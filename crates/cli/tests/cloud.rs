@@ -62,11 +62,11 @@ fn ev(c: &herdsman::Ctx, ts: u64, kind: &str) {
     .unwrap();
 }
 
-/// #255: replies that make cloud1 pass its health look on start: herdr, git over HTTPS, the logins, herdsman.
+/// #255: replies that make cloud1 pass its health look on start: herdr, git over HTTPS, the logins, herdsman. herdr's
+/// version and its login pane (`workspace create`, `pane read`) are the health look's herdr rows (#721 drops them).
 fn healthy(f: Fake) -> Fake {
     let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 2099-01-01 00:00:00 UTC\n\n[]";
-    f.reply("herdr --machine cloud1 agent list", NO_AGENTS)
-        .reply(&format!("{SSH}'sh' '-c' 'PATH="), "version: 0.9.5\nversion: 0.9.5\n")
+    f.reply(&format!("{SSH}'sh' '-c' 'PATH="), "version: 0.9.5\nversion: 0.9.5\n")
         .reply(&format!("{SSH}'gh' 'api' '-i'"), gh)
         .reply(&format!("{SSH}'sh' '-c' 'p=$(pgrep"), "")
         .reply(&format!("{SSH}'git' 'ls-remote'"), "abc\tHEAD\n")
@@ -84,8 +84,7 @@ fn healthy(f: Fake) -> Fake {
 /// mini at load/cpu `mini`; cloud1 reachable, idle, healthy, and its recipe answering.
 fn fake(mini: f64) -> Fake {
     healthy(Fake::default())
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr --machine cloud1 agent list", NO_AGENTS)
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n vm.loadavg", &format!("{{ {} 1 1 }}", mini * 4.0))
         .reply("sysctl -n hw.ncpu", "4")
         .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "0.4 1 1 1/9 42")
@@ -100,10 +99,19 @@ fn fake(mini: f64) -> Fake {
         .reply(&rc("stop"), "")
 }
 
-/// Where a lane on #12 goes: the host's name, or the refusal (no start: `place` only picks).
+/// Where a lane on #12 goes: the host's name, or the refusal (no start: `place` only picks). mini's lanes (none) on a
+/// shed there.
 fn placed(c: &herdsman::Ctx, r: &Fake, force: Option<&str>) -> Result<String, String> {
     let cfg = Config::load(&c.config).unwrap();
-    match place(c, &cfg, r, &read(&c.state).unwrap(), ("sendmeter", 12, "impl"), force) {
+    let sh = FakeShed::new();
+    match place(
+        c,
+        &cfg,
+        &sh.on(r),
+        &read(&c.state).unwrap(),
+        ("sendmeter", 12, "impl"),
+        force,
+    ) {
         Ok(p) => {
             let p = p.unwrap();
             p.refusal
@@ -113,9 +121,8 @@ fn placed(c: &herdsman::Ctx, r: &Fake, force: Option<&str>) -> Result<String, St
     }
 }
 
-/// A fresh lane on cloud1 answers every step.
+/// A fresh lane on cloud1 answers every step (its terminal is cloud1's shed's, `OverSsh`).
 fn spawn_fake() -> Fake {
-    let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
     fake(0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(
@@ -124,20 +131,34 @@ fn spawn_fake() -> Fake {
         )
         .reply(&format!("{SSH}'git' '-C'"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
-        .reply("herdr --machine cloud1 worktree create", ws)
-        .reply(
-            "herdr --machine cloud1 pane list --workspace w9",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr --machine cloud1 pane run w9:p1 export", "{}")
-        .reply("herdr --machine cloud1 agent start sendmeter-impl-12", "{}")
-        .reply("herdr --machine cloud1 agent wait sendmeter-impl-12", "{}")
+        .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
+        .reply(&format!("{SSH}'rm' '-f'"), "")
+}
+
+/// `f`, cloud1's lanes on its own shed `sh` over ssh.
+fn on_cloud<'a>(f: &'a Fake, sh: &'a FakeShed) -> OverSsh<'a> {
+    OverSsh {
+        f,
+        hosts: vec![("cloud1", sh)],
+    }
+}
+
+/// The index in `r`'s calls of the first `shed connect` (over ssh) carrying a `method` request.
+fn shed_call_at(r: &Fake, method: &str) -> Option<usize> {
+    let calls = r.calls.borrow();
+    let at = calls.iter().enumerate().filter(|(_, c)| c.contains("'shed' 'connect'"));
+    let inputs = r.inputs.borrow();
+    let sent = inputs.iter().filter(|(c, _)| c.contains("'shed' 'connect'"));
+    let want = format!("\"method\":\"{method}\"");
+    at.zip(sent).find(|(_, (_, i))| i.contains(&want)).map(|((n, _), _)| n)
 }
 
 #[test]
 fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     let c = setup("cloud-start");
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let (sh, cloud) = (FakeShed::new(), FakeShed::new());
+    sh.attach(&c);
     run(
         &c,
         &Fake::default(),
@@ -145,15 +166,22 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     );
     // A dry run never starts it.
     let r = spawn_fake();
-    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--dry-run"]);
+    let (code, out) = run(
+        &c,
+        &on_cloud(&r, &cloud),
+        &["spawn", "sendmeter", "12", "impl", "--dry-run"],
+    );
     assert!(!r.called(&rc("start")), "{code} {out}");
+    assert!(cloud.methods().is_empty(), "{:?}", cloud.methods());
     let r = spawn_fake();
-    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+    let (code, out) = run(&c, &on_cloud(&r, &cloud), &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let i = |p: &str| r.index(p).unwrap_or_else(|| panic!("no {p}: {:?}", r.calls.borrow()));
     // #635: `status` first (an empty one would `create`), then `start`, then `address`.
     assert!(i(&rc("status")) < i(&rc("start")) && i(&rc("start")) < i(&rc("address")));
-    assert!(i(&rc("address")) < i("herdr --machine cloud1 worktree create"));
+    let started = shed_call_at(&r, "run").unwrap_or_else(|| panic!("no run: {:?}", r.calls.borrow()));
+    assert!(i(&rc("address")) < started);
+    assert!(cloud.called("run", "sendmeter-impl-12") && sh.all("run").is_empty());
     let inc = std::fs::read_to_string(c.home.join(".ssh/config.d/herdsman")).unwrap();
     assert!(
         inc.contains("Host cloud1\n  HostName 10.0.0.7\n  User ubuntu\n  Port 2222\n"),
@@ -172,7 +200,8 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     assert_eq!(s.str("host"), Some("cloud1"));
     // #256: why it went there, and the lane hook's host.
     assert_eq!(s.str("why"), Some("needs docker: no local host has it"));
-    assert!(r.calls.borrow().iter().any(|c| c.contains("HERDSMAN_HOST='cloud1'")));
+    let sent = cloud.sent("sendmeter-impl-12");
+    assert!(sent.iter().any(|c| c.contains("HERDSMAN_HOST='cloud1'")), "{sent:?}");
     // #646: its first use there clones lean: the integration branch only, `wip/*` never fetched.
     let clone: Vec<_> = (r.calls.borrow().iter())
         .filter(|c| c.contains("git clone"))
@@ -190,7 +219,7 @@ fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enou
     // mini admits: mini (cloud1 is stopped and never looked at over SSH).
     let r = fake(0.1);
     assert_eq!(placed(&c, &r, None).as_deref(), Ok("mini"));
-    assert!(!r.called("herdr --machine cloud1"), "{:?}", r.calls.borrow());
+    assert!(!r.called(SSH), "{:?}", r.calls.borrow());
     // mini held: its refusal until it has been held 10 minutes, then the stopped cloud host.
     let e = placed(&c, &fake(3.0), None).unwrap_err();
     assert!(e.starts_with("HOST_BUSY: mini"), "{e}");
@@ -235,9 +264,17 @@ fn a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked() {
     let c = setup("cloud-running-overflow");
     ev(&c, NOW - 100, "cloud-start");
     ev(&c, NOW - 90, "cloud-up");
+    let (sh, cloud) = (FakeShed::new(), FakeShed::new());
     let pick = |c: &herdsman::Ctx, r: &Fake| {
         let cfg = Config::load(&c.config).unwrap();
-        let p = place(c, &cfg, r, &read(&c.state).unwrap(), ("sendmeter", 12, "impl"), None);
+        let p = place(
+            c,
+            &cfg,
+            &sh.on(&on_cloud(r, &cloud)),
+            &read(&c.state).unwrap(),
+            ("sendmeter", 12, "impl"),
+            None,
+        );
         let p = p.unwrap().unwrap();
         (p.name, p.refusal.map(|r| r.0), p.why)
     };
@@ -840,7 +877,9 @@ fn a_snapshot_needs_a_green_health_check_first() {
     assert!(format!("{e:#}").contains("cloud1 is not healthy"), "{e:#}");
     assert!(!r.called(&rc("snapshot")));
     let r = healthy(Fake::default()).reply(&rc("snapshot"), "");
-    herdsman::cloud::snapshot(&c, &cfg, &r, "cloud1").unwrap();
+    let (sh, cloud) = (FakeShed::new(), FakeShed::new());
+    herdsman::cloud::snapshot(&c, &cfg, &sh.on(&on_cloud(&r, &cloud)), "cloud1").unwrap();
+    assert!(cloud.methods().contains(&"ls".to_string()), "its lanes were looked at");
     assert!(r.called(&rc("snapshot")) && herdsman::events::jsonl(&c.state).unwrap().contains("cloud-snapshot"));
     assert!(
         herdsman::hosts::cached(&c)["cloud1"].github.starts_with("github:"),

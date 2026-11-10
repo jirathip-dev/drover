@@ -11,17 +11,18 @@ const NOW: u64 = 1_000_000;
 const ADDR: &str = "127.0.0.1:7777";
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
 
-fn two_hosts(name: &str) -> herdsman::Ctx {
+/// Hosts mini (this one) and bazzite, their lanes on shed: this host's server (returned, kept for the test's length).
+fn two_hosts(name: &str) -> (herdsman::Ctx, FakeShed) {
     let cfg = format!("{CONFIG}\n[hosts.mini]\ntags = [\"fast\"]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
     let c = ctx(&tmpdir(name), &cfg);
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    c
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    (c, sh)
 }
 
 fn fake() -> Fake {
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr --machine bazzite agent list", NO_AGENTS)
         .reply("sysctl -n vm.loadavg", "{ 6.0 1 1 }")
         .reply("sysctl -n hw.ncpu", "4")
         .reply(
@@ -52,13 +53,18 @@ fn row(ts: u64, host: &str, load: f64) -> Row {
 
 #[test]
 fn rows_are_appended_per_host_per_step() {
-    let c = two_hosts("history-append");
+    let (c, sh) = two_hosts("history-append");
     let (r, cfg) = (fake(), Config::load(&c.config).unwrap());
+    let bazzite = FakeShed::new();
+    let over = OverSsh {
+        f: &r,
+        hosts: vec![("bazzite", &bazzite)],
+    };
     // The fast step: this host, sampled now.
-    let (code, out) = run(&c, &r, &["drive", "--fast"]);
+    let (code, out) = run(&c, &over, &["drive", "--fast"]);
     assert_eq!(code, 0, "{out}");
-    // The 5-minute survey: the remote host, from the same probe placement uses.
-    survey(&c, &cfg, &r, false);
+    // The 5-minute survey: the remote host (its shed reached over ssh), from the same probe placement uses.
+    survey(&c, &cfg, &sh.on(&over), false);
     let rows = history(&c);
     let hosts: Vec<(&str, Option<f64>)> = rows.iter().map(|r| (r.host.as_str(), r.load_cpu)).collect();
     assert_eq!(hosts, [("mini", Some(1.5)), ("bazzite", Some(0.5))], "{rows:?}");
@@ -69,7 +75,7 @@ fn rows_are_appended_per_host_per_step() {
 
 #[test]
 fn rows_older_than_24h_are_dropped() {
-    let mut c = two_hosts("history-drop");
+    let (mut c, _sh) = two_hosts("history-drop");
     for (ts, h) in [
         (NOW - 100_000, "mini"),
         (NOW - 100_000, "bazzite"),
@@ -86,7 +92,7 @@ fn rows_older_than_24h_are_dropped() {
 
 #[test]
 fn the_file_stays_under_the_size_bound() {
-    let mut c = two_hosts("history-bound");
+    let (mut c, _sh) = two_hosts("history-bound");
     for i in 0..1_500 {
         c.now = NOW + i * 60;
         record(&c, &[row(c.now, "mini", 1.23), row(c.now, "bazzite", 0.45)], 2).unwrap();
@@ -106,7 +112,7 @@ fn the_file_stays_under_the_size_bound() {
 #[test]
 fn one_host_keeps_24h_and_rewrites_rarely() {
     use std::os::unix::fs::MetadataExt;
-    let mut c = two_hosts("history-one");
+    let (mut c, _sh) = two_hosts("history-one");
     let p = c.state.with_file_name("host-history.jsonl");
     let (host, mut ino, mut rewrites) = ("a-rather-long-hostname-mini-01", 0, 0);
     for i in 0..1_500 {
@@ -147,13 +153,14 @@ fn downsampling_keeps_the_worst_per_bucket() {
 
 #[test]
 fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
-    let c = two_hosts("history-cards");
+    let (c, sh) = two_hosts("history-cards");
     let st = c.state.parent().unwrap();
     let seen = json!({"bazzite": {"tags": ["os:linux"], "seen": NOW - 1980, "up": false, "load": 0.4, "disk": 300.0, "disk_total": 476.0}});
     std::fs::write(st.join("hosts.json"), seen.to_string()).unwrap();
     record(&c, &[row(NOW - 30, "mini", 3.1), row(NOW - 30, "bazzite", 0.4)], 2).unwrap();
     let r = fake();
-    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let w = sh.on(&r);
+    let s = Server::new(&c, &w, Some(ADDR.into()));
     let get = |q: &str| {
         String::from_utf8_lossy(&s.respond(&format!("GET {q} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned()
     };
@@ -165,12 +172,12 @@ fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
         .collect();
     assert_eq!(gs[..2], ["HOSTS", "FLEET DISK"], "{gs:?}");
     assert!(!page.contains(">MACHINE<"));
-    let (mini, baz) = (
+    let (mini, bazzite) = (
         page.find("data-h=\"mini\"").unwrap(),
         page.find("data-h=\"bazzite\"").unwrap(),
     );
-    assert!(mini < baz, "main first");
-    assert!(page[mini..baz].contains("<span class=\"tag m\">main</span>"));
+    assert!(mini < bazzite, "main first");
+    assert!(page[mini..bazzite].contains("<span class=\"tag m\">main</span>"));
     for k in ["load", "swap", "mem", "disk", "lanes"] {
         assert_eq!(page.matches(&format!("data-k={k} ")).count(), 2, "{k} on both cards");
     }
@@ -187,7 +194,7 @@ fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
         "used-space bar words: {}",
         &page[i..i + 400]
     );
-    assert!(page[baz..].contains("<span class=\"hw m\">offline · last seen 33m</span>"));
+    assert!(page[bazzite..].contains("<span class=\"hw m\">offline · last seen 33m</span>"));
     let chart = get("/frag?id=hist&host=mini&k=load");
     let parts: Vec<&str> = chart.split("\r\n\r\n").nth(1).unwrap().split('|').collect();
     assert_eq!(parts.len(), 4, "value, lanes, pressure, minutes ago: {chart}");
@@ -208,7 +215,7 @@ fn watched_fake(len: usize) -> Fake {
 
 #[test]
 fn no_process_table_walk_while_nobody_watches() {
-    let c = two_hosts("history-idle");
+    let (c, _sh) = two_hosts("history-idle");
     let r = watched_fake(10);
     let (code, out) = run(&c, &r, &["drive", "--fast"]);
     assert_eq!(code, 0, "{out}");
@@ -223,7 +230,7 @@ fn no_process_table_walk_while_nobody_watches() {
 
 #[test]
 fn sampling_resumes_once_the_host_tab_is_open() {
-    let mut c = two_hosts("history-watch");
+    let (mut c, _sh) = two_hosts("history-watch");
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
@@ -251,7 +258,7 @@ fn sampling_resumes_once_the_host_tab_is_open() {
 
 #[test]
 fn the_byte_bound_holds_with_long_command_lines() {
-    let mut c = two_hosts("history-long");
+    let (mut c, _sh) = two_hosts("history-long");
     let (r, cfg) = (watched_fake(64 * 1024), Config::load(&c.config).unwrap());
     for i in 0..1_700 {
         c.now = NOW + i * 60;

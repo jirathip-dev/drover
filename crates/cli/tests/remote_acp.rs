@@ -298,7 +298,7 @@ fn hook_there(env: &BTreeMap<String, String>, dir: &Path, cmd: &str) -> String {
 #[test]
 fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_with_no_token_there() {
     let (c, home) = setup("racp-spawn", &["boat1"]);
-    let f = spawn_fake().reply("herdr --machine boat1 agent list", NO_AGENTS);
+    let f = spawn_fake();
     let b = Boat::new(&c, &f, &[("boat1", true, true)]);
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     // Up from its shed alone: herdr there is never asked.

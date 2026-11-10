@@ -1,6 +1,7 @@
 //! #630: workspace roots (temp folders here): a new lane takes the first mounted root, `hosts eject` saves and
 //! restarts a lane on the next one, a pulled root's lane restarts once from its pushed head, and `migrate` moves an
-//! idle `~/.herdr/worktrees` worktree into `<root>/<repo>/<lane>`. git is real; herdr, gh and the host probes are fakes.
+//! idle `~/.herdr/worktrees` worktree into `<root>/<repo>/<lane>`. git is real; gh and the host probes are fakes, the
+//! lanes run on the fake shed.
 mod common;
 use common::*;
 use herdsman::config::Config;
@@ -11,22 +12,14 @@ use std::path::{Path, PathBuf};
 
 const AGENT: &str = "sendmeter-impl-12";
 
-/// git runs for real; `herdr worktree create` is a real `git worktree add` of its branch; the rest is the fake.
+/// git runs for real; the rest is the fake.
 struct Git<'a>(&'a Fake);
 
 impl Runner for Git<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
-        let a: Vec<&str> = args.iter().map(String::as_str).collect();
         if prog == "git" || prog == "cp" {
             self.0.calls.borrow_mut().push(format!("git {}", args.join(" ")));
             return Real.run(prog, args);
-        }
-        if let ["worktree", "create", "--cwd", local, "--branch", b, "--base", _, "--path", p, ..] = a[..] {
-            git(Path::new(local), &["worktree", "add", p, b]);
-            return Ok(Out {
-                stdout: r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#.into(),
-                ..Out::default()
-            });
         }
         self.0.run(prog, args)
     }
@@ -46,9 +39,11 @@ fn git(dir: &Path, a: &[&str]) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-/// An origin with `staging` and a pushed `issue-12`, its clone (the fleet's `local`), and the two roots.
+/// An origin with `staging` and a pushed `issue-12`, its clone (the fleet's `local`), the two roots, and the shed the
+/// lanes run on.
 struct Repo {
     c: herdsman::Ctx,
+    sh: FakeShed,
     origin: PathBuf,
     local: PathBuf,
     nvme: PathBuf,
@@ -86,8 +81,11 @@ fn repo(name: &str) -> Repo {
         + &format!("\n[hosts.mini]\n{roots}\n");
     let c = ctx(&d, &cfg);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     Repo {
         c,
+        sh,
         origin,
         local,
         nvme,
@@ -95,25 +93,17 @@ fn repo(name: &str) -> Repo {
     }
 }
 
-/// herdr and gh as a spawn on this host needs them; the lane, once restarted, works in `cwd`.
-fn fake(cwd: &Path) -> Fake {
+/// gh as a spawn on this host needs it; the lane, live on `r`'s shed, works in `cwd`.
+fn fake(r: &Repo, cwd: &Path) -> Fake {
     let wt = cwd.join("sendmeter/issue-12");
-    spawnable(Fake::default().reply(
-        "herdr agent list",
-        &agents(&[(AGENT, "working", &wt.to_string_lossy(), "w9:p1")]),
-    ))
+    r.sh.lane(AGENT, "working", &wt.to_string_lossy());
+    spawnable()
 }
 
-fn spawnable(f: Fake) -> Fake {
-    f.reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
-        .reply("herdr pane close", "")
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr agent wait", "{}")
+fn spawnable() -> Fake {
+    Fake::default()
+        .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
 /// Issue 12's impl lane working in the first root (its worktree made there, a file left uncommitted).
@@ -138,7 +128,7 @@ fn spawns(c: &herdsman::Ctx) -> Vec<Event> {
 #[test]
 fn a_new_lane_lands_in_the_first_mounted_root_and_skips_a_missing_one() {
     let r = repo("roots-place");
-    let f = fake(&r.internal);
+    let f = fake(&r, &r.internal);
     let worktree = |c: &herdsman::Ctx| {
         let (code, out) = run(c, &f, &["spawn", "sendmeter", "12", "impl", "--dry-run", "--json"]);
         assert_eq!(code, 0, "{out}");
@@ -153,7 +143,7 @@ fn a_new_lane_lands_in_the_first_mounted_root_and_skips_a_missing_one() {
 fn eject_saves_and_restarts_a_live_lane_on_the_next_root_then_reports_safe() {
     let r = repo("roots-eject");
     let old = working_on_nvme(&r);
-    let f = fake(&r.internal);
+    let f = fake(&r, old.parent().unwrap().parent().unwrap());
     let (code, out) = run(&r.c, &Git(&f), &["hosts", "eject", "mini"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     assert!(out.contains(&format!("safe to unplug {}", r.nvme.display())), "{out}");
@@ -171,6 +161,8 @@ fn eject_saves_and_restarts_a_live_lane_on_the_next_root_then_reports_safe() {
     );
     // Restarted from that save on the next root.
     let new = r.internal.join("sendmeter/issue-12");
+    assert!(r.sh.called("kill", AGENT), "the live lane stopped first");
+    assert_eq!(r.sh.last("run")["cwd"], json!(new), "and ran again there");
     let sp = spawns(&r.c);
     let last = sp.last().unwrap();
     assert_eq!((sp.len(), last.str("root")), (2, Some(&*r.internal.to_string_lossy())));
@@ -191,11 +183,11 @@ fn a_pulled_root_is_noted_once_and_its_lane_restarts_on_the_next_root_from_its_p
     let r = repo("roots-pulled");
     working_on_nvme(&r);
     std::fs::remove_dir_all(&r.nvme).unwrap(); // pulled without eject
-    let f = fake(&r.internal);
+    let f = fake(&r, &r.nvme);
     let cfg = Config::load(&r.c.config).unwrap();
     let watch = || {
         let mut out = vec![];
-        herdsman::roots::watch(&r.c, &cfg, &Git(&f), &mut out).unwrap();
+        herdsman::roots::watch(&r.c, &cfg, &r.sh.on(&Git(&f)), &mut out).unwrap();
         String::from_utf8(out).unwrap()
     };
     let out = watch();
@@ -249,10 +241,8 @@ fn migrate_moves_an_idle_worktree_into_the_new_layout() {
     );
     let cache = r.c.home.join(".cache/herdsman/target/sendmeter");
     std::fs::create_dir_all(&cache).unwrap();
-    let f = Fake::default().reply(
-        "herdr agent list",
-        &agents(&[("sendmeter-impl-13", "working", &live.to_string_lossy(), "w2:p1")]),
-    );
+    r.sh.lane("sendmeter-impl-13", "working", &live.to_string_lossy());
+    let f = Fake::default();
     let (code, out) = run(&r.c, &Git(&f), &["migrate"]);
     assert_eq!(code, 0, "{out}");
     let to = r.c.worktrees.join("sendmeter/issue-12");
@@ -268,11 +258,8 @@ fn migrate_moves_an_idle_worktree_into_the_new_layout() {
         "the old build caches stay while a worktree is left: {out}"
     );
     // Once that lane has ended, the next migrate moves it and drops the old caches.
-    let (code, out) = run(
-        &r.c,
-        &Git(&Fake::default().reply("herdr agent list", NO_AGENTS)),
-        &["migrate"],
-    );
+    r.sh.exit("sendmeter-impl-13");
+    let (code, out) = run(&r.c, &Git(&Fake::default()), &["migrate"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         r.c.worktrees.join("sendmeter/issue-13/README").is_file() && !cache.exists(),
@@ -304,7 +291,7 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         "# setup\n.herdsman-ignored.env\n../escape\nmissing\n",
     )
     .unwrap();
-    let f = spawnable(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let f = spawnable();
     let (code, out) = run(&r.c, &Git(&f), &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out}");
     let mine = b.join(AGENT).join("release");
@@ -320,12 +307,11 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         assert_eq!(cl.data["errors"].as_array().map(Vec::len), Some(1), "{out}");
     }
     let target = format!("{}'", b.join(AGENT).display());
-    let calls = f.calls.borrow();
+    let sent = r.sh.sent(AGENT);
     assert!(
-        calls.iter().any(|c| c.contains("TARGET_DIR=") && c.contains(&target)),
-        "{target}"
+        sent.iter().any(|c| c.contains("TARGET_DIR=") && c.contains(&target)),
+        "{target} {sent:?}"
     );
-    drop(calls);
     let wt = r.nvme.join("sendmeter/issue-12");
     assert_eq!(
         std::fs::read_to_string(wt.join(".herdsman-ignored.env")).unwrap(),
@@ -339,18 +325,11 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     let (_, st) = run(&r.c, &Git(&f), &["status"]);
     assert!(st.contains(" · +1 ⇡1"), "{st}");
     let cfg = Config::load(&r.c.config).unwrap();
-    let a: serde_json::Value =
-        serde_json::from_str(&agents(&[(AGENT, "working", &wt.to_string_lossy(), "w9:p1")])).unwrap();
+    // The lane the spawn started, as shed lists it.
+    let a = herdsman::herdr::agents(&r.sh.on(&Git(&f))).unwrap();
+    assert_eq!(a[0]["cwd"], json!(wt), "{a:?}");
     let st = herdsman::events::states(&r.c.state).unwrap();
-    let ls = herdsman::lanes::join(
-        &cfg,
-        &Git(&f),
-        &r.c.worktrees,
-        &ev,
-        &st,
-        a["result"]["agents"].as_array().unwrap(),
-        &Default::default(),
-    );
+    let ls = herdsman::lanes::join(&cfg, &Git(&f), &r.c.worktrees, &ev, &st, &a, &Default::default());
     let l = ls.iter().find(|l| l.name == AGENT).unwrap();
     let u = l.unsaved(&Git(&f));
     assert_eq!(

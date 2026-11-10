@@ -54,10 +54,11 @@ fn an_export_ships_the_host_data_and_its_forms_are_inert() {
 #[test]
 fn a_live_board_draws_cards_gauges_and_forms_that_post() {
     let c = ctx(&tmpdir("host-live"), CONFIG);
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("df -k /", "F\n/dev/disk1 41943040 1 4194304\n");
-    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = Fake::default().reply("df -k /", "F\n/dev/disk1 41943040 1 4194304\n");
+    let w = sh.on(&r); // the CLI and `serve_on` wrap theirs so
+    let s = Server::new(&c, &w, Some(ADDR.into()));
     let h = host_tab(&s, ADDR, 1_000_000);
     assert_eq!(groups(&h)[..3], ["HOSTS", "FLEET DISK", "SERVICES"], "{h}");
     // One card, the main host's, its disk (4 of 40 GB free) under the 10 GB floor: red, the used part, `▶`, how far
@@ -85,8 +86,11 @@ fn the_host_api_shows_each_root_with_its_state_and_free_space() {
     let seen = format!(r#"{{"this host":{{"roots":{roots}}}}}"#);
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(c.state.with_file_name("hosts.json"), seen).unwrap();
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = Fake::default();
+    let w = sh.on(&r); // the CLI and `serve_on` wrap theirs so
+    let s = Server::new(&c, &w, Some(ADDR.into()));
     let res =
         String::from_utf8(s.respond(&format!("GET /api/v1/host HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).unwrap();
     let v: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
