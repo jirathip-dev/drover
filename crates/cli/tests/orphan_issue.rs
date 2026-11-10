@@ -258,3 +258,33 @@ fn waiting_names_why_drive_has_not_started_a_queued_issue() {
         line(&c)
     );
 }
+
+/// #791: drive's last finished pass is 30 min old but a tick runs with a fresh heartbeat: `running for Nm`, never
+/// `tick stuck?`; no heartbeat for 2 intervals (slow_secs 300) reads stuck.
+#[test]
+fn waiting_reads_a_long_running_tick_as_running_not_stuck() {
+    let d = tmpdir("orphan-791");
+    let mut c = ctx(&d, CONFIG);
+    ev(&c, T0, None, "queue", json!({"op": "add", "issues": [12]}));
+    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let line = |c: &herdsman::Ctx| {
+        let (code, out) = run(c, &r, &["waiting", "sendmeter"]);
+        assert_eq!(code, 0, "{out}");
+        out.lines()
+            .find(|l| l.starts_with("sendmeter #12 drive: "))
+            .unwrap()
+            .to_string()
+    };
+    let st = c.state.parent().unwrap();
+    std::fs::write(st.join("drive-sendmeter.last"), T0.to_string()).unwrap();
+    c.now = T0 + 1800;
+    std::fs::write(st.join("tick.beat"), format!("{} {}", c.now - 360, c.now - 30)).unwrap();
+    let l = line(&c);
+    assert!(l.ends_with("→ drive's pass running for 6m"), "{l}");
+    std::fs::write(st.join("tick.beat"), format!("{} {}", c.now - 1200, c.now - 660)).unwrap();
+    let l = line(&c);
+    assert!(
+        l.ends_with("→ drive's next pass (last 30m ago): tick stuck? herdsman doctor"),
+        "{l}"
+    );
+}
