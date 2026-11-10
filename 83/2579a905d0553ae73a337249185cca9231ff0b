@@ -1,0 +1,9 @@
+Decided: a running tick rewrites `tick.beat` (`<started> <beat>`) every minute and removes it when it ends; `waiting` and `doctor` read a beat under 2 tick intervals old as "running for Nm"
+Because: "Measure the watchdog's age from the last pass that started (or a heartbeat a running pass writes every minute)"
+Because: "means no pass started or heartbeat for over 2 intervals"
+Decided: 2 intervals = 2 × limits.slow_secs (the tick job's interval, crates/core/src/timer.rs:96), shared by both readers via timer::stuck_secs
+Rejected: a beat field inside tick.step — the heartbeat thread would race Pass::note's rewrites of the same file
+Rejected: heartbeat in the fast step too — the issue's alarms read the tick's stamps (check.at, drive.at, drive-<fleet>.last), the fast step writes none of them
+Check: doctor's watchdog threshold moves from a fixed 900 s to 2 intervals (600 s at the default 300 s), as the spec defines stuck
+Check: the beat thread is joined before tick.beat is removed, so no late write recreates it
+Owner: a long tick now shows "running for Nm" in waiting and doctor; "tick stuck?" only appears once a tick has gone silent for two intervals.
