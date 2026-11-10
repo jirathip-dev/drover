@@ -2804,3 +2804,62 @@ fn a_hold_outliving_a_pass_past_its_blockers_merge_is_logged_hold_stale_once() {
     assert_eq!(stale.len(), 1, "logged once");
     assert_eq!((stale[0].issue, &stale[0].data["on"]), (Some(12), &json!([11])));
 }
+
+/// #712: a parked issue is skipped; `unpark` (a paired device's [unpark], never an unpaired one) puts it back in the
+/// state it had before its needs-human, in its queue place, and the next pass starts it.
+#[test]
+fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
+    let c = setup("drive-unpark");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
+    ev(&c, 10, "needs-human", json!({"code": "START_FAILED"}));
+    let (code, out) = run(&c, &Fake::default(), &["unpark", "sendmeter", "12"]);
+    assert!(
+        code == 3 && out.contains("REFUSED NOT_PARKED: #12 is needs-human, not parked"),
+        "{out}"
+    );
+    let park = ["park", "sendmeter", "12", "--why", "host mini is down"];
+    assert_eq!(run(&c, &Fake::default(), &park).0, 0);
+    let (code, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "ls"]);
+    assert!(code == 0 && out.contains("parked: host mini is down"), "{out}");
+    let r = fake(NO_AGENTS).reply("git -C", "");
+    assert!(drive(&c, &r).1.is_empty());
+    assert!(!r.called("herdr agent start"), "a parked issue is skipped");
+
+    let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let page = with_queue(
+        &String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)),
+        &s,
+        "127.0.0.1:7777",
+        c.now,
+    );
+    assert!(
+        page.contains("<span class=r>parked: host mini is down</span>"),
+        "{page}"
+    );
+    assert!(page.contains("<input type=hidden name=op value=unpark>"), "{page}");
+    let i = page.find("name=mtime value=").unwrap() + 17;
+    let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let body = format!("op=unpark&fleet=sendmeter&issue=12&mtime={mtime}");
+    let post = |extra: &str| {
+        let req = format!(
+            "POST / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n{extra}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        String::from_utf8_lossy(&s.respond(&req, c.now)).into_owned()
+    };
+    assert!(post("").starts_with("HTTP/1.1 401"), "an unpaired device cannot unpark");
+    assert_eq!(state(&c), "parked");
+    let cookie = pair(&s, &c, "", c.now);
+    let res = post(&cookie);
+    assert!(res.starts_with("HTTP/1.1 303") && res.contains("unparked"), "{res}");
+    assert_eq!(state(&c), "queued");
+    let all = read(&c.state).unwrap();
+    let kinds: Vec<(&str, Option<&str>)> = (all.iter())
+        .filter(|e| ["parked", "unparked"].contains(&e.kind.as_str()))
+        .map(|e| (e.kind.as_str(), e.str("by")))
+        .collect();
+    assert_eq!(kinds, [("parked", Some("owner")), ("unparked", Some("owner"))]);
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["start"], "{out}");
+    assert!(r.called("herdr agent start sendmeter-impl-12"));
+}

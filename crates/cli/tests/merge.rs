@@ -614,6 +614,32 @@ fn extend_and_park_refuse_outside_needs_human_and_park_clears_it() {
     assert!(exit == 3 && out.contains("is parked, not needs-human"), "{out}");
 }
 
+/// #712: `unpark` puts a parked issue back in the round it had before its needs-human, logged `by`, and an issue
+/// out of the queue goes last; a second unpark refuses.
+#[test]
+fn unpark_restores_the_round_and_requeues_it_last() {
+    let (_d, c) = needs_human("cli-unpark");
+    let r = Fake::default();
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "5", "7"]).0, 0);
+    assert_eq!(run(&c, &r, &["park", "sendmeter", "12"]).0, 0);
+    let (exit, out) = run(&c, &r, &["unpark", "sendmeter", "12", "--by", "alice"]);
+    assert_eq!((exit, out.as_str()), (0, "#12: unparked, back to fix(3)\n"));
+    assert_eq!(st(&c).state, "fix(3)");
+    let all = read(&c.state).unwrap();
+    let un = all.iter().rfind(|e| e.kind == "unparked").unwrap();
+    assert_eq!((un.str("by"), un.str("state")), (Some("alice"), Some("fix(3)")));
+    let q: Vec<u64> = herdsman::queue::replay(&all, "sendmeter")
+        .iter()
+        .map(|i| i.issue)
+        .collect();
+    assert_eq!(q, [5, 7, 12]);
+    let (exit, out) = run(&c, &r, &["unpark", "sendmeter", "12"]);
+    assert!(
+        exit == 3 && out.contains("REFUSED NOT_PARKED: #12 is fix(3), not parked"),
+        "{out}"
+    );
+}
+
 /// #198: the merge commit is `<title> (#PR)`, the PR body's `## For humans` lines, then the facts line.
 #[test]
 fn merge_message_copies_the_human_summary_and_the_facts_line() {

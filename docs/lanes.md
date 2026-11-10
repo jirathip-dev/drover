@@ -219,7 +219,12 @@ Herd strip (the issue's horse, or a gate horse when it has no lane, wears a red 
   and the closing comment says `Owner override: ROUND_LIMIT`.
 - **one more round** logs `round-extended` (this issue's limit is `review_rounds` + 1 per extension) and
   spawns `impl --supersede`.
-- **park** logs `parked`: the issue leaves `needs-human` and shows as parked.
+- **park** logs `parked` (`by`, and `herdsman park <fleet> <issue> --why <text>`'s reason): the issue leaves
+  `needs-human` and shows as parked; `queue ls` and its Queue row show the reason.
+- **unpark** (#712; a parked Queue or Lanes row's button, or `herdsman unpark <fleet> <issue> [--by]`, owner only)
+  logs `unparked` with the state it goes back to: the state before the `needs-human` the park closed (normally
+  `queued` or its round). Its queue place is kept; out of the queue it goes last; drive's next pass picks it up.
+  Anything but a parked issue is `REFUSED NOT_PARKED`.
 
 This replaces raising `review_rounds` in fleet.toml, merging and restoring it by hand.
 
