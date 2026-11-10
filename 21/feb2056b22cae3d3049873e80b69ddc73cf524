@@ -1,0 +1,6 @@
+Decided: no trim; this round merges origin/staging (with #802, line_cap 41000) instead of cutting the PR to the old cap
+Because: q1182
+Rejected: trimming to the old 57-line headroom — the PR's src/ net is +202, so 145 lines of spec'd recovery paths would go
+Rejected: a rebase onto staging — lanes never rewrite history or force-push; a merge commit carries staging instead
+Check: cap-check at this head reads 38476 / cap 41000 (exit 0); no production code changed this round
+Owner: The line-cap failure is fixed by the raise you approved (#802); this change itself is unchanged.
