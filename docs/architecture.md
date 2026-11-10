@@ -131,7 +131,7 @@ board shows (`Event` for events and asks, `IssueState`, `Waiting`, `HostSeen`, `
 u64 is `number`, `Option<T>` is `field?: T | null`, `rename` and `flatten` as serde does them. CI regenerates the file
 and fails on any diff, then `serde_json_fits_the_types` type-checks the demo export's real payloads and each type's
 default with `tsc --noEmit --strict`, and `just types-lint` fails a hand-written copy of a generated type in the board's
-TS: it imports them from `assets/types/api`.
+TS: it imports them from `assets/types/api.d.ts`.
 
 ## Code rules
 
