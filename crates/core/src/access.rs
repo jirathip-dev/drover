@@ -1,6 +1,6 @@
 //! What a lane may use: its account (first uncapped of an ordered list; tokens never read out) and MCP servers.
 use crate::config::{Config, Fleet, Role};
-use crate::events::{emit, fold, last_spawn, read, Event};
+use crate::events::{emit, read, Event};
 use crate::gate::refused;
 use crate::harness::Credential;
 use crate::runner::Runner;
@@ -10,6 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
+use std::path::Path;
 
 /// When the account's (#302: or account-less harness's) latest cap or rest, since any reset, ends: its logged
 /// `until`, else `cap_reset_minutes` after it (#640: a sign-out, until `accounts reset`).
@@ -43,7 +44,7 @@ pub fn confirm(ctx: &Ctx, a: Option<&str>, until: u64) -> Seen {
             let full = [m.session, m.week].into_iter().flatten().filter(|w| w.0 >= 100.0);
             let full = full.map(|w| w.1.max(until)).max();
             let kind = ["cap-banner-ignored", "account-capped"][usize::from(full.is_some())];
-            (kind, full, pcts(&m))
+            (kind, full, pcts(&m, ctx.now))
         }
         None => (stale, Some(until), "no fresh reading".into()),
     }
@@ -51,9 +52,9 @@ pub fn confirm(ctx: &Ctx, a: Option<&str>, until: u64) -> Seen {
 
 pub type Seen = (&'static str, Option<u64>, String);
 
-/// `5h —, 7d 23%`: a window the plan lacks is `—`.
-fn pcts(m: &usage::Meter) -> String {
-    let p = |w: usage::Window| w.map_or("—".into(), |w| format!("{:.0}%", w.0));
+/// `5h —, 7d 23%`: a window the plan lacks is `—`, one past its reset 0% (#785).
+fn pcts(m: &usage::Meter, now: u64) -> String {
+    let p = |w: usage::Window| w.map_or("—".into(), |w| format!("{:.0}%", if w.1 > now { w.0 } else { 0.0 }));
     format!("5h {}, 7d {}", p(m.session), p(m.week))
 }
 
@@ -194,32 +195,20 @@ pub fn banner(pat: &str, screen: &str) -> bool {
 /// `herdsman accounts`: each account's state and the open lanes on it. Names only, never tokens.
 pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = read(&ctx.state)?;
-    let states = fold(&events);
-    // Latest spawn per agent, kept while its issue (if any) is not merged.
-    let mut on: BTreeMap<&str, &str> = BTreeMap::new();
-    for e in events.iter().filter(|e| e.kind == "spawn") {
-        if let Some(a) = e.str("agent") {
-            on.insert(a, e.str("account").unwrap_or_default());
-        }
-    }
-    let merged = |e: &Event| {
-        e.issue
-            .is_some_and(|n| states.get(&(e.fleet.clone(), n)).is_some_and(|s| s.state == "merged"))
-    };
-    let open = |a: &str| last_spawn(&events, a).is_some_and(|e| !merged(e));
+    // #785: the lanes still running (`usage::lane_end`), with their accounts.
+    let running = (0..events.len()).filter(|&i| events[i].kind == "spawn" && usage::lane_end(&events, i).is_none());
+    let on: Vec<(&str, &str)> = running
+        .filter_map(|i| Some((events[i].str("agent")?, events[i].str("account")?)))
+        .collect();
     if cfg.accounts.names.is_empty() {
         writeln!(out, "no [accounts] configured")?;
     }
     for name in cfg.accounts.names.keys() {
-        let lanes: Vec<&str> = on
-            .iter()
-            .filter(|(a, n)| *n == name && open(a))
-            .map(|(a, _)| *a)
-            .collect();
+        let lanes: Vec<&str> = on.iter().filter(|l| l.1 == name).map(|l| l.0).collect();
         let m = usage::row(ctx, name);
         let mut state = cap_line(cfg, r, &events, name, ctx.now);
         if let (Some(m), "ok") = (&m, state.as_str()) {
-            state = format!("ok: {}", pcts(m));
+            state = format!("ok: {}", pcts(m, ctx.now));
         }
         writeln!(out, "{name:<8} {state:<28} {} lanes {}", lanes.len(), lanes.join(" "))?;
         if let Some(m) = m {
@@ -277,6 +266,10 @@ pub fn account_env(cfg: &Config, r: &dyn Runner, harness: &str, name: &str) -> R
         Ok(o) => o,
         Err(e) => return fail(format!("did not run: {e:#}")),
     };
+    if o.code == 3 {
+        let why = format!("account {name} is signed out (`{}` exit 3)", words.join(" "));
+        return refused("SIGNED_OUT", why);
+    }
     let var = |k: &String| !k.is_empty() && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
     let env = serde_json::from_str::<BTreeMap<String, String>>(&o.stdout).ok();
     match env.filter(|e| o.code == 0 && e.keys().all(var)) {
@@ -287,6 +280,58 @@ pub fn account_env(cfg: &Config, r: &dyn Runner, harness: &str, name: &str) -> R
             o.stderr.trim()
         )),
     }
+}
+
+/// #785: account `a` with its env, signed in: one `account_env` calls signed out (exit 3) or, with none, whose folder
+/// its CLI's status command does rests `account-signed-out` (its one owner alert names the sign-in) and the role's
+/// next account is tried. A dry run asks no CLI and logs nothing.
+pub fn signed(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (fleet, role, dry): (&str, &Role, bool),
+    mut a: Option<Account>,
+) -> Result<Option<Account>> {
+    let h = crate::harness::get(&role.harness);
+    let ask = !dry && cfg.accounts.account_env.is_none();
+    while let Some((name, env)) = a.as_mut() {
+        let got = account_env(cfg, r, &role.harness, name);
+        let out = match &got {
+            Ok(got) => folder(&role.harness, got)
+                .filter(|f| ask && h.signed_in(r, Path::new(f.1)) == Some(false))
+                .map(|(var, d)| {
+                    format!(
+                        "account {name} is signed out: {var}={d} {}",
+                        h.login().unwrap_or_default()
+                    )
+                }),
+            Err(e) => (e.downcast_ref::<crate::gate::Refusal>())
+                .filter(|f| f.code == "SIGNED_OUT" && !dry)
+                .map(|f| f.msg.clone()),
+        };
+        let Some(why) = out else {
+            *env = got?;
+            return Ok(a);
+        };
+        let why = format!("{why}; sign it in, then `herdsman accounts reset {name}`");
+        let d = json!({"account": name, "harness": role.harness, "meter": "sign-in check", "reason": why});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, fleet, None, "account-signed-out", d),
+        )?;
+        a = pick(ctx, cfg, &read(&ctx.state)?, role)?;
+    }
+    Ok(a)
+}
+
+/// #683: the provider's config-folder env var (`CONFIG_ENV`) and its value in `env`.
+fn folder<'a>(harness: &str, env: &'a BTreeMap<String, String>) -> Option<(&'static str, &'a str)> {
+    let Credential::Account(provider) = crate::harness::get(harness).credential() else {
+        return None;
+    };
+    let var = crate::harness::CONFIG_ENV.iter().find(|p| p.0 == provider)?.1;
+    Some((var, env.get(var)?))
 }
 
 /// #707: with no `account_env`, account `name`'s `[accounts]` value `token-file:<path>` (hand-placed, 0600): the env var
@@ -304,8 +349,8 @@ pub fn token_file(cfg: &Config, harness: &str, name: &str) -> Option<(String, st
         .then(|| (var.to_string(), crate::config::expand(f)))
 }
 
-/// #683: account `name`'s sign-in for `herdsman accounts` and doctor: whether it passes, and its line (` → ` its fix):
-/// its env's config folder holds its CLI's login (a file read, never the Keychain), or why its env failed.
+/// #683: account `name`'s sign-in for `herdsman accounts`: whether it passes, and its line (` → ` its fix): its env's
+/// config folder signed in as its CLI's status command says (#785; never the Keychain), or why its env failed.
 pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
     let on = |n: &&&str| matches!(crate::harness::get(n).credential(), Credential::Account(_));
     let Some(hn) = crate::harness::NAMES.iter().find(on) else {
@@ -324,18 +369,14 @@ pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
         Ok(env) => env,
         Err(e) => return (false, format!("{e:#}")),
     };
-    let Credential::Account(provider) = h.credential() else {
-        return (false, String::new());
-    };
-    let var = crate::harness::CONFIG_ENV.iter().find(|p| p.0 == provider).map(|p| p.1);
-    let Some((var, dir)) = var.and_then(|v| Some((v, env.get(v)?))) else {
+    let Some((var, dir)) = folder(hn, &env) else {
         let keys: Vec<&String> = env.keys().collect();
         return (true, format!("env {keys:?} from account_env"));
     };
     let login = h.login().unwrap_or("its login");
     let fix = format!("cooee Settings › Providers, or {var}={dir} {login}");
     (
-        h.signed_in(std::path::Path::new(dir)),
+        h.signed_in(r, Path::new(dir)) == Some(true),
         format!("signed in ({dir}) → {fix}"),
     )
 }

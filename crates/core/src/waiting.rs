@@ -95,6 +95,16 @@ pub const TURN_BLOCKED: &str = "reported blocked: ";
 const NUDGE_SECS: u64 = 600;
 
 /// #511: the build lane's latest `herdsman turn` since its spawn and any extra round the owner gave.
+/// #785: the issue's lane, since its latest spawn, logged `lane-failed-start`.
+fn failed_start(events: &[Event], s: &IssueState) -> bool {
+    let sp = s.lane.as_deref().and_then(|l| crate::events::last_spawn(events, l));
+    sp.is_some_and(|sp| {
+        events
+            .iter()
+            .any(|e| e.kind == "lane-failed-start" && e.ts >= sp.ts && e.str("agent") == sp.str("agent"))
+    })
+}
+
 pub fn turn<'a>(events: &'a [Event], s: &IssueState) -> Option<&'a Event> {
     let sp = last_spawn(events, s.build.as_ref().and_then(|b| s.lanes.get(b))?)?;
     let extended = events.iter().rfind(|e| e.is("round-extended", &s.fleet, s.issue));
@@ -536,6 +546,12 @@ fn waits(
             "lane killed, waiting for drive to respawn impl",
             s.last_ts,
             cmd("spawn", &format!(" {}", p.role(build).unwrap_or(p.start()))),
+        ),
+        "impl" | "fix" if failed_start(events, s) => w(
+            "owner",
+            "failed start: no event after its first turn (check its account's sign-in)",
+            s.last_ts,
+            None,
         ),
         "impl" | "fix" => w("none", "idle without pushing (check the pane)", s.last_ts, None),
         "design" => {

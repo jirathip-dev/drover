@@ -67,9 +67,14 @@ impl Harness for Codex {
             ("INITIAL_AGENT_MODE", "agent-full-access".into()),
         ]
     }
-    /// Codex keeps the folder's `ChatGPT` login (or API key) in `auth.json`.
-    fn signed_in(&self, dir: &Path) -> bool {
-        dir.join("auth.json").is_file()
+    /// #785: `codex login status` in the folder: `Logged in …` or `Not logged in`.
+    fn signed_in(&self, r: &dyn crate::runner::Runner, dir: &Path) -> Option<bool> {
+        let home = format!("CODEX_HOME={}", dir.display());
+        let o = r
+            .run("env", &crate::runner::argv(&[&home, "codex", "login", "status"]))
+            .ok()?;
+        let said = o.stdout + &o.stderr;
+        said.contains("ogged in").then(|| !said.contains("Not logged in"))
     }
     /// The session config (model head + the profile's hooks) as `CODEX_CONFIG`; the role ahead of the repo's own
     /// `AGENTS.md` in `AGENTS.override.md`, which Codex reads in its place.
