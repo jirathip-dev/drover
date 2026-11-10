@@ -71,6 +71,8 @@ function row(d: QueueTab, c: QueueCard, r: QueueRow): string {
     const mv = (label: string, key: string, to: number) => `${form(d)}${hidden('mv', c.name, d.mtime)}<input type=hidden name=issue value=${n}><input type=hidden name=${key} value=${to}><button>${label}</button></form>`;
     lines.push(`<span class=btns>${r.up == null ? '' : mv('▲ up', 'before', r.up)}${r.down == null ? '' : mv('▼ down', 'after', r.down)}</span>`);
   }
+  // #712: a parked issue back to the state it had (paired only, as [park]).
+  if (r.state === 'parked' && d.rw) lines.push(`${form(d)}${hidden('unpark', c.name, d.mtime)}<input type=hidden name=issue value=${n}><button>unpark</button></form>`);
   const card = lines.filter(Boolean).map(l => `<p>${l}</p>`).join('');
   const ls = r.lanes.map(qlane), more = ls.length > 5 ? `<details class=qm><summary>+${ls.length - 5} older</summary>${ls.slice(5).join('')}</details>` : '';
   const qls = ls.length ? `<div class=qls>${ls.slice(0, 5).join('')}${more}</div>` : '';
