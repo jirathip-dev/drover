@@ -1,0 +1,15 @@
+Decided: silence is read from shed's ACP events at intake (`at`, `said`, open `tools` in shed-out.json), checked each slow drive pass by `stall::silent`
+Because: "Silent = an ACP lane with an open turn and no session event for 10 min"
+Decided: an open tool call (pending/in_progress) in a lane shed still lists running counts as a live process: not silent
+Because: "unless a tool call is pending whose process is still alive"
+Decided: nudge = `shed cancel` + one `continue:` prompt; unanswered 10 min → `spawn --supersede --force` once; silent again within the hour → needs-human LANE_SILENT (its alert)
+Because: "cancel the turn + one 'continue' nudge"
+Decided: dead/silent/stalled respawns pass `--force`, which skips HOST_BUSY only (spawn.rs keeps MEM_LOW/DISK_LOW); the kick path's room check honours it too
+Because: "a respawn of a dead or silent lane skips"
+Decided: auth reuses check's signed-out path (account-signed-out rests the account); the pattern adds 401/authentication_error/revoked token, the alert names the sign-in command, and a signed-out lane still `working` is respawned
+Because: "marks its account signed out"
+Decided: `waiting` appends `held: <CODE> <why>` from drive's last refused spawn of the due command; such an issue is not "undriven"
+Because: "a step drive owns but skipped shows why"
+Rejected: a new signed-out store or alert kind — account-signed-out already rests accounts and alerts once per key
+Check: tests in crates/cli/tests/shed.rs drive the real `drive`/`check`/`waiting` against a fake shed socket; the MEM_LOW case asserts no second spawn
+Owner: ACP lanes that go quiet mid-turn are now nudged, then restarted once, and only reach you if that fails; waiting says why a step is held.
