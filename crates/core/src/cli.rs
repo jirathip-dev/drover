@@ -1326,7 +1326,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         } => crate::timer::service_unit(ctx, r, out, &api, board.as_deref())?,
         Cmd::Service { api, board, .. } => (SERVICE.get().context("no service")?)(ctx, &api, board.as_deref())?,
         cmd => {
-            let cfg = Config::load(&ctx.config)?;
+            let cfg = match cmd {
+                Cmd::Check => check::config(ctx)?, // #709
+                _ => Config::load(&ctx.config)?,
+            };
             // #561: check, clean, drive (#678: and reclaim) probe each remote host once and bound every remote call.
             let fast = matches!(cmd, Cmd::Drive { fast: true, .. });
             let pass = if fast {
