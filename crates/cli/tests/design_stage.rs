@@ -530,3 +530,48 @@ fn architect_revise_reruns_it_with_the_note_and_reject_needs_a_human() {
     drive(&c, &r);
     assert_eq!((spawned(&c, "architect"), spawned(&c, "impl")), (2, 0));
 }
+
+#[test]
+fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut c = setup("design-supersede", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    // Lane 1 pushes its design while it is still at it, so no hand-off yet.
+    let pushed = c.now + 60;
+    let working = Fake::default().reply(
+        "herdr agent list",
+        &agents(&[("sendmeter-design-12", "working", &wt(&c, 12), "w9:c1")]),
+    );
+    drive(&c, &fake(&c, pushed));
+    drive(&c, &Both(working, &fake(&c, pushed)));
+    assert_eq!(state(&c, 12), "design");
+    // Lane 2 replaces it with nothing new to push: the design on the branch is still handed off, once.
+    c.now += 1000;
+    let r = fake(&c, pushed);
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design", "--supersede"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(spawned(&c, "design"), 2);
+    let out = drive(&c, &r);
+    assert!(
+        out.contains(&format!("sendmeter #12 design-review: {HEAD:.7}")),
+        "{out}"
+    );
+    assert_eq!(
+        (state(&c, 12).as_str(), kinds(&c, "needs-decision").len()),
+        ("design-review", 1)
+    );
+    drive(&c, &r);
+    assert_eq!(kinds(&c, "design-review").len(), 1);
+    // A revise lane with no new commit leaves the head already handed off alone.
+    assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "make it blue"]).0, 0);
+    c.now += 1000;
+    drive(&c, &r);
+    drive(&c, &r);
+    assert_eq!(
+        (state(&c, 12).as_str(), kinds(&c, "design-review").len()),
+        ("design", 1)
+    );
+}
