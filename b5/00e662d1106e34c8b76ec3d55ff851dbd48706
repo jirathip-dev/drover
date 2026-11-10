@@ -1,0 +1,7 @@
+Decided: staging is merged in, not rebased; the branch is pushed and lanes never force-push.
+Because: q1181
+Decided: trimmed 56 lines in-diff first: signed() sets the lane's token too, one doctor meter note row, shorter meter and failed-start code.
+Because: crates/core/src/access.rs:287
+Rejected: trimming unrelated code for the last 16 lines — the owner chose one queue-wide cap raise (#802, now 41000).
+Check: cap-check reads 38088 / 41000; no behaviour changed in the trim; doctor's meter note is its own row, so the existing account-source row test still holds.
+Owner: the build's line-cap check passes now that the cap went up; nothing changed for users this round.
