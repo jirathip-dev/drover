@@ -1604,9 +1604,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             )),
                             // #724: passes run and only a spawn slot is wanting: not a stuck tick.
                             Some(t) if ctx.now.saturating_sub(t) > 600 && slot.is_some() => slot,
+                            // #791: a long tick still beating is running, not stuck.
+                            Some(_) if let Some(since) = crate::timer::running(ctx, &cfg) => Some(format!(
+                                "drive's pass running for {}",
+                                crate::events::age(ctx.now.saturating_sub(since))
+                            )),
                             Some(t) => {
                                 let late = ctx.now.saturating_sub(t);
-                                let stuck = if late > 600 {
+                                let stuck = if late > crate::timer::stuck_secs(&cfg) {
                                     ": tick stuck? herdsman doctor"
                                 } else {
                                     ""
@@ -1688,6 +1693,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes)?;
                         check::remote_orphans(&cfg, r, out, orphans && yes)?;
+                        // #779: and the wip branches `wip prune` would delete (a dry run without --yes).
+                        for f in cfg.fleet.keys().filter(|f| fleet.as_ref().is_none_or(|x| x == *f)) {
+                            if let Err(e) = check::prune(ctx, &cfg, r, out, f, !yes) {
+                                writeln!(out, "{f}: wip prune failed: {e:#}")?;
+                            }
+                        }
                     }
                 }
                 Cmd::Runners { cmd } => {

@@ -601,6 +601,9 @@ pub struct Limits {
     /// #710: more Keychain readers up over 60 s alert `keychain-jammed`; `reap_keychain_readers` kills them too.
     pub keychain_readers: usize,
     pub reap_keychain_readers: bool,
+    /// #779: spawn refuses `RESPAWN_LOOP` after this many failed starts of an issue's role within the window.
+    pub respawn_max: u32,
+    pub respawn_window_minutes: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -678,6 +681,8 @@ impl Default for Limits {
             webhook_poll_minutes: 10,
             keychain_readers: 3,
             reap_keychain_readers: false,
+            respawn_max: 3,
+            respawn_window_minutes: 60,
         }
     }
 }
