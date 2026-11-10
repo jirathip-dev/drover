@@ -201,6 +201,20 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         Err(e) => (false, format!("{e:#}")),
     };
     row(rows, on, '!', &format!("webhook — {why}{bad} → {fix}"));
+    // #781: signed by the one local identity, a Keychain access list naming herdsman trusts every build, not one hash.
+    if cfg!(target_os = "macos") {
+        let req = [
+            "-v",
+            "-R",
+            "=certificate leaf[subject.CN] = \"herdsman-local\"",
+            &ctx.exe,
+        ];
+        let line = format!(
+            "signature — {} signed by \"herdsman-local\" → sh scripts/signing-identity.sh in the herdsman checkout (once), then sh scripts/signing-identity.sh sign {}",
+            ctx.exe, ctx.exe
+        );
+        row(rows, ok(r, "codesign", &req).is_ok(), '✗', &line);
+    }
     // #710: the readers `check` counts for `keychain-jammed`.
     let jam = crate::host::keychain_jam(r);
     let line = format!("keychain readers — {}", crate::host::jam_line(&jam));

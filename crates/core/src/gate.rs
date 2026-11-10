@@ -1007,13 +1007,16 @@ fn merged(
         writeln!(out, "teardown: {e:#}")?;
     }
     if f.repo.ends_with("/herdsman") {
-        // Dogfood fleet: say how to pick up the merged code; never run it.
+        // Dogfood fleet: say how to pick up the merged code; never run it. #781: signed, so the Keychain trusts it.
         let exe = std::path::Path::new(&ctx.exe);
         let root = exe.parent().and_then(|b| b.parent()).unwrap_or(exe);
+        let src = f.local_path();
         writeln!(
             out,
-            "cargo install --path {}/crates/cli --locked --root {} --force",
-            f.local_path().display(),
+            "cargo install --path {}/crates/cli --locked --root {} --force && sh {}/scripts/signing-identity.sh sign {}/bin/herdsman",
+            src.display(),
+            root.display(),
+            src.display(),
             root.display()
         )?;
     }
