@@ -1,0 +1,9 @@
+Decided: merge origin/staging and take #788's cap_script and parser from it; my own copy of that fallback is dropped
+Because: crates/core/src/overlap.rs:240
+Decided: keep only the `counted by …` line on top of staging; the spec asks herdsman to say which count it used
+Because: "runs that script or exactly mirrors its rules, and says which one it used"
+Rejected: dropping the #803 regression test as a duplicate of #788's — it is the only one running cooee's real script
+Rejected: editing runner_limits.rs for the CI flake — a "Text file busy" race in a file this PR never touches; the new head reruns CI
+Check: `herdsman cap cooee` prints non-test lines 23398, apple 4014 at staging 54e8946; cooee's script prints the same there
+Check: `herdsman cap herdsman` reads 38643 at staging 0ca7613; cap-check at this head reads 38648, i.e. +5 for this PR
+Owner: the cap view now says whether it used the repo's own script or herdsman's built-in count; #788 already fixed the numbers
