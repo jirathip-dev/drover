@@ -1,0 +1,12 @@
+Decided: lane/<agent> answers LaneChat (Chat flattened plus blocks); an ACP lane's blocks come from shed's read events, a PTY lane's are one screen block
+Because: "blocks come only from ACP fields. No harness- or provider-specific parsing"
+Decided: the screen block carries no copy of lines; it names the response's lines
+Because: crates/cli/tests/history.rs:62
+Rejected: screen block with its own text — doubled the response and broke the chat's 64 KB first-open budget
+Decided: the drawing (scope 3) is not in this PR; the old board's files stay untouched
+Because: scripts/board-freeze.sh:12
+Rejected: drawing blocks in assets/serve.js — board-freeze fails without a board-fix line, and the shared Lanes module (#743) was closed not planned
+Decided: shed-proto and the remote-host shed pin move to shed's #52 merge (56de739), the first with read events
+Because: "built from shed's structured read (`read events: true`"
+Check: recorded claude, codex and gemini sessions give the same block shapes; the multi-line command is one tool block with a one-line title_line
+Owner: ACP lanes now come out of the API as prompt, reply, tool, plan and approval blocks; something still has to draw them (the shared Lanes module was dropped).
