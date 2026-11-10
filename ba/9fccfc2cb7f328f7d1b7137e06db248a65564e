@@ -1,0 +1,7 @@
+Decided: a design or architect head hands off once, when its stage's folder changed since the stage began and no design-review names that head; the commit time against the lane's spawn no longer matters.
+Because: "whether the commit came before or after this lane's spawn"
+Because: crates/core/src/design.rs:62
+Rejected: keep the after-spawn check and OR the new one in — a revise lane on the same head would then be re-handed off, against "A head already handed off is not handed off twice".
+Rejected: require a README too — architect lanes write adr.md and no README (roles/architect.md:17), so "any file in the stage's folder" fits both.
+Check: existing design_stage fakes now give each revise round and the design after an architect its own pushed head, since an unchanged head is no longer handed off again.
+Owner: a design lane restarted over a design that is already pushed now sends it to you for review instead of sitting idle.
