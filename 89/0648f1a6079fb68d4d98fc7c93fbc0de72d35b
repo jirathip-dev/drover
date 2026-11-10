@@ -1,0 +1,8 @@
+Decided: `stall::silent` also checks the issue's design-stage lane (role design or architect, state `design`), falling back to it when `active_lane` has none
+Because: "synergy #3359's design had a failed file write"
+Decided: its respawn is the same `spawn <role> --supersede --force` drive already uses for design stages
+Because: crates/core/src/drive.rs:1820
+Rejected: widening `IssueState::active_lane` — stall and liveness callers use it to mean build or check lanes only
+Rejected: a verify-lane change — verify spawns as a check stage in `review(n)`, which `active_lane` already returns
+Check: `a_silent_design_lane_is_nudged` fails with stall.rs reverted and passes at head; `cargo test -p herdsman --test shed` 46 passed
+Owner: A design lane that goes quiet mid-turn is now nudged and restarted like any other lane.
