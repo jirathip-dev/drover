@@ -1,5 +1,5 @@
 //! #412: the optional per-issue design stage: `queue add --design`, drive's design lane, the hand-off to the owner, and
-//! approve / revise / reject from the board card or the orchestrator thread.
+//! approve / revise / reject from the board card or the conductor thread.
 mod common;
 use common::*;
 use herdsman::events::{fold, read, Event};
@@ -159,7 +159,7 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
     assert!(post(&s, "/thread", "op=new&repo=sendmeter&text=Design+first", &cookie, c.now).contains("t1"));
-    // The orchestrator queues both issues `--design` from its thread.
+    // The conductor queues both issues `--design` from its thread.
     std::env::set_var("HERDSMAN_THREAD", "t1");
     let q = run(
         &c,

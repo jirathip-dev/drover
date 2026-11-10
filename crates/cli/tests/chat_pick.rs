@@ -137,7 +137,6 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
     );
     assert!(res.ends_with("t3 started\n"), "{res}");
     assert_eq!(kind(&c, "thread-new")[2].str("harness"), Some("claude"));
-    // #780 (q1173): the frozen board matches the old `conductor-*` types, so its awake dot is gone.
     assert!(chat(&s, &cookie)
         .contains("<b>Board</b><small class=tid>· t3</small></div><span class=ds>sendmeter · claude · opus"));
 }

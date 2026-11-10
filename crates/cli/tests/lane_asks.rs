@@ -1,5 +1,5 @@
-//! #541: a lane's ask goes to its repo's orchestrator thread first (the pinned one, else the newest; none: the owner);
-//! the orchestrator answers only with a basis and never an owner topic; its answer posts an FYI line the owner may
+//! #541: a lane's ask goes to its repo's conductor thread first (the pinned one, else the newest; none: the owner);
+//! the conductor answers only with a basis and never an owner topic; its answer posts an FYI line the owner may
 //! [change] for 30 min. Its own test binary: `HERDSMAN_LANE`, `HERDSMAN_THREAD` and `PATH` are process-wide.
 mod common;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
@@ -45,7 +45,7 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// A fleet with a claude orchestrator (`extra` in its `[fleet.sendmeter]`), a webpush notifier with one device behind a
+/// A fleet with a claude conductor (`extra` in its `[fleet.sendmeter]`), a webpush notifier with one device behind a
 /// fake `curl` that answers 201, and the impl lane of #36; threads `threads` in order.
 fn setup(name: &str, extra: &str, threads: &[&str]) -> herdsman::Ctx {
     let d = tmpdir(name);
@@ -93,7 +93,7 @@ fn pushes(c: &herdsman::Ctx) -> usize {
     std::fs::read_to_string(calls).unwrap_or_default().lines().count()
 }
 
-/// herdr ready to start an orchestrator, type into a lane, and the spec of #36 (with an Amendment).
+/// herdr ready to start a conductor, type into a lane, and the spec of #36 (with an Amendment).
 fn host() -> Fake {
     let issue = json!({"title": "Split the sender", "body": SPEC, "updatedAt": "t1", "comments": [
         {"body": "**Amendment** no new dependency for it", "authorAssociation": "OWNER", "url": "u1",
@@ -128,7 +128,7 @@ fn lane_ask(c: &herdsman::Ctx, q: &str) -> String {
     out.trim().into()
 }
 
-/// The orchestrator of thread `t` answers `id` with option `n` on `basis`: exit code, output, the runner.
+/// The conductor of thread `t` answers `id` with option `n` on `basis`: exit code, output, the runner.
 fn orchestrator_answer(c: &herdsman::Ctx, t: &str, id: &str, n: &str, basis: &str) -> (i32, String, Fake) {
     as_orchestrator(t);
     let r = host();
@@ -254,7 +254,7 @@ fn an_owner_topic_is_refused_and_put_to_the_owner_in_the_thread() {
         [(Some("q1"), Some("t1"), json!(1)), (Some("q2"), Some("t1"), json!(1))]
     );
     assert_eq!(pushes(&c), 2, "each pushes as an ask");
-    // The owner's choice row in the thread: the orchestrator's pick first; the tap answers the lane.
+    // The owner's choice row in the thread: the conductor's pick first; the tap answers the lane.
     let chat = chat(&c, NOW + 5);
     assert!(chat.contains("data-id=\"q1\""), "{chat}");
     as_owner();
@@ -291,13 +291,12 @@ fn the_owner_changes_a_orchestrator_answer_within_30_minutes_only() {
     lane_ask(&c, "Split it?");
     assert_eq!(orchestrator_answer(&c, "t1", "q1", "2", quote).0, 0);
     let board = chat(&c, NOW + 60);
-    // #780 (q1173): the frozen board offers [change] only on a `by: conductor-…` answer; the CLI below still changes it.
     assert!(
         board.contains("answered q1 for #36: no, because Keep the old sender behind a flag</p>"),
         "{board}"
     );
     assert!(!board.contains("<details class=chg>"), "{board}");
-    // An orchestrator may not change it.
+    // A conductor may not change it.
     let (code, out, _) = orchestrator_answer(&c, "t1", "q1", "1", quote);
     assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
     as_owner();

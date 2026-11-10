@@ -1,4 +1,4 @@
-//! #461: every `timer install` logs `timer-install` with its `by`; an orchestrator's shows in its thread.
+//! #461: every `timer install` logs `timer-install` with its `by`; a conductor's shows in its thread.
 //! Its own test binary: `HERDSMAN_LANE` and `HERDSMAN_THREAD` are process-wide.
 mod common;
 use common::*;

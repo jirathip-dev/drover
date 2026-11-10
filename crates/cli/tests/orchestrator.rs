@@ -1,4 +1,4 @@
-//! #355: orchestrator chat: a thread's lifecycle (start, sleep, resume with history) and an ask round-trip.
+//! #355: conductor chat: a thread's lifecycle (start, sleep, resume with history) and an ask round-trip.
 mod common;
 use common::*;
 use herdsman::events::{read, Event};
@@ -39,7 +39,7 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// herdr with `agents` live, ready to start an orchestrator in a new workspace or type into one.
+/// herdr with `agents` live, ready to start a conductor in a new workspace or type into one.
 fn herdr(agents: &str) -> Fake {
     Fake::default()
         .reply("herdr agent list", agents)
@@ -186,7 +186,7 @@ fn a_harness_without_resume_gets_the_history_in_its_kick() {
     );
 }
 
-/// #397: herdr refuses an `agent start` argument with a control character (`invalid_agent_argument`): no orchestrator
+/// #397: herdr refuses an `agent start` argument with a control character (`invalid_agent_argument`): no conductor
 /// start or resume, nor any lane spawn, sends one, however many lines the thread has. (dsh's launch carries no kick.)
 #[test]
 fn no_harness_starts_an_agent_with_a_control_character_in_its_argv() {
@@ -270,7 +270,7 @@ fn a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_int
         "read now: {ls}"
     );
 
-    // The tap (`answer`) types the DECISION into the thread's orchestrator and logs it in the thread.
+    // The tap (`answer`) types the DECISION into the thread's conductor and logs it in the thread.
     let r = herdr(&live("idle"));
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: small -> orchestrator-t1\n"));

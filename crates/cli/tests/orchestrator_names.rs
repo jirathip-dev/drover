@@ -1,7 +1,3 @@
-//! #780: the conductor is the orchestrator. Its old spellings (`[conductor]`, `role.conductor`, `--by conductor-<t>`,
-//! an old log's `by`) still load and act the same with one doctor line; many orchestrators (`[orchestrator.<id>]`)
-//! share a fleet, each action logged with the one that took it; a `name` is every label and nothing else.
-//! `HERDSMAN_LANE` is process-wide: the tests here take `ENV` in turn.
 mod common;
 use common::*;
 use herdsman::config::Config;
@@ -48,7 +44,6 @@ fn the_old_names_load_and_act_the_same_with_one_doctor_line() {
     let c2 = ctx(&tmpdir("orch-new"), &new);
     assert!(!run(&c2, &Fake::default(), &["doctor"]).1.contains("[conductor]"));
 
-    // An old log: thread t1 and its ask q2, and lane ask q1 answered by its conductor (`by: conductor-t1`) a minute ago.
     ev(&c, NOW - 300, "thread-new", json!({"thread": "t1", "title": "Grill"}));
     ev(
         &c,
@@ -100,7 +95,6 @@ fn the_old_names_load_and_act_the_same_with_one_doctor_line() {
         Some("orchestrator-t1"),
         "an old event's by reads as the new one"
     );
-    // The owner may still change an orchestrator's answer for 30 minutes: the old one's too.
     let (code, out) = run(
         &c,
         &Fake::default(),
@@ -108,7 +102,6 @@ fn the_old_names_load_and_act_the_same_with_one_doctor_line() {
     );
     assert_eq!(code, 0, "{out}");
     assert_eq!(kinds(&c, "decision").last().unwrap().str("choice"), Some("b"));
-    // `--by conductor-t1` is t1's orchestrator: it withdraws t1's ask, logged in the new spelling.
     let (code, out) = run(
         &c,
         &Fake::default(),
@@ -118,7 +111,6 @@ fn the_old_names_load_and_act_the_same_with_one_doctor_line() {
     assert_eq!(kinds(&c, "ask-withdrawn")[0].str("by"), Some("orchestrator-t1"));
 }
 
-/// Two orchestrators over sendmeter: Ada's and Bob's.
 fn two(name: &str) -> herdsman::Ctx {
     let cfg = format!(
         "{CONFIG}\n[orchestrator.ada]\nname = \"Ada\"\nfleets = [\"sendmeter\"]\n\n[orchestrator.bob]\nname = \"Bob\"\nfleets = [\"all\"]\n"
@@ -126,7 +118,6 @@ fn two(name: &str) -> herdsman::Ctx {
     ctx(&tmpdir(name), &cfg)
 }
 
-/// `args` run in orchestrator `id`'s lane.
 fn as_orch(c: &herdsman::Ctx, r: &Fake, id: &str, args: &[&str]) -> (i32, String) {
     std::env::set_var("HERDSMAN_LANE", "sendmeter:-:orchestrator");
     std::env::set_var("HERDSMAN_ORCHESTRATOR", id);
@@ -184,7 +175,6 @@ fn two_orchestrators_on_one_fleet_both_act_each_named_in_the_log_and_the_gates_s
     let f = spawnable();
     let (code, out) = as_orch(&c, &f, "ada", &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
-    // Bob on the same issue: the gate refuses it as it refuses anyone's second lane.
     let (code, out) = as_orch(&c, &spawnable(), "bob", &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED LANE_LIVE"), "{out}");
@@ -195,7 +185,6 @@ fn two_orchestrators_on_one_fleet_both_act_each_named_in_the_log_and_the_gates_s
         .map(|e| (e.issue, e.data["orchestrator"].clone()))
         .collect();
     assert_eq!(spawns, [(Some(12), json!("ada")), (Some(13), json!("bob"))]);
-    // The owner's own actions name none.
     assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "14"]).0, 0);
     assert_eq!(kinds(&c, "queue").last().unwrap().data.get("orchestrator"), None);
 

@@ -376,7 +376,7 @@ fn bad_config_and_hermes_profiles() {
         "no profile, nothing to check: {out}"
     );
 
-    // #401: the default orchestrator (the impl role on `lane-orchestrator`) needs its Hermes profile too.
+    // #401: the default conductor (the impl role on `lane-conductor`) needs its Hermes profile too.
     assert!(line(&out, "hermes lane-orchestrator").starts_with('✗'), "{out}");
     for p in ["fleet-impl", "lane-orchestrator"] {
         write(&c.hermes.join(p).join("config.yaml"), "", 0o644);

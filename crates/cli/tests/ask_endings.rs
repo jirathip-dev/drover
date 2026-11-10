@@ -1,4 +1,4 @@
-//! #584: an ask closes on every real ending: the owner's typed answer (`answer --typed`), an orchestrator's withdraw, a
+//! #584: an ask closes on every real ending: the owner's typed answer (`answer --typed`), a conductor's withdraw, a
 //! handoff delivered or failed, 24 h expiry unless its lane is live (that one re-alerts once a day); a one-time sweep.
 mod common;
 use common::*;
@@ -131,7 +131,7 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
     assert!(row(&c, "q1").ends_with("[withdrawn → q2]"), "{}", row(&c, "q1"));
 }
 
-/// An orchestrator role, its profile, and a handoff card from t1 to the repo with t2 and a new thread as its rows.
+/// A conductor role, its profile, and a handoff card from t1 to the repo with t2 and a new thread as its rows.
 fn handoff(name: &str) -> herdsman::Ctx {
     let d = tmpdir(name);
     let c = ctx(
@@ -169,7 +169,7 @@ fn a_handoff_ask_closes_when_it_is_delivered_and_when_it_fails() {
     assert!(open(&c).is_empty());
     assert!(row(&c, "q1").ends_with("[delivered to t2]"), "{}", row(&c, "q1"));
 
-    // herdr is down: nothing reaches t2's orchestrator; the card closes as failed.
+    // herdr is down: nothing reaches t2's conductor; the card closes as failed.
     let c = handoff("handoff-failed");
     let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "1"]);
     assert_ne!(code, 0, "{out}");

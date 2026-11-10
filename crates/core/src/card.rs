@@ -1,8 +1,8 @@
-//! #538: run cards. An orchestrator posts an ad-hoc owner-level command in its thread (`herdsman card post`): the exact
+//! #538: run cards. A conductor posts an ad-hoc owner-level command in its thread (`herdsman card post`): the exact
 //! command, why, its blast radius and its folder. The owner's [approve] (within 15 min of the post) has herdsman run
 //! that exact text once on the main host, its exit code and output tail (secrets masked) posted back into the thread;
 //! [deny] runs nothing. Both are logged `by: owner` with the card id and the command's sha. `CARD_FORBIDDEN` refuses
-//! the hard-nos at posting, and the hook refuses them from an orchestrator's own shell.
+//! the hard-nos at posting, and the hook refuses them from a conductor's own shell.
 use crate::config::Config;
 use crate::devices::sha256;
 use crate::events::{emit, read, Event};
@@ -163,7 +163,7 @@ pub fn settle_via(
     } else {
         format!("run {id} denied by owner; nothing ran")
     };
-    let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false)); // logged even if the orchestrator can't wake
+    let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
     Ok(line)
 }
 

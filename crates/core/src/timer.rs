@@ -215,7 +215,7 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
 }
 
 /// #461: log `timer-install`: `by` the owner or the lane (`HERDSMAN_LANE`), the jobs written and the labels
-/// reloaded; an orchestrator's thread (`HERDSMAN_THREAD`) shows it as a system line.
+/// reloaded; a conductor's thread (`HERDSMAN_THREAD`) shows it as a system line.
 fn installed(ctx: &Ctx, cfg: &Config, lines: &[(&str, String)]) -> Result<()> {
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
     let pick = |f: fn(&str) -> bool| lines.iter().filter(|l| f(&l.1)).map(|l| l.0).collect::<Vec<_>>();

@@ -1,6 +1,6 @@
 //! #701: on a 50,000-event log with 40 threads, a tick with no new events (the needs and chat parts, the same minute
 //! and the next) and a `POST /thread` (`say`, `new`) read no event row from the database but the new ones
-//! (`db::ROWS`) and never walk the whole log for a thread (`orchestrator::WALKS`: the events a thread lookup looks at).
+//! (`db::ROWS`) and never walk the whole log for a thread (`conductor::WALKS`: the events a thread lookup looks at).
 mod common;
 use common::*;
 use herdsman::db::ROWS;

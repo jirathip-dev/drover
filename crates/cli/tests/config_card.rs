@@ -14,7 +14,7 @@ const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const CARD: &str = "<form class=chc data-id=\"c1\"><button name=act value=apply>apply</button>";
 
-/// Thread t1 with an orchestrator role; `config propose` of an impl model change gives `c1`.
+/// Thread t1 with a conductor role; `config propose` of an impl model change gives `c1`.
 fn setup(name: &str) -> herdsman::Ctx {
     let c = ctx(
         &tmpdir(name),
@@ -40,7 +40,7 @@ fn propose(c: &herdsman::Ctx) {
     assert_eq!((code, out.as_str()), (0, "c1\n"));
 }
 
-/// Orchestrator messages `m<i>` in t1.
+/// Conductor messages `m<i>` in t1.
 fn msgs(c: &herdsman::Ctx, ts: u64, ids: std::ops::Range<u64>) {
     for i in ids {
         let d = json!({"thread": "t1", "from": "orchestrator", "text": format!("m{i}")});

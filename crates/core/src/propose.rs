@@ -151,6 +151,6 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
         cfg,
         Event::new(ctx.now, &p.fleet, None, "config-settled", d),
     )?;
-    let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false)); // logged even if the orchestrator can't wake
+    let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
     Ok(line)
 }

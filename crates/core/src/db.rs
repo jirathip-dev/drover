@@ -116,7 +116,7 @@ fn open(state: &Path) -> Result<Connection> {
 fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Result<()> {
     let mut ev = Event { seq: 0, ..ev.clone() };
     if let Some(id) = crate::orchestrator::acting() {
-        ev.data.entry("orchestrator").or_insert(id.into()); // #780: which orchestrator acted
+        ev.data.entry("orchestrator").or_insert(id.into());
     }
     let json = serde_json::to_string(&ev)?;
     c.execute(

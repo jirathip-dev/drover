@@ -560,7 +560,7 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
 }
 
 /// #565: why herdsman's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (with an
-/// account; #637: on a remote host, its profile checked there instead); empty when it would. #633: an attached cooee orchestrator's `guarded` too.
+/// account; #637: on a remote host, its profile checked there instead); empty when it would. #633: an attached cooee conductor's `guarded` too.
 pub fn unguarded(
     ctx: &Ctx,
     (profile, family, h): (&str, &str, &str),
@@ -1583,7 +1583,7 @@ fn tail(r: &dyn Runner, pane: &str) -> String {
 }
 
 /// #463: a start that failed shows why on `pane`'s screen; a first-start prompt the harness knows gets its answer
-/// (`logged` with its name) and the harness is confirmed up. #736: spawn's and an orchestrator's. Whether it came up; the
+/// (`logged` with its name) and the harness is confirmed up. #736: spawn's and a conductor's. Whether it came up; the
 /// screen's redacted tail.
 pub(crate) fn unblock(
     r: &dyn Runner,

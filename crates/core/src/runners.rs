@@ -129,7 +129,7 @@ fn per_day(ctx: &Ctx, c: &CiRunners) -> Result<f64> {
     Ok(rate.with_context(|| format!("no rate_usd_hour for size {}", c.size))? * 24.0)
 }
 
-/// The owner said yes to ask `id` about `runners <verb>`: an owner ask whose first option the owner (not an orchestrator, not
+/// The owner said yes to ask `id` about `runners <verb>`: an owner ask whose first option the owner (not a conductor, not
 /// the default) chose, used by no verb yet (one yes lets one run on).
 fn approved(events: &[Event], id: Option<&str>, verb: &str) -> bool {
     let Some(id) = id else { return false };

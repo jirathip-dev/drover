@@ -51,8 +51,6 @@ impl Event {
     }
 }
 
-/// #780: an event as read, its old spellings in the new ones: `conductor-<start|sleep|…>`, `from: conductor` and
-/// `by: conductor-<thread>` (`orchestrator::by`).
 pub(crate) fn aliased(mut ev: Event) -> Event {
     if let Some(k) = ev.kind.strip_prefix("conductor-") {
         ev.kind = format!("orchestrator-{k}");
@@ -220,10 +218,10 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
         _ if watched => "",
         "needs-decision" if ev.str("kind") == Some("routine") || ev.str("routed").is_some() => "",
         "decision" if ev.str("by") == Some("default") => "needs-decision",
-        // #541: a lane ask put to the owner pushes as an ask; an orchestrator's answer to one never pushes.
+        // #541: a lane ask put to the owner pushes as an ask; a conductor's answer to one never pushes.
         "ask-owner" => "needs-decision",
         "decision" if ev.str("by").is_some_and(|b| b.starts_with("orchestrator-")) => "",
-        // #386: an orchestrator's reply pushes; the owner's own words and system lines never do.
+        // #386: a conductor's reply pushes; the owner's own words and system lines never do.
         "thread-msg" if ev.str("from") != Some("orchestrator") => "",
         k => k,
     };
@@ -560,7 +558,7 @@ impl Asks {
 }
 
 /// #701: the chat's index, one event at a time (`add`, beside `Asks`): the threads, each thread's events, the first
-/// ask and the last decision of each (fleet, id), and the handoff rows sent on (`orchestrator::forwarded`); by position.
+/// ask and the last decision of each (fleet, id), and the handoff rows sent on (`conductor::forwarded`); by position.
 #[derive(Default, Clone)]
 pub struct Threads {
     pub new: Vec<usize>,

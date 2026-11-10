@@ -1379,7 +1379,7 @@ fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
     assert!(w.contains("lane gone (adapter crash), no push: respawning impl"), "{w}");
 }
 
-/// #608: a shed-acp fleet's thread, its orchestrator's events of `kind`.
+/// #608: a shed-acp fleet's thread, its conductor's events of `kind`.
 fn thread_events(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     let all = herdsman::events::read(&c.state).unwrap();
     all.into_iter().filter(|e| e.kind == kind).collect()
@@ -1546,7 +1546,7 @@ fn an_acp_orchestrator_runs_under_the_orchestrator_guard() {
     let v: Value = serde_json::from_str(&o).unwrap_or_else(|_| panic!("{o}"));
     assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny", "{o}");
     assert!(o.contains("REFUSED OWNER_ONLY"), "{o}");
-    // An orchestrator's own verb (an impl lane's ORCHESTRATOR_ONLY) runs.
+    // A conductor's own verb (an impl lane's CONDUCTOR_ONLY) runs.
     assert_eq!(
         tool("herdsman amend sendmeter 12 'x' --basis q1"),
         "",

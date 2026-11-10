@@ -1,4 +1,4 @@
-//! #715: an orchestrator cold start never freezes the board: while a start blocks (30 s here), the request that caused it
+//! #715: a conductor cold start never freezes the board: while a start blocks (30 s here), the request that caused it
 //! has its reply, and `GET /` and a second device's send answer at once; a failed background start shows its error in
 //! the thread, the message that triggered it still logged (#717).
 mod common;
@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 const ADDR: &str = "127.0.0.1:7777";
 const TIMEOUT: &str = r#"{"error":{"code":"timeout","message":"timed out waiting for agent startup"}}"#;
 
-/// Thread t1 (orchestrator asleep: never started) with ask q1 from it.
+/// Thread t1 (conductor asleep: never started) with ask q1 from it.
 fn setup(name: &str) -> herdsman::Ctx {
     let c = ctx(
         &tmpdir(name),
@@ -108,7 +108,7 @@ fn a_blocked_orchestrator_start_holds_no_request() {
     let addr = l.local_addr().unwrap();
     std::thread::spawn(move || herdsman::serve::serve_on(c, r, l, false));
 
-    // Device A answers t1's ask: its orchestrator is asleep, so the answer wakes it (the start blocks).
+    // Device A answers t1's ask: its conductor is asleep, so the answer wakes it (the start blocks).
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         drop(tx.send(call(
@@ -134,7 +134,7 @@ fn a_blocked_orchestrator_start_holds_no_request() {
         "device B's send during the start: {res:.300}"
     );
     assert!(ms < 1000, "device B's send took {ms} ms during the start");
-    // The answer itself was replied to, not held until the orchestrator is up.
+    // The answer itself was replied to, not held until the conductor is up.
     let (ms, res) = rx
         .recv_timeout(Duration::from_secs(1))
         .expect("the answer's reply waits on the start");

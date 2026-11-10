@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// Threads t1…t27 on sendmeter (t27 archived); in t1 `extra` orchestrator lines, then a message naming t27, t999 (no
+/// Threads t1…t27 on sendmeter (t27 archived); in t1 `extra` conductor lines, then a message naming t27, t999 (no
 /// such thread) and `t27` in inline code, a handoff to t27, a system line and an ask whose option names t27.
 fn setup(name: &str, extra: u64) -> herdsman::Ctx {
     let d = tmpdir(name);

@@ -1,5 +1,5 @@
-//! #401: a fleet without `[fleet.<n>.role.orchestrator]` runs its orchestrator on its impl role (profile `lane-orchestrator`),
-//! and the [config] sheet's Orchestrator choices write that table in place (backup first, refused unless doctor passes).
+//! #401: a fleet without `[fleet.<n>.role.conductor]` runs its conductor on its impl role (profile `lane-conductor`),
+//! and the [config] sheet's Conductor choices write that table in place (backup first, refused unless doctor passes).
 mod common;
 use common::*;
 use herdsman::events::{read, Event};
@@ -16,7 +16,7 @@ fn req(s: &Server, path: &str, body: &str, extra: &str) -> String {
     String::from_utf8_lossy(&s.respond(&r, T)).into_owned()
 }
 
-/// `CONFIG` (impl: hermes, opus; no orchestrator role) with rev on sonnet: the fleet's roles use opus and sonnet.
+/// `CONFIG` (impl: hermes, opus; no conductor role) with rev on sonnet: the fleet's roles use opus and sonnet.
 /// #268: sendmeter's [config] sheet as the board draws it from API v1's `queue`.
 fn config_sheet(s: &Server) -> String {
     queue_js(s, ADDR, T, "sheet(d, 'sendmeter')")
@@ -30,7 +30,7 @@ fn setup(name: &str) -> herdsman::Ctx {
     ctx(&tmpdir(name), &text)
 }
 
-/// herdr ready to start an orchestrator in a new workspace; `which hermes` finds it (doctor's harness row).
+/// herdr ready to start a conductor in a new workspace; `which hermes` finds it (doctor's harness row).
 fn host() -> Fake {
     Fake::default()
         .reply("herdr agent list", NO_AGENTS)
@@ -59,7 +59,7 @@ fn start_line(r: &Fake) -> String {
 #[test]
 fn a_fleet_without_a_orchestrator_role_starts_one_on_its_impl_role_from_the_board() {
     let c = setup("cdef-start");
-    // `profiles sync` always writes the default orchestrator's profile.
+    // `profiles sync` always writes the default conductor's profile.
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let profile = c.config.with_file_name("claude").join("lane-orchestrator");
     assert!(profile.join("settings.json").exists());
@@ -71,7 +71,7 @@ fn a_fleet_without_a_orchestrator_role_starts_one_on_its_impl_role_from_the_boar
     let st = &starts(&c)[0];
     assert_eq!((st.str("harness"), st.str("model")), (Some("hermes"), Some("opus")));
     assert!(start_line(&r).contains("-p lane-orchestrator"), "{}", start_line(&r));
-    // The orchestrator answers with `thread reply`; `thread show` reads it back.
+    // The conductor answers with `thread reply`; `thread show` reads it back.
     let (code, out) = run(&c, &Fake::default(), &["thread", "reply", "t1", "Scope first."]);
     assert_eq!(code, 0, "{out}");
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
@@ -88,8 +88,6 @@ fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_
     let r = host();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let sheet = config_sheet(&s);
-    // #780 (q1173): the frozen board's sheet looks for `role.conductor`, so it no longer draws this section; its
-    // `op=cond` post still saves through the orchestrator role.
     assert!(!sheet.contains("<h3>Conductor<span>"), "{sheet}");
     let i = sheet.find("name=mtime value=").unwrap() + 17;
     let mt: String = sheet[i..].chars().take_while(char::is_ascii_digit).collect();
@@ -121,7 +119,7 @@ fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_
         (set.str("role"), set.str("key"), set.str("new")),
         (Some("orchestrator"), Some("model"), Some("sonnet"))
     );
-    // The next orchestrator start runs on the new model.
+    // The next conductor start runs on the new model.
     let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Next", &cookie);
     assert!(res.ends_with("t1 started\n"), "{res}");
     assert_eq!(starts(&c)[0].str("model"), Some("sonnet"));

@@ -161,7 +161,7 @@ fn protected_path<'a>(s: &str, p: &'a Policy) -> Option<&'a str> {
     p.paths.iter().map(String::as_str).find(|pp| s.contains(pp))
 }
 
-/// #410: `file` lies in the orchestrator's own thread folder and is not one herdsman writes there.
+/// #410: `file` lies in the conductor's own thread folder and is not one herdsman writes there.
 fn own_file(file: &str, p: &Policy) -> bool {
     use std::path::{Component, Path};
     let Some(own) = &p.own else { return false };
@@ -213,7 +213,7 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
     }
     let cmd = &dups(&unquote(cmd, false));
     let mut cwd = cwd.to_string();
-    // #538: the hard nos no run card may run, from an orchestrator's own shell either.
+    // #538: the hard nos no run card may run, from a conductor's own shell either.
     if let Some(w) = crate::card::forbidden(cmd).filter(|_| p.orchestrator) {
         return Some(format!(
             "REFUSED CARD_FORBIDDEN: this command {w}; an orchestrator never runs it (#538)"
@@ -261,7 +261,7 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             return Some(NO_CAP_EDIT.into());
         }
         // #499: each path in a word (`--opt=`, `of=`, `a>b` split off; an option's `-t<dir>` as each suffix)
-        // resolved against the cwd; an orchestrator's write lands only in its own folder. The segment's own text,
+        // resolved against the cwd; a conductor's write lands only in its own folder. The segment's own text,
         // its own-folder words left out, is still checked. #570: a relative word only as a writer's argument
         // or a redirection's target.
         let paths = |w: &str| -> Vec<String> {
@@ -555,7 +555,7 @@ pub fn group_of(cmd: &str) -> Option<&'static str> {
 
 /// `setup`, `serve approve|unpair|devices --revoke`, `config apply|discard`, `secret ls|rm`, `accounts import` and
 /// `card approve|deny`: owner-only (pre-rename `fleet` too). #538: a group verb (`clean --yes`, a design spawn, …)
-/// is an orchestrator's too while `[orchestrator] allow` has its group on, never another lane's.
+/// is a conductor's too while `[conductor] allow` has its group on, never another lane's.
 fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     let orchestrator = p.orchestrator;
     let i = t
@@ -586,20 +586,20 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if block && r.iter().enumerate().skip(3).any(other) {
         return Some("REFUSED OWN_ISSUE: a lane may `queue block`/`unblock` only its own issue (#425)".into());
     }
-    // #419: `lesson` files an issue and spawns a lane: an orchestrator's verb (the owner's too); its digest (and #510's
+    // #419: `lesson` files an issue and spawns a lane: a conductor's verb (the owner's too); its digest (and #510's
     // `apply`, a rules-file rewrite in the lane's own worktree) is open.
     if !orchestrator && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
         return Some(
             "REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `herdsman lesson` (#419)".into(),
         );
     }
-    // #574: `amend` edits the issue's spec: the owner's decision, written by an orchestrator or the owner.
+    // #574: `amend` edits the issue's spec: the owner's decision, written by a conductor or the owner.
     if !orchestrator && r.first() == Some(&"amend") {
         return Some(
             "REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `herdsman amend` (#574)".into(),
         );
     }
-    // #461: `timer install` (only that host verb) is an orchestrator's too; outside a lane it is the owner's.
+    // #461: `timer install` (only that host verb) is a conductor's too; outside a lane it is the owner's.
     if !orchestrator && !lane.is_empty() && r.first() == Some(&"timer") && r.contains(&"install") {
         return Some(
             "REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `herdsman timer install` (#461)".into(),
@@ -749,7 +749,7 @@ pub fn push_dir(input: &Value) -> Option<String> {
 }
 
 /// #386: a shell call's command when it runs `herdsman` or `gh` (but `herdsman thread reply`, which is the reply
-/// itself): an orchestrator's tool row in its thread.
+/// itself): a conductor's tool row in its thread.
 pub fn fleet_cmd(input: &Value) -> Option<&str> {
     let tool = input["tool_name"].as_str().unwrap_or_default();
     let cmd = tool_input(input)["command"].as_str()?.trim();

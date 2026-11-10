@@ -164,7 +164,6 @@ fn herd_and_roles_read_as_the_old_board_draws_them() {
         .iter()
         .map(|r| r["name"].clone())
         .collect();
-    // #780: the frozen sheet (serve.rs) looks for `role.conductor`; the orchestrator role is a row of its own now.
     assert_eq!(names, [json!("impl"), json!("orchestrator"), json!("rev")]);
     assert_eq!(roles["config"]["roles"][0]["model"], "opus");
     assert_eq!(

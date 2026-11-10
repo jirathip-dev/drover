@@ -66,7 +66,7 @@ pub fn join(
         by_pane.insert(e.str("pane"), e);
     }
     let (mut out, mut seen) = (vec![], BTreeSet::new());
-    // #422: each thread's last `orchestrator-start`, by its agent (`orchestrator-<thread>`).
+    // #422: each thread's last `conductor-start`, by its agent (`conductor-<thread>`).
     let starts = events.iter().filter(|e| e.kind == "orchestrator-start");
     let mut cs: BTreeMap<&str, &Event> = starts.filter_map(|e| Some((e.str("agent")?, e))).collect();
     for a in agents {
@@ -223,7 +223,7 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
     }
 }
 
-/// #422: the orchestrator `e` started: role `orchestrator`, named `<thread title> · <thread>`, `asleep` with no pane.
+/// #422: the conductor `e` started: role `conductor`, named `<thread title> · <thread>`, `asleep` with no pane.
 fn orchestrator(events: &[Event], e: &Event, l: Lane) -> Lane {
     let (id, mut l) = (e.str("thread").unwrap_or_default(), from_spawn(e, l));
     let t = (events.iter()).find(|t| t.kind == "thread-new" && t.str("thread") == Some(id));
@@ -247,7 +247,7 @@ pub fn group(all: &[Lane], changed: impl Fn(&Lane) -> u64) -> Groups<'_> {
             section(l),
             l.fleet.is_none(),
             l.fleet.clone(),
-            l.role != "orchestrator", // #422: a repo's orchestrators first
+            l.role != "orchestrator",
             std::cmp::Reverse(changed(l)),
         )
     });

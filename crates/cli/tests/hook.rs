@@ -374,7 +374,7 @@ fn design_spawn_is_owner_only() {
     assert_eq!(bash_as("impl", "herdsman board x # design"), None);
 }
 
-/// #410: an orchestrator thread spawns design lanes; impl, rev, orch and other lanes still may not.
+/// #410: a conductor thread spawns design lanes; impl, rev, orch and other lanes still may not.
 #[test]
 fn a_orchestrator_may_spawn_design_lanes() {
     let run = |lane: &str, cmd: &str| {
@@ -400,7 +400,7 @@ fn a_orchestrator_may_spawn_design_lanes() {
     }
 }
 
-/// #419: an orchestrator (and the owner) runs `herdsman lesson`; impl, rev and orch lanes may not, but any reads its digest.
+/// #419: a conductor (and the owner) runs `herdsman lesson`; impl, rev and orch lanes may not, but any reads its digest.
 #[test]
 fn only_a_orchestrator_runs_lesson() {
     let run = |lane: &str, cmd: &str| {
@@ -427,7 +427,7 @@ fn only_a_orchestrator_runs_lesson() {
     assert_eq!(run("synergy:12:lesson", "herdsman lesson apply synergy"), "");
 }
 
-/// #574: only an orchestrator (and the owner) runs `herdsman amend`; impl, rev and design lanes are refused.
+/// #574: only a conductor (and the owner) runs `herdsman amend`; impl, rev and design lanes are refused.
 #[test]
 fn only_a_orchestrator_runs_amend() {
     let run = |lane: &str| {
@@ -441,8 +441,8 @@ fn only_a_orchestrator_runs_amend() {
     }
 }
 
-/// #461: an orchestrator (and the owner, outside any lane) runs `herdsman timer install`; impl, rev and design lanes
-/// may not; no other `timer` verb changes for an orchestrator.
+/// #461: a conductor (and the owner, outside any lane) runs `herdsman timer install`; impl, rev and design lanes
+/// may not; no other `timer` verb changes for a conductor.
 #[test]
 fn only_a_orchestrator_runs_timer_install() {
     let run = |lane: Option<&str>, cmd: &str| {
@@ -461,7 +461,7 @@ fn only_a_orchestrator_runs_timer_install() {
         assert!(!run(Some(lane), "herdsman timer status").contains("REFUSED"), "{lane}");
     }
     assert!(run(Some("synergy:-:orchestrator"), "herdsman setup").contains("REFUSED OWNER_ONLY"));
-    // #646: a lane or orchestrator lists wip branches; deleting them is the owner's run card.
+    // #646: a lane or conductor lists wip branches; deleting them is the owner's run card.
     for lane in ["synergy:12:impl", "synergy:-:orchestrator"] {
         assert_eq!(run(Some(lane), "herdsman wip prune synergy --dry-run"), "", "{lane}");
         let out = run(Some(lane), "herdsman wip prune synergy");
@@ -538,7 +538,7 @@ fn quoted_text_is_not_a_command() {
     assert!(run("synergy:-:orch", "herdsman thread reply t1 x && docker ps").contains("NO_CONTAINERS"));
 }
 
-/// #410: an orchestrator writes in its own thread folder, but not herdsman's files there, another thread's or the log.
+/// #410: a conductor writes in its own thread folder, but not herdsman's files there, another thread's or the log.
 #[test]
 fn a_orchestrator_writes_its_own_thread_folder() {
     let d = tmpdir("hook-own");
@@ -563,7 +563,7 @@ fn a_orchestrator_writes_its_own_thread_folder() {
     }
 }
 
-/// #499: from the shell too, an orchestrator copies into its own thread folder, but not herdsman's files there, another
+/// #499: from the shell too, a conductor copies into its own thread folder, but not herdsman's files there, another
 /// thread's or the log; relative targets resolve against the cwd (and its `cd`s) for every lane.
 #[test]
 fn a_orchestrator_copies_into_its_own_thread_folder() {
@@ -642,7 +642,7 @@ fn a_orchestrator_copies_into_its_own_thread_folder() {
 }
 
 /// #570: from a cwd in the state folder, `2>&1` and a redirection to `/dev/null` write no file there; a real
-/// relative target outside the orchestrator's own folder still does.
+/// relative target outside the conductor's own folder still does.
 #[test]
 fn fd_duplications_write_no_file() {
     let d = tmpdir("hook-dups");
@@ -711,7 +711,7 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
     }
 }
 
-/// The hook's stdout for `call` (a pre-tool event) run as the orchestrator of thread t6, state under `d`.
+/// The hook's stdout for `call` (a pre-tool event) run as the conductor of thread t6, state under `d`.
 fn orchestrator_hook(d: &std::path::Path, mut call: serde_json::Value) -> String {
     call["hook_event_name"] = json!("PreToolUse");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_herdsman"));
@@ -975,7 +975,7 @@ fn setup_is_owner_only() {
     }
 }
 
-/// #387: a lane (the orchestrator too) proposes config and requests secrets, but never applies, lists or removes them.
+/// #387: a lane (the conductor too) proposes config and requests secrets, but never applies, lists or removes them.
 #[test]
 fn config_apply_and_secret_ls_rm_are_owner_only() {
     for cmd in [
@@ -993,7 +993,7 @@ fn config_apply_and_secret_ls_rm_are_owner_only() {
     assert_eq!(bash("herdsman secret request t1 API_KEY --why x"), None);
 }
 
-/// #386: an orchestrator's allowed `herdsman`/`gh` command is logged for its thread's tool rows (`thread-cmd`); its
+/// #386: a conductor's allowed `herdsman`/`gh` command is logged for its thread's tool rows (`thread-cmd`); its
 /// `thread reply`, other commands, denied ones and calls outside a thread are not.
 #[test]
 fn a_orchestrator_command_is_logged_for_its_thread() {
@@ -1279,7 +1279,7 @@ fn files_a_lane_edits_never_change_the_hook_rules() {
     assert_eq!(calls.map(decide).to_vec(), before);
 }
 
-/// #538: a group verb runs from an orchestrator while its group is on (the default: all but `pause` and `set`), never from
+/// #538: a group verb runs from a conductor while its group is on (the default: all but `pause` and `set`), never from
 /// another lane; a switched-off group's verb is refused `GROUP_OFF`.
 #[test]
 fn capability_groups_gate_a_orchestrators_owner_verbs() {
@@ -1328,8 +1328,8 @@ fn capability_groups_gate_a_orchestrators_owner_verbs() {
     }
 }
 
-/// #538: only an orchestrator posts run cards and only the owner settles them; a hard-no command is refused from a
-/// orchestrator's own shell too, but quoted reply text naming one is not run.
+/// #538: only a conductor posts run cards and only the owner settles them; a hard-no command is refused from a
+/// conductor's own shell too, but quoted reply text naming one is not run.
 #[test]
 fn run_cards_post_from_a_orchestrator_settle_by_the_owner_and_hard_nos_never_run() {
     let input =
@@ -1365,7 +1365,7 @@ fn run_cards_post_from_a_orchestrator_settle_by_the_owner_and_hard_nos_never_run
     );
 }
 
-/// #537: an orchestrator runs the `herdsman runners` verbs, impl and rev lanes never; raw container commands stay refused
+/// #537: a conductor runs the `herdsman runners` verbs, impl and rev lanes never; raw container commands stay refused
 /// for everyone, while a message or argument that only names docker is not a command.
 #[test]
 fn runners_verbs_are_a_orchestrators_and_docker_in_message_text_is_not_a_command() {
@@ -1430,7 +1430,7 @@ fn a_lanes_git_notes_write_or_notes_push_is_refused() {
 }
 
 /// #668: an impl lane never writes `ci/cap.toml` (an edit, a writer's argument, a redirection's target); reading it,
-/// or a check that names it, passes. The orchestrator-filed raise (its issue titled `cap: …`) may edit it.
+/// or a check that names it, passes. The conductor-filed raise (its issue titled `cap: …`) may edit it.
 #[test]
 fn impl_lane_never_edits_the_cap_file() {
     let d = tmpdir("hook-cap");

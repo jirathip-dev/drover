@@ -1,5 +1,5 @@
-//! #413: `thread handoff`: a new or an existing thread linked both ways, the text typed into its orchestrator as from the
-//! source, flow-back rows (an issue filed, an ask answered), the board's chips, and an orchestrator's `thread new` refused.
+//! #413: `thread handoff`: a new or an existing thread linked both ways, the text typed into its conductor as from the
+//! source, flow-back rows (an issue filed, an ask answered), the board's chips, and a conductor's `thread new` refused.
 mod common;
 use common::*;
 use herdsman::events::{read, Event};
@@ -30,7 +30,7 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// herdr with `agents` live, ready to start an orchestrator in a new workspace or type into one.
+/// herdr with `agents` live, ready to start a conductor in a new workspace or type into one.
 fn herdr(agents: &str) -> Fake {
     Fake::default()
         .reply("herdr agent list", agents)
@@ -62,7 +62,7 @@ fn show(c: &herdsman::Ctx, id: &str) -> String {
     run(c, &Fake::default(), &["thread", "show", id]).1
 }
 
-/// The real `herdsman` binary on `c`'s files, in an orchestrator lane of thread `thread` (`None`: the owner's shell).
+/// The real `herdsman` binary on `c`'s files, in a conductor lane of thread `thread` (`None`: the owner's shell).
 fn bin(c: &herdsman::Ctx, thread: Option<&str>, args: &[&str], stdin: &str) -> (i32, String) {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_herdsman"));
     for k in [
@@ -94,7 +94,7 @@ fn bin(c: &herdsman::Ctx, thread: Option<&str>, args: &[&str], stdin: &str) -> (
     (o.status.code().unwrap_or(-1), text)
 }
 
-/// The orchestrator of `thread` ran `cmd` in its shell, which printed `stdout` (a `PostToolUse` hook call).
+/// The conductor of `thread` ran `cmd` in its shell, which printed `stdout` (a `PostToolUse` hook call).
 fn ran(c: &herdsman::Ctx, thread: &str, cmd: &str, stdout: &str) {
     let input = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": cmd},
         "tool_response": {"stdout": stdout, "stderr": "", "interrupted": false}});
@@ -118,7 +118,7 @@ fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_orchestrator_with_th
         (h[0].str("from"), h[0].str("to"), h[0].str("title"), h[0].str("text")),
         (Some("t1"), Some("t2"), Some("Rate limits"), Some("429s from #19"))
     );
-    // t2's orchestrator starts, the handoff its thread's last message, marked as from t1 (not the owner).
+    // t2's conductor starts, the handoff its thread's last message, marked as from t1 (not the owner).
     assert!(r.called("herdr agent start orchestrator-t2"), "{:?}", r.calls.borrow());
     let dir = c.state.with_file_name("orchestrator").join("t2");
     assert_eq!(
@@ -145,7 +145,7 @@ fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_orchestrator_with_th
     assert_eq!(kinds(&c, "thread-new").len(), 2, "refusals start no thread");
 }
 
-/// A handoff to a repo with no orchestrator is refused before a thread or a link is logged.
+/// A handoff to a repo with no conductor is refused before a thread or a link is logged.
 #[test]
 fn a_handoff_to_a_repo_without_a_orchestrator_logs_nothing() {
     let c = setup("handoff-noorchestrator");
@@ -172,7 +172,7 @@ fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_orches
         "t2\n"
     );
     let r = herdr(&agents(&[("orchestrator-t2", "idle", "/x", "w9:p2")]));
-    // An awake t2 orchestrator: its start is logged.
+    // An awake t2 conductor: its start is logged.
     let st =
         json!({"thread": "t2", "agent": "orchestrator-t2", "pane": "w9:p2", "workspace": "w9", "harness": "claude"});
     herdsman::events::append(
@@ -209,7 +209,7 @@ fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_orches
     );
 }
 
-/// #492: t1 and t2–t8 in sendmeter, each t<n> with an orchestrator reply `n` minutes in (t5's a long one); t8 archived.
+/// #492: t1 and t2–t8 in sendmeter, each t<n> with a conductor reply `n` minutes in (t5's a long one); t8 archived.
 fn threads(name: &str) -> herdsman::Ctx {
     let c = setup(name);
     let titles = [
@@ -286,7 +286,7 @@ fn a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_b
         card.data["handoff"]["targets"],
         json!(["t7", "t6", "t5", "t4", "new", "t3", "t2"])
     );
-    // Nothing delivered: no link, no message, no thread, no orchestrator touched.
+    // Nothing delivered: no link, no message, no thread, no conductor touched.
     assert_eq!(
         (
             kinds(&c, "thread-handoff").len(),
@@ -385,7 +385,7 @@ fn a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not
         run(&c, &r, &["thread", "handoff", "t1", "t2", "Facets", "add facets"]).1,
         "t2\n"
     );
-    // t2's orchestrator: not mine; sends it on to the repo.
+    // t2's conductor: not mine; sends it on to the repo.
     assert_eq!(
         run(
             &c,
@@ -400,7 +400,7 @@ fn a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not
         "{}",
         show(&c, "t2")
     );
-    // A row the owner wrote after is not forwarded by a later handoff (the orchestrator took it on).
+    // A row the owner wrote after is not forwarded by a later handoff (the conductor took it on).
     assert_eq!(
         run(&c, &r, &["thread", "handoff", "t1", "t2", "Docs", "doc it"]).1,
         "t2\n"
@@ -489,7 +489,7 @@ fn a_orchestrators_thread_new_is_refused_naming_handoff_and_the_owners_still_wor
         bin(&c, None, &["thread", "new", "sendmeter", "Side quest"], ""),
         (0, "t2\n".into())
     );
-    // Any orchestrator may hand off to any repo (`all` too).
+    // Any conductor may hand off to any repo (`all` too).
     assert_eq!(to_new(&c, &herdr(NO_AGENTS), "all", "Cross-repo", "both fleets"), "t3");
     assert_eq!(kinds(&c, "thread-new")[2].fleet, "all");
     let usage = run(&c, &Fake::default(), &["help", "--agent"]).1;
@@ -619,14 +619,14 @@ fn starts(r: &Fake) -> Vec<String> {
     start.map(|c| c.split_once(" -- ").unwrap().1.to_string()).collect()
 }
 
-/// #621: a 2,400-byte text, in lines like an orchestrator's proposal.
+/// #621: a 2,400-byte text, in lines like a conductor's proposal.
 fn long_text() -> String {
     let text: String = (0..300).map(|i| format!("line {i:03}. ")).collect();
     text[..2400].to_string()
 }
 
-/// #621: a 2,400-byte handoff lands in full as a new thread's first orchestrator message, and again in full once that
-/// thread's orchestrator is asleep (its resume); no start's command line passes herdr's 1,024-byte limit.
+/// #621: a 2,400-byte handoff lands in full as a new thread's first conductor message, and again in full once that
+/// thread's conductor is asleep (its resume); no start's command line passes herdr's 1,024-byte limit.
 #[test]
 fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herdrs_line_limit() {
     let c = setup("handoff-long");
@@ -646,7 +646,7 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herd
     let md = c.state.with_file_name("orchestrator").join("t2/.thread.md");
     assert_eq!(std::fs::read_to_string(&md).unwrap(), format!("from t1: {line}\n"));
 
-    // t2's orchestrator is gone (asleep): the next long handoff resumes it, the text in full in its thread file.
+    // t2's conductor is gone (asleep): the next long handoff resumes it, the text in full in its thread file.
     let (code, out) = run(&c, &r, &["thread", "handoff", "t1", "t2", "More", &text]);
     assert_eq!((code, out.as_str()), (0, "t2\n"));
     assert!(
@@ -730,7 +730,7 @@ fn a_failed_handoff_tap_shows_its_error_and_its_retry_is_the_one_delivery() {
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
     assert_ne!(code, 0, "{out}");
     assert!(show(&c, "t1").contains(why), "{}", show(&c, "t1"));
-    // #648: nothing reached t2's orchestrator; its one logged row is what the retry delivers.
+    // #648: nothing reached t2's conductor; its one logged row is what the retry delivers.
     assert!(
         kinds(&c, "orchestrator-start").is_empty(),
         "{:?}",

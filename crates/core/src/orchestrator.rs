@@ -1,4 +1,4 @@
-//! #355: orchestrator chat. A thread belongs to a fleet (or `all`); one orchestrator lane (role `orchestrator`, any harness)
+//! #355: conductor chat. A thread belongs to a fleet (or `all`); one conductor lane (role `conductor`, any harness)
 //! talks it through in a working folder without a worktree, sleeps after `IDLE` and wakes with its saved session.
 use crate::config::{expand, Config, Role};
 use crate::events::{self, emit, shared, Event};
@@ -54,7 +54,7 @@ pub fn find<'a>(events: &'a [Event], id: &str) -> Result<&'a Event> {
     }
 }
 
-/// #633: cooee thread `id`'s last `orchestrator-attached` / `orchestrator-detached`.
+/// #633: cooee thread `id`'s last `conductor-attached` / `conductor-detached`.
 fn link_of<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
     let link = |e: &&Event| matches!(e.kind.as_str(), "orchestrator-attached" | "orchestrator-detached");
     events.iter().rfind(|e| link(e) && e.str("thread") == Some(id))
@@ -71,7 +71,7 @@ pub fn fleet_of<'a>(events: &'a [Event], id: &str) -> Result<&'a str> {
     Ok(&attached(events, id).map_or_else(|| find(events, id), Ok)?.fleet)
 }
 
-/// #633: `POST /api/v1/orchestrator-attach`: cooee thread `id` becomes `fleet`'s orchestrator thread (`orchestrator-attached`);
+/// #633: `POST /api/v1/conductor-attach`: cooee thread `id` becomes `fleet`'s conductor thread (`conductor-attached`);
 /// what its profile needs: the brief, the synced settings, the env, and whether #565's ACP guard holds (`why` not).
 pub fn attach(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, id: &str) -> Result<Value> {
     let f = cfg.fleet(fleet)?;
@@ -134,8 +134,7 @@ pub fn by(b: &str) -> String {
         .map_or_else(|| b.into(), |t| format!("orchestrator-{t}"))
 }
 
-/// #780: the orchestrator id this process acts for: in an orchestrator lane (`HERDSMAN_LANE`'s role), its
-/// `HERDSMAN_ORCHESTRATOR`. Every event it logs names it (`db::insert`).
+/// #780: in an orchestrator lane, its `HERDSMAN_ORCHESTRATOR` id; every event it logs names it (`db::insert`).
 pub fn acting() -> Option<String> {
     let lane = std::env::var("HERDSMAN_LANE").ok()?;
     is_role(lane.split(':').nth(2)?).then(|| std::env::var("HERDSMAN_ORCHESTRATOR").ok())?
@@ -144,8 +143,7 @@ pub fn acting() -> Option<String> {
 /// #780: the orchestrator a thread from before #780 (none named) belongs to, the one `[orchestrator]` itself names.
 pub const DEFAULT: &str = "default";
 
-/// #780: orchestrator `id`'s name (`[orchestrator.<id>] name`, the default's `[orchestrator] name`): what every label
-/// shows; code keys off the role and the id only.
+/// #780: orchestrator `id`'s name, what every label shows (code keys off the role and the id only).
 pub fn name<'a>(cfg: &'a Config, id: &str) -> &'a str {
     let o = &cfg.orchestrator;
     let n = if id == DEFAULT {
@@ -172,8 +170,6 @@ pub fn name_of<'a>(cfg: &'a Config, events: &[Event], id: &str) -> &'a str {
     name(cfg, find(events, id).map_or(id, id_of))
 }
 
-/// #780: the orchestrator a new thread on `repo` talks to: `want` (`BAD_VALUE` unless its `fleets` cover the repo),
-/// else the first `[orchestrator.<id>]` that covers it, else the default.
 fn assign(cfg: &Config, repo: &str, want: Option<&str>) -> Result<String> {
     let covers = |o: &crate::config::Orchestrator| o.fleets.iter().any(|f| f == repo || f == "all");
     let first = || cfg.orchestrator.more.iter().find(|o| covers(o.1)).map(|o| o.0.as_str());
@@ -188,7 +184,7 @@ fn assign(cfg: &Config, repo: &str, want: Option<&str>) -> Result<String> {
 }
 
 /// `herdsman thread new <fleet|all> <title> [--harness <h>]`: its id. #404: the thread keeps its harness (`harness`,
-/// else the default's) for good. #780: the frozen board's call; the default orchestrator for the repo.
+/// else the default's) for good.
 pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, harness: Option<&str>) -> Result<String> {
     new_with(ctx, cfg, repo, title, (harness, None))
 }
@@ -245,7 +241,7 @@ pub fn archived(events: &[Event], id: &str) -> bool {
     a.is_some_and(|e| e.kind == "thread-archive")
 }
 
-/// #405: `thread archive` (`on`) closes the thread's live orchestrator (`orchestrator-sleep`; its folder, uploads and log
+/// #405: `thread archive` (`on`) closes the thread's live conductor (`conductor-sleep`; its folder, uploads and log
 /// stay) and folds the thread; `thread restore` unfolds it, and its next message resumes the same session.
 pub fn archive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, on: bool) -> Result<()> {
     let events = shared(&ctx.state)?;
@@ -306,7 +302,7 @@ pub fn upload(ctx: &Ctx, cfg: &Config, id: &str, files: &[(String, Vec<u8>)]) ->
     Ok(out)
 }
 
-/// #413: `thread handoff`: to thread `to` at once, linked; wakes its orchestrator as `from`. #492: to a repo (or `all`), a
+/// #413: `thread handoff`: to thread `to` at once, linked; wakes its conductor as `from`. #492: to a repo (or `all`), a
 /// choice card in `from` (an owner ask with `handoff`): the repo's threads or a new one; `pick` delivers on the tap.
 pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]: [&str; 4]) -> Result<String> {
     text_ok(text)?;
@@ -316,7 +312,7 @@ pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]:
         return refused("BAD_VALUE", "a thread hands off to another thread");
     }
     let fwd = forwards(&events, from);
-    // The target's orchestrator is checked first: no thread or link is left behind without delivery.
+    // The target's conductor is checked first: no thread or link is left behind without delivery.
     if is_id(to) {
         role(cfg, &find(&events, to)?.fleet)?;
         return send(ctx, cfg, r, (from, to, to), (title, text), (fwd, None));
@@ -434,7 +430,7 @@ pub fn land(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) 
 }
 
 /// A handoff from `from` into thread `to` (`new`: a new thread in `repo`): the linked `thread-handoff` row and the text
-/// typed into its orchestrator, both naming the target as `<title> · <id>`.
+/// typed into its conductor, both naming the target as `<title> · <id>`.
 fn send(
     ctx: &Ctx,
     cfg: &Config,
@@ -464,7 +460,7 @@ fn send(
 }
 
 /// #492: a handoff from `from` forwards the newest handoff it received that the owner has not written after and that
-/// is not forwarded yet (its seq): the orchestrator sends on what was not meant for it.
+/// is not forwarded yet (its seq): the conductor sends on what was not meant for it.
 fn forwards(events: &[Event], from: &str) -> Option<u64> {
     let owner = |e: &Event| {
         e.kind == "thread-msg"
@@ -499,7 +495,7 @@ pub fn handoff_text(e: &Event) -> String {
 }
 
 /// #541: the thread a lane's ask on `fleet` goes to: `[fleet.<n>] ask_thread`, else the repo's most recently active
-/// one (neither archived); none without an orchestrator role. #633: an attached cooee thread is one of them.
+/// one (neither archived); none without a conductor role. #633: an attached cooee thread is one of them.
 pub fn route<'a>(cfg: &Config, events: &'a [Event], fleet: &str) -> Option<&'a str> {
     let own = role(cfg, fleet).is_ok();
     let repo = |e: &&'a Event| e.fleet == fleet && (own && e.kind == "thread-new" || e.kind == "orchestrator-attached");
@@ -604,8 +600,8 @@ fn log(ctx: &Ctx, cfg: &Config, t: &Event, from: &str, (text, files): (&str, &[V
     emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))
 }
 
-/// The thread's orchestrator's working folder, one per thread: `<state dir>/orchestrator/<thread>/` (#780: the old
-/// `conductor/` while only it exists), or (#386) `<[orchestrator] dir>/<thread>/`.
+/// The thread's conductor's working folder, one per thread: `<state dir>/conductor/<thread>/`, or (#386)
+/// `<[conductor] dir>/<thread>/`.
 pub fn dir(ctx: &Ctx, cfg: &Config, id: &str) -> std::path::PathBuf {
     let (new, old) = (
         ctx.state.with_file_name("orchestrator"),
@@ -649,7 +645,7 @@ pub fn reply(ctx: &Ctx, cfg: &Config, id: &str, text: &str, files: &[std::path::
 }
 
 /// `herdsman thread say` (and a thread ask's answer, `raw`: typed as is; #386: the board's, with `files`): log
-/// `from`'s message, then type it into the thread's orchestrator, starting or resuming it first; the agent it went to.
+/// `from`'s message, then type it into the thread's conductor, starting or resuming it first; the agent it went to.
 pub fn say(
     ctx: &Ctx,
     cfg: &Config,
@@ -675,7 +671,7 @@ thread_local! {
     static LATER: std::cell::RefCell<Option<Vec<(Event, String)>>> = const { std::cell::RefCell::new(None) };
 }
 
-/// #715: `f` with every `say` in it logging only (a board request never waits on an orchestrator start); the
+/// #715: `f` with every `say` in it logging only (a board request never waits on a conductor start); the
 /// deliveries it left, for the caller to type in once its reply is out.
 pub fn deferred<T>(f: impl FnOnce() -> T) -> (T, Vec<(Event, String)>) {
     LATER.set(Some(vec![]));
@@ -740,7 +736,7 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     let agents = herdr::agents(r)?;
     let awake = last.filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| a["name"] == s.data["agent"]));
-    // #404: a model/effort pick since the orchestrator started resumes it on them.
+    // #404: a model/effort pick since the conductor started resumes it on them.
     let picked = awake.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
     let Some(s) = awake.filter(|_| !picked) else {
         if let Some(s) = awake {
@@ -755,7 +751,7 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
         return start(ctx, cfg, r, t, &shared(&ctx.state)?, line);
     };
     let (agent, pane) = (s.str("agent").unwrap_or_default(), s.str("pane").unwrap_or_default());
-    // #608: an ACP orchestrator takes the line as one prompt, multi-line as it is (#397's one line is herdr's).
+    // #608: an ACP conductor takes the line as one prompt, multi-line as it is (#397's one line is herdr's).
     if acp(s) {
         crate::shed::cli(r, &["send", agent, line])?;
         return Ok(agent.into());
@@ -770,12 +766,12 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     Ok(agent.into())
 }
 
-/// #608: an orchestrator that runs as an ACP session in shed.
+/// #608: a conductor that runs as an ACP session in shed.
 fn acp(s: &Event) -> bool {
     s.str("runtime") == Some("shed-acp")
 }
 
-/// Close orchestrator `s`: its shed terminal (#608), else its herdr workspace.
+/// Close conductor `s`: its shed terminal (#608), else its herdr workspace.
 fn close(r: &dyn Runner, s: &Event) -> Result<()> {
     if acp(s) {
         return herdr::close(r, s.str("agent").unwrap_or_default()).map(drop);
@@ -783,8 +779,8 @@ fn close(r: &dyn Runner, s: &Event) -> Result<()> {
     herdr::workspace_close(r, s.str("workspace").unwrap_or_default()).map(drop)
 }
 
-/// The orchestrator role: the thread fleet's `[fleet.<n>.role.orchestrator]` (#401: else its impl role on profile
-/// `lane-orchestrator`, `Config::parse`); for `all`, the first fleet's that has one.
+/// The conductor role: the thread fleet's `[fleet.<n>.role.conductor]` (#401: else its impl role on profile
+/// `lane-conductor`, `Config::parse`); for `all`, the first fleet's that has one.
 pub fn role<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, &'a Role)> {
     let has = |(n, f): (&'a String, &'a crate::config::Fleet)| Some((n.as_str(), f.role.get("orchestrator")?));
     let found = match repo {
@@ -800,7 +796,7 @@ pub fn role<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, &'a Role)> {
     }
 }
 
-/// #404: a new thread's orchestrator: the role, with `[chat]`'s harness (another harness drops the role's model and
+/// #404: a new thread's conductor: the role, with `[chat]`'s harness (another harness drops the role's model and
 /// accounts), model, effort and account(s) over it.
 pub fn defaults<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, Role)> {
     let (fleet, base) = role(cfg, repo)?;
@@ -828,7 +824,7 @@ fn on(r: &Role, h: Option<&str>) -> Role {
     }
 }
 
-/// #404: thread `t`'s orchestrator: the defaults, or the role on another harness it started with; then its last
+/// #404: thread `t`'s conductor: the defaults, or the role on another harness it started with; then its last
 /// model/effort pick.
 pub fn thread_role<'a>(cfg: &'a Config, events: &[Event], t: &Event) -> Result<(&'a str, Role)> {
     let (fleet, d) = defaults(cfg, &t.fleet)?;
@@ -846,7 +842,7 @@ pub fn thread_role<'a>(cfg: &'a Config, events: &[Event], t: &Event) -> Result<(
 }
 
 /// #404: the models a thread on harness `h` can pick: those its roles on `h` (or `[chat]`, where a fleet's default
-/// orchestrator is on `h`) use, any fleet;
+/// conductor is on `h`) use, any fleet;
 /// none where `h`'s profile owns the model.
 pub fn harness_models<'a>(cfg: &'a Config, h: &str) -> Vec<&'a str> {
     if !harness::get(h).takes_model() {
@@ -867,7 +863,7 @@ pub fn harness_models<'a>(cfg: &'a Config, h: &str) -> Vec<&'a str> {
 }
 
 /// #404: the composer chip's pick: thread `id`'s model and effort from its next turn (`deliver` resumes the
-/// orchestrator on them), logged `thread-model`, a system line in the thread.
+/// conductor on them), logged `thread-model`, a system line in the thread.
 pub fn pick(ctx: &Ctx, cfg: &Config, id: &str, model: &str, effort: &str) -> Result<()> {
     let events = shared(&ctx.state)?;
     let t = find(&events, id)?;
@@ -893,7 +889,7 @@ pub fn models(f: &crate::config::Fleet) -> Vec<&str> {
     all.into_iter().collect()
 }
 
-/// #401: the [config] sheet's orchestrator choices (harness, model, effort) into `[fleet.<n>.role.orchestrator]` in place (a
+/// #401: the [config] sheet's conductor choices (harness, model, effort) into `[fleet.<n>.role.conductor]` in place (a
 /// fleet on the default gets the table: its impl role's keys); refused `DOCTOR` if `doctor` with the new file shows a ✗
 /// it did not before. The old file goes to `fleet.toml.bak` first.
 pub fn set(ctx: &Ctx, r: &dyn Runner, fleet: &str, wanted: &[(&str, String)]) -> Result<String> {
@@ -993,7 +989,7 @@ fn save(ctx: &Ctx, r: &dyn Runner, new: &str) -> Result<Config> {
     Ok(new_cfg)
 }
 
-/// A random v4 UUID, a new orchestrator's session id.
+/// A random v4 UUID, a new conductor's session id.
 fn uuid() -> Result<String> {
     let mut b = crate::devices::random(16)?;
     (b[6], b[8]) = (b[6] & 0x0f | 0x40, b[8] & 0x3f | 0x80);
@@ -1008,7 +1004,7 @@ fn uuid() -> Result<String> {
     ))
 }
 
-/// Start the thread's orchestrator with `line`: its first start, or a resume of its session (a harness that can't
+/// Start the thread's conductor with `line`: its first start, or a resume of its session (a harness that can't
 /// resume is pointed at the conversation so far instead).
 fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], line: &str) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
@@ -1070,11 +1066,10 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         token: None,
     };
     p.env.insert("HERDSMAN_THREAD".into(), id.into());
-    // #780: `acting`.
     p.env.insert("HERDSMAN_ORCHESTRATOR".into(), id_of(t).into());
-    // #683: the orchestrator runs on this host: its account's env is its sign-in.
+    // #683: the conductor runs on this host: its account's env is its sign-in.
     crate::access::signed(ctx, cfg, r, (fleet, &role, false), &mut p)?;
-    // #608: a shed-acp fleet's orchestrator is an ACP session under the same guard as its lanes (#565), or none at all.
+    // #608: a shed-acp fleet's conductor is an ACP session under the same guard as its lanes (#565), or none at all.
     let shed = cfg.shed_for(fleet).filter(|b| b.acp.is_some());
     let acp = match shed.map(|b| (b.acp.clone().unwrap_or_default(), herdr::Shed(b))) {
         Some((aid, b)) => match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
@@ -1197,7 +1192,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     started(ctx, cfg, r, t, &p, d)
 }
 
-/// Log orchestrator start `d` (and a fallback's `switched to` line); the agent.
+/// Log conductor start `d` (and a fallback's `switched to` line); the agent.
 fn started(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, p: &Plan, d: Value) -> Result<String> {
     let agent = d["agent"].as_str().unwrap_or_default().to_string();
     emit(
@@ -1220,7 +1215,7 @@ fn started(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, p: &Plan, d: Valu
     Ok(agent)
 }
 
-/// The orchestrator's `.brief.md`: its thread, then `[orchestrator]`'s instructions, memory notes and skills index.
+/// The conductor's `.brief.md`: its thread, then `[conductor]`'s instructions, memory notes and skills index.
 fn profile(cfg: &Config, t: &Event, fleet: &str) -> String {
     let (id, title) = (t.str("thread").unwrap_or_default(), t.str("title").unwrap_or_default());
     let repo = cfg.fleet.get(&t.fleet).map_or("all repos".into(), |f| {
@@ -1248,7 +1243,7 @@ fn profile(cfg: &Config, t: &Event, fleet: &str) -> String {
         let text = std::fs::read_to_string(m).unwrap_or_default();
         s += &format!("\n## Memory: {}\n\n{}\n", m.display(), text.trim_end());
     }
-    // #538: what this fleet lets the orchestrator run.
+    // #538: what this fleet lets the conductor run.
     s += "\n## Capability groups ([orchestrator] allow)\n\n";
     for (g, verbs) in crate::config::GROUPS {
         let on = ["off", "on"][usize::from(c.groups().contains(g))];
@@ -1287,7 +1282,7 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
         "thread-model" => Some(json!({"ts": e.ts, "from": "system", "text": picked(e)})),
         // #538: a run card; its settled line follows as a system message.
         "run-card" => Some(json!({"ts": e.ts, "from": "orchestrator", "text": crate::card::text(e)})),
-        // #461: an orchestrator's `timer install`, a system line.
+        // #461: a conductor's `timer install`, a system line.
         "timer-install" => {
             let (by, w, l) = (e.str("by").unwrap_or("?"), &e.data["written"], &e.data["reloaded"]);
             let text = format!("{by} ran `herdsman timer install`: wrote {w}, reloaded {l}");
@@ -1326,8 +1321,7 @@ pub fn picked(e: &Event) -> String {
     )
 }
 
-/// Items as lines: `<from>: <text>`, an ask as `<from> asks <id>: <question>` and its `[n]` options; #780: the
-/// orchestrator's as its name `who`.
+/// Items as lines: `<from>: <text>`, an ask as `<from> asks <id>: <question>` and its `[n]` options.
 fn render(items: &[Value], who: &str) -> String {
     let s = |v: &Value, k: &str| v[k].as_str().unwrap_or_default().to_string();
     let line = |i: &Value| match i["ask"].as_str() {
@@ -1387,8 +1381,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, id: &str, as_json: boo
     Ok(write!(out, "{}", render(&items, name(cfg, id_of(t))))?)
 }
 
-/// `herdsman thread ls [fleet]`: per repo, its threads with title, last message, unread dot and orchestrator (#780: its
-/// id and name) and state.
+/// `herdsman thread ls [fleet]`: per repo, its threads with title, last message, unread dot and conductor state.
 pub fn ls(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: Option<&str>, as_json: bool) -> Result<()> {
     let events = shared(&ctx.state)?;
     let mut rows: Vec<Value> = vec![];
@@ -1441,8 +1434,8 @@ pub fn ls(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: Option<&str>, as_
     Ok(())
 }
 
-/// `check`: each awake orchestrator whose thread has been quiet `IDLE` and that is not working is closed
-/// (`orchestrator-sleep`); the next message resumes it.
+/// `check`: each awake conductor whose thread has been quiet `IDLE` and that is not working is closed
+/// (`conductor-sleep`); the next message resumes it.
 pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], agents: &[Value]) -> Result<()> {
     for t in events.iter().filter(|e| e.kind == "thread-new") {
         let id = t.str("thread").unwrap_or_default();
@@ -1455,7 +1448,7 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         if a.is_some() && switch(ctx, cfg, r, t, s)? {
             continue;
         }
-        // #608: an ACP orchestrator shed no longer runs is asleep at once (the board's dot is shed's state).
+        // #608: an ACP conductor shed no longer runs is asleep at once (the board's dot is shed's state).
         let gone = a.is_none() && acp(s);
         if !gone && (!quiet || a.is_some_and(|a| a["agent_status"] == "working")) {
             continue;
@@ -1473,7 +1466,7 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
     Ok(())
 }
 
-/// #387: an awake orchestrator showing a usage limit (or signed out) rests its account (else its harness) and resumes
+/// #387: an awake conductor showing a usage limit (or signed out) rests its account (else its harness) and resumes
 /// the same session on the role's next account or `fallback` entry; signed out, the thread gets a [sign in] line.
 fn switch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Result<bool> {
     let (id, account, hn) = (

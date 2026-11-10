@@ -27,8 +27,7 @@ pub struct Config {
     pub setup: Vec<SetupCfg>,
     /// #298: `[runtime]`, the terminal runtime new lanes start in (docs/runtimes.md); herdr when unset.
     pub runtime: Runtime,
-    /// #355: `[orchestrator]`: the orchestrator profile, plain markdown in a repo the owner picks (`crate::orchestrator`).
-    /// #780: `[conductor]`, its old name, is read for one release (`warnings`).
+    /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
     #[serde(alias = "conductor")]
     pub orchestrator: OrchestratorCfg,
     /// #780: fleet.toml still names `[conductor]` or a `role.conductor` (doctor's deprecation line).
@@ -110,8 +109,8 @@ pub struct Chat {
     pub accounts: Vec<String>,
 }
 
-/// #355: the orchestrator's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the
-/// root of the per-thread working folders (default `<state dir>/orchestrator`); #538: `allow`, its capability groups.
+/// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the
+/// root of the per-thread working folders (default `<state dir>/conductor`); #538: `allow`, its capability groups.
 #[derive(Debug, Default, Deserialize)]
 pub struct OrchestratorCfg {
     pub dir: Option<String>,

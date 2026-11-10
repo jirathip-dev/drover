@@ -1,5 +1,5 @@
 //! #419: the lesson role: `herdsman lesson digest` (a fleet's recent mistakes) and `herdsman lesson` (its issue and
-//! lane), run weekly by `tick` and on demand by an orchestrator.
+//! lane), run weekly by `tick` and on demand by a conductor.
 use crate::access::{civil_month_day, civil_year};
 use crate::config::Config;
 use crate::events::{emit, plain, read, Event};
@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use std::io::Write;
 
-/// `herdsman lesson digest`: the last `days` of rev FAIL findings, the owner's lines in the fleet's orchestrator threads,
+/// `herdsman lesson digest`: the last `days` of rev FAIL findings, the owner's lines in the fleet's conductor threads,
 /// `by: owner` events and reverts on integration, secret-looking values redacted.
 pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -> Result<String> {
     let f = cfg.fleet(fleet)?;

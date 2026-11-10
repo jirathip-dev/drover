@@ -97,7 +97,7 @@ pub fn settle(
         format!("secret {name} set ✓ (by owner)"),
     ];
     let line = &line[usize::from(value.is_some())];
-    let _ = orchestrator::say(ctx, cfg, r, (id, line, &[]), ("system", false)); // logged even if the orchestrator can't wake
+    let _ = orchestrator::say(ctx, cfg, r, (id, line, &[]), ("system", false));
     Ok(line.clone())
 }
 

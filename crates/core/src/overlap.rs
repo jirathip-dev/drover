@@ -299,7 +299,7 @@ fn script_caps(
         .ok_or_else(|| format!("printed `{}`", last.trim()))
 }
 
-/// #668: `herdsman cap <fleet>`: the queue-wide line-cap view, so one orchestrator-filed issue raises the cap for the
+/// #668: `herdsman cap <fleet>`: the queue-wide line-cap view, so one conductor-filed issue raises the cap for the
 /// whole queue: integration's total against the cap, every open PR's `src/ net` (its body's, else its measured diff),
 /// the queued issues with no PR, and the projected total with the ask a crossing lane files. #754: a fleet with its
 /// own cap script counts by it, at integration and on each open PR's merge, every cap it prints.

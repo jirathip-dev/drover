@@ -108,7 +108,7 @@ fn a_paired_report_is_kept_and_named_to_the_notifier() {
         std::fs::read_to_string(&heard).unwrap().contains(&path),
         "the notifier hears the path"
     );
-    // The orchestrator reads it back.
+    // The conductor reads it back.
     let id = b["id"].as_str().unwrap();
     let (code, out) = run(&c, &Fake::default(), &["report"]);
     assert!(code == 0 && out.contains(id) && out.contains(&path), "{out}");

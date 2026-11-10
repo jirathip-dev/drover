@@ -299,8 +299,8 @@ fn owner_topic(text: &str) -> bool {
 }
 
 /// `herdsman ask`: log a `needs-decision` for the asking lane (`HERDSMAN_LANE`, else none), notify, print its id.
-/// #541: a lane's ask (not an orchestrator's) goes to its repo's orchestrator thread first (`routed`, no push); with none,
-/// or the orchestrator not reached, to the owner.
+/// #541: a lane's ask (not a conductor's) goes to its repo's conductor thread first (`routed`, no push); with none,
+/// or the conductor not reached, to the owner.
 pub fn ask(
     ctx: &Ctx,
     cfg: &Config,
@@ -325,7 +325,7 @@ pub fn ask(
     }
     let events = read(&ctx.state)?;
     if let Some(t) = thread {
-        orchestrator::fleet_of(&events, t)?; // #355: its options become the thread's choice rows (#633: or a cooee card)
+        orchestrator::fleet_of(&events, t)?;
     }
     let id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
     // `<fleet>:<issue|->:<role>` names the newest spawn of that lane.
@@ -357,7 +357,7 @@ pub fn ask(
     }
     let ev = Event::new(ctx.now, fleet, issue, "needs-decision", d);
     emit(&ctx.state, cfg, ev.clone())?;
-    // #633: an attached cooee thread reads the ask from `/api/v1/events`; no herdsman orchestrator to type it into.
+    // #633: an attached cooee thread reads the ask from `/api/v1/events`; no herdsman conductor to type it into.
     if let Some(t) = routed.filter(|t| orchestrator::attached(&events, t).is_none()) {
         if let Err(e) = orchestrator::lane_ask(ctx, cfg, r, t, &ev) {
             orchestrator::to_owner(ctx, cfg, t, &ev, None, &format!("orchestrator not reached: {e:#}"))?;
@@ -376,7 +376,7 @@ fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
 /// An orchestrator's answer may not change one this long after it (the owner's [change] may).
 pub const CHANGE: u64 = 30 * 60;
 
-/// #541: `herdsman answer --basis`, run by thread `t`'s orchestrator: answered `by: orchestrator-<t>` only if the ask is a
+/// #541: `herdsman answer --basis`, run by thread `t`'s conductor: answered `by: conductor-<t>` only if the ask is a
 /// lane ask on its repo, names no owner topic, and `basis` quotes the issue's spec (3 words or more, verbatim) or
 /// names an answered decision; else `OWNER_ASK`, and a lane ask on its repo is put to the owner in the thread.
 pub fn orchestrator_answer(
@@ -534,7 +534,7 @@ pub fn answer(
     answer_with(ctx, cfg, r, out, (fleet, id), choice, (by, via), None)
 }
 
-/// `answer`; #541: an orchestrator's (`basis`) also posts its FYI line, and the owner may change one for `CHANGE`.
+/// `answer`; #541: a conductor's (`basis`) also posts its FYI line, and the owner may change one for `CHANGE`.
 #[allow(clippy::too_many_arguments)]
 fn answer_with(
     ctx: &Ctx,
@@ -554,7 +554,7 @@ fn answer_with(
     let last = events.iter().rev().find(|e| is(e, "decision"));
     let orchestrator = |b: &str| b.starts_with("orchestrator-");
     let change = |d: &&Event| d.str("by").is_some_and(orchestrator) && !orchestrator(by) && ctx.now < d.ts + CHANGE;
-    // #621: a handoff card answers every tap with its one delivery (`orchestrator::land`).
+    // #621: a handoff card answers every tap with its one delivery (`conductor::land`).
     let handoff = ask.data.get("handoff").is_some();
     if let Some(d) = last.filter(|d| !handoff && d.str("by") != Some("default") && !change(d)) {
         return gate::refused(
@@ -571,7 +571,7 @@ fn answer_with(
         let why = "an answer is an option number or one line of text, at most 2,000 chars";
         return gate::refused("BAD_VALUE", why);
     }
-    // #492: a handoff card's tap delivers the handoff there; nothing goes back into the thread's orchestrator.
+    // #492: a handoff card's tap delivers the handoff there; nothing goes back into the thread's conductor.
     if handoff {
         let (to, fresh) = orchestrator::land(ctx, cfg, r, ask, choice)?;
         let text = match last.and_then(|d| d.str("choice")) {
@@ -623,11 +623,11 @@ fn answer_with(
     {
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {t}")?);
     }
-    // #584: a typed answer's orchestrator ran it, the owner's line already in its conversation.
+    // #584: a typed answer's conductor ran it, the owner's line already in its conversation.
     if let Some(t) = ask.str("thread").filter(|_| by != TYPED) {
-        let agent = orchestrator::say(ctx, cfg, r, (t, &msg, &[]), (by, true))?; // #355: back into the thread's conversation
+        let agent = orchestrator::say(ctx, cfg, r, (t, &msg, &[]), (by, true))?;
         let q = ask.str("question").unwrap_or_default();
-        orchestrator::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?; // #413: into the thread it came from
+        orchestrator::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?;
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?);
     }
     if design {

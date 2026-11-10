@@ -1,4 +1,4 @@
-//! #538: orchestrator access: capability groups in `[orchestrator] allow` (their default, the brief's list, a config card
+//! #538: conductor access: capability groups in `[conductor] allow` (their default, the brief's list, a config card
 //! that switches one only on the owner's [apply]) and run cards (approve runs the exact command once and posts its
 //! output, deny runs nothing, a changed or expired card is refused, a hard no is refused at posting).
 mod common;
@@ -35,7 +35,7 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// `herdsman hook` as thread t1's orchestrator under `c`'s fleet.toml: its stdout ("" allows).
+/// `herdsman hook` as thread t1's conductor under `c`'s fleet.toml: its stdout ("" allows).
 fn orchestrator_hook(c: &herdsman::Ctx, cmd: &str) -> String {
     let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
     let mut child = Command::new(env!("CARGO_BIN_EXE_herdsman"))
@@ -130,7 +130,7 @@ fn a_config_card_switches_a_group_on_only_at_the_owners_apply() {
         &["config", "propose", "t1", file.to_str().unwrap()],
     );
     assert_eq!((code, out.as_str()), (0, "c1\n"));
-    // Proposed, not applied: still off, and the orchestrator can't apply it itself.
+    // Proposed, not applied: still off, and the conductor can't apply it itself.
     assert!(orchestrator_hook(&c, "herdsman pause sendmeter").contains("REFUSED GROUP_OFF"));
     assert!(orchestrator_hook(&c, "herdsman config apply c1").contains("REFUSED OWNER_ONLY"));
     let (code, out) = run(&c, &Fake::default(), &["config", "apply", "c1"]);
@@ -140,7 +140,7 @@ fn a_config_card_switches_a_group_on_only_at_the_owners_apply() {
         orchestrator_hook(&c, "herdsman hosts off mini").contains("REFUSED GROUP_OFF"),
         "hosts is off now"
     );
-    // A group verb the orchestrator runs shows in its thread with the group.
+    // A group verb the conductor runs shows in its thread with the group.
     assert_eq!(orchestrator_hook(&c, "herdsman clean sendmeter --yes"), "");
     let row = kinds(&c, "thread-cmd").pop().unwrap();
     assert_eq!(

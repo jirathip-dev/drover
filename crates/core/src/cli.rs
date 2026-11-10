@@ -161,7 +161,7 @@ enum Cmd {
         /// routine (defaults to --recommend after [limits].ask_default_minutes) | owner (always waits)
         #[arg(long, default_value = "owner", value_parser = ["routine", "owner"])]
         kind: String,
-        /// Ask in this orchestrator thread: its options become choice rows, the answer goes back into it
+        #[arg(help = "Ask in this orchestrator thread: its options become choice rows, the answer goes back into it")]
         #[arg(long, value_name = "ID")]
         thread: Option<String>,
     },
@@ -174,14 +174,18 @@ enum Cmd {
         /// Who answered, as the board shows it (e.g. owner, alice)
         #[arg(long, default_value = "owner")]
         by: String,
-        /// An orchestrator's answer to a lane ask: a verbatim quote of the issue's spec, or an answered decision id
+        #[arg(
+            help = "An orchestrator's answer to a lane ask: a verbatim quote of the issue's spec, or an answered decision id"
+        )]
         #[arg(long, value_name = "QUOTE|ID")]
         basis: Option<String>,
         /// The owner's exact line in the ask's thread, after the ask: logged by: owner (typed)
         #[arg(long, value_name = "LINE")]
         typed: Option<String>,
     },
-    /// Orchestrators and the owner: write an owner-decided amendment into the issue body's `## Amendments`; re-runs the PR's failed spec checks
+    #[command(
+        about = "Orchestrators and the owner: write an owner-decided amendment into the issue body's `## Amendments`; re-runs the PR's failed spec checks"
+    )]
     Amend {
         fleet: String,
         issue: u64,
@@ -192,12 +196,14 @@ enum Cmd {
     },
     /// The board's bug reports (#363), newest first: id, note, bundle path; with an id, that bundle
     Report { id: Option<String> },
-    /// Orchestrator chat threads per repo (or `all`), each talked through by one orchestrator lane (docs/orchestrator.md)
+    #[command(
+        about = "Orchestrator chat threads per repo (or `all`), each talked through by one orchestrator lane (docs/orchestrator.md)"
+    )]
     Thread {
         #[command(subcommand)]
         cmd: ThreadCmd,
     },
-    /// #387: fleet.toml changes as thread cards only the owner applies (docs/orchestrator.md)
+    #[command(about = "#387: fleet.toml changes as thread cards only the owner applies (docs/orchestrator.md)")]
     Config {
         #[command(subcommand)]
         cmd: ConfigCmd,
@@ -212,7 +218,9 @@ enum Cmd {
         #[command(subcommand)]
         cmd: SecretCmd,
     },
-    /// #538: run cards: an owner-level command an orchestrator posts in its thread; herdsman runs it once on the owner's [approve]
+    #[command(
+        about = "#538: run cards: an owner-level command an orchestrator posts in its thread; herdsman runs it once on the owner's [approve]"
+    )]
     Card {
         #[command(subcommand)]
         cmd: CardCmd,
@@ -271,7 +279,9 @@ enum Cmd {
     Next { fleet: String },
     /// Compact board (≤ 60 cols): queue order, state, lane, age, last event
     Board { fleet: Option<String> },
-    /// File this week's lessons issue, queue it on top and spawn its `lesson` lane (orchestrators and the owner only)
+    #[command(
+        about = "File this week's lessons issue, queue it on top and spawn its `lesson` lane (orchestrators and the owner only)"
+    )]
     #[command(args_conflicts_with_subcommands = true)]
     Lesson {
         #[command(subcommand)]
@@ -441,8 +451,9 @@ enum Cmd {
         #[arg(long, help = "Remove without asking")]
         apply: bool,
     },
-    /// #537: the `[ci_runners]` VMs and their GitHub runners (an orchestrator's `runners` group, its brief names the verbs);
-    /// each verb logged `runners-*`
+    #[command(
+        about = "#537: the `[ci_runners]` VMs and their GitHub runners (an orchestrator's `runners` group, its brief names the verbs); each verb logged `runners-*`"
+    )]
     #[command(hide = true)]
     Runners {
         #[command(subcommand)]
@@ -525,11 +536,11 @@ struct Scope {
 
 #[derive(Subcommand)]
 enum AskCmd {
-    /// Close an ask its own thread's orchestrator replaced; logged `ask-withdrawn`
+    #[command(about = "Close an ask its own thread's orchestrator replaced; logged `ask-withdrawn`")]
     Withdraw {
         fleet: String,
         id: String,
-        /// The orchestrator withdrawing it: orchestrator-<thread>
+        #[arg(help = "The orchestrator withdrawing it: orchestrator-<thread>")]
         #[arg(long)]
         by: String,
         /// The ask that replaces it
@@ -540,25 +551,33 @@ enum AskCmd {
 
 #[derive(Subcommand)]
 enum ThreadCmd {
-    /// Start a thread for a fleet's repo (or `all`); prints its id. An orchestrator uses `thread handoff`
+    #[command(
+        about = "Start a thread for a fleet's repo (or `all`); prints its id. An orchestrator uses `thread handoff`"
+    )]
     New {
         repo: String,
         title: String,
-        /// Its orchestrator's harness for good: claude | hermes | dsh (default `[chat]`'s, else the orchestrator role's)
+        #[arg(
+            help = "Its orchestrator's harness for good: claude | hermes | dsh (default `[chat]`'s, else the orchestrator role's)"
+        )]
         #[arg(long)]
         harness: Option<String>,
-        /// #780: the `[orchestrator.<id>]` it talks to (default: the first whose fleets cover the repo)
+        #[arg(help = "The `[orchestrator.<id>]` it talks to (default: the first whose fleets cover the repo)")]
         #[arg(long)]
         orchestrator: Option<String>,
     },
-    /// An orchestrator hands off to thread <to> at once, or to a repo (or `all`): the owner taps one of its threads or a new one; linked both ways, <text> wakes its orchestrator as from <from>
+    #[command(
+        about = "An orchestrator hands off to thread <to> at once, or to a repo (or `all`): the owner taps one of its threads or a new one; linked both ways, <text> wakes its orchestrator as from <from>"
+    )]
     Handoff {
         from: String,
         to: String,
         title: String,
         text: String,
     },
-    /// The owner's message: logged, then typed into the thread's orchestrator (started or resumed first)
+    #[command(
+        about = "The owner's message: logged, then typed into the thread's orchestrator (started or resumed first)"
+    )]
     Say {
         id: String,
         text: String,
@@ -569,13 +588,13 @@ enum ThreadCmd {
         #[arg(long)]
         file: Vec<PathBuf>,
     },
-    /// Retitle a thread: the orchestrator's short summary, once after its first reply
+    #[command(about = "Retitle a thread: the orchestrator's short summary, once after its first reply")]
     Title { id: String, title: String },
-    /// Fold a thread into its repo's archived list; its orchestrator stops, nothing is deleted
+    #[command(about = "Fold a thread into its repo's archived list; its orchestrator stops, nothing is deleted")]
     Archive { id: String },
     /// Bring an archived thread back; its next message resumes the same session
     Restore { id: String },
-    /// The orchestrator's reply to the owner
+    #[command(about = "The orchestrator's reply to the owner")]
     Reply {
         id: String,
         text: String,
@@ -590,7 +609,7 @@ enum ThreadCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Per repo, its threads: title, last message, unread dot, orchestrator awake/asleep
+    #[command(about = "Per repo, its threads: title, last message, unread dot, orchestrator awake/asleep")]
     Ls(Scope),
 }
 
@@ -1455,7 +1474,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     basis,
                     ..
                 } => match std::env::var("HERDSMAN_THREAD").ok().filter(|t| !t.is_empty()) {
-                    // #541: an orchestrator answers lane asks on its repo only with a basis.
+                    // #541: a conductor answers lane asks on its repo only with a basis.
                     Some(t) => {
                         let how = (t.as_str(), basis.as_deref().unwrap_or_default());
                         crate::orchestrator_answer(ctx, &cfg, r, out, (&fleet, &id), &choice, how)?;
@@ -1478,7 +1497,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => crate::amend::amend(ctx, &cfg, r, out, (&fleet, issue), &basis, &text)?,
                 Cmd::Check => check::check(ctx, &cfg, r, out)?,
                 Cmd::Thread { cmd } => match cmd {
-                    // #413: every thread an orchestrator starts is logged with its source.
+                    // #413: every thread a conductor starts is logged with its source.
                     ThreadCmd::New { .. } if std::env::var("HERDSMAN_THREAD").is_ok_and(|t| !t.is_empty()) => {
                         gate::refused("USE_HANDOFF", "an orchestrator starts threads with `thread handoff`")?;
                     }
@@ -1955,7 +1974,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         }
                         QueueCmd::Ls { .. } => unreachable!(),
                     };
-                    // #412: an orchestrator's design (#730: or architect) mark: the approval asks in its thread too.
+                    // #412: a conductor's design (#730: or architect) mark: the approval asks in its thread too.
                     let mut d = d;
                     if let Some(t) = std::env::var("HERDSMAN_THREAD")
                         .ok()
@@ -2031,7 +2050,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         writeln!(out, "{v}")?;
         return Ok(());
     }
-    // #413: an issue a handed-off thread's orchestrator filed goes back to the thread it came from.
+    // #413: an issue a handed-off thread's conductor filed goes back to the thread it came from.
     let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();
     if let Some(text) = hook::issue_filed(&input).filter(|_| !thread.is_empty()) {
         if let Err(e) = Config::load(&ctx.config).and_then(|cfg| crate::orchestrator::flow(ctx, &cfg, &thread, &text)) {
@@ -2053,7 +2072,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         Ok(r) => r,
         Err(cause) => return fail_closed(ctx, out, &input, &cause),
     };
-    // #668: an impl lane never edits the cap file, but for the orchestrator-filed raise (its issue titled `cap: …`).
+    // #668: an impl lane never edits the cap file, but for the conductor-filed raise (its issue titled `cap: …`).
     let mut it = lane.split(':');
     let (fleet, n) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
     let cap = rules.builds
@@ -2069,7 +2088,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         h.join(".hermes/profiles").to_string_lossy().into(),
     ];
     paths.extend(std::env::var("HERDSMAN_RULES").ok()); // #592: a lane never edits its own rules
-                                                        // #410: an orchestrator (`HERDSMAN_LANE`'s role) spawns design lanes and writes its own thread folder.
+                                                        // #410: a conductor (`HERDSMAN_LANE`'s role) spawns design lanes and writes its own thread folder.
     let orchestrator =
         std::env::var("HERDSMAN_LANE").is_ok_and(|l| l.split(':').nth(2).is_some_and(crate::orchestrator::is_role));
     let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();
@@ -2107,7 +2126,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     if let Some(dir) = hook::push_dir(&input) {
         coauthor_warn(ctx, r, &dir, "HEAD");
     }
-    // #386: an orchestrator's `herdsman`/`gh` command shows in its thread as a closed tool row.
+    // #386: a conductor's `herdsman`/`gh` command shows in its thread as a closed tool row.
     // #538: a group verb's row names its group.
     if let Some(cmd) = hook::fleet_cmd(&input).filter(|_| !thread.is_empty()) {
         let mut d = json!({"thread": thread, "cmd": cmd});

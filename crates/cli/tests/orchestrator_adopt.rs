@@ -1,4 +1,4 @@
-//! #477: an orchestrator start that times out (or finds its name taken) but whose agent is up is adopted, not failed;
+//! #477: a conductor start that times out (or finds its name taken) but whose agent is up is adopted, not failed;
 //! deliveries to one thread wait for its start; a failure row shows herdr's message, not its JSON.
 mod common;
 use common::*;
@@ -29,12 +29,12 @@ fn setup(name: &str) -> herdsman::Ctx {
     c
 }
 
-/// The thread's orchestrator folder, as herdr reports an agent's cwd.
+/// The thread's conductor folder, as herdr reports an agent's cwd.
 fn folder(c: &herdsman::Ctx) -> String {
     c.state.with_file_name("orchestrator").join("t1").display().to_string()
 }
 
-/// herdr with `list` as its agents, ready to start an orchestrator in workspace w9 or type into one.
+/// herdr with `list` as its agents, ready to start a conductor in workspace w9 or type into one.
 fn herdr(list: &str) -> Fake {
     Fake::default()
         .reply("herdr agent list", list)
@@ -184,7 +184,7 @@ fn two_messages_while_a_start_is_in_flight_start_one_orchestrator_and_reach_it_i
         began_rx.recv_timeout(Duration::from_secs(10)).unwrap();
         while listed_rx.try_recv().is_ok() {}
         let b = s.spawn(|| run(&c, &r, &["thread", "say", "t1", "two"]));
-        // Unserialized, the second delivery reads herdr's agents at once (none yet) and starts a second orchestrator.
+        // Unserialized, the second delivery reads herdr's agents at once (none yet) and starts a second conductor.
         let raced = listed_rx.recv_timeout(Duration::from_millis(500)).is_ok();
         go.send(()).unwrap();
         go.send(()).unwrap();
@@ -199,7 +199,7 @@ fn two_messages_while_a_start_is_in_flight_start_one_orchestrator_and_reach_it_i
     assert!(typed > r.f.index("herdr agent start"), "{:?}", r.f.calls.borrow());
 }
 
-/// #623: herdr on a loaded host: `agent start` times out once, and the orchestrator shows in the list only after the
+/// #623: herdr on a loaded host: `agent start` times out once, and the conductor shows in the list only after the
 /// starting thread has slept `after` s (a fake clock). Another thread's `sleep` (a message behind the start) holds
 /// until the test says the first delivery is done.
 struct Late {
@@ -295,7 +295,7 @@ const LOST: &str = r#"{"error":{"code":"agent_name_not_found","message":"named a
 #[test]
 fn a_stale_name_is_cleared_and_the_start_succeeds_on_its_second_try() {
     let c = setup("stale-name");
-    // Its earlier orchestrator ran in w9 and is gone now; herdr still holds the name.
+    // Its earlier conductor ran in w9 and is gone now; herdr still holds the name.
     say(&c, &herdr(NO_AGENTS), "hello");
     let r = herdr(NO_AGENTS).once_err("herdr agent start", 1, LOST);
     let log = say(&c, &r, "again");
@@ -315,7 +315,7 @@ fn a_stale_name_is_cleared_and_the_start_succeeds_on_its_second_try() {
     assert!(s[1].data.get("adopted").is_none(), "{:?}", s[1].data);
 }
 
-// --- #736: an orchestrator start blocked by a first-start prompt answers it as spawn does ---
+// --- #736: a conductor start blocked by a first-start prompt answers it as spawn does ---
 
 const NOT_READY: &str = r#"{"error":{"code":"agent_not_ready","message":"agent orchestrator-t1 is blocked during startup and is not ready for prompts"}}"#;
 /// #484: a real failed start's screen: the unnumbered trust menu under the shell's own `❯` prompts.

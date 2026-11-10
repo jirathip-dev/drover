@@ -1,4 +1,4 @@
-//! #633: a cooee thread attached as a repo's orchestrator (`POST /api/v1/orchestrator-attach`): its `guarded`, its asks in
+//! #633: a cooee thread attached as a repo's conductor (`POST /api/v1/conductor-attach`): its `guarded`, its asks in
 //! `/api/v1/events`, lane asks routed to it, and the link ended by detach or archive. Its own test binary:
 //! `HERDSMAN_LANE` is process-wide.
 mod common;
@@ -37,7 +37,7 @@ fn ask(c: &herdsman::Ctx, r: &Fake, thread: Option<&str>) -> (i32, String) {
 
 #[test]
 fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
-    // The impl role (the orchestrator's fallback, profile `lane-orchestrator`) on Claude with an account: the guard's other
+    // The impl role (the conductor's fallback, profile `lane-conductor`) on Claude with an account: the guard's other
     // checks hold, so `guarded` turns on the synced hook alone.
     let cfg = CONFIG.replace(
         "harness  =  \"hermes\"    # toggled in tests",
@@ -133,7 +133,7 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     assert_eq!(e["data"]["thread"], COOEE);
     assert_eq!(e["data"]["options"], json!(["small", "full"]));
     assert_eq!(e["data"]["recommend"], 2);
-    // The card's answer comes back through /api/v1/answer: decided, no herdsman orchestrator started for it.
+    // The card's answer comes back through /api/v1/answer: decided, no herdsman conductor started for it.
     let m = call(&s, &ck, ("GET", "/api/v1/state"), "")["mtime"].clone();
     let calls = r.calls.borrow().len();
     let ans = post(

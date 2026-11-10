@@ -112,7 +112,7 @@ fn setup(name: &str) -> herdsman::Ctx {
     c
 }
 
-/// herdr with the thread's conductor `orchestrator-t1` live (idle) in pane w9:p1.
+/// herdr with the thread's conductor `conductor-t1` live (idle) in pane w9:p1.
 fn live() -> Fake {
     Fake::default()
         .reply(
@@ -655,7 +655,6 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
         &agents(&[("orchestrator-t1", "working", "/x", "w9:p1")]),
     );
     let (chat, _) = frags(&Server::new(&c, &busy, Some(ADDR.into())), &cookie, T + 30);
-    // #780 (q1173): the frozen board matches the old `conductor-*` types, so it no longer sees the turn and draws no pill.
     assert!(!chat.contains("<p class=\"tlv wk\""), "{chat}");
 }
 
@@ -1233,7 +1232,7 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
     assert_eq!(m[17], 0.0, "page errors: {out}");
 }
 
-/// #407: herdr whose `orchestrator-t1` (pane w9:p1) is working while `.1` is set, else idle; every call recorded.
+/// #407: herdr whose `conductor-t1` (pane w9:p1) is working while `.1` is set, else idle; every call recorded.
 struct Flip(Fake, std::sync::atomic::AtomicBool);
 impl herdsman::runner::Runner for Flip {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
@@ -1438,8 +1437,6 @@ fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
         w.contains(&fold(seq("1"), "2 commands", &(row("1") + &row("2")))),
         "{w}"
     );
-    // #780 (q1173): the frozen board matches the old `conductor-*` types, so it no longer sees the live turn: its
-    // commands fold too and there is no pill.
     assert!(
         w.contains(&fold(seq("3"), "1 command", &row("3"))) && !w.contains(&format!("data-since={since}")),
         "{w}"

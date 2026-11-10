@@ -566,7 +566,7 @@ fn push_titles_use_each_devices_theme_words() {
     );
 }
 
-/// #386: an orchestrator's reply pushes `<repo> · <thread title>: <first line>`, a thread ask `… asks: <question>`, both
+/// #386: a conductor's reply pushes `<repo> · <thread title>: <first line>`, a thread ask `… asks: <question>`, both
 /// opening the thread; the owner's own message and a system line never push.
 #[test]
 fn a_orchestrator_reply_and_a_thread_choice_push_with_the_thread_named() {

@@ -1,5 +1,5 @@
 //! #620: `/api/v1/chat` on 30 threads × 200 messages in a 60,000-event log walks the log a bounded number of times
-//! per thread, never once per message row (`orchestrator::SCANS`), and a second request with no new event reuses the
+//! per thread, never once per message row (`conductor::SCANS`), and a second request with no new event reuses the
 //! fold without reading the log.
 mod common;
 use common::*;

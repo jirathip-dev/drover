@@ -1,6 +1,6 @@
 //! #268: the Queue tab is the TypeScript board's (web/src/queue.ts, run under node), drawn from API v1's `queue`: the
 //! page carries none of it, and every form the board draws posts through API v1 with exactly its fields: [▼], [Drive
-//! now], [Pause], [Resume], a defaulted decision's [change], the backlog's [queue N], a role's [Set] and an Orchestrator
+//! now], [Pause], [Resume], a defaulted decision's [change], the backlog's [queue N], a role's [Set] and a Conductor
 //! choice from the [config] sheet.
 mod common;
 use common::*;
@@ -188,13 +188,10 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     ok(&form(&paused, "resume", None).0);
     assert!(!tab().contains("<details class=\"fc off "));
 
-    // The [config] sheet: a role's [Set] (sonnet for impl), the Orchestrator choice no longer drawn.
     let sheet = queue_js(&s, ADDR, T, "sheet(d, 'sendmeter')");
     let (mut set, _) = form(&sheet, "set", Some(("role", "impl")));
     set.extend([("harness", "hermes"), ("model", "sonnet"), ("effort", "")].map(|(k, v)| (k.into(), v.into())));
     assert!(ok(&set).contains("model sonnet"));
-    // #780 (q1173): the frozen sheet looks for `role.conductor`, so it draws no Orchestrator choice now
-    // (orchestrator_default.rs saves one through `op=cond`).
     let sheet = queue_js(&s, ADDR, T, "sheet(d, 'sendmeter')");
     assert!(
         forms(&sheet)
@@ -210,7 +207,7 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     assert_eq!(post(&s, &cookie, &stale)["code"], "STALE");
 }
 
-/// #517: an orchestrator's thread ask on an issue: its question and options on that issue's queue card (and the needs
+/// #517: a conductor's thread ask on an issue: its question and options on that issue's queue card (and the needs
 /// card), `asked in <title> · <id>`; answered there, the thread's copy shows it answered, no longer open.
 #[test]
 fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
@@ -223,7 +220,7 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
     let ask = json!({"id": "q398", "question": "ship the bell now?", "options": ["now", "after #10"],
         "recommend": 1, "kind": "owner", "thread": "t6"});
     ev(Some(2), "needs-decision", ask);
-    // herdr ready to start the thread's orchestrator: the answer goes to it, as a tap in the thread would.
+    // herdr ready to start the thread's conductor: the answer goes to it, as a tap in the thread would.
     let r = Fake::default()
         .reply("herdr agent list", NO_AGENTS)
         .reply(

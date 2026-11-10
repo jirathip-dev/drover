@@ -1,4 +1,4 @@
-//! #387: orchestrator chat step 3: `config propose` cards only the owner applies, the orchestrator's account switch with
+//! #387: conductor chat step 3: `config propose` cards only the owner applies, the conductor's account switch with
 //! its session, and secrets that never leave the keychain.
 mod common;
 use common::*;
@@ -31,7 +31,7 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// A sendmeter orchestrator (`role_extra` added to its role, `extra` to fleet.toml) and thread t1.
+/// A sendmeter conductor (`role_extra` added to its role, `extra` to fleet.toml) and thread t1.
 fn setup(name: &str, role_extra: &str, extra: &str) -> herdsman::Ctx {
     let d = tmpdir(name);
     let cfg = format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{role_extra}\n{extra}");
@@ -46,7 +46,7 @@ fn setup(name: &str, role_extra: &str, extra: &str) -> herdsman::Ctx {
     c
 }
 
-/// herdr with `agents` live, ready to start an orchestrator or type into one.
+/// herdr with `agents` live, ready to start a conductor or type into one.
 fn herdr(agents: &str) -> Fake {
     Fake::default()
         .reply("herdr agent list", agents)
@@ -223,7 +223,7 @@ fn a_signed_out_orchestrator_gets_a_sign_in_card_for_its_own_login() {
         let s = Server::new(c, &r, Some(ADDR.into()));
         chat(&s, &pair(&s, c, "Mozilla/5.0 (iPhone)", T), T + 120)
     };
-    // The default orchestrator (no account, no fallback): nothing to switch to, still a [sign in] for `claude`.
+    // The default conductor (no account, no fallback): nothing to switch to, still a [sign in] for `claude`.
     let c = setup("cards-signin-plain", "", "");
     assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
     let later = herdsman::Ctx {
@@ -324,7 +324,7 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
         assert!(!text.contains(value), "the secret is in {what}: {text}");
     }
     assert!(show.contains("secret API_KEY set ✓ (by owner)") && !page.contains("class=chs"));
-    // `secret:API_KEY` reaches the lane's own shell from the file spawn delivered: the orchestrator's start sourced it.
+    // `secret:API_KEY` reaches the lane's own shell from the file spawn delivered: the conductor's start sourced it.
     assert_eq!(*r.2.borrow(), [value], "{calls}");
     assert!(calls.contains("&& . '") && !f.inputs.borrow().iter().any(|i| i.1.contains(value)));
     assert!(
@@ -441,7 +441,7 @@ fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() 
     );
 }
 
-/// #702: thread t1 with an orchestrator reply, run card r1 (`uptime`), then another reply; its sha, the herdr fake (the
+/// #702: thread t1 with a conductor reply, run card r1 (`uptime`), then another reply; its sha, the herdr fake (the
 /// run prints `load 0.42`), and a paired owner device's cookie.
 fn card_between_replies(c: &herdsman::Ctx) -> (String, Fake, String) {
     let at = |n: u64| herdsman::Ctx {
@@ -479,7 +479,7 @@ fn pos(page: &str, w: &str) -> usize {
     page.find(w).unwrap_or_else(|| panic!("{w} not in {page}"))
 }
 
-/// #702: a run card the orchestrator posts between two of its replies renders in the chat tab (API v1 `chat` and its
+/// #702: a run card the conductor posts between two of its replies renders in the chat tab (API v1 `chat` and its
 /// HTML) in order, with its command, why, blast and open [approve]/[deny].
 #[test]
 fn a_run_card_between_two_replies_renders_in_order_in_the_chat_tab() {

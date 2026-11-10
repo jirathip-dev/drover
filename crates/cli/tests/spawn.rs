@@ -169,7 +169,7 @@ fn cap_asks_only_when_your_own_pr_crosses() {
             "ask only when your own PR, merged onto current integration, would put the total over `line_cap`; trim first, then ask `--kind owner`.",
             "Being near the cap, or another PR's growth, is never a reason to ask.",
             "A `STAGING_WOULD_BREAK` from the cap after another merge is a fix round: trim, or ask under the same rule.",
-            // #668: one orchestrator-filed raise for the queue, never a lane's own edit.
+            // #668: one conductor-filed raise for the queue, never a lane's own edit.
             "Never edit `ci/cap.toml` (the hook refuses it",
             "`herdsman cap <fleet>`'s queue-wide view",
             "in one orchestrator-filed issue (recommended), or trim.",
