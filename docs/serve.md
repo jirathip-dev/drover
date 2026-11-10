@@ -435,6 +435,24 @@ empty: no chip). The old board's Queue and Lanes rows show it as a chip; `status
 The rule: a screen that needs data herdsman doesn't send gets the `/api/v1` field here first, with its fixture in
 `crates/cli/tests/api_v1_contract.rs`, then the consumer reads it. Consumers never derive engine state themselves.
 
+## cooee's native screens (#814)
+
+herdsman is cooee's `drover` plugin: `cooee-plugin.toml` at the repo root names its places (the Conductor's Queue and
+Events chips, its chat cards, the drover menu row) and `[permissions]`. cooee runs `herdsman serve --addr
+127.0.0.1:$PORT` and calls it with `Authorization: Bearer $COOEE_PLUGIN_TOKEN`; the board's own Host check and a paired
+device work too. Beside `/api/v1`, never in the board's pages, it answers JSON made of cooee's blocks
+(cooee#125's screens-as-data design):
+
+- `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `?before=<unix time>`),
+  `/screens/fleets` (the Fleets sheet) and `/screens/cards` (the open asks, design reviews, needs-human issues and run
+  cards as chat cards);
+- `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,
+  `replace`, `remove` and `insert` ops by block id, and the Queue chip's `badge` count;
+- `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;
+  each other runs the board's own op (a refusal is 409 with its line).
+
+Tests: `crates/cli/tests/cooee_screens.rs` against cooee's fixtures in `crates/cli/tests/golden/cooee/`.
+
 ## Host tab (#141)
 
 Five groups in a fixed order (#234): HOSTS (a card per host, main first, then A→Z: load/cpu, swap-out, memory, disk,

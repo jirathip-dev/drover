@@ -1,0 +1,31 @@
+[
+  { "type": "card", "id": "run-c41", "kind": "run", "title": "Delete #48's wip snapshots: merged, they carry build output", "meta": "4m",
+    "blocks": [
+      { "type": "run", "id": "c41", "action": "run-card", "command": "git push origin --delete wip/cooee-impl-48-20261108-2115 wip/cooee-impl-48-20261109-0116",
+        "sha": "3b7e0c55a1d9", "dir": "~/Projects/cooee", "touches": "origin: 2 wip/ branches", "until": "2026-11-09T09:52:00Z" } ] },
+  { "type": "card", "id": "design-125", "kind": "ask", "tone": "warn", "title": "cooee #125 · design", "meta": "3m",
+    "blocks": [
+      { "type": "text", "markdown": "**Approve plugin screens as data? (revise 1)**" },
+      { "type": "images", "id": "pngs", "items": [
+        { "src": "/files/125/conductor-390-light.png", "alt": "the Conductor chat" },
+        { "src": "/files/125/queue-390-dark.png", "alt": "the Queue sheet" },
+        { "src": "/files/125/events-390-light.png", "alt": "the Events sheet" },
+        { "src": "/files/125/home-390-light.png", "alt": "home, the avatar menu" } ] },
+      { "type": "choice", "id": "q960", "action": "answer", "recommended": "approve",
+        "options": [ { "value": "approve", "label": "approve" }, { "value": "revise", "label": "revise" }, { "value": "reject", "label": "reject" } ],
+        "other": { "placeholder": "a revise note…", "for": "revise" } } ] },
+  { "type": "card", "id": "ask-q947", "kind": "ask", "tone": "warn", "title": "herdsman #722 · impl", "meta": "routine · 18m",
+    "blocks": [
+      { "type": "text", "markdown": "**The fix round's branch is still checked out in its herdr-era worktree. Move it out?**" },
+      { "type": "choice", "id": "q947", "action": "answer", "recommended": "move",
+        "options": [ { "value": "move", "label": "move it out, wip/ first" }, { "value": "refuse", "label": "refuse LANE_LIVE" } ],
+        "other": { "placeholder": "other…" },
+        "default": { "value": "move", "until": "2026-11-09T09:53:00Z", "label": "takes the recommendation in {rel}" } } ] },
+  { "type": "card", "id": "nh-2708", "kind": "ask", "tone": "bad", "title": "synergy #2708 · review 3", "meta": "needs-human · 12m",
+    "blocks": [
+      { "type": "text", "markdown": "**Round limit: review 3 FAIL · 1 finding**" },
+      { "type": "choice", "id": "nh2708", "action": "needs-human",
+        "options": [ { "value": "extend", "label": "one more round" },
+          { "value": "merge", "label": "merge anyway", "confirm": { "title": "Merge #2708 past its FAIL?", "message": "Logged by: owner. CI and serial still gate it.", "ok": "Merge", "destructive": true } },
+          { "value": "park", "label": "park" } ] } ] }
+]
