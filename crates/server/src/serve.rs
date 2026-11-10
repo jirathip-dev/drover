@@ -1019,7 +1019,7 @@ impl<'a> Server<'a> {
                 let (t, name) = p[8..].split_once('/').unwrap_or_default();
                 let name = form(&format!("n={name}")).remove("n").unwrap_or_default();
                 let at = shared(&ctx.state).ok().and_then(|ev| chat::file(ctx, &ev, t, &name, false));
-                match at.and_then(|p| std::fs::read(p).ok()) {
+                match at.and_then(crate::runner::read_file) {
                     Some(b) => ("200 OK", ctype(&name), b),
                     None => ("404 Not Found", "text/plain", text("no such file in the thread\n")),
                 }
@@ -1032,7 +1032,7 @@ impl<'a> Server<'a> {
                 let ask = |e: &&Event| crate::design::is_ask(e) && e.fleet == f && e.issue.map(|n| n.to_string()).as_deref() == Some(n);
                 let ev = shared(&ctx.state).unwrap_or_default();
                 let at = ev.iter().rfind(ask).and_then(|a| chat::files_of(a).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
-                match at.and_then(|p| std::fs::read(p).ok()) {
+                match at.and_then(crate::runner::read_file) {
                     Some(b) => ("200 OK", PNG, b),
                     None => ("404 Not Found", "text/plain", text("no such design file\n")),
                 }
@@ -1045,7 +1045,7 @@ impl<'a> Server<'a> {
                 let ev = shared(&ctx.state).unwrap_or_default();
                 let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n))).unwrap_or_default();
                 let at = i.parse().ok().and_then(|i: usize| shots.into_iter().nth(i));
-                match at.and_then(|(_, p)| std::fs::read(p).ok()) {
+                match at.and_then(|(_, p)| crate::runner::read_file(p)) {
                     Some(b) => ("200 OK", PNG, b),
                     None => ("404 Not Found", "text/plain", text("no such screenshot\n")),
                 }
@@ -3145,7 +3145,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
                 f["name"].as_str().unwrap_or_default(),
             );
             let to = dir.join("thread").join(t);
-            let b = chat::file(ctx, &events, t, name, demo).and_then(|p| std::fs::read(p).ok());
+            let b = chat::file(ctx, &events, t, name, demo).and_then(crate::runner::read_file);
             if let Some(b) = b.filter(|_| !name.contains('/')) {
                 std::fs::create_dir_all(&to)?;
                 std::fs::write(to.join(name), b)?;

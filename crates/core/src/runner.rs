@@ -132,7 +132,7 @@ impl Real {
         use std::process::Stdio;
         // #776: a `-C <dir>` on a disk that stopped answering fails at once; its child would never exit.
         if let Some(dir) = args.iter().position(|a| a == "-C").and_then(|i| args.get(i + 1)) {
-            if hung(dir, PROBE, |d| drop(std::fs::read_dir(d).map(|mut e| e.next()))) {
+            if hung(dir, PROBE, list) {
                 let stderr = format!("{prog} {}: {dir} is on a disk that is not answering", args.join(" "));
                 return Ok(Out {
                     code: 124,
@@ -170,6 +170,11 @@ impl Real {
         // Its readers may outlive it too while a grandchild (ssh) holds the pipes.
         let _ = c.kill();
         std::thread::spawn(move || c.wait());
+        // #776: a `-C <dir>` call that ran out of time marks its whole disk: a folder macOS still lists from memory
+        // passes the probe while its files hang.
+        if let Some(dir) = args.iter().position(|a| a == "-C").and_then(|i| args.get(i + 1)) {
+            sicken(dir);
+        }
         let stderr = format!("{prog} {}: no answer in {:?}", args.join(" "), limit);
         Ok(Out {
             code: 124,
@@ -214,38 +219,107 @@ pub fn limit(prog: &str, args: &[String]) -> Duration {
 /// #776: how long a folder's listing may take before its disk counts as not answering.
 pub const PROBE: Duration = Duration::from_secs(2);
 
-/// #776: whether `dir`'s disk has stopped answering: `probe(dir)` (a listing) runs on its own thread and must finish
-/// within `wait`. A probe still running is never repeated: the folder stays hung, with no new thread, until it ends.
-/// A folder that answered is trusted for a minute.
-pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) + Send + 'static) -> bool {
-    use std::collections::HashMap;
-    use std::sync::atomic::{AtomicBool, Ordering::Relaxed};
-    use std::sync::{Arc, Mutex, OnceLock};
-    /// Per folder: its last probe's done flag and when it started.
-    type Probes = HashMap<String, (Arc<AtomicBool>, Instant)>;
-    static SEEN: OnceLock<Mutex<Probes>> = OnceLock::new();
-    let seen = SEEN.get_or_init(Mutex::default);
-    let done = {
-        let mut m = seen.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        match m.get(dir) {
-            Some((d, _)) if !d.load(Relaxed) => return true,
-            Some((_, at)) if at.elapsed() < Duration::from_secs(60) => return false,
-            _ => {}
+/// #776: how long a disk that let a call run out of time stays hung: every path on it fails at once until then.
+pub const SICK: Duration = Duration::from_secs(300);
+
+/// #776: the probe `Real` uses: `dir`'s disk (its `st_dev`) and the first entry of its listing.
+fn list(dir: &str) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    let dev = std::fs::metadata(dir).ok()?.dev();
+    drop(std::fs::read_dir(dir).map(|mut e| e.next()));
+    Some(dev)
+}
+
+/// A folder's last probe: whether it ended, the disk it named (0: none) and when it started.
+struct Probe {
+    done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    dev: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    at: Instant,
+}
+
+fn probes() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, Probe>> {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Probe>>> =
+        std::sync::OnceLock::new();
+    let m = SEEN.get_or_init(std::sync::Mutex::default);
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn sick() -> std::sync::MutexGuard<'static, std::collections::HashMap<u64, Instant>> {
+    static SICK_AT: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u64, Instant>>> =
+        std::sync::OnceLock::new();
+    let m = SICK_AT.get_or_init(std::sync::Mutex::default);
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn is_sick(dev: u64) -> bool {
+    dev != 0 && sick().get(&dev).is_some_and(|t| t.elapsed() < SICK)
+}
+
+/// #776: mark the disk `dir`'s last probe named as hung for `SICK` (a call on it ran out of time).
+pub fn sicken(dir: &str) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let dev = probes().get(dir).map_or(0, |p| p.dev.load(Relaxed));
+    if dev != 0 {
+        sick().insert(dev, Instant::now());
+    }
+}
+
+/// #776: whether `dir`'s disk has stopped answering: `probe(dir)` (its disk and a listing) runs on its own thread and
+/// must finish within `wait`. A probe still running is never repeated: the folder stays hung, with no new thread,
+/// until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
+pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> + Send + 'static) -> bool {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+    use std::sync::Arc;
+    let (done, dev) = {
+        let mut m = probes();
+        if let Some(p) = m.get(dir) {
+            if !p.done.load(Relaxed) || is_sick(p.dev.load(Relaxed)) {
+                return true;
+            }
+            if p.at.elapsed() < Duration::from_secs(60) {
+                return false;
+            }
         }
-        let d = Arc::new(AtomicBool::new(false));
-        m.insert(dir.into(), (d.clone(), Instant::now()));
-        d
+        let (done, dev) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicU64::new(0)));
+        m.insert(
+            dir.into(),
+            Probe {
+                done: done.clone(),
+                dev: dev.clone(),
+                at: Instant::now(),
+            },
+        );
+        (done, dev)
     };
-    let (d, owned) = (done.clone(), dir.to_string());
-    std::thread::spawn(move || (probe(&owned), d.store(true, Relaxed)));
+    let (d, v, owned) = (done.clone(), dev.clone(), dir.to_string());
+    std::thread::spawn(move || {
+        v.store(probe(&owned).unwrap_or(0), Relaxed);
+        d.store(true, Relaxed);
+    });
     let end = Instant::now() + wait;
     while Instant::now() < end {
         if done.load(Relaxed) {
-            return false;
+            return is_sick(dev.load(Relaxed));
         }
         std::thread::sleep(Duration::from_millis(20));
     }
     !done.load(Relaxed)
+}
+
+/// #775: `path`'s bytes for a request thread (serve's screenshots, designs, thread files): None when its folder is
+/// hung (#776) or the read takes over `PROBE`, which marks the folder's disk; the stuck read keeps its own thread.
+pub fn read_file(path: impl AsRef<std::path::Path>) -> Option<Vec<u8>> {
+    let path = path.as_ref().to_path_buf();
+    let dir = path.parent()?.to_string_lossy().into_owned();
+    if hung(&dir, PROBE, list) {
+        return None;
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || drop(tx.send(std::fs::read(path).ok())));
+    rx.recv_timeout(PROBE).unwrap_or_else(|_| {
+        sicken(&dir);
+        None
+    })
 }
 
 fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {

@@ -160,8 +160,16 @@ fn a_folder_whose_listing_hangs_is_hung_and_probed_once() {
     use std::sync::Arc;
     let dir = tmpdir("hung-probe").to_string_lossy().into_owned();
     let probes = Arc::new(AtomicUsize::new(0));
-    let slow =
-        |n: Arc<AtomicUsize>| move |_: &str| (n.fetch_add(1, Relaxed), std::thread::sleep(Duration::from_secs(5))).1;
+    let slow = |n: Arc<AtomicUsize>| {
+        move |_: &str| {
+            (
+                n.fetch_add(1, Relaxed),
+                std::thread::sleep(Duration::from_secs(5)),
+                None,
+            )
+                .2
+        }
+    };
     let t = Instant::now();
     assert!(hung(&dir, Duration::from_millis(300), slow(probes.clone())));
     assert!(t.elapsed() < Duration::from_secs(2), "{:?}", t.elapsed());
@@ -178,9 +186,10 @@ fn a_folder_whose_listing_hangs_is_hung_and_probed_once() {
 #[test]
 fn a_folder_that_answers_is_not_hung() {
     let dir = tmpdir("hung-ok").to_string_lossy().into_owned();
-    assert!(!herdsman::runner::hung(&dir, Duration::from_secs(2), |d| drop(
-        std::fs::read_dir(d)
-    )));
+    assert!(!herdsman::runner::hung(&dir, Duration::from_secs(2), |d| {
+        drop(std::fs::read_dir(d));
+        None
+    }));
 }
 
 /// #776: `git -C <dir>` on a hung folder answers 124 at once instead of starting a child that never exits.
@@ -188,7 +197,8 @@ fn a_folder_that_answers_is_not_hung() {
 fn a_git_call_on_a_hung_folder_fails_at_once() {
     let dir = tmpdir("hung-git").to_string_lossy().into_owned();
     assert!(herdsman::runner::hung(&dir, Duration::from_millis(100), |_| {
-        std::thread::sleep(Duration::from_secs(5))
+        std::thread::sleep(Duration::from_secs(5));
+        None
     }));
     let t = Instant::now();
     let o = Real.run("git", &argv(&["-C", &dir, "status", "--porcelain"])).unwrap();
@@ -205,4 +215,45 @@ fn a_git_call_on_a_healthy_folder_runs() {
         .run("git", &argv(&["-C", &dir, "rev-parse", "--is-inside-work-tree"]))
         .unwrap();
     assert_ne!(o.code, 124, "{o:?}");
+}
+
+/// #776: once a call on a disk runs out of time, every folder on that disk is hung, even one whose listing still
+/// answers (macOS serves it from memory while the files hang).
+#[test]
+fn a_disk_marked_hung_fails_every_folder_on_it() {
+    use herdsman::runner::{hung, sicken};
+    const DEV: u64 = 0xDEAD_0776;
+    let (a, b) = (
+        tmpdir("sick-a").to_string_lossy().into_owned(),
+        tmpdir("sick-b").to_string_lossy().into_owned(),
+    );
+    assert!(!hung(&a, Duration::from_secs(2), |_| Some(DEV)));
+    assert!(!hung(&b, Duration::from_secs(2), |_| Some(DEV)));
+    sicken(&a);
+    let t = Instant::now();
+    assert!(
+        hung(&b, Duration::from_secs(2), |_| Some(DEV)),
+        "the other folder on the same disk"
+    );
+    assert!(t.elapsed() < Duration::from_millis(100), "{:?}", t.elapsed());
+}
+
+/// #775: serve's file reads go through `read_file`: a readable file comes back, one in a hung folder is None at once.
+#[test]
+fn read_file_returns_bytes_and_gives_up_on_a_hung_folder() {
+    let ok = tmpdir("read-ok");
+    std::fs::write(ok.join("shot.png"), b"png").unwrap();
+    assert_eq!(
+        herdsman::runner::read_file(ok.join("shot.png")).as_deref(),
+        Some(&b"png"[..])
+    );
+    let bad = tmpdir("read-hung");
+    let dir = bad.to_string_lossy().into_owned();
+    assert!(herdsman::runner::hung(&dir, Duration::from_millis(100), |_| {
+        std::thread::sleep(Duration::from_secs(5));
+        None
+    }));
+    let t = Instant::now();
+    assert_eq!(herdsman::runner::read_file(bad.join("shot.png")), None);
+    assert!(t.elapsed() < Duration::from_millis(200), "{:?}", t.elapsed());
 }
