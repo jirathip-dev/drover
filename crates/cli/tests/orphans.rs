@@ -1,13 +1,12 @@
 //! #376: lanes herdsman never logged: `spawn-started` before the harness starts, and each drive step adopts a
 //! lane-shaped orphan pane of a tracked issue (its verdict then recorded as any lane's), closes a stale one, and leaves
-//! an unmatched one to `check`'s `orphan-lane` alert.
+//! an unmatched one to `check`'s `orphan-lane` alert. #771: lanes are shed terminals (`FakeShed`), another host's
+//! reached over ssh (`OverSsh`).
 mod common;
 use common::*;
 use herdsman::events::{append, fold, read, Event};
 use serde_json::json;
 use std::path::PathBuf;
-
-const WS: &str = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
 
 fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
@@ -23,14 +22,21 @@ fn pr(head: &str) -> String {
         .to_string()
 }
 
-/// The pane-get answer of a pane running a harness.
-fn harness(pane: &str) -> String {
-    json!({"result": {"pane": {"pane_id": pane, "agent": "hermes", "workspace_id": "w9"}}}).to_string()
+/// The fleet config with its lanes on a fake shed (`extra` appended first).
+fn shed_ctx(name: &str, extra: &str) -> (herdsman::Ctx, FakeShed) {
+    let sh = FakeShed::new();
+    let c = ctx(&tmpdir(name), &sh.config(&format!("{CONFIG}{extra}")));
+    (c, sh)
 }
 
-fn fake(agents: &str) -> Fake {
+/// Where shed's request `method` naming terminal `name` falls among all its requests.
+fn at(sh: &FakeShed, method: &str, name: &str) -> Option<usize> {
+    let st = sh.lock();
+    st.seen.iter().position(|(m, p)| m == method && p["name"] == name)
+}
+
+fn fake() -> Fake {
     Fake::default()
-        .reply("herdr agent list", agents)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -38,9 +44,9 @@ fn fake(agents: &str) -> Fake {
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
 }
 
-fn fast(c: &herdsman::Ctx, r: &Fake) -> String {
+fn fast(c: &herdsman::Ctx, r: &dyn herdsman::runner::Runner) -> String {
     let (code, out) = run(c, r, &["drive", "--fast"]);
-    assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+    assert_eq!(code, 0, "{out}");
     out
 }
 
@@ -52,7 +58,7 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
 fn review(c: &herdsman::Ctx, verdict: &str) -> PathBuf {
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w9:p1", "workspace": "w9", "worktree": wt,
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "worktree": wt,
         "branch": "issue-12"});
     ev(c, 10, "spawn", d);
     let rev = c.worktrees.join("sendmeter/rev-12-r1");
@@ -63,23 +69,35 @@ fn review(c: &herdsman::Ctx, verdict: &str) -> PathBuf {
 
 #[test]
 fn spawn_logs_spawn_started_before_the_harness_starts() {
-    let c = ctx(&tmpdir("orphan-started"), CONFIG);
-    let r = fake(NO_AGENTS)
+    // An ACP lane: shed's CLI starts its harness (`shed run --acp`), and that start fails.
+    let sh = FakeShed::new();
+    let cfg = CONFIG.replace(
+        "harness  =  \"hermes\"    # toggled in tests",
+        "harness = \"claude\"\naccount = \"C\"",
+    );
+    let cfg = format!(
+        "{cfg}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        sh.sock.display()
+    );
+    let mut c = ctx(&tmpdir("orphan-started"), &cfg);
+    c.exe = env!("CARGO_BIN_EXE_herdsman").into(); // the profiles' hook: ACP lanes start only guarded
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let f = fake()
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "")
-        .reply("herdr worktree", WS)
         .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
+            "shed agents --json",
+            r#"[{"id": "claude-acp", "cmd": ["claude-agent-acp"]}]"#,
         )
-        .reply("herdr pane run", "{}")
-        .reply("herdr pane", "{}")
-        .once_err("herdr agent start", 1, "hermes: command not found");
+        .once_err("shed run", 1, "claude-agent-acp: command not found");
+    let r = sh.cli(&f);
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
-    assert_eq!(code, 1, "{out}");
+    assert_eq!(code, 1, "{out} {:?}", f.calls.borrow());
+    assert!(f.called("shed run --acp"), "the harness start was tried");
     let st = &kinds(&c, "spawn-started")[0];
     assert_eq!(
         (st.str("agent"), st.str("role"), st.str("pane")),
-        (Some("sendmeter-impl-12"), Some("impl"), Some("w9:p1"))
+        (Some("sendmeter-impl-12"), Some("impl"), Some("sendmeter-impl-12"))
     );
     assert_eq!(
         PathBuf::from(st.str("worktree").unwrap()),
@@ -93,28 +111,26 @@ fn spawn_logs_spawn_started_before_the_harness_starts() {
     );
 }
 
-/// A crash between `spawn-started` and `spawn`: the next fast step adopts the running pane.
+/// A crash between `spawn-started` and `spawn`: the next fast step adopts the running terminal.
 #[test]
 fn a_crash_after_spawn_started_is_adopted_by_the_next_step() {
-    let c = ctx(&tmpdir("orphan-crash"), CONFIG);
+    let (c, sh) = shed_ctx("orphan-crash", "");
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
     ev(
         &c,
         50,
         "spawn-started",
-        json!({"agent": "sendmeter-impl-12", "role": "impl", "worktree": wt, "pane": "w9:p1"}),
+        json!({"agent": "sendmeter-impl-12", "role": "impl", "worktree": wt, "pane": "sendmeter-impl-12"}),
     );
-    let list = agents(&[("sendmeter-impl-12", "working", &wt.to_string_lossy(), "w9:p1")]);
-    let r = fake(&list)
-        .reply("herdr pane get w9:p1", &harness("w9:p1"))
-        .reply("herdr agent rename w9:p1 sendmeter-impl-12", "{}");
+    sh.lane("sendmeter-impl-12", "working", &wt.to_string_lossy());
+    let r = fake();
     let out = fast(&c, &r);
-    assert!(out.contains("adopted w9:p1 as sendmeter-impl-12"), "{out}");
+    assert!(out.contains("adopted sendmeter-impl-12 as sendmeter-impl-12"), "{out}");
     let sp = &kinds(&c, "spawn")[0];
     assert_eq!(
         (sp.str("pane"), sp.str("why"), sp.data["since"].as_u64()),
-        (Some("w9:p1"), Some("orphan"), Some(50))
+        (Some("sendmeter-impl-12"), Some("orphan"), Some(50))
     );
     assert_eq!(kinds(&c, "spawn-adopted")[0].str("why"), Some("orphan"));
     assert_eq!(fold(&read(&c.state).unwrap())[&("sendmeter".into(), 12)].state, "impl");
@@ -123,23 +139,20 @@ fn a_crash_after_spawn_started_is_adopted_by_the_next_step() {
     assert_eq!(kinds(&c, "spawn").len(), 1);
 }
 
-/// A finished review no spawn logged, its verdict at the PR head: adopted, recorded, then its pane closed.
+/// A finished review no spawn logged, its verdict at the PR head: adopted, recorded, then its terminal closed.
 #[test]
 fn a_finished_orphan_review_at_the_head_is_recorded_then_closed() {
-    let c = ctx(&tmpdir("orphan-review"), CONFIG);
+    let (c, sh) = shed_ctx("orphan-review", "");
     let head = sha("abc");
     let rev = review(&c, &format!("PASS\nReviewed head: {head}\nall good\n"));
-    let list = agents(&[("sendmeter-rev-12-r1", "done", &rev.to_string_lossy(), "w9:p2")]);
-    let r = fake(&list)
-        .reply("herdr pane get w9:p2", &harness("w9:p2"))
-        .reply("herdr agent rename w9:p2 sendmeter-rev-12-r1", "{}")
+    let name = "sendmeter-rev-12-r1";
+    sh.lane(name, "done", &rev.to_string_lossy());
+    let r = fake()
         .reply("gh pr view issue-12", &pr(&head))
         .reply(
             "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
             &format!("{head}\n"),
         )
-        .reply("herdr worktree", WS)
-        .reply("herdr pane close w9:p2", "{}")
         .reply(&format!("git -C {} rev-list", rev.display()), "0\n")
         .reply("git -C", "");
     let out = fast(&c, &r);
@@ -158,23 +171,22 @@ fn a_finished_orphan_review_at_the_head_is_recorded_then_closed() {
         "{out} {:?}",
         read(&c.state).unwrap()
     );
-    let (close, rename) = (
-        r.index("herdr pane close w9:p2").unwrap(),
-        r.index("herdr agent rename").unwrap(),
-    );
-    assert!(close > rename, "{:?}", r.calls.borrow());
+    // Adopted (its harness read: `get`) before it is closed (`kill`, then `rm`).
+    let (get, kill) = (at(&sh, "get", name).unwrap(), at(&sh, "kill", name).unwrap());
+    assert!(kill > get, "{:?}", sh.methods());
+    assert!(!sh.has(name), "removed");
 }
 
-/// A finished review whose verdict is for an old head: its unpushed work goes to wip/, the pane closes, no verdict.
+/// A finished review whose verdict is for an old head: its unpushed work goes to wip/, the terminal closes, no verdict.
 #[test]
 fn a_stale_head_orphan_review_is_closed_not_recorded() {
-    let c = ctx(&tmpdir("orphan-stale"), CONFIG);
+    let (c, sh) = shed_ctx("orphan-stale", "");
     let rev = review(&c, &format!("PASS\nReviewed head: {}\n", sha("0d")));
-    let list = agents(&[("sendmeter-rev-12-r1", "done", &rev.to_string_lossy(), "w9:p2")]);
-    let r = fake(&list)
+    let name = "sendmeter-rev-12-r1";
+    sh.lane(name, "done", &rev.to_string_lossy());
+    let r = fake()
         .reply("gh pr view issue-12", &pr(&sha("bee")))
         .reply(&format!("git -C {} rev-list", rev.display()), "1\n")
-        .reply("herdr pane close w9:p2", "{}")
         .reply("git -C", "");
     let out = fast(&c, &r);
     assert!(
@@ -184,53 +196,54 @@ fn a_stale_head_orphan_review_is_closed_not_recorded() {
     let closed = &kinds(&c, "lane-closed")[0];
     assert_eq!(
         (closed.str("why"), closed.str("pane")),
-        (Some("stale-orphan"), Some("w9:p2"))
+        (Some("stale-orphan"), Some(name))
     );
     let push = format!(
         "git -C {} push origin HEAD:refs/heads/wip/sendmeter-rev-12-",
         rev.display()
     );
-    assert!(r.index(&push).unwrap() < r.index("herdr pane close w9:p2").unwrap());
+    assert!(r.called(&push), "{:?}", r.calls.borrow());
+    assert!(sh.called("kill", name) && !sh.has(name), "{:?}", sh.methods());
     assert!(
         kinds(&c, "verdict").is_empty() && kinds(&c, "spawn").len() == 1,
         "not recorded, not adopted"
     );
-    assert!(!r.called("herdr agent rename"));
+    assert!(!sh.called("get", name), "never adopted: {:?}", sh.methods());
 }
 
-/// A merged issue's orphan pane is stale too.
+/// A merged issue's orphan terminal is stale too (lane-shaped by its folder alone).
 #[test]
 fn a_merged_issues_orphan_is_closed() {
-    let c = ctx(&tmpdir("orphan-merged"), CONFIG);
+    let (c, sh) = shed_ctx("orphan-merged", "");
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
     ev(&c, 10, "merged", json!({}));
-    let list = agents(&[("", "idle", &wt.to_string_lossy(), "w9:p7")]);
-    let r = fake(&list).reply("herdr pane close w9:p7", "{}").reply("git -C", "");
+    sh.add("t7", json!({"fleet": "sendmeter"}));
+    sh.set("t7", |t| t["cwd"] = json!(wt));
+    let r = fake().reply("git -C", "");
     let out = fast(&c, &r);
-    assert!(
-        out.contains("closed stale orphan w9:p7 (sendmeter#12 is merged)"),
-        "{out}"
-    );
+    assert!(out.contains("closed stale orphan t7 (sendmeter#12 is merged)"), "{out}");
     assert_eq!(kinds(&c, "lane-closed")[0].str("why"), Some("stale-orphan"));
+    assert!(sh.called("kill", "t7") && !sh.has("t7"), "{:?}", sh.methods());
 }
 
-/// A lane-shaped pane of no tracked issue: drive leaves it, `check` alerts it once; a tracked one is not alerted.
+/// A lane-shaped terminal of no tracked issue: drive leaves it, `check` alerts it once; a tracked one is not alerted.
 #[test]
 fn an_unmatched_pane_is_only_alerted() {
-    let c = ctx(&tmpdir("orphan-unmatched"), CONFIG);
+    let (c, sh) = shed_ctx("orphan-unmatched", "");
     let wt = c.worktrees.join("sendmeter/issue-12");
     ev(
         &c,
         50,
         "spawn-started",
-        json!({"agent": "sendmeter-impl-12", "role": "impl", "pane": "w9:p1"}),
+        json!({"agent": "sendmeter-impl-12", "role": "impl", "pane": "sendmeter-impl-12"}),
     );
-    let list = agents(&[
-        ("sendmeter-impl-99", "idle", "/tmp/elsewhere", "w9:p9"),
-        ("sendmeter-impl-12", "working", &wt.to_string_lossy(), "w9:p1"),
-    ]);
-    let r = fake(&list).reply("git -C", "");
+    // No harness label: no harness detected in it, so never adopted.
+    let labels = json!({"fleet": "sendmeter", "issue": "99", "role": "impl"});
+    sh.add("sendmeter-impl-99", labels);
+    sh.set("sendmeter-impl-99", |t| t["cwd"] = json!("/tmp/elsewhere"));
+    sh.lane("sendmeter-impl-12", "working", &wt.to_string_lossy());
+    let r = fake().reply("git -C", "");
     assert_eq!(run(&c, &r, &["check"]).0, 0);
     let alerts = kinds(&c, "orphan-lane");
     assert_eq!(alerts.len(), 1);
@@ -239,77 +252,95 @@ fn an_unmatched_pane_is_only_alerted() {
         (Some(99), Some("sendmeter-impl-99"))
     );
     fast(&c, &r);
-    assert!(!r.called("herdr agent rename w9:p9") && !r.called("herdr pane close w9:p9"));
+    let other = "sendmeter-impl-99";
+    assert!(
+        !sh.called("kill", other) && !sh.called("rm", other) && sh.has(other),
+        "{:?}",
+        sh.methods()
+    );
     assert!(kinds(&c, "spawn").iter().all(|e| e.issue == Some(12)));
 }
 
-/// An orphan on another host (`herdr --machine`) is adopted there, and its spawn names the host.
+const HOSTS: &str = "\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n";
+
+/// An orphan on another host (its shed over ssh) is adopted there, and its spawn names the host.
 #[test]
 fn a_remote_orphan_is_adopted_on_its_host() {
-    let cfg = format!("{CONFIG}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
-    let c = ctx(&tmpdir("orphan-remote"), &cfg);
+    let (c, sh) = shed_ctx("orphan-remote", HOSTS);
     ev(&c, 10, "queued", json!({}));
     let wt = "/home/me/.herdr/worktrees/sendmeter/issue-12";
-    let list = agents(&[("sendmeter-impl-12", "working", wt, "w3:p1")]);
-    let r = fake(NO_AGENTS)
-        .reply("herdr --machine bazzite agent list", &list)
-        .reply("herdr --machine bazzite pane get w3:p1", &harness("w3:p1"))
-        .reply("herdr --machine bazzite agent rename w3:p1 sendmeter-impl-12", "{}");
+    let baz = FakeShed::new();
+    baz.lane("sendmeter-impl-12", "working", wt);
+    let f = fake();
+    let r = OverSsh {
+        f: &f,
+        hosts: vec![("bazzite", &baz)],
+    };
     let out = fast(&c, &r);
-    assert!(out.contains("adopted w3:p1"), "{out} {:?}", r.calls.borrow());
+    assert!(
+        out.contains("adopted sendmeter-impl-12"),
+        "{out} {:?}",
+        f.calls.borrow()
+    );
     let sp = &kinds(&c, "spawn")[0];
     assert_eq!(
         (sp.str("host"), sp.str("machine"), sp.str("worktree")),
         (Some("bazzite"), Some("bazzite"), Some(wt))
     );
-    assert!(!r.called("herdr agent rename"), "never renamed on this host");
+    assert!(baz.called("get", "sendmeter-impl-12"), "{:?}", baz.methods());
+    assert!(!sh.called("get", "sendmeter-impl-12"), "never adopted on this host");
 }
 
-/// #393: a runner that, while drive lists the remote host's agents, logs `spawn-started` as a concurrent spawn does
+/// #393: a runner that, while drive lists the remote host's lanes, logs `spawn-started` as a concurrent spawn does
 /// before it starts the harness (its `spawn` comes once the prompt is confirmed, after this pass).
-struct Racing<'a>(&'a Fake, &'a herdsman::Ctx, &'a str);
+struct Racing<'a>(&'a OverSsh<'a>, &'a herdsman::Ctx, &'a str);
+
+impl Racing<'_> {
+    fn race(&self, line: &str, input: &str) {
+        let listing = line.contains("bazzite") && line.contains("'shed' 'connect'") && input.contains("\"ls\"");
+        if listing && kinds(self.1, "spawn-started").is_empty() {
+            let d = json!({"agent": "sendmeter-impl-12", "role": "impl", "worktree": self.2,
+                "pane": "sendmeter-impl-12", "host": "bazzite", "machine": "bazzite"});
+            ev(self.1, self.1.now, "spawn-started", d);
+        }
+    }
+}
 
 impl herdsman::runner::Runner for Racing<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
-        let line = format!("{prog} {}", args.join(" "));
-        if line.contains("bazzite") && line.contains("list") && kinds(self.1, "spawn-started").is_empty() {
-            let d = json!({"agent": "sendmeter-impl-12", "role": "impl", "worktree": self.2, "pane": "w3:p1",
-                "host": "bazzite", "machine": "bazzite"});
-            ev(self.1, self.1.now, "spawn-started", d);
-        }
         self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+        self.race(&format!("{prog} {}", args.join(" ")), input);
+        self.0.run_in(prog, args, input)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
     }
 }
 
 /// #393: a remote lane whose spawn is still running when the sweep lists it is not adopted; an unlogged one is.
 #[test]
 fn a_lane_spawned_during_the_remote_listing_is_not_adopted() {
-    let cfg = format!("{CONFIG}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
-    let c = ctx(&tmpdir("orphan-race"), &cfg);
+    let (c, _sh) = shed_ctx("orphan-race", HOSTS);
     ev(&c, 10, "queued", json!({}));
     append(&c.state, &Event::new(10, "sendmeter", Some(13), "queued", json!({}))).unwrap();
     let (wt, wt13) = (
         "/home/me/.herdr/worktrees/sendmeter/issue-12",
         "/home/me/.herdr/worktrees/sendmeter/issue-13",
     );
-    let list = agents(&[
-        ("sendmeter-impl-12", "working", wt, "w3:p1"),
-        ("sendmeter-impl-13", "working", wt13, "w3:p2"),
-    ]);
-    let f = fake(NO_AGENTS)
-        .reply("herdr --machine bazzite agent list", &list)
-        .reply("herdr --machine bazzite pane get w3:p1", &harness("w3:p1"))
-        .reply("herdr --machine bazzite agent rename w3:p1 sendmeter-impl-12", "{}")
-        .reply("herdr --machine bazzite pane get w3:p2", &harness("w3:p2"))
-        .reply("herdr --machine bazzite agent rename w3:p2 sendmeter-impl-13", "{}");
-    let (code, out) = run(&c, &Racing(&f, &c, wt), &["drive", "--fast"]);
+    let baz = FakeShed::new();
+    baz.lane("sendmeter-impl-12", "working", wt);
+    baz.lane("sendmeter-impl-13", "working", wt13);
+    let f = fake();
+    let over = OverSsh {
+        f: &f,
+        hosts: vec![("bazzite", &baz)],
+    };
+    let (code, out) = run(&c, &Racing(&over, &c, wt), &["drive", "--fast"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(kinds(&c, "spawn-started").len(), 1, "logged during the listing");
-    assert!(
-        !f.called("herdr --machine bazzite agent rename w3:p1"),
-        "{:?}",
-        f.calls.borrow()
-    );
+    assert!(!baz.called("get", "sendmeter-impl-12"), "{:?}", baz.methods());
     let spawns = kinds(&c, "spawn");
     assert_eq!(
         spawns.iter().map(|e| (e.issue, e.str("why"))).collect::<Vec<_>>(),

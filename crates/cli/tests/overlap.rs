@@ -8,7 +8,7 @@ use herdsman::runner::{Out, Real, Runner};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
-/// git runs for real, the rest (gh, herdr) is scripted; every call is recorded.
+/// git runs for real, the rest (gh; lanes on a fake shed) is scripted; every call is recorded.
 struct Mixed(Fake);
 
 impl Runner for Mixed {
@@ -20,6 +20,13 @@ impl Runner for Mixed {
         self.0.run(prog, args)
     }
     fn sleep(&self, _: u64) {}
+}
+
+/// #771: ctx `c`'s lanes on a fake shed (none running till a test adds one); keep it alive for the test.
+fn shed(c: &herdsman::Ctx) -> FakeShed {
+    let sh = FakeShed::new();
+    sh.attach(c);
+    sh
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -82,7 +89,7 @@ fn head(seed: &Path, branch: &str) -> String {
 
 /// An impl lane for `n`, a PASS at its pushed head when `pass`, and its open PR #(10 + n) in the PR cache.
 fn lane(c: &herdsman::Ctx, seed: &Path, n: u64, pass: bool) {
-    let spawn = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "branch": format!("issue-{n}"), "pane": format!("p{n}")});
+    let spawn = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "branch": format!("issue-{n}"), "pane": format!("sendmeter-impl-{n}")});
     append(&c.state, &Event::new(10, "sendmeter", Some(n), "spawn", spawn)).unwrap();
     if pass {
         let v = json!({"verdict": "PASS", "sha": head(seed, &format!("issue-{n}"))});
@@ -112,21 +119,21 @@ fn merger(n: u64, head: &str) -> Mixed {
             .reply(&format!("gh pr view issue-{n} "), &green_pr(n, head))
             .reply("gh pr merge", "")
             .reply("gh pr view 1", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
-            .reply("gh issue", "")
-            .reply("herdr", NO_AGENTS),
+            .reply("gh issue", ""),
     )
 }
 
 #[test]
 fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     let (_d, seed, c, cfg) = repos("au-clean");
+    let sh = shed(&c);
     lane(&c, &seed, 3, true);
     strict(&c);
     let from = head(&seed, "issue-3");
     commit(&seed, "c.txt", "c\n", "staging");
-    let r = Mixed(Fake::default().reply("herdr", NO_AGENTS));
+    let r = Mixed(Fake::default());
     let mut out = vec![];
-    herdsman::drive::auto_update(&c, &cfg, &r, &mut out, "sendmeter").unwrap();
+    herdsman::drive::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
     let to = head(&seed, "issue-3");
     let ev = read(&c.state).unwrap();
     let up = ev.iter().find(|e| e.kind == "auto-updated").expect("auto-updated");
@@ -139,6 +146,11 @@ fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
             .all(|l| l.starts_with("git ") || l.starts_with("herdr agent list")),
         "{:?}",
         r.0.calls.borrow()
+    );
+    assert!(
+        sh.methods().iter().all(|m| m == "ls"),
+        "no lane touched: {:?}",
+        sh.methods()
     );
     // The gate takes the PASS of the head it updated: merged, no review round.
     let r = merger(3, &to);
@@ -200,6 +212,7 @@ fn merge_staging(d: &Path, extra: Option<&str>) {
 #[test]
 fn gate_refuses_a_merge_head_that_adds_its_own_change() {
     let (d, seed, c, _) = repos("au-impure");
+    let sh = shed(&c);
     lane(&c, &seed, 3, true);
     commit(&seed, "c.txt", "c\n", "staging");
     // A merge of integration with an extra edit folded in: not a pure update.
@@ -219,13 +232,7 @@ fn gate_refuses_a_merge_head_that_adds_its_own_change() {
             .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
             .reply("sysctl -n hw.ncpu", "10\n")
             .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
-            .reply("herdr agent list", NO_AGENTS)
-            .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-            .reply(
-                "herdr pane list",
-                r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-            )
-            .reply("herdr", "{}"),
+            .reply("which shed", "/opt/shed/bin/shed\n"),
     );
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -234,9 +241,10 @@ fn gate_refuses_a_merge_head_that_adds_its_own_change() {
     assert!(
         calls
             .iter()
-            .any(|l| l.contains("--branch rev-3-r2 --base origin/issue-3")),
+            .any(|l| l.contains(" worktree add -b rev-3-r2 ") && l.ends_with(" origin/issue-3")),
         "{calls:?}"
     );
+    assert_eq!(sh.last("run")["name"], "sendmeter-rev-3-r2", "{:?}", sh.methods());
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)];
     assert_eq!(st.state, "review(2)");
     assert!(!st.reviewed(&h), "B has no verdict yet");
@@ -245,6 +253,7 @@ fn gate_refuses_a_merge_head_that_adds_its_own_change() {
 #[test]
 fn an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass() {
     let (_d, seed, mut c, _) = repos("au-ci-pending");
+    let _sh = shed(&c);
     lane(&c, &seed, 1, true);
     lane(&c, &seed, 3, true);
     strict(&c);
@@ -262,8 +271,7 @@ fn an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass() {
                 .reply("gh pr view issue-3 ", pr3)
                 .reply("gh pr merge", "")
                 .reply("gh pr view 1", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
-                .reply("gh issue", "")
-                .reply("herdr", NO_AGENTS),
+                .reply("gh issue", ""),
         );
         let (code, out) = run(c, &r, &["drive"]);
         assert_eq!(code, 0, "{out}");
@@ -357,14 +365,14 @@ fn merge_tree_finds_the_pair_and_its_files_once() {
 #[test]
 fn drive_merges_the_ready_pr_that_conflicts_with_nothing_first() {
     let (_d, seed, c, _) = repos("order");
+    let _sh = shed(&c);
     for n in 1..=3 {
         lane(&c, &seed, n, true);
     }
     let mut f = Fake::default()
         .reply("gh pr merge", "")
         .reply("gh pr view 1", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
-        .reply("gh issue", "")
-        .reply("herdr", NO_AGENTS);
+        .reply("gh issue", "");
     for n in 1..=3 {
         f = f.reply(
             &format!("gh pr view issue-{n} "),
@@ -382,21 +390,19 @@ fn drive_merges_the_ready_pr_that_conflicts_with_nothing_first() {
 #[test]
 fn heads_up_reaches_a_working_lane_once() {
     let (_d, seed, c, cfg) = repos("heads-up");
+    let sh = shed(&c);
     lane(&c, &seed, 1, false);
     lane(&c, &seed, 2, true);
-    let r = Mixed(Fake::default().reply("herdr", ""));
+    sh.lane("sendmeter-impl-1", "working", "/w/issue-1");
+    sh.lane("sendmeter-impl-2", "idle", "/w/issue-2");
+    let r = Mixed(Fake::default());
     for _ in 0..2 {
-        herdsman::overlap::preview(&c, &cfg, &r, "sendmeter", &read(&c.state).unwrap()).unwrap();
+        herdsman::overlap::preview(&c, &cfg, &sh.on(&r), "sendmeter", &read(&c.state).unwrap()).unwrap();
     }
-    let want =
-        "herdr agent prompt sendmeter-impl-1 HEADS-UP: #2 is ready to merge and touches a.txt: your branch may conflict \
+    let want = "HEADS-UP: #2 is ready to merge and touches a.txt: your branch may conflict \
                 with #2; keep going, herdsman updates you after it merges.";
-    assert_eq!(r.0.count(want), 1, "{:?}", r.0.calls.borrow());
-    assert_eq!(
-        r.0.count("herdr agent prompt sendmeter-impl-2"),
-        0,
-        "a ready PR's lane is done"
-    );
+    assert_eq!(sh.sent("sendmeter-impl-1"), [want], "{:?}", sh.methods());
+    assert!(sh.sent("sendmeter-impl-2").is_empty(), "a ready PR's lane is done");
     assert_eq!(
         read(&c.state).unwrap().iter().filter(|e| e.kind == "heads-up").count(),
         1
@@ -439,7 +445,7 @@ fn reviewed_with(c: &herdsman::Ctx, n: u64, sha: &str, body: &str) -> String {
     let wt = c.worktrees.join(format!("rev-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     std::fs::write(wt.join("verdict.md"), body).unwrap();
-    let d = json!({"role": "rev", "agent": format!("sendmeter-rev-{n}-r1"), "pane": "p9", "worktree": wt, "sha": sha});
+    let d = json!({"role": "rev", "agent": format!("sendmeter-rev-{n}-r1"), "pane": format!("sendmeter-rev-{n}-r1"), "worktree": wt, "sha": sha});
     append(&c.state, &Event::new(30, "sendmeter", Some(n), "spawn", d)).unwrap();
     wt.join("verdict.md").display().to_string()
 }
@@ -453,6 +459,7 @@ fn pending_pr(n: u64, head: &str) -> String {
 #[test]
 fn a_written_verdict_is_recorded_before_the_update_in_the_same_pass() {
     let (_d, seed, c, _) = repos("au-order");
+    let _sh = shed(&c);
     lane(&c, &seed, 1, true);
     lane(&c, &seed, 3, false);
     strict(&c);
@@ -466,8 +473,7 @@ fn a_written_verdict_is_recorded_before_the_update_in_the_same_pass() {
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &from)
             .reply("gh pr merge", "")
             .reply("gh pr view 1", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
-            .reply("gh issue", "")
-            .reply("herdr", NO_AGENTS),
+            .reply("gh issue", ""),
     );
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -490,10 +496,14 @@ fn a_branch_in_review_is_not_updated() {
     reviewed(&c, 3, &from);
     commit(&seed, "c.txt", "c\n", "staging");
     // A reviewer still working, then one done whose verdict is not recorded yet.
-    let live = agents(&[("sendmeter-rev-3-r1", "working", "/wt", "p9")]);
-    for list in [live.as_str(), NO_AGENTS] {
-        let r = Mixed(Fake::default().reply("herdr", list));
-        herdsman::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
+    let sh = shed(&c);
+    sh.lane("sendmeter-rev-3-r1", "working", "/wt");
+    for live in [true, false] {
+        if !live {
+            sh.remove("sendmeter-rev-3-r1");
+        }
+        let r = Mixed(Fake::default());
+        herdsman::drive::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
         assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
     }
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "auto-updated"));
@@ -502,6 +512,7 @@ fn a_branch_in_review_is_not_updated() {
 #[test]
 fn a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges() {
     let (d, seed, c, _) = repos("au-carry");
+    let _sh = shed(&c);
     lane(&c, &seed, 3, false);
     let x = head(&seed, "issue-3");
     let file = reviewed(&c, 3, &x);
@@ -512,8 +523,7 @@ fn a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges() {
     let r = Mixed(
         Fake::default()
             .reply("gh pr view issue-3 ", &green_pr(3, &m))
-            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m)
-            .reply("herdr", NO_AGENTS),
+            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m),
     );
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -540,6 +550,7 @@ fn a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges() {
 #[test]
 fn a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses() {
     let (d, seed, c, _) = repos("au-no-carry");
+    let _sh = shed(&c);
     lane(&c, &seed, 3, false);
     let x = head(&seed, "issue-3");
     let file = reviewed(&c, 3, &x);
@@ -549,8 +560,7 @@ fn a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses() {
     let r = Mixed(
         Fake::default()
             .reply("gh pr view issue-3 ", &pending_pr(3, &m))
-            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m)
-            .reply("herdr", NO_AGENTS),
+            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m),
     );
     let (code, out) = run(
         &c,
@@ -585,11 +595,12 @@ const RULES: &str = "gh api repos/jirathip-dev/sendmeter/rules/branches/staging"
 #[test]
 fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     let (_d, seed, mut c, cfg) = repos("au-non-strict");
+    let sh = shed(&c);
     lane(&c, &seed, 3, true);
     let from = head(&seed, "issue-3");
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(merger(3, &from).0.reply(PROTECTION, "false\n"));
-    herdsman::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
+    herdsman::drive::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
     assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
     let ev = read(&c.state).unwrap();
     assert!(
@@ -599,12 +610,8 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     // The status says so, never a silent catch-up loop.
     let behind = json!({"number": 13, "state": "OPEN", "baseRefName": "staging", "headRefOid": from,
         "mergeable": "MERGEABLE", "mergeStateStatus": "BEHIND", "statusCheckRollup": []});
-    let w = Mixed(
-        Fake::default()
-            .reply("gh pr view issue-3 ", &behind.to_string())
-            .reply("herdr", NO_AGENTS),
-    );
-    let ws = herdsman::waiting::scan(&c, &cfg, &w, &read(&c.state).unwrap(), &[], true);
+    let w = Mixed(Fake::default().reply("gh pr view issue-3 ", &behind.to_string()));
+    let ws = herdsman::waiting::scan(&c, &cfg, &sh.on(&w), &read(&c.state).unwrap(), &[], true);
     let what = &ws.iter().find(|(s, _)| s.issue == 3).expect("#3").1.what;
     assert!(
         what.starts_with("PASS · behind staging (not required) · merging when CI green"),
@@ -619,7 +626,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
             .reply("gh pr view issue-3 ", &green.to_string())
             .reply("gh pr view 1", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string()),
     );
-    let r = Mixed(r.0.reply("gh pr ", "").reply("gh issue", "").reply("herdr", NO_AGENTS));
+    let r = Mixed(r.0.reply("gh pr ", "").reply("gh issue", ""));
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let merge = format!("gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {from}");
@@ -630,17 +637,13 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
 #[test]
 fn strict_rule_auto_updates_and_puts_the_merge_label_back() {
     let (d, seed, c, _) = repos("au-strict");
+    let sh = shed(&c);
     let cfg = labelled(&d);
     lane(&c, &seed, 3, true);
     commit(&seed, "c.txt", "c\n", "staging");
-    let r = Mixed(
-        Fake::default()
-            .reply(RULES, "true\n")
-            .reply("gh pr edit", "")
-            .reply("herdr", NO_AGENTS),
-    );
+    let r = Mixed(Fake::default().reply(RULES, "true\n").reply("gh pr edit", ""));
     let mut out = vec![];
-    herdsman::drive::auto_update(&c, &cfg, &r, &mut out, "sendmeter").unwrap();
+    herdsman::drive::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
     let out = String::from_utf8_lossy(&out);
     let to = head(&seed, "issue-3");
     assert!(out.contains("auto-updated"), "{out}");
@@ -699,6 +702,7 @@ fn moved(seed: &Path) -> (String, String) {
 #[test]
 fn a_verdict_naming_the_current_head_records_there_whatever_the_spawn_head() {
     let (_d, seed, c, _) = repos("named-head");
+    let _sh = shed(&c);
     let cfg = std::fs::read_to_string(&c.config).unwrap();
     let label = "integration = \"staging\"\nmerge_label = \"merge-ready\"";
     let cfg = cfg.replacen("integration = \"staging\"", label, 1);
@@ -710,8 +714,7 @@ fn a_verdict_naming_the_current_head_records_there_whatever_the_spawn_head() {
         Fake::default()
             .reply("gh pr view issue-3 ", &green_pr(3, &b))
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &b)
-            .reply("gh pr edit", "")
-            .reply("herdr", NO_AGENTS),
+            .reply("gh pr edit", ""),
     );
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -734,14 +737,14 @@ fn a_verdict_naming_a_head_a_commit_moved_from_is_stale_and_none_means_the_spawn
         .enumerate()
     {
         let (_d, seed, c, _) = repos(&format!("named-stale-{i}"));
+        let _sh = shed(&c);
         lane(&c, &seed, 3, false);
         let (a, b) = moved(&seed);
         reviewed_with(&c, 3, &a, &body.replace("{a}", &a));
         let r = Mixed(
             Fake::default()
                 .reply("gh pr view issue-3 ", &pending_pr(3, &b))
-                .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &b)
-                .reply("herdr", NO_AGENTS),
+                .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &b),
         );
         let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
         let want = format!("review was for {a:.7}, head moved to {b:.7} (not a clean merge): review again");
@@ -753,6 +756,7 @@ fn a_verdict_naming_a_head_a_commit_moved_from_is_stale_and_none_means_the_spawn
 #[test]
 fn a_verdict_naming_the_head_a_pure_merge_moved_from_is_carried() {
     let (d, seed, c, _) = repos("named-carry");
+    let _sh = shed(&c);
     lane(&c, &seed, 3, false);
     let x = head(&seed, "issue-3");
     reviewed_with(&c, 3, &x, &format!("PASS\nReviewed head: {x}\n"));
@@ -762,8 +766,7 @@ fn a_verdict_naming_the_head_a_pure_merge_moved_from_is_carried() {
     let r = Mixed(
         Fake::default()
             .reply("gh pr view issue-3 ", &green_pr(3, &m))
-            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m)
-            .reply("herdr", NO_AGENTS),
+            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m),
     );
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -815,6 +818,7 @@ fn cap_check_warns_within_reach_of_the_cap() {
 #[test]
 fn check_emits_cap_near_once_per_integration_sha() {
     let (_d, seed, c, cfg) = repos("cap-near");
+    let sh = shed(&c);
     let put = |files: &[(&str, &str)]| {
         for (f, t) in files {
             let p = seed.join(f);
@@ -832,13 +836,13 @@ fn check_emits_cap_near_once_per_integration_sha() {
         ("crates/x/src/m/b.rs", "1\n2"),
         ("crates/x/tests/t.rs", "not\nsrc\n"),
     ]);
-    let r = Mixed(Fake::default().reply("herdr", NO_AGENTS));
+    let r = Mixed(Fake::default());
     let near = || {
         let ev = read(&c.state).unwrap();
         ev.into_iter().filter(|e| e.kind == "cap-near").collect::<Vec<_>>()
     };
     for _ in 0..2 {
-        herdsman::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
+        herdsman::check::check(&c, &cfg, &sh.on(&r), &mut vec![]).unwrap();
     }
     let got = near();
     assert_eq!(got.len(), 1, "once per sha, not per pass: {got:?}");

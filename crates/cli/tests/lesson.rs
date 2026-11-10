@@ -13,6 +13,13 @@ fn ev(c: &herdsman::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", issue, kind, d)).unwrap();
 }
 
+/// An empty fake shed for `c`'s lanes, attached to it (keep it alive for the test).
+fn shed(c: &herdsman::Ctx) -> FakeShed {
+    let sh = FakeShed::new();
+    sh.attach(c);
+    sh
+}
+
 /// A FAIL verdict body with one proven blocker `what` and a non-blocking note.
 fn fail(what: &str) -> Value {
     let body = format!(
@@ -111,6 +118,7 @@ const OFF: &str = "\n[fleet.quiet]\nrepo = \"acme/quiet\"\nlocal = \"/tmp/does-n
 #[test]
 fn tick_runs_lesson_once_a_week_and_never_when_off() {
     let c = ctx(&tmpdir("lesson-tick"), &(CONFIG.to_string() + OFF));
+    let _sh = shed(&c);
     // #517: a fleet over a week old with 2 FAILs this week.
     ev(&c, OLD, Some(3), "verdict", fail("old unwrap on None"));
     ev(&c, NOW, Some(12), "verdict", fail("unwrap on a missing config"));
@@ -118,7 +126,7 @@ fn tick_runs_lesson_once_a_week_and_never_when_off() {
     let fake = || {
         Fake::default()
             .reply("herdr status", "server:\n  status: running\n")
-            .reply("herdr agent list", NO_AGENTS)
+            .reply("which shed", "/opt/shed/bin/shed\n")
             .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
             .reply(
                 "gh issue create",
@@ -154,9 +162,10 @@ fn tick_runs_lesson_once_a_week_and_never_when_off() {
 #[test]
 fn tick_skips_lesson_for_a_young_or_quiet_fleet() {
     let c = ctx(&tmpdir("lesson-young"), CONFIG);
+    let _sh = shed(&c);
     let r = Fake::default()
         .reply("herdr status", "server:\n  status: running\n")
-        .reply("herdr agent list", NO_AGENTS)
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply(
             "gh issue create",
@@ -182,6 +191,7 @@ fn tick_skips_lesson_for_a_young_or_quiet_fleet() {
     );
     // Over a week old, 1 FAIL this week: no repeated class to find either.
     let c = ctx(&tmpdir("lesson-quiet"), CONFIG);
+    let _sh = shed(&c);
     ev(&c, OLD, Some(3), "verdict", fail("old unwrap on None"));
     ev(&c, NOW - HOUR, Some(12), "verdict", fail("unwrap on a missing config"));
     let (code, out) = run(&c, &r, &["tick"]);
@@ -190,10 +200,9 @@ fn tick_skips_lesson_for_a_young_or_quiet_fleet() {
     assert_eq!(skipped(&c)[0].str("why"), Some("under 2 FAIL verdicts this week"));
 }
 
-/// The fake for one spawn, issue `n`'s spec as `title`.
+/// The fake for one spawn on shed, issue `n`'s spec as `title`.
 fn spawner(n: u64) -> Fake {
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
         .reply(
             &format!("gh issue view {n}"),
             r#"{"title":"lessons","body":"the template"}"#,
@@ -204,25 +213,13 @@ fn spawner(n: u64) -> Fake {
         )
         .reply("gh issue close", "")
         .reply("git -C", "0\n")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
-        )
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr pane wait-output", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr pane read", "Read the brief")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
 #[test]
 fn lesson_files_queues_and_spawns_a_lesson_lane_that_may_close_with_no_change() {
     let c = ctx(&tmpdir("lesson-run"), CONFIG);
+    let sh = shed(&c);
     let r = spawner(80);
     let (code, out) = run(&c, &r, &["lesson", "sendmeter"]);
     assert!(code == 0 || code == 4, "{code} {out}");
@@ -235,6 +232,7 @@ fn lesson_files_queues_and_spawns_a_lesson_lane_that_may_close_with_no_change() 
         herdsman::queue::replay(&events, "sendmeter").first().map(|i| i.issue),
         Some(80)
     );
+    assert_eq!(sh.last("run")["name"], "sendmeter-lesson-80", "{:?}", sh.methods());
     let spawn = events.iter().find(|e| e.is("spawn", "sendmeter", 80)).expect("a lane");
     // No `[role.lesson]`: impl's harness and profile.
     assert_eq!(
@@ -275,12 +273,13 @@ fn lesson_files_queues_and_spawns_a_lesson_lane_that_may_close_with_no_change() 
 #[test]
 fn rules_file_is_in_impl_and_rev_briefs_and_missing_is_fine() {
     let c = ctx(&tmpdir("lesson-rules"), CONFIG);
+    let _sh = shed(&c);
     let rules = "- don't unwrap config reads (enforced by: clippy unwrap_used)\n";
     for (role, dir) in [("impl", "issue-12"), ("rev", "rev-12-r1")] {
         let wt = c.worktrees.join("sendmeter").join(dir);
         std::fs::create_dir_all(wt.join(".herdsman")).unwrap();
         std::fs::write(wt.join(".herdsman/rules.md"), rules).unwrap();
-        // The checkout herdr made: clean.
+        // The checkout spawn made: clean.
         let r = spawner(12).once(&format!("git -C {} status --porcelain", wt.display()), 0, "");
         let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", role]);
         assert!(code == 0 || code == 4, "{role}: {code} {out}");
@@ -289,6 +288,7 @@ fn rules_file_is_in_impl_and_rev_briefs_and_missing_is_fine() {
         assert!(brief.contains(&want), "{role}: {brief}");
     }
     let c = ctx(&tmpdir("lesson-norules"), CONFIG);
+    let _sh = shed(&c);
     let (code, out) = run(&c, &spawner(12), &["spawn", "sendmeter", "12", "impl"]);
     assert!(code == 0 || code == 4, "{code} {out}");
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
@@ -486,6 +486,7 @@ fn lesson_apply_promotes_and_retires_by_history_and_never_touches_hand_written_c
 #[test]
 fn briefs_carry_the_shared_pack_before_the_repo_rules() {
     let c = ctx(&tmpdir("lesson-shared"), CONFIG);
+    let _sh = shed(&c);
     let wt = c.worktrees.join("sendmeter").join("rev-12-r1");
     std::fs::create_dir_all(wt.join(".herdsman")).unwrap();
     std::fs::write(wt.join(".herdsman/rules.md"), "- don't X (enforced by: none)\n").unwrap();
@@ -499,6 +500,7 @@ fn briefs_carry_the_shared_pack_before_the_repo_rules() {
     );
     assert!(shared.is_some() && shared < repo, "{brief}");
     let c = ctx(&tmpdir("lesson-shared-none"), CONFIG);
+    let _sh = shed(&c);
     let (code, out) = run(&c, &spawner(12), &["spawn", "sendmeter", "12", "impl"]);
     assert!(code == 0 || code == 4, "{code} {out}");
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
@@ -513,7 +515,8 @@ fn briefs_carry_the_shared_pack_before_the_repo_rules() {
 #[test]
 fn lessons_missed_fires_once_after_8_days_and_never_when_off() {
     let c = ctx(&tmpdir("lesson-missed"), &(CONFIG.to_string() + OFF));
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let sh = shed(&c);
+    let r = Fake::default();
     append(
         &c.state,
         &Event::new(OLD - 2 * 86400, "quiet", Some(1), "queued", json!({})),
@@ -549,7 +552,7 @@ fn lessons_missed_fires_once_after_8_days_and_never_when_off() {
     // Paused: skipped.
     let c = ctx(
         &tmpdir("lesson-missed-paused"),
-        &CONFIG.replace("[fleet.sendmeter]\n", "[fleet.sendmeter]\npaused = true\n"),
+        &sh.config(&CONFIG.replace("[fleet.sendmeter]\n", "[fleet.sendmeter]\npaused = true\n")),
     );
     ev(&c, OLD - 86400, Some(1), "queued", json!({}));
     let (code, out) = run(&c, &r, &["check"]);
@@ -567,6 +570,7 @@ fn a_prose_only_lesson_pr_is_a_fail() {
     let code_pr = "diff --git a/src/x.rs b/src/x.rs\n+fn typed() {}\n";
     for (diff, want) in [(prose, "FAIL"), (check, "PASS"), (retire, "PASS"), (code_pr, "PASS")] {
         let c = ctx(&tmpdir("lesson-prose"), CONFIG);
+        let _sh = shed(&c);
         ev(
             &c,
             NOW - 2 * HOUR,
@@ -578,8 +582,7 @@ fn a_prose_only_lesson_pr_is_a_fail() {
         std::fs::write(&f, "PASS\n\nlooks fine\n").unwrap();
         let r = Fake::default()
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", &head)
-            .reply("gh pr diff issue-12 -R jirathip-dev/sendmeter", diff)
-            .reply("herdr agent list", NO_AGENTS);
+            .reply("gh pr diff issue-12 -R jirathip-dev/sendmeter", diff);
         let args = [
             "verdict",
             "sendmeter",
@@ -606,6 +609,7 @@ fn a_prose_only_lesson_pr_is_a_fail() {
     }
     // Not a lesson issue: a prose PR passes and its diff is never read.
     let c = ctx(&tmpdir("lesson-prose-impl"), CONFIG);
+    let _sh = shed(&c);
     ev(
         &c,
         NOW - 2 * HOUR,
@@ -615,9 +619,7 @@ fn a_prose_only_lesson_pr_is_a_fail() {
     );
     let f = c.state.with_file_name("verdict.md");
     std::fs::write(&f, "PASS\n").unwrap();
-    let r = Fake::default()
-        .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", &head)
-        .reply("herdr agent list", NO_AGENTS);
+    let r = Fake::default().reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", &head);
     let (code, out) = run(
         &c,
         &r,

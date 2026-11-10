@@ -58,9 +58,10 @@ fn preview_changes_nothing_and_apply_removes_only_build_folders() {
     std::fs::write(w.join("notes.md"), "x").unwrap();
     touch(&w.join("notes.md"), old);
     touch(&w, NOW); // the worktree folder's own mtime is no edit: the tests hold whatever the real clock says
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = || {
         git(Fake::default(), &w, old, "?? notes.md\0")
-            .reply("herdr agent list", NO_AGENTS)
             .reply("lsof", "")
             .reply("git -C", "")
     };
@@ -83,8 +84,9 @@ fn a_y_answer_applies() {
     let c = setup("reclaim-y");
     let w = lane(&c, 12);
     touch(&w, NOW);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = git(Fake::default(), &w, NOW - 8 * DAY, "")
-        .reply("herdr agent list", NO_AGENTS)
         .reply("lsof", "")
         .reply("git -C", "");
     let mut out = Vec::new();
@@ -109,11 +111,10 @@ fn busy_or_recent_worktrees_are_skipped() {
     let r = git(r, &live, old, "");
     let r = git(r, &edited, old, " M src/lib.rs\0");
     let r = git(r, &deleted, old, " D src/gone.rs\0");
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane("sendmeter-impl-2", "idle", "/elsewhere");
     let r = git(r, &moved, NOW - 2 * DAY, "")
-        .reply(
-            "herdr agent list",
-            &agents(&[("sendmeter-impl-2", "idle", "/elsewhere", "p1")]),
-        )
         .reply("lsof", &lsof)
         .reply("git -C", "");
     let (code, out) = run(&c, &r, &["reclaim", "--apply"]);
@@ -148,7 +149,9 @@ fn the_shared_build_folder_is_trimmed_past_its_budget_except_a_building_profile(
     let (building, idle) = (profile("sendmeter/debug"), profile("other/debug"));
     let held = std::fs::File::open(building.join(".cargo-lock")).unwrap();
     held.lock().unwrap(); // a cargo build running there
-    let r = || Fake::default().reply("herdr agent list", NO_AGENTS).reply("lsof", "");
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = || Fake::default().reply("lsof", "");
     let (code, out) = run(&c, &r(), &["reclaim"]);
     assert_eq!(code, 0, "{out}");
     assert!(

@@ -15,14 +15,14 @@ fn ev(c: &herdsman::Ctx, issue: u64, kind: &str, d: serde_json::Value) {
 fn spawn(c: &herdsman::Ctx, issue: u64, role: &str, agent: &str) {
     let w = c.worktrees.join("sendmeter").join(agent);
     std::fs::create_dir_all(&w).unwrap();
-    let d = json!({"role": role, "agent": agent, "worktree": w, "pane": format!("{agent}:p1"), "workspace": agent});
+    let d = json!({"role": role, "agent": agent, "worktree": w, "pane": agent, "runtime": "shed"});
     ev(c, issue, "spawn", d);
 }
 
 /// #651: a lane spawned on the remote host `air`.
 fn air_spawn(c: &herdsman::Ctx, issue: u64, role: &str, agent: &str) {
-    let d = json!({"role": role, "agent": agent, "worktree": format!("/Users/me/.herdr/worktrees/sendmeter/{agent}"),
-                   "pane": "w1:p1", "workspace": "w1", "host": "air", "machine": "air"});
+    let d = json!({"role": role, "agent": agent, "worktree": format!("/Users/me/worktrees/sendmeter/{agent}"),
+                   "pane": agent, "runtime": "shed", "host": "air", "machine": "air"});
     ev(c, issue, "spawn", d);
 }
 
@@ -63,14 +63,15 @@ fn setup(name: &str, budget_bytes: u64) -> (herdsman::Ctx, PathBuf) {
     (ctx(&d, &cfg), root.join(".scratch"))
 }
 
-fn budget(c: &herdsman::Ctx, r: &Fake) -> String {
-    let mut out = vec![];
-    herdsman::check::budget(c, &Config::load(&c.config).unwrap(), r, &mut out).unwrap();
+/// `check::budget`'s output, its lanes on `sh` (attached to `c`).
+fn budget(c: &herdsman::Ctx, sh: &FakeShed) -> String {
+    let (mut out, f) = (vec![], Fake::default());
+    herdsman::check::budget(c, &Config::load(&c.config).unwrap(), &sh.on(&f), &mut out).unwrap();
     String::from_utf8(out).unwrap()
 }
 
 /// An ended lane's scratch goes at drive's pass (merged, superseded by a later round, or unknown); an open issue's
-/// active lane, a live herdr agent and a building one keep theirs.
+/// active lane, a live agent and a building one keep theirs.
 #[test]
 fn drive_deletes_an_ended_lanes_scratch() {
     let (c, s) = setup("scratch-sweep", 1 << 40);
@@ -98,8 +99,10 @@ fn drive_deletes_an_ended_lanes_scratch() {
     std::fs::write(&lock, "").unwrap();
     let held = std::fs::File::open(&lock).unwrap();
     held.lock().unwrap(); // a cargo build running there
-    let r = Fake::default().reply("herdr agent list", &agents(&[("sendmeter-impl-14", "idle", "/x", "p")]));
-    let out = budget(&c, &r);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane("sendmeter-impl-14", "idle", "/x");
+    let out = budget(&c, &sh);
     let gone = dirs.each_ref().map(|d| !d.exists());
     assert_eq!(
         gone,
@@ -118,8 +121,9 @@ fn the_oldest_scratch_is_trimmed_over_budget() {
     let (old, new) = (blob(&s, "sendmeter-rev-9-r1"), blob(&s, "sendmeter-impl-13"));
     age(&old, 1_000);
     // #634: no live agent for either (spawned long ago); a live one's scratch is never trimmed (tests/shed.rs).
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
-    let out = budget(&c, &r);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let out = budget(&c, &sh);
     assert!(!old.exists() && new.exists(), "{out}");
     assert!(out.contains("builds: trimmed"), "{out}");
 }
@@ -170,12 +174,12 @@ fn clean_removes_stray_cargo_folders_and_claude_temp_dirs() {
     let claude = blob(&tmp, &format!("claude-501/{key}"));
     let other = blob(&tmp, "claude-501/-Users-me-elsewhere");
 
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = || {
         Fake::default()
-            .reply("herdr agent list", NO_AGENTS)
             .reply(&format!("git -C {wt} rev-list"), "0\n")
             .reply("git -C", "")
-            .reply("herdr", "{}")
     };
     let (code, dry) = run(&c, &r(), &["clean"]);
     assert_eq!(code, 0, "{dry}");
@@ -211,23 +215,23 @@ fn clean_removes_stray_cargo_folders_and_claude_temp_dirs() {
 }
 
 /// #651: a remote host `air` whose build-folder commands run here, in a shell with `home` as `$HOME`, against real
-/// folders: every ssh line naming its build root runs through `sh -c`, `df` answers `free_kb`, the rest (herdr, probes)
-/// is `fake`'s.
-struct Air {
-    fake: Fake,
+/// folders: every ssh line naming its build root runs through `sh -c`, `df` answers `free_kb`, its `shed connect` is
+/// `over`'s fake shed for air, the rest (probes) is `over`'s fake.
+struct Air<'a> {
+    over: OverSsh<'a>,
     free_kb: u64,
     home: PathBuf,
 }
 
 const AIR_ROOT: &str = "~/.cache/hs-651-air";
 
-impl herdsman::runner::Runner for Air {
+impl herdsman::runner::Runner for Air<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
         let line = args.iter().position(|a| a == "--").map(|i| args[i + 1..].join(" "));
         let Some(line) = line.filter(|_| prog == "ssh" && args.iter().any(|a| a == "air")) else {
-            return self.fake.run(prog, args);
+            return self.over.run(prog, args);
         };
-        self.fake.calls.borrow_mut().push(format!("ssh air -- {line}"));
+        self.over.f.calls.borrow_mut().push(format!("ssh air -- {line}"));
         if line.starts_with("'df'") {
             let df = format!(
                 "Filesystem 1024-blocks Used Available\n/dev/disk3 488000000 1 {}\n",
@@ -239,7 +243,7 @@ impl herdsman::runner::Runner for Air {
             });
         }
         if !line.contains(AIR_ROOT) {
-            return self.fake.run(prog, args);
+            return self.over.run(prog, args);
         }
         let o = std::process::Command::new("sh")
             .args(["-c", &line])
@@ -250,6 +254,12 @@ impl herdsman::runner::Runner for Air {
             stdout: String::from_utf8_lossy(&o.stdout).into(),
             stderr: String::from_utf8_lossy(&o.stderr).into(),
         })
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+        match args.iter().any(|a| a.contains("'shed' 'connect'")) {
+            true => self.over.run_in(prog, args, input),
+            false => self.run(prog, args),
+        }
     }
     fn sleep(&self, _: u64) {}
 }
@@ -268,23 +278,35 @@ fn air_setup(name: &str) -> (herdsman::Ctx, PathBuf, PathBuf) {
     (c, home, s)
 }
 
-fn tick(c: &herdsman::Ctx, home: &Path, air: &[(&str, &str, &str, &str)], free_kb: u64) -> (Air, String) {
-    let fake = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr --machine air agent list", &agents(air))
+/// One tick, air's shed running the `(name, status)` lanes; the calls the fake saw, and the tick's output.
+fn tick(c: &herdsman::Ctx, home: &Path, air: &[(&str, &str)], free_kb: u64) -> (Vec<String>, String) {
+    let sh = FakeShed::new();
+    sh.attach(c);
+    let air_sh = FakeShed::new();
+    air.iter().for_each(|(n, st)| air_sh.lane(n, st, "/x"));
+    let f = Fake::default()
         .reply(
             "herdr status",
             "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
         )
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "");
     let r = Air {
-        fake,
+        over: OverSsh {
+            f: &f,
+            hosts: vec![("air", &air_sh)],
+        },
         free_kb,
         home: home.into(),
     };
     let (code, out) = run(c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
-    (r, out)
+    assert!(
+        air_sh.methods().contains(&"ls".to_string()),
+        "air's lanes listed on its shed"
+    );
+    let calls = f.calls.borrow().clone();
+    (calls, out)
 }
 
 /// #651: one tick on a remote host with three scratch folders (a merged lane whose agent sits `done`, a working lane,
@@ -297,17 +319,12 @@ fn a_remote_hosts_ended_and_orphan_scratch_goes_at_the_tick() {
     air_spawn(&c, 13, "impl", "sendmeter-impl-13");
     let [ended, working, orphan] =
         ["sendmeter-impl-12", "sendmeter-impl-13", "sendmeter-rev-9-r1"].map(|a| blob(&s, &format!("{a}/debug")));
-    let air = [
-        ("sendmeter-impl-12", "done", "/x", "w1:p1"),
-        ("sendmeter-impl-13", "working", "/x", "w2:p1"),
-    ];
-    let (r, out) = tick(&c, &home, &air, 200 * 1_048_576);
+    let air = [("sendmeter-impl-12", "done"), ("sendmeter-impl-13", "working")];
+    let (calls, out) = tick(&c, &home, &air, 200 * 1_048_576);
     assert!(!ended.exists() && !orphan.exists(), "{out}");
     assert!(working.exists(), "a working lane's scratch stays: {out}");
     assert!(
-        r.fake
-            .calls
-            .borrow()
+        calls
             .iter()
             .any(|l| l.starts_with("ssh air -- 'sh' '-c'") && l.contains(".scratch")),
         "swept through air's runner"
@@ -341,9 +358,9 @@ fn a_host_short_of_disk_drops_non_working_scratch_largest_first() {
         sized("sendmeter-impl-14", 256),
     );
     let air = [
-        ("sendmeter-impl-13", "idle", "/x", "w1:p1"),
-        ("sendmeter-rev-13-r1", "done", "/x", "w2:p1"),
-        ("sendmeter-impl-14", "working", "/x", "w3:p1"),
+        ("sendmeter-impl-13", "idle"),
+        ("sendmeter-rev-13-r1", "done"),
+        ("sendmeter-impl-14", "working"),
     ];
     let (_, out) = tick(&c, &home, &air, 1_048_576);
     assert!(!small.exists() && !big.exists(), "{out}");

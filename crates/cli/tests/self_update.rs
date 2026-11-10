@@ -152,12 +152,14 @@ fn pause_and_resume_are_logged_and_pause_stops_the_job() {
 fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_closes_orphan_workspaces() {
     let d = tmpdir("clean-sched");
     let c = ctx(&d, CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let day = 86_400;
     let lane = |issue: u64, merged_at: u64| {
         let w = c.worktrees.join("sendmeter").join(format!("issue-{issue}"));
         std::fs::create_dir_all(&w).unwrap();
         let w = w.to_string_lossy().into_owned();
-        let d = json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": w, "pane": format!("w{issue}:p1"), "workspace": format!("w{issue}")});
+        let d = json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": w, "pane": format!("impl-{issue}"), "runtime": "shed"});
         append(&c.state, &Event::new(10, "sendmeter", Some(issue), "spawn", d)).unwrap();
         let m = json!({"pr": "1", "merge_sha": "m", "into": "staging"});
         append(&c.state, &Event::new(merged_at, "sendmeter", Some(issue), "merged", m)).unwrap();
@@ -179,10 +181,11 @@ fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_closes_orphan_work
         let f = all
             .iter()
             .fold(f, |f, w| f.reply(&format!("git -C {w} rev-list"), "0\n"));
-        f.reply("git -C", "").reply("herdr", "{}")
+        f.reply("git -C", "").reply("herdr workspace close", "{}")
     };
+    sh.lane("impl-21", "idle", &live);
+    // The lanes are shed's; the orphan-workspace sweep after them is herdr's alone (#721 drops it).
     let r = git(Fake::default()
-        .reply("herdr agent list", &agents(&[("impl-21", "idle", &live, "w21:p1")]))
         .reply("herdr workspace list", &ws.to_string())
         .once(&format!("git -C {dirty} status"), 0, "?? notes.md\n")
         .once_err(&format!("git -C {dirty} add -A"), 1, "add failed"));
@@ -205,16 +208,28 @@ fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_closes_orphan_work
         r.called("herdr workspace close wX") && !r.called("herdr workspace close wY"),
         "{out}"
     );
+    for w in &cleaned {
+        assert!(
+            r.called(&format!("git -C /tmp/does-not-matter/sendmeter worktree remove {w}")),
+            "{out}"
+        );
+    }
+    assert!(
+        !r.called(&format!("git -C /tmp/does-not-matter/sendmeter worktree remove {live}")),
+        "{out}"
+    );
     assert!(kinds(&c, "clean-failed").is_empty(), "a passing run alerts nothing");
-    cleaned.iter().for_each(|w| std::fs::remove_dir_all(w).unwrap()); // what the faked `herdr worktree remove` does
+    cleaned.iter().for_each(|w| std::fs::remove_dir_all(w).unwrap()); // what the faked `git worktree remove` does
 
     // The next run takes the rest (the live one has stopped, the dirty one is clean now); a failure alerts once, not
     // again while it repeats.
+    sh.remove("impl-21");
     let r = || {
-        git(Fake::default()
-            .reply("herdr agent list", NO_AGENTS)
-            .reply("herdr workspace list", &ws.to_string())
-            .once_err("herdr workspace close wX", 1, "server gone"))
+        git(Fake::default().reply("herdr workspace list", &ws.to_string()).once_err(
+            "herdr workspace close wX",
+            1,
+            "server gone",
+        ))
     };
     let (code, out) = run(&c, &r(), &["clean", "--scheduled"]);
     assert_eq!(code, 1, "{out}");
