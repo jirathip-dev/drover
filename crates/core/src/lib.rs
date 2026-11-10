@@ -2,6 +2,7 @@
 pub mod access;
 pub mod action;
 pub mod amend;
+pub mod arch;
 pub mod card;
 pub mod check;
 #[allow(clippy::doc_markdown)] // its doc comments are clap help text, printed verbatim

@@ -83,6 +83,47 @@ pub fn reap(r: &dyn Runner, dir: &Path, trim: bool, spare: Option<&str>) -> (Vec
     (first.into_iter().map(|p| p.1).collect(), kb / 1024)
 }
 
+/// #710: a process stuck on the Keychain: pid, seconds up, its parent's name (never an argument).
+pub type Stuck = (String, u64, String);
+
+/// #710: `security find-generic-password` readers up over 60 s and a `SecurityAgent` up over 10 min (troubleshooting §2);
+/// securityd and every other `security` verb never match.
+pub fn keychain_jam(r: &dyn Runner) -> (Vec<Stuck>, Option<Stuck>) {
+    let ps = stdout(r, "ps", &["-axo", "pid=,ppid=,etime=,command="]).unwrap_or_default();
+    let rows: Vec<Vec<&str>> = ps.lines().map(|l| l.split_whitespace().collect()).collect();
+    let name = |w: Option<&&str>| w.map_or("?", |w| w.rsplit('/').next().unwrap_or(w)).to_string();
+    let parent = |ppid: &str| name(rows.iter().find(|w| w.first() == Some(&ppid)).and_then(|w| w.get(3)));
+    let (mut readers, mut agent) = (vec![], None);
+    for w in rows.iter().filter(|w| w.len() > 3) {
+        let up = w[2].split(['-', ':']).rev().zip([1, 60, 3600, 86_400]);
+        let up: u64 = up.map(|(n, k)| n.parse::<u64>().unwrap_or(0) * k).sum();
+        let stuck = (w[0].to_string(), up, parent(w[1]));
+        match (name(w.get(3)).as_str(), w.get(4)) {
+            ("security", Some(&"find-generic-password")) if up > 60 => readers.push(stuck),
+            ("SecurityAgent", _) if up > 600 => agent = Some(stuck),
+            _ => {}
+        }
+    }
+    (readers, agent)
+}
+
+/// #710: `keychain_jam`'s readers and agent as one line, with troubleshooting §2's fix for those pids.
+pub fn jam_line((readers, agent): &(Vec<Stuck>, Option<Stuck>)) -> String {
+    let each: Vec<String> = readers.iter().map(|p| format!("{} ({})", p.0, p.2)).collect();
+    let pids: Vec<&str> = readers.iter().map(|p| p.0.as_str()).collect();
+    let oldest = readers.iter().map(|p| p.1).max();
+    let oldest = oldest.map_or(String::new(), |t| format!(", oldest {}", crate::events::age(t)));
+    let up = agent.as_ref().map_or(String::new(), |a| {
+        format!("; SecurityAgent {} up {}", a.0, crate::events::age(a.1))
+    });
+    format!(
+        "{} waiting over 60 s{oldest}: {}{up} → kill {} && kill \"$(pgrep -x SecurityAgent)\" (docs/troubleshooting.md §2)",
+        readers.len(),
+        each.join(", "),
+        pids.join(" ")
+    )
+}
+
 /// #248: the MB each agent's processes hold (those whose cwd is inside the agent's cwd).
 pub fn held(r: &dyn Runner, agents: &[&Value]) -> Vec<u64> {
     let (ps, rss) = (cwds(r), stdout(r, "ps", &["-axo", "pid=,rss="]).unwrap_or_default());

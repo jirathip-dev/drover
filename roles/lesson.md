@@ -11,6 +11,8 @@ that works; write rules last.
    error names the fix, then a behaviour test, and only last a docs line (a "don't X" rule).
    Your PR adds or changes at least one enforcer (a CI step, a test, a type, a lint rule, a lesson check); a PR that
    only edits prose is a FAIL in rev (herdsman records its PASS as one) unless it retires lines.
+   A layer crossing or a banned call is a `[[layer]]` or `[[ban]]` entry in `.herdsman/arch.toml` (its `reason`
+   names the mistake), which `herdsman arch-check` enforces in CI.
 4. Prove each new check fails on a real past mistake from the digest: apply that mistake, run the check, and put
    the command and its failing output in the PR body. Then show it passes on the fixed tree.
 5. Rules live in `.herdsman/rules.md` (a repo without one gets it from its first lesson run): at most 30 lines (CI

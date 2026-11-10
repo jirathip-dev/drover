@@ -440,7 +440,7 @@ fn brief(
     p: &Plan,
     title: &str,
     body: &str,
-    (fix, rules, repro): (Option<&str>, Option<&str>, bool),
+    (fix, rules, repro, play): (Option<&str>, Option<&str>, bool, Option<String>),
 ) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
     let contract = match p.family {
@@ -474,7 +474,15 @@ fn brief(
         (_, "rev", _) => include_str!("../roles/brief-repro-rev.md"),
         _ => include_str!("../roles/brief-repro-impl.md"),
     };
-    let contract = contract.trim_end().to_string() + "\n" + steps;
+    // #734: a `--perf` or `--refactor` issue's playbook.
+    let play = match (play.as_deref(), p.family, p.stage.as_str()) {
+        (None, ..) | (_, "design", _) | (_, "rev", "verify") => "",
+        (Some("perf"), "rev", _) => include_str!("../roles/brief-perf-rev.md"),
+        (Some("perf"), ..) => include_str!("../roles/brief-perf-impl.md"),
+        (_, "rev", _) => include_str!("../roles/brief-refactor-rev.md"),
+        _ => include_str!("../roles/brief-refactor-impl.md"),
+    };
+    let contract = contract.trim_end().to_string() + "\n" + steps + play;
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
     // #733: the shared rules pack, then (#419) the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
@@ -741,7 +749,8 @@ pub const OWN_FILES: &[&str] = &[
     ".mcp.lane.json",
     "verdict.md",
     ".review-brief.md",
-    "why.md", // #677: herdsman attaches it as a note; never committed
+    "why.md",              // #677: herdsman attaches it as a note; never committed
+    ".verify-browser.mjs", // #731: scripts/verify-browser.mjs, for the verify lane's recipe
 ];
 
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
@@ -1333,6 +1342,7 @@ pub fn spawn(
                     fix,
                     on.read(&p.worktree.join(".herdsman/rules.md")).as_deref(),
                     crate::queue::repro(&events, fleet, issue),
+                    crate::queue::playbook(&events, fleet, issue),
                 ),
             ),
         )
@@ -1344,6 +1354,10 @@ pub fn spawn(
         herdr::workspace_rename(r, &ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
     }
     on.write(&p.brief, &brief_text).context("writing the brief")?;
+    if p.role == "verify" {
+        let vb = include_str!("../../../scripts/verify-browser.mjs");
+        on.write(&p.worktree.join(".verify-browser.mjs"), vb)?;
+    }
     if on.machine.is_none() {
         copy_included(&f.local_path(), &p.worktree)?;
     }

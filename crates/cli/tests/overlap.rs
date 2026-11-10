@@ -950,3 +950,83 @@ fn cap_prints_the_queue_wide_view() {
         assert!(out.contains(want), "{want:?} in\n{out}");
     }
 }
+
+/// git and `sh` run for real (a fleet's cap script), the rest is scripted.
+struct Shell(Mixed);
+
+impl Runner for Shell {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        if prog == "sh" {
+            return Real.run(prog, args);
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+/// #754: `repos` with `key` (a `premerge` or `cap_script` line) in the fleet, `script` as `scripts/line-cap.sh`,
+/// `src/a.rs` (10 lines) and `web/ts/b.ts` (5) on staging, and `issue-4` adding `web/ts/c.ts` (3) as open PR #14.
+fn script_repos(name: &str, key: &str, script: &str) -> (herdsman::Ctx, Shell) {
+    let (d, seed, _, _) = repos(name);
+    for dir in ["src", "web/ts", "scripts"] {
+        std::fs::create_dir_all(seed.join(dir)).unwrap();
+    }
+    std::fs::write(seed.join("scripts/line-cap.sh"), script).unwrap();
+    std::fs::write(seed.join("web/ts/b.ts"), "1\n2\n3\n4\n5\n").unwrap();
+    commit(&seed, "src/a.rs", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n", "staging");
+    git(&seed, &["checkout", "-q", "-B", "issue-4", "staging"]);
+    commit(&seed, "web/ts/c.ts", "1\n2\n3\n", "issue-4");
+    git(&seed, &["checkout", "-q", "staging"]);
+    let config = CONFIG.replace("/tmp/does-not-matter/sendmeter", d.join("local").to_str().unwrap());
+    let c = ctx(
+        &d,
+        &config.replace(
+            "integration = \"staging\"",
+            &format!("integration = \"staging\"\n{key}"),
+        ),
+    );
+    let pr = json!({"number": 14, "state": "OPEN", "baseRefName": "staging", "body": "src/ net +0 (budget +0)"});
+    let r = Shell(Mixed(Fake::default().reply("gh pr view issue-4", &pr.to_string())));
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "4"]).0, 0);
+    (c, r)
+}
+
+/// #754: a repo whose `premerge` cap script also counts TypeScript: `herdsman cap` shows the script's total, each
+/// open PR's net by the script on its merge, and projects and raises from that count, not the built-in Rust one.
+#[test]
+fn cap_uses_the_fleets_own_cap_script() {
+    let script = "n=$(cat src/*.rs web/ts/*.ts | grep -c .)\necho \"line cap: $n / cap 100\"\n[ \"$n\" -le 100 ]\n";
+    let (c, r) = script_repos("cap-script", "premerge = [\"sh scripts/line-cap.sh\"]", script);
+    let (code, out) = run(&c, &r, &["cap", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    for want in [
+        "sendmeter: line cap 15 / cap 100 at staging",
+        "headroom 85\n",
+        "  #4 (PR #14): +3 (script)",
+        "sum of open PRs: +3; projected total 18 / cap 100, headroom 82",
+        "ask options: 1. raise line cap to 518 in one conductor-filed issue (recommended) 2. trim",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+}
+
+/// #754: a `cap_script` that prints two caps: each is shown, projected and raised with its own headroom.
+#[test]
+fn cap_shows_each_cap_a_script_prints() {
+    let script = "echo \"src: $(cat src/*.rs | grep -c .) / cap 100\"\necho \"apple_cap: $(cat web/ts/*.ts | grep -c .) / cap 6\"\n";
+    let (c, r) = script_repos("cap-two", "cap_script = \"sh scripts/line-cap.sh\"", script);
+    let (code, out) = run(&c, &r, &["cap", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    for want in [
+        "sendmeter: src 10 / cap 100 at staging",
+        "headroom 90\n",
+        "sendmeter: apple_cap 5 / cap 6 at staging",
+        "headroom 1\n",
+        "  #4 (PR #14): +0 src, +3 apple_cap (script)",
+        "src: sum of open PRs: +0; projected total 10 / cap 100, headroom 90",
+        "apple_cap: sum of open PRs: +3; projected total 8 / cap 6, headroom -2",
+        "ask options: 1. raise apple_cap to 508 in one conductor-filed issue (recommended) 2. trim",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+}

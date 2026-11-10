@@ -570,6 +570,21 @@
       await wait();
       if ($('.fv').ariaPressed !== 'true' || !$('.chat>.now .blk.run')) early.push('[full conversation]: not pressed, or no tool run shown');
     },
+    // #750: a lane whose transcript is an ACP session's (shed's `> prompt`, `[tool] title (status)`, the reply, as
+    // crates/cli/tests/golden/screens/acp.txt): its text on separate lines, each tool one line, its rest behind a tap.
+    'sheet-acp': async () => {
+      const lines = ['> # Brief — acme-web-impl-41 (acme/acme-web#41)', 'Implement #41: dark-mode toggle persists across reloads.', 'Run `pnpm test` before you push.',
+        '[tool] Read src/settings/store.ts (completed)', '[tool] Edit src/settings/store.ts (completed)',
+        '[tool] `cd /srv/acme/worktrees/acme-web-impl-41 && pnpm test settings --reporter=dot 2>&1 | tee test.log`', '`git add -A && git commit -m "settings: keep the theme across reloads (#41)"` (completed)',
+        '[tool] git push -u origin issue-41 (failed)', 'The theme now loads from storage before the first paint.', 'Tests pass; the push was refused, so I stopped there.'];
+      window.fetch = (u, o) => String(u).includes('lane/') ? Promise.resolve(Response.json({ harness: 'claude', lines, live: 0 })) : F(u, o);
+      tab('lanes');
+      open($('.lane[data-agent="acme-web-impl-41"]'));
+      await wait();
+      const txt = [...$$('.chat>.now>.txt')], tools = [...$$('.chat>.now>.blk.run')];
+      if (txt.length !== 2 || getComputedStyle(txt[0]).whiteSpace !== 'pre-wrap' || txt[0].offsetHeight < 3 * parseFloat(getComputedStyle(txt[0]).lineHeight)) early.push(`text: ${txt.length} blocks, not 2 on separate lines`);
+      if (tools.length !== 4 || tools.some(t => t.open || t.querySelector('.cmd').offsetHeight > 1.5 * parseFloat(getComputedStyle(t.querySelector('.cmd')).lineHeight))) early.push(`tools: ${tools.length}, not 4 closed one-line rows`);
+    },
     // #83: the demo's parked lane (no pane, its work on PR #15): the card's parked line, [clean] disabled with its
     // reason in p.st, [stop]/[kill] hidden, and nothing in the sheet in the red (danger) colour.
     'sheet-parked': async () => {
@@ -1124,7 +1139,7 @@
   const ERR = 'error: herdsman: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-garden': 0, 'herd-garden-busy': 0, 'herd-garden-held': 0, 'herd-garden-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
-  const ROOTS = { 'loading-tap': () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { 'loading-tap': () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], 'sheet-acp': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql, .lko', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.
