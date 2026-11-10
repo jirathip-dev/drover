@@ -15,30 +15,33 @@ use std::path::{Path, PathBuf};
 /// Poll and cache period of the meter and the balance.
 const POLL: u64 = 600;
 
-/// Seconds `account`'s lanes ran in the `window` before `now`: each spawn until its issue is merged or cleaned,
-/// its lane-dead, a supersede of it, or its next spawn (a lane still running counts until `now`).
+/// When spawn `events[i]`'s lane ended (None: it runs): its issue merged, closed or cleaned, its lane-dead, its ACP
+/// session gone (#785), a supersede of it, or its next spawn.
+pub fn lane_end(events: &[Event], i: usize) -> Option<u64> {
+    let s = &events[i];
+    let a = s.str("agent").unwrap_or_default();
+    let ends = |e: &&Event| match e.kind.as_str() {
+        "merged" | "clean" | "closed" | "closed-other" => e.fleet == s.fleet && s.issue.is_some() && e.issue == s.issue,
+        "lane-dead" => e.fleet == s.fleet && e.str("key").is_some_and(|k| k.ends_with(&format!(":{a}"))),
+        "lane-state" => e.str("agent") == Some(a) && e.str("state") == Some("gone"),
+        "supersede" => {
+            e.str("agent") == Some(a) || e.data["killed"].as_array().is_some_and(|k| k.iter().any(|n| n == a))
+        }
+        "spawn" => e.str("agent") == Some(a),
+        _ => false,
+    };
+    events[i + 1..].iter().find(ends).map(|e| e.ts)
+}
+
+/// Seconds `account`'s lanes ran in the `window` before `now`, each spawn until its `lane_end` (else `now`).
 pub fn lane_secs(events: &[Event], account: &str, now: u64, window: u64) -> u64 {
     let from = now.saturating_sub(window);
     let spawns = events
         .iter()
         .enumerate()
         .filter(|(_, e)| e.kind == "spawn" && e.str("account") == Some(account));
-    spawns
-        .map(|(i, s)| {
-            let a = s.str("agent").unwrap_or_default();
-            let ends = |e: &&Event| match e.kind.as_str() {
-                "merged" | "clean" => e.fleet == s.fleet && s.issue.is_some() && e.issue == s.issue,
-                "lane-dead" => e.fleet == s.fleet && e.str("key").is_some_and(|k| k.ends_with(&format!(":{a}"))),
-                "supersede" => {
-                    e.str("agent") == Some(a) || e.data["killed"].as_array().is_some_and(|k| k.iter().any(|n| n == a))
-                }
-                "spawn" => e.str("agent") == Some(a),
-                _ => false,
-            };
-            let end = events[i + 1..].iter().find(ends).map_or(now, |e| e.ts).min(now);
-            end.saturating_sub(s.ts.max(from))
-        })
-        .sum()
+    let end = |i| lane_end(events, i).unwrap_or(now).min(now);
+    spawns.map(|(i, s)| end(i).saturating_sub(s.ts.max(from))).sum()
 }
 
 /// `5h 1.5 · 7d 12.0 herdsman lane-hours`: what herdsman ran, not Anthropic's quota.
@@ -200,22 +203,18 @@ pub type Shown = (Vec<(String, f64)>, Option<String>);
 #[allow(clippy::unnecessary_wraps)]
 pub fn shown(r: &dyn Runner, m: &Meter, _login: &str, now: u64) -> Result<Shown, String> {
     let mut parts = vec![];
-    if let Some((p, t)) = m.session {
-        let read = now.saturating_sub(m.ts);
-        let read = if read < 60 {
-            String::new()
-        } else {
-            format!(", read {} ago", age(read))
-        };
-        parts.push((
-            format!("session {p:.0}% (resets {}{read})", age(t.saturating_sub(now))),
-            p,
-        ));
+    let read = Some(now.saturating_sub(m.ts)).filter(|s| *s >= 60);
+    let read = read.map_or(String::new(), |s| format!(", read {} ago", age(s)));
+    // #785: a window past its reset reads as reset (0%).
+    let live = |(p, t): (f64, u64), when: String| (t > now).then(|| (p, format!("resets {when}")));
+    let live = |w, when| live(w, when).unwrap_or((0.0, "reset".into()));
+    if let Some((p, s)) = m.session.map(|w| live(w, age(w.1.saturating_sub(now)))) {
+        parts.push((format!("session {p:.0}% ({s}{read})"), p));
     }
-    if let Some((p, t)) = m.week {
-        parts.push((format!("week {p:.0}% (resets {})", date(r, t, "+%a %H:%M")), p));
+    if let Some((p, s)) = m.week.map(|w| live(w, date(r, w.1, "+%a %H:%M"))) {
+        parts.push((format!("week {p:.0}% ({s})"), p));
     }
-    let pace = m.week.and_then(|w| out_at(w, now)).map(|t| {
+    let pace = m.week.filter(|w| w.1 > now).and_then(|w| out_at(w, now)).map(|t| {
         let s = date(r, t, "+%a %H");
         let part = |h: u32| {
             ["night", "morning", "afternoon", "evening"][match h {

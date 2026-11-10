@@ -350,10 +350,7 @@ fn meter_is_the_newest_status_line_row_fresh_or_stale() {
         out.contains("session 41% (resets 59m, read 60s ago) · week 63%"),
         "{out}"
     );
-    assert!(
-        out.contains("session 12% (resets 0s, read 60m ago) · week 30%"),
-        "{out}"
-    );
+    assert!(out.contains("session 0% (reset, read 60m ago) · week 30%"), "{out}");
     // #707: A's newest row is 700 s old and there is no poll: it is still the reading, with its age.
     std::fs::remove_file(d.join("state/usage.jsonl")).unwrap();
     row(&c, "A", c.now - 700, 41.0, 63.0);
@@ -387,4 +384,20 @@ fn headroom_picking_takes_the_most_headroom() {
     row(&c, "A", c.now - 4000, 90.0, 10.0);
     row(&c, "B", c.now, 20.0, 30.0);
     assert_eq!(dry(&headroom), "A");
+}
+
+#[test]
+fn a_reading_past_its_reset_reads_as_reset_with_its_age() {
+    let d = tmpdir("usage-785-reset");
+    let c = ctx(&d, &config(&d));
+    // #785: A's last reading is 4 days old: both windows reset since (88%, 88%).
+    row(&c, "A", c.now - 4 * 86400, 88.0, 88.0);
+    let (code, out) = run(&c, &Fake::default().reply("date -r", "Mon 19\n"), &["accounts"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("session 0% (reset, read 4d ago) · week 0% (reset)"),
+        "{out}"
+    );
+    assert!(out.contains("ok: 5h 0%, 7d 0%"), "{out}");
+    assert!(!out.contains("88%"), "{out}");
 }

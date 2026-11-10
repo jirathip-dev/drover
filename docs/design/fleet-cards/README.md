@@ -73,7 +73,7 @@ The bar colours come only from the existing accent tokens.
    path exists for them today. `herdsman set` only writes role keys (harness/model/profile/effort), and the web only
    writes model/effort. Also, rounds, stall and ask-default are **global** `[limits]` for all fleets, not per fleet,
    and the line cap lives in the repo's `ci/cap.toml` (behind the owner-OK rule). The mockup shows them read-only.
-   **Recommend: read-only now.** If you want them editable, that is a separate issue: a `herdsman set --limit`
+   **Recommend: read-only now.** If you want them editable, that is a separate issue: a new herdsman set --limit flag
    with its own validation and event.
 2. **`models` is unset in your `fleet.toml`.** So the web model picker offers only the current value, and any
    change is refused `BAD_VALUE` (`set` checks against `models`). The mockup shows the pickers as they would look
