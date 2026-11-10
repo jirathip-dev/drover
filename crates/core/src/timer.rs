@@ -251,6 +251,23 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     }
     let mark = ctx.state.with_file_name("tick.step");
     let pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now)));
+    // #791: `tick.beat` (`<started> <beat>`) each minute while the tick runs: `running` reads it.
+    let (beat, since, t0) = (
+        ctx.state.with_file_name("tick.beat"),
+        ctx.now,
+        std::time::Instant::now(),
+    );
+    let at = beat.clone();
+    let write = move || {
+        let _ = std::fs::write(&at, format!("{since} {}", since + t0.elapsed().as_secs()));
+    };
+    write();
+    let (stop, rx) = std::sync::mpsc::channel::<()>();
+    let beating = std::thread::spawn(move || {
+        while rx.recv_timeout(std::time::Duration::from_secs(60)) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+            write();
+        }
+    });
     let loaded = crate::check::config(ctx); // #709: `config-invalid` once per error
     let res = loaded.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|cfg| {
         pass.step("herdr status");
@@ -279,6 +296,9 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         driven
     });
     let _ = std::fs::remove_file(&mark);
+    drop(stop);
+    let _ = beating.join();
+    let _ = std::fs::remove_file(&beat);
     let (cfg, events) = (loaded.unwrap_or_default(), read(&ctx.state).unwrap_or_default());
     match res {
         Err(e) if e.downcast_ref::<crate::gate::Refusal>().is_some() => writeln!(out, "tick: {e}")?,
@@ -295,6 +315,20 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         alert(ctx, &cfg, &events, "service-red", &item, &why)?;
     }
     Ok(0)
+}
+
+/// #791: the running tick's start, while its `tick.beat` is at most 2 tick intervals old; `None`: no tick runs, or
+/// it stalled (no heartbeat for over 2 intervals: stuck).
+pub fn running(ctx: &Ctx, cfg: &Config) -> Option<u64> {
+    let text = std::fs::read_to_string(ctx.state.with_file_name("tick.beat")).ok()?;
+    let mut w = text.split_whitespace().map(|x| x.parse::<u64>().ok());
+    let (since, beat) = (w.next()??, w.next()??);
+    (ctx.now <= beat + stuck_secs(cfg)).then_some(since)
+}
+
+/// #791: 2 tick intervals: no pass started and no heartbeat for longer reads stuck.
+pub fn stuck_secs(cfg: &Config) -> u64 {
+    2 * cfg.limits.slow_secs
 }
 
 /// #561: a tick still running 10 min after it started (its `tick.step`): `tick-stuck` once, naming the step and the
