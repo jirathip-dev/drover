@@ -94,6 +94,15 @@ pub const TURN_BLOCKED: &str = "reported blocked: ";
 /// #511: a nudged `done` with still no push is blocked after this long (or at its next `done`).
 const NUDGE_SECS: u64 = 600;
 
+/// #785: the issue's lane, since its latest spawn, logged `lane-failed-start`.
+fn failed_start(events: &[Event], s: &IssueState) -> bool {
+    let Some(sp) = s.lane.as_deref().and_then(|l| last_spawn(events, l)) else {
+        return false;
+    };
+    let hit = |e: &Event| e.kind == "lane-failed-start" && e.ts >= sp.ts && e.str("agent") == sp.str("agent");
+    events.iter().any(hit)
+}
+
 /// #511: the build lane's latest `herdsman turn` since its spawn and any extra round the owner gave.
 pub fn turn<'a>(events: &'a [Event], s: &IssueState) -> Option<&'a Event> {
     let sp = last_spawn(events, s.build.as_ref().and_then(|b| s.lanes.get(b))?)?;
@@ -537,6 +546,7 @@ fn waits(
             s.last_ts,
             cmd("spawn", &format!(" {}", p.role(build).unwrap_or(p.start()))),
         ),
+        "impl" | "fix" if failed_start(events, s) => w("owner", "failed start (no event back)", s.last_ts, None),
         "impl" | "fix" => w("none", "idle without pushing (check the pane)", s.last_ts, None),
         "design" => {
             // #730: the stage's lane is the architect's or the designer's.

@@ -227,6 +227,17 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let to = (u.fleet.as_str(), u.issue);
         fire(ctx, cfg, out, &events, to, "answer-undelivered", d.into())?;
     }
+    // #785: an ACP lane silent after its first turn is a failed start, not idle: once per start, naming its account.
+    let silent = crate::shed::silent(ctx, cfg.limits.acp_start_minutes).into_iter();
+    for (sp, agent, at) in silent.filter_map(|(a, at)| Some((last_spawn(&events, &a)?, a, at))) {
+        let on = sp.str("account").map_or("its login".into(), |a| format!("account {a}"));
+        let why = format!(
+            "{agent}: failed start on {on}, no event {} after its first turn",
+            age(ctx.now - at)
+        );
+        let d = json!({"key": format!("{agent}:{at}"), "agent": agent, "account": sp.str("account"), "reason": why});
+        fire(ctx, cfg, out, &events, (&sp.fleet, sp.issue), "lane-failed-start", d)?;
+    }
     for s in fold(&events).values().filter(|s| !s.done()) {
         let idle = ctx.now.saturating_sub(s.last_ts);
         let mut hits = vec![];

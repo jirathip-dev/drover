@@ -64,6 +64,8 @@ fn account_rows(cfg: &Config, rows: &mut Vec<String>) {
         |c| format!("the account_env helper `{c}`"),
     );
     rows.push(format!("✓ accounts — sign in from {src}"));
+    // #785: ACP lanes write no meter reading; only an interactive status line does.
+    rows.push("✓ meter — `accounts` shows each reading's age; one past its reset reads 0%".into());
     let on = |n: &&&str| {
         matches!(
             crate::harness::get(n).credential(),

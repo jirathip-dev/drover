@@ -155,11 +155,12 @@ impl Harness for Claude {
     fn acp_env(&self, model: Option<&str>, _effort: Option<&str>) -> Vec<(&'static str, String)> {
         model.map(|m| ("ANTHROPIC_MODEL", m.to_string())).into_iter().collect()
     }
-    /// #683: Claude Code keeps the folder's account in `.claude.json` (`oauthAccount`) while it is signed in.
-    fn signed_in(&self, dir: &Path) -> bool {
-        let v = std::fs::read_to_string(dir.join(".claude.json")).ok();
-        v.and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok())
-            .is_some_and(|v| v["oauthAccount"].is_object())
+    /// #785: `claude auth status` in the folder, the shell's token unset (a stale login file is no sign-in).
+    fn signed_in(&self, r: &dyn Runner, dir: &Path) -> Option<bool> {
+        let dir = format!("CLAUDE_CONFIG_DIR={}", dir.display());
+        let a = ["-u", "CLAUDE_CODE_OAUTH_TOKEN", &dir, "claude", "auth", "status"];
+        let o = r.run("env", &crate::runner::argv(&a)).ok()?;
+        serde_json::from_str::<serde_json::Value>(&o.stdout).ok()?["loggedIn"].as_bool()
     }
     /// claude-agent-acp reads Claude Code's local project settings and `CLAUDE.local.md`.
     fn acp_profile(&self, settings: &str, role: &str) -> String {
