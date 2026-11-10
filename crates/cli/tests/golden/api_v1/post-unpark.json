@@ -1,0 +1,14 @@
+{
+  "response": {
+    "code": "STALE",
+    "message": "fleet.toml changed since the page was rendered; reload and retry",
+    "ok": false
+  },
+  "route": "POST /api/v1/unpark",
+  "schema": {
+    "code": "string",
+    "message": "string",
+    "ok": "boolean"
+  },
+  "type": "Reply"
+}

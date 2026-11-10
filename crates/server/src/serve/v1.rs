@@ -11,7 +11,10 @@ use crate::api::{
     IssueView, Lane, LaneChat, LessonFleet, LessonRun,
 };
 use crate::api::{Handoff, HandoffChoice, HandoffFrom, LastLine, RepoThread, RepoThreads};
-use crate::api::{Lessons, Marks, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict, WhyNote};
+use crate::api::{
+    Lessons, Marks, NeedsTab, PendingStart, QueueTab, Queued, Reply, Repro, Roles, Row, SetupScreen, State, Verdict,
+    WhyNote,
+};
 use crate::events::plain;
 use anyhow::{bail, Context};
 use serde::Serialize;
@@ -122,7 +125,7 @@ impl Server<'_> {
                 )
             }
             // #269: the needs cards, Lanes and [chat], as this device sees them; a thread's older messages.
-            ("GET", Some("needs")) => out("200 OK", &self.needs_tab(ctx, paired)),
+            ("GET", Some("needs")) => out("200 OK", &pending_cards(ctx, self.needs_tab(ctx, paired))),
             ("GET", Some("lanes")) => out("200 OK", &self.unsaved(ctx, self.lanes_tab(ctx, paired))),
             ("GET", Some("chat")) => {
                 let (mut c, ev) = (
@@ -411,6 +414,8 @@ impl Server<'_> {
                     _ => b.clone(),
                 })
                 .collect(),
+            pending: crate::pending::of(&events, f, i.issue).map(start),
+            status: crate::pending::of(&events, f, i.issue).and_then(|p| p.line(ctx.now)),
         };
         let seen = crate::hosts::cached(ctx);
         let host = |(name, h): (String, Option<&crate::config::HostCfg>)| {
@@ -547,7 +552,41 @@ fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
         issue: n,
         verdicts,
         why,
+        pending: crate::pending::of(&ev, fleet, n).map(start),
     }
+}
+
+/// #778: a pending start as API v1 sends it.
+fn start(p: crate::pending::Pending) -> PendingStart {
+    PendingStart {
+        action: p.action,
+        since: p.since,
+        reason: p.reason,
+    }
+}
+
+/// #778: the needs cards less each pending start's; one back (refused, or 30 min unstarted) is a plain card naming why.
+fn pending_cards(ctx: &Ctx, mut tab: NeedsTab) -> NeedsTab {
+    let ev = shared(&ctx.state).unwrap_or_default();
+    let back = |f: &str, n| crate::pending::of(&ev, f, n).filter(|p| p.back(ctx.now));
+    tab.issues
+        .retain(|i| crate::pending::of(&ev, &i.fleet, i.issue).is_none() || back(&i.fleet, i.issue).is_some());
+    let mut st = ev.states.clone();
+    st.retain(|(f, n), _| back(f, *n).is_some() && !tab.issues.iter().any(|i| i.fleet == *f && i.issue == *n));
+    // As a failed extend's card (the issue left needs-human with its round).
+    for s in st.values_mut() {
+        s.last_event = "extend-failed".into();
+    }
+    tab.issues
+        .extend(Server::needs_human(ctx, Config::kept(ctx).ok().as_ref(), &ev, &st));
+    for (i, p) in tab
+        .issues
+        .iter_mut()
+        .filter_map(|i| back(&i.fleet, i.issue).map(|p| (i, p)))
+    {
+        (i.why, i.pending) = (p.why(ctx.now), false);
+    }
+    tab
 }
 
 /// #576: `lessons`: each fleet's setting, its newest lesson lane's issue and when `tick` runs the next.

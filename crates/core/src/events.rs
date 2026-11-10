@@ -388,6 +388,8 @@ pub fn checks(e: &Event) -> bool {
 
 /// Events `herdsman check` and notifiers write about an issue; they are not activity.
 pub const PASSIVE: &[&str] = &[
+    // #778: a tapped start still waiting; the decision before it moved the issue.
+    "pending-action",
     "lane-state",
     "lesson-prompted",
     // #511: a lane's typed turn end and drive's prompt on it; neither moves the issue.
@@ -836,7 +838,8 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
             "design-approved" | "design-revise" => (s.state, s.lane) = ("queued".into(), None),
             "design-rejected" => (s.state, s.lane) = ("needs-human".into(), None),
             // #500: a false `LANE_ENDS` park undone: the state before it. #639: back in the queue, its build lane ends.
-            "repaired" => {
+            // #712: the owner's `unpark`: the state before the park, the same way.
+            "repaired" | "unparked" => {
                 s.state = e.str("state").map_or(s.state.clone(), String::from);
                 if let Some(b) = s.build.take().filter(|_| s.state == "queued") {
                     s.lanes.remove(&b);

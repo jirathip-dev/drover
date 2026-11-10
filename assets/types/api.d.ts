@@ -92,7 +92,11 @@ export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolea
 /**
  * #630: each lane's workspace root and unsaved work.
  */
-unsaved: Array<LaneUnsaved>, };
+unsaved: Array<LaneUnsaved>, 
+/**
+ * #712: fleet.toml's mtime, for a row's [unpark] form.
+ */
+mtime: string, };
 
 /**
  * A state section (`tone`) and its repo groups.
@@ -107,7 +111,11 @@ export type LaneRepo = { name: string, lanes: Array<LaneRow>, };
  * conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its
  * fleet is not configured), `dead` and the blocked card.
  */
-export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, runtime: string, host: string, where: string, };
+export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, 
+/**
+ * #712: its issue is parked: the fleet its [unpark] posts to.
+ */
+unpark?: string | null, runtime: string, host: string, where: string, };
 
 /**
  * #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.
@@ -254,7 +262,17 @@ export type Queued = { fleet: string, issue: number, title?: string | null, stat
 /**
  * #667: its blockers in another fleet or repo, as `owner/repo#N`.
  */
-blocked_on: Array<string>, };
+blocked_on: Array<string>, 
+/**
+ * #778: a tapped start waiting for its lane, and the row's `starting, waiting for host: <reason> · <age>`.
+ */
+pending?: PendingStart | null, status?: string | null, };
+
+/**
+ * #778: a card tap's lane start not begun yet: its `action` (extend, answer, approve, revise), since when, the last
+ * refusal `reason` (a code; a hard one with its words).
+ */
+export type PendingStart = { action: string, since: number, reason?: string | null, };
 
 /**
  * `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
@@ -437,7 +455,7 @@ export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null
 /**
  * #576: API v1's `issue/<fleet>/<n>`: its recorded verdicts, newest first; #677: its latest why note.
  */
-export type IssueView = { fleet: string, issue: number, verdicts: Array<Verdict>, why?: WhyNote | null, };
+export type IssueView = { fleet: string, issue: number, verdicts: Array<Verdict>, why?: WhyNote | null, pending?: PendingStart | null, };
 
 /**
  * #677: the issue's latest why note: the round head it is on, its round and its `Owner:` line.

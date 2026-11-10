@@ -123,7 +123,24 @@ enum Cmd {
         why: Option<String>,
     },
     /// Owner only: park a needs-human issue (its card's [park]); the card clears
-    Park { fleet: String, issue: u64 },
+    Park {
+        fleet: String,
+        issue: u64,
+        /// Why it is parked: `queue ls` and the board show it
+        #[arg(long)]
+        why: Option<String>,
+        /// Who parked it, as the log shows it
+        #[arg(long, default_value = "owner")]
+        by: String,
+    },
+    /// Owner only: a parked issue back to the state it had, in its queue place (else last); logs `unparked`
+    Unpark {
+        fleet: String,
+        issue: u64,
+        /// Who unparked it, as the log shows it
+        #[arg(long, default_value = "owner")]
+        by: String,
+    },
     /// Hold for a decision: log it, notify the fleet with numbered options and the answer command, print its id
     #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Ask {
@@ -846,8 +863,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`).
-pub const HELP_AGENT_MAX: usize = 346;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`, +6 for #712's `unpark` and `park --why`/`--by`).
+pub const HELP_AGENT_MAX: usize = 352;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -1120,11 +1137,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     "FLEET", "ISSUE", "STATE", "LANE", "AGE", head
                 )?;
                 for (s, skip) in rows.into_iter().zip(skips) {
-                    let w = waits
+                    // #778: a tapped start waiting for its lane says so first.
+                    let pending = crate::pending::of(&events, &s.fleet, s.issue).and_then(|p| p.line(ctx.now));
+                    let wait = waits
                         .iter()
                         .flatten()
-                        .find(|(x, _)| x.fleet == s.fleet && x.issue == s.issue)
-                        .map(|w| w.1.what.clone())
+                        .find(|(x, _)| x.fleet == s.fleet && x.issue == s.issue);
+                    let w = pending
+                        .or_else(|| wait.map(|w| w.1.what.clone()))
                         .or(skip)
                         .or_else(|| {
                             let e = events.iter().rev().find(|e| e.is("spawn", &s.fleet, s.issue))?;
@@ -1285,6 +1305,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 if r["needs"].as_array().is_some_and(|n| !n.is_empty()) {
                     on += &format!("  needs {}", r["needs"].to_string().replace(['[', ']', '"'], ""));
                 }
+                if let Some(w) = r["why"].as_str() {
+                    on += &format!("  parked: {w}");
+                }
                 let n = |k: &str| r[k].as_u64().unwrap_or_default();
                 writeln!(
                     out,
@@ -1330,7 +1353,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Check => check::config(ctx)?, // #709
                 _ => Config::load(&ctx.config)?,
             };
-            // #561: check, clean and drive probe each remote host once and bound every remote call.
+            // #561: check, clean, drive (#678: and reclaim) probe each remote host once and bound every remote call.
             let fast = matches!(cmd, Cmd::Drive { fast: true, .. });
             let pass = if fast {
                 crate::hosts::Pass::fast(r)
@@ -1338,7 +1361,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 crate::hosts::Pass::new(r, None)
             };
             let r: &dyn Runner = match cmd {
-                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } => &pass,
+                Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } | Cmd::Reclaim { .. } => &pass,
                 _ => r,
             };
             let kick = |f: &str, n, why| {
@@ -1607,6 +1630,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         });
                     }
                     rows.retain(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet));
+                    for w in &mut rows {
+                        // #778: a tapped start waiting for its lane, as `status` says it.
+                        if let Some(l) = crate::pending::of(&events, &w.fleet, w.issue).and_then(|p| p.line(ctx.now)) {
+                            (w.who, w.what) = ("drive", l);
+                        }
+                    }
                     let slots = crate::drive::holders(ctx);
                     if !json && !slots.is_empty() {
                         writeln!(out, "slots: {slots}")?;
@@ -1653,7 +1682,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if scheduled {
                         return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
                     }
-                    check::clean(ctx, &cfg, r, out, fleet.as_deref(), (None, lane.as_deref(), false), yes)?;
+                    let what = (None, lane.as_deref(), false, true); // #678: disabled hosts that answer too
+                    check::clean_all(ctx, &cfg, r, out, fleet.as_deref(), what, yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;
                         check::strays(ctx, &cfg, out, yes)?;
@@ -1704,7 +1734,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     issue,
                     by,
                     no_spawn,
-                } => gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "extend", (!no_spawn, &by))?,
+                } => gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "extend", (!no_spawn, &by, None))?,
                 Cmd::Done {
                     fleet,
                     issue,
@@ -1756,9 +1786,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         return Ok(4);
                     }
                 }
-                Cmd::Park { fleet, issue } => {
-                    gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, "owner"))?;
+                Cmd::Park { fleet, issue, why, by } => {
+                    gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
                 }
+                Cmd::Unpark { fleet, issue, by } => gate::unpark(ctx, &cfg, out, (&fleet, issue), &by)?,
                 Cmd::Brief { fleet, issue } => {
                     let v = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, issue, false)?;
                     let s = |k: &str| v[k].as_str().unwrap_or_default().to_string();

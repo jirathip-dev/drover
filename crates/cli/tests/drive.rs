@@ -1928,9 +1928,9 @@ impl herdsman::runner::Runner for Spy<'_> {
     }
 }
 
-/// #217: `[one more round]` logs its decision before the spawn runs; a spawn refused HOST_BUSY logs `extend-failed`
-/// with the reason, and the next drive pass starts the recorded round as its fix step. The spawn runs under
-/// drive.lock, so no pass starts the same round meanwhile.
+/// #217: `[one more round]` logs its decision before the spawn runs; #778: a spawn refused HOST_BUSY keeps it pending
+/// with the reason (no `extend-failed`), and the next drive pass starts the recorded round as its fix step. The spawn
+/// runs under drive.lock, so no pass starts the same round meanwhile.
 #[test]
 fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     let c = setup("drive-extend");
@@ -1956,20 +1956,18 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
     let spy = Spy(busy, &c, Default::default());
     let (code, out) = run(&c, &spy, &["extend", "sendmeter", "12"]);
-    assert!(code == 3 && out.contains("REFUSED HOST_BUSY"), "{out}");
+    assert!(code == 0 && out.contains("waiting for host (HOST_BUSY)"), "{out}");
     let seen = spy.2.lock().unwrap().clone();
     assert!(
         !seen.is_empty() && seen.iter().all(|&l| l),
         "a command ran before the decision or outside drive.lock: {seen:?}"
     );
     let all = read(&c.state).unwrap();
-    let failed = all
-        .iter()
-        .find(|e| e.kind == "extend-failed")
-        .expect("no extend-failed");
-    assert!(
-        failed.str("reason").unwrap().starts_with("REFUSED HOST_BUSY"),
-        "{failed:?}"
+    assert!(!all.iter().any(|e| e.kind == "extend-failed"), "{all:?}");
+    let p = herdsman::pending::of(&all, "sendmeter", 12).expect("pending");
+    assert_eq!(
+        (p.action.as_str(), p.reason.as_deref(), p.failed),
+        ("extend", Some("HOST_BUSY"), false)
     );
     assert_eq!(state(&c), "fix(3)");
 
@@ -1977,6 +1975,7 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["fix"], "{out}");
     assert!(r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    assert_eq!(herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
 }
 
 /// #217 review finding 1: an extend while a drive pass holds drive.lock records the round and spawns nothing (the
@@ -2807,4 +2806,63 @@ fn a_hold_outliving_a_pass_past_its_blockers_merge_is_logged_hold_stale_once() {
     let stale = kinds(&c, "hold-stale");
     assert_eq!(stale.len(), 1, "logged once");
     assert_eq!((stale[0].issue, &stale[0].data["on"]), (Some(12), &json!([11])));
+}
+
+/// #712: a parked issue is skipped; `unpark` (a paired device's [unpark], never an unpaired one) puts it back in the
+/// state it had before its needs-human, in its queue place, and the next pass starts it.
+#[test]
+fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
+    let c = setup("drive-unpark");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
+    ev(&c, 10, "needs-human", json!({"code": "START_FAILED"}));
+    let (code, out) = run(&c, &Fake::default(), &["unpark", "sendmeter", "12"]);
+    assert!(
+        code == 3 && out.contains("REFUSED NOT_PARKED: #12 is needs-human, not parked"),
+        "{out}"
+    );
+    let park = ["park", "sendmeter", "12", "--why", "host mini is down"];
+    assert_eq!(run(&c, &Fake::default(), &park).0, 0);
+    let (code, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "ls"]);
+    assert!(code == 0 && out.contains("parked: host mini is down"), "{out}");
+    let r = fake(NO_AGENTS).reply("git -C", "");
+    assert!(drive(&c, &r).1.is_empty());
+    assert!(!r.called("herdr agent start"), "a parked issue is skipped");
+
+    let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let page = with_queue(
+        &String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)),
+        &s,
+        "127.0.0.1:7777",
+        c.now,
+    );
+    assert!(
+        page.contains("<span class=r>parked: host mini is down</span>"),
+        "{page}"
+    );
+    assert!(page.contains("<input type=hidden name=op value=unpark>"), "{page}");
+    let i = page.find("name=mtime value=").unwrap() + 17;
+    let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let body = format!("op=unpark&fleet=sendmeter&issue=12&mtime={mtime}");
+    let post = |extra: &str| {
+        let req = format!(
+            "POST / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n{extra}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        String::from_utf8_lossy(&s.respond(&req, c.now)).into_owned()
+    };
+    assert!(post("").starts_with("HTTP/1.1 401"), "an unpaired device cannot unpark");
+    assert_eq!(state(&c), "parked");
+    let cookie = pair(&s, &c, "", c.now);
+    let res = post(&cookie);
+    assert!(res.starts_with("HTTP/1.1 303") && res.contains("unparked"), "{res}");
+    assert_eq!(state(&c), "queued");
+    let all = read(&c.state).unwrap();
+    let kinds: Vec<(&str, Option<&str>)> = (all.iter())
+        .filter(|e| ["parked", "unparked"].contains(&e.kind.as_str()))
+        .map(|e| (e.kind.as_str(), e.str("by")))
+        .collect();
+    assert_eq!(kinds, [("parked", Some("owner")), ("unparked", Some("owner"))]);
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["start"], "{out}");
+    assert!(r.called("herdr agent start sendmeter-impl-12"));
 }

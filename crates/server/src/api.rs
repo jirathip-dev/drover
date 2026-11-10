@@ -207,6 +207,8 @@ pub struct LanesTab {
     pub sections: Vec<LaneSection>,
     /// #630: each lane's workspace root and unsaved work.
     pub unsaved: Vec<LaneUnsaved>,
+    /// #712: fleet.toml's mtime, for a row's [unpark] form.
+    pub mtime: String,
 }
 
 /// #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.
@@ -257,6 +259,8 @@ pub struct LaneRow {
     pub repo: Option<String>,
     pub dead: bool,
     pub blocked: Option<Blocked>,
+    /// #712: its issue is parked: the fleet its [unpark] posts to.
+    pub unpark: Option<String>,
     // #609: the runtime the lane was spawned in (`herdr`, `shed`, `shed-acp`), its host, and `where`, the one label
     // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
     pub runtime: String,
@@ -539,6 +543,17 @@ pub struct Queued {
     pub blocked_by: Option<u64>,
     /// #667: its blockers in another fleet or repo, as `owner/repo#N`.
     pub blocked_on: Vec<String>,
+    /// #778: a tapped start waiting for its lane, and the row's `starting, waiting for host: <reason> · <age>`.
+    pub pending: Option<PendingStart>,
+    pub status: Option<String>,
+}
+
+/// #778: a card tap's lane start not begun yet: its `action` (extend, answer, approve, revise), since when, the last
+/// refusal `reason` (a code; a hard one with its words).
+pub struct PendingStart {
+    pub action: String,
+    pub since: u64,
+    pub reason: Option<String>,
 }
 
 /// `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
@@ -961,6 +976,7 @@ pub struct IssueView {
     pub issue: u64,
     pub verdicts: Vec<Verdict>,
     pub why: Option<WhyNote>,
+    pub pending: Option<PendingStart>,
 }
 
 /// #677: the issue's latest why note: the round head it is on, its round and its `Owner:` line.
