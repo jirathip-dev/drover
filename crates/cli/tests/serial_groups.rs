@@ -24,6 +24,14 @@ fn config(keys: &str, tables: &str) -> String {
     )
 }
 
+/// #771: a ctx for `cfg` whose lanes run on a fake shed (no live lanes yet).
+fn sctx(name: &str, cfg: &str) -> (herdsman::Ctx, FakeShed) {
+    let c = ctx(&tmpdir(name), cfg);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    (c, sh)
+}
+
 fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
@@ -37,8 +45,8 @@ fn lane(c: &herdsman::Ctx, n: u64) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     let agent = format!("sendmeter-impl-{n}");
-    let d = json!({"role": "impl", "agent": agent, "pane": format!("w9:{agent}"), "workspace": "w9", "worktree": wt,
-        "branch": format!("issue-{n}")});
+    let d = json!({"role": "impl", "agent": agent, "pane": agent, "workspace": "", "runtime": "shed",
+        "worktree": wt, "branch": format!("issue-{n}")});
     ev(c, n, "spawn", d);
 }
 
@@ -52,19 +60,12 @@ fn pr(n: u64) -> String {
 /// Spawns succeed, the host is calm, and issue `n`'s open PR changes `files`.
 fn fake(prs: &[(u64, &str)]) -> Fake {
     let mut f = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane", "{}")
-        .reply("herdr agent", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "");
     for (n, files) in prs {
         f = f.reply(&format!("gh pr view issue-{n}"), &pr(*n)).reply(
@@ -133,13 +134,13 @@ fn both_forms_parse_and_together_are_an_error() {
 
 #[test]
 fn doctor_suggests_the_new_form() {
-    let c = ctx(&tmpdir("sg-doctor"), &config("serial_paths = [\"db/**\"]", ""));
+    let (c, _sh) = sctx("sg-doctor", &config("serial_paths = [\"db/**\"]", ""));
     let (_, out) = run(&c, &Fake::default(), &["doctor"]);
     assert!(
         out.contains("! serial_paths is the old form; [[fleet.sendmeter.serial]] name=\"db\"…"),
         "{out}"
     );
-    let c = ctx(&tmpdir("sg-doctor-new"), &config("", DB_CI));
+    let (c, _sh) = sctx("sg-doctor-new", &config("", DB_CI));
     assert!(!run(&c, &Fake::default(), &["doctor"]).1.contains("old form"));
 }
 
@@ -147,7 +148,7 @@ fn doctor_suggests_the_new_form() {
 
 #[test]
 fn a_mark_joins_its_group_plain_serial_the_first() {
-    let c = ctx(&tmpdir("sg-mark"), &config("", DB_CI));
+    let (c, _sh) = sctx("sg-mark", &config("", DB_CI));
     let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
     ok(&["queue", "sendmeter", "add", "1", "--serial", "ci"]);
     ok(&["queue", "sendmeter", "add", "--serial", "2", "3"]);
@@ -171,7 +172,7 @@ fn a_mark_joins_its_group_plain_serial_the_first() {
 
 #[test]
 fn a_pushed_diff_joins_a_free_group_and_carries_on() {
-    let c = ctx(&tmpdir("sg-diff"), &config("", DB_CI));
+    let (c, _sh) = sctx("sg-diff", &config("", DB_CI));
     lane(&c, 12);
     let r = fake(&[(12, "src/a.rs\nscripts/check-x.mjs\n")]);
     let (out, _) = drive(&c, &r);
@@ -192,7 +193,7 @@ fn a_pushed_diff_joins_a_free_group_and_carries_on() {
 
 #[test]
 fn a_second_ci_push_holds_until_the_holder_merges_then_updates() {
-    let c = ctx(&tmpdir("sg-hold"), &config("", DB_CI));
+    let (c, sh) = sctx("sg-hold", &config("", DB_CI));
     assert_eq!(
         run(
             &c,
@@ -204,27 +205,28 @@ fn a_second_ci_push_holds_until_the_holder_merges_then_updates() {
     );
     lane(&c, 9);
     lane(&c, 12);
-    let mut r = fake(&[(12, "scripts/lib/ci.mjs\n")]);
-    // #444: the holder's lane is still at work (a gone one with no push would be respawned).
-    let live = agents(&[("sendmeter-impl-9", "working", "/x", "w9:sendmeter-impl-9")]);
-    r.replies
-        .splice(0..0, Fake::default().reply("herdr agent list", &live).replies);
+    let r = fake(&[(12, "scripts/lib/ci.mjs\n")]);
+    // #444: the holder's lane is still at work (a gone one with no push would be respawned); #12's pushed and ended,
+    // its terminal kept (told to stop there).
+    sh.lane("sendmeter-impl-9", "working", "/x");
+    sh.lane("sendmeter-impl-12", "done", "/x");
+    sh.exit("sendmeter-impl-12");
+    let stops = || {
+        let sent = sh.sent("sendmeter-impl-12");
+        sent.into_iter().filter(|t| t.starts_with("stop:")).collect::<Vec<_>>()
+    };
     let (out, steps) = drive(&c, &r);
     assert_eq!(logged(&c, 12, "serial-held"), ["ci (9)"], "{out}");
     let stop = "stop: ci is held by #9; you'll get an update round when it merges";
-    assert!(
-        r.called(&format!("herdr agent prompt sendmeter-impl-12 {stop}")),
-        "{:?}",
-        r.calls.borrow()
-    );
+    assert_eq!(stops(), [stop], "{:?}", sh.methods());
     assert!(steps.is_empty(), "no review while held: {steps:?}");
-    assert!(!r.called("herdr agent start sendmeter-rev-12"));
+    assert!(!sh.called("run", "sendmeter-rev-12-r1"));
     let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
     assert!(w.contains("waits: ci held by #9 (1/1)"), "{w}");
     // Still held next pass, and told once.
     let (_, steps) = drive(&c, &r);
     assert!(steps.is_empty(), "{steps:?}");
-    assert_eq!(r.count("herdr agent prompt sendmeter-impl-12 stop:"), 1);
+    assert_eq!(stops().len(), 1);
     // A manual spawn says who holds the slot.
     let (exit, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert!(
@@ -236,14 +238,14 @@ fn a_second_ci_push_holds_until_the_holder_merges_then_updates() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["conflict"], "{out}");
     assert_eq!(logged(&c, 12, "serial-slot"), ["ci"]);
-    assert!(r.called("herdr agent start sendmeter-impl-12"), "{out}");
+    assert!(sh.called("run", "sendmeter-impl-12"), "{out}");
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
     assert!(brief.contains("Merge `origin/staging` into this branch"), "{brief}");
 }
 
 #[test]
 fn the_first_held_in_queue_order_takes_a_freed_slot() {
-    let c = ctx(&tmpdir("sg-order"), &config("", DB_CI));
+    let (c, _sh) = sctx("sg-order", &config("", DB_CI));
     let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
     ok(&["queue", "sendmeter", "add", "9", "--serial", "ci"]);
     ok(&["queue", "sendmeter", "add", "13", "12"]);
@@ -269,7 +271,7 @@ fn the_first_held_in_queue_order_takes_a_freed_slot() {
 fn two_groups_take_slots_in_name_order_so_two_issues_never_deadlock() {
     let groups = "[[fleet.sendmeter.serial]]\nname = \"bb\"\npaths = [\"b/**\"]\n\n\
                   [[fleet.sendmeter.serial]]\nname = \"aa\"\npaths = [\"a/**\"]\n";
-    let c = ctx(&tmpdir("sg-ab"), &config("", groups));
+    let (c, _sh) = sctx("sg-ab", &config("", groups));
     lane(&c, 12);
     lane(&c, 13);
     // Both touch aa and bb at once (listed b first): #12 takes both, #13 holds on aa and so never takes bb.
@@ -291,7 +293,7 @@ fn two_groups_take_slots_in_name_order_so_two_issues_never_deadlock() {
 fn a_held_issue_waits_on_its_second_group_with_its_first_slot_taken() {
     let groups = "[[fleet.sendmeter.serial]]\nname = \"aa\"\npaths = [\"a/**\"]\n\n\
                   [[fleet.sendmeter.serial]]\nname = \"bb\"\npaths = [\"b/**\"]\n";
-    let c = ctx(&tmpdir("sg-ab2"), &config("", groups));
+    let (c, _sh) = sctx("sg-ab2", &config("", groups));
     let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
     ok(&["queue", "sendmeter", "add", "8", "--serial", "aa"]);
     ok(&["queue", "sendmeter", "add", "9", "--serial", "bb"]);
@@ -316,11 +318,11 @@ fn a_held_issue_waits_on_its_second_group_with_its_first_slot_taken() {
 
 #[test]
 fn work_over_the_limit_when_a_group_lands_keeps_going_and_new_joins_wait() {
-    let c = ctx(&tmpdir("sg-grand"), &config("", DB_CI));
+    let (c, _sh) = sctx("sg-grand", &config("", DB_CI));
     // #8 and #9 already touch ci.yml and are in review when the group lands: no join events yet.
     for n in [8, 9] {
         lane(&c, n);
-        let d = json!({"role": "rev", "agent": format!("sendmeter-rev-{n}-r1"), "pane": "w9:r", "workspace": "w9"});
+        let d = json!({"role": "rev", "agent": format!("sendmeter-rev-{n}-r1"), "pane": format!("sendmeter-rev-{n}-r1"), "workspace": "", "runtime": "shed"});
         ev(&c, n, "spawn", d);
     }
     let ci = ".github/workflows/ci.yml\n";
@@ -356,7 +358,7 @@ fn work_over_the_limit_when_a_group_lands_keeps_going_and_new_joins_wait() {
 
 #[test]
 fn merge_refuses_a_pr_touching_a_group_it_never_joined() {
-    let c = ctx(&tmpdir("sg-unmarked"), &config("", DB_CI));
+    let (c, _sh) = sctx("sg-unmarked", &config("", DB_CI));
     assert_eq!(
         run(
             &c,
@@ -371,13 +373,10 @@ fn merge_refuses_a_pr_touching_a_group_it_never_joined() {
     ev(&c, 12, "verdict", json!({"verdict": "PASS", "sha": head}));
     let checks = json!([{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
     let view = json!({"number": 112, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": checks});
-    let r = Fake::default()
-        .reply("gh pr view issue-12", &view.to_string())
-        .reply(
-            "gh api repos/jirathip-dev/sendmeter/pulls/112/files",
-            "supabase/migrations/1.sql\nscripts/check-x.mjs\n",
-        )
-        .reply("herdr agent list", NO_AGENTS);
+    let r = Fake::default().reply("gh pr view issue-12", &view.to_string()).reply(
+        "gh api repos/jirathip-dev/sendmeter/pulls/112/files",
+        "supabase/migrations/1.sql\nscripts/check-x.mjs\n",
+    );
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
     assert!(
@@ -395,7 +394,7 @@ fn merge_refuses_a_pr_touching_a_group_it_never_joined() {
 fn crossed_joins_over_two_groups_never_deadlock() {
     let groups = "[[fleet.sendmeter.serial]]\nname = \"aa\"\npaths = [\"a/**\"]\n\n\
                   [[fleet.sendmeter.serial]]\nname = \"bb\"\npaths = [\"b/**\"]\n";
-    let c = ctx(&tmpdir("sg-cross"), &config("", groups));
+    let (c, _sh) = sctx("sg-cross", &config("", groups));
     let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
     ok(&["queue", "sendmeter", "add", "13", "12"]);
     lane(&c, 12);
@@ -419,7 +418,7 @@ fn crossed_joins_over_two_groups_never_deadlock() {
 
 #[test]
 fn a_marked_issue_logs_its_join_by_mark() {
-    let c = ctx(&tmpdir("sg-mark-log"), &config("", DB_CI));
+    let (c, _sh) = sctx("sg-mark-log", &config("", DB_CI));
     let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
     ok(&["queue", "sendmeter", "add", "12", "--serial", "ci"]);
     lane(&c, 12);

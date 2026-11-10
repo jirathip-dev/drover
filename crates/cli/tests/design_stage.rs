@@ -14,12 +14,15 @@ const ADDR: &str = "127.0.0.1:7777";
 const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
 const HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
-fn setup(name: &str, extra: &str) -> herdsman::Ctx {
+/// #771: the fleet's lanes run on a fake shed (`.1`).
+fn setup(name: &str, extra: &str) -> (herdsman::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), &format!("{CONFIG}{DESIGN}{extra}"));
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let profile = c.config.with_file_name("claude").join("fleet-conductor");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
-    c
+    (c, sh)
 }
 
 fn wt(c: &herdsman::Ctx, n: u64) -> String {
@@ -30,7 +33,6 @@ fn wt(c: &herdsman::Ctx, n: u64) -> String {
 fn fake(c: &herdsman::Ctx, at: u64) -> Fake {
     let w = wt(c, 12);
     Fake::default()
-        .reply("herdr agent list", &agents(&[("conductor-t1", "idle", "/x", "w9:c1")]))
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -43,17 +45,7 @@ fn fake(c: &herdsman::Ctx, at: u64) -> Fake {
             "docs/design/meter/index.html\ndocs/design/meter/1440.png\ndocs/design/meter/390.png\n",
         )
         .reply("git -C", "")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:c1"}}}"#,
-        )
-        .reply("herdr pane", "{}")
-        .reply("herdr agent", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
 fn drive(c: &herdsman::Ctx, r: &dyn Runner) -> String {
@@ -79,7 +71,7 @@ fn spawned(c: &herdsman::Ctx, role: &str) -> usize {
 #[test]
 fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_to_impl() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("design-flow", "");
+    let (c, sh) = setup("design-flow", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -87,12 +79,13 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "13"]).0, 0);
     let r = fake(&c, c.now + 60);
     drive(&c, &r);
-    assert!(r.called("herdr agent start sendmeter-design-12") && !r.called("herdr agent start sendmeter-impl-12"));
-    assert!(
-        r.called("herdr agent start sendmeter-impl-13"),
-        "unmarked: impl at once"
+    assert!(sh.called("run", "sendmeter-design-12") && !sh.called("run", "sendmeter-impl-12"));
+    assert!(sh.called("run", "sendmeter-impl-13"), "unmarked: impl at once");
+    let wt12 = format!(
+        "git -C /tmp/does-not-matter/sendmeter worktree add {} issue-12",
+        wt(&c, 12)
     );
-    assert!(r.called("herdr worktree create --cwd /tmp/does-not-matter/sendmeter --branch issue-12"));
+    assert!(r.called(&wt12), "{:?}", r.calls.borrow());
     assert_eq!((state(&c, 12).as_str(), state(&c, 13).as_str()), ("design", "impl"));
     // The lane's turn ended with a pushed commit: the owner gets it, with both PNGs.
     let out = drive(&c, &r);
@@ -117,9 +110,9 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!(spawned(&c, "impl"), 1, "never impl before the approval");
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "approve"]).0, 0);
     assert_eq!(kinds(&c, "design-approved").len(), 1);
-    assert!(r.called("herdr pane close w9:p1"), "the design pane goes");
+    assert!(sh.called("kill", "sendmeter-design-12"), "the design pane goes");
     drive(&c, &r);
-    assert!(r.called("herdr agent start sendmeter-impl-12"));
+    assert!(sh.called("run", "sendmeter-impl-12"));
     assert_eq!((state(&c, 12).as_str(), spawned(&c, "design")), ("impl", 1));
 }
 
@@ -141,7 +134,7 @@ fn needs_and_chat(s: &Server, cookie: &str, now: u64) -> (String, String) {
 #[test]
 fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup(
+    let (c, _sh) = setup(
         "design-surfaces",
         "\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n",
     );
@@ -249,7 +242,7 @@ impl Runner for Both<'_> {
 #[test]
 fn revise_redoes_the_design_with_the_note_in_its_brief_five_times_in_a_row() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut c = setup("design-revise", "");
+    let (mut c, _sh) = setup("design-revise", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -315,7 +308,9 @@ fn reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human(
     git(&local, &["push", "-q", "origin", "HEAD:staging"]);
     let cfg = format!("{CONFIG}{DESIGN}").replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
     let c = ctx(&d, &cfg);
-    // The lane's worktree on the issue branch (herdr makes it in a real spawn).
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    // The lane's worktree on the issue branch (spawn makes it in a real one).
     let w = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(w.parent().unwrap()).unwrap();
     git(
@@ -374,7 +369,7 @@ fn reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human(
 #[test]
 fn design_off_on_a_queued_issue_lets_impl_spawn_directly() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("design-off", "");
+    let (c, sh) = setup("design-off", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -396,14 +391,14 @@ fn design_off_on_a_queued_issue_lets_impl_spawn_directly() {
     );
     let r = fake(&c, c.now + 60);
     drive(&c, &r);
-    assert!(r.called("herdr agent start sendmeter-impl-12") && !r.called("herdr agent start sendmeter-design-12"));
+    assert!(sh.called("run", "sendmeter-impl-12") && !sh.called("run", "sendmeter-design-12"));
     assert_eq!(state(&c, 12), "impl");
 }
 
 #[test]
 fn a_paused_fleet_auto_spawns_no_design_but_the_conductor_still_can() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("design-paused", "");
+    let (c, sh) = setup("design-paused", "");
     let toml = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(
         &c.config,
@@ -416,10 +411,10 @@ fn a_paused_fleet_auto_spawns_no_design_but_the_conductor_still_can() {
     );
     let r = fake(&c, c.now + 60);
     drive(&c, &r);
-    assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    assert!(sh.all("run").is_empty(), "{:?}", sh.methods());
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design"]);
     assert_eq!(code, 0, "{out}");
-    assert!(r.called("herdr agent start sendmeter-design-12"));
+    assert!(sh.called("run", "sendmeter-design-12"));
     assert_eq!(state(&c, 12), "design");
 }
 
@@ -441,16 +436,13 @@ fn brief(c: &herdsman::Ctx) -> String {
 #[test]
 fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("architect-flow", ARCHITECT);
+    let (c, sh) = setup("architect-flow", ARCHITECT);
     let q = ["queue", "sendmeter", "add", "12", "--design", "--architect"];
     assert_eq!(run(&c, &Fake::default(), &q).0, 0);
     let base = fake(&c, c.now + 60);
     let r = Both(adr(&c), &base);
     drive(&c, &r);
-    assert!(
-        base.called("herdr agent start sendmeter-architect-12")
-            && !base.called("herdr agent start sendmeter-design-12")
-    );
+    assert!(sh.called("run", "sendmeter-architect-12") && !sh.called("run", "sendmeter-design-12"));
     assert!(brief(&c).contains("# ROLE: ARCHITECT") && brief(&c).contains("docs/architecture/<slug>/"));
     assert_eq!(state(&c, 12), "design");
     drive(&c, &r);
@@ -473,15 +465,12 @@ fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr(
         (Some("architect"), Some("docs/architecture/meter"))
     );
     drive(&c, &r);
-    assert!(
-        base.called("herdr agent start sendmeter-design-12"),
-        "the design comes next"
-    );
+    assert!(sh.called("run", "sendmeter-design-12"), "the design comes next");
     assert_eq!((state(&c, 12).as_str(), spawned(&c, "impl")), ("design", 0));
     drive(&c, &r);
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q2", "approve"]).0, 0);
     drive(&c, &r);
-    assert!(base.called("herdr agent start sendmeter-impl-12"));
+    assert!(sh.called("run", "sendmeter-impl-12"));
     assert_eq!(state(&c, 12), "impl");
     let b = brief(&c);
     assert!(
@@ -493,7 +482,7 @@ fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr(
 #[test]
 fn architect_revise_reruns_it_with_the_note_and_reject_needs_a_human() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut c = setup("architect-revise", ARCHITECT);
+    let (mut c, _sh) = setup("architect-revise", ARCHITECT);
     assert_eq!(
         run(
             &c,

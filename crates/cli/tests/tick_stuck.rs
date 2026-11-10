@@ -9,13 +9,22 @@ use serde_json::json;
 use std::time::Duration;
 
 const NOW: u64 = 1_000_000;
-const WT: &str = "/Users/me/.herdr/worktrees/sendmeter/issue-9";
+const WT: &str = "/Users/me/.local/share/herdsman/work/sendmeter/issue-9";
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
 
-fn setup(name: &str, extra: &str) -> herdsman::Ctx {
+/// #771: the fleet's lanes run on shed (`sh`), this host's and, over `shed connect`, the Air's.
+fn setup(name: &str, extra: &str) -> (herdsman::Ctx, FakeShed) {
+    let (c, sh) = setup_on(name, extra);
+    sh.attach(&c);
+    (c, sh)
+}
+
+/// `setup`, its shed not yet attached (lanes on herdr).
+fn setup_on(name: &str, extra: &str) -> (herdsman::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n{extra}");
     let c = ctx(&tmpdir(name), &toml);
+    let sh = FakeShed::new();
     let st = c.state.parent().unwrap();
     std::fs::create_dir_all(st).unwrap();
     let cache = json!({
@@ -24,8 +33,8 @@ fn setup(name: &str, extra: &str) -> herdsman::Ctx {
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     // #9's lane ran on the Air and is merged: clean's to remove.
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-9", "pane": "w9:p1", "workspace": "w9", "worktree": WT,
-                   "branch": "issue-9", "host": "air", "machine": "air"});
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-9", "pane": "sendmeter-impl-9", "workspace": "",
+                   "runtime": "shed", "worktree": WT, "branch": "issue-9", "host": "air", "machine": "air"});
     append(&c.state, &Event::new(NOW - 900, "sendmeter", Some(9), "spawn", d)).unwrap();
     append(
         &c.state,
@@ -33,21 +42,28 @@ fn setup(name: &str, extra: &str) -> herdsman::Ctx {
     )
     .unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    c
+    (c, sh)
 }
 
 fn local() -> Fake {
     Fake::default()
-        .reply(
-            "herdr status",
-            "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
-        )
-        .reply("herdr agent list", NO_AGENTS)
         .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
         .reply("sysctl -n hw.ncpu", "4")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("git ", "")
         .reply("gh issue view", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+        .reply("which shed", "/opt/shed/bin/shed\n")
+}
+
+/// `local`, its lanes on herdr: herdr-only until `shed::With` forwards `run_for` (#771 report), for #721.
+fn local_herdr() -> Fake {
+    local()
+        // The tick's first step is `herdr status` (timer.rs).
+        .reply(
+            "herdr status",
+            "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
+        )
+        .reply("herdr agent list", NO_AGENTS)
         .reply(
             "herdr worktree create",
             r#"{"result":{"workspace":{"workspace_id":"w1"}}}"#,
@@ -105,15 +121,16 @@ impl Runner for Hang {
 
 #[test]
 fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
-    let c = setup("stuck-air", "");
+    // Still herdr: with shed, `shed::With` drops `run_for`'s limit, so the Air probe would hang the tick (#771 report).
+    let (c, _sh) = setup_on("stuck-air", "");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     // #11's lane is live on the Air.
     let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "pane": "w8:p1", "workspace": "w8",
-                   "worktree": "/Users/me/.herdr/worktrees/sendmeter/issue-11", "branch": "issue-11", "host": "air",
-                   "machine": "air"});
+                   "worktree": "/Users/me/.local/share/herdsman/work/sendmeter/issue-11", "branch": "issue-11",
+                   "host": "air", "machine": "air"});
     append(&c.state, &Event::new(NOW - 600, "sendmeter", Some(11), "spawn", d)).unwrap();
     let r = Hang {
-        f: local(),
+        f: local_herdr(),
         mark: c.state.with_file_name("tick.step"),
         spent: Shared::new(0),
         seen: Shared::default(),
@@ -147,34 +164,44 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
 
 #[test]
 fn clean_never_probes_a_disabled_hosts_worktrees() {
-    let c = setup("stuck-disabled", "enabled = false");
-    let r = local().reply("herdr --machine air agent list", NO_AGENTS);
-    let (code, out) = run(&c, &r, &["clean", "--yes"]);
+    let (c, _sh) = setup("stuck-disabled", "enabled = false");
+    let (r, air) = (local(), FakeShed::new()); // the Air's shed: no lanes
+    let on = OverSsh {
+        f: &r,
+        hosts: vec![("air", &air)],
+    };
+    let (code, out) = run(&c, &on, &["clean", "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains(&format!("keep air:{WT}: on a disabled host (not cleaned)")),
         "{out}"
     );
     let calls = r.calls.borrow();
-    assert!(!calls.iter().any(|l| l.starts_with(SSH)), "{calls:?}");
+    // Its lanes are listed (shed over ssh, as herdr's agent list was), its worktrees never probed.
+    let probes = calls
+        .iter()
+        .filter(|l| l.starts_with(SSH) && !l.contains("'shed' 'connect'"));
+    assert_eq!(probes.count(), 0, "{calls:?}");
     // Enabled again: probed and removed as before.
-    let c2 = setup("stuck-enabled", "");
-    let r = local()
-        .reply("herdr --machine air agent list", NO_AGENTS)
-        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "");
-    let (_, out) = run(&c2, &r, &["clean"]);
+    let (c2, _sh2) = setup("stuck-enabled", "");
+    let r = local().reply(&format!("{SSH}'sh' '-c' 'test -e"), "");
+    let on = OverSsh {
+        f: &r,
+        hosts: vec![("air", &air)],
+    };
+    let (_, out) = run(&c2, &on, &["clean"]);
     assert!(r.called(&format!("{SSH}'sh' '-c' 'test -e")), "{out}");
     assert!(!out.contains("not cleaned"), "{out}");
 }
 
 #[test]
 fn a_dead_shared_connection_drops_its_socket_and_runs_once_more_without_it() {
-    let c = setup("stuck-socket", "");
+    let (c, _sh) = setup("stuck-socket", "");
+    let air = FakeShed::new();
     let sock = c.state.with_file_name("herdsman-ssh-abc");
     std::fs::write(&sock, "").unwrap();
     let probe = format!("{SSH}'sh' '-c' 'test -e");
     let r = local()
-        .reply("herdr --machine air agent list", NO_AGENTS)
         .reply(
             "ssh -G -oControlPath=/tmp/herdsman-ssh-%C air",
             &format!("user me\ncontrolpath {}\n", sock.display()),
@@ -188,7 +215,14 @@ fn a_dead_shared_connection_drops_its_socket_and_runs_once_more_without_it() {
             "ssh -oControlPath=none -oBatchMode=yes -oConnectTimeout=10 air -- 'sh' '-c' 'test -e",
             "",
         );
-    let (code, out) = run(&c, &r, &["clean"]);
+    let (code, out) = run(
+        &c,
+        &OverSsh {
+            f: &r,
+            hosts: vec![("air", &air)],
+        },
+        &["clean"],
+    );
     assert_eq!(code, 0, "{out}");
     assert!(!sock.exists(), "the stale socket is removed");
     let calls = r.calls.borrow();
@@ -207,7 +241,7 @@ fn a_dead_shared_connection_drops_its_socket_and_runs_once_more_without_it() {
 
 #[test]
 fn a_tick_ten_minutes_old_raises_tick_stuck_once_naming_its_step_and_child() {
-    let c = setup("stuck-alert", "");
+    let (c, _sh) = setup("stuck-alert", "");
     let mark = c.state.with_file_name("tick.step");
     let child = "ssh -oBatchMode=yes air -- 'sh' '-c' 'test -e \"$1\"'";
     let stuck = |c: &herdsman::Ctx| -> Vec<Event> {
