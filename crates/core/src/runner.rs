@@ -251,8 +251,25 @@ fn sick() -> std::sync::MutexGuard<'static, std::collections::HashMap<u64, Insta
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// #776: a hung disk's mark, shared by every herdsman process (drive and tick start fresh each run, so a mark kept
+/// only in memory costs each run one timed-out call and one stuck child): `~/.cache/herdsman/sick-disks/<dev>`,
+/// fresh for `SICK` after its last write.
+fn mark(dev: u64) -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(
+        std::path::Path::new(&home)
+            .join(".cache/herdsman/sick-disks")
+            .join(dev.to_string()),
+    )
+}
+
 fn is_sick(dev: u64) -> bool {
-    dev != 0 && sick().get(&dev).is_some_and(|t| t.elapsed() < SICK)
+    let fresh = |t: std::time::SystemTime| t.elapsed().is_ok_and(|e| e < SICK);
+    dev != 0
+        && (sick().get(&dev).is_some_and(|t| t.elapsed() < SICK)
+            || mark(dev)
+                .and_then(|p| p.metadata().ok()?.modified().ok())
+                .is_some_and(fresh))
 }
 
 /// #776: mark the disk `dir`'s last probe named as hung for `SICK` (a call on it ran out of time).
@@ -261,6 +278,10 @@ pub fn sicken(dir: &str) {
     let dev = probes().get(dir).map_or(0, |p| p.dev.load(Relaxed));
     if dev != 0 {
         sick().insert(dev, Instant::now());
+        if let Some(p) = mark(dev) {
+            let _ = p.parent().map(std::fs::create_dir_all);
+            let _ = std::fs::write(p, b"");
+        }
     }
 }
 

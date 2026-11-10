@@ -222,17 +222,18 @@ fn a_git_call_on_a_healthy_folder_runs() {
 #[test]
 fn a_disk_marked_hung_fails_every_folder_on_it() {
     use herdsman::runner::{hung, sicken};
-    const DEV: u64 = 0xDEAD_0776;
+    // A disk id no real disk has, fresh per run: the mark is shared on disk (~/.cache/herdsman/sick-disks).
+    let dev = 0xDEAD_0776_0000_0000 | u64::from(std::process::id());
     let (a, b) = (
         tmpdir("sick-a").to_string_lossy().into_owned(),
         tmpdir("sick-b").to_string_lossy().into_owned(),
     );
-    assert!(!hung(&a, Duration::from_secs(2), |_| Some(DEV)));
-    assert!(!hung(&b, Duration::from_secs(2), |_| Some(DEV)));
+    assert!(!hung(&a, Duration::from_secs(2), move |_| Some(dev)));
+    assert!(!hung(&b, Duration::from_secs(2), move |_| Some(dev)));
     sicken(&a);
     let t = Instant::now();
     assert!(
-        hung(&b, Duration::from_secs(2), |_| Some(DEV)),
+        hung(&b, Duration::from_secs(2), move |_| Some(dev)),
         "the other folder on the same disk"
     );
     assert!(t.elapsed() < Duration::from_millis(100), "{:?}", t.elapsed());
@@ -256,4 +257,20 @@ fn read_file_returns_bytes_and_gives_up_on_a_hung_folder() {
     let t = Instant::now();
     assert_eq!(herdsman::runner::read_file(bad.join("shot.png")), None);
     assert!(t.elapsed() < Duration::from_millis(200), "{:?}", t.elapsed());
+}
+
+/// #776: the mark is shared on disk, so a fresh process (each drive or tick run) sees a disk another one marked.
+#[test]
+fn a_disk_mark_is_seen_by_a_process_that_never_saw_the_timeout() {
+    let dev = 0xDEAD_0777_0000_0000 | u64::from(std::process::id());
+    let home = std::env::var("HOME").unwrap();
+    let mark = std::path::Path::new(&home)
+        .join(".cache/herdsman/sick-disks")
+        .join(dev.to_string());
+    std::fs::create_dir_all(mark.parent().unwrap()).unwrap();
+    std::fs::write(&mark, b"").unwrap();
+    let dir = tmpdir("sick-shared").to_string_lossy().into_owned();
+    let hung = herdsman::runner::hung(&dir, Duration::from_secs(2), move |_| Some(dev));
+    std::fs::remove_file(&mark).unwrap();
+    assert!(hung, "a folder on a disk marked by another process");
 }
