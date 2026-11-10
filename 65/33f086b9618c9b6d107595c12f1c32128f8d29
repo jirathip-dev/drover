@@ -1,0 +1,12 @@
+Decided: with no premerge or cap_script, herdsman cap runs the repo's own scripts/line-cap.sh found at integration
+Because: "the fleet's `premerge` or `scripts/line-cap.sh`"
+Because: crates/core/src/overlap.rs:255
+Decided: a cap line may read `label N / M` as well as `label N / cap M`, so cooee's non-test and apple lines parse
+Because: "herdsman's count ignores those, so its queue-wide view and raise suggestion understate"
+Decided: an unparseable script fails naming the script and the last line it printed
+Because: "reported plainly as that, with the line it got"
+Rejected: a new fleet.toml key per repo — cap_script already exists; cooee would still need config to be right
+Rejected: matching only `/ cap ` — cooee's script, the CI gate, prints `non-test lines: N / M`
+Check: herdsman cap cooee at staging 0b3b591 printed 23398 / 23500 and 4014 / 5000, same as sh scripts/line-cap.sh there
+Check: crates/cli/tests/overlap.rs:1037 and :1055 fail on base, pass at head
+Owner: herdsman cap now reads the same numbers as each repo's own cap script, so raise suggestions match CI.
