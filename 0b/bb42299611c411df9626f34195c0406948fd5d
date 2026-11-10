@@ -1,0 +1,7 @@
+Decided: drop the 32 new comments arch-check rejects; the why lives in these notes, not in code
+Because: crates/core/src/shed.rs:201
+Decided: merge #785 from staging: shed-out.json keeps both #785's first-turn `start` and #792's `at`/`said`/`tools` per lane
+Because: crates/core/src/shed.rs:263
+Rejected: #785's whole-entry reset on a turn's text — it would drop the open `tools` the silence check reads
+Check: `herdsman arch-check --base origin/staging` exits 0 at this head; the five #792 shed tests and #785's failed-start test pass
+Owner: No behaviour change this round: the code comments the new check refuses are gone, and the latest staging is merged in.
