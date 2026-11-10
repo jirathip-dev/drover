@@ -5,6 +5,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+/// #771: the shared fake shed server lane tests run on.
+pub mod fake_shed;
+pub use fake_shed::{FakeShed, OverSsh};
+
 pub const CONFIG: &str = r#"# fleet config (test)
 [fleet.sendmeter]
 repo = "jirathip-dev/sendmeter"

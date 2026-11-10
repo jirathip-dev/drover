@@ -16,130 +16,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
-type Terms = Arc<Mutex<BTreeMap<String, Value>>>;
-
-/// A fake shed server: every request it got (`method`, params), its terminals, and the events `events` streams.
-struct Server {
-    sock: PathBuf,
-    seen: Arc<Mutex<Vec<(String, Value)>>>,
-    terms: Terms,
-    /// #662: the kept events `events` streams (those after its `since`); a test adds more as its lanes exit.
-    events: Arc<Mutex<Vec<Value>>>,
-}
-
-impl Server {
-    fn new(version: &str, events: Vec<Value>) -> Server {
-        static N: AtomicU32 = AtomicU32::new(0);
-        let sock = PathBuf::from(format!(
-            "/tmp/hsb-{}-{}.sock",
-            std::process::id(),
-            N.fetch_add(1, Ordering::SeqCst)
-        ));
-        let _ = std::fs::remove_file(&sock);
-        let l = UnixListener::bind(&sock).unwrap();
-        let (seen, terms) = (Arc::new(Mutex::new(vec![])), Arc::new(Mutex::new(BTreeMap::new())));
-        let events = Arc::new(Mutex::new(events));
-        let (s2, t2, v, e2) = (seen.clone(), terms.clone(), version.to_string(), events.clone());
-        std::thread::spawn(move || {
-            for c in l.incoming().flatten() {
-                let (s, t, v, e) = (s2.clone(), t2.clone(), v.clone(), e2.clone());
-                std::thread::spawn(move || conn(c, &s, &t, &v, &e));
-            }
-        });
-        Server {
-            sock,
-            seen,
-            terms,
-            events,
-        }
-    }
-    fn shed(&self) -> Shed {
-        Shed {
-            wire: Wire::Socket(self.sock.clone()),
-            acp: None,
-            policy: "ask".into(),
-        }
-    }
-    fn methods(&self) -> Vec<String> {
-        self.seen.lock().unwrap().iter().map(|s| s.0.clone()).collect()
-    }
-    fn last(&self, method: &str) -> Value {
-        let seen = self.seen.lock().unwrap();
-        seen.iter()
-            .rev()
-            .find(|s| s.0 == method)
-            .map(|s| s.1.clone())
-            .unwrap_or_default()
-    }
-    fn add(&self, name: &str, labels: Value) {
-        let t = json!({"name": name, "labels": labels, "cwd": "/w/issue-12", "cmd": ["sh"], "keep": true,
-            "state": "running", "exit": null, "pid": 7, "reported": {"state": "working"}});
-        self.terms.lock().unwrap().insert(name.into(), t);
-    }
-}
-
-fn conn(c: UnixStream, seen: &Mutex<Vec<(String, Value)>>, terms: &Terms, version: &str, events: &Mutex<Vec<Value>>) {
-    let mut w = c.try_clone().unwrap();
-    for line in BufReader::new(c).lines().map_while(Result::ok) {
-        let q: Request = serde_json::from_str(&line).unwrap();
-        if q.method != "hello" {
-            seen.lock().unwrap().push((q.method.clone(), q.params.clone()));
-        }
-        let res = match q.method.as_str() {
-            "hello" => Ok(json!({"product": "shed", "version": version})),
-            m => handle(m, &q.params, &mut terms.lock().unwrap()),
-        };
-        let id = q.id.unwrap();
-        let resp = res.map_or_else(|e| Response::err(id.clone(), e), |v| Response::ok(id.clone(), v));
-        writeln!(w, "{}", serde_json::to_string(&resp).unwrap()).unwrap();
-        if q.method == "events" {
-            let since = q.params["since"].as_u64().unwrap_or(0);
-            let new = events
-                .lock()
-                .unwrap()
-                .clone()
-                .into_iter()
-                .filter(|e| e["seq"].as_u64() > Some(since));
-            new.for_each(|e| drop(writeln!(w, "{e}")));
-            std::thread::sleep(std::time::Duration::from_secs(3)); // shed never closes the stream
-            return;
-        }
-    }
-}
-
-fn handle(m: &str, p: &Value, terms: &mut BTreeMap<String, Value>) -> Result<Value, RpcError> {
-    let name = p["name"].as_str().unwrap_or_default().to_string();
-    let gone = || RpcError::new(ErrorCode::NoSuchTerminal, &name);
-    match m {
-        "run" => {
-            let t = json!({"name": name, "labels": p["labels"], "cwd": p["cwd"], "cmd": p["cmd"], "keep": p["keep"],
-                "state": "running", "exit": null, "pid": 9});
-            terms.insert(name, t.clone());
-            Ok(t)
-        }
-        "ls" => Ok(json!(terms.values().collect::<Vec<_>>())),
-        "events" => Ok(json!({})),
-        _ if !terms.contains_key(&name) => Err(gone()),
-        "get" => Ok(terms[&name].clone()),
-        // #666: a terminal's own `text` (an ACP session's transcript), else a screen.
-        "read" => Ok(json!({"text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from)})),
-        "send" | "keys" => Ok(json!({})),
-        "wait" => {
-            let outcome = if name == "slow" { "timeout" } else { "matched" };
-            Ok(json!({"outcome": outcome, "terminal": terms[&name]}))
-        }
-        "kill" => {
-            terms.get_mut(&name).unwrap()["state"] = json!("exited");
-            Ok(terms[&name].clone())
-        }
-        "rm" => Ok(terms.remove(&name).unwrap()),
-        "state" => {
-            terms.get_mut(&name).unwrap()["reported"] = json!({"state": p["state"]});
-            Ok(terms[&name].clone())
-        }
-        _ => Err(RpcError::new(ErrorCode::MethodNotFound, m)),
-    }
-}
+type Terms = Arc<Mutex<common::fake_shed::State>>;
 
 fn lane_labels() -> Value {
     json!({"fleet": "sendmeter", "issue": "12", "role": "impl", "harness": "claude"})
@@ -147,7 +24,7 @@ fn lane_labels() -> Value {
 
 #[test]
 fn every_adapter_call_is_a_shed_request() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     b.add("sendmeter-impl-12", lane_labels());
     b.add("scratch", json!({})); // no `fleet` label: no lane
     let f = Fake::default();
@@ -208,8 +85,9 @@ fn every_adapter_call_is_a_shed_request() {
 
 #[test]
 fn a_wait_that_times_out_answers_as_herdr() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     b.add("slow", lane_labels());
+    b.wait_ends("slow", "timeout");
     let f = Fake::default();
     let r = shed::With(&f, b.shed());
     let o = herdr::exec(&r, &herdr::wait_working_argv("slow", "20000")).unwrap();
@@ -218,14 +96,14 @@ fn a_wait_that_times_out_answers_as_herdr() {
 
 #[test]
 fn another_shed_version_is_refused() {
-    let b = Server::new("9.9.9", vec![]);
+    let b = FakeShed::start("9.9.9", vec![]);
     let e = shed::call(&Fake::default(), &b.shed().wire, shed::proto::Method::Ls, json!({})).unwrap_err();
     assert!(format!("{e:#}").starts_with("SHED_VERSION"), "{e:#}");
 }
 
 #[test]
 fn another_host_is_reached_through_shed_connect_over_ssh() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let hello = json!(Response::ok(json!(0), json!(shed::proto::Hello::ours())));
     let read = json!(Response::ok(json!(1), json!({"text": "remote screen"})));
     let f = Fake::default().reply("ssh", &format!("{hello}\n{read}\n"));
@@ -265,7 +143,7 @@ fn spawn_fake() -> Fake {
 
 #[test]
 fn a_lane_spawns_on_shed() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let d = tmpdir("shed-spawn");
     let c = ctx(&d, &shed_config(&b.sock, ""));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
@@ -318,9 +196,8 @@ fn a_lane_spawns_on_shed() {
     );
     // The lane's exports, then the harness, typed into its shell; the kick waits for its reported state.
     let sends: Vec<String> = b
-        .seen
         .lock()
-        .unwrap()
+        .seen
         .iter()
         .filter(|s| s.0 == "send")
         .map(|s| s.1["text"].as_str().unwrap().into())
@@ -389,7 +266,7 @@ impl Runner for Cli<'_> {
             let name = &args[args.iter().position(|a| a == "--name").unwrap() + 1];
             let t = json!({"name": name, "labels": lane_labels(), "cwd": "/w", "cmd": ["shed"], "keep": false,
                 "state": "running", "exit": null, "pid": 3, "acp": "claude-acp"});
-            self.1.lock().unwrap().insert(name.clone(), t);
+            self.1.lock().unwrap().terms.insert(name.clone(), t);
             if let Some(i) = args.iter().position(|a| a == "--") {
                 let cwd = &args[args.iter().position(|a| a == "--cwd").unwrap() + 1];
                 let o = std::process::Command::new(&args[i + 1])
@@ -427,12 +304,12 @@ fn acp_ctx(name: &str, cfg: &str) -> herdsman::Ctx {
 
 #[test]
 fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_first_prompt() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     b.add("sendmeter-impl-12", lane_labels()); // the lane before left it exited: removed first
-    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
+    b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
     let c = acp_ctx("acp-spawn", &acp_config(&b.sock, "claude", true));
     let f = acp_fake(&["echo", "claude-agent-acp"]);
-    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let cli = Cli(&f, b.state.clone(), Shared::default());
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     let wt = c.worktrees.join("sendmeter/issue-12");
@@ -499,10 +376,10 @@ fn bash_call(cmd: &str, cwd: &std::path::Path) -> String {
 
 #[test]
 fn a_guarded_command_is_refused_inside_an_acp_lane() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let c = acp_ctx("acp-guard", &acp_config(&b.sock, "claude", true));
     // The fake ACP agent is `env`: the bridge gets back the environment the lane's adapter runs in.
-    let cli = Cli(&acp_fake(&["env"]), b.terms.clone(), Shared::default());
+    let cli = Cli(&acp_fake(&["env"]), b.state.clone(), Shared::default());
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out}");
     let dump = cli.2.borrow().concat();
@@ -565,7 +442,7 @@ fn a_guarded_command_is_refused_inside_an_acp_lane() {
 
 #[test]
 fn an_unguardable_acp_lane_refuses_to_start() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let unsynced = ctx(&tmpdir("acp-nohook"), &acp_config(&b.sock, "claude", true));
     let cases = [
         (
@@ -580,7 +457,7 @@ fn an_unguardable_acp_lane_refuses_to_start() {
     ];
     for (c, why) in cases {
         let f = acp_fake(&["env"]);
-        let cli = Cli(&f, b.terms.clone(), Shared::default());
+        let cli = Cli(&f, b.state.clone(), Shared::default());
         let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
         assert_eq!(code, 3, "{out}");
         assert!(out.contains("REFUSED ACP_UNGUARDED") && out.contains(why), "{out}");
@@ -599,7 +476,7 @@ fn an_unguardable_acp_lane_refuses_to_start() {
 /// (shed and the ACP adapter's command), and `timer install` puts the resolved shed's folder on it.
 #[test]
 fn a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let c = acp_ctx("shed-missing", &acp_config(&b.sock, "claude", true));
     let f = acp_fake(&["no-such-adapter-600"]).once("which shed", 1, "");
     let (code, out) = run(&c, &f, &["spawn", "sendmeter", "12", "impl"]);
@@ -666,7 +543,7 @@ fn an_acp_lanes_state_follows_its_turn_events() {
         ev(7, json!({"event": "state", "state": "done", "note": "end_turn"})),
         ev(8, json!({"event": "exited", "code": 0})),
     ];
-    let b = Server::new(shed::proto::VERSION, events);
+    let b = FakeShed::start(shed::proto::VERSION, events);
     let c = ctx(&tmpdir("acp-state"), &acp_config(&b.sock, "claude", true));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
@@ -723,7 +600,7 @@ fn hook_in(kind: &str, var: &str, sock: &std::path::Path, event: &str) -> String
 
 #[test]
 fn the_lane_hook_reports_its_state_to_shed() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     b.add("sendmeter-impl-12", lane_labels());
     for (event, state) in [
         ("UserPromptSubmit", "working"),
@@ -767,7 +644,7 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
             json!({"event": "exited", "code": 0}),
         ),
     ];
-    let b = Server::new(shed::proto::VERSION, events);
+    let b = FakeShed::start(shed::proto::VERSION, events);
     let d = tmpdir("shed-drive");
     let c = ctx(&d, &shed_config(&b.sock, ""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
@@ -829,7 +706,7 @@ fn another_product_at_the_same_version_is_refused() {
 
 #[test]
 fn the_old_kind_and_env_still_work_with_a_warning() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     b.add("sendmeter-impl-12", lane_labels());
     let err = hook_in("berth", "BERTH", &b.sock, "Stop");
     assert_eq!(b.last("state"), json!({"name": "sendmeter-impl-12", "state": "done"}));
@@ -852,7 +729,7 @@ fn the_old_kind_and_env_still_work_with_a_warning() {
 #[test]
 fn drive_reads_berths_seq_file_once_when_sheds_is_missing() {
     let ev = json!({"seq": 9, "name": "sendmeter-impl-12", "labels": lane_labels(), "event": "killed"});
-    let b = Server::new(shed::proto::VERSION, vec![ev]);
+    let b = FakeShed::start(shed::proto::VERSION, vec![ev]);
     let d = tmpdir("shed-old-seq");
     let c = ctx(&d, &shed_config(&b.sock, ""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
@@ -881,7 +758,7 @@ fn the_service_follows_sheds_events_and_says_when_the_stream_drops() {
         ev(3, json!({"event": "state", "state": "working"})),
         ev(4, json!({"event": "exited", "code": 137})),
     ];
-    let b = Server::new(shed::proto::VERSION, events);
+    let b = FakeShed::start(shed::proto::VERSION, events);
     let d = tmpdir("shed-service");
     let c = ctx(&d, &shed_config(&b.sock, ""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
@@ -933,7 +810,7 @@ fn the_service_follows_sheds_events_and_says_when_the_stream_drops() {
 /// Lanes tab lists shed's running lane live, with its shed state, never dead, parked or gone.
 #[test]
 fn the_lanes_tab_lists_a_running_shed_acp_lane_live() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     b.add("sendmeter-impl-12", lane_labels());
     let c = ctx(&tmpdir("acp-lanes-tab"), &acp_config(&b.sock, "claude", true));
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed",
@@ -981,7 +858,7 @@ fn the_lanes_tab_lists_a_running_shed_acp_lane_live() {
 /// `host offline`, and the shed failure is one `! shed:` health row (`hosts refresh`, `doctor`).
 #[test]
 fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let d = tmpdir("shed-remote-up");
     let c = ctx(
         &d,
@@ -1062,8 +939,8 @@ struct Lands<'a>(&'a Fake, Terms);
 impl Runner for Lands<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
         if prog == "shed" && args[0] == "send" {
-            let mut t = self.1.lock().unwrap();
-            t.get_mut(&args[1]).unwrap()["text"] = json!(format!("> {}", args[2]));
+            let mut st = self.1.lock().unwrap();
+            st.terms.get_mut(&args[1]).unwrap()["text"] = json!(format!("> {}", args[2]));
         }
         self.0.run(prog, args)
     }
@@ -1074,14 +951,15 @@ impl Runner for Lands<'_> {
 /// landed as its first prompt (the spawn's `shed send` was dropped). Past the start window drive sends it again, once.
 #[test]
 fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let lane = "sendmeter-rev-12-r1";
     b.add(
         lane,
         json!({"fleet": "sendmeter", "issue": "12", "role": "rev", "harness": "claude"}),
     );
     {
-        let mut terms = b.terms.lock().unwrap();
+        let mut st = b.lock();
+        let terms = &mut st.terms;
         let t = terms.get_mut(lane).unwrap();
         (t["acp"], t["reported"], t["text"]) = (json!("claude-acp"), Value::Null, json!(""));
     }
@@ -1112,7 +990,7 @@ fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
         .reply("gh pr view issue-12", &pr.to_string())
         .reply("git -C", "")
         .reply("shed send", "");
-    let r = Lands(&f, b.terms.clone());
+    let r = Lands(&f, b.state.clone());
     let at = |s: u64| herdsman::Ctx { now: s, ..c.clone() };
     let sends = || f.count(&format!("shed send {lane}"));
     let drive = |c: &herdsman::Ctx| {
@@ -1148,13 +1026,13 @@ fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
 /// not), nor (#630) its build folder's profiles; an exited shed lane's goes as before, its line naming why.
 #[test]
 fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     b.add("sendmeter-impl-12", lane_labels());
-    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["acp"] = json!("claude-acp");
+    b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["acp"] = json!("claude-acp");
     let mut gone = lane_labels();
     gone["issue"] = json!("13");
     b.add("sendmeter-impl-13", gone);
-    b.terms.lock().unwrap().get_mut("sendmeter-impl-13").unwrap()["state"] = json!("exited");
+    b.lock().terms.get_mut("sendmeter-impl-13").unwrap()["state"] = json!("exited");
     let d = tmpdir("shed-trim");
     let cfg = CONFIG.replace(
         "build_root = \"\"",
@@ -1248,9 +1126,9 @@ impl Runner for Push<'_> {
 
 /// #662: the ACP fleet with accounts C then D (#683: folders), and #12's impl lane spawned on C in a real worktree (its `origin` a
 /// bare repo holding `issue-12` at the base commit): (ctx, server, fake, worktree, origin).
-fn acp_lane(name: &str) -> (herdsman::Ctx, Server, Fake, PathBuf, PathBuf) {
+fn acp_lane(name: &str) -> (herdsman::Ctx, FakeShed, Fake, PathBuf, PathBuf) {
     std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let cfg =
         acp_config(&b.sock, "claude", true).replace("account = \"C\"", "accounts = [\"C\", \"D\"]") + "D = \"D\"\n";
     let c = acp_ctx(name, &cfg);
@@ -1269,7 +1147,7 @@ fn acp_lane(name: &str) -> (herdsman::Ctx, Server, Fake, PathBuf, PathBuf) {
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n");
     let (code, out) = run(
         &c,
-        &Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone()),
+        &Push(Cli(&f, b.state.clone(), Shared::default()), wt.clone()),
         &["spawn", "sendmeter", "12", "impl"],
     );
     assert_eq!(code, 0, "{out}");
@@ -1277,9 +1155,10 @@ fn acp_lane(name: &str) -> (herdsman::Ctx, Server, Fake, PathBuf, PathBuf) {
 }
 
 /// #662: the lane's shed session ends: its terminal exits, shed's kept events say how (`kind`s after a turn's start).
-fn exits(b: &Server, kinds: &[Value]) {
-    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
-    let mut ev = b.events.lock().unwrap();
+fn exits(b: &FakeShed, kinds: &[Value]) {
+    b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
+    let mut st = b.lock();
+    let ev = &mut st.events;
     let start = ev.len() as u64 * 10;
     let all = [&[json!({"event": "turn", "prompt": "# Brief"})][..], kinds].concat();
     for (i, k) in all.iter().enumerate() {
@@ -1320,7 +1199,7 @@ fn an_acp_lane_that_exits_on_an_account_limit_is_pushed_and_resumed_in_its_workt
             json!({"event": "exited", "code": 0}),
         ],
     );
-    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    let cli = Push(Cli(&f, b.state.clone(), Shared::default()), wt.clone());
     let (code, out) = run(&later(&c, 300), &cli, &["drive"]);
     assert_eq!(code, 0, "{out}");
     // Its commits are on the issue branch, its staged file is not; it runs again in the same worktree, on D.
@@ -1356,7 +1235,7 @@ fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     let c = later(&c, 300);
     shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
-    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    let cli = Push(Cli(&f, b.state.clone(), Shared::default()), wt.clone());
     let (code, out) = run(&c, &cli, &["check"]);
     assert_eq!(code, 0, "{out}");
     let dead = logged(&c, "lane-dead");
@@ -1379,14 +1258,14 @@ fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
 
 #[test]
 fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and_restarts() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let c = acp_ctx("acp-conductor", &acp_config(&b.sock, "claude", true));
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
         "t1\n"
     );
     let f = acp_fake(&["echo", "claude-agent-acp"]);
-    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let cli = Cli(&f, b.state.clone(), Shared::default());
     let (code, out) = run(&c, &cli, &["thread", "say", "t1", "what should #12 cover?"]);
     assert_eq!(
         (code, out.as_str()),
@@ -1426,7 +1305,7 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
 
     // Awake: a multi-line message goes in as it is, through `shed send`.
     let f = acp_fake(&["echo"]);
-    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let cli = Cli(&f, b.state.clone(), Shared::default());
     assert_eq!(
         run(&at(&c, c.now + 60), &cli, &["thread", "say", "t1", "scope\nthen tests"]).0,
         0
@@ -1454,7 +1333,7 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
         "{:?}",
         b.methods()
     );
-    assert!(!b.terms.lock().unwrap().contains_key("conductor-t1"));
+    assert!(!b.lock().terms.contains_key("conductor-t1"));
     let sl = thread_events(&c, "conductor-sleep");
     assert_eq!(sl.iter().map(|e| e.str("why")).collect::<Vec<_>>(), [Some("idle")]);
     let (_, ls) = run(&quiet, &Fake::default(), &["thread", "ls", "--json"]);
@@ -1462,7 +1341,7 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
 
     // The next message starts a fresh session (shed's bridge loads none) with the thread so far.
     let f = acp_fake(&["echo"]);
-    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let cli = Cli(&f, b.state.clone(), Shared::default());
     assert_eq!(
         run(&at(&c, quiet.now + 60), &cli, &["thread", "say", "t1", "third"]).0,
         0
@@ -1485,7 +1364,7 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
     assert_eq!((st.len(), st[1].data["resumed"].clone()), (2, json!(false)));
 
     // A session shed no longer runs is asleep on the next check, quiet or not.
-    b.terms.lock().unwrap().remove("conductor-t1");
+    b.lock().terms.remove("conductor-t1");
     assert_eq!(run(&at(&c, quiet.now + 120), &cli, &["check"]).0, 0);
     let sl = thread_events(&c, "conductor-sleep");
     assert_eq!(sl.last().and_then(|e| e.str("why")), Some("gone"));
@@ -1493,10 +1372,10 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
 
 #[test]
 fn an_acp_conductor_runs_under_the_conductor_guard() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let c = acp_ctx("acp-conductor-guard", &acp_config(&b.sock, "claude", true));
     run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
-    let cli = Cli(&acp_fake(&["env"]), b.terms.clone(), Shared::default());
+    let cli = Cli(&acp_fake(&["env"]), b.state.clone(), Shared::default());
     assert_eq!(run(&c, &cli, &["thread", "say", "t1", "hi"]).0, 0);
     let dump = cli.2.borrow().concat();
     let env: BTreeMap<&str, &str> = dump.lines().filter_map(|l| l.split_once('=')).collect();
@@ -1544,11 +1423,11 @@ fn an_acp_conductor_runs_under_the_conductor_guard() {
 
 #[test]
 fn an_unguardable_acp_conductor_refuses_with_a_system_line_and_never_falls_back_to_herdr() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let c = acp_ctx("acp-conductor-noacct", &acp_config(&b.sock, "claude", false));
     run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
     let f = acp_fake(&["env"]);
-    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let cli = Cli(&f, b.state.clone(), Shared::default());
     let (code, out) = run(&c, &cli, &["thread", "say", "t1", "hi"]);
     assert_eq!(code, 3, "{out}");
     assert!(
@@ -1626,7 +1505,7 @@ fn wheres(c: &herdsman::Ctx, r: impl Fn() -> Fake) -> BTreeMap<String, (String, 
 /// runtime once the last herdr lane is gone (each shape is in tests/golden/api_v1/where.json).
 #[test]
 fn every_lane_says_where_it_runs() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     b.add("sendmeter-impl-12", lane_labels());
     let hosts = |air: bool| format!("\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\nenabled = {air}\n");
     let c = ctx(
@@ -1736,7 +1615,7 @@ fn every_lane_says_where_it_runs() {
 /// still says `shed-acp` once the fleet's runtime config is gone (new lanes start in herdr).
 #[test]
 fn a_lane_keeps_its_spawn_runtime_after_the_config_changes() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     b.add("sendmeter-impl-12", lane_labels());
     let c = ctx(&tmpdir("acp-keeps-runtime"), &acp_config(&b.sock, "claude", true));
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed-acp",
@@ -1823,10 +1702,10 @@ fn worktrees_of(local: &std::path::Path) -> String {
 
 #[test]
 fn a_fix_round_moves_a_clean_herdr_era_worktree_to_the_new_root() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let (c, f, local, old, _) = herdr_era_lane("moved-clean", &b.sock, true, &[]);
     let cli = Push(
-        Cli(&f, b.terms.clone(), Shared::default()),
+        Cli(&f, b.state.clone(), Shared::default()),
         local.parent().unwrap().into(),
     );
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
@@ -1847,12 +1726,12 @@ fn a_fix_round_moves_a_clean_herdr_era_worktree_to_the_new_root() {
 
 #[test]
 fn a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let (c, f, local, old, origin) = herdr_era_lane("moved-unpushed", &b.sock, false, &[]);
     git(&old, &["commit", "-q", "--allow-empty", "-m", "unpushed"]);
     let commit = git(&old, &["rev-parse", "HEAD"]);
     let cli = Push(
-        Cli(&f, b.terms.clone(), Shared::default()),
+        Cli(&f, b.state.clone(), Shared::default()),
         local.parent().unwrap().into(),
     );
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
@@ -1869,10 +1748,10 @@ fn a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves() {
 
 #[test]
 fn a_live_agent_in_the_herdr_era_worktree_refuses_lane_live() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let (c, f, local, old, _) = herdr_era_lane("moved-live", &b.sock, false, &["shell"]);
     let cli = Push(
-        Cli(&f, b.terms.clone(), Shared::default()),
+        Cli(&f, b.state.clone(), Shared::default()),
         local.parent().unwrap().into(),
     );
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
@@ -1888,7 +1767,7 @@ fn a_live_agent_in_the_herdr_era_worktree_refuses_lane_live() {
 /// #737: profiles synced through a symlink to the binary guard a spawn through the real path, and the reverse.
 #[test]
 fn a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let real = std::fs::canonicalize(env!("CARGO_BIN_EXE_herdsman")).unwrap();
     for (name, sync_via_link) in [("acp-link-sync", true), ("acp-real-sync", false)] {
         let dir = tmpdir(name);
@@ -1901,7 +1780,7 @@ fn a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path() {
         assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
         c.exe = spawn.display().to_string();
         let f = acp_fake(&["env"]);
-        let cli = Cli(&f, b.terms.clone(), Shared::default());
+        let cli = Cli(&f, b.state.clone(), Shared::default());
         let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--dry-run"]);
         assert!(code == 0 && !out.contains("ACP_UNGUARDED"), "{name}: {code} {out}");
     }
@@ -1910,7 +1789,7 @@ fn a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path() {
 /// #737: a hook naming another binary still refuses the spawn.
 #[test]
 fn a_hook_naming_another_binary_refuses_acp_unguarded() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let dir = tmpdir("acp-other-bin");
     let other = dir.join("other/herdsman");
     std::fs::create_dir_all(other.parent().unwrap()).unwrap();
@@ -1920,7 +1799,7 @@ fn a_hook_naming_another_binary_refuses_acp_unguarded() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     c.exe = env!("CARGO_BIN_EXE_herdsman").into();
     let f = acp_fake(&["env"]);
-    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let cli = Cli(&f, b.state.clone(), Shared::default());
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--dry-run"]);
     assert!(code == 3 && out.contains("REFUSED ACP_UNGUARDED"), "{out}");
 }
@@ -1929,7 +1808,7 @@ fn a_hook_naming_another_binary_refuses_acp_unguarded() {
 /// starts its role's agent with its own provider's config folder, and the codex lane's tools pass herdsman's hook.
 #[test]
 fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let cfg = acp_config(&b.sock, "claude", true)
         .replace(
             "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
@@ -1946,7 +1825,7 @@ fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
         .reply("shed run", "")
         .reply("shed send", "")
         .reply("gh pr view", &pr.to_string());
-    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let cli = Cli(&f, b.state.clone(), Shared::default());
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out}");
     let ev = |kind: &str, d: Value| {
