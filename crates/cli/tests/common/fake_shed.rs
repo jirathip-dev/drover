@@ -2,7 +2,7 @@
 //! `herdsman::shed` speaks them): run, ls, get, read, send, keys, wait, kill, rm, state and events. A test points its
 //! fleet at it (`config`), adds the lanes a host runs (`lane`, `add`), scripts their screens and waits, and reads back
 //! every request it got. Another host's shed (`shed connect` over ssh) is the same server behind `OverSsh`.
-use super::Fake;
+use super::{Fake, Shared};
 use herdsman::runner::{Out, Runner};
 use herdsman::shed::proto::{ErrorCode, Request, Response, RpcError, VERSION};
 use herdsman::shed::{Shed, Wire};
@@ -267,6 +267,58 @@ impl Runner for OverSsh<'_> {
             }
             None => self.f.run_in(prog, args, input),
         }
+    }
+    fn sleep(&self, secs: u64) {
+        self.f.sleep(secs);
+    }
+}
+
+/// shed's CLI as the fake server sees it, around `f` (which still answers and logs every call): `shed run --acp` makes
+/// a running ACP terminal of that name, labelled as its `--label`s (`cwd` `/w`), and, as shed's bridge does, starts the
+/// adapter command after `--` at once (in `--cwd`, its env cleared but `PATH`, `$SHED` set): its stdout kept in `out`.
+pub struct Cli<'a> {
+    pub f: &'a Fake,
+    pub state: Arc<Mutex<State>>,
+    pub out: Shared<Vec<String>>,
+}
+
+impl FakeShed {
+    /// shed's CLI on this server, around `f` (`Cli`).
+    pub fn cli<'a>(&self, f: &'a Fake) -> Cli<'a> {
+        Cli {
+            f,
+            state: self.state.clone(),
+            out: Shared::default(),
+        }
+    }
+}
+
+impl Runner for Cli<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        if prog == "shed" && args[0] == "run" {
+            let at = |k: &str| &args[args.iter().position(|a| a == k).unwrap() + 1];
+            let name = at("--name");
+            let ls = args.iter().zip(&args[1..]).filter(|(k, _)| *k == "--label");
+            let labels: serde_json::Map<String, Value> = ls
+                .filter_map(|(_, kv)| kv.split_once('='))
+                .map(|(k, v)| (k.to_string(), json!(v)))
+                .collect();
+            let t = json!({"name": name, "labels": labels, "cwd": "/w", "cmd": ["shed"], "keep": false,
+                "state": "running", "exit": null, "pid": 3, "acp": "claude-acp"});
+            self.state.lock().unwrap().terms.insert(name.clone(), t);
+            if let Some(i) = args.iter().position(|a| a == "--") {
+                let o = std::process::Command::new(&args[i + 1])
+                    .current_dir(at("--cwd"))
+                    .args(&args[i + 2..])
+                    .env_clear()
+                    .env("PATH", std::env::var("PATH").unwrap())
+                    .env("SHED", name)
+                    .output()
+                    .unwrap();
+                self.out.borrow_mut().push(String::from_utf8(o.stdout).unwrap());
+            }
+        }
+        self.f.run(prog, args)
     }
     fn sleep(&self, secs: u64) {
         self.f.sleep(secs);

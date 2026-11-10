@@ -6,14 +6,12 @@ use herdsman::events::Event;
 use herdsman::herdr;
 use herdsman::hosts::On;
 use herdsman::runner::Runner;
-use herdsman::shed::proto::{ErrorCode, Request, Response, RpcError};
-use herdsman::shed::{self, Shed, Wire};
+use herdsman::shed::proto::Response;
+use herdsman::shed::{self, Wire};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
-use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::{UnixListener, UnixStream};
+use std::io::Write;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 type Terms = Arc<Mutex<common::fake_shed::State>>;
@@ -255,36 +253,6 @@ fn acct_c() -> String {
 
 const TOKEN_C: &str = concat!("sk", "-ant-oat01-CCCC-secret");
 
-/// shed's CLI as the fake server sees it: `shed run --acp` makes a running ACP terminal of that name and, as shed's
-/// bridge does, starts the adapter command after `--` at once (in the terminal's env and `--cwd`, `$SHED` set): its
-/// stdout kept.
-struct Cli<'a>(&'a Fake, Terms, Shared<Vec<String>>);
-
-impl Runner for Cli<'_> {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
-        if prog == "shed" && args[0] == "run" {
-            let name = &args[args.iter().position(|a| a == "--name").unwrap() + 1];
-            let t = json!({"name": name, "labels": lane_labels(), "cwd": "/w", "cmd": ["shed"], "keep": false,
-                "state": "running", "exit": null, "pid": 3, "acp": "claude-acp"});
-            self.1.lock().unwrap().terms.insert(name.clone(), t);
-            if let Some(i) = args.iter().position(|a| a == "--") {
-                let cwd = &args[args.iter().position(|a| a == "--cwd").unwrap() + 1];
-                let o = std::process::Command::new(&args[i + 1])
-                    .current_dir(cwd)
-                    .args(&args[i + 2..])
-                    .env_clear()
-                    .env("PATH", std::env::var("PATH").unwrap())
-                    .env("SHED", name)
-                    .output()
-                    .unwrap();
-                self.2.borrow_mut().push(String::from_utf8(o.stdout).unwrap());
-            }
-        }
-        self.0.run(prog, args)
-    }
-    fn sleep(&self, _: u64) {}
-}
-
 /// A shed-acp spawn's fake: shed's CLI answers, and the installed agent is `adapter` (`shed agents --json`).
 fn acp_fake(adapter: &[&str]) -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
@@ -309,7 +277,7 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
     let c = acp_ctx("acp-spawn", &acp_config(&b.sock, "claude", true));
     let f = acp_fake(&["echo", "claude-agent-acp"]);
-    let cli = Cli(&f, b.state.clone(), Shared::default());
+    let cli = b.cli(&f);
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     let wt = c.worktrees.join("sendmeter/issue-12");
@@ -379,10 +347,11 @@ fn a_guarded_command_is_refused_inside_an_acp_lane() {
     let b = FakeShed::new();
     let c = acp_ctx("acp-guard", &acp_config(&b.sock, "claude", true));
     // The fake ACP agent is `env`: the bridge gets back the environment the lane's adapter runs in.
-    let cli = Cli(&acp_fake(&["env"]), b.state.clone(), Shared::default());
+    let ef = acp_fake(&["env"]);
+    let cli = b.cli(&ef);
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out}");
-    let dump = cli.2.borrow().concat();
+    let dump = cli.out.borrow().concat();
     let env: BTreeMap<&str, &str> = dump.lines().filter_map(|l| l.split_once('=')).collect();
     // #683: the account's folder is its config folder (its own login); no token reaches the lane.
     assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&acct_c().as_str()));
@@ -457,7 +426,7 @@ fn an_unguardable_acp_lane_refuses_to_start() {
     ];
     for (c, why) in cases {
         let f = acp_fake(&["env"]);
-        let cli = Cli(&f, b.state.clone(), Shared::default());
+        let cli = b.cli(&f);
         let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
         assert_eq!(code, 3, "{out}");
         assert!(out.contains("REFUSED ACP_UNGUARDED") && out.contains(why), "{out}");
@@ -1105,12 +1074,12 @@ fn git(dir: &std::path::Path, a: &[&str]) -> String {
 
 /// #662: an ACP lane's runner whose `git` in its worktree (a real repo, the `PathBuf`) is real; the rest is `Cli`'s.
 /// #722: also `git -C` anywhere under that path.
-struct Push<'a>(Cli<'a>, PathBuf);
+struct Push<'a>(fake_shed::Cli<'a>, PathBuf);
 
 impl Runner for Push<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
         if prog == "git" && args.len() > 1 && args[0] == "-C" && std::path::Path::new(&args[1]).starts_with(&self.1) {
-            self.0 .0.calls.borrow_mut().push(format!("git {}", args.join(" ")));
+            self.0.f.calls.borrow_mut().push(format!("git {}", args.join(" ")));
             let o = std::process::Command::new("git").args(args).output()?;
             let s = |b: Vec<u8>| String::from_utf8_lossy(&b).into_owned();
             return Ok(herdsman::runner::Out {
@@ -1147,7 +1116,7 @@ fn acp_lane(name: &str) -> (herdsman::Ctx, FakeShed, Fake, PathBuf, PathBuf) {
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n");
     let (code, out) = run(
         &c,
-        &Push(Cli(&f, b.state.clone(), Shared::default()), wt.clone()),
+        &Push(b.cli(&f), wt.clone()),
         &["spawn", "sendmeter", "12", "impl"],
     );
     assert_eq!(code, 0, "{out}");
@@ -1199,7 +1168,7 @@ fn an_acp_lane_that_exits_on_an_account_limit_is_pushed_and_resumed_in_its_workt
             json!({"event": "exited", "code": 0}),
         ],
     );
-    let cli = Push(Cli(&f, b.state.clone(), Shared::default()), wt.clone());
+    let cli = Push(b.cli(&f), wt.clone());
     let (code, out) = run(&later(&c, 300), &cli, &["drive"]);
     assert_eq!(code, 0, "{out}");
     // Its commits are on the issue branch, its staged file is not; it runs again in the same worktree, on D.
@@ -1235,7 +1204,7 @@ fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     let c = later(&c, 300);
     shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
-    let cli = Push(Cli(&f, b.state.clone(), Shared::default()), wt.clone());
+    let cli = Push(b.cli(&f), wt.clone());
     let (code, out) = run(&c, &cli, &["check"]);
     assert_eq!(code, 0, "{out}");
     let dead = logged(&c, "lane-dead");
@@ -1265,7 +1234,7 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
         "t1\n"
     );
     let f = acp_fake(&["echo", "claude-agent-acp"]);
-    let cli = Cli(&f, b.state.clone(), Shared::default());
+    let cli = b.cli(&f);
     let (code, out) = run(&c, &cli, &["thread", "say", "t1", "what should #12 cover?"]);
     assert_eq!(
         (code, out.as_str()),
@@ -1305,7 +1274,7 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
 
     // Awake: a multi-line message goes in as it is, through `shed send`.
     let f = acp_fake(&["echo"]);
-    let cli = Cli(&f, b.state.clone(), Shared::default());
+    let cli = b.cli(&f);
     assert_eq!(
         run(&at(&c, c.now + 60), &cli, &["thread", "say", "t1", "scope\nthen tests"]).0,
         0
@@ -1341,7 +1310,7 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
 
     // The next message starts a fresh session (shed's bridge loads none) with the thread so far.
     let f = acp_fake(&["echo"]);
-    let cli = Cli(&f, b.state.clone(), Shared::default());
+    let cli = b.cli(&f);
     assert_eq!(
         run(&at(&c, quiet.now + 60), &cli, &["thread", "say", "t1", "third"]).0,
         0
@@ -1375,9 +1344,10 @@ fn an_acp_conductor_runs_under_the_conductor_guard() {
     let b = FakeShed::new();
     let c = acp_ctx("acp-conductor-guard", &acp_config(&b.sock, "claude", true));
     run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
-    let cli = Cli(&acp_fake(&["env"]), b.state.clone(), Shared::default());
+    let ef = acp_fake(&["env"]);
+    let cli = b.cli(&ef);
     assert_eq!(run(&c, &cli, &["thread", "say", "t1", "hi"]).0, 0);
-    let dump = cli.2.borrow().concat();
+    let dump = cli.out.borrow().concat();
     let env: BTreeMap<&str, &str> = dump.lines().filter_map(|l| l.split_once('=')).collect();
     assert_eq!(env.get("HERDSMAN_LANE"), Some(&"sendmeter:-:conductor"));
     assert_eq!(env.get("HERDSMAN_THREAD"), Some(&"t1"));
@@ -1427,7 +1397,7 @@ fn an_unguardable_acp_conductor_refuses_with_a_system_line_and_never_falls_back_
     let c = acp_ctx("acp-conductor-noacct", &acp_config(&b.sock, "claude", false));
     run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
     let f = acp_fake(&["env"]);
-    let cli = Cli(&f, b.state.clone(), Shared::default());
+    let cli = b.cli(&f);
     let (code, out) = run(&c, &cli, &["thread", "say", "t1", "hi"]);
     assert_eq!(code, 3, "{out}");
     assert!(
@@ -1705,7 +1675,7 @@ fn a_fix_round_moves_a_clean_herdr_era_worktree_to_the_new_root() {
     let b = FakeShed::new();
     let (c, f, local, old, _) = herdr_era_lane("moved-clean", &b.sock, true, &[]);
     let cli = Push(
-        Cli(&f, b.state.clone(), Shared::default()),
+        b.cli(&f),
         local.parent().unwrap().into(),
     );
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
@@ -1731,7 +1701,7 @@ fn a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves() {
     git(&old, &["commit", "-q", "--allow-empty", "-m", "unpushed"]);
     let commit = git(&old, &["rev-parse", "HEAD"]);
     let cli = Push(
-        Cli(&f, b.state.clone(), Shared::default()),
+        b.cli(&f),
         local.parent().unwrap().into(),
     );
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
@@ -1751,7 +1721,7 @@ fn a_live_agent_in_the_herdr_era_worktree_refuses_lane_live() {
     let b = FakeShed::new();
     let (c, f, local, old, _) = herdr_era_lane("moved-live", &b.sock, false, &["shell"]);
     let cli = Push(
-        Cli(&f, b.state.clone(), Shared::default()),
+        b.cli(&f),
         local.parent().unwrap().into(),
     );
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
@@ -1780,7 +1750,7 @@ fn a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path() {
         assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
         c.exe = spawn.display().to_string();
         let f = acp_fake(&["env"]);
-        let cli = Cli(&f, b.state.clone(), Shared::default());
+        let cli = b.cli(&f);
         let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--dry-run"]);
         assert!(code == 0 && !out.contains("ACP_UNGUARDED"), "{name}: {code} {out}");
     }
@@ -1799,7 +1769,7 @@ fn a_hook_naming_another_binary_refuses_acp_unguarded() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     c.exe = env!("CARGO_BIN_EXE_herdsman").into();
     let f = acp_fake(&["env"]);
-    let cli = Cli(&f, b.state.clone(), Shared::default());
+    let cli = b.cli(&f);
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--dry-run"]);
     assert!(code == 3 && out.contains("REFUSED ACP_UNGUARDED"), "{out}");
 }
@@ -1825,7 +1795,7 @@ fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
         .reply("shed run", "")
         .reply("shed send", "")
         .reply("gh pr view", &pr.to_string());
-    let cli = Cli(&f, b.state.clone(), Shared::default());
+    let cli = b.cli(&f);
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out}");
     let ev = |kind: &str, d: Value| {
@@ -1846,7 +1816,7 @@ fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
         "{runs:?}"
     );
     assert!(runs[1].contains("--label harness=codex "), "{runs:?}");
-    let dumps = cli.2.borrow();
+    let dumps = cli.out.borrow();
     let env = |i: usize| -> BTreeMap<String, String> {
         let kv = dumps[i].lines().filter_map(|l| l.split_once('='));
         kv.map(|(k, v)| (k.to_string(), v.to_string())).collect()

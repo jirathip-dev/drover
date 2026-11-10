@@ -7,6 +7,7 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// #771: the shared fake shed server lane tests run on.
 pub mod fake_shed;
+#[allow(unused_imports)]
 pub use fake_shed::{FakeShed, OverSsh};
 
 pub const CONFIG: &str = r#"# fleet config (test)
