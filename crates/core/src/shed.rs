@@ -197,7 +197,7 @@ fn last_out(ctx: &Ctx, agent: &str, f: impl FnOnce(&mut Value)) -> Result<Value>
     Ok(was)
 }
 
-/// #792: ACP lane `agent`'s session as drive's intake last saw it (`turn` open, `at`, `said`, open `tools`); null if none.
+/// #792: ACP lane `agent`'s session as drive's intake last saw it (`turn` open, `at`, `said`, open `tools`, last `cpu`); null if none.
 pub fn session(ctx: &Ctx, agent: &str) -> Value {
     let t = std::fs::read_to_string(ctx.state.with_file_name("shed-out.json")).unwrap_or_default();
     serde_json::from_str::<Value>(&t).map_or(Value::Null, |mut v| v[agent].take())
@@ -244,6 +244,13 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
                 }
                 EventKind::Reply { .. } => (v["said"], v["tools"]) = (json!(ctx.now), Value::Null),
                 _ => v["said"] = json!(ctx.now),
+            }
+        })?;
+    }
+    if let EventKind::Resources(u) = &e.kind {
+        last_out(ctx, &e.name, |v| {
+            if !v.is_null() {
+                v["cpu"] = json!(u.cpu_pct);
             }
         })?;
     }

@@ -132,6 +132,9 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], agents: &[
 /// #792: the prompt a silent ACP lane gets once its turn is cancelled.
 pub const NUDGE: &str = "continue: your last step finished or failed; carry on, or end your turn with `herdsman turn`";
 
+/// #792: a lane's process tree at or over this much of one core runs its open tool call.
+pub const BUSY_CPU_PCT: u64 = 10;
+
 /// #792: what drive does about a silent ACP lane (`fleet` #`issue`'s `lane`).
 pub enum Silent {
     Nudge(String),
@@ -146,7 +149,7 @@ pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Value], fleet: &s
         let (Some(sp), o) = (last_spawn(ev, lane), crate::shed::session(ctx, lane)) else {
             continue;
         };
-        let open = o["tools"].as_object().is_some_and(|m| !m.is_empty());
+        let open = o["tools"].as_object().is_some_and(|m| !m.is_empty()) && o["cpu"].as_u64() >= Some(BUSY_CPU_PCT);
         if o["turn"] != true || open || !agents.iter().any(|a| a["name"] == lane) {
             continue;
         }
