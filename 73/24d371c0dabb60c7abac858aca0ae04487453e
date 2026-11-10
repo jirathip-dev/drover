@@ -1,0 +1,11 @@
+Decided: the sim models prune's git calls instead of clean skipping prune in the sim
+Because: crates/core/src/cli.rs:1663
+Because: "`clean` (and `wip prune`) deletes origin `wip/*` branches of merged or closed issues"
+Decided: for-each-ref lists the model's origin wip branches; the size call answers 0
+Because: crates/cli/tests/sim/model.rs:488
+Decided: the known fleet's idle goes from 5585 to 5661 s (93.08 to 94.35 min)
+Because: crates/cli/tests/sim/main.rs:373
+Rejected: not running prune from clean — the spec has clean prune
+Check: the trace diff against base first differs at t+1289 by the 2 prune git calls; the jittered timers shift after that
+Check: the three webkit tests that were skipped were run separately (see the PR body)
+Owner: Clean's new wip prune broke the simulator tests; the simulator now knows those git calls
