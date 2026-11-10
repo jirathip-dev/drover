@@ -1,0 +1,5 @@
+Decided: merge origin/staging 39c20e9; web/dist/board.css conflicted only as a build output, so it is rebuilt with `npm run build` from the merged web/src
+Because: web/package.json:7
+Decided: drop pr.md, prs.json and test.exit, scratch files the supersede wip snapshot had committed
+Rejected: none
+Owner: The branch is brought up to date with staging; nothing in the broken-config banner changed.
