@@ -96,15 +96,13 @@ fn a_known_thread_id_is_a_ref_and_an_unknown_or_coded_one_stays_text() {
     assert!(!chat.contains("data-go=\"t999\""), "{chat}");
     let view = &chat[chat.find("<div class=cvp data-t=\"t27\">").unwrap()..];
     assert!(
-        view.contains(
-            "<textarea name=text rows=1 aria-label=message placeholder=\"message the orchestrator\" disabled>"
-        ),
+        view.contains("<textarea name=text rows=1 aria-label=message placeholder=\"message the conductor\" disabled>"),
         "{view}"
     );
     let one =
         &chat[chat.find("<div class=cvp data-t=\"t1\">").unwrap()..chat.find("<div class=cvp data-t=\"t2\">").unwrap()];
     assert!(
-        !one.contains("class=rst") && !one.contains("orchestrator\" disabled>"),
+        !one.contains("class=rst") && !one.contains("conductor\" disabled>"),
         "{one}"
     );
 

@@ -209,7 +209,7 @@ fn a_usage_limit_resumes_the_orchestrator_on_the_next_account_with_the_same_sess
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.contains(
-            "owner: scope #12\norchestrator: Small or full?\nsystem: switched to claude:B (claude:A resting until "
+            "owner: scope #12\nOrchestrator: Small or full?\nsystem: switched to claude:B (claude:A resting until "
         ),
         "{show}"
     );

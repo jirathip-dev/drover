@@ -1470,7 +1470,7 @@ fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_
     let sl = thread_events(&c, "orchestrator-sleep");
     assert_eq!(sl.iter().map(|e| e.str("why")).collect::<Vec<_>>(), [Some("idle")]);
     let (_, ls) = run(&quiet, &Fake::default(), &["thread", "ls", "--json"]);
-    assert!(ls.contains("\"orchestrator\": \"asleep\""), "{ls}");
+    assert!(ls.contains("\"state\": \"asleep\""), "{ls}");
 
     // The next message starts a fresh session (shed's bridge loads none) with the thread so far.
     let f = acp_fake(&["echo"]);

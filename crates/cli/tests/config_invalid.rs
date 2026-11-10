@@ -11,7 +11,7 @@ use serde_json::Value;
 const HOST: &str = "127.0.0.1:7777";
 const GOOD: &str =
     "[fleet.acme]\nrepo = \"acme/app\"\nlocal = \"/tmp/does-not-matter/app\"\nintegration = \"staging\"\n";
-const WANT: &str = "config invalid: fleet.acme.role.orchestrator: account 'C' is not in [accounts] (fleet.toml:8)";
+const WANT: &str = "config invalid: fleet.acme.role.impl: account 'C' is not in [accounts] (fleet.toml:8)";
 
 fn bad() -> String {
     format!("{GOOD}\n[fleet.acme.role.impl]\nharness = \"claude\"\naccount = \"C\"\n")

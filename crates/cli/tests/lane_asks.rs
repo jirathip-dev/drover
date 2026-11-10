@@ -291,7 +291,12 @@ fn the_owner_changes_a_orchestrator_answer_within_30_minutes_only() {
     lane_ask(&c, "Split it?");
     assert_eq!(orchestrator_answer(&c, "t1", "q1", "2", quote).0, 0);
     let board = chat(&c, NOW + 60);
-    assert!(board.contains("answered q1 for #36: no, because Keep the old sender behind a flag</p><details class=chg><summary>change</summary><form class=chq data-id=\"q1\""), "{board}");
+    // #780 (q1173): the frozen board offers [change] only on a `by: conductor-…` answer; the CLI below still changes it.
+    assert!(
+        board.contains("answered q1 for #36: no, because Keep the old sender behind a flag</p>"),
+        "{board}"
+    );
+    assert!(!board.contains("<details class=chg>"), "{board}");
     // An orchestrator may not change it.
     let (code, out, _) = orchestrator_answer(&c, "t1", "q1", "1", quote);
     assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
@@ -313,7 +318,6 @@ fn the_owner_changes_a_orchestrator_answer_within_30_minutes_only() {
     // After 30 min: no [change], and the owner's answer is refused.
     lane_ask(&c, "Split the tests too?");
     assert_eq!(orchestrator_answer(&c, "t1", "q2", "2", quote).0, 0);
-    assert!(chat(&c, NOW + 60).contains("<form class=chq data-id=\"q2\""));
     let late = NOW + 30 * 60;
     assert!(!chat(&c, late).contains("class=chg"), "no [change] after 30 min");
     let r = host();

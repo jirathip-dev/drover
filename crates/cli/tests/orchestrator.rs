@@ -155,7 +155,7 @@ fn a_thread_starts_sleeps_when_idle_and_resumes_its_session_with_history() {
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert_eq!(
         show,
-        "t1 sendmeter: Grill #12\nowner: what should #12 cover?\norchestrator: Scope and tests. Which first?\n\
+        "t1 sendmeter: Grill #12\nowner: what should #12 cover?\nOrchestrator: Scope and tests. Which first?\n\
          owner: scope\nowner: tests first\n"
     );
 }
@@ -182,7 +182,7 @@ fn a_harness_without_resume_gets_the_history_in_its_kick() {
     );
     assert_eq!(
         std::fs::read_to_string(thread).unwrap(),
-        "owner: first\norchestrator: noted\nowner: second\n"
+        "owner: first\nOrchestrator: noted\nowner: second\n"
     );
 }
 
@@ -254,7 +254,7 @@ fn a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_int
     let ls: serde_json::Value = serde_json::from_str(&ls).unwrap();
     assert_eq!(
         (ls[0]["unread"].clone(), ls[0]["last"].clone()),
-        (json!(true), json!("orchestrator asks q1: Which scope?"))
+        (json!(true), json!("Orchestrator asks q1: Which scope?"))
     );
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&show).unwrap();
@@ -266,7 +266,7 @@ fn a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_int
     assert_eq!((item["ask"].clone(), item["open"].clone()), (json!("q1"), json!(true)));
     let (_, ls) = run(&c, &Fake::default(), &["thread", "ls"]);
     assert!(
-        ls.starts_with("sendmeter\n  t1   Grill #12: orchestrator asks q1"),
+        ls.starts_with("sendmeter\n  t1   Grill #12: Orchestrator asks q1"),
         "read now: {ls}"
     );
 
@@ -282,7 +282,7 @@ fn a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_int
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.ends_with(
-            "orchestrator asks q1: Which scope?\n  [2] full (recommended)\n  [1] small\nowner: DECISION q1: small\n"
+            "Orchestrator asks q1: Which scope?\n  [2] full (recommended)\n  [1] small\nowner: DECISION q1: small\n"
         ),
         "{show}"
     );

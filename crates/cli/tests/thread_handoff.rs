@@ -786,7 +786,7 @@ fn a_pending_repo_handoff_is_one_item_with_choices_and_its_pick_delivers_it_in_b
     );
     assert_eq!(
         h["from"],
-        json!({"agent": "orchestrator", "thread": "t1", "repo": "sendmeter"})
+        json!({"agent": "conductor", "thread": "t1", "repo": "sendmeter"})
     );
     assert_eq!(h["to"], json!({"repo": "sendmeter", "pending": true}));
     assert_eq!(
@@ -872,9 +872,9 @@ fn a_repos_threads_list_newest_active_first_with_newest_on_the_first() {
     assert_eq!(
         rows,
         [
-            (json!("t1"), json!(true), json!("orchestrator: grilled")),
-            (json!("t3"), json!(false), json!("orchestrator: on it")),
-            (json!("t2"), json!(false), json!("orchestrator: on it"))
+            (json!("t1"), json!(true), json!("conductor: grilled")),
+            (json!("t3"), json!(false), json!("conductor: on it")),
+            (json!("t2"), json!(false), json!("conductor: on it"))
         ]
     );
     assert_eq!(v["threads"][0]["last"]["ts"], json!(late.now));

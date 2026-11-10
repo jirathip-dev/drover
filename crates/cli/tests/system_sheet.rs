@@ -115,7 +115,7 @@ fn every_former_control_is_in_its_section_and_the_gear_opens_at_agent_providers(
           n('hosts', '#host .hcd'), n('hosts', '#host>.grp'), n('hosts', '#host .su'), n('hosts', '#host [data-su=claude]'), \
           +(n('activity', '#events .er') > 0), +(n('activity', '#events .chips button') > 1), \
           n('notifications', '#push'), n('notifications', 'form.role2 [name=hash]'), n('notifications', '.cg'), \
-          n('orchestrator', '.kv2 a.go[href=\"#system/fleets/sendmeter\"]'), \
+          n('conductor', '.kv2 a.go[href=\"#system/fleets/sendmeter\"]'), \
           n('appearance', '[role=listbox]'), n('appearance', '.lko[data-t]'), \
           +!document.querySelector('main #host, main #events, #look'), \
           +![...document.querySelectorAll('#host .gn')].some(g => g.textContent === 'ALERTS'), \
@@ -124,14 +124,15 @@ fn every_former_control_is_in_its_section_and_the_gear_opens_at_agent_providers(
         got.push(+(document.documentElement.dataset.theme === 'kitchen'), +sysOn()); \
         document.querySelector('.sxc').click(); got.push(+!sysOn(), +(location.hash === '#queue')); window.measure = got";
     let m = measure(&page("sys-all", true), "", "queue", &format!("{{ {js} }}"));
-    // Open at providers (hash, scrolled to the top, its chip filled); account A's row; sendmeter's 7 [config] groups,
-    // its 2 roles' model pickers and the pipeline graph; one host card, 4 groups, [sign in ▾] without Claude's;
-    // Activity's rows and chips; [enable alerts], one paired device, 4 Notifications groups (#557: no Telegram); Orchestrator's [edit] link;
+    // Open at providers (hash, scrolled to the top, its chip filled); account A's row; sendmeter's 6 [config] groups,
+    // its 3 roles' model pickers (#780, q1173: the frozen sheet looks for `role.conductor`, so the orchestrator is a
+    // role row and its own group is gone) and the pipeline graph; one host card, 4 groups, [sign in ▾] without Claude's;
+    // Activity's rows and chips; [enable alerts], one paired device, 4 Notifications groups (#557: no Telegram); Conductor's [edit] link;
     // Appearance's 3 lists and 4 themes; nothing left in the tabs and no ALERTS, accounts or deepseek in Hosts; a theme
     // tap applies, the sheet stays; [close] closes and puts the tab's hash back.
     assert_eq!(
         m,
-        [1., 1., 1., 1., 1., 7., 2., 1., 1., 4., 1., 0., 1., 1., 1., 1., 4., 1., 3., 4., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 6., 3., 1., 1., 4., 1., 0., 1., 1., 1., 1., 4., 1., 3., 4., 1., 1., 1., 1., 1., 1., 1.],
         "{m:?}"
     );
 }
