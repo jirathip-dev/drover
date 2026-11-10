@@ -1512,7 +1512,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     ThreadCmd::Reply { id, text, file } => crate::orchestrator::reply(ctx, &cfg, &id, &text, &file)?,
                     ThreadCmd::Show { id, json } => crate::orchestrator::show(ctx, &cfg, out, &id, json)?,
                     ThreadCmd::Ls(Scope { fleet, json }) => {
-                        crate::orchestrator::ls(ctx, &cfg, out, fleet.as_deref(), json)?
+                        crate::orchestrator::ls(ctx, &cfg, out, fleet.as_deref(), json)?;
                     }
                 },
                 Cmd::Config { cmd } => {

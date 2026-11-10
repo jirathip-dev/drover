@@ -147,7 +147,7 @@ impl Server<'_> {
                     .for_each(|t| handoffs(&ev, &mut t["page"]));
                 out("200 OK", &c)
             }
-            // #681: a repo's conductor threads, newest-active first (cooee's side threads).
+            // #681: a repo's orchestrator threads, newest-active first (cooee's side threads).
             ("GET", Some(x)) if x.starts_with("repo/") && x.ends_with("/threads") => {
                 let fleet = x[5..].strip_suffix("/threads").unwrap_or_default();
                 match Config::kept(ctx) {
@@ -261,7 +261,7 @@ impl Server<'_> {
             .as_ref()
             .filter(|_| ["drive", "override", "extend", "park"].contains(&op.as_str()))
         else {
-            // #715: an answer's conductor wake is delivered after the reply.
+            // #715: an answer's orchestrator wake is delivered after the reply.
             let (res, later) = crate::orchestrator::deferred(|| self.write(ctx, &f));
             self.later(ctx, later);
             return res;
@@ -927,7 +927,7 @@ fn handoff(events: &[Event], o: &Event, folded: bool) -> Handoff {
     }
 }
 
-/// #681: API v1 `repo/<fleet>/threads`: the repo's conductor threads newest-active first (the chat tab's order: by
+/// #681: API v1 `repo/<fleet>/threads`: the repo's orchestrator threads newest-active first (the chat tab's order: by
 /// the last message not the system's), the first not archived its ongoing one.
 fn repo(events: &[Event], fleet: &str) -> RepoThreads {
     use crate::orchestrator::{archived, of, title, unread};
