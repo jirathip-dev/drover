@@ -1,5 +1,5 @@
 //! #419: the lesson role: `herdsman lesson digest` (a fleet's recent mistakes) and `herdsman lesson` (its issue and
-//! lane), run weekly by `tick` and on demand by a conductor.
+//! lane), run weekly by `tick` and on demand by an orchestrator.
 use crate::access::{civil_month_day, civil_year};
 use crate::config::Config;
 use crate::events::{emit, plain, read, Event};
@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use std::io::Write;
 
-/// `herdsman lesson digest`: the last `days` of rev FAIL findings, the owner's lines in the fleet's conductor threads,
+/// `herdsman lesson digest`: the last `days` of rev FAIL findings, the owner's lines in the fleet's orchestrator threads,
 /// `by: owner` events and reverts on integration, secret-looking values redacted.
 pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -> Result<String> {
     let f = cfg.fleet(fleet)?;
@@ -34,9 +34,11 @@ pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -
             s += &format!("\n#{n} round {round}:\n{}\n", ls.join("\n"));
         }
     }
-    s += "\n## The owner in conductor threads\n\n";
+    s += "\n## The owner in orchestrator threads\n\n";
     let owner_msg = |e: &&&Event| {
-        e.kind == "thread-msg" && e.str("from").is_some_and(|f| f != "conductor") && crate::conductor::link(e).is_none()
+        e.kind == "thread-msg"
+            && e.str("from").is_some_and(|f| f != "orchestrator")
+            && crate::orchestrator::link(e).is_none()
     };
     for e in recent.iter().filter(owner_msg) {
         let text = e.str("text").unwrap_or_default().replace('\n', "\n  ");
@@ -362,7 +364,7 @@ pub fn review(
         let said = |e: &Event| {
             match e.kind.as_str() {
                 "verdict" => e.str("body"),
-                "thread-msg" if e.str("from") != Some("conductor") => e.str("text"),
+                "thread-msg" if e.str("from") != Some("orchestrator") => e.str("text"),
                 _ => None,
             }
             .is_some_and(|t| t.lines().any(|l| l.trim() == fp))

@@ -1,6 +1,6 @@
 //! #268: the Queue tab is the TypeScript board's (web/src/queue.ts, run under node), drawn from API v1's `queue`: the
 //! page carries none of it, and every form the board draws posts through API v1 with exactly its fields: [▼], [Drive
-//! now], [Pause], [Resume], a defaulted decision's [change], the backlog's [queue N], a role's [Set] and a Conductor
+//! now], [Pause], [Resume], a defaulted decision's [change], the backlog's [queue N], a role's [Set] and an Orchestrator
 //! choice from the [config] sheet.
 mod common;
 use common::*;
@@ -188,7 +188,7 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     ok(&form(&paused, "resume", None).0);
     assert!(!tab().contains("<details class=\"fc off "));
 
-    // The [config] sheet: a role's [Set] (sonnet for impl), then a Conductor choice.
+    // The [config] sheet: a role's [Set] (sonnet for impl), then an Orchestrator choice.
     let sheet = queue_js(&s, ADDR, T, "sheet(d, 'sendmeter')");
     let (mut set, _) = form(&sheet, "set", Some(("role", "impl")));
     set.extend([("harness", "hermes"), ("model", "sonnet"), ("effort", "")].map(|(k, v)| (k.into(), v.into())));
@@ -196,10 +196,10 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     let sheet = queue_js(&s, ADDR, T, "sheet(d, 'sendmeter')");
     let (mut cond, _) = form(&sheet, "cond", Some(("model", "sonnet")));
     cond.insert("model".into(), "sonnet".into());
-    assert!(ok(&cond).contains("conductor: model sonnet"));
+    assert!(ok(&cond).contains("orchestrator: model sonnet"));
     let text = std::fs::read_to_string(&c.config).unwrap();
     assert!(
-        text.contains("[fleet.sendmeter.role.conductor]") && text.contains("model = \"sonnet\""),
+        text.contains("[fleet.sendmeter.role.orchestrator]") && text.contains("model = \"sonnet\""),
         "{text}"
     );
 
@@ -211,7 +211,7 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     assert_eq!(post(&s, &cookie, &stale)["code"], "STALE");
 }
 
-/// #517: a conductor's thread ask on an issue: its question and options on that issue's queue card (and the needs
+/// #517: an orchestrator's thread ask on an issue: its question and options on that issue's queue card (and the needs
 /// card), `asked in <title> · <id>`; answered there, the thread's copy shows it answered, no longer open.
 #[test]
 fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
@@ -224,7 +224,7 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
     let ask = json!({"id": "q398", "question": "ship the bell now?", "options": ["now", "after #10"],
         "recommend": 1, "kind": "owner", "thread": "t6"});
     ev(Some(2), "needs-decision", ask);
-    // herdr ready to start the thread's conductor: the answer goes to it, as a tap in the thread would.
+    // herdr ready to start the thread's orchestrator: the answer goes to it, as a tap in the thread would.
     let r = Fake::default()
         .reply("herdr agent list", NO_AGENTS)
         .reply(
@@ -259,7 +259,7 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
         (d.len(), d[0].str("choice"), d[0].str("by")),
         (1, Some("after #10"), Some("owner"))
     );
-    assert!(r.called("herdr agent start conductor-t6"), "{:?}", r.calls.borrow());
+    assert!(r.called("herdr agent start orchestrator-t6"), "{:?}", r.calls.borrow());
     // The thread's copy is answered, not open; the card has no form left.
     let chat: Value = serde_json::from_str(&api(&s, ADDR, &cookie, T, "chat")).unwrap();
     let t = (chat["threads"].as_array().unwrap().iter())

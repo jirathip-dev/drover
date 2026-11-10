@@ -161,7 +161,7 @@ enum Cmd {
         /// routine (defaults to --recommend after [limits].ask_default_minutes) | owner (always waits)
         #[arg(long, default_value = "owner", value_parser = ["routine", "owner"])]
         kind: String,
-        /// Ask in this conductor thread: its options become choice rows, the answer goes back into it
+        /// Ask in this orchestrator thread: its options become choice rows, the answer goes back into it
         #[arg(long, value_name = "ID")]
         thread: Option<String>,
     },
@@ -174,14 +174,14 @@ enum Cmd {
         /// Who answered, as the board shows it (e.g. owner, alice)
         #[arg(long, default_value = "owner")]
         by: String,
-        /// A conductor's answer to a lane ask: a verbatim quote of the issue's spec, or an answered decision id
+        /// An orchestrator's answer to a lane ask: a verbatim quote of the issue's spec, or an answered decision id
         #[arg(long, value_name = "QUOTE|ID")]
         basis: Option<String>,
         /// The owner's exact line in the ask's thread, after the ask: logged by: owner (typed)
         #[arg(long, value_name = "LINE")]
         typed: Option<String>,
     },
-    /// Conductors and the owner: write an owner-decided amendment into the issue body's `## Amendments`; re-runs the PR's failed spec checks
+    /// Orchestrators and the owner: write an owner-decided amendment into the issue body's `## Amendments`; re-runs the PR's failed spec checks
     Amend {
         fleet: String,
         issue: u64,
@@ -192,12 +192,12 @@ enum Cmd {
     },
     /// The board's bug reports (#363), newest first: id, note, bundle path; with an id, that bundle
     Report { id: Option<String> },
-    /// Conductor chat threads per repo (or `all`), each talked through by one conductor lane (docs/conductor.md)
+    /// Orchestrator chat threads per repo (or `all`), each talked through by one orchestrator lane (docs/orchestrator.md)
     Thread {
         #[command(subcommand)]
         cmd: ThreadCmd,
     },
-    /// #387: fleet.toml changes as thread cards only the owner applies (docs/conductor.md)
+    /// #387: fleet.toml changes as thread cards only the owner applies (docs/orchestrator.md)
     Config {
         #[command(subcommand)]
         cmd: ConfigCmd,
@@ -212,7 +212,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: SecretCmd,
     },
-    /// #538: run cards: an owner-level command a conductor posts in its thread; herdsman runs it once on the owner's [approve]
+    /// #538: run cards: an owner-level command an orchestrator posts in its thread; herdsman runs it once on the owner's [approve]
     Card {
         #[command(subcommand)]
         cmd: CardCmd,
@@ -271,7 +271,7 @@ enum Cmd {
     Next { fleet: String },
     /// Compact board (≤ 60 cols): queue order, state, lane, age, last event
     Board { fleet: Option<String> },
-    /// File this week's lessons issue, queue it on top and spawn its `lesson` lane (conductors and the owner only)
+    /// File this week's lessons issue, queue it on top and spawn its `lesson` lane (orchestrators and the owner only)
     #[command(args_conflicts_with_subcommands = true)]
     Lesson {
         #[command(subcommand)]
@@ -441,7 +441,7 @@ enum Cmd {
         #[arg(long, help = "Remove without asking")]
         apply: bool,
     },
-    /// #537: the `[ci_runners]` VMs and their GitHub runners (a conductor's `runners` group, its brief names the verbs);
+    /// #537: the `[ci_runners]` VMs and their GitHub runners (an orchestrator's `runners` group, its brief names the verbs);
     /// each verb logged `runners-*`
     #[command(hide = true)]
     Runners {
@@ -525,11 +525,11 @@ struct Scope {
 
 #[derive(Subcommand)]
 enum AskCmd {
-    /// Close an ask its own thread's conductor replaced; logged `ask-withdrawn`
+    /// Close an ask its own thread's orchestrator replaced; logged `ask-withdrawn`
     Withdraw {
         fleet: String,
         id: String,
-        /// The conductor withdrawing it: conductor-<thread>
+        /// The orchestrator withdrawing it: orchestrator-<thread>
         #[arg(long)]
         by: String,
         /// The ask that replaces it
@@ -540,22 +540,25 @@ enum AskCmd {
 
 #[derive(Subcommand)]
 enum ThreadCmd {
-    /// Start a thread for a fleet's repo (or `all`); prints its id. A conductor uses `thread handoff`
+    /// Start a thread for a fleet's repo (or `all`); prints its id. An orchestrator uses `thread handoff`
     New {
         repo: String,
         title: String,
-        /// Its conductor's harness for good: claude | hermes | dsh (default `[chat]`'s, else the conductor role's)
+        /// Its orchestrator's harness for good: claude | hermes | dsh (default `[chat]`'s, else the orchestrator role's)
         #[arg(long)]
         harness: Option<String>,
+        /// #780: the `[orchestrator.<id>]` it talks to (default: the first whose fleets cover the repo)
+        #[arg(long)]
+        orchestrator: Option<String>,
     },
-    /// A conductor hands off to thread <to> at once, or to a repo (or `all`): the owner taps one of its threads or a new one; linked both ways, <text> wakes its conductor as from <from>
+    /// An orchestrator hands off to thread <to> at once, or to a repo (or `all`): the owner taps one of its threads or a new one; linked both ways, <text> wakes its orchestrator as from <from>
     Handoff {
         from: String,
         to: String,
         title: String,
         text: String,
     },
-    /// The owner's message: logged, then typed into the thread's conductor (started or resumed first)
+    /// The owner's message: logged, then typed into the thread's orchestrator (started or resumed first)
     Say {
         id: String,
         text: String,
@@ -566,13 +569,13 @@ enum ThreadCmd {
         #[arg(long)]
         file: Vec<PathBuf>,
     },
-    /// Retitle a thread: the conductor's short summary, once after its first reply
+    /// Retitle a thread: the orchestrator's short summary, once after its first reply
     Title { id: String, title: String },
-    /// Fold a thread into its repo's archived list; its conductor stops, nothing is deleted
+    /// Fold a thread into its repo's archived list; its orchestrator stops, nothing is deleted
     Archive { id: String },
     /// Bring an archived thread back; its next message resumes the same session
     Restore { id: String },
-    /// The conductor's reply to the owner
+    /// The orchestrator's reply to the owner
     Reply {
         id: String,
         text: String,
@@ -587,7 +590,7 @@ enum ThreadCmd {
         #[arg(long)]
         json: bool,
     },
-    /// Per repo, its threads: title, last message, unread dot, conductor awake/asleep
+    /// Per repo, its threads: title, last message, unread dot, orchestrator awake/asleep
     Ls(Scope),
 }
 
@@ -867,7 +870,7 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's conductor `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`, +6 for #712's `unpark` and `park --why`/`--by`).
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's orchestrator `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`, +6 for #712's `unpark` and `park --why`/`--by`).
 pub const HELP_AGENT_MAX: usize = 352;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
@@ -1389,8 +1392,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => spawn::profiles_sync(ctx, &cfg, &usage_doc(), out)?,
                 Cmd::Spawn { fleet, issue, role, o } => {
                     // #155: the orch role is gone; `- orch` (and any orch spawn) is refused.
-                    if role == "conductor" {
-                        return gate::refused("BAD_VALUE", "a conductor starts from `herdsman thread say`");
+                    if crate::orchestrator::is_role(&role) {
+                        return gate::refused("BAD_VALUE", "an orchestrator starts from `herdsman thread say`");
                     }
                     if role == "orch" {
                         let why = "herdsman drives fleets itself; see herdsman timer";
@@ -1414,7 +1417,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Ask {
                     cmd: Some(AskCmd::Withdraw { fleet, id, by, new }),
                     ..
-                } => crate::withdraw(ctx, &cfg, out, (&fleet, &id), &by, new.as_deref())?,
+                } => crate::withdraw(
+                    ctx,
+                    &cfg,
+                    out,
+                    (&fleet, &id),
+                    &crate::orchestrator::by(&by),
+                    new.as_deref(),
+                )?,
                 Cmd::Ask {
                     fleet: Some(fleet),
                     issue: Some(issue),
@@ -1445,12 +1455,20 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     basis,
                     ..
                 } => match std::env::var("HERDSMAN_THREAD").ok().filter(|t| !t.is_empty()) {
-                    // #541: a conductor answers lane asks on its repo only with a basis.
+                    // #541: an orchestrator answers lane asks on its repo only with a basis.
                     Some(t) => {
                         let how = (t.as_str(), basis.as_deref().unwrap_or_default());
-                        crate::conductor_answer(ctx, &cfg, r, out, (&fleet, &id), &choice, how)?;
+                        crate::orchestrator_answer(ctx, &cfg, r, out, (&fleet, &id), &choice, how)?;
                     }
-                    None => crate::answer(ctx, &cfg, r, out, (&fleet, &id), &choice, (&by, None))?,
+                    None => crate::answer(
+                        ctx,
+                        &cfg,
+                        r,
+                        out,
+                        (&fleet, &id),
+                        &choice,
+                        (&crate::orchestrator::by(&by), None),
+                    )?,
                 },
                 Cmd::Amend {
                     fleet,
@@ -1460,16 +1478,22 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 } => crate::amend::amend(ctx, &cfg, r, out, (&fleet, issue), &basis, &text)?,
                 Cmd::Check => check::check(ctx, &cfg, r, out)?,
                 Cmd::Thread { cmd } => match cmd {
-                    // #413: every thread a conductor starts is logged with its source.
+                    // #413: every thread an orchestrator starts is logged with its source.
                     ThreadCmd::New { .. } if std::env::var("HERDSMAN_THREAD").is_ok_and(|t| !t.is_empty()) => {
-                        gate::refused("USE_HANDOFF", "a conductor starts threads with `thread handoff`")?;
+                        gate::refused("USE_HANDOFF", "an orchestrator starts threads with `thread handoff`")?;
                     }
-                    ThreadCmd::New { repo, title, harness } => {
-                        let id = crate::conductor::new(ctx, &cfg, &repo, &title, harness.as_deref())?;
+                    ThreadCmd::New {
+                        repo,
+                        title,
+                        harness,
+                        orchestrator,
+                    } => {
+                        let o = (harness.as_deref(), orchestrator.as_deref());
+                        let id = crate::orchestrator::new_with(ctx, &cfg, &repo, &title, o)?;
                         writeln!(out, "{id}")?;
                     }
                     ThreadCmd::Handoff { from, to, title, text } => {
-                        let to = crate::conductor::handoff(ctx, &cfg, r, [&from, &to, &title, &text])?;
+                        let to = crate::orchestrator::handoff(ctx, &cfg, r, [&from, &to, &title, &text])?;
                         writeln!(out, "{to}")?;
                     }
                     ThreadCmd::Say { id, text, by, file } => {
@@ -1477,17 +1501,19 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         let load =
                             |p: &PathBuf| Ok((name(p), std::fs::read(p).with_context(|| p.display().to_string())?));
                         let files = file.iter().map(load).collect::<Result<Vec<_>>>()?;
-                        crate::conductor::find(&read(&ctx.state)?, &id)?;
-                        let files = crate::conductor::upload(ctx, &cfg, &id, &files)?;
-                        let agent = crate::conductor::say(ctx, &cfg, r, (&id, &text, &files), (&by, false))?;
+                        crate::orchestrator::find(&read(&ctx.state)?, &id)?;
+                        let files = crate::orchestrator::upload(ctx, &cfg, &id, &files)?;
+                        let agent = crate::orchestrator::say(ctx, &cfg, r, (&id, &text, &files), (&by, false))?;
                         writeln!(out, "{id}: -> {agent}")?;
                     }
-                    ThreadCmd::Title { id, title } => crate::conductor::retitle(ctx, &cfg, &id, &title)?,
-                    ThreadCmd::Archive { id } => crate::conductor::archive(ctx, &cfg, r, &id, true)?,
-                    ThreadCmd::Restore { id } => crate::conductor::archive(ctx, &cfg, r, &id, false)?,
-                    ThreadCmd::Reply { id, text, file } => crate::conductor::reply(ctx, &cfg, &id, &text, &file)?,
-                    ThreadCmd::Show { id, json } => crate::conductor::show(ctx, &cfg, out, &id, json)?,
-                    ThreadCmd::Ls(Scope { fleet, json }) => crate::conductor::ls(ctx, out, fleet.as_deref(), json)?,
+                    ThreadCmd::Title { id, title } => crate::orchestrator::retitle(ctx, &cfg, &id, &title)?,
+                    ThreadCmd::Archive { id } => crate::orchestrator::archive(ctx, &cfg, r, &id, true)?,
+                    ThreadCmd::Restore { id } => crate::orchestrator::archive(ctx, &cfg, r, &id, false)?,
+                    ThreadCmd::Reply { id, text, file } => crate::orchestrator::reply(ctx, &cfg, &id, &text, &file)?,
+                    ThreadCmd::Show { id, json } => crate::orchestrator::show(ctx, &cfg, out, &id, json)?,
+                    ThreadCmd::Ls(Scope { fleet, json }) => {
+                        crate::orchestrator::ls(ctx, &cfg, out, fleet.as_deref(), json)?
+                    }
                 },
                 Cmd::Config { cmd } => {
                     let (id, apply) = match cmd {
@@ -1929,7 +1955,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         }
                         QueueCmd::Ls { .. } => unreachable!(),
                     };
-                    // #412: a conductor's design (#730: or architect) mark: the approval asks in its thread too.
+                    // #412: an orchestrator's design (#730: or architect) mark: the approval asks in its thread too.
                     let mut d = d;
                     if let Some(t) = std::env::var("HERDSMAN_THREAD")
                         .ok()
@@ -2005,10 +2031,10 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         writeln!(out, "{v}")?;
         return Ok(());
     }
-    // #413: an issue a handed-off thread's conductor filed goes back to the thread it came from.
+    // #413: an issue a handed-off thread's orchestrator filed goes back to the thread it came from.
     let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();
     if let Some(text) = hook::issue_filed(&input).filter(|_| !thread.is_empty()) {
-        if let Err(e) = Config::load(&ctx.config).and_then(|cfg| crate::conductor::flow(ctx, &cfg, &thread, &text)) {
+        if let Err(e) = Config::load(&ctx.config).and_then(|cfg| crate::orchestrator::flow(ctx, &cfg, &thread, &text)) {
             eprintln!("herdsman hook: {e:#}");
         }
     }
@@ -2027,7 +2053,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         Ok(r) => r,
         Err(cause) => return fail_closed(ctx, out, &input, &cause),
     };
-    // #668: an impl lane never edits the cap file, but for the conductor-filed raise (its issue titled `cap: …`).
+    // #668: an impl lane never edits the cap file, but for the orchestrator-filed raise (its issue titled `cap: …`).
     let mut it = lane.split(':');
     let (fleet, n) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
     let cap = rules.builds
@@ -2043,19 +2069,24 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         h.join(".hermes/profiles").to_string_lossy().into(),
     ];
     paths.extend(std::env::var("HERDSMAN_RULES").ok()); // #592: a lane never edits its own rules
-                                                        // #410: a conductor (`HERDSMAN_LANE`'s role) spawns design lanes and writes its own thread folder.
-    let conductor = std::env::var("HERDSMAN_LANE").is_ok_and(|l| l.split(':').nth(2) == Some("conductor"));
+                                                        // #410: an orchestrator (`HERDSMAN_LANE`'s role) spawns design lanes and writes its own thread folder.
+    let orchestrator =
+        std::env::var("HERDSMAN_LANE").is_ok_and(|l| l.split(':').nth(2).is_some_and(crate::orchestrator::is_role));
     let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();
     let cfg = Config::load(&ctx.config)
         .ok()
-        .filter(|_| conductor && !thread.is_empty() && !thread.contains(['/', '.']));
-    let own = cfg.map(|cfg| crate::conductor::dir(ctx, &cfg, &thread).to_string_lossy().into_owned());
+        .filter(|_| orchestrator && !thread.is_empty() && !thread.contains(['/', '.']));
+    let own = cfg.map(|cfg| {
+        crate::orchestrator::dir(ctx, &cfg, &thread)
+            .to_string_lossy()
+            .into_owned()
+    });
     let policy = hook::Policy {
         branches: rules.branches,
         paths,
         reviewer: reviewer || rules.reviewer,
         deny: rules.deny,
-        conductor,
+        orchestrator,
         own,
         groups: rules.groups,
         scratch: std::env::var("HERDSMAN_SCRATCH_TARGET").ok().filter(|s| !s.is_empty()),
@@ -2076,7 +2107,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     if let Some(dir) = hook::push_dir(&input) {
         coauthor_warn(ctx, r, &dir, "HEAD");
     }
-    // #386: a conductor's `herdsman`/`gh` command shows in its thread as a closed tool row.
+    // #386: an orchestrator's `herdsman`/`gh` command shows in its thread as a closed tool row.
     // #538: a group verb's row names its group.
     if let Some(cmd) = hook::fleet_cmd(&input).filter(|_| !thread.is_empty()) {
         let mut d = json!({"thread": thread, "cmd": cmd});

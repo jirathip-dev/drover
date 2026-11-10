@@ -25,9 +25,17 @@ use serde_json::Value;
 const LANE_OPS: &[&str] = &["send", "menu", "act", "setup", "chat-about", "chat", "close"];
 
 /// #576: API v1's own ops a paired device only may POST (the board's are `PAIRED_OPS`).
-/// #633: and a cooee thread's conductor link.
+/// #633: and a cooee thread's orchestrator link (#780: its old `conductor-` paths too).
 /// #725: and the lifeboat's posts.
-const V1_PAIRED: &[&str] = &["qset", "lesson", "conductor-attach", "conductor-detach", "lifeboat"];
+const V1_PAIRED: &[&str] = &[
+    "qset",
+    "lesson",
+    "orchestrator-attach",
+    "orchestrator-detach",
+    "conductor-attach",
+    "conductor-detach",
+    "lifeboat",
+];
 
 type Res = (&'static str, &'static str, Vec<u8>);
 
@@ -74,7 +82,7 @@ impl Server<'_> {
                 ("200 OK", HTML, crate::lifeboat::page(ctx, &lanes, msg).into_bytes())
             }
             ("POST", Some("lifeboat")) if paired => {
-                let (msg, later) = crate::conductor::deferred(|| crate::lifeboat::act(ctx, self.r, &fields(body)));
+                let (msg, later) = crate::orchestrator::deferred(|| crate::lifeboat::act(ctx, self.r, &fields(body)));
                 self.later(ctx, later);
                 ("200 OK", HTML, crate::lifeboat::back(&super::enc(&msg)).into_bytes())
             }
@@ -217,14 +225,17 @@ impl Server<'_> {
             ("POST", Some("chat")) => done(self.chat_defaults(ctx, &fields(body))),
             ("POST", Some("close")) => done(self.close(ctx, &fields(body))),
             ("POST", Some("qset")) => done(qset(ctx, &fields(body))),
-            ("POST", Some(op @ ("conductor-attach" | "conductor-detach"))) => {
+            (
+                "POST",
+                Some(op @ ("orchestrator-attach" | "orchestrator-detach" | "conductor-attach" | "conductor-detach")),
+            ) => {
                 let f = fields(body);
                 let [fleet, t] = ["fleet", "thread"].map(|k| f.get(k).map_or("", String::as_str));
                 let cfg = Config::kept(ctx);
-                if op == "conductor-detach" {
-                    return done(cfg.and_then(|c| crate::conductor::detach(ctx, &c, fleet, t)));
+                if op.ends_with("-detach") {
+                    return done(cfg.and_then(|c| crate::orchestrator::detach(ctx, &c, fleet, t)));
                 }
-                let a = cfg.and_then(|c| crate::conductor::attach(ctx, &c, self.r, fleet, t));
+                let a = cfg.and_then(|c| crate::orchestrator::attach(ctx, &c, self.r, fleet, t));
                 match a.and_then(|v| Ok(serde_json::from_value::<ConductorAttach>(v)?)) {
                     Ok(a) => out("200 OK", &a),
                     Err(e) => done(Err(e)),
@@ -251,7 +262,7 @@ impl Server<'_> {
             .filter(|_| ["drive", "override", "extend", "park"].contains(&op.as_str()))
         else {
             // #715: an answer's conductor wake is delivered after the reply.
-            let (res, later) = crate::conductor::deferred(|| self.write(ctx, &f));
+            let (res, later) = crate::orchestrator::deferred(|| self.write(ctx, &f));
             self.later(ctx, later);
             return res;
         };
@@ -290,7 +301,7 @@ impl Server<'_> {
         if wanted.is_empty() {
             return refused("BAD_VALUE", "set harness, model or effort");
         }
-        let line = crate::conductor::chat(ctx, self.r, &wanted)?;
+        let line = crate::orchestrator::chat(ctx, self.r, &wanted)?;
         self.kick.store(true, super::Relaxed);
         Ok(line)
     }
@@ -816,7 +827,7 @@ impl Server<'_> {
 fn handoffs(events: &[Event], page: &mut Value) {
     let (id, sent) = (
         page["id"].as_str().unwrap_or_default().to_string(),
-        crate::conductor::forwarded(events),
+        crate::orchestrator::forwarded(events),
     );
     let msgs = page["msgs"].as_array_mut().map(std::mem::take).unwrap_or_default();
     let want: std::collections::BTreeSet<_> = msgs.iter().filter_map(|m| m["seq"].as_u64()).collect();
@@ -919,7 +930,7 @@ fn handoff(events: &[Event], o: &Event, folded: bool) -> Handoff {
 /// #681: API v1 `repo/<fleet>/threads`: the repo's conductor threads newest-active first (the chat tab's order: by
 /// the last message not the system's), the first not archived its ongoing one.
 fn repo(events: &[Event], fleet: &str) -> RepoThreads {
-    use crate::conductor::{archived, of, title, unread};
+    use crate::orchestrator::{archived, of, title, unread};
     let ts = events.iter().filter(|t| t.kind == "thread-new" && t.fleet == fleet);
     let mut rows: Vec<_> = ts
         .map(|t| {
@@ -948,7 +959,7 @@ fn repo(events: &[Event], fleet: &str) -> RepoThreads {
     let mut ongoing = true;
     let threads = rows.into_iter().map(|(id, last)| {
         let archived = archived(events, id);
-        let lane = of(events, id).rfind(|e| e.kind.starts_with("conductor-"));
+        let lane = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
         let newest = ongoing && !archived;
         ongoing &= !newest;
         RepoThread {
@@ -956,7 +967,7 @@ fn repo(events: &[Event], fleet: &str) -> RepoThreads {
             title: title(events, id).into(),
             last,
             unread: unread(events, id),
-            awake: lane.is_some_and(|l| l.kind != "conductor-sleep"),
+            awake: lane.is_some_and(|l| l.kind != "orchestrator-sleep"),
             archived,
             newest,
         }

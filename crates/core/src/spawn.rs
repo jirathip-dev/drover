@@ -18,7 +18,7 @@ pub fn role_prompt(role: &str) -> &'static str {
         "impl" => include_str!("../roles/impl.md"),
         "design" => include_str!("../roles/design.md"),
         "architect" => include_str!("../roles/architect.md"),
-        "conductor" => include_str!("../roles/conductor.md"),
+        "orchestrator" => include_str!("../roles/orchestrator.md"),
         "lesson" => include_str!("../roles/lesson.md"),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
@@ -153,7 +153,7 @@ pub struct Plan {
     pub title: String,
     /// #302: the card's `on <entry> (<entries> resting until` and that time, when a `fallback` entry carries on.
     pub resting: Option<(String, u64)>,
-    /// #355: a conductor's harness session id, and whether to resume it (`Harness::resumes`).
+    /// #355: an orchestrator's harness session id, and whether to resume it (`Harness::resumes`).
     pub session: Option<(String, bool)>,
     /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `ANTHROPIC_AUTH_TOKEN`).
     pub lane_key: Option<String>,
@@ -560,7 +560,7 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
 }
 
 /// #565: why herdsman's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (with an
-/// account; #637: on a remote host, its profile checked there instead); empty when it would. #633: an attached cooee conductor's `guarded` too.
+/// account; #637: on a remote host, its profile checked there instead); empty when it would. #633: an attached cooee orchestrator's `guarded` too.
 pub fn unguarded(
     ctx: &Ctx,
     (profile, family, h): (&str, &str, &str),
@@ -1583,7 +1583,7 @@ fn tail(r: &dyn Runner, pane: &str) -> String {
 }
 
 /// #463: a start that failed shows why on `pane`'s screen; a first-start prompt the harness knows gets its answer
-/// (`logged` with its name) and the harness is confirmed up. #736: spawn's and a conductor's. Whether it came up; the
+/// (`logged` with its name) and the harness is confirmed up. #736: spawn's and an orchestrator's. Whether it came up; the
 /// screen's redacted tail.
 pub(crate) fn unblock(
     r: &dyn Runner,

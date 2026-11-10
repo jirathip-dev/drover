@@ -945,7 +945,7 @@ fn cap_prints_the_queue_wide_view() {
         "  #4 (PR #14): +3 (measured)",
         "queued, no PR: #9\n",
         "sum of open PRs: +1403; projected total 1413 / cap 1000, headroom -413",
-        "raise to 1513 in one conductor-filed issue (recommended) 2. trim",
+        "raise to 1513 in one orchestrator-filed issue (recommended) 2. trim",
     ] {
         assert!(out.contains(want), "{want:?} in\n{out}");
     }
@@ -1004,7 +1004,7 @@ fn cap_uses_the_fleets_own_cap_script() {
         "headroom 85\n",
         "  #4 (PR #14): +3 (script)",
         "sum of open PRs: +3; projected total 18 / cap 100, headroom 82",
-        "ask options: 1. raise line cap to 518 in one conductor-filed issue (recommended) 2. trim",
+        "ask options: 1. raise line cap to 518 in one orchestrator-filed issue (recommended) 2. trim",
     ] {
         assert!(out.contains(want), "{want:?} in\n{out}");
     }
@@ -1025,7 +1025,7 @@ fn cap_shows_each_cap_a_script_prints() {
         "  #4 (PR #14): +0 src, +3 apple_cap (script)",
         "src: sum of open PRs: +0; projected total 10 / cap 100, headroom 90",
         "apple_cap: sum of open PRs: +3; projected total 8 / cap 6, headroom -2",
-        "ask options: 1. raise apple_cap to 508 in one conductor-filed issue (recommended) 2. trim",
+        "ask options: 1. raise apple_cap to 508 in one orchestrator-filed issue (recommended) 2. trim",
     ] {
         assert!(out.contains(want), "{want:?} in\n{out}");
     }

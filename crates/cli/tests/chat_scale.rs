@@ -1,9 +1,9 @@
 //! #620: `/api/v1/chat` on 30 threads × 200 messages in a 60,000-event log walks the log a bounded number of times
-//! per thread, never once per message row (`conductor::SCANS`), and a second request with no new event reuses the
+//! per thread, never once per message row (`orchestrator::SCANS`), and a second request with no new event reuses the
 //! fold without reading the log.
 mod common;
 use common::*;
-use herdsman::conductor::SCANS;
+use herdsman::orchestrator::SCANS;
 use herdsman::serve::Server;
 use serde_json::json;
 use std::sync::atomic::Ordering::Relaxed;
@@ -22,7 +22,7 @@ fn the_chat_tab_is_linear_in_the_log_and_cached_by_its_last_seq() {
         let id = format!("t{t}");
         log.push(json!({"ts": NOW, "fleet": "sendmeter", "type": "thread-new", "thread": id, "title": format!("thread {t}")}));
         for m in 0..MSGS {
-            let from = if m % 2 == 0 { "owner" } else { "conductor" };
+            let from = if m % 2 == 0 { "owner" } else { "orchestrator" };
             log.push(
                 json!({"ts": NOW + m, "fleet": "sendmeter", "type": "thread-msg", "thread": id, "from": from,
                 "text": format!("message {m}")}),

@@ -1,5 +1,5 @@
-//! #541: a lane's ask goes to its repo's conductor thread first (the pinned one, else the newest; none: the owner);
-//! the conductor answers only with a basis and never an owner topic; its answer posts an FYI line the owner may
+//! #541: a lane's ask goes to its repo's orchestrator thread first (the pinned one, else the newest; none: the owner);
+//! the orchestrator answers only with a basis and never an owner topic; its answer posts an FYI line the owner may
 //! [change] for 30 min. Its own test binary: `HERDSMAN_LANE`, `HERDSMAN_THREAD` and `PATH` are process-wide.
 mod common;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
@@ -27,8 +27,8 @@ fn as_lane() {
     std::env::remove_var("HERDSMAN_THREAD");
 }
 
-fn as_conductor(t: &str) {
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:-:conductor");
+fn as_orchestrator(t: &str) {
+    std::env::set_var("HERDSMAN_LANE", "sendmeter:-:orchestrator");
     std::env::set_var("HERDSMAN_THREAD", t);
 }
 
@@ -45,7 +45,7 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// A fleet with a claude conductor (`extra` in its `[fleet.sendmeter]`), a webpush notifier with one device behind a
+/// A fleet with a claude orchestrator (`extra` in its `[fleet.sendmeter]`), a webpush notifier with one device behind a
 /// fake `curl` that answers 201, and the impl lane of #36; threads `threads` in order.
 fn setup(name: &str, extra: &str, threads: &[&str]) -> herdsman::Ctx {
     let d = tmpdir(name);
@@ -54,10 +54,10 @@ fn setup(name: &str, extra: &str, threads: &[&str]) -> herdsman::Ctx {
         &format!("integration = \"staging\"\n{extra}"),
     );
     let conf = format!(
-        "{conf}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\n\n[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n"
+        "{conf}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n\n[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n"
     );
     let c = ctx(&d, &conf);
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     let bin = d.join("bin");
@@ -93,7 +93,7 @@ fn pushes(c: &herdsman::Ctx) -> usize {
     std::fs::read_to_string(calls).unwrap_or_default().lines().count()
 }
 
-/// herdr ready to start a conductor, type into a lane, and the spec of #36 (with an Amendment).
+/// herdr ready to start an orchestrator, type into a lane, and the spec of #36 (with an Amendment).
 fn host() -> Fake {
     let issue = json!({"title": "Split the sender", "body": SPEC, "updatedAt": "t1", "comments": [
         {"body": "**Amendment** no new dependency for it", "authorAssociation": "OWNER", "url": "u1",
@@ -128,9 +128,9 @@ fn lane_ask(c: &herdsman::Ctx, q: &str) -> String {
     out.trim().into()
 }
 
-/// The conductor of thread `t` answers `id` with option `n` on `basis`: exit code, output, the runner.
-fn conductor_answer(c: &herdsman::Ctx, t: &str, id: &str, n: &str, basis: &str) -> (i32, String, Fake) {
-    as_conductor(t);
+/// The orchestrator of thread `t` answers `id` with option `n` on `basis`: exit code, output, the runner.
+fn orchestrator_answer(c: &herdsman::Ctx, t: &str, id: &str, n: &str, basis: &str) -> (i32, String, Fake) {
+    as_orchestrator(t);
     let r = host();
     let (code, out) = run(c, &r, &["answer", "sendmeter", id, n, "--basis", basis]);
     as_owner();
@@ -154,14 +154,14 @@ fn a_lane_ask_wakes_the_newest_thread_and_stays_open_without_a_push() {
     assert_eq!(lane_ask(&c, "Split it?"), "q1");
     let a = &kinds(&c, "needs-decision")[0];
     assert_eq!((a.str("routed"), a.str("thread")), (Some("t2"), None));
-    let thread = c.state.with_file_name("conductor").join("t2/.thread.md");
+    let thread = c.state.with_file_name("orchestrator").join("t2/.thread.md");
     assert_eq!(
         std::fs::read_to_string(thread).unwrap(),
         "system: lane ask q1 on #36 from sendmeter-impl-36 (owner): Split it? [1] yes [2] no (recommended). \
          Answer it only if the issue spec or a past decision settles it: `herdsman answer sendmeter q1 <n> --basis \
          \"<verbatim spec quote | q<id>>\"`; else run it without --basis and it goes to the owner.\n"
     );
-    assert_eq!(kinds(&c, "conductor-start")[0].str("thread"), Some("t2"));
+    assert_eq!(kinds(&c, "orchestrator-start")[0].str("thread"), Some("t2"));
     let (_, asks) = run(&c, &Fake::default(), &["asks", "sendmeter", "--json"]);
     let asks: serde_json::Value = serde_json::from_str(&asks).unwrap();
     assert_eq!(
@@ -189,7 +189,7 @@ fn with_no_thread_the_ask_goes_to_the_owner_as_before() {
     let c = setup("lane-ask-none", "", &[]);
     lane_ask(&c, "Split it?");
     assert_eq!(kinds(&c, "needs-decision")[0].str("routed"), None);
-    assert!(kinds(&c, "thread-msg").is_empty() && kinds(&c, "conductor-start").is_empty());
+    assert!(kinds(&c, "thread-msg").is_empty() && kinds(&c, "orchestrator-start").is_empty());
     assert_eq!(pushes(&c), 1, "the owner's ask pushes");
 }
 
@@ -200,7 +200,7 @@ fn a_spec_quote_answer_reaches_the_lane_posts_an_fyi_and_pushes_nothing() {
     lane_ask(&c, "Split it?");
     // Line breaks in the spec don't matter; the words must be verbatim.
     let quote = "Keep the old sender behind a flag until the owner says so.";
-    let (code, out, r) = conductor_answer(&c, "t1", "q1", "2", quote);
+    let (code, out, r) = orchestrator_answer(&c, "t1", "q1", "2", quote);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: no -> sendmeter-impl-36\n"));
     assert!(
         r.called("herdr agent prompt sendmeter-impl-36 DECISION q1: no"),
@@ -208,7 +208,7 @@ fn a_spec_quote_answer_reaches_the_lane_posts_an_fyi_and_pushes_nothing() {
         r.calls.borrow()
     );
     let d = &kinds(&c, "decision")[0];
-    assert_eq!((d.str("by"), d.str("basis")), (Some("conductor-t1"), Some(quote)));
+    assert_eq!((d.str("by"), d.str("basis")), (Some("orchestrator-t1"), Some(quote)));
     let fyi = kinds(&c, "thread-msg").pop().unwrap();
     assert_eq!(
         (fyi.str("thread"), fyi.str("from"), fyi.str("text")),
@@ -218,13 +218,13 @@ fn a_spec_quote_answer_reaches_the_lane_posts_an_fyi_and_pushes_nothing() {
             Some(&*format!("answered q1 for #36: no, because {quote}"))
         )
     );
-    assert_eq!(pushes(&c), 0, "a conductor's answer pushes nothing");
+    assert_eq!(pushes(&c), 0, "an orchestrator's answer pushes nothing");
 
     // A past decision's id is a basis too; the ask's own id is not.
     let q2 = lane_ask(&c, "Split the tests too?");
-    let (code, out, _) = conductor_answer(&c, "t1", &q2, "1", &q2);
+    let (code, out, _) = orchestrator_answer(&c, "t1", &q2, "1", &q2);
     assert!(code == 3 && out.contains("REFUSED OWNER_ASK"), "{out}");
-    let (code, out, _) = conductor_answer(&c, "t1", &q2, "1", "q1");
+    let (code, out, _) = orchestrator_answer(&c, "t1", &q2, "1", "q1");
     assert_eq!((code, out.as_str()), (0, "sendmeter q2: yes -> sendmeter-impl-36\n"));
 }
 
@@ -235,7 +235,7 @@ fn an_owner_topic_is_refused_and_put_to_the_owner_in_the_thread() {
     let quote = "Keep the old sender behind a flag";
     for (q, id) in [("Promote staging→main now?", "q1"), ("Rotate the secret first?", "q2")] {
         lane_ask(&c, q);
-        let (code, out, r) = conductor_answer(&c, "t1", id, "1", quote);
+        let (code, out, r) = orchestrator_answer(&c, "t1", id, "1", quote);
         assert_eq!(
             (code, out.as_str()),
             (3, "REFUSED OWNER_ASK: it names an owner topic; ask the owner\n")
@@ -254,7 +254,7 @@ fn an_owner_topic_is_refused_and_put_to_the_owner_in_the_thread() {
         [(Some("q1"), Some("t1"), json!(1)), (Some("q2"), Some("t1"), json!(1))]
     );
     assert_eq!(pushes(&c), 2, "each pushes as an ask");
-    // The owner's choice row in the thread: the conductor's pick first; the tap answers the lane.
+    // The owner's choice row in the thread: the orchestrator's pick first; the tap answers the lane.
     let chat = chat(&c, NOW + 5);
     assert!(chat.contains("data-id=\"q1\""), "{chat}");
     as_owner();
@@ -273,7 +273,7 @@ fn an_empty_or_unmatched_basis_is_refused() {
         ("behind a", "--basis is neither"),
         ("q9", "--basis is neither"),
     ] {
-        let (code, out, _) = conductor_answer(&c, "t1", "q1", "2", basis);
+        let (code, out, _) = orchestrator_answer(&c, "t1", "q1", "2", basis);
         assert!(
             code == 3 && out.starts_with(&format!("REFUSED OWNER_ASK: {why}")),
             "{basis}: {out}"
@@ -284,16 +284,16 @@ fn an_empty_or_unmatched_basis_is_refused() {
 }
 
 #[test]
-fn the_owner_changes_a_conductor_answer_within_30_minutes_only() {
+fn the_owner_changes_a_orchestrator_answer_within_30_minutes_only() {
     let _env = env();
     let c = setup("lane-ask-change", "", &["Run"]);
     let quote = "Keep the old sender behind a flag";
     lane_ask(&c, "Split it?");
-    assert_eq!(conductor_answer(&c, "t1", "q1", "2", quote).0, 0);
+    assert_eq!(orchestrator_answer(&c, "t1", "q1", "2", quote).0, 0);
     let board = chat(&c, NOW + 60);
     assert!(board.contains("answered q1 for #36: no, because Keep the old sender behind a flag</p><details class=chg><summary>change</summary><form class=chq data-id=\"q1\""), "{board}");
-    // A conductor may not change it.
-    let (code, out, _) = conductor_answer(&c, "t1", "q1", "1", quote);
+    // An orchestrator may not change it.
+    let (code, out, _) = orchestrator_answer(&c, "t1", "q1", "1", quote);
     assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
     as_owner();
     let r = host();
@@ -312,7 +312,7 @@ fn the_owner_changes_a_conductor_answer_within_30_minutes_only() {
 
     // After 30 min: no [change], and the owner's answer is refused.
     lane_ask(&c, "Split the tests too?");
-    assert_eq!(conductor_answer(&c, "t1", "q2", "2", quote).0, 0);
+    assert_eq!(orchestrator_answer(&c, "t1", "q2", "2", quote).0, 0);
     assert!(chat(&c, NOW + 60).contains("<form class=chq data-id=\"q2\""));
     let late = NOW + 30 * 60;
     assert!(!chat(&c, late).contains("class=chg"), "no [change] after 30 min");

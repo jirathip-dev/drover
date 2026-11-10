@@ -1139,7 +1139,7 @@ fn asks_stranded_on_a_remote_host_are_imported_once() {
     assert!(out.contains("q2 #12") && out.contains("Which way?"), "{out}");
 }
 
-/// #275 (conductor): `agent_name_not_found` also hits the main host under load: the same retry or naming; #359: only
+/// #275 (orchestrator): `agent_name_not_found` also hits the main host under load: the same retry or naming; #359: only
 /// a pane that never confirmed is closed.
 #[test]
 fn a_lost_agent_name_on_the_main_host_retries_or_keeps_the_harness() {

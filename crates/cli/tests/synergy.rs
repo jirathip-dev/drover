@@ -1,5 +1,5 @@
 //! #6 synergy cutover: serial_paths (SERIAL_BUSY, SERIAL_UNMARKED), optional caps (CAP)
-//! and the conductor-only design role.
+//! and the orchestrator-only design role.
 mod common;
 use common::*;
 use herdsman::events::{append, fold, read, Event};

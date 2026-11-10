@@ -304,7 +304,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         row(rows, fresh || running.is_some(), '✗', &line);
     }
     for (label, state) in crate::timer::drift(ctx, cfg, r) {
-        let line = format!("timer — {label} {state} → herdsman timer install (the owner or a conductor)");
+        let line = format!("timer — {label} {state} → herdsman timer install (the owner or an orchestrator)");
         row(rows, state == "loaded", '✗', &line);
     }
     // #635: each cloud host's size, key and CLI; an ssh `Include` that reads a host-key file.

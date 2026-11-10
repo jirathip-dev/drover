@@ -69,7 +69,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         .map_err(|e| eprintln!("herdsman check: herdr agent list failed ({e:#}); skipping lane checks"))
         .ok();
     if let Some(a) = &agents {
-        crate::conductor::sleep_idle(ctx, cfg, r, &events, a)?; // #355
+        crate::orchestrator::sleep_idle(ctx, cfg, r, &events, a)?; // #355
     }
     let stall = cfg.limits.stall_minutes * 60;
     // #157: each host's agents; a lane on an unreachable host is skipped (it never pages).

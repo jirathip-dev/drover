@@ -7,7 +7,7 @@ use crate::config::Config;
 use crate::events::{emit, read, Event};
 use crate::gate::refused;
 use crate::runner::Runner;
-use crate::{conductor, Ctx};
+use crate::{orchestrator, Ctx};
 use anyhow::{Context, Result};
 use serde_json::json;
 use std::io::Write;
@@ -51,7 +51,7 @@ pub fn request(ctx: &Ctx, cfg: &Config, thread: &str, name: &str, why: &str) -> 
             "a secret's name is A-Z, 0-9 and _, and --why says what it is for",
         );
     }
-    let t = conductor::find(&read(&ctx.state)?, thread)?.clone();
+    let t = orchestrator::find(&read(&ctx.state)?, thread)?.clone();
     let d = json!({"thread": thread, "name": name, "why": why});
     emit(
         &ctx.state,
@@ -63,7 +63,7 @@ pub fn request(ctx: &Ctx, cfg: &Config, thread: &str, name: &str, why: &str) -> 
 /// Thread `id`'s open request for `name` (no `secret-set` or `secret-dismissed` after it).
 pub fn open<'a>(events: &'a [Event], id: &str, name: &str) -> Option<&'a Event> {
     let mine = |e: &&Event| e.kind.starts_with("secret-") && e.str("name") == Some(name);
-    crate::conductor::of(events, id)
+    crate::orchestrator::of(events, id)
         .rfind(mine)
         .filter(|e| e.kind == "secret-request")
 }
@@ -97,7 +97,7 @@ pub fn settle(
         format!("secret {name} set ✓ (by owner)"),
     ];
     let line = &line[usize::from(value.is_some())];
-    let _ = conductor::say(ctx, cfg, r, (id, line, &[]), ("system", false)); // logged even if the conductor can't wake
+    let _ = orchestrator::say(ctx, cfg, r, (id, line, &[]), ("system", false)); // logged even if the orchestrator can't wake
     Ok(line.clone())
 }
 

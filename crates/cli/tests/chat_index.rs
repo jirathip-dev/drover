@@ -1,10 +1,10 @@
 //! #701: on a 50,000-event log with 40 threads, a tick with no new events (the needs and chat parts, the same minute
 //! and the next) and a `POST /thread` (`say`, `new`) read no event row from the database but the new ones
-//! (`db::ROWS`) and never walk the whole log for a thread (`conductor::WALKS`: the events a thread lookup looks at).
+//! (`db::ROWS`) and never walk the whole log for a thread (`orchestrator::WALKS`: the events a thread lookup looks at).
 mod common;
 use common::*;
-use herdsman::conductor::WALKS;
 use herdsman::db::ROWS;
+use herdsman::orchestrator::WALKS;
 use herdsman::serve::Server;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering::Relaxed;
@@ -31,7 +31,7 @@ fn a_quiet_tick_and_a_post_touch_only_new_events() {
         let id = format!("t{t}");
         log.push(json!({"ts": NOW, "fleet": "sendmeter", "type": "thread-new", "thread": id, "title": format!("thread {t}")}));
         for m in 0..MSGS {
-            let from = if m % 2 == 0 { "owner" } else { "conductor" };
+            let from = if m % 2 == 0 { "owner" } else { "orchestrator" };
             log.push(
                 json!({"ts": NOW + m, "fleet": "sendmeter", "type": "thread-msg", "thread": id, "from": from,
                 "text": format!("message {m}")}),

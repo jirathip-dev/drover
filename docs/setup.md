@@ -121,8 +121,8 @@ Moving off Hermes: once both jobs have run (`self-updated` in the log after a st
 remove the old Hermes fleet jobs, once:
 
 ```sh
-hermes -p conductor cron remove d8bbecd490d7   # fleet-check (auto-install)
-hermes -p conductor cron remove 064cdd00dc56   # herdr-worktree-prune
+hermes -p orchestrator cron remove d8bbecd490d7   # fleet-check (auto-install)
+hermes -p orchestrator cron remove 064cdd00dc56   # herdr-worktree-prune
 ```
 
 Other Hermes cron jobs (a one-off reminder) stay. `scripts/install-gate.sh` stays for a manual install.

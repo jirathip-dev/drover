@@ -114,7 +114,11 @@ fn open(state: &Path) -> Result<Connection> {
 }
 
 fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Result<()> {
-    let json = serde_json::to_string(&Event { seq: 0, ..ev.clone() })?;
+    let mut ev = Event { seq: 0, ..ev.clone() };
+    if let Some(id) = crate::orchestrator::acting() {
+        ev.data.entry("orchestrator").or_insert(id.into()); // #780: which orchestrator acted
+    }
+    let json = serde_json::to_string(&ev)?;
     c.execute(
         "INSERT INTO events (seq, ts, fleet, issue, type, json, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![seq, ev.ts, ev.fleet, ev.issue, ev.kind, json, archived],
@@ -142,10 +146,10 @@ fn rows(c: &Connection, filter: &str, arg: u64) -> Result<Vec<Event>> {
     rows.map(|r| {
         let (seq, json) = r?;
         ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Ok(Event {
+        Ok(crate::events::aliased(Event {
             seq,
             ..serde_json::from_str(&json)?
-        })
+        }))
     })
     .collect()
 }

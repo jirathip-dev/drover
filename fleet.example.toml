@@ -69,7 +69,7 @@ integration = "staging"
 # env = { PORT = "$HERDSMAN_PORT" }   # each lane's own port (a hash of fleet/branch), for dev servers
 # port_range = "41000-41999"   # HERDSMAN_PORT's range (the default)
 # ui_paths = ["web/**", "assets/**"]   # #417: a PR touching these goes through the verify stage (needs [fleet.web.role.verify])
-# ask_thread = "t6"   # #541: lane asks go to this conductor thread first (default: the repo's most recently active one)
+# ask_thread = "t6"   # #541: lane asks go to this orchestrator thread first (default: the repo's most recently active one)
 
 # #294: serial groups: at most `max` (default 1) issues touching `paths` in flight at once (docs/config.md).
 [[fleet.web.serial]]

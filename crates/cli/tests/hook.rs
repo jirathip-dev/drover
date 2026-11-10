@@ -374,15 +374,15 @@ fn design_spawn_is_owner_only() {
     assert_eq!(bash_as("impl", "herdsman board x # design"), None);
 }
 
-/// #410: a conductor thread spawns design lanes; impl, rev, orch and other lanes still may not.
+/// #410: an orchestrator thread spawns design lanes; impl, rev, orch and other lanes still may not.
 #[test]
-fn a_conductor_may_spawn_design_lanes() {
+fn a_orchestrator_may_spawn_design_lanes() {
     let run = |lane: &str, cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
         hook_in(Some(lane), "impl", input)
     };
     let spawn = "herdsman spawn synergy 2475 design";
-    assert_eq!(run("synergy:-:conductor", spawn), "", "a conductor may");
+    assert_eq!(run("synergy:-:orchestrator", spawn), "", "an orchestrator may");
     for lane in [
         "synergy:12:impl",
         "synergy:12:rev",
@@ -391,27 +391,30 @@ fn a_conductor_may_spawn_design_lanes() {
     ] {
         assert!(run(lane, spawn).contains("owner-only"), "{lane}");
     }
-    assert!(run("conductor", spawn).contains("HOOK_FAILED_CLOSED"), "no fleet");
+    assert!(run("orchestrator", spawn).contains("HOOK_FAILED_CLOSED"), "no fleet");
     for cmd in ["herdsman setup", "herdsman secret ls"] {
-        assert!(run("synergy:-:conductor", cmd).contains("REFUSED OWNER_ONLY"), "{cmd}");
+        assert!(
+            run("synergy:-:orchestrator", cmd).contains("REFUSED OWNER_ONLY"),
+            "{cmd}"
+        );
     }
 }
 
-/// #419: a conductor (and the owner) runs `herdsman lesson`; impl, rev and orch lanes may not, but any reads its digest.
+/// #419: an orchestrator (and the owner) runs `herdsman lesson`; impl, rev and orch lanes may not, but any reads its digest.
 #[test]
-fn only_a_conductor_runs_lesson() {
+fn only_a_orchestrator_runs_lesson() {
     let run = |lane: &str, cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
         hook_in(Some(lane), "impl", input)
     };
     assert_eq!(
-        run("synergy:-:conductor", "herdsman lesson synergy"),
+        run("synergy:-:orchestrator", "herdsman lesson synergy"),
         "",
-        "a conductor may"
+        "an orchestrator may"
     );
     for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:-:orch"] {
         assert!(
-            run(lane, "herdsman lesson synergy").contains("REFUSED CONDUCTOR_ONLY"),
+            run(lane, "herdsman lesson synergy").contains("REFUSED ORCHESTRATOR_ONLY"),
             "{lane}"
         );
         assert_eq!(
@@ -424,42 +427,42 @@ fn only_a_conductor_runs_lesson() {
     assert_eq!(run("synergy:12:lesson", "herdsman lesson apply synergy"), "");
 }
 
-/// #574: only a conductor (and the owner) runs `herdsman amend`; impl, rev and design lanes are refused.
+/// #574: only an orchestrator (and the owner) runs `herdsman amend`; impl, rev and design lanes are refused.
 #[test]
-fn only_a_conductor_runs_amend() {
+fn only_a_orchestrator_runs_amend() {
     let run = |lane: &str| {
         let cmd = "herdsman amend synergy 12 --basis q3 \"board-fix: x\"";
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
         hook_in(Some(lane), "impl", input)
     };
-    assert_eq!(run("synergy:-:conductor"), "", "a conductor may");
+    assert_eq!(run("synergy:-:orchestrator"), "", "an orchestrator may");
     for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:12:design"] {
-        assert!(run(lane).contains("REFUSED CONDUCTOR_ONLY"), "{lane}");
+        assert!(run(lane).contains("REFUSED ORCHESTRATOR_ONLY"), "{lane}");
     }
 }
 
-/// #461: a conductor (and the owner, outside any lane) runs `herdsman timer install`; impl, rev and design lanes
-/// may not; no other `timer` verb changes for a conductor.
+/// #461: an orchestrator (and the owner, outside any lane) runs `herdsman timer install`; impl, rev and design lanes
+/// may not; no other `timer` verb changes for an orchestrator.
 #[test]
-fn only_a_conductor_runs_timer_install() {
+fn only_a_orchestrator_runs_timer_install() {
     let run = |lane: Option<&str>, cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
         hook_in(lane, "impl", input)
     };
     let install = "herdsman timer install";
-    assert_eq!(run(Some("synergy:-:conductor"), install), "", "a conductor may");
+    assert_eq!(run(Some("synergy:-:orchestrator"), install), "", "an orchestrator may");
     assert_eq!(run(None, install), "", "the owner may");
     for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:12:design"] {
         let out = run(Some(lane), install);
         assert!(
-            out.contains("REFUSED CONDUCTOR_ONLY") && out.contains("timer install"),
+            out.contains("REFUSED ORCHESTRATOR_ONLY") && out.contains("timer install"),
             "{lane}: {out}"
         );
         assert!(!run(Some(lane), "herdsman timer status").contains("REFUSED"), "{lane}");
     }
-    assert!(run(Some("synergy:-:conductor"), "herdsman setup").contains("REFUSED OWNER_ONLY"));
-    // #646: a lane or conductor lists wip branches; deleting them is the owner's run card.
-    for lane in ["synergy:12:impl", "synergy:-:conductor"] {
+    assert!(run(Some("synergy:-:orchestrator"), "herdsman setup").contains("REFUSED OWNER_ONLY"));
+    // #646: a lane or orchestrator lists wip branches; deleting them is the owner's run card.
+    for lane in ["synergy:12:impl", "synergy:-:orchestrator"] {
         assert_eq!(run(Some(lane), "herdsman wip prune synergy --dry-run"), "", "{lane}");
         let out = run(Some(lane), "herdsman wip prune synergy");
         assert!(out.contains("REFUSED OWNER_ONLY"), "{lane}: {out}");
@@ -475,7 +478,7 @@ fn quoted_text_is_not_a_command() {
     };
     let reply = r#"herdsman thread reply t5 "run \`herdsman spawn synergy 2475 design\`""#;
     let heredoc = "cat > f.md <<'EOF'\nrun `herdsman spawn synergy 2475 design`\nEOF\nwc -l f.md";
-    for lane in ["synergy:-:conductor", "synergy:-:orch"] {
+    for lane in ["synergy:-:orchestrator", "synergy:-:orch"] {
         assert_eq!(run(lane, reply), "", "{lane}");
     }
     for cmd in [
@@ -535,14 +538,14 @@ fn quoted_text_is_not_a_command() {
     assert!(run("synergy:-:orch", "herdsman thread reply t1 x && docker ps").contains("NO_CONTAINERS"));
 }
 
-/// #410: a conductor writes in its own thread folder, but not herdsman's files there, another thread's or the log.
+/// #410: an orchestrator writes in its own thread folder, but not herdsman's files there, another thread's or the log.
 #[test]
-fn a_conductor_writes_its_own_thread_folder() {
+fn a_orchestrator_writes_its_own_thread_folder() {
     let d = tmpdir("hook-own");
     std::fs::write(d.join("fleet.toml"), config()).unwrap();
-    let c = d.join("state/conductor");
+    let c = d.join("state/orchestrator");
     let write = |file: &std::path::Path| {
-        conductor_hook(
+        orchestrator_hook(
             &d,
             json!({"tool_name": "Write", "tool_input": {"file_path": file, "content": "x"}}),
         )
@@ -560,13 +563,13 @@ fn a_conductor_writes_its_own_thread_folder() {
     }
 }
 
-/// #499: from the shell too, a conductor copies into its own thread folder, but not herdsman's files there, another
+/// #499: from the shell too, an orchestrator copies into its own thread folder, but not herdsman's files there, another
 /// thread's or the log; relative targets resolve against the cwd (and its `cd`s) for every lane.
 #[test]
-fn a_conductor_copies_into_its_own_thread_folder() {
+fn a_orchestrator_copies_into_its_own_thread_folder() {
     let d = tmpdir("hook-own-sh");
     std::fs::write(d.join("fleet.toml"), config()).unwrap();
-    let (st, c) = (d.join("state"), d.join("state/conductor"));
+    let (st, c) = (d.join("state"), d.join("state/orchestrator"));
     let run = |lane: &str, cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": "/tmp",
             "tool_input": {"command": cmd}});
@@ -590,7 +593,7 @@ fn a_conductor_copies_into_its_own_thread_folder() {
         String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
     };
     let (own, other) = (c.join("t6").display().to_string(), c.join("t5").display().to_string());
-    let cond = "synergy:-:conductor";
+    let cond = "synergy:-:orchestrator";
     // A symlink already in the folder (pointing at the state dir) is no way out of it.
     std::fs::create_dir_all(c.join("t6")).unwrap();
     std::os::unix::fs::symlink("../..", c.join("t6/link")).unwrap();
@@ -627,7 +630,7 @@ fn a_conductor_copies_into_its_own_thread_folder() {
         ("synergy:7:impl", format!("dd if=a of={st}/events.jsonl")),
         (cond, format!("cp -t{st}/ a.png {own}/a.png")),
         (cond, format!("sips -s format png a.jpg -o{st}/events.jsonl {own}/x")),
-        (cond, format!("cd {st}/conductor && cp -t6/x a.png")),
+        (cond, format!("cd {st}/orchestrator && cp -t6/x a.png")),
         (cond, format!("cd {st} && cp -t. a.png {own}/a.png")),
         (cond, format!("ln -s ../../events.jsonl {own}/x")),
         (cond, format!("cd {own} && ln -s ../../events.jsonl x")),
@@ -639,15 +642,15 @@ fn a_conductor_copies_into_its_own_thread_folder() {
 }
 
 /// #570: from a cwd in the state folder, `2>&1` and a redirection to `/dev/null` write no file there; a real
-/// relative target outside the conductor's own folder still does.
+/// relative target outside the orchestrator's own folder still does.
 #[test]
 fn fd_duplications_write_no_file() {
     let d = tmpdir("hook-dups");
     std::fs::write(d.join("fleet.toml"), config()).unwrap();
-    let (st, own) = (d.join("state"), d.join("state/conductor/t6"));
+    let (st, own) = (d.join("state"), d.join("state/orchestrator/t6"));
     std::fs::create_dir_all(&own).unwrap();
     let sh = |cwd: &Path, cmd: &str| {
-        conductor_hook(
+        orchestrator_hook(
             &d,
             json!({"tool_name": "Bash", "cwd": cwd, "tool_input": {"command": cmd}}),
         )
@@ -676,12 +679,12 @@ fn fd_duplications_write_no_file() {
 
 /// #504: the shell check makes the same exception: `cp`/`mkdir` into its own folder, nothing else under the state dir.
 #[test]
-fn a_conductors_shell_writes_its_own_thread_folder() {
+fn a_orchestrators_shell_writes_its_own_thread_folder() {
     let d = tmpdir("hook-own-sh");
     std::fs::write(d.join("fleet.toml"), config()).unwrap();
-    let (c, s) = (d.join("state/conductor"), d.join("state"));
+    let (c, s) = (d.join("state/orchestrator"), d.join("state"));
     let (c, s) = (c.display(), s.display());
-    let sh = |cmd: &str| conductor_hook(&d, json!({"tool_name": "Bash", "tool_input": {"command": cmd}}));
+    let sh = |cmd: &str| orchestrator_hook(&d, json!({"tool_name": "Bash", "tool_input": {"command": cmd}}));
     for cmd in [
         format!("cp x {c}/t6/a.png"),
         format!("mkdir -p {c}/t6/d && cp /w/a.png /w/b.png \"{c}/t6/d/\""),
@@ -708,14 +711,14 @@ fn a_conductors_shell_writes_its_own_thread_folder() {
     }
 }
 
-/// The hook's stdout for `call` (a pre-tool event) run as the conductor of thread t6, state under `d`.
-fn conductor_hook(d: &std::path::Path, mut call: serde_json::Value) -> String {
+/// The hook's stdout for `call` (a pre-tool event) run as the orchestrator of thread t6, state under `d`.
+fn orchestrator_hook(d: &std::path::Path, mut call: serde_json::Value) -> String {
     call["hook_event_name"] = json!("PreToolUse");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_herdsman"));
     let mut child = cmd
-        .args(["hook", "--role", "conductor"])
+        .args(["hook", "--role", "orchestrator"])
         .env_remove("FLEET_LANE")
-        .env("HERDSMAN_LANE", "synergy:-:conductor")
+        .env("HERDSMAN_LANE", "synergy:-:orchestrator")
         .env("HERDSMAN_THREAD", "t6")
         .env("FLEET_CONFIG", d.join("fleet.toml"))
         .env("FLEET_STATE", d.join("state/events.jsonl"))
@@ -749,7 +752,7 @@ fn ai_coauthor_trailer_is_spotted() {
 }
 
 const NO_CONTAINERS: &str = "herdsman: REFUSED NO_CONTAINERS: lanes never start containers (owner rule). Use the \
-                             repo's non-container test path, or ask the conductor.";
+                             repo's non-container test path, or ask the orchestrator.";
 
 /// #216: every default entry is denied as a command word: plain, `sh -c`, `env`, `sudo`, a full path, a pipeline,
 /// `&&`, `$( )`; the same words as arguments, and other `supabase` subcommands, are allowed.
@@ -972,7 +975,7 @@ fn setup_is_owner_only() {
     }
 }
 
-/// #387: a lane (the conductor too) proposes config and requests secrets, but never applies, lists or removes them.
+/// #387: a lane (the orchestrator too) proposes config and requests secrets, but never applies, lists or removes them.
 #[test]
 fn config_apply_and_secret_ls_rm_are_owner_only() {
     for cmd in [
@@ -982,7 +985,7 @@ fn config_apply_and_secret_ls_rm_are_owner_only() {
         "herdsman secret rm all TOKEN",
     ] {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        let out = hook_in(Some("x:-:conductor"), "conductor", input.clone());
+        let out = hook_in(Some("x:-:orchestrator"), "orchestrator", input.clone());
         assert!(out.contains("REFUSED OWNER_ONLY"), "{cmd}: {out}");
         assert_eq!(hook_in(None, "impl", input), "", "the owner (no lane) may: {cmd}");
     }
@@ -990,13 +993,13 @@ fn config_apply_and_secret_ls_rm_are_owner_only() {
     assert_eq!(bash("herdsman secret request t1 API_KEY --why x"), None);
 }
 
-/// #386: a conductor's allowed `herdsman`/`gh` command is logged for its thread's tool rows (`thread-cmd`); its
+/// #386: an orchestrator's allowed `herdsman`/`gh` command is logged for its thread's tool rows (`thread-cmd`); its
 /// `thread reply`, other commands, denied ones and calls outside a thread are not.
 #[test]
-fn a_conductor_command_is_logged_for_its_thread() {
+fn a_orchestrator_command_is_logged_for_its_thread() {
     let cmds = |vars: &[(&str, Option<&str>)], cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        let (out, d) = hook_cfg(CONFIG, vars, "conductor", input);
+        let (out, d) = hook_cfg(CONFIG, vars, "orchestrator", input);
         let log = herdsman::events::jsonl(&d.join("state/events.jsonl")).unwrap_or_default();
         let rows: Vec<Value> = log.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
         (
@@ -1007,7 +1010,7 @@ fn a_conductor_command_is_logged_for_its_thread() {
         )
     };
     let lane = [
-        ("HERDSMAN_LANE", Some("sendmeter:-:conductor")),
+        ("HERDSMAN_LANE", Some("sendmeter:-:orchestrator")),
         ("HERDSMAN_THREAD", Some("t1")),
     ];
     let cmd = "gh issue create -R acme/x -t \"Rate limits\" -F -";
@@ -1276,10 +1279,10 @@ fn files_a_lane_edits_never_change_the_hook_rules() {
     assert_eq!(calls.map(decide).to_vec(), before);
 }
 
-/// #538: a group verb runs from a conductor while its group is on (the default: all but `pause` and `set`), never from
+/// #538: a group verb runs from an orchestrator while its group is on (the default: all but `pause` and `set`), never from
 /// another lane; a switched-off group's verb is refused `GROUP_OFF`.
 #[test]
-fn capability_groups_gate_a_conductors_owner_verbs() {
+fn capability_groups_gate_a_orchestrators_owner_verbs() {
     let input =
         |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
     let run = |cfg: &str, lane: &str, cmd: &str| hook_cfg(cfg, &[("HERDSMAN_LANE", Some(lane))], "impl", input(cmd)).0;
@@ -1298,14 +1301,14 @@ fn capability_groups_gate_a_conductors_owner_verbs() {
         "herdsman set synergy impl --model opus",
     ];
     for cmd in on {
-        assert_eq!(run(&config(), "synergy:-:conductor", cmd), "", "default on: {cmd}");
+        assert_eq!(run(&config(), "synergy:-:orchestrator", cmd), "", "default on: {cmd}");
         for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:12:design"] {
             let out = run(&config(), lane, cmd);
             assert!(out.contains("REFUSED OWNER_ONLY"), "{lane} {cmd}: {out}");
         }
     }
     for cmd in off {
-        let out = run(&config(), "synergy:-:conductor", cmd);
+        let out = run(&config(), "synergy:-:orchestrator", cmd);
         assert!(
             out.contains("REFUSED GROUP_OFF") && out.contains("config propose"),
             "default off: {cmd}: {out}"
@@ -1315,29 +1318,29 @@ fn capability_groups_gate_a_conductors_owner_verbs() {
     for cmd in ["herdsman clean synergy", "herdsman hosts", "herdsman accounts"] {
         assert_eq!(run(&config(), "synergy:12:impl", cmd), "", "{cmd}");
     }
-    let only = config() + "\n[conductor]\nallow = [\"pause\"]\n";
-    assert_eq!(run(&only, "synergy:-:conductor", "herdsman pause synergy"), "");
+    let only = config() + "\n[orchestrator]\nallow = [\"pause\"]\n";
+    assert_eq!(run(&only, "synergy:-:orchestrator", "herdsman pause synergy"), "");
     for cmd in ["herdsman clean --yes", "herdsman spawn synergy 9 design"] {
         assert!(
-            run(&only, "synergy:-:conductor", cmd).contains("REFUSED GROUP_OFF"),
+            run(&only, "synergy:-:orchestrator", cmd).contains("REFUSED GROUP_OFF"),
             "switched off: {cmd}"
         );
     }
 }
 
-/// #538: only a conductor posts run cards and only the owner settles them; a hard-no command is refused from a
-/// conductor's own shell too, but quoted reply text naming one is not run.
+/// #538: only an orchestrator posts run cards and only the owner settles them; a hard-no command is refused from a
+/// orchestrator's own shell too, but quoted reply text naming one is not run.
 #[test]
-fn run_cards_post_from_a_conductor_settle_by_the_owner_and_hard_nos_never_run() {
+fn run_cards_post_from_a_orchestrator_settle_by_the_owner_and_hard_nos_never_run() {
     let input =
         |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
     let run = |lane: Option<&str>, cmd: &str| hook_in(lane, "impl", input(cmd));
     let post = "herdsman card post t1 --cmd 'git log -1 main' --why w --blast none --dir .";
-    assert_eq!(run(Some("synergy:-:conductor"), post), "");
-    assert!(run(Some("synergy:12:impl"), post).contains("REFUSED CONDUCTOR_ONLY"));
+    assert_eq!(run(Some("synergy:-:orchestrator"), post), "");
+    assert!(run(Some("synergy:12:impl"), post).contains("REFUSED ORCHESTRATOR_ONLY"));
     for cmd in ["herdsman card approve r1", "herdsman card deny r1"] {
         assert!(
-            run(Some("synergy:-:conductor"), cmd).contains("REFUSED OWNER_ONLY"),
+            run(Some("synergy:-:orchestrator"), cmd).contains("REFUSED OWNER_ONLY"),
             "{cmd}"
         );
         assert_eq!(run(None, cmd), "", "the owner may: {cmd}");
@@ -1350,19 +1353,22 @@ fn run_cards_post_from_a_conductor_settle_by_the_owner_and_hard_nos_never_run() 
         "git push --force origin main",
         "gh api -X DELETE repos/o/r/branches/main/protection",
     ] {
-        let out = run(Some("synergy:-:conductor"), cmd);
+        let out = run(Some("synergy:-:orchestrator"), cmd);
         assert!(out.contains("REFUSED CARD_FORBIDDEN"), "{cmd}: {out}");
     }
     assert_eq!(
-        run(Some("synergy:-:conductor"), "herdsman thread reply t1 'never printenv'"),
+        run(
+            Some("synergy:-:orchestrator"),
+            "herdsman thread reply t1 'never printenv'"
+        ),
         ""
     );
 }
 
-/// #537: a conductor runs the `herdsman runners` verbs, impl and rev lanes never; raw container commands stay refused
+/// #537: an orchestrator runs the `herdsman runners` verbs, impl and rev lanes never; raw container commands stay refused
 /// for everyone, while a message or argument that only names docker is not a command.
 #[test]
-fn runners_verbs_are_a_conductors_and_docker_in_message_text_is_not_a_command() {
+fn runners_verbs_are_a_orchestrators_and_docker_in_message_text_is_not_a_command() {
     let input =
         |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
     let run = |lane: &str, cmd: &str| hook_cfg(&config(), &[("HERDSMAN_LANE", Some(lane))], "impl", input(cmd)).0;
@@ -1374,12 +1380,12 @@ fn runners_verbs_are_a_conductors_and_docker_in_message_text_is_not_a_command() 
         "herdsman runners tokens",
         "herdsman runners retire-local",
     ] {
-        assert_eq!(run("synergy:-:conductor", cmd), "", "{cmd}");
+        assert_eq!(run("synergy:-:orchestrator", cmd), "", "{cmd}");
         for lane in ["synergy:12:impl", "synergy:12:rev"] {
             assert!(run(lane, cmd).contains("REFUSED OWNER_ONLY"), "{lane} {cmd}");
         }
     }
-    for lane in ["synergy:-:conductor", "synergy:12:impl"] {
+    for lane in ["synergy:-:orchestrator", "synergy:12:impl"] {
         for cmd in [
             "docker ps",
             "sh -c 'cd /x && docker ps'",
@@ -1424,7 +1430,7 @@ fn a_lanes_git_notes_write_or_notes_push_is_refused() {
 }
 
 /// #668: an impl lane never writes `ci/cap.toml` (an edit, a writer's argument, a redirection's target); reading it,
-/// or a check that names it, passes. The conductor-filed raise (its issue titled `cap: …`) may edit it.
+/// or a check that names it, passes. The orchestrator-filed raise (its issue titled `cap: …`) may edit it.
 #[test]
 fn impl_lane_never_edits_the_cap_file() {
     let d = tmpdir("hook-cap");

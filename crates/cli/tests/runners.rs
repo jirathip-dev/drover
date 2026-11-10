@@ -174,8 +174,8 @@ fn add_creates_within_the_cap_refuses_past_it_and_only_an_owner_yes_lets_it_on()
         out.contains("REFUSED RUNNERS_CAP: 4 VMs at $48.00/day") && out.contains("--kind owner"),
         "{out}"
     );
-    // A conductor's or a defaulted answer is no approval; nor an ask about another verb.
-    asked(&c, "q1", "herdsman runners add 1: ok?", "yes", "conductor-t1");
+    // An orchestrator's or a defaulted answer is no approval; nor an ask about another verb.
+    asked(&c, "q1", "herdsman runners add 1: ok?", "yes", "orchestrator-t1");
     asked(&c, "q2", "herdsman runners add 1: ok?", "yes", "default");
     asked(&c, "q3", "herdsman runners remove vm1: ok?", "yes", "owner");
     asked(&c, "q4", "herdsman runners add 1: ok?", "no", "owner");

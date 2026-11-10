@@ -582,7 +582,7 @@ pub fn queue_html(json: &str, expr: &str) -> String {
 
 /// #440: a `<script>` painting what the TypeScript board draws into the System sheet (main.ts), for a page cut before
 /// board.js: Hosts & health from `s`'s `/api/v1/host`, Agent providers and Notifications from the same, Fleets and
-/// Conductor from `/api/v1/queue`, Activity from its events (`events`, `events_tab`'s HTML).
+/// Orchestrator from `/api/v1/queue`, Activity from its events (`events`, `events_tab`'s HTML).
 pub fn system_frags(s: &herdsman::serve::Server, host: &str, now: u64, events: &str) -> String {
     let get = |p: &str| {
         let r =
@@ -599,7 +599,7 @@ pub fn system_frags(s: &herdsman::serve::Server, host: &str, now: u64, events: &
         "import {{ tab }} from {:?}; import * as y from {:?}; import fs from 'node:fs';\n\
          const h = JSON.parse(fs.readFileSync({:?})), q = JSON.parse(fs.readFileSync({:?}));\n\
          process.stdout.write(JSON.stringify({{ host: tab(h), 'sy-providers': y.providers(h), 'sy-notifications': y.notifications(h), \
-         'sy-fleets': y.fleets(q), 'sy-conductor': y.conductor(q), events: fs.readFileSync({:?}, 'utf8') }}));",
+         'sy-fleets': y.fleets(q), 'sy-orchestrator': y.orchestrator(q), events: fs.readFileSync({:?}, 'utf8') }}));",
         src("host.ts"),
         src("system.ts"),
         d.join("host.json"),

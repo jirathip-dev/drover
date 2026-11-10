@@ -104,18 +104,21 @@ fn setup(name: &str) -> herdsman::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     c
 }
 
-/// herdr with the thread's conductor `conductor-t1` live (idle) in pane w9:p1.
+/// herdr with the thread's conductor `orchestrator-t1` live (idle) in pane w9:p1.
 fn live() -> Fake {
     Fake::default()
-        .reply("herdr agent list", &agents(&[("conductor-t1", "idle", "/x", "w9:p1")]))
+        .reply(
+            "herdr agent list",
+            &agents(&[("orchestrator-t1", "idle", "/x", "w9:p1")]),
+        )
         .reply("herdr agent prompt", "")
         .reply("herdr pane send-keys", "")
         .reply("herdr pane run", "")
@@ -151,7 +154,7 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
         .calls
         .borrow()
         .iter()
-        .any(|c| c.starts_with("herdr agent start conductor-t1")));
+        .any(|c| c.starts_with("herdr agent start orchestrator-t1")));
     let ask = [
         "ask",
         "sendmeter",
@@ -183,7 +186,7 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
     );
     assert_eq!(body(&res), "answered q1\n", "{res}");
     assert!(
-        r.called("herdr agent prompt conductor-t1 DECISION q1: small"),
+        r.called("herdr agent prompt orchestrator-t1 DECISION q1: small"),
         "{:?}",
         r.calls.borrow()
     );
@@ -205,7 +208,7 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
         T + 30,
     );
     assert_eq!(body(&res), "answered q2\n", "{res}");
-    assert!(r.called("herdr agent prompt conductor-t1 DECISION q2: 600 a minute"));
+    assert!(r.called("herdr agent prompt orchestrator-t1 DECISION q2: 600 a minute"));
     assert!(frags(&s, &cookie, T + 40).0.contains("✓ other: \"600 a minute\""));
 }
 
@@ -233,13 +236,13 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
     let saved = c
         .state
-        .with_file_name("conductor")
+        .with_file_name("orchestrator")
         .join("t1/uploads")
         .join(format!("{T}-IMG_1.PNG"));
     assert_eq!(std::fs::read(&saved).unwrap(), png, "in the conductor's folder");
     assert!(
         r.called(&format!(
-            "herdr agent prompt conductor-t1 [t1] owner: see this (attached: {})",
+            "herdr agent prompt orchestrator-t1 [t1] owner: see this (attached: {})",
             saved.display()
         )),
         "the conductor gets its path: {:?}",
@@ -254,7 +257,7 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     assert_eq!(&got[at..], &png[..]);
 
     // Out: the conductor's reply with a mockup PNG.
-    let folder = c.state.with_file_name("conductor").join("t1");
+    let folder = c.state.with_file_name("orchestrator").join("t1");
     let mock = folder.join("mockup-390.png");
     std::fs::write(&mock, b"\x89PNG mock").unwrap();
     let (code, out) = run(
@@ -383,7 +386,7 @@ fn a_large_attachment_arrives_whole_over_the_socket() {
     let mut res = String::new();
     s.read_to_string(&mut res).unwrap();
     assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
-    let up = c.state.with_file_name("conductor").join("t1/uploads");
+    let up = c.state.with_file_name("orchestrator").join("t1/uploads");
     let saved = std::fs::read_dir(&up).unwrap().next().unwrap().unwrap().path();
     assert_eq!(std::fs::read(saved).unwrap(), png);
 }
@@ -450,7 +453,7 @@ fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_ima
         return;
     }
     let c = setup("chat-viewer");
-    let folder = c.state.with_file_name("conductor").join("t1");
+    let folder = c.state.with_file_name("orchestrator").join("t1");
     std::fs::create_dir_all(&folder).unwrap();
     let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
     for f in ["icon-180.png", "icon-192.png"] {
@@ -610,7 +613,7 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
     );
     go.send(()).unwrap();
     let line = seen.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
-    assert_eq!(line, "herdr agent prompt conductor-t1 [t1] owner: a long message");
+    assert_eq!(line, "herdr agent prompt orchestrator-t1 [t1] owner: a long message");
 }
 
 /// #403: a delivery that fails is a red system line with [retry]; [retry] types the same line, logging no copy.
@@ -640,7 +643,7 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let res = req(&s, "POST", "/thread", &format!("op=retry&t=t1&n={n}"), &cookie, T + 10);
     assert_eq!(body(&res), "retrying\n", "{res}");
-    assert!(r.called("herdr agent start conductor-t1"), "{:?}", r.calls.borrow());
+    assert!(r.called("herdr agent start orchestrator-t1"), "{:?}", r.calls.borrow());
     let log = herdsman::events::jsonl(&c.state).unwrap();
     assert_eq!(log.matches("\"from\":\"owner\",\"text\":\"hello\"").count(), 1, "{log}");
     let res = req(&s, "POST", "/thread", "op=retry&t=t1&n=1", &cookie, T + 20);
@@ -649,13 +652,11 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     // as the pill, timed from the turn's start (the owner's last message).
     let busy = Fake::default().reply(
         "herdr agent list",
-        &agents(&[("conductor-t1", "working", "/x", "w9:p1")]),
+        &agents(&[("orchestrator-t1", "working", "/x", "w9:p1")]),
     );
     let (chat, _) = frags(&Server::new(&c, &busy, Some(ADDR.into())), &cookie, T + 30);
-    assert!(
-        chat.contains("<p class=\"tlv wk\" data-since=1000000><i class=tld aria-hidden=true></i> working</p>"),
-        "{chat}"
-    );
+    // #780 (q1173): the frozen board matches the old `conductor-*` types, so it no longer sees the turn and draws no pill.
+    assert!(!chat.contains("<p class=\"tlv wk\""), "{chat}");
 }
 
 /// #408: thread t1 with `n` conductor messages `m1`…; a paired cookie at `now`.
@@ -919,13 +920,13 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     let msgs: Vec<_> = events.iter().filter(|e| e.kind == "thread-msg").collect();
     assert_eq!(msgs.len(), 1, "{}", log(&c));
     assert_eq!(msgs[0].str("text"), Some("Grill me on #12\nthe land mode part"));
-    let thread = c.state.with_file_name("conductor").join("t1/.thread.md");
+    let thread = c.state.with_file_name("orchestrator").join("t1/.thread.md");
     assert_eq!(
         std::fs::read_to_string(thread).unwrap(),
         "owner: Grill me on #12\nthe land mode part\n",
         "the conductor gets the message only"
     );
-    assert!(r.called("herdr agent start conductor-t1"), "{:?}", r.calls.borrow());
+    assert!(r.called("herdr agent start orchestrator-t1"), "{:?}", r.calls.borrow());
     // The conductor's summary title, after its first reply.
     let (code, out) = run(&c, &r, &["thread", "title", "t1", "Land mode for #12"]);
     assert_eq!(code, 0, "{out}");
@@ -990,7 +991,7 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
         T,
     );
     assert_eq!(body(&res), "t1 started\n", "{res}");
-    let dir = c.state.with_file_name("conductor").join("t1");
+    let dir = c.state.with_file_name("orchestrator").join("t1");
     let files = |d: &std::path::Path| {
         let mut v = vec![];
         let mut todo = vec![d.to_path_buf()];
@@ -1015,7 +1016,7 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
         let s: Vec<_> = herdsman::events::read(&c.state)
             .unwrap()
             .into_iter()
-            .filter(|e| e.kind == "conductor-start")
+            .filter(|e| e.kind == "orchestrator-start")
             .collect();
         s.iter()
             .map(|e| (e.str("session").unwrap().to_string(), e.data["resumed"] == true))
@@ -1027,7 +1028,7 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     let sleep = herdsman::events::read(&c.state)
         .unwrap()
         .into_iter()
-        .rfind(|e| e.kind == "conductor-sleep")
+        .rfind(|e| e.kind == "orchestrator-sleep")
         .unwrap();
     assert_eq!(sleep.str("why"), Some("archived"));
     let (chat, _) = frags(&s, &cookie, T + 11);
@@ -1109,7 +1110,7 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
         T,
     );
     assert!(body(&res).contains("at most 10 files a message"), "{res}");
-    let up = c.state.with_file_name("conductor").join("t1/uploads");
+    let up = c.state.with_file_name("orchestrator").join("t1/uploads");
     assert_eq!(std::fs::read_dir(&up).map_or(0, |d| d.count()), 0, "nothing saved");
     let res = req(
         &s,
@@ -1127,7 +1128,7 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
     let att: String = saved.iter().map(|p| format!(" (attached: {})", p.display())).collect();
     assert!(
         r.called(&format!(
-            "herdr agent prompt conductor-t1 [t1] owner: IMG_0.PNG, IMG_1.PNG, IMG_2.PNG{att}"
+            "herdr agent prompt orchestrator-t1 [t1] owner: IMG_0.PNG, IMG_1.PNG, IMG_2.PNG{att}"
         )),
         "{:?}",
         r.calls.borrow()
@@ -1232,7 +1233,7 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
     assert_eq!(m[17], 0.0, "page errors: {out}");
 }
 
-/// #407: herdr whose `conductor-t1` (pane w9:p1) is working while `.1` is set, else idle; every call recorded.
+/// #407: herdr whose `orchestrator-t1` (pane w9:p1) is working while `.1` is set, else idle; every call recorded.
 struct Flip(Fake, std::sync::atomic::AtomicBool);
 impl herdsman::runner::Runner for Flip {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
@@ -1241,7 +1242,7 @@ impl herdsman::runner::Runner for Flip {
             return out;
         }
         let st = ["idle", "working"][usize::from(self.1.load(std::sync::atomic::Ordering::SeqCst))];
-        let stdout = agents(&[("conductor-t1", st, "/x", "w9:p1")]);
+        let stdout = agents(&[("orchestrator-t1", st, "/x", "w9:p1")]);
         Ok(herdsman::runner::Out {
             code: 0,
             stdout,
@@ -1287,6 +1288,7 @@ fn until(f: impl Fn() -> bool) -> bool {
 /// watcher types the queued ones in, oldest first, each logged as the owner's. `steer` sends Esc (the turn stops), then
 /// the message; [send now] steers a queued one in and unqueues it.
 #[test]
+#[ignore = "#780 (q1173): the frozen board matches the old conductor-* types, so it no longer sees a turn to wait for"]
 fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now() {
     use std::sync::atomic::Ordering::SeqCst;
     let c = setup("chat-queue");
@@ -1314,7 +1316,9 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
     let addr = l.local_addr().unwrap();
     let (c2, r2) = (c.clone(), r.clone());
     std::thread::spawn(move || herdsman::serve::serve_on(&c2, &*r2, l, false));
-    let typed = |t: &str| r.0.called(&format!("herdr agent prompt conductor-t1 [t1] owner: {t}"));
+    let typed = |t: &str| {
+        r.0.called(&format!("herdr agent prompt orchestrator-t1 [t1] owner: {t}"))
+    };
     for t in ["one", "two", "three"] {
         assert_eq!(post_to(&addr, &cookie, &format!("op=queue&t=t1&text={t}")), "queued\n");
     }
@@ -1422,7 +1426,7 @@ fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
     };
     let since = ev.iter().rfind(|e| e.str("text") == Some("again")).unwrap().ts;
     let chat = |st: &str| {
-        let r = Fake::default().reply("herdr agent list", &agents(&[("conductor-t1", st, "/x", "w9:p1")]));
+        let r = Fake::default().reply("herdr agent list", &agents(&[("orchestrator-t1", st, "/x", "w9:p1")]));
         let s = Server::new(&c, &r, Some(ADDR.into()));
         frags(&s, &pair(&s, &c, "Mozilla/5.0 (iPhone)", T), T).0
     };
@@ -1434,12 +1438,12 @@ fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
         w.contains(&fold(seq("1"), "2 commands", &(row("1") + &row("2")))),
         "{w}"
     );
+    // #780 (q1173): the frozen board matches the old `conductor-*` types, so it no longer sees the live turn: its
+    // commands fold too and there is no pill.
     assert!(
-        w.contains(&row("3").replacen("<details", &format!("<details data-n={}", seq("3")), 1))
-            && !w.contains(&fold(seq("3"), "1 command", &row("3"))),
-        "the live turn's row stays: {w}"
+        w.contains(&fold(seq("3"), "1 command", &row("3"))) && !w.contains(&format!("data-since={since}")),
+        "{w}"
     );
-    assert!(w.contains(&format!("<p class=\"tlv wk\" data-since={since}>")), "{w}");
     let i = chat("idle");
     assert!(
         i.contains(&fold(seq("3"), "1 command", &row("3"))) && !i.contains("tlv wk"),

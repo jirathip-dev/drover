@@ -14,11 +14,11 @@ const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const CARD: &str = "<form class=chc data-id=\"c1\"><button name=act value=apply>apply</button>";
 
-/// Thread t1 with a conductor role; `config propose` of an impl model change gives `c1`.
+/// Thread t1 with an orchestrator role; `config propose` of an impl model change gives `c1`.
 fn setup(name: &str) -> herdsman::Ctx {
     let c = ctx(
         &tmpdir(name),
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Models"]).1,
@@ -40,10 +40,10 @@ fn propose(c: &herdsman::Ctx) {
     assert_eq!((code, out.as_str()), (0, "c1\n"));
 }
 
-/// Conductor messages `m<i>` in t1.
+/// Orchestrator messages `m<i>` in t1.
 fn msgs(c: &herdsman::Ctx, ts: u64, ids: std::ops::Range<u64>) {
     for i in ids {
-        let d = json!({"thread": "t1", "from": "conductor", "text": format!("m{i}")});
+        let d = json!({"thread": "t1", "from": "orchestrator", "text": format!("m{i}")});
         append(&c.state, &Event::new(ts + i, "sendmeter", None, "thread-msg", d)).unwrap();
     }
 }

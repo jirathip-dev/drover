@@ -98,7 +98,7 @@ fn amend_writes_an_owner_decision_into_the_spec_and_reruns_board_freeze() {
         ("q2", 60, Some("default")),
         ("q3", 60, None),
         ("q4", 61, Some("owner")),
-        ("q5", 60, Some("conductor-t1")),
+        ("q5", 60, Some("orchestrator-t1")),
     ] {
         ev(n, "needs-decision", json!({"id": id, "question": "?"})).unwrap();
         if let Some(by) = by {

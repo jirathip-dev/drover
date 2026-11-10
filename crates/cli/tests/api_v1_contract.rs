@@ -180,7 +180,7 @@ fn every_route_keeps_its_fixtures_shape() {
     // #681: a pending repo handoff from it: its `handoff` item (with the card's rows) in `thread/<t>` and `chat`.
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     let h = [t.as_str(), "sendmeter", "Facets", "add facets\nthen reindex"];
-    herdsman::conductor::handoff(&c, &cfg, &r, h).unwrap();
+    herdsman::orchestrator::handoff(&c, &cfg, &r, h).unwrap();
     gets!(
         ("chat", "/api/v1/chat", ChatTab),
         ("thread/<t>", format!("/api/v1/thread/{t}"), ThreadPage),
@@ -213,7 +213,7 @@ fn every_route_keeps_its_fixtures_shape() {
             &mut fails,
         );
     }
-    // #633: a cooee thread attached as the conductor, and an ask in it, as `events` lists them.
+    // #633: a cooee thread attached as the orchestrator, and an ask in it, as `events` lists them.
     let since = get("/api/v1/events?since=0")["seq"].clone();
     let attach = json!({"fleet": "sendmeter", "thread": "cooee-7f3a"});
     let ty = ("ConductorAttach", schema::<ConductorAttach>());

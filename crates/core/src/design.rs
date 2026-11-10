@@ -31,7 +31,7 @@ fn pre<'a>(ev: &'a [Event], f: &str, n: u64, role: &str) -> Option<&'a str> {
 }
 
 /// A design lane that ended its turn (not working) on a head that carries its stage's files and was never handed off:
-/// `design-review`, then one ask that the board card and the conductor thread which queued it (if any) both answer.
+/// `design-review`, then one ask that the board card and the orchestrator thread which queued it (if any) both answer.
 pub fn handoff(
     ctx: &Ctx,
     cfg: &Config,

@@ -10,15 +10,15 @@ use serde_json::{json, Value};
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// Threads t1…t27 on sendmeter (t27 archived); in t1 `extra` conductor lines, then a message naming t27, t999 (no
+/// Threads t1…t27 on sendmeter (t27 archived); in t1 `extra` orchestrator lines, then a message naming t27, t999 (no
 /// such thread) and `t27` in inline code, a handoff to t27, a system line and an ask whose option names t27.
 fn setup(name: &str, extra: u64) -> herdsman::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     let r = Fake::default();
@@ -33,12 +33,12 @@ fn setup(name: &str, extra: u64) -> herdsman::Ctx {
     for i in 1..=extra {
         ev(
             "thread-msg",
-            json!({"thread": "t1", "from": "conductor", "text": format!("m{i}")}),
+            json!({"thread": "t1", "from": "orchestrator", "text": format!("m{i}")}),
         );
     }
     ev(
         "thread-msg",
-        json!({"thread": "t1", "from": "conductor", "text": "see t27, t999 and `t27`"}),
+        json!({"thread": "t1", "from": "orchestrator", "text": "see t27, t999 and `t27`"}),
     );
     ev(
         "thread-handoff",
@@ -62,7 +62,7 @@ fn setup(name: &str, extra: u64) -> herdsman::Ctx {
     for i in 1..=extra {
         ev(
             "thread-msg",
-            json!({"thread": "t1", "from": "conductor", "text": format!("n{i}")}),
+            json!({"thread": "t1", "from": "orchestrator", "text": format!("n{i}")}),
         );
     }
     assert_eq!(run(&c, &r, &["thread", "archive", "t27"]).0, 0);
@@ -96,13 +96,15 @@ fn a_known_thread_id_is_a_ref_and_an_unknown_or_coded_one_stays_text() {
     assert!(!chat.contains("data-go=\"t999\""), "{chat}");
     let view = &chat[chat.find("<div class=cvp data-t=\"t27\">").unwrap()..];
     assert!(
-        view.contains("<textarea name=text rows=1 aria-label=message placeholder=\"message the conductor\" disabled>"),
+        view.contains(
+            "<textarea name=text rows=1 aria-label=message placeholder=\"message the orchestrator\" disabled>"
+        ),
         "{view}"
     );
     let one =
         &chat[chat.find("<div class=cvp data-t=\"t1\">").unwrap()..chat.find("<div class=cvp data-t=\"t2\">").unwrap()];
     assert!(
-        !one.contains("class=rst") && !one.contains("conductor\" disabled>"),
+        !one.contains("class=rst") && !one.contains("orchestrator\" disabled>"),
         "{one}"
     );
 

@@ -1,4 +1,4 @@
-//! #538: conductor access: capability groups in `[conductor] allow` (their default, the brief's list, a config card
+//! #538: orchestrator access: capability groups in `[orchestrator] allow` (their default, the brief's list, a config card
 //! that switches one only on the owner's [apply]) and run cards (approve runs the exact command once and posts its
 //! output, deny runs nothing, a changed or expired card is refused, a hard no is refused at posting).
 mod common;
@@ -15,9 +15,9 @@ fn setup(name: &str, extra: &str) -> herdsman::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\n{extra}"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{extra}"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     assert_eq!(
@@ -35,16 +35,16 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// `herdsman hook` as thread t1's conductor under `c`'s fleet.toml: its stdout ("" allows).
-fn conductor_hook(c: &herdsman::Ctx, cmd: &str) -> String {
+/// `herdsman hook` as thread t1's orchestrator under `c`'s fleet.toml: its stdout ("" allows).
+fn orchestrator_hook(c: &herdsman::Ctx, cmd: &str) -> String {
     let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
     let mut child = Command::new(env!("CARGO_BIN_EXE_herdsman"))
         .env_remove("HERDSMAN_SCRATCH_TARGET")
-        .env("HERDSMAN_LANE", "sendmeter:-:conductor")
+        .env("HERDSMAN_LANE", "sendmeter:-:orchestrator")
         .env("HERDSMAN_THREAD", "t1")
         .env("FLEET_CONFIG", &c.config)
         .env("FLEET_STATE", &c.state)
-        .args(["hook", "--role", "conductor"])
+        .args(["hook", "--role", "orchestrator"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -79,18 +79,18 @@ fn post(c: &herdsman::Ctx, cmd: &str) -> (i32, String) {
 fn groups_default_to_all_but_pause_and_set_and_name_only_known_groups() {
     let cfg = Config::parse(CONFIG).unwrap();
     assert_eq!(
-        cfg.conductor.groups(),
+        cfg.orchestrator.groups(),
         ["design", "clean", "hosts", "reclaim", "accounts", "runners"]
     );
-    let set = Config::parse(&format!("{CONFIG}\n[conductor]\nallow = [\"set\"]\n")).unwrap();
-    assert_eq!(set.conductor.groups(), ["set"]);
-    let bad = Config::parse(&format!("{CONFIG}\n[conductor]\nallow = [\"root\"]\n"));
+    let set = Config::parse(&format!("{CONFIG}\n[orchestrator]\nallow = [\"set\"]\n")).unwrap();
+    assert_eq!(set.orchestrator.groups(), ["set"]);
+    let bad = Config::parse(&format!("{CONFIG}\n[orchestrator]\nallow = [\"root\"]\n"));
     assert!(format!("{:#}", bad.unwrap_err()).contains("\"root\" is no group"));
 }
 
 #[test]
-fn the_conductor_brief_lists_the_fleets_groups() {
-    let c = setup("card-brief", "\n[conductor]\nallow = [\"clean\", \"pause\"]\n");
+fn the_orchestrator_brief_lists_the_fleets_groups() {
+    let c = setup("card-brief", "\n[orchestrator]\nallow = [\"clean\", \"pause\"]\n");
     let r = Fake::default()
         .reply("herdr agent list", r#"{"result":{"agents":[]}}"#)
         .reply(
@@ -99,9 +99,9 @@ fn the_conductor_brief_lists_the_fleets_groups() {
         )
         .reply("herdr", "");
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "tidy up"]).0, 0);
-    let brief = std::fs::read_to_string(c.state.with_file_name("conductor").join("t1/.brief.md")).unwrap();
+    let brief = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t1/.brief.md")).unwrap();
     for want in [
-        "## Capability groups ([conductor] allow)",
+        "## Capability groups ([orchestrator] allow)",
         "- `clean` (on): `clean --yes`, `--orphans`, `--lane`",
         "- `pause` (on): `pause`, `resume`",
         "- `hosts` (off): `hosts on|off|refresh`",
@@ -116,28 +116,32 @@ fn the_conductor_brief_lists_the_fleets_groups() {
 #[test]
 fn a_config_card_switches_a_group_on_only_at_the_owners_apply() {
     let c = setup("card-allow", "");
-    assert!(conductor_hook(&c, "herdsman pause sendmeter").contains("REFUSED GROUP_OFF"));
+    assert!(orchestrator_hook(&c, "herdsman pause sendmeter").contains("REFUSED GROUP_OFF"));
     let file = c.config.with_file_name("proposed.toml");
     let old = std::fs::read_to_string(&c.config).unwrap();
-    std::fs::write(&file, format!("{old}\n[conductor]\nallow = [\"clean\", \"pause\"]\n")).unwrap();
+    std::fs::write(
+        &file,
+        format!("{old}\n[orchestrator]\nallow = [\"clean\", \"pause\"]\n"),
+    )
+    .unwrap();
     let (code, out) = run(
         &c,
         &Fake::default(),
         &["config", "propose", "t1", file.to_str().unwrap()],
     );
     assert_eq!((code, out.as_str()), (0, "c1\n"));
-    // Proposed, not applied: still off, and the conductor can't apply it itself.
-    assert!(conductor_hook(&c, "herdsman pause sendmeter").contains("REFUSED GROUP_OFF"));
-    assert!(conductor_hook(&c, "herdsman config apply c1").contains("REFUSED OWNER_ONLY"));
+    // Proposed, not applied: still off, and the orchestrator can't apply it itself.
+    assert!(orchestrator_hook(&c, "herdsman pause sendmeter").contains("REFUSED GROUP_OFF"));
+    assert!(orchestrator_hook(&c, "herdsman config apply c1").contains("REFUSED OWNER_ONLY"));
     let (code, out) = run(&c, &Fake::default(), &["config", "apply", "c1"]);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(conductor_hook(&c, "herdsman pause sendmeter"), "");
+    assert_eq!(orchestrator_hook(&c, "herdsman pause sendmeter"), "");
     assert!(
-        conductor_hook(&c, "herdsman hosts off mini").contains("REFUSED GROUP_OFF"),
+        orchestrator_hook(&c, "herdsman hosts off mini").contains("REFUSED GROUP_OFF"),
         "hosts is off now"
     );
-    // A group verb the conductor runs shows in its thread with the group.
-    assert_eq!(conductor_hook(&c, "herdsman clean sendmeter --yes"), "");
+    // A group verb the orchestrator runs shows in its thread with the group.
+    assert_eq!(orchestrator_hook(&c, "herdsman clean sendmeter --yes"), "");
     let row = kinds(&c, "thread-cmd").pop().unwrap();
     assert_eq!(
         (row.str("thread"), row.str("cmd"), row.str("group")),
