@@ -1,0 +1,12 @@
+Decided: one `pending-action` event per tap (and per changed refusal), folded by `pending::of`; a spawn of the issue ends it
+Because: "then a `pending-action` record (action, issue, lane role, since, last refusal reason)"
+Decided: drive's `act` logs each refused build spawn on the pending record; soft codes keep it, the rest fail it
+Because: "Soft refusals (HOST_BUSY, MEM_LOW, CAP, ALL_CAPPED, SPAWN_PENDING, SERIAL_BUSY, PAUSED, HOST_OFFLINE) keep it pending"
+Decided: IN_FLIGHT and ALREADY_DONE neither wait nor fail: another pass is on that very spawn (#509)
+Because: "no duplicate spawn when two passes overlap (action_id, #509)"
+Decided: cards are hidden or brought back in serve/v1.rs over the frozen needs tab, never in serve.rs
+Because: "The old board is frozen (#552): no serve.js/css, web/, serve.rs changes."
+Rejected: deciding "started" by timestamps — a design lane and its approve log in the same second in tests; an answer stores the log's seq instead
+Rejected: putting the line into the waiting scan drive acts on — it would break drive's respawn words; status/waiting/API show it instead
+Check: the extend tap on a busy host exits 0 and logs no extend-failed; a returned card's tap starts the lane without a second round
+Owner: A tapped [one more round], answer or design approve now stays answered while the Mac is busy; the card only comes back if the start really fails or waits over 30 minutes.
