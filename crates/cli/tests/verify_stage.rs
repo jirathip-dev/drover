@@ -627,3 +627,61 @@ fn a_verified_head_a_gate_refused_names_the_gate_not_review_again() {
     assert_eq!(w.what, "PASS · merge refused SERIAL_UNMARKED: touches serial paths");
     assert_eq!(w.next_cmd, None);
 }
+
+/// #775 AC3: the screenshot's disk stops answering (its folder's listing hangs): `/shot/…` answers 504 within the
+/// read limit instead of holding a request thread, and `GET /` answers 200 before, during and after.
+#[test]
+fn a_shot_on_a_hung_disk_answers_504_and_the_board_stays_up() {
+    let d = tmpdir("verify-shot-hung");
+    let c = ctx(&d, &config());
+    let shots = d.join("lane/shots");
+    std::fs::create_dir_all(&shots).unwrap();
+    std::fs::write(shots.join("home-390.png"), b"\x89PNG narrow").unwrap();
+    let w = d.join("lane").to_string_lossy().into_owned();
+    ev(
+        &c,
+        1,
+        "spawn",
+        json!({"role": "verify", "stage": "verify", "check": true, "agent": "verify-1", "worktree": w}),
+    );
+    let path = shots
+        .canonicalize()
+        .unwrap()
+        .join("home-390.png")
+        .to_string_lossy()
+        .into_owned();
+    ev(
+        &c,
+        2,
+        "verdict",
+        json!({"verdict": "FAIL", "stage": "verify", "files": [{"name": "shots/home-390.png", "path": path}]}),
+    );
+    let none = Fake::default();
+    let s = Server::new(&c, &none, Some(ADDR.into()));
+    let get = |p: &str| {
+        String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now)).into_owned()
+    };
+    assert!(get("/").starts_with("HTTP/1.1 200"));
+    // The disk stops answering: the folder's listing never ends.
+    let dir = shots.canonicalize().unwrap().to_string_lossy().into_owned();
+    assert!(herdsman::runner::hung(&dir, std::time::Duration::ZERO, |_| {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        None
+    }));
+    std::thread::scope(|sc| {
+        let shot = sc.spawn(|| {
+            let t = std::time::Instant::now();
+            (get("/shot/sendmeter/12/0"), t.elapsed())
+        });
+        for _ in 0..5 {
+            assert!(get("/").starts_with("HTTP/1.1 200"), "the board stays up");
+        }
+        let (png, took) = shot.join().unwrap();
+        assert!(png.starts_with("HTTP/1.1 504"), "{png}");
+        assert!(
+            took < herdsman::runner::PROBE + std::time::Duration::from_secs(1),
+            "{took:?}"
+        );
+    });
+    assert!(get("/").starts_with("HTTP/1.1 200"));
+}

@@ -592,6 +592,8 @@ pub struct Limits {
     pub spawn_pending_max_secs: u64, // #333: a spawn marker or kick lock older than this is stale
     /// #302: how long an unavailable agent rests when its message names no reset.
     pub fallback_rest_minutes: u64,
+    /// #785: an ACP lane with no event back this long after its first turn is a failed start.
+    pub acp_start_minutes: u64,
     /// #343: the event log over this many MB moves its old events to monthly archives (each slow pass).
     pub rotate_mb: u64,
     /// #626: with GitHub webhooks on (a `GITHUB_WEBHOOK_SECRET`), the fast step re-reads PRs only this often.
@@ -674,6 +676,7 @@ impl Default for Limits {
             max_parallel_spawns: 6,
             spawn_pending_max_secs: 300,
             fallback_rest_minutes: 60,
+            acp_start_minutes: 3,
             rotate_mb: 20,
             webhook_poll_minutes: 10,
             keychain_readers: 3,
@@ -709,6 +712,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "stall",
     "lane-dead",
     "account-signed-out",
+    "lane-failed-start",
     "ready-unmerged",
     "ci-missing",
     "outbox-stale",
