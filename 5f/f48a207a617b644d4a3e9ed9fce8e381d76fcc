@@ -1,0 +1,5 @@
+Decided: fix round 2 merges current staging and changes no code; the ui FAIL was one flaky spinner frame
+Because: crates/core/src/check.rs:1286
+Rejected: editing web/ or the ui audit — this PR touches neither, and the base 61eaeee passed ui
+Check: the ui job is green at the new head; the diff against staging is only check.rs, events.rs and tests/scratch.rs
+Owner: no behaviour change in this round; staging merged in so CI reruns on a fresh head
