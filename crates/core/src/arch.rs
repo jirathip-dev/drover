@@ -18,7 +18,6 @@ struct Arch {
     ban: Vec<Ban>,
     #[serde(default)]
     size: Vec<Size>,
-    /// Today's size offenders, `<file>[:<fn>] <lines>` a line (default `.herdsman/arch-baseline.txt`).
     baseline: Option<String>,
     comments: Option<Comments>,
     docs: Option<Docs>,
@@ -66,6 +65,8 @@ struct Layer {
     mods: Vec<String>,
     #[serde(default)]
     may_use: Vec<String>,
+    #[serde(default)]
+    exclude: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -76,6 +77,8 @@ struct Ban {
     #[serde(default)]
     except: Vec<String>,
     reason: String,
+    #[serde(default)]
+    comments: bool,
 }
 
 #[derive(Deserialize)]
@@ -84,6 +87,8 @@ struct Size {
     paths: Vec<String>,
     max_file_lines: Option<usize>,
     max_fn_lines: Option<usize>,
+    #[serde(default)]
+    exclude: Vec<String>,
 }
 
 /// Whether a glob matches `p`, `/**/` also matching no folder (`src/**/*.rs` matches `src/lib.rs`).
@@ -108,8 +113,13 @@ pub fn check(
     };
     let a: Arch = toml::from_str(&text).with_context(|| format!("parsing {}", config.display()))?;
     let base_path = a.baseline.as_deref().unwrap_or(".herdsman/arch-baseline.txt");
-    let base: BTreeMap<String, usize> = std::fs::read_to_string(base_path)
-        .unwrap_or_default()
+    let base_text = std::fs::read_to_string(base_path).unwrap_or_default();
+    let crossings: BTreeSet<&str> = base_text
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.contains(" -> "))
+        .collect();
+    let base: BTreeMap<String, usize> = base_text
         .lines()
         .filter_map(|l| {
             l.trim()
@@ -118,48 +128,65 @@ pub fn check(
         })
         .collect();
     let mut files = vec![];
-    walk(Path::new("."), &mut files);
+    let ban_paths: Vec<&String> = a.ban.iter().flat_map(|b| &b.paths).collect();
+    walk(Path::new("."), &ban_paths, &mut files);
     files.sort();
-    let (mut bad, mut now) = (vec![], BTreeMap::<String, usize>::new());
+    let (mut bad, mut now, mut crossed) = (vec![], BTreeMap::<String, usize>::new(), BTreeSet::new());
     for p in &files {
         let ext = Path::new(p).extension().and_then(|x| x.to_str()).unwrap_or_default();
         let rust = ext == "rs";
-        let Some(src) = (rust || ext == "ts" || ext == "tsx")
+        let code = rust || ext == "ts" || ext == "tsx";
+        let slashes = code
+            || [
+                "js", "jsx", "mjs", "cjs", "mts", "cts", "swift", "go", "kt", "java", "c", "h", "cpp",
+            ]
+            .contains(&ext);
+        let bans: Vec<&Ban> = a
+            .ban
+            .iter()
+            .filter(|b| any(&b.paths, p) && !any(&b.except, p))
+            .collect();
+        let Some(src) = (code || !bans.is_empty())
             .then(|| std::fs::read_to_string(p).ok())
             .flatten()
         else {
             continue;
         };
         let lines: Vec<&str> = src.lines().collect();
-        let own = a.layer.iter().find(|l| any(&l.paths, p));
-        for (i, l) in lines
-            .iter()
-            .enumerate()
-            .filter(|(_, l)| !l.trim_start().starts_with("//"))
-        {
+        let own = a.layer.iter().find(|l| code && any(&l.paths, p) && !any(&l.exclude, p));
+        for (i, l) in lines.iter().enumerate() {
             let at = format!("{p}:{}", i + 1);
-            for b in a
-                .ban
+            let comment = slashes && l.trim_start().starts_with("//");
+            for b in bans
                 .iter()
-                .filter(|b| l.contains(&b.pattern) && any(&b.paths, p) && !any(&b.except, p))
+                .filter(|b| l.contains(&b.pattern) && (b.comments || !comment))
             {
                 bad.push(format!("{at}: `{}` is banned here: {}", b.pattern, b.reason));
             }
             for (own, t) in own
+                .filter(|_| !comment)
                 .into_iter()
                 .flat_map(|o| targets(p, l, rust).into_iter().map(move |t| (o, t)))
             {
                 let to = a.layer.iter().find(|x| uses(x, &t)).filter(|x| x.name != own.name);
                 if let Some(to) = to.filter(|x| !own.may_use.contains(&x.name)) {
-                    let (from, may) = (&own.name, &own.may_use);
-                    bad.push(format!(
-                        "{at}: layer `{from}` uses `{}` ({t}); its may_use is {may:?}",
-                        to.name
-                    ));
+                    let key = format!("{p} -> {}", to.name);
+                    if !crossings.contains(key.as_str()) {
+                        let (from, may) = (&own.name, &own.may_use);
+                        bad.push(format!(
+                            "{at}: layer `{from}` uses `{}` ({t}); its may_use is {may:?}",
+                            to.name
+                        ));
+                    }
+                    crossed.insert(key);
                 }
             }
         }
-        for s in a.size.iter().filter(|s| any(&s.paths, p)) {
+        for s in a
+            .size
+            .iter()
+            .filter(|s| code && any(&s.paths, p) && !any(&s.exclude, p))
+        {
             let mut sizes = vec![(p.clone(), 1, lines.len(), s.max_file_lines)];
             let each = fns(&lines, rust).into_iter();
             sizes.extend(each.map(|(name, at, n)| (format!("{p}:{name}"), at, n, s.max_fn_lines)));
@@ -191,12 +218,23 @@ pub fn check(
         }
     }
     if write {
+        let (keep, grown): (Vec<_>, Vec<_>) = crossed
+            .iter()
+            .partition(|k| crossings.is_empty() || crossings.contains(k.as_str()));
+        let sizes = now.iter().map(|(k, n)| format!("{k} {n}\n"));
         std::fs::write(
             base_path,
-            now.iter().map(|(k, n)| format!("{k} {n}\n")).collect::<String>(),
+            sizes.chain(keep.iter().map(|k| format!("{k}\n"))).collect::<String>(),
         )?;
-        writeln!(out, "wrote {} size offenders to {base_path}", now.len())?;
-        return Ok(0);
+        let (n, c) = (now.len(), keep.len());
+        writeln!(out, "wrote {n} size offenders and {c} layer crossings to {base_path}")?;
+        for k in &grown {
+            writeln!(
+                out,
+                "{k}: a new layer crossing is not baselined; the listed ones may only shrink"
+            )?;
+        }
+        return Ok(i32::from(!grown.is_empty()));
     }
     for b in &bad {
         writeln!(out, "{b}")?;
@@ -205,16 +243,17 @@ pub fn check(
     Ok(i32::from(!bad.is_empty()))
 }
 
-/// The repo's files under `dir`, skipping dot folders, `target*` and `node_modules`.
-fn walk(dir: &Path, out: &mut Vec<String>) {
+fn walk(dir: &Path, bans: &[&String], out: &mut Vec<String>) {
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || name.starts_with("target") || name == "node_modules" {
+        let rel: String = e.path().to_string_lossy().trim_start_matches("./").into();
+        let named = bans.iter().any(|b| b.starts_with(&format!("{rel}/")));
+        if (name.starts_with('.') && !named) || name.starts_with("target") || name == "node_modules" {
             continue;
         }
         match e.file_type() {
-            Ok(t) if t.is_dir() => walk(&e.path(), out),
-            Ok(_) => out.push(e.path().to_string_lossy().trim_start_matches("./").into()),
+            Ok(t) if t.is_dir() => walk(&e.path(), bans, out),
+            Ok(_) => out.push(rel),
             Err(_) => {}
         }
     }
