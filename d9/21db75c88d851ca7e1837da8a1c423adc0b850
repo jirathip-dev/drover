@@ -1,0 +1,8 @@
+Decided: line_cap 38028 -> 41000 in ci/cap.toml, one raise for the whole queue
+Because: q1182
+Because: "Raise to 41,000 once: covers the open PRs and the queued ones"
+Decided: record it in docs/cap-history/2026-11-10-41000.md with the herdsman cap numbers, like the earlier raises
+Because: ci/cap.toml:2
+Rejected: a smaller raise to the open PRs only (39,489 + margin) — six queued issues would ask again
+Check: herdsman cap-check --config ci/cap.toml exits 0 and prints 37971 / cap 41000
+Owner: The code-size limit is now 41,000 lines, enough for the open and queued work.
