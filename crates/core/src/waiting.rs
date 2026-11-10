@@ -600,13 +600,17 @@ pub fn scan(
             lane: Some(lane.clone()),
             ..s
         };
-        let mine = of.get(&(s.fleet.as_str(), s.issue)).map_or(&[][..], Vec::as_slice);
         let (f, branch) = (&cfg.fleet[&s.fleet], crate::gate::branch_of(Some(&s), s.issue));
         // #169: no PR yet: the issue branch's latest run backs the `checks` link (the tick reads it, never a request).
         if live && !matches!(s.state.as_str(), "merged" | "closed") && gh::cached_pr(ctx, &s.fleet, s.issue).is_null() {
             gh::run(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now);
         }
-        if busy(&lane) {
+        let mine = of.get(&(s.fleet.as_str(), s.issue)).map_or(&[][..], Vec::as_slice);
+        let sp = last_spawn(mine, &lane);
+        let rested = |e: &Event| {
+            crate::access::rests(&e.kind) && sp.is_some_and(|p| e.ts >= p.ts && e.str("account") == p.str("account"))
+        };
+        if busy(&lane) && !(sp.is_some_and(|p| p.str("account").is_some()) && mine.iter().any(rested)) {
             let who = if s.check_lane() == Some(&lane) {
                 "reviewer"
             } else {
@@ -820,6 +824,12 @@ pub fn scan(
         {
             w.what = why;
         }
+        if let Some(h) = spawn
+            .then(|| held(mine, (&s.fleet, s.issue), w.next_cmd.as_deref()))
+            .flatten()
+        {
+            w.what += &format!(" · {h}");
+        }
         // #212: a CI/merge line from a PR read older than 2 min (no fast step since) says when it was taken.
         let at = gh::cached_at(ctx, &s.fleet, s.issue).filter(|t| ctx.now > t + 120);
         if let Some(t) = at.filter(|_| w.what.starts_with("PASS · ")) {
@@ -901,6 +911,39 @@ pub fn guarded(events: &[Event], cfg: &Config) -> Vec<IssueState> {
     out
 }
 
+pub fn held(events: &[Event], (f, n): (&str, u64), cmd: Option<&str>) -> Option<String> {
+    let mine = |e: &&Event| e.fleet == f && e.issue == Some(n) && matches!(e.kind.as_str(), "driven" | "spawn");
+    let e = events.iter().rfind(mine)?;
+    let wait = ["EXIT", "ERROR", "SPAWN_PENDING", "SPAWN_BACKOFF"];
+    let code = e.str("code").filter(|c| !wait.contains(c))?;
+    let c = e.str("cmd").filter(|c| c.starts_with("herdsman spawn "))?;
+    cmd.is_none_or(|x| c.starts_with(x)).then_some(())?;
+    let why = e.str("result").unwrap_or_default();
+    let why = why.split_once(": ").map_or(why, |p| p.1);
+    Some(format!(
+        "held: {code} {}",
+        why.split("; retry later").next().unwrap_or(why)
+    ))
+}
+
+/// #792: a working lane's silent-lane recovery since its spawn: ` · nudged 3m ago: silent 10m mid-turn`.
+pub fn recovered(events: &[Event], lane: &str, now: u64) -> String {
+    let sp = last_spawn(events, lane);
+    let mine = |e: &&Event| {
+        matches!(e.kind.as_str(), "nudged" | "respawned-silent")
+            && e.str("agent") == Some(lane)
+            && sp.is_some_and(|sp| e.ts >= sp.ts)
+    };
+    events.iter().rfind(mine).map_or(String::new(), |e| {
+        let how = ["nudged", "respawned"][usize::from(e.kind == "respawned-silent")];
+        format!(
+            " · {how} {} ago: {}",
+            age(now.saturating_sub(e.ts)),
+            e.str("why").unwrap_or_default()
+        )
+    })
+}
+
 /// #493: a refusal that stops drive's starts for every fleet (`CAP`: its own); the queue waits on it.
 const HOST_WAIT: [&str; 5] = ["HOST_BUSY", "DISK_LOW", "DISK_BUDGET", "MEM_LOW", "ALL_CAPPED"];
 pub const ORPHAN_SECS: u64 = 1800;
@@ -919,6 +962,7 @@ pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Valu
     let label = f.merge_label.as_deref().is_none_or(|l| gh::has_label(pr, l));
     let ci = s.state == "ready" && label && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(pr))) == "pending";
     let held = !crate::events::held_on(log.all, s).is_empty() || !log.blockers(&s.fleet, s.issue).is_empty();
+    let held = held || self::held(log.all, (&s.fleet, s.issue), None).is_some();
     if f.paused || ci || held || s.lanes.values().any(working) || log.asks.iter().any(asked) {
         return None;
     }

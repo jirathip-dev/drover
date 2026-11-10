@@ -197,7 +197,7 @@ fn the_install_repair_unparks_a_lane_ends_a_design_adoption_caused() {
     assert_eq!((state(&c, 12), state(&c, 13)), ("fix(1)".into(), "needs-human".into()));
     assert_eq!(
         waiting(&c, &r, 12)["what"],
-        "review FAIL, waiting for drive (next pass ≤ 5 min) to start fix round"
+        "review FAIL, waiting for drive (next pass ≤ 5 min) to start fix round · held: HOST_BUSY memory pressure critical"
     );
     // Once repaired, never again.
     run(&c, &r, &["drive"]);

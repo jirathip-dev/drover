@@ -207,6 +207,8 @@ Every fleet is driven by herdsman itself. `herdsman drive [fleet]` does one pass
 | a lane killed | `spawn impl` (respawn) |
 | a live lane idle `stall_minutes` with no push, verdict or turn (#666) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with its last screen lines |
 | a live lane whose pane or session shows no output 10 min after its spawn | an ACP session gets its brief again once; then `spawn <role> --supersede` once (respawn `failed start`); then `needs-human START_FAILED` |
+| an ACP lane (build, check or design stage) mid-turn with no session event `silent_minutes` (10) and no tool call still running (#792) | `shed cancel` and one `continue` prompt (`nudged`); still silent 10 min later: `spawn <role> --supersede --force` once (`respawned-silent`); silent again within the hour: `needs-human LANE_SILENT` |
+| a dead or silent lane's respawn on a busy host (#792) | `--force` skips `HOST_BUSY` (logged `override`); `MEM_LOW` and `DISK_LOW` still hold it, and `waiting` names the hold (`held: <code> <why>`) |
 | a lane the hook refused twice (`hook-failed-closed`) since its spawn | its pane closed, `needs-human HOOK_REFUSED` with the refusal |
 | merged lanes left | `clean --yes` |
 

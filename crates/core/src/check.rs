@@ -305,7 +305,13 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     let why = match kind {
                         "cap-banner-ignored" => format!("{name}: {role} lane {lane} shows a limit banner but usage reads {meter}; {name} stays in rotation"),
                         "account-capped" | "agent-unavailable" if auth.is_empty() => format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now"),
-                        _ => format!("{name}: {role} lane {lane} is signed out; spawns skip {name} until you sign in or replace its token (an account: then `herdsman accounts reset {name}`)"),
+                        _ => {
+                            let fix = account.map(|a| crate::access::sign_in(cfg, r, a).1);
+                            let cmd = fix.and_then(|f| Some(f.split_once(" → ")?.1.rsplit(", or ").next()?.to_string()));
+                            let fix = cmd.map_or("sign in".into(), |c| format!("sign in (`{c}`)"));
+                            let fix = format!("{fix} or replace its token");
+                            format!("{name}: {role} lane {lane} is signed out; spawns skip {name} until you {fix} (an account: then `herdsman accounts reset {name}`)")
+                        }
                     };
                     hits.push((kind, format!("{lane}:{name}{auth}"), why));
                     let d = json!({"agent": lane, "harness": harness, "account": account, "host": host, "until": until, "meter": meter});

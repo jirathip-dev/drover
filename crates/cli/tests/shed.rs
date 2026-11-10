@@ -427,6 +427,7 @@ fn acp_fake(adapter: &[&str]) -> Fake {
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
+        .reply("shed cancel", "")
 }
 
 /// An ACP lane's ctx: its profiles synced, the real binary as their hook.
@@ -2216,6 +2217,213 @@ fn a_pty_lane_still_returns_its_screen() {
     let v = lane_json(&b, "sendmeter-impl-12", "");
     assert_eq!(v["lines"], json!(["screen of sendmeter-impl-12"]), "{v}");
     assert_eq!(v["blocks"], json!([{"k": "screen"}]), "{v}");
+}
+
+fn session(b: &Server, kinds: &[Value]) {
+    session_of(b, "sendmeter-impl-12", kinds);
+}
+
+fn session_of(b: &Server, name: &str, kinds: &[Value]) {
+    let mut ev = b.events.lock().unwrap();
+    for k in kinds {
+        let seq = ev.iter().filter_map(|e| e["seq"].as_u64()).max().unwrap_or(0) + 1;
+        let mut e = json!({"seq": seq, "name": name, "labels": lane_labels()});
+        e.as_object_mut().unwrap().extend(k.as_object().unwrap().clone());
+        ev.push(e);
+    }
+}
+
+fn mid_turn(b: &Server) {
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["reported"] = json!({"state": "working"});
+}
+
+fn turn() -> Value {
+    json!({"event": "turn", "prompt": "# Brief"})
+}
+
+fn tool(status: &str) -> Value {
+    json!({"event": "tool_call", "id": "t1", "title": "cargo test", "status": status, "kind": "execute"})
+}
+
+fn cpu(pct: u64) -> Value {
+    json!({"event": "resources", "rss_mb": 900, "cpu_pct": pct})
+}
+
+const SILENT: u64 = 600;
+
+fn drive_at(c: &herdsman::Ctx, r: &dyn Runner, secs: u64) -> String {
+    let (code, out) = run(&later(c, secs), r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    out
+}
+
+fn host(f: &mut Fake, prog: &str, stdout: &str) {
+    let o = herdsman::runner::Out {
+        code: 0,
+        stdout: stdout.into(),
+        stderr: String::new(),
+    };
+    f.replies.insert(0, (prog.into(), o));
+}
+
+#[test]
+fn a_silent_acp_lane_is_nudged_then_respawned_once_then_escalated() {
+    let (c, b, f, wt, _) = acp_lane("acp-silent");
+    mid_turn(&b);
+    session(&b, &[turn(), tool("completed")]);
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    drive_at(&c, &cli, 60);
+    drive_at(&c, &cli, 60 + SILENT - 1);
+    assert!(!f.called("shed cancel"), "not silent yet");
+    let out = drive_at(&c, &cli, 60 + SILENT);
+    assert!(f.called("shed cancel sendmeter-impl-12"), "{out}");
+    assert_eq!(f.count("shed send sendmeter-impl-12 continue: "), 1, "{out}");
+    assert_eq!(logged(&c, "nudged").len(), 1);
+    drive_at(&c, &cli, 60 + SILENT + 60);
+    assert_eq!(f.count("shed cancel"), 1, "one nudge");
+    let (_, w) = run(&later(&c, 60 + SILENT + 60), &cli, &["waiting", "sendmeter"]);
+    assert!(w.contains("nudged"), "waiting shows the nudge: {w}");
+    let out = drive_at(&c, &cli, 60 + 2 * SILENT + 1);
+    assert_eq!(logged(&c, "respawned-silent").len(), 1, "{out}");
+    assert_eq!(logged(&c, "spawn").len(), 2, "{out}");
+    assert!(logged(&c, "needs-human").is_empty());
+    mid_turn(&b);
+    session(&b, &[turn()]);
+    drive_at(&c, &cli, 60 + 2 * SILENT + 30);
+    let out = drive_at(&c, &cli, 60 + 3 * SILENT + 31);
+    let nh = logged(&c, "needs-human");
+    assert_eq!(nh.len(), 1, "{out}");
+    assert_eq!(nh[0].str("code"), Some("LANE_SILENT"));
+    drive_at(&c, &cli, 60 + 5 * SILENT);
+    assert_eq!(logged(&c, "needs-human").len(), 1);
+    assert_eq!(logged(&c, "spawn").len(), 2);
+    assert_eq!(logged(&c, "respawned-silent").len(), 1);
+}
+
+#[test]
+fn a_silent_design_lane_is_nudged() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let cfg = acp_config(&b.sock, "claude", true)
+        + "\n[fleet.sendmeter.role.design]\nharness = \"claude\"\naccount = \"C\"\n";
+    let c = acp_ctx("acp-silent-design", &cfg);
+    let f = acp_fake(&["true"])
+        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+        .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
+        .reply("sysctl -n hw.ncpu", "10\n")
+        .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n");
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    assert_eq!(run(&c, &cli, &["queue", "sendmeter", "add", "12", "--design"]).0, 0);
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "design"]);
+    assert_eq!(code, 0, "{out}");
+    let lane = "sendmeter-design-12";
+    b.terms.lock().unwrap().get_mut(lane).unwrap()["reported"] = json!({"state": "working"});
+    session_of(&b, lane, &[turn(), tool("failed")]);
+    drive_at(&c, &cli, 60);
+    let out = drive_at(&c, &cli, 60 + SILENT);
+    assert!(f.called("shed cancel sendmeter-design-12"), "{out}");
+    assert_eq!(logged(&c, "nudged").len(), 1, "{out}");
+}
+
+#[test]
+fn a_pending_tool_call_in_a_live_session_is_not_silent() {
+    let (c, b, f, wt, _) = acp_lane("acp-tool");
+    mid_turn(&b);
+    session(&b, &[turn(), tool("in_progress"), cpu(80)]);
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    drive_at(&c, &cli, 60 + 3 * SILENT);
+    assert!(!f.called("shed cancel"));
+    assert!(logged(&c, "nudged").is_empty());
+    session(&b, &[tool("completed")]);
+    drive_at(&c, &cli, 60 + 3 * SILENT + 1);
+    let out = drive_at(&c, &cli, 60 + 4 * SILENT + 1);
+    assert!(f.called("shed cancel sendmeter-impl-12"), "{out}");
+}
+
+#[test]
+fn a_pending_tool_call_whose_process_died_is_silent() {
+    let (c, b, f, wt, _) = acp_lane("acp-tool-dead");
+    mid_turn(&b);
+    session(&b, &[turn(), tool("in_progress"), cpu(80), cpu(0)]);
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    drive_at(&c, &cli, 60);
+    let out = drive_at(&c, &cli, 60 + SILENT);
+    assert!(f.called("shed cancel sendmeter-impl-12"), "{out}");
+    assert_eq!(logged(&c, "nudged").len(), 1, "{out}");
+}
+
+#[test]
+fn a_silent_lanes_respawn_goes_ahead_under_host_busy_but_not_under_mem_low() {
+    for (name, prog, sample, spawns) in [
+        ("acp-busy", "sysctl -n vm.loadavg", "{ 90.00 80.00 70.00 }\n", 2),
+        (
+            "acp-memlow",
+            "vm_stat",
+            "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 100.\nPages inactive: 100.\n",
+            1,
+        ),
+    ] {
+        let (c, b, mut f, wt, _) = acp_lane(name);
+        mid_turn(&b);
+        session(&b, &[turn()]);
+        host(&mut f, prog, sample);
+        let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+        drive_at(&c, &cli, 60);
+        drive_at(&c, &cli, 60 + SILENT);
+        assert_eq!(logged(&c, "nudged").len(), 1, "{name}");
+        let out = drive_at(&c, &cli, 60 + 2 * SILENT + 1);
+        assert_eq!(logged(&c, "spawn").len(), spawns, "{name}: {out}");
+        assert_eq!(logged(&c, "respawned-silent").len(), spawns - 1, "{name}: {out}");
+    }
+}
+
+#[test]
+fn an_auth_failure_marks_the_account_signed_out_alerts_once_and_respawns_on_the_next_account() {
+    let (c, b, f, wt, _) = acp_lane("acp-auth");
+    mid_turn(&b);
+    let err = "API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\"}}";
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["text"] = json!(err);
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    for s in [60, 120] {
+        let (code, out) = run(&later(&c, s), &cli, &["check"]);
+        assert_eq!(code, 0, "{out}");
+    }
+    let out = logged(&c, "account-signed-out");
+    assert_eq!(out.len(), 1, "alerted once: {out:?}");
+    assert_eq!(out[0].str("account"), Some("C"));
+    let why = out[0].str("reason").unwrap();
+    assert!(why.contains("claude /login") && why.contains(&acct_c()), "{why}");
+    drive_at(&c, &cli, 180);
+    let sp = logged(&c, "spawn");
+    assert_eq!(sp.len(), 2);
+    assert_eq!(sp[1].str("account"), Some("D"));
+}
+
+#[test]
+fn a_skipped_fix_round_spawn_shows_its_refusal_in_waiting() {
+    let (c, b, mut f, wt, _) = acp_lane("acp-held");
+    let ev = |ts: u64, kind: &str, d: Value| {
+        herdsman::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
+    };
+    let head = "b".repeat(40);
+    ev(c.now + 10, "pushed", json!({"sha": head}));
+    ev(
+        c.now + 20,
+        "spawn",
+        json!({"role": "rev", "check": true, "agent": "sendmeter-rev-12-r1", "sha": head}),
+    );
+    let d = json!({"verdict": "FAIL", "sha": head, "stage": "rev", "loop": "rev", "body": "FAIL"});
+    ev(c.now + 30, "verdict", d);
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
+    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+        "mergeable": "MERGEABLE", "statusCheckRollup": []});
+    f = f.reply("gh pr view issue-12", &pr.to_string());
+    host(&mut f, "sysctl -n vm.loadavg", "{ 90.00 80.00 70.00 }\n");
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    drive_at(&c, &cli, 60);
+    assert_eq!(logged(&c, "spawn").len(), 2, "the fix round (a new lane) waits");
+    let (_, w) = run(&later(&c, 3 * 3600), &cli, &["waiting", "sendmeter"]);
+    assert!(w.contains("held: HOST_BUSY load/cpu 9.00 > "), "{w}");
+    assert!(!w.contains("nothing drives this"), "{w}");
 }
 
 #[test]

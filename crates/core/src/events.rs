@@ -401,6 +401,8 @@ pub const PASSIVE: &[&str] = &[
     "why-nudged",
     // #666: an ACP lane's first prompt sent again.
     "start-resent",
+    "nudged",
+    "respawned-silent",
     "budget-freed",
     // #798: a finished lane's build folder or scratch removed.
     "build-freed",
