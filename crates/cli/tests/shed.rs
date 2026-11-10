@@ -2042,12 +2042,13 @@ fn a_pty_lane_still_returns_its_screen() {
     assert_eq!(v["blocks"], json!([{"k": "screen"}]), "{v}");
 }
 
-fn session(b: &Server, kinds: &[Value]) {
+fn session(b: &FakeShed, kinds: &[Value]) {
     session_of(b, "sendmeter-impl-12", kinds);
 }
 
-fn session_of(b: &Server, name: &str, kinds: &[Value]) {
-    let mut ev = b.events.lock().unwrap();
+fn session_of(b: &FakeShed, name: &str, kinds: &[Value]) {
+    let mut st = b.lock();
+    let ev = &mut st.events;
     for k in kinds {
         let seq = ev.iter().filter_map(|e| e["seq"].as_u64()).max().unwrap_or(0) + 1;
         let mut e = json!({"seq": seq, "name": name, "labels": lane_labels()});
@@ -2056,8 +2057,8 @@ fn session_of(b: &Server, name: &str, kinds: &[Value]) {
     }
 }
 
-fn mid_turn(b: &Server) {
-    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["reported"] = json!({"state": "working"});
+fn mid_turn(b: &FakeShed) {
+    b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["reported"] = json!({"state": "working"});
 }
 
 fn turn() -> Value {
@@ -2094,7 +2095,7 @@ fn a_silent_acp_lane_is_nudged_then_respawned_once_then_escalated() {
     let (c, b, f, wt, _) = acp_lane("acp-silent");
     mid_turn(&b);
     session(&b, &[turn(), tool("completed")]);
-    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    let cli = Push(b.cli(&f), wt.clone());
     drive_at(&c, &cli, 60);
     drive_at(&c, &cli, 60 + SILENT - 1);
     assert!(!f.called("shed cancel"), "not silent yet");
@@ -2125,7 +2126,7 @@ fn a_silent_acp_lane_is_nudged_then_respawned_once_then_escalated() {
 
 #[test]
 fn a_silent_design_lane_is_nudged() {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+    let b = FakeShed::new();
     let cfg = acp_config(&b.sock, "claude", true)
         + "\n[fleet.sendmeter.role.design]\nharness = \"claude\"\naccount = \"C\"\n";
     let c = acp_ctx("acp-silent-design", &cfg);
@@ -2134,12 +2135,12 @@ fn a_silent_design_lane_is_nudged() {
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n");
-    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let cli = b.cli(&f);
     assert_eq!(run(&c, &cli, &["queue", "sendmeter", "add", "12", "--design"]).0, 0);
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "design"]);
     assert_eq!(code, 0, "{out}");
     let lane = "sendmeter-design-12";
-    b.terms.lock().unwrap().get_mut(lane).unwrap()["reported"] = json!({"state": "working"});
+    b.lock().terms.get_mut(lane).unwrap()["reported"] = json!({"state": "working"});
     session_of(&b, lane, &[turn(), tool("failed")]);
     drive_at(&c, &cli, 60);
     let out = drive_at(&c, &cli, 60 + SILENT);
@@ -2152,7 +2153,7 @@ fn a_pending_tool_call_in_a_live_session_is_not_silent() {
     let (c, b, f, wt, _) = acp_lane("acp-tool");
     mid_turn(&b);
     session(&b, &[turn(), tool("in_progress"), cpu(80)]);
-    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    let cli = Push(b.cli(&f), wt.clone());
     drive_at(&c, &cli, 60 + 3 * SILENT);
     assert!(!f.called("shed cancel"));
     assert!(logged(&c, "nudged").is_empty());
@@ -2167,7 +2168,7 @@ fn a_pending_tool_call_whose_process_died_is_silent() {
     let (c, b, f, wt, _) = acp_lane("acp-tool-dead");
     mid_turn(&b);
     session(&b, &[turn(), tool("in_progress"), cpu(80), cpu(0)]);
-    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    let cli = Push(b.cli(&f), wt.clone());
     drive_at(&c, &cli, 60);
     let out = drive_at(&c, &cli, 60 + SILENT);
     assert!(f.called("shed cancel sendmeter-impl-12"), "{out}");
@@ -2189,7 +2190,7 @@ fn a_silent_lanes_respawn_goes_ahead_under_host_busy_but_not_under_mem_low() {
         mid_turn(&b);
         session(&b, &[turn()]);
         host(&mut f, prog, sample);
-        let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+        let cli = Push(b.cli(&f), wt.clone());
         drive_at(&c, &cli, 60);
         drive_at(&c, &cli, 60 + SILENT);
         assert_eq!(logged(&c, "nudged").len(), 1, "{name}");
@@ -2204,8 +2205,8 @@ fn an_auth_failure_marks_the_account_signed_out_alerts_once_and_respawns_on_the_
     let (c, b, f, wt, _) = acp_lane("acp-auth");
     mid_turn(&b);
     let err = "API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\"}}";
-    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["text"] = json!(err);
-    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["text"] = json!(err);
+    let cli = Push(b.cli(&f), wt.clone());
     for s in [60, 120] {
         let (code, out) = run(&later(&c, s), &cli, &["check"]);
         assert_eq!(code, 0, "{out}");
@@ -2236,12 +2237,12 @@ fn a_skipped_fix_round_spawn_shows_its_refusal_in_waiting() {
     );
     let d = json!({"verdict": "FAIL", "sha": head, "stage": "rev", "loop": "rev", "body": "FAIL"});
     ev(c.now + 30, "verdict", d);
-    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
+    b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
     let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
         "mergeable": "MERGEABLE", "statusCheckRollup": []});
     f = f.reply("gh pr view issue-12", &pr.to_string());
     host(&mut f, "sysctl -n vm.loadavg", "{ 90.00 80.00 70.00 }\n");
-    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    let cli = Push(b.cli(&f), wt.clone());
     drive_at(&c, &cli, 60);
     assert_eq!(logged(&c, "spawn").len(), 2, "the fix round (a new lane) waits");
     let (_, w) = run(&later(&c, 3 * 3600), &cli, &["waiting", "sendmeter"]);
@@ -2253,13 +2254,13 @@ fn a_skipped_fix_round_spawn_shows_its_refusal_in_waiting() {
 fn an_acp_lane_silent_after_its_first_turn_is_a_failed_start_naming_its_account() {
     let (c, b, f, wt, _) = acp_lane("acp-silent");
     // #785: its brief went in as its first turn; nothing came back.
-    let seq = b.events.lock().unwrap().len() as u64 * 10 + 1;
+    let seq = b.lock().events.len() as u64 * 10 + 1;
     let turn =
         json!({"seq": seq, "name": "sendmeter-impl-12", "labels": lane_labels(), "event": "turn", "prompt": "# Brief"});
-    b.events.lock().unwrap().push(turn);
+    b.lock().events.push(turn);
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
-    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    let cli = Push(b.cli(&f), wt.clone());
     let check = |secs| {
         let (code, out) = run(&later(&c, secs), &cli, &["check"]);
         assert_eq!(code, 0, "{out}");

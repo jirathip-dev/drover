@@ -17,7 +17,7 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> (u16, V
     (head[9..12].parse().unwrap(), serde_json::from_str(body).unwrap())
 }
 
-fn board(name: &str, extra: &str) -> (herdsman::Ctx, Fake, String) {
+fn board(name: &str, extra: &str) -> (herdsman::Ctx, OnShed, String) {
     let (c, r) = v1_board(name);
     let text = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(

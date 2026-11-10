@@ -819,11 +819,12 @@ fn a_signed_out_folder_account_is_skipped_with_one_alert_in_standalone() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     // A's folder holds a stale login file, but its CLI says it is signed out; B's says signed in.
     sign_in(&d.join("accounts/A"));
+    let sh = FakeShed::attached(&c);
     let status = |r: Fake| {
         r.reply(&auth_status(&d, "A"), r#"{"loggedIn": false}"#)
             .reply(&auth_status(&d, "B"), r#"{"loggedIn": true}"#)
     };
-    let (r, got) = spawn_with(&c, 12, SIGN_IN, status);
+    let (r, got) = spawn_with(&c, &sh, 12, SIGN_IN, status);
     assert!(r.called(&auth_status(&d, "A")), "{:?}", r.calls.borrow());
     assert_eq!(got, format!("{}/accounts/B|", d.display()), "the lane is on B");
     assert_eq!(kinds(&c, "spawn")[0].str("account"), Some("B"));
@@ -835,7 +836,7 @@ fn a_signed_out_folder_account_is_skipped_with_one_alert_in_standalone() {
         "names the sign-in: {out:?}"
     );
     // The next spawn skips A without asking again: still one alert.
-    let (r, got) = spawn_with(&c, 13, SIGN_IN, status);
+    let (r, got) = spawn_with(&c, &sh, 13, SIGN_IN, status);
     assert_eq!(got, format!("{}/accounts/B|", d.display()));
     assert!(!r.called(&auth_status(&d, "A")));
     assert_eq!(kinds(&c, "account-signed-out").len(), 1);
@@ -850,6 +851,7 @@ fn an_account_env_exit_3_is_signed_out_and_skipped() {
     );
     let c = ctx(&d, &cfg);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let sh = FakeShed::attached(&c);
     let f = |r: Fake| {
         r.once_err("fake-cooee accounts env claude A", 3, "cooee: claude/A is signed out")
             .reply(
@@ -857,7 +859,7 @@ fn an_account_env_exit_3_is_signed_out_and_skipped() {
                 r#"{"CLAUDE_CONFIG_DIR": "/cooee/B"}"#,
             )
     };
-    let (_, got) = spawn_with(&c, 12, SIGN_IN, f);
+    let (_, got) = spawn_with(&c, &sh, 12, SIGN_IN, f);
     assert_eq!(got, "/cooee/B|", "the lane is on B");
     let out = kinds(&c, "account-signed-out");
     assert_eq!((out.len(), out[0].str("account")), (1, Some("A")), "{out:?}");
