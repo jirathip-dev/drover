@@ -1,0 +1,14 @@
+Decided: the comment and doc-touch checks judge only `git diff --base`; CI passes HEAD^1 of the PR merge commit (fetch-depth 2)
+Because: "Only added lines are judged, so old comments don't fail."
+Decided: `herdsman …` spans are checked against this binary's own clap tree (`[docs] cli = true`), flags only inside them
+Rejected: checking bare `--flag` spans — 227 false hits on this repo (other tools' flags, CSS vars)
+Decided: a path span counts only when its first folder exists at the repo root; `../` spans resolve from the doc's folder
+Decided: `[docs] skip` globs for per-fleet-repo paths (`.herdsman/**`) that this repo's docs describe but do not have
+Decided: a watched change is a `name:` line in a watched file; a changed doc line naming `name` or `name-with-dashes` covers it
+Because: "must touch a doc naming it, or carry `no doc: <why>` in its body"
+Decided: new CLI flags take `help = …` attributes instead of `///` (a `///` above a non-pub field is a new comment)
+Because: crates/core/src/arch.rs:368
+Rejected: stripping old comments here — scope 3 is one conductor-filed --refactor issue per repo
+Check: a doc paths fix in docs/pipeline.md, runtime-hc.md, fleet-cards README and architecture.md only removed stale or other-repo names
+Check: a PR body edited after push does not re-run CI, so `no doc:` must be there before the push
+Owner: new comments now fail CI here, and docs may only name files, commands and flags that exist
