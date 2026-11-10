@@ -43,55 +43,9 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// #771: Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every call is the Fake's, the
-/// lane runtime the server's, as `[runtime] kind = "shed"` makes it.
-struct OnShed(Fake, FakeShed);
-
-impl OnShed {
-    fn new(f: Fake) -> OnShed {
-        OnShed(f, FakeShed::new())
-    }
-}
-
-impl std::ops::Deref for OnShed {
-    type Target = Fake;
-    fn deref(&self) -> &Fake {
-        &self.0
-    }
-}
-
-impl herdsman::runner::Runner for OnShed {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
-        self.0.run(prog, args)
-    }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
-        self.0.run_in(prog, args, input)
-    }
-    fn sleep(&self, secs: u64) {
-        self.0.sleep(secs);
-    }
-    fn shed(&self) -> Option<herdsman::shed::Shed> {
-        Some(self.1.shed())
-    }
-}
-/// `v1_board` with its lanes on a fake shed (#771): #12's impl lane working, #9's rev lane blocked on a permission menu
-/// (each its own pane); gh's writes succeed. The setup terminal on bazzite stays `v1_board`'s (herdr's).
-fn shed_board(name: &str) -> (herdsman::Ctx, OnShed) {
-    let cfg = format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
-    let c = ctx(&tmpdir(name), &cfg);
-    let r = OnShed::new(Fake::default().reply("gh issue close", ""));
-    for (issue, role, agent, state) in [(12, "impl", IMPL, "working"), (9, "rev", REV, "blocked")] {
-        let d = json!({"role": role, "agent": agent, "harness": "claude", "pane": agent});
-        herdsman::events::append(&c.state, &Event::new(T - 100, "sendmeter", Some(issue), "spawn", d)).unwrap();
-        r.1.lane(agent, state, "/x");
-        r.1.screen(agent, V1_PERMISSION);
-    }
-    (c, r)
-}
-
 #[test]
 fn send_prompts_a_lane_with_the_boards_refusals_and_rate_limit() {
-    let (c, r) = shed_board("v1-send");
+    let (c, r) = v1_board("v1-send");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let msg = json!({"agent": IMPL, "text": "run the tests again"});
     assert_eq!(post(&s, "send", msg.clone(), "").1, "UNPAIRED");
@@ -122,7 +76,7 @@ fn send_prompts_a_lane_with_the_boards_refusals_and_rate_limit() {
 
 #[test]
 fn menu_answers_the_card_it_was_shown_and_refuses_a_stale_one() {
-    let (c, r) = shed_board("v1-menu");
+    let (c, r) = v1_board("v1-menu");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let needs = req(&s, "GET", "/api/v1/needs", "", &ck).1;
@@ -144,7 +98,7 @@ fn menu_answers_the_card_it_was_shown_and_refuses_a_stale_one() {
 
 #[test]
 fn act_stops_a_lane_dry_runs_a_kill_and_refuses_unknowns() {
-    let (c, r) = shed_board("v1-act");
+    let (c, r) = v1_board("v1-act");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     assert_eq!(post(&s, "act", json!({"agent": IMPL, "op": "stop"}), "").1, "UNPAIRED");
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
@@ -165,7 +119,7 @@ fn act_stops_a_lane_dry_runs_a_kill_and_refuses_unknowns() {
 
 #[test]
 fn setup_starts_a_configured_terminal_and_reads_its_screen() {
-    let (c, r) = v1_board("v1-setup");
+    let (c, r) = v1_board_on("v1-setup", herdr_setup(Fake::default()));
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let start = json!({"host": "bazzite", "name": "claude B"});
     assert_eq!(post(&s, "setup", start.clone(), "").1, "UNPAIRED");
@@ -189,7 +143,7 @@ fn setup_starts_a_configured_terminal_and_reads_its_screen() {
 
 #[test]
 fn herd_and_roles_read_as_the_old_board_draws_them() {
-    let (c, r) = shed_board("v1-reads");
+    let (c, r) = v1_board("v1-reads");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let (status, herd) = req(&s, "GET", "/api/v1/herd", "", "");
     assert_eq!(status, "200 OK");
@@ -225,7 +179,7 @@ fn herd_and_roles_read_as_the_old_board_draws_them() {
 
 #[test]
 fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
-    let (c, r) = shed_board("v1-chat");
+    let (c, r) = v1_board("v1-chat");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     // A form op takes a JSON body too (the role picker's `set`).
     let set = json!({"fleet": "sendmeter", "role": "rev", "model": "sonnet", "mtime": mtime(&s)});

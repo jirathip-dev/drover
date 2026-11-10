@@ -332,3 +332,35 @@ impl Runner for Cli<'_> {
         self.f.sleep(secs);
     }
 }
+
+/// Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every program call is the Fake's,
+/// the lane runtime the server's, as `[runtime] kind = "shed"` makes it (for a caller that builds no CLI, e.g. `Server`).
+pub struct OnShed(pub Fake, pub FakeShed);
+
+impl OnShed {
+    pub fn new(f: Fake) -> OnShed {
+        OnShed(f, FakeShed::new())
+    }
+}
+
+impl std::ops::Deref for OnShed {
+    type Target = Fake;
+    fn deref(&self) -> &Fake {
+        &self.0
+    }
+}
+
+impl Runner for OnShed {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        self.0.run_in(prog, args, input)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+    fn shed(&self) -> Option<Shed> {
+        Some(self.1.shed())
+    }
+}

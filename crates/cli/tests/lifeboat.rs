@@ -12,9 +12,37 @@ const T: u64 = 1_000_000;
 const CMD: &str = "uptime";
 
 /// API v1's board (#12 impl working, #9 rev blocked) with #30 queued, ask q1 on #12 and run cards r1 and r2 open.
-fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
+fn fixture(name: &str) -> (herdsman::Ctx, OnShed) {
     let (c, r) = v1_board(name);
-    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "30"]).0, 0);
+    seed(&c, &r);
+    (c, r)
+}
+
+/// #771: herdr-only (#721): `fixture` with its lanes as herdr shows them. On shed a page load still asks bazzite's
+/// shed over ssh (the step's snapshot holds no remote shed lanes), which #721 must fix before it moves this.
+fn herdr_fixture(name: &str) -> (herdsman::Ctx, Fake) {
+    let (c, _) = v1_board(name);
+    let list = agents(&[(IMPL, "working", "/x", "w1:p2"), (REV, "blocked", "/x", "w1:p3")]);
+    let r = Fake::default()
+        .reply("herdr agent list", &list)
+        .reply("herdr pane read", V1_PERMISSION)
+        .reply("gh issue close", "");
+    std::fs::write(
+        &c.config,
+        std::fs::read_to_string(&c.config)
+            .unwrap()
+            .split("\n[runtime]\n")
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    seed(&c, &r);
+    (c, r)
+}
+
+/// #30 queued, ask q1 on #12 and run cards r1 and r2 open.
+fn seed(c: &herdsman::Ctx, r: &Fake) {
+    assert_eq!(run(c, r, &["queue", "sendmeter", "add", "30"]).0, 0);
     let ev = |issue, kind, d| append(&c.state, &Event::new(T - 50, "sendmeter", issue, kind, d)).unwrap();
     let q = json!({"id": "q1", "agent": IMPL, "question": "Which database?", "options": ["SQLite", "Postgres"]});
     ev(Some(12), "needs-decision", q);
@@ -23,7 +51,6 @@ fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
             "dir": "/srv", "host": "main", "timeout": 60, "sha": herdsman::devices::sha256(CMD.as_bytes())});
         ev(None, "run-card", d);
     }
-    (c, r)
 }
 
 /// `method /api/v1/lifeboat[query]` with `body` (a form) as `cookie`'s device: (status line, body).
@@ -61,7 +88,7 @@ fn an_unpaired_device_sees_the_pair_hint_and_nothing_else() {
 
 #[test]
 fn a_paired_device_sees_queue_lanes_asks_and_cards_and_a_load_runs_no_subprocess() {
-    let (c, r) = fixture("lifeboat-paired");
+    let (c, r) = herdr_fixture("lifeboat-paired");
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0); // the step's snapshot, as on a live host
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
