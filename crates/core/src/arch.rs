@@ -398,6 +398,26 @@ fn stale_docs(d: &Docs, files: &[String]) -> Vec<String> {
         c.build();
         c
     });
+    let cli_gap = |rest: &str| -> Option<String> {
+        let mut c = cli.as_ref()?;
+        for (n, w) in rest.split_whitespace().enumerate() {
+            if ["|", "||", "&&", ";", ">"].contains(&w) {
+                break;
+            }
+            let w = w.split('|').next().unwrap_or_default();
+            if let Some(f) = w.strip_prefix("--") {
+                let f = f.split('=').next().unwrap_or_default();
+                if !f.is_empty() && !c.get_arguments().any(|a| a.get_long() == Some(f)) {
+                    return Some(format!("`{}` has no `--{f}`", c.get_name()));
+                }
+            } else if let Some(s) = c.find_subcommand(w) {
+                c = s;
+            } else if n == 0 && w.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
+                return Some(format!("no herdsman command `{w}`"));
+            }
+        }
+        None
+    };
     let mut bad = vec![];
     for p in files.iter().filter(|p| any(&d.paths, p)) {
         let mut fence = false;
@@ -409,7 +429,7 @@ fn stale_docs(d: &Docs, files: &[String]) -> Vec<String> {
             for s in l.split('`').skip(1).step_by(2) {
                 let dir = Path::new(p).parent().filter(|_| s.starts_with("../"));
                 let gap = match (&cli, s.strip_prefix("herdsman ")) {
-                    (Some(c), Some(rest)) => cli_gap(c, rest),
+                    (Some(_), Some(rest)) => cli_gap(rest),
                     _ if any(&d.skip, s) => None,
                     _ => missing_path(s, dir.unwrap_or(Path::new("."))),
                 };
@@ -424,27 +444,6 @@ fn stale_docs(d: &Docs, files: &[String]) -> Vec<String> {
         }
     }
     bad
-}
-
-fn cli_gap(root: &clap::Command, rest: &str) -> Option<String> {
-    let mut c = root;
-    for (n, w) in rest.split_whitespace().enumerate() {
-        if ["|", "||", "&&", ";", ">"].contains(&w) {
-            break;
-        }
-        let w = w.split('|').next().unwrap_or_default();
-        if let Some(f) = w.strip_prefix("--") {
-            let f = f.split('=').next().unwrap_or_default();
-            if !f.is_empty() && !c.get_arguments().any(|a| a.get_long() == Some(f)) {
-                return Some(format!("`{}` has no `--{f}`", c.get_name()));
-            }
-        } else if let Some(s) = c.find_subcommand(w) {
-            c = s;
-        } else if n == 0 && w.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
-            return Some(format!("no herdsman command `{w}`"));
-        }
-    }
-    None
 }
 
 fn missing_path(s: &str, root: &Path) -> Option<String> {
