@@ -1,0 +1,12 @@
+Decided: a signed-out account rests as the existing `account-signed-out` (until `accounts reset`) and spawn re-picks the role's next account in the same pass.
+Because: "Exit 3 (signed out) means skip the account like a capped one, with one owner alert naming the sign-in"
+Decided: standalone sign-in asks the CLI (`claude auth status` / `codex login status` in the folder, token unset); an unknown answer never blocks a spawn.
+Because: "runs the provider's status command for the folder (not a file check)"
+Rejected: falling back to herdsman's folders when the helper fails — a failing helper still refuses ACCOUNT_ENV (#683 q846, tested); its folders may not exist under cooee.
+Rejected: usage from `cooee accounts ls --json` — its rows carry no usage fields yet (provider, name, folder, signed_in, token_file, token_age_days, error); the meter stays usage.jsonl.
+Decided: a failed start is the first ACP turn's time kept in shed-out.json until any text/reply comes back; check alerts `lane-failed-start` once per start, waiting says "failed start".
+Because: "an ACP lane with no event after its first turn for 3 min (configurable) is a failed start"
+Decided: the pick needed no change: headroom already counts only windows whose reset is ahead, the default order only 30-min-fresh readings.
+Because: crates/core/src/access.rs:96
+Check: dry runs ask no CLI and log nothing (`signed` dry flag); the spawn tests' Fake answers unscripted `env … auth status` with no JSON, so they keep their account.
+Owner: a logged-out account is now skipped with one alert, the meter stops showing stale percentages, and a lane that never answers is called a failed start.
