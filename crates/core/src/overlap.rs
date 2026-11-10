@@ -235,16 +235,25 @@ struct Count {
     limit: i64,
 }
 
-/// #754: the fleet's own line-cap script: `cap_script`, else the first `premerge` check naming a cap.
-fn cap_script(f: &Fleet) -> Option<String> {
+/// #754: the fleet's own line-cap script: `cap_script`, else the first `premerge` check naming a cap; #803: else the
+/// repo's `scripts/line-cap.sh` at `sha`, the script its CI enforces the cap with (cooee's).
+fn cap_script(r: &dyn Runner, f: &Fleet, sha: &str) -> Option<String> {
     let run = |p: &crate::config::Premerge| match p {
         crate::config::Premerge::Cmd(c) => c.clone(),
         crate::config::Premerge::Named(c) => c.run.clone(),
     };
-    (f.cap_script.clone()).or_else(|| f.premerge.iter().flatten().map(run).find(|c| c.contains("cap")))
+    let repo = || {
+        let at = format!("{sha}:scripts/line-cap.sh");
+        git(r, &f.local_path(), &["cat-file", "-e", &at])
+            .ok()
+            .map(|_| "sh scripts/line-cap.sh".to_string())
+    };
+    (f.cap_script.clone())
+        .or_else(|| f.premerge.iter().flatten().map(run).find(|c| c.contains("cap")))
+        .or_else(repo)
 }
 
-/// #754: every `<label> N / cap M` line `script` prints in a scratch worktree at `base` (with `branch` merged in);
+/// #754: every `<label> N / cap M` line (#803: or `<label>: N / M`) `script` prints in a scratch worktree at `base` (with `branch` merged in);
 /// `None` when the merge conflicts or it prints none.
 fn script_caps(
     ctx: &Ctx,
@@ -269,7 +278,8 @@ fn script_caps(
     let o = o?;
     let num = |w: &str| w.replace(',', "").parse::<i64>().ok();
     let cap = |l: &str| {
-        let (left, rest) = l.split_once(" / cap ")?;
+        let (left, rest) = l.split_once(" / ")?;
+        let rest = rest.strip_prefix("cap ").unwrap_or(rest);
         let (label, n) = left
             .trim()
             .rsplit_once(char::is_whitespace)
@@ -292,9 +302,10 @@ pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut 
     let f = cfg.fleet(fleet)?;
     let dir = f.local_path();
     let _ = git(r, &dir, &["fetch", "-q", "origin"]);
-    let script = cap_script(f);
+    let head = git(r, &dir, &["rev-parse", &format!("origin/{}", f.integration)]);
+    let script = head.as_deref().ok().and_then(|h| cap_script(r, f, h));
     let (sha, caps, warn) = if let Some(s) = &script {
-        let sha = git(r, &dir, &["rev-parse", &format!("origin/{}", f.integration)])?;
+        let sha = head?;
         let toml = git(r, &dir, &["show", &format!("{sha}:ci/cap.toml")]).unwrap_or_default();
         let warn = limits(&toml).map_or(500, |l| l.1);
         let caps = script_caps(ctx, r, f, s, &sha, None)
@@ -331,6 +342,11 @@ pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut 
             c.limit - c.lines
         )?;
     }
+    let by = script.as_deref().map_or_else(
+        || "the built-in count of src/**/*.rs and crates/*/src/**/*.rs".to_string(),
+        |s| format!("`{s}`"),
+    );
+    writeln!(out, "counted by {by}")?;
     let prs = gh::snapshot(ctx, r, f, fleet, ctx.now)?;
     let mut prs: Vec<&Value> = (prs.as_object().into_iter().flat_map(|m| m.values()))
         .filter(|p| p["baseRefName"] == f.integration.as_str())
