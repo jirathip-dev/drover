@@ -533,6 +533,41 @@ guarded: boolean, why: string, };
 
 export type AttachEnv = { HERDSMAN_LANE: string, HERDSMAN_THREAD: string, HERDSMAN_PORT: string, } & ({ [key in string]: string });
 
+/**
+ * #786: `GET /api/v1/config`: fleet.toml as cooee's config screens read it.
+ */
+export type ConfigView = { 
+/**
+ * The file's sha256: a manual edit sends it back and is refused `STALE` once the file moved.
+ */
+hash: string, 
+/**
+ * The raw TOML for the editor (a secret-shaped value never loads: `SECRET_IN_CONFIG`).
+ */
+text: string, fields: Array<ConfigField>, };
+
+/**
+ * #786: one setting: its dotted path, TOML kind, allowed values, doc line and `secret:NAME`'s name.
+ */
+export type ConfigField = { path: string, kind: string, value: JsonValue, allowed: Array<string>, doc: string, secret?: string | null, };
+
+/**
+ * #786: `config-check` and `config-edit`'s body: raw TOML, field edits, a fleet added or removed, at `hash`.
+ */
+export type ConfigChange = { hash: string, text?: string | null, set: Array<ConfigSet>, add?: NewFleet | null, remove?: string | null, confirm: boolean, };
+
+export type ConfigSet = { path: string, value: JsonValue, };
+
+/**
+ * #786: a fleet from a GitHub repo; its roles copied from the first fleet's.
+ */
+export type NewFleet = { name: string, repo: string, local: string, integration: string, };
+
+/**
+ * #786: `POST /api/v1/config-check`'s answer: the change's diff and its errors; nothing written.
+ */
+export type ConfigCheck = { diff: string, errors: Array<string>, };
+
 export type Event = { 
 /**
  * #259: the log's monotonic number, set on append (an old row's is its line number); 0 before.
