@@ -101,6 +101,16 @@ impl FakeShed {
         sh.attach(c);
         sh
     }
+    /// A `PATH` for the real binary with a stub `shed` first in `dir` (spawn refuses `SHED_MISSING` unless `which
+    /// shed` finds one; the lanes still run on this server's socket).
+    pub fn path_in(dir: &std::path::Path) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir.join("shed-bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::write(bin.join("shed"), "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(bin.join("shed"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        format!("{}:/usr/bin:/bin", bin.display())
+    }
     pub fn lock(&self) -> std::sync::MutexGuard<'_, State> {
         self.state.lock().unwrap()
     }

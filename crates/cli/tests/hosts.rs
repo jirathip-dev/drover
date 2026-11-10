@@ -393,7 +393,8 @@ fn clean_removes_a_remote_worktree_over_its_host() {
         bazzite.called("kill", IMPL) && !sh.called("kill", IMPL),
         "its pane closes on bazzite"
     );
-    assert!(!r.calls.borrow().iter().any(|c| c.starts_with("git ")));
+    // #779: the remote worktree is never touched by local git (clean's wip prune reads the fleet's local clone).
+    assert!(!r.calls.borrow().iter().any(|c| c.starts_with("git ") && c.contains(WT)));
 }
 
 /// #416: a merged lane on bazzite that only `spawn-started` logged (its spawn failed after the worktree was made) and an

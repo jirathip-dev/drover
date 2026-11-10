@@ -175,6 +175,8 @@ spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or
 # webhook_poll_minutes = 10   # #626: with GitHub webhooks on, the fast step's catch-up PR read runs this often
 # keychain_readers = 3   # #710: more Keychain readers waiting over 60 s alert `keychain-jammed` (troubleshooting §2)
 # reap_keychain_readers = false   # true: `check` kills those readers, then a SecurityAgent up over 10 min
+# respawn_max = 3   # #779: spawn refuses `RESPAWN_LOOP` (one owner ask: try again / park) after this many failed starts
+# respawn_window_minutes = 60   # of an issue's role (lane died, killed, prompt never landed) within this window
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin

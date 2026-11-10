@@ -472,6 +472,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             None => err(128, "fatal"),
         },
         ["status", "--porcelain", ..] => ok(""),
+        ["rev-list", "--objects", "--disk-usage", ..] => ok("0\n"),
         ["rev-list", ..] | ["log", ..] | ["diff", ..] | ["branch", ..] | ["ls-files", ..] => ok(""),
         ["reset", "--hard", b] => {
             if let Some(h) = m.origin.get(b.trim_start_matches("origin/")).cloned() {
@@ -483,6 +484,13 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             Some(h) => ok(format!("{h}\t{r}\n")),
             None => ok(""),
         },
+        // #779 `wip prune` (from `clean`): origin's wip branches.
+        ["for-each-ref", _, "refs/remotes/origin/wip/"] => ok(m
+            .origin
+            .keys()
+            .filter(|b| b.starts_with("wip/"))
+            .map(|b| format!("{b}\n"))
+            .collect::<String>()),
         ["write-tree"] => ok(format!("{:040x}\n", 8)),
         ["push", "-q", "origin", to] if to.starts_with("HEAD:") && !to.contains("refs/") => {
             let (branch, Some(head)) = (&to[5..], m.heads.get(dir).cloned()) else {

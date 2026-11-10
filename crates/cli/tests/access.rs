@@ -156,6 +156,7 @@ fn role_account_b_signs_in_with_its_folder_and_no_token_with_no_helper() {
             .env("FLEET_CONFIG", &c.config)
             .env("FLEET_STATE", &c.state)
             .env("FLEET_WORKTREES", &c.worktrees)
+            .env("PATH", FakeShed::path_in(&d))
             .output()
             .unwrap();
         let (so, se) = (String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));

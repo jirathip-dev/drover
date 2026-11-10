@@ -838,6 +838,8 @@ fn wip_prune_dry_run_lists_and_deletes_nothing() {
     let (code, out) = run(&c, &r, &["wip", "prune", "sendmeter", "--dry-run"]);
     assert_eq!(code, 0, "{out}");
     let want = [
+        "#7 merged: 2 wip, 1 would delete, 1 kept",
+        "#8 ?: 1 wip, 0 would delete, 1 kept",
         "wip/sendmeter-impl-7-20261101-1200 · 2 MB · #7 merged · build output · would delete",
         "wip/sendmeter-impl-8-20261101-1200 · 2 MB · #8 ? · build output · kept",
         "wip/sendmeter-rev-7-r2-20261101-1300 · 2 MB · #7 merged · kept",
@@ -852,4 +854,83 @@ fn wip_prune_dry_run_lists_and_deletes_nothing() {
         "{out}"
     );
     assert_eq!(remote(), 2);
+}
+
+fn sh_git(a: &[&str]) -> String {
+    let s = std::process::Command::new("git").args(a).output().unwrap();
+    assert!(s.status.success(), "{a:?}: {}", String::from_utf8_lossy(&s.stderr));
+    String::from_utf8(s.stdout).unwrap()
+}
+
+/// #779: a closed issue's 5 wip branches of one role → its newest is left, whatever they hold; an open issue's are
+/// untouched. The run lists the counts per issue first.
+#[test]
+fn wip_prune_keeps_only_the_newest_of_a_closed_issue() {
+    let d = tmpdir("wip-prune-newest");
+    let (origin, local) = (d.join("o.git"), d.join("local"));
+    let (o, l) = (
+        origin.to_string_lossy().into_owned(),
+        local.to_string_lossy().into_owned(),
+    );
+    sh_git(&["init", "-q", "--bare", &o]);
+    sh_git(&["clone", "-q", &o, &l]);
+    for (k, v) in [("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")] {
+        sh_git(&["-C", &l, "config", k, v]);
+    }
+    sh_git(&["-C", &l, "commit", "-q", "--allow-empty", "-m", "init"]);
+    sh_git(&["-C", &l, "push", "-q", "origin", "HEAD:refs/heads/staging"]);
+    let wip = |name: &str| {
+        sh_git(&["-C", &l, "checkout", "-q", "--detach", "origin/staging"]);
+        std::fs::write(local.join("a.rs"), name).unwrap();
+        sh_git(&["-C", &l, "add", "a.rs"]);
+        sh_git(&["-C", &l, "commit", "-qm", "wip"]);
+        sh_git(&["-C", &l, "push", "-q", "origin", &format!("HEAD:refs/heads/wip/{name}")]);
+    };
+    for t in ["0801", "0802", "0803", "0804", "0805"] {
+        wip(&format!("sendmeter-impl-48-2026110{}-{t}00-ab12", &t[3..]));
+    }
+    for t in ["0801", "0802"] {
+        wip(&format!("sendmeter-impl-49-2026110{}-{t}00-cd34", &t[3..]));
+    }
+    let c = ctx(&d, &CONFIG.replace("/tmp/does-not-matter/sendmeter", &l));
+    append(&c.state, &Event::new(T, "sendmeter", Some(48), "closed", json!({}))).unwrap();
+    append(
+        &c.state,
+        &Event::new(T, "sendmeter", Some(49), "spawn", json!({"role": "impl"})),
+    )
+    .unwrap();
+    let _sh = FakeShed::attached(&c); // `clean` lists the fleet's lanes
+    let r = RealGit(Fake::default(), "");
+    let remote = || sh_git(&["ls-remote", "--heads", &o, "wip/*"]);
+    let (code, out) = run(&c, &r, &["wip", "prune", "sendmeter", "--dry-run"]);
+    assert_eq!(code, 0, "{out}");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        lines[..2],
+        [
+            "#48 closed: 5 wip, 4 would delete, 1 kept",
+            "#49 impl: 2 wip, 0 would delete, 2 kept"
+        ],
+        "{out}"
+    );
+    assert_eq!(remote().lines().count(), 7, "a dry run deletes nothing");
+    let (code, out) = run(&c, &r, &["clean", "sendmeter"]);
+    assert!(
+        code == 0 && out.contains("#48 closed: 5 wip, 4 would delete, 1 kept\n"),
+        "{code} {out}"
+    );
+    assert_eq!(remote().lines().count(), 7, "clean without --yes deletes nothing");
+    let (code, out) = run(&c, &r, &["wip", "prune", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.starts_with("#48 closed: 5 wip, 4 deleted, 1 kept\n"), "{out}");
+    let left = remote();
+    let left: Vec<&str> = left.lines().filter_map(|l| l.split("refs/heads/").nth(1)).collect();
+    assert_eq!(
+        left,
+        [
+            "wip/sendmeter-impl-48-20261105-080500-ab12",
+            "wip/sendmeter-impl-49-20261101-080100-cd34",
+            "wip/sendmeter-impl-49-20261102-080200-cd34"
+        ]
+    );
 }

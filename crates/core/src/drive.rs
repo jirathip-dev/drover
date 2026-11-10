@@ -675,6 +675,12 @@ pub fn drive(
             writeln!(out, "budget: {e:#}")?;
         }
     }
+    // #630/#790: a lane whose root went away restarts on the next root (the full pass only).
+    if only.is_none() && !fast {
+        if let Err(e) = crate::roots::watch(ctx, cfg, r, out) {
+            writeln!(out, "roots: {e:#}")?;
+        }
+    }
     // #714: a paused fleet's live lanes still get their outbox drained and their answers; only its pass is held.
     let live: Vec<&str> = (cfg.fleet.keys().map(String::as_str))
         .filter(|n| only.is_none_or(|o| o == *n))

@@ -29,8 +29,8 @@ fn wt(c: &herdsman::Ctx, n: u64) -> String {
     c.worktrees.join(format!("sendmeter/issue-{n}")).display().to_string()
 }
 
-/// Spawns succeed, the host is calm; #12's design worktree has a pushed commit at `at` touching two PNGs.
-fn fake(c: &herdsman::Ctx, at: u64) -> Fake {
+/// Spawns succeed, the host is calm; #12's design worktree is at the pushed commit `head`, touching two PNGs.
+fn fake(c: &herdsman::Ctx, head: &str) -> Fake {
     let w = wt(c, 12);
     Fake::default()
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
@@ -38,7 +38,7 @@ fn fake(c: &herdsman::Ctx, at: u64) -> Fake {
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
-        .reply(&format!("git -C {w} log -1"), &format!("{HEAD} {at}\n"))
+        .reply(&format!("git -C {w} log -1"), &format!("{head}\n"))
         .reply(&format!("git -C {w} rev-list"), "0\n")
         .reply(
             &format!("git -C {w} diff --name-only"),
@@ -77,7 +77,7 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
         0
     );
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "13"]).0, 0);
-    let r = fake(&c, c.now + 60);
+    let r = fake(&c, HEAD);
     drive(&c, &r);
     assert!(sh.called("run", "sendmeter-design-12") && !sh.called("run", "sendmeter-impl-12"));
     assert!(sh.called("run", "sendmeter-impl-13"), "unmarked: impl at once");
@@ -112,7 +112,7 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!(kinds(&c, "design-approved").len(), 1);
     assert!(sh.called("kill", "sendmeter-design-12"), "the design pane goes");
     // #778: approved on a busy host: impl's start stays pending with the reason, then starts once load drops.
-    let busy = fake(&c, c.now + 60).once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
+    let busy = fake(&c, HEAD).once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
     drive(&c, &busy);
     let p = herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
     assert_eq!((p.action.as_str(), p.reason.as_deref()), ("approve", Some("HOST_BUSY")));
@@ -145,7 +145,7 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
         "design-surfaces",
         "\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n",
     );
-    let r = fake(&c, c.now + 60);
+    let r = fake(&c, HEAD);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
     assert!(post(&s, "/thread", "op=new&repo=sendmeter&text=Design+first", &cookie, c.now).contains("t1"));
@@ -205,10 +205,8 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     std::fs::create_dir_all(wt(&c, 13)).unwrap();
     let w = wt(&c, 13);
     let r13 = Fake::default()
-        .reply(
-            &format!("git -C {w} log -1"),
-            &format!("{} {}\n", "e".repeat(40), c.now + 60),
-        )
+        .reply(&format!("git -C {w} log -1"), &format!("{}\n", "e".repeat(40)))
+        .reply(&format!("git -C {w} diff --name-only"), "docs/design/meter/1440.png\n")
         .reply(&format!("git -C {w} rev-list"), "0\n");
     let r13 = Both(r13, &r);
     drive(&c, &r13);
@@ -255,8 +253,8 @@ fn revise_redoes_the_design_with_the_note_in_its_brief_five_times_in_a_row() {
         0
     );
     for k in 1..=5 {
-        // Each round's design lane pushes a commit after it spawned.
-        let r = fake(&c, c.now + 60);
+        // Each round's design lane pushes a new head.
+        let r = fake(&c, &k.to_string().repeat(40));
         drive(&c, &r);
         drive(&c, &r);
         assert_eq!(state(&c, 12), "design-review", "round {k}");
@@ -265,7 +263,7 @@ fn revise_redoes_the_design_with_the_note_in_its_brief_five_times_in_a_row() {
         assert_eq!(code, 0, "{out}");
         assert_eq!(kinds(&c, "design-revise")[k - 1].str("note"), Some(note.as_str()));
         c.now += 1000;
-        drive(&c, &fake(&c, c.now + 60));
+        drive(&c, &r);
         let brief = std::fs::read_to_string(Path::new(&wt(&c, 12)).join(".brief.md")).unwrap();
         assert!(brief.contains("# ROLE: DESIGNER") && brief.contains(&note), "{brief}");
         assert_eq!((state(&c, 12).as_str(), spawned(&c, "design")), ("design", k + 1));
@@ -336,7 +334,7 @@ fn reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
     );
-    let r = RealGit(fake(&c, 0));
+    let r = RealGit(fake(&c, HEAD));
     drive(&c, &r);
     let pre = git(&w, &["rev-parse", "HEAD"]);
     assert_eq!(kinds(&c, "spawn")[0].str("sha"), Some(pre.as_str()));
@@ -396,7 +394,7 @@ fn design_off_on_a_queued_issue_lets_impl_spawn_directly() {
         .0,
         0
     );
-    let r = fake(&c, c.now + 60);
+    let r = fake(&c, HEAD);
     drive(&c, &r);
     assert!(sh.called("run", "sendmeter-impl-12") && !sh.called("run", "sendmeter-design-12"));
     assert_eq!(state(&c, 12), "impl");
@@ -416,7 +414,7 @@ fn a_paused_fleet_auto_spawns_no_design_but_the_conductor_still_can() {
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
     );
-    let r = fake(&c, c.now + 60);
+    let r = fake(&c, HEAD);
     drive(&c, &r);
     assert!(sh.all("run").is_empty(), "{:?}", sh.methods());
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design"]);
@@ -427,11 +425,11 @@ fn a_paused_fleet_auto_spawns_no_design_but_the_conductor_still_can() {
 
 const ARCHITECT: &str = "\n[fleet.sendmeter.role.architect]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
 
-/// The architect lane's pushed commit touches `docs/architecture/meter/` (put before `fake`).
-fn adr(c: &herdsman::Ctx) -> Fake {
+/// The architect lane's pushed commit `head` touches `docs/architecture/meter/` (put before `fake`).
+fn adr(c: &herdsman::Ctx, head: &str) -> Fake {
     let w = wt(c, 12);
     Fake::default().reply(
-        &format!("git -C {w} diff --name-only {HEAD} {HEAD} -- docs/architecture"),
+        &format!("git -C {w} diff --name-only {head} {head} -- docs/architecture"),
         "docs/architecture/meter/adr.md\ndocs/architecture/meter/statechart.md\n",
     )
 }
@@ -446,8 +444,8 @@ fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr(
     let (c, sh) = setup("architect-flow", ARCHITECT);
     let q = ["queue", "sendmeter", "add", "12", "--design", "--architect"];
     assert_eq!(run(&c, &Fake::default(), &q).0, 0);
-    let base = fake(&c, c.now + 60);
-    let r = Both(adr(&c), &base);
+    let base = fake(&c, HEAD);
+    let r = Both(adr(&c, HEAD), &base);
     drive(&c, &r);
     assert!(sh.called("run", "sendmeter-architect-12") && !sh.called("run", "sendmeter-design-12"));
     assert!(brief(&c).contains("# ROLE: ARCHITECT") && brief(&c).contains("docs/architecture/<slug>/"));
@@ -474,6 +472,8 @@ fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr(
     drive(&c, &r);
     assert!(sh.called("run", "sendmeter-design-12"), "the design comes next");
     assert_eq!((state(&c, 12).as_str(), spawned(&c, "impl")), ("design", 0));
+    // The design lane pushes its own head on top of the approved ADR.
+    let r = fake(&c, &"e".repeat(40));
     drive(&c, &r);
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q2", "approve"]).0, 0);
     drive(&c, &r);
@@ -499,16 +499,17 @@ fn architect_revise_reruns_it_with_the_note_and_reject_needs_a_human() {
         .0,
         0
     );
-    let base = fake(&c, c.now + 60);
-    let r = Both(adr(&c), &base);
+    let base = fake(&c, HEAD);
+    let r = Both(adr(&c, HEAD), &base);
     drive(&c, &r);
     drive(&c, &r);
     assert_eq!(state(&c, 12), "design-review");
     let note = "split the store from the sync";
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", note]).0, 0);
     c.now += 1000;
-    let base = fake(&c, c.now + 60);
-    let r = Both(adr(&c), &base);
+    let head = "e".repeat(40); // the revised ADR
+    let base = fake(&c, &head);
+    let r = Both(adr(&c, &head), &base);
     drive(&c, &r);
     assert!(brief(&c).contains("# ROLE: ARCHITECT") && brief(&c).contains(note));
     assert_eq!((state(&c, 12).as_str(), spawned(&c, "architect")), ("design", 2));
@@ -518,4 +519,45 @@ fn architect_revise_reruns_it_with_the_note_and_reject_needs_a_human() {
     assert_eq!(state(&c, 12), "needs-human");
     drive(&c, &r);
     assert_eq!((spawned(&c, "architect"), spawned(&c, "impl")), (2, 0));
+}
+
+#[test]
+fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut c, sh) = setup("design-supersede", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    // Lane 1 pushes its design while it is still at it, so no hand-off yet.
+    drive(&c, &fake(&c, HEAD));
+    sh.lane("sendmeter-design-12", "working", &wt(&c, 12));
+    drive(&c, &fake(&c, HEAD));
+    assert_eq!(state(&c, 12), "design");
+    // Lane 2 replaces it with nothing new to push: the design on the branch is still handed off, once.
+    c.now += 1000;
+    let r = fake(&c, HEAD);
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design", "--supersede"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(spawned(&c, "design"), 2);
+    let out = drive(&c, &r);
+    assert!(
+        out.contains(&format!("sendmeter #12 design-review: {HEAD:.7}")),
+        "{out}"
+    );
+    assert_eq!(
+        (state(&c, 12).as_str(), kinds(&c, "needs-decision").len()),
+        ("design-review", 1)
+    );
+    drive(&c, &r);
+    assert_eq!(kinds(&c, "design-review").len(), 1);
+    // A revise lane with no new commit leaves the head already handed off alone.
+    assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "make it blue"]).0, 0);
+    c.now += 1000;
+    drive(&c, &r);
+    drive(&c, &r);
+    assert_eq!(
+        (state(&c, 12).as_str(), kinds(&c, "design-review").len()),
+        ("design", 1)
+    );
 }
