@@ -27,7 +27,15 @@ const LANE_OPS: &[&str] = &["send", "menu", "act", "setup", "chat-about", "chat"
 /// #576: API v1's own ops a paired device only may POST (the board's are `PAIRED_OPS`).
 /// #633: and a cooee thread's conductor link.
 /// #725: and the lifeboat's posts.
-const V1_PAIRED: &[&str] = &["qset", "lesson", "conductor-attach", "conductor-detach", "lifeboat"];
+const V1_PAIRED: &[&str] = &[
+    "qset",
+    "lesson",
+    "conductor-attach",
+    "conductor-detach",
+    "lifeboat",
+    "config-check",
+    "config-edit",
+];
 
 type Res = (&'static str, &'static str, Vec<u8>);
 
@@ -94,6 +102,8 @@ impl Server<'_> {
                     },
                 )
             }
+            ("GET", Some("config")) if !paired => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
+            ("GET", Some("config")) => crate::propose::view(ctx).map_or_else(|e| done(Err(e)), |v| out("200 OK", &v)),
             ("GET", Some("host")) => out("200 OK", &roots(ctx, self.host_tab(ctx))),
             ("GET", Some("queue")) => out("200 OK", &marked(ctx, self.queue_tab(ctx))),
             ("GET", Some(x)) if x.starts_with("issue/") => {
@@ -213,6 +223,16 @@ impl Server<'_> {
                 };
                 let status = if code == "ERROR" { "400 Bad Request" } else { status };
                 reply(status, code, refusal.map_or(msg.as_str(), |r| r.1))
+            }
+            ("POST", Some(op @ ("config-check" | "config-edit"))) => {
+                let c =
+                    serde_json::from_str::<crate::propose::ConfigChange>(body).context("the body is no config change");
+                match c.and_then(|c| Ok((c, Config::kept(ctx)?))) {
+                    Ok((c, cfg)) if op == "config-check" => {
+                        crate::propose::check(ctx, &cfg, &c).map_or_else(|e| done(Err(e)), |v| out("200 OK", &v))
+                    }
+                    r => done(r.and_then(|(c, cfg)| crate::propose::edit(ctx, &cfg, self.r, &c, "owner (cooee)"))),
+                }
             }
             ("POST", Some("chat")) => done(self.chat_defaults(ctx, &fields(body))),
             ("POST", Some("close")) => done(self.close(ctx, &fields(body))),
