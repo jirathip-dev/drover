@@ -298,9 +298,10 @@ fn launch(
     r: &dyn Runner,
     ev: &[Event],
     (fleet, n): (&str, u64),
-    role: &str,
+    c: &[&str],
     start: bool,
 ) -> Result<i32> {
+    let role = c[3];
     markers(ctx, cfg, r, true); // #333: only live kicks count; a dead or old marker goes first
     let live = pending(ctx);
     // #416: one bound for a full host (its earlier lanes' worktree is there) is refused there: it holds no slot.
@@ -325,7 +326,8 @@ fn launch(
         return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting"));
     }
     crate::spawn::lane_admit(ctx, cfg.fleet(fleet)?, ev, fleet, n, role)?;
-    if let Some((code, why)) = room(ctx, cfg, r) {
+    // #792: a `--force`d respawn (a dead or silent lane) goes ahead on a busy host, as its spawn does.
+    if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && c.contains(&"--force"))) {
         return crate::gate::refused(code, why);
     }
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
@@ -940,6 +942,42 @@ fn save(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "lane-pushed", d))
 }
 
+/// #792: each silent ACP lane of `fleet` (a kick's: its issue's) nudged, respawned past `HOST_BUSY`, or escalated.
+fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: &[Value], fleet: &str) -> Result<()> {
+    let ev = read(&ctx.state)?;
+    let found = stall::silent(ctx, cfg, &ev, agents, fleet);
+    for (n, lane, a) in found.into_iter().filter(|x| KICK.get().is_none_or(|k| k == x.0)) {
+        match a {
+            stall::Silent::Nudge(why) => stall::nudge(ctx, r, out, &ev, (fleet, n), &lane, &why)?,
+            stall::Silent::Respawn(role, why) => {
+                let num = n.to_string();
+                let args = ["spawn", fleet, &num, &role, "--supersede", "--force"];
+                if act(ctx, cfg, r, out, &ev, (fleet, Some(n), "respawn"), &args)?.is_none() {
+                    let d = json!({"role": role, "agent": lane, "why": why});
+                    append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "respawned-silent", d))?;
+                }
+            }
+            stall::Silent::Escalate(why) => escalate(ctx, cfg, out, (fleet, n), &lane, "LANE_SILENT", &why)?,
+        }
+    }
+    Ok(())
+}
+
+/// A lane's needs-human card (and its alert), with why.
+fn escalate(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    lane: &str,
+    code: &str,
+    why: &str,
+) -> Result<()> {
+    writeln!(out, "{fleet} #{n} needs-human: {why}")?;
+    let d = json!({"code": code, "reason": why, "agent": lane});
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "needs-human", d))
+}
+
 fn pass(
     ctx: &Ctx,
     cfg: &Config,
@@ -1015,6 +1053,7 @@ fn pass(
     // #666: a lane the hook keeps refusing is ended and escalated at once, never left to stall.
     if !fast {
         crate::stall::refused(ctx, cfg, r, out, &read(&ctx.state)?, fleet)?;
+        silent(ctx, cfg, r, out, &agents, fleet)?;
     }
     let events = read(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
@@ -1157,6 +1196,12 @@ fn pass(
             if fast && !matches!(step, "verdict" | "merge") {
                 continue;
             }
+            // #792 (q1137): a dead lane's respawn skips HOST_BUSY; MEM_LOW and DISK_LOW still hold it.
+            let args = if step == "respawn" {
+                [&args[..], &["--force"]].concat()
+            } else {
+                args
+            };
             // #417: a verify stage the issue doesn't need (or has no recipe for) is logged passed instead.
             if step == "review" && args[3] == "verify" && !crate::verify::due(ctx, cfg, r, out, s, &pr)? {
                 continue;
@@ -1249,7 +1294,7 @@ fn pass(
             // #666: a live lane stalled or never started: superseded once, then the owner's.
             match a {
                 stall::Act::Respawn(role, why) => {
-                    let args = ["spawn", fleet, &n, &role, "--supersede"];
+                    let args = ["spawn", fleet, &n, &role, "--supersede", "--force"];
                     let code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "respawn"), &args)?;
                     if code.is_none() {
                         let d = json!({"role": role, "agent": w.lane, "why": why});
@@ -1257,12 +1302,7 @@ fn pass(
                     }
                     go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
                 }
-                stall::Act::Escalate(code, why) => {
-                    writeln!(out, "{fleet} #{n} needs-human: {why}")?;
-                    let d = json!({"code": code, "reason": why, "agent": w.lane});
-                    let e = Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d);
-                    emit(&ctx.state, cfg, e)?;
-                }
+                stall::Act::Escalate(code, why) => escalate(ctx, cfg, out, (fleet, s.issue), &w.lane, code, &why)?,
             }
         } else if s.state == "blocked" && s.last_event != "no-action" {
             // #214: a block drive has no step for is logged once, never left silent.
@@ -1964,7 +2004,7 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
         .and_then(|n| retrying(ctx, ev, fleet, n));
     let res = match (back, issue.filter(|_| kicks)) {
         (Some(why), _) => crate::gate::refused("SPAWN_BACKOFF", why),
-        (None, Some(n)) => launch(ctx, cfg, r, ev, (fleet, n), c[3], step == "start"),
+        (None, Some(n)) => launch(ctx, cfg, r, ev, (fleet, n), c, step == "start"),
         (None, None) => crate::cli::run(c, ctx, r, &mut buf),
     };
     IN_ACT.set(false);

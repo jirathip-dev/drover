@@ -27,7 +27,9 @@ pub const AUTH_TOKEN_ENV: &str = "ANTHROPIC_AUTH_TOKEN";
 pub const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
 
 /// Claude Code's signed-out errors (#302), as `CAP_PATTERN`.
-const AUTH_PATTERN: &str = "please run /login|invalid api key|oauth token has expired|not logged in";
+/// #792: a 401, or a token another login replaced (revoked), too.
+const AUTH_PATTERN: &str = "please run /login|invalid api key|oauth token has expired|not logged in|api error: 401|\
+    authentication_error|token has been revoked";
 
 /// #640: Claude Code's own lines: the last transcript block unless a `⏺` reply/tool call heads it, minus prompts.
 fn own_lines(screen: &str) -> String {

@@ -197,6 +197,12 @@ fn last_out(ctx: &Ctx, agent: &str, f: impl FnOnce(&mut Value)) -> Result<Value>
     Ok(was)
 }
 
+/// #792: ACP lane `agent`'s session as drive's intake last saw it (`turn` open, `at`, `said`, open `tools`); null if none.
+pub fn session(ctx: &Ctx, agent: &str) -> Value {
+    let t = std::fs::read_to_string(ctx.state.with_file_name("shed-out.json")).unwrap_or_default();
+    serde_json::from_str::<Value>(&t).map_or(Value::Null, |mut v| v[agent].take())
+}
+
 /// One shed event as its lane's passive `lane-state` (#529: an exit or kill is `gone`; #662: with its `cause`, and an
 /// account limit caps the lane's account); whether it was a lane's.
 pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
@@ -216,6 +222,24 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
         EventKind::Reply { text, .. } => Some((text.as_str(), false, false)),
         _ => None,
     };
+    // #792: when the session last spoke (`at`; `said`: the agent itself, not a prompt) and its tool calls still open.
+    if e.kind.is_acp() && !e.replay {
+        last_out(ctx, &e.name, |v| {
+            v["at"] = json!(ctx.now);
+            match &e.kind {
+                EventKind::Turn { .. } => {}
+                EventKind::ToolCall { id, status, .. } if matches!(status.as_str(), "pending" | "in_progress") => {
+                    (v["said"], v["tools"][id]) = (json!(ctx.now), json!(status));
+                }
+                EventKind::ToolCall { id, .. } => {
+                    v["said"] = json!(ctx.now);
+                    v["tools"].as_object_mut().map(|m| m.remove(id));
+                }
+                EventKind::Reply { .. } => (v["said"], v["tools"]) = (json!(ctx.now), Value::Null),
+                _ => v["said"] = json!(ctx.now),
+            }
+        })?;
+    }
     if let Some((t, turn, add)) = more {
         last_out(ctx, &e.name, |v| {
             let all = [v["text"].as_str().filter(|_| add).unwrap_or_default(), t].concat();
@@ -227,7 +251,7 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
                 .into_iter()
                 .rev()
                 .collect();
-            *v = json!({"text": tail, "turn": turn});
+            (v["text"], v["turn"]) = (json!(tail), json!(turn));
         })?;
         return Ok(false);
     }

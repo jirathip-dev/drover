@@ -401,6 +401,9 @@ pub const PASSIVE: &[&str] = &[
     "why-nudged",
     // #666: an ACP lane's first prompt sent again.
     "start-resent",
+    // #792: a silent ACP lane's turn cancelled and nudged; one respawned for it.
+    "nudged",
+    "respawned-silent",
     "budget-freed",
     "wip-saved",
     "wip-blocked",
