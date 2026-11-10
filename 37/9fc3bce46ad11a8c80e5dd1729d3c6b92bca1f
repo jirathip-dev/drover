@@ -1,0 +1,8 @@
+Decided: an open tool call keeps a lane "not silent" only while shed's last `resources` sample for it shows the tree at 10% of a core or more
+Because: "unless a tool call is pending whose process is still alive"
+Decided: intake stores that sample's `cpu_pct` as `cpu` on the lane's shed-out.json entry, only for lanes that already have one
+Because: crates/core/src/shed.rs:250
+Rejected: probing the tool's pid with ps on the lane's host — ACP names no pid for a tool call, and the agent's own children (MCP servers) would read as alive
+Rejected: any cpu above 0 — an idle agent runs at a few percent, and shed emits a sample whenever cpu moves by 10% of its last value
+Check: `a_pending_tool_call_whose_process_died_is_silent` fails at bb84fb2d and passes at head; the live-process test now carries a busy sample
+Owner: A lane stuck on a tool whose process died is now nudged like any silent lane; a long build that is still working is left alone.
