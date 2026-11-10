@@ -1,0 +1,8 @@
+Decided: extend drive's per-pass scratch sweep to <root>/.build/<agent>, with one finished-lane rule for both folders
+Because: "A finished lane's build folder (`<root>/.build/<agent>`, and its `.scratch/<agent>`) is removed at once"
+Because: crates/core/src/check.rs:1286
+Rejected: a separate trim pass beside trim_root — a second way to drop the same folders
+Rejected: removing unnamed .build folders — no spawn proves they belong to a finished lane
+Check: a verdict, design-review or the lane's own turn-end done after its last spawn counts as finished; a re-spawn makes it unfinished again
+Check: working agents and a held .cargo-lock still keep the folder; worktrees are untouched
+Owner: finished lanes' build folders now go on the next drive pass instead of at merge or after 7 days
