@@ -227,11 +227,7 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
     if let Some((t, turn, add)) = more {
         last_out(ctx, &e.name, |v| {
             // #785: when its first turn went in, kept until anything comes back.
-            let start = match turn && !add {
-                true if v.is_null() => json!(ctx.now),
-                true => v["start"].clone(),
-                false => Value::Null,
-            };
+            let start = (turn && !add).then(|| v.get("start").map_or(ctx.now.into(), Value::clone));
             let all = [v["text"].as_str().filter(|_| add).unwrap_or_default(), t].concat();
             let tail: String = all
                 .chars()

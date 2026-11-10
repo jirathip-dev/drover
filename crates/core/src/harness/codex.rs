@@ -70,9 +70,8 @@ impl Harness for Codex {
     /// #785: `codex login status` in the folder: `Logged in …` or `Not logged in`.
     fn signed_in(&self, r: &dyn crate::runner::Runner, dir: &Path) -> Option<bool> {
         let home = format!("CODEX_HOME={}", dir.display());
-        let o = r
-            .run("env", &crate::runner::argv(&[&home, "codex", "login", "status"]))
-            .ok()?;
+        let a = crate::runner::argv(&[&home, "codex", "login", "status"]);
+        let o = r.run("env", &a).ok()?;
         let said = o.stdout + &o.stderr;
         said.contains("ogged in").then(|| !said.contains("Not logged in"))
     }

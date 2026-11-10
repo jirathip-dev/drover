@@ -55,7 +55,7 @@ fn config_rows(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
 
 /// #707 (q855): one row for where accounts sign in from (no Keychain read, no per-account rows); a `token-file:`
 /// account's file warns when loose, missing or older than `TOKEN_DAYS`.
-fn account_rows(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
+fn account_rows(cfg: &Config, rows: &mut Vec<String>) {
     if cfg.accounts.names.is_empty() {
         return;
     }
@@ -64,22 +64,8 @@ fn account_rows(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
         |c| format!("the account_env helper `{c}`"),
     );
     rows.push(format!("✓ accounts — sign in from {src}"));
-    // #785: only an interactive status line writes a reading (ACP lanes have none); spawns skip a stale one.
-    for (name, m) in cfg
-        .accounts
-        .names
-        .keys()
-        .filter_map(|n| Some((n, crate::usage::row(ctx, n)?)))
-    {
-        let read = crate::events::age(ctx.now.saturating_sub(m.ts));
-        let fix = "only an interactive status line writes it; a window past its reset reads 0%";
-        row(
-            rows,
-            ctx.now < m.ts + 5 * 3600,
-            '!',
-            &format!("account {name} meter — read {read} ago → {fix}"),
-        );
-    }
+    // #785: ACP lanes write no meter reading; only an interactive status line does.
+    rows.push("✓ meter — `accounts` shows each reading's age; one past its reset reads 0%".into());
     let on = |n: &&&str| {
         matches!(
             crate::harness::get(n).credential(),
@@ -201,7 +187,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
                 .map(|p| format!("  {} — {} (fleet.toml:{})", p.rule, p.msg, p.line)),
         );
     }
-    account_rows(ctx, cfg, rows);
+    account_rows(cfg, rows);
     // #626: GitHub webhooks need their secret; the refused deliveries are only counted.
     let n = crate::webhook::rejected(ctx);
     let bad = match n {

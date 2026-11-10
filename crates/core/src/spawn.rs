@@ -970,11 +970,7 @@ pub fn spawn(
     // #785: a signed-out account is skipped for the role's next one.
     if on.machine.is_none() && p.account.is_some() {
         let fr = access::fallback(cfg, &read(&ctx.state)?, f.role(role)?, ctx.now)?.0;
-        p.account = access::signed(ctx, cfg, base, (fleet, &fr, o.dry_run), p.account.take())?;
-        p.token = p
-            .account
-            .as_ref()
-            .and_then(|a| access::token_file(cfg, &p.harness, &a.0));
+        access::signed(ctx, cfg, base, (fleet, &fr, o.dry_run), &mut p)?;
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
     let home = |a: Vec<String>| crate::hosts::rehome(a, hm);

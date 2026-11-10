@@ -203,27 +203,15 @@ pub type Shown = (Vec<(String, f64)>, Option<String>);
 #[allow(clippy::unnecessary_wraps)]
 pub fn shown(r: &dyn Runner, m: &Meter, _login: &str, now: u64) -> Result<Shown, String> {
     let mut parts = vec![];
-    let read = now.saturating_sub(m.ts);
-    let read = if read < 60 {
-        String::new()
-    } else {
-        format!(", read {} ago", age(read))
-    };
+    let read = Some(now.saturating_sub(m.ts)).filter(|s| *s >= 60);
+    let read = read.map_or(String::new(), |s| format!(", read {} ago", age(s)));
     // #785: a window past its reset reads as reset (0%).
-    if let Some((p, t)) = m.session {
-        let (p, s) = if t > now {
-            (p, format!("resets {}", age(t - now)))
-        } else {
-            (0.0, "reset".into())
-        };
+    let live = |(p, t): (f64, u64), when: String| (t > now).then(|| (p, format!("resets {when}")));
+    let live = |w, when| live(w, when).unwrap_or((0.0, "reset".into()));
+    if let Some((p, s)) = m.session.map(|w| live(w, age(w.1.saturating_sub(now)))) {
         parts.push((format!("session {p:.0}% ({s}{read})"), p));
     }
-    if let Some((p, t)) = m.week {
-        let (p, s) = if t > now {
-            (p, format!("resets {}", date(r, t, "+%a %H:%M")))
-        } else {
-            (0.0, "reset".into())
-        };
+    if let Some((p, s)) = m.week.map(|w| live(w, date(r, w.1, "+%a %H:%M"))) {
         parts.push((format!("week {p:.0}% ({s})"), p));
     }
     let pace = m.week.filter(|w| w.1 > now).and_then(|w| out_at(w, now)).map(|t| {

@@ -986,11 +986,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     };
     p.env.insert("HERDSMAN_THREAD".into(), id.into());
     // #683: the conductor runs on this host: its account's env is its sign-in.
-    p.account = crate::access::signed(ctx, cfg, r, (fleet, &role, false), p.account.take())?;
-    p.token = p
-        .account
-        .as_ref()
-        .and_then(|a| crate::access::token_file(cfg, &p.harness, &a.0));
+    crate::access::signed(ctx, cfg, r, (fleet, &role, false), &mut p)?;
     // #608: a shed-acp fleet's conductor is an ACP session under the same guard as its lanes (#565), or none at all.
     let shed = cfg.shed_for(fleet).filter(|b| b.acp.is_some());
     let acp = match shed.map(|b| (b.acp.clone().unwrap_or_default(), herdr::Shed(b))) {

@@ -282,47 +282,40 @@ pub fn account_env(cfg: &Config, r: &dyn Runner, harness: &str, name: &str) -> R
     }
 }
 
-/// #785: account `a` with its env, signed in: one `account_env` calls signed out (exit 3) or, with none, whose folder
-/// its CLI's status command does rests `account-signed-out` (its one owner alert names the sign-in) and the role's
-/// next account is tried. A dry run asks no CLI and logs nothing.
+/// #785: `p`'s account with its env and token, signed in: one signed out (`account_env` exit 3, else its CLI's status
+/// command) rests `account-signed-out` (one owner alert) for the role's next. A dry run asks no CLI, logs nothing.
 pub fn signed(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
     (fleet, role, dry): (&str, &Role, bool),
-    mut a: Option<Account>,
-) -> Result<Option<Account>> {
-    let h = crate::harness::get(&role.harness);
+    p: &mut crate::spawn::Plan,
+) -> Result<()> {
+    let (h, mut a) = (crate::harness::get(&role.harness), p.account.take());
     let ask = !dry && cfg.accounts.account_env.is_none();
     while let Some((name, env)) = a.as_mut() {
         let got = account_env(cfg, r, &role.harness, name);
         let out = match &got {
             Ok(got) => folder(&role.harness, got)
                 .filter(|f| ask && h.signed_in(r, Path::new(f.1)) == Some(false))
-                .map(|(var, d)| {
-                    format!(
-                        "account {name} is signed out: {var}={d} {}",
-                        h.login().unwrap_or_default()
-                    )
-                }),
+                .map(|(var, d)| format!("account {name} is signed out: {var}={d} {}", h.login().unwrap_or(""))),
             Err(e) => (e.downcast_ref::<crate::gate::Refusal>())
                 .filter(|f| f.code == "SIGNED_OUT" && !dry)
                 .map(|f| f.msg.clone()),
         };
         let Some(why) = out else {
             *env = got?;
-            return Ok(a);
+            break;
         };
         let why = format!("{why}; sign it in, then `herdsman accounts reset {name}`");
         let d = json!({"account": name, "harness": role.harness, "meter": "sign-in check", "reason": why});
-        emit(
-            &ctx.state,
-            cfg,
-            Event::new(ctx.now, fleet, None, "account-signed-out", d),
-        )?;
+        let e = Event::new(ctx.now, fleet, None, "account-signed-out", d);
+        emit(&ctx.state, cfg, e)?;
         a = pick(ctx, cfg, &read(&ctx.state)?, role)?;
     }
-    Ok(a)
+    p.token = a.as_ref().and_then(|a| token_file(cfg, &p.harness, &a.0));
+    p.account = a;
+    Ok(())
 }
 
 /// #683: the provider's config-folder env var (`CONFIG_ENV`) and its value in `env`.
