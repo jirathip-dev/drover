@@ -1,0 +1,7 @@
+Decided: fix round: board-freeze is green at 252ba19 since q971's amendment; the red left was a stale `evidence` run from before the body named that head
+Because: q971
+Decided: merge origin/staging (#713, #709, #678, #778) for a new head, so every check runs once at it with the body naming it
+Decided: the web/dist/board.js conflict is resolved by `npm run build` on the merged web/src, never by hand
+Rejected: re-running the stale evidence run — a re-run reuses its first payload, the old body, and fails again
+Check: board-freeze, evidence and the web dist check are green at the new head; CI's rust job runs the full suite
+Owner: Brought the change up to date with staging so its checks run fresh; the board check passes now that the issue allows the unpark button.
