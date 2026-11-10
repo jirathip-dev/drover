@@ -31,6 +31,44 @@ fn setup(name: &str, harness: &str) -> herdsman::Ctx {
     c
 }
 
+/// #771: `setup` on shed-acp (#608): the fleet's own `[fleet.sendmeter.runtime]` on `b`, its conductor signed in with
+/// account C (an ACP session runs under the lane guard, #565), the profiles synced with the real binary as their hook.
+fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
+    let d = tmpdir(name);
+    let cfg = config("claude", &d).replace(
+        "[fleet.sendmeter.role.conductor]\nharness = \"claude\"",
+        "[fleet.sendmeter.role.conductor]\nharness = \"claude\"\naccount = \"C\"",
+    );
+    let cfg = format!(
+        "{cfg}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        b.sock.display()
+    );
+    let mut c = ctx(&d, &cfg);
+    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
+        "t1\n"
+    );
+    c
+}
+
+/// #771: shed's CLI answers (`shed run --acp`, `shed send`); the installed ACP agent's command is `adapter`.
+fn acp(adapter: &[&str]) -> Fake {
+    let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
+    Fake::default()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed run", "")
+        .reply("shed send", "")
+}
+
+/// The `shed run` and `shed send` calls `f` got, in order.
+fn shed_calls(f: &Fake) -> Vec<String> {
+    let calls = f.calls.borrow();
+    let ours = |c: &&String| c.starts_with("shed run") || c.starts_with("shed send");
+    calls.iter().filter(ours).cloned().collect()
+}
+
 fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
     herdsman::Ctx { now, ..c.clone() }
 }
@@ -71,11 +109,111 @@ fn start_line(r: &Fake) -> String {
 }
 
 #[test]
-fn a_thread_starts_sleeps_when_idle_and_resumes_its_session_with_history() {
-    let c = setup("conductor-life", "claude");
+fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
+    let b = FakeShed::new();
+    let c = acp_setup("conductor-life", &b);
+    let f = acp(&["env"]);
+    let cli = b.cli(&f);
+    let (code, out) = run(&c, &cli, &["thread", "say", "t1", "what should #12 cover?"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "t1: -> conductor-t1\n"),
+        "{:?}",
+        f.calls.borrow()
+    );
+    let dir = c.state.with_file_name("conductor").join("t1");
+    let calls = shed_calls(&f);
+    let head = format!(
+        "shed run --acp claude-acp --policy allow --name conductor-t1 --cwd {} ",
+        dir.display()
+    );
+    assert!(calls[0].starts_with(&head), "{calls:?}");
+    let st = &kinds(&c, "conductor-start")[0];
+    assert_eq!(
+        (st.str("runtime"), st.data["resumed"].clone()),
+        (Some("shed-acp"), json!(false))
+    );
+    let thread = dir.join(".thread.md");
+    let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
+    // The brief, then the kick pointing at the thread file, then the line: the session's first prompt.
+    let first = format!(
+        "shed send conductor-t1 {}\n\nThe thread so far is in {}, the last message new.\n\n[t1] owner: what should #12 cover?",
+        brief.trim_end(),
+        thread.display()
+    );
+    assert_eq!(calls[1..], [first]);
+    assert_eq!(
+        std::fs::read_to_string(&thread).unwrap(),
+        "owner: what should #12 cover?\n"
+    );
+    for want in [
+        "# ROLE: CONDUCTOR",
+        "Thread: t1, Grill #12",
+        "Grill before filing.",
+        "The owner reads on a phone.",
+        "in a ``` fenced block, one block per command group",
+    ] {
+        assert!(brief.contains(want), "{want}: {brief}");
+    }
+    let env = cli.out.borrow().concat();
+    assert!(env.lines().any(|l| l == "HERDSMAN_LANE=sendmeter:-:conductor"), "{env}");
+
+    let (code, out) = run(
+        &c,
+        &Fake::default(),
+        &["thread", "reply", "t1", "Scope and tests. Which first?"],
+    );
+    assert_eq!(code, 0, "{out}");
+
+    // Awake: the next message is typed into the same session.
+    let f = acp(&["echo"]);
+    let c2 = at(&c, NOW + 60);
+    assert_eq!(run(&c2, &b.cli(&f), &["thread", "say", "t1", "scope"]).0, 0);
+    assert_eq!(shed_calls(&f), ["shed send conductor-t1 [t1] owner: scope"]);
+
+    // Quiet under 30 min, or working: it stays up.
+    let (code, out) = run(&at(&c, NOW + 60 + 29 * 60), &b.cli(&f), &["check"]);
+    assert_eq!(code, 0, "{out}");
+    b.set("conductor-t1", |t| t["reported"] = json!({"state": "working"}));
+    let (code, out) = run(&at(&c, NOW + 60 * 60), &b.cli(&f), &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(kinds(&c, "conductor-sleep").is_empty());
+    assert!(!b.called("kill", "conductor-t1"), "{:?}", b.methods());
+    b.set("conductor-t1", |t| t["reported"] = json!({"state": "idle"}));
+    assert_eq!(run(&at(&c, NOW + 60 + 31 * 60), &b.cli(&f), &["check"]).0, 0);
+    assert!(b.called("kill", "conductor-t1"), "{:?}", b.methods());
+    assert_eq!(kinds(&c, "conductor-sleep")[0].str("why"), Some("idle"));
+
+    // Asleep: the next message starts a fresh session (shed's bridge resumes none) pointed at the thread so far.
+    let f = acp(&["echo"]);
+    assert_eq!(
+        run(&at(&c, NOW + 3600), &b.cli(&f), &["thread", "say", "t1", "tests first"]).0,
+        0
+    );
+    let calls = shed_calls(&f);
+    assert!(calls[0].starts_with(&head), "{calls:?}");
+    assert!(calls[1].ends_with("[t1] owner: tests first"), "{calls:?}");
+    assert_eq!(kinds(&c, "conductor-start")[1].data["resumed"], json!(false));
+    assert_eq!(
+        std::fs::read_to_string(&thread).unwrap(),
+        "owner: what should #12 cover?\nconductor: Scope and tests. Which first?\nowner: scope\nowner: tests first\n"
+    );
+
+    let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
+    assert_eq!(
+        show,
+        "t1 sendmeter: Grill #12\nowner: what should #12 cover?\nconductor: Scope and tests. Which first?\n\
+         owner: scope\nowner: tests first\n"
+    );
+}
+
+/// herdr-only (#721 deletes it): a claude conductor in a herdr pane starts with its own session id and, asleep,
+/// resumes that session with the message itself as the kick.
+#[test]
+fn a_herdr_conductor_resumes_its_session() {
+    let c = setup("conductor-resume", "claude");
     let r = herdr(NO_AGENTS);
-    let (code, out) = run(&c, &r, &["thread", "say", "t1", "what should #12 cover?"]);
-    assert_eq!((code, out.as_str()), (0, "t1: -> conductor-t1\n"));
+    assert_eq!(run(&c, &r, &["thread", "say", "t1", "what should #12 cover?"]).0, 0);
     let dir = c.state.with_file_name("conductor").join("t1");
     assert!(r.called(&format!(
         "herdr workspace create --cwd {} --label conductor-t1",
@@ -90,57 +228,22 @@ fn a_thread_starts_sleeps_when_idle_and_resumes_its_session_with_history() {
         first.contains("--append-system-prompt-file") && !first.contains("--resume"),
         "{first}"
     );
-    let thread = dir.join(".thread.md");
     assert!(
         first.ends_with(&format!(
             "Read {} and act on it. The thread so far is in {}, the last message new.",
             dir.join(".brief.md").display(),
-            thread.display()
+            dir.join(".thread.md").display()
         )),
         "{first}"
     );
-    assert_eq!(
-        std::fs::read_to_string(&thread).unwrap(),
-        "owner: what should #12 cover?\n"
-    );
-    let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
-    for want in [
-        "# ROLE: CONDUCTOR",
-        "Thread: t1, Grill #12",
-        "Grill before filing.",
-        "The owner reads on a phone.",
-        "in a ``` fenced block, one block per command group",
-    ] {
-        assert!(brief.contains(want), "{want}: {brief}");
-    }
     assert!(r.called("herdr pane run w9:p1 export HERDSMAN_LANE='sendmeter:-:conductor'"));
-
-    let (code, out) = run(&c, &r, &["thread", "reply", "t1", "Scope and tests. Which first?"]);
-    assert_eq!(code, 0, "{out}");
-
-    // Awake: the next message is typed into the same agent.
     let r = herdr(&live("idle"));
-    let c2 = at(&c, NOW + 60);
-    assert_eq!(run(&c2, &r, &["thread", "say", "t1", "scope"]).0, 0);
-    assert!(
-        r.called("herdr agent prompt conductor-t1 [t1] owner: scope"),
-        "{:?}",
-        r.calls.borrow()
-    );
+    assert_eq!(run(&at(&c, NOW + 60), &r, &["thread", "say", "t1", "scope"]).0, 0);
+    assert!(r.called("herdr agent prompt conductor-t1 [t1] owner: scope"));
     assert!(r.called("herdr pane send-keys w9:p1 Enter") && !r.called("herdr agent start"));
-
-    // Quiet under 30 min, or working: it stays up.
-    let (code, out) = run(&at(&c, NOW + 60 + 29 * 60), &herdr(&live("idle")), &["check"]);
-    assert_eq!(code, 0, "{out}");
-    let (code, out) = run(&at(&c, NOW + 60 * 60), &herdr(&live("working")), &["check"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(kinds(&c, "conductor-sleep").is_empty());
     let r = herdr(&live("idle"));
     assert_eq!(run(&at(&c, NOW + 60 + 31 * 60), &r, &["check"]).0, 0);
     assert!(r.called("herdr workspace close w9"), "{:?}", r.calls.borrow());
-    assert_eq!(kinds(&c, "conductor-sleep")[0].str("why"), Some("idle"));
-
-    // Asleep: the next message resumes the same session, the message itself the kick.
     let r = herdr(NO_AGENTS);
     assert_eq!(
         run(&at(&c, NOW + 3600), &r, &["thread", "say", "t1", "tests first"]).0,
@@ -151,16 +254,10 @@ fn a_thread_starts_sleeps_when_idle_and_resumes_its_session_with_history() {
     assert!(!resumed.contains("--session-id"), "{resumed}");
     assert!(resumed.ends_with(" [t1] owner: tests first"), "{resumed}");
     assert_eq!(kinds(&c, "conductor-start")[1].data["resumed"], json!(true));
-
-    let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
-    assert_eq!(
-        show,
-        "t1 sendmeter: Grill #12\nowner: what should #12 cover?\nconductor: Scope and tests. Which first?\n\
-         owner: scope\nowner: tests first\n"
-    );
 }
 
-/// A harness that can't resume its session is pointed at the whole conversation instead.
+/// herdr-only (#721 deletes it): a harness that can't resume its herdr session is pointed at the whole conversation
+/// instead (on shed-acp every start is fresh and pointed at it, above).
 #[test]
 fn a_harness_without_resume_gets_the_history_in_its_kick() {
     let c = setup("conductor-generic", "hermes");
@@ -186,7 +283,7 @@ fn a_harness_without_resume_gets_the_history_in_its_kick() {
     );
 }
 
-/// #397: herdr refuses an `agent start` argument with a control character (`invalid_agent_argument`): no conductor
+/// herdr-only (#721 deletes it). #397: herdr refuses an `agent start` argument with a control character (`invalid_agent_argument`): no conductor
 /// start or resume, nor any lane spawn, sends one, however many lines the thread has. (dsh's launch carries no kick.)
 #[test]
 fn no_harness_starts_an_agent_with_a_control_character_in_its_argv() {
@@ -232,8 +329,12 @@ fn no_harness_starts_an_agent_with_a_control_character_in_its_argv() {
 
 #[test]
 fn a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_into_the_thread() {
-    let c = setup("conductor-ask", "claude");
-    assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "grill me"]).0, 0);
+    let b = FakeShed::new();
+    let c = acp_setup("conductor-ask", &b);
+    assert_eq!(
+        run(&c, &b.cli(&acp(&["echo"])), &["thread", "say", "t1", "grill me"]).0,
+        0
+    );
     let ask = [
         "ask",
         "sendmeter",
@@ -271,14 +372,10 @@ fn a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_int
     );
 
     // The tap (`answer`) types the DECISION into the thread's conductor and logs it in the thread.
-    let r = herdr(&live("idle"));
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    let f = acp(&["echo"]);
+    let (code, out) = run(&c, &b.cli(&f), &["answer", "sendmeter", "q1", "1"]);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: small -> conductor-t1\n"));
-    assert!(
-        r.called("herdr agent prompt conductor-t1 DECISION q1: small"),
-        "{:?}",
-        r.calls.borrow()
-    );
+    assert_eq!(shed_calls(&f), ["shed send conductor-t1 DECISION q1: small"]);
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.ends_with(
@@ -298,8 +395,10 @@ fn a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_int
 fn a_thread_needs_a_conductor_or_impl_role_and_spawn_never_starts_one() {
     let no_impl = CONFIG.replace("[fleet.sendmeter.role.impl]", "[fleet.sendmeter.role.build]");
     let c = ctx(&tmpdir("conductor-none"), &no_impl);
+    let b = FakeShed::new();
+    b.attach(&c);
     assert_eq!(run(&c, &Fake::default(), &["thread", "new", "all", "Cross-repo"]).0, 0);
-    let (code, out) = run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "hi"]);
+    let (code, out) = run(&c, &Fake::default(), &["thread", "say", "t1", "hi"]);
     assert!(code == 3 && out.contains("REFUSED NO_CONDUCTOR"), "{out}");
     let (code, out) = run(&c, &Fake::default(), &["spawn", "sendmeter", "12", "conductor"]);
     assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");

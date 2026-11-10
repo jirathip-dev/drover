@@ -10,8 +10,8 @@ use serde_json::{json, Value};
 const T: u64 = 1_000_000;
 
 /// The log: impl #5 (newer than the conductors), threads t6 (awake), t7 (`all`, awake) and t8 (asleep), plus t9
-/// that never started a conductor. herdr runs the impl, both awake conductors and two agents herdsman never started.
-fn setup(name: &str) -> (herdsman::Ctx, Value) {
+/// that never started a conductor. #771: shed runs the impl, both awake conductors and two agents herdsman never started.
+fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     let cfg = format!(
         "{CONFIG}\n[fleet.herdsman]\nrepo = \"o/herdsman\"\nlocal = \"/p/herdsman\"\nintegration = \"staging\"\n"
     );
@@ -27,7 +27,8 @@ fn setup(name: &str) -> (herdsman::Ctx, Value) {
         ("t8", "herdsman", "Old chat", 900_000),
     ] {
         ev(ts, fleet, None, "thread-new", json!({"thread": id, "title": title}));
-        let d = json!({"thread": id, "agent": format!("conductor-{id}"), "pane": "w9:p1", "harness": "claude", "model": "opus"});
+        let agent = format!("conductor-{id}");
+        let d = json!({"thread": id, "agent": agent, "pane": agent, "harness": "claude", "model": "opus"});
         ev(ts, fleet, None, "conductor-start", d);
     }
     ev(
@@ -44,19 +45,29 @@ fn setup(name: &str) -> (herdsman::Ctx, Value) {
         "thread-new",
         json!({"thread": "t9", "title": "Never started"}),
     );
-    let agents = json!([
-        {"name": "herdsman-impl-5", "agent_status": "idle", "pane_id": "w1:p1", "cwd": "/x"},
-        {"name": "conductor-t6", "agent_status": "idle", "pane_id": "w6:p1", "cwd": "/x"},
-        {"name": "conductor-t7", "agent_status": "working", "pane_id": "w7:p1", "cwd": "/x"},
-        {"name": "conductor-t99", "agent_status": "idle", "pane_id": "w8:p1", "cwd": "/x"},
-        {"agent": "codex", "agent_status": "idle", "pane_id": "w4:p1", "cwd": "/Users/me/side", "workspace_id": "w4"},
-    ]);
-    (c, agents)
+    let b = FakeShed::new();
+    b.attach(&c);
+    for (name, status) in [
+        ("herdsman-impl-5", "idle"),
+        ("conductor-t6", "idle"),
+        ("conductor-t7", "working"),
+        ("conductor-t99", "idle"),
+    ] {
+        b.lane(name, status, "/x");
+    }
+    // A codex session another fleet's herdsman started on the same shed (no fleet of this config).
+    b.add("side", json!({"fleet": "side-project", "harness": "codex"}));
+    b.set("side", |t| {
+        t["cwd"] = json!("/Users/me/side");
+        t["reported"] = json!({"state": "idle"});
+    });
+    (c, b)
 }
 
 #[test]
 fn conductors_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed() {
-    let (c, agents) = setup("conductor-lanes");
+    let (c, b) = setup("conductor-lanes");
+    let agents = herdsman::herdr::agents(&b.on(&Fake::default())).unwrap();
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     let events = read(&c.state).unwrap();
     let st = herdsman::events::fold(&events);
@@ -66,7 +77,7 @@ fn conductors_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed(
         &c.worktrees,
         &events,
         &st,
-        agents.as_array().unwrap(),
+        &agents,
         &Default::default(),
     );
     let row = |l: &herdsman::lanes::Lane| {
@@ -81,6 +92,7 @@ fn conductors_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed(
             l.issue,
         )
     };
+    // In shed's order (by name), the asleep one last.
     let got: Vec<_> = lanes.iter().map(row).collect();
     let r = |f: &str, n: &str, role: &str, st: &str, m: &str, t: &str, i| {
         (f.into(), n.into(), role.into(), st.into(), m.into(), t.into(), i)
@@ -88,7 +100,6 @@ fn conductors_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed(
     assert_eq!(
         got,
         [
-            r("herdsman", "herdsman-impl-5", "impl", "idle", "sonnet", "", Some(5)),
             r(
                 "herdsman",
                 "Conductor-run design lanes · t6",
@@ -101,7 +112,8 @@ fn conductors_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed(
             r("all", "Every repo · t7", "conductor", "working", "opus", "t7", None),
             // A `conductor-<id>` name with no such thread in the log is no lane of herdsman's.
             r("", "conductor-t99", "other", "idle", "", "", None),
-            r("", "w4", "other", "idle", "", "", None),
+            r("herdsman", "herdsman-impl-5", "impl", "idle", "sonnet", "", Some(5)),
+            r("", "side", "other", "idle", "", "", None),
             r("herdsman", "Old chat · t8", "conductor", "asleep", "opus", "t8", None),
         ]
     );
@@ -131,15 +143,15 @@ fn conductors_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed(
         ["Conductor-run design lanes · t6", "Old chat · t8", "herdsman-impl-5"]
     );
     assert_eq!(names("working", "all repos"), ["Every repo · t7"]);
-    assert_eq!(names("idle", "Others"), ["conductor-t99", "w4"]);
+    assert_eq!(names("idle", "Others"), ["conductor-t99", "side"]);
 }
 
 /// The Lanes tab's HTML: each conductor row carries its thread (the tap target), an asleep one is gone (dimmed).
 #[test]
 fn the_lanes_tab_renders_conductor_rows_with_their_thread() {
-    let (c, agents) = setup("conductor-lanes-page");
-    let list = json!({"result": {"agents": agents}}).to_string();
-    let r = Fake::default().reply("herdr agent list", &list);
+    let (c, b) = setup("conductor-lanes-page");
+    let f = Fake::default();
+    let r = b.on(&f);
     let s = Server::new(&c, &r, None);
     let page = with_queue(
         &String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)),
@@ -176,13 +188,13 @@ fn a_tap_on_a_conductor_row_opens_its_thread_in_the_chat_tab() {
         eprintln!("skipping: no swift/WebKit here");
         return;
     }
-    let (c, agents) = setup("conductor-lanes-tap");
-    let list = json!({"result": {"agents": agents}}).to_string();
+    let (c, b) = setup("conductor-lanes-tap");
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap().to_string();
     let at = addr.clone();
     std::thread::spawn(move || {
-        let r = Fake::default().reply("herdr agent list", &list);
+        let f = Fake::default();
+        let r = b.on(&f);
         let s = Server::new(&c, &r, Some(at));
         for mut st in l.incoming().flatten() {
             let mut buf = [0u8; 8192];

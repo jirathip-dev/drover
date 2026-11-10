@@ -30,19 +30,38 @@ fn setup(name: &str) -> herdsman::Ctx {
     ctx(&tmpdir(name), &text)
 }
 
-/// herdr ready to start a conductor in a new workspace; `which hermes` finds it (doctor's harness row).
-fn host() -> Fake {
-    Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
+/// #771: `setup` on shed-acp (#608): the fleet's own runtime on `b`, its impl role (so its default conductor) on claude
+/// signed in with account C (an ACP session runs under the lane guard, #565), the profiles synced with the real binary
+/// as their hook.
+fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
+    let text = CONFIG
+        .replace(
+            "profile = \"fleet-rev\"\n",
+            "profile = \"fleet-rev\"\nmodel = \"sonnet\"\n",
         )
-        .reply("herdr pane", "")
-        .reply("herdr agent start", "")
-        .reply("herdr agent wait", "")
-        .reply("herdr agent prompt", "")
-        .reply("which hermes", "/usr/local/bin/hermes\n")
+        .replace(
+            "harness  =  \"hermes\"    # toggled in tests",
+            "harness = \"claude\"\naccount = \"C\"",
+        );
+    let text = format!(
+        "{text}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        b.sock.display()
+    );
+    let mut c = ctx(&tmpdir(name), &text);
+    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    c
+}
+
+/// shed's CLI answers (`shed run --acp`, `shed send`; the installed ACP agent runs `echo`); `which claude` finds it
+/// (doctor's harness row).
+fn host() -> Fake {
+    let agents =
+        serde_json::json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
+    Fake::default()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed run", "")
+        .reply("shed send", "")
+        .reply("which claude", "/usr/local/bin/claude\n")
 }
 
 fn starts(c: &herdsman::Ctx) -> Vec<Event> {
@@ -50,27 +69,32 @@ fn starts(c: &herdsman::Ctx) -> Vec<Event> {
     all.filter(|e| e.kind == "conductor-start").collect()
 }
 
+/// The conductor's `shed run --acp` line.
 fn start_line(r: &Fake) -> String {
     let calls = r.calls.borrow();
-    let start = calls.iter().find(|c| c.starts_with("herdr agent start conductor-"));
+    let start = calls.iter().find(|c| c.starts_with("shed run --acp claude-acp"));
     start.cloned().unwrap_or_default()
 }
 
 #[test]
 fn a_fleet_without_a_conductor_role_starts_one_on_its_impl_role_from_the_board() {
-    let c = setup("cdef-start");
+    let b = FakeShed::new();
+    let c = acp_setup("cdef-start", &b);
     // `profiles sync` always writes the default conductor's profile.
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let profile = c.config.with_file_name("claude").join("lane-conductor");
     assert!(profile.join("settings.json").exists());
-    let r = host();
+    let f = host();
+    let cli = b.cli(&f);
+    let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Grill+%2312", &cookie);
     assert!(res.ends_with("\r\n\r\nt1 started\n"), "{res}");
     let st = &starts(&c)[0];
-    assert_eq!((st.str("harness"), st.str("model")), (Some("hermes"), Some("opus")));
-    assert!(start_line(&r).contains("-p lane-conductor"), "{}", start_line(&r));
+    assert_eq!((st.str("harness"), st.str("model")), (Some("claude"), Some("opus")));
+    let lane = profile.join("settings.json");
+    assert!(start_line(&f).contains(&*lane.to_string_lossy()), "{}", start_line(&f));
     // The conductor answers with `thread reply`; `thread show` reads it back.
     let (code, out) = run(&c, &Fake::default(), &["thread", "reply", "t1", "Scope first."]);
     assert_eq!(code, 0, "{out}");
@@ -83,9 +107,13 @@ fn a_fleet_without_a_conductor_role_starts_one_on_its_impl_role_from_the_board()
 
 #[test]
 fn a_conductor_choice_in_config_writes_its_table_after_a_backup_and_the_next_start_uses_it() {
-    let c = setup("cdef-set");
+    let b = FakeShed::new();
+    let c = acp_setup("cdef-set", &b);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let orig = std::fs::read_to_string(&c.config).unwrap();
-    let r = host();
+    let f = host();
+    let cli = b.cli(&f);
+    let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let sheet = config_sheet(&s);
     assert!(
@@ -110,7 +138,7 @@ fn a_conductor_choice_in_config_writes_its_table_after_a_backup_and_the_next_sta
         "{res}"
     );
     let want = format!(
-        "{orig}\n[fleet.sendmeter.role.conductor]\nharness = \"hermes\"\nmodel = \"sonnet\"\nprofile = \"lane-conductor\"\n"
+        "{orig}\n[fleet.sendmeter.role.conductor]\naccount = \"C\"\nharness = \"claude\"\nmodel = \"sonnet\"\nprofile = \"lane-conductor\"\n"
     );
     assert_eq!(
         std::fs::read_to_string(&c.config).unwrap(),
@@ -132,14 +160,18 @@ fn a_conductor_choice_in_config_writes_its_table_after_a_backup_and_the_next_sta
     let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Next", &cookie);
     assert!(res.ends_with("t1 started\n"), "{res}");
     assert_eq!(starts(&c)[0].str("model"), Some("sonnet"));
-    assert!(start_line(&r).contains("-p lane-conductor"));
+    let lane = c.config.with_file_name("claude").join("lane-conductor/settings.json");
+    let start = start_line(&f);
+    assert!(start.contains(&*lane.to_string_lossy()), "{start}");
+    assert!(start.contains("ANTHROPIC_MODEL='sonnet'"), "{start}");
 }
 
 #[test]
 fn a_conductor_choice_that_fails_doctor_is_refused_and_leaves_fleet_toml_alone() {
     let c = setup("cdef-doctor");
     let orig = std::fs::read(&c.config).unwrap();
-    let r = host();
+    // `which hermes` finds it (doctor's harness row).
+    let r = Fake::default().reply("which hermes", "/usr/local/bin/hermes\n");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let sheet = config_sheet(&s);

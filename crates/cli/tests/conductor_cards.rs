@@ -46,6 +46,44 @@ fn setup(name: &str, role_extra: &str, extra: &str) -> herdsman::Ctx {
     c
 }
 
+/// #771: `setup` on shed-acp (#608): the fleet's own runtime on `b`, its conductor signed in (an ACP session runs under
+/// the lane guard, #565: with no `role_extra`, on account C), the profiles synced with the real binary as their hook.
+fn acp_setup(name: &str, role_extra: &str, extra: &str, b: &FakeShed) -> herdsman::Ctx {
+    let d = tmpdir(name);
+    let role = if role_extra.is_empty() {
+        "account = \"C\""
+    } else {
+        role_extra
+    };
+    let accounts = if extra.contains("[accounts]") {
+        ""
+    } else {
+        "[accounts]\nC = \"C\"\n"
+    };
+    let cfg = format!(
+        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\n{role}\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n{accounts}{extra}",
+        b.sock.display()
+    );
+    let mut c = ctx(&d, &cfg);
+    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).1,
+        "t1\n"
+    );
+    c
+}
+
+/// #771: shed's CLI answers (`shed run --acp`, `shed send`); the installed ACP agent's command is `adapter`.
+fn acp(adapter: &[&str]) -> Fake {
+    let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
+    Fake::default()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed run", "")
+        .reply("shed send", "")
+}
+
 /// herdr with `agents` live, ready to start a conductor or type into one.
 fn herdr(agents: &str) -> Fake {
     Fake::default()
@@ -68,7 +106,8 @@ fn live() -> String {
 
 #[test]
 fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_doctor_check() {
-    let c = setup("cards-config", "", "");
+    let sh = FakeShed::new();
+    let c = acp_setup("cards-config", "", "", &sh);
     let old = std::fs::read_to_string(&c.config).unwrap();
     let new = old.replace("model = \"opus\"", "model = \"sonnet\"");
     let file = c.config.with_file_name("proposed.toml");
@@ -97,11 +136,18 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
     );
 
     assert_eq!(
-        run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "use sonnet for impl"]).0,
+        run(
+            &c,
+            &sh.cli(&acp(&["echo"])),
+            &["thread", "say", "t1", "use sonnet for impl"]
+        )
+        .0,
         0
     );
-    let r = herdr(&live());
-    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let r = acp(&["echo"]);
+    let cli = sh.cli(&r);
+    let on = sh.on(&cli);
+    let s = Server::new(&c, &on, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let page = chat(&s, &cookie, T);
     assert!(page.contains("<pre class=df>  [fleet.sendmeter.role.impl]\n- model = &quot;opus&quot;\n+ model = &quot;sonnet&quot;\n</pre>"), "{page}");
@@ -139,8 +185,9 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
             && page.contains(" class=\"qs note\">config c1 applied by owner, backup kept, doctor ")
     );
     assert!(
-        r.called("herdr agent prompt conductor-t1 [t1] system: config c1 applied by owner"),
-        "the conductor learns it"
+        r.called("shed send conductor-t1 [t1] system: config c1 applied by owner"),
+        "the conductor learns it: {:?}",
+        r.calls.borrow()
     );
     assert!(body(&req(&s, "/thread", "op=config&id=c1&act=discard", &cookie, T + 30)).contains("ALREADY_SETTLED"));
 
@@ -164,6 +211,8 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
     assert!(std::fs::read_to_string(&c.config).unwrap().ends_with("# hand edit\n"));
 }
 
+/// herdr-only (#721 deletes it): the switch resumes the same herdr session (`--resume`); on shed-acp every start is a
+/// fresh session (below).
 #[test]
 fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session() {
     let accounts = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n";
@@ -216,14 +265,71 @@ fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session
 }
 
 #[test]
-fn a_signed_out_conductor_gets_a_sign_in_card_for_its_own_login() {
+fn a_usage_limit_restarts_the_conductor_on_the_next_account() {
+    let accounts = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n";
+    let sh = FakeShed::new();
+    let c = acp_setup(
+        "cards-switch-acp",
+        "fallback = [\"claude:A\", \"claude:B\"]",
+        accounts,
+        &sh,
+    );
+    assert_eq!(
+        run(&c, &sh.cli(&acp(&["echo"])), &["thread", "say", "t1", "scope #12"]).0,
+        0
+    );
+    run(&c, &Fake::default(), &["thread", "reply", "t1", "Small or full?"]);
+    let first = kinds(&c, "conductor-start")[0].clone();
+    assert_eq!(first.str("account"), Some("A"));
+
+    sh.screen("conductor-t1", "You've hit your limit · resets 6:40pm");
+    let r = acp(&["env"]);
+    let cli = sh.cli(&r);
+    let (code, out) = run(
+        &herdsman::Ctx {
+            now: T + 60,
+            ..c.clone()
+        },
+        &cli,
+        &["check"],
+    );
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(kinds(&c, "account-capped")[0].str("account"), Some("A"));
+    assert!(sh.called("kill", "conductor-t1"), "{:?}", sh.methods());
+    let next = &kinds(&c, "conductor-start")[1];
+    assert_eq!(
+        (next.str("account"), next.str("runtime")),
+        (Some("B"), Some("shed-acp"))
+    );
+    assert_eq!(next.data["resumed"], json!(false));
+    assert_eq!(r.count("shed run --acp claude-acp"), 1, "{:?}", r.calls.borrow());
+    // #683: B's own login folder, no token.
+    let b = herdsman::config::home().join(".config/herdsman/accounts/B");
+    let env = cli.out.borrow().concat();
+    assert!(
+        env.lines().any(|l| l == format!("CLAUDE_CONFIG_DIR={}", b.display())),
+        "on B: {env}"
+    );
+    assert!(!env.contains("CLAUDE_CODE_OAUTH_TOKEN"), "{env}");
+    let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
+    assert!(
+        show.contains(
+            "owner: scope #12\nconductor: Small or full?\nsystem: switched to claude:B (claude:A resting until "
+        ),
+        "{show}"
+    );
+}
+
+/// herdr-only (#721 deletes it): a conductor with no account (no ACP session starts without one, #565) signed out:
+/// nothing to switch to, still a [sign in] for `claude`.
+#[test]
+fn a_signed_out_conductor_with_no_account_gets_a_sign_in_card_for_the_harness_login() {
     let signed_out = "Invalid API key · Please run /login";
     let page = |c: &herdsman::Ctx| {
         let r = herdr(NO_AGENTS);
         let s = Server::new(c, &r, Some(ADDR.into()));
         chat(&s, &pair(&s, c, "Mozilla/5.0 (iPhone)", T), T + 120)
     };
-    // The default conductor (no account, no fallback): nothing to switch to, still a [sign in] for `claude`.
     let c = setup("cards-signin-plain", "", "");
     assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
     let later = herdsman::Ctx {
@@ -255,33 +361,60 @@ fn a_signed_out_conductor_gets_a_sign_in_card_for_its_own_login() {
         1,
         "once"
     );
+}
 
-    // On account A with a `claude A` login configured: the card opens that login, and B carries on.
+#[test]
+fn a_signed_out_conductor_gets_a_sign_in_card_for_its_own_login() {
+    let signed_out = "Invalid API key · Please run /login";
+    let sh = FakeShed::new();
+    let page = |c: &herdsman::Ctx| {
+        let f = Fake::default();
+        let r = sh.on(&f);
+        let s = Server::new(c, &r, Some(ADDR.into()));
+        chat(&s, &pair(&s, c, "Mozilla/5.0 (iPhone)", T), T + 120)
+    };
+    // On account A with a `claude A` login configured: the card opens that login (once), and B carries on.
     let extra = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n\n[[setup]]\nname = \"claude A\"\ncmd = \"claude /login\"\nenv = {CLAUDE_CONFIG_DIR = \"~/accounts/A\"}\n";
-    let c = setup("cards-signin-account", "fallback = [\"claude:A\", \"claude:B\"]", extra);
-    assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
-    let r = herdr(&live()).reply("herdr pane read w9:p1", signed_out);
+    let c = acp_setup(
+        "cards-signin-account",
+        "fallback = [\"claude:A\", \"claude:B\"]",
+        extra,
+        &sh,
+    );
+    assert_eq!(
+        run(&c, &sh.cli(&acp(&["echo"])), &["thread", "say", "t1", "scope #12"]).0,
+        0
+    );
+    sh.screen("conductor-t1", signed_out);
     let later = herdsman::Ctx {
         now: T + 60,
         ..c.clone()
     };
-    assert_eq!(run(&later, &r, &["check"]).0, 0);
+    assert_eq!(run(&later, &sh.cli(&acp(&["echo"])), &["check"]).0, 0);
+    assert!(sh.called("kill", "conductor-t1"), "{:?}", sh.methods());
     let line = kinds(&c, "thread-msg")
         .into_iter()
         .find(|e| e.str("signin").is_some())
         .unwrap();
     assert_eq!(line.str("signin"), Some("claude A"));
     assert!(page(&c).contains("claude is signed out (account A): sign in <button type=button data-su=\"claude A\""));
-    assert_eq!(kinds(&c, "conductor-start")[1].str("account"), Some("B"));
+    let next = &kinds(&c, "conductor-start")[1];
+    assert_eq!(
+        (next.str("account"), next.str("runtime")),
+        (Some("B"), Some("shed-acp"))
+    );
+    assert_eq!(kinds(&c, "account-signed-out")[0].str("account"), Some("A"));
 }
 
 #[test]
 fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_reference_injects_at_spawn() {
     let value = "hunter2-SECRET-value";
-    let c = setup(
+    let sh = FakeShed::new();
+    let c = acp_setup(
         "cards-secret",
         "",
         "[fleet.sendmeter.env]\nAPI_KEY = \"secret:API_KEY\"\n",
+        &sh,
     );
     let bad = format!("{CONFIG}\n[fleet.sendmeter.env]\nX = \"secret:x'; rm -rf ~\"\n");
     assert!(
@@ -294,8 +427,10 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
         &["secret", "request", "t1", "API_KEY", "--why", "the search API"],
     );
     assert_eq!(code, 0, "{out}");
-    let f = herdr(NO_AGENTS);
-    let r = Shell(&f, "API_KEY", Shared::default());
+    // The ACP adapter prints the `API_KEY` its session starts with.
+    let f = acp(&["printenv", "API_KEY"]);
+    let cli = sh.cli(&f);
+    let r = sh.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let form = format!("op=secret&t=t1&name=API_KEY&act=save&value={value}");
     // Not a paired device: no card input, and the POST is refused before the keychain.
@@ -325,7 +460,7 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
     }
     assert!(show.contains("secret API_KEY set ✓ (by owner)") && !page.contains("class=chs"));
     // `secret:API_KEY` reaches the lane's own shell from the file spawn delivered: the conductor's start sourced it.
-    assert_eq!(*r.2.borrow(), [value], "{calls}");
+    assert_eq!(*cli.out.borrow(), [format!("{value}\n")], "{calls}");
     assert!(calls.contains("&& . '") && !f.inputs.borrow().iter().any(|i| i.1.contains(value)));
     assert!(
         body(&req(&s, "/thread", &form, &cookie, T + 30)).contains("NO_SUCH_REQUEST"),
@@ -340,7 +475,8 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
 /// expired, it says so.
 #[test]
 fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() {
-    let c = setup("cards-run", "", "");
+    let sh = FakeShed::new();
+    let c = acp_setup("cards-run", "", "", &sh);
     let card = |cmd: &str| {
         let args = [
             "card",
@@ -367,8 +503,10 @@ fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() 
     assert_eq!(card("git status"), "r2\n");
     assert_eq!(card("uptime"), "r3\n");
     let sha = kinds(&c, "run-card")[0].str("sha").unwrap().to_string();
-    let r = herdr(&live()).reply("sh -c", "commit 1a2b\n");
-    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let r = acp(&["echo"]).reply("sh -c", "commit 1a2b\n");
+    let cli = sh.cli(&r);
+    let on = sh.on(&cli);
+    let s = Server::new(&c, &on, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
 
     // API v1 `thread/<t>` for the paired device: the card, its sha, open for [approve]/[deny].
@@ -441,9 +579,9 @@ fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() 
     );
 }
 
-/// #702: thread t1 with a conductor reply, run card r1 (`uptime`), then another reply; its sha, the herdr fake (the
-/// run prints `load 0.42`), and a paired owner device's cookie.
-fn card_between_replies(c: &herdsman::Ctx) -> (String, Fake, String) {
+/// #702: thread t1 with a conductor reply, run card r1 (`uptime`), then another reply; its sha, the fake (the run
+/// prints `load 0.42`; shed's CLI answers), and a paired owner device's cookie.
+fn card_between_replies(c: &herdsman::Ctx, sh: &FakeShed) -> (String, Fake, String) {
     let at = |n: u64| herdsman::Ctx {
         now: T + n,
         ..c.clone()
@@ -466,8 +604,13 @@ fn card_between_replies(c: &herdsman::Ctx) -> (String, Fake, String) {
     assert_eq!(run(&at(10), &Fake::default(), &args).1, "r1\n");
     say(20, "after the card");
     let sha = kinds(c, "run-card")[0].str("sha").unwrap().to_string();
-    let r = herdr(&live()).reply("sh -c", "load 0.42\n");
-    let cookie = pair(&Server::new(c, &r, Some(ADDR.into())), c, "Mozilla/5.0 (iPhone)", T);
+    let r = acp(&["echo"]).reply("sh -c", "load 0.42\n");
+    let cookie = pair(
+        &Server::new(c, &sh.on(&r), Some(ADDR.into())),
+        c,
+        "Mozilla/5.0 (iPhone)",
+        T,
+    );
     (sha, r, cookie)
 }
 
@@ -483,9 +626,12 @@ fn pos(page: &str, w: &str) -> usize {
 /// HTML) in order, with its command, why, blast and open [approve]/[deny].
 #[test]
 fn a_run_card_between_two_replies_renders_in_order_in_the_chat_tab() {
-    let c = setup("cards-run-order", "", "");
-    let (sha, r, cookie) = card_between_replies(&c);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let sh = FakeShed::new();
+    let c = acp_setup("cards-run-order", "", "", &sh);
+    let (sha, r, cookie) = card_between_replies(&c, &sh);
+    let cli = sh.cli(&r);
+    let on = sh.on(&cli);
+    let s = Server::new(&c, &on, Some(ADDR.into()));
     let j: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, T + 60, "chat")).unwrap();
     let t = j["threads"]
         .as_array()
@@ -525,18 +671,21 @@ fn a_run_card_between_two_replies_renders_in_order_in_the_chat_tab() {
 /// tail post to the thread, rendered under it.
 #[test]
 fn a_settled_run_cards_result_renders_in_the_chat_tab() {
-    let c = setup("cards-run-result", "", "");
-    let (sha, r, cookie) = card_between_replies(&c);
+    let sh = FakeShed::new();
+    let c = acp_setup("cards-run-result", "", "", &sh);
+    let (sha, r, cookie) = card_between_replies(&c, &sh);
+    let cli = sh.cli(&r);
     let out = run(
         &herdsman::Ctx {
             now: T + 120,
             ..c.clone()
         },
-        &r,
+        &cli,
         &["card", "approve", "r1", "--sha", &sha[..12]],
     );
     assert!(out.1.contains("run r1 approved by owner"), "{out:?}");
-    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let on = sh.on(&cli);
+    let s = Server::new(&c, &on, Some(ADDR.into()));
     let all = chat(&s, &cookie, T + 130);
     let page = t1(&all);
     let order = [
