@@ -1,0 +1,5 @@
+Decided: drop the five comment lines arch-check flagged; spawn::changes keeps staging's one-line doc
+Because: crates/core/src/spawn.rs:760
+Rejected: keeping the #770 note as a second doc line — #735 allows one `///` line on a pub item and none on test fns
+Check: herdsman arch-check --base origin/staging reports 0 violations and the two #770 tests still pass
+Owner: No change to the fix itself; comment lines the CI check rejects were removed.
