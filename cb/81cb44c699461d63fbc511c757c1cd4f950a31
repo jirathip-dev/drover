@@ -1,0 +1,9 @@
+Decided: the changes job pipes the diff through scripts/board-freeze.sh with an empty spec, so its exit 1 means a board UI file changed; no second copy of the list
+Because: .github/workflows/ci.yml:182
+Decided: Playwright pinned at 1.63.0 under RUNNER_TEMP, found by NODE_PATH; the job fails if node cannot load it, so CI never skips the WebKit tests silently
+Because: .github/workflows/ci.yml:202
+Decided: webview.mjs blocks service workers: sw.js's clients.claim stalled every Playwright evaluate after load
+Because: crates/cli/tests/support/webview.mjs:75
+Rejected: keeping the service worker for the warm first paint — Playwright WebKit hangs on its claim; warm now means the HTTP cache warm
+Check: ui-webkit on ubuntu passes all three steps and uploads close-chat, close-config, close-legend and chat-kb PNGs; evidence check green at cb81cb4
+Owner: The iPhone-engine check now runs on Linux and only when a PR touches the board, so it no longer blocks every merge.
