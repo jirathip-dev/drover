@@ -28,12 +28,16 @@ pub struct Config {
     /// #298: `[runtime]`, the terminal runtime new lanes start in (docs/runtimes.md); herdr when unset.
     pub runtime: Runtime,
     /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
-    pub conductor: ConductorCfg,
+    #[serde(alias = "conductor")]
+    pub orchestrator: OrchestratorCfg,
+    /// #780: fleet.toml still names `[conductor]` or a `role.conductor` (doctor's deprecation line).
+    #[serde(skip)]
+    pub old_names: bool,
     /// #557: the Telegram bridge (#387) is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
     pub telegram: Option<toml::Value>,
     /// #345: `[service] url`, where lanes on other hosts reach `herdsman service`'s API (docs/service.md).
     pub service: ServiceCfg,
-    /// #404: `[chat]`, new threads' conductor defaults over the fleet's `role.conductor` (`conductor::defaults`).
+    /// #404: `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
     pub chat: Chat,
     /// #537: `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
     pub ci_runners: Option<CiRunners>,
@@ -55,7 +59,7 @@ impl Default for ProxyCfg {
     fn default() -> Self {
         ProxyCfg {
             port: 41990,
-            upstream: crate::harness::PROXY_UPSTREAM.into(),
+            upstream: crate::providers::proxied().map_or("", |p| p.upstream).into(),
             key_hours: 12,
         }
     }
@@ -94,7 +98,7 @@ pub struct ServiceCfg {
     pub url: Option<String>,
 }
 
-/// #404: the harness, model, effort and account(s) a new thread's conductor starts on; each unset one is the role's.
+/// #404: the harness, model, effort and account(s) a new thread's orchestrator starts on; each unset one is the role's.
 #[derive(Debug, Default, Deserialize)]
 pub struct Chat {
     pub harness: Option<String>,
@@ -108,15 +112,28 @@ pub struct Chat {
 /// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the
 /// root of the per-thread working folders (default `<state dir>/conductor`); #538: `allow`, its capability groups.
 #[derive(Debug, Default, Deserialize)]
-pub struct ConductorCfg {
+pub struct OrchestratorCfg {
     pub dir: Option<String>,
     pub instructions: Option<String>,
     pub skills: Option<String>,
     pub memory: Option<String>,
     pub allow: Option<Vec<String>>,
+    /// #780: the default orchestrator's name: free text the owner calls it, shown on its labels, never read by code.
+    pub name: Option<String>,
+    /// #780: `[orchestrator.<id>]`, more orchestrators: each its own `name` and `fleets` (overlap allowed).
+    #[serde(flatten)]
+    pub more: BTreeMap<String, Orchestrator>,
 }
 
-/// #538: each capability group a conductor may be allowed and its herdsman verbs (the hook's `group`).
+/// #780: one `[orchestrator.<id>]`: what the owner calls it and the fleets its threads may be on.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Orchestrator {
+    pub name: Option<String>,
+    pub fleets: Vec<String>,
+}
+
+/// #538: each capability group an orchestrator may be allowed and its herdsman verbs (the hook's `group`).
 pub const GROUPS: &[(&str, &str)] = &[
     ("design", "`spawn … design` or `… architect`"),
     ("clean", "`clean --yes`, `--orphans`, `--lane`"),
@@ -128,7 +145,7 @@ pub const GROUPS: &[(&str, &str)] = &[
     ("set", "`set` a role's harness, model or effort"),
 ];
 
-impl ConductorCfg {
+impl OrchestratorCfg {
     /// #538: the groups on: `allow`, else every group but `pause` and `set`.
     pub fn groups(&self) -> Vec<&str> {
         let default = || {
@@ -150,7 +167,6 @@ pub enum RuntimeKind {
     #[default]
     Herdr,
     Shed,
-    /// #565: shed running each lane as an ACP session (`acp` defaults to `claude-acp`, `acp_policy` to `allow`).
     #[serde(rename = "shed-acp")]
     ShedAcp,
     /// #455: shed's old name, accepted for one release with a warning (and a doctor row).
@@ -177,7 +193,7 @@ impl Runtime {
             acp: self
                 .acp
                 .clone()
-                .or_else(|| acp.then(crate::harness::default_acp).flatten().map(Into::into)),
+                .or_else(|| acp.then(crate::providers::default_acp).flatten().map(Into::into)),
             policy: self
                 .acp_policy
                 .clone()
@@ -432,7 +448,7 @@ pub struct Fleet {
     /// #417: globs of UI files: a PR touching one goes through the verify stage.
     #[serde(default)]
     pub ui_paths: Vec<String>,
-    /// #541: the conductor thread (`t6`) lane asks go to first; unset = the repo's most recently active thread.
+    /// #541: the orchestrator thread (`t6`) lane asks go to first; unset = the repo's most recently active thread.
     pub ask_thread: Option<String>,
     /// #565: `[fleet.<n>.runtime]`, this fleet's new lanes' runtime over the global `[runtime]` (a pilot on one fleet).
     pub runtime: Option<Runtime>,
@@ -494,13 +510,13 @@ pub struct Role {
     /// #732: unset with `agent` set, the harness whose adapter that agent is.
     #[serde(default)]
     pub harness: String,
-    /// #732: the ACP agent id its shed-acp lanes run (`claude-acp`, `codex-acp`, …) over the runtime's `acp`.
+    /// #732: the ACP agent id its shed-acp lanes run (one `shed agents` lists) over the runtime's `acp`.
     pub agent: Option<String>,
     pub profile: Option<String>,
     pub model: Option<String>,
     /// Reasoning effort, mapped per harness (`harness::effort_ok`); `[limits].effort` when unset.
     pub effort: Option<String>,
-    /// Claude lanes: the account (`[accounts]` name) to run on, or an ordered fallback list.
+    /// Lanes on `[accounts]`: the account (`[accounts]` name) to run on, or an ordered fallback list.
     pub account: Option<String>,
     #[serde(default)]
     pub accounts: Vec<String>,
@@ -517,7 +533,7 @@ pub struct Role {
     pub needs: Vec<String>,
     /// #236: the host its lanes always run on (`main`: the one without `machine`); `design` defaults to `main`.
     pub host: Option<String>,
-    /// #401: the default conductor `Config::parse` adds for a fleet without one: its impl role on `lane-conductor`.
+    /// #401: the default orchestrator `Config::parse` adds for a fleet without one: its impl role on `lane-orchestrator`.
     #[serde(skip)]
     pub default: bool,
 }
@@ -560,7 +576,7 @@ pub struct Limits {
     pub build_budget_gb: f64,
     /// #651: the scratch sweep runs on every enabled remote host too (`false`: this host only).
     pub sweep_remote: bool,
-    /// #536: where `herdsman clean` looks for stray Cargo build folders and Claude Code's per-worktree temp dirs.
+    /// #536: where `herdsman clean` looks for stray Cargo build folders and a provider's per-worktree temp dirs.
     pub stray_roots: Vec<String>,
     /// #168: `herdsman spawn` refuses `MEM_LOW` under this many GB of free + inactive memory.
     pub min_free_mem_gb: f64,
@@ -763,9 +779,13 @@ impl Config {
         let f = self.accounts.accounts_env.as_deref();
         let tg = "removed (#557): herdsman has no Telegram bridge now; drop the table".to_string();
         let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));
+        let old =
+            "renamed (#780): call it [orchestrator] and role.orchestrator; the old names are read for one release";
+        let old = self.old_names.then(|| ("[conductor]", old.to_string()));
         f.map(|f| ("[accounts].accounts_env", run(f)))
             .into_iter()
             .chain(tg)
+            .chain(old)
             .collect()
     }
 
@@ -852,7 +872,7 @@ impl Config {
         if c.runtime.kind == RuntimeKind::Berth {
             eprintln!("herdsman: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
         }
-        let levels = crate::harness::EFFORTS;
+        let levels = crate::providers::EFFORTS;
         if let Some(e) = c.limits.effort.as_deref().filter(|e| !levels.contains(e)) {
             bail!("limits.effort: \"{e}\" must be one of {levels:?}");
         }
@@ -863,18 +883,35 @@ impl Config {
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
         }
-        if let Some(g) = c.conductor.groups().iter().find(|g| !GROUPS.iter().any(|k| k.0 == **g)) {
+        if let Some((id, f)) = (c.orchestrator.more.iter())
+            .find_map(|(id, o)| Some((id, o.fleets.iter().find(|f| *f != "all" && !c.fleet.contains_key(*f))?)))
+        {
+            bail!("orchestrator.{id}.fleets: \"{f}\" is no fleet");
+        }
+        if let Some(g) = c
+            .orchestrator
+            .groups()
+            .iter()
+            .find(|g| !GROUPS.iter().any(|k| k.0 == **g))
+        {
             bail!(
-                "conductor.allow: \"{g}\" is no group; one of {:?}",
+                "orchestrator.allow: \"{g}\" is no group; one of {:?}",
                 GROUPS.iter().map(|g| g.0).collect::<Vec<_>>()
             );
         }
         let ch = &c.chat;
-        if let Some(h) = ch.harness.as_deref().filter(|h| !crate::harness::NAMES.contains(h)) {
-            bail!("chat.harness: \"{h}\" must be one of {:?}", crate::harness::NAMES);
+        if let Some(h) = ch
+            .harness
+            .as_deref()
+            .filter(|h| !crate::providers::lane_names().contains(h))
+        {
+            bail!(
+                "chat.harness: \"{h}\" must be one of {:?}",
+                crate::providers::lane_names()
+            );
         }
         if let (Some(h), Some(e)) = (&ch.harness, &ch.effort) {
-            if !crate::harness::efforts(h).contains(&e.as_str()) {
+            if !crate::providers::get(h).efforts().contains(&e.as_str()) {
                 bail!("chat.effort: harness {h} does not support effort \"{e}\"");
             }
         }
@@ -887,7 +924,12 @@ impl Config {
             bail!("chat: account '{a}' is not in [accounts]");
         }
         let mut c = c;
+        c.old_names = raw.contains_key("conductor");
         for (name, f) in &mut c.fleet {
+            if let Some(r) = f.role.remove("conductor") {
+                f.role.entry("orchestrator".into()).or_insert(r);
+                c.old_names = true;
+            }
             let mut p = f
                 .pipeline
                 .take()
@@ -912,13 +954,13 @@ impl Config {
             f.pipeline = Some(p);
         }
         for (name, f) in &mut c.fleet {
-            if let Some(r) = f.role.get("impl").filter(|_| !f.role.contains_key("conductor")) {
+            if let Some(r) = f.role.get("impl").filter(|_| !f.role.contains_key("orchestrator")) {
                 let r = Role {
-                    profile: Some("lane-conductor".into()),
+                    profile: Some("lane-orchestrator".into()),
                     default: true,
                     ..r.clone()
                 };
-                f.role.insert("conductor".into(), r);
+                f.role.insert("orchestrator".into(), r);
             }
             if !f.serial_paths.is_empty() {
                 if !f.serial.is_empty() {
@@ -942,7 +984,7 @@ impl Config {
             }
             for (role, r) in &mut f.role {
                 let id = r.agent.as_deref();
-                match (id.map(|a| (a, crate::harness::of_agent(a))), r.harness.is_empty()) {
+                match (id.map(|a| (a, crate::providers::of_agent(a))), r.harness.is_empty()) {
                     (Some((a, None)), _) => bail!("fleet.{name}.role.{role}: agent {a}: no harness adapter guards it"),
                     (Some((_, Some(h))), true) => r.harness = h.into(),
                     (Some((a, Some(h))), false) if h != r.harness => {
@@ -958,10 +1000,10 @@ impl Config {
                 if role == "orch" || role.is_empty() || !role.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                     bail!("fleet.{name}.role.{role}: a role name is letters, digits and `-`, not orch");
                 }
-                if !crate::harness::known().any(|h| h == r.harness) {
+                if !crate::providers::known().any(|h| h == r.harness) {
                     bail!(
                         "fleet.{name}.role.{role}: harness must be one of {:?}",
-                        crate::harness::NAMES
+                        crate::providers::lane_names()
                     );
                 }
                 if let Some(a) = r.account_list().iter().find(|a| !c.accounts.names.contains_key(*a)) {
@@ -969,13 +1011,13 @@ impl Config {
                 }
                 let bad = |e: &&String| {
                     let (h, a) = e.split_once(':').unwrap_or((e, ""));
-                    !crate::harness::NAMES.contains(&h) || !a.is_empty() && !c.accounts.names.contains_key(a)
+                    !crate::providers::lane_names().contains(&h) || !a.is_empty() && !c.accounts.names.contains_key(a)
                 };
                 if let Some(e) = r.fallback.iter().find(bad) {
                     bail!("fleet.{name}.role.{role}: fallback '{e}' is not harness[:account] ([accounts])");
                 }
                 if let Some(e) = r.effort_or(&c.limits) {
-                    let ok = crate::harness::efforts(&r.harness);
+                    let ok = crate::providers::get(&r.harness).efforts();
                     if !levels.contains(&e.as_str()) {
                         bail!("fleet.{name}.role.{role}: effort \"{e}\" must be one of {levels:?}");
                     }
@@ -1006,8 +1048,8 @@ impl Config {
         let of = |r: &Role| r.agent.clone().or_else(|| run.clone());
         let p = (of(i), of(v));
         let p = (
-            p.0.as_deref().and_then(crate::harness::provider),
-            p.1.as_deref().and_then(crate::harness::provider),
+            p.0.as_deref().and_then(crate::providers::vendor_of_agent),
+            p.1.as_deref().and_then(crate::providers::vendor_of_agent),
         );
         if i.agent.is_none() && v.agent.is_none() || p.0.is_none() || p.0 != p.1 {
             return Ok(());
@@ -1110,7 +1152,7 @@ impl Fleet {
         match role {
             "design" => "design",
             "architect" => "architect",
-            "conductor" => "conductor",
+            "orchestrator" => "orchestrator",
             r if self.flow().is_check(r) => "rev",
             _ => "impl",
         }

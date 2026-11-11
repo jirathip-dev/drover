@@ -44,7 +44,7 @@ pub fn lane_secs(events: &[Event], account: &str, now: u64, window: u64) -> u64 
     spawns.map(|(i, s)| end(i).saturating_sub(s.ts.max(from))).sum()
 }
 
-/// `5h 1.5 · 7d 12.0 herdsman lane-hours`: what herdsman ran, not Anthropic's quota.
+/// `5h 1.5 · 7d 12.0 herdsman lane-hours`: what herdsman ran, not the provider's quota.
 #[allow(clippy::cast_precision_loss)] // hours to one decimal; f64 is exact far past any lane's run time
 pub fn lane_hours(events: &[Event], account: &str, now: u64) -> String {
     let h = |w: u64| lane_secs(events, account, now, w) as f64 / 3600.0;
@@ -285,8 +285,12 @@ pub fn row(ctx: &Ctx, name: &str) -> Option<Meter> {
 /// row per account per minute and prints `myapp #12 · 5h 41% · 7d 63%`. Never fails the session: errors are swallowed.
 pub fn statusline(ctx: &Ctx, account: &str, lane: &str, input: &str, out: &mut dyn Write) {
     let v: Value = serde_json::from_str(input).unwrap_or_default();
-    let how = crate::harness::accounts().and_then(crate::harness::Harness::usage_meter);
-    let ((fp, fr), (sp, sr)) = how.map(|m| m.status(&v)).unwrap_or_default();
+    let how = crate::providers::accounts().and_then(|p| p.usage());
+    let (five, seven) = how
+        .map(|u| u.reading(&v))
+        .map(|l| (l.session, l.week))
+        .unwrap_or_default();
+    let (fp, sp) = (five.used, seven.used);
     let fresh = |r: &Row| ctx.now < r.ts + 60;
     let mut all = rows(ctx);
     if !account.is_empty() && (fp.is_some() || sp.is_some()) && !all.get(account).is_some_and(fresh) {
@@ -294,9 +298,9 @@ pub fn statusline(ctx: &Ctx, account: &str, lane: &str, input: &str, out: &mut d
             ts: ctx.now,
             account: account.into(),
             five_hour_pct: fp,
-            five_hour_reset: fr,
+            five_hour_reset: five.resets,
             seven_day_pct: sp,
-            seven_day_reset: sr,
+            seven_day_reset: seven.resets,
         };
         let p = ctx.state.with_file_name("usage.jsonl");
         // Over 1 MB, keep only each account's newest row.

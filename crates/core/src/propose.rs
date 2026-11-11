@@ -6,7 +6,7 @@ use crate::devices::sha256;
 use crate::events::{emit, read, Event};
 use crate::gate::refused;
 use crate::runner::Runner;
-use crate::{conductor, Ctx};
+use crate::{orchestrator, Ctx};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -17,7 +17,7 @@ use std::path::Path;
 /// `herdsman config propose <thread> <file>`: `file` is the whole new fleet.toml; validated, its diff is the card.
 pub fn propose(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, thread: &str, file: &Path) -> Result<()> {
     let events = read(&ctx.state)?;
-    let t = conductor::find(&events, thread)?;
+    let t = orchestrator::find(&events, thread)?;
     let text = std::fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?;
     Config::parse(&text).context("the proposed fleet.toml is invalid")?;
     let cur = std::fs::read_to_string(&ctx.config)?;
@@ -84,7 +84,7 @@ pub fn stale(ctx: &Ctx, p: &Event) -> bool {
 
 /// #460: thread `thread`'s proposals that wait for the owner (neither settled nor stale), oldest first.
 pub fn waiting<'a>(ctx: &'a Ctx, events: &'a [Event], thread: &'a str) -> impl Iterator<Item = &'a Event> {
-    crate::conductor::of(events, thread).filter(move |e| {
+    crate::orchestrator::of(events, thread).filter(move |e| {
         e.kind == "config-propose" && settled(events, e.str("id").unwrap_or_default()).is_none() && !stale(ctx, e)
     })
 }
@@ -157,7 +157,7 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
         cfg,
         Event::new(ctx.now, &p.fleet, None, "config-settled", d),
     )?;
-    let _ = conductor::say(ctx, cfg, r, (thread, &line, &[]), ("system", false)); // logged even if the conductor can't wake
+    let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
     Ok(line)
 }
 
@@ -246,8 +246,8 @@ pub fn view(ctx: &Ctx) -> Result<ConfigView> {
     let fields = leaves.into_iter().map(|(path, v)| {
         let key = path.rsplit('.').next().unwrap_or_default();
         let allowed = match key {
-            "harness" => crate::harness::NAMES.map(String::from).to_vec(),
-            "effort" => crate::harness::EFFORTS.iter().map(|e| (*e).into()).collect(),
+            "harness" => crate::providers::lane_names().into_iter().map(String::from).collect(),
+            "effort" => crate::providers::EFFORTS.iter().map(|e| (*e).into()).collect(),
             "model" => cfg.models.clone(),
             _ => vec![],
         };

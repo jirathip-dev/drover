@@ -1,5 +1,6 @@
 //! Hermes: the `hooks:` key + its consent in the role's existing profile; the kick is typed at the `❯` prompt.
-use super::{attempts, hook_command, Credential, Dialect, Harness};
+use super::{attempts, hook_command, Credential, Dialect, Home, Provider, Row};
+use crate::config::Config;
 use crate::herdr;
 use crate::runner::{argv, Runner};
 use crate::spawn::Plan;
@@ -7,11 +8,25 @@ use crate::Ctx;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 const HERMES_HOOKS: &str = include_str!("../../hooks/hermes-hooks.yaml");
 
 pub struct Hermes;
+pub static PROVIDER: Hermes = Hermes;
+
+const HOME: Home = Home {
+    env: "FLEET_HERMES_PROFILES",
+    default: ".hermes/profiles",
+};
+
+fn root(ctx: &Ctx) -> PathBuf {
+    ctx.homes
+        .get("hermes")
+        .cloned()
+        .unwrap_or_else(|| HOME.resolve(&crate::config::home()))
+}
 
 /// Hermes' `pre_tool_call` / `post_tool_call` / `on_session_end` shell hooks (older ones: `args`, no event name).
 static DIALECT: Dialect = Dialect {
@@ -31,7 +46,54 @@ static DIALECT: Dialect = Dialect {
     again: None,
 };
 
-impl Harness for Hermes {
+impl Provider for Hermes {
+    fn model_default(&self) -> Option<&'static str> {
+        Some("profile")
+    }
+    fn home(&self) -> Option<Home> {
+        Some(HOME)
+    }
+    fn profile_files(&self, ctx: &Ctx, profile: &str) -> Vec<PathBuf> {
+        vec![root(ctx).join(profile).join("config.yaml")]
+    }
+    fn hooks_allowed(&self, ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<bool> {
+        let mut good = true;
+        for (name, f, role, _, profile) in crate::spawn::profiles(cfg) {
+            if !root(ctx).join(&profile).join("config.yaml").exists() {
+                continue;
+            }
+            let lane = format!("HERDSMAN_LANE={name}:-:{role}");
+            let o = r.run("env", &argv(&[&lane, "hermes", "-p", &profile, "hooks", "list"]))?;
+            let cmd = hook_command(ctx, f.family(role));
+            let allowed = o.code == 0 && o.stdout.lines().any(|l| l.contains(&cmd) && l.contains("✓ allowed"));
+            writeln!(
+                out,
+                "{} {profile} ({role})",
+                if allowed { "✓ allowed" } else { "✗ not allowed" }
+            )?;
+            good &= allowed;
+        }
+        Ok(good)
+    }
+    fn doctor(&self, ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<Row> {
+        let roles = cfg.fleet.values().flat_map(|fleet| &fleet.role);
+        let hermes = roles.filter(|role| role.1.harness == "hermes");
+        let hermes: BTreeSet<_> = hermes.map(|role| role.1.profile_or(role.0)).collect();
+        let mut rows: Vec<Row> = vec![];
+        for profile in &hermes {
+            let line = format!("hermes {profile} — profile → hermes profile create {profile}");
+            rows.push((root(ctx).join(profile).join("config.yaml").exists(), '✗', line));
+        }
+        if !hermes.is_empty() {
+            let synced = crate::spawn::profiles_check(ctx, cfg, r, &mut std::io::sink()).unwrap_or(false);
+            let line = "hermes hooks — profiles sync --check → herdsman profiles sync";
+            rows.push((synced, '✗', line.into()));
+        }
+        rows
+    }
+    fn scrubs_env(&self, var: &str) -> bool {
+        var.trim_start_matches('_').starts_with("HERMES_")
+    }
     fn sync(
         &self,
         ctx: &Ctx,
@@ -41,7 +103,7 @@ impl Harness for Hermes {
         _usage: &str,
         out: &mut dyn Write,
     ) -> Result<()> {
-        let yaml = ctx.hermes.join(profile).join("config.yaml");
+        let yaml = root(ctx).join(profile).join("config.yaml");
         let Ok(text) = std::fs::read_to_string(&yaml) else {
             return Ok(());
         };
@@ -56,7 +118,7 @@ impl Harness for Hermes {
         }
         writeln!(out, "synced {} hooks ({role})", yaml.display())?;
         approve_hook(
-            &ctx.hermes.join(profile).join("shell-hooks-allowlist.json"),
+            &root(ctx).join(profile).join("shell-hooks-allowlist.json"),
             &hook_command(ctx, role),
         )
     }
@@ -141,7 +203,7 @@ fn approve_hook(path: &Path, cmd: &str) -> Result<()> {
 
 /// Set an existing profile's `mcp_servers:` to only the role's servers (removed when there are none).
 pub fn set_mcp(ctx: &Ctx, profile: &str, servers: &serde_json::Map<String, Value>) -> Result<()> {
-    let yaml = ctx.hermes.join(profile).join("config.yaml");
+    let yaml = root(ctx).join(profile).join("config.yaml");
     let Ok(text) = std::fs::read_to_string(&yaml) else {
         return Ok(());
     };

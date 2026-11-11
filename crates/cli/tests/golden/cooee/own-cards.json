@@ -1,0 +1,13 @@
+[
+  { "type": "card", "id": "cfg-edgar", "kind": "config", "title": "EDGAR plugin settings",
+    "blocks": [
+      { "type": "config", "id": "edgar", "submit": { "label": "Save", "action": "save-config" }, "fields": [
+        { "type": "text", "name": "user_agent", "label": "User agent", "value": "cooee research" },
+        { "type": "picker", "name": "rate", "label": "Rate", "value": "5 / s", "options": ["1 / s", "5 / s", "10 / s"] } ] } ] },
+  { "type": "card", "id": "sec-edgar", "kind": "secret",
+    "blocks": [ { "type": "secret", "id": "EDGAR_API_KEY", "name": "EDGAR_API_KEY", "action": "set-secret" } ] },
+  { "type": "card", "id": "run-r7", "kind": "run", "title": "Install the edgar plugin's Python deps",
+    "blocks": [
+      { "type": "run", "id": "r7", "action": "run-card", "command": "uv pip install -r plugins/edgar/requirements.txt",
+        "sha": "3b7e0c55a1d9", "dir": "~/research", "touches": "~/research/.venv only, no network after", "until": "2026-11-09T09:52:00Z" } ] }
+]

@@ -16,7 +16,9 @@ fn config(extra: &str) -> String {
         "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
         "[fleet.sendmeter.role.rev]\nharness = \"claude\"\nmodel = \"sonnet\"",
     );
-    format!("{c}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\neffort = \"high\"\n{extra}")
+    format!(
+        "{c}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\neffort = \"high\"\n{extra}"
+    )
 }
 
 /// #771: `config` on shed-acp (#608): the fleet's own runtime on `b`, its conductor signed in with account C (an ACP
@@ -62,7 +64,7 @@ fn chat(s: &Server, cookie: &str) -> String {
 
 /// herdr ready to start conductors (`agents`: its agent list), dsh-tui at the pinned profile.
 fn host(agents: &str) -> Fake {
-    let dsh = format!("profile: {}  /x\n", herdsman::harness::DSH_TUI_VERSION);
+    let dsh = format!("profile: {}  /x\n", herdsman::providers::DSH_TUI_VERSION);
     Fake::default()
         .reply("herdr agent list", agents)
         .reply(
@@ -84,13 +86,13 @@ fn kind(c: &herdsman::Ctx, k: &str) -> Vec<Event> {
 #[test]
 fn chat_defaults_come_from_the_chat_table_else_the_conductor_role() {
     let plain = Config::parse(&config("")).unwrap();
-    let (_, r) = herdsman::conductor::defaults(&plain, "sendmeter").unwrap();
+    let (_, r) = herdsman::orchestrator::defaults(&plain, "sendmeter").unwrap();
     assert_eq!(
         (r.harness.as_str(), r.model.as_deref(), r.effort.as_deref()),
         ("claude", Some("opus"), Some("high"))
     );
     let on = Config::parse(&config("[chat]\nmodel = \"sonnet\"\neffort = \"low\"\n")).unwrap();
-    let (_, r) = herdsman::conductor::defaults(&on, "sendmeter").unwrap();
+    let (_, r) = herdsman::orchestrator::defaults(&on, "sendmeter").unwrap();
     assert_eq!(
         (r.harness.as_str(), r.model.as_deref(), r.effort.as_deref()),
         ("claude", Some("sonnet"), Some("low"))
@@ -98,12 +100,12 @@ fn chat_defaults_come_from_the_chat_table_else_the_conductor_role() {
     // `[chat]`'s model is a pick on the harness its fleets' conductors default to.
     let m = Config::parse(&config("[chat]\nmodel = \"haiku\"\n")).unwrap();
     assert_eq!(
-        herdsman::conductor::harness_models(&m, "claude"),
+        herdsman::orchestrator::harness_models(&m, "claude"),
         ["haiku", "opus", "sonnet"]
     );
     // Another harness drops the role's model; its profile stays the conductor's.
     let h = Config::parse(&config("[chat]\nharness = \"hermes\"\n")).unwrap();
-    let (_, r) = herdsman::conductor::defaults(&h, "sendmeter").unwrap();
+    let (_, r) = herdsman::orchestrator::defaults(&h, "sendmeter").unwrap();
     assert_eq!(
         (r.harness.as_str(), r.model.as_deref(), r.profile.as_deref()),
         ("hermes", None, None)
@@ -142,7 +144,7 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
     let f = acp();
     let cli = b.cli(&f);
     assert_eq!(run(&c, &cli, &["thread", "say", "t1", "hi"]).0, 0);
-    let st = &kind(&c, "conductor-start")[0];
+    let st = &kind(&c, "orchestrator-start")[0];
     assert_eq!(
         (st.str("harness"), st.str("model"), st.str("runtime")),
         (Some("claude"), Some("opus"), Some("shed-acp"))
@@ -169,7 +171,7 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
     assert!(res.ends_with("t3 started\n"), "{res}");
     assert_eq!(kind(&c, "thread-new")[2].str("harness"), Some("claude"));
     assert_eq!(
-        f.count("shed run --acp claude-acp --policy allow --name conductor-t3"),
+        f.count("shed run --acp claude-acp --policy allow --name orchestrator-t3"),
         1
     );
     assert!(chat(&s, &cookie).contains(
@@ -179,7 +181,7 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
 
 /// herdr-only (#721 deletes it): a hermes thread (no ACP adapter) starts on hermes in a herdr pane.
 #[test]
-fn a_hermes_thread_starts_its_conductor_on_hermes() {
+fn a_hermes_thread_starts_its_orchestrator_on_hermes() {
     let c = ctx(&tmpdir("pick-new-hermes"), &config("[chat]\nharness = \"claude\"\n"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let (code, out) = run(
@@ -191,7 +193,7 @@ fn a_hermes_thread_starts_its_conductor_on_hermes() {
     std::fs::write(&c.config, config("[chat]\nharness = \"dsh\"\n")).unwrap();
     let r = host(NO_AGENTS);
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
-    let st = &kind(&c, "conductor-start")[0];
+    let st = &kind(&c, "orchestrator-start")[0];
     assert_eq!((st.str("harness"), st.str("model")), (Some("hermes"), None));
 }
 
@@ -213,19 +215,19 @@ fn the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread() {
         let r = host(NO_AGENTS);
         let (code, out) = run(&c, &r, &["thread", "say", &id, "hi"]);
         assert_eq!(code, 0, "{out}");
-        assert_eq!(kind(&c, "conductor-start")[i].str("harness"), Some(*h));
-        let dir = herdsman::conductor::dir(&c, &Config::load(&c.config).unwrap(), &id);
+        assert_eq!(kind(&c, "orchestrator-start")[i].str("harness"), Some(*h));
+        let dir = herdsman::orchestrator::dir(&c, &Config::load(&c.config).unwrap(), &id);
         let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
         assert!(
-            brief.contains("# Conductor brief: thread") && brief.contains("Always grill scope first."),
+            brief.contains("# Orchestrator brief: thread") && brief.contains("Always grill scope first."),
             "{brief}"
         );
         // Each harness's own channel carries the kick that reads the brief.
         let calls = r.calls.borrow().join("\n");
         let kick = format!("Read {} and act on it.", dir.join(".brief.md").display());
         let channel = match *h {
-            "claude" => "herdr agent start conductor-t1 --kind claude",
-            "hermes" => "herdr agent prompt conductor-t2 Read ",
+            "claude" => "herdr agent start orchestrator-t1 --kind claude",
+            "hermes" => "herdr agent prompt orchestrator-t2 Read ",
             _ => "herdr pane send-text w9:p1 Read ",
         };
         assert!(
@@ -233,13 +235,13 @@ fn the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread() {
             "{h}: {calls}"
         );
         if *h == "claude" {
-            let role = c.config.with_file_name("claude").join("fleet-conductor/role.md");
+            let role = c.config.with_file_name("claude").join("fleet-orchestrator/role.md");
             let line = calls.lines().find(|l| l.starts_with(channel)).unwrap();
             assert!(
                 line.contains(&format!("--append-system-prompt-file {}", role.display())),
                 "{line}"
             );
-            assert!(std::fs::read_to_string(role).unwrap().contains("conductor"));
+            assert!(std::fs::read_to_string(role).unwrap().contains("orchestrator"));
         }
     }
 }
@@ -284,15 +286,15 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
         "{show}"
     );
     // The conductor is awake: the next message closes it and resumes the same session on the pick.
-    let first = kind(&c, "conductor-start")[0].clone();
-    let awake = r#"{"result":{"agents":[{"name":"conductor-t1","agent_status":"idle","pane_id":"w9:p1"}]}}"#;
+    let first = kind(&c, "orchestrator-start")[0].clone();
+    let awake = r#"{"result":{"agents":[{"name":"orchestrator-t1","agent_status":"idle","pane_id":"w9:p1"}]}}"#;
     let r2 = host(awake);
     assert_eq!(run(&c, &r2, &["thread", "say", "t1", "next"]).0, 0);
     let calls = r2.calls.borrow().join("\n");
     assert!(calls.contains("herdr workspace close w9"), "{calls}");
-    let sleep = kind(&c, "conductor-sleep");
+    let sleep = kind(&c, "orchestrator-sleep");
     assert_eq!(sleep[0].str("why"), Some("model"));
-    let next = &kind(&c, "conductor-start")[1];
+    let next = &kind(&c, "orchestrator-start")[1];
     assert_eq!((next.str("model"), next.str("effort")), (Some("sonnet"), Some("low")));
     assert_eq!(
         (next.str("session"), next.data["resumed"].as_bool()),
@@ -300,7 +302,7 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
     );
     let start = calls
         .lines()
-        .find(|l| l.starts_with("herdr agent start conductor-t1"))
+        .find(|l| l.starts_with("herdr agent start orchestrator-t1"))
         .unwrap();
     assert!(start.contains("--model sonnet --effort low"), "{start}");
     assert!(
@@ -310,7 +312,7 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
     // Awake on the pick already: the message after is typed in, no restart.
     let r3 = host(awake);
     assert_eq!(run(&c, &r3, &["thread", "say", "t1", "again"]).0, 0);
-    assert_eq!(kind(&c, "conductor-start").len(), 2);
+    assert_eq!(kind(&c, "orchestrator-start").len(), 2);
 }
 
 #[test]
@@ -357,10 +359,10 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it() {
     let first = f.count("shed run --acp");
     let f2 = acp();
     assert_eq!(run(&c, &b.cli(&f2), &["thread", "say", "t1", "next"]).0, 0);
-    assert!(b.called("kill", "conductor-t1"), "{:?}", b.methods());
-    let sleep = kind(&c, "conductor-sleep");
+    assert!(b.called("kill", "orchestrator-t1"), "{:?}", b.methods());
+    let sleep = kind(&c, "orchestrator-sleep");
     assert_eq!(sleep[0].str("why"), Some("model"));
-    let next = &kind(&c, "conductor-start")[1];
+    let next = &kind(&c, "orchestrator-start")[1];
     assert_eq!((next.str("model"), next.str("effort")), (Some("sonnet"), Some("low")));
     assert_eq!(next.data["resumed"].as_bool(), Some(false));
     let calls = f2.calls.borrow().join("\n");
@@ -370,8 +372,8 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it() {
     // Awake on the pick already: the message after is typed in, no restart.
     let f3 = acp();
     assert_eq!(run(&c, &b.cli(&f3), &["thread", "say", "t1", "again"]).0, 0);
-    assert_eq!(kind(&c, "conductor-start").len(), 2);
-    assert!(f3.called("shed send conductor-t1 [t1] owner: again") && !f3.called("shed run"));
+    assert_eq!(kind(&c, "orchestrator-start").len(), 2);
+    assert!(f3.called("shed send orchestrator-t1 [t1] owner: again") && !f3.called("shed run"));
 }
 
 #[test]
@@ -389,5 +391,5 @@ fn an_old_thread_without_a_harness_renders_and_starts_on_the_default() {
         "<b>Before #404</b><small class=tid>· t1</small></div><span class=ds>sendmeter · claude · opus</span>"
     ));
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
-    assert_eq!(kind(&c, "conductor-start")[0].str("harness"), Some("claude"));
+    assert_eq!(kind(&c, "orchestrator-start")[0].str("harness"), Some("claude"));
 }

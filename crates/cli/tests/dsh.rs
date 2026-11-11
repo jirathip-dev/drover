@@ -390,7 +390,7 @@ fn installed_hook_refuses_real_push_to_staging_from_lane_worktree_only() {
     )
     .status
     .success());
-    herdsman::harness::install_pre_push(&herdsman::runner::Real, env!("CARGO_BIN_EXE_herdsman"), &lane, "impl")
+    herdsman::providers::install_pre_push(&herdsman::runner::Real, env!("CARGO_BIN_EXE_herdsman"), &lane, "impl")
         .unwrap();
 
     let o = git(&lane, &["push", "origin", "HEAD:staging"]);

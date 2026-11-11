@@ -1079,7 +1079,7 @@ pub struct ConductorAttach {
     pub message: String,
     /// `roles/conductor.md`, the repo and the owner's conductor instructions.
     pub brief: String,
-    /// The synced conductor Claude settings (`PreToolUse`: `herdsman hook`).
+    /// The synced conductor provider settings (`PreToolUse`: `herdsman hook`).
     pub settings: String,
     pub env: AttachEnv,
     /// #565's ACP guard holds; else `why` not.

@@ -64,7 +64,7 @@ fn a_lane_ask_stores_its_agent_and_the_answer_is_typed_into_its_pane() {
     let (code, out) = run(
         &c,
         &Fake::default(),
-        &["answer", "sendmeter", "q1", "2", "--by", "conductor"],
+        &["answer", "sendmeter", "q1", "2", "--by", "orchestrator"],
     );
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: no -> sendmeter-impl-36\n"));
     assert_eq!(sh.sent(LANE), ["DECISION q1: no"], "{:?}", sh.methods());

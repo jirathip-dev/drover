@@ -813,7 +813,7 @@ fn bootstrap_repairs_an_old_bootstrap_fleet_toml_so_profiles_sync_passes_there()
 #[test]
 fn a_failed_bootstrap_step_shows_its_command_exit_code_and_output_and_logs_them() {
     let (c, cfg) = running("cloud-boot-fail");
-    let err = "invalid config /home/me/.config/herdsman/fleet.toml: fleet.berth.role.conductor: account 'C' is not in [accounts]";
+    let err = "invalid config /home/me/.config/herdsman/fleet.toml: fleet.berth.role.orchestrator: account 'C' is not in [accounts]";
     let f = boot_again()
         .once_err(&step("test ! -e "), 1, &format!("warming up\n{err}\n"))
         .once_err(&step("test ! -e "), 1, &format!("warming up\n{err}\n"));

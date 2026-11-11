@@ -51,6 +51,19 @@ impl Event {
     }
 }
 
+pub(crate) fn aliased(mut ev: Event) -> Event {
+    if let Some(k) = ev.kind.strip_prefix("conductor-") {
+        ev.kind = format!("orchestrator-{k}");
+    }
+    if ev.str("from") == Some("conductor") {
+        ev.data["from"] = "orchestrator".into();
+    }
+    if let Some(b) = ev.str("by").filter(|b| b.starts_with("conductor-")) {
+        ev.data["by"] = crate::orchestrator::by(b).into();
+    }
+    ev
+}
+
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if hands a reference
 fn is_zero(n: &u64) -> bool {
     *n == 0
@@ -89,11 +102,11 @@ fn parse(text: &str, path: &Path) -> Vec<Event> {
     let mut out = Vec::with_capacity(lines.len());
     for (i, l) in lines.iter().enumerate() {
         match serde_json::from_str::<Event>(l) {
-            Ok(ev) if ev.seq == 0 => out.push(Event {
+            Ok(ev) if ev.seq == 0 => out.push(aliased(Event {
                 seq: i as u64 + 1,
                 ..ev
-            }),
-            Ok(ev) => out.push(ev),
+            })),
+            Ok(ev) => out.push(aliased(ev)),
             Err(_) if l.trim().is_empty() || i + 1 == lines.len() => {}
             Err(e) => eprintln!(
                 "herdsman: {}: line {}: skipping corrupt record: {e}",
@@ -207,9 +220,9 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
         "decision" if ev.str("by") == Some("default") => "needs-decision",
         // #541: a lane ask put to the owner pushes as an ask; a conductor's answer to one never pushes.
         "ask-owner" => "needs-decision",
-        "decision" if ev.str("by").is_some_and(|b| b.starts_with("conductor-")) => "",
+        "decision" if ev.str("by").is_some_and(|b| b.starts_with("orchestrator-")) => "",
         // #386: a conductor's reply pushes; the owner's own words and system lines never do.
-        "thread-msg" if ev.str("from") != Some("conductor") => "",
+        "thread-msg" if ev.str("from") != Some("orchestrator") => "",
         k => k,
     };
     let wanted = |n: &&crate::config::Notify| n.wants(if n.webpush() { push } else { &ev.kind });
@@ -287,12 +300,10 @@ pub fn plain(ev: &Event) -> String {
     }
 }
 
-/// Runs without `HERMES_*` / `_HERMES_*`: a lane's Hermes profile must not leak into the notifier's `hermes send`.
 fn run_notifier(cmd: &str, payload: &str) -> Result<()> {
-    let hermes = |k: &String| k.trim_start_matches('_').starts_with("HERMES_");
     let mut args: Vec<String> = std::env::vars()
         .map(|(k, _)| k)
-        .filter(hermes)
+        .filter(|k| crate::providers::all().any(|p| p.scrubs_env(k)))
         .flat_map(|k| ["-u".into(), k])
         .collect();
     // Both streams go nowhere, as before: a sink that backgrounds a child must not hold the reply open.

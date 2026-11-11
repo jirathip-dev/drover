@@ -18,7 +18,7 @@ const TIMEOUT: &str = "timed out waiting for agent startup";
 /// synced with the real binary as their hook.
 fn setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
          [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
         b.sock.display()
     );
@@ -96,7 +96,7 @@ fn call(addr: SocketAddr, method: &str, path: &str, cookie: &str, body: &str) ->
 }
 
 #[test]
-fn a_blocked_conductor_start_holds_no_request() {
+fn a_blocked_orchestrator_start_holds_no_request() {
     let sh: &'static FakeShed = Box::leak(Box::new(FakeShed::new()));
     let c = setup("cold-start", sh);
     let f: &'static Fake = Box::leak(Box::new(acp()));
@@ -124,7 +124,7 @@ fn a_blocked_conductor_start_holds_no_request() {
     while !r.1.load(SeqCst) && t.elapsed() < Duration::from_secs(5) {
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(r.1.load(SeqCst), "the answer never started t1's conductor");
+    assert!(r.1.load(SeqCst), "the answer never started t1's orchestrator");
 
     let (ms, res) = call(addr, "GET", "/", "", "");
     assert!(res.starts_with("HTTP/1.1 200"), "GET / during the start: {res:.300}");
@@ -150,7 +150,7 @@ fn a_blocked_conductor_start_holds_no_request() {
     while t.elapsed() < Duration::from_secs(10) {
         std::thread::sleep(Duration::from_millis(300));
         let log = herdsman::events::jsonl(&c.state).unwrap_or_default();
-        if log.contains("\"conductor-start\"") && log == last {
+        if log.contains("\"orchestrator-start\"") && log == last {
             break;
         }
         last = log;

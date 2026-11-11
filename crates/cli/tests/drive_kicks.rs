@@ -884,3 +884,69 @@ fn waiting_names_a_slot_wait_not_a_stuck_tick() {
     );
     assert!(!out.contains("tick stuck?"), "{out}");
 }
+
+fn dead_six_live_one(name: &str) -> (herdsman::Ctx, Fake, FakeShed) {
+    let (c, sh) = fleet(name, 6, 1);
+    (11..=16).for_each(|n| mark(&c, n, 4242, 10));
+    mark(&c, 17, 4343, 30);
+    let r = fake("1.0")
+        .reply("kill -0 4343", "")
+        .reply("ps -o etime= -p 4343", "  00:40\n");
+    (c, r, sh)
+}
+
+#[test]
+fn a_dead_kicks_marker_counts_nowhere_and_the_hold_names_the_live_one() {
+    let (c, r, _sh) = dead_six_live_one("kicks-812-dead");
+    let (code, out) = run(&c, &r, &["waiting"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("slots: sendmeter 1\n"), "{out}");
+    let (c, r, _sh) = dead_six_live_one("kicks-812-held");
+    let held = serde_json::json!([{"issue": 3, "step": "spawn", "outcome": "waiting", "code": "SPAWN_PENDING"}]);
+    for ts in [c.now - 1200, c.now - 60] {
+        let d = serde_json::json!({"actions": held});
+        herdsman::events::append(
+            &c.state,
+            &herdsman::events::Event::new(ts, "sendmeter", None, "drive-pass", d),
+        )
+        .unwrap();
+    }
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    let ev = read(&c.state).unwrap();
+    let alert = ev.iter().rfind(|e| e.kind == "spawn-held").expect("spawn-held");
+    let why = alert.str("reason").unwrap_or_default();
+    assert!(why.contains("spawn-sendmeter-17.pending 30s"), "{why}");
+    assert!(!why.contains("spawn-sendmeter-11.pending"), "{why}");
+    assert_eq!(stale(&c).len(), 6);
+}
+
+#[test]
+fn waiting_names_the_marker_that_holds_the_slot() {
+    let (c, r, _sh) = dead_six_live_one("kicks-812-waiting");
+    fix_due(&c, 21);
+    let d = serde_json::json!({"step": "fix", "cmd": "herdsman spawn sendmeter 21 impl --supersede",
+        "result": "REFUSED SPAWN_PENDING: 6 spawns starting", "code": "SPAWN_PENDING"});
+    herdsman::events::append(
+        &c.state,
+        &herdsman::events::Event::new(c.now - 30, "sendmeter", Some(21), "driven", d),
+    )
+    .unwrap();
+    let (code, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("waiting for a spawn slot: spawn-sendmeter-17.pending 30s"),
+        "{out}"
+    );
+}
+
+#[test]
+fn a_manual_spawn_and_drives_launch_agree_on_the_slots() {
+    let (c, r, _sh) = dead_six_live_one("kicks-812-manual");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "1", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let (c, r, _sh) = dead_six_live_one("kicks-812-drive");
+    let d = pass(&c, &r);
+    assert_eq!(launched(&r, 1), 1, "{d}");
+    assert!(!codes(&d).contains(&"SPAWN_PENDING".to_string()), "{d}");
+}

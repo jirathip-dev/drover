@@ -34,9 +34,9 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
 /// A sendmeter conductor (`role_extra` added to its role, `extra` to fleet.toml) and thread t1.
 fn setup(name: &str, role_extra: &str, extra: &str) -> herdsman::Ctx {
     let d = tmpdir(name);
-    let cfg = format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\n{role_extra}\n{extra}");
+    let cfg = format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{role_extra}\n{extra}");
     let c = ctx(&d, &cfg);
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     assert_eq!(
@@ -61,7 +61,7 @@ fn acp_setup(name: &str, role_extra: &str, extra: &str, b: &FakeShed) -> herdsma
         "[accounts]\nC = \"C\"\n"
     };
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\n{role}\n\n\
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{role}\n\n\
          [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n{accounts}{extra}",
         b.sock.display()
     );
@@ -101,7 +101,7 @@ fn herdr(agents: &str) -> Fake {
 }
 
 fn live() -> String {
-    agents(&[("conductor-t1", "idle", "/x", "w9:p1")])
+    agents(&[("orchestrator-t1", "idle", "/x", "w9:p1")])
 }
 
 #[test]
@@ -185,8 +185,8 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
             && page.contains(" class=\"qs note\">config c1 applied by owner, backup kept, doctor ")
     );
     assert!(
-        r.called("shed send conductor-t1 [t1] system: config c1 applied by owner"),
-        "the conductor learns it: {:?}",
+        r.called("shed send orchestrator-t1 [t1] system: config c1 applied by owner"),
+        "the orchestrator learns it: {:?}",
         r.calls.borrow()
     );
     assert!(body(&req(&s, "/thread", "op=config&id=c1&act=discard", &cookie, T + 30)).contains("ALREADY_SETTLED"));
@@ -214,12 +214,12 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
 /// herdr-only (#721 deletes it): the switch resumes the same herdr session (`--resume`); on shed-acp every start is a
 /// fresh session (below).
 #[test]
-fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session() {
+fn a_usage_limit_resumes_the_orchestrator_on_the_next_account_with_the_same_session() {
     let accounts = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n";
     let c = setup("cards-switch", "fallback = [\"claude:A\", \"claude:B\"]", accounts);
     assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
     run(&c, &Fake::default(), &["thread", "reply", "t1", "Small or full?"]);
-    let first = kinds(&c, "conductor-start")[0].clone();
+    let first = kinds(&c, "orchestrator-start")[0].clone();
     assert_eq!(first.str("account"), Some("A"));
     let session = first.str("session").unwrap().to_string();
 
@@ -237,7 +237,7 @@ fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session
     assert_eq!(code, 0, "{out}");
     assert_eq!(kinds(&c, "account-capped")[0].str("account"), Some("A"));
     assert!(r.called("herdr workspace close w9"));
-    let next = &kinds(&c, "conductor-start")[1];
+    let next = &kinds(&c, "orchestrator-start")[1];
     assert_eq!(
         (next.str("account"), next.str("session")),
         (Some("B"), Some(session.as_str()))
@@ -246,7 +246,7 @@ fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session
     let calls = r.calls.borrow();
     let start = calls
         .iter()
-        .find(|c| c.starts_with("herdr agent start conductor-t1"))
+        .find(|c| c.starts_with("herdr agent start orchestrator-t1"))
         .unwrap();
     assert!(
         start.contains(&format!("--resume {session}")) && !start.contains("--session-id"),
@@ -258,14 +258,14 @@ fn a_usage_limit_resumes_the_conductor_on_the_next_account_with_the_same_session
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.contains(
-            "owner: scope #12\nconductor: Small or full?\nsystem: switched to claude:B (claude:A resting until "
+            "owner: scope #12\nOrchestrator: Small or full?\nsystem: switched to claude:B (claude:A resting until "
         ),
         "{show}"
     );
 }
 
 #[test]
-fn a_usage_limit_restarts_the_conductor_on_the_next_account() {
+fn a_usage_limit_restarts_the_orchestrator_on_the_next_account() {
     let accounts = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n";
     let sh = FakeShed::new();
     let c = acp_setup(
@@ -279,10 +279,10 @@ fn a_usage_limit_restarts_the_conductor_on_the_next_account() {
         0
     );
     run(&c, &Fake::default(), &["thread", "reply", "t1", "Small or full?"]);
-    let first = kinds(&c, "conductor-start")[0].clone();
+    let first = kinds(&c, "orchestrator-start")[0].clone();
     assert_eq!(first.str("account"), Some("A"));
 
-    sh.screen("conductor-t1", "You've hit your limit · resets 6:40pm");
+    sh.screen("orchestrator-t1", "You've hit your limit · resets 6:40pm");
     let r = acp(&["env"]);
     let cli = sh.cli(&r);
     let (code, out) = run(
@@ -295,8 +295,8 @@ fn a_usage_limit_restarts_the_conductor_on_the_next_account() {
     );
     assert_eq!(code, 0, "{out}");
     assert_eq!(kinds(&c, "account-capped")[0].str("account"), Some("A"));
-    assert!(sh.called("kill", "conductor-t1"), "{:?}", sh.methods());
-    let next = &kinds(&c, "conductor-start")[1];
+    assert!(sh.called("kill", "orchestrator-t1"), "{:?}", sh.methods());
+    let next = &kinds(&c, "orchestrator-start")[1];
     assert_eq!(
         (next.str("account"), next.str("runtime")),
         (Some("B"), Some("shed-acp"))
@@ -314,7 +314,7 @@ fn a_usage_limit_restarts_the_conductor_on_the_next_account() {
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.contains(
-            "owner: scope #12\nconductor: Small or full?\nsystem: switched to claude:B (claude:A resting until "
+            "owner: scope #12\nOrchestrator: Small or full?\nsystem: switched to claude:B (claude:A resting until "
         ),
         "{show}"
     );
@@ -323,7 +323,7 @@ fn a_usage_limit_restarts_the_conductor_on_the_next_account() {
 /// herdr-only (#721 deletes it): a conductor with no account (no ACP session starts without one, #565) signed out:
 /// nothing to switch to, still a [sign in] for `claude`.
 #[test]
-fn a_signed_out_conductor_with_no_account_gets_a_sign_in_card_for_the_harness_login() {
+fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness_login() {
     let signed_out = "Invalid API key · Please run /login";
     let page = |c: &herdsman::Ctx| {
         let r = herdr(NO_AGENTS);
@@ -339,7 +339,7 @@ fn a_signed_out_conductor_with_no_account_gets_a_sign_in_card_for_the_harness_lo
     let r = herdr(&live()).reply("herdr pane read w9:p1", signed_out);
     assert_eq!(run(&later, &r, &["check"]).0, 0);
     assert!(r.called("herdr workspace close w9"));
-    assert_eq!(kinds(&c, "conductor-start").len(), 1, "no account to resume on");
+    assert_eq!(kinds(&c, "orchestrator-start").len(), 1, "no account to resume on");
     assert!(kinds(&c, "agent-unavailable").is_empty(), "the harness is not rested");
     let lines: Vec<_> = kinds(&c, "thread-msg")
         .into_iter()
@@ -364,7 +364,7 @@ fn a_signed_out_conductor_with_no_account_gets_a_sign_in_card_for_the_harness_lo
 }
 
 #[test]
-fn a_signed_out_conductor_gets_a_sign_in_card_for_its_own_login() {
+fn a_signed_out_orchestrator_gets_a_sign_in_card_for_its_own_login() {
     let signed_out = "Invalid API key · Please run /login";
     let sh = FakeShed::new();
     let page = |c: &herdsman::Ctx| {
@@ -385,20 +385,20 @@ fn a_signed_out_conductor_gets_a_sign_in_card_for_its_own_login() {
         run(&c, &sh.cli(&acp(&["echo"])), &["thread", "say", "t1", "scope #12"]).0,
         0
     );
-    sh.screen("conductor-t1", signed_out);
+    sh.screen("orchestrator-t1", signed_out);
     let later = herdsman::Ctx {
         now: T + 60,
         ..c.clone()
     };
     assert_eq!(run(&later, &sh.cli(&acp(&["echo"])), &["check"]).0, 0);
-    assert!(sh.called("kill", "conductor-t1"), "{:?}", sh.methods());
+    assert!(sh.called("kill", "orchestrator-t1"), "{:?}", sh.methods());
     let line = kinds(&c, "thread-msg")
         .into_iter()
         .find(|e| e.str("signin").is_some())
         .unwrap();
     assert_eq!(line.str("signin"), Some("claude A"));
     assert!(page(&c).contains("claude is signed out (account A): sign in <button type=button data-su=\"claude A\""));
-    let next = &kinds(&c, "conductor-start")[1];
+    let next = &kinds(&c, "orchestrator-start")[1];
     assert_eq!(
         (next.str("account"), next.str("runtime")),
         (Some("B"), Some("shed-acp"))

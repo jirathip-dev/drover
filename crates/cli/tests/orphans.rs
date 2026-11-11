@@ -350,3 +350,47 @@ fn a_lane_spawned_during_the_remote_listing_is_not_adopted() {
     let adopted = kinds(&c, "spawn-adopted");
     assert_eq!(adopted.iter().map(|e| e.issue).collect::<Vec<_>>(), [Some(13)]);
 }
+
+#[test]
+fn a_rev_lane_on_a_reused_pane_id_is_adopted() {
+    let c = ctx(&tmpdir("orphan-812-reused"), CONFIG);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w9:p1", "workspace": "w9", "worktree": wt,
+        "branch": "issue-12"});
+    ev(&c, 10, "spawn", d);
+    let rev = c.worktrees.join("sendmeter/rev-12-r1");
+    std::fs::create_dir_all(&rev).unwrap();
+    let list = agents(&[("sendmeter-rev-12-r1", "working", &rev.to_string_lossy(), "w9:p1")]);
+    let pane = json!({"result": {"pane": {"pane_id": "w9:p1", "agent": "hermes", "workspace_id": "w9"}}});
+    let r = fake()
+        .reply("herdr agent list", &list)
+        .reply("herdr pane get w9:p1", &pane.to_string())
+        .reply("herdr agent rename w9:p1 sendmeter-rev-12-r1", "{}")
+        .reply("git -C", "");
+    let out = fast(&c, &r);
+    assert!(out.contains("adopted w9:p1 as sendmeter-rev-12-r1"), "{out}");
+    let sp = kinds(&c, "spawn");
+    assert_eq!(
+        (sp.len(), sp[1].str("role"), sp[1].str("why")),
+        (2, Some("rev"), Some("orphan"))
+    );
+}
+
+#[test]
+fn an_orphan_rev_lane_of_the_wrong_round_is_closed() {
+    let (c, sh) = shed_ctx("orphan-812-round", "");
+    review(&c, "");
+    let rev = c.worktrees.join("sendmeter/rev-12-r3");
+    std::fs::create_dir_all(&rev).unwrap();
+    let name = "sendmeter-rev-12-r3";
+    sh.lane(name, "idle", &rev.to_string_lossy());
+    let r = fake().reply("git -C", "");
+    let out = fast(&c, &r);
+    assert!(
+        out.contains("closed stale orphan sendmeter-rev-12-r3 (round r3, r1 is due)"),
+        "{out}"
+    );
+    assert_eq!(kinds(&c, "lane-closed")[0].str("why"), Some("stale-orphan"));
+    assert_eq!(kinds(&c, "spawn").len(), 1, "never adopted");
+    assert!(sh.called("kill", name) && !sh.has(name), "{:?}", sh.methods());
+}

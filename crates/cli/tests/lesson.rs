@@ -47,7 +47,7 @@ fn digest_shows_the_last_week_and_redacts_secrets() {
         NOW - HOUR,
         None,
         "thread-msg",
-        json!({"thread": "t1", "from": "conductor", "text": "on it"}),
+        json!({"thread": "t1", "from": "orchestrator", "text": "on it"}),
     );
     ev(&c, NOW - HOUR, Some(12), "parked", json!({"by": "owner"}));
     ev(&c, OLD, Some(3), "round-extended", json!({"by": "owner"}));

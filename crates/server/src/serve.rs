@@ -27,6 +27,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod chat;
+#[path = "screens.rs"]
+mod screens;
 mod v1;
 
 const SW: &str = include_str!("../assets/sw.js");
@@ -804,6 +806,9 @@ impl<'a> Server<'a> {
             return Ok(());
         }
         drop(clients);
+        if req.starts_with("GET ") && path.starts_with("/screens/") && path.ends_with("/stream") {
+            return self.stream(&mut s, &req, path, query);
+        }
         s.write_all(&self.reply(&req, crate::now()))?;
         Ok(())
     }
@@ -1005,6 +1010,7 @@ impl<'a> Server<'a> {
         };
         let (status, ctype, body) = match (method, path) {
             (_, p) if p.starts_with("/api/") => self.api(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
+            (_, p) if p.starts_with("/screens/") || p == "/action" => self.screens(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
             ("POST", _) if self.addr.is_none() => ("405 Method Not Allowed", "text/plain", text("read-only: GET only\n")),
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),
             // #501: `/pair/status` asks whether this browser is paired (no secrets): the page asks it on a 401.
@@ -1243,7 +1249,7 @@ impl<'a> Server<'a> {
         let (l, fleet, pane) = self.lane(ctx, agent)?;
         let on = l.on(self.r);
         let screen = || herdr::read(&on, &pane);
-        let h = crate::harness::get(&l.harness);
+        let h = crate::providers::get(&l.harness);
         let menu = h.pending_menu(&screen()?);
         let Some((q, opts)) = menu.filter(|p| !p.1.is_empty()) else {
             return refused(
@@ -1345,7 +1351,6 @@ impl<'a> Server<'a> {
         let agent = q.get("agent")?;
         let ls = self.lanes(ctx.now, &cfg, &events, &events.states)?;
         let file = lanes::log(&ctx.state, agent).filter(|_| self.export.is_none());
-        // #218: a lane with no pane: its stored transcript (#248: Claude's saved session first), no live block.
         let Some(l) = ls.into_iter().find(|l| &l.name == agent && l.pane.is_some()) else {
             let wt = crate::events::last_spawn(&events, agent).and_then(|e| e.str("worktree"));
             let saved = wt.and_then(|wt| lanes::session(&ctx.home, wt));
@@ -1368,7 +1373,6 @@ impl<'a> Server<'a> {
         let end = all.len().saturating_sub(before);
         let page = window(&all[..end], lines, 32);
         let status = lanes::chat(&screen).1.map(lanes::strip);
-        // #260: the default view's source: Claude's session transcript, else (null) the pane's role runs.
         let ok = self.export.is_none();
         // #351: the last `turns` (10, more as the sheet scrolls up) within 3.2 KB each: a chat opens with ~64 KB at most.
         let said = l.session().filter(|_| ok).and_then(|p| lanes::read_tail(&p, 1 << 21));
@@ -1728,7 +1732,7 @@ impl<'a> Server<'a> {
             .and_then(|p| herdr::read(&l.on(&self.cached(ctx.now, 2)), p).ok())
             .unwrap_or_default();
         let rw = self.addr.is_some() && paired;
-        let h = crate::harness::get(&l.harness);
+        let h = crate::providers::get(&l.harness);
         let c = lanes::prompt(&screen).unwrap_or_default();
         let menu = h.pending_menu(&screen);
         if menu.is_none() && h.status_word(&screen).is_some() {
@@ -2225,8 +2229,6 @@ impl<'a> Server<'a> {
             a,
         ];
         let screen = screen.unwrap_or_default();
-        // #276: a `now:` line is one line from the server (full text on long-press): Claude's spinner word, the action (a
-        // command summarised; cut first), the elapsed time.
         let (now, spin) = (lanes::now_of(l, &screen), lanes::spin(&l.harness, &screen));
         let busy = (now.is_some() || spin.is_some()).then(|| {
             let (w, t) = spin.map_or((None, None), |(w, t)| (Some(w), t));
@@ -2514,8 +2516,8 @@ impl<'a> Server<'a> {
                     .iter()
                     .filter_map(|a| Some((a, a["agent"].as_str().filter(|l| !l.is_empty())?)))
                 {
-                    let h = crate::harness::all().find(|h| h.1.process_names().contains(&label));
-                    by.entry(h.map_or(label, |h| h.0).into()).or_default().push(a);
+                    let h = crate::providers::lanes().find(|h| h.process_names().contains(&label));
+                    by.entry(h.map_or(label, |h| h.name).into()).or_default().push(a);
                 }
                 for (h, ours) in by {
                     let n = |st: &str| ours.iter().filter(|a| a["agent_status"] == st).count();
@@ -3250,13 +3252,12 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         harness: r.harness.clone(),
         model: r.model.clone(),
         effort: r.effort.clone(),
-        efforts: strs(crate::harness::efforts(&r.harness)),
+        efforts: strs(crate::providers::get(&r.harness).efforts()),
         // Unset: what the lane actually gets (the profile's/harness's model, `[limits].effort`).
-        model_default: if r.harness == "hermes" {
-            "profile".into()
-        } else {
-            r.harness.clone()
-        },
+        model_default: crate::providers::get(&r.harness)
+            .model_default()
+            .unwrap_or(&r.harness)
+            .into(),
         effort_default: l.effort.clone().unwrap_or_else(|| "none".into()),
         accounts: r.account_list(),
         mcp: r.mcp.clone(),
@@ -3267,12 +3268,12 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         harness: r.harness.clone(),
         model: r.model.clone(),
         effort: r.effort.clone(),
-        efforts: strs(crate::harness::efforts(&r.harness)),
+        efforts: strs(crate::providers::get(&r.harness).efforts()),
         models: strs(&crate::conductor::models(fc)),
     });
     let harness = |h: &&str| Harness {
         name: (*h).into(),
-        efforts: strs(crate::harness::efforts(h)),
+        efforts: strs(crate::providers::get(h).efforts()),
     };
     ConfigSheet {
         path: path.strip_prefix(&home).map_or(path.clone(), |p| format!("~{p}")),
@@ -3306,7 +3307,7 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         global: notify(&cfg.notify),
         pipe: pipe(fleet, fc, st),
         models: cfg.models.clone(),
-        harnesses: crate::harness::NAMES.iter().map(harness).collect(),
+        harnesses: crate::providers::lane_names().iter().map(harness).collect(),
         roles: fc.role.iter().filter(|r| r.0 != "conductor").map(role).collect(),
         conductor,
     }

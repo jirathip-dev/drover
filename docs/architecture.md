@@ -109,7 +109,7 @@ herdr argv) and `gh` (cached GitHub reads).
 | `pipeline` | a fleet's stages and where each outcome goes ([pipeline.md](pipeline.md)) |
 | `queue` | `queue`, `next`, `board` |
 | `drive`, `timer` | one pass of the loop; the jobs that run it (`setup`, `timer`, `tick`) and the Services rows |
-| `spawn`, `harness/*` | `spawn`, `adopt`, `profiles sync`; one file per harness (claude, hermes, dsh) |
+| `spawn`, `providers/*` | `spawn`, `adopt`, `profiles sync`; one file per provider behind one trait, listed by one `registry!` line ([providers](providers.md)) |
 | `gate` | `verdict` and `merge` |
 | `check` | `check` alerts, `clean`, `stop`, `kill`, `close`, the worktree budget |
 | `waiting` | what an idle lane waits on (`waiting`) |

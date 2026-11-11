@@ -22,21 +22,21 @@ fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     let spawn = json!({"role": "impl", "agent": "herdsman-impl-5", "harness": "claude", "model": "sonnet"});
     ev(900_500, "herdsman", Some(5), "spawn", spawn);
     for (id, fleet, title, ts) in [
-        ("t6", "herdsman", "Conductor-run design lanes", 900_200),
+        ("t6", "herdsman", "Orchestrator-run design lanes", 900_200),
         ("t7", "all", "Every repo", 900_100),
         ("t8", "herdsman", "Old chat", 900_000),
     ] {
         ev(ts, fleet, None, "thread-new", json!({"thread": id, "title": title}));
-        let agent = format!("conductor-{id}");
+        let agent = format!("orchestrator-{id}");
         let d = json!({"thread": id, "agent": agent, "pane": agent, "harness": "claude", "model": "opus"});
-        ev(ts, fleet, None, "conductor-start", d);
+        ev(ts, fleet, None, "orchestrator-start", d);
     }
     ev(
         900_300,
         "herdsman",
         None,
-        "conductor-sleep",
-        json!({"thread": "t8", "agent": "conductor-t8", "why": "idle"}),
+        "orchestrator-sleep",
+        json!({"thread": "t8", "agent": "orchestrator-t8", "why": "idle"}),
     );
     ev(
         900_300,
@@ -49,9 +49,9 @@ fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     b.attach(&c);
     for (name, status) in [
         ("herdsman-impl-5", "idle"),
-        ("conductor-t6", "idle"),
-        ("conductor-t7", "working"),
-        ("conductor-t99", "idle"),
+        ("orchestrator-t6", "idle"),
+        ("orchestrator-t7", "working"),
+        ("orchestrator-t99", "idle"),
     ] {
         b.lane(name, status, "/x");
     }
@@ -65,8 +65,8 @@ fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
 }
 
 #[test]
-fn conductors_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed() {
-    let (c, b) = setup("conductor-lanes");
+fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed() {
+    let (c, b) = setup("orchestrator-lanes");
     let agents = herdsman::herdr::agents(&b.on(&Fake::default())).unwrap();
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     let events = read(&c.state).unwrap();
@@ -100,21 +100,29 @@ fn conductors_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed(
     assert_eq!(
         got,
         [
+            r("herdsman", "herdsman-impl-5", "impl", "idle", "sonnet", "", Some(5)),
             r(
                 "herdsman",
-                "Conductor-run design lanes · t6",
-                "conductor",
+                "Orchestrator-run design lanes · t6",
+                "orchestrator",
                 "idle",
                 "opus",
                 "t6",
                 None
             ),
-            r("all", "Every repo · t7", "conductor", "working", "opus", "t7", None),
+            r("all", "Every repo · t7", "orchestrator", "working", "opus", "t7", None),
             // A `conductor-<id>` name with no such thread in the log is no lane of herdsman's.
-            r("", "conductor-t99", "other", "idle", "", "", None),
-            r("herdsman", "herdsman-impl-5", "impl", "idle", "sonnet", "", Some(5)),
+            r("", "orchestrator-t99", "other", "idle", "", "", None),
             r("", "side", "other", "idle", "", "", None),
-            r("herdsman", "Old chat · t8", "conductor", "asleep", "opus", "t8", None),
+            r(
+                "herdsman",
+                "Old chat · t8",
+                "orchestrator",
+                "asleep",
+                "opus",
+                "t8",
+                None
+            ),
         ]
     );
     // Grouped: the herdsman subgroup opens with its conductors (newest first), then the impl that changed later.
@@ -140,16 +148,16 @@ fn conductors_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed(
     assert_eq!(idle, ["herdsman", "Others"]);
     assert_eq!(
         names("idle", "herdsman"),
-        ["Conductor-run design lanes · t6", "Old chat · t8", "herdsman-impl-5"]
+        ["Orchestrator-run design lanes · t6", "Old chat · t8", "herdsman-impl-5"]
     );
     assert_eq!(names("working", "all repos"), ["Every repo · t7"]);
-    assert_eq!(names("idle", "Others"), ["conductor-t99", "side"]);
+    assert_eq!(names("idle", "Others"), ["orchestrator-t99", "side"]);
 }
 
 /// The Lanes tab's HTML: each conductor row carries its thread (the tap target), an asleep one is gone (dimmed).
 #[test]
-fn the_lanes_tab_renders_conductor_rows_with_their_thread() {
-    let (c, b) = setup("conductor-lanes-page");
+fn the_lanes_tab_renders_orchestrator_rows_with_their_thread() {
+    let (c, b) = setup("orchestrator-lanes-page");
     let f = Fake::default();
     let r = b.on(&f);
     let s = Server::new(&c, &r, None);
@@ -163,18 +171,20 @@ fn the_lanes_tab_renders_conductor_rows_with_their_thread() {
     let idle = &page[at("<h2><span class=a>idle (")..];
     let herd = &idle[idle.find("<h3>herdsman (3)</h3>").unwrap()..];
     assert!(
-        herd.starts_with("<h3>herdsman (3)</h3><div class=lane data-agent=\"Conductor-run design lanes · t6\" data-role=conductor data-thread=t6>"),
+        herd.starts_with("<h3>herdsman (3)</h3><div class=lane data-agent=\"Orchestrator-run design lanes · t6\" data-role=orchestrator data-thread=t6>"),
         "{herd}"
     );
-    assert!(page.contains("<div class=lane data-agent=\"Old chat · t8\" data-role=conductor data-gone data-thread=t8>"));
+    assert!(
+        page.contains("<div class=lane data-agent=\"Old chat · t8\" data-role=orchestrator data-gone data-thread=t8>")
+    );
     assert!(page.contains("<span class=\"nw m\">asleep"), "asleep reads muted");
     assert!(page.contains(
-        "<h3>all repos (1)</h3><div class=lane data-agent=\"Every repo · t7\" data-role=conductor data-thread=t7>"
+        "<h3>all repos (1)</h3><div class=lane data-agent=\"Every repo · t7\" data-role=orchestrator data-thread=t7>"
     ));
     let others = &page[at("<h3>Others (2)</h3>")..];
     let others = &others[..others.find("<h2>").unwrap_or(others.len())];
     assert!(
-        !others.contains("data-thread") && others.contains("conductor-t99"),
+        !others.contains("data-thread") && others.contains("orchestrator-t99"),
         "{others}"
     );
     let css = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/serve.css")).unwrap();
@@ -183,12 +193,12 @@ fn the_lanes_tab_renders_conductor_rows_with_their_thread() {
 
 /// In WebKit at 390 px: a tap on the asleep conductor's row opens its thread in the chat tab (no lane sheet).
 #[test]
-fn a_tap_on_a_conductor_row_opens_its_thread_in_the_chat_tab() {
+fn a_tap_on_a_orchestrator_row_opens_its_thread_in_the_chat_tab() {
     if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
         eprintln!("skipping: no swift/WebKit here");
         return;
     }
-    let (c, b) = setup("conductor-lanes-tap");
+    let (c, b) = setup("orchestrator-lanes-tap");
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap().to_string();
     let at = addr.clone();
@@ -207,7 +217,7 @@ fn a_tap_on_a_conductor_row_opens_its_thread_in_the_chat_tab() {
         window.late = [+(document.documentElement.dataset.tab === 'chat'), +!$('#chat').hidden, +!!v, \
           +(v && getComputedStyle(v).display !== 'none'), +(THR === 't8'), +!!(history.state && history.state.thr === 't8'), \
           +!$('#sheet.on'), errs.length];";
-    let png = tmpdir("conductor-lanes-png").join("tap.png");
+    let png = tmpdir("orchestrator-lanes-png").join("tap.png");
     let o = swift()
         .args([
             concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),

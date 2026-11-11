@@ -66,13 +66,7 @@ fn account_rows(cfg: &Config, rows: &mut Vec<String>) {
     rows.push(format!("✓ accounts — sign in from {src}"));
     // #785: ACP lanes write no meter reading; only an interactive status line does.
     rows.push("✓ meter — `accounts` shows each reading's age; one past its reset reads 0%".into());
-    let on = |n: &&&str| {
-        matches!(
-            crate::harness::get(n).credential(),
-            crate::harness::Credential::Account(_)
-        )
-    };
-    let hn = crate::harness::NAMES.iter().find(on).copied().unwrap_or_default();
+    let hn = crate::providers::accounts().map_or("", |p| p.name);
     for name in cfg.accounts.names.keys() {
         let Some((_, f)) = crate::access::token_file(cfg, hn, name) else {
             continue;
@@ -226,16 +220,8 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("harness — {binary} on PATH → install {binary}");
         row(rows, ok(r, "which", &[binary]).is_ok(), '✗', &line);
     }
-    let hermes = roles.iter().filter(|role| role.1.harness == "hermes");
-    let hermes: BTreeSet<_> = hermes.map(|role| role.1.profile_or(role.0)).collect();
-    for profile in &hermes {
-        let line = format!("hermes {profile} — profile → hermes profile create {profile}");
-        row(rows, ctx.hermes.join(profile).join("config.yaml").exists(), '✗', &line);
-    }
-    if !hermes.is_empty() {
-        let synced = crate::spawn::profiles_check(ctx, cfg, r, &mut std::io::sink()).unwrap_or(false);
-        let line = "hermes hooks — profiles sync --check → herdsman profiles sync";
-        row(rows, synced, '✗', line);
+    for (pass, bad, line) in crate::providers::lanes().flat_map(|p| p.doctor(ctx, cfg, r)) {
+        row(rows, pass, bad, &line);
     }
     // #737: a profile's hook names another binary: lanes from this one are refused ACP_UNGUARDED.
     let stray = crate::spawn::stray_hooks(ctx, cfg);
@@ -317,7 +303,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         row(rows, fresh || running.is_some(), '✗', &line);
     }
     for (label, state) in crate::timer::drift(ctx, cfg, r) {
-        let line = format!("timer — {label} {state} → herdsman timer install (the owner or a conductor)");
+        let line = format!("timer — {label} {state} → herdsman timer install (the owner or an orchestrator)");
         row(rows, state == "loaded", '✗', &line);
     }
     // #635: each cloud host's size, key and CLI; an ssh `Include` that reads a host-key file.
@@ -347,7 +333,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         }
         let tags = [tags, h.tags.clone()].concat();
         let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
-        let h = crate::harness::all().filter_map(|h| h.1.health_check());
+        let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
         let v = crate::VERSION;
         let ok = format!("✓ host {name} — herdr, session, git, gh, {logins}herdsman {v}");
@@ -368,7 +354,10 @@ const STARTUP: [&str; 4] = [".zshenv", ".zprofile", ".zshrc", ".zlogin"];
 /// #708: a clean login shell (`env -i HOME=$HOME zsh -ilc`) that exports the accounts harness's token var overrides
 /// each lane's account: the warning names the startup files that mention it, never the value or any other line.
 fn login_token(r: &dyn Runner, host: Option<&str>) -> Option<String> {
-    let var = crate::harness::accounts()?.token_env()?;
+    let crate::providers::Credential::Account(a) = crate::providers::accounts()?.credential() else {
+        return None;
+    };
+    let var = a.token_env?;
     let probe = format!(
         "t=$(env -i HOME=\"$HOME\" zsh -ilc 'echo \"token:${{{var}:+set}}\"' </dev/null 2>/dev/null); \
          case \"$t\" in *token:set*) echo token:set; cd \"$HOME\" && \

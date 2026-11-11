@@ -1,7 +1,7 @@
 # The phone page
 
 `herdsman serve --addr <host:port>` is one phone page (Home Screen app, works offline with a
-`last update hh:mm` line) with Queue · Lanes · Chat · Host · Events tabs (Chat: docs/conductor.md). `--read-only` serves GET only.
+`last update hh:mm` line) with Queue · Lanes · Chat · Host · Events tabs (Chat: docs/orchestrator.md). `--read-only` serves GET only.
 
 Frozen for features (#552): the board takes bug fixes only, until it retires once the parity list passes. New chat
 UI goes to cooee core, new workflow UI (Queue, Asks, Fleets tabs) to the cooee-drover repo; both read `/api/v1`, which
@@ -106,8 +106,8 @@ Lanes are grouped like Corral: state sections blocked → working → idle → d
 split into fleet subgroups (alphabetical, Others last), newest-changed first. A lane the log has open
 but herdr shows no pane for is `parked` (neutral, `parked · work on PR #n` or `parked · pushed <sha>`)
 when its worktree is clean with nothing unpushed, and `dead` (red, with the log/pane mismatch line)
-when work is at risk. #422: a thread's conductor (`conductor-<thread>`) is a lane of the thread's repo (an
-`all` thread's in `all repos`), role `conductor`, first in its subgroup, named `<thread title> · <thread>`; once
+when work is at risk. #422: a thread's orchestrator (`orchestrator-<thread>`) is a lane of the thread's repo (an
+`all` thread's in `all repos`), role `orchestrator`, first in its subgroup, named `<thread title> · <thread>`; once
 its pane closed it stays, dimmed, as `asleep`, and its row opens the thread in the chat tab. On a paused fleet a parked lane reads `parked: fleet paused (resume to review
 PR #n)`; once resumed, the usual `pushed <sha>, waiting for drive (next pass ≤ 5 min) to spawn review` applies. Tapping a lane
 opens a bottom sheet that slides up to 78 % and drags like an iOS sheet (it follows the finger from the
@@ -181,7 +181,7 @@ Sends pass the same Host/Origin checks, are limited to 10 a minute per device, a
 chars, or a control character other than newline). Removing a device also needs a paired cookie. Each send logs `{"type":"prompt","via":"web","agent","device","chars"}`, never the
 text. Secure cookies need https (`tailscale serve`) or localhost.
 
-Open asks (`herdsman ask`, but a conductor's `ask --thread`: those wait in their thread) show as a red **needs you** card above every tab: the question, option
+Open asks (`herdsman ask`, but an orchestrator's `ask --thread`: those wait in their thread) show as a red **needs you** card above every tab: the question, option
 buttons (recommended first) and a free-text box, tagged `routine · defaults to 2 in 24m` or `owner · waits
 for you` (#99, [docs/lanes.md](lanes.md#asks)). Answering POSTs `op=answer` (`herdsman answer … --by owner`,
 logged `"via":"web"`) under the same Host/Origin checks and needs a paired device (401 otherwise). In the
@@ -379,13 +379,13 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `GET needs` | #269: the needs-you cards for this device: `snap` (#450: the step's look's time, 0 for none; the strip under the header shows its age once over 2 min), the open `asks` (`who`, `kind`, imported `from`), each `blocked` lane's card (unpaired: its `activity`; paired: the harness `menu` or the pane's `tail`), the `needs-human` `issues` (one more round `pending`, the last verdict, the PR line, `merge`), `choosing` (`[chat·N]`); `rw`, `live`, `paired` and `pair` say which forms and buttons show |
 | `GET lanes` | #269: the Lanes tab for this device: state `sections` with their repo groups and each lane's row (avatar `state`, `act`, `atone`, `coat`; `state` in `tone` for `ago`, `why`, the `activity` or `now` line) and hidden card (`head`, `shown`, `facts`, the PR line, `dead`, the `blocked` card); `error` (no fleet.toml) or `failed` (herdr unread) |
 | `GET chat` | #269: the [chat] tab: per repo (`all` first) its thread `rows` and `archived` ones, then each thread's view (`ds`, `state`, its last 30 messages by `kind`, `older` or the `started` line); `rw`: a paired device on the live board writes; #620: serve keeps the folded tab by the log's last seq, fleet.toml's mtime, the agents and the minute, and a request in between reuses it without reading the log |
-| `GET thread/<t>?before=N&n=30` | #408, #269: a thread's messages before seq `N`, as `chat`'s pages. #681: a handoff's message carries one `handoff` item (cooee's agent→agent message): `kind: "handoff"`, `id` (its seq; a repo handoff's is its card's), `from` (`{agent: "conductor", thread, repo}`), `to` (the thread id once delivered, else `{repo, pending: true}`), `title`, `summary` (the first line), `text`, `state` (`pending`, `delivered`, `failed` with its `error`, `forwarded`), `folded` (the sender's thread; the receiver's is the message form) and, while pending, `choices`: the card's rows (`n`, `text`, the `thread` it goes to, `new` for a new thread), each picked by `POST <op>` (`answer`) with its `fleet`, `id`, `choice` = `n` and `State.mtime`; the outcome shows in both threads' items. A repo handoff's own `kind: "handoff"` row after the pick has no item (its card's is the one) |
-| `GET repo/<fleet>/threads` | #681: the repo's conductor threads, newest-active first: `id`, `title`, `last` (`line`, `ts`), `unread`, `awake` (its conductor not asleep), `archived`, and `newest: true` on the ongoing one (the first not archived), so cooee shows it as the agent's chat and the rest as side threads; `all` for the all-repos threads; 404 `NOT_FOUND` for no such fleet |
+| `GET thread/<t>?before=N&n=30` | #408, #269: a thread's messages before seq `N`, as `chat`'s pages. #681: a handoff's message carries one `handoff` item (cooee's agent→agent message): `kind: "handoff"`, `id` (its seq; a repo handoff's is its card's), `from` (`{agent: "orchestrator", thread, repo}`), `to` (the thread id once delivered, else `{repo, pending: true}`), `title`, `summary` (the first line), `text`, `state` (`pending`, `delivered`, `failed` with its `error`, `forwarded`), `folded` (the sender's thread; the receiver's is the message form) and, while pending, `choices`: the card's rows (`n`, `text`, the `thread` it goes to, `new` for a new thread), each picked by `POST <op>` (`answer`) with its `fleet`, `id`, `choice` = `n` and `State.mtime`; the outcome shows in both threads' items. A repo handoff's own `kind: "handoff"` row after the pick has no item (its card's is the one) |
+| `GET repo/<fleet>/threads` | #681: the repo's orchestrator threads, newest-active first: `id`, `title`, `last` (`line`, `ts`), `unread`, `awake` (its orchestrator not asleep), `archived`, and `newest: true` on the ongoing one (the first not archived), so cooee shows it as the agent's chat and the rest as side threads; `all` for the all-repos threads; 404 `NOT_FOUND` for no such fleet |
 | `GET events?since=N` | #259's contract: the events after `N` (#266: `&until=M`, up to `M`) in `list`; over 500, `refresh: true` and none (read `state` again). Each as the Events tab says it: `glyph`, `tone`, `text`, `imp`, the row sprite's `act` and `coat`, `plain`, and its issue's `pr` or checks `run` |
 | `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) plus #749's `blocks`: an ACP lane's transcript from shed's events (`prompt`, `reply`, `tool`, `plan`, `approval`; `?before=<seq>&n=N` pages back), a PTY lane's one `screen` block (its `lines`) |
 | `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `cond`, `bqueue`, `answer`, `drive`, `override`, `extend`, `park`, `unpark`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`, as the form or a JSON object (#555: a list joins with `,`, `true` is `1`); answers `{ok, code, message}` |
 | `GET herd` | #555: Herd mode's data, the same as `/herd.json` |
-| `GET roles?fleet=F` | #555: the fleet's [config] sheet (`config`: its roles with the model/effort pickers, the conductor) and `chat`, `[chat]`'s new-thread defaults with the harnesses it may name |
+| `GET roles?fleet=F` | #555: the fleet's [config] sheet (`config`: its roles with the model/effort pickers, the orchestrator) and `chat`, `[chat]`'s new-thread defaults with the harnesses it may name |
 | `GET setup/<pane>` | #555: a setup terminal's screen (`lines`, `urls`, `closed`), the old board's `/lane?setup=` |
 | `POST send` | #555: `{agent, text}` to a lane, or `{setup, text}` into a setup terminal: the old board's `/send` (10 a minute per device: `RATE_LIMIT`; `PAUSED`, `REV_READONLY`, `BAD_VALUE`) |
 | `POST menu` | #555: `{agent, choice, h}`, a blocked lane's menu option: `/answer` (`STALE` when the menu is not the card's `h`) |
@@ -396,8 +396,8 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `POST close` | #555: `{fleet, issue}`, a backlog issue's [close]: `gh issue close`, logged `closed`; `NOT_BACKLOG` for a queued issue or one with a lane |
 | `POST qset` | #576 (paired): `fleet`, `issue`, `key` (`design`, `verify`, `repro`), `value` (`on`, `off`): the CLI's `queue <fleet> set <n> <key> <value>` |
 | `POST lesson` | #576 (paired): `fleet`: the CLI's `lesson <fleet>`, its queue entry logged `by` the device |
-| `POST conductor-attach` | #633 (paired): `{fleet, thread}`, a cooee thread as the repo's conductor thread (`conductor-attached`): `ask --thread` takes it, lane asks route to it, its asks and decisions are `events`; answers `ConductorAttach`: `brief`, `settings` (the synced conductor Claude settings), `env` (`HERDSMAN_LANE`, `HERDSMAN_THREAD`, `HERDSMAN_PORT`), `guarded` (#565's ACP guard holds) and `why` not |
-| `POST conductor-detach` | #633 (paired): `{fleet, thread}`, the link ends (`conductor-detached`; archiving the thread ends it too); `NO_SUCH_THREAD` unless attached |
+| `POST orchestrator-attach` | #633 (paired): `{fleet, thread}`, a cooee thread as the repo's orchestrator thread (`orchestrator-attached`): `ask --thread` takes it, lane asks route to it, its asks and decisions are `events`; answers `OrchestratorAttach`: `brief`, `settings` (the synced orchestrator Claude settings), `env` (`HERDSMAN_LANE`, `HERDSMAN_THREAD`, `HERDSMAN_PORT`), `guarded` (#565's ACP guard holds) and `why` not |
+| `POST orchestrator-detach` | #633 (paired): `{fleet, thread}`, the link ends (`orchestrator-detached`; archiving the thread ends it too); `NO_SUCH_THREAD` unless attached |
 
 Every answer is JSON, a refusal too: `{ok: false, code, message}` with 401 `UNPAIRED`, 503 `BUSY` (#501), 403 `FORBIDDEN`, 405
 `READ_ONLY`, 409 and the `REFUSED` code (`STALE`, `DRIVE_RUNNING`, …), 404 `NOT_FOUND`. The theme is the phone's own
@@ -434,6 +434,26 @@ empty: no chip). The old board's Queue and Lanes rows show it as a chip; `status
 
 The rule: a screen that needs data herdsman doesn't send gets the `/api/v1` field here first, with its fixture in
 `crates/cli/tests/api_v1_contract.rs`, then the consumer reads it. Consumers never derive engine state themselves.
+
+## cooee's native screens (#814)
+
+herdsman is cooee's `drover` plugin: `cooee-plugin.toml` at the repo root names its places (the Conductor's Queue and
+Events chips, its chat cards, the drover menu row) and `[permissions]`. cooee runs `herdsman serve --addr
+127.0.0.1:$PORT` and calls it with `Authorization: Bearer $COOEE_PLUGIN_TOKEN`; the board's own Host check and a paired
+device work too. Beside `/api/v1`, never in the board's pages, it answers JSON made of cooee's blocks
+(cooee#125's screens-as-data design):
+
+- `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `?before=<unix time>`),
+  `/screens/fleets` (the Fleets sheet) and `/screens/cards` (the open asks, design reviews, needs-human issues and run
+  cards as chat cards); q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
+  and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
+  shows until a tap opens the full card; a second tap folds it again;
+- `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,
+  `replace`, `remove` and `insert` ops by block id, and the Queue chip's `badge` count;
+- `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;
+  each other runs the board's own op (a refusal is 409 with its line).
+
+Tests: `crates/cli/tests/cooee_screens.rs` against cooee's fixtures in `crates/cli/tests/golden/cooee/`.
 
 ## Host tab (#141)
 

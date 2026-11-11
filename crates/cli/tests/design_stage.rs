@@ -19,7 +19,7 @@ fn setup(name: &str, extra: &str) -> (herdsman::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), &format!("{CONFIG}{DESIGN}{extra}"));
     let sh = FakeShed::new();
     sh.attach(&c);
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     (c, sh)
@@ -143,7 +143,7 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (c, _sh) = setup(
         "design-surfaces",
-        "\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n",
+        "\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n",
     );
     let r = fake(&c, HEAD);
     let s = Server::new(&c, &r, Some(ADDR.into()));
@@ -401,7 +401,7 @@ fn design_off_on_a_queued_issue_lets_impl_spawn_directly() {
 }
 
 #[test]
-fn a_paused_fleet_auto_spawns_no_design_but_the_conductor_still_can() {
+fn a_paused_fleet_auto_spawns_no_design_but_the_orchestrator_still_can() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let (c, sh) = setup("design-paused", "");
     let toml = std::fs::read_to_string(&c.config).unwrap();

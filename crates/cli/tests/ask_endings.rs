@@ -69,12 +69,12 @@ fn a_typed_answer_closes_the_ask_only_with_the_owners_exact_line_after_it_in_its
     said(&c, NOW - 100, "t1", "owner", "before the ask");
     thread_ask(&c, NOW - 90, "q1", "t1");
     said(&c, NOW - 80, "t2", "owner", "in another thread");
-    said(&c, NOW - 70, "t1", "conductor", "the conductor's line");
+    said(&c, NOW - 70, "t1", "orchestrator", "the orchestrator's line");
     said(&c, NOW - 60, "t1", "owner", "Ok as recommended then");
     for (line, why) in [
         ("before the ask", "before"),
         ("in another thread", "t2"),
-        ("the conductor's line", "no owner message"),
+        ("the orchestrator's line", "no owner message"),
         ("never said", "no owner message"),
     ] {
         let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "--typed", line]);
@@ -108,9 +108,9 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
     let (code, out) = run(
         &c,
         &Fake::default(),
-        &["ask", "withdraw", "sendmeter", "q2", "--by", "conductor-t2"],
+        &["ask", "withdraw", "sendmeter", "q2", "--by", "orchestrator-t2"],
     );
-    assert_eq!(code, 3, "only its own thread's conductor withdraws it: {out}");
+    assert_eq!(code, 3, "only its own thread's orchestrator withdraws it: {out}");
     let (code, out) = run(
         &c,
         &Fake::default(),
@@ -120,7 +120,7 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
             "sendmeter",
             "q1",
             "--by",
-            "conductor-t1",
+            "orchestrator-t1",
             "--for",
             "q2",
         ],
@@ -135,7 +135,7 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
 /// (the real binary their hook), and a handoff card from t1 to the repo with t2 and a new thread as its rows.
 fn handoff(name: &str, sh: &FakeShed) -> herdsman::Ctx {
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
          [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
         sh.sock.display()
     );
@@ -166,7 +166,7 @@ fn a_handoff_ask_closes_when_it_is_delivered_and_when_it_fails() {
         .calls
         .borrow()
         .iter()
-        .any(|l| l.starts_with("shed send conductor-t2 ") && l.contains("grill #12"));
+        .any(|l| l.starts_with("shed send orchestrator-t2 ") && l.contains("grill #12"));
     assert!(sent, "{:?}", f.calls.borrow());
     let herdr = |l: &&String| l.starts_with("herdr") && *l != "herdr agent list";
     assert!(

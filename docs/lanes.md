@@ -5,7 +5,7 @@ or the owner-only `design` and `architect`. No lane runs the fleet: `herdsman dr
 
 ## Design and architect (#412, #730)
 
-Two roles run before impl, started by the owner, a conductor thread or drive, on the main host only. Neither writes
+Two roles run before impl, started by the owner, an orchestrator thread or drive, on the main host only. Neither writes
 product code; the owner approves, revises (a note in the next brief) or rejects their pushed work, and impl starts
 only after approve.
 
@@ -112,7 +112,7 @@ first use of a host) takes the integration branch only, and its later fetches sk
 `[limits] idle_merged_minutes` (default 15) has its pane closed by `clean` (and so by drive's pass) the `kill --yes`
 way, logged `lane-closed` with `why: merged-idle`, then its worktree removed; the dry run says `would close`. A
 `SECRET_IN_WIP` or failed snapshot keeps the pane, one `lane-kept-dirty`, never retried. A working agent, an open
-issue's lane, a conductor or any other agent in the folder stays `keep …: live agent`.
+issue's lane, an orchestrator or any other agent in the folder stays `keep …: live agent`.
 
 `--supersede` kills the old agent and logs it. If `herdr agent start` times out but the
 harness came up in the pane, spawn names the agent and logs the lane anyway; if nothing
@@ -170,7 +170,7 @@ The default (`[limits] deny_commands`, listed in `assets/deny_commands.toml`) is
 no-containers rule: `docker`, `docker-compose`, `podman`, `nerdctl`, `colima`, `orb`, `orbctl`,
 `limactl`, `supabase start`, `supabase db start`, `DOCKER_HOST=…` and `open -a Docker|OrbStack`, each
 refused with `REFUSED NO_CONTAINERS: lanes never start containers (owner rule). Use the repo's
-non-container test path, or ask the conductor.` `[fleet.<n>] deny_commands` replaces the list (`[]` turns
+non-container test path, or ask the orchestrator.` `[fleet.<n>] deny_commands` replaces the list (`[]` turns
 it off, noted on every config load), `deny_commands_add` extends whichever applies. The board's [config]
 sheet shows the active list. Each refusal is logged `hook-denied` (`rule` = the message) and shows on Events.
 
@@ -268,9 +268,9 @@ decision shows on its issue row as `decided by default: <option>` with **[change
 someone made is final (`ALREADY_ANSWERED`).
 
 #584: an ask closes on every real ending, and `herdsman asks --all` says which: `answered` (a tap, `herdsman answer`,
-or `answer <fleet> <id> --typed "<line>"`, which a conductor runs with the owner's exact line from the ask's thread,
+or `answer <fleet> <id> --typed "<line>"`, which an orchestrator runs with the owner's exact line from the ask's thread,
 logged `by: owner (typed)`; any other line is `NOT_TYPED`), `withdrawn → q<new>` (`herdsman ask withdraw`, by its own
-thread's conductor), `delivered to t<n>` or `failed` (a handoff card), `expired`, `closed: merged`, `closed: lane
+thread's orchestrator), `delivered to t<n>` or `failed` (a handoff card), `expired`, `closed: merged`, `closed: lane
 gone`. `herdsman check` expires an ask open over `[limits] ask_expire_hours` (24) that nobody waits on: a thread ask
 with no lane, a handoff card, an ask whose lane is no live agent. A live lane's ask never expires; `ask-waiting`
 repeats for it once a day. The first `check` after #584 sweeps the log once (`asks-swept`, with the count).

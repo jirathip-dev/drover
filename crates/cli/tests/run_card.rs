@@ -15,9 +15,9 @@ fn setup(name: &str, extra: &str) -> herdsman::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\n{extra}"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{extra}"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     assert_eq!(
@@ -36,15 +36,15 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
 }
 
 /// `herdsman hook` as thread t1's conductor under `c`'s fleet.toml: its stdout ("" allows).
-fn conductor_hook(c: &herdsman::Ctx, cmd: &str) -> String {
+fn orchestrator_hook(c: &herdsman::Ctx, cmd: &str) -> String {
     let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
     let mut child = Command::new(env!("CARGO_BIN_EXE_herdsman"))
         .env_remove("HERDSMAN_SCRATCH_TARGET")
-        .env("HERDSMAN_LANE", "sendmeter:-:conductor")
+        .env("HERDSMAN_LANE", "sendmeter:-:orchestrator")
         .env("HERDSMAN_THREAD", "t1")
         .env("FLEET_CONFIG", &c.config)
         .env("FLEET_STATE", &c.state)
-        .args(["hook", "--role", "conductor"])
+        .args(["hook", "--role", "orchestrator"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
@@ -79,17 +79,17 @@ fn post(c: &herdsman::Ctx, cmd: &str) -> (i32, String) {
 fn groups_default_to_all_but_pause_and_set_and_name_only_known_groups() {
     let cfg = Config::parse(CONFIG).unwrap();
     assert_eq!(
-        cfg.conductor.groups(),
+        cfg.orchestrator.groups(),
         ["design", "clean", "hosts", "reclaim", "accounts", "runners"]
     );
-    let set = Config::parse(&format!("{CONFIG}\n[conductor]\nallow = [\"set\"]\n")).unwrap();
-    assert_eq!(set.conductor.groups(), ["set"]);
-    let bad = Config::parse(&format!("{CONFIG}\n[conductor]\nallow = [\"root\"]\n"));
+    let set = Config::parse(&format!("{CONFIG}\n[orchestrator]\nallow = [\"set\"]\n")).unwrap();
+    assert_eq!(set.orchestrator.groups(), ["set"]);
+    let bad = Config::parse(&format!("{CONFIG}\n[orchestrator]\nallow = [\"root\"]\n"));
     assert!(format!("{:#}", bad.unwrap_err()).contains("\"root\" is no group"));
 }
 
 #[test]
-fn the_conductor_brief_lists_the_fleets_groups() {
+fn the_orchestrator_brief_lists_the_fleets_groups() {
     // #771: the conductor starts on shed, as an ACP session (its profile synced, its account's sign-in).
     let sh = FakeShed::new();
     let acp = format!(
@@ -98,7 +98,7 @@ fn the_conductor_brief_lists_the_fleets_groups() {
     );
     let mut c = setup(
         "card-brief",
-        &format!("{acp}\n[conductor]\nallow = [\"clean\", \"pause\"]\n"),
+        &format!("{acp}\n[orchestrator]\nallow = [\"clean\", \"pause\"]\n"),
     );
     c.exe = env!("CARGO_BIN_EXE_herdsman").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
@@ -114,10 +114,10 @@ fn the_conductor_brief_lists_the_fleets_groups() {
         "{:?}",
         f.calls.borrow()
     );
-    assert!(sh.has("conductor-t1"), "{:?}", sh.methods());
-    let brief = std::fs::read_to_string(c.state.with_file_name("conductor").join("t1/.brief.md")).unwrap();
+    assert!(sh.has("orchestrator-t1"), "{:?}", sh.methods());
+    let brief = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t1/.brief.md")).unwrap();
     for want in [
-        "## Capability groups ([conductor] allow)",
+        "## Capability groups ([orchestrator] allow)",
         "- `clean` (on): `clean --yes`, `--orphans`, `--lane`",
         "- `pause` (on): `pause`, `resume`",
         "- `hosts` (off): `hosts on|off|refresh`",
@@ -132,10 +132,14 @@ fn the_conductor_brief_lists_the_fleets_groups() {
 #[test]
 fn a_config_card_switches_a_group_on_only_at_the_owners_apply() {
     let c = setup("card-allow", "");
-    assert!(conductor_hook(&c, "herdsman pause sendmeter").contains("REFUSED GROUP_OFF"));
+    assert!(orchestrator_hook(&c, "herdsman pause sendmeter").contains("REFUSED GROUP_OFF"));
     let file = c.config.with_file_name("proposed.toml");
     let old = std::fs::read_to_string(&c.config).unwrap();
-    std::fs::write(&file, format!("{old}\n[conductor]\nallow = [\"clean\", \"pause\"]\n")).unwrap();
+    std::fs::write(
+        &file,
+        format!("{old}\n[orchestrator]\nallow = [\"clean\", \"pause\"]\n"),
+    )
+    .unwrap();
     let (code, out) = run(
         &c,
         &Fake::default(),
@@ -143,17 +147,17 @@ fn a_config_card_switches_a_group_on_only_at_the_owners_apply() {
     );
     assert_eq!((code, out.as_str()), (0, "c1\n"));
     // Proposed, not applied: still off, and the conductor can't apply it itself.
-    assert!(conductor_hook(&c, "herdsman pause sendmeter").contains("REFUSED GROUP_OFF"));
-    assert!(conductor_hook(&c, "herdsman config apply c1").contains("REFUSED OWNER_ONLY"));
+    assert!(orchestrator_hook(&c, "herdsman pause sendmeter").contains("REFUSED GROUP_OFF"));
+    assert!(orchestrator_hook(&c, "herdsman config apply c1").contains("REFUSED OWNER_ONLY"));
     let (code, out) = run(&c, &Fake::default(), &["config", "apply", "c1"]);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(conductor_hook(&c, "herdsman pause sendmeter"), "");
+    assert_eq!(orchestrator_hook(&c, "herdsman pause sendmeter"), "");
     assert!(
-        conductor_hook(&c, "herdsman hosts off mini").contains("REFUSED GROUP_OFF"),
+        orchestrator_hook(&c, "herdsman hosts off mini").contains("REFUSED GROUP_OFF"),
         "hosts is off now"
     );
     // A group verb the conductor runs shows in its thread with the group.
-    assert_eq!(conductor_hook(&c, "herdsman clean sendmeter --yes"), "");
+    assert_eq!(orchestrator_hook(&c, "herdsman clean sendmeter --yes"), "");
     let row = kinds(&c, "thread-cmd").pop().unwrap();
     assert_eq!(
         (row.str("thread"), row.str("cmd"), row.str("group")),

@@ -98,13 +98,13 @@ fn ask_answer_round_trip_prompts_the_asker_once() {
     );
 
     let r = Fake::default();
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "2", "--by", "conductor"]);
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "2", "--by", "orchestrator"]);
     assert_eq!(code, 0, "{out}");
     assert!(typed(&sh, "DECISION q1: no, trim"), "{:?}", sh.methods());
     let dec = &kinds(&c, "decision")[0];
     assert_eq!(
         (dec.str("id"), dec.str("choice"), dec.str("by")),
-        (Some("q1"), Some("no, trim"), Some("conductor"))
+        (Some("q1"), Some("no, trim"), Some("orchestrator"))
     );
     assert_eq!(run(&c, &Fake::default(), &["asks"]).1, "", "answered asks are closed");
     assert!(run(&c, &Fake::default(), &["asks", "--all"])

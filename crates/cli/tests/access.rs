@@ -583,7 +583,7 @@ fn hermes_profile_gets_only_the_listed_mcp_servers() {
     let d = tmpdir("mcp-hermes");
     let cfg = config(&d, "mcp = [\"supabase-dev\"]").replace("harness = \"claude\"\nmcp", "harness = \"hermes\"\nmcp");
     let c = ctx(&d, &cfg);
-    let yaml = c.hermes.join("fleet-impl/config.yaml");
+    let yaml = c.homes["hermes"].join("fleet-impl/config.yaml");
     std::fs::create_dir_all(yaml.parent().unwrap()).unwrap();
     std::fs::write(
         &yaml,

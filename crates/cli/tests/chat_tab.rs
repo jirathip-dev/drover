@@ -70,6 +70,7 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
         "<span class=ds><i class=dt></i>acme-api · claude · opus · awake</span>",
         "conductor in ",
         " class=\"blk me\" open><summary><span class=k>you</span>",
+        " class=\"blk ai\" open><summary><span class=k>conductor</span><span class=pv>I see it:",
         "<code>/v1/search</code>",
         "<figure class=im><img src=\"thread/t4/IMG%5F2041%2EPNG\"",
         "<figcaption>IMG_2041.PNG · 218 KB</figcaption>",
@@ -88,6 +89,10 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
         assert!(t4.contains(want), "{want} not in {t4}");
     }
     assert!(!t4.contains("DECISION q31"), "a DECISION line shows as the ✓ line only");
+    assert!(
+        chat.contains("<span class=ds>all · claude · opus · asleep</span>"),
+        "{chat}"
+    );
     assert!(!t4.contains("disabled"), "a paired owner device writes");
     // The needs-you stack keeps lane asks, and (#517) a thread's ask tied to an issue with where it was asked;
     // `[chat·N]` counts the threads that wait on a choice (t4, t5).
@@ -104,9 +109,9 @@ fn setup(name: &str) -> herdsman::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     c
@@ -116,7 +121,7 @@ fn setup(name: &str) -> herdsman::Ctx {
 /// session runs under the lane guard, #565), the profiles synced with the real binary as their hook.
 fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
          [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
         b.sock.display()
     );
@@ -137,7 +142,7 @@ fn acp() -> Fake {
 }
 
 /// The `shed run` that starts thread t1's conductor.
-const START_T1: &str = "shed run --acp claude-acp --policy allow --name conductor-t1";
+const START_T1: &str = "shed run --acp claude-acp --policy allow --name orchestrator-t1";
 
 /// A fake shed for a server thread that outlives its test (its socket file stays until the run ends).
 fn leaked() -> &'static FakeShed {
@@ -167,7 +172,7 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
         "{res}"
     );
     assert!(f.called(START_T1), "{:?}", f.calls.borrow());
-    assert!(b.has("conductor-t1"));
+    assert!(b.has("orchestrator-t1"));
     let ask = [
         "ask",
         "sendmeter",
@@ -199,7 +204,7 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
     );
     assert_eq!(body(&res), "answered q1\n", "{res}");
     assert!(
-        f.called("shed send conductor-t1 DECISION q1: small"),
+        f.called("shed send orchestrator-t1 DECISION q1: small"),
         "{:?}",
         f.calls.borrow()
     );
@@ -221,7 +226,7 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
         T + 30,
     );
     assert_eq!(body(&res), "answered q2\n", "{res}");
-    assert!(f.called("shed send conductor-t1 DECISION q2: 600 a minute"));
+    assert!(f.called("shed send orchestrator-t1 DECISION q2: 600 a minute"));
     assert!(frags(&s, &cookie, T + 40).0.contains("✓ other: \"600 a minute\""));
 }
 
@@ -256,13 +261,13 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
     let saved = c
         .state
-        .with_file_name("conductor")
+        .with_file_name("orchestrator")
         .join("t1/uploads")
         .join(format!("{T}-IMG_1.PNG"));
     assert_eq!(std::fs::read(&saved).unwrap(), png, "in the conductor's folder");
     assert!(
         f.called(&format!(
-            "shed send conductor-t1 [t1] owner: see this (attached: {})",
+            "shed send orchestrator-t1 [t1] owner: see this (attached: {})",
             saved.display()
         )),
         "the conductor gets its path: {:?}",
@@ -277,7 +282,7 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     assert_eq!(&got[at..], &png[..]);
 
     // Out: the conductor's reply with a mockup PNG.
-    let folder = c.state.with_file_name("conductor").join("t1");
+    let folder = c.state.with_file_name("orchestrator").join("t1");
     let mock = folder.join("mockup-390.png");
     std::fs::write(&mock, b"\x89PNG mock").unwrap();
     let (code, out) = run(
@@ -417,7 +422,7 @@ fn a_large_attachment_arrives_whole_over_the_socket() {
     let mut res = String::new();
     s.read_to_string(&mut res).unwrap();
     assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
-    let up = c.state.with_file_name("conductor").join("t1/uploads");
+    let up = c.state.with_file_name("orchestrator").join("t1/uploads");
     let saved = std::fs::read_dir(&up).unwrap().next().unwrap().unwrap().path();
     assert_eq!(std::fs::read(saved).unwrap(), png);
 }
@@ -484,7 +489,7 @@ fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_ima
         return;
     }
     let c = setup("chat-viewer");
-    let folder = c.state.with_file_name("conductor").join("t1");
+    let folder = c.state.with_file_name("orchestrator").join("t1");
     std::fs::create_dir_all(&folder).unwrap();
     let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
     for f in ["icon-180.png", "icon-192.png"] {
@@ -646,7 +651,7 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
     );
     go.send(()).unwrap();
     let line = seen.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
-    assert_eq!(line, "shed send conductor-t1 [t1] owner: a long message");
+    assert_eq!(line, "shed send orchestrator-t1 [t1] owner: a long message");
 }
 
 /// #403: a delivery that fails is a red system line with [retry]; [retry] types the same line, logging no copy.
@@ -682,14 +687,16 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     let res = req(&s, "POST", "/thread", &format!("op=retry&t=t1&n={n}"), &cookie, T + 10);
     assert_eq!(body(&res), "retrying\n", "{res}");
     assert!(f.called(START_T1), "{:?}", f.calls.borrow());
-    assert!(f.called("shed send conductor-t1 ") && f.calls.borrow().iter().any(|l| l.ends_with("[t1] owner: hello")));
+    assert!(
+        f.called("shed send orchestrator-t1 ") && f.calls.borrow().iter().any(|l| l.ends_with("[t1] owner: hello"))
+    );
     let log = herdsman::events::jsonl(&c.state).unwrap();
     assert_eq!(log.matches("\"from\":\"owner\",\"text\":\"hello\"").count(), 1, "{log}");
     let res = req(&s, "POST", "/thread", "op=retry&t=t1&n=1", &cookie, T + 20);
     assert!(body(&res).contains("nothing to retry"), "{res}");
     // Mid-turn, the live line is the inline mark serve.js fills with the theme's loading art; #407: serve.js floats it
     // as the pill, timed from the turn's start (the owner's last message).
-    b.set("conductor-t1", |t| {
+    b.set("orchestrator-t1", |t| {
         t["reported"] = serde_json::json!({"state": "working"})
     });
     let none = Fake::default();
@@ -973,7 +980,7 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     let msgs: Vec<_> = events.iter().filter(|e| e.kind == "thread-msg").collect();
     assert_eq!(msgs.len(), 1, "{}", log(&c));
     assert_eq!(msgs[0].str("text"), Some("Grill me on #12\nthe land mode part"));
-    let thread = c.state.with_file_name("conductor").join("t1/.thread.md");
+    let thread = c.state.with_file_name("orchestrator").join("t1/.thread.md");
     assert_eq!(
         std::fs::read_to_string(thread).unwrap(),
         "owner: Grill me on #12\nthe land mode part\n",
@@ -1047,7 +1054,7 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
         T,
     );
     assert_eq!(body(&res), "t1 started\n", "{res}");
-    let dir = c.state.with_file_name("conductor").join("t1");
+    let dir = c.state.with_file_name("orchestrator").join("t1");
     let files = |d: &std::path::Path| {
         let mut v = vec![];
         let mut todo = vec![d.to_path_buf()];
@@ -1072,7 +1079,7 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
         let s: Vec<_> = herdsman::events::read(&c.state)
             .unwrap()
             .into_iter()
-            .filter(|e| e.kind == "conductor-start")
+            .filter(|e| e.kind == "orchestrator-start")
             .collect();
         s.iter()
             .map(|e| (e.str("runtime").unwrap().to_string(), e.data["resumed"] == true))
@@ -1081,14 +1088,14 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     let res = req(&s, "POST", "/thread", "op=archive&t=t1", &cookie, T + 10);
     assert_eq!(body(&res), "t1 archived\n", "{res}");
     assert!(
-        b.called("kill", "conductor-t1") && !b.has("conductor-t1"),
+        b.called("kill", "orchestrator-t1") && !b.has("orchestrator-t1"),
         "{:?}",
         b.methods()
     );
     let sleep = herdsman::events::read(&c.state)
         .unwrap()
         .into_iter()
-        .rfind(|e| e.kind == "conductor-sleep")
+        .rfind(|e| e.kind == "orchestrator-sleep")
         .unwrap();
     assert_eq!(sleep.str("why"), Some("archived"));
     let (chat, _) = frags(&s, &cookie, T + 11);
@@ -1138,10 +1145,13 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
 
 /// herdr-only (#721 deletes it): a claude conductor in a herdr pane, archived then restored, resumes the same session.
 #[test]
-fn a_restored_herdr_thread_resumes_its_conductors_session() {
+fn a_restored_herdr_thread_resumes_its_orchestrators_session() {
     let c = setup("chat-archive-herdr");
     let r = Fake::default()
-        .reply("herdr agent list", &agents(&[("conductor-t1", "idle", "/x", "w9:p1")]))
+        .reply(
+            "herdr agent list",
+            &agents(&[("orchestrator-t1", "idle", "/x", "w9:p1")]),
+        )
         .reply("herdr agent prompt", "")
         .reply("herdr pane send-keys", "")
         .reply("herdr pane run", "")
@@ -1161,7 +1171,7 @@ fn a_restored_herdr_thread_resumes_its_conductors_session() {
     let st: Vec<_> = herdsman::events::read(&c.state)
         .unwrap()
         .into_iter()
-        .filter(|e| e.kind == "conductor-start")
+        .filter(|e| e.kind == "orchestrator-start")
         .map(|e| (e.str("session").unwrap().to_string(), e.data["resumed"] == true))
         .collect();
     assert_eq!(st.len(), 2, "{st:?}");
@@ -1212,7 +1222,7 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
         T,
     );
     assert!(body(&res).contains("at most 10 files a message"), "{res}");
-    let up = c.state.with_file_name("conductor").join("t1/uploads");
+    let up = c.state.with_file_name("orchestrator").join("t1/uploads");
     assert_eq!(std::fs::read_dir(&up).map_or(0, |d| d.count()), 0, "nothing saved");
     let res = req(
         &s,
@@ -1230,7 +1240,7 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
     let att: String = saved.iter().map(|p| format!(" (attached: {})", p.display())).collect();
     assert!(
         f.called(&format!(
-            "shed send conductor-t1 [t1] owner: IMG_0.PNG, IMG_1.PNG, IMG_2.PNG{att}"
+            "shed send orchestrator-t1 [t1] owner: IMG_0.PNG, IMG_1.PNG, IMG_2.PNG{att}"
         )),
         "{:?}",
         f.calls.borrow()
@@ -1249,10 +1259,13 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
     let (code, out) = run(&c, &cli, &["thread", "say", "t1", "two", "--file", a, "--file", a]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        f.calls.borrow().iter().any(|l| l.starts_with("shed send conductor-t1 ")
-            && l.contains("owner: two (attached: ")
-            && l.contains("-a.png) (attached: ")
-            && l.contains("-2-a.png)")),
+        f.calls
+            .borrow()
+            .iter()
+            .any(|l| l.starts_with("shed send orchestrator-t1 ")
+                && l.contains("owner: two (attached: ")
+                && l.contains("-a.png) (attached: ")
+                && l.contains("-2-a.png)")),
         "{:?}",
         f.calls.borrow()
     );
@@ -1341,7 +1354,7 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
 /// #407: thread t1's ACP conductor on `b`, working (`true`) or idle as its session reports it.
 fn working(b: &FakeShed, on: bool) {
     let st = ["idle", "working"][usize::from(on)];
-    b.set("conductor-t1", |t| t["reported"] = serde_json::json!({"state": st}));
+    b.set("orchestrator-t1", |t| t["reported"] = serde_json::json!({"state": st}));
 }
 
 /// #407: shed's CLI that notes, with each line it types into an ACP session (`shed send`), how many Esc keys the
@@ -1355,7 +1368,7 @@ impl Typing<'_> {
     fn esc(&self) -> usize {
         let keys = self.1.all("keys");
         keys.iter()
-            .filter(|k| k["name"] == "conductor-t1" && k["keys"] == serde_json::json!(["esc"]))
+            .filter(|k| k["name"] == "orchestrator-t1" && k["keys"] == serde_json::json!(["esc"]))
             .count()
     }
 }
@@ -1435,7 +1448,7 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
     std::thread::spawn(move || herdsman::serve::serve_on(&c2, r, l, false));
-    let typed = |t: &str| f.called(&format!("shed send conductor-t1 [t1] owner: {t}"));
+    let typed = |t: &str| f.called(&format!("shed send orchestrator-t1 [t1] owner: {t}"));
     for t in ["one", "two", "three"] {
         assert_eq!(post_to(&addr, &cookie, &format!("op=queue&t=t1&text={t}")), "queued\n");
     }
@@ -1527,7 +1540,7 @@ fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
     assert_eq!(run(&c, &cli, &["thread", "reply", "t1", "done"]).0, 0);
     assert_eq!(run(&c, &cli, &["thread", "say", "t1", "again"]).0, 0);
     assert!(
-        f.called("shed send conductor-t1 [t1] owner: again"),
+        f.called("shed send orchestrator-t1 [t1] owner: again"),
         "{:?}",
         f.calls.borrow()
     );
@@ -1544,7 +1557,7 @@ fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
     };
     let since = ev.iter().rfind(|e| e.str("text") == Some("again")).unwrap().ts;
     let chat = |st: &str| {
-        b.set("conductor-t1", |t| t["reported"] = serde_json::json!({"state": st}));
+        b.set("orchestrator-t1", |t| t["reported"] = serde_json::json!({"state": st}));
         let f = Fake::default();
         let r = b.on(&f);
         let s = Server::new(&c, &r, Some(ADDR.into()));

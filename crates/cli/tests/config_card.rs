@@ -18,7 +18,7 @@ const CARD: &str = "<form class=chc data-id=\"c1\"><button name=act value=apply>
 fn setup(name: &str) -> herdsman::Ctx {
     let c = ctx(
         &tmpdir(name),
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Models"]).1,
@@ -43,7 +43,7 @@ fn propose(c: &herdsman::Ctx) {
 /// Conductor messages `m<i>` in t1.
 fn msgs(c: &herdsman::Ctx, ts: u64, ids: std::ops::Range<u64>) {
     for i in ids {
-        let d = json!({"thread": "t1", "from": "conductor", "text": format!("m{i}")});
+        let d = json!({"thread": "t1", "from": "orchestrator", "text": format!("m{i}")});
         append(&c.state, &Event::new(ts + i, "sendmeter", None, "thread-msg", d)).unwrap();
     }
 }
@@ -305,7 +305,7 @@ fn applying_a_new_fleet_kicks_its_first_queued_issue() {
 #[test]
 fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
     let c = setup("cfg-sync");
-    let yaml = c.hermes.join("fleet-verify/config.yaml");
+    let yaml = c.homes["hermes"].join("fleet-verify/config.yaml");
     std::fs::create_dir_all(yaml.parent().unwrap()).unwrap();
     std::fs::write(&yaml, "model: x\n").unwrap();
     let old = std::fs::read_to_string(&c.config).unwrap();
@@ -320,9 +320,9 @@ fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
     let (code, out) = run(&c, &r, &["config", "apply", "c1"]);
     assert_eq!(code, 0, "{out}");
     // A check role's hook is rev's (read-only).
-    let allow = std::fs::read_to_string(c.hermes.join("fleet-verify/shell-hooks-allowlist.json")).unwrap();
+    let allow = std::fs::read_to_string(c.homes["hermes"].join("fleet-verify/shell-hooks-allowlist.json")).unwrap();
     assert!(allow.contains("hook --role rev"), "{allow}");
     assert!(std::fs::read_to_string(&yaml).unwrap().contains("hooks:"));
-    let settings = herdsman::harness::profiles_root(&c).join("fleet-verify/settings.json");
+    let settings = herdsman::providers::profiles_root(&c).join("fleet-verify/settings.json");
     assert!(std::fs::read_to_string(settings).unwrap().contains("hook --role rev"));
 }

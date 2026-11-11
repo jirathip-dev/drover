@@ -45,7 +45,7 @@ fn change<'a>(ctx: &Ctx, events: &'a [Event], e: &Event) -> Option<&'a Event> {
     let id = e.str("change")?;
     let d = ask_event(events, "decision", &e.fleet, id)?;
     let by = d.str("by").unwrap_or_default();
-    (by.starts_with("conductor-") && ctx.now < d.ts + crate::CHANGE).then_some(())?;
+    (by.starts_with("orchestrator-") && ctx.now < d.ts + crate::CHANGE).then_some(())?;
     ask_event(events, "needs-decision", &e.fleet, id)
 }
 
@@ -73,11 +73,11 @@ fn queued<'a>(events: &'a [Event], id: &'a str) -> BTreeMap<u64, &'a Event> {
 
 /// `choose` (an open ask), `working` (mid-turn), `asleep`, `awake` or `new` (no conductor yet).
 fn state(events: &[Event], id: &str, agents: &[Value]) -> &'static str {
-    let lane = of(events, id).rfind(|e| e.kind.starts_with("conductor-"));
+    let lane = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     let a = lane.and_then(|l| agents.iter().find(|a| l.data.get("agent") == Some(&a["name"])));
     match lane {
         _ if open_ask(events, id).is_some() => "choose",
-        Some(l) if l.kind == "conductor-sleep" => "asleep",
+        Some(l) if l.kind == "orchestrator-sleep" => "asleep",
         Some(_) if a.is_some_and(|a| a["agent_status"] == "working") => "working",
         Some(_) => "awake",
         None => "new",
@@ -242,9 +242,9 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
                     ..m("run", s("cmd"))
                 }
             }
-            ("conductor-start", _) if e.data.get("resumed") == Some(&json!(true)) => m("resumed", s("session")),
+            ("orchestrator-start", _) if e.data.get("resumed") == Some(&json!(true)) => m("resumed", s("session")),
             ("thread-model", _) => m("note", conductor::picked(e)),
-            ("conductor-sleep", _) if s("why") != "model" => m("sleep", String::new()),
+            ("orchestrator-sleep", _) if s("why") != "model" => m("sleep", String::new()),
             _ => continue,
         };
         if m.kind == "cmd" {
@@ -336,7 +336,7 @@ fn chips(cfg: &Config, r: &crate::config::Role) -> Vec<Chip> {
     let effort = r.effort_or(&cfg.limits);
     let all = [
         chip("model", r.model.as_deref(), &models),
-        chip("effort", effort.as_deref(), crate::harness::efforts(&r.harness)),
+        chip("effort", effort.as_deref(), crate::providers::get(&r.harness).efforts()),
     ];
     all.into_iter()
         .filter(|c| c.all.len() > 1 || c.cur.is_none() && !c.all.is_empty())
@@ -415,7 +415,7 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Va
             harness: chip(
                 "harness",
                 conductor::defaults(cfg, repo).ok().map(|d| d.1.harness).as_deref(),
-                &crate::harness::NAMES,
+                &crate::providers::lane_names(),
             ),
         });
     }
@@ -607,8 +607,11 @@ fn unqueue(ctx: &Ctx, e: &Event, why: &str) -> Result<()> {
 
 /// #407: Esc into the thread's live conductor: its turn stops (an asleep one has none).
 fn stop(r: &dyn Runner, events: &[Event], id: &str) {
-    let last = of(events, id).rfind(|e| e.kind.starts_with("conductor-"));
-    if let Some(p) = last.filter(|e| e.kind == "conductor-start").and_then(|e| e.str("pane")) {
+    let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
+    if let Some(p) = last
+        .filter(|e| e.kind == "orchestrator-start")
+        .and_then(|e| e.str("pane"))
+    {
         drop(crate::herdr::keys(r, p, "Escape"));
     }
 }

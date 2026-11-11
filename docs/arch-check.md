@@ -1,9 +1,9 @@
 # arch-check (#734)
 
 `herdsman arch-check [--config .herdsman/arch.toml]` is a fast static check every fleet repo runs in CI. It scans
-Rust and TypeScript sources as plain text (no compiler) and prints each violation as `file:line: why`, exiting 1 on
+Rust and TypeScript sources (and any file a `[[ban]]` names) as plain text (no compiler) and prints each violation as `file:line: why`, exiting 1 on
 any. A repo with no config has nothing to check (exit 0). Paths are globs from the repo root (`**` any depth, `*`
-inside one folder); dot folders, `target*` and `node_modules` are skipped.
+inside one folder); `target*`, `node_modules` and dot folders no `[[ban]]` path starts with are skipped.
 
 ```toml
 # A layer's files, the names other code uses it by, and the layers it may use. Rust: any `a::b` path on a line
@@ -14,6 +14,7 @@ name = "core"
 paths = ["crates/core/src/**"]
 mods = ["herdsman_core"]
 may_use = []
+exclude = ["**/*.test.*", "**/__tests__/**"] # files this entry does not check: non-test source only
 
 [[layer]]
 name = "server"
@@ -21,12 +22,33 @@ paths = ["crates/server/src/**"]
 mods = ["herdsman_server"]
 may_use = ["core"]
 
-# A substring that may appear only in its exceptions (comment lines are skipped).
+# A substring that may appear only in its exceptions, in any file its paths match (`.yml`, `.mjs`, `.sql`, …).
+# `//` comment lines (in Rust, TypeScript, JavaScript and other `//` languages) are skipped unless `comments = true`.
 [[ban]]
 pattern = "Command::new"
 paths = ["crates/*/src/**"]
 except = ["crates/core/src/runner.rs"]
 reason = "#713: spawn processes through the Runner"
+
+[[ban]]
+pattern = "@ts-expect-error"
+paths = ["web/src/**"]
+reason = "type it instead"
+comments = true
+
+[[ban]]
+pattern = "run: exit 1"
+paths = [".github/workflows/*.yml"]
+reason = "a failing step says why"
+
+# `ignore_case = true` matches the pattern in any case (#806: `Codex` and `CODEX_HOME` as well as `codex`).
+[[ban]]
+pattern = "codex"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/providers/**"]
+reason = "core never names a provider"
+comments = true
+ignore_case = true
 
 # Size limits per glob. A file or function over one fails unless the baseline lists it at that size or more,
 # so only new or grown offenders fail.
@@ -34,12 +56,15 @@ reason = "#713: spawn processes through the Runner"
 paths = ["crates/*/src/**/*.rs"]
 max_file_lines = 2000
 max_fn_lines = 150
+exclude = ["**/tests/**"]
 
 baseline = ".herdsman/arch-baseline.txt" # the default
 ```
 
 `herdsman arch-check --write-baseline` writes today's offenders to the baseline, one `<file> <lines>` or
-`<file>:<fn> <lines>` a line. A function runs from its `fn` / `function` / `const f = (…) => {` line to the first
+`<file>:<fn> <lines>` a line, and today's layer crossings, one `<file> -> <layer>` a line: a listed crossing passes,
+any other fails. Once the baseline lists crossings they may only shrink: `--write-baseline` drops fixed ones and
+exits 1 naming each new one instead of adding it. A function runs from its `fn` / `function` / `const f = (…) => {` line to the first
 later line at its indent starting with `}`, so the source must be formatted.
 
 ## Comments and docs (#735)

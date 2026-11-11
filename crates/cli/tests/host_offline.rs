@@ -240,3 +240,124 @@ fn another_hosts_agent_list_is_cut_off_at_its_limit() {
         .unwrap();
     assert_eq!((o.code, o.stdout.trim()), (0, "up"), "an answer in time is kept");
 }
+
+#[test]
+fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
+    let (c, sh) = setup("offline-move");
+    let st = c.state.parent().unwrap();
+    let note = st.join("notes.txt");
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    let sink = format!(
+        "\n[[notify]]\ncmd = \"cat >> '{}'\"\non = [\"lanes-moved\"]\n",
+        note.display()
+    );
+    std::fs::write(&c.config, toml + &sink).unwrap();
+    let hosts = |up: bool| {
+        let cache = json!({
+            "mini": {"tags": ["os:macos"], "home": "/Users/me", "probed": NOW, "seen": NOW, "up": true},
+            "bazzite": {"tags": ["os:linux"], "home": "/home/me", "probed": NOW, "seen": if up { NOW } else { NOW - 901 }, "up": up},
+        });
+        std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
+    };
+    hosts(false);
+    remote_spawn(&c);
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-13", "harness": "claude", "pane": "sendmeter-impl-13", "workspace": "",
+                   "worktree": "/home/me/.herdr/worktrees/sendmeter/issue-13", "branch": "issue-13", "host": "bazzite", "machine": "bazzite"});
+    append(&c.state, &Event::new(NOW - 800, "sendmeter", Some(13), "spawn", d)).unwrap();
+    let local = "git -C /tmp/does-not-matter/sendmeter";
+    let fail = |p: String| {
+        (
+            p,
+            herdsman::runner::Out {
+                code: 1,
+                ..Default::default()
+            },
+        )
+    };
+    let mut r = mini_only();
+    r.replies.insert(0, fail(format!("{local} fetch origin issue-13")));
+    for n in [12, 13] {
+        r.replies
+            .insert(0, fail(format!("{local} rev-parse --verify --quiet issue-{n}")));
+    }
+    r.replies
+        .insert(0, fail(format!("{local} rev-parse --verify --quiet origin/issue-13")));
+    let sha = "1234567890abcdef1234567890abcdef12345678";
+    r.replies.insert(
+        0,
+        (
+            format!("{local} rev-parse --verify --quiet origin/issue-12"),
+            herdsman::runner::Out {
+                stdout: sha.into(),
+                ..Default::default()
+            },
+        ),
+    );
+
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    for n in [12, 13] {
+        let sp = read(&c.state)
+            .unwrap()
+            .into_iter()
+            .rfind(|e| e.is("spawn", "sendmeter", n))
+            .unwrap();
+        assert_eq!(
+            (sp.str("host"), sp.str("role")),
+            (Some("mini"), Some("impl")),
+            "#{n}: {out}"
+        );
+        assert!(sh.called("run", &format!("sendmeter-impl-{n}")), "{:?}", sh.methods());
+    }
+    let creates: Vec<String> = r
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| c.starts_with(&format!("{local} worktree add")))
+        .cloned()
+        .collect();
+    assert!(
+        creates
+            .iter()
+            .any(|c| c.contains(" -b issue-12 ") && c.ends_with(" origin/issue-12")),
+        "{creates:?}"
+    );
+    assert!(
+        creates
+            .iter()
+            .any(|c| c.contains(" -b issue-13 ") && c.ends_with(" origin/staging")),
+        "{creates:?}"
+    );
+    let moved = kinds(&c, "lane-moved");
+    let m = |n: u64| moved.iter().find(|e| e.issue == Some(n)).unwrap();
+    assert_eq!(moved.len(), 2, "{moved:?}");
+    assert_eq!(
+        (m(12).str("host"), m(12).str("agent"), m(12).str("sha")),
+        (Some("bazzite"), Some("sendmeter-impl-12"), Some(sha))
+    );
+    assert_eq!(
+        (m(13).str("host"), m(13).str("agent"), m(13).str("sha")),
+        (Some("bazzite"), Some("sendmeter-impl-13"), None)
+    );
+    let posted = std::fs::read_to_string(&note).unwrap_or_default();
+    assert_eq!(posted.lines().count(), 1, "one line: {posted:?}");
+    assert!(
+        posted.contains("sendmeter-impl-12") && posted.contains("sendmeter-impl-13"),
+        "{posted}"
+    );
+    assert!(posted.contains("unpushed work stayed on bazzite"), "{posted}");
+    let (_, status) = run(&c, &r, &["status"]);
+    assert!(!status.contains("host offline"), "the old lanes are gone: {status}");
+
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    hosts(true);
+    let (f, bazzite) = (mini_only(), FakeShed::new());
+    let up = with_bazzite(&f, &bazzite);
+    let (code, out) = run(&c, &up, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(kinds(&c, "spawn").len(), 4, "{out}");
+    assert_eq!(kinds(&c, "lane-moved").len(), 2);
+    assert_eq!(std::fs::read_to_string(&note).unwrap().lines().count(), 1);
+    assert!(bazzite.all("run").is_empty(), "{:?}", bazzite.methods());
+}

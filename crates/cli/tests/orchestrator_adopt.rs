@@ -11,15 +11,15 @@ use std::time::Duration;
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const TIMEOUT: &str = r#"{"error":{"code":"timeout","message":"timed out waiting for agent startup"}}"#;
-const TAKEN: &str = r#"{"error":{"code":"agent_name_taken","message":"agent name conductor-t1 is already used"}}"#;
+const TAKEN: &str = r#"{"error":{"code":"agent_name_taken","message":"agent name orchestrator-t1 is already used"}}"#;
 
 fn setup(name: &str) -> herdsman::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     assert_eq!(
@@ -34,7 +34,7 @@ fn setup(name: &str) -> herdsman::Ctx {
 fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     let d = tmpdir(name);
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
          [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
         b.sock.display()
     );
@@ -60,7 +60,7 @@ fn acp() -> Fake {
 
 /// The thread's conductor folder, as herdr reports an agent's cwd.
 fn folder(c: &herdsman::Ctx) -> String {
-    c.state.with_file_name("conductor").join("t1").display().to_string()
+    c.state.with_file_name("orchestrator").join("t1").display().to_string()
 }
 
 /// herdr with `list` as its agents, ready to start a conductor in workspace w9 or type into one.
@@ -96,15 +96,18 @@ fn say(c: &herdsman::Ctx, r: &dyn herdsman::runner::Runner, text: &str) -> Strin
 
 fn starts(c: &herdsman::Ctx) -> Vec<herdsman::events::Event> {
     let all = herdsman::events::read(&c.state).unwrap();
-    all.into_iter().filter(|e| e.kind == "conductor-start").collect()
+    all.into_iter().filter(|e| e.kind == "orchestrator-start").collect()
 }
 
 /// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
 fn a_start_that_times_out_with_its_agent_up_is_adopted_and_its_workspace_kept() {
     let c = setup("adopt-timeout");
-    let r =
-        herdr(&agents(&[("conductor-t1", "working", &folder(&c), "w9:p1")])).once_err("herdr agent start", 1, TIMEOUT);
+    let r = herdr(&agents(&[("orchestrator-t1", "working", &folder(&c), "w9:p1")])).once_err(
+        "herdr agent start",
+        1,
+        TIMEOUT,
+    );
     let log = say(&c, &r, "hello");
     assert!(!log.contains("not delivered"), "{log}");
     assert!(!r.called("herdr workspace close"), "{:?}", r.calls.borrow());
@@ -119,11 +122,12 @@ fn a_start_that_times_out_with_its_agent_up_is_adopted_and_its_workspace_kept() 
 #[test]
 fn a_name_taken_by_the_threads_own_live_agent_is_adopted_and_the_line_typed_in() {
     let c = setup("adopt-taken");
-    let r = herdr(&agents(&[("conductor-t1", "idle", &folder(&c), "w16:p1")])).once_err("herdr agent start", 1, TAKEN);
+    let r =
+        herdr(&agents(&[("orchestrator-t1", "idle", &folder(&c), "w16:p1")])).once_err("herdr agent start", 1, TAKEN);
     let log = say(&c, &r, "hello");
     assert!(!log.contains("not delivered"), "{log}");
     assert!(
-        r.called("herdr agent prompt conductor-t1 [t1] owner: hello"),
+        r.called("herdr agent prompt orchestrator-t1 [t1] owner: hello"),
         "{:?}",
         r.calls.borrow()
     );
@@ -138,7 +142,7 @@ fn a_name_taken_by_the_threads_own_live_agent_is_adopted_and_the_line_typed_in()
 #[test]
 fn a_name_taken_by_an_agent_in_another_folder_is_still_not_delivered() {
     let c = setup("adopt-elsewhere");
-    let r = herdr(&agents(&[("conductor-t1", "idle", "/elsewhere/t1", "w16:p1")]))
+    let r = herdr(&agents(&[("orchestrator-t1", "idle", "/elsewhere/t1", "w16:p1")]))
         .once_err("herdr agent start", 1, TAKEN)
         .once_err("herdr agent start", 1, TAKEN);
     let log = say(&c, &r, "hello");
@@ -183,7 +187,7 @@ impl herdsman::runner::Runner for Slow<'_> {
 }
 
 #[test]
-fn two_messages_while_a_start_is_in_flight_start_one_conductor_and_reach_it_in_order() {
+fn two_messages_while_a_start_is_in_flight_start_one_orchestrator_and_reach_it_in_order() {
     let b = FakeShed::new();
     let c = acp_setup("adopt-serial", &b);
     let (began, began_rx) = channel();
@@ -210,9 +214,9 @@ fn two_messages_while_a_start_is_in_flight_start_one_conductor_and_reach_it_in_o
         assert!(!raced, "the second delivery did not wait: {:?}", f.calls.borrow());
     });
     assert_eq!(f.count("shed run"), 1, "{:?}", f.calls.borrow());
-    let dir = c.state.with_file_name("conductor").join("t1");
+    let dir = c.state.with_file_name("orchestrator").join("t1");
     assert_eq!(std::fs::read_to_string(dir.join(".thread.md")).unwrap(), "owner: one\n");
-    let typed = f.index("shed send conductor-t1 [t1] owner: two");
+    let typed = f.index("shed send orchestrator-t1 [t1] owner: two");
     assert!(typed > f.index("shed run"), "{:?}", f.calls.borrow());
 }
 
@@ -254,7 +258,7 @@ impl Late {
         Late {
             f: herdr(NO_AGENTS).once_err("herdr agent start", 1, TIMEOUT),
             after,
-            list: agents(&[("conductor-t1", "idle", &folder(c), "w9:p1")]),
+            list: agents(&[("orchestrator-t1", "idle", &folder(c), "w9:p1")]),
             clock: Mutex::new(0),
             starter: Mutex::new(None),
             done: (Mutex::new(false), std::sync::Condvar::new()),
@@ -326,12 +330,12 @@ fn two_messages_1_s_apart_during_a_slow_start_are_both_delivered_in_order() {
     assert!(!log.contains("still being delivered"), "{log}");
     assert!(!log.contains("not delivered"), "{log}");
     assert_eq!(r.f.count("herdr agent start"), 1, "{:?}", r.f.calls.borrow());
-    let typed = r.f.index("herdr agent prompt conductor-t1 [t1] owner: two");
+    let typed = r.f.index("herdr agent prompt orchestrator-t1 [t1] owner: two");
     assert!(typed > r.f.index("herdr agent start"), "{:?}", r.f.calls.borrow());
     assert_eq!(starts(&c).len(), 1);
 }
 
-const LOST: &str = r#"{"error":{"code":"agent_name_not_found","message":"named agent conductor-t1 no longer owns the target terminal"}}"#;
+const LOST: &str = r#"{"error":{"code":"agent_name_not_found","message":"named agent orchestrator-t1 no longer owns the target terminal"}}"#;
 
 /// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
@@ -359,14 +363,14 @@ fn a_stale_name_is_cleared_and_the_start_succeeds_on_its_second_try() {
 
 // --- #736: a conductor start blocked by a first-start prompt answers it as spawn does ---
 
-const NOT_READY: &str = r#"{"error":{"code":"agent_not_ready","message":"agent conductor-t1 is blocked during startup and is not ready for prompts"}}"#;
+const NOT_READY: &str = r#"{"error":{"code":"agent_not_ready","message":"agent orchestrator-t1 is blocked during startup and is not ready for prompts"}}"#;
 /// #484: a real failed start's screen: the unnumbered trust menu under the shell's own `❯` prompts.
 const TRUST_LIVE: &str = include_str!("golden/spawn/trust-live.txt");
 const BYPASS: &str = " WARNING: Claude Code running in Bypass Permissions mode\n\n By proceeding, you accept all responsibility?\n\n ❯ 1. No, exit\n   2. Yes, I accept\n\n Enter to confirm · Esc to cancel\n";
 
 /// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
-fn a_conductor_start_blocked_by_a_known_first_start_prompt_answers_it_and_delivers() {
+fn a_orchestrator_start_blocked_by_a_known_first_start_prompt_answers_it_and_delivers() {
     for (screen, prompt, keys) in [
         (TRUST_LIVE, "folder-trust", &["Down", "Enter"][..]),
         (BYPASS, "bypass-permissions", &["2"]),
@@ -400,14 +404,14 @@ fn a_conductor_start_blocked_by_a_known_first_start_prompt_answers_it_and_delive
             (Some("w9:p1"), &serde_json::json!(true))
         );
         // The first start's line is in its thread file, which the start's kick points it at.
-        let thread = std::fs::read_to_string(c.state.with_file_name("conductor").join("t1/.thread.md")).unwrap();
+        let thread = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t1/.thread.md")).unwrap();
         assert!(thread.contains("hello"), "{thread}");
     }
 }
 
 /// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
-fn a_conductor_start_blocked_by_an_unknown_prompt_shows_its_redacted_screen() {
+fn a_orchestrator_start_blocked_by_an_unknown_prompt_shows_its_redacted_screen() {
     let c = setup("first-start-unknown");
     let token = "ghp_0123456789abcdefghijklmnopqrstuv";
     let screen = format!(" Choose the text style that looks best with your terminal?\n\n ❯ 1. Dark mode\n   2. Light mode\nkey: {token}\n");
