@@ -1141,6 +1141,9 @@ fn pass(
         if let Err(e) = crate::gate::sync_label(ctx, cfg, r, out, s, &pr) {
             writeln!(out, "{fleet} #{n} label: {e:#}")?;
         }
+        if crate::gate::ready_draft(ctx, cfg, r, out, s, &pr)? && merge(w) {
+            continue;
+        }
         // #148: a head auto-updated this pass has no CI yet; its merge waits for the next pass.
         let now = |e: &Event| e.is("auto-updated", fleet, s.issue) && e.ts == ctx.now;
         if let Some(e) = read(&ctx.state)?.into_iter().rev().find(now) {
@@ -1282,7 +1285,8 @@ fn pass(
             // starts only now, so that one waits for the next pass).
             let mut merge = step == "merge";
             let full = f.merge_label.is_some() && pr["landing"] != "fast-first";
-            let green = ci == "green" && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
+            let green =
+                ci == "green" && pr["isDraft"] != true && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
             // #599/#650: a PASS merges this pass only if the merge gate's rule finds the head verified by it.
             let verified = || -> Result<bool> {
                 let st = fold(&read(&ctx.state)?).remove(&(fleet.to_string(), s.issue));

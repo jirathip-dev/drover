@@ -87,6 +87,7 @@ pub const NO_PUSH: &str = ", no push: ";
 pub const LESSON_PROMPT: &str = "lesson lane ended without a push: prompting it once";
 pub const LESSON_CLOSE: &str = "lesson lane ended without a push: closing as no repeated class";
 const RESPAWN_SECS: u64 = 1800;
+const DRAFT: &str = "PR is a draft";
 /// #511: a build lane's typed turn end, as drive acts on it (`turn`): nudged once, prompted to go on, or blocked.
 pub const TURN_NUDGE: &str = "reported done, nothing new pushed: nudging it once";
 pub const TURN_GO_ON: &str = "reported working, idle: prompting it to continue";
@@ -426,7 +427,7 @@ fn waits(
             let fast = pr["landing"] == "fast-first";
             let unlabelled = (fc.merge_label.as_deref()).filter(|l| !fast && !gh::has_label(pr, l));
             let what = if pr["isDraft"] == true {
-                "PASS · CI green · PR is a draft".into()
+                format!("PASS · CI green · {DRAFT}")
             } else if let Some(l) = unlabelled {
                 format!("PASS · CI green · PR lacks label `{l}`")
             } else if done && skip("verify-skipped") {
@@ -815,6 +816,9 @@ pub fn scan(
             .filter(|l| w.who == "ci" && !gh::has_label(&pr, l))
         {
             w.what = format!("PASS, PR lacks label `{l}`, so the full CI has not run");
+        }
+        if pr["isDraft"] == true && w.what.starts_with("PASS") && !w.what.ends_with(DRAFT) {
+            w.what = format!("PASS · {DRAFT}");
         }
         w.what = w.what.replace("for drive", "for drive (next pass ≤ 5 min)");
         // #513: a due spawn drive's last try refused for want of a slot waits for one (the lane row says so, not parked).

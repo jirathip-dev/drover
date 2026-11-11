@@ -319,6 +319,39 @@ pub fn sync_label(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))
 }
 
+/// #839: a draft PR with a PASS at its head is marked ready for review (its full CI starts); true while it is a draft.
+pub fn ready_draft(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    s: &IssueState,
+    pr: &Value,
+) -> Result<bool> {
+    let (fleet, f) = (s.fleet.as_str(), cfg.fleet(&s.fleet)?);
+    let head = pr["headRefOid"].as_str().unwrap_or_default();
+    let Some(num) = pr["number"].as_u64() else {
+        return Ok(false);
+    };
+    if pr["isDraft"] != true || pr["state"] != "OPEN" || s.done() || !passed(&read(&ctx.state)?, s, head) {
+        return Ok(false);
+    }
+    let n = num.to_string();
+    if let Err(e) = ok(r, "gh", &["pr", "ready", &n, "-R", &f.repo]) {
+        writeln!(out, "{fleet} #{} PR #{n} is a draft: {e:#}", s.issue)?;
+        return Ok(true);
+    }
+    gh::forget_pr(ctx, fleet, s.issue);
+    writeln!(out, "{fleet} #{} marked-ready PR #{n} @ {head:.7}", s.issue)?;
+    let d = json!({"pr": num, "sha": head});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, fleet, Some(s.issue), "marked-ready", d),
+    )?;
+    Ok(true)
+}
+
 #[doc(hidden)]
 pub fn ci_green(rollup: &Value, required: &[String]) -> Result<(), String> {
     rollup
