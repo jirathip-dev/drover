@@ -1,0 +1,14 @@
+Decided: each needs card is a `<details class=ask>` whose summary is the one line `#N · kind · question · age` plus its main button
+Because: q1234
+Decided: the open state survives `/live` because serve.js's morph keeps a details' `open` and keys it by the summary's first span, which holds no age
+Because: assets/serve.js:528
+Decided: the line's main button is the card's own form submit by `form=` id (same name and value), so it posts exactly what the full card's button posts
+Because: "The main button on a folded line does the same action as the full card's button"
+Decided: off Lanes the cards are hidden by CSS, but the `needs` part still loads on every tab: the fleet.toml error banner rides it and stays on every tab
+Because: web/src/needs.ts:54
+Decided: a blocked lane's harness prompt gets no main button on its line (the owner named four kinds; a permission prompt is approved from the open card)
+Decided: a design ask's main button is approve (it has no recommended option); an owner ask with no recommendation has none
+Rejected: dropping `parts.needs()` from boardTab for other tabs — the #709 config banner would vanish from Queue
+Check: ui-390 queue.png and lanes.png; the `needs-fold` audit view submits both buttons and compares the form data, taps open, redraws via herd-needs, taps fold
+Decided: merged origin/staging; the web/dist/board.js conflict was resolved by `npm run build` on the merged web/src, never by hand
+Owner: Needs-you cards now show only on Lanes, one line each with its main button; tap the line to see the full card.
