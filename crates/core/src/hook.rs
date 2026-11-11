@@ -833,6 +833,7 @@ pub fn turn_mark(state: &Path, lane: &str) -> PathBuf {
 pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Option<Value> {
     let ev = input["hook_event_name"].as_str().filter(|e| !e.is_empty())?;
     let d = dialects().find(|d| d.prompt == ev || d.stop == ev)?;
+    let _ = mark.parent().map(std::fs::create_dir_all);
     if d.prompt == ev {
         let _ = std::fs::write(mark, "prompt");
         return None;
