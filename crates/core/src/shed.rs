@@ -339,6 +339,9 @@ impl Runner for With<'_> {
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
         self.0.run_in(prog, args, input)
     }
+    fn run_for(&self, prog: &str, args: &[String], input: &str, limit: std::time::Duration) -> Result<Out> {
+        self.0.run_for(prog, args, input, limit)
+    }
     fn sleep(&self, secs: u64) {
         self.0.sleep(secs);
     }

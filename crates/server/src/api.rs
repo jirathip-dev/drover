@@ -619,6 +619,19 @@ pub struct HostTab {
     pub subs: Vec<Sub>,
     pub devices: Vec<Paired>,
     pub notify: Vec<Notifier>,
+    pub vendors: Vendors,
+}
+
+/// #830: the provider vendor of each account and each [sign in ▾] login that is a provider's.
+pub struct Vendors {
+    pub accounts: Vec<Vendor>,
+    pub setups: Vec<Vendor>,
+}
+
+/// #830: an account's or a login's `name` and its provider's `vendor`.
+pub struct Vendor {
+    pub name: String,
+    pub vendor: String,
 }
 
 /// #440: a global `[[notify]]` in words (System → Notifications): `web push` or `command`, and its events.

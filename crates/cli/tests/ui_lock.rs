@@ -92,10 +92,10 @@ fn a_lock_held_ten_minutes_is_run_past() {
 fn the_audits_run_under_the_lock() {
     let audit = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/ui-audit.sh")).unwrap();
     assert!(audit.contains(r#"exec "$(dirname "$0")/ui-lock.sh" "$0" "$@""#));
-    let home = tmpdir("ui-lock-swift");
+    let home = tmpdir("ui-lock-webkit");
     let mut a = holder(&home);
     // The WebKit tests' `swift` waits on the same lock.
-    let mut c = common::swift();
+    let mut c = common::webview();
     let mut s = c
         .arg("--version")
         .env("UI_AUDIT_LOCK", home.join(".cache/herdsman/ui-audit.lock"))
