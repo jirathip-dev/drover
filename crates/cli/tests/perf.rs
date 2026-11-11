@@ -91,11 +91,12 @@ fn ms(t: Instant) -> u128 {
 }
 
 /// `serve_on` (the real server: socket, sampler, watcher) on this fixture, as `herdsman serve` runs it; its address.
-fn serve(c: herdsman::Ctx, r: Slow) -> (&'static herdsman::Ctx, &'static Slow, std::net::SocketAddr) {
-    let (c, r): (&'static herdsman::Ctx, &'static Slow) = (Box::leak(Box::new(c)), Box::leak(Box::new(r)));
+fn serve<R: Runner + 'static>(c: herdsman::Ctx, r: R) -> (&'static herdsman::Ctx, &'static R, std::net::SocketAddr) {
+    let (c, r): (&'static herdsman::Ctx, &'static R) = (Box::leak(Box::new(c)), Box::leak(Box::new(r)));
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     std::thread::spawn(move || herdsman::serve::serve_on(c, r, l, false));
+    get(addr, "/sw.js");
     (c, r, addr)
 }
 
@@ -158,6 +159,7 @@ fn a_step_makes_one_remote_call_per_host_and_requests_make_none() {
     let before = r.2.load(Relaxed);
     let (c, r, addr) = serve(c, r);
     get(addr, "/"); // warm, as a phone's second load is
+    r.1.lock().unwrap().clear();
     let (page, size) = get(addr, "/");
     let (herd, _) = get(addr, "/herd.json");
     let (lanes, _) = get(addr, "/api/v1/lanes"); // #269: the Lanes tab's data
@@ -547,4 +549,305 @@ fn a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget() {
         return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
     }
     assert!(cpu < 2000.0, "100 requests took {cpu:.0} ms of CPU (budget 2000)");
+}
+
+const FLEETS: [&str; 5] = ["sendmeter", "alpha", "bravo", "charlie", "delta"];
+
+fn huge() -> (herdsman::Ctx, Fake) {
+    let sh = shed();
+    let mut cfg = CONFIG.to_string();
+    for f in &FLEETS[1..] {
+        cfg += &format!(
+            "\n[fleet.{f}]\nrepo = \"o/{f}\"\nlocal = \"/tmp/does-not-matter/{f}\"\nintegration = \"staging\"\n\
+             [fleet.{f}.role.impl]\nharness = \"claude\"\n[fleet.{f}.role.rev]\nharness = \"claude\"\n"
+        );
+    }
+    let c = ctx(&tmpdir("perf-huge"), &cfg);
+    sh.attach(&c);
+    let mut log = vec![];
+    let ev = |ts, f: &str, n: Option<u64>, kind, d| serde_json::to_string(&Event::new(ts, f, n, kind, d)).unwrap();
+    for f in FLEETS {
+        log.push(ev(
+            NOW - 9_500,
+            f,
+            None,
+            "queue",
+            json!({"op": "add", "issues": (1..=40).collect::<Vec<u64>>()}),
+        ));
+        for t in 1..=10 {
+            let id = format!("{f}-t{t}");
+            log.push(ev(
+                NOW - 9_400,
+                f,
+                None,
+                "thread-new",
+                json!({"thread": id, "title": id}),
+            ));
+            for m in 0..100 {
+                let from = if m % 2 == 0 { "owner" } else { "orchestrator" };
+                log.push(ev(
+                    NOW - 9_300 + m,
+                    f,
+                    None,
+                    "thread-msg",
+                    json!({"thread": id, "from": from, "text": "hi"}),
+                ));
+            }
+        }
+        for n in 1..=40u64 {
+            let (agent, t) = (format!("{f}-impl-{n}"), NOW - 9_000 + n);
+            let d = json!({"role": "impl", "agent": agent, "pane": agent, "runtime": "shed", "worktree": format!("/wt/{agent}")});
+            log.push(ev(t, f, Some(n), "spawn", d));
+            let mut ask = json!({"id": format!("{f}-q{n}"), "agent": agent, "question": "?", "options": ["yes", "no"], "recommend": 1});
+            if n % 4 == 0 {
+                ask["thread"] = json!(format!("{f}-t{}", n / 4));
+            }
+            log.push(ev(t + 1, f, Some(n), "needs-decision", ask));
+            if n % 4 != 1 {
+                log.push(ev(
+                    t + 2,
+                    f,
+                    Some(n),
+                    "decision",
+                    json!({"id": format!("{f}-q{n}"), "choice": "yes", "by": "owner"}),
+                ));
+            }
+            log.push(ev(t + 3, f, Some(n), "pushed", json!({"sha": "a".repeat(40)})));
+            let rev = format!("{f}-rev-{n}-r1");
+            let d = json!({"role": "rev", "agent": rev, "pane": rev, "runtime": "shed", "worktree": format!("/wt/{rev}"), "sha": "a".repeat(40)});
+            log.push(ev(t + 4, f, Some(n), "spawn", d));
+            log.push(ev(
+                t + 5,
+                f,
+                Some(n),
+                "verdict",
+                json!({"verdict": "FAIL", "sha": "a".repeat(40)}),
+            ));
+            sh.lane(&agent, "idle", &format!("/wt/{agent}"));
+            sh.screen(&agent, "⏺ Working on it\n\n❯ \n");
+        }
+    }
+    for i in 0..150_000 - log.len() as u64 {
+        let f = FLEETS[i as usize % 5];
+        let d = json!({"step": "review", "code": "EXIT", "result": "exit 1: boom"});
+        log.push(ev(NOW - 5_000 + i / 30, f, Some(1 + i % 40), "driven", d));
+    }
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    std::fs::write(&c.state, log.join("\n") + "\n").unwrap();
+    let f = Fake::default().reply("git -C", &format!("{} {}\n", "a".repeat(40), NOW - 600));
+    (c, f)
+}
+
+fn send(addr: std::net::SocketAddr, req: &str) -> String {
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    s.write_all(req.as_bytes()).unwrap();
+    let mut res = vec![];
+    drop(s.read_to_end(&mut res));
+    String::from_utf8_lossy(&res).into_owned()
+}
+
+fn pair_on(addr: std::net::SocketAddr, c: &herdsman::Ctx) -> String {
+    let post = |path: &str, extra: &str| {
+        send(
+            addr,
+            &format!("POST {path} HTTP/1.1\r\nHost: {addr}\r\n{extra}Content-Length: 0\r\n\r\n"),
+        )
+    };
+    let res = post("/pair/request", "User-Agent: perf\r\n");
+    let code = res
+        .rsplit("\r\n\r\n")
+        .next()
+        .unwrap()
+        .lines()
+        .next()
+        .unwrap()
+        .to_string();
+    let set = res.lines().find_map(|l| l.strip_prefix("Set-Cookie: ")).unwrap();
+    let cookie = format!("Cookie: {}\r\n", &set[..set.find(';').unwrap()]);
+    let now = herdsman::now();
+    let (rc, out) = run(
+        &herdsman::Ctx { now, ..c.clone() },
+        &Fake::default(),
+        &["serve", "approve", &code],
+    );
+    assert_eq!(rc, 0, "{out}");
+    assert!(post("/pair/claim", &cookie).starts_with("HTTP/1.1 200"));
+    cookie
+}
+
+fn op(addr: std::net::SocketAddr, cookie: &str, body: &str) -> String {
+    let v: serde_json::Value = serde_json::from_str(&api_body(&fetch(addr, "/api/v1/state").1)).unwrap();
+    let mtime = v["mtime"].as_str().unwrap();
+    let body = format!("{body}&mtime={mtime}");
+    let res = send(
+        addr,
+        &format!(
+            "POST / HTTP/1.1\r\nHost: {addr}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        ),
+    );
+    res.lines()
+        .find_map(|l| l.strip_prefix("Location: "))
+        .unwrap_or(&res)
+        .to_string()
+}
+
+#[test]
+fn the_state_read_stays_under_300ms_on_a_150k_event_log() {
+    let live = std::env::var("HERDSMAN_PERF_DB");
+    let (c, r) = match &live {
+        Ok(db) => {
+            let cfg =
+                std::env::var("HERDSMAN_PERF_CONFIG").map_or(CONFIG.into(), |p| std::fs::read_to_string(p).unwrap());
+            let c = ctx(&tmpdir("perf-live"), &cfg);
+            std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+            std::fs::copy(db, c.state.with_file_name("state.db")).unwrap();
+            (c, Fake::default())
+        }
+        Err(_) => huge(),
+    };
+    let (c, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0)));
+    let first = fetch(addr, "/api/v1/state").0;
+    let rebuilt = herdsman::events::REBUILDS.load(Relaxed);
+    let mut t: Vec<u128> = (0..5).map(|_| fetch(addr, "/api/v1/state").0).collect();
+    t.sort_unstable();
+    let n = herdsman::events::read(&c.state).unwrap().len();
+    report(&format!(
+        "#859 perf ({n} events): GET /api/v1/state first {first} ms, runs {t:?} ms, median {} ms",
+        t[2]
+    ));
+    if live.is_ok() {
+        return;
+    }
+    let cookie = pair_on(addr, c);
+    for p in [
+        "/api/v1/needs",
+        "/api/v1/lanes",
+        "/api/v1/chat",
+        "/api/v1/queue",
+        "/api/v1/host",
+        "/herd.json",
+        "/",
+    ] {
+        let res = send(addr, &format!("GET {p} HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n"));
+        assert!(res.starts_with("HTTP/1.1 200"), "{p}: {}", &res[..res.len().min(200)]);
+    }
+    assert_eq!(
+        herdsman::events::REBUILDS.load(Relaxed),
+        rebuilt,
+        "a board read built an ask index from a copied slice of the log"
+    );
+    let asks = |body: &str| -> Vec<String> {
+        let v: serde_json::Value = serde_json::from_str(&body[body.find("\r\n\r\n").unwrap() + 4..]).unwrap();
+        v["asks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["id"].as_str().unwrap().to_string())
+            .collect()
+    };
+    assert!(asks(&fetch(addr, "/api/v1/state").1).contains(&"alpha-q1".to_string()));
+    let msg = op(addr, &cookie, "op=answer&fleet=alpha&id=alpha-q1&choice=yes");
+    assert!(msg.contains("answered"), "{msg}");
+    let (after, body) = fetch(addr, "/api/v1/state");
+    assert!(
+        !asks(&body).contains(&"alpha-q1".to_string()),
+        "the answered ask is still listed"
+    );
+    report(&format!(
+        "#859 perf: GET /api/v1/state right after an answer {after} ms"
+    ));
+    if cfg!(debug_assertions) {
+        return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
+    }
+    assert!(t[2] < 300, "/api/v1/state took {} ms (median of 5; target < 300)", t[2]);
+}
+
+struct NoSpawn(Slow, Mutex<Vec<String>>);
+impl Runner for NoSpawn {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        if herdsman::runner::in_request() {
+            let line = format!("{prog} {}", args.join(" "));
+            self.1.lock().unwrap().push(line.clone());
+            panic!("#859: `{line}` started on a board request");
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+#[test]
+fn no_board_request_starts_a_process() {
+    let (c, r) = fixture();
+    let (c, r, addr) = serve(c, NoSpawn(r, Mutex::default()));
+    let cookie = pair_on(addr, c);
+    let paths = [
+        "/",
+        "/api/v1/state",
+        "/api/v1/health",
+        "/api/v1/host",
+        "/api/v1/queue",
+        "/api/v1/needs",
+        "/api/v1/lanes",
+        "/api/v1/chat",
+        "/api/v1/events",
+        "/api/v1/lessons",
+        "/api/v1/config",
+        "/api/v1/issue/sendmeter/1",
+        "/api/v1/lane/sendmeter-impl-1",
+        "/api/v1/lane/sendmeter-impl-20",
+        "/lane?agent=sendmeter-impl-1",
+        "/herd.json",
+        "/screens/queue",
+        "/screens/cards",
+        "/screens/events",
+        "/screens/fleets",
+        "/pair/status",
+    ];
+    for p in paths {
+        let res = send(addr, &format!("GET {p} HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n"));
+        assert!(
+            res.starts_with("HTTP/1.1 "),
+            "{p}: no answer (its handler panicked: {:?})",
+            r.1.lock().unwrap()
+        );
+    }
+    assert_eq!(
+        *r.1.lock().unwrap(),
+        Vec::<String>::new(),
+        "processes started on a request"
+    );
+    let v: serde_json::Value = serde_json::from_str(&api_body(&fetch(addr, "/api/v1/state").1)).unwrap();
+    assert_eq!(v["lanes"].as_array().unwrap().len(), 30, "{}", v["lanes"]);
+    assert!(
+        v["sources"]["herdr"].is_u64() && v["sources"]["remote"].is_u64(),
+        "{}",
+        v["sources"]
+    );
+}
+
+fn api_body(res: &str) -> String {
+    res[res.find("\r\n\r\n").unwrap() + 4..].to_string()
+}
+
+#[test]
+fn a_big_fold_holds_up_no_other_logs_read() {
+    let (big, _) = huge();
+    let (small, _) = fixture();
+    let p = big.state.clone();
+    let h = std::thread::spawn(move || herdsman::events::shared(&p).map(|l| l.len()));
+    std::thread::sleep(Duration::from_millis(50));
+    let (t, folding) = (Instant::now(), !h.is_finished());
+    append(&small.state, &Event::new(NOW, "sendmeter", None, "note", json!({}))).unwrap();
+    herdsman::events::shared(&small.state).unwrap();
+    let waited = ms(t);
+    assert_eq!(h.join().unwrap().unwrap(), 150_000);
+    assert!(
+        folding,
+        "the big fold ended before the small read began: nothing measured"
+    );
+    assert!(
+        waited < 500,
+        "a small log's read waited {waited} ms on another log's fold"
+    );
 }

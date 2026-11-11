@@ -624,6 +624,14 @@ pub struct Limits {
     pub respawn_window_minutes: u64,
     /// #825: a drive pass longer than this logs `pass-slow` with its slowest step.
     pub pass_max_secs: u64,
+    /// #859: serve's background re-reads of herdr's agents, shed's, the remote hosts' (ssh) and the host sample.
+    pub serve_herdr_secs: u64,
+    pub serve_shed_secs: u64,
+    pub serve_remote_secs: u64,
+    pub serve_host_secs: u64,
+    /// #859: `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once per episode.
+    pub slo_api_p95_ms: u64,
+    pub slo_api_minutes: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -705,6 +713,12 @@ impl Default for Limits {
             respawn_max: 3,
             respawn_window_minutes: 60,
             pass_max_secs: 120,
+            serve_herdr_secs: 2,
+            serve_shed_secs: 5,
+            serve_remote_secs: 10,
+            serve_host_secs: 10,
+            slo_api_p95_ms: 1000,
+            slo_api_minutes: 10,
         }
     }
 }
@@ -728,6 +742,7 @@ pub struct Notify {
 
 /// A webpush notifier's events when `on` is unset: the alert set plus the asks (#40) and needs-human (#130).
 pub const WEBPUSH_ON: &[&str] = &[
+    "slo-api",
     "config-invalid",
     "thread-msg",
     "blocked",

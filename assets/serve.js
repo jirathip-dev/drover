@@ -832,12 +832,14 @@ document.addEventListener('submit', async e => {
   if (!d.get('op')) return toast(`error: ${((b || f).closest('.ask')?.querySelector('summary>span') || {}).textContent || 'this form'}: no op sent`);
   if (b) b.ariaBusy = 'true';
   const p = k && PEND[b.value] && pend(k, b.value); // #217: the card is a pending line at once (no buttons, no second tap)
+  const ans = d.get('op') === 'answer' && f.closest('#needs>.ask'); // #859: an answered ask's card goes on the tap
+  if (ans) ans.remove();
   try {
     const r = await post('', d), m = r.redirected ? new URL(r.url).searchParams.get('msg') || '' : 'error: ' + (await r.text()).trim();
     toast(m);
     if (p && /^(REFUSED|error)/.test(m)) p.replaceWith(k);
     if (!m.includes(' started for ')) refresh(); // a background job's result comes by /live and its toast
-  } catch (err) { toast('error: ' + err.message); if (p) p.replaceWith(k); }
+  } catch (err) { toast('error: ' + err.message); if (p) p.replaceWith(k); if (ans) refresh(); }
   if (b) b.ariaBusy = null;
 });
 B.insertAdjacentHTML('beforeend', `<div id=sheet><div class=bd></div><div class=sh role=dialog aria-modal=true>
