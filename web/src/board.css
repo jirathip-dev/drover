@@ -1,3 +1,9 @@
 /* #265: the board's CSS as today (assets/), bundled into dist/board.css; the themes stay in assets/themes/. */
 @import "../../assets/serve.css";
 @import "../../assets/herd.css";
+html:not([data-tab=lanes]) :is(#needs>:not(.cfgbad),.later:has(+#needs)){display:none}
+.ask>summary{display:flex;gap:var(--s2)}
+.ask>summary>span:first-child{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ask>summary>.ag{flex:none;color:var(--mute);font-size:var(--fs-meta)}
+.ask>summary>button{flex:none;width:auto;max-width:40%}
+.ask>summary>button>span{display:block;white-space:nowrap;pointer-events:none}
