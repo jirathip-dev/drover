@@ -1,0 +1,7 @@
+Decided: drive's full pass restarts each open lane of a remote host unreachable 15 min (hosts.json `seen`) on the main host via spawn --supersede --host main.
+Because: "drive restarts each of its unfinished lanes on the main host, from the lane's pushed branch (staging if none), same role and round"
+Because: crates/core/src/spawn.rs:1173
+Rejected: a new restart path like roots::restart — spawn's supersede already marks an unreachable host's pane stale and #676's move starts from the pushed branch.
+Rejected: counting from the host-offline alert event — check skips stopped cloud hosts the same way, but hosts.json seen is what survey keeps per host.
+Check: a stopped cloud host is skipped; lane-moved is logged only once the lane's latest spawn has left the host, so a failed start retries next pass.
+Owner: A host unreachable for 15 minutes now gets its lanes restarted on the main host, with one line telling you which moved; unpushed work stays on that host.
