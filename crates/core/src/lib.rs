@@ -492,9 +492,12 @@ pub fn answer_typed(
     }
     let ask = events.iter().find(|e| is(e, "needs-decision"));
     let text = ask.map_or(choice, |a| chosen(a, choice));
-    if text != "approve" {
+    if text == "revise" {
         let text = format!("{text}: {note}");
         return answer_with(ctx, cfg, r, out, (fleet, id), &text, (TYPED, None), (None, Some(note)));
+    }
+    if text != "approve" {
+        return answer_with(ctx, cfg, r, out, (fleet, id), text, (TYPED, None), (None, Some(note)));
     }
     let Some(n) = ask.and_then(|a| a.issue) else {
         return gate::refused("BAD_VALUE", format!("{id} is on no issue to amend with the note"));

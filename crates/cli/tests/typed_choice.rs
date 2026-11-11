@@ -102,3 +102,23 @@ fn an_ask_answered_by_the_owner_typed_is_an_amend_basis() {
         Some("Tidy the tab.\n\n## Amendments\n- **Amendment (q1)**: scope: tab only\n")
     );
 }
+
+#[test]
+fn a_typed_reject_with_a_note_rejects_and_keeps_the_note() {
+    let line = "No, start over";
+    let c = design_ask("typed-reject", line);
+    let pre = "a".repeat(40);
+    let lane = json!({"agent": "sendmeter-design-60", "pane": "p1", "worktree": "/w", "branch": "issue-60"});
+    log(&c, NOW - 80, Some(60), "spawn", lane);
+    let review = json!({"agent": "sendmeter-design-60", "pre": pre, "adr": null});
+    log(&c, NOW - 70, Some(60), "design-review", review);
+    let note = "wrong direction";
+    let r = Fake::default().reply("git", "b");
+    let args = ["answer", "sendmeter", "q1", "reject", "--typed", line, "--note", note];
+    let (code, out) = run(&c, &r, &args);
+    assert_eq!(code, 0, "{out}");
+    assert!(kinds(&c, "design-revise").is_empty(), "reject is no revise");
+    assert_eq!(kinds(&c, "design-rejected")[0].str("pre"), Some(pre.as_str()));
+    let d = &kinds(&c, "decision")[0];
+    assert_eq!((d.str("choice"), d.str("note")), (Some("reject"), Some(note)));
+}
