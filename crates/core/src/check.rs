@@ -477,7 +477,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         crate::events::append(&ctx.state, &e)?;
     }
     // #389: a remote lane's outbox line drive has not delivered in 5 min; once per lane and line.
-    for (e, lane, ts) in crate::outbox::stale(r, &events, ctx.now) {
+    for (e, lane, ts) in crate::outbox::stale(r, &events, (ctx.now, cfg.limits.outbox_stale_minutes * 60)) {
         let why = format!(
             "{lane}'s outbox holds a line from {} ago that drive has not delivered",
             age(ctx.now.saturating_sub(ts / 1000))
@@ -521,7 +521,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let rec = a.data["recommend"].to_string();
         crate::answer(ctx, cfg, r, out, (&a.fleet, id), &rec, ("default", None))?;
     }
-    let waiting = |a: &&&Event| !routine(a) && a.str("from").is_none() && ctx.now.saturating_sub(a.ts) > 30 * 60;
+    let waiting = |a: &&&Event| {
+        !routine(a) && a.str("from").is_none() && ctx.now.saturating_sub(a.ts) > cfg.limits.ask_waiting_minutes * 60
+    };
     for a in open.iter().filter(waiting) {
         let why = format!(
             "{} unanswered for {}: {}",

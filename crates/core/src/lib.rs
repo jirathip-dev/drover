@@ -374,9 +374,6 @@ fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
         .unwrap_or(choice)
 }
 
-/// An orchestrator's answer may not change one this long after it (the owner's [change] may).
-pub const CHANGE: u64 = 30 * 60;
-
 /// #541: `herdsman answer --basis`, run by thread `t`'s conductor: answered `by: conductor-<t>` only if the ask is a
 /// lane ask on its repo, names no owner topic, and `basis` quotes the issue's spec (3 words or more, verbatim) or
 /// names an answered decision; else `OWNER_ASK`, and a lane ask on its repo is put to the owner in the thread.
@@ -609,7 +606,11 @@ fn answer_with(
     };
     let last = events.iter().rev().find(|e| is(e, "decision"));
     let orchestrator = |b: &str| b.starts_with("orchestrator-");
-    let change = |d: &&Event| d.str("by").is_some_and(orchestrator) && !orchestrator(by) && ctx.now < d.ts + CHANGE;
+    let change = |d: &&Event| {
+        d.str("by").is_some_and(orchestrator)
+            && !orchestrator(by)
+            && ctx.now < d.ts + cfg.limits.orchestrator_change_minutes * 60
+    };
     // #621: a handoff card answers every tap with its one delivery (`conductor::land`).
     let handoff = ask.data.get("handoff").is_some();
     if let Some(d) = last.filter(|d| !handoff && d.str("by") != Some("default") && !change(d)) {

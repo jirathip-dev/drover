@@ -60,6 +60,8 @@ jobs:
           just types-lint
       - name: "no Rust HTML (#269): crates/server builds the page shell only; the TypeScript board draws every tab"
         run: just html-lint
+      - name: "timing check (#844): every core timing is a [limits] key; no hard-coded Duration in crates/core/src"
+        run: scripts/timing-check.sh
       - name: line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
         run: ./target/release/herdsman cap-check --config ci/cap.toml
       - name: "arch-check (#734: layers, banned calls and size baselines in .herdsman/arch.toml; #735: new comments, stale docs)"

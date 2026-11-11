@@ -312,8 +312,9 @@ fn run_notifier(cmd: &str, payload: &str) -> Result<()> {
         "-c",
         &format!("exec >/dev/null 2>&1\n{cmd}"),
     ]));
-    let o = Real.run_for("env", &args, payload, Duration::from_secs(15))?;
-    anyhow::ensure!(o.code != 124, "timed out after 15s");
+    let secs = crate::config::limits().notify_secs;
+    let o = Real.run_for("env", &args, payload, Duration::from_secs(secs))?;
+    anyhow::ensure!(o.code != 124, "timed out after {secs}s");
     anyhow::ensure!(o.code == 0, "exit {}", o.code);
     Ok(())
 }

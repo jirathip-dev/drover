@@ -625,6 +625,8 @@ enum ThreadCmd {
 
 #[derive(Subcommand)]
 enum ConfigCmd {
+    #[command(about = "Every [limits] key with its value and what it times or caps")]
+    Show,
     /// Propose <file> as the whole new fleet.toml in a thread: validated, its diff a card with [apply] [discard]
     Propose { thread: String, file: PathBuf },
     /// Owner only: apply a proposal (backup kept, doctor run)
@@ -1555,6 +1557,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 },
                 Cmd::Config { cmd } => {
                     let (id, apply) = match cmd {
+                        ConfigCmd::Show => return crate::config::show(&cfg, out).map(|()| 0),
                         ConfigCmd::Propose { thread, file } => {
                             return crate::propose::propose(ctx, &cfg, out, &thread, &file).map(|()| 0)
                         }

@@ -258,7 +258,12 @@ pub fn account_env(cfg: &Config, r: &dyn Runner, harness: &str, name: &str) -> R
     let Some((prog, args)) = words.split_first() else {
         return fail("is empty".into());
     };
-    let o = match r.run_for(prog, args, "", std::time::Duration::from_secs(30)) {
+    let o = match r.run_for(
+        prog,
+        args,
+        "",
+        std::time::Duration::from_secs(cfg.limits.access_probe_secs),
+    ) {
         Ok(o) => o,
         Err(e) => return fail(format!("did not run: {e:#}")),
     };

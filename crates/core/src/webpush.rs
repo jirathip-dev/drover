@@ -191,7 +191,12 @@ fn post(s: &Sub, k: &SecretKey, sub: &str, body: &[u8]) -> Result<u16> {
         &s.endpoint,
     ]);
     // #713: through the runner, bounded past curl's own 10 s.
-    let o = crate::runner::Real.within("curl", &args, body, std::time::Duration::from_secs(15))?;
+    let o = crate::runner::Real.within(
+        "curl",
+        &args,
+        body,
+        std::time::Duration::from_secs(crate::config::limits().notify_secs),
+    )?;
     Ok(o.stdout.trim().parse().unwrap_or(0))
 }
 

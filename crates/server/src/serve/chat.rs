@@ -45,7 +45,8 @@ fn change<'a>(ctx: &Ctx, events: &'a [Event], e: &Event) -> Option<&'a Event> {
     let id = e.str("change")?;
     let d = ask_event(events, "decision", &e.fleet, id)?;
     let by = d.str("by").unwrap_or_default();
-    (by.starts_with("orchestrator-") && ctx.now < d.ts + crate::CHANGE).then_some(())?;
+    (by.starts_with("orchestrator-") && ctx.now < d.ts + crate::config::limits().orchestrator_change_minutes * 60)
+        .then_some(())?;
     ask_event(events, "needs-decision", &e.fleet, id)
 }
 

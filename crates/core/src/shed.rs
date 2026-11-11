@@ -318,7 +318,7 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
 /// reported state, exit or kill as a passive `lane-state` event. Only this host's server; the agent list every pass
 /// polls still sees every lane, here and elsewhere. #529: a running service follows the stream and keeps `shed.seq`.
 pub fn intake(ctx: &Ctx, cfg: &Config, w: &Wire) -> Result<usize> {
-    let got = events(w, seen(ctx), Duration::from_millis(300))?;
+    let got = events(w, seen(ctx), Duration::from_millis(cfg.limits.shed_read_millis))?;
     let mut n = 0;
     for e in &got {
         n += usize::from(log(ctx, cfg, e)?);

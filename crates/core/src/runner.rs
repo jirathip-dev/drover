@@ -140,7 +140,7 @@ impl Real {
             })
         };
         // #776: a `-C <dir>` on a disk that stopped answering fails at once; its child would never exit.
-        if let Some(dir) = dir.filter(|d| hung(d, PROBE, list)) {
+        if let Some(dir) = dir.filter(|d| hung(d, probe_wait(), list)) {
             return fail(format!("{dir} is on a disk that is not answering"));
         }
         let mut pipes = None;
@@ -212,11 +212,18 @@ pub fn limit(prog: &str, args: &[String]) -> Duration {
     Duration::from_secs(secs)
 }
 
-/// #776: how long a folder's listing may take before its disk counts as not answering.
-pub const PROBE: Duration = Duration::from_secs(2);
+/// #776: how long a folder's listing may take before its disk counts as not answering (`disk_probe_secs`).
+pub fn probe_wait() -> Duration {
+    Duration::from_secs(crate::config::limits().disk_probe_secs)
+}
 
-/// #776: how long a disk that let a call run out of time stays hung: every path on it fails at once until then.
-pub const SICK: Duration = Duration::from_secs(300);
+fn sick_for() -> Duration {
+    Duration::from_secs(crate::config::limits().disk_sick_secs)
+}
+
+fn poll() -> Duration {
+    Duration::from_millis(crate::config::limits().poll_millis)
+}
 
 /// #776: the probe `Real` uses: `dir`'s disk (its `st_dev`) and the first entry of its listing.
 fn list(dir: &str) -> Option<u64> {
@@ -260,15 +267,15 @@ fn mark(dev: u64) -> Option<std::path::PathBuf> {
 }
 
 fn is_sick(dev: u64) -> bool {
-    let fresh = |t: std::time::SystemTime| t.elapsed().is_ok_and(|e| e < SICK);
+    let fresh = |t: std::time::SystemTime| t.elapsed().is_ok_and(|e| e < sick_for());
     dev != 0
-        && (sick().get(&dev).is_some_and(|t| t.elapsed() < SICK)
+        && (sick().get(&dev).is_some_and(|t| t.elapsed() < sick_for())
             || mark(dev)
                 .and_then(|p| p.metadata().ok()?.modified().ok())
                 .is_some_and(fresh))
 }
 
-/// #776: mark the disk `dir`'s last probe named as hung for `SICK` (a call on it ran out of time).
+/// #776: mark the disk `dir`'s last probe named as hung for `disk_sick_secs` (a call on it ran out of time).
 pub fn sicken(dir: &str) {
     use std::sync::atomic::Ordering::Relaxed;
     let dev = probes().get(dir).map_or(0, |p| p.dev.load(Relaxed));
@@ -293,7 +300,7 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
             if !p.done.load(Relaxed) || is_sick(p.dev.load(Relaxed)) {
                 return true;
             }
-            if p.at.elapsed() < Duration::from_secs(60) {
+            if p.at.elapsed() < Duration::from_secs(crate::config::limits().disk_trust_secs) {
                 return false;
             }
         }
@@ -318,7 +325,7 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
         if done.load(Relaxed) {
             return is_sick(dev.load(Relaxed));
         }
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(poll());
     }
     !done.load(Relaxed)
 }
@@ -329,12 +336,12 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
 pub fn read_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> {
     let path = path.as_ref().to_path_buf();
     let late = || std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{}: no answer", path.display()));
-    let end = Instant::now() + PROBE;
+    let end = Instant::now() + probe_wait();
     let dir = path
         .parent()
         .map(|d| d.to_string_lossy().into_owned())
         .unwrap_or_default();
-    if hung(&dir, PROBE, list) {
+    if hung(&dir, probe_wait(), list) {
         return Err(late());
     }
     let claim = Claim::take(&path.to_string_lossy(), end).ok_or_else(late)?;
@@ -456,7 +463,7 @@ pub fn settle<P: Proc>(key: Option<&str>, limit: Duration, start: impl FnOnce() 
         if let Some(st) = c.try_wait()? {
             return Ok(Ended::Exited(st));
         }
-        std::thread::sleep(Duration::from_millis(20));
+        std::thread::sleep(poll());
     }
     let _ = c.kill();
     if let Some(cl) = &claim {
