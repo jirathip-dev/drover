@@ -516,8 +516,6 @@ fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
     assert!(!again.contains("issue-48"), "{again}");
 }
 
-/// #820: over budget, waiting lanes (live agents idle on an ask or a review) lose their build folders, the longest
-/// waiting first, until under; a working lane never; one owner line per pass names the lanes and the GB freed.
 #[test]
 fn over_budget_frees_waiting_lanes_longest_waiting_first() {
     let cfg = |gb: f64| format!("{CONFIG}worktree_budget_gb = {gb}\n");
@@ -528,7 +526,7 @@ fn over_budget_frees_waiting_lanes_longest_waiting_first() {
         lane(&c, 20, 8, "impl", "issue-8"),
         lane(&c, 5, 9, "impl", "issue-9"),
     );
-    ev(&c, 30, 7, "needs-decision", json!({"id": "q1", "question": "which?"})); // #7 waits since 30, #8 since 20
+    ev(&c, 30, 7, "needs-decision", json!({"id": "q1", "question": "which?"}));
     let cache = |a: &str| build(&c.worktrees.join(".build"), a, 4096);
     let (a, r8, b) = (
         build(&asks, "target", 4096),
@@ -565,7 +563,6 @@ fn over_budget_frees_waiting_lanes_longest_waiting_first() {
         "all budget-freed: freed 0.0 GB from sendmeter-impl-8"
     );
 
-    // Half a block: #7 goes too, in the same one line; the working #9 keeps its own.
     let c = ctx(&d, &cfg(2048.0 / 1_073_741_824.0));
     run_budget(&c);
     assert!(!a.exists() && !ca.exists() && b.exists() && cb.exists());

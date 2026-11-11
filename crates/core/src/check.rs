@@ -1144,7 +1144,7 @@ fn save(
 }
 
 /// #164: the worktree total by a full walk (drive's pass, never a request), stamped for spawn's `DISK_BUDGET` and the
-/// Host tab. #820: over `worktree_budget_gb`, waiting lanes' build folders go, the longest waiting first (`budget-freed`).
+/// Host tab. Over `worktree_budget_gb`, the idlest lanes' build folders go first (`budget-freed`), never a working one's.
 pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let mut total = du(&ctx.worktrees).saturating_sub(du(&ctx.worktrees.join(crate::roots::BUILD)));
     let over = |t: u64| gb(t) > cfg.limits.worktree_budget_gb;
