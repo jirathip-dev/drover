@@ -175,7 +175,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             continue;
         };
         let ns: Vec<String> = mine.iter().map(|h| format!("#{}", h.0 .1)).collect();
-        // #812: what holds the slots after the sweep above, never a marker it just removed.
         let by = crate::drive::held_by(ctx, cfg, r);
         let by = if by.is_empty() {
             "no spawn starting now".into()

@@ -98,12 +98,10 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
     (live, stale)
 }
 
-/// #812: lease `l` still holds its slot: unexpired, no older than `spawn_pending_max_secs`, its kick alive.
 fn holds(ctx: &Ctx, cfg: &Config, r: &dyn Runner, l: &crate::db::Lease) -> bool {
     l.expires_at > ctx.now && ctx.now.saturating_sub(l.at) <= cfg.limits.spawn_pending_max_secs && !gone(r, l, ctx.now)
 }
 
-/// #812: the spawn markers holding a slot, oldest first.
 fn starting(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<crate::db::Lease> {
     let mut v: Vec<_> = (crate::db::leases(&ctx.state, "spawn-").into_iter())
         .filter(|l| l.key.ends_with(".pending") && holds(ctx, cfg, r, l))
@@ -537,8 +535,7 @@ fn update(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, fleet: &str, n: u64) -
     append(&ctx.state, &Event::new(e.ts, fleet, None, "drive-pass", d))
 }
 
-/// #318: the `spawn` in each live `spawn-<fleet>-<n>.pending`, one a launched kick is still starting (#812: by
-/// `holds`, the sweep's own rule).
+/// #318: the `spawn` in each live `spawn-<fleet>-<n>.pending`, one a launched kick is still starting.
 pub(crate) fn pending(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<Event> {
     let live = starting(ctx, cfg, r).into_iter();
     live.filter_map(|l| serde_json::from_str(&l.data).ok()).collect()

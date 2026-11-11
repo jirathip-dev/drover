@@ -320,8 +320,6 @@ fn a_lane_spawned_during_the_remote_listing_is_not_adopted() {
     assert_eq!(adopted.iter().map(|e| e.issue).collect::<Vec<_>>(), [Some(13)]);
 }
 
-/// #812: herdr reused the pane id of #12's logged impl lane for a rev lane no spawn logged: the pane is another lane,
-/// so drive adopts it rather than leave the review waiting on "a lane is already on it".
 #[test]
 fn a_rev_lane_on_a_reused_pane_id_is_adopted() {
     let c = ctx(&tmpdir("orphan-812-reused"), CONFIG);
@@ -341,8 +339,6 @@ fn a_rev_lane_on_a_reused_pane_id_is_adopted() {
     );
 }
 
-/// #812: an orphan rev lane of another round than the one due (r3 while r1 is) is replaced as `--supersede` would:
-/// its work saved, its pane closed, never adopted.
 #[test]
 fn an_orphan_rev_lane_of_the_wrong_round_is_closed() {
     let c = ctx(&tmpdir("orphan-812-round"), CONFIG);

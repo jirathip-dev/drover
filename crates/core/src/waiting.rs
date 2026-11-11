@@ -423,7 +423,6 @@ fn waits(
         "ready" if gh::ci(&checks) == "green" => {
             // #650: verify passed by drive's skip at this head says so.
             let skip = |k: &str| events.iter().any(|e| e.is(k, f, n) && e.str("sha") == Some(pushed));
-            // #812: a draft, or a PR without the label merge needs, does not merge: the row names that.
             let fast = pr["landing"] == "fast-first";
             let unlabelled = (fc.merge_label.as_deref()).filter(|l| !fast && !gh::has_label(pr, l));
             let what = if pr["isDraft"] == true {
@@ -822,7 +821,6 @@ pub fn scan(
         let tried = mine.iter().rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
         let spawn = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("herdsman spawn "));
         if spawn && tried.is_some_and(|e| e.str("code") == Some("SPAWN_PENDING")) {
-            // #812: the markers holding the slots now, each with its age.
             let by = crate::drive::held_by(ctx, cfg, r);
             w.what = if by.is_empty() {
                 SLOT.into()

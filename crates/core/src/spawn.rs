@@ -1649,7 +1649,7 @@ pub(crate) fn lane_admit(
     role: &str,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
-    let events = &[events, &crate::drive::pending(ctx, cfg, r)].concat(); // #318: spawns still starting count as lanes
+    let events = &[events, &crate::drive::pending(ctx, cfg, r)].concat();
     let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
@@ -1995,7 +1995,6 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let (Some(pane), m, name) = (a["pane_id"].as_str(), a["machine"].as_str(), a["name"].as_str()) else {
             continue;
         };
-        // #812: a pane id herdr reused for another agent is not that agent's: the pane matches with its name.
         let named = |e: &&Event| name.is_none_or(str::is_empty) || e.str("agent") == name;
         let at =
             |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m && named(e) || e.str("agent") == name;
@@ -2037,7 +2036,6 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
             .flatten()
             .and_then(head)
             .filter(|(x, h): &(String, String)| !x.eq_ignore_ascii_case(h));
-        // #812: a review of another round than the one due is replaced, as `--supersede` would.
         let due = s
             .stage_rounds
             .get(f.flow().stage_of(&role))

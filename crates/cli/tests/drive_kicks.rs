@@ -883,7 +883,6 @@ fn waiting_names_a_slot_wait_not_a_stuck_tick() {
     assert!(!out.contains("tick stuck?"), "{out}");
 }
 
-/// #812: six markers whose kick died (unexpired leases) and one live kick's marker.
 fn dead_six_live_one(name: &str) -> (herdsman::Ctx, Fake) {
     let c = fleet(name, 6, 1);
     (11..=16).for_each(|n| mark(&c, n, 4242, 10));
@@ -894,8 +893,6 @@ fn dead_six_live_one(name: &str) -> (herdsman::Ctx, Fake) {
     (c, r)
 }
 
-/// #812: a dead kick's marker holds no slot anywhere the slots are read: `waiting`'s holders, drive's admit, and the
-/// `spawn-held` alert, which names the live marker (key and age) that does hold one, not the swept ones.
 #[test]
 fn a_dead_kicks_marker_counts_nowhere_and_the_hold_names_the_live_one() {
     let (c, r) = dead_six_live_one("kicks-812-dead");
@@ -922,7 +919,6 @@ fn a_dead_kicks_marker_counts_nowhere_and_the_hold_names_the_live_one() {
     assert_eq!(stale(&c).len(), 6);
 }
 
-/// #812: a due fix round refused SPAWN_PENDING: `waiting` names the marker holding the slot and its age.
 #[test]
 fn waiting_names_the_marker_that_holds_the_slot() {
     let (c, r) = dead_six_live_one("kicks-812-waiting");
@@ -942,7 +938,6 @@ fn waiting_names_the_marker_that_holds_the_slot() {
     );
 }
 
-/// #812: with every slot held by dead kicks' markers, a manual spawn is admitted and so is drive's launch.
 #[test]
 fn a_manual_spawn_and_drives_launch_agree_on_the_slots() {
     let (c, r) = dead_six_live_one("kicks-812-manual");

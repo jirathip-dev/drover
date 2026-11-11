@@ -555,7 +555,6 @@ fn a_dead_fix_lane_is_respawned_not_parked() {
     assert_eq!(of(22), Some(None), "a fix lane still there is left alone");
 }
 
-/// #812: a PASS with CI green whose PR is a draft, or lacks the label merge needs, says so; never "merging within 1 min".
 #[test]
 fn a_green_pass_on_a_draft_or_unlabelled_pr_names_the_cause() {
     let (c, mut r) = fixture("waiting-812-draft");
