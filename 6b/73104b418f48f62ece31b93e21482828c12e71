@@ -1,0 +1,8 @@
+Decided: the fold and Lanes-only rules move from web/src/board.css to assets/serve.css
+Because: crates/server/src/serve.rs:1636
+Decided: the line's main button is capped at a third of the row, so the question keeps half of it
+Because: assets/ui-audit.js:1327
+Decided: the main button's label ellipsises so a long recommended option never overflows the line
+Rejected: linking dist/board.css in the page shell — a second copy of serve.css on every load
+Check: ui job green; ui-390 queue.png shows no needs card, lanes.png one line per card
+Owner: Needs-you cards now really hide off Lanes and fold to one line; the first round's styles never reached the page.
