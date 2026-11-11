@@ -1,0 +1,5 @@
+Decided: no code change this round; merged origin/staging and refreshed the PR body's evidence at the new head
+Because: scripts/evidence-check.sh:10
+Rejected: editing the body only for 95a13ac — staging had moved, so the gates re-ran on the merged head instead
+Check: the evidence check passes at the pushed head and the PR body's Tests section names 477e6d1
+Owner: Nothing new for you here; this round only refreshes the test evidence after catching up with staging.
