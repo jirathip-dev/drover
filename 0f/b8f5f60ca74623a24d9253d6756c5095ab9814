@@ -1,0 +1,7 @@
+Decided: an orchestrator thread from before #780 still carries `<fleet>:-:conductor`, and the role family read it as impl; family now maps both role names to orchestrator
+Because: crates/core/src/orchestrator.rs:127
+Because: "Orchestrator and conductor sessions, which have no lane in HERDSMAN_LANE, end their turns freely"
+Rejected: gating the stop hook on a numeric issue in HERDSMAN_LANE — a second rule for what the role family already says
+Check: crates/core/src/config.rs:1149 makes `herdsman turn` and the hook's reviewer and builds flags treat `conductor` the same as `orchestrator`
+Check: the chat_tab browser test also fails on this branch with the fix reverted, so it was already failing
+Owner: Orchestrator threads started before the rename are no longer told to run a command they cannot run.
