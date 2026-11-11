@@ -305,7 +305,7 @@ impl<'a> Pass<'a> {
             let bare: Vec<String> = std::iter::once("-oControlPath=none".into()).chain(bare).collect();
             o = self.r.run_for(prog, &bare, input, limit)?;
         }
-        if o.code == 124 || refused(&o) {
+        if matches!(o.code, 124 | 255) {
             self.up.lock().unwrap().insert(m.into(), false);
         }
         self.note("");
@@ -555,6 +555,12 @@ pub fn agents_of(cfg: &Config, name: &str, on: &On) -> Result<Vec<Value>> {
 pub fn offline<'a>(ctx: &Ctx, sp: Option<&'a Event>) -> Option<&'a str> {
     let h = sp.filter(|e| e.str("machine").is_some())?.str("host")?;
     cached(ctx).get(h).is_some_and(|s| !s.up).then_some(h)
+}
+
+/// #877: spawn `sp`'s lane is on a host that is `off` or failed its last probe: a pass never reaches into it.
+pub fn held(ctx: &Ctx, cfg: &Config, sp: &Event) -> bool {
+    let off = |h: &str| cfg.hosts.get(h).is_some_and(|c| !c.enabled);
+    offline(ctx, Some(sp)).is_some() || sp.str("machine").is_some() && sp.str("host").is_some_and(off)
 }
 
 /// This host's live agents, then the remote ones.
