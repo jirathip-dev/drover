@@ -1,0 +1,13 @@
+Decided: `answer --typed` takes an optional explicit choice; the typed line is then evidence only, and `--note` carries the note.
+Because: "takes an explicit choice (approve/revise/reject, or the option number) plus the owner's line as evidence"
+Decided: a non-approve choice with a note answers `<choice>: <note>`, which a design ask's decide reads as the revise note.
+Because: crates/core/src/design.rs:122
+Decided: an approve with a note logs `note` on the decision, then runs `amend` with the ask as its basis.
+Because: "An approve with a note records the note and also writes it under the issue's `## Amendments`."
+Decided: amend's basis check accepts `by: owner (typed)` beside owner and default.
+Because: crates/core/src/amend.rs:33
+Rejected: parsing "approve with note" out of free text — guessing intent from words is the bug itself.
+Rejected: `--note` on plain `answer` too — the issue scopes it to typed answers; clap requires `--typed` and a choice.
+Check: free text alone with `--typed` still revises with the line as its note (typed_choice.rs second test).
+Check: the note is validated before the decision is logged, so amend cannot fail on it after an approve.
+Owner: When you type "approve with a note" in a thread, the design is approved and your note lands in the issue's Amendments.
