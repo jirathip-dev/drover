@@ -1464,8 +1464,6 @@ fn impl_lane_never_edits_the_cap_file() {
     assert_eq!(bash("25", "sed -i '' 's/35500/36000/' ci/cap.toml"), "");
 }
 
-/// #826: the stop hook asks for `herdsman turn` only in impl-family lanes; an orchestrator (or pre-#780 conductor)
-/// thread and a session outside any lane end their turns freely.
 #[test]
 fn the_stop_hook_asks_for_the_turn_only_in_impl_lanes() {
     let stop = |lane: Option<&str>, role: &str| hook_in(lane, role, json!({"hook_event_name": "Stop"}));
