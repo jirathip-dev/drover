@@ -720,10 +720,10 @@ fn message_text_is_not_a_write_or_a_group_verb() {
     let sh = |cmd: &str| orchestrator_hook(&d, json!({"tool_name": "Bash", "tool_input": {"command": cmd}}));
     let refusal = "REFUSED GROUP_OFF: the `set` group is off; I ran `herdsman set synergy impl --model x`";
     for cmd in [
-        format!("herdsman thread handoff t6 t7 'copy' \"cp mock.png {s}/orchestrator/t7/; then {refusal}\""),
-        format!("herdsman thread handoff t6 synergy \"why: {refusal}\" 'mv a > {s}/x'"),
-        format!("herdsman ask synergy 1 \"cp a {s}/x?\" --why \"`herdsman set x impl`\""),
-        format!("gh issue create -t 'hook' --body \"echo x > {s}/events.jsonl; {refusal}\""),
+        format!("herdsman thread handoff t6 t7 \"copy\" 'cp mock.png {s}/orchestrator/t7/; then {refusal}'"),
+        format!("herdsman thread handoff t6 synergy 'why: {refusal}' \"mv a > {s}/x\""),
+        format!("herdsman ask synergy 1 \"cp a {s}/x?\" --why '`herdsman set x impl`'"),
+        format!("gh issue create -t 'hook' --body 'echo x > {s}/events.jsonl; {refusal}'"),
     ] {
         assert_eq!(sh(&cmd), "", "{cmd}");
     }
@@ -740,6 +740,7 @@ fn message_text_is_not_a_write_or_a_group_verb() {
         "herdsman thread handoff t6 t7 a b; herdsman set synergy impl --model x",
         "herdsman \"set\" synergy impl --model x",
         "herdsman thread handoff t6 t7 a \"$(herdsman set synergy impl --model x)\"",
+        "herdsman thread handoff t6 t7 a \"run `herdsman set synergy impl --model x`\"",
     ] {
         assert!(sh(cmd).contains("REFUSED GROUP_OFF"), "{cmd}");
     }
