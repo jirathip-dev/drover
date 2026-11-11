@@ -678,7 +678,6 @@ enum CardCmd {
     },
     /// Owner only: deny a card; nothing runs
     Deny { id: String },
-    /// #821: an approved card's run, detached by approve; its exit code and output tail go to the thread
     #[command(hide = true)]
     Run { id: String },
 }

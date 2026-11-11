@@ -159,8 +159,7 @@ pub fn settle_via(
     Ok(line)
 }
 
-/// #821: `herdsman card run <id>`, detached by [approve]: approved card `id`'s command run once in its folder, killed
-/// with its process group past its --timeout; its exit code and output tail (secrets masked) logged and posted.
+/// #821: run approved card `id` once, detached, up to its --timeout; log and post its exit code and output tail.
 pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> {
     let events = read(&ctx.state)?;
     let Some(c) = events.iter().find(|e| e.kind == "run-card" && e.str("id") == Some(id)) else {

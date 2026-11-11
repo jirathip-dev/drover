@@ -280,9 +280,6 @@ fn a_hard_no_is_refused_at_posting() {
     );
 }
 
-/// #821: a card's `sh` as a clock would run it: `sleep N` ends with exit 0 when its call's limit is at least N s, else
-/// it is killed (exit 124) once the limit passes, as `Real` does. A call that lost its limit has the 60 s default.
-/// The run's own output file (its last argument) gets `started` first; a detached start is only recorded.
 struct Clock(Fake);
 
 impl Clock {
@@ -361,9 +358,6 @@ fn last_msg(c: &herdsman::Ctx) -> String {
     kinds(c, "thread-msg").pop().unwrap().str("text").unwrap().to_string()
 }
 
-/// #821: [approve] posts `running…` at once and starts the run detached on the main host; the detached run (`card run`)
-/// keeps the card's --timeout, not the 60 s default (here through shed's runner, the one the owner's host uses), and
-/// posts the real exit code and tail; it runs once.
 #[test]
 fn a_card_sleeping_90s_with_timeout_300_runs_in_the_background_and_reports_exit_0() {
     let c = setup(
@@ -387,7 +381,6 @@ fn a_card_sleeping_90s_with_timeout_300_runs_in_the_background_and_reports_exit_
     assert_eq!(detached, [format!("detach {} card run r1", c.exe)]);
     assert!(!r.0.called("sh -c"), "{:?}", r.0.calls.borrow());
 
-    // The detached run, as the main host starts it.
     let (code, out) = run(&at(&c, T + 150), &r, &["card", "run", "r1"]);
     assert_eq!(code, 0, "{out}");
     assert!(r.0.called("sh -c"), "{:?}", r.0.calls.borrow());
@@ -408,14 +401,12 @@ fn a_card_sleeping_90s_with_timeout_300_runs_in_the_background_and_reports_exit_
     );
     assert!(text.contains("started") && text.contains("slept 90s"), "{text}");
 
-    // Once only: a second start runs nothing.
     let again = Clock(Fake::default());
     let (code, out) = run(&at(&c, T + 160), &again, &["card", "run", "r1"]);
     assert_eq!((code, out.contains("REFUSED ALREADY_SETTLED")), (3, true), "{out}");
     assert!(!again.0.called("sh -c") && kinds(&c, "run-done").len() == 1);
 }
 
-/// #821: past its --timeout the run is killed (its whole process group) and reported as a timeout with its tail.
 #[test]
 fn a_run_past_its_timeout_is_killed_and_reported_with_its_tail() {
     let c = setup("card-timeout", "");
