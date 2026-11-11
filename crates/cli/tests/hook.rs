@@ -711,7 +711,6 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
     }
 }
 
-/// #834: a message's text is judged by what the command runs, not its words; a real write or off-group verb is not.
 #[test]
 fn message_text_is_not_a_write_or_a_group_verb() {
     let d = tmpdir("hook-msg");
