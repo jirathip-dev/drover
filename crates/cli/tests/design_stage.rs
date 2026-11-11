@@ -606,3 +606,35 @@ fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
         ("design", 1)
     );
 }
+
+#[test]
+fn a_design_brief_takes_the_medium_and_path_the_issue_names() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let c = setup("design-medium", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let body = r#"{"title":"t","body":"Draw SwiftUI views in `apple/design/x/` (previews only)."}"#;
+    let base = fake(&c, HEAD);
+    let r = Both(Fake::default().reply("gh issue view", body), &base);
+    drive(&c, &r);
+    let b = brief(&c);
+    assert!(
+        b.contains("- Medium: SwiftUI. You write only under `docs/design/`, `apple/design/x/`;"),
+        "{b}"
+    );
+    drive(&c, &r);
+    let w = wt(&c, 12);
+    assert!(base.called(&format!(
+        "git -C {w} diff --name-only {HEAD} {HEAD} -- docs/design apple/design/x"
+    )));
+    assert_eq!(state(&c, 12), "design-review");
+    let c = setup("design-medium-html", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    drive(&c, &fake(&c, HEAD));
+    assert!(brief(&c).contains("- Medium: HTML. You write only under `docs/design/`;"));
+}

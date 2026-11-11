@@ -2157,6 +2157,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         groups: rules.groups,
         scratch: std::env::var("HERDSMAN_SCRATCH_TARGET").ok().filter(|s| !s.is_empty()),
         cap,
+        design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, &input, fleet, n)),
     };
     let cur = |d: &str| {
         runner::ok(r, "git", &["-C", d, "rev-parse", "--abbrev-ref", "HEAD"])
