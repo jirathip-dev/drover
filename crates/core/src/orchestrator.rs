@@ -618,30 +618,46 @@ pub fn inside(ctx: &Ctx, cfg: &Config, id: &str, p: &std::path::Path) -> Option<
 }
 
 /// A file a message carries, as the thread logs it: its name, path in the orchestrator's folder and size.
-pub fn file(ctx: &Ctx, cfg: &Config, id: &str, p: &std::path::Path) -> Result<Value> {
-    let Some(p) = inside(ctx, cfg, id, p) else {
-        let d = dir(ctx, cfg, id).display().to_string();
-        bail!("{}: not in the thread's folder {d}; copy it there first", p.display());
+pub fn file(ctx: &Ctx, cfg: &Config, t: &Event, p: &std::path::Path) -> Result<Value> {
+    let id = t.str("thread").unwrap_or_default();
+    let p = match inside(ctx, cfg, id, p) {
+        Some(p) => p,
+        None => copy_in(ctx, cfg, t, p)?,
     };
     let size = std::fs::metadata(&p).with_context(|| p.display().to_string())?.len();
     let name = p.file_name().map(|n| n.to_string_lossy().into_owned());
     Ok(json!({"name": name, "path": p, "size": size}))
 }
 
+fn copy_in(ctx: &Ctx, cfg: &Config, t: &Event, p: &std::path::Path) -> Result<std::path::PathBuf> {
+    let id = t.str("thread").unwrap_or_default();
+    let roots = (cfg.fleet.get(&t.fleet).into_iter())
+        .flat_map(|f| [ctx.worktrees.join(f.repo_name()), expand(&f.local)])
+        .filter_map(|r| r.canonicalize().ok());
+    let from = (p.canonicalize().ok()).filter(|f| f.is_file() && roots.clone().any(|r| f.starts_with(r)));
+    let (Some(from), Some(name)) = (from, p.file_name()) else {
+        let d = dir(ctx, cfg, id).display().to_string();
+        bail!(
+            "{}: not in the thread's folder {d}, a lane worktree of fleet {} or its repo checkout",
+            p.display(),
+            t.fleet
+        );
+    };
+    let to = dir(ctx, cfg, id).join("files");
+    std::fs::create_dir_all(&to)?;
+    let to = to.join(name);
+    let _ = std::fs::remove_file(&to);
+    std::fs::copy(&from, &to).with_context(|| from.display().to_string())?;
+    to.canonicalize().map_err(Into::into)
+}
+
 /// `herdsman thread reply [--file <path>]…`: the orchestrator's message to the owner, its files shown inline.
 pub fn reply(ctx: &Ctx, cfg: &Config, id: &str, text: &str, files: &[std::path::PathBuf]) -> Result<()> {
     text_ok(text)?;
-    let files = files
-        .iter()
-        .map(|p| file(ctx, cfg, id, p))
-        .collect::<Result<Vec<_>>>()?;
-    log(
-        ctx,
-        cfg,
-        find(&shared(&ctx.state)?, id)?,
-        "orchestrator",
-        (text, &files),
-    )
+    let events = shared(&ctx.state)?;
+    let t = find(&events, id)?;
+    let files = files.iter().map(|p| file(ctx, cfg, t, p)).collect::<Result<Vec<_>>>()?;
+    log(ctx, cfg, t, "orchestrator", (text, &files))
 }
 
 /// `herdsman thread say` (and a thread ask's answer, `raw`: typed as is; #386: the board's, with `files`): log

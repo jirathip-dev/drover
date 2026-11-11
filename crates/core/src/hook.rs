@@ -279,8 +279,14 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         };
         // A link's target resolves against the link's folder, not the cwd: `ln` gets no own-folder pass.
         // #504: the shell expands braces, globs, variables and escapes after this check sees the word.
+        let copy = matches!(t.first(), Some(&("cp" | "mv" | "install" | "rsync" | "ditto")));
+        let into = t.last().filter(|_| copy).map(|w| resolve(w, &cwd));
+        let folder =
+            |f: &str| into.as_deref() == Some(f) && p.own.as_deref().is_some_and(|o| Path::new(o) == Path::new(f));
         let own = |f: &str| {
-            !t.contains(&"ln") && !f.contains(['{', '}', '*', '?', '[', ']', '$', '~', '\\']) && own_file(f, p)
+            !t.contains(&"ln")
+                && !f.contains(['{', '}', '*', '?', '[', ']', '$', '~', '\\'])
+                && (own_file(f, p) || folder(f))
         };
         let hit = (t.iter().flat_map(|w| paths(w)))
             .find_map(|f| p.paths.iter().find(|pp| f.starts_with(pp.as_str()) && !own(&f)))
