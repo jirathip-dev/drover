@@ -1,0 +1,7 @@
+Decided: no code change this round; the ui-webkit job was cancelled after 2h38m on a hung runner, no test failed
+Because: scripts/evidence-check.sh:10
+Decided: merged origin/staging f2a2410 so every check re-runs at one new head, and the body names that head
+Because: "`cargo build`, `clippy -D warnings` and `cargo test` exit 0, and `ci/cap.toml` holds"
+Rejected: re-running only the cancelled job — staging had moved 10 commits, so a fresh head also re-checks the cap
+Check: at 1c8f666 ui-webkit, rust, ui and evidence are green; cap-check reports 41283 / 45400
+Owner: The orchestrator can now show a design image or screenshot from a lane's worktree in a thread reply, with no run card.
