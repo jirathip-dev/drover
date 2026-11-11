@@ -1,0 +1,5 @@
+Decided: round 2 only removes the comment lines arch-check rejected (new `//!`/`///`/`//` lines and the two trailing comments re-indented under `if due`); no code changed
+Because: crates/core/src/hosts.rs:327
+Rejected: keeping the `#485`/`#419` trailing comments — re-indenting them makes them new lines, which arch-check fails
+Check: `herdsman arch-check --base origin/staging` reports 0 violations; offline_tick, runner_limits and tick_stuck still pass
+Owner: no behaviour change; this round only makes CI's comment check pass
