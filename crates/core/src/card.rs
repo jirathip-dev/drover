@@ -11,7 +11,6 @@ use crate::runner::{argv, Runner};
 use crate::{orchestrator, Ctx};
 use anyhow::Result;
 use serde_json::json;
-use std::time::Duration;
 
 /// An approval's window: 15 min from the card's post.
 pub const TTL: u64 = 900;
@@ -168,48 +167,33 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> 
     if settled(&events, id).is_none_or(|s| s.data["approved"] != true) {
         return refused("NOT_APPROVED", format!("{id} is not approved; nothing ran"));
     }
-    let ran = |e: &Event| ["run-started", "run-done"].contains(&e.kind.as_str()) && e.str("id") == Some(id);
+    let ran = |e: &Event| matches!(e.kind.as_str(), "run-started" | "run-done") && e.str("id") == Some(id);
     if events.iter().any(ran) {
-        return refused(
-            "ALREADY_SETTLED",
-            format!("{id} ran already; a new run needs a new card"),
-        );
+        return refused("ALREADY_SETTLED", format!("{id} ran already; post a new card"));
     }
     let [thread, cmd, dir, sum] = ["thread", "cmd", "dir", "sha"].map(|k| c.str(k).unwrap_or_default());
     let (pid, start) = (std::process::id(), crate::now());
+    let secs = c.data["timeout"].as_u64().unwrap_or(600);
     let d = json!({"thread": thread, "id": id, "sha": sum, "pid": pid});
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-started", d))?;
-    let secs = c.data["timeout"].as_u64().unwrap_or(600);
-    let file = ctx.state.with_file_name(format!("run-{id}.out"));
-    let path = file.display().to_string();
-    let sh = "exec >\"$3\" 2>&1; cd -- \"$1\" && eval \"$2\"";
-    let o = r.run_for(
-        "sh",
-        &argv(&["-c", sh, "sh", dir, cmd, &path]),
-        "",
-        Duration::from_secs(secs),
-    );
-    let (code, mut text) = o.map_or_else(|e| (-1, format!("{e:#}")), |o| (o.code, o.stdout + &o.stderr));
+    let out = ctx.state.with_file_name(format!("run-{id}.out"));
+    let (sh, path) = ("exec >\"$3\" 2>&1; cd -- \"$1\" && eval \"$2\"", out.display());
+    let args = argv(&["-c", sh, "sh", dir, cmd, &path.to_string()]);
+    let o = r.run_for("sh", &args, "", std::time::Duration::from_secs(secs));
+    let (code, mut note) = o.map_or_else(|e| (-1, format!("{e:#}")), |o| (o.code, o.stdout + &o.stderr));
     if code == 124 {
-        text = format!("killed after {secs}s (its --timeout)");
+        note = format!("killed after {secs}s (its --timeout)");
     }
-    text.insert_str(0, &std::fs::read_to_string(&file).unwrap_or_default());
-    let lines: Vec<&str> = text.lines().collect();
-    let tail = lines[lines.len().saturating_sub(20)..]
-        .iter()
-        .map(|l| crate::lanes::redact(l));
-    let tail = tail.collect::<Vec<_>>().join("\n");
-    let d = json!({"thread": thread, "id": id, "sha": sum, "by": "owner", "code": code, "tail": tail});
+    let text = std::fs::read_to_string(&out).unwrap_or_default() + &note;
+    let mut tail: Vec<String> = text.lines().rev().take(20).map(crate::lanes::redact).collect();
+    tail.reverse();
+    let tail = tail.join("\n");
     let now = ctx.now + crate::now().saturating_sub(start);
-    emit(&ctx.state, cfg, Event::new(now, &c.fleet, None, "run-done", d))?;
+    let ctx = &Ctx { now, ..ctx.clone() };
+    let d = json!({"thread": thread, "id": id, "sha": sum, "by": "owner", "code": code, "tail": tail});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-done", d))?;
     let line = format!("run {id} approved by owner, ran in {dir}: exit {code}\n```\n{tail}\n```");
-    let _ = orchestrator::say(
-        &Ctx { now, ..ctx.clone() },
-        cfg,
-        r,
-        (thread, &line, &[]),
-        ("system", false),
-    );
+    let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
     if code == 124 {
         let _ = r.run("kill", &argv(&["-KILL", "--", &format!("-{pid}")]));
     }
