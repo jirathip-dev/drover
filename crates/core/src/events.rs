@@ -76,7 +76,7 @@ pub fn append(path: &Path, ev: &Event) -> Result<()> {
 
 /// The live log (#343: without the events a rotation archived), by seq.
 pub fn read(path: &Path) -> Result<Vec<Event>> {
-    crate::db::events(path, "archived = ?1", 0)
+    Ok(shared(path)?.events.clone())
 }
 
 /// #344: the log in the JSONL format before #344, one event a line with its seq (`herdsman events --jsonl`).
@@ -414,6 +414,7 @@ pub const PASSIVE: &[&str] = &[
     "start-resent",
     "nudged",
     "respawned-silent",
+    "rev-stale-replaced",
     "budget-freed",
     // #798: a finished lane's build folder or scratch removed.
     "build-freed",
@@ -460,6 +461,7 @@ pub const PASSIVE: &[&str] = &[
     "decision-redelivered",
     "labelled",
     "build-cloned",
+    "build-reused",
     "unlabelled",
     "form-only-rejected",
     "form-rounds-exhausted",

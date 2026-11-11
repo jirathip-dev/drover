@@ -22,6 +22,8 @@ pub const SOFT: [&str; 8] = [
 const SKIP: [&str; 2] = ["IN_FLIGHT", "ALREADY_DONE"];
 /// A pending action unstarted this long brings its card back.
 pub const BACK_SECS: u64 = 1800;
+/// #825: the reason of a start held by host load alone: it waits, its card never comes back for it.
+pub const LOAD: &str = "HOST_BUSY (load)";
 
 /// An issue's pending action: its latest `pending-action` with no `spawn` of the issue after it.
 #[derive(Debug, Clone, PartialEq)]
@@ -37,7 +39,7 @@ pub struct Pending {
 impl Pending {
     /// Its card is back: a hard refusal, or still not started after `BACK_SECS`.
     pub fn back(&self, now: u64) -> bool {
-        self.failed || now >= self.since + BACK_SECS
+        self.failed || now >= self.since + BACK_SECS && self.reason.as_deref() != Some(LOAD)
     }
     /// The row's line while it waits: `starting, waiting for host: <reason> · <age>`.
     pub fn line(&self, now: u64) -> Option<String> {
@@ -90,12 +92,17 @@ pub fn refused(ctx: &Ctx, (fleet, n): (&str, u64), code: &str, why: &str) -> Res
         return Ok(false);
     };
     let soft = SOFT.contains(&code);
-    let reason = if soft {
-        code.to_string()
-    } else {
-        format!("{code}: {why}")
+    let signals = why.split(" (top:").next().unwrap_or_default();
+    let load = code == "HOST_BUSY"
+        && signals.contains("load/cpu")
+        && !signals.contains("pressure")
+        && !signals.contains("swap");
+    let reason = match () {
+        () if load => LOAD.to_string(),
+        () if soft => code.to_string(),
+        () => format!("{code}: {why}"),
     };
-    if SKIP.contains(&code) || soft && p.reason.as_deref() == Some(code) {
+    if SKIP.contains(&code) || soft && p.reason.as_deref() == Some(&reason) {
         return Ok(true);
     }
     let d = json!({"action": p.action, "role": p.role, "since": p.since, "after": p.after, "reason": reason,
