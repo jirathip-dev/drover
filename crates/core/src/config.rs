@@ -1146,7 +1146,7 @@ impl Fleet {
         match role {
             "design" => "design",
             "architect" => "architect",
-            "orchestrator" => "orchestrator",
+            r if crate::orchestrator::is_role(r) => "orchestrator",
             r if self.flow().is_check(r) => "rev",
             _ => "impl",
         }
