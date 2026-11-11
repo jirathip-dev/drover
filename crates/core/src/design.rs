@@ -12,6 +12,23 @@ use std::path::Path;
 /// The design ask's options; free text is a revise note.
 pub const OPTIONS: [&str; 3] = ["approve", "revise", "reject"];
 
+/// #868: a design lane's hook scope: its worktree top (from the hook input's `cwd`) and its issue's design paths.
+pub fn scope(ctx: &Ctx, r: &dyn Runner, input: &Value, fleet: &str, n: Option<u64>) -> crate::hook::Design {
+    let here = std::env::current_dir()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let cwd = input["cwd"].as_str().unwrap_or(&here);
+    let top = ok(r, "git", &["-C", cwd, "rev-parse", "--show-toplevel"]);
+    let spec = n
+        .and_then(|n| crate::gh::cached_spec(ctx, fleet, n))
+        .unwrap_or_default();
+    crate::hook::Design {
+        root: top.map_or_else(|_| cwd.to_string(), |t| t.trim().to_string()),
+        allow: paths(spec["body"].as_str().unwrap_or_default()),
+    }
+}
+
 /// #868: the folders a design lane writes: `docs/design` and each backquoted `…/design/…` path its issue `body` names.
 pub fn paths(body: &str) -> Vec<String> {
     let mut out = vec!["docs/design".to_string()];
