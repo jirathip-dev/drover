@@ -2923,7 +2923,7 @@ fn a_draft_pr_with_a_pass_is_marked_ready_once_then_merged() {
     );
     let ready = "gh pr ready 100 -R jirathip-dev/sendmeter";
     let kinds = |k: &str| read(&c.state).unwrap().iter().filter(|e| e.kind == k).count();
-    let r = fake(NO_AGENTS)
+    let r = fake(NONE)
         .reply("gh pr view issue-12", &draft_pr(&head, "green"))
         .reply("gh pr ready 100", "")
         .reply("gh pr merge 100", "")
@@ -2934,7 +2934,7 @@ fn a_draft_pr_with_a_pass_is_marked_ready_once_then_merged() {
     assert!(!r.called("gh pr merge"), "a draft never merges: {out}");
     assert_eq!(kinds("marked-ready"), 1);
     herdsman::gh::forget_pr(&c, "sendmeter", 12);
-    let r = fake(NO_AGENTS)
+    let r = fake(NONE)
         .reply("gh pr view issue-12", &pr(&head, "green"))
         .reply("gh pr ready 100", "")
         .reply("gh pr merge 100", "")
@@ -2959,7 +2959,7 @@ fn a_draft_pr_that_cannot_be_marked_ready_says_so_in_status() {
         "verdict",
         json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
     );
-    let r = fake(NO_AGENTS)
+    let r = fake(NONE)
         .reply("gh pr view issue-12", &draft_pr(&head, "pending"))
         .once_err("gh pr ready 100", 1, "GraphQL: Resource not accessible by integration");
     let (out, _) = drive(&c, &r);

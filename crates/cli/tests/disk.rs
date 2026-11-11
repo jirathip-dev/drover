@@ -596,17 +596,14 @@ fn over_budget_frees_waiting_lanes_longest_waiting_first() {
         cache("sendmeter-impl-8"),
         cache("sendmeter-impl-9"),
     );
-    let r = Fake::default().reply("git -C", "").reply(
-        "herdr agent list",
-        &agents(&[
-            ("sendmeter-impl-7", "blocked", "/x", "p7"),
-            ("sendmeter-impl-8", "idle", "/x", "p8"),
-            ("sendmeter-impl-9", "working", "/x", "p9"),
-        ]),
-    );
+    let sh = FakeShed::attached(&c);
+    sh.lane("sendmeter-impl-7", "blocked", "/x");
+    sh.lane("sendmeter-impl-8", "idle", "/x");
+    sh.lane("sendmeter-impl-9", "working", "/x");
+    let r = Fake::default().reply("git -C", "");
     let run_budget = |c: &herdsman::Ctx| {
         let mut out = vec![];
-        herdsman::check::budget(c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+        herdsman::check::budget(c, &Config::load(&c.config).unwrap(), &sh.on(&r), &mut out).unwrap();
         String::from_utf8(out).unwrap()
     };
     let out = run_budget(&c);
@@ -622,6 +619,7 @@ fn over_budget_frees_waiting_lanes_longest_waiting_first() {
     );
 
     let c = ctx(&d, &cfg(2048.0 / 1_073_741_824.0));
+    sh.attach(&c);
     run_budget(&c);
     assert!(!a.exists() && !ca.exists() && b.exists() && cb.exists());
     let freed = events(&c, "budget-freed");

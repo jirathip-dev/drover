@@ -28,7 +28,7 @@ impl Runner for Dropped {
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, _limit: Duration) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
-        let air = matches!(prog, "ssh" | "herdr") && args.iter().any(|a| a == "air") && args[0] != "-G";
+        let air = prog == "ssh" && args.iter().any(|a| a == "air") && args[0] != "-G";
         if !air || line == PROBE {
             return self.0.run_in(prog, args, input);
         }
@@ -52,27 +52,16 @@ fn main_host() -> Fake {
             "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
         )
         .reply(PROBE, "")
-        .reply("herdr agent list", NO_AGENTS)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
         .reply("sysctl -n hw.ncpu", "8")
         .reply("vm_stat", "Swapouts: 5.\n")
         .reply("gh issue view", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply("git ", "")
-        .reply(
-            "herdr worktree create",
-            r#"{"result":{"workspace":{"workspace_id":"w1"}}}"#,
-        )
-        .reply(
-            "herdr pane list --workspace w1",
-            r#"{"result":{"panes":[{"pane_id":"w1:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run w1:p1 export", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr agent wait", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-fn setup(name: &str, air_cfg: &str, limits: &str) -> herdsman::Ctx {
+fn setup(name: &str, air_cfg: &str, limits: &str) -> (herdsman::Ctx, FakeShed) {
     let base = CONFIG
         .replace("harness  =  \"hermes\"", "harness = \"claude\"")
         .replace("[limits]\n", &format!("[limits]\n{limits}"));
@@ -86,10 +75,11 @@ fn setup(name: &str, air_cfg: &str, limits: &str) -> herdsman::Ctx {
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let sh = FakeShed::attached(&c);
     for n in 1..=5 {
         let wt = format!("/Users/me/.herdr/worktrees/sendmeter/issue-{n}");
         let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "harness": "claude",
-                       "pane": format!("w9:p{n}"), "workspace": "w9", "worktree": wt, "branch": format!("issue-{n}"),
+                       "pane": format!("sendmeter-impl-{n}"), "workspace": "", "worktree": wt, "branch": format!("issue-{n}"),
                        "host": "air", "machine": "air"});
         append(&c.state, &Event::new(NOW - 900, "sendmeter", Some(n), "spawn", d)).unwrap();
         append(
@@ -99,13 +89,13 @@ fn setup(name: &str, air_cfg: &str, limits: &str) -> herdsman::Ctx {
         .unwrap();
     }
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    c
+    (c, sh)
 }
 
 #[test]
 fn a_host_that_drops_after_its_probe_costs_one_timeout_and_drive_still_starts() {
     for (name, air_cfg) in [("drop-disabled", "enabled = false\n"), ("drop-enabled", "")] {
-        let c = setup(name, air_cfg, "");
+        let (c, sh) = setup(name, air_cfg, "");
         let r = Dropped::new(main_host());
         let (code, out) = run(&c, &r, &["tick"]);
         assert_eq!(code, 0, "{name}: {out}");
@@ -116,7 +106,7 @@ fn a_host_that_drops_after_its_probe_costs_one_timeout_and_drive_still_starts() 
         );
         assert!(r.2.get() <= 10, "{name}: {} s on the Air", r.2.get());
         assert!(
-            r.0.called("herdr agent start sendmeter-impl-12"),
+            sh.called("run", "sendmeter-impl-12"),
             "{name}: drive's full pass starts #12 on the main host: {out}"
         );
     }
@@ -124,7 +114,7 @@ fn a_host_that_drops_after_its_probe_costs_one_timeout_and_drive_still_starts() 
 
 #[test]
 fn a_tick_past_its_budget_skips_the_rest_says_so_and_ends() {
-    let c = setup("drop-budget", "", "slow_secs = 0\n");
+    let (c, sh) = setup("drop-budget", "", "slow_secs = 0\n");
     let r = Dropped::new(main_host());
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
@@ -139,7 +129,7 @@ fn a_tick_past_its_budget_skips_the_rest_says_so_and_ends() {
         "{out}"
     );
     assert!(
-        r.0.called("herdr agent start sendmeter-impl-12"),
+        sh.called("run", "sendmeter-impl-12"),
         "drive still starts local work: {out}"
     );
 }

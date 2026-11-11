@@ -120,8 +120,10 @@ fn the_host_api_gives_each_account_and_provider_login_its_vendor() {
         &tmpdir("host-vendors"),
         &(CONFIG.to_string() + "[accounts]\nA = \"A\"\n"),
     );
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let sh = FakeShed::attached(&c);
+    let r = Fake::default();
+    let w = sh.on(&r);
+    let s = Server::new(&c, &w, Some(ADDR.into()));
     let res =
         String::from_utf8(s.respond(&format!("GET /api/v1/host HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).unwrap();
     let v: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();

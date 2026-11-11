@@ -384,7 +384,11 @@ fn an_old_thread_without_a_harness_renders_and_starts_on_the_default() {
 }
 
 fn listed(models: &str) -> String {
-    let c = config("").replace("model = \"opus\"", "model = \"claude-opus-5-5\"");
+    with_models(&config(""), models)
+}
+
+fn with_models(c: &str, models: &str) -> String {
+    let c = c.replace("model = \"opus\"", "model = \"claude-opus-5-5\"");
     format!(
         "models = [{models}]\n{}",
         c.replace("model = \"sonnet\"", "model = \"claude-opus-5-5\"")
@@ -422,15 +426,18 @@ fn the_model_chip_offers_the_models_list_and_a_pick_from_it_is_taken() {
 
 #[test]
 fn a_pick_dropped_from_the_models_list_is_refused_on_send_and_the_message_stays() {
-    let c = ctx(&tmpdir("pick-dropped"), &listed("\"opus\", \"fable\""));
+    let b = FakeShed::new();
+    let listed = |models: &str| with_models(&acp_config("", &b), models);
+    let mut c = ctx(&tmpdir("pick-dropped"), &listed("\"opus\", \"fable\""));
+    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).0, 0);
     pick_fable(&c);
     std::fs::write(&c.config, listed("\"opus\"")).unwrap();
-    let r = host(NO_AGENTS);
-    let (code, out) = run(&c, &r, &["thread", "say", "t1", "keep me"]);
+    let f = acp();
+    let (code, out) = run(&c, &b.cli(&f), &["thread", "say", "t1", "keep me"]);
     assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");
-    assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    assert!(!f.called("shed run"), "{:?}", f.calls.borrow());
     let sys = system(&c);
     assert_eq!(sys.len(), 1, "{sys:?}");
     assert!(
