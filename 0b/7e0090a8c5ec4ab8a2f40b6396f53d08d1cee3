@@ -1,0 +1,8 @@
+Decided: an orchestrator thread from before #780 still carries `<fleet>:-:conductor`, and the role family read it as impl; family now maps both role names to orchestrator
+Because: "Orchestrator and conductor sessions, which have no lane in HERDSMAN_LANE, end their turns freely"
+Because: crates/core/src/orchestrator.rs:127
+Decided: fix round 1 drops the regression test's two comment lines; arch-check refuses new comments, the why lives in this note
+Rejected: gating the stop hook on a numeric issue in HERDSMAN_LANE — a second rule for what the role family already says
+Check: `herdsman arch-check --base origin/staging` reports 0 violations at the head
+Check: the regression test body is unchanged; only its doc comment lines went
+Owner: Orchestrator threads started before the rename are no longer told to run a command they cannot run.
