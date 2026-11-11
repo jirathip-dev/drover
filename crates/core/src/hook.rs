@@ -248,13 +248,19 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             return Some(r);
         }
         // #570: a redirection's target; `/dev/null`, `/dev/stdout` and `/dev/stderr` write nothing.
-        let targets: Vec<String> = (seg.split('>').skip(1))
-            .filter_map(|s| s.split_whitespace().next())
-            .map(|w| w.replace(['"', '\''], ""))
+        let targets: Vec<String> = redirects(seg)
+            .into_iter()
             .filter(|w| !["/dev/null", "/dev/stdout", "/dev/stderr"].contains(&w.as_str()))
             .collect();
-        let writer = t.iter().any(|w| WRITERS.contains(w))
-            || (t.iter().any(|w| *w == "sed" || *w == "perl") && t.iter().any(|w| w.starts_with("-i")));
+        let bare = unquote(seg, true);
+        let w: Vec<&str> = bare.split_whitespace().collect();
+        let herdsman = (w
+            .iter()
+            .find(|w| !w.contains('=') && !matches!(word(w), "command" | "time")))
+        .is_some_and(|w| matches!(word(w), "herdsman" | "fleet"));
+        let writer = !herdsman
+            && (w.iter().any(|w| WRITERS.contains(w))
+                || (w.iter().any(|w| *w == "sed" || *w == "perl") && w.iter().any(|w| w.starts_with("-i"))));
         // #668: the cap file as a writer's argument or a redirection's target.
         let cap = |w: &String| w.ends_with(CAP_FILE);
         if p.cap && (targets.iter().any(cap) || writer && toks.iter().any(cap)) {
@@ -298,6 +304,21 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         }
     }
     None
+}
+
+fn redirects(seg: &str) -> Vec<String> {
+    let mut quote = None;
+    let at = seg.char_indices().filter(|&(_, c)| {
+        match (quote, c) {
+            (None, '\'' | '"') => quote = Some(c),
+            (Some(q), c) if q == c => quote = None,
+            _ => {}
+        }
+        quote.is_none() && c == '>'
+    });
+    (at.filter_map(|(i, _)| seg[i + 1..].trim_start_matches('>').split_whitespace().next()))
+        .map(|w| w.replace(['"', '\''], ""))
+        .collect()
 }
 
 /// #570: `cmd` without file-descriptor duplications (`2>&1`, `>&2`, `<&3`, `>&-`) and with `&>` as `>`, so
