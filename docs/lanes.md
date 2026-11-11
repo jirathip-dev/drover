@@ -221,7 +221,9 @@ Herd strip (the issue's horse, or a gate horse when it has no lane, wears a red 
   PASS, green CI and the serial gate still apply. The `merged` event records `by: owner, override: "ROUND_LIMIT"`
   and the closing comment says `Owner override: ROUND_LIMIT`.
 - **one more round** logs `round-extended` (this issue's limit is `review_rounds` + 1 per extension) and
-  spawns `impl --supersede`.
+  spawns `impl --supersede`. #817: an orchestrator grants it in its repo's thread with
+  `herdsman extend <fleet> <issue> --typed "<owner line>"` (`by: owner (typed)`) or `--basis "<spec quote>"`
+  (`by: orchestrator-<thread>`, an FYI line whose [change] parks the issue for 30 min).
 - **park** logs `parked` (`by`, and `herdsman park <fleet> <issue> --why <text>`'s reason): the issue leaves
   `needs-human` and shows as parked; `queue ls` and its Queue row show the reason.
 - **unpark** (#712; a parked Queue or Lanes row's button, or `herdsman unpark <fleet> <issue> [--by]`, owner only)
@@ -269,7 +271,9 @@ someone made is final (`ALREADY_ANSWERED`).
 
 #584: an ask closes on every real ending, and `herdsman asks --all` says which: `answered` (a tap, `herdsman answer`,
 or `answer <fleet> <id> --typed "<line>"`, which an orchestrator runs with the owner's exact line from the ask's thread,
-logged `by: owner (typed)`; any other line is `NOT_TYPED`), `withdrawn → q<new>` (`herdsman ask withdraw`, by its own
+logged `by: owner (typed)`; any other line is `NOT_TYPED`; #838: `answer <fleet> <id> <choice> --typed "<line>" --note
+"<note>"` names the owner's pick, the line is then evidence only, and an approve's note also goes under the issue's
+`## Amendments`; a typed answer is an `amend --basis`), `withdrawn → q<new>` (`herdsman ask withdraw`, by its own
 thread's orchestrator), `delivered to t<n>` or `failed` (a handoff card), `expired`, `closed: merged`, `closed: lane
 gone`. `herdsman check` expires an ask open over `[limits] ask_expire_hours` (24) that nobody waits on: a thread ask
 with no lane, a handoff card, an ask whose lane is no live agent. A live lane's ask never expires; `ask-waiting`
