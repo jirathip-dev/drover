@@ -204,7 +204,7 @@ html:not([data-tab=lanes]) :is(#needs>:not(.cfgbad),.later:has(+#needs)){display
 .ask>summary{display:flex;gap:var(--s2)}
 .ask>summary>span:first-child{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ask>summary>.ag{flex:none;color:var(--mute);font-size:var(--fs-meta)}
-.ask>summary>button{flex:none;width:auto;max-width:40%}
+.ask>summary>button{flex:none;width:auto;max-width:33%}
 .ask>summary>button>span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;pointer-events:none}
 .pend{border:1px solid var(--line);border-radius:8px;padding:var(--s2);margin:var(--s2) 0}.pend p{margin:0} /* #217: a tapped needs-you card */
 .cfgbad{border:1px solid var(--r);color:var(--r);border-radius:8px;padding:var(--s2);margin:var(--s2) 0;font-weight:600} /* #709: fleet.toml invalid */
