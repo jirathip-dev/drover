@@ -136,7 +136,10 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
         (freed[0].str("agent"), freed[0].data["bytes"].as_u64()),
         (Some("sendmeter-impl-8"), Some(4096))
     );
-    let stamp = || std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
+    let stamp = || {
+        let s = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
+        s.lines().next().unwrap().to_string()
+    };
     assert_eq!(stamp(), format!("8192 {}", c.now));
 
     // Half a block: #7 goes too, the working #9 keeps 4096 → still over.
@@ -151,7 +154,45 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
         out.starts_with("REFUSED DISK_BUDGET: worktrees 0.0 GB > 0.0000019"),
         "{out}"
     );
+    // #842: the refusal names the measured root and the largest folders.
+    let why = format!(
+        "; measured {} 0.0 GB (build folders aside); largest: {} 0.0 GB, ",
+        c.worktrees.display(),
+        busy.display()
+    );
+    assert!(out.contains(&why), "{out}");
     assert!(!r.called("herdr worktree"), "nothing created");
+}
+
+/// #842: a root that is not mounted counts 0, no error; the refusal lists it with the others.
+#[test]
+fn a_missing_root_counts_zero() {
+    let d = tmpdir("disk-gone");
+    let gone = d.join("Volumes/NVMe/herdsman");
+    let roots = format!(
+        "roots = [\"{}\", \"{}\"]",
+        gone.display(),
+        d.join("worktrees").display()
+    );
+    let cfg = format!("{CONFIG}worktree_budget_gb = 0.000001\n\n[hosts.mini]\n{roots}\n");
+    let c = ctx(&d, &cfg);
+    let wt = lane(&c, 10, 7, "impl", "issue-7");
+    build(&wt, "src", 4096);
+    let r = Fake::default().reply("git -C", "").reply("herdr agent list", NO_AGENTS);
+    let mut out = vec![];
+    herdsman::check::budget(&c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "1", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    let why = format!(
+        "measured {} 0.0 GB, {} 0.0 GB (build folders aside); largest: {} 0.0 GB",
+        gone.display(),
+        c.worktrees.display(),
+        wt.display()
+    );
+    assert!(
+        out.starts_with("REFUSED DISK_BUDGET: worktrees 0.0 GB") && out.contains(&why),
+        "{out}"
+    );
 }
 
 /// drive walks the worktrees first: over budget with nothing to free, the start is refused and the pass stops.
