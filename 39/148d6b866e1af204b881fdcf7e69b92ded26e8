@@ -1,0 +1,7 @@
+Decided: trimmed copy_in to fit the line cap on current staging: a one-line refusal and map_or_else instead of a match
+Because: crates/core/src/orchestrator.rs:625
+Rejected: filing a cap ask — trimming 5 lines with no change in behaviour was enough
+Decided: merged origin/staging b47fd12 so the cap-check counts against the current integration total
+Because: "`cargo build`, `clippy -D warnings` and `cargo test` exit 0, and `ci/cap.toml` holds"
+Check: cap-check at 39148d6 reports 40999 / 41000; the reply --file and hook tests still pass
+Owner: The orchestrator can now show a design image or screenshot from a lane's worktree in a thread reply, with no run card.
