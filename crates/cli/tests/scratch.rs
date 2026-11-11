@@ -332,6 +332,13 @@ impl herdsman::runner::Runner for Air {
             stderr: String::from_utf8_lossy(&o.stderr).into(),
         })
     }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+        let batch = herdsman::hosts::quote("sh", &["-c".into(), herdsman::hosts::EXISTS.into()]);
+        match args.last() == Some(&batch) {
+            true => self.fake.run_in(prog, args, input),
+            false => self.run(prog, args),
+        }
+    }
     fn sleep(&self, _: u64) {}
 }
 

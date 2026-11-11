@@ -489,6 +489,15 @@ impl herdsman::runner::Runner for TwoHosts {
             _ => self.0.run(prog, args),
         }
     }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+        let line = args.last().map_or("", String::as_str);
+        match prog {
+            "ssh" if !line.starts_with("'date' ") => {
+                herdsman::runner::Real.run_in("sh", &["-c".into(), line.into()], input)
+            }
+            _ => self.run(prog, args),
+        }
+    }
 }
 
 /// #716: lane `impl-48` left dirty work on this host and on the Air; one `clean --yes` saves each to its own wip/

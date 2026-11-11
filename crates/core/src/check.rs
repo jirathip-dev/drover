@@ -773,27 +773,31 @@ pub fn clean_all(
         })
         .collect();
     // Newest spawn per worktree wins (it has the current pane); #416: a `spawn-started` alone (the spawn failed) too.
-    for e in (events.iter().rev())
+    let spawns: Vec<&Event> = (events.iter().rev())
         .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && fleet.is_none_or(|f| f == e.fleet))
         .chain(&revs)
-    {
-        let (Some(n), Some(wt)) = (e.issue, e.str("worktree")) else {
-            continue;
-        };
-        if issue.is_some_and(|i| i != n) || lane.is_some_and(|a| e.str("agent") != Some(a)) {
-            continue;
-        }
-        let on = On::of(r, Some(e));
+        .filter(|e| e.issue.is_some_and(|n| issue.is_none_or(|i| i == n)))
+        .filter(|e| lane.is_none_or(|a| e.str("agent") == Some(a)))
+        .collect();
+    let held = |e: &Event| {
         // #561: a disabled or unreachable host's worktrees are never probed; a merged or closed one there is listed.
         // #678: an explicit run's probe decides for a disabled host.
-        let away = e.str("host").filter(|_| on.machine.is_some());
+        let away = e.str("host").filter(|_| e.str("machine").is_some());
         let held = match away.filter(|h| cfg.hosts.get(*h).is_some_and(|c| !c.enabled)) {
             Some(h) => !off.iter().any(|o| o.0 == h && o.2.is_some()),
             None => crate::hosts::offline(ctx, Some(e)).is_some(),
         };
-        let held = held.then_some("host unreachable (not cleaned)");
+        held.then_some("host unreachable (not cleaned)")
+    };
+    let there = crate::hosts::present(r, spawns.iter().copied().filter(|e| held(e).is_none()));
+    for e in spawns {
+        let (Some(n), Some(wt)) = (e.issue, e.str("worktree")) else {
+            continue;
+        };
+        let (on, held) = (On::of(r, Some(e)), held(e));
+        let away = e.str("host").filter(|_| on.machine.is_some());
         let gone = |c: &Event| c.kind == "clean" && c.str("worktree") == Some(wt) && c.ts >= e.ts;
-        let gone = || held.map_or_else(|| !on.exists(Path::new(wt)), |_| events.iter().any(gone));
+        let gone = || held.map_or_else(|| !there.contains(&(on.machine, wt)), |_| events.iter().any(gone));
         if seen.contains(wt) || gone() {
             continue;
         }
