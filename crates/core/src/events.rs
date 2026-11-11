@@ -414,6 +414,7 @@ pub const PASSIVE: &[&str] = &[
     "start-resent",
     "nudged",
     "respawned-silent",
+    "rev-stale-replaced",
     "budget-freed",
     // #798: a finished lane's build folder or scratch removed.
     "build-freed",
