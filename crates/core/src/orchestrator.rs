@@ -5,7 +5,7 @@ use crate::events::{self, emit, shared, Event};
 use crate::gate::refused;
 use crate::runner::Runner;
 use crate::spawn::Plan;
-use crate::{harness, herdr, Ctx};
+use crate::{herdr, providers, Ctx};
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
@@ -87,7 +87,7 @@ pub fn attach(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, id: &str) ->
     let t = Event::new(ctx.now, fleet, None, "orchestrator-attached", json!({"thread": id}));
     emit(&ctx.state, cfg, t.clone())?;
     let p = role.profile_or("orchestrator");
-    let acp = harness::get(&role.harness).acp().unwrap_or(&role.harness);
+    let acp = providers::get(&role.harness).acp().unwrap_or(&role.harness);
     // #683: the account's env is the thread's sign-in (its own login); the profile's settings go on top.
     let acct = crate::access::pick(ctx, cfg, &events, &role).ok().flatten();
     let acct = acct
@@ -96,7 +96,7 @@ pub fn attach(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, id: &str) ->
     let acct = acct.unwrap_or_default();
     let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, (!acct.is_empty(), false));
     let port = crate::spawn::lane_port(f.port_range.as_deref(), &format!("{fleet}/orchestrator-{id}"), &[]);
-    let settings = harness::profiles_root(ctx).join(&p).join("settings.json");
+    let settings = providers::profiles_root(ctx).join(&p).join("settings.json");
     let mut env = json!({"HERDSMAN_LANE": format!("{fleet}:-:orchestrator"), "HERDSMAN_THREAD": id,
         "HERDSMAN_PORT": port.to_string()});
     for (k, v) in acct {
@@ -196,8 +196,11 @@ pub fn new_with(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, (harness, orch
     }
     title_ok(title)?;
     let orch = assign(cfg, repo, orch)?;
-    if let Some(h) = harness.filter(|h| !harness::NAMES.contains(h)) {
-        return refused("BAD_VALUE", format!("harness {h:?}: one of {:?}", harness::NAMES));
+    if let Some(h) = harness.filter(|h| !providers::lane_names().contains(h)) {
+        return refused(
+            "BAD_VALUE",
+            format!("harness {h:?}: one of {:?}", providers::lane_names()),
+        );
     }
     let h = harness
         .map(String::from)
@@ -848,7 +851,9 @@ pub fn thread_role<'a>(cfg: &'a Config, events: &[Event], t: &Event) -> Result<(
         Some(h) if h != d.harness => on(role(cfg, &t.fleet)?.1, Some(h)),
         _ => d,
     };
-    r.effort = r.effort.filter(|e| harness::efforts(&r.harness).contains(&e.as_str()));
+    r.effort = r
+        .effort
+        .filter(|e| providers::get(&r.harness).efforts().contains(&e.as_str()));
     let id = t.str("thread").unwrap_or_default();
     if let Some(p) = of(events, id).rfind(|e| e.kind == "thread-model") {
         r.model = p.str("model").map(String::from).or(r.model);
@@ -861,7 +866,7 @@ pub fn thread_role<'a>(cfg: &'a Config, events: &[Event], t: &Event) -> Result<(
 /// conductor is on `h`) use, any fleet;
 /// none where `h`'s profile owns the model.
 pub fn harness_models<'a>(cfg: &'a Config, h: &str) -> Vec<&'a str> {
-    if !harness::get(h).takes_model() {
+    if !providers::get(h).takes_model() {
         return vec![];
     }
     let roles = cfg
@@ -885,7 +890,7 @@ pub fn pick(ctx: &Ctx, cfg: &Config, id: &str, model: &str, effort: &str) -> Res
     let t = find(&events, id)?;
     let h = thread_role(cfg, &events, t)?.1.harness;
     let ok = (model.is_empty() || harness_models(cfg, &h).contains(&model))
-        && (effort.is_empty() || harness::efforts(&h).contains(&effort));
+        && (effort.is_empty() || providers::get(&h).efforts().contains(&effort));
     if !ok || model.is_empty() && effort.is_empty() {
         return refused("BAD_VALUE", format!("{model} {effort}: not one of {h}'s choices"));
     }
@@ -1027,7 +1032,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     let (fleet, base) = thread_role(cfg, events, t)?;
     let f = cfg.fleet(fleet)?;
     let (role, resting) = crate::access::fallback(cfg, events, &base, ctx.now)?;
-    let h = harness::get(&role.harness);
+    let h = providers::get(&role.harness);
     // Only a session this harness started resumes (a fallback to another harness starts its own).
     // #608: an ACP session is never resumed (shed's bridge loads none): it starts fresh with the thread file.
     let first =
@@ -1494,7 +1499,7 @@ fn switch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Resu
     let chain = account.is_some() || role(cfg, &t.fleet).is_ok_and(|r| !r.1.fallback.is_empty());
     let (screen, h) = (
         herdr::read(r, s.str("pane").unwrap_or_default()).unwrap_or_default(),
-        harness::get(hn),
+        providers::get(hn),
     );
     // #640: an account's banner caps only when its usage reading agrees; a cap is never a sign-out.
     let limit = chain.then(|| h.usage_limited(cfg, r, &screen, ctx.now)).flatten();
@@ -1525,7 +1530,6 @@ fn switch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Resu
             "{hn} is signed out{}: sign in",
             account.map_or(String::new(), |a| format!(" (account {a})"))
         );
-        // #303 names an account's login `claude B` ([[setup]]); without one configured, the harness's own login.
         let named = account.map(|a| format!("{hn} {a}"));
         let su = named.filter(|n| crate::setup::all(cfg).iter().any(|s| &s.0 == n));
         let d = json!({"thread": id, "from": "system", "text": text, "signin": su.as_deref().unwrap_or(hn)});

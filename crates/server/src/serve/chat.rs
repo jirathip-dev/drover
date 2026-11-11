@@ -336,7 +336,7 @@ fn chips(cfg: &Config, r: &crate::config::Role) -> Vec<Chip> {
     let effort = r.effort_or(&cfg.limits);
     let all = [
         chip("model", r.model.as_deref(), &models),
-        chip("effort", effort.as_deref(), crate::harness::efforts(&r.harness)),
+        chip("effort", effort.as_deref(), crate::providers::get(&r.harness).efforts()),
     ];
     all.into_iter()
         .filter(|c| c.all.len() > 1 || c.cur.is_none() && !c.all.is_empty())
@@ -415,7 +415,7 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Va
             harness: chip(
                 "harness",
                 conductor::defaults(cfg, repo).ok().map(|d| d.1.harness).as_deref(),
-                &crate::harness::NAMES,
+                &crate::providers::lane_names(),
             ),
         });
     }

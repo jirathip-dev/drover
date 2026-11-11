@@ -1,6 +1,6 @@
 //! The tool guard of `herdsman help --agent`, in each harness's hook dialect (`Harness::hook_dialect`).
 use crate::config::{Config, Deny};
-use crate::harness::dialects;
+use crate::providers::dialects;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -116,7 +116,7 @@ pub fn after(input: &Value) -> bool {
     dialects().any(|d| d.post == ev || d.stop == ev)
 }
 
-/// #508: a call before a tool runs (a pre-tool event, or Hermes' bare `args` without one), not a prompt or notification.
+/// #508: a call before a tool runs (a pre-tool event, or a bare `args` call without one), not a prompt or notification.
 pub fn pre_call(input: &Value) -> bool {
     let ev = input["hook_event_name"].as_str().unwrap_or_default();
     ev.is_empty() || dialects().any(|d| d.pre == ev)
@@ -134,7 +134,6 @@ pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<Str
     if !dialects().any(|d| d.edits.contains(&tool)) {
         return None;
     }
-    // A V4A `patch` (#732: Codex's `apply_patch` `command`) names its files inside the patch text.
     let file = ["file_path", "notebook_path", "path", "patch", "command"]
         .iter()
         .find_map(|k| ti[k].as_str())
@@ -785,10 +784,9 @@ pub fn issue_filed(input: &Value) -> Option<String> {
 
 /// #198: the first `Co-Authored-By:` line in a commit log that names an AI.
 pub fn ai_coauthor(log: &str) -> Option<&str> {
-    const AI: &[&str] = &["claude", "anthropic", "openai", "codex", "gpt", "copilot", "gemini"];
     log.lines().map(str::trim).find(|l| {
         let l = l.to_ascii_lowercase();
-        l.starts_with("co-authored-by:") && AI.iter().any(|a| l.contains(a))
+        l.starts_with("co-authored-by:") && crate::providers::brands().chain(["copilot"]).any(|a| l.contains(a))
     })
 }
 

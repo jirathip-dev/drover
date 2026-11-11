@@ -246,8 +246,8 @@ pub fn view(ctx: &Ctx) -> Result<ConfigView> {
     let fields = leaves.into_iter().map(|(path, v)| {
         let key = path.rsplit('.').next().unwrap_or_default();
         let allowed = match key {
-            "harness" => crate::harness::NAMES.map(String::from).to_vec(),
-            "effort" => crate::harness::EFFORTS.iter().map(|e| (*e).into()).collect(),
+            "harness" => crate::providers::lane_names().into_iter().map(String::from).collect(),
+            "effort" => crate::providers::EFFORTS.iter().map(|e| (*e).into()).collect(),
             "model" => cfg.models.clone(),
             _ => vec![],
         };

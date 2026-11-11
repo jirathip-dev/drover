@@ -1,5 +1,3 @@
-//! #303 setup terminals: a configured login (`[[setup]]`, else built-in claude/gh/codex) in a herdr pane on a host,
-//! typed into from the board's sheet; it closes when the command exits or after `TIMEOUT`. Only names run, never lines.
 use crate::events::{append, read, Event};
 use crate::{config::Config, gate::refused, herdr, hosts::On, runner::argv, runner::Runner, Ctx};
 use anyhow::{Context, Result};
@@ -22,8 +20,11 @@ pub fn all(cfg: &Config) -> Vec<(String, String)> {
         .iter()
         .map(|s| (s.name.clone(), s.env.iter().map(env).collect::<String>() + &s.cmd))
         .collect();
-    let logins = crate::harness::all().filter_map(|(n, h)| Some((n, h.login()?)));
-    for (n, c) in logins.chain([("gh", "gh auth login"), ("codex", "codex login")]) {
+    let login = |h: crate::providers::Entry| Some((h.name, h.login()?));
+    let logins = crate::providers::lanes()
+        .filter_map(login)
+        .chain([("gh", "gh auth login")]);
+    for (n, c) in logins.chain(crate::providers::acp_only().filter_map(login)) {
         if !v.iter().any(|x| x.0 == n) {
             v.push((n.into(), c.into()));
         }
