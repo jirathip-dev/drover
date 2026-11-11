@@ -1,0 +1,5 @@
+Decided: round 6 adds no code; it merges origin/staging and refreshes the PR body's Evidence to head b41be81 so the evidence check passes
+Because: crates/core/src/hosts.rs:297
+Rejected: re-running the failed evidence run — it replays the old event, whose body predates the head
+Check: the evidence check is green at the head and the PR body's Evidence names the full head sha
+Owner: no behaviour change this round; it only clears a stale evidence failure and catches up with staging
