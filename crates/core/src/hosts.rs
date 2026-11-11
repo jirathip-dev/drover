@@ -218,6 +218,7 @@ pub struct Pass<'a> {
     up: std::sync::Mutex<BTreeMap<String, bool>>,
     mark: Option<(PathBuf, u64)>,
     step: std::sync::Mutex<String>,
+    pub until: Option<std::time::Instant>,
 }
 
 impl<'a> Pass<'a> {
@@ -229,7 +230,11 @@ impl<'a> Pass<'a> {
             up,
             mark,
             step,
+            until: None,
         }
+    }
+    pub fn over(&self) -> bool {
+        self.until.is_some_and(|t| std::time::Instant::now() >= t)
     }
     /// The fast step's: #337's one remote call per host, no probe; a call killed at 15 s marks its host down.
     pub fn fast(r: &'a dyn Runner) -> Self {
@@ -276,8 +281,8 @@ impl<'a> Pass<'a> {
             return input.map_or_else(|| self.r.run(prog, args), |i| self.r.run_in(prog, args, i));
         };
         self.note(&quote(prog, args));
-        if !self.up(m) {
-            let stderr = format!("{m}: host offline (no answer to `ssh {m} true` this pass)");
+        if self.over() || !self.up(m) {
+            let stderr = format!("{m}: not sent (host offline this pass, or the tick past its budget)");
             return Ok(Out {
                 code: 255,
                 stderr,
@@ -286,8 +291,9 @@ impl<'a> Pass<'a> {
         }
         let limit = std::time::Duration::from_secs(crate::config::limits().ssh_call_secs);
         let input = input.unwrap_or_default();
+        let refused = |o: &Out| o.code == 255 && o.stderr.contains("connect to host");
         let mut o = self.r.run_for(prog, args, input, limit)?;
-        if matches!(o.code, 124 | 255) && args.iter().any(|a| a == CM[1]) {
+        if matches!(o.code, 124 | 255) && !refused(&o) && args.iter().any(|a| a == CM[1]) {
             let g = ok(self.r, "ssh", &["-G", CM[1], m]).unwrap_or_default();
             if let Some(sock) = g.lines().find_map(|l| l.strip_prefix("controlpath ")) {
                 let _ = std::fs::remove_file(sock);
@@ -296,7 +302,7 @@ impl<'a> Pass<'a> {
             let bare: Vec<String> = std::iter::once("-oControlPath=none".into()).chain(bare).collect();
             o = self.r.run_for(prog, &bare, input, limit)?;
         }
-        if o.code == 124 {
+        if o.code == 124 || refused(&o) {
             self.up.lock().unwrap().insert(m.into(), false);
         }
         self.note("");

@@ -249,7 +249,6 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         let _ = f.and_then(|f| f.set_len(0));
     }
     let mark = ctx.state.with_file_name("tick.step");
-    let pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now)));
     // #791: `tick.beat` (`<started> <beat>`) each minute while the tick runs: `running` reads it.
     let (beat, since, t0) = (
         ctx.state.with_file_name("tick.beat"),
@@ -269,6 +268,9 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
             write();
         }
     });
+    let budget = loaded.as_ref().map_or(u64::MAX, |c| c.limits.slow_secs);
+    let mut pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now)));
+    pass.until = std::time::Instant::now().checked_add(std::time::Duration::from_secs(budget));
     let res = loaded.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|cfg| {
         pass.step("herdr status");
         herdr::status(&pass).map_err(|e| anyhow::anyhow!("herdr: {e:#}"))?;
@@ -276,6 +278,10 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         crate::check::check(ctx, cfg, &pass, out)?;
         pass.step("drive");
         let driven = drive::drive(ctx, cfg, &pass, out, None, false, false);
+        if pass.over() {
+            writeln!(out, "tick: past its {budget} s budget; skipped: clean, trim, lesson")?;
+            return driven;
+        }
         // #164: the `clean --yes` sweep once an hour, not only after a merge; its failures don't fail the tick.
         // #561: after drive, so no spawn or merge waits on it.
         let at = ctx.state.with_file_name("clean.at");
