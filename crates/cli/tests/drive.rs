@@ -2866,3 +2866,67 @@ fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
     assert_eq!(steps, ["start"], "{out}");
     assert!(r.called("herdr agent start sendmeter-impl-12"));
 }
+
+#[test]
+fn a_conflicting_pass_with_an_idle_impl_lane_gets_its_update_in_one_pass() {
+    let c = setup("drive-conflict-idle");
+    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(
+        &c,
+        20,
+        "verdict",
+        json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
+    );
+    ev(
+        &c,
+        21,
+        "blocked",
+        json!({"code": "NOT_MERGEABLE", "reason": "a100000 conflicts with origin/staging"}),
+    );
+    ev(
+        &c,
+        22,
+        "lane-state",
+        json!({"agent": "sendmeter-impl-12", "state": "hibernated"}),
+    );
+    let list = agents(&[(
+        "sendmeter-impl-12",
+        "hibernated",
+        &wt.to_string_lossy(),
+        "w9:sendmeter-impl-12",
+    )]);
+    let r = fake(&list)
+        .reply("gh pr view issue-12", &stale_pr(&sha("a1"), "CONFLICTING", "DIRTY"))
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["conflict"], "{out}");
+    assert_eq!(state(&c), "fix(1)+u1", "{out}");
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(!out.contains("catching up next pass"), "{out}");
+}
+
+#[test]
+fn a_refused_update_round_shows_its_reason_not_catching_up() {
+    let c = setup("drive-conflict-held");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(
+        &c,
+        20,
+        "verdict",
+        json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
+    );
+    let busy = Fake::default().once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
+    let busy = Fake {
+        replies: fake(NO_AGENTS)
+            .reply("gh pr view issue-12", &stale_pr(&sha("a1"), "CONFLICTING", "DIRTY"))
+            .reply("git -C", "")
+            .replies,
+        ..busy
+    };
+    let (out, steps) = drive(&c, &busy);
+    assert_eq!(steps, ["conflict"], "{out}");
+    assert!(out.contains("REFUSED HOST_BUSY"), "{out}");
+    let (_, out) = run(&c, &busy, &["waiting", "sendmeter"]);
+    assert!(out.contains("PASS · conflicts with staging · held: HOST_BUSY"), "{out}");
+    assert!(!out.contains("catching up next pass"), "{out}");
+}
