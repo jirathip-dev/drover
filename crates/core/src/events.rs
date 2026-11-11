@@ -672,7 +672,6 @@ pub fn shared(path: &Path) -> Result<Arc<Log>> {
     let mut l = {
         let mut m = logs();
         let l = &mut m.get_mut(&file).expect("added above").1;
-        // Seq 0 (no events, or a read error `last_seq` hides) is read again: its error is the caller's to show.
         if key == l.key && last == l.seq && last > 0 {
             return Ok(l.clone());
         }
@@ -684,7 +683,6 @@ pub fn shared(path: &Path) -> Result<Arc<Log>> {
 }
 
 fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<u64>)) -> Result<()> {
-    // #560: another file or a rotation since (`db::version`): all again.
     if key != l.key {
         *l = Arc::new(Log { key, ..Log::default() });
     }

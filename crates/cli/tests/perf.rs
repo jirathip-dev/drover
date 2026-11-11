@@ -828,7 +828,6 @@ fn api_body(res: &str) -> String {
     res[res.find("\r\n\r\n").unwrap() + 4..].to_string()
 }
 
-/// #859: one log's first fold (the 150k fixture's) holds up no other log's read: each database has its own gate.
 #[test]
 fn a_big_fold_holds_up_no_other_logs_read() {
     let (big, _) = huge();
