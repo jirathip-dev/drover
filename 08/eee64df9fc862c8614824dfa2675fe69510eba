@@ -1,0 +1,13 @@
+Decided: `events::read` returns a copy of the incremental `events::shared` log, so a pass reads the database once and then only rows appended since.
+Because: "read the log once per pass and share it, or read only the fleet/issue rows the step needs"
+Decided: drive::pass's per-issue `auto-updated` lookup scans the shared log in place: it was the profile's top hot spot (20,306 of 24,515 log-read samples).
+Because: crates/core/src/drive.rs:1143
+Rejected: migrating every `read` caller to `Arc<Log>` — about 130 call sites for no further gain once the hot loop stops copying.
+Decided: a check round k > 1 renames `.build/<agent>-r<k-1>` (and its worktree's clone_build dirs) into its own, unless that agent is live; logged `build-reused`.
+Because: "A rev or verify round of an issue reuses that issue's previous round's build folder (renamed in)"
+Decided: admission subtracts the %CPU of `herdsman` processes and the `cp` they parent (one `ps -Ao` per sample) from the load, and names the 3 busiest others.
+Because: "A refusal on load names the top 3 processes by CPU in its `why`"
+Decided: a pending start refused HOST_BUSY on load alone records `HOST_BUSY (load)` and its card never comes back for the wait; memory pressure keeps the 30-min return.
+Because: "It never goes needs-human for host load alone."
+Check: pass_budget fails on base (5,002,050 rows of a 100,041-event log) and passes here; chat_tab, live_board and self_update failures, and config_card's WebKit hang, fail the same on base.
+Owner: Drive passes now take seconds instead of minutes, review rounds reuse their build instead of copying it, and a busy host from herdsman's own work no longer holds lanes back or brings cards back to you.
