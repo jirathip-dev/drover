@@ -1,0 +1,10 @@
+Decided: the vendors ride on a new top-level `vendors` of /api/v1/host, filled in serve/v1.rs, not on the Account and HostCard rows
+Because: "No board UI file changes"
+Rejected: a `vendor` on each Account and HostCard row — serve.rs builds those literals and is a frozen board file (scripts/board-freeze.sh:13)
+Decided: `vendors` holds `{name, vendor}` lists, not name-keyed maps
+Because: crates/cli/tests/api_v1_contract.rs:284
+Decided: the fake provider's label is tested in core (setup::vendors, the function /api/v1 calls); the /api/v1 test uses the shipped providers
+Because: crates/core/src/providers/mod.rs:19
+Rejected: a `fake` core feature for the CLI tests — feature unification puts it in every login and harness list and broke unrelated tests (cloud bootstrap, config_api)
+Check: the_host_api_gives_each_account_and_provider_login_its_vendor and the_repos_provider_ban_fails_a_new_web_file_and_passes_the_two_frozen_board_files fail with the change reverted
+Owner: The server now tells apps which company each account and sign-in belongs to, and new web code may no longer name an AI provider.
