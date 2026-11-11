@@ -623,10 +623,7 @@ pub fn inside(ctx: &Ctx, cfg: &Config, id: &str, p: &std::path::Path) -> Option<
 /// A file a message carries, as the thread logs it: its name, path in the orchestrator's folder and size.
 pub fn file(ctx: &Ctx, cfg: &Config, t: &Event, p: &std::path::Path) -> Result<Value> {
     let id = t.str("thread").unwrap_or_default();
-    let p = match inside(ctx, cfg, id, p) {
-        Some(p) => p,
-        None => copy_in(ctx, cfg, t, p)?,
-    };
+    let p = inside(ctx, cfg, id, p).map_or_else(|| copy_in(ctx, cfg, t, p), Ok)?;
     let size = std::fs::metadata(&p).with_context(|| p.display().to_string())?.len();
     let name = p.file_name().map(|n| n.to_string_lossy().into_owned());
     Ok(json!({"name": name, "path": p, "size": size}))
@@ -639,9 +636,8 @@ fn copy_in(ctx: &Ctx, cfg: &Config, t: &Event, p: &std::path::Path) -> Result<st
         .filter_map(|r| r.canonicalize().ok());
     let from = (p.canonicalize().ok()).filter(|f| f.is_file() && roots.clone().any(|r| f.starts_with(r)));
     let (Some(from), Some(name)) = (from, p.file_name()) else {
-        let d = dir(ctx, cfg, id).display().to_string();
         bail!(
-            "{}: not in the thread's folder {d}, a lane worktree of fleet {} or its repo checkout",
+            "{}: not in the thread's folder, fleet {}'s worktrees or checkout",
             p.display(),
             t.fleet
         );
