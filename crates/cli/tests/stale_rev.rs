@@ -109,3 +109,16 @@ fn a_reviewer_whose_pane_changed_is_not_replaced() {
     let out = drive(&at(&c, t0 + 200 * 60), &r);
     assert!(kinds(&c, "rev-stale-replaced").is_empty(), "{out}");
 }
+
+#[test]
+fn a_reviewer_mid_tool_call_is_not_replaced() {
+    let c = stuck("stale-rev-tool");
+    let t0 = 1_000_000;
+    drive(&at(&c, t0), &fake(QUIET));
+    let open = json!({"sendmeter-rev-12-r2": {"turn": true, "tools": {"t7": "cargo test"}}});
+    std::fs::write(c.state.with_file_name("shed-out.json"), open.to_string()).unwrap();
+    let r = fake(QUIET);
+    let out = drive(&at(&c, t0 + 121 * 60), &r);
+    assert!(kinds(&c, "rev-stale-replaced").is_empty(), "{out}");
+    assert!(!r.called("herdr agent start sendmeter-rev-12-r2"), "{out}");
+}

@@ -732,6 +732,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "lane-dead",
     "account-signed-out",
     "lane-failed-start",
+    "rev-stale-replaced",
     "ready-unmerged",
     "ci-missing",
     "outbox-stale",

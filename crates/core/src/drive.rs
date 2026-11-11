@@ -992,6 +992,32 @@ fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: 
     Ok(())
 }
 
+fn stale_replaced(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    role: &str,
+    old: &str,
+    mins: u64,
+) -> Result<()> {
+    let ev = read(&ctx.state)?;
+    let new = |e: &&Event| e.is("spawn", fleet, n) && e.str("role") == Some(role) && e.ts >= ctx.now;
+    let new = ev
+        .iter()
+        .rfind(new)
+        .and_then(|e| e.str("agent"))
+        .unwrap_or("a lane still starting");
+    let why = format!("{old} quiet {mins}m with no verdict: replaced by {new}");
+    writeln!(out, "{fleet} #{n} {why}")?;
+    let d = json!({"agent": old, "role": role, "idle_minutes": mins, "new": new, "reason": why});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, fleet, Some(n), "rev-stale-replaced", d),
+    )
+}
+
 fn escalate(
     ctx: &Ctx,
     cfg: &Config,
@@ -1266,9 +1292,16 @@ fn pass(
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
             // #534: a finished lane of the issue in the way is replaced in the same pass; a working one still waits.
-            if code == Some("LANE_LIVE") && args[0] == "spawn" && last_words(fleet).contains(OLD) {
+            let stale = (code == Some("LANE_LIVE") && step == "review")
+                .then(|| s.lanes.get(args[3]))
+                .flatten()
+                .and_then(|l| Some((l, stall::stale_check(ctx, r, &events, &agents, (fleet, s.issue), l)?)));
+            if code == Some("LANE_LIVE") && args[0] == "spawn" && (last_words(fleet).contains(OLD) || stale.is_some()) {
                 let a = [&args[..], &["--supersede"]].concat();
                 code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &a)?;
+            }
+            if let Some((old, mins)) = stale.filter(|_| code.is_none()) {
+                stale_replaced(ctx, cfg, out, (fleet, s.issue), args[3], old, mins)?;
             }
             if let Some((hash, _)) = repro.filter(|_| code == Some("NO_REPRO")) {
                 repro_refused(ctx, cfg, r, (&events, &agents), (fleet, s.issue, &w.lane), &args, &hash)?;
