@@ -37,6 +37,10 @@ herdsman thread ls [FLEET] [--json]           # per repo: title, last message, u
   that roles (or `[chat]`) on its harness use and the harness's efforts (no model chip where a profile owns the
   model: Hermes, dsh). A pick logs `thread-model`, shows `model sonnet · effort low from the next turn`, and the
   next message resumes the orchestrator's session on it. The header reads `repo · harness · model`.
+- **Model list (#860):** the model chip also offers fleet.toml's top-level `models = [...]`; add a model there (via
+  `herdsman config propose`) and the chip offers it. A send on a pick no longer offered is refused `BAD_VALUE` with a
+  system line naming the model and the list (the message stays); a model the CLI rejects at start is one system line
+  with its error, not retried.
 - **No worktree:** it runs in `<state dir>/orchestrator/<thread>/` (or `<[orchestrator] dir>/<thread>/`) in its own herdr workspace, as agent
   `orchestrator-<thread>`, with `HERDSMAN_LANE=<fleet>:-:orchestrator` (so the lane hook guards it) and
   `HERDSMAN_THREAD=<thread>`.
