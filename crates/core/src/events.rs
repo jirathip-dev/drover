@@ -920,7 +920,11 @@ impl IssueState {
 
     /// #831: a needs-human card's main action: [start lane] when no build lane ever spawned and no round was reviewed.
     pub fn card(&self) -> &'static str {
-        ["one more round", "start lane"][usize::from(self.build.is_none() && self.verdicts.is_empty())]
+        if self.build.is_none() && self.verdicts.is_empty() {
+            "start lane"
+        } else {
+            "one more round"
+        }
     }
 
     /// A verdict was already recorded for this sha.
