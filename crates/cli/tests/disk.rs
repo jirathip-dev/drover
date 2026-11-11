@@ -508,7 +508,12 @@ impl herdsman::runner::Runner for TwoHosts<'_> {
                 ..Default::default()
             });
         }
-        self.run(prog, args)
+        match prog {
+            "ssh" if !line.starts_with("'date' ") => {
+                herdsman::runner::Real.run_in("sh", &["-c".into(), line.into()], input)
+            }
+            _ => self.run(prog, args),
+        }
     }
 }
 

@@ -128,6 +128,23 @@ impl Runner for Fake {
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
         self.inputs.borrow_mut().push((line, input.into()));
+        let batch = herdsman::hosts::quote("sh", &["-c".into(), herdsman::hosts::EXISTS.into()]);
+        if prog == "ssh" && args.last() == Some(&batch) {
+            self.calls.borrow_mut().push(format!("{prog} {}", args.join(" ")));
+            let mut stdout = String::new();
+            for p in input.lines() {
+                let test = herdsman::hosts::quote("sh", &["-c".into(), "test -e \"$1\"".into(), "sh".into(), p.into()]);
+                let o = self.run(prog, &[&args[..args.len() - 1], &[test]].concat())?;
+                if matches!(o.code, 124 | 255) {
+                    return Ok(o);
+                }
+                stdout += if o.code == 0 { "y\n" } else { "n\n" };
+            }
+            return Ok(Out {
+                stdout,
+                ..Out::default()
+            });
+        }
         self.run(prog, args)
     }
 }

@@ -333,7 +333,8 @@ impl herdsman::runner::Runner for Air<'_> {
         })
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
-        match args.iter().any(|a| a.contains("'shed' 'connect'")) {
+        let batch = herdsman::hosts::quote("sh", &["-c".into(), herdsman::hosts::EXISTS.into()]);
+        match args.last() == Some(&batch) || args.iter().any(|a| a.contains("'shed' 'connect'")) {
             true => self.over.run_in(prog, args, input),
             false => self.run(prog, args),
         }
