@@ -217,8 +217,7 @@ pub struct Pass<'a> {
     up: std::sync::Mutex<BTreeMap<String, bool>>,
     mark: Option<(PathBuf, u64)>,
     step: std::sync::Mutex<String>,
-    until: Option<std::time::Instant>,
-    unsent: std::sync::atomic::AtomicUsize,
+    pub until: Option<std::time::Instant>,
 }
 
 impl<'a> Pass<'a> {
@@ -231,19 +230,10 @@ impl<'a> Pass<'a> {
             mark,
             step,
             until: None,
-            unsent: std::sync::atomic::AtomicUsize::new(0),
         }
     }
-    /// #835: a pass that sends nothing to another host once `secs` have passed.
-    #[must_use]
-    pub fn budget(self, secs: u64) -> Self {
-        let until = std::time::Instant::now().checked_add(std::time::Duration::from_secs(secs));
-        Pass { until, ..self }
-    }
-    /// #835: past the budget: the remote calls it did not send, else None.
-    pub fn over(&self) -> Option<usize> {
-        let over = self.until.is_some_and(|t| std::time::Instant::now() >= t);
-        over.then(|| self.unsent.load(std::sync::atomic::Ordering::Relaxed))
+    pub fn over(&self) -> bool {
+        self.until.is_some_and(|t| std::time::Instant::now() >= t)
     }
     /// The fast step's: #337's one remote call per host, no probe; a call killed at 15 s marks its host down.
     pub fn fast(r: &'a dyn Runner) -> Self {
@@ -295,17 +285,8 @@ impl<'a> Pass<'a> {
             return input.map_or_else(|| self.r.run(prog, args), |i| self.r.run_in(prog, args, i));
         };
         self.note(&quote(prog, args));
-        if self.over().is_some() {
-            self.unsent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let stderr = format!("{m}: not sent (the tick is past its budget)");
-            return Ok(Out {
-                code: 255,
-                stderr,
-                ..Out::default()
-            });
-        }
-        if !self.up(m) {
-            let stderr = format!("{m}: host offline (no answer to `ssh {m} true` this pass)");
+        if self.over() || !self.up(m) {
+            let stderr = format!("{m}: not sent (host offline this pass, or the tick past its budget)");
             return Ok(Out {
                 code: 255,
                 stderr,
