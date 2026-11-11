@@ -622,6 +622,8 @@ pub struct Limits {
     /// #779: spawn refuses `RESPAWN_LOOP` after this many failed starts of an issue's role within the window.
     pub respawn_max: u32,
     pub respawn_window_minutes: u64,
+    /// #825: a drive pass longer than this logs `pass-slow` with its slowest step.
+    pub pass_max_secs: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -702,6 +704,7 @@ impl Default for Limits {
             reap_keychain_readers: false,
             respawn_max: 3,
             respawn_window_minutes: 60,
+            pass_max_secs: 120,
         }
     }
 }
@@ -732,6 +735,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "lane-dead",
     "account-signed-out",
     "lane-failed-start",
+    "rev-stale-replaced",
     "ready-unmerged",
     "ci-missing",
     "outbox-stale",
@@ -1152,7 +1156,7 @@ impl Fleet {
         match role {
             "design" => "design",
             "architect" => "architect",
-            "orchestrator" => "orchestrator",
+            r if crate::orchestrator::is_role(r) => "orchestrator",
             r if self.flow().is_check(r) => "rev",
             _ => "impl",
         }

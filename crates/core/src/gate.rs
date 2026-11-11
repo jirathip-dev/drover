@@ -1067,16 +1067,8 @@ pub fn needs_human(
     op: &str,
     (spawn, by, why): (bool, &str, Option<&str>),
 ) -> Result<()> {
-    // Only from needs-human (#217: or a failed extend's card): a stale card or a double tap never parks a merged
-    // issue or extends twice.
-    let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
-    let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
-    // #778: or a pending start whose card is back (refused, or 30 min unstarted).
-    let back = crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.back(ctx.now));
-    if state != "needs-human" && last != "extend-failed" && !back {
-        return refused("NOT_NEEDS_HUMAN", format!("#{n} is {state}, not needs-human"));
-    }
-    let ev = |k| Event::new(ctx.now, fleet, Some(n), k, json!({"by": by}));
+    let state = held(ctx, fleet, n)?;
+    let state = state.as_str();
     match op {
         "override" => merge(ctx, cfg, r, out, fleet, n, true)?,
         "extend" => {
@@ -1111,20 +1103,42 @@ pub fn needs_human(
                 }
             }
         }
-        _ => {
-            let mut e = ev("parked");
-            if let Some(w) = why.filter(|w| !w.trim().is_empty()) {
-                e.data.insert("why".into(), json!(w));
-            }
-            crate::events::append(&ctx.state, &e)?;
-            // #186: a parked issue's lanes are closed: reap what they left (a live agent's worktree is spared).
-            if let Ok(a) = herdr::agents(r) {
-                check::leftovers(ctx, cfg, r, &a, true)?;
-            }
-        }
+        _ => return park(ctx, cfg, r, out, (fleet, n), by, why),
     }
     writeln!(out, "#{n}: {op}")?;
     Ok(())
+}
+
+/// Issue `n`'s state if it waits on the owner's needs-human card, else `NOT_NEEDS_HUMAN`.
+pub fn held(ctx: &Ctx, fleet: &str, n: u64) -> Result<String> {
+    let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
+    let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
+    let back = crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.back(ctx.now));
+    if state != "needs-human" && last != "extend-failed" && !back {
+        return refused("NOT_NEEDS_HUMAN", format!("#{n} is {state}, not needs-human"));
+    }
+    Ok(state.into())
+}
+
+/// `park`: log `parked` (`why`, if any) and reap what the issue's closed lanes left.
+pub fn park(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    by: &str,
+    why: Option<&str>,
+) -> Result<()> {
+    let mut e = Event::new(ctx.now, fleet, Some(n), "parked", json!({"by": by}));
+    if let Some(w) = why.filter(|w| !w.trim().is_empty()) {
+        e.data.insert("why".into(), json!(w));
+    }
+    crate::events::append(&ctx.state, &e)?;
+    if let Ok(a) = herdr::agents(r) {
+        check::leftovers(ctx, cfg, r, &a, true)?;
+    }
+    Ok(writeln!(out, "#{n}: park")?)
 }
 
 /// #712: `herdsman unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human
