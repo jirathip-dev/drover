@@ -1953,18 +1953,11 @@ fn clean_merged(
         e.issue
             .is_some_and(|n| st.get(&(fleet.into(), n)).is_some_and(IssueState::done))
     };
-    let left = |e: &&Event| {
-        !crate::hosts::held(ctx, cfg, e)
-            && e.str("worktree")
-                .is_some_and(|w| crate::hosts::On::of(r, Some(e)).exists(Path::new(w)))
-    };
-    if KICK.get().is_none()
-        && events
-            .iter()
-            .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && e.fleet == fleet)
-            .filter(merged)
-            .any(|e| left(&e))
-    {
+    let left = (events.iter())
+        .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && e.fleet == fleet)
+        .filter(merged)
+        .filter(|e| !crate::hosts::held(ctx, cfg, e));
+    if KICK.get().is_none() && !crate::hosts::present(r, left).is_empty() {
         let c = (fleet, None, "clean");
         act(ctx, cfg, r, out, events, c, &["clean", fleet, "--yes"])?;
     }
