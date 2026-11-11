@@ -209,14 +209,17 @@ impl Runner for On<'_> {
 
 /// #561: a check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared
 /// connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed after 15 s;
-/// one through a dead shared connection drops its socket and runs once more without it. `mark` (the tick's
-/// `tick.step`, with the tick's start) names the step and the child it waits on, for `tick-stuck`.
+/// one through a dead shared connection drops its socket and runs once more without it. #835: a call that times out
+/// or finds the host gone marks it down too. `mark` (the tick's `tick.step`, with the tick's start) names the step and
+/// the child it waits on, for `tick-stuck`; past `until` (the tick's budget) no remote call goes out.
 pub struct Pass<'a> {
     r: &'a dyn Runner,
     probe: bool,
     up: std::sync::Mutex<BTreeMap<String, bool>>,
     mark: Option<(PathBuf, u64)>,
     step: std::sync::Mutex<String>,
+    until: Option<std::time::Instant>,
+    unsent: std::sync::atomic::AtomicUsize,
 }
 
 impl<'a> Pass<'a> {
@@ -228,7 +231,20 @@ impl<'a> Pass<'a> {
             up,
             mark,
             step,
+            until: None,
+            unsent: std::sync::atomic::AtomicUsize::new(0),
         }
+    }
+    /// #835: a pass that sends nothing to another host once `secs` have passed.
+    #[must_use]
+    pub fn budget(self, secs: u64) -> Self {
+        let until = std::time::Instant::now().checked_add(std::time::Duration::from_secs(secs));
+        Pass { until, ..self }
+    }
+    /// #835: past the budget: the remote calls it did not send, else None.
+    pub fn over(&self) -> Option<usize> {
+        let over = self.until.is_some_and(|t| std::time::Instant::now() >= t);
+        over.then(|| self.unsent.load(std::sync::atomic::Ordering::Relaxed))
     }
     /// The fast step's: #337's one remote call per host, no probe; a call killed at 15 s marks its host down.
     pub fn fast(r: &'a dyn Runner) -> Self {
@@ -280,6 +296,15 @@ impl<'a> Pass<'a> {
             return input.map_or_else(|| self.r.run(prog, args), |i| self.r.run_in(prog, args, i));
         };
         self.note(&quote(prog, args));
+        if self.over().is_some() {
+            self.unsent.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let stderr = format!("{m}: not sent (the tick is past its budget)");
+            return Ok(Out {
+                code: 255,
+                stderr,
+                ..Out::default()
+            });
+        }
         if !self.up(m) {
             let stderr = format!("{m}: host offline (no answer to `ssh {m} true` this pass)");
             return Ok(Out {
@@ -289,8 +314,9 @@ impl<'a> Pass<'a> {
             });
         }
         let (limit, input) = (std::time::Duration::from_secs(15), input.unwrap_or_default());
+        let refused = |o: &Out| o.code == 255 && o.stderr.contains("connect to host");
         let mut o = self.r.run_for(prog, args, input, limit)?;
-        if matches!(o.code, 124 | 255) && args.iter().any(|a| a == CM[1]) {
+        if matches!(o.code, 124 | 255) && !refused(&o) && args.iter().any(|a| a == CM[1]) {
             let g = ok(self.r, "ssh", &["-G", CM[1], m]).unwrap_or_default();
             if let Some(sock) = g.lines().find_map(|l| l.strip_prefix("controlpath ")) {
                 let _ = std::fs::remove_file(sock);
@@ -299,7 +325,7 @@ impl<'a> Pass<'a> {
             let bare: Vec<String> = std::iter::once("-oControlPath=none".into()).chain(bare).collect();
             o = self.r.run_for(prog, &bare, input, limit)?;
         }
-        if o.code == 124 {
+        if o.code == 124 || refused(&o) {
             self.up.lock().unwrap().insert(m.into(), false);
         }
         self.note("");
