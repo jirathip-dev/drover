@@ -255,6 +255,17 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
         .iter()
         .map(|o| o["value"].clone());
     assert_eq!(nh.collect::<Vec<_>>(), [json!("extend"), json!("park")]);
+    let folds: Vec<&Value> = cards.as_array().unwrap()[1..].iter().map(|c| &c["fold"]).collect();
+    assert_eq!(folds[0]["line"], "routine · Move the branch out? · 5m");
+    assert_eq!(
+        folds[0]["main"],
+        json!({"block": "q7", "action": "answer", "value": "move", "label": "move"})
+    );
+    assert_eq!(folds[1]["line"], "#5 · needs-human · review rounds ran out (4/3) · 31m");
+    assert_eq!(
+        (&folds[1]["main"]["block"], &folds[1]["main"]["label"]),
+        (&json!("nh-sendmeter-5"), &json!("one more round"))
+    );
     assert_eq!(req(&s, T, "GET", "/screens/nope", "", "").0, 404);
     let foreign = req(&s, T, "GET", "/screens/queue", "", "Origin: https://evil.example\r\n");
     assert_eq!(foreign.0, 403);
@@ -363,6 +374,25 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
         (settled.str("via"), &settled.data["approved"]),
         (Some("cooee"), &json!(false))
     );
+}
+
+/// q1235: a folded ask card's main button, posted as the app posts a tap on it, answers the ask.
+#[test]
+fn a_folded_cards_main_button_answers_its_ask() {
+    let (c, r) = recorded("cooee-fold");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let cards = req(&s, T, "GET", "/screens/cards", "", "").1;
+    let main = &find(&cards, "ask-q7")["fold"]["main"];
+    let tap = json!({"screen": "cards", "block": main["block"], "action": main["action"], "values": {"choice": main["value"]}});
+    let (status, v) = req(&s, T, "POST", "/action", &tap.to_string(), &ck);
+    assert_eq!(status, 200, "{v}");
+    let d = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .rfind(|e| e.kind == "decision")
+        .unwrap();
+    assert_eq!((d.str("id"), d.str("choice")), (Some("q7"), Some("move")));
 }
 
 fn apply(screen: &mut Value, ops: &[Value]) {

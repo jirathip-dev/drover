@@ -445,7 +445,9 @@ device work too. Beside `/api/v1`, never in the board's pages, it answers JSON m
 
 - `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `?before=<unix time>`),
   `/screens/fleets` (the Fleets sheet) and `/screens/cards` (the open asks, design reviews, needs-human issues and run
-  cards as chat cards);
+  cards as chat cards); q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
+  and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
+  shows until a tap opens the full card; a second tap folds it again;
 - `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,
   `replace`, `remove` and `insert` ops by block id, and the Queue chip's `badge` count;
 - `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;

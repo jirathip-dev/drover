@@ -7,7 +7,7 @@ use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::{Duration, Instant};
 
-const MANIFEST: &str = include_str!("../../../../cooee-plugin.toml");
+const MANIFEST: &str = include_str!("../../../cooee-plugin.toml");
 static STREAMS: AtomicUsize = AtomicUsize::new(0);
 type Res = (&'static str, &'static str, Vec<u8>);
 type Q = BTreeMap<String, String>;
@@ -204,7 +204,17 @@ fn choice(id: &str, action: &str, options: &[Value]) -> Value {
     json!({"type": "choice", "id": id, "action": action, "options": options})
 }
 
-fn ask_card(mins: u64, a: &NeedAsk) -> Value {
+/// q1235: a card's folded line, `#N · kind · question cut short · age`, and its main button.
+fn fold(n: Option<u64>, kind: &str, q: &str, age: &str, main: &Value) -> Value {
+    let mut cut: String = q.chars().take(48).collect();
+    if cut.len() < q.len() {
+        cut.push('…');
+    }
+    let n = n.map_or(String::new(), |n| format!("#{n} · "));
+    json!({"line": format!("{n}{kind} · {cut} · {age}"), "main": main})
+}
+
+fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
     let q = &a.ask;
     let opts: Vec<Value> = q.options.iter().map(|o| json!({"value": o, "label": o})).collect();
     let mut c = choice(&q.id, "answer", &opts);
@@ -232,8 +242,18 @@ fn ask_card(mins: u64, a: &NeedAsk) -> Value {
         blocks.push(json!({"type": "images", "id": format!("pngs-{}", q.id), "items": items.collect::<Vec<_>>()}));
     }
     blocks.push(c);
+    let kind = match (design, routine) {
+        ("", false) => "owner",
+        ("", true) => "routine",
+        _ => "design",
+    };
+    let age = crate::events::age(now.saturating_sub(q.ts));
+    let main = rec
+        .or(q.options.first())
+        .map(|o| json!({"block": q.id, "action": "answer", "value": o, "label": o}));
     json!({"type": "card", "id": format!("ask-{}", q.id), "kind": "ask", "tone": "warn",
-        "title": format!("{}{issue}{design}", q.fleet), "meta": if routine { "routine" } else { "owner" }, "blocks": blocks})
+        "title": format!("{}{issue}{design}", q.fleet), "meta": format!("{kind} · {age}"),
+        "fold": fold(q.issue, kind, &q.question, &age, &main.unwrap_or_default()), "blocks": blocks})
 }
 
 fn needs_card(i: &NeedIssue) -> Value {
@@ -254,8 +274,11 @@ fn needs_card(i: &NeedIssue) -> Value {
     if !i.pending {
         blocks.push(choice(&format!("nh-{f}-{n}"), "needs-human", &opts));
     }
+    let age = i.who.rsplit(" · ").next().unwrap_or_default();
+    let main = (!i.pending).then(|| json!({"block": format!("nh-{f}-{n}"), "action": "needs-human", "value": "extend", "label": "one more round", "values": vals}));
     json!({"type": "card", "id": format!("nhc-{f}-{n}"), "kind": "ask", "tone": "bad",
-        "title": format!("{f} #{n} · {}", i.title), "meta": "needs-human", "blocks": blocks})
+        "title": format!("{f} #{n} · {}", i.title), "meta": format!("needs-human · {age}"),
+        "fold": fold(Some(n), "needs-human", &i.why, age, &main.unwrap_or_default()), "blocks": blocks})
 }
 
 fn run_cards(now: u64, ev: &[Event]) -> Vec<Value> {
@@ -525,7 +548,7 @@ impl Server<'_> {
         });
         let ev = shared(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
-        cards.extend(tab.asks.iter().map(|a| ask_card(mins, a)));
+        cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, mins, a)));
         cards.extend(tab.issues.iter().map(needs_card));
         Value::Array(cards)
     }
