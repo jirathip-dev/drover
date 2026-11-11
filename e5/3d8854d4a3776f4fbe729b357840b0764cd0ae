@@ -1,0 +1,7 @@
+Decided: the #770 design test calls fake(&c, HEAD) after merging staging, whose #789 made fake take the head sha
+Because: crates/cli/tests/design_stage.rs:30
+Decided: a fresh head instead of rerunning the failed evidence run at dc1c7be
+Because: scripts/evidence-check.sh:10
+Rejected: gh run rerun of the failed evidence run — it replays the old event's PR body and fails again
+Check: with crates/core/src reverted on this merged tree, exactly the two #770 tests fail; at head both pass
+Owner: No change to the fix itself; the branch caught up with staging and its test was adjusted to compile there.
