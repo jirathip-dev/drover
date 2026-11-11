@@ -1709,7 +1709,7 @@ fn gb(bytes: u64) -> f64 {
 /// The last walk's worktree total in GB (`check`'s or `budget`'s, both stamp `worktrees.du`) and when.
 pub fn worktree_du(ctx: &Ctx) -> Option<(f64, Option<u64>)> {
     let s = std::fs::read_to_string(ctx.state.with_file_name("worktrees.du")).ok()?;
-    let mut n = s.split_whitespace();
+    let mut n = s.lines().next()?.split_whitespace();
     Some((gb(n.next()?.parse().ok()?), n.next().and_then(|t| t.parse().ok())))
 }
 
