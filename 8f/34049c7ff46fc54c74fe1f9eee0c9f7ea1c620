@@ -1,0 +1,5 @@
+Decided: drop the five comment lines arch-check flagged; restore the base doc line on `budget` instead of rewording it
+Because: crates/core/src/check.rs:1146
+Rejected: keeping the #820 doc wording — a changed `///` line counts as a new comment beyond the one allowed
+Check: `herdsman arch-check --base origin/staging` is 0 violations and the disk tests still pass
+Owner: no behaviour change this round; it only removes code comments the CI style check refused
