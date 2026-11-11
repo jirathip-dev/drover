@@ -1,0 +1,5 @@
+Decided: the perf test helper waits for serve to answer one GET before a test times anything against it
+Because: crates/cli/tests/perf.rs:337
+Rejected: warm up in a background thread so serve accepts at once — first requests then race the warm-up and the rebuild-counter and sources tests fail
+Check: with a 6 s sleep added to serve_on startup the /live test fails as CI did without the helper wait and passes with it
+Owner: a slow test runner no longer fails the live-update speed test; the board's speed is unchanged
