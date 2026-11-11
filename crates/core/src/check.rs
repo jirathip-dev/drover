@@ -175,8 +175,14 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             continue;
         };
         let ns: Vec<String> = mine.iter().map(|h| format!("#{}", h.0 .1)).collect();
+        let by = crate::drive::held_by(ctx, cfg, r);
+        let by = if by.is_empty() {
+            "no spawn starting now".into()
+        } else {
+            format!("slots held by {by}")
+        };
         let why = format!(
-            "{} held back by SPAWN_PENDING for {}",
+            "{} held back by SPAWN_PENDING for {}: {by}",
             ns.join(", "),
             age(ctx.now - since)
         );
