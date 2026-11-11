@@ -77,27 +77,27 @@ fn used(name: &str) -> herdsman::Ctx {
     c
 }
 
-fn card(c: &herdsman::Ctx) -> String {
-    let addr = "127.0.0.1:7777";
+fn card(c: &herdsman::Ctx) -> Value {
     let r = fake("1");
-    let s = herdsman::serve::Server::new(c, &r, Some(addr.into()));
-    let cookie = pair(&s, c, "", c.now);
-    let res = s.respond(&format!("GET / HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n"), c.now);
-    let page = with_board(&String::from_utf8_lossy(&res), &s, addr, &cookie, c.now);
-    let a = page.find("<div class=ask data-n=12>").expect("no needs-human card");
-    page[a..a + page[a..].find("</div>").unwrap()].to_string()
+    let s = herdsman::serve::Server::new(c, &r, Some("127.0.0.1:7777".into()));
+    let res = s.respond("GET /screens/cards HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now);
+    let res = String::from_utf8_lossy(&res).into_owned();
+    let cards: Value = serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let k = cards.as_array().unwrap().iter().find(|k| k["id"] == "nhc-sendmeter-12");
+    k.expect("no needs-human card").clone()
 }
 
 #[test]
 fn the_card_offers_start_lane_only_for_a_lane_that_never_ran() {
+    let label = |k: &Value| k["fold"]["main"]["label"].as_str().unwrap_or_default().to_string();
     let k = card(&stuck("never-started-card"));
     assert!(
-        k.contains("value=extend>start lane") && !k.contains("one more round"),
+        label(&k) == "start lane" && !k.to_string().contains("one more round"),
         "{k}"
     );
     let k = card(&used("used-rounds-card"));
     assert!(
-        k.contains("value=extend>one more round") && !k.contains("start lane"),
+        label(&k) == "one more round" && !k.to_string().contains("start lane"),
         "{k}"
     );
 }

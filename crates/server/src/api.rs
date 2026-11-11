@@ -180,8 +180,6 @@ pub struct NeedIssue {
     pub fleet: String,
     pub issue: u64,
     pub pending: bool,
-    /// #831: the main action's label: `start lane` (its lane never ran) or `one more round`.
-    pub action: String,
     pub who: String,
     pub title: String,
     pub why: String,

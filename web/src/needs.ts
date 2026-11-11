@@ -3,6 +3,7 @@
 import type { Blocked, NeedIssue, NeedsTab } from '../../assets/types/api';
 import { enc } from './chat.ts';
 import { esc } from './events.ts'; // node runs this file as is: the extension
+import { age } from './events.ts';
 import { answer, asked, form, hidden, prLine } from './queue.ts';
 
 /** What a card's forms read: the board takes forms (`rw`), posts them (`live`), the device is paired, offers Pair. */
@@ -10,9 +11,13 @@ export type Flags = Pick<NeedsTab, 'now' | 'rw' | 'live' | 'paired' | 'pair'>;
 
 const PAIRB = ' <button type=button class=pairb>Pair this phone</button>';
 
+const folded = (parts: (string | null | undefined)[], ago: string, main = '') =>
+  `<summary><span>${esc(parts.filter(Boolean).join(' · '))}</span>${ago ? `<span class=ag>${ago}</span>` : ''}${main}</summary>`;
+const issueOf = (who: string) => who.split(' · ').find(w => w.startsWith('#'));
+
 /** A blocked lane's card: its harness menu's options (`/answer`) under its title, reason, command and countdown, else
  * the pane's last lines, and a Reply button that opens the lane's sheet; unpaired, the activity and a pairing hint. */
-export function blocked(d: Flags, b: Blocked): string {
+export function blocked(d: Flags, b: Blocked, fold = false): string {
   let body: string;
   if (b.activity != null) body = `<p class=m>${esc(b.activity)}</p><p class=m>pair this phone to answer${d.pair ? PAIRB : ''}</p>`;
   else if (b.menu != null) {
@@ -22,32 +27,40 @@ export function blocked(d: Flags, b: Blocked): string {
     body = `<p class=title>${esc(m.title)}</p><p class=reason>${esc(m.reason)}</p><p class=command>${esc(m.command)}</p>${cd}<p>${esc(m.question)}</p>${opts.join('')}`;
   } else body = `<pre>${esc(b.tail ?? '')}</pre>`;
   const reply = d.rw && d.paired ? '<button type=button class=rp>Reply</button><p class=as></p>' : '';
-  return `<div class=ask data-ask="${esc(b.name)}" data-push=${b.push ? 1 : 0}><p><b>needs you</b> <span class=m>${esc(b.who)}</span></p>${body}${reply}</div>`;
+  const q = b.menu?.question ?? b.activity ?? b.tail?.trim().split('\n').pop(), t = fold ? 'details' : 'div';
+  return `<${t} class=ask data-ask="${esc(b.name)}" data-push=${b.push ? 1 : 0}>${fold ? folded([issueOf(b.who), 'prompt', q], '') : ''}<p><b>needs you</b> <span class=m>${esc(b.who)}</span></p>${body}${reply}</${t}>`;
 }
 
 /** #130: a `needs-human` issue's card: why, the last verdict, then (paired) merge anyway, one more round, park; #217:
  * one more round recorded with no lane yet is one muted line. */
 function issue(d: NeedsTab, s: NeedIssue): string {
   const n = s.issue;
-  if (s.pending) return `<div class=pend data-n=${n}><p class=m>⟳ ${esc(s.action)} · starting a lane…</p></div>`;
+  if (s.pending) return `<div class=pend data-n=${n}><p class=m>⟳ one more round · starting a lane…</p></div>`;
   const line = prLine(s.pr, s.repo, n);
   const v = s.pass != null ? `PASS at ${s.pass.slice(0, 7)}${s.stale ? ' (not the head)' : ''} · ${line} · ${s.mergeable}` : `FAIL: ${esc(s.fail)} · ${line}`;
+  const id = esc(`nf-${s.fleet}-${n}`), rw = d.rw && d.paired, ago = s.who.split(' · ').pop() ?? '';
   const merge = s.merge ? `<button name=op value=override data-confirm="Merge #${n} past the round limit?">merge anyway</button>` : '';
-  const f = d.rw && d.paired ? `${form(d)}${hidden('', s.fleet, d.mtime)}<input type=hidden name=issue value=${n}>${merge}<button name=op value=extend>${esc(s.action)}</button><button name=op value=park>park</button></form>` : '';
+  const f = rw ? `${form(d, ` id="${id}"`)}${hidden('', s.fleet, d.mtime)}<input type=hidden name=issue value=${n}>${merge}<button name=op value=extend>one more round</button><button name=op value=park>park</button></form>` : '';
   // #417: the verdict's screenshots, inline, as `/shot/<fleet>/<n>/<i>` serves them.
   const shots = s.shots.map((x, i) => `<figure class=im><img src="shot/${enc(s.fleet)}/${n}/${i}" alt="${esc(x)}" loading=lazy><figcaption>${esc(x)}</figcaption></figure>`).join('');
-  return `<div class=ask data-n=${n}><p><b>needs you</b> <span class=m>${esc(s.who)}</span></p><p>#${n} ${esc(s.title)} · ${esc(s.why)}</p><p class=m>${v}</p>${shots}${f}</div>`;
+  const main = rw ? `<button form="${id}" name=op value=extend><span>one more round</span></button>` : '';
+  const head = folded([`#${n}`, 'needs-human', s.title, s.why], /^\d+[smhd]$/.test(ago) ? ago : '', main);
+  return `<details class=ask data-n=${n}>${head}<p><b>needs you</b> <span class=m>${esc(s.who)}</span></p><p>#${n} ${esc(s.title)} · ${esc(s.why)}</p><p class=m>${v}</p>${shots}${f}</details>`;
 }
 
 /** The `#needs` strip: the snapshot's time (#450: serve.js folds its age into the strip), the cards, and `[chat·N]`'s count (#386). */
 export function tab(d: NeedsTab): string {
   // #709: fleet.toml fails to load: the red banner, above every tab, until it loads again.
-  const age = `<i id=sts hidden data-ts=${d.snap}></i>` + (d.config == null ? '' : `<p class=cfgbad role=alert>${esc(d.config)}</p>`);
+  const top = `<i id=sts hidden data-ts=${d.snap}></i>` + (d.config == null ? '' : `<p class=cfgbad role=alert>${esc(d.config)}</p>`);
   const asks = d.asks.map(a => {
-    const from = a.from == null ? '' : ` · imported from ${esc(a.from)}`, f = d.rw ? answer(d, a.ask, 'Send') : '';
+    const k = a.ask, id = esc(`nf-${k.fleet}-${k.id}`), design = k.options.join() === 'approve,revise,reject';
+    const from = a.from == null ? '' : ` · imported from ${esc(a.from)}`, f = d.rw ? answer(d, k, 'Send', id) : '';
+    const m = k.recommend ?? (design ? 1 : null), o = m == null ? undefined : k.options[m - 1];
+    const main = d.rw && o != null ? `<button form="${id}" name=choice value=${m}><span>${esc(o)}</span></button>` : '';
+    const head = folded([k.issue == null ? '' : `#${k.issue}`, design ? 'design' : a.kind.split(' · ')[0], k.question], age(Math.max(0, d.now - k.ts)), main);
     // #412: a design's PNGs, inline, as `/design/<fleet>/<n>/<i>` serves them.
     const pngs = a.pngs.map((n, i) => `<figure class=im><img src="design/${enc(a.ask.fleet)}/${a.ask.issue ?? 0}/${i}" alt="${esc(n)}" loading=lazy><figcaption>${esc(n)}</figcaption></figure>`);
-    return `<div class=ask><p><b>needs you</b> <span class=m>${esc(a.who)}</span> <span class=m>· ${a.kind}${from}</span></p><p>${asked(a)}</p>${pngs.join('')}${f}</div>`;
+    return `<details class=ask>${head}<p><b>needs you</b> <span class=m>${esc(a.who)}</span> <span class=m>· ${a.kind}${from}</span></p><p>${asked(a)}</p>${pngs.join('')}${f}</details>`;
   });
-  return age + asks.join('') + d.blocked.map(b => blocked(d, b)).join('') + d.issues.map(s => issue(d, s)).join('') + `<i id=chn hidden data-n=${d.choosing}></i>`;
+  return top + asks.join('') + d.blocked.map(b => blocked(d, b, true)).join('') + d.issues.map(s => issue(d, s)).join('') + `<i id=chn hidden data-n=${d.choosing}></i>`;
 }
