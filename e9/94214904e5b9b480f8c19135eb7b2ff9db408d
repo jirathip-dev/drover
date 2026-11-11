@@ -1,0 +1,5 @@
+Decided: fixed the red `evidence` check by merging origin/staging into a new head and naming that sha in the PR body before the push.
+Because: .github/workflows/evidence.yml:16
+Rejected: rerunning the failed evidence run — a rerun replays the old event's PR body, so it failed again at 07:21.
+Check: every gate was re-run at e994214; the full suite fails only chat_tab, live_board and self_update, which fail the same on base 3d90dba1.
+Owner: No code change this round; the PR's test evidence now names its current head, so the evidence check is green.
