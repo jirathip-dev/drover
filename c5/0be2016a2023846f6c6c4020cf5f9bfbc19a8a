@@ -1,0 +1,7 @@
+Decided: the token file sits beside fleet.toml (ctx.config), created once at serve_on start with create_new and mode 0600
+Because: "If `~/.config/herdsman/cooee-token` is missing, `herdsman serve` creates it"
+Rejected: write0600 when missing — it renames over the path, so a racing second start could rewrite the token
+Decided: plugin() reads the file on every request and accepts it alongside COOEE_PLUGIN_TOKEN
+Because: crates/server/src/screens.rs:557
+Check: cooee_token.rs starts serve_on twice on real sockets; the token works on /screens/queue and /action, no token gets 401
+Owner: cooee can attach to the running serve with a private token file that serve makes once and keeps.
