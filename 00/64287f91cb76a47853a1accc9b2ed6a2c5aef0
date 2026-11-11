@@ -1,0 +1,7 @@
+Decided: shortened the reply --file refusal to one line so the repo fits the line cap after staging moved (#834)
+Because: crates/core/src/orchestrator.rs:639
+Rejected: filing a cap ask — a 4-line trim with no behaviour change was enough
+Decided: merged origin/staging 27e3949 so cap-check counts against the current integration total
+Because: "`cargo build`, `clippy -D warnings` and `cargo test` exit 0, and `ci/cap.toml` holds"
+Check: cap-check at 0064287 reports 41000 / 41000; the hook and reply --file tests pass; the WebKit scroll test fails on staging too
+Owner: The orchestrator can now show a design image or screenshot from a lane's worktree in a thread reply, with no run card.
