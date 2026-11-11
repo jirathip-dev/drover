@@ -1,0 +1,7 @@
+Decided: worktree_du reads the total and time from the stamp's first line only; root and top rows follow it.
+Because: crates/core/src/check.rs:1712
+Decided: the timer test checks that first line ends with the tick time, since the stamp now carries the roots and the largest folders.
+Because: "A refusal names the measured roots and the top 3 folders by size"
+Rejected: a second file for the root/top rows — two files written by one walk can disagree after a crash.
+Check: cargo test -p herdsman --test timer passes (11/11) and --test disk passes (11/11).
+Owner: fixes a test the first round broke; the disk numbers are unchanged.
