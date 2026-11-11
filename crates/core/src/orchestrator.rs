@@ -618,30 +618,38 @@ pub fn inside(ctx: &Ctx, cfg: &Config, id: &str, p: &std::path::Path) -> Option<
 }
 
 /// A file a message carries, as the thread logs it: its name, path in the orchestrator's folder and size.
-pub fn file(ctx: &Ctx, cfg: &Config, id: &str, p: &std::path::Path) -> Result<Value> {
-    let Some(p) = inside(ctx, cfg, id, p) else {
-        let d = dir(ctx, cfg, id).display().to_string();
-        bail!("{}: not in the thread's folder {d}; copy it there first", p.display());
-    };
+pub fn file(ctx: &Ctx, cfg: &Config, t: &Event, p: &std::path::Path) -> Result<Value> {
+    let id = t.str("thread").unwrap_or_default();
+    let p = inside(ctx, cfg, id, p).map_or_else(|| copy_in(ctx, cfg, t, p), Ok)?;
     let size = std::fs::metadata(&p).with_context(|| p.display().to_string())?.len();
     let name = p.file_name().map(|n| n.to_string_lossy().into_owned());
     Ok(json!({"name": name, "path": p, "size": size}))
 }
 
+fn copy_in(ctx: &Ctx, cfg: &Config, t: &Event, p: &std::path::Path) -> Result<std::path::PathBuf> {
+    let id = t.str("thread").unwrap_or_default();
+    let roots = (cfg.fleet.get(&t.fleet).into_iter())
+        .flat_map(|f| [ctx.worktrees.join(f.repo_name()), expand(&f.local)])
+        .filter_map(|r| r.canonicalize().ok());
+    let from = (p.canonicalize().ok()).filter(|f| f.is_file() && roots.clone().any(|r| f.starts_with(r)));
+    let (Some(from), Some(name)) = (from, p.file_name()) else {
+        bail!("{}: not in the thread folder, a worktree or the checkout", p.display());
+    };
+    let to = dir(ctx, cfg, id).join("files");
+    std::fs::create_dir_all(&to)?;
+    let to = to.join(name);
+    let _ = std::fs::remove_file(&to);
+    std::fs::copy(&from, &to).with_context(|| from.display().to_string())?;
+    to.canonicalize().map_err(Into::into)
+}
+
 /// `herdsman thread reply [--file <path>]…`: the orchestrator's message to the owner, its files shown inline.
 pub fn reply(ctx: &Ctx, cfg: &Config, id: &str, text: &str, files: &[std::path::PathBuf]) -> Result<()> {
     text_ok(text)?;
-    let files = files
-        .iter()
-        .map(|p| file(ctx, cfg, id, p))
-        .collect::<Result<Vec<_>>>()?;
-    log(
-        ctx,
-        cfg,
-        find(&shared(&ctx.state)?, id)?,
-        "orchestrator",
-        (text, &files),
-    )
+    let events = shared(&ctx.state)?;
+    let t = find(&events, id)?;
+    let files = files.iter().map(|p| file(ctx, cfg, t, p)).collect::<Result<Vec<_>>>()?;
+    log(ctx, cfg, t, "orchestrator", (text, &files))
 }
 
 /// `herdsman thread say` (and a thread ask's answer, `raw`: typed as is; #386: the board's, with `files`): log
@@ -702,6 +710,12 @@ pub fn post(
 /// #403: `say`'s second half: type `line` into thread `t`'s orchestrator, starting or resuming it first.
 pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
+    let cur = thread_role(cfg, &shared(&ctx.state)?, t)?.1;
+    let ms = harness_models(cfg, &cur.harness);
+    if let Some(m) = cur.model.filter(|m| !ms.is_empty() && !ms.contains(&m.as_str())) {
+        let text = format!("model {m} is not one of {ms:?}");
+        return log(ctx, cfg, t, "system", (&text, &[])).and_then(|()| refused("BAD_VALUE", text));
+    }
     // #477: one delivery per thread at a time (across processes too): a message waits for a start in flight.
     let dir = dir(ctx, cfg, id);
     std::fs::create_dir_all(&dir)?;
@@ -860,7 +874,8 @@ pub fn harness_models<'a>(cfg: &'a Config, h: &str) -> Vec<&'a str> {
             .keys()
             .any(|n| defaults(cfg, n).is_ok_and(|d| d.1.harness == h))
     });
-    let all: std::collections::BTreeSet<_> = roles.filter_map(|r| r.model.as_deref()).chain(chat).collect();
+    let mut all: std::collections::BTreeSet<_> = roles.filter_map(|r| r.model.as_deref()).chain(chat).collect();
+    all.extend(cfg.models.iter().map(String::as_str));
     all.into_iter().collect()
 }
 
@@ -1175,6 +1190,12 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         }
         break (new, o, up);
     };
+    let why = format!("{} {screen}", herdr::message(&o));
+    let named = |m: &&str| o.code != 0 && up.is_none() && (why.contains("unrecognized_model") || why.contains(*m));
+    if let Some(m) = p.model.as_deref().filter(named) {
+        let text = format!("the orchestrator does not start on model {m}: {}", why.trim_end());
+        return log(ctx, cfg, t, "system", (&text, &[])).and_then(|()| refused("BAD_VALUE", text));
+    }
     let pane = match (o.code, up) {
         (0, _) => new.clone(),
         (_, Some(p)) => p,

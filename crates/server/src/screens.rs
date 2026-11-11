@@ -255,10 +255,12 @@ fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
         "fold": fold(q.issue, kind, &q.question, &age, &main.unwrap_or_default()), "blocks": blocks})
 }
 
-fn needs_card(i: &NeedIssue) -> Value {
+fn needs_card(i: &NeedIssue, ev: &crate::events::Log) -> Value {
     let (f, n) = (&i.fleet, i.issue);
+    let st = ev.states.get(&(f.clone(), n));
+    let action = st.map_or("one more round", |s| s.card());
     let vals = json!({"fleet": f, "issue": n});
-    let mut opts = vec![json!({"value": "extend", "label": "one more round", "values": vals})];
+    let mut opts = vec![json!({"value": "extend", "label": action, "values": vals})];
     if i.merge {
         let confirm = json!({"title": format!("Merge #{n} past its FAIL?"), "message": "Logged by: owner. CI and serial still gate it.", "ok": "Merge", "destructive": true});
         opts.push(json!({"value": "merge", "label": "merge anyway", "values": vals, "confirm": confirm}));
@@ -274,7 +276,7 @@ fn needs_card(i: &NeedIssue) -> Value {
         blocks.push(choice(&format!("nh-{f}-{n}"), "needs-human", &opts));
     }
     let age = i.who.rsplit(" · ").next().unwrap_or_default();
-    let main = (!i.pending).then(|| json!({"block": format!("nh-{f}-{n}"), "action": "needs-human", "value": "extend", "label": "one more round", "values": vals}));
+    let main = (!i.pending).then(|| json!({"block": format!("nh-{f}-{n}"), "action": "needs-human", "value": "extend", "label": action, "values": vals}));
     json!({"type": "card", "id": format!("nhc-{f}-{n}"), "kind": "ask", "tone": "bad",
         "title": format!("{f} #{n} · {}", i.title), "meta": format!("needs-human · {age}"),
         "fold": fold(Some(n), "needs-human", &i.why, age, &main.unwrap_or_default()), "blocks": blocks})
@@ -548,16 +550,21 @@ impl Server<'_> {
         let ev = shared(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
         cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, mins, a)));
-        cards.extend(tab.issues.iter().map(needs_card));
+        cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
         Value::Array(cards)
     }
 
-    fn plugin(head: &str) -> bool {
-        let token = std::env::var("COOEE_PLUGIN_TOKEN").unwrap_or_default();
+    fn plugin(ctx: &Ctx, head: &str) -> bool {
+        let file = std::fs::read_to_string(ctx.config.with_file_name("cooee-token")).unwrap_or_default();
         let bearer = header(head, "authorization")
             .and_then(|h| h.strip_prefix("Bearer "))
             .unwrap_or_default();
-        !token.is_empty() && devices::sha256(bearer.as_bytes()) == devices::sha256(token.as_bytes())
+        [
+            std::env::var("COOEE_PLUGIN_TOKEN").unwrap_or_default(),
+            file.trim().into(),
+        ]
+        .iter()
+        .any(|t| !t.is_empty() && devices::sha256(bearer.as_bytes()) == devices::sha256(t.as_bytes()))
     }
 
     pub(super) fn screens(
@@ -569,7 +576,7 @@ impl Server<'_> {
         body: &str,
         auth: &Auth,
     ) -> Res {
-        let plugin = Self::plugin(head);
+        let plugin = Self::plugin(ctx, head);
         if !plugin && !self.allowed(ctx, head) {
             return line("403 Forbidden", "foreign Host or Origin");
         }
@@ -768,7 +775,7 @@ impl Server<'_> {
         let (q, open) = (form(query), STREAMS.fetch_add(1, Relaxed) < 4);
         let first = self
             .screen(&ctx(), base, &q)
-            .filter(|_| open && (Self::plugin(head) || self.allowed(self.ctx, head)));
+            .filter(|_| open && (Self::plugin(self.ctx, head) || self.allowed(self.ctx, head)));
         let Some(mut cur) = first else {
             STREAMS.fetch_sub(1, Relaxed);
             let r = line(

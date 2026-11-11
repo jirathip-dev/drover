@@ -10,48 +10,48 @@ skip = [".herdsman/**"]
 
 [[ban]]
 pattern = "claude"
-paths = ["crates/*/src/**"]
-except = ["crates/core/src/providers/**"]
-reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md)"
+paths = ["crates/*/src/**", "web/src/**"]
+except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
 comments = true
 ignore_case = true
 
 [[ban]]
 pattern = "anthropic"
-paths = ["crates/*/src/**"]
-except = ["crates/core/src/providers/**"]
-reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md)"
+paths = ["crates/*/src/**", "web/src/**"]
+except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
 comments = true
 ignore_case = true
 
 [[ban]]
 pattern = "codex"
-paths = ["crates/*/src/**"]
-except = ["crates/core/src/providers/**"]
-reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md)"
+paths = ["crates/*/src/**", "web/src/**"]
+except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
 comments = true
 ignore_case = true
 
 [[ban]]
 pattern = "openai"
-paths = ["crates/*/src/**"]
-except = ["crates/core/src/providers/**"]
-reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md)"
+paths = ["crates/*/src/**", "web/src/**"]
+except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
 comments = true
 ignore_case = true
 
 [[ban]]
 pattern = "gemini"
-paths = ["crates/*/src/**"]
-except = ["crates/core/src/providers/**"]
-reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md)"
+paths = ["crates/*/src/**", "web/src/**"]
+except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
 comments = true
 ignore_case = true
 
 [[ban]]
 pattern = "hermes"
-paths = ["crates/*/src/**"]
-except = ["crates/core/src/providers/**"]
-reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md)"
+paths = ["crates/*/src/**", "web/src/**"]
+except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
 comments = true
 ignore_case = true

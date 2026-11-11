@@ -301,6 +301,9 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         crate::lesson::weekly(ctx, cfg, &pass, out)?; // #419
         driven
     });
+    for m in pass.late() {
+        writeln!(out, "tick: {m}: over budget; skipped for the rest of this pass")?;
+    }
     let _ = std::fs::remove_file(&mark);
     drop(stop);
     let _ = beating.join();

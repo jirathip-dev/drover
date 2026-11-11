@@ -775,30 +775,31 @@ pub fn clean_all(
         })
         .collect();
     // Newest spawn per worktree wins (it has the current pane); #416: a `spawn-started` alone (the spawn failed) too.
-    for e in (events.iter().rev())
+    let spawns: Vec<&Event> = (events.iter().rev())
         .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && fleet.is_none_or(|f| f == e.fleet))
         .chain(&revs)
-    {
+        .filter(|e| e.issue.is_some_and(|n| issue.is_none_or(|i| i == n)))
+        .filter(|e| lane.is_none_or(|a| e.str("agent") == Some(a)))
+        .collect();
+    let held = |e: &Event| {
+        // #561: a disabled or unreachable host's worktrees are never probed; a merged or closed one there is listed.
+        // #678: an explicit run's probe decides for a disabled host.
+        let away = e.str("host").filter(|_| e.str("machine").is_some());
+        let held = match away.filter(|h| cfg.hosts.get(*h).is_some_and(|c| !c.enabled)) {
+            Some(h) => !off.iter().any(|o| o.0 == h && o.2.is_some()),
+            None => crate::hosts::offline(ctx, Some(e)).is_some(),
+        };
+        held.then_some("host unreachable (not cleaned)")
+    };
+    let there = crate::hosts::present(r, spawns.iter().copied().filter(|e| held(e).is_none()));
+    for e in spawns {
         let (Some(n), Some(wt)) = (e.issue, e.str("worktree")) else {
             continue;
         };
-        if issue.is_some_and(|i| i != n) || lane.is_some_and(|a| e.str("agent") != Some(a)) {
-            continue;
-        }
-        let on = On::of(r, Some(e));
-        // #561: a disabled or unreachable host's worktrees are never probed; a merged or closed one there is listed.
-        // #678: an explicit run's probe decides for a disabled host.
+        let (on, held) = (On::of(r, Some(e)), held(e));
         let away = e.str("host").filter(|_| on.machine.is_some());
-        let held = match away.filter(|h| cfg.hosts.get(*h).is_some_and(|c| !c.enabled)) {
-            Some(h) => match off.iter().find(|o| o.0 == h) {
-                Some((.., Some(_))) => None,
-                Some(_) => Some("host offline (not cleaned)"),
-                None => Some("on a disabled host (not cleaned)"),
-            },
-            None => crate::hosts::offline(ctx, Some(e)).map(|_| "host offline (not cleaned)"),
-        };
         let gone = |c: &Event| c.kind == "clean" && c.str("worktree") == Some(wt) && c.ts >= e.ts;
-        let gone = || held.map_or_else(|| !on.exists(Path::new(wt)), |_| events.iter().any(gone));
+        let gone = || held.map_or_else(|| !there.contains(&(on.machine, wt)), |_| events.iter().any(gone));
         if seen.contains(wt) || gone() {
             continue;
         }
@@ -1085,6 +1086,7 @@ pub fn leftovers(
 }
 
 const BUILD_DIRS: &[&str] = &["target", "node_modules", ".next", "dist", ".cache"];
+const BUILDERS: &[&str] = &["cargo", "rustc", "node", "npm", "npx", "pnpm", "yarn", "bun"];
 /// #103: delete a lane's build folders (#164: plus the fleet's `build_dirs`), even when the worktree stays; the bytes
 /// freed (#361: with `dry`, listed and counted, none removed). One git does not ignore stays.
 pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt: &Path, dry: bool) -> Result<u64> {
@@ -1147,50 +1149,60 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
     let usage = measure(ctx, cfg);
     let mut total = usage.total;
     let over = |t: u64| gb(t) > cfg.limits.worktree_budget_gb;
-    let builds = builds(ctx, cfg).iter().any(|b| b.is_dir());
-    let live = if over(total) || builds {
+    let builds = builds(ctx, cfg);
+    let live = if over(total) || builds.iter().any(|b| b.is_dir()) {
         live_lanes(ctx, cfg, r)?
     } else {
         Live::new()
     };
     if over(total) {
-        let events = read(&ctx.state)?;
+        let (events, agents, ps) = (read(&ctx.state)?, host::agents(r)?, host::cwds(r));
         let states = fold(&events);
+        let since = ctx.now.saturating_sub(cfg.limits.stall_minutes * 60);
+        let working = |a: &str| (agents.iter()).any(|x| x["name"] == a && x["agent_status"] == "working");
         let mut seen = std::collections::BTreeSet::new();
         let mut lanes: Vec<(u64, &Event, &str)> = (events.iter().rev())
             .filter(|e| e.kind == "spawn" && e.str("role") != Some("orch"))
             .filter_map(|e| Some((e, e.str("worktree")?)))
             .filter(|(_, w)| Path::new(w).starts_with(&ctx.worktrees) && Path::new(w).exists() && seen.insert(*w))
-            .filter(|(e, _)| !e.str("agent").is_some_and(|a| live.contains(a)))
+            .filter(|(e, _)| e.ts < since && !e.str("agent").is_some_and(working))
             .map(|(e, w)| {
-                (
-                    e.issue
-                        .and_then(|n| states.get(&(e.fleet.clone(), n)))
-                        .map_or(e.ts, |s| s.last_ts),
-                    e,
-                    w,
-                )
+                let s = e.issue.and_then(|n| states.get(&(e.fleet.clone(), n)));
+                (s.map_or(e.ts, |s| s.last_ts), e, w)
             })
             .collect();
         lanes.sort_by_key(|l| l.0);
+        let (mut bytes, mut names) = (0, vec![]);
         for (_, e, wt) in lanes {
             if !over(total) {
                 break;
             }
-            let bytes = purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
-            if bytes > 0 {
-                total = total.saturating_sub(bytes);
-                writeln!(
-                    out,
-                    "budget: freed {bytes} bytes of build folders in {wt} (no live agent)"
-                )?;
-                let d = json!({"agent": e.str("agent"), "bytes": bytes});
-                emit(
-                    &ctx.state,
-                    cfg,
-                    Event::new(ctx.now, &e.fleet, e.issue, "budget-freed", d),
-                )?;
+            let agent = e.str("agent").unwrap_or_default();
+            let caches: Vec<_> = (builds.iter().map(|b| b.join(agent)))
+                .filter(|c| !agent.is_empty() && c.is_dir())
+                .collect();
+            let node = host::inside(&ps, Path::new(wt))
+                .into_iter()
+                .any(|p| BUILDERS.contains(&p.1.as_str()));
+            if node || caches.iter().any(|c| building(c, 1)) {
+                writeln!(out, "budget: keep {wt}: a build runs")?;
+                continue;
             }
+            let mut freed = purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
+            total = total.saturating_sub(freed);
+            freed += (caches.iter().map(|c| (du(c), std::fs::remove_dir_all(c))))
+                .filter_map(|(n, res)| res.ok().map(|()| n))
+                .sum::<u64>();
+            if freed > 0 {
+                writeln!(out, "budget: freed {freed} bytes of build folders of {wt} (waiting)")?;
+                bytes += freed;
+                names.push(agent);
+            }
+        }
+        if !names.is_empty() {
+            let why = format!("freed {:.1} GB from {}", gb(bytes), names.join(", "));
+            let d = json!({"lanes": names, "bytes": bytes, "reason": why});
+            emit(&ctx.state, cfg, Event::new(ctx.now, "all", None, "budget-freed", d))?;
         }
     }
     sweep(ctx, cfg, &On::new(r, None), "local", out)?;

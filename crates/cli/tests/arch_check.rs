@@ -510,3 +510,28 @@ fn a_baselined_layer_crossing_passes_and_a_new_one_fails() {
     let base = std::fs::read_to_string(d.join(".herdsman/arch-baseline.txt")).unwrap();
     assert_eq!(base, "web/src/api/client.ts -> web-ui\n", "the list only shrinks");
 }
+
+#[test]
+fn the_repos_provider_ban_fails_a_new_web_file_and_passes_the_two_frozen_board_files() {
+    let conf = include_str!("../../../.herdsman/arch.toml");
+    let board = "const C = '<b>Anthropic</b>' + ['claude', 'codex'].join();\n";
+    let d = committed(
+        "arch-ban-web",
+        conf,
+        &[("web/src/system.ts", board), ("web/src/host.ts", board)],
+    );
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    std::fs::write(
+        d.join("web/src/accounts.ts"),
+        "export const v = 'x';\nconst p = 'Claude';\n",
+    )
+    .unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("web/src/accounts.ts:2: `claude` is banned here: #806"),
+        "{out}"
+    );
+    assert!(out.contains("1 violations"), "{out}");
+}

@@ -3,6 +3,8 @@ version = "0.1.0"
 build = "true"
 run = "exec herdsman serve --addr 127.0.0.1:$PORT"
 needs = ["herdsman"]
+attach = "http://127.0.0.1:7777"
+attach_token = "~/.config/herdsman/cooee-token"
 
 [[places]]
 type = "header-strip"

@@ -166,18 +166,29 @@ fn approve_runs_the_exact_command_once_and_posts_its_masked_output() {
     );
 
     let leak = "token ghp_abcdefghij0123456789abcdefghij";
-    let r = Fake::default().reply("sh -c", &format!("commit 1a2b\n{leak}\n"));
+    let r = Fake::default()
+        .reply("sh -c nohup", "4242\n")
+        .reply("sh -c", &format!("commit 1a2b\n{leak}\n"));
     let at5 = at(&c, T + 300);
     let (code, out) = run(&at5, &r, &["card", "approve", "r1", "--sha", &sha[..12]]);
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "run r1 approved by owner, running in /srv/app…\n")
+    );
+    let (code, out) = run(&at5, &r, &["card", "run", "r1"]);
     assert_eq!(code, 0, "{out}");
+    let out_file = c.state.with_file_name("run-r1.out");
     assert_eq!(
         r.calls
             .borrow()
             .iter()
-            .filter(|l| l.starts_with("sh -c"))
+            .filter(|l| l.starts_with("sh -c") && !l.starts_with("sh -c nohup"))
             .cloned()
             .collect::<Vec<_>>(),
-        ["sh -c cd -- \"$1\" && eval \"$2\" sh /srv/app git log -1 main"],
+        [format!(
+            "sh -c exec >\"$3\" 2>&1; cd -- \"$1\" && eval \"$2\" sh /srv/app git log -1 main {}",
+            out_file.display()
+        )],
         "the exact text, in its folder"
     );
     let line = kinds(&c, "thread-msg").pop().unwrap();
@@ -267,4 +278,154 @@ fn a_hard_no_is_refused_at_posting() {
         "r1\n",
         "a plain promotion may be a card"
     );
+}
+
+struct Clock(Fake);
+
+impl Clock {
+    fn sh(&self, args: &[String], limit: u64) -> anyhow::Result<herdsman::runner::Out> {
+        self.0
+            .calls
+            .borrow_mut()
+            .push(format!("sh {} (limit {limit}s)", args.join(" ")));
+        let n: u64 = args
+            .iter()
+            .find_map(|a| a.strip_prefix("sleep ")?.parse().ok())
+            .unwrap_or(0);
+        if let Some(out) = args.last().filter(|a| a.ends_with(".out")) {
+            std::fs::write(out, "started\n")?;
+        }
+        let (code, stdout, stderr) = match n <= limit {
+            true => (0, format!("slept {n}s\n"), String::new()),
+            false => (124, String::new(), format!("no answer in {limit}s")),
+        };
+        Ok(herdsman::runner::Out { code, stdout, stderr })
+    }
+}
+
+impl herdsman::runner::Runner for Clock {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+        match prog {
+            "sh" if args.first().is_some_and(|a| a == "-c") && !args[1].contains("nohup") => self.sh(args, 60),
+            _ => self.0.run(prog, args),
+        }
+    }
+    fn run_in(&self, prog: &str, args: &[String], _input: &str) -> anyhow::Result<herdsman::runner::Out> {
+        self.run(prog, args)
+    }
+    fn run_for(
+        &self,
+        prog: &str,
+        args: &[String],
+        _input: &str,
+        limit: std::time::Duration,
+    ) -> anyhow::Result<herdsman::runner::Out> {
+        match prog {
+            "sh" => self.sh(args, limit.as_secs()),
+            _ => self.0.run(prog, args),
+        }
+    }
+    fn sleep(&self, _secs: u64) {}
+    fn detach(&self, exe: &str, args: &[String], _log: &std::path::Path) -> anyhow::Result<u32> {
+        self.0
+            .calls
+            .borrow_mut()
+            .push(format!("detach {exe} {}", args.join(" ")));
+        Ok(4242)
+    }
+}
+
+fn card_with_timeout(c: &herdsman::Ctx, cmd: &str, timeout: &str) -> String {
+    let args = [
+        "card",
+        "post",
+        "t1",
+        "--cmd",
+        cmd,
+        "--why",
+        "owner asked",
+        "--blast",
+        "build caches",
+        "--dir",
+        "/srv/app",
+        "--timeout",
+        timeout,
+    ];
+    run(c, &Fake::default(), &args).1
+}
+
+fn last_msg(c: &herdsman::Ctx) -> String {
+    kinds(c, "thread-msg").pop().unwrap().str("text").unwrap().to_string()
+}
+
+#[test]
+fn a_card_sleeping_90s_with_timeout_300_runs_in_the_background_and_reports_exit_0() {
+    let c = setup(
+        "card-background",
+        "\n[runtime]\nkind = \"shed\"\nsocket = \"/nonexistent/shed.sock\"\n",
+    );
+    assert_eq!(card_with_timeout(&c, "sleep 90", "300"), "r1\n");
+    let r = Clock(Fake::default());
+    let (code, out) = run(&at(&c, T + 60), &r, &["card", "approve", "r1"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(out, "run r1 approved by owner, running in /srv/app…\n");
+    assert_eq!(last_msg(&c), "run r1 approved by owner, running in /srv/app…");
+    assert!(kinds(&c, "run-done").is_empty(), "nothing ran in the approve itself");
+    let detached: Vec<String> =
+        r.0.calls
+            .borrow()
+            .iter()
+            .filter(|l| l.starts_with("detach "))
+            .cloned()
+            .collect();
+    assert_eq!(detached, [format!("detach {} card run r1", c.exe)]);
+    assert!(!r.0.called("sh -c"), "{:?}", r.0.calls.borrow());
+
+    let (code, out) = run(&at(&c, T + 150), &r, &["card", "run", "r1"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(r.0.called("sh -c"), "{:?}", r.0.calls.borrow());
+    assert!(
+        r.0.calls
+            .borrow()
+            .iter()
+            .any(|l| l.starts_with("sh -c") && l.ends_with("(limit 300s)")),
+        "{:?}",
+        r.0.calls.borrow()
+    );
+    let done = &kinds(&c, "run-done")[0];
+    assert_eq!((done.str("id"), done.data["code"].clone()), (Some("r1"), json!(0)));
+    let text = last_msg(&c);
+    assert!(
+        text.starts_with("run r1 approved by owner, ran in /srv/app: exit 0"),
+        "{text}"
+    );
+    assert!(text.contains("started") && text.contains("slept 90s"), "{text}");
+
+    let again = Clock(Fake::default());
+    let (code, out) = run(&at(&c, T + 160), &again, &["card", "run", "r1"]);
+    assert_eq!((code, out.contains("REFUSED ALREADY_SETTLED")), (3, true), "{out}");
+    assert!(!again.0.called("sh -c") && kinds(&c, "run-done").len() == 1);
+}
+
+#[test]
+fn a_run_past_its_timeout_is_killed_and_reported_with_its_tail() {
+    let c = setup("card-timeout", "");
+    assert_eq!(card_with_timeout(&c, "sleep 400", "300"), "r1\n");
+    let r = Clock(Fake::default());
+    assert_eq!(run(&at(&c, T + 60), &r, &["card", "approve", "r1"]).0, 0);
+    let (code, out) = run(&at(&c, T + 400), &r, &["card", "run", "r1"]);
+    assert_eq!(code, 0, "{out}");
+    let done = &kinds(&c, "run-done")[0];
+    assert_eq!(done.data["code"], json!(124));
+    let text = last_msg(&c);
+    assert!(
+        text.starts_with("run r1 approved by owner, ran in /srv/app: exit 124"),
+        "{text}"
+    );
+    assert!(
+        text.contains("started") && text.contains("killed after 300s (its --timeout)"),
+        "{text}"
+    );
+    let kill = format!("kill -KILL -- -{}", std::process::id());
+    assert!(r.0.called(&kill), "{:?}", r.0.calls.borrow());
 }

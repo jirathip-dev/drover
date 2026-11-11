@@ -694,6 +694,8 @@ enum CardCmd {
     },
     /// Owner only: deny a card; nothing runs
     Deny { id: String },
+    #[command(hide = true)]
+    Run { id: String },
 }
 
 #[derive(Subcommand)]
@@ -1602,6 +1604,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         }
                         CardCmd::Approve { id, sha } => crate::card::settle(ctx, &cfg, r, &id, true, sha.as_deref())?,
                         CardCmd::Deny { id } => crate::card::settle(ctx, &cfg, r, &id, false, None)?,
+                        CardCmd::Run { id } => crate::card::run(ctx, &cfg, r, &id)?,
                     };
                     writeln!(out, "{line}")?;
                 }
@@ -1771,7 +1774,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if scheduled {
                         return check::scheduled(ctx, &cfg, r, out).map(|()| 0);
                     }
-                    let what = (None, lane.as_deref(), false, true); // #678: disabled hosts that answer too
+                    let what = (None, lane.as_deref(), false, !crate::drive::in_act());
                     check::clean_all(ctx, &cfg, r, out, fleet.as_deref(), what, yes)?;
                     if lane.is_none() {
                         check::orphans(ctx, &cfg, out, orphans && yes)?;

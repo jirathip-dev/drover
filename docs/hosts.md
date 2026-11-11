@@ -11,7 +11,9 @@ fleet.toml nothing changes: every lane runs on the main host, as before.
    herdr commands, and `ssh <name> …` for everything else (git, probes, file reads and writes). So the machine's label
    must also work as an SSH host name, e.g. an entry in `~/.ssh/config`. Key-based login only, because herdsman runs
    ssh with `BatchMode=yes` (#337: and `ControlMaster=auto`, one connection kept 10 minutes). The board's reads of a
-   host (#337) are one ssh call per step, its herdr run as `~/.local/bin/herdr` there.
+   host (#337) are one ssh call per step, its herdr run as `~/.local/bin/herdr` there. A pass checks all of a host's
+   lane worktrees with one ssh call (#880); a host whose call runs past its limit shows in the tick's log as
+   `tick: <host>: over budget; skipped for the rest of this pass`, and the pass goes on for the other hosts.
 2. On the new host, install and log in to:
    - herdr (its server running);
    - git;

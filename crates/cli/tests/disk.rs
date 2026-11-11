@@ -133,8 +133,8 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
     let freed = events(&c, "budget-freed");
     assert_eq!(freed.len(), 1);
     assert_eq!(
-        (freed[0].str("agent"), freed[0].data["bytes"].as_u64()),
-        (Some("sendmeter-impl-8"), Some(4096))
+        (freed[0].data["lanes"].clone(), freed[0].data["bytes"].as_u64()),
+        (json!(["sendmeter-impl-8"]), Some(4096))
     );
     let stamp = || {
         let s = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
@@ -489,6 +489,15 @@ impl herdsman::runner::Runner for TwoHosts {
             _ => self.0.run(prog, args),
         }
     }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+        let line = args.last().map_or("", String::as_str);
+        match prog {
+            "ssh" if !line.starts_with("'date' ") => {
+                herdsman::runner::Real.run_in("sh", &["-c".into(), line.into()], input)
+            }
+            _ => self.run(prog, args),
+        }
+    }
 }
 
 /// #716: lane `impl-48` left dirty work on this host and on the Air; one `clean --yes` saves each to its own wip/
@@ -553,6 +562,61 @@ fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
     let (code, again) = run(&c, &r(), &["clean", "--yes"]);
     assert_eq!(code, 0, "{again}");
     assert!(!again.contains("issue-48"), "{again}");
+}
+
+#[test]
+fn over_budget_frees_waiting_lanes_longest_waiting_first() {
+    let cfg = |gb: f64| format!("{CONFIG}worktree_budget_gb = {gb}\n");
+    let d = tmpdir("disk-waiting");
+    let c = ctx(&d, &cfg(10240.0 / 1_073_741_824.0));
+    let (asks, review, busy) = (
+        lane(&c, 10, 7, "impl", "issue-7"),
+        lane(&c, 20, 8, "impl", "issue-8"),
+        lane(&c, 5, 9, "impl", "issue-9"),
+    );
+    ev(&c, 30, 7, "needs-decision", json!({"id": "q1", "question": "which?"}));
+    let cache = |a: &str| build(&c.worktrees.join(".build"), a, 4096);
+    let (a, r8, b) = (
+        build(&asks, "target", 4096),
+        build(&review, "target", 4096),
+        build(&busy, "target", 4096),
+    );
+    let (ca, c8, cb) = (
+        cache("sendmeter-impl-7"),
+        cache("sendmeter-impl-8"),
+        cache("sendmeter-impl-9"),
+    );
+    let r = Fake::default().reply("git -C", "").reply(
+        "herdr agent list",
+        &agents(&[
+            ("sendmeter-impl-7", "blocked", "/x", "p7"),
+            ("sendmeter-impl-8", "idle", "/x", "p8"),
+            ("sendmeter-impl-9", "working", "/x", "p9"),
+        ]),
+    );
+    let run_budget = |c: &herdsman::Ctx| {
+        let mut out = vec![];
+        herdsman::check::budget(c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+        String::from_utf8(out).unwrap()
+    };
+    let out = run_budget(&c);
+    assert!(!r8.exists() && !c8.exists(), "#8 waits longest: freed first: {out}");
+    assert!(a.exists() && ca.exists(), "under budget after #8: #7 stays: {out}");
+    assert!(b.exists() && cb.exists(), "a working lane is never freed: {out}");
+    assert!(review.exists(), "the worktree itself stays");
+    let freed = events(&c, "budget-freed");
+    assert_eq!(freed.len(), 1, "one line per pass");
+    assert_eq!(
+        herdsman::events::plain(&freed[0]),
+        "all budget-freed: freed 0.0 GB from sendmeter-impl-8"
+    );
+
+    let c = ctx(&d, &cfg(2048.0 / 1_073_741_824.0));
+    run_budget(&c);
+    assert!(!a.exists() && !ca.exists() && b.exists() && cb.exists());
+    let freed = events(&c, "budget-freed");
+    assert_eq!(freed.len(), 2);
+    assert_eq!(freed[1].str("reason"), Some("freed 0.0 GB from sendmeter-impl-7"));
 }
 
 #[test]

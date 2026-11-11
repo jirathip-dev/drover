@@ -214,6 +214,11 @@ thread_local! {
     static SLOT: Cell<bool> = const { Cell::new(false) };
 }
 
+/// #877: a pass's own command runs (its `clean` leaves disabled hosts alone).
+pub fn in_act() -> bool {
+    IN_ACT.get()
+}
+
 /// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (#389: none from a lane on
 /// another host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
 /// own session.
@@ -1189,6 +1194,9 @@ fn pass(
         if let Err(e) = crate::gate::sync_label(ctx, cfg, r, out, s, &pr) {
             writeln!(out, "{fleet} #{n} label: {e:#}")?;
         }
+        if crate::gate::ready_draft(ctx, cfg, r, out, s, &pr)? && merge(w) {
+            continue;
+        }
         // #148: a head auto-updated this pass has no CI yet; its merge waits for the next pass.
         let now = |e: &Event| e.is("auto-updated", fleet, s.issue) && e.ts == ctx.now;
         if let Some(e) = crate::events::shared(&ctx.state)?.iter().rfind(|e| now(e)).cloned() {
@@ -1337,7 +1345,8 @@ fn pass(
             // starts only now, so that one waits for the next pass).
             let mut merge = step == "merge";
             let full = f.merge_label.is_some() && pr["landing"] != "fast-first";
-            let green = ci == "green" && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
+            let green =
+                ci == "green" && pr["isDraft"] != true && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
             // #599/#650: a PASS merges this pass only if the merge gate's rule finds the head verified by it.
             let verified = || -> Result<bool> {
                 let st = fold(&read(&ctx.state)?).remove(&(fleet.to_string(), s.issue));
@@ -1944,17 +1953,11 @@ fn clean_merged(
         e.issue
             .is_some_and(|n| st.get(&(fleet.into(), n)).is_some_and(IssueState::done))
     };
-    let left = |e: &&Event| {
-        e.str("worktree")
-            .is_some_and(|w| crate::hosts::On::of(r, Some(e)).exists(Path::new(w)))
-    };
-    if KICK.get().is_none()
-        && events
-            .iter()
-            .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && e.fleet == fleet)
-            .filter(merged)
-            .any(|e| left(&e))
-    {
+    let left = (events.iter())
+        .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && e.fleet == fleet)
+        .filter(merged)
+        .filter(|e| !crate::hosts::held(ctx, cfg, e));
+    if KICK.get().is_none() && !crate::hosts::present(r, left).is_empty() {
         let c = (fleet, None, "clean");
         act(ctx, cfg, r, out, events, c, &["clean", fleet, "--yes"])?;
     }
