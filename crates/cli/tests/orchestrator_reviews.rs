@@ -80,8 +80,7 @@ fn needs_human(c: &herdsman::Ctx, ts: u64) {
 
 fn host() -> Fake {
     let issue = json!({"title": "Split the sender", "body": SPEC, "updatedAt": "t1", "comments": []});
-    Fake::default()
-        .reply("gh issue view 36", &issue.to_string())
+    Fake::default().reply("gh issue view 36", &issue.to_string())
 }
 
 fn by(c: &herdsman::Ctx, t: Option<&str>, now: u64, args: &[&str]) -> (i32, String) {
