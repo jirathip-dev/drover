@@ -1,0 +1,12 @@
+Decided: harness/ becomes providers/ behind one Provider trait; five name tables replaced by one registry! line
+Because: "One module per provider (providers/<name>.rs) behind a common trait"
+Because: "Adding one = a new file + one registry line"
+Decided: Hermes doctor rows, hooks check, profile files and env scrub moved into hermes.rs behind neutral trait hooks
+Decided: proxy specifics (upstream, env names, beta header merge) live in claude.rs as a Proxy value; proxy.rs stays generic
+Decided: provider-naming comments deleted, or turned into clap help attributes, never reworded across lines
+Because: crates/core/src/arch.rs:419
+Rejected: rewording multi-line comments in place — arch-check fails any added comment line but one doc line on a pub item
+Decided: the --harness help is built from the registry, so its text reads exactly as before
+Check: fake.rs unit tests fail if the fake's registry line is removed (lane_names, config, setup, account env, launch)
+Check: arch_check fixture fails `Codex` in a core file and passes it under providers/
+Owner: Every AI provider now lives in its own file; adding one is a new file plus one line, and CI blocks provider names elsewhere.
