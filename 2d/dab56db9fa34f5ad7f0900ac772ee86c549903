@@ -1,0 +1,7 @@
+Decided: no code change this round; the only red check at 6b73104 was a stale `evidence` run from the push, before the body named that head
+Because: scripts/evidence-check.sh:10
+Decided: merged origin/staging for a new head, with the body naming it before the push, so every check at the head is a fresh run
+Because: crates/core/src/gh.rs:415
+Rejected: re-running the failed `evidence` run — a re-run replays the push event's old body and fails again
+Check: every check at 2ddab56 is green, `evidence` included; web/dist is unchanged by `npm run build` after the merge
+Owner: No behaviour change this round; it only clears a stale CI failure and catches up with staging.
