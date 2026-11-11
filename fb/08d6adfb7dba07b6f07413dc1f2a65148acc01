@@ -1,0 +1,7 @@
+Decided: drive runs `gh pr ready` on a draft PR once a PASS stands at its head, logs `marked-ready`, and skips that pass's merge.
+Because: "drive marks a draft PR with a PASS at its head ready for review (`gh pr ready`, logged)"
+Decided: a PASS on a draft PR reads "PR is a draft" in waiting/status whatever the CI state.
+Because: "If it can't, status and the board say"
+Rejected: a gate refusal for drafts — it would log `blocked` and drive would treat the issue as stale instead of retrying ready.
+Check: ready_draft runs next to sync_label in each drive pass; the verdict-then-merge path in the same pass also skips drafts.
+Owner: A reviewed draft PR is now taken out of draft automatically and merges on a later pass.
