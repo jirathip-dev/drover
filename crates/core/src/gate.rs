@@ -1078,11 +1078,8 @@ pub fn needs_human(
 
 /// Issue `n`'s state if it waits on the owner's needs-human card, else `NOT_NEEDS_HUMAN`.
 pub fn held(ctx: &Ctx, fleet: &str, n: u64) -> Result<String> {
-    // Only from needs-human (#217: or a failed extend's card): a stale card or a double tap never parks a merged
-    // issue or extends twice.
     let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
     let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
-    // #778: or a pending start whose card is back (refused, or 30 min unstarted).
     let back = crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.back(ctx.now));
     if state != "needs-human" && last != "extend-failed" && !back {
         return refused("NOT_NEEDS_HUMAN", format!("#{n} is {state}, not needs-human"));
@@ -1105,7 +1102,6 @@ pub fn park(
         e.data.insert("why".into(), json!(w));
     }
     crate::events::append(&ctx.state, &e)?;
-    // #186: a parked issue's lanes are closed: reap what they left (a live agent's worktree is spared).
     if let Ok(a) = herdr::agents(r) {
         check::leftovers(ctx, cfg, r, &a, true)?;
     }

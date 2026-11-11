@@ -377,7 +377,7 @@ fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
 pub const CHANGE: u64 = 30 * 60;
 
 /// #541: `herdsman answer --basis`, run by thread `t`'s conductor: answered `by: conductor-<t>` only if the ask is a
-/// lane, design or extend ask on its repo (#817), names no owner topic, and `basis` quotes the issue's spec (3 words or more, verbatim) or
+/// lane ask on its repo, names no owner topic, and `basis` quotes the issue's spec (3 words or more, verbatim) or
 /// names an answered decision; else `OWNER_ASK`, and a lane ask on its repo is put to the owner in the thread.
 pub fn conductor_answer(
     ctx: &Ctx,
@@ -435,9 +435,7 @@ pub fn conductor_answer(
     )
 }
 
-/// #817: `herdsman extend` run by thread `t`'s conductor on an issue of its repo (else `OWNER_ASK`): with `typed`, the
-/// owner's line in `t` after the issue's needs-human (`by: owner (typed)`, else `NOT_TYPED`); else its extend ask,
-/// [one more round] or [park], answered as `conductor_answer` does with `basis`, which [change] may park.
+/// #817: `herdsman extend` by thread `t`'s conductor: the owner's `typed` line, else its extend ask answered on `basis`.
 #[allow(clippy::too_many_arguments)]
 pub fn conductor_extend(
     ctx: &Ctx,
@@ -488,8 +486,7 @@ pub fn conductor_extend(
 const TYPED: &str = "owner (typed)";
 
 /// #584: `herdsman answer --typed <line>`: the owner's words, accepted only when `line` is the owner's message in the
-/// ask's thread (its own, the one its lane ask was put to the owner in, or #817: a design ask's repo's conductor
-/// thread `on`) after the ask; else `NOT_TYPED`.
+/// ask's thread (its own, or the one its lane ask was put to the owner in) after the ask; else `NOT_TYPED`.
 pub fn answer_typed(
     ctx: &Ctx,
     cfg: &Config,

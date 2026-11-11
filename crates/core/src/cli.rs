@@ -94,7 +94,7 @@ enum Cmd {
         #[arg(long)]
         owner_override: bool,
     },
-    /// Owner (or a conductor with --typed/--basis): one more review round for a needs-human issue; logs `round-extended`
+    /// Owner only: one more review round for a needs-human issue (its card's [one more round]); logs `round-extended`
     Extend {
         fleet: String,
         issue: u64,
@@ -104,11 +104,18 @@ enum Cmd {
         /// Record the extra round only; leave the live lane alone (no impl spawn)
         #[arg(long)]
         no_spawn: bool,
-        /// A conductor's: the owner's exact line in its thread, after the card: logged by: owner (typed)
-        #[arg(long, value_name = "LINE", conflicts_with = "basis")]
+        #[arg(
+            long,
+            value_name = "LINE",
+            conflicts_with = "basis",
+            help = "A conductor's: the owner's exact line in its thread, after the card: logged by: owner (typed)"
+        )]
         typed: Option<String>,
-        /// A conductor's: a verbatim quote of the issue's spec, or an answered decision id; the owner may [change] it
-        #[arg(long, value_name = "QUOTE|ID")]
+        #[arg(
+            long,
+            value_name = "QUOTE|ID",
+            help = "A conductor's: a verbatim quote of the issue's spec, or an answered decision id; the owner may [change] it"
+        )]
         basis: Option<String>,
     },
     /// End a fix round with no new commit: drive reviews the same head again (a CI-only FAIL with green CI merges)

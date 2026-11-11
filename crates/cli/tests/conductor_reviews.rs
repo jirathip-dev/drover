@@ -1,7 +1,3 @@
-//! #817: a conductor acts on design and architect reviews and on needs-human's [one more round] in its repo's thread:
-//! the owner's typed line (`by: owner (typed)`) or a spec basis (`by: conductor-<t>`, an FYI line the owner may
-//! [change] for 30 min; an extend's [change] parks). Another repo's conductor is refused. Its own test binary:
-//! `HERDSMAN_LANE` and `HERDSMAN_THREAD` are process-wide.
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
@@ -31,7 +27,6 @@ fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
     herdsman::Ctx { now, ..c.clone() }
 }
 
-/// Fleets sendmeter (thread t1) and other (thread t2), each with a conductor; #36 on sendmeter.
 fn setup(name: &str) -> herdsman::Ctx {
     let other = "[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/does-not-matter/other\"\n\
                  integration = \"staging\"\n\n[fleet.other.role.impl]\nharness = \"hermes\"\n\n\
@@ -59,7 +54,6 @@ fn setup(name: &str) -> herdsman::Ctx {
     c
 }
 
-/// The owner's line `text` in thread `t`.
 fn said(c: &herdsman::Ctx, ts: u64, t: &str, text: &str) {
     let fleet = if t == "t1" { "sendmeter" } else { "other" };
     log(
@@ -72,7 +66,6 @@ fn said(c: &herdsman::Ctx, ts: u64, t: &str, text: &str) {
     );
 }
 
-/// #36's design ask q1 (no thread: the board card).
 fn design_ask(c: &herdsman::Ctx, ts: u64) {
     let d = json!({"id": "q1", "question": "Design for #36 is ready (abc1234): approve, revise (type a note) or reject?",
         "options": ["approve", "revise", "reject"], "recommend": null, "kind": "owner", "design": true, "role": "design"});
@@ -84,7 +77,6 @@ fn needs_human(c: &herdsman::Ctx, ts: u64) {
     log(c, ts, "sendmeter", Some(36), "needs-human", d);
 }
 
-/// The issue spec of #36, and herdr quiet.
 fn host() -> Fake {
     let issue = json!({"title": "Split the sender", "body": SPEC, "updatedAt": "t1", "comments": []});
     Fake::default()
@@ -93,7 +85,6 @@ fn host() -> Fake {
         .reply("herdr", "")
 }
 
-/// `args` run by thread `t`'s conductor (no thread: the owner) at `now`.
 fn by(c: &herdsman::Ctx, t: Option<&str>, now: u64, args: &[&str]) -> (i32, String) {
     match t {
         Some(t) => {
@@ -132,7 +123,6 @@ fn a_typed_design_answer_needs_the_owners_line_in_the_conductors_thread_after_th
         code == 3 && out.contains("REFUSED NOT_TYPED: that line came before q1"),
         "{out}"
     );
-    // Another repo's conductor, with the owner's line in its own thread.
     said(&c, NOW - 100, "t2", "approve");
     let (code, out) = by(&c, Some("t2"), NOW, &typed);
     assert!(code == 3 && out.contains("REFUSED NOT_TYPED"), "{out}");
