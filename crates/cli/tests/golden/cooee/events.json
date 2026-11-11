@@ -1,0 +1,153 @@
+{
+ "type": "screen",
+ "id": "events",
+ "title": "Events",
+ "stream": "/screens/events/stream",
+ "blocks": [
+  {
+   "type": "chips",
+   "id": "kind",
+   "name": "kind",
+   "multi": true,
+   "selected": [
+    "all"
+   ],
+   "action": "filter",
+   "options": [
+    {
+     "value": "all",
+     "label": "all"
+    },
+    {
+     "value": "merge",
+     "label": "merges"
+    },
+    {
+     "value": "verdict",
+     "label": "verdicts"
+    },
+    {
+     "value": "lane",
+     "label": "lanes"
+    },
+    {
+     "value": "ask",
+     "label": "asks"
+    }
+   ]
+  },
+  {
+   "type": "section",
+   "header": "today",
+   "blocks": [
+    {
+     "type": "list",
+     "id": "ev",
+     "rows": [
+      {
+       "type": "row",
+       "id": "e-912",
+       "figure": {
+        "state": "done"
+       },
+       "title": "merged #708 into staging",
+       "subtitle": "doctor: bound every Keychain/codesign call",
+       "value": "09:40",
+       "tap": {
+        "url": "https://github.com/jirathip-dev/herdsman/pull/723"
+       }
+      },
+      {
+       "type": "row",
+       "id": "e-911",
+       "figure": {
+        "state": "done"
+       },
+       "title": "PASS #708 review 2",
+       "subtitle": "at 9e41c07 · CI green",
+       "value": "09:38"
+      },
+      {
+       "type": "row",
+       "id": "e-909",
+       "figure": {
+        "state": "working",
+        "tool": "edit"
+       },
+       "title": "spawn herdsman-impl-641 · fix 1",
+       "subtitle": "on mini · Claude Code · opus 5.5",
+       "value": "09:35",
+       "tap": {
+        "thread": "herdsman-impl-641"
+       }
+      },
+      {
+       "type": "row",
+       "id": "e-910",
+       "figure": {
+        "state": "needs"
+       },
+       "title": "ask q947 · #722",
+       "subtitle": {
+        "text": "routine · default in 12m",
+        "tone": "warn"
+       },
+       "value": "09:23",
+       "tap": {
+        "thread": "t59"
+       }
+      },
+      {
+       "type": "row",
+       "id": "e-908",
+       "figure": {
+        "state": "fail"
+       },
+       "title": "FAIL #641 review 1",
+       "subtitle": "2 findings · blocking [correctness]",
+       "value": "08:50"
+      },
+      {
+       "type": "row",
+       "id": "e-907",
+       "figure": {
+        "state": "fail"
+       },
+       "title": "round limit · synergy #2708",
+       "subtitle": {
+        "text": "needs-human",
+        "tone": "bad"
+       },
+       "value": "08:29"
+      },
+      {
+       "type": "row",
+       "id": "e-906",
+       "figure": {
+        "state": "working",
+        "tool": "run"
+       },
+       "title": "spawn herdsman-impl-722 · impl",
+       "subtitle": "on mini · Codex · gpt-5.6-luna",
+       "value": "08:12"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "list",
+   "rows": [
+    {
+     "type": "row",
+     "id": "older",
+     "title": "earlier days",
+     "style": "link",
+     "tap": {
+      "open": "/screens/events?before=2026-11-09"
+     }
+    }
+   ]
+  }
+ ]
+}

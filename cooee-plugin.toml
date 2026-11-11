@@ -1,0 +1,36 @@
+name = "drover"
+version = "0.1.0"
+build = "true"
+run = "exec herdsman serve --addr 127.0.0.1:$PORT"
+needs = ["herdsman"]
+
+[[places]]
+type = "header-strip"
+id = "queue"
+persona = "conductor"
+label = "Queue"
+screen = "/screens/queue"
+
+[[places]]
+type = "header-strip"
+id = "events"
+persona = "conductor"
+label = "Events"
+screen = "/screens/events"
+
+[[places]]
+type = "chat-cards"
+persona = "conductor"
+
+[[places]]
+type = "menu-row"
+label = "drover"
+subtitle = "herdsman's fleets"
+screen = "/screens/fleets"
+
+[permissions]
+places = ["header-strip", "chat-cards", "menu-row"]
+push = true
+actions = ["filter", "drive", "pause", "drive-all", "top", "answer", "run-card", "needs-human", "save-fleets", "stop", "drop", "remove-fleet"]
+destructive = ["stop", "drop", "remove-fleet", "run-card", "needs-human"]
+network = ["api.github.com", "127.0.0.1:7777"]

@@ -1,0 +1,75 @@
+[
+ {
+  "seq": 41,
+  "ops": [
+   {
+    "op": "merge",
+    "id": "q-722",
+    "fields": {
+     "badge": {
+      "text": "review 1",
+      "tone": "working"
+     },
+     "figure": {
+      "state": "working",
+      "tool": "read"
+     },
+     "subtitle": "impl ✓ · review 1 ▸ herdsman-rev-722 · mini"
+    }
+   }
+  ]
+ },
+ {
+  "seq": 42,
+  "ops": [
+   {
+    "op": "remove",
+    "id": "q-708"
+   },
+   {
+    "op": "merge",
+    "id": "done-today",
+    "fields": {
+     "value": "7"
+    }
+   }
+  ]
+ },
+ {
+  "seq": 43,
+  "ops": [
+   {
+    "op": "replace",
+    "id": "q-456",
+    "block": {
+     "type": "row",
+     "id": "q-456",
+     "figure": {
+      "state": "working",
+      "tool": "edit"
+     },
+     "title": "#456 Rename herdsman to drover",
+     "badge": {
+      "text": "impl",
+      "tone": "working"
+     },
+     "value": "now"
+    }
+   },
+   {
+    "op": "merge",
+    "id": "q-686",
+    "fields": {
+     "subtitle": {
+      "text": "held until #456 · in impl",
+      "tone": "warn"
+     }
+    }
+   },
+   {
+    "op": "badge",
+    "count": 6
+   }
+  ]
+ }
+]

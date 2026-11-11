@@ -388,6 +388,38 @@ fn a_ban_with_comments_matches_a_comment_line_and_without_it_does_not() {
 }
 
 #[test]
+fn an_ignore_case_ban_fails_a_provider_name_in_core_in_any_case_and_passes_it_in_providers() {
+    let conf = "[[ban]]\npattern = \"codex\"\npaths = [\"crates/*/src/**\"]\nexcept = [\"crates/core/src/providers/**\"]\nreason = \"core never names a provider\"\ncomments = true\nignore_case = true\n";
+    let d = committed(
+        "arch-ban-case",
+        conf,
+        &[
+            (
+                "crates/core/src/setup.rs",
+                "fn a() {}
+const L: &str = \"Codex login\";
+",
+            ),
+            (
+                "crates/core/src/providers/codex.rs",
+                "const L: &str = \"codex login\";
+",
+            ),
+        ],
+    );
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("crates/core/src/setup.rs:2: `codex` is banned here: core never names a provider"),
+        "{out}"
+    );
+    assert!(out.contains("1 violations"), "{out}");
+    std::fs::write(d.join(".herdsman/arch.toml"), conf.replace("ignore_case = true\n", "")).unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+}
+
+#[test]
 fn a_ban_checks_a_workflow_yml_and_a_test_mjs_and_except_still_passes_a_listed_file() {
     let conf = r#"
 [[ban]]
