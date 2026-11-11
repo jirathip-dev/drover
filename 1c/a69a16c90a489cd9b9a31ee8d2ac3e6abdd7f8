@@ -1,0 +1,9 @@
+Decided: origin/staging merged three times this round; its new lane tests (#780 #812 #814 #819 #824 #825 #840) moved onto the fake shed
+Because: "Outside the tests the PR lists for #721 to delete, no test file fakes a herdr reply"
+Decided: #812's reused-pane orphan test stays on herdr and is listed for #721
+Because: crates/core/src/spawn.rs:2014
+Rejected: a shed port of it — a shed terminal's name is its id, so it would pass without #812's fix
+Decided: herd.rs uses the shared OnShed instead of its own copy
+Because: "The fake shed lives in one shared helper, not copied into each test file"
+Check: git diff on crates/*/src is empty; the full suite at 1ca69a16c exits 0
+Owner: Test code only; staging's newest tests now also run on the pretend shed, so retiring herdr won't break them.
