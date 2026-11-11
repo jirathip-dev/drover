@@ -209,9 +209,8 @@ impl Runner for On<'_> {
 
 /// #561: a check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared
 /// connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed after 15 s;
-/// one through a dead shared connection drops its socket and runs once more without it. #835: a call that times out
-/// or finds the host gone marks it down too. `mark` (the tick's `tick.step`, with the tick's start) names the step and
-/// the child it waits on, for `tick-stuck`; past `until` (the tick's budget) no remote call goes out.
+/// one through a dead shared connection drops its socket and runs once more without it. `mark` (the tick's
+/// `tick.step`, with the tick's start) names the step and the child it waits on, for `tick-stuck`.
 pub struct Pass<'a> {
     r: &'a dyn Runner,
     probe: bool,

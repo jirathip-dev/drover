@@ -16,7 +16,6 @@ fn sleeper(dir: &Path, name: &str) -> String {
     p.to_string_lossy().into_owned()
 }
 
-/// Runs `call` again while exec fails ETXTBSY: a sibling test's fork can hold the fresh script's write fd until it execs.
 fn exec_fresh<T>(call: impl Fn() -> anyhow::Result<T>) -> T {
     for _ in 0..50 {
         match call() {

@@ -1,7 +1,3 @@
-//! #835: the 11-11 stall as a test. The Air answers the tick's probe, then drops: every later ssh to it fails after its
-//! 10 s connect timeout (exit 255, `connect to host … timed out`). With 5 lanes there, the tick pays one timeout for it,
-//! not one per lane, and drive's full pass still starts the queued issue on the main host. A tick past its budget
-//! sends nothing more to another host, skips its maintenance steps, says what it skipped and ends.
 mod common;
 use common::*;
 use herdsman::events::{append, Event};
@@ -12,8 +8,6 @@ use std::time::Duration;
 const NOW: u64 = 1_000_000;
 const PROBE: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true";
 
-/// `.0`, except that the Air answers only the probe: every other call to it (ssh there, `herdr --machine air`) fails
-/// as ssh does when the host is gone, after its 10 s connect timeout, added to the virtual clock `.2`; each logged in `.1`.
 struct Dropped(Fake, Shared<Vec<String>>, Shared<u64>);
 
 impl Dropped {
@@ -78,7 +72,6 @@ fn main_host() -> Fake {
         .reply("herdr agent wait", "{}")
 }
 
-/// The Air (`air_cfg` its extra config lines) with 5 merged lanes whose worktrees may still be there, and #12 queued.
 fn setup(name: &str, air_cfg: &str, limits: &str) -> herdsman::Ctx {
     let base = CONFIG
         .replace("harness  =  \"hermes\"", "harness = \"claude\"")

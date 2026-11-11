@@ -267,7 +267,6 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         }
     });
     let loaded = crate::check::config(ctx); // #709: `config-invalid` once per error
-                                            // #835: one tick interval; past it nothing more goes to another host and the steps after drive are skipped.
     let budget = loaded.as_ref().map_or(0, |c| c.limits.slow_secs);
     let pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now)));
     let pass = if loaded.is_ok() { pass.budget(budget) } else { pass };
@@ -301,11 +300,11 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         }
         if due("trim") {
             pass.step("trim");
-            crate::check::trim_hosts(ctx, cfg, &pass, out)?; // #485: maintenance after drive, never before it
+            crate::check::trim_hosts(ctx, cfg, &pass, out)?;
         }
         if due("lesson") {
             pass.step("lesson");
-            crate::lesson::weekly(ctx, cfg, &pass, out)?; // #419
+            crate::lesson::weekly(ctx, cfg, &pass, out)?;
         }
         driven
     });
