@@ -716,17 +716,15 @@ fn page_fits_390px_without_horizontal_scroll() {
         );
     }
     // #440: Host and Events are System's sections (tests/system_sheet.rs measures them at 390 px).
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping the WebKit scrollWidth check: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let file = d.join("page.html");
     std::fs::write(&file, html).unwrap();
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     for tab in ["queue", "lanes"] {
         for mode in ["horse", "ascii", "glyph"] {
-            let o = swift()
-                .args([script, file.to_str().unwrap(), "390", tab, mode])
+            let o = webview()
+                .args([file.to_str().unwrap(), "390", tab, mode])
                 .output()
                 .unwrap();
             let out = String::from_utf8_lossy(&o.stdout);

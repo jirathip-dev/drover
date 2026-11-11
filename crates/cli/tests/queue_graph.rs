@@ -117,8 +117,7 @@ fn rows_carry_the_graph_data_and_the_fleet_its_serial_paths() {
 
 #[test]
 fn the_graph_and_its_legend_pass_the_audit_at_390px() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture();
@@ -180,11 +179,9 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
         let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("{name}.png"))
         });
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
-        let o = swift()
+        let o = webview()
             .env("HERDSMAN_TAB", "queue") // #440: its own localStorage: no earlier run's Herd mode on this origin
             .args([
-                script,
                 file.to_str().unwrap(),
                 "390",
                 "queue",
