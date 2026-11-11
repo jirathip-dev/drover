@@ -818,6 +818,28 @@ pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> 
     (!done.is_empty() || !errs.is_empty()).then(|| json!({"dirs": done, "secs": secs, "errors": errs}))
 }
 
+fn reuse(p: &Plan, dirs: &[String], target: Option<&String>, agents: &[Value]) -> Option<Value> {
+    let (stem, k) = p.agent.rsplit_once("-r")?;
+    let k = k.parse::<u64>().ok().filter(|k| *k > 1)?;
+    let prev = format!("{stem}-r{}", k - 1);
+    if agents.iter().any(|a| a["name"] == prev.as_str()) {
+        return None;
+    }
+    let wt = p.worktree.to_string_lossy();
+    let old = wt
+        .strip_suffix(&format!("-r{k}"))
+        .map(|w| PathBuf::from(format!("{w}-r{}", k - 1)));
+    let mut pairs: Vec<(PathBuf, PathBuf)> = (dirs.iter())
+        .filter_map(|d| Some((old.as_ref()?.join(d), p.worktree.join(d))))
+        .collect();
+    pairs.extend(target.map(|t| (Path::new(t).with_file_name(&prev), PathBuf::from(t))));
+    let moved: Vec<String> = (pairs.into_iter())
+        .filter(|(from, to)| from.is_dir() && !to.exists() && std::fs::rename(from, to).is_ok())
+        .map(|(_, to)| to.display().to_string())
+        .collect();
+    (!moved.is_empty()).then(|| json!({"dirs": moved, "from": prev}))
+}
+
 /// #630: a new lane's build folder `t` (under its root's `.build`) cloned from the newest of its fleet's lanes' there:
 /// one volume, so copy-on-write, never a full copy. The `build-cloned` data, if any.
 pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
@@ -1508,6 +1530,9 @@ pub fn spawn(
         &dirs[..]
     };
     let target = p.env.get("CARGO_TARGET_DIR").filter(|_| on.machine.is_none());
+    if let Some(d) = (p.family == "rev").then(|| reuse(&p, dirs, target, &agents)).flatten() {
+        event("build-reused", d)?;
+    }
     let (res, cloned) = std::thread::scope(|s| {
         let c = s.spawn(|| {
             let warm = target.and_then(|t| clone_warm(r, fleet, Path::new(t)));
