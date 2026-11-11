@@ -225,7 +225,7 @@ fn service(c: &herdsman::Ctx, bin: &std::path::Path, api: &str) -> (Proc, u64) {
         .env("FLEET_CONFIG", &c.config)
         .env("FLEET_STATE", &c.state)
         .env("FLEET_WORKTREES", &c.worktrees)
-        .env("FLEET_HERMES_PROFILES", &c.hermes)
+        .env("FLEET_HERMES_PROFILES", &c.homes["hermes"])
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .spawn()

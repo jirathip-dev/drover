@@ -2,7 +2,7 @@
 mod common;
 use common::*;
 use herdsman::events::{append, Event};
-use herdsman::harness;
+use herdsman::providers;
 use herdsman::serve::Server;
 use serde_json::json;
 
@@ -14,10 +14,10 @@ const MENU: &str = "⏺ Bash(cargo test)\nWhich database should the meter use?\n
 
 #[test]
 fn the_generic_harness_has_every_fallback() {
-    let h = harness::get("gemini");
+    let h = providers::get("gemini");
     assert!(h.env().is_empty() && h.health_check().is_none() && h.process_names().is_empty());
-    assert_eq!(h.credential(), harness::Credential::None);
-    assert!(h.login().is_none() && h.hook_dialect().is_none() && h.usage_meter().is_none());
+    assert_eq!(h.credential(), providers::Credential::None);
+    assert!(h.login().is_none() && h.hook_dialect().is_none() && h.usage().is_none());
     let c = ctx(&tmpdir("generic-fallbacks"), CONFIG);
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     let banner = "Claude usage limit reached. Your limit will reset at 3pm.";

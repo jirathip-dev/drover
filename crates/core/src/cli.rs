@@ -4,7 +4,7 @@ use crate::events::{emit, read, status_line, Event};
 use crate::hosts::all_agents;
 use crate::runner::{self, Runner};
 use crate::{
-    access, check, devices, gate, gh, harness, hook, migrate, pause, protection, queue, queue_change, set, spawn, Ctx,
+    access, check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx,
 };
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -39,11 +39,9 @@ enum Cmd {
         fleet: String,
         /// impl | rev | design
         role: String,
-        /// claude | hermes | dsh
-        #[arg(long, value_parser = harness::NAMES)]
+        #[arg(long, help = providers::lane_names().join(" | "), value_parser = clap::builder::PossibleValuesParser::new(providers::lane_names()))]
         harness: Option<String>,
-        /// Model name (claude harness; Hermes profiles own their model)
-        #[arg(long)]
+        #[arg(long, help = "Model name (ignored where the provider's profile owns the model)")]
         model: Option<String>,
         /// Profile name (default fleet-<role>)
         #[arg(long)]
@@ -478,7 +476,7 @@ enum Cmd {
         #[arg(long)]
         host: Option<String>,
     },
-    /// Manage per-role Claude Code config folders
+    #[command(about = "Manage per-role provider profiles")]
     Profiles {
         #[command(subcommand)]
         cmd: ProfilesCmd,
@@ -507,8 +505,7 @@ enum Cmd {
         #[arg(long)]
         agent: bool,
     },
-    /// Claude Code PreToolUse / Hermes pre_tool_call hook (reads hook JSON on stdin)
-    #[command(hide = true)]
+    #[command(hide = true, about = "A provider's pre-tool-call hook (reads hook JSON on stdin)")]
     Hook {
         /// The lane's role; `rev` is read-only
         #[arg(long)]
@@ -517,8 +514,10 @@ enum Cmd {
         #[arg(long)]
         git_pre_push: bool,
     },
-    /// Claude Code status line: records the lane account's 5h/7d limits (reads status JSON on stdin)
-    #[command(hide = true)]
+    #[command(
+        hide = true,
+        about = "A provider's status line: records the lane account's 5h/7d limits (reads status JSON on stdin)"
+    )]
     Statusline,
     /// #275: log a lane's own event (`hook-denied`, `coauthor-trailer`), forwarded from a lane on another host
     #[command(hide = true)]
@@ -807,8 +806,10 @@ enum HostsCmd {
     /// Owner only: a cloud host's lanes' work to `wip/` first, then its recipe's `destroy`; logs `cloud-stop`
     #[command(hide = true)]
     Destroy { name: String },
-    /// Owner only: install herdr, herdsman, git, gh, Claude Code there over SSH, open its logins, clone its fleets
-    #[command(hide = true)]
+    #[command(
+        hide = true,
+        about = "Owner only: install herdr, herdsman, git, gh, the lane providers there over SSH, open its logins, clone its fleets"
+    )]
     Bootstrap { name: String },
     /// Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`
     #[command(hide = true)]
@@ -876,10 +877,14 @@ enum LessonCmd {
 
 #[derive(Subcommand)]
 enum ProfilesCmd {
-    /// Write ~/.config/herdsman/claude/<profile>/ (settings.json + hooks, role.md, fleet.md) and Hermes profiles' `hooks:` + hook approval
+    #[command(
+        about = "Write each provider's per-role profile (settings + hooks, role prompt, usage doc) and hook approvals"
+    )]
     Sync {
-        /// Write nothing; exit 1 unless every fleet Hermes profile lists its hook as `✓ allowed`
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Write nothing; exit 1 unless every fleet profile lists its hook as `✓ allowed`"
+        )]
         check: bool,
         /// #592: only this profile, of role family `--role`, without fleet.toml (spawn's, on a lane's remote host)
         #[arg(long, requires = "role", hide = true)]
@@ -1369,8 +1374,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     ..
                 },
         } => {
-            for h in crate::harness::known() {
-                crate::harness::get(h).sync(ctx, &role, &role, &p, &usage_doc(), out)?;
+            for h in crate::providers::known() {
+                crate::providers::get(h).sync(ctx, &role, &role, &p, &usage_doc(), out)?;
             }
         }
         Cmd::Service {
@@ -1699,7 +1704,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             (w.who, w.what) = ("drive", l);
                         }
                     }
-                    let slots = crate::drive::holders(ctx);
+                    let slots = crate::drive::holders(ctx, &cfg, r);
                     if !json && !slots.is_empty() {
                         writeln!(out, "slots: {slots}")?;
                     }
@@ -2010,7 +2015,6 @@ fn lane(issue: &str) -> Result<Option<u64>> {
 fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool) -> Result<()> {
     let mut buf = String::new();
     stdin.read_to_string(&mut buf)?;
-    // Inert outside fleet lanes (they share the Hermes profiles); `HERDSMAN_LANE` beats `FLEET_LANE`, even empty.
     let lane = std::env::var_os("HERDSMAN_LANE").or_else(|| std::env::var_os("FLEET_LANE"));
     let Some(lane) = lane.filter(|v| !v.is_empty()).map(|v| v.to_string_lossy().into_owned()) else {
         return Ok(());
@@ -2089,8 +2093,12 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         dir(&ctx.config),
         dir(&ctx.state),
         h.join(".config/fleet-operations").to_string_lossy().into(),
-        h.join(".hermes/profiles").to_string_lossy().into(),
     ];
+    paths.extend(
+        providers::all()
+            .filter_map(|p| Some(p.home()?.default))
+            .map(|d| h.join(d).to_string_lossy().into()),
+    );
     paths.extend(std::env::var("HERDSMAN_RULES").ok()); // #592: a lane never edits its own rules
                                                         // #410: a conductor (`HERDSMAN_LANE`'s role) spawns design lanes and writes its own thread folder.
     let orchestrator =
