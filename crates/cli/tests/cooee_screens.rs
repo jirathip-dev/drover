@@ -345,8 +345,14 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
 
     let answer =
         json!({"screen": "cards", "block": "q7", "action": "answer", "values": {"choice": "refuse", "other": ""}});
+    let cards = |ck: &str| req(&s, T, "GET", "/screens/cards", "", ck).1.to_string();
+    assert!(cards(&ck).contains("\"ask-q7\""));
     let (status, v) = post(answer.clone(), &ck);
     assert_eq!(status, 200, "{v}");
+    assert_eq!(v["ops"], json!([{"op": "remove", "id": "ask-q7"}]), "{v}");
+    assert!(!cards(&ck).contains("\"ask-q7\""));
+    let state = req(&s, T, "GET", "/api/v1/state", "", &ck).1;
+    assert!(!state["asks"].to_string().contains("\"q7\""), "{state}");
     let d = read(&c.state)
         .unwrap()
         .into_iter()

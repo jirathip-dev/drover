@@ -499,13 +499,20 @@ fn count(v: &Value) -> Option<usize> {
 
 impl Server<'_> {
     fn screen(&self, ctx: &Ctx, path: &str, q: &Q) -> Option<Value> {
-        Some(match path {
+        let mut v = match path {
             "/screens/queue" => self.queue_screen(ctx, q),
             "/screens/events" => events_screen(ctx, q),
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
             "/screens/cards" => self.chat_cards(ctx),
             _ => return None,
-        })
+        };
+        let oldest = self.r.refreshed().into_values().min();
+        let old = oldest.map(|t| ctx.now.saturating_sub(t)).filter(|a| *a > 10);
+        if let (Some(a), Some(b)) = (old, v.get_mut("blocks").and_then(Value::as_array_mut)) {
+            let line = format!("data {} old", crate::events::age(a));
+            b.insert(0, json!({"type": "text", "id": "age", "markdown": line}));
+        }
+        Some(v)
     }
 
     fn queue_screen(&self, ctx: &Ctx, q: &Q) -> Value {
@@ -547,6 +554,10 @@ impl Server<'_> {
         });
         let ev = shared(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
+        cards.extend(super::v1::slo_open(&ev).map(|e| {
+            json!({"type": "card", "id": format!("slo-{}", e.seq), "kind": "alert", "tone": "warn",
+                "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
+        }));
         cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, mins, a)));
         cards.extend(tab.issues.iter().map(needs_card));
         Value::Array(cards)
@@ -647,7 +658,7 @@ impl Server<'_> {
                 crate::queue_change(ctx, &cfg, &fleet, d, Some("cooee"))?
             }
             "stop" => {
-                crate::check::stop(ctx, &cfg, self.r, &mut vec![], &s("agent"))?;
+                crate::check::stop(ctx, &cfg, &self.r, &mut vec![], &s("agent"))?;
                 format!("stopped {}", s("agent"))
             }
             "answer" => {
@@ -681,7 +692,7 @@ impl Server<'_> {
                 crate::card::settle_via(
                     ctx,
                     &cfg,
-                    self.r,
+                    &self.r,
                     block,
                     s("choice") == "approve",
                     sha.as_deref(),
@@ -696,12 +707,16 @@ impl Server<'_> {
                     remove: Some(fleet),
                     ..Default::default()
                 };
-                crate::propose::edit(ctx, &cfg, self.r, &c, "owner (cooee)")?
+                crate::propose::edit(ctx, &cfg, &self.r, &c, "owner (cooee)")?
             }
             other => anyhow::bail!("no handler for `{other}`"),
         };
         let close = ["save-fleets", "remove-fleet"].contains(&name);
-        Ok(json!({"ops": [], "toast": toast, "close": close}))
+        let ops: Vec<Value> = (name == "answer")
+            .then(|| json!({"op": "remove", "id": format!("ask-{block}")}))
+            .into_iter()
+            .collect();
+        Ok(json!({"ops": ops, "toast": toast, "close": close}))
     }
 
     fn save_fleets(&self, ctx: &Ctx, cfg: &Config, v: &Value) -> Result<String> {
@@ -738,7 +753,7 @@ impl Server<'_> {
             done.push(crate::propose::edit(
                 ctx,
                 &Config::kept(ctx)?,
-                self.r,
+                &self.r,
                 &c,
                 "owner (cooee)",
             )?);
@@ -766,9 +781,8 @@ impl Server<'_> {
             ..self.ctx.clone()
         };
         let (q, open) = (form(query), STREAMS.fetch_add(1, Relaxed) < 4);
-        let first = self
-            .screen(&ctx(), base, &q)
-            .filter(|_| open && (Self::plugin(head) || self.allowed(self.ctx, head)));
+        let screen = |c: &Ctx| crate::runner::request(|| self.screen(c, base, &q));
+        let first = screen(&ctx()).filter(|_| open && (Self::plugin(head) || self.allowed(self.ctx, head)));
         let Some(mut cur) = first else {
             STREAMS.fetch_sub(1, Relaxed);
             let r = line(
@@ -801,7 +815,7 @@ impl Server<'_> {
                 let now = crate::db::last_seq(&self.ctx.state);
                 if now != log || built.elapsed() >= Duration::from_secs(30) {
                     (log, built) = (now, Instant::now());
-                    let new = self.screen(&ctx(), base, &q).unwrap_or_else(|| cur.clone());
+                    let new = screen(&ctx()).unwrap_or_else(|| cur.clone());
                     let mut change = ops(&cur, &new);
                     change.extend(
                         count(&new)

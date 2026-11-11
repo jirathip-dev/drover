@@ -733,7 +733,15 @@ fn unpaired_viewers_see_no_pane_text() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &r.once("herdr agent list", 0, NO_AGENTS), l, false));
+    std::thread::spawn(move || {
+        herdsman::serve::serve_on(
+            &c2,
+            &r.once("herdr agent list", 0, NO_AGENTS)
+                .once("herdr agent list", 0, NO_AGENTS),
+            l,
+            false,
+        )
+    });
     let sub = |extra: &str| {
         let mut s = TcpStream::connect(addr).unwrap();
         s.write_all(format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n{extra}\r\n").as_bytes())

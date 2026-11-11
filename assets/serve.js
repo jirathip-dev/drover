@@ -830,11 +830,13 @@ document.addEventListener('submit', async e => {
   if (b) b.ariaBusy = 'true';
   const d = new FormData(f, b), k = b && b.name === 'op' && b.closest('#needs>.ask');
   if (k && PEND[b.value]) pend(k, b.value); // #217: the card is a pending line at once (no buttons, no second tap)
+  const ans = f.elements.op.value === 'answer' && f.closest('#needs>.ask'); // #859: an answered ask's card goes on the tap
+  if (ans) ans.remove();
   try {
     const r = await post('', d), m = r.redirected ? new URL(r.url).searchParams.get('msg') || '' : 'error: ' + (await r.text()).trim();
     toast(m);
     if (!m.includes(' started for ')) refresh(); // a background job's result comes by /live and its toast
-  } catch (err) { toast('error: ' + err.message); }
+  } catch (err) { toast('error: ' + err.message); if (ans) refresh(); }
   if (b) b.ariaBusy = null;
 });
 B.insertAdjacentHTML('beforeend', `<div id=sheet><div class=bd></div><div class=sh role=dialog aria-modal=true>

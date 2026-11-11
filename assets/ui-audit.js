@@ -709,6 +709,16 @@
       if (!seen($$('#needs>.ask')[1])) early.push('the changed card did not come back');
     },
     // #217 gate 2: a tapped [one more round]: the needs-human card is one muted pending line with no buttons, at the top.
+    // #859: an ask's answer tap takes its card off at once, before the POST answers; a failed POST draws the cards again.
+    'needs-answered': async () => {
+      tab('queue');
+      $('#needs').insertAdjacentHTML('afterbegin', '<div class=ask id=aud859><p>Which DB?</p><form><input type=hidden name=op value=answer><input type=hidden name=fleet value=acme-web><input type=hidden name=id value=q859><button name=choice value=1>1. sqlite</button></form></div>');
+      const hold = [];
+      window.fetch = (u, o) => o && o.method === 'POST' ? new Promise(r => hold.push(r)) : F(u, o);
+      $('#aud859 form').requestSubmit($('#aud859 button'));
+      if (!hold.length || $('#aud859')) early.push(`after the tap: ${hold.length} POSTs, the card ${$('#aud859') ? 'still shown' : 'gone'}`);
+      window.fetch = F;
+    },
     'needs-pending': () => {
       tab('queue');
       const c = [...$$('#needs>.ask[data-n]')].find(c => /needs you/.test(c.textContent));

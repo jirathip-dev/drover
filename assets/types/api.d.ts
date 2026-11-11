@@ -254,7 +254,11 @@ export type Setup = { host: string, name: string, };
  * `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s),
  * the Events tab's time groups.
  */
-export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, };
+export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, 
+/**
+ * #859: when the background last read each source the lanes come from (herdr, shed, remote, host).
+ */
+sources: { [key in string]: number }, };
 
 export type Fleet = { name: string, repo: string, color: string, paused: boolean, };
 

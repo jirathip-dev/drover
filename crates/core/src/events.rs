@@ -622,11 +622,15 @@ pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> 
     map.get(&(fleet.into(), id.into())).map(|i| &events[*i])
 }
 
+/// #859: ask indexes built from a slice that is no cached `Log` (`index`'s one-pass fallback): serve's reads build none.
+pub static REBUILDS: AtomicUsize = AtomicUsize::new(0);
+
 /// #632: `f` on `events`' ask index: the cached `log`'s when `events` is it, else built in one pass.
 fn index<T>(events: &[Event], f: impl FnOnce(&Asks) -> T) -> T {
     if let Some(l) = cached(events) {
         return f(&l.asks);
     }
+    REBUILDS.fetch_add(1, Relaxed);
     let mut x = Asks::default();
     (1..=events.len()).for_each(|n| x.add(&events[..n]));
     f(&x)
@@ -640,6 +644,7 @@ pub struct Log {
     pub asks: Asks,
     pub threads: Threads,
     pub states: States,
+    issues: HashMap<(String, u64), Vec<usize>>,
     seq: u64,
     key: (Option<u64>, Option<u64>),
 }
@@ -672,6 +677,9 @@ pub fn shared(path: &Path) -> Result<Arc<Log>> {
     m.seq = new.last().map_or(last, |e| e.seq.max(last));
     m.states = fold_into(std::mem::take(&mut m.states), &new);
     for e in new {
+        if let Some(n) = e.issue {
+            m.issues.entry((e.fleet.clone(), n)).or_default().push(m.events.len());
+        }
         m.events.push(e);
         m.asks.add(&m.events);
         m.threads.add(&m.events);
@@ -744,13 +752,29 @@ pub fn open_asks(events: &[Event]) -> Vec<&Event> {
     index(events, |x| x.open(events))
 }
 
-/// Current per-issue state (the states in `roles/usage-tail.md`).
+/// #859: `fleet` #`n`'s events in order: the index's when `events` is a cached log, else one pass.
+pub fn of_issue<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> {
+    let Some(l) = cached(events) else {
+        REBUILDS.fetch_add(1, Relaxed);
+        return events
+            .iter()
+            .filter(|e| e.fleet == fleet && e.issue == Some(n))
+            .collect();
+    };
+    let at = l.issues.get(&(fleet.to_string(), n));
+    at.map_or_else(Vec::new, |v| v.iter().map(|i| &events[*i]).collect())
+}
+
+/// Current per-issue state (the states in `roles/usage-tail.md`); #859: the cached log's fold when `events` is it.
 pub fn fold(events: &[Event]) -> States {
+    if let Some(l) = cached(events) {
+        return l.states.clone();
+    }
     fold_into(States::new(), events)
 }
 
 /// #343: `fold` on from the states `m` (a checkpoint's).
-fn fold_into(mut m: States, events: &[Event]) -> States {
+pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
     for e in events {
         let Some(n) = e.issue else { continue };
         let new = || IssueState {

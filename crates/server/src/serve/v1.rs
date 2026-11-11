@@ -16,9 +16,10 @@ use crate::api::{
     WhyNote,
 };
 use crate::events::plain;
+use crate::runner::Runner;
 use anyhow::{bail, Context};
 use serde::Serialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 /// #555: the paired-only POSTs beside `PAIRED_OPS`: the old board's `/send`, `/answer` (`menu`), `/act`, `/setup` and
 /// a backlog row's [chat about] (`/thread`'s `new`), then `[chat]`'s defaults and a backlog issue's [close].
@@ -84,7 +85,7 @@ impl Server<'_> {
                 ("200 OK", HTML, crate::lifeboat::page(ctx, &lanes, msg).into_bytes())
             }
             ("POST", Some("lifeboat")) if paired => {
-                let (msg, later) = crate::orchestrator::deferred(|| crate::lifeboat::act(ctx, self.r, &fields(body)));
+                let (msg, later) = crate::orchestrator::deferred(|| crate::lifeboat::act(ctx, &self.r, &fields(body)));
                 self.later(ctx, later);
                 ("200 OK", HTML, crate::lifeboat::back(&super::enc(&msg)).into_bytes())
             }
@@ -101,6 +102,8 @@ impl Server<'_> {
                         ok: error.is_none(),
                         config: config.into(),
                         error,
+                        routes: lock(&self.timing).routes(ctx.now),
+                        sources: self.r.refreshed(),
                     },
                 )
             }
@@ -121,7 +124,7 @@ impl Server<'_> {
                     x[8..].strip_suffix("/digest").unwrap_or_default(),
                     f.get("days").and_then(|d| d.parse().ok()).unwrap_or(7),
                 );
-                let text = Config::kept(ctx).and_then(|c| crate::lesson::digest(ctx, &c, self.r, fleet, days));
+                let text = Config::kept(ctx).and_then(|c| crate::lesson::digest(ctx, &c, &self.r, fleet, days));
                 text.map_or_else(
                     |e| reply("404 Not Found", "NOT_FOUND", format!("{e:#}")),
                     |text| {
@@ -192,7 +195,7 @@ impl Server<'_> {
                 reply("401 Unauthorized", "UNPAIRED", "pair this device first")
             }
             // #555: a setup pane's screen (the old board's `/lane?setup=`).
-            ("GET", _) if setup.is_some() => crate::setup::screen(ctx, self.r, setup.unwrap_or_default()).map_or_else(
+            ("GET", _) if setup.is_some() => crate::setup::screen(ctx, &self.r, setup.unwrap_or_default()).map_or_else(
                 |e| reply("404 Not Found", "NOT_FOUND", format!("{e:#}")),
                 |j| out("200 OK", &serde_json::from_value::<SetupScreen>(j).unwrap_or_default()),
             ),
@@ -233,7 +236,7 @@ impl Server<'_> {
                     Ok((c, cfg)) if op == "config-check" => {
                         crate::propose::check(ctx, &cfg, &c).map_or_else(|e| done(Err(e)), |v| out("200 OK", &v))
                     }
-                    r => done(r.and_then(|(c, cfg)| crate::propose::edit(ctx, &cfg, self.r, &c, "owner (cooee)"))),
+                    r => done(r.and_then(|(c, cfg)| crate::propose::edit(ctx, &cfg, &self.r, &c, "owner (cooee)"))),
                 }
             }
             ("POST", Some("chat")) => done(self.chat_defaults(ctx, &fields(body))),
@@ -249,7 +252,7 @@ impl Server<'_> {
                 if op.ends_with("-detach") {
                     return done(cfg.and_then(|c| crate::orchestrator::detach(ctx, &c, fleet, t)));
                 }
-                let a = cfg.and_then(|c| crate::orchestrator::attach(ctx, &c, self.r, fleet, t));
+                let a = cfg.and_then(|c| crate::orchestrator::attach(ctx, &c, &self.r, fleet, t));
                 match a.and_then(|v| Ok(serde_json::from_value::<ConductorAttach>(v)?)) {
                     Ok(a) => out("200 OK", &a),
                     Err(e) => done(Err(e)),
@@ -291,7 +294,7 @@ impl Server<'_> {
     fn lesson(&self, ctx: &Ctx, f: &BTreeMap<String, String>, by: &str) -> Result<String> {
         let (cfg, mut out) = (Config::kept(ctx)?, vec![]);
         let fleet = f.get("fleet").map_or("", String::as_str);
-        let confirmed = crate::lesson::run(ctx, &cfg, self.r, &mut out, fleet, Some(by))?;
+        let confirmed = crate::lesson::run(ctx, &cfg, &self.r, &mut out, fleet, Some(by))?;
         let out = String::from_utf8_lossy(&out);
         let filed = out.lines().next().unwrap_or_default();
         Ok(format!(
@@ -315,7 +318,7 @@ impl Server<'_> {
         if wanted.is_empty() {
             return refused("BAD_VALUE", "set harness, model or effort");
         }
-        let line = crate::orchestrator::chat(ctx, self.r, &wanted)?;
+        let line = crate::orchestrator::chat(ctx, &self.r, &wanted)?;
         self.kick.store(true, super::Relaxed);
         Ok(line)
     }
@@ -349,7 +352,7 @@ impl Server<'_> {
         }
         let d = serde_json::json!({"why": "backlog", "via": "web"});
         crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "closed", d))?;
-        let _ = gh::backlog(ctx, self.r, fc, fleet);
+        let _ = gh::backlog(ctx, &self.r, fc, fleet);
         Ok(format!("closed #{n}"))
     }
 
@@ -361,7 +364,7 @@ impl Server<'_> {
             let (cfg, ev) = (Config::load(&ctx.config).ok()?, shared(&ctx.state).ok()?);
             let all = self.lanes(ctx.now, &cfg, &ev, &ev.states)?;
             let l = all.into_iter().find(|l| q.get("agent") == Some(&l.name))?;
-            let (on, pane) = (l.on(self.r), l.pane.as_deref()?);
+            let (on, pane) = (l.on(&self.r), l.pane.as_deref()?);
             let n = num("n").or_else(|| num("lines")).unwrap_or(200).min(200);
             let seq = q.get("before").and_then(|v| v.parse::<u64>().ok()).filter(|&s| s > 0);
             let ev = crate::herdr::Shed(crate::runner::Runner::shed(&on)?).transcript(&on, pane, seq, n);
@@ -475,7 +478,7 @@ impl Server<'_> {
         Ok(State {
             seq: events.last().map_or(0, |e| e.seq),
             now: ctx.now,
-            tz: crate::usage::date(self.r, ctx.now, "+%z")
+            tz: crate::usage::date(&self.r, ctx.now, "+%z")
                 .parse::<i64>()
                 .map_or(0, |z| z / 100 * 3600 + z % 100 * 60),
             age: (snap > 0).then(|| ctx.now.saturating_sub(snap)),
@@ -490,9 +493,52 @@ impl Server<'_> {
                 .into_iter()
                 .map(row)
                 .collect(),
-            alerts: vec![row(("push".into(), t, d, String::new()))],
+            alerts: [row(("push".into(), t, d, String::new()))]
+                .into_iter()
+                .chain(slo_open(&events).map(|e| row(("api".into(), "r", plain(e), String::new()))))
+                .collect(),
+            sources: self.r.refreshed(),
         })
     }
+
+    pub(super) fn warm(&self) {
+        let ctx = &Ctx {
+            now: crate::now(),
+            ..self.ctx.clone()
+        };
+        crate::runner::request(|| {
+            drop(self.state(ctx));
+            drop(self.needs_tab(ctx, true));
+            drop(self.lanes_tab(ctx, true));
+            drop(self.host_tab(ctx));
+            drop(self.queue_tab(ctx));
+            drop(self.herd(ctx, None));
+        });
+    }
+
+    /// #859: `/api/v1` p95 over `slo_api_p95_ms` for `slo_api_minutes`: one `slo-api`; held again, `slo-api-ok`.
+    pub fn slo(&self, now: u64) {
+        let (Ok(cfg), Ok(ev)) = (Config::kept(self.ctx), shared(&self.ctx.state)) else {
+            return;
+        };
+        let (limit, mins) = (cfg.limits.slo_api_p95_ms, cfg.limits.slo_api_minutes);
+        let broken = lock(&self.timing).breach(now, limit, mins);
+        let e = match (broken, slo_open(&ev).is_some()) {
+            (Some((route, p95)), false) => {
+                let why = format!("{route} p95 {p95} ms, over {limit} ms for {mins} min");
+                let d = json!({"route": route, "p95_ms": p95, "reason": why});
+                Event::new(now, "herdsman", None, "slo-api", d)
+            }
+            (None, true) => Event::new(now, "herdsman", None, "slo-api-ok", json!({})),
+            _ => return,
+        };
+        drop(crate::events::emit(&self.ctx.state, &cfg, e));
+    }
+}
+
+pub(super) fn slo_open(events: &[Event]) -> Option<&Event> {
+    let last = events.iter().rfind(|e| e.kind.starts_with("slo-api"));
+    last.filter(|e| e.kind == "slo-api")
 }
 
 /// #576: `queue`'s cards with each queued row's marks, and the verify note its row shows.
