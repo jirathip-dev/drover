@@ -10,7 +10,7 @@ in with:
   `{"CLAUDE_CONFIG_DIR": "…"}`. A failing or non-JSON answer refuses the spawn `ACCOUNT_ENV` with its stderr.
   herdsman never reads cooee's folder layout. When it is set, cooee's account list wins.
 - With no `account_env`, the account's folder: its `[accounts.usage]` folder, else `~/.config/herdsman/accounts/<name>`,
-  as the provider's config folder (claude: `CLAUDE_CONFIG_DIR`, codex: `CODEX_HOME`; one table, `harness::CONFIG_ENV`).
+  as the provider's config folder (claude: `CLAUDE_CONFIG_DIR`, codex: `CODEX_HOME`; each provider's `Accounts::config_env`).
 
 Standalone, sign each account in once with `CLAUDE_CONFIG_DIR=<folder> claude /login` (or with cooee, Settings ›
 Providers). Claude Code keeps that login itself; herdsman only points the lane at the folder. The lane's profile goes on

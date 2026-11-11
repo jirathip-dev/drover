@@ -78,7 +78,7 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
             continue;
         };
         let age = ctx.now.saturating_sub(l.at);
-        if l.expires_at > ctx.now && age <= cfg.limits.spawn_pending_max_secs && !gone(r, &l, ctx.now) {
+        if holds(ctx, cfg, r, &l) {
             live.push(name);
             continue;
         }
@@ -96,6 +96,24 @@ pub fn markers(ctx: &Ctx, cfg: &Config, r: &dyn Runner, remove: bool) -> (Vec<St
         stale.push(e);
     }
     (live, stale)
+}
+
+fn holds(ctx: &Ctx, cfg: &Config, r: &dyn Runner, l: &crate::db::Lease) -> bool {
+    l.expires_at > ctx.now && ctx.now.saturating_sub(l.at) <= cfg.limits.spawn_pending_max_secs && !gone(r, l, ctx.now)
+}
+
+fn starting(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<crate::db::Lease> {
+    let mut v: Vec<_> = (crate::db::leases(&ctx.state, "spawn-").into_iter())
+        .filter(|l| l.key.ends_with(".pending") && holds(ctx, cfg, r, l))
+        .collect();
+    v.sort_by_key(|l| l.at);
+    v
+}
+
+/// #812: what holds the spawn slots, each marker's key and age (`spawn-a-1.pending 4m, …`); empty when none does.
+pub fn held_by(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
+    let at = |l: &crate::db::Lease| format!("{} {}", l.key, crate::events::age(ctx.now.saturating_sub(l.at)));
+    starting(ctx, cfg, r).iter().map(at).collect::<Vec<_>>().join(", ")
 }
 
 /// #333: `spawns starting N/<max>` and the stale markers swept in the last day: doctor's and the Host tab's line.
@@ -303,7 +321,7 @@ fn launch(
 ) -> Result<i32> {
     let role = c[3];
     markers(ctx, cfg, r, true); // #333: only live kicks count; a dead or old marker goes first
-    let live = pending(ctx);
+    let live = pending(ctx, cfg, r);
     // #416: one bound for a full host (its earlier lanes' worktree is there) is refused there: it holds no slot.
     let low =
         |e: &Event| crate::host::free_gb(&crate::hosts::On::of(r, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb);
@@ -323,9 +341,11 @@ fn launch(
         || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n))
         || (mine >= max.div_ceil(2) && waits_elsewhere(ctx, cfg, ev, fleet))
     {
-        return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting"));
+        let by = Some(held_by(ctx, cfg, r)).filter(|b| !b.is_empty());
+        let by = by.map_or(String::new(), |b| format!(": {b}"));
+        return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting{by}"));
     }
-    crate::spawn::lane_admit(ctx, cfg.fleet(fleet)?, ev, fleet, n, role)?;
+    crate::spawn::lane_admit(ctx, (cfg, r), ev, fleet, n, role)?;
     if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && c.contains(&"--force"))) {
         return crate::gate::refused(code, why);
     }
@@ -516,9 +536,8 @@ fn update(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, fleet: &str, n: u64) -
 }
 
 /// #318: the `spawn` in each live `spawn-<fleet>-<n>.pending`, one a launched kick is still starting.
-pub(crate) fn pending(ctx: &Ctx) -> Vec<Event> {
-    let all = crate::db::leases(&ctx.state, "spawn-").into_iter();
-    let live = all.filter(|l| l.key.ends_with(".pending") && l.expires_at > ctx.now);
+pub(crate) fn pending(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<Event> {
+    let live = starting(ctx, cfg, r).into_iter();
     live.filter_map(|l| serde_json::from_str(&l.data).ok()).collect()
 }
 
@@ -532,7 +551,10 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
         Some("DISK_LOW") => format!("disk nearly full ({why})"),
         Some("CAP" | "ALL_CAPPED") => "lane limit or usage cap reached".into(),
         Some("CI_NOT_GREEN") => "waiting for CI".into(),
-        Some("SPAWN_PENDING") => crate::waiting::SLOT.into(),
+        Some("SPAWN_PENDING") => match why.split_once(": ") {
+            Some((_, by)) => format!("{}: {by}", crate::waiting::SLOT),
+            None => crate::waiting::SLOT.into(),
+        },
         Some("SPAWN_BACKOFF") => why.into(),
         Some("SERIAL_BUSY") => "another one-at-a-time issue is in flight".into(),
         Some("IN_FLIGHT" | "ALREADY_DONE") => "skipped: another pass is on it or did it".into(),
@@ -641,6 +663,14 @@ pub fn drive(
     fast: bool,
 ) -> Result<()> {
     let t0 = std::time::Instant::now();
+    let mut slow = (t0, String::new(), 0.0);
+    let mut lap = |step: &str| {
+        let secs = slow.0.elapsed().as_secs_f64();
+        if secs > slow.2 {
+            (slow.1, slow.2) = (step.to_string(), secs);
+        }
+        slow.0 = std::time::Instant::now();
+    };
     only.map(|f| cfg.fleet(f)).transpose()?;
     std::fs::create_dir_all(state_dir(ctx))?;
     let i = usize::from(fast);
@@ -664,6 +694,7 @@ pub fn drive(
             writeln!(out, "host history: {e:#}")?;
         }
     }
+    lap("read log, host sample");
     // #298: shed's state changes since the last pass, logged per lane; the agent list each pass polls is the fallback.
     if let Some(b) = r.shed().filter(|_| !fast) {
         if let Err(e) = crate::shed::intake(ctx, cfg, &b.wire) {
@@ -676,10 +707,14 @@ pub fn drive(
             writeln!(out, "budget: {e:#}")?;
         }
     }
+    lap("disk budget");
     // #630/#790: a lane whose root went away restarts on the next root (the full pass only).
     if only.is_none() && !fast {
         if let Err(e) = crate::roots::watch(ctx, cfg, r, out) {
             writeln!(out, "roots: {e:#}")?;
+        }
+        if let Err(e) = crate::hosts::evacuate(ctx, cfg, r, out) {
+            writeln!(out, "offline hosts: {e:#}")?;
         }
     }
     // #714: a paused fleet's live lanes still get their outbox drained and their answers; only its pass is held.
@@ -708,6 +743,7 @@ pub fn drive(
         res = Err(e);
     };
     // #337: one look per step (each remote host in one ssh call), saved for the board; the passes scan it.
+    lap("roots, redeliver");
     let log = || crate::db::last_seq(&ctx.state);
     let mut seen = if fleets.is_empty() && (!fast || live.is_empty()) {
         crate::snapshot::Snap::read(ctx, r) // every fleet paused, no drain: nothing to look at
@@ -722,6 +758,7 @@ pub fn drive(
             Err(e) => writeln!(out, "orphans: {e:#}")?,
         }
     }
+    lap("look, orphans");
     if !fast {
         if let Err(e) = repair(ctx, cfg, (r, &seen), out) {
             writeln!(out, "repair: {e:#}")?;
@@ -734,6 +771,7 @@ pub fn drive(
     }
     // #182: every fleet's due steps (reviews first) before any fleet starts new work.
     let mut due = vec![];
+    lap("repair, outbox");
     for name in &fleets {
         match pass(ctx, cfg, (r, &seen), out, name, fast) {
             Ok(go) => {
@@ -742,12 +780,14 @@ pub fn drive(
             }
             Err(e) => fail(name, e),
         }
+        lap(&format!("{name}: PR reads, gates, steps"));
     }
     if !fast {
         for (name, e) in starts(ctx, cfg, r, out, &due, start) {
             fail(name, e);
         }
     }
+    lap("spawns");
     // #337: a step that logged something is looked at again, so the board shows what it did.
     if log() != grew {
         crate::snapshot::take(ctx, cfg, r);
@@ -785,6 +825,13 @@ pub fn drive(
         let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
         cp.unwrap_or_else(|e| eprintln!("herdsman: checkpoint: {e:#}"));
     }
+    lap("backlog, checkpoint");
+    let secs = t0.elapsed().as_secs_f64();
+    if t0.elapsed().as_secs() > cfg.limits.pass_max_secs {
+        let r1 = |x: f64| (x * 10.0).round() / 10.0;
+        let d = json!({"fast": fast, "secs": r1(secs), "step": slow.1, "step_secs": r1(slow.2), "kick": KICK.get()});
+        let _ = append(&ctx.state, &Event::new(ctx.now, "herdsman", None, "pass-slow", d));
+    }
     res
 }
 
@@ -817,7 +864,7 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
                 .active_lane()
                 .is_some_and(|(_, l)| live.iter().any(|a| a["name"] == l));
             if lane
-                || pending(ctx)
+                || pending(ctx, cfg, r)
                     .iter()
                     .any(|p| p.fleet == s.fleet && p.issue == Some(s.issue))
             {
@@ -965,6 +1012,32 @@ fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: 
         }
     }
     Ok(())
+}
+
+fn stale_replaced(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    role: &str,
+    old: &str,
+    mins: u64,
+) -> Result<()> {
+    let ev = read(&ctx.state)?;
+    let new = |e: &&Event| e.is("spawn", fleet, n) && e.str("role") == Some(role) && e.ts >= ctx.now;
+    let new = ev
+        .iter()
+        .rfind(new)
+        .and_then(|e| e.str("agent"))
+        .unwrap_or("a lane still starting");
+    let why = format!("{old} quiet {mins}m with no verdict: replaced by {new}");
+    writeln!(out, "{fleet} #{n} {why}")?;
+    let d = json!({"agent": old, "role": role, "idle_minutes": mins, "new": new, "reason": why});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, fleet, Some(n), "rev-stale-replaced", d),
+    )
 }
 
 fn escalate(
@@ -1118,7 +1191,7 @@ fn pass(
         }
         // #148: a head auto-updated this pass has no CI yet; its merge waits for the next pass.
         let now = |e: &Event| e.is("auto-updated", fleet, s.issue) && e.ts == ctx.now;
-        if let Some(e) = read(&ctx.state)?.into_iter().rev().find(now) {
+        if let Some(e) = crate::events::shared(&ctx.state)?.iter().rfind(|e| now(e)).cloned() {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
@@ -1241,9 +1314,16 @@ fn pass(
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
             // #534: a finished lane of the issue in the way is replaced in the same pass; a working one still waits.
-            if code == Some("LANE_LIVE") && args[0] == "spawn" && last_words(fleet).contains(OLD) {
+            let stale = (code == Some("LANE_LIVE") && step == "review")
+                .then(|| s.lanes.get(args[3]))
+                .flatten()
+                .and_then(|l| Some((l, stall::stale_check(ctx, r, &events, &agents, (fleet, s.issue), l)?)));
+            if code == Some("LANE_LIVE") && args[0] == "spawn" && (last_words(fleet).contains(OLD) || stale.is_some()) {
                 let a = [&args[..], &["--supersede"]].concat();
                 code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &a)?;
+            }
+            if let Some((old, mins)) = stale.filter(|_| code.is_none()) {
+                stale_replaced(ctx, cfg, out, (fleet, s.issue), args[3], old, mins)?;
             }
             if let Some((hash, _)) = repro.filter(|_| code == Some("NO_REPRO")) {
                 repro_refused(ctx, cfg, r, (&events, &agents), (fleet, s.issue, &w.lane), &args, &hash)?;
@@ -1759,9 +1839,9 @@ fn ext_closed(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, flee
 }
 
 /// #638: each pending spawn's fleet with its count, most first (`cooee 3, berth 2`): who holds the slots.
-pub fn holders(ctx: &Ctx) -> String {
+pub fn holders(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     let mut by = BTreeMap::<String, usize>::new();
-    for p in pending(ctx) {
+    for p in pending(ctx, cfg, r) {
         *by.entry(p.fleet).or_default() += 1;
     }
     let mut by: Vec<_> = by.into_iter().collect();
@@ -1805,7 +1885,7 @@ fn starts<'a>(
     while go && !todo.is_empty() {
         i %= todo.len();
         let fleet = todo[i].0;
-        let held = || pending(ctx).iter().filter(|p| p.fleet == fleet).count();
+        let held = || pending(ctx, cfg, r).iter().filter(|p| p.fleet == fleet).count();
         let full = max > 0 && KICK.get().is_none() && todo.len() > 1 && held() * total >= share(fleet);
         let Some(n) = todo[i].1.pop_front().filter(|_| !full) else {
             todo.remove(i);

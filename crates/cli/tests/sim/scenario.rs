@@ -41,7 +41,7 @@ pub fn ctx(root: &Path, now: u64) -> Ctx {
         config: root.join("config/fleet.toml"),
         state: root.join("state/events.jsonl"),
         worktrees: root.join("wt"),
-        hermes: root.join("hermes"),
+        homes: [("hermes", root.join("hermes"))].into(),
         exe: "/opt/herdsman/bin/herdsman".into(),
         now,
         home: root.join("home"),

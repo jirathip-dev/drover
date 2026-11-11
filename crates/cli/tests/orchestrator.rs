@@ -209,7 +209,7 @@ fn no_harness_starts_an_agent_with_a_control_character_in_its_argv() {
         assert_eq!(bad(&r), None, "{h}: resume");
     }
     let c = setup("orchestrator-argv-lanes", "claude");
-    for h in herdsman::harness::NAMES {
+    for h in herdsman::providers::lane_names() {
         for role in ["impl", "rev"] {
             let set = ["set", "sendmeter", role, "--harness", h];
             assert_eq!(run(&c, &Fake::default(), &set).0, 0);

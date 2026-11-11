@@ -1,7 +1,7 @@
 //! The page's Lanes tab (docs/serve.md): herdr agents joined with the log, grouped, plus masked pane text.
 use crate::config::Config;
 use crate::events::{Event, States};
-use crate::harness;
+use crate::providers;
 use crate::runner::{ok, Runner};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -192,13 +192,13 @@ impl Lane {
     /// #260: a local lane's newest session transcript, when its harness keeps one (`Harness::transcript`).
     pub fn session(&self) -> Option<std::path::PathBuf> {
         let wt = self.worktree.as_ref().filter(|_| self.machine.is_none())?;
-        harness::get(&self.harness).transcript(&crate::config::home(), wt)
+        providers::get(&self.harness).transcript(&crate::config::home(), wt)
     }
 }
 
 /// The newest session transcript any harness keeps for worktree `wt` under `home`.
 pub fn session_file(home: &Path, wt: &str) -> Option<std::path::PathBuf> {
-    harness::all().find_map(|h| h.1.transcript(home, wt))
+    providers::lanes().find_map(|h| h.transcript(home, wt))
 }
 
 fn from_spawn(e: &Event, l: Lane) -> Lane {
@@ -485,7 +485,7 @@ pub fn roll(file: &Path, body: &[String]) -> (Vec<String>, usize) {
 pub fn activity(harness: &str, screen: &str) -> String {
     let (body, status) = chat(screen);
     let lines: Vec<&str> = body.into_iter().map(str::trim).filter(|l| !l.is_empty()).collect();
-    let line = lines.into_iter().rev().find(|l| harness::get(harness).now_line(l));
+    let line = lines.into_iter().rev().find(|l| providers::get(harness).now_line(l));
     let m = mask(status.or(line).unwrap_or_default());
     if m.chars().count() > 60 {
         m.chars().take(59).collect::<String>() + "…"
@@ -553,21 +553,21 @@ pub fn short(cmd: &str) -> String {
 
 /// #276: the live spinner's word and elapsed time (`Harness::status_word`).
 pub fn spin(harness: &str, screen: &str) -> Option<(String, Option<String>)> {
-    harness::get(harness).status_word(screen)
+    providers::get(harness).status_word(screen)
 }
 
 /// #260: the pane's last tool line, as any harness reads it (`Harness::tool_line`), as a `now:` line.
 pub fn now(screen: &str) -> Option<String> {
     chat(screen).0.iter().rev().find_map(|l| {
         let t = strip(l);
-        let (tool, arg) = harness::all().find_map(|h| h.1.tool_line(t.trim()))?;
+        let (tool, arg) = providers::lanes().find_map(|h| h.tool_line(t.trim()))?;
         Some(doing(&tool, &arg))
     })
 }
 
 /// A blocked pane's pending prompt, as any harness reads it (`Harness::pending_menu`).
 pub fn pending(screen: &str) -> Option<(String, Vec<String>)> {
-    harness::all().find_map(|h| h.1.pending_menu(screen))
+    providers::lanes().find_map(|h| h.pending_menu(screen))
 }
 
 /// #362: a transcript's cached tail: its inode, the offset read up to (past its last full line), the 64 bytes before
@@ -634,9 +634,6 @@ pub fn now_of(l: &Lane, screen: &str) -> Option<String> {
     tail.map_or_else(|| now(screen), |t| said(&t).1)
 }
 
-/// #260: a Claude session transcript (`.jsonl`): its prompts and each turn's final text reply as `{k: me | ai, text, at}`
-/// (masked; meta lines, tool results and `<…>` wrappers dropped), and its last tool call as a `now:` line (none once text
-/// follows it: the turn replied).
 pub fn said(jsonl: &str) -> (Vec<Value>, Option<String>) {
     let (mut out, mut now, keys) = (Vec::<Value>::new(), None, ["command", "file_path", "path", "pattern"]);
     for v in jsonl.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {

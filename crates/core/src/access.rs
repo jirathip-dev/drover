@@ -2,7 +2,7 @@
 use crate::config::{Config, Fleet, Role};
 use crate::events::{emit, read, Event};
 use crate::gate::refused;
-use crate::harness::Credential;
+use crate::providers::Credential;
 use crate::runner::Runner;
 use crate::usage;
 use crate::Ctx;
@@ -87,7 +87,7 @@ pub type Account = (String, BTreeMap<String, String>);
 pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Option<Account>> {
     let now = ctx.now;
     let mut names = role.account_list();
-    let Credential::Account(_) = crate::harness::get(&role.harness).credential() else {
+    let Credential::Account(_) = crate::providers::get(&role.harness).credential() else {
         return Ok(None);
     };
     if names.is_empty() {
@@ -242,21 +242,17 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
 /// object of env vars (else refused `ACCOUNT_ENV` with its stderr), or with none set its folder (`Accounts::folder`)
 /// as its provider's config folder. Never a token; empty for a harness on no `[accounts]`.
 pub fn account_env(cfg: &Config, r: &dyn Runner, harness: &str, name: &str) -> Result<BTreeMap<String, String>> {
-    let Credential::Account(provider) = crate::harness::get(harness).credential() else {
+    let Credential::Account(acct) = crate::providers::get(harness).credential() else {
         return Ok(BTreeMap::new());
     };
     let Some(cmd) = &cfg.accounts.account_env else {
         if token_file(cfg, harness, name).is_some() {
             return Ok(BTreeMap::new()); // #707: its token goes in the lane's secrets file (`spawn::deliver`)
         }
-        let var = crate::harness::CONFIG_ENV
-            .iter()
-            .find(|p| p.0 == provider)
-            .map(|p| p.1.to_string());
-        let var = var.with_context(|| format!("no config folder env for provider {provider}"))?;
+        let var = acct.config_env.to_string();
         return Ok(BTreeMap::from([(var, cfg.accounts.folder(name).display().to_string())]));
     };
-    let fill = |w: &str| w.replace("{provider}", provider).replace("{name}", name);
+    let fill = |w: &str| w.replace("{provider}", acct.provider).replace("{name}", name);
     let words: Vec<String> = cmd.split_whitespace().map(fill).collect();
     let fail = |why: String| refused("ACCOUNT_ENV", format!("account {name}: `{}` {why}", words.join(" ")));
     let Some((prog, args)) = words.split_first() else {
@@ -291,7 +287,7 @@ pub fn signed(
     (fleet, role, dry): (&str, &Role, bool),
     p: &mut crate::spawn::Plan,
 ) -> Result<()> {
-    let (h, mut a) = (crate::harness::get(&role.harness), p.account.take());
+    let (h, mut a) = (crate::providers::get(&role.harness), p.account.take());
     let ask = !dry && cfg.accounts.account_env.is_none();
     while let Some((name, env)) = a.as_mut() {
         let got = account_env(cfg, r, &role.harness, name);
@@ -320,22 +316,22 @@ pub fn signed(
 
 /// #683: the provider's config-folder env var (`CONFIG_ENV`) and its value in `env`.
 fn folder<'a>(harness: &str, env: &'a BTreeMap<String, String>) -> Option<(&'static str, &'a str)> {
-    let Credential::Account(provider) = crate::harness::get(harness).credential() else {
+    let Credential::Account(acct) = crate::providers::get(harness).credential() else {
         return None;
     };
-    let var = crate::harness::CONFIG_ENV.iter().find(|p| p.0 == provider)?.1;
+    let var = acct.config_env;
     Some((var, env.get(var)?))
 }
 
 /// #707: with no `account_env`, account `name`'s `[accounts]` value `token-file:<path>` (hand-placed, 0600): the env var
 /// its lane gets the token as (`Harness::token_env`) and the file.
 pub fn token_file(cfg: &Config, harness: &str, name: &str) -> Option<(String, std::path::PathBuf)> {
-    let h = crate::harness::get(harness);
-    let Credential::Account(_) = h.credential() else {
+    let h = crate::providers::get(harness);
+    let Credential::Account(acct) = h.credential() else {
         return None;
     };
     let f = cfg.accounts.names.get(name)?.strip_prefix("token-file:")?;
-    let var = h.token_env()?;
+    let var = acct.token_env?;
     cfg.accounts
         .account_env
         .is_none()
@@ -345,8 +341,7 @@ pub fn token_file(cfg: &Config, harness: &str, name: &str) -> Option<(String, st
 /// #683: account `name`'s sign-in for `herdsman accounts`: whether it passes, and its line (` → ` its fix): its env's
 /// config folder signed in as its CLI's status command says (#785; never the Keychain), or why its env failed.
 pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
-    let on = |n: &&&str| matches!(crate::harness::get(n).credential(), Credential::Account(_));
-    let Some(hn) = crate::harness::NAMES.iter().find(on) else {
+    let Some(hn) = crate::providers::accounts().map(|p| p.name) else {
         return (false, "no harness runs on [accounts]".into());
     };
     if let Some((var, f)) = token_file(cfg, hn, name) {
@@ -357,7 +352,7 @@ pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
             format!("{var} from token file {}{why} → place it, mode 600", f.display()),
         );
     }
-    let (h, env) = (crate::harness::get(hn), account_env(cfg, r, hn, name));
+    let (h, env) = (crate::providers::get(hn), account_env(cfg, r, hn, name));
     let env = match env {
         Ok(env) => env,
         Err(e) => return (false, format!("{e:#}")),

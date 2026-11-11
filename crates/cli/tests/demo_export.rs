@@ -14,7 +14,7 @@ fn export() -> (PathBuf, Fake) {
         config: demo.join("fleet.toml"),
         state: demo.join("events.jsonl"),
         worktrees: d.join("wt"),
-        hermes: d.join("hermes"),
+        homes: [("hermes", d.join("hermes"))].into(),
         exe: "herdsman".into(),
         now: 1,
         home: d.join("home"),

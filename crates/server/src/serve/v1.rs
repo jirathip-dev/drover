@@ -698,7 +698,11 @@ fn roles(ctx: &Ctx, fleet: &str) -> Result<Roles> {
     let c = &cfg.chat;
     let harness = |h: &&str| Harness {
         name: (*h).into(),
-        efforts: crate::harness::efforts(h).iter().map(ToString::to_string).collect(),
+        efforts: crate::providers::get(h)
+            .efforts()
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
     };
     Ok(Roles {
         fleet: fleet.into(),
@@ -707,7 +711,7 @@ fn roles(ctx: &Ctx, fleet: &str) -> Result<Roles> {
             harness: c.harness.clone(),
             model: c.model.clone(),
             effort: c.effort.clone(),
-            harnesses: crate::harness::NAMES.iter().map(harness).collect(),
+            harnesses: crate::providers::lane_names().iter().map(harness).collect(),
         },
     })
 }
