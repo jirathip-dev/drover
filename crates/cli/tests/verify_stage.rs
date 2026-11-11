@@ -64,7 +64,6 @@ fn sctx(name: &str, cfg: &str) -> (herdsman::Ctx, FakeShed) {
     (c, sh)
 }
 
-/// #12 built (its lane gone; `design`: after its design was approved) and rev PASSed at `head`.
 fn passed(name: &str, cfg: &str, design: bool) -> (herdsman::Ctx, String, FakeShed) {
     let (c, sh) = sctx(name, cfg);
     let head = sha("abc");
