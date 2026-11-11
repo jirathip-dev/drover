@@ -569,6 +569,10 @@ fn waits(
                 cmd("spawn", &format!(" {role} --supersede")),
             )
         }
+        "needs-human" => {
+            let what = format!("needs-human: your card's [{}]", s.card());
+            w("owner", &what, s.last_ts, cmd("extend", ""))
+        }
         st => w("none", &format!("nothing to do ({st})"), s.last_ts, None),
     }
 }
@@ -600,6 +604,7 @@ pub fn scan(
                 .and_then(|b| s.lanes.get(b))
                 .or(s.check_lane())
                 .cloned()
+                .or((s.state == "needs-human").then(String::new))
         }) else {
             continue;
         };
