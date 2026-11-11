@@ -272,24 +272,22 @@ fn the_loader_and_the_age_are_one_strip_under_the_header() {
 /// the cold one, a new WebKit process, is reported) of the page a real board serves from the snapshot, under 300 ms. Runs where WebKit is at hand (the macOS CI job).
 #[test]
 fn the_first_paint_in_webkit_is_under_300ms() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture();
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     let base = format!("http://{}/", serve(c, r).2);
     let file = tmpdir("perf-fcp").join("page.png");
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     // Read after the shot's wait (`window.late`): the entry lands once the frame has painted.
     let fcp = "Object.defineProperty(window, 'late', {get: () => [(performance.getEntriesByName('first-contentful-paint')[0] || {startTime: -1}).startTime]})";
     let paint = |warm: bool| {
-        let mut sw = swift();
+        let mut sw = webview();
         if warm {
             sw.env("HERDSMAN_WARM", "1");
         }
         let o = sw
-            .args([script, &base, "390", "-", "horse"])
+            .args([&base, "390", "-", "horse"])
             .arg(&file)
             .arg(fcp)
             .output()

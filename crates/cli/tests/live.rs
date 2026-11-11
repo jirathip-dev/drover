@@ -537,8 +537,7 @@ fn unparsed_blocked_pane_shows_masked_tail_and_reply() {
 /// PNGs go to `$HERDSMAN_SNAPSHOTS` when set.
 #[test]
 fn live_board_fits_390px() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = blocked("live-shots", &[COUNTDOWN]);
@@ -561,21 +560,12 @@ fn live_board_fits_390px() {
         ("sheet-blocked", "lanes", "sync('g'); open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]'))".into()),
     ];
     let dir = std::env::var("HERDSMAN_SNAPSHOTS").ok();
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     for (name, tab, js) in scenes {
         let png = dir.as_ref().map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(p).join(format!("{name}.png"))
         });
-        let o = swift()
-            .args([
-                script,
-                file.to_str().unwrap(),
-                "390",
-                tab,
-                "horse",
-                png.to_str().unwrap(),
-                &js,
-            ])
+        let o = webview()
+            .args([file.to_str().unwrap(), "390", tab, "horse", png.to_str().unwrap(), &js])
             .output()
             .unwrap();
         let out = String::from_utf8_lossy(&o.stdout);
