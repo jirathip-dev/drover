@@ -423,7 +423,7 @@ fn a_second_rev_round_reuses_the_first_rounds_build_folder_and_only_the_first_cl
     std::fs::write(b.join("sendmeter-impl-12/release/warm"), "w").unwrap();
     git(&r.local, &["branch", "-q", "rev-12-r1", "origin/issue-12"]);
     git(&r.local, &["branch", "-q", "rev-12-r2", "origin/issue-12"]);
-    let f = spawnable(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let f = spawnable();
     let (code, out) = run(&r.c, &Git(&f), &["spawn", "sendmeter", "12", "rev"]);
     assert_eq!(code, 0, "{out}");
     let cp = |f: &Fake| {
@@ -437,6 +437,7 @@ fn a_second_rev_round_reuses_the_first_rounds_build_folder_and_only_the_first_cl
     let ev = read(&r.c.state).unwrap();
     assert!(ev.iter().any(|e| e.kind == "build-cloned") && !ev.iter().any(|e| e.kind == "build-reused"));
 
+    r.sh.exit("sendmeter-rev-12-r1");
     let r1 = b.join("sendmeter-rev-12-r1");
     std::fs::create_dir_all(r1.join("release")).unwrap();
     std::fs::write(r1.join("release/built"), "r1").unwrap();
@@ -446,7 +447,7 @@ fn a_second_rev_round_reuses_the_first_rounds_build_folder_and_only_the_first_cl
         &Event::new(r.c.now, "sendmeter", Some(12), "verdict", verdict),
     )
     .unwrap();
-    let f = spawnable(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let f = spawnable();
     let (code, out) = run(&r.c, &Git(&f), &["spawn", "sendmeter", "12", "rev"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(cp(&f), 0, "the second round copies nothing: {:?}", f.calls.borrow());

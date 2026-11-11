@@ -287,7 +287,7 @@ fn an_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once() {
 
 #[test]
 fn a_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_admitted() {
-    let mut c = setup("pending-load");
+    let (mut c, sh) = setup("pending-load");
     let load = Out {
         stdout: "{ 40.00 3.00 2.00 }\n".into(),
         ..Out::default()
@@ -318,6 +318,6 @@ fn a_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_
     assert_eq!(cards(&c, &calm, c.now), [], "two hours on load alone: no card");
     let (code, out) = run(&c, &calm, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert!(calm.called("herdr agent start sendmeter-impl-12"), "{out}");
+    assert_eq!(started(&sh), 1, "{out}");
     assert_eq!((spawns(&c), pending(&c)), (2, None));
 }

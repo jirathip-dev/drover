@@ -182,17 +182,20 @@ fn load_from_herdsmans_own_processes_admits_and_an_outside_one_is_named() {
     let c = ctx(&tmpdir("host-own-load"), CONFIG);
     let ps =
         "  101     1 600.0 /opt/herdsman/bin/herdsman\n  102   101 350.0 /bin/cp\n  103     1   5.0 /usr/sbin/mds\n";
-    let own = happy(&c, NO_AGENTS)
+    let (sh, own) = shed_happy(&c);
+    let own = own
         .once("sysctl -n vm.loadavg", 0, "{ 26.00 3.00 2.00 }\n")
         .reply("ps -Ao", ps);
     let (exit, out) = spawn(&c, &own, &[]);
     assert_eq!(exit, 0, "herdsman's own drive and clone: {out}");
+    assert_eq!(sh.all("run").len(), 1);
     let busy = format!("{ps}  104     1 900.0 /usr/bin/rustc\n  105     1 120.0 /usr/libexec/fseventsd\n");
     let c = ctx(&tmpdir("host-other-load"), CONFIG);
-    let other = happy(&c, NO_AGENTS)
+    let (sh, other) = shed_happy(&c);
+    let other = other
         .once("sysctl -n vm.loadavg", 0, "{ 36.00 3.00 2.00 }\n")
         .reply("ps -Ao", &busy);
-    let out = assert_refused(&c, &other, &[], "HOST_BUSY");
+    let out = assert_refused(&c, &sh, &other, &[], "HOST_BUSY");
     assert!(
         out.contains("load/cpu 2.65 > 2.5 (top: rustc 900%, fseventsd 120%, mds 5%)"),
         "{out}"
