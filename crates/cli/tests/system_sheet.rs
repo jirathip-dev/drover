@@ -1,7 +1,7 @@
 //! #440: the tab bar is queue · lanes · chat; [⚙] on every tab opens the System sheet, its dot red while a host card is
 //! red; every former Host, Events, [config] and [◐] control renders inside its section; the old links (`#host`,
 //! `#events`, `#config/<fleet>`, a stored `host` tab, a Queue card's [config]) land on `#system/<section>`. The real
-//! page in WebKit (tests/support/webview.mjs), the board's parts painted as main.ts paints them (`system_frags`).
+//! page in WebKit (tests/support/webview.swift), the board's parts painted as main.ts paints them (`system_frags`).
 mod common;
 use common::*;
 use herdsman::serve::Server;

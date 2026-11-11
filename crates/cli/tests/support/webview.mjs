@@ -26,7 +26,8 @@ const done = (code, ...line) => {
   if (line.length) console.log(line.join(" "));
   process.exit(code);
 };
-setTimeout(() => done(3, "timeout"), 30_000);
+let at = "launch";
+setTimeout(() => done(3, `timeout at ${at}`), 30_000);
 
 // A PNG's RGBA bytes, row by row (8-bit RGB or RGBA, as Playwright writes them).
 function rgba(buf) {
@@ -72,6 +73,7 @@ function judge(b, f, top, lo = 0) {
 
 const browser = await webkit.launch();
 const ctx = await browser.newContext({ viewport: { width, height: 844 }, bypassCSP: true });
+at = "newPage";
 const page = await ctx.newPage();
 const shot = () => page.screenshot({ caret: "initial" });
 const run = async (js) => page.evaluate((s) => (0, eval)(s), js);
@@ -84,6 +86,7 @@ if (url) {
   const [name, ...v] = (env.HERDSMAN_COOKIE ?? "").split("=");
   if (v.length) await ctx.addCookies([{ name, value: v.join("="), url }]);
 }
+at = "load";
 if (env.HERDSMAN_TAB) await ctx.addInitScript(`localStorage.tab = ${JSON.stringify(env.HERDSMAN_TAB)}`);
 if (url) {
   await page.goto(url);
@@ -96,6 +99,7 @@ if (url) {
   await page.setContent(readFileSync(page0, "utf8"));
 }
 // #440: a file's page waits for herd.js's theme (its words and sprites), else they land mid-`js` on some runs.
+at = "js";
 const themed = url ? "" : "typeof themed === 'object' && await themed;";
 if (close) {
   await body(`${themed} return 1`);
@@ -108,7 +112,8 @@ if (close) {
   const top = await run("document.querySelector('.sh').getBoundingClientRect().top").catch(() => 0);
   const lo = judge(b, rgba(await shot()), top).k;
   await run(`${close}; 1`);
-  const got = [];
+  at = "close";
+const got = [];
   for (const t0 = Date.now(); Date.now() - t0 < 400; ) got.push(await shot());
   const r = got.map((f) => judge(b, rgba(f), top, lo));
   const worst = r.reduce((m, x, i) => (x.off > r[m].off ? i : m), 0);
@@ -129,6 +134,7 @@ const v = await run(js).catch((e) => done(2, `js error: ${e.message}`));
 if (!nums(v)) done(2, `js error: ${JSON.stringify(v)}`);
 const wide = [Math.trunc(v[0]), Math.trunc(v[1])];
 if (!png) done(0, ...wide, ...v.slice(3).map(Number));
+at = "shot";
 await page.setViewportSize({ width, height: extra ? 844 : Math.ceil(v[2]) });
 await sleep(Number(env.HERDSMAN_WAIT ?? 0.5));
 // #315: numbers the js leaves in `window.late` are read after the wait (a sheet's poll has landed) instead.
