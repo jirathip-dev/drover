@@ -2930,3 +2930,70 @@ fn a_refused_update_round_shows_its_reason_not_catching_up() {
     assert!(out.contains("PASS · conflicts with staging · held: HOST_BUSY"), "{out}");
     assert!(!out.contains("catching up next pass"), "{out}");
 }
+
+fn draft_pr(head: &str, ci: &str) -> String {
+    let mut v: serde_json::Value = serde_json::from_str(&pr(head, ci)).unwrap();
+    v["isDraft"] = json!(true);
+    v.to_string()
+}
+
+#[test]
+fn a_draft_pr_with_a_pass_is_marked_ready_once_then_merged() {
+    let c = setup("drive-839-draft");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
+    std::fs::remove_dir_all(c.worktrees.join("sendmeter/gone-12")).unwrap();
+    let head = sha("abc");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let ready = "gh pr ready 100 -R jirathip-dev/sendmeter";
+    let kinds = |k: &str| read(&c.state).unwrap().iter().filter(|e| e.kind == k).count();
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &draft_pr(&head, "green"))
+        .reply("gh pr ready 100", "")
+        .reply("gh pr merge 100", "")
+        .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
+        .reply("gh issue", "");
+    let (out, _) = drive(&c, &r);
+    assert_eq!(r.count(ready), 1, "{out}");
+    assert!(!r.called("gh pr merge"), "a draft never merges: {out}");
+    assert_eq!(kinds("marked-ready"), 1);
+    herdsman::gh::forget_pr(&c, "sendmeter", 12);
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &pr(&head, "green"))
+        .reply("gh pr ready 100", "")
+        .reply("gh pr merge 100", "")
+        .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
+        .reply("gh issue", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["merge"], "{out}");
+    assert!(!r.called(ready), "marked ready once only: {out}");
+    assert_eq!(kinds("marked-ready"), 1);
+    assert_eq!(state(&c), "merged");
+}
+
+#[test]
+fn a_draft_pr_that_cannot_be_marked_ready_says_so_in_status() {
+    let c = setup("drive-839-draft-stuck");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
+    std::fs::remove_dir_all(c.worktrees.join("sendmeter/gone-12")).unwrap();
+    let head = sha("abc");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &draft_pr(&head, "pending"))
+        .once_err("gh pr ready 100", 1, "GraphQL: Resource not accessible by integration");
+    let (out, _) = drive(&c, &r);
+    assert!(r.called("gh pr ready 100"), "{out}");
+    let (code, out) = run(&c, &r, &["status", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("PR is a draft"), "{out}");
+    assert!(!out.contains("merging"), "{out}");
+}
