@@ -427,7 +427,7 @@ fn slow_du_never_blocks_the_board() {
     }
     assert_eq!(run(&c, &r, &["check"]).0, 0);
     let du = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
-    assert!(du.ends_with(&format!(" {}", c.now)), "{du}");
+    assert!(du.lines().next().unwrap().ends_with(&format!(" {}", c.now)), "{du}");
 }
 
 const PROBE: &str = if MAC {
