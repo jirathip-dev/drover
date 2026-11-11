@@ -1,0 +1,9 @@
+Decided: writer words are read from the segment with quoted args dropped and every quote mark turned into a space, so sh -c 'rm x' shows rm.
+Because: "A real write into the state dir (a redirect onto events.jsonl, a move into it) is still refused."
+Because: crates/core/src/hook.rs:255
+Decided: a segment whose command word is herdsman (or fleet) is never a shell writer; herdsman judges its own verbs.
+Because: "`herdsman …` verbs are judged by herdsman itself, not by the shell-word guard"
+Decided: redirect targets come from `>` outside quotes only, so awk 'NR>1' redirects nothing.
+Rejected: adding sh -c, bash -lc and eval as special cases — the quote glued to the first word ('rm) was the one root cause.
+Check: the refused list now has sh -c, bash -c, bash -lc, eval and xargs sh -c writes onto events.jsonl; the first (sh -c) failed on 99bd37f code, all pass at head.
+Owner: the orchestrator can run queue mv/rm and redirect herdsman output; a quoted shell write into the state folder is still refused.
