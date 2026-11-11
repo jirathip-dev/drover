@@ -1,0 +1,11 @@
+Decided: every literal core timing is a [limits] key whose default is today's value, with one doc line in LIMIT_DOCS and docs/config.md
+Because: "Make each a [limits] key with today's value as default, add a doc line per key"
+Decided: CI's timing check is scripts/timing-check.sh run in ci.yml; it skips config.rs and #[cfg(test)] items
+Because: "outside `#[cfg(test)]` and `config.rs` fails"
+Decided: no card_wait_secs key; no card view wait exists at head, the run follows --timeout
+Because: crates/core/src/card.rs:151
+Rejected: an unused card_wait_secs key — dead config nothing reads; #821 can add it with the wait it times
+Decided: `herdsman config show` prints every limit, its value and its doc line
+Check: crates/cli/tests/limits.rs drives a remote spawn plan with ssh_connect_secs = 42 and sees -oConnectTimeout=42
+Check: the chat_tab follow test fails identically on origin/staging (host browser), unrelated to this diff
+Owner: Every timing herdsman uses can now be tuned in fleet.toml's [limits], and CI blocks new hard-coded ones.
