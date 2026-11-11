@@ -7,3 +7,51 @@ paths = ["docs/**/*.md", "README.md"]
 watch = ["crates/core/src/cli.rs", "crates/core/src/config.rs", "crates/server/src/api.rs"]
 cli = true
 skip = [".herdsman/**"]
+
+[[ban]]
+pattern = "claude"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/providers/**"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md)"
+comments = true
+ignore_case = true
+
+[[ban]]
+pattern = "anthropic"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/providers/**"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md)"
+comments = true
+ignore_case = true
+
+[[ban]]
+pattern = "codex"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/providers/**"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md)"
+comments = true
+ignore_case = true
+
+[[ban]]
+pattern = "openai"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/providers/**"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md)"
+comments = true
+ignore_case = true
+
+[[ban]]
+pattern = "gemini"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/providers/**"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md)"
+comments = true
+ignore_case = true
+
+[[ban]]
+pattern = "hermes"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/providers/**"]
+reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md)"
+comments = true
+ignore_case = true

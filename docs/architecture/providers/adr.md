@@ -10,7 +10,7 @@ hermes, and adding one is a new file plus one registry line (q1190)?
 
 ## Where it stands (staging 3d90dba1)
 
-`crates/core/src/harness/` already holds a 40-method `Harness` trait with Generic defaults and five files. The leaks:
+crates/core/src/harness/ (now providers/) already held a 40-method `Harness` trait with Generic defaults and five files. The leaks:
 
 | Leak | Where |
 |---|---|

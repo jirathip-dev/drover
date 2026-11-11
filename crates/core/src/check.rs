@@ -290,7 +290,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let screen = herdr::read(r, p).unwrap_or_default();
                 let name = account.or(sp.str("harness")).unwrap_or_default();
                 let (harness, host) = (sp.str("harness"), sp.str("host"));
-                let h = crate::harness::get(harness.unwrap_or_default());
+                let h = crate::providers::get(harness.unwrap_or_default());
                 // #640: an account's banner caps only when its usage reading agrees; a sign-out is never a cap.
                 let seen = match h.usage_limited(cfg, r, &screen, ctx.now) {
                     Some(u) => Some((crate::access::confirm(ctx, account, u), "")),
@@ -947,7 +947,7 @@ pub fn clean_all(
             let _ = herdr::close(&on, pane);
         }
         if on.machine.is_none() {
-            crate::harness::remove_tmp(&stray_roots(cfg), wt);
+            crate::providers::remove_tmp(&stray_roots(cfg), wt);
         }
         drop_log(ctx, e.str("agent"));
         removed += 1;

@@ -24,7 +24,7 @@ fn an_export_ships_the_host_data_and_its_forms_are_inert() {
         config: demo.join("fleet.toml"),
         state: demo.join("events.jsonl"),
         worktrees: d.join("wt"),
-        hermes: d.join("hermes"),
+        homes: [("hermes", d.join("hermes"))].into(),
         exe: "herdsman".into(),
         now: 1,
         home: d.join("home"),

@@ -3,8 +3,8 @@
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
 use crate::events::{age, append, emit, fold, last_spawn, open_asks, read, Event, IssueState};
 use crate::gate::refused;
-use crate::harness;
 use crate::host::{self, Host};
+use crate::providers;
 use crate::runner::{argv, ok, Out, Runner};
 use crate::Ctx;
 use anyhow::{bail, ensure, Result};
@@ -722,7 +722,7 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     }
     let gh = format!("ssh {} gh auth login", on.machine.unwrap_or_default());
     let mut logins = vec![("gh", "gh auth status", gh.as_str())];
-    logins.extend(harness::all().filter_map(|h| h.1.health_check()));
+    logins.extend(providers::lanes().filter_map(|h| h.health_check()));
     // #235: typed into a fresh pane: logins as a lane sees them; `hs:done` is not in the echoed line.
     let probe = |(t, c, _): &(&str, &str, &str)| format!("{c} >/dev/null 2>&1; echo \"{t}:$?\"; ");
     let pane = logins.iter().map(probe).collect::<String>() + "echo \"hs:\"done";
@@ -746,8 +746,6 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     bad
 }
 
-/// #637: a `shed-acp` host's health (no herdr there): git for each fleet it fits, gh's login over ssh, and for each
-/// Claude role of those fleets the ACP guard (`acp_guard`); a failed guard is `✗ acp guard`, which keeps lanes off.
 fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[String], &str)) -> Vec<String> {
     let mut bad = vec![];
     let fits = cfg.fleet.iter().filter(|f| f.1.needs.iter().all(|t| tags.contains(t)));
@@ -765,7 +763,10 @@ fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[Str
         }
         for (role, rc) in &f.role {
             let profile = rc.profile_or(role);
-            let Some(id) = harness::get(&rc.harness).acp().filter(|_| seen.insert(profile.clone())) else {
+            let Some(id) = providers::get(&rc.harness)
+                .acp()
+                .filter(|_| seen.insert(profile.clone()))
+            else {
                 continue;
             };
             if let Some(why) = acp_guard(ctx, on, home, (&profile, f.family(role), id)) {
@@ -792,7 +793,7 @@ pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &
         return Some(format!("herdsman there is {theirs}, not {mine}"));
     }
     let dir = rehome(
-        vec![harness::profiles_root(ctx).join(profile).display().to_string()],
+        vec![providers::profiles_root(ctx).join(profile).display().to_string()],
         Some(home),
     )
     .remove(0);
