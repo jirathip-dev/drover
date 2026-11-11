@@ -1,0 +1,8 @@
+Decided: design lanes take their medium and writable folders from the issue body; HTML under docs/design/ stays the default
+Because: "the medium comes from the issue (and the repo's own design rules), HTML only as the default"
+Decided: the hook refuses a design lane's edit outside docs/design/ and the issue's named design paths (REFUSED DESIGN_PATH)
+Because: "and nothing else outside `docs/design/`"
+Decided: round 4 merges origin/staging and refreshes the PR evidence at the new head; no code change
+Rejected: keeping the staging build fix in this PR — staging now carries an equal fix and the merge leaves no diff there
+Check: the evidence check names head 8503440; cargo test without HERDSMAN_LANE exits 0
+Owner: Design lanes draw in the medium the issue asks for (SwiftUI previews when named) and may only write their design folders.
