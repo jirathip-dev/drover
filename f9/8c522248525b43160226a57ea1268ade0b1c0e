@@ -1,0 +1,5 @@
+Decided: fix round 2 only merges origin/staging 419a0af and names the new head in the PR body before the push; no code change
+Because: .github/workflows/evidence.yml:18
+Rejected: re-running the red evidence run — it re-reads the old push event's body, which named no sha yet
+Check: the evidence check at f98c522 passes on its push event and every other check is green
+Owner: Only a catch-up with the shared branch and a fresher test record; nothing new for users.
