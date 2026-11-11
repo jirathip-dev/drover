@@ -1,0 +1,6 @@
+Decided: merge origin/staging, keeping its providers/ rename and re-adding LOCAL_FILES and LOCAL_DIR beside its consts
+Because: crates/core/src/providers/claude.rs:24
+Because: crates/core/src/spawn.rs:750
+Rejected: keeping the old pub proxy consts from HEAD — staging moved them into its Proxy table, and nothing reads them now
+Check: with crates/core/src reverted on this merged tree, exactly the two #770 tests fail; at head both pass
+Owner: No change to the fix itself; the branch caught up with staging's rename of the provider code.
