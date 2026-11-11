@@ -1,0 +1,13 @@
+Decided: a pass checks a remote host's worktrees with one `sh -c` over ssh, the paths on stdin and one y/n line back each (`On::existing`, `hosts::present`).
+Because: "the paths go in as a batch, and one existence result comes back per path"
+Decided: clean_merged and clean_all ask `present` once per host before their loops; trim's low-disk list uses `existing` too.
+Because: crates/core/src/drive.rs:1955
+Decided: a host whose call is killed at its limit (exit 124), or held back once the tick is past its budget, is listed by the tick as `tick: <host>: over budget; skipped for the rest of this pass`.
+Because: "A host that runs past #877's budget is logged and skipped"
+Rejected: paths as argv — 500 paths near the remote ARG_MAX on long homes; stdin has no limit.
+Rejected: folding the check into #337's snapshot batch — a different step's reader; a second batch per pass is one call, not hundreds.
+Rejected: a per-host wall-clock budget — needs real time in tests; a hung host is already cut at the 15 s call limit and marked down.
+Check: a batch whose line count differs from its paths (failed call) answers none exists, as each failed `test -e` did before.
+Check: the test Fake answers the batch per path through the old `test -e "$1"` stubs, so existing tests keep their meaning.
+Check: drive still reads the host's agents in its own #337 batch call; the AC2 test counts the worktree-check calls (one) and no per-path call.
+Owner: a tick with hundreds of old lanes on another machine now asks that machine once, not once per lane, and a hung machine no longer holds up the rest.
