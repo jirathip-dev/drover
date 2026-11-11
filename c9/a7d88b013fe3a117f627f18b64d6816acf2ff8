@@ -1,0 +1,14 @@
+Decided: origin/staging merged three times; #880's remote_exists.rs, #859's perf huge() and board_fresh SLO test and #868's design test moved onto the shared fake shed
+Because: "Outside the tests the PR lists for #721 to delete, no test file fakes a herdr reply"
+Decided: remote_exists.rs answers the Air's own shed over ssh from a second FakeShed, outside the hang and the existence-call count
+Because: crates/cli/tests/remote_exists.rs:55
+Rejected: hanging the Air's shed connect too — herdr's `--machine` list never went over ssh, so it would change what #880 measures
+Decided: #859's deferred-read age test stays on herdr and is listed for #721, as is perf's no_board_request_starts_a_process
+Because: crates/core/src/shed.rs:82
+Rejected: a shed port of the age test — a local shed is read over its socket, never through the runner cache it tests
+Decided: disk.rs and scratch.rs keep both the shed connect route and #880's batched existence probe
+Because: "The fake shed lives in one shared helper, not copied into each test file"
+Decided: the PR body's evidence names the new head, fixing the red evidence check at c77d27c
+Because: "The PR states the before and after count of `herdr` lines in `crates/*/tests`"
+Check: git diff on crates/*/src against staging is empty; remote_exists still counts one existence ssh call per pass
+Owner: Test code only; staging's newest remote-worktree and board-speed tests also run on the pretend shed, and the PR's evidence names the latest commit.
