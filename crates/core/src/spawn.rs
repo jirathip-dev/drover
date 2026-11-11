@@ -444,7 +444,13 @@ fn brief(
         "design" => format!(
             include_str!("../roles/brief-design.md"),
             branch = branch,
-            integration = integration
+            integration = integration,
+            medium = crate::design::medium(body),
+            paths = crate::design::paths(body)
+                .iter()
+                .map(|p| format!("`{p}/`"))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         "architect" => format!(
             include_str!("../roles/brief-architect.md"),

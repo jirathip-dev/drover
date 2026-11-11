@@ -2149,6 +2149,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         groups: rules.groups,
         scratch: std::env::var("HERDSMAN_SCRATCH_TARGET").ok().filter(|s| !s.is_empty()),
         cap,
+        design: (lane.split(':').nth(2) == Some("design")).then(|| design_scope(ctx, r, &input, fleet, n)),
     };
     let cur = |d: &str| {
         runner::ok(r, "git", &["-C", d, "rev-parse", "--abbrev-ref", "HEAD"])
@@ -2175,6 +2176,23 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         lane_event(ctx, "thread-cmd", d);
     }
     Ok(())
+}
+
+/// #868: a design lane's scope: the worktree its call runs in (git's top level, else the cwd) and its issue's paths.
+fn design_scope(ctx: &Ctx, r: &dyn Runner, input: &serde_json::Value, fleet: &str, n: Option<u64>) -> hook::Design {
+    let here = std::env::current_dir()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let cwd = input["cwd"].as_str().unwrap_or(&here);
+    let top = runner::ok(r, "git", &["-C", cwd, "rev-parse", "--show-toplevel"]);
+    let spec = n
+        .and_then(|n| crate::gh::cached_spec(ctx, fleet, n))
+        .unwrap_or_default();
+    hook::Design {
+        root: top.map_or_else(|_| cwd.to_string(), |t| t.trim().to_string()),
+        allow: crate::design::paths(spec["body"].as_str().unwrap_or_default()),
+    }
 }
 
 /// #592: lane `<fleet>:<issue>:<role>`'s hook rules: its rules file (`HERDSMAN_RULES`, a remote lane's) and only it, else

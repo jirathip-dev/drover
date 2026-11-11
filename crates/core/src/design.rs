@@ -12,6 +12,36 @@ use std::path::Path;
 /// The design ask's options; free text is a revise note.
 pub const OPTIONS: [&str; 3] = ["approve", "revise", "reject"];
 
+/// #868: the folders a design lane writes: `docs/design` and each backquoted `…/design/…` path its issue `body` names.
+pub fn paths(body: &str) -> Vec<String> {
+    let mut out = vec!["docs/design".to_string()];
+    for span in body.split('`').skip(1).step_by(2) {
+        let keep = |c: &&str| !c.contains(['*', '<', '{', '…']) && !c.ends_with("...");
+        let parts: Vec<&str> = span
+            .trim()
+            .split('/')
+            .take_while(keep)
+            .filter(|c| !c.is_empty())
+            .collect();
+        let named = parts.contains(&"design") && !span.starts_with(['/', '~', '$']);
+        let p = parts.join("/");
+        if named
+            && !parts.iter().any(|c| *c == ".." || c.contains(char::is_whitespace))
+            && !out.iter().any(|o| Path::new(&p).starts_with(o))
+        {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// #868: the medium a design issue asks for: a native one it names along with a design path of its own, else HTML.
+pub fn medium(body: &str) -> &'static str {
+    let native = ["SwiftUI", "UIKit", "AppKit", "Jetpack Compose"];
+    let own = paths(body).len() > 1;
+    native.into_iter().find(|m| own && body.contains(m)).unwrap_or("HTML")
+}
+
 /// A design's ask (`needs-decision` with `design: true`).
 pub fn is_ask(e: &Event) -> bool {
     e.kind == "needs-decision" && e.data.get("design") == Some(&Value::Bool(true))
@@ -67,12 +97,15 @@ pub fn handoff(
     }
     let role = sp.str("role").unwrap_or("design");
     let pre = pre(&ev, f, n, role).unwrap_or(head);
-    let dir = if role == "architect" {
-        "docs/architecture"
+    let dirs = if role == "architect" {
+        vec!["docs/architecture".to_string()]
     } else {
-        "docs/design"
+        let spec = crate::gh::cached_spec(ctx, f, n).unwrap_or_default();
+        paths(spec["body"].as_str().unwrap_or_default())
     };
-    let names = ok(r, "git", &["-C", wt, "diff", "--name-only", pre, head, "--", dir]).unwrap_or_default();
+    let mut args = vec!["-C", wt, "diff", "--name-only", pre, head, "--"];
+    args.extend(dirs.iter().map(String::as_str));
+    let names = ok(r, "git", &args).unwrap_or_default();
     if names.trim().is_empty() {
         return Ok(()); // no design on the branch yet
     }

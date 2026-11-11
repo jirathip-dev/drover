@@ -9,9 +9,11 @@ Two roles run before impl, started by the owner, an orchestrator thread or drive
 product code; the owner approves, revises (a note in the next brief) or rejects their pushed work, and impl starts
 only after approve.
 
-- `design` (UI, `queue add N --design`): HTML mockups on the repo's own design system in `docs/design/<slug>/`, a
-  1440 and a 390 PNG of each page and a README mapping each PNG to the decision it shows; at most 3 pages unless
-  the issue asks for variants.
+- `design` (UI, `queue add N --design`): the medium the issue asks for. By default HTML mockups on the repo's own
+  design system in `docs/design/<slug>/`; an issue naming SwiftUI views in a design path (`apple/design/<slug>/`) gets
+  preview-only views and fixtures there (#868), and the hook keeps the lane's edits to `docs/design/` and those paths.
+  A PNG of each page or view at the sizes the issue asks for (default 1440 and 390 wide; iPhone and Mac frames for
+  native) and a README mapping each PNG to the decision it shows; at most 3 pages unless the issue asks for variants.
 - `architect` (`[fleet.<n>.role.architect]`, `queue add N --architect`, `queue set N architect on|off`): in
   `docs/architecture/<slug>/` an ADR (question, options, decision, consequences), the data shapes as types or a
   schema, the module boundaries (which module may call which), a statechart where state matters and the callers'
