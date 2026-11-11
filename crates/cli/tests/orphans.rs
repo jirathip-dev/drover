@@ -319,3 +319,39 @@ fn a_lane_spawned_during_the_remote_listing_is_not_adopted() {
     let adopted = kinds(&c, "spawn-adopted");
     assert_eq!(adopted.iter().map(|e| e.issue).collect::<Vec<_>>(), [Some(13)]);
 }
+
+#[test]
+fn a_rev_lane_on_a_reused_pane_id_is_adopted() {
+    let c = ctx(&tmpdir("orphan-812-reused"), CONFIG);
+    let rev = review(&c, "");
+    std::fs::remove_file(rev.join("verdict.md")).unwrap();
+    let list = agents(&[("sendmeter-rev-12-r1", "working", &rev.to_string_lossy(), "w9:p1")]);
+    let r = fake(&list)
+        .reply("herdr pane get w9:p1", &harness("w9:p1"))
+        .reply("herdr agent rename w9:p1 sendmeter-rev-12-r1", "{}")
+        .reply("git -C", "");
+    let out = fast(&c, &r);
+    assert!(out.contains("adopted w9:p1 as sendmeter-rev-12-r1"), "{out}");
+    let sp = kinds(&c, "spawn");
+    assert_eq!(
+        (sp.len(), sp[1].str("role"), sp[1].str("why")),
+        (2, Some("rev"), Some("orphan"))
+    );
+}
+
+#[test]
+fn an_orphan_rev_lane_of_the_wrong_round_is_closed() {
+    let c = ctx(&tmpdir("orphan-812-round"), CONFIG);
+    review(&c, "");
+    let rev = c.worktrees.join("sendmeter/rev-12-r3");
+    std::fs::create_dir_all(&rev).unwrap();
+    let list = agents(&[("sendmeter-rev-12-r3", "idle", &rev.to_string_lossy(), "w9:p2")]);
+    let r = fake(&list).reply("herdr pane close w9:p2", "{}").reply("git -C", "");
+    let out = fast(&c, &r);
+    assert!(
+        out.contains("closed stale orphan sendmeter-rev-12-r3 (round r3, r1 is due)"),
+        "{out}"
+    );
+    assert_eq!(kinds(&c, "lane-closed")[0].str("why"), Some("stale-orphan"));
+    assert!(kinds(&c, "spawn").len() == 1 && !r.called("herdr agent rename"));
+}

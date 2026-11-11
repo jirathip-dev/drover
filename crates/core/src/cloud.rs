@@ -444,14 +444,14 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let build = format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force");
     let herdr = format!("herdr\therdr --version | grep -qx 'herdr {v}'\t\n");
     let mut steps = format!("{}{TOOLS}\n", if acp { "" } else { &herdr });
-    for (n, i) in crate::harness::all().filter_map(|(n, h)| Some((n, h.install()?))) {
+    for (n, i) in crate::providers::lanes().filter_map(|h| Some((h.name, h.install()?))) {
         steps += &format!("{n}\tcommand -v {n}\t{i}\n");
     }
     steps += &format!("{RUST}\n");
     if acp {
         let (git, rev, sv) = (crate::shed::git(), crate::shed::REV, crate::shed::proto::VERSION);
         let shed = format!("cargo install --git {git} --rev {rev} --locked --force shed");
-        let adapter = SHED.replace("{acp}", crate::harness::default_acp().unwrap_or_default());
+        let adapter = SHED.replace("{acp}", crate::providers::default_acp().unwrap_or_default());
         steps += &format!("shed\t[ \"$(shed --version)\" = 'shed {sv}' ]\t{shed}\n{adapter}\n");
     }
     steps += &format!("herdsman\t[ \"$('{exe}' --version)\" = 'herdsman {version}' ]\t{build}");
@@ -460,9 +460,9 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     if acp && !pass("gh auth status") {
         bail!("{name}: log in with `ssh {m} gh auth login` there, then bootstrap again");
     }
-    let harness = crate::harness::all()
+    let harness = crate::providers::lanes()
         .filter(|_| !acp)
-        .filter_map(|(n, h)| Some((h.health_check()?.1, n)));
+        .filter_map(|h| Some((h.health_check()?.1, h.name)));
     let logins = harness.chain([("gh auth status", "gh-token")]).filter(|t| !pass(t.0));
     let panes = logins
         .map(|t| crate::setup::start(ctx, cfg, r, name, t.1, "bootstrap"))

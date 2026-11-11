@@ -1,4 +1,3 @@
-//! #98 `herdsman setup|timer|tick` and the Host tab's Services rows: herdsman runs its own 5-minute job, no Hermes.
 use crate::config::Config;
 use crate::events::{age, emit, read, Event};
 use crate::runner::{ok, Runner};
@@ -15,7 +14,7 @@ pub const FAST: &str = "dev.herdsman.fast";
 /// #345: `herdsman service`, kept alive; it runs the fast step itself (and the board with `--board`).
 pub const SERVICE: &str = "dev.herdsman.service";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
-/// #557: herdsman's own install every 5 min and the daily scheduled clean, no Hermes; `setup` and `timer` write them.
+/// #557: herdsman's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
 pub const UPDATE: &str = "dev.herdsman.update";
 pub const CLEAN: &str = "dev.herdsman.clean";
 pub const MORE: [(&str, &[&str]); 2] = [(UPDATE, &["self-update"]), (CLEAN, &["clean", "--scheduled"])];
@@ -405,7 +404,6 @@ fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<(
     Ok(())
 }
 
-/// Every file under the config dir and the fleets' Hermes configs: did `profiles sync` change any?
 fn snap(ctx: &Ctx, cfg: &Config) -> Vec<(PathBuf, Vec<u8>)> {
     fn walk(p: &Path, v: &mut Vec<(PathBuf, Vec<u8>)>) {
         match std::fs::read_dir(p) {
@@ -416,7 +414,9 @@ fn snap(ctx: &Ctx, cfg: &Config) -> Vec<(PathBuf, Vec<u8>)> {
     let mut v = vec![];
     walk(ctx.config.parent().unwrap_or(&ctx.config), &mut v);
     for (role, def) in cfg.fleet.values().flat_map(|f| &f.role) {
-        walk(&ctx.hermes.join(def.profile_or(role)).join("config.yaml"), &mut v);
+        for f in crate::providers::get(&def.harness).profile_files(ctx, &def.profile_or(role)) {
+            walk(&f, &mut v);
+        }
     }
     v.sort();
     v

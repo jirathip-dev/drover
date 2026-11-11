@@ -3,9 +3,9 @@ use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, read, Event};
 use crate::gate::refused;
-use crate::harness::{self, hook_command};
 use crate::herdr;
 use crate::host;
+use crate::providers;
 use crate::runner::{argv, ok, Out, Runner};
 use crate::Ctx;
 use anyhow::{bail, Context, Result};
@@ -46,7 +46,7 @@ fn prompt_kind<'a>(f: &'a Fleet, role: &'a str) -> &'a str {
 }
 
 /// Each profile once, at its first (fleet, role) in fleet.toml order.
-fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)> {
+pub(crate) fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)> {
     let mut done = std::collections::BTreeSet::new();
     let all = cfg.fleet.iter().flat_map(|(name, f)| {
         f.role
@@ -62,12 +62,12 @@ pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) 
     let all = profiles(cfg);
     for (_, f, role, r, profile) in &all {
         // #173: a role's profile hook is its kind's: a check role's is read-only, as rev's; #577: its prompt its own.
-        for h in harness::known() {
-            harness::get(h).sync(ctx, f.family(role), prompt_kind(f, role), profile, usage, out)?;
+        for h in providers::known() {
+            providers::get(h).sync(ctx, f.family(role), prompt_kind(f, role), profile, usage, out)?;
         }
-        harness::set_mcp(ctx, profile, &access::mcp_servers(cfg, f, r)?)?;
+        providers::set_mcp(ctx, profile, &access::mcp_servers(cfg, f, r)?)?;
     }
-    let root = harness::profiles_root(ctx);
+    let root = providers::profiles_root(ctx);
     for d in std::fs::read_dir(root).into_iter().flatten().flatten() {
         let (name, dir) = (d.file_name().to_string_lossy().into_owned(), d.path());
         if dir.join("role.md").exists() && !all.iter().any(|p| p.4 == name) {
@@ -78,27 +78,15 @@ pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) 
     Ok(())
 }
 
-/// `profiles sync --check`: each Hermes profile's `hooks list` (run as in a lane) shows its hook `✓ allowed`.
+/// `profiles sync --check`: no stray hook, and each provider's profiles allow their hook (`Provider::hooks_allowed`).
 pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<bool> {
     let stray = stray_hooks(ctx, cfg);
     let mut good = stray.is_empty();
     for s in stray {
         writeln!(out, "✗ {s} → herdsman profiles sync")?;
     }
-    for (name, f, role, _, profile) in profiles(cfg) {
-        if !ctx.hermes.join(&profile).join("config.yaml").exists() {
-            continue;
-        }
-        let lane = format!("HERDSMAN_LANE={name}:-:{role}");
-        let o = r.run("env", &argv(&[&lane, "hermes", "-p", &profile, "hooks", "list"]))?;
-        let cmd = hook_command(ctx, f.family(role));
-        let allowed = o.code == 0 && o.stdout.lines().any(|l| l.contains(&cmd) && l.contains("✓ allowed"));
-        writeln!(
-            out,
-            "{} {profile} ({role})",
-            if allowed { "✓ allowed" } else { "✗ not allowed" }
-        )?;
-        good &= allowed;
+    for p in providers::lanes() {
+        good &= p.hooks_allowed(ctx, cfg, r, out)?;
     }
     Ok(good)
 }
@@ -107,7 +95,7 @@ pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Wri
 pub fn stray_hooks(ctx: &Ctx, cfg: &Config) -> Vec<String> {
     let mut stray = vec![];
     for (_, _, _, _, profile) in profiles(cfg) {
-        let path = harness::profiles_root(ctx).join(&profile).join("settings.json");
+        let path = providers::profiles_root(ctx).join(&profile).join("settings.json");
         let settings: Value = std::fs::read_to_string(path)
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
@@ -115,7 +103,7 @@ pub fn stray_hooks(ctx: &Ctx, cfg: &Config) -> Vec<String> {
         let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
         for h in pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten()) {
             let cmd = h["command"].as_str().unwrap_or_default();
-            if let Some(exe) = harness::hook_program(cmd).filter(|_| !harness::runs_this(ctx, cmd)) {
+            if let Some(exe) = providers::hook_program(cmd).filter(|_| !providers::runs_this(ctx, cmd)) {
                 stray.push(format!("{profile} hook runs {exe}, not {}", ctx.exe));
             }
         }
@@ -155,7 +143,7 @@ pub struct Plan {
     pub resting: Option<(String, u64)>,
     /// #355: an orchestrator's harness session id, and whether to resume it (`Harness::resumes`).
     pub session: Option<(String, bool)>,
-    /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `ANTHROPIC_AUTH_TOKEN`).
+    /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `Proxy::auth_token_env`).
     pub lane_key: Option<String>,
     /// #707: a local lane's `token-file:` account: the env var and the file `deliver` exports it from.
     pub token: Option<(String, PathBuf)>,
@@ -173,9 +161,11 @@ impl Plan {
         // #683: the account's env, its own CLI login; the lane's profile goes on top (`--settings`, ACP's settings).
         let acct = self.account.iter().flat_map(|a| &a.1);
         c.extend(acct.map(|(k, d)| format!("{k}='{}'", d.replace('\'', r"'\''"))));
-        c.extend(harness::get(&self.harness).env().iter().map(|v| String::from(*v)));
+        c.extend(providers::get(&self.harness).env().iter().map(|v| String::from(*v)));
         // #708: a token the pane inherited (a login shell's export) never picks the account of a lane without one.
-        if let (None, Some(v)) = (&self.account, harness::get(&self.harness).token_env()) {
+        if let (None, providers::Credential::Account(providers::Accounts { token_env: Some(v), .. })) =
+            (&self.account, providers::get(&self.harness).credential())
+        {
             c.push(format!("&& unset {v}"));
         }
         if !self.secrets().is_empty() || self.lane_key.is_some() || self.token.is_some() {
@@ -206,11 +196,11 @@ impl Plan {
     }
 
     pub fn start_cmd(&self, ctx: &Ctx, pane: &str) -> Vec<String> {
-        harness::get(&self.harness).start_cmd(ctx, self, pane)
+        providers::get(&self.harness).start_cmd(ctx, self, pane)
     }
 
     pub fn kick_cmds(&self, pane: &str) -> Vec<Vec<String>> {
-        harness::get(&self.harness).kick_cmds(self, pane)
+        providers::get(&self.harness).kick_cmds(self, pane)
     }
 
     /// #157: the lane's files under `root` on its host; #630: its builds too.
@@ -248,7 +238,8 @@ pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Pl
     }
     // #637: a remote ACP lane holds no account token, only its proxy key.
     text += &p.lane_key.as_ref().map_or_else(String::new, |k| {
-        format!("export {}='{k}'\n", crate::harness::AUTH_TOKEN_ENV)
+        let var = crate::providers::proxied().map_or("", |px| px.auth_token_env);
+        format!("export {var}='{k}'\n")
     });
     let file = (!text.is_empty()).then(|| p.secrets_file());
     if let Some(f) = &file {
@@ -567,16 +558,16 @@ pub fn unguarded(
     id: &str,
     (account, remote): (bool, bool),
 ) -> String {
-    let settings: Value = std::fs::read_to_string(harness::profiles_root(ctx).join(profile).join("settings.json"))
+    let settings: Value = std::fs::read_to_string(providers::profiles_root(ctx).join(profile).join("settings.json"))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
     let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
     let mut hooks = pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten());
     // #637: a remote host's profile is proven there (`hosts::acp_guard`), before this.
-    if harness::get(h).acp() != Some(id) {
+    if providers::get(h).acp() != Some(id) {
         format!("ACP agent {id} runs no {h} hook")
-    } else if !remote && !hooks.any(|h| h["command"].as_str().is_some_and(|c| harness::guards(ctx, c, family))) {
+    } else if !remote && !hooks.any(|h| h["command"].as_str().is_some_and(|c| providers::guards(ctx, c, family))) {
         format!("profile {profile} has no herdsman PreToolUse hook; run `herdsman profiles sync`")
     } else if !account {
         "an ACP lane signs in with its role's [accounts] account env".into()
@@ -590,7 +581,7 @@ pub fn unguarded(
 /// worktree's local project settings and memory, and no `$SHED` (its state is the session's, not the hook's).
 /// Refused `ACP_UNGUARDED` when herdsman's hook would not guard it (#508: fail closed).
 pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&str>) -> Result<Vec<String>> {
-    let dir = harness::profiles_root(ctx).join(&p.profile);
+    let dir = providers::profiles_root(ctx).join(&p.profile);
     let home = |a: Vec<String>| crate::hosts::rehome(a, remote);
     let why = unguarded(
         ctx,
@@ -615,12 +606,12 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());
     let q = |v: &str| format!("'{}'", v.replace('\'', r"'\''"));
     let dir = PathBuf::from(home(vec![dir.display().to_string()]).remove(0));
-    let env = harness::get(&p.harness).acp_env(p.model.as_deref(), p.effort.as_deref());
+    let env = providers::get(&p.harness).acp_env(p.model.as_deref(), p.effort.as_deref());
     let own: Vec<String> = env.iter().map(|(k, v)| format!("{k}={}", q(v))).collect();
     words.splice(at..at, own);
     let (set, role) = (dir.join("settings.json"), dir.join("role.md"));
     let (set, role) = (q(&set.to_string_lossy()), q(&role.to_string_lossy()));
-    let profile = harness::get(&p.harness).acp_profile(&set, &role);
+    let profile = providers::get(&p.harness).acp_profile(&set, &role);
     let line = words.join(" ") + &profile + " && unset SHED BERTH && exec \"$@\"";
     Ok([argv(&["sh", "-c", &line, "sh"]), cmd].concat())
 }
@@ -655,8 +646,9 @@ fn remote_acp(
             ),
         );
     }
-    p.env
-        .insert(crate::harness::BASE_URL_ENV.into(), crate::proxy::url(cfg));
+    if let Some(px) = crate::providers::proxied() {
+        p.env.insert(px.base_url_env.into(), crate::proxy::url(cfg));
+    }
     p.lane_key = Some(crate::proxy::new_key()?);
     Ok(())
 }
@@ -1025,7 +1017,7 @@ pub fn spawn(
         };
         p.env.insert("HERDSMAN_TOKEN".into(), crate::service::grant(ctx, &g)?);
     }
-    let h = harness::get(&p.harness);
+    let h = providers::get(&p.harness);
     h.ready(ctx, r, &p)?;
     let event = |kind: &str, d: Value| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d));
 
@@ -1113,7 +1105,7 @@ pub fn spawn(
         );
     }
 
-    lane_admit(ctx, f, &events, fleet, issue, role)?;
+    lane_admit(ctx, (cfg, r), &events, fleet, issue, role)?;
     respawn_guard(ctx, cfg, &events, (fleet, issue, role))?;
     let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
     if o.update && updates >= f.flow().update_limit() {
@@ -1587,7 +1579,7 @@ fn tail(r: &dyn Runner, pane: &str) -> String {
 /// screen's redacted tail.
 pub(crate) fn unblock(
     r: &dyn Runner,
-    h: &dyn harness::Harness,
+    h: &dyn providers::Provider,
     pane: &str,
     logged: impl FnOnce(&str) -> Result<()>,
 ) -> Result<(bool, String)> {
@@ -1609,10 +1601,7 @@ pub(crate) fn unblock(
 const SOFT: [&str; 3] = ["timeout", "agent_name_not_found", "agent_launch_pending"];
 const REPORTED: [&str; 4] = ["working", "idle", "blocked", "done"];
 
-/// #359: whether the harness came up in `pane`: its process runs there and its startup title or a reported state has
-/// been seen. Reads it 5 s apart, never deciding from one read; #718: gives up `CONFIRM_SECS` after it starts, however
-/// often the pane's title changes (a busy Claude's spinner never ends).
-fn confirm(r: &dyn Runner, h: &dyn harness::Harness, pane: &str) -> bool {
+fn confirm(r: &dyn Runner, h: &dyn providers::Provider, pane: &str) -> bool {
     let (mut left, mut titled, names) = (herdr::CONFIRM_SECS, false, h.process_names());
     loop {
         let v = herdr::json(r, &herdr::pane_get_argv(pane)).map_or(Value::Null, |v| v["result"]["pane"].clone());
@@ -1640,8 +1629,16 @@ fn orphan(agents: &[Value], events: &[Event], p: &Plan, unnamed: bool) -> Option
 }
 
 /// `SERIAL_BUSY` (a group of the issue's is full, unless it holds a slot there) and CAP (`max_impl` / `max_rev`).
-pub(crate) fn lane_admit(ctx: &Ctx, f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) -> Result<()> {
-    let events = &[events, &crate::drive::pending(ctx)].concat(); // #318: spawns still starting count as lanes
+pub(crate) fn lane_admit(
+    ctx: &Ctx,
+    (cfg, r): (&Config, &dyn Runner),
+    events: &[Event],
+    fleet: &str,
+    issue: u64,
+    role: &str,
+) -> Result<()> {
+    let f = cfg.fleet(fleet)?;
+    let events = &[events, &crate::drive::pending(ctx, cfg, r)].concat();
     let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
@@ -1772,7 +1769,7 @@ fn handover(
     let after = |t: &Value| at.as_ref().is_none_or(|s| t.as_str().is_none_or(|t| t > s.as_str()));
     let (wt, h) = (
         p.worktree.to_string_lossy(),
-        harness::get(prev.str("harness").unwrap_or_default()),
+        providers::get(prev.str("harness").unwrap_or_default()),
     );
     let (mut prompts, mut replies, mut cmds) = (vec![], vec![], vec![]);
     let jsonl = h
@@ -1987,7 +1984,9 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let (Some(pane), m, name) = (a["pane_id"].as_str(), a["machine"].as_str(), a["name"].as_str()) else {
             continue;
         };
-        let at = |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m || e.str("agent") == name;
+        let named = |e: &&Event| name.is_none_or(str::is_empty) || e.str("agent") == name;
+        let at =
+            |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m && named(e) || e.str("agent") == name;
         // #393: a `spawn-started` younger than a spawn can take is a spawn still running, not an orphan.
         let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < SPAWN_SECS;
         // #500: one adoption per pane, ever: a pane adopted once is never an orphan again.
@@ -2026,8 +2025,18 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
             .flatten()
             .and_then(head)
             .filter(|(x, h): &(String, String)| !x.eq_ignore_ascii_case(h));
+        let due = s
+            .stage_rounds
+            .get(f.flow().stage_of(&role))
+            .copied()
+            .unwrap_or_default()
+            + 1;
+        let lane = name.filter(|n| !n.is_empty()).or(wt.as_deref());
+        let round = lane.and_then(|l| l.rsplit_once("-r")?.1.parse::<u32>().ok());
+        let round = round.filter(|k| f.family(&role) == "rev" && *k != due);
         let stale = match old {
             _ if s.done() => Some(format!("{fleet}#{n} is {}", s.state)),
+            _ if let Some(k) = round => Some(format!("round r{k}, r{due} is due")),
             Some((x, h)) => Some(format!("verdict for {x:.7}, head is {h:.7}")),
             None => None,
         };

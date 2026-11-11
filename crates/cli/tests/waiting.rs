@@ -554,3 +554,24 @@ fn a_dead_fix_lane_is_respawned_not_parked() {
     assert_eq!(of(21), fix(21), "a supersede that never spawned");
     assert_eq!(of(22), Some(None), "a fix lane still there is left alone");
 }
+
+#[test]
+fn a_green_pass_on_a_draft_or_unlabelled_pr_names_the_cause() {
+    let (c, mut r) = fixture("waiting-812-draft");
+    let draft = pr(&sha("4"), "green").replace("\"number\"", "\"isDraft\":true,\"number\"");
+    let out = herdsman::runner::Out {
+        code: 0,
+        stdout: draft,
+        stderr: String::new(),
+    };
+    r.replies.insert(0, ("gh pr view issue-4 ".into(), out));
+    let four = |c: &herdsman::Ctx, r: &Fake| waits(c, r, &[]).into_iter().find(|w| w.issue == 4).unwrap();
+    assert_eq!(four(&c, &r).what, "PASS · CI green · PR is a draft");
+    let (c, r) = fixture("waiting-812-label");
+    let cfg = CONFIG.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nmerge_label = \"full-ci\"",
+    );
+    std::fs::write(&c.config, cfg).unwrap();
+    assert_eq!(four(&c, &r).what, "PASS · CI green · PR lacks label `full-ci`");
+}

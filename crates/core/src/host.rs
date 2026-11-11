@@ -163,7 +163,7 @@ pub fn groups(r: &dyn Runner) -> [u64; 5] {
     const G: [&str; 3] = ["colima qemu lima virtualiz", "chrom safari firefox", "herd"];
     let (ps, mut kb) = (stdout(r, "ps", &["-axo", "rss=,command="]).unwrap_or_default(), [0; 5]);
     for (k, cmd) in ps.to_lowercase().lines().filter_map(|l| l.trim().split_once(' ')) {
-        let lane = crate::harness::all().any(|h| h.1.process_names().iter().any(|w| cmd.contains(w)));
+        let lane = crate::providers::lanes().any(|h| h.process_names().iter().any(|w| cmd.contains(w)));
         let i = G.iter().position(|g| g.split(' ').any(|w| cmd.contains(w)));
         kb[if lane { 0 } else { i.map_or(4, |i| i + 1) }] += k.parse::<u64>().unwrap_or(0);
     }
