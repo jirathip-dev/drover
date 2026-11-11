@@ -2867,8 +2867,6 @@ fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
     assert!(r.called("herdr agent start sendmeter-impl-12"));
 }
 
-/// #824: a PASSed PR that conflicts, its impl lane idle (hibernated) in its pane: one pass supersedes it and starts the
-/// update round.
 #[test]
 fn a_conflicting_pass_with_an_idle_impl_lane_gets_its_update_in_one_pass() {
     let c = setup("drive-conflict-idle");
@@ -2907,7 +2905,6 @@ fn a_conflicting_pass_with_an_idle_impl_lane_gets_its_update_in_one_pass() {
     assert!(!out.contains("catching up next pass"), "{out}");
 }
 
-/// #824: an update round drive tried and was refused shows that refusal in `waiting`, not a promise of the next pass.
 #[test]
 fn a_refused_update_round_shows_its_reason_not_catching_up() {
     let c = setup("drive-conflict-held");
