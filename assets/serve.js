@@ -394,7 +394,7 @@ function words(root) {
     p.innerHTML = tw('tab-' + t, t);
   }
   if (root === document) syswords();
-  root.querySelectorAll('.ask>p:first-child>b').forEach(b => relabel(b, 'needs', 'needs you'));
+  root.querySelectorAll('.ask>p:first-of-type>b').forEach(b => relabel(b, 'needs', 'needs you'));
   root.querySelectorAll('.qg>h3').forEach(h => relabel(h, QK[h.parentNode.dataset.g], h.dataset.p ?? h.textContent));
   root.querySelectorAll('details.q').forEach(d => {
     const o = d.querySelector('summary>span:nth-of-type(2)'), s = o && (o.querySelector(':scope>span') || o);
@@ -1675,7 +1675,7 @@ const lget = () => { try { return JSON.parse(get('later')) || {}; } catch (e) { 
 const ckey = c => (c.dataset.ask ? 'prompt' : c.dataset.n ? 'nh' : 'ask') + ' ' + ((c.querySelector('.m') || {}).textContent || '').split(' · ').filter(s => !/^\d+[smhd]$/.test(s)).join(' · ');
 function csig(c) {
   const x = c.cloneNode(true);
-  x.querySelectorAll(':scope>p:first-child, .cd, .st, .as, .lat').forEach(e => e.remove());
+  x.querySelectorAll(':scope>summary, :scope>p:first-of-type, .cd, .st, .as, .lat').forEach(e => e.remove());
   let h = 0;
   for (const ch of x.textContent.replace(/\b\d+[smhd]\b/g, '') + ((x.querySelector('[name=id]') || {}).value || '')) h = Math.imul(h, 31) + ch.charCodeAt(0) | 0;
   return (h >>> 0).toString(36);

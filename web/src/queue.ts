@@ -11,10 +11,10 @@ const none = '<span class=m>none</span>', all = '<span class="tag m">all fleets<
 const list = (v: string[], sep = ', ') => (v.length ? esc(v.join(sep)) : none);
 
 /** Ask `a`'s answer form: option buttons (recommended first) and a free-text box. */
-export function answer(d: { live: boolean; mtime: string }, a: Ask, send: string): string {
+export function answer(d: { live: boolean; mtime: string }, a: Ask, send: string, id = ''): string {
   const opts = a.options.map((o, i) => [o, i + 1] as const).sort((x, y) => +(x[1] !== a.recommend) - +(y[1] !== a.recommend));
   const btns = opts.map(([o, n]) => `<button name=choice value=${n}>${n}. ${esc(o)}${n === a.recommend ? ' <small>(recommended)</small>' : ''}</button>`).join('');
-  return `${form(d)}${hidden('answer', a.fleet, d.mtime)}<input type=hidden name=id value="${esc(a.id)}"><input name=text aria-label=answer placeholder="or type an answer"><button>${send}</button>${btns}</form>`;
+  return `${form(d, id && ` id="${id}"`)}${hidden('answer', a.fleet, d.mtime)}<input type=hidden name=id value="${esc(a.id)}"><input name=text aria-label=answer placeholder="or type an answer"><button>${send}</button>${btns}</form>`;
 }
 
 /** #517: an open ask's question and, asked in a thread, `asked in <title> · <id>` (a tap opens it, serve.js). */
