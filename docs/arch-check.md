@@ -41,6 +41,15 @@ pattern = "run: exit 1"
 paths = [".github/workflows/*.yml"]
 reason = "a failing step says why"
 
+# `ignore_case = true` matches the pattern in any case (#806: `Codex` and `CODEX_HOME` as well as `codex`).
+[[ban]]
+pattern = "codex"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/providers/**"]
+reason = "core never names a provider"
+comments = true
+ignore_case = true
+
 # Size limits per glob. A file or function over one fails unless the baseline lists it at that size or more,
 # so only new or grown offenders fail.
 [[size]]

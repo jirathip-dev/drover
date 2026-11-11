@@ -79,6 +79,18 @@ struct Ban {
     reason: String,
     #[serde(default)]
     comments: bool,
+    #[serde(default)]
+    ignore_case: bool,
+}
+
+impl Ban {
+    fn hits(&self, line: &str) -> bool {
+        if self.ignore_case {
+            line.to_lowercase().contains(&self.pattern.to_lowercase())
+        } else {
+            line.contains(&self.pattern)
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -157,10 +169,7 @@ pub fn check(
         for (i, l) in lines.iter().enumerate() {
             let at = format!("{p}:{}", i + 1);
             let comment = slashes && l.trim_start().starts_with("//");
-            for b in bans
-                .iter()
-                .filter(|b| l.contains(&b.pattern) && (b.comments || !comment))
-            {
+            for b in bans.iter().filter(|b| b.hits(l) && (b.comments || !comment)) {
                 bad.push(format!("{at}: `{}` is banned here: {}", b.pattern, b.reason));
             }
             for (own, t) in own

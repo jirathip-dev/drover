@@ -1,6 +1,6 @@
 //! #732: Codex, as its ACP adapter `codex-acp` runs it (shed-acp lanes only): its login is the account folder's own
 //! (`CODEX_HOME`), its guard herdsman's hook in the session config (`codex-config.json`), its role `AGENTS.override.md`.
-use super::{hook_command, Credential, Dialect, Harness};
+use super::{hook_command, Accounts, Credential, Dialect, Provider, Surface};
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::json;
@@ -8,6 +8,7 @@ use std::io::Write;
 use std::path::Path;
 
 pub struct Codex;
+pub static PROVIDER: Codex = Codex;
 
 /// Codex's hooks speak Claude Code's protocol; its file edits are `apply_patch`, the patch in `command`.
 static DIALECT: Dialect = Dialect {
@@ -31,7 +32,16 @@ pub fn config(hook: &str) -> serde_json::Value {
     json!({"bypass_hook_trust": true, "hooks": {"PreToolUse": h, "PostToolUse": h, "Stop": h, "UserPromptSubmit": h}})
 }
 
-impl Harness for Codex {
+impl Provider for Codex {
+    fn surface(&self) -> Surface {
+        Surface::Acp
+    }
+    fn vendor(&self) -> Option<&'static str> {
+        Some("openai")
+    }
+    fn brands(&self) -> &'static [&'static str] {
+        &["openai", "codex", "gpt"]
+    }
     fn sync(
         &self,
         ctx: &Ctx,
@@ -83,9 +93,12 @@ impl Harness for Codex {
             " && export CODEX_CONFIG=\"{{$HERDSMAN_CODEX$(tail -c +2 {cfg})\" && {{ cat {role}; cat AGENTS.md 2>/dev/null || true; }} > AGENTS.override.md"
         )
     }
-    /// `[accounts]` of provider `codex` (`harness::CONFIG_ENV`: `CODEX_HOME`).
     fn credential(&self) -> Credential {
-        Credential::Account("codex")
+        Credential::Account(Accounts {
+            provider: "codex",
+            config_env: "CODEX_HOME",
+            token_env: None,
+        })
     }
     fn login(&self) -> Option<&'static str> {
         Some("codex login")
