@@ -515,3 +515,34 @@ fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
     assert_eq!(code, 0, "{again}");
     assert!(!again.contains("issue-48"), "{again}");
 }
+
+/// #842: the budget's walk counts a hard-linked file and an APFS clone once each (no clone on a file system without
+/// them).
+#[test]
+fn the_budget_counts_a_hard_link_and_a_clone_once() {
+    use std::os::unix::fs::MetadataExt;
+    let c = ctx(&tmpdir("disk-links"), CONFIG);
+    let wt = lane(&c, 10, 7, "impl", "issue-7");
+    let a = wt.join("a");
+    std::fs::write(&a, vec![7u8; 1 << 20]).unwrap();
+    std::fs::hard_link(&a, wt.join("b")).unwrap();
+    let clone = if cfg!(target_os = "macos") {
+        "-c"
+    } else {
+        "--reflink=always"
+    };
+    let cloned = std::process::Command::new("cp")
+        .args([clone, &a.to_string_lossy(), &wt.join("c").to_string_lossy()])
+        .status()
+        .is_ok_and(|s| s.success());
+    if !cloned {
+        let _ = std::fs::remove_file(wt.join("c"));
+    }
+    let size = std::fs::metadata(&a).unwrap().blocks() * 512;
+    let r = Fake::default().reply("git -C", "").reply("herdr agent list", NO_AGENTS);
+    let mut out = vec![];
+    herdsman::check::budget(&c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+    let stamp = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
+    let total = stamp.split_whitespace().next();
+    assert_eq!(total, Some(size.to_string().as_str()), "cloned: {cloned}");
+}
