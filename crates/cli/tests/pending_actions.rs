@@ -290,8 +290,19 @@ fn a_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_
         stdout: "{ 40.00 3.00 2.00 }\n".into(),
         ..Out::default()
     };
+    let swapd = Out {
+        stdout: "  104     1 900.0 /usr/sbin/swapd\n".into(),
+        ..Out::default()
+    };
     let loaded = Fake {
-        replies: [vec![("sysctl -n vm.loadavg".to_string(), load)], fake("1").replies].concat(),
+        replies: [
+            vec![
+                ("sysctl -n vm.loadavg".to_string(), load),
+                ("ps -Ao".to_string(), swapd),
+            ],
+            fake("1").replies,
+        ]
+        .concat(),
         ..Fake::default()
     };
     let calm = fake("1");

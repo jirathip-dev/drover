@@ -92,7 +92,11 @@ pub fn refused(ctx: &Ctx, (fleet, n): (&str, u64), code: &str, why: &str) -> Res
         return Ok(false);
     };
     let soft = SOFT.contains(&code);
-    let load = code == "HOST_BUSY" && why.contains("load/cpu") && !why.contains("pressure") && !why.contains("swap");
+    let signals = why.split(" (top:").next().unwrap_or_default();
+    let load = code == "HOST_BUSY"
+        && signals.contains("load/cpu")
+        && !signals.contains("pressure")
+        && !signals.contains("swap");
     let reason = match () {
         () if load => LOAD.to_string(),
         () if soft => code.to_string(),
