@@ -43,7 +43,11 @@ fn pass_profile() {
         let args: &[&str] = if fast { &["drive", "--fast"] } else { &["drive"] };
         let (r0, c0, t0) = (herdsman::db::ROWS.load(Relaxed), cpu(), Instant::now());
         let (code, _) = run(&c, &f, args);
-        let (wall, cpu, rows) = (t0.elapsed().as_secs_f64(), cpu() - c0, herdsman::db::ROWS.load(Relaxed) - r0);
+        let (wall, cpu, rows) = (
+            t0.elapsed().as_secs_f64(),
+            cpu() - c0,
+            herdsman::db::ROWS.load(Relaxed) - r0,
+        );
         println!(
             "run {i} {:?}: exit {code} wall {wall:.2}s cpu {cpu:.2}s rows {rows} ({:.1} full-log reads of {len})",
             args,
