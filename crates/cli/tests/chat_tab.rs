@@ -303,8 +303,6 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     }
 }
 
-/// #833: a reply's file from a lane worktree of the thread's fleet is copied into the thread's folder and carried;
-/// a file outside the worktree root, the repo checkout and the thread's folder is still refused.
 #[test]
 fn a_reply_file_from_a_lane_worktree_is_copied_into_the_thread_folder() {
     let c = setup("chat-wt-file");

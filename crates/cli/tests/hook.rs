@@ -689,7 +689,6 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
         format!("cp x {c}/t6/a.png"),
         format!("mkdir -p {c}/t6/d && cp /w/a.png /w/b.png \"{c}/t6/d/\""),
         format!("echo hi > {c}/t6/n.txt"),
-        // #833: the folder itself as the copy's target.
         format!("cp /w/docs/design/a.png /w/docs/design/b.png {c}/t6/"),
         format!("cp /w/a.png \"{c}/t6\""),
     ] {
