@@ -1,0 +1,12 @@
+Decided: a pass marks a host down after any ssh/herdr call that ends 124 or 255, not only after a "connect to host" message
+Because: crates/core/src/hosts.rs:308
+Because: "One reachability probe per host per pass (cached for the pass), not one per worktree"
+Decided: drive's clean_merged never probes a merged lane's worktree on an off host or one whose last probe failed
+Because: crates/core/src/drive.rs:1957
+Decided: clean run inside a pass leaves disabled hosts alone; only an explicit herdsman clean sweeps them
+Because: crates/core/src/cli.rs:1774
+Rejected: new budget code for scope 3 — #835's Pass::until and the "past its budget; skipped" line already do it
+Rejected: matching more ssh error strings in refused() — a banner timeout and other proxy errors keep slipping past
+Check: on base plus commit 1, tick_dead_host fails at 1140 s on the Air; at head under 60 s and at most 2 calls
+Check: needs_fold_ops.rs is a staging build fix (#871 still called swift(), which #862 renamed to webview())
+Owner: a dead or switched-off host now costs the timer one short check per run, not hours
