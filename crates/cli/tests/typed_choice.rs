@@ -1,5 +1,3 @@
-//! #838: `answer --typed` takes an explicit choice (the owner's line is its evidence) and `--note`; an approve with a
-//! note is written under the issue's `## Amendments`; a typed answer is an `amend --basis`.
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
@@ -15,7 +13,6 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// Thread t1 holds design ask q1 on #60, then the owner's `line` in it.
 fn design_ask(name: &str, line: &str) -> herdsman::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     log(
@@ -33,7 +30,6 @@ fn design_ask(name: &str, line: &str) -> herdsman::Ctx {
     c
 }
 
-/// The body of the last `gh issue edit 60`.
 fn edited(r: &Fake) -> Option<String> {
     let calls = r.calls.borrow();
     let edit = calls.iter().rfind(|c| c.starts_with("gh issue edit 60 "))?;

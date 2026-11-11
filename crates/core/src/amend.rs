@@ -13,7 +13,7 @@ use std::io::Write;
 const SPEC_CHECKS: &[&str] = &["board-freeze"];
 
 /// Append `- **Amendment (<basis>)**: <text>` under the body's `## Amendments` (made once), log `amend`, then
-/// re-run the open PR's failed spec checks. `basis` must be an ask on this issue answered by the owner (typed too, or by
+/// re-run the open PR's failed spec checks. `basis` must be an ask on this issue answered by the owner (or by
 /// default); else `NO_DECISION`, before any `gh` call.
 pub fn amend(
     ctx: &Ctx,

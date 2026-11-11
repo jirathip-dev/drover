@@ -440,7 +440,6 @@ pub(crate) const TYPED: &str = "owner (typed)";
 
 /// #584: `herdsman answer --typed <line>`: the owner's words, accepted only when `line` is the owner's message in the
 /// ask's thread (its own, or the one its lane ask was put to the owner in) after the ask; else `NOT_TYPED`.
-/// #838: `choice` answers it with the line as evidence (none: the line is the answer); `note` goes with it.
 pub fn answer_typed(
     ctx: &Ctx,
     cfg: &Config,
@@ -555,7 +554,6 @@ pub fn answer(
 }
 
 /// `answer`; #541: a conductor's (`basis`) also posts its FYI line, and the owner may change one for `CHANGE`.
-/// #838: a typed answer's `note` is logged with the decision and sent with it.
 #[allow(clippy::too_many_arguments)]
 fn answer_with(
     ctx: &Ctx,
