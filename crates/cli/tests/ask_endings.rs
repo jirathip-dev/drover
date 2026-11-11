@@ -69,12 +69,12 @@ fn a_typed_answer_closes_the_ask_only_with_the_owners_exact_line_after_it_in_its
     said(&c, NOW - 100, "t1", "owner", "before the ask");
     thread_ask(&c, NOW - 90, "q1", "t1");
     said(&c, NOW - 80, "t2", "owner", "in another thread");
-    said(&c, NOW - 70, "t1", "conductor", "the conductor's line");
+    said(&c, NOW - 70, "t1", "orchestrator", "the orchestrator's line");
     said(&c, NOW - 60, "t1", "owner", "Ok as recommended then");
     for (line, why) in [
         ("before the ask", "before"),
         ("in another thread", "t2"),
-        ("the conductor's line", "no owner message"),
+        ("the orchestrator's line", "no owner message"),
         ("never said", "no owner message"),
     ] {
         let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "--typed", line]);
@@ -108,9 +108,9 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
     let (code, out) = run(
         &c,
         &Fake::default(),
-        &["ask", "withdraw", "sendmeter", "q2", "--by", "conductor-t2"],
+        &["ask", "withdraw", "sendmeter", "q2", "--by", "orchestrator-t2"],
     );
-    assert_eq!(code, 3, "only its own thread's conductor withdraws it: {out}");
+    assert_eq!(code, 3, "only its own thread's orchestrator withdraws it: {out}");
     let (code, out) = run(
         &c,
         &Fake::default(),
@@ -120,7 +120,7 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
             "sendmeter",
             "q1",
             "--by",
-            "conductor-t1",
+            "orchestrator-t1",
             "--for",
             "q2",
         ],
@@ -136,9 +136,9 @@ fn handoff(name: &str) -> herdsman::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     threads(&c, NOW - 200);

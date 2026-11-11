@@ -92,7 +92,12 @@ fn every_control_passes_the_audit_at_390px() {
             "#sys",
             "sysopen('notifications')".to_string(),
         ),
-        ("ui-conductor", "queue", "#sys", "sysopen('conductor')".to_string()),
+        (
+            "ui-orchestrator",
+            "queue",
+            "#sys",
+            "sysopen('orchestrator')".to_string(),
+        ),
         ("ui-appearance", "queue", "#sys", "sysopen('appearance')".to_string()),
         (
             "ui-sheet",

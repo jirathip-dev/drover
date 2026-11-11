@@ -228,11 +228,11 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
         None => ("herdsman".into(), plain(ev)),
     };
     // #386: `<repo> · <thread title>: <the reply's first line>`, or `… asks: <question>`; a tap opens the thread.
-    if let Some(t) = thread.and_then(|t| crate::conductor::find(&evs, t).ok()) {
+    if let Some(t) = thread.and_then(|t| crate::orchestrator::find(&evs, t).ok()) {
         let repo = if t.fleet == "all" { "all repos" } else { &t.fleet };
         let head = format!(
             "{repo} · {}",
-            crate::conductor::title(&evs, t.str("thread").unwrap_or_default())
+            crate::orchestrator::title(&evs, t.str("thread").unwrap_or_default())
         );
         let text = ev.str("text").and_then(|x| x.lines().find(|l| !l.trim().is_empty()));
         body = match ev.str("question") {

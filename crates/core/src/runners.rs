@@ -144,7 +144,7 @@ fn approved(events: &[Event], id: Option<&str>, verb: &str) -> bool {
     let yes = ask.and_then(|a| a.data["options"].get(0)?.as_str());
     let by = |e: &&Event| {
         e.str("by")
-            .is_some_and(|b| b != "default" && !b.starts_with("conductor-"))
+            .is_some_and(|b| b != "default" && !b.starts_with("orchestrator-"))
     };
     let decision = events
         .iter()

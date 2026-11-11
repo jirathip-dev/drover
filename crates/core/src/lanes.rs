@@ -15,7 +15,7 @@ pub struct Lane {
     /// Agent name, or the workspace label for an unnamed agent outside any fleet.
     pub name: String,
     pub issue: Option<u64>,
-    /// impl | rev | design | conductor, or `other` when herdsman did not spawn it.
+    /// impl | rev | design | orchestrator, or `other` when herdsman did not spawn it.
     pub role: String,
     pub harness: String,
     pub model: Option<String>,
@@ -40,7 +40,7 @@ pub struct Lane {
     pub root: Option<String>,
     /// #302: `on <entry> (<entries> resting until 18:40)` when a `fallback` entry carries on.
     pub resting: Option<String>,
-    /// #422: a conductor's chat thread (`t6`); with no pane it is `asleep`.
+    /// #422: an orchestrator's chat thread (`t6`); with no pane it is `asleep`.
     pub thread: Option<String>,
     /// #609: the runtime it was spawned in (`herdr` | `shed` | `shed-acp`), from its spawn: never the config's now.
     pub runtime: String,
@@ -67,7 +67,7 @@ pub fn join(
     }
     let (mut out, mut seen) = (vec![], BTreeSet::new());
     // #422: each thread's last `conductor-start`, by its agent (`conductor-<thread>`).
-    let starts = events.iter().filter(|e| e.kind == "conductor-start");
+    let starts = events.iter().filter(|e| e.kind == "orchestrator-start");
     let mut cs: BTreeMap<&str, &Event> = starts.filter_map(|e| Some((e.str("agent")?, e))).collect();
     for a in agents {
         let s = |k: &str| a[k].as_str().filter(|v| !v.is_empty());
@@ -105,7 +105,7 @@ pub fn join(
                 continue;
             }
         } else if let Some(e) = name.and_then(|n| cs.remove(n)) {
-            l = conductor(events, e, l);
+            l = orchestrator(events, e, l);
         } else {
             let inside = |d: &Path| {
                 ["cwd", "foreground_cwd"]
@@ -148,7 +148,7 @@ pub fn join(
             });
         }
     }
-    out.extend(cs.into_values().map(|e| conductor(events, e, Lane::default())));
+    out.extend(cs.into_values().map(|e| orchestrator(events, e, Lane::default())));
     for l in &mut out {
         let mark = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "lane-closed" | "lane-kept-dirty");
         let last = events.iter().rev().find(|e| mark(e) && e.str("agent") == Some(&l.name));
@@ -224,11 +224,11 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
 }
 
 /// #422: the conductor `e` started: role `conductor`, named `<thread title> · <thread>`, `asleep` with no pane.
-fn conductor(events: &[Event], e: &Event, l: Lane) -> Lane {
+fn orchestrator(events: &[Event], e: &Event, l: Lane) -> Lane {
     let (id, mut l) = (e.str("thread").unwrap_or_default(), from_spawn(e, l));
     let t = (events.iter()).find(|t| t.kind == "thread-new" && t.str("thread") == Some(id));
     l.name = format!("{} · {id}", t.and_then(|t| t.str("title")).unwrap_or_default());
-    (l.role, l.thread) = ("conductor".into(), Some(id.into()));
+    (l.role, l.thread) = ("orchestrator".into(), Some(id.into()));
     l.state = l.pane.as_ref().map_or("asleep".into(), |_| l.state);
     l
 }
@@ -247,7 +247,7 @@ pub fn group(all: &[Lane], changed: impl Fn(&Lane) -> u64) -> Groups<'_> {
             section(l),
             l.fleet.is_none(),
             l.fleet.clone(),
-            l.role != "conductor", // #422: a repo's conductors first
+            l.role != "orchestrator",
             std::cmp::Reverse(changed(l)),
         )
     });

@@ -395,7 +395,7 @@ local_stop = "~/ci/ci-runners.sh down --now"      # optional: the command that s
 ```
 
 The recipe's `runner_*` commands (assets/recipes/boat.toml) create, read and delete a VM and run its VM-side steps.
-The verbs, each logged `runners-<verb>`; a conductor runs them while its `runners` group is on, no other lane may:
+The verbs, each logged `runners-<verb>`; an orchestrator runs them while its `runners` group is on, no other lane may:
 
 - `herdsman runners status`: the health line (`9/9 online`: online VM runners of `slots × VMs`), each VM's state and
   each runner.
