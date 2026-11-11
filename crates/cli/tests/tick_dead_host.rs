@@ -1,6 +1,3 @@
-//! #877: a host whose ssh never connects, with 50 old worktrees on it: a tick pass costs it at most one bounded probe
-//! (an `off` one: none past it), reports its worktrees `host unreachable` without a connection each, and drive still
-//! starts work; a reachable `off` host is still cleaned when asked directly.
 mod common;
 use common::*;
 use herdsman::events::{append, Event};
@@ -11,8 +8,6 @@ use std::time::Duration;
 const NOW: u64 = 1_000_000;
 const PROBE: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true";
 
-/// Every call to the Air (but its reachability probe, when `probe_ok`) waits out its ssh connect timeout (or its limit,
-/// if shorter) on a virtual clock, then fails as ssh does when the host never answers its banner.
 struct Dead {
     f: Fake,
     probe_ok: bool,
@@ -63,7 +58,6 @@ fn setup(name: &str, air_cfg: &str) -> herdsman::Ctx {
         "air": {"tags": ["os:macos"], "home": "/Users/me", "probed": NOW, "seen": NOW, "up": true},
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
-    // 50 old lanes ran on the Air; their issues are merged.
     for n in 100..150u64 {
         let wt = format!("/Users/me/.herdr/worktrees/sendmeter/issue-{n}");
         let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("w9:p{n}"),
@@ -111,7 +105,6 @@ fn main_host() -> Fake {
 
 #[test]
 fn a_host_whose_ssh_never_connects_with_50_worktrees_costs_the_tick_under_a_minute() {
-    // The Air `off` and silent; then on, answering its probe and dropping right after.
     for (name, air_cfg, probe_ok) in [("dead-on", "", true), ("dead-off", "enabled = false\n", false)] {
         let c = setup(name, air_cfg);
         let r = Dead {
