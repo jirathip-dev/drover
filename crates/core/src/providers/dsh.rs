@@ -1,5 +1,5 @@
 //! dsh-TUI lanes (docs/dsh.md): a per-role patch layer, a pinned `dsh-tui` typed into the shell, a git pre-push hook.
-use super::{attempts, Credential, Harness};
+use super::{attempts, Credential, Provider};
 use crate::herdr;
 use crate::runner::{ok, Runner};
 use crate::spawn::Plan;
@@ -17,6 +17,7 @@ const LABEL: &str = "dsh-tui";
 const WIZARD: &[&str] = &["Welcome to dsh-TUI", "欢迎使用 dsh-TUI"];
 
 pub struct Dsh;
+pub static PROVIDER: Dsh = Dsh;
 
 /// `<config dir>/dsh/<profile>.patch.yml`, the lane's `--patch` overlay.
 fn patch_file(ctx: &Ctx, profile: &str) -> PathBuf {
@@ -37,7 +38,10 @@ fn patch(role: &str) -> String {
     )
 }
 
-impl Harness for Dsh {
+impl Provider for Dsh {
+    fn efforts(&self) -> &'static [&'static str] {
+        &["none"]
+    }
     fn sync(
         &self,
         ctx: &Ctx,

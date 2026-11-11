@@ -1,10 +1,5 @@
-//! #637: the token proxy on the main host (docs/hosts.md). A remote ACP lane's adapter gets the proxy's URL (an ssh
-//! tunnel back here) and a per-lane key; the proxy checks that key and forwards each model call to `[proxy] upstream`
-//! with the role's account token added here, so no Claude token ever reaches a remote host. Keys are kept as their
-//! sha256, live for `key_hours`, end with their lane, and `hosts keys revoke` ends one at once.
 use crate::config::{write_atomic, Config};
 use crate::events::{ends, fold, read, Event};
-use crate::harness::{BETA_HEADER, OAUTH_BETA};
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
@@ -261,20 +256,16 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
         q(&path),
         q(&token)
     );
-    let mut beta: Vec<&str> = get(BETA_HEADER)
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|b| !b.is_empty())
-        .collect();
-    if !beta.contains(&OAUTH_BETA) {
-        beta.push(OAUTH_BETA);
-    }
-    conf += &format!("header = \"{BETA_HEADER}: {}\"\n", beta.join(","));
-    for (k, v) in heads
+    let kept: Vec<_> = heads
         .iter()
-        .filter(|h| !DROP.contains(&h.0.as_str()) && h.0 != BETA_HEADER)
-    {
+        .filter(|h| !DROP.contains(&h.0.as_str()))
+        .cloned()
+        .collect();
+    let kept = match crate::providers::proxied() {
+        Some(px) => (px.headers)(&kept),
+        None => kept,
+    };
+    for (k, v) in &kept {
         conf += &format!("header = \"{k}: {}\"\n", q(v));
     }
     let tmp = ctx.state.with_file_name(format!(

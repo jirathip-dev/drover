@@ -59,7 +59,7 @@ impl Default for ProxyCfg {
     fn default() -> Self {
         ProxyCfg {
             port: 41990,
-            upstream: crate::harness::PROXY_UPSTREAM.into(),
+            upstream: crate::providers::proxied().map_or("", |p| p.upstream).into(),
             key_hours: 12,
         }
     }
@@ -167,7 +167,6 @@ pub enum RuntimeKind {
     #[default]
     Herdr,
     Shed,
-    /// #565: shed running each lane as an ACP session (`acp` defaults to `claude-acp`, `acp_policy` to `allow`).
     #[serde(rename = "shed-acp")]
     ShedAcp,
     /// #455: shed's old name, accepted for one release with a warning (and a doctor row).
@@ -194,7 +193,7 @@ impl Runtime {
             acp: self
                 .acp
                 .clone()
-                .or_else(|| acp.then(crate::harness::default_acp).flatten().map(Into::into)),
+                .or_else(|| acp.then(crate::providers::default_acp).flatten().map(Into::into)),
             policy: self
                 .acp_policy
                 .clone()
@@ -511,13 +510,13 @@ pub struct Role {
     /// #732: unset with `agent` set, the harness whose adapter that agent is.
     #[serde(default)]
     pub harness: String,
-    /// #732: the ACP agent id its shed-acp lanes run (`claude-acp`, `codex-acp`, …) over the runtime's `acp`.
+    /// #732: the ACP agent id its shed-acp lanes run (one `shed agents` lists) over the runtime's `acp`.
     pub agent: Option<String>,
     pub profile: Option<String>,
     pub model: Option<String>,
     /// Reasoning effort, mapped per harness (`harness::effort_ok`); `[limits].effort` when unset.
     pub effort: Option<String>,
-    /// Claude lanes: the account (`[accounts]` name) to run on, or an ordered fallback list.
+    /// Lanes on `[accounts]`: the account (`[accounts]` name) to run on, or an ordered fallback list.
     pub account: Option<String>,
     #[serde(default)]
     pub accounts: Vec<String>,
@@ -577,7 +576,7 @@ pub struct Limits {
     pub build_budget_gb: f64,
     /// #651: the scratch sweep runs on every enabled remote host too (`false`: this host only).
     pub sweep_remote: bool,
-    /// #536: where `herdsman clean` looks for stray Cargo build folders and Claude Code's per-worktree temp dirs.
+    /// #536: where `herdsman clean` looks for stray Cargo build folders and a provider's per-worktree temp dirs.
     pub stray_roots: Vec<String>,
     /// #168: `herdsman spawn` refuses `MEM_LOW` under this many GB of free + inactive memory.
     pub min_free_mem_gb: f64,
@@ -876,7 +875,7 @@ impl Config {
         if c.runtime.kind == RuntimeKind::Berth {
             eprintln!("herdsman: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
         }
-        let levels = crate::harness::EFFORTS;
+        let levels = crate::providers::EFFORTS;
         if let Some(e) = c.limits.effort.as_deref().filter(|e| !levels.contains(e)) {
             bail!("limits.effort: \"{e}\" must be one of {levels:?}");
         }
@@ -904,11 +903,18 @@ impl Config {
             );
         }
         let ch = &c.chat;
-        if let Some(h) = ch.harness.as_deref().filter(|h| !crate::harness::NAMES.contains(h)) {
-            bail!("chat.harness: \"{h}\" must be one of {:?}", crate::harness::NAMES);
+        if let Some(h) = ch
+            .harness
+            .as_deref()
+            .filter(|h| !crate::providers::lane_names().contains(h))
+        {
+            bail!(
+                "chat.harness: \"{h}\" must be one of {:?}",
+                crate::providers::lane_names()
+            );
         }
         if let (Some(h), Some(e)) = (&ch.harness, &ch.effort) {
-            if !crate::harness::efforts(h).contains(&e.as_str()) {
+            if !crate::providers::get(h).efforts().contains(&e.as_str()) {
                 bail!("chat.effort: harness {h} does not support effort \"{e}\"");
             }
         }
@@ -981,7 +987,7 @@ impl Config {
             }
             for (role, r) in &mut f.role {
                 let id = r.agent.as_deref();
-                match (id.map(|a| (a, crate::harness::of_agent(a))), r.harness.is_empty()) {
+                match (id.map(|a| (a, crate::providers::of_agent(a))), r.harness.is_empty()) {
                     (Some((a, None)), _) => bail!("fleet.{name}.role.{role}: agent {a}: no harness adapter guards it"),
                     (Some((_, Some(h))), true) => r.harness = h.into(),
                     (Some((a, Some(h))), false) if h != r.harness => {
@@ -997,10 +1003,10 @@ impl Config {
                 if role == "orch" || role.is_empty() || !role.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
                     bail!("fleet.{name}.role.{role}: a role name is letters, digits and `-`, not orch");
                 }
-                if !crate::harness::known().any(|h| h == r.harness) {
+                if !crate::providers::known().any(|h| h == r.harness) {
                     bail!(
                         "fleet.{name}.role.{role}: harness must be one of {:?}",
-                        crate::harness::NAMES
+                        crate::providers::lane_names()
                     );
                 }
                 if let Some(a) = r.account_list().iter().find(|a| !c.accounts.names.contains_key(*a)) {
@@ -1008,13 +1014,13 @@ impl Config {
                 }
                 let bad = |e: &&String| {
                     let (h, a) = e.split_once(':').unwrap_or((e, ""));
-                    !crate::harness::NAMES.contains(&h) || !a.is_empty() && !c.accounts.names.contains_key(a)
+                    !crate::providers::lane_names().contains(&h) || !a.is_empty() && !c.accounts.names.contains_key(a)
                 };
                 if let Some(e) = r.fallback.iter().find(bad) {
                     bail!("fleet.{name}.role.{role}: fallback '{e}' is not harness[:account] ([accounts])");
                 }
                 if let Some(e) = r.effort_or(&c.limits) {
-                    let ok = crate::harness::efforts(&r.harness);
+                    let ok = crate::providers::get(&r.harness).efforts();
                     if !levels.contains(&e.as_str()) {
                         bail!("fleet.{name}.role.{role}: effort \"{e}\" must be one of {levels:?}");
                     }
@@ -1045,8 +1051,8 @@ impl Config {
         let of = |r: &Role| r.agent.clone().or_else(|| run.clone());
         let p = (of(i), of(v));
         let p = (
-            p.0.as_deref().and_then(crate::harness::provider),
-            p.1.as_deref().and_then(crate::harness::provider),
+            p.0.as_deref().and_then(crate::providers::vendor_of_agent),
+            p.1.as_deref().and_then(crate::providers::vendor_of_agent),
         );
         if i.agent.is_none() && v.agent.is_none() || p.0.is_none() || p.0 != p.1 {
             return Ok(());
