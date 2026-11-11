@@ -1,0 +1,5 @@
+Decided: this round only merges origin/staging and refreshes the PR body's evidence to the new head; no code change
+Because: q1292
+Rejected: re-running only the evidence check at d501296 — the stale failed run stays in the rollup and staging had moved 41 commits
+Check: every check at a0d0861 is green, including evidence, with no stale failed run
+Owner: the PR now names the exact version tested; nothing in the board changed this round
