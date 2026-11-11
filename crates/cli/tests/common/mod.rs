@@ -313,7 +313,7 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
         config: cfgdir.join("fleet.toml"),
         state: dir.join("state/events.jsonl"),
         worktrees: dir.join("worktrees"),
-        hermes: dir.join("hermes"),
+        homes: [("hermes", dir.join("hermes"))].into(),
         exe: "/opt/herdsman/bin/herdsman".into(),
         now: 1_000_000,
         home: dir.join("home"),

@@ -1,5 +1,7 @@
 //! Claude Code: per-role settings.json (`PreToolUse` hook) + role.md; the kick goes in as argv.
-use super::{hook_command, Credential, Dialect, Harness, UsageMeter};
+mod meter;
+
+use super::{hook_command, Accounts, Credential, Dialect, Header, Provider, Proxy, Usage};
 use crate::config::Config;
 use crate::herdr;
 use crate::lanes::{chat, mask, strip};
@@ -14,20 +16,33 @@ use std::path::{Path, PathBuf};
 const SETTINGS: &str = include_str!("../../hooks/claude-settings.json");
 
 pub struct Claude;
+pub static PROVIDER: Claude = Claude;
 
-/// `|`-separated, case-insensitive substrings of Claude Code's usage-limit banner (`[accounts].cap_pattern` overrides).
-/// #637: the token proxy's default upstream, the beta header it adds the OAuth beta to, and the env an ACP adapter
-/// reads its proxy URL and lane key from.
-pub const PROXY_UPSTREAM: &str = "https://api.anthropic.com";
-pub const BETA_HEADER: &str = "anthropic-beta";
-pub const OAUTH_BETA: &str = "oauth-2025-04-20";
-pub const BASE_URL_ENV: &str = "ANTHROPIC_BASE_URL";
-pub const AUTH_TOKEN_ENV: &str = "ANTHROPIC_AUTH_TOKEN";
+const BETA_HEADER: &str = "anthropic-beta";
+const OAUTH_BETA: &str = "oauth-2025-04-20";
 /// #770: what `acp_profile` copies into a worktree (the lane's own files, never its work) and the folder it makes.
 pub const LOCAL_FILES: [&str; 2] = ["CLAUDE.local.md", ".claude/settings.local.json"];
 pub const LOCAL_DIR: &str = ".claude/";
 
-pub const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
+static PROXY: Proxy = Proxy {
+    upstream: "https://api.anthropic.com",
+    base_url_env: "ANTHROPIC_BASE_URL",
+    auth_token_env: "ANTHROPIC_AUTH_TOKEN",
+    headers,
+};
+
+fn headers(kept: &[Header]) -> Vec<Header> {
+    let sent = kept.iter().find(|h| h.0 == BETA_HEADER).map_or("", |h| h.1.as_str());
+    let mut beta: Vec<&str> = sent.split(',').map(str::trim).filter(|b| !b.is_empty()).collect();
+    if !beta.contains(&OAUTH_BETA) {
+        beta.push(OAUTH_BETA);
+    }
+    let head = (BETA_HEADER.to_string(), beta.join(","));
+    let rest = kept.iter().filter(|h| h.0 != BETA_HEADER).cloned();
+    std::iter::once(head).chain(rest).collect()
+}
+
+const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
 
 /// Claude Code's signed-out errors (#302), as `CAP_PATTERN`.
 const AUTH_PATTERN: &str = "please run /login|invalid api key|oauth token has expired|not logged in|api error: 401|\
@@ -66,7 +81,16 @@ pub fn root(ctx: &Ctx) -> PathBuf {
     ctx.config.with_file_name("claude")
 }
 
-impl Harness for Claude {
+impl Provider for Claude {
+    fn vendor(&self) -> Option<&'static str> {
+        Some("anthropic")
+    }
+    fn brands(&self) -> &'static [&'static str] {
+        &["claude", "anthropic"]
+    }
+    fn proxy(&self) -> Option<&'static Proxy> {
+        Some(&PROXY)
+    }
     fn sync(&self, ctx: &Ctx, role: &str, prompt: &str, profile: &str, usage: &str, out: &mut dyn Write) -> Result<()> {
         let dir = root(ctx).join(profile);
         std::fs::create_dir_all(&dir)?;
@@ -171,12 +195,12 @@ impl Harness for Claude {
         let [md, json] = LOCAL_FILES;
         format!(" && mkdir -p .claude && cp {settings} {json} && cp {role} {md}")
     }
-    /// #683: `[accounts]` of provider `claude` (`harness::CONFIG_ENV`).
     fn credential(&self) -> Credential {
-        Credential::Account("claude")
-    }
-    fn token_env(&self) -> Option<&'static str> {
-        Some("CLAUDE_CODE_OAUTH_TOKEN")
+        Credential::Account(Accounts {
+            provider: "claude",
+            config_env: "CLAUDE_CONFIG_DIR",
+            token_env: Some("CLAUDE_CODE_OAUTH_TOKEN"),
+        })
     }
     fn login(&self) -> Option<&'static str> {
         Some("claude /login")
@@ -187,8 +211,8 @@ impl Harness for Claude {
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         Some(&DIALECT)
     }
-    fn usage_meter(&self) -> Option<&'static dyn UsageMeter> {
-        Some(&super::claude_meter::Meter)
+    fn usage(&self) -> Option<&'static dyn Usage> {
+        Some(&meter::Meter)
     }
     fn usage_limited(&self, cfg: &Config, r: &dyn Runner, screen: &str, now: u64) -> Option<u64> {
         let pat = cfg.accounts.cap_pattern.as_deref().unwrap_or(CAP_PATTERN);

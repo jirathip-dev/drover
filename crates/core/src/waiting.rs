@@ -423,14 +423,20 @@ fn waits(
         "ready" if gh::ci(&checks) == "green" => {
             // #650: verify passed by drive's skip at this head says so.
             let skip = |k: &str| events.iter().any(|e| e.is(k, f, n) && e.str("sha") == Some(pushed));
-            let what = if done && skip("verify-skipped") {
-                "PASS · verify skipped · merging next pass"
+            let fast = pr["landing"] == "fast-first";
+            let unlabelled = (fc.merge_label.as_deref()).filter(|l| !fast && !gh::has_label(pr, l));
+            let what = if pr["isDraft"] == true {
+                "PASS · CI green · PR is a draft".into()
+            } else if let Some(l) = unlabelled {
+                format!("PASS · CI green · PR lacks label `{l}`")
+            } else if done && skip("verify-skipped") {
+                "PASS · verify skipped · merging next pass".into()
             } else if done && skip("verify-no-recipe") {
-                "PASS · verify no recipe · merging next pass"
+                "PASS · verify no recipe · merging next pass".into()
             } else {
-                "PASS · CI green · merging within 1 min"
+                "PASS · CI green · merging within 1 min".into()
             };
-            w("drive", what, s.last_ts, cmd("merge", ""))
+            w("drive", &what, s.last_ts, cmd("merge", ""))
         }
         "ready" => {
             let all = checks.as_array().map(Vec::as_slice).unwrap_or_default();
@@ -736,7 +742,7 @@ pub fn scan(
         // A lane started this pass, or a spawn still starting, is not gone yet.
         let settled = || {
             sp.is_some_and(|e| ctx.now >= e.ts + 120)
-                && !crate::drive::pending(ctx)
+                && !crate::drive::pending(ctx, cfg, r)
                     .iter()
                     .any(|p| p.fleet == s.fleet && p.issue == Some(s.issue))
         };
@@ -815,7 +821,12 @@ pub fn scan(
         let tried = mine.iter().rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
         let spawn = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("herdsman spawn "));
         if spawn && tried.is_some_and(|e| e.str("code") == Some("SPAWN_PENDING")) {
-            w.what = SLOT.into();
+            let by = crate::drive::held_by(ctx, cfg, r);
+            w.what = if by.is_empty() {
+                SLOT.into()
+            } else {
+                format!("{SLOT}: {by}")
+            };
         }
         // #724: a failed spawn backing off says when drive retries it, and why.
         if let Some(why) = spawn

@@ -1,11 +1,3 @@
-//! Harness adapters (profile + hook install, launch argv, kick, screen readers, transcript, logins): a new harness is
-//! one file plus its `NAMES` entry; core never names one, and any other name gets the generic fallbacks (#316).
-mod claude;
-mod claude_meter;
-mod codex;
-mod dsh;
-mod hermes;
-
 use crate::herdr;
 use crate::runner::Runner;
 use crate::spawn::Plan;
@@ -13,61 +5,138 @@ use crate::Ctx;
 use anyhow::Result;
 use serde_json::Value;
 use std::io::Write;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
-pub use claude::{
-    remove_tmp, root as profiles_root, AUTH_TOKEN_ENV, BASE_URL_ENV, BETA_HEADER, CAP_PATTERN, LOCAL_DIR, LOCAL_FILES,
-    OAUTH_BETA, PROXY_UPSTREAM,
-};
+pub use claude::{remove_tmp, root as profiles_root, LOCAL_DIR, LOCAL_FILES};
 pub use dsh::{install_pre_push, DSH_TUI_VERSION};
 pub use hermes::set_mcp;
 
-pub const NAMES: [&str; 3] = ["claude", "hermes", "dsh"];
+macro_rules! registry { ($($(#[$m:meta])* $n:ident),* $(,)?) => {
+    $($(#[$m])* mod $n;)*
+    static ALL: &[Entry] = &[$($(#[$m])* Entry { name: stringify!($n), provider: &$n::PROVIDER }),*];
+} }
+registry! { claude, hermes, dsh, codex, gemini, #[cfg(test)] fake }
 
-/// #732: harnesses a role reaches only through its ACP `agent` (no terminal lane, not offered as a `harness`).
-pub const ACP_ONLY: [&str; 1] = ["codex"];
+/// A registry entry: its name (the registry's ident) and the provider it derefs to.
+#[derive(Clone, Copy)]
+pub struct Entry {
+    pub name: &'static str,
+    pub provider: &'static dyn Provider,
+}
 
-/// #732: every harness name, `NAMES` then `ACP_ONLY`.
+impl Deref for Entry {
+    type Target = dyn Provider;
+    fn deref(&self) -> &Self::Target {
+        self.provider
+    }
+}
+
+/// How a provider is reached.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Surface {
+    Terminal,
+    Acp,
+    Listed,
+}
+
+/// Every provider, in registry order.
+pub fn all() -> impl Iterator<Item = Entry> {
+    ALL.iter().copied()
+}
+
+fn on(s: Surface) -> impl Iterator<Item = Entry> {
+    all().filter(move |p| p.surface() == s)
+}
+
+/// The lane providers a role's `harness` may name.
+pub fn lanes() -> impl Iterator<Item = Entry> {
+    on(Surface::Terminal)
+}
+
+/// #732: providers a role reaches only through its ACP `agent` (no terminal lane, not offered as a `harness`).
+pub fn acp_only() -> impl Iterator<Item = Entry> {
+    on(Surface::Acp)
+}
+
+/// The names a role's `harness` may take.
+pub fn lane_names() -> Vec<&'static str> {
+    lanes().map(|p| p.name).collect()
+}
+
+/// #732: every provider name `get` knows, the lanes then the ACP-only ones.
 pub fn known() -> impl Iterator<Item = &'static str> {
-    NAMES.into_iter().chain(ACP_ONLY)
+    lanes().chain(acp_only()).map(|p| p.name)
 }
 
-/// #732: each known ACP agent's model provider; a fleet's `rev` runs on another provider than its `impl`.
-pub const PROVIDERS: &[(&str, &str)] = &[
-    ("claude-acp", "anthropic"),
-    ("codex-acp", "openai"),
-    ("gemini-acp", "google"),
-];
-
-/// #732: ACP agent `id`'s model provider, if known.
-pub fn provider(id: &str) -> Option<&'static str> {
-    PROVIDERS.iter().find(|p| p.0 == id).map(|p| p.1)
+/// #732: ACP agent `id`'s model vendor, if known; a fleet's `rev` runs on another vendor than its `impl`.
+pub fn vendor_of_agent(id: &str) -> Option<&'static str> {
+    all().find(|p| p.acp() == Some(id)).and_then(|p| p.vendor())
 }
 
-/// #732: the harness whose adapter ACP agent `id` is (the one that guards it).
+/// #732: the provider whose adapter ACP agent `id` is (the one that guards it).
 pub fn of_agent(id: &str) -> Option<&'static str> {
     known().find(|h| get(h).acp() == Some(id))
 }
 
+/// #198: the names an AI co-author trailer carries.
+pub fn brands() -> impl Iterator<Item = &'static str> {
+    all().flat_map(|p| p.brands().iter().copied())
+}
+
+/// #637: the token proxy's provider: the first that has one.
+pub fn proxied() -> Option<&'static Proxy> {
+    all().find_map(|p| p.proxy())
+}
+
 /// Effort levels a role may set (`effort = "…"`).
 pub const EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
-
-/// The levels `harness` takes: Claude `--effort` (`none` omits it), Hermes `--reasoning`; dsh none yet.
-pub fn efforts(harness: &str) -> &'static [&'static str] {
-    match harness {
-        "dsh" => &["none"],
-        _ => EFFORTS,
-    }
-}
 
 /// How a harness's lanes sign in: unknown, an `[accounts]` account of this provider (`access::pick`; #683: its env from
 /// `access::account_env`), or the harness's own login on the host.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Credential {
     None,
-    Account(&'static str),
+    Account(Accounts),
     Own,
 }
+
+/// What an `[accounts]` account is to its provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Accounts {
+    pub provider: &'static str,
+    pub config_env: &'static str,
+    pub token_env: Option<&'static str>,
+}
+
+/// #637: what the token proxy needs from the provider it fronts.
+pub struct Proxy {
+    pub upstream: &'static str,
+    pub base_url_env: &'static str,
+    pub auth_token_env: &'static str,
+    pub headers: fn(&[Header]) -> Vec<Header>,
+}
+
+/// A forwarded HTTP header: its lowercase name and its value.
+pub type Header = (String, String);
+
+/// A provider's own folder under `~`, its env var overriding it.
+pub struct Home {
+    pub env: &'static str,
+    pub default: &'static str,
+}
+
+impl Home {
+    /// The folder: its env var when set and not empty, else the default under `home`.
+    pub fn resolve(&self, home: &Path) -> PathBuf {
+        std::env::var_os(self.env)
+            .filter(|v| !v.is_empty())
+            .map_or_else(|| home.join(self.default), PathBuf::from)
+    }
+}
+
+/// A `herdsman doctor` row: passed, its mark when not, its text.
+pub type Row = (bool, char, String);
 
 /// A harness's hook protocol, as `herdsman hook` reads and answers it: whether it `sent` a call, the keys of a call's
 /// tool `input` (the first object wins), its `shell` and file-writing tools, its `hook_event_name` after a tool call
@@ -90,34 +159,76 @@ pub struct Dialect {
     pub again: Option<fn(&str) -> Value>,
 }
 
-/// Every harness by name, in `NAMES` order.
-pub fn all() -> impl Iterator<Item = (&'static str, &'static dyn Harness)> {
-    NAMES.into_iter().map(|n| (n, get(n)))
-}
-
 /// The hook dialects of every harness that has one, in `known` order.
 pub fn dialects() -> impl Iterator<Item = &'static Dialect> {
     known().filter_map(|h| get(h).hook_dialect())
 }
 
-/// (used %, reset epoch) of a usage window, either part unread.
-pub type Part = (Option<f64>, Option<u64>);
-
-/// A harness's usage meter for an `[accounts]` login (#258; #707: its status line only, no poll).
-pub trait UsageMeter: Sync {
-    /// The (5-hour, 7-day) parts of its status-line JSON (`herdsman statusline`).
-    fn status(&self, v: &Value) -> (Part, Part);
+/// A usage window: used %, reset epoch, either unread.
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub struct Window {
+    pub used: Option<f64>,
+    pub resets: Option<u64>,
 }
 
-/// The harness `[accounts]` are for: the first that runs on one.
-pub fn accounts() -> Option<&'static dyn Harness> {
-    NAMES
-        .iter()
-        .map(|n| get(n))
-        .find(|h| matches!(h.credential(), Credential::Account(_)))
+/// An account's limits: its session and its weekly window.
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub struct Limits {
+    pub session: Window,
+    pub week: Window,
 }
 
-pub trait Harness: Sync {
+/// A provider's usage meter for an `[accounts]` login (#258; #707: its status line only, no poll).
+pub trait Usage: Sync {
+    fn reading(&self, status_line: &Value) -> Limits;
+    fn cap_banner(&self) -> &'static str;
+}
+
+/// The provider `[accounts]` are for: the first lane provider that runs on one.
+pub fn accounts() -> Option<Entry> {
+    lanes().find(|h| matches!(h.credential(), Credential::Account(_)))
+}
+
+pub trait Provider: Sync {
+    fn surface(&self) -> Surface {
+        Surface::Terminal
+    }
+    fn vendor(&self) -> Option<&'static str> {
+        None
+    }
+    fn brands(&self) -> &'static [&'static str] {
+        &[]
+    }
+    fn proxy(&self) -> Option<&'static Proxy> {
+        None
+    }
+    fn efforts(&self) -> &'static [&'static str] {
+        EFFORTS
+    }
+    fn model_default(&self) -> Option<&'static str> {
+        None
+    }
+    fn home(&self) -> Option<Home> {
+        None
+    }
+    fn profile_files(&self, _ctx: &Ctx, _profile: &str) -> Vec<PathBuf> {
+        vec![]
+    }
+    fn hooks_allowed(
+        &self,
+        _ctx: &Ctx,
+        _cfg: &crate::config::Config,
+        _r: &dyn Runner,
+        _out: &mut dyn Write,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+    fn doctor(&self, _ctx: &Ctx, _cfg: &crate::config::Config, _r: &dyn Runner) -> Vec<Row> {
+        vec![]
+    }
+    fn scrubs_env(&self, _var: &str) -> bool {
+        false
+    }
     /// Write this harness's files for a `role`-family `profile` (hooks) with `prompt`'s role prompt.
     fn sync(
         &self,
@@ -186,10 +297,6 @@ pub trait Harness: Sync {
     fn credential(&self) -> Credential {
         Credential::None
     }
-    /// #708: the env var a token in the shell overrides its CLI's login with (generic: none).
-    fn token_env(&self) -> Option<&'static str> {
-        None
-    }
     /// The interactive login a person runs for it (setup panes, login hints).
     fn login(&self) -> Option<&'static str> {
         None
@@ -203,7 +310,7 @@ pub trait Harness: Sync {
         None
     }
     /// Its accounts' usage meter (generic: none).
-    fn usage_meter(&self) -> Option<&'static dyn UsageMeter> {
+    fn usage(&self) -> Option<&'static dyn Usage> {
         None
     }
     /// The pane shows a usage-limit banner: until when.
@@ -257,24 +364,18 @@ pub trait Harness: Sync {
 }
 
 struct Generic;
-impl Harness for Generic {}
+impl Provider for Generic {}
 
-/// #683 (q846): the one provider -> config-folder env table, the account source when no `account_env` is set.
-pub const CONFIG_ENV: &[(&str, &str)] = &[("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CODEX_HOME")];
-
-pub fn get(name: &str) -> &'static dyn Harness {
-    match name {
-        "claude" => &claude::Claude,
-        "hermes" => &hermes::Hermes,
-        "dsh" => &dsh::Dsh,
-        "codex" => &codex::Codex,
-        _ => &Generic,
-    }
+/// The provider a role's `harness` names; an unknown or listed-only one gets the generic fallbacks.
+pub fn get(name: &str) -> &'static dyn Provider {
+    all()
+        .find(|p| p.name == name && p.surface() != Surface::Listed)
+        .map_or(&Generic, |p| p.provider)
 }
 
-/// #565: a `shed-acp` runtime's default adapter: the first harness's that runs its hooks.
+/// #565: a `shed-acp` runtime's default adapter: the first lane provider's that runs its hooks.
 pub fn default_acp() -> Option<&'static str> {
-    all().find_map(|h| h.1.acp())
+    lanes().find_map(|h| h.acp())
 }
 
 /// The herdsman hook's command line, as Claude settings and Hermes config/allowlist name it.
