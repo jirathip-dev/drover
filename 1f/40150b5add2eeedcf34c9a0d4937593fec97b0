@@ -1,0 +1,14 @@
+Decided: an orchestrator's extend --basis records one extend ask ([one more round] / [park]) and answers it through orchestrator_answer, so #541's FYI, [change] and choice row are reused as they are
+Because: "the card goes to the owner as a choice row with the conductor's pick recommended"
+Decided: that ask's [park] (the owner's [change] within 30 min, or a tap on the choice row) runs the same park as `park --by owner`
+Because: "For an extend, [change] parks the issue (`park --by owner`)"
+Decided: design and architect asks join lane asks in orchestrator_answer; a typed answer counts the orchestrator's own repo thread as a design ask's thread
+Because: crates/core/src/lib.rs:396
+Decided: extend run in an orchestrator thread with neither --typed nor --basis is refused OWNER_ASK and put to the owner, as answer without --basis is
+Because: "Every other owner-only verb is unchanged"
+Decided: the needs-human check moved into gate::held so an orchestrator's extend reports NOT_NEEDS_HUMAN before any typed or basis check
+Because: crates/core/src/gate.rs:1080
+Rejected: a new chat card kind for the extend FYI — the existing change row already re-answers an ask, so a recorded ask needs no board change
+Rejected: keeping the moved park and needs-human comments — arch-check fails moved comment lines, so their reasons stay in git history
+Check: crates/cli/tests/orchestrator_reviews.rs covers acceptance 1-5 through the real CLI and the chat tab's [change] row
+Owner: Your orchestrator can now approve, revise or reject designs and grant one more round when you say so in its thread, or on its own when the spec settles it, with 30 minutes for you to change it.
