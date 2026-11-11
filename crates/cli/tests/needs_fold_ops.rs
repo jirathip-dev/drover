@@ -67,8 +67,7 @@ const TAPS: &str = "window.ts = []; const t0 = toast; toast = (m, s) => (ts.push
 
 #[test]
 fn folded_main_buttons_post_their_op_in_webkit() {
-    if !cfg!(target_os = "macos") || std::process::Command::new("swift").arg("--version").output().is_err() {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let _lock = ui_lock();
@@ -76,19 +75,11 @@ fn folded_main_buttons_post_their_op_in_webkit() {
     for w in ["390", "1440"] {
         let (c, url, cookie) = board(&format!("needs871-{w}"));
         let png = shots.join(format!("needs-fold-ops-{w}.png"));
-        let o = swift()
+        let o = webview()
             .env("HERDSMAN_COOKIE", &cookie)
             .env("HERDSMAN_WAIT", "9")
             .env("HERDSMAN_PRE", PRE)
-            .args([
-                concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
-                &url,
-                w,
-                "queue",
-                "scene",
-                png.to_str().unwrap(),
-                TAPS,
-            ])
+            .args([&url, w, "queue", "scene", png.to_str().unwrap(), TAPS])
             .output()
             .unwrap();
         let out = String::from_utf8_lossy(&o.stdout);
