@@ -136,7 +136,10 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
         (freed[0].data["lanes"].clone(), freed[0].data["bytes"].as_u64()),
         (json!(["sendmeter-impl-8"]), Some(4096))
     );
-    let stamp = || std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
+    let stamp = || {
+        let s = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
+        s.lines().next().unwrap().to_string()
+    };
     assert_eq!(stamp(), format!("8192 {}", c.now));
 
     // Half a block: #7 goes too, the working #9 keeps 4096 → still over.
@@ -151,7 +154,43 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
         out.starts_with("REFUSED DISK_BUDGET: worktrees 0.0 GB > 0.0000019"),
         "{out}"
     );
+    let why = format!(
+        "; measured {} 0.0 GB (build folders aside); largest: {} 0.0 GB, ",
+        c.worktrees.display(),
+        busy.display()
+    );
+    assert!(out.contains(&why), "{out}");
     assert!(!r.called("herdr worktree"), "nothing created");
+}
+
+#[test]
+fn a_missing_root_counts_zero() {
+    let d = tmpdir("disk-gone");
+    let gone = d.join("Volumes/NVMe/herdsman");
+    let roots = format!(
+        "roots = [\"{}\", \"{}\"]",
+        gone.display(),
+        d.join("worktrees").display()
+    );
+    let cfg = format!("{CONFIG}worktree_budget_gb = 0.000001\n\n[hosts.mini]\n{roots}\n");
+    let c = ctx(&d, &cfg);
+    let wt = lane(&c, 10, 7, "impl", "issue-7");
+    build(&wt, "src", 4096);
+    let r = Fake::default().reply("git -C", "").reply("herdr agent list", NO_AGENTS);
+    let mut out = vec![];
+    herdsman::check::budget(&c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "1", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    let why = format!(
+        "measured {} 0.0 GB, {} 0.0 GB (build folders aside); largest: {} 0.0 GB",
+        gone.display(),
+        c.worktrees.display(),
+        wt.display()
+    );
+    assert!(
+        out.starts_with("REFUSED DISK_BUDGET: worktrees 0.0 GB") && out.contains(&why),
+        "{out}"
+    );
 }
 
 /// drive walks the worktrees first: over budget with nothing to free, the start is refused and the pass stops.
@@ -569,4 +608,33 @@ fn over_budget_frees_waiting_lanes_longest_waiting_first() {
     let freed = events(&c, "budget-freed");
     assert_eq!(freed.len(), 2);
     assert_eq!(freed[1].str("reason"), Some("freed 0.0 GB from sendmeter-impl-7"));
+}
+
+#[test]
+fn the_budget_counts_a_hard_link_and_a_clone_once() {
+    use std::os::unix::fs::MetadataExt;
+    let c = ctx(&tmpdir("disk-links"), CONFIG);
+    let wt = lane(&c, 10, 7, "impl", "issue-7");
+    let a = wt.join("a");
+    std::fs::write(&a, vec![7u8; 1 << 20]).unwrap();
+    std::fs::hard_link(&a, wt.join("b")).unwrap();
+    let clone = if cfg!(target_os = "macos") {
+        "-c"
+    } else {
+        "--reflink=always"
+    };
+    let cloned = std::process::Command::new("cp")
+        .args([clone, &a.to_string_lossy(), &wt.join("c").to_string_lossy()])
+        .status()
+        .is_ok_and(|s| s.success());
+    if !cloned {
+        let _ = std::fs::remove_file(wt.join("c"));
+    }
+    let size = std::fs::metadata(&a).unwrap().blocks() * 512;
+    let r = Fake::default().reply("git -C", "").reply("herdr agent list", NO_AGENTS);
+    let mut out = vec![];
+    herdsman::check::budget(&c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+    let stamp = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
+    let total = stamp.split_whitespace().next();
+    assert_eq!(total, Some(size.to_string().as_str()), "cloned: {cloned}");
 }
