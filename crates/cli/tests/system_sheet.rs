@@ -1,7 +1,7 @@
 //! #440: the tab bar is queue · lanes · chat; [⚙] on every tab opens the System sheet, its dot red while a host card is
 //! red; every former Host, Events, [config] and [◐] control renders inside its section; the old links (`#host`,
 //! `#events`, `#config/<fleet>`, a stored `host` tab, a Queue card's [config]) land on `#system/<section>`. The real
-//! page in WebKit (tests/support/webview.swift), the board's parts painted as main.ts paints them (`system_frags`).
+//! page in WebKit (tests/support/webview.mjs), the board's parts painted as main.ts paints them (`system_frags`).
 mod common;
 use common::*;
 use herdsman::serve::Server;
@@ -53,18 +53,10 @@ fn measure(file: &std::path::Path, pre: &str, stored: &str, js: &str) -> Vec<f64
         ),
     )
     .unwrap();
-    let o = swift()
+    let o = webview()
         .env("HERDSMAN_TAB", stored)
         .env("HERDSMAN_WAIT", "1")
-        .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
-            run.to_str().unwrap(),
-            "390",
-            "-",
-            "horse",
-            png.to_str().unwrap(),
-            js,
-        ])
+        .args([run.to_str().unwrap(), "390", "-", "horse", png.to_str().unwrap(), js])
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&o.stdout);
@@ -72,17 +64,9 @@ fn measure(file: &std::path::Path, pre: &str, stored: &str, js: &str) -> Vec<f64
     out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect()
 }
 
-fn webkit() -> bool {
-    let ok = std::process::Command::new("swift").arg("--version").output().is_ok() && cfg!(target_os = "macos");
-    if !ok {
-        eprintln!("skipping: no swift/WebKit here");
-    }
-    ok
-}
-
 #[test]
 fn three_tabs_and_the_gear_on_each_with_the_dot_only_for_a_red_host() {
-    if !webkit() {
+    if no_webkit() {
         return;
     }
     // The nav's links, then per tab: [⚙] shown, its dot shown; then no [◐], no host or events tab, and the dot's label.
@@ -104,7 +88,7 @@ fn three_tabs_and_the_gear_on_each_with_the_dot_only_for_a_red_host() {
 
 #[test]
 fn every_former_control_is_in_its_section_and_the_gear_opens_at_agent_providers() {
-    if !webkit() {
+    if no_webkit() {
         return;
     }
     let js = "document.querySelector('#sysb').click(); \
@@ -133,7 +117,7 @@ fn every_former_control_is_in_its_section_and_the_gear_opens_at_agent_providers(
 
 #[test]
 fn the_old_links_land_on_their_system_section() {
-    if !webkit() {
+    if no_webkit() {
         return;
     }
     let file = page("sys-routes", false);

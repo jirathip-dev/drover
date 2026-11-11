@@ -644,8 +644,7 @@ fn vector_horses_keep_a_coat_per_name() {
 /// WebKit is at hand; PNGs go to `$HERDSMAN_SNAPSHOTS` when set.
 #[test]
 fn lanes_and_sheet_fit_390px() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture("shots");
@@ -689,7 +688,6 @@ fn lanes_and_sheet_fit_390px() {
     let d = tmpdir("shots-png");
     let file = d.join("page.html");
     std::fs::write(&file, drawn(&page[page.find("<!doctype").unwrap()..], &s, ADDR, "", T)).unwrap();
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     let scenes = [
         ("lanes-horse", "horse", String::new()),
         ("lanes-ascii", "ascii", String::new()),
@@ -747,16 +745,8 @@ fn lanes_and_sheet_fit_390px() {
         let png = dir.as_ref().map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(p).join(format!("{name}.png"))
         });
-        let o = swift()
-            .args([
-                script,
-                file.to_str().unwrap(),
-                "390",
-                "lanes",
-                mode,
-                png.to_str().unwrap(),
-                &js,
-            ])
+        let o = webview()
+            .args([file.to_str().unwrap(), "390", "lanes", mode, png.to_str().unwrap(), &js])
             .output()
             .unwrap();
         let out = String::from_utf8_lossy(&o.stdout);
@@ -775,8 +765,7 @@ fn lanes_and_sheet_fit_390px() {
 /// ≥ 1 block, [full conversation] changes what is drawn, and the page logs no error.
 #[test]
 fn chat_views_never_blank() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture("never-blank");
@@ -822,9 +811,8 @@ fn chat_views_never_blank() {
             json!(lane.to_string())
         );
         let png = d.join(format!("{agent}.png"));
-        let o = swift()
+        let o = webview()
             .args([
-                concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
                 file.to_str().unwrap(),
                 "390",
                 "lanes",
@@ -852,8 +840,7 @@ fn chat_views_never_blank() {
 /// and the next read, answered for a paired device (`X-Paired`), takes it away again; saying yes, none ever shows.
 #[test]
 fn one_401_never_latches_unpaired() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture("pair-recheck");
@@ -865,7 +852,6 @@ fn one_401_never_latches_unpaired() {
     let d = tmpdir("pair-recheck-png");
     let file = d.join("page.html");
     std::fs::write(&file, drawn(&page[page.find("<!doctype").unwrap()..], &s, ADDR, "", T)).unwrap();
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     // [Pair UI shown after the 401, shown after the next read, the "Pair this phone" line, pair/status asked].
     let scene = |paired: bool| {
         let js = format!(
@@ -878,10 +864,9 @@ fn one_401_never_latches_unpaired() {
             lane = json!(lane)
         );
         let png = d.join(format!("pair-{paired}.png"));
-        let o = swift()
+        let o = webview()
             .env("HERDSMAN_WAIT", "1")
             .args([
-                script,
                 file.to_str().unwrap(),
                 "390",
                 "lanes",
