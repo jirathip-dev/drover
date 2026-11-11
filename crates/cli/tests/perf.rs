@@ -86,12 +86,13 @@ fn ms(t: Instant) -> u128 {
     t.elapsed().as_millis()
 }
 
-/// `serve_on` (the real server: socket, sampler, watcher) on this fixture, as `herdsman serve` runs it; its address.
+/// `serve_on` (the real server: socket, sampler, watcher) on this fixture, as `herdsman serve` runs it; its address once it answers.
 fn serve<R: Runner + 'static>(c: herdsman::Ctx, r: R) -> (&'static herdsman::Ctx, &'static R, std::net::SocketAddr) {
     let (c, r): (&'static herdsman::Ctx, &'static R) = (Box::leak(Box::new(c)), Box::leak(Box::new(r)));
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     std::thread::spawn(move || herdsman::serve::serve_on(c, r, l, false));
+    get(addr, "/sw.js");
     (c, r, addr)
 }
 
