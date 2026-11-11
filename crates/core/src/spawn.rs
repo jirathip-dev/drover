@@ -18,7 +18,7 @@ pub fn role_prompt(role: &str) -> &'static str {
         "impl" => include_str!("../roles/impl.md"),
         "design" => include_str!("../roles/design.md"),
         "architect" => include_str!("../roles/architect.md"),
-        "conductor" => include_str!("../roles/conductor.md"),
+        "orchestrator" => include_str!("../roles/orchestrator.md"),
         "lesson" => include_str!("../roles/lesson.md"),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
@@ -153,7 +153,7 @@ pub struct Plan {
     pub title: String,
     /// #302: the card's `on <entry> (<entries> resting until` and that time, when a `fallback` entry carries on.
     pub resting: Option<(String, u64)>,
-    /// #355: a conductor's harness session id, and whether to resume it (`Harness::resumes`).
+    /// #355: an orchestrator's harness session id, and whether to resume it (`Harness::resumes`).
     pub session: Option<(String, bool)>,
     /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `ANTHROPIC_AUTH_TOKEN`).
     pub lane_key: Option<String>,

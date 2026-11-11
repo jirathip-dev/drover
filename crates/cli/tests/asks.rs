@@ -78,7 +78,7 @@ fn ask_answer_round_trip_prompts_the_asker_once() {
         .reply("herdr agent prompt", "")
         .reply("herdr pane send-keys", "")
         .reply("herdr agent wait", "");
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "2", "--by", "conductor"]);
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "2", "--by", "orchestrator"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         r.called("herdr agent prompt sendmeter-impl-36 DECISION q1: no, trim"),
@@ -89,7 +89,7 @@ fn ask_answer_round_trip_prompts_the_asker_once() {
     let dec = &kinds(&c, "decision")[0];
     assert_eq!(
         (dec.str("id"), dec.str("choice"), dec.str("by")),
-        (Some("q1"), Some("no, trim"), Some("conductor"))
+        (Some("q1"), Some("no, trim"), Some("orchestrator"))
     );
     assert_eq!(run(&c, &Fake::default(), &["asks"]).1, "", "answered asks are closed");
     assert!(run(&c, &Fake::default(), &["asks", "--all"])
