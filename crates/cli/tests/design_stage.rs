@@ -591,7 +591,7 @@ fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
 #[test]
 fn a_design_brief_takes_the_medium_and_path_the_issue_names() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("design-medium", "");
+    let (c, _sh) = setup("design-medium", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -611,7 +611,7 @@ fn a_design_brief_takes_the_medium_and_path_the_issue_names() {
         "git -C {w} diff --name-only {HEAD} {HEAD} -- docs/design apple/design/x"
     )));
     assert_eq!(state(&c, 12), "design-review");
-    let c = setup("design-medium-html", "");
+    let (c, _sh) = setup("design-medium-html", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
