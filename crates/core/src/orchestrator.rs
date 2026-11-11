@@ -636,11 +636,7 @@ fn copy_in(ctx: &Ctx, cfg: &Config, t: &Event, p: &std::path::Path) -> Result<st
         .filter_map(|r| r.canonicalize().ok());
     let from = (p.canonicalize().ok()).filter(|f| f.is_file() && roots.clone().any(|r| f.starts_with(r)));
     let (Some(from), Some(name)) = (from, p.file_name()) else {
-        bail!(
-            "{}: not in the thread's folder, fleet {}'s worktrees or checkout",
-            p.display(),
-            t.fleet
-        );
+        bail!("{}: not in the thread folder, a worktree or the checkout", p.display());
     };
     let to = dir(ctx, cfg, id).join("files");
     std::fs::create_dir_all(&to)?;
