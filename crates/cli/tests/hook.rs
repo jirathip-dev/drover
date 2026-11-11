@@ -716,6 +716,52 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
     }
 }
 
+#[test]
+fn herdsman_verbs_and_quoted_text_write_nothing() {
+    let d = tmpdir("hook-837");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let (st, own) = (d.join("state"), d.join("state/orchestrator/t6"));
+    std::fs::create_dir_all(&own).unwrap();
+    let sh = |cwd: &Path, cmd: &str| {
+        orchestrator_hook(
+            &d,
+            json!({"tool_name": "Bash", "cwd": cwd, "tool_input": {"command": cmd}}),
+        )
+    };
+    for cwd in [&own, &st] {
+        for cmd in [
+            "herdsman queue herdsman rm 828",
+            "herdsman queue herdsman mv --after 827 828",
+            "herdsman queue herdsman add 830 > /dev/null",
+            "herdsman queue herdsman add 830 >/tmp/q.log 2>&1",
+            "herdsman queue herdsman ls | awk 'NR>1'",
+            "herdsman queue herdsman ls | awk \"NR>1 {print}\"",
+            "gh issue create --title 'queue rm' --body 'run herdsman queue herdsman rm 828 > out, then mv it'",
+        ] {
+            assert_eq!(sh(cwd, cmd), "", "{}: {cmd}", cwd.display());
+        }
+    }
+    let s = st.display();
+    for (cwd, cmd) in [
+        (&st, "herdsman queue herdsman ls > events.jsonl".to_string()),
+        (&own, format!("herdsman queue herdsman ls >> {s}/events.jsonl")),
+        (&own, format!("herdsman queue herdsman ls > \"{s}/events.jsonl\"")),
+        (
+            &own,
+            format!("herdsman queue herdsman rm 828 && mv /tmp/x {s}/events.jsonl"),
+        ),
+        (&own, format!("mv /tmp/x '{s}/events.jsonl'")),
+        (&st, "awk 'NR>1' a > events.jsonl".to_string()),
+        (&own, format!("sh -c 'rm {s}/events.jsonl'")),
+        (&own, format!("bash -c 'rm {s}/events.jsonl'")),
+        (&own, format!("bash -lc \"rm {s}/events.jsonl\"")),
+        (&own, format!("eval 'rm {s}/events.jsonl'")),
+        (&own, format!("xargs -I{{}} sh -c 'mv {{}} {s}/events.jsonl'")),
+    ] {
+        assert!(sh(cwd, &cmd).contains("is blocked"), "{}: {cmd}", cwd.display());
+    }
+}
+
 /// The hook's stdout for `call` (a pre-tool event) run as the conductor of thread t6, state under `d`.
 fn orchestrator_hook(d: &std::path::Path, mut call: serde_json::Value) -> String {
     call["hook_event_name"] = json!("PreToolUse");
@@ -1467,4 +1513,18 @@ fn impl_lane_never_edits_the_cap_file() {
     std::fs::write(cache.join("issue-sendmeter-25.json"), spec.to_string()).unwrap();
     assert_eq!(call("25", "Edit", json!({"file_path": "/w/ci/cap.toml"})), "");
     assert_eq!(bash("25", "sed -i '' 's/35500/36000/' ci/cap.toml"), "");
+}
+
+#[test]
+fn the_stop_hook_asks_for_the_turn_only_in_impl_lanes() {
+    let stop = |lane: Option<&str>, role: &str| hook_in(lane, role, json!({"hook_event_name": "Stop"}));
+    for lane in [None, Some("sendmeter:-:orchestrator"), Some("sendmeter:-:conductor")] {
+        assert_eq!(stop(lane, "orchestrator"), "", "{lane:?} ends its turn freely");
+    }
+    let out = stop(Some("sendmeter:24:impl"), "impl");
+    let v: Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(
+        (&v["decision"], &v["reason"]),
+        (&json!("block"), &json!(herdsman::hook::TURN_ASK))
+    );
 }

@@ -183,6 +183,29 @@ pub struct Host {
     pub free_mem_gb: Option<f64>,
     /// #234: the memory size in GB.
     pub mem_total_gb: Option<f64>,
+    /// #825: the 3 busiest processes herdsman did not start, `name cpu%`.
+    pub top: Vec<String>,
+}
+
+fn own_load(ps: &str) -> (f64, Vec<String>) {
+    let row = |l: &str| {
+        let mut w = l.split_whitespace();
+        let (pid, parent, cpu) = (
+            w.next()?.parse::<u64>().ok()?,
+            w.next()?.parse::<u64>().ok()?,
+            w.next()?,
+        );
+        let comm = w.collect::<Vec<_>>().join(" ");
+        let name = comm.rsplit('/').next().unwrap_or_default().to_string();
+        Some((pid, parent, cpu.parse::<f64>().ok()?, name))
+    };
+    let procs: Vec<_> = ps.lines().filter_map(row).collect();
+    let ours: Vec<u64> = (procs.iter().filter(|p| p.3 == "herdsman")).map(|p| p.0).collect();
+    let (own, mut other): (Vec<_>, Vec<_>) =
+        (procs.iter()).partition(|p| ours.contains(&p.0) || p.3 == "cp" && ours.contains(&p.1));
+    other.sort_by(|a, b| b.2.total_cmp(&a.2));
+    let top = other.iter().take(3).map(|p| format!("{} {:.0}%", p.3, p.2)).collect();
+    (own.iter().map(|p| p.2 / 100.0).sum(), top)
 }
 
 fn stdout(r: &dyn Runner, prog: &str, args: &[&str]) -> Option<String> {
@@ -236,7 +259,8 @@ pub fn sample(r: &dyn Runner) -> Host {
     let load = load.or_else(|| word(linux("cat", &["/proc/loadavg"]), 0));
     let ncpu = ncpu.or_else(|| word(linux("nproc", &[]), 0));
     let avail = || Some(word(linux("grep", &["MemAvailable", "/proc/meminfo"]), 1)? / 1_048_576.0);
-    let load_per_cpu = load.zip(ncpu.filter(|n| *n > 0.0)).map(|(l, n)| l / n);
+    let (own, top) = own_load(&stdout(r, "ps", &["-Ao", "pid=,ppid=,pcpu=,comm="]).unwrap_or_default());
+    let load_per_cpu = load.zip(ncpu.filter(|n| *n > 0.0)).map(|(l, n)| (l - own).max(0.0) / n);
     let size = stdout(r, "sysctl", &["-n", "hw.memsize"]).and_then(|s| s.trim().parse::<f64>().ok());
     let size = size.map(|b| b / 1_073_741_824.0);
     let size = size.or_else(|| Some(word(linux("grep", &["MemTotal", "/proc/meminfo"]), 1)? / 1_048_576.0));
@@ -247,6 +271,7 @@ pub fn sample(r: &dyn Runner) -> Host {
         load_per_cpu,
         free_mem_gb: mem_gb(&b).or_else(avail),
         mem_total_gb: size,
+        top,
     }
 }
 
@@ -295,7 +320,12 @@ pub fn admit(h: &Host, l: &Limits) -> Result<(), String> {
         why.push(format!("swap-out median {s} pages/2s > {}", l.swapout_rate));
     }
     if let Some(x) = h.load_per_cpu.filter(|x| *x > l.load_per_cpu) {
-        why.push(format!("load/cpu {x:.2} > {}", l.load_per_cpu));
+        let top = (!h.top.is_empty()).then(|| format!(" (top: {})", h.top.join(", ")));
+        why.push(format!(
+            "load/cpu {x:.2} > {}{}",
+            l.load_per_cpu,
+            top.unwrap_or_default()
+        ));
     }
     if why.is_empty() {
         Ok(())
