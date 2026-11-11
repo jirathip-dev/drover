@@ -1,0 +1,13 @@
+Decided: the manifest follows cooee#140's branch shape ([[places]] plus [permissions] places as kinds), the one its Manifest parser (deny_unknown_fields) reads
+Because: "The manifest's field names follow what cooee#140 merges; until then, the fixtures' shape."
+Decided: the blocks are built from the board's own queue_tab, needs_tab and API v1 events, so no engine state is derived twice
+Because: crates/server/src/serve/screens.rs:490
+Decided: one generic diff of block trees keyed by id makes every stream's ops; an unaddressable change sends a screen op
+Because: "a stream of `{seq, ops}` events (`merge`, `replace`, `remove`, insert) keyed by block id"
+Decided: chat cards are served at GET /screens/cards (and its stream); cooee's /plugin/card takes no card blocks yet, so herdsman posts nothing
+Rejected: posting to cooee's /plugin/card — staging's takes only {thread, text, options}, not a card block
+Decided: cooee runs the installed herdsman (`herdsman serve --addr 127.0.0.1:$PORT`) and is trusted by its COOEE_PLUGIN_TOKEN bearer
+Rejected: building herdsman in cooee's checkout — a second binary of another version on the same state log
+Decided: network names herdsman serve's own 127.0.0.1:7777 where the fixture said drover's 127.0.0.1:7878
+Check: tests compare each served screen's block skeleton and keys with cooee#125's fixtures, and the stream's ops turn the first answer into a fresh GET
+Owner: cooee's native app can now show herdsman's Queue, Events, asks and fleet settings, and act on them, straight from herdsman.
