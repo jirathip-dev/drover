@@ -9,8 +9,6 @@ use serde_json::json;
 
 const AIR_SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
 
-/// The main host's runner: a shell line over ssh to `air` runs here (the lane's worktree is a local folder), and
-/// `shed connect` over ssh to `air` reaches air's own shed (`OverSsh`).
 struct Air<'a>(OverSsh<'a>);
 
 impl<'a> Air<'a> {
@@ -50,7 +48,6 @@ impl Runner for Air<'_> {
 fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answers() {
     let (md, ld) = (tmpdir("paused-main"), tmpdir("paused-lane"));
     let (main, lane) = (ctx(&md, CONFIG), ctx(&ld, CONFIG));
-    // Lanes run on shed: this host's, and air's own (reached over ssh), where #12's lane lives.
     let (here, air) = (FakeShed::new(), FakeShed::new());
     here.attach(&main);
     air.lane("sendmeter-impl-12", "idle", "/x");

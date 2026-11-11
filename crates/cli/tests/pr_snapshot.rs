@@ -36,7 +36,7 @@ fn calm() -> Fake {
 #[test]
 fn a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet() {
     let c = ctx(&tmpdir("snap-one-call"), &CONFIG.replace("[limits]", ALPHA));
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     for n in [12, 13, 14, 15] {
         lane(&c, "sendmeter", n);
@@ -87,7 +87,7 @@ fn the_merge_gate_reads_checks_from_the_snapshot() {
 #[test]
 fn status_and_serve_make_no_gh_call() {
     let c = ctx(&tmpdir("snap-read-only"), CONFIG);
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     lane(&c, "sendmeter", 12);
     let r = calm().reply("gh api graphql", &open_prs(&[12]));
@@ -108,7 +108,7 @@ fn probe(status: &str, etag: &str) -> String {
 #[test]
 fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
     let c = ctx(&tmpdir("snap-etag"), CONFIG);
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     let ns: Vec<u64> = (1..=30).collect();
     for n in &ns {

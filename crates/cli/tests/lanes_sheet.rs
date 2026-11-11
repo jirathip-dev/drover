@@ -21,8 +21,6 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str, now: u64) 
     String::from_utf8_lossy(&s.respond(&r, now)).into_owned()
 }
 
-/// #771: Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every call is the Fake's, the
-/// lane runtime the server's, as `[runtime] kind = "shed"` makes it.
 struct OnShed(Fake, FakeShed);
 
 impl OnShed {
@@ -53,8 +51,6 @@ impl herdsman::runner::Runner for OnShed {
     }
 }
 
-/// Agents in every state across sendmeter, synergy and Others (#771: all on a fake shed); sendmeter-impl-14 is dead (log
-/// only).
 fn fixture(name: &str) -> (herdsman::Ctx, OnShed) {
     let c = ctx(&tmpdir(name), &two());
     let spawn = |fleet: &str, issue: u64, ts: u64, role: &str, agent: &str| {
@@ -81,7 +77,6 @@ fn fixture(name: &str) -> (herdsman::Ctx, OnShed) {
         r.1.lane(n, st, "/x");
         r.1.screen(n, screen);
     }
-    // Terminals no lane of the log claims, outside every fleet: Others.
     for (n, harness, st, cwd) in [
         ("side-project", "codex", "idle", "/home/me/side"),
         ("scratch", "claude", "working", "/home/me/scratch"),
@@ -528,7 +523,6 @@ fn pairing_codes_devices_and_prompt_events() {
         !herdsman::events::jsonl(&c.state).unwrap().contains("secret"),
         "no message text in the log"
     );
-    // ESC, Ctrl-C, DEL, CR and tab are refused; a leading `-` goes through verbatim as the prompt's text.
     for ctl in ["%1B%5B2J", "stop%03", "x%7F", "a%0Db", "a%09b"] {
         assert!(send(&cookie, ctl).contains("REFUSED BAD_VALUE: "), "{ctl}");
     }
@@ -832,7 +826,6 @@ fn chat_views_never_blank() {
     let d = json!({"role": "impl", "agent": "synergy-impl-7", "harness": "claude", "machine": "air", "host": "air"});
     append(&c.state, &Event::new(900_800, "synergy", Some(7), "spawn", d)).unwrap();
     let screen = "⏺ Bash(cargo test)\n  ⎿ ok\n> fix the test\n⏺ Fixed: the test passes.\n";
-    // The Air's own shed, reached by `shed connect` over ssh.
     let OnShed(f, sh) = r;
     let air = FakeShed::new();
     air.lane("synergy-impl-7", "working", "/x");

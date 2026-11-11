@@ -7,7 +7,6 @@ use serde_json::json;
 const T: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-12";
 
-/// sendmeter #12's impl lane (on shed, its pane its name) and, `pushed` seconds before now, its logged push.
 fn lane(name: &str, pushed: u64) -> (herdsman::Ctx, String, FakeShed) {
     let c = ctx(&tmpdir(name), CONFIG);
     let sh = FakeShed::new();
@@ -25,8 +24,6 @@ fn lane(name: &str, pushed: u64) -> (herdsman::Ctx, String, FakeShed) {
     (c, wt, sh)
 }
 
-/// shed runs the lane, reported `done`, in its worktree; git answers `status` and the unpushed count; the agent
-/// holds 270 MB.
 fn fake(sh: &FakeShed, wt: &str, status: &str, ahead: &str) -> Fake {
     sh.lane(LANE, "done", wt);
     with(wt, status, ahead)
@@ -66,7 +63,6 @@ fn a_done_pushed_lane_closes_after_the_delay() {
     assert_eq!(closed[0].data["agent"], LANE);
     assert_eq!(closed[0].data["freed_mb"], 270);
     assert!(std::path::Path::new(&wt).is_dir(), "the worktree stays");
-    // Closed by herdsman, shed no longer lists it: never a `lane-dead`.
     let r = with(&wt, "", "0\n");
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");

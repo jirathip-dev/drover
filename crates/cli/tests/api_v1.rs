@@ -40,7 +40,6 @@ fn golden(name: &str, mut v: Value) {
     );
 }
 
-/// sendmeter: #12 in work (a lane), #17 queued behind #12, #9 asking.
 fn logged(name: &str) -> herdsman::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(
@@ -75,8 +74,6 @@ fn logged(name: &str) -> herdsman::Ctx {
 
 const SCREEN: &str = "⏺ Bash(cargo test)\n  ⎿ ok\n";
 
-/// `logged`, herdr showing the impl lane working: #771: herdr-only, kept for the state golden (its lane's `runtime`
-/// and herdr's Services row) until #721 re-blesses it.
 fn herdr_fixture(name: &str) -> (herdsman::Ctx, Fake) {
     let list = agents(&[("sendmeter-impl-12", "working", "/x", "w1:p2")]);
     let r = Fake::default()
@@ -85,7 +82,6 @@ fn herdr_fixture(name: &str) -> (herdsman::Ctx, Fake) {
     (logged(name), r)
 }
 
-/// `logged`, shed showing the impl lane working.
 fn fixture(name: &str) -> (herdsman::Ctx, OnShed) {
     let r = OnShed::new(Fake::default());
     r.1.lane("sendmeter-impl-12", "working", "/x");

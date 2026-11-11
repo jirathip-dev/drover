@@ -9,8 +9,6 @@ const NOW: u64 = 1_000_000;
 const SAFE: &str = "sendmeter-impl-12";
 const RISKY: &str = "sendmeter-impl-14";
 
-/// #771: Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every call is the Fake's, the
-/// lane runtime the server's, as `[runtime] kind = "shed"` makes it.
 struct OnShed(Fake, FakeShed);
 
 impl OnShed {
@@ -41,7 +39,6 @@ impl herdsman::runner::Runner for OnShed {
     }
 }
 
-/// impl #12 (clean, pushed, PR #42 open) and impl #14 (dirty), both without a live pane.
 fn fixture(name: &str, paused: bool) -> (herdsman::Ctx, OnShed) {
     let cfg = CONFIG.replace(
         "integration = \"staging\"   # never main",

@@ -1,5 +1,3 @@
-//! #334 gate 2: the live board in WebKit against a real `serve` on a socket (#771: lanes on fake sheds, each with a
-//! Claude Code screen as its pane reads it: ANSI, CRLF, rules): the chat sheet of a local Claude lane with a session, an Air lane and a lane
 //! with no transcript; the ascii frames across a `/live` update.
 mod common;
 use common::*;
@@ -7,7 +5,6 @@ use herdsman::events::{append, Event};
 use serde_json::json;
 use std::path::Path;
 
-/// A Claude Code pane as its ANSI read (`--format ansi`) gives it.
 fn screen(prompt: &str, reply: &str) -> String {
     let rule = "─".repeat(100);
     [
@@ -41,7 +38,6 @@ fn spawn(c: &herdsman::Ctx, ts: u64, issue: u64, agent: &str, machine: Option<&s
     append(&c.state, &Event::new(ts, "sendmeter", Some(issue), "spawn", d)).unwrap();
 }
 
-/// The sheds a `board` serves from, alive while the test runs: their sockets go when it is dropped.
 struct Sheds(Vec<std::path::PathBuf>);
 
 impl Drop for Sheds {
@@ -50,8 +46,6 @@ impl Drop for Sheds {
     }
 }
 
-/// A real `serve` with three working Claude lanes: 12 (local, a session transcript under `home`), 13 (on the Air, its
-/// own shed over ssh) and 14 (local, no transcript); returns its URL, a paired cookie (`name=value`) and the sheds.
 fn board(name: &str, home: &Path) -> (herdsman::Ctx, String, String, Sheds) {
     let c = ctx(&tmpdir(name), CONFIG);
     spawn(&c, 900_100, 12, "sendmeter-impl-12", None);
@@ -64,7 +58,6 @@ fn board(name: &str, home: &Path) -> (herdsman::Ctx, String, String, Sheds) {
         json!({"type": "assistant", "timestamp": "2026-11-04T03:01:00Z", "message": {"content": [{"type": "text", "text": "Fixed: the test **passes** now."}]}}),
     ];
     std::fs::write(proj.join("s.jsonl"), said.map(|v| v.to_string()).join("\n") + "\n").unwrap();
-    // Served for the rest of the test: the server thread outlives this fn.
     let (sh, air): (&'static FakeShed, &'static FakeShed) = (
         Box::leak(Box::new(FakeShed::new())),
         Box::leak(Box::new(FakeShed::new())),

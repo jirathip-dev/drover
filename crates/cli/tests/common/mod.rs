@@ -759,9 +759,6 @@ pub const V1_PERMISSION: &str = "╭──────────────�
 /// #641: herdr's one saved machine profile for bazzite (`herdr machine list --json`).
 pub const BAZZITE: &str = r#"[{"id": "b1", "label": "bazzite"}]"#;
 
-/// #555: API v1's board on fake shed `r.1` (#771): sendmeter: #12's impl lane working, #9's rev lane blocked on a
-/// permission menu (each pane its lane's name); a setup terminal `claude B` on host bazzite; `f` answers the rest, and
-/// gh's writes succeed.
 pub fn v1_board_on(name: &str, f: Fake) -> (herdsman::Ctx, OnShed) {
     let cfg = format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}\n[hosts.bazzite]\nmachine = \"bazzite\"\n\n[[setup]]\nname = \"claude B\"\ncmd = \"claude /login\"\n");
     let c = ctx(&tmpdir(name), &cfg);
@@ -785,8 +782,6 @@ pub fn v1_board(name: &str) -> (herdsman::Ctx, OnShed) {
     v1_board_on(name, Fake::default())
 }
 
-/// #771: herdr-only (#721 deletes it with setup's herdr path): `f`, plus herdr's replies for the setup terminal on
-/// bazzite (setup terminals are herdr workspaces; `setup.rs` has no shed path).
 pub fn herdr_setup(f: Fake) -> Fake {
     f.reply("herdr --machine bazzite pane read", "Paste code here >\n")
         .reply("herdr machine list --json", BAZZITE)

@@ -193,7 +193,6 @@ fn tick_skips_lesson_for_a_young_or_quiet_fleet() {
     assert_eq!(skipped(&c)[0].str("why"), Some("under 2 FAIL verdicts this week"));
 }
 
-/// The fake for one spawn on shed, issue `n`'s spec as `title`.
 fn spawner(n: u64) -> Fake {
     Fake::default()
         .reply(
@@ -272,7 +271,6 @@ fn rules_file_is_in_impl_and_rev_briefs_and_missing_is_fine() {
         let wt = c.worktrees.join("sendmeter").join(dir);
         std::fs::create_dir_all(wt.join(".herdsman")).unwrap();
         std::fs::write(wt.join(".herdsman/rules.md"), rules).unwrap();
-        // The checkout spawn made: clean.
         let r = spawner(12).once(&format!("git -C {} status --porcelain", wt.display()), 0, "");
         let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", role]);
         assert!(code == 0 || code == 4, "{role}: {code} {out}");

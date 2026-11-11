@@ -1,7 +1,5 @@
 //! #376: lanes herdsman never logged: `spawn-started` before the harness starts, and each drive step adopts a
 //! lane-shaped orphan pane of a tracked issue (its verdict then recorded as any lane's), closes a stale one, and leaves
-//! an unmatched one to `check`'s `orphan-lane` alert. #771: lanes are shed terminals (`FakeShed`), another host's
-//! reached over ssh (`OverSsh`).
 mod common;
 use common::*;
 use herdsman::events::{append, fold, read, Event};
@@ -22,14 +20,12 @@ fn pr(head: &str) -> String {
         .to_string()
 }
 
-/// The fleet config with its lanes on a fake shed (`extra` appended first).
 fn shed_ctx(name: &str, extra: &str) -> (herdsman::Ctx, FakeShed) {
     let sh = FakeShed::new();
     let c = ctx(&tmpdir(name), &sh.config(&format!("{CONFIG}{extra}")));
     (c, sh)
 }
 
-/// Where shed's request `method` naming terminal `name` falls among all its requests.
 fn at(sh: &FakeShed, method: &str, name: &str) -> Option<usize> {
     let st = sh.lock();
     st.seen.iter().position(|(m, p)| m == method && p["name"] == name)
@@ -69,7 +65,6 @@ fn review(c: &herdsman::Ctx, verdict: &str) -> PathBuf {
 
 #[test]
 fn spawn_logs_spawn_started_before_the_harness_starts() {
-    // An ACP lane: shed's CLI starts its harness (`shed run --acp`), and that start fails.
     let sh = FakeShed::new();
     let cfg = CONFIG.replace(
         "harness  =  \"hermes\"    # toggled in tests",
@@ -80,7 +75,7 @@ fn spawn_logs_spawn_started_before_the_harness_starts() {
         sh.sock.display()
     );
     let mut c = ctx(&tmpdir("orphan-started"), &cfg);
-    c.exe = env!("CARGO_BIN_EXE_herdsman").into(); // the profiles' hook: ACP lanes start only guarded
+    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let f = fake()
         .reply("which shed", "/opt/shed/bin/shed\n")
@@ -111,7 +106,6 @@ fn spawn_logs_spawn_started_before_the_harness_starts() {
     );
 }
 
-/// A crash between `spawn-started` and `spawn`: the next fast step adopts the running terminal.
 #[test]
 fn a_crash_after_spawn_started_is_adopted_by_the_next_step() {
     let (c, sh) = shed_ctx("orphan-crash", "");
@@ -139,7 +133,6 @@ fn a_crash_after_spawn_started_is_adopted_by_the_next_step() {
     assert_eq!(kinds(&c, "spawn").len(), 1);
 }
 
-/// A finished review no spawn logged, its verdict at the PR head: adopted, recorded, then its terminal closed.
 #[test]
 fn a_finished_orphan_review_at_the_head_is_recorded_then_closed() {
     let (c, sh) = shed_ctx("orphan-review", "");
@@ -171,13 +164,11 @@ fn a_finished_orphan_review_at_the_head_is_recorded_then_closed() {
         "{out} {:?}",
         read(&c.state).unwrap()
     );
-    // Adopted (its harness read: `get`) before it is closed (`kill`, then `rm`).
     let (get, kill) = (at(&sh, "get", name).unwrap(), at(&sh, "kill", name).unwrap());
     assert!(kill > get, "{:?}", sh.methods());
     assert!(!sh.has(name), "removed");
 }
 
-/// A finished review whose verdict is for an old head: its unpushed work goes to wip/, the terminal closes, no verdict.
 #[test]
 fn a_stale_head_orphan_review_is_closed_not_recorded() {
     let (c, sh) = shed_ctx("orphan-stale", "");
@@ -211,7 +202,6 @@ fn a_stale_head_orphan_review_is_closed_not_recorded() {
     assert!(!sh.called("get", name), "never adopted: {:?}", sh.methods());
 }
 
-/// A merged issue's orphan terminal is stale too (lane-shaped by its folder alone).
 #[test]
 fn a_merged_issues_orphan_is_closed() {
     let (c, sh) = shed_ctx("orphan-merged", "");
@@ -227,7 +217,6 @@ fn a_merged_issues_orphan_is_closed() {
     assert!(sh.called("kill", "t7") && !sh.has("t7"), "{:?}", sh.methods());
 }
 
-/// A lane-shaped terminal of no tracked issue: drive leaves it, `check` alerts it once; a tracked one is not alerted.
 #[test]
 fn an_unmatched_pane_is_only_alerted() {
     let (c, sh) = shed_ctx("orphan-unmatched", "");
@@ -238,7 +227,6 @@ fn an_unmatched_pane_is_only_alerted() {
         "spawn-started",
         json!({"agent": "sendmeter-impl-12", "role": "impl", "pane": "sendmeter-impl-12"}),
     );
-    // No harness label: no harness detected in it, so never adopted.
     let labels = json!({"fleet": "sendmeter", "issue": "99", "role": "impl"});
     sh.add("sendmeter-impl-99", labels);
     sh.set("sendmeter-impl-99", |t| t["cwd"] = json!("/tmp/elsewhere"));
@@ -263,7 +251,6 @@ fn an_unmatched_pane_is_only_alerted() {
 
 const HOSTS: &str = "\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n";
 
-/// An orphan on another host (its shed over ssh) is adopted there, and its spawn names the host.
 #[test]
 fn a_remote_orphan_is_adopted_on_its_host() {
     let (c, sh) = shed_ctx("orphan-remote", HOSTS);
@@ -291,7 +278,6 @@ fn a_remote_orphan_is_adopted_on_its_host() {
     assert!(!sh.called("get", "sendmeter-impl-12"), "never adopted on this host");
 }
 
-/// #393: a runner that, while drive lists the remote host's lanes, logs `spawn-started` as a concurrent spawn does
 /// before it starts the harness (its `spawn` comes once the prompt is confirmed, after this pass).
 struct Racing<'a>(&'a OverSsh<'a>, &'a herdsman::Ctx, &'a str);
 

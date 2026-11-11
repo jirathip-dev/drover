@@ -11,7 +11,6 @@ const NOW: u64 = 1_000_000;
 const ADDR: &str = "127.0.0.1:7777";
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
 
-/// Hosts mini (this one) and bazzite, their lanes on shed: this host's server (returned, kept for the test's length).
 fn two_hosts(name: &str) -> (herdsman::Ctx, FakeShed) {
     let cfg = format!("{CONFIG}\n[hosts.mini]\ntags = [\"fast\"]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
     let c = ctx(&tmpdir(name), &cfg);
@@ -63,7 +62,6 @@ fn rows_are_appended_per_host_per_step() {
     // The fast step: this host, sampled now.
     let (code, out) = run(&c, &over, &["drive", "--fast"]);
     assert_eq!(code, 0, "{out}");
-    // The 5-minute survey: the remote host (its shed reached over ssh), from the same probe placement uses.
     survey(&c, &cfg, &sh.on(&over), false);
     let rows = history(&c);
     let hosts: Vec<(&str, Option<f64>)> = rows.iter().map(|r| (r.host.as_str(), r.load_cpu)).collect();

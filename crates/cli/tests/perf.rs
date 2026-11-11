@@ -37,13 +37,11 @@ impl Runner for Slow {
     fn sleep(&self, _: u64) {}
 }
 
-/// A fake shed that lives as long as the test binary (the served board's threads outlive the test).
 fn shed() -> &'static FakeShed {
     Box::leak(Box::new(FakeShed::new()))
 }
 
 /// 30 impl lanes, #1–#15 on mini and #16–#30 on bazzite, each idle with a pane and an unpushed worktree.
-/// Herdr-only, for #721 (#771 report): on shed, bazzite's lane reads are one `shed connect` each, not #337's one batch.
 fn fixture() -> (herdsman::Ctx, Slow) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let cfg = format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
@@ -399,7 +397,6 @@ fn big() -> (herdsman::Ctx, Fake, &'static FakeShed) {
     big_with(200)
 }
 
-/// `big` with `lanes` lanes (#560: 20, a busy fleet's), #771: on a fake shed.
 fn big_with(lanes: u64) -> (herdsman::Ctx, Fake, &'static FakeShed) {
     let c = ctx(&tmpdir("perf-big"), CONFIG);
     let sh = shed();

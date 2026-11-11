@@ -31,8 +31,6 @@ fn setup(name: &str, harness: &str) -> herdsman::Ctx {
     c
 }
 
-/// #771: `setup` on shed-acp (#608): the fleet's own `[fleet.sendmeter.runtime]` on `b`, its conductor signed in with
-/// account C (an ACP session runs under the lane guard, #565), the profiles synced with the real binary as their hook.
 fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     let d = tmpdir(name);
     let cfg = config("claude", &d).replace(
@@ -53,7 +51,6 @@ fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     c
 }
 
-/// #771: shed's CLI answers (`shed run --acp`, `shed send`); the installed ACP agent's command is `adapter`.
 fn acp(adapter: &[&str]) -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
     Fake::default()
@@ -62,7 +59,6 @@ fn acp(adapter: &[&str]) -> Fake {
         .reply("shed send", "")
 }
 
-/// The `shed run` and `shed send` calls `f` got, in order.
 fn shed_calls(f: &Fake) -> Vec<String> {
     let calls = f.calls.borrow();
     let ours = |c: &&String| c.starts_with("shed run") || c.starts_with("shed send");
@@ -135,7 +131,6 @@ fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
     );
     let thread = dir.join(".thread.md");
     let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
-    // The brief, then the kick pointing at the thread file, then the line: the session's first prompt.
     let first = format!(
         "shed send orchestrator-t1 {}\n\nThe thread so far is in {}, the last message new.\n\n[t1] owner: what should #12 cover?",
         brief.trim_end(),
@@ -168,13 +163,11 @@ fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
     );
     assert_eq!(code, 0, "{out}");
 
-    // Awake: the next message is typed into the same session.
     let f = acp(&["echo"]);
     let c2 = at(&c, NOW + 60);
     assert_eq!(run(&c2, &b.cli(&f), &["thread", "say", "t1", "scope"]).0, 0);
     assert_eq!(shed_calls(&f), ["shed send orchestrator-t1 [t1] owner: scope"]);
 
-    // Quiet under 30 min, or working: it stays up.
     let (code, out) = run(&at(&c, NOW + 60 + 29 * 60), &b.cli(&f), &["check"]);
     assert_eq!(code, 0, "{out}");
     b.set("orchestrator-t1", |t| t["reported"] = json!({"state": "working"}));
@@ -187,7 +180,6 @@ fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
     assert!(b.called("kill", "orchestrator-t1"), "{:?}", b.methods());
     assert_eq!(kinds(&c, "orchestrator-sleep")[0].str("why"), Some("idle"));
 
-    // Asleep: the next message starts a fresh session (shed's bridge resumes none) pointed at the thread so far.
     let f = acp(&["echo"]);
     assert_eq!(
         run(&at(&c, NOW + 3600), &b.cli(&f), &["thread", "say", "t1", "tests first"]).0,
@@ -210,8 +202,6 @@ fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
     );
 }
 
-/// herdr-only (#721 deletes it): a claude conductor in a herdr pane starts with its own session id and, asleep,
-/// resumes that session with the message itself as the kick.
 #[test]
 fn a_herdr_orchestrator_resumes_its_session() {
     let c = setup("orchestrator-resume", "claude");
@@ -259,8 +249,6 @@ fn a_herdr_orchestrator_resumes_its_session() {
     assert_eq!(kinds(&c, "orchestrator-start")[1].data["resumed"], json!(true));
 }
 
-/// herdr-only (#721 deletes it): a harness that can't resume its herdr session is pointed at the whole conversation
-/// instead (on shed-acp every start is fresh and pointed at it, above).
 #[test]
 fn a_harness_without_resume_gets_the_history_in_its_kick() {
     let c = setup("orchestrator-generic", "hermes");
@@ -286,7 +274,6 @@ fn a_harness_without_resume_gets_the_history_in_its_kick() {
     );
 }
 
-/// herdr-only (#721 deletes it). #397: herdr refuses an `agent start` argument with a control character (`invalid_agent_argument`): no conductor
 /// start or resume, nor any lane spawn, sends one, however many lines the thread has. (dsh's launch carries no kick.)
 #[test]
 fn no_harness_starts_an_agent_with_a_control_character_in_its_argv() {

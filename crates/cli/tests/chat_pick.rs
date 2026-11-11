@@ -21,8 +21,6 @@ fn config(extra: &str) -> String {
     )
 }
 
-/// #771: `config` on shed-acp (#608): the fleet's own runtime on `b`, its conductor signed in with account C (an ACP
-/// session runs under the lane guard, #565).
 fn acp_config(extra: &str, b: &FakeShed) -> String {
     let c = config(extra).replace("effort = \"high\"\n", "effort = \"high\"\naccount = \"C\"\n");
     format!(
@@ -31,7 +29,6 @@ fn acp_config(extra: &str, b: &FakeShed) -> String {
     )
 }
 
-/// A ctx on `acp_config`, the profiles synced with the real binary as their hook.
 fn acp_ctx(name: &str, extra: &str, b: &FakeShed) -> herdsman::Ctx {
     let mut c = ctx(&tmpdir(name), &acp_config(extra, b));
     c.exe = env!("CARGO_BIN_EXE_herdsman").into();
@@ -39,7 +36,6 @@ fn acp_ctx(name: &str, extra: &str, b: &FakeShed) -> herdsman::Ctx {
     c
 }
 
-/// shed's CLI answers (`shed run --acp`, `shed send`); the installed ACP agent runs `echo`.
 fn acp() -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
     Fake::default()
@@ -179,7 +175,6 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
     ));
 }
 
-/// herdr-only (#721 deletes it): a hermes thread (no ACP adapter) starts on hermes in a herdr pane.
 #[test]
 fn a_hermes_thread_starts_its_orchestrator_on_hermes() {
     let c = ctx(&tmpdir("pick-new-hermes"), &config("[chat]\nharness = \"claude\"\n"));
@@ -197,8 +192,6 @@ fn a_hermes_thread_starts_its_orchestrator_on_hermes() {
     assert_eq!((st.str("harness"), st.str("model")), (Some("hermes"), None));
 }
 
-/// herdr-only (#721 deletes it): each harness's herdr channel (`agent start`, `agent prompt`, `pane send-text`) carries
-/// the kick (on shed-acp the brief is the session's first prompt: tests/conductor.rs).
 #[test]
 fn the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread() {
     let notes = tmpdir("pick-notes").join("AGENTS.md");
@@ -246,7 +239,6 @@ fn the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread() {
     }
 }
 
-/// herdr-only (#721 deletes it): the restart on the pick resumes the same herdr session (`--resume`).
 #[test]
 fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
     let c = ctx(&tmpdir("pick-model"), &config(""));
@@ -334,7 +326,6 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it() {
         ),
         "{page}"
     );
-    // Only the thread harness's models and efforts.
     let res = req(&s, "/thread", "op=model&t=t1&model=gpt-9", &cookie);
     assert!(res.contains("REFUSED BAD_VALUE"), "{res}");
     let res = req(&s, "/thread", "op=model&t=t1&model=sonnet&effort=low", &cookie);
@@ -355,7 +346,6 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it() {
         show.ends_with("system: model sonnet · effort low from the next turn\n"),
         "{show}"
     );
-    // The conductor is awake: the next message closes it and starts a session on the pick.
     let first = f.count("shed run --acp");
     let f2 = acp();
     assert_eq!(run(&c, &b.cli(&f2), &["thread", "say", "t1", "next"]).0, 0);
@@ -369,7 +359,6 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it() {
     let start = calls.lines().find(|l| l.starts_with("shed run --acp")).unwrap();
     assert!(start.contains("ANTHROPIC_MODEL='sonnet'"), "{start}");
     assert_eq!(first, 1);
-    // Awake on the pick already: the message after is typed in, no restart.
     let f3 = acp();
     assert_eq!(run(&c, &b.cli(&f3), &["thread", "say", "t1", "again"]).0, 0);
     assert_eq!(kind(&c, "orchestrator-start").len(), 2);

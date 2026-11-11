@@ -4,7 +4,6 @@ use common::*;
 use herdsman::events::{read, Event};
 use serde_json::json;
 
-/// Issues 1-3 queued; #771: lanes run on a fake shed.
 fn fan(name: &str) -> (herdsman::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(
@@ -16,7 +15,6 @@ fn fan(name: &str) -> (herdsman::Ctx, FakeShed) {
     (c, sh)
 }
 
-/// The names of the lanes shed was asked to start, in order.
 fn started(sh: &FakeShed) -> Vec<String> {
     let runs = sh.all("run").into_iter();
     runs.map(|p| p["name"].as_str().unwrap_or_default().to_string())

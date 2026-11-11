@@ -90,7 +90,6 @@ fn groups_default_to_all_but_pause_and_set_and_name_only_known_groups() {
 
 #[test]
 fn the_orchestrator_brief_lists_the_fleets_groups() {
-    // #771: the conductor starts on shed, as an ACP session (its profile synced, its account's sign-in).
     let sh = FakeShed::new();
     let acp = format!(
         "account = \"C\"\n\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",

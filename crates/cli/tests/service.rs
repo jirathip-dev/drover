@@ -95,7 +95,7 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     };
     let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = api.local_addr().unwrap().to_string();
-    let sh = FakeShed::new(); // #771: lanes on shed, none live
+    let sh = FakeShed::new();
     sh.attach(&c);
     let r: &'static Lane = Box::leak(Box::new(Lane(Fake::default(), c.clone())));
     let sc = c.clone();
@@ -279,14 +279,14 @@ fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
             ),
         ),
         ("hermes", "exit 0".into()),
-        ("shed", "exit 0".into()), // #771: the lanes' runtime is on PATH
+        ("shed", "exit 0".into()),
     ];
     for (name, body) in tools {
         let p = bin.join(name);
         std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&p, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     }
-    let sh = FakeShed::new(); // #771: lanes on shed (the service's too), none live
+    let sh = FakeShed::new();
     sh.attach(&c);
     let pass = |r: &Fake| assert_eq!(run(&c, r, &["drive"]).0, 0);
     let host = || {

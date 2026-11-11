@@ -11,7 +11,6 @@ use std::process::{Command, Stdio};
 const NOW: u64 = 1_000_000;
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
 
-/// CONFIG on Claude, mini (this host) and bazzite (remote), both probed, lanes on shed (this host's server returned).
 fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let c = ctx(
@@ -32,7 +31,6 @@ fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     (c, sh)
 }
 
-/// A fresh lane on bazzite: its clone, worktree and files answer (its terminal is bazzite's shed's, `OverSsh`).
 fn remote_fake() -> Fake {
     Fake::default()
         .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
@@ -52,7 +50,6 @@ fn remote_fake() -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// The index in `r`'s calls of the first `shed connect` (over ssh) carrying a `method` request.
 fn shed_call_at(r: &Fake, method: &str) -> Option<usize> {
     let calls = r.calls.borrow();
     let at = calls.iter().enumerate().filter(|(_, c)| c.contains("'shed' 'connect'"));
@@ -62,8 +59,6 @@ fn shed_call_at(r: &Fake, method: &str) -> Option<usize> {
     at.zip(sent).find(|(_, (_, i))| i.contains(&want)).map(|((n, _), _)| n)
 }
 
-/// The lane's environment on bazzite as the spawn left it (the `export` line typed into its shed terminal): each var, a
-/// value naming a file the spawn wrote there pointing at that file's copy under `remote`.
 fn lane_env(r: &Fake, bazzite: &FakeShed, remote: &Path) -> BTreeMap<String, String> {
     let written: BTreeMap<String, String> = r
         .inputs
@@ -256,7 +251,6 @@ fn a_config_change_marks_a_live_remote_lane_rules_stale_until_respawned() {
     let (_, board) = run(&c, &r, &["board", "sendmeter"]);
     assert!(!board.contains("rules stale"), "{board}");
     let text = std::fs::read_to_string(&c.config).unwrap();
-    // bazzite's own (the last table before the runtime's).
     let deny = "deny_commands_add = [\"terraform apply\"]\n\n[runtime]";
     std::fs::write(&c.config, text.replacen("\n[runtime]", &format!("\n{deny}"), 1)).unwrap();
     let (_, board) = run(&c, &r, &["board", "sendmeter"]);

@@ -14,7 +14,6 @@ const ADDR: &str = "127.0.0.1:7777";
 const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
 const HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
-/// #771: the fleet's lanes run on a fake shed (`.1`).
 fn setup(name: &str, extra: &str) -> (herdsman::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), &format!("{CONFIG}{DESIGN}{extra}"));
     let sh = FakeShed::new();
@@ -126,7 +125,7 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
 #[test]
 fn a_design_lane_whose_only_untracked_file_is_its_claude_local_md_hands_off() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("design-claude-local", "");
+    let (c, _sh) = setup("design-claude-local", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -343,7 +342,6 @@ fn reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human(
     let c = ctx(&d, &cfg);
     let sh = FakeShed::new();
     sh.attach(&c);
-    // The lane's worktree on the issue branch (spawn makes it in a real one).
     let w = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(w.parent().unwrap()).unwrap();
     git(

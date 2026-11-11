@@ -8,7 +8,6 @@ use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
 
-/// A spawn's fake on a shed host (#771): the branch missing locally, `which shed` found; the lane is shed's terminal.
 fn fake() -> Fake {
     Fake::default()
         .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")

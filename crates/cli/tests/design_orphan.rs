@@ -9,7 +9,6 @@ use serde_json::json;
 const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
 const HEAD: &str = "5bf04afe07dae022b35684353f2040f9a37d33a6";
 
-/// #771: a ctx for `cfg` whose lanes run on a fake shed (no live lanes yet).
 fn sctx(name: &str, cfg: &str) -> (herdsman::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), cfg);
     let sh = FakeShed::new();
@@ -51,7 +50,6 @@ fn failed(c: &herdsman::Ctx, n: u64) {
     ev(c, n, 400, "lane-closed", d);
 }
 
-/// A calm or busy host (no spawn starts while busy), the PR at HEAD (lanes on `sctx`'s shed).
 fn fake(pressure: &str) -> Fake {
     let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": HEAD,
         "statusCheckRollup": []});

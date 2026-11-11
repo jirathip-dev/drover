@@ -79,7 +79,6 @@ fn dry_run_launches_pinned_dsh_tui_with_role_patch() {
     );
     assert_eq!(code, 0, "{out}");
     let p: Value = serde_json::from_str(&out).unwrap();
-    // The lane is shed terminal `<agent>`: each step a shed request (method, params).
     let cmd = |i: usize| -> (String, Value) {
         let w = p["commands"][i].as_array().unwrap();
         assert_eq!(w[0], "shed", "{w:?}");

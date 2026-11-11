@@ -5,8 +5,6 @@ use common::*;
 use herdsman::events::{append, read, Event};
 use serde_json::json;
 
-/// A Fake on which `spawn sendmeter 12 impl` starts a lane on the fake shed whose prompt never lands (exit 4); after the
-/// first start its worktree holds one unpushed commit, so each `--supersede` of it saves a `wip/` branch first.
 fn dying(c: &herdsman::Ctx) -> (FakeShed, Fake) {
     let sh = FakeShed::attached(c);
     sh.wait_ends("sendmeter-impl-12", "timeout");

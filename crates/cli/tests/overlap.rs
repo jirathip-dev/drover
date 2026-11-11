@@ -8,7 +8,6 @@ use herdsman::runner::{Out, Real, Runner};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
-/// git runs for real, the rest (gh; lanes on a fake shed) is scripted; every call is recorded.
 struct Mixed(Fake);
 
 impl Runner for Mixed {

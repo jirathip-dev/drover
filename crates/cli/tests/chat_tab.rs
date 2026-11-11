@@ -117,8 +117,6 @@ fn setup(name: &str) -> herdsman::Ctx {
     c
 }
 
-/// #771: `setup` on shed-acp (#608): the fleet's own runtime on `b`, its conductor signed in with account C (an ACP
-/// session runs under the lane guard, #565), the profiles synced with the real binary as their hook.
 fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     let cfg = format!(
         "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
@@ -131,7 +129,6 @@ fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     c
 }
 
-/// #771: shed's CLI answers (`shed run --acp`, `shed send`); the installed ACP agent runs `echo`.
 fn acp() -> Fake {
     let agents =
         serde_json::json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
@@ -141,10 +138,8 @@ fn acp() -> Fake {
         .reply("shed send", "")
 }
 
-/// The `shed run` that starts thread t1's conductor.
 const START_T1: &str = "shed run --acp claude-acp --policy allow --name orchestrator-t1";
 
-/// A fake shed for a server thread that outlives its test (its socket file stays until the run ends).
 fn leaked() -> &'static FakeShed {
     Box::leak(Box::new(FakeShed::new()))
 }
@@ -564,7 +559,6 @@ fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_ima
     assert_eq!(m, [2., 2., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 2., 1., 0.], "{out}");
 }
 
-/// #403: shed's CLI whose typing into an ACP session (`shed send`) waits for the test's go, then reports the line.
 struct Held<'a>(
     common::fake_shed::Cli<'a>,
     std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
@@ -663,7 +657,6 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
         "t1\n"
     );
-    // shed's CLI is down: no ACP agent list, no session.
     let down = Fake::default();
     let on = b.on(&down);
     let s = Server::new(&c, &on, Some(ADDR.into()));
@@ -713,7 +706,6 @@ fn long(name: &str, n: u64, now: u64) -> (herdsman::Ctx, String) {
     fill(setup(name), n, now)
 }
 
-/// #408: thread t1 of ctx `c` with `n` conductor messages; a paired cookie at `now`.
 fn fill(c: herdsman::Ctx, n: u64, now: u64) -> (herdsman::Ctx, String) {
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Long"]).1,
@@ -1033,8 +1025,6 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     assert_eq!(t2.str("title").unwrap(), format!("{}…", &long[..60]));
 }
 
-/// #405: [archive] ends the conductor's session and folds the thread; [restore] brings it back and its next message
-/// starts its conductor again. Nothing under the thread's folder goes.
 #[test]
 fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     let b = FakeShed::new();
@@ -1123,7 +1113,6 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     assert_eq!(body(&res), "sent\n", "{res}");
     let st = starts(&c);
     assert_eq!(st.len(), 2, "{st:?}");
-    // shed's bridge resumes no session: a fresh one, pointed at the thread so far.
     assert_eq!(st[1], ("shed-acp".to_string(), false), "{st:?}");
     assert_eq!(f.count(START_T1), 2, "{:?}", f.calls.borrow());
     // The CLI does the same, logged; nothing was removed from the folder.
@@ -1143,7 +1132,6 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     assert!(before.iter().all(|f| after.contains(f)), "{before:?} vs {after:?}");
 }
 
-/// herdr-only (#721 deletes it): a claude conductor in a herdr pane, archived then restored, resumes the same session.
 #[test]
 fn a_restored_herdr_thread_resumes_its_orchestrators_session() {
     let c = setup("chat-archive-herdr");
@@ -1351,14 +1339,11 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
     assert_eq!(m[17], 0.0, "page errors: {out}");
 }
 
-/// #407: thread t1's ACP conductor on `b`, working (`true`) or idle as its session reports it.
 fn working(b: &FakeShed, on: bool) {
     let st = ["idle", "working"][usize::from(on)];
     b.set("orchestrator-t1", |t| t["reported"] = serde_json::json!({"state": st}));
 }
 
-/// #407: shed's CLI that notes, with each line it types into an ACP session (`shed send`), how many Esc keys the
-/// fake server had got by then.
 struct Typing<'a>(
     common::fake_shed::Cli<'a>,
     &'a FakeShed,
@@ -1495,7 +1480,6 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
     assert_eq!(l.matches("\"why\":\"sent\"").count(), 2, "{l}");
     let (chat, _) = frags(&Server::new(&c, &on, Some(ADDR.into())), &cookie, now);
     assert!(!chat.contains("class=tq"), "the queue is empty");
-    // Steer: Esc into the conductor's session, then the message.
     working(b, true);
     assert_eq!(r.esc(), 0);
     assert_eq!(post_to(&addr, &cookie, "op=steer&t=t1&text=stop+that"), "sent\n");

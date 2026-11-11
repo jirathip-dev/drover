@@ -43,7 +43,6 @@ fn pr(head: &str) -> String {
     .to_string()
 }
 
-/// Spawns succeed and the host is calm (lanes on `shed_on`'s shed).
 fn fake() -> Fake {
     Fake::default()
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
@@ -59,7 +58,6 @@ fn fake() -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// #771: `c`'s lanes on a fake shed; lane `name` live in `cwd` as `status`, its screen `screen`.
 fn shed_on(c: &herdsman::Ctx, name: &str, status: &str, cwd: &str, screen: &str) -> FakeShed {
     let sh = FakeShed::new();
     sh.attach(c);
@@ -124,7 +122,6 @@ fn a_verify_lane_that_ends_without_a_verdict_is_respawned_once_then_needs_a_huma
     );
     assert!(sh.called("run", "sendmeter-verify-12-r1"), "{out}");
     assert!(state(&c).starts_with("review"), "{}", state(&c));
-    // The fresh lane ends the same way, with the same screen.
     sh.lane("sendmeter-verify-12-r1", "done", "/w/verify-12-r1");
     sh.screen("sendmeter-verify-12-r1", screen);
     // The respawned lane stalls too: one needs-human card with the evidence (its last screen lines).

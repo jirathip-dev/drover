@@ -65,7 +65,7 @@ fn keys(v: &Value) -> Vec<String> {
 #[test]
 fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
     let c = ctx(&tmpdir("backlog-tick"), CONFIG);
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     let r = Fake::default().once(READ, 0, &first_read());
     run(&c, &r, &["drive", "--fast"]);
@@ -123,7 +123,7 @@ fn the_reads_jq_flattens_each_issue() {
         return eprintln!("skipping: no jq here");
     }
     let c = ctx(&tmpdir("backlog-jq"), CONFIG);
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     let r = Fake::default();
     run(&c, &r, &["drive"]);
@@ -166,7 +166,7 @@ fn the_reads_jq_flattens_each_issue() {
 #[test]
 fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
     let c = ctx(&tmpdir("backlog-board"), CONFIG);
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "20"]).0, 0);
     let ev = herdsman::events::Event::new(
@@ -323,7 +323,7 @@ fn the_backlog_draws_on_a_fresh_load_and_after_a_live_patch() {
         return;
     };
     let c = ctx(&tmpdir("backlog-live"), CONFIG);
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     let r = Fake::default().reply("gh issue view", r#"{"title": "a title", "body": ""}"#);
     assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "30", "31", "32", "33"]).0, 0);

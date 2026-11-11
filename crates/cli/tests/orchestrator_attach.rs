@@ -44,7 +44,6 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
         "harness = \"claude\"\naccount = \"C\"",
     ) + "\n[accounts]\naccount_env = \"fake-cooee accounts env {provider} {name}\"\nC = \"C\"\n";
     let c = ctx(&tmpdir("orchestrator-attach"), &cfg);
-    // #771: lanes (and any conductor herdsman would start) on shed.
     let b = FakeShed::new();
     b.attach(&c);
     let r = Fake::default().reply("gh", "").reply(
@@ -108,7 +107,6 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
         .count();
     assert_eq!(attached, 2);
 
-    // Its ask is accepted and in the events with its thread, options and recommend; nothing typed into a lane.
     let seq = call(&s, &ck, ("GET", "/api/v1/events?since=0"), "")["seq"]
         .as_u64()
         .unwrap();
@@ -165,7 +163,6 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
         .count();
     assert_eq!(starts, 0);
 
-    // #541: a lane's ask is routed to it (the event carries `routed`; cooee posts it), not typed into a conductor.
     std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
     let (code, _) = ask(&c, &r, None);
     std::env::remove_var("HERDSMAN_LANE");

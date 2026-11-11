@@ -1,7 +1,3 @@
-//! #771: the one fake shed server lane tests start and script, on a real Unix socket (shed-proto JSON-RPC lines, as
-//! `herdsman::shed` speaks them): run, ls, get, read, send, keys, wait, kill, rm, state and events. A test points its
-//! fleet at it (`config`), adds the lanes a host runs (`lane`, `add`), scripts their screens and waits, and reads back
-//! every request it got. Another host's shed (`shed connect` over ssh) is the same server behind `OverSsh`.
 use super::{Fake, Shared};
 use herdsman::runner::{Out, Runner};
 use herdsman::shed::proto::{ErrorCode, Request, Response, RpcError, VERSION};
@@ -25,7 +21,6 @@ pub struct State {
     pub events: Vec<Value>,
     /// A `wait`'s outcome per terminal (default `matched`).
     pub waits: BTreeMap<String, String>,
-    /// The version its `hello` answers.
     version: String,
 }
 
@@ -88,8 +83,6 @@ impl FakeShed {
             self.sock.display()
         )
     }
-    /// Ctx `c`'s fleet config, its lanes now on this server (`config`); a `[runtime]` an earlier `attach` added is
-    /// replaced, so attaching again (or another server) is safe.
     pub fn attach(&self, c: &herdsman::Ctx) {
         let base = std::fs::read_to_string(&c.config).unwrap();
         let base = base.split("\n[runtime]\nkind = \"shed\"\n").next().unwrap_or_default();
@@ -101,8 +94,6 @@ impl FakeShed {
         sh.attach(c);
         sh
     }
-    /// A `PATH` for the real binary with a stub `shed` first in `dir` (spawn refuses `SHED_MISSING` unless `which
-    /// shed` finds one; the lanes still run on this server's socket).
     pub fn path_in(dir: &std::path::Path) -> String {
         use std::os::unix::fs::PermissionsExt;
         let bin = dir.join("shed-bin");
@@ -143,8 +134,6 @@ impl FakeShed {
             "state": "running", "exit": null, "pid": 7, "reported": {"state": "working"}});
         self.lock().terms.insert(name.into(), t);
     }
-    /// Lane `<fleet>-<role>-<issue>[-r<n>]` running in `cwd`, its reported state `status` (`idle`, `working`,
-    /// `blocked`, `done`): a live agent as `herdr agent list` showed one, labelled as spawn labels it.
     pub fn lane(&self, name: &str, status: &str, cwd: &str) {
         let mut w: Vec<&str> = name.split('-').collect();
         if w.len() > 3 && w[w.len() - 1].starts_with('r') {
@@ -191,7 +180,6 @@ impl FakeShed {
     }
 }
 
-/// One request's answer line.
 fn answer(st: &Mutex<State>, q: &Request) -> String {
     let mut st = st.lock().unwrap();
     if q.method != "hello" {
@@ -216,7 +204,7 @@ fn conn(c: UnixStream, st: &Mutex<State>) {
             let new: Vec<Value> = st.lock().unwrap().events.clone();
             let new = new.into_iter().filter(|e| e["seq"].as_u64() > Some(since));
             new.for_each(|e| drop(writeln!(w, "{e}")));
-            std::thread::sleep(std::time::Duration::from_secs(3)); // shed never closes the stream
+            std::thread::sleep(std::time::Duration::from_secs(3));
             return;
         }
     }
@@ -237,7 +225,6 @@ fn handle(m: &str, p: &Value, st: &mut State) -> Result<Value, RpcError> {
         "events" => Ok(json!({})),
         _ if !terms.contains_key(&name) => Err(gone()),
         "get" => Ok(terms[&name].clone()),
-        // #749: an ACP terminal's events (`events`), the last `n` before `before`, as shed pages them.
         "read" if p["events"] == true && terms[&name]["acp"].is_string() => {
             let before = p["before"].as_u64().unwrap_or(u64::MAX);
             let all: Vec<&Value> = terms[&name]["events"]
@@ -249,7 +236,6 @@ fn handle(m: &str, p: &Value, st: &mut State) -> Result<Value, RpcError> {
             let n = p["n"].as_u64().map_or(all.len(), |n| n as usize);
             Ok(json!({"text": "", "events": all[all.len().saturating_sub(n)..]}))
         }
-        // #666: a terminal's own `text` (an ACP session's transcript), else a screen.
         "read" => Ok(json!({"text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from)})),
         "send" | "keys" => Ok(json!({})),
         "wait" => {
@@ -269,8 +255,6 @@ fn handle(m: &str, p: &Value, st: &mut State) -> Result<Value, RpcError> {
     }
 }
 
-/// `f`, with each host in `hosts` running its own fake shed: a `shed connect` over ssh to it (`<host> -- 'shed'
-/// 'connect' …`) is answered by that server; every other command goes to `f`.
 pub struct OverSsh<'a> {
     pub f: &'a Fake,
     pub hosts: Vec<(&'a str, &'a FakeShed)>,
@@ -303,9 +287,6 @@ impl Runner for OverSsh<'_> {
     }
 }
 
-/// shed's CLI as the fake server sees it, around `f` (which still answers and logs every call): `shed run --acp` makes
-/// a running ACP terminal of that name, labelled as its `--label`s (`cwd` `/w`), and, as shed's bridge does, starts the
-/// adapter command after `--` at once (in `--cwd`, its env cleared but `PATH`, `$SHED` set): its stdout kept in `out`.
 pub struct Cli<'a> {
     pub f: &'a Fake,
     pub state: Arc<Mutex<State>>,
@@ -355,8 +336,6 @@ impl Runner for Cli<'_> {
     }
 }
 
-/// Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every program call is the Fake's,
-/// the lane runtime the server's, as `[runtime] kind = "shed"` makes it (for a caller that builds no CLI, e.g. `Server`).
 pub struct OnShed(pub Fake, pub FakeShed);
 
 impl OnShed {

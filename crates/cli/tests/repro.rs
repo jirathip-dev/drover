@@ -170,7 +170,6 @@ fn pr(head: &str) -> String {
     .to_string()
 }
 
-/// Drive's world: the host is calm, the PR at `sha()` changes only `src/a.rs` (lanes on the caller's shed).
 fn drive_fake() -> Fake {
     fake(SECTION)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")

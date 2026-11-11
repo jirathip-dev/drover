@@ -29,7 +29,7 @@ fn brief(name: &str, issue: &str, role: &str, fail: bool, update: bool) -> Strin
             .replace("sendmeter", "api")
             + DESIGN),
     );
-    let sh = FakeShed::new(); // #771: the lane spawns on shed
+    let sh = FakeShed::new();
     sh.attach(&c);
     if fail {
         let body = "FAIL\n\n1. **blocking**: src/x.rs:3 off by {one}.";

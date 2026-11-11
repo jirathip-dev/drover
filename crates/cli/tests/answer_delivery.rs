@@ -37,7 +37,6 @@ fn lane_ask(c: &herdsman::Ctx) {
     assert_eq!((code, out.as_str()), (0, "q1\n"));
 }
 
-/// `c`'s lanes on a fake shed, `LANE` live there (its pane is its name).
 fn shed(c: &herdsman::Ctx) -> FakeShed {
     let sh = FakeShed::new();
     sh.attach(c);
@@ -45,7 +44,6 @@ fn shed(c: &herdsman::Ctx) -> FakeShed {
     sh
 }
 
-/// Whether shed had `text` typed into `LANE`, then Enter pressed on `pane` after it.
 fn typed(sh: &FakeShed, pane: &str, text: &str) -> bool {
     let seen = sh.lock().seen.clone();
     let send = (seen.iter()).position(|(m, p)| m == "send" && p["name"] == LANE && p["text"] == text);
@@ -117,7 +115,6 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     sh.attach(&c);
     spawn(&c, json!({}));
     lane_ask(&c);
-    // shed has no such lane: recorded, logged undelivered, red on the issue's card.
     assert_eq!(run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "1"]).0, 0);
     let u = kinds(&c, "answer-undelivered");
     assert_eq!(
@@ -133,7 +130,6 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     };
     assert!(page(&Fake::default()).contains("<span class=r>answer q1 not delivered: "));
 
-    // Still unreachable: the fast step asks shed for the lane again, logging nothing new.
     let asked = || sh.all("get").iter().filter(|p| p["name"] == LANE).count();
     let before = asked();
     run(&c, &Fake::default(), &["drive", "--fast"]);
@@ -194,7 +190,6 @@ fn a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane() {
         (ev[closed].str("pane"), ev[spawned].str("pane")),
         (Some("old-36"), Some(LANE))
     );
-    // shed: the old pane closed, the new lane run under its name.
     assert!(sh.called("kill", "old-36"), "{:?}", sh.methods());
     assert_eq!(sh.last("run")["name"], LANE);
     let ran = sh.lock().seen.len();

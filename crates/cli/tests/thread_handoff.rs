@@ -26,8 +26,6 @@ fn setup(name: &str) -> herdsman::Ctx {
     c
 }
 
-/// #771: `setup` on shed-acp (#608): the fleet's own runtime on `b`, its conductor signed in with account C (an ACP
-/// session runs under the lane guard, #565), the profiles synced with the real binary as their hook.
 fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     let cfg = format!(
         "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
@@ -44,7 +42,6 @@ fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     c
 }
 
-/// #771: shed's CLI answers (`shed run --acp`, `shed send`); the installed ACP agent runs `echo`.
 fn acp() -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
     Fake::default()
@@ -211,7 +208,6 @@ fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_orches
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
         "t2\n"
     );
-    // An awake t2 conductor: an ACP session shed runs, its start logged.
     b.add(
         "orchestrator-t2",
         json!({"fleet": "sendmeter", "role": "orchestrator", "thread": "t2"}),
@@ -525,7 +521,6 @@ fn an_issue_filed_and_an_ask_answered_in_the_target_each_add_one_row_to_the_sour
         "t2",
     ];
     assert_eq!(run(&c, &Fake::default(), &ask).1, "q2\n");
-    // t2's conductor is awake (its session from the handoff): the answer is typed in.
     let r = acp();
     assert_eq!(run(&c, &b.cli(&r), &["answer", "sendmeter", "q2", "1"]).0, 0);
     assert!(
@@ -693,7 +688,6 @@ fn long_text() -> String {
 }
 
 /// #621: a 2,400-byte handoff lands in full as a new thread's first conductor message, and again in full once that
-/// thread's conductor is asleep (a fresh session: its first prompt carries the line).
 #[test]
 fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one() {
     let b = FakeShed::new();
@@ -714,7 +708,6 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one() {
     let md = c.state.with_file_name("orchestrator").join("t2/.thread.md");
     assert_eq!(std::fs::read_to_string(&md).unwrap(), format!("from t1: {line}\n"));
 
-    // t2's conductor is gone (asleep): the next long handoff starts it again, the text in full in its thread file.
     b.remove("orchestrator-t2");
     let (code, out) = run(&c, &r, &["thread", "handoff", "t1", "t2", "More", &text]);
     assert_eq!((code, out.as_str()), (0, "t2\n"));
@@ -739,9 +732,6 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one() {
     }
 }
 
-/// herdr-only (#721 deletes it). #621: a 2,400-byte handoff lands in full as a new thread's first conductor message,
-/// and again in full once that thread's conductor is asleep (its resume); no start's command line passes herdr's
-/// 1,024-byte limit.
 #[test]
 fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herdrs_line_limit() {
     let c = setup("handoff-long");

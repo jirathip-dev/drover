@@ -4,7 +4,6 @@ use common::*;
 use herdsman::events::{append, read, Event};
 use serde_json::json;
 
-/// sendmeter #12's merged impl lane, run on shed (its pane its name, no herdr workspace); `issue-120` its sibling.
 fn setup(name: &str) -> (std::path::PathBuf, herdsman::Ctx, String, String, FakeShed) {
     let d = tmpdir(name);
     let c = ctx(&d, CONFIG);
@@ -34,7 +33,6 @@ fn lsof(mine: &str, sibling: &str) -> String {
     )
 }
 
-/// `wt` is clean and pushed (also when `git worktree remove` re-checks it).
 fn fake(lsof: &str, wt: &str) -> Fake {
     Fake::default()
         .once("lsof", 0, lsof)
@@ -43,7 +41,6 @@ fn fake(lsof: &str, wt: &str) -> Fake {
         .reply("kill", "")
 }
 
-/// The index of the first call containing `what`.
 fn at(r: &Fake, what: &str) -> Option<usize> {
     r.calls.borrow().iter().position(|c| c.contains(what))
 }
@@ -61,7 +58,7 @@ fn kills(r: &Fake) -> Vec<String> {
 fn closing_a_lane_terms_then_kills_only_its_worktree_pids() {
     let (_d, c, mine, sibling, _sh) = setup("reap-kill");
     let rows = lsof(&mine, &sibling);
-    let r = fake(&rows, &mine).reply("lsof", &rows); // nothing dies on TERM
+    let r = fake(&rows, &mine).reply("lsof", &rows);
     let (code, out) = run(&c, &r, &["clean", "sendmeter", "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(kills(&r), ["kill -TERM 101 102", "kill -KILL 101 102"]);
@@ -209,8 +206,6 @@ fn check_reaps_closed_lanes_but_spares_active_and_live_ones() {
     assert_eq!(reaped[0].data["names"], json!(["Google Chrome Helper"]));
 }
 
-/// #223: a `done` lane past `idle_reap_minutes` loses the processes left in its worktree, never its shell, its agent
-/// or what the agent runs (#679: on shed, the terminal's pid and its tree).
 #[test]
 fn check_trims_a_done_lanes_children_but_not_its_agent() {
     let d = tmpdir("trim-check");
@@ -222,8 +217,6 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
     let wt = wt.to_string_lossy().into_owned();
     let spawn = json!({"role": "impl", "agent": "impl-12", "worktree": wt, "pane": "impl-12", "runtime": "shed"});
     append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();
-    // shed 199 → terminal shell 200 → agent 201 → tsserver 202 → its helper 203; 300 sits outside the worktree; a
-    // stray shell 400 (parent: launchd) → zsh 401 → node 402 → its helper 403, left in the worktree.
     let rows = format!(
         "p200\nczsh\nfcwd\nn{wt}\np201\nc2.1.309\nfcwd\nn{wt}\np202\ncnode\nfcwd\nn{wt}/web\np203\ncnode\nfcwd\nn{wt}\n\
          p300\ncnode\nfcwd\nn/elsewhere\np400\nczsh\nfcwd\nn{wt}\np401\nczsh\nfcwd\nn{wt}\np402\ncnode\nfcwd\nn{wt}/web\n\
@@ -320,7 +313,7 @@ fn host_tab_shows_top_memory_users_with_their_owner() {
 fn host_tab_sums_claude_lane_memory_by_state() {
     use herdsman::serve::Server;
     let (_d, c, mine, sibling, sh) = setup("claude-host");
-    sh.lane("impl-12", "done", &mine); // both labelled harness `claude`
+    sh.lane("impl-12", "done", &mine);
     sh.lane("impl-120", "working", &sibling);
     let r = Fake::default()
         .reply(
@@ -366,7 +359,7 @@ fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
     let ps = "  199     1   9000\n  200   199   1000\n  201   200   2000\n  202   201 300000\n  203   202 400000\n  \
               204   203   3000\n  205   204 900000\n  300     1   1000\n  301   300   1000\n  302   301 102400\n";
     sh.lane("impl-12", "done", &wt);
-    sh.set("impl-12", |t| t["pid"] = json!(200)); // the terminal's pid
+    sh.set("impl-12", |t| t["pid"] = json!(200));
     let fake = || {
         Fake::default()
             .once("lsof", 0, &rows)
@@ -405,8 +398,6 @@ fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
     assert_eq!(ev[0].data["killed"], json!(["vite"]), "no lane-trimmed names the agent");
 }
 
-/// #679: a live shed lane whose last turn is `working` is idle between turns: `check` alerts no stall; one whose last
-/// turn is `done` still does.
 #[test]
 fn check_alerts_no_stall_for_an_acp_lane_between_turns() {
     for (turn, stalls) in [("working", false), ("done", true)] {

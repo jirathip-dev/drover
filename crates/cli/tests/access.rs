@@ -29,20 +29,15 @@ fn folders(d: &Path, role_extra: &str) -> String {
     config(d, role_extra) + "\n[accounts.usage]\n" + &dirs
 }
 
-/// What lane `lane`'s shell on `sh` prints of `"$<var>"` after running the `export` line typed into it.
 fn shell(sh: &FakeShed, lane: &str, var: &str) -> String {
     let typed = sh.sent(lane);
     let line = typed.iter().find(|t| t.starts_with("export ")).expect("no export line");
     let line = format!("{}; printf %s \"${var}\"", line.trim_end_matches('\r'));
-    // #683: the pane's shell starts with neither credential var of the test's own env.
     let mut c = std::process::Command::new("sh");
     c.env_remove("CLAUDE_CODE_OAUTH_TOKEN").env_remove("CLAUDE_CONFIG_DIR");
     String::from_utf8_lossy(&c.arg("-c").arg(line).output().unwrap().stdout).into()
 }
 
-/// Lane `n`'s secrets file (`<worktree>.env`) made empty (0600) beforehand, also linked as `<worktree>.env.keep`:
-/// spawn writes it in place and removes only its name, so the shell can source what spawn wrote after the spawn
-/// (shed's typed lines go over its socket, past the test's runner).
 fn keep_secrets(c: &herdsman::Ctx, n: u64) {
     use std::os::unix::fs::PermissionsExt;
     let f = format!("{}.env", c.worktrees.join(format!("sendmeter/issue-{n}")).display());
@@ -52,12 +47,10 @@ fn keep_secrets(c: &herdsman::Ctx, n: u64) {
     std::fs::hard_link(&f, format!("{f}.keep")).unwrap();
 }
 
-/// A real (faked gh/git) impl spawn of issue `n` on shed `sh` (terminal `sendmeter-impl-<n>`); its shell's `SIGN_IN`.
 fn spawn(c: &herdsman::Ctx, sh: &FakeShed, n: u64) -> (Fake, String) {
     spawn_var(c, sh, n, SIGN_IN)
 }
 
-/// As `spawn`; `var` is what its shell printed of `"$<var>"`.
 fn spawn_var(c: &herdsman::Ctx, sh: &FakeShed, n: u64, var: &'static str) -> (Fake, String) {
     spawn_with(c, sh, n, var, |r| r)
 }
@@ -87,7 +80,6 @@ fn spawn_with(
     );
     let secrets = format!("{}.env", wt.display());
     assert!(!Path::new(&secrets).exists(), "the secrets file is left behind");
-    // `keep_secrets`: what spawn wrote to it, back under its name while the shell sources it.
     let kept = format!("{secrets}.keep");
     if Path::new(&kept).exists() {
         std::fs::hard_link(&kept, &secrets).unwrap();
@@ -99,7 +91,6 @@ fn spawn_with(
     (r, token)
 }
 
-/// Everything typed into lane `n`'s shell on `sh`, and every command line `r` ran.
 fn lines(sh: &FakeShed, r: &Fake, n: u64) -> Vec<String> {
     let mut all = sh.sent(&format!("sendmeter-impl-{n}"));
     all.extend(r.calls.borrow().iter().cloned());
@@ -407,7 +398,6 @@ fn cap_expires_after_cap_reset_minutes() {
     assert_eq!(dry_account(&c, 13), "A");
 }
 
-/// Caps lane `sendmeter-impl-12` (live on `sh`) with `banner` on its screen via `herdsman check`.
 fn cap(c: &herdsman::Ctx, sh: &FakeShed, banner: &str) {
     assert!(check_shows(c, sh, banner).contains("account-capped"));
 }
@@ -534,7 +524,6 @@ fn mcp_allowlist_is_the_only_mcp_and_prod_is_refused() {
     );
     assert_eq!(code, 0, "{out}");
     let p: Value = serde_json::from_str(&out).unwrap();
-    // The harness launch the lane's shell is typed (`shed send`).
     let start = &p["commands"][4];
     assert_eq!(
         (start[0].as_str(), start[1].as_str()),
@@ -602,7 +591,6 @@ fn hermes_profile_gets_only_the_listed_mcp_servers() {
     );
 }
 
-/// #640: lane `sendmeter-impl-12` on account A, idle on `sh` in its worktree, shows `screen`; `herdsman check`'s output.
 fn check_shows(c: &herdsman::Ctx, sh: &FakeShed, screen: &str) -> String {
     let wt = c.worktrees.join("sendmeter/issue-12");
     sh.lane("sendmeter-impl-12", "idle", wt.to_str().unwrap());
@@ -751,8 +739,6 @@ fn a_token_file_account_reaches_only_its_lanes_shell_as_the_oauth_token() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     keep_secrets(&c, 12);
     let (r, got) = spawn(&c, &sh, 12);
-    // The token from the file, through the secrets file the pane sources: no config folder, never argv, the pane or the
-    // log.
     assert_eq!(got, format!("|{TOKEN_A}"));
     let calls = lines(&sh, &r, 12);
     assert!(calls.iter().any(|l| l.contains("&& . '")), "{calls:?}");

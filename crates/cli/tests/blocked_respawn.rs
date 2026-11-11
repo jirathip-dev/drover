@@ -25,7 +25,6 @@ fn spawn(c: &herdsman::Ctx, ts: u64) {
     ev(c, ts, 12, "spawn", d);
 }
 
-/// #12's impl lane spawned at ts 10, its shed terminal gone (it ended), no PR; `title` = the issue's.
 fn lane(name: &str, title: &str) -> (herdsman::Ctx, Fake, FakeShed) {
     std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
     let c = ctx(&tmpdir(name), CONFIG);
@@ -45,7 +44,6 @@ fn lane(name: &str, title: &str) -> (herdsman::Ctx, Fake, FakeShed) {
     (c, r, sh)
 }
 
-/// Whether drive started any lane on shed.
 fn started(sh: &FakeShed) -> bool {
     !sh.all("run").is_empty()
 }

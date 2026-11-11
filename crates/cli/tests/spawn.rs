@@ -16,19 +16,16 @@ fn plan(c: &herdsman::Ctx, r: &Fake, role: &str) -> Value {
     serde_json::from_str(&out).unwrap()
 }
 
-/// #771: ctx `c`'s lanes on a fake shed (spawn's and the plan's runtime), the server kept alive by the caller.
 fn on_shed(c: &herdsman::Ctx) -> FakeShed {
     let sh = FakeShed::new();
     sh.attach(c);
     sh
 }
 
-/// A shed spawn's fake: `which shed` finds it.
 fn shed_fake() -> Fake {
     Fake::default().reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// The shed requests a plan shows (`shed <method> <params>`), as (method, params).
 fn requests(p: &Value) -> Vec<(String, Value)> {
     let cmds = p["commands"].as_array().unwrap();
     let shed = cmds.iter().filter(|c| c[0] == "shed" && c[2].is_string());
@@ -39,14 +36,12 @@ fn requests(p: &Value) -> Vec<(String, Value)> {
     .collect()
 }
 
-/// The line a shed plan types into the lane's shell that starts with `head` (its Enter dropped).
 fn typed(p: &Value, head: &str) -> String {
     let sends = requests(p).into_iter().filter(|r| r.0 == "send");
     let texts = sends.map(|r| r.1["text"].as_str().unwrap().trim_end_matches('\r').to_string());
     texts.into_iter().find(|t| t.starts_with(head)).unwrap()
 }
 
-/// The lane's exports as the plan types them (`export A='x' …`), split at spaces; `raw_export` keeps #630's build folders.
 fn export(p: &Value) -> Vec<String> {
     raw_export(p).into_iter().filter(|w| !w.contains("/.build/")).collect()
 }
@@ -55,7 +50,6 @@ fn raw_export(p: &Value) -> Vec<String> {
     typed(p, "export ").split_whitespace().map(String::from).collect()
 }
 
-/// The harness launch as the plan types it (`exec 'claude' '--x' …`), as its shell words (quotes removed).
 fn launch(p: &Value) -> Vec<String> {
     let (mut out, mut w, mut quoted, mut any) = (vec![], String::new(), false, false);
     for ch in typed(p, "exec ").chars() {
@@ -496,10 +490,6 @@ fn reopen_spawn_clones_no_build_folder() {
     assert!(ev.iter().any(|e| e.kind == "spawn") && !ev.iter().any(|e| e.kind == "build-cloned"));
 }
 
-/// `Fake`, plus `git worktree add` checks out `Cargo.lock` into the new lane like the real one. The lane's shed `wait`s
-/// time out until `cp` runs; `cp` holds until the kick's first wait (`beside`: it came), and the kick's pause between
-/// attempts holds until `cp` ran. A clone run before the kick never sees its wait; one run after it leaves the kick
-/// unconfirmed. `cp` also records how many lines the lane's shell was typed by then (`typed`: its harness started).
 struct Checkout<'a> {
     f: &'a Fake,
     wt: std::path::PathBuf,
@@ -511,7 +501,6 @@ struct Checkout<'a> {
 
 const LANE: &str = "sendmeter-impl-12";
 
-/// Whether `ok` holds within 5 s.
 fn within(ok: impl Fn() -> bool) -> bool {
     let t = std::time::Instant::now();
     while !ok() && t.elapsed().as_secs() < 5 {
@@ -611,7 +600,6 @@ fn hermes_role_dry_run_kicks_prompt_after_boot() {
         ["-p".to_string(), "fleet-rev".into(), "--accept-hooks".into()]
     );
     assert_eq!(start[..2], ["exec", "hermes"].map(String::from));
-    // The kick waits for Hermes' prompt, then prompts the lane by name.
     let q = requests(&p);
     let at = q.iter().position(|r| r.0 == "wait").unwrap();
     assert_eq!(
@@ -648,7 +636,6 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
         .reply("git -C", "");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
-    // #24: the lane's shell exports HERDSMAN_LANE before the harness starts, arming `herdsman hook`.
     let sent = sh.sent(LANE);
     assert!(
         sent.len() == 2
@@ -656,7 +643,6 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
             && sent[1].starts_with("exec 'claude'"),
         "{sent:?}"
     );
-    // #19: the title comes from the spec fetched at spawn, not a stale or missing cache.
     assert!(
         sent[1].contains("'--name' 'sendmeter · impl #12 · Fix the meter' '--mcp-config'"),
         "{}",
@@ -669,7 +655,6 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
         (st.state.as_str(), st.lane.as_deref()),
         ("impl", Some("sendmeter-impl-12"))
     );
-    // #187: the spawn event records the lane's port.
     let ev = read(&c.state)
         .unwrap()
         .into_iter()
@@ -679,8 +664,6 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
     assert_eq!(ev.data["confirmed"], true);
 }
 
-/// herdr-only (#721 deletes it): #194: a reopened worktree's herdr workspace keeps the lane's name, not herdr's branch
-/// label.
 #[test]
 fn herdr_reopened_workspace_keeps_the_lane_name() {
     let d = tmpdir("spawn-real-herdr");
@@ -722,7 +705,7 @@ fn unconfirmed_hermes_kick_presses_enter_then_exits_4() {
     let d = tmpdir("spawn-unconfirmed");
     let c = ctx(&d, CONFIG);
     let sh = on_shed(&c);
-    sh.wait_ends(LANE, "timeout"); // the lane never reports working
+    sh.wait_ends(LANE, "timeout");
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
     let r = shed_fake()

@@ -62,8 +62,6 @@ fn ev(c: &herdsman::Ctx, ts: u64, kind: &str) {
     .unwrap();
 }
 
-/// #255: replies that make cloud1 pass its health look on start: herdr, git over HTTPS, the logins, herdsman. herdr's
-/// version and its login pane (`workspace create`, `pane read`) are the health look's herdr rows (#721 drops them).
 fn healthy(f: Fake) -> Fake {
     let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 2099-01-01 00:00:00 UTC\n\n[]";
     f.reply(&format!("{SSH}'sh' '-c' 'PATH="), "version: 0.9.5\nversion: 0.9.5\n")
@@ -99,8 +97,6 @@ fn fake(mini: f64) -> Fake {
         .reply(&rc("stop"), "")
 }
 
-/// Where a lane on #12 goes: the host's name, or the refusal (no start: `place` only picks). mini's lanes (none) on a
-/// shed there.
 fn placed(c: &herdsman::Ctx, r: &Fake, force: Option<&str>) -> Result<String, String> {
     let cfg = Config::load(&c.config).unwrap();
     let sh = FakeShed::new();
@@ -121,7 +117,6 @@ fn placed(c: &herdsman::Ctx, r: &Fake, force: Option<&str>) -> Result<String, St
     }
 }
 
-/// A fresh lane on cloud1 answers every step (its terminal is cloud1's shed's, `OverSsh`).
 fn spawn_fake() -> Fake {
     fake(0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
@@ -135,7 +130,6 @@ fn spawn_fake() -> Fake {
         .reply(&format!("{SSH}'rm' '-f'"), "")
 }
 
-/// `f`, cloud1's lanes on its own shed `sh` over ssh.
 fn on_cloud<'a>(f: &'a Fake, sh: &'a FakeShed) -> OverSsh<'a> {
     OverSsh {
         f,
@@ -143,7 +137,6 @@ fn on_cloud<'a>(f: &'a Fake, sh: &'a FakeShed) -> OverSsh<'a> {
     }
 }
 
-/// The index in `r`'s calls of the first `shed connect` (over ssh) carrying a `method` request.
 fn shed_call_at(r: &Fake, method: &str) -> Option<usize> {
     let calls = r.calls.borrow();
     let at = calls.iter().enumerate().filter(|(_, c)| c.contains("'shed' 'connect'"));

@@ -1,7 +1,4 @@
 //! M2 spawn gates: host load (HOST_BUSY), duplicate guard (LANE_LIVE,
-//! WORKTREE_DIRTY, --supersede), the Hermes kick retry (#9) and the NO_ORCH refusal (#155). #771: generic spawn
-//! behaviour runs on the shared fake shed (`shed_happy`); herdr's own start path (soft starts, pane ids, startup
-//! prompts, `agent_pane_busy`, `agent_name_taken`) stays on `happy` for #721 to delete.
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
@@ -40,13 +37,10 @@ fn happy(c: &herdsman::Ctx, agent_list: &str) -> Fake {
         .reply("herdr agent wait", "{}")
 }
 
-/// #771: `happy` on a shed host: ctx `c`'s lanes on a fresh fake shed (returned; keep it alive), no herdr replies.
-/// The worktree exists, clean and pushed.
 fn shed_happy(c: &herdsman::Ctx) -> (FakeShed, Fake) {
     let w = wt(c);
     std::fs::create_dir_all(&w).unwrap();
     let sh = FakeShed::new();
-    // A second call on the same ctx moves its lanes to this server (the last one's `[runtime]` dropped).
     let base = std::fs::read_to_string(&c.config).unwrap();
     let base = base.split("\n[runtime]\n").next().unwrap();
     std::fs::write(&c.config, sh.config(base)).unwrap();
@@ -68,7 +62,6 @@ fn spawn(c: &herdsman::Ctx, r: &dyn Runner, extra: &[&str]) -> (i32, String) {
     run(c, r, &a)
 }
 
-/// A spawn on shed `sh` refused `code`: no worktree made, no terminal run, nothing logged.
 fn assert_refused(c: &herdsman::Ctx, sh: &FakeShed, r: &Fake, extra: &[&str], code: &str) -> String {
     let before = read(&c.state).unwrap().len();
     let (exit, out) = spawn(c, r, extra);
@@ -326,8 +319,6 @@ fn supersede_kills_old_agent_then_spawns() {
 
 // --- #9: Hermes kick ---
 
-/// shed + Hermes model: until the first attempt's pause (`sleep 10`) the lane's waits time out and its screen shows
-/// no context (`ctx --`), so the first prompt is dropped; after it the next prompt lands.
 struct Hermes<'a> {
     fake: Fake,
     sh: &'a FakeShed,
@@ -600,7 +591,6 @@ fn agent_launch_pending_on_rename_is_retried_then_succeeds() {
     assert_eq!(ev.iter().find(|e| e.kind == "spawn").unwrap().data["confirmed"], true);
 }
 
-/// herdr-only (#721): a spawn on herdr refused `code`, nothing created or logged.
 fn herdr_refused(c: &herdsman::Ctx, r: &Fake, code: &str) -> String {
     let before = read(&c.state).unwrap().len();
     let (exit, out) = spawn(c, r, &[]);
@@ -615,7 +605,6 @@ fn herdr_refused(c: &herdsman::Ctx, r: &Fake, code: &str) -> String {
     out
 }
 
-/// herdr-only (#721): an agent whose herdr start timed out has no name; shed terminals always have one.
 #[test]
 fn lane_live_names_pane_of_unnamed_agent() {
     let d = tmpdir("dup-unnamed");
@@ -647,7 +636,6 @@ fn adopt_records_running_lane() {
     assert_eq!(s.data["adopted"], true);
     let (_, st) = run(&c, &Fake::default(), &["status"]);
     assert!(st.contains("sendmeter-impl-12"), "{st}");
-    // A terminal with no harness running (it exited) is not a lane.
     sh.exit("stray");
     assert_eq!(
         run(&c, &r, &["adopt", "sendmeter", "13", "impl", "--pane", "stray"]).0,
@@ -669,8 +657,6 @@ fn host_busy_creates_no_worktree_dir() {
     assert!(!wt(&c).exists(), "no worktree dir");
 }
 
-/// #107: a kick that is never confirmed (every wait times out, the screen shows no context) still logs the
-/// running lane's spawn, unconfirmed; the spawn exits 4 (spawned, prompt not confirmed).
 #[test]
 fn kick_failure_after_start_still_logs_unconfirmed_spawn() {
     let d = tmpdir("kick-fails");
@@ -756,14 +742,13 @@ fn supersede_closes_old_pane_after_confirm_unless_working() {
         let d = tmpdir("supersede-old-pane");
         let c = ctx(&d, CONFIG);
         let w = wt(&c).to_string_lossy().into_owned();
-        // The old lane's terminal is `old-pane`: renamed and working elsewhere (a listed lane), or left over.
         let d0 = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12", "worktree": w, "pane": "old-pane"});
         append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", d0)).unwrap();
         let (sh, r) = shed_happy(&c);
         if working {
             sh.lane("old-pane", "working", "/elsewhere");
         } else {
-            sh.add("old-pane", json!({})); // no `fleet` label: no live lane
+            sh.add("old-pane", json!({}));
         }
         let (exit, out) = spawn(&c, &r, &["--supersede"]);
         assert_eq!(exit, 0, "{out} {:?}", r.calls.borrow());
@@ -808,7 +793,6 @@ fn a_failed_rename_closes_the_pane_so_the_next_spawn_is_not_lane_live() {
     assert_eq!(exit, 0, "{out}");
 }
 
-/// herdr-only (#721): an unnamed idle pane (a timed-out herdr start); a named one is adopted instead.
 #[test]
 fn lane_live_on_an_idle_unlogged_pane_names_its_age_and_the_way_out() {
     let d = tmpdir("dup-stale");

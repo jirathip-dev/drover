@@ -22,7 +22,6 @@ fn config(extra: &str) -> String {
 
 const SERIAL: &str = "serial_paths = [\"supabase/migrations/**\"]";
 
-/// A Fake on which any hermes spawn on shed succeeds end to end (#771: the lanes live on the ctx's fake shed).
 fn happy() -> Fake {
     Fake::default()
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
@@ -61,7 +60,7 @@ fn refused(c: &herdsman::Ctx, n: u64, role: &str, code: &str) {
 fn second_serial_impl_waits_until_first_merges() {
     let d = tmpdir("serial-busy");
     let c = ctx(&d, &config(SERIAL));
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     assert_eq!(
         run(
@@ -94,7 +93,7 @@ fn second_serial_impl_waits_until_first_merges() {
 fn serial_max_two_admits_a_second_serial_and_refuses_a_third() {
     let d = tmpdir("serial-max");
     let c = ctx(&d, &config(&format!("{SERIAL}\nserial_max = 2")));
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     assert_eq!(
         run(
@@ -132,7 +131,7 @@ fn serial_max_two_admits_a_second_serial_and_refuses_a_third() {
 fn in_flight_serial_issue_keeps_its_lanes_when_over_full() {
     let d = tmpdir("serial-over");
     let c = ctx(&d, &config(SERIAL));
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     let add = ["queue", "sendmeter", "add", "1", "3", "--serial"];
     assert_eq!(run(&c, &Fake::default(), &add).0, 0);
@@ -170,7 +169,6 @@ fn merge(serial: bool, files: &str) -> (i32, String, Fake) {
     merge_on(serial, merge_fake(files)).2
 }
 
-/// Merge #12 (queued `--serial` or not) at PASS on `r`: (its ctx, its fake shed (no lane live), (exit, output, r)).
 fn merge_on(serial: bool, r: Fake) -> (herdsman::Ctx, FakeShed, (i32, String, Fake)) {
     let d = tmpdir("serial-merge");
     let c = ctx(&d, &config(SERIAL));
@@ -258,7 +256,7 @@ fn unmarked_pr_touching_serial_path_is_refused() {
 #[test]
 fn owner_override_still_refuses_an_unmarked_serial_pr() {
     let c = ctx(&tmpdir("serial-override"), &config(SERIAL));
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     spawned(&c, 12, "impl");
     log(&c, 12, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
@@ -303,7 +301,7 @@ fn serial_globs() {
 fn no_cap_by_default_even_with_50_lanes() {
     let d = tmpdir("cap-unset");
     let c = ctx(&d, &config(""));
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     for n in 100..150 {
         spawned(&c, n, "impl");
@@ -323,7 +321,7 @@ fn no_cap_by_default_even_with_50_lanes() {
 fn max_impl_refuses_the_third_impl() {
     let d = tmpdir("cap-impl");
     let c = ctx(&d, &config("max_impl = 2\nmax_rev = 1"));
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     assert_eq!(spawn(&c, 1, "impl").0, 0);
     assert_eq!(spawn(&c, 2, "impl").0, 0);
@@ -344,7 +342,7 @@ fn max_impl_refuses_the_third_impl() {
 fn design_lane_spawns_but_never_moves_the_issue() {
     let d = tmpdir("design");
     let c = ctx(&d, &config(SERIAL));
-    let sh = FakeShed::new(); // #771: lanes on shed, none live
+    let sh = FakeShed::new();
     sh.attach(&c);
     let r = happy().once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "");
     let (exit, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design"]);
@@ -369,7 +367,6 @@ fn design_lane_spawns_but_never_moves_the_issue() {
         (st.state.as_str(), st.branch.as_deref(), st.lane.as_deref()),
         ("queued", None, None)
     );
-    // It shows in shed like any lane: a live design agent is LANE_LIVE for a second design spawn.
     sh.set("sendmeter-design-12", |t| t["cwd"] = json!("/elsewhere"));
     let (exit, out) = run(&c, &happy(), &["spawn", "sendmeter", "12", "design"]);
     assert_eq!(exit, 3, "{out}");

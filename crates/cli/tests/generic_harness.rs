@@ -45,7 +45,6 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
     std::fs::create_dir_all(&wt).unwrap();
     let sp = json!({"role": "impl", "agent": LANE, "harness": "gemini", "pane": LANE, "worktree": wt});
     append(&c.state, &Event::new(T - 60, "sendmeter", Some(12), "spawn", sp)).unwrap();
-    // #771: the lane is a shed terminal, its harness gemini, its screen the menu.
     let sh = FakeShed::new();
     sh.attach(&c);
     sh.lane(LANE, "blocked", &wt);

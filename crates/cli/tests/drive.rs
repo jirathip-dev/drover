@@ -7,38 +7,31 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 thread_local! {
-    /// #771: this test's fake shed (libtest runs each test on its own thread): every ctx here runs its lanes on it.
     static SHED: Rc<FakeShed> = Rc::new(FakeShed::new());
 }
 
-/// This test's fake shed.
 fn sh() -> Rc<FakeShed> {
     SHED.with(Rc::clone)
 }
 
-/// `common::ctx`, its lanes on this test's shed.
 fn ctx(dir: &Path, config: &str) -> herdsman::Ctx {
     let c = common::ctx(dir, config);
     sh().attach(&c);
     c
 }
 
-/// Write fleet config `base` to `c`, its lanes still on this test's shed.
 fn reconfig(c: &herdsman::Ctx, base: &str) {
     std::fs::write(&c.config, sh().config(base)).unwrap();
 }
 
-/// No live lane.
 const NONE: &[(&str, &str, &str)] = &[];
 
-/// The lanes started (shed `run`) whose name starts with `prefix`, in order.
 fn started(prefix: &str) -> Vec<String> {
     let runs = sh().all("run").into_iter();
     let names = runs.filter_map(|p| p["name"].as_str().map(String::from));
     names.filter(|n| n.starts_with(prefix)).collect()
 }
 
-/// How many times lane `name` was typed a line starting with `text`.
 fn typed(name: &str, text: &str) -> usize {
     sh().sent(name).iter().filter(|t| t.starts_with(text)).count()
 }
@@ -87,8 +80,6 @@ fn strict(c: &herdsman::Ctx) {
     .unwrap();
 }
 
-/// A Fake on which spawns succeed and the host is calm; `live` (name, status, cwd) = the lanes shed runs now (every
-/// other lane it ran has exited).
 fn fake<A: AsRef<str>, B: AsRef<str>, C: AsRef<str>>(live: &[(A, B, C)]) -> Fake {
     let sh = sh();
     let names: Vec<&str> = live.iter().map(|l| l.0.as_ref()).collect();
@@ -162,7 +153,6 @@ fn review_spawns_rev_at_the_pushed_head() {
     let c = setup("drive-review");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("abc");
-    // The reviewer's branch is new: made from the PR's head.
     let r = fake(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy())])
         .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
         .reply("gh pr view issue-12", &pr(&head, "pending"))
@@ -435,7 +425,7 @@ fn clean_reclaims_merged_lanes() {
     assert_eq!(steps, ["clean"], "{out}");
     let rm = format!("git -C /tmp/does-not-matter/sendmeter worktree remove {}", wt.display());
     assert!(r.called(&rm), "{:?}", r.calls.borrow());
-    std::fs::remove_dir_all(&wt).unwrap(); // git removed it
+    std::fs::remove_dir_all(&wt).unwrap();
     idle(&c, &r);
 }
 
@@ -461,7 +451,6 @@ fn idle_lane(name: &str, merged: bool, status: &str) -> (herdsman::Ctx, PathBuf,
     (c, wt, r)
 }
 
-/// Fake `.0`, each call it answers logged (`.1`) with how many shed requests came before it: the order of the two.
 struct Stamped(Fake, std::sync::Mutex<Vec<(String, usize)>>);
 impl herdsman::runner::Runner for Stamped {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
@@ -474,7 +463,6 @@ impl herdsman::runner::Runner for Stamped {
     }
 }
 impl Stamped {
-    /// The shed requests made before the first call starting with `prefix`.
     fn at(&self, prefix: &str) -> Option<usize> {
         let calls = self.1.lock().unwrap();
         calls.iter().find(|c| c.0.starts_with(prefix)).map(|c| c.1)
@@ -634,7 +622,7 @@ fn a_pr_merged_outside_herdsman_is_logged_merged_and_its_lanes_cleaned() {
     assert_eq!(steps, ["clean"], "{out}");
     let rm = format!("git -C /tmp/does-not-matter/sendmeter worktree remove {}", wt.display());
     assert!(r.called(&rm), "{:?}", r.calls.borrow());
-    std::fs::remove_dir_all(&wt).unwrap(); // git removed it
+    std::fs::remove_dir_all(&wt).unwrap();
     assert!(!run(&c, &r, &["waiting", "sendmeter"]).1.contains("#12"));
     // The repair is once: a later pass logs nothing more.
     idle(&c, &r);
@@ -688,7 +676,6 @@ fn paused_fleets_and_host_busy_are_no_ops() {
     assert_eq!(run(&c, &Fake::default(), &["pause", "sendmeter"]).0, 0);
     let r = fake(NONE).reply("git -C", "");
     idle(&c, &r);
-    // Only drive's intake of shed's events: no lane is read, started or ended.
     assert!(sh().methods().iter().all(|m| m == "events"), "{:?}", sh().methods());
     assert_eq!(
         herdsman::drive::last_pass(&c, "sendmeter"),
@@ -757,7 +744,6 @@ fn a_dead_pids_lock_is_taken_over_at_once_and_a_live_ones_respected() {
     let gone = || assert!(lease_on(&c, "drive.lock").is_none(), "released after the pass");
     assert_eq!(drive(&c, &dead).1, ["start"]);
     gone();
-    // The guard releases the lease when the pass fails (shed is down), too.
     lease_as(&c, "drive.lock", 4242, c.now, 3600);
     std::fs::remove_file(&sh().sock).unwrap();
     let bad = Fake::default().once("kill -0 4242", 1, "");
@@ -820,7 +806,6 @@ fn the_drive_summary_groups_per_action() {
     assert_eq!(herdsman::drive::summary("sendmeter", ""), "sendmeter: nothing due");
 }
 
-/// Sleeps 3 s on each lane's worktree add (a spawn): a slow drive pass.
 struct Slow(Fake);
 impl herdsman::runner::Runner for Slow {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
@@ -1062,7 +1047,6 @@ fn fan_fake<A: AsRef<str>, B: AsRef<str>, C: AsRef<str>>(live: &[(A, B, C)]) -> 
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
 }
 
-/// The live lanes: issues `ns`' impl lanes working.
 fn working(c: &herdsman::Ctx, ns: &[u64]) -> Vec<(String, &'static str, String)> {
     let wt = |n: u64| {
         c.worktrees
@@ -2280,7 +2264,6 @@ fn a_workflow_that_never_started_is_ci_broken_and_gets_a_fix_round() {
     assert!(state(&c).starts_with("fix"), "{}", state(&c));
 }
 
-/// #425: #12's impl lane held on #11, which merged; `live` = the lanes shed runs.
 fn held(name: &str, live: &[(&str, &str, &str)]) -> (herdsman::Ctx, Fake) {
     let c = setup(name);
     lane(&c, c.now - 600, "impl", "sendmeter-impl-12", "issue-12");
@@ -2409,7 +2392,6 @@ fn two_respawns_without_a_push_go_to_needs_human() {
         now: c.now + s,
         ..c.clone()
     };
-    // Each respawned lane ends again without a push.
     let ends = || sh().exit("sendmeter-impl-12");
     assert_eq!(drive(&c, &r).1, ["respawn"]);
     ends();
@@ -2650,7 +2632,6 @@ fn a_lesson_issue_parked_lane_ends_is_closed_on_install() {
     assert_eq!(state(&c), "closed");
 }
 
-/// #534: cooee #1's shape: a reviewer spawned before the impl lane, done in its pane, holds the name the next review plans.
 fn old_reviewer(name: &str, status: &str) -> (herdsman::Ctx, Fake) {
     let c = setup(name);
     let rev = lane(&c, 5, "rev", "sendmeter-rev-12-r1", "rev-12-r1");

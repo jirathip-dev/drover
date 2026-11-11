@@ -12,14 +12,12 @@ const NOW: u64 = 1_000_000;
 const WT: &str = "/Users/me/.local/share/herdsman/work/sendmeter/issue-9";
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
 
-/// #771: the fleet's lanes run on shed (`sh`), this host's and, over `shed connect`, the Air's.
 fn setup(name: &str, extra: &str) -> (herdsman::Ctx, FakeShed) {
     let (c, sh) = setup_on(name, extra);
     sh.attach(&c);
     (c, sh)
 }
 
-/// `setup`, its shed not yet attached (lanes on herdr).
 fn setup_on(name: &str, extra: &str) -> (herdsman::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n{extra}");
@@ -55,10 +53,8 @@ fn local() -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// `local`, its lanes on herdr: herdr-only until `shed::With` forwards `run_for` (#771 report), for #721.
 fn local_herdr() -> Fake {
     local()
-        // The tick's first step is `herdr status` (timer.rs).
         .reply(
             "herdr status",
             "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
@@ -126,7 +122,6 @@ impl Runner for Hang {
 
 #[test]
 fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
-    // Still herdr: with shed, `shed::With` drops `run_for`'s limit, so the Air probe would hang the tick (#771 report).
     let (c, _sh) = setup_on("stuck-air", "");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     // #11's lane is live on the Air.
@@ -178,9 +173,8 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
 #[test]
 fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
     let (c, _sh) = setup("stuck-disabled", "enabled = false");
-    // The tick's herdr status gate is src's (timer.rs `tick`), until #721.
     let r = local().reply("herdr status", "server:\n  status: running\n");
-    let air = FakeShed::new(); // the Air's shed: no lanes
+    let air = FakeShed::new();
     let on = OverSsh {
         f: &r,
         hosts: vec![("air", &air)],
@@ -192,7 +186,6 @@ fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
         "{out}"
     );
     let calls = r.calls.borrow();
-    // Its worktree is never removed there (on shed, `git worktree remove` over ssh).
     let removes = calls
         .iter()
         .filter(|l| l.contains(" air ") && l.contains("worktree remove"));
@@ -215,7 +208,6 @@ fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
 /// nothing else sent there.
 #[test]
 fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
-    // `setup_on`: herdr-default lanes; on shed `shed::With` drops `run_for`, unbounding the probe (#721).
     let (c, _sh) = setup_on("stuck-disabled-silent", "enabled = false");
     let r = Hang {
         f: local_herdr(),

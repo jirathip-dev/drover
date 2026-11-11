@@ -27,7 +27,6 @@ fn lane_spawn(c: &herdsman::Ctx, ts: u64) {
     .unwrap();
 }
 
-/// `c`'s lanes on a fake shed, `LANE` live there (its pane is its name).
 fn shed(c: &herdsman::Ctx) -> FakeShed {
     let sh = FakeShed::new();
     sh.attach(c);
@@ -35,7 +34,6 @@ fn shed(c: &herdsman::Ctx) -> FakeShed {
     sh
 }
 
-/// Whether shed had `text` typed into `LANE`, then Enter pressed on it after.
 fn typed(sh: &FakeShed, text: &str) -> bool {
     let seen = sh.lock().seen.clone();
     let send = (seen.iter()).position(|(m, p)| m == "send" && p["name"] == LANE && p["text"] == text);
@@ -43,7 +41,6 @@ fn typed(sh: &FakeShed, text: &str) -> bool {
     matches!((send, enter), (Some(s), Some(e)) if s < e)
 }
 
-/// The (sends, keys, waits) shed got for `LANE`.
 fn calls(sh: &FakeShed) -> (usize, usize, usize) {
     let n = |m: &str| sh.all(m).iter().filter(|p| p["name"] == LANE).count();
     (n("send"), n("keys"), n("wait"))
@@ -254,7 +251,6 @@ fn answer_to_a_gone_agent_records_the_decision_and_exits_0() {
     assert_eq!(out.trim(), want);
     assert_eq!(kinds(&c, "decision")[0].str("choice"), Some("yes, to 5,200"));
 
-    // A pane in the log whose lane shed no longer runs: the prompt fails, the decision is still recorded.
     let d = tmpdir("ask-gone");
     let c = ctx(&d, CONFIG);
     let sh = FakeShed::new();
@@ -523,7 +519,7 @@ fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
     let d = tmpdir("ask-undelivered");
     let c = ctx(&d, CONFIG);
     let sh = shed(&c);
-    sh.wait_ends(LANE, "timeout"); // it stays idle
+    sh.wait_ends(LANE, "timeout");
     lane_spawn(&c, NOW - 60);
     ask(&c);
     assert_eq!(run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "2"]).0, 0);
@@ -605,7 +601,7 @@ fn an_ask_made_during_its_lanes_startup_stays_open_answerable_and_alerts_once() 
         append(&c.state, &e).unwrap();
     }
     ask(&c);
-    append(&c.state, &ev("spawn", start, lane(LANE))).unwrap(); // logged after the ask, as in #2358
+    append(&c.state, &ev("spawn", start, lane(LANE))).unwrap();
     c.now = NOW;
     let (_, open) = run(&c, &Fake::default(), &["asks", "sendmeter"]);
     assert!(open.contains("q1 #36"), "{open}");

@@ -13,9 +13,6 @@ use std::time::{Duration, Instant};
 
 const ADDR: &str = "127.0.0.1:7777";
 const TIMEOUT: &str = "timed out waiting for agent startup";
-/// Thread t1 (conductor asleep: never started) with ask q1 from it; #771: on shed-acp (#608), the fleet's own runtime
-/// on `b`, its conductor signed in with account C (an ACP session runs under the lane guard, #565), the profiles
-/// synced with the real binary as their hook.
 fn setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     let cfg = format!(
         "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
@@ -43,7 +40,6 @@ fn setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     c
 }
 
-/// shed's CLI answers (`shed run --acp`, `shed send`); the installed ACP agent runs `echo`.
 fn acp() -> Fake {
     let agents =
         serde_json::json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
@@ -53,7 +49,6 @@ fn acp() -> Fake {
         .reply("shed send", "")
 }
 
-/// `.0` (shed's CLI), with `shed run` blocking for 30 s (or until `.2`); `.1` once a start is under way.
 struct Slow(Cli<'static>, AtomicBool, AtomicBool);
 impl Slow {
     fn block(&self, prog: &str, args: &[String]) {

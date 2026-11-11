@@ -35,7 +35,6 @@ fn pr(head: &str) -> String {
     .to_string()
 }
 
-/// Spawns succeed, the host is calm; the PR at `head` changes `files` (lanes on the ctx's fake shed).
 fn fake(head: &str, files: &str) -> Fake {
     Fake::default()
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
@@ -52,14 +51,12 @@ fn fake(head: &str, files: &str) -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// Whether a lane named `prefix…` was started on `sh`.
 fn started(sh: &FakeShed, prefix: &str) -> bool {
     let runs = sh.all("run");
     runs.iter()
         .any(|p| p["name"].as_str().is_some_and(|n| n.starts_with(prefix)))
 }
 
-/// #771: a ctx for `cfg` whose lanes run on a fake shed (none live).
 fn sctx(name: &str, cfg: &str) -> (herdsman::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), cfg);
     let sh = FakeShed::new();

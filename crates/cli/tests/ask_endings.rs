@@ -131,8 +131,6 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
     assert!(row(&c, "q1").ends_with("[withdrawn → q2]"), "{}", row(&c, "q1"));
 }
 
-/// A conductor role (signed in with account C) whose fleet runs on shed `sh` as ACP sessions, its profiles synced
-/// (the real binary their hook), and a handoff card from t1 to the repo with t2 and a new thread as its rows.
 fn handoff(name: &str, sh: &FakeShed) -> herdsman::Ctx {
     let cfg = format!(
         "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
@@ -154,7 +152,6 @@ fn handoff(name: &str, sh: &FakeShed) -> herdsman::Ctx {
 fn a_handoff_ask_closes_when_it_is_delivered_and_when_it_fails() {
     let sh = FakeShed::new();
     let c = handoff("handoff-ok", &sh);
-    // shed's CLI starts t2's conductor as an ACP session (its installed adapter) and sends it the handoff.
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
     let f = Fake::default()
         .reply("shed agents --json", &agents.to_string())
@@ -177,7 +174,6 @@ fn a_handoff_ask_closes_when_it_is_delivered_and_when_it_fails() {
     assert!(open(&c).is_empty());
     assert!(row(&c, "q1").ends_with("[delivered to t2]"), "{}", row(&c, "q1"));
 
-    // shed is down: nothing reaches t2's conductor; the card closes as failed.
     let c = handoff("handoff-failed", &FakeShed::new());
     let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "1"]);
     assert_ne!(code, 0, "{out}");

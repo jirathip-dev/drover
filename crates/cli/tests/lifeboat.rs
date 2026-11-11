@@ -18,8 +18,6 @@ fn fixture(name: &str) -> (herdsman::Ctx, OnShed) {
     (c, r)
 }
 
-/// #771: herdr-only (#721): `fixture` with its lanes as herdr shows them. On shed a page load still asks bazzite's
-/// shed over ssh (the step's snapshot holds no remote shed lanes), which #721 must fix before it moves this.
 fn herdr_fixture(name: &str) -> (herdsman::Ctx, Fake) {
     let (c, _) = v1_board(name);
     let list = agents(&[(IMPL, "working", "/x", "w1:p2"), (REV, "blocked", "/x", "w1:p3")]);
@@ -40,7 +38,6 @@ fn herdr_fixture(name: &str) -> (herdsman::Ctx, Fake) {
     (c, r)
 }
 
-/// #30 queued, ask q1 on #12 and run cards r1 and r2 open.
 fn seed(c: &herdsman::Ctx, r: &Fake) {
     assert_eq!(run(c, r, &["queue", "sendmeter", "add", "30"]).0, 0);
     let ev = |issue, kind, d| append(&c.state, &Event::new(T - 50, "sendmeter", issue, kind, d)).unwrap();

@@ -370,7 +370,7 @@ fn merge_tears_down_clean_lanes_and_keeps_unpushed_ones() {
         p.to_string_lossy().into_owned()
     };
     let (imp, rev) = (wt("issue-12"), wt("rev-12-r1"));
-    let sh = FakeShed::new(); // #771: both lanes live on shed
+    let sh = FakeShed::new();
     sh.attach(&c);
     for (ts, role, w) in [(11, "impl", &imp), (12, "rev", &rev)] {
         let agent = format!("{role}-12");

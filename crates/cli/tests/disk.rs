@@ -26,7 +26,6 @@ fn build(wt: &Path, dir: &str, bytes: usize) -> PathBuf {
     wt.join(dir)
 }
 
-/// A lane's spawn event (a shed lane's: its pane its name, no workspace) and its worktree dir under the root.
 fn lane(c: &herdsman::Ctx, ts: u64, issue: u64, role: &str, name: &str) -> PathBuf {
     let w = c.worktrees.join("sendmeter").join(name);
     std::fs::create_dir_all(&w).unwrap();
@@ -207,7 +206,6 @@ fn the_hourly_sweep_runs_once_per_hour() {
     merged(&c, 12);
     let ahead = |n: &str| format!("git -C {} rev-list", c.worktrees.join("sendmeter").join(n).display());
     let r = || {
-        // tick's herdr gate (src, until #721 drops it) is the one herdr word left.
         Fake::default()
             .reply("herdr status", "version: 1\nversion: 1\n")
             .reply(&ahead("issue-12"), "0\n")
@@ -229,7 +227,7 @@ fn the_hourly_sweep_runs_once_per_hour() {
     };
     let (n, out) = tick(&c);
     assert_eq!(n, 1, "{out}");
-    std::fs::remove_dir_all(first).unwrap(); // what git's removal does
+    std::fs::remove_dir_all(first).unwrap();
     lane(&c, 60, 13, "impl", "issue-13");
     merged(&c, 13);
     c.now = NOW + 3599;
@@ -254,7 +252,6 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-/// Real git; `date` is scripted.
 struct GitHerdr(Fake);
 
 impl herdsman::runner::Runner for GitHerdr {
@@ -447,8 +444,6 @@ fn the_host_tab_removes_orphans_for_a_paired_device_only() {
     assert!(!old.exists() && !host_tab(&s, ADDR, NOW).contains("remove orphans"));
 }
 
-/// Real git; a `ssh <host> -- <line>` runs `<line>` here (the Air shares this disk), but its `shed connect` is the
-/// Air's own fake shed (`.1`); `date` is scripted.
 struct TwoHosts<'a>(Fake, &'a FakeShed);
 
 impl herdsman::runner::Runner for TwoHosts<'_> {

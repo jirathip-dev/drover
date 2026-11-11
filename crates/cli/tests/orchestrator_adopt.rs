@@ -29,8 +29,6 @@ fn setup(name: &str) -> herdsman::Ctx {
     c
 }
 
-/// #771: `setup` on shed-acp (#608): the fleet's own runtime on `b`, its conductor signed in with account C (an ACP
-/// session runs under the lane guard, #565), the profiles synced with the real binary as their hook.
 fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     let d = tmpdir(name);
     let cfg = format!(
@@ -48,7 +46,6 @@ fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     c
 }
 
-/// #771: shed's CLI answers (`shed run --acp`, `shed send`); the installed ACP agent runs `echo`.
 fn acp() -> Fake {
     let agents =
         serde_json::json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
@@ -79,8 +76,6 @@ fn herdr(list: &str) -> Fake {
         .reply("herdr agent prompt", "")
 }
 
-/// Post `text` to t1 from a paired phone (its delivery runs before `respond` returns); the event log after. (`Server::new`
-/// takes its runner as it is: a shed-acp caller wraps it, as `serve` does.)
 fn say(c: &herdsman::Ctx, r: &dyn herdsman::runner::Runner, text: &str) -> String {
     let s = Server::new(c, r, Some(ADDR.into()));
     let cookie = pair(&s, c, "Mozilla/5.0 (iPhone)", T);
@@ -99,7 +94,6 @@ fn starts(c: &herdsman::Ctx) -> Vec<herdsman::events::Event> {
     all.into_iter().filter(|e| e.kind == "orchestrator-start").collect()
 }
 
-/// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
 fn a_start_that_times_out_with_its_agent_up_is_adopted_and_its_workspace_kept() {
     let c = setup("adopt-timeout");
@@ -118,7 +112,6 @@ fn a_start_that_times_out_with_its_agent_up_is_adopted_and_its_workspace_kept() 
     );
 }
 
-/// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
 fn a_name_taken_by_the_threads_own_live_agent_is_adopted_and_the_line_typed_in() {
     let c = setup("adopt-taken");
@@ -138,7 +131,6 @@ fn a_name_taken_by_the_threads_own_live_agent_is_adopted_and_the_line_typed_in()
     );
 }
 
-/// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
 fn a_name_taken_by_an_agent_in_another_folder_is_still_not_delivered() {
     let c = setup("adopt-elsewhere");
@@ -151,7 +143,6 @@ fn a_name_taken_by_an_agent_in_another_folder_is_still_not_delivered() {
     assert!(starts(&c).is_empty());
 }
 
-/// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
 fn a_failed_start_shows_herdrs_message_not_its_json() {
     let c = setup("adopt-message");
@@ -169,8 +160,6 @@ fn a_failed_start_shows_herdrs_message_not_its_json() {
     assert!(r.called("herdr workspace close w9"), "{:?}", r.calls.borrow());
 }
 
-/// shed's CLI whose `shed run` holds until the test's go (telling it it began); the session exists once let go. Its
-/// `sleep` is real (a delivery waiting on the start's lock waits in real time).
 struct Slow<'a> {
     cli: Cli<'a>,
     began: Mutex<Sender<()>>,
@@ -204,7 +193,6 @@ fn two_messages_while_a_start_is_in_flight_start_one_orchestrator_and_reach_it_i
         began_rx.recv_timeout(Duration::from_secs(10)).unwrap();
         let before = lists();
         let second = s.spawn(|| run(&c, &r, &["thread", "say", "t1", "two"]));
-        // Unserialized, the second delivery lists shed's terminals at once (no conductor yet) and starts a second one.
         std::thread::sleep(Duration::from_millis(500));
         let raced = lists() > before;
         go.send(()).unwrap();
@@ -220,7 +208,6 @@ fn two_messages_while_a_start_is_in_flight_start_one_orchestrator_and_reach_it_i
     assert!(typed > f.index("shed run"), "{:?}", f.calls.borrow());
 }
 
-/// #623: a start that fails (not a refusal) is tried once more; the thread shows one row.
 #[test]
 fn a_failed_start_is_tried_once_more_and_shows_one_row() {
     let b = FakeShed::new();
@@ -233,7 +220,6 @@ fn a_failed_start_is_tried_once_more_and_shows_one_row() {
     assert!(log.contains("bridge down"), "{log}");
     assert_eq!(f.count("shed run"), 2, "{:?}", f.calls.borrow());
     assert!(starts(&c).is_empty());
-    // One failed try, then the second goes in: delivered.
     let c = acp_setup("adopt-retry-once", &b);
     let f = acp().once_err("shed run", 1, "bridge down");
     let log = say(&c, &b.on(&b.cli(&f)), "hello");
@@ -295,7 +281,6 @@ impl herdsman::runner::Runner for Late {
     }
 }
 
-/// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
 fn a_start_that_times_out_and_whose_agent_comes_up_20_s_later_is_adopted_with_no_workspace_closed() {
     let c = setup("slow-start");
@@ -311,7 +296,6 @@ fn a_start_that_times_out_and_whose_agent_comes_up_20_s_later_is_adopted_with_no
     );
 }
 
-/// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
 fn two_messages_1_s_apart_during_a_slow_start_are_both_delivered_in_order() {
     let c = setup("slow-two");
@@ -337,7 +321,6 @@ fn two_messages_1_s_apart_during_a_slow_start_are_both_delivered_in_order() {
 
 const LOST: &str = r#"{"error":{"code":"agent_name_not_found","message":"named agent orchestrator-t1 no longer owns the target terminal"}}"#;
 
-/// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
 fn a_stale_name_is_cleared_and_the_start_succeeds_on_its_second_try() {
     let c = setup("stale-name");
@@ -368,7 +351,6 @@ const NOT_READY: &str = r#"{"error":{"code":"agent_not_ready","message":"agent o
 const TRUST_LIVE: &str = include_str!("golden/spawn/trust-live.txt");
 const BYPASS: &str = " WARNING: Claude Code running in Bypass Permissions mode\n\n By proceeding, you accept all responsibility?\n\n ❯ 1. No, exit\n   2. Yes, I accept\n\n Enter to confirm · Esc to cancel\n";
 
-/// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
 fn a_orchestrator_start_blocked_by_a_known_first_start_prompt_answers_it_and_delivers() {
     for (screen, prompt, keys) in [
@@ -409,7 +391,6 @@ fn a_orchestrator_start_blocked_by_a_known_first_start_prompt_answers_it_and_del
     }
 }
 
-/// herdr-only (#721 deletes it): herdr `agent start` error handling.
 #[test]
 fn a_orchestrator_start_blocked_by_an_unknown_prompt_shows_its_redacted_screen() {
     let c = setup("first-start-unknown");

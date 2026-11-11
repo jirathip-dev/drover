@@ -30,9 +30,6 @@ fn setup(name: &str) -> herdsman::Ctx {
     ctx(&tmpdir(name), &text)
 }
 
-/// #771: `setup` on shed-acp (#608): the fleet's own runtime on `b`, its impl role (so its default conductor) on claude
-/// signed in with account C (an ACP session runs under the lane guard, #565), the profiles synced with the real binary
-/// as their hook.
 fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     let text = CONFIG
         .replace(
@@ -52,8 +49,6 @@ fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
     c
 }
 
-/// shed's CLI answers (`shed run --acp`, `shed send`; the installed ACP agent runs `echo`); `which claude` finds it
-/// (doctor's harness row).
 fn host() -> Fake {
     let agents =
         serde_json::json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
@@ -69,7 +64,6 @@ fn starts(c: &herdsman::Ctx) -> Vec<Event> {
     all.filter(|e| e.kind == "orchestrator-start").collect()
 }
 
-/// The conductor's `shed run --acp` line.
 fn start_line(r: &Fake) -> String {
     let calls = r.calls.borrow();
     let start = calls.iter().find(|c| c.starts_with("shed run --acp claude-acp"));
@@ -164,7 +158,6 @@ fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_
 fn a_orchestrator_choice_that_fails_doctor_is_refused_and_leaves_fleet_toml_alone() {
     let c = setup("cdef-doctor");
     let orig = std::fs::read(&c.config).unwrap();
-    // `which hermes` finds it (doctor's harness row).
     let r = Fake::default().reply("which hermes", "/usr/local/bin/hermes\n");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);

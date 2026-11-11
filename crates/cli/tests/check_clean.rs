@@ -23,7 +23,6 @@ fn spawn_ev(c: &herdsman::Ctx, ts: u64, issue: u64, agent: &str) {
     );
 }
 
-/// Ctx `c`'s lanes on a fake shed, `lanes` (name, reported state) running in `/x`.
 fn shed(c: &herdsman::Ctx, lanes: &[(&str, &str)]) -> FakeShed {
     let sh = FakeShed::new();
     sh.attach(c);
@@ -232,7 +231,6 @@ fn clean_removes_only_merged_clean_idle_lanes() {
         wt("issue-14"),
         wt("issue-15"),
     );
-    // On shed a lane's pane is its name, and it has no herdr workspace.
     let lane = |ts, issue, role: &str, w: &str| {
         let agent = format!("{role}-{issue}");
         let d = json!({"role": role, "agent": agent, "worktree": w, "pane": agent, "runtime": "shed"});
@@ -348,7 +346,6 @@ fn clean_removes_only_merged_clean_idle_lanes() {
     assert!(cleaned.contains(&a) && cleaned.contains(&b));
 }
 
-/// Real git; the rest scripted (the lanes on a fake shed, none live).
 struct RealGit(Fake);
 
 impl herdsman::runner::Runner for RealGit {
@@ -665,7 +662,6 @@ fn orphan_lane_fires_once_per_agent() {
 }
 
 /// #128: a verdict closes the reviewer's pane and removes its worktree; a dirty one stays, with the reason logged;
-/// one shed still shows working is untouched.
 #[test]
 fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
     const REV: &str = "sendmeter-rev-12-r1";
@@ -874,7 +870,7 @@ fn clean_and_the_wip_snapshot_treat_spawns_claude_files_as_the_lanes_own() {
             ts,
             issue,
             "spawn",
-            json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": w, "pane": format!("w{issue}:p1"), "workspace": format!("w{issue}")}),
+            json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": w, "pane": format!("impl-{issue}"), "runtime": "shed"}),
         );
         ev(
             &c,
@@ -884,7 +880,8 @@ fn clean_and_the_wip_snapshot_treat_spawns_claude_files_as_the_lanes_own() {
             json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
         );
     }
-    let r = || GitHerdr(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let _sh = shed(&c, &[]);
+    let r = || RealGit(Fake::default());
     let (code, out) = run(&c, &r(), &["clean", "--lane", "impl-12", "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(!ours.exists(), "{out}");

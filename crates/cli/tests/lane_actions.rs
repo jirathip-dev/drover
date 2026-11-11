@@ -9,8 +9,6 @@ const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-12";
 
-/// sendmeter #12's impl lane in a real (empty) worktree dir, on a fake shed (its pane is its name; the test makes it
-/// live there); git answers per test.
 fn lane(name: &str) -> (herdsman::Ctx, String, FakeShed) {
     let d = tmpdir(name);
     let c = ctx(&d, CONFIG);
@@ -24,12 +22,10 @@ fn lane(name: &str) -> (herdsman::Ctx, String, FakeShed) {
     (c, wt, sh)
 }
 
-/// Whether shed closed the lane's pane (`kill`, then `rm`).
 fn closed(sh: &FakeShed) -> bool {
     sh.called("kill", LANE) && sh.called("rm", LANE)
 }
 
-/// Runner `f`, noting at each `git … push` whether shed had closed the lane's pane yet.
 struct AtPush<'a>(Fake, &'a FakeShed, Shared<Vec<bool>>);
 
 impl herdsman::runner::Runner for AtPush<'_> {
@@ -109,7 +105,6 @@ fn kill_pushes_wip_then_closes_and_logs() {
             && at("reset -q -- .brief.md") < at("commit -q --no-verify -m wip: kill snapshot")
     );
     assert!(at("commit") < at(&format!("push origin HEAD:refs/heads/wip/{LANE}-20261031-120000-")));
-    // The pane closes after the push: shed's terminal was still up when it ran, and is gone now.
     assert!(closed(&sh) && !sh.has(LANE), "{:?}", sh.methods());
     // Never main/staging, never force: the one push names the wip ref.
     let pushes: Vec<String> = r
@@ -198,7 +193,6 @@ fn kill_skips_lockfile_checksums_but_not_secrets() {
 }
 
 /// Real git for the lane's worktree (a clone of a bare origin, `.brief.md` gitignored, the lane
-/// scratch written), failing any git call containing `fail`; date is faked (lanes are the test's fake shed).
 struct RealGit(Fake, &'static str);
 
 impl herdsman::runner::Runner for RealGit {
@@ -344,7 +338,6 @@ fn close_shuts_an_others_pane_and_refuses_lanes() {
         (e.kind.as_str(), e.str("agent")),
         ("closed-other", Some("dsh-tui-test"))
     );
-    // A lane, by name (on shed also its pane id): IS_LANE, nothing closes.
     let (code, out) = run(&c, &r, &["close", LANE]);
     assert!(code == 3 && out.starts_with("REFUSED IS_LANE"), "{out}");
     assert!(!sh.called("kill", LANE) && sh.has(LANE));
@@ -490,7 +483,6 @@ fn lane_pages_back_through_the_rolling_transcript() {
     assert!(sh.all("read").contains(&recent), "{:?}", sh.all("read"));
 }
 
-/// #218: a lane shed no longer runs reads back its stored transcript (the last page, no live block); none stored: 404.
 #[test]
 fn a_gone_lane_reads_its_stored_transcript() {
     let (c, _, sh) = lane("gone-transcript");
@@ -899,7 +891,7 @@ fn wip_prune_keeps_only_the_newest_of_a_closed_issue() {
         &Event::new(T, "sendmeter", Some(49), "spawn", json!({"role": "impl"})),
     )
     .unwrap();
-    let _sh = FakeShed::attached(&c); // `clean` lists the fleet's lanes
+    let _sh = FakeShed::attached(&c);
     let r = RealGit(Fake::default(), "");
     let remote = || sh_git(&["ls-remote", "--heads", &o, "wip/*"]);
     let (code, out) = run(&c, &r, &["wip", "prune", "sendmeter", "--dry-run"]);

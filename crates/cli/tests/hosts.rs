@@ -1,8 +1,3 @@
-//! #157: multi-host lanes on two machines (`mini`, this host; `bazzite`, over `ssh`), #771: each host's lanes on its
-//! own fake shed (bazzite's through `shed connect` over ssh), and fake probes: tags, needs and NO_HOST, least-busy
-//! placement, per-host admission, every lane call on its host, a remote clean, an offline host that never pages, and
-//! the on/off switch (amendment A). Tests of herdr's own words (its health rows, `agent start` retries, workspaces) keep
-//! herdr's replies: #721 deletes them with herdr.
 mod common;
 use common::*;
 use herdsman::config::Config;
@@ -37,8 +32,6 @@ fn setup(name: &str, extra: &str, bazzite_up: bool, seen: u64) -> herdsman::Ctx 
     c
 }
 
-/// Both hosts' probes; mini at `mini` load/cpu, bazzite at `remote` (load ÷ 4 cpus, Linux `/proc`). Their lanes:
-/// `on_shed` and `two`.
 fn fake(mini: f64, remote: f64) -> Fake {
     Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
@@ -55,13 +48,11 @@ fn fake(mini: f64, remote: f64) -> Fake {
         )
 }
 
-/// herdr-only tests (#721 deletes them): both hosts' herdr answering, no agents.
 fn herdr_lists(f: Fake) -> Fake {
     f.reply("herdr agent list", NO_AGENTS)
         .reply("herdr --machine bazzite agent list", NO_AGENTS)
 }
 
-/// `f`, bazzite reachable: its lanes on its own shed `bazzite`, through `shed connect` over ssh.
 fn two<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
     OverSsh {
         f,
@@ -69,7 +60,6 @@ fn two<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
     }
 }
 
-/// The index in `r`'s calls of the first `shed connect` (over ssh) carrying a `method` request.
 fn shed_call_at(r: &Fake, method: &str) -> Option<usize> {
     let calls = r.calls.borrow();
     let at = calls.iter().enumerate().filter(|(_, c)| c.contains("'shed' 'connect'"));
@@ -84,8 +74,6 @@ const IMPL: &str = "sendmeter-impl-12";
 const HERDR_STATUS: &str = "Client:\n  version: 0.9.5\n\nserver:\n  version: 0.9.5\n";
 
 /// #235: replies that make bazzite healthy: herdr same version in its login session, git over SSH, gh and Claude
-/// logged in inside a pane, and this herdsman's version. herdr's version, session and login pane are `health`'s herdr
-/// rows (asked of every non-ACP host until #721 drops them).
 fn healthy(f: Fake) -> Fake {
     f.reply(&format!("{SSH}'sh' '-c' 'PATH="), HERDR_STATUS)
         .reply(&format!("{SSH}'sh' '-c' 'p=$(pgrep"), "")
@@ -105,21 +93,18 @@ fn ev(c: &herdsman::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) 
     append(&c.state, &Event::new(ts, "sendmeter", Some(issue), kind, d)).unwrap();
 }
 
-/// #12's impl lane spawned on bazzite's shed.
 fn remote_spawn(c: &herdsman::Ctx, ts: u64) {
     let d = json!({"role": "impl", "agent": IMPL, "harness": "claude", "pane": IMPL, "workspace": "",
                    "worktree": WT, "branch": "issue-12", "host": "bazzite", "machine": "bazzite"});
     ev(c, ts, 12, "spawn", d);
 }
 
-/// herdr-only tests: #12's impl lane spawned on bazzite's herdr, in pane w9:p1.
 fn herdr_remote_spawn(c: &herdsman::Ctx, ts: u64) {
     let d = json!({"role": "impl", "agent": IMPL, "harness": "claude", "pane": "w9:p1", "workspace": "w9",
                    "worktree": WT, "branch": "issue-12", "host": "bazzite", "machine": "bazzite"});
     ev(c, ts, 12, "spawn", d);
 }
 
-/// Where a lane of `role` on #`issue` goes: the host's name, or the refusal. Both hosts' sheds answer (no lanes).
 fn placed(c: &herdsman::Ctx, r: &Fake, issue: u64, role: &str, force: Option<&str>) -> Result<String, String> {
     let cfg = Config::load(&c.config).unwrap();
     let events = read(&c.state).unwrap();
@@ -261,7 +246,6 @@ fn with_account(c: &herdsman::Ctx) -> &'static str {
     TOKEN
 }
 
-/// A fresh lane on bazzite: its clone, worktree and files answer (its terminal: bazzite's shed, `two`).
 fn remote_fake() -> Fake {
     fake(0.1, 0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
@@ -272,7 +256,6 @@ fn remote_fake() -> Fake {
         .reply(&format!("{SSH}'rm' '-f'"), "")
 }
 
-/// herdr-only tests: a fresh lane on bazzite's herdr: its worktree, pane and agent start all answer.
 fn herdr_remote_fake() -> Fake {
     let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
     herdr_lists(remote_fake())
@@ -300,7 +283,6 @@ fn a_remote_lane_runs_every_command_on_its_host() {
     let (code, out) = run(&c, &two(&r, &bazzite), &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let calls = r.calls.borrow();
-    // The lane's terminal is bazzite's: started, typed into and waited on there, never here.
     for m in ["run", "send", "wait"] {
         assert!(bazzite.called(m, IMPL), "{m}: {:?}", bazzite.methods());
         assert!(!sh.called(m, IMPL), "{m} here: {:?}", sh.methods());
@@ -646,7 +628,7 @@ fn lane_cards_and_the_herd_name_the_host() {
     let (sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), Fake::default());
     bazzite.lane(IMPL, "working", WT);
     let r = two(&f, &bazzite);
-    let w = sh.on(&r); // the CLI and `serve_on` wrap theirs so
+    let w = sh.on(&r);
     let s = Server::new(&c, &w, Some(ADDR.into()));
     let page =
         String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
@@ -723,7 +705,6 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
 #[test]
 fn doctor_flags_a_stale_remote_fleet_toml_and_leaves_it() {
     let c = setup("hosts-stale-conf", "", true, 0);
-    // doctor's host section asks herdr there first (src doctor.rs, until #721): herdr-only.
     let r = healthy(herdr_lists(fake(0.1, 0.1)))
         .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n");
     let (_, out) = run(&c, &r, &["doctor"]);
@@ -896,7 +877,6 @@ fn an_older_herdsman_there_warns_and_is_rebuilt_at_this_sha_once() {
 }
 
 /// #236: a dry run places the lane first and prints the argvs exactly as a real spawn sends them: bazzite's home in
-/// every path, each over ssh to bazzite (#771: its shed's requests through `shed connect`), and no account token.
 #[test]
 fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
     let c = setup("hosts-dry", "", true, 0);
@@ -932,7 +912,7 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
         all.contains("'git' '-C' '/home/me/src/sendmeter' 'worktree' 'add' '-b' 'issue-12'"),
         "{all}"
     );
-    let typed = all.replace("'\\''", "'"); // the typed lines, out of their ssh quoting
+    let typed = all.replace("'\\''", "'");
     assert!(
         typed.contains("TOOLS='/home/me/bin'") && typed.contains(&format!("Read {WT}/.brief.md")),
         "{all}"
@@ -946,8 +926,6 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
         cmds.iter().any(|c| c.starts_with(&format!("{SSH}'shed' 'run' "))),
         "{all}"
     );
-    // Golden: the real spawn sends exactly these argvs (a shed line: that request to bazzite's shed). The branch is new
-    // there, as the plan assumes.
     let verify = format!("{SSH}'git' '-C' '/home/me/src/sendmeter' 'rev-parse' '--verify'");
     let new = herdsman::runner::Out {
         code: 1,
@@ -1057,7 +1035,6 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
         .reply(&format!("{SSH}'git' '-C' '{rev}' 'status'"), "")
         .reply(&format!("{SSH}'git' '-C' '{rev}' 'worktree' 'remove'"), "")
         .reply(&format!("{SSH}'rm'"), "");
-    // The reviewer's terminal there is gone (its harness ended): its close counts.
     let (sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     let r = two(&r, &bazzite);
     let cfg = Config::load(&c.config).unwrap();
@@ -1105,7 +1082,6 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
         "{:?}",
         f.calls.borrow()
     );
-    // On bazzite's shed: the prompt, then Enter, then the wait that confirms it; nothing here.
     let after: Vec<_> = bazzite.lock().seen[seen..]
         .iter()
         .filter(|(m, _)| ["send", "keys", "wait"].contains(&m.as_str()))
@@ -1124,7 +1100,6 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
         "{after:?}"
     );
     assert!(!sh.called("send", IMPL) && !sh.called("keys", IMPL));
-    // #304: plus the answer's kick of #12, the one call besides bazzite's shed.
     let calls = f.calls.borrow();
     let other: Vec<_> = calls.iter().filter(|c| !c.contains("'shed' 'connect'")).collect();
     assert_eq!(other.len(), 1, "{calls:?}");
@@ -1306,7 +1281,6 @@ fn a_lost_agent_name_on_the_main_host_retries_or_keeps_the_harness() {
     }
 }
 
-/// Both hosts idle (#12's impl lane live on bazzite: `live_on`).
 fn live_fake() -> Fake {
     Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
@@ -1321,7 +1295,6 @@ fn live_fake() -> Fake {
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
 }
 
-/// Bazzite's shed, #12's impl lane live there, idle in its worktree.
 fn live_on() -> FakeShed {
     let bazzite = FakeShed::new();
     bazzite.lane(IMPL, "idle", WT);
@@ -1407,7 +1380,6 @@ fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
         "lane-killed",
         json!({"role": "impl", "agent": "sendmeter-impl-12"}),
     );
-    // The branch is not here: the lane makes it at the pushed one.
     let r = fake(2.0, 0.1)
         .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
@@ -1547,7 +1519,6 @@ fn the_tick_drives_before_it_trims_remote_hosts() {
     let c = trim_setup("hosts-tick-trim", "");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let _sh = FakeShed::attached(&c);
-    // tick's herdr gate (src, until #721 drops it) is the one herdr word left.
     let r = fake(1.0, 0.1)
         .reply(
             "herdr status",
@@ -1693,9 +1664,6 @@ fn a_supersede_saves_a_remote_lanes_dirty_work_first() {
     }
 }
 
-/// #664: bazzite's merged lane, its agent still live there: `kill --yes` closes it there and sees it gone before
-/// printing `killed`, and the next `clean --yes` removes the worktree. (#771: a shed lane's pane is its name, so herdr's
-/// stale pane id has no shed case.)
 #[test]
 fn kill_closes_a_remote_lanes_live_pane_and_clean_then_removes_it() {
     let c = setup("hosts-kill-664", "", true, 0);
@@ -1803,9 +1771,6 @@ fn a_worktree_whose_gitfile_points_at_another_host_is_reported_not_removed() {
     assert!(!out.contains("removed"), "{out}");
 }
 
-/// #664: the Air's case: a merged lane `kill` already logged as killed, its terminal still idle in the worktree on
-/// bazzite's shed: clean keeps it while under `idle_merged_minutes`, then closes it there, sees it gone and removes the
-/// worktree.
 #[test]
 fn clean_closes_a_killed_lanes_leftover_shell_pane_then_removes_the_worktree() {
     let c = setup("hosts-leftover-664", "", true, 0);

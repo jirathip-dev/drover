@@ -88,7 +88,6 @@ fn fake(rev_head: &str, wt: &Path) -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// Spawn `args` (after `spawn sendmeter 12`) on a fake shed (#771: no lane live before it) and read the lane's brief.
 fn brief(c: &herdsman::Ctx, head: &str, args: &[&str]) -> String {
     let sh = FakeShed::new();
     sh.attach(c);

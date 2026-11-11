@@ -119,7 +119,6 @@ fn a_paired_report_is_kept_and_named_to_the_notifier() {
     );
 }
 
-/// A real `serve` with one lane (#771: live on a fake shed); returns its URL, a paired cookie (`name=value`) and the shed.
 fn board(c: &herdsman::Ctx) -> (String, String, FakeShed) {
     let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "worktree": "/wt/x"});
     append(&c.state, &Event::new(900_000, "sendmeter", Some(12), "spawn", sp)).unwrap();

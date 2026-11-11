@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// A server on a real socket (#771: its lanes on a fake shed, none live); returns its address and that shed.
 fn live_server(name: &str) -> (herdsman::Ctx, std::net::SocketAddr, FakeShed) {
     let c = ctx(&tmpdir(name), CONFIG);
     append(&c.state, &Event::new(T, "sendmeter", None, "note", json!({}))).unwrap();
@@ -25,8 +24,6 @@ fn live_server(name: &str) -> (herdsman::Ctx, std::net::SocketAddr, FakeShed) {
     (c, addr, sh)
 }
 
-/// #771: Fake `f` with its lanes on fake shed `sh`; each `sleep` (the host's time passing, as a key takes effect) shows
-/// the next of `later`'s (lane, screen) on that lane.
 struct Lanes {
     f: Fake,
     sh: FakeShed,
@@ -41,20 +38,16 @@ impl Lanes {
             later: std::sync::Mutex::default(),
         }
     }
-    /// Lane `name` live and blocked, its pane showing `screen`.
     fn blocked(&self, name: &str, screen: &str) {
         self.sh.lane(name, "blocked", "/x");
         self.sh.screen(name, screen);
     }
-    /// After the next `sleep`, lane `name`'s pane shows `screen`.
     fn then(&self, name: &str, screen: &str) {
         self.later.lock().unwrap().push((name.into(), screen.into()));
     }
-    /// Every key sent, as shed's `keys` requests.
     fn keys(&self) -> Vec<serde_json::Value> {
         self.sh.all("keys")
     }
-    /// How many panes were read.
     fn reads(&self) -> usize {
         self.sh.all("read").len()
     }
@@ -323,7 +316,6 @@ fn countdown_card_shows_reason_command_and_clears_when_the_prompt_goes() {
     assert!(!needs.contains("sendmeter-impl-12"), "no stale card: {needs}");
 }
 
-/// sendmeter-impl-12 (claude) blocked, its pane showing `imp`; sendmeter-rev-9-r1 too, showing `rev`.
 fn blocked(name: &str, imp: &str, rev: &str) -> (herdsman::Ctx, Lanes) {
     let c = ctx(&tmpdir(name), CONFIG);
     for (issue, role, agent) in [(12, "impl", "sendmeter-impl-12"), (9, "rev", "sendmeter-rev-9-r1")] {
@@ -742,7 +734,7 @@ fn unpaired_viewers_see_no_pane_text() {
         s
     };
     let (mut anon, mut dev) = (sub(""), sub(&ck));
-    let hello = drain(&mut anon, 1_500); // the watcher's first look: no lanes yet
+    let hello = drain(&mut anon, 1_500);
     assert!(
         !live.all("ls").is_empty() && !hello.contains("event: needs\n"),
         "{hello}"
@@ -770,7 +762,7 @@ fn unpaired_viewers_see_no_pane_text() {
 #[test]
 fn the_sampler_thread_fills_the_host() {
     let c = ctx(&tmpdir("sampler"), CONFIG);
-    let sh = FakeShed::new(); // #771: lanes on shed, none live
+    let sh = FakeShed::new();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let r = Fake::default()

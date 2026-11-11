@@ -10,7 +10,6 @@ use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
 const IMPL: &str = "sendmeter-impl-12";
-/// The `git worktree add` a lane's spawn on shed makes its worktree with.
 const ADD: &str = "git -C /tmp/does-not-matter/sendmeter worktree add";
 
 fn sha(p: &str) -> String {
@@ -21,7 +20,6 @@ fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
-/// #12 queued, its impl lane through three FAILs, then out of rounds (needs-human); lanes on a fake shed (#771).
 fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), CONFIG);
     let sh = FakeShed::attached(&c);
@@ -46,7 +44,6 @@ fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     (c, sh)
 }
 
-/// How many times shed was asked to start #12's impl lane.
 fn started(sh: &FakeShed) -> usize {
     sh.all("run").iter().filter(|p| p["name"] == IMPL).count()
 }

@@ -27,8 +27,6 @@ fn at(c: &herdsman::Ctx, secs: u64) -> herdsman::Ctx {
     }
 }
 
-/// #12's impl lane, spawned at ts 10 in a real worktree on a fake shed, where it sits idle (`live`) or is gone, and
-/// a Fake for the rest; `pr` = the PR view (`None`: no PR), `head` = the worktree's (`None`: unread).
 fn lane(name: &str, live: bool, pr: Option<&str>) -> (herdsman::Ctx, Fake, FakeShed) {
     lane_at(name, live, pr, None)
 }
@@ -108,12 +106,10 @@ fn texts(c: &herdsman::Ctx, r: &Fake) -> (String, String) {
 const NUDGE: &str = "herdsman: you reported `done`, but nothing new is pushed";
 const GO_ON: &str = "herdsman: continue the task";
 
-/// How many prompts starting `text` shed typed into the lane.
 fn typed(sh: &FakeShed, text: &str) -> usize {
     sh.sent(LANE).iter().filter(|t| t.starts_with(text)).count()
 }
 
-/// Whether the lane was started again (a shed `run`).
 fn respawned(sh: &FakeShed) -> bool {
     sh.methods().iter().any(|m| m == "run")
 }

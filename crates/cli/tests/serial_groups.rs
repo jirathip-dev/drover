@@ -24,7 +24,6 @@ fn config(keys: &str, tables: &str) -> String {
     )
 }
 
-/// #771: a ctx for `cfg` whose lanes run on a fake shed (no live lanes yet).
 fn sctx(name: &str, cfg: &str) -> (herdsman::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), cfg);
     let sh = FakeShed::new();
@@ -206,8 +205,6 @@ fn a_second_ci_push_holds_until_the_holder_merges_then_updates() {
     lane(&c, 9);
     lane(&c, 12);
     let r = fake(&[(12, "scripts/lib/ci.mjs\n")]);
-    // #444: the holder's lane is still at work (a gone one with no push would be respawned); #12's pushed and ended,
-    // its terminal kept (told to stop there).
     sh.lane("sendmeter-impl-9", "working", "/x");
     sh.lane("sendmeter-impl-12", "done", "/x");
     sh.exit("sendmeter-impl-12");

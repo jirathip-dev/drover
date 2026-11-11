@@ -143,7 +143,7 @@ fn a_tapped_ref_opens_that_thread_and_back_returns_scrolled_where_you_were() {
         "Mozilla/5.0 (iPhone)",
         now,
     );
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();

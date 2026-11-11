@@ -267,7 +267,7 @@ fn open_pr() -> String {
 #[test]
 fn with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_after_a_delivery() {
     let c = setup("hook-catchup");
-    let sh = FakeShed::new(); // no lanes
+    let sh = FakeShed::new();
     sh.attach(&c);
     let r = Fake::default()
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")

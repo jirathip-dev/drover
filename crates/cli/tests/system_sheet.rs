@@ -19,7 +19,7 @@ fn page(name: &str, red: bool) -> std::path::PathBuf {
     } else {
         "F\n/dev/disk1 41943040 1 31457280\n"
     };
-    let sh = FakeShed::new(); // #771: lanes on shed, none live
+    let sh = FakeShed::new();
     sh.attach(&c);
     let f = Fake::default().reply("df -k /", df);
     let r = sh.on(&f);

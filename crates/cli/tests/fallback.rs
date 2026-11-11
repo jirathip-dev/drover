@@ -18,7 +18,6 @@ fn config(d: &Path, role_extra: &str) -> String {
         + "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n"
 }
 
-/// #771: a ctx on `config(d, role_extra)`, its lanes on a fake shed.
 fn on_shed(name: &str, role_extra: &str) -> (herdsman::Ctx, FakeShed) {
     let d = tmpdir(name);
     let c = ctx(&d, &config(&d, role_extra));
@@ -29,7 +28,6 @@ fn on_shed(name: &str, role_extra: &str) -> (herdsman::Ctx, FakeShed) {
 
 const CHAIN: &str = "fallback = [\"claude:A\", \"claude:B\", \"dsh\"]";
 
-/// Faked gh/git for a real impl spawn of issue `n`, its lane shed's terminal `sendmeter-impl-<n>`.
 fn fake(c: &herdsman::Ctx, n: u64) -> Fake {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
@@ -57,7 +55,6 @@ fn dry(c: &herdsman::Ctx, n: u64) -> (Value, Value) {
     (p["harness"].clone(), p["account"].clone())
 }
 
-/// `herdsman check` with lane `sendmeter-impl-12` idle on shed, showing `screen`.
 fn check(c: &herdsman::Ctx, sh: &FakeShed, screen: &str) -> String {
     let wt = c.worktrees.join("sendmeter/issue-12");
     sh.lane("sendmeter-impl-12", "idle", wt.to_str().unwrap());
@@ -144,7 +141,6 @@ fn a_signed_out_lane_rests_and_its_successor_gets_the_carry_over() {
 
 #[test]
 fn a_harness_that_wont_start_twice_rests() {
-    // herdr-only (#721 deletes it): a failed `herdr agent start` is what logs `spawn-failed`; shed's start has no such path.
     let d = tmpdir("fb-start");
     let c = ctx(&d, &config(&d, CHAIN));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
@@ -324,7 +320,7 @@ fn an_entry_that_ran_before_gets_only_the_delta() {
     spawn(&c, 12, &[]); // claude:A
     ask(&c, "needs-decision", json!({"id": "early", "question": "q?"}));
     c.now += 60;
-    sign_out_and_supersede(&c, &sh, &fake(&c, 12)); // claude:B: A never handed over before, the full note
+    sign_out_and_supersede(&c, &sh, &fake(&c, 12));
     let full = brief12(&c);
     assert!(
         full.contains("asks early") && !full.contains("Only what happened since"),

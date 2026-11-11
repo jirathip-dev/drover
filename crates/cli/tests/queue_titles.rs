@@ -74,7 +74,7 @@ fn uncached_rows_have_no_title_and_make_no_gh_call() {
 #[test]
 fn check_caches_a_queued_issues_spec_once_and_its_row_shows_the_title() {
     let c = queued("check-titles");
-    let sh = FakeShed::new(); // no lanes
+    let sh = FakeShed::new();
     sh.attach(&c);
     let f = Fake::default()
         .reply(

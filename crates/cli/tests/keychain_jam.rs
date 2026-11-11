@@ -39,7 +39,7 @@ fn jammed(c: &herdsman::Ctx) -> usize {
 fn three_readers_say_nothing() {
     let c = ctx(&tmpdir("kc-jam-below"), CONFIG);
     let r = fake(false);
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     run(&c, &r, &["check"]);
     assert!(r.called(PS), "check reads ps: {:?}", r.calls.borrow());
@@ -51,7 +51,7 @@ fn three_readers_say_nothing() {
 fn a_jam_alerts_once_per_episode_with_pids_ages_parents_and_the_fix_but_no_secret() {
     let c = ctx(&tmpdir("kc-jam-once"), CONFIG);
     run(&c, &fake(true), &["check"]);
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     run(&c, &fake(true), &["check"]);
     assert_eq!(jammed(&c), 1, "none while it persists");
@@ -102,7 +102,7 @@ fn a_jam_alerts_once_per_episode_with_pids_ages_parents_and_the_fix_but_no_secre
 fn reaping_is_off_by_default_and_kills_only_old_readers_then_the_agent() {
     let c = ctx(&tmpdir("kc-jam-off"), CONFIG);
     let r = fake(true);
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     run(&c, &r, &["check"]);
     assert!(!r.called("kill "), "off by default: {:?}", r.calls.borrow());
@@ -110,7 +110,7 @@ fn reaping_is_off_by_default_and_kills_only_old_readers_then_the_agent() {
     let cfg = CONFIG.replace("[limits]\n", "[limits]\nreap_keychain_readers = true\n");
     let c = ctx(&tmpdir("kc-jam-reap"), &cfg);
     let r = fake(true);
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     run(&c, &r, &["check"]);
     let kills: Vec<String> = r

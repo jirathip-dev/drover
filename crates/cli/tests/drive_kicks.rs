@@ -8,7 +8,6 @@ fn fleet(name: &str, max: usize, issues: u64) -> (herdsman::Ctx, FakeShed) {
     fleet_with(name, max, "", issues, &[])
 }
 
-/// A fleet with `extra` config lines and issues 1..=`issues` queued with `flags`; #771: its lanes on a fake shed.
 fn fleet_with(name: &str, max: usize, extra: &str, issues: u64, flags: &[&str]) -> (herdsman::Ctx, FakeShed) {
     let cfg = CONFIG
         .replace("max_parallel_spawns = 0", &format!("max_parallel_spawns = {max}"))
@@ -27,7 +26,6 @@ fn fleet_with(name: &str, max: usize, extra: &str, issues: u64, flags: &[&str]) 
     (c, sh)
 }
 
-/// Whether any lane was started on shed (a harness start).
 fn started(sh: &FakeShed) -> bool {
     !sh.all("run").is_empty()
 }
@@ -139,7 +137,6 @@ fn a_failed_kick_clears_its_marker_and_the_next_pass_retries() {
     let r = fake("1.0");
     pass(&c, &r);
     assert!(marker(&c, 1).is_some());
-    // The kick's spawn fails (no git, no gh: no worktree): the marker goes with the kick.
     let broken = Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
@@ -271,7 +268,6 @@ fn six_dead_markers_never_hold_a_new_spawn() {
     assert!((11..=16).all(|n| marker(&c, n).is_none()));
 }
 
-/// A runner whose spawn panics as it makes the lane's worktree.
 struct Panics(Fake);
 impl herdsman::runner::Runner for Panics {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
@@ -693,7 +689,6 @@ fn starts_share_slots_round_robin_across_fleets() {
     assert_eq!(firsts, ["alpha", "beta", "gamma"]);
 }
 
-/// #638: a runner recording, at each look at the host (its disk probe, beside the lane list), whether issue 1's spawn slot is still held.
 struct Watch(Fake, herdsman::Ctx, Shared<Vec<bool>>);
 impl herdsman::runner::Runner for Watch {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
@@ -730,7 +725,6 @@ fn waiting_names_the_slot_holders() {
     assert!(out.contains("slots: alpha 2, beta 1\n"), "{out}");
 }
 
-/// #724: `f` with every spawn failing the same way (#722's branch still checked out in an older worktree).
 fn broken(f: Fake) -> Fake {
     let mut f = fake_with("1.0", f);
     let used = herdsman::runner::Out {

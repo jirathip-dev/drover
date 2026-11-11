@@ -1,7 +1,5 @@
 //! #630: workspace roots (temp folders here): a new lane takes the first mounted root, `hosts eject` saves and
 //! restarts a lane on the next one, a pulled root's lane restarts once from its pushed head, and `migrate` moves an
-//! idle `~/.herdr/worktrees` worktree into `<root>/<repo>/<lane>`. git is real; gh and the host probes are fakes, the
-//! lanes run on the fake shed.
 mod common;
 use common::*;
 use herdsman::config::Config;
@@ -12,7 +10,6 @@ use std::path::{Path, PathBuf};
 
 const AGENT: &str = "sendmeter-impl-12";
 
-/// git runs for real; the rest is the fake.
 struct Git<'a>(&'a Fake);
 
 impl Runner for Git<'_> {
@@ -39,8 +36,6 @@ fn git(dir: &Path, a: &[&str]) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-/// An origin with `staging` and a pushed `issue-12`, its clone (the fleet's `local`), the two roots, and the shed the
-/// lanes run on.
 struct Repo {
     c: herdsman::Ctx,
     sh: FakeShed,
@@ -93,7 +88,6 @@ fn repo(name: &str) -> Repo {
     }
 }
 
-/// gh as a spawn on this host needs it; the lane, live on `r`'s shed, works in `cwd`.
 fn fake(r: &Repo, cwd: &Path) -> Fake {
     let wt = cwd.join("sendmeter/issue-12");
     r.sh.lane(AGENT, "working", &wt.to_string_lossy());
@@ -325,7 +319,6 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     let (_, st) = run(&r.c, &Git(&f), &["status"]);
     assert!(st.contains(" · +1 ⇡1"), "{st}");
     let cfg = Config::load(&r.c.config).unwrap();
-    // The lane the spawn started, as shed lists it.
     let a = herdsman::herdr::agents(&r.sh.on(&Git(&f))).unwrap();
     assert_eq!(a[0]["cwd"], json!(wt), "{a:?}");
     let st = herdsman::events::states(&r.c.state).unwrap();
@@ -392,13 +385,12 @@ fn a_drive_pass_restarts_a_lane_whose_root_went_away_on_the_next_root_once() {
     assert!(out.contains("sendmeter #12") && !out.contains("root gone"), "{out}");
 }
 
-/// #790: a restart that fails (here gh answers nothing) logs no move and is tried again on the next pass.
 #[test]
 fn a_failed_restart_off_a_gone_root_is_retried_on_the_next_drive_pass() {
     let r = repo("roots-retry");
     working_on_nvme(&r);
     std::fs::remove_dir_all(&r.nvme).unwrap();
-    let down = Fake::default().reply("which shed", "/opt/shed/bin/shed\n"); // gh answers nothing: the start fails
+    let down = Fake::default().reply("which shed", "/opt/shed/bin/shed\n");
     let (code, out) = run(&r.c, &Git(&down), &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains(&format!("{AGENT}: restart failed")), "{out}");

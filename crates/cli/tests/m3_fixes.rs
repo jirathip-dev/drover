@@ -47,7 +47,7 @@ fn spawn_and_adopt_on_merged_issue_are_refused() {
     let c = ctx(&d, CONFIG);
     merged_13(&c);
     let before = read(&c.state).unwrap().len();
-    let sh = FakeShed::new(); // #771: lanes on shed
+    let sh = FakeShed::new();
     sh.attach(&c);
     let r = Fake::default().reply("gh", "{}").reply("git", "").reply("sysctl", "1");
     for args in [

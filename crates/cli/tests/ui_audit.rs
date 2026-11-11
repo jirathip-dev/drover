@@ -43,7 +43,7 @@ fn fixture() -> (String, String) {
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "18", "19", "20"]).0,
         0
     );
-    let sh = FakeShed::new(); // #771: the lanes live on shed
+    let sh = FakeShed::new();
     sh.attach(&c);
     for (n, st) in [("sendmeter-impl-12", "working"), ("sendmeter-impl-13", "blocked")] {
         sh.lane(n, st, "/x");

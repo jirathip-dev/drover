@@ -109,7 +109,7 @@ fn an_issue_with_no_pr_links_the_ticks_latest_run_or_nothing() {
     );
     // The tick (its `drive` pass, #155) reads the issue branch's latest run; a render only reads that cache.
     let url = format!("{GH}/actions/runs/99");
-    let _sh = FakeShed::new(); // #771: lanes on shed, none live
+    let _sh = FakeShed::new();
     _sh.attach(&c);
     let r = Fake::default().reply("gh pr view", "").reply(
         "gh run list -R jirathip-dev/sendmeter --branch issue-17",

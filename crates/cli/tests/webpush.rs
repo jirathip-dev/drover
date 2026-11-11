@@ -116,8 +116,6 @@ fn post(s: &Server, path: &str, body: &str, extra: &str) -> String {
     String::from_utf8_lossy(&s.respond(&req, 1_000_000)).into_owned()
 }
 
-/// #771: Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every call is the Fake's, the
-/// lane runtime the server's, as `[runtime] kind = "shed"` makes it.
 struct OnShed(Fake, FakeShed);
 
 impl OnShed {

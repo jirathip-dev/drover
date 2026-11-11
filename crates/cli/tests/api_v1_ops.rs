@@ -238,8 +238,6 @@ fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
 
 #[test]
 fn a_backlog_issue_gets_a_thread_or_closes() {
-    // #771: #12 has a lane; the new thread's conductor runs on shed, an ACP session (its profile synced, its account's
-    // sign-in).
     let sh = FakeShed::new();
     let cfg = format!(
         "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\naccount = \"C\"\n\n\
@@ -258,7 +256,7 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
         .reply("shed", "")
         .reply("gh issue close", "");
     let cli = sh.cli(&host);
-    let r = herdsman::shed::With(&cli, sh.shed()); // as `serve_on` wraps it from the config
+    let r = herdsman::shed::With(&cli, sh.shed());
     let cache = c.state.parent().unwrap().join("cache");
     std::fs::create_dir_all(&cache).unwrap();
     let bl = json!({"ts": T, "issues": {"30": {"number": 30, "title": "Meter export", "state": "OPEN"}}});

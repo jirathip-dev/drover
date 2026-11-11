@@ -684,7 +684,7 @@ fn page_fits_390px_without_horizontal_scroll() {
     )
     .unwrap();
     let screen = format!("⏺ Bash({})\n{}\n", "y".repeat(200), "z".repeat(400));
-    let sh = FakeShed::new(); // #771: the lane lives on shed
+    let sh = FakeShed::new();
     sh.attach(&c);
     sh.lane(long, "working", "/x");
     sh.screen(long, &screen);
@@ -798,7 +798,7 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
             json!({"why": "merged"}),
         );
     }
-    let sh = FakeShed::new(); // #771: the lane lives on shed
+    let sh = FakeShed::new();
     sh.attach(&c);
     sh.lane("sendmeter-impl-17", "working", "/x");
     let f = Fake::default();

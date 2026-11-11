@@ -206,7 +206,6 @@ fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_closes_orphan_work
         f.reply("git -C", "").reply("herdr workspace close", "{}")
     };
     sh.lane("impl-21", "idle", &live);
-    // The lanes are shed's; the orphan-workspace sweep after them is herdr's alone (#721 drops it).
     let r = git(Fake::default()
         .reply("herdr workspace list", &ws.to_string())
         .once(&format!("git -C {dirty} status"), 0, "?? notes.md\n")
@@ -241,7 +240,7 @@ fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_closes_orphan_work
         "{out}"
     );
     assert!(kinds(&c, "clean-failed").is_empty(), "a passing run alerts nothing");
-    cleaned.iter().for_each(|w| std::fs::remove_dir_all(w).unwrap()); // what the faked `git worktree remove` does
+    cleaned.iter().for_each(|w| std::fs::remove_dir_all(w).unwrap());
 
     // The next run takes the rest (the live one has stopped, the dirty one is clean now); a failure alerts once, not
     // again while it repeats.

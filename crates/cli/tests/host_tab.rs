@@ -57,7 +57,7 @@ fn a_live_board_draws_cards_gauges_and_forms_that_post() {
     let sh = FakeShed::new();
     sh.attach(&c);
     let r = Fake::default().reply("df -k /", "F\n/dev/disk1 41943040 1 4194304\n");
-    let w = sh.on(&r); // the CLI and `serve_on` wrap theirs so
+    let w = sh.on(&r);
     let s = Server::new(&c, &w, Some(ADDR.into()));
     let h = host_tab(&s, ADDR, 1_000_000);
     assert_eq!(groups(&h)[..3], ["HOSTS", "FLEET DISK", "SERVICES"], "{h}");
@@ -89,7 +89,7 @@ fn the_host_api_shows_each_root_with_its_state_and_free_space() {
     let sh = FakeShed::new();
     sh.attach(&c);
     let r = Fake::default();
-    let w = sh.on(&r); // the CLI and `serve_on` wrap theirs so
+    let w = sh.on(&r);
     let s = Server::new(&c, &w, Some(ADDR.into()));
     let res =
         String::from_utf8(s.respond(&format!("GET /api/v1/host HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).unwrap();

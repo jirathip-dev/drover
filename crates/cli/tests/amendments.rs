@@ -66,7 +66,7 @@ fn new_amendment_prompts_the_open_lane_exactly_once() {
     std::fs::write(wt.join(".brief.md"), "# Issue #12: Fix\n\nAC: works\n").unwrap();
     let spawn = json!({"role": "impl", "agent": LANE, "branch": "issue-12", "pane": LANE, "worktree": wt});
     append(&c.state, &Event::new(NOW - 60, "sendmeter", Some(12), "spawn", spawn)).unwrap();
-    let sh = FakeShed::new(); // #771: the lane lives on shed
+    let sh = FakeShed::new();
     sh.attach(&c);
     sh.lane(LANE, "idle", "/x");
     let amend = [comment("owner", "OWNER", "**Amendment A**: also log it", 1)];

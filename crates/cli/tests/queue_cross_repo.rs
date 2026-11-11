@@ -19,7 +19,7 @@ fn setup(name: &str, fake: Fake) -> (herdsman::Ctx, Fake, FakeShed) {
         .reply("gh issue view 12", &json!({"title": "t", "body": "b"}).to_string())
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "");
-    let sh = FakeShed::new(); // #771: lanes start on shed
+    let sh = FakeShed::new();
     sh.attach(&c);
     (c, r, sh)
 }

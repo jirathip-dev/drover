@@ -216,8 +216,6 @@ fn the_card_says_not_counted_in_amber() {
     );
 }
 
-/// #771: Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every call is the Fake's, the
-/// lane runtime the server's, as `[runtime] kind = "shed"` makes it.
 struct OnShed(Fake, FakeShed);
 
 impl OnShed {

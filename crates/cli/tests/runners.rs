@@ -34,8 +34,6 @@ fn on(vm: &str, tok: bool, c: &str) -> String {
     rc(tok, &format!("export C='{c}'; fakeboat exec {vm}"))
 }
 
-/// vm1 and vm2 (3 slots each, $12 a day each, cap 3 VMs / $40), this host's runners labelled `self`; #771: lanes on a
-/// fake shed with none live.
 fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     let cfg = format!(
         "{CONFIG}\n[ci_runners]\nprovider = \"fake\"\nrepo = \"o/app\"\nlabel = \"boat\"\nsize = \"large\"\nslots = 3\n\

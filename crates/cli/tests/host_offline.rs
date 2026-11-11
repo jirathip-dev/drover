@@ -1,4 +1,3 @@
-//! #478: one unreachable host (bazzite, its `shed connect` over ssh failing) refuses only its own spawns
 //! `HOST_OFFLINE`; its lanes show `host offline` (never `lane-dead`), `check` alerts its drop and return once each, a
 //! supersede's pane left there is killed once it is back, and `kill`/`close --host` pick one host's agent of a name.
 mod common;
@@ -10,7 +9,6 @@ use serde_json::json;
 const NOW: u64 = 1_000_000;
 const WT: &str = "/home/me/.herdr/worktrees/sendmeter/issue-12";
 
-/// Mini (this host) and bazzite, both last seen up, lanes on shed: mini's server returned.
 fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
@@ -32,14 +30,12 @@ fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
-/// #12's impl lane, spawned on bazzite's shed.
 fn remote_spawn(c: &herdsman::Ctx) {
     let d = json!({"role": "impl", "agent": IMPL, "harness": "claude", "pane": IMPL, "workspace": "",
                    "worktree": WT, "branch": "issue-12", "host": "bazzite", "machine": "bazzite"});
     ev(c, NOW - 900, "spawn", d);
 }
 
-/// The main host answers a full spawn; bazzite answers nothing (its `shed connect` fails: unreachable).
 fn mini_only() -> Fake {
     Fake::default()
         .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
@@ -49,7 +45,6 @@ fn mini_only() -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// `f`, bazzite reachable: its own shed `bazzite` over ssh.
 fn with_bazzite<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
     OverSsh {
         f,

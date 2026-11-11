@@ -82,8 +82,6 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// #771: Fake `0` with its lanes on fake shed `1` (none live unless the test adds them): every call is the Fake's, the
-/// lane runtime the server's, as `[runtime] kind = "shed"` makes it.
 struct OnShed(Fake, FakeShed);
 
 impl OnShed {
@@ -147,7 +145,7 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
         json!({"ts": T - 60, "issues": {"30": issue(30), "31": issue(31)}}).to_string(),
     )
     .unwrap();
-    let r = OnShed::new(Fake::default().reply("which hermes", "/usr/local/bin/hermes\n")); // #771: no lane live
+    let r = OnShed::new(Fake::default().reply("which hermes", "/usr/local/bin/hermes\n"));
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page = String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T)).into_owned();
     assert!(
@@ -240,7 +238,6 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
 /// card), `asked in <title> · <id>`; answered there, the thread's copy shows it answered, no longer open.
 #[test]
 fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
-    // #771: the thread's conductor runs on shed, an ACP session (its profile synced, its account's sign-in).
     let sh = FakeShed::new();
     let cfg = format!(
         "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\naccount = \"C\"\n\n\
@@ -258,14 +255,13 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
     let ask = json!({"id": "q398", "question": "ship the bell now?", "options": ["now", "after #10"],
         "recommend": 1, "kind": "owner", "thread": "t6"});
     ev(Some(2), "needs-decision", ask);
-    // shed ready to start the thread's conductor: the answer goes to it, as a tap in the thread would.
     let agents =
         json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo", "claude-agent-acp"]}]);
     let host = Fake::default()
         .reply("shed agents --json", &agents.to_string())
         .reply("shed", "");
     let cli = sh.cli(&host);
-    let r = herdsman::shed::With(&cli, sh.shed()); // as `serve_on` wraps it from the config
+    let r = herdsman::shed::With(&cli, sh.shed());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let html = queue_tab(&s, ADDR, T);

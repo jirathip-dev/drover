@@ -63,7 +63,6 @@ fn setup(name: &str, budget_bytes: u64) -> (herdsman::Ctx, PathBuf) {
     (ctx(&d, &cfg), root.join(".scratch"))
 }
 
-/// `check::budget`'s output, its lanes on `sh` (attached to `c`).
 fn budget(c: &herdsman::Ctx, sh: &FakeShed) -> String {
     let (mut out, f) = (vec![], Fake::default());
     herdsman::check::budget(c, &Config::load(&c.config).unwrap(), &sh.on(&f), &mut out).unwrap();
@@ -71,7 +70,6 @@ fn budget(c: &herdsman::Ctx, sh: &FakeShed) -> String {
 }
 
 /// An ended lane's scratch goes at drive's pass (merged, superseded by a later round, or unknown); an open issue's
-/// active lane, a live agent and a building one keep theirs.
 #[test]
 fn drive_deletes_an_ended_lanes_scratch() {
     let (c, s) = setup("scratch-sweep", 1 << 40);
@@ -296,8 +294,6 @@ fn clean_removes_stray_cargo_folders_and_claude_temp_dirs() {
 }
 
 /// #651: a remote host `air` whose build-folder commands run here, in a shell with `home` as `$HOME`, against real
-/// folders: every ssh line naming its build root runs through `sh -c`, `df` answers `free_kb`, its `shed connect` is
-/// `over`'s fake shed for air, the rest (probes) is `over`'s fake.
 struct Air<'a> {
     over: OverSsh<'a>,
     free_kb: u64,
@@ -359,7 +355,6 @@ fn air_setup(name: &str) -> (herdsman::Ctx, PathBuf, PathBuf) {
     (c, home, s)
 }
 
-/// One tick, air's shed running the `(name, status)` lanes; the calls the fake saw, and the tick's output.
 fn tick(c: &herdsman::Ctx, home: &Path, air: &[(&str, &str)], free_kb: u64) -> (Vec<String>, String) {
     let sh = FakeShed::new();
     sh.attach(c);
@@ -488,8 +483,6 @@ fn air_off(name: &str) -> (herdsman::Ctx, PathBuf, [PathBuf; 3]) {
     (c, home, dirs)
 }
 
-/// #678: the disabled Air's runner: #12's worktree there clean and pushed, removable; its lanes on `air` (#14's
-/// idle), this host's on `here` (#13's working).
 fn air_off_runner<'a>(home: &Path, f: &'a Fake, air: &'a FakeShed) -> Air<'a> {
     Air {
         over: OverSsh {
@@ -501,7 +494,6 @@ fn air_off_runner<'a>(home: &Path, f: &'a Fake, air: &'a FakeShed) -> Air<'a> {
     }
 }
 
-/// `air_off_runner`'s fake and the two hosts' sheds (`here` attached to `c`).
 fn air_off_hosts(c: &herdsman::Ctx) -> (Fake, FakeShed, FakeShed) {
     let wt = AIR_WT;
     let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
@@ -518,7 +510,6 @@ fn air_off_hosts(c: &herdsman::Ctx) -> (Fake, FakeShed, FakeShed) {
     (f, here, air)
 }
 
-/// #12's worktree on the Air (`air_spawn`'s).
 const AIR_WT: &str = "/Users/me/worktrees/sendmeter/sendmeter-impl-12";
 
 /// #678: an explicit `clean` sweeps a disabled host that answers: the dry run lists the merged lane's worktree and the

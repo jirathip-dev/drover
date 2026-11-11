@@ -61,7 +61,6 @@ impl Runner for Wedged {
 }
 
 /// A Claude fleet with a `secret:` env and account A's usage meter, and #12's
-/// impl lane on A (check confirms its usage-limit banner from the meter), idle on a fake shed showing the banner.
 fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     let d = tmpdir(name);
     let cfg = CONFIG.replace(
@@ -87,7 +86,6 @@ fn wedged() -> Wedged {
     Wedged(
         Fake::default()
             .reply("hostname -s", "mini\n")
-            // The tick's and doctor's herdr status gate is src's, until #721.
             .reply(
                 "herdr status",
                 "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",

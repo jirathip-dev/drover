@@ -135,8 +135,6 @@ fn repo(name: &str) -> Repo {
     }
 }
 
-/// #12's impl lane in `repo`'s worktree (spawned at ts 10, `update` for an update round), and q5 answered by the owner;
-/// #771: lanes on the fake shed returned (the lane not live unless a test adds it).
 fn lane(repo: &Repo, update: bool) -> (herdsman::Ctx, FakeShed) {
     std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
     let c = ctx(

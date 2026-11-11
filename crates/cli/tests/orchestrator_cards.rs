@@ -46,8 +46,6 @@ fn setup(name: &str, role_extra: &str, extra: &str) -> herdsman::Ctx {
     c
 }
 
-/// #771: `setup` on shed-acp (#608): the fleet's own runtime on `b`, its conductor signed in (an ACP session runs under
-/// the lane guard, #565: with no `role_extra`, on account C), the profiles synced with the real binary as their hook.
 fn acp_setup(name: &str, role_extra: &str, extra: &str, b: &FakeShed) -> herdsman::Ctx {
     let d = tmpdir(name);
     let role = if role_extra.is_empty() {
@@ -75,7 +73,6 @@ fn acp_setup(name: &str, role_extra: &str, extra: &str, b: &FakeShed) -> herdsma
     c
 }
 
-/// #771: shed's CLI answers (`shed run --acp`, `shed send`); the installed ACP agent's command is `adapter`.
 fn acp(adapter: &[&str]) -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
     Fake::default()
@@ -211,8 +208,6 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
     assert!(std::fs::read_to_string(&c.config).unwrap().ends_with("# hand edit\n"));
 }
 
-/// herdr-only (#721 deletes it): the switch resumes the same herdr session (`--resume`); on shed-acp every start is a
-/// fresh session (below).
 #[test]
 fn a_usage_limit_resumes_the_orchestrator_on_the_next_account_with_the_same_session() {
     let accounts = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n";
@@ -303,7 +298,6 @@ fn a_usage_limit_restarts_the_orchestrator_on_the_next_account() {
     );
     assert_eq!(next.data["resumed"], json!(false));
     assert_eq!(r.count("shed run --acp claude-acp"), 1, "{:?}", r.calls.borrow());
-    // #683: B's own login folder, no token.
     let b = herdsman::config::home().join(".config/herdsman/accounts/B");
     let env = cli.out.borrow().concat();
     assert!(
@@ -320,8 +314,6 @@ fn a_usage_limit_restarts_the_orchestrator_on_the_next_account() {
     );
 }
 
-/// herdr-only (#721 deletes it): a conductor with no account (no ACP session starts without one, #565) signed out:
-/// nothing to switch to, still a [sign in] for `claude`.
 #[test]
 fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness_login() {
     let signed_out = "Invalid API key · Please run /login";
@@ -373,7 +365,6 @@ fn a_signed_out_orchestrator_gets_a_sign_in_card_for_its_own_login() {
         let s = Server::new(c, &r, Some(ADDR.into()));
         chat(&s, &pair(&s, c, "Mozilla/5.0 (iPhone)", T), T + 120)
     };
-    // On account A with a `claude A` login configured: the card opens that login (once), and B carries on.
     let extra = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n\n[[setup]]\nname = \"claude A\"\ncmd = \"claude /login\"\nenv = {CLAUDE_CONFIG_DIR = \"~/accounts/A\"}\n";
     let c = acp_setup(
         "cards-signin-account",
@@ -427,7 +418,6 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
         &["secret", "request", "t1", "API_KEY", "--why", "the search API"],
     );
     assert_eq!(code, 0, "{out}");
-    // The ACP adapter prints the `API_KEY` its session starts with.
     let f = acp(&["printenv", "API_KEY"]);
     let cli = sh.cli(&f);
     let r = sh.on(&cli);
@@ -579,8 +569,6 @@ fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() 
     );
 }
 
-/// #702: thread t1 with a conductor reply, run card r1 (`uptime`), then another reply; its sha, the fake (the run
-/// prints `load 0.42`; shed's CLI answers), and a paired owner device's cookie.
 fn card_between_replies(c: &herdsman::Ctx, sh: &FakeShed) -> (String, Fake, String) {
     let at = |n: u64| herdsman::Ctx {
         now: T + n,

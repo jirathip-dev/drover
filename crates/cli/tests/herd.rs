@@ -62,7 +62,6 @@ fn fixture(name: &str) -> (herdsman::Ctx, OnShed) {
         r.1.lane(n, st, "/x");
         r.1.screen(n, SCREEN);
     }
-    // A terminal no lane of the log claims, outside every fleet: one of Others.
     r.1.add("side-project", json!({"fleet": "-", "harness": "codex"}));
     r.1.set("side-project", |t| {
         t["cwd"] = json!("/home/me/side");

@@ -10,7 +10,6 @@ use serde_json::{json, Value};
 const T: u64 = 1_000_000;
 
 /// The log: impl #5 (newer than the conductors), threads t6 (awake), t7 (`all`, awake) and t8 (asleep), plus t9
-/// that never started a conductor. #771: shed runs the impl, both awake conductors and two agents herdsman never started.
 fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     let cfg = format!(
         "{CONFIG}\n[fleet.herdsman]\nrepo = \"o/herdsman\"\nlocal = \"/p/herdsman\"\nintegration = \"staging\"\n"
@@ -55,7 +54,6 @@ fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     ] {
         b.lane(name, status, "/x");
     }
-    // A codex session another fleet's herdsman started on the same shed (no fleet of this config).
     b.add("side", json!({"fleet": "side-project", "harness": "codex"}));
     b.set("side", |t| {
         t["cwd"] = json!("/Users/me/side");
@@ -92,7 +90,6 @@ fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_clos
             l.issue,
         )
     };
-    // In shed's order (by name), the asleep one last.
     let got: Vec<_> = lanes.iter().map(row).collect();
     let r = |f: &str, n: &str, role: &str, st: &str, m: &str, t: &str, i| {
         (f.into(), n.into(), role.into(), st.into(), m.into(), t.into(), i)

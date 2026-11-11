@@ -46,9 +46,6 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// A fleet on a fake shed with a claude conductor that runs as an ACP session (signed in with account C, its profiles
-/// synced, the real binary their hook; `extra` in its `[fleet.sendmeter]`), a webpush notifier with one device behind a
-/// fake `curl` that answers 201, and the impl lane of #36 live on that shed; threads `threads` in order.
 fn setup(name: &str, extra: &str, threads: &[&str]) -> (herdsman::Ctx, FakeShed) {
     let d = tmpdir(name);
     let conf = CONFIG.replace(
@@ -100,8 +97,6 @@ fn pushes(c: &herdsman::Ctx) -> usize {
     std::fs::read_to_string(calls).unwrap_or_default().lines().count()
 }
 
-/// shed's CLI ready to start a conductor as an ACP session (its installed adapter) and prompt it, and the spec of #36
-/// (with an Amendment).
 fn host() -> Fake {
     let issue = json!({"title": "Split the sender", "body": SPEC, "updatedAt": "t1", "comments": [
         {"body": "**Amendment** no new dependency for it", "authorAssociation": "OWNER", "url": "u1",
@@ -134,7 +129,6 @@ fn lane_ask(c: &herdsman::Ctx, sh: &FakeShed, q: &str) -> String {
     out.trim().into()
 }
 
-/// The conductor of thread `t` answers `id` with option `n` on `basis`: exit code, output.
 fn orchestrator_answer(c: &herdsman::Ctx, sh: &FakeShed, t: &str, id: &str, n: &str, basis: &str) -> (i32, String) {
     as_orchestrator(t);
     let (code, out) = run(c, &sh.cli(&host()), &["answer", "sendmeter", id, n, "--basis", basis]);
@@ -142,7 +136,6 @@ fn orchestrator_answer(c: &herdsman::Ctx, sh: &FakeShed, t: &str, id: &str, n: &
     (code, out)
 }
 
-/// Whether shed had `text` typed into the lane, then Enter.
 fn typed(sh: &FakeShed, text: &str) -> bool {
     let enter = sh
         .all("keys")

@@ -127,7 +127,6 @@ fn drain(s: &mut TcpStream, ms: u64) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// A real `serve` on a socket, its lanes on a fake shed with none live (#771); its address and that shed.
 fn serve(c: &herdsman::Ctx) -> (std::net::SocketAddr, FakeShed) {
     let sh = FakeShed::new();
     sh.attach(c);
