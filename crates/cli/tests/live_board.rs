@@ -89,31 +89,15 @@ fn board(name: &str, home: &Path) -> (herdsman::Ctx, String, String) {
     (c, url, cookie.trim().trim_start_matches("Cookie: ").to_string())
 }
 
-fn webkit() -> bool {
-    let ok = cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok();
-    if !ok {
-        eprintln!("skipping: no swift/WebKit here");
-    }
-    ok
-}
-
 /// The page at `url` in WebKit, `js` run after `tab(tab); mode(mode)`; `window.late` (numbers) read `wait` s later;
 /// `pre` runs at document start.
 #[allow(clippy::too_many_arguments)]
 fn page(url: &str, cookie: &str, tab: &str, mode: &str, pre: &str, js: &str, wait: &str, png: &Path) -> Vec<f64> {
-    let o = swift()
+    let o = webview()
         .env("HERDSMAN_COOKIE", cookie)
         .env("HERDSMAN_WAIT", wait)
         .env("HERDSMAN_PRE", pre)
-        .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
-            url,
-            "390",
-            tab,
-            mode,
-            png.to_str().unwrap(),
-            js,
-        ])
+        .args([url, "390", tab, mode, png.to_str().unwrap(), js])
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&o.stdout);
@@ -128,7 +112,7 @@ fn rowed(js: &str) -> String {
 
 #[test]
 fn live_board_chat_and_ascii_in_webkit() {
-    if !webkit() {
+    if no_webkit() {
         return;
     }
     let _lock = ui_lock();
@@ -214,7 +198,7 @@ fn live_board_chat_and_ascii_in_webkit() {
 /// loads (as before #305), no sprite in it, and no two header controls draw the same sprite.
 #[test]
 fn herd_paints_at_once_and_refresh_is_the_plain_spinner() {
-    if !webkit() {
+    if no_webkit() {
         return;
     }
     let _lock = ui_lock();

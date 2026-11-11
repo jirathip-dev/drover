@@ -68,8 +68,7 @@ fn fixture() -> (String, String) {
 
 #[test]
 fn every_control_passes_the_audit_at_390px() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (html, herd) = fixture();
@@ -120,17 +119,8 @@ fn every_control_passes_the_audit_at_390px() {
         let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("{name}.png"))
         });
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
-        let o = swift()
-            .args([
-                script,
-                file.to_str().unwrap(),
-                "390",
-                tab,
-                "horse",
-                png.to_str().unwrap(),
-                &js,
-            ])
+        let o = webview()
+            .args([file.to_str().unwrap(), "390", tab, "horse", png.to_str().unwrap(), &js])
             .output()
             .unwrap();
         let out = String::from_utf8_lossy(&o.stdout);
@@ -162,8 +152,7 @@ fn every_control_passes_the_audit_at_390px() {
 /// dimmed evenly by the fading backdrop, never another colour (iOS flashed it grey: `.out`, the chat blocks' box, on #sheet).
 #[test]
 fn closing_a_sheet_never_repaints_the_page() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (html, _) = fixture();
@@ -180,7 +169,6 @@ fn closing_a_sheet_never_repaints_the_page() {
     let file = tmpdir("ui-close").join("page.html");
     std::fs::write(&file, html).unwrap();
     let stub = "window.fetch = async () => new Response('no pane output', {status: 404})";
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     let mut bad = vec![];
     for (name, tab, open, shut) in [
         (
@@ -201,9 +189,8 @@ fn closing_a_sheet_never_repaints_the_page() {
         let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(file.with_file_name(format!("close-{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("close-{name}.png"))
         });
-        let o = swift()
+        let o = webview()
             .args([
-                script,
                 file.to_str().unwrap(),
                 "390",
                 tab,
@@ -242,8 +229,7 @@ fn closing_a_sheet_never_repaints_the_page() {
 /// that tab's section alone, and the Queue rows (row height, `#n` column width) lay out as they settle.
 #[test]
 fn the_first_paint_is_the_stored_tab_and_the_settled_layout() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (html, _) = fixture();
@@ -258,15 +244,13 @@ fn the_first_paint_is_the_stored_tab_and_the_settled_layout() {
     // Shown or not: Queue, Lanes, Chat, [?]; then each Queue row's height and `#n` width.
     let measure = "window.measure = [...['#queue', '#lanes', '#chat', 'header .qhelp'].map(s => getComputedStyle(document.querySelector(s)).display === 'none' ? 0 : 1), \
         ...[...document.querySelectorAll('details.q')].flatMap(d => [d.querySelector('summary').getBoundingClientRect().height, d.querySelector('summary>span').getBoundingClientRect().width])]";
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     let shot = |tab: &str, frame: &str, file: &std::path::Path| {
         let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("first-{tab}-{frame}.png")), |p| {
             std::path::Path::new(&p).join(format!("first-{tab}-{frame}.png"))
         });
-        let o = swift()
+        let o = webview()
             .env("HERDSMAN_TAB", tab)
             .args([
-                script,
                 file.to_str().unwrap(),
                 "390",
                 "-",

@@ -6,7 +6,7 @@ import { esc } from './events.ts'; // node runs this file as is (tests/queue_boa
 
 /** A form: a live board's posts; an export's are inert. */
 export const form = (d: { live: boolean }, rest = '') => `<form ${d.live ? 'method=post' : 'inert'}${rest}>`;
-export const hidden = (op: string, fleet: string, mt: string) => `<input type=hidden name=op value=${op}><input type=hidden name=fleet value="${esc(fleet)}"><input type=hidden name=mtime value=${mt}>`;
+export const hidden = (op: string, fleet: string, mt: string) => `${op && `<input type=hidden name=op value=${op}>`}<input type=hidden name=fleet value="${esc(fleet)}"><input type=hidden name=mtime value=${mt}>`;
 const none = '<span class=m>none</span>', all = '<span class="tag m">all fleets</span>';
 const list = (v: string[], sep = ', ') => (v.length ? esc(v.join(sep)) : none);
 

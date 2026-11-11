@@ -713,6 +713,12 @@ pub fn post(
 /// #403: `say`'s second half: type `line` into thread `t`'s orchestrator, starting or resuming it first.
 pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Result<String> {
     let id = t.str("thread").unwrap_or_default();
+    let cur = thread_role(cfg, &shared(&ctx.state)?, t)?.1;
+    let ms = harness_models(cfg, &cur.harness);
+    if let Some(m) = cur.model.filter(|m| !ms.is_empty() && !ms.contains(&m.as_str())) {
+        let text = format!("model {m} is not one of {ms:?}");
+        return log(ctx, cfg, t, "system", (&text, &[])).and_then(|()| refused("BAD_VALUE", text));
+    }
     // #477: one delivery per thread at a time (across processes too): a message waits for a start in flight.
     let dir = dir(ctx, cfg, id);
     std::fs::create_dir_all(&dir)?;
@@ -871,7 +877,8 @@ pub fn harness_models<'a>(cfg: &'a Config, h: &str) -> Vec<&'a str> {
             .keys()
             .any(|n| defaults(cfg, n).is_ok_and(|d| d.1.harness == h))
     });
-    let all: std::collections::BTreeSet<_> = roles.filter_map(|r| r.model.as_deref()).chain(chat).collect();
+    let mut all: std::collections::BTreeSet<_> = roles.filter_map(|r| r.model.as_deref()).chain(chat).collect();
+    all.extend(cfg.models.iter().map(String::as_str));
     all.into_iter().collect()
 }
 
@@ -1186,6 +1193,12 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         }
         break (new, o, up);
     };
+    let why = format!("{} {screen}", herdr::message(&o));
+    let named = |m: &&str| o.code != 0 && up.is_none() && (why.contains("unrecognized_model") || why.contains(*m));
+    if let Some(m) = p.model.as_deref().filter(named) {
+        let text = format!("the orchestrator does not start on model {m}: {}", why.trim_end());
+        return log(ctx, cfg, t, "system", (&text, &[])).and_then(|()| refused("BAD_VALUE", text));
+    }
     let pane = match (o.code, up) {
         (0, _) => new.clone(),
         (_, Some(p)) => p,

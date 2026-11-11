@@ -14,7 +14,7 @@ const WORDS: [&str; 6] = [
 ];
 
 /// (file, exact text with whitespace collapsed, why it may stay). Each one is removed before the scan.
-const EXCEPTIONS: [(&str, &str, &str); 12] = [
+const EXCEPTIONS: [(&str, &str, &str); 13] = [
     (
         "assets/herd.js",
         "jirathip-dev/corral",
@@ -72,6 +72,11 @@ const EXCEPTIONS: [(&str, &str, &str); 12] = [
     ),
     (
         "docs/setup.md",
+        "https://github.com/jirathip-dev/herdsman/issues/",
+        "the project's own issue links",
+    ),
+    (
+        "README.md",
         "https://github.com/jirathip-dev/herdsman/issues/",
         "the project's own issue links",
     ),

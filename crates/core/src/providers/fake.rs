@@ -7,6 +7,9 @@ pub struct Fake;
 pub static PROVIDER: Fake = Fake;
 
 impl Provider for Fake {
+    fn vendor(&self) -> Option<&'static str> {
+        Some("fake")
+    }
     fn start_cmd(&self, _ctx: &Ctx, _p: &Plan, pane: &str) -> Vec<String> {
         herdr::run_argv(pane, &["fake-cli", "--go"])
     }
@@ -93,9 +96,11 @@ mod tests {
     }
 
     #[test]
-    fn setup_offers_its_login() {
+    fn setup_offers_its_login_with_its_vendor() {
         let all = crate::setup::all(&config("fake").unwrap());
         assert!(all.contains(&("fake".into(), "fake login".into())), "{all:?}");
+        let v = crate::setup::vendors(&config("fake").unwrap());
+        assert!(v.contains(&("fake".into(), "fake".into())) && !v.iter().any(|x| x.0 == "gh"), "{v:?}");
     }
 
     #[test]
