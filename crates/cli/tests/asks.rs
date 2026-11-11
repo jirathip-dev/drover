@@ -214,7 +214,7 @@ fn an_open_ask_re_alerts_once_as_ask_waiting_after_30_min() {
 }
 
 #[test]
-fn needs_you_card_tops_every_tab_and_answer_needs_a_paired_device() {
+fn needs_you_card_folds_above_the_tabs_and_answer_needs_a_paired_device() {
     let d = tmpdir("ask-card");
     let c = ctx(&d, CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
@@ -224,7 +224,7 @@ fn needs_you_card_tops_every_tab_and_answer_needs_a_paired_device() {
     let page = String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
     let page = with_queue(&page, &s, "127.0.0.1:7777", NOW); // #268: the Queue tab as the board draws it
     let (card, main) = (
-        page.find("<div class=ask>").expect("no needs-you card"),
+        page.find("<details class=ask>").expect("no needs-you card"),
         page.find("<main>").unwrap(),
     );
     assert!(card < main, "the card sits above every tab section");

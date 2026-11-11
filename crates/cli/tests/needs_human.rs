@@ -94,8 +94,8 @@ fn get(s: &Server, path: &str, cookie: &str) -> String {
 
 /// The `#needs` strip's card for #12.
 fn card(page: &str) -> &str {
-    let a = page.find("<div class=ask data-n=12>").expect("no needs-human card");
-    &page[a..a + page[a..].find("</div>").unwrap()]
+    let a = page.find("<details class=ask data-n=12>").expect("no needs-human card");
+    &page[a..a + page[a..].find("</details>").unwrap()]
 }
 
 #[test]
@@ -123,13 +123,28 @@ fn card_with_a_pass_at_head_offers_merge_anyway_to_a_paired_phone_only() {
         "{k}"
     );
     assert!(
-        page.find("<div class=ask data-n=12>") < page.find("<main>"),
-        "above every tab"
+        page.find("<details class=ask data-n=12>") < page.find("<main>"),
+        "above the tabs"
+    );
+    assert!(
+        k.starts_with(
+            "<details class=ask data-n=12><summary><span>#12 · needs-human · review rounds ran out (4/3)</span>"
+        ),
+        "#816: folded to one line: {k}"
+    );
+    assert!(
+        k.contains(
+            r#"<button form="nf-sendmeter-12" name=op value=extend><span>one more round</span></button></summary>"#
+        ) && k.contains(r#"<form method=post id="nf-sendmeter-12">"#),
+        "#816: the line's main button posts the card's form: {k}"
     );
 
     let unpaired = get(&s, "/", "");
     let k = card(&unpaired);
-    assert!(!k.contains("<form"), "an unpaired phone sees no buttons: {k}");
+    assert!(
+        !k.contains("<form") && !k.contains("<button"),
+        "an unpaired phone sees no buttons: {k}"
+    );
     let ro = Server::new(&c, &r, None);
     let page = get(&ro, "/", "");
     let k = card(&page);
@@ -215,7 +230,7 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     let p = herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
     assert_eq!((p.reason.as_deref(), p.failed), (Some("PAUSED"), false));
     assert!(
-        !get(&s, "/", &cookie).contains("<div class=ask data-n=12>"),
+        !get(&s, "/", &cookie).contains("<details class=ask data-n=12>"),
         "the card stays answered"
     );
     assert!(post("extend").contains("not%20needs"), "a second tap");
@@ -258,7 +273,7 @@ fn a_recorded_extension_is_a_pending_line_without_buttons() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "", NOW);
     let page = get(&s, "/", &cookie);
-    assert!(!page.contains("<div class=ask data-n=12>"), "no needs-you card");
+    assert!(!page.contains("<details class=ask data-n=12>"), "no needs-you card");
     let a = page.find("<div class=pend data-n=12>").expect("no pending line");
     let p = &page[a..a + page[a..].find("</div>").unwrap()];
     assert!(p.contains("⟳ one more round · starting a lane…"), "{p}");

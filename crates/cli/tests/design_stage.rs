@@ -123,6 +123,34 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!(herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
 }
 
+#[test]
+fn a_design_lane_whose_only_untracked_file_is_its_claude_local_md_hands_off() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let c = setup("design-claude-local", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let mut r = fake(&c, HEAD);
+    let st = Out {
+        code: 0,
+        stdout: "?? CLAUDE.local.md\n".into(),
+        stderr: String::new(),
+    };
+    r.replies.insert(0, (format!("git -C {} status", wt(&c, 12)), st));
+    drive(&c, &r);
+    assert_eq!(state(&c, 12), "design");
+    let out = drive(&c, &r);
+    assert!(
+        out.contains(&format!("sendmeter #12 design-review: {:.7}", HEAD)),
+        "{out}"
+    );
+    assert_eq!(
+        (state(&c, 12).as_str(), kinds(&c, "needs-decision").len()),
+        ("design-review", 1)
+    );
+}
+
 /// A paired device's `POST path` with `body`.
 fn post(s: &Server, path: &str, body: &str, cookie: &str, now: u64) -> String {
     let r = format!(
@@ -168,7 +196,7 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     assert_eq!((ask.issue, ask.str("thread")), (Some(12), Some("t1")));
     let (needs, chat) = needs_and_chat(&s, &cookie, c.now + 5);
     assert!(
-        needs.contains("<div class=ask>") && needs.contains("<img src=\"design/sendmeter/12/0\""),
+        needs.contains("<details class=ask>") && needs.contains("<img src=\"design/sendmeter/12/0\""),
         "{needs}"
     );
     assert!(chat.contains("data-id=\"q1\""), "{chat}");
@@ -195,7 +223,7 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     assert_eq!(kinds(&c, "design-approved")[0].str("by"), Some("owner"));
     let (needs, chat) = needs_and_chat(&s, &cookie, c.now + 15);
     assert!(
-        !needs.contains("<div class=ask>") && !chat.contains("data-id=\"q1\""),
+        !needs.contains("<details class=ask>") && !chat.contains("data-id=\"q1\""),
         "{needs}"
     );
     assert!(chat.contains("✓ 1. approve"), "{chat}");
