@@ -129,6 +129,50 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], agents: &[
     Some(Act::Escalate("LANE_STALLED", why))
 }
 
+/// #819: a check lane with no verdict since its spawn and no new pane output this long is replaced.
+pub const STALE_CHECK_SECS: u64 = 2 * 3600;
+
+/// #819: the minutes check lane `lane` of `fleet` #`n` has been quiet, once that is [`STALE_CHECK_SECS`].
+pub fn stale_check(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    ev: &[Event],
+    agents: &[Value],
+    (fleet, n): (&str, u64),
+    lane: &str,
+) -> Option<u64> {
+    let i = ev
+        .iter()
+        .rposition(|e| e.kind == "spawn" && e.str("agent") == Some(lane))?;
+    let sp = &ev[i];
+    if !agents.iter().any(|a| a["name"] == lane) || ev[i + 1..].iter().any(|e| e.is("verdict", fleet, n)) {
+        return None;
+    }
+    let screen = herdr::read(&On::of(r, Some(sp)), sp.str("pane")?).ok()?;
+    let tools = crate::shed::session(ctx, lane)["tools"]
+        .as_object()
+        .is_some_and(|m| !m.is_empty());
+    let quiet = ctx.now.saturating_sub(changed(ctx, lane, &screen, tools).max(sp.ts));
+    (quiet >= STALE_CHECK_SECS).then_some(quiet / 60)
+}
+
+fn changed(ctx: &Ctx, lane: &str, screen: &str, busy: bool) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let path = ctx.state.with_file_name("pane-seen.json");
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut seen: serde_json::Map<String, Value> = serde_json::from_str(&text).unwrap_or_default();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    screen.hash(&mut h);
+    let hash = format!("{:016x}", h.finish());
+    let at = seen.get(lane).filter(|s| !busy && s["hash"] == hash.as_str());
+    if let Some(t) = at.and_then(|s| s["at"].as_u64()) {
+        return t;
+    }
+    seen.insert(lane.into(), json!({"hash": hash, "at": ctx.now}));
+    let _ = std::fs::write(&path, Value::Object(seen).to_string());
+    ctx.now
+}
+
 /// #792: the prompt a silent ACP lane gets once its turn is cancelled.
 pub const NUDGE: &str = "continue: your last step finished or failed; carry on, or end your turn with `herdsman turn`";
 
