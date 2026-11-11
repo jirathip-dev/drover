@@ -155,6 +155,7 @@ pub fn serve(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool) -> Result<(
 
 #[allow(clippy::needless_pass_by_value)] // public API: the listener is handed over and lives as long as the server
 pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> Result<()> {
+    devices::cooee_token(ctx)?;
     let addr = (!read_only)
         .then(|| l.local_addr().map(|a| a.to_string()))
         .transpose()?;
