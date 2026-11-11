@@ -1,0 +1,5 @@
+Decided: merged origin/staging; in crates/cli/tests/hook.rs kept both new tests, this issue's and #837's, side by side
+Because: crates/cli/tests/hook.rs:749
+Rejected: none
+Check: crates/core/src/hook.rs auto-merged; #837 changed bash/redirects, this PR unquote; the hook test binary passes 42/42 at head
+Owner: The fix is updated onto the latest staging with no change to what it does.
