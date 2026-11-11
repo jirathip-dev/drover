@@ -27,6 +27,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod chat;
+#[path = "screens.rs"]
+mod screens;
 mod v1;
 
 const SW: &str = include_str!("../assets/sw.js");
@@ -804,6 +806,9 @@ impl<'a> Server<'a> {
             return Ok(());
         }
         drop(clients);
+        if req.starts_with("GET ") && path.starts_with("/screens/") && path.ends_with("/stream") {
+            return self.stream(&mut s, &req, path, query);
+        }
         s.write_all(&self.reply(&req, crate::now()))?;
         Ok(())
     }
@@ -1005,6 +1010,7 @@ impl<'a> Server<'a> {
         };
         let (status, ctype, body) = match (method, path) {
             (_, p) if p.starts_with("/api/") => self.api(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
+            (_, p) if p.starts_with("/screens/") || p == "/action" => self.screens(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
             ("POST", _) if self.addr.is_none() => ("405 Method Not Allowed", "text/plain", text("read-only: GET only\n")),
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),
             // #501: `/pair/status` asks whether this browser is paired (no secrets): the page asks it on a 401.
