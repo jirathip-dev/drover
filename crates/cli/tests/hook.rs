@@ -712,6 +712,40 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
 }
 
 #[test]
+fn message_text_is_not_a_write_or_a_group_verb() {
+    let d = tmpdir("hook-msg");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let s = d.join("state").display().to_string();
+    let sh = |cmd: &str| orchestrator_hook(&d, json!({"tool_name": "Bash", "tool_input": {"command": cmd}}));
+    let refusal = "REFUSED GROUP_OFF: the `set` group is off; I ran `herdsman set synergy impl --model x`";
+    for cmd in [
+        format!("herdsman thread handoff t6 t7 \"copy\" 'cp mock.png {s}/orchestrator/t7/; then {refusal}'"),
+        format!("herdsman thread handoff t6 synergy 'why: {refusal}' \"mv a > {s}/x\""),
+        format!("herdsman ask synergy 1 \"cp a {s}/x?\" --why '`herdsman set x impl`'"),
+        format!("gh issue create -t 'hook' --body 'echo x > {s}/events.jsonl; {refusal}'"),
+    ] {
+        assert_eq!(sh(&cmd), "", "{cmd}");
+    }
+    for cmd in [
+        format!("echo x > {s}/events.jsonl"),
+        format!("cp a.png {s}/x"),
+        format!("herdsman thread handoff t6 t7 a b > \"{s}/out file\""),
+        format!("herdsman thread say t6 'x' && cp a \"{s}/x y\""),
+    ] {
+        assert!(sh(&cmd).contains("is blocked"), "{cmd}");
+    }
+    for cmd in [
+        "herdsman set synergy impl --model x",
+        "herdsman thread handoff t6 t7 a b; herdsman set synergy impl --model x",
+        "herdsman \"set\" synergy impl --model x",
+        "herdsman thread handoff t6 t7 a \"$(herdsman set synergy impl --model x)\"",
+        "herdsman thread handoff t6 t7 a \"run `herdsman set synergy impl --model x`\"",
+    ] {
+        assert!(sh(cmd).contains("REFUSED GROUP_OFF"), "{cmd}");
+    }
+}
+
+#[test]
 fn herdsman_verbs_and_quoted_text_write_nothing() {
     let d = tmpdir("hook-837");
     std::fs::write(d.join("fleet.toml"), config()).unwrap();
