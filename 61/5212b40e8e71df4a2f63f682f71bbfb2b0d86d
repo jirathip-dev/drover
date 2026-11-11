@@ -1,0 +1,10 @@
+Decided: approve detaches a hidden `herdsman card run <id>` on the main host and posts "running…" at once.
+Because: crates/core/src/card.rs:153
+Decided: `card run` logs run-started/run-done in the event log and runs only once per card, so a restart keeps the result.
+Because: "A herdsman/serve restart mid-run doesn't lose the result (state in the event log)."
+Decided: shed's runner forwards run_for, the root cause of the 60 s cut-off.
+Because: crates/core/src/shed.rs:342
+Rejected: polling the run from serve — another long-lived loop; a detached runner that posts its own result is simpler.
+Check: cargo test -p herdsman --test run_card fails at commit 1 (exit 124 after 60s) and passes at the head.
+Check: the 4 failing suite binaries (chat_tab, config_card, live_board, self_update) also fail or hang on plain staging 8c97451.
+Owner: Approving a run card now replies "running…" right away and later posts the real result, even across restarts.
