@@ -689,6 +689,9 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
         format!("cp x {c}/t6/a.png"),
         format!("mkdir -p {c}/t6/d && cp /w/a.png /w/b.png \"{c}/t6/d/\""),
         format!("echo hi > {c}/t6/n.txt"),
+        // #833: the folder itself as the copy's target.
+        format!("cp /w/docs/design/a.png /w/docs/design/b.png {c}/t6/"),
+        format!("cp /w/a.png \"{c}/t6\""),
     ] {
         assert_eq!(sh(&cmd), "", "{cmd}");
     }
@@ -699,6 +702,9 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
         format!("cp x {c}/t6/../t5/a.png"),
         format!("cp {c}/t6/a.png {s}/fleet.toml"),
         format!("rm {s}/events.jsonl"),
+        format!("cp x {c}/t5/"),
+        format!("cp x {s}/events.jsonl"),
+        format!("rm -rf {c}/t6"),
         // The shell expands these after the check: another thread's folder, herdsman's `.thread.md`.
         format!("cp x {c}/t6/{{a.png,../t5/x}}"),
         format!("cp x {c}/t6/{{.thread,x}}.md"),

@@ -303,6 +303,48 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     }
 }
 
+/// #833: a reply's file from a lane worktree of the thread's fleet is copied into the thread's folder and carried;
+/// a file outside the worktree root, the repo checkout and the thread's folder is still refused.
+#[test]
+fn a_reply_file_from_a_lane_worktree_is_copied_into_the_thread_folder() {
+    let c = setup("chat-wt-file");
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
+        "t1\n"
+    );
+    let design = c.worktrees.join("sendmeter/issue-12/docs/design/inbox");
+    std::fs::create_dir_all(&design).unwrap();
+    let png = design.join("inbox-390.png");
+    std::fs::write(&png, b"\x89PNG design").unwrap();
+    let r = Fake::default();
+    let (code, out) = run(
+        &c,
+        &r,
+        &["thread", "reply", "t1", "The mockup.", "--file", png.to_str().unwrap()],
+    );
+    assert_eq!(code, 0, "{out}");
+    let folder = c.state.with_file_name("orchestrator").join("t1");
+    let log = herdsman::events::jsonl(&c.state).unwrap();
+    let msg = log.lines().rfind(|l| l.contains("The mockup.")).unwrap();
+    let e: serde_json::Value = serde_json::from_str(msg).unwrap();
+    let f = &e["files"][0];
+    assert_eq!(f["name"], "inbox-390.png", "{msg}");
+    let copy = std::path::PathBuf::from(f["path"].as_str().unwrap());
+    assert!(copy.starts_with(folder.canonicalize().unwrap()), "{msg}");
+    assert_eq!(std::fs::read(&copy).unwrap(), b"\x89PNG design");
+
+    let away = c.worktrees.parent().unwrap().join("elsewhere");
+    for p in [away.join("x.png"), c.worktrees.join("other/issue-1/x.png")] {
+        if let Some(d) = p.parent() {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(&p, b"x").unwrap();
+        let (code, out) = run(&c, &r, &["thread", "reply", "t1", "x", "--file", p.to_str().unwrap()]);
+        assert_ne!(code, 0, "{}: {out}", p.display());
+        assert!(!herdsman::events::jsonl(&c.state).unwrap().contains(p.to_str().unwrap()));
+    }
+}
+
 fn url_enc(s: &str) -> String {
     s.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D")
 }
