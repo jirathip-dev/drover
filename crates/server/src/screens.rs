@@ -255,8 +255,10 @@ fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
         "fold": fold(q.issue, kind, &q.question, &age, &main.unwrap_or_default()), "blocks": blocks})
 }
 
-fn needs_card(i: &NeedIssue, action: &str) -> Value {
+fn needs_card(i: &NeedIssue, ev: &crate::events::Log) -> Value {
     let (f, n) = (&i.fleet, i.issue);
+    let st = ev.states.get(&(f.clone(), n));
+    let action = st.map_or("one more round", |s| s.card());
     let vals = json!({"fleet": f, "issue": n});
     let mut opts = vec![json!({"value": "extend", "label": action, "values": vals})];
     if i.merge {
@@ -548,12 +550,7 @@ impl Server<'_> {
         let ev = shared(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
         cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, mins, a)));
-        let action = |i: &NeedIssue| {
-            ev.states
-                .get(&(i.fleet.clone(), i.issue))
-                .map_or("one more round", |s| s.card_action())
-        };
-        cards.extend(tab.issues.iter().map(|i| needs_card(i, action(i))));
+        cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
         Value::Array(cards)
     }
 
