@@ -1,0 +1,11 @@
+Decided: origin/staging merged three times this round; its new lane tests (#820 #830 #831 #835 #842 #860 #871 #877) moved onto the shared fake shed
+Because: "Outside the tests the PR lists for #721 to delete, no test file fakes a herdr reply"
+Decided: #860's model-rejected-at-start test stays on herdr and is listed for #721
+Because: crates/core/src/orchestrator.rs:1189
+Rejected: a shed port of it — the shed-acp start returns before the screen check, so it would test nothing
+Decided: tick_dead_host's direct clean and kill reach the off host's shed through OverSsh
+Because: "The fake shed lives in one shared helper, not copied into each test file"
+Decided: the PR body's evidence names the new head, fixing the red evidence check at 52691f5
+Because: "The PR states the before and after count of `herdr` lines in `crates/*/tests`"
+Check: git diff on crates/*/src against staging is empty; offline_tick and tick_dead_host still count the remote ssh calls
+Owner: Test code only; staging's newest tests also run on the pretend shed, and the PR's evidence matches its latest commit.
