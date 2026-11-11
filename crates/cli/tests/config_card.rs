@@ -18,7 +18,7 @@ const CARD: &str = "<form class=chc data-id=\"c1\"><button name=act value=apply>
 fn setup(name: &str) -> herdsman::Ctx {
     let c = ctx(
         &tmpdir(name),
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Models"]).1,
@@ -43,7 +43,7 @@ fn propose(c: &herdsman::Ctx) {
 /// Conductor messages `m<i>` in t1.
 fn msgs(c: &herdsman::Ctx, ts: u64, ids: std::ops::Range<u64>) {
     for i in ids {
-        let d = json!({"thread": "t1", "from": "conductor", "text": format!("m{i}")});
+        let d = json!({"thread": "t1", "from": "orchestrator", "text": format!("m{i}")});
         append(&c.state, &Event::new(ts + i, "sendmeter", None, "thread-msg", d)).unwrap();
     }
 }

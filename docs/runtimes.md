@@ -155,16 +155,16 @@ Codex hooks speak Claude Code's protocol, and an `apply_patch` edit is judged on
 first in `AGENTS.override.md`, ahead of the repo's own `AGENTS.md`. `herdsman config apply` runs `profiles sync`
 itself, so a role it adds is guarded (and a Hermes profile's hook approved) before doctor looks.
 
-**Conductors (#608).** A thread whose fleet (for an `all` thread, the fleet whose conductor role it runs on) is on
-`shed-acp` starts its conductor the same way: `shed run --acp <acp> --policy <acp_policy> --name conductor-<thread>
---cwd <state dir>/conductor/<thread>/` with the labels `fleet`, `issue=-`, `role=conductor`, `harness`,
+**Orchestrators (#608).** A thread whose fleet (for an `all` thread, the fleet whose orchestrator role it runs on) is on
+`shed-acp` starts its orchestrator the same way: `shed run --acp <acp> --policy <acp_policy> --name orchestrator-<thread>
+--cwd <state dir>/orchestrator/<thread>/` with the labels `fleet`, `issue=-`, `role=orchestrator`, `harness`,
 `source=drover`, `group=<repo>` and `thread=<thread>`, so cooee lists it. The brief, the kick and the message are its
 first prompt; every later line (an owner message, a `DECISION`, a handoff, a system line) goes in through `shed send`,
-multi-line as it is. The guard is a lane's: `HERDSMAN_LANE=<fleet>:-:conductor` and `HERDSMAN_THREAD` reach the
+multi-line as it is. The guard is a lane's: `HERDSMAN_LANE=<fleet>:-:orchestrator` and `HERDSMAN_THREAD` reach the
 profile's hook, so owner-only verbs stay refused. An unguardable setup refuses `ACP_UNGUARDED`, posts the reason in the
 thread as a `system` line, and never falls back to herdr. The idle sleep kills and removes the session, and a session
 shed no longer runs is asleep on the next `check`. shed's bridge loads no saved session yet (`session/load`), so the
-next message starts a fresh one pointed at `.thread.md`. A fleet on herdr keeps herdr conductors.
+next message starts a fresh one pointed at `.thread.md`. A fleet on herdr keeps herdr orchestrators.
 
 **shed on the timer's PATH (#600).** drive spawns with the timer jobs' PATH, not your shell's. `herdsman timer
 install` puts the folder of the `shed` your shell resolves on it, `herdsman doctor` checks `shed` and each ACP

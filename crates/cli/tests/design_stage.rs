@@ -16,7 +16,7 @@ const HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
 fn setup(name: &str, extra: &str) -> herdsman::Ctx {
     let c = ctx(&tmpdir(name), &format!("{CONFIG}{DESIGN}{extra}"));
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     c
@@ -30,7 +30,10 @@ fn wt(c: &herdsman::Ctx, n: u64) -> String {
 fn fake(c: &herdsman::Ctx, head: &str) -> Fake {
     let w = wt(c, 12);
     Fake::default()
-        .reply("herdr agent list", &agents(&[("conductor-t1", "idle", "/x", "w9:c1")]))
+        .reply(
+            "herdr agent list",
+            &agents(&[("orchestrator-t1", "idle", "/x", "w9:c1")]),
+        )
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -150,7 +153,7 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let c = setup(
         "design-surfaces",
-        "\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n",
+        "\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n",
     );
     let r = fake(&c, HEAD);
     let s = Server::new(&c, &r, Some(ADDR.into()));
@@ -406,7 +409,7 @@ fn design_off_on_a_queued_issue_lets_impl_spawn_directly() {
 }
 
 #[test]
-fn a_paused_fleet_auto_spawns_no_design_but_the_conductor_still_can() {
+fn a_paused_fleet_auto_spawns_no_design_but_the_orchestrator_still_can() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let c = setup("design-paused", "");
     let toml = std::fs::read_to_string(&c.config).unwrap();

@@ -28,12 +28,16 @@ pub struct Config {
     /// #298: `[runtime]`, the terminal runtime new lanes start in (docs/runtimes.md); herdr when unset.
     pub runtime: Runtime,
     /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
-    pub conductor: ConductorCfg,
+    #[serde(alias = "conductor")]
+    pub orchestrator: OrchestratorCfg,
+    /// #780: fleet.toml still names `[conductor]` or a `role.conductor` (doctor's deprecation line).
+    #[serde(skip)]
+    pub old_names: bool,
     /// #557: the Telegram bridge (#387) is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
     pub telegram: Option<toml::Value>,
     /// #345: `[service] url`, where lanes on other hosts reach `herdsman service`'s API (docs/service.md).
     pub service: ServiceCfg,
-    /// #404: `[chat]`, new threads' conductor defaults over the fleet's `role.conductor` (`conductor::defaults`).
+    /// #404: `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
     pub chat: Chat,
     /// #537: `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
     pub ci_runners: Option<CiRunners>,
@@ -94,7 +98,7 @@ pub struct ServiceCfg {
     pub url: Option<String>,
 }
 
-/// #404: the harness, model, effort and account(s) a new thread's conductor starts on; each unset one is the role's.
+/// #404: the harness, model, effort and account(s) a new thread's orchestrator starts on; each unset one is the role's.
 #[derive(Debug, Default, Deserialize)]
 pub struct Chat {
     pub harness: Option<String>,
@@ -108,15 +112,28 @@ pub struct Chat {
 /// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the
 /// root of the per-thread working folders (default `<state dir>/conductor`); #538: `allow`, its capability groups.
 #[derive(Debug, Default, Deserialize)]
-pub struct ConductorCfg {
+pub struct OrchestratorCfg {
     pub dir: Option<String>,
     pub instructions: Option<String>,
     pub skills: Option<String>,
     pub memory: Option<String>,
     pub allow: Option<Vec<String>>,
+    /// #780: the default orchestrator's name: free text the owner calls it, shown on its labels, never read by code.
+    pub name: Option<String>,
+    /// #780: `[orchestrator.<id>]`, more orchestrators: each its own `name` and `fleets` (overlap allowed).
+    #[serde(flatten)]
+    pub more: BTreeMap<String, Orchestrator>,
 }
 
-/// #538: each capability group a conductor may be allowed and its herdsman verbs (the hook's `group`).
+/// #780: one `[orchestrator.<id>]`: what the owner calls it and the fleets its threads may be on.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Orchestrator {
+    pub name: Option<String>,
+    pub fleets: Vec<String>,
+}
+
+/// #538: each capability group an orchestrator may be allowed and its herdsman verbs (the hook's `group`).
 pub const GROUPS: &[(&str, &str)] = &[
     ("design", "`spawn … design` or `… architect`"),
     ("clean", "`clean --yes`, `--orphans`, `--lane`"),
@@ -128,7 +145,7 @@ pub const GROUPS: &[(&str, &str)] = &[
     ("set", "`set` a role's harness, model or effort"),
 ];
 
-impl ConductorCfg {
+impl OrchestratorCfg {
     /// #538: the groups on: `allow`, else every group but `pause` and `set`.
     pub fn groups(&self) -> Vec<&str> {
         let default = || {
@@ -432,7 +449,7 @@ pub struct Fleet {
     /// #417: globs of UI files: a PR touching one goes through the verify stage.
     #[serde(default)]
     pub ui_paths: Vec<String>,
-    /// #541: the conductor thread (`t6`) lane asks go to first; unset = the repo's most recently active thread.
+    /// #541: the orchestrator thread (`t6`) lane asks go to first; unset = the repo's most recently active thread.
     pub ask_thread: Option<String>,
     /// #565: `[fleet.<n>.runtime]`, this fleet's new lanes' runtime over the global `[runtime]` (a pilot on one fleet).
     pub runtime: Option<Runtime>,
@@ -517,7 +534,7 @@ pub struct Role {
     pub needs: Vec<String>,
     /// #236: the host its lanes always run on (`main`: the one without `machine`); `design` defaults to `main`.
     pub host: Option<String>,
-    /// #401: the default conductor `Config::parse` adds for a fleet without one: its impl role on `lane-conductor`.
+    /// #401: the default orchestrator `Config::parse` adds for a fleet without one: its impl role on `lane-orchestrator`.
     #[serde(skip)]
     pub default: bool,
 }
@@ -763,9 +780,13 @@ impl Config {
         let f = self.accounts.accounts_env.as_deref();
         let tg = "removed (#557): herdsman has no Telegram bridge now; drop the table".to_string();
         let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));
+        let old =
+            "renamed (#780): call it [orchestrator] and role.orchestrator; the old names are read for one release";
+        let old = self.old_names.then(|| ("[conductor]", old.to_string()));
         f.map(|f| ("[accounts].accounts_env", run(f)))
             .into_iter()
             .chain(tg)
+            .chain(old)
             .collect()
     }
 
@@ -863,9 +884,19 @@ impl Config {
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
         }
-        if let Some(g) = c.conductor.groups().iter().find(|g| !GROUPS.iter().any(|k| k.0 == **g)) {
+        if let Some((id, f)) = (c.orchestrator.more.iter())
+            .find_map(|(id, o)| Some((id, o.fleets.iter().find(|f| *f != "all" && !c.fleet.contains_key(*f))?)))
+        {
+            bail!("orchestrator.{id}.fleets: \"{f}\" is no fleet");
+        }
+        if let Some(g) = c
+            .orchestrator
+            .groups()
+            .iter()
+            .find(|g| !GROUPS.iter().any(|k| k.0 == **g))
+        {
             bail!(
-                "conductor.allow: \"{g}\" is no group; one of {:?}",
+                "orchestrator.allow: \"{g}\" is no group; one of {:?}",
                 GROUPS.iter().map(|g| g.0).collect::<Vec<_>>()
             );
         }
@@ -887,7 +918,12 @@ impl Config {
             bail!("chat: account '{a}' is not in [accounts]");
         }
         let mut c = c;
+        c.old_names = raw.contains_key("conductor");
         for (name, f) in &mut c.fleet {
+            if let Some(r) = f.role.remove("conductor") {
+                f.role.entry("orchestrator".into()).or_insert(r);
+                c.old_names = true;
+            }
             let mut p = f
                 .pipeline
                 .take()
@@ -912,13 +948,13 @@ impl Config {
             f.pipeline = Some(p);
         }
         for (name, f) in &mut c.fleet {
-            if let Some(r) = f.role.get("impl").filter(|_| !f.role.contains_key("conductor")) {
+            if let Some(r) = f.role.get("impl").filter(|_| !f.role.contains_key("orchestrator")) {
                 let r = Role {
-                    profile: Some("lane-conductor".into()),
+                    profile: Some("lane-orchestrator".into()),
                     default: true,
                     ..r.clone()
                 };
-                f.role.insert("conductor".into(), r);
+                f.role.insert("orchestrator".into(), r);
             }
             if !f.serial_paths.is_empty() {
                 if !f.serial.is_empty() {
@@ -1110,7 +1146,7 @@ impl Fleet {
         match role {
             "design" => "design",
             "architect" => "architect",
-            "conductor" => "conductor",
+            "orchestrator" => "orchestrator",
             r if self.flow().is_check(r) => "rev",
             _ => "impl",
         }

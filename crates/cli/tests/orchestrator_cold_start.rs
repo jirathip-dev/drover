@@ -17,9 +17,9 @@ const TIMEOUT: &str = r#"{"error":{"code":"timeout","message":"timed out waiting
 fn setup(name: &str) -> herdsman::Ctx {
     let c = ctx(
         &tmpdir(name),
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     let f = Fake::default();
@@ -97,7 +97,7 @@ fn call(addr: SocketAddr, method: &str, path: &str, cookie: &str, body: &str) ->
 }
 
 #[test]
-fn a_blocked_conductor_start_holds_no_request() {
+fn a_blocked_orchestrator_start_holds_no_request() {
     let c = setup("cold-start");
     let r = Slow(herdr(), AtomicBool::new(false), AtomicBool::new(false));
     let (c, r): (&'static herdsman::Ctx, &'static Slow) = (Box::leak(Box::new(c)), Box::leak(Box::new(r)));
@@ -123,7 +123,7 @@ fn a_blocked_conductor_start_holds_no_request() {
     while !r.1.load(SeqCst) && t.elapsed() < Duration::from_secs(5) {
         std::thread::sleep(Duration::from_millis(10));
     }
-    assert!(r.1.load(SeqCst), "the answer never started t1's conductor");
+    assert!(r.1.load(SeqCst), "the answer never started t1's orchestrator");
 
     let (ms, res) = call(addr, "GET", "/", "", "");
     assert!(res.starts_with("HTTP/1.1 200"), "GET / during the start: {res:.300}");
@@ -149,7 +149,7 @@ fn a_blocked_conductor_start_holds_no_request() {
     while t.elapsed() < Duration::from_secs(10) {
         std::thread::sleep(Duration::from_millis(300));
         let log = herdsman::events::jsonl(&c.state).unwrap_or_default();
-        if log.contains("\"conductor-start\"") && log == last {
+        if log.contains("\"orchestrator-start\"") && log == last {
             break;
         }
         last = log;
