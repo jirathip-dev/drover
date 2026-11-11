@@ -266,9 +266,6 @@ fn another_hosts_agent_list_is_cut_off_at_its_limit() {
     assert_eq!((o.code, o.stdout.trim()), (0, "up"), "an answer in time is kept");
 }
 
-/// #840: bazzite unreachable 15 min with #12 (branch pushed) and #13 (never pushed) on it: one drive pass restarts both
-/// on the main host (#12 from its pushed branch, #13 from staging), logs a `lane-moved` each and posts one line; the
-/// next pass, and bazzite's return, restart nothing.
 #[test]
 fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
     let c = setup("offline-move");
@@ -377,7 +374,6 @@ fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
     let (_, status) = run(&c, &r, &["status"]);
     assert!(!status.contains("host offline"), "the old lanes are gone: {status}");
 
-    // Still down, then back: nothing restarts, nothing more is posted.
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     hosts(true);
