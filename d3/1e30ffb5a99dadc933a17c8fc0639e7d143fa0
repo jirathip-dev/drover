@@ -1,0 +1,11 @@
+Decided: this round changes no code; the PR body's evidence and the index.toml pin move to head d31e30ff, which carries the q1235 fold and screens.rs out of serve/
+Because: "The PR body names the commit for cooee's `plugins/index.toml` to pin"
+Decided: ask cards carry a fold line (#N · kind · question cut short · age) and their main button; a tap opens the full card
+Because: q1235
+Decided: the blocks are built from the board's own queue_tab and needs_tab, so no engine state is derived twice
+Because: crates/server/src/screens.rs:512
+Decided: serve.rs only routes /screens/* and /action beside /api/v1; the board's pages are untouched
+Because: q1240
+Rejected: a new commit to re-anchor the evidence — the head already holds every change; only the body lagged
+Check: the body's pin and test evidence name d31e30ffb5a99dadc933a17c8fc0639e7d143fa0, the PR head
+Owner: cooee's native app can show herdsman's Queue, Events, folded ask cards and fleet settings, and act on them.
