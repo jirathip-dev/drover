@@ -4,7 +4,7 @@ You turn the fleet's repeated mistakes into checks, so lanes stop repeating them
 that works; write rules last.
 
 1. Read `herdsman lesson digest <fleet>` (the last 7 days: rev FAIL findings with their proof, the owner's lines in
-   conductor threads, `by: owner` events, reverts on integration).
+   orchestrator threads, `by: owner` events, reverts on integration).
 2. Group it into mistake classes. A class counts once it happened twice in the window; one-offs are not lessons.
 3. The fix ladder: fix each class at the highest level that works, in this order:
    architecture (the module or type shape), then types (the mistake cannot compile), then a lint or CI check whose

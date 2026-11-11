@@ -30,8 +30,8 @@ harness = "dsh"
 harness = "claude"
 model = "opus"
 
-# #386: the conductor that talks the [chat] tab's acme-api and all-repos threads through.
-[fleet.acme-api.role.conductor]
+# #386: the orchestrator that talks the [chat] tab's acme-api and all-repos threads through.
+[fleet.acme-api.role.orchestrator]
 harness = "claude"
 model = "opus"
 

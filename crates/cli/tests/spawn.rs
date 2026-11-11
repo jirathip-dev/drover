@@ -172,7 +172,7 @@ fn cap_asks_only_when_your_own_pr_crosses() {
             // #668: one conductor-filed raise for the queue, never a lane's own edit.
             "Never edit `ci/cap.toml` (the hook refuses it",
             "`herdsman cap <fleet>`'s queue-wide view",
-            "in one conductor-filed issue (recommended), or trim.",
+            "in one orchestrator-filed issue (recommended), or trim.",
         ] {
             assert!(t.contains(w), "{w}");
         }

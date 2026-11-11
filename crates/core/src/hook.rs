@@ -13,15 +13,15 @@ pub struct Policy {
     pub reviewer: bool,
     /// #216: the fleet's `deny_commands`.
     pub deny: Vec<Deny>,
-    /// #410: a conductor lane (`HERDSMAN_LANE`'s role): it may spawn design lanes.
-    pub conductor: bool,
-    /// #410: the conductor's thread folder, writable but for herdsman's `.brief.md` and `.thread.md`.
+    /// #410: an orchestrator lane (`HERDSMAN_LANE`'s role): it may spawn design lanes.
+    pub orchestrator: bool,
+    /// #410: the orchestrator's thread folder, writable but for herdsman's `.brief.md` and `.thread.md`.
     pub own: Option<String>,
-    /// #538: the capability groups a conductor has on (`[conductor] allow`).
+    /// #538: the capability groups an orchestrator has on (`[orchestrator] allow`).
     pub groups: Vec<String>,
     /// #536: the lane's `HERDSMAN_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo builds only under its `build_root`.
     pub scratch: Option<String>,
-    /// #668: an impl lane: `ci/cap.toml` is not its to write (but for the conductor-filed raise).
+    /// #668: an impl lane: `ci/cap.toml` is not its to write (but for the orchestrator-filed raise).
     pub cap: bool,
 }
 
@@ -55,7 +55,7 @@ impl Rules {
         Rules {
             branches,
             deny,
-            groups: cfg.conductor.groups().into_iter().map(String::from).collect(),
+            groups: cfg.orchestrator.groups().into_iter().map(String::from).collect(),
             reviewer: family == Some("rev"),
             builds: role != "lesson" && family == Some("impl"),
         }
@@ -84,7 +84,7 @@ const WRITERS: &[&str] = &[
     "rm", "mv", "cp", "tee", "truncate", "chmod", "ln", "install", "dd", "sips",
 ];
 
-/// #668: the repo's line cap file; one conductor-filed issue raises it for the whole queue.
+/// #668: the repo's line cap file; one orchestrator-filed issue raises it for the whole queue.
 pub const CAP_FILE: &str = "ci/cap.toml";
 pub const NO_CAP_EDIT: &str = "REFUSED CAP_FILE: a lane never edits ci/cap.toml; when your PR would cross the cap, \
                                run `herdsman cap <fleet>` and ask with its view (#668)";
@@ -214,9 +214,9 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
     let cmd = &dups(&unquote(cmd, false));
     let mut cwd = cwd.to_string();
     // #538: the hard nos no run card may run, from a conductor's own shell either.
-    if let Some(w) = crate::card::forbidden(cmd).filter(|_| p.conductor) {
+    if let Some(w) = crate::card::forbidden(cmd).filter(|_| p.orchestrator) {
         return Some(format!(
-            "REFUSED CARD_FORBIDDEN: this command {w}; a conductor never runs it (#538)"
+            "REFUSED CARD_FORBIDDEN: this command {w}; an orchestrator never runs it (#538)"
         ));
     }
     // #502: `pgrep x | xargs kill` and `kill $(pgrep x)` kill by pattern too.
@@ -557,7 +557,7 @@ pub fn group_of(cmd: &str) -> Option<&'static str> {
 /// `card approve|deny`: owner-only (pre-rename `fleet` too). #538: a group verb (`clean --yes`, a design spawn, …)
 /// is a conductor's too while `[conductor] allow` has its group on, never another lane's.
 fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
-    let conductor = p.conductor;
+    let orchestrator = p.orchestrator;
     let i = t
         .iter()
         .position(|w| matches!(w.rsplit('/').next(), Some("herdsman" | "fleet")))?;
@@ -588,17 +588,21 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     }
     // #419: `lesson` files an issue and spawns a lane: a conductor's verb (the owner's too); its digest (and #510's
     // `apply`, a rules-file rewrite in the lane's own worktree) is open.
-    if !conductor && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
-        return Some("REFUSED CONDUCTOR_ONLY: only a conductor or the owner runs `herdsman lesson` (#419)".into());
+    if !orchestrator && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
+        return Some(
+            "REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `herdsman lesson` (#419)".into(),
+        );
     }
     // #574: `amend` edits the issue's spec: the owner's decision, written by a conductor or the owner.
-    if !conductor && r.first() == Some(&"amend") {
-        return Some("REFUSED CONDUCTOR_ONLY: only a conductor or the owner runs `herdsman amend` (#574)".into());
+    if !orchestrator && r.first() == Some(&"amend") {
+        return Some(
+            "REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `herdsman amend` (#574)".into(),
+        );
     }
     // #461: `timer install` (only that host verb) is a conductor's too; outside a lane it is the owner's.
-    if !conductor && !lane.is_empty() && r.first() == Some(&"timer") && r.contains(&"install") {
+    if !orchestrator && !lane.is_empty() && r.first() == Some(&"timer") && r.contains(&"install") {
         return Some(
-            "REFUSED CONDUCTOR_ONLY: only a conductor or the owner runs `herdsman timer install` (#461)".into(),
+            "REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `herdsman timer install` (#461)".into(),
         );
     }
     if r.first() == Some(&"wip") && !r.contains(&"--dry-run") {
@@ -612,25 +616,25 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
             "REFUSED OWNER_ONLY: only the owner runs the token proxy or revokes its keys, never a lane (#637)".into(),
         );
     }
-    if !conductor && r.first() == Some(&"card") {
-        return Some("REFUSED CONDUCTOR_ONLY: only a conductor posts run cards (#538)".into());
+    if !orchestrator && r.first() == Some(&"card") {
+        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator posts run cards (#538)".into());
     }
     let g = group(r)?;
-    if g == "design" && !conductor {
+    if g == "design" && !orchestrator {
         return Some(
-            "design lanes are owner-only: the owner or a conductor thread runs `herdsman spawn … design`, never a lane"
+            "design lanes are owner-only: the owner or an orchestrator thread runs `herdsman spawn … design`, never a lane"
                 .into(),
         );
     }
-    if !conductor {
+    if !orchestrator {
         return Some(format!(
-            "REFUSED OWNER_ONLY: `herdsman {}` ({g} group) is the owner's or a conductor's, never a lane's (#538)",
+            "REFUSED OWNER_ONLY: `herdsman {}` ({g} group) is the owner's or an orchestrator's, never a lane's (#538)",
             r[0]
         ));
     }
     (!p.groups.iter().any(|x| x == g)).then(|| {
         format!(
-            "REFUSED GROUP_OFF: the `{g}` group is off in [conductor] allow; propose turning it on with \
+            "REFUSED GROUP_OFF: the `{g}` group is off in [orchestrator] allow; propose turning it on with \
              `herdsman config propose` (#538)"
         )
     })

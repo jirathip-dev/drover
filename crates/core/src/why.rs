@@ -427,7 +427,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
         let d = events
             .iter()
             .rfind(|d| d.kind == "decision" && d.fleet == *fleet && d.str("id") == Some(id));
-        let answer = d.map(|d| json!({"choice": d.str("choice"), "by": d.str("by"), "via": d.str("via")}));
+        let answer = d.map(|d| json!({"choice": d.str("choice"), "by": d.str("by").map(|b| crate::orchestrator::label(cfg, &events, b)), "via": d.str("via")}));
         let mine = issue.is_some() && e.issue == issue;
         (mine || cited(id))
             .then(|| json!({"id": id, "kind": e.str("kind"), "question": e.str("question"), "answer": answer}))

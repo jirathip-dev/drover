@@ -164,7 +164,7 @@ fn herd_and_roles_read_as_the_old_board_draws_them() {
         .iter()
         .map(|r| r["name"].clone())
         .collect();
-    assert_eq!(names, [json!("impl"), json!("rev")]);
+    assert_eq!(names, [json!("impl"), json!("orchestrator"), json!("rev")]);
     assert_eq!(roles["config"]["roles"][0]["model"], "opus");
     assert_eq!(
         (
@@ -185,7 +185,7 @@ fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
     let set = json!({"fleet": "sendmeter", "role": "rev", "model": "sonnet", "mtime": mtime(&s)});
     assert_eq!(post(&s, "set", set, "").1, "OK");
     let roles = |s: &Server| req(s, "GET", "/api/v1/roles?fleet=sendmeter", "", "").1;
-    assert_eq!(roles(&s)["config"]["roles"][1]["model"], "sonnet");
+    assert_eq!(roles(&s)["config"]["roles"][2]["model"], "sonnet");
     let chat = |m: &str, v: Value| {
         let mut b = json!({"mtime": m});
         b.as_object_mut().unwrap().extend(v.as_object().unwrap().clone());
@@ -258,7 +258,7 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
     );
     assert_eq!(
         post(&s, "chat-about", json!({"fleet": "nope", "issue": 30}), &ck).1,
-        "NO_CONDUCTOR"
+        "NO_ORCHESTRATOR"
     );
     // [close]: a backlog issue only; #12 has a lane.
     assert_eq!(

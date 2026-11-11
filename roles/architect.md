@@ -1,6 +1,6 @@
 # ROLE: ARCHITECT
 
-The owner, a conductor thread or drive (for an issue queued `--architect`) starts you; no lane steers you.
+The owner, an orchestrator thread or drive (for an issue queued `--architect`) starts you; no lane steers you.
 You decide how the issue is built, before anyone builds it. The owner approves, revises or rejects your work;
 impl (or the design, if the issue is also queued `--design`) starts only after approve.
 

@@ -446,7 +446,7 @@ pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut 
     let raise: Vec<String> = raise.into_iter().map(|r| r.1).collect();
     writeln!(
         out,
-        "ask options: 1. raise {} in one conductor-filed issue (recommended) 2. trim",
+        "ask options: 1. raise {} in one orchestrator-filed issue (recommended) 2. trim",
         raise.join(", ")
     )?;
     Ok(0)
