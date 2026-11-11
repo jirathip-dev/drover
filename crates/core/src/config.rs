@@ -620,6 +620,12 @@ pub struct Limits {
     pub ask_waiting_minutes: u64,
     pub outbox_stale_minutes: u64,
     pub host_offline_minutes: u64,
+    pub serve_herdr_secs: u64,
+    pub serve_shed_secs: u64,
+    pub serve_remote_secs: u64,
+    pub serve_host_secs: u64,
+    pub slo_api_p95_ms: u64,
+    pub slo_api_minutes: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -727,6 +733,12 @@ impl Default for Limits {
             ask_waiting_minutes: 30,
             outbox_stale_minutes: 5,
             host_offline_minutes: 15,
+            serve_herdr_secs: 2,
+            serve_shed_secs: 5,
+            serve_remote_secs: 10,
+            serve_host_secs: 10,
+            slo_api_p95_ms: 1000,
+            slo_api_minutes: 10,
         }
     }
 }
@@ -936,6 +948,30 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "host_offline_minutes",
         "a remote host unreachable this long has its open lanes restarted on the main host",
     ),
+    (
+        "serve_herdr_secs",
+        "serve re-reads herdr's agents in the background this often",
+    ),
+    (
+        "serve_shed_secs",
+        "serve re-reads shed's lanes in the background this often",
+    ),
+    (
+        "serve_remote_secs",
+        "serve re-reads the remote hosts (ssh) in the background this often",
+    ),
+    (
+        "serve_host_secs",
+        "serve re-samples this host's load in the background this often",
+    ),
+    (
+        "slo_api_p95_ms",
+        "`/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once",
+    ),
+    (
+        "slo_api_minutes",
+        "how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api`",
+    ),
 ];
 
 static ACTIVE: std::sync::RwLock<Option<std::sync::Arc<Limits>>> = std::sync::RwLock::new(None);
@@ -976,6 +1012,7 @@ pub struct Notify {
 
 /// A webpush notifier's events when `on` is unset: the alert set plus the asks (#40) and needs-human (#130).
 pub const WEBPUSH_ON: &[&str] = &[
+    "slo-api",
     "config-invalid",
     "thread-msg",
     "blocked",

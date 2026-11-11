@@ -603,8 +603,8 @@ impl Threads {
 /// #701: the cached `Log` whose events `events` are (none: a log read some other way).
 pub fn cached(events: &[Event]) -> Option<Arc<Log>> {
     let logs = LOGS.lock().unwrap_or_else(PoisonError::into_inner);
-    let hit = logs.values().find(|l| std::ptr::eq(l.events.as_slice(), events));
-    hit.cloned()
+    let hit = logs.values().find(|l| std::ptr::eq(l.1.events.as_slice(), events));
+    hit.map(|l| l.1.clone())
 }
 
 /// #701: the first `needs-decision` (`ask`) or the last `decision` of `fleet`'s ask `id`: the index's when `events` is
@@ -623,11 +623,15 @@ pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> 
     map.get(&(fleet.into(), id.into())).map(|i| &events[*i])
 }
 
+/// #859: ask indexes built from a slice that is no cached `Log` (`index`'s one-pass fallback): serve's reads build none.
+pub static REBUILDS: AtomicUsize = AtomicUsize::new(0);
+
 /// #632: `f` on `events`' ask index: the cached `log`'s when `events` is it, else built in one pass.
 fn index<T>(events: &[Event], f: impl FnOnce(&Asks) -> T) -> T {
     if let Some(l) = cached(events) {
         return f(&l.asks);
     }
+    REBUILDS.fetch_add(1, Relaxed);
     let mut x = Asks::default();
     (1..=events.len()).for_each(|n| x.add(&events[..n]));
     f(&x)
@@ -641,6 +645,7 @@ pub struct Log {
     pub asks: Asks,
     pub threads: Threads,
     pub states: States,
+    issues: HashMap<(String, u64), Vec<usize>>,
     seq: u64,
     key: (Option<u64>, Option<u64>),
 }
@@ -652,32 +657,49 @@ impl std::ops::Deref for Log {
     }
 }
 
-static LOGS: Mutex<BTreeMap<PathBuf, Arc<Log>>> = Mutex::new(BTreeMap::new());
+type Gated = (Arc<Mutex<()>>, Arc<Log>);
+
+static LOGS: Mutex<BTreeMap<PathBuf, Gated>> = Mutex::new(BTreeMap::new());
 
 /// #560, #632: the cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq:
 /// each call reads only the events appended since (serve's requests and watcher).
 pub fn shared(path: &Path) -> Result<Arc<Log>> {
-    let mut logs = LOGS.lock().unwrap_or_else(PoisonError::into_inner);
-    let l = logs.entry(crate::db::file(path)).or_default();
-    // #560: another file or a rotation since (`db::version`): all again.
+    let (file, logs) = (crate::db::file(path), || {
+        LOGS.lock().unwrap_or_else(PoisonError::into_inner)
+    });
+    let gate = logs().entry(file.clone()).or_default().0.clone();
+    let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
     let (last, key) = (crate::db::last_seq(path), crate::db::version(path));
+    let mut l = {
+        let mut m = logs();
+        let l = &mut m.get_mut(&file).expect("added above").1;
+        if key == l.key && last == l.seq && last > 0 {
+            return Ok(l.clone());
+        }
+        std::mem::take(l)
+    };
+    let got = catch_up(path, &mut l, last, key);
+    logs().get_mut(&file).expect("added above").1 = l.clone();
+    got.map(|()| l)
+}
+
+fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<u64>)) -> Result<()> {
     if key != l.key {
         *l = Arc::new(Log { key, ..Log::default() });
-    }
-    // Seq 0 (no events, or a read error `last_seq` hides) is read again: its error is the caller's to show.
-    if last == l.seq && last > 0 {
-        return Ok(l.clone());
     }
     let new = crate::db::events(path, "archived = 0 AND seq > ?1", l.seq)?;
     let m = Arc::make_mut(l);
     m.seq = new.last().map_or(last, |e| e.seq.max(last));
     m.states = fold_into(std::mem::take(&mut m.states), &new);
     for e in new {
+        if let Some(n) = e.issue {
+            m.issues.entry((e.fleet.clone(), n)).or_default().push(m.events.len());
+        }
         m.events.push(e);
         m.asks.add(&m.events);
         m.threads.add(&m.events);
     }
-    Ok(l.clone())
+    Ok(())
 }
 
 /// Why ask `a` closed (#584: every ending): answered, withdrawn, delivered or failed (a handoff card), expired, its
@@ -745,13 +767,29 @@ pub fn open_asks(events: &[Event]) -> Vec<&Event> {
     index(events, |x| x.open(events))
 }
 
-/// Current per-issue state (the states in `roles/usage-tail.md`).
+/// #859: `fleet` #`n`'s events in order: the index's when `events` is a cached log, else one pass.
+pub fn of_issue<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> {
+    let Some(l) = cached(events) else {
+        REBUILDS.fetch_add(1, Relaxed);
+        return events
+            .iter()
+            .filter(|e| e.fleet == fleet && e.issue == Some(n))
+            .collect();
+    };
+    let at = l.issues.get(&(fleet.to_string(), n));
+    at.map_or_else(Vec::new, |v| v.iter().map(|i| &events[*i]).collect())
+}
+
+/// Current per-issue state (the states in `roles/usage-tail.md`); #859: the cached log's fold when `events` is it.
 pub fn fold(events: &[Event]) -> States {
+    if let Some(l) = cached(events) {
+        return l.states.clone();
+    }
     fold_into(States::new(), events)
 }
 
 /// #343: `fold` on from the states `m` (a checkpoint's).
-fn fold_into(mut m: States, events: &[Event]) -> States {
+pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
     for e in events {
         let Some(n) = e.issue else { continue };
         let new = || IssueState {

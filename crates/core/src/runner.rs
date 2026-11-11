@@ -57,6 +57,21 @@ pub trait Runner: Sync {
     }
 }
 
+thread_local!(static REQUEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+
+/// #859: `f` as a board GET request: it may read only what the background refreshed, never start a process.
+pub fn request<T>(f: impl FnOnce() -> T) -> T {
+    let was = REQUEST.replace(true);
+    let t = f();
+    REQUEST.set(was);
+    t
+}
+
+/// #859: this thread is serving a board GET request (`request`).
+pub fn in_request() -> bool {
+    REQUEST.get()
+}
+
 pub struct Real;
 
 impl Runner for Real {
@@ -130,6 +145,7 @@ impl Real {
     pub fn within(&self, prog: &str, args: &[String], input: &[u8], limit: Duration) -> Result<Out> {
         use std::io::Write;
         use std::process::Stdio;
+        debug_assert!(!in_request(), "#859: `{prog}` started on a board request");
         let dir = args.iter().position(|a| a == "-C").and_then(|i| args.get(i + 1));
         let fail = |why: String| {
             let stderr = format!("{prog} {}: {why}", args.join(" "));

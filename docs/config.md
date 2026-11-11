@@ -144,3 +144,9 @@ Every timing and cap herdsman core uses is a `[limits]` key; a fleet.toml withou
 | `ask_waiting_minutes` | `30` | an owner ask open this long alerts `ask-waiting` |
 | `outbox_stale_minutes` | `5` | a remote lane's outbox line undelivered this long alerts `outbox-stale` |
 | `host_offline_minutes` | `15` | a remote host unreachable this long has its open lanes restarted on the main host |
+| `serve_herdr_secs` | `2` | serve re-reads herdr's agents in the background this often |
+| `serve_shed_secs` | `5` | serve re-reads shed's lanes in the background this often |
+| `serve_remote_secs` | `10` | serve re-reads the remote hosts (ssh) in the background this often |
+| `serve_host_secs` | `10` | serve re-samples this host's load in the background this often |
+| `slo_api_p95_ms` | `1000` | `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once |
+| `slo_api_minutes` | `10` | how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api` |

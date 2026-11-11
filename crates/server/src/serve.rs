@@ -27,8 +27,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod chat;
+mod fresh;
 #[path = "screens.rs"]
 mod screens;
+mod slo;
 mod v1;
 
 const SW: &str = include_str!("../assets/sw.js");
@@ -166,8 +168,13 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
     let (tx, rx) = channel();
     let s = Server {
         jobs: Some(tx),
-        ..Server::new(ctx, r, addr)
+        ..Server::new(ctx, r, addr).deferring()
     };
+    STARTED.get_or_init(|| ctx.now);
+    for _ in 0..2 {
+        s.warm();
+        s.refresh(crate::now());
+    }
     let (h, w) = (
         s.host.clone(),
         Server {
@@ -180,14 +187,25 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
         },
     );
     let (s, busy) = (&s, &AtomicUsize::new(0));
-    STARTED.get_or_init(|| ctx.now);
     std::thread::scope(|sc| {
+        let limits = || Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
         // #57: the host every 10 s (its 2 s vm_stat delta included) here, never on a request.
         sc.spawn(move || loop {
             let mut hs = host::sample(r);
             host::window(&ctx.state, &mut hs);
             *lock(&h) = hs;
-            std::thread::sleep(Duration::from_secs(10));
+            s.r.sampled(crate::now());
+            std::thread::sleep(Duration::from_secs(limits().serve_host_secs.max(1)));
+        });
+        for src in fresh::Source::ALL {
+            sc.spawn(move || loop {
+                s.r.refresh(src, src.every(&limits()), crate::now());
+                std::thread::sleep(Duration::from_secs(1));
+            });
+        }
+        sc.spawn(move || loop {
+            s.slo(crate::now());
+            std::thread::sleep(Duration::from_secs(60));
         });
         sc.spawn(move || loop {
             w.tick();
@@ -221,13 +239,14 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
 
 /// `Server::cached` as a Runner (runner, cache, now, ttl): also `waiting::scan`'s per-issue `git log` on a request.
 /// A read the step's snapshot (#337) has comes from it; one it lacks on another host fails, never runs on a request.
-struct Memo<'a>(&'a dyn Runner, &'a Cache, u64, u64, Arc<Snapshot>);
+struct Memo<'a>(&'a fresh::Fresh<'a>, &'a Cache, u64, u64, Arc<Snapshot>);
 impl Runner for Memo<'_> {
     fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
         let (key, cache) = (crate::snapshot::key(prog, args), || lock(self.1));
         match self.4.reads.get(&key) {
             Some(v) => return Ok(crate::snapshot::out(v.clone())),
             None if self.4.ts > 0 && crate::snapshot::remote(prog, args) => return Ok(crate::snapshot::out(None)),
+            None if self.0.defer && crate::runner::in_request() => return self.0.run(prog, args),
             None => {}
         }
         let hit = cache()
@@ -333,7 +352,7 @@ fn window<T: std::fmt::Debug>(v: &[T], n: usize, kb: usize) -> &[T] {
 
 pub struct Server<'a> {
     ctx: &'a Ctx,
-    r: &'a dyn Runner,
+    r: fresh::Fresh<'a>,
     /// The bind address a POST's `Host` must name; None: read-only.
     addr: Option<String>,
     /// Command stdout by argv, with its time: rate-limited reads, shared with the watcher, which (`fresh`) re-reads at a third of the ttl.
@@ -359,6 +378,7 @@ pub struct Server<'a> {
     later: Mutex<Vec<(Ctx, (Event, String))>>,
     /// #620: the [chat] tab's fold, by its key (`chat_tab`).
     chat: Mutex<[(serde_json::Value, serde_json::Value); 2]>,
+    timing: Mutex<slo::Timing>,
 }
 
 const JSON: &str = "application/json; charset=utf-8";
@@ -683,7 +703,7 @@ impl<'a> Server<'a> {
     pub fn new(ctx: &'a Ctx, r: &'a dyn Runner, addr: Option<String>) -> Self {
         Server {
             ctx,
-            r,
+            r: fresh::Fresh::new(r),
             addr,
             cache: Arc::default(),
             fresh: false,
@@ -698,6 +718,22 @@ impl<'a> Server<'a> {
             snap: Mutex::default(),
             later: Mutex::default(),
             chat: Mutex::default(),
+            timing: Mutex::default(),
+        }
+    }
+
+    /// #859: a request reads only what the background read (`refresh`), never starting a process (`serve_on`'s).
+    #[must_use]
+    pub fn deferring(mut self) -> Self {
+        self.r.defer = true;
+        self
+    }
+
+    /// #859: read again, at `now`, each source's reads due by its `[limits] serve_<source>_secs` (a new one at once).
+    pub fn refresh(&self, now: u64) {
+        let l = Config::kept(self.ctx).map(|c| c.limits).unwrap_or_default();
+        for src in fresh::Source::ALL {
+            self.r.refresh(src, src.every(&l), now);
         }
     }
 
@@ -823,7 +859,7 @@ impl<'a> Server<'a> {
     fn deliver(&self) {
         let jobs = std::mem::take(&mut *lock(&self.later));
         for (c, job) in jobs {
-            chat::deliver(&c, self.r, &job);
+            chat::deliver(&c, &self.r, &job);
             self.kick.store(true, Relaxed);
         }
     }
@@ -856,7 +892,7 @@ impl<'a> Server<'a> {
             changed |= hash(&at) != w.herdr.1;
             w.herdr = (now, hash(&at));
         } else if now >= w.herdr.0 + 2 {
-            let out = herdr::agent_list(self.r);
+            let out = herdr::agent_list(&self.r);
             changed |= hash(&out) != w.herdr.1;
             w.herdr = (now, hash(&out));
             lock(&self.cache).insert("herdr agent list".into(), (now, out));
@@ -883,7 +919,7 @@ impl<'a> Server<'a> {
             .and_then(|j| j["result"]["agents"].as_array().map(|a| chat::flush(at, a)))
             .unwrap_or_default()
         {
-            chat::deliver(at, self.r, &job);
+            chat::deliver(at, &self.r, &job);
         }
         // #560: the parts are rendered only for an audience listening (a client that connects reads them afresh).
         let heard = |p: bool| lock(&self.clients).iter().any(|c| c.1.is_some() == p);
@@ -931,7 +967,7 @@ impl<'a> Server<'a> {
     /// The runner whose reads that ran OK within the last `ttl` seconds come from the cache (else run now).
     fn cached(&self, now: u64, ttl: u64) -> Memo<'_> {
         Memo(
-            self.r,
+            &self.r,
             &self.cache,
             now,
             if self.fresh { ttl / 3 } else { ttl },
@@ -957,6 +993,19 @@ impl<'a> Server<'a> {
     }
 
     fn reply(&self, req: &str, now: u64) -> Vec<u8> {
+        let t = Instant::now();
+        let res = if req.starts_with("GET ") {
+            crate::runner::request(|| self.route(req, now))
+        } else {
+            self.route(req, now)
+        };
+        let path = req.split_whitespace().nth(1).unwrap_or_default();
+        let ms = t.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+        lock(&self.timing).add(now, path.split('?').next().unwrap_or_default(), ms);
+        res
+    }
+
+    fn route(&self, req: &str, now: u64) -> Vec<u8> {
         let (head, body) = req.split_once("\r\n\r\n").unwrap_or((req, ""));
         let mut w = head.split_whitespace();
         let (method, target) = (w.next().unwrap_or_default(), w.next().unwrap_or_default());
@@ -1197,12 +1246,12 @@ impl<'a> Server<'a> {
         let res = if path == "/thread" {
             let mut later = vec![];
             // #715: an answer's or a card's conductor wake is delivered after the reply too.
-            let (res, more) = crate::conductor::deferred(|| chat::post(ctx, self.r, f, &mut later));
+            let (res, more) = crate::conductor::deferred(|| chat::post(ctx, &self.r, f, &mut later));
             self.later(ctx, later.into_iter().chain(more));
             res
         } else if path == "/setup" {
             let (via, s) = (format!("web {}", dev.label), body::<crate::api::Setup>(f));
-            Config::kept(ctx).and_then(|c| crate::setup::start(ctx, &c, self.r, &s.host, &s.name, &via))
+            Config::kept(ctx).and_then(|c| crate::setup::start(ctx, &c, &self.r, &s.host, &s.name, &via))
         } else if pick {
             self.pick(ctx, dev, &body(f))
         } else if act {
@@ -1213,7 +1262,7 @@ impl<'a> Server<'a> {
             let s = body::<crate::api::Send>(f);
             s.setup.as_deref().map_or_else(
                 || self.prompt(ctx, dev, &s),
-                |p| crate::setup::send(ctx, self.r, p, &s.text),
+                |p| crate::setup::send(ctx, &self.r, p, &s.text),
             )
         };
         if pick || act || path == "/thread" {
@@ -1248,7 +1297,7 @@ impl<'a> Server<'a> {
     fn pick(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Answer) -> Result<String> {
         let (agent, choice) = (f.agent.as_str(), f.choice.as_str());
         let (l, fleet, pane) = self.lane(ctx, agent)?;
-        let on = l.on(self.r);
+        let on = l.on(&self.r);
         let screen = || herdr::read(&on, &pane);
         let h = crate::providers::get(&l.harness);
         let menu = h.pending_menu(&screen()?);
@@ -1276,7 +1325,7 @@ impl<'a> Server<'a> {
         append(&ctx.state, &Event::new(ctx.now, &fleet, l.issue, "answer", d))?;
         // #337: a board tap is a kick: the snapshot is looked at again at once.
         if let Some(n) = l.issue {
-            crate::drive::kick(ctx, self.r, &fleet, n, "board");
+            crate::drive::kick(ctx, &self.r, &fleet, n, "board");
         }
         self.r.sleep(1);
         Ok(if h.pending_menu(&screen()?) == Some((q, opts)) {
@@ -1301,11 +1350,11 @@ impl<'a> Server<'a> {
         if text.chars().any(|c| (c < ' ' && c != '\n') || c == '\x7f') {
             return refused("BAD_VALUE", "a message has no control characters (newlines are fine)");
         }
-        herdr::reply(&l.on(self.r), l.harness == "dsh", agent, pane, text)?;
+        herdr::reply(&l.on(&self.r), l.harness == "dsh", agent, pane, text)?;
         let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "chars": n});
         append(&ctx.state, &Event::new(ctx.now, fleet, l.issue, "prompt", d))?;
         if let Some(n) = l.issue {
-            crate::drive::kick(ctx, self.r, fleet, n, "board");
+            crate::drive::kick(ctx, &self.r, fleet, n, "board");
         }
         Ok(format!("sent to {agent}"))
     }
@@ -1319,18 +1368,18 @@ impl<'a> Server<'a> {
             return refused("NO_SUCH_AGENT", format!("no lane `{agent}` in the log"));
         };
         match op {
-            "stop" => crate::check::stop(ctx, &cfg, self.r, &mut out, agent)?,
-            "kill" => crate::check::kill(ctx, &cfg, self.r, &mut out, (agent, None), yes)?,
+            "stop" => crate::check::stop(ctx, &cfg, &self.r, &mut out, agent)?,
+            "kill" => crate::check::kill(ctx, &cfg, &self.r, &mut out, (agent, None), yes)?,
             "clean" => crate::check::clean(
                 ctx,
                 &cfg,
-                self.r,
+                &self.r,
                 &mut out,
                 Some(&fleet),
                 (None, Some(agent), false),
                 yes,
             )?,
-            "close" => crate::check::close(ctx, &cfg, self.r, &mut out, agent, None)?,
+            "close" => crate::check::close(ctx, &cfg, &self.r, &mut out, agent, None)?,
             op => return refused("BAD_VALUE", format!("op is stop, kill, clean or close, not `{op}`")),
         }
         if yes || op == "stop" {
@@ -1344,7 +1393,7 @@ impl<'a> Server<'a> {
     /// transcript (#138; the export reads the screen only), the live block's length and the status line, as JSON.
     fn transcript(&self, ctx: &Ctx, q: &BTreeMap<String, String>) -> Option<String> {
         if let Some(p) = q.get("setup") {
-            return crate::setup::screen(ctx, self.r, p).ok().map(|j| j.to_string());
+            return crate::setup::screen(ctx, &self.r, p).ok().map(|j| j.to_string());
         }
         let n = |k: &str, d: usize| q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d);
         let (lines, before) = (n("lines", 200).min(200), n("before", 0));
@@ -1367,7 +1416,7 @@ impl<'a> Server<'a> {
             .ok();
         };
         // #337: a lane's chat always reads its pane live (5 s cache), never from the snapshot.
-        let live = Memo(self.r, &self.cache, ctx.now, 5, Arc::default());
+        let live = Memo(&self.r, &self.cache, ctx.now, 5, Arc::default());
         let screen = herdr::recent(&l.on(&live), l.pane.as_deref()?, "200").ok()?;
         let body = lanes::body(&screen);
         let (all, live) = file.map_or((body.clone(), body.len()), |f| lanes::roll(&f, &body));
@@ -1432,7 +1481,7 @@ impl<'a> Server<'a> {
                 let issue = n("issue").context("no issue")?;
                 let d = queue::op("mv", &[issue], false, n("before"), n("after"), None);
                 crate::queue_change(ctx, &Config::kept(ctx)?, fleet, d, Some("web"))?;
-                crate::drive::kick(ctx, self.r, fleet, issue, "board");
+                crate::drive::kick(ctx, &self.r, fleet, issue, "board");
                 format!(
                     "moved #{issue} {}",
                     n("before").map_or_else(|| format!("after #{}", g("after")), |b| format!("before #{b}"))
@@ -1449,7 +1498,7 @@ impl<'a> Server<'a> {
                     .map(|k| (k, g(k).to_string()))
                     .collect();
                 if op == "cond" {
-                    return crate::conductor::set(ctx, self.r, fleet, &wanted); // #401
+                    return crate::conductor::set(ctx, &self.r, fleet, &wanted);
                 }
                 let line = wanted
                     .iter()
@@ -1464,17 +1513,18 @@ impl<'a> Server<'a> {
                 crate::answer(
                     ctx,
                     &Config::kept(ctx)?,
-                    self.r,
+                    &self.r,
                     &mut out,
                     (fleet, g("id")),
                     choice,
                     ("owner", Some("web")),
                 )?;
+                drop(shared(&ctx.state));
                 format!("answered {}", g("id"))
             }
             "drive" => {
                 let cfg = Config::kept(ctx)?;
-                crate::drive::drive(ctx, &cfg, self.r, &mut out, Some(fleet), true, false)?;
+                crate::drive::drive(ctx, &cfg, &self.r, &mut out, Some(fleet), true, false)?;
                 crate::drive::summary(fleet, &String::from_utf8_lossy(&out))
             }
             // #130: a needs-human card's buttons.
@@ -1484,13 +1534,13 @@ impl<'a> Server<'a> {
                 crate::gate::needs_human(
                     ctx,
                     &Config::kept(ctx)?,
-                    self.r,
+                    &self.r,
                     &mut out,
                     (fleet, n),
                     op,
                     (true, "owner", why),
                 )?;
-                crate::drive::kick(ctx, self.r, fleet, n, "board");
+                crate::drive::kick(ctx, &self.r, fleet, n, "board");
                 format!("#{n}: {op}")
             }
             // #712: a parked row's [unpark]; drive's next pass picks it up.
@@ -1505,7 +1555,7 @@ impl<'a> Server<'a> {
             }
             "reap" => {
                 let cfg = Config::kept(ctx)?;
-                let n = crate::check::leftovers(ctx, &cfg, self.r, &herdr::agents(self.r)?, true)?.len();
+                let n = crate::check::leftovers(ctx, &cfg, &self.r, &herdr::agents(&self.r)?, true)?.len();
                 format!("reaped {n} leftover process(es)")
             }
             "host" => {
@@ -2374,10 +2424,10 @@ impl<'a> Server<'a> {
             .into_iter()
             .flat_map(|c| c.accounts.names.keys().map(move |n| (c, n)))
         {
-            let cap = crate::access::cap_line(c, self.r, events, name, ctx.now);
+            let cap = crate::access::cap_line(c, &self.r, events, name, ctx.now);
             let login = c.accounts.usage.get(name).map_or("", String::as_str);
-            let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, self.r, name))
-                .map(|m| crate::usage::shown(self.r, &m, login, ctx.now));
+            let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, &self.r, name))
+                .map(|m| crate::usage::shown(&self.r, &m, login, ctx.now));
             let (meters, pace, hint) = match usage {
                 Some(Ok((parts, pace))) => (
                     parts.into_iter().map(|(label, pct)| Meter { label, pct }).collect(),
@@ -2399,7 +2449,7 @@ impl<'a> Server<'a> {
             });
         }
         d.deepseek = cfg
-            .and_then(|c| crate::usage::deepseek(ctx, c, self.r))
+            .and_then(|c| crate::usage::deepseek(ctx, c, &self.r))
             .map(|b| match b {
                 Ok((b, low)) => Balance {
                     balance: Some(format!("{} {:.2}", b.currency, b.total)),
