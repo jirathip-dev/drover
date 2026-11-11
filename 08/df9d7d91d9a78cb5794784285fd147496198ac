@@ -1,0 +1,10 @@
+Decided: a quoted argument of `herdsman`/`gh` holding spaces or shell marks is message text, dropped before the write and group checks
+Because: "Free-text arguments (message bodies such as `thread reply|handoff|say` text, `--why`, `--body`"
+Decided: a single quoted word (`herdsman "set"`), a `$(…)` or backtick inside double quotes, and a quoted redirection target are still judged
+Because: "a real off-group verb (`herdsman <verb>` as the program run) is still `GROUP_OFF`"
+Decided: the second commit moved the test's backtick messages into single quotes; in double quotes bash runs them, so refusing them is right
+Because: crates/cli/tests/hook.rs:742
+Rejected: a full shell parser — the existing unquote pass already tokenises quotes, heredocs and segments; one more drop rule fixes the root cause
+Rejected: a doc line on unquote for #834 — arch-check fails any new comment line; the reason lives here
+Check: at base the commit-1 test (and the corrected one) fails on the handoff case; at head every hook test passes
+Owner: Orchestrators can now send handoffs, replies and asks whose text mentions forbidden commands or paths; real writes and off verbs are still refused.
