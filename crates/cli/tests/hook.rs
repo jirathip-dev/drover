@@ -711,8 +711,6 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
     }
 }
 
-/// #837: `herdsman` verbs are herdsman's to judge, a `>` in quoted text redirects nothing and a quoted argument is no
-/// command word: from the state dir or its own folder a conductor runs them. A real write into the state dir is refused.
 #[test]
 fn herdsman_verbs_and_quoted_text_write_nothing() {
     let d = tmpdir("hook-837");
