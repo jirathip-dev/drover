@@ -1,0 +1,8 @@
+Decided: round 3's FAIL was CI-only (a timing flake in chat_tab), so the hook code and tests are unchanged.
+Because: crates/cli/tests/chat_tab.rs:1512
+Decided: merged origin/staging to get a fresh head; a rerun of the original push's evidence check replays the old PR body and can't pass.
+Rejected: an empty commit — merging staging is a standing answer and brings the branch up to date at the same cost.
+Check: the merge's hook.rs changes come from staging (providers::dialects import, a doc line, ai_coauthor) and none of them touch the writer/redirect logic.
+Because: crates/core/src/hook.rs:259
+Check: the rerun of the rust job at 2b7f93b (run 42975757315, attempt 2) passed.
+Owner: no behaviour change this round; the branch is caught up with staging so CI can go green.
