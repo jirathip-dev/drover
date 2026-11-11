@@ -6,7 +6,7 @@ owns spawn, verdict and merge; agents act only through it, and it refuses anythi
 it through orchestrator threads, in cooee or on the phone board.
 
 ```
-cooee (app)  →  herdsman serve: /api/v1 and cooee screens  →  drive, lanes, gates, merge
+cooee (app)  →  herdsman (Drover): /api/v1 and its screens  →  drive, lanes, gates, merge
 ```
 
 ## Today
@@ -46,6 +46,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - Lanes on many machines, placed by tags and load (#211, #564); workspace roots (#645).
 - Cloud hosts with idle stop and a spend budget (#280); shed-acp hosts with no herdr (#705).
 - A host offline 15 min gets its lanes restarted on the main host (#847).
+- A never-started needs-human lane gets [start lane] (#858).
 - Owner-approved CI runner VMs for orchestrators (#596).
 
 **Accounts, providers and secrets**
@@ -56,7 +57,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 
 **API and apps**
 - `/api/v1`: the read and act API every screen uses, pinned by a contract test (#589, #583, #797).
-- cooee's Drover plugin: `cooee-plugin.toml` and the `/screens/` JSON blocks (#822).
+- Drover in cooee: herdsman serves the plugin itself, `cooee-plugin.toml` and `/screens/` JSON blocks (#822).
 - An orchestrator thread can live in cooee (#690).
 - The lifeboat page at `/api/v1/lifeboat` for when cooee is down (#757).
 - The old phone board (`herdsman serve`) is frozen to bug fixes (#552, `.github/workflows/board-freeze.yml`).
@@ -83,7 +84,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 **Drive robustness**
 - An unreachable disabled host no longer stalls the tick ([#877](https://github.com/jirathip-dev/herdsman/issues/877)); skip a dead root ([#776](https://github.com/jirathip-dev/herdsman/issues/776)).
 - Fleet SLOs and a self-heal ladder ([#855](https://github.com/jirathip-dev/herdsman/issues/855)); every wait a typed promise with a deadline ([#854](https://github.com/jirathip-dev/herdsman/issues/854)).
-- A never-started lane gets [start lane] ([#831](https://github.com/jirathip-dev/herdsman/issues/831)); thread files from a lane ([#833](https://github.com/jirathip-dev/herdsman/issues/833)).
+- Thread files from a lane's worktree ([#833](https://github.com/jirathip-dev/herdsman/issues/833)).
 
 **Rules and checks**
 - Comment rule, banned APIs, parity with cooee's lints ([#807](https://github.com/jirathip-dev/herdsman/issues/807), [#809](https://github.com/jirathip-dev/herdsman/issues/809), [#808](https://github.com/jirathip-dev/herdsman/issues/808)).
