@@ -523,7 +523,7 @@ export type ConductorAttach = { ok: boolean, code: string, message: string,
  */
 brief: string, 
 /**
- * The synced conductor Claude settings (`PreToolUse`: `herdsman hook`).
+ * The synced conductor provider settings (`PreToolUse`: `herdsman hook`).
  */
 settings: string, env: AttachEnv, 
 /**

@@ -275,8 +275,10 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
         EventKind::State(s) => json!({"state": s.state, "note": s.note}),
         EventKind::Exited { code } => {
             let out = last_out(ctx, &e.name, |v| *v = Value::Null)?;
-            let pat = cfg.accounts.cap_pattern.as_deref();
-            let pat = pat.unwrap_or(crate::harness::CAP_PATTERN);
+            let banner = crate::providers::accounts()
+                .and_then(|p| p.usage())
+                .map(crate::providers::Usage::cap_banner);
+            let pat = cfg.accounts.cap_pattern.as_deref().or(banner).unwrap_or_default();
             let cause = if crate::access::banner(pat, out["text"].as_str().unwrap_or_default()) {
                 RESUMABLE[0]
             } else if *code != Some(0) || out["turn"] == true {

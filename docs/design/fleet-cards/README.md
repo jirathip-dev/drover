@@ -58,7 +58,7 @@ It is the lane sheet's box (#70 detents, drag and backdrop unchanged) with the f
   per-fleet one.
 - **Harness picker:** `crate::set` already writes `harness`. The web `set` op only passes `model`/`effort` today, so
   phase 2 adds `harness` to that list. That adds no new key, validation or event. When the harness changes, the
-  effort list follows `harness::efforts` (dsh: `none`).
+  effort list follows `Provider::efforts` (dsh: `none`).
 - Values that fall back to a default say so (`3 (default)`, `unset → none`).
 
 ## The rules, measured on the mockup
