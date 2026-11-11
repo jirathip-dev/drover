@@ -16,5 +16,6 @@ probe on that runner proves the server, not a hand-built page, produced them.
 | a chat opens with ≤ 64 KB: its last 10 turns (3.2 KB a turn) and the lines that fit in 32 KB; 10 turns more a scroll | `GET /lane` | `history.rs` `a_chat_opens_with_its_last_10_turns_within_64kb` |
 | Events opens with 100 rows a view, then 100 a page | `GET /frag?id=events&skip=` | `history.rs` `events_open_with_100_rows_then_page` |
 | 100 board requests on a 30,000-event store (20 lanes, a new event every 10th) < 2 s of CPU in release: a request reads only the events appended since the last (`events::shared`), the watcher renders only for a listening audience | `serve_on`'s socket | `perf.rs` `a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget` |
+| a fast pass (`drive --fast`) over a 100,000-event log < 10 s with at most one full-log read: every read of the log after the first takes only the rows appended since (`events::shared`); a pass longer than `[limits] pass_max_secs` (default 120) logs `pass-slow` naming its slowest step (#825) | `drive --fast` | `pass_budget.rs` `a_fast_pass_over_a_100k_event_log_reads_it_once_and_stays_under_its_bound` |
 
 The numbers go to the CI job summary (`$GITHUB_STEP_SUMMARY`). How each path works: [serve.md](serve.md).
