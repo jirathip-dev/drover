@@ -1,0 +1,9 @@
+Decided: reply --file copies a file from the fleet's worktree folder or its repo checkout into the thread folder's files/ and logs that copy
+Because: "copies it into the thread's folder itself. Paths outside those roots are still refused"
+Decided: the hook already allowed writes to a file inside the own folder (#504); the repro's cp into the folder itself was the refused case, now allowed only as a copy's last argument
+Because: crates/core/src/hook.rs:284
+Rejected: allowing the own folder path for every command — rm -rf on it would delete herdsman's .brief.md and .thread.md
+Decided: an existing file at the copy's destination is removed first, so a planted symlink is never written through
+Because: crates/core/src/orchestrator.rs:649
+Check: at 331aa5d both new tests fail (reply refused, cp into the folder refused); at head they pass, and other threads, the event log and rm -rf on the folder stay refused
+Owner: The orchestrator can now show a design image or screenshot from a lane's worktree in a thread reply, with no run card.
