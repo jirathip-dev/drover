@@ -1,4 +1,3 @@
-//! #859: each request's route and time: per-route p50/p95 (`/api/v1/health`) and the `/api/v1` SLO.
 use crate::api::RouteTime;
 use std::collections::{BTreeMap, VecDeque};
 

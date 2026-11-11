@@ -1,4 +1,3 @@
-//! #859: the board's runner: a deferring board's request reads the background's last read and starts no process.
 use crate::config::Limits;
 use crate::runner::{in_request, Out, Runner};
 use anyhow::Result;

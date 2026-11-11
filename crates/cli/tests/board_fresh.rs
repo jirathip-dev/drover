@@ -1,4 +1,3 @@
-//! #859: Drover's `data <age> old` line past 10 s; `/api/v1/health` route times; the `/api/v1` SLO, once per episode.
 mod common;
 use common::*;
 use herdsman::events::read;
