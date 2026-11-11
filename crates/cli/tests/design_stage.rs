@@ -607,8 +607,6 @@ fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
     );
 }
 
-/// #868: an issue naming SwiftUI views in `apple/design/x/` gets that medium and path in its design brief, and the
-/// hand-off looks for the design there too; an issue naming none gets HTML under `docs/design/` only.
 #[test]
 fn a_design_brief_takes_the_medium_and_path_the_issue_names() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

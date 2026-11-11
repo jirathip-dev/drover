@@ -2178,7 +2178,6 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     Ok(())
 }
 
-/// #868: a design lane's scope: the worktree its call runs in (git's top level, else the cwd) and its issue's paths.
 fn design_scope(ctx: &Ctx, r: &dyn Runner, input: &serde_json::Value, fleet: &str, n: Option<u64>) -> hook::Design {
     let here = std::env::current_dir()
         .unwrap_or_default()

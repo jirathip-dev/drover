@@ -1558,8 +1558,6 @@ fn the_stop_hook_asks_for_the_turn_only_in_impl_lanes() {
     );
 }
 
-/// #868: a design lane writes `docs/design/` and the design paths its cached issue names (`apple/design/x/`), and
-/// nothing else: product code (`apple/Sources/CooeeAPI/…`) is refused, by any edit shape. Other lanes are unchanged.
 #[test]
 fn a_design_lane_writes_only_its_issues_design_paths() {
     let d = tmpdir("hook-design");
@@ -1610,9 +1608,7 @@ fn a_design_lane_writes_only_its_issues_design_paths() {
     };
     assert!(refused(hermes(design, "apple/Sources/CooeeAPI/Client.swift")));
     assert!(refused(patch(design, "apple/Sources/CooeeAPI/Client.swift")));
-    // Hermes' bare `args` call has no cwd: paths resolve in the folder the hook runs in.
     assert_eq!(patch(design, "apple/design/x/A.swift"), "");
-    // An issue naming no design path: `docs/design/` only.
     assert!(refused(edit(
         "sendmeter:31:design",
         "Write",
