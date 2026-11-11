@@ -1,0 +1,7 @@
+Decided: merge origin/staging and keep both disk tests (this branch's waiting-lanes test and staging's hard-link test)
+Because: crates/cli/tests/disk.rs:559
+Decided: refresh the PR body's evidence to name head 474a9a0 after re-running the gates there
+Because: crates/cli/tests/disk.rs:133
+Rejected: dropping either disk test in the conflict — each covers a different behaviour
+Check: the evidence check is green and `cargo test -p herdsman --test disk` passes 12 tests
+Owner: no behaviour change this round; it catches up with staging and fixes the PR description
