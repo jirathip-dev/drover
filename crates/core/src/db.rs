@@ -453,7 +453,14 @@ fn import(c: &mut Connection, state: &Path) -> Result<()> {
             max = seq;
         }
         seen.extend(all);
-        let fold = |ev: &[Event]| serde_json::to_value(events::fold(ev).into_values().collect::<Vec<_>>()).ok();
+        let fold = |ev: &[Event]| {
+            serde_json::to_value(
+                events::fold_into(events::States::new(), ev)
+                    .into_values()
+                    .collect::<Vec<_>>(),
+            )
+            .ok()
+        };
         anyhow::ensure!(
             fold(&seen) == fold(&rows(&tx, "seq > ?1", 0)?),
             "import of {} changes the fold; nothing imported",

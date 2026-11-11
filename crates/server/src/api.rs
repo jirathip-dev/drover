@@ -526,6 +526,8 @@ pub struct State {
     pub hosts: Vec<Row>,
     pub services: Vec<Row>,
     pub alerts: Vec<Row>,
+    /// #859: when the background last read each source the lanes come from (herdr, shed, remote, host).
+    pub sources: BTreeMap<String, u64>,
 }
 
 pub struct Fleet {
@@ -1076,6 +1078,17 @@ pub struct Health {
     pub ok: bool,
     pub config: String,
     pub error: Option<String>,
+    /// #859: each route's request times over the last 10 min, slowest p95 first; each source's `refreshed_at`.
+    pub routes: Vec<RouteTime>,
+    pub sources: BTreeMap<String, u64>,
+}
+
+/// #859: one route's requests in the window: how many, their median and 95th percentile in ms.
+pub struct RouteTime {
+    pub route: String,
+    pub count: u64,
+    pub p50: u64,
+    pub p95: u64,
 }
 
 /// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.

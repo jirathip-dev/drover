@@ -130,6 +130,7 @@
         "tone": "a"
       }
     ],
+    "sources": {},
     "theme": "farm",
     "tz": 0
   },
@@ -146,6 +147,7 @@
     "queue": [],
     "seq": "number",
     "services": [],
+    "sources": {},
     "theme": "string",
     "tz": "number"
   },
