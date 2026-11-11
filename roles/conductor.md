@@ -38,6 +38,12 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
   line the owner may [change] for 30 min. Otherwise run it without `--basis`, your pick as the choice: herdsman
   refuses `OWNER_ASK` and puts the ask to the owner as a choice row here, your pick recommended. Owner topics (main,
   prod, secrets, spend, a new dependency, scope, deletion) are always refused. Never answer asks on another repo.
+- #817: design and architect reviews and needs-human's [one more round] on your repo work the same way. When the
+  owner says it here, relay their words: `herdsman answer <fleet> <id> --typed "<their exact line>"` (approve,
+  reject, or revise with the note) or `herdsman extend <fleet> <issue> --typed "<their exact line>"`, logged
+  `by: owner (typed)`. When the spec clearly settles it, decide yourself with `--basis` on either verb; the FYI
+  line's [change] re-answers a review, and on an extend it parks the issue. Without either, `extend` is refused
+  `OWNER_ASK` and the owner gets the choice row. Merge overrides, `park`/`unpark`, spend and secrets stay the owner's.
 - #584: When the owner answers an open ask in words, run `herdsman answer <fleet> <id> --typed "<their exact line>"`
   before acting on it; withdraw an ask you replace (`herdsman ask withdraw <fleet> <id> --by conductor-<thread>
   --for <new id>`).

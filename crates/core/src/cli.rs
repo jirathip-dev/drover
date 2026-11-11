@@ -94,7 +94,7 @@ enum Cmd {
         #[arg(long)]
         owner_override: bool,
     },
-    /// Owner only: one more review round for a needs-human issue (its card's [one more round]); logs `round-extended`
+    /// Owner (or a conductor with --typed/--basis): one more review round for a needs-human issue; logs `round-extended`
     Extend {
         fleet: String,
         issue: u64,
@@ -104,6 +104,12 @@ enum Cmd {
         /// Record the extra round only; leave the live lane alone (no impl spawn)
         #[arg(long)]
         no_spawn: bool,
+        /// A conductor's: the owner's exact line in its thread, after the card: logged by: owner (typed)
+        #[arg(long, value_name = "LINE", conflicts_with = "basis")]
+        typed: Option<String>,
+        /// A conductor's: a verbatim quote of the issue's spec, or an answered decision id; the owner may [change] it
+        #[arg(long, value_name = "QUOTE|ID")]
+        basis: Option<String>,
     },
     /// End a fix round with no new commit: drive reviews the same head again (a CI-only FAIL with green CI merges)
     Done {
@@ -1436,7 +1442,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     id,
                     typed: Some(line),
                     ..
-                } => crate::answer_typed(ctx, &cfg, r, out, (&fleet, &id), &line)?,
+                } => {
+                    let on = std::env::var("HERDSMAN_THREAD").ok();
+                    crate::answer_typed(ctx, &cfg, r, out, (&fleet, &id), &line, on.as_deref())?;
+                }
                 Cmd::Answer {
                     fleet,
                     id,
@@ -1751,7 +1760,18 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     issue,
                     by,
                     no_spawn,
-                } => gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "extend", (!no_spawn, &by, None))?,
+                    typed,
+                    basis,
+                } => match std::env::var("HERDSMAN_THREAD").ok().filter(|t| !t.is_empty()) {
+                    Some(t) => {
+                        let how = (typed.as_deref(), basis.as_deref());
+                        crate::conductor_extend(ctx, &cfg, r, out, (&fleet, issue), !no_spawn, &t, how)?;
+                    }
+                    None if typed.is_some() || basis.is_some() => {
+                        gate::refused("BAD_VALUE", "--typed and --basis are a conductor's, run in its thread")?;
+                    }
+                    None => gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "extend", (!no_spawn, &by, None))?,
+                },
                 Cmd::Done {
                     fleet,
                     issue,
