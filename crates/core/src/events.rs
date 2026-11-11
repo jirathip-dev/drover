@@ -300,12 +300,10 @@ pub fn plain(ev: &Event) -> String {
     }
 }
 
-/// Runs without `HERMES_*` / `_HERMES_*`: a lane's Hermes profile must not leak into the notifier's `hermes send`.
 fn run_notifier(cmd: &str, payload: &str) -> Result<()> {
-    let hermes = |k: &String| k.trim_start_matches('_').starts_with("HERMES_");
     let mut args: Vec<String> = std::env::vars()
         .map(|(k, _)| k)
-        .filter(hermes)
+        .filter(|k| crate::providers::all().any(|p| p.scrubs_env(k)))
         .flat_map(|k| ["-u".into(), k])
         .collect();
     // Both streams go nowhere, as before: a sink that backgrounds a child must not hold the reply open.

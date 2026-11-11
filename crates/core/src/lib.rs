@@ -17,7 +17,6 @@ pub mod drive;
 pub mod events;
 pub mod gate;
 pub mod gh;
-pub mod harness;
 pub mod herdr;
 pub mod hook;
 pub mod host;
@@ -32,6 +31,7 @@ pub mod pending;
 pub mod pipeline;
 pub mod propose;
 pub mod protection;
+pub mod providers;
 pub mod proxy;
 pub mod queue;
 pub mod report;
@@ -72,8 +72,7 @@ pub struct Ctx {
     pub config: PathBuf,
     pub state: PathBuf,
     pub worktrees: PathBuf,
-    /// Hermes profiles root (`<root>/<profile>/config.yaml`).
-    pub hermes: PathBuf,
+    pub homes: std::collections::BTreeMap<&'static str, PathBuf>,
     pub exe: String,
     pub now: u64,
     /// Tree `herdsman migrate` works on: `HERDSMAN_HOME`, else `$HOME`.
@@ -108,7 +107,9 @@ impl Ctx {
             config,
             state,
             worktrees: env("FLEET_WORKTREES", home().join(roots::DEFAULT.trim_start_matches("~/"))),
-            hermes: env("FLEET_HERMES_PROFILES", home().join(".hermes/profiles")),
+            homes: providers::all()
+                .filter_map(|p| Some((p.name, p.home()?.resolve(&home()))))
+                .collect(),
             exe: std::env::current_exe().map_or("herdsman".into(), |p| p.to_string_lossy().into()),
             now: now(),
             home: root,

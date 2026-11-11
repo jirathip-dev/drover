@@ -1,6 +1,6 @@
 //! The tool guard of `herdsman help --agent`, in each harness's hook dialect (`Harness::hook_dialect`).
 use crate::config::{Config, Deny};
-use crate::harness::dialects;
+use crate::providers::dialects;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -116,7 +116,7 @@ pub fn after(input: &Value) -> bool {
     dialects().any(|d| d.post == ev || d.stop == ev)
 }
 
-/// #508: a call before a tool runs (a pre-tool event, or Hermes' bare `args` without one), not a prompt or notification.
+/// #508: a call before a tool runs (a pre-tool event, or a bare `args` call without one), not a prompt or notification.
 pub fn pre_call(input: &Value) -> bool {
     let ev = input["hook_event_name"].as_str().unwrap_or_default();
     ev.is_empty() || dialects().any(|d| d.pre == ev)
@@ -134,7 +134,6 @@ pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<Str
     if !dialects().any(|d| d.edits.contains(&tool)) {
         return None;
     }
-    // A V4A `patch` (#732: Codex's `apply_patch` `command`) names its files inside the patch text.
     let file = ["file_path", "notebook_path", "path", "patch", "command"]
         .iter()
         .find_map(|k| ti[k].as_str())
@@ -248,13 +247,19 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             return Some(r);
         }
         // #570: a redirection's target; `/dev/null`, `/dev/stdout` and `/dev/stderr` write nothing.
-        let targets: Vec<String> = (seg.split('>').skip(1))
-            .filter_map(|s| s.split_whitespace().next())
-            .map(|w| w.replace(['"', '\''], ""))
+        let targets: Vec<String> = redirects(seg)
+            .into_iter()
             .filter(|w| !["/dev/null", "/dev/stdout", "/dev/stderr"].contains(&w.as_str()))
             .collect();
-        let writer = t.iter().any(|w| WRITERS.contains(w))
-            || (t.iter().any(|w| *w == "sed" || *w == "perl") && t.iter().any(|w| w.starts_with("-i")));
+        let bare = unquote(seg, true).replace(['"', '\''], " ");
+        let w: Vec<&str> = bare.split_whitespace().collect();
+        let herdsman = (w
+            .iter()
+            .find(|w| !w.contains('=') && !matches!(word(w), "command" | "time")))
+        .is_some_and(|w| matches!(word(w), "herdsman" | "fleet"));
+        let writer = !herdsman
+            && (w.iter().any(|w| WRITERS.contains(w))
+                || (w.iter().any(|w| *w == "sed" || *w == "perl") && w.iter().any(|w| w.starts_with("-i"))));
         // #668: the cap file as a writer's argument or a redirection's target.
         let cap = |w: &String| w.ends_with(CAP_FILE);
         if p.cap && (targets.iter().any(cap) || writer && toks.iter().any(cap)) {
@@ -298,6 +303,21 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         }
     }
     None
+}
+
+fn redirects(seg: &str) -> Vec<String> {
+    let mut quote = None;
+    let at = seg.char_indices().filter(|&(_, c)| {
+        match (quote, c) {
+            (None, '\'' | '"') => quote = Some(c),
+            (Some(q), c) if q == c => quote = None,
+            _ => {}
+        }
+        quote.is_none() && c == '>'
+    });
+    (at.filter_map(|(i, _)| seg[i + 1..].trim_start_matches('>').split_whitespace().next()))
+        .map(|w| w.replace(['"', '\''], ""))
+        .collect()
 }
 
 /// #570: `cmd` without file-descriptor duplications (`2>&1`, `>&2`, `<&3`, `>&-`) and with `&>` as `>`, so
@@ -779,10 +799,9 @@ pub fn issue_filed(input: &Value) -> Option<String> {
 
 /// #198: the first `Co-Authored-By:` line in a commit log that names an AI.
 pub fn ai_coauthor(log: &str) -> Option<&str> {
-    const AI: &[&str] = &["claude", "anthropic", "openai", "codex", "gpt", "copilot", "gemini"];
     log.lines().map(str::trim).find(|l| {
         let l = l.to_ascii_lowercase();
-        l.starts_with("co-authored-by:") && AI.iter().any(|a| l.contains(a))
+        l.starts_with("co-authored-by:") && crate::providers::brands().chain(["copilot"]).any(|a| l.contains(a))
     })
 }
 

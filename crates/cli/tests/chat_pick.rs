@@ -37,7 +37,7 @@ fn chat(s: &Server, cookie: &str) -> String {
 
 /// herdr ready to start conductors (`agents`: its agent list), dsh-tui at the pinned profile.
 fn host(agents: &str) -> Fake {
-    let dsh = format!("profile: {}  /x\n", herdsman::harness::DSH_TUI_VERSION);
+    let dsh = format!("profile: {}  /x\n", herdsman::providers::DSH_TUI_VERSION);
     Fake::default()
         .reply("herdr agent list", agents)
         .reply(
