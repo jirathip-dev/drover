@@ -1,0 +1,5 @@
+Decided: this round only merges origin/staging and refreshes the PR body's evidence to the new head; no code change
+Because: q1292
+Rejected: a new commit just to re-date the body — the staging merge already moves the head, so the body names that sha
+Check: the PR body's Evidence heading names the pushed head sha and CI's evidence check is green at it
+Owner: the PR now says which exact version was tested; nothing in the board changed this round
