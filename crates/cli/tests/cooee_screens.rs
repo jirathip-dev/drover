@@ -78,7 +78,6 @@ fn recorded(name: &str) -> (herdsman::Ctx, OnShed) {
     (c, r)
 }
 
-/// #771: lanes 12, its round-2 review and 17 working on a fake shed.
 fn working() -> OnShed {
     let r = OnShed::new(Fake::default());
     for name in ["sendmeter-impl-12", "sendmeter-rev-12-r2", "sendmeter-impl-17"] {
