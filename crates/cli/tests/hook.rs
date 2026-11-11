@@ -747,6 +747,11 @@ fn herdsman_verbs_and_quoted_text_write_nothing() {
         ),
         (&own, format!("mv /tmp/x '{s}/events.jsonl'")),
         (&st, "awk 'NR>1' a > events.jsonl".to_string()),
+        (&own, format!("sh -c 'rm {s}/events.jsonl'")),
+        (&own, format!("bash -c 'rm {s}/events.jsonl'")),
+        (&own, format!("bash -lc \"rm {s}/events.jsonl\"")),
+        (&own, format!("eval 'rm {s}/events.jsonl'")),
+        (&own, format!("xargs -I{{}} sh -c 'mv {{}} {s}/events.jsonl'")),
     ] {
         assert!(sh(cwd, &cmd).contains("is blocked"), "{}: {cmd}", cwd.display());
     }

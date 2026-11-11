@@ -252,7 +252,7 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             .into_iter()
             .filter(|w| !["/dev/null", "/dev/stdout", "/dev/stderr"].contains(&w.as_str()))
             .collect();
-        let bare = unquote(seg, true);
+        let bare = unquote(seg, true).replace(['"', '\''], " ");
         let w: Vec<&str> = bare.split_whitespace().collect();
         let herdsman = (w
             .iter()
