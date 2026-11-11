@@ -1,0 +1,13 @@
+Decided: a round-extended on a needs-human issue whose build lane never spawned puts it back to queued, so drive's normal queue start spawns it once the host admits it
+Because: "puts the lane back to waiting for admission: drive spawns it on the first pass where the host admits it"
+Decided: the same fold rule covers grants already logged before this change (synergy #3405/#3376), with no migration
+Because: "A `round-extended` grant on such an issue (already granted today, e.g. synergy #3405/#3376) is treated the same"
+Decided: a never-started issue's grant adds no extra round; never started means no build-lane spawn and no verdict
+Because: crates/core/src/events.rs:923
+Decided: [start lane] is the same owner-only extend op with its own label, so CLI, web and any typed relay of extend carry it unchanged
+Because: "Like extend, it is owner-only and works through `herdsman answer --typed` relay (#817)."
+Rejected: a new start-lane op and event — a second path for one owner decision, with new plumbing in every client
+Decided: waiting shows a needs-human issue as the owner's card with its action and `herdsman extend`, lane or not
+Because: "it names the next command or what it waits on (`host load`, the owner's card)"
+Check: crates/cli/tests/never_started.rs fails at commit 1 (no spawn on the admitting pass) and passes at head
+Owner: An issue whose lane never got to start now shows [start lane] instead of [one more round], and tapping it (or an earlier grant) starts the lane as soon as the host has room.
