@@ -69,8 +69,6 @@ fn check_alerts_a_retired_key_once_and_the_board_shows_it() {
     assert!(first.chars().count() <= 60);
 }
 
-/// The gate runs this build's binary on a config: bad keeps the installed one, good replaces it; #707: it signs
-/// nothing and reads no secret (a fake `codesign` or `security` on PATH is never run).
 #[test]
 fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     let d = tmpdir("gate");
@@ -81,14 +79,18 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     std::fs::write(&dest, "old").unwrap();
     let fake = d.join("fake");
     std::fs::create_dir_all(&fake).unwrap();
-    let log = d.join("keychain.log");
-    let sh = format!("#!/bin/sh\necho \"$0 $@\" >> '{}'\n", log.display());
-    for name in ["codesign", "security"] {
-        std::fs::write(fake.join(name), &sh).unwrap();
+    let log = d.join("codesign.log");
+    let sh = format!(
+        "#!/bin/sh\n[ -n \"$HANG\" ] && exec sleep 30\necho \"$@\" >> '{}'\n",
+        log.display()
+    );
+    let sec = "#!/bin/sh\n[ -n \"$NOID\" ] && exit 44\necho 'SHA-256 hash: 00'\necho 'SHA-1 hash: AC01B47A'\n";
+    for (name, body) in [("codesign", sh.as_str()), ("security", sec)] {
+        std::fs::write(fake.join(name), body).unwrap();
         std::fs::set_permissions(fake.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     let path = format!("{}:{}", fake.display(), std::env::var("PATH").unwrap());
-    let gate = |config: &str| {
+    let gate = |config: &str, env: &str| {
         let cfg = d.join("fleet.toml");
         std::fs::write(&cfg, config).unwrap();
         Command::new("sh")
@@ -98,23 +100,38 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
             .env("FLEET_STATE", d.join("state/events.jsonl"))
             .env("PATH", &path)
             .env("HOME", &d)
+            .env("HERDSMAN_SIGN_TIMEOUT", "1")
+            .env(env, "1")
             .output()
             .unwrap()
     };
-    let o = gate("[limits]\neffort = \"bogus\"\n");
+    let o = gate("[limits]\neffort = \"bogus\"\n", "X");
     let out = String::from_utf8_lossy(&o.stdout);
     assert_eq!(o.status.code(), Some(1), "{out}");
     assert!(out.contains("kept ") && out.contains("✗ config — "), "{out}");
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
+    assert!(!log.exists(), "a refused build is never signed");
 
-    // A config that loads goes in, its account signed in or not (#707: no `doctor --tokens` step).
-    let o = gate(RETIRED);
+    for (env, fix) in [
+        ("NOID", "fix: sh scripts/signing-identity.sh once"),
+        ("HANG", "fix: security set-key-partition-list"),
+    ] {
+        let o = gate(RETIRED, env);
+        let out = String::from_utf8_lossy(&o.stdout);
+        assert_eq!(o.status.code(), Some(1), "{env}: {out}");
+        assert!(out.contains("not signed; kept ") && out.contains(fix), "{env}: {out}");
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
+        assert!(!dest.with_file_name("herdsman.new").exists());
+    }
+
+    let o = gate(RETIRED, "X");
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stdout));
     assert_eq!(std::fs::read(&dest).unwrap(), std::fs::read(new).unwrap());
     assert!(!dest.with_file_name("herdsman.new").exists());
-    assert!(
-        !log.exists(),
-        "no signing, no Keychain: {}",
-        std::fs::read_to_string(&log).unwrap_or_default()
+    let signed = format!(
+        "--force --sign AC01B47A --keychain {}/Library/Keychains/login.keychain-db --identifier herdsman {}.new\n",
+        d.display(),
+        dest.display()
     );
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), signed);
 }

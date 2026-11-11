@@ -12,8 +12,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@1.99.1
       - name: install herdsman
         run: cargo install --locked --git https://github.com/jirathip-dev/herdsman --branch staging herdsman
       - name: arch-check
-        run: herdsman arch-check --config "${{ inputs.config }}"
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            printf '%s' "$BODY" > "$RUNNER_TEMP/pr-body.md"
+            set -- --base HEAD^1 --pr-body "$RUNNER_TEMP/pr-body.md"
+          fi
+          herdsman arch-check --config "${{ inputs.config }}" "$@"

@@ -64,6 +64,8 @@ fn account_rows(cfg: &Config, rows: &mut Vec<String>) {
         |c| format!("the account_env helper `{c}`"),
     );
     rows.push(format!("✓ accounts — sign in from {src}"));
+    // #785: ACP lanes write no meter reading; only an interactive status line does.
+    rows.push("✓ meter — `accounts` shows each reading's age; one past its reset reads 0%".into());
     let on = |n: &&&str| {
         matches!(
             crate::harness::get(n).credential(),
@@ -201,6 +203,19 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         Err(e) => (false, format!("{e:#}")),
     };
     row(rows, on, '!', &format!("webhook — {why}{bad} → {fix}"));
+    if cfg!(target_os = "macos") {
+        let req = [
+            "-v",
+            "-R",
+            "=certificate leaf[subject.CN] = \"herdsman-local\"",
+            &ctx.exe,
+        ];
+        let line = format!(
+            "signature — {} signed by \"herdsman-local\" → sh scripts/signing-identity.sh in the herdsman checkout (once), then sh scripts/signing-identity.sh sign {}",
+            ctx.exe, ctx.exe
+        );
+        row(rows, ok(r, "codesign", &req).is_ok(), '✗', &line);
+    }
     // #710: the readers `check` counts for `keychain-jammed`.
     let jam = crate::host::keychain_jam(r);
     let line = format!("keychain readers — {}", crate::host::jam_line(&jam));
@@ -287,16 +302,22 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let notifier = cfg.webpush_sub().is_some();
     let line = format!("push — {subs} subscriptions, notifier {notifier} → turn alerts on; add a webpush [[notify]]");
     row(rows, subs > 0 && notifier, '!', &line);
-    // `check` and `drive` stamp `<state>/<what>.at` each run: the cron's proof.
+    // `check` and `drive` stamp `<state>/<what>.at` each run: the cron's proof. #791: a tick still beating is running.
+    let running = crate::timer::running(ctx, cfg);
     for what in ["check", "drive"] {
         let stamp = std::fs::read_to_string(ctx.state.with_file_name(format!("{what}.at")));
         let at = stamp.ok().and_then(|text| text.trim().parse::<u64>().ok());
         let age = at.map_or("never".into(), |at| crate::events::age(ctx.now - at));
-        let line = format!("watchdog {what} — ran {age} → herdsman timer install");
-        row(rows, at.is_some_and(|at| ctx.now < at + 900), '✗', &line);
+        let fresh = at.is_some_and(|at| ctx.now <= at + crate::timer::stuck_secs(cfg));
+        let ran = match running.filter(|_| !fresh) {
+            Some(since) => format!("running for {}", crate::events::age(ctx.now.saturating_sub(since))),
+            None => format!("ran {age}"),
+        };
+        let line = format!("watchdog {what} — {ran} → herdsman timer install");
+        row(rows, fresh || running.is_some(), '✗', &line);
     }
     for (label, state) in crate::timer::drift(ctx, cfg, r) {
-        let line = format!("timer — {label} {state} → herdsman timer install (the owner or a conductor)");
+        let line = format!("timer — {label} {state} → herdsman timer install (the owner or an orchestrator)");
         row(rows, state == "loaded", '✗', &line);
     }
     // #635: each cloud host's size, key and CLI; an ssh `Include` that reads a host-key file.

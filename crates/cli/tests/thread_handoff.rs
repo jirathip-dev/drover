@@ -14,9 +14,9 @@ fn setup(name: &str) -> herdsman::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     assert_eq!(
@@ -76,7 +76,7 @@ fn bin(c: &herdsman::Ctx, thread: Option<&str>, args: &[&str], stdin: &str) -> (
         cmd.env_remove(k);
     }
     if let Some(t) = thread {
-        cmd.env("HERDSMAN_LANE", "sendmeter:-:conductor")
+        cmd.env("HERDSMAN_LANE", "sendmeter:-:orchestrator")
             .env("HERDSMAN_THREAD", t);
     }
     let mut child = cmd
@@ -98,12 +98,12 @@ fn bin(c: &herdsman::Ctx, thread: Option<&str>, args: &[&str], stdin: &str) -> (
 fn ran(c: &herdsman::Ctx, thread: &str, cmd: &str, stdout: &str) {
     let input = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": cmd},
         "tool_response": {"stdout": stdout, "stderr": "", "interrupted": false}});
-    let (code, out) = bin(c, Some(thread), &["hook", "--role", "conductor"], &input.to_string());
+    let (code, out) = bin(c, Some(thread), &["hook", "--role", "orchestrator"], &input.to_string());
     assert_eq!(code, 0, "{out}");
 }
 
 #[test]
-fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_conductor_with_the_text() {
+fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_orchestrator_with_the_text() {
     let c = setup("handoff-new");
     let r = herdr(NO_AGENTS);
     assert_eq!(to_new(&c, &r, "sendmeter", "Rate limits", "429s from #19"), "t2");
@@ -119,8 +119,8 @@ fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_conductor_with_the_t
         (Some("t1"), Some("t2"), Some("Rate limits"), Some("429s from #19"))
     );
     // t2's conductor starts, the handoff its thread's last message, marked as from t1 (not the owner).
-    assert!(r.called("herdr agent start conductor-t2"), "{:?}", r.calls.borrow());
-    let dir = c.state.with_file_name("conductor").join("t2");
+    assert!(r.called("herdr agent start orchestrator-t2"), "{:?}", r.calls.borrow());
+    let dir = c.state.with_file_name("orchestrator").join("t2");
     assert_eq!(
         std::fs::read_to_string(dir.join(".thread.md")).unwrap(),
         "from t1: handoff to Rate limits · t2: 429s from #19\n"
@@ -147,13 +147,13 @@ fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_conductor_with_the_t
 
 /// A handoff to a repo with no conductor is refused before a thread or a link is logged.
 #[test]
-fn a_handoff_to_a_repo_without_a_conductor_logs_nothing() {
-    let c = setup("handoff-noconductor");
+fn a_handoff_to_a_repo_without_a_orchestrator_logs_nothing() {
+    let c = setup("handoff-noorchestrator");
     let cfg = std::fs::read_to_string(&c.config).unwrap();
     let other = "\n[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/does-not-matter/other\"\nintegration = \"staging\"\n";
     std::fs::write(&c.config, cfg + other).unwrap();
     let (code, out) = run(&c, &herdr(NO_AGENTS), &["thread", "handoff", "t1", "other", "x", "y"]);
-    assert!(code == 3 && out.contains("REFUSED NO_CONDUCTOR"), "{out}");
+    assert!(code == 3 && out.contains("REFUSED NO_ORCHESTRATOR"), "{out}");
     assert_eq!(
         (
             kinds(&c, "thread-new").len(),
@@ -165,16 +165,21 @@ fn a_handoff_to_a_repo_without_a_conductor_logs_nothing() {
 }
 
 #[test]
-fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_conductor() {
+fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_orchestrator() {
     let c = setup("handoff-reuse");
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
         "t2\n"
     );
-    let r = herdr(&agents(&[("conductor-t2", "idle", "/x", "w9:p2")]));
+    let r = herdr(&agents(&[("orchestrator-t2", "idle", "/x", "w9:p2")]));
     // An awake t2 conductor: its start is logged.
-    let st = json!({"thread": "t2", "agent": "conductor-t2", "pane": "w9:p2", "workspace": "w9", "harness": "claude"});
-    herdsman::events::append(&c.state, &Event::new(c.now, "sendmeter", None, "conductor-start", st)).unwrap();
+    let st =
+        json!({"thread": "t2", "agent": "orchestrator-t2", "pane": "w9:p2", "workspace": "w9", "harness": "claude"});
+    herdsman::events::append(
+        &c.state,
+        &Event::new(c.now, "sendmeter", None, "orchestrator-start", st),
+    )
+    .unwrap();
     let (code, out) = run(
         &c,
         &r,
@@ -187,7 +192,7 @@ fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_conduc
         "a thread id is delivered at once, no card"
     );
     assert!(
-        r.called("herdr agent prompt conductor-t2 [t2] t1: handoff to Search · t2: burst 100, not 50"),
+        r.called("herdr agent prompt orchestrator-t2 [t2] t1: handoff to Search · t2: burst 100, not 50"),
         "{:?}",
         r.calls.borrow()
     );
@@ -321,7 +326,7 @@ fn a_tap_on_a_thread_delivers_there_and_a_tap_on_new_starts_a_thread() {
         "{out}"
     );
     assert_eq!(kinds(&c, "thread-new").len(), 8, "an existing thread, no new one");
-    assert!(r.called("herdr agent start conductor-t5"), "{:?}", r.calls.borrow());
+    assert!(r.called("herdr agent start orchestrator-t5"), "{:?}", r.calls.borrow());
     // Both rows name the target as `<title> · <id>`.
     assert!(
         show(&c, "t5").ends_with("from t1: handoff to Billing · t5: 429s from #19\n"),
@@ -464,7 +469,7 @@ fn an_issue_filed_and_an_ask_answered_in_the_target_each_add_one_row_to_the_sour
         "t2",
     ];
     assert_eq!(run(&c, &Fake::default(), &ask).1, "q2\n");
-    let r = herdr(&agents(&[("conductor-t2", "idle", "/x", "w9:p1")]));
+    let r = herdr(&agents(&[("orchestrator-t2", "idle", "/x", "w9:p1")]));
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q2", "1"]).0, 0);
     let t1 = show(&c, "t1");
     assert_eq!(t1.lines().count(), rows + 1, "{t1}");
@@ -472,7 +477,7 @@ fn an_issue_filed_and_an_ask_answered_in_the_target_each_add_one_row_to_the_sour
 }
 
 #[test]
-fn a_conductors_thread_new_is_refused_naming_handoff_and_the_owners_still_works() {
+fn a_orchestrators_thread_new_is_refused_naming_handoff_and_the_owners_still_works() {
     let c = setup("handoff-perm");
     let (code, out) = bin(&c, Some("t1"), &["thread", "new", "sendmeter", "Side quest"], "");
     assert!(
@@ -492,7 +497,7 @@ fn a_conductors_thread_new_is_refused_naming_handoff_and_the_owners_still_works(
         usage.contains("`herdsman thread handoff <FROM> <TO> <TITLE> <TEXT>`"),
         "{usage}"
     );
-    let brief = std::fs::read_to_string(c.state.with_file_name("conductor").join("t3/.brief.md")).unwrap();
+    let brief = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t3/.brief.md")).unwrap();
     assert!(
         brief.contains("herdsman thread handoff <thread> <repo|t<n>>"),
         "{brief}"
@@ -638,7 +643,7 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herd
         (first.str("from"), first.str("text")),
         (Some("t1"), Some(line.as_str()))
     );
-    let md = c.state.with_file_name("conductor").join("t2/.thread.md");
+    let md = c.state.with_file_name("orchestrator").join("t2/.thread.md");
     assert_eq!(std::fs::read_to_string(&md).unwrap(), format!("from t1: {line}\n"));
 
     // t2's conductor is gone (asleep): the next long handoff resumes it, the text in full in its thread file.
@@ -727,15 +732,15 @@ fn a_failed_handoff_tap_shows_its_error_and_its_retry_is_the_one_delivery() {
     assert!(show(&c, "t1").contains(why), "{}", show(&c, "t1"));
     // #648: nothing reached t2's conductor; its one logged row is what the retry delivers.
     assert!(
-        kinds(&c, "conductor-start").is_empty(),
+        kinds(&c, "orchestrator-start").is_empty(),
         "{:?}",
-        kinds(&c, "conductor-start")
+        kinds(&c, "orchestrator-start")
     );
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: Search · t2 (0s ago) -> t2\n"));
     assert_eq!(copies(&c, "t2", "add facets"), (1, 1));
     assert_eq!(r.count("herdr agent start"), 3, "{:?}", r.calls.borrow());
-    let md = c.state.with_file_name("conductor").join("t2/.thread.md");
+    let md = c.state.with_file_name("orchestrator").join("t2/.thread.md");
     assert_eq!(
         std::fs::read_to_string(md).unwrap(),
         "from t1: handoff to Search · t2: add facets\n"

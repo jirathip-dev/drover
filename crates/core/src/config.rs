@@ -28,12 +28,16 @@ pub struct Config {
     /// #298: `[runtime]`, the terminal runtime new lanes start in (docs/runtimes.md); herdr when unset.
     pub runtime: Runtime,
     /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
-    pub conductor: ConductorCfg,
+    #[serde(alias = "conductor")]
+    pub orchestrator: OrchestratorCfg,
+    /// #780: fleet.toml still names `[conductor]` or a `role.conductor` (doctor's deprecation line).
+    #[serde(skip)]
+    pub old_names: bool,
     /// #557: the Telegram bridge (#387) is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
     pub telegram: Option<toml::Value>,
     /// #345: `[service] url`, where lanes on other hosts reach `herdsman service`'s API (docs/service.md).
     pub service: ServiceCfg,
-    /// #404: `[chat]`, new threads' conductor defaults over the fleet's `role.conductor` (`conductor::defaults`).
+    /// #404: `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
     pub chat: Chat,
     /// #537: `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
     pub ci_runners: Option<CiRunners>,
@@ -94,7 +98,7 @@ pub struct ServiceCfg {
     pub url: Option<String>,
 }
 
-/// #404: the harness, model, effort and account(s) a new thread's conductor starts on; each unset one is the role's.
+/// #404: the harness, model, effort and account(s) a new thread's orchestrator starts on; each unset one is the role's.
 #[derive(Debug, Default, Deserialize)]
 pub struct Chat {
     pub harness: Option<String>,
@@ -108,15 +112,28 @@ pub struct Chat {
 /// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the
 /// root of the per-thread working folders (default `<state dir>/conductor`); #538: `allow`, its capability groups.
 #[derive(Debug, Default, Deserialize)]
-pub struct ConductorCfg {
+pub struct OrchestratorCfg {
     pub dir: Option<String>,
     pub instructions: Option<String>,
     pub skills: Option<String>,
     pub memory: Option<String>,
     pub allow: Option<Vec<String>>,
+    /// #780: the default orchestrator's name: free text the owner calls it, shown on its labels, never read by code.
+    pub name: Option<String>,
+    /// #780: `[orchestrator.<id>]`, more orchestrators: each its own `name` and `fleets` (overlap allowed).
+    #[serde(flatten)]
+    pub more: BTreeMap<String, Orchestrator>,
 }
 
-/// #538: each capability group a conductor may be allowed and its herdsman verbs (the hook's `group`).
+/// #780: one `[orchestrator.<id>]`: what the owner calls it and the fleets its threads may be on.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Orchestrator {
+    pub name: Option<String>,
+    pub fleets: Vec<String>,
+}
+
+/// #538: each capability group an orchestrator may be allowed and its herdsman verbs (the hook's `group`).
 pub const GROUPS: &[(&str, &str)] = &[
     ("design", "`spawn … design` or `… architect`"),
     ("clean", "`clean --yes`, `--orphans`, `--lane`"),
@@ -128,7 +145,7 @@ pub const GROUPS: &[(&str, &str)] = &[
     ("set", "`set` a role's harness, model or effort"),
 ];
 
-impl ConductorCfg {
+impl OrchestratorCfg {
     /// #538: the groups on: `allow`, else every group but `pause` and `set`.
     pub fn groups(&self) -> Vec<&str> {
         let default = || {
@@ -432,7 +449,7 @@ pub struct Fleet {
     /// #417: globs of UI files: a PR touching one goes through the verify stage.
     #[serde(default)]
     pub ui_paths: Vec<String>,
-    /// #541: the conductor thread (`t6`) lane asks go to first; unset = the repo's most recently active thread.
+    /// #541: the orchestrator thread (`t6`) lane asks go to first; unset = the repo's most recently active thread.
     pub ask_thread: Option<String>,
     /// #565: `[fleet.<n>.runtime]`, this fleet's new lanes' runtime over the global `[runtime]` (a pilot on one fleet).
     pub runtime: Option<Runtime>,
@@ -517,7 +534,7 @@ pub struct Role {
     pub needs: Vec<String>,
     /// #236: the host its lanes always run on (`main`: the one without `machine`); `design` defaults to `main`.
     pub host: Option<String>,
-    /// #401: the default conductor `Config::parse` adds for a fleet without one: its impl role on `lane-conductor`.
+    /// #401: the default orchestrator `Config::parse` adds for a fleet without one: its impl role on `lane-orchestrator`.
     #[serde(skip)]
     pub default: bool,
 }
@@ -544,6 +561,8 @@ pub struct Limits {
     pub review_rounds: u32,
     pub update_rounds: u32,
     pub stall_minutes: u64,
+    /// #792: an ACP lane's open turn with no session event this long is silent: cancelled and nudged, then respawned.
+    pub silent_minutes: u64,
     pub ci_start_minutes: u64,
     /// Host-load gate for `herdsman spawn` (`HOST_BUSY`).
     pub load_per_cpu: f64,
@@ -592,6 +611,8 @@ pub struct Limits {
     pub spawn_pending_max_secs: u64, // #333: a spawn marker or kick lock older than this is stale
     /// #302: how long an unavailable agent rests when its message names no reset.
     pub fallback_rest_minutes: u64,
+    /// #785: an ACP lane with no event back this long after its first turn is a failed start.
+    pub acp_start_minutes: u64,
     /// #343: the event log over this many MB moves its old events to monthly archives (each slow pass).
     pub rotate_mb: u64,
     /// #626: with GitHub webhooks on (a `GITHUB_WEBHOOK_SECRET`), the fast step re-reads PRs only this often.
@@ -599,6 +620,9 @@ pub struct Limits {
     /// #710: more Keychain readers up over 60 s alert `keychain-jammed`; `reap_keychain_readers` kills them too.
     pub keychain_readers: usize,
     pub reap_keychain_readers: bool,
+    /// #779: spawn refuses `RESPAWN_LOOP` after this many failed starts of an issue's role within the window.
+    pub respawn_max: u32,
+    pub respawn_window_minutes: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -630,6 +654,7 @@ impl Default for Limits {
             review_rounds: 3,
             update_rounds: 3,
             stall_minutes: 30,
+            silent_minutes: 10,
             ci_start_minutes: 10,
             load_per_cpu: 2.5,
             swapout_rate: 2000.0,
@@ -671,10 +696,13 @@ impl Default for Limits {
             max_parallel_spawns: 6,
             spawn_pending_max_secs: 300,
             fallback_rest_minutes: 60,
+            acp_start_minutes: 3,
             rotate_mb: 20,
             webhook_poll_minutes: 10,
             keychain_readers: 3,
             reap_keychain_readers: false,
+            respawn_max: 3,
+            respawn_window_minutes: 60,
         }
     }
 }
@@ -698,11 +726,13 @@ pub struct Notify {
 
 /// A webpush notifier's events when `on` is unset: the alert set plus the asks (#40) and needs-human (#130).
 pub const WEBPUSH_ON: &[&str] = &[
+    "config-invalid",
     "thread-msg",
     "blocked",
     "stall",
     "lane-dead",
     "account-signed-out",
+    "lane-failed-start",
     "ready-unmerged",
     "ci-missing",
     "outbox-stale",
@@ -750,9 +780,13 @@ impl Config {
         let f = self.accounts.accounts_env.as_deref();
         let tg = "removed (#557): herdsman has no Telegram bridge now; drop the table".to_string();
         let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));
+        let old =
+            "renamed (#780): call it [orchestrator] and role.orchestrator; the old names are read for one release";
+        let old = self.old_names.then(|| ("[conductor]", old.to_string()));
         f.map(|f| ("[accounts].accounts_env", run(f)))
             .into_iter()
             .chain(tg)
+            .chain(old)
             .collect()
     }
 
@@ -763,8 +797,55 @@ impl Config {
     }
 
     pub fn load(path: &Path) -> Result<Config> {
+        Self::load_text(path).map(|c| c.0)
+    }
+
+    /// #709: the config and its text; a parse error is the one line `config invalid: <error> (fleet.toml:<line>)`
+    /// that tick, drive, `check`'s alert and the board's banner all show.
+    fn load_text(path: &Path) -> Result<(Config, String)> {
         let text = std::fs::read_to_string(path).with_context(|| format!("cannot read config {}", path.display()))?;
-        Self::parse(&text).with_context(|| format!("invalid config {}", path.display()))
+        let e = match Self::parse(&text) {
+            Ok(c) => return Ok((c, text)),
+            Err(e) => e,
+        };
+        let rf = e.downcast_ref::<crate::gate::Refusal>();
+        let (msg, at) = match (e.downcast_ref::<toml::de::Error>(), rf) {
+            (Some(t), _) => (t.message().replace('\n', "; "), t.span().map(|s| s.start)),
+            (_, Some(r)) => (r.msg.clone(), None),
+            _ => (format!("{e:#}"), None),
+        };
+        // A check's error quotes the value it rejects (`account 'C'`): its first line in the file.
+        let quoted = msg.split(['\'', '"']).nth(1).filter(|q| !q.is_empty());
+        let at = at.or_else(|| text.find(&format!("\"{}\"", quoted?)));
+        let file = path.file_name().map_or("fleet.toml".into(), |f| f.to_string_lossy());
+        let line = at.map_or(String::new(), |i| format!(":{}", text[..i].matches('\n').count() + 1));
+        let line = format!("config invalid: {msg} ({file}{line})");
+        // A refusal (SECRET_IN_CONFIG) stays one: the CLI still exits 3 on it.
+        match rf {
+            Some(r) => crate::gate::refused(r.code, line),
+            None => bail!(line),
+        }
+    }
+
+    /// #709: the config, else (it fails to load) the error and the last good one, which each load keeps beside the
+    /// state log (`fleet.good.toml`): serve reads from it and `check` alerts through its notifiers.
+    pub fn loaded(ctx: &crate::Ctx) -> std::result::Result<Config, (anyhow::Error, Option<Box<Config>>)> {
+        let good = ctx.state.with_file_name("fleet.good.toml");
+        match Self::load_text(&ctx.config) {
+            Ok((c, text)) => {
+                if std::fs::read_to_string(&good).ok().as_deref() != Some(&text) {
+                    let _ = good.parent().map(std::fs::create_dir_all);
+                    let _ = std::fs::write(&good, text);
+                }
+                Ok(c)
+            }
+            Err(e) => Err((e, Self::load(&good).ok().map(Box::new))),
+        }
+    }
+
+    /// #709: serve's reads: the config, else the last good one; Err only with none kept.
+    pub fn kept(ctx: &crate::Ctx) -> Result<Config> {
+        Self::loaded(ctx).or_else(|(e, good)| good.map(|g| *g).ok_or(e))
     }
 
     pub fn parse(text: &str) -> Result<Config> {
@@ -803,9 +884,19 @@ impl Config {
         {
             bail!("notify: a type = \"webpush\" notifier needs sub = \"mailto:you@example.com\"");
         }
-        if let Some(g) = c.conductor.groups().iter().find(|g| !GROUPS.iter().any(|k| k.0 == **g)) {
+        if let Some((id, f)) = (c.orchestrator.more.iter())
+            .find_map(|(id, o)| Some((id, o.fleets.iter().find(|f| *f != "all" && !c.fleet.contains_key(*f))?)))
+        {
+            bail!("orchestrator.{id}.fleets: \"{f}\" is no fleet");
+        }
+        if let Some(g) = c
+            .orchestrator
+            .groups()
+            .iter()
+            .find(|g| !GROUPS.iter().any(|k| k.0 == **g))
+        {
             bail!(
-                "conductor.allow: \"{g}\" is no group; one of {:?}",
+                "orchestrator.allow: \"{g}\" is no group; one of {:?}",
                 GROUPS.iter().map(|g| g.0).collect::<Vec<_>>()
             );
         }
@@ -827,7 +918,12 @@ impl Config {
             bail!("chat: account '{a}' is not in [accounts]");
         }
         let mut c = c;
+        c.old_names = raw.contains_key("conductor");
         for (name, f) in &mut c.fleet {
+            if let Some(r) = f.role.remove("conductor") {
+                f.role.entry("orchestrator".into()).or_insert(r);
+                c.old_names = true;
+            }
             let mut p = f
                 .pipeline
                 .take()
@@ -852,13 +948,13 @@ impl Config {
             f.pipeline = Some(p);
         }
         for (name, f) in &mut c.fleet {
-            if let Some(r) = f.role.get("impl").filter(|_| !f.role.contains_key("conductor")) {
+            if let Some(r) = f.role.get("impl").filter(|_| !f.role.contains_key("orchestrator")) {
                 let r = Role {
-                    profile: Some("lane-conductor".into()),
+                    profile: Some("lane-orchestrator".into()),
                     default: true,
                     ..r.clone()
                 };
-                f.role.insert("conductor".into(), r);
+                f.role.insert("orchestrator".into(), r);
             }
             if !f.serial_paths.is_empty() {
                 if !f.serial.is_empty() {
@@ -1050,7 +1146,7 @@ impl Fleet {
         match role {
             "design" => "design",
             "architect" => "architect",
-            "conductor" => "conductor",
+            "orchestrator" => "orchestrator",
             r if self.flow().is_check(r) => "rev",
             _ => "impl",
         }
@@ -1196,19 +1292,11 @@ pub fn set_in(text: &str, header: &str, key: &str, lit: &str) -> Result<String> 
         let l = lines[i];
         let eq = l.find('=').unwrap() + 1;
         let v = eq + l[eq..].len() - l[eq..].trim_start().len();
-        let end = if l[v..].starts_with('"') {
-            l[v + 1..].find('"').map(|c| v + c + 2)
-        } else if lit.starts_with('"') {
-            None
-        } else {
-            Some(
-                v + l[v..]
-                    .find(|c: char| c.is_whitespace() || c == '#')
-                    .unwrap_or(l.len() - v),
-            )
-        };
-        let end = end.ok_or_else(|| anyhow!("{header} {key}: value must be a \"string\""))?;
-        out[i] = format!("{}{lit}{}", &l[..v], &l[end..]);
+        let mut q = false;
+        let end = l[v..]
+            .find(|c| (q ^= c == '"', c == '#' && !q).1)
+            .map_or(l.trim_end().len().max(v), |c| v + c);
+        out[i] = format!("{}{lit}{}", &l[..v], &l[v + l[v..end].trim_end().len()..]);
     } else {
         let last = (start..end).rev().find(|&i| !lines[i].trim().is_empty()).unwrap();
         if !out[last].ends_with('\n') {

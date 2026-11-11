@@ -3,7 +3,7 @@
 #![cfg(feature = "ts")]
 use herdsman_server::api::*;
 use herdsman_server::events::{fold, Event, IssueState};
-use herdsman_server::{hosts, waiting::Waiting, Ctx};
+use herdsman_server::{hosts, propose, waiting::Waiting, Ctx};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use ts_rs::TS;
@@ -21,6 +21,9 @@ macro_rules! each {
             HerdHost,
             Chat,
             Notice,
+            LaneChat,
+            ApprovalChoice,
+            Block,
             Moment,
             NeedsTab,
             NeedAsk,
@@ -59,6 +62,7 @@ macro_rules! each {
             State,
             Fleet,
             Queued,
+            PendingStart,
             Lane,
             Ask,
             Row,
@@ -106,6 +110,12 @@ macro_rules! each {
             Reply,
             ConductorAttach,
             AttachEnv,
+            propose::ConfigView,
+            propose::ConfigField,
+            propose::ConfigChange,
+            propose::ConfigSet,
+            propose::NewFleet,
+            propose::ConfigCheck,
             Event,
             IssueState,
             Waiting,

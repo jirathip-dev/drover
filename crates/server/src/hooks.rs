@@ -11,9 +11,7 @@ use std::time::Duration;
 
 /// `herdsman serve`: the board on `addr` plus, unless read-only, the Funnel listener on `[serve] hooks_addr` (#626).
 pub fn serve(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool) -> Result<()> {
-    let hooks = Config::load(&ctx.config)
-        .map(|c| c.serve.hooks_addr())
-        .unwrap_or_default();
+    let hooks = Config::kept(ctx).map(|c| c.serve.hooks_addr()).unwrap_or_default();
     let hooks = (!read_only && !hooks.is_empty()).then(|| TcpListener::bind(&hooks).map_err(|e| (hooks, e)));
     std::thread::scope(|sc| {
         match hooks {

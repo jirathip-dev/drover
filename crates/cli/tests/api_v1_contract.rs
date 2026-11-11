@@ -26,6 +26,7 @@ const POSTS: &[&str] = &[
     "override",
     "extend",
     "park",
+    "unpark",
     "orphans",
     "reap",
     "host",
@@ -179,12 +180,12 @@ fn every_route_keeps_its_fixtures_shape() {
     // #681: a pending repo handoff from it: its `handoff` item (with the card's rows) in `thread/<t>` and `chat`.
     let cfg = herdsman::config::Config::load(&c.config).unwrap();
     let h = [t.as_str(), "sendmeter", "Facets", "add facets\nthen reindex"];
-    herdsman::conductor::handoff(&c, &cfg, &r, h).unwrap();
+    herdsman::orchestrator::handoff(&c, &cfg, &r, h).unwrap();
     gets!(
         ("chat", "/api/v1/chat", ChatTab),
         ("thread/<t>", format!("/api/v1/thread/{t}"), ThreadPage),
         ("repo/<fleet>/threads", "/api/v1/repo/sendmeter/threads", RepoThreads),
-        ("lane/<agent>", format!("/api/v1/lane/{IMPL}"), Chat),
+        ("lane/<agent>", format!("/api/v1/lane/{IMPL}"), LaneChat),
         ("herd", "/api/v1/herd", Herd),
         ("roles", "/api/v1/roles?fleet=sendmeter", Roles),
         ("setup/<pane>", "/api/v1/setup/w9:p1", SetupScreen),

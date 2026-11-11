@@ -5,7 +5,7 @@ or the owner-only `design` and `architect`. No lane runs the fleet: `herdsman dr
 
 ## Design and architect (#412, #730)
 
-Two roles run before impl, started by the owner, a conductor thread or drive, on the main host only. Neither writes
+Two roles run before impl, started by the owner, an orchestrator thread or drive, on the main host only. Neither writes
 product code; the owner approves, revises (a note in the next brief) or rejects their pushed work, and impl starts
 only after approve.
 
@@ -102,16 +102,17 @@ to `queued` (or `fix(n)`), a killed review to the state before it, both re-spawn
 files only. It always skips `target*/`, `node_modules/` and `.lane-logs/` (whatever `.gitignore` says), any file over
 5 MB, and the largest files once the snapshot passes 50 MB. The skipped files are listed on the kill output and in
 the wip commit message, never committed. `herdsman wip prune <fleet> --dry-run` lists origin's `wip/*` branches
-with the size each adds over the integration branch, its issue's state and whether it carries build output. Without
-`--dry-run` (the owner's, through a run card) it deletes on origin those of a merged or closed issue that carry build
-output: a branch delete, never a history rewrite or force-push. A herdsman-made clone (`hosts bootstrap`, a lane's
+with the size each adds over the integration branch, its issue's state and whether it carries build output, after
+the counts per issue. Without `--dry-run` (the owner's, through a run card) it deletes on origin those of a merged or
+closed issue but the newest per issue and role (#779), and that one too if it carries build output; an open issue's
+stay. `herdsman clean` lists the same, and deletes them with `--yes`: a branch delete, never a history rewrite or force-push. A herdsman-made clone (`hosts bootstrap`, a lane's
 first use of a host) takes the integration branch only, and its later fetches skip `wip/*`.
 `herdsman clean <fleet> --lane <agent>` applies `clean`'s safety to one lane and refuses
 `UNSAFE_CLEAN` with the reason. #605: a merged or closed issue's lane whose agent is not `working` for
 `[limits] idle_merged_minutes` (default 15) has its pane closed by `clean` (and so by drive's pass) the `kill --yes`
 way, logged `lane-closed` with `why: merged-idle`, then its worktree removed; the dry run says `would close`. A
 `SECRET_IN_WIP` or failed snapshot keeps the pane, one `lane-kept-dirty`, never retried. A working agent, an open
-issue's lane, a conductor or any other agent in the folder stays `keep …: live agent`.
+issue's lane, an orchestrator or any other agent in the folder stays `keep …: live agent`.
 
 `--supersede` kills the old agent and logs it. If `herdr agent start` times out but the
 harness came up in the pane, spawn names the agent and logs the lane anyway; if nothing
@@ -169,7 +170,7 @@ The default (`[limits] deny_commands`, listed in `assets/deny_commands.toml`) is
 no-containers rule: `docker`, `docker-compose`, `podman`, `nerdctl`, `colima`, `orb`, `orbctl`,
 `limactl`, `supabase start`, `supabase db start`, `DOCKER_HOST=…` and `open -a Docker|OrbStack`, each
 refused with `REFUSED NO_CONTAINERS: lanes never start containers (owner rule). Use the repo's
-non-container test path, or ask the conductor.` `[fleet.<n>] deny_commands` replaces the list (`[]` turns
+non-container test path, or ask the orchestrator.` `[fleet.<n>] deny_commands` replaces the list (`[]` turns
 it off, noted on every config load), `deny_commands_add` extends whichever applies. The board's [config]
 sheet shows the active list. Each refusal is logged `hook-denied` (`rule` = the message) and shows on Events.
 
@@ -206,6 +207,8 @@ Every fleet is driven by herdsman itself. `herdsman drive [fleet]` does one pass
 | a lane killed | `spawn impl` (respawn) |
 | a live lane idle `stall_minutes` with no push, verdict or turn (#666) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with its last screen lines |
 | a live lane whose pane or session shows no output 10 min after its spawn | an ACP session gets its brief again once; then `spawn <role> --supersede` once (respawn `failed start`); then `needs-human START_FAILED` |
+| an ACP lane (build, check or design stage) mid-turn with no session event `silent_minutes` (10) and no tool call still running (#792) | `shed cancel` and one `continue` prompt (`nudged`); still silent 10 min later: `spawn <role> --supersede --force` once (`respawned-silent`); silent again within the hour: `needs-human LANE_SILENT` |
+| a dead or silent lane's respawn on a busy host (#792) | `--force` skips `HOST_BUSY` (logged `override`); `MEM_LOW` and `DISK_LOW` still hold it, and `waiting` names the hold (`held: <code> <why>`) |
 | a lane the hook refused twice (`hook-failed-closed`) since its spawn | its pane closed, `needs-human HOOK_REFUSED` with the refusal |
 | merged lanes left | `clean --yes` |
 
@@ -219,7 +222,12 @@ Herd strip (the issue's horse, or a gate horse when it has no lane, wears a red 
   and the closing comment says `Owner override: ROUND_LIMIT`.
 - **one more round** logs `round-extended` (this issue's limit is `review_rounds` + 1 per extension) and
   spawns `impl --supersede`.
-- **park** logs `parked`: the issue leaves `needs-human` and shows as parked.
+- **park** logs `parked` (`by`, and `herdsman park <fleet> <issue> --why <text>`'s reason): the issue leaves
+  `needs-human` and shows as parked; `queue ls` and its Queue row show the reason.
+- **unpark** (#712; a parked Queue or Lanes row's button, or `herdsman unpark <fleet> <issue> [--by]`, owner only)
+  logs `unparked` with the state it goes back to: the state before the `needs-human` the park closed (normally
+  `queued` or its round). Its queue place is kept; out of the queue it goes last; drive's next pass picks it up.
+  Anything but a parked issue is `REFUSED NOT_PARKED`.
 
 This replaces raising `review_rounds` in fleet.toml, merging and restoring it by hand.
 
@@ -260,9 +268,9 @@ decision shows on its issue row as `decided by default: <option>` with **[change
 someone made is final (`ALREADY_ANSWERED`).
 
 #584: an ask closes on every real ending, and `herdsman asks --all` says which: `answered` (a tap, `herdsman answer`,
-or `answer <fleet> <id> --typed "<line>"`, which a conductor runs with the owner's exact line from the ask's thread,
+or `answer <fleet> <id> --typed "<line>"`, which an orchestrator runs with the owner's exact line from the ask's thread,
 logged `by: owner (typed)`; any other line is `NOT_TYPED`), `withdrawn → q<new>` (`herdsman ask withdraw`, by its own
-thread's conductor), `delivered to t<n>` or `failed` (a handoff card), `expired`, `closed: merged`, `closed: lane
+thread's orchestrator), `delivered to t<n>` or `failed` (a handoff card), `expired`, `closed: merged`, `closed: lane
 gone`. `herdsman check` expires an ask open over `[limits] ask_expire_hours` (24) that nobody waits on: a thread ask
 with no lane, a handoff card, an ask whose lane is no live agent. A live lane's ask never expires; `ask-waiting`
 repeats for it once a day. The first `check` after #584 sweeps the log once (`asks-swept`, with the count).

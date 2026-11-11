@@ -45,7 +45,7 @@ fn change<'a>(ctx: &Ctx, events: &'a [Event], e: &Event) -> Option<&'a Event> {
     let id = e.str("change")?;
     let d = ask_event(events, "decision", &e.fleet, id)?;
     let by = d.str("by").unwrap_or_default();
-    (by.starts_with("conductor-") && ctx.now < d.ts + crate::CHANGE).then_some(())?;
+    (by.starts_with("orchestrator-") && ctx.now < d.ts + crate::CHANGE).then_some(())?;
     ask_event(events, "needs-decision", &e.fleet, id)
 }
 
@@ -73,11 +73,11 @@ fn queued<'a>(events: &'a [Event], id: &'a str) -> BTreeMap<u64, &'a Event> {
 
 /// `choose` (an open ask), `working` (mid-turn), `asleep`, `awake` or `new` (no conductor yet).
 fn state(events: &[Event], id: &str, agents: &[Value]) -> &'static str {
-    let lane = of(events, id).rfind(|e| e.kind.starts_with("conductor-"));
+    let lane = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     let a = lane.and_then(|l| agents.iter().find(|a| l.data.get("agent") == Some(&a["name"])));
     match lane {
         _ if open_ask(events, id).is_some() => "choose",
-        Some(l) if l.kind == "conductor-sleep" => "asleep",
+        Some(l) if l.kind == "orchestrator-sleep" => "asleep",
         Some(_) if a.is_some_and(|a| a["agent_status"] == "working") => "working",
         Some(_) => "awake",
         None => "new",
@@ -242,9 +242,9 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
                     ..m("run", s("cmd"))
                 }
             }
-            ("conductor-start", _) if e.data.get("resumed") == Some(&json!(true)) => m("resumed", s("session")),
+            ("orchestrator-start", _) if e.data.get("resumed") == Some(&json!(true)) => m("resumed", s("session")),
             ("thread-model", _) => m("note", conductor::picked(e)),
-            ("conductor-sleep", _) if s("why") != "model" => m("sleep", String::new()),
+            ("orchestrator-sleep", _) if s("why") != "model" => m("sleep", String::new()),
             _ => continue,
         };
         if m.kind == "cmd" {
@@ -280,7 +280,7 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
 
 /// #408: API v1 `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
 pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>) -> Option<ThreadPage> {
-    let (cfg, t) = (Config::load(&ctx.config).ok()?, conductor::find(events, id).ok()?);
+    let (cfg, t) = (Config::kept(ctx).ok()?, conductor::find(events, id).ok()?);
     let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
     let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
     Some(page(ctx, &cfg, events, t, (before, n), u64::MAX))
@@ -439,7 +439,7 @@ impl super::Server<'_> {
         let c = &mut all[usize::from(rw)];
         if c.0 != key {
             // #483: a config or log read error shows its own text (as the Queue tab does).
-            let (cfg, events) = match (Config::load(&ctx.config), crate::events::shared(&ctx.state)) {
+            let (cfg, events) = match (Config::kept(ctx), crate::events::shared(&ctx.state)) {
                 (Ok(c), Ok(e)) => (Ok(c), e),
                 (Err(e), _) | (_, Err(e)) => (Err(format!("{e:#}")), std::sync::Arc::default()),
             };
@@ -468,7 +468,7 @@ pub fn file(ctx: &Ctx, events: &[Event], id: &str, name: &str, demo: bool) -> Op
     if demo && fixture {
         return Some(p.into());
     }
-    conductor::inside(ctx, &Config::load(&ctx.config).ok()?, id, p)
+    conductor::inside(ctx, &Config::kept(ctx).ok()?, id, p)
 }
 
 /// `POST /thread` from a paired owner device: `new` (#405: a first message starts a thread and its conductor), `say`
@@ -482,7 +482,7 @@ pub fn post(
     f: &BTreeMap<String, String>,
     later: &mut Vec<(Event, String)>,
 ) -> Result<String> {
-    let cfg = Config::load(&ctx.config)?;
+    let cfg = Config::kept(ctx)?;
     let events = crate::events::shared(&ctx.state)?;
     let g = |k: &str| f.get(k).map_or("", String::as_str);
     let (id, mut out) = (g("t"), vec![]);
@@ -607,8 +607,11 @@ fn unqueue(ctx: &Ctx, e: &Event, why: &str) -> Result<()> {
 
 /// #407: Esc into the thread's live conductor: its turn stops (an asleep one has none).
 fn stop(r: &dyn Runner, events: &[Event], id: &str) {
-    let last = of(events, id).rfind(|e| e.kind.starts_with("conductor-"));
-    if let Some(p) = last.filter(|e| e.kind == "conductor-start").and_then(|e| e.str("pane")) {
+    let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
+    if let Some(p) = last
+        .filter(|e| e.kind == "orchestrator-start")
+        .and_then(|e| e.str("pane"))
+    {
         drop(crate::herdr::keys(r, p, "Escape"));
     }
 }
@@ -616,7 +619,7 @@ fn stop(r: &dyn Runner, events: &[Event], id: &str) {
 /// #407: at a turn's end (the conductor no longer working) its queued messages go in, oldest first, each logged as
 /// the owner's and unqueued; the lines for `deliver`.
 pub fn flush(ctx: &Ctx, agents: &[Value]) -> Vec<(Event, String)> {
-    let (Ok(cfg), Ok(events)) = (Config::load(&ctx.config), crate::events::shared(&ctx.state)) else {
+    let (Ok(cfg), Ok(events)) = (Config::kept(ctx), crate::events::shared(&ctx.state)) else {
         return vec![];
     };
     let mut out = vec![];
@@ -645,7 +648,7 @@ pub fn flush(ctx: &Ctx, agents: &[Value]) -> Vec<(Event, String)> {
 /// #403: type a logged message into its conductor (after the reply went out); a failure is a red system line whose
 /// [retry] types it again.
 pub fn deliver(ctx: &Ctx, r: &dyn Runner, (t, line): &(Event, String)) {
-    let Ok(cfg) = Config::load(&ctx.config) else { return };
+    let Ok(cfg) = Config::kept(ctx) else { return };
     if let Err(e) = conductor::deliver(ctx, &cfg, r, t, line) {
         let text = format!("✗ not delivered: {e:#}");
         let d = json!({"thread": t.str("thread"), "from": "system", "text": text, "line": line});

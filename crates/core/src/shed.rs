@@ -20,7 +20,7 @@ pub use shed_proto as proto;
 pub fn git() -> String {
     env!("CARGO_PKG_REPOSITORY").replace("/herdsman", "/shed")
 }
-pub const REV: &str = "8bac04fdb8542ef496c614b47126d85c50a7892e";
+pub const REV: &str = "56de739060d99e54e2ded43ab9702ff1c5270c37";
 
 /// Where a host's shed server answers.
 #[derive(Clone, Debug, PartialEq)]
@@ -197,6 +197,20 @@ fn last_out(ctx: &Ctx, agent: &str, f: impl FnOnce(&mut Value)) -> Result<Value>
     Ok(was)
 }
 
+/// #792: ACP lane `agent`'s session as drive's intake last saw it (`turn` open, `at`, `said`, open `tools`, last `cpu`); null if none.
+pub fn session(ctx: &Ctx, agent: &str) -> Value {
+    let t = std::fs::read_to_string(ctx.state.with_file_name("shed-out.json")).unwrap_or_default();
+    serde_json::from_str::<Value>(&t).map_or(Value::Null, |mut v| v[agent].take())
+}
+
+/// #785: the ACP lanes with no event back `mins` after their first turn: (agent, when that turn went in).
+pub fn silent(ctx: &Ctx, mins: u64) -> Vec<(String, u64)> {
+    let all: Value = crate::usage::load(&ctx.state.with_file_name("shed-out.json")).unwrap_or_default();
+    let start = |(a, v): (&String, &Value)| Some((a.clone(), v["start"].as_u64()?));
+    let all = all.as_object().into_iter().flatten().filter_map(start);
+    all.filter(|s| ctx.now >= s.1 + mins * 60).collect()
+}
+
 /// One shed event as its lane's passive `lane-state` (#529: an exit or kill is `gone`; #662: with its `cause`, and an
 /// account limit caps the lane's account); whether it was a lane's.
 pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
@@ -216,8 +230,34 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
         EventKind::Reply { text, .. } => Some((text.as_str(), false, false)),
         _ => None,
     };
+    if e.kind.is_acp() && !e.replay {
+        last_out(ctx, &e.name, |v| {
+            v["at"] = json!(ctx.now);
+            match &e.kind {
+                EventKind::Turn { .. } => {}
+                EventKind::ToolCall { id, status, .. } if matches!(status.as_str(), "pending" | "in_progress") => {
+                    (v["said"], v["tools"][id]) = (json!(ctx.now), json!(status));
+                }
+                EventKind::ToolCall { id, .. } => {
+                    v["said"] = json!(ctx.now);
+                    v["tools"].as_object_mut().map(|m| m.remove(id));
+                }
+                EventKind::Reply { .. } => (v["said"], v["tools"]) = (json!(ctx.now), Value::Null),
+                _ => v["said"] = json!(ctx.now),
+            }
+        })?;
+    }
+    if let EventKind::Resources(u) = &e.kind {
+        last_out(ctx, &e.name, |v| {
+            if !v.is_null() {
+                v["cpu"] = json!(u.cpu_pct);
+            }
+        })?;
+    }
     if let Some((t, turn, add)) = more {
         last_out(ctx, &e.name, |v| {
+            // #785: when its first turn went in, kept until anything comes back.
+            let start = (turn && !add).then(|| v.get("start").map_or(ctx.now.into(), Value::clone));
             let all = [v["text"].as_str().filter(|_| add).unwrap_or_default(), t].concat();
             let tail: String = all
                 .chars()
@@ -227,7 +267,7 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
                 .into_iter()
                 .rev()
                 .collect();
-            *v = json!({"text": tail, "turn": turn});
+            (v["text"], v["turn"], v["start"]) = (json!(tail), json!(turn), json!(start));
         })?;
         return Ok(false);
     }

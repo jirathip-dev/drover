@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: clippy, rustfmt
@@ -36,12 +38,12 @@ jobs:
         run: |
           extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|shed-proto|rusqlite|keyring|tokio|herdsman-core|herdsman-server|herdsman-service' || true)
           test -z "$extra" || { echo "not allowed: $extra"; exit 1; }
-      - name: layers (#264; core never depends on server or cli, server never on cli; only runner, events and webpush in core spawn processes)
+      - name: layers (#264; core never depends on server or cli, server never on cli; #713 only the runner in core spawns processes, tests/runner_limits.rs checks every crate)
         run: |
           core=$(cargo tree --locked -p herdsman-core -e normal,build --prefix none)
           server=$(cargo tree --locked -p herdsman-server -e normal,build --prefix none)
           if grep -E '^herdsman(-server)? v' <<<"$core" || grep -E '^herdsman v' <<<"$server"; then exit 1; fi
-          bad=$(grep -rlwE 'Command|Stdio|Child' crates/core/src | grep -vxE 'crates/core/src/(runner|events|webpush)\.rs' || true)
+          bad=$(grep -rlwE 'Command|Stdio|Child' crates/core/src | grep -vxE 'crates/core/src/runner\.rs' || true)
           test -z "$bad" || { echo "std::process outside the Runner implementations: $bad"; exit 1; }
       - name: harness-neutral core (#316; no Claude or Anthropic name outside crates/core/src/harness/ but comments and the hook's AI-trailer names)
         run: |
@@ -64,8 +66,15 @@ jobs:
         run: just html-lint
       - name: line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
         run: ./target/release/herdsman cap-check --config ci/cap.toml
-      - name: "arch-check (#734: layers, banned calls and size baselines in .herdsman/arch.toml)"
-        run: ./target/release/herdsman arch-check
+      - name: "arch-check (#734: layers, banned calls and size baselines in .herdsman/arch.toml; #735: new comments, stale docs)"
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            printf '%s' "$BODY" > "$RUNNER_TEMP/pr-body.md"
+            set -- --base HEAD^1 --pr-body "$RUNNER_TEMP/pr-body.md"
+          fi
+          ./target/release/herdsman arch-check "$@"
       - name: "lesson checks (#510: shadow ones report would-fail in the job summary and never fail; active ones fail)"
         run: ./target/release/herdsman lesson-check
       - name: assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)

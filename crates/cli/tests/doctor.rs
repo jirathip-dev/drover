@@ -97,6 +97,7 @@ fn good() -> Fake {
         .reply("tailscale serve status", "|-- / proxy http://127.0.0.1:7777\n")
         .reply("launchctl print gui/", "state = running\n")
         .reply("systemctl --user is-active", "active\n")
+        .reply("codesign -v -R", "")
 }
 
 fn line<'a>(out: &'a str, check: &str) -> &'a str {
@@ -125,9 +126,9 @@ fn all_good_exits_zero_and_never_writes() {
         "launchd",
         "phone",
         "webhook",
+        "signature",
     ] {
-        // The launchd job is macOS only; Linux has no row for it.
-        if check == "launchd" && !cfg!(target_os = "macos") {
+        if ["launchd", "signature"].contains(&check) && !cfg!(target_os = "macos") {
             assert!(!out.contains(&format!(" {check} — ")), "{out}");
             continue;
         }
@@ -136,23 +137,26 @@ fn all_good_exits_zero_and_never_writes() {
     for check in ["vapid.key", "push", "watchdog check", "watchdog drive", "timer"] {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
-    // #707 (q855): one account-source row, no per-account rows, no Keychain read, no signature row.
     assert!(
         line(&out, "accounts").contains("sign in from each account's own folder") && !out.contains("TOKEN_MAIN"),
         "{out}"
     );
+    assert!(!out.contains(" account main — "), "{out}");
     assert!(
-        !out.contains(" account main — ") && !out.contains(" signature — "),
-        "{out}"
-    );
-    assert!(
-        !r.calls
-            .borrow()
-            .iter()
-            .any(|c| c.starts_with("security ") || c.starts_with("codesign ")),
+        !r.calls.borrow().iter().any(|c| c.starts_with("security ")),
         "{:?}",
         r.calls.borrow()
     );
+    if cfg!(target_os = "macos") {
+        assert!(
+            line(&out, "signature").contains(&format!("{} signed by \"herdsman-local\"", c.exe)),
+            "{out}"
+        );
+        assert!(r.called(&format!(
+            "codesign -v -R =certificate leaf[subject.CN] = \"herdsman-local\" {}",
+            c.exe
+        )));
+    }
     let writes = [
         "gh pr",
         "gh issue",
@@ -260,6 +264,11 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "no plist runs herdsman serve",
         ),
         (
+            |_, _, r| r.once("codesign -v -R", 3, ""),
+            "signature",
+            "→ sh scripts/signing-identity.sh in the herdsman checkout (once), then sh scripts/signing-identity.sh sign ",
+        ),
+        (
             |c, _, r| {
                 let k = c.state.with_file_name("webpush/vapid.key");
                 std::fs::set_permissions(k, std::fs::Permissions::from_mode(0o644)).unwrap();
@@ -303,7 +312,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         ),
     ];
     for (i, (brk, check, fix)) in cases.into_iter().enumerate() {
-        if check == "launchd" && !cfg!(target_os = "macos") {
+        if ["launchd", "signature"].contains(&check) && !cfg!(target_os = "macos") {
             continue;
         }
         let (c, d) = setup(&format!("doc-fail-{i}"), "claude");
@@ -377,8 +386,8 @@ fn bad_config_and_hermes_profiles() {
     );
 
     // #401: the default conductor (the impl role on `lane-conductor`) needs its Hermes profile too.
-    assert!(line(&out, "hermes lane-conductor").starts_with('✗'), "{out}");
-    for p in ["fleet-impl", "lane-conductor"] {
+    assert!(line(&out, "hermes lane-orchestrator").starts_with('✗'), "{out}");
+    for p in ["fleet-impl", "lane-orchestrator"] {
         write(&c.hermes.join(p).join("config.yaml"), "", 0o644);
     }
     let (code, out) = run(&c, &good(), &["doctor"]);
@@ -391,7 +400,7 @@ fn bad_config_and_hermes_profiles() {
         &c,
         &good()
             .reply("env HERDSMAN_LANE=demo:-:impl hermes", &hook("impl"))
-            .reply("env HERDSMAN_LANE=demo:-:conductor hermes", &hook("conductor")),
+            .reply("env HERDSMAN_LANE=demo:-:orchestrator hermes", &hook("orchestrator")),
         &["doctor"],
     );
     assert_eq!(code, 0, "{out}");
@@ -545,4 +554,27 @@ fn a_login_shell_exporting_the_token_warns() {
         .unwrap_or_else(|| panic!("{out}"));
     assert_eq!(l, format!("{warn} ~/.zshrc"), "{out}");
     assert!(!out.contains("FAKEtoken") && !out.contains("Welcome"), "{out}");
+}
+
+/// #791: a tick still running with a fresh heartbeat reads `running for Nm`, never stuck; with no heartbeat for 2
+/// intervals (slow_secs 300) the stale stamp reads stuck again.
+#[test]
+fn a_long_tick_with_a_fresh_heartbeat_is_running_not_stuck() {
+    let (c, _) = setup("doc-beat", "claude");
+    let st = c.state.parent().unwrap().to_path_buf();
+    write(&st.join("check.at"), &(c.now - 1080).to_string(), 0o644);
+    write(&st.join("tick.beat"), &format!("{} {}", c.now - 360, c.now - 30), 0o644);
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    let l = line(&out, "watchdog check");
+    assert!(l.starts_with('✓') && l.contains("running for 6m"), "{l}");
+    write(
+        &st.join("tick.beat"),
+        &format!("{} {}", c.now - 1080, c.now - 660),
+        0o644,
+    );
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    let l = line(&out, "watchdog check");
+    assert!(l.starts_with('✗') && l.contains("ran 18m"), "{l}");
 }

@@ -8,7 +8,7 @@ use crate::devices::sha256;
 use crate::events::{emit, read, Event};
 use crate::gate::refused;
 use crate::runner::{argv, Runner};
-use crate::{conductor, Ctx};
+use crate::{orchestrator, Ctx};
 use anyhow::Result;
 use serde_json::json;
 
@@ -86,7 +86,7 @@ pub fn post(ctx: &Ctx, cfg: &Config, thread: &str, c: &Card) -> Result<String> {
         );
     }
     let events = read(&ctx.state)?;
-    let t = conductor::find(&events, thread)?;
+    let t = orchestrator::find(&events, thread)?;
     let id = format!("r{}", events.iter().filter(|e| e.kind == "run-card").count() + 1);
     let dir = std::path::absolute(c.dir)?.display().to_string();
     let d = json!({"thread": thread, "id": id, "cmd": c.cmd, "why": c.why, "blast": c.blast, "dir": dir,
@@ -163,7 +163,7 @@ pub fn settle_via(
     } else {
         format!("run {id} denied by owner; nothing ran")
     };
-    let _ = conductor::say(ctx, cfg, r, (thread, &line, &[]), ("system", false)); // logged even if the conductor can't wake
+    let _ = orchestrator::say(ctx, cfg, r, (thread, &line, &[]), ("system", false));
     Ok(line)
 }
 

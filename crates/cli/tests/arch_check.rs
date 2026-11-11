@@ -170,3 +170,311 @@ fn no_config_has_nothing_to_check() {
     let (code, out) = arch(&d, &[]);
     assert_eq!((code, out.trim()), (0, "no .herdsman/arch.toml: nothing to check"));
 }
+
+fn git(dir: &Path, args: &[&str]) {
+    let o = std::process::Command::new("git")
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .output()
+        .unwrap();
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
+}
+
+fn committed(name: &str, arch: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
+    let d = tmpdir(name);
+    for (p, text) in [(".herdsman/arch.toml", arch)].iter().chain(files) {
+        let p = d.join(p);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    }
+    git(&d, &["init", "-q"]);
+    git(&d, &["add", "-A"]);
+    git(&d, &["commit", "-qm", "base"]);
+    d
+}
+
+const OLD: &str = "// an old comment\nfn old() {}\n";
+
+#[test]
+fn only_an_added_comment_fails_but_safety_over_unsafe_and_one_doc_line_on_a_pub_item() {
+    let d = committed(
+        "arch-comments",
+        "[comments]\npolicy = \"off\"\n",
+        &[("src/lib.rs", OLD), ("web/a.ts", "export const a = 1;\n")],
+    );
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    let added = [
+        "// SAFETY: the pointer is valid",
+        "unsafe { f() }",
+        "/// One line.",
+        "pub fn a() {}",
+        "/// First.",
+        "/// Second.",
+        "pub fn b() {}",
+        "fn c() {",
+        "    // new",
+        "}",
+        "/* block",
+        "  still */",
+        "fn d() { let x = 1; // trailing",
+        "    let s = 2; /* inline */ }",
+        "const U: &str = \"https://x // y /* z\";",
+        "const R: &str = r#\"a \" // b\"#;",
+        "const C: char = '\"'; // after a char",
+        "fn e<'a>(v: &'a str) -> &'a str { v }",
+    ];
+    let lib = format!("{OLD}{}\n", added.join("\n"));
+    std::fs::write(d.join("src/lib.rs"), lib).unwrap();
+    std::fs::write(
+        d.join("web/a.ts"),
+        "/** Shown. */\nexport const a = 1;\n// not ok\nconst b = '//' + `/*`; /* not ok */\nconst c = \"// fine\";\n",
+    )
+    .unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    let flagged: Vec<&str> = out
+        .lines()
+        .filter_map(|l| l.split(": a new comment").nth(1).and(l.split(": a").next()))
+        .collect();
+    assert_eq!(
+        flagged,
+        [
+            "src/lib.rs:7",
+            "src/lib.rs:8",
+            "src/lib.rs:11",
+            "src/lib.rs:13",
+            "src/lib.rs:14",
+            "src/lib.rs:15",
+            "src/lib.rs:16",
+            "src/lib.rs:19",
+            "web/a.ts:3",
+            "web/a.ts:4"
+        ],
+        "{out}"
+    );
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(
+        (code, out.contains("0 violations")),
+        (0, true),
+        "no --base, nothing judged: {out}"
+    );
+}
+
+const DOCS: &str = "[docs]\npaths = [\"docs/**/*.md\", \"README.md\"]\nwatch = [\"src/cli.rs\"]\ncli = true\n";
+
+#[test]
+fn a_doc_naming_a_missing_path_line_link_or_flag_fails() {
+    let readme = "See `src/lib.rs:2`, `src/lib.rs`, [doc](docs/a.md) and `herdsman spawn --dry-run <f>`.\n";
+    let doc = "`../src/lib.rs` and `herdsman queue <fleet> add --top 3`\n```\n`src/gone.rs`\n```\n";
+    let d = committed(
+        "arch-docs",
+        DOCS,
+        &[
+            ("src/lib.rs", "fn a() {}\nfn b() {}\n"),
+            ("README.md", readme),
+            ("docs/a.md", doc),
+        ],
+    );
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    let stale = "`src/gone.rs`, `src/lib.rs:3`, [x](docs/none.md), `herdsman spawn --gone`, `herdsman nope`\n";
+    std::fs::write(d.join("docs/b.md"), stale).unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    for want in [
+        "docs/b.md:1: `src/gone.rs`: no such path",
+        "docs/b.md:1: `src/lib.rs:3`: src/lib.rs has fewer than 3 lines",
+        "docs/b.md:1: link `docs/none.md` does not exist",
+        "docs/b.md:1: `herdsman spawn --gone`: `spawn` has no `--gone`",
+        "docs/b.md:1: `herdsman nope`: no herdsman command `nope`",
+        "5 violations",
+    ] {
+        assert!(out.contains(want), "{want}: {out}");
+    }
+}
+
+#[test]
+fn a_changed_flag_needs_a_doc_naming_it_or_no_doc_in_the_pr_body() {
+    let cli = "struct Args {\n    old_flag: bool,\n}\n";
+    let d = committed(
+        "arch-doc-touch",
+        DOCS,
+        &[("src/cli.rs", cli), ("docs/a.md", "`--old-flag`\n")],
+    );
+    std::fs::write(d.join("src/cli.rs"), "struct Args {\n    new_flag: bool,\n}\n").unwrap();
+    std::fs::write(d.join("body.md"), "Closes #1\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD", "--pr-body", "body.md"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("src/cli.rs:2: `new_flag` added, but no changed doc line names it"),
+        "{out}"
+    );
+    assert!(out.contains("src/cli.rs:2: `old_flag` removed"), "{out}");
+    std::fs::write(d.join("body.md"), "no doc: internal only\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD", "--pr-body", "body.md"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    std::fs::write(d.join("body.md"), "Closes #1\n").unwrap();
+    std::fs::write(d.join("docs/a.md"), "`--new-flag`\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD", "--pr-body", "body.md"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+}
+
+#[test]
+fn a_size_and_a_layer_exclude_skip_a_test_file_and_still_fail_a_source_file() {
+    let conf = r#"
+[[layer]]
+name = "ui"
+paths = ["apps/*/src/**"]
+exclude = ["**/*.test.*", "**/__tests__/**"]
+
+[[layer]]
+name = "db"
+paths = ["db/**"]
+
+[[size]]
+paths = ["apps/*/src/**"]
+exclude = ["**/*.test.*", "**/__tests__/**"]
+max_file_lines = 2
+"#;
+    let crossing = "import { q } from \"../../../db/q\";\nconst a = 1;\nconst b = 2;\n";
+    let d = committed(
+        "arch-exclude",
+        conf,
+        &[
+            ("db/q.ts", "export const q = 1;\n"),
+            ("apps/web/src/a.test.ts", crossing),
+            ("apps/web/src/__tests__/b.ts", crossing),
+            ("apps/web/src/c.ts", crossing),
+        ],
+    );
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("apps/web/src/c.ts:1: layer `ui` uses `db` (db/q)"),
+        "{out}"
+    );
+    assert!(
+        out.contains("apps/web/src/c.ts:1: `apps/web/src/c.ts` is 3 lines, over 2"),
+        "{out}"
+    );
+    assert!(out.contains("2 violations"), "{out}");
+}
+
+#[test]
+fn a_ban_with_comments_matches_a_comment_line_and_without_it_does_not() {
+    let ban = |comments: &str| {
+        format!("[[ban]]\npattern = \"@ts-expect-error\"\npaths = [\"src/**\"]\nreason = \"type it\"\n{comments}")
+    };
+    let src = "const a = 1;\n  // @ts-expect-error\nconst b: number = a;\n";
+    let d = committed("arch-ban-comments", &ban("comments = true\n"), &[("src/a.ts", src)]);
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("src/a.ts:2: `@ts-expect-error` is banned here: type it"),
+        "{out}"
+    );
+    std::fs::write(d.join(".herdsman/arch.toml"), ban("")).unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+}
+
+#[test]
+fn a_ban_checks_a_workflow_yml_and_a_test_mjs_and_except_still_passes_a_listed_file() {
+    let conf = r#"
+[[ban]]
+pattern = "run: exit 1"
+paths = [".github/workflows/*.yml"]
+except = [".github/workflows/allowed.yml"]
+reason = "no bare exit 1 step"
+
+[[ban]]
+pattern = "readFileSync("
+paths = ["**/*.test.mjs"]
+except = ["scripts/ok.test.mjs"]
+reason = "read fixtures through the helper"
+"#;
+    let wf = "jobs:\n  a:\n    steps:\n      - run: exit 1\n";
+    let mjs = "import fs from 'node:fs';\nconst t = fs.readFileSync('x');\n";
+    let d = committed(
+        "arch-ban-any",
+        conf,
+        &[
+            (".github/workflows/ci.yml", wf),
+            (".github/workflows/allowed.yml", wf),
+            ("scripts/a.test.mjs", mjs),
+            ("scripts/ok.test.mjs", mjs),
+        ],
+    );
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains(".github/workflows/ci.yml:4: `run: exit 1` is banned here: no bare exit 1 step"),
+        "{out}"
+    );
+    assert!(
+        out.contains("scripts/a.test.mjs:2: `readFileSync(` is banned here: read fixtures through the helper"),
+        "{out}"
+    );
+    assert!(out.contains("2 violations"), "{out}");
+}
+
+#[test]
+fn a_baselined_layer_crossing_passes_and_a_new_one_fails() {
+    let d = repo(
+        "arch-layer-base",
+        &[
+            ("crates/core/src/lib.rs", "use herdsman_server::api;\n"),
+            ("crates/core/src/ok.rs", "use std::fmt;\n"),
+            ("web/src/api/client.ts", "import { draw } from '../ui/board';\n"),
+            ("web/src/ui/board.ts", "export const draw = 1;\n"),
+        ],
+    );
+    let (code, out) = arch(&d, &["--write-baseline"]);
+    assert_eq!(code, 0, "{out}");
+    let base = std::fs::read_to_string(d.join(".herdsman/arch-baseline.txt")).unwrap();
+    assert_eq!(
+        base,
+        "crates/core/src/lib.rs -> server\nweb/src/api/client.ts -> web-ui\n"
+    );
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    std::fs::write(d.join("crates/core/src/ok.rs"), "use herdsman_server::x;\n").unwrap();
+    std::fs::write(
+        d.join("web/src/api/client.ts"),
+        "import { draw } from '../ui/board';\nimport { s } from 'herdsman_server/s';\n",
+    )
+    .unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("crates/core/src/ok.rs:1: layer `core` uses `server`"),
+        "{out}"
+    );
+    assert!(
+        out.contains("web/src/api/client.ts:2: layer `web-api` uses `server`"),
+        "{out}"
+    );
+    assert!(out.contains("2 violations"), "{out}");
+    let (code, out) = arch(&d, &["--write-baseline"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("crates/core/src/ok.rs -> server: a new layer crossing is not baselined"),
+        "{out}"
+    );
+    std::fs::write(d.join("crates/core/src/lib.rs"), "use std::fmt;\n").unwrap();
+    std::fs::write(d.join("crates/core/src/ok.rs"), "use std::fmt;\n").unwrap();
+    std::fs::write(d.join("web/src/api/client.ts"), "import { draw } from '../ui/board';\n").unwrap();
+    let (code, out) = arch(&d, &["--write-baseline"]);
+    assert_eq!(code, 0, "{out}");
+    let base = std::fs::read_to_string(d.join(".herdsman/arch-baseline.txt")).unwrap();
+    assert_eq!(base, "web/src/api/client.ts -> web-ui\n", "the list only shrinks");
+}

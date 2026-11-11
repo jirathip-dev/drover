@@ -418,7 +418,7 @@ fn merge_into_fleet_repo_prints_reinstall_command_last() {
     assert_eq!(exit, 0, "{out}");
     assert_eq!(
         out.lines().last(),
-        Some("cargo install --path /tmp/does-not-matter/sendmeter/crates/cli --locked --root /opt/herdsman --force"),
+        Some("cargo install --path /tmp/does-not-matter/sendmeter/crates/cli --locked --root /opt/herdsman --force && sh /tmp/does-not-matter/sendmeter/scripts/signing-identity.sh sign /opt/herdsman/bin/herdsman"),
         "{out}"
     );
     assert!(!r.called("cargo"), "printed, never run");
@@ -610,6 +610,32 @@ fn extend_and_park_refuse_outside_needs_human_and_park_clears_it() {
     assert_eq!(st(&c).state, "parked");
     let (exit, out) = run(&c, &r, &["park", "sendmeter", "12"]);
     assert!(exit == 3 && out.contains("is parked, not needs-human"), "{out}");
+}
+
+/// #712: `unpark` puts a parked issue back in the round it had before its needs-human, logged `by`, and an issue
+/// out of the queue goes last; a second unpark refuses.
+#[test]
+fn unpark_restores_the_round_and_requeues_it_last() {
+    let (_d, c) = needs_human("cli-unpark");
+    let r = Fake::default();
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "5", "7"]).0, 0);
+    assert_eq!(run(&c, &r, &["park", "sendmeter", "12"]).0, 0);
+    let (exit, out) = run(&c, &r, &["unpark", "sendmeter", "12", "--by", "alice"]);
+    assert_eq!((exit, out.as_str()), (0, "#12: unparked, back to fix(3)\n"));
+    assert_eq!(st(&c).state, "fix(3)");
+    let all = read(&c.state).unwrap();
+    let un = all.iter().rfind(|e| e.kind == "unparked").unwrap();
+    assert_eq!((un.str("by"), un.str("state")), (Some("alice"), Some("fix(3)")));
+    let q: Vec<u64> = herdsman::queue::replay(&all, "sendmeter")
+        .iter()
+        .map(|i| i.issue)
+        .collect();
+    assert_eq!(q, [5, 7, 12]);
+    let (exit, out) = run(&c, &r, &["unpark", "sendmeter", "12"]);
+    assert!(
+        exit == 3 && out.contains("REFUSED NOT_PARKED: #12 is fix(3), not parked"),
+        "{out}"
+    );
 }
 
 /// #198: the merge commit is `<title> (#PR)`, the PR body's `## For humans` lines, then the facts line.

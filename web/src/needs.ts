@@ -41,7 +41,8 @@ function issue(d: NeedsTab, s: NeedIssue): string {
 
 /** The `#needs` strip: the snapshot's time (#450: serve.js folds its age into the strip), the cards, and `[chat·N]`'s count (#386). */
 export function tab(d: NeedsTab): string {
-  const age = `<i id=sts hidden data-ts=${d.snap}></i>`;
+  // #709: fleet.toml fails to load: the red banner, above every tab, until it loads again.
+  const age = `<i id=sts hidden data-ts=${d.snap}></i>` + (d.config == null ? '' : `<p class=cfgbad role=alert>${esc(d.config)}</p>`);
   const asks = d.asks.map(a => {
     const from = a.from == null ? '' : ` · imported from ${esc(a.from)}`, f = d.rw ? answer(d, a.ask, 'Send') : '';
     // #412: a design's PNGs, inline, as `/design/<fleet>/<n>/<i>` serves them.

@@ -56,13 +56,14 @@ impl Waiting {
     }
 }
 
-/// #217: an extra round is recorded for a lane that has not started yet (`extend --no-spawn` asks for none).
+/// #217: an extra round is recorded for a lane that has not started yet (`extend --no-spawn` asks for none); #778:
+/// its pending action, until a hard refusal ends it (logs before #778: the round's own event, last).
 pub fn unspawned(events: &[Event], s: &IssueState) -> bool {
     let last = events
         .iter()
         .rev()
         .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue));
-    s.last_event == "extend-failed"
+    crate::pending::of(events, &s.fleet, s.issue).is_some_and(|p| p.action == "extend" && !p.failed)
         || last.is_some_and(|e| e.kind == "round-extended" && e.data.get("spawn") == Some(&Value::Bool(true)))
 }
 
@@ -92,6 +93,15 @@ pub const TURN_GO_ON: &str = "reported working, idle: prompting it to continue";
 pub const TURN_BLOCKED: &str = "reported blocked: ";
 /// #511: a nudged `done` with still no push is blocked after this long (or at its next `done`).
 const NUDGE_SECS: u64 = 600;
+
+/// #785: the issue's lane, since its latest spawn, logged `lane-failed-start`.
+fn failed_start(events: &[Event], s: &IssueState) -> bool {
+    let Some(sp) = s.lane.as_deref().and_then(|l| last_spawn(events, l)) else {
+        return false;
+    };
+    let hit = |e: &Event| e.kind == "lane-failed-start" && e.ts >= sp.ts && e.str("agent") == sp.str("agent");
+    events.iter().any(hit)
+}
 
 /// #511: the build lane's latest `herdsman turn` since its spawn and any extra round the owner gave.
 pub fn turn<'a>(events: &'a [Event], s: &IssueState) -> Option<&'a Event> {
@@ -206,7 +216,7 @@ impl<'a> Log<'a> {
 /// `head` = the lane worktree's (sha, commit time); `pr` = the (cached) PR view;
 /// `rev` = the rev worktree's verdict.md (absolute path, first line) when written since the rev spawn.
 /// #173: each next step is the one `fc`'s pipeline maps the outcome to.
-/// #630: `waits`, plus what a pulled root lost (a `root-moved` since the issue's last push).
+/// #630: `waits`, plus what a pulled root lost (a `root-moved` since the issue's last push); #790: the lane moved on.
 pub fn waiting_on(
     log: &Log,
     events: &[Event],
@@ -220,7 +230,7 @@ pub fn waiting_on(
     let mut since = events.iter().rev().take_while(|e| !e.is("pushed", &s.fleet, s.issue));
     let moved = since.find(|e| e.is("root-moved", &s.fleet, s.issue));
     if let Some(l) = moved.and_then(|e| e.str("lost")).filter(|l| !l.is_empty()) {
-        w.what += &format!(" · root gone, lost {l}");
+        w.what += &format!(" · moved off a pulled root, lost {l}");
     }
     w
 }
@@ -395,7 +405,7 @@ fn waits(
         }
         "ready" if !how.is_empty() => {
             let base = pr["baseRefName"].as_str().unwrap_or("?");
-            let what = format!("PASS · {how} {base} · catching up next pass (≤ 5 min)");
+            let what = format!("PASS · {how} {base} · {CATCH_UP}");
             let b = to(gate, "conflict");
             w(
                 "drive",
@@ -536,6 +546,7 @@ fn waits(
             s.last_ts,
             cmd("spawn", &format!(" {}", p.role(build).unwrap_or(p.start()))),
         ),
+        "impl" | "fix" if failed_start(events, s) => w("owner", "failed start (no event back)", s.last_ts, None),
         "impl" | "fix" => w("none", "idle without pushing (check the pane)", s.last_ts, None),
         "design" => {
             // #730: the stage's lane is the architect's or the designer's.
@@ -589,13 +600,17 @@ pub fn scan(
             lane: Some(lane.clone()),
             ..s
         };
-        let mine = of.get(&(s.fleet.as_str(), s.issue)).map_or(&[][..], Vec::as_slice);
         let (f, branch) = (&cfg.fleet[&s.fleet], crate::gate::branch_of(Some(&s), s.issue));
         // #169: no PR yet: the issue branch's latest run backs the `checks` link (the tick reads it, never a request).
         if live && !matches!(s.state.as_str(), "merged" | "closed") && gh::cached_pr(ctx, &s.fleet, s.issue).is_null() {
             gh::run(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now);
         }
-        if busy(&lane) {
+        let mine = of.get(&(s.fleet.as_str(), s.issue)).map_or(&[][..], Vec::as_slice);
+        let sp = last_spawn(mine, &lane);
+        let rested = |e: &Event| {
+            crate::access::rests(&e.kind) && sp.is_some_and(|p| e.ts >= p.ts && e.str("account") == p.str("account"))
+        };
+        if busy(&lane) && !(sp.is_some_and(|p| p.str("account").is_some()) && mine.iter().any(rested)) {
             let who = if s.check_lane() == Some(&lane) {
                 "reviewer"
             } else {
@@ -809,6 +824,15 @@ pub fn scan(
         {
             w.what = why;
         }
+        if let Some(h) = spawn
+            .then(|| held(mine, (&s.fleet, s.issue), w.next_cmd.as_deref()))
+            .flatten()
+        {
+            w.what = match w.what.strip_suffix(CATCH_UP) {
+                Some(p) => format!("{p}{h}"),
+                None => format!("{} · {h}", w.what),
+            };
+        }
         // #212: a CI/merge line from a PR read older than 2 min (no fast step since) says when it was taken.
         let at = gh::cached_at(ctx, &s.fleet, s.issue).filter(|t| ctx.now > t + 120);
         if let Some(t) = at.filter(|_| w.what.starts_with("PASS · ")) {
@@ -890,6 +914,41 @@ pub fn guarded(events: &[Event], cfg: &Config) -> Vec<IssueState> {
     out
 }
 
+const CATCH_UP: &str = "catching up next pass (≤ 5 min)";
+
+pub fn held(events: &[Event], (f, n): (&str, u64), cmd: Option<&str>) -> Option<String> {
+    let mine = |e: &&Event| e.fleet == f && e.issue == Some(n) && matches!(e.kind.as_str(), "driven" | "spawn");
+    let e = events.iter().rfind(mine)?;
+    let wait = ["EXIT", "ERROR", "SPAWN_PENDING", "SPAWN_BACKOFF"];
+    let code = e.str("code").filter(|c| !wait.contains(c))?;
+    let c = e.str("cmd").filter(|c| c.starts_with("herdsman spawn "))?;
+    cmd.is_none_or(|x| c.starts_with(x)).then_some(())?;
+    let why = e.str("result").unwrap_or_default();
+    let why = why.split_once(": ").map_or(why, |p| p.1);
+    Some(format!(
+        "held: {code} {}",
+        why.split("; retry later").next().unwrap_or(why)
+    ))
+}
+
+/// #792: a working lane's silent-lane recovery since its spawn: ` · nudged 3m ago: silent 10m mid-turn`.
+pub fn recovered(events: &[Event], lane: &str, now: u64) -> String {
+    let sp = last_spawn(events, lane);
+    let mine = |e: &&Event| {
+        matches!(e.kind.as_str(), "nudged" | "respawned-silent")
+            && e.str("agent") == Some(lane)
+            && sp.is_some_and(|sp| e.ts >= sp.ts)
+    };
+    events.iter().rfind(mine).map_or(String::new(), |e| {
+        let how = ["nudged", "respawned"][usize::from(e.kind == "respawned-silent")];
+        format!(
+            " · {how} {} ago: {}",
+            age(now.saturating_sub(e.ts)),
+            e.str("why").unwrap_or_default()
+        )
+    })
+}
+
 /// #493: a refusal that stops drive's starts for every fleet (`CAP`: its own); the queue waits on it.
 const HOST_WAIT: [&str; 5] = ["HOST_BUSY", "DISK_LOW", "DISK_BUDGET", "MEM_LOW", "ALL_CAPPED"];
 pub const ORPHAN_SECS: u64 = 1800;
@@ -908,6 +967,7 @@ pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Valu
     let label = f.merge_label.as_deref().is_none_or(|l| gh::has_label(pr, l));
     let ci = s.state == "ready" && label && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(pr))) == "pending";
     let held = !crate::events::held_on(log.all, s).is_empty() || !log.blockers(&s.fleet, s.issue).is_empty();
+    let held = held || self::held(log.all, (&s.fleet, s.issue), None).is_some();
     if f.paused || ci || held || s.lanes.values().any(working) || log.asks.iter().any(asked) {
         return None;
     }

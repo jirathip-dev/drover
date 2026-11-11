@@ -1,5 +1,5 @@
 //! #561: a remote host that never answers (the Air, offline) costs a tick one 5 s probe: the tick stays in budget,
-//! drive still starts work, the host shows offline; a disabled host's worktrees are never probed by clean; a call
+//! drive still starts work, the host shows offline; a disabled host's worktrees are never probed by the tick's clean; a call
 //! through a dead shared ssh connection drops its socket and runs once more; a tick 10 min old raises `tick-stuck` once.
 mod common;
 use common::*;
@@ -69,6 +69,7 @@ struct Hang {
     mark: std::path::PathBuf,
     spent: Shared<u64>,
     seen: Shared<Vec<String>>,
+    beats: Shared<Vec<String>>,
 }
 
 fn air(prog: &str, args: &[String]) -> bool {
@@ -92,6 +93,10 @@ impl Runner for Hang {
         self.seen
             .borrow_mut()
             .push(std::fs::read_to_string(&self.mark).unwrap_or_default());
+        let beat = self.mark.with_file_name("tick.beat");
+        self.beats
+            .borrow_mut()
+            .push(std::fs::read_to_string(beat).unwrap_or_default());
         self.spent.set(self.spent.get() + limit.as_secs());
         Ok(Out {
             code: 124,
@@ -117,6 +122,7 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
         mark: c.state.with_file_name("tick.step"),
         spent: Shared::new(0),
         seen: Shared::default(),
+        beats: Shared::default(),
     };
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
@@ -135,6 +141,12 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
     let mark = r.seen.borrow()[0].clone();
     assert!(mark.contains(r#""step":"check""#) && mark.contains("air"), "{mark}");
     assert!(!r.mark.exists(), "the tick's step marker goes when it ends");
+    // #791: a running tick's heartbeat (`<started> <beat>`), gone when it ends.
+    assert_eq!(r.beats.borrow()[0], format!("{NOW} {NOW}"));
+    assert!(
+        !r.mark.with_file_name("tick.beat").exists(),
+        "the heartbeat goes when the tick ends"
+    );
     let cached = herdsman::hosts::cached(&c);
     assert!(!cached["air"].up, "the Air shows offline");
     assert!(
@@ -145,18 +157,19 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
     assert!(status.contains("host offline: air"), "{status}");
 }
 
+/// #678: drive's hourly clean and trim still leave a disabled host alone: listed, never removed or swept.
 #[test]
-fn clean_never_probes_a_disabled_hosts_worktrees() {
+fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
     let c = setup("stuck-disabled", "enabled = false");
     let r = local().reply("herdr --machine air agent list", NO_AGENTS);
-    let (code, out) = run(&c, &r, &["clean", "--yes"]);
+    let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains(&format!("keep air:{WT}: on a disabled host (not cleaned)")),
         "{out}"
     );
-    let calls = r.calls.borrow();
-    assert!(!calls.iter().any(|l| l.starts_with(SSH)), "{calls:?}");
+    assert!(!r.called("herdr --machine air worktree remove"), "{out}");
+    assert!(!out.contains("scratch: air:"), "no scratch sweep there: {out}");
     // Enabled again: probed and removed as before.
     let c2 = setup("stuck-enabled", "");
     let r = local()
@@ -165,6 +178,35 @@ fn clean_never_probes_a_disabled_hosts_worktrees() {
     let (_, out) = run(&c2, &r, &["clean"]);
     assert!(r.called(&format!("{SSH}'sh' '-c' 'test -e")), "{out}");
     assert!(!out.contains("not cleaned"), "{out}");
+}
+
+/// #678: an explicit `clean --yes` on a disabled host that never answers: one bounded probe, `offline (not cleaned)`,
+/// nothing else sent there.
+#[test]
+fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
+    let c = setup("stuck-disabled-silent", "enabled = false");
+    let r = Hang {
+        f: local(),
+        mark: c.state.with_file_name("tick.step"),
+        spent: Shared::new(0),
+        seen: Shared::default(),
+        beats: Shared::default(),
+    };
+    let (code, out) = run(&c, &r, &["clean", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!("keep air:{WT}: host offline (not cleaned)")),
+        "{out}"
+    );
+    assert!(out.contains("scratch: air: host offline (not cleaned)"), "{out}");
+    let calls = r.f.calls.borrow();
+    let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
+    assert_eq!(
+        to_air,
+        ["ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true"],
+        "one probe, nothing after it"
+    );
+    assert!(r.spent.get() <= 5, "{}s on the Air", r.spent.get());
 }
 
 #[test]

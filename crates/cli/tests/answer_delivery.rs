@@ -57,7 +57,7 @@ fn a_lane_ask_stores_its_agent_and_the_answer_is_typed_into_its_pane() {
     let a = &kinds(&c, "needs-decision")[0];
     assert_eq!((a.str("agent"), a.str("host")), (Some(LANE), Some("mini")));
     let r = ok_herdr("");
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "2", "--by", "conductor"]);
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "2", "--by", "orchestrator"]);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: no -> sendmeter-impl-36\n"));
     assert!(
         r.called("herdr agent prompt sendmeter-impl-36 DECISION q1: no"),

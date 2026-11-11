@@ -70,9 +70,9 @@ Production code added only for tests counts against the change too.
   in the PR body with one line on why. The cap in `ci/cap.toml` is a total for the repo and the only
   hard limit: ask only when your own PR, merged onto current integration, would put the total over
   `line_cap`; trim first, then ask `--kind owner`.
-- Never edit `ci/cap.toml` (the hook refuses it): one conductor-filed issue raises it for the whole queue.
+- Never edit `ci/cap.toml` (the hook refuses it): one orchestrator-filed issue raises it for the whole queue.
   Your cap ask carries `herdsman cap <fleet>`'s queue-wide view, with its two options: raise to the
-  projected total plus margin in one conductor-filed issue (recommended), or trim. A `DECISION` to wait
+  projected total plus margin in one orchestrator-filed issue (recommended), or trim. A `DECISION` to wait
   for that issue: `herdsman queue <fleet> block --on N <issue>` and end the turn.
 - Being near the cap, or another PR's growth, is never a reason to ask. A `STAGING_WOULD_BREAK` from
   the cap after another merge is a fix round: trim, or ask under the same rule.
@@ -134,3 +134,5 @@ FAIL
   `Decided: …`, `Because: "spec quote" | q<id> | file:line`, `Rejected: alternative — why`,
   `Check: what the reviewer should verify`, `Owner: one plain line`. Every `Because:` cites a verbatim spec quote
   (12+ chars), an answered ask or a `file:line` at your head; no secrets. A bad note is refused `WHY_INVALID`.
+- #735: a non-obvious reason goes in that why note (`herdsman why`), never in a comment: arch-check fails a new
+  comment line but `// SAFETY:` over `unsafe` and one `///` line on a public item.

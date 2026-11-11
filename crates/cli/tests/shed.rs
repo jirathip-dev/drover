@@ -121,6 +121,18 @@ fn handle(m: &str, p: &Value, terms: &mut BTreeMap<String, Value>) -> Result<Val
         "events" => Ok(json!({})),
         _ if !terms.contains_key(&name) => Err(gone()),
         "get" => Ok(terms[&name].clone()),
+        // #749: an ACP terminal's events (`events`), the last `n` before `before`, as shed pages them.
+        "read" if p["events"] == true && terms[&name]["acp"].is_string() => {
+            let before = p["before"].as_u64().unwrap_or(u64::MAX);
+            let all: Vec<&Value> = terms[&name]["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e["seq"].as_u64() < Some(before))
+                .collect();
+            let n = p["n"].as_u64().map_or(all.len(), |n| n as usize);
+            Ok(json!({"text": "", "events": all[all.len().saturating_sub(n)..]}))
+        }
         // #666: a terminal's own `text` (an ACP session's transcript), else a screen.
         "read" => Ok(json!({"text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from)})),
         "send" | "keys" => Ok(json!({})),
@@ -415,6 +427,7 @@ fn acp_fake(adapter: &[&str]) -> Fake {
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
+        .reply("shed cancel", "")
 }
 
 /// An ACP lane's ctx: its profiles synced, the real binary as their hook.
@@ -1378,9 +1391,9 @@ fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
 }
 
 #[test]
-fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and_restarts() {
+fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_and_restarts() {
     let b = Server::new(shed::proto::VERSION, vec![]);
-    let c = acp_ctx("acp-conductor", &acp_config(&b.sock, "claude", true));
+    let c = acp_ctx("acp-orchestrator", &acp_config(&b.sock, "claude", true));
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
         "t1\n"
@@ -1390,16 +1403,16 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
     let (code, out) = run(&c, &cli, &["thread", "say", "t1", "what should #12 cover?"]);
     assert_eq!(
         (code, out.as_str()),
-        (0, "t1: -> conductor-t1\n"),
+        (0, "t1: -> orchestrator-t1\n"),
         "{:?}",
         f.calls.borrow()
     );
-    let dir = c.state.with_file_name("conductor").join("t1");
+    let dir = c.state.with_file_name("orchestrator").join("t1");
     let calls = f.calls.borrow().clone();
     let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
     let head = format!(
-        "shed run --acp claude-acp --policy allow --name conductor-t1 --cwd {} --label fleet=sendmeter --label issue=- \
-         --label role=conductor --label harness=claude --label source=drover --label group=sendmeter --label thread=t1 \
+        "shed run --acp claude-acp --policy allow --name orchestrator-t1 --cwd {} --label fleet=sendmeter --label issue=- \
+         --label role=orchestrator --label harness=claude --label source=drover --label group=sendmeter --label thread=t1 \
          -- sh -c ",
         dir.display()
     );
@@ -1410,17 +1423,17 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
     let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
     let thread = dir.join(".thread.md");
     let first = format!(
-        "shed send conductor-t1 {}\n\nThe thread so far is in {}, the last message new.\n\n[t1] owner: what should #12 cover?",
+        "shed send orchestrator-t1 {}\n\nThe thread so far is in {}, the last message new.\n\n[t1] owner: what should #12 cover?",
         brief.trim_end(),
         thread.display()
     );
     let sends: Vec<_> = calls.iter().filter(|c| c.starts_with("shed send")).collect();
     assert_eq!(sends, [&first]);
     assert!(brief.contains("Thread: t1, Grill #12"));
-    let st = &thread_events(&c, "conductor-start")[0];
+    let st = &thread_events(&c, "orchestrator-start")[0];
     assert_eq!(
         (st.str("runtime"), st.str("pane")),
-        (Some("shed-acp"), Some("conductor-t1"))
+        (Some("shed-acp"), Some("orchestrator-t1"))
     );
     assert_eq!(st.data["confirmed"], json!(true));
 
@@ -1437,7 +1450,7 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
             .iter()
             .filter(|c| c.starts_with("shed"))
             .collect::<Vec<_>>(),
-        [&"shed send conductor-t1 [t1] owner: scope\nthen tests".to_string()]
+        [&"shed send orchestrator-t1 [t1] owner: scope\nthen tests".to_string()]
     );
     assert!(
         !b.methods().iter().any(|m| m == "send" || m == "keys"),
@@ -1454,11 +1467,11 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
         "{:?}",
         b.methods()
     );
-    assert!(!b.terms.lock().unwrap().contains_key("conductor-t1"));
-    let sl = thread_events(&c, "conductor-sleep");
+    assert!(!b.terms.lock().unwrap().contains_key("orchestrator-t1"));
+    let sl = thread_events(&c, "orchestrator-sleep");
     assert_eq!(sl.iter().map(|e| e.str("why")).collect::<Vec<_>>(), [Some("idle")]);
     let (_, ls) = run(&quiet, &Fake::default(), &["thread", "ls", "--json"]);
-    assert!(ls.contains("\"conductor\": \"asleep\""), "{ls}");
+    assert!(ls.contains("\"state\": \"asleep\""), "{ls}");
 
     // The next message starts a fresh session (shed's bridge loads none) with the thread so far.
     let f = acp_fake(&["echo"]);
@@ -1481,32 +1494,32 @@ fn a_shed_acp_fleets_thread_runs_its_conductor_as_an_acp_session_that_sleeps_and
         history.contains("owner: scope\nthen tests") && history.ends_with("owner: third\n"),
         "{history}"
     );
-    let st = thread_events(&c, "conductor-start");
+    let st = thread_events(&c, "orchestrator-start");
     assert_eq!((st.len(), st[1].data["resumed"].clone()), (2, json!(false)));
 
     // A session shed no longer runs is asleep on the next check, quiet or not.
-    b.terms.lock().unwrap().remove("conductor-t1");
+    b.terms.lock().unwrap().remove("orchestrator-t1");
     assert_eq!(run(&at(&c, quiet.now + 120), &cli, &["check"]).0, 0);
-    let sl = thread_events(&c, "conductor-sleep");
+    let sl = thread_events(&c, "orchestrator-sleep");
     assert_eq!(sl.last().and_then(|e| e.str("why")), Some("gone"));
 }
 
 #[test]
-fn an_acp_conductor_runs_under_the_conductor_guard() {
+fn an_acp_orchestrator_runs_under_the_orchestrator_guard() {
     let b = Server::new(shed::proto::VERSION, vec![]);
-    let c = acp_ctx("acp-conductor-guard", &acp_config(&b.sock, "claude", true));
+    let c = acp_ctx("acp-orchestrator-guard", &acp_config(&b.sock, "claude", true));
     run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
     let cli = Cli(&acp_fake(&["env"]), b.terms.clone(), Shared::default());
     assert_eq!(run(&c, &cli, &["thread", "say", "t1", "hi"]).0, 0);
     let dump = cli.2.borrow().concat();
     let env: BTreeMap<&str, &str> = dump.lines().filter_map(|l| l.split_once('=')).collect();
-    assert_eq!(env.get("HERDSMAN_LANE"), Some(&"sendmeter:-:conductor"));
+    assert_eq!(env.get("HERDSMAN_LANE"), Some(&"sendmeter:-:orchestrator"));
     assert_eq!(env.get("HERDSMAN_THREAD"), Some(&"t1"));
     assert!(!env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"), "{env:?}");
     assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&acct_c().as_str()));
     // The profile's `PreToolUse` hook, from its session folder's local settings, run in the adapter's env as Claude
     // Code runs it.
-    let cwd = c.state.with_file_name("conductor").join("t1");
+    let cwd = c.state.with_file_name("orchestrator").join("t1");
     let local = std::fs::read_to_string(cwd.join(".claude/settings.local.json")).unwrap();
     let s: Value = serde_json::from_str(&local).unwrap();
     let hook = s["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
@@ -1538,14 +1551,14 @@ fn an_acp_conductor_runs_under_the_conductor_guard() {
     assert_eq!(
         tool("herdsman amend sendmeter 12 'x' --basis q1"),
         "",
-        "a conductor amends"
+        "an orchestrator amends"
     );
 }
 
 #[test]
-fn an_unguardable_acp_conductor_refuses_with_a_system_line_and_never_falls_back_to_herdr() {
+fn an_unguardable_acp_orchestrator_refuses_with_a_system_line_and_never_falls_back_to_herdr() {
     let b = Server::new(shed::proto::VERSION, vec![]);
-    let c = acp_ctx("acp-conductor-noacct", &acp_config(&b.sock, "claude", false));
+    let c = acp_ctx("acp-orchestrator-noacct", &acp_config(&b.sock, "claude", false));
     run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
     let f = acp_fake(&["env"]);
     let cli = Cli(&f, b.terms.clone(), Shared::default());
@@ -1566,7 +1579,7 @@ fn an_unguardable_acp_conductor_refuses_with_a_system_line_and_never_falls_back_
     let sys: Vec<_> = msgs.iter().filter(|e| e.str("from") == Some("system")).collect();
     assert_eq!(sys.len(), 1, "{msgs:?}");
     assert!(sys[0].str("text").unwrap().contains("ACP_UNGUARDED"), "{:?}", sys[0]);
-    assert!(thread_events(&c, "conductor-start").is_empty());
+    assert!(thread_events(&c, "orchestrator-start").is_empty());
 }
 
 /// #609: `GET path` on a fresh board over runner `r` (a server per call: its lane cache starts empty).
@@ -2076,4 +2089,368 @@ fn a_rev_on_the_impls_provider_refuses_to_load() {
         .unwrap_err()
         .contains("no harness adapter guards it"));
     assert!(load(&base.replace("harness = \"hermes\"", "harness = \"claude\"")).is_ok());
+}
+
+/// #749: `GET /api/v1/lane/<agent>` for lane `agent` on fake shed `b` (a paired phone), its JSON.
+fn lane_json(b: &Server, agent: &str, query: &str) -> Value {
+    let c = ctx(
+        &tmpdir(&format!("acp-blocks-{agent}")),
+        &acp_config(&b.sock, "claude", false),
+    );
+    let d = json!({"role": "impl", "agent": agent, "harness": "claude", "runtime": "shed", "pane": agent});
+    herdsman::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
+    let fake = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let r = shed::With(&fake, b.shed());
+    let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone) Safari/604.1", 1_000_000);
+    let q = format!("GET /api/v1/lane/{agent}{query} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n{cookie}\r\n");
+    let res = String::from_utf8_lossy(&s.respond(&q, 1_000_000)).into_owned();
+    assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
+    serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap()
+}
+
+/// An ACP lane on `b` whose transcript is shed's recorded `agent` session (tests/golden/acp/<agent>.events.json).
+fn recorded(b: &Server, agent: &str) -> Value {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/golden/acp/{agent}.events.json"));
+    let events: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    b.add("sendmeter-impl-12", lane_labels());
+    let mut terms = b.terms.lock().unwrap();
+    let t = terms.get_mut("sendmeter-impl-12").unwrap();
+    (t["acp"], t["events"]) = (json!(format!("{agent}-acp")), events);
+    drop(terms);
+    lane_json(b, "sendmeter-impl-12", "")
+}
+
+/// A block's shape: its `k` and field names, plus a tool's status and ACP kind (never the agent's wording).
+fn shape(b: &Value) -> String {
+    let keys: Vec<&str> = b.as_object().unwrap().keys().map(String::as_str).collect();
+    let tool = if b["k"] == "tool" {
+        format!(" {} {}", b["status"], b["kind"])
+    } else {
+        String::new()
+    };
+    format!("{} {keys:?}{tool}", b["k"])
+}
+
+/// #749: recorded sessions of three ACP agents (claude, codex, gemini: shed's #52 fixtures) give the same block
+/// shapes in `lane/<agent>`: the prompt, the plan, one block per tool call (its updates folded, its status the last),
+/// the approval with the option taken, one reply of the joined text chunks. A multi-line command is one `tool` block
+/// whose `title_line` has no newline, the whole title beside it.
+#[test]
+fn acp_transcripts_from_different_agents_give_the_same_blocks() {
+    let got: Vec<Value> = ["claude", "codex", "gemini"]
+        .iter()
+        .map(|a| recorded(&Server::new(shed::proto::VERSION, vec![]), a))
+        .collect();
+    let shapes: Vec<Vec<String>> = got
+        .iter()
+        .map(|v| v["blocks"].as_array().unwrap().iter().map(shape).collect())
+        .collect();
+    assert_eq!(
+        shapes[0],
+        [
+            r#""prompt" ["k", "text"]"#,
+            r#""plan" ["entries", "k"]"#,
+            r#""tool" ["id", "k", "kind", "status", "title", "title_line"] "completed" "read""#,
+            r#""tool" ["id", "k", "kind", "status", "title", "title_line"] "completed" "execute""#,
+            r#""approval" ["answered", "k", "options", "tool"]"#,
+            r#""tool" ["id", "k", "kind", "status", "title", "title_line"] "failed" "search""#,
+            r#""reply" ["k", "markdown"]"#,
+        ],
+        "{}",
+        got[0]
+    );
+    assert_eq!(shapes[1], shapes[0], "codex: {}", got[1]);
+    assert_eq!(shapes[2], shapes[0], "gemini: {}", got[2]);
+    let claude = got[0]["blocks"].as_array().unwrap();
+    assert_eq!(claude[0]["text"], "replay");
+    assert_eq!(claude[4]["answered"], "allow");
+    assert_eq!(
+        claude[4]["options"][0],
+        json!({"id": "allow_always", "name": "Always Allow", "kind": "allow_always"})
+    );
+    assert!(claude[6]["markdown"]
+        .as_str()
+        .unwrap()
+        .starts_with("## Fixed\n\nThe parser now:\n- skips"));
+    assert!(claude[6]["markdown"]
+        .as_str()
+        .unwrap()
+        .ends_with("```\nAll 12 tests pass."));
+    for v in &got {
+        let cmd = &v["blocks"][3];
+        assert!(cmd["title"].as_str().unwrap().contains('\n'), "{cmd}");
+        assert!(!cmd["title_line"].as_str().unwrap().contains('\n'), "{cmd}");
+        assert!(cmd["title"]
+            .as_str()
+            .unwrap()
+            .starts_with(cmd["title_line"].as_str().unwrap().trim_end_matches('…')));
+        assert_eq!(v["lines"], json!([]), "an ACP lane sends no screen lines");
+        assert_eq!((v["before"].as_u64(), &v["more"]), (Some(1), &json!(false)), "{v}");
+    }
+    assert_eq!(got[0]["blocks"][3]["title_line"], "`cargo test -p parser \\…");
+}
+
+/// #749: an ACP transcript pages by `before` (an event `seq`) and `n`: claude's last 4 events before seq 13 (seqs 9-12)
+/// are two tool blocks, the cargo command's last updates and the failed search; the next page is `before` 9.
+#[test]
+fn an_acp_transcript_pages_by_event_seq() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    recorded(&b, "claude");
+    let v = lane_json(&b, "sendmeter-impl-12", "?before=13&n=4");
+    let kinds: Vec<String> = v["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| format!("{} {}", b["k"], b["status"]))
+        .collect();
+    assert_eq!(kinds, [r#""tool" "completed""#, r#""tool" "failed""#], "{v}");
+    assert_eq!((v["before"].as_u64(), &v["more"]), (Some(9), &json!(true)), "{v}");
+    assert_eq!(b.last("read")["before"], 13);
+}
+
+/// #749: a PTY lane on shed (no `acp`) still returns its screen: its lines, and the one `screen` block naming them.
+#[test]
+fn a_pty_lane_still_returns_its_screen() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    b.add("sendmeter-impl-12", lane_labels());
+    let v = lane_json(&b, "sendmeter-impl-12", "");
+    assert_eq!(v["lines"], json!(["screen of sendmeter-impl-12"]), "{v}");
+    assert_eq!(v["blocks"], json!([{"k": "screen"}]), "{v}");
+}
+
+fn session(b: &Server, kinds: &[Value]) {
+    session_of(b, "sendmeter-impl-12", kinds);
+}
+
+fn session_of(b: &Server, name: &str, kinds: &[Value]) {
+    let mut ev = b.events.lock().unwrap();
+    for k in kinds {
+        let seq = ev.iter().filter_map(|e| e["seq"].as_u64()).max().unwrap_or(0) + 1;
+        let mut e = json!({"seq": seq, "name": name, "labels": lane_labels()});
+        e.as_object_mut().unwrap().extend(k.as_object().unwrap().clone());
+        ev.push(e);
+    }
+}
+
+fn mid_turn(b: &Server) {
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["reported"] = json!({"state": "working"});
+}
+
+fn turn() -> Value {
+    json!({"event": "turn", "prompt": "# Brief"})
+}
+
+fn tool(status: &str) -> Value {
+    json!({"event": "tool_call", "id": "t1", "title": "cargo test", "status": status, "kind": "execute"})
+}
+
+fn cpu(pct: u64) -> Value {
+    json!({"event": "resources", "rss_mb": 900, "cpu_pct": pct})
+}
+
+const SILENT: u64 = 600;
+
+fn drive_at(c: &herdsman::Ctx, r: &dyn Runner, secs: u64) -> String {
+    let (code, out) = run(&later(c, secs), r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    out
+}
+
+fn host(f: &mut Fake, prog: &str, stdout: &str) {
+    let o = herdsman::runner::Out {
+        code: 0,
+        stdout: stdout.into(),
+        stderr: String::new(),
+    };
+    f.replies.insert(0, (prog.into(), o));
+}
+
+#[test]
+fn a_silent_acp_lane_is_nudged_then_respawned_once_then_escalated() {
+    let (c, b, f, wt, _) = acp_lane("acp-silent");
+    mid_turn(&b);
+    session(&b, &[turn(), tool("completed")]);
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    drive_at(&c, &cli, 60);
+    drive_at(&c, &cli, 60 + SILENT - 1);
+    assert!(!f.called("shed cancel"), "not silent yet");
+    let out = drive_at(&c, &cli, 60 + SILENT);
+    assert!(f.called("shed cancel sendmeter-impl-12"), "{out}");
+    assert_eq!(f.count("shed send sendmeter-impl-12 continue: "), 1, "{out}");
+    assert_eq!(logged(&c, "nudged").len(), 1);
+    drive_at(&c, &cli, 60 + SILENT + 60);
+    assert_eq!(f.count("shed cancel"), 1, "one nudge");
+    let (_, w) = run(&later(&c, 60 + SILENT + 60), &cli, &["waiting", "sendmeter"]);
+    assert!(w.contains("nudged"), "waiting shows the nudge: {w}");
+    let out = drive_at(&c, &cli, 60 + 2 * SILENT + 1);
+    assert_eq!(logged(&c, "respawned-silent").len(), 1, "{out}");
+    assert_eq!(logged(&c, "spawn").len(), 2, "{out}");
+    assert!(logged(&c, "needs-human").is_empty());
+    mid_turn(&b);
+    session(&b, &[turn()]);
+    drive_at(&c, &cli, 60 + 2 * SILENT + 30);
+    let out = drive_at(&c, &cli, 60 + 3 * SILENT + 31);
+    let nh = logged(&c, "needs-human");
+    assert_eq!(nh.len(), 1, "{out}");
+    assert_eq!(nh[0].str("code"), Some("LANE_SILENT"));
+    drive_at(&c, &cli, 60 + 5 * SILENT);
+    assert_eq!(logged(&c, "needs-human").len(), 1);
+    assert_eq!(logged(&c, "spawn").len(), 2);
+    assert_eq!(logged(&c, "respawned-silent").len(), 1);
+}
+
+#[test]
+fn a_silent_design_lane_is_nudged() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let cfg = acp_config(&b.sock, "claude", true)
+        + "\n[fleet.sendmeter.role.design]\nharness = \"claude\"\naccount = \"C\"\n";
+    let c = acp_ctx("acp-silent-design", &cfg);
+    let f = acp_fake(&["true"])
+        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+        .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
+        .reply("sysctl -n hw.ncpu", "10\n")
+        .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n");
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    assert_eq!(run(&c, &cli, &["queue", "sendmeter", "add", "12", "--design"]).0, 0);
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "design"]);
+    assert_eq!(code, 0, "{out}");
+    let lane = "sendmeter-design-12";
+    b.terms.lock().unwrap().get_mut(lane).unwrap()["reported"] = json!({"state": "working"});
+    session_of(&b, lane, &[turn(), tool("failed")]);
+    drive_at(&c, &cli, 60);
+    let out = drive_at(&c, &cli, 60 + SILENT);
+    assert!(f.called("shed cancel sendmeter-design-12"), "{out}");
+    assert_eq!(logged(&c, "nudged").len(), 1, "{out}");
+}
+
+#[test]
+fn a_pending_tool_call_in_a_live_session_is_not_silent() {
+    let (c, b, f, wt, _) = acp_lane("acp-tool");
+    mid_turn(&b);
+    session(&b, &[turn(), tool("in_progress"), cpu(80)]);
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    drive_at(&c, &cli, 60 + 3 * SILENT);
+    assert!(!f.called("shed cancel"));
+    assert!(logged(&c, "nudged").is_empty());
+    session(&b, &[tool("completed")]);
+    drive_at(&c, &cli, 60 + 3 * SILENT + 1);
+    let out = drive_at(&c, &cli, 60 + 4 * SILENT + 1);
+    assert!(f.called("shed cancel sendmeter-impl-12"), "{out}");
+}
+
+#[test]
+fn a_pending_tool_call_whose_process_died_is_silent() {
+    let (c, b, f, wt, _) = acp_lane("acp-tool-dead");
+    mid_turn(&b);
+    session(&b, &[turn(), tool("in_progress"), cpu(80), cpu(0)]);
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    drive_at(&c, &cli, 60);
+    let out = drive_at(&c, &cli, 60 + SILENT);
+    assert!(f.called("shed cancel sendmeter-impl-12"), "{out}");
+    assert_eq!(logged(&c, "nudged").len(), 1, "{out}");
+}
+
+#[test]
+fn a_silent_lanes_respawn_goes_ahead_under_host_busy_but_not_under_mem_low() {
+    for (name, prog, sample, spawns) in [
+        ("acp-busy", "sysctl -n vm.loadavg", "{ 90.00 80.00 70.00 }\n", 2),
+        (
+            "acp-memlow",
+            "vm_stat",
+            "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 100.\nPages inactive: 100.\n",
+            1,
+        ),
+    ] {
+        let (c, b, mut f, wt, _) = acp_lane(name);
+        mid_turn(&b);
+        session(&b, &[turn()]);
+        host(&mut f, prog, sample);
+        let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+        drive_at(&c, &cli, 60);
+        drive_at(&c, &cli, 60 + SILENT);
+        assert_eq!(logged(&c, "nudged").len(), 1, "{name}");
+        let out = drive_at(&c, &cli, 60 + 2 * SILENT + 1);
+        assert_eq!(logged(&c, "spawn").len(), spawns, "{name}: {out}");
+        assert_eq!(logged(&c, "respawned-silent").len(), spawns - 1, "{name}: {out}");
+    }
+}
+
+#[test]
+fn an_auth_failure_marks_the_account_signed_out_alerts_once_and_respawns_on_the_next_account() {
+    let (c, b, f, wt, _) = acp_lane("acp-auth");
+    mid_turn(&b);
+    let err = "API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\"}}";
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["text"] = json!(err);
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    for s in [60, 120] {
+        let (code, out) = run(&later(&c, s), &cli, &["check"]);
+        assert_eq!(code, 0, "{out}");
+    }
+    let out = logged(&c, "account-signed-out");
+    assert_eq!(out.len(), 1, "alerted once: {out:?}");
+    assert_eq!(out[0].str("account"), Some("C"));
+    let why = out[0].str("reason").unwrap();
+    assert!(why.contains("claude /login") && why.contains(&acct_c()), "{why}");
+    drive_at(&c, &cli, 180);
+    let sp = logged(&c, "spawn");
+    assert_eq!(sp.len(), 2);
+    assert_eq!(sp[1].str("account"), Some("D"));
+}
+
+#[test]
+fn a_skipped_fix_round_spawn_shows_its_refusal_in_waiting() {
+    let (c, b, mut f, wt, _) = acp_lane("acp-held");
+    let ev = |ts: u64, kind: &str, d: Value| {
+        herdsman::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
+    };
+    let head = "b".repeat(40);
+    ev(c.now + 10, "pushed", json!({"sha": head}));
+    ev(
+        c.now + 20,
+        "spawn",
+        json!({"role": "rev", "check": true, "agent": "sendmeter-rev-12-r1", "sha": head}),
+    );
+    let d = json!({"verdict": "FAIL", "sha": head, "stage": "rev", "loop": "rev", "body": "FAIL"});
+    ev(c.now + 30, "verdict", d);
+    b.terms.lock().unwrap().get_mut("sendmeter-impl-12").unwrap()["state"] = json!("exited");
+    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
+        "mergeable": "MERGEABLE", "statusCheckRollup": []});
+    f = f.reply("gh pr view issue-12", &pr.to_string());
+    host(&mut f, "sysctl -n vm.loadavg", "{ 90.00 80.00 70.00 }\n");
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    drive_at(&c, &cli, 60);
+    assert_eq!(logged(&c, "spawn").len(), 2, "the fix round (a new lane) waits");
+    let (_, w) = run(&later(&c, 3 * 3600), &cli, &["waiting", "sendmeter"]);
+    assert!(w.contains("held: HOST_BUSY load/cpu 9.00 > "), "{w}");
+    assert!(!w.contains("nothing drives this"), "{w}");
+}
+
+#[test]
+fn an_acp_lane_silent_after_its_first_turn_is_a_failed_start_naming_its_account() {
+    let (c, b, f, wt, _) = acp_lane("acp-silent");
+    // #785: its brief went in as its first turn; nothing came back.
+    let seq = b.events.lock().unwrap().len() as u64 * 10 + 1;
+    let turn =
+        json!({"seq": seq, "name": "sendmeter-impl-12", "labels": lane_labels(), "event": "turn", "prompt": "# Brief"});
+    b.events.lock().unwrap().push(turn);
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
+    let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
+    let check = |secs| {
+        let (code, out) = run(&later(&c, secs), &cli, &["check"]);
+        assert_eq!(code, 0, "{out}");
+        out
+    };
+    check(120);
+    assert!(logged(&c, "lane-failed-start").is_empty(), "2 min: not yet");
+    let out = check(200);
+    let failed = logged(&c, "lane-failed-start");
+    assert_eq!(failed.len(), 1, "{out}");
+    assert_eq!(failed[0].str("account"), Some("C"));
+    assert!(failed[0].str("reason").unwrap().contains("account C"), "{failed:?}");
+    check(400);
+    assert_eq!(logged(&c, "lane-failed-start").len(), 1, "once per start");
+    let (_, w) = run(&later(&c, 400), &cli, &["waiting", "sendmeter"]);
+    assert!(w.contains("failed start") && !w.contains("idle without pushing"), "{w}");
 }

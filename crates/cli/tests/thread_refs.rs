@@ -16,9 +16,9 @@ fn setup(name: &str, extra: u64) -> herdsman::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     let r = Fake::default();
@@ -33,12 +33,12 @@ fn setup(name: &str, extra: u64) -> herdsman::Ctx {
     for i in 1..=extra {
         ev(
             "thread-msg",
-            json!({"thread": "t1", "from": "conductor", "text": format!("m{i}")}),
+            json!({"thread": "t1", "from": "orchestrator", "text": format!("m{i}")}),
         );
     }
     ev(
         "thread-msg",
-        json!({"thread": "t1", "from": "conductor", "text": "see t27, t999 and `t27`"}),
+        json!({"thread": "t1", "from": "orchestrator", "text": "see t27, t999 and `t27`"}),
     );
     ev(
         "thread-handoff",
@@ -62,7 +62,7 @@ fn setup(name: &str, extra: u64) -> herdsman::Ctx {
     for i in 1..=extra {
         ev(
             "thread-msg",
-            json!({"thread": "t1", "from": "conductor", "text": format!("n{i}")}),
+            json!({"thread": "t1", "from": "orchestrator", "text": format!("n{i}")}),
         );
     }
     assert_eq!(run(&c, &r, &["thread", "archive", "t27"]).0, 0);

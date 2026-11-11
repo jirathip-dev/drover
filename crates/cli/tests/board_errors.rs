@@ -37,6 +37,9 @@ fn a_tab_names_the_real_read_error() {
     let c = ctx(&tmpdir("board-errors-cfg"), "[fleet.acme\n");
     for tab in ["queue", "chat"] {
         let e = error(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), tab);
-        assert!(e.contains("fleet.toml") && e.contains("TOML parse error"), "{tab}: {e}");
+        assert!(
+            e.starts_with("config invalid: ") && e.contains("(fleet.toml:1)"),
+            "{tab}: {e}"
+        );
     }
 }

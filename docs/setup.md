@@ -14,10 +14,39 @@ adapter: a herdr CLI change touches that file only.
 gh auth status
 herdr --version
 cargo install --path crates/cli --locked --root ~/.local/share/herdsman
+# macOS (#781): sign with one local identity, so a Keychain item's access list trusts every build, not one.
+sh scripts/signing-identity.sh   # once: creates "herdsman-local", lets codesign use it (asks the login password)
+sh scripts/signing-identity.sh sign ~/.local/share/herdsman/bin/herdsman   # by hash; fails, never hangs, on a dialog
 echo 'export PATH="$HOME/.local/share/herdsman/bin:$PATH"' >> ~/.zshrc   # or ~/.bashrc
 ```
 
 Check it worked: open a new shell and run `herdsman --version`.
+
+### Signed builds (#781)
+
+macOS trusts a Keychain item's reader by its designated requirement. `cargo install` signs ad hoc (`cdhash H"…"`, new
+every build), so each build was a new app and "Always Allow" came back. Signed with "herdsman-local" the requirement is
+`identifier herdsman and certificate leaf = H"<the cert's SHA-1>"`, the same for every build. The self-update job, the
+install gate and the reinstall line `herdsman merge` prints all sign; with no identity (or a codesign stuck on a
+dialog, killed after 10 s) they keep the installed binary. `doctor`'s `signature` row names the identity and is ✗ (exit
+1) for an unsigned build. herdsman itself keeps no Keychain item (#707); shed and cooee sign with the same identity.
+
+The check, run on the Mini at #781 (b1 the installed staging build, b2 this branch's, u b2 unsigned; a scratch keychain
+holds an item created with `security add-generic-password -T b1`):
+
+```text
+b1 designated => identifier herdsman and certificate leaf = H"412eb86c9f99cd0f5277ec9c2c0400e59534cc7c"
+b2 designated => identifier herdsman and certificate leaf = H"412eb86c9f99cd0f5277ec9c2c0400e59534cc7c"
+u # designated => cdhash H"4835b3c6a0856e5f722d045f7a9454a76e793c51"
+stored requirement: identifier herdsman and certificate leaf = H"412eb86c9f99cd0f5277ec9c2c0400e59534cc7c"
+codesign -v -R="$REQ" b1 → exit 0;  b2 → exit 0;  u → exit 3
+✓ signature — b2 signed by "herdsman-local"
+✗ signature — u signed by "herdsman-local" → sh scripts/signing-identity.sh … sign u
+```
+
+A program reading that item with Keychain dialogs off (`SecKeychainSetUserInteractionAllowed(false)`,
+`SecKeychainFindGenericPassword`), built twice and signed the same way, read it both times with no prompt; the ad hoc
+build was refused (`-25293`, errSecAuthFailed).
 
 ## 2. Config
 
@@ -121,8 +150,8 @@ Moving off Hermes: once both jobs have run (`self-updated` in the log after a st
 remove the old Hermes fleet jobs, once:
 
 ```sh
-hermes -p conductor cron remove d8bbecd490d7   # fleet-check (auto-install)
-hermes -p conductor cron remove 064cdd00dc56   # herdr-worktree-prune
+hermes -p orchestrator cron remove d8bbecd490d7   # fleet-check (auto-install)
+hermes -p orchestrator cron remove 064cdd00dc56   # herdr-worktree-prune
 ```
 
 Other Hermes cron jobs (a one-off reminder) stay. `scripts/install-gate.sh` stays for a manual install.

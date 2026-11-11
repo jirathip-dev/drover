@@ -945,7 +945,7 @@ fn cap_prints_the_queue_wide_view() {
         "  #4 (PR #14): +3 (measured)",
         "queued, no PR: #9\n",
         "sum of open PRs: +1403; projected total 1413 / cap 1000, headroom -413",
-        "raise to 1513 in one conductor-filed issue (recommended) 2. trim",
+        "raise to 1513 in one orchestrator-filed issue (recommended) 2. trim",
     ] {
         assert!(out.contains(want), "{want:?} in\n{out}");
     }
@@ -1004,7 +1004,7 @@ fn cap_uses_the_fleets_own_cap_script() {
         "headroom 85\n",
         "  #4 (PR #14): +3 (script)",
         "sum of open PRs: +3; projected total 18 / cap 100, headroom 82",
-        "ask options: 1. raise line cap to 518 in one conductor-filed issue (recommended) 2. trim",
+        "ask options: 1. raise line cap to 518 in one orchestrator-filed issue (recommended) 2. trim",
     ] {
         assert!(out.contains(want), "{want:?} in\n{out}");
     }
@@ -1025,8 +1025,68 @@ fn cap_shows_each_cap_a_script_prints() {
         "  #4 (PR #14): +0 src, +3 apple_cap (script)",
         "src: sum of open PRs: +0; projected total 10 / cap 100, headroom 90",
         "apple_cap: sum of open PRs: +3; projected total 8 / cap 6, headroom -2",
-        "ask options: 1. raise apple_cap to 508 in one conductor-filed issue (recommended) 2. trim",
+        "ask options: 1. raise apple_cap to 508 in one orchestrator-filed issue (recommended) 2. trim",
     ] {
         assert!(out.contains(want), "{want:?} in\n{out}");
     }
+}
+
+#[test]
+fn cap_runs_the_repos_line_cap_script_when_the_fleet_names_none() {
+    let script = include_str!("support/cooee-line-cap.sh");
+    let (c, r) = script_repos("cap-repo-script", "", script);
+    let seed = c.worktrees.with_file_name("seed");
+    for dir in ["crates/core/src", "web/src", "ci"] {
+        std::fs::create_dir_all(seed.join(dir)).unwrap();
+    }
+    std::fs::write(
+        seed.join("ci/cap.toml"),
+        "[fleet.cooee]\nline_cap = 1000\napple_cap = 50\n",
+    )
+    .unwrap();
+    std::fs::write(seed.join("web/src/main.rs"), "fn main() {}\n").unwrap();
+    let lib = "fn a() {}\n\nfn b() {}\n#[cfg(test)]\nmod t {\n    fn x() {}\n}\n";
+    commit(&seed, "crates/core/src/lib.rs", lib, "staging");
+    let (code, out) = run(&c, &r, &["cap", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    for want in [
+        "sendmeter: non-test lines 8 / cap 1000 at staging",
+        "headroom 992\n",
+        "sendmeter: apple lines 0 / cap 50 at staging",
+        "counted by `sh scripts/line-cap.sh`",
+        "  #4 (PR #14): +3 non-test lines, +0 apple lines (script)",
+        "non-test lines: sum of open PRs: +3; projected total 11 / cap 1000, headroom 989",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+}
+
+/// #788: no `premerge` or `cap_script`, but the repo has `scripts/line-cap.sh` printing cooee's `label: N / M` lines
+/// (no `cap` word) for two caps: `herdsman cap` counts by that script, extra paths included, each cap on its own.
+#[test]
+fn cap_finds_the_repos_own_line_cap_script() {
+    let script =
+        "echo \"non-test lines: $(cat src/*.rs web/ts/*.ts | grep -c .) / 100\"\necho \"apple lines: 0 / 50\"\n";
+    let (c, r) = script_repos("cap-own", "", script);
+    let (code, out) = run(&c, &r, &["cap", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    for want in [
+        "sendmeter: non-test lines 15 / cap 100 at staging",
+        "sendmeter: apple lines 0 / cap 50 at staging",
+        "  #4 (PR #14): +3 non-test lines, +0 apple lines (script)",
+        "non-test lines: sum of open PRs: +3; projected total 18 / cap 100, headroom 82",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+}
+
+/// #788: a cap script whose output has no `N / cap M` line is reported as that, with the line it printed.
+#[test]
+fn cap_reports_a_script_it_cannot_parse() {
+    let script = "echo 'counting...'\necho 'total: 15 lines, limit 100'\n";
+    let (c, r) = script_repos("cap-garbled", "", script);
+    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let err = herdsman::overlap::cap_view(&c, &cfg, &r, "sendmeter", &mut Vec::new()).unwrap_err();
+    let want = "`sh scripts/line-cap.sh` at origin/staging printed no `N / cap M` line herdsman can parse: printed `total: 15 lines, limit 100`";
+    assert_eq!(err.to_string(), want);
 }

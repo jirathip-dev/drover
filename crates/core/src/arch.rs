@@ -2,9 +2,10 @@
 //! of Rust and TypeScript: a layer uses only the layers its `may_use` lists, a banned pattern appears only in its
 //! exceptions, and a file or function over its size limit fails unless the baseline lists it at that size or more.
 use crate::config::glob;
+use crate::runner::{argv, Runner};
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 use std::path::Path;
 
@@ -17,8 +18,40 @@ struct Arch {
     ban: Vec<Ban>,
     #[serde(default)]
     size: Vec<Size>,
-    /// Today's size offenders, `<file>[:<fn>] <lines>` a line (default `.herdsman/arch-baseline.txt`).
     baseline: Option<String>,
+    comments: Option<Comments>,
+    docs: Option<Docs>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Comments {
+    policy: Policy,
+    #[serde(default)]
+    except: Vec<String>,
+}
+
+#[derive(Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum Policy {
+    On,
+    Off,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(deny_unknown_fields, default)]
+struct Docs {
+    paths: Vec<String>,
+    watch: Vec<String>,
+    skip: Vec<String>,
+    cli: bool,
+}
+
+struct Change {
+    file: String,
+    line: usize,
+    added: bool,
+    text: String,
 }
 
 /// A layer: its files, the names other files use it by (`herdsman_core`, `crate::gate`, `@app/core`; a relative
@@ -32,6 +65,8 @@ struct Layer {
     mods: Vec<String>,
     #[serde(default)]
     may_use: Vec<String>,
+    #[serde(default)]
+    exclude: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -42,6 +77,8 @@ struct Ban {
     #[serde(default)]
     except: Vec<String>,
     reason: String,
+    #[serde(default)]
+    comments: bool,
 }
 
 #[derive(Deserialize)]
@@ -50,6 +87,8 @@ struct Size {
     paths: Vec<String>,
     max_file_lines: Option<usize>,
     max_fn_lines: Option<usize>,
+    #[serde(default)]
+    exclude: Vec<String>,
 }
 
 /// Whether a glob matches `p`, `/**/` also matching no folder (`src/**/*.rs` matches `src/lib.rs`).
@@ -60,15 +99,27 @@ fn any(globs: &[String], p: &str) -> bool {
 
 /// `herdsman arch-check`: each violation as `file:line: why`, exit 1 on any; `write` records today's size offenders
 /// as the baseline instead. No config: nothing to check.
-pub fn check(config: &Path, write: bool, out: &mut dyn Write) -> Result<i32> {
+pub fn check(
+    config: &Path,
+    write: bool,
+    since: Option<&str>,
+    pr_body: Option<&Path>,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+) -> Result<i32> {
     let Ok(text) = std::fs::read_to_string(config) else {
         writeln!(out, "no {}: nothing to check", config.display())?;
         return Ok(0);
     };
     let a: Arch = toml::from_str(&text).with_context(|| format!("parsing {}", config.display()))?;
     let base_path = a.baseline.as_deref().unwrap_or(".herdsman/arch-baseline.txt");
-    let base: BTreeMap<String, usize> = std::fs::read_to_string(base_path)
-        .unwrap_or_default()
+    let base_text = std::fs::read_to_string(base_path).unwrap_or_default();
+    let crossings: BTreeSet<&str> = base_text
+        .lines()
+        .map(str::trim)
+        .filter(|l| l.contains(" -> "))
+        .collect();
+    let base: BTreeMap<String, usize> = base_text
         .lines()
         .filter_map(|l| {
             l.trim()
@@ -77,48 +128,65 @@ pub fn check(config: &Path, write: bool, out: &mut dyn Write) -> Result<i32> {
         })
         .collect();
     let mut files = vec![];
-    walk(Path::new("."), &mut files);
+    let ban_paths: Vec<&String> = a.ban.iter().flat_map(|b| &b.paths).collect();
+    walk(Path::new("."), &ban_paths, &mut files);
     files.sort();
-    let (mut bad, mut now) = (vec![], BTreeMap::<String, usize>::new());
+    let (mut bad, mut now, mut crossed) = (vec![], BTreeMap::<String, usize>::new(), BTreeSet::new());
     for p in &files {
         let ext = Path::new(p).extension().and_then(|x| x.to_str()).unwrap_or_default();
         let rust = ext == "rs";
-        let Some(src) = (rust || ext == "ts" || ext == "tsx")
+        let code = rust || ext == "ts" || ext == "tsx";
+        let slashes = code
+            || [
+                "js", "jsx", "mjs", "cjs", "mts", "cts", "swift", "go", "kt", "java", "c", "h", "cpp",
+            ]
+            .contains(&ext);
+        let bans: Vec<&Ban> = a
+            .ban
+            .iter()
+            .filter(|b| any(&b.paths, p) && !any(&b.except, p))
+            .collect();
+        let Some(src) = (code || !bans.is_empty())
             .then(|| std::fs::read_to_string(p).ok())
             .flatten()
         else {
             continue;
         };
         let lines: Vec<&str> = src.lines().collect();
-        let own = a.layer.iter().find(|l| any(&l.paths, p));
-        for (i, l) in lines
-            .iter()
-            .enumerate()
-            .filter(|(_, l)| !l.trim_start().starts_with("//"))
-        {
+        let own = a.layer.iter().find(|l| code && any(&l.paths, p) && !any(&l.exclude, p));
+        for (i, l) in lines.iter().enumerate() {
             let at = format!("{p}:{}", i + 1);
-            for b in a
-                .ban
+            let comment = slashes && l.trim_start().starts_with("//");
+            for b in bans
                 .iter()
-                .filter(|b| l.contains(&b.pattern) && any(&b.paths, p) && !any(&b.except, p))
+                .filter(|b| l.contains(&b.pattern) && (b.comments || !comment))
             {
                 bad.push(format!("{at}: `{}` is banned here: {}", b.pattern, b.reason));
             }
             for (own, t) in own
+                .filter(|_| !comment)
                 .into_iter()
                 .flat_map(|o| targets(p, l, rust).into_iter().map(move |t| (o, t)))
             {
                 let to = a.layer.iter().find(|x| uses(x, &t)).filter(|x| x.name != own.name);
                 if let Some(to) = to.filter(|x| !own.may_use.contains(&x.name)) {
-                    let (from, may) = (&own.name, &own.may_use);
-                    bad.push(format!(
-                        "{at}: layer `{from}` uses `{}` ({t}); its may_use is {may:?}",
-                        to.name
-                    ));
+                    let key = format!("{p} -> {}", to.name);
+                    if !crossings.contains(key.as_str()) {
+                        let (from, may) = (&own.name, &own.may_use);
+                        bad.push(format!(
+                            "{at}: layer `{from}` uses `{}` ({t}); its may_use is {may:?}",
+                            to.name
+                        ));
+                    }
+                    crossed.insert(key);
                 }
             }
         }
-        for s in a.size.iter().filter(|s| any(&s.paths, p)) {
+        for s in a
+            .size
+            .iter()
+            .filter(|s| code && any(&s.paths, p) && !any(&s.exclude, p))
+        {
             let mut sizes = vec![(p.clone(), 1, lines.len(), s.max_file_lines)];
             let each = fns(&lines, rust).into_iter();
             sizes.extend(each.map(|(name, at, n)| (format!("{p}:{name}"), at, n, s.max_fn_lines)));
@@ -133,13 +201,40 @@ pub fn check(config: &Path, write: bool, out: &mut dyn Write) -> Result<i32> {
             }
         }
     }
+    let mut diff = vec![];
+    if let Some(b) = since {
+        let o = r.run("git", &argv(&["diff", "-U0", "--no-color", "--no-ext-diff", b]))?;
+        anyhow::ensure!(o.code == 0, "git diff {b}: {}", o.stderr.trim());
+        diff = changes(&o.stdout);
+    }
+    if let Some(c) = a.comments.as_ref().filter(|c| c.policy == Policy::Off) {
+        bad.extend(new_comments(&diff, &c.except));
+    }
+    if let Some(d) = &a.docs {
+        bad.extend(stale_docs(d, &files));
+        let body = pr_body.map(std::fs::read_to_string).transpose()?;
+        if body.is_some_and(|b| !b.contains("no doc:")) {
+            bad.extend(undocumented(d, &diff));
+        }
+    }
     if write {
+        let (keep, grown): (Vec<_>, Vec<_>) = crossed
+            .iter()
+            .partition(|k| crossings.is_empty() || crossings.contains(k.as_str()));
+        let sizes = now.iter().map(|(k, n)| format!("{k} {n}\n"));
         std::fs::write(
             base_path,
-            now.iter().map(|(k, n)| format!("{k} {n}\n")).collect::<String>(),
+            sizes.chain(keep.iter().map(|k| format!("{k}\n"))).collect::<String>(),
         )?;
-        writeln!(out, "wrote {} size offenders to {base_path}", now.len())?;
-        return Ok(0);
+        let (n, c) = (now.len(), keep.len());
+        writeln!(out, "wrote {n} size offenders and {c} layer crossings to {base_path}")?;
+        for k in &grown {
+            writeln!(
+                out,
+                "{k}: a new layer crossing is not baselined; the listed ones may only shrink"
+            )?;
+        }
+        return Ok(i32::from(!grown.is_empty()));
     }
     for b in &bad {
         writeln!(out, "{b}")?;
@@ -148,16 +243,17 @@ pub fn check(config: &Path, write: bool, out: &mut dyn Write) -> Result<i32> {
     Ok(i32::from(!bad.is_empty()))
 }
 
-/// The repo's files under `dir`, skipping dot folders, `target*` and `node_modules`.
-fn walk(dir: &Path, out: &mut Vec<String>) {
+fn walk(dir: &Path, bans: &[&String], out: &mut Vec<String>) {
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with('.') || name.starts_with("target") || name == "node_modules" {
+        let rel: String = e.path().to_string_lossy().trim_start_matches("./").into();
+        let named = bans.iter().any(|b| b.starts_with(&format!("{rel}/")));
+        if (name.starts_with('.') && !named) || name.starts_with("target") || name == "node_modules" {
             continue;
         }
         match e.file_type() {
-            Ok(t) if t.is_dir() => walk(&e.path(), out),
-            Ok(_) => out.push(e.path().to_string_lossy().trim_start_matches("./").into()),
+            Ok(t) if t.is_dir() => walk(&e.path(), bans, out),
+            Ok(_) => out.push(rel),
             Err(_) => {}
         }
     }
@@ -242,4 +338,197 @@ fn fns(lines: &[&str], rust: bool) -> Vec<(String, usize, usize)> {
         }
     }
     v
+}
+
+fn changes(diff: &str) -> Vec<Change> {
+    let (mut v, mut from, mut to, mut old, mut new, mut head) = (vec![], "", "", 0, 0, true);
+    for l in diff.lines() {
+        if l.starts_with("diff --git ") {
+            head = true;
+        } else if let Some(h) = l.strip_prefix("@@ -") {
+            let num = |s: &str| s.split([',', ' ']).next().and_then(|n| n.parse().ok()).unwrap_or(0);
+            let (o, n) = h.split_once(" +").unwrap_or_default();
+            (old, new, head) = (num(o), num(n), false);
+        } else if head {
+            from = l.strip_prefix("--- a/").unwrap_or(from);
+            to = l.strip_prefix("+++ b/").unwrap_or(to);
+        } else if let Some((sign @ ("+" | "-"), text)) = l.split_at_checked(1) {
+            let added = sign == "+";
+            let (file, line) = if added { (to, &mut new) } else { (from, &mut old) };
+            v.push(Change {
+                file: file.into(),
+                line: *line,
+                added,
+                text: text.into(),
+            });
+            *line += 1;
+        }
+    }
+    v
+}
+
+fn comment_lines(lines: &[&str], rust: bool) -> Vec<bool> {
+    let (mut block, mut quote, mut raw) = (false, None::<char>, None::<usize>);
+    let each = lines.iter().map(|l| {
+        let s: Vec<char> = l.chars().collect();
+        let (mut c, mut i) = (block, 0);
+        while i < s.len() {
+            let (ch, next) = (s[i], s.get(i + 1).copied());
+            if block {
+                block = !(ch == '*' && next == Some('/'));
+                i += if block { 1 } else { 2 };
+            } else if let Some(n) = raw {
+                let end = ch == '"' && s[i + 1..].iter().take(n).filter(|&&x| x == '#').count() == n;
+                raw = if end { None } else { raw };
+                i += if end { n + 1 } else { 1 };
+            } else if let Some(q) = quote {
+                quote = if ch == q { None } else { quote };
+                i += if ch == '\\' { 2 } else { 1 };
+            } else if ch == '/' && next == Some('/') {
+                c = true;
+                break;
+            } else if ch == '/' && next == Some('*') {
+                (c, block, i) = (true, true, i + 2);
+            } else if rust && ch == 'r' && matches!(next, Some('"' | '#')) && (i == 0 || !s[i - 1].is_alphanumeric()) {
+                let n = s[i + 1..].iter().take_while(|&&x| x == '#').count();
+                raw = (s.get(i + 1 + n) == Some(&'"')).then_some(n);
+                i += if raw.is_some() { n + 2 } else { 1 };
+            } else if ch == '"' || (!rust && matches!(ch, '\'' | '`')) {
+                (quote, i) = (Some(ch), i + 1);
+            } else if rust && ch == '\'' && (next == Some('\\') || s.get(i + 2) == Some(&'\'')) {
+                let close = s.get(i + 3..).and_then(|r| r.iter().position(|&x| x == '\''));
+                i += close.filter(|_| next == Some('\\')).map_or(3, |p| p + 4);
+            } else {
+                i += 1;
+            }
+        }
+        c
+    });
+    each.collect()
+}
+
+fn allowed_comment(lines: &[&str], com: &[bool], i: usize) -> bool {
+    let t = lines[i].trim();
+    if t.starts_with("// SAFETY:") {
+        return lines.get(i + 1).is_some_and(|n| n.contains("unsafe"));
+    }
+    let one_doc = (t.starts_with("///") && !t.starts_with("////")) || (t.starts_with("/**") && t.ends_with("*/"));
+    let mut item = lines[i + 1..].iter().map(|l| l.trim_start());
+    let item = item.find(|l| !l.starts_with("#[") && !l.starts_with('@'));
+    let public = item.is_some_and(|l| l.starts_with("pub ") || l.starts_with("export "));
+    one_doc && public && (i == 0 || !com[i - 1])
+}
+
+fn new_comments(diff: &[Change], except: &[String]) -> Vec<String> {
+    let code = |f: &str| [".rs", ".ts", ".tsx"].iter().any(|x| f.ends_with(x)) && !any(except, f);
+    let (mut added, mut bad) = (BTreeMap::<&str, Vec<usize>>::new(), vec![]);
+    for c in diff.iter().filter(|c| c.added && code(&c.file)) {
+        added.entry(&c.file).or_default().push(c.line.saturating_sub(1));
+    }
+    for (f, at) in added {
+        let src = std::fs::read_to_string(f).unwrap_or_default();
+        let lines: Vec<&str> = src.lines().collect();
+        let com = comment_lines(&lines, Path::new(f).extension().is_some_and(|x| x == "rs"));
+        for i in at
+            .into_iter()
+            .filter(|&i| com.get(i) == Some(&true) && !allowed_comment(&lines, &com, i))
+        {
+            bad.push(format!(
+                "{f}:{}: a new comment (only `// SAFETY:` over unsafe and one `///` on a pub item): put the why in `herdsman why`",
+                i + 1
+            ));
+        }
+    }
+    bad
+}
+
+fn stale_docs(d: &Docs, files: &[String]) -> Vec<String> {
+    let mut cli = d.cli.then(<crate::cli::Cli as clap::CommandFactory>::command);
+    if let Some(c) = &mut cli {
+        c.build();
+    }
+    let cli_gap = |rest: &str| -> Option<String> {
+        let mut c = cli.as_ref()?;
+        let stop = |w: &&str| ["|", "||", "&&", ";", ">"].contains(w);
+        for (n, w) in rest.split_whitespace().take_while(|w| !stop(w)).enumerate() {
+            let w = w.split('|').next().unwrap_or_default();
+            if let Some(f) = w.strip_prefix("--") {
+                let f = f.split('=').next().unwrap_or_default();
+                if !f.is_empty() && !c.get_arguments().any(|a| a.get_long() == Some(f)) {
+                    return Some(format!("`{}` has no `--{f}`", c.get_name()));
+                }
+            } else if let Some(s) = c.find_subcommand(w) {
+                c = s;
+            } else if n == 0 && w.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
+                return Some(format!("no herdsman command `{w}`"));
+            }
+        }
+        None
+    };
+    let mut bad = vec![];
+    for p in files.iter().filter(|p| any(&d.paths, p)) {
+        let (mut fence, dir) = (false, Path::new(p).parent().unwrap_or(Path::new(".")));
+        for (i, l) in std::fs::read_to_string(p).unwrap_or_default().lines().enumerate() {
+            fence ^= l.trim_start().starts_with("```");
+            if fence || l.trim_start().starts_with("```") {
+                continue;
+            }
+            for s in l.split('`').skip(1).step_by(2) {
+                let gap = match (&cli, s.strip_prefix("herdsman ")) {
+                    (Some(_), Some(rest)) => cli_gap(rest),
+                    _ if any(&d.skip, s) => None,
+                    _ => missing_path(s, if s.starts_with("../") { dir } else { Path::new(".") }),
+                };
+                bad.extend(gap.map(|g| format!("{p}:{}: `{s}`: {g}", i + 1)));
+            }
+            for t in l.split("](").skip(1).filter_map(|r| r.split([')', ' ', '#']).next()) {
+                if !t.is_empty() && !t.contains(':') && !dir.join(t).exists() {
+                    bad.push(format!("{p}:{}: link `{t}` does not exist", i + 1));
+                }
+            }
+        }
+    }
+    bad
+}
+
+fn missing_path(s: &str, root: &Path) -> Option<String> {
+    let p = s.trim_start_matches("./");
+    let odd = |c: char| c.is_whitespace() || "*<>{}…$~#?|()[]'\",@=".contains(c);
+    if p.contains(odd) || p.contains("::") || p.contains("://") {
+        return None;
+    }
+    let (path, line) = match p.rsplit_once(':') {
+        Some((a, n)) => (a, Some(n.split('-').next()?.parse::<usize>().ok()?)),
+        None => (p, None),
+    };
+    let first = path.split('/').next().unwrap_or_default();
+    if !(path.contains('/') || line.is_some()) || first.is_empty() || !root.join(first).exists() {
+        return None;
+    }
+    let f = root.join(path.trim_end_matches('/'));
+    if !f.exists() {
+        return Some("no such path".into());
+    }
+    let n = line?;
+    let short = std::fs::read_to_string(&f).map_or(0, |t| t.lines().count()) < n;
+    short.then(|| format!("{path} has fewer than {n} lines"))
+}
+
+fn undocumented(d: &Docs, diff: &[Change]) -> Vec<String> {
+    let docs = |n: &str| diff.iter().any(|c| any(&d.paths, &c.file) && c.text.contains(n));
+    let key = |n: &str| !n.is_empty() && n.bytes().all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_'));
+    let (mut seen, mut bad) = (BTreeSet::new(), vec![]);
+    for c in diff.iter().filter(|c| any(&d.watch, &c.file)) {
+        let t = c.text.trim_start().trim_start_matches("pub ");
+        let Some((name, _)) = t.split_once(':').filter(|(n, r)| key(n) && !r.starts_with(':')) else {
+            continue;
+        };
+        if seen.insert(name) && !docs(name) && !docs(&name.replace('_', "-")) {
+            let (f, n, how) = (&c.file, c.line, if c.added { "added" } else { "removed" });
+            bad.push(format!(
+                "{f}:{n}: `{name}` {how}, but no changed doc line names it (or `no doc: <why>` in the PR body)"
+            ));
+        }
+    }
+    bad
 }
