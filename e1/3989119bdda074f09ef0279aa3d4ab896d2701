@@ -1,0 +1,9 @@
+Decided: the Perf before/after is measured on the checked-in 100,041-event fixture (`pass_profile_on_the_fixture_log`), so any reviewer can rerun it on base and head.
+Because: crates/cli/tests/pass_budget.rs:89
+Rejected: rerunning only on a recorded live log — the copy needs the matching fleet.toml, which a lane cannot copy, so a stand-in config never reaches the per-issue loop.
+Decided: kept the AC2 test as is: on a clean base build it fails (5,002,050 rows of a 100,041-event log; 40 waits reach the per-issue read).
+Because: crates/cli/tests/pass_budget.rs:71
+Check: build base in its own CARGO_TARGET_DIR: cargo names workspace members by relative path, so a base sharing head's target reuses head's test binary and passes.
+Decided: a load-only hold reads only the signals before ` (top:`, so a named process like `swapd` cannot turn a load wait into a card.
+Because: crates/core/src/pending.rs:95
+Owner: Drive passes read the log once instead of about fifty times, and a reviewer can now rerun the before/after numbers themselves.
