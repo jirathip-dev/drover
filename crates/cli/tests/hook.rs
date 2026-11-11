@@ -1509,3 +1509,17 @@ fn impl_lane_never_edits_the_cap_file() {
     assert_eq!(call("25", "Edit", json!({"file_path": "/w/ci/cap.toml"})), "");
     assert_eq!(bash("25", "sed -i '' 's/35500/36000/' ci/cap.toml"), "");
 }
+
+#[test]
+fn the_stop_hook_asks_for_the_turn_only_in_impl_lanes() {
+    let stop = |lane: Option<&str>, role: &str| hook_in(lane, role, json!({"hook_event_name": "Stop"}));
+    for lane in [None, Some("sendmeter:-:orchestrator"), Some("sendmeter:-:conductor")] {
+        assert_eq!(stop(lane, "orchestrator"), "", "{lane:?} ends its turn freely");
+    }
+    let out = stop(Some("sendmeter:24:impl"), "impl");
+    let v: Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(
+        (&v["decision"], &v["reason"]),
+        (&json!("block"), &json!(herdsman::hook::TURN_ASK))
+    );
+}
