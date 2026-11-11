@@ -102,6 +102,19 @@ enum Cmd {
         /// Record the extra round only; leave the live lane alone (no impl spawn)
         #[arg(long)]
         no_spawn: bool,
+        #[arg(
+            long,
+            value_name = "LINE",
+            conflicts_with = "basis",
+            help = "An orchestrator's: the owner's exact line in its thread, after the card: logged by: owner (typed)"
+        )]
+        typed: Option<String>,
+        #[arg(
+            long,
+            value_name = "QUOTE|ID",
+            help = "An orchestrator's: a verbatim quote of the issue's spec, or an answered decision id; the owner may [change] it"
+        )]
+        basis: Option<String>,
     },
     /// End a fix round with no new commit: drive reviews the same head again (a CI-only FAIL with green CI merges)
     Done {
@@ -892,8 +905,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's orchestrator `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`, +6 for #712's `unpark` and `park --why`/`--by`, +1 for #780's `thread new --orchestrator`).
-pub const HELP_AGENT_MAX: usize = 353;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's orchestrator `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`, +6 for #712's `unpark` and `park --why`/`--by`, +1 for #780's `thread new --orchestrator`, +2 for #817's `extend --typed`/`--basis`).
+pub const HELP_AGENT_MAX: usize = 355;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -1468,7 +1481,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     id,
                     typed: Some(line),
                     ..
-                } => crate::answer_typed(ctx, &cfg, r, out, (&fleet, &id), &line)?,
+                } => {
+                    let on = std::env::var("HERDSMAN_THREAD").ok();
+                    crate::answer_typed(ctx, &cfg, r, out, (&fleet, &id), &line, on.as_deref())?;
+                }
                 Cmd::Answer {
                     fleet,
                     id,
@@ -1799,7 +1815,21 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     issue,
                     by,
                     no_spawn,
-                } => gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "extend", (!no_spawn, &by, None))?,
+                    typed,
+                    basis,
+                } => match std::env::var("HERDSMAN_THREAD").ok().filter(|t| !t.is_empty()) {
+                    Some(t) => {
+                        let how = (typed.as_deref(), basis.as_deref());
+                        crate::orchestrator_extend(ctx, &cfg, r, out, (&fleet, issue), !no_spawn, &t, how)?;
+                    }
+                    None if typed.is_some() || basis.is_some() => {
+                        gate::refused(
+                            "BAD_VALUE",
+                            "--typed and --basis are an orchestrator's, run in its thread",
+                        )?;
+                    }
+                    None => gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "extend", (!no_spawn, &by, None))?,
+                },
                 Cmd::Done {
                     fleet,
                     issue,

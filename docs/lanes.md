@@ -221,7 +221,9 @@ Herd strip (the issue's horse, or a gate horse when it has no lane, wears a red 
   PASS, green CI and the serial gate still apply. The `merged` event records `by: owner, override: "ROUND_LIMIT"`
   and the closing comment says `Owner override: ROUND_LIMIT`.
 - **one more round** logs `round-extended` (this issue's limit is `review_rounds` + 1 per extension) and
-  spawns `impl --supersede`.
+  spawns `impl --supersede`. #817: an orchestrator grants it in its repo's thread with
+  `herdsman extend <fleet> <issue> --typed "<owner line>"` (`by: owner (typed)`) or `--basis "<spec quote>"`
+  (`by: orchestrator-<thread>`, an FYI line whose [change] parks the issue for 30 min).
 - **park** logs `parked` (`by`, and `herdsman park <fleet> <issue> --why <text>`'s reason): the issue leaves
   `needs-human` and shows as parked; `queue ls` and its Queue row show the reason.
 - **unpark** (#712; a parked Queue or Lanes row's button, or `herdsman unpark <fleet> <issue> [--by]`, owner only)
