@@ -37,6 +37,10 @@ herdsman thread ls [FLEET] [--json]           # per repo: title, last message, u
   that roles (or `[chat]`) on its harness use and the harness's efforts (no model chip where a profile owns the
   model: Hermes, dsh). A pick logs `thread-model`, shows `model sonnet · effort low from the next turn`, and the
   next message resumes the orchestrator's session on it. The header reads `repo · harness · model`.
+- **Model list (#860):** the model chip also offers fleet.toml's top-level `models = [...]`; add a model there (via
+  `herdsman config propose`) and the chip offers it. A send on a pick no longer offered is refused `BAD_VALUE` with a
+  system line naming the model and the list (the message stays); a model the CLI rejects at start is one system line
+  with its error, not retried.
 - **No worktree:** it runs in `<state dir>/orchestrator/<thread>/` (or `<[orchestrator] dir>/<thread>/`) in its own herdr workspace, as agent
   `orchestrator-<thread>`, with `HERDSMAN_LANE=<fleet>:-:orchestrator` (so the lane hook guards it) and
   `HERDSMAN_THREAD=<thread>`.
@@ -239,10 +243,9 @@ never edits the account list itself: that change is a `config propose` card.
 - [save] writes the value to the main host's 0600 file `<config dir>/secrets/<NAME>` (#707, docs/providers.md), never
   in argv. Events, the chat and lanes never see it. The thread records
   only `secret <NAME> set ✓ (by owner)`.
-- A cloud host's provider key (docs/hosts.md, e.g. `BOAT_API_KEY`) works saved either way: from the fleet's thread
-  (`herdsman/<fleet>/<NAME>`, for a host only that fleet fits) or as `all`.
-- A fleet's `env` refers to it as `KEY = "secret:<NAME>"`. At spawn herdsman delivers it (the fleet's item, else
-  `all`'s) through a 0600 file the pane's shell sources, deleted after the start (docs/providers.md).
+- One file per name, shared by every fleet: there are no per-fleet items (#707).
+- A fleet's `env` refers to it as `KEY = "secret:<NAME>"`. At spawn herdsman delivers it through a 0600 file the
+  pane's shell sources, deleted after the start (docs/providers.md).
 - `herdsman secret ls` and `herdsman secret rm <fleet|all> <NAME>` are owner-only.
 
 ## Telegram (removed, #557)

@@ -255,10 +255,12 @@ fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
         "fold": fold(q.issue, kind, &q.question, &age, &main.unwrap_or_default()), "blocks": blocks})
 }
 
-fn needs_card(i: &NeedIssue) -> Value {
+fn needs_card(i: &NeedIssue, ev: &crate::events::Log) -> Value {
     let (f, n) = (&i.fleet, i.issue);
+    let st = ev.states.get(&(f.clone(), n));
+    let action = st.map_or("one more round", |s| s.card());
     let vals = json!({"fleet": f, "issue": n});
-    let mut opts = vec![json!({"value": "extend", "label": "one more round", "values": vals})];
+    let mut opts = vec![json!({"value": "extend", "label": action, "values": vals})];
     if i.merge {
         let confirm = json!({"title": format!("Merge #{n} past its FAIL?"), "message": "Logged by: owner. CI and serial still gate it.", "ok": "Merge", "destructive": true});
         opts.push(json!({"value": "merge", "label": "merge anyway", "values": vals, "confirm": confirm}));
@@ -274,7 +276,7 @@ fn needs_card(i: &NeedIssue) -> Value {
         blocks.push(choice(&format!("nh-{f}-{n}"), "needs-human", &opts));
     }
     let age = i.who.rsplit(" · ").next().unwrap_or_default();
-    let main = (!i.pending).then(|| json!({"block": format!("nh-{f}-{n}"), "action": "needs-human", "value": "extend", "label": "one more round", "values": vals}));
+    let main = (!i.pending).then(|| json!({"block": format!("nh-{f}-{n}"), "action": "needs-human", "value": "extend", "label": action, "values": vals}));
     json!({"type": "card", "id": format!("nhc-{f}-{n}"), "kind": "ask", "tone": "bad",
         "title": format!("{f} #{n} · {}", i.title), "meta": format!("needs-human · {age}"),
         "fold": fold(Some(n), "needs-human", &i.why, age, &main.unwrap_or_default()), "blocks": blocks})
@@ -559,7 +561,7 @@ impl Server<'_> {
                 "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
         }));
         cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, mins, a)));
-        cards.extend(tab.issues.iter().map(needs_card));
+        cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
         Value::Array(cards)
     }
 

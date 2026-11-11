@@ -109,7 +109,7 @@ impl Server<'_> {
             }
             ("GET", Some("config")) if !paired => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
             ("GET", Some("config")) => crate::propose::view(ctx).map_or_else(|e| done(Err(e)), |v| out("200 OK", &v)),
-            ("GET", Some("host")) => out("200 OK", &roots(ctx, self.host_tab(ctx))),
+            ("GET", Some("host")) => out("200 OK", &vendors(ctx, roots(ctx, self.host_tab(ctx)))),
             ("GET", Some("queue")) => out("200 OK", &marked(ctx, self.queue_tab(ctx))),
             ("GET", Some(x)) if x.starts_with("issue/") => {
                 let (fleet, n) = x[6..].split_once('/').unwrap_or_default();
@@ -842,6 +842,16 @@ fn roots(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
             });
         }
     }
+    tab
+}
+
+fn vendors(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
+    let row = |(name, vendor)| crate::api::Vendor { name, vendor };
+    let v = crate::providers::accounts().and_then(|p| p.vendor());
+    let accounts = tab.accounts.iter().filter_map(|a| Some((a.name.clone(), v?.into())));
+    tab.vendors.accounts = accounts.map(row).collect();
+    let setups = Config::kept(ctx).map(|c| crate::setup::vendors(&c)).unwrap_or_default();
+    tab.vendors.setups = setups.into_iter().map(row).collect();
     tab
 }
 

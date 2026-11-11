@@ -329,7 +329,7 @@
 328 atlas #2859 review(2) r1 u0 x0 | drive Some("herdsman verdict atlas 2859 PASS --sha bc30faa540d3793338153df4e15d866f5cab5d0a --file /v.md") | none None | VERDICT_FAIL
 329 atlas #2557 review(3) r2 u0 x0 | drive Some("herdsman verdict atlas 2557 PASS --sha 70c6c19e35d883ebec35fcfc942c9987019642a0 --file /v.md") | none None | VERDICT_FAIL
 330 atlas #2557 fix(3) r3 u0 x0 | drive Some("herdsman spawn atlas 2557 impl --supersede") | drive Some("herdsman spawn atlas 2557 impl --supersede") | VERDICT_FAIL
-331 atlas #2557 needs-human r3 u0 x0 | none None | none None | VERDICT_FAIL
+331 atlas #2557 needs-human r3 u0 x0 | owner Some("herdsman extend atlas 2557") | owner Some("herdsman extend atlas 2557") | VERDICT_FAIL
 332 atlas #2696 review(1) r0 u0 x0 | drive Some("herdsman verdict atlas 2696 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 333 atlas #2696 fix(1) r1 u0 x0 | drive Some("herdsman spawn atlas 2696 impl --supersede") | drive Some("herdsman spawn atlas 2696 impl --supersede") | VERDICT_FAIL
 334 herdsman #39 review(1) r0 u0 x0 | drive Some("herdsman verdict herdsman 39 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -356,7 +356,7 @@
 355 atlas #2696 merged r2 u0 x0 | none None | none None | ok
 356 atlas #2696 merged r2 u0 x0 | none None | none None | ok
 357 atlas #2823 impl r0 u0 x0 | drive Some("herdsman spawn atlas 2823 rev") | drive Some("herdsman spawn atlas 2823 rev") | NO_VERDICT
-358 atlas #2557 needs-human r3 u0 x0 | none None | none None | VERDICT_FAIL
+358 atlas #2557 needs-human r3 u0 x0 | owner Some("herdsman extend atlas 2557") | owner Some("herdsman extend atlas 2557") | VERDICT_FAIL
 359 atlas #2605 fix(2) r2 u0 x0 | none None | drive Some("herdsman spawn atlas 2605 rev") | VERDICT_FAIL
 360 herdsman #53 impl r0 u0 x0 | drive Some("herdsman spawn herdsman 53 rev") | drive Some("herdsman spawn herdsman 53 rev") | NO_VERDICT
 361 atlas #2859 review(3) r2 u0 x0 | drive Some("herdsman verdict atlas 2859 PASS --sha 36b28a678539ed4a7e3d5540e14323b8776e0973 --file /v.md") | none None | VERDICT_FAIL
@@ -370,7 +370,7 @@
 369 atlas #2859 ready r3 u0 x0 | drive Some("herdsman merge atlas 2859") | drive Some("herdsman merge atlas 2859") | ok
 370 atlas #2605 review(3) r2 u0 x0 | drive Some("herdsman verdict atlas 2605 PASS --sha 583fff83e78351a6b657131abb3f98b02dac7ba7 --file /v.md") | none None | VERDICT_FAIL
 371 atlas #2605 ready r3 u0 x0 | drive Some("herdsman merge atlas 2605") | drive Some("herdsman merge atlas 2605") | ok
-372 atlas #2557 needs-human r3 u0 x0 | none None | none None | VERDICT_FAIL
+372 atlas #2557 needs-human r3 u0 x0 | owner Some("herdsman extend atlas 2557") | owner Some("herdsman extend atlas 2557") | VERDICT_FAIL
 373 herdsman #55 impl r0 u0 x0 | drive Some("herdsman spawn herdsman 55 rev") | drive Some("herdsman spawn herdsman 55 rev") | NO_VERDICT
 374 atlas #2849 review(1) r0 u0 x0 | drive Some("herdsman verdict atlas 2849 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 375 atlas #2849 ready r1 u0 x0 | drive Some("herdsman merge atlas 2849") | drive Some("herdsman merge atlas 2849") | ok
@@ -447,8 +447,8 @@
 446 atlas #2858 merged r2 u0 x0 | none None | none None | ok
 447 atlas #2872 impl r0 u0 x0 | drive Some("herdsman spawn atlas 2872 rev") | drive Some("herdsman spawn atlas 2872 rev") | NO_VERDICT
 448 herdsman #67 impl r0 u0 x0 | drive Some("herdsman spawn herdsman 67 rev") | drive Some("herdsman spawn herdsman 67 rev") | NO_VERDICT
-449 atlas #2557 needs-human r4 u0 x0 | none None | none None | ROUND_LIMIT
-450 atlas #2557 needs-human r4 u0 x0 | none None | none None | ROUND_LIMIT
+449 atlas #2557 needs-human r4 u0 x0 | owner Some("herdsman extend atlas 2557") | owner Some("herdsman extend atlas 2557") | ROUND_LIMIT
+450 atlas #2557 needs-human r4 u0 x0 | owner Some("herdsman extend atlas 2557") | owner Some("herdsman extend atlas 2557") | ROUND_LIMIT
 451 atlas #2557 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
 452 atlas #2557 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
 453 atlas #2557 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
@@ -511,7 +511,7 @@
 510 atlas #2881 review(2) r1 u0 x0 | drive Some("herdsman verdict atlas 2881 PASS --sha 7816332a98d49a22b2cc333da69c9e61e22bd3a6 --file /v.md") | none None | VERDICT_FAIL
 511 atlas #2726 fix(1) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
 512 atlas #2726 fix(1) r1 u0 x0 | none None | drive Some("herdsman spawn atlas 2726 rev") | VERDICT_FAIL
-513 atlas #2844 needs-human r4 u0 x0 | none None | none None | ROUND_LIMIT
+513 atlas #2844 needs-human r4 u0 x0 | owner Some("herdsman extend atlas 2844") | owner Some("herdsman extend atlas 2844") | ROUND_LIMIT
 514 herdsman #68 fix(1) r1 u0 x0 | drive Some("herdsman spawn herdsman 68 impl --supersede") | drive Some("herdsman spawn herdsman 68 impl --supersede") | VERDICT_FAIL
 515 herdsman #68 fix(1) r1 u0 x0 | none None | drive Some("herdsman spawn herdsman 68 rev") | VERDICT_FAIL
 516 herdsman #73 impl r0 u0 x0 | drive Some("herdsman spawn herdsman 73 rev") | drive Some("herdsman spawn herdsman 73 rev") | NO_VERDICT
@@ -718,7 +718,7 @@
 717 herdsman #99 fix(1) r1 u0 x0 | none None | drive Some("herdsman spawn herdsman 99 rev") | VERDICT_FAIL
 718 herdsman #102 review(2) r1 u0 x0 | owner None | owner None | VERDICT_FAIL
 719 atlas #2881 ready r4 u0 x0 | drive Some("herdsman merge atlas 2881") | drive Some("herdsman merge atlas 2881") | ROUND_LIMIT
-720 atlas #2881 needs-human r4 u0 x0 | none None | none None | ROUND_LIMIT
+720 atlas #2881 needs-human r4 u0 x0 | owner Some("herdsman extend atlas 2881") | owner Some("herdsman extend atlas 2881") | ROUND_LIMIT
 721 atlas #2726 ready r2 u0 x0 | drive Some("herdsman merge atlas 2726") | drive Some("herdsman merge atlas 2726") | ok
 722 atlas #2886 fix(1) r1 u0 x0 | none None | drive Some("herdsman spawn atlas 2886 rev") | ok
 723 herdsman #105 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
@@ -812,19 +812,19 @@
 811 herdsman #97 merged r3 u0 x0 | none None | none None | ok
 812 herdsman #97 merged r3 u0 x0 | none None | none None | ok
 813 herdsman #99 ready r4 u0 x0 | drive Some("herdsman merge herdsman 99") | drive Some("herdsman merge herdsman 99") | ROUND_LIMIT
-814 herdsman #99 needs-human r4 u0 x0 | none None | none None | ROUND_LIMIT
+814 herdsman #99 needs-human r4 u0 x0 | owner Some("herdsman extend herdsman 99") | owner Some("herdsman extend herdsman 99") | ROUND_LIMIT
 815 herdsman #96 fix(3) r3 u0 x0 | drive Some("herdsman spawn herdsman 96 impl --supersede") | drive Some("herdsman spawn herdsman 96 impl --supersede") | VERDICT_FAIL
-816 herdsman #96 needs-human r3 u0 x0 | none None | none None | VERDICT_FAIL
+816 herdsman #96 needs-human r3 u0 x0 | owner Some("herdsman extend herdsman 96") | owner Some("herdsman extend herdsman 96") | VERDICT_FAIL
 817 herdsman #104 ready r3 u0 x0 | drive Some("herdsman merge herdsman 104") | drive Some("herdsman merge herdsman 104") | ok
 818 herdsman #104 fix(3) r3 u0 x0 | none None | drive Some("herdsman spawn herdsman 104 rev") | ok
 819 herdsman #96 fix(3) r3 u0 x0 | none None | drive Some("herdsman spawn herdsman 96 rev") | VERDICT_FAIL
-820 herdsman #99 needs-human r4 u0 x0 | none None | none None | ROUND_LIMIT
+820 herdsman #99 needs-human r4 u0 x0 | owner Some("herdsman extend herdsman 99") | owner Some("herdsman extend herdsman 99") | ROUND_LIMIT
 821 herdsman #105 ready r2 u0 x0 | drive Some("herdsman merge herdsman 105") | drive Some("herdsman merge herdsman 105") | ok
 822 herdsman #105 merged r2 u0 x0 | none None | none None | ok
 823 herdsman #105 merged r2 u0 x0 | none None | none None | ok
 824 herdsman #105 merged r2 u0 x0 | none None | none None | ok
 825 herdsman #105 merged r2 u0 x0 | none None | none None | ok
-826 herdsman #99 needs-human r4 u0 x0 | none None | none None | ROUND_LIMIT
+826 herdsman #99 needs-human r4 u0 x0 | owner Some("herdsman extend herdsman 99") | owner Some("herdsman extend herdsman 99") | ROUND_LIMIT
 827 herdsman #103 ready r3 u0 x0 | drive Some("herdsman merge herdsman 103") | drive Some("herdsman merge herdsman 103") | ok
 828 herdsman #103 merged r3 u0 x0 | none None | none None | ok
 829 herdsman #103 merged r3 u0 x0 | none None | none None | ok
@@ -854,7 +854,7 @@
 853 herdsman #98 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 854 herdsman #98 impl r0 u0 x0 | drive Some("herdsman spawn herdsman 98 rev") | drive Some("herdsman spawn herdsman 98 rev") | NO_VERDICT
 855 herdsman #96 ready r4 u0 x0 | drive Some("herdsman merge herdsman 96") | drive Some("herdsman merge herdsman 96") | ROUND_LIMIT
-856 herdsman #96 needs-human r4 u0 x0 | none None | none None | ROUND_LIMIT
+856 herdsman #96 needs-human r4 u0 x0 | owner Some("herdsman extend herdsman 96") | owner Some("herdsman extend herdsman 96") | ROUND_LIMIT
 857 atlas #2726 review(3) r2 u0 x0 | drive Some("herdsman verdict atlas 2726 PASS --sha 2b71a5fb044549edbeb124dd517c13fc91e468ac --file /v.md") | none None | ok
 858 herdsman #104 review(4) r3 u0 x0 | drive Some("herdsman verdict herdsman 104 PASS --sha c591c22f45f7263e44bf151c3c0fea8ff06b1cf1 --file /v.md") | none None | ok
 859 herdsman #122 review(1) r0 u0 x0 | drive Some("herdsman verdict herdsman 122 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
@@ -869,7 +869,7 @@
 868 atlas #2726 merged r3 u0 x0 | none None | none None | ok
 869 atlas #2726 merged r3 u0 x0 | none None | none None | ok
 870 atlas #2841 impl r0 u0 x0 | drive Some("herdsman spawn atlas 2841 rev") | drive Some("herdsman spawn atlas 2841 rev") | NO_VERDICT
-871 herdsman #104 needs-human r4 u0 x0 | none None | none None | ROUND_LIMIT
+871 herdsman #104 needs-human r4 u0 x0 | owner Some("herdsman extend herdsman 104") | owner Some("herdsman extend herdsman 104") | ROUND_LIMIT
 872 herdsman #122 ready r1 u0 x0 | drive Some("herdsman merge herdsman 122") | drive Some("herdsman merge herdsman 122") | ok
 873 herdsman #124 review(1) r0 u0 x0 | drive Some("herdsman verdict herdsman 124 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 874 herdsman #104 merged r4 u0 x0 | none None | none None | ROUND_LIMIT
@@ -1036,7 +1036,7 @@
 1035 atlas #2782 fix(2) r2 u0 x0 | owner None | owner None | VERDICT_FAIL
 1036 atlas #2666 fix(1) r1 u0 x0 | drive Some("herdsman spawn atlas 2666 impl --supersede") | drive Some("herdsman spawn atlas 2666 impl --supersede") | VERDICT_FAIL
 1037 atlas #2684 fix(3) r3 u0 x0 | drive Some("herdsman spawn atlas 2684 impl --supersede") | drive Some("herdsman spawn atlas 2684 impl --supersede") | VERDICT_FAIL
-1038 atlas #2684 needs-human r3 u0 x0 | none None | none None | VERDICT_FAIL
+1038 atlas #2684 needs-human r3 u0 x0 | owner Some("herdsman extend atlas 2684") | owner Some("herdsman extend atlas 2684") | VERDICT_FAIL
 1039 atlas #2821 review(2) r1 u0 x0 | drive Some("herdsman verdict atlas 2821 PASS --sha e5be15b70d971bb60fc7f22c8f2671f986e457db --file /v.md") | none None | VERDICT_FAIL
 1040 atlas #2782 fix(2) r2 u0 x0 | none None | drive Some("herdsman spawn atlas 2782 rev") | VERDICT_FAIL
 1041 atlas #2666 fix(1) r1 u0 x0 | none None | drive Some("herdsman spawn atlas 2666 rev") | VERDICT_FAIL
@@ -1045,7 +1045,7 @@
 1044 herdsman #140 impl r0 u0 x0 | drive Some("herdsman spawn herdsman 140 rev") | drive Some("herdsman spawn herdsman 140 rev") | NO_VERDICT
 1045 atlas #2666 fix(2) r2 u0 x0 | drive Some("herdsman spawn atlas 2666 impl --supersede") | drive Some("herdsman spawn atlas 2666 impl --supersede") | VERDICT_FAIL
 1046 atlas #2782 fix(3) r3 u0 x0 | drive Some("herdsman spawn atlas 2782 impl --supersede") | drive Some("herdsman spawn atlas 2782 impl --supersede") | VERDICT_FAIL
-1047 atlas #2782 needs-human r3 u0 x0 | none None | none None | VERDICT_FAIL
+1047 atlas #2782 needs-human r3 u0 x0 | owner Some("herdsman extend atlas 2782") | owner Some("herdsman extend atlas 2782") | VERDICT_FAIL
 1048 atlas #2900 impl r0 u0 x0 | drive Some("herdsman spawn atlas 2900 rev") | drive Some("herdsman spawn atlas 2900 rev") | NO_VERDICT
 1049 atlas #2684 review(4) r3 u0 x0 | drive Some("herdsman verdict atlas 2684 PASS --sha ed29ffc928f14a36024429247c870349a1cdadaa --file /v.md") | none None | VERDICT_FAIL
 1050 atlas #2622 impl r0 u0 x0 | drive Some("herdsman spawn atlas 2622 rev") | drive Some("herdsman spawn atlas 2622 rev") | NO_VERDICT
@@ -1054,7 +1054,7 @@
 1053 herdsman #141 impl r0 u0 x0 | owner None | owner None | NO_VERDICT
 1054 atlas #2666 fix(2) r2 u0 x0 | none None | drive Some("herdsman spawn atlas 2666 rev") | VERDICT_FAIL
 1055 atlas #2684 fix(4) r4 u0 x0 | drive Some("herdsman spawn atlas 2684 impl --supersede") | drive Some("herdsman spawn atlas 2684 impl --supersede") | VERDICT_FAIL
-1056 atlas #2684 needs-human r4 u0 x0 | none None | none None | VERDICT_FAIL
+1056 atlas #2684 needs-human r4 u0 x0 | owner Some("herdsman extend atlas 2684") | owner Some("herdsman extend atlas 2684") | VERDICT_FAIL
 1057 herdsman #140 review(1) r0 u0 x0 | drive Some("herdsman verdict herdsman 140 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1058 atlas #2303 merged r1 u0 x0 | none None | none None | ok
 1059 atlas #2303 merged r1 u0 x0 | none None | none None | ok
@@ -1175,9 +1175,9 @@
 1174 atlas #2870 review(1) r0 u0 x0 | drive Some("herdsman verdict atlas 2870 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1175 atlas #2909 review(1) r0 u0 x0 | drive Some("herdsman verdict atlas 2909 PASS --sha ffffffffffffffffffffffffffffffffffffffff --file /v.md") | none None | NO_VERDICT
 1176 atlas #2684 fix(4) r4 u0 x0 | drive Some("herdsman spawn atlas 2684 impl --supersede") | drive Some("herdsman spawn atlas 2684 impl --supersede") | VERDICT_FAIL
-1177 atlas #2684 needs-human r4 u0 x0 | none None | none None | VERDICT_FAIL
+1177 atlas #2684 needs-human r4 u0 x0 | owner Some("herdsman extend atlas 2684") | owner Some("herdsman extend atlas 2684") | VERDICT_FAIL
 1178 atlas #2782 fix(4) r4 u0 x0 | drive Some("herdsman spawn atlas 2782 impl --supersede") | drive Some("herdsman spawn atlas 2782 impl --supersede") | VERDICT_FAIL
-1179 atlas #2782 needs-human r4 u0 x0 | none None | none None | VERDICT_FAIL
+1179 atlas #2782 needs-human r4 u0 x0 | owner Some("herdsman extend atlas 2782") | owner Some("herdsman extend atlas 2782") | VERDICT_FAIL
 1180 atlas #2870 fix(1) r1 u0 x0 | drive Some("herdsman spawn atlas 2870 impl --supersede") | drive Some("herdsman spawn atlas 2870 impl --supersede") | VERDICT_FAIL
 1181 atlas #2909 fix(1) r1 u0 x0 | drive Some("herdsman spawn atlas 2909 impl --supersede") | drive Some("herdsman spawn atlas 2909 impl --supersede") | VERDICT_FAIL
 1182 herdsman #173 queued r0 u0 x0 | none None | none None | NO_VERDICT

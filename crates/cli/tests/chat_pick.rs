@@ -272,3 +272,90 @@ fn an_old_thread_without_a_harness_renders_and_starts_on_the_default() {
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
     assert_eq!(kind(&c, "orchestrator-start")[0].str("harness"), Some("claude"));
 }
+
+fn listed(models: &str) -> String {
+    let c = config("").replace("model = \"opus\"", "model = \"claude-opus-5-5\"");
+    format!(
+        "models = [{models}]\n{}",
+        c.replace("model = \"sonnet\"", "model = \"claude-opus-5-5\"")
+    )
+}
+
+fn system(c: &herdsman::Ctx) -> Vec<String> {
+    let sys = kind(c, "thread-msg")
+        .into_iter()
+        .filter(|e| e.str("from") == Some("system"));
+    sys.map(|e| e.str("text").unwrap_or_default().to_string()).collect()
+}
+
+fn pick_fable(c: &herdsman::Ctx) {
+    let r = Fake::default();
+    let s = Server::new(c, &r, Some(ADDR.into()));
+    let cookie = pair(&s, c, "Mozilla/5.0 (iPhone)", T);
+    let res = req(&s, "/thread", "op=model&t=t1&model=fable", &cookie);
+    assert!(res.ends_with("picked\n"), "{res}");
+}
+
+#[test]
+fn the_model_chip_offers_the_models_list_and_a_pick_from_it_is_taken() {
+    let m = Config::parse(&listed("\"opus\", \"fable\"")).unwrap();
+    assert_eq!(
+        herdsman::orchestrator::harness_models(&m, "claude"),
+        ["claude-opus-5-5", "fable", "opus"]
+    );
+    assert!(herdsman::orchestrator::harness_models(&m, "hermes").is_empty());
+    let c = ctx(&tmpdir("pick-listed"), &listed("\"opus\", \"fable\""));
+    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).0, 0);
+    pick_fable(&c);
+    assert_eq!(kind(&c, "thread-model")[0].str("model"), Some("fable"));
+}
+
+#[test]
+fn a_pick_dropped_from_the_models_list_is_refused_on_send_and_the_message_stays() {
+    let c = ctx(&tmpdir("pick-dropped"), &listed("\"opus\", \"fable\""));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).0, 0);
+    pick_fable(&c);
+    std::fs::write(&c.config, listed("\"opus\"")).unwrap();
+    let r = host(NO_AGENTS);
+    let (code, out) = run(&c, &r, &["thread", "say", "t1", "keep me"]);
+    assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");
+    assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    let sys = system(&c);
+    assert_eq!(sys.len(), 1, "{sys:?}");
+    assert!(
+        sys[0].contains("model fable") && sys[0].contains("[\"claude-opus-5-5\", \"opus\"]"),
+        "{sys:?}"
+    );
+    let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
+    assert!(show.contains("keep me"), "{show}");
+}
+
+#[test]
+fn a_model_the_cli_rejects_at_start_is_one_system_line_and_no_retry() {
+    let c = ctx(&tmpdir("pick-rejected"), &listed("\"opus\", \"fable\""));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).0, 0);
+    pick_fable(&c);
+    let r = host(NO_AGENTS)
+        .once_err(
+            "herdr agent start",
+            1,
+            r#"{"error":{"code":"agent_not_ready","message":"agent exited before ready"}}"#,
+        )
+        .once(
+            "herdr pane read",
+            0,
+            "API Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"unrecognized_model\"}}",
+        );
+    let (code, out) = run(&c, &r, &["thread", "say", "t1", "hi"]);
+    assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");
+    assert_eq!(r.count("herdr agent start"), 1, "{:?}", r.calls.borrow());
+    let sys = system(&c);
+    assert_eq!(sys.len(), 1, "{sys:?}");
+    assert!(
+        sys[0].contains("model fable") && sys[0].contains("unrecognized_model"),
+        "{sys:?}"
+    );
+    assert!(kind(&c, "orchestrator-start").is_empty());
+}

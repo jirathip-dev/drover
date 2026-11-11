@@ -214,6 +214,19 @@
       "fix": "",
       "name": "farm",
       "tone": "g"
+    },
+    "vendors": {
+      "accounts": [],
+      "setups": [
+        {
+          "name": "claude",
+          "vendor": "anthropic"
+        },
+        {
+          "name": "codex",
+          "vendor": "openai"
+        }
+      ]
     }
   },
   "route": "GET /api/v1/host",
@@ -246,6 +259,10 @@
       "fix": "string",
       "name": "string",
       "tone": "string"
+    },
+    "vendors": {
+      "accounts": [],
+      "setups": []
     }
   },
   "type": "HostTab"

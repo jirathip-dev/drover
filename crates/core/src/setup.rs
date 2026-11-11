@@ -32,6 +32,12 @@ pub fn all(cfg: &Config) -> Vec<(String, String)> {
     v
 }
 
+/// #830: the vendor of each setup in `all` that is a provider's login, by its name.
+pub fn vendors(cfg: &Config) -> Vec<(String, String)> {
+    let of = |(n, _): (String, String)| Some((n.clone(), crate::providers::get(&n).vendor()?.into()));
+    all(cfg).into_iter().filter_map(of).collect()
+}
+
 /// Start setup `name` on `host` in a new workspace there; logs `setup` (no command line, no input); the pane id.
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, via: &str) -> Result<String> {
     let boot = ("gh-token".to_string(), GH_TOKEN.to_string()); // #255: bootstrap's, not on the host cards

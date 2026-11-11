@@ -214,6 +214,11 @@ thread_local! {
     static SLOT: Cell<bool> = const { Cell::new(false) };
 }
 
+/// #877: a pass's own command runs (its `clean` leaves disabled hosts alone).
+pub fn in_act() -> bool {
+    IN_ACT.get()
+}
+
 /// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (#389: none from a lane on
 /// another host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
 /// own session.
@@ -1949,8 +1954,9 @@ fn clean_merged(
             .is_some_and(|n| st.get(&(fleet.into(), n)).is_some_and(IssueState::done))
     };
     let left = |e: &&Event| {
-        e.str("worktree")
-            .is_some_and(|w| crate::hosts::On::of(r, Some(e)).exists(Path::new(w)))
+        !crate::hosts::held(ctx, cfg, e)
+            && e.str("worktree")
+                .is_some_and(|w| crate::hosts::On::of(r, Some(e)).exists(Path::new(w)))
     };
     if KICK.get().is_none()
         && events
