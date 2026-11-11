@@ -29,11 +29,11 @@ export function blocked(d: Flags, b: Blocked): string {
  * one more round recorded with no lane yet is one muted line. */
 function issue(d: NeedsTab, s: NeedIssue): string {
   const n = s.issue;
-  if (s.pending) return `<div class=pend data-n=${n}><p class=m>⟳ one more round · starting a lane…</p></div>`;
+  if (s.pending) return `<div class=pend data-n=${n}><p class=m>⟳ ${esc(s.action)} · starting a lane…</p></div>`;
   const line = prLine(s.pr, s.repo, n);
   const v = s.pass != null ? `PASS at ${s.pass.slice(0, 7)}${s.stale ? ' (not the head)' : ''} · ${line} · ${s.mergeable}` : `FAIL: ${esc(s.fail)} · ${line}`;
   const merge = s.merge ? `<button name=op value=override data-confirm="Merge #${n} past the round limit?">merge anyway</button>` : '';
-  const f = d.rw && d.paired ? `${form(d)}${hidden('', s.fleet, d.mtime)}<input type=hidden name=issue value=${n}>${merge}<button name=op value=extend>one more round</button><button name=op value=park>park</button></form>` : '';
+  const f = d.rw && d.paired ? `${form(d)}${hidden('', s.fleet, d.mtime)}<input type=hidden name=issue value=${n}>${merge}<button name=op value=extend>${esc(s.action)}</button><button name=op value=park>park</button></form>` : '';
   // #417: the verdict's screenshots, inline, as `/shot/<fleet>/<n>/<i>` serves them.
   const shots = s.shots.map((x, i) => `<figure class=im><img src="shot/${enc(s.fleet)}/${n}/${i}" alt="${esc(x)}" loading=lazy><figcaption>${esc(x)}</figcaption></figure>`).join('');
   return `<div class=ask data-n=${n}><p><b>needs you</b> <span class=m>${esc(s.who)}</span></p><p>#${n} ${esc(s.title)} · ${esc(s.why)}</p><p class=m>${v}</p>${shots}${f}</div>`;

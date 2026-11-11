@@ -1694,6 +1694,19 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             next_cmd,
                         });
                     }
+                    let nh = |s: &&crate::events::IssueState| s.state == "needs-human" && s.lane.is_none();
+                    for s in st.values().filter(nh).filter(|s| cfg.fleet.contains_key(&s.fleet)) {
+                        let (what, next) = crate::waiting::owner_card(s);
+                        rows.push(crate::waiting::Waiting {
+                            fleet: s.fleet.clone(),
+                            issue: s.issue,
+                            lane: String::new(),
+                            who: "owner",
+                            what,
+                            since: s.last_ts,
+                            next_cmd: Some(next),
+                        });
+                    }
                     rows.retain(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet));
                     for w in &mut rows {
                         // #778: a tapped start waiting for its lane, as `status` says it.

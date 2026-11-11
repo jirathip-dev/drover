@@ -568,8 +568,18 @@ fn waits(
                 cmd("spawn", &format!(" {role} --supersede")),
             )
         }
+        "needs-human" => {
+            let (what, next) = owner_card(s);
+            w("owner", &what, s.last_ts, Some(next))
+        }
         st => w("none", &format!("nothing to do ({st})"), s.last_ts, None),
     }
+}
+
+/// #831: a needs-human issue waits on the owner's card: its action and the command that taps it.
+pub fn owner_card(s: &IssueState) -> (String, String) {
+    let what = format!("needs-human: your card's [{}]", s.card_action());
+    (what, format!("herdsman extend {} {}", s.fleet, s.issue))
 }
 
 /// One row per lane herdr does not show `working`: the latest lane's reason (`s.lane == w.lane`), shared by the

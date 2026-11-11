@@ -1697,6 +1697,7 @@ impl<'a> Server<'a> {
                 fleet: f.clone(),
                 issue: n,
                 pending,
+                action: s.card_action().into(),
                 who: format!("{f} · #{n} · {}", age(ctx.now.saturating_sub(s.last_ts))),
                 title: gh::cached_title(ctx, f, n).unwrap_or_default(),
                 why: why.and_then(|e| e.str("reason")).unwrap_or("gate").into(),

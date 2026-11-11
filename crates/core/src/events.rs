@@ -863,6 +863,7 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
             }
             // #350: the FAIL verdict logged right after it starts the fix round.
             "reverted" | "land-fix" => s.state = format!("fix({})", s.rounds),
+            "round-extended" if s.state == "needs-human" && s.never_started() => s.state = "queued".into(),
             "round-extended" => {
                 (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
                 // #151: `extend --no-spawn` spawns nothing, so the extra round itself leaves needs-human. #639: a build
@@ -912,6 +913,20 @@ impl IssueState {
             "·f"
         } else {
             ""
+        }
+    }
+
+    /// #831: no build lane ever spawned and no round reviewed.
+    pub fn never_started(&self) -> bool {
+        self.build.is_none() && self.verdicts.is_empty()
+    }
+
+    /// #831: a needs-human card's main action: [start lane] for a lane that never ran, else [one more round].
+    pub fn card_action(&self) -> &'static str {
+        if self.never_started() {
+            "start lane"
+        } else {
+            "one more round"
         }
     }
 
