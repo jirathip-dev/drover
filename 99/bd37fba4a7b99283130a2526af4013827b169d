@@ -1,0 +1,11 @@
+Decided: a segment whose command word is herdsman (or fleet) is never a shell writer; herdsman judges its own verbs.
+Because: "`herdsman …` verbs are judged by herdsman itself, not by the shell-word guard"
+Decided: writer words are read from the segment with quoted arguments dropped (unquote with args), so a --body text naming rm or mv is no write.
+Decided: redirect targets come from `>` outside quotes only (redirects), so awk 'NR>1' redirects nothing.
+Because: "A real write into the state dir (a redirect onto events.jsonl, a move into it) is still refused."
+Because: crates/core/src/hook.rs:251
+Rejected: dropping quoted text for the whole path check — cp a "<state>/events.jsonl" would then pass.
+Rejected: matching writers only as the command word — xargs rm, sudo rm and find -exec rm would slip through.
+Check: redirect targets of a herdsman verb are still checked (herdsman … > events.jsonl is refused).
+Check: the test's doc comment was dropped in a later commit only for arch-check (#735); its assertions are unchanged.
+Owner: the orchestrator can now run queue mv/rm and pipe or redirect herdsman output without being refused.
