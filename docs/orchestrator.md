@@ -243,10 +243,9 @@ never edits the account list itself: that change is a `config propose` card.
 - [save] writes the value to the main host's 0600 file `<config dir>/secrets/<NAME>` (#707, docs/providers.md), never
   in argv. Events, the chat and lanes never see it. The thread records
   only `secret <NAME> set ✓ (by owner)`.
-- A cloud host's provider key (docs/hosts.md, e.g. `BOAT_API_KEY`) works saved either way: from the fleet's thread
-  (`herdsman/<fleet>/<NAME>`, for a host only that fleet fits) or as `all`.
-- A fleet's `env` refers to it as `KEY = "secret:<NAME>"`. At spawn herdsman delivers it (the fleet's item, else
-  `all`'s) through a 0600 file the pane's shell sources, deleted after the start (docs/providers.md).
+- One file per name, shared by every fleet: there are no per-fleet items (#707).
+- A fleet's `env` refers to it as `KEY = "secret:<NAME>"`. At spawn herdsman delivers it through a 0600 file the
+  pane's shell sources, deleted after the start (docs/providers.md).
 - `herdsman secret ls` and `herdsman secret rm <fleet|all> <NAME>` are owner-only.
 
 ## Telegram (removed, #557)

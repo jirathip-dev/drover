@@ -788,13 +788,10 @@ pub fn clean_all(
         // #678: an explicit run's probe decides for a disabled host.
         let away = e.str("host").filter(|_| on.machine.is_some());
         let held = match away.filter(|h| cfg.hosts.get(*h).is_some_and(|c| !c.enabled)) {
-            Some(h) => match off.iter().find(|o| o.0 == h) {
-                Some((.., Some(_))) => None,
-                Some(_) => Some("host offline (not cleaned)"),
-                None => Some("on a disabled host (not cleaned)"),
-            },
-            None => crate::hosts::offline(ctx, Some(e)).map(|_| "host offline (not cleaned)"),
+            Some(h) => !off.iter().any(|o| o.0 == h && o.2.is_some()),
+            None => crate::hosts::offline(ctx, Some(e)).is_some(),
         };
+        let held = held.then_some("host unreachable (not cleaned)");
         let gone = |c: &Event| c.kind == "clean" && c.str("worktree") == Some(wt) && c.ts >= e.ts;
         let gone = || held.map_or_else(|| !on.exists(Path::new(wt)), |_| events.iter().any(gone));
         if seen.contains(wt) || gone() {

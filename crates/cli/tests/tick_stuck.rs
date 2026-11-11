@@ -150,7 +150,7 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
     let cached = herdsman::hosts::cached(&c);
     assert!(!cached["air"].up, "the Air shows offline");
     assert!(
-        out.contains(&format!("keep air:{WT}: host offline (not cleaned)")),
+        out.contains(&format!("keep air:{WT}: host unreachable (not cleaned)")),
         "{out}"
     );
     let (_, status) = run(&c, &Fake::default(), &["status"]);
@@ -165,7 +165,7 @@ fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains(&format!("keep air:{WT}: on a disabled host (not cleaned)")),
+        out.contains(&format!("keep air:{WT}: host unreachable (not cleaned)")),
         "{out}"
     );
     assert!(!r.called("herdr --machine air worktree remove"), "{out}");
@@ -195,7 +195,7 @@ fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
     let (code, out) = run(&c, &r, &["clean", "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains(&format!("keep air:{WT}: host offline (not cleaned)")),
+        out.contains(&format!("keep air:{WT}: host unreachable (not cleaned)")),
         "{out}"
     );
     assert!(out.contains("scratch: air: host offline (not cleaned)"), "{out}");
