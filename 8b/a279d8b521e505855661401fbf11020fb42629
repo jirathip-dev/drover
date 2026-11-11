@@ -1,0 +1,9 @@
+Decided: an orchestrator's basis answer of [park] on an extend ask is refused OWNER_ASK and put to the owner as the choice row, with park recommended
+Because: "Every other owner-only verb is unchanged: merge overrides, `park`/`unpark` by the conductor"
+Decided: the owner's own [park] (the [change] row or the choice row tap) still parks, by: owner
+Because: "For an extend, [change] parks the issue (`park --by owner`)"
+Decided: help --agent's line budget rises by 2 for the two new extend flags
+Because: "Update the conductor role doc (`roles/conductor.md`) and `help --agent` with the two new paths"
+Rejected: refusing park inside answer_with by caller — orchestrator_answer is the one door an orchestrator's basis answer takes, so the check sits with its other OWNER_ASK reasons
+Check: crates/cli/tests/orchestrator_reviews.rs a_basis_extend_posts_an_fyi_whose_change_parks_within_30_minutes_only now answers q1 with 2 on a spec quote and expects OWNER_ASK, no parked and no decision
+Owner: Your orchestrator can grant one more round on its own, but only you can park an issue.
