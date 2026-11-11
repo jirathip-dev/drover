@@ -1,0 +1,7 @@
+Decided: no code change this round; the evidence FAIL was a stale run from a body edit, the next run at b68de16 passed
+Because: scripts/evidence-check.sh:10
+Decided: merged origin/staging so every check re-runs at one new head, and the body names that head
+Because: scripts/evidence-check.sh:3
+Rejected: re-running the failed evidence run — a re-run replays the old event body and fails again
+Check: at 97ccf0e the evidence, rust and ui checks are green with no older failed evidence run on that head
+Owner: The orchestrator can now show a design image or screenshot from a lane's worktree in a thread reply, with no run card.
