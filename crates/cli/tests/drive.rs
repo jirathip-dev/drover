@@ -2937,7 +2937,6 @@ fn draft_pr(head: &str, ci: &str) -> String {
     v.to_string()
 }
 
-/// #839: a draft PR with a PASS at its head is marked ready once (logged), then merges on the next green pass.
 #[test]
 fn a_draft_pr_with_a_pass_is_marked_ready_once_then_merged() {
     let c = setup("drive-839-draft");
@@ -2976,7 +2975,6 @@ fn a_draft_pr_with_a_pass_is_marked_ready_once_then_merged() {
     assert_eq!(state(&c), "merged");
 }
 
-/// #839: a draft that can't be marked ready says so in status, never "merging next pass".
 #[test]
 fn a_draft_pr_that_cannot_be_marked_ready_says_so_in_status() {
     let c = setup("drive-839-draft-stuck");
