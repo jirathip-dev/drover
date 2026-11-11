@@ -1,0 +1,5 @@
+Decided: fix round 1 only names `accounts` and `setups` in the `vendors` row of docs/serve.md; no code change
+Because: crates/server/src/api.rs:628
+Rejected: a `no doc:` line in the PR body — the field is public API and the row already documents `vendors`
+Check: `herdsman arch-check --base origin/staging --pr-body <PR body>` exits 0 at this head (it failed on `setups` at 1256da0)
+Owner: The API docs now name both vendor lists, which clears the red CI check.
