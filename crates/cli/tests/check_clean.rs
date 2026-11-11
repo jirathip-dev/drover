@@ -785,8 +785,6 @@ fn saved_as(out: &str, prefix: &str) -> String {
     out[at..].split_whitespace().next().unwrap().to_string()
 }
 
-/// #770: spawn's `CLAUDE.local.md` and `.claude/settings.local.json` are the lane's own: `clean --lane` takes a tree
-/// holding only them, a real untracked file still counts, and the wip snapshot leaves both out.
 #[test]
 fn clean_and_the_wip_snapshot_treat_spawns_claude_files_as_the_lanes_own() {
     let d = tmpdir("clean-claude-local");

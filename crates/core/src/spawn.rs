@@ -762,8 +762,7 @@ pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
     )
 }
 
-/// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages; #770: the
-/// harness folder spawn made for its settings).
+/// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages).
 pub fn changes(st: &str) -> usize {
     let own = |l: &&str| {
         (own_files()

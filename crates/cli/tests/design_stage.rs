@@ -133,7 +133,6 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!(herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
 }
 
-/// #770: the lane's own `CLAUDE.local.md`, untracked in a repo that does not ignore it, never holds the hand-off back.
 #[test]
 fn a_design_lane_whose_only_untracked_file_is_its_claude_local_md_hands_off() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
