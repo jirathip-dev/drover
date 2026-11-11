@@ -829,3 +829,26 @@ fn no_board_request_starts_a_process() {
 fn api_body(res: &str) -> String {
     res[res.find("\r\n\r\n").unwrap() + 4..].to_string()
 }
+
+/// #859: one log's first fold (the 150k fixture's) holds up no other log's read: each database has its own gate.
+#[test]
+fn a_big_fold_holds_up_no_other_logs_read() {
+    let (big, _) = huge();
+    let (small, _) = fixture();
+    let p = big.state.clone();
+    let h = std::thread::spawn(move || herdsman::events::shared(&p).map(|l| l.len()));
+    std::thread::sleep(Duration::from_millis(50));
+    let (t, folding) = (Instant::now(), !h.is_finished());
+    append(&small.state, &Event::new(NOW, "sendmeter", None, "note", json!({}))).unwrap();
+    herdsman::events::shared(&small.state).unwrap();
+    let waited = ms(t);
+    assert_eq!(h.join().unwrap().unwrap(), 150_000);
+    assert!(
+        folding,
+        "the big fold ended before the small read began: nothing measured"
+    );
+    assert!(
+        waited < 500,
+        "a small log's read waited {waited} ms on another log's fold"
+    );
+}

@@ -602,8 +602,8 @@ impl Threads {
 /// #701: the cached `Log` whose events `events` are (none: a log read some other way).
 pub fn cached(events: &[Event]) -> Option<Arc<Log>> {
     let logs = LOGS.lock().unwrap_or_else(PoisonError::into_inner);
-    let hit = logs.values().find(|l| std::ptr::eq(l.events.as_slice(), events));
-    hit.cloned()
+    let hit = logs.values().find(|l| std::ptr::eq(l.1.events.as_slice(), events));
+    hit.map(|l| l.1.clone())
 }
 
 /// #701: the first `needs-decision` (`ask`) or the last `decision` of `fleet`'s ask `id`: the index's when `events` is
@@ -656,21 +656,37 @@ impl std::ops::Deref for Log {
     }
 }
 
-static LOGS: Mutex<BTreeMap<PathBuf, Arc<Log>>> = Mutex::new(BTreeMap::new());
+type Gated = (Arc<Mutex<()>>, Arc<Log>);
+
+static LOGS: Mutex<BTreeMap<PathBuf, Gated>> = Mutex::new(BTreeMap::new());
 
 /// #560, #632: the cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq:
 /// each call reads only the events appended since (serve's requests and watcher).
 pub fn shared(path: &Path) -> Result<Arc<Log>> {
-    let mut logs = LOGS.lock().unwrap_or_else(PoisonError::into_inner);
-    let l = logs.entry(crate::db::file(path)).or_default();
-    // #560: another file or a rotation since (`db::version`): all again.
+    let (file, logs) = (crate::db::file(path), || {
+        LOGS.lock().unwrap_or_else(PoisonError::into_inner)
+    });
+    let gate = logs().entry(file.clone()).or_default().0.clone();
+    let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
     let (last, key) = (crate::db::last_seq(path), crate::db::version(path));
+    let mut l = {
+        let mut m = logs();
+        let l = &mut m.get_mut(&file).expect("added above").1;
+        // Seq 0 (no events, or a read error `last_seq` hides) is read again: its error is the caller's to show.
+        if key == l.key && last == l.seq && last > 0 {
+            return Ok(l.clone());
+        }
+        std::mem::take(l)
+    };
+    let got = catch_up(path, &mut l, last, key);
+    logs().get_mut(&file).expect("added above").1 = l.clone();
+    got.map(|()| l)
+}
+
+fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<u64>)) -> Result<()> {
+    // #560: another file or a rotation since (`db::version`): all again.
     if key != l.key {
         *l = Arc::new(Log { key, ..Log::default() });
-    }
-    // Seq 0 (no events, or a read error `last_seq` hides) is read again: its error is the caller's to show.
-    if last == l.seq && last > 0 {
-        return Ok(l.clone());
     }
     let new = crate::db::events(path, "archived = 0 AND seq > ?1", l.seq)?;
     let m = Arc::make_mut(l);
@@ -684,7 +700,7 @@ pub fn shared(path: &Path) -> Result<Arc<Log>> {
         m.asks.add(&m.events);
         m.threads.add(&m.events);
     }
-    Ok(l.clone())
+    Ok(())
 }
 
 /// Why ask `a` closed (#584: every ending): answered, withdrawn, delivered or failed (a handoff card), expired, its
