@@ -1,0 +1,9 @@
+Decided: a refused update round's waiting line names the refusal in place of "catching up next pass"
+Because: "never as 'catching up next pass'"
+Because: crates/core/src/waiting.rs:831
+Decided: no drive change; its update spawn already supersedes the issue's own idle or hibernated lane
+Because: crates/core/src/drive.rs:1579
+Rejected: a second supersede retry in drive on LANE_LIVE — the update spawn already carries --supersede, a retry is dead code
+Check: the hibernated-lane test passes on base too; it pins AC3, the held-reason test is the repro
+Check: cooee log 07:20-08:01 had only fast passes and kicks for other issues; no full pass ran to spawn the update
+Owner: a refused catch-up round now shows why it is held; the cooee stall was full drive passes not running, worth its own issue
