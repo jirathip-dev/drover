@@ -1,0 +1,8 @@
+Decided: design lanes take their medium and writable folders from the issue body; HTML under docs/design/ stays the default
+Because: "the medium comes from the issue (and the repo's own design rules), HTML only as the default"
+Decided: the hook refuses a design lane's edit outside docs/design/ and the issue's named design paths (REFUSED DESIGN_PATH)
+Because: "and nothing else outside `docs/design/`"
+Decided: round 5 merges origin/staging and refreshes the evidence; no code change
+Rejected: changing the live.rs stream test — its CI red was a timing flake in serve, which this diff does not touch; it passes 3/3 locally
+Check: the rust job is green at the new head; the evidence names head 7bbb321
+Owner: Design lanes draw in the medium the issue asks for (SwiftUI previews when named) and may only write their design folders.
