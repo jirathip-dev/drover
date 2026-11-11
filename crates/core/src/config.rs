@@ -645,6 +645,9 @@ impl Deny {
     }
 }
 
+/// `orchestrator_change_minutes`' default; the frozen board's `CHANGE` window follows it.
+pub const ORCHESTRATOR_CHANGE_MINUTES: u64 = 30;
+
 impl Default for Limits {
     fn default() -> Self {
         Limits {
@@ -719,7 +722,7 @@ impl Default for Limits {
             poll_millis: 20,
             tick_beat_secs: 60,
             orchestrator_idle_minutes: 30,
-            orchestrator_change_minutes: 30,
+            orchestrator_change_minutes: ORCHESTRATOR_CHANGE_MINUTES,
             token_refresh_minutes: 30,
             ask_waiting_minutes: 30,
             outbox_stale_minutes: 5,

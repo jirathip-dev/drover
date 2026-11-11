@@ -367,6 +367,9 @@ pub fn ask(
     Ok(writeln!(out, "{id}")?)
 }
 
+/// #541: how long the owner may change a conductor's answer, in seconds (the board reads it).
+pub const CHANGE: u64 = config::ORCHESTRATOR_CHANGE_MINUTES * 60;
+
 /// A choice as its ask has it: option `n`'s text, else the text given.
 fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
     let n = choice.parse::<usize>().ok();
