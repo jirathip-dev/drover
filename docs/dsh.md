@@ -14,7 +14,7 @@ profile = "lane-rev"
   layer: reviewers get the `workspace-write` sandbox, other roles `danger-full-access`;
   approvals are `never` (an unattended lane cannot answer them).
 - `herdsman spawn` refuses unless `dsh-tui version` reports profile `0.17.0`
-  (`harness::DSH_TUI_VERSION`). It types `dsh-tui --patch <file>` into the lane shell
+  (`providers::DSH_TUI_VERSION`). It types `dsh-tui --patch <file>` into the lane shell
   (herdr has no `dsh` agent kind), waits until herdr shows the pane as agent `dsh-tui`
   with state `idle` (dsh-TUI reports its own state to herdr), presses Esc if the
   first-run wizard is up, names the agent, types the kick with `herdr pane send-text` +

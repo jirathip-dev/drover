@@ -95,3 +95,23 @@ lacks the variable, a dim `deepseek · key not found in <file>` row shows instea
 
 Hermes profiles own their provider keys, in `~/.hermes/profiles/<profile>/.env`. herdsman never
 reads them.
+
+## Adding a provider (#806)
+
+Each provider is one module in `crates/core/src/providers/` behind the `Provider` trait (login, accounts,
+usage/limits, models, launch, prompt and screen parsing); core asks `providers::get`, `lanes()`, `accounts()`,
+`proxied()` and the like, and never names one. arch-check's `[[ban]]`s in `.herdsman/arch.toml` fail any provider
+name (any case, comments too) in `crates/*/src/**` outside that folder. The ADR is
+[docs/architecture/providers/adr.md](architecture/providers/adr.md).
+
+To add one:
+
+1. Write `crates/core/src/providers/<name>.rs` with `pub static PROVIDER` implementing `Provider`. Override only what
+   differs from the defaults: `surface()` (`Terminal`, a `harness` choice; `Acp`, reached through its ACP agent;
+   `Listed`, known only as an agent's vendor), `start_cmd`/`kick_cmds`, `login()`, `credential()` (an `Accounts` with
+   its config-folder and token env), `usage()`, `efforts()`, `hook_dialect()`, `brands()`.
+2. Append its name to the `registry! { … }` line in `crates/core/src/providers/mod.rs`. Order matters only for the
+   first-match readers (screen parsing, `accounts()`), so new ones go last.
+
+Nothing else changes: `harness = "<name>"` validates, `profiles sync` writes its files, setup offers its login and an
+account signs in through its env. `crates/core/src/providers/fake.rs`, a test-only provider, proves it with unit tests.

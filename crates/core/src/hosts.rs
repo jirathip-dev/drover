@@ -3,8 +3,8 @@
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
 use crate::events::{age, append, emit, fold, last_spawn, open_asks, read, Event, IssueState};
 use crate::gate::refused;
-use crate::harness;
 use crate::host::{self, Host};
+use crate::providers;
 use crate::runner::{argv, ok, Out, Runner};
 use crate::Ctx;
 use anyhow::{bail, ensure, Result};
@@ -722,7 +722,7 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     }
     let gh = format!("ssh {} gh auth login", on.machine.unwrap_or_default());
     let mut logins = vec![("gh", "gh auth status", gh.as_str())];
-    logins.extend(harness::all().filter_map(|h| h.1.health_check()));
+    logins.extend(providers::lanes().filter_map(|h| h.health_check()));
     // #235: typed into a fresh pane: logins as a lane sees them; `hs:done` is not in the echoed line.
     let probe = |(t, c, _): &(&str, &str, &str)| format!("{c} >/dev/null 2>&1; echo \"{t}:$?\"; ");
     let pane = logins.iter().map(probe).collect::<String>() + "echo \"hs:\"done";
@@ -746,8 +746,6 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     bad
 }
 
-/// #637: a `shed-acp` host's health (no herdr there): git for each fleet it fits, gh's login over ssh, and for each
-/// Claude role of those fleets the ACP guard (`acp_guard`); a failed guard is `✗ acp guard`, which keeps lanes off.
 fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[String], &str)) -> Vec<String> {
     let mut bad = vec![];
     let fits = cfg.fleet.iter().filter(|f| f.1.needs.iter().all(|t| tags.contains(t)));
@@ -765,7 +763,10 @@ fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[Str
         }
         for (role, rc) in &f.role {
             let profile = rc.profile_or(role);
-            let Some(id) = harness::get(&rc.harness).acp().filter(|_| seen.insert(profile.clone())) else {
+            let Some(id) = providers::get(&rc.harness)
+                .acp()
+                .filter(|_| seen.insert(profile.clone()))
+            else {
                 continue;
             };
             if let Some(why) = acp_guard(ctx, on, home, (&profile, f.family(role), id)) {
@@ -792,7 +793,7 @@ pub fn acp_guard(ctx: &Ctx, on: &On, home: &str, (profile, family, id): (&str, &
         return Some(format!("herdsman there is {theirs}, not {mine}"));
     }
     let dir = rehome(
-        vec![harness::profiles_root(ctx).join(profile).display().to_string()],
+        vec![providers::profiles_root(ctx).join(profile).display().to_string()],
         Some(home),
     )
     .remove(0);
@@ -1007,6 +1008,67 @@ pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
     let open = st.values().filter(|s| !s.done()).filter_map(|s| s.active_lane());
     open.map(|l| l.1).filter(on).map(String::from).collect()
 }
+
+/// #840: a remote host unreachable 15 min straight: its open lanes restart on the main host from their pushed branch.
+pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+    let seen = cached(ctx);
+    for (name, h) in cfg.hosts.iter().filter(|h| h.1.machine.is_some()) {
+        let events = read(&ctx.state)?;
+        let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
+        if stopped
+            || !seen
+                .get(name)
+                .is_some_and(|s| !s.up && s.seen + OFFLINE_SECS <= ctx.now)
+        {
+            continue;
+        }
+        let mut moved = vec![];
+        for s in fold(&events).values().filter(|s| !s.done()) {
+            let (Some((role, agent)), Ok(f)) = (s.active_lane(), cfg.fleet(&s.fleet)) else {
+                continue;
+            };
+            if last_spawn(&events, agent).is_none_or(|e| e.str("host") != Some(name)) {
+                continue;
+            }
+            let o = crate::spawn::Opts {
+                supersede: true,
+                host: Some("main".into()),
+                ..Default::default()
+            };
+            if let Err(e) = crate::spawn::spawn(ctx, cfg, r, out, (&s.fleet, s.issue, role), &o) {
+                writeln!(out, "{agent}: restart off {name} failed: {e:#}")?;
+                continue;
+            }
+            let now = read(&ctx.state)?;
+            let Some(to) = last_spawn(&now, agent).filter(|e| e.str("host") != Some(name)) else {
+                continue;
+            };
+            let local = under(&f.local, None).display().to_string();
+            let branch = format!("origin/{}", to.str("branch").unwrap_or_default());
+            let sha = ok(r, "git", &["-C", &local, "rev-parse", "--verify", "--quiet", &branch]).ok();
+            let d =
+                json!({"agent": agent, "host": name, "to": to.str("host"), "sha": sha.map(|s| s.trim().to_string())});
+            emit(
+                &ctx.state,
+                cfg,
+                Event::new(ctx.now, &s.fleet, Some(s.issue), "lane-moved", d),
+            )?;
+            moved.push(agent.to_string());
+        }
+        if !moved.is_empty() {
+            let why = format!(
+                "{name} offline 15 min: {} restarted on the main host from the pushed branch; unpushed work stayed on {name}",
+                moved.join(", ")
+            );
+            writeln!(out, "{why}")?;
+            let d = json!({"host": name, "lanes": moved, "reason": why});
+            emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, "lanes-moved", d))?;
+        }
+    }
+    Ok(())
+}
+
+const OFFLINE_SECS: u64 = 15 * 60;
 
 /// A host as the board and `hosts` say it: (tone, words). Offline and off are grey: neither pages.
 pub fn shown(enabled: bool, s: &Seen, lanes: usize, now: u64) -> (&'static str, String) {

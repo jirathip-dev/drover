@@ -45,10 +45,6 @@ jobs:
           if grep -E '^herdsman(-server)? v' <<<"$core" || grep -E '^herdsman v' <<<"$server"; then exit 1; fi
           bad=$(grep -rlwE 'Command|Stdio|Child' crates/core/src | grep -vxE 'crates/core/src/runner\.rs' || true)
           test -z "$bad" || { echo "std::process outside the Runner implementations: $bad"; exit 1; }
-      - name: harness-neutral core (#316; no Claude or Anthropic name outside crates/core/src/harness/ but comments and the hook's AI-trailer names)
-        run: |
-          bad=$(grep -rniE 'claude|anthropic' crates/*/src | grep -v '^crates/core/src/harness/' | grep -vE '^[^:]+:[0-9]+: *//' | grep -v 'const AI:' || true)
-          test -z "$bad" || { echo "harness named outside crates/core/src/harness/: $bad"; exit 1; }
       - name: "release has no ts-rs (#375: the TS bindings' dep is behind the `ts` feature)"
         run: "! cargo tree --locked -p herdsman -e normal --prefix none | grep -E '^ts-rs(-macros)? v'"
       - uses: taiki-e/install-action@v2
