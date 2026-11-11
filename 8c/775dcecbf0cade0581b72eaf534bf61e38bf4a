@@ -1,0 +1,7 @@
+Decided: change only the line_cap value in ci/cap.toml to 45400; warn_within and comments stay
+Because: "`ci/cap.toml` `[fleet.herdsman] line_cap = 45400`; nothing else in that file changes"
+Decided: the history file copies the issue's sizing (staging 27e3949, open PRs, queued estimates, margin)
+Because: q1291
+Rejected: a raise sized for open PRs only — the owner asked to cover every queued issue too
+Check: git diff staging...HEAD touches only ci/cap.toml and docs/cap-history/2026-11-11-45400.md; cap-check exits 0
+Owner: The source size limit rises to 45,400 lines so the whole queue fits.
