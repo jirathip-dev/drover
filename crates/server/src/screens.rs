@@ -204,7 +204,6 @@ fn choice(id: &str, action: &str, options: &[Value]) -> Value {
     json!({"type": "choice", "id": id, "action": action, "options": options})
 }
 
-/// q1235: a card's folded line, `#N · kind · question cut short · age`, and its main button.
 fn fold(n: Option<u64>, kind: &str, q: &str, age: &str, main: &Value) -> Value {
     let mut cut: String = q.chars().take(48).collect();
     if cut.len() < q.len() {

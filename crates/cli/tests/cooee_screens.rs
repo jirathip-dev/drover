@@ -376,7 +376,6 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
     );
 }
 
-/// q1235: a folded ask card's main button, posted as the app posts a tap on it, answers the ask.
 #[test]
 fn a_folded_cards_main_button_answers_its_ask() {
     let (c, r) = recorded("cooee-fold");
