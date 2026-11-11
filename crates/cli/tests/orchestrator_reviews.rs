@@ -262,6 +262,14 @@ fn a_basis_extend_posts_an_fyi_whose_change_parks_within_30_minutes_only() {
         (up.len(), up[0].str("thread"), up[0].data["recommend"].clone()),
         (1, Some("t1"), json!(1))
     );
+    let park = ["answer", "sendmeter", "q1", "2", "--basis", QUOTE];
+    let (code, out) = by(&c, Some("t1"), NOW, &park);
+    assert!(
+        code == 3 && out.contains("REFUSED OWNER_ASK: parking is the owner's"),
+        "{out}"
+    );
+    assert!(kinds(&c, "parked").is_empty() && kinds(&c, "decision").is_empty());
+    assert_eq!(kinds(&c, "ask-owner").len(), 1, "the owner's row is already there");
     assert!(kinds(&c, "round-extended").is_empty());
 
     let (code, out) = ext(QUOTE);

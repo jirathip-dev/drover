@@ -410,6 +410,8 @@ pub fn orchestrator_answer(
     };
     let why = if owner_topic(&format!("{} {text}", ask.str("question").unwrap_or_default())) {
         "it names an owner topic"
+    } else if ask.data.get("extend").is_some() && text == "park" {
+        "parking is the owner's"
     } else if quote.is_empty() {
         "no --basis"
     } else if quote != id && events.iter().any(decided) || in_spec()? {
