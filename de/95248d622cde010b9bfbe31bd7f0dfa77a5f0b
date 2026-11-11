@@ -1,0 +1,12 @@
+Decided: one walk (check::measure) over every root of this host, deduping files by (device, inode) when hard-linked and by APFS clone id when the file may share blocks; check and budget both stamp it.
+Because: "counting APFS clones/hard links once, and is re-measured at most every pass"
+Because: crates/core/src/check.rs:1793
+Decided: the budget keeps excluding each root's .build folder (its own build_budget_gb trims it); the refusal says "build folders aside".
+Because: crates/core/src/check.rs:1207
+Decided: check's tick used to stamp the same file with .build included and no dedup, budget's pass without .build; now both stamp the same measure.
+Because: crates/core/src/check.rs:585
+Rejected: shelling out to du -sk per root — macOS du counts a clone twice, so it fails the clone criterion.
+Rejected: summing APFS private sizes — two fresh clones each report 0 private bytes, so the shared data would count zero times.
+Check: a diverged clone (rewritten in part) gets a new clone id and counts in full again, as du counts it.
+Check: the clone dedup is macOS-only (getattrlist); Linux counts hard links once, reflinks in full, like GNU du.
+Owner: the disk budget now counts each file once across all roots, skips unmounted roots, and a refusal lists the roots and the three biggest folders.
