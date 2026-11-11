@@ -1463,3 +1463,23 @@ fn impl_lane_never_edits_the_cap_file() {
     assert_eq!(call("25", "Edit", json!({"file_path": "/w/ci/cap.toml"})), "");
     assert_eq!(bash("25", "sed -i '' 's/35500/36000/' ci/cap.toml"), "");
 }
+
+/// #827: the stop hook asks for `herdsman turn` only in an impl-type lane; any other lane, or none, ends its turn.
+#[test]
+fn the_stop_hook_asks_for_a_turn_only_in_impl_type_lanes() {
+    let stop = json!({"hook_event_name": "Stop", "stop_hook_active": false});
+    assert_eq!(hook_in(None, "orchestrator", stop.clone()), "");
+    for lane in ["orchestrator", "conductor"].map(|r| format!("sendmeter:-:{r}")) {
+        assert_eq!(hook_in(Some(&lane), "orchestrator", stop.clone()), "", "{lane}");
+    }
+    for role in ["rev", "verify", "design", "architect"] {
+        assert_eq!(hook_as(role, stop.clone()), "", "{role}");
+    }
+    let d = tmpdir("hook-turn");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let lane = [("HERDSMAN_LANE", Some("sendmeter:24:impl"))];
+    let out = hook_at(&d, &d, &lane, "impl", &stop.to_string());
+    let v: Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(v["reason"], herdsman::hook::TURN_ASK, "{out}");
+    assert_eq!(hook_at(&d, &d, &lane, "impl", &stop.to_string()), "");
+}
