@@ -1,0 +1,13 @@
+Decided: the root cause is the needs-human form's empty hidden op: the summary button comes first in tree order, so the body is `op=extend&op=` and the server's map keeps the last, empty one
+Because: web/src/needs.ts:43
+Because: crates/server/src/serve.rs:413
+Decided: `hidden` writes no op input when its op is empty, which also fixes the plain no-JS form post
+Because: web/src/queue.ts:9
+Decided: the submit handler sets the tapped button's name and value on the form data itself instead of relying on FormData's submitter argument
+Because: assets/serve.js:831
+Decided: a tap with no op posts nothing and toasts `error: <card line>: no op sent`; an error reply or a failed post puts the card back in place of its pending line
+Because: "A POST without `op` is never silent: the toast names the card, and the card comes back rather than vanishing."
+Rejected: changing the server to keep the first duplicate key — the duplicate key is the client's bug, and other forms rely on today's parsing
+Check: cargo test --locked -p herdsman --test needs_fold_ops fails at fea3b903f (the tap still posts, extend sends `op=extend&op=`) and passes at the head, at 390 and 1440
+Check: the ask's folded main option already posted op=answer in WebKit; the test pins it. Cooee card actions go to /action, which has no op field
+Owner: The "one more round" button on a folded needs-human card works again, and a button that somehow sends nothing now says so and keeps the card.
