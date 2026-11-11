@@ -16,11 +16,24 @@ fn sleeper(dir: &Path, name: &str) -> String {
     p.to_string_lossy().into_owned()
 }
 
+/// Runs `call` again while exec fails ETXTBSY: a sibling test's fork can hold the fresh script's write fd until it execs.
+fn exec_fresh<T>(call: impl Fn() -> anyhow::Result<T>) -> T {
+    for _ in 0..50 {
+        match call() {
+            Err(e) if e.chain().any(|c| c.to_string().contains("os error 26")) => {
+                std::thread::sleep(Duration::from_millis(20))
+            }
+            r => return r.unwrap(),
+        }
+    }
+    call().unwrap()
+}
+
 #[test]
 fn a_call_past_its_limit_is_cut_at_the_limit_with_124() {
     let prog = sleeper(&tmpdir("limit-for"), "slow");
     let t = Instant::now();
-    let o = Real.run_for(&prog, &[], "", Duration::from_secs(1)).unwrap();
+    let o = exec_fresh(|| Real.run_for(&prog, &[], "", Duration::from_secs(1)));
     let took = t.elapsed();
     assert_eq!(o.code, 124, "{o:?}");
     assert!(o.stderr.contains("no answer in 1s"), "{}", o.stderr);
@@ -35,7 +48,7 @@ fn a_call_with_no_explicit_limit_is_bounded_by_the_table() {
     // codesign waits on the Keychain: 10 s, though the program would sleep 30.
     let prog = sleeper(&tmpdir("limit-default"), "codesign");
     let t = Instant::now();
-    let o = Real.run(&prog, &argv(&["-v", "x"])).unwrap();
+    let o = exec_fresh(|| Real.run(&prog, &argv(&["-v", "x"])));
     let took = t.elapsed();
     assert_eq!(o.code, 124, "{o:?}");
     assert!(
