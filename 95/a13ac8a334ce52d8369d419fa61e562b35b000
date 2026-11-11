@@ -1,0 +1,5 @@
+Decided: name extend --typed and --basis in docs/lanes.md's one-more-round entry, so arch-check's doc rule sees them
+Because: crates/core/src/arch.rs:527
+Rejected: a `no doc:` line in the PR body — the flags are user-facing and lanes.md already documents answer --typed
+Check: herdsman arch-check --base origin/staging exits 0 after the staging merge (899 files, 0 violations)
+Owner: The new orchestrator options for one more round are now written up in the lanes guide.
