@@ -818,7 +818,6 @@ pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> 
     (!done.is_empty() || !errs.is_empty()).then(|| json!({"dirs": done, "secs": secs, "errors": errs}))
 }
 
-/// #825: a check round's build folders renamed in from its round before's, when no lane is live there. Its data, if any.
 fn reuse(p: &Plan, dirs: &[String], target: Option<&String>, agents: &[Value]) -> Option<Value> {
     let (stem, k) = p.agent.rsplit_once("-r")?;
     let k = k.parse::<u64>().ok().filter(|k| *k > 1)?;

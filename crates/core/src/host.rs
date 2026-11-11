@@ -187,7 +187,6 @@ pub struct Host {
     pub top: Vec<String>,
 }
 
-/// #825: the cores herdsman's own processes (and the `cp` they run) keep busy, and the 3 busiest others.
 fn own_load(ps: &str) -> (f64, Vec<String>) {
     let row = |l: &str| {
         let mut w = l.split_whitespace();
