@@ -1,0 +1,9 @@
+Decided: round 5 fixes CI's rust failure, the src line cap (41027 / 41000): merge origin/staging and trim the budget to a plain deadline, src net +46 to +12
+Because: crates/core/src/timer.rs:280
+Because: "tick has a wall-clock budget; past it, it logs what it skipped and ends, so the next pass runs"
+Decided: the skip check runs once, after drive; past the deadline clean, trim and lesson are all skipped and one line names them
+Rejected: asking to raise the cap — the rules say trim first, and +12 fits the 14 lines of headroom at staging 27e3949
+Rejected: keeping the unsent-call counter — every unsent call already answers 255 with a "past its budget" stderr
+Check: cap-check reports 40998 / 41000; offline_tick, runner_limits and tick_stuck pass; offline_tick is unchanged since c605fa37
+Check: chat_tab's the_thread_follows test fails on plain origin/staging on this host too, not because of this PR
+Owner: no change in what the tick does; this round only makes the code small enough for the repo's line cap
