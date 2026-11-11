@@ -1,0 +1,11 @@
+Decided: a pass marks a host down on ssh's own connect failure (exit 255, `connect to host`), not only on exit 124, and skips the shared-socket retry then
+Because: crates/core/src/hosts.rs:328
+Because: "A host that fails one probe in a pass is marked offline for the rest of that pass"
+Decided: root cause from the live log: 11-11 tick-stuck events wait on `ssh air -- test -e <worktree>` per merged lane; the Air passed the probe, then each call failed 255 after 10 s plus a retry, never marking it down
+Decided: the tick's budget is one tick interval (`limits.slow_secs`); past it no remote call is sent and clean, trim and lesson are skipped, then one line names them
+Because: "tick has a wall-clock budget; past it, it logs what it skipped and ends, so the next pass runs"
+Rejected: skipping check or drive past the budget — drive's full pass must run; its remote calls fail at once instead
+Rejected: per-lane offline checks in clean_merged or outbox — the pass runner is the one place every remote call goes through
+Check: crates/cli/tests/offline_tick.rs fails at c605fa37 (12 calls to the Air) and passes at the head; tick_stuck.rs's dead-socket retry still passes
+Check: a remote command that itself exits 255 without `connect to host` in stderr does not mark its host down
+Owner: a laptop host that drops off the network now costs the timer one 10 s timeout per pass, not one per old lane, and a slow pass stops after one interval
