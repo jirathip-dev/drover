@@ -329,10 +329,8 @@ pub fn run(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
     (code, String::from_utf8(out).unwrap())
 }
 
-/// `swift` for tests/support/webview.swift, its page based at a local server of serve's `/a/<hash>/`
-/// assets (#57: the page links them; a same-origin base lets herd.js fetch horses.svg). #560: it runs under
-/// scripts/ui-lock.sh, one WebKit audit at a time on the host.
-pub fn swift() -> std::process::Command {
+/// `node tests/support/webview.mjs` (Playwright's WebKit) under scripts/ui-lock.sh, its page based at serve's assets.
+pub fn webview() -> std::process::Command {
     static BASE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let base = BASE.get_or_init(|| {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -348,15 +346,32 @@ pub fn swift() -> std::process::Command {
         });
         base
     });
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.mjs");
     // #560: WebKit under the user's home, never a test's temporary `$HOME` (live_board's, deleted when it ends).
-    if HELD.load(Ordering::SeqCst) {
-        let mut c = std::process::Command::new("swift");
-        c.env("HERDSMAN_BASE", base).env("HOME", user_home());
-        return c;
-    }
-    let mut c = std::process::Command::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/ui-lock.sh"));
-    c.arg("swift").env("HERDSMAN_BASE", base).env("HOME", user_home());
+    let mut c = if HELD.load(Ordering::SeqCst) {
+        std::process::Command::new("node")
+    } else {
+        let mut c = std::process::Command::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/ui-lock.sh"));
+        c.arg("node");
+        c
+    };
+    c.arg(script).env("HERDSMAN_BASE", base).env("HOME", user_home());
     c
+}
+
+/// #862: true (and a skip message) where node cannot load Playwright (`NODE_PATH`), so a WebKit test returns early.
+pub fn no_webkit() -> bool {
+    static NO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let no = *NO.get_or_init(|| {
+        let o = std::process::Command::new("node")
+            .args(["-e", "require('playwright')"])
+            .output();
+        !o.is_ok_and(|o| o.status.success())
+    });
+    if no {
+        eprintln!("skipping: no node/Playwright here (NODE_PATH with playwright, see the ui-webkit CI job)");
+    }
+    no
 }
 
 /// The user's home from the password database, as scripts/ui-lock.sh finds it (a test may point `$HOME` elsewhere).

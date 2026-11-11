@@ -230,8 +230,7 @@ fn page_has_the_herd_button_and_horse_symbols() {
 /// a swipe to the next repo, the sheet from a horse; no horizontal page scroll. PNGs go to `$HERDSMAN_SNAPSHOTS`.
 #[test]
 fn herd_snapshots_fit_390px() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture("shots");
@@ -276,10 +275,8 @@ fn herd_snapshots_fit_390px() {
         let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("{name}.png"))
         });
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
-        let o = swift()
+        let o = webview()
             .args([
-                script,
                 file.to_str().unwrap(),
                 "390",
                 "lanes",
@@ -305,8 +302,7 @@ fn herd_snapshots_fit_390px() {
 /// (a) 0 blocked · 1 working · 13 queued · 7 idle · 11 done, (b) only 1 done, (c) every band.
 #[test]
 fn herd_horses_are_one_size_at_390px() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture("sizes");
@@ -383,10 +379,8 @@ fn herd_horses_are_one_size_at_390px() {
         let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("{name}.png"))
         });
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
-        let o = swift()
+        let o = webview()
             .args([
-                script,
                 file.to_str().unwrap(),
                 "390",
                 "lanes",

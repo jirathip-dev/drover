@@ -145,18 +145,10 @@ fn page(url: &str, cookie: &str, js: &str, png: &Path) -> Vec<f64> {
     let js = format!(
         "(function go() {{ const t = document.querySelector('#lanes .lane[data-agent]'); if (!t) return setTimeout(go, 20); {js} }})()"
     );
-    let o = swift()
+    let o = webview()
         .env("HERDSMAN_COOKIE", cookie)
         .env("HERDSMAN_WAIT", "1.5")
-        .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
-            url,
-            "390",
-            "lanes",
-            "scene",
-            png.to_str().unwrap(),
-            &js,
-        ])
+        .args([url, "390", "lanes", "scene", png.to_str().unwrap(), &js])
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&o.stdout);
@@ -166,8 +158,7 @@ fn page(url: &str, cookie: &str, js: &str, png: &Path) -> Vec<f64> {
 
 #[test]
 fn report_mode_in_webkit_outlines_confirms_and_sends_a_bundle() {
-    if !cfg!(target_os = "macos") || std::process::Command::new("swift").arg("--version").output().is_err() {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let c = ctx(&tmpdir("report-wk"), CONFIG);
