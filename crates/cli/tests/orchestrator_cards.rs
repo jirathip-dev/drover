@@ -493,7 +493,9 @@ fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() 
     assert_eq!(card("git status"), "r2\n");
     assert_eq!(card("uptime"), "r3\n");
     let sha = kinds(&c, "run-card")[0].str("sha").unwrap().to_string();
-    let r = acp(&["echo"]).reply("sh -c", "commit 1a2b\n");
+    let r = acp(&["echo"])
+        .reply("sh -c nohup", "4242\n")
+        .reply("sh -c", "commit 1a2b\n");
     let cli = sh.cli(&r);
     let on = sh.on(&cli);
     let s = Server::new(&c, &on, Some(ADDR.into()));
@@ -542,10 +544,18 @@ fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() 
         T + 120,
     );
     assert!(
-        res.starts_with("HTTP/1.1 200") && body(&res).contains("run r1 approved by owner"),
+        res.starts_with("HTTP/1.1 200") && body(&res).contains("run r1 approved by owner, running in /srv/app…"),
         "{res}"
     );
-    assert!(r.called("sh -c"));
+    let ran = run(
+        &herdsman::Ctx {
+            now: T + 125,
+            ..c.clone()
+        },
+        &r,
+        &["card", "run", "r1"],
+    );
+    assert_eq!(ran.0, 0, "{ran:?}");
     let res = req(&s, "/thread", "op=card&id=r2&act=deny", &cookie, T + 130);
     assert!(res.starts_with("HTTP/1.1 200"), "{res}");
     let page = chat(&s, &cookie, T + 140);
@@ -592,7 +602,9 @@ fn card_between_replies(c: &herdsman::Ctx, sh: &FakeShed) -> (String, Fake, Stri
     assert_eq!(run(&at(10), &Fake::default(), &args).1, "r1\n");
     say(20, "after the card");
     let sha = kinds(c, "run-card")[0].str("sha").unwrap().to_string();
-    let r = acp(&["echo"]).reply("sh -c", "load 0.42\n");
+    let r = acp(&["echo"])
+        .reply("sh -c nohup", "4242\n")
+        .reply("sh -c", "load 0.42\n");
     let cookie = pair(
         &Server::new(c, &sh.on(&r), Some(ADDR.into())),
         c,
@@ -671,7 +683,19 @@ fn a_settled_run_cards_result_renders_in_the_chat_tab() {
         &cli,
         &["card", "approve", "r1", "--sha", &sha[..12]],
     );
-    assert!(out.1.contains("run r1 approved by owner"), "{out:?}");
+    assert!(
+        out.1.contains("run r1 approved by owner, running in /srv/app…"),
+        "{out:?}"
+    );
+    let ran = run(
+        &herdsman::Ctx {
+            now: T + 125,
+            ..c.clone()
+        },
+        &cli,
+        &["card", "run", "r1"],
+    );
+    assert_eq!(ran.0, 0, "{ran:?}");
     let on = sh.on(&cli);
     let s = Server::new(&c, &on, Some(ADDR.into()));
     let all = chat(&s, &cookie, T + 130);

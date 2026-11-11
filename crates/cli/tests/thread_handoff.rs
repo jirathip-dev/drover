@@ -623,8 +623,7 @@ fn the_chat_tab_shows_a_chip_on_each_linked_row_and_thread_row() {
 /// A tap on a chip, in a thread or in the list, opens the other thread (WebKit, serve.js's click handler).
 #[test]
 fn a_tap_on_a_chip_opens_the_other_thread() {
-    if Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let b = FakeShed::new();
@@ -650,10 +649,8 @@ fn a_tap_on_a_chip_opens_the_other_thread() {
         && r.height > 0 && r.height < 24 && r.top >= tp.top && r.bottom <= tp.bottom + 1 ? 1 : 0; \
         tap('.tr[data-t=\"t1\"] .lc[data-go=\"t2\"]'); const d = THR === 't2' ? 1 : 0; \
         window.measure = [a, b, d, document.querySelector('.cvp[data-t=\"t2\"] summary').parentElement.open ? 1 : 0, e]";
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
-    let o = swift()
+    let o = webview()
         .args([
-            script,
             file.to_str().unwrap(),
             "390",
             "chat",

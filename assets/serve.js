@@ -821,20 +821,23 @@ if ($('.msg.g, .msg.r')) toast($('.msg.g, .msg.r').textContent);
 // Every op form POSTs with fetch (same checks), toasts the redirect's `msg` and patches in place: the scroll stays
 // (#65, #140: no navigation); the tapped button spins until the reply. The plain form POST is the no-JS fallback.
 const PEND = { extend: 'one more round · starting a lane…', park: 'park · closing its lanes…', override: 'merge anyway · merging…' };
-const pend = (card, op) => { card.outerHTML = `<div class=pend data-n=${card.dataset.n}><p class=m>⟳ ${PEND[op]}</p></div>`; };
+const pend = (card, op) => { const p = el('div', 'pend'); p.dataset.n = card.dataset.n; p.innerHTML = `<p class=m>⟳ ${PEND[op]}</p>`; card.replaceWith(p); return p; };
 document.addEventListener('submit', async e => {
   const f = e.target, b = e.submitter, c = b && b.dataset.confirm;
   if (c && !confirm(c)) return e.preventDefault(); // #130: merge anyway
   if (!f.elements.op) return;
   e.preventDefault();
+  const d = new FormData(f), k = b && b.name === 'op' && b.closest('#needs>.ask');
+  if (b && b.name) d.set(b.name, b.value);
+  if (!d.get('op')) return toast(`error: ${((b || f).closest('.ask')?.querySelector('summary>span') || {}).textContent || 'this form'}: no op sent`);
   if (b) b.ariaBusy = 'true';
-  const d = new FormData(f, b), k = b && b.name === 'op' && b.closest('#needs>.ask');
-  if (k && PEND[b.value]) pend(k, b.value); // #217: the card is a pending line at once (no buttons, no second tap)
+  const p = k && PEND[b.value] && pend(k, b.value); // #217: the card is a pending line at once (no buttons, no second tap)
   try {
     const r = await post('', d), m = r.redirected ? new URL(r.url).searchParams.get('msg') || '' : 'error: ' + (await r.text()).trim();
     toast(m);
+    if (p && /^(REFUSED|error)/.test(m)) p.replaceWith(k);
     if (!m.includes(' started for ')) refresh(); // a background job's result comes by /live and its toast
-  } catch (err) { toast('error: ' + err.message); }
+  } catch (err) { toast('error: ' + err.message); if (p) p.replaceWith(k); }
   if (b) b.ariaBusy = null;
 });
 B.insertAdjacentHTML('beforeend', `<div id=sheet><div class=bd></div><div class=sh role=dialog aria-modal=true>

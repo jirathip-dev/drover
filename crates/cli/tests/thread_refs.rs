@@ -128,8 +128,7 @@ fn a_known_thread_id_is_a_ref_and_an_unknown_or_coded_one_stays_text() {
 /// the bar's back returns to t1 scrolled where it was, the browser's back likewise; [restore] turns t27's composer on.
 #[test]
 fn a_tapped_ref_opens_that_thread_and_back_returns_scrolled_where_you_were() {
-    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let now = std::time::SystemTime::now()
@@ -166,11 +165,10 @@ fn a_tapped_ref_opens_that_thread_and_back_returns_scrolled_where_you_were() {
           await until(() => v('t27') && !v('t27').querySelector('.tw textarea').disabled); \
           at.push(+!v('t27').querySelector('.tw textarea').disabled, +!v('t27').querySelector('.rst'), errs.length); })()";
     let png = std::env::var_os("HERDSMAN_SHOT").map_or_else(|| tmpdir("thread-refs-png").join("refs.png"), Into::into);
-    let o = swift()
+    let o = webview()
         .env("HERDSMAN_WAIT", "12")
         .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
         .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
             &format!("http://{addr}/"),
             "390",
             "chat",

@@ -190,18 +190,10 @@ fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
 
 /// The page at a phone's width in WebKit on a real `serve`, `js` run on the chat tab; `window.late` after `wait` s.
 fn webkit(url: &str, cookie: &str, js: &str, wait: &str, png: &std::path::Path) -> Vec<f64> {
-    let o = swift()
+    let o = webview()
         .env("HERDSMAN_WAIT", wait)
         .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
-        .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
-            url,
-            "390",
-            "chat",
-            "scene",
-            png.to_str().unwrap(),
-            js,
-        ])
+        .args([url, "390", "chat", "scene", png.to_str().unwrap(), js])
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&o.stdout);
@@ -214,8 +206,7 @@ fn webkit(url: &str, cookie: &str, js: &str, wait: &str, png: &std::path::Path) 
 /// list, and the card once stale. (HERDSMAN_SNAPSHOTS keeps the three shots.)
 #[test]
 fn the_card_lands_live_in_view_and_stays_reachable_in_webkit() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let shots = std::env::var("HERDSMAN_SNAPSHOTS").map_or_else(|_| tmpdir("cfg-png"), std::path::PathBuf::from);
