@@ -40,7 +40,6 @@ fn the_manifest_attaches_to_the_running_serve_with_its_token_file() {
     assert_eq!(m["attach_token"].as_str(), Some("~/.config/herdsman/cooee-token"));
 }
 
-/// One request to a running `serve_on`, over its socket: the status code.
 fn ask(addr: std::net::SocketAddr, method: &str, path: &str, body: &str, extra: &str) -> String {
     use std::io::{Read, Write};
     let mut s = std::net::TcpStream::connect(addr).unwrap();
