@@ -712,6 +712,40 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
 }
 
 #[test]
+fn message_text_is_not_a_write_or_a_group_verb() {
+    let d = tmpdir("hook-msg");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let s = d.join("state").display().to_string();
+    let sh = |cmd: &str| orchestrator_hook(&d, json!({"tool_name": "Bash", "tool_input": {"command": cmd}}));
+    let refusal = "REFUSED GROUP_OFF: the `set` group is off; I ran `herdsman set synergy impl --model x`";
+    for cmd in [
+        format!("herdsman thread handoff t6 t7 \"copy\" 'cp mock.png {s}/orchestrator/t7/; then {refusal}'"),
+        format!("herdsman thread handoff t6 synergy 'why: {refusal}' \"mv a > {s}/x\""),
+        format!("herdsman ask synergy 1 \"cp a {s}/x?\" --why '`herdsman set x impl`'"),
+        format!("gh issue create -t 'hook' --body 'echo x > {s}/events.jsonl; {refusal}'"),
+    ] {
+        assert_eq!(sh(&cmd), "", "{cmd}");
+    }
+    for cmd in [
+        format!("echo x > {s}/events.jsonl"),
+        format!("cp a.png {s}/x"),
+        format!("herdsman thread handoff t6 t7 a b > \"{s}/out file\""),
+        format!("herdsman thread say t6 'x' && cp a \"{s}/x y\""),
+    ] {
+        assert!(sh(&cmd).contains("is blocked"), "{cmd}");
+    }
+    for cmd in [
+        "herdsman set synergy impl --model x",
+        "herdsman thread handoff t6 t7 a b; herdsman set synergy impl --model x",
+        "herdsman \"set\" synergy impl --model x",
+        "herdsman thread handoff t6 t7 a \"$(herdsman set synergy impl --model x)\"",
+        "herdsman thread handoff t6 t7 a \"run `herdsman set synergy impl --model x`\"",
+    ] {
+        assert!(sh(cmd).contains("REFUSED GROUP_OFF"), "{cmd}");
+    }
+}
+
+#[test]
 fn herdsman_verbs_and_quoted_text_write_nothing() {
     let d = tmpdir("hook-837");
     std::fs::write(d.join("fleet.toml"), config()).unwrap();
@@ -1508,4 +1542,18 @@ fn impl_lane_never_edits_the_cap_file() {
     std::fs::write(cache.join("issue-sendmeter-25.json"), spec.to_string()).unwrap();
     assert_eq!(call("25", "Edit", json!({"file_path": "/w/ci/cap.toml"})), "");
     assert_eq!(bash("25", "sed -i '' 's/35500/36000/' ci/cap.toml"), "");
+}
+
+#[test]
+fn the_stop_hook_asks_for_the_turn_only_in_impl_lanes() {
+    let stop = |lane: Option<&str>, role: &str| hook_in(lane, role, json!({"hook_event_name": "Stop"}));
+    for lane in [None, Some("sendmeter:-:orchestrator"), Some("sendmeter:-:conductor")] {
+        assert_eq!(stop(lane, "orchestrator"), "", "{lane:?} ends its turn freely");
+    }
+    let out = stop(Some("sendmeter:24:impl"), "impl");
+    let v: Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(
+        (&v["decision"], &v["reason"]),
+        (&json!("block"), &json!(herdsman::hook::TURN_ASK))
+    );
 }
