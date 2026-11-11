@@ -250,6 +250,26 @@ fn kind(e: &anyhow::Error) -> String {
     }
 }
 
+/// cooee's attach token (`cooee-token` beside fleet.toml): `herdsman serve` creates it once, mode 0600, never rewrites it.
+pub fn cooee_token(ctx: &Ctx) -> Result<String> {
+    let p = ctx.config.with_file_name("cooee-token");
+    std::fs::create_dir_all(p.parent().unwrap_or(&p))?;
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&p)
+    {
+        Ok(mut f) => {
+            let t: String = random(32)?.iter().map(|b| format!("{b:02x}")).collect();
+            f.write_all(t.as_bytes())?;
+            Ok(t)
+        }
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(std::fs::read_to_string(&p)?.trim().into()),
+        Err(e) => Err(e.into()),
+    }
+}
+
 /// SHA-256, lowercase hex.
 pub fn sha256(data: &[u8]) -> String {
     use sha2::Digest;
