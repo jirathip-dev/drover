@@ -703,6 +703,9 @@ pub fn drive(
         if let Err(e) = crate::roots::watch(ctx, cfg, r, out) {
             writeln!(out, "roots: {e:#}")?;
         }
+        if let Err(e) = crate::hosts::evacuate(ctx, cfg, r, out) {
+            writeln!(out, "offline hosts: {e:#}")?;
+        }
     }
     // #714: a paused fleet's live lanes still get their outbox drained and their answers; only its pass is held.
     let live: Vec<&str> = (cfg.fleet.keys().map(String::as_str))
