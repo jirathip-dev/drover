@@ -1,0 +1,13 @@
+Decided: every literal core timing is a [limits] key whose default is today's value, with one doc line in LIMIT_DOCS and docs/config.md
+Because: "Make each a [limits] key with today's value as default, add a doc line per key"
+Decided: CI's timing check is scripts/timing-check.sh run in ci.yml; it skips config.rs and #[cfg(test)] items
+Because: "outside `#[cfg(test)]` and `config.rs` fails"
+Decided: no card_wait_secs key; no card view wait exists at head, a card runs for its own timeout
+Because: crates/core/src/card.rs:24
+Rejected: an unused card_wait_secs key — dead config nothing reads; #821 can add it with the wait it times
+Decided: staging merge gives #859's six serve and SLO limits a LIMIT_DOCS line and a docs/config.md row, like every other key
+Because: crates/core/src/config.rs:952
+Decided: staging build fix: needs_fold_ops uses webview() since #862 removed swift()
+Because: crates/cli/tests/needs_fold_ops.rs:78
+Check: crates/cli/tests/limits.rs fails if any [limits] field lacks a doc line or docs table row; it passes with #859's keys
+Owner: Every timing herdsman uses can now be tuned in fleet.toml's [limits], and CI blocks new hard-coded ones.
