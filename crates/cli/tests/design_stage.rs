@@ -142,7 +142,7 @@ fn a_design_lane_whose_only_untracked_file_is_its_claude_local_md_hands_off() {
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
     );
-    let mut r = fake(&c, c.now + 60);
+    let mut r = fake(&c, HEAD);
     let st = Out {
         code: 0,
         stdout: "?? CLAUDE.local.md\n".into(),
