@@ -554,12 +554,17 @@ impl Server<'_> {
         Value::Array(cards)
     }
 
-    fn plugin(head: &str) -> bool {
-        let token = std::env::var("COOEE_PLUGIN_TOKEN").unwrap_or_default();
+    fn plugin(ctx: &Ctx, head: &str) -> bool {
+        let file = std::fs::read_to_string(ctx.config.with_file_name("cooee-token")).unwrap_or_default();
         let bearer = header(head, "authorization")
             .and_then(|h| h.strip_prefix("Bearer "))
             .unwrap_or_default();
-        !token.is_empty() && devices::sha256(bearer.as_bytes()) == devices::sha256(token.as_bytes())
+        [
+            std::env::var("COOEE_PLUGIN_TOKEN").unwrap_or_default(),
+            file.trim().into(),
+        ]
+        .iter()
+        .any(|t| !t.is_empty() && devices::sha256(bearer.as_bytes()) == devices::sha256(t.as_bytes()))
     }
 
     pub(super) fn screens(
@@ -571,7 +576,7 @@ impl Server<'_> {
         body: &str,
         auth: &Auth,
     ) -> Res {
-        let plugin = Self::plugin(head);
+        let plugin = Self::plugin(ctx, head);
         if !plugin && !self.allowed(ctx, head) {
             return line("403 Forbidden", "foreign Host or Origin");
         }
@@ -770,7 +775,7 @@ impl Server<'_> {
         let (q, open) = (form(query), STREAMS.fetch_add(1, Relaxed) < 4);
         let first = self
             .screen(&ctx(), base, &q)
-            .filter(|_| open && (Self::plugin(head) || self.allowed(self.ctx, head)));
+            .filter(|_| open && (Self::plugin(self.ctx, head) || self.allowed(self.ctx, head)));
         let Some(mut cur) = first else {
             STREAMS.fetch_sub(1, Relaxed);
             let r = line(
