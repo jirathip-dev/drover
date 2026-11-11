@@ -405,7 +405,7 @@ fn waits(
         }
         "ready" if !how.is_empty() => {
             let base = pr["baseRefName"].as_str().unwrap_or("?");
-            let what = format!("PASS · {how} {base} · catching up next pass (≤ 5 min)");
+            let what = format!("PASS · {how} {base} · {CATCH_UP}");
             let b = to(gate, "conflict");
             w(
                 "drive",
@@ -839,7 +839,10 @@ pub fn scan(
             .then(|| held(mine, (&s.fleet, s.issue), w.next_cmd.as_deref()))
             .flatten()
         {
-            w.what += &format!(" · {h}");
+            w.what = match w.what.strip_suffix(CATCH_UP) {
+                Some(p) => format!("{p}{h}"),
+                None => format!("{} · {h}", w.what),
+            };
         }
         // #212: a CI/merge line from a PR read older than 2 min (no fast step since) says when it was taken.
         let at = gh::cached_at(ctx, &s.fleet, s.issue).filter(|t| ctx.now > t + 120);
@@ -921,6 +924,8 @@ pub fn guarded(events: &[Event], cfg: &Config) -> Vec<IssueState> {
     }
     out
 }
+
+const CATCH_UP: &str = "catching up next pass (≤ 5 min)";
 
 pub fn held(events: &[Event], (f, n): (&str, u64), cmd: Option<&str>) -> Option<String> {
     let mine = |e: &&Event| e.fleet == f && e.issue == Some(n) && matches!(e.kind.as_str(), "driven" | "spawn");
