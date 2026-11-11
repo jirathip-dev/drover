@@ -72,7 +72,7 @@ function judge(b, f, top, lo = 0) {
 }
 
 const browser = await webkit.launch();
-const ctx = await browser.newContext({ viewport: { width, height: 844 }, bypassCSP: true });
+const ctx = await browser.newContext({ viewport: { width, height: 844 }, bypassCSP: true, serviceWorkers: "block" });
 at = "newPage";
 const page = await ctx.newPage();
 for (const e of ["crash", "dialog", "framenavigated", "pageerror", "requestfailed"])

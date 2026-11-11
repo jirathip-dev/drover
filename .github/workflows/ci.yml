@@ -208,11 +208,13 @@ jobs:
       - name: first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
       - name: sheet close in WebKit (chat, config, legend)
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p ui-webkit
           HERDSMAN_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test ui_audit closing_a_sheet_never_repaints_the_page -- --nocapture
           test -f ui-webkit/close-chat.png && test -f ui-webkit/close-config.png && test -f ui-webkit/close-legend.png
       - name: the chat keyboard in WebKit (#443, a 336 px visualViewport shrink at 390)
+        if: ${{ !cancelled() }}
         run: |
           HERDSMAN_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test chat_tab the_keyboard_keeps_the_composer_on_it -- --nocapture
           test -f ui-webkit/chat-kb.png
