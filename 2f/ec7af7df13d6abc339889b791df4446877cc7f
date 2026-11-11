@@ -1,0 +1,10 @@
+Decided: cooee-drover is gone from README and docs/serve.md; cooee talks to herdsman (Drover) directly
+Because: "No doc may describe cooee-drover as a separate repo or plugin to install"
+Because: cooee-plugin.toml:1
+Decided: #831 moved from "next" to "Today" as it merged on staging while this lane ran
+Because: "Every "Today" line names a merged PR or file that proves it"
+Decided: README may hold the project's own issue links, the same setup_neutral exception docs have
+Because: crates/cli/tests/setup_neutral.rs:79
+Rejected: renaming cooee-drover in test fixtures — the owner note puts code and test names out of scope
+Check: every Today #N is a merged PR subject on staging; every next link is an open issue; README stays at 150 lines
+Owner: The README now shows what herdsman does today and what is next; the repo description to apply is in the PR body.
