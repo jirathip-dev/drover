@@ -154,7 +154,6 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
         out.starts_with("REFUSED DISK_BUDGET: worktrees 0.0 GB > 0.0000019"),
         "{out}"
     );
-    // #842: the refusal names the measured root and the largest folders.
     let why = format!(
         "; measured {} 0.0 GB (build folders aside); largest: {} 0.0 GB, ",
         c.worktrees.display(),
@@ -164,7 +163,6 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
     assert!(!r.called("herdr worktree"), "nothing created");
 }
 
-/// #842: a root that is not mounted counts 0, no error; the refusal lists it with the others.
 #[test]
 fn a_missing_root_counts_zero() {
     let d = tmpdir("disk-gone");
@@ -557,8 +555,6 @@ fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
     assert!(!again.contains("issue-48"), "{again}");
 }
 
-/// #842: the budget's walk counts a hard-linked file and an APFS clone once each (no clone on a file system without
-/// them).
 #[test]
 fn the_budget_counts_a_hard_link_and_a_clone_once() {
     use std::os::unix::fs::MetadataExt;
