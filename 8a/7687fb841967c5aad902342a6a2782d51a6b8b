@@ -1,0 +1,9 @@
+Decided: design lanes take their medium and writable folders from the issue body; HTML under docs/design/ stays the default
+Because: "the medium comes from the issue (and the repo's own design rules), HTML only as the default"
+Decided: the hook refuses a design lane's edit outside docs/design/ and the issue's named design paths (REFUSED DESIGN_PATH)
+Because: "and nothing else outside `docs/design/`"
+Decided: staging build fix: needs_fold_ops (#871) drives webview() and no_webkit(); #863 had removed swift() and webview.swift
+Because: crates/cli/tests/common/mod.rs:333
+Rejected: restoring webview.swift — #863 moved every WebKit test to Playwright on purpose
+Check: cargo test without HERDSMAN_LANE exits 0; with it, only self_update's by-owner assertion fails, the same as on staging
+Owner: Design lanes draw in the medium the issue asks for (SwiftUI previews when named) and may only write their design folders.
