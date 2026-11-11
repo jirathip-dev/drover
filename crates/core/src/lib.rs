@@ -546,18 +546,11 @@ pub fn answer_typed(
     }
     let ask = events.iter().find(|e| is(e, "needs-decision"));
     let text = ask.map_or(choice, |a| chosen(a, choice));
-    if text == "revise" {
-        let text = format!("{text}: {note}");
-        return answer_with(ctx, cfg, r, out, (fleet, id), &text, (TYPED, None), (None, Some(note)));
-    }
-    if text != "approve" {
-        return answer_with(ctx, cfg, r, out, (fleet, id), text, (TYPED, None), (None, Some(note)));
-    }
-    let Some(n) = ask.and_then(|a| a.issue) else {
-        return gate::refused("BAD_VALUE", format!("{id} is on no issue to amend with the note"));
-    };
+    let n = ask.and_then(|a| a.issue).filter(|_| text == "approve");
+    let revise = (text == "revise").then(|| format!("revise: {note}"));
+    let text = revise.as_deref().unwrap_or(text);
     answer_with(ctx, cfg, r, out, (fleet, id), text, (TYPED, None), (None, Some(note)))?;
-    amend::amend(ctx, cfg, r, out, (fleet, n), id, note)
+    n.map_or(Ok(()), |n| amend::amend(ctx, cfg, r, out, (fleet, n), id, note))
 }
 
 /// #584: `herdsman ask withdraw`: the ask's own thread's orchestrator (`by`) closes an ask it replaced (`for`).
@@ -673,11 +666,9 @@ fn answer_with(
         gate::needs_human(ctx, cfg, r, out, (fleet, n), "extend", (spawn, by, None))?;
     }
     let mut d = with_via(json!({"id": id, "choice": text, "by": by}), via);
-    if let Some(b) = basis {
-        d["basis"] = json!(b);
-    }
-    if let Some(n) = note {
-        d["note"] = json!(n);
+    let set = [("basis", basis), ("note", note)].map(|(k, v)| v.map(|v| (k, v)));
+    for (k, v) in set.into_iter().flatten() {
+        d[k] = json!(v);
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, ask.issue, "decision", d))?;
     // #779: a `RESPAWN_LOOP` ask's [park] parks the issue ([try again] is the decision spawn reads).
@@ -703,13 +694,8 @@ fn answer_with(
         let _ = crate::drive::kick_once(ctx, r, (fleet, n), why, Some(&id)); // #304: after the decision is logged
     }
     let mins = cfg.limits.ask_default_minutes;
-    let note_default = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
-    let said = note.map(|n| format!(" (note: {n})")).filter(|_| text == "approve");
-    let msg = format!(
-        "DECISION {id}: {text}{}{}",
-        said.unwrap_or_default(),
-        note_default.unwrap_or_default()
-    );
+    let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
+    let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());
     // #633: an attached cooee thread reads the decision from `/api/v1/events`.
     if let Some(t) = ask
         .str("thread")

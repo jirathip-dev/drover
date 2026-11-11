@@ -193,10 +193,7 @@ enum Cmd {
         /// The owner's exact line in the ask's thread, after the ask: logged by: owner (typed)
         #[arg(long, value_name = "LINE")]
         typed: Option<String>,
-        #[arg(
-            help = "With a typed choice: a revise's note, or an approve's (also written under the issue's `## Amendments`)"
-        )]
-        #[arg(long, requires_all = ["typed", "choice"])]
+        #[arg(long, requires_all = ["typed", "choice"], help = "A typed choice's note; an approve's goes in Amendments")]
         note: Option<String>,
     },
     #[command(
