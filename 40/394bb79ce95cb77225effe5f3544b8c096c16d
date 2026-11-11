@@ -1,0 +1,12 @@
+Decided: a lane is waiting when its agent is not `working` (herdr status) and it was spawned over stall_minutes ago; its in-worktree build dirs and its `.build/<agent>` cache go
+Because: "Never a lane with a running agent turn or a running cargo/node build."
+Because: crates/core/src/check.rs:1167
+Decided: a lane whose `.build/<agent>` profile holds a cargo lock, or with a cargo/rustc/node/npm/pnpm/yarn/bun process inside its worktree, is kept
+Because: crates/core/src/check.rs:1089
+Decided: oldest wait = the issue's last activity (the existing idlest-first order), stopping once the counted total is under budget
+Because: "oldest wait first, stopping once under budget"
+Decided: one `budget-freed` event per pass on fleet `all`, reason `freed N GB from <lanes>`, replacing the per-lane event
+Because: "One line to the owner per pass: freed N GB from <lanes>."
+Rejected: counting `.build` in the worktree total — that is the accounting change #842 owns
+Check: the two existing budget tests and the new one in crates/cli/tests/disk.rs; the working lane's caches stay
+Owner: over the worktree budget, waiting lanes lose their build caches (longest waiting first) and you get one line saying how much was freed
