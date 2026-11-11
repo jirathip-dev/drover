@@ -1,0 +1,6 @@
+Decided: round 3 adds no code; it merges origin/staging so CI runs fresh at a new head
+Because: crates/core/src/hosts.rs:328
+Rejected: re-running the failed evidence run — a re-run replays its 11:08 event, whose body predates the head sha, so it fails again
+Rejected: an empty commit — the staging catch-up was due anyway (34 commits behind) and gives the same fresh CI
+Check: the evidence check is green at 32a22dd and the PR body's Evidence names 32a22ddf353662f403e34f4aaf5b83a9c21de581
+Owner: no behaviour change this round; it only clears a stale CI failure and catches up with staging
