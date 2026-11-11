@@ -1,0 +1,13 @@
+Decided: one liveness rule (`holds`) for spawn markers, shared by the sweep, `pending()`, drive's admit, lane_admit, `waiting` and `spawn-held`.
+Because: "no longer counts toward SPAWN_PENDING in drive's admit, in `pending()` or in `spawn-held`, on the same pass that sweeps it"
+Because: crates/core/src/drive.rs:101
+Decided: an orphan's pane counts as logged only together with its agent name (herdr reuses pane ids); a rev lane of another round than the one due is closed (wip saved), as --supersede would.
+Because: crates/core/src/spawn.rs:1998
+Decided: SPAWN_PENDING refusals, `waiting` and `spawn-held` list each live marker's key and age, read after the sweep so a removed marker never shows.
+Because: "name what actually holds the slot (the marker key and its age)"
+Decided: a green PASS on a draft PR, or one missing the merge label (not fast-first), says so instead of "merging within 1 min"; isDraft is now read.
+Because: crates/core/src/waiting.rs:428
+Decided: fix round 3 only merges current staging and refreshes the PR evidence to the new head; no code change.
+Rejected: gating a manual `herdsman spawn` on the spawn slots — it is the owner's direct command and would add a new refusal; both paths now count the same live markers.
+Check: a dead kick's marker never shows in `waiting`'s slots line, and a reused pane id with another agent's name is adopted.
+Owner: Dead spawn markers no longer hold drive's slots, stray reviewers are adopted or replaced, and waiting names the real holder or draft PR.
