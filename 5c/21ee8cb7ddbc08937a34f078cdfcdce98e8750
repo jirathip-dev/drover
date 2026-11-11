@@ -1,0 +1,14 @@
+Decided: `answer --typed` takes an optional explicit choice; the typed line is then evidence only, and `--note` carries the note.
+Because: "takes an explicit choice (approve/revise/reject, or the option number) plus the owner's line as evidence"
+Decided: a revise with a note answers `revise: <note>`, which a design ask's decide reads as the revise note.
+Because: crates/core/src/design.rs:124
+Decided: an approve with a note logs `note` on the decision, then runs `amend` with the ask as its basis.
+Because: "An approve with a note records the note and also writes it under the issue's `## Amendments`."
+Decided: amend's basis check accepts `by: owner (typed)` beside owner and default.
+Because: crates/core/src/amend.rs:33
+Decided: round 4 merges staging (#817's `on` thread arg joins the typed line) and trims to fit the cap exactly (41000/41000).
+Because: crates/core/src/lib.rs:549
+Rejected: echoing the note in the DECISION line and refusing an approve on an issue-less ask — cut for the cap; the note stays on the decision.
+Check: free text alone with `--typed` still revises with the line as its note (typed_choice.rs second test).
+Check: `herdsman cap-check --config ci/cap.toml` exits 0 at the head with 0 lines of headroom.
+Owner: When you type "approve with a note" in a thread, the design is approved and your note lands in the issue's Amendments.
