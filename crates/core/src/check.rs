@@ -6,7 +6,7 @@ use crate::gate::gate;
 use crate::host;
 use crate::hosts::On;
 use crate::runner::{ok, Runner};
-use crate::spawn::{changes, dirty, OWN_FILES, SHOT_DIRS};
+use crate::spawn::{changes, dirty, own_files, SHOT_DIRS};
 use crate::Ctx;
 use crate::{gh, herdr};
 use anyhow::{Context, Result};
@@ -1904,7 +1904,7 @@ pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str, saved: bool
     if let Some(why) = dirty(r, Path::new(wt)).filter(|_| !saved) {
         anyhow::bail!("{why}");
     }
-    for f in OWN_FILES {
+    for f in own_files() {
         r.remove(&Path::new(wt).join(f)).context(format!("removing {f}"))?;
     }
     for d in SHOT_DIRS.iter().map(|d| Path::new(wt).join(d)) {
@@ -2313,7 +2313,7 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         .collect();
         let no = NO_WIP.map(|d| format!(":(exclude,glob)**/{d}/**"));
         git(&[&["add", "-A", "--", "."][..], &no.each_ref().map(String::as_str)].concat())?;
-        git(&[&["reset", "-q", "--"][..], OWN_FILES, SHOT_DIRS].concat())?;
+        git(&[&["reset", "-q", "--"][..], &own_files().collect::<Vec<_>>(), SHOT_DIRS].concat())?;
         let changed = git(&["diff", "--cached", "--name-only", "--no-renames", "-z"])?;
         let tree = git(&["ls-tree", "-r", "-l", "-z", git(&["write-tree"])?.trim()])?;
         let mut files: Vec<(u64, &str)> = (tree.split('\0').filter_map(|l| l.split_once('\t')))

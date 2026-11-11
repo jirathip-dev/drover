@@ -745,6 +745,11 @@ pub const OWN_FILES: &[&str] = &[
     ".verify-browser.mjs", // #731: scripts/verify-browser.mjs, for the verify lane's recipe
 ];
 
+/// #770: `OWN_FILES` and the harness files spawn copies in (`providers::LOCAL_FILES`).
+pub fn own_files() -> impl Iterator<Item = &'static str> {
+    OWN_FILES.iter().chain(&providers::LOCAL_FILES).copied()
+}
+
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
 pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
 
@@ -760,7 +765,10 @@ pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
 /// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages).
 pub fn changes(st: &str) -> usize {
     let own = |l: &&str| {
-        (OWN_FILES.iter().chain(SHOT_DIRS).chain(&["node_modules/"])).any(|f| l.trim_end() == format!("?? {f}"))
+        (own_files()
+            .chain(SHOT_DIRS.iter().copied())
+            .chain(["node_modules/", providers::LOCAL_DIR]))
+        .any(|f| l.trim_end() == format!("?? {f}"))
     };
     st.lines().filter(|l| !own(l)).count()
 }
@@ -808,6 +816,28 @@ pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> 
     }
     let secs = t.elapsed().as_secs();
     (!done.is_empty() || !errs.is_empty()).then(|| json!({"dirs": done, "secs": secs, "errors": errs}))
+}
+
+fn reuse(p: &Plan, dirs: &[String], target: Option<&String>, agents: &[Value]) -> Option<Value> {
+    let (stem, k) = p.agent.rsplit_once("-r")?;
+    let k = k.parse::<u64>().ok().filter(|k| *k > 1)?;
+    let prev = format!("{stem}-r{}", k - 1);
+    if agents.iter().any(|a| a["name"] == prev.as_str()) {
+        return None;
+    }
+    let wt = p.worktree.to_string_lossy();
+    let old = wt
+        .strip_suffix(&format!("-r{k}"))
+        .map(|w| PathBuf::from(format!("{w}-r{}", k - 1)));
+    let mut pairs: Vec<(PathBuf, PathBuf)> = (dirs.iter())
+        .filter_map(|d| Some((old.as_ref()?.join(d), p.worktree.join(d))))
+        .collect();
+    pairs.extend(target.map(|t| (Path::new(t).with_file_name(&prev), PathBuf::from(t))));
+    let moved: Vec<String> = (pairs.into_iter())
+        .filter(|(from, to)| from.is_dir() && !to.exists() && std::fs::rename(from, to).is_ok())
+        .map(|(_, to)| to.display().to_string())
+        .collect();
+    (!moved.is_empty()).then(|| json!({"dirs": moved, "from": prev}))
 }
 
 /// #630: a new lane's build folder `t` (under its root's `.build`) cloned from the newest of its fleet's lanes' there:
@@ -1501,6 +1531,9 @@ pub fn spawn(
         &dirs[..]
     };
     let target = p.env.get("CARGO_TARGET_DIR").filter(|_| on.machine.is_none());
+    if let Some(d) = (p.family == "rev").then(|| reuse(&p, dirs, target, &agents)).flatten() {
+        event("build-reused", d)?;
+    }
     let (res, cloned) = std::thread::scope(|s| {
         let c = s.spawn(|| {
             let warm = target.and_then(|t| clone_warm(r, fleet, Path::new(t)));
