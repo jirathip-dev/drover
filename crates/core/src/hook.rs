@@ -570,7 +570,7 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
         (Some(&"config"), Some(&("apply" | "discard")))
             | (Some(&"secret"), Some(&("ls" | "rm")))
             | (Some(&"accounts"), Some(&"import"))
-            | (Some(&"card"), Some(&("approve" | "deny")))
+            | (Some(&"card"), Some(&("approve" | "deny" | "run")))
     ) {
         return Some(
             "REFUSED OWNER_ONLY: only the owner applies config, settles run cards or lists and removes secrets, never \

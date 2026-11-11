@@ -678,6 +678,9 @@ enum CardCmd {
     },
     /// Owner only: deny a card; nothing runs
     Deny { id: String },
+    /// #821: an approved card's run, detached by approve; its exit code and output tail go to the thread
+    #[command(hide = true)]
+    Run { id: String },
 }
 
 #[derive(Subcommand)]
@@ -1573,6 +1576,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         }
                         CardCmd::Approve { id, sha } => crate::card::settle(ctx, &cfg, r, &id, true, sha.as_deref())?,
                         CardCmd::Deny { id } => crate::card::settle(ctx, &cfg, r, &id, false, None)?,
+                        CardCmd::Run { id } => crate::card::run(ctx, &cfg, r, &id)?,
                     };
                     writeln!(out, "{line}")?;
                 }

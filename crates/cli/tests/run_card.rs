@@ -166,18 +166,29 @@ fn approve_runs_the_exact_command_once_and_posts_its_masked_output() {
     );
 
     let leak = "token ghp_abcdefghij0123456789abcdefghij";
-    let r = Fake::default().reply("sh -c", &format!("commit 1a2b\n{leak}\n"));
+    let r = Fake::default()
+        .reply("sh -c nohup", "4242\n")
+        .reply("sh -c", &format!("commit 1a2b\n{leak}\n"));
     let at5 = at(&c, T + 300);
     let (code, out) = run(&at5, &r, &["card", "approve", "r1", "--sha", &sha[..12]]);
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "run r1 approved by owner, running in /srv/app…\n")
+    );
+    let (code, out) = run(&at5, &r, &["card", "run", "r1"]);
     assert_eq!(code, 0, "{out}");
+    let out_file = c.state.with_file_name("run-r1.out");
     assert_eq!(
         r.calls
             .borrow()
             .iter()
-            .filter(|l| l.starts_with("sh -c"))
+            .filter(|l| l.starts_with("sh -c") && !l.starts_with("sh -c nohup"))
             .cloned()
             .collect::<Vec<_>>(),
-        ["sh -c cd -- \"$1\" && eval \"$2\" sh /srv/app git log -1 main"],
+        [format!(
+            "sh -c exec >\"$3\" 2>&1; cd -- \"$1\" && eval \"$2\" sh /srv/app git log -1 main {}",
+            out_file.display()
+        )],
         "the exact text, in its folder"
     );
     let line = kinds(&c, "thread-msg").pop().unwrap();
