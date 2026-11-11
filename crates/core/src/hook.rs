@@ -391,7 +391,9 @@ fn unquote(cmd: &str, args: bool) -> String {
         match c {
             '\'' | '"' => {
                 // Only when `herdsman` is the command word: `eval` or `ssh h` before it re-parse the quoted text.
-                let i = words.iter().position(|w| matches!(word(w), "herdsman" | "fleet"));
+                let i = words
+                    .iter()
+                    .position(|w| matches!(word(w), "herdsman" | "fleet" | "gh"));
                 let i = i.filter(|&i| {
                     words[..i]
                         .iter()
@@ -405,6 +407,7 @@ fn unquote(cmd: &str, args: bool) -> String {
                 let text = text || data;
                 // `$'…'` escapes its quote (`$'x\''`); its text is kept, like an unterminated quote's.
                 let ansi = c == '\'' && out.ends_with('$');
+                let target = out.trim_end().ends_with(['>', '<']);
                 out.push(c);
                 let (mut span, mut live, mut closed) = (String::new(), false, false);
                 while let Some(q) = cs.next() {
@@ -417,7 +420,9 @@ fn unquote(cmd: &str, args: bool) -> String {
                     live |= c == '"' && esc.is_none() && (q == '`' || (q == '$' && cs.peek() == Some(&'(')));
                     span.extend(Some(q).into_iter().chain(esc));
                 }
-                if !text || live || ansi || !closed {
+                let msg =
+                    i.is_some() && !target && span.contains(|q: char| q.is_whitespace() || ";|&()`<>".contains(q));
+                if !(text || msg) || live || ansi || !closed {
                     cur.push_str(&span);
                     out.push_str(&span);
                 }
