@@ -1,0 +1,5 @@
+Decided: this round merges origin/staging, resolving the screens.rs conflict by keeping both sides
+Because: crates/server/src/screens.rs:791
+Rejected: none
+Check: the stream's first screen still runs inside runner::request and calls staging's Self::plugin(self.ctx, head)
+Owner: the PR is up to date with staging and names the exact version tested; nothing in the board changed this round
