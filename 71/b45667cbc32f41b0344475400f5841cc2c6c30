@@ -1,0 +1,5 @@
+Decided: drop the four new comment lines in the disk test file; the code and assertions are unchanged.
+Because: crates/cli/tests/disk.rs:157
+Rejected: keeping them as doc comments — arch-check allows one `///` line on a public item only, and test fns are private.
+Check: CI's arch-check step reports 0 violations at this head.
+Owner: fixes the red CI check; the disk numbers are unchanged.
