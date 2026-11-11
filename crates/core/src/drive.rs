@@ -663,6 +663,14 @@ pub fn drive(
     fast: bool,
 ) -> Result<()> {
     let t0 = std::time::Instant::now();
+    let mut slow = (t0, String::new(), 0.0);
+    let mut lap = |step: &str| {
+        let secs = slow.0.elapsed().as_secs_f64();
+        if secs > slow.2 {
+            (slow.1, slow.2) = (step.to_string(), secs);
+        }
+        slow.0 = std::time::Instant::now();
+    };
     only.map(|f| cfg.fleet(f)).transpose()?;
     std::fs::create_dir_all(state_dir(ctx))?;
     let i = usize::from(fast);
@@ -686,6 +694,7 @@ pub fn drive(
             writeln!(out, "host history: {e:#}")?;
         }
     }
+    lap("read log, host sample");
     // #298: shed's state changes since the last pass, logged per lane; the agent list each pass polls is the fallback.
     if let Some(b) = r.shed().filter(|_| !fast) {
         if let Err(e) = crate::shed::intake(ctx, cfg, &b.wire) {
@@ -698,6 +707,7 @@ pub fn drive(
             writeln!(out, "budget: {e:#}")?;
         }
     }
+    lap("disk budget");
     // #630/#790: a lane whose root went away restarts on the next root (the full pass only).
     if only.is_none() && !fast {
         if let Err(e) = crate::roots::watch(ctx, cfg, r, out) {
@@ -733,6 +743,7 @@ pub fn drive(
         res = Err(e);
     };
     // #337: one look per step (each remote host in one ssh call), saved for the board; the passes scan it.
+    lap("roots, redeliver");
     let log = || crate::db::last_seq(&ctx.state);
     let mut seen = if fleets.is_empty() && (!fast || live.is_empty()) {
         crate::snapshot::Snap::read(ctx, r) // every fleet paused, no drain: nothing to look at
@@ -747,6 +758,7 @@ pub fn drive(
             Err(e) => writeln!(out, "orphans: {e:#}")?,
         }
     }
+    lap("look, orphans");
     if !fast {
         if let Err(e) = repair(ctx, cfg, (r, &seen), out) {
             writeln!(out, "repair: {e:#}")?;
@@ -759,6 +771,7 @@ pub fn drive(
     }
     // #182: every fleet's due steps (reviews first) before any fleet starts new work.
     let mut due = vec![];
+    lap("repair, outbox");
     for name in &fleets {
         match pass(ctx, cfg, (r, &seen), out, name, fast) {
             Ok(go) => {
@@ -767,12 +780,14 @@ pub fn drive(
             }
             Err(e) => fail(name, e),
         }
+        lap(&format!("{name}: PR reads, gates, steps"));
     }
     if !fast {
         for (name, e) in starts(ctx, cfg, r, out, &due, start) {
             fail(name, e);
         }
     }
+    lap("spawns");
     // #337: a step that logged something is looked at again, so the board shows what it did.
     if log() != grew {
         crate::snapshot::take(ctx, cfg, r);
@@ -809,6 +824,13 @@ pub fn drive(
         let max = cfg.limits.rotate_mb << 20;
         let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
         cp.unwrap_or_else(|e| eprintln!("herdsman: checkpoint: {e:#}"));
+    }
+    lap("backlog, checkpoint");
+    let secs = t0.elapsed().as_secs_f64();
+    if t0.elapsed().as_secs() > cfg.limits.pass_max_secs {
+        let r1 = |x: f64| (x * 10.0).round() / 10.0;
+        let d = json!({"fast": fast, "secs": r1(secs), "step": slow.1, "step_secs": r1(slow.2), "kick": KICK.get()});
+        let _ = append(&ctx.state, &Event::new(ctx.now, "herdsman", None, "pass-slow", d));
     }
     res
 }
@@ -992,6 +1014,32 @@ fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: 
     Ok(())
 }
 
+fn stale_replaced(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    role: &str,
+    old: &str,
+    mins: u64,
+) -> Result<()> {
+    let ev = read(&ctx.state)?;
+    let new = |e: &&Event| e.is("spawn", fleet, n) && e.str("role") == Some(role) && e.ts >= ctx.now;
+    let new = ev
+        .iter()
+        .rfind(new)
+        .and_then(|e| e.str("agent"))
+        .unwrap_or("a lane still starting");
+    let why = format!("{old} quiet {mins}m with no verdict: replaced by {new}");
+    writeln!(out, "{fleet} #{n} {why}")?;
+    let d = json!({"agent": old, "role": role, "idle_minutes": mins, "new": new, "reason": why});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, fleet, Some(n), "rev-stale-replaced", d),
+    )
+}
+
 fn escalate(
     ctx: &Ctx,
     cfg: &Config,
@@ -1143,7 +1191,7 @@ fn pass(
         }
         // #148: a head auto-updated this pass has no CI yet; its merge waits for the next pass.
         let now = |e: &Event| e.is("auto-updated", fleet, s.issue) && e.ts == ctx.now;
-        if let Some(e) = read(&ctx.state)?.into_iter().rev().find(now) {
+        if let Some(e) = crate::events::shared(&ctx.state)?.iter().rfind(|e| now(e)).cloned() {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
@@ -1266,9 +1314,16 @@ fn pass(
             }
             let mut code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &args)?;
             // #534: a finished lane of the issue in the way is replaced in the same pass; a working one still waits.
-            if code == Some("LANE_LIVE") && args[0] == "spawn" && last_words(fleet).contains(OLD) {
+            let stale = (code == Some("LANE_LIVE") && step == "review")
+                .then(|| s.lanes.get(args[3]))
+                .flatten()
+                .and_then(|l| Some((l, stall::stale_check(ctx, r, &events, &agents, (fleet, s.issue), l)?)));
+            if code == Some("LANE_LIVE") && args[0] == "spawn" && (last_words(fleet).contains(OLD) || stale.is_some()) {
                 let a = [&args[..], &["--supersede"]].concat();
                 code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &a)?;
+            }
+            if let Some((old, mins)) = stale.filter(|_| code.is_none()) {
+                stale_replaced(ctx, cfg, out, (fleet, s.issue), args[3], old, mins)?;
             }
             if let Some((hash, _)) = repro.filter(|_| code == Some("NO_REPRO")) {
                 repro_refused(ctx, cfg, r, (&events, &agents), (fleet, s.issue, &w.lane), &args, &hash)?;
