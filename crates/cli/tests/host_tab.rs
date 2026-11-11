@@ -109,3 +109,29 @@ fn the_host_api_shows_each_root_with_its_state_and_free_space() {
         "{v}"
     );
 }
+
+#[test]
+fn the_host_api_gives_each_account_and_provider_login_its_vendor() {
+    let c = ctx(
+        &tmpdir("host-vendors"),
+        &(CONFIG.to_string() + "[accounts]\nA = \"A\"\n"),
+    );
+    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let res =
+        String::from_utf8(s.respond(&format!("GET /api/v1/host HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
+    let setups = v["hosts"][0]["setups"].as_array().unwrap();
+    assert!(
+        setups.contains(&"claude".into()) && setups.contains(&"gh".into()),
+        "{v}"
+    );
+    assert_eq!(
+        v["vendors"],
+        serde_json::json!({
+            "accounts": [{"name": "A", "vendor": "anthropic"}],
+            "setups": [{"name": "claude", "vendor": "anthropic"}, {"name": "codex", "vendor": "openai"}],
+        }),
+        "gh is no provider's login: {v}"
+    );
+}
