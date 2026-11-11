@@ -1,0 +1,7 @@
+Decided: no code change; the evidence FAIL came from the run before the body edit, and that run stayed failed in the check rollup at d31e30f
+Because: scripts/evidence-check.sh:10
+Decided: merge origin/staging (f650428) for a fresh head with a clean check rollup; the body's evidence and index.toml pin name that head
+Because: "The PR body names the commit for cooee's `plugins/index.toml` to pin"
+Rejected: re-running the failed evidence run — it reuses its event's old PR body and fails again
+Check: the body's pin and test evidence name 98b9f9509a1c0640e07b62e9268277a9912c14a9, the PR head, and every check at it is green
+Owner: no behaviour change this round; the PR now sits on current staging with up-to-date evidence.
