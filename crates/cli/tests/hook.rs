@@ -1464,7 +1464,6 @@ fn impl_lane_never_edits_the_cap_file() {
     assert_eq!(bash("25", "sed -i '' 's/35500/36000/' ci/cap.toml"), "");
 }
 
-/// #827: the stop hook asks for `herdsman turn` only in an impl-type lane; any other lane, or none, ends its turn.
 #[test]
 fn the_stop_hook_asks_for_a_turn_only_in_impl_type_lanes() {
     let stop = json!({"hook_event_name": "Stop", "stop_hook_active": false});
