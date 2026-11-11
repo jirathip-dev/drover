@@ -414,3 +414,51 @@ fn a_failed_restart_off_a_gone_root_is_retried_on_the_next_drive_pass() {
     assert_eq!(code, 0, "{out}");
     assert_eq!((spawns(&r.c).len(), moved(&r.c)), (2, 1), "{out}");
 }
+
+#[test]
+fn a_second_rev_round_reuses_the_first_rounds_build_folder_and_only_the_first_clones() {
+    let r = repo("roots-reuse");
+    let b = r.nvme.join(".build");
+    std::fs::create_dir_all(b.join("sendmeter-impl-12/release")).unwrap();
+    std::fs::write(b.join("sendmeter-impl-12/release/warm"), "w").unwrap();
+    git(&r.local, &["branch", "-q", "rev-12-r1", "origin/issue-12"]);
+    git(&r.local, &["branch", "-q", "rev-12-r2", "origin/issue-12"]);
+    let f = spawnable(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let (code, out) = run(&r.c, &Git(&f), &["spawn", "sendmeter", "12", "rev"]);
+    assert_eq!(code, 0, "{out}");
+    let cp = |f: &Fake| {
+        f.calls
+            .borrow()
+            .iter()
+            .filter(|c| c.starts_with("git -cR") || c.starts_with("git -R"))
+            .count()
+    };
+    assert_eq!(cp(&f), 1, "the first round clones: {:?}", f.calls.borrow());
+    let ev = read(&r.c.state).unwrap();
+    assert!(ev.iter().any(|e| e.kind == "build-cloned") && !ev.iter().any(|e| e.kind == "build-reused"));
+
+    let r1 = b.join("sendmeter-rev-12-r1");
+    std::fs::create_dir_all(r1.join("release")).unwrap();
+    std::fs::write(r1.join("release/built"), "r1").unwrap();
+    let verdict = json!({"verdict": "FAIL", "sha": "a".repeat(40), "body": "FAIL"});
+    append(
+        &r.c.state,
+        &Event::new(r.c.now, "sendmeter", Some(12), "verdict", verdict),
+    )
+    .unwrap();
+    let f = spawnable(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let (code, out) = run(&r.c, &Git(&f), &["spawn", "sendmeter", "12", "rev"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(cp(&f), 0, "the second round copies nothing: {:?}", f.calls.borrow());
+    let r2 = b.join("sendmeter-rev-12-r2");
+    assert_eq!(std::fs::read_to_string(r2.join("release/built")).unwrap(), "r1");
+    assert!(!r1.exists());
+    let ev = read(&r.c.state).unwrap();
+    let e = ev
+        .iter()
+        .find(|e| e.kind == "build-reused")
+        .expect("build-reused logged");
+    assert_eq!(e.str("from"), Some("sendmeter-rev-12-r1"));
+    assert_eq!(e.data["dirs"], json!([r2.display().to_string()]));
+    assert_eq!(ev.iter().filter(|e| e.kind == "build-cloned").count(), 1);
+}

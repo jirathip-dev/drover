@@ -284,3 +284,40 @@ fn an_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once() {
         "the skip failed nothing"
     );
 }
+
+#[test]
+fn a_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_admitted() {
+    let mut c = setup("pending-load");
+    let load = Out {
+        stdout: "{ 40.00 3.00 2.00 }\n".into(),
+        ..Out::default()
+    };
+    let swapd = Out {
+        stdout: "  104     1 900.0 /usr/sbin/swapd\n".into(),
+        ..Out::default()
+    };
+    let loaded = Fake {
+        replies: [
+            vec![
+                ("sysctl -n vm.loadavg".to_string(), load),
+                ("ps -Ao".to_string(), swapd),
+            ],
+            fake("1").replies,
+        ]
+        .concat(),
+        ..Fake::default()
+    };
+    let calm = fake("1");
+    let (code, out) = run(&c, &loaded, &["extend", "sendmeter", "12"]);
+    assert!(code == 0 && out.contains("waiting for host (HOST_BUSY)"), "{out}");
+    c.now += 7200;
+    let (code, out) = run(&c, &loaded, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(spawns(&c), 1, "nothing started on a loaded host");
+    assert_eq!(pending(&c).unwrap().reason.as_deref(), Some(herdsman::pending::LOAD));
+    assert_eq!(cards(&c, &calm, c.now), [], "two hours on load alone: no card");
+    let (code, out) = run(&c, &calm, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(calm.called("herdr agent start sendmeter-impl-12"), "{out}");
+    assert_eq!((spawns(&c), pending(&c)), (2, None));
+}
