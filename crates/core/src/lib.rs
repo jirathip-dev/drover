@@ -8,7 +8,6 @@ pub mod check;
 #[allow(clippy::doc_markdown)] // its doc comments are clap help text, printed verbatim
 mod cli;
 pub mod cloud;
-pub mod conductor;
 pub mod config;
 pub mod db;
 pub mod design;
@@ -26,6 +25,7 @@ pub mod hosts;
 pub mod land;
 pub mod lanes;
 pub mod lesson;
+pub mod orchestrator;
 pub mod outbox;
 pub mod overlap;
 pub mod pending;
@@ -325,7 +325,7 @@ pub fn ask(
     }
     let events = read(&ctx.state)?;
     if let Some(t) = thread {
-        conductor::fleet_of(&events, t)?; // #355: its options become the thread's choice rows (#633: or a cooee card)
+        orchestrator::fleet_of(&events, t)?;
     }
     let id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
     // `<fleet>:<issue|->:<role>` names the newest spawn of that lane.
@@ -350,17 +350,17 @@ pub fn ask(
     let from_lane = lane
         .rsplit(':')
         .next()
-        .is_some_and(|r| !r.is_empty() && r != "conductor");
-    let routed = conductor::route(cfg, &events, fleet).filter(|_| from_lane && thread.is_none());
+        .is_some_and(|r| !r.is_empty() && !orchestrator::is_role(r));
+    let routed = orchestrator::route(cfg, &events, fleet).filter(|_| from_lane && thread.is_none());
     if let Some(t) = routed {
         d["routed"] = json!(t);
     }
     let ev = Event::new(ctx.now, fleet, issue, "needs-decision", d);
     emit(&ctx.state, cfg, ev.clone())?;
     // #633: an attached cooee thread reads the ask from `/api/v1/events`; no herdsman conductor to type it into.
-    if let Some(t) = routed.filter(|t| conductor::attached(&events, t).is_none()) {
-        if let Err(e) = conductor::lane_ask(ctx, cfg, r, t, &ev) {
-            conductor::to_owner(ctx, cfg, t, &ev, None, &format!("conductor not reached: {e:#}"))?;
+    if let Some(t) = routed.filter(|t| orchestrator::attached(&events, t).is_none()) {
+        if let Err(e) = orchestrator::lane_ask(ctx, cfg, r, t, &ev) {
+            orchestrator::to_owner(ctx, cfg, t, &ev, None, &format!("orchestrator not reached: {e:#}"))?;
         }
     }
     Ok(writeln!(out, "{id}")?)
@@ -373,13 +373,13 @@ fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
         .unwrap_or(choice)
 }
 
-/// A conductor's answer may not change one this long after it (the owner's [change] may).
+/// An orchestrator's answer may not change one this long after it (the owner's [change] may).
 pub const CHANGE: u64 = 30 * 60;
 
 /// #541: `herdsman answer --basis`, run by thread `t`'s conductor: answered `by: conductor-<t>` only if the ask is a
 /// lane ask on its repo, names no owner topic, and `basis` quotes the issue's spec (3 words or more, verbatim) or
 /// names an answered decision; else `OWNER_ASK`, and a lane ask on its repo is put to the owner in the thread.
-pub fn conductor_answer(
+pub fn orchestrator_answer(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
@@ -394,7 +394,7 @@ pub fn conductor_answer(
         return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {id}"));
     };
     let mine = ask.str("routed").is_some() || crate::design::is_ask(ask) || ask.data.get("extend").is_some();
-    if !mine || conductor::fleet_of(&events, t)? != ask.fleet {
+    if !mine || orchestrator::fleet_of(&events, t)? != ask.fleet {
         return gate::refused("OWNER_ASK", format!("{id} is no lane ask on {t}'s repo; ask the owner"));
     }
     let text = chosen(ask, choice);
@@ -420,7 +420,7 @@ pub fn conductor_answer(
     if !why.is_empty() {
         let opts = ask.data["options"].as_array().into_iter().flatten();
         let rec = (opts.zip(1..)).find(|o| o.0 == text).map(|o| o.1);
-        conductor::to_owner(ctx, cfg, t, ask, rec, why)?;
+        orchestrator::to_owner(ctx, cfg, t, ask, rec, why)?;
         return gate::refused("OWNER_ASK", format!("{why}; ask the owner"));
     }
     answer_with(
@@ -430,14 +430,14 @@ pub fn conductor_answer(
         out,
         (fleet, id),
         choice,
-        (&format!("conductor-{t}"), None),
+        (&format!("orchestrator-{t}"), None),
         Some(&quote),
     )
 }
 
-/// #817: `herdsman extend` by thread `t`'s conductor: the owner's `typed` line, else its extend ask answered on `basis`.
+/// #817: `herdsman extend` by thread `t`'s orchestrator: the owner's `typed` line, else its extend ask answered on `basis`.
 #[allow(clippy::too_many_arguments)]
-pub fn conductor_extend(
+pub fn orchestrator_extend(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
@@ -448,7 +448,7 @@ pub fn conductor_extend(
     (typed, basis): (Option<&str>, Option<&str>),
 ) -> Result<()> {
     let events = read(&ctx.state)?;
-    if conductor::fleet_of(&events, t)? != fleet {
+    if orchestrator::fleet_of(&events, t)? != fleet {
         return gate::refused("OWNER_ASK", format!("#{n} is not on {t}'s repo; ask the owner"));
     }
     gate::held(ctx, fleet, n)?;
@@ -479,7 +479,7 @@ pub fn conductor_extend(
             "kind": "owner", "extend": true, "spawn": spawn});
         events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "needs-decision", d))?;
     }
-    conductor_answer(ctx, cfg, r, out, (fleet, &id), "1", (t, basis.unwrap_or_default()))
+    orchestrator_answer(ctx, cfg, r, out, (fleet, &id), "1", (t, basis.unwrap_or_default()))
 }
 
 /// #584: who a typed answer is by.
@@ -498,7 +498,7 @@ pub fn answer_typed(
 ) -> Result<()> {
     let events = read(&ctx.state)?;
     let is = |e: &&Event, k: &str| e.kind == k && e.fleet == fleet && e.str("id") == Some(id);
-    let on = on.filter(|t| conductor::fleet_of(&events, t).ok() == Some(fleet));
+    let on = on.filter(|t| orchestrator::fleet_of(&events, t).ok() == Some(fleet));
     // Where the ask waits: its `needs-decision` in its thread, or (#541) its `ask-owner` row.
     let asked: Vec<(&str, u64)> = (events.iter())
         .filter(|e| is(e, "needs-decision") || is(e, "ask-owner"))
@@ -537,7 +537,7 @@ pub fn answer_typed(
     answer(ctx, cfg, r, out, (fleet, id), line, (TYPED, None))
 }
 
-/// #584: `herdsman ask withdraw`: the ask's own thread's conductor (`by`) closes an ask it replaced (`for`).
+/// #584: `herdsman ask withdraw`: the ask's own thread's orchestrator (`by`) closes an ask it replaced (`for`).
 pub fn withdraw(
     ctx: &Ctx,
     cfg: &Config,
@@ -555,8 +555,11 @@ pub fn withdraw(
         return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {q}"));
     }
     let t = ask.str("thread").unwrap_or_default();
-    if t.is_empty() || by.strip_prefix("conductor-").unwrap_or(by) != t {
-        return gate::refused("BAD_VALUE", format!("only {id}'s own thread's conductor withdraws it"));
+    if t.is_empty() || by.strip_prefix("orchestrator-").unwrap_or(by) != t {
+        return gate::refused(
+            "BAD_VALUE",
+            format!("only {id}'s own thread's orchestrator withdraws it"),
+        );
     }
     if let Some(w) = events::closed(&events, ask) {
         return gate::refused("ALREADY_ANSWERED", format!("{id} is closed: {w}"));
@@ -602,8 +605,8 @@ fn answer_with(
         return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {id}"));
     };
     let last = events.iter().rev().find(|e| is(e, "decision"));
-    let conductor = |b: &str| b.starts_with("conductor-");
-    let change = |d: &&Event| d.str("by").is_some_and(conductor) && !conductor(by) && ctx.now < d.ts + CHANGE;
+    let orchestrator = |b: &str| b.starts_with("orchestrator-");
+    let change = |d: &&Event| d.str("by").is_some_and(orchestrator) && !orchestrator(by) && ctx.now < d.ts + CHANGE;
     // #621: a handoff card answers every tap with its one delivery (`conductor::land`).
     let handoff = ask.data.get("handoff").is_some();
     if let Some(d) = last.filter(|d| !handoff && d.str("by") != Some("default") && !change(d)) {
@@ -623,7 +626,7 @@ fn answer_with(
     }
     // #492: a handoff card's tap delivers the handoff there; nothing goes back into the thread's conductor.
     if handoff {
-        let (to, fresh) = conductor::land(ctx, cfg, r, ask, choice)?;
+        let (to, fresh) = orchestrator::land(ctx, cfg, r, ask, choice)?;
         let text = match last.and_then(|d| d.str("choice")) {
             Some(first) if !fresh => first,
             _ => text,
@@ -659,7 +662,7 @@ fn answer_with(
             Event::new(ctx.now, fleet, ask.issue, "parked", json!({"by": by})),
         )?;
     }
-    if let (Some(b), Some(t)) = (basis, by.strip_prefix("conductor-")) {
+    if let (Some(b), Some(t)) = (basis, by.strip_prefix("orchestrator-")) {
         let at = ask.issue.map_or(String::new(), |n| format!(" for #{n}"));
         let text = format!("answered {id}{at}: {text}, because {b}");
         let d = json!({"thread": t, "from": "system", "text": text, "change": id});
@@ -677,14 +680,17 @@ fn answer_with(
     let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
     let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());
     // #633: an attached cooee thread reads the decision from `/api/v1/events`.
-    if let Some(t) = ask.str("thread").filter(|t| conductor::attached(&events, t).is_some()) {
+    if let Some(t) = ask
+        .str("thread")
+        .filter(|t| orchestrator::attached(&events, t).is_some())
+    {
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {t}")?);
     }
     // #584: a typed answer's conductor ran it, the owner's line already in its conversation.
     if let Some(t) = ask.str("thread").filter(|_| by != TYPED) {
-        let agent = conductor::say(ctx, cfg, r, (t, &msg, &[]), (by, true))?; // #355: back into the thread's conversation
+        let agent = orchestrator::say(ctx, cfg, r, (t, &msg, &[]), (by, true))?;
         let q = ask.str("question").unwrap_or_default();
-        conductor::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?; // #413: into the thread it came from
+        orchestrator::flow(ctx, cfg, t, &format!("answered {id}: {q} → {text}"))?;
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?);
     }
     if design {

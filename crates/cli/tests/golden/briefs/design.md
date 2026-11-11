@@ -2,7 +2,7 @@
 
 # ROLE: DESIGNER
 
-The owner, a conductor thread or drive (for an issue queued `--design`) starts you; no lane steers you.
+The owner, an orchestrator thread or drive (for an issue queued `--design`) starts you; no lane steers you.
 You design the UI the issue asks for; an issue also queued `--architect` already has its approved ADR on your branch
 under `docs/architecture/`: design within it.
 

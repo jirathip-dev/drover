@@ -30,8 +30,8 @@ fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
 fn setup(name: &str) -> herdsman::Ctx {
     let other = "[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/does-not-matter/other\"\n\
                  integration = \"staging\"\n\n[fleet.other.role.impl]\nharness = \"hermes\"\n\n\
-                 [fleet.other.role.conductor]\nharness = \"claude\"\n";
-    let conf = format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\n\n{other}");
+                 [fleet.other.role.orchestrator]\nharness = \"claude\"\n";
+    let conf = format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n\n{other}");
     let c = ctx(&tmpdir(name), &conf);
     log(
         &c,
@@ -88,7 +88,7 @@ fn host() -> Fake {
 fn by(c: &herdsman::Ctx, t: Option<&str>, now: u64, args: &[&str]) -> (i32, String) {
     match t {
         Some(t) => {
-            std::env::set_var("HERDSMAN_LANE", "sendmeter:-:conductor");
+            std::env::set_var("HERDSMAN_LANE", "sendmeter:-:orchestrator");
             std::env::set_var("HERDSMAN_THREAD", t);
         }
         None => {
@@ -112,7 +112,7 @@ fn chat(c: &herdsman::Ctx, now: u64) -> String {
 }
 
 #[test]
-fn a_typed_design_answer_needs_the_owners_line_in_the_conductors_thread_after_the_ask() {
+fn a_typed_design_answer_needs_the_owners_line_in_the_orchestrators_thread_after_the_ask() {
     let _env = env();
     let c = setup("typed-design");
     said(&c, NOW - 300, "t1", "approve");
@@ -221,8 +221,8 @@ fn a_basis_answers_a_design_ask_with_an_fyi_and_refuses_a_non_quote_or_owner_top
     );
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: approve\n"));
     let d = &kinds(&c, "decision")[0];
-    assert_eq!((d.str("by"), d.str("basis")), (Some("conductor-t1"), Some(QUOTE)));
-    assert_eq!(kinds(&c, "design-approved")[0].str("by"), Some("conductor-t1"));
+    assert_eq!((d.str("by"), d.str("basis")), (Some("orchestrator-t1"), Some(QUOTE)));
+    assert_eq!(kinds(&c, "design-approved")[0].str("by"), Some("orchestrator-t1"));
     let fyi = kinds(&c, "thread-msg").pop().unwrap();
     assert_eq!(
         (fyi.str("thread"), fyi.str("text"), fyi.str("change")),
@@ -267,7 +267,7 @@ fn a_basis_extend_posts_an_fyi_whose_change_parks_within_30_minutes_only() {
     let (code, out) = ext(QUOTE);
     assert_eq!(code, 0, "{out}");
     let r = kinds(&c, "round-extended");
-    assert_eq!((r.len(), r[0].str("by")), (1, Some("conductor-t1")));
+    assert_eq!((r.len(), r[0].str("by")), (1, Some("orchestrator-t1")));
     let fyi = kinds(&c, "thread-msg").pop().unwrap();
     assert_eq!(
         (fyi.str("thread"), fyi.str("text")),
