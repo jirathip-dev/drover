@@ -39,8 +39,10 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
   refuses `OWNER_ASK` and puts the ask to the owner as a choice row here, your pick recommended. Owner topics (main,
   prod, secrets, spend, a new dependency, scope, deletion) are always refused. Never answer asks on another repo.
 - #584: When the owner answers an open ask in words, run `herdsman answer <fleet> <id> --typed "<their exact line>"`
-  before acting on it; withdraw an ask you replace (`herdsman ask withdraw <fleet> <id> --by orchestrator-<thread>
-  --for <new id>`).
+  before acting on it. #838: words that pick an option name it, their note apart:
+  `herdsman answer <fleet> <id> approve --typed "<line>" --note "<note>"` (a revise note likewise; an approve note is
+  also written under the issue's `## Amendments`). Withdraw an ask you replace (`herdsman ask withdraw <fleet> <id>
+  --by orchestrator-<thread> --for <new id>`).
 - Queue a "design first" issue (or one with a design-gate criterion) with `herdsman queue <fleet> add <n> --design`:
   drive starts its design lane, and impl only after the owner approves the design (in this thread or on the board).
   Redo a design by hand by spawning its `design` role with `--supersede`. #730: queue an issue that needs its

@@ -167,7 +167,7 @@ enum Cmd {
     Answer {
         fleet: String,
         id: String,
-        #[arg(required_unless_present = "typed", conflicts_with = "typed")]
+        #[arg(required_unless_present = "typed")]
         choice: Option<String>,
         /// Who answered, as the board shows it (e.g. owner, alice)
         #[arg(long, default_value = "owner")]
@@ -180,6 +180,9 @@ enum Cmd {
         /// The owner's exact line in the ask's thread, after the ask: logged by: owner (typed)
         #[arg(long, value_name = "LINE")]
         typed: Option<String>,
+        /// With a typed choice: a revise's note, or an approve's (also written under the issue's `## Amendments`)
+        #[arg(long, requires_all = ["typed", "choice"])]
+        note: Option<String>,
     },
     #[command(
         about = "Orchestrators and the owner: write an owner-decided amendment into the issue body's `## Amendments`; re-runs the PR's failed spec checks"
@@ -1466,9 +1469,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Answer {
                     fleet,
                     id,
+                    choice,
                     typed: Some(line),
+                    note,
                     ..
-                } => crate::answer_typed(ctx, &cfg, r, out, (&fleet, &id), &line)?,
+                } => {
+                    let how = (choice.as_deref(), note.as_deref());
+                    crate::answer_typed(ctx, &cfg, r, out, (&fleet, &id), &line, how)?;
+                }
                 Cmd::Answer {
                     fleet,
                     id,

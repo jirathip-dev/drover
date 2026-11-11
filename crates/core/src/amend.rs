@@ -13,7 +13,7 @@ use std::io::Write;
 const SPEC_CHECKS: &[&str] = &["board-freeze"];
 
 /// Append `- **Amendment (<basis>)**: <text>` under the body's `## Amendments` (made once), log `amend`, then
-/// re-run the open PR's failed spec checks. `basis` must be an ask on this issue answered by the owner (or by
+/// re-run the open PR's failed spec checks. `basis` must be an ask on this issue answered by the owner (typed too, or by
 /// default); else `NO_DECISION`, before any `gh` call.
 pub fn amend(
     ctx: &Ctx,
@@ -30,7 +30,7 @@ pub fn amend(
     let asked = events.iter().find(|e| is(e, "needs-decision")).and_then(|a| a.issue);
     let by = events.iter().rev().find(|e| is(e, "decision"));
     let by = by.and_then(|d| d.str("by"));
-    if asked != Some(issue) || !matches!(by, Some("owner" | "default")) {
+    if asked != Some(issue) || !matches!(by, Some("owner" | "default" | crate::TYPED)) {
         let why = format!("{basis} is no ask on {fleet}#{issue} the owner answered");
         return gate::refused("NO_DECISION", why);
     }

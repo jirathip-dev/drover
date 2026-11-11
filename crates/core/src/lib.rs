@@ -431,15 +431,16 @@ pub fn orchestrator_answer(
         (fleet, id),
         choice,
         (&format!("orchestrator-{t}"), None),
-        Some(&quote),
+        (Some(&quote), None),
     )
 }
 
 /// #584: who a typed answer is by.
-const TYPED: &str = "owner (typed)";
+pub(crate) const TYPED: &str = "owner (typed)";
 
 /// #584: `herdsman answer --typed <line>`: the owner's words, accepted only when `line` is the owner's message in the
 /// ask's thread (its own, or the one its lane ask was put to the owner in) after the ask; else `NOT_TYPED`.
+/// #838: `choice` answers it with the line as evidence (none: the line is the answer); `note` goes with it.
 pub fn answer_typed(
     ctx: &Ctx,
     cfg: &Config,
@@ -447,6 +448,7 @@ pub fn answer_typed(
     out: &mut dyn Write,
     (fleet, id): (&str, &str),
     line: &str,
+    (choice, note): (Option<&str>, Option<&str>),
 ) -> Result<()> {
     let events = read(&ctx.state)?;
     let is = |e: &&Event, k: &str| e.kind == k && e.fleet == fleet && e.str("id") == Some(id);
@@ -482,7 +484,24 @@ pub fn answer_typed(
     if !why.is_empty() {
         return gate::refused("NOT_TYPED", why);
     }
-    answer(ctx, cfg, r, out, (fleet, id), line, (TYPED, None))
+    let choice = choice.unwrap_or(line);
+    let Some(note) = note else {
+        return answer(ctx, cfg, r, out, (fleet, id), choice, (TYPED, None));
+    };
+    if note.trim().is_empty() || note.chars().any(char::is_control) {
+        return gate::refused("BAD_VALUE", "a note is one line of text");
+    }
+    let ask = events.iter().find(|e| is(e, "needs-decision"));
+    let text = ask.map_or(choice, |a| chosen(a, choice));
+    if text != "approve" {
+        let text = format!("{text}: {note}");
+        return answer_with(ctx, cfg, r, out, (fleet, id), &text, (TYPED, None), (None, Some(note)));
+    }
+    let Some(n) = ask.and_then(|a| a.issue) else {
+        return gate::refused("BAD_VALUE", format!("{id} is on no issue to amend with the note"));
+    };
+    answer_with(ctx, cfg, r, out, (fleet, id), text, (TYPED, None), (None, Some(note)))?;
+    amend::amend(ctx, cfg, r, out, (fleet, n), id, note)
 }
 
 /// #584: `herdsman ask withdraw`: the ask's own thread's orchestrator (`by`) closes an ask it replaced (`for`).
@@ -532,10 +551,11 @@ pub fn answer(
     choice: &str,
     (by, via): (&str, Option<&str>),
 ) -> Result<()> {
-    answer_with(ctx, cfg, r, out, (fleet, id), choice, (by, via), None)
+    answer_with(ctx, cfg, r, out, (fleet, id), choice, (by, via), (None, None))
 }
 
 /// `answer`; #541: a conductor's (`basis`) also posts its FYI line, and the owner may change one for `CHANGE`.
+/// #838: a typed answer's `note` is logged with the decision and sent with it.
 #[allow(clippy::too_many_arguments)]
 fn answer_with(
     ctx: &Ctx,
@@ -545,7 +565,7 @@ fn answer_with(
     (fleet, id): (&str, &str),
     choice: &str,
     (by, via): (&str, Option<&str>),
-    basis: Option<&str>,
+    (basis, note): (Option<&str>, Option<&str>),
 ) -> Result<()> {
     let events = read(&ctx.state)?;
     let is = |e: &&Event, k: &str| e.kind == k && e.fleet == fleet && e.str("id") == Some(id);
@@ -594,6 +614,9 @@ fn answer_with(
     if let Some(b) = basis {
         d["basis"] = json!(b);
     }
+    if let Some(n) = note {
+        d["note"] = json!(n);
+    }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, ask.issue, "decision", d))?;
     // #779: a `RESPAWN_LOOP` ask's [park] parks the issue ([try again] is the decision spawn reads).
     if ask.data.get("respawn_loop").is_some() && text == "park" {
@@ -615,8 +638,13 @@ fn answer_with(
         let _ = crate::drive::kick_once(ctx, r, (fleet, n), why, Some(&id)); // #304: after the decision is logged
     }
     let mins = cfg.limits.ask_default_minutes;
-    let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
-    let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());
+    let note_default = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
+    let said = note.map(|n| format!(" (note: {n})")).filter(|_| text == "approve");
+    let msg = format!(
+        "DECISION {id}: {text}{}{}",
+        said.unwrap_or_default(),
+        note_default.unwrap_or_default()
+    );
     // #633: an attached cooee thread reads the decision from `/api/v1/events`.
     if let Some(t) = ask
         .str("thread")

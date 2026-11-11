@@ -26,7 +26,7 @@ fn design_ask(name: &str, line: &str) -> herdsman::Ctx {
         json!({"thread": "t1", "title": "t1"}),
     );
     let d = json!({"id": "q1", "question": "Design for #60 is ready: approve, revise or reject?",
-        "options": ["approve", "revise", "reject"], "recommend": null, "kind": "owner", "design": true, "thread": "t1"});
+        "options": ["approve", "revise", "reject"], "recommend": null, "kind": "owner", "design": true, "thread": "t1", "role": "design"});
     log(&c, NOW - 90, Some(60), "needs-decision", d);
     let said = json!({"thread": "t1", "from": "owner", "text": line});
     log(&c, NOW - 60, None, "thread-msg", said);
@@ -45,7 +45,9 @@ fn a_typed_approve_with_a_note_approves_and_writes_the_note_under_amendments() {
     let line = "Approve with note for me";
     let c = design_ask("typed-approve", line);
     let note = "keep the meter grey";
-    let r = Fake::default().reply("gh issue view 60", &json!({"body": "Draw the meter.\n"}).to_string());
+    let r = Fake::default()
+        .reply("gh issue view 60", &json!({"body": "Draw the meter.\n"}).to_string())
+        .reply("gh issue edit 60", "");
     let args = ["answer", "sendmeter", "q1", "approve", "--typed", line, "--note", note];
     let (code, out) = run(&c, &r, &args);
     assert_eq!(code, 0, "{out}");
@@ -90,7 +92,9 @@ fn an_ask_answered_by_the_owner_typed_is_an_amend_basis() {
         "decision",
         json!({"id": "q1", "choice": "yes", "by": "owner (typed)"}),
     );
-    let r = Fake::default().reply("gh issue view 60", &json!({"body": "Tidy the tab.\n"}).to_string());
+    let r = Fake::default()
+        .reply("gh issue view 60", &json!({"body": "Tidy the tab.\n"}).to_string())
+        .reply("gh issue edit 60", "");
     let (code, out) = run(
         &c,
         &r,
