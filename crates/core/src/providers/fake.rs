@@ -96,15 +96,11 @@ mod tests {
     }
 
     #[test]
-    fn setup_offers_its_login() {
+    fn setup_offers_its_login_with_its_vendor() {
         let all = crate::setup::all(&config("fake").unwrap());
         assert!(all.contains(&("fake".into(), "fake login".into())), "{all:?}");
-    }
-
-    #[test]
-    fn its_login_carries_its_vendor_and_a_login_of_no_provider_none() {
         let v = crate::setup::vendors(&config("fake").unwrap());
-        assert_eq!((v.get("fake").map(String::as_str), v.get("gh")), (Some("fake"), None), "{v:?}");
+        assert!(v.contains(&("fake".into(), "fake".into())) && !v.iter().any(|x| x.0 == "gh"), "{v:?}");
     }
 
     #[test]

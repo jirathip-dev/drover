@@ -2,7 +2,6 @@ use crate::events::{append, read, Event};
 use crate::{config::Config, gate::refused, herdr, hosts::On, runner::argv, runner::Runner, Ctx};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
 
 pub const TIMEOUT: u64 = 600;
 /// #255: a cloud host's gh login: the token read without echo, piped by a shell builtin (never in argv), then HTTPS git.
@@ -34,7 +33,7 @@ pub fn all(cfg: &Config) -> Vec<(String, String)> {
 }
 
 /// #830: the vendor of each setup in `all` that is a provider's login, by its name.
-pub fn vendors(cfg: &Config) -> BTreeMap<String, String> {
+pub fn vendors(cfg: &Config) -> Vec<(String, String)> {
     let of = |(n, _): (String, String)| Some((n.clone(), crate::providers::get(&n).vendor()?.into()));
     all(cfg).into_iter().filter_map(of).collect()
 }
