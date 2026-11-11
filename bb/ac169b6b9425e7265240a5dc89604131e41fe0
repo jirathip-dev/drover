@@ -1,0 +1,7 @@
+Decided: merge origin/staging (c18b835, with #866's cap raise) instead of rebasing; this round changes no code.
+Because: q1291
+Decided: refresh the PR body's evidence sha before the push, so the push-time evidence run reads the new head.
+Because: scripts/evidence-check.sh:14
+Rejected: re-running the old evidence run — a re-run reuses the push event's frozen body and failed again.
+Check: cap-check at head reads 41079 / 45400 and the evidence check is green at bbac169.
+Owner: brings the branch up to date with staging and the raised line cap; the disk numbers are unchanged.
