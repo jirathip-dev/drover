@@ -1,0 +1,10 @@
+Decided: one test file runs real drive passes (tick every 5 min, drive --fast every minute) over a fake clock against a stateful fake world, one scenario per 2026-11-11 bug, asserting on the event log.
+Because: "Drive runs N passes against it; the test asserts on the event log."
+Decided: the tick's step marker and the SLO's own-pid filter read crate::sim::pid(), the #680 seam, so an in-process tick carries its own pid; unset it is the real pid.
+Because: crates/core/src/sim.rs:30
+Decided: drive's silent step now replaces a working reviewer quiet 2h with no verdict at the head it reviews (#819 only replaced one blocking a newer head); it reads the pane from the pass's look, so no new herdr call shifts the #680 sim.
+Because: "Silent reviewer: no pane output past `silent` → superseded, review completes."
+Rejected: extending the #680 seeded concurrent sim — its scheduler and random faults add nothing to five fixed, deterministic scenarios.
+Rejected: a production switch per heal to show the scenarios fail — each heal was turned off by a one-line patch and the failing runs are in the PR body.
+Check: an idle reviewer is still left to the #666 stall path (drive.rs a_no_repro_pass test); the hung-host model (a tick's ssh outlives its kill; the fast step's kill at its limit still frees it) matches the 2026-11-11 stuck tick.
+Owner: drive's five 2026-11-11 failures now have a time-based test in CI, and a reviewer silent for 2 hours is replaced instead of waiting forever.
