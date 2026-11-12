@@ -1,0 +1,15 @@
+Decided: phrases live in Say::line in crates/core/src/promise.rs; drive's rows carry a Kind; promise::pass logs promise and promise-missed.
+Because: "the string builders are private to the promise module"
+Decided: a promise is moved past once the issue's state or PR head changes; a newer promise of another kind supersedes it.
+Because: "a promise past its deadline that the issue has not moved past is logged once"
+Rejected: one promise per drive row — a 2-pass deadline on "held until #N merges" alerts falsely for days.
+Decided: CI check is arch-check [[ban]] entries for each phrase, except promise.rs; no new CI step.
+Because: .herdsman/arch.toml:63
+Decided: promise and promise-missed are passive events, so logging one never moves an issue's fold state.
+Because: crates/core/src/events.rs:409
+Decided: the extra appends moved sim timing onto two parked seeds (16 merged race, 1382 NO_PR strand); fixed both and moved them to FIXED rather than retune around them.
+Because: crates/core/src/drive.rs:1800
+Decided: the hunt counts no `promise` event as coverage and starts from rng 1 (finds the planted I1 at round 20); idle 5661→5561 is timer jitter as in #779.
+Because: crates/cli/tests/sim/hunt.rs:213
+Check: the waiting.rs replay test turns a merging promise into a draft PASS and gets exactly one promise-missed and the ⚠ line.
+Owner: Drive's waiting lines now come with a deadline; a stuck one is logged and shown as missed with the reason.
