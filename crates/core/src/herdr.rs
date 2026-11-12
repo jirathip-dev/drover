@@ -128,6 +128,16 @@ impl Shed {
         let a = self.acp_argv(name, labels, cwd, cmd);
         shed::cli(r, &a.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
     }
+    /// #899: its exited lane terminals (a `fleet` label), kept until removed.
+    pub fn exited(&self, r: &dyn Runner) -> Result<Vec<TerminalInfo>> {
+        let all: Vec<TerminalInfo> = serde_json::from_value(self.call(r, Method::Ls, LsParams::default())?)?;
+        let gone = |t: &TerminalInfo| t.state == shed_proto::State::Exited && t.labels.contains_key("fleet");
+        Ok(all.into_iter().filter(gone).collect())
+    }
+    /// #899: remove terminal `name`.
+    pub fn rm(&self, r: &dyn Runner, name: &str) -> Result<()> {
+        self.call(r, Method::Rm, Target { name: name.into() }).map(drop)
+    }
     /// The `shed run --acp` words that start ACP lane `name`.
     pub fn acp_argv(&self, name: &str, labels: &[(&str, String)], cwd: &str, cmd: &[String]) -> Vec<String> {
         let id = self.0.acp.as_deref().unwrap_or_default();

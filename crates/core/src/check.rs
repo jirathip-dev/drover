@@ -448,6 +448,19 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, (l.0, Some(l.1)), "orphan-lane", d)?;
         }
     }
+    let all: Vec<Value> = (agents.iter().flatten())
+        .chain(remote.values().flatten().flatten())
+        .cloned()
+        .collect();
+    for ((fl, n, role), names) in dups(&events, &all) {
+        let why = format!(
+            "lane {fl}:{n}:{role} runs {} processes ({}); the next drive pass stops all but the newest",
+            names.len(),
+            names.join(", ")
+        );
+        let d = json!({"key": names.join(","), "reason": why});
+        fire(ctx, cfg, out, &events, (&fl, Some(n)), "lane-dup", d)?;
+    }
     // #710: Keychain readers piling up behind a dialog nobody sees: once per episode (a clear pass ends it).
     let jam = host::keychain_jam(r);
     let last = events
@@ -971,6 +984,28 @@ pub fn clean_all(
                 json!({"worktree": wt, "pane": pane, "why": why}),
             ),
         )?;
+    }
+    let sheds = r.shed().filter(|_| lane.is_none()).map(herdr::Shed);
+    for (b, t) in sheds
+        .iter()
+        .flat_map(|b| b.exited(r).unwrap_or_default().into_iter().map(move |t| (b, t)))
+    {
+        let (fl, n) = (&t.labels["fleet"], t.labels.get("issue").and_then(|i| i.parse().ok()));
+        let Some(n) = n.filter(|n| issue.is_none_or(|i| i == *n) && fleet.is_none_or(|f| f == fl)) else {
+            continue;
+        };
+        let why = if states.get(&(fl.clone(), n)).is_some_and(|s| s.state == "merged") {
+            "merged"
+        } else if cfg.fleet.contains_key(fl) && closed_issues(ctx, cfg, r, out, &mut closed, fl).contains(&n) {
+            "issue closed"
+        } else {
+            continue;
+        };
+        if yes {
+            b.rm(r, &t.name)?;
+        }
+        let did = if yes { "removed" } else { "would remove" };
+        writeln!(out, "{did} exited shed terminal {} ({fl}#{n} {why})", t.name)?;
     }
     if lane.is_none() && issue.is_none() {
         sweep_off(ctx, cfg, r, out, &off, !yes)?;
@@ -2115,6 +2150,72 @@ pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 cfg,
                 Event::new(ctx.now, &s.fleet, s.issue, "stale-pane-killed", d),
             )?;
+        }
+    }
+    Ok(())
+}
+
+/// #899: each lane key (fleet, issue, role) its newest spawns give two or more live agents, oldest first.
+pub fn dups(events: &[Event], agents: &[Value]) -> Vec<((String, u64, String), Vec<String>)> {
+    let mut by: BTreeMap<(String, u64, String), BTreeMap<u64, String>> = BTreeMap::new();
+    for name in agents.iter().filter_map(|a| a["name"].as_str()) {
+        let Some(sp) = last_spawn(events, name) else {
+            continue;
+        };
+        if let (Some(n), Some(role)) = (sp.issue, sp.str("role")) {
+            let key = (sp.fleet.clone(), n, role.to_string());
+            by.entry(key).or_default().insert(sp.seq, name.into());
+        }
+    }
+    let many = by.into_iter().filter(|(_, v)| v.len() > 1);
+    many.map(|(k, v)| (k, v.into_values().collect())).collect()
+}
+
+/// #899: stop each live agent of lane `(fleet, issue, role)` but `keep` as `kill --yes` does; the agents stopped.
+pub fn stop_rounds(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (fleet, issue, role): (&str, u64, &str),
+    keep: &str,
+) -> Result<Vec<String>> {
+    let events = read(&ctx.state)?;
+    let (mut lists, mut seen, mut stopped) = (BTreeMap::new(), vec![keep], vec![]);
+    let olds = (events.iter().rev()).filter(|e| e.is("spawn", fleet, issue) && e.str("role") == Some(role));
+    for sp in olds {
+        let agent = sp.str("agent").unwrap_or(keep);
+        if seen.contains(&agent) || crate::hosts::held(ctx, cfg, sp) {
+            continue;
+        }
+        seen.push(agent);
+        let on = On::of(r, Some(sp));
+        let live = lists
+            .entry(on.machine)
+            .or_insert_with(|| host::agents(&on).unwrap_or_default());
+        if live.iter().any(|a| a["name"] == agent) {
+            let lane = (agent, sp.str("host"));
+            kill_as(ctx, cfg, r, &mut std::io::sink(), lane, true, Some("lane-dup"))?;
+            stopped.push(agent.to_string());
+        }
+    }
+    Ok(stopped)
+}
+
+/// #899: drive's pass: each lane key two or more live agents carry keeps only its newest.
+pub fn dedup(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+    let (events, mut by) = (read(&ctx.state)?, BTreeMap::new());
+    let on = |f: &str| cfg.fleet.get(f).is_some_and(|f| !f.paused);
+    let spawns = (events.iter()).filter(|e| e.kind == "spawn" && on(&e.fleet));
+    let keys = spawns.filter_map(|e| Some(((e.fleet.as_str(), e.issue?, e.str("role")?), e.str("agent")?)));
+    if !keys.fold(false, |two, (k, a)| by.insert(k, a).is_some_and(|b| b != a) || two) {
+        return Ok(());
+    }
+    let all = crate::hosts::all_agents(cfg, r)?;
+    for ((fl, n, role), names) in dups(&events, &all).into_iter().filter(|d| on(&d.0 .0)) {
+        let keep = names.last().map_or("", String::as_str);
+        match stop_rounds(ctx, cfg, r, (&fl, n, &role), keep) {
+            Ok(gone) => writeln!(out, "lane {fl}:{n}:{role}: stopped {}, kept {keep}", gone.join(", "))?,
+            Err(e) => writeln!(out, "lane {fl}:{n}:{role}: {e:#}")?,
         }
     }
     Ok(())

@@ -1222,6 +1222,7 @@ pub fn spawn(
         }
         event("supersede", d)?;
     }
+    crate::check::stop_rounds(ctx, cfg, base, (fleet, issue, role), &p.agent)?;
     // #676: a lane moved off its last host starts from the pushed branch, plus that host's unsaved work on `wip/`.
     let moved = (placed.as_ref())
         .and_then(|pl| last_spawn(&events, &p.agent).filter(|e| e.str("machine") != pl.machine.as_deref()));
