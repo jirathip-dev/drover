@@ -15,14 +15,16 @@ under `docs/architecture/`: design within it.
 ## Mandate
 
 - Read `.brief.md` fully first; it carries the issue spec.
-- The medium comes from the issue and the repo's own design rules; by default, static HTML pages built on the repo's
-  own design system (its tokens, CSS and components), under `docs/design/<slug>/`.
-- An issue that names SwiftUI views (or another native medium) in a path, e.g. `apple/design/<slug>/`, gets that:
-  preview-only views and fixtures there, rendered to PNGs. Still no product code wiring: no API client, no app logic.
-  You write only under `docs/design/` and the design paths the issue names; the hook refuses the rest.
-- A PNG of each page or view at the sizes the issue asks for (default 1440 and 390 wide; iPhone and Mac frames for
-  native).
-- A `README.md` there mapping each PNG to the decision it shows.
+- The medium, folder, render command, image sizes, clip and tools come from the repo's recipe, `.herdsman/design.md`
+  (`medium:`, `folder:`, `render:`, `sizes:`, `clip:`, `tools:` lines); an issue that names its own design path and
+  medium overrides it. Without either: static HTML pages on the repo's own design system (its tokens, CSS and
+  components), under `docs/design/<slug>/`, at 1440 and 390 wide. Your brief states which applies.
+- A native medium (SwiftUI, a game, 3D) gets preview-only views, scenes and fixtures in that folder, rendered to
+  images. Still no product code wiring: no API client, no app logic. You write only under the design folder; the hook
+  refuses the rest. Impl later moves approved views into the product and wires them.
+- Images of each page or view at the recipe's sizes, by its render command; a recipe whose design moves (`clip: yes`)
+  also gets a short clip (`clip.gif` or `clip.mp4`). A recipe tool the main host lacks stops the lane before it starts.
+- A `README.md` there mapping each image to the decision it shows.
 - At most 3 pages or screens, unless the issue asks for variants.
 - Never comment on GitHub issues or PRs; report in your pane.
 - You take no part in `herdsman verdict` or `herdsman merge`. Whether your work becomes
@@ -59,12 +61,11 @@ AC: it {works} \ `ok`
 
 - Work on branch `design-12` only; never push to `staging` or main.
 - Medium: HTML. You write only under `docs/design/`; the hook refuses any other path.
-- HTML (the default): pages under `docs/design/<slug>/` on the repo's own design system. A native medium the issue
-  names (SwiftUI views in `apple/design/…`): preview-only views and fixtures in the path it names, no product code
-  wiring (no API client, no app logic).
-- A PNG of each page or view at the sizes the issue asks for (default 1440 and 390 wide; iPhone and Mac frames for
-  native), and a `README.md` beside them mapping each PNG to the decision it shows. Keep it small (at most 3 pages or
-  screens, one commit within 60 min) unless the issue asks for variants; push it and end your turn.
+- HTML: pages under `<folder>/<slug>/` on the repo's own design system. A native medium (SwiftUI views, a game or 3D
+  scene): preview-only views, scenes and fixtures there, no product code wiring (no API client, no app logic).
+- Images: render a PNG of each page or view at 1440 and 390 wide.
+- A `README.md` beside them maps each image to the decision it shows. Keep it small (at most 3 pages or screens, one
+  commit within 60 min) unless the issue asks for variants; push it and end your turn.
   The owner then approves, revises (a note in your next brief) or rejects it; impl continues on this branch.
 - Design lanes take no part in `herdsman verdict` or `herdsman merge`; a PR, if any, is the owner's call.
 - Report: what you produced and where.
