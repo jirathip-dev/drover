@@ -1022,6 +1022,12 @@ fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: 
         .filter(|s| s.fleet == fleet && s.state.starts_with("review"));
     for s in reviews.filter(|s| KICK.get().is_none_or(|k| k == s.issue)) {
         let Some((role, old)) = s.active_lane() else { continue };
+        if !agents
+            .iter()
+            .any(|a| a["name"] == old && a["agent_status"] == "working")
+        {
+            continue;
+        }
         let Some(mins) = stall::stale_check(ctx, r, &ev, agents, (fleet, s.issue), old) else {
             continue;
         };

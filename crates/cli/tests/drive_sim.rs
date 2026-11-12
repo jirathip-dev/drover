@@ -1,7 +1,3 @@
-//! #856: drive over simulated time against a faulty world: a fake clock, GitHub (PR state, draft flag, checks), herdr
-//! panes (their screens), hosts (up, down, or an ssh that hangs), processes and real worktree files. `tick` every 5
-//! minutes (launchd starts none while one runs) and `drive --fast` every minute; each scenario is one 2026-11-11 bug,
-//! asserted on the event log. A future drive bug about drive over time adds its scenario here (docs/architecture.md).
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
@@ -37,7 +33,6 @@ struct Pr {
     green_at: u64,
 }
 
-/// The world drive's calls land in; what it does not model goes to `base` (a calm host on which spawns succeed).
 struct World {
     base: Fake,
     now: Shared<u64>,
@@ -46,11 +41,8 @@ struct World {
     hosts: Shared<BTreeMap<String, Reach>>,
     procs: Shared<BTreeMap<u32, (String, u64)>>,
     ws: Shared<u32>,
-    /// Each pass's output, by its minute: a failing scenario prints it.
     trace: Shared<Vec<String>>,
-    /// Each tick that ran to its end: its start and exit code.
     ticks: Shared<Vec<(u64, i32)>>,
-    /// The tick process blocked in a hung call, woken when it is killed.
     hung: (Mutex<Option<u32>>, Condvar),
 }
 
@@ -115,9 +107,6 @@ impl World {
         )
     }
 
-    /// A call to a remote host: refused at once (down), or hung (the 2026-11-11 tick: its ssh outlived its 15 s kill,
-    /// so it blocks the tick until the tick itself is killed, which ends the hang; the fast step's kill at its limit
-    /// still frees it, 124).
     fn remote(&self, host: &str) -> Option<Out> {
         let reach = self.hosts.borrow().get(host).copied()?;
         match reach {
@@ -278,7 +267,6 @@ impl Runner for World {
     fn sleep(&self, _secs: u64) {}
 }
 
-/// One scenario: the world, its fleet and the passes run against it.
 struct Sim {
     w: Arc<World>,
     c: herdsman::Ctx,
@@ -309,7 +297,6 @@ impl Sim {
         append(&self.c.state, &Event::new(self.w.now(), "sendmeter", Some(12), kind, d)).unwrap();
     }
 
-    /// What happened, for a failed assertion: each pass's output, then every event's time and kind.
     fn story(&self) -> String {
         let ev = read(&self.c.state).unwrap();
         let ev = ev.iter().map(|e| format!("{} {} {:?}", e.ts, e.kind, e.data));
@@ -326,7 +313,6 @@ impl Sim {
             .collect()
     }
 
-    /// `herdsman <args>` as a process of its own (pid `pid`, the clock now), until it ends or blocks in a hung call.
     fn start(&mut self, args: &'static [&'static str], pid: u32) {
         let (w, c) = (self.w.clone(), self.at());
         w.procs
@@ -357,8 +343,6 @@ impl Sim {
         self.tick = Some(h);
     }
 
-    /// Run `mins` minutes from now: `tick` each 5th minute (none while the last one runs), `drive --fast` each minute,
-    /// then `lane` (the agents' turn).
     fn minutes(&mut self, mins: u64, mut lane: impl FnMut(&Sim)) {
         for _ in 0..mins {
             self.w.now.set(self.w.now() + 60);
@@ -387,7 +371,6 @@ fn hosts_seen(s: &Sim) {
     std::fs::write(s.c.state.with_file_name("hosts.json"), cache.to_string()).unwrap();
 }
 
-/// 1. ssh to a host hangs inside the tick: drive's fast step stops it within `slo_tick_minutes`, the next tick runs.
 #[test]
 fn a_tick_hung_on_ssh_is_stopped_within_the_slo_and_the_next_tick_runs() {
     let mut s = Sim::new("sim-stuck-tick", AIR);
@@ -414,7 +397,6 @@ fn a_tick_hung_on_ssh_is_stopped_within_the_slo_and_the_next_tick_runs() {
     assert!(!s.c.state.with_file_name("tick.step").exists());
 }
 
-/// 2. Worktrees that share files (hard links): the budget counts their real size once; no DISK_BUDGET hold.
 #[test]
 fn worktrees_sharing_files_count_once_and_hold_no_spawn() {
     let mut s = Sim::new("sim-disk", "");
@@ -452,7 +434,6 @@ fn worktrees_sharing_files_count_once_and_hold_no_spawn() {
     );
 }
 
-/// 3. A draft PR with a PASS at its head: marked ready (its full CI runs), then merged.
 #[test]
 fn a_passed_draft_pr_is_marked_ready_and_merged() {
     let mut s = Sim::new("sim-draft", "");
@@ -481,7 +462,6 @@ fn a_passed_draft_pr_is_marked_ready_and_merged() {
     assert_eq!(s.w.pr.borrow().as_ref().map(|p| p.state), Some("MERGED"));
 }
 
-/// 4. A reviewer whose pane shows no new output for 2 h: replaced in the same round; the new one's verdict lands.
 #[test]
 fn a_silent_reviewer_is_superseded_and_the_review_completes() {
     let mut s = Sim::new("sim-silent-rev", "");
@@ -532,7 +512,6 @@ fn a_silent_reviewer_is_superseded_and_the_review_completes() {
     assert_eq!((v[0].str("verdict"), v[0].str("sha")), (Some("PASS"), Some(HEAD)));
 }
 
-/// 5. A remote host offline with a lane on it: after `host_offline_minutes` the lane restarts on the main host.
 #[test]
 fn an_offline_hosts_lanes_restart_on_the_main_host_after_15_minutes() {
     let mut s = Sim::new("sim-offline", AIR);
