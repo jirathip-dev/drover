@@ -1,0 +1,12 @@
+Decided: an issue naming its own design path takes the #868 medium and folders whole; the repo recipe is then ignored
+Because: "An issue that names a design path or medium (#868) overrides the recipe"
+Decided: spawn checks the recipe's tool tags on the main host before the worktree's harness starts; a gap logs turn-end blocked, a LANE_BLOCKED card and refuses MISSING_TOOL
+Because: "A missing tool ends the turn `blocked`, naming it, for the owner to install"
+Rejected: telling the design lane to run `herdsman turn blocked` itself — design lanes report no turn and drive never reads one, so nothing would reach the owner
+Decided: only a design spawn reads the recipe (git show at its base); other spawns make no extra call
+Because: crates/core/src/spawn.rs:1259
+Rejected: reading it on every spawn — the sim's exact metrics moved by one git call per spawn
+Decided: the hand-off lists .gif and .mp4 beside .png, read from the recipe at the pushed head
+Because: "The design-review event and ask show the images and the clip"
+Check: design_stage's four recipe tests and hook's recipe-folder test fail on the base; a recipe-less repo keeps HTML under docs/design at 1440/390
+Owner: A repo can set its design medium, folder, render command, sizes, clip and needed tools once in .herdsman/design.md; a missing tool stops the design lane before it starts.
