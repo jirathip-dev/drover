@@ -1,0 +1,11 @@
+Decided: a live agent's lane key is its newest spawn event's (fleet, issue, role); spawn stops every other live agent of that key before it starts the new one
+Because: crates/core/src/spawn.rs:328 names each check round's agent and worktree `-r<k>`, and crates/core/src/host.rs:14 matches only that name or worktree, so round 1 was never seen
+Because: "stops every older live process of the same `HERDSMAN_LANE` key (fleet:issue:role) on that host"
+Decided: stopping reuses `kill --yes` (kill_as): wip/ save first, then the pane or shed terminal is closed on the lane's own host (herdr, shed or remote), and `lane-closed` is logged with why `lane-dup`
+Rejected: parsing the lane key from agent names or shed labels — an ACP terminal's `role` label is the family (rev/fix), not the role
+Decided: check fires `lane-dup` keyed by the set of agent names (once per state); the slow drive pass beside `stale` keeps only the newest spawn
+Decided: `clean` lists, and with --yes removes, this host's exited shed lane terminals whose issue is merged or closed
+Rejected: removing remote hosts' exited terminals in clean — the issue's scope 3 names none, and `shed kill` + `rm` already removes the stopped ones
+Check: crates/cli/tests/shed.rs spawning_verify_round_two_stops_round_ones_live_terminal_first: the shed server sees kill r1 before run r2
+Check: two_live_processes_of_one_lane_alert_once_and_the_next_drive_pass_keeps_the_newest and clean_removes_exited_shed_terminals_of_merged_lanes_only fail on base
+Owner: a new review or verify round now stops the previous round's agent first, so old bridges no longer pile up on the host
