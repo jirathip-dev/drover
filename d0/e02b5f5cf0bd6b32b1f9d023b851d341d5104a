@@ -1,0 +1,5 @@
+Decided: merged origin/staging into issue-912; no conflicts, no edits beyond the merge
+Because: "No behaviour change besides the doctor line."
+Rejected: none
+Check: cargo test --locked --no-fail-fast with HERDSMAN_LANE unset is green at d0e02b5; the evidence check passes on the new PR body
+Owner: The branch is up to date with staging and the PR body now names the tested head.
