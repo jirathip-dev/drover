@@ -21,6 +21,30 @@ struct Arch {
     baseline: Option<String>,
     comments: Option<Comments>,
     docs: Option<Docs>,
+    #[serde(default)]
+    frozen: Vec<String>,
+    #[serde(default)]
+    collect: Vec<Collect>,
+    #[serde(default)]
+    generated: Vec<String>,
+    generate: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Collect {
+    dir: String,
+    glob: Option<String>,
+}
+
+impl Collect {
+    fn entries(&self) -> String {
+        format!(
+            "{}/{}",
+            self.dir.trim_end_matches('/'),
+            self.glob.as_deref().unwrap_or("*")
+        )
+    }
 }
 
 #[derive(Deserialize)]
@@ -49,6 +73,7 @@ struct Docs {
 
 struct Change {
     file: String,
+    hunk: usize,
     line: usize,
     added: bool,
     text: String,
@@ -104,7 +129,7 @@ struct Size {
 }
 
 /// Whether a glob matches `p`, `/**/` also matching no folder (`src/**/*.rs` matches `src/lib.rs`).
-fn any(globs: &[String], p: &str) -> bool {
+pub(crate) fn any(globs: &[String], p: &str) -> bool {
     let m = |g: &str| glob(g.as_bytes(), p.as_bytes());
     globs.iter().any(|g| m(g) || m(&g.replace("/**/", "/")))
 }
@@ -124,6 +149,11 @@ pub fn check(
         return Ok(0);
     };
     let a: Arch = toml::from_str(&text).with_context(|| format!("parsing {}", config.display()))?;
+    anyhow::ensure!(
+        a.generated.is_empty() || a.generate.is_some(),
+        "{}: `generated` needs `generate`, the command that writes them",
+        config.display()
+    );
     let base_path = a.baseline.as_deref().unwrap_or(".herdsman/arch-baseline.txt");
     let base_text = std::fs::read_to_string(base_path).unwrap_or_default();
     let crossings: BTreeSet<&str> = base_text
@@ -216,6 +246,8 @@ pub fn check(
         anyhow::ensure!(o.code == 0, "git diff {b}: {}", o.stderr.trim());
         diff = changes(&o.stdout);
     }
+    bad.extend(frozen_adds(&a, &diff));
+    bad.extend(stale_generated(&a, r)?);
     if let Some(c) = a.comments.as_ref().filter(|c| c.policy == Policy::Off) {
         bad.extend(new_comments(&diff, &c.except));
     }
@@ -250,6 +282,61 @@ pub fn check(
     }
     writeln!(out, "arch-check: {} files, {} violations", files.len(), bad.len())?;
     Ok(i32::from(!bad.is_empty()))
+}
+
+/// #890: the globs `text`, an arch.toml, lists as frozen or generated: converted, so never a hotspot.
+pub fn converted(text: &str) -> Result<Vec<String>> {
+    let a: Arch = toml::from_str(text).context("parsing .herdsman/arch.toml")?;
+    Ok(a.frozen.into_iter().chain(a.generated).collect())
+}
+
+fn frozen_adds(a: &Arch, diff: &[Change]) -> Vec<String> {
+    let folders: Vec<String> = a.collect.iter().map(|c| format!("`{}`", c.entries())).collect();
+    let instead = match folders.is_empty() {
+        true => "a `[[collect]]` folder".to_string(),
+        false => folders.join(" or "),
+    };
+    let collected = |f: &str| a.collect.iter().any(|c| any(&[c.entries()], f));
+    let mut hunks = BTreeMap::<usize, (Vec<&Change>, usize)>::new();
+    for c in diff.iter().filter(|c| any(&a.frozen, &c.file) && !collected(&c.file)) {
+        let h = hunks.entry(c.hunk).or_default();
+        if c.added {
+            h.0.push(c);
+        } else {
+            h.1 += 1;
+        }
+    }
+    let new = hunks.into_values().flat_map(|(adds, gone)| adds.into_iter().skip(gone));
+    new.map(|c| {
+        let (f, n, t) = (&c.file, c.line, c.text.trim());
+        format!("{f}:{n}: `{t}` added to a frozen list: add one file per entry in {instead} instead")
+    })
+    .collect()
+}
+
+fn stale_generated(a: &Arch, r: &dyn Runner) -> Result<Vec<String>> {
+    let Some(cmd) = a.generate.as_deref().filter(|_| !a.generated.is_empty()) else {
+        return Ok(vec![]);
+    };
+    let before: Vec<Option<Vec<u8>>> = a.generated.iter().map(|p| std::fs::read(p).ok()).collect();
+    let o = r.run("sh", &argv(&["-c", cmd]))?;
+    if o.code != 0 {
+        return Ok(vec![format!("`{cmd}` exited {}: {}", o.code, o.stderr.trim())]);
+    }
+    let mut bad = vec![];
+    for (p, was) in a.generated.iter().zip(before) {
+        if std::fs::read(p).ok() == was {
+            continue;
+        }
+        bad.push(format!(
+            "{p}: differs from what `{cmd}` writes: run it and commit the output, never hand-merge a generated file"
+        ));
+        match was {
+            Some(b) => std::fs::write(p, b)?,
+            None => std::fs::remove_file(p)?,
+        }
+    }
+    Ok(bad)
 }
 
 fn walk(dir: &Path, bans: &[&String], out: &mut Vec<String>) {
@@ -350,14 +437,14 @@ fn fns(lines: &[&str], rust: bool) -> Vec<(String, usize, usize)> {
 }
 
 fn changes(diff: &str) -> Vec<Change> {
-    let (mut v, mut from, mut to, mut old, mut new, mut head) = (vec![], "", "", 0, 0, true);
+    let (mut v, mut from, mut to, mut old, mut new, mut head, mut hunk) = (vec![], "", "", 0, 0, true, 0);
     for l in diff.lines() {
         if l.starts_with("diff --git ") {
             head = true;
         } else if let Some(h) = l.strip_prefix("@@ -") {
             let num = |s: &str| s.split([',', ' ']).next().and_then(|n| n.parse().ok()).unwrap_or(0);
             let (o, n) = h.split_once(" +").unwrap_or_default();
-            (old, new, head) = (num(o), num(n), false);
+            (old, new, head, hunk) = (num(o), num(n), false, hunk + 1);
         } else if head {
             from = l.strip_prefix("--- a/").unwrap_or(from);
             to = l.strip_prefix("+++ b/").unwrap_or(to);
@@ -366,6 +453,7 @@ fn changes(diff: &str) -> Vec<Change> {
             let (file, line) = if added { (to, &mut new) } else { (from, &mut old) };
             v.push(Change {
                 file: file.into(),
+                hunk,
                 line: *line,
                 added,
                 text: text.into(),

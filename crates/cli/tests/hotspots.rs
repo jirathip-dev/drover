@@ -207,6 +207,20 @@ fn a_second_run_in_the_week_updates_the_open_issue_queued_architect() {
 }
 
 #[test]
+fn a_file_the_arch_toml_lists_frozen_or_generated_is_converted_and_never_hot() {
+    let c = fixture("hotspots-converted");
+    let local = c.state.parent().unwrap().parent().unwrap().join("local");
+    std::fs::create_dir_all(local.join(".herdsman")).unwrap();
+    std::fs::write(local.join(".herdsman/arch.toml"), "frozen = [\"a.rs\"]\n").unwrap();
+    git(&local, NOW, &["add", "."]);
+    git(&local, NOW, &["commit", "-qm", "freeze a.rs"]);
+    git(&local, NOW, &["update-ref", "refs/remotes/origin/staging", "HEAD"]);
+    let (code, out) = run(&c, &RealGit(gh("[]")), &["hotspots", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("a.rs") && out.contains("none"), "{out}");
+}
+
+#[test]
 fn tick_skips_a_fleet_with_hotspots_off() {
     let c = fixture("hotspots-off");
     let r = RealGit(

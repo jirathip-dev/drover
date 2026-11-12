@@ -556,3 +556,41 @@ fn the_repos_provider_ban_fails_a_new_web_file_and_passes_the_two_frozen_board_f
     );
     assert!(out.contains("1 violations"), "{out}");
 }
+
+const FROZEN: &str = "frozen = [\"src/registry.rs\"]\n\n[[collect]]\ndir = \"src/features\"\nglob = \"*.rs\"\n";
+
+#[test]
+fn a_line_added_to_a_frozen_list_fails_but_removed_edited_or_collected_ones_pass() {
+    let reg = "mod a;\nmod b;\nmod c;\n";
+    let d = committed(
+        "arch-frozen",
+        FROZEN,
+        &[("src/registry.rs", reg), ("src/features/a.rs", "fn a() {}\n")],
+    );
+    std::fs::write(d.join("src/registry.rs"), "mod a;\nmod b;\nmod c;\nmod d;\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    let want =
+        "src/registry.rs:4: `mod d;` added to a frozen list: add one file per entry in `src/features/*.rs` instead";
+    assert!(out.contains(want), "{out}");
+    assert!(out.contains("1 violations"), "{out}");
+    std::fs::write(d.join("src/registry.rs"), "mod a;\nmod bee;\n").unwrap();
+    std::fs::write(d.join("src/features/d.rs"), "fn d() {}\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+}
+
+#[test]
+fn a_generated_file_that_differs_from_its_regenerated_output_fails() {
+    let conf = "generated = [\"gen/types.ts\"]\ngenerate = \"mkdir -p gen && printf 'export type A = 1;\\\\n' > gen/types.ts\"\n";
+    let d = committed("arch-generated", conf, &[("gen/types.ts", "export type A = 1;\n")]);
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    let merged = "export type A = 1;\nexport type B = 2;\n";
+    std::fs::write(d.join("gen/types.ts"), merged).unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("gen/types.ts: differs from what `mkdir -p gen"), "{out}");
+    let left = std::fs::read_to_string(d.join("gen/types.ts")).unwrap();
+    assert_eq!(left, merged, "the check leaves the tree as it found it");
+}
