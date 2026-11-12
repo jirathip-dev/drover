@@ -629,6 +629,8 @@ pub struct Limits {
     pub serve_shed_secs: u64,
     pub serve_remote_secs: u64,
     pub serve_host_secs: u64,
+    /// #893: `/live`'s heartbeat; a stream that misses 2 is dropped.
+    pub serve_heartbeat_secs: u64,
     /// #859: `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once per episode.
     pub slo_api_p95_ms: u64,
     pub slo_api_minutes: u64,
@@ -717,6 +719,7 @@ impl Default for Limits {
             serve_shed_secs: 5,
             serve_remote_secs: 10,
             serve_host_secs: 10,
+            serve_heartbeat_secs: 15,
             slo_api_p95_ms: 1000,
             slo_api_minutes: 10,
         }

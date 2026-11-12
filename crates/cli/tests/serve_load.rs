@@ -1,26 +1,37 @@
-//! #893: serve under load: with the database write-locked (a drive pass mid-write), a paired device's API v1 reads and
-//! `/live` still answer at once; held `/live` streams never lock out a new one.
 mod common;
 use common::*;
 use herdsman::events::{append, Event};
+use herdsman::runner::{Out, Runner};
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-fn server(name: &str) -> (herdsman::Ctx, SocketAddr) {
-    let c = ctx(&tmpdir(name), CONFIG);
+struct SlowGh(Fake, Arc<AtomicUsize>);
+
+impl Runner for SlowGh {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        if prog == "gh" {
+            self.1.fetch_add(1, Ordering::SeqCst);
+            std::thread::sleep(Duration::from_secs(10));
+        }
+        self.0.run(prog, args)
+    }
+}
+
+fn server(name: &str, config: &str) -> (herdsman::Ctx, SocketAddr, Arc<AtomicUsize>) {
+    let c = ctx(&tmpdir(name), config);
     append(&c.state, &Event::new(1_000_000, "sendmeter", None, "note", json!({}))).unwrap();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    let c2 = c.clone();
-    std::thread::spawn(move || {
-        herdsman::serve::serve_on(&c2, &Fake::default().reply("herdr agent list", NO_AGENTS), l, false)
-    });
-    (c, addr)
+    let (c2, gh) = (c.clone(), Arc::new(AtomicUsize::new(0)));
+    let r = SlowGh(Fake::default().reply("herdr agent list", NO_AGENTS), gh.clone());
+    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &r, l, false));
+    (c, addr, gh)
 }
 
-/// The first `want` bytes of `path`'s answer (all of it: 0) and how long they took; 2 s at most.
 fn get(addr: SocketAddr, path: &str, cookie: &str, want: usize) -> (String, Duration) {
     let t = Instant::now();
     let mut s = TcpStream::connect(addr).unwrap();
@@ -42,8 +53,8 @@ fn p95(mut v: Vec<Duration>) -> Duration {
 }
 
 #[test]
-fn api_v1_reads_and_live_answer_within_200ms_with_the_db_write_locked() {
-    let (c, addr) = server("load-locked");
+fn api_v1_reads_and_live_answer_within_200ms_with_the_db_write_locked_and_gh_slow() {
+    let (c, addr, gh) = server("load-locked", CONFIG);
     let now = herdsman::now();
     let r = Fake::default();
     let cookie = pair(
@@ -52,7 +63,6 @@ fn api_v1_reads_and_live_answer_within_200ms_with_the_db_write_locked() {
         "",
         now,
     );
-    // The device was last seen over an hour ago: its first request rewrites last-seen.
     let db = rusqlite::Connection::open(herdsman::db::file(&c.state)).unwrap();
     let old = "UPDATE devices SET json = json_set(json, '$.used', ?1)";
     db.execute(old, [now - 7200]).unwrap();
@@ -78,34 +88,36 @@ fn api_v1_reads_and_live_answer_within_200ms_with_the_db_write_locked() {
     assert!(status.iter().all(|s| s == "HTTP/1.1 200 OK"), "{status:?}");
     assert!(p95(api) < Duration::from_millis(200));
     assert!(p95(live) < Duration::from_millis(200));
+    assert_eq!(gh.load(Ordering::SeqCst), 0, "no read waited on gh");
 }
 
 #[test]
-fn eight_held_live_streams_do_not_lock_out_a_ninth() {
-    let (_c, addr) = server("load-ninth");
-    let open = |s: &mut TcpStream| {
-        let mut b = [0u8; 4096];
-        s.read(&mut b).map(|n| String::from_utf8_lossy(&b[..n]).into_owned())
-    };
-    // Phones gone without a FIN: their sockets stay open and never read again.
-    let mut held: Vec<TcpStream> = (0..8)
+fn eight_silent_live_streams_are_dropped_after_two_missed_heartbeats_and_a_ninth_connects() {
+    let (c, addr, _) = server("load-silent", &format!("{CONFIG}serve_heartbeat_secs = 1\n"));
+    let fleet = "f".repeat(30_000);
+    for n in 0..400 {
+        append(&c.state, &Event::new(1_000_000 + n, &fleet, None, "note", json!({}))).unwrap();
+    }
+    let r = Fake::default();
+    let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let now = herdsman::now();
+    let silent: Vec<TcpStream> = (0..8)
         .map(|_| {
-            let mut s = TcpStream::connect(addr).unwrap();
-            s.write_all(format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
-                .unwrap();
-            s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-            assert!(open(&mut s).unwrap().starts_with("HTTP/1.1 200 OK"));
-            s
+            let cookie = pair(&s, &c, "", now);
+            let mut t = TcpStream::connect(addr).unwrap();
+            let req = format!("GET /live?since=0 HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n");
+            t.write_all(req.as_bytes()).unwrap();
+            t
         })
         .collect();
+    let (end, mut open) = (Instant::now() + Duration::from_secs(8), silent);
+    while !open.is_empty() && Instant::now() < end {
+        open.retain_mut(|t| t.write_all(b"\n").is_ok());
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    eprintln!("silent streams closed {:?} before the deadline", end - Instant::now());
+    assert!(open.is_empty(), "{} silent streams still open", open.len());
     let (r, d) = get(addr, "/live", "", 15);
     eprintln!("ninth /live: {d:?} {}", r.lines().next().unwrap_or(""));
     assert!(r.starts_with("HTTP/1.1 200 OK"), "the ninth: {r}");
-    let mut first = held.remove(0);
-    let end = Instant::now() + Duration::from_secs(2);
-    while matches!(open(&mut first), Ok(s) if !s.is_empty()) && Instant::now() < end {}
-    assert!(
-        matches!(open(&mut first), Ok(s) if s.is_empty()),
-        "the oldest stream is closed for it"
-    );
 }

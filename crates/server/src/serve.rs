@@ -139,7 +139,57 @@ type Auth = std::result::Result<devices::Device, String>;
 fn busy(a: &Auth) -> bool {
     a.as_ref().is_err_and(|w| w.starts_with("db error: "))
 }
-type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>)>>>;
+#[cfg(target_os = "macos")]
+fn queued(s: &TcpStream) -> i32 {
+    extern "C" {
+        fn getsockopt(fd: i32, level: i32, name: i32, value: *mut i32, len: *mut u32) -> i32;
+    }
+    let (mut n, mut len) = (0i32, 4u32);
+    // SAFETY: a live socket's fd and an int-sized out value with its length, as SO_NWRITE writes.
+    let rc = unsafe {
+        getsockopt(
+            std::os::fd::AsRawFd::as_raw_fd(s),
+            0xffff,
+            0x1024,
+            &raw mut n,
+            &raw mut len,
+        )
+    };
+    if rc == 0 {
+        n
+    } else {
+        0
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn queued(s: &TcpStream) -> i32 {
+    extern "C" {
+        fn ioctl(fd: i32, req: u64, ...) -> i32;
+    }
+    let mut n = 0i32;
+    // SAFETY: a live socket's fd and an int out value, as SIOCOUTQ writes.
+    let rc = unsafe { ioctl(std::os::fd::AsRawFd::as_raw_fd(s), 0x5411, &raw mut n) };
+    if rc == 0 {
+        n
+    } else {
+        0
+    }
+}
+
+fn sent(s: &mut TcpStream, mut b: &[u8], end: Instant) -> bool {
+    while !b.is_empty() {
+        let left = end.saturating_duration_since(Instant::now());
+        match s.set_write_timeout(Some(left)).and_then(|()| s.write(b)) {
+            Ok(n) if n > 0 => b = &b[n..],
+            _ => return false,
+        }
+    }
+    true
+}
+
+type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>, String)>>>;
+const PER_DEVICE: usize = 4;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 /// A form op for `serve_on`'s job thread: (ctx, form, fleet).
 type Job = (Ctx, BTreeMap<String, String>, String);
@@ -783,13 +833,25 @@ impl<'a> Server<'a> {
         // #501: a database error is no unpaired stream: the reply below says 503 and the page reconnects.
         let dev = live.then(|| devices::check(&ctx, header(&req, "cookie").unwrap_or_default()));
         if let Some(dev) = dev.filter(|d| !busy(d)) {
-            s.set_write_timeout(Some(Duration::from_secs(10)))?;
+            let beat = Duration::from_secs(
+                Config::kept(self.ctx)
+                    .map_or(15, |c| c.limits.serve_heartbeat_secs)
+                    .max(1),
+            );
             s.set_read_timeout(Some(Duration::from_millis(1)))?;
             let (tx, rx) = channel::<String>();
-            if clients.len() >= 8 {
-                clients.remove(0);
+            let hash = dev.ok().map(|d| d.hash);
+            let who = hash
+                .clone()
+                .unwrap_or_else(|| s.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default());
+            if let Some(i) = clients
+                .iter()
+                .position(|c| c.2 == who)
+                .filter(|_| clients.iter().filter(|c| c.2 == who).count() >= PER_DEVICE)
+            {
+                clients.remove(i);
             }
-            clients.push((tx, dev.ok().map(|d| d.hash)));
+            clients.push((tx, hash, who));
             let mut msg = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\nevent: build\ndata: {VER:08x}\n\n"
             );
@@ -815,7 +877,8 @@ impl<'a> Server<'a> {
             // Each second: a message (an `ev` the replay sent already: skipped), else a peek (the peer closed: free
             // the slot), else a ping every 15 s; #352: a `?tab=host` stream stamps `host-watch.at` (`hosts::sample`).
             std::thread::spawn(move || {
-                while s.write_all(msg.as_bytes()).is_ok() {
+                let mut missed = 0;
+                while sent(&mut s, msg.as_bytes(), Instant::now() + 2 * beat) {
                     let _ = host.then(|| std::fs::write(st.with_file_name("host-watch.at"), crate::now().to_string()));
                     let t = Instant::now();
                     msg = loop {
@@ -837,7 +900,13 @@ impl<'a> Server<'a> {
                             {
                                 return
                             }
-                            _ if t.elapsed() >= Duration::from_secs(15) => break ": ping\n\n".into(),
+                            _ if t.elapsed() >= beat => {
+                                missed = if queued(&s) > 0 { missed + 1 } else { 0 };
+                                if missed >= 2 {
+                                    return;
+                                }
+                                break ": ping\n\n".into();
+                            }
                             _ => {}
                         }
                     };

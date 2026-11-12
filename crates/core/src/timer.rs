@@ -35,7 +35,8 @@ pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: u64, mac:
     let log = log.to_string_lossy();
     let (cmd, when, template, dest) = if mac {
         let strings = argv.iter().map(|a| format!("<string>{a}</string>")).collect();
-        let when = ["KeepAlive</key><true/>", "StartInterval</key><integer>{secs}</integer>"][i];
+        let serve = "KeepAlive</key><true/>\n<key>ProcessType</key><string>Interactive</string>";
+        let when = [serve, "StartInterval</key><integer>{secs}</integer>"][i];
         let at = "StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>";
         let when = if every == DAILY { at } else { when };
         let dest = format!("Library/LaunchAgents/{label}.plist");
