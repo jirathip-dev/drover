@@ -2,6 +2,7 @@
 use crate::config::{Config, Fleet};
 use crate::events::{age, fold, last_spawn, open_asks, Event, IssueState};
 use crate::promise::Say;
+pub use crate::promise::SLOT;
 use crate::runner::{ok, Runner};
 use crate::{gh, Ctx};
 use serde::{Deserialize, Deserializer, Serialize};

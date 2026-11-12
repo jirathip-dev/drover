@@ -33,7 +33,8 @@ pub enum Say {
     PassRunning,
 }
 
-const SLOT: &str = "waiting for a spawn slot";
+/// The spawn-slot wait phrase; the board matches on it.
+pub const SLOT: &str = "waiting for a spawn slot";
 const CATCH_UP: &str = "catching up next pass (≤ 5 min)";
 
 impl Say {
@@ -66,11 +67,6 @@ impl Say {
             Say::PassRunning => "a drive pass is running; the next pass starts the round".into(),
         }
     }
-}
-
-/// A line that waits for a spawn slot.
-pub fn is_slot(line: &str) -> bool {
-    line.contains(SLOT)
 }
 
 /// A line that ends catching up, without that ending.
