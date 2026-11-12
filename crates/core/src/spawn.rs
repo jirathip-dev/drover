@@ -444,7 +444,13 @@ fn brief(
         "design" => format!(
             include_str!("../roles/brief-design.md"),
             branch = branch,
-            integration = integration
+            integration = integration,
+            medium = crate::design::medium(body),
+            paths = crate::design::paths(body)
+                .iter()
+                .map(|p| format!("`{p}/`"))
+                .collect::<Vec<_>>()
+                .join(", ")
         ),
         "architect" => format!(
             include_str!("../roles/brief-architect.md"),
@@ -745,6 +751,11 @@ pub const OWN_FILES: &[&str] = &[
     ".verify-browser.mjs", // #731: scripts/verify-browser.mjs, for the verify lane's recipe
 ];
 
+/// #770: `OWN_FILES` and the harness files spawn copies in (`providers::LOCAL_FILES`).
+pub fn own_files() -> impl Iterator<Item = &'static str> {
+    OWN_FILES.iter().chain(&providers::LOCAL_FILES).copied()
+}
+
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
 pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
 
@@ -760,7 +771,10 @@ pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
 /// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages).
 pub fn changes(st: &str) -> usize {
     let own = |l: &&str| {
-        (OWN_FILES.iter().chain(SHOT_DIRS).chain(&["node_modules/"])).any(|f| l.trim_end() == format!("?? {f}"))
+        (own_files()
+            .chain(SHOT_DIRS.iter().copied())
+            .chain(["node_modules/", providers::LOCAL_DIR]))
+        .any(|f| l.trim_end() == format!("?? {f}"))
     };
     st.lines().filter(|l| !own(l)).count()
 }
@@ -1147,7 +1161,8 @@ pub fn spawn(
     // #164: the last drive pass's walk of this host's worktrees (drive frees the idlest lanes' build folders first).
     let budget = cfg.limits.worktree_budget_gb;
     if let Some(gb) = crate::check::worktree_gb(ctx).filter(|g| on.machine.is_none() && *g > budget) {
-        return refused("DISK_BUDGET", format!("worktrees {gb:.1} GB > {budget} GB"));
+        let why = crate::check::worktree_why(ctx);
+        return refused("DISK_BUDGET", format!("worktrees {gb:.1} GB > {budget} GB; {why}"));
     }
     match refusal {
         Some(("HOST_BUSY", why)) if o.force => event(

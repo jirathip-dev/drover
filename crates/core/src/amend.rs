@@ -30,7 +30,7 @@ pub fn amend(
     let asked = events.iter().find(|e| is(e, "needs-decision")).and_then(|a| a.issue);
     let by = events.iter().rev().find(|e| is(e, "decision"));
     let by = by.and_then(|d| d.str("by"));
-    if asked != Some(issue) || !matches!(by, Some("owner" | "default")) {
+    if asked != Some(issue) || !matches!(by, Some("owner" | "default" | crate::TYPED)) {
         let why = format!("{basis} is no ask on {fleet}#{issue} the owner answered");
         return gate::refused("NO_DECISION", why);
     }

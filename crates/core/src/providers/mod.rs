@@ -8,7 +8,7 @@ use std::io::Write;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
-pub use claude::{remove_tmp, root as profiles_root};
+pub use claude::{remove_tmp, root as profiles_root, LOCAL_DIR, LOCAL_FILES};
 pub use dsh::{install_pre_push, DSH_TUI_VERSION};
 pub use hermes::set_mcp;
 

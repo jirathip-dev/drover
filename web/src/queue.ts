@@ -6,15 +6,15 @@ import { esc } from './events.ts'; // node runs this file as is (tests/queue_boa
 
 /** A form: a live board's posts; an export's are inert. */
 export const form = (d: { live: boolean }, rest = '') => `<form ${d.live ? 'method=post' : 'inert'}${rest}>`;
-export const hidden = (op: string, fleet: string, mt: string) => `<input type=hidden name=op value=${op}><input type=hidden name=fleet value="${esc(fleet)}"><input type=hidden name=mtime value=${mt}>`;
+export const hidden = (op: string, fleet: string, mt: string) => `${op && `<input type=hidden name=op value=${op}>`}<input type=hidden name=fleet value="${esc(fleet)}"><input type=hidden name=mtime value=${mt}>`;
 const none = '<span class=m>none</span>', all = '<span class="tag m">all fleets</span>';
 const list = (v: string[], sep = ', ') => (v.length ? esc(v.join(sep)) : none);
 
 /** Ask `a`'s answer form: option buttons (recommended first) and a free-text box. */
-export function answer(d: { live: boolean; mtime: string }, a: Ask, send: string): string {
+export function answer(d: { live: boolean; mtime: string }, a: Ask, send: string, id = ''): string {
   const opts = a.options.map((o, i) => [o, i + 1] as const).sort((x, y) => +(x[1] !== a.recommend) - +(y[1] !== a.recommend));
   const btns = opts.map(([o, n]) => `<button name=choice value=${n}>${n}. ${esc(o)}${n === a.recommend ? ' <small>(recommended)</small>' : ''}</button>`).join('');
-  return `${form(d)}${hidden('answer', a.fleet, d.mtime)}<input type=hidden name=id value="${esc(a.id)}"><input name=text aria-label=answer placeholder="or type an answer"><button>${send}</button>${btns}</form>`;
+  return `${form(d, id && ` id="${id}"`)}${hidden('answer', a.fleet, d.mtime)}<input type=hidden name=id value="${esc(a.id)}"><input name=text aria-label=answer placeholder="or type an answer"><button>${send}</button>${btns}</form>`;
 }
 
 /** #517: an open ask's question and, asked in a thread, `asked in <title> · <id>` (a tap opens it, serve.js). */

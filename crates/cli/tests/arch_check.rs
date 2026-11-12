@@ -531,3 +531,28 @@ fn a_commit_building_a_promise_phrase_outside_the_promise_module_fails_this_repo
     let (code, out) = add("crates/core/src/promise.rs");
     assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
 }
+
+#[test]
+fn the_repos_provider_ban_fails_a_new_web_file_and_passes_the_two_frozen_board_files() {
+    let conf = include_str!("../../../.herdsman/arch.toml");
+    let board = "const C = '<b>Anthropic</b>' + ['claude', 'codex'].join();\n";
+    let d = committed(
+        "arch-ban-web",
+        conf,
+        &[("web/src/system.ts", board), ("web/src/host.ts", board)],
+    );
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    std::fs::write(
+        d.join("web/src/accounts.ts"),
+        "export const v = 'x';\nconst p = 'Claude';\n",
+    )
+    .unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("web/src/accounts.ts:2: `claude` is banned here: #806"),
+        "{out}"
+    );
+    assert!(out.contains("1 violations"), "{out}");
+}

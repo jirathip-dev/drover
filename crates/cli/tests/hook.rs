@@ -689,6 +689,8 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
         format!("cp x {c}/t6/a.png"),
         format!("mkdir -p {c}/t6/d && cp /w/a.png /w/b.png \"{c}/t6/d/\""),
         format!("echo hi > {c}/t6/n.txt"),
+        format!("cp /w/docs/design/a.png /w/docs/design/b.png {c}/t6/"),
+        format!("cp /w/a.png \"{c}/t6\""),
     ] {
         assert_eq!(sh(&cmd), "", "{cmd}");
     }
@@ -699,6 +701,9 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
         format!("cp x {c}/t6/../t5/a.png"),
         format!("cp {c}/t6/a.png {s}/fleet.toml"),
         format!("rm {s}/events.jsonl"),
+        format!("cp x {c}/t5/"),
+        format!("cp x {s}/events.jsonl"),
+        format!("rm -rf {c}/t6"),
         // The shell expands these after the check: another thread's folder, herdsman's `.thread.md`.
         format!("cp x {c}/t6/{{a.png,../t5/x}}"),
         format!("cp x {c}/t6/{{.thread,x}}.md"),
@@ -708,6 +713,40 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
         format!("cp x {c}/t6/$T"),
     ] {
         assert!(sh(&cmd).contains("is blocked"), "{cmd}");
+    }
+}
+
+#[test]
+fn message_text_is_not_a_write_or_a_group_verb() {
+    let d = tmpdir("hook-msg");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let s = d.join("state").display().to_string();
+    let sh = |cmd: &str| orchestrator_hook(&d, json!({"tool_name": "Bash", "tool_input": {"command": cmd}}));
+    let refusal = "REFUSED GROUP_OFF: the `set` group is off; I ran `herdsman set synergy impl --model x`";
+    for cmd in [
+        format!("herdsman thread handoff t6 t7 \"copy\" 'cp mock.png {s}/orchestrator/t7/; then {refusal}'"),
+        format!("herdsman thread handoff t6 synergy 'why: {refusal}' \"mv a > {s}/x\""),
+        format!("herdsman ask synergy 1 \"cp a {s}/x?\" --why '`herdsman set x impl`'"),
+        format!("gh issue create -t 'hook' --body 'echo x > {s}/events.jsonl; {refusal}'"),
+    ] {
+        assert_eq!(sh(&cmd), "", "{cmd}");
+    }
+    for cmd in [
+        format!("echo x > {s}/events.jsonl"),
+        format!("cp a.png {s}/x"),
+        format!("herdsman thread handoff t6 t7 a b > \"{s}/out file\""),
+        format!("herdsman thread say t6 'x' && cp a \"{s}/x y\""),
+    ] {
+        assert!(sh(&cmd).contains("is blocked"), "{cmd}");
+    }
+    for cmd in [
+        "herdsman set synergy impl --model x",
+        "herdsman thread handoff t6 t7 a b; herdsman set synergy impl --model x",
+        "herdsman \"set\" synergy impl --model x",
+        "herdsman thread handoff t6 t7 a \"$(herdsman set synergy impl --model x)\"",
+        "herdsman thread handoff t6 t7 a \"run `herdsman set synergy impl --model x`\"",
+    ] {
+        assert!(sh(cmd).contains("REFUSED GROUP_OFF"), "{cmd}");
     }
 }
 
@@ -1508,4 +1547,81 @@ fn impl_lane_never_edits_the_cap_file() {
     std::fs::write(cache.join("issue-sendmeter-25.json"), spec.to_string()).unwrap();
     assert_eq!(call("25", "Edit", json!({"file_path": "/w/ci/cap.toml"})), "");
     assert_eq!(bash("25", "sed -i '' 's/35500/36000/' ci/cap.toml"), "");
+}
+
+#[test]
+fn the_stop_hook_asks_for_the_turn_only_in_impl_lanes() {
+    let stop = |lane: Option<&str>, role: &str| hook_in(lane, role, json!({"hook_event_name": "Stop"}));
+    for lane in [None, Some("sendmeter:-:orchestrator"), Some("sendmeter:-:conductor")] {
+        assert_eq!(stop(lane, "orchestrator"), "", "{lane:?} ends its turn freely");
+    }
+    let out = stop(Some("sendmeter:24:impl"), "impl");
+    let v: Value = serde_json::from_str(out.trim()).unwrap();
+    assert_eq!(
+        (&v["decision"], &v["reason"]),
+        (&json!("block"), &json!(herdsman::hook::TURN_ASK))
+    );
+}
+
+#[test]
+fn a_design_lane_writes_only_its_issues_design_paths() {
+    let d = tmpdir("hook-design");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let cache = d.join("state/cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    let spec = json!({"title": "native surfaces", "body": "SwiftUI views in `apple/design/x/`, previews only."});
+    std::fs::write(cache.join("issue-sendmeter-30.json"), spec.to_string()).unwrap();
+    let wt = tmpdir("hook-design-wt");
+    let hook =
+        |lane: &str, input: Value| hook_at(&d, &wt, &[("HERDSMAN_LANE", Some(lane))], "design", &input.to_string());
+    let edit = |lane: &str, tool: &str, f: &str| {
+        let ti = json!({"file_path": f, "content": "x"});
+        hook(
+            lane,
+            json!({"hook_event_name": "PreToolUse", "tool_name": tool, "cwd": "/w", "tool_input": ti}),
+        )
+    };
+    let patch = |lane: &str, f: &str| {
+        let p = format!("*** Begin Patch\n*** Update File: {f}\n@@\n-a\n+b\n*** End Patch\n");
+        hook(
+            lane,
+            json!({"tool_name": "patch", "args": {"mode": "patch", "patch": p}}),
+        )
+    };
+    let design = "sendmeter:30:design";
+    for f in [
+        "/w/apple/design/x/NativeSurfaces.swift",
+        "apple/design/x/Fixtures/Feed.swift",
+        "/w/docs/design/x/README.md",
+    ] {
+        assert_eq!(edit(design, "Write", f), "", "{f}");
+        assert_eq!(edit(design, "Edit", f), "", "{f}");
+    }
+    let refused = |out: String| out.contains("REFUSED DESIGN_PATH");
+    for f in [
+        "/w/apple/Sources/CooeeAPI/Client.swift",
+        "apple/Sources/CooeeAPI/Client.swift",
+        "/w/apple/design/x/../../Sources/CooeeAPI/Client.swift",
+        "/w/apple/design/xy/Screen.swift",
+        "/elsewhere/apple/design/x/Screen.swift",
+    ] {
+        assert!(refused(edit(design, "Write", f)), "{f}");
+    }
+    let hermes = |lane: &str, f: &str| {
+        let ti = json!({"path": f, "content": "x"});
+        hook(lane, json!({"tool_name": "write_file", "cwd": "/w", "args": ti}))
+    };
+    assert!(refused(hermes(design, "apple/Sources/CooeeAPI/Client.swift")));
+    assert!(refused(patch(design, "apple/Sources/CooeeAPI/Client.swift")));
+    assert_eq!(patch(design, "apple/design/x/A.swift"), "");
+    assert!(refused(edit(
+        "sendmeter:31:design",
+        "Write",
+        "/w/apple/design/x/A.swift"
+    )));
+    assert_eq!(edit("sendmeter:31:design", "Write", "/w/docs/design/a/index.html"), "");
+    assert_eq!(
+        edit("sendmeter:30:impl", "Write", "/w/apple/Sources/CooeeAPI/Client.swift"),
+        ""
+    );
 }

@@ -182,8 +182,7 @@ fn the_lanes_tab_renders_orchestrator_rows_with_their_thread() {
 /// In WebKit at 390 px: a tap on the asleep conductor's row opens its thread in the chat tab (no lane sheet).
 #[test]
 fn a_tap_on_a_orchestrator_row_opens_its_thread_in_the_chat_tab() {
-    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, agents) = setup("orchestrator-lanes-tap");
@@ -206,9 +205,8 @@ fn a_tap_on_a_orchestrator_row_opens_its_thread_in_the_chat_tab() {
           +(v && getComputedStyle(v).display !== 'none'), +(THR === 't8'), +!!(history.state && history.state.thr === 't8'), \
           +!$('#sheet.on'), errs.length];";
     let png = tmpdir("orchestrator-lanes-png").join("tap.png");
-    let o = swift()
+    let o = webview()
         .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
             &format!("http://{addr}/?all=1"),
             "390",
             "lanes",

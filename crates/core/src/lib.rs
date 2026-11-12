@@ -395,7 +395,8 @@ pub fn orchestrator_answer(
     let Some(ask) = events.iter().find(is) else {
         return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {id}"));
     };
-    if ask.str("routed").is_none() || orchestrator::fleet_of(&events, t)? != ask.fleet {
+    let mine = ask.str("routed").is_some() || crate::design::is_ask(ask) || ask.data.get("extend").is_some();
+    if !mine || orchestrator::fleet_of(&events, t)? != ask.fleet {
         return gate::refused("OWNER_ASK", format!("{id} is no lane ask on {t}'s repo; ask the owner"));
     }
     let text = chosen(ask, choice);
@@ -411,6 +412,8 @@ pub fn orchestrator_answer(
     };
     let why = if owner_topic(&format!("{} {text}", ask.str("question").unwrap_or_default())) {
         "it names an owner topic"
+    } else if ask.data.get("extend").is_some() && text == "park" {
+        "parking is the owner's"
     } else if quote.is_empty() {
         "no --basis"
     } else if quote != id && events.iter().any(decided) || in_spec()? {
@@ -432,12 +435,59 @@ pub fn orchestrator_answer(
         (fleet, id),
         choice,
         (&format!("orchestrator-{t}"), None),
-        Some(&quote),
+        (Some(&quote), None),
     )
 }
 
+/// #817: `herdsman extend` by thread `t`'s orchestrator: the owner's `typed` line, else its extend ask answered on `basis`.
+#[allow(clippy::too_many_arguments)]
+pub fn orchestrator_extend(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    spawn: bool,
+    t: &str,
+    (typed, basis): (Option<&str>, Option<&str>),
+) -> Result<()> {
+    let events = read(&ctx.state)?;
+    if orchestrator::fleet_of(&events, t)? != fleet {
+        return gate::refused("OWNER_ASK", format!("#{n} is not on {t}'s repo; ask the owner"));
+    }
+    gate::held(ctx, fleet, n)?;
+    let card = events.iter().rfind(|e| e.is("needs-human", fleet, n));
+    if let Some(line) = typed {
+        let said = |m: &Event| m.kind == "thread-msg" && m.str("thread") == Some(t) && m.str("from") == Some("owner");
+        let after = |m: &Event| said(m) && m.str("text") == Some(line) && card.is_some_and(|c| m.seq > c.seq);
+        if !events.iter().any(after) {
+            return gate::refused(
+                "NOT_TYPED",
+                format!("no owner message in {t} says that line after #{n}'s card"),
+            );
+        }
+        return gate::needs_human(ctx, cfg, r, out, (fleet, n), "extend", (spawn, TYPED, None));
+    }
+    let open = |e: &&Event| e.is("needs-decision", fleet, n) && e.data.get("extend").is_some();
+    let ask = events
+        .iter()
+        .rfind(open)
+        .filter(|a| events::closed(&events, a).is_none());
+    let mut id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
+    if let Some(a) = ask {
+        a.str("id").unwrap_or_default().clone_into(&mut id);
+    } else {
+        let why = card.and_then(|c| c.str("reason")).unwrap_or("needs-human");
+        let q = format!("One more round for #{n}? ({why})");
+        let d = json!({"id": id, "question": q, "options": ["one more round", "park"], "recommend": 1,
+            "kind": "owner", "extend": true, "spawn": spawn});
+        events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "needs-decision", d))?;
+    }
+    orchestrator_answer(ctx, cfg, r, out, (fleet, &id), "1", (t, basis.unwrap_or_default()))
+}
+
 /// #584: who a typed answer is by.
-const TYPED: &str = "owner (typed)";
+pub(crate) const TYPED: &str = "owner (typed)";
 
 /// #584: `herdsman answer --typed <line>`: the owner's words, accepted only when `line` is the owner's message in the
 /// ask's thread (its own, or the one its lane ask was put to the owner in) after the ask; else `NOT_TYPED`.
@@ -447,14 +497,19 @@ pub fn answer_typed(
     r: &dyn runner::Runner,
     out: &mut dyn Write,
     (fleet, id): (&str, &str),
-    line: &str,
+    (line, on): (&str, Option<&str>),
+    (choice, note): (Option<&str>, Option<&str>),
 ) -> Result<()> {
     let events = read(&ctx.state)?;
     let is = |e: &&Event, k: &str| e.kind == k && e.fleet == fleet && e.str("id") == Some(id);
+    let on = on.filter(|t| orchestrator::fleet_of(&events, t).ok() == Some(fleet));
     // Where the ask waits: its `needs-decision` in its thread, or (#541) its `ask-owner` row.
-    let asked: Vec<&Event> = (events.iter())
+    let asked: Vec<(&str, u64)> = (events.iter())
         .filter(|e| is(e, "needs-decision") || is(e, "ask-owner"))
-        .filter(|e| e.str("thread").is_some())
+        .flat_map(|e| {
+            let own = on.filter(|_| crate::design::is_ask(e));
+            e.str("thread").into_iter().chain(own).map(|t| (t, e.seq))
+        })
         .collect();
     let said: Vec<&Event> = (events.iter())
         .filter(|e| e.kind == "thread-msg" && e.str("from") == Some("owner") && e.str("text") == Some(line))
@@ -462,8 +517,8 @@ pub fn answer_typed(
     // The ask's first row in `m`'s thread.
     let at = |m: &Event| {
         (asked.iter())
-            .filter(|a| a.str("thread") == m.str("thread"))
-            .map(|a| a.seq)
+            .filter(|a| Some(a.0) == m.str("thread"))
+            .map(|a| a.1)
             .min()
     };
     let there: Vec<_> = said.iter().filter_map(|m| Some((m.seq, at(m)?))).collect();
@@ -483,7 +538,18 @@ pub fn answer_typed(
     if !why.is_empty() {
         return gate::refused("NOT_TYPED", why);
     }
-    answer(ctx, cfg, r, out, (fleet, id), line, (TYPED, None))
+    let choice = choice.unwrap_or(line);
+    if note.is_some_and(|n| n.trim().is_empty() || n.chars().any(char::is_control)) {
+        return gate::refused("BAD_VALUE", "a note is one line of text");
+    }
+    let ask = events.iter().find(|e| is(e, "needs-decision"));
+    let text = ask.map_or(choice, |a| chosen(a, choice));
+    let revise = note.filter(|_| text == "revise").map(|n| format!("revise: {n}"));
+    let said = revise.as_deref().unwrap_or(choice);
+    answer_with(ctx, cfg, r, out, (fleet, id), said, (TYPED, None), (None, note))?;
+    let n = ask.and_then(|a| a.issue).filter(|_| text == "approve");
+    n.zip(note)
+        .map_or(Ok(()), |(n, note)| amend::amend(ctx, cfg, r, out, (fleet, n), id, note))
 }
 
 /// #584: `herdsman ask withdraw`: the ask's own thread's orchestrator (`by`) closes an ask it replaced (`for`).
@@ -533,7 +599,7 @@ pub fn answer(
     choice: &str,
     (by, via): (&str, Option<&str>),
 ) -> Result<()> {
-    answer_with(ctx, cfg, r, out, (fleet, id), choice, (by, via), None)
+    answer_with(ctx, cfg, r, out, (fleet, id), choice, (by, via), (None, None))
 }
 
 /// `answer`; #541: a conductor's (`basis`) also posts its FYI line, and the owner may change one for `CHANGE`.
@@ -546,7 +612,7 @@ fn answer_with(
     (fleet, id): (&str, &str),
     choice: &str,
     (by, via): (&str, Option<&str>),
-    basis: Option<&str>,
+    (basis, note): (Option<&str>, Option<&str>),
 ) -> Result<()> {
     let events = read(&ctx.state)?;
     let is = |e: &&Event, k: &str| e.kind == k && e.fleet == fleet && e.str("id") == Some(id);
@@ -591,10 +657,15 @@ fn answer_with(
     if design {
         crate::design::decide(ctx, cfg, r, ask, text, by)?;
     }
-    let mut d = with_via(json!({"id": id, "choice": text, "by": by}), via);
-    if let Some(b) = basis {
-        d["basis"] = json!(b);
+    let extend = ask.issue.filter(|_| ask.data.get("extend").is_some());
+    if let Some(n) = extend.filter(|_| text == "park") {
+        gate::park(ctx, cfg, r, out, (fleet, n), by, None)?;
+    } else if let Some(n) = extend.filter(|_| last.is_none()) {
+        let spawn = ask.data["spawn"] != json!(false);
+        gate::needs_human(ctx, cfg, r, out, (fleet, n), "extend", (spawn, by, None))?;
     }
+    let mut d = json!({"id": id, "choice": text, "by": by, "basis": basis, "note": note, "via": via});
+    d.as_object_mut().iter_mut().for_each(|m| m.retain(|_, v| !v.is_null()));
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, ask.issue, "decision", d))?;
     // #779: a `RESPAWN_LOOP` ask's [park] parks the issue ([try again] is the decision spawn reads).
     if ask.data.get("respawn_loop").is_some() && text == "park" {
@@ -609,6 +680,9 @@ fn answer_with(
         let text = format!("answered {id}{at}: {text}, because {b}");
         let d = json!({"thread": t, "from": "system", "text": text, "change": id});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "thread-msg", d))?;
+    }
+    if extend.is_some() {
+        return Ok(writeln!(out, "{fleet} {id}: {text}")?);
     }
     let why = via.map_or("answer", |_| "board");
     if let Some(n) = ask.issue {

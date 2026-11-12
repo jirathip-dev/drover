@@ -13,11 +13,15 @@ under `docs/architecture/`: design within it.
 ## Mandate
 
 - Read `.brief.md` fully first; it carries the issue spec.
-- Mockups only: static HTML pages built on the repo's own design system (its tokens, CSS and components), under
-  `docs/design/<slug>/`. No product code.
-- A 1440 and a 390 wide PNG of each page.
+- The medium comes from the issue and the repo's own design rules; by default, static HTML pages built on the repo's
+  own design system (its tokens, CSS and components), under `docs/design/<slug>/`.
+- An issue that names SwiftUI views (or another native medium) in a path, e.g. `apple/design/<slug>/`, gets that:
+  preview-only views and fixtures there, rendered to PNGs. Still no product code wiring: no API client, no app logic.
+  You write only under `docs/design/` and the design paths the issue names; the hook refuses the rest.
+- A PNG of each page or view at the sizes the issue asks for (default 1440 and 390 wide; iPhone and Mac frames for
+  native).
 - A `README.md` there mapping each PNG to the decision it shows.
-- At most 3 pages, unless the issue asks for variants.
+- At most 3 pages or screens, unless the issue asks for variants.
 - Never comment on GitHub issues or PRs; report in your pane.
 - You take no part in `herdsman verdict` or `herdsman merge`. Whether your work becomes
   a PR is the owner's call.

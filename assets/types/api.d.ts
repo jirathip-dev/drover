@@ -254,7 +254,11 @@ export type Setup = { host: string, name: string, };
  * `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s),
  * the Events tab's time groups.
  */
-export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, };
+export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, 
+/**
+ * #859: when the background last read each source the lanes come from (herdr, shed, remote, host).
+ */
+sources: { [key in string]: number }, };
 
 export type Fleet = { name: string, repo: string, color: string, paused: boolean, };
 
@@ -292,7 +296,7 @@ export type Row = { name: string, tone: string, detail: string, fix: string, };
  * board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's
  * forms are inert); `mtime` the forms send back.
  */
-export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, };
+export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, vendors: Vendors, };
 
 /**
  * #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on]
@@ -353,6 +357,16 @@ export type Paired = { hash: string, label: string, created: number, used: numbe
  * #440: a global `[[notify]]` in words (System → Notifications): `web push` or `command`, and its events.
  */
 export type Notifier = { kind: string, on: string, };
+
+/**
+ * #830: the provider vendor of each account and each [sign in ▾] login that is a provider's.
+ */
+export type Vendors = { accounts: Array<Vendor>, setups: Array<Vendor>, };
+
+/**
+ * #830: an account's or a login's `name` and its provider's `vendor`.
+ */
+export type Vendor = { name: string, vendor: string, };
 
 /**
  * #268: API v1's `queue`, the Queue tab at `now`: a card per fleet, the ones needing you first (`error`: fleet.toml

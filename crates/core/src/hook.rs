@@ -23,6 +23,14 @@ pub struct Policy {
     pub scratch: Option<String>,
     /// #668: an impl lane: `ci/cap.toml` is not its to write (but for the orchestrator-filed raise).
     pub cap: bool,
+    /// #868: a design lane: its edits land only under its issue's design paths.
+    pub design: Option<Design>,
+}
+
+/// #868: a design lane's worktree `root` and the folders under it (`crate::design::paths`) it may write.
+pub struct Design {
+    pub root: String,
+    pub allow: Vec<String>,
 }
 
 /// #592: a lane's hook rules as the main host resolves them from its fleet.toml. A remote lane's are frozen at spawn in
@@ -146,8 +154,35 @@ pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<Str
             "{file} is protected ({pp}); change it only through `herdsman` (e.g. `herdsman set`)"
         ));
     }
+    if let Some(r) = design_write(file, p) {
+        return Some(r);
+    }
     (p.reviewer && !file.ends_with("/verdict.md") && file != "verdict.md")
         .then(|| format!("reviewers are read-only: only verdict.md may be written, not {file}"))
+}
+
+fn design_write(file: &str, p: &Policy) -> Option<String> {
+    let d = p.design.as_ref()?;
+    let patched: Vec<&str> = (file.lines())
+        .filter_map(|l| l.strip_prefix("*** "))
+        .filter_map(|l| l.split_once(" File: ").map(|(_, f)| f).or(l.strip_prefix("Move to: ")))
+        .map(str::trim)
+        .collect();
+    let files = if file.starts_with("*** ") { patched } else { vec![file] };
+    let ok = |f: &&str| {
+        let f = resolve(f, &d.root);
+        let rel = Path::new(&f).strip_prefix(&d.root);
+        rel.is_ok_and(|rel| d.allow.iter().any(|a| rel.starts_with(a)))
+    };
+    let bad = files
+        .iter()
+        .find(|f| !ok(f))
+        .copied()
+        .or(files.is_empty().then_some(file))?;
+    let allow = d.allow.iter().map(|a| format!("{a}/")).collect::<Vec<_>>().join(", ");
+    Some(format!(
+        "REFUSED DESIGN_PATH: a design lane writes only under {allow}, not {bad} (#868)"
+    ))
 }
 
 fn expand_home(s: &str) -> String {
@@ -284,8 +319,14 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         };
         // A link's target resolves against the link's folder, not the cwd: `ln` gets no own-folder pass.
         // #504: the shell expands braces, globs, variables and escapes after this check sees the word.
+        let copy = matches!(t.first(), Some(&("cp" | "mv" | "install" | "rsync" | "ditto")));
+        let into = t.last().filter(|_| copy).map(|w| resolve(w, &cwd));
+        let folder =
+            |f: &str| into.as_deref() == Some(f) && p.own.as_deref().is_some_and(|o| Path::new(o) == Path::new(f));
         let own = |f: &str| {
-            !t.contains(&"ln") && !f.contains(['{', '}', '*', '?', '[', ']', '$', '~', '\\']) && own_file(f, p)
+            !t.contains(&"ln")
+                && !f.contains(['{', '}', '*', '?', '[', ']', '$', '~', '\\'])
+                && (own_file(f, p) || folder(f))
         };
         let hit = (t.iter().flat_map(|w| paths(w)))
             .find_map(|f| p.paths.iter().find(|pp| f.starts_with(pp.as_str()) && !own(&f)))
@@ -391,7 +432,9 @@ fn unquote(cmd: &str, args: bool) -> String {
         match c {
             '\'' | '"' => {
                 // Only when `herdsman` is the command word: `eval` or `ssh h` before it re-parse the quoted text.
-                let i = words.iter().position(|w| matches!(word(w), "herdsman" | "fleet"));
+                let i = words
+                    .iter()
+                    .position(|w| matches!(word(w), "herdsman" | "fleet" | "gh"));
                 let i = i.filter(|&i| {
                     words[..i]
                         .iter()
@@ -405,6 +448,7 @@ fn unquote(cmd: &str, args: bool) -> String {
                 let text = text || data;
                 // `$'…'` escapes its quote (`$'x\''`); its text is kept, like an unterminated quote's.
                 let ansi = c == '\'' && out.ends_with('$');
+                let target = out.trim_end().ends_with(['>', '<']);
                 out.push(c);
                 let (mut span, mut live, mut closed) = (String::new(), false, false);
                 while let Some(q) = cs.next() {
@@ -417,7 +461,9 @@ fn unquote(cmd: &str, args: bool) -> String {
                     live |= c == '"' && esc.is_none() && (q == '`' || (q == '$' && cs.peek() == Some(&'(')));
                     span.extend(Some(q).into_iter().chain(esc));
                 }
-                if !text || live || ansi || !closed {
+                let msg =
+                    i.is_some() && !target && span.contains(|q: char| q.is_whitespace() || ";|&()`<>".contains(q));
+                if !(text || msg) || live || ansi || !closed {
                     cur.push_str(&span);
                     out.push_str(&span);
                 }
@@ -590,7 +636,7 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
         (Some(&"config"), Some(&("apply" | "discard")))
             | (Some(&"secret"), Some(&("ls" | "rm")))
             | (Some(&"accounts"), Some(&"import"))
-            | (Some(&"card"), Some(&("approve" | "deny")))
+            | (Some(&"card"), Some(&("approve" | "deny" | "run")))
     ) {
         return Some(
             "REFUSED OWNER_ONLY: only the owner applies config, settles run cards or lists and removes secrets, never \

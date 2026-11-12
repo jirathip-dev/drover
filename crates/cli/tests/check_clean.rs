@@ -784,3 +784,75 @@ fn saved_as(out: &str, prefix: &str) -> String {
     let at = out.find(prefix).unwrap_or_else(|| panic!("no {prefix} in {out}"));
     out[at..].split_whitespace().next().unwrap().to_string()
 }
+
+#[test]
+fn clean_and_the_wip_snapshot_treat_spawns_claude_files_as_the_lanes_own() {
+    let d = tmpdir("clean-claude-local");
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        let o = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    };
+    let (origin, local) = (d.join("origin.git"), d.join("local"));
+    git(&d, &["init", "-q", "--bare", origin.to_str().unwrap()]);
+    git(&d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
+    git(&local, &["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&local, &["push", "-q", "origin", "HEAD"]);
+    let c = ctx(
+        &d,
+        &CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap()),
+    );
+    let wt = |n: &str, files: &[&str]| {
+        let p = c.worktrees.join("sendmeter").join(n);
+        git(&local, &["worktree", "add", "-q", "-b", n, p.to_str().unwrap()]);
+        for f in ["CLAUDE.local.md", ".claude/settings.local.json"].iter().chain(files) {
+            std::fs::create_dir_all(p.join(f).parent().unwrap()).unwrap();
+            std::fs::write(p.join(f), "x").unwrap();
+        }
+        p
+    };
+    let (ours, user) = (wt("issue-12", &[]), wt("issue-13", &["notes.txt"]));
+    for (ts, issue, p) in [(10, 12, &ours), (11, 13, &user)] {
+        let w = p.to_str().unwrap();
+        ev(
+            &c,
+            ts,
+            issue,
+            "spawn",
+            json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": w, "pane": format!("w{issue}:p1"), "workspace": format!("w{issue}")}),
+        );
+        ev(
+            &c,
+            50,
+            issue,
+            "merged",
+            json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
+        );
+    }
+    let r = || GitHerdr(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let (code, out) = run(&c, &r(), &["clean", "--lane", "impl-12", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!ours.exists(), "{out}");
+    let (_, dry) = run(&c, &r(), &["clean"]);
+    let user_s = user.display().to_string();
+    assert!(
+        dry.contains(&format!(
+            "would save {user_s} to wip/ (1 uncommitted change(s)), then remove it"
+        )),
+        "{dry}"
+    );
+    let (_, done) = run(&c, &r(), &["clean", "--yes"]);
+    let wip = saved_as(&done, "wip/impl-13-1000000-");
+    let files = git(&origin, &["ls-tree", "-r", "--name-only", &wip]);
+    assert_eq!(files, "notes.txt\n", "{done}");
+}

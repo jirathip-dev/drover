@@ -281,7 +281,7 @@ fn random_seeds() {
 fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     let s = Some(Sabotage::Planted);
     let tripped = |f: &str| f.starts_with("I1 ");
-    let h = hunt::hunt(&[2, 3, 4, 5], 5, s, |r, f| {
+    let h = hunt::hunt(&[2, 3, 4, 5], 1, s, |r, f| {
         r < 40 && !f.iter().any(|x| tripped(&x.failure))
     });
     let f = h
@@ -359,7 +359,8 @@ fn hunt() {
 /// 300 s, its record and merge; #202's first reviewer is refused, superseded at t+1025 and its successor reviews
 /// 300 s). Five spawns of four lanes, one wasted; two heads × 300 s of CI; idle: the four kept lanes from their stop
 /// to the clean and the refused reviewer's 14 s (#779: 5661, up from 5585, as clean's `wip prune` git calls move the
-/// jittered timers after the first merge); one reviewed head per merge.
+/// jittered timers after the first merge; #854: 5561, as drive's promise appends move them again); one reviewed head
+/// per merge.
 #[test]
 fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
@@ -370,7 +371,7 @@ fn the_known_fleet_gives_exact_metrics() {
         wasted: 1,
         supersedes: 1,
         lanes: 4,
-        idle: 5661,
+        idle: 5561,
         ci_wait: 600,
         lock_wait: 13,
         serial: 0,
@@ -388,7 +389,7 @@ fn the_known_fleet_gives_exact_metrics() {
             ("caps", 0.0),
             ("ci_wait_min", 10.0),
             ("host_busy", 0.0),
-            ("idle_lane_min", 94.35),
+            ("idle_lane_min", 92.68),
             ("lock_wait_min", 0.22),
             ("queue_to_merge_p50_min", 17.12),
             ("queue_to_merge_p90_min", 22.27),

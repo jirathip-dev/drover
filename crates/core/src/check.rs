@@ -6,7 +6,7 @@ use crate::gate::gate;
 use crate::host;
 use crate::hosts::On;
 use crate::runner::{ok, Runner};
-use crate::spawn::{changes, dirty, OWN_FILES, SHOT_DIRS};
+use crate::spawn::{changes, dirty, own_files, SHOT_DIRS};
 use crate::Ctx;
 use crate::{gh, herdr};
 use anyhow::{Context, Result};
@@ -586,10 +586,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         leftovers(ctx, cfg, r, a, true)?;
     }
     // #160: the worktree total (bytes, when) for the Services disk row; `serve` never walks or runs `du`.
-    let _ = std::fs::write(
-        ctx.state.with_file_name("worktrees.du"),
-        format!("{} {}", du(&ctx.worktrees), ctx.now),
-    );
+    let _ = stamp(ctx, &measure(ctx, cfg));
     Ok(())
 }
 
@@ -780,30 +777,31 @@ pub fn clean_all(
         })
         .collect();
     // Newest spawn per worktree wins (it has the current pane); #416: a `spawn-started` alone (the spawn failed) too.
-    for e in (events.iter().rev())
+    let spawns: Vec<&Event> = (events.iter().rev())
         .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && fleet.is_none_or(|f| f == e.fleet))
         .chain(&revs)
-    {
+        .filter(|e| e.issue.is_some_and(|n| issue.is_none_or(|i| i == n)))
+        .filter(|e| lane.is_none_or(|a| e.str("agent") == Some(a)))
+        .collect();
+    let held = |e: &Event| {
+        // #561: a disabled or unreachable host's worktrees are never probed; a merged or closed one there is listed.
+        // #678: an explicit run's probe decides for a disabled host.
+        let away = e.str("host").filter(|_| e.str("machine").is_some());
+        let held = match away.filter(|h| cfg.hosts.get(*h).is_some_and(|c| !c.enabled)) {
+            Some(h) => !off.iter().any(|o| o.0 == h && o.2.is_some()),
+            None => crate::hosts::offline(ctx, Some(e)).is_some(),
+        };
+        held.then_some("host unreachable (not cleaned)")
+    };
+    let there = crate::hosts::present(r, spawns.iter().copied().filter(|e| held(e).is_none()));
+    for e in spawns {
         let (Some(n), Some(wt)) = (e.issue, e.str("worktree")) else {
             continue;
         };
-        if issue.is_some_and(|i| i != n) || lane.is_some_and(|a| e.str("agent") != Some(a)) {
-            continue;
-        }
-        let on = On::of(r, Some(e));
-        // #561: a disabled or unreachable host's worktrees are never probed; a merged or closed one there is listed.
-        // #678: an explicit run's probe decides for a disabled host.
+        let (on, held) = (On::of(r, Some(e)), held(e));
         let away = e.str("host").filter(|_| on.machine.is_some());
-        let held = match away.filter(|h| cfg.hosts.get(*h).is_some_and(|c| !c.enabled)) {
-            Some(h) => match off.iter().find(|o| o.0 == h) {
-                Some((.., Some(_))) => None,
-                Some(_) => Some("host offline (not cleaned)"),
-                None => Some("on a disabled host (not cleaned)"),
-            },
-            None => crate::hosts::offline(ctx, Some(e)).map(|_| "host offline (not cleaned)"),
-        };
         let gone = |c: &Event| c.kind == "clean" && c.str("worktree") == Some(wt) && c.ts >= e.ts;
-        let gone = || held.map_or_else(|| !on.exists(Path::new(wt)), |_| events.iter().any(gone));
+        let gone = || held.map_or_else(|| !there.contains(&(on.machine, wt)), |_| events.iter().any(gone));
         if seen.contains(wt) || gone() {
             continue;
         }
@@ -1090,6 +1088,7 @@ pub fn leftovers(
 }
 
 const BUILD_DIRS: &[&str] = &["target", "node_modules", ".next", "dist", ".cache"];
+const BUILDERS: &[&str] = &["cargo", "rustc", "node", "npm", "npx", "pnpm", "yarn", "bun"];
 /// #103: delete a lane's build folders (#164: plus the fleet's `build_dirs`), even when the worktree stays; the bytes
 /// freed (#361: with `dry`, listed and counted, none removed). One git does not ignore stays.
 pub fn purge(r: &dyn Runner, cfg: &Config, fleet: &str, out: &mut dyn Write, wt: &Path, dry: bool) -> Result<u64> {
@@ -1149,60 +1148,120 @@ fn save(
 /// #164: the worktree total by a full walk (drive's pass, never a request), stamped for spawn's `DISK_BUDGET` and the
 /// Host tab. Over `worktree_budget_gb`, the idlest lanes' build folders go first (`budget-freed`), never a working one's.
 pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let mut total = du(&ctx.worktrees).saturating_sub(du(&ctx.worktrees.join(crate::roots::BUILD)));
+    let usage = measure(ctx, cfg);
+    let mut total = usage.total;
     let over = |t: u64| gb(t) > cfg.limits.worktree_budget_gb;
-    let builds = builds(ctx, cfg).iter().any(|b| b.is_dir());
-    let live = if over(total) || builds {
+    let builds = builds(ctx, cfg);
+    let live = if over(total) || builds.iter().any(|b| b.is_dir()) {
         live_lanes(ctx, cfg, r)?
     } else {
         Live::new()
     };
     if over(total) {
-        let events = read(&ctx.state)?;
+        let (events, agents, ps) = (read(&ctx.state)?, host::agents(r)?, host::cwds(r));
         let states = fold(&events);
+        let since = ctx.now.saturating_sub(cfg.limits.stall_minutes * 60);
+        let working = |a: &str| (agents.iter()).any(|x| x["name"] == a && x["agent_status"] == "working");
         let mut seen = std::collections::BTreeSet::new();
         let mut lanes: Vec<(u64, &Event, &str)> = (events.iter().rev())
             .filter(|e| e.kind == "spawn" && e.str("role") != Some("orch"))
             .filter_map(|e| Some((e, e.str("worktree")?)))
             .filter(|(_, w)| Path::new(w).starts_with(&ctx.worktrees) && Path::new(w).exists() && seen.insert(*w))
-            .filter(|(e, _)| !e.str("agent").is_some_and(|a| live.contains(a)))
+            .filter(|(e, _)| e.ts < since && !e.str("agent").is_some_and(working))
             .map(|(e, w)| {
-                (
-                    e.issue
-                        .and_then(|n| states.get(&(e.fleet.clone(), n)))
-                        .map_or(e.ts, |s| s.last_ts),
-                    e,
-                    w,
-                )
+                let s = e.issue.and_then(|n| states.get(&(e.fleet.clone(), n)));
+                (s.map_or(e.ts, |s| s.last_ts), e, w)
             })
             .collect();
         lanes.sort_by_key(|l| l.0);
+        let (mut bytes, mut names) = (0, vec![]);
         for (_, e, wt) in lanes {
             if !over(total) {
                 break;
             }
-            let bytes = purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
-            if bytes > 0 {
-                total = total.saturating_sub(bytes);
-                writeln!(
-                    out,
-                    "budget: freed {bytes} bytes of build folders in {wt} (no live agent)"
-                )?;
-                let d = json!({"agent": e.str("agent"), "bytes": bytes});
-                emit(
-                    &ctx.state,
-                    cfg,
-                    Event::new(ctx.now, &e.fleet, e.issue, "budget-freed", d),
-                )?;
+            let agent = e.str("agent").unwrap_or_default();
+            let caches: Vec<_> = (builds.iter().map(|b| b.join(agent)))
+                .filter(|c| !agent.is_empty() && c.is_dir())
+                .collect();
+            let node = host::inside(&ps, Path::new(wt))
+                .into_iter()
+                .any(|p| BUILDERS.contains(&p.1.as_str()));
+            if node || caches.iter().any(|c| building(c, 1)) {
+                writeln!(out, "budget: keep {wt}: a build runs")?;
+                continue;
             }
+            let mut freed = purge(r, cfg, &e.fleet, out, Path::new(wt), false)?;
+            total = total.saturating_sub(freed);
+            freed += (caches.iter().map(|c| (du(c), std::fs::remove_dir_all(c))))
+                .filter_map(|(n, res)| res.ok().map(|()| n))
+                .sum::<u64>();
+            if freed > 0 {
+                writeln!(out, "budget: freed {freed} bytes of build folders of {wt} (waiting)")?;
+                bytes += freed;
+                names.push(agent);
+            }
+        }
+        if !names.is_empty() {
+            let why = format!("freed {:.1} GB from {}", gb(bytes), names.join(", "));
+            let d = json!({"lanes": names, "bytes": bytes, "reason": why});
+            emit(&ctx.state, cfg, Event::new(ctx.now, "all", None, "budget-freed", d))?;
         }
     }
     sweep(ctx, cfg, &On::new(r, None), "local", out)?;
     trim_builds(ctx, cfg, cfg.limits.build_budget_gb, &live, out, false)?;
-    Ok(std::fs::write(
-        ctx.state.with_file_name("worktrees.du"),
-        format!("{total} {}", ctx.now),
-    )?)
+    stamp(ctx, &if total == usage.total { usage } else { measure(ctx, cfg) })
+}
+
+/// #842: this host's worktrees (build folders aside) by one walk: a hard link or clone counts once across all roots.
+pub struct Usage {
+    pub total: u64,
+    pub roots: Vec<(std::path::PathBuf, u64)>,
+    pub top: Vec<(std::path::PathBuf, u64)>,
+}
+
+/// Each root's bytes (a missing one 0) and the 3 largest `<root>/<repo>/<lane>` folders.
+pub fn measure(ctx: &Ctx, cfg: &Config) -> Usage {
+    let ls = |p: &Path| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path());
+    let (mut seen, mut top, mut roots) = (Seen::new(), vec![], vec![]);
+    for root in local_roots(ctx, cfg) {
+        let mut sum = 0;
+        for d in ls(&root).filter(|d| !d.ends_with(crate::roots::BUILD)) {
+            let dir = std::fs::symlink_metadata(&d).is_ok_and(|m| m.is_dir());
+            for p in if dir { ls(&d).collect() } else { vec![d] } {
+                let b = walk(&p, &mut seen);
+                sum += b;
+                top.push((p, b));
+            }
+        }
+        roots.push((root, sum));
+    }
+    top.sort_by_key(|a| std::cmp::Reverse(a.1));
+    top.truncate(3);
+    let total = roots.iter().map(|r| r.1).sum();
+    Usage { total, roots, top }
+}
+
+fn stamp(ctx: &Ctx, u: &Usage) -> Result<()> {
+    let mut s = format!("{} {}\n", u.total, ctx.now);
+    for (kind, v) in [("root", &u.roots), ("top", &u.top)] {
+        for (p, b) in v {
+            s += &format!("{kind}\t{b}\t{}\n", p.display());
+        }
+    }
+    Ok(std::fs::write(ctx.state.with_file_name("worktrees.du"), s)?)
+}
+
+/// The last walk's roots and largest folders, as a refusal names them.
+pub fn worktree_why(ctx: &Ctx) -> String {
+    let s = std::fs::read_to_string(ctx.state.with_file_name("worktrees.du")).unwrap_or_default();
+    let of = |kind: &str| {
+        let rows = s
+            .lines()
+            .filter_map(|l| l.strip_prefix(kind)?.strip_prefix('\t')?.split_once('\t'));
+        let rows = rows.map(|(b, p)| format!("{p} {:.1} GB", gb(b.parse().unwrap_or(0))));
+        rows.collect::<Vec<_>>().join(", ")
+    };
+    format!("measured {} (build folders aside); largest: {}", of("root"), of("top"))
 }
 
 /// #438: each enabled remote host's shared build folder trimmed to `build_budget_gb`; #485: after the tick's drive,
@@ -1452,13 +1511,17 @@ pub fn mtime(d: &Path) -> u64 {
 
 /// #630: this host's build folders, `<root>/.build` of each of its roots.
 fn builds(ctx: &Ctx, cfg: &Config) -> Vec<std::path::PathBuf> {
+    let roots = local_roots(ctx, cfg);
+    roots.into_iter().map(|r| r.join(crate::roots::BUILD)).collect()
+}
+
+fn local_roots(ctx: &Ctx, cfg: &Config) -> Vec<std::path::PathBuf> {
     let name = cfg
         .hosts
         .iter()
         .find(|h| h.1.machine.is_none())
         .map_or("", |h| h.0.as_str());
-    let roots = crate::roots::listed(cfg, name, None, &ctx.worktrees);
-    roots.into_iter().map(|r| r.join(crate::roots::BUILD)).collect()
+    crate::roots::listed(cfg, name, None, &ctx.worktrees)
 }
 
 /// `trim_root` on each of this host's build folders. Bytes freed.
@@ -1662,7 +1725,7 @@ fn gb(bytes: u64) -> f64 {
 /// The last walk's worktree total in GB (`check`'s or `budget`'s, both stamp `worktrees.du`) and when.
 pub fn worktree_du(ctx: &Ctx) -> Option<(f64, Option<u64>)> {
     let s = std::fs::read_to_string(ctx.state.with_file_name("worktrees.du")).ok()?;
-    let mut n = s.split_whitespace();
+    let mut n = s.lines().next()?.split_whitespace();
     Some((gb(n.next()?.parse().ok()?), n.next().and_then(|t| t.parse().ok())))
 }
 
@@ -1738,11 +1801,52 @@ fn drop_log(ctx: &Ctx, agent: Option<&str>) {
 
 /// Bytes of blocks used under `p` (symlinks not followed), like `du -k`, not apparent size; the disk row's total.
 pub fn du(p: &Path) -> u64 {
+    walk(p, &mut Seen::new())
+}
+
+type Seen = std::collections::HashSet<(u64, u64)>;
+
+fn walk(p: &Path, seen: &mut Seen) -> u64 {
     use std::os::unix::fs::MetadataExt;
     match std::fs::symlink_metadata(p) {
-        Ok(m) if m.is_dir() => std::fs::read_dir(p).map_or(0, |d| d.flatten().map(|e| du(&e.path())).sum()),
-        m => m.map_or(0, |m| m.blocks() * 512),
+        Ok(m) if m.is_dir() => std::fs::read_dir(p).map_or(0, |d| d.flatten().map(|e| walk(&e.path(), seen)).sum()),
+        Ok(m) => {
+            let id = m.is_file().then(|| clone_id(p)).flatten();
+            let id = id.or_else(|| (m.nlink() > 1).then(|| m.ino()));
+            u64::from(id.is_none_or(|i| seen.insert((m.dev(), i)))) * m.blocks() * 512
+        }
+        Err(_) => 0,
     }
+}
+
+#[cfg(target_os = "macos")]
+fn clone_id(p: &Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    #[repr(C)]
+    struct AttrList([u16; 2], [u32; 5]);
+    #[repr(C, packed)]
+    struct Buf(u32, [u32; 5], u64, u64);
+    extern "C" {
+        fn getattrlist(
+            path: *const std::ffi::c_char,
+            list: *mut AttrList,
+            buf: *mut Buf,
+            size: usize,
+            opts: u32,
+        ) -> i32;
+    }
+    let path = std::ffi::CString::new(p.as_os_str().as_bytes()).ok()?;
+    let mut list = AttrList([5, 0], [0x8000_0000, 0, 0, 0, 0x300]);
+    let mut buf = Buf(0, [0; 5], 0, 0);
+    // SAFETY: a NUL-terminated path, an attrlist and a buffer of the size passed, all live for the call.
+    let rc = unsafe { getattrlist(path.as_ptr(), &raw mut list, &raw mut buf, size_of::<Buf>(), 0x21) };
+    let (returned, id, flags) = (buf.1[4], buf.2, buf.3);
+    (rc == 0 && returned & 0x300 == 0x300 && flags & 1 == 1).then_some(id)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn clone_id(_: &Path) -> Option<u64> {
+    None
 }
 
 /// #639: an open issue (queued, in a round, needs-human or parked) closed on GitHub by any route is `closed-other`
@@ -1816,7 +1920,7 @@ pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str, saved: bool
     if let Some(why) = dirty(r, Path::new(wt)).filter(|_| !saved) {
         anyhow::bail!("{why}");
     }
-    for f in OWN_FILES {
+    for f in own_files() {
         r.remove(&Path::new(wt).join(f)).context(format!("removing {f}"))?;
     }
     for d in SHOT_DIRS.iter().map(|d| Path::new(wt).join(d)) {
@@ -2225,7 +2329,7 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         .collect();
         let no = NO_WIP.map(|d| format!(":(exclude,glob)**/{d}/**"));
         git(&[&["add", "-A", "--", "."][..], &no.each_ref().map(String::as_str)].concat())?;
-        git(&[&["reset", "-q", "--"][..], OWN_FILES, SHOT_DIRS].concat())?;
+        git(&[&["reset", "-q", "--"][..], &own_files().collect::<Vec<_>>(), SHOT_DIRS].concat())?;
         let changed = git(&["diff", "--cached", "--name-only", "--no-renames", "-z"])?;
         let tree = git(&["ls-tree", "-r", "-l", "-z", git(&["write-tree"])?.trim()])?;
         let mut files: Vec<(u64, &str)> = (tree.split('\0').filter_map(|l| l.split_once('\t')))

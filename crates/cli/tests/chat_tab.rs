@@ -303,6 +303,46 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     }
 }
 
+#[test]
+fn a_reply_file_from_a_lane_worktree_is_copied_into_the_thread_folder() {
+    let c = setup("chat-wt-file");
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
+        "t1\n"
+    );
+    let design = c.worktrees.join("sendmeter/issue-12/docs/design/inbox");
+    std::fs::create_dir_all(&design).unwrap();
+    let png = design.join("inbox-390.png");
+    std::fs::write(&png, b"\x89PNG design").unwrap();
+    let r = Fake::default();
+    let (code, out) = run(
+        &c,
+        &r,
+        &["thread", "reply", "t1", "The mockup.", "--file", png.to_str().unwrap()],
+    );
+    assert_eq!(code, 0, "{out}");
+    let folder = c.state.with_file_name("orchestrator").join("t1");
+    let log = herdsman::events::jsonl(&c.state).unwrap();
+    let msg = log.lines().rfind(|l| l.contains("The mockup.")).unwrap();
+    let e: serde_json::Value = serde_json::from_str(msg).unwrap();
+    let f = &e["files"][0];
+    assert_eq!(f["name"], "inbox-390.png", "{msg}");
+    let copy = std::path::PathBuf::from(f["path"].as_str().unwrap());
+    assert!(copy.starts_with(folder.canonicalize().unwrap()), "{msg}");
+    assert_eq!(std::fs::read(&copy).unwrap(), b"\x89PNG design");
+
+    let away = c.worktrees.parent().unwrap().join("elsewhere");
+    for p in [away.join("x.png"), c.worktrees.join("other/issue-1/x.png")] {
+        if let Some(d) = p.parent() {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(&p, b"x").unwrap();
+        let (code, out) = run(&c, &r, &["thread", "reply", "t1", "x", "--file", p.to_str().unwrap()]);
+        assert_ne!(code, 0, "{}: {out}", p.display());
+        assert!(!herdsman::events::jsonl(&c.state).unwrap().contains(p.to_str().unwrap()));
+    }
+}
+
 fn url_enc(s: &str) -> String {
     s.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D")
 }
@@ -453,8 +493,7 @@ const nav = async url => {{
 /// thread's images are all still loaded.
 #[test]
 fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_images() {
-    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let c = setup("chat-viewer");
@@ -512,10 +551,9 @@ fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_ima
           at.push(+IV.hidden, ok(), +(location.href === href), errs.length); \
           window.late = at; })()";
     let png = tmpdir("chat-viewer-png").join("thread.png");
-    let o = swift()
+    let o = webview()
         .env("HERDSMAN_WAIT", "3")
         .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
             &format!("http://{addr}/deep/thread/t1/icon-180.png"),
             "390",
             "chat",
@@ -737,8 +775,7 @@ fn a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time()
 /// a message sent (the live update) keeps every page loaded.
 #[test]
 fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let now = std::time::SystemTime::now()
@@ -762,11 +799,10 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
           await until(() => [...tc().querySelectorAll(':scope>.blk.me:not(.snt) .pv')].some(p => p.textContent === 'a new one')); \
           at.push(+(tc().querySelector(':scope>[data-n] .pv').textContent === 'm1'), +tc().firstElementChild.textContent.startsWith('thread started'), +(n() > 100), errs.length); })()";
     let png = tmpdir("chat-window-png").join("thread.png");
-    let o = swift()
+    let o = webview()
         .env("HERDSMAN_WAIT", "12")
         .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
         .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
             &format!("http://{addr}/"),
             "390",
             "chat",
@@ -827,8 +863,7 @@ fn a_fenced_block_renders_as_one_box_with_its_exact_text_and_copy() {
 
 #[test]
 fn copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_one() {
-    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let c = coded("chat-copy");
@@ -865,11 +900,10 @@ fn copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_
         serde_json::json!(first),
         serde_json::json!(second)
     );
-    let o = swift()
+    let o = webview()
         .env("HERDSMAN_WAIT", "3")
         .env("HERDSMAN_PRE", pre)
         .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
             &format!("http://{addr}/"),
             "390",
             "chat",
@@ -1168,8 +1202,7 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
 /// and the message just above the box stays just above it; likewise once the box grows and the keyboard closes.
 #[test]
 fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place() {
-    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let now = std::time::SystemTime::now()
@@ -1203,11 +1236,10 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
     let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(tmpdir("chat-kb-png").join("chat-kb.png"), |p| {
         std::path::Path::new(&p).join("chat-kb.png")
     });
-    let o = swift()
+    let o = webview()
         .env("HERDSMAN_WAIT", "12")
         .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
         .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
             &format!("http://{addr}/"),
             "390",
             "chat",
@@ -1528,8 +1560,7 @@ fn a_stream_with_a_thread_open_stamps_its_watch_file() {
 /// page), and a failed send keeps the draft. (#443: at 390 px the thread's messages scroll, never the page.)
 #[test]
 fn the_thread_follows_its_end_until_you_drag_and_drafts_survive_a_reload() {
-    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let c = coded("chat-follow");
@@ -1578,11 +1609,10 @@ fn the_thread_follows_its_end_until_you_drag_and_drafts_survive_a_reload() {
           await nap(300); \
           at.push(+(box.value === 'a draft'), +(localStorage.getItem('draft:t1') === 'a draft'), f.querySelectorAll('.att').length); \
           window.late = [...at, errs.length]; } catch (e) { window.late = [-1, window.late.length]; } })()";
-    let o = swift()
+    let o = webview()
         .env("HERDSMAN_WAIT", "10")
         .env("HERDSMAN_PRE", pre)
         .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
             &format!("http://{addr}/?thread=t1#chat"),
             "390",
             "chat",

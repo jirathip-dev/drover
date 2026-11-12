@@ -57,6 +57,29 @@ pub fn resolve(r: &dyn Runner, m: &str, none_ok: bool) -> Result<()> {
     }
 }
 
+/// #880: `On::existing`'s script: the paths on stdin, a line each.
+pub const EXISTS: &str = "while IFS= read -r p; do test -e \"$p\" && echo y || echo n; done";
+
+/// #880: the worktrees of `spawns` that exist, as `(machine, worktree)`: one `existing` call per host.
+pub fn present<'e>(
+    r: &dyn Runner,
+    spawns: impl IntoIterator<Item = &'e Event>,
+) -> std::collections::BTreeSet<(Option<&'e str>, &'e str)> {
+    let mut by: BTreeMap<Option<&str>, Vec<&str>> = BTreeMap::new();
+    for e in spawns {
+        if let Some(w) = e.str("worktree") {
+            by.entry(e.str("machine")).or_default().push(w);
+        }
+    }
+    let mut there = std::collections::BTreeSet::new();
+    for (m, mut ws) in by {
+        ws.sort_unstable();
+        ws.dedup();
+        there.extend(On::new(r, m).existing(&ws).into_iter().map(|w| (m, w)));
+    }
+    there
+}
+
 /// A lane's host; `machine` None is this one (every call and file exactly as before).
 pub struct On<'a> {
     pub r: &'a dyn Runner,
@@ -112,6 +135,25 @@ impl<'a> On<'a> {
             None => p.exists(),
             Some(_) => self.sh("test -e \"$1\"", p, "").is_ok_and(|o| o.code == 0),
         }
+    }
+    /// #880: which of `paths` exist here: one call (one ssh to a remote host), a `y` or `n` line back per path.
+    pub fn existing<'p>(&self, paths: &[&'p str]) -> std::collections::BTreeSet<&'p str> {
+        if self.machine.is_none() || paths.is_empty() {
+            return paths.iter().copied().filter(|p| Path::new(p).exists()).collect();
+        }
+        let input: String = paths.iter().map(|p| format!("{p}\n")).collect();
+        let o = self.run_in("sh", &argv(&["-c", EXISTS]), &input);
+        let o = o.ok().filter(|o| o.code == 0).map(|o| o.stdout).unwrap_or_default();
+        let seen: Vec<&str> = o.lines().collect();
+        if seen.len() != paths.len() {
+            return std::collections::BTreeSet::new();
+        }
+        paths
+            .iter()
+            .zip(seen)
+            .filter(|(_, y)| *y == "y")
+            .map(|(p, _)| *p)
+            .collect()
     }
     pub fn read(&self, p: &Path) -> Option<String> {
         match self.machine {
@@ -217,6 +259,8 @@ pub struct Pass<'a> {
     up: std::sync::Mutex<BTreeMap<String, bool>>,
     mark: Option<(PathBuf, u64)>,
     step: std::sync::Mutex<String>,
+    pub until: Option<std::time::Instant>,
+    late: std::sync::Mutex<std::collections::BTreeSet<String>>,
 }
 
 impl<'a> Pass<'a> {
@@ -228,7 +272,16 @@ impl<'a> Pass<'a> {
             up,
             mark,
             step,
+            until: None,
+            late: std::sync::Mutex::default(),
         }
+    }
+    pub fn over(&self) -> bool {
+        self.until.is_some_and(|t| std::time::Instant::now() >= t)
+    }
+    /// #880: the hosts over budget this pass: a call there killed at its limit, or held back past the pass's budget.
+    pub fn late(&self) -> Vec<String> {
+        self.late.lock().unwrap().iter().cloned().collect()
     }
     /// The fast step's: #337's one remote call per host, no probe; a call killed at 15 s marks its host down.
     pub fn fast(r: &'a dyn Runner) -> Self {
@@ -271,6 +324,9 @@ impl<'a> Pass<'a> {
             "true",
         ]);
         let o = self.r.run_for("ssh", &probe, "", std::time::Duration::from_secs(5));
+        if o.as_ref().is_ok_and(|o| o.code == 124) {
+            self.late.lock().unwrap().insert(m.into());
+        }
         let u = o.is_ok_and(|o| !matches!(o.code, 124 | 255));
         self.up.lock().unwrap().insert(m.into(), u);
         u
@@ -280,8 +336,12 @@ impl<'a> Pass<'a> {
             return input.map_or_else(|| self.r.run(prog, args), |i| self.r.run_in(prog, args, i));
         };
         self.note(&quote(prog, args));
-        if !self.up(m) {
-            let stderr = format!("{m}: host offline (no answer to `ssh {m} true` this pass)");
+        let over = self.over();
+        if over {
+            self.late.lock().unwrap().insert(m.into());
+        }
+        if over || !self.up(m) {
+            let stderr = format!("{m}: not sent (host offline this pass, or the tick past its budget)");
             return Ok(Out {
                 code: 255,
                 stderr,
@@ -289,8 +349,9 @@ impl<'a> Pass<'a> {
             });
         }
         let (limit, input) = (std::time::Duration::from_secs(15), input.unwrap_or_default());
+        let refused = |o: &Out| o.code == 255 && o.stderr.contains("connect to host");
         let mut o = self.r.run_for(prog, args, input, limit)?;
-        if matches!(o.code, 124 | 255) && args.iter().any(|a| a == CM[1]) {
+        if matches!(o.code, 124 | 255) && !refused(&o) && args.iter().any(|a| a == CM[1]) {
             let g = ok(self.r, "ssh", &["-G", CM[1], m]).unwrap_or_default();
             if let Some(sock) = g.lines().find_map(|l| l.strip_prefix("controlpath ")) {
                 let _ = std::fs::remove_file(sock);
@@ -299,8 +360,11 @@ impl<'a> Pass<'a> {
             let bare: Vec<String> = std::iter::once("-oControlPath=none".into()).chain(bare).collect();
             o = self.r.run_for(prog, &bare, input, limit)?;
         }
-        if o.code == 124 {
+        if matches!(o.code, 124 | 255) {
             self.up.lock().unwrap().insert(m.into(), false);
+        }
+        if o.code == 124 {
+            self.late.lock().unwrap().insert(m.into());
         }
         self.note("");
         Ok(o)
@@ -551,6 +615,12 @@ pub fn offline<'a>(ctx: &Ctx, sp: Option<&'a Event>) -> Option<&'a str> {
     cached(ctx).get(h).is_some_and(|s| !s.up).then_some(h)
 }
 
+/// #877: spawn `sp`'s lane is on a host that is `off` or failed its last probe: a pass never reaches into it.
+pub fn held(ctx: &Ctx, cfg: &Config, sp: &Event) -> bool {
+    let off = |h: &str| cfg.hosts.get(h).is_some_and(|c| !c.enabled);
+    offline(ctx, Some(sp)).is_some() || sp.str("machine").is_some() && sp.str("host").is_some_and(off)
+}
+
 /// This host's live agents, then the remote ones.
 pub fn all_agents(cfg: &Config, r: &dyn Runner) -> Result<Vec<Value>> {
     Ok([host::agents(r)?, remote_agents(cfg, r)].concat())
@@ -604,7 +674,8 @@ pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
         .collect();
     wts.sort_unstable();
     wts.dedup();
-    wts.retain(|w| on.exists(Path::new(w)));
+    let there = on.existing(&wts);
+    wts.retain(|w| there.contains(w));
     let names: Vec<&str> = wts.iter().filter_map(|w| w.rsplit('/').next()).collect();
     let free = match names.len() {
         0 => "nothing for `herdsman clean --yes` there; `herdsman reclaim` frees idle build folders".into(),

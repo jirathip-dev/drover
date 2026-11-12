@@ -319,6 +319,39 @@ pub fn sync_label(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))
 }
 
+/// #839: a draft PR with a PASS at its head is marked ready for review (its full CI starts); true while it is a draft.
+pub fn ready_draft(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    s: &IssueState,
+    pr: &Value,
+) -> Result<bool> {
+    let (fleet, f) = (s.fleet.as_str(), cfg.fleet(&s.fleet)?);
+    let head = pr["headRefOid"].as_str().unwrap_or_default();
+    let Some(num) = pr["number"].as_u64() else {
+        return Ok(false);
+    };
+    if pr["isDraft"] != true || pr["state"] != "OPEN" || s.done() || !passed(&read(&ctx.state)?, s, head) {
+        return Ok(false);
+    }
+    let n = num.to_string();
+    if let Err(e) = ok(r, "gh", &["pr", "ready", &n, "-R", &f.repo]) {
+        writeln!(out, "{fleet} #{} PR #{n} is a draft: {e:#}", s.issue)?;
+        return Ok(true);
+    }
+    gh::forget_pr(ctx, fleet, s.issue);
+    writeln!(out, "{fleet} #{} marked-ready PR #{n} @ {head:.7}", s.issue)?;
+    let d = json!({"pr": num, "sha": head});
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, fleet, Some(s.issue), "marked-ready", d),
+    )?;
+    Ok(true)
+}
+
 #[doc(hidden)]
 pub fn ci_green(rollup: &Value, required: &[String]) -> Result<(), String> {
     rollup
@@ -797,8 +830,7 @@ pub fn merge(
     let landed = |num: &str| -> Result<bool> {
         Ok(json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "state"])?["state"] == "MERGED")
     };
-    let logged = |a: &Event| events.iter().any(|e| e.seq > a.seq && e.is("merged", fleet, issue));
-    if let Some(a) = crate::action::last(&events, fleet, issue, "merge").filter(|a| a.kind != "failed" && !logged(a)) {
+    if let Some(a) = unlogged_merge(&events, fleet, issue) {
         let (num, head) = (a.str("pr").unwrap_or_default(), a.str("head").unwrap_or_default());
         if a.ts + MERGE_SECS > ctx.now && !crate::action::dead(r, a) {
             return refused("IN_FLIGHT", format!("skipped: merge of PR #{num} in flight"));
@@ -884,6 +916,7 @@ pub fn merge(
         Err(rf)
             if rf.code == "STAGING_MOVED"
                 || rf.code == "BEHIND"
+                || rf.code == "NO_PR" && st.as_ref().is_none_or(|s| s.lane.is_none())
                 || rf.code == "CI_NOT_GREEN"
                     && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr))) == "pending" =>
         {
@@ -929,6 +962,12 @@ pub fn merge(
     ok(r, "gh", &[&["pr", "merge", &num, "-R", &f.repo][..], &m].concat())?;
     intent.done(json!({"pr": num, "head": head}))?;
     merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, over, secs, fast))
+}
+
+/// #509: this issue's merge action not yet `failed` and no `merged` logged after it; `merge` logs it, with its head.
+pub fn unlogged_merge<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a Event> {
+    let logged = |a: &Event| events.iter().any(|e| e.seq > a.seq && e.is("merged", fleet, issue));
+    crate::action::last(events, fleet, issue, "merge").filter(|a| a.kind != "failed" && !logged(a))
 }
 
 /// #509: how long a merge's intent may stay open before the next pass recovers it from the PR.
@@ -1034,16 +1073,8 @@ pub fn needs_human(
     op: &str,
     (spawn, by, why): (bool, &str, Option<&str>),
 ) -> Result<()> {
-    // Only from needs-human (#217: or a failed extend's card): a stale card or a double tap never parks a merged
-    // issue or extends twice.
-    let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
-    let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
-    // #778: or a pending start whose card is back (refused, or 30 min unstarted).
-    let back = crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.back(ctx.now));
-    if state != "needs-human" && last != "extend-failed" && !back {
-        return refused("NOT_NEEDS_HUMAN", format!("#{n} is {state}, not needs-human"));
-    }
-    let ev = |k| Event::new(ctx.now, fleet, Some(n), k, json!({"by": by}));
+    let state = held(ctx, fleet, n)?;
+    let state = state.as_str();
     match op {
         "override" => merge(ctx, cfg, r, out, fleet, n, true)?,
         "extend" => {
@@ -1078,20 +1109,42 @@ pub fn needs_human(
                 }
             }
         }
-        _ => {
-            let mut e = ev("parked");
-            if let Some(w) = why.filter(|w| !w.trim().is_empty()) {
-                e.data.insert("why".into(), json!(w));
-            }
-            crate::events::append(&ctx.state, &e)?;
-            // #186: a parked issue's lanes are closed: reap what they left (a live agent's worktree is spared).
-            if let Ok(a) = herdr::agents(r) {
-                check::leftovers(ctx, cfg, r, &a, true)?;
-            }
-        }
+        _ => return park(ctx, cfg, r, out, (fleet, n), by, why),
     }
     writeln!(out, "#{n}: {op}")?;
     Ok(())
+}
+
+/// Issue `n`'s state if it waits on the owner's needs-human card, else `NOT_NEEDS_HUMAN`.
+pub fn held(ctx: &Ctx, fleet: &str, n: u64) -> Result<String> {
+    let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
+    let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
+    let back = crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.back(ctx.now));
+    if state != "needs-human" && last != "extend-failed" && !back {
+        return refused("NOT_NEEDS_HUMAN", format!("#{n} is {state}, not needs-human"));
+    }
+    Ok(state.into())
+}
+
+/// `park`: log `parked` (`why`, if any) and reap what the issue's closed lanes left.
+pub fn park(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    (fleet, n): (&str, u64),
+    by: &str,
+    why: Option<&str>,
+) -> Result<()> {
+    let mut e = Event::new(ctx.now, fleet, Some(n), "parked", json!({"by": by}));
+    if let Some(w) = why.filter(|w| !w.trim().is_empty()) {
+        e.data.insert("why".into(), json!(w));
+    }
+    crate::events::append(&ctx.state, &e)?;
+    if let Ok(a) = herdr::agents(r) {
+        check::leftovers(ctx, cfg, r, &a, true)?;
+    }
+    Ok(writeln!(out, "#{n}: park")?)
 }
 
 /// #712: `herdsman unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human

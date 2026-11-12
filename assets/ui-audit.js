@@ -95,8 +95,17 @@
     e.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: r.left + 10, clientY: r.top + 10 }));
     e.click(); // the click a release ends with: it does nothing else
   };
+  const folded = () => {
+    const cards = [...$$('#needs>.ask')];
+    if (cards.length < 3) return early.push(`${cards.length} needs-you cards in the demo, not 3`), false;
+    for (const c of cards) {
+      const s = c.querySelector(':scope>summary'), t = s?.firstElementChild;
+      if (c.open || !t || !seen(s) || t.offsetHeight > 1.5 * parseFloat(getComputedStyle(t).lineHeight) || getComputedStyle(t).textOverflow !== 'ellipsis') early.push(`needs card not one folded line: ${c.textContent.slice(0, 40)}`);
+    }
+    return true;
+  };
   const VIEWS = {
-    queue: () => tab('queue'),
+    queue: () => { tab('queue'); if ([...$$('#needs>.ask, .later:has(+#needs)')].some(seen)) early.push('a needs-you card on Queue'); },
     // #281 gate 2: the Queue and Events rows in the shot (no needs cards above them, in the check too), so their sprites' pixels are checked.
     'queue-rows': () => { tab('queue'); $('#needs').hidden = true; },
     'events-rows': () => { sys('activity'); $('#needs').hidden = true; },
@@ -176,7 +185,41 @@
     // impl → rev → sec → gates.
     pipeline: () => pipe('acme-web'),
     'pipeline-custom': () => pipe('acme-api'),
-    lanes: () => tab('lanes'),
+    lanes: () => { tab('lanes'); folded(); },
+    'needs-fold': async () => {
+      tab('lanes');
+      if (!folded()) return;
+      $$('[inert]').forEach(e => { e.inert = false; });
+      const sent = [], grab = e => { e.preventDefault(); e.stopImmediatePropagation(); sent.push(JSON.stringify([...new FormData(e.target, e.submitter)])); };
+      addEventListener('submit', grab, true);
+      const mains = [...$$('#needs>.ask>summary>button')];
+      if (!mains.length) early.push('no main button on a folded line');
+      for (const b of mains) {
+        const c = b.closest('.ask'), twin = b.form && [...b.form.elements].find(x => x !== b && x.name === b.name && x.value === b.value);
+        if (!twin || !c.contains(twin)) { early.push(`${label(b)}: no twin in its card's form`); continue; }
+        b.disabled = twin.disabled = false;
+        b.scrollIntoView({ block: 'center', behavior: 'instant' });
+        const r = b.getBoundingClientRect();
+        document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2).click();
+        twin.click();
+        if (sent.length !== 2 || sent[0] !== sent[1]) early.push(`${label(b)}: the line's button sent ${sent[0]}, the card's ${sent[1]}`);
+        if (c.open) early.push(`${label(b)}: the line's button opened the card`);
+        sent.length = 0;
+      }
+      window.removeEventListener('submit', grab, true);
+      const d = await (await fetch(new URL('api/v1/needs', document.baseURI))).json(), c = [...$$('#needs>.ask')].pop(), k = c.querySelector('summary>span').textContent;
+      c.querySelector('summary').click();
+      if (!c.open) early.push('a tap on the line left the card folded');
+      d.asks.shift();
+      d.now += 600;
+      dispatchEvent(new CustomEvent('herd-needs', { detail: d }));
+      const o = [...$$('#needs>.ask')].filter(x => x.open).map(x => x.querySelector('summary>span').textContent);
+      if (o.join() !== k) early.push(`after a herd-needs redraw the open cards are [${o}], not [${k}]`);
+      const a = [...$$('#needs>.ask')].find(x => x.open);
+      a?.querySelector('summary').click();
+      if (a?.open) early.push('a second tap on the line left the card open');
+      a?.querySelector('summary').click();
+    },
     // #386: the [chat] tab's thread list (the needs-you stack folded with [later all]), and one thread open from its
     // first message, with the choice rows, images, a file row and the composer (scrolled to the top: a scrolled view
     // shoots blank); at 1440 the list and the thread side by side.
@@ -688,7 +731,7 @@
     // #154: three needs-you cards through the live path (frag): [later] on one → `1 need you ▸` and 2 cards; [later all]
     // → the line alone; a tap on it → all 3; a changed card (its question) comes back by itself. Measured as it ends.
     'needs-later': () => {
-      tab('queue');
+      tab('lanes');
       put('later', '{}');
       const cards = [...$$('#needs>.ask')].slice(0, 3).map(c => { const x = c.cloneNode(true); x.querySelector('.lat').remove(); x.className = 'ask'; return x; });
       if (cards.length < 3) return early.push(`${cards.length} needs-you cards in the demo, not 3`);
@@ -709,8 +752,18 @@
       if (!seen($$('#needs>.ask')[1])) early.push('the changed card did not come back');
     },
     // #217 gate 2: a tapped [one more round]: the needs-human card is one muted pending line with no buttons, at the top.
+    // #859: an ask's answer tap takes its card off at once, before the POST answers; a failed POST draws the cards again.
+    'needs-answered': async () => {
+      tab('lanes');
+      $('#needs').insertAdjacentHTML('afterbegin', '<div class=ask id=aud859><p>Which DB?</p><form><input type=hidden name=op value=answer><input type=hidden name=fleet value=acme-web><input type=hidden name=id value=q859><button name=choice value=1>1. sqlite</button></form></div>');
+      const hold = [];
+      window.fetch = (u, o) => o && o.method === 'POST' ? new Promise(r => hold.push(r)) : F(u, o);
+      $('#aud859 form').requestSubmit($('#aud859 button'));
+      if (!hold.length || $('#aud859')) early.push(`after the tap: ${hold.length} POSTs, the card ${$('#aud859') ? 'still shown' : 'gone'}`);
+      window.fetch = F;
+    },
     'needs-pending': () => {
-      tab('queue');
+      tab('lanes');
       const c = [...$$('#needs>.ask[data-n]')].find(c => /needs you/.test(c.textContent));
       if (!c) return early.push('no needs-human card in the demo');
       $('#needs').prepend(c);
@@ -1205,7 +1258,7 @@
     // #370 gate 2: the tab's own line and its labels pair the theme word with the plain one, and the muted plain word is
     // ≥ 4.5:1 on what is under it (the first ancestor with a background, over --bg when see-through).
     if (!on(sec ? `#sy-${sec}>.syh .thw` : `#${tb}>.tsub>.thw`).length) bad.push(`${tb}: no theme line`);
-    const LBL = { queue: '#queue .qg>h3, #queue details.done>summary>span, #needs .ask>p:first-child>b', lanes: '#lanes h2>span', events: '#events details.er:is([data-k=merged],[data-k=verdict],[data-k=spawn],[data-k=queue]) .sm', host: '#host .hcd .hhd .hnm' }[tb];
+    const LBL = { queue: '#queue .qg>h3, #queue details.done>summary>span, #needs .ask>p:first-of-type>b', lanes: '#lanes h2>span', events: '#events details.er:is([data-k=merged],[data-k=verdict],[data-k=spawn],[data-k=queue]) .sm', host: '#host .hcd .hhd .hnm' }[tb];
     for (const e of on(LBL)) if (!e.querySelector('.thw') || !e.querySelector('.pw') && tb !== 'events') bad.push(`${tb}: label without its theme word: "${e.textContent.slice(0, 30)}"`);
     const rgb = c => { const v = c.match(/[\d.]+/g).map(Number); return c.startsWith('color(') ? [...v.slice(0, 3).map(x => x * 255), v[3] ?? 1] : [...v.slice(0, 3), v[3] ?? 1]; };
     const under = e => { for (; e; e = e.parentElement) { const c = rgb(getComputedStyle(e).backgroundColor); if (c[3] > 0) return c[3] < 1 ? over(c.slice(0, 3), rgb(getComputedStyle(B).backgroundColor), c[3]) : c.slice(0, 3); } return rgb(getComputedStyle(B).backgroundColor); };

@@ -62,13 +62,9 @@ impl Pending {
 /// `fleet` #`n`'s pending action, if any: no spawn of the issue after it, nor after its tap's `after` seq (the kick
 /// a decision fires may spawn before the record is logged).
 pub fn of(events: &[Event], fleet: &str, n: u64) -> Option<Pending> {
-    let mine = || {
-        events
-            .iter()
-            .filter(|e| e.fleet == fleet && e.issue == Some(n))
-            .enumerate()
-    };
-    let (i, e) = mine().filter(|(_, e)| e.kind == "pending-action").last()?;
+    let all = crate::events::of_issue(events, fleet, n);
+    let mine = || all.iter().copied().enumerate();
+    let (i, e) = mine().rfind(|(_, e)| e.kind == "pending-action")?;
     let num = |k| e.data.get(k).and_then(serde_json::Value::as_u64);
     let (since, after) = (num("since").unwrap_or(e.ts), num("after").unwrap_or(u64::MAX));
     let started = mine().any(|(j, s)| s.kind == "spawn" && (j > i || s.seq > after));
