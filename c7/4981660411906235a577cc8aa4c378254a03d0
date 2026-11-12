@@ -1,0 +1,9 @@
+Decided: no src change; #868 already diffs the issue's named design paths in handoff, so this PR adds the test the issue asks for
+Because: crates/core/src/design.rs:121
+Decided: the test drives real git in a temp origin and worktree, so the path filter of git diff is exercised, not a faked reply
+Because: "commits `apple/design/x/iphone.png` and `apple/design/x/Mac.png` (nothing under `docs/design/`)"
+Decided: the reject test's repo setup moved into a shared repo() helper both tests use
+Because: crates/cli/tests/design_stage.rs:339
+Rejected: a fake-runner test — Fake answers git diff by prefix, ignoring the paths, so it would pass on the old docs/design-only diff
+Check: with handoff's dirs set back to docs/design only, the new test fails (state design, not design-review); at head it passes
+Owner: Adds a test that a design saved in the issue's own design folder reaches you for review; the fix itself shipped with #868.
