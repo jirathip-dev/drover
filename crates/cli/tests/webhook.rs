@@ -215,7 +215,7 @@ fn the_funnel_listener_answers_no_path_but_hooks_github() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || listen(&c2, &Fake::default(), &l));
+    std::thread::spawn(move || listen(&c2, &Fake::default(), &l, None));
     for req in [
         "GET / HTTP/1.1\r\nHost: x\r\n\r\n",
         "GET /live HTTP/1.1\r\nHost: x\r\n\r\n",

@@ -91,9 +91,12 @@ pub fn hand_fds(argv: &[std::ffi::OsString], fds: &[i32], bridge: bool) -> Resul
     let fds = fds.to_vec();
     // SAFETY: fcntl is async-signal-safe; between fork and exec it only clears close-on-exec on the listeners.
     unsafe {
-        c.pre_exec(move || match fds.iter().all(|&fd| fcntl(fd, 2, 0) != -1) {
-            true => Ok(()),
-            false => Err(std::io::Error::last_os_error()),
+        c.pre_exec(move || {
+            if fds.iter().all(|&fd| fcntl(fd, 2, 0) != -1) {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
         });
     }
     if !bridge {

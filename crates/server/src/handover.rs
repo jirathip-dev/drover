@@ -52,7 +52,10 @@ impl Handover {
             let _ = BufReader::new(c).read_line(&mut String::new());
         }
         let _ = std::fs::remove_file(&self.sock);
-        let bound = UnixListener::bind(&self.sock);
+        let bound = UnixListener::bind(&self.sock).and_then(|l| {
+            std::fs::set_permissions(&self.sock, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+            Ok(l)
+        });
         bound
             .map_err(|e| eprintln!("herdsman serve: no handover: {}: {e}", self.sock.display()))
             .ok()
@@ -104,10 +107,10 @@ impl Handover {
         }
     }
 
-    /// The loops stopped: wait out the requests in flight (`busy`), then exec in place (the supervisor's pid) or exit.
-    pub fn finish(&self, busy: &AtomicUsize) -> ! {
+    /// The loops stopped: wait until `idle` (requests, deliveries, board jobs), then exec in place or, a bridge, exit.
+    pub fn finish(&self, idle: impl Fn() -> bool) -> ! {
         let t = Instant::now();
-        while (busy.load(SeqCst) > 0 || !self.done()) && t.elapsed() < Duration::from_secs(10) {
+        while !(idle() && self.done()) && t.elapsed() < Duration::from_secs(60) {
             std::thread::sleep(Duration::from_millis(10));
         }
         if self.exec.load(SeqCst) {

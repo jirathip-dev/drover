@@ -184,7 +184,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             ..Server::new(ctx, r, s.addr.clone())
         },
     );
-    let (s, busy) = (&s, &AtomicUsize::new(0));
+    let (s, busy, open) = (&s, &AtomicUsize::new(0), &AtomicUsize::new(0));
     std::thread::scope(|sc| {
         let limits = || Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
         // #57: the host every 10 s (its 2 s vm_stat delta included) here, never on a request.
@@ -205,6 +205,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             s.slo(crate::now());
             std::thread::sleep(Duration::from_secs(60));
         });
+        w.tick();
         sc.spawn(move || loop {
             w.tick();
             std::thread::sleep(Duration::from_secs(1));
@@ -224,11 +225,13 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
         }
         for mut st in l.incoming().flatten() {
             if busy.fetch_add(1, Relaxed) < 16 {
+                open.fetch_add(1, Relaxed);
                 // #715: its deliveries (a conductor start can take minutes) run after it frees its request slot.
                 sc.spawn(move || {
                     drop(s.handle(st));
                     busy.fetch_sub(1, Relaxed);
                     s.deliver();
+                    open.fetch_sub(1, Relaxed);
                 });
             } else {
                 busy.fetch_sub(1, Relaxed);
@@ -239,7 +242,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
                 lock(&s.clients)
                     .drain(..)
                     .for_each(|c| drop(c.0.send("retry: 250\n\n".into())));
-                h.finish(busy);
+                h.finish(|| open.load(Relaxed) == 0 && lock(&s.running).is_empty());
             }
         }
     });

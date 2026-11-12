@@ -182,11 +182,11 @@ fn staging_serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Path) -> Result
     };
     let addr = &cfg.self_update.staging_addr;
     let args = ["serve", "--read-only", "--addr", addr];
-    let line = crate::timer::install(&at, cfg, r, crate::timer::STAGING, &args, true);
-    if line.starts_with('✗') {
-        bail!("{line}");
+    let job = crate::timer::install(&at, cfg, r, crate::timer::STAGING, &args, true);
+    if job.starts_with('✗') {
+        bail!("{job}");
     }
-    if line.starts_with("= already") {
+    if job.starts_with("= already") {
         crate::timer::restart(ctx, r, crate::timer::STAGING)?;
     }
     Ok(format!("staging serve on {addr}"))
