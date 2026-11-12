@@ -17,6 +17,8 @@ pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--
 /// #557: herdsman's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
 pub const UPDATE: &str = "dev.herdsman.update";
 pub const CLEAN: &str = "dev.herdsman.clean";
+/// #894: the optional read-only staging serve (`[self_update] staging_serve`), from its own install root.
+pub const STAGING: &str = "dev.herdsman.serve-staging";
 pub const MORE: [(&str, &[&str]); 2] = [(UPDATE, &["self-update"]), (CLEAN, &["clean", "--scheduled"])];
 /// #557: the `every` of a job that runs daily at 03:30 (launchd `StartCalendarInterval`, systemd `OnCalendar`).
 pub const DAILY: u64 = 86_400;
@@ -73,9 +75,8 @@ fn ctl(ctx: &Ctx, label: &str, every: bool) -> [String; 3] {
     ["is-active", "enable --now", "disable --now"].map(|a| format!("systemctl --user {a} {unit}"))
 }
 
-/// #557: restart the board job on the binary just installed: `launchctl kickstart -k`, else `systemctl --user restart`.
-pub fn restart(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
-    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.herdsman.serve");
+/// #557: restart job `label` on the binary just installed: `launchctl kickstart -k`, else `systemctl --user restart`.
+pub fn restart(ctx: &Ctx, r: &dyn Runner, label: &str) -> Result<String> {
     let probe = ctl(ctx, label, false)[0].replacen("print", "kickstart -k", 1);
     exec(r, &probe.replacen("is-active", "restart", 1))
 }
@@ -338,35 +339,6 @@ pub fn running(ctx: &Ctx, cfg: &Config) -> Option<u64> {
 /// #791: 2 tick intervals: no pass started and no heartbeat for longer reads stuck.
 pub fn stuck_secs(cfg: &Config) -> u64 {
     2 * cfg.limits.slow_secs
-}
-
-/// #561: a tick still running 10 min after it started (its `tick.step`): `tick-stuck` once, naming the step and the
-/// child it waits on. The fast step looks, since a stuck tick cannot.
-pub fn stuck(ctx: &Ctx, cfg: &Config) -> Result<()> {
-    let Ok(text) = std::fs::read_to_string(ctx.state.with_file_name("tick.step")) else {
-        return Ok(());
-    };
-    let m: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
-    let Some(since) = m["since"].as_u64().filter(|t| ctx.now >= t + 600) else {
-        return Ok(());
-    };
-    if read(&ctx.state)?
-        .iter()
-        .any(|e| e.kind == "tick-stuck" && e.data["key"] == since)
-    {
-        return Ok(());
-    }
-    let (step, child) = (
-        m["step"].as_str().unwrap_or("?"),
-        m["child"].as_str().unwrap_or_default(),
-    );
-    let child = if child.is_empty() { "none" } else { child };
-    let why = format!(
-        "tick running {} min, in {step}; waiting on: {child}",
-        (ctx.now - since) / 60
-    );
-    let d = serde_json::json!({"key": since, "step": step, "child": child, "reason": why});
-    emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, "tick-stuck", d))
 }
 
 /// #237: reinstall each own job `drift` finds missing or outdated, read it back, log `timer-repaired`; alert when

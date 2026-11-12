@@ -43,6 +43,27 @@ pub struct Config {
     pub ci_runners: Option<CiRunners>,
     /// #637: `[proxy]`, the token proxy remote ACP lanes' model calls go through (`crate::proxy`, docs/hosts.md).
     pub proxy: ProxyCfg,
+    /// #894: `[self_update]`, the release branch the live install follows and the optional staging serve.
+    pub self_update: SelfUpdate,
+}
+
+/// #894: `branch` (default `main`) `self-update` installs; `staging_serve` adds a read-only staging build on `staging_addr`.
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct SelfUpdate {
+    pub branch: String,
+    pub staging_serve: bool,
+    pub staging_addr: String,
+}
+
+impl Default for SelfUpdate {
+    fn default() -> Self {
+        SelfUpdate {
+            branch: "main".into(),
+            staging_serve: false,
+            staging_addr: "127.0.0.1:7787".into(),
+        }
+    }
 }
 
 /// #637: the proxy's port (on this host, and on each `shed-acp` host through an ssh tunnel), where it forwards, and how
@@ -636,6 +657,10 @@ pub struct Limits {
     /// #859: `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once per episode.
     pub slo_api_p95_ms: u64,
     pub slo_api_minutes: u64,
+    /// #855: no lane working this long while the queue has spawnable work breaches `slo-idle`.
+    pub slo_idle_minutes: u64,
+    /// #855: a tick running longer than this breaches `slo-tick`; the next fast step stops it.
+    pub slo_tick_minutes: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -725,6 +750,8 @@ impl Default for Limits {
             serve_heartbeat_secs: 15,
             slo_api_p95_ms: 1000,
             slo_api_minutes: 10,
+            slo_idle_minutes: 20,
+            slo_tick_minutes: 10,
         }
     }
 }
@@ -749,6 +776,7 @@ pub struct Notify {
 /// A webpush notifier's events when `on` is unset: the alert set plus the asks (#40) and needs-human (#130).
 pub const WEBPUSH_ON: &[&str] = &[
     "slo-api",
+    "stuck",
     "config-invalid",
     "thread-msg",
     "blocked",

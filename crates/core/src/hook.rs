@@ -27,7 +27,7 @@ pub struct Policy {
     pub design: Option<Design>,
 }
 
-/// #868: a design lane's worktree `root` and the folders under it (`crate::design::paths`) it may write.
+/// #868: a design lane's worktree `root` and the folders under it (`crate::design::Recipe`) it may write.
 pub struct Design {
     pub root: String,
     pub allow: Vec<String>,

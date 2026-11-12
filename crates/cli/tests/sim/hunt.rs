@@ -210,7 +210,8 @@ pub fn coverage(w: &World) -> (BTreeSet<String>, Vec<u64>) {
     let s = |v: Option<&Value>| v.and_then(Value::as_str).unwrap_or("-").to_string();
     let (mut cov, mut spawns) = (BTreeSet::new(), BTreeMap::new());
     let (mut sup, mut lag) = (0, 0);
-    for x in w.wrote.iter().filter(|x| x.ev.kind != "promise") {
+    let book = ["promise", "slo-idle", "slo-tick", "self-heal", "stuck", "slo-ok"];
+    for x in w.wrote.iter().filter(|x| !book.contains(&x.ev.kind.as_str())) {
         let a = &w.procs[x.proc].args;
         let pass = a[..a.len().min(2)].join("-");
         let pass = if pass.ends_with("--fast") { pass } else { a[0].clone() };

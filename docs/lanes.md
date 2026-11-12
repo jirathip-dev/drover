@@ -14,6 +14,9 @@ only after approve.
   preview-only views and fixtures there (#868), and the hook keeps the lane's edits to `docs/design/` and those paths.
   A PNG of each page or view at the sizes the issue asks for (default 1440 and 390 wide; iPhone and Mac frames for
   native) and a README mapping each PNG to the decision it shows; at most 3 pages unless the issue asks for variants.
+  #873: a repo in another medium sets it once in `.herdsman/design.md` (`medium:`, `folder:`, `render:`, `sizes:`,
+  `clip: yes` for a short gif or mp4 beside the images, `tools:` host tags); the issue's own design path overrides it.
+  The lane writes only under that folder, and a tool the main host lacks ends its turn `blocked` before it starts.
 - `architect` (`[fleet.<n>.role.architect]`, `queue add N --architect`, `queue set N architect on|off`): in
   `docs/architecture/<slug>/` an ADR (question, options, decision, consequences), the data shapes as types or a
   schema, the module boundaries (which module may call which), a statechart where state matters and the callers'
@@ -289,6 +292,15 @@ repeats for it once a day. The first `check` after #584 sweeps the log once (`as
 one as `promise`; one past its deadline whose issue kept its state and head is logged once as `promise-missed` (a
 notifier can subscribe to it) with the reason drive sees then, and `waiting`, `status` and the board show
 `⚠ missed <age>: <reason>` in place of the stale line.
+
+#855: the fast step also checks two fleet SLOs: `slo-idle` (no lane working for `[limits] slo_idle_minutes` (20)
+while the queue has spawnable work) and `slo-tick` (a tick running past `slo_tick_minutes` (10), replacing
+`tick-stuck`). On a breach or a missed promise drive first tries the known heal and logs `self-heal`: a herdsman
+tick or drive pid it can name gets SIGTERM, then SIGKILL after 10 s; a DISK_BUDGET hold is recounted and the
+queue's first spawn retried; drive's own pass already respawns a silent lane and marks a PASSed draft ready.
+Still breached a pass (`slow_secs`) after the heal, or with no heal known, it emits one `stuck` per episode
+(pushed, and an owner card naming the issue or fleet, the reason and what was tried); `slo-ok` ends the episode
+once the issue moves or the SLO recovers, and the card clears.
 
 `herdsman check` alerts once per state on `stall`, `lane-dead` (a parked lane, clean and pushed with no
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no

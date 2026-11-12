@@ -698,3 +698,127 @@ fn a_design_pushed_under_the_issues_named_path_raises_the_ask_and_one_elsewhere_
         );
     }
 }
+
+const SWIFT: &str = "# Design recipe\n\n- medium: SwiftUI\n- folder: apple/design\n- render: `just design-shots`\n\
+- sizes: iPhone 393x852, Mac 1440x900\n";
+
+#[test]
+fn a_design_brief_takes_the_repos_recipe_unless_the_issue_names_its_own_path() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for (name, body, want) in [
+        (
+            "design-recipe",
+            "b",
+            "- Medium: SwiftUI. You write only under `apple/design/`;",
+        ),
+        (
+            "design-recipe-override",
+            "UIKit screens in `ios/design/y/`.",
+            "- Medium: UIKit. You write only under `docs/design/`, `ios/design/y/`;",
+        ),
+    ] {
+        let c = setup(name, "");
+        assert_eq!(
+            run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+            0
+        );
+        let base = fake(&c, HEAD);
+        let issue = format!(r#"{{"title":"t","body":"{body}"}}"#);
+        let recipe = Fake::default().reply("git -C /tmp/does-not-matter/sendmeter show", SWIFT);
+        let r = Both(recipe.reply("gh issue view", &issue), &base);
+        drive(&c, &r);
+        let b = brief(&c);
+        assert!(b.contains(want), "{b}");
+        let shots = "- Images: run `just design-shots` at iPhone 393x852, Mac 1440x900.";
+        assert_eq!(b.contains(shots), name == "design-recipe", "{b}");
+    }
+    let c = setup("design-no-recipe", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    drive(&c, &fake(&c, HEAD));
+    let b = brief(&c);
+    assert!(
+        b.contains("- Medium: HTML. You write only under `docs/design/`;"),
+        "{b}"
+    );
+    assert!(
+        b.contains("- Images: render a PNG of each page or view at 1440 and 390 wide.\n"),
+        "{b}"
+    );
+}
+
+#[test]
+fn a_recipe_with_a_clip_hands_off_the_images_and_the_clip() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (c, w) = repo(&tmpdir("design-clip"));
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let r = RealGit(fake(&c, HEAD));
+    drive(&c, &r);
+    std::fs::create_dir_all(w.join(".herdsman")).unwrap();
+    let game = "- medium: Godot scene\n- folder: game/design\n- sizes: 1920x1080\n- clip: yes\n";
+    std::fs::write(w.join(".herdsman/design.md"), game).unwrap();
+    for f in [
+        "game/design/x/title.png",
+        "game/design/x/play.png",
+        "game/design/x/clip.mp4",
+    ] {
+        std::fs::create_dir_all(w.join(f).parent().unwrap()).unwrap();
+        std::fs::write(w.join(f), "bytes").unwrap();
+    }
+    git(&w, &["add", "."]);
+    git(&w, &["commit", "-qm", "design"]);
+    git(&w, &["push", "-q", "origin", "issue-12"]);
+    drive(&c, &r);
+    assert_eq!(state(&c, 12), "design-review");
+    for e in [&kinds(&c, "design-review")[0], &kinds(&c, "needs-decision")[0]] {
+        let mut got: Vec<&str> = e.data["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| f["name"].as_str().unwrap())
+            .collect();
+        got.sort_unstable();
+        assert_eq!(
+            got,
+            [
+                "game/design/x/clip.mp4",
+                "game/design/x/play.png",
+                "game/design/x/title.png"
+            ]
+        );
+    }
+}
+
+#[test]
+fn a_recipe_tool_the_main_host_lacks_ends_the_design_turn_blocked_before_it_starts() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let c = setup("design-tool", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let base = fake(&c, HEAD);
+    let need = format!("{SWIFT}- tools: xcode, blender\n");
+    let r = Both(
+        Fake::default()
+            .reply("git -C /tmp/does-not-matter/sendmeter show", &need)
+            .reply("sh -c uname -s", "Darwin\narm64\n/Users/o\nxcode\n"),
+        &base,
+    );
+    drive(&c, &r);
+    let turn = &kinds(&c, "turn-end")[0];
+    assert_eq!((turn.str("state"), turn.str("role")), (Some("blocked"), Some("design")));
+    let why = turn.str("why").unwrap();
+    assert!(why.starts_with("missing tool blender:"), "{why}");
+    let card = &kinds(&c, "needs-human")[0];
+    assert_eq!(card.str("code"), Some("LANE_BLOCKED"));
+    assert!(card.str("reason").unwrap().contains("missing tool blender"));
+    assert!(!base.called("herdr agent start sendmeter-design-12") && spawned(&c, "design") == 0);
+    assert!(!Path::new(&wt(&c, 12)).join(".brief.md").exists(), "nothing drawn");
+    assert_eq!(state(&c, 12), "needs-human");
+}

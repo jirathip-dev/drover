@@ -436,6 +436,7 @@ fn brief(
     title: &str,
     body: &str,
     (fix, rules, repro, play): (Option<&str>, Option<&str>, bool, Option<String>),
+    recipe: &crate::design::Recipe,
 ) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
     let contract = match p.family {
@@ -449,12 +450,20 @@ fn brief(
             include_str!("../roles/brief-design.md"),
             branch = branch,
             integration = integration,
-            medium = crate::design::medium(body),
-            paths = crate::design::paths(body)
-                .iter()
+            medium = recipe.medium,
+            paths = (recipe.folders.iter())
                 .map(|p| format!("`{p}/`"))
                 .collect::<Vec<_>>()
-                .join(", ")
+                .join(", "),
+            render = recipe
+                .render
+                .as_ref()
+                .map_or("render a PNG of each page or view".into(), |c| format!("run `{c}`")),
+            sizes = recipe.sizes,
+            clip = [
+                "",
+                " The design moves: also a short clip of it (`clip.gif` or `clip.mp4`) beside the images."
+            ][usize::from(recipe.clip)]
         ),
         "architect" => format!(
             include_str!("../roles/brief-architect.md"),
@@ -1249,6 +1258,12 @@ pub fn spawn(
             "git",
             &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
         )?;
+        let body = iss["body"].as_str().unwrap_or("");
+        let recipe = match p.family {
+            "design" => crate::design::Recipe::at(r, &local, &p.base, body),
+            _ => crate::design::Recipe::of("", body),
+        };
+        crate::design::tools(ctx, cfg, r, (fleet, issue, &p.agent), &recipe)?;
         let pushed = || ok(r, "git", &["-C", &local, "fetch", "origin", &p.branch]).is_ok();
         if moved.is_some() && p.family != "rev" && pushed() {
             p.base = format!("origin/{}", p.branch);
@@ -1379,6 +1394,7 @@ pub fn spawn(
                     crate::queue::repro(&events, fleet, issue),
                     crate::queue::playbook(&events, fleet, issue),
                 ),
+                &recipe,
             ),
         )
     };

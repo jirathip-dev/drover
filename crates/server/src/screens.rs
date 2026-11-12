@@ -560,6 +560,10 @@ impl Server<'_> {
             json!({"type": "card", "id": format!("slo-{}", e.seq), "kind": "alert", "tone": "warn",
                 "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
         }));
+        cards.extend(crate::slo::open_stuck(&ev).into_iter().map(|e| {
+            json!({"type": "card", "id": format!("stuck-{}", e.seq), "kind": "alert", "tone": "warn",
+                "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": crate::events::plain(e)}]})
+        }));
         cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, mins, a)));
         cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
         Value::Array(cards)

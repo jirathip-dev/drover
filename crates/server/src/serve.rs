@@ -9,6 +9,7 @@ use crate::api::{
 use crate::config::{Config, Limits, Role};
 use crate::events::{age, append, shared, Event, IssueState, States};
 use crate::gate::{gate, refused, Refusal};
+use crate::handover::Handover;
 use crate::host::{self, Host};
 use crate::runner::{Out, Runner};
 use crate::snapshot::Snapshot;
@@ -196,15 +197,12 @@ type Job = (Ctx, BTreeMap<String, String>, String);
 /// When this board started (the Services board row's uptime).
 static STARTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
-pub fn serve(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool) -> Result<()> {
-    let l = TcpListener::bind(addr)?;
-    let mode = if read_only { "read-only view" } else { "phone page" };
-    eprintln!("herdsman serve: {mode} on http://{}/", l.local_addr()?);
-    serve_on(ctx, r, l, read_only)
+pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> Result<()> {
+    serve_with(ctx, r, l, read_only, None)
 }
 
 #[allow(clippy::needless_pass_by_value)] // public API: the listener is handed over and lives as long as the server
-pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> Result<()> {
+pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho: Option<&Handover>) -> Result<()> {
     devices::cooee_token(ctx)?;
     let addr = (!read_only)
         .then(|| l.local_addr().map(|a| a.to_string()))
@@ -236,7 +234,7 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
             ..Server::new(ctx, r, s.addr.clone())
         },
     );
-    let (s, busy) = (&s, &AtomicUsize::new(0));
+    let (s, busy, open) = (&s, &AtomicUsize::new(0), &AtomicUsize::new(0));
     std::thread::scope(|sc| {
         let limits = || Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
         // #57: the host every 10 s (its 2 s vm_stat delta included) here, never on a request.
@@ -257,6 +255,7 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
             s.slo(crate::now());
             std::thread::sleep(Duration::from_secs(60));
         });
+        w.tick();
         sc.spawn(move || loop {
             w.tick();
             std::thread::sleep(Duration::from_secs(1));
@@ -270,17 +269,30 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
                 lock(&s.clients).retain(|c| c.0.send(format!("id: {id}\nevent: toast\ndata: {msg}\n\n")).is_ok());
             }
         });
+        let sock = ho.and_then(Handover::ready);
+        if let Some((h, sock)) = ho.zip(sock) {
+            sc.spawn(move || h.control(&sock));
+        }
         for mut st in l.incoming().flatten() {
             if busy.fetch_add(1, Relaxed) < 16 {
+                open.fetch_add(1, Relaxed);
                 // #715: its deliveries (a conductor start can take minutes) run after it frees its request slot.
                 sc.spawn(move || {
                     drop(s.handle(st));
                     busy.fetch_sub(1, Relaxed);
                     s.deliver();
+                    open.fetch_sub(1, Relaxed);
                 });
             } else {
                 busy.fetch_sub(1, Relaxed);
                 drop(st.write_all(b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n"));
+            }
+            if let Some(h) = ho.filter(|h| h.stopping()) {
+                h.left();
+                lock(&s.clients)
+                    .drain(..)
+                    .for_each(|c| drop(c.0.send("retry: 250\n\n".into())));
+                h.finish(|| open.load(Relaxed) == 0 && lock(&s.running).is_empty());
             }
         }
     });
