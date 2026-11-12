@@ -42,7 +42,7 @@ A fleet with `[fleet.<n>.role.verify]` adds a verify check after rev's PASS (sta
 
 `drover lesson <fleet>` (orchestrators and the owner only; an orchestrator runs it when the owner says "correct") files `lessons: <fleet> week of <date>`, queues it on top and spawns a `lesson` lane (the impl role's harness unless `[fleet.<n>.role.lesson]` sets one). `drover tick` runs it every 7 days per fleet: `lessons = "weekly"` (default) or `"off"` in `[fleet.<n>]`. Any lane may read `drover lesson digest <fleet> [--days 7]`. #510: a lesson check starts in shadow (`shadow since <date>` on its rules line: reported, never failing); `drover lesson apply <fleet>` in the lesson lane promotes or retires it by its history, never touching hand-written lines.
 An orchestrator may run `drover timer install` (only that host verb; logged `timer-install`, `by` its lane) when `drover doctor` reports the timer outdated or missing; any other lane is `REFUSED ORCHESTRATOR_ONLY`.
-`.drover/rules.md` in a repo: at most 30 "don't X" lines (CI's cap check fails over that), each naming its enforcer or `none`; every impl and rev brief carries it. Follow it.
+`.drover/rules.md` in a repo: at most 30 "don't X" lines (CI's cap check fails over that), each naming its enforcer or `none`; every impl and rev brief carries it. Follow it. #890: `.drover/arch.toml`'s `frozen = ["path"]` lists fail a PR that adds a line to them (add one file in a `[[collect]]` folder, `dir` and optional `glob`, instead); its `generated = ["path"]` files must match what `generate = "cmd"` writes, so rerun it, never hand-merge them. CI runs `drover arch-check`; frozen and generated files are never hotspots.
 
 ## Exit codes
 
