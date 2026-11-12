@@ -363,7 +363,7 @@ impl Sim {
         for _ in 0..mins {
             self.w.now.set(self.w.now() + 60);
             let running = self.w.procs.borrow().contains_key(&TICK_PID);
-            if (self.w.now() - T0) % 300 == 0 && !running {
+            if (self.w.now() - T0).is_multiple_of(300) && !running {
                 if let Some(h) = self.tick.take() {
                     let _ = h.join();
                 }
