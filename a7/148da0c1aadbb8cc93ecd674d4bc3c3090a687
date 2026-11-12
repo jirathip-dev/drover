@@ -1,0 +1,14 @@
+Decided: the hourly last-seen mark fails at once on a held write lock instead of waiting 60 s under the devices lock
+Because: crates/core/src/devices.rs:212
+Rejected: a per-route last-good response cache — WAL reads never wait on a writer; the only wait was this write
+Decided: a missed heartbeat is bytes still untaken at the next ping, or a write not done in 2 pings
+Because: "drop a client that misses 2, a per-device limit instead of the cap of 8"
+Rejected: a page-side ack — SSE is one-way; the kernel's send queue already says what the peer took
+Decided: 4 streams per device (paired token, else address); a device's fifth closes its own oldest
+Because: crates/server/src/serve.rs:192
+Decided: serve's launchd job ProcessType Interactive; spawn's lane shell renices itself to 10
+Because: "Lane build commands (cargo, xcodebuild, node builds) run at low priority"
+Rejected: wrapping each build command — the agent starts them; a niced shell covers all, local and remote
+Check: serve_load fails on the baseline commit (hangs, 503s, ninth refused) and with the drops disabled
+Check: no request runs gh (SlowGh counts 0); restarts are #894, RSS #895
+Owner: the board answers in ms during drive passes; dead phones no longer hold live slots; builds yield to serve
