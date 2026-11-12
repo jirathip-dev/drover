@@ -43,6 +43,27 @@ pub struct Config {
     pub ci_runners: Option<CiRunners>,
     /// #637: `[proxy]`, the token proxy remote ACP lanes' model calls go through (`crate::proxy`, docs/hosts.md).
     pub proxy: ProxyCfg,
+    /// #894: `[self_update]`, the release branch the live install follows and the optional staging serve.
+    pub self_update: SelfUpdate,
+}
+
+/// #894: `branch` (default `main`) `self-update` installs; `staging_serve` adds a read-only staging build on `staging_addr`.
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct SelfUpdate {
+    pub branch: String,
+    pub staging_serve: bool,
+    pub staging_addr: String,
+}
+
+impl Default for SelfUpdate {
+    fn default() -> Self {
+        SelfUpdate {
+            branch: "main".into(),
+            staging_serve: false,
+            staging_addr: "127.0.0.1:7787".into(),
+        }
+    }
 }
 
 /// #637: the proxy's port (on this host, and on each `shed-acp` host through an ssh tunnel), where it forwards, and how

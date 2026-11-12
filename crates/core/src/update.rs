@@ -36,54 +36,96 @@ pub fn self_update(
         writeln!(out, "= self-update: no fleet for the herdsman repo")?;
         return Ok(0);
     };
+    let su = &cfg.self_update;
+    let live = std::fs::canonicalize(&ctx.exe).unwrap_or_else(|_| ctx.exe.clone().into());
+    let home = ctx.state.with_file_name("update");
+    let code = install(ctx, cfg, r, out, f, &events, (&su.branch, home, live, dry, false))?;
+    if !su.staging_serve {
+        return Ok(code);
+    }
+    let home = ctx.state.with_file_name("update-staging");
+    let t = ("staging", home.clone(), home.join("bin/herdsman"), dry, true);
+    Ok(code.max(install(ctx, cfg, r, out, f, &events, t)?))
+}
+
+/// #894: the control socket of the serve listening on `port` (`herdsman_server::handover`).
+pub fn serve_sock(ctx: &Ctx, port: u16) -> PathBuf {
+    ctx.state.with_file_name(format!("serve-{port}.sock"))
+}
+
+type Target<'a> = (&'a str, PathBuf, PathBuf, bool, bool);
+
+fn install(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    f: &crate::config::Fleet,
+    events: &[Event],
+    (branch, home, live, dry, staging): Target,
+) -> Result<i32> {
     let local = f.local_path();
     let l = local.to_string_lossy();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &*l], a].concat());
-    git(&["fetch", "-q", "origin", &f.integration])?;
-    let sha = git(&["rev-parse", &format!("origin/{}", f.integration)])?;
-    let (sha, home) = (sha.trim(), ctx.state.with_file_name("update"));
+    let what = if staging { "staging serve: " } else { "" };
+    git(&["fetch", "-q", "origin", branch])?;
+    let sha = git(&["rev-parse", &format!("origin/{branch}")])?;
+    let sha = sha.trim();
     if std::fs::read_to_string(home.join("sha")).is_ok_and(|s| s.trim() == sha) {
-        writeln!(out, "= up to date @ {sha:.7}")?;
+        writeln!(out, "= {what}up to date @ {sha:.7}")?;
         return Ok(0);
     }
     let (ci, checks) = crate::land::suite(r, f, sha);
     if ci != "green" {
         let first = crate::gh::not_green(&checks).map_or(String::new(), |c| format!(": {c}"));
-        writeln!(out, "= {} @ {sha:.7}: CI {ci}{first}; not installed", f.integration)?;
+        writeln!(out, "= {what}{branch} @ {sha:.7}: CI {ci}{first}; not installed")?;
         return Ok(0);
     }
-    let live = std::fs::canonicalize(&ctx.exe).unwrap_or_else(|_| ctx.exe.clone().into());
     let new = PathBuf::from(format!("{}.new", live.display()));
     if dry {
+        let then = if staging {
+            format!(
+                "would (re)start the read-only staging serve on {}",
+                cfg.self_update.staging_addr
+            )
+        } else {
+            "would run profiles sync and hand serve over (a restart if no serve answers)".into()
+        };
         let plan = [
-            format!("would build {sha:.7} in {} (CI green)", home.join("src").display()),
+            format!(
+                "would build {sha:.7} ({branch}) in {} (CI green)",
+                home.join("src").display()
+            ),
             format!(
                 "would sign it \"herdsman-local\", run its doctor --config-only and --tokens, then swap it in at {}",
                 live.display()
             ),
-            "would run profiles sync and restart serve".into(),
+            then,
         ];
         writeln!(out, "{}", plan.join("\n"))?;
         return Ok(0);
     }
+    std::fs::create_dir_all(live.parent().unwrap_or(&live))?;
     let staged = stage(r, &local, &home, sha, &new).and_then(|()| gate(r, &home.join("src"), &new));
     let res = staged.and_then(|()| {
         std::fs::rename(&new, &live).with_context(|| format!("swap into {}", live.display()))?;
         std::fs::write(home.join("sha"), sha)?;
+        if staging {
+            return staging_serve(ctx, cfg, r, &live).context("installed, then the staging serve");
+        }
         let synced = ok(r, &live.to_string_lossy(), &["profiles", "sync"]).context("installed, then profiles sync");
-        synced.and_then(|_| crate::timer::restart(ctx, cfg, r).context("installed, then the serve restart"))
+        synced.and_then(|_| hand_over(ctx, cfg, r).context("installed, then the serve restart"))
     });
     let Err(e) = res else {
+        let d = json!({"sha": sha, "branch": branch});
         emit(
             &ctx.state,
             cfg,
-            Event::new(ctx.now, "herdsman", None, "self-updated", json!({"sha": sha})),
+            Event::new(ctx.now, "herdsman", None, "self-updated", d),
         )?;
-        writeln!(
-            out,
-            "✓ installed {sha:.7} at {}; profiles synced, serve restarted",
-            live.display()
-        )?;
+        let synced = if staging { "" } else { "profiles synced, " };
+        let done = res.unwrap_or_default();
+        writeln!(out, "✓ {what}installed {sha:.7} at {}; {synced}{done}", live.display())?;
         return Ok(0);
     };
     let _ = std::fs::remove_file(&new);
@@ -106,6 +148,48 @@ pub fn self_update(
         )?;
     }
     Ok(1)
+}
+
+fn hand_over(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
+    let asked = || -> Result<String> {
+        let port = cfg
+            .serve
+            .addr()
+            .rsplit_once(':')
+            .and_then(|(_, p)| p.parse().ok())
+            .unwrap_or(7777);
+        let mut c = std::os::unix::net::UnixStream::connect(serve_sock(ctx, port))?;
+        c.set_read_timeout(Some(std::time::Duration::from_secs(300)))?;
+        writeln!(c, "handover")?;
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut std::io::BufReader::new(c), &mut line)?;
+        let pid = line
+            .trim()
+            .strip_prefix("ok ")
+            .with_context(|| format!("serve: {}", line.trim()))?;
+        Ok(format!("serve handed over (bridge pid {pid})"))
+    };
+    asked().or_else(|_| {
+        let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.herdsman.serve");
+        crate::timer::restart(ctx, r, label).map(|_| "serve restarted".into())
+    })
+}
+
+fn staging_serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Path) -> Result<String> {
+    let at = Ctx {
+        exe: live.to_string_lossy().into(),
+        ..ctx.clone()
+    };
+    let addr = &cfg.self_update.staging_addr;
+    let args = ["serve", "--read-only", "--addr", addr];
+    let job = crate::timer::install(&at, cfg, r, crate::timer::STAGING, &args, true);
+    if job.starts_with('✗') {
+        bail!("{job}");
+    }
+    if job.starts_with("= already") {
+        crate::timer::restart(ctx, r, crate::timer::STAGING)?;
+    }
+    Ok(format!("staging serve on {addr}"))
 }
 
 /// #708: `! self-update — paused since <time> → …` while the last toggle is a pause (doctor and the board).
