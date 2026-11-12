@@ -129,6 +129,14 @@ herdsman timer install                # the drive loop, every 5 minutes
 herdsman serve --addr 127.0.0.1:7777  # /api/v1, cooee's screens and the old board
 ```
 
+`herdsman setup` also installs `herdsman self-update`, every 5 minutes. It installs the head of `[self_update] branch`
+(default `main`, which moves only when the owner promotes staging; `branch = "staging"` suits a dev box) once its CI is
+green. The running serve hands its sockets (the board and the webhook port) to the new binary without dropping a
+request: the page reconnects and resumes from its last event. `[self_update] staging_serve = true` adds
+`dev.herdsman.serve-staging`, a read-only serve of the green staging head from its own install root on
+`staging_addr` (default `127.0.0.1:7787`), to try a change before promoting it. Detail:
+[setup](docs/setup.md#self-update-and-the-daily-clean-557).
+
 | Command | What it does |
 |---|---|
 | `drive` / `timer` / `tick` | one pass; the job that runs it; check, then drive |

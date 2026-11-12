@@ -17,6 +17,8 @@ pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--
 /// #557: herdsman's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
 pub const UPDATE: &str = "dev.herdsman.update";
 pub const CLEAN: &str = "dev.herdsman.clean";
+/// #894: the optional read-only staging serve (`[self_update] staging_serve`), from its own install root.
+pub const STAGING: &str = "dev.herdsman.serve-staging";
 pub const MORE: [(&str, &[&str]); 2] = [(UPDATE, &["self-update"]), (CLEAN, &["clean", "--scheduled"])];
 /// #557: the `every` of a job that runs daily at 03:30 (launchd `StartCalendarInterval`, systemd `OnCalendar`).
 pub const DAILY: u64 = 86_400;
@@ -72,9 +74,8 @@ fn ctl(ctx: &Ctx, label: &str, every: bool) -> [String; 3] {
     ["is-active", "enable --now", "disable --now"].map(|a| format!("systemctl --user {a} {unit}"))
 }
 
-/// #557: restart the board job on the binary just installed: `launchctl kickstart -k`, else `systemctl --user restart`.
-pub fn restart(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
-    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.herdsman.serve");
+/// #557: restart job `label` on the binary just installed: `launchctl kickstart -k`, else `systemctl --user restart`.
+pub fn restart(ctx: &Ctx, r: &dyn Runner, label: &str) -> Result<String> {
     let probe = ctl(ctx, label, false)[0].replacen("print", "kickstart -k", 1);
     exec(r, &probe.replacen("is-active", "restart", 1))
 }

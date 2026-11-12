@@ -72,6 +72,63 @@ pub fn in_request() -> bool {
     REQUEST.get()
 }
 
+const SERVE_FDS: &str = "HERDSMAN_SERVE_FDS";
+extern "C" {
+    fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+}
+
+/// #894: `argv` with the listeners `fds` kept open across exec and named in `HERDSMAN_SERVE_FDS`: a bridge in the background (sh reaps nothing), else exec'd in place.
+pub fn hand_fds(argv: &[std::ffi::OsString], fds: &[i32], bridge: bool) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    let mut c = Command::new(if bridge { "sh".as_ref() } else { argv[0].as_os_str() });
+    if bridge {
+        c.args(["-c", "\"$@\" &", "sh"]).args(argv);
+    } else {
+        c.args(&argv[1..]);
+    }
+    let list: Vec<String> = fds.iter().map(i32::to_string).collect();
+    c.env(SERVE_FDS, list.join(",")).stdin(std::process::Stdio::null());
+    let fds = fds.to_vec();
+    // SAFETY: fcntl is async-signal-safe; between fork and exec it only clears close-on-exec on the listeners.
+    unsafe {
+        c.pre_exec(move || match fds.iter().all(|&fd| fcntl(fd, 2, 0) != -1) {
+            true => Ok(()),
+            false => Err(std::io::Error::last_os_error()),
+        });
+    }
+    if !bridge {
+        return Err(c.exec()).context("exec");
+    }
+    let s = c.status().context("sh")?;
+    if !s.success() {
+        bail!("sh: {s}");
+    }
+    Ok(())
+}
+
+/// #894: the listeners a predecessor handed over (`hand_fds`), close-on-exec again; none for a fresh start.
+pub fn inherited() -> Vec<std::net::TcpListener> {
+    use std::os::fd::FromRawFd;
+    let Some(v) = std::env::var_os(SERVE_FDS) else {
+        return vec![];
+    };
+    std::env::remove_var(SERVE_FDS);
+    let fds = v
+        .to_string_lossy()
+        .split(',')
+        .filter_map(|f| f.parse().ok())
+        .collect::<Vec<i32>>();
+    // SAFETY: each fd is a listener the predecessor passed down for this process alone; nothing else here owns it.
+    unsafe {
+        fds.into_iter()
+            .map(|fd| {
+                fcntl(fd, 2, 1);
+                std::net::TcpListener::from_raw_fd(fd)
+            })
+            .collect()
+    }
+}
+
 pub struct Real;
 
 impl Runner for Real {
