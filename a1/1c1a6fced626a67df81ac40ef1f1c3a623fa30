@@ -1,0 +1,14 @@
+Decided: the SLOs, heals and `stuck` live in one new module (crates/core/src/slo.rs) run by the fast step, which replaces #561's tick-stuck check (slo-tick takes its place, with a configurable limit).
+Because: "a tick/drive process running longer than `slo_tick_minutes`"
+Decided: an episode is keyed per breach (tick start, idle start, promise made_at); `stuck` once per key, `slo-ok` ends it and clears the card.
+Because: "Once per episode; it clears when the issue moves or the SLO recovers"
+Decided: "one pass later" means one `slow_secs` after the last heal, so a recount's retried spawn or a respawn has a full pass to land.
+Because: "alert you only if it's still stuck one pass later" (q1268)
+Decided: the silent-lane respawn (#792) and draft-ready (#839) heals drive already runs every pass are read as tried heals from their own events, not logged twice as `self-heal`.
+Rejected: a second self-heal event from drive.rs for those two heals — the same fact logged twice in two shapes.
+Decided: a tick pid is only stopped when `ps` names it a herdsman tick or drive and it is not this process; a tick.step with no pid goes straight to `stuck`.
+Because: "only a herdsman tick/drive pid it can name"
+Check: crates/cli/tests/slo.rs drives `drive --fast` through idle → slo-idle → self-heal → stuck (one push, one card) → slo-ok, plus the recover and no-heal cases.
+Check: crates/cli/tests/tick_stuck.rs: SIGTERM heal, SIGKILL after 10 fake 1 s sleeps, a foreign pid never killed.
+Decided: the sim hunt's coverage skips the SLO bookkeeping events and its rng is re-picked (1 → 3), as #854 did when its promise appends moved the sim's timers (crates/cli/tests/sim/main.rs:284).
+Owner: when drive stalls as a whole it now tries the known fix first and phones you once, with the reason and what it tried, if that did not help.
