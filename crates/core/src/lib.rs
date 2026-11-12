@@ -594,7 +594,6 @@ pub fn answer(
     answer_with(ctx, cfg, r, out, ask, choice, (by, via), (None, None))
 }
 
-/// #906: ask `id` on `fleet`; an id logged twice (before #906) is the ask `mine` picks, else `AMBIGUOUS_ASK`.
 fn the_ask<'a>(events: &'a [Event], (fleet, id): (&str, &str), mine: &dyn Fn(&Event) -> bool) -> Result<&'a Event> {
     let is = |e: &&Event| e.kind == "needs-decision" && e.fleet == fleet && e.str("id") == Some(id);
     let all: Vec<&Event> = events.iter().filter(is).collect();
@@ -613,13 +612,12 @@ fn the_ask<'a>(events: &'a [Event], (fleet, id): (&str, &str), mine: &dyn Fn(&Ev
     }
 }
 
-/// #906: ask `e` is in the thread whose orchestrator `by` is.
 fn in_thread(e: &Event, by: &str) -> bool {
     by.strip_prefix("orchestrator-")
         .is_some_and(|t| e.str("thread") == Some(t))
 }
 
-/// `answer` of `ask`; #541: a conductor's (`basis`) also posts its FYI line, and the owner may change one for `CHANGE`.
+/// `answer`; #541: a conductor's (`basis`) also posts its FYI line, and the owner may change one for `CHANGE`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn answer_with(
     ctx: &Ctx,

@@ -1,5 +1,3 @@
-//! #906: ask ids are allocated with the insert, so two writers racing on one state dir never share one; a pair of asks
-//! that already share an id is resolved by the caller's thread (withdraw, answer), else refused `AMBIGUOUS_ASK`.
 mod common;
 use common::*;
 use herdsman::events::{append, closed, read, Event};
@@ -17,7 +15,6 @@ fn asks(c: &herdsman::Ctx) -> Vec<Event> {
     events.into_iter().filter(|e| e.kind == "needs-decision").collect()
 }
 
-/// Each ask's thread and how it closed, in log order.
 fn endings(c: &herdsman::Ctx) -> Vec<(String, Option<&'static str>)> {
     let events = read(&c.state).unwrap();
     let asks = events.iter().filter(|e| e.kind == "needs-decision");

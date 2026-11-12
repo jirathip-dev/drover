@@ -221,7 +221,6 @@ pub fn emit_ask(state: &Path, cfg: &Config, ev: &Event) -> Result<Event> {
     Ok(ev)
 }
 
-/// Run the notifiers on logged event `ev`.
 fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
     // #99: phones hear of owner asks and of each default taken, never of a routine ask merely waiting.
     // #407: a thread open on a board (its stream stamped `watch-<thread>.at` in the last 5 s) pushes nothing.
@@ -748,8 +747,7 @@ pub fn closed_row(events: &[Event], a: &Event) -> Option<String> {
     })
 }
 
-/// #906: `e` (a decision or an `ask-*` ending) is about ask `a`: by its `ask_seq`; one from before #906 by id, on
-/// the ask's issue or none.
+/// #906: decision or `ask-*` ending `e` is about ask `a` (by `ask_seq`, else by id on its issue).
 pub fn names(e: &Event, a: &Event) -> bool {
     let seq = e.data.get("ask_seq").and_then(Value::as_u64);
     e.str("id") == a.str("id") && seq.map_or(e.issue.is_none() || e.issue == a.issue, |s| s == a.seq)
