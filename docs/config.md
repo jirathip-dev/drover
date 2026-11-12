@@ -74,6 +74,15 @@ full_first_paths = ["db/migrations/**", ".github/workflows/**"]
   time, plus the minutes integration sat red.
 - **Promotion.** `main` stays human-only; promote a staging commit only once its full suite is green.
 
+## Hotspots (#889)
+
+`herdsman hotspots [FLEET]` (every fleet when none is named) lists the files 5 or more merged PRs touched in the
+last 14 days on the integration branch, any language, each with its `conflict-predicted` events and the update rounds of
+the issues that touched it (herdsman's log, every fleet on the same repo). It keeps the list in the state folder as
+`hotspots-<fleet>.json`. With any hot file it opens `hotspots: <fleet> week of <monday>`, or updates that issue while it
+is open, and queues it `--architect`. `herdsman tick` runs it weekly per fleet; `hotspots = "off"` in `[fleet.<n>]` opts
+out.
+
 ## Limits (#844)
 
 Every timing and cap herdsman core uses is a `[limits]` key; a fleet.toml without one keeps the default below.

@@ -21,6 +21,7 @@ pub mod herdr;
 pub mod hook;
 pub mod host;
 pub mod hosts;
+pub mod hotspots;
 pub mod land;
 pub mod lanes;
 pub mod lesson;
