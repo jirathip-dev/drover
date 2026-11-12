@@ -1,0 +1,13 @@
+Decided: generated is a path list and the command it reruns is one top-level generate key
+Because: "The check reruns the named command and fails on any difference"
+Rejected: [[generated]] tables with a per-file command — the spec writes generated as a plain path list
+Decided: in a frozen file, a hunk's added lines up to its removed count are edits and pass
+Because: "A PR that only removes or edits lines there passes"
+Decided: the generated check restores the original file after comparing, so arch-check never edits the tree
+Because: crates/core/src/arch.rs:328
+Decided: hotspots reads arch.toml at origin/<integration> through git show, so a missing file means none converted
+Because: crates/core/src/hotspots.rs:52
+Decided: the usage sentence joins the rules.md line because help --agent is at HELP_AGENT_MAX
+Because: crates/cli/tests/spawn.rs:675
+Check: a frozen added line fails naming file, line and the collect folder; removed or edited lines pass
+Owner: Repos can freeze a shared list file and mark generated files; CI then rejects new lines and hand-edited generated output.
