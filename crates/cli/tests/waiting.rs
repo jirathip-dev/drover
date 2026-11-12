@@ -574,3 +574,35 @@ fn a_green_pass_on_a_draft_or_unlabelled_pr_names_the_cause() {
     std::fs::write(&c.config, cfg).unwrap();
     assert_eq!(four(&c, &r).what, "PASS · CI green · PR lacks label `full-ci`");
 }
+
+#[test]
+fn a_pass_left_unmerged_for_three_passes_shows_the_missed_promise_with_the_real_reason() {
+    let (mut c, mut r) = fixture("waiting-854-missed");
+    let cfg = Config::load(&c.config).unwrap();
+    let drive = |c: &herdsman::Ctx, r: &Fake| {
+        let rows = lanes(c, r, &[]);
+        herdsman::promise::pass(c, &cfg, "sendmeter", &read(&c.state).unwrap(), &rows).unwrap();
+    };
+    let four = |c: &herdsman::Ctx, r: &Fake| waits(c, r, &[]).into_iter().find(|w| w.issue == 4).unwrap();
+    assert_eq!(four(&c, &r).what, "PASS · CI green · merging within 1 min");
+    drive(&c, &r);
+    let draft = pr(&sha("4"), "green").replace("\"number\"", "\"isDraft\":true,\"number\"");
+    let out = herdsman::runner::Out {
+        code: 0,
+        stdout: draft,
+        stderr: String::new(),
+    };
+    r.replies.insert(0, ("gh pr view issue-4 ".into(), out));
+    for _ in 0..3 {
+        c.now += 300;
+        drive(&c, &r);
+    }
+    let missed: Vec<Event> = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "promise-missed" && e.issue == Some(4))
+        .collect();
+    assert_eq!(missed.len(), 1, "{missed:?}");
+    assert_eq!(missed[0].str("kind"), Some("merging"));
+    assert_eq!(four(&c, &r).what, "⚠ missed 15m: now: PASS · CI green · PR is a draft");
+}

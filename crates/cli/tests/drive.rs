@@ -2170,7 +2170,7 @@ fn a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absen
     assert!(
         stalls
             .iter()
-            .any(|s| s.ends_with("fix-done recorded, waiting for drive to spawn review")),
+            .any(|s| s.ends_with("fix-done recorded, waiting for drive (next pass ≤ 5 min) to spawn review")),
         "{stalls:?}"
     );
     let (out, steps) = drive(&c, &r);

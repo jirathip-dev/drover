@@ -55,3 +55,51 @@ except = ["crates/core/src/providers/**", "web/src/system.ts", "web/src/host.ts"
 reason = "#806: core never names a provider; its code goes in crates/core/src/providers/ (docs/providers.md); #830: nor does web/src (system.ts and host.ts until the frozen board, #552, retires)"
 comments = true
 ignore_case = true
+
+[[ban]]
+pattern = "next pass"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/promise.rs"]
+reason = "#854: a waiting/next-step line is a typed promise: build it with crate::promise::Say"
+
+[[ban]]
+pattern = "waiting for drive"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/promise.rs"]
+reason = "#854: a waiting/next-step line is a typed promise: build it with crate::promise::Say"
+
+[[ban]]
+pattern = "merging within"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/promise.rs"]
+reason = "#854: a waiting/next-step line is a typed promise: build it with crate::promise::Say"
+
+[[ban]]
+pattern = "merging when"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/promise.rs"]
+reason = "#854: a waiting/next-step line is a typed promise: build it with crate::promise::Say"
+
+[[ban]]
+pattern = "spawn slot"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/promise.rs"]
+reason = "#854: a waiting/next-step line is a typed promise: build it with crate::promise::Say"
+
+[[ban]]
+pattern = "reviewer slot"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/promise.rs"]
+reason = "#854: a waiting/next-step line is a typed promise: build it with crate::promise::Say"
+
+[[ban]]
+pattern = "recording within"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/promise.rs"]
+reason = "#854: a waiting/next-step line is a typed promise: build it with crate::promise::Say"
+
+[[ban]]
+pattern = "earlier review"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/promise.rs"]
+reason = "#854: a waiting/next-step line is a typed promise: build it with crate::promise::Say"
