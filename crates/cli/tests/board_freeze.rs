@@ -34,7 +34,7 @@ fn a_board_ui_change_needs_board_fix_in_the_issue() {
     assert_eq!(code, Some(1), "{out}");
     assert!(
         out.contains(
-            "the old board takes bug fixes only (board-fix in the issue); new UI goes to cooee or the drover plugins"
+            "the old board takes bug fixes only (board-fix in the issue); new UI goes to cooee or Drover's screens (served by herdsman)"
         ),
         "{out}"
     );

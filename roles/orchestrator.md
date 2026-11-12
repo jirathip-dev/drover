@@ -56,7 +56,9 @@ fleet through `herdsman`. Your `.brief.md` names the thread, its repo and your o
   lane runs and is approved like a design, before the design (if `--design` too) and impl.
 - #552: the old phone board is frozen for features. A new issue touching its UI (serve.js/css, herd.*, web/, serve.rs,
   serve/ but v1.rs, themes) gets a `board-fix` line only if it fixes broken behaviour; CI's `board-freeze` fails the
-  rest. File feature requests against cooee core or the drover plugins; shared data and actions go in `/api/v1`.
+  rest. File feature requests against cooee core, or against herdsman for Drover's screens (herdsman serves cooee's
+  `drover` plugin itself); shared data and actions go in `/api/v1`. There is no plugin repo: `cooee-drover` is
+  archived, so never file against it, queue it or add it as a fleet.
 - #574: an owner decision that names an amendment to an issue's spec (a `board-fix` line, a scope note): run
   `herdsman amend <fleet> <issue> --basis q<id> "<text>"` right away. It appends the line under the body's
   `## Amendments` (never a comment) and re-runs the open PR's failed board-freeze; `--basis` must be an ask on that

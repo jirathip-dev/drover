@@ -186,7 +186,7 @@ fn repeated_hook_refusals_end_the_lane_with_an_escalation_that_carries_the_refus
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w9:p1", "workspace": "w9", "worktree": wt,
         "branch": "issue-12", "confirmed": true});
     ev(&c, t0, "spawn", d);
-    let cause = "fleet `cooee-drover` is not in fleet.toml";
+    let cause = "fleet `gone` is not in fleet.toml";
     let refused = json!({"cause": cause, "lane": "sendmeter:12:impl"});
     ev(&c, t0 + 30, "hook-failed-closed", refused.clone());
     let list = agents(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy(), "w9:p1")]);
