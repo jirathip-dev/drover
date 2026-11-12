@@ -697,7 +697,7 @@ fn a_design_brief_takes_the_repos_recipe_unless_the_issue_names_its_own_path() {
             "- Medium: UIKit. You write only under `docs/design/`, `ios/design/y/`;",
         ),
     ] {
-        let c = setup(name, "");
+        let (c, _sh) = setup(name, "");
         assert_eq!(
             run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
             0
@@ -712,7 +712,7 @@ fn a_design_brief_takes_the_repos_recipe_unless_the_issue_names_its_own_path() {
         let shots = "- Images: run `just design-shots` at iPhone 393x852, Mac 1440x900.";
         assert_eq!(b.contains(shots), name == "design-recipe", "{b}");
     }
-    let c = setup("design-no-recipe", "");
+    let (c, _sh) = setup("design-no-recipe", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -732,7 +732,7 @@ fn a_design_brief_takes_the_repos_recipe_unless_the_issue_names_its_own_path() {
 #[test]
 fn a_recipe_with_a_clip_hands_off_the_images_and_the_clip() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (c, w) = repo(&tmpdir("design-clip"));
+    let (c, w, _sh) = repo(&tmpdir("design-clip"));
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -777,7 +777,7 @@ fn a_recipe_with_a_clip_hands_off_the_images_and_the_clip() {
 #[test]
 fn a_recipe_tool_the_main_host_lacks_ends_the_design_turn_blocked_before_it_starts() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("design-tool", "");
+    let (c, sh) = setup("design-tool", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -798,7 +798,7 @@ fn a_recipe_tool_the_main_host_lacks_ends_the_design_turn_blocked_before_it_star
     let card = &kinds(&c, "needs-human")[0];
     assert_eq!(card.str("code"), Some("LANE_BLOCKED"));
     assert!(card.str("reason").unwrap().contains("missing tool blender"));
-    assert!(!base.called("herdr agent start sendmeter-design-12") && spawned(&c, "design") == 0);
+    assert!(!sh.called("run", "sendmeter-design-12") && spawned(&c, "design") == 0);
     assert!(!Path::new(&wt(&c, 12)).join(".brief.md").exists(), "nothing drawn");
     assert_eq!(state(&c, 12), "needs-human");
 }
