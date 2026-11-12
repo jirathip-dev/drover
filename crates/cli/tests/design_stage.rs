@@ -45,6 +45,7 @@ fn fake(c: &herdsman::Ctx, head: &str) -> Fake {
         )
         .reply("git -C", "")
         .reply("which shed", "/opt/shed/bin/shed\n")
+        .reply("shed send orchestrator-t1", "")
 }
 
 fn drive(c: &herdsman::Ctx, r: &dyn Runner) -> String {
@@ -803,8 +804,8 @@ fn a_recipe_tool_the_main_host_lacks_ends_the_design_turn_blocked_before_it_star
     assert_eq!(state(&c, 12), "needs-human");
 }
 
-fn staged(name: &str, flag: &str) -> (herdsman::Ctx, std::path::PathBuf, RealGit) {
-    let (c, w) = repo(&tmpdir(name));
+fn staged(name: &str, flag: &str) -> (herdsman::Ctx, std::path::PathBuf, RealGit, FakeShed) {
+    let (c, w, sh) = repo(&tmpdir(name));
     let toml = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, format!("{toml}{ARCHITECT}")).unwrap();
     let t = run(&c, &Fake::default(), &["thread", "new", "sendmeter", "meter"]);
@@ -813,9 +814,19 @@ fn staged(name: &str, flag: &str) -> (herdsman::Ctx, std::path::PathBuf, RealGit
     let q = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", flag]);
     std::env::remove_var("HERDSMAN_THREAD");
     assert_eq!(q.0, 0, "{}", q.1);
+    sh.add(
+        "orchestrator-t1",
+        serde_json::json!({"fleet": "sendmeter", "role": "orchestrator", "thread": "t1"}),
+    );
+    let st = serde_json::json!({"thread": "t1", "agent": "orchestrator-t1", "pane": "orchestrator-t1", "runtime": "shed-acp", "harness": "claude"});
+    herdsman::events::append(
+        &c.state,
+        &Event::new(c.now, "sendmeter", None, "orchestrator-start", st),
+    )
+    .unwrap();
     let r = RealGit(fake(&c, HEAD));
     drive(&c, &r);
-    (c, w, r)
+    (c, w, r, sh)
 }
 
 fn push(w: &Path, files: &[(&str, &str)]) -> String {
@@ -836,7 +847,7 @@ fn tree(head: &str, dir: &str) -> String {
 #[test]
 fn an_architect_ask_quotes_the_summary_and_links_the_adr_folder_at_the_sha_and_a_revise_the_new_one() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (mut c, w, r) = staged("architect-summary", "--architect");
+    let (mut c, w, r, _sh) = staged("architect-summary", "--architect");
     let sum = "Decision: one store, synced nightly\nSlices: store, sync, board\nOpen questions: none";
     let readme = format!("# Meter\n\n## Summary\n\n{sum}\n\n## Shapes\n\n`struct Meter`\n");
     let head = push(
@@ -879,7 +890,7 @@ fn an_architect_ask_quotes_the_summary_and_links_the_adr_folder_at_the_sha_and_a
 #[test]
 fn a_design_ask_links_the_design_folder_the_issue_names_at_the_sha() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (c, w) = repo(&tmpdir("design-link"));
+    let (c, w, _sh) = repo(&tmpdir("design-link"));
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -922,7 +933,7 @@ fn without_a_summary_the_ask_quotes_the_adrs_decision_and_without_either_it_read
         ),
         ("architect-bare", "# ADR\n\nwe store it once\n", ""),
     ] {
-        let (c, w, r) = staged(name, "--architect");
+        let (c, w, r, _sh) = staged(name, "--architect");
         let head = push(&w, &[("docs/architecture/meter/adr.md", file)]);
         drive(&c, &r);
         let ask = &kinds(&c, "needs-decision")[0];
@@ -941,7 +952,7 @@ fn without_a_summary_the_ask_quotes_the_adrs_decision_and_without_either_it_read
 #[test]
 fn a_long_summary_is_cut_at_a_line_end_near_600_characters() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (c, w, r) = staged("architect-cap", "--architect");
+    let (c, w, r, _sh) = staged("architect-cap", "--architect");
     let lines: Vec<String> = (0..20).map(|i| format!("{i:02} {}", "x".repeat(46))).collect();
     let readme = format!("## Summary\n{}\n", lines.join("\n"));
     push(&w, &[("docs/architecture/meter/README.md", &readme)]);
