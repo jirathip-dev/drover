@@ -278,7 +278,7 @@ pub fn store_now<T: Serialize>(state: &Path, table: &str, all: &[T]) -> Result<(
     with(state, true, (), |c| {
         c.busy_timeout(std::time::Duration::ZERO)?;
         let r = replace(c, table, all);
-        c.busy_timeout(std::time::Duration::from_secs(60))?;
+        c.busy_timeout(std::time::Duration::from_secs(crate::config::limits().db_busy_secs))?;
         r
     })
 }
