@@ -162,7 +162,6 @@ fn lane(repo: &Repo, update: bool) -> herdsman::Ctx {
 }
 
 /// The Fake around git: #12's open PR at `head`, its spec, and the writes it allows.
-/// A PR body that passes `turn done`'s check at `head`.
 fn body(head: &str) -> String {
     format!("Closes #12\n\n## For humans\n\nx\n\n## Evidence (head {head})")
 }
@@ -459,8 +458,6 @@ fn a_refused_note_is_nudged_once_then_review_goes_ahead() {
     assert_eq!(kinds(&c, "pushed").len(), 1, "{:?}", r.calls.borrow());
 }
 
-/// #925: real bodies review FAILed (PR#876 stale sha, PR#700 placeholder, PR#777 no `## For humans` and a "Generated
-/// with" line) are refused PR_BODY at `turn done`, before review; a staging merge on top of the named head passes.
 #[test]
 fn a_pr_body_without_the_heads_evidence_is_refused_before_review() {
     let repo = repo("why-pr-body");

@@ -106,7 +106,7 @@ fn cite(
 }
 
 /// `turn done`'s note for `role`'s lane: None when none is due (no PR, nothing new pushed) or it is on origin; else the
-/// refusal (nothing written or pushed): `PR_BODY` (#925) for a body that fails `body`, `WHY_INVALID` for the note.
+/// `WHY_INVALID` reason (nothing written or pushed).
 pub fn turn(
     ctx: &Ctx,
     cfg: &Config,
