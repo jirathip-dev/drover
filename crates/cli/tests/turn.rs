@@ -71,7 +71,8 @@ fn pr(head: &str, ci: &str) -> String {
         "green" => json!({"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}),
         _ => json!({"__typename": "CheckRun", "name": "ci", "status": "IN_PROGRESS"}),
     };
-    json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": [check]})
+    let body = format!("## For humans\n\nx\n\n## Evidence (head {head})");
+    json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": [check], "body": body})
         .to_string()
 }
 
