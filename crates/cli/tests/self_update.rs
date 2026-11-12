@@ -9,8 +9,12 @@ const FLEET: &str = "[fleet.herdsman]\nrepo = \"jirathip-dev/herdsman\"\nlocal =
 
 /// A ctx whose live binary (`OLD`) and a finished build (`NEW`) are real files; the live path, canonical.
 fn setup(name: &str) -> (herdsman::Ctx, PathBuf) {
+    setup_with(name, FLEET)
+}
+
+fn setup_with(name: &str, config: &str) -> (herdsman::Ctx, PathBuf) {
     let d = tmpdir(name);
-    let mut c = ctx(&d, FLEET);
+    let mut c = ctx(&d, config);
     std::fs::create_dir_all(d.join("bin")).unwrap();
     std::fs::write(d.join("bin/herdsman"), "OLD").unwrap();
     c.exe = d.join("bin/herdsman").to_string_lossy().into();
@@ -22,11 +26,10 @@ fn setup(name: &str) -> (herdsman::Ctx, PathBuf) {
     (c, live)
 }
 
-/// git answers `SHA` for staging, gh its check runs (`conclusion`), the rest of the install succeeds.
 fn host(conclusion: &str) -> Fake {
     let checks = json!([{"__typename": "CheckRun", "name": "rust", "status": "COMPLETED", "conclusion": conclusion}]);
     Fake::default()
-        .reply("git -C /x/herdsman rev-parse origin/staging", &format!("{SHA}\n"))
+        .reply("git -C /x/herdsman rev-parse origin/main", &format!("{SHA}\n"))
         .reply("git -C", "")
         .reply(
             &format!("gh api repos/jirathip-dev/herdsman/commits/{SHA}/check-runs"),
@@ -46,6 +49,173 @@ fn sign_script(c: &herdsman::Ctx) -> String {
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+}
+
+fn heads(c: &herdsman::Ctx, live: &std::path::Path, heads: &[(&str, &str)]) -> Fake {
+    let checks = json!([{"__typename": "CheckRun", "name": "rust", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
+    let f = heads.iter().fold(Fake::default(), |f, (b, sha)| {
+        f.reply(&format!("git -C /x/herdsman rev-parse origin/{b}"), &format!("{sha}\n"))
+            .reply(
+                &format!("gh api repos/jirathip-dev/herdsman/commits/{sha}/check-runs"),
+                &checks.to_string(),
+            )
+    });
+    let staging = c.state.with_file_name("update-staging/bin/herdsman.new");
+    f.reply("git -C", "")
+        .reply("cargo build --release --locked -p herdsman", "")
+        .reply("which codesign", "/usr/bin/codesign\n")
+        .reply("sh ", "")
+        .reply(&format!("{}.new doctor --config-only", live.display()), "")
+        .reply(&format!("{} doctor --config-only", staging.display()), "")
+        .reply(&format!("{} profiles sync", live.display()), "")
+        .reply("launchctl", "")
+        .reply("systemctl", "")
+}
+
+const MAIN: &str = "1111111111111111111111111111111111111111";
+const MAIN2: &str = "2222222222222222222222222222222222222222";
+const STAGING: &str = "3333333333333333333333333333333333333333";
+
+#[test]
+fn branch_main_ignores_a_newer_green_staging_head_and_installs_a_new_green_main_head() {
+    let (c, live) = setup_with("upd-main", &format!("{FLEET}\n[self_update]\nbranch = \"main\"\n"));
+    let installed = || std::fs::read_to_string(c.state.with_file_name("update/sha")).unwrap();
+    let r = heads(&c, &live, &[("staging", STAGING), ("main", MAIN)]);
+    let (code, out) = run(&c, &r, &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.starts_with("✓ installed 1111111 at "), "{out}");
+    assert!(
+        r.called("git -C /x/herdsman fetch -q origin main"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    assert!(
+        !r.called("git -C /x/herdsman fetch -q origin staging")
+            && !r.called("git -C /x/herdsman rev-parse origin/staging")
+    );
+    assert!(!r.called(&format!("gh api repos/jirathip-dev/herdsman/commits/{STAGING}")));
+    assert_eq!(installed(), MAIN);
+
+    std::fs::write(&live, "OLD").unwrap();
+    let r = heads(&c, &live, &[("staging", MAIN2), ("main", MAIN)]);
+    assert_eq!(
+        run(&c, &r, &["self-update"]).1,
+        "= up to date @ 1111111\n",
+        "a newer staging head"
+    );
+    assert!(!r.called("cargo") && std::fs::read_to_string(&live).unwrap() == "OLD");
+
+    let r = heads(&c, &live, &[("staging", MAIN2), ("main", STAGING)]);
+    let (code, out) = run(&c, &r, &["self-update"]);
+    assert!(code == 0 && out.starts_with("✓ installed 3333333 at "), "{out}");
+    assert_eq!(
+        (installed(), std::fs::read_to_string(&live).unwrap()),
+        (STAGING.into(), "NEW".into())
+    );
+    let ev = kinds(&c, "self-updated");
+    let got: Vec<_> = ev
+        .iter()
+        .map(|e| (e.str("branch").unwrap(), e.str("sha").unwrap()))
+        .collect();
+    assert_eq!(got, [("main", MAIN), ("main", STAGING)]);
+}
+
+fn job_args(c: &herdsman::Ctx, label: &str) -> Vec<String> {
+    if cfg!(target_os = "macos") {
+        let p = std::fs::read_to_string(c.home.join(format!("Library/LaunchAgents/{label}.plist"))).unwrap();
+        let a = p.split("<array>").nth(1).unwrap().split("</array>").next().unwrap();
+        a.split("<string>")
+            .skip(1)
+            .map(|s| s.split("</string>").next().unwrap().to_string())
+            .collect()
+    } else {
+        let p = std::fs::read_to_string(c.home.join(format!(".config/systemd/user/{label}.service"))).unwrap();
+        let l = p.lines().find_map(|l| l.strip_prefix("ExecStart=")).unwrap();
+        l.split(' ').map(String::from).collect()
+    }
+}
+
+#[test]
+fn the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state() {
+    let text = format!("{FLEET}\n[self_update]\nstaging_serve = true\nstaging_addr = \"127.0.0.1:0\"\n");
+    let (c, live) = setup_with("upd-stg", &text);
+    let built = c.state.with_file_name("update-staging/target/release/herdsman");
+    std::fs::create_dir_all(built.parent().unwrap()).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_herdsman"), &built).unwrap();
+    let r = heads(&c, &live, &[("staging", STAGING), ("main", MAIN)]);
+    let (code, out) = run(&c, &r, &["self-update"]);
+    assert_eq!(code, 0, "{out}");
+    let bin = c.state.with_file_name("update-staging/bin/herdsman");
+    assert!(
+        out.contains(&format!(
+            "✓ staging serve: installed 3333333 at {}; staging serve on 127.0.0.1:0",
+            bin.display()
+        )),
+        "{out}"
+    );
+    assert!(
+        r.called(&format!(
+            "git -C {} checkout -q --detach {STAGING}",
+            c.state.with_file_name("update-staging/src").display()
+        )) || r.called("git -C /x/herdsman worktree add")
+    );
+    assert_eq!(
+        std::fs::read_to_string(c.state.with_file_name("update-staging/sha")).unwrap(),
+        STAGING
+    );
+    assert_eq!(std::fs::read_to_string(&live).unwrap(), "NEW", "main installed apart");
+    let args = job_args(&c, "dev.herdsman.serve-staging");
+    assert_eq!(
+        args,
+        [
+            bin.to_string_lossy().as_ref(),
+            "serve",
+            "--read-only",
+            "--addr",
+            "127.0.0.1:0"
+        ]
+    );
+
+    append(&c.state, &Event::new(c.now, "herdsman", None, "note", json!({}))).unwrap();
+    let before = read(&c.state).unwrap().len();
+    let mut p = std::process::Command::new(&args[0])
+        .args(&args[1..])
+        .env("FLEET_CONFIG", &c.config)
+        .env("FLEET_STATE", &c.state)
+        .env("HERDSMAN_HOME", &c.home)
+        .env("PATH", "/usr/bin:/bin")
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut err = std::io::BufReader::new(p.stderr.take().unwrap());
+    let mut line = String::new();
+    std::io::BufRead::read_line(&mut err, &mut line).unwrap();
+    let addr = line
+        .trim()
+        .strip_prefix("herdsman serve: read-only view on http://")
+        .unwrap()
+        .trim_end_matches('/')
+        .to_string();
+    let post = |path: &str| {
+        let mut s = std::net::TcpStream::connect(&addr).unwrap();
+        let body = "fleet=herdsman";
+        let req = format!("POST {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}", body.len());
+        std::io::Write::write_all(&mut s, req.as_bytes()).unwrap();
+        let mut res = String::new();
+        let _ = std::io::Read::read_to_string(&mut s, &mut res);
+        res
+    };
+    let paused = post("/pause");
+    let queued = post("/queue");
+    let _ = p.kill();
+    let _ = p.wait();
+    assert!(paused.starts_with("HTTP/1.1 405"), "{paused}");
+    assert!(queued.starts_with("HTTP/1.1 405"), "{queued}");
+    assert_eq!(
+        read(&c.state).unwrap().len(),
+        before,
+        "nothing written to the live state"
+    );
 }
 
 #[test]

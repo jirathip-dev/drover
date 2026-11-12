@@ -279,24 +279,21 @@ fn a_dead_shared_connection_drops_its_socket_and_runs_once_more_without_it() {
 }
 
 #[test]
-fn a_tick_ten_minutes_old_raises_tick_stuck_once_naming_its_step_and_child() {
+fn a_tick_ten_minutes_old_it_cannot_name_raises_slo_tick_and_stuck_once() {
     let (c, _sh) = setup("stuck-alert", "");
     let mark = c.state.with_file_name("tick.step");
     let child = "ssh -oBatchMode=yes air -- 'sh' '-c' 'test -e \"$1\"'";
-    let stuck = |c: &herdsman::Ctx| -> Vec<Event> {
-        assert_eq!(run(c, &local(), &["drive", "--fast"]).0, 0);
-        read(&c.state)
-            .unwrap()
-            .into_iter()
-            .filter(|e| e.kind == "tick-stuck")
-            .collect()
+    let kinds = |c: &herdsman::Ctx, k: &str| -> Vec<Event> {
+        read(&c.state).unwrap().into_iter().filter(|e| e.kind == k).collect()
     };
+    let drive = |c: &herdsman::Ctx| assert_eq!(run(c, &local(), &["drive", "--fast"]).0, 0);
     std::fs::write(
         &mark,
         json!({"since": NOW - 300, "step": "clean", "child": child}).to_string(),
     )
     .unwrap();
-    assert!(stuck(&c).is_empty(), "5 min is not stuck");
+    drive(&c);
+    assert!(kinds(&c, "slo-tick").is_empty(), "5 min is not stuck");
     std::fs::write(
         &mark,
         json!({"since": NOW - 700, "step": "clean", "child": child}).to_string(),
@@ -307,12 +304,119 @@ fn a_tick_ten_minutes_old_raises_tick_stuck_once_naming_its_step_and_child() {
         ..c.clone()
     };
     for c in [&c, &c, &later] {
-        let e = stuck(c);
+        drive(c);
+        let e = kinds(c, "slo-tick");
         assert_eq!(e.len(), 1, "once: {e:?}");
-        assert_eq!((e[0].str("step"), e[0].str("child")), (Some("clean"), Some(child)));
         assert!(
-            e[0].str("reason").unwrap().contains("tick running 11 min, in clean"),
+            e[0].str("reason")
+                .unwrap()
+                .contains(&format!("tick running 11 min, in clean; waiting on: {child}")),
             "{e:?}"
         );
+        let s = kinds(c, "stuck");
+        assert_eq!(
+            s.len(),
+            1,
+            "no heal for a tick with no pid: alerted at once, once: {s:?}"
+        );
+        assert!(
+            s[0].str("reason").unwrap().ends_with("tried: nothing (no known heal)"),
+            "{s:?}"
+        );
     }
+    assert!(kinds(&c, "self-heal").is_empty());
+}
+
+#[test]
+fn a_herdsman_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self_heal() {
+    let (c, _sh) = setup("stuck-kill", "");
+    let mark = c.state.with_file_name("tick.step");
+    std::fs::write(
+        &mark,
+        json!({"since": NOW - 700, "step": "drive", "child": "", "pid": 4242}).to_string(),
+    )
+    .unwrap();
+    let r = local()
+        .once("kill -0 4242", 0, "")
+        .reply("ps -o command= -p 4242", "/Users/me/.local/bin/herdsman tick\n")
+        .reply("kill -TERM 4242", "");
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(r.count("kill -TERM 4242"), 1);
+    assert!(!r.called("kill -KILL"), "it ended on SIGTERM");
+    let ev = read(&c.state).unwrap();
+    let heal: Vec<&Event> = ev.iter().filter(|e| e.kind == "self-heal").collect();
+    assert_eq!(heal.len(), 1, "{heal:?}");
+    assert_eq!(heal[0].str("did"), Some("stopped tick pid 4242 (SIGTERM)"));
+    assert_eq!(ev.iter().filter(|e| e.kind == "slo-tick").count(), 1);
+    let later = herdsman::Ctx {
+        now: NOW + 600,
+        ..c.clone()
+    };
+    let r = local().reply("ps -o command= -p 4242", "/Users/me/.local/bin/herdsman tick\n");
+    assert_eq!(run(&later, &r, &["drive", "--fast"]).0, 0);
+    assert!(!r.called("kill -TERM"), "a stopped tick is not stopped again");
+    let kinds: Vec<String> = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .map(|e| e.kind)
+        .filter(|k| k.starts_with("s"))
+        .collect();
+    assert!(
+        kinds.ends_with(&["slo-tick".into(), "self-heal".into(), "slo-ok".into()]),
+        "{kinds:?}"
+    );
+    assert!(!kinds.contains(&"stuck".to_string()), "healed: no alert");
+}
+
+#[test]
+fn a_process_that_is_no_herdsman_tick_is_never_killed() {
+    let (c, _sh) = setup("stuck-foreign", "");
+    let mark = c.state.with_file_name("tick.step");
+    std::fs::write(
+        &mark,
+        json!({"since": NOW - 700, "step": "drive", "child": "", "pid": 4243}).to_string(),
+    )
+    .unwrap();
+    let r = local()
+        .reply("kill -0 4243", "")
+        .reply("ps -o command= -p 4243", "/usr/bin/vim notes.txt\n");
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert!(
+        !r.called("kill -TERM") && !r.called("kill -KILL"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    let ev = read(&c.state).unwrap();
+    assert!(
+        ev.iter().any(|e| e.kind == "stuck"),
+        "a tick it cannot name is the owner's at once"
+    );
+}
+
+#[test]
+fn a_tick_that_ignores_sigterm_is_killed_after_10_s() {
+    let (c, _sh) = setup("stuck-sigkill", "");
+    let mark = c.state.with_file_name("tick.step");
+    std::fs::write(
+        &mark,
+        json!({"since": NOW - 700, "step": "drive", "child": "", "pid": 4244}).to_string(),
+    )
+    .unwrap();
+    let r = local()
+        .reply("kill -0 4244", "")
+        .reply("ps -o command= -p 4244", "herdsman drive\n")
+        .reply("kill -TERM 4244", "")
+        .reply("kill -KILL 4244", "");
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(
+        (
+            r.count("kill -TERM 4244"),
+            r.count("sleep 1"),
+            r.count("kill -KILL 4244")
+        ),
+        (1, 10, 1)
+    );
+    let ev = read(&c.state).unwrap();
+    let heal = ev.iter().find(|e| e.kind == "self-heal").unwrap();
+    assert_eq!(heal.str("did"), Some("stopped tick pid 4244 (SIGKILL after 10 s)"));
 }

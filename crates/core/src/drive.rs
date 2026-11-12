@@ -694,7 +694,6 @@ pub fn drive(
     };
     // #234: the fast step samples every host into the 24 h history (the Host tab's sparklines).
     if fast {
-        crate::timer::stuck(ctx, cfg).unwrap_or_else(|e| drop(writeln!(out, "tick-stuck: {e:#}")));
         if let Err(e) = crate::hosts::sample(ctx, cfg, r, &crate::events::read(&ctx.state)?) {
             writeln!(out, "host history: {e:#}")?;
         }
@@ -791,6 +790,8 @@ pub fn drive(
         for (name, e) in starts(ctx, cfg, r, out, &due, start) {
             fail(name, e);
         }
+    } else if only.is_none() && KICK.get().is_none() {
+        crate::slo::pass(ctx, cfg, (r, &seen), out, &fleets).unwrap_or_else(|e| drop(writeln!(out, "slo: {e:#}")));
     }
     lap("spawns");
     // #337: a step that logged something is looked at again, so the board shows what it did.
