@@ -1,0 +1,11 @@
+Decided: states, pass steps and tick steps are const tables (events::STATES, drive::STEPS, timer::TICK_STEPS) that the diagram renders
+Because: "Built from the same tables the code uses (state enum, the step list, `Limits`), not from hand-written text"
+Decided: fold, lap and Pass::step debug-assert their names are in those tables, so a new state or step fails the tests until it is added
+Because: "Changing a state or step in code without regenerating fails CI"
+Decided: timing keys no step claims are listed under an "other timers" node automatically
+Because: "so a new state, step or limit appears without editing the diagram code"
+Rejected: drawing verify(n) and architect as their own states — fold has no such states; they appear as edge labels
+Rejected: a new menu-row place in cooee-plugin.toml — the issue asks only that the screen be served
+Check: the edge labels in events::STATES name the real gates; each step's limit keys are used in that step
+Check: herdsman diagram | diff docs/workflow.md - is clean; /screens/workflow returns two diagram blocks
+Owner: herdsman can now draw its own workflow map from the code, and CI keeps the checked-in copy current
