@@ -132,7 +132,7 @@ Every timing and cap herdsman core uses is a `[limits]` key; a fleet.toml withou
 | `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow` |
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout` |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe |
-| `ssh_call_secs` | `20` | a remote call in a pass is killed after this long, its ssh's process group with it |
+| `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
 | `access_probe_secs` | `30` | an account probe (`account_env`) is killed after this long |
 | `db_busy_secs` | `60` | the SQLite busy timeout |
 | `db_retry_millis` | `10` | the pause between a new database's WAL switch retries |
