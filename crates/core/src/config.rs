@@ -739,7 +739,7 @@ impl Default for Limits {
             pass_max_secs: 120,
             ssh_connect_secs: 10,
             ssh_quick_secs: 5,
-            ssh_call_secs: 15,
+            ssh_call_secs: 20,
             access_probe_secs: 30,
             db_busy_secs: 60,
             db_retry_millis: 10,

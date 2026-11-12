@@ -157,6 +157,12 @@ rounds still go to it. The Host tab shows such a host grey, as `off · draining 
 `off · not used for lanes`. The main host (no `machine`) runs herdsman, the board and the log: it has no `[off]`, and
 `hosts off` refuses it `MAIN_HOST`; set `enabled = false` in fleet.toml by hand if you mean it.
 
+#939: once an off host has no open lane left, `drive`, `check`, `status` and the tick never contact it (no ssh at
+all); its lanes are still finished, cleaned and saved while any remain. Every remote call in a pass is killed with its
+ssh's process group after `ssh_call_secs` (20 s), output still held open included; the host is then offline for the
+rest of that pass and the other hosts and fleets go on. An ssh refused with `REMOTE HOST IDENTIFICATION HAS CHANGED`
+logs `host-key-changed <host>` once (again only after the host was back online) and is not retried in that pass.
+
 ## Monitoring
 
 - `herdsman hosts` prints, per host: on or off, reachable or offline, its tags, load/cpu, memory, disk, and its lanes.

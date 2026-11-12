@@ -1149,7 +1149,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let mut serial: Vec<_> = rows.iter().filter_map(|s| serial(&s.fleet)).collect();
                 serial.dedup();
                 // #337: the fast step's snapshot (a remote read it lacks fails), and only the fleet asked for.
-                let look = crate::snapshot::Snap::read(ctx, r);
+                let off = cfg.as_ref().map(|c| crate::hosts::idle_off(c, &events));
+                let spared = crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), None);
+                let look = crate::snapshot::Snap::read(ctx, &spared);
                 let skip = |s: &crate::events::IssueState| {
                     let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
                     let skip = queue::skipped(&events, &all, f, &s.fleet, s.issue, ctx.now);
@@ -1419,6 +1421,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             } else {
                 crate::hosts::Pass::new(r, None)
             };
+            let off = match cmd {
+                Cmd::Check | Cmd::Drive { .. } => crate::hosts::idle_off(&cfg, &read(&ctx.state)?),
+                _ => std::collections::BTreeSet::new(),
+            };
+            let pass = pass.sparing(off, Some((ctx, &cfg)));
             let r: &dyn Runner = match cmd {
                 Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } | Cmd::Reclaim { .. } => &pass,
                 _ => r,
