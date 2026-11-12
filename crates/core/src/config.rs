@@ -575,89 +575,81 @@ impl Role {
     }
 }
 
-#[derive(Debug, Deserialize)]
+/// `[limits]`: each key's doc line is its `LIMIT_DOCS` entry.
+#[derive(Debug, Clone, Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct Limits {
     pub review_rounds: u32,
     pub update_rounds: u32,
     pub stall_minutes: u64,
-    /// #792: an ACP lane's open turn with no session event this long is silent: cancelled and nudged, then respawned.
     pub silent_minutes: u64,
     pub ci_start_minutes: u64,
-    /// Host-load gate for `herdsman spawn` (`HOST_BUSY`).
     pub load_per_cpu: f64,
-    /// Pages swapped out per 2 s sample.
     pub swapout_rate: f64,
-    /// `herdsman spawn` refuses `DISK_LOW` under this many GB free on `/`.
     pub min_free_gb: f64,
-    /// #164: over this many GB of worktrees drive frees the idlest lanes' build folders, then spawn refuses `DISK_BUDGET`.
     pub worktree_budget_gb: f64,
-    /// #630: each lane's Cargo target, `<root>/.build/<agent>`, on its host (a fleet's own wins); over
-    /// `build_budget_gb` drive trims their unlocked profiles.
     pub build_budget_gb: f64,
-    /// #651: the scratch sweep runs on every enabled remote host too (`false`: this host only).
     pub sweep_remote: bool,
-    /// #536: where `herdsman clean` looks for stray Cargo build folders and a provider's per-worktree temp dirs.
     pub stray_roots: Vec<String>,
-    /// #168: `herdsman spawn` refuses `MEM_LOW` under this many GB of free + inactive memory.
     pub min_free_mem_gb: f64,
-    /// Default reasoning effort for roles that set none.
     pub effort: Option<String>,
-    /// #99: a routine ask unanswered this long takes its recommended option.
     pub ask_default_minutes: u64,
-    /// #584: an ask nobody waits on (no live asking lane) closes as expired after this many hours.
     pub ask_expire_hours: u64,
-    /// #223: a lane `done`/idle this long loses the processes its agent started (tsserver, vite, ...).
     pub idle_reap_minutes: u64,
-    /// #248: a `done` lane handed off this long closes its session; lane settings' `cleanupPeriodDays`.
     pub done_close_minutes: u64,
-    /// #605: a merged or closed issue's lane not `working` this long has its pane closed (drive's `clean`).
     pub idle_merged_minutes: u64,
     pub transcript_days: u64,
-    /// #216: commands the lane hook denies; `[fleet.<n>] deny_commands` replaces it, `deny_commands_add` extends it.
     pub deny_commands: Vec<Deny>,
-    /// #212: the fast step (`drive --fast`) and the slow tick run every this many seconds.
     pub fast_secs: u64,
     pub slow_secs: u64,
-    /// #228: the finding tags a `FAIL (form-only)` may carry, and how many per issue don't count as a review round.
     pub form_categories: Vec<String>,
     pub form_rounds: u32,
-    /// #254: every local host refused this long lets placement start a stopped cloud host.
     pub overflow_after_minutes: u64,
-    /// #283: a remote host's asks older than this are never imported; `check` pushes this many a pass, then a summary.
     pub import_max_age_hours: u64,
     pub max_pushes_per_pass: usize,
-    pub max_parallel_spawns: usize, // #318: concurrent detached spawn kicks (0: in the pass)
-    pub spawn_pending_max_secs: u64, // #333: a spawn marker or kick lock older than this is stale
-    /// #302: how long an unavailable agent rests when its message names no reset.
+    pub max_parallel_spawns: usize,
+    pub spawn_pending_max_secs: u64,
     pub fallback_rest_minutes: u64,
-    /// #785: an ACP lane with no event back this long after its first turn is a failed start.
     pub acp_start_minutes: u64,
-    /// #343: the event log over this many MB moves its old events to monthly archives (each slow pass).
     pub rotate_mb: u64,
-    /// #626: with GitHub webhooks on (a `GITHUB_WEBHOOK_SECRET`), the fast step re-reads PRs only this often.
     pub webhook_poll_minutes: u64,
-    /// #710: more Keychain readers up over 60 s alert `keychain-jammed`; `reap_keychain_readers` kills them too.
     pub keychain_readers: usize,
     pub reap_keychain_readers: bool,
-    /// #779: spawn refuses `RESPAWN_LOOP` after this many failed starts of an issue's role within the window.
     pub respawn_max: u32,
     pub respawn_window_minutes: u64,
-    /// #825: a drive pass longer than this logs `pass-slow` with its slowest step.
     pub pass_max_secs: u64,
-    /// #854: drive passes (`slow_secs` each) a promise of each kind may stay open before `promise-missed` (default 2).
+    pub ssh_connect_secs: u64,
+    pub ssh_quick_secs: u64,
+    pub ssh_call_secs: u64,
+    pub access_probe_secs: u64,
+    pub db_busy_secs: u64,
+    pub db_retry_millis: u64,
+    pub cloud_idle_stop_minutes: u64,
+    pub notify_secs: u64,
+    pub gate_check_minutes: u64,
+    pub shed_read_millis: u64,
+    pub proxy_connect_secs: u64,
+    pub service_call_secs: u64,
+    pub disk_probe_secs: u64,
+    pub disk_sick_secs: u64,
+    pub disk_trust_secs: u64,
+    pub poll_millis: u64,
+    pub tick_beat_secs: u64,
+    pub orchestrator_idle_minutes: u64,
+    pub orchestrator_change_minutes: u64,
+    pub token_refresh_minutes: u64,
+    pub ask_waiting_minutes: u64,
+    pub outbox_stale_minutes: u64,
+    pub host_offline_minutes: u64,
     pub promise_passes: std::collections::BTreeMap<crate::promise::Kind, u64>,
-    /// #859: serve's background re-reads of herdr's agents, shed's, the remote hosts' (ssh) and the host sample.
     pub serve_herdr_secs: u64,
     pub serve_shed_secs: u64,
     pub serve_remote_secs: u64,
     pub serve_host_secs: u64,
-    /// #859: `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once per episode.
+    pub serve_handover_secs: u64,
     pub slo_api_p95_ms: u64,
     pub slo_api_minutes: u64,
-    /// #855: no lane working this long while the queue has spawnable work breaches `slo-idle`.
     pub slo_idle_minutes: u64,
-    /// #855: a tick running longer than this breaches `slo-tick`; the next fast step stops it.
     pub slo_tick_minutes: u64,
 }
 
@@ -683,6 +675,9 @@ impl Deny {
         }
     }
 }
+
+/// `orchestrator_change_minutes`' default; the frozen board's `CHANGE` window follows it.
+pub const ORCHESTRATOR_CHANGE_MINUTES: u64 = 30;
 
 impl Default for Limits {
     fn default() -> Self {
@@ -740,17 +735,307 @@ impl Default for Limits {
             respawn_max: 3,
             respawn_window_minutes: 60,
             pass_max_secs: 120,
+            ssh_connect_secs: 10,
+            ssh_quick_secs: 5,
+            ssh_call_secs: 15,
+            access_probe_secs: 30,
+            db_busy_secs: 60,
+            db_retry_millis: 10,
+            cloud_idle_stop_minutes: 20,
+            notify_secs: 15,
+            gate_check_minutes: 30,
+            shed_read_millis: 300,
+            proxy_connect_secs: 1,
+            service_call_secs: 2,
+            disk_probe_secs: 2,
+            disk_sick_secs: 300,
+            disk_trust_secs: 60,
+            poll_millis: 20,
+            tick_beat_secs: 60,
+            orchestrator_idle_minutes: 30,
+            orchestrator_change_minutes: ORCHESTRATOR_CHANGE_MINUTES,
+            token_refresh_minutes: 30,
+            ask_waiting_minutes: 30,
+            outbox_stale_minutes: 5,
+            host_offline_minutes: 15,
             promise_passes: std::collections::BTreeMap::new(),
             serve_herdr_secs: 2,
             serve_shed_secs: 5,
             serve_remote_secs: 10,
             serve_host_secs: 10,
+            serve_handover_secs: 300,
             slo_api_p95_ms: 1000,
             slo_api_minutes: 10,
             slo_idle_minutes: 20,
             slo_tick_minutes: 10,
         }
     }
+}
+
+/// #844: every `[limits]` key and what it sets, in docs/config.md's order; `herdsman config show` prints them.
+pub const LIMIT_DOCS: &[(&str, &str)] = &[
+    (
+        "review_rounds",
+        "review rounds before an issue goes needs-human (ROUND_LIMIT)",
+    ),
+    (
+        "update_rounds",
+        "PASSed update rounds before `spawn --update` refuses UPDATE_LIMIT",
+    ),
+    ("stall_minutes", "a working lane with no event this long is stalled"),
+    (
+        "silent_minutes",
+        "an ACP lane's open turn with no session event this long is cancelled and nudged",
+    ),
+    (
+        "ci_start_minutes",
+        "a PR head with no checks this long after its push alerts `ci-missing`",
+    ),
+    ("load_per_cpu", "spawn refuses HOST_BUSY over this load per CPU"),
+    (
+        "swapout_rate",
+        "pages swapped out per 2 s sample that count as swapping",
+    ),
+    ("min_free_gb", "spawn refuses DISK_LOW under this many GB free on `/`"),
+    (
+        "worktree_budget_gb",
+        "over this many GB of worktrees drive frees build folders, then spawn refuses DISK_BUDGET",
+    ),
+    (
+        "build_budget_gb",
+        "over this many GB of lane build folders drive trims their unlocked profiles",
+    ),
+    (
+        "sweep_remote",
+        "the scratch sweep runs on every enabled remote host too",
+    ),
+    (
+        "stray_roots",
+        "where `herdsman clean` looks for stray build folders and temp dirs",
+    ),
+    (
+        "min_free_mem_gb",
+        "spawn refuses MEM_LOW under this many GB of free + inactive memory",
+    ),
+    ("effort", "default reasoning effort for roles that set none"),
+    (
+        "ask_default_minutes",
+        "a routine ask unanswered this long takes its recommended option",
+    ),
+    (
+        "ask_expire_hours",
+        "an ask no live lane waits on expires after this many hours",
+    ),
+    (
+        "idle_reap_minutes",
+        "a lane done or idle this long loses the processes its agent started",
+    ),
+    (
+        "done_close_minutes",
+        "a done lane handed off this long closes its session",
+    ),
+    (
+        "idle_merged_minutes",
+        "a merged or closed issue's idle lane has its pane closed after this long",
+    ),
+    ("transcript_days", "a lane's agent keeps its transcripts this many days"),
+    ("deny_commands", "commands the lane hook refuses (default: containers)"),
+    (
+        "fast_secs",
+        "the fast step (`drive --fast`) runs every this many seconds",
+    ),
+    ("slow_secs", "the slow tick runs every this many seconds"),
+    ("form_categories", "the finding tags a `FAIL (form-only)` may carry"),
+    (
+        "form_rounds",
+        "form-only FAILs per issue that don't count as a review round",
+    ),
+    (
+        "overflow_after_minutes",
+        "every local host refused this long lets placement start a stopped cloud host",
+    ),
+    (
+        "import_max_age_hours",
+        "a remote host's asks older than this are never imported",
+    ),
+    (
+        "max_pushes_per_pass",
+        "push alerts `check` sends a pass before a summary",
+    ),
+    (
+        "max_parallel_spawns",
+        "concurrent detached spawn kicks (0: in the pass)",
+    ),
+    (
+        "spawn_pending_max_secs",
+        "a spawn marker or kick lock older than this is stale",
+    ),
+    (
+        "fallback_rest_minutes",
+        "how long an unavailable agent rests when its message names no reset",
+    ),
+    (
+        "acp_start_minutes",
+        "an ACP lane with no event back this long after its first turn is a failed start",
+    ),
+    (
+        "rotate_mb",
+        "the event log over this many MB moves old events to monthly archives",
+    ),
+    (
+        "webhook_poll_minutes",
+        "with GitHub webhooks on, the fast step re-reads PRs only this often",
+    ),
+    (
+        "keychain_readers",
+        "more Keychain readers up over 60 s alert `keychain-jammed`",
+    ),
+    ("reap_keychain_readers", "kill those stuck Keychain readers too"),
+    (
+        "respawn_max",
+        "failed starts of an issue's role in the window before spawn refuses RESPAWN_LOOP",
+    ),
+    (
+        "respawn_window_minutes",
+        "the window `respawn_max` counts failed starts in",
+    ),
+    ("pass_max_secs", "a drive pass longer than this logs `pass-slow`"),
+    ("ssh_connect_secs", "every host ssh's `-oConnectTimeout`"),
+    (
+        "ssh_quick_secs",
+        "a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe",
+    ),
+    ("ssh_call_secs", "a remote call in a pass is killed after this long"),
+    (
+        "access_probe_secs",
+        "an account probe (`account_env`) is killed after this long",
+    ),
+    ("db_busy_secs", "the SQLite busy timeout"),
+    (
+        "db_retry_millis",
+        "the pause between a new database's WAL switch retries",
+    ),
+    (
+        "cloud_idle_stop_minutes",
+        "a cloud host's `idle_stop_minutes` when it sets none",
+    ),
+    (
+        "notify_secs",
+        "a notifier command or web push send is killed after this long",
+    ),
+    (
+        "gate_check_minutes",
+        "a premerge or gate check (a build or test run) is killed after this long",
+    ),
+    (
+        "shed_read_millis",
+        "how long drive's intake waits for shed's state changes",
+    ),
+    ("proxy_connect_secs", "the token proxy's liveness connect timeout"),
+    (
+        "service_call_secs",
+        "a call to the running service's socket times out after this long",
+    ),
+    (
+        "disk_probe_secs",
+        "a folder listing slower than this marks its disk as not answering",
+    ),
+    (
+        "disk_sick_secs",
+        "a disk that let a call run out of time stays hung this long",
+    ),
+    (
+        "disk_trust_secs",
+        "a folder that answered is trusted this long before it is probed again",
+    ),
+    (
+        "poll_millis",
+        "the pause between polls of a child process or disk probe",
+    ),
+    ("tick_beat_secs", "a running tick writes `tick.beat` this often"),
+    (
+        "orchestrator_idle_minutes",
+        "an orchestrator whose thread is quiet this long closes on the next `check`",
+    ),
+    (
+        "orchestrator_change_minutes",
+        "an orchestrator's answer may not change one this long after it",
+    ),
+    (
+        "token_refresh_minutes",
+        "`check` pushes a fresh runner registration token to every VM this often",
+    ),
+    (
+        "ask_waiting_minutes",
+        "an owner ask open this long alerts `ask-waiting`",
+    ),
+    (
+        "outbox_stale_minutes",
+        "a remote lane's outbox line undelivered this long alerts `outbox-stale`",
+    ),
+    (
+        "host_offline_minutes",
+        "a remote host unreachable this long has its open lanes restarted on the main host",
+    ),
+    (
+        "promise_passes",
+        "drive passes a promise of each kind may stay open before `promise-missed` (default 2)",
+    ),
+    (
+        "serve_herdr_secs",
+        "serve re-reads herdr's agents in the background this often",
+    ),
+    (
+        "serve_shed_secs",
+        "serve re-reads shed's lanes in the background this often",
+    ),
+    (
+        "serve_remote_secs",
+        "serve re-reads the remote hosts (ssh) in the background this often",
+    ),
+    (
+        "serve_host_secs",
+        "serve re-samples this host's load in the background this often",
+    ),
+    (
+        "serve_handover_secs",
+        "`self-update` waits this long for the running serve to hand over before restarting it",
+    ),
+    (
+        "slo_api_p95_ms",
+        "`/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once",
+    ),
+    (
+        "slo_api_minutes",
+        "how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api`",
+    ),
+    (
+        "slo_idle_minutes",
+        "no lane working this long while the queue has spawnable work breaches `slo-idle`",
+    ),
+    (
+        "slo_tick_minutes",
+        "a tick running longer than this breaches `slo-tick`; the next fast step stops it",
+    ),
+];
+
+static ACTIVE: std::sync::RwLock<Option<std::sync::Arc<Limits>>> = std::sync::RwLock::new(None);
+
+/// #844: the last loaded fleet.toml's `[limits]` (defaults before one loads), for code that holds no `Config`.
+pub fn limits() -> std::sync::Arc<Limits> {
+    static DEFAULT: std::sync::OnceLock<std::sync::Arc<Limits>> = std::sync::OnceLock::new();
+    let active = ACTIVE.read().ok().and_then(|a| a.clone());
+    active.unwrap_or_else(|| DEFAULT.get_or_init(Default::default).clone())
+}
+
+/// #844: `herdsman config show`: each `[limits]` key, its value and its doc line.
+pub fn show(cfg: &Config, out: &mut dyn std::io::Write) -> Result<()> {
+    let vals = toml::Table::try_from(&cfg.limits)?;
+    for (k, doc) in LIMIT_DOCS {
+        let v = vals.get(*k).map_or("unset".into(), toml::Value::to_string);
+        writeln!(out, "{k} = {v}  # {doc}")?;
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -854,7 +1139,12 @@ impl Config {
     fn load_text(path: &Path) -> Result<(Config, String)> {
         let text = std::fs::read_to_string(path).with_context(|| format!("cannot read config {}", path.display()))?;
         let e = match Self::parse(&text) {
-            Ok(c) => return Ok((c, text)),
+            Ok(c) => {
+                if let Ok(mut a) = ACTIVE.write() {
+                    *a = Some(std::sync::Arc::new(c.limits.clone()));
+                }
+                return Ok((c, text));
+            }
             Err(e) => e,
         };
         let rf = e.downcast_ref::<crate::gate::Refusal>();

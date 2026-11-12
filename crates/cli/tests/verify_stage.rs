@@ -675,7 +675,7 @@ fn a_shot_on_a_hung_disk_answers_504_and_the_board_stays_up() {
         let (png, took) = shot.join().unwrap();
         assert!(png.starts_with("HTTP/1.1 504"), "{png}");
         assert!(
-            took < herdsman::runner::PROBE + std::time::Duration::from_secs(1),
+            took < herdsman::runner::probe_wait() + std::time::Duration::from_secs(1),
             "{took:?}"
         );
     });

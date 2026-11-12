@@ -261,13 +261,14 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         let _ = std::fs::write(&at, format!("{since} {}", since + t0.elapsed().as_secs()));
     };
     write();
+    let loaded = crate::check::config(ctx);
     let (stop, rx) = std::sync::mpsc::channel::<()>();
+    let every = std::time::Duration::from_secs(crate::config::limits().tick_beat_secs);
     let beating = std::thread::spawn(move || {
-        while rx.recv_timeout(std::time::Duration::from_secs(60)) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+        while rx.recv_timeout(every) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
             write();
         }
     });
-    let loaded = crate::check::config(ctx); // #709: `config-invalid` once per error
     let budget = loaded.as_ref().map_or(u64::MAX, |c| c.limits.slow_secs);
     let mut pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now)));
     pass.until = std::time::Instant::now().checked_add(std::time::Duration::from_secs(budget));

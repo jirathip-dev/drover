@@ -284,7 +284,7 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Live, out: &mut dyn 
         let Some(Some(agents)) = live.get(name).filter(|_| state(&events, name) == "running") else {
             continue;
         };
-        let idle = h.idle_stop_minutes.unwrap_or(20) * 60;
+        let idle = h.idle_stop_minutes.unwrap_or(cfg.limits.cloud_idle_stop_minutes) * 60;
         let up = last(&events, name, &["cloud-up"]);
         let busy = seen.get(name).map_or(0, |s| s.busy).max(up.map_or(0, |e| e.ts));
         let quiet = (agents.is_empty() && busy + idle <= ctx.now).then(|| format!("idle {} min", idle / 60));

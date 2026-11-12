@@ -369,15 +369,15 @@ pub fn ask(
     Ok(writeln!(out, "{id}")?)
 }
 
+/// #541: how long the owner may change a conductor's answer, in seconds (the board reads it).
+pub const CHANGE: u64 = config::ORCHESTRATOR_CHANGE_MINUTES * 60;
+
 /// A choice as its ask has it: option `n`'s text, else the text given.
 fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
     let n = choice.parse::<usize>().ok();
     n.and_then(|n| ask.data["options"].get(n.checked_sub(1)?)?.as_str())
         .unwrap_or(choice)
 }
-
-/// An orchestrator's answer may not change one this long after it (the owner's [change] may).
-pub const CHANGE: u64 = 30 * 60;
 
 /// #541: `herdsman answer --basis`, run by thread `t`'s conductor: answered `by: conductor-<t>` only if the ask is a
 /// lane ask on its repo, names no owner topic, and `basis` quotes the issue's spec (3 words or more, verbatim) or
@@ -622,7 +622,11 @@ fn answer_with(
     };
     let last = events.iter().rev().find(|e| is(e, "decision"));
     let orchestrator = |b: &str| b.starts_with("orchestrator-");
-    let change = |d: &&Event| d.str("by").is_some_and(orchestrator) && !orchestrator(by) && ctx.now < d.ts + CHANGE;
+    let change = |d: &&Event| {
+        d.str("by").is_some_and(orchestrator)
+            && !orchestrator(by)
+            && ctx.now < d.ts + cfg.limits.orchestrator_change_minutes * 60
+    };
     // #621: a handoff card answers every tap with its one delivery (`conductor::land`).
     let handoff = ask.data.get("handoff").is_some();
     if let Some(d) = last.filter(|d| !handoff && d.str("by") != Some("default") && !change(d)) {
