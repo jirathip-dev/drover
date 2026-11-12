@@ -1,0 +1,6 @@
+Decided: serve.rs is back to staging's version; waiting.rs re-exports promise::SLOT so the board's match is unchanged.
+Because: crates/core/src/waiting.rs:5
+Rejected: keeping promise::is_slot in serve.rs — it edits a frozen board file and board-freeze goes red.
+Rejected: a SLOT literal in waiting.rs — arch-check bans the phrase outside promise.rs.
+Check: git diff origin/staging...HEAD -- crates/server/src/serve.rs is empty and board-freeze is green.
+Owner: The board file is no longer touched; the waiting lines still come only from the promise module.
