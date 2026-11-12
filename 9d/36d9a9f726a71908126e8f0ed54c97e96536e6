@@ -1,0 +1,12 @@
+Decided: ask ids come from one db transaction that counts every logged ask (archived too) and inserts the new one, used by all six ask writers.
+Because: "Ask ids are allocated atomically in the db (a sequence, or an insert that takes the next id in the same transaction)"
+Decided: the design-review event and its ask go in one transaction keyed fleet#issue:role-ask@head; a second pass inserts nothing.
+Because: "check-and-insert in one db transaction. A second pass for the same key posts nothing"
+Decided: a fast pass never hands off a design (crates/core/src/drive.rs:1132), so the test races a full pass, a fast pass and a kick, which runs a full pass without drive.lock.
+Because: crates/core/src/drive.rs:289
+Decided: a repeated ask id is closed as `repeat` in the ask index and dropped from a thread's events, so every view shows the first.
+Because: crates/core/src/events.rs:511
+Rejected: the #509 intent/done guard — it needs a third event pair and a recovery probe for what one insert does.
+Rejected: a new ask-id table or sequence — a count inside the same immediate transaction is already atomic and keeps existing ids.
+Check: cargo test -p herdsman --test ask_ids fails at 45186b2e2 (2 asks, 41/50 ids, 2 rows) and passes at the head.
+Owner: one design ask per pushed design now, and two asks can no longer get the same number.
