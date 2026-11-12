@@ -22,7 +22,9 @@ under `docs/architecture/`: design within it.
   refuses the rest. Impl later moves approved views into the product and wires them.
 - Images of each page or view at the recipe's sizes, by its render command; a recipe whose design moves (`clip: yes`)
   also gets a short clip (`clip.gif` or `clip.mp4`). A recipe tool the main host lacks stops the lane before it starts.
-- A `README.md` there mapping each image to the decision it shows.
+- A `README.md` there that starts with a `## Summary` for the owner, in plain language, no code, at most 6 lines:
+  `Decision:` what the design decides, `Screens:` the pages or screens drawn, `Open questions:` yours for the owner
+  or `none`. The owner's ask quotes it, with a link to the folder. Below it, map each image to the decision it shows.
 - At most 3 pages or screens, unless the issue asks for variants.
 - Never comment on GitHub issues or PRs; report in your pane.
 - You take no part in `herdsman verdict` or `herdsman merge`. Whether your work becomes
