@@ -14,6 +14,9 @@ impl (or the design, if the issue is also queued `--design`) starts only after a
 
 - Read `.brief.md` fully first; it carries the issue spec. Read the code the issue touches.
 - Write `docs/architecture/<slug>/` only. No product code.
+  - `README.md` and `adr.md` each start with a `## Summary` for the owner, in plain language, no code, at most
+    6 lines: `Decision:` what you decided, `Slices:` the pieces impl builds, `Open questions:` yours for the owner
+    or `none`. The owner's ask quotes it, with a link to the folder.
   - `adr.md`: the question, the options, the decision, its consequences.
   - The data shapes, as types or a schema.
   - Module boundaries: which module may call which.

@@ -822,3 +822,150 @@ fn a_recipe_tool_the_main_host_lacks_ends_the_design_turn_blocked_before_it_star
     assert!(!Path::new(&wt(&c, 12)).join(".brief.md").exists(), "nothing drawn");
     assert_eq!(state(&c, 12), "needs-human");
 }
+
+fn staged(name: &str, flag: &str) -> (herdsman::Ctx, std::path::PathBuf, RealGit) {
+    let (c, w) = repo(&tmpdir(name));
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, format!("{toml}{ARCHITECT}")).unwrap();
+    let t = run(&c, &Fake::default(), &["thread", "new", "sendmeter", "meter"]);
+    assert!(t.0 == 0 && t.1.contains("t1"), "{}", t.1);
+    std::env::set_var("HERDSMAN_THREAD", "t1");
+    let q = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", flag]);
+    std::env::remove_var("HERDSMAN_THREAD");
+    assert_eq!(q.0, 0, "{}", q.1);
+    let r = RealGit(fake(&c, HEAD));
+    drive(&c, &r);
+    (c, w, r)
+}
+
+fn push(w: &Path, files: &[(&str, &str)]) -> String {
+    for (f, text) in files {
+        std::fs::create_dir_all(w.join(f).parent().unwrap()).unwrap();
+        std::fs::write(w.join(f), text).unwrap();
+    }
+    git(w, &["add", "."]);
+    git(w, &["commit", "-qm", "stage"]);
+    git(w, &["push", "-q", "origin", "issue-12"]);
+    git(w, &["rev-parse", "HEAD"])
+}
+
+fn tree(head: &str, dir: &str) -> String {
+    format!("https://github.com/jirathip-dev/sendmeter/tree/{head}/{dir}/")
+}
+
+#[test]
+fn an_architect_ask_quotes_the_summary_and_links_the_adr_folder_at_the_sha_and_a_revise_the_new_one() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut c, w, r) = staged("architect-summary", "--architect");
+    let sum = "Decision: one store, synced nightly\nSlices: store, sync, board\nOpen questions: none";
+    let readme = format!("# Meter\n\n## Summary\n\n{sum}\n\n## Shapes\n\n`struct Meter`\n");
+    let head = push(
+        &w,
+        &[
+            ("docs/architecture/meter/README.md", &readme),
+            ("docs/architecture/meter/adr.md", "# ADR\n\n## Decision\n\nnot this\n"),
+        ],
+    );
+    drive(&c, &r);
+    let link = tree(&head, "docs/architecture/meter");
+    let q = format!(
+        "{sum}\n\n{link}\n\nArchitecture (ADR) for #12 is ready ({:.7}): approve, revise (type a note) or reject?",
+        head
+    );
+    let ask = &kinds(&c, "needs-decision")[0];
+    assert_eq!(ask.str("question"), Some(q.as_str()));
+    assert_eq!((ask.str("summary"), ask.str("link")), (Some(sum), Some(link.as_str())));
+    let (code, asks) = run(&c, &r, &["asks", "sendmeter"]);
+    assert!(code == 0 && asks.contains(sum) && asks.contains(&link), "{asks}");
+    let (code, thread) = run(&c, &r, &["thread", "show", "t1"]);
+    assert!(
+        code == 0 && thread.contains(&format!("asks q1: {sum}\n\n{link}")),
+        "{thread}"
+    );
+    assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "split the sync"]).0, 0);
+    c.now += 1000;
+    drive(&c, &r);
+    let readme = readme.replace("synced nightly", "synced hourly");
+    let head2 = push(&w, &[("docs/architecture/meter/README.md", &readme)]);
+    drive(&c, &r);
+    let ask = &kinds(&c, "needs-decision")[1];
+    let q = ask.str("question").unwrap();
+    assert!(
+        q.starts_with("Decision: one store, synced hourly\n") && q.contains(&tree(&head2, "docs/architecture/meter")),
+        "{q}"
+    );
+}
+
+#[test]
+fn a_design_ask_links_the_design_folder_the_issue_names_at_the_sha() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (c, w) = repo(&tmpdir("design-link"));
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let body = r#"{"title":"t","body":"Draw SwiftUI views; screenshots in `apple/design/x/`."}"#;
+    let base = RealGit(fake(&c, HEAD));
+    let r = Both(Fake::default().reply("gh issue view", body), &base);
+    drive(&c, &r);
+    let sum = "Decision: a single meter dial\nScreens: iPhone, Mac\nOpen questions: dark mode?";
+    let head = push(
+        &w,
+        &[
+            ("apple/design/x/iphone.png", "png"),
+            (
+                "apple/design/x/README.md",
+                &format!("## Summary\n{sum}\n## Images\n- iphone.png\n"),
+            ),
+        ],
+    );
+    drive(&c, &r);
+    let ask = &kinds(&c, "needs-decision")[0];
+    let link = tree(&head, "apple/design/x");
+    assert_eq!(ask.str("link"), Some(link.as_str()));
+    let q = ask.str("question").unwrap();
+    assert!(
+        q.starts_with(&format!("{sum}\n\n{link}\n\nDesign for #12 is ready")),
+        "{q}"
+    );
+}
+
+#[test]
+fn without_a_summary_the_ask_quotes_the_adrs_decision_and_without_either_it_reads_as_before() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let adr = "# ADR\n\n## Question\n\nhow?\n\n## Decision\n\nOne store.\n\n### Why\n\nsimple\n\n## Open questions\n\n- sync cadence\n\n## Consequences\n\nmore code\n";
+    for (name, file, want) in [
+        (
+            "architect-decision",
+            adr,
+            "Decision: One store.\n\n### Why\n\nsimple\nOpen questions: - sync cadence\n\n",
+        ),
+        ("architect-bare", "# ADR\n\nwe store it once\n", ""),
+    ] {
+        let (c, w, r) = staged(name, "--architect");
+        let head = push(&w, &[("docs/architecture/meter/adr.md", file)]);
+        drive(&c, &r);
+        let ask = &kinds(&c, "needs-decision")[0];
+        let bare = format!("Architecture (ADR) for #12 is ready ({head:.7}): approve, revise (type a note) or reject?");
+        let link = tree(&head, "docs/architecture/meter");
+        let q = if want.is_empty() {
+            bare
+        } else {
+            format!("{want}{link}\n\n{bare}")
+        };
+        assert_eq!(ask.str("question"), Some(q.as_str()), "{name}");
+        assert_eq!(ask.str("link"), Some(link.as_str()));
+    }
+}
+
+#[test]
+fn a_long_summary_is_cut_at_a_line_end_near_600_characters() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (c, w, r) = staged("architect-cap", "--architect");
+    let lines: Vec<String> = (0..20).map(|i| format!("{i:02} {}", "x".repeat(46))).collect();
+    let readme = format!("## Summary\n{}\n", lines.join("\n"));
+    push(&w, &[("docs/architecture/meter/README.md", &readme)]);
+    drive(&c, &r);
+    let sum = kinds(&c, "needs-decision")[0].str("summary").unwrap().to_string();
+    assert_eq!(sum, format!("{}\n…", lines[..12].join("\n")));
+}
