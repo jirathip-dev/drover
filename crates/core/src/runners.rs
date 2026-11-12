@@ -10,9 +10,6 @@ use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
 
-/// How often `check` pushes a fresh registration token to every VM (GitHub's last an hour).
-const TOKEN_EVERY: u64 = 30 * 60;
-
 pub enum Verb {
     Status,
     Revive(String),
@@ -188,7 +185,7 @@ fn push_tokens(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &CiRunners) -> Result
     Ok(all.len() - failed.len())
 }
 
-/// `check`: a fresh token every `TOKEN_EVERY`, then the health (`runners-low` / `runners-ok` are check's).
+/// `check`: a fresh token every `token_refresh_minutes`, then the health (`runners-low` / `runners-ok` are check's).
 pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Option<Result<(u64, u64)>> {
     let c = cfg.ci_runners.as_ref()?;
     let last = events
@@ -196,7 +193,7 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Option
         .rev()
         .find(|e| e.kind == "runners-tokens")
         .map_or(0, |e| e.ts);
-    if last + TOKEN_EVERY <= ctx.now {
+    if last + cfg.limits.token_refresh_minutes * 60 <= ctx.now {
         if let Err(e) = push_tokens(ctx, cfg, r, c) {
             eprintln!("herdsman check: runner tokens: {e:#}");
         }
@@ -342,7 +339,7 @@ pub fn run(
                 "tokens: a fresh one on {n}/{} VMs; the refresher is `herdsman check` (the 5-minute timer), every {} \
                  min (before this: {ago})",
                 all.len(),
-                TOKEN_EVERY / 60
+                cfg.limits.token_refresh_minutes
             )?)
         }
         Verb::RetireLocal => {

@@ -737,10 +737,8 @@ pub(crate) fn run_checks<'a>(r: &dyn Runner, wt: &Path, base: &str, cs: &'a [Che
     let hit = |c: &&Check| c.when.is_empty() || c.when.iter().any(&glob);
     cs.iter().filter(hit).find_map(|c| {
         let sh = argv(&["-c", &format!("cd \"$0\" && {}", c.run), &wt.to_string_lossy()]);
-        // #713: a check is a build or a test run: 30 min, not the 60 s default.
-        let o = r
-            .run_for("sh", &sh, "", std::time::Duration::from_mins(30))
-            .unwrap_or_default();
+        let limit = std::time::Duration::from_secs(crate::config::limits().gate_check_minutes * 60);
+        let o = r.run_for("sh", &sh, "", limit).unwrap_or_default();
         (o.code != 0).then(|| (c, format!("{}{}", o.stdout, o.stderr)))
     })
 }

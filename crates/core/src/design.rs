@@ -190,8 +190,8 @@ pub fn handoff(
         return Ok(()); // no design on the branch yet
     }
     // #730: the ADR's folder, `docs/architecture/<slug>`, which the impl and rev briefs link once approved.
-    let adr = names.lines().next().filter(|_| role == "architect");
-    let adr = adr.map(|l| l.split('/').take(3).collect::<Vec<_>>().join("/"));
+    let dir = folder(names.lines().next().unwrap_or_default(), &dirs);
+    let adr = (role == "architect").then(|| dir.clone());
     let png = |l: &&str| {
         [".png", ".gif", ".mp4"]
             .iter()
@@ -223,9 +223,61 @@ pub fn handoff(
         "Design"
     };
     let q = format!("{what} for #{n} is ready ({head:.7}): approve, revise (type a note) or reject?");
+    let link = format!("https://github.com/{}/tree/{head}/{dir}/", cfg.fleet(f)?.repo);
+    let summary = summary(r, wt, head, &dir);
+    let q = summary.as_ref().map_or(q.clone(), |s| format!("{s}\n\n{link}\n\n{q}"));
     let d = json!({"id": id, "question": q, "options": OPTIONS, "recommend": null, "kind": "owner", "design": true, "files": files,
-        "thread": thread, "role": role});
+        "thread": thread, "role": role, "summary": summary, "link": link});
     emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "needs-decision", d))
+}
+
+fn folder(name: &str, dirs: &[String]) -> String {
+    let under = dirs
+        .iter()
+        .find_map(|d| Some((d, name.strip_prefix(d.as_str())?.strip_prefix('/')?)));
+    match under {
+        Some((d, rest)) => match rest.split_once('/') {
+            Some((slug, _)) => format!("{d}/{slug}"),
+            None => d.clone(),
+        },
+        None => name.rsplit_once('/').map_or("", |p| p.0).to_string(),
+    }
+}
+
+fn section(md: &str, name: &str) -> Option<String> {
+    let level = |l: &str| l.len() - l.trim_start_matches('#').len();
+    let lines: Vec<&str> = md.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| level(l) > 0 && l.trim_start_matches('#').trim().eq_ignore_ascii_case(name))?;
+    let body: Vec<&str> = lines[at + 1..]
+        .iter()
+        .take_while(|l| !(1..=level(lines[at])).contains(&level(l)))
+        .copied()
+        .collect();
+    Some(body.join("\n").trim().to_string()).filter(|b| !b.is_empty())
+}
+
+fn summary(r: &dyn Runner, wt: &str, head: &str, dir: &str) -> Option<String> {
+    let show = |f: &str| ok(r, "git", &["-C", wt, "show", &format!("{head}:{dir}/{f}")]).unwrap_or_default();
+    let adr = show("adr.md");
+    let own = section(&show("README.md"), "Summary").or_else(|| section(&adr, "Summary"));
+    let text = own.or_else(|| {
+        let open = section(&adr, "Open questions").unwrap_or_else(|| "none".into());
+        Some(format!(
+            "Decision: {}\nOpen questions: {open}",
+            section(&adr, "Decision")?
+        ))
+    })?;
+    let mut out = String::new();
+    for l in text.lines() {
+        if out.chars().count() + l.chars().count() > 600 {
+            let cut: String = l.chars().take(600_usize.saturating_sub(out.chars().count())).collect();
+            return Some(format!("{out}{}…", if out.is_empty() { cut } else { String::new() }));
+        }
+        out = format!("{out}{l}\n");
+    }
+    Some(out.trim_end().to_string())
 }
 
 /// The owner's answer `text` to design ask `ask`: approve, reject, or (anything else) revise with it as the note.
