@@ -582,10 +582,6 @@ fn an_unguardable_acp_lane_refuses_to_start() {
     let unsynced = ctx(&tmpdir("acp-nohook"), &acp_config(&b.sock, "claude", true));
     let cases = [
         (
-            acp_ctx("acp-noacct", &acp_config(&b.sock, "claude", false)),
-            "[accounts] account env",
-        ),
-        (
             acp_ctx("acp-hermes", &acp_config(&b.sock, "hermes", true)),
             "runs no hermes hook",
         ),
@@ -606,6 +602,33 @@ fn an_unguardable_acp_lane_refuses_to_start() {
         assert!(code == 3 && out.contains("ACP_UNGUARDED"), "the dry run too: {out}");
     }
     assert!(b.methods().is_empty(), "{:?}", b.methods());
+}
+
+#[test]
+fn an_acp_lane_with_no_account_starts_guarded_on_the_hosts_own_login() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let c = acp_ctx("acp-noacct", &acp_config(&b.sock, "claude", false));
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    let calls = f.calls.borrow();
+    let start = calls
+        .iter()
+        .find(|c| c.starts_with("shed run --acp claude-acp"))
+        .unwrap();
+    assert!(
+        start.contains("settings.local.json"),
+        "its profile, so the hook guards it: {start}"
+    );
+    assert!(
+        !start.contains("CLAUDE_CONFIG_DIR=") && !start.contains("HERDSMAN_ACCOUNT="),
+        "no account env: {start}"
+    );
+    assert!(
+        start.contains("unset CLAUDE_CODE_OAUTH_TOKEN"),
+        "an inherited token never signs it in: {start}"
+    );
 }
 
 /// #600: drive's launchd PATH had no shed: spawn named it before making anything, doctor checks the timer's PATH
@@ -1558,14 +1581,17 @@ fn an_acp_orchestrator_runs_under_the_orchestrator_guard() {
 #[test]
 fn an_unguardable_acp_orchestrator_refuses_with_a_system_line_and_never_falls_back_to_herdr() {
     let b = Server::new(shed::proto::VERSION, vec![]);
-    let c = acp_ctx("acp-orchestrator-noacct", &acp_config(&b.sock, "claude", false));
+    let c = ctx(
+        &tmpdir("acp-orchestrator-nohook"),
+        &acp_config(&b.sock, "claude", false),
+    );
     run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
     let f = acp_fake(&["env"]);
     let cli = Cli(&f, b.terms.clone(), Shared::default());
     let (code, out) = run(&c, &cli, &["thread", "say", "t1", "hi"]);
     assert_eq!(code, 3, "{out}");
     assert!(
-        out.contains("REFUSED ACP_UNGUARDED") && out.contains("[accounts] account env"),
+        out.contains("REFUSED ACP_UNGUARDED") && out.contains("no herdsman PreToolUse hook"),
         "{out}"
     );
     let calls = f.calls.borrow();
