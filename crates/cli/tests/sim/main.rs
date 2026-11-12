@@ -359,8 +359,7 @@ fn hunt() {
 /// 300 s, its record and merge; #202's first reviewer is refused, superseded at t+1025 and its successor reviews
 /// 300 s). Five spawns of four lanes, one wasted; two heads × 300 s of CI; idle: the four kept lanes from their stop
 /// to the clean and the refused reviewer's 14 s (#779: 5661, up from 5585, as clean's `wip prune` git calls move the
-/// jittered timers after the first merge; #854: 5561, as drive's promise appends move them again); one reviewed head
-/// per merge.
+/// jittered timers after the first merge); one reviewed head per merge.
 #[test]
 fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
