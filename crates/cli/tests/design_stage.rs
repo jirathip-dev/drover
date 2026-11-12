@@ -42,7 +42,7 @@ fn fake(c: &herdsman::Ctx, head: &str) -> Fake {
         .reply(&format!("git -C {w} log -1"), &format!("{head}\n"))
         .reply(&format!("git -C {w} rev-list"), "0\n")
         .reply(
-            &format!("git -C {w} diff --name-only"),
+            &format!("git -C {w} log --format= --name-only"),
             "docs/design/meter/index.html\ndocs/design/meter/1440.png\ndocs/design/meter/390.png\n",
         )
         .reply("git -C", "")
@@ -244,7 +244,10 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     let w = wt(&c, 13);
     let r13 = Fake::default()
         .reply(&format!("git -C {w} log -1"), &format!("{}\n", "e".repeat(40)))
-        .reply(&format!("git -C {w} diff --name-only"), "docs/design/meter/1440.png\n")
+        .reply(
+            &format!("git -C {w} log --format= --name-only"),
+            "docs/design/meter/1440.png\n",
+        )
         .reply(&format!("git -C {w} rev-list"), "0\n");
     let r13 = Both(r13, &r);
     drive(&c, &r13);
@@ -471,7 +474,7 @@ const ARCHITECT: &str = "\n[fleet.sendmeter.role.architect]\nharness = \"hermes\
 fn adr(c: &herdsman::Ctx, head: &str) -> Fake {
     let w = wt(c, 12);
     Fake::default().reply(
-        &format!("git -C {w} diff --name-only {head} {head} -- docs/architecture"),
+        &format!("git -C {w} log --format= --name-only {head}..{head} ^origin/staging -- docs/architecture"),
         "docs/architecture/meter/adr.md\ndocs/architecture/meter/statechart.md\n",
     )
 }
@@ -633,7 +636,7 @@ fn a_design_brief_takes_the_medium_and_path_the_issue_names() {
     drive(&c, &r);
     let w = wt(&c, 12);
     assert!(base.called(&format!(
-        "git -C {w} diff --name-only {HEAD} {HEAD} -- docs/design apple/design/x"
+        "git -C {w} log --format= --name-only {HEAD}..{HEAD} ^origin/staging -- docs/design apple/design/x"
     )));
     assert_eq!(state(&c, 12), "design-review");
     let c = setup("design-medium-html", "");
