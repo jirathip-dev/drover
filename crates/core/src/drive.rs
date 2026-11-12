@@ -1017,6 +1017,19 @@ fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: 
             stall::Silent::Escalate(why) => escalate(ctx, cfg, out, (fleet, n), &lane, "LANE_SILENT", &why)?,
         }
     }
+    let reviews = fold(&ev)
+        .into_values()
+        .filter(|s| s.fleet == fleet && s.state.starts_with("review"));
+    for s in reviews.filter(|s| KICK.get().is_none_or(|k| k == s.issue)) {
+        let Some((role, old)) = s.active_lane() else { continue };
+        let Some(mins) = stall::stale_check(ctx, r, &ev, agents, (fleet, s.issue), old) else {
+            continue;
+        };
+        let (n, step) = (s.issue.to_string(), (fleet, Some(s.issue), "review"));
+        if act(ctx, cfg, r, out, &ev, step, &["spawn", fleet, &n, role, "--supersede"])?.is_none() {
+            stale_replaced(ctx, cfg, out, (fleet, s.issue), role, old, mins)?;
+        }
+    }
     Ok(())
 }
 
