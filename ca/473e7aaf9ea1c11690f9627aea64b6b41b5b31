@@ -1,0 +1,7 @@
+Decided: origin/staging merged at 6a09ea70d (#854/#888); a clean merge whose test changes add no herdr lines
+Because: "Outside the tests the PR lists for #721 to delete, no test file fakes a herdr reply"
+Decided: the PR body's evidence names the new head ca473e7, fixing the red evidence check at 5685b5d
+Because: "The PR states the before and after count of `herdr` lines in `crates/*/tests`"
+Rejected: committing the previous lane's pr_body.md snapshot — it is a scratch draft of the PR body, not repo content
+Check: git diff on crates/*/src against staging is empty; herdr lines in crates/*/tests stay 1790 -> 700
+Owner: Test code only; caught up with the latest staging, and the PR's evidence names the newest commit.
