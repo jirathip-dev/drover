@@ -1058,7 +1058,7 @@ pub fn needs_human(
                 crate::pending::record(ctx, (fleet, n), "extend", "impl", None)?;
             }
             if spawn && held.is_none() {
-                writeln!(out, "#{n}: a drive pass is running; the next pass starts the round")?;
+                writeln!(out, "#{n}: {}", crate::promise::Say::PassRunning.line())?;
             } else if spawn {
                 let o = crate::spawn::Opts {
                     supersede: true,

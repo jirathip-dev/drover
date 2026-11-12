@@ -425,7 +425,7 @@ pub fn slot_wait(ctx: &Ctx, ev: &[Event], fleet: &str, n: u64) -> Option<String>
     let ids: std::collections::BTreeSet<_> = ev.iter().filter_map(|e| Some((&e.fleet, e.issue?))).collect();
     let failing = |(f, i): &(&String, u64)| failures(ev, f, *i).last().is_some_and(|e| ctx.now < e.ts + 3600);
     let k = ids.iter().filter(|x| failing(x)).count();
-    Some(format!("{} ({k} failing retries hold them)", crate::waiting::SLOT))
+    Some(crate::promise::Say::SpawnSlot(None).line() + &format!(" ({k} failing retries hold them)"))
 }
 
 /// #560: a host short of room launches nothing: its refusal holds every spawn of the pass, so a review the order put
@@ -552,8 +552,8 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
         Some("CAP" | "ALL_CAPPED") => "lane limit or usage cap reached".into(),
         Some("CI_NOT_GREEN") => "waiting for CI".into(),
         Some("SPAWN_PENDING") => match why.split_once(": ") {
-            Some((_, by)) => format!("{}: {by}", crate::waiting::SLOT),
-            None => crate::waiting::SLOT.into(),
+            Some((_, by)) => crate::promise::Say::SpawnSlot(Some(by.into())).line(),
+            None => crate::promise::Say::SpawnSlot(None).line(),
         },
         Some("SPAWN_BACKOFF") => why.into(),
         Some("SERIAL_BUSY") => "another one-at-a-time issue is in flight".into(),
@@ -1135,6 +1135,7 @@ fn pass(
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
     waits.retain(one);
+    crate::promise::pass(ctx, cfg, fleet, &events, &waits)?;
     external(ctx, cfg, r, out, fleet)?;
     ext_closed(ctx, cfg, r, out, fleet)?;
     if KICK.get().is_none() {

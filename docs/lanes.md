@@ -277,6 +277,13 @@ repeats for it once a day. The first `check` after #584 sweeps the log once (`as
 
 ## Check and notifiers
 
+#854: every waiting or next-step line drive prints (`merging next pass`, `waiting for drive (next pass ≤ 5 min) to …`,
+`waiting for a spawn slot`) is a promise with a deadline: `[limits] promise_passes` drive passes for its kind
+(`next-pass`, `merging`, `spawn-pending`, `waiting-on`; default 2 each, `slow_secs` per pass). Each pass logs a new
+one as `promise`; one past its deadline whose issue kept its state and head is logged once as `promise-missed` (a
+notifier can subscribe to it) with the reason drive sees then, and `waiting`, `status` and the board show
+`⚠ missed <age>: <reason>` in place of the stale line.
+
 `herdsman check` alerts once per state on `stall`, `lane-dead` (a parked lane, clean and pushed with no
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no
 checks `[limits] ci_start_minutes` (10) after its push: `CI broken: <workflow> did not start` when a failed run has

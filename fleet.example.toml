@@ -179,6 +179,7 @@ spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or
 # reap_keychain_readers = false   # true: `check` kills those readers, then a SecurityAgent up over 10 min
 # respawn_max = 3   # #779: spawn refuses `RESPAWN_LOOP` (one owner ask: try again / park) after this many failed starts
 # respawn_window_minutes = 60   # of an issue's role (lane died, killed, prompt never landed) within this window
+# promise_passes = { next-pass = 2, merging = 2, spawn-pending = 2, waiting-on = 2 }   # #854: drive passes a waiting line may stay true before `promise-missed`
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin

@@ -633,7 +633,7 @@ fn view(ctx: &Ctx, l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> View {
     let (tone, shown) = l
         .parked
         .as_ref()
-        .filter(|_| !shown.contains(crate::waiting::SLOT))
+        .filter(|_| !crate::promise::is_slot(&shown))
         .map_or((tone, shown), |h| ("m", format!("parked · {}", on(h))));
     let kept = |k: &String| format!("{shown} · kept open: {k}");
     let shown = l.kept.as_ref().map_or(shown.clone(), kept);

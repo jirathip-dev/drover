@@ -510,3 +510,24 @@ fn a_baselined_layer_crossing_passes_and_a_new_one_fails() {
     let base = std::fs::read_to_string(d.join(".herdsman/arch-baseline.txt")).unwrap();
     assert_eq!(base, "web/src/api/client.ts -> web-ui\n", "the list only shrinks");
 }
+
+#[test]
+fn a_commit_building_a_promise_phrase_outside_the_promise_module_fails_this_repos_arch_check() {
+    let conf = include_str!("../../../.herdsman/arch.toml");
+    let d = committed("arch-promise", conf, &[("crates/core/src/drive.rs", "fn a() {}\n")]);
+    let add = |p: &str| {
+        std::fs::write(d.join(p), "fn a() -> String {\n    format!(\"merging next pass\")\n}\n").unwrap();
+        git(&d, &["add", "-A"]);
+        git(&d, &["commit", "-qm", "add"]);
+        arch(&d, &["--base", "HEAD^1"])
+    };
+    let (code, out) = add("crates/core/src/drive.rs");
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("crates/core/src/drive.rs:2: `next pass` is banned here: #854"),
+        "{out}"
+    );
+    git(&d, &["reset", "-q", "--hard", "HEAD^1"]);
+    let (code, out) = add("crates/core/src/promise.rs");
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+}

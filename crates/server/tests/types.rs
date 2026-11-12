@@ -212,6 +212,7 @@ fn serde_json_fits_the_types() {
         what: "an ask".into(),
         since: 1,
         next_cmd: None,
+        promise: None,
     };
     let moment = Moment {
         seq: 4,
