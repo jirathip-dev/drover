@@ -1,0 +1,5 @@
+Decided: no code change this round; merged origin/staging and re-pushed so CI reruns the rust job
+Because: crates/cli/tests/live.rs:746
+Rejected: editing the live.rs timing test — it is server code this PR never touches, it passed 3/3 local runs and staging CI at 6a09ea7 was green
+Check: the rust job at this head is green, including live.rs unpaired_viewers_see_no_pane_text
+Owner: Round 2 only refreshed the branch on staging to clear an unrelated flaky web test; the design recipe itself is unchanged.
