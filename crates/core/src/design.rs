@@ -44,8 +44,7 @@ pub struct Recipe {
 }
 
 impl Recipe {
-    /// The issue `body`'s own design path and medium (#868), else the repo's recipe `text` (`key: value` lines), else
-    /// HTML under `docs/design/` at 1440 and 390.
+    /// The issue `body`'s own design path (#868), else the recipe `text`'s `key: value` lines, else HTML at 1440/390.
     pub fn of(text: &str, body: &str) -> Recipe {
         let mut r = Recipe {
             medium: medium(body).into(),
@@ -279,8 +278,7 @@ pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, 
     crate::pending::record(ctx, (f, n), action, role, None)
 }
 
-/// #873: the recipe's tool tags this main host lacks (its probed tags and fleet.toml's) end the design lane's turn
-/// `blocked` before anything is drawn: a `turn-end`, the owner's card naming them, then `REFUSED MISSING_TOOL`.
+/// #873: a recipe tool tag the main host lacks ends the design lane's turn `blocked`, naming it, before anything is drawn.
 pub fn tools(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (f, n, agent): (&str, u64, &str), rc: &Recipe) -> Result<()> {
     if rc.tools.is_empty() {
         return Ok(());
