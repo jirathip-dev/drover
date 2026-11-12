@@ -1,0 +1,9 @@
+Decided: origin/staging merged up to 75b9c65fa (#855 #873 #894); tick_stuck.rs's conflict keeps staging's renamed test on the fake-shed setup
+Because: "Outside the tests the PR lists for #721 to delete, no test file fakes a herdr reply"
+Decided: #855's slo.rs runs drive and the cards page on the shared fake shed; its working lane is a shed terminal
+Because: crates/cli/tests/common/fake_shed.rs:137
+Decided: #873's recipe-tool design test asserts no shed run instead of no herdr agent start
+Because: crates/cli/tests/design_stage.rs:801
+Rejected: committing the scratch pr_body.md drafts from the wip snapshot — they are PR-body drafts, not repo content
+Check: git diff on crates/*/src against staging is empty; herdr lines in crates/*/tests 1793 -> 700; full suite exits 0 at 81647ddb0
+Owner: Test code only; caught up with the latest staging, whose new stuck-drive tests also run on the pretend shed.
