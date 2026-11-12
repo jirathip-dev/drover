@@ -159,7 +159,7 @@ fn hand_over(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
             .and_then(|(_, p)| p.parse().ok())
             .unwrap_or(7777);
         let mut c = std::os::unix::net::UnixStream::connect(serve_sock(ctx, port))?;
-        c.set_read_timeout(Some(std::time::Duration::from_secs(300)))?;
+        c.set_read_timeout(Some(std::time::Duration::from_secs(cfg.limits.serve_handover_secs)))?;
         writeln!(c, "handover")?;
         let mut line = String::new();
         std::io::BufRead::read_line(&mut std::io::BufReader::new(c), &mut line)?;

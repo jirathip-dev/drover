@@ -95,7 +95,7 @@ impl Provider for Claude {
         let dir = root(ctx).join(profile);
         std::fs::create_dir_all(&dir)?;
         let hook_cmd = serde_json::to_string(&hook_command(ctx, role))?;
-        let days = crate::config::Config::load(&ctx.config).map_or(30, |c| c.limits.transcript_days);
+        let days = crate::config::Config::load(&ctx.config).map_or(crate::config::limits().transcript_days, |c| c.limits.transcript_days);
         let line = serde_json::to_string(&format!("'{}' statusline", ctx.exe))?;
         let settings = SETTINGS
             .replace("\"{{FLEET_HOOK}}\"", &hook_cmd)

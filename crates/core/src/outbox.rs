@@ -98,8 +98,8 @@ fn apply(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, sp: &Event, lane: &str,
     append(&ctx.state, &Event::new(ctx.now, &sp.fleet, sp.issue, "outbox", d))
 }
 
-/// `check`'s side: each live remote lane whose outbox holds a line drive has not delivered in 5 min, with its oldest ts.
-pub fn stale(r: &dyn Runner, events: &[Event], now: u64) -> Vec<(Event, String, u64)> {
+/// `check`'s side: each live remote lane whose outbox holds a line drive has not delivered in `after` seconds, with its oldest ts.
+pub fn stale(r: &dyn Runner, events: &[Event], (now, after): (u64, u64)) -> Vec<(Event, String, u64)> {
     let sh = "cat \"$1\" \"$1.draining\" 2>/dev/null; exit 0";
     let oldest = |sp: &Event, p: &str| {
         let text = crate::runner::ok(&On::of(r, Some(sp)), "sh", &crate::runner::argv(&["-c", sh, "sh", p]));
@@ -108,7 +108,7 @@ pub fn stale(r: &dyn Runner, events: &[Event], now: u64) -> Vec<(Event, String, 
             .lines()
             .filter_map(|l| serde_json::from_str::<Value>(l).ok()?["ts"].as_u64())
             .min();
-        ts.filter(|ts| now.saturating_mul(1000).saturating_sub(*ts) > 5 * 60 * 1000)
+        ts.filter(|ts| now.saturating_mul(1000).saturating_sub(*ts) > after * 1000)
     };
     boxes(events)
         .into_iter()

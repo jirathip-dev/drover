@@ -345,7 +345,7 @@ fn write_private(p: &std::path::Path, b: &[u8]) -> Result<()> {
 pub fn ensure(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, machine): (&str, &str)) -> Result<()> {
     let port = cfg.proxy.port;
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    if TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(1)).is_err() {
+    if TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(cfg.limits.proxy_connect_secs)).is_err() {
         r.detach(&ctx.exe, &argv(&["proxy"]), &ctx.state.with_file_name("proxy.log"))?;
     }
     let pid = ctx.state.with_file_name(format!("tunnel-{name}.pid"));

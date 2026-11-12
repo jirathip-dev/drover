@@ -84,7 +84,7 @@ pub fn present<'e>(
 pub struct On<'a> {
     pub r: &'a dyn Runner,
     pub machine: Option<&'a str>,
-    connect: &'static str,
+    connect: u64,
     /// #637: a `shed-acp` host: no herdr there, so a herdr call fails here without going out.
     no_herdr: bool,
 }
@@ -94,7 +94,7 @@ impl<'a> On<'a> {
         On {
             r,
             machine,
-            connect: "-oConnectTimeout=10",
+            connect: crate::config::limits().ssh_connect_secs,
             no_herdr: false,
         }
     }
@@ -106,7 +106,7 @@ impl<'a> On<'a> {
     /// #485: a maintenance call that must not hold up a pass: a 5 s connect timeout.
     pub fn quick(r: &'a dyn Runner, machine: Option<&'a str>) -> Self {
         On {
-            connect: "-oConnectTimeout=5",
+            connect: crate::config::limits().ssh_quick_secs,
             ..Self::new(r, machine)
         }
     }
@@ -124,7 +124,8 @@ impl<'a> On<'a> {
         }
         let line = quote(prog, args);
         // #337: one connection per host, kept 10 min, whatever the user's ssh config says.
-        let ssh = argv(&["-oBatchMode=yes", self.connect, CM[0], CM[1], CM[2], m, "--", &line]);
+        let connect = format!("-oConnectTimeout={}", self.connect);
+        let ssh = argv(&["-oBatchMode=yes", &connect, CM[0], CM[1], CM[2], m, "--", &line]);
         ("ssh".into(), ssh)
     }
     pub(crate) fn sh(&self, script: &str, p: &Path, input: &str) -> Result<Out> {
@@ -318,15 +319,10 @@ impl<'a> Pass<'a> {
         if !self.probe {
             return true;
         }
-        let probe = argv(&[
-            "-oBatchMode=yes",
-            "-oConnectTimeout=5",
-            "-oControlPath=none",
-            m,
-            "--",
-            "true",
-        ]);
-        let o = self.r.run_for("ssh", &probe, "", std::time::Duration::from_secs(5));
+        let secs = crate::config::limits().ssh_quick_secs;
+        let connect = format!("-oConnectTimeout={secs}");
+        let probe = argv(&["-oBatchMode=yes", &connect, "-oControlPath=none", m, "--", "true"]);
+        let o = self.r.run_for("ssh", &probe, "", std::time::Duration::from_secs(secs));
         if o.as_ref().is_ok_and(|o| o.code == 124) {
             self.late.lock().unwrap().insert(m.into());
         }
@@ -351,7 +347,8 @@ impl<'a> Pass<'a> {
                 ..Out::default()
             });
         }
-        let (limit, input) = (std::time::Duration::from_secs(15), input.unwrap_or_default());
+        let limit = std::time::Duration::from_secs(crate::config::limits().ssh_call_secs);
+        let input = input.unwrap_or_default();
         let refused = |o: &Out| o.code == 255 && o.stderr.contains("connect to host");
         let mut o = self.r.run_for(prog, args, input, limit)?;
         if matches!(o.code, 124 | 255) && !refused(&o) && args.iter().any(|a| a == CM[1]) {
@@ -1092,7 +1089,7 @@ pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) ->
         if stopped
             || !seen
                 .get(name)
-                .is_some_and(|s| !s.up && s.seen + OFFLINE_SECS <= ctx.now)
+                .is_some_and(|s| !s.up && s.seen + cfg.limits.host_offline_minutes * 60 <= ctx.now)
         {
             continue;
         }
@@ -1141,8 +1138,6 @@ pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) ->
     }
     Ok(())
 }
-
-const OFFLINE_SECS: u64 = 15 * 60;
 
 /// A host as the board and `hosts` say it: (tone, words). Offline and off are grey: neither pages.
 pub fn shown(enabled: bool, s: &Seen, lanes: usize, now: u64) -> (&'static str, String) {
