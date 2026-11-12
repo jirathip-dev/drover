@@ -339,35 +339,6 @@ pub fn stuck_secs(cfg: &Config) -> u64 {
     2 * cfg.limits.slow_secs
 }
 
-/// #561: a tick still running 10 min after it started (its `tick.step`): `tick-stuck` once, naming the step and the
-/// child it waits on. The fast step looks, since a stuck tick cannot.
-pub fn stuck(ctx: &Ctx, cfg: &Config) -> Result<()> {
-    let Ok(text) = std::fs::read_to_string(ctx.state.with_file_name("tick.step")) else {
-        return Ok(());
-    };
-    let m: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
-    let Some(since) = m["since"].as_u64().filter(|t| ctx.now >= t + 600) else {
-        return Ok(());
-    };
-    if read(&ctx.state)?
-        .iter()
-        .any(|e| e.kind == "tick-stuck" && e.data["key"] == since)
-    {
-        return Ok(());
-    }
-    let (step, child) = (
-        m["step"].as_str().unwrap_or("?"),
-        m["child"].as_str().unwrap_or_default(),
-    );
-    let child = if child.is_empty() { "none" } else { child };
-    let why = format!(
-        "tick running {} min, in {step}; waiting on: {child}",
-        (ctx.now - since) / 60
-    );
-    let d = serde_json::json!({"key": since, "step": step, "child": child, "reason": why});
-    emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, "tick-stuck", d))
-}
-
 /// #237: reinstall each own job `drift` finds missing or outdated, read it back, log `timer-repaired`; alert when
 /// that fails. Never the tick's own job: reloading it would end this run (its row stays red, alerted).
 fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<()> {

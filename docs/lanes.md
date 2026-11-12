@@ -293,6 +293,15 @@ one as `promise`; one past its deadline whose issue kept its state and head is l
 notifier can subscribe to it) with the reason drive sees then, and `waiting`, `status` and the board show
 `⚠ missed <age>: <reason>` in place of the stale line.
 
+#855: the fast step also checks two fleet SLOs: `slo-idle` (no lane working for `[limits] slo_idle_minutes` (20)
+while the queue has spawnable work) and `slo-tick` (a tick running past `slo_tick_minutes` (10), replacing
+`tick-stuck`). On a breach or a missed promise drive first tries the known heal and logs `self-heal`: a herdsman
+tick or drive pid it can name gets SIGTERM, then SIGKILL after 10 s; a DISK_BUDGET hold is recounted and the
+queue's first spawn retried; drive's own pass already respawns a silent lane and marks a PASSed draft ready.
+Still breached a pass (`slow_secs`) after the heal, or with no heal known, it emits one `stuck` per episode
+(pushed, and an owner card naming the issue or fleet, the reason and what was tried); `slo-ok` ends the episode
+once the issue moves or the SLO recovers, and the card clears.
+
 `herdsman check` alerts once per state on `stall`, `lane-dead` (a parked lane, clean and pushed with no
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no
 checks `[limits] ci_start_minutes` (10) after its push: `CI broken: <workflow> did not start` when a failed run has

@@ -634,6 +634,10 @@ pub struct Limits {
     /// #859: `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once per episode.
     pub slo_api_p95_ms: u64,
     pub slo_api_minutes: u64,
+    /// #855: no lane working this long while the queue has spawnable work breaches `slo-idle`.
+    pub slo_idle_minutes: u64,
+    /// #855: a tick running longer than this breaches `slo-tick`; the next fast step stops it.
+    pub slo_tick_minutes: u64,
 }
 
 /// #216: a `deny_commands` entry: a command word or command + subcommand prefix, bare or `{ cmd, why }`.
@@ -722,6 +726,8 @@ impl Default for Limits {
             serve_host_secs: 10,
             slo_api_p95_ms: 1000,
             slo_api_minutes: 10,
+            slo_idle_minutes: 20,
+            slo_tick_minutes: 10,
         }
     }
 }
@@ -746,6 +752,7 @@ pub struct Notify {
 /// A webpush notifier's events when `on` is unset: the alert set plus the asks (#40) and needs-human (#130).
 pub const WEBPUSH_ON: &[&str] = &[
     "slo-api",
+    "stuck",
     "config-invalid",
     "thread-msg",
     "blocked",
