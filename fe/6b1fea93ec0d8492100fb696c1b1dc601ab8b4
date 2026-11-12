@@ -1,0 +1,13 @@
+Decided: db::ask reads the highest q<n> and inserts the needs-decision in one IMMEDIATE transaction; all six sites call it
+Because: "Allocate the id and insert the `needs-decision` event in **one** IMMEDIATE transaction in `db.rs`"
+Decided: the max counts archived rows too, so a rotation can no longer hand out an id twice
+Because: "so it stays unique even if counts and ids have drifted apart"
+Decided: answer, withdraw, typed and orchestrator answers resolve a shared id by the caller's thread, else AMBIGUOUS_ASK with the seqs
+Because: "Without that context they refuse `AMBIGUOUS_ASK`, naming the seqs"
+Decided: decisions and ask-* endings now carry ask_seq; an older one closes an ask by id only on the ask's issue or none
+Because: crates/core/src/events.rs:753
+Rejected: id-only matching of endings — #3120's decision would mark t82's Q4 answered and the withdraw would be refused
+Decided: check's routine default answers the exact ask it found, never by id
+Because: crates/core/src/check.rs:525
+Check: cargo test -p herdsman --test ask_ids fails 4/4 on commit 1 and passes at the head
+Owner: Every new question gets a number no other question has, even when two are asked at the same moment; old duplicates are told apart by thread.
