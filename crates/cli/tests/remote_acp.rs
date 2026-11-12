@@ -620,3 +620,19 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
         assert_eq!(seen.lock().unwrap().len(), 1, "refused calls never reach upstream");
     }
 }
+
+#[test]
+fn a_remote_acp_lane_whose_role_has_no_account_is_refused_acp_unguarded() {
+    let (c, _) = setup("racp-noacct", &["boat1"]);
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, toml.replacen("account = \"C\"", "", 1)).unwrap();
+    let f = spawn_fake();
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl", "--host", "boat1"]);
+    assert!(
+        code == 3 && o.contains("REFUSED ACP_UNGUARDED") && o.contains("[accounts] account"),
+        "{o}"
+    );
+    assert!(spawned(&c).is_empty() && herdsman::proxy::keys(&c).is_empty());
+    assert!(b.runs.borrow().is_empty(), "nothing started");
+}
