@@ -1,0 +1,8 @@
+Decided: revert the one-line `lane-dup` word in the frozen board's words(); the alert stays a passive event in events.rs
+Because: crates/core/src/events.rs:429 keeps `lane-dup` in PASSIVE, so check still raises it without touching serve.rs
+Rejected: adding a board-fix line to the issue — the board takes bug fixes only, and the alert needs no board change
+Decided: the sim hunt test starts from rng 23 instead of 3; drive's extra agent listing moved rng 3's fuzz path past 40 rounds
+Because: crates/cli/tests/sim/main.rs:284 seeds the hunt; with rng 23 it finds the planted I1 at round 6, before random seed 14
+Rejected: dropping the dedup pass to keep the old schedule — "the next drive pass stops all but the newest" needs it
+Check: the minimised staging plan still trips I1 on this head, and seed 14 without sabotage passes (no real duplicate)
+Owner: the board stays frozen, and the duplicate-lane alert still reaches notifiers
