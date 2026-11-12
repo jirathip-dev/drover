@@ -292,9 +292,10 @@ pub fn converted(text: &str) -> Result<Vec<String>> {
 
 fn frozen_adds(a: &Arch, diff: &[Change]) -> Vec<String> {
     let folders: Vec<String> = a.collect.iter().map(|c| format!("`{}`", c.entries())).collect();
-    let instead = match folders.is_empty() {
-        true => "a `[[collect]]` folder".to_string(),
-        false => folders.join(" or "),
+    let instead = if folders.is_empty() {
+        "a `[[collect]]` folder".to_string()
+    } else {
+        folders.join(" or ")
     };
     let collected = |f: &str| a.collect.iter().any(|c| any(&[c.entries()], f));
     let mut hunks = BTreeMap::<usize, (Vec<&Change>, usize)>::new();
