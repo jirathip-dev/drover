@@ -1000,7 +1000,14 @@ fn save(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "lane-pushed", d))
 }
 
-fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: &[Value], fleet: &str) -> Result<()> {
+fn silent(
+    ctx: &Ctx,
+    cfg: &Config,
+    (r, seen): (&dyn Runner, &dyn Runner),
+    out: &mut dyn Write,
+    agents: &[Value],
+    fleet: &str,
+) -> Result<()> {
     let ev = read(&ctx.state)?;
     let found = stall::silent(ctx, cfg, &ev, agents, fleet);
     for (n, lane, a) in found.into_iter().filter(|x| KICK.get().is_none_or(|k| k == x.0)) {
@@ -1028,7 +1035,7 @@ fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: 
         {
             continue;
         }
-        let Some(mins) = stall::stale_check(ctx, r, &ev, agents, (fleet, s.issue), old) else {
+        let Some(mins) = stall::stale_check(ctx, seen, &ev, agents, (fleet, s.issue), old) else {
             continue;
         };
         let (n, step) = (s.issue.to_string(), (fleet, Some(s.issue), "review"));
@@ -1154,7 +1161,7 @@ fn pass(
     // #666: a lane the hook keeps refusing is ended and escalated at once, never left to stall.
     if !fast {
         crate::stall::refused(ctx, cfg, r, out, &read(&ctx.state)?, fleet)?;
-        silent(ctx, cfg, r, out, &agents, fleet)?;
+        silent(ctx, cfg, (r, seen), out, &agents, fleet)?;
     }
     let events = read(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
