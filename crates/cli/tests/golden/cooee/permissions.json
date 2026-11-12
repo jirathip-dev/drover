@@ -1,5 +1,5 @@
 {
-  "plugin": "cooee-drover", "version": "0.4.0", "commit": "b3f8ce2", "source": "index",
+  "plugin": "drover", "version": "0.4.0", "commit": "b3f8ce2", "source": "index",
   "run": "node server.mjs", "persona": "conductor",
   "permissions": {
     "places": ["header-strip: Queue", "header-strip: Events", "menu-row: drover"],

@@ -578,3 +578,14 @@ fn a_long_tick_with_a_fresh_heartbeat_is_running_not_stuck() {
     let l = line(&out, "watchdog check");
     assert!(l.starts_with('✗') && l.contains("ran 18m"), "{l}");
 }
+
+#[test]
+fn an_archived_fleet_repo_is_named_with_its_fix() {
+    let (c, _) = setup("doc-archived", "claude");
+    let r = good().once("gh repo view", 0, r#"{"isArchived":true,"name":"demo"}"#);
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(line(&out, "gh demo").starts_with('✓'), "{out}");
+    let fix = "! gh demo — o/demo is archived → remove [fleet.demo] from fleet.toml";
+    assert!(out.contains(fix), "{out}");
+}

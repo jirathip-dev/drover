@@ -1,5 +1,5 @@
 {
-  "plugin": "cooee-drover",
+  "plugin": "drover",
   "places": [
     { "type": "header-strip", "id": "queue", "persona": "conductor", "label": "Queue", "screen": "/screens/queue" },
     { "type": "header-strip", "id": "events", "persona": "conductor", "label": "Events", "screen": "/screens/events" },

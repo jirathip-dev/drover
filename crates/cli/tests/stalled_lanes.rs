@@ -142,7 +142,6 @@ fn a_verify_lane_that_ends_without_a_verdict_is_respawned_once_then_needs_a_huma
     assert_eq!(kinds(&c, "respawn").len(), 1);
 }
 
-/// AC 3: cooee-drover #12's pane never started (blank) and sat 28 h.
 #[test]
 fn a_blank_pane_after_the_start_window_is_retried_once_then_escalated() {
     let c = ctx(&tmpdir("stall-blank"), CONFIG);
@@ -176,7 +175,6 @@ fn a_blank_pane_after_the_start_window_is_retried_once_then_escalated() {
     assert_eq!((kinds(&c, "needs-human").len(), kinds(&c, "respawn").len()), (1, 1));
 }
 
-/// AC 4: cooee-drover #13's lane was refused by the hook for an unknown fleet and sat 28 h.
 #[test]
 fn repeated_hook_refusals_end_the_lane_with_an_escalation_that_carries_the_refusal() {
     let c = ctx(&tmpdir("stall-hook"), CONFIG);
@@ -186,7 +184,7 @@ fn repeated_hook_refusals_end_the_lane_with_an_escalation_that_carries_the_refus
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w9:p1", "workspace": "w9", "worktree": wt,
         "branch": "issue-12", "confirmed": true});
     ev(&c, t0, "spawn", d);
-    let cause = "fleet `cooee-drover` is not in fleet.toml";
+    let cause = "fleet `gone` is not in fleet.toml";
     let refused = json!({"cause": cause, "lane": "sendmeter:12:impl"});
     ev(&c, t0 + 30, "hook-failed-closed", refused.clone());
     let list = agents(&[("sendmeter-impl-12", "idle", &wt.to_string_lossy(), "w9:p1")]);

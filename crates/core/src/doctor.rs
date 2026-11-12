@@ -112,8 +112,17 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     row(rows, ctx.worktrees.is_dir(), '✗', &line);
     for (name, fleet) in &cfg.fleet {
         let repo = &fleet.repo;
-        let read = ok(r, "gh", &["repo", "view", repo, "--json", "name"]).is_ok();
-        row(rows, read, '✗', &format!("gh {name} — read {repo} → gh auth refresh"));
+        let view = ok(r, "gh", &["repo", "view", repo, "--json", "name,isArchived"]);
+        let read = format!("gh {name} — read {repo} → gh auth refresh");
+        row(rows, view.is_ok(), '✗', &read);
+        let view = view
+            .ok()
+            .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
+        if view.is_some_and(|v| v["isArchived"] == true) {
+            rows.push(format!(
+                "! gh {name} — {repo} is archived → remove [fleet.{name}] from fleet.toml"
+            ));
+        }
         let dir = fleet.local_path().display().to_string();
         let branch = &fleet.integration;
         let origin = format!("origin/{branch}");
