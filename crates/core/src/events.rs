@@ -206,6 +206,17 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
 #[allow(clippy::needless_pass_by_value)] // public API: callers and tests hand the event over
 pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     append(state, &ev)?;
+    notify(state, cfg, &ev)
+}
+
+/// #900: `db::ask`, then notify each event logged: they, the asks numbered, or none when `once` is logged already.
+pub fn ask(state: &Path, cfg: &Config, evs: Vec<Event>, once: Option<&str>) -> Result<Vec<Event>> {
+    let evs = crate::db::ask(state, evs, once)?.unwrap_or_default();
+    evs.iter().try_for_each(|ev| notify(state, cfg, ev))?;
+    Ok(evs)
+}
+
+fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
     // #99: phones hear of owner asks and of each default taken, never of a routine ask merely waiting.
     // #407: a thread open on a board (its stream stamped `watch-<thread>.at` in the last 5 s) pushes nothing.
     let at = |t: &str| std::fs::read_to_string(state.with_file_name(format!("watch-{t}.at"))).ok();
@@ -228,12 +239,12 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     let wanted = |n: &&crate::config::Notify| n.wants(if n.webpush() { push } else { &ev.kind });
     for n in cfg.notifiers(&ev.fleet).into_iter().filter(wanted) {
         let payload = if n.format.as_deref() == Some("json") {
-            serde_json::to_string(&ev)?
+            serde_json::to_string(ev)?
         } else {
-            plain(&ev) + "\n"
+            plain(ev) + "\n"
         };
         let res = if n.webpush() {
-            crate::webpush::send(state, n.sub.as_deref().unwrap_or_default(), &ev, None).map(drop)
+            crate::webpush::send(state, n.sub.as_deref().unwrap_or_default(), ev, None).map(drop)
         } else {
             run_notifier(&n.cmd, &payload)
         };
@@ -488,7 +499,7 @@ pub const PASSIVE: &[&str] = &[
 ];
 
 /// #584: an ask's endings, the first that applies naming why it closed.
-const ORDER: [&str; 8] = [
+const ORDER: [&str; 9] = [
     "answered",
     "withdrawn",
     "delivered",
@@ -497,6 +508,7 @@ const ORDER: [&str; 8] = [
     "closed: merged",
     "closed: issue closed",
     "closed: lane gone",
+    "repeat",
 ];
 
 /// #632: events indexed and (ask, event) pairs checked: the ask endings' work, counted.
@@ -511,6 +523,7 @@ pub struct Asks {
     by: HashMap<(u8, String, Option<String>), Vec<usize>>,
     /// The first `spawn-started` of each (agent, pane).
     started: HashMap<(Option<String>, Option<String>), usize>,
+    ids: std::collections::HashSet<(String, String)>,
 }
 
 impl Asks {
@@ -525,6 +538,8 @@ impl Asks {
         let issue = e.issue.map(|n| n.to_string());
         if e.kind == "spawn-started" {
             self.started.entry((s("agent"), s("pane"))).or_insert(i);
+        } else if e.kind == "needs-decision" && s("id").is_some_and(|id| !self.ids.insert((e.fleet.clone(), id))) {
+            self.ends.insert(i, Some((ORDER.len() - 1, i)));
         } else if e.kind == "needs-decision" {
             self.ends.insert(i, None);
             let keys = [key(0, s("id")), key(2, s("agent"))]
@@ -626,6 +641,12 @@ pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> 
     let x = &l.threads;
     let map = if kind == "decision" { &x.decisions } else { &x.asks };
     map.get(&(fleet.into(), id.into())).map(|i| &events[*i])
+}
+
+/// #900: `e` repeats an ask id logged before it (two passes raced to post it): every view shows the first alone.
+pub fn repeat(events: &[Event], e: &Event) -> bool {
+    let first = |id| ask_event(events, "needs-decision", &e.fleet, id);
+    e.kind == "needs-decision" && e.str("id").and_then(first).is_some_and(|a| !std::ptr::eq(a, e))
 }
 
 /// #859: ask indexes built from a slice that is no cached `Log` (`index`'s one-pass fallback): serve's reads build none.

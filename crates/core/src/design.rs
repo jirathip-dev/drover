@@ -1,7 +1,7 @@
 //! #412: an issue's optional design stage: the design lane's hand-off for review, and the owner's decision on it.
 //! #730: an architect stage works the same way; its events name `role: architect` (none: `design`).
 use crate::config::Config;
-use crate::events::{emit, last_spawn, read, Event, IssueState};
+use crate::events::{self, emit, last_spawn, read, Event, IssueState};
 use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
@@ -202,9 +202,8 @@ pub fn handoff(
         .filter(png)
         .map(|l| json!({"name": l, "path": Path::new(wt).join(l)}))
         .collect();
-    writeln!(out, "{f} #{n} design-review: {head:.7}")?;
     let d = json!({"sha": head, "pre": pre, "agent": sp.str("agent"), "files": files, "role": role, "adr": adr});
-    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "design-review", d))?;
+    let review = Event::new(ctx.now, f, Some(n), "design-review", d);
     let mark = |e: &&Event| {
         e.kind == "queue"
             && e.fleet == f
@@ -216,7 +215,6 @@ pub fn handoff(
         .rfind(mark)
         .and_then(|e| e.str("design_thread"))
         .filter(|t| !t.is_empty());
-    let id = format!("q{}", ev.iter().filter(|e| e.kind == "needs-decision").count() + 1);
     let what = if role == "architect" {
         "Architecture (ADR)"
     } else {
@@ -226,9 +224,14 @@ pub fn handoff(
     let link = format!("https://github.com/{}/tree/{head}/{dir}/", cfg.fleet(f)?.repo);
     let summary = summary(r, wt, head, &dir);
     let q = summary.as_ref().map_or(q.clone(), |s| format!("{s}\n\n{link}\n\n{q}"));
-    let d = json!({"id": id, "question": q, "options": OPTIONS, "recommend": null, "kind": "owner", "design": true, "files": files,
+    let d = json!({"question": q, "options": OPTIONS, "recommend": null, "kind": "owner", "design": true, "files": files,
         "thread": thread, "role": role, "summary": summary, "link": link});
-    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "needs-decision", d))
+    let ask = Event::new(ctx.now, f, Some(n), "needs-decision", d);
+    let once = crate::action::id(f, n, &format!("{role}-ask"), head);
+    if !events::ask(&ctx.state, cfg, vec![review, ask], Some(&once))?.is_empty() {
+        writeln!(out, "{f} #{n} design-review: {head:.7}")?;
+    }
+    Ok(())
 }
 
 fn folder(name: &str, dirs: &[String]) -> String {
