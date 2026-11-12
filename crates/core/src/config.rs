@@ -624,6 +624,8 @@ pub struct Limits {
     pub respawn_window_minutes: u64,
     /// #825: a drive pass longer than this logs `pass-slow` with its slowest step.
     pub pass_max_secs: u64,
+    /// #854: drive passes (`slow_secs` each) a promise of each kind may stay open before `promise-missed` (default 2).
+    pub promise_passes: std::collections::BTreeMap<crate::promise::Kind, u64>,
     /// #859: serve's background re-reads of herdr's agents, shed's, the remote hosts' (ssh) and the host sample.
     pub serve_herdr_secs: u64,
     pub serve_shed_secs: u64,
@@ -715,6 +717,7 @@ impl Default for Limits {
             respawn_max: 3,
             respawn_window_minutes: 60,
             pass_max_secs: 120,
+            promise_passes: std::collections::BTreeMap::new(),
             serve_herdr_secs: 2,
             serve_shed_secs: 5,
             serve_remote_secs: 10,

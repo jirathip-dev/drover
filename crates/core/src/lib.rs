@@ -29,6 +29,7 @@ pub mod outbox;
 pub mod overlap;
 pub mod pending;
 pub mod pipeline;
+pub mod promise;
 pub mod propose;
 pub mod protection;
 pub mod providers;

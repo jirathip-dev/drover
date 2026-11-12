@@ -43,7 +43,10 @@ impl Pending {
     }
     /// The row's line while it waits: `starting, waiting for host: <reason> · <age>`.
     pub fn line(&self, now: u64) -> Option<String> {
-        let why = self.reason.as_deref().unwrap_or("drive's next pass");
+        let why = self
+            .reason
+            .clone()
+            .unwrap_or_else(|| crate::promise::Say::Pass(String::new()).line());
         let wait = age(now.saturating_sub(self.since));
         (!self.failed).then(|| format!("starting, waiting for host: {why} · {wait}"))
     }
