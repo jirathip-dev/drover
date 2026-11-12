@@ -1,0 +1,13 @@
+Decided: the ask's question is the folder's Summary, then the GitHub tree link at the head, then today's approve line
+Because: "The question stays in this order: summary, then link, then the approve / revise / reject line"
+Decided: with no Summary and no ADR Decision the question is today's, link kept only on the event's link field
+Because: "No ADR either: today's question, unchanged"
+Decided: the Summary is read from the folder's README.md, then adr.md, by git show at the reviewed head
+Because: "it reads that `## Summary` from the folder at the head sha and quotes it in the ask"
+Decided: the folder is the stage folder the first changed file sits under plus its slug; the ADR link reuses it
+Because: crates/core/src/design.rs:193
+Rejected: a separate path rule per role — the design folders already come from the recipe and issue
+Decided: the cap counts characters, keeps whole lines, and marks a cut with an ellipsis line
+Because: "The summary is capped (about 600 chars, cut at a line end)"
+Check: the four new design_stage tests fail on the base design.rs and pass at the head
+Owner: Architect and design asks now open with the lane's plain summary and a link to the reviewed folder at that commit.
