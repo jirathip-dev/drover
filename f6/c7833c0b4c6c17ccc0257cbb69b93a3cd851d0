@@ -1,0 +1,12 @@
+Decided: one structural guard in `hosts::Pass` (`sparing`): the machines of disabled hosts with no open lane get no call at all in tick, check, drive and status; survey skips them so no host-offline flip.
+Because: "drive, check and status never contact a host with `enabled = false` unless a live lane is still logged there"
+Decided: `Real::within` runs each child in its own process group, kills the group at the limit, and bounds the pipe reads after exit; output still held open past the deadline fails closed as 124 (host offline for the pass).
+Because: "A connect timeout alone doesn't cover a hang after the connection is made."
+Rejected: returning the exit code with empty output when a grandchild holds the pipes — a silent empty answer reads as "no agents"; failing closed marks the host down instead.
+Decided: the existing `ssh_call_secs` is the deadline knob, its default raised 15 → 20 s; no second option.
+Because: "Every remote host call has a hard total deadline (default 20 s, set in `[limits]`)"
+Decided: `host-key-changed <host>` is emitted from the pass on the banner, deduped until a later `host-online`; the host is marked down and the shared-socket retry is skipped.
+Because: "reported once as its own alert, `host-key-changed <host>`, never retried in a loop"
+Rejected: sparing explicit `clean`/`reclaim` too — #678's explicit clean sweeps disabled hosts' scratch on purpose; the tick's clean step is spared.
+Check: crates/cli/tests/host_deadline.rs held-pipes case hangs forever on the base (reproduced with `timeout 60`), and the hang case's grandchild `sleep` dies with the group.
+Owner: A switched-off host is no longer contacted at all, and a host that hangs or whose key changed now costs a pass at most 20 seconds, with one alert.
