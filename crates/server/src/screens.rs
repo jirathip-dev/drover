@@ -324,7 +324,6 @@ fn fleets(cfg: &Config) -> Value {
     json!({"type": "sheet", "id": "fleets", "title": "Fleets", "cancel": "Cancel", "done": {"label": "Save", "action": "save-fleets"}, "blocks": blocks})
 }
 
-/// #845: the statechart and the pass chart as `diagram` blocks: live counts per state, each limit node's key.
 fn workflow(ctx: &Ctx) -> Value {
     let limits = Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
     let ev = shared(&ctx.state).unwrap_or_default();
