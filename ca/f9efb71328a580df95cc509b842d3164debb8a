@@ -1,0 +1,10 @@
+Decided: the issue-listed comment lines in v1.rs, api_v1_ops.rs, api_v1_contract.rs and stalled_lanes.rs are deleted, not reworded
+Because: crates/core/src/arch.rs:535
+Rejected: rewording them — arch-check fails every added comment line (5 violations at the reworded commit)
+Decided: the deleted module docs are not moved anywhere; docs/serve.md already carries them
+Because: docs/serve.md:413
+Decided: the cooee golden screens name the plugin and sample fleet `drover`, the real plugin name
+Because: "hits only the new \"archived, do not use\" line in `roles/orchestrator.md` and the doctor check with its test"
+Check: rg -i "drover plugins|cooee-drover" over roles scripts docs crates hits only orchestrator.md:60 and its recorded copy in post-conductor-attach.json
+Check: arch-check --base origin/staging reports 0 violations; cooee_screens passes on the renamed goldens
+Owner: No plugin repo is named anywhere now; doctor warns about a fleet on an archived repo.
