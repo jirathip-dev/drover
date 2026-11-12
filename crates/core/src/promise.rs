@@ -186,14 +186,20 @@ pub fn pass(
     Ok(())
 }
 
-/// The row's line once its open promise was missed: `⚠ missed <age>: <real reason>`.
-pub fn missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>, now: u64) -> Option<String> {
+/// #855: the issue's open promise once missed, with drive's real reason.
+pub fn open_missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>) -> Option<(Promise, String)> {
     let mine: Vec<&Event> = events
         .iter()
         .filter(|e| e.fleet == s.fleet && e.issue == Some(s.issue))
         .collect();
     let (p, why) = open(&mine)?;
     let why = why.filter(|_| !p.moved(s, head) && kind.is_none_or(|k| k == p.kind))?;
+    Some((p, why))
+}
+
+/// The row's line once its open promise was missed: `⚠ missed <age>: <real reason>`.
+pub fn missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>, now: u64) -> Option<String> {
+    let (p, why) = open_missed(events, s, head, kind)?;
     Some(format!("⚠ missed {}: {why}", age(now.saturating_sub(p.made_at))))
 }
 

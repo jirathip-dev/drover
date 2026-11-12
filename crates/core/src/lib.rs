@@ -44,6 +44,7 @@ pub mod service;
 pub mod setup;
 pub mod shed;
 pub mod sim;
+pub mod slo;
 pub mod snapshot;
 pub mod spawn;
 pub mod stall;
