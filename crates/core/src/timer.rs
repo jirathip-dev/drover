@@ -280,7 +280,10 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         pass.step("drive");
         let driven = drive::drive(ctx, cfg, &pass, out, None, false, false);
         if pass.over() {
-            writeln!(out, "tick: past its {budget} s budget; skipped: clean, trim, lesson")?;
+            writeln!(
+                out,
+                "tick: past its {budget} s budget; skipped: clean, trim, lesson, hotspots"
+            )?;
             return driven;
         }
         // #164: the `clean --yes` sweep once an hour, not only after a merge; its failures don't fail the tick.
@@ -300,6 +303,8 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         crate::check::trim_hosts(ctx, cfg, &pass, out)?; // #485: maintenance after drive, never before it
         pass.step("lesson");
         crate::lesson::weekly(ctx, cfg, &pass, out)?; // #419
+        pass.step("hotspots");
+        crate::hotspots::weekly(ctx, cfg, &pass, out)?;
         driven
     });
     for m in pass.late() {
