@@ -447,7 +447,9 @@ enum Cmd {
         #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans"])]
         scheduled: bool,
     },
-    /// Install the herdsman fleet's integration head once its CI is green: build, sign, doctor-gate, swap (#557)
+    #[command(
+        about = "Install the `[self_update] branch` head (default main) once its CI is green: build, sign, doctor-gate, swap, hand serve over (#557, #894)"
+    )]
     SelfUpdate {
         /// Print what it would do; change nothing
         #[arg(long)]
@@ -1703,10 +1705,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 } else {
                                     ""
                                 };
-                                Some(format!(
-                                    "drive's next pass (last {} ago){stuck}",
-                                    crate::events::age(late)
-                                ))
+                                let last = format!(" (last {} ago){stuck}", crate::events::age(late));
+                                Some(crate::promise::Say::Pass(last).line())
                             }
                         };
                         let (fleet, issue, since, next_cmd) = (s.fleet, s.issue, s.last_ts, why);
@@ -1719,6 +1719,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             what,
                             since,
                             next_cmd,
+                            promise: None,
                         });
                     }
                     rows.retain(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet));
@@ -2160,6 +2161,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         groups: rules.groups,
         scratch: std::env::var("HERDSMAN_SCRATCH_TARGET").ok().filter(|s| !s.is_empty()),
         cap,
+        design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, &input, fleet, n)),
     };
     let cur = |d: &str| {
         runner::ok(r, "git", &["-C", d, "rev-parse", "--abbrev-ref", "HEAD"])

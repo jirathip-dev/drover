@@ -23,6 +23,14 @@ pub struct Policy {
     pub scratch: Option<String>,
     /// #668: an impl lane: `ci/cap.toml` is not its to write (but for the orchestrator-filed raise).
     pub cap: bool,
+    /// #868: a design lane: its edits land only under its issue's design paths.
+    pub design: Option<Design>,
+}
+
+/// #868: a design lane's worktree `root` and the folders under it (`crate::design::paths`) it may write.
+pub struct Design {
+    pub root: String,
+    pub allow: Vec<String>,
 }
 
 /// #592: a lane's hook rules as the main host resolves them from its fleet.toml. A remote lane's are frozen at spawn in
@@ -146,8 +154,35 @@ pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<Str
             "{file} is protected ({pp}); change it only through `herdsman` (e.g. `herdsman set`)"
         ));
     }
+    if let Some(r) = design_write(file, p) {
+        return Some(r);
+    }
     (p.reviewer && !file.ends_with("/verdict.md") && file != "verdict.md")
         .then(|| format!("reviewers are read-only: only verdict.md may be written, not {file}"))
+}
+
+fn design_write(file: &str, p: &Policy) -> Option<String> {
+    let d = p.design.as_ref()?;
+    let patched: Vec<&str> = (file.lines())
+        .filter_map(|l| l.strip_prefix("*** "))
+        .filter_map(|l| l.split_once(" File: ").map(|(_, f)| f).or(l.strip_prefix("Move to: ")))
+        .map(str::trim)
+        .collect();
+    let files = if file.starts_with("*** ") { patched } else { vec![file] };
+    let ok = |f: &&str| {
+        let f = resolve(f, &d.root);
+        let rel = Path::new(&f).strip_prefix(&d.root);
+        rel.is_ok_and(|rel| d.allow.iter().any(|a| rel.starts_with(a)))
+    };
+    let bad = files
+        .iter()
+        .find(|f| !ok(f))
+        .copied()
+        .or(files.is_empty().then_some(file))?;
+    let allow = d.allow.iter().map(|a| format!("{a}/")).collect::<Vec<_>>().join(", ");
+    Some(format!(
+        "REFUSED DESIGN_PATH: a design lane writes only under {allow}, not {bad} (#868)"
+    ))
 }
 
 fn expand_home(s: &str) -> String {

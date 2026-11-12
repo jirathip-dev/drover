@@ -134,13 +134,21 @@ no Hermes needed.
 
 herdsman needs no Hermes: `herdsman setup` (or `timer install`) also writes two jobs of its own.
 
-- `dev.herdsman.update` runs `herdsman self-update` every 5 minutes. It fetches the herdsman fleet's integration
-  branch (the fleet whose repo is `…/herdsman`) and installs a new head only once its CI is all green: it builds in
-  `<state dir>/update/src` (a worktree of the fleet's `local`), never over the live binary, runs the new binary's
-  `doctor --config-only` against the live fleet.toml (#539), swaps it in atomically, then runs `profiles sync` and
-  restarts the board job. Any failed step keeps the old binary and alerts `self-update-failed` once per head, with
-  the exact failure. `herdsman self-update --dry-run` prints what it would do; `--pause` / `--resume` toggle it
+- `dev.herdsman.update` runs `herdsman self-update` every 5 minutes. It fetches `[self_update] branch` (default
+  `main`, #894; `"staging"` for a dev box) of the herdsman fleet (the fleet whose repo is `…/herdsman`) and installs a
+  new head only once its CI is all green: it builds in `<state dir>/update/src` (a worktree of the fleet's `local`),
+  never over the live binary, runs the new binary's `doctor --config-only` against the live fleet.toml (#539), swaps
+  it in atomically, then runs `profiles sync` and hands serve over: the running serve starts the new binary on its
+  listening sockets (the board's and the webhook port), stops accepting once that one is warm, closes each `/live`
+  stream (the page reconnects with `?since=<seq>` and misses no event), drains its requests and execs the new binary
+  in place, so launchd keeps its pid. A serve that does not answer on `<state dir>/serve-<port>.sock` (an older
+  build) is restarted instead. Any failed step keeps the old binary and alerts `self-update-failed` once per head,
+  with the exact failure. `herdsman self-update --dry-run` prints what it would do; `--pause` / `--resume` toggle it
   (logged). The job's PATH includes `cargo`'s directory.
+- `[self_update] staging_serve = true` (off by default) also installs the green staging head into
+  `<state dir>/update-staging/bin/herdsman` and runs it as `dev.herdsman.serve-staging`: `serve --read-only` on
+  `staging_addr` (default `127.0.0.1:7787`) against the live config and state, every write refused, to try a change
+  before promoting it.
 - `dev.herdsman.clean` runs `herdsman clean --scheduled` daily at 03:30: worktrees of merged or closed issues idle
   3 days or more, at most 10 a run, never a live one; unsaved work goes to `wip/` first, as `clean --yes`. Then it
   closes each herdr workspace whose checkout folder is gone. A refusal or failure alerts `clean-failed` once; a clean

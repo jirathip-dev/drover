@@ -144,9 +144,13 @@ Every timing and cap herdsman core uses is a `[limits]` key; a fleet.toml withou
 | `ask_waiting_minutes` | `30` | an owner ask open this long alerts `ask-waiting` |
 | `outbox_stale_minutes` | `5` | a remote lane's outbox line undelivered this long alerts `outbox-stale` |
 | `host_offline_minutes` | `15` | a remote host unreachable this long has its open lanes restarted on the main host |
+| `promise_passes` | `{}` | drive passes a promise of each kind may stay open before `promise-missed` (default 2) |
 | `serve_herdr_secs` | `2` | serve re-reads herdr's agents in the background this often |
 | `serve_shed_secs` | `5` | serve re-reads shed's lanes in the background this often |
 | `serve_remote_secs` | `10` | serve re-reads the remote hosts (ssh) in the background this often |
 | `serve_host_secs` | `10` | serve re-samples this host's load in the background this often |
+| `serve_handover_secs` | `300` | `self-update` waits this long for the running serve to hand over before restarting it |
 | `slo_api_p95_ms` | `1000` | `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once |
 | `slo_api_minutes` | `10` | how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api` |
+| `slo_idle_minutes` | `20` | no lane working this long while the queue has spawnable work breaches `slo-idle` |
+| `slo_tick_minutes` | `10` | a tick running longer than this breaches `slo-tick`; the next fast step stops it |

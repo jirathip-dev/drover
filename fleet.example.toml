@@ -179,12 +179,15 @@ spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or
 # reap_keychain_readers = false   # true: `check` kills those readers, then a SecurityAgent up over 10 min
 # respawn_max = 3   # #779: spawn refuses `RESPAWN_LOOP` (one owner ask: try again / park) after this many failed starts
 # respawn_window_minutes = 60   # of an issue's role (lane died, killed, prompt never landed) within this window
+# promise_passes = { next-pass = 2, merging = 2, spawn-pending = 2, waiting-on = 2 }   # #854: drive passes a waiting line may stay true before `promise-missed`
 # serve_herdr_secs = 2   # #859: serve re-reads herdr's agents this often in the background (a request never runs it)
 # serve_shed_secs = 5    # shed's sessions
 # serve_remote_secs = 10   # the remote hosts' agents (ssh)
 # serve_host_secs = 10   # the host sample
 # slo_api_p95_ms = 1000   # #859: /api/v1 p95 over this for `slo_api_minutes` pushes `slo-api` and shows a card
 # slo_api_minutes = 10
+# slo_idle_minutes = 20   # #855: no lane working this long with spawnable work queued: `slo-idle`, a heal, then `stuck`
+# slo_tick_minutes = 10   # #855: a tick running longer: `slo-tick`; the next fast step stops it, then `stuck` if it lives
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin

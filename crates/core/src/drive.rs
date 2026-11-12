@@ -430,7 +430,7 @@ pub fn slot_wait(ctx: &Ctx, ev: &[Event], fleet: &str, n: u64) -> Option<String>
     let ids: std::collections::BTreeSet<_> = ev.iter().filter_map(|e| Some((&e.fleet, e.issue?))).collect();
     let failing = |(f, i): &(&String, u64)| failures(ev, f, *i).last().is_some_and(|e| ctx.now < e.ts + 3600);
     let k = ids.iter().filter(|x| failing(x)).count();
-    Some(format!("{} ({k} failing retries hold them)", crate::waiting::SLOT))
+    Some(crate::promise::Say::SpawnSlot(None).line() + &format!(" ({k} failing retries hold them)"))
 }
 
 /// #560: a host short of room launches nothing: its refusal holds every spawn of the pass, so a review the order put
@@ -557,8 +557,8 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
         Some("CAP" | "ALL_CAPPED") => "lane limit or usage cap reached".into(),
         Some("CI_NOT_GREEN") => "waiting for CI".into(),
         Some("SPAWN_PENDING") => match why.split_once(": ") {
-            Some((_, by)) => format!("{}: {by}", crate::waiting::SLOT),
-            None => crate::waiting::SLOT.into(),
+            Some((_, by)) => crate::promise::Say::SpawnSlot(Some(by.into())).line(),
+            None => crate::promise::Say::SpawnSlot(None).line(),
         },
         Some("SPAWN_BACKOFF") => why.into(),
         Some("SERIAL_BUSY") => "another one-at-a-time issue is in flight".into(),
@@ -694,7 +694,6 @@ pub fn drive(
     };
     // #234: the fast step samples every host into the 24 h history (the Host tab's sparklines).
     if fast {
-        crate::timer::stuck(ctx, cfg).unwrap_or_else(|e| drop(writeln!(out, "tick-stuck: {e:#}")));
         if let Err(e) = crate::hosts::sample(ctx, cfg, r, &crate::events::read(&ctx.state)?) {
             writeln!(out, "host history: {e:#}")?;
         }
@@ -791,6 +790,8 @@ pub fn drive(
         for (name, e) in starts(ctx, cfg, r, out, &due, start) {
             fail(name, e);
         }
+    } else if only.is_none() && KICK.get().is_none() {
+        crate::slo::pass(ctx, cfg, (r, &seen), out, &fleets).unwrap_or_else(|e| drop(writeln!(out, "slo: {e:#}")));
     }
     lap("spawns");
     // #337: a step that logged something is looked at again, so the board shows what it did.
@@ -1140,6 +1141,7 @@ fn pass(
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
     waits.retain(one);
+    crate::promise::pass(ctx, cfg, fleet, &events, &waits)?;
     external(ctx, cfg, r, out, fleet)?;
     ext_closed(ctx, cfg, r, out, fleet)?;
     if KICK.get().is_none() {
@@ -1796,6 +1798,7 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
         let back = |e: &Event| e.issue == Some(s.issue) && e.fleet == fleet && e.str("landed_pr") == Some(&num);
         let closed = || gh::closed(ctx, r, cfg.fleet(fleet)?, fleet, ctx.now).map(|c| c.contains(&s.issue));
         let (kind, mut d) = match pr["state"].as_str() {
+            Some("MERGED") if crate::gate::unlogged_merge(&events, fleet, s.issue).is_some() => continue,
             Some("MERGED") if !events.iter().any(back) => {
                 let m = json!({"into": pr["baseRefName"], "merge_sha": pr["mergeCommit"]["oid"], "merged_at": pr["mergedAt"]});
                 ("merged", m)

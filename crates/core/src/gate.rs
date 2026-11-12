@@ -828,8 +828,7 @@ pub fn merge(
     let landed = |num: &str| -> Result<bool> {
         Ok(json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "state"])?["state"] == "MERGED")
     };
-    let logged = |a: &Event| events.iter().any(|e| e.seq > a.seq && e.is("merged", fleet, issue));
-    if let Some(a) = crate::action::last(&events, fleet, issue, "merge").filter(|a| a.kind != "failed" && !logged(a)) {
+    if let Some(a) = unlogged_merge(&events, fleet, issue) {
         let (num, head) = (a.str("pr").unwrap_or_default(), a.str("head").unwrap_or_default());
         if a.ts + MERGE_SECS > ctx.now && !crate::action::dead(r, a) {
             return refused("IN_FLIGHT", format!("skipped: merge of PR #{num} in flight"));
@@ -915,6 +914,7 @@ pub fn merge(
         Err(rf)
             if rf.code == "STAGING_MOVED"
                 || rf.code == "BEHIND"
+                || rf.code == "NO_PR" && st.as_ref().is_none_or(|s| s.lane.is_none())
                 || rf.code == "CI_NOT_GREEN"
                     && gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr))) == "pending" =>
         {
@@ -960,6 +960,12 @@ pub fn merge(
     ok(r, "gh", &[&["pr", "merge", &num, "-R", &f.repo][..], &m].concat())?;
     intent.done(json!({"pr": num, "head": head}))?;
     merged(ctx, cfg, r, out, (fleet, issue), &pr, (&num, &head, over, secs, fast))
+}
+
+/// #509: this issue's merge action not yet `failed` and no `merged` logged after it; `merge` logs it, with its head.
+pub fn unlogged_merge<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a Event> {
+    let logged = |a: &Event| events.iter().any(|e| e.seq > a.seq && e.is("merged", fleet, issue));
+    crate::action::last(events, fleet, issue, "merge").filter(|a| a.kind != "failed" && !logged(a))
 }
 
 /// #509: how long a merge's intent may stay open before the next pass recovers it from the PR.
@@ -1081,7 +1087,7 @@ pub fn needs_human(
                 crate::pending::record(ctx, (fleet, n), "extend", "impl", None)?;
             }
             if spawn && held.is_none() {
-                writeln!(out, "#{n}: a drive pass is running; the next pass starts the round")?;
+                writeln!(out, "#{n}: {}", crate::promise::Say::PassRunning.line())?;
             } else if spawn {
                 let o = crate::spawn::Opts {
                     supersede: true,

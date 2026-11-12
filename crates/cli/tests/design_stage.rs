@@ -336,13 +336,10 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&o.stdout).trim().to_string()
 }
 
-#[test]
-fn reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human() {
-    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let d = tmpdir("design-reject");
+fn repo(d: &Path) -> (herdsman::Ctx, std::path::PathBuf) {
     let (origin, local) = (d.join("origin.git"), d.join("local"));
-    git(&d, &["init", "-q", "--bare", "-b", "staging", origin.to_str().unwrap()]);
-    git(&d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
+    git(d, &["init", "-q", "--bare", "-b", "staging", origin.to_str().unwrap()]);
+    git(d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
     git(&local, &["config", "user.email", "t@example.com"]);
     git(&local, &["config", "user.name", "t"]);
     std::fs::write(local.join("app.rs"), "fn main() {}\n").unwrap();
@@ -350,7 +347,7 @@ fn reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human(
     git(&local, &["commit", "-qm", "base"]);
     git(&local, &["push", "-q", "origin", "HEAD:staging"]);
     let cfg = format!("{CONFIG}{DESIGN}").replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
-    let c = ctx(&d, &cfg);
+    let c = ctx(d, &cfg);
     // The lane's worktree on the issue branch (herdr makes it in a real spawn).
     let w = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(w.parent().unwrap()).unwrap();
@@ -366,6 +363,15 @@ fn reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human(
             "origin/staging",
         ],
     );
+    (c, w)
+}
+
+#[test]
+fn reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let d = tmpdir("design-reject");
+    let (c, w) = repo(&d);
+    let origin = d.join("origin.git");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -605,4 +611,90 @@ fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
         (state(&c, 12).as_str(), kinds(&c, "design-review").len()),
         ("design", 1)
     );
+}
+
+#[test]
+fn a_design_brief_takes_the_medium_and_path_the_issue_names() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let c = setup("design-medium", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    let body = r#"{"title":"t","body":"Draw SwiftUI views in `apple/design/x/` (previews only)."}"#;
+    let base = fake(&c, HEAD);
+    let r = Both(Fake::default().reply("gh issue view", body), &base);
+    drive(&c, &r);
+    let b = brief(&c);
+    assert!(
+        b.contains("- Medium: SwiftUI. You write only under `docs/design/`, `apple/design/x/`;"),
+        "{b}"
+    );
+    drive(&c, &r);
+    let w = wt(&c, 12);
+    assert!(base.called(&format!(
+        "git -C {w} diff --name-only {HEAD} {HEAD} -- docs/design apple/design/x"
+    )));
+    assert_eq!(state(&c, 12), "design-review");
+    let c = setup("design-medium-html", "");
+    assert_eq!(
+        run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+        0
+    );
+    drive(&c, &fake(&c, HEAD));
+    assert!(brief(&c).contains("- Medium: HTML. You write only under `docs/design/`;"));
+}
+
+#[test]
+fn a_design_pushed_under_the_issues_named_path_raises_the_ask_and_one_elsewhere_stays_idle() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let body = r#"{"title":"t","body":"Draw SwiftUI views; screenshots in `apple/design/x/`."}"#;
+    for (name, files) in [
+        ("design-named", ["apple/design/x/iphone.png", "apple/design/x/Mac.png"]),
+        ("design-elsewhere", ["apple/Sources/A.swift", "apple/Sources/a.png"]),
+    ] {
+        let (c, w) = repo(&tmpdir(name));
+        assert_eq!(
+            run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
+            0
+        );
+        let base = RealGit(fake(&c, HEAD));
+        let r = Both(Fake::default().reply("gh issue view", body), &base);
+        drive(&c, &r);
+        for f in files {
+            std::fs::create_dir_all(w.join(f).parent().unwrap()).unwrap();
+            std::fs::write(w.join(f), "png").unwrap();
+        }
+        git(&w, &["add", "apple"]);
+        git(&w, &["commit", "-qm", "design"]);
+        git(&w, &["push", "-q", "origin", "issue-12"]);
+        drive(&c, &r);
+        let (_, waiting) = run(&c, &r, &["waiting", "sendmeter"]);
+        let asks = kinds(&c, "needs-decision");
+        if name == "design-elsewhere" {
+            assert_eq!(state(&c, 12), "design");
+            assert!(asks.is_empty() && kinds(&c, "design-review").is_empty());
+            assert!(
+                waiting.contains("design lane idle without a pushed design"),
+                "{waiting}"
+            );
+            continue;
+        }
+        assert_eq!(state(&c, 12), "design-review");
+        let review = &kinds(&c, "design-review")[0];
+        for e in [review, &asks[0]] {
+            let mut got: Vec<&str> = e.data["files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|f| f["name"].as_str().unwrap())
+                .collect();
+            got.sort_unstable();
+            assert_eq!(got, ["apple/design/x/Mac.png", "apple/design/x/iphone.png"]);
+        }
+        assert!(
+            waiting.contains("herdsman answer sendmeter q1 approve|revise|reject"),
+            "{waiting}"
+        );
+    }
 }

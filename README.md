@@ -129,6 +129,8 @@ herdsman timer install                # the drive loop, every 5 minutes
 herdsman serve --addr 127.0.0.1:7777  # /api/v1, cooee's screens and the old board
 ```
 
+Self-update installs the green head of `[self_update] branch` (default `main`); serve hands its sockets to the new binary without dropping a request; `staging_serve = true` adds a read-only staging serve on `staging_addr` (default `127.0.0.1:7787`) ([setup](docs/setup.md#self-update-and-the-daily-clean-557)).
+
 | Command | What it does |
 |---|---|
 | `drive` / `timer` / `tick` | one pass; the job that runs it; check, then drive |
@@ -141,9 +143,7 @@ herdsman serve --addr 127.0.0.1:7777  # /api/v1, cooee's screens and the old boa
 | `profiles` / `accounts` / `hosts` / `secret` | per-role folders and hooks; accounts; hosts; secret files |
 | `setup` / `doctor` / `why` / `lesson` | install the jobs; host check; a line's reasoning; lesson checks |
 
-Detail: [setup](docs/setup.md), [config](docs/config.md), [pipeline](docs/pipeline.md), [lanes and hooks](docs/lanes.md),
-[hosts](docs/hosts.md), [accounts](docs/accounts.md), [orchestrator](docs/orchestrator.md), [serve and /api/v1](docs/serve.md),
-[architecture](docs/architecture.md). Agents read `herdsman help --agent`.
+Detail: [setup](docs/setup.md), [config](docs/config.md), [pipeline](docs/pipeline.md), [lanes and hooks](docs/lanes.md), [hosts](docs/hosts.md), [accounts](docs/accounts.md), [orchestrator](docs/orchestrator.md), [serve and /api/v1](docs/serve.md), [architecture](docs/architecture.md). Agents read `herdsman help --agent`.
 
 ## License
 

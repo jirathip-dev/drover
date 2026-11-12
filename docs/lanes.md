@@ -9,9 +9,11 @@ Two roles run before impl, started by the owner, an orchestrator thread or drive
 product code; the owner approves, revises (a note in the next brief) or rejects their pushed work, and impl starts
 only after approve.
 
-- `design` (UI, `queue add N --design`): HTML mockups on the repo's own design system in `docs/design/<slug>/`, a
-  1440 and a 390 PNG of each page and a README mapping each PNG to the decision it shows; at most 3 pages unless
-  the issue asks for variants.
+- `design` (UI, `queue add N --design`): the medium the issue asks for. By default HTML mockups on the repo's own
+  design system in `docs/design/<slug>/`; an issue naming SwiftUI views in a design path (`apple/design/<slug>/`) gets
+  preview-only views and fixtures there (#868), and the hook keeps the lane's edits to `docs/design/` and those paths.
+  A PNG of each page or view at the sizes the issue asks for (default 1440 and 390 wide; iPhone and Mac frames for
+  native) and a README mapping each PNG to the decision it shows; at most 3 pages unless the issue asks for variants.
 - `architect` (`[fleet.<n>.role.architect]`, `queue add N --architect`, `queue set N architect on|off`): in
   `docs/architecture/<slug>/` an ADR (question, options, decision, consequences), the data shapes as types or a
   schema, the module boundaries (which module may call which), a statechart where state matters and the callers'
@@ -280,6 +282,22 @@ with no lane, a handoff card, an ask whose lane is no live agent. A live lane's 
 repeats for it once a day. The first `check` after #584 sweeps the log once (`asks-swept`, with the count).
 
 ## Check and notifiers
+
+#854: every waiting or next-step line drive prints (`merging next pass`, `waiting for drive (next pass ≤ 5 min) to …`,
+`waiting for a spawn slot`) is a promise with a deadline: `[limits] promise_passes` drive passes for its kind
+(`next-pass`, `merging`, `spawn-pending`, `waiting-on`; default 2 each, `slow_secs` per pass). Each pass logs a new
+one as `promise`; one past its deadline whose issue kept its state and head is logged once as `promise-missed` (a
+notifier can subscribe to it) with the reason drive sees then, and `waiting`, `status` and the board show
+`⚠ missed <age>: <reason>` in place of the stale line.
+
+#855: the fast step also checks two fleet SLOs: `slo-idle` (no lane working for `[limits] slo_idle_minutes` (20)
+while the queue has spawnable work) and `slo-tick` (a tick running past `slo_tick_minutes` (10), replacing
+`tick-stuck`). On a breach or a missed promise drive first tries the known heal and logs `self-heal`: a herdsman
+tick or drive pid it can name gets SIGTERM, then SIGKILL after 10 s; a DISK_BUDGET hold is recounted and the
+queue's first spawn retried; drive's own pass already respawns a silent lane and marks a PASSed draft ready.
+Still breached a pass (`slow_secs`) after the heal, or with no heal known, it emits one `stuck` per episode
+(pushed, and an owner card naming the issue or fleet, the reason and what was tried); `slo-ok` ends the episode
+once the issue moves or the SLO recovers, and the card clears.
 
 `herdsman check` alerts once per state on `stall`, `lane-dead` (a parked lane, clean and pushed with no
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no

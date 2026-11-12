@@ -298,7 +298,10 @@ impl<'a> Pass<'a> {
     fn note(&self, child: &str) {
         if let Some((p, since)) = &self.mark {
             let step = self.step.lock().unwrap().clone();
-            let _ = std::fs::write(p, json!({"since": since, "step": step, "child": child}).to_string());
+            let _ = std::fs::write(
+                p,
+                json!({"since": since, "step": step, "child": child, "pid": std::process::id()}).to_string(),
+            );
         }
     }
     /// The remote host `prog args` runs on: `herdr --machine m …` or `ssh [-o…] m -- …`.
