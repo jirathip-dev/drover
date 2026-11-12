@@ -1,0 +1,8 @@
+Decided: the stage's files are `git log pre..head ^origin/<integration> -- <folders>`, the lane's own commits only
+Because: "No `design-review` event and no approval ask unless the lane's branch has at least one commit past its spawn `pre` sha"
+Rejected: `git diff pre head` — it counts integration commits the worktree picked up (cooee#300's routines ADR)
+Decided: an errored or gone stage lane with nothing of its own gets a `needs-human LANE_FAILED` card naming its note
+Because: "the owner gets a card naming the error, and respawns go through the normal `RESPAWN_LOOP` limits"
+Rejected: reusing LANE_ENDS — drive.rs auto-repairs that code, which would respawn without the owner
+Check: a revise lane that errors on an already handed-off head also gets the card (handed path calls `failed`)
+Owner: an architect or design lane that crashes with nothing written now raises a failure card, not an approve ask
