@@ -943,7 +943,87 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
             _ => {}
         }
     }
+    debug_assert!(m.values().all(|s| state(&s.state).is_some()), "a state not in STATES");
     m
+}
+
+/// #845: every state `fold` gives an issue (a round's `(n)`, `·f` and `+uN` aside), each with its ways out.
+pub const STATES: &[(&str, &[(&str, &str)])] = &[
+    (
+        "queued",
+        &[
+            ("design", "queued with an architect or design mark, that lane first"),
+            (
+                "impl",
+                "impl spawned, refused while SERIAL_BUSY, HOST_BUSY, DISK_BUDGET, LANE_LIVE or CAP",
+            ),
+            ("closed", "issue closed on GitHub"),
+        ],
+    ),
+    ("design", &[("design-review", "design pushed, the owner's ask")]),
+    (
+        "design-review",
+        &[("queued", "approve or revise"), ("needs-human", "reject")],
+    ),
+    (
+        "impl",
+        &[
+            ("review(n)", "turn done with a push, review spawned"),
+            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+            ("queued", "lane killed, or repaired while blocked"),
+        ],
+    ),
+    (
+        "review(n)",
+        &[
+            ("ready", "PASS at head"),
+            ("fix(n)", "FAIL at head"),
+            ("needs-human", "ROUND_LIMIT after review_rounds"),
+        ],
+    ),
+    (
+        "fix(n)",
+        &[
+            ("review(n)", "fix pushed, next review round"),
+            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+        ],
+    ),
+    (
+        "ready",
+        &[
+            ("review(n)", "verify stage at head for ui_paths, a verify or repro mark"),
+            (
+                "fix(n)",
+                "update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds",
+            ),
+            ("merged", "merge with PASS at head and CI green, no STAGING_WOULD_BREAK"),
+            ("blocked", "merge refused, or PR closed outside herdsman"),
+        ],
+    ),
+    (
+        "blocked",
+        &[
+            ("fix(n)", "fix round spawned"),
+            ("review(n)", "review spawned at a new head"),
+        ],
+    ),
+    (
+        "needs-human",
+        &[
+            ("queued", "extend with no lane yet, start lane"),
+            ("fix(n)", "extend, one more round"),
+            ("parked", "park"),
+        ],
+    ),
+    ("parked", &[("needs-human", "unpark, the state before it")]),
+    ("merged", &[]),
+    ("closed", &[]),
+];
+
+/// #845: `state`'s `STATES` entry, matched on its name before any `(` or `+`.
+pub fn state(state: &str) -> Option<&'static (&'static str, &'static [(&'static str, &'static str)])> {
+    let base = state.split(['(', '+']).next();
+    STATES.iter().find(|(name, _)| name.split('(').next() == base)
 }
 
 /// #412: the states a design spawn moves into `design` (before impl).

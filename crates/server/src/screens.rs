@@ -324,6 +324,19 @@ fn fleets(cfg: &Config) -> Value {
     json!({"type": "sheet", "id": "fleets", "title": "Fleets", "cancel": "Cancel", "done": {"label": "Save", "action": "save-fleets"}, "blocks": blocks})
 }
 
+/// #845: the statechart and the pass chart as `diagram` blocks: live counts per state, each limit node's key.
+fn workflow(ctx: &Ctx) -> Value {
+    let limits = Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
+    let ev = shared(&ctx.state).unwrap_or_default();
+    let counts = crate::diagram::counts(ev.states.values());
+    let blocks = crate::diagram::charts(&limits, Some(&counts)).map(|c| {
+        let nodes: Vec<Value> = c.nodes.iter().map(|(id, k)| json!({"id": id, "limit": k})).collect();
+        let n = if c.id == "states" { json!(counts) } else { json!({}) };
+        json!({"type": "diagram", "id": c.id, "source": c.source, "counts": n, "nodes": nodes})
+    });
+    json!({"type": "screen", "id": "workflow", "title": "Workflow", "blocks": blocks})
+}
+
 const KINDS: [(&str, &str); 4] = [
     ("merge", "merges"),
     ("verdict", "verdicts"),
@@ -506,6 +519,7 @@ impl Server<'_> {
             "/screens/events" => events_screen(ctx, q),
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
             "/screens/cards" => self.chat_cards(ctx),
+            "/screens/workflow" => workflow(ctx),
             _ => return None,
         };
         let oldest = self.r.refreshed().into_values().min();

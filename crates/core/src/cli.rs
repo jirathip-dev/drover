@@ -275,6 +275,13 @@ enum Cmd {
         about = "#889: files 5+ merged PRs touched in 14 days; opens or updates the week's issue, queued `--architect`"
     )]
     Hotspots { fleet: Option<String> },
+    /// #845: the issue statechart and the timers' pass chart as Mermaid (docs/workflow.md); `--live`: counts, config
+    Diagram {
+        /// Per-state issue counts and the config's `[limits]` values
+        #[arg(long)]
+        live: bool,
+        fleet: Option<String>,
+    },
     /// Poll `herdsman pr` with backoff (30 s → 5 min); exit 0 reached, 1 failed check/closed PR, 124 timeout
     Wait {
         fleet: String,
@@ -1100,6 +1107,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             crate::secret::retired(&state, out)?; // #707
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
+        Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
         Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
         Cmd::ArchCheck {
             config,

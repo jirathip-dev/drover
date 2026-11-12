@@ -14,6 +14,30 @@ pub const FAST: &str = "dev.herdsman.fast";
 /// #345: `herdsman service`, kept alive; it runs the fast step itself (and the board with `--board`).
 pub const SERVICE: &str = "dev.herdsman.service";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
+/// #845: the tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
+pub const TICK_STEPS: [(&str, &[&str]); 7] = [
+    ("herdr status", &[]),
+    (
+        "check",
+        &[
+            "stall_minutes",
+            "ask_default_minutes",
+            "ask_waiting_minutes",
+            "ask_expire_hours",
+            "outbox_stale_minutes",
+            "acp_start_minutes",
+            "idle_reap_minutes",
+            "done_close_minutes",
+            "idle_merged_minutes",
+            "token_refresh_minutes",
+        ],
+    ),
+    ("drive", &["pass_max_secs"]),
+    ("clean", &[]),
+    ("trim", &[]),
+    ("lesson", &[]),
+    ("hotspots", &[]),
+];
 /// #557: herdsman's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
 pub const UPDATE: &str = "dev.herdsman.update";
 pub const CLEAN: &str = "dev.herdsman.clean";

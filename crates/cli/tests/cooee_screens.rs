@@ -569,3 +569,49 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
     screen.as_object_mut().unwrap().remove("badge");
     assert_eq!(screen, fresh, "the ops turned the first answer into today's");
 }
+
+#[test]
+fn the_workflow_screen_is_two_diagram_blocks_with_live_counts_and_limit_nodes() {
+    let (c, r) = recorded("cooee-workflow");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let (status, v) = req(&s, T, "GET", "/screens/workflow", "", "");
+    assert_eq!(status, 200, "{v}");
+    assert_eq!((&v["type"], &v["id"]), (&json!("screen"), &json!("workflow")));
+    let states = find(&v, "states");
+    assert_eq!(states["type"], "diagram");
+    assert!(
+        states["source"].as_str().unwrap().starts_with("stateDiagram-v2\n"),
+        "{states}"
+    );
+    assert!(
+        states["source"]
+            .as_str()
+            .unwrap()
+            .contains("state \"fix(n) · 1\" as fix"),
+        "{states}"
+    );
+    for (state, n) in [("merged", 1), ("fix(n)", 1), ("needs-human", 1)] {
+        assert_eq!(states["counts"][state], n, "{state}: {states}");
+    }
+    let pass = find(&v, "pass");
+    assert_eq!(pass["type"], "diagram");
+    let source = pass["source"].as_str().unwrap();
+    let nodes = pass["nodes"].as_array().unwrap();
+    for (id, limit) in [
+        ("k_slow_secs", "slow_secs"),
+        ("k_fast_secs", "fast_secs"),
+        ("k_stall_minutes", "stall_minutes"),
+    ] {
+        assert!(nodes.contains(&json!({"id": id, "limit": limit})), "{id}: {nodes:?}");
+    }
+    for n in nodes {
+        assert!(
+            source.contains(&format!(
+                "{}([\"{} = ",
+                n["id"].as_str().unwrap(),
+                n["limit"].as_str().unwrap()
+            )),
+            "{n}"
+        );
+    }
+}
