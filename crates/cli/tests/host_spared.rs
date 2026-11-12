@@ -1,5 +1,3 @@
-//! #939: a disabled host with no lane there is never contacted by a tick or `status`; a host whose ssh key changed
-//! alerts `host-key-changed` once and is not tried again in the pass.
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
@@ -104,8 +102,6 @@ fn a_disabled_host_with_a_live_lane_there_is_still_looked_at() {
     assert_eq!(code, 0, "{out}");
     assert!(r.called("herdr --machine boat1 agent list"), "{out}");
 }
-
-/// Every call to boat1 answers as ssh does for a changed host key: the banner, exit 255.
 struct KeyChanged(Fake);
 
 impl Runner for KeyChanged {

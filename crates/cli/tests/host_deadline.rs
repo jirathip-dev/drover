@@ -1,6 +1,3 @@
-//! #939, alone in its binary (`[limits]` is process-wide): a real ssh child that answers its probe and then never
-//! returns is killed with its process group at `ssh_call_secs`; the tick ends in time, the host shows offline and drive
-//! still starts the main host's work. A child that exits while its own child keeps the pipes open ends a call too.
 mod common;
 use common::*;
 use herdsman::events::{append, read, Event};
@@ -10,8 +7,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const NOW: u64 = 1_000_000;
-
-/// Local calls go to the fake; every call to boat1 runs `ssh` (a script) for real.
 struct Remote {
     f: Fake,
     ssh: PathBuf,
@@ -39,8 +34,6 @@ impl Runner for Remote {
         self.f.detach(exe, args, log)
     }
 }
-
-/// An `ssh` that answers the `-- true` probe, then for any other call starts `sleep` (its pid in `pids`) and `tail`.
 fn fake_ssh(dir: &Path, tail: &str) -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     let p = dir.join("ssh");
