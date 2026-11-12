@@ -1700,10 +1700,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                                 } else {
                                     ""
                                 };
-                                Some(format!(
-                                    "drive's next pass (last {} ago){stuck}",
-                                    crate::events::age(late)
-                                ))
+                                let last = format!(" (last {} ago){stuck}", crate::events::age(late));
+                                Some(crate::promise::Say::Pass(last).line())
                             }
                         };
                         let (fleet, issue, since, next_cmd) = (s.fleet, s.issue, s.last_ts, why);
@@ -1716,6 +1714,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             what,
                             since,
                             next_cmd,
+                            promise: None,
                         });
                     }
                     rows.retain(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet));
