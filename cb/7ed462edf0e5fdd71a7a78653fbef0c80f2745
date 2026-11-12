@@ -1,0 +1,15 @@
+Decided: serve passes its listening fds to the new binary by inheritance (close-on-exec cleared in the child only), no new dependency
+Because: "takes over the listening sockets (7777 and the 7778 webhook port), by fd passing or `SO_REUSEPORT`"
+Rejected: SO_REUSEPORT or SCM_RIGHTS — both need libc/socket2 as a direct dependency (an owner ask); std has neither
+Decided: two hops, old serve -> bridge (spawned while it runs) -> old serve's pid exec'd into the new binary, then the bridge drains and exits
+Because: "launchd KeepAlive stays the fallback only"
+Rejected: the bridge staying as the server — launchd tracks the old pid, so its KeepAlive restart would fight the bridge for the port
+Decided: the drain waits for request threads, their deliveries and queued board jobs (60 s bound), not just request slots
+Because: crates/server/src/serve.rs:232
+Decided: an older serve with no control socket (the first install of this build) gets today's restart
+Because: "launchd KeepAlive stays the fallback only"
+Check: crates/cli/tests/handover.rs drives the real binary: a 50 ms GET / poller sees no failure; /live resumes with ?since= and gets every event once
+Decided: the watcher ticks once before serve accepts, so a fresh serve (bridge or exec) sends every event after its first /live client connects
+Decided: the staging serve is `serve --read-only` from <state>/update-staging, installed by the same self-update pass when staging_serve = true
+Because: "read-only against the live state, for trying changes before promotion"
+Owner: the live install follows main only, and an install hands the page over without dropping it; a read-only staging serve is opt-in on port 7787
