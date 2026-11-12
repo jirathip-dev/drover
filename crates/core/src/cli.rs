@@ -1869,8 +1869,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let note = (state == "done").then(|| crate::why::turn(ctx, &cfg, r, out, (f, n), role));
                     let note = note.transpose()?.flatten();
                     let mut d = json!({"state": state, "why": why, "role": role});
-                    if let Some(w) = &note {
-                        d["note"] = json!(format!("WHY_INVALID: {w}"));
+                    if let Some((code, w)) = &note {
+                        d["note"] = json!(format!("{code}: {w}"));
                     }
                     emit(&ctx.state, &cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
                     writeln!(out, "recorded {f}#{n} turn-end: {state}")?;
@@ -1878,8 +1878,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         writeln!(out, "ask the question with `herdsman ask {f} {n} …` if you have not")?;
                     }
                     kick(f, n, "turn");
-                    if let Some(w) = note {
-                        return gate::refused("WHY_INVALID", w);
+                    if let Some((code, w)) = note {
+                        return gate::refused(code, w);
                     }
                 }
                 Cmd::Why { at, json } => crate::why::show(ctx, &cfg, r, out, &at, json)?,
