@@ -262,6 +262,8 @@ pub struct Pass<'a> {
     step: std::sync::Mutex<String>,
     pub until: Option<std::time::Instant>,
     late: std::sync::Mutex<std::collections::BTreeSet<String>>,
+    off: std::collections::BTreeSet<String>,
+    log: Option<(&'a Ctx, &'a Config)>,
 }
 
 impl<'a> Pass<'a> {
@@ -275,7 +277,14 @@ impl<'a> Pass<'a> {
             step,
             until: None,
             late: std::sync::Mutex::default(),
+            off: std::collections::BTreeSet::new(),
+            log: None,
         }
+    }
+    /// #939: never contact the machines `off`; a host's changed key logs `host-key-changed` once (with `log`).
+    #[must_use]
+    pub fn sparing(self, off: std::collections::BTreeSet<String>, log: Option<(&'a Ctx, &'a Config)>) -> Self {
+        Pass { off, log, ..self }
     }
     pub fn over(&self) -> bool {
         self.until.is_some_and(|t| std::time::Instant::now() >= t)
@@ -323,6 +332,9 @@ impl<'a> Pass<'a> {
         let connect = format!("-oConnectTimeout={secs}");
         let probe = argv(&["-oBatchMode=yes", &connect, "-oControlPath=none", m, "--", "true"]);
         let o = self.r.run_for("ssh", &probe, "", std::time::Duration::from_secs(secs));
+        if let Ok(o) = &o {
+            self.key_changed(m, o);
+        }
         if o.as_ref().is_ok_and(|o| o.code == 124) {
             self.late.lock().unwrap().insert(m.into());
         }
@@ -334,6 +346,14 @@ impl<'a> Pass<'a> {
         let Some(m) = Self::host(prog, args) else {
             return input.map_or_else(|| self.r.run(prog, args), |i| self.r.run_in(prog, args, i));
         };
+        if self.off.contains(m) {
+            let stderr = format!("{m}: not sent (host disabled, no lane there)");
+            return Ok(Out {
+                code: 255,
+                stderr,
+                ..Out::default()
+            });
+        }
         self.note(&quote(prog, args));
         let over = self.over();
         if over {
@@ -349,7 +369,8 @@ impl<'a> Pass<'a> {
         }
         let limit = std::time::Duration::from_secs(crate::config::limits().ssh_call_secs);
         let input = input.unwrap_or_default();
-        let refused = |o: &Out| o.code == 255 && o.stderr.contains("connect to host");
+        let refused =
+            |o: &Out| o.code == 255 && (o.stderr.contains("connect to host") || o.stderr.contains(KEY_CHANGED));
         let mut o = self.r.run_for(prog, args, input, limit)?;
         if matches!(o.code, 124 | 255) && !refused(&o) && args.iter().any(|a| a == CM[1]) {
             let g = ok(self.r, "ssh", &["-G", CM[1], m]).unwrap_or_default();
@@ -360,6 +381,7 @@ impl<'a> Pass<'a> {
             let bare: Vec<String> = std::iter::once("-oControlPath=none".into()).chain(bare).collect();
             o = self.r.run_for(prog, &bare, input, limit)?;
         }
+        self.key_changed(m, &o);
         if matches!(o.code, 124 | 255) {
             self.up.lock().unwrap().insert(m.into(), false);
         }
@@ -369,6 +391,44 @@ impl<'a> Pass<'a> {
         self.note("");
         Ok(o)
     }
+    fn key_changed(&self, m: &str, o: &Out) {
+        if !o.stderr.contains(KEY_CHANGED) {
+            return;
+        }
+        self.up.lock().unwrap().insert(m.into(), false);
+        let Some((ctx, cfg)) = self.log else {
+            return;
+        };
+        let host = cfg
+            .hosts
+            .iter()
+            .find(|h| h.1.machine.as_deref() == Some(m))
+            .map_or(m, |h| h.0.as_str());
+        let events = read(&ctx.state).unwrap_or_default();
+        let kinds = ["host-key-changed", "host-online"];
+        let last = events
+            .iter()
+            .rev()
+            .find(|e| e.str("host") == Some(host) && kinds.contains(&e.kind.as_str()));
+        if last.is_some_and(|e| e.kind == kinds[0]) {
+            return;
+        }
+        let why = format!("host-key-changed {host}: ssh refuses its new host key; check it, then `ssh-keygen -R {m}`");
+        let d = json!({"host": host, "reason": why});
+        let _ = emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kinds[0], d));
+    }
+}
+
+const KEY_CHANGED: &str = "REMOTE HOST IDENTIFICATION HAS CHANGED";
+
+/// #939: the machines of disabled hosts with no open lane logged there: drive, check and status never contact them.
+pub fn idle_off(cfg: &Config, events: &[Event]) -> std::collections::BTreeSet<String> {
+    let idle = |(n, h): &(&String, &HostCfg)| !h.enabled && lanes_on(cfg, events, n).is_empty();
+    cfg.hosts
+        .iter()
+        .filter(idle)
+        .filter_map(|h| h.1.machine.clone())
+        .collect()
 }
 
 impl Runner for Pass<'_> {
@@ -454,7 +514,11 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         return agents;
     }
     let events = read(&ctx.state).unwrap_or_default();
+    let off = idle_off(cfg, &events);
     for (name, h) in &cfg.hosts {
+        if h.machine.as_ref().is_some_and(|m| off.contains(m)) {
+            continue;
+        }
         let on = On::new(r, h.machine.as_deref());
         let s = all.entry(name.clone()).or_default();
         // #254: a stopped cloud host is not looked at (its lanes are paused, never paged).
