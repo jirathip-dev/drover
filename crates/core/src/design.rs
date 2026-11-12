@@ -23,14 +23,78 @@ pub fn scope(ctx: &Ctx, r: &dyn Runner, input: &Value, fleet: &str, n: Option<u6
     let spec = n
         .and_then(|n| crate::gh::cached_spec(ctx, fleet, n))
         .unwrap_or_default();
-    crate::hook::Design {
-        root: top.map_or_else(|_| cwd.to_string(), |t| t.trim().to_string()),
-        allow: paths(spec["body"].as_str().unwrap_or_default()),
+    let root = top.map_or_else(|_| cwd.to_string(), |t| t.trim().to_string());
+    let text = std::fs::read_to_string(Path::new(&root).join(RECIPE)).unwrap_or_default();
+    let allow = Recipe::of(&text, spec["body"].as_str().unwrap_or_default()).folders;
+    crate::hook::Design { root, allow }
+}
+
+/// #873: a repo's design recipe.
+pub const RECIPE: &str = ".herdsman/design.md";
+
+/// #873: what a design lane draws, where, how it renders and the host tags it needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recipe {
+    pub medium: String,
+    pub folders: Vec<String>,
+    pub render: Option<String>,
+    pub sizes: String,
+    pub clip: bool,
+    pub tools: Vec<String>,
+}
+
+impl Recipe {
+    /// The issue `body`'s own design path and medium (#868), else the repo's recipe `text` (`key: value` lines), else
+    /// HTML under `docs/design/` at 1440 and 390.
+    pub fn of(text: &str, body: &str) -> Recipe {
+        let mut r = Recipe {
+            medium: medium(body).into(),
+            folders: paths(body),
+            render: None,
+            sizes: "1440 and 390 wide".into(),
+            clip: false,
+            tools: vec![],
+        };
+        if r.folders.len() > 1 {
+            return r;
+        }
+        for l in text.lines() {
+            let Some((k, v)) = l.trim().trim_start_matches(['-', '*', ' ']).split_once(':') else {
+                continue;
+            };
+            let v = v.trim().trim_matches('`').trim();
+            let key = k.trim().trim_matches('*').to_ascii_lowercase();
+            match key.as_str() {
+                _ if v.is_empty() => {}
+                "medium" => r.medium = v.into(),
+                "folder" if !v.starts_with(['/', '~', '$']) && !v.split('/').any(|c| c == "..") => {
+                    r.folders = vec![v.trim_end_matches('/').into()];
+                }
+                "render" => r.render = Some(v.into()),
+                "sizes" => r.sizes = v.into(),
+                "clip" => r.clip = !matches!(v.to_ascii_lowercase().as_str(), "no" | "none" | "false"),
+                "tools" => {
+                    r.tools = v
+                        .split([',', ' '])
+                        .filter(|t| !t.is_empty())
+                        .map(String::from)
+                        .collect();
+                }
+                _ => {}
+            }
+        }
+        r
+    }
+
+    /// The recipe at `rev` of the checkout `dir`, for an issue `body`.
+    pub fn at(r: &dyn Runner, dir: &str, rev: &str, body: &str) -> Recipe {
+        let text = ok(r, "git", &["-C", dir, "show", &format!("{rev}:{RECIPE}")]);
+        Recipe::of(&text.unwrap_or_default(), body)
     }
 }
 
 /// #868: the folders a design lane writes: `docs/design` and each backquoted `…/design/…` path its issue `body` names.
-pub fn paths(body: &str) -> Vec<String> {
+fn paths(body: &str) -> Vec<String> {
     let mut out = vec!["docs/design".to_string()];
     for span in body.split('`').skip(1).step_by(2) {
         let keep = |c: &&str| !c.contains(['*', '<', '{', '…']) && !c.ends_with("...");
@@ -53,7 +117,7 @@ pub fn paths(body: &str) -> Vec<String> {
 }
 
 /// #868: the medium a design issue asks for: a native one it names along with a design path of its own, else HTML.
-pub fn medium(body: &str) -> &'static str {
+fn medium(body: &str) -> &'static str {
     let native = ["SwiftUI", "UIKit", "AppKit", "Jetpack Compose"];
     let own = paths(body).len() > 1;
     native.into_iter().find(|m| own && body.contains(m)).unwrap_or("HTML")
@@ -118,7 +182,7 @@ pub fn handoff(
         vec!["docs/architecture".to_string()]
     } else {
         let spec = crate::gh::cached_spec(ctx, f, n).unwrap_or_default();
-        paths(spec["body"].as_str().unwrap_or_default())
+        Recipe::at(r, wt, head, spec["body"].as_str().unwrap_or_default()).folders
     };
     let mut args = vec!["-C", wt, "diff", "--name-only", pre, head, "--"];
     args.extend(dirs.iter().map(String::as_str));
@@ -129,7 +193,11 @@ pub fn handoff(
     // #730: the ADR's folder, `docs/architecture/<slug>`, which the impl and rev briefs link once approved.
     let adr = names.lines().next().filter(|_| role == "architect");
     let adr = adr.map(|l| l.split('/').take(3).collect::<Vec<_>>().join("/"));
-    let png = |l: &&str| l.to_ascii_lowercase().ends_with(".png");
+    let png = |l: &&str| {
+        [".png", ".gif", ".mp4"]
+            .iter()
+            .any(|x| l.to_ascii_lowercase().ends_with(x))
+    };
     let files: Vec<Value> = names
         .lines()
         .filter(png)
@@ -209,4 +277,37 @@ pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, 
         _ => return Ok(()),
     };
     crate::pending::record(ctx, (f, n), action, role, None)
+}
+
+/// #873: the recipe's tool tags this main host lacks (its probed tags and fleet.toml's) end the design lane's turn
+/// `blocked` before anything is drawn: a `turn-end`, the owner's card naming them, then `REFUSED MISSING_TOOL`.
+pub fn tools(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (f, n, agent): (&str, u64, &str), rc: &Recipe) -> Result<()> {
+    if rc.tools.is_empty() {
+        return Ok(());
+    }
+    let mut have = crate::hosts::probe(r).map(|p| p.0).unwrap_or_default();
+    have.extend(
+        cfg.hosts
+            .values()
+            .filter(|h| h.machine.is_none())
+            .flat_map(|h| h.tags.clone()),
+    );
+    let lacks: Vec<&str> = rc
+        .tools
+        .iter()
+        .filter(|t| !have.contains(t))
+        .map(String::as_str)
+        .collect();
+    if lacks.is_empty() {
+        return Ok(());
+    }
+    let why = format!(
+        "missing tool {}: the design recipe ({RECIPE}) needs it on the main host; install it, then spawn the design lane again",
+        lacks.join(", ")
+    );
+    let d = json!({"state": "blocked", "why": why, "role": "design", "agent": agent});
+    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
+    let d = json!({"code": "LANE_BLOCKED", "reason": format!("lane blocked: {why}"), "agent": agent});
+    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "needs-human", d))?;
+    crate::gate::refused("MISSING_TOOL", why)
 }

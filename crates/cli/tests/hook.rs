@@ -1625,3 +1625,32 @@ fn a_design_lane_writes_only_its_issues_design_paths() {
         ""
     );
 }
+
+#[test]
+fn a_design_lane_writes_only_its_repos_recipe_folder() {
+    let d = tmpdir("hook-recipe");
+    std::fs::write(d.join("fleet.toml"), config()).unwrap();
+    let cache = d.join("state/cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    let spec = json!({"title": "native surfaces", "body": "Draw the feed."});
+    std::fs::write(cache.join("issue-sendmeter-30.json"), spec.to_string()).unwrap();
+    let wt = tmpdir("hook-recipe-wt");
+    std::fs::create_dir_all(wt.join(".herdsman")).unwrap();
+    let recipe = "- medium: SwiftUI\n- folder: apple/design\n- sizes: iPhone, Mac\n";
+    std::fs::write(wt.join(".herdsman/design.md"), recipe).unwrap();
+    let edit = |f: &str| {
+        let ti = json!({"file_path": f, "content": "x"});
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Write", "cwd": wt, "tool_input": ti});
+        let lane = [("HERDSMAN_LANE", Some("sendmeter:30:design"))];
+        hook_at(&d, &wt, &lane, "design", &input.to_string())
+    };
+    assert_eq!(edit("apple/design/x/Feed.swift"), "");
+    assert_eq!(edit(&wt.join("apple/design/x/feed.png").display().to_string()), "");
+    for f in [
+        "apple/Sources/Feed.swift",
+        "docs/design/x/index.html",
+        ".herdsman/design.md",
+    ] {
+        assert!(edit(f).contains("REFUSED DESIGN_PATH"), "{f}");
+    }
+}
