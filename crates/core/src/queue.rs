@@ -392,7 +392,10 @@ pub fn skipped(
             }
         }
         let g = &gs.first()?.name;
-        return Some((format!("{g} slot free"), format!("{g} slot free; starts next pass")));
+        return Some((
+            format!("{g} slot free"),
+            crate::promise::Say::Starts(format!("{g} slot free")).line(),
+        ));
     }
     let mine = |m: u64| {
         f.is_some_and(|f| {
