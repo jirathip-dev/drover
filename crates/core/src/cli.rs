@@ -447,7 +447,9 @@ enum Cmd {
         #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans"])]
         scheduled: bool,
     },
-    /// Install the herdsman fleet's integration head once its CI is green: build, sign, doctor-gate, swap (#557)
+    #[command(
+        about = "Install the `[self_update] branch` head (default main) once its CI is green: build, sign, doctor-gate, swap, hand serve over (#557, #894)"
+    )]
     SelfUpdate {
         /// Print what it would do; change nothing
         #[arg(long)]
