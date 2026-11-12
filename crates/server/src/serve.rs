@@ -775,7 +775,7 @@ impl<'a> Server<'a> {
         let (path, query) = target.split_once('?').unwrap_or((target, ""));
         let mut clients = lock(&self.clients);
         clients.retain(|c| c.0.send(String::new()).is_ok());
-        let live = req.starts_with("GET ") && path == "/live" && self.allowed(self.ctx, &req) && clients.len() < 8;
+        let live = req.starts_with("GET ") && path == "/live" && self.allowed(self.ctx, &req);
         let ctx = Ctx {
             now: crate::now(),
             ..self.ctx.clone()
@@ -786,6 +786,9 @@ impl<'a> Server<'a> {
             s.set_write_timeout(Some(Duration::from_secs(10)))?;
             s.set_read_timeout(Some(Duration::from_millis(1)))?;
             let (tx, rx) = channel::<String>();
+            if clients.len() >= 8 {
+                clients.remove(0);
+            }
             clients.push((tx, dev.ok().map(|d| d.hash)));
             let mut msg = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\nevent: build\ndata: {VER:08x}\n\n"
@@ -1065,7 +1068,6 @@ impl<'a> Server<'a> {
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),
             // #501: `/pair/status` asks whether this browser is paired (no secrets): the page asks it on a 401.
             ("GET", "/live" | "/pair/status") if busy(self.auth(ctx, head, &a)) => deny(""),
-            ("GET", "/live") => ("503 Service Unavailable", "text/plain", text("8 live clients already: the page polls instead\n")),
             ("GET", "/") => self.page(ctx, &form(query), dev().is_some())
                 .map_or_else(fail, |b| ("200 OK", HTML, b.into_bytes())),
             ("GET", "/frag") => Self::part(ctx, &form(query))
