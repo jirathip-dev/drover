@@ -91,6 +91,27 @@ skipped. CI runs `herdsman arch-check --base HEAD^1 --pr-body <body>` on a pull 
 so `HEAD^1` is the base). The reason for a non-obvious line goes in the commit's why note (`herdsman why`), never in a
 comment.
 
+## Frozen lists, collected folders and generated files (#890)
+
+A central list every feature appends a line to is where parallel PRs collide: turn it into a folder with one file
+per entry, then freeze the list.
+
+```toml
+# Top-level keys, before any [table]. With --base, a line a PR adds to a frozen list fails, naming the file, the
+# line and the collected folder to use instead; a removed or edited line passes.
+frozen = ["src/registry.rs"]
+# Files that must match what `generate` writes: the check runs it, fails on any difference and restores the file.
+generated = ["assets/types/board.ts"]
+generate = "just types"
+
+# A collected folder (`glob` defaults to `*`): a new file there always passes, even under a frozen glob.
+[[collect]]
+dir = "src/features"
+glob = "*.rs"
+```
+
+A frozen or generated file counts as converted: `herdsman hotspots` leaves it out.
+
 The lesson lane turns a repeated layer crossing or banned call into a `[[layer]]` or `[[ban]]` entry.
 
 Another repo's CI runs it with the reusable workflow:

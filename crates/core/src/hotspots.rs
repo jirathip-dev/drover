@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::events::read;
 use crate::lesson::ymd;
-use crate::runner::{ok, Runner};
+use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -48,6 +48,13 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
             None => touched.entry(l.to_string()).or_default().push(sha.to_string()),
         }
     }
+    let arch_toml = format!("{range}:.herdsman/arch.toml");
+    let arch = r.run("git", &argv(&["-C", &local, "show", &arch_toml]))?;
+    let converted = match arch.code {
+        0 => crate::arch::converted(&arch.stdout)?,
+        _ => vec![],
+    };
+    touched.retain(|f, _| !crate::arch::any(&converted, f));
     let events = read(&ctx.state)?;
     let same = |e: &&crate::events::Event| cfg.fleet(&e.fleet).is_ok_and(|g| g.repo == f.repo);
     let updates = |sha: &String| {
