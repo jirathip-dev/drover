@@ -279,7 +279,13 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         }
     });
     let budget = loaded.as_ref().map_or(u64::MAX, |c| c.limits.slow_secs);
-    let mut pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now)));
+    let events = read(&ctx.state).unwrap_or_default();
+    let spared = loaded
+        .as_ref()
+        .ok()
+        .map(|c| (crate::hosts::idle_off(c, &events), (ctx, c)));
+    let (off, log) = spared.map_or_else(Default::default, |(o, l)| (o, Some(l)));
+    let mut pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now))).sparing(off, log);
     pass.until = std::time::Instant::now().checked_add(std::time::Duration::from_secs(budget));
     let res = loaded.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|cfg| {
         pass.step("herdr status");

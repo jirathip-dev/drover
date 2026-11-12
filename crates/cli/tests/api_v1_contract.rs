@@ -1,8 +1,3 @@
-//! #555: API v1's contract with cooee and the drover plugins: one fixture per route in tests/golden/api_v1/ (drover's
-//! module tests copy them), each holding the route, its Rust type, that type's schema (`schema`: serde's JSON of its
-//! default, every field; generated here) and a recorded response. A route whose response shape (its keys, each
-//! value's JSON type; `null` fits any) leaves the fixture's, or a type whose schema changed, fails until the fixture
-//! is updated in the same PR: `BLESS=1 cargo test --test api_v1_contract` rewrites them.
 mod common;
 use common::*;
 use drover::serve::Server;

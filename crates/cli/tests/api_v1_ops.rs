@@ -1,6 +1,3 @@
-//! #555: the drover plugins' `/api/v1` routes: each runs the old board's code (`/send`, `/answer`, `/act`, `/setup`,
-//! `/herd.json`, the [config] sheet, `/thread`'s `new`) or a new op (`chat`, `close`), JSON in and `Reply` out; the
-//! paired-only ones answer 401 UNPAIRED to an unpaired device and run nothing.
 mod common;
 use common::*;
 use drover::events::{read, Event};

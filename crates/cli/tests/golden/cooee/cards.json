@@ -15,7 +15,7 @@
       { "type": "choice", "id": "q960", "action": "answer", "recommended": "approve",
         "options": [ { "value": "approve", "label": "approve" }, { "value": "revise", "label": "revise" }, { "value": "reject", "label": "reject" } ],
         "other": { "placeholder": "a revise note…", "for": "revise" } } ] },
-  { "type": "card", "id": "ask-q947", "kind": "ask", "tone": "warn", "title": "drover #722 · impl", "meta": "routine · 18m",
+  { "type": "card", "id": "ask-q947", "kind": "ask", "tone": "warn", "title": "herdsman #722 · impl", "meta": "routine · 18m",
     "fold": { "line": "#722 · routine · The fix round's branch is still checked out in it… · 18m", "main": { "block": "q947", "action": "answer", "value": "move", "label": "move" } },
     "blocks": [
       { "type": "text", "markdown": "**The fix round's branch is still checked out in its herdr-era worktree. Move it out?**" },

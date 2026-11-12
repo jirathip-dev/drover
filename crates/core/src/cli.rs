@@ -1164,7 +1164,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let mut serial: Vec<_> = rows.iter().filter_map(|s| serial(&s.fleet)).collect();
                 serial.dedup();
                 // #337: the fast step's snapshot (a remote read it lacks fails), and only the fleet asked for.
-                let look = crate::snapshot::Snap::read(ctx, r);
+                let off = cfg.as_ref().map(|c| crate::hosts::idle_off(c, &events));
+                let spared = crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), None);
+                let look = crate::snapshot::Snap::read(ctx, &spared);
                 let skip = |s: &crate::events::IssueState| {
                     let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
                     let skip = queue::skipped(&events, &all, f, &s.fleet, s.issue, ctx.now);
@@ -1434,6 +1436,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             } else {
                 crate::hosts::Pass::new(r, None)
             };
+            let off = match cmd {
+                Cmd::Check | Cmd::Drive { .. } => crate::hosts::idle_off(&cfg, &read(&ctx.state)?),
+                _ => std::collections::BTreeSet::new(),
+            };
+            let pass = pass.sparing(off, Some((ctx, &cfg)));
             let r: &dyn Runner = match cmd {
                 Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } | Cmd::Reclaim { .. } => &pass,
                 _ => r,
@@ -1881,8 +1888,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let note = (state == "done").then(|| crate::why::turn(ctx, &cfg, r, out, (f, n), role));
                     let note = note.transpose()?.flatten();
                     let mut d = json!({"state": state, "why": why, "role": role});
-                    if let Some(w) = &note {
-                        d["note"] = json!(format!("WHY_INVALID: {w}"));
+                    if let Some((code, w)) = &note {
+                        d["note"] = json!(format!("{code}: {w}"));
                     }
                     emit(&ctx.state, &cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
                     writeln!(out, "recorded {f}#{n} turn-end: {state}")?;
@@ -1890,8 +1897,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         writeln!(out, "ask the question with `drover ask {f} {n} …` if you have not")?;
                     }
                     kick(f, n, "turn");
-                    if let Some(w) = note {
-                        return gate::refused("WHY_INVALID", w);
+                    if let Some((code, w)) = note {
+                        return gate::refused(code, w);
                     }
                 }
                 Cmd::Why { at, json } => crate::why::show(ctx, &cfg, r, out, &at, json)?,

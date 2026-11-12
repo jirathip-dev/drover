@@ -74,11 +74,11 @@
         "state": "working",
         "tool": "edit"
        },
-       "title": "spawn drover-impl-641 · fix 1",
+       "title": "spawn herdsman-impl-641 · fix 1",
        "subtitle": "on mini · Claude Code · opus 5.5",
        "value": "09:35",
        "tap": {
-        "thread": "drover-impl-641"
+        "thread": "herdsman-impl-641"
        }
       },
       {
@@ -127,7 +127,7 @@
         "state": "working",
         "tool": "run"
        },
-       "title": "spawn drover-impl-722 · impl",
+       "title": "spawn herdsman-impl-722 · impl",
        "subtitle": "on mini · Codex · gpt-5.6-luna",
        "value": "08:12"
       }

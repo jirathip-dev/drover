@@ -142,7 +142,6 @@ fn a_verify_lane_that_ends_without_a_verdict_is_respawned_once_then_needs_a_huma
     assert_eq!(kinds(&c, "respawn").len(), 1);
 }
 
-/// AC 3: cooee-drover #12's pane never started (blank) and sat 28 h.
 #[test]
 fn a_blank_pane_after_the_start_window_is_retried_once_then_escalated() {
     let c = ctx(&tmpdir("stall-blank"), CONFIG);
@@ -176,7 +175,6 @@ fn a_blank_pane_after_the_start_window_is_retried_once_then_escalated() {
     assert_eq!((kinds(&c, "needs-human").len(), kinds(&c, "respawn").len()), (1, 1));
 }
 
-/// AC 4: cooee-drover #13's lane was refused by the hook for an unknown fleet and sat 28 h.
 #[test]
 fn repeated_hook_refusals_end_the_lane_with_an_escalation_that_carries_the_refusal() {
     let c = ctx(&tmpdir("stall-hook"), CONFIG);

@@ -14,7 +14,7 @@
       "state": "working",
       "tool": "read"
      },
-     "subtitle": "impl ✓ · review 1 ▸ drover-rev-722 · mini"
+     "subtitle": "impl ✓ · review 1 ▸ herdsman-rev-722 · mini"
     }
    }
   ]
@@ -48,7 +48,7 @@
       "state": "working",
       "tool": "edit"
      },
-     "title": "#456 Rename drover to drover",
+     "title": "#456 Rename herdsman to drover",
      "badge": {
       "text": "impl",
       "tone": "working"

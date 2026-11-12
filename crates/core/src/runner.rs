@@ -220,9 +220,12 @@ impl Real {
             return fail(format!("{dir} is on a disk that is not answering"));
         }
         let mut pipes = None;
+        let end = Instant::now() + limit;
         let start = || {
+            use std::os::unix::process::CommandExt;
             let mut c = Command::new(prog)
                 .args(args)
+                .process_group(0)
                 .stdin(Stdio::piped())
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
@@ -233,16 +236,22 @@ impl Real {
             Ok(c)
         };
         let ended = settle(dir.map(String::as_str), limit, start)?;
-        let text =
-            |b: std::thread::JoinHandle<Vec<u8>>| String::from_utf8_lossy(&b.join().unwrap_or_default()).into_owned();
+        let text = |b: std::sync::mpsc::Receiver<Vec<u8>>| {
+            let left = end.saturating_duration_since(Instant::now());
+            let v = b.recv_timeout(left).ok()?;
+            Some(String::from_utf8_lossy(&v).into_owned())
+        };
         match ended {
             Ended::Exited(st) => {
                 let (so, se) = pipes.context("pipes")?;
-                Ok(Out {
-                    code: st.code().unwrap_or(-1),
-                    stdout: text(so),
-                    stderr: text(se),
-                })
+                match (text(so), text(se)) {
+                    (Some(stdout), Some(stderr)) => Ok(Out {
+                        code: st.code().unwrap_or(-1),
+                        stdout,
+                        stderr,
+                    }),
+                    _ => fail(format!("it ended, but its output stayed open past {limit:?}")),
+                }
             }
             // #776: a `-C <dir>` call that ran out of time marks its whole disk: a folder macOS still lists from
             // memory passes the probe while its files hang. Its readers may outlive it while a grandchild (ssh) holds
@@ -448,6 +457,12 @@ impl Proc for std::process::Child {
         std::process::Child::try_wait(self)
     }
     fn kill(&mut self) -> std::io::Result<()> {
+        extern "C" {
+            fn kill(pid: i32, sig: i32) -> i32;
+        }
+        let group = i32::try_from(self.id()).map_or(0, |p| -p);
+        // SAFETY: kill(2) only sends SIGKILL to the child's own process group, which `within` made for it alone.
+        unsafe { kill(group, 9) };
         std::process::Child::kill(self)
     }
 }
@@ -550,12 +565,14 @@ pub fn settle<P: Proc>(key: Option<&str>, limit: Duration, start: impl FnOnce() 
     Ok(Ended::TimedOut)
 }
 
-fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut v = vec![];
         let _ = p.map(|mut p| p.read_to_end(&mut v));
-        v
-    })
+        let _ = tx.send(v);
+    });
+    rx
 }
 
 pub fn argv(args: &[&str]) -> Vec<String> {
