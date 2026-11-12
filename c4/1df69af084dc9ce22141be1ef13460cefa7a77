@@ -1,0 +1,9 @@
+Decided: stale PR evidence (56 pr-body FAILs, ~35 stale sha) is refused PR_BODY at turn done, before a reviewer is spawned
+Because: "Fix each class at the highest level that works: architecture or types, then a lint or CI check"
+Because: crates/core/src/why.rs:210
+Rejected: a rules.md line only — CI evidence already fails it, lanes still ended turns on it
+Rejected: gating review spawn on all CI — a larger drive change, waits on slow jobs; left for the owner
+Decided: same rule as scripts/evidence-check.sh (head or a commit under integration merges), so the turn gate and CI agree
+Decided: rules.md gets two CI-enforced lines (board-freeze, arch-check) lanes tripped 8 and 10+ times
+Check: a refused turn still logs turn-end with the note, so drive's one-nudge-then-review path is unchanged
+Owner: a lane can no longer hand a PR to review while its body's evidence is for an older commit
