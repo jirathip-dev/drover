@@ -330,7 +330,6 @@ pub fn ask(
     if let Some(t) = thread {
         orchestrator::fleet_of(&events, t)?;
     }
-    let id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
     // `<fleet>:<issue|->:<role>` names the newest spawn of that lane.
     let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
     let at = |e: &Event| {
@@ -345,8 +344,7 @@ pub fn ask(
     let starts = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "spawn-started");
     let spawned = events.iter().rev().filter(starts).find(|e| at(e) == lane);
     let (a, h) = spawned.map_or((None, None), |e| (e.str("agent"), e.str("host"))); // #325: and its host
-    let mut d =
-        json!({"id": id, "question": q, "options": opts, "recommend": rec, "agent": a, "host": h, "kind": kind});
+    let mut d = json!({"question": q, "options": opts, "recommend": rec, "agent": a, "host": h, "kind": kind});
     if let Some(t) = thread {
         d["thread"] = json!(t);
     }
@@ -358,15 +356,14 @@ pub fn ask(
     if let Some(t) = routed {
         d["routed"] = json!(t);
     }
-    let ev = Event::new(ctx.now, fleet, issue, "needs-decision", d);
-    emit(&ctx.state, cfg, ev.clone())?;
+    let ev = events::emit_ask(&ctx.state, cfg, &Event::new(ctx.now, fleet, issue, "needs-decision", d))?;
     // #633: an attached cooee thread reads the ask from `/api/v1/events`; no herdsman conductor to type it into.
     if let Some(t) = routed.filter(|t| orchestrator::attached(&events, t).is_none()) {
         if let Err(e) = orchestrator::lane_ask(ctx, cfg, r, t, &ev) {
             orchestrator::to_owner(ctx, cfg, t, &ev, None, &format!("orchestrator not reached: {e:#}"))?;
         }
     }
-    Ok(writeln!(out, "{id}")?)
+    Ok(writeln!(out, "{}", ev.str("id").unwrap_or_default())?)
 }
 
 /// #541: how long the owner may change a conductor's answer, in seconds (the board reads it).
@@ -392,10 +389,8 @@ pub fn orchestrator_answer(
     (t, basis): (&str, &str),
 ) -> Result<()> {
     let events = read(&ctx.state)?;
-    let is = |e: &&Event| e.kind == "needs-decision" && e.fleet == fleet && e.str("id") == Some(id);
-    let Some(ask) = events.iter().find(is) else {
-        return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {id}"));
-    };
+    let by = format!("orchestrator-{t}");
+    let ask = the_ask(&events, (fleet, id), &|e| in_thread(e, &by))?;
     let mine = ask.str("routed").is_some() || crate::design::is_ask(ask) || ask.data.get("extend").is_some();
     if !mine || orchestrator::fleet_of(&events, t)? != ask.fleet {
         return gate::refused("OWNER_ASK", format!("{id} is no lane ask on {t}'s repo; ask the owner"));
@@ -428,16 +423,7 @@ pub fn orchestrator_answer(
         orchestrator::to_owner(ctx, cfg, t, ask, rec, why)?;
         return gate::refused("OWNER_ASK", format!("{why}; ask the owner"));
     }
-    answer_with(
-        ctx,
-        cfg,
-        r,
-        out,
-        (fleet, id),
-        choice,
-        (&format!("orchestrator-{t}"), None),
-        (Some(&quote), None),
-    )
+    answer_with(ctx, cfg, r, out, ask, choice, (&by, None), (Some(&quote), None))
 }
 
 /// #817: `herdsman extend` by thread `t`'s orchestrator: the owner's `typed` line, else its extend ask answered on `basis`.
@@ -474,16 +460,16 @@ pub fn orchestrator_extend(
         .iter()
         .rfind(open)
         .filter(|a| events::closed(&events, a).is_none());
-    let mut id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
-    if let Some(a) = ask {
-        a.str("id").unwrap_or_default().clone_into(&mut id);
+    let id = if let Some(a) = ask {
+        a.str("id").unwrap_or_default().to_string()
     } else {
         let why = card.and_then(|c| c.str("reason")).unwrap_or("needs-human");
         let q = format!("One more round for #{n}? ({why})");
-        let d = json!({"id": id, "question": q, "options": ["one more round", "park"], "recommend": 1,
+        let d = json!({"question": q, "options": ["one more round", "park"], "recommend": 1,
             "kind": "owner", "extend": true, "spawn": spawn});
-        events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "needs-decision", d))?;
-    }
+        let ev = events::ask(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "needs-decision", d))?;
+        ev.str("id").unwrap_or_default().to_string()
+    };
     orchestrator_answer(ctx, cfg, r, out, (fleet, &id), "1", (t, basis.unwrap_or_default()))
 }
 
@@ -543,12 +529,17 @@ pub fn answer_typed(
     if note.is_some_and(|n| n.trim().is_empty() || n.chars().any(char::is_control)) {
         return gate::refused("BAD_VALUE", "a note is one line of text");
     }
-    let ask = events.iter().find(|e| is(e, "needs-decision"));
-    let text = ask.map_or(choice, |a| chosen(a, choice));
+    let typed_in = |e: &Event| {
+        let own = on.filter(|_| crate::design::is_ask(e));
+        let t = |m: &&&Event| m.str("thread") == e.str("thread") || m.str("thread") == own;
+        said.iter().filter(t).any(|m| m.seq > e.seq)
+    };
+    let ask = the_ask(&events, (fleet, id), &typed_in)?;
+    let text = chosen(ask, choice);
     let revise = note.filter(|_| text == "revise").map(|n| format!("revise: {n}"));
     let said = revise.as_deref().unwrap_or(choice);
-    answer_with(ctx, cfg, r, out, (fleet, id), said, (TYPED, None), (None, note))?;
-    let n = ask.and_then(|a| a.issue).filter(|_| text == "approve");
+    answer_with(ctx, cfg, r, out, ask, said, (TYPED, None), (None, note))?;
+    let n = ask.issue.filter(|_| text == "approve");
     n.zip(note)
         .map_or(Ok(()), |(n, note)| amend::amend(ctx, cfg, r, out, (fleet, n), id, note))
 }
@@ -564,9 +555,7 @@ pub fn withdraw(
 ) -> Result<()> {
     let events = read(&ctx.state)?;
     let is = |e: &&Event, q: &str| e.kind == "needs-decision" && e.fleet == fleet && e.str("id") == Some(q);
-    let Some(ask) = events.iter().find(|e| is(e, id)) else {
-        return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {id}"));
-    };
+    let ask = the_ask(&events, (fleet, id), &|e| in_thread(e, by))?;
     if let Some(q) = new.filter(|q| !events.iter().any(|e| is(&e, q))) {
         return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {q}"));
     }
@@ -580,7 +569,7 @@ pub fn withdraw(
     if let Some(w) = events::closed(&events, ask) {
         return gate::refused("ALREADY_ANSWERED", format!("{id} is closed: {w}"));
     }
-    let d = json!({"id": id, "by": by, "for": new});
+    let d = json!({"id": id, "ask_seq": ask.seq, "by": by, "for": new});
     emit(
         &ctx.state,
         cfg,
@@ -600,27 +589,51 @@ pub fn answer(
     choice: &str,
     (by, via): (&str, Option<&str>),
 ) -> Result<()> {
-    answer_with(ctx, cfg, r, out, (fleet, id), choice, (by, via), (None, None))
+    let events = read(&ctx.state)?;
+    let ask = the_ask(&events, (fleet, id), &|e| in_thread(e, by))?;
+    answer_with(ctx, cfg, r, out, ask, choice, (by, via), (None, None))
 }
 
-/// `answer`; #541: a conductor's (`basis`) also posts its FYI line, and the owner may change one for `CHANGE`.
+/// #906: ask `id` on `fleet`; an id logged twice (before #906) is the ask `mine` picks, else `AMBIGUOUS_ASK`.
+fn the_ask<'a>(events: &'a [Event], (fleet, id): (&str, &str), mine: &dyn Fn(&Event) -> bool) -> Result<&'a Event> {
+    let is = |e: &&Event| e.kind == "needs-decision" && e.fleet == fleet && e.str("id") == Some(id);
+    let all: Vec<&Event> = events.iter().filter(is).collect();
+    let picked: Vec<&Event> = all.iter().copied().filter(|e| mine(e)).collect();
+    match (all.as_slice(), picked.as_slice()) {
+        ([], _) => gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {id}")),
+        ([a], _) | (_, [a]) => Ok(a),
+        _ => {
+            let seqs: Vec<String> = all.iter().map(|e| e.seq.to_string()).collect();
+            let why = format!(
+                "{id} names the asks at seqs {}; answer it from its own thread",
+                seqs.join(", ")
+            );
+            gate::refused("AMBIGUOUS_ASK", why)
+        }
+    }
+}
+
+/// #906: ask `e` is in the thread whose orchestrator `by` is.
+fn in_thread(e: &Event, by: &str) -> bool {
+    by.strip_prefix("orchestrator-")
+        .is_some_and(|t| e.str("thread") == Some(t))
+}
+
+/// `answer` of `ask`; #541: a conductor's (`basis`) also posts its FYI line, and the owner may change one for `CHANGE`.
 #[allow(clippy::too_many_arguments)]
-fn answer_with(
+pub(crate) fn answer_with(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn runner::Runner,
     out: &mut dyn Write,
-    (fleet, id): (&str, &str),
+    ask: &Event,
     choice: &str,
     (by, via): (&str, Option<&str>),
     (basis, note): (Option<&str>, Option<&str>),
 ) -> Result<()> {
     let events = read(&ctx.state)?;
-    let is = |e: &&Event, k: &str| e.kind == k && e.fleet == fleet && e.str("id") == Some(id);
-    let Some(ask) = events.iter().find(|e| is(e, "needs-decision")) else {
-        return gate::refused("NO_SUCH_ASK", format!("{fleet} has no ask {id}"));
-    };
-    let last = events.iter().rev().find(|e| is(e, "decision"));
+    let (fleet, id) = (ask.fleet.as_str(), ask.str("id").unwrap_or_default());
+    let last = (events.iter().rev()).find(|e| e.kind == "decision" && events::names(e, ask));
     let orchestrator = |b: &str| b.starts_with("orchestrator-");
     let change = |d: &&Event| {
         d.str("by").is_some_and(orchestrator)
@@ -652,7 +665,10 @@ fn answer_with(
             _ => text,
         };
         if fresh {
-            let d = with_via(json!({"id": id, "choice": text, "by": by, "to": to}), via);
+            let d = with_via(
+                json!({"id": id, "ask_seq": ask.seq, "choice": text, "by": by, "to": to}),
+                via,
+            );
             emit(&ctx.state, cfg, Event::new(ctx.now, fleet, None, "decision", d))?;
         }
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {to}")?);
@@ -669,7 +685,8 @@ fn answer_with(
         let spawn = ask.data["spawn"] != json!(false);
         gate::needs_human(ctx, cfg, r, out, (fleet, n), "extend", (spawn, by, None))?;
     }
-    let mut d = json!({"id": id, "choice": text, "by": by, "basis": basis, "note": note, "via": via});
+    let mut d =
+        json!({"id": id, "ask_seq": ask.seq, "choice": text, "by": by, "basis": basis, "note": note, "via": via});
     d.as_object_mut().iter_mut().for_each(|m| m.retain(|_, v| !v.is_null()));
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, ask.issue, "decision", d))?;
     // #779: a `RESPAWN_LOOP` ask's [park] parks the issue ([try again] is the decision spawn reads).

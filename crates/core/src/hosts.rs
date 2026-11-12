@@ -526,7 +526,6 @@ fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
     };
     let events = read(&ctx.state).unwrap_or_default();
     let (states, max_age) = (fold(&events), cfg.limits.import_max_age_hours * 3600);
-    let mut n = events.iter().filter(|e| e.kind == "needs-decision").count();
     let mark = |e: &&Event| e.kind == "asks-imported" && e.str("host") == Some(name);
     let upto = events.iter().rev().find(mark).and_then(|e| e.data["upto_ts"].as_u64());
     let remote: Vec<Event> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
@@ -541,14 +540,13 @@ fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
         }
         let lane = (events.iter().rev()).find(|s| s.kind == "spawn" && s.fleet == e.fleet && s.issue == e.issue);
         let mut d = Value::Object(e.data.clone());
-        n += 1;
-        (d["id"], d["from"]) = (json!(format!("q{n}")), json!(from));
+        d["from"] = json!(from);
         if d["agent"].is_null() {
             d["agent"] = json!(lane
                 .filter(|s| s.str("host") == Some(name))
                 .and_then(|s| s.str("agent")));
         }
-        let _ = append(&ctx.state, &Event::new(e.ts, &e.fleet, e.issue, "needs-decision", d));
+        let _ = crate::events::ask(&ctx.state, &Event::new(e.ts, &e.fleet, e.issue, "needs-decision", d));
     }
     if let Some(t) = remote.iter().filter(new).map(|e| e.ts).max() {
         let d = json!({"host": name, "upto_ts": t});

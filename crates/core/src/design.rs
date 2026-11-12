@@ -216,7 +216,6 @@ pub fn handoff(
         .rfind(mark)
         .and_then(|e| e.str("design_thread"))
         .filter(|t| !t.is_empty());
-    let id = format!("q{}", ev.iter().filter(|e| e.kind == "needs-decision").count() + 1);
     let what = if role == "architect" {
         "Architecture (ADR)"
     } else {
@@ -226,9 +225,9 @@ pub fn handoff(
     let link = format!("https://github.com/{}/tree/{head}/{dir}/", cfg.fleet(f)?.repo);
     let summary = summary(r, wt, head, &dir);
     let q = summary.as_ref().map_or(q.clone(), |s| format!("{s}\n\n{link}\n\n{q}"));
-    let d = json!({"id": id, "question": q, "options": OPTIONS, "recommend": null, "kind": "owner", "design": true, "files": files,
+    let d = json!({"question": q, "options": OPTIONS, "recommend": null, "kind": "owner", "design": true, "files": files,
         "thread": thread, "role": role, "summary": summary, "link": link});
-    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "needs-decision", d))
+    crate::events::emit_ask(&ctx.state, cfg, &Event::new(ctx.now, f, Some(n), "needs-decision", d)).map(drop)
 }
 
 fn folder(name: &str, dirs: &[String]) -> String {

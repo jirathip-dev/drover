@@ -74,6 +74,11 @@ pub fn append(path: &Path, ev: &Event) -> Result<()> {
     crate::db::append(path, ev)
 }
 
+/// #906: ask `ev`, a `needs-decision`, under a fresh id (`db::ask`); the event as logged.
+pub fn ask(path: &Path, ev: &Event) -> Result<Event> {
+    crate::db::ask(path, ev)
+}
+
 /// The live log (#343: without the events a rotation archived), by seq.
 pub fn read(path: &Path) -> Result<Vec<Event>> {
     Ok(shared(path)?.events.clone())
@@ -206,6 +211,18 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
 #[allow(clippy::needless_pass_by_value)] // public API: callers and tests hand the event over
 pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     append(state, &ev)?;
+    notify(state, cfg, &ev)
+}
+
+/// #906: `ask`, then `emit`'s notifiers; the ask as logged.
+pub fn emit_ask(state: &Path, cfg: &Config, ev: &Event) -> Result<Event> {
+    let ev = ask(state, ev)?;
+    notify(state, cfg, &ev)?;
+    Ok(ev)
+}
+
+/// Run the notifiers on logged event `ev`.
+fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
     // #99: phones hear of owner asks and of each default taken, never of a routine ask merely waiting.
     // #407: a thread open on a board (its stream stamped `watch-<thread>.at` in the last 5 s) pushes nothing.
     let at = |t: &str| std::fs::read_to_string(state.with_file_name(format!("watch-{t}.at"))).ok();
@@ -228,12 +245,12 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     let wanted = |n: &&crate::config::Notify| n.wants(if n.webpush() { push } else { &ev.kind });
     for n in cfg.notifiers(&ev.fleet).into_iter().filter(wanted) {
         let payload = if n.format.as_deref() == Some("json") {
-            serde_json::to_string(&ev)?
+            serde_json::to_string(ev)?
         } else {
-            plain(&ev) + "\n"
+            plain(ev) + "\n"
         };
         let res = if n.webpush() {
-            crate::webpush::send(state, n.sub.as_deref().unwrap_or_default(), &ev, None).map(drop)
+            crate::webpush::send(state, n.sub.as_deref().unwrap_or_default(), ev, None).map(drop)
         } else {
             run_notifier(&n.cmd, &payload)
         };
@@ -731,13 +748,20 @@ pub fn closed_row(events: &[Event], a: &Event) -> Option<String> {
     })
 }
 
+/// #906: `e` (a decision or an `ask-*` ending) is about ask `a`: by its `ask_seq`; one from before #906 by id, on
+/// the ask's issue or none.
+pub fn names(e: &Event, a: &Event) -> bool {
+    let seq = e.data.get("ask_seq").and_then(Value::as_u64);
+    e.str("id") == a.str("id") && seq.map_or(e.issue.is_none() || e.issue == a.issue, |s| s == a.seq)
+}
+
 /// #447: what later event `e` does to ask `a` (`closed`'s reasons, one event at a time). `own`: `e`'s
 /// `spawn-started` came before the ask, so a `spawn` `e` is the asking lane itself (#446).
 fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option<&'static str> {
     VISITS.fetch_add(1, Relaxed);
     let on = |k: &str| e.kind == k && a.issue.is_some() && e.issue == a.issue;
     let mine = matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
-    let id = e.str("id") == a.str("id");
+    let id = names(e, a);
     if e.fleet != a.fleet {
         None
     } else if e.kind == "decision" && id {

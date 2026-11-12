@@ -191,6 +191,22 @@ pub fn claim(
     })
 }
 
+/// #906: ask `ev` under the next id (the highest `q<n>` logged, plus 1), read and appended in one transaction.
+pub fn ask(state: &Path, ev: &Event) -> Result<Event> {
+    crate::sim::point(&crate::sim::Point::Append(ev));
+    with(state, true, ev.clone(), |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let q = "SELECT COALESCE(MAX(CAST(SUBSTR(json_extract(json, '$.id'), 2) AS INTEGER)), 0) FROM events \
+            WHERE type = 'needs-decision' AND json_extract(json, '$.id') GLOB 'q[0-9]*'";
+        let n: u64 = tx.query_row(q, [], |r| r.get(0))?;
+        let mut ev = ev.clone();
+        ev.data.insert("id".into(), format!("q{}", n + 1).into());
+        insert(&tx, &ev, None, false)?;
+        tx.commit()?;
+        Ok(ev)
+    })
+}
+
 /// #509: mark trigger `id` processed; false if it already was.
 pub fn processed(state: &Path, id: &str, now: u64) -> Result<bool> {
     let q = "INSERT OR IGNORE INTO processed (id, at) VALUES (?1, ?2)";

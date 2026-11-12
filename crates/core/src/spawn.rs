@@ -1786,15 +1786,11 @@ fn respawn_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue, role)
         failed.join("; ")
     );
     if asked.is_none() {
-        let id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
         let q = format!("#{issue}'s {role} lane keeps failing at start: {}", failed.join("; "));
-        let d = json!({"id": id, "question": q, "options": ["try again", "park"], "recommend": null, "agent": null,
+        let d = json!({"question": q, "options": ["try again", "park"], "recommend": null, "agent": null,
             "kind": "owner", "respawn_loop": role});
-        emit(
-            &ctx.state,
-            cfg,
-            Event::new(ctx.now, fleet, Some(issue), "needs-decision", d),
-        )?;
+        let ev = Event::new(ctx.now, fleet, Some(issue), "needs-decision", d);
+        crate::events::emit_ask(&ctx.state, cfg, &ev)?;
     }
     refused("RESPAWN_LOOP", why)
 }

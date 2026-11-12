@@ -349,17 +349,17 @@ pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]:
     // The newest 4, then the new thread; the rest after it, behind the board's `more` row.
     opts.insert(opts.len().min(4), format!("new thread: {title}"));
     targets.insert(targets.len().min(4), "new");
-    let q = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
     let question = format!("Hand off \"{title}\" to which {to} thread? Nothing is delivered until you tap one.");
-    let d = json!({"id": q, "question": question, "options": opts, "recommend": null, "kind": "owner", "thread": from,
+    let d = json!({"question": question, "options": opts, "recommend": null, "kind": "owner", "thread": from,
         "handoff": {"repo": to, "title": title, "text": text, "targets": targets}, "forwards": fwd});
-    emit(
+    let ev = events::emit_ask(
         &ctx.state,
         cfg,
-        Event::new(ctx.now, &t.fleet, None, "needs-decision", d),
+        &Event::new(ctx.now, &t.fleet, None, "needs-decision", d),
     )?;
     Ok(format!(
-        "{q}: the owner picks the thread; nothing is delivered until then"
+        "{}: the owner picks the thread; nothing is delivered until then",
+        ev.str("id").unwrap_or_default()
     ))
 }
 
@@ -421,7 +421,7 @@ pub fn land(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) 
     };
     // #584: a handoff that fails to go out closes its card as failed; #621: its full error is a row in the source.
     if let Err(e) = &sent {
-        let d = json!({"id": id, "to": to, "reason": format!("{e:#}")});
+        let d = json!({"id": id, "ask_seq": ask.seq, "to": to, "reason": format!("{e:#}")});
         emit(&ctx.state, cfg, Event::new(ctx.now, &ask.fleet, None, "ask-failed", d))?;
         let text = format!("✗ {id} not delivered to {to}: {e:#}");
         log(ctx, cfg, find(&events, from)?, "system", (&text, &[]))?;
