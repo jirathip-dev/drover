@@ -1,24 +1,24 @@
-//! #1: only `herdsman migrate` moves the pre-rename `~/.config/fleet` and
-//! `~/.local/state/fleet`; other commands read them in place, under a fake HOME.
+//! #456: only `drover migrate` moves the pre-rename herdsman config, state and share trees; until then the hook reads
+//! them in place and every other command refuses, under a fake HOME.
 mod common;
 use common::tmpdir;
-use herdsman::events::Event;
+use drover::events::Event;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const CONFIG: &str = "[fleet.s]\nrepo = \"a/s\"\nlocal = \"/tmp/x\"\nintegration = \"staging\"\n";
 
-/// `herdsman <args>` with HOME = HERDSMAN_HOME = `home`, no path overrides, `stdin` piped:
+/// `drover <args>` with HOME = DROVER_HOME = `home`, no path overrides, `stdin` piped:
 /// (exit, stdout, stderr).
 fn run_in(home: &Path, args: &[&str], envs: &[(&str, &str)], stdin: &str) -> (i32, String, String) {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_herdsman"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_drover"))
         .args(args)
         .env("HOME", home)
-        .env("HERDSMAN_HOME", home)
+        .env("DROVER_HOME", home)
         .env_remove("FLEET_CONFIG")
         .env_remove("FLEET_STATE")
-        .env_remove("HERDSMAN_LANE")
+        .env_remove("DROVER_LANE")
         .env_remove("FLEET_LANE")
         .envs(envs.iter().copied())
         .stdin(Stdio::piped())
@@ -53,7 +53,7 @@ fn seed(home: &Path, name: &str) {
 fn seed_db(home: &Path, name: &str) {
     seed(home, name);
     let state = home.join(".local/state").join(name).join("events.jsonl");
-    herdsman::db::migrate(&state, &mut std::io::sink()).unwrap();
+    drover::db::migrate(&state, &mut std::io::sink()).unwrap();
 }
 
 /// Every path under `dir` with its mtime and (for files) contents.
@@ -76,13 +76,13 @@ fn snapshot(dir: &Path) -> Vec<(PathBuf, std::time::SystemTime, Vec<u8>)> {
 }
 
 fn moved(h: &Path) -> bool {
-    h.join(".config/herdsman").exists() || h.join(".local/state/herdsman").exists()
+    h.join(".config/drover").exists() || h.join(".local/state/drover").exists()
 }
 
 #[test]
 fn version_and_help_touch_nothing() {
     let h = tmpdir("migrate-pure");
-    seed(&h, "fleet");
+    seed(&h, "herdsman");
     let before = snapshot(&h);
     for args in [&["--version"][..], &["--help"], &["status", "--help"]] {
         let (code, out, err) = run(&h, args);
@@ -94,26 +94,17 @@ fn version_and_help_touch_nothing() {
 }
 
 #[test]
-fn status_reads_old_paths_in_place_and_hints_once() {
+fn status_refuses_until_migrated_and_moves_nothing() {
     let h = tmpdir("migrate-fallback");
-    seed_db(&h, "fleet");
+    seed_db(&h, "herdsman");
     let before = snapshot(&h.join(".config"));
     let (code, out, err) = run(&h, &["status"]);
-    assert_eq!(code, 0, "{err}");
-    assert!(
-        out.contains("12") && out.contains("merged"),
-        "real history, not an empty board: {out}"
+    let old = [".config/herdsman", ".local/state/herdsman"].map(|d| h.join(d).display().to_string());
+    let line = format!(
+        "drover: {} is from before the rename: run `drover migrate` first\n",
+        old.join(", ")
     );
-    let hint = |what: &str, d: &str| {
-        format!(
-            "herdsman: found pre-rename {what} at {}; run 'herdsman migrate' to move it",
-            h.join(d).display()
-        )
-    };
-    assert_eq!(err.matches(&hint("config", ".config/fleet")).count(), 1, "{err}");
-    assert_eq!(err.matches(&hint("state", ".local/state/fleet")).count(), 1, "{err}");
-    assert_eq!(err.lines().count(), 2, "{err}");
-    assert!(h.join(".local/state/fleet/state.db").exists());
+    assert_eq!((code, out.as_str(), err), (1, "", line));
     assert_eq!(snapshot(&h.join(".config")), before, "nothing moved");
     assert!(!moved(&h));
 }
@@ -127,48 +118,46 @@ fn status_with_neither_home_is_an_empty_board_without_hint() {
 }
 
 #[test]
-fn existing_new_dirs_win_and_old_ones_are_left_alone() {
+fn with_both_trees_the_new_one_is_read_and_migrate_moves_nothing() {
     let h = tmpdir("migrate-both");
-    seed_db(&h, "fleet");
     seed_db(&h, "herdsman");
-    std::fs::write(h.join(".config/fleet/fleet.toml"), "# old\n").unwrap();
+    seed_db(&h, "drover");
+    std::fs::write(h.join(".config/herdsman/fleet.toml"), "# old\n").unwrap();
     let (code, _, err) = run(&h, &["status"]);
     assert_eq!((code, err.as_str()), (0, ""));
-    let (code, out, _) = run(&h, &["migrate", "--live"]);
-    assert_eq!(code, 0);
-    assert_eq!(out.matches("already exists").count(), 2, "{out}");
-    assert_eq!(
-        std::fs::read_to_string(h.join(".config/fleet/fleet.toml")).unwrap(),
-        "# old\n"
-    );
-    assert_eq!(
-        std::fs::read_to_string(h.join(".config/herdsman/fleet.toml")).unwrap(),
-        CONFIG
-    );
-    assert!(h.join(".local/state/fleet/state.db").exists());
+    let before = snapshot(&h);
+    let (code, out, err) = run(&h, &["migrate", "--live"]);
+    assert_eq!((code, out.as_str()), (1, ""), "{err}");
+    let both = [".config/herdsman", ".config/drover"].map(|d| h.join(d).display().to_string());
+    let line = format!("both {} and {} exist: nothing moved; keep one", both[0], both[1]);
+    assert!(err.contains(&line), "{err}");
+    assert_eq!(snapshot(&h), before, "nothing touched");
 }
 
 #[test]
 fn migrate_moves_both_once() {
     let h = tmpdir("migrate-move");
-    seed(&h, "fleet");
+    seed(&h, "herdsman");
     let (code, out, err) = run(&h, &["migrate", "--live"]);
     assert_eq!(code, 0, "{err}");
     for d in [".config", ".local/state"] {
         let line = format!(
             "moved {} -> {}",
-            h.join(d).join("fleet").display(),
-            h.join(d).join("herdsman").display()
+            h.join(d).join("herdsman").display(),
+            h.join(d).join("drover").display()
         );
         assert!(out.contains(&line), "{out}");
     }
-    assert!(!h.join(".config/fleet").exists() && !h.join(".local/state/fleet").exists());
+    for d in [".config", ".local/state"] {
+        let link = std::fs::read_link(h.join(d).join("herdsman")).unwrap();
+        assert_eq!(link, h.join(d).join("drover"), "the old name is a link to the new tree");
+    }
     assert_eq!(
-        std::fs::read_to_string(h.join(".config/herdsman/fleet.toml")).unwrap(),
+        std::fs::read_to_string(h.join(".config/drover/fleet.toml")).unwrap(),
         CONFIG
     );
     // #344: and its log imported into the database there.
-    let st = h.join(".local/state/herdsman");
+    let st = h.join(".local/state/drover");
     assert!(st.join("state.db").exists() && st.join("events.jsonl.migrated").exists());
     // Second run: a no-op (#344: nothing left to import either; the database's own files may be touched).
     let before = snapshot(&h.join(".config"));
@@ -191,7 +180,7 @@ fn migrate_with_nothing_to_move_says_so() {
     let h = tmpdir("migrate-empty");
     let (code, out, err) = run(&h, &["migrate", "--live"]);
     assert_eq!(code, 0, "{err}");
-    assert_eq!(out.matches("nothing to move").count(), 2, "{out}");
+    assert_eq!(out.matches("nothing to move").count(), 3, "{out}");
     assert!(!h.join(".config").exists());
 }
 
@@ -199,18 +188,18 @@ fn migrate_with_nothing_to_move_says_so() {
 fn failed_state_move_rolls_the_config_move_back() {
     use std::os::unix::fs::PermissionsExt;
     let h = tmpdir("migrate-rollback");
-    seed(&h, "fleet");
+    seed(&h, "herdsman");
     let parent = h.join(".local/state");
     std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o555)).unwrap();
     let (code, out, err) = run(&h, &["migrate", "--live"]);
     std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert_ne!(code, 0, "{out}");
-    let (old, new) = (parent.join("fleet"), parent.join("herdsman"));
+    let (old, new) = (parent.join("herdsman"), parent.join("drover"));
     assert!(
         err.contains(&format!("moving {} -> {} failed", old.display(), new.display())),
         "{err}"
     );
-    let (cold, cnew) = (h.join(".config/fleet"), h.join(".config/herdsman"));
+    let (cold, cnew) = (h.join(".config/herdsman"), h.join(".config/drover"));
     assert!(
         err.contains(&format!("rolled back {} -> {}", cnew.display(), cold.display())),
         "{err}"
@@ -228,15 +217,15 @@ fn failed_state_move_rolls_the_config_move_back() {
 fn symlinked_old_dir_migrates_as_a_link() {
     let h = tmpdir("migrate-link");
     seed(&h, "real");
-    std::os::unix::fs::symlink(h.join(".config/real"), h.join(".config/fleet")).unwrap();
-    std::os::unix::fs::symlink(h.join(".local/state/real"), h.join(".local/state/fleet")).unwrap();
+    std::os::unix::fs::symlink(h.join(".config/real"), h.join(".config/herdsman")).unwrap();
+    std::os::unix::fs::symlink(h.join(".local/state/real"), h.join(".local/state/herdsman")).unwrap();
     let (code, _, err) = run(&h, &["migrate", "--live"]);
     assert_eq!(code, 0, "{err}");
     let (code, out, err) = run(&h, &["status"]);
     assert_eq!((code, err.as_str()), (0, ""));
     assert!(out.contains("merged"), "{out}");
     assert_eq!(
-        std::fs::read_to_string(h.join(".config/herdsman/fleet.toml")).unwrap(),
+        std::fs::read_to_string(h.join(".config/drover/fleet.toml")).unwrap(),
         CONFIG
     );
     assert!(h.join(".config/real/fleet.toml").exists(), "link target untouched");
@@ -248,14 +237,14 @@ fn hook_with_pre_rename_home_prints_only_its_json_decision() {
     let cmd = ["gh", "pr", "merge", "5"].join(" ");
     let input = serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Bash",
         "cwd": std::env::temp_dir(), "tool_input": {"command": cmd}});
-    let lane = [("HERDSMAN_LANE", "s:12:impl")];
+    let lane = [("DROVER_LANE", "s:12:impl")];
     let decide = |h: &Path| run_in(h, &["hook", "--role", "impl"], &lane, &input.to_string());
     let clean = tmpdir("migrate-hook-clean");
-    seed(&clean, "herdsman");
+    seed(&clean, "drover");
     let (code, want, _) = decide(&clean);
     assert_eq!(code, 0);
     let h = tmpdir("migrate-hook");
-    seed(&h, "fleet");
+    seed(&h, "herdsman");
     let before = snapshot(&h);
     let (code, out, err) = decide(&h);
     assert_eq!((code, err.as_str()), (0, ""), "no stderr at all");
@@ -263,6 +252,48 @@ fn hook_with_pre_rename_home_prints_only_its_json_decision() {
     let v: serde_json::Value = serde_json::from_str(out.trim()).expect("stdout is exactly one JSON value");
     assert!(v.to_string().contains("deny"), "{v}");
     assert_eq!(snapshot(&h), before, "hook never migrates");
+}
+
+#[test]
+fn the_old_lane_variable_alone_still_arms_the_hook() {
+    let cmd = ["gh", "pr", "merge", "5"].join(" ");
+    let input = serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Bash",
+        "cwd": std::env::temp_dir(), "tool_input": {"command": cmd}});
+    let h = tmpdir("migrate-hook-old-var");
+    seed(&h, "drover");
+    let decide = |var: &str| {
+        run_in(
+            &h,
+            &["hook", "--role", "impl"],
+            &[(var, "s:12:impl")],
+            &input.to_string(),
+        )
+    };
+    let (code, new, _) = decide("DROVER_LANE");
+    assert!(code == 0 && new.contains("deny"), "{new}");
+    assert_eq!(decide("HERDSMAN_LANE"), (0, new, String::new()));
+}
+
+#[test]
+fn run_as_herdsman_it_works_and_prints_the_rename_notice() {
+    let h = tmpdir("migrate-alias");
+    seed_db(&h, "drover");
+    let alias = h.join("herdsman");
+    std::os::unix::fs::symlink(env!("CARGO_BIN_EXE_drover"), &alias).unwrap();
+    let o = Command::new(&alias)
+        .arg("status")
+        .env("HOME", &h)
+        .env("DROVER_HOME", &h)
+        .env_remove("FLEET_CONFIG")
+        .env_remove("FLEET_STATE")
+        .output()
+        .unwrap();
+    let (out, err) = (
+        String::from_utf8(o.stdout).unwrap(),
+        String::from_utf8(o.stderr).unwrap(),
+    );
+    assert!(o.status.success() && out.contains("merged"), "{out} / {err}");
+    assert_eq!(err, "herdsman is now drover: the old name works for one more release\n");
 }
 
 /// #9: a set-but-empty path variable is unset, never the empty (cwd-relative) path.
@@ -276,47 +307,44 @@ const EMPTY: [(&str, &str); 4] = [
 #[test]
 fn empty_path_vars_resolve_to_the_defaults() {
     let h = tmpdir("migrate-empty-vars");
-    seed_db(&h, "herdsman");
+    seed_db(&h, "drover");
     for home in ["", h.to_str().unwrap()] {
-        let envs: Vec<_> = EMPTY.iter().copied().chain([("HERDSMAN_HOME", home)]).collect();
+        let envs: Vec<_> = EMPTY.iter().copied().chain([("DROVER_HOME", home)]).collect();
         let (code, out, err) = run_in(&h, &["status"], &envs, "");
-        assert_eq!((code, err.as_str()), (0, ""), "HERDSMAN_HOME={home:?}");
+        assert_eq!((code, err.as_str()), (0, ""), "DROVER_HOME={home:?}");
         assert!(
             out.contains("12") && out.contains("merged"),
             "real history, not an empty board: {out}"
         );
     }
-    // Empty HERDSMAN_HOME falls back to $HOME, pre-rename hint included.
+    // Empty DROVER_HOME falls back to $HOME, where the pre-rename trees refuse.
     let old = tmpdir("migrate-empty-vars-old");
-    seed_db(&old, "fleet");
-    let envs: Vec<_> = EMPTY.iter().copied().chain([("HERDSMAN_HOME", "")]).collect();
+    seed_db(&old, "herdsman");
+    let envs: Vec<_> = EMPTY.iter().copied().chain([("DROVER_HOME", "")]).collect();
     let (code, out, err) = run_in(&old, &["status"], &envs, "");
-    assert_eq!(code, 0, "{err}");
-    assert!(
-        out.contains("merged") && err.contains("found pre-rename config"),
-        "{out} / {err}"
-    );
+    assert_eq!((code, out.as_str()), (1, ""), "{err}");
+    assert!(err.contains("run `drover migrate` first"), "{err}");
 }
 
 #[test]
-fn migrate_refuses_an_empty_herdsman_home_and_leaves_the_cwd_alone() {
+fn migrate_refuses_an_empty_drover_home_and_leaves_the_cwd_alone() {
     let (h, cwd) = (tmpdir("migrate-empty-home"), tmpdir("migrate-empty-cwd"));
-    seed(&h, "fleet");
-    seed(&cwd, "fleet");
+    seed(&h, "herdsman");
+    seed(&cwd, "herdsman");
     let (bh, bc) = (snapshot(&h), snapshot(&cwd));
-    let o = Command::new(env!("CARGO_BIN_EXE_herdsman"))
+    let o = Command::new(env!("CARGO_BIN_EXE_drover"))
         .arg("migrate")
         .current_dir(&cwd)
         .env("HOME", &h)
-        .env("HERDSMAN_HOME", "")
+        .env("DROVER_HOME", "")
         .envs(EMPTY)
-        .env_remove("HERDSMAN_LANE")
+        .env_remove("DROVER_LANE")
         .env_remove("FLEET_LANE")
         .output()
         .unwrap();
     let err = String::from_utf8(o.stderr).unwrap();
     assert_ne!(o.status.code(), Some(0), "{err}");
-    assert!(err.contains("HERDSMAN_HOME is set but empty"), "{err}");
+    assert!(err.contains("DROVER_HOME is set but empty"), "{err}");
     assert!(o.stdout.is_empty(), "nothing moved or reported");
     assert_eq!(
         (snapshot(&h), snapshot(&cwd)),
@@ -330,8 +358,8 @@ fn migrate_refuses_an_empty_herdsman_home_and_leaves_the_cwd_alone() {
 #[test]
 fn the_live_state_dir_is_migrated_only_with_live() {
     let h = tmpdir("migrate-live");
-    seed(&h, "herdsman");
-    let st = h.join(".local/state/herdsman");
+    seed(&h, "drover");
+    let st = h.join(".local/state/drover");
     let before = snapshot(&st);
     for args in [&["status"][..], &["migrate"]] {
         let (code, _, err) = run(&h, args);

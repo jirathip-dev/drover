@@ -1,5 +1,5 @@
-//! #538: run cards. A conductor posts an ad-hoc owner-level command in its thread (`herdsman card post`): the exact
-//! command, why, its blast radius and its folder. The owner's [approve] (within 15 min of the post) has herdsman run
+//! #538: run cards. A conductor posts an ad-hoc owner-level command in its thread (`drover card post`): the exact
+//! command, why, its blast radius and its folder. The owner's [approve] (within 15 min of the post) has drover run
 //! that exact text once on the main host, its exit code and output tail (secrets masked) posted back into the thread;
 //! [deny] runs nothing. Both are logged `by: owner` with the card id and the command's sha. `CARD_FORBIDDEN` refuses
 //! the hard-nos at posting, and the hook refuses them from a conductor's own shell.
@@ -67,14 +67,14 @@ pub fn forbidden(cmd: &str) -> Option<&'static str> {
     if (del && any(&|x| x.contains("protection") || x.contains("rulesets")))
         || has("--owner-override")
         || has("--no-verify")
-        || (has("herdsman") && has("timer") && has("remove"))
+        || ((has("drover") || has("herdsman")) && has("timer") && has("remove"))
     {
-        return Some("turns off branch protection or herdsman's gates");
+        return Some("turns off branch protection or drover's gates");
     }
     None
 }
 
-/// `herdsman card post`: log card `r<n>` in `thread`; its id.
+/// `drover card post`: log card `r<n>` in `thread`; its id.
 pub fn post(ctx: &Ctx, cfg: &Config, thread: &str, c: &Card) -> Result<String> {
     if let Some(w) = forbidden(c.cmd) {
         return refused("CARD_FORBIDDEN", format!("this command {w}; no run card may"));
@@ -205,7 +205,7 @@ pub fn text(e: &Event) -> String {
     let s = |k: &str| e.str(k).unwrap_or_default();
     let id = s("id");
     format!(
-        "run card {id}: `{}`\nwhy: {}\ntouches: {}\nruns on: {} host, {}\n[approve] herdsman card approve {id} --sha {} · [deny] herdsman card deny {id} (expires 15 min after posting)",
+        "run card {id}: `{}`\nwhy: {}\ntouches: {}\nruns on: {} host, {}\n[approve] drover card approve {id} --sha {} · [deny] drover card deny {id} (expires 15 min after posting)",
         s("cmd"),
         s("why"),
         s("blast"),

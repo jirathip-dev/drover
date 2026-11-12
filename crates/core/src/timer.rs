@@ -7,23 +7,23 @@ use std::io::Write;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
-pub const TICK: &str = "dev.herdsman.tick";
+pub const TICK: &str = "dev.drover.tick";
 /// #212: the every-minute `drive --fast` job, its own job so the slow tick never delays it.
-pub const FAST: &str = "dev.herdsman.fast";
+pub const FAST: &str = "dev.drover.fast";
 /// #237: the build's own jobs (label, args); `install` derives each one's interval from its args.
-/// #345: `herdsman service`, kept alive; it runs the fast step itself (and the board with `--board`).
-pub const SERVICE: &str = "dev.herdsman.service";
+/// #345: `drover service`, kept alive; it runs the fast step itself (and the board with `--board`).
+pub const SERVICE: &str = "dev.drover.service";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
-/// #557: herdsman's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
-pub const UPDATE: &str = "dev.herdsman.update";
-pub const CLEAN: &str = "dev.herdsman.clean";
+/// #557: drover's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
+pub const UPDATE: &str = "dev.drover.update";
+pub const CLEAN: &str = "dev.drover.clean";
 /// #894: the optional read-only staging serve (`[self_update] staging_serve`), from its own install root.
-pub const STAGING: &str = "dev.herdsman.serve-staging";
+pub const STAGING: &str = "dev.drover.serve-staging";
 pub const MORE: [(&str, &[&str]); 2] = [(UPDATE, &["self-update"]), (CLEAN, &["clean", "--scheduled"])];
 /// #557: the `every` of a job that runs daily at 03:30 (launchd `StartCalendarInterval`, systemd `OnCalendar`).
 pub const DAILY: u64 = 86_400;
 const MAC: bool = cfg!(target_os = "macos");
-const FIX: &str = "herdsman timer install";
+const FIX: &str = "drover timer install";
 const ABANDON: &str = "<key>AbandonProcessGroup</key><true/>";
 const HANDOFF: &str = "restart herdr to finish the update: `herdr update --handoff`";
 /// One Services row: (item, tone `g|a|r`, detail, the fix shown on red).
@@ -136,7 +136,7 @@ pub fn job_path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     got.unwrap_or_else(|| path(ctx, cfg, r))
 }
 
-/// The jobs' PATH: the dirs of the harness binaries, `gh`, `herdr`, `shed` (#600) and herdsman, then the system dirs
+/// The jobs' PATH: the dirs of the harness binaries, `gh`, `herdr`, `shed` (#600) and drover, then the system dirs
 /// (`/usr/sbin:/sbin` for `sysctl` and `vm_stat`, the #30 lesson).
 fn path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     let roles = cfg.fleet.values().flat_map(|f| f.role.values());
@@ -170,6 +170,15 @@ pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&st
             return format!("✗ {label}: {e} → check {}", p.display());
         }
     }
+    let was = label.replace("dev.drover.", "dev.herdsman.");
+    let stale: Vec<String> = (self::files(ctx, &was, &[], "", u64::from(every), MAC).iter())
+        .filter(|f| was != label && f.0.exists())
+        .map(|f| f.0.display().to_string())
+        .collect();
+    if !stale.is_empty() {
+        let off = &ctl(ctx, &was, every)[2];
+        return format!("✓ wrote {label}; swap it in: {off}; rm {} && {up}", stale.join(" "));
+    }
     if !load {
         return format!("✓ wrote {label}; load it: {up}");
     }
@@ -182,7 +191,7 @@ pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&st
     exec(r, &up).map_or_else(|e| format!("✗ {label}: {e:#} → {up}"), |_| format!("✓ {up}"))
 }
 
-/// `herdsman timer install|remove|status`.
+/// `drover timer install|remove|status`.
 pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: (&str, &str, bool)) -> Result<i32> {
     let (action, label, load) = cmd;
     let both = [(label, JOBS[0].1), JOBS[1], MORE[0], MORE[1]];
@@ -214,19 +223,19 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
     Ok(i32::from(line.contains('✗')))
 }
 
-/// #461: log `timer-install`: `by` the owner or the lane (`HERDSMAN_LANE`), the jobs written and the labels
-/// reloaded; a conductor's thread (`HERDSMAN_THREAD`) shows it as a system line.
+/// #461: log `timer-install`: `by` the owner or the lane (`DROVER_LANE`), the jobs written and the labels
+/// reloaded; a conductor's thread (`DROVER_THREAD`) shows it as a system line.
 fn installed(ctx: &Ctx, cfg: &Config, lines: &[(&str, String)]) -> Result<()> {
-    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+    let lane = std::env::var("DROVER_LANE").unwrap_or_default();
     let pick = |f: fn(&str) -> bool| lines.iter().filter(|l| f(&l.1)).map(|l| l.0).collect::<Vec<_>>();
     let written = pick(|s| !s.starts_with("= ") && !s.contains("→ check"));
     let reloaded = pick(|s| s.starts_with("✓ ") && !s.starts_with("✓ wrote"));
     let by = if lane.is_empty() { "owner" } else { &lane };
     let mut d = serde_json::json!({"by": by, "written": written, "reloaded": reloaded});
-    if let Some(t) = std::env::var("HERDSMAN_THREAD").ok().filter(|t| !t.is_empty()) {
+    if let Some(t) = std::env::var("DROVER_THREAD").ok().filter(|t| !t.is_empty()) {
         d["thread"] = t.into();
     }
-    let ev = Event::new(ctx.now, "herdsman", None, "timer-install", d);
+    let ev = Event::new(ctx.now, "drover", None, "timer-install", d);
     emit(&ctx.state, cfg, ev)
 }
 
@@ -237,10 +246,10 @@ fn alert(ctx: &Ctx, cfg: &Config, events: &[Event], kind: &str, item: &str, reas
         return Ok(());
     }
     let d = serde_json::json!({"key": item, "reason": reason});
-    emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))
+    emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))
 }
 
-/// `herdsman tick`: `check`, then `drive` (under #92's lock), the hourly clean, remote build trims, then an hourly alert per
+/// `drover tick`: `check`, then `drive` (under #92's lock), the hourly clean, remote build trims, then an hourly alert per
 /// red Services row. A refusal exits 0; a real error (config, herdr) logs `tick-failed`, alerted at most hourly, and
 /// exits 1. #561: one probe per remote host, 15 s per remote call; `tick.step` names the step for `tick-stuck`.
 pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
@@ -360,7 +369,7 @@ fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<(
             emit(
                 &ctx.state,
                 cfg,
-                Event::new(ctx.now, "herdsman", None, "timer-repaired", d),
+                Event::new(ctx.now, "drover", None, "timer-repaired", d),
             )?;
         } else {
             alert(ctx, cfg, events, "timer-repair-failed", label, &line)?;
@@ -387,12 +396,12 @@ fn snap(ctx: &Ctx, cfg: &Config) -> Vec<(PathBuf, Vec<u8>)> {
     v
 }
 
-/// `herdsman setup`: tick job, board job (or adopt one under another label), tailscale serve, profiles sync, then
+/// `drover setup`: tick job, board job (or adopt one under another label), tailscale serve, profiles sync, then
 /// doctor, whose exit code it returns. Each step prints `✓ done`, `= already` or `✗ <error> → <fix>`.
 pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Result<i32> {
     let cfg = Config::load(&ctx.config)?;
     let (label, addr) = (cfg.serve.launchd_label.as_deref(), cfg.serve.addr());
-    let label = label.unwrap_or("dev.herdsman.serve");
+    let label = label.unwrap_or("dev.drover.serve");
     let other = crate::doctor::serve_plist(ctx).filter(|p| MAC && !p.ends_with(format!("{label}.plist")));
     let board = match other {
         Some(p) => format!("= adopted {} (re-labelling is manual: docs/setup.md)", p.display()),
@@ -413,7 +422,7 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
     let before = snap(ctx, &cfg);
     let synced = crate::spawn::profiles_sync(ctx, &cfg, &crate::usage_doc(), &mut std::io::sink());
     let sync = match synced {
-        Err(e) => format!("✗ profiles sync: {e:#} → herdsman profiles sync"),
+        Err(e) => format!("✗ profiles sync: {e:#} → drover profiles sync"),
         Ok(()) if snap(ctx, &cfg) == before => "= already profiles synced".into(),
         Ok(()) => "✓ profiles synced".into(),
     };
@@ -428,14 +437,14 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
     crate::doctor::doctor(ctx, r, out, false, false)
 }
 
-/// #345 `herdsman service --install`: write its unit (kept alive: launchd/systemd restart it) and print the commands
+/// #345 `drover service --install`: write its unit (kept alive: launchd/systemd restart it) and print the commands
 /// that swap it in for the fast-step job (and the board job, with `--board`); loads nothing itself.
 pub fn service_unit(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, api: &str, board: Option<&str>) -> Result<()> {
     let cfg = Config::load(&ctx.config)?;
     let mut args = vec!["service", "--api", api];
     args.extend(board.iter().flat_map(|b| ["--board", *b]));
     writeln!(out, "{}", install(ctx, &cfg, r, SERVICE, &args, false))?;
-    let serve = cfg.serve.launchd_label.as_deref().unwrap_or("dev.herdsman.serve");
+    let serve = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
     writeln!(out, "To swap it in, run:")?;
     for (label, every) in std::iter::once((FAST, true)).chain(board.map(|_| (serve, false))) {
         writeln!(out, "  {}", ctl(ctx, label, every)[2])?;
@@ -515,7 +524,7 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let board = board.or_else(|| listens().then(|| format!("listening on {addr}")));
     let t = if board.is_some() { "g" } else { "r" };
     let d = board.unwrap_or(format!("down on {addr}"));
-    let mut rows = vec![row("board", t, d, "herdsman setup")];
+    let mut rows = vec![row("board", t, d, "drover setup")];
     // #237: each own job against this build, folded into its step's row: red unless loaded.
     let drift = drift(ctx, cfg, r);
     let service = crate::service::up(ctx);
@@ -532,7 +541,7 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
         let last = drive::last_pass(ctx, name);
         let did = events.iter().rfind(|e| e.kind == "driven" && e.fleet == *name);
         let did = did.and_then(|e| e.str("result")).unwrap_or("nothing yet");
-        let driven = format!("herdsman · last pass {} · {did}", ago(ctx.now, last));
+        let driven = format!("drover · last pass {} · {did}", ago(ctx.now, last));
         rows.push(if f.paused {
             row(&item, "a", "paused".into(), "")
         } else {
@@ -567,7 +576,7 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
         rows.push(row(&format!("{rt} lane events"), t, d, ""));
     }
     let (t, d) = phone(ctx, Some(cfg), &events);
-    rows.push(row("phone alerts", t, d, "herdsman push test"));
+    rows.push(row("phone alerts", t, d, "drover push test"));
     let v = herdr_versions(r);
     let shown = |(c, s, _): &(String, String, bool)| format!("client {c}, server {s}");
     let d = v.as_ref().map_or("not on PATH, or no server".into(), shown);
@@ -576,7 +585,7 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     if let Some(gb) = host::free_gb(r) {
         let (min, n) = (cfg.limits.min_free_gb, usize::from);
         let t = ["g", "a", "r"][n(gb <= min * 1.25) + n(gb < min)];
-        rows.push(row("disk", t, format!("{gb:.0} GB free"), "herdsman clean --yes"));
+        rows.push(row("disk", t, format!("{gb:.0} GB free"), "drover clean --yes"));
     }
     // #164: the worktree total from the last walk (#160: never a `du` here), against the budget; amber from 80 %,
     // red over (DISK_BUDGET).
@@ -588,6 +597,6 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
         let t = ["g", "a", "r"][usize::from(gb > budget * 0.8) + usize::from(gb > budget)];
         (t, format!("▕{bar}▏ {gb:.1} / {budget} GB · {}", ago(ctx.now, at)))
     });
-    rows.push(row("fleet disk", t, d, "herdsman clean --yes"));
+    rows.push(row("fleet disk", t, d, "drover clean --yes"));
     rows
 }

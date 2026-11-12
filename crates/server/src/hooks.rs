@@ -10,7 +10,7 @@ use std::net::TcpListener;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Duration;
 
-/// `herdsman serve`: the board on `addr` plus, unless read-only, the Funnel listener on `[serve] hooks_addr` (#626).
+/// `drover serve`: the board on `addr` plus, unless read-only, the Funnel listener on `[serve] hooks_addr` (#626).
 pub fn serve(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool) -> Result<()> {
     board(ctx, r, addr, read_only, !read_only)
 }
@@ -21,7 +21,7 @@ pub fn board(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool, handover: b
     let inherited = got.len() > 0;
     let l = got.next().map_or_else(|| TcpListener::bind(addr), Ok)?;
     let mode = if read_only { "read-only view" } else { "phone page" };
-    eprintln!("herdsman serve: {mode} on http://{}/", l.local_addr()?);
+    eprintln!("drover serve: {mode} on http://{}/", l.local_addr()?);
     let hooks = Config::kept(ctx).map(|c| c.serve.hooks_addr()).unwrap_or_default();
     let hooks = (!read_only && !hooks.is_empty()).then(|| {
         got.next()
@@ -37,10 +37,10 @@ pub fn board(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool, handover: b
     std::thread::scope(|sc| {
         match &hooks {
             Some(Ok(h)) => {
-                eprintln!("herdsman serve: webhooks on http://{}/hooks/github", h.local_addr()?);
+                eprintln!("drover serve: webhooks on http://{}/hooks/github", h.local_addr()?);
                 sc.spawn(move || listen(ctx, r, h, ho));
             }
-            Some(Err((a, e))) => eprintln!("herdsman serve: no webhooks: {a}: {e}"),
+            Some(Err((a, e))) => eprintln!("drover serve: no webhooks: {a}: {e}"),
             None => {}
         }
         crate::serve::serve_with(ctx, r, l, read_only, ho)

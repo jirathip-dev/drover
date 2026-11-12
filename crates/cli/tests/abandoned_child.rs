@@ -1,5 +1,5 @@
 //! #775 AC1, alone in its binary so no other call reaps (polls) the abandoned child during the check.
-use herdsman::runner::{settle, Ended, Proc};
+use drover::runner::{settle, Ended, Proc};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::{Duration, Instant};

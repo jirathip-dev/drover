@@ -1,5 +1,5 @@
 //! `gate::ci_green`, moved out of `src/gate.rs`.
-use herdsman::gate::ci_green;
+use drover::gate::ci_green;
 use serde_json::{json, Value};
 
 fn run(name: &str, conclusion: &str, started: &str) -> Value {

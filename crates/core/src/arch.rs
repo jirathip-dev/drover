@@ -1,4 +1,4 @@
-//! #734: `herdsman arch-check`: a repo's architecture rules in `.herdsman/arch.toml`, checked by plain source scanning
+//! #734: `drover arch-check`: a repo's architecture rules in `.drover/arch.toml`, checked by plain source scanning
 //! of Rust and TypeScript: a layer uses only the layers its `may_use` lists, a banned pattern appears only in its
 //! exceptions, and a file or function over its size limit fails unless the baseline lists it at that size or more.
 use crate::config::glob;
@@ -54,7 +54,7 @@ struct Change {
     text: String,
 }
 
-/// A layer: its files, the names other files use it by (`herdsman_core`, `crate::gate`, `@app/core`; a relative
+/// A layer: its files, the names other files use it by (`drover_core`, `crate::gate`, `@app/core`; a relative
 /// TypeScript import resolves to a path and matches `paths`), and the layers it may use.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -109,7 +109,7 @@ fn any(globs: &[String], p: &str) -> bool {
     globs.iter().any(|g| m(g) || m(&g.replace("/**/", "/")))
 }
 
-/// `herdsman arch-check`: each violation as `file:line: why`, exit 1 on any; `write` records today's size offenders
+/// `drover arch-check`: each violation as `file:line: why`, exit 1 on any; `write` records today's size offenders
 /// as the baseline instead. No config: nothing to check.
 pub fn check(
     config: &Path,
@@ -124,8 +124,8 @@ pub fn check(
         return Ok(0);
     };
     let a: Arch = toml::from_str(&text).with_context(|| format!("parsing {}", config.display()))?;
-    let base_path = a.baseline.as_deref().unwrap_or(".herdsman/arch-baseline.txt");
-    let base_text = std::fs::read_to_string(base_path).unwrap_or_default();
+    let base_path = a.baseline.as_deref().unwrap_or(".drover/arch-baseline.txt");
+    let base_text = std::fs::read_to_string(crate::repo_path(Path::new(base_path))).unwrap_or_default();
     let crossings: BTreeSet<&str> = base_text
         .lines()
         .map(str::trim)
@@ -443,7 +443,7 @@ fn new_comments(diff: &[Change], except: &[String]) -> Vec<String> {
             .filter(|&i| com.get(i) == Some(&true) && !allowed_comment(&lines, &com, i))
         {
             bad.push(format!(
-                "{f}:{}: a new comment (only `// SAFETY:` over unsafe and one `///` on a pub item): put the why in `herdsman why`",
+                "{f}:{}: a new comment (only `// SAFETY:` over unsafe and one `///` on a pub item): put the why in `drover why`",
                 i + 1
             ));
         }
@@ -469,7 +469,7 @@ fn stale_docs(d: &Docs, files: &[String]) -> Vec<String> {
             } else if let Some(s) = c.find_subcommand(w) {
                 c = s;
             } else if n == 0 && w.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
-                return Some(format!("no herdsman command `{w}`"));
+                return Some(format!("no drover command `{w}`"));
             }
         }
         None
@@ -483,7 +483,7 @@ fn stale_docs(d: &Docs, files: &[String]) -> Vec<String> {
                 continue;
             }
             for s in l.split('`').skip(1).step_by(2) {
-                let gap = match (&cli, s.strip_prefix("herdsman ")) {
+                let gap = match (&cli, s.strip_prefix("drover ")) {
                     (Some(_), Some(rest)) => cli_gap(rest),
                     _ if any(&d.skip, s) => None,
                     _ => missing_path(s, if s.starts_with("../") { dir } else { Path::new(".") }),

@@ -1,10 +1,10 @@
 //! #141: each `driven` result as the Host tab's FLEETS row says it: (status, word, plain words + what clears it).
-use herdsman::events::Event;
-use herdsman::serve::in_words;
+use drover::events::Event;
+use drover::serve::in_words;
 use serde_json::json;
 
 fn said(code: Option<&str>, step: &str, issue: u64, result: &str, serial: &str) -> (String, String, String) {
-    let d = json!({"step": step, "code": code, "result": result, "cmd": "herdsman …"});
+    let d = json!({"step": step, "code": code, "result": result, "cmd": "drover …"});
     let (t, w, x) = in_words(&Event::new(1, "synergy", Some(issue), "driven", d), serial);
     (t.into(), w.into(), x)
 }
@@ -17,7 +17,7 @@ fn every_refusal_and_outcome_has_its_plain_words() {
     let busy =
         "REFUSED SERIAL_BUSY: serial #2755 is unmerged (impl), #2782 is unmerged (impl), #2891 is unmerged (impl); \
                 retry after they merge";
-    let exit4 = r#"exit 4: "herdsman-impl-138" ["claude" "fleet-impl"] @ "~/.herdr/worktrees/herdsman/issue-138""#;
+    let exit4 = r#"exit 4: "drover-impl-138" ["claude" "fleet-impl"] @ "~/.herdr/worktrees/drover/issue-138""#;
     let golden: &[Case] = &[
         (
             Some("SERIAL_BUSY"),
@@ -55,9 +55,9 @@ fn every_refusal_and_outcome_has_its_plain_words() {
             Some("DISK_LOW"),
             "start",
             12,
-            "REFUSED DISK_LOW: 8.0 GB free < 10; `herdsman clean --yes`",
+            "REFUSED DISK_LOW: 8.0 GB free < 10; `drover clean --yes`",
             "serial",
-            ["a", "held", "8.0 GB free < 10 GB floor · `herdsman clean --yes`"],
+            ["a", "held", "8.0 GB free < 10 GB floor · `drover clean --yes`"],
         ),
         (
             Some("ALL_CAPPED"),
@@ -112,7 +112,7 @@ fn every_refusal_and_outcome_has_its_plain_words() {
             [
                 "r",
                 "needs you",
-                "#12: /w/issue-12 is no fleet lane and has 2 dirty files · `herdsman kill` it, or spawn `--supersede`",
+                "#12: /w/issue-12 is no fleet lane and has 2 dirty files · `drover kill` it, or spawn `--supersede`",
             ],
         ),
         (
@@ -151,9 +151,9 @@ fn every_refusal_and_outcome_has_its_plain_words() {
             Some("PAUSED"),
             "start",
             12,
-            "REFUSED PAUSED: synergy is paused; `herdsman resume synergy` first",
+            "REFUSED PAUSED: synergy is paused; `drover resume synergy` first",
             "serial",
-            ["m", "paused", "`herdsman resume synergy` first"],
+            ["m", "paused", "`drover resume synergy` first"],
         ),
         (
             Some("EXIT"),
@@ -183,7 +183,7 @@ fn every_refusal_and_outcome_has_its_plain_words() {
             None,
             "start",
             138,
-            r#""herdsman-impl-138" ["claude" "fleet-impl"]"#,
+            r#""drover-impl-138" ["claude" "fleet-impl"]"#,
             "serial",
             ["g", "started", "#138"],
         ),

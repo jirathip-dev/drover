@@ -9,7 +9,7 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-/// The dsh-TUI profile version lanes run; `herdsman spawn` refuses any other.
+/// The dsh-TUI profile version lanes run; `drover spawn` refuses any other.
 pub const DSH_TUI_VERSION: &str = "0.17.0";
 /// The agent label dsh-TUI reports to herdr.
 const LABEL: &str = "dsh-tui";
@@ -32,7 +32,7 @@ fn patch(role: &str) -> String {
         "danger-full-access"
     };
     format!(
-        "# Written by `herdsman profiles sync` for {role} lanes; edits are overwritten.\n\
+        "# Written by `drover profiles sync` for {role} lanes; edits are overwritten.\n\
          - id: sandbox-policy\n  config:\n    mode: {mode}\n    workspaceRoot: !!js process.cwd()\n\
          - id: approval\n  config:\n    policy: never\n"
     )
@@ -60,7 +60,7 @@ impl Provider for Dsh {
 
     fn ready(&self, ctx: &Ctx, r: &dyn Runner, p: &Plan) -> Result<()> {
         if !patch_file(ctx, &p.profile).exists() {
-            bail!("DSH profile {} missing; run `herdsman profiles sync`", p.profile);
+            bail!("DSH profile {} missing; run `drover profiles sync`", p.profile);
         }
         let v = ok(r, "dsh-tui", &["version"]).context("dsh-tui is not installed")?;
         let profile = v
@@ -152,7 +152,7 @@ fn poll(r: &dyn Runner, get: &[String], want: &[&str], tries: u32) -> bool {
     false
 }
 
-/// A worktree-only `pre-push` hook (`core.hooksPath`) running `herdsman hook --git-pre-push`.
+/// A worktree-only `pre-push` hook (`core.hooksPath`) running `drover hook --git-pre-push`.
 pub fn install_pre_push(r: &dyn Runner, exe: &str, wt: &Path, role: &str) -> Result<()> {
     let w = wt.to_string_lossy();
     let gd = PathBuf::from(ok(r, "git", &["-C", &w, "rev-parse", "--absolute-git-dir"])?.trim());

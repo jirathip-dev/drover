@@ -2,7 +2,7 @@
 //! deliveries to one thread wait for its start; a failure row shows herdr's message, not its JSON.
 mod common;
 use common::*;
-use herdsman::serve::Server;
+use drover::serve::Server;
 use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
@@ -13,7 +13,7 @@ const T: u64 = 1_000_000;
 const TIMEOUT: &str = r#"{"error":{"code":"timeout","message":"timed out waiting for agent startup"}}"#;
 const TAKEN: &str = r#"{"error":{"code":"agent_name_taken","message":"agent name orchestrator-t1 is already used"}}"#;
 
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
@@ -30,7 +30,7 @@ fn setup(name: &str) -> herdsman::Ctx {
 }
 
 /// The thread's conductor folder, as herdr reports an agent's cwd.
-fn folder(c: &herdsman::Ctx) -> String {
+fn folder(c: &drover::Ctx) -> String {
     c.state.with_file_name("orchestrator").join("t1").display().to_string()
 }
 
@@ -51,7 +51,7 @@ fn herdr(list: &str) -> Fake {
 }
 
 /// Post `text` to t1 from a paired phone (its delivery runs before `respond` returns); the event log after.
-fn say(c: &herdsman::Ctx, r: &dyn herdsman::runner::Runner, text: &str) -> String {
+fn say(c: &drover::Ctx, r: &dyn drover::runner::Runner, text: &str) -> String {
     let s = Server::new(c, r, Some(ADDR.into()));
     let cookie = pair(&s, c, "Mozilla/5.0 (iPhone)", T);
     let body = format!("op=say&t=t1&text={text}");
@@ -61,11 +61,11 @@ fn say(c: &herdsman::Ctx, r: &dyn herdsman::runner::Runner, text: &str) -> Strin
     );
     let res = String::from_utf8_lossy(&s.respond(&req, T)).into_owned();
     assert!(res.ends_with("\r\n\r\nsent\n"), "{res}");
-    herdsman::events::jsonl(&c.state).unwrap()
+    drover::events::jsonl(&c.state).unwrap()
 }
 
-fn starts(c: &herdsman::Ctx) -> Vec<herdsman::events::Event> {
-    let all = herdsman::events::read(&c.state).unwrap();
+fn starts(c: &drover::Ctx) -> Vec<drover::events::Event> {
+    let all = drover::events::read(&c.state).unwrap();
     all.into_iter().filter(|e| e.kind == "orchestrator-start").collect()
 }
 
@@ -145,8 +145,8 @@ struct Slow {
     listed: Mutex<Sender<()>>,
     go: Mutex<Receiver<()>>,
 }
-impl herdsman::runner::Runner for Slow {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for Slow {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let mut out = self.f.run(prog, args)?;
         let is = |a: &str, b: &str| prog == "herdr" && args.starts_with(&[a.into(), b.into()]);
         if is("agent", "list") {
@@ -211,7 +211,7 @@ struct Late {
     done: (Mutex<bool>, std::sync::Condvar),
 }
 impl Late {
-    fn new(c: &herdsman::Ctx, after: u64) -> Late {
+    fn new(c: &drover::Ctx, after: u64) -> Late {
         Late {
             f: herdr(NO_AGENTS).once_err("herdr agent start", 1, TIMEOUT),
             after,
@@ -226,8 +226,8 @@ impl Late {
         self.done.1.notify_all();
     }
 }
-impl herdsman::runner::Runner for Late {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for Late {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let mut out = self.f.run(prog, args)?;
         let is = |a: &str, b: &str| prog == "herdr" && args.starts_with(&[a.into(), b.into()]);
         if is("agent", "start") {
@@ -281,7 +281,7 @@ fn two_messages_1_s_apart_during_a_slow_start_are_both_delivered_in_order() {
         r.finish();
         b.join().unwrap();
     });
-    let log = herdsman::events::jsonl(&c.state).unwrap();
+    let log = drover::events::jsonl(&c.state).unwrap();
     assert!(!log.contains("still being delivered"), "{log}");
     assert!(!log.contains("not delivered"), "{log}");
     assert_eq!(r.f.count("herdr agent start"), 1, "{:?}", r.f.calls.borrow());
@@ -345,7 +345,7 @@ fn a_orchestrator_start_blocked_by_a_known_first_start_prompt_answers_it_and_del
             .collect();
         assert_eq!(sent, keys, "{:?}", r.calls.borrow());
         assert!(!r.called("herdr workspace close"), "{:?}", r.calls.borrow());
-        let ev = herdsman::events::read(&c.state).unwrap();
+        let ev = drover::events::read(&c.state).unwrap();
         let sp = ev
             .iter()
             .find(|e| e.kind == "startup-prompt")

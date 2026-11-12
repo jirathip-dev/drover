@@ -6,7 +6,7 @@ or token on a command line: read it with `read -rs` into a shell variable and `u
 ## 1. A locked or jammed login Keychain (#707)
 
 **Symptom.** Lanes on a folder account come up signed out, or `security` calls hang over ssh; the board still serves
-and drive still starts lanes (herdsman itself reads no Keychain item and holds no secret store since #707).
+and drive still starts lanes (drover itself reads no Keychain item and holds no secret store since #707).
 
 **Cause.** Claude Code keeps a folder login (`CLAUDE_CONFIG_DIR=<folder> claude /login`) in the login Keychain. A locked
 login Keychain, or unanswered Keychain dialogs queued in SecurityAgent with no one at the screen (seen on 2026-11-08),
@@ -19,8 +19,8 @@ ps -axo pid,etime,command | grep -E '[S]ecurityAgent|[s]ecurity (find|unlock)'
 ```
 
 A SecurityAgent with a long elapsed time plus `security` processes that never finish is the jam.
-`herdsman check` alerts `keychain-jammed` (once per episode) with their pids and this fix when more than
-`[limits] keychain_readers` (3) wait over 60 s; `herdsman doctor` shows the count. `reap_keychain_readers = true`
+`drover check` alerts `keychain-jammed` (once per episode) with their pids and this fix when more than
+`[limits] keychain_readers` (3) wait over 60 s; `drover doctor` shows the count. `reap_keychain_readers = true`
 lets `check` run the fix itself (`keychain-reap`).
 
 **Fix.** Over ssh, name the login keychain explicitly (an ssh session has no login search list), unlock it, and kill a
@@ -39,33 +39,33 @@ kill "$(pgrep -x SecurityAgent)"
 A headless host that must not depend on the login Keychain at all: give its accounts a hand-placed `token-file:`
 ([accounts](accounts.md)).
 
-**Confirm.** `herdsman accounts` shows each account `signed in`, and a new lane on it starts signed in.
+**Confirm.** `drover accounts` shows each account `signed in`, and a new lane on it starts signed in.
 
-## 2. herdsman's old Keychain items
+## 2. drover's old Keychain items
 
-**Symptom.** `herdsman/<fleet>/<NAME>` items (old `secret:` values, `BOAT_API_KEY`, account tokens) are still in the
+**Symptom.** `drover/<fleet>/<NAME>` items (old `secret:` values, `BOAT_API_KEY`, account tokens) are still in the
 login Keychain after the move to secret files.
 
-**Cause.** herdsman stopped reading them (#707) and deletes nothing itself.
+**Cause.** drover stopped reading them (#707) and deletes nothing itself.
 
 **Fix.** Put each value you still need in its file (`<config dir>/secrets/<NAME>`, mode 0600; see
-[providers](providers.md)), then run the `security delete-generic-password -a herdsman -s …` lines `herdsman migrate`
+[providers](providers.md)), then run the `security delete-generic-password -a drover -s …` lines `drover migrate`
 prints, naming the login keychain over ssh as in §1.
 
-**Confirm.** `security dump-keychain ~/Library/Keychains/login.keychain-db | grep '"herdsman/'` prints nothing.
+**Confirm.** `security dump-keychain ~/Library/Keychains/login.keychain-db | grep '"drover/'` prints nothing.
 
-## 3. Stale `~/.local/bin/herdsman` on a remote host
+## 3. Stale `~/.local/bin/drover` on a remote host
 
-**Symptom.** A remote host was updated (`host-update` logged, `herdsman --version` there is current), yet its lanes'
+**Symptom.** A remote host was updated (`host-update` logged, `drover --version` there is current), yet its lanes'
 hook behaves like an old build.
 
-**Cause.** The updater installs into `~/.local/share/herdsman/bin`, but the lanes' hook called a separate, older copy
+**Cause.** The updater installs into `~/.local/share/drover/bin`, but the lanes' hook called a separate, older copy
 in `~/.local/bin` that is not a symlink, so the update never reached it. #573 is the real fix.
 
 **Check.**
 
 ```sh
-ssh <host> 'ls -l ~/.local/bin/herdsman; ~/.local/bin/herdsman --version'
+ssh <host> 'ls -l ~/.local/bin/drover; ~/.local/bin/drover --version'
 ```
 
 A regular file (no `->`) or a version different from the main host's is the stale copy.
@@ -73,10 +73,10 @@ A regular file (no `->`) or a version different from the main host's is the stal
 **Fix.** Replace it with a symlink to the updated binary:
 
 ```sh
-ssh <host> 'ln -sf ~/.local/share/herdsman/bin/herdsman ~/.local/bin/herdsman'
+ssh <host> 'ln -sf ~/.local/share/drover/bin/drover ~/.local/bin/drover'
 ```
 
-**Confirm.** The check above shows `~/.local/bin/herdsman -> …/.local/share/herdsman/bin/herdsman` and the main
+**Confirm.** The check above shows `~/.local/bin/drover -> …/.local/share/drover/bin/drover` and the main
 host's version and git sha.
 
 ## 4. Remote fleet.toml drift
@@ -84,7 +84,7 @@ host's version and git sha.
 **Symptom.** Every tool call of a lane on a remote host is refused `REFUSED HOOK_FAILED_CLOSED: <fleet> not in
 fleet.toml`.
 
-**Cause.** A remote host's own `~/.config/herdsman/fleet.toml` is written once at cloud bootstrap (only when it has
+**Cause.** A remote host's own `~/.config/drover/fleet.toml` is written once at cloud bootstrap (only when it has
 none) and never refreshed. A fleet added on the main host later is missing there, so the host's lane hook fails
 closed.
 
@@ -92,14 +92,14 @@ closed.
 move it aside and bootstrap again so it is rewritten:
 
 ```sh
-ssh <host> 'mv ~/.config/herdsman/fleet.toml ~/.config/herdsman/fleet.toml.old'
-herdsman hosts bootstrap <host>
+ssh <host> 'mv ~/.config/drover/fleet.toml ~/.config/drover/fleet.toml.old'
+drover hosts bootstrap <host>
 ```
 
-**After #592.** herdsman keeps the remote fleet.toml in step with the main host's, so a new fleet reaches every host
+**After #592.** drover keeps the remote fleet.toml in step with the main host's, so a new fleet reaches every host
 without this step.
 
-**Confirm.** `ssh <host> 'grep -n "^\[fleet.<fleet>\]" ~/.config/herdsman/fleet.toml'` prints the table, and the lane's
+**Confirm.** `ssh <host> 'grep -n "^\[fleet.<fleet>\]" ~/.config/drover/fleet.toml'` prints the table, and the lane's
 next tool call is not refused.
 
 ## 5. Shed on remote hosts
@@ -107,22 +107,22 @@ next tool call is not refused.
 **Symptom.** With a shed runtime configured, a remote host shows offline and takes no lanes, though ssh and herdr work
 there.
 
-**Cause.** Until #601 lands, a shed runtime makes herdsman look for shed on every host; a remote host with no shed fails
+**Cause.** Until #601 lands, a shed runtime makes drover look for shed on every host; a remote host with no shed fails
 that look and counts as offline.
 
 **How to tell.**
 
 ```sh
-herdsman hosts                    # the host: offline
+drover hosts                    # the host: offline
 ssh <host> herdr agent list       # works
 ```
 
-Offline in `herdsman hosts` while `herdr agent list` over ssh is OK is this case, not a network fault.
+Offline in `drover hosts` while `herdr agent list` over ssh is OK is this case, not a network fault.
 
 **Fix.** Until #601, run remote lanes with the herdr runtime (`kind = "herdr"`, see [runtimes](runtimes.md)), or
 install shed on that host.
 
-**Confirm.** `herdsman hosts` shows the host reachable, and a lane placed there starts.
+**Confirm.** `drover hosts` shows the host reachable, and a lane placed there starts.
 
 ## 6. Wedged Keychain daemon (securityd)
 
@@ -144,7 +144,7 @@ pollers) queues behind it.
 
 **Fix.**
 
-1. Stop what keeps starting readers: herdsman's timer jobs and any other poller (unload their LaunchAgents, or stop
+1. Stop what keeps starting readers: drover's timer jobs and any other poller (unload their LaunchAgents, or stop
    them as you started them). *(unverified)*
 2. Kill the waiting readers by pid and SecurityAgent, as in §1.
 3. Kill the per-session daemon; launchd starts a new one. `launchctl kickstart system/com.apple.securityd` is
@@ -202,7 +202,7 @@ sudo fdesetup authrestart
 ```
 
 **A shell rc that exports `CLAUDE_CODE_OAUTH_TOKEN`.** A token exported in `~/.zshrc` (or another rc file) reaches
-every lane and overrides the account env herdsman gives it, so all lanes run on that one token. Remove the export;
+every lane and overrides the account env drover gives it, so all lanes run on that one token. Remove the export;
 `doctor` flags a login-shell token (#708). Check without printing the value:
 
 ```sh

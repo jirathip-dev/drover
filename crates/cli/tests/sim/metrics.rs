@@ -12,7 +12,7 @@ pub struct Metrics {
     /// Seconds from an issue's first queue add to its merged event, per merged issue.
     pub to_merge: Vec<u64>,
     pub spawns: u64,
-    /// Spawns whose pane pushed no head and wrote no verdict herdsman takes.
+    /// Spawns whose pane pushed no head and wrote no verdict drover takes.
     pub wasted: u64,
     pub supersedes: u64,
     /// Distinct lane names spawned.

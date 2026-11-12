@@ -57,7 +57,7 @@ impl Handover {
             Ok(l)
         });
         bound
-            .map_err(|e| eprintln!("herdsman serve: no handover: {}: {e}", self.sock.display()))
+            .map_err(|e| eprintln!("drover serve: no handover: {}: {e}", self.sock.display()))
             .ok()
     }
 
@@ -115,7 +115,7 @@ impl Handover {
         }
         if self.exec.load(SeqCst) {
             if let Err(e) = crate::runner::hand_fds(&argv(), &self.fds(), false) {
-                eprintln!("herdsman serve: after the handover: {e:#}");
+                eprintln!("drover serve: after the handover: {e:#}");
             }
         }
         std::process::exit(0)

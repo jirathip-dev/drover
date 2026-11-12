@@ -1,4 +1,4 @@
-//! What accounts and providers have used (docs/providers.md): herdsman lane-hours from the log, each account's
+//! What accounts and providers have used (docs/providers.md): drover lane-hours from the log, each account's
 //! usage meter (`Harness::usage_meter`, read through the account's own login), and the `DeepSeek` balance. Secrets
 //! reach `curl` on stdin only: never argv, the log, a cache or the page.
 use crate::config::{expand, Config};
@@ -44,11 +44,11 @@ pub fn lane_secs(events: &[Event], account: &str, now: u64, window: u64) -> u64 
     spawns.map(|(i, s)| end(i).saturating_sub(s.ts.max(from))).sum()
 }
 
-/// `5h 1.5 · 7d 12.0 herdsman lane-hours`: what herdsman ran, not the provider's quota.
+/// `5h 1.5 · 7d 12.0 drover lane-hours`: what drover ran, not the provider's quota.
 #[allow(clippy::cast_precision_loss)] // hours to one decimal; f64 is exact far past any lane's run time
 pub fn lane_hours(events: &[Event], account: &str, now: u64) -> String {
     let h = |w: u64| lane_secs(events, account, now, w) as f64 / 3600.0;
-    format!("5h {:.1} · 7d {:.1} herdsman lane-hours", h(5 * 3600), h(7 * 86400))
+    format!("5h {:.1} · 7d {:.1} drover lane-hours", h(5 * 3600), h(7 * 86400))
 }
 
 /// Local `date -r ts <fmt>` (UTC hh:mm when `date` cannot tell).
@@ -247,7 +247,7 @@ pub fn meter_line(r: &dyn Runner, m: &Meter, login: &str, now: u64) -> String {
     }
 }
 
-/// One `herdsman statusline` reading of an account's limits, a line of `<state>/usage.jsonl`.
+/// One `drover statusline` reading of an account's limits, a line of `<state>/usage.jsonl`.
 #[derive(Debug, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Row {
@@ -271,7 +271,7 @@ pub fn reading(ctx: &Ctx, name: &str, old: impl FnOnce() -> Option<Meter>) -> Op
     row(ctx, name).or_else(old)
 }
 
-/// #707: the account's newest status-line reading (`herdsman statusline`), fresh or stale; no `/api/oauth/usage`
+/// #707: the account's newest status-line reading (`drover statusline`), fresh or stale; no `/api/oauth/usage`
 /// poll, so an account with no live lane keeps its last row.
 pub fn row(ctx: &Ctx, name: &str) -> Option<Meter> {
     rows(ctx).remove(name).map(|w| Meter {
@@ -281,7 +281,7 @@ pub fn row(ctx: &Ctx, name: &str) -> Option<Meter> {
     })
 }
 
-/// `herdsman statusline`: the accounts harness's status-line JSON on stdin (`UsageMeter::status`); appends at most one
+/// `drover statusline`: the accounts harness's status-line JSON on stdin (`UsageMeter::status`); appends at most one
 /// row per account per minute and prints `myapp #12 · 5h 41% · 7d 63%`. Never fails the session: errors are swallowed.
 pub fn statusline(ctx: &Ctx, account: &str, lane: &str, input: &str, out: &mut dyn Write) {
     let v: Value = serde_json::from_str(input).unwrap_or_default();

@@ -2,15 +2,15 @@
   "type": "sheet", "id": "fleets", "title": "Fleets",
   "cancel": "Cancel", "done": { "label": "Save", "action": "save-fleets" },
   "blocks": [
-    { "type": "section", "header": "herdsman", "footer": "Drive runs every 5 minutes on mini. Pause stops new lanes; live ones finish.", "blocks": [
-      { "type": "form", "id": "f-herdsman", "fields": [
-        { "type": "toggle", "name": "herdsman.drive", "label": "Drive", "value": true },
-        { "type": "picker", "name": "herdsman.host", "label": "Host", "value": "mini", "options": ["mini", "air", "least busy"] },
-        { "type": "picker", "name": "herdsman.impl", "label": "Impl", "value": "Claude Code · opus 5.5 · high",
+    { "type": "section", "header": "drover", "footer": "Drive runs every 5 minutes on mini. Pause stops new lanes; live ones finish.", "blocks": [
+      { "type": "form", "id": "f-drover", "fields": [
+        { "type": "toggle", "name": "drover.drive", "label": "Drive", "value": true },
+        { "type": "picker", "name": "drover.host", "label": "Host", "value": "mini", "options": ["mini", "air", "least busy"] },
+        { "type": "picker", "name": "drover.impl", "label": "Impl", "value": "Claude Code · opus 5.5 · high",
           "options": ["Claude Code · opus 5.5 · high", "Claude Code · sonnet 5.5", "Codex · gpt-5.6-luna"] },
-        { "type": "picker", "name": "herdsman.rev", "label": "Review", "value": "Codex · gpt-5.6-luna",
+        { "type": "picker", "name": "drover.rev", "label": "Review", "value": "Codex · gpt-5.6-luna",
           "options": ["Claude Code · opus 5.5 · high", "Codex · gpt-5.6-luna"] },
-        { "type": "picker", "name": "herdsman.rounds", "label": "Rounds", "value": "3", "options": ["2", "3", "4", "5"] } ] } ] },
+        { "type": "picker", "name": "drover.rounds", "label": "Rounds", "value": "3", "options": ["2", "3", "4", "5"] } ] } ] },
     { "type": "section", "header": "cooee-drover", "blocks": [
       { "type": "form", "id": "f-drover", "fields": [
         { "type": "toggle", "name": "cooee-drover.drive", "label": "Drive", "value": false },

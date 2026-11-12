@@ -27,7 +27,7 @@
    "id": "repo",
    "name": "repo",
    "selected": [
-    "herdsman"
+    "drover"
    ],
    "action": "filter",
    "options": [
@@ -40,8 +40,8 @@
      "label": "cooee"
     },
     {
-     "value": "herdsman",
-     "label": "herdsman"
+     "value": "drover",
+     "label": "drover"
     },
     {
      "value": "cooee-drover",
@@ -89,9 +89,9 @@
   },
   {
    "type": "card",
-   "id": "fleet-herdsman",
+   "id": "fleet-drover",
    "tone": "accent",
-   "title": "herdsman",
+   "title": "drover",
    "subtitle": "read 2m ago · 7 lanes on mini",
    "badge": {
     "text": "driving",
@@ -150,7 +150,7 @@
            }
           }
          ],
-         "subtitle": "impl ▸ herdsman-impl-722 · mini"
+         "subtitle": "impl ▸ drover-impl-722 · mini"
         },
         {
          "type": "row",
@@ -168,9 +168,9 @@
           "since": "2026-11-09T09:35:00Z"
          },
          "tap": {
-          "thread": "herdsman-impl-641"
+          "thread": "drover-impl-641"
          },
-         "subtitle": "impl ✓ · review 1 ✗ · fix 1 ▸ herdsman-impl-641 · mini"
+         "subtitle": "impl ✓ · review 1 ✗ · fix 1 ▸ drover-impl-641 · mini"
         },
         {
          "type": "row",
@@ -188,7 +188,7 @@
          "tap": {
           "open": "/screens/issue?n=609"
          },
-         "subtitle": "impl ✓ · review 1–3 ✗ · fix 4 ▸ herdsman-impl-609 · air"
+         "subtitle": "impl ✓ · review 1–3 ✗ · fix 4 ▸ drover-impl-609 · air"
         },
         {
          "type": "row",
@@ -234,7 +234,7 @@
          "figure": {
           "state": "idle"
          },
-         "title": "#456 Rename herdsman to drover",
+         "title": "#456 Rename drover to drover",
          "badge": {
           "text": "#1",
           "tone": "mute"
@@ -290,7 +290,7 @@
          "figure": {
           "state": "idle"
          },
-         "title": "#725 lifeboat: small fallback page in herdsman",
+         "title": "#725 lifeboat: small fallback page in drover",
          "badge": {
           "text": "#3",
           "tone": "mute"

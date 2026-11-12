@@ -2,8 +2,8 @@
 //! tests/golden/api/), the same Host/Origin and pairing refusals as the HTML board, and the HTML board unchanged.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -41,7 +41,7 @@ fn golden(name: &str, mut v: Value) {
 }
 
 /// sendmeter: #12 in work (a lane), #17 queued behind #12, #9 asking; herdr shows the impl lane working.
-fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
+fn fixture(name: &str) -> (drover::Ctx, Fake) {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "17"]).0,
@@ -257,7 +257,7 @@ fn an_issue_carries_its_latest_why_owner_line() {
     assert_eq!(v["why"], want, "{v}");
 }
 
-/// #576: `issue/<fleet>/<n>` lists the verdicts `herdsman verdict` recorded, newest first: a verify PASS with its two
+/// #576: `issue/<fleet>/<n>` lists the verdicts `drover verdict` recorded, newest first: a verify PASS with its two
 /// screenshots (as `/shot/` serves them), a rev PASS with its `Repro: run` block, a rev FAIL with its findings.
 #[test]
 fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
@@ -340,8 +340,8 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
 fn lessons_show_the_last_run_and_the_next_due_date() {
     let (c, r) = fixture("api-lessons");
     // tick's weekly step: the fleet is under a week old, so it skips and the next is due a week on.
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    herdsman::lesson::weekly(&c, &cfg, &Fake::default(), &mut vec![]).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    drover::lesson::weekly(&c, &cfg, &Fake::default(), &mut vec![]).unwrap();
     let d = json!({"role": "lesson", "stage": "impl", "agent": "sendmeter-lesson-30", "harness": "claude"});
     append(&c.state, &Event::new(900_400, "sendmeter", Some(30), "spawn", d)).unwrap();
     let s = Server::new(&c, &r, Some(ADDR.into()));

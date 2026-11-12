@@ -86,7 +86,7 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
     Ok(hot)
 }
 
-/// #889: the report `herdsman hotspots` prints and its issue's body.
+/// #889: the report `drover hotspots` prints and its issue's body.
 pub fn report(fleet: &str, hot: &[Hot]) -> String {
     let mut s = format!("Hot files in {fleet}: {HOT} or more merged PRs in the last {DAYS} days\n\n");
     if hot.is_empty() {

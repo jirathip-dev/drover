@@ -2,9 +2,9 @@
 //! card (Queue + Herd strip) with [merge anyway] only when the PR could merge but for the round limit.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, fold, read, Event};
-use herdsman::serve::Server;
+use drover::config::Config;
+use drover::events::{append, fold, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
@@ -12,7 +12,7 @@ const ADDR: &str = "127.0.0.1:7777";
 const HEAD: &str = "1111111111111111111111111111111111111111";
 
 /// #12: four review rounds (the last `last` at HEAD), then `needs-human`; the PR cache says open, green, mergeable.
-fn fixture(name: &str, last: &str) -> herdsman::Ctx {
+fn fixture(name: &str, last: &str) -> drover::Ctx {
     let mut c = ctx(&tmpdir(name), CONFIG);
     c.now = NOW;
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
@@ -197,7 +197,7 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
         res.contains("msg=%2312%3A%20extend"),
         "PAUSED only holds the spawn: {res}"
     );
-    let p = herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
+    let p = drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
     assert_eq!((p.reason.as_deref(), p.failed), (Some("PAUSED"), false));
     assert!(
         !get(&s, "/", &cookie).contains("<details class=ask data-n=12>"),

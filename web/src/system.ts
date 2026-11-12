@@ -46,7 +46,7 @@ export function notifications(d: HostTab): string {
   const push = group('Push', 'web push to the home-screen app', dl([['push', `<b class=${d.push.tone}>${esc(d.push.detail)}</b>`], ['this phone', me]]));
   const subs = d.subs.map(x => `<form method=post action=/push/unsubscribe class=role2><input type=hidden name=id value=${x.id}><span>${esc(x.label)} <span class=mt>alerts on ${ago(x.created)} ago</span></span><button>Remove</button></form>`).join('');
   const devs = d.devices.map(x => `${form(d, ' class=role2')}${hidden('unpair', d.mtime)}<input type=hidden name=hash value=${esc(x.hash)}><span>${esc(x.label)} <span class=m>paired ${ago(x.created)} ago · used ${ago(x.used)} ago</span></span><button>Remove</button></form>`).join('');
-  const how = 'tap [pair this phone], then <code>herdsman serve approve &lt;code&gt;</code> on the main host';
+  const how = 'tap [pair this phone], then <code>drover serve approve &lt;code&gt;</code> on the main host';
   const pair = `<p class=mt>${d.devices.length ? `to pair another device: open the board there, ${how}` : `no paired device yet: ${how}`}</p>`;
   const notify = d.notify.length ? dl(d.notify.map(n => [n.kind, esc(n.on)])) : '<p class=mt>none: <code>[[notify]]</code> in fleet.toml</p>';
   const body = push

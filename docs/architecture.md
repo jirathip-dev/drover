@@ -1,9 +1,9 @@
 # Architecture and state
 
-herdsman has no daemon. Every command reads the config, folds the event log into the current state, acts, and
+drover has no daemon. Every command reads the config, folds the event log into the current state, acts, and
 appends what it did.
 
-#345 adds one optional long-running process, `herdsman service` (docs/service.md): kicks driven at once, the
+#345 adds one optional long-running process, `drover service` (docs/service.md): kicks driven at once, the
 GitHub poll and API v1. With it stopped every command still works this way.
 
 ## State database (#344)
@@ -34,18 +34,18 @@ insert-if-free in one transaction: free means no row, an expired row, or a holde
 runs. A dropped guard deletes its own row; a holder that died leaves a row that the next taker replaces, so
 nothing has to sweep it first.
 
-**Migration:** the first open of the database (any command) and `herdsman migrate` import whatever is left beside it
+**Migration:** the first open of the database (any command) and `drover migrate` import whatever is left beside it
 from before #344: `events.jsonl`, its archives `events-YYYYMM.jsonl.gz` (their rows `archived`), `serve/devices.json`
 and `webpush/subs.json`. The import runs in one transaction and is checked: the fold of the database's events plus
 the files' must equal the fold after the import, or nothing is imported. Each file is then renamed to
 `<name>.migrated`, which is the backup. A second run finds nothing to import. Rows keep their seq unless the database
 already has a later one (an old build that wrote `events.jsonl` again: its rows are added after).
-The owner's own state dir (`~/.local/state/herdsman`, or the pre-rename `fleet`) is the exception: no command imports
-there on its own, and `herdsman migrate` refuses it without `--live`. A test build run without `FLEET_STATE` would
+The owner's own state dir (`~/.local/state/drover`, or the pre-rename `herdsman`) is the exception: no command imports
+there on its own, and `drover migrate` refuses it without `--live`. A test build run without `FLEET_STATE` would
 otherwise take the log away from the installed build, which still reads `events.jsonl`.
 
-**Export:** `herdsman events --jsonl` prints the whole log in its old format, one event per line with its seq, for
-readers outside herdsman (scripts, a cron watchdog). Remote hosts each keep their own database; a lane there
+**Export:** `drover events --jsonl` prints the whole log in its old format, one event per line with its seq, for
+readers outside drover (scripts, a cron watchdog). Remote hosts each keep their own database; a lane there
 forwards its writes to the main host (#275), and `check` reads a host's asks through its export (or its old log
 file, on an older build).
 
@@ -66,30 +66,37 @@ writer died mid-line has a torn tail; its import skips it. A merged issue stays 
 
 | Path | What |
 |---|---|
-| `~/.config/herdsman/fleet.toml` (`FLEET_CONFIG`) | config: fleets, roles, limits, notifiers |
-| `~/.local/state/herdsman/events.jsonl` (`FLEET_STATE`) | names the state dir; `state.db` beside it holds the log (#344), the file itself only before its import |
-| `~/.local/state/herdsman/cache/` | cached issue specs and PR/CI reads |
-| `~/.local/share/herdsman/work/` (`FLEET_WORKTREES`; a host's `root`/`roots`, #630) | lane worktrees, `<repo>/issue-<n>`; builds under `.build/` |
-| `~/.config/herdsman/claude/<profile>/` | `settings.json` (PreToolUse hook), `role.md`, `fleet.md` |
+| `~/.config/drover/fleet.toml` (`FLEET_CONFIG`) | config: fleets, roles, limits, notifiers |
+| `~/.local/state/drover/events.jsonl` (`FLEET_STATE`) | names the state dir; `state.db` beside it holds the log (#344), the file itself only before its import |
+| `~/.local/state/drover/cache/` | cached issue specs and PR/CI reads |
+| `~/.local/share/drover/work/` (`FLEET_WORKTREES`; a host's `root`/`roots`, #630) | lane worktrees, `<repo>/issue-<n>`; builds under `.build/` |
+| `~/.config/drover/claude/<profile>/` | `settings.json` (PreToolUse hook), `role.md`, `fleet.md` |
 | `~/.hermes/profiles/<profile>/config.yaml` (`FLEET_HERMES_PROFILES`) | sync rewrites its `hooks:` key and drops `agent.reasoning_effort` (fleet.toml `effort` owns it) |
-| `~/.config/herdsman/dsh/<profile>.patch.yml` | DSH patch layer for `harness = "dsh"` lanes ([dsh.md](dsh.md)) |
+| `~/.config/drover/dsh/<profile>.patch.yml` | DSH patch layer for `harness = "dsh"` lanes ([dsh.md](dsh.md)) |
 | `roles/`, `hooks/` | role prompts, the tail of `help --agent` (`usage-tail.md`) and hook settings, compiled into the binary |
 
 A path variable that is set but empty counts as unset.
 
-## Rename from `fleet`
+## Rename from `herdsman`
 
-herdsman was called `fleet` (#27). Only `herdsman migrate` moves `~/.config/fleet` and
-`~/.local/state/fleet` to the paths above, both or neither; `HERDSMAN_HOME` overrides
-`$HOME` for it. Until then other commands read the old dirs in place and print a one-line
-hint on stderr (`hook` stays silent). Lanes export `HERDSMAN_LANE`; `FLEET_LANE` still arms
-the hook for one release, and `HERDSMAN_LANE` wins when both are set.
+drover was called `herdsman` (#456). Only `drover migrate` moves `~/.config/herdsman`, `~/.local/state/herdsman` and
+`~/.local/share/herdsman` to their `drover` names, all or none, and leaves each old name as a link to the new one, so a
+running lane's paths still resolve; `DROVER_HOME` overrides `$HOME` for it. With both an old and a new tree it moves
+nothing and says so. Until it has run, every command but `hook`, `lane-event`, `statusline`, `migrate` and `help`
+refuses with one line naming `drover migrate`; those read the old dirs in place.
+
+For one release: the binary also answers to `herdsman` (a link beside it; it prints a one-line notice), every
+`HERDSMAN_*` variable is read as its `DROVER_*` name unless that is set, the lane hook still guards a command typed as
+`herdsman …`, and a repo's `.herdsman/` folder is read when it has no `.drover/` file of that name. The launchd and
+systemd jobs are `dev.drover.*`: `drover timer install` writes them and, while a `dev.herdsman.*` job file is still
+there, prints the unload, remove and load commands for the owner instead of running them. Fleet names, lane and
+worktree names, event kinds and log fields are unchanged: events drover logs about itself keep the fleet `herdsman`.
 
 ## Module map
 
 Three crates (#264): `crates/core` (every module below but `serve`), `crates/server` (`serve`, over core only) and
-`crates/cli` (the `herdsman` binary: core plus server, and the integration tests). `cargo install --path crates/cli`.
-Core never depends on server or cli: `herdsman serve` reaches it through the `SERVE` hook `main.rs` sets. CI checks
+`crates/cli` (the `drover` binary: core plus server, and the integration tests). `cargo install --path crates/cli`.
+Core never depends on server or cli: `drover serve` reaches it through the `SERVE` hook `main.rs` sets. CI checks
 both rules: no server or cli crate in core's dependency tree, and `std::process::Command` in core only in `runner`
 (the `Runner` implementation), `events` (notifiers) and `webpush` (curl).
 The split is a pure move by what compiles today, so core still holds I/O modules (`drive`, `spawn`, `harness`,
@@ -127,7 +134,7 @@ Every JSON shape the page reads or posts has one definition, in Rust: `crates/se
 lane chat, `/live`'s `ev`, API v1's tabs (#269: the needs cards, Lanes, [chat]), the `/send`, `/answer`, `/act` and `/setup` bodies) and the core rows the
 board shows (`Event` for events and asks, `IssueState`, `Waiting`, `HostSeen`, `HostRow`). `ts-rs`, behind the server's
 `ts` feature (never in the release build; CI checks `cargo tree -e normal`), turns them into `assets/types/api.d.ts`:
-`just types` writes it (`cargo test -p herdsman-server --features ts export_bindings`). The types follow serde's JSON:
+`just types` writes it (`cargo test -p drover-server --features ts export_bindings`). The types follow serde's JSON:
 u64 is `number`, `Option<T>` is `field?: T | null`, `rename` and `flatten` as serde does them. CI regenerates the file
 and fails on any diff, then `serde_json_fits_the_types` type-checks the demo export's real payloads and each type's
 default with `tsc --noEmit --strict`, and `just types-lint` fails a hand-written copy of a generated type in the board's
@@ -148,7 +155,7 @@ TS: it imports them from `assets/types/api.d.ts`.
   - `format_collect`: `.map(|x| format!(..)).collect()` reads better than a `fold` with `write!`.
   - `many_single_char_names`: short names in small math and parsing closures (dates, hex, crypto).
 - **Size cap:** at most `line_cap` (in `ci/cap.toml`) formatted lines of non-test Rust under `src/` and `crates/*/src/` (tests
-  live in `crates/cli/tests/`), counted after `cargo fmt`. CI runs `herdsman cap-check --config ci/cap.toml`; a fleet can set its own
+  live in `crates/cli/tests/`), counted after `cargo fmt`. CI runs `drover cap-check --config ci/cap.toml`; a fleet can set its own
   `line_cap` under `[fleet.<name>]`. Raising the cap needs the owner's OK in an issue.
 
 History: one file per change in `docs/cap-history/<date>-<issue>.md`, so no two PRs edit the same line.

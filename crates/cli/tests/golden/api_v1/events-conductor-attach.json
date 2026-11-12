@@ -42,7 +42,7 @@
         "imp": true,
         "issue": null,
         "k": "needs-you",
-        "plain": "sendmeter needs you (? asks q1): Which scope?\n  1) small\n  2) full (recommended)\n  herdsman answer sendmeter q1 <n|\"text\">",
+        "plain": "sendmeter needs you (? asks q1): Which scope?\n  1) small\n  2) full (recommended)\n  drover answer sendmeter q1 <n|\"text\">",
         "pr": null,
         "run": null,
         "seq": 14,

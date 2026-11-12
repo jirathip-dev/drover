@@ -527,9 +527,9 @@ impl Server<'_> {
             (Some((route, p95)), false) => {
                 let why = format!("{route} p95 {p95} ms, over {limit} ms for {mins} min");
                 let d = json!({"route": route, "p95_ms": p95, "reason": why});
-                Event::new(now, "herdsman", None, "slo-api", d)
+                Event::new(now, "drover", None, "slo-api", d)
             }
-            (None, true) => Event::new(now, "herdsman", None, "slo-api-ok", json!({})),
+            (None, true) => Event::new(now, "drover", None, "slo-api-ok", json!({})),
             _ => return,
         };
         drop(crate::events::emit(&self.ctx.state, &cfg, e));

@@ -1,19 +1,19 @@
-//! #40: `herdsman ask` / `answer` / `asks`, the needs-you card and the `ask-waiting` alert.
+//! #40: `drover ask` / `answer` / `asks`, the needs-you card and the `ask-waiting` alert.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-36";
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
 /// The asking lane's spawn, so an answer can find its pane.
-fn lane_spawn(c: &herdsman::Ctx, ts: u64) {
+fn lane_spawn(c: &drover::Ctx, ts: u64) {
     append(
         &c.state,
         &Event::new(
@@ -27,9 +27,9 @@ fn lane_spawn(c: &herdsman::Ctx, ts: u64) {
     .unwrap();
 }
 
-/// The asks as `herdsman ask` logs them inside `LANE` (`HERDSMAN_LANE` is process-wide, so not set here).
-fn from_lane(c: &herdsman::Ctx) {
-    let Ok(log) = herdsman::events::jsonl(&c.state) else {
+/// The asks as `drover ask` logs them inside `LANE` (`DROVER_LANE` is process-wide, so not set here).
+fn from_lane(c: &drover::Ctx) {
+    let Ok(log) = drover::events::jsonl(&c.state) else {
         return;
     }; // a refused ask logs nothing
     rewrite_log(
@@ -38,7 +38,7 @@ fn from_lane(c: &herdsman::Ctx) {
     );
 }
 
-fn ask(c: &herdsman::Ctx) -> String {
+fn ask(c: &drover::Ctx) -> String {
     let args = [
         "ask",
         "sendmeter",
@@ -166,13 +166,13 @@ fn notifier_gets_the_question_numbered_options_and_answer_command() {
         "Raise the src budget?",
         "1) yes, to 5,200",
         "2) no, trim (recommended)",
-        "herdsman answer sendmeter q1 <n|\"text\">",
+        "drover answer sendmeter q1 <n|\"text\">",
     ] {
         assert!(got.contains(w), "missing {w:?} in {got}");
     }
 }
 
-fn check(c: &herdsman::Ctx, r: &Fake) -> String {
+fn check(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["check"]);
     assert_eq!(code, 0, "{out}");
     out
@@ -264,7 +264,7 @@ fn closed_by(then: Event) -> (usize, String) {
     append(&c.state, &then).unwrap();
     let events = read(&c.state).unwrap();
     (
-        herdsman::events::open_asks(&events).len(),
+        drover::events::open_asks(&events).len(),
         run(&c, &Fake::default(), &["asks", "--all"]).1,
     )
 }
@@ -349,12 +349,12 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
         r.calls.borrow()
     );
     // #304: the board's answer kicks the ask's issue at once.
-    assert!(r.called("sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter 36 --why board --now"));
+    assert!(r.called("sh -c nohup '/opt/drover/bin/drover' kick sendmeter 36 --why board --now"));
     assert_eq!(run(&c, &Fake::default(), &["asks"]).1, "", "the ask is closed");
 }
 
 /// #99: a routine ask, `Raise the src budget?` style without owner words, recommending option 2.
-fn routine(c: &herdsman::Ctx, q: &str) -> (i32, String) {
+fn routine(c: &drover::Ctx, q: &str) -> (i32, String) {
     let args = [
         "ask",
         "sendmeter",
@@ -428,7 +428,7 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
         .reply("herdr pane send-keys", "")
         .reply("herdr agent wait", "");
     c.now = NOW - 60;
-    let page = |c: &herdsman::Ctx| {
+    let page = |c: &drover::Ctx| {
         let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
         let page =
             String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)).into_owned();
@@ -533,7 +533,7 @@ fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
         (u.len(), u[0].str("id"), u[0].str("agent"), u[0].str("text")),
         (1, Some("q1"), Some(LANE), Some("DECISION q1: no, trim"))
     );
-    assert!(herdsman::config::WEBPUSH_ON.contains(&"answer-undelivered"), "pushed");
+    assert!(drover::config::WEBPUSH_ON.contains(&"answer-undelivered"), "pushed");
     assert!(kinds(&c, "answer-delivered").is_empty());
 }
 
