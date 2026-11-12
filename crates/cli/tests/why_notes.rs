@@ -162,8 +162,16 @@ fn lane(repo: &Repo, update: bool) -> herdsman::Ctx {
 }
 
 /// The Fake around git: #12's open PR at `head`, its spec, and the writes it allows.
+fn body(head: &str) -> String {
+    format!("Closes #12\n\n## For humans\n\nx\n\n## Evidence (head {head})")
+}
+
 fn fake(head: &str) -> Fake {
-    let pr = json!({"number": 100, "state": "OPEN", "headRefOid": head, "body": "Closes #12\n\n## For humans\n\nx"});
+    fake_body(head, &body(head))
+}
+
+fn fake_body(head: &str, body: &str) -> Fake {
+    let pr = json!({"number": 100, "state": "OPEN", "headRefOid": head, "body": body});
     Fake::default()
         .reply("gh pr view issue-12", &pr.to_string())
         .reply(
@@ -423,7 +431,7 @@ fn a_refused_note_is_nudged_once_then_review_goes_ahead() {
     let wt = repo.wt.to_string_lossy().into_owned();
     let list = agents(&[("sendmeter-impl-12", "idle", &wt, "w9:p1")]);
     let ci = json!([{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
-    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": repo.head, "statusCheckRollup": ci});
+    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": repo.head, "statusCheckRollup": ci, "body": body(&repo.head)});
     let r = Fake::default()
         .reply("herdr agent list", &list)
         .reply("gh pr view issue-12", &pr.to_string())
@@ -439,7 +447,8 @@ fn a_refused_note_is_nudged_once_then_review_goes_ahead() {
     };
     let (code, out) = run(&later(200), &Git::new(&r), &["drive"]);
     assert_eq!(code, 0, "{out}");
-    let nudge = "herdr agent prompt sendmeter-impl-12 herdsman: your why note was refused: WHY_INVALID: why.md missing";
+    let nudge =
+        "herdr agent prompt sendmeter-impl-12 herdsman: your `turn done` was refused: WHY_INVALID: why.md missing";
     assert_eq!(r.count(nudge), 1, "{:?}", r.calls.borrow());
     assert!(kinds(&c, "pushed").is_empty(), "no review before the nudge is answered");
     // The lane answers with another `done`, still without a note: the review goes ahead, the nudge is not repeated.
@@ -447,4 +456,48 @@ fn a_refused_note_is_nudged_once_then_review_goes_ahead() {
     run(&later(400), &Git::new(&r), &["drive"]);
     assert_eq!(r.count(nudge), 1);
     assert_eq!(kinds(&c, "pushed").len(), 1, "{:?}", r.calls.borrow());
+}
+
+#[test]
+fn a_pr_body_without_the_heads_evidence_is_refused_before_review() {
+    let repo = repo("why-pr-body");
+    let base = g(&repo.wt, &["rev-parse", "HEAD^1"]);
+    let stale = format!("## For humans\n\nx\n\n## Evidence (head {base})\n\ncargo test: exit 0");
+    let cases = [
+        (stale, "names no sha of head"),
+        (
+            "## For humans\n\nx\n\n## Evidence (head SHA_PLACEHOLDER)\n\nWEEK_PLACEHOLDER".into(),
+            "names no sha of head",
+        ),
+        (
+            format!("## What changed\n\nx\n\n## Evidence (head {})", repo.head),
+            "no `## For humans` section",
+        ),
+        (
+            format!(
+                "{}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+                body(&repo.head)
+            ),
+            "carries `🤖 Generated with [Claude Code]",
+        ),
+    ];
+    let c = lane(&repo, false);
+    std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
+    for (b, why) in cases {
+        let r = fake_body(&repo.head, &b);
+        let (code, out) = run(&c, &Git::new(&r), &["turn", "done"]);
+        assert_eq!(code, 3, "{why}: {out}");
+        assert!(out.contains("REFUSED PR_BODY: ") && out.contains(why), "{why}: {out}");
+        assert!(!r.called("gh pr edit") && kinds(&c, "why").is_empty(), "{why}");
+        let t = kinds(&c, "turn-end").pop().unwrap();
+        assert!(
+            t.str("note").unwrap().starts_with("PR_BODY: "),
+            "{why}: the turn still ends"
+        );
+    }
+    let merged = "Merge remote-tracking branch 'origin/staging' into issue-12";
+    g(&repo.wt, &["commit", "-q", "--allow-empty", "-m", merged]);
+    let top = g(&repo.wt, &["rev-parse", "HEAD"]);
+    let (code, out) = run(&c, &Git::new(&fake_body(&top, &body(&repo.head))), &["turn", "done"]);
+    assert_eq!(code, 0, "a staging merge over the named head passes: {out}");
 }

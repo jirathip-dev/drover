@@ -126,5 +126,7 @@ AC: it {works} \ `ok`
   `Decided: …`, `Because: "spec quote" | q<id> | file:line`, `Rejected: alternative — why`,
   `Check: what the reviewer should verify`, `Owner: one plain line`. Every `Because:` cites a verbatim spec quote
   (12+ chars), an answered ask or a `file:line` at your head; no secrets. A bad note is refused `WHY_INVALID`.
+- #925: `turn done` refuses `PR_BODY` until the PR body names your pushed head sha, has `## For humans` and no
+  "Generated with" line: `gh pr edit --body` first.
 - #735: a non-obvious reason goes in that why note (`herdsman why`), never in a comment: arch-check fails a new
   comment line but `// SAFETY:` over `unsafe` and one `///` line on a public item.

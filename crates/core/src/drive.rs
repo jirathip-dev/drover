@@ -13,7 +13,7 @@ use std::io::Write;
 use std::path::Path;
 
 /// #677: drive's one prompt on a `done` whose why note was refused.
-pub const WHY_NUDGE: &str = "your why note was refused: ";
+pub const WHY_NUDGE: &str = "your `turn done` was refused: ";
 /// #168: a pass's lease outlives a hung pass by this much; #344: a dead holder's goes at once.
 const STALE_LOCK_SECS: u64 = 3600;
 
@@ -1719,7 +1719,7 @@ fn handoff(
             let told = |e: &&Event| e.is("why-nudged", fleet, s.issue) && e.str("agent") == Some(&w.lane) && e.ts >= sp;
             match ev.iter().rfind(told) {
                 None => {
-                    let text = format!("herdsman: {WHY_NUDGE}{}. Fix why.md, then `herdsman turn done`.", why.1);
+                    let text = format!("herdsman: {WHY_NUDGE}{}. Fix it, then `herdsman turn done`.", why.1);
                     let sent = tell(r, ev, &w.lane, &text);
                     writeln!(out, "{fleet} #{} why note refused: nudged", s.issue)?;
                     let d = json!({"agent": w.lane, "note": why.1, "sent": sent});
