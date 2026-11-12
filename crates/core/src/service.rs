@@ -22,7 +22,7 @@ pub fn sock(ctx: &Ctx) -> PathBuf {
 /// One request line to the running service and its one reply line; `None` when no service listens.
 pub fn call(ctx: &Ctx, req: &Value) -> Option<Value> {
     let s = UnixStream::connect(sock(ctx)).ok()?;
-    let t = Some(Duration::from_secs(2));
+    let t = Some(Duration::from_secs(crate::config::limits().service_call_secs));
     s.set_read_timeout(t).ok()?;
     s.set_write_timeout(t).ok()?;
     (&s).write_all(format!("{req}\n").as_bytes()).ok()?;

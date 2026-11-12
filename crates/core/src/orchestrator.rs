@@ -10,9 +10,6 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
 
-/// An orchestrator whose thread is quiet this long (and that is not working) closes on the next `check`.
-pub const IDLE: u64 = 30 * 60;
-
 /// #620: how many times `of` ran (#701: `WALKS`, the events it looked at).
 pub static SCANS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -1469,7 +1466,8 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         let Some(s) = last.filter(|e| e.kind == "orchestrator-start") else {
             continue;
         };
-        let quiet = of(events, id).map(|e| e.ts).max().unwrap_or(0) + IDLE <= ctx.now;
+        let quiet =
+            of(events, id).map(|e| e.ts).max().unwrap_or(0) + cfg.limits.orchestrator_idle_minutes * 60 <= ctx.now;
         let a = agents.iter().find(|a| a["name"] == s.data["agent"]);
         if a.is_some() && switch(ctx, cfg, r, t, s)? {
             continue;

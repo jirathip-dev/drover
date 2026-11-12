@@ -99,14 +99,15 @@ fn open(state: &Path) -> Result<Connection> {
     let mut o = std::fs::OpenOptions::new();
     drop(std::os::unix::fs::OpenOptionsExt::mode(o.create(true).append(true), 0o600).open(file(state))?);
     let c = Connection::open(file(state)).with_context(|| format!("cannot open {}", file(state).display()))?;
-    c.busy_timeout(std::time::Duration::from_secs(60))?;
+    let l = crate::config::limits();
+    c.busy_timeout(std::time::Duration::from_secs(l.db_busy_secs))?;
     // Switching to WAL needs the file alone and SQLite does not wait for it: a new database's first openers retry.
     let mode = |c: &Connection| c.pragma_query_value(None, "journal_mode", |r| r.get::<_, String>(0));
     for _ in 0..6000 {
         if mode(&c)? == "wal" || c.pragma_update(None, "journal_mode", "WAL").is_ok() {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_millis(l.db_retry_millis));
     }
     anyhow::ensure!(mode(&c)? == "wal", "{} is not in WAL mode", file(state).display());
     c.execute_batch(SCHEMA)?;

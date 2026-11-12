@@ -17,7 +17,7 @@ fn a_read_that_blocks_times_out_within_the_limit() {
     let e = herdsman::runner::read_file(&fifo).unwrap_err();
     let took = t.elapsed();
     assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
-    let limit = herdsman::runner::PROBE;
+    let limit = herdsman::runner::probe_wait();
     assert!(took >= limit && took < limit + Duration::from_secs(1), "{took:?}");
     // The read still waits on its thread: a second one never starts and answers at once.
     let t = Instant::now();
