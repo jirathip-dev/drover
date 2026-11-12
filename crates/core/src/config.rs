@@ -466,6 +466,8 @@ pub struct Fleet {
     pub land: Option<Land>,
     /// #419: `weekly` (unset) has `tick` run `herdsman lesson` every 7 days; `off` opts out.
     pub lessons: Option<String>,
+    /// #889: `weekly` (unset) has `tick` run `herdsman hotspots` every 7 days; `off` opts out.
+    pub hotspots: Option<String>,
     /// #417: globs of UI files: a PR touching one goes through the verify stage.
     #[serde(default)]
     pub ui_paths: Vec<String>,

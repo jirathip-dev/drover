@@ -317,7 +317,8 @@ pub fn record(ctx: &Ctx, r: &dyn Runner, wt: &std::path::Path, (fleet, n): (&str
     crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "lesson-shadow", d))
 }
 
-fn ymd(day: u64) -> String {
+/// #510: day number `day` as `YYYY-MM-DD`.
+pub fn ymd(day: u64) -> String {
     let (m, d) = civil_month_day(day);
     format!("{}-{m:02}-{d:02}", civil_year(day))
 }
