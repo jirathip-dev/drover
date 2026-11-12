@@ -1,0 +1,5 @@
+Decided: no code change; merged origin/staging to get a new head, since the old failed evidence run kept 85b467f red.
+Because: crates/core/src/gh.rs:414
+Rejected: re-running the failed evidence run — a re-run replays the old PR body and fails again.
+Check: evidence passes at 5137832 and the PR body names that head.
+Owner: The red check was a stale run; the branch now has a fresh head with every check re-run.
