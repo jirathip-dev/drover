@@ -1,0 +1,9 @@
+Decided: one merged PR is one first-parent commit on origin/<integration>, counted per file in a 14-day window
+Because: "5 or more merged PRs touched it in the last 14 days (git history of the integration branch)"
+Decided: update rounds come from the `merged` event whose merge_sha is that commit, counting its issue's `spawn` events with update true
+Because: crates/core/src/gate.rs:987
+Decided: the issue title uses the week's Monday so a later run in the same week finds and edits the open issue
+Because: "or updates that week's issue if it is still open"
+Rejected: excluding arch.toml converted/frozen files now — the format is #890's; "until that issue lands, nothing is left out"
+Check: crates/cli/tests/hotspots.rs runs real git on a fixture repo; HELP_AGENT_MAX +3 matches the new command's help lines
+Owner: herdsman now files one weekly issue per fleet listing files that 5+ merged PRs touched in two weeks, for an architect to split.
