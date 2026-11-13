@@ -2304,8 +2304,8 @@ fn an_acp_lane_silent_after_its_first_turn_is_a_failed_start_naming_its_account(
     assert!(w.contains("failed start") && !w.contains("idle without pushing"), "{w}");
 }
 
-fn verify_round_one(name: &str) -> (drover::Ctx, Server) {
-    let b = Server::new(shed::proto::VERSION, vec![]);
+fn verify_round_one(name: &str) -> (drover::Ctx, FakeShed) {
+    let b = FakeShed::new();
     let verify = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
     let c = ctx(&tmpdir(name), &format!("{}{verify}", shed_config(&b.sock, "")));
     let ev = |kind: &str, d: Value| {
@@ -2332,9 +2332,10 @@ fn verify_round_one(name: &str) -> (drover::Ctx, Server) {
     (c, b)
 }
 
-fn carrying(b: &Server, role: &str) -> Vec<String> {
-    let t = b.terms.lock().unwrap();
-    let live = t
+fn carrying(b: &FakeShed, role: &str) -> Vec<String> {
+    let st = b.lock();
+    let live = st
+        .terms
         .values()
         .filter(|t| t["state"] == "running" && t["labels"]["role"] == role);
     live.map(|t| t["name"].as_str().unwrap().to_string()).collect()
@@ -2347,7 +2348,7 @@ fn spawning_verify_round_two_stops_round_ones_live_terminal_first() {
     let f = spawn_fake().reply("gh pr view", "{}");
     let (code, out) = run(&c, &f, &["spawn", "sendmeter", "12", "verify"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
-    let order: Vec<(String, String)> = (b.seen.lock().unwrap().iter())
+    let order: Vec<(String, String)> = (b.lock().seen.iter())
         .filter(|s| matches!(s.0.as_str(), "kill" | "run"))
         .map(|s| (s.0.clone(), s.1["name"].as_str().unwrap().to_string()))
         .collect();
@@ -2393,7 +2394,7 @@ fn two_live_processes_of_one_lane_alert_once_and_the_next_drive_pass_keeps_the_n
     let (code, out) = run(&later(&c, 600), &f, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(carrying(&b, "verify"), [r2], "{out}");
-    assert!(b.terms.lock().unwrap().get("sendmeter-verify-12-r1").is_none());
+    assert!(!b.has("sendmeter-verify-12-r1"));
 }
 
 #[test]
@@ -2404,24 +2405,24 @@ fn clean_removes_exited_shed_terminals_of_merged_lanes_only() {
         &Event::new(c.now, "sendmeter", Some(12), "merged", json!({"sha": "b".repeat(40)})),
     )
     .unwrap();
-    b.terms.lock().unwrap().get_mut("sendmeter-verify-12-r1").unwrap()["state"] = json!("exited");
+    b.exit("sendmeter-verify-12-r1");
     b.add(
         "sendmeter-impl-13",
         json!({"fleet": "sendmeter", "issue": "13", "role": "impl", "harness": "claude"}),
     );
-    b.terms.lock().unwrap().get_mut("sendmeter-impl-13").unwrap()["state"] = json!("exited");
+    b.exit("sendmeter-impl-13");
     let f = Fake::default().reply("gh issue list", "[]");
     let (_, out) = run(&c, &f, &["clean"]);
     assert!(
         out.contains("would remove exited shed terminal sendmeter-verify-12-r1 (sendmeter#12 merged)"),
         "{out}"
     );
-    assert_eq!(b.terms.lock().unwrap().len(), 2, "a dry run removes nothing");
+    assert_eq!(b.lock().terms.len(), 2, "a dry run removes nothing");
     let (_, out) = run(&c, &f, &["clean", "--yes"]);
     assert!(
         out.contains("removed exited shed terminal sendmeter-verify-12-r1"),
         "{out}"
     );
-    let left: Vec<String> = b.terms.lock().unwrap().keys().cloned().collect();
+    let left: Vec<String> = b.lock().terms.keys().cloned().collect();
     assert_eq!(left, ["sendmeter-impl-13"], "an open issue's exited terminal stays");
 }
