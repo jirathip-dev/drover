@@ -8,7 +8,7 @@ use anyhow::Result;
 use serde_json::json;
 
 /// Refusals that only mean "not yet": the action stays pending.
-pub const SOFT: [&str; 8] = [
+pub const SOFT: [&str; 9] = [
     "HOST_BUSY",
     "MEM_LOW",
     "CAP",
@@ -16,6 +16,7 @@ pub const SOFT: [&str; 8] = [
     "SPAWN_PENDING",
     "SERIAL_BUSY",
     "PAUSED",
+    "RUNTIME_DOWN",
     "HOST_OFFLINE",
 ];
 /// Another pass is on the same spawn (#509), or did it: neither waits nor fails.
@@ -41,14 +42,19 @@ impl Pending {
     pub fn back(&self, now: u64) -> bool {
         self.failed || now >= self.since + BACK_SECS && self.reason.as_deref() != Some(LOAD)
     }
-    /// The row's line while it waits: `starting, waiting for host: <reason> · <age>`.
+    /// The row's line while it waits: `starting, waiting for host: <reason> · <age>`; #975: `extended · starting`.
     pub fn line(&self, now: u64) -> Option<String> {
-        let why = self
-            .reason
-            .clone()
-            .unwrap_or_else(|| crate::promise::Say::Pass(String::new()).line());
         let wait = age(now.saturating_sub(self.since));
-        (!self.failed).then(|| format!("starting, waiting for host: {why} · {wait}"))
+        let what = match (&self.reason, self.action == "extend") {
+            (None, true) => "extended · starting".into(),
+            (Some(why), true) => format!("extended · starting, waiting for host: {why}"),
+            (why, false) => format!(
+                "starting, waiting for host: {}",
+                why.clone()
+                    .unwrap_or_else(|| crate::promise::Say::Pass(String::new()).line())
+            ),
+        };
+        (!self.failed).then(|| format!("{what} · {wait}"))
     }
     /// A returned card's reason: the refusal and the wait.
     pub fn why(&self, now: u64) -> String {
@@ -76,6 +82,11 @@ pub fn of(events: &[Event], fleet: &str, n: u64) -> Option<Pending> {
         reason: e.str("reason").map(String::from),
         failed: e.data.get("failed") == Some(&json!(true)),
     })
+}
+
+/// #975: the owner's extend waits to start: its spawn skips the host-load and spawn-pending gates.
+pub fn extending(events: &[Event], fleet: &str, n: u64) -> bool {
+    of(events, fleet, n).is_some_and(|p| p.action == "extend" && !p.failed)
 }
 
 /// Log a tap's pending action, after its decision: a new one, its start not tried yet; a spawn logged past seq `after`

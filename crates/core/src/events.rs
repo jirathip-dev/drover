@@ -525,7 +525,7 @@ pub struct Asks {
     by: HashMap<(u8, String, Option<String>), Vec<usize>>,
     /// The first `spawn-started` of each (agent, pane).
     started: HashMap<(Option<String>, Option<String>), usize>,
-    ids: std::collections::HashSet<(String, String)>,
+    ids: std::collections::HashSet<String>,
 }
 
 impl Asks {
@@ -540,7 +540,7 @@ impl Asks {
         let issue = e.issue.map(|n| n.to_string());
         if e.kind == "spawn-started" {
             self.started.entry((s("agent"), s("pane"))).or_insert(i);
-        } else if e.kind == "needs-decision" && s("id").is_some_and(|id| !self.ids.insert((e.fleet.clone(), id))) {
+        } else if e.kind == "needs-decision" && twin(e).is_some_and(|k| !self.ids.insert(k)) {
             self.ends.insert(i, Some((ORDER.len() - 1, i)));
         } else if e.kind == "needs-decision" {
             self.ends.insert(i, None);
@@ -646,10 +646,14 @@ pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> 
     map.get(&(fleet.into(), id.into())).map(|i| &events[*i])
 }
 
-/// #900: `e` repeats an ask id logged before it (two passes raced to post it): every view shows the first alone.
+/// #900: `e` repeats an ask logged before it (two passes raced to post it): every view shows the first alone.
 pub fn repeat(events: &[Event], e: &Event) -> bool {
-    let first = |id| ask_event(events, "needs-decision", &e.fleet, id);
-    e.kind == "needs-decision" && e.str("id").and_then(first).is_some_and(|a| !std::ptr::eq(a, e))
+    closed(events, e) == Some("repeat")
+}
+
+fn twin(e: &Event) -> Option<String> {
+    let k = (&e.fleet, e.issue, e.str("thread"), e.str("question"));
+    e.str("id").map(|id| format!("{id} {k:?}"))
 }
 
 /// #859: ask indexes built from a slice that is no cached `Log` (`index`'s one-pass fallback): serve's reads build none.
@@ -832,13 +836,19 @@ pub fn closed_row(events: &[Event], a: &Event) -> Option<String> {
     })
 }
 
+/// #906: decision or `ask-*` ending `e` is about ask `a` (by `ask_seq`, else by id on its issue).
+pub fn names(e: &Event, a: &Event) -> bool {
+    let seq = e.data.get("ask_seq").and_then(Value::as_u64);
+    e.str("id") == a.str("id") && seq.map_or(e.issue.is_none() || e.issue == a.issue, |s| s == a.seq)
+}
+
 /// #447: what later event `e` does to ask `a` (`closed`'s reasons, one event at a time). `own`: `e`'s
 /// `spawn-started` came before the ask, so a `spawn` `e` is the asking lane itself (#446).
 fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option<&'static str> {
     VISITS.fetch_add(1, Relaxed);
     let on = |k: &str| e.kind == k && a.issue.is_some() && e.issue == a.issue;
     let mine = matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
-    let id = e.str("id") == a.str("id");
+    let id = names(e, a);
     if e.fleet != a.fleet {
         None
     } else if e.kind == "decision" && id {
@@ -1044,7 +1054,87 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
             _ => {}
         }
     }
+    debug_assert!(m.values().all(|s| state(&s.state).is_some()), "a state not in STATES");
     m
+}
+
+/// #845: every state `fold` gives an issue (a round's `(n)`, `·f` and `+uN` aside), each with its ways out.
+pub const STATES: &[(&str, &[(&str, &str)])] = &[
+    (
+        "queued",
+        &[
+            ("design", "queued with an architect or design mark, that lane first"),
+            (
+                "impl",
+                "impl spawned, refused while SERIAL_BUSY, HOST_BUSY, DISK_BUDGET, LANE_LIVE or CAP",
+            ),
+            ("closed", "issue closed on GitHub"),
+        ],
+    ),
+    ("design", &[("design-review", "design pushed, the owner's ask")]),
+    (
+        "design-review",
+        &[("queued", "approve or revise"), ("needs-human", "reject")],
+    ),
+    (
+        "impl",
+        &[
+            ("review(n)", "turn done with a push, review spawned"),
+            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+            ("queued", "lane killed, or repaired while blocked"),
+        ],
+    ),
+    (
+        "review(n)",
+        &[
+            ("ready", "PASS at head"),
+            ("fix(n)", "FAIL at head"),
+            ("needs-human", "ROUND_LIMIT after review_rounds"),
+        ],
+    ),
+    (
+        "fix(n)",
+        &[
+            ("review(n)", "fix pushed, next review round"),
+            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+        ],
+    ),
+    (
+        "ready",
+        &[
+            ("review(n)", "verify stage at head for ui_paths, a verify or repro mark"),
+            (
+                "fix(n)",
+                "update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds",
+            ),
+            ("merged", "merge with PASS at head and CI green, no STAGING_WOULD_BREAK"),
+            ("blocked", "merge refused, or PR closed outside drover"),
+        ],
+    ),
+    (
+        "blocked",
+        &[
+            ("fix(n)", "fix round spawned"),
+            ("review(n)", "review spawned at a new head"),
+        ],
+    ),
+    (
+        "needs-human",
+        &[
+            ("queued", "extend with no lane yet, start lane"),
+            ("fix(n)", "extend, one more round"),
+            ("parked", "park"),
+        ],
+    ),
+    ("parked", &[("needs-human", "unpark, the state before it")]),
+    ("merged", &[]),
+    ("closed", &[]),
+];
+
+/// #845: `state`'s `STATES` entry, matched on its name before any `(` or `+`.
+pub fn state(state: &str) -> Option<&'static (&'static str, &'static [(&'static str, &'static str)])> {
+    let base = state.split(['(', '+']).next();
+    STATES.iter().find(|(name, _)| name.split('(').next() == base)
 }
 
 /// #412: the states a design spawn moves into `design` (before impl).

@@ -199,7 +199,7 @@ Check it worked: `echo hello | notify-telegram <chat>` arrives on your phone.
 ## 6. Board on the phone (Tailscale)
 
 `drover setup` writes and loads this job for you: label `[serve] launchd_label` (default
-`dev.drover.serve`), address `[serve] addr` (default `127.0.0.1:7777`), `KeepAlive`, the tick's PATH,
+`dev.drover.serve`), address `[serve] addr` (default `127.0.0.1:7777`), `KeepAlive`, `ProcessType Interactive` (#893), the tick's PATH,
 logs to `~/.local/state/drover/serve.log`. If a job under another label already runs
 `drover serve`, setup adopts it (`= adopted <plist>`) and never makes a second one. Re-labelling is
 manual: `launchctl bootout gui/$(id -u)/<old label>`, delete its plist, run `drover setup` again.
@@ -230,6 +230,7 @@ macOS, `~/Library/LaunchAgents/dev.drover.serve.plist`:
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Interactive</string>
 </dict>
 </plist>
 ```

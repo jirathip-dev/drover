@@ -209,7 +209,7 @@ pub fn check(ctx: &Ctx, cookie: &str) -> Result<Device, String> {
         return Err("expired".into());
     }
     let stale = std::mem::replace(&mut all[i].used, ctx.now) + 3600 <= ctx.now;
-    let _ = stale.then(|| store(ctx, &all));
+    let _ = stale.then(|| crate::db::store_now(&ctx.state, "devices", &all));
     Ok(all.swap_remove(i))
 }
 

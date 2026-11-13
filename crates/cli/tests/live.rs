@@ -128,7 +128,10 @@ fn live_caps_clients_and_checks_host() {
         assert!(drain(s, 300).starts_with("HTTP/1.1 200 OK"));
     }
     let mut ninth = subscribe(addr, &addr.to_string());
-    assert!(drain(&mut ninth, 500).starts_with("HTTP/1.1 503 "), "the 9th client");
+    assert!(
+        drain(&mut ninth, 500).starts_with("HTTP/1.1 200 OK"),
+        "#893: the 9th client closes the oldest"
+    );
     drop(held);
     std::thread::sleep(Duration::from_millis(1_500));
     let mut again = subscribe(addr, &addr.to_string());
