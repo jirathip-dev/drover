@@ -139,7 +139,7 @@ pub struct NeedsTab {
 }
 
 /// An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
-/// design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th); #517: the `thread` it was asked in, its `title`.
+/// design's PNGs by name (`/design/<fleet>/<n>/<i>/<ask id>` serves the `i`th); #517: the `thread` it was asked in, its `title`.
 pub struct NeedAsk {
     pub ask: Ask,
     pub who: String,
@@ -191,6 +191,8 @@ pub struct NeedIssue {
     pub mergeable: String,
     pub merge: bool,
     pub shots: Vec<String>,
+    /// #969: the sha of the verdict `shots` are from, the round `/shot/<fleet>/<n>/<i>/<sha>` names.
+    pub shots_at: Option<String>,
 }
 
 /// #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no

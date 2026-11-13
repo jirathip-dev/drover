@@ -590,7 +590,7 @@ fn qset(ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
 /// #576: `issue/<fleet>/<n>`: its verdicts, newest first; the newest's screenshots as `/shot/` serves them.
 fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
     let ev = shared(&ctx.state).unwrap_or_default();
-    let mut shots: Vec<String> = crate::verify::served(&ev, (fleet, n))
+    let mut shots: Vec<String> = crate::verify::served(&ev, (fleet, n), None)
         .into_iter()
         .map(|x| x.0)
         .collect();

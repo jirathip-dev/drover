@@ -97,12 +97,12 @@ fn inside(path: &Path, dir: &Path) -> Option<PathBuf> {
 }
 
 /// #547: the shots of `fleet` #`n`'s last verdict the board shows and serves: a verify verdict's, each still a file
-/// inside one of the issue's lane folders (older events kept any `.png` word).
-pub fn served(events: &[Event], (fleet, n): (&str, u64)) -> Vec<(String, PathBuf)> {
+/// inside one of the issue's lane folders (older events kept any `.png` word); #969: `at` a sha, its last verdict there.
+pub fn served(events: &[Event], (fleet, n): (&str, u64), at: Option<&str>) -> Vec<(String, PathBuf)> {
     let lanes: Vec<&str> = (events.iter().filter(|e| e.is("spawn", fleet, n)))
         .filter_map(|e| e.str("worktree"))
         .collect();
-    let last = events.iter().rfind(|e| e.is("verdict", fleet, n));
+    let last = (events.iter()).rfind(|e| e.is("verdict", fleet, n) && at.is_none_or(|s| e.str("sha") == Some(s)));
     let files = last
         .filter(|e| e.str("stage") == Some("verify"))
         .and_then(|e| e.data["files"].as_array());

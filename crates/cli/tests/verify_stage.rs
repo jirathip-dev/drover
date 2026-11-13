@@ -446,7 +446,7 @@ fn shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
     // An older event that stored a path outside the lane folders: no card shot, and the route answers 404.
     let old = json!({"verdict": "FAIL", "stage": "verify", "files": [{"name": "x.png", "path": x}]});
     ev(&c, 3, "verdict", old);
-    assert!(drover::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12)).is_empty());
+    assert!(drover::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12), None).is_empty());
     assert!(get("/shot/sendmeter/12/0").starts_with("HTTP/1.1 404"));
 }
 
