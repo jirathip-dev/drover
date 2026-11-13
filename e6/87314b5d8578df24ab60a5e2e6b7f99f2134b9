@@ -1,0 +1,4 @@
+Decided: merge origin/staging (the drover rename) keeping both sides: renamed names plus this branch's spawn::LOW and ProcessType Interactive
+Because: crates/cli/tests/spawn.rs:553
+Rejected: none
+Owner: the branch is current with staging again; behaviour is unchanged from round 1
