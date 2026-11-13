@@ -1,0 +1,7 @@
+Decided: merge origin/staging; lib.rs keeps this branch's one ask allocator with staging's drover rename, and ask_ids.rs follows the rename and staging's design hand-off file list.
+Because: crates/core/src/design.rs:195
+Decided: a fast pass still never hands off a design, so the race test still runs a full pass, a fast pass and a kick together.
+Because: crates/core/src/drive.rs:1158
+Rejected: none
+Check: cargo test -p drover --test ask_ids passes at the head and fails with design.rs's once key set to None (2 asks).
+Owner: the fix for doubled design asks now sits on the latest staging.
