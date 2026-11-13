@@ -19,6 +19,7 @@ pub mod drive;
 pub mod events;
 pub mod gate;
 pub mod gh;
+pub mod heavy;
 pub mod herdr;
 pub mod hook;
 pub mod host;

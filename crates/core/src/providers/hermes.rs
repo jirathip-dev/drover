@@ -44,6 +44,7 @@ static DIALECT: Dialect = Dialect {
     deny: |reason| json!({"action": "block", "message": reason}),
     prompt: "",
     again: None,
+    rewrite: None,
 };
 
 impl Provider for Hermes {

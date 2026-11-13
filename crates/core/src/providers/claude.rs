@@ -74,6 +74,7 @@ static DIALECT: Dialect = Dialect {
     deny: |reason| json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}),
     prompt: "UserPromptSubmit",
     again: Some(|reason| json!({"decision": "block", "reason": reason})),
+    rewrite: Some(|ti| json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow", "updatedInput": ti}})),
 };
 
 /// `<config dir>/claude`, the generated per-role profiles.

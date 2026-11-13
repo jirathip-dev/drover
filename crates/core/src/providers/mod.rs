@@ -157,6 +157,8 @@ pub struct Dialect {
     /// `reason` (none: "", `None`).
     pub prompt: &'static str,
     pub again: Option<fn(&str) -> Value>,
+    /// #909: its answer that runs the tool call with this tool input instead (none: it can't).
+    pub rewrite: Option<fn(Value) -> Value>,
 }
 
 /// The hook dialects of every harness that has one, in `known` order.
