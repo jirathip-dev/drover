@@ -1,0 +1,14 @@
+Decided: arch-check gets `[comments] policy = "strict"`, judging every line of every .rs/.ts/.tsx file; "off" stays diff-only so other fleet repos keep their behaviour
+Because: "A CI check (a script or an arch/lint rule) enforcing the rule on every tracked source file, tests included."
+Decided: the allowed set is the existing one (SAFETY over unsafe, one `///` line on a pub item) plus `// TODO(#N)`, checked by syntax only
+Because: "Allowed: `// SAFETY:` above an unsafe/forced operation, and `// TODO(#N)` naming an open issue."
+Decided: multi-line `///` on a pub item became one joined line, not cut, so public docs keep their text
+Decided: clap help text moved from `///` to `about =` / `help =` attributes; every `--help` and `help --agent` page is byte-identical
+Because: crates/core/src/cli.rs:26
+Decided: the frozen old board (web/src, serve.rs, serve/ but v1.rs) is in `except`, so board-freeze still passes
+Because: .drover/rules.md:1
+Rejected: checking that a TODO's issue is open — needs the network in CI; none exist today
+Rejected: hand-rewriting 5,100 comments into names or tests — a scripted strip with a token-equality check is reviewable
+Check: stripping comments and whitespace, old and new files match token for token except arch.rs, the new test, cli.rs clap attrs, spawn.rs's one collapsed if (clippy) and rustfmt trailing commas
+Check: assets/types/api.d.ts is regenerated; its diff is comment lines only
+Owner: Code comments are gone except safety notes, issue TODOs and one-line docs on public items, and CI now fails any other.
