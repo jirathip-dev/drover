@@ -133,6 +133,38 @@ pub fn append(state: &Path, ev: &Event) -> Result<()> {
     with(state, true, (), |c| insert(c, ev, None, false))
 }
 
+/// #900: `evs` in one transaction, each `needs-decision` under the next ask id; none if an ask keyed `once` is logged.
+pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Option<Vec<Event>>> {
+    for ev in &evs {
+        crate::sim::point(&crate::sim::Point::Append(ev));
+    }
+    with(state, true, None, |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let count = |w: &str, p: &[&str]| {
+            let q = format!("SELECT COUNT(*) FROM events WHERE type = 'needs-decision'{w}");
+            tx.query_row(&q, rusqlite::params_from_iter(p), |r| r.get::<_, u64>(0))
+        };
+        if let Some(k) = once {
+            if count(" AND json_extract(json, '$.once') = ?1", &[k])? > 0 {
+                return Ok(None);
+            }
+        }
+        let mut n = count("", &[])?;
+        for ev in evs.iter_mut().filter(|e| e.kind == "needs-decision") {
+            n += 1;
+            ev.data.insert("id".into(), format!("q{n}").into());
+            if let Some(k) = once {
+                ev.data.insert("once".into(), k.into());
+            }
+        }
+        for ev in &evs {
+            insert(&tx, ev, None, false)?;
+        }
+        tx.commit()?;
+        Ok(Some(evs))
+    })
+}
+
 /// The events `filter` (an SQL condition over the columns, `?1` = `arg`) selects, by seq.
 pub(crate) fn events(state: &Path, filter: &str, arg: u64) -> Result<Vec<Event>> {
     with(state, false, vec![], |c| rows(c, filter, arg))

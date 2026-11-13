@@ -590,8 +590,8 @@ pub fn unguarded(
         format!("ACP agent {id} runs no {h} hook")
     } else if !remote && !hooks.any(|h| h["command"].as_str().is_some_and(|c| providers::guards(ctx, c, family))) {
         format!("profile {profile} has no drover PreToolUse hook; run `drover profiles sync`")
-    } else if !account {
-        "an ACP lane signs in with its role's [accounts] account env".into()
+    } else if !account && remote {
+        "an ACP lane on another host signs in with its role's [accounts] account, through the main host's proxy".into()
     } else {
         String::new()
     }
@@ -1792,15 +1792,11 @@ fn respawn_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue, role)
         failed.join("; ")
     );
     if asked.is_none() {
-        let id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
         let q = format!("#{issue}'s {role} lane keeps failing at start: {}", failed.join("; "));
-        let d = json!({"id": id, "question": q, "options": ["try again", "park"], "recommend": null, "agent": null,
+        let d = json!({"question": q, "options": ["try again", "park"], "recommend": null, "agent": null,
             "kind": "owner", "respawn_loop": role});
-        emit(
-            &ctx.state,
-            cfg,
-            Event::new(ctx.now, fleet, Some(issue), "needs-decision", d),
-        )?;
+        let ev = Event::new(ctx.now, fleet, Some(issue), "needs-decision", d);
+        crate::events::ask(&ctx.state, cfg, vec![ev], None)?;
     }
     refused("RESPAWN_LOOP", why)
 }

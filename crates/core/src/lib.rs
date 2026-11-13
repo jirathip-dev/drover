@@ -58,7 +58,7 @@ pub mod webhook;
 pub mod webpush;
 pub mod why;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 pub use cli::{main_with, usage_doc, HELP_AGENT_MAX, SERVE, SERVICE};
 use config::{home, set_in, set_value, write_atomic, Config};
 use events::{emit, read, Event};
@@ -379,7 +379,6 @@ pub fn ask(
     if let Some(t) = thread {
         orchestrator::fleet_of(&events, t)?;
     }
-    let id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
     // `<fleet>:<issue|->:<role>` names the newest spawn of that lane.
     let lane = std::env::var("DROVER_LANE").unwrap_or_default();
     let at = |e: &Event| {
@@ -394,8 +393,7 @@ pub fn ask(
     let starts = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "spawn-started");
     let spawned = events.iter().rev().filter(starts).find(|e| at(e) == lane);
     let (a, h) = spawned.map_or((None, None), |e| (e.str("agent"), e.str("host"))); // #325: and its host
-    let mut d =
-        json!({"id": id, "question": q, "options": opts, "recommend": rec, "agent": a, "host": h, "kind": kind});
+    let mut d = json!({"question": q, "options": opts, "recommend": rec, "agent": a, "host": h, "kind": kind});
     if let Some(t) = thread {
         d["thread"] = json!(t);
     }
@@ -408,7 +406,10 @@ pub fn ask(
         d["routed"] = json!(t);
     }
     let ev = Event::new(ctx.now, fleet, issue, "needs-decision", d);
-    emit(&ctx.state, cfg, ev.clone())?;
+    let ev = events::ask(&ctx.state, cfg, vec![ev], None)?
+        .pop()
+        .context("ask not logged")?;
+    let id = ev.str("id").unwrap_or_default();
     // #633: an attached cooee thread reads the ask from `/api/v1/events`; no drover conductor to type it into.
     if let Some(t) = routed.filter(|t| orchestrator::attached(&events, t).is_none()) {
         if let Err(e) = orchestrator::lane_ask(ctx, cfg, r, t, &ev) {
@@ -523,17 +524,20 @@ pub fn orchestrator_extend(
         .iter()
         .rfind(open)
         .filter(|a| events::closed(&events, a).is_none());
-    let mut id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
-    if let Some(a) = ask {
-        a.str("id").unwrap_or_default().clone_into(&mut id);
+    let ask = if let Some(a) = ask {
+        a.clone()
     } else {
         let why = card.and_then(|c| c.str("reason")).unwrap_or("needs-human");
         let q = format!("One more round for #{n}? ({why})");
-        let d = json!({"id": id, "question": q, "options": ["one more round", "park"], "recommend": 1,
+        let d = json!({"question": q, "options": ["one more round", "park"], "recommend": 1,
             "kind": "owner", "extend": true, "spawn": spawn});
-        events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "needs-decision", d))?;
-    }
-    orchestrator_answer(ctx, cfg, r, out, (fleet, &id), "1", (t, basis.unwrap_or_default()))
+        let ev = Event::new(ctx.now, fleet, Some(n), "needs-decision", d);
+        db::ask(&ctx.state, vec![ev], None)?
+            .and_then(|mut v| v.pop())
+            .context("ask not logged")?
+    };
+    let id = ask.str("id").unwrap_or_default();
+    orchestrator_answer(ctx, cfg, r, out, (fleet, id), "1", (t, basis.unwrap_or_default()))
 }
 
 /// #584: who a typed answer is by.

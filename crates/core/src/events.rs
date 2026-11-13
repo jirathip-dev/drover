@@ -4,10 +4,12 @@ use crate::runner::{Real, Runner};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, HashMap};
+use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
@@ -76,7 +78,7 @@ pub fn append(path: &Path, ev: &Event) -> Result<()> {
 
 /// The live log (#343: without the events a rotation archived), by seq.
 pub fn read(path: &Path) -> Result<Vec<Event>> {
-    Ok(shared(path)?.events.clone())
+    Ok(shared(path)?.to_vec())
 }
 
 /// #344: the log in the JSONL format before #344, one event a line with its seq (`drover events --jsonl`).
@@ -206,6 +208,17 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
 #[allow(clippy::needless_pass_by_value)] // public API: callers and tests hand the event over
 pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     append(state, &ev)?;
+    notify(state, cfg, &ev)
+}
+
+/// #900: `db::ask`, then notify each event logged: they, the asks numbered, or none when `once` is logged already.
+pub fn ask(state: &Path, cfg: &Config, evs: Vec<Event>, once: Option<&str>) -> Result<Vec<Event>> {
+    let evs = crate::db::ask(state, evs, once)?.unwrap_or_default();
+    evs.iter().try_for_each(|ev| notify(state, cfg, ev))?;
+    Ok(evs)
+}
+
+fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
     // #99: phones hear of owner asks and of each default taken, never of a routine ask merely waiting.
     // #407: a thread open on a board (its stream stamped `watch-<thread>.at` in the last 5 s) pushes nothing.
     let at = |t: &str| std::fs::read_to_string(state.with_file_name(format!("watch-{t}.at"))).ok();
@@ -228,12 +241,12 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     let wanted = |n: &&crate::config::Notify| n.wants(if n.webpush() { push } else { &ev.kind });
     for n in cfg.notifiers(&ev.fleet).into_iter().filter(wanted) {
         let payload = if n.format.as_deref() == Some("json") {
-            serde_json::to_string(&ev)?
+            serde_json::to_string(ev)?
         } else {
-            plain(&ev) + "\n"
+            plain(ev) + "\n"
         };
         let res = if n.webpush() {
-            crate::webpush::send(state, n.sub.as_deref().unwrap_or_default(), &ev, None).map(drop)
+            crate::webpush::send(state, n.sub.as_deref().unwrap_or_default(), ev, None).map(drop)
         } else {
             run_notifier(&n.cmd, &payload)
         };
@@ -488,7 +501,7 @@ pub const PASSIVE: &[&str] = &[
 ];
 
 /// #584: an ask's endings, the first that applies naming why it closed.
-const ORDER: [&str; 8] = [
+const ORDER: [&str; 9] = [
     "answered",
     "withdrawn",
     "delivered",
@@ -497,6 +510,7 @@ const ORDER: [&str; 8] = [
     "closed: merged",
     "closed: issue closed",
     "closed: lane gone",
+    "repeat",
 ];
 
 /// #632: events indexed and (ask, event) pairs checked: the ask endings' work, counted.
@@ -511,6 +525,7 @@ pub struct Asks {
     by: HashMap<(u8, String, Option<String>), Vec<usize>>,
     /// The first `spawn-started` of each (agent, pane).
     started: HashMap<(Option<String>, Option<String>), usize>,
+    ids: std::collections::HashSet<(String, String)>,
 }
 
 impl Asks {
@@ -525,6 +540,8 @@ impl Asks {
         let issue = e.issue.map(|n| n.to_string());
         if e.kind == "spawn-started" {
             self.started.entry((s("agent"), s("pane"))).or_insert(i);
+        } else if e.kind == "needs-decision" && s("id").is_some_and(|id| !self.ids.insert((e.fleet.clone(), id))) {
+            self.ends.insert(i, Some((ORDER.len() - 1, i)));
         } else if e.kind == "needs-decision" {
             self.ends.insert(i, None);
             let keys = [key(0, s("id")), key(2, s("agent"))]
@@ -605,11 +622,12 @@ impl Threads {
     }
 }
 
-/// #701: the cached `Log` whose events `events` are (none: a log read some other way).
+/// #701, #944: the `Log` whose events `events` are, the newest or one a reader still holds (none: read some other way).
 pub fn cached(events: &[Event]) -> Option<Arc<Log>> {
-    let logs = LOGS.lock().unwrap_or_else(PoisonError::into_inner);
-    let hit = logs.values().find(|l| std::ptr::eq(l.1.events.as_slice(), events));
-    hit.map(|l| l.1.clone())
+    let live = LIVE.lock().unwrap_or_else(PoisonError::into_inner);
+    live.iter()
+        .filter_map(Weak::upgrade)
+        .find(|l| std::ptr::eq(&raw const *l.events, events))
 }
 
 /// #701: the first `needs-decision` (`ask`) or the last `decision` of `fleet`'s ask `id`: the index's when `events` is
@@ -626,6 +644,12 @@ pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> 
     let x = &l.threads;
     let map = if kind == "decision" { &x.decisions } else { &x.asks };
     map.get(&(fleet.into(), id.into())).map(|i| &events[*i])
+}
+
+/// #900: `e` repeats an ask id logged before it (two passes raced to post it): every view shows the first alone.
+pub fn repeat(events: &[Event], e: &Event) -> bool {
+    let first = |id| ask_event(events, "needs-decision", &e.fleet, id);
+    e.kind == "needs-decision" && e.str("id").and_then(first).is_some_and(|a| !std::ptr::eq(a, e))
 }
 
 /// #859: ask indexes built from a slice that is no cached `Log` (`index`'s one-pass fallback): serve's reads build none.
@@ -646,7 +670,7 @@ fn index<T>(events: &[Event], f: impl FnOnce(&Asks) -> T) -> T {
 /// folded alone (a rotation or another database file since: all again).
 #[derive(Default, Clone)]
 pub struct Log {
-    pub events: Vec<Event>,
+    pub events: Events,
     pub asks: Asks,
     pub threads: Threads,
     pub states: States,
@@ -662,9 +686,82 @@ impl std::ops::Deref for Log {
     }
 }
 
+/// #944: a log's events, in a buffer its later versions share and append to in place: each sees only its own `len`.
+#[derive(Default, Clone)]
+pub struct Events {
+    buf: Arc<Buf>,
+    len: usize,
+}
+
+#[derive(Default)]
+struct Buf {
+    len: Mutex<usize>,
+    cells: Box<[UnsafeCell<MaybeUninit<Event>>]>,
+}
+
+// SAFETY: a cell is written once, under `len`'s lock, before `len` passes it; only cells below `len` are ever read.
+unsafe impl Sync for Buf {}
+
+impl Drop for Buf {
+    fn drop(&mut self) {
+        let n = *self.len.get_mut().unwrap_or_else(PoisonError::into_inner);
+        for c in &mut self.cells[..n] {
+            // SAFETY: the first `n` cells were written (`push`) and are dropped only here.
+            unsafe { c.get_mut().assume_init_drop() };
+        }
+    }
+}
+
+impl std::ops::Deref for Events {
+    type Target = [Event];
+    fn deref(&self) -> &[Event] {
+        // SAFETY: the first `len` cells are written and never written again; a cell is laid out as its `Event`.
+        unsafe { std::slice::from_raw_parts(self.buf.cells.as_ptr().cast(), self.len) }
+    }
+}
+
+impl Events {
+    fn push(&mut self, e: Event) {
+        loop {
+            let mut at = self.buf.len.lock().unwrap_or_else(PoisonError::into_inner);
+            if *at == self.len && self.len < self.buf.cells.len() {
+                // SAFETY: cell `len` is past what every handle sees and `at`'s lock is held: nothing else touches it.
+                unsafe { (*self.buf.cells[self.len].get()).write(e) };
+                (*at, self.len) = (self.len + 1, self.len + 1);
+                return;
+            }
+            drop(at);
+            self.grow(1);
+        }
+    }
+
+    fn reserve(&mut self, n: usize) {
+        if self.len + n > self.buf.cells.len() {
+            self.grow(n);
+        }
+    }
+
+    fn grow(&mut self, n: usize) {
+        let cap = (self.len + n).next_power_of_two().max(64);
+        let cells = (0..cap).map(|_| UnsafeCell::new(MaybeUninit::uninit())).collect();
+        let mut next = Events {
+            buf: Arc::new(Buf {
+                len: Mutex::new(0),
+                cells,
+            }),
+            len: 0,
+        };
+        self.iter().for_each(|e| next.push(e.clone()));
+        *self = next;
+    }
+}
+
 type Gated = (Arc<Mutex<()>>, Arc<Log>);
 
 static LOGS: Mutex<BTreeMap<PathBuf, Gated>> = Mutex::new(BTreeMap::new());
+
+/// #944: each `Log` `shared` has made, while a reader holds it (`cached` finds them).
+static LIVE: Mutex<Vec<Weak<Log>>> = Mutex::new(Vec::new());
 
 /// #560, #632: the cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq:
 /// each call reads only the events appended since (serve's requests and watcher).
@@ -685,6 +782,9 @@ pub fn shared(path: &Path) -> Result<Arc<Log>> {
     };
     let got = catch_up(path, &mut l, last, key);
     logs().get_mut(&file).expect("added above").1 = l.clone();
+    let mut live = LIVE.lock().unwrap_or_else(PoisonError::into_inner);
+    live.retain(|w| w.strong_count() > 0 && !std::ptr::eq(w.as_ptr(), Arc::as_ptr(&l)));
+    live.push(Arc::downgrade(&l));
     got.map(|()| l)
 }
 
@@ -696,6 +796,7 @@ fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<
     let m = Arc::make_mut(l);
     m.seq = new.last().map_or(last, |e| e.seq.max(last));
     m.states = fold_into(std::mem::take(&mut m.states), &new);
+    m.events.reserve(new.len());
     for e in new {
         if let Some(n) = e.issue {
             m.issues.entry((e.fleet.clone(), n)).or_default().push(m.events.len());
