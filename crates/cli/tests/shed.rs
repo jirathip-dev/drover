@@ -2303,3 +2303,126 @@ fn an_acp_lane_silent_after_its_first_turn_is_a_failed_start_naming_its_account(
     let (_, w) = run(&later(&c, 400), &cli, &["waiting", "sendmeter"]);
     assert!(w.contains("failed start") && !w.contains("idle without pushing"), "{w}");
 }
+
+fn verify_round_one(name: &str) -> (drover::Ctx, FakeShed) {
+    let b = FakeShed::new();
+    let verify = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
+    let c = ctx(&tmpdir(name), &format!("{}{verify}", shed_config(&b.sock, "")));
+    let ev = |kind: &str, d: Value| {
+        drover::events::append(&c.state, &Event::new(c.now - 100, "sendmeter", Some(12), kind, d)).unwrap()
+    };
+    let impl_ = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
+    ev("spawn", impl_.clone());
+    ev("pushed", json!({"sha": "a".repeat(40)}));
+    let r1 = "sendmeter-verify-12-r1";
+    let wt = c.worktrees.join("sendmeter/verify-12-r1");
+    ev(
+        "spawn",
+        json!({"role": "verify", "stage": "verify", "check": true, "agent": r1, "pane": r1, "runtime": "shed",
+        "worktree": wt, "branch": "verify-12-r1"}),
+    );
+    let fail = json!({"verdict": "FAIL", "sha": "a".repeat(40), "stage": "verify", "body": "FAIL"});
+    ev("verdict", fail);
+    ev("spawn", impl_);
+    ev("pushed", json!({"sha": "b".repeat(40)}));
+    b.add(
+        r1,
+        json!({"fleet": "sendmeter", "issue": "12", "role": "verify", "harness": "claude"}),
+    );
+    (c, b)
+}
+
+fn carrying(b: &FakeShed, role: &str) -> Vec<String> {
+    let st = b.lock();
+    let live = st
+        .terms
+        .values()
+        .filter(|t| t["state"] == "running" && t["labels"]["role"] == role);
+    live.map(|t| t["name"].as_str().unwrap().to_string()).collect()
+}
+
+#[test]
+fn spawning_verify_round_two_stops_round_ones_live_terminal_first() {
+    let (c, b) = verify_round_one("dup-spawn");
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let f = spawn_fake().reply("gh pr view", "{}");
+    let (code, out) = run(&c, &f, &["spawn", "sendmeter", "12", "verify"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    let order: Vec<(String, String)> = (b.lock().seen.iter())
+        .filter(|s| matches!(s.0.as_str(), "kill" | "run"))
+        .map(|s| (s.0.clone(), s.1["name"].as_str().unwrap().to_string()))
+        .collect();
+    let want = [("kill", "sendmeter-verify-12-r1"), ("run", "sendmeter-verify-12-r2")];
+    assert_eq!(
+        order,
+        want.map(|(m, n)| (m.to_string(), n.to_string())),
+        "round 1 stops before round 2 starts"
+    );
+    assert_eq!(carrying(&b, "verify"), ["sendmeter-verify-12-r2"]);
+    let closed = logged(&c, "lane-closed");
+    assert_eq!(closed.len(), 1);
+    assert_eq!(
+        (closed[0].str("agent"), closed[0].str("why")),
+        (Some("sendmeter-verify-12-r1"), Some("lane-dup"))
+    );
+}
+
+#[test]
+fn two_live_processes_of_one_lane_alert_once_and_the_next_drive_pass_keeps_the_newest() {
+    let (c, b) = verify_round_one("dup-check");
+    let r2 = "sendmeter-verify-12-r2";
+    let d = json!({"role": "verify", "stage": "verify", "check": true, "agent": r2, "pane": r2, "runtime": "shed"});
+    drover::events::append(&c.state, &Event::new(c.now - 50, "sendmeter", Some(12), "spawn", d)).unwrap();
+    b.add(
+        r2,
+        json!({"fleet": "sendmeter", "issue": "12", "role": "verify", "harness": "claude"}),
+    );
+    let f = Fake::default();
+    for _ in 0..2 {
+        assert_eq!(run(&c, &f, &["check"]).0, 0);
+    }
+    let dup = logged(&c, "lane-dup");
+    assert_eq!(dup.len(), 1, "once per state");
+    assert!(
+        dup[0]
+            .str("reason")
+            .unwrap()
+            .contains("sendmeter-verify-12-r1, sendmeter-verify-12-r2"),
+        "{:?}",
+        dup[0]
+    );
+    let (code, out) = run(&later(&c, 600), &f, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(carrying(&b, "verify"), [r2], "{out}");
+    assert!(!b.has("sendmeter-verify-12-r1"));
+}
+
+#[test]
+fn clean_removes_exited_shed_terminals_of_merged_lanes_only() {
+    let (c, b) = verify_round_one("dup-clean");
+    drover::events::append(
+        &c.state,
+        &Event::new(c.now, "sendmeter", Some(12), "merged", json!({"sha": "b".repeat(40)})),
+    )
+    .unwrap();
+    b.exit("sendmeter-verify-12-r1");
+    b.add(
+        "sendmeter-impl-13",
+        json!({"fleet": "sendmeter", "issue": "13", "role": "impl", "harness": "claude"}),
+    );
+    b.exit("sendmeter-impl-13");
+    let f = Fake::default().reply("gh issue list", "[]");
+    let (_, out) = run(&c, &f, &["clean"]);
+    assert!(
+        out.contains("would remove exited shed terminal sendmeter-verify-12-r1 (sendmeter#12 merged)"),
+        "{out}"
+    );
+    assert_eq!(b.lock().terms.len(), 2, "a dry run removes nothing");
+    let (_, out) = run(&c, &f, &["clean", "--yes"]);
+    assert!(
+        out.contains("removed exited shed terminal sendmeter-verify-12-r1"),
+        "{out}"
+    );
+    let left: Vec<String> = b.lock().terms.keys().cloned().collect();
+    assert_eq!(left, ["sendmeter-impl-13"], "an open issue's exited terminal stays");
+}

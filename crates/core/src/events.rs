@@ -443,6 +443,7 @@ pub const PASSIVE: &[&str] = &[
     "lane-pushed",
     "stall",
     "orphan-lane",
+    "lane-dup",
     "orphan-issue",
     "outbox-stale",
     "lane-dead",
