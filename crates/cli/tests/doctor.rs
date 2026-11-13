@@ -266,7 +266,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         (
             |_, _, r| r.once("codesign -v -R", 3, ""),
             "signature",
-            "→ sh scripts/signing-identity.sh in the drover checkout (once), then sh scripts/signing-identity.sh sign ",
+            "→ sh scripts/signing-identity.sh in the drover checkout (once), then sh scripts/install-gate.sh ",
         ),
         (
             |c, _, r| {

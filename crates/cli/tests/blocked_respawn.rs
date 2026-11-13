@@ -21,36 +21,31 @@ fn at(c: &drover::Ctx, secs: u64) -> drover::Ctx {
 
 fn spawn(c: &drover::Ctx, ts: u64) {
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let d = json!({"role": "impl", "agent": LANE, "pane": "w9:p1", "workspace": "w9", "worktree": wt,
-        "branch": "issue-12"});
+    let d = json!({"role": "impl", "agent": LANE, "pane": LANE, "worktree": wt, "branch": "issue-12"});
     ev(c, ts, 12, "spawn", d);
 }
 
-/// #12's impl lane spawned at ts 10, its pane gone (it ended), no PR; `title` = the issue's.
-fn lane(name: &str, title: &str) -> (drover::Ctx, Fake) {
+fn lane(name: &str, title: &str) -> (drover::Ctx, Fake, FakeShed) {
     std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
     let c = ctx(&tmpdir(name), CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     std::fs::create_dir_all(c.worktrees.join("sendmeter/issue-12")).unwrap();
     spawn(&c, 10);
     let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view 12", &json!({"title": title, "body": "b"}).to_string())
         .reply("gh issue close", "")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr agent wait", "{}")
         .reply("git -C", "");
-    (c, r)
+    (c, r, sh)
+}
+
+fn started(sh: &FakeShed) -> bool {
+    !sh.all("run").is_empty()
 }
 
 fn ok(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
@@ -63,13 +58,18 @@ fn ok(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
 fn drive(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
     let out = ok(c, r, &["drive"]);
-    let new = read(&c.state).unwrap().split_off(before);
+    let new = read(&c.state).unwrap().to_vec().split_off(before);
     let steps = new.iter().filter(|e| e.kind == "driven");
     (out, steps.map(|e| e.str("step").unwrap().to_string()).collect())
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn state(c: &drover::Ctx) -> String {
@@ -85,7 +85,7 @@ fn lane_ends(c: &drover::Ctx, ts: u64) {
 
 #[test]
 fn a_blocked_issue_given_an_extra_round_is_never_respawned_and_waits_for_its_blockers() {
-    let (c, r) = lane("blocked-fix", "t");
+    let (c, r, sh) = lane("blocked-fix", "t");
     ok(&c, &r, &["queue", "sendmeter", "add", "12"]);
     ok(
         &c,
@@ -103,12 +103,12 @@ fn a_blocked_issue_given_an_extra_round_is_never_respawned_and_waits_for_its_blo
     assert!(!w.contains("review FAIL"), "{w}");
     let (out, steps) = drive(&c, &r);
     assert!(steps.is_empty(), "{out}");
-    assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    assert!(!started(&sh), "{:?}", r.calls.borrow());
     assert!(kinds(&c, "respawn").is_empty());
     let ls = ok(&c, &r, &["queue", "sendmeter", "ls"]);
     assert!(ls.contains("#12    queued  blocked by #11, #13"), "{ls}");
     drive(&at(&c, 7200), &r);
-    assert!(!r.called("herdr agent start"), "never while a blocker is open");
+    assert!(!started(&sh), "never while a blocker is open");
     // Both blockers merged: the queue starts it as a first spawn.
     for n in [11, 13] {
         ev(
@@ -121,11 +121,12 @@ fn a_blocked_issue_given_an_extra_round_is_never_respawned_and_waits_for_its_blo
     }
     let (out, steps) = drive(&at(&c, 7300), &r);
     assert_eq!(steps, ["start"], "{out}");
+    assert_eq!(sh.last("run")["name"], LANE);
 }
 
 #[test]
 fn two_blocked_turns_in_a_row_are_owner_cards_never_lane_ends() {
-    let (c, r) = lane("blocked-twice", "t");
+    let (c, r, sh) = lane("blocked-twice", "t");
     ok(&c, &r, &["turn", "blocked", "--why", "waits on #11"]);
     let (out, steps) = drive(&c, &r);
     assert!(steps.is_empty(), "{out}");
@@ -147,13 +148,13 @@ fn two_blocked_turns_in_a_row_are_owner_cards_never_lane_ends() {
         .collect();
     assert_eq!(codes, [Some("LANE_BLOCKED".into()), Some("LANE_BLOCKED".into())]);
     assert!(kinds(&c, "respawn").is_empty());
-    assert!(!r.called("herdr agent start"));
+    assert!(!started(&sh));
 }
 
 #[test]
 fn an_extra_round_for_a_lane_that_never_pushed_is_no_review_fail() {
     // The root cause of cooee #29's "review FAIL" with no PR: `extend` on a build lane that never reached review.
-    let (c, r) = lane("extend-impl", "t");
+    let (c, r, _sh) = lane("extend-impl", "t");
     lane_ends(&c, 20);
     ev(&c, 30, 12, "round-extended", json!({"by": "owner", "spawn": true}));
     assert_eq!(state(&c), "impl");
@@ -165,7 +166,7 @@ fn an_extra_round_for_a_lane_that_never_pushed_is_no_review_fail() {
 #[test]
 fn a_lessons_issue_done_with_no_change_and_no_pr_closes() {
     // berth #22's shape: drive's queue start spawned the lessons issue as `impl`, not `lesson`.
-    let (c, r) = lane("lesson-close", "lessons: sendmeter week of 2026-11-05");
+    let (c, r, sh) = lane("lesson-close", "lessons: sendmeter week of 2026-11-05");
     ok(&c, &r, &["brief", "sendmeter", "12"]);
     let out = ok(&c, &r, &["done", "--no-change", "no repeated class", "sendmeter", "12"]);
     assert!(out.contains("closed sendmeter#12: no repeated class"), "{out}");
@@ -173,13 +174,13 @@ fn a_lessons_issue_done_with_no_change_and_no_pr_closes() {
     assert_eq!(state(&c), "closed");
     let (out, steps) = drive(&at(&c, 7200), &r);
     assert!(steps.is_empty(), "{out}");
-    assert!(!r.called("herdr agent start"));
+    assert!(!started(&sh));
     assert!(kinds(&c, "needs-human").is_empty());
 }
 
 #[test]
 fn an_issue_closed_on_github_reads_closed_after_one_check_and_drive_leaves_it() {
-    let (c, r) = lane("gh-closed", "t");
+    let (c, r, sh) = lane("gh-closed", "t");
     let r = r.reply(
         "gh issue list -R jirathip-dev/sendmeter --state closed",
         r#"[{"number": 12}]"#,
@@ -195,7 +196,7 @@ fn an_issue_closed_on_github_reads_closed_after_one_check_and_drive_leaves_it() 
     ev(&c, 40, 12, "round-extended", json!({"by": "owner", "spawn": true}));
     let (out, steps) = drive(&at(&c, 60), &r);
     assert!(steps.is_empty(), "{out}");
-    assert!(!r.called("herdr agent start"));
+    assert!(!started(&sh));
     ok(&at(&c, 120), &r, &["check"]);
     assert_eq!(kinds(&c, "closed-other").len(), 1, "logged once");
 }
@@ -204,7 +205,7 @@ fn an_issue_closed_on_github_reads_closed_after_one_check_and_drive_leaves_it() 
 /// parked that way again, or with no trim before the exit, it stays parked.
 #[test]
 fn a_lane_ends_after_an_idle_trim_gets_one_respawn() {
-    let (c, r) = lane("trim-repair", "t");
+    let (c, r, sh) = lane("trim-repair", "t");
     let park = |c: &drover::Ctx, ts: u64, trim: bool| {
         if trim {
             ev(
@@ -240,6 +241,12 @@ fn a_lane_ends_after_an_idle_trim_gets_one_respawn() {
         Some(wt.to_str().unwrap()),
         "its own worktree"
     );
+    let runs = sh.all("run");
+    assert_eq!(
+        (runs.len(), runs[0]["name"].as_str(), runs[0]["cwd"].as_str()),
+        (1, Some(LANE), wt.to_str()),
+        "its lane restarted on shed in that worktree"
+    );
 
     // Trimmed and parked again: once only.
     let c2 = at(&c, 100);
@@ -249,7 +256,7 @@ fn a_lane_ends_after_an_idle_trim_gets_one_respawn() {
     assert_eq!(state(&c2), "needs-human");
 
     // No trim before the exit: parked as before.
-    let (c, r) = lane("trim-repair-none", "t");
+    let (c, r, _sh) = lane("trim-repair-none", "t");
     park(&c, 20, false);
     let (out, _) = drive(&c, &r);
     assert!(kinds(&c, "repaired").is_empty(), "{out}");

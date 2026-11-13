@@ -64,12 +64,13 @@ fn new_amendment_prompts_the_open_lane_exactly_once() {
     let wt = d.join("wt");
     std::fs::create_dir_all(&wt).unwrap();
     std::fs::write(wt.join(".brief.md"), "# Issue #12: Fix\n\nAC: works\n").unwrap();
-    let spawn = json!({"role": "impl", "agent": LANE, "branch": "issue-12", "pane": "w9:p1", "worktree": wt});
+    let spawn = json!({"role": "impl", "agent": LANE, "branch": "issue-12", "pane": LANE, "worktree": wt});
     append(&c.state, &Event::new(NOW - 60, "sendmeter", Some(12), "spawn", spawn)).unwrap();
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane(LANE, "idle", "/x");
     let amend = [comment("owner", "OWNER", "**Amendment A**: also log it", 1)];
     let r = Fake::default()
-        .reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w9:p1")]))
-        .reply("herdr", "{}")
         .reply(
             "gh issue view 12 -R jirathip-dev/sendmeter --json updatedAt",
             r#"{"updatedAt":"t2"}"#,
@@ -79,10 +80,10 @@ fn new_amendment_prompts_the_open_lane_exactly_once() {
     assert_eq!(code, 0, "{out}");
     let line = "AMENDMENT on #12 (https://github.com/c/1): run `drover brief sendmeter 12` and apply it";
     assert!(out.contains(line), "{out}");
-    assert!(r.called(&format!("herdr agent prompt {LANE} {line}")));
-    assert!(r.called("herdr pane send-keys w9:p1 Enter"));
+    assert_eq!(sh.sent(LANE), [line]);
+    assert_eq!(sh.last("keys"), json!({"name": LANE, "keys": ["Enter"]}));
     assert_eq!(run(&c, &r, &["check"]), (0, String::new()), "never twice");
-    assert_eq!(r.count("herdr agent prompt"), 1);
+    assert_eq!(sh.sent(LANE).len(), 1);
     let evs = read(&c.state).unwrap();
     assert_eq!(evs.iter().filter(|e| e.kind == "amended").count(), 1);
     // A lane whose brief already carries the amendment (spawned after it) is not prompted.
@@ -92,8 +93,9 @@ fn new_amendment_prompts_the_open_lane_exactly_once() {
     )
     .unwrap();
     let c2 = ctx(&tmpdir("amend-fresh"), CONFIG);
-    let spawn = json!({"role": "impl", "agent": LANE, "pane": "w9:p1", "worktree": wt});
+    sh.attach(&c2);
+    let spawn = json!({"role": "impl", "agent": LANE, "pane": LANE, "worktree": wt});
     append(&c2.state, &Event::new(NOW - 60, "sendmeter", Some(12), "spawn", spawn)).unwrap();
     assert_eq!(run(&c2, &r, &["check"]), (0, String::new()));
-    assert_eq!(r.count("herdr agent prompt"), 1);
+    assert_eq!(sh.sent(LANE).len(), 1);
 }

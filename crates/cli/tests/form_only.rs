@@ -207,9 +207,7 @@ fn the_card_says_not_counted_in_amber() {
     let file = json!({"ts": 1_000_000, "branch": "issue-12", "pr": pr});
     std::fs::write(cache.join("pr-sendmeter-12.json"), file.to_string()).unwrap();
     c.now = 1_000_000;
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#);
+    let r = OnShed::new(Fake::default());
     let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let page = queue_tab(&s, "127.0.0.1:7777", c.now); // #268: the board's Queue tab
     assert!(

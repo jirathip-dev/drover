@@ -15,7 +15,7 @@ fn log(c: &drover::Ctx, issue: Option<u64>, kind: &str, d: Value) {
 
 fn asks(c: &drover::Ctx) -> Vec<Event> {
     let events = read(&c.state).unwrap();
-    events.into_iter().filter(|e| e.kind == "needs-decision").collect()
+    events.iter().filter(|e| e.kind == "needs-decision").cloned().collect()
 }
 
 fn endings(c: &drover::Ctx) -> Vec<(String, Option<&'static str>)> {
@@ -148,7 +148,12 @@ const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\npro
 const HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 struct Meet {
@@ -177,36 +182,26 @@ impl Runner for Meet {
 #[test]
 fn concurrent_full_fast_and_kick_passes_over_one_finished_design_lane_post_one_ask() {
     let c = ctx(&tmpdir("ask-ids-design"), &format!("{CONFIG}{DESIGN}"));
+    let _sh = FakeShed::attached(&c);
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
     );
     let wt = c.worktrees.join("sendmeter/issue-12").display().to_string();
     let fake = Fake::default()
-        .reply("herdr agent list", &agents(&[]))
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply(&format!("git -C {wt} log -1"), &format!("{HEAD}\n"))
         .reply(&format!("git -C {wt} rev-list"), "0\n")
         .reply(
             &format!("git -C {wt} log --format= --name-only"),
             "docs/design/meter/index.html\ndocs/design/meter/1440.png\n",
         )
-        .reply("git -C", "")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:c1"}}}"#,
-        )
-        .reply("herdr pane", "{}")
-        .reply("herdr agent", "{}");
+        .reply("git ", "");
     let (code, out) = run(&c, &fake, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(kinds(&c, "spawn").len(), 1, "the design lane: {out}");

@@ -101,7 +101,7 @@ fn a_paired_report_is_kept_and_named_to_the_notifier() {
     assert_eq!(b["device"], json!(drover::devices::load(&c)[0].label));
     assert!(b["build"].as_str().unwrap().contains('('), "names the build sha");
     assert!(std::fs::read(dir.join("shot.png")).unwrap().starts_with(b"\x89PNG"));
-    let e = read(&c.state).unwrap().pop().unwrap();
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!((e.kind.as_str(), e.fleet.as_str()), ("report", "sendmeter"));
     let path = dir.join("bundle.json").display().to_string();
     assert!(
@@ -119,15 +119,14 @@ fn a_paired_report_is_kept_and_named_to_the_notifier() {
     );
 }
 
-/// A real `serve` with one lane; returns its URL and a paired cookie (`name=value`).
-fn board(c: &drover::Ctx) -> (String, String) {
+fn board(c: &drover::Ctx) -> (String, String, FakeShed) {
     let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "worktree": "/wt/x"});
     append(&c.state, &Event::new(900_000, "sendmeter", Some(12), "spawn", sp)).unwrap();
-    let list = json!({"result": {"agents": [{"name": "sendmeter-impl-12", "agent_status": "working", "pane_id": "w1:p1", "cwd": "/x"}]}});
-    let r = Fake::default()
-        .reply("herdr agent list", &list.to_string())
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
-        .reply("herdr pane read", "⏺ working\n");
+    let sh = FakeShed::new();
+    sh.attach(c);
+    sh.lane("sendmeter-impl-12", "working", "/x");
+    sh.screen("sendmeter-impl-12", "⏺ working\n");
+    let r = Fake::default();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -137,7 +136,7 @@ fn board(c: &drover::Ctx) -> (String, String) {
     let url = format!("http://{}/", l.local_addr().unwrap());
     let c2 = c.clone();
     std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
-    (url, cookie.trim().trim_start_matches("Cookie: ").to_string())
+    (url, cookie.trim().trim_start_matches("Cookie: ").to_string(), sh)
 }
 
 /// The page in WebKit at 390 px: `js` once the lane row is in, `window.late` read 1.5 s later.
@@ -162,7 +161,7 @@ fn report_mode_in_webkit_outlines_confirms_and_sends_a_bundle() {
         return;
     }
     let c = ctx(&tmpdir("report-wk"), CONFIG);
-    let (url, cookie) = board(&c);
+    let (url, cookie, _sh) = board(&c);
     let shots = std::env::var("DROVER_SNAPSHOTS").map_or_else(|_| tmpdir("report-png"), std::path::PathBuf::from);
     // `/report` from the reply box's menu, a tap (outline), a second tap (the note box), a note: the 390 px shot.
     // The taps come 400 ms on, once the sheet has slid away.

@@ -120,7 +120,7 @@ fn post(s: &Server, path: &str, body: &str, extra: &str) -> String {
 fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     let dir = tmpdir("wp-sub");
     let c = ctx(&dir, CONFIG);
-    let r = Fake::default().reply("herdr", NO_AGENTS);
+    let r = OnShed::new(Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
     let form = sub_form(&ua, "https://web.push.apple.com/secret-endpoint");
@@ -251,6 +251,7 @@ fn delivery_201_sent_410_pruned_500_notify_failed() {
     );
     let ev = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "notify-failed")
         .unwrap();
@@ -378,7 +379,7 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
     let _path = fake_curl(&dir);
     std::fs::write(dir.join("code"), "201").unwrap();
     let c = ctx(&dir, &format!("{CONFIG}\n{PUSH}"));
-    let r = Fake::default().reply("herdr", NO_AGENTS);
+    let r = OnShed::new(Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
     let cookie = pair(&s, &c, "Mozilla (iPhone)", c.now) + "User-Agent: Mozilla (iPhone)\r\n";
@@ -405,10 +406,12 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
         "one push each, to the new device only"
     );
     let json: serde_json::Value =
-        serde_json::from_slice(&decrypt(&std::fs::read(dir.join("body")).unwrap(), &ua, &d(AUTH)).unwrap()).unwrap();
+        serde_json::from_slice(&decrypt(&std::fs::read(dir.join("body")).unwrap().to_vec(), &ua, &d(AUTH)).unwrap())
+            .unwrap();
     assert!(json["body"].as_str().unwrap().ends_with("alerts are on"), "{json}");
     let sent: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "push-sent")
         .collect();
@@ -461,7 +464,7 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
 fn check_warns_once_when_devices_are_subscribed_but_no_notifier_is() {
     let dir = tmpdir("wp-check");
     let c = ctx(&dir, CONFIG);
-    let r = Fake::default().reply("herdr", NO_AGENTS);
+    let r = OnShed::new(Fake::default());
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
     let f = |ep: &str| {
         sub_form(&ua, ep)

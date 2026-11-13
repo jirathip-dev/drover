@@ -18,29 +18,24 @@ fn config(d: &Path, role_extra: &str) -> String {
         + "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n"
 }
 
+fn on_shed(name: &str, role_extra: &str) -> (drover::Ctx, FakeShed) {
+    let d = tmpdir(name);
+    let c = ctx(&d, &config(&d, role_extra));
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    (c, sh)
+}
+
 const CHAIN: &str = "fallback = [\"claude:A\", \"claude:B\", \"dsh\"]";
 
-/// Faked herdr/gh/git for a real impl spawn of issue `n` in pane `w9:p<n>`.
 fn fake(c: &drover::Ctx, n: u64) -> Fake {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
-    let pane = format!("w9:p{n}");
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply(&format!("gh issue view {n}"), r#"{"title":"t","body":"b"}"#)
         .reply("git -C", "")
-        .reply(
-            "herdr worktree open",
-            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
-        )
-        .reply(
-            "herdr pane list --workspace w9",
-            &format!(r#"{{"result":{{"panes":[{{"pane_id":"{pane}","agent":null}}]}}}}"#),
-        )
-        .reply(&format!("herdr pane run {pane} export"), "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr agent wait", "{}")
 }
 
 /// A real (faked) impl spawn of issue `n` that succeeds.
@@ -54,22 +49,17 @@ fn spawn(c: &drover::Ctx, n: u64, extra: &[&str]) {
 /// The dry-run plan of an impl spawn of issue `n`: (harness, account).
 fn dry(c: &drover::Ctx, n: u64) -> (Value, Value) {
     let args = ["spawn", "sendmeter", &n.to_string(), "impl", "--dry-run", "--json"];
-    let (code, out) = run(c, &Fake::default(), &args);
+    let (code, out) = run(c, &Fake::default().reply("which shed", "/opt/shed/bin/shed\n"), &args);
     assert_eq!(code, 0, "{out}");
     let p: Value = serde_json::from_str(&out).unwrap();
     (p["harness"].clone(), p["account"].clone())
 }
 
-/// `drover check` with lane `sendmeter-impl-12` (pane `w9:p12`) showing `screen`.
-fn check(c: &drover::Ctx, screen: &str) -> String {
+fn check(c: &drover::Ctx, sh: &FakeShed, screen: &str) -> String {
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
-        )
-        .reply("herdr pane read w9:p12", screen);
-    let (code, out) = run(c, &r, &["check"]);
+    sh.lane("sendmeter-impl-12", "idle", wt.to_str().unwrap());
+    sh.screen("sendmeter-impl-12", screen);
+    let (code, out) = run(c, &Fake::default(), &["check"]);
     assert_eq!(code, 0, "{out}");
     out
 }
@@ -80,19 +70,22 @@ fn rest(c: &drover::Ctx, d: Value) {
 
 #[test]
 fn usage_limit_rests_a_and_the_next_spawn_uses_b() {
-    let d = tmpdir("fb-usage");
-    let c = ctx(&d, &config(&d, CHAIN));
+    let (c, sh) = on_shed("fb-usage", CHAIN);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, 12, &[]);
+    assert_eq!(
+        sh.last("run")["name"],
+        "sendmeter-impl-12",
+        "the lane is shed's terminal"
+    );
     assert_eq!(read(&c.state).unwrap().last().unwrap().str("account"), Some("A"));
-    assert!(check(&c, "Claude usage limit reached.").contains("account-capped"));
+    assert!(check(&c, &sh, "Claude usage limit reached.").contains("account-capped"));
     assert_eq!(dry(&c, 13), (json!("claude"), json!("B")));
 }
 
 #[test]
 fn all_claude_accounts_resting_carries_on_with_the_next_harness() {
-    let d = tmpdir("fb-all");
-    let c = ctx(&d, &config(&d, CHAIN));
+    let (c, _sh) = on_shed("fb-all", CHAIN);
     for a in ["A", "B"] {
         rest(&c, json!({"harness": "claude", "account": a, "until": c.now + 600}));
     }
@@ -105,8 +98,7 @@ fn all_claude_accounts_resting_carries_on_with_the_next_harness() {
 
 #[test]
 fn a_rest_that_expired_goes_back_to_a_at_the_next_round() {
-    let d = tmpdir("fb-back");
-    let mut c = ctx(&d, &config(&d, CHAIN));
+    let (mut c, _sh) = on_shed("fb-back", CHAIN);
     rest(&c, json!({"harness": "claude", "account": "A", "until": c.now + 600}));
     assert_eq!(dry(&c, 13), (json!("claude"), json!("B")));
     c.now += 601;
@@ -115,11 +107,10 @@ fn a_rest_that_expired_goes_back_to_a_at_the_next_round() {
 
 #[test]
 fn a_signed_out_lane_rests_and_its_successor_gets_the_carry_over() {
-    let d = tmpdir("fb-carry");
-    let c = ctx(&d, &config(&d, CHAIN));
+    let (c, sh) = on_shed("fb-carry", CHAIN);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, 12, &[]);
-    let out = check(&c, "API Error: 401 · Please run /login");
+    let out = check(&c, &sh, "API Error: 401 · Please run /login");
     assert!(out.contains("signed out"), "{out}");
     let ev = read(&c.state).unwrap();
     // #640: an account's sign-out is its own state, without a reset time.
@@ -153,12 +144,30 @@ fn a_harness_that_wont_start_twice_rests() {
     let d = tmpdir("fb-start");
     let c = ctx(&d, &config(&d, CHAIN));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
     for _ in 0..2 {
-        let r = fake(&c, 12).once_err("herdr agent start", 1, "claude: command not found");
+        let r = Fake::default()
+            .reply("herdr agent list", NO_AGENTS)
+            .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
+            .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+            .reply("git -C", "")
+            .reply(
+                "herdr worktree open",
+                r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
+            )
+            .reply(
+                "herdr pane list --workspace w9",
+                r#"{"result":{"panes":[{"pane_id":"w9:p12","agent":null}]}}"#,
+            )
+            .reply("herdr pane run w9:p12 export", "{}")
+            .reply("herdr agent wait", "{}")
+            .once_err("herdr agent start", 1, "claude: command not found");
         assert_eq!(run(&c, &r, &["spawn", "sendmeter", "12", "impl"]).0, 1);
     }
     let ev: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| !["spawn-started", "intent", "failed"].contains(&e.kind.as_str())) // #509: around each try
         .collect();
@@ -173,14 +182,13 @@ fn a_harness_that_wont_start_twice_rests() {
 
 #[test]
 fn default_config_is_unchanged() {
-    let d = tmpdir("fb-default");
-    let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    let (c, sh) = on_shed("fb-default", "accounts = [\"A\", \"B\"]");
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     assert_eq!(dry(&c, 13), (json!("claude"), json!("A")));
     spawn(&c, 12, &[]);
     // No chain: a cap is the account cap it always was; #640: a sign-out is its own state.
-    assert!(check(&c, "Please run /login").contains("account-signed-out"));
-    assert!(check(&c, "Claude usage limit reached.").contains("account-capped"));
+    assert!(check(&c, &sh, "Please run /login").contains("account-signed-out"));
+    assert!(check(&c, &sh, "Claude usage limit reached.").contains("account-capped"));
     assert_eq!(dry(&c, 13), (json!("claude"), json!("B")));
     spawn(&c, 12, &["--supersede"]);
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
@@ -202,8 +210,8 @@ fn brief12(c: &drover::Ctx) -> String {
 }
 
 /// Lane `sendmeter-impl-12` signed out (via `drover check`), then superseded by the next entry with `r` as the fake.
-fn sign_out_and_supersede(c: &drover::Ctx, r: &Fake) {
-    assert!(check(c, "API Error: 401 · Please run /login").contains("signed out"));
+fn sign_out_and_supersede(c: &drover::Ctx, sh: &FakeShed, r: &Fake) {
+    assert!(check(c, sh, "API Error: 401 · Please run /login").contains("signed out"));
     let (code, out) = run(c, r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert_eq!(code, 0, "{out}");
 }
@@ -219,8 +227,7 @@ fn ask(c: &drover::Ctx, kind: &str, mut d: Value) {
 
 #[test]
 fn the_fallback_brief_carries_a_capped_handover_from_the_transcript() {
-    let d = tmpdir("ho-transcript");
-    let c = ctx(&d, &config(&d, CHAIN));
+    let (c, sh) = on_shed("ho-transcript", CHAIN);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, 12, &[]);
     let wt = c.worktrees.join("sendmeter/issue-12");
@@ -242,7 +249,7 @@ fn the_fallback_brief_carries_a_capped_handover_from_the_transcript() {
     ask(&c, "needs-decision", json!({"id": "q1", "question": "which way?"}));
     ask(&c, "decision", json!({"id": "q1", "choice": "a", "by": "owner"}));
     let diff = format!("git -C {} diff --name-only origin/staging", wt.display());
-    sign_out_and_supersede(&c, &fake(&c, 12).once(&diff, 0, "src/a.rs\nsrc/b.rs\n"));
+    sign_out_and_supersede(&c, &sh, &fake(&c, 12).once(&diff, 0, "src/a.rs\nsrc/b.rs\n"));
 
     let brief = brief12(&c);
     let note = &brief[brief.find("Handover:").expect(&brief)..];
@@ -282,8 +289,7 @@ fn the_fallback_brief_carries_a_capped_handover_from_the_transcript() {
 
 #[test]
 fn without_a_transcript_the_handover_reads_the_pane_log() {
-    let d = tmpdir("ho-panelog");
-    let c = ctx(&d, &config(&d, CHAIN));
+    let (c, sh) = on_shed("ho-panelog", CHAIN);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, 12, &[]);
     let log = drover::lanes::log(&c.state, "sendmeter-impl-12").unwrap();
@@ -294,7 +300,7 @@ fn without_a_transcript_the_handover_reads_the_pane_log() {
     )
     .unwrap();
     // check rolls the pane into the log too; the lines above are what it had before.
-    assert!(check(&c, "API Error: 401 · Please run /login").contains("signed out"));
+    assert!(check(&c, &sh, "API Error: 401 · Please run /login").contains("signed out"));
     let (code, out) = run(&c, &fake(&c, 12), &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert_eq!(code, 0, "{out}");
     let brief = brief12(&c);
@@ -310,13 +316,12 @@ fn without_a_transcript_the_handover_reads_the_pane_log() {
 
 #[test]
 fn an_entry_that_ran_before_gets_only_the_delta() {
-    let d = tmpdir("ho-delta");
-    let mut c = ctx(&d, &config(&d, CHAIN));
+    let (mut c, sh) = on_shed("ho-delta", CHAIN);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, 12, &[]); // claude:A
     ask(&c, "needs-decision", json!({"id": "early", "question": "q?"}));
     c.now += 60;
-    sign_out_and_supersede(&c, &fake(&c, 12)); // claude:B: A never handed over before, the full note
+    sign_out_and_supersede(&c, &sh, &fake(&c, 12));
     let full = brief12(&c);
     assert!(
         full.contains("asks early") && !full.contains("Only what happened since"),

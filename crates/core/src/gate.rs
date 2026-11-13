@@ -1011,7 +1011,8 @@ fn merged(
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "landed", d))?;
     }
     // The one GitHub comment fleet writes: ≤ 5 lines, merge sha + verdict sha; #677: the latest why note's Owner line.
-    let why = read(&ctx.state)?.into_iter().rfind(|e| e.is("why", fleet, issue));
+    let log = read(&ctx.state)?;
+    let why = log.iter().rfind(|e| e.is("why", fleet, issue));
     let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(
         "Merged via `drover merge`: PR #{num} → `{}` @ `{merge_sha}`\nPinned PASS verdict sha: `{head}`{}{}",
@@ -1050,12 +1051,9 @@ fn merged(
         let src = f.local_path();
         writeln!(
             out,
-            "cargo install --path {}/crates/cli --locked --root {} --force && sh {}/scripts/signing-identity.sh sign {}/bin/drover && ln -sf drover {}/bin/herdsman",
-            src.display(),
-            root.display(),
-            src.display(),
-            root.display(),
-            root.display()
+            "cargo build --release --locked -p drover --manifest-path {s}/Cargo.toml && sh {s}/scripts/install-gate.sh {s}/target/release/drover {r}/bin/drover && ln -sf drover {r}/bin/herdsman",
+            s = src.display(),
+            r = root.display()
         )?;
     }
     Ok(())

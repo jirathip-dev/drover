@@ -149,10 +149,15 @@ pub struct Plan {
     pub token: Option<(String, PathBuf)>,
 }
 
-/// #893: the lane's shell, and so its agent and every build it starts, at low scheduling priority.
-pub const LOW: &str = "&& renice -n 10 -p $$ >/dev/null";
+/// #979: a build or check lane's shell and all it starts under macOS background `QoS`, else `nice 10` and idle I/O.
+pub const BACKGROUND: &str = "&& if [ -x /usr/sbin/taskpolicy ]; then /usr/sbin/taskpolicy -b -p $$; else renice -n 10 -p $$ >/dev/null; ionice -c3 -p $$ 2>/dev/null; true; fi";
 
 impl Plan {
+    /// #979: build and check lanes run in the background; design, architect and orchestrator lanes do not.
+    pub fn qos(&self) -> Option<&'static str> {
+        matches!(self.family, "impl" | "rev").then_some("background")
+    }
+
     /// Exports `DROVER_LANE`, `DROVER_PORT` and the fleet's `env`; #441: sources the secrets `deliver` wrote.
     pub fn lane_cmd(&self, pane: &str) -> Vec<String> {
         let (lane, port) = (format!("DROVER_LANE='{}'", self.lane), self.port.to_string());
@@ -181,7 +186,7 @@ impl Plan {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));
         }
-        c.push(LOW.into());
+        c.extend(self.qos().map(|_| BACKGROUND.to_string()));
         c
     }
 
@@ -835,12 +840,16 @@ pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> 
             Ok(()) => done.push(d),
             Err(e) => {
                 let _ = std::fs::remove_dir_all(&tmp);
-                errs.push(format!("{d}: {e:#}"));
+                errs.push(format!("{d}: {}", first_lines(&e)));
             }
         }
     }
     let secs = t.elapsed().as_secs();
     (!done.is_empty() || !errs.is_empty()).then(|| json!({"dirs": done, "secs": secs, "errors": errs}))
+}
+
+fn first_lines(e: &anyhow::Error) -> String {
+    format!("{e:#}").lines().take(5).collect::<Vec<_>>().join("\n")
 }
 
 fn reuse(p: &Plan, dirs: &[String], target: Option<&String>, agents: &[Value]) -> Option<Value> {
@@ -885,7 +894,7 @@ pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
     };
     let res = ok(r, "cp", &[args, &[&s, &d]].concat());
     let res = res.and_then(|_| Ok(std::fs::rename(&tmp, t)?));
-    let errs: Vec<String> = res.err().map(|e| format!("{e:#}")).into_iter().collect();
+    let errs: Vec<String> = res.err().map(|e| first_lines(&e)).into_iter().collect();
     let _ = std::fs::remove_dir_all(&tmp);
     let dirs: Vec<String> = errs.is_empty().then(|| t.display().to_string()).into_iter().collect();
     Some(json!({"dirs": dirs, "from": src, "secs": at.elapsed().as_secs(), "errors": errs}))
@@ -1209,7 +1218,7 @@ pub fn spawn(
         .map_or(0, |e| e.seq);
     let probe = |i: &Event| -> Result<Option<Value>> {
         let logged = read(&ctx.state)?
-            .into_iter()
+            .iter()
             .any(|e| e.seq > i.seq && e.is("spawn", fleet, issue));
         let up = (step == "spawn").then(|| host::agents(r).ok()).flatten();
         let up = up.is_some_and(|a| !host::live_in(&a, &p.agent, &p.worktree).is_empty());
@@ -1251,6 +1260,7 @@ pub fn spawn(
         }
         event("supersede", d)?;
     }
+    crate::check::stop_rounds(ctx, cfg, base, (fleet, issue, role), &p.agent)?;
     // #676: a lane moved off its last host starts from the pushed branch, plus that host's unsaved work on `wip/`.
     let moved = (placed.as_ref())
         .and_then(|pl| last_spawn(&events, &p.agent).filter(|e| e.str("machine") != pl.machine.as_deref()));
@@ -1977,7 +1987,7 @@ fn iso(t: u64) -> String {
 /// The `spawn` event's data for a lane of plan `p` running in `pane`.
 fn lane_data(p: &Plan, pane: &str, ws: &str) -> Value {
     json!({"role": p.role, "stage": p.stage, "check": p.family == "rev", "harness": p.harness, "profile": p.profile, "model": p.model, "effort": p.effort, "agent": p.agent,
-        "pane": pane, "workspace": ws, "worktree": p.worktree, "branch": p.branch, "account": p.account.as_ref().map(|a| &a.0), "port": p.port})
+        "pane": pane, "workspace": ws, "worktree": p.worktree, "branch": p.branch, "account": p.account.as_ref().map(|a| &a.0), "port": p.port, "qos": p.qos()})
 }
 
 /// `drover adopt`: log the lane running in `pane` and name its agent as planned; nothing is started. `extra` joins the

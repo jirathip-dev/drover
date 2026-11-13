@@ -79,7 +79,12 @@ fn form(html: &str, op: &str, with: Option<(&str, &str)>) -> Form {
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 #[test]
@@ -115,10 +120,7 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
         json!({"ts": T - 60, "issues": {"30": issue(30), "31": issue(31)}}).to_string(),
     )
     .unwrap();
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr agent prompt", "")
-        .reply("which hermes", "/usr/local/bin/hermes\n");
+    let r = OnShed::new(Fake::default().reply("which hermes", "/usr/local/bin/hermes\n"));
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page = String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T)).into_owned();
     assert!(
@@ -211,7 +213,15 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
 /// card), `asked in <title> · <id>`; answered there, the thread's copy shows it answered, no longer open.
 #[test]
 fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
-    let c = ctx(&tmpdir("queue-thread-ask"), CONFIG);
+    let sh = FakeShed::new();
+    let cfg = format!(
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\naccount = \"C\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        sh.sock.display()
+    );
+    let mut c = ctx(&tmpdir("queue-thread-ask"), &cfg);
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "2"]).0, 0);
     let ev = |n: Option<u64>, kind: &str, d: Value| {
         append(&c.state, &Event::new(T - 60, "sendmeter", n, kind, d)).unwrap();
@@ -220,17 +230,13 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
     let ask = json!({"id": "q398", "question": "ship the bell now?", "options": ["now", "after #10"],
         "recommend": 1, "kind": "owner", "thread": "t6"});
     ev(Some(2), "needs-decision", ask);
-    // herdr ready to start the thread's conductor: the answer goes to it, as a tap in the thread would.
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
-        )
-        .reply("herdr pane", "")
-        .reply("herdr agent start", "")
-        .reply("herdr agent wait", "")
-        .reply("herdr agent prompt", "");
+    let agents =
+        json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo", "claude-agent-acp"]}]);
+    let host = Fake::default()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed", "");
+    let cli = sh.cli(&host);
+    let r = drover::shed::With(&cli, sh.shed());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let html = queue_tab(&s, ADDR, T);
@@ -255,7 +261,11 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
         (d.len(), d[0].str("choice"), d[0].str("by")),
         (1, Some("after #10"), Some("owner"))
     );
-    assert!(r.called("herdr agent start orchestrator-t6"), "{:?}", r.calls.borrow());
+    assert!(
+        sh.has("orchestrator-t6") && host.called("shed send orchestrator-t6"),
+        "{:?}",
+        host.calls.borrow()
+    );
     // The thread's copy is answered, not open; the card has no form left.
     let chat: Value = serde_json::from_str(&api(&s, ADDR, &cookie, T, "chat")).unwrap();
     let t = (chat["threads"].as_array().unwrap().iter())

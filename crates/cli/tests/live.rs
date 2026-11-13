@@ -13,17 +13,64 @@ use std::time::{Duration, Instant};
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// A server on a real socket (fake herdr: no agents); returns its address.
-fn live_server(name: &str) -> (drover::Ctx, std::net::SocketAddr) {
+fn live_server(name: &str) -> (drover::Ctx, std::net::SocketAddr, FakeShed) {
     let c = ctx(&tmpdir(name), CONFIG);
     append(&c.state, &Event::new(T, "sendmeter", None, "note", json!({}))).unwrap();
+    let sh = FakeShed::new();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    let c2 = c.clone();
-    std::thread::spawn(move || {
-        drover::serve::serve_on(&c2, &Fake::default().reply("herdr agent list", NO_AGENTS), l, false)
-    });
-    (c, addr)
+    let (c2, b) = (c.clone(), sh.shed());
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &drover::shed::With(&Fake::default(), b), l, false));
+    (c, addr, sh)
+}
+
+struct Lanes {
+    f: Fake,
+    sh: FakeShed,
+    later: std::sync::Mutex<Vec<(String, String)>>,
+}
+
+impl Lanes {
+    fn new(f: Fake) -> Lanes {
+        Lanes {
+            f,
+            sh: FakeShed::new(),
+            later: std::sync::Mutex::default(),
+        }
+    }
+    fn blocked(&self, name: &str, screen: &str) {
+        self.sh.lane(name, "blocked", "/x");
+        self.sh.screen(name, screen);
+    }
+    fn then(&self, name: &str, screen: &str) {
+        self.later.lock().unwrap().push((name.into(), screen.into()));
+    }
+    fn keys(&self) -> Vec<serde_json::Value> {
+        self.sh.all("keys")
+    }
+    fn reads(&self) -> usize {
+        self.sh.all("read").len()
+    }
+}
+
+impl drover::runner::Runner for Lanes {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        self.f.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
+        self.f.run_in(prog, args, input)
+    }
+    fn sleep(&self, secs: u64) {
+        self.f.sleep(secs);
+        let mut later = self.later.lock().unwrap();
+        if !later.is_empty() {
+            let (name, screen) = later.remove(0);
+            self.sh.screen(&name, &screen);
+        }
+    }
+    fn shed(&self) -> Option<drover::shed::Shed> {
+        Some(self.sh.shed())
+    }
 }
 
 fn subscribe(addr: std::net::SocketAddr, host: &str) -> TcpStream {
@@ -49,7 +96,7 @@ fn drain(s: &mut TcpStream, ms: u64) -> String {
 
 #[test]
 fn live_pushes_one_frag_per_changed_section() {
-    let (c, addr) = live_server("live");
+    let (c, addr, _sh) = live_server("live");
     let mut s = subscribe(addr, &addr.to_string());
     let hello = drain(&mut s, 1_500);
     assert!(
@@ -120,7 +167,7 @@ fn live_pushes_one_frag_per_changed_section() {
 
 #[test]
 fn live_caps_clients_and_checks_host() {
-    let (_c, addr) = live_server("cap");
+    let (_c, addr, _sh) = live_server("cap");
     let mut foreign = subscribe(addr, "evil.example");
     assert!(drain(&mut foreign, 500).starts_with("HTTP/1.1 403 "));
     let mut held: Vec<TcpStream> = (0..8).map(|_| subscribe(addr, &addr.to_string())).collect();
@@ -243,7 +290,7 @@ fn prompt_card_golden_from_the_auto_deny_screen() {
 
 #[test]
 fn countdown_card_shows_reason_command_and_clears_when_the_prompt_goes() {
-    let (c, r) = blocked("countdown", &[COUNTDOWN, COUNTDOWN]);
+    let (c, r) = blocked("countdown", COUNTDOWN, COUNTDOWN);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
     let page = page(&s, "/", &ck);
@@ -261,13 +308,8 @@ fn countdown_card_shows_reason_command_and_clears_when_the_prompt_goes() {
     assert!(!needs.contains("data-push=1"), "{needs}");
     // Auto-denied: the next read shows Claude working again, so the card goes.
     let working = "⏺ Bash(cargo test)\n  ⎿ Error: denied\n\n✶ Pontificating… (12m 0s · ↓ 3.1k tokens)\n";
-    let r2 = Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[("sendmeter-impl-12", "blocked", "/x", "w1:p2")]),
-        )
-        .reply("herdr workspace list", "{}")
-        .reply("herdr pane read", working);
+    let r2 = Lanes::new(Fake::default());
+    r2.blocked("sendmeter-impl-12", working);
     let s2 = Server::new(&c, &r2, Some(ADDR.into()));
     let page =
         String::from_utf8_lossy(&s2.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n{ck}\r\n"), T + 5))
@@ -277,8 +319,7 @@ fn countdown_card_shows_reason_command_and_clears_when_the_prompt_goes() {
     assert!(!needs.contains("sendmeter-impl-12"), "no stale card: {needs}");
 }
 
-/// sendmeter-impl-12 (claude) blocked on a permission prompt; sendmeter-rev-9-r1 too.
-fn blocked(name: &str, screens: &[&str]) -> (drover::Ctx, Fake) {
+fn blocked(name: &str, imp: &str, rev: &str) -> (drover::Ctx, Lanes) {
     let c = ctx(&tmpdir(name), CONFIG);
     for (issue, role, agent) in [(12, "impl", "sendmeter-impl-12"), (9, "rev", "sendmeter-rev-9-r1")] {
         append(
@@ -293,18 +334,10 @@ fn blocked(name: &str, screens: &[&str]) -> (drover::Ctx, Fake) {
         )
         .unwrap();
     }
-    let list = agents(&[
-        ("sendmeter-impl-12", "blocked", "/x", "w1:p2"),
-        ("sendmeter-rev-9-r1", "blocked", "/x", "w1:p3"),
-    ]);
-    let mut r = Fake::default()
-        .reply("herdr agent list", &list)
-        .reply("herdr workspace list", "{}")
-        .reply("herdr pane send-keys", "");
-    for s in screens {
-        r = r.once("herdr pane read", 0, s);
-    }
-    (c, r.reply("herdr pane read", PERMISSION))
+    let r = Lanes::new(Fake::default());
+    r.blocked("sendmeter-impl-12", imp);
+    r.blocked("sendmeter-rev-9-r1", rev);
+    (c, r)
 }
 
 /// #269: the page at `path` as the board draws it for the request's device (`extra`: its cookie).
@@ -341,7 +374,7 @@ fn cookie(s: &Server, c: &drover::Ctx) -> String {
 
 #[test]
 fn answer_sends_the_digit_and_logs_no_question() {
-    let (c, r) = blocked("answer", &[]);
+    let (c, r) = blocked("answer", PERMISSION, PERMISSION);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
     let page = page(&s, "/", &ck);
@@ -357,7 +390,7 @@ fn answer_sends_the_digit_and_logs_no_question() {
     assert!(needs.contains("data-ask=\"sendmeter-impl-12\""), "{needs}");
     let res = req(&s, "POST", "/answer", "agent=sendmeter-impl-12&choice=2", "");
     assert!(res.starts_with("HTTP/1.1 401 "), "no device cookie: {res}");
-    assert!(!r.called("herdr pane send-keys"));
+    assert!(r.keys().is_empty());
     let foreign = req(
         &s,
         "POST",
@@ -376,17 +409,8 @@ fn answer_sends_the_digit_and_logs_no_question() {
         );
         assert!(res.contains("REFUSED BAD_VALUE"), "{bad}: {res}");
     }
-    assert!(!r.called("herdr pane send-keys"), "never a guessed key");
-    for screen in [PERMISSION, "⏺ Bash(cargo test --all)\n  ⎿ ok"] {
-        r.onces.borrow_mut().push((
-            "herdr pane read".into(),
-            drover::runner::Out {
-                code: 0,
-                stdout: screen.into(),
-                stderr: String::new(),
-            },
-        ));
-    }
+    assert!(r.keys().is_empty(), "never a guessed key");
+    r.then("sendmeter-impl-12", "⏺ Bash(cargo test --all)\n  ⎿ ok");
     let res = req(
         &s,
         "POST",
@@ -398,9 +422,8 @@ fn answer_sends_the_digit_and_logs_no_question() {
         res.starts_with("HTTP/1.1 200 OK") && res.contains("sent to sendmeter-impl-12"),
         "{res}"
     );
-    assert_eq!(r.count("herdr pane send-keys"), 1);
-    assert!(r.called("herdr pane send-keys w1:p2 2"));
-    let e = read(&c.state).unwrap().pop().unwrap();
+    assert_eq!(r.keys(), [json!({"name": "sendmeter-impl-12", "keys": ["2"]})]);
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!((e.kind.as_str(), e.issue), ("answer", Some(12)));
     assert_eq!(
         serde_json::Value::Object(e.data.clone()),
@@ -419,26 +442,19 @@ fn answer_sends_the_digit_and_logs_no_question() {
         &ck,
     );
     assert!(res.contains("still waiting: sendmeter-rev-9-r1"), "{res}");
-    assert!(r.called("herdr pane send-keys w1:p3 1"));
+    assert_eq!(r.keys()[1], json!({"name": "sendmeter-rev-9-r1", "keys": ["1"]}));
 }
 
 /// The card showed menu A; the pane (read afresh, past every cache) now shows menu B: no key, and
 /// "menu changed". After a send, the next render reads the pane again (no cached stale menu).
 #[test]
 fn answer_refuses_a_changed_menu_and_rerenders_fresh() {
-    let (c, r) = blocked("stale-menu", &[]);
+    let (c, r) = blocked("stale-menu", PERMISSION, PERMISSION);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
     let h = shown_h(&page(&s, "/", &ck));
     let b = PERMISSION.replace("for cargo  ", "for git    ");
-    r.onces.borrow_mut().push((
-        "herdr pane read".into(),
-        drover::runner::Out {
-            code: 0,
-            stdout: b,
-            stderr: String::new(),
-        },
-    ));
+    r.sh.screen("sendmeter-impl-12", &b);
     let res = req(
         &s,
         "POST",
@@ -447,39 +463,13 @@ fn answer_refuses_a_changed_menu_and_rerenders_fresh() {
         &ck,
     );
     assert!(res.contains("REFUSED STALE: menu changed — refreshed"), "{res}");
-    assert_eq!(
-        r.count("herdr pane send-keys"),
-        0,
-        "menu A tapped, menu B on the pane: no key"
-    );
+    assert!(r.keys().is_empty(), "menu A tapped, menu B on the pane: no key");
     let res = req(&s, "POST", "/answer", "agent=sendmeter-impl-12&choice=2", &ck);
     assert!(res.contains("REFUSED STALE"), "no h: {res}");
-    assert_eq!(r.count("herdr pane send-keys"), 0);
-    let reads = r.count("herdr pane read");
-    r.onces.borrow_mut().push((
-        "herdr pane read".into(),
-        drover::runner::Out {
-            code: 0,
-            stdout: PERMISSION.into(),
-            stderr: String::new(),
-        },
-    ));
-    r.onces.borrow_mut().push((
-        "herdr pane read".into(),
-        drover::runner::Out {
-            code: 0,
-            stdout: "⏺ Bash(cargo test --all)\n  ⎿ ok".into(),
-            stderr: String::new(),
-        },
-    ));
-    r.onces.borrow_mut().push((
-        "herdr pane read".into(),
-        drover::runner::Out {
-            code: 0,
-            stdout: "⏺ Bash(cargo test --all)\n  ⎿ ok".into(),
-            stderr: String::new(),
-        },
-    ));
+    assert!(r.keys().is_empty());
+    let reads = r.reads();
+    r.sh.screen("sendmeter-impl-12", PERMISSION);
+    r.then("sendmeter-impl-12", "⏺ Bash(cargo test --all)\n  ⎿ ok");
     let res = req(
         &s,
         "POST",
@@ -488,12 +478,12 @@ fn answer_refuses_a_changed_menu_and_rerenders_fresh() {
         &ck,
     );
     assert!(
-        res.contains("sent to sendmeter-impl-12") && r.called("herdr pane send-keys w1:p2 2"),
+        res.contains("sent to sendmeter-impl-12") && r.keys() == [json!({"name": "sendmeter-impl-12", "keys": ["2"]})],
         "same menu: the digit: {res}"
     );
     // Same second (cache TTLs not expired): the page still reads the pane afresh and drops the old buttons.
     let page = page(&s, "/", &ck);
-    assert!(r.count("herdr pane read") > reads + 2, "a fresh read after the send");
+    assert!(r.reads() > reads + 2, "a fresh read after the send");
     let card = &page
         [page.find("data-ask=\"sendmeter-impl-12\"").unwrap()..page.find("data-ask=\"sendmeter-rev-9-r1\"").unwrap()];
     assert!(!card.contains("class=pick") && card.contains("⎿ ok"), "{card}");
@@ -501,24 +491,25 @@ fn answer_refuses_a_changed_menu_and_rerenders_fresh() {
 
 #[test]
 fn answer_refuses_reviewer_menus_and_unparsed_panes() {
-    let (c, r) = blocked("answer-rev", &[MENU, "garbage, no prompt"]);
+    let (c, r) = blocked("answer-rev", "garbage, no prompt", MENU);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
     let res = req(&s, "POST", "/answer", "agent=sendmeter-rev-9-r1&choice=1", &ck);
     assert!(res.contains("REFUSED REV_READONLY"), "{res}");
     let res = req(&s, "POST", "/answer", "agent=sendmeter-impl-12&choice=1", &ck);
     assert!(res.contains("REFUSED BAD_VALUE: no menu"), "{res}");
-    assert!(!r.called("herdr pane send-keys"));
+    assert!(r.keys().is_empty());
 }
 
 #[test]
 fn unparsed_blocked_pane_shows_masked_tail_and_reply() {
     let (c, r) = blocked(
         "tail",
-        &[concat!(
+        concat!(
             "l1\nl2\nl3\nl4\nl5\nl6\nl7 token=gh",
             "p_abcdefghijklmnopqrstuvwxyz0123456789\nl8"
-        )],
+        ),
+        PERMISSION,
     );
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
@@ -543,7 +534,7 @@ fn live_board_fits_390px() {
     if no_webkit() {
         return;
     }
-    let (c, r) = blocked("live-shots", &[COUNTDOWN]);
+    let (c, r) = blocked("live-shots", COUNTDOWN, PERMISSION);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
     let page = drawn(&req(&s, "GET", "/?all=1", "", &ck), &s, ADDR, &ck, T);
@@ -593,7 +584,7 @@ fn reconnect(addr: std::net::SocketAddr, since: &str) -> String {
 
 #[test]
 fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
-    let (c, addr) = live_server("replay");
+    let (c, addr, _sh) = live_server("replay");
     let mut s = subscribe(addr, &addr.to_string());
     drain(&mut s, 1_500);
     append(&c.state, &Event::new(T + 1, "sendmeter", Some(7), "merged", json!({}))).unwrap();
@@ -696,7 +687,7 @@ fn the_board_dedupes_by_seq_and_skips_stale_moments() {
 /// Lanes (#269) and `/live` show an unpaired viewer who is blocked, the activity and a pairing hint.
 #[test]
 fn unpaired_viewers_see_no_pane_text() {
-    let (c, r) = blocked("unpaired", &[]);
+    let (c, r) = blocked("unpaired", PERMISSION, PERMISSION);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
     let pane = [
@@ -723,18 +714,11 @@ fn unpaired_viewers_see_no_pane_text() {
     );
     assert!(page(&s, "/", &ck).contains("Do you want to proceed?"), "paired");
     // /live: the blocked lane appears after the watcher's first look; each audience gets its own render.
+    let live = FakeShed::new();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    let c2 = c.clone();
-    std::thread::spawn(move || {
-        drover::serve::serve_on(
-            &c2,
-            &r.once("herdr agent list", 0, NO_AGENTS)
-                .once("herdr agent list", 0, NO_AGENTS),
-            l,
-            false,
-        )
-    });
+    let (c2, b) = (c.clone(), live.shed());
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &drover::shed::With(&Fake::default(), b), l, false));
     let sub = |extra: &str| {
         let mut s = TcpStream::connect(addr).unwrap();
         s.write_all(format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n{extra}\r\n").as_bytes())
@@ -743,6 +727,15 @@ fn unpaired_viewers_see_no_pane_text() {
         s
     };
     let (mut anon, mut dev) = (sub(""), sub(&ck));
+    let hello = drain(&mut anon, 1_500);
+    assert!(
+        !live.all("ls").is_empty() && !hello.contains("event: needs\n"),
+        "{hello}"
+    );
+    for n in ["sendmeter-impl-12", "sendmeter-rev-9-r1"] {
+        live.lane(n, "blocked", "/x");
+        live.screen(n, PERMISSION);
+    }
     let (a, d) = (drain(&mut anon, 4_000), drain(&mut dev, 500));
     assert!(a.contains("event: needs\n") && a.contains("\"activity\":\""), "{a}");
     assert!(pane.iter().all(|p| !a.contains(p)), "unpaired stream: {a}");
@@ -762,13 +755,14 @@ fn unpaired_viewers_see_no_pane_text() {
 #[test]
 fn the_sampler_thread_fills_the_host() {
     let c = ctx(&tmpdir("sampler"), CONFIG);
+    let sh = FakeShed::new();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
         .reply("vm_stat", "Swapouts: 100.\n")
         .reply("sysctl", "4\n");
-    std::thread::spawn(move || drover::serve::serve_on(&c, &r, l, false));
+    let b = sh.shed();
+    std::thread::spawn(move || drover::serve::serve_on(&c, &drover::shed::With(&r, b), l, false));
     let end = Instant::now() + Duration::from_secs(5);
     loop {
         let mut s = TcpStream::connect(addr).unwrap();
