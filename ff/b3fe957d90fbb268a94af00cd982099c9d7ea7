@@ -1,0 +1,13 @@
+Decided: other = a shed session no spawn or orchestrator-start in the log names and no `fleet` label marks, since herdr::Shed lists labelled terminals as Lanes rows already.
+Because: "Fleet lanes stay in their usual sections (#603) and never appear here twice"
+Decided: shed has no timestamps, so `age` counts from when this board first saw the session in that state, carried across refreshes in the cached list.
+Because: crates/server/src/serve/v1.rs:423
+Decided: one `ls` per enabled host, cached 10 s in serve's cache like the herdr agent list; remote reads go through the On ssh wrapper and the board's deferred runner.
+Because: q686
+Decided: a host whose shed fails is one {host, error} entry; nothing is written to hosts.json, so the host never shows offline.
+Because: "That host is never marked offline (#601)"
+Decided: the section reuses existing classes (details.qm, .lane, tag m, act, small) with no button, form or data-agent, so nothing in it can be tapped.
+Because: q684
+Rejected: a static seen-since map — tests (and two servers) running in parallel overwrote each other's map.
+Check: the WebKit step added to ui-webkit writes shed-folded.png and shed-open.png at 390; this host has no Playwright, so that step ran in CI only.
+Owner: The phone board's Lanes tab now ends with a folded, read-only "Other in shed" list of every non-fleet shed session on mini and air.
