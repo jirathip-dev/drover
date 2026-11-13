@@ -357,6 +357,15 @@ pub fn running(ctx: &Ctx, cfg: &Config) -> Option<u64> {
     (ctx.now <= beat + stuck_secs(cfg)).then_some(since)
 }
 
+/// #972: the running tick's `tick.step` and its age, when that step began over 3 × `slow_secs` ago.
+pub fn stuck_step(ctx: &Ctx, cfg: &Config) -> Option<(String, u64)> {
+    let m: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(ctx.state.with_file_name("tick.step")).ok()?).ok()?;
+    let at = m["at"].as_u64().or_else(|| m["since"].as_u64())?;
+    let secs = ctx.now.saturating_sub(at);
+    (secs > 3 * cfg.limits.slow_secs).then(|| (m["step"].as_str().unwrap_or("?").to_string(), secs))
+}
+
 /// #791: 2 tick intervals: no pass started and no heartbeat for longer reads stuck.
 pub fn stuck_secs(cfg: &Config) -> u64 {
     2 * cfg.limits.slow_secs

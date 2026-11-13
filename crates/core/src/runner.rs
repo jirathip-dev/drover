@@ -302,6 +302,11 @@ pub fn probe_wait() -> Duration {
     Duration::from_secs(crate::config::limits().disk_probe_secs)
 }
 
+/// #972: `dir` listed within `disk_probe_secs` (`hung`'s probe); a dead disk's root is skipped for the pass.
+pub fn answers(dir: &std::path::Path) -> bool {
+    !hung(&dir.to_string_lossy(), probe_wait(), list)
+}
+
 fn sick_for() -> Duration {
     Duration::from_secs(crate::config::limits().disk_sick_secs)
 }
