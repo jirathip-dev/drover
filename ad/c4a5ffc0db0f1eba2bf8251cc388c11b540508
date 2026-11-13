@@ -1,0 +1,4 @@
+Decided: merged origin/staging; drive_sim.rs takes staging's version, since this branch only renamed herdsman to drover there and staging now has the same rename plus its herdr removal.
+Because: crates/cli/tests/drive_sim.rs:3
+Rejected: none
+Owner: The flake fix now sits on the latest staging; nothing in the two tests changed.
