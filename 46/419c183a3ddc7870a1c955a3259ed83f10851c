@@ -1,0 +1,5 @@
+Decided: round 2 merges origin/staging again so CI builds staging's renamed drive_sim test; the diagram code is unchanged
+Because: crates/cli/tests/drive_sim.rs:1
+Rejected: editing drive_sim.rs here — staging already fixed it in #965, so merging staging is the smaller change
+Check: drover diagram | diff docs/workflow.md - is clean at this head and CI's rust job is green
+Owner: the workflow diagram branch is caught up with staging for a fresh review
