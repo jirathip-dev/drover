@@ -1,0 +1,7 @@
+Decided: update round merges origin/staging (the drover rename); the diagram's names follow it and docs/workflow.md is regenerated
+Because: "holds the default-config output; CI runs"
+Decided: cli.rs and timer.rs conflicts keep both sides: the Diagram command and TICK_STEPS plus staging's renamed labels
+Because: crates/core/src/timer.rs:18
+Rejected: running drover migrate on this host to test with the real config — host changes are the owner's; tests ran with HOME in the scratch dir
+Check: drover diagram | diff docs/workflow.md - is clean at this head
+Owner: the workflow diagram now follows the drover rename and the current default settings
