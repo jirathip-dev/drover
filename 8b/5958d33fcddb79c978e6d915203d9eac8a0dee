@@ -1,0 +1,11 @@
+Decided: origin/staging merged up to 1610b79f1 (#975 #976 #906); drive.rs's and pending_actions.rs's conflicts keep staging's assertions with lane starts checked as fake-shed runs
+Because: "Outside the tests the PR lists for #721 to delete, no test file fakes a herdr reply"
+Decided: #975's new owner_extend.rs runs on the shared fake shed; its slow-start hook delays the first git worktree add instead of herdr's worktree create
+Because: crates/cli/tests/owner_extend.rs:173
+Decided: #976's new hung_root.rs tests call the file's fake-shed host() with no herdr lane list
+Because: "The fake shed lives in one shared helper, not copied into each test file"
+Rejected: listing owner_extend.rs for #721 — it tests extend past host load, not herdr
+Decided: the PR body's evidence names head 8b5958d33, fixing the red evidence check at 3e9da7daf
+Because: "The PR states the before and after count of `herdr` lines in `crates/*/tests`"
+Check: git diff on crates/*/src against staging is empty; herdr lines in crates/*/tests 1864 -> 709; full suite exits 0 with DROVER_LANE unset as on CI
+Owner: Test code only; caught up with staging again, and its newest extend and hung-root tests also run on the pretend shed.
