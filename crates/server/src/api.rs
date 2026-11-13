@@ -139,7 +139,7 @@ pub struct NeedsTab {
 }
 
 /// An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
-/// design's PNGs by name (`/design/<fleet>/<n>/<i>/<ask id>` serves the `i`th); #517: the `thread` it was asked in, its `title`.
+/// design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th); #517: the `thread` it was asked in, its `title`.
 pub struct NeedAsk {
     pub ask: Ask,
     pub who: String,

@@ -1,5 +1,3 @@
-//! #969: a design or verify card's image is its own round's PNG, through the service worker, after a later round wrote
-//! other bytes at the same path; an old-style URL (no round) is the latest round's file.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -8,7 +6,6 @@ use serde_json::{json, Value};
 use std::io::{BufRead, Write};
 use std::path::Path;
 
-/// The real server on a free port, for the test's life.
 fn serve(c: &'static drover::Ctx) -> (&'static Server<'static>, String) {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap().to_string();
@@ -24,7 +21,6 @@ fn serve(c: &'static drover::Ctx) -> (&'static Server<'static>, String) {
     (s, addr)
 }
 
-/// A browser's service worker (`tests/support/sw.mjs`): `get` fetches a URL through it.
 struct Sw(std::process::Child, std::io::BufReader<std::process::ChildStdout>);
 impl Sw {
     fn new(addr: &str) -> Self {
@@ -75,7 +71,6 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8(o.stdout).unwrap().trim().into()
 }
 
-/// The old board's (needs.ts) image srcs in its needs-you strip.
 fn needs_srcs(s: &Server, addr: &str, now: u64) -> Vec<String> {
     let [needs, ..] = parts(s, addr, "", now);
     needs
@@ -85,7 +80,6 @@ fn needs_srcs(s: &Server, addr: &str, now: u64) -> Vec<String> {
         .collect()
 }
 
-/// Drover's screens' design card srcs (`/screens/cards`).
 fn card_srcs(s: &Server, addr: &str, now: u64) -> Vec<String> {
     let res = s.respond(&format!("GET /screens/cards HTTP/1.1\r\nHost: {addr}\r\n\r\n"), now);
     let res = String::from_utf8_lossy(&res);
@@ -148,7 +142,6 @@ fn a_revised_designs_card_shows_its_own_rounds_png_through_the_service_worker() 
     let (r2_old, r2_new) = round(2, b"\x89PNG round 2");
     assert_eq!(sw.get(&r2_old), b"\x89PNG round 2", "the old board's card: {r2_old}");
     assert_eq!(sw.get(&r2_new), b"\x89PNG round 2", "Drover's screens' card: {r2_new}");
-    // Round 1's card, read fresh from the server: still round 1's PNG, though the file now holds round 2's.
     let direct = |p: &str| {
         let p = if p.starts_with('/') {
             p.to_string()
@@ -160,7 +153,6 @@ fn a_revised_designs_card_shows_its_own_rounds_png_through_the_service_worker() 
     };
     assert_eq!(direct(&r1_old), b"\x89PNG round 1");
     assert_eq!(direct(&r1_new), b"\x89PNG round 1");
-    // An old-style URL (no round) is the latest ask's file, as before.
     assert_eq!(direct("/design/sendmeter/12/0"), b"\x89PNG round 2");
 }
 

@@ -545,7 +545,6 @@ fn drive(ctx: &Ctx, events: &[Event], fleet: &str, meta: Vec<String>) -> Drive {
 }
 
 /// #775: a route's file from disk within the runner's limit: 504 for this file alone when its disk does not answer.
-/// #969: `path` as commit `sha` has it (`git cat-file`, on a disk that answers), else as on disk now.
 impl Server<'_> {
     fn round_file(
         &self,
@@ -1217,7 +1216,7 @@ impl<'a> Server<'a> {
                 let at = shared(&ctx.state).ok().and_then(|ev| chat::file(ctx, &ev, t, &name, false));
                 disk_file(at, ctype(&name), "no such file in the thread\n")
             }
-            // #412: a PNG of the design waiting for the owner's decision; #969: `/<ask id>` that ask's, at its commit.
+            // #412: a PNG of the design waiting for the owner's decision.
             ("GET", p) if p.starts_with("/design/") => {
                 let mut it = p[8..].splitn(4, '/');
                 let (f, n, i, q) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));
@@ -1230,7 +1229,7 @@ impl<'a> Server<'a> {
                 let sha = k.filter(|_| q.is_some()).and_then(|k| ev[..k].iter().rfind(|e| e.is("design-review", &f, n))?.str("sha"));
                 self.round_file(sha, at, "no such design file\n")
             }
-            // #417: a screenshot the issue's last verdict lists; #969: `/<sha>` the last verdict at that sha.
+            // #417: a screenshot the issue's last verdict lists.
             ("GET", p) if p.starts_with("/shot/") => {
                 let mut it = p[6..].splitn(4, '/');
                 let (f, n, i, sha) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));

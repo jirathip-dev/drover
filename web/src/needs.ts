@@ -41,7 +41,7 @@ function issue(d: NeedsTab, s: NeedIssue): string {
   const id = esc(`nf-${s.fleet}-${n}`), rw = d.rw && d.paired, ago = s.who.split(' · ').pop() ?? '';
   const merge = s.merge ? `<button name=op value=override data-confirm="Merge #${n} past the round limit?">merge anyway</button>` : '';
   const f = rw ? `${form(d, ` id="${id}"`)}${hidden('', s.fleet, d.mtime)}<input type=hidden name=issue value=${n}>${merge}<button name=op value=extend>one more round</button><button name=op value=park>park</button></form>` : '';
-  // #417: the verdict's screenshots, inline, as `/shot/<fleet>/<n>/<i>/<sha>` serves them.
+  // #417: the verdict's screenshots, inline, as `/shot/<fleet>/<n>/<i>` serves them.
   const shots = s.shots.map((x, i) => `<figure class=im><img src="shot/${enc(s.fleet)}/${n}/${i}/${s.shots_at ?? ''}" alt="${esc(x)}" loading=lazy><figcaption>${esc(x)}</figcaption></figure>`).join('');
   const main = rw ? `<button form="${id}" name=op value=extend><span>one more round</span></button>` : '';
   const head = folded([`#${n}`, 'needs-human', s.title, s.why], /^\d+[smhd]$/.test(ago) ? ago : '', main);
@@ -58,7 +58,7 @@ export function tab(d: NeedsTab): string {
     const m = k.recommend ?? (design ? 1 : null), o = m == null ? undefined : k.options[m - 1];
     const main = d.rw && o != null ? `<button form="${id}" name=choice value=${m}><span>${esc(o)}</span></button>` : '';
     const head = folded([k.issue == null ? '' : `#${k.issue}`, design ? 'design' : a.kind.split(' · ')[0], k.question], age(Math.max(0, d.now - k.ts)), main);
-    // #412: a design's PNGs, inline, as `/design/<fleet>/<n>/<i>/<ask id>` serves them.
+    // #412: a design's PNGs, inline, as `/design/<fleet>/<n>/<i>` serves them.
     const pngs = a.pngs.map((n, i) => `<figure class=im><img src="design/${enc(a.ask.fleet)}/${a.ask.issue ?? 0}/${i}/${enc(a.ask.id)}" alt="${esc(n)}" loading=lazy><figcaption>${esc(n)}</figcaption></figure>`);
     return `<details class=ask>${head}<p><b>needs you</b> <span class=m>${esc(a.who)}</span> <span class=m>· ${a.kind}${from}</span></p><p>${asked(a)}</p>${pngs.join('')}${f}</details>`;
   });

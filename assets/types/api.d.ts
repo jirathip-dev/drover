@@ -61,7 +61,7 @@ config?: string | null, };
 
 /**
  * An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
- * design's PNGs by name (`/design/<fleet>/<n>/<i>/<ask id>` serves the `i`th); #517: the `thread` it was asked in, its `title`.
+ * design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th); #517: the `thread` it was asked in, its `title`.
  */
 export type NeedAsk = { ask: Ask, who: string, kind: string, from?: string | null, pngs: Array<string>, thread?: string | null, title?: string | null, };
 
