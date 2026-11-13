@@ -1,0 +1,11 @@
+Decided: merge origin/staging; keep #900's db::ask(evs, once) as the one ask helper and delete this branch's duplicate db::ask, events::ask and emit_ask
+Because: "All six sites go through that one helper; none counts events itself anymore"
+Decided: #900's db::ask numbers from the highest q<n> logged plus 1 instead of a count
+Because: "The id comes from the highest existing `q<n>`, plus 1, read inside that transaction"
+Decided: #900's `repeat` ending closes only a true double (same id, issue, thread and question), not every ask sharing an id
+Because: crates/core/src/events.rs:654
+Rejected: id-only repeat — it marks t82's Q4 (seq 148358) closed as a repeat of #3120's card, so the withdraw cleanup has nothing open to close
+Decided: regenerate docs/workflow.md (staging build fix: #982 added runtime_down_minutes without it)
+Because: crates/cli/tests/diagram.rs:19
+Check: cargo test -p drover --test ask_ids passes 7/7 (both branches' tests) at the merge head
+Owner: The branch now sits on the latest staging, which had its own fix for the same race; the two are combined so new questions still get unique numbers and old clashing ones are told apart by thread.
