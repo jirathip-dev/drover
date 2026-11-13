@@ -225,3 +225,26 @@ fn a_pass_stuck_past_three_pass_max_secs_is_logged_and_the_next_pass_takes_its_l
     assert_eq!(stuck.len(), 1, "{stuck:#?}");
     assert_eq!(stuck[0].str("step"), Some("after backlog, checkpoint"), "{stuck:#?}");
 }
+
+#[test]
+fn a_probe_another_thread_started_is_waited_out_not_taken_for_a_hang() {
+    let d = tmpdir("probe-in-flight");
+    let dir = d.to_string_lossy().into_owned();
+    let (began, rx) = std::sync::mpsc::channel();
+    let first = {
+        let dir = dir.clone();
+        std::thread::spawn(move || {
+            drover::runner::hung(&dir, Duration::from_secs(5), move |_| {
+                began.send(()).unwrap();
+                std::thread::sleep(Duration::from_millis(300));
+                None
+            })
+        })
+    };
+    rx.recv().unwrap();
+    assert!(
+        !drover::runner::hung(&dir, Duration::from_secs(5), |_| None),
+        "a probe still in its time answers"
+    );
+    assert!(!first.join().unwrap());
+}

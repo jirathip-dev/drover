@@ -328,6 +328,7 @@ struct Probe {
     done: std::sync::Arc<std::sync::atomic::AtomicBool>,
     dev: std::sync::Arc<std::sync::atomic::AtomicU64>,
     at: Instant,
+    end: Instant,
 }
 
 fn probes() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, Probe>> {
@@ -379,14 +380,19 @@ pub fn sicken(dir: &str) {
 }
 
 /// #776: whether `dir`'s disk has stopped answering: `probe(dir)` (its disk and a listing) runs on its own thread and
-/// must finish within `wait`. A probe still running is never repeated: the folder stays hung, with no new thread,
-/// until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
+/// must finish within `wait`. A probe still running is never repeated: a caller waits out its time, then the folder
+/// stays hung, with no new thread, until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
 pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> + Send + 'static) -> bool {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
     use std::sync::Arc;
-    let (done, dev) = {
+    let (done, dev, end) = {
         let mut m = probes();
         if let Some(p) = m.get(dir) {
+            if !p.done.load(Relaxed) && Instant::now() < p.end {
+                let (done, dev, end) = (p.done.clone(), p.dev.clone(), p.end);
+                drop(m);
+                return hangs_past(&done, &dev, end);
+            }
             if !p.done.load(Relaxed) || is_sick(p.dev.load(Relaxed)) {
                 return true;
             }
@@ -395,22 +401,28 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
             }
         }
         let (done, dev) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicU64::new(0)));
+        let end = Instant::now() + wait;
         m.insert(
             dir.into(),
             Probe {
                 done: done.clone(),
                 dev: dev.clone(),
                 at: Instant::now(),
+                end,
             },
         );
-        (done, dev)
+        (done, dev, end)
     };
     let (d, v, owned) = (done.clone(), dev.clone(), dir.to_string());
     std::thread::spawn(move || {
         v.store(probe(&owned).unwrap_or(0), Relaxed);
         d.store(true, Relaxed);
     });
-    let end = Instant::now() + wait;
+    hangs_past(&done, &dev, end)
+}
+
+fn hangs_past(done: &std::sync::atomic::AtomicBool, dev: &std::sync::atomic::AtomicU64, end: Instant) -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
     while Instant::now() < end {
         if done.load(Relaxed) {
             return is_sick(dev.load(Relaxed));
