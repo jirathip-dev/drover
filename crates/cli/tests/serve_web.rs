@@ -2,9 +2,9 @@
 //! read-only, pause, the Lanes join/grouping, masking, PWA assets, 390 px layout.
 mod common;
 use common::*;
-use herdsman::devices;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::devices;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -55,13 +55,13 @@ fn location(res: &str) -> String {
 }
 
 /// The last event, minus `via`, and its `via`.
-fn last(c: &herdsman::Ctx) -> (serde_json::Value, Option<String>) {
+fn last(c: &drover::Ctx) -> (serde_json::Value, Option<String>) {
     let mut e = read(&c.state).unwrap().pop().unwrap();
     let via = e.data.remove("via").and_then(|v| v.as_str().map(String::from));
     (json!({"type": e.kind, "fleet": e.fleet, "data": e.data}), via)
 }
 
-fn pair(name: &str) -> (herdsman::Ctx, herdsman::Ctx) {
+fn pair(name: &str) -> (drover::Ctx, drover::Ctx) {
     let (a, b) = (tmpdir(&format!("{name}-cli")), tmpdir(&format!("{name}-web")));
     let (a, b) = (ctx(&a, &config()), ctx(&b, &config()));
     for c in [&a, &b] {
@@ -73,8 +73,8 @@ fn pair(name: &str) -> (herdsman::Ctx, herdsman::Ctx) {
     (a, b)
 }
 
-fn order(c: &herdsman::Ctx) -> Vec<u64> {
-    herdsman::queue::replay(&read(&c.state).unwrap(), "sendmeter")
+fn order(c: &drover::Ctx) -> Vec<u64> {
+    drover::queue::replay(&read(&c.state).unwrap(), "sendmeter")
         .iter()
         .map(|i| i.issue)
         .collect()
@@ -140,7 +140,7 @@ fn pause_button_matches_cli_and_blocks_next_and_spawn() {
     );
     let res = post(&s, &format!("op=pause&fleet=sendmeter&mtime={}", mtime(&s)), "");
     assert_eq!(location(&res), "/?msg=sendmeter paused", "{res}");
-    let text = |c: &herdsman::Ctx| std::fs::read_to_string(&c.config).unwrap();
+    let text = |c: &drover::Ctx| std::fs::read_to_string(&c.config).unwrap();
     assert_eq!(text(&cli), text(&web));
     assert!(
         text(&web).contains("integration = \"staging\"   # never main\npaused = true\n"),
@@ -184,7 +184,7 @@ fn pause_button_matches_cli_and_blocks_next_and_spawn() {
 }
 
 #[test]
-fn role_dropdowns_set_like_herdsman_set() {
+fn role_dropdowns_set_like_drover_set() {
     let (cli, web) = pair("set");
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
@@ -219,10 +219,10 @@ fn role_dropdowns_set_like_herdsman_set() {
         "/?msg=sendmeter impl: model sonnet, effort high",
         "{res}"
     );
-    let text = |c: &herdsman::Ctx| std::fs::read_to_string(&c.config).unwrap();
+    let text = |c: &drover::Ctx| std::fs::read_to_string(&c.config).unwrap();
     assert_eq!(text(&cli), text(&web));
     assert!(text(&web).contains("model = \"sonnet\"\neffort = \"high\"\n"));
-    let sets = |c: &herdsman::Ctx| {
+    let sets = |c: &drover::Ctx| {
         read(&c.state)
             .unwrap()
             .into_iter()
@@ -264,8 +264,8 @@ fn set_refuses_toml_injection_on_web_and_cli() {
     let (cli, web) = pair("inject");
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
-    let text = |c: &herdsman::Ctx| std::fs::read_to_string(&c.config).unwrap();
-    let (before, log) = (text(&web), herdsman::events::jsonl(&web.state).unwrap());
+    let text = |c: &drover::Ctx| std::fs::read_to_string(&c.config).unwrap();
+    let (before, log) = (text(&web), drover::events::jsonl(&web.state).unwrap());
     // `opus"\n[[notify]]\ncmd = "touch /tmp/pwned"\n#`, form-encoded, as model and as effort.
     let evil = "opus%22%0A%5B%5Bnotify%5D%5D%0Acmd+%3D+%22touch+%2Ftmp%2Fpwned%22%0A%23";
     for field in ["model", "effort"] {
@@ -280,7 +280,7 @@ fn set_refuses_toml_injection_on_web_and_cli() {
         );
     }
     assert_eq!(text(&web), before, "fleet.toml byte-identical");
-    assert_eq!(herdsman::events::jsonl(&web.state).unwrap(), log, "no event");
+    assert_eq!(drover::events::jsonl(&web.state).unwrap(), log, "no event");
     let before = text(&cli);
     for v in [
         "opus\"\n[[notify]]\ncmd = \"touch /tmp/pwned\"\n#",
@@ -304,7 +304,7 @@ fn stale_mtime_refuses_without_writing() {
     let s = Server::new(&web, &r, Some(ADDR.into()));
     let (cfg, log) = (
         std::fs::read_to_string(&web.config).unwrap(),
-        herdsman::events::jsonl(&web.state).unwrap(),
+        drover::events::jsonl(&web.state).unwrap(),
     );
     for body in [
         "op=pause&fleet=sendmeter&mtime=1",
@@ -316,7 +316,7 @@ fn stale_mtime_refuses_without_writing() {
         assert!(location(&res).starts_with("/?msg=REFUSED STALE: "), "{res}");
     }
     assert_eq!(std::fs::read_to_string(&web.config).unwrap(), cfg);
-    assert_eq!(herdsman::events::jsonl(&web.state).unwrap(), log);
+    assert_eq!(drover::events::jsonl(&web.state).unwrap(), log);
     assert!(get(&s, "/?msg=REFUSED%20STALE%3A%20x").contains("<p class=\"msg r\">REFUSED STALE: x</p>"));
 }
 
@@ -326,7 +326,7 @@ fn foreign_host_or_origin_is_403_and_read_only_is_405() {
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
     let body = format!("op=pause&fleet=sendmeter&mtime={}", mtime(&s));
-    let log = herdsman::events::jsonl(&web.state).unwrap();
+    let log = drover::events::jsonl(&web.state).unwrap();
     for extra in [
         "Origin: https://evil.example\r\n",
         "Origin: http://127.0.0.1:7777.evil\r\n",
@@ -339,7 +339,7 @@ fn foreign_host_or_origin_is_403_and_read_only_is_405() {
         body.len()
     );
     assert!(String::from_utf8_lossy(&s.respond(&wrong, 1_000_000)).starts_with("HTTP/1.1 403 "));
-    assert_eq!(herdsman::events::jsonl(&web.state).unwrap(), log, "nothing written");
+    assert_eq!(drover::events::jsonl(&web.state).unwrap(), log, "nothing written");
     // `tailscale serve`: the ts.net name from [serve].allowed_hosts, over https.
     let ts = format!(
         "POST / HTTP/1.1\r\nHost: mac.tail1.ts.net:7443\r\nOrigin: https://mac.tail1.ts.net:7443\r\nContent-Length: {}\r\n\r\n{body}",
@@ -457,7 +457,7 @@ fn lanes_group_by_fleet_with_others() {
     let d = tmpdir("lanes");
     let two = format!("{CONFIG}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\n");
     let c = ctx(&d, &two);
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let ev = |fleet: &str, issue: Option<u64>, d: serde_json::Value| {
         append(&c.state, &Event::new(900_000, fleet, issue, "spawn", d)).unwrap()
     };
@@ -482,7 +482,7 @@ fn lanes_group_by_fleet_with_others() {
         json!({"role": "impl", "agent": "synergy-impl-7", "harness": "claude", "pane": "w5:p1"}),
     );
     let events = read(&c.state).unwrap();
-    let st = herdsman::events::fold(&events);
+    let st = drover::events::fold(&events);
     let wt = c.worktrees.join("synergy-apps/designer").to_string_lossy().into_owned();
     let agents = json!([
         {"name": "sendmeter-impl-12", "agent_status": "working", "pane_id": "w1:p2", "cwd": "/x"},
@@ -492,7 +492,7 @@ fn lanes_group_by_fleet_with_others() {
         {"agent": "dsh-tui", "agent_status": "blocked", "pane_id": "w5:p1", "cwd": "/p/synergy-apps", "workspace_id": "w5"},
     ]);
     let ws = [("w4".to_string(), "side-project".to_string())].into();
-    let lanes = herdsman::lanes::join(
+    let lanes = drover::lanes::join(
         &cfg,
         &Fake::default(),
         &c.worktrees,
@@ -567,7 +567,7 @@ fn lanes_group_by_fleet_with_others() {
 #[test]
 fn one_lane_per_agent_name() {
     let c = ctx(&tmpdir("lanes-dup"), CONFIG);
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     for ts in [900_000, 950_000] {
         let d = json!({"role": "impl", "agent": "sendmeter-impl-3061", "harness": "claude", "pane": "w1:p1"});
         append(&c.state, &Event::new(ts, "sendmeter", Some(3061), "spawn", d)).unwrap();
@@ -577,9 +577,9 @@ fn one_lane_per_agent_name() {
         {"name": "sendmeter-impl-3061", "agent_status": "working", "pane_id": "w1:p1", "cwd": "/x"},
         {"name": "sendmeter-impl-3061", "agent_status": "idle", "pane_id": "w9:p1", "cwd": "/x", "host": "mini"},
     ]);
-    let st = herdsman::events::fold(&events);
+    let st = drover::events::fold(&events);
     let (fake, ws) = (Fake::default(), Default::default());
-    let lanes = herdsman::lanes::join(&cfg, &fake, &c.worktrees, &events, &st, agents.as_array().unwrap(), &ws);
+    let lanes = drover::lanes::join(&cfg, &fake, &c.worktrees, &events, &st, agents.as_array().unwrap(), &ws);
     let got: Vec<_> = lanes
         .iter()
         .map(|l| (l.name.as_str(), l.state.as_str(), l.pane.as_deref()))
@@ -589,7 +589,7 @@ fn one_lane_per_agent_name() {
 
 #[test]
 fn activity_lines_per_harness_are_masked_and_cut() {
-    use herdsman::lanes::{activity, mask, tail};
+    use drover::lanes::{activity, mask, tail};
     let claude = "⏺ Read(src/serve.rs)\n  ⎿ Read 120 lines\n⏺ Bash(cargo test --release)\n  ⎿ Running…\n╭──────╮\n│ > │\n╰──────╯\n⏵⏵ bypass permissions on\n";
     assert_eq!(activity("claude", claude), "⏺ Bash(cargo test --release)");
     let hermes = "┊ 💻 $ git status  0.2s\nthinking...\n┊ 📖 read  src/lib.rs  0.1s\n────\n❯ \n";
@@ -626,12 +626,12 @@ fn activity_lines_per_harness_are_masked_and_cut() {
         ("GITHUB_TOKEN=\"abc def\" next", "GITHUB_TOKEN=\"••• def\" next"),
         ("DB_PASSWORD=hunter2 cargo test", "DB_PASSWORD=••• cargo test"),
         (
-            "cargo test --release -p herdsman serve_web",
-            "cargo test --release -p herdsman serve_web",
+            "cargo test --release -p drover serve_web",
+            "cargo test --release -p drover serve_web",
         ),
         (
-            "/Users/jirathip/.herdr/worktrees/herdsman/issue-16/src",
-            "/Users/jirathip/.herdr/worktrees/herdsman/issue-16/src",
+            "/Users/jirathip/.herdr/worktrees/drover/issue-16/src",
+            "/Users/jirathip/.herdr/worktrees/drover/issue-16/src",
         ),
     ];
     for (raw, want) in secrets {
@@ -716,17 +716,15 @@ fn page_fits_390px_without_horizontal_scroll() {
         );
     }
     // #440: Host and Events are System's sections (tests/system_sheet.rs measures them at 390 px).
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping the WebKit scrollWidth check: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let file = d.join("page.html");
     std::fs::write(&file, html).unwrap();
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     for tab in ["queue", "lanes"] {
         for mode in ["horse", "ascii", "glyph"] {
-            let o = swift()
-                .args([script, file.to_str().unwrap(), "390", tab, mode])
+            let o = webview()
+                .args([file.to_str().unwrap(), "390", tab, mode])
                 .output()
                 .unwrap();
             let out = String::from_utf8_lossy(&o.stdout);
@@ -1029,14 +1027,14 @@ fn frag_parts_redirect_navigations_and_404_unknown_ids() {
 fn pair_request_carries_the_optional_approve_hint() {
     let js = include_str!("../../../assets/serve.js");
     assert!(
-        js.contains("`Waiting for approval on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')"),
+        js.contains("`Waiting for approval on the Mac: drover serve approve ${t}` + (h ? ` · ${h}` : '')"),
         "the Mac line, hint after ` · `"
     );
     assert!(
         js.contains("el('p', 'm', `Waiting"),
         "`el` sets textContent: the hint is never HTML"
     );
-    let request = |c: &herdsman::Ctx| {
+    let request = |c: &drover::Ctx| {
         let r = Fake::default();
         let s = Server::new(c, &r, Some(ADDR.into()));
         let req =
@@ -1084,7 +1082,7 @@ fn host_local_pairing_shows_the_approve_line_and_lasts_a_year() {
         res.rsplit("\r\n\r\n").next().unwrap().to_string()
     };
     let body = request("X-Peer: 127.0.0.1\r\nHost: 127.0.0.1:7777\r\n");
-    assert_eq!(body, format!("{0}\n\nherdsman serve approve {0}\n", &body[..6]));
+    assert_eq!(body, format!("{0}\n\ndrover serve approve {0}\n", &body[..6]));
     for extra in [
         "X-Peer: 127.0.0.1\r\nHost: 127.0.0.1:7777\r\nX-Forwarded-For: 100.64.0.2\r\n",
         "X-Peer: 127.0.0.1\r\nHost: 127.0.0.1:7777\r\nTailscale-User-Login: a@b\r\n",
@@ -1094,9 +1092,9 @@ fn host_local_pairing_shows_the_approve_line_and_lasts_a_year() {
         assert_eq!(request(extra).len(), 8, "not on the host: code only: {extra:?}");
     }
     let cookie = common::pair(&s, &c, "Mac Safari", 1_000_000);
-    let devs = |now| run(&herdsman::Ctx { now, ..c.clone() }, &r, &["serve", "devices"]).1;
+    let devs = |now| run(&drover::Ctx { now, ..c.clone() }, &r, &["serve", "devices"]).1;
     assert!(devs(1_000_000).ends_with(" expires in 365d\n"), "{}", devs(1_000_000));
-    let paired = |now| devices::find(&herdsman::Ctx { now, ..c.clone() }, &cookie[8..]).is_some();
+    let paired = |now| devices::find(&drover::Ctx { now, ..c.clone() }, &cookie[8..]).is_some();
     assert!(paired(1_000_000 + 300 * 86_400), "used: renewed for a year from now");
     assert!(paired(1_000_000 + 600 * 86_400), "still within a year of that use");
     assert!(!paired(1_000_000 + 966 * 86_400), "a year unused: unpaired");

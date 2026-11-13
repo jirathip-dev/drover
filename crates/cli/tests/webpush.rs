@@ -7,10 +7,10 @@ use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::Aes128Gcm;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{emit, read, Event};
-use herdsman::serve::Server;
-use herdsman::webpush;
+use drover::config::Config;
+use drover::events::{emit, read, Event};
+use drover::serve::Server;
+use drover::webpush;
 use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
 use p256::{PublicKey, SecretKey};
 use std::os::unix::fs::PermissionsExt;
@@ -550,18 +550,18 @@ fn push_titles_use_each_devices_theme_words() {
             ("plain".to_string(), b.to_string()),
         ]
     };
-    assert_eq!(titles("merged"), pair("Order up: #7 merged", "herdsman"));
+    assert_eq!(titles("merged"), pair("Order up: #7 merged", "drover"));
     assert_eq!(
         titles("needs-human"),
         pair("The bell: sendmeter #7 needs you", "#7 needs you: r")
     );
     assert_eq!(
         titles("needs-decision"),
-        pair("The bell: sendmeter #7 needs you", "herdsman")
+        pair("The bell: sendmeter #7 needs you", "drover")
     );
     assert_eq!(
         titles("blocked"),
-        pair("herdsman", "herdsman"),
+        pair("drover", "drover"),
         "no theme words for other events"
     );
 }
@@ -569,7 +569,7 @@ fn push_titles_use_each_devices_theme_words() {
 /// #386: a conductor's reply pushes `<repo> · <thread title>: <first line>`, a thread ask `… asks: <question>`, both
 /// opening the thread; the owner's own message and a system line never push.
 #[test]
-fn a_conductor_reply_and_a_thread_choice_push_with_the_thread_named() {
+fn a_orchestrator_reply_and_a_thread_choice_push_with_the_thread_named() {
     let dir = tmpdir("wp-thread");
     let _path = fake_curl(&dir);
     std::fs::write(dir.join("code"), "201").unwrap();
@@ -601,7 +601,7 @@ fn a_conductor_reply_and_a_thread_choice_push_with_the_thread_named() {
     emit(&c.state, &cfg, msg("owner", "what should #12 cover?")).unwrap();
     emit(&c.state, &cfg, msg("system", "⇄ switched to account B")).unwrap();
     assert_eq!(pushes(), 0, "the owner's own words and system lines: no push");
-    emit(&c.state, &cfg, msg("conductor", "Scope and tests.\nWhich first?")).unwrap();
+    emit(&c.state, &cfg, msg("orchestrator", "Scope and tests.\nWhich first?")).unwrap();
     assert_eq!(pushes(), 1);
     let j = last();
     assert_eq!(j["body"], "sendmeter · Grill #12: Scope and tests.");
@@ -642,7 +642,7 @@ fn no_push_for_the_thread_open_on_a_board() {
         emit(&c.state, &cfg, Event::new(100, "sendmeter", None, "thread-new", d)).unwrap();
     }
     let reply = |t: &str| {
-        let d = serde_json::json!({"thread": t, "from": "conductor", "text": "Scope?"});
+        let d = serde_json::json!({"thread": t, "from": "orchestrator", "text": "Scope?"});
         emit(&c.state, &cfg, Event::new(100, "sendmeter", None, "thread-msg", d)).unwrap();
     };
     let watch = c.state.with_file_name("watch-t1.at");

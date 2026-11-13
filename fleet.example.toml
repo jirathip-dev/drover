@@ -1,20 +1,20 @@
-# Copy to ~/.config/herdsman/fleet.toml (or point FLEET_CONFIG at it).
+# Copy to ~/.config/drover/fleet.toml (or point FLEET_CONFIG at it).
 
-models = ["opus", "sonnet", "claude-opus-5-5"]   # the model dropdown `herdsman serve` offers
+models = ["opus", "sonnet", "claude-opus-5-5"]   # the model dropdown `drover serve` offers
 
 [serve]
 allowed_hosts = ["<mac>.<tailnet>.ts.net"]   # `tailscale serve` proxies the page over HTTPS
 # approve_hint = "or send 'pair {code}' to the owner"   # appended to the pairing panel's Mac line
-# tailscale_https_port = 8443   # `herdsman setup` runs `tailscale serve --bg --https=<port> http://<addr>`
+# tailscale_https_port = 8443   # `drover setup` runs `tailscale serve --bg --https=<port> http://<addr>`
 # hooks_addr = "127.0.0.1:7778"   # the Funnel listener: POST /hooks/github only ("" = off; docs/serve.md)
-# launchd_label = "dev.herdsman.serve"   # the board job `herdsman setup` writes (or adopts)
+# launchd_label = "dev.drover.serve"   # the board job `drover setup` writes (or adopts)
 # theme = "kitchen"   # the Herd's theme: farm (default), kitchen or <config dir>/themes/<name>/ (docs/serve.md)
 
 [fleet.api]
 repo = "acme/api"
 local = "~/Projects/api"
-integration = "staging"          # herdsman merge target; main is never a target
-# paused = true                  # `herdsman pause|resume api`: no next, impl/rev spawns refuse PAUSED
+integration = "staging"          # drover merge target; main is never a target
+# paused = true                  # `drover pause|resume api`: no next, impl/rev spawns refuse PAUSED
 
 [fleet.api.role.impl]
 harness = "claude"
@@ -29,22 +29,22 @@ mcp = ["supabase-dev"]        # only these servers from the repo's .mcp.json; de
 harness = "hermes"
 profile = "lane-rev"
 
-# This repo, dogfooding: a `*/herdsman` repo's merge prints the `cargo install` that picks it up.
-[fleet.herdsman]
-repo = "<owner>/herdsman"
-local = "~/Projects/herdsman"
+# This repo, dogfooding: a `*/drover` repo's merge prints the `cargo install` that picks it up.
+[fleet.drover]
+repo = "<owner>/drover"
+local = "~/Projects/drover"
 integration = "staging"
-# #438: lanes already share one cargo build folder per host and repo, `<root>/.build/herdsman` under
+# #438: lanes already share one cargo build folder per host and repo, `<root>/.build/drover` under
 # the host's workspace root (#630); `env` or `shared_cache` (#361) setting
 # CARGO_TARGET_DIR replaces it. Lanes building at once queue on cargo's lock (docs/lanes.md).
-# shared_cache = { CARGO_TARGET_DIR = "~/.cache/herdsman/herdsman/target" }
+# shared_cache = { CARGO_TARGET_DIR = "~/.cache/drover/drover/target" }
 
-[fleet.herdsman.role.impl]
+[fleet.drover.role.impl]
 harness = "claude"
 profile = "lane-impl"
 model = "opus"
 
-[fleet.herdsman.role.rev]
+[fleet.drover.role.rev]
 harness = "hermes"
 profile = "lane-rev"
 
@@ -54,21 +54,23 @@ local = "~/Projects/web"
 integration = "staging"
 # serial_paths = ["supabase/migrations/**"]   # the old form of one [[fleet.web.serial]] group named serial_label (default "db"), serial_max at a time
 # required_checks = ["quality"]   # gate/check/wait look only at these (latest run each); unset = all checks
-# premerge = ["herdsman cap-check --config ci/cap.toml", "cargo check --locked"]   # merge runs these on the PR merged with current integration (STAGING_WOULD_BREAK); unset = the cap check if ci/cap.toml
+# premerge = ["drover cap-check --config ci/cap.toml", "cargo check --locked"]   # merge runs these on the PR merged with current integration (STAGING_WOULD_BREAK); unset = the cap check if ci/cap.toml
+# cap_script = "scripts/line-cap.sh"   # #754: `drover cap` runs it and reads its `N / cap M` lines; unset = the first premerge check naming a cap, else the built-in Rust count
 # merge_label = "merge-ready"      # added to the PR after a PASS at its head (full CI), removed if the head moves past it (a pure merge of integration keeps it)
 # update_ready = "always"   # catch every behind PASSed PR up with integration; default "needed": only on a conflict or a strict branch rule
-# line_cap = 10000   # `herdsman cap-check --config <this file>`: formatted src/**/*.rs lines, exit 1 over it
-# lessons = "off"   # #419: `herdsman tick` runs `herdsman lesson` weekly per fleet (default "weekly"); "off" opts out
+# line_cap = 10000   # `drover cap-check --config <this file>`: formatted src/**/*.rs lines, exit 1 over it
+# hotspots = "off"   # #889: `drover tick` runs `drover hotspots` weekly per fleet (default "weekly"); "off" opts out
+# lessons = "off"   # #419: `drover tick` runs `drover lesson` weekly per fleet (default "weekly"); "off" opts out
 # max_impl = 2   # optional caps (CAP); unset = no cap, the host check protects the Mac
 # max_rev = 2
 # notify_global = true   # also send this fleet's events to the global [[notify]]
 # clone_build = ["target"]   # cp -cR (APFS clone) these local folders into a new lane when the lockfile matches
 # build_dirs = ["ios/build"]   # freed with target, node_modules, .next and dist when a lane finishes or over budget
-# env = { npm_config_cache = "~/.cache/herdsman/npm" }   # npm fleets: one shared cache (pnpm's store already is)
-# env = { PORT = "$HERDSMAN_PORT" }   # each lane's own port (a hash of fleet/branch), for dev servers
-# port_range = "41000-41999"   # HERDSMAN_PORT's range (the default)
+# env = { npm_config_cache = "~/.cache/drover/npm" }   # npm fleets: one shared cache (pnpm's store already is)
+# env = { PORT = "$DROVER_PORT" }   # each lane's own port (a hash of fleet/branch), for dev servers
+# port_range = "41000-41999"   # DROVER_PORT's range (the default)
 # ui_paths = ["web/**", "assets/**"]   # #417: a PR touching these goes through the verify stage (needs [fleet.web.role.verify])
-# ask_thread = "t6"   # #541: lane asks go to this conductor thread first (default: the repo's most recently active one)
+# ask_thread = "t6"   # #541: lane asks go to this orchestrator thread first (default: the repo's most recently active one)
 
 # #294: serial groups: at most `max` (default 1) issues touching `paths` in flight at once (docs/config.md).
 [[fleet.web.serial]]
@@ -104,34 +106,37 @@ profile = "lane-impl"
 harness = "hermes"
 profile = "lane-rev"
 
-# Owner-only: `herdsman spawn web <issue> design`; the hook denies it from any lane.
+# Owner-only: `drover spawn web <issue> design`; the hook denies it from any lane.
 [fleet.web.role.design]
 harness = "hermes"
 profile = "lane-design"
 
 # #417: the optional verify stage (docs/pipeline.md): after rev's PASS, a read-only lane drives the real app at the
-# head from the repo's .herdsman/verify.md and screenshots it against the approved design; FAILs use rev's rounds.
+# head from the repo's .drover/verify.md and screenshots it against the approved design; FAILs use rev's rounds.
 # [fleet.web.role.verify]
 # harness = "claude"
 # model = "claude-opus-5-5"
 
 [accounts]
-# Each account: the name of its token secret in the main host's OS store (`herdsman accounts import` from tokens.env).
-A = "CLAUDE_CODE_OAUTH_TOKEN_A"
-B = "CLAUDE_CODE_OAUTH_TOKEN_B"
-C = "CLAUDE_CODE_OAUTH_TOKEN_C"
+# Each account's name (#683: the value is unused; drover keeps no token). A lane signs in with `account_env`'s printed
+# JSON env, else the account's own login folder ([accounts.usage]'s, else ~/.config/drover/accounts/<name>) as
+# CLAUDE_CONFIG_DIR. Sign in with cooee (Settings › Providers) or `CLAUDE_CONFIG_DIR=<folder> claude /login`.
+# account_env = "cooee accounts env {provider} {name} --require-signed-in"   # #785: exit 3 skips a signed-out account
+A = "A"
+B = "B"
+C = "C"
 # cap_reset_minutes = 300
 # cap_pattern = "usage limit reached|hit your limit"   # `|`-separated, case-insensitive; #640: harness's own banner line only, checked against [accounts.usage]
 # pick = "headroom"   # spawns take the uncapped account with the most 5h/7d headroom; default "order"
 
-# The usage meter: each account's own `claude` login folder (docs/providers.md); never given to lanes.
+# The usage meter: each account's own `claude` login folder (docs/providers.md); with no account_env, its lanes' too.
 # [accounts.usage]
-# A = "~/.config/herdsman/accounts/A"
+# A = "~/.config/drover/accounts/A"
 
-# The DeepSeek balance row; the key is read from an env file or the store, never from here.
+# The DeepSeek balance row; the key is read from a 0600 env file or the environment, never from here.
 # [providers.deepseek]
 # key_env = "DEEPSEEK_API_KEY"
-# env_file = "~/.config/deepseek.env"   # default: the store's herdsman/all/DEEPSEEK_API_KEY
+# env_file = "~/.config/deepseek.env"   # mode 0600; default: drover's environment
 # warn_below = 5
 
 [limits]
@@ -141,34 +146,49 @@ update_rounds = 3   # `spawn --update` (conflict/behind) rounds, counted apart f
 # form_categories = ["trailer", "pr-body", "stale-baseline", "format", "docs-fresh", "migration-redate", "infra"]
 #                   # a fleet's own `form_categories` / `form_rounds` replace these
 # Both are the built-in pipeline's limits; a fleet with its own [fleet.<n>.pipeline] sets `rounds` per stage (docs/pipeline.md).
-stall_minutes = 30   # herdsman check: stall / ready-unmerged threshold
+stall_minutes = 30   # drover check: stall / ready-unmerged threshold
+silent_minutes = 10  # #792: an ACP lane mid-turn with no session event this long is nudged, then respawned once
 ci_start_minutes = 10   # a PR head with no checks this long after its push is CI missing/broken: ci-missing alert, fix round
-ask_default_minutes = 30  # herdsman check: a routine ask unanswered this long takes its recommended option
-ask_expire_hours = 24     # herdsman check: an ask nobody waits on (no live asking lane) closes as expired
-done_close_minutes = 5    # herdsman check: a done lane whose push/verdict is logged this long closes its session
+ask_default_minutes = 30  # drover check: a routine ask unanswered this long takes its recommended option
+ask_expire_hours = 24     # drover check: an ask nobody waits on (no live asking lane) closes as expired
+done_close_minutes = 5    # drover check: a done lane whose push/verdict is logged this long closes its session
 idle_merged_minutes = 15  # drive/clean: a merged or closed issue's lane not working this long has its pane closed (work to wip/)
 import_max_age_hours = 24 # a remote host's unanswered asks older than this are never imported
-max_pushes_per_pass = 3   # herdsman check pushes at most this many alerts a pass, then one summary
+max_pushes_per_pass = 3   # drover check pushes at most this many alerts a pass, then one summary
 # fallback_rest_minutes = 60   # #302: an unavailable agent rests this long when its message names no reset
+# acp_start_minutes = 3        # #785: an ACP lane silent this long after its first turn alerts `lane-failed-start`
 # rotate_mb = 20   # #343: an event log over this moves events older than 30 days to events-YYYYMM.jsonl.gz (kept)
 transcript_days = 30      # Claude lanes' cleanupPeriodDays; lanes share ~/.claude, so below 30 (Claude's default) also prunes your own transcripts
-load_per_cpu = 2.5   # herdsman spawn HOST_BUSY thresholds
+load_per_cpu = 2.5   # drover spawn HOST_BUSY thresholds
 swapout_rate = 2000  # pages swapped out per 2 s sample
-min_free_gb = 10     # herdsman spawn DISK_LOW under this many GB free on /
+min_free_gb = 10     # drover spawn DISK_LOW under this many GB free on /
 worktree_budget_gb = 25   # over it drive frees the idlest lanes' build folders, then spawn refuses DISK_BUDGET
 build_budget_gb = 20      # over it drive (and `reclaim`) removes the shared folder's profiles no cargo is building in; enabled remote hosts: the tick, after drive
 sweep_remote = true       # #651: ended lanes' scratch is swept on every enabled remote host too (false: this host only)
-stray_roots = ["/tmp", "$TMPDIR"]   # `herdsman clean` lists (--yes removes) stray Cargo build folders here, and a removed worktree's Claude temp dir
-min_free_mem_gb = 2  # herdsman spawn MEM_LOW under this many GB of free + inactive memory
+stray_roots = ["/tmp", "$TMPDIR"]   # `drover clean` lists (--yes removes) stray Cargo build folders here, and a removed worktree's Claude temp dir
+min_free_mem_gb = 2  # drover spawn MEM_LOW under this many GB of free + inactive memory
 effort = "high"      # default for roles without `effort`; dsh accepts only "none" for now
 # deny_commands = ["docker", "supabase start", { cmd = "git push --force", why = "REFUSED NO_FORCE: ask the owner" }]
 # Commands the lane hook refuses (default: the container set in assets/deny_commands.toml). A fleet's
 # `deny_commands` replaces it (`[]` = off), its `deny_commands_add` extends it; see docs/lanes.md.
-fast_secs = 60       # `herdsman timer install`: the fast job (`drive --fast`: record verdicts, merge PASS + green)
+fast_secs = 60       # `drover timer install`: the fast job (`drive --fast`: record verdicts, merge PASS + green)
 slow_secs = 300      # and the tick (check + the full pass that starts lanes)
 max_parallel_spawns = 6   # the pass launches each spawn as a detached kick, this many at once (0: spawn in the pass)
 spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or whose pid is gone) is stale
 # webhook_poll_minutes = 10   # #626: with GitHub webhooks on, the fast step's catch-up PR read runs this often
+# keychain_readers = 3   # #710: more Keychain readers waiting over 60 s alert `keychain-jammed` (troubleshooting §2)
+# reap_keychain_readers = false   # true: `check` kills those readers, then a SecurityAgent up over 10 min
+# respawn_max = 3   # #779: spawn refuses `RESPAWN_LOOP` (one owner ask: try again / park) after this many failed starts
+# respawn_window_minutes = 60   # of an issue's role (lane died, killed, prompt never landed) within this window
+# promise_passes = { next-pass = 2, merging = 2, spawn-pending = 2, waiting-on = 2 }   # #854: drive passes a waiting line may stay true before `promise-missed`
+# serve_herdr_secs = 2   # #859: serve re-reads herdr's agents this often in the background (a request never runs it)
+# serve_shed_secs = 5    # shed's sessions
+# serve_remote_secs = 10   # the remote hosts' agents (ssh)
+# serve_host_secs = 10   # the host sample
+# slo_api_p95_ms = 1000   # #859: /api/v1 p95 over this for `slo_api_minutes` pushes `slo-api` and shows a card
+# slo_api_minutes = 10
+# slo_idle_minutes = 20   # #855: no lane working this long with spawnable work queued: `slo-idle`, a heal, then `stuck`
+# slo_tick_minutes = 10   # #855: a tick running longer: `slo-tick`; the next fast step stops it, then `stuck` if it lives
 
 [[notify]]
 cmd = "notify <chat>"   # any command; one plain line on stdin
@@ -176,7 +196,7 @@ cmd = "notify <chat>"   # any command; one plain line on stdin
 on = ["stall", "lane-dead", "ready-unmerged", "blocked", "merged", "needs-human", "evidence-missing", "account-capped"]
 # format = "json"   # send the raw event JSON instead
 
-# #303: the logins a host card's [sign in ▾] (or `herdsman setup <host> <name>`) runs; claude, gh and codex are built in.
+# #303: the logins a host card's [sign in ▾] (or `drover setup <host> <name>`) runs; claude, gh and codex are built in.
 # [[setup]]
 # name = "claude B"
 # cmd = "claude /login"
@@ -187,5 +207,5 @@ on = ["stall", "lane-dead", "ready-unmerged", "blocked", "merged", "needs-human"
 # kind = "shed"   # "berth", its old name, still works for one release (with a warning)
 # acp = "claude-acp"   # optional ACP mode (docs/runtimes.md)
 # #565: or one fleet's own, e.g. to pilot ACP lanes (cooee's Workflow list) on it:
-# [fleet.herdsman.runtime]
+# [fleet.drover.runtime]
 # kind = "shed-acp"   # each lane a claude-acp session, guarded by the profile's hook; needs the role's account

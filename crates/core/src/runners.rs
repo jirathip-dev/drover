@@ -1,4 +1,4 @@
-//! #537 `herdsman runners`: the owner's `[ci_runners]` VMs and their GitHub runners (docs/hosts.md). Each verb is
+//! #537 `drover runners`: the owner's `[ci_runners]` VMs and their GitHub runners (docs/hosts.md). Each verb is
 //! logged `runners-<verb>`. The registration token goes to a VM on stdin (`cloud::run`), never into argv, the log or
 //! the output; the provider key stays on this host.
 use crate::config::{CiRunners, Config};
@@ -9,9 +9,6 @@ use crate::Ctx;
 use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
-
-/// How often `check` pushes a fresh registration token to every VM (GitHub's last an hour).
-const TOKEN_EVERY: u64 = 30 * 60;
 
 pub enum Verb {
     Status,
@@ -30,7 +27,7 @@ fn conf(cfg: &Config) -> Result<&CiRunners> {
 }
 
 fn log(ctx: &Ctx, cfg: &Config, kind: &str, d: Value) -> Result<()> {
-    emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))
+    emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))
 }
 
 /// The VMs now: `vms`, then each `runners-add` and `runners-remove` in the log.
@@ -119,7 +116,7 @@ fn rc(ctx: &Ctx, r: &dyn Runner, c: &CiRunners, key: &str, vm: &str, token: Opti
             fill(s("runner_exec")?)
         ),
     };
-    crate::cloud::run(r, &rc, &format!("{vm} {key}"), &line, (token, None))
+    crate::cloud::run(ctx, r, &rc, &format!("{vm} {key}"), &line, token)
 }
 
 /// One VM's cost a day: the recipe's `rate_usd_hour` for `size`, × 24.
@@ -144,7 +141,7 @@ fn approved(events: &[Event], id: Option<&str>, verb: &str) -> bool {
     let yes = ask.and_then(|a| a.data["options"].get(0)?.as_str());
     let by = |e: &&Event| {
         e.str("by")
-            .is_some_and(|b| b != "default" && !b.starts_with("conductor-"))
+            .is_some_and(|b| b != "default" && !b.starts_with("orchestrator-"))
     };
     let decision = events
         .iter()
@@ -160,7 +157,7 @@ fn ask_owner<T>(code: &'static str, why: &str, verb: &str) -> Result<T> {
     refused(
         code,
         format!(
-            "{why}: ask the owner (`herdsman ask <fleet> \"herdsman runners {verb}: ok?\" --option yes --option no \
+            "{why}: ask the owner (`drover ask <fleet> \"drover runners {verb}: ok?\" --option yes --option no \
              --kind owner`), then run it again with --approved <id>"
         ),
     )
@@ -188,7 +185,7 @@ fn push_tokens(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &CiRunners) -> Result
     Ok(all.len() - failed.len())
 }
 
-/// `check`: a fresh token every `TOKEN_EVERY`, then the health (`runners-low` / `runners-ok` are check's).
+/// `check`: a fresh token every `token_refresh_minutes`, then the health (`runners-low` / `runners-ok` are check's).
 pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Option<Result<(u64, u64)>> {
     let c = cfg.ci_runners.as_ref()?;
     let last = events
@@ -196,15 +193,15 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Option
         .rev()
         .find(|e| e.kind == "runners-tokens")
         .map_or(0, |e| e.ts);
-    if last + TOKEN_EVERY <= ctx.now {
+    if last + cfg.limits.token_refresh_minutes * 60 <= ctx.now {
         if let Err(e) = push_tokens(ctx, cfg, r, c) {
-            eprintln!("herdsman check: runner tokens: {e:#}");
+            eprintln!("drover check: runner tokens: {e:#}");
         }
     }
     Some(health(r, c, events))
 }
 
-/// `herdsman runners <verb>`; `ok_id` an owner ask that approved going past a gate.
+/// `drover runners <verb>`; `ok_id` an owner ask that approved going past a gate.
 pub fn run(
     ctx: &Ctx,
     cfg: &Config,
@@ -339,10 +336,10 @@ pub fn run(
             let ago = last.map_or("never".into(), |e| format!("{} ago", age(ctx.now - e.ts)));
             Ok(writeln!(
                 out,
-                "tokens: a fresh one on {n}/{} VMs; the refresher is `herdsman check` (the 5-minute timer), every {} \
+                "tokens: a fresh one on {n}/{} VMs; the refresher is `drover check` (the 5-minute timer), every {} \
                  min (before this: {ago})",
                 all.len(),
-                TOKEN_EVERY / 60
+                cfg.limits.token_refresh_minutes
             )?)
         }
         Verb::RetireLocal => {

@@ -1,12 +1,12 @@
-//! The in-process world herdsman's calls land in: herdr panes and agents, gh PRs and checks, git heads, pids and the
+//! The in-process world drover's calls land in: herdr panes and agents, gh PRs and checks, git heads, pids and the
 //! host's load. Each argv is matched by its leading words; one it does not know fails the run ("unmodelled call").
 use crate::sched::{Sim, World};
-use herdsman::runner::Out;
+use drover::runner::Out;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-pub const FLEET: &str = "herdsman";
+pub const FLEET: &str = "drover";
 pub const REPO: &str = "jirathip-dev/herdsman";
 
 /// What a lane's agent does once its prompt lands.
@@ -110,7 +110,7 @@ pub struct Model {
     pub ci_secs: Option<u64>,
     /// #685 ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live
     /// lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed
-    /// a head or wrote a verdict herdsman takes.
+    /// a head or wrote a verdict drover takes.
     pub ci_since: BTreeMap<String, u64>,
     pub ci_wait: u64,
     pub idle: u64,
@@ -193,7 +193,10 @@ pub fn answer(sim: &Arc<Sim>, w: &mut World, me: usize, prog: &str, args: &[Stri
             let o = herdr(sim, w, &a);
             if let (["agent", "start", _, _, _, _, pane, ..], 0) = (&a[..], o.code) {
                 w.procs[me].starting = Some((*pane).into());
-                if w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
+                let agent = Some(a[2].to_string());
+                let starts = w.model.panes.iter().filter(|p| p.agent == agent).count();
+                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 4;
+                if planted || w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
                     crate::invariants::double(w, pane);
                 }
             }
@@ -481,6 +484,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             None => err(128, "fatal"),
         },
         ["status", "--porcelain", ..] => ok(""),
+        ["rev-list", "--objects", "--disk-usage", ..] => ok("0\n"),
         ["rev-list", ..] | ["log", ..] | ["diff", ..] | ["branch", ..] | ["ls-files", ..] => ok(""),
         ["reset", "--hard", b] => {
             if let Some(h) = m.origin.get(b.trim_start_matches("origin/")).cloned() {
@@ -492,6 +496,13 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             Some(h) => ok(format!("{h}\t{r}\n")),
             None => ok(""),
         },
+        // #779 `wip prune` (from `clean`): origin's wip branches.
+        ["for-each-ref", _, "refs/remotes/origin/wip/"] => ok(m
+            .origin
+            .keys()
+            .filter(|b| b.starts_with("wip/"))
+            .map(|b| format!("{b}\n"))
+            .collect::<String>()),
         ["write-tree"] => ok(format!("{:040x}\n", 8)),
         ["push", "-q", "origin", to] if to.starts_with("HEAD:") && !to.contains("refs/") => {
             let (branch, Some(head)) = (&to[5..], m.heads.get(dir).cloned()) else {

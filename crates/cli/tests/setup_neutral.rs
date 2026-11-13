@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 /// Matched case-insensitively anywhere in a shipped file.
-/// #355 made `conductor` a herdsman role, so it is no longer an install's own name.
+/// #355 made `conductor` a drover role, so it is no longer an install's own name.
 const WORDS: [&str; 6] = [
     "jirathip",
     "synergy",
@@ -14,7 +14,7 @@ const WORDS: [&str; 6] = [
 ];
 
 /// (file, exact text with whitespace collapsed, why it may stay). Each one is removed before the scan.
-const EXCEPTIONS: [(&str, &str, &str); 12] = [
+const EXCEPTIONS: [(&str, &str, &str); 13] = [
     (
         "assets/herd.js",
         "jirathip-dev/corral",
@@ -72,6 +72,11 @@ const EXCEPTIONS: [(&str, &str, &str); 12] = [
     ),
     (
         "docs/setup.md",
+        "https://github.com/jirathip-dev/herdsman/issues/",
+        "the project's own issue links",
+    ),
+    (
+        "README.md",
         "https://github.com/jirathip-dev/herdsman/issues/",
         "the project's own issue links",
     ),
@@ -138,4 +143,31 @@ fn shipped_files_name_no_install() {
         "setup-specific names in shipped files (#82):\n{}",
         bad.join("\n")
     );
+}
+
+/// #732 (q911): role texts speak of "the lane" and "the agent": no harness or provider's name in a line's behaviour
+/// (a `code` span, a file or command's name, may carry one).
+#[test]
+fn role_texts_name_no_harness() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../roles");
+    let mut bad = vec![];
+    for e in std::fs::read_dir(&root).unwrap() {
+        let f = e.unwrap().path();
+        let text = std::fs::read_to_string(&f).unwrap();
+        for (n, line) in text.lines().enumerate() {
+            let prose: String = line.split('`').step_by(2).collect::<Vec<_>>().join(" ").to_lowercase();
+            let words = prose.split(|c: char| !c.is_ascii_alphanumeric());
+            if let Some(w) = words
+                .into_iter()
+                .find(|w| ["claude", "hermes", "codex", "anthropic", "openai"].contains(w))
+            {
+                bad.push(format!(
+                    "{}:{}: {w}: {line}",
+                    f.file_name().unwrap().to_string_lossy(),
+                    n + 1
+                ));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "say \"the lane\" or \"the agent\":\n{}", bad.join("\n"));
 }

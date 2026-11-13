@@ -36,8 +36,7 @@ fn a_fleet_toml_from_before_each_retired_key_change_loads() {
     }
     let c = ctx(&tmpdir("upgrade-441"), RETIRED);
     let (_, out) = run(&c, &Fake::default(), &["doctor", "--config-only"]);
-    let warn = "! config — [accounts].accounts_env is retired (#441): run `herdsman accounts import \
-                ~/.config/claude-accounts/tokens.env`, then drop the line";
+    let warn = "! config — [accounts].accounts_env is retired (#441): drop the line (#683: accounts sign in with their own login)";
     assert!(out.lines().any(|l| l == warn), "{out}");
 }
 
@@ -59,28 +58,25 @@ fn check_alerts_a_retired_key_once_and_the_board_shows_it() {
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("[accounts].accounts_env is retired (#441)"), "{out}");
-    let log = herdsman::events::read(&c.state).unwrap();
+    let log = drover::events::read(&c.state).unwrap();
     assert_eq!(log.iter().filter(|e| e.kind == "config-warning").count(), 1);
     let (_, out) = run(&c, &r, &["check"]);
     assert!(!out.contains("accounts_env"), "once per key: {out}");
     let (code, out) = run(&c, &r, &["board"]);
     assert_eq!(code, 0, "{out}");
     let first = out.lines().next().unwrap_or_default();
-    assert_eq!(first, "! [accounts].accounts_env is retired → herdsman doctor");
+    assert_eq!(first, "! [accounts].accounts_env is retired → drover doctor");
     assert!(first.chars().count() <= 60);
 }
 
-/// The gate runs this build's binary on a config: bad keeps the installed one, good replaces it.
 #[test]
 fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     let d = tmpdir("gate");
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/install-gate.sh");
-    let new = env!("CARGO_BIN_EXE_herdsman");
-    let dest = d.join("bin/herdsman");
+    let new = env!("CARGO_BIN_EXE_drover");
+    let dest = d.join("bin/drover");
     std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
     std::fs::write(&dest, "old").unwrap();
-    // #556: a fake `codesign` logs how the install signs (the real one would reach for the keychain); #568: a fake
-    // `security` holds the identity, and `codesign` sleeps (a keychain dialog) while HANG is set.
     let fake = d.join("fake");
     std::fs::create_dir_all(&fake).unwrap();
     let log = d.join("codesign.log");
@@ -88,13 +84,13 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
         "#!/bin/sh\n[ -n \"$HANG\" ] && exec sleep 30\necho \"$@\" >> '{}'\n",
         log.display()
     );
-    let sec = "#!/bin/sh\necho 'SHA-256 hash: 00'\necho 'SHA-1 hash: AC01B47A'\n";
+    let sec = "#!/bin/sh\n[ -n \"$NOID\" ] && exit 44\necho 'SHA-256 hash: 00'\necho 'SHA-1 hash: AC01B47A'\n";
     for (name, body) in [("codesign", sh.as_str()), ("security", sec)] {
         std::fs::write(fake.join(name), body).unwrap();
         std::fs::set_permissions(fake.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
     }
     let path = format!("{}:{}", fake.display(), std::env::var("PATH").unwrap());
-    let gate = |config: &str, hang: &str| {
+    let gate = |config: &str, env: &str| {
         let cfg = d.join("fleet.toml");
         std::fs::write(&cfg, config).unwrap();
         Command::new("sh")
@@ -104,55 +100,38 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
             .env("FLEET_STATE", d.join("state/events.jsonl"))
             .env("PATH", &path)
             .env("HOME", &d)
-            .env("HANG", hang)
-            .env("HERDSMAN_SIGN_TIMEOUT", if hang.is_empty() { "60" } else { "1" })
+            .env("DROVER_SIGN_TIMEOUT", "1")
+            .env(env, "1")
             .output()
             .unwrap()
     };
-    let o = gate("[limits]\neffort = \"bogus\"\n", "");
+    let o = gate("[limits]\neffort = \"bogus\"\n", "X");
     let out = String::from_utf8_lossy(&o.stdout);
     assert_eq!(o.status.code(), Some(1), "{out}");
     assert!(out.contains("kept ") && out.contains("✗ config — "), "{out}");
     assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
     assert!(!log.exists(), "a refused build is never signed");
 
-    // #568: a codesign stuck on a keychain dialog times out: the old binary stays, the fix is named, exit 1.
-    let o = gate(RETIRED, "1");
-    let out = String::from_utf8_lossy(&o.stdout);
-    assert_eq!(o.status.code(), Some(1), "{out}");
-    assert!(
-        out.contains("kept ") && out.contains("fix: security set-key-partition-list"),
-        "{out}"
-    );
-    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
+    for (env, fix) in [
+        ("NOID", "fix: sh scripts/signing-identity.sh once"),
+        ("HANG", "fix: security set-key-partition-list"),
+    ] {
+        let o = gate(RETIRED, env);
+        let out = String::from_utf8_lossy(&o.stdout);
+        assert_eq!(o.status.code(), Some(1), "{env}: {out}");
+        assert!(out.contains("not signed; kept ") && out.contains(fix), "{env}: {out}");
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
+        assert!(!dest.with_file_name("drover.new").exists());
+    }
 
-    // #631: the signed build can't read the account token (not in the store nor the retired file): DEST stays.
-    let o = gate(RETIRED, "");
-    let out = String::from_utf8_lossy(&o.stdout);
-    assert_eq!(o.status.code(), Some(1), "{out}");
-    assert!(
-        out.contains("can't read the secrets; kept ") && out.contains("✗ account main — "),
-        "{out}"
-    );
-    assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
-    assert!(!dest.with_file_name("herdsman.new").exists());
-
-    // The retired file still serves it (a `!` row): the token check passes and the build goes in.
-    std::fs::create_dir_all(d.join(".config/claude-accounts")).unwrap();
-    std::fs::write(
-        d.join(".config/claude-accounts/tokens.env"),
-        "CLAUDE_CODE_OAUTH_TOKEN_MAIN=tok\n",
-    )
-    .unwrap();
-    let o = gate(RETIRED, "");
+    let o = gate(RETIRED, "X");
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stdout));
     assert_eq!(std::fs::read(&dest).unwrap(), std::fs::read(new).unwrap());
-    // #568: by the identity's SHA-1 hash in the login keychain (by name, the untrusted cert is "no identity").
+    assert!(!dest.with_file_name("drover.new").exists());
     let signed = format!(
-        "--force --sign AC01B47A --keychain {}/Library/Keychains/login.keychain-db --identifier herdsman {}.new\n",
+        "--force --sign AC01B47A --keychain {}/Library/Keychains/login.keychain-db --identifier drover {}.new\n",
         d.display(),
         dest.display()
     );
-    // The token-refused build was signed too (the check runs on the signed binary), then the green one.
-    assert_eq!(std::fs::read_to_string(&log).unwrap(), signed.repeat(2));
+    assert_eq!(std::fs::read_to_string(&log).unwrap(), signed);
 }

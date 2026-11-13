@@ -1,4 +1,4 @@
-//! #97: `herdsman doctor` is read-only, prints ✓/✗/! with a fix per line, exits 1 on any ✗, never echoes a secret.
+//! #97: `drover doctor` is read-only, prints ✓/✗/! with a fix per line, exits 1 on any ✗, never echoes a secret.
 mod common;
 use common::*;
 use std::os::unix::fs::PermissionsExt;
@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 const TOKEN: &str = concat!("sk", "-ant-oat01-FAKEtokenFAKEtokenFAKEtoken0123456789");
 const HERDR: &str = "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n";
-const PLIST: &str = "<plist><dict><key>ProgramArguments</key><array><string>/x/herdsman</string>\
+const PLIST: &str = "<plist><dict><key>ProgramArguments</key><array><string>/x/drover</string>\
 <string>serve</string><string>--addr</string><string>127.0.0.1:7777</string></array></dict></plist>";
 const SUB: &str = r#"[{"endpoint":"https://push.example/x","p256dh":"k","auth":"a","label":"phone","created":1}]"#;
 
@@ -24,14 +24,20 @@ profile = "fleet-impl"
 [accounts]
 main = "TOKEN_MAIN"
 
+[accounts.usage]
+main = "{accounts}/main"
+
 [serve]
 allowed_hosts = ["mac.tail.ts.net"]
+webhook_secret_file = "{hook}"
 
 [[notify]]
 type = "webpush"
 sub = "mailto:a@b.c"
 "#,
         local = d.join("local").display(),
+        accounts = d.join("accounts").display(),
+        hook = d.join("config/secrets/GITHUB_WEBHOOK_SECRET").display(),
     )
 }
 
@@ -42,13 +48,17 @@ fn write(p: &Path, text: &str, mode: u32) {
 }
 
 /// A host where every check passes.
-fn setup(name: &str, harness: &str) -> (herdsman::Ctx, PathBuf) {
+fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
     let d = tmpdir(name);
     let c = ctx(&d, &config(&d, harness));
     std::fs::create_dir_all(d.join("local")).unwrap();
     std::fs::create_dir_all(&c.worktrees).unwrap();
+    // #683: account main's own login folder, signed in.
+    write(&d.join("accounts/main/.claude.json"), r#"{"oauthAccount": {}}"#, 0o600);
+    // #707: the webhook secret's 0600 file.
+    write(&d.join("config/secrets/GITHUB_WEBHOOK_SECRET"), "hook", 0o600);
     write(
-        &c.home.join("Library/LaunchAgents/dev.herdsman.serve.plist"),
+        &c.home.join("Library/LaunchAgents/dev.drover.serve.plist"),
         PLIST,
         0o644,
     );
@@ -74,8 +84,6 @@ fn setup(name: &str, harness: &str) -> (herdsman::Ctx, PathBuf) {
 
 fn good() -> Fake {
     Fake::default()
-        .stored("herdsman/all/TOKEN_MAIN", TOKEN)
-        .stored("herdsman/all/GITHUB_WEBHOOK_SECRET", "hook")
         .reply("herdr status", HERDR)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1")
         .reply("vm_stat", "Swapouts: 5.\n")
@@ -85,7 +93,7 @@ fn good() -> Fake {
         .reply("gh repo view o/demo", "{}")
         .reply("git -C ", "abc\n")
         .reply("which ", "/bin/x\n")
-        .reply("lsof ", "herdsman 1 u LISTEN\n")
+        .reply("lsof ", "drover 1 u LISTEN\n")
         .reply("tailscale serve status", "|-- / proxy http://127.0.0.1:7777\n")
         .reply("launchctl print gui/", "state = running\n")
         .reply("systemctl --user is-active", "active\n")
@@ -110,16 +118,16 @@ fn all_good_exits_zero_and_never_writes() {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
     for check in [
-        "account main",
+        "accounts",
         "harness",
         "serve hosts",
         "serve",
         "tailscale",
         "launchd",
-        "signature",
         "phone",
+        "webhook",
+        "signature",
     ] {
-        // The launchd job and the signature are macOS only; Linux has no row for them.
         if ["launchd", "signature"].contains(&check) && !cfg!(target_os = "macos") {
             assert!(!out.contains(&format!(" {check} — ")), "{out}");
             continue;
@@ -130,9 +138,25 @@ fn all_good_exits_zero_and_never_writes() {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
     assert!(
-        line(&out, "account main").contains("herdsman/all/TOKEN_MAIN in the store"),
+        line(&out, "accounts").contains("sign in from each account's own folder") && !out.contains("TOKEN_MAIN"),
         "{out}"
     );
+    assert!(!out.contains(" account main — "), "{out}");
+    assert!(
+        !r.calls.borrow().iter().any(|c| c.starts_with("security ")),
+        "{:?}",
+        r.calls.borrow()
+    );
+    if cfg!(target_os = "macos") {
+        assert!(
+            line(&out, "signature").contains(&format!("{} signed by \"drover-local\"", c.exe)),
+            "{out}"
+        );
+        assert!(r.called(&format!(
+            "codesign -v -R =certificate leaf[subject.CN] = \"drover-local\" {}",
+            c.exe
+        )));
+    }
     let writes = [
         "gh pr",
         "gh issue",
@@ -161,7 +185,7 @@ fn all_good_exits_zero_and_never_writes() {
         &c.config,
         text.replace(
             "integration = \"staging\"",
-            "integration = \"staging\"\ndriver = \"herdsman\"",
+            "integration = \"staging\"\ndriver = \"drover\"",
         ),
     )
     .unwrap();
@@ -172,7 +196,7 @@ fn all_good_exits_zero_and_never_writes() {
 
 #[test]
 fn secrets_never_echo() {
-    // #441: the account's token is in the store; doctor checks it is there, never shows it.
+    // #707: the webhook secret and VAPID key are files; doctor checks them, never shows them.
     let (c, _) = setup("doc-secret", "claude");
     for args in [&["doctor"][..], &["doctor", "--json"]] {
         let (code, out) = run(&c, &good(), args);
@@ -183,13 +207,16 @@ fn secrets_never_echo() {
         );
     }
     let (_, out) = run(&c, &good(), &["doctor"]);
-    assert!(line(&out, "account main").starts_with('✓'), "{out}");
+    assert!(
+        line(&out, "webhook").starts_with('✓') && !out.contains("— hook"),
+        "{out}"
+    );
 }
 
 /// Each failure: (what breaks, the check, its fix).
 #[test]
 fn each_check_fails_with_its_fix_and_exit_one() {
-    type Break = fn(&herdsman::Ctx, &Path, Fake) -> Fake;
+    type Break = fn(&drover::Ctx, &Path, Fake) -> Fake;
     let cases: Vec<(Break, &str, &str)> = vec![
         (|_, _, r| r.once("herdr status", 1, ""), "herdr", "→ herdr"),
         (|_, _, r| r.once("vm_stat", 1, ""), "host", "→ put /usr/sbin"),
@@ -212,19 +239,11 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "worktrees",
             "→ mkdir -p",
         ),
-        (
-            |_, _, r| {
-                r.store.borrow_mut().clear();
-                r
-            },
-            "account main",
-            "herdsman/all/TOKEN_MAIN in the store → herdsman accounts import",
-        ),
         (|_, _, r| r.once("which claude", 1, ""), "harness", "→ install claude"),
         (
             |_, _, r| r.once("lsof ", 1, ""),
             "serve",
-            "→ herdsman serve --addr 127.0.0.1:7777",
+            "→ drover serve --addr 127.0.0.1:7777",
         ),
         (
             |_, _, r| r.once("tailscale serve status", 0, "No serve config\n"),
@@ -238,23 +257,16 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         ),
         (
             |c, _, r| {
-                std::fs::remove_file(c.home.join("Library/LaunchAgents/dev.herdsman.serve.plist")).unwrap();
+                std::fs::remove_file(c.home.join("Library/LaunchAgents/dev.drover.serve.plist")).unwrap();
                 r
             },
             "launchd",
-            "no plist runs herdsman serve",
+            "no plist runs drover serve",
         ),
         (
-            // #556: an ad-hoc signed build (or no "herdsman-local" identity) fails codesign's requirement test.
             |_, _, r| r.once("codesign -v -R", 3, ""),
             "signature",
-            "→ sh scripts/signing-identity.sh in the herdsman checkout (once), then reinstall",
-        ),
-        (
-            // #568: the identity is there, but codesign waits on the key's dialog: the fix sets its partition list.
-            |_, _, r| r.once("codesign -v -R", 3, "").reply("security find-certificate -c herdsman-local", ""),
-            "signature",
-            "→ security set-key-partition-list -S apple-tool:,apple:,codesign: -s ~/Library/Keychains/login.keychain-db (asks the login password), then sh scripts/signing-identity.sh sign ",
+            "→ sh scripts/signing-identity.sh in the drover checkout (once), then sh scripts/signing-identity.sh sign ",
         ),
         (
             |c, _, r| {
@@ -271,7 +283,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
                 r
             },
             "vapid.key",
-            "missing → herdsman push test",
+            "missing → drover push test",
         ),
         (
             |c, _, r| {
@@ -287,7 +299,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
                 r
             },
             "watchdog drive",
-            "→ herdsman timer install",
+            "→ drover timer install",
         ),
         (
             // macOS: the serve job's probe passes, the tick job's fails; Linux probes systemd.
@@ -296,7 +308,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
                 false => r.once("systemctl --user is-active", 3, ""),
             },
             "timer",
-            "dev.herdsman.tick missing → herdsman timer install",
+            "dev.drover.tick missing → drover timer install",
         ),
     ];
     for (i, (brk, check, fix)) in cases.into_iter().enumerate() {
@@ -318,7 +330,7 @@ fn warnings_do_not_fail() {
     let (c, _) = setup("doc-warn", "claude");
     // #344: no paired phone, no push subscription (setup's files were imported into state.db).
     for t in ["devices", "push"] {
-        herdsman::db::store::<serde_json::Value>(&c.state, t, &[]).unwrap();
+        drover::db::store::<serde_json::Value>(&c.state, t, &[]).unwrap();
     }
     let old = HERDR.replacen("version: 0.9.5\n\n", "version: 0.9.6\n\n", 1);
     let r = good().once("herdr status", 0, &old);
@@ -336,15 +348,12 @@ fn warnings_do_not_fail() {
 #[test]
 fn tailscale_missing_is_a_warning() {
     struct NoTailscale(Fake);
-    impl herdsman::runner::Runner for NoTailscale {
-        fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+    impl drover::runner::Runner for NoTailscale {
+        fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
             anyhow::ensure!(prog != "tailscale", "cannot run tailscale");
             self.0.run(prog, args)
         }
         fn sleep(&self, _: u64) {}
-        fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-            self.0.secret(svc)
-        }
     }
     let (c, _) = setup("doc-nots", "claude");
     let (code, out) = run(&c, &NoTailscale(good()), &["doctor"]);
@@ -377,28 +386,28 @@ fn bad_config_and_hermes_profiles() {
     );
 
     // #401: the default conductor (the impl role on `lane-conductor`) needs its Hermes profile too.
-    assert!(line(&out, "hermes lane-conductor").starts_with('✗'), "{out}");
-    for p in ["fleet-impl", "lane-conductor"] {
-        write(&c.hermes.join(p).join("config.yaml"), "", 0o644);
+    assert!(line(&out, "hermes lane-orchestrator").starts_with('✗'), "{out}");
+    for p in ["fleet-impl", "lane-orchestrator"] {
+        write(&c.homes["hermes"].join(p).join("config.yaml"), "", 0o644);
     }
     let (code, out) = run(&c, &good(), &["doctor"]);
     assert_eq!(code, 1, "{out}");
     assert!(line(&out, "hermes fleet-impl").starts_with('✓'), "{out}");
-    assert!(line(&out, "hermes hooks").contains("→ herdsman profiles sync"), "{out}");
+    assert!(line(&out, "hermes hooks").contains("→ drover profiles sync"), "{out}");
 
     let hook = |role: &str| format!("'{}' hook --role {role} ✓ allowed", c.exe);
     let (code, out) = run(
         &c,
         &good()
-            .reply("env HERDSMAN_LANE=demo:-:impl hermes", &hook("impl"))
-            .reply("env HERDSMAN_LANE=demo:-:conductor hermes", &hook("conductor")),
+            .reply("env DROVER_LANE=demo:-:impl hermes", &hook("impl"))
+            .reply("env DROVER_LANE=demo:-:orchestrator hermes", &hook("orchestrator")),
         &["doctor"],
     );
     assert_eq!(code, 0, "{out}");
 }
 
-/// #539: a config still naming the retired `accounts_env` loads; doctor warns (exit 0) before the import and after
-/// it, until the line is dropped. Before the import the file still serves the token, so the account row warns too.
+/// #539: a config still naming the retired `accounts_env` loads; doctor warns (exit 0) until the line is dropped
+/// (#683: the account signs in with its own folder either way).
 #[test]
 fn retired_accounts_env_warns_until_the_line_is_dropped() {
     let (c, d) = setup("doc-retired", "claude");
@@ -408,28 +417,175 @@ fn retired_accounts_env_warns_until_the_line_is_dropped() {
     let line_ = format!("accounts_env = \"{}\"\n", env.display());
     let old = text.replace("[accounts]\n", &format!("[accounts]\n{line_}"));
     std::fs::write(&c.config, &old).unwrap();
-    let warn = format!(
-        "! config — [accounts].accounts_env is retired (#441): run `herdsman accounts import {}`, then drop the line",
-        env.display()
-    );
+    let warn = "! config — [accounts].accounts_env is retired (#441): drop the line (#683: accounts sign in with their own login)";
 
     let r = good();
-    r.store.borrow_mut().clear();
     let (code, out) = run(&c, &r, &["doctor"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.lines().any(|l| l == warn), "{out}");
-    assert!(line(&out, "account main").starts_with('!'), "{out}");
+    assert!(line(&out, "accounts").starts_with('✓'), "{out}");
     assert!(!out.contains(TOKEN), "{out}");
-
-    let env = env.display().to_string();
-    assert_eq!(run(&c, &r, &["accounts", "import", &env]).0, 0);
-    let (code, out) = run(&c, &r, &["doctor"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(out.lines().any(|l| l == warn), "imported, the line still warns: {out}");
-    assert!(line(&out, "account main").starts_with('✓'), "{out}");
 
     std::fs::write(&c.config, &text).unwrap();
     let (code, out) = run(&c, &good(), &["doctor"]);
     assert_eq!(code, 0, "{out}");
     assert!(!out.contains('!'), "{out}");
+}
+
+/// #737: a profile hook naming another binary fails doctor and `profiles sync --check`, both naming it.
+#[test]
+fn a_hook_naming_another_binary_is_named() {
+    let (mut c, d) = setup("doc-stray-hook", "claude");
+    let other = d.join("other/drover");
+    write(&other, "", 0o755);
+    let real = c.exe.clone();
+    c.exe = other.display().to_string();
+    assert_eq!(run(&c, &good(), &["profiles", "sync"]).0, 0);
+    c.exe = real;
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    let row = line(&out, "profile hooks");
+    assert!(
+        code == 1 && row.starts_with('✗') && row.contains(&*other.to_string_lossy()),
+        "{out}"
+    );
+    let (code, out) = run(&c, &good(), &["profiles", "sync", "--check"]);
+    assert!(code == 1 && out.contains(&*other.to_string_lossy()), "{out}");
+    assert_eq!(run(&c, &good(), &["profiles", "sync"]).0, 0);
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert!(code == 0 && line(&out, "profile hooks").starts_with('✓'), "{out}");
+}
+
+/// #708: the launchd row follows `[serve] launchd_label` (default `dev.drover.serve`), never another plist that
+/// mentions `drover serve`; a missing one lists what it found.
+#[test]
+fn launchd_row_follows_the_configured_label() {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let (c, _) = setup("doc-launchd", "claude");
+    let agents = c.home.join("Library/LaunchAgents");
+    for old in ["com.a.drover.plist", "local.drover.plist", "zz.drover.old.plist"] {
+        write(&agents.join(old), PLIST, 0o644);
+    }
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    let l = line(&out, "launchd");
+    assert!(l.starts_with('✓') && l.ends_with("/dev.drover.serve loaded"), "{l}");
+
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    let mine = text.replace("[serve]\n", "[serve]\nlaunchd_label = \"dev.mine.serve\"\n");
+    std::fs::write(&c.config, mine).unwrap();
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    let l = line(&out, "launchd");
+    assert!(l.starts_with('✗') && l.contains("dev.mine.serve.plist missing"), "{l}");
+    assert!(l.contains("found") && l.contains("dev.drover.serve.plist"), "{l}");
+    write(&agents.join("dev.mine.serve.plist"), PLIST, 0o644);
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(line(&out, "launchd").ends_with("/dev.mine.serve loaded"), "{out}");
+}
+
+/// #708: the stale spawn markers removed in 24 h are listed once each, with a count, capped at `+N more`.
+#[test]
+fn spawns_row_dedupes_stale_names() {
+    let (c, _) = setup("doc-spawns", "claude");
+    let mut names: Vec<String> = (1..=8).map(|n| format!("spawn-demo-{n}.pending")).collect();
+    names.extend(std::iter::repeat_n("spawn-demo-1.pending".to_string(), 299));
+    for (i, f) in names.iter().enumerate() {
+        let ev = drover::events::Event::new(
+            c.now - 600 + i as u64,
+            "demo",
+            Some(1),
+            "stale-marker",
+            serde_json::json!({ "file": f }),
+        );
+        drover::events::append(&c.state, &ev).unwrap();
+    }
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    let l = out.lines().find(|l| l.contains("spawns starting")).unwrap();
+    assert!(l.starts_with("! spawns starting 0/"), "{l}");
+    assert_eq!(l.matches("spawn-demo-1.pending").count(), 1, "{l}");
+    assert!(l.contains("spawn-demo-1.pending ×300"), "{l}");
+    assert!(l.contains("+3 more"), "{l}");
+    assert!(l.len() < 300, "{} chars: {l}", l.len());
+}
+
+/// #708: `self-update --pause` shows in doctor and on the board until `--resume`.
+#[test]
+fn a_paused_self_update_shows_in_doctor_and_the_board() {
+    let (c, _) = setup("doc-paused", "claude");
+    let r = good();
+    assert_eq!(run(&c, &r, &["self-update", "--pause"]).0, 0);
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    let row = out
+        .lines()
+        .find(|l| l.contains(" self-update — "))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert!(row.starts_with("! self-update — paused since "), "{row}");
+    assert!(row.ends_with(" → drover self-update --resume"), "{row}");
+    let (_, board) = run(&c, &r, &["board"]);
+    assert!(board.lines().any(|l| l == row), "{board}");
+
+    assert_eq!(run(&c, &r, &["self-update", "--resume"]).0, 0);
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(!out.contains("self-update"), "{out}");
+    let (_, board) = run(&c, &r, &["board"]);
+    assert!(!board.contains("self-update"), "{board}");
+}
+
+/// #708: a clean login shell that exports `CLAUDE_CODE_OAUTH_TOKEN` warns with the file to fix; neither the value nor
+/// anything else the shell printed is shown.
+#[test]
+fn a_login_shell_exporting_the_token_warns() {
+    let (c, _) = setup("doc-login", "claude");
+    let warn = "! a login shell exports CLAUDE_CODE_OAUTH_TOKEN (it overrides each lane's account) → remove it from";
+    let (_, out) = run(&c, &good(), &["doctor"]);
+    assert!(!out.contains("login shell"), "{out}");
+    let shell = format!("Welcome {TOKEN}\ntoken:set\nfile:.zshrc\nfile:{TOKEN}\n");
+    let r = good().reply("sh -c t=$(env -i HOME=", &shell);
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    let l = out
+        .lines()
+        .find(|l| l.starts_with(warn))
+        .unwrap_or_else(|| panic!("{out}"));
+    assert_eq!(l, format!("{warn} ~/.zshrc"), "{out}");
+    assert!(!out.contains("FAKEtoken") && !out.contains("Welcome"), "{out}");
+}
+
+/// #791: a tick still running with a fresh heartbeat reads `running for Nm`, never stuck; with no heartbeat for 2
+/// intervals (slow_secs 300) the stale stamp reads stuck again.
+#[test]
+fn a_long_tick_with_a_fresh_heartbeat_is_running_not_stuck() {
+    let (c, _) = setup("doc-beat", "claude");
+    let st = c.state.parent().unwrap().to_path_buf();
+    write(&st.join("check.at"), &(c.now - 1080).to_string(), 0o644);
+    write(&st.join("tick.beat"), &format!("{} {}", c.now - 360, c.now - 30), 0o644);
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    let l = line(&out, "watchdog check");
+    assert!(l.starts_with('✓') && l.contains("running for 6m"), "{l}");
+    write(
+        &st.join("tick.beat"),
+        &format!("{} {}", c.now - 1080, c.now - 660),
+        0o644,
+    );
+    let (code, out) = run(&c, &good(), &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    let l = line(&out, "watchdog check");
+    assert!(l.starts_with('✗') && l.contains("ran 18m"), "{l}");
+}
+
+#[test]
+fn an_archived_fleet_repo_is_named_with_its_fix() {
+    let (c, _) = setup("doc-archived", "claude");
+    let r = good().once("gh repo view", 0, r#"{"isArchived":true,"name":"demo"}"#);
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(line(&out, "gh demo").starts_with('✓'), "{out}");
+    let fix = "! gh demo — o/demo is archived → remove [fleet.demo] from fleet.toml";
+    assert!(out.contains(fix), "{out}");
 }

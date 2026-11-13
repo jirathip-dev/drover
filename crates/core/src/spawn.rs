@@ -1,11 +1,11 @@
-//! `herdsman spawn`, `adopt` and `profiles sync` (docs/lanes.md); per-harness parts live in `harness`.
+//! `drover spawn`, `adopt` and `profiles sync` (docs/lanes.md); per-harness parts live in `harness`.
 use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, read, Event};
 use crate::gate::refused;
-use crate::harness::{self, hook_command};
 use crate::herdr;
 use crate::host;
+use crate::providers;
 use crate::runner::{argv, ok, Out, Runner};
 use crate::Ctx;
 use anyhow::{bail, Context, Result};
@@ -17,7 +17,8 @@ pub fn role_prompt(role: &str) -> &'static str {
     match role {
         "impl" => include_str!("../roles/impl.md"),
         "design" => include_str!("../roles/design.md"),
-        "conductor" => include_str!("../roles/conductor.md"),
+        "architect" => include_str!("../roles/architect.md"),
+        "orchestrator" => include_str!("../roles/orchestrator.md"),
         "lesson" => include_str!("../roles/lesson.md"),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),
@@ -45,7 +46,7 @@ fn prompt_kind<'a>(f: &'a Fleet, role: &'a str) -> &'a str {
 }
 
 /// Each profile once, at its first (fleet, role) in fleet.toml order.
-fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)> {
+pub(crate) fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)> {
     let mut done = std::collections::BTreeSet::new();
     let all = cfg.fleet.iter().flat_map(|(name, f)| {
         f.role
@@ -55,18 +56,18 @@ fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)> {
     all.filter(|p| done.insert(p.4.clone())).collect()
 }
 
-/// Write every harness's files for every role's profile, so `herdsman set` alone can switch a role's harness;
+/// Write every harness's files for every role's profile, so `drover set` alone can switch a role's harness;
 /// a generated profile no role names any more (#155: a retired role's) is removed.
 pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) -> Result<()> {
     let all = profiles(cfg);
     for (_, f, role, r, profile) in &all {
         // #173: a role's profile hook is its kind's: a check role's is read-only, as rev's; #577: its prompt its own.
-        for h in harness::NAMES {
-            harness::get(h).sync(ctx, f.family(role), prompt_kind(f, role), profile, usage, out)?;
+        for h in providers::known() {
+            providers::get(h).sync(ctx, f.family(role), prompt_kind(f, role), profile, usage, out)?;
         }
-        harness::set_mcp(ctx, profile, &access::mcp_servers(cfg, f, r)?)?;
+        providers::set_mcp(ctx, profile, &access::mcp_servers(cfg, f, r)?)?;
     }
-    let root = harness::profiles_root(ctx);
+    let root = providers::profiles_root(ctx);
     for d in std::fs::read_dir(root).into_iter().flatten().flatten() {
         let (name, dir) = (d.file_name().to_string_lossy().into_owned(), d.path());
         if dir.join("role.md").exists() && !all.iter().any(|p| p.4 == name) {
@@ -77,25 +78,37 @@ pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) 
     Ok(())
 }
 
-/// `profiles sync --check`: each Hermes profile's `hooks list` (run as in a lane) shows its hook `✓ allowed`.
+/// `profiles sync --check`: no stray hook, and each provider's profiles allow their hook (`Provider::hooks_allowed`).
 pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<bool> {
-    let mut good = true;
-    for (name, f, role, _, profile) in profiles(cfg) {
-        if !ctx.hermes.join(&profile).join("config.yaml").exists() {
-            continue;
-        }
-        let lane = format!("HERDSMAN_LANE={name}:-:{role}");
-        let o = r.run("env", &argv(&[&lane, "hermes", "-p", &profile, "hooks", "list"]))?;
-        let cmd = hook_command(ctx, f.family(role));
-        let allowed = o.code == 0 && o.stdout.lines().any(|l| l.contains(&cmd) && l.contains("✓ allowed"));
-        writeln!(
-            out,
-            "{} {profile} ({role})",
-            if allowed { "✓ allowed" } else { "✗ not allowed" }
-        )?;
-        good &= allowed;
+    let stray = stray_hooks(ctx, cfg);
+    let mut good = stray.is_empty();
+    for s in stray {
+        writeln!(out, "✗ {s} → drover profiles sync")?;
+    }
+    for p in providers::lanes() {
+        good &= p.hooks_allowed(ctx, cfg, r, out)?;
     }
     Ok(good)
+}
+
+/// #737: each synced profile's drover hook whose program is not the running binary: `<profile> hook runs <exe>`.
+pub fn stray_hooks(ctx: &Ctx, cfg: &Config) -> Vec<String> {
+    let mut stray = vec![];
+    for (_, _, _, _, profile) in profiles(cfg) {
+        let path = providers::profiles_root(ctx).join(&profile).join("settings.json");
+        let settings: Value = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+        let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
+        for h in pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten()) {
+            let cmd = h["command"].as_str().unwrap_or_default();
+            if let Some(exe) = providers::hook_program(cmd).filter(|_| !providers::runs_this(ctx, cmd)) {
+                stray.push(format!("{profile} hook runs {exe}, not {}", ctx.exe));
+            }
+        }
+    }
+    stray
 }
 
 pub struct Plan {
@@ -113,10 +126,11 @@ pub struct Plan {
     pub worktree: PathBuf,
     pub brief: PathBuf,
     pub kick: String,
-    /// `HERDSMAN_LANE` value (`<fleet>:<issue>:<role>`); arms `herdsman hook` in the lane.
+    /// `DROVER_LANE` value (`<fleet>:<issue>:<role>`); arms `drover hook` in the lane.
     pub lane: String,
-    /// `[accounts]` lanes: the account name and its token's secret name (`all`'s, in the store).
-    pub account: Option<(String, String)>,
+    /// `[accounts]` lanes: the account name and (#683) the env it signs in with (`access::account_env`); that env is
+    /// empty on a remote host (its lanes sign in through the main host's token proxy, #637).
+    pub account: Option<access::Account>,
     pub env: std::collections::BTreeMap<String, String>,
     pub port: u16,
     /// The only MCP servers the lane gets, and the lane-local file a harness reads them from.
@@ -127,44 +141,54 @@ pub struct Plan {
     pub title: String,
     /// #302: the card's `on <entry> (<entries> resting until` and that time, when a `fallback` entry carries on.
     pub resting: Option<(String, u64)>,
-    /// #355: a conductor's harness session id, and whether to resume it (`Harness::resumes`).
+    /// #355: an orchestrator's harness session id, and whether to resume it (`Harness::resumes`).
     pub session: Option<(String, bool)>,
+    /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `Proxy::auth_token_env`).
+    pub lane_key: Option<String>,
+    /// #707: a local lane's `token-file:` account: the env var and the file `deliver` exports it from.
+    pub token: Option<(String, PathBuf)>,
 }
 
 impl Plan {
-    /// Exports `HERDSMAN_LANE`, `HERDSMAN_PORT` and the fleet's `env`; #441: sources the secrets `deliver` wrote.
+    /// Exports `DROVER_LANE`, `DROVER_PORT` and the fleet's `env`; #441: sources the secrets `deliver` wrote.
     pub fn lane_cmd(&self, pane: &str) -> Vec<String> {
-        let (lane, port) = (format!("HERDSMAN_LANE='{}'", self.lane), self.port.to_string());
-        let mut c = herdr::run_argv(pane, &["export", &lane, &format!("HERDSMAN_PORT={port}")]);
-        let v = |v: &str| expand(v).display().to_string().replace("$HERDSMAN_PORT", &port);
+        let (lane, port) = (format!("DROVER_LANE='{}'", self.lane), self.port.to_string());
+        let mut c = herdr::run_argv(pane, &["export", &lane, &format!("DROVER_PORT={port}")]);
+        let v = |v: &str| {
+            expand(v)
+                .display()
+                .to_string()
+                .replace("$DROVER_PORT", &port)
+                .replace("$HERDSMAN_PORT", &port)
+        };
         let plain = self.env.iter().filter(|(_, x)| !x.starts_with("secret:"));
         c.extend(plain.map(|(k, x)| format!("{k}='{}'", v(x))));
-        c.extend(self.account.iter().map(|a| format!("HERDSMAN_ACCOUNT='{}'", a.0)));
-        c.extend(harness::get(&self.harness).env().iter().map(|v| String::from(*v)));
-        if !self.secrets().is_empty() {
+        c.extend(self.account.iter().map(|a| format!("DROVER_ACCOUNT='{}'", a.0)));
+        // #683: the account's env, its own CLI login; the lane's profile goes on top (`--settings`, ACP's settings).
+        let acct = self.account.iter().flat_map(|a| &a.1);
+        c.extend(acct.map(|(k, d)| format!("{k}='{}'", d.replace('\'', r"'\''"))));
+        c.extend(providers::get(&self.harness).env().iter().map(|v| String::from(*v)));
+        // #708: a token the pane inherited (a login shell's export) never picks the account of a lane without one.
+        if let (None, providers::Credential::Account(providers::Accounts { token_env: Some(v), .. })) =
+            (&self.account, providers::get(&self.harness).credential())
+        {
+            c.push(format!("&& unset {v}"));
+        }
+        if !self.secrets().is_empty() || self.lane_key.is_some() || self.token.is_some() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));
         }
         c
     }
 
-    /// #441: (env var, fleet, secret name) of each `secret:<NAME>` env and of the account's token.
+    /// #441: (env var, fleet, secret name) of each `secret:<NAME>` env (#683: never an account token).
     fn secrets(&self) -> Vec<(String, &str, String)> {
         let fleet = self.lane.split(':').next().unwrap_or_default();
         let env = self
             .env
             .iter()
             .filter_map(|(k, x)| Some((k.clone(), fleet, x.strip_prefix("secret:")?.into())));
-        let token = match harness::get(&self.harness).credential() {
-            harness::Credential::Token(v) => Some(v),
-            _ => None,
-        };
-        let acct = self
-            .account
-            .iter()
-            .zip(token)
-            .map(|(a, v)| (v.to_string(), "all", a.1.clone()));
-        env.chain(acct).collect()
+        env.collect()
     }
 
     /// The file `deliver` writes beside the worktree, on the lane's host.
@@ -178,11 +202,11 @@ impl Plan {
     }
 
     pub fn start_cmd(&self, ctx: &Ctx, pane: &str) -> Vec<String> {
-        harness::get(&self.harness).start_cmd(ctx, self, pane)
+        providers::get(&self.harness).start_cmd(ctx, self, pane)
     }
 
     pub fn kick_cmds(&self, pane: &str) -> Vec<Vec<String>> {
-        harness::get(&self.harness).kick_cmds(self, pane)
+        providers::get(&self.harness).kick_cmds(self, pane)
     }
 
     /// #157: the lane's files under `root` on its host; #630: its builds too.
@@ -195,16 +219,34 @@ impl Plan {
     }
 }
 
-/// #441: the lane's secrets read from the main host's store and written 0600 beside its worktree on its host (over
-/// the ssh channel's stdin to a remote one), never in argv, a pane or the log; the guard removes the file when dropped.
-pub fn deliver<'a>(on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Plan) -> Result<Delivered<'a>> {
+/// #707: the lane's secrets read from 0600 files on the main host (`<config>/secrets/<NAME>`, its `token-file:`) and
+/// written 0600 beside its worktree on its host (over the ssh channel's stdin to a remote one), never in argv, a pane
+/// or the log; the guard removes the file when dropped.
+pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Plan) -> Result<Delivered<'a>> {
     let mut text = String::new();
-    for (var, fleet, name) in p.secrets() {
-        let v = crate::secret::lookup(on, fleet, &name)?.or_else(|| cfg.legacy_secret(&name)); // #539
-        let why =
-            || format!("{var}: secret {name} is not in the store (`herdsman accounts import` or a secret request)");
+    let named = p
+        .secrets()
+        .into_iter()
+        .map(|(var, _, n)| (var, crate::secret::path(ctx, &n), n));
+    let token = p
+        .token
+        .iter()
+        .map(|(var, f)| (var.clone(), f.clone(), "token-file".into()));
+    for (var, f, name) in named.chain(token) {
+        let v = crate::secret::file(&f)?.or_else(|| cfg.legacy_secret(&name)); // #539
+        let why = || {
+            format!(
+                "{var}: secret {name} is not in {} (`drover secret request`)",
+                f.display()
+            )
+        };
         text += &format!("export {var}='{}'\n", v.with_context(why)?.replace('\'', r"'\''"));
     }
+    // #637: a remote ACP lane holds no account token, only its proxy key.
+    text += &p.lane_key.as_ref().map_or_else(String::new, |k| {
+        let var = crate::providers::proxied().map_or("", |px| px.auth_token_env);
+        format!("export {var}='{k}'\n")
+    });
     let file = (!text.is_empty()).then(|| p.secrets_file());
     if let Some(f) = &file {
         on.write_private(f, &text)?;
@@ -294,19 +336,20 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
                 format!("origin/{impl_branch}"),
                 head,
             )
-        } else if role == "design" {
-            let head = format!("{fleet} · design #{issue}");
-            // #412: a `--design` issue's design, before impl, commits to the issue branch, where impl goes on.
+        } else if crate::events::STAGES.contains(&role) {
+            let head = format!("{fleet} · {role} #{issue}");
+            // #412: a `--design` (#730: `--architect`) issue's stage, before impl, commits to the issue branch, where
+            // impl goes on.
             let pre = st
                 .as_ref()
                 .is_none_or(|s| crate::events::DESIGN.contains(&s.state.as_str()));
             let pre = pre
                 && crate::queue::replay(&ev, fleet)
                     .iter()
-                    .any(|i| i.issue == issue && i.design);
+                    .any(|i| i.issue == issue && (i.design || i.architect));
             (
-                format!("{fleet}-design-{issue}"),
-                if pre { impl_branch } else { format!("design-{issue}") },
+                format!("{fleet}-{role}-{issue}"),
+                if pre { impl_branch } else { format!("{role}-{issue}") },
                 format!("origin/{}", f.integration),
                 head,
             )
@@ -364,6 +407,8 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         title,
         resting,
         session: None,
+        lane_key: None,
+        token: None,
     })
 }
 
@@ -373,7 +418,7 @@ fn shared_target<'a>(root: &Path, f: &'a Fleet, agent: &str) -> impl Iterator<It
     let b = root.join(crate::roots::BUILD);
     let d = b.join(agent).display().to_string();
     let s = b.join(SCRATCH).join(agent).display().to_string();
-    let vars = [("CARGO_TARGET_DIR".into(), d), ("HERDSMAN_SCRATCH_TARGET".into(), s)];
+    let vars = [("CARGO_TARGET_DIR".into(), d), ("DROVER_SCRATCH_TARGET".into(), s)];
     vars.into_iter()
         .filter(|v| !f.env.contains_key(&v.0) && !f.shared_cache.contains_key(&v.0))
 }
@@ -392,7 +437,8 @@ fn brief(
     p: &Plan,
     title: &str,
     body: &str,
-    (fix, rules, repro): (Option<&str>, Option<&str>, bool),
+    (fix, rules, repro, play): (Option<&str>, Option<&str>, bool, Option<String>),
+    recipe: &crate::design::Recipe,
 ) -> String {
     let (branch, integration) = (&p.branch, &f.integration);
     let contract = match p.family {
@@ -405,6 +451,25 @@ fn brief(
         "design" => format!(
             include_str!("../roles/brief-design.md"),
             branch = branch,
+            integration = integration,
+            medium = recipe.medium,
+            paths = (recipe.folders.iter())
+                .map(|p| format!("`{p}/`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            render = recipe
+                .render
+                .as_ref()
+                .map_or("render a PNG of each page or view".into(), |c| format!("run `{c}`")),
+            sizes = recipe.sizes,
+            clip = [
+                "",
+                " The design moves: also a short clip of it (`clip.gif` or `clip.mp4`) beside the images."
+            ][usize::from(recipe.clip)]
+        ),
+        "architect" => format!(
+            include_str!("../roles/brief-architect.md"),
+            branch = branch,
             integration = integration
         ),
         _ => format!(
@@ -416,18 +481,28 @@ fn brief(
     };
     // #420: a `--repro` issue's steps: impl's failing test first, rev's proof it fails on base and passes at head.
     let steps = match (repro, p.family, p.stage.as_str()) {
-        (false, ..) | (_, "design", _) => "",
+        (false, ..) | (_, "design" | "architect", _) => "",
         (_, "rev", "verify") => include_str!("../roles/brief-repro-verify.md"),
         (_, "rev", _) => include_str!("../roles/brief-repro-rev.md"),
         _ => include_str!("../roles/brief-repro-impl.md"),
     };
-    let contract = contract.trim_end().to_string() + "\n" + steps;
+    // #734: a `--perf` or `--refactor` issue's playbook.
+    let play = match (play.as_deref(), p.family, p.stage.as_str()) {
+        (None, ..) | (_, "design", _) | (_, "rev", "verify") => "",
+        (Some("perf"), "rev", _) => include_str!("../roles/brief-perf-rev.md"),
+        (Some("perf"), ..) => include_str!("../roles/brief-perf-impl.md"),
+        (_, "rev", _) => include_str!("../roles/brief-refactor-rev.md"),
+        _ => include_str!("../roles/brief-refactor-impl.md"),
+    };
+    let contract = contract.trim_end().to_string() + "\n" + steps + play;
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
-    // #419: the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
+    // #733: the shared rules pack, then (#419) the repo's lessons, `.drover/rules.md` at the lane's checkout.
     let rules = rules.map_or(String::new(), |r| {
-        format!("## Repo rules (.herdsman/rules.md)\n\n{}\n\n", r.trim_end())
+        format!("## Repo rules (.drover/rules.md)\n\n{}\n\n", r.trim_end())
     });
+    let shared = include_str!("../rules/shared.md").trim_end();
+    let rules = format!("## Shared rules (rules/shared.md)\n\n{shared}\n\n{rules}");
     format!(
         include_str!("../roles/brief.md"),
         agent = p.agent,
@@ -496,44 +571,49 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
     k.filter(|_| p.family == "rev").unwrap_or(n)
 }
 
-/// #565: why herdsman's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (with an
-/// account, on a remote host); empty when it would. #633: an attached cooee conductor's `guarded` too.
+/// #565: why drover's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (with an
+/// account; #637: on a remote host, its profile checked there instead); empty when it would. #633: an attached cooee conductor's `guarded` too.
 pub fn unguarded(
     ctx: &Ctx,
     (profile, family, h): (&str, &str, &str),
     id: &str,
     (account, remote): (bool, bool),
 ) -> String {
-    let settings: Value = std::fs::read_to_string(harness::profiles_root(ctx).join(profile).join("settings.json"))
+    let settings: Value = std::fs::read_to_string(providers::profiles_root(ctx).join(profile).join("settings.json"))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
         .unwrap_or_default();
     let pre = settings["hooks"]["PreToolUse"].as_array().into_iter().flatten();
     let mut hooks = pre.flat_map(|m| m["hooks"].as_array().into_iter().flatten());
-    let guard = hook_command(ctx, family);
-    if remote {
-        "shed runs ACP sessions on its own host only".to_string()
-    } else if harness::get(h).acp() != Some(id) {
+    // #637: a remote host's profile is proven there (`hosts::acp_guard`), before this.
+    if providers::get(h).acp() != Some(id) {
         format!("ACP agent {id} runs no {h} hook")
-    } else if !hooks.any(|h| h["command"] == guard.as_str()) {
-        format!("profile {profile} has no herdsman PreToolUse hook; run `herdsman profiles sync`")
+    } else if !remote && !hooks.any(|h| h["command"].as_str().is_some_and(|c| providers::guards(ctx, c, family))) {
+        format!("profile {profile} has no drover PreToolUse hook; run `drover profiles sync`")
     } else if !account {
-        "an ACP lane signs in with its role's [accounts] token (its config folder is its profile)".into()
+        "an ACP lane signs in with its role's [accounts] account env".into()
     } else {
         String::new()
     }
 }
 
 /// #565: an ACP lane's adapter (its agent's command in `shed agents`), run by `sh` after the lane's exports and secrets
-/// file, with its profile as its harness's config folder and no `$SHED` (its state is the session's, not the hook's).
-/// Refused `ACP_UNGUARDED` when herdsman's hook would not guard it (#508: fail closed).
-pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> Result<Vec<String>> {
-    let dir = harness::profiles_root(ctx).join(&p.profile);
+/// file, with its account's env as its sign-in (#683), its profile's settings and role as the
+/// worktree's local project settings and memory, and no `$SHED` (its state is the session's, not the hook's).
+/// Refused `ACP_UNGUARDED` when drover's hook would not guard it (#508: fail closed).
+pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&str>) -> Result<Vec<String>> {
+    let dir = providers::profiles_root(ctx).join(&p.profile);
+    let home = |a: Vec<String>| crate::hosts::rehome(a, remote);
     let why = unguarded(
         ctx,
         (&p.profile, p.family, &p.harness),
         id,
-        (p.account.is_some(), remote),
+        (
+            p.account
+                .as_ref()
+                .is_some_and(|a| !a.1.is_empty() || p.lane_key.is_some()),
+            remote.is_some(),
+        ),
     );
     if !why.is_empty() {
         return refused("ACP_UNGUARDED", format!("{why}; the lane does not start"));
@@ -543,14 +623,63 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: bool) -> R
     let cmd: Vec<String> = agent
         .and_then(|a| serde_json::from_value(a["cmd"].clone()).ok())
         .with_context(|| format!("ACP agent {id} is not installed; `shed agents add {id}`"))?;
-    let mut words = p.lane_cmd("")[3..].to_vec();
+    let mut words = home(p.lane_cmd("")[3..].to_vec());
     let at = words.iter().position(|w| w.starts_with("&&")).unwrap_or(words.len());
     let q = |v: &str| format!("'{}'", v.replace('\'', r"'\''"));
-    let env = harness::get(&p.harness).acp_env(&dir, p.model.as_deref());
+    let dir = PathBuf::from(home(vec![dir.display().to_string()]).remove(0));
+    let env = providers::get(&p.harness).acp_env(p.model.as_deref(), p.effort.as_deref());
     let own: Vec<String> = env.iter().map(|(k, v)| format!("{k}={}", q(v))).collect();
     words.splice(at..at, own);
-    let line = words.join(" ") + " && unset SHED BERTH && exec \"$@\"";
+    let (set, role) = (dir.join("settings.json"), dir.join("role.md"));
+    let (set, role) = (q(&set.to_string_lossy()), q(&role.to_string_lossy()));
+    let profile = providers::get(&p.harness).acp_profile(&set, &role);
+    let line = words.join(" ") + &profile + " && unset SHED BERTH && exec \"$@\"";
     Ok([argv(&["sh", "-c", &line, "sh"]), cmd].concat())
+}
+
+/// #637: an ACP lane on another host: its profile synced there by name (#592; not on a dry run), then the guard proven
+/// there (`hosts::acp_guard`). Unguarded, the host gets a `✗ acp guard` row (the next placement goes elsewhere) and
+/// spawn refuses `ACP_UNGUARDED`; guarded, the lane gets a fresh proxy key and the proxy's URL, never a token.
+fn remote_acp(
+    ctx: &Ctx,
+    cfg: &Config,
+    on: &crate::hosts::On,
+    p: &mut Plan,
+    (pl, id): (&crate::hosts::Placed, &str),
+    dry: bool,
+) -> Result<()> {
+    let home = pl.home.as_deref().unwrap_or_default();
+    if !dry {
+        let exe = crate::hosts::rehome(vec![ctx.exe.clone()], Some(home)).remove(0);
+        ok(
+            on,
+            &exe,
+            &["profiles", "sync", "--profile", &p.profile, "--role", p.family],
+        )?;
+    }
+    if let Some(why) = crate::hosts::acp_guard(ctx, on, home, (&p.profile, p.family, id)) {
+        crate::hosts::sick(ctx, &pl.name, &format!("✗ acp guard {} — {why}", p.profile));
+        return refused(
+            "ACP_UNGUARDED",
+            format!(
+                "{}: {why}; the lane does not start, the next placement skips the host",
+                pl.name
+            ),
+        );
+    }
+    if let Some(px) = crate::providers::proxied() {
+        p.env.insert(px.base_url_env.into(), crate::proxy::url(cfg));
+    }
+    p.lane_key = Some(crate::proxy::new_key()?);
+    Ok(())
+}
+
+/// #722: the linked worktree of `local`'s repo where `branch` is checked out, if any.
+fn checked_out(r: &dyn Runner, local: &str, branch: &str) -> Option<String> {
+    let list = ok(r, "git", &["-C", local, "worktree", "list", "--porcelain"]).ok()?;
+    let want = format!("branch refs/heads/{branch}");
+    let held = list.split("\n\n").skip(1).find(|b| b.lines().any(|l| l == want))?;
+    held.lines().next()?.strip_prefix("worktree ").map(String::from)
 }
 
 /// #298: `git worktree add` for a shed lane: its branch checked out if it exists (`have`), else made at the base.
@@ -605,7 +734,7 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
         cmds.extend(p.kick_cmds("<pane>").into_iter().map(|k| sent(herdr::BIN, k)));
     }
     // #345: the lane's service token is never shown (the plan is printed and `--json`).
-    if let Some(t) = p.env.get("HERDSMAN_TOKEN") {
+    if let Some(t) = p.env.get("DROVER_TOKEN") {
         cmds.iter_mut()
             .flatten()
             .for_each(|w| *w = w.replace(t.as_str(), "•••"));
@@ -633,12 +762,19 @@ pub const OWN_FILES: &[&str] = &[
     ".mcp.lane.json",
     "verdict.md",
     ".review-brief.md",
+    "why.md",              // #677: drover attaches it as a note; never committed
+    ".verify-browser.mjs", // #731: scripts/verify-browser.mjs, for the verify lane's recipe
 ];
+
+/// #770: `OWN_FILES` and the harness files spawn copies in (`providers::LOCAL_FILES`).
+pub fn own_files() -> impl Iterator<Item = &'static str> {
+    OWN_FILES.iter().chain(&providers::LOCAL_FILES).copied()
+}
 
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
 pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
 
-/// #646: a herdsman-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
+/// #646: a drover-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
 pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
     let all = "'+refs/heads/*:refs/remotes/origin/*'";
     format!(
@@ -650,7 +786,10 @@ pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
 /// `git status --porcelain` lines that are not lane scratch or generated (#248: screenshots, packages).
 pub fn changes(st: &str) -> usize {
     let own = |l: &&str| {
-        (OWN_FILES.iter().chain(SHOT_DIRS).chain(&["node_modules/"])).any(|f| l.trim_end() == format!("?? {f}"))
+        (own_files()
+            .chain(SHOT_DIRS.iter().copied())
+            .chain(["node_modules/", providers::LOCAL_DIR]))
+        .any(|f| l.trim_end() == format!("?? {f}"))
     };
     st.lines().filter(|l| !own(l)).count()
 }
@@ -700,6 +839,28 @@ pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> 
     (!done.is_empty() || !errs.is_empty()).then(|| json!({"dirs": done, "secs": secs, "errors": errs}))
 }
 
+fn reuse(p: &Plan, dirs: &[String], target: Option<&String>, agents: &[Value]) -> Option<Value> {
+    let (stem, k) = p.agent.rsplit_once("-r")?;
+    let k = k.parse::<u64>().ok().filter(|k| *k > 1)?;
+    let prev = format!("{stem}-r{}", k - 1);
+    if agents.iter().any(|a| a["name"] == prev.as_str()) {
+        return None;
+    }
+    let wt = p.worktree.to_string_lossy();
+    let old = wt
+        .strip_suffix(&format!("-r{k}"))
+        .map(|w| PathBuf::from(format!("{w}-r{}", k - 1)));
+    let mut pairs: Vec<(PathBuf, PathBuf)> = (dirs.iter())
+        .filter_map(|d| Some((old.as_ref()?.join(d), p.worktree.join(d))))
+        .collect();
+    pairs.extend(target.map(|t| (Path::new(t).with_file_name(&prev), PathBuf::from(t))));
+    let moved: Vec<String> = (pairs.into_iter())
+        .filter(|(from, to)| from.is_dir() && !to.exists() && std::fs::rename(from, to).is_ok())
+        .map(|(_, to)| to.display().to_string())
+        .collect();
+    (!moved.is_empty()).then(|| json!({"dirs": moved, "from": prev}))
+}
+
 /// #630: a new lane's build folder `t` (under its root's `.build`) cloned from the newest of its fleet's lanes' there:
 /// one volume, so copy-on-write, never a full copy. The `build-cloned` data, if any.
 pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
@@ -726,10 +887,10 @@ pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
     Some(json!({"dirs": dirs, "from": src, "secs": at.elapsed().as_secs(), "errors": errs}))
 }
 
-/// #630: the ignored files `.herdsman/worktree-include` lists (one path per line, `#` comments), copied from the main
+/// #630: the ignored files `.drover/worktree-include` lists (one path per line, `#` comments), copied from the main
 /// checkout into a new lane's worktree when missing there. Never secrets: those stay in `secret:` env.
 pub fn copy_included(local: &Path, wt: &Path) -> Result<()> {
-    let list = std::fs::read_to_string(local.join(".herdsman/worktree-include")).unwrap_or_default();
+    let list = std::fs::read_to_string(crate::repo_path(&local.join(".drover/worktree-include"))).unwrap_or_default();
     for l in list
         .lines()
         .map(str::trim)
@@ -819,8 +980,8 @@ pub fn spawn(
     o: &Opts,
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
-    if f.paused && role != "design" {
-        return refused("PAUSED", format!("{fleet} is paused; `herdsman resume {fleet}` first"));
+    if f.paused && !crate::events::STAGES.contains(&role) {
+        return refused("PAUSED", format!("{fleet} is paused; `drover resume {fleet}` first"));
     }
     if o.update && f.family(role) != "impl" {
         return refused("BAD_VALUE", "--update is an impl fix round");
@@ -829,22 +990,30 @@ pub fn spawn(
     // #157: from here every call and file of the lane is on its host; #236: the dry run shows it placed.
     let placed = crate::hosts::place(ctx, cfg, r, &read(&ctx.state)?, (fleet, issue, role), o.host.as_deref())?;
     let placed = crate::hosts::wake(ctx, cfg, r, (f, o.dry_run), placed)?;
-    let on = crate::hosts::On::new(r, placed.as_ref().and_then(|pl| pl.machine.as_deref()));
+    let acp_host = placed.as_ref().is_some_and(|pl| cfg.host_acp(&pl.name).is_some());
+    let on = crate::hosts::On::new(r, placed.as_ref().and_then(|pl| pl.machine.as_deref())).shed_only(acp_host);
     let (base, r): (&dyn Runner, &dyn Runner) = (r, &on);
     if let Some(pl) = &placed {
         p.at(&pl.root, f);
-        p.env.insert("HERDSMAN_HOST".into(), pl.name.clone()); // #256: the lane hook's per-host rules
+        p.env.insert("DROVER_HOST".into(), pl.name.clone()); // #256: the lane hook's per-host rules
         if pl.machine.is_some() {
             // #389: its asks, answers, verdicts and events wait in its outbox; it holds no route to the main host.
             // #345: they go to the service over HTTP when `[service] url` is set (its token is added below the dry run).
             match &cfg.service.url {
-                Some(url) => p.env.insert("HERDSMAN_SERVICE".into(), url.clone()),
-                None => p.env.insert("HERDSMAN_OUTBOX".into(), "1".into()),
+                Some(url) => p.env.insert("DROVER_SERVICE".into(), url.clone()),
+                None => p.env.insert("DROVER_OUTBOX".into(), "1".into()),
             };
             // #592: its host keeps no fleet.toml: its hook reads the rules this host resolves (written below).
             p.env
-                .insert("HERDSMAN_RULES".into(), p.rules_file().display().to_string());
+                .insert("DROVER_RULES".into(), p.rules_file().display().to_string());
         }
+    }
+    // #683: a lane on this host signs in with its account's env (a failing `account_env` refuses the spawn); a remote
+    // one gets none, its host signs in through the main host's token proxy (#637).
+    // #785: a signed-out account is skipped for the role's next one.
+    if on.machine.is_none() && p.account.is_some() {
+        let fr = access::fallback(cfg, &read(&ctx.state)?, f.role(role)?, ctx.now)?.0;
+        access::signed(ctx, cfg, base, (fleet, &fr, o.dry_run), &mut p)?;
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
     let home = |a: Vec<String>| crate::hosts::rehome(a, hm);
@@ -853,21 +1022,29 @@ pub fn spawn(
     let local = local.to_string_lossy().into_owned();
     let reopen = on.exists(&p.worktree);
     // #565: the fleet's own runtime over the global one, on the lane host's wire (`On`); an ACP lane's labels and adapter.
-    let bt = cfg.shed_for(fleet).map(|b| {
+    let bt = cfg.shed_on(fleet, placed.as_ref().map(|pl| pl.name.as_str())).map(|b| {
         let wire = on.shed().map_or(b.wire.clone(), |w| w.wire);
-        herdr::Shed(crate::shed::Shed { wire, ..b })
+        // #732: an ACP lane runs its role's own agent over the runtime's.
+        let acp = b
+            .acp
+            .clone()
+            .map(|a| f.role(role).ok().and_then(|r| r.agent.clone()).unwrap_or(a));
+        herdr::Shed(crate::shed::Shed { wire, acp, ..b })
     });
     // #600: drive's PATH is the timer's; a shed it lacks is named before anything is made.
     if bt.is_some() && on.machine.is_none() && ok(r, "which", &["shed"]).is_err() {
         let path = std::env::var("PATH").unwrap_or_default();
-        let fix = "`herdsman timer install` from a shell where `which shed` finds it";
+        let fix = "`drover timer install` from a shell where `which shed` finds it";
         return refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
     }
     let acp_id = bt.as_ref().and_then(|b| b.0.acp.clone());
     let n = round(&read(&ctx.state)?, fleet, issue, &p);
     let labels = labels(&p, acp_id.as_ref().map(|_| (f, n)));
+    if let (Some(id), Some(pl)) = (&acp_id, placed.as_ref().filter(|pl| pl.machine.is_some())) {
+        remote_acp(ctx, cfg, &on, &mut p, (pl, id), o.dry_run)?;
+    }
     let acp = match &acp_id {
-        Some(id) => acp_cmd(ctx, r, &p, id, on.machine.is_some())?,
+        Some(id) => acp_cmd(ctx, r, &p, id, hm.filter(|_| on.machine.is_some()))?,
         None => vec![],
     };
     let mut pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, bt.as_ref(), &labels, &acp));
@@ -880,7 +1057,7 @@ pub fn spawn(
     if let Some(("HOST_OFFLINE", why)) = placed.as_ref().and_then(|pl| pl.refusal.clone()) {
         return refused("HOST_OFFLINE", why);
     }
-    if p.env.contains_key("HERDSMAN_SERVICE") {
+    if p.env.contains_key("DROVER_SERVICE") {
         let g = crate::service::Grant {
             fleet: fleet.into(),
             issue,
@@ -889,9 +1066,9 @@ pub fn spawn(
             lane: p.lane.clone(),
             at: ctx.now,
         };
-        p.env.insert("HERDSMAN_TOKEN".into(), crate::service::grant(ctx, &g)?);
+        p.env.insert("DROVER_TOKEN".into(), crate::service::grant(ctx, &g)?);
     }
-    let h = harness::get(&p.harness);
+    let h = providers::get(&p.harness);
     h.ready(ctx, r, &p)?;
     let event = |kind: &str, d: Value| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d));
 
@@ -916,7 +1093,7 @@ pub fn spawn(
         dup.push((
             "LANE_LIVE",
             format!(
-                "stale pane {} (idle {idle}): herdsman adopt or --supersede",
+                "stale pane {} (idle {idle}): drover adopt or --supersede",
                 names.join(", ")
             ),
         ));
@@ -979,7 +1156,8 @@ pub fn spawn(
         );
     }
 
-    lane_admit(ctx, f, &events, fleet, issue, role)?;
+    lane_admit(ctx, (cfg, r), &events, fleet, issue, role)?;
+    respawn_guard(ctx, cfg, &events, (fleet, issue, role))?;
     let updates = fold(&events).remove(&(fleet.into(), issue)).map_or(0, |s| s.updates);
     if o.update && updates >= f.flow().update_limit() {
         let why = format!(
@@ -998,7 +1176,8 @@ pub fn spawn(
     // #164: the last drive pass's walk of this host's worktrees (drive frees the idlest lanes' build folders first).
     let budget = cfg.limits.worktree_budget_gb;
     if let Some(gb) = crate::check::worktree_gb(ctx).filter(|g| on.machine.is_none() && *g > budget) {
-        return refused("DISK_BUDGET", format!("worktrees {gb:.1} GB > {budget} GB"));
+        let why = crate::check::worktree_why(ctx);
+        return refused("DISK_BUDGET", format!("worktrees {gb:.1} GB > {budget} GB; {why}"));
     }
     match refusal {
         Some(("HOST_BUSY", why)) if o.force => event(
@@ -1058,6 +1237,15 @@ pub fn spawn(
         }
         event("supersede", d)?;
     }
+    // #676: a lane moved off its last host starts from the pushed branch, plus that host's unsaved work on `wip/`.
+    let moved = (placed.as_ref())
+        .and_then(|pl| last_spawn(&events, &p.agent).filter(|e| e.str("machine") != pl.machine.as_deref()));
+    if let Some((e, owt)) = moved
+        .and_then(|e| Some((e, e.str("worktree")?)))
+        .filter(|_| wip.is_none())
+    {
+        wip = crate::check::save_lane(ctx, &crate::hosts::On::of(base, Some(e)), &p.agent, owt)?;
+    }
 
     let mut sha = None;
     let note; // #353: a superseded or fallback lane's summary for its successor, logged on its spawn
@@ -1072,20 +1260,63 @@ pub fn spawn(
             "git",
             &["-C", &local, "fetch", "origin", p.base.trim_start_matches("origin/")],
         )?;
-        let created = match bt {
-            None => herdr::json(r, &create_argv(&local, &p, reopen))?,
-            Some(_) if reopen => Value::Null,
-            Some(_) => {
-                let have = r
-                    .run(
-                        "git",
-                        &argv(&["-C", &local, "rev-parse", "--verify", "--quiet", &p.branch]),
-                    )?
-                    .code
-                    == 0;
-                ok(r, "git", &worktree_add(&local, &p, have))?;
-                Value::Null
+        let body = iss["body"].as_str().unwrap_or("");
+        let recipe = match p.family {
+            "design" => crate::design::Recipe::at(r, &local, &p.base, body),
+            _ => crate::design::Recipe::of("", body),
+        };
+        crate::design::tools(ctx, cfg, r, (fleet, issue, &p.agent), &recipe)?;
+        let pushed = || ok(r, "git", &["-C", &local, "fetch", "origin", &p.branch]).is_ok();
+        if moved.is_some() && p.family != "rev" && pushed() {
+            p.base = format!("origin/{}", p.branch);
+        }
+        let make = || -> Result<Value> {
+            Ok(match bt {
+                None => herdr::json(r, &create_argv(&local, &p, reopen))?,
+                Some(_) if reopen => Value::Null,
+                Some(_) => {
+                    let have = r
+                        .run(
+                            "git",
+                            &argv(&["-C", &local, "rev-parse", "--verify", "--quiet", &p.branch]),
+                        )?
+                        .code
+                        == 0;
+                    ok(r, "git", &worktree_add(&local, &p, have))?;
+                    Value::Null
+                }
+            })
+        };
+        // #722: it failed with the branch still checked out in another worktree (a herdr-era root): that worktree's
+        // work is saved to `wip/`, it is removed and the lane's made again; a live agent there refuses.
+        let created = match make() {
+            Err(e) if !reopen => {
+                let Some(held) = checked_out(r, &local, &p.branch) else {
+                    return Err(e);
+                };
+                let live = host::agents(r)?;
+                let names: Vec<&str> = (host::live_in(&live, "\0", Path::new(&held)).iter())
+                    .filter_map(|a| a["name"].as_str().filter(|n| !n.is_empty()).or(a["pane_id"].as_str()))
+                    .collect();
+                if !names.is_empty() {
+                    let why = format!("live agent(s) {names:?} in {held}, where {} is checked out", p.branch);
+                    return refused("LANE_LIVE", why);
+                }
+                let git = |a: &[&str]| ok(r, "git", &[&["-C", &local, "worktree"][..], a].concat());
+                if on.exists(Path::new(&held)) {
+                    wip = wip.or(crate::check::save_lane(ctx, &on, &p.agent, &held)?);
+                    // Its work is on `wip/` or pushed: only lane scratch can stop a plain remove.
+                    if git(&["remove", &held]).is_err() {
+                        git(&["remove", "--force", &held])?;
+                    }
+                } else {
+                    git(&["prune"])?;
+                }
+                let d = json!({"role": role, "agent": p.agent, "old": held, "worktree": wt, "wip": wip});
+                event("worktree-moved", d)?;
+                make()?
             }
+            c => c?,
         };
         if p.family == "rev" {
             // #92: a re-review of the same round moves its worktree to the fetched head; the spawn logs that head.
@@ -1095,7 +1326,7 @@ pub fn spawn(
             }
         }
         // #412: a design lane's start head is the tree a rejected design goes back to.
-        if p.family == "rev" || p.family == "design" {
+        if p.family == "rev" || crate::events::STAGES.contains(&p.family) {
             sha = ok(r, "git", &["-C", &wt, "rev-parse", "HEAD"])
                 .ok()
                 .map(|h| h.trim().to_string());
@@ -1112,7 +1343,7 @@ pub fn spawn(
         let resume = cause.filter(|c| crate::shed::RESUMABLE.contains(c)).map(|c| {
             format!(
                 "Resume: your previous session in this worktree stopped mid-turn ({c}). Its local commits and staged \
-                 changes are kept here, and herdsman pushed the commits to `{}`: continue from them and push.",
+                 changes are kept here, and drover pushed the commits to `{}`: continue from them and push.",
                 p.branch
             )
         });
@@ -1125,15 +1356,30 @@ pub fn spawn(
         let update = o
             .update
             .then(|| format!(include_str!("../roles/brief-update.md"), f.integration));
+        // #730: an `--architect` issue's later lanes build to (rev: check the diff against) the approved ADR.
+        let adr = events
+            .iter()
+            .rfind(|e| e.is("design-approved", fleet, issue) && e.str("role") == Some("architect"))
+            .and_then(|e| e.str("adr"))
+            .filter(|_| p.family != "architect")
+            .map(|a| match p.family {
+                "rev" => format!("Architecture: the owner approved the ADR in `{a}/`; check the diff against it."),
+                _ => format!("Architecture: the owner approved the ADR in `{a}/` on this branch; build to it."),
+            });
         let decided = events
             .iter()
             .filter(|e| e.is("decision", fleet, issue))
             .map(plain)
             .chain(update)
+            .chain(adr)
+            .chain((!crate::events::STAGES.contains(&p.family)).then(|| {
+                let rev = (p.family == "rev").then(|| sha.as_deref().unwrap_or_default());
+                crate::why::brief(r, f, &events, (fleet, issue), rev, body)
+            }).flatten())
             .chain(note.clone())
             .chain(resume)
             .chain(wip.as_ref().map(|w| {
-                format!("Saved work: the superseded lane's uncommitted and unpushed work is on `origin/{w}`; fetch and merge it first.")
+                format!("Saved work: the last lane's uncommitted and unpushed work is on `origin/{w}`; fetch and merge it first.")
             }))
             .map(|t| format!("\n\n{t}"));
         (
@@ -1146,9 +1392,11 @@ pub fn spawn(
                 &decided.fold(body.to_string(), |b, d| b + &d),
                 (
                     fix,
-                    on.read(&p.worktree.join(".herdsman/rules.md")).as_deref(),
+                    crate::repo_read("rules.md", |f| on.read(&p.worktree.join(f))).as_deref(),
                     crate::queue::repro(&events, fleet, issue),
+                    crate::queue::playbook(&events, fleet, issue),
                 ),
+                &recipe,
             ),
         )
     };
@@ -1159,11 +1407,15 @@ pub fn spawn(
         herdr::workspace_rename(r, &ws, &p.agent)?; // #194: an open workspace keeps its branch label otherwise
     }
     on.write(&p.brief, &brief_text).context("writing the brief")?;
+    if p.role == "verify" {
+        let vb = include_str!("../../../scripts/verify-browser.mjs");
+        on.write(&p.worktree.join(".verify-browser.mjs"), vb)?;
+    }
     if on.machine.is_none() {
         copy_included(&f.local_path(), &p.worktree)?;
     }
     h.prepare(ctx, &on, &p)?;
-    if on.machine.is_some() {
+    if on.machine.is_some() && p.lane_key.is_none() {
         // #592: its host keeps no fleet.toml, so this lane's profile is synced there by name.
         let exe = home(vec![ctx.exe.clone()]).remove(0);
         ok(
@@ -1172,7 +1424,15 @@ pub fn spawn(
             &["profiles", "sync", "--profile", &p.profile, "--role", p.family],
         )?;
     }
-    let _secrets = deliver(&on, cfg, &p)?;
+    if let (Some(k), Some(pl)) = (&p.lane_key, &placed) {
+        // #637: its proxy key recorded (the account it signs with stays here), the proxy and the host's tunnel up.
+        // #683: the account's `[accounts]` value names its token's secret, read only by the proxy here.
+        let acct = p.account.as_ref().and_then(|a| cfg.accounts.names.get(&a.0));
+        let acct = acct.map_or("", String::as_str);
+        crate::proxy::mint(ctx, cfg, k, (fleet, issue, &p.agent), (&pl.name, acct))?;
+        crate::proxy::ensure(ctx, cfg, base, (&pl.name, pl.machine.as_deref().unwrap_or_default()))?;
+    }
+    let _secrets = deliver(ctx, &on, cfg, &p)?;
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
     let rules = rules.map(|pl| crate::hook::Rules::resolve(cfg, fleet, role, &pl.name));
     if let Some(rl) = &rules {
@@ -1231,23 +1491,15 @@ pub fn spawn(
             start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
             late = soft(&start) && confirm(r, h, &pane);
         }
-        // #463: a start that failed shows why on its screen; a first-start prompt the harness knows gets its answer.
         let mut screen = String::new();
         if start.code != 0 && !late {
-            screen = tail(r, &pane);
-            if let Some((prompt, keys)) = h.startup_prompt(&screen) {
-                for k in &keys {
-                    herdr::keys(r, &pane, k)?;
-                }
+            let logged = |prompt: &str| {
                 event(
                     "startup-prompt",
                     json!({"agent": p.agent, "pane": pane, "prompt": prompt}),
-                )?;
-                late = confirm(r, h, &pane);
-                if !late {
-                    screen = tail(r, &pane);
-                }
-            }
+                )
+            };
+            (late, screen) = unblock(r, h, &pane, logged)?;
         }
         if start.code != 0 {
             let taken = herdr::failed_with(&start, "agent_name_taken");
@@ -1307,6 +1559,9 @@ pub fn spawn(
         &dirs[..]
     };
     let target = p.env.get("CARGO_TARGET_DIR").filter(|_| on.machine.is_none());
+    if let Some(d) = (p.family == "rev").then(|| reuse(&p, dirs, target, &agents)).flatten() {
+        event("build-reused", d)?;
+    }
     let (res, cloned) = std::thread::scope(|s| {
         let c = s.spawn(|| {
             let warm = target.and_then(|t| clone_warm(r, fleet, Path::new(t)));
@@ -1318,8 +1573,9 @@ pub fn spawn(
                 None => h.kick(r, &p, &pane),
             };
             let mut d = lane_data(&p, &pane, &ws);
-            if bt.is_some() {
-                d["runtime"] = json!("shed");
+            if let Some(b) = &bt {
+                d["runtime"] = json!(["shed", "shed-acp"][usize::from(b.0.acp.is_some())]);
+                // #609
             }
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d["confirmed"] = json!(confirmed);
@@ -1380,14 +1636,35 @@ fn tail(r: &dyn Runner, pane: &str) -> String {
     lines[lines.len().saturating_sub(40)..].join("\n")
 }
 
+/// #463: a start that failed shows why on `pane`'s screen; a first-start prompt the harness knows gets its answer
+/// (`logged` with its name) and the harness is confirmed up. #736: spawn's and a conductor's. Whether it came up; the
+/// screen's redacted tail.
+pub(crate) fn unblock(
+    r: &dyn Runner,
+    h: &dyn providers::Provider,
+    pane: &str,
+    logged: impl FnOnce(&str) -> Result<()>,
+) -> Result<(bool, String)> {
+    let screen = tail(r, pane);
+    let Some((prompt, keys)) = h.startup_prompt(&screen) else {
+        return Ok((false, screen));
+    };
+    for k in &keys {
+        herdr::keys(r, pane, k)?;
+    }
+    logged(prompt)?;
+    if confirm(r, h, pane) {
+        return Ok((true, screen));
+    }
+    Ok((false, tail(r, pane)))
+}
+
 /// #359: start failures after which the harness may still come up, and the states it reports once up.
 const SOFT: [&str; 3] = ["timeout", "agent_name_not_found", "agent_launch_pending"];
 const REPORTED: [&str; 4] = ["working", "idle", "blocked", "done"];
 
-/// #359: whether the harness came up in `pane`: its process runs there and its startup title or a reported state has
-/// been seen. Reads it 5 s apart, never deciding from one read; any change restarts the window.
-fn confirm(r: &dyn Runner, h: &dyn harness::Harness, pane: &str) -> bool {
-    let (mut left, mut seen, mut titled, names) = (herdr::CONFIRM_SECS, String::new(), false, h.process_names());
+fn confirm(r: &dyn Runner, h: &dyn providers::Provider, pane: &str) -> bool {
+    let (mut left, mut titled, names) = (herdr::CONFIRM_SECS, false, h.process_names());
     loop {
         let v = herdr::json(r, &herdr::pane_get_argv(pane)).map_or(Value::Null, |v| v["result"]["pane"].clone());
         let agent = v["agent"].as_str().unwrap_or("");
@@ -1397,12 +1674,10 @@ fn confirm(r: &dyn Runner, h: &dyn harness::Harness, pane: &str) -> bool {
         if titled && !agent.is_empty() && (names.is_empty() || names.contains(&agent)) {
             return true;
         }
-        let now = format!("{agent}\n{title}");
-        left = if now == seen { left } else { herdr::CONFIRM_SECS };
         if left < 5 {
             return false;
         }
-        (left, seen) = (left - 5, now);
+        left -= 5;
         r.sleep(5);
     }
 }
@@ -1416,8 +1691,16 @@ fn orphan(agents: &[Value], events: &[Event], p: &Plan, unnamed: bool) -> Option
 }
 
 /// `SERIAL_BUSY` (a group of the issue's is full, unless it holds a slot there) and CAP (`max_impl` / `max_rev`).
-pub(crate) fn lane_admit(ctx: &Ctx, f: &Fleet, events: &[Event], fleet: &str, issue: u64, role: &str) -> Result<()> {
-    let events = &[events, &crate::drive::pending(ctx)].concat(); // #318: spawns still starting count as lanes
+pub(crate) fn lane_admit(
+    ctx: &Ctx,
+    (cfg, r): (&Config, &dyn Runner),
+    events: &[Event],
+    fleet: &str,
+    issue: u64,
+    role: &str,
+) -> Result<()> {
+    let f = cfg.fleet(fleet)?;
+    let events = &[events, &crate::drive::pending(ctx, cfg, r)].concat();
     let st = fold(events);
     let others: Vec<_> = st.values().filter(|s| s.fleet == fleet && s.issue != issue).collect();
     let building = |s: &str| s == "impl" || s.starts_with("fix");
@@ -1443,6 +1726,83 @@ pub(crate) fn lane_admit(ctx: &Ctx, f: &Fleet, events: &[Event], fleet: &str, is
         return refused("CAP", format!("{n} {role} lane(s) open in {fleet}, max_{fam} = {cap}"));
     }
     Ok(())
+}
+
+/// #779: the starts of `role` on the issue since its last that pushed or ended a turn, or the owner's [try again]: each
+/// with why it failed (its lane died, was killed, or its prompt never landed), and the open `RESPAWN_LOOP` ask if any.
+fn starts<'a>(
+    events: &'a [Event],
+    fleet: &str,
+    issue: u64,
+    role: &str,
+) -> (Vec<(u64, Option<&'a str>)>, Option<&'a str>) {
+    let (mut v, mut asked, mut agent) = (vec![], None, None);
+    let mut asks = vec![];
+    let fail = |v: &mut Vec<(u64, Option<&str>)>, why| {
+        if let Some(s) = v.last_mut().filter(|s| s.1.is_none()) {
+            s.1 = Some(why);
+        }
+    };
+    for e in events.iter().filter(|e| e.fleet == fleet && e.issue == Some(issue)) {
+        let mine = e.str("role") == Some(role);
+        match e.kind.as_str() {
+            "spawn" if mine => {
+                agent = e.str("agent");
+                v.push((
+                    e.ts,
+                    (e.data.get("confirmed") == Some(&json!(false))).then_some("prompt never landed"),
+                ));
+            }
+            "pushed" => (v, asked) = (vec![], None),
+            "turn-end" if mine => (v, asked) = (vec![], None),
+            "lane-dead" if agent.is_some_and(|a| e.str("key").is_some_and(|k| k.ends_with(&format!(":{a}")))) => {
+                fail(&mut v, "lane died");
+            }
+            "supersede" | "lane-killed" if mine => fail(&mut v, "killed"),
+            "needs-decision" if e.str("respawn_loop") == Some(role) => {
+                asks.extend(e.str("id"));
+                asked = e.str("id");
+            }
+            "decision" if e.str("choice") == Some("try again") && asks.contains(&e.str("id").unwrap_or_default()) => {
+                (v, asked) = (vec![], None);
+            }
+            _ => {}
+        }
+    }
+    (v, asked)
+}
+
+/// #779: `RESPAWN_LOOP` after `[limits] respawn_max` failed starts of `role` within `respawn_window_minutes`, naming
+/// them; the first refusal files one owner ask, [try again] (counts afresh) or [park]. Before any wip snapshot.
+fn respawn_guard(ctx: &Ctx, cfg: &Config, events: &[Event], (fleet, issue, role): (&str, u64, &str)) -> Result<()> {
+    let l = &cfg.limits;
+    let (v, asked) = starts(events, fleet, issue, role);
+    let since = ctx.now.saturating_sub(l.respawn_window_minutes * 60);
+    let failed: Vec<String> = (v.iter())
+        .filter(|s| s.0 >= since)
+        .filter_map(|s| Some(format!("{} ago: {}", crate::events::age(ctx.now - s.0), s.1?)))
+        .collect();
+    if failed.len() < l.respawn_max as usize {
+        return Ok(());
+    }
+    let why = format!(
+        "{} failed {role} starts within {} min ({}); answer the owner ask to try again or park",
+        failed.len(),
+        l.respawn_window_minutes,
+        failed.join("; ")
+    );
+    if asked.is_none() {
+        let id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
+        let q = format!("#{issue}'s {role} lane keeps failing at start: {}", failed.join("; "));
+        let d = json!({"id": id, "question": q, "options": ["try again", "park"], "recommend": null, "agent": null,
+            "kind": "owner", "respawn_loop": role});
+        emit(
+            &ctx.state,
+            cfg,
+            Event::new(ctx.now, fleet, Some(issue), "needs-decision", d),
+        )?;
+    }
+    refused("RESPAWN_LOOP", why)
 }
 
 /// #353: a summary of lane `prev` for its successor `p`, one whitespace-collapsed line of at most 240 chars per item:
@@ -1471,7 +1831,7 @@ fn handover(
     let after = |t: &Value| at.as_ref().is_none_or(|s| t.as_str().is_none_or(|t| t > s.as_str()));
     let (wt, h) = (
         p.worktree.to_string_lossy(),
-        harness::get(prev.str("harness").unwrap_or_default()),
+        providers::get(prev.str("harness").unwrap_or_default()),
     );
     let (mut prompts, mut replies, mut cmds) = (vec![], vec![], vec![]);
     let jsonl = h
@@ -1609,7 +1969,7 @@ fn lane_data(p: &Plan, pane: &str, ws: &str) -> Value {
         "pane": pane, "workspace": ws, "worktree": p.worktree, "branch": p.branch, "account": p.account.as_ref().map(|a| &a.0), "port": p.port})
 }
 
-/// `herdsman adopt`: log the lane running in `pane` and name its agent as planned; nothing is started. `extra` joins the
+/// `drover adopt`: log the lane running in `pane` and name its agent as planned; nothing is started. `extra` joins the
 /// `spawn` data (#376: an orphan's host, machine, worktree, `since`).
 pub fn adopt(
     ctx: &Ctx,
@@ -1686,7 +2046,9 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let (Some(pane), m, name) = (a["pane_id"].as_str(), a["machine"].as_str(), a["name"].as_str()) else {
             continue;
         };
-        let at = |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m || e.str("agent") == name;
+        let named = |e: &&Event| name.is_none_or(str::is_empty) || e.str("agent") == name;
+        let at =
+            |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m && named(e) || e.str("agent") == name;
         // #393: a `spawn-started` younger than a spawn can take is a spawn still running, not an orphan.
         let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < SPAWN_SECS;
         // #500: one adoption per pane, ever: a pane adopted once is never an orphan again.
@@ -1725,8 +2087,18 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
             .flatten()
             .and_then(head)
             .filter(|(x, h): &(String, String)| !x.eq_ignore_ascii_case(h));
+        let due = s
+            .stage_rounds
+            .get(f.flow().stage_of(&role))
+            .copied()
+            .unwrap_or_default()
+            + 1;
+        let lane = name.filter(|n| !n.is_empty()).or(wt.as_deref());
+        let round = lane.and_then(|l| l.rsplit_once("-r")?.1.parse::<u32>().ok());
+        let round = round.filter(|k| f.family(&role) == "rev" && *k != due);
         let stale = match old {
             _ if s.done() => Some(format!("{fleet}#{n} is {}", s.state)),
+            _ if let Some(k) = round => Some(format!("round r{k}, r{due} is due")),
             Some((x, h)) => Some(format!("verdict for {x:.7}, head is {h:.7}")),
             None => None,
         };
@@ -1734,8 +2106,8 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let res = if let Some(why) = stale {
             (|| {
                 if let Some(w) = wt.as_deref().filter(|w| dirty(&on, Path::new(w)).is_some()) {
-                    let b = format!("wip/{fleet}-{role}-{n}-{}", ctx.now);
-                    crate::check::save_wip(&on, w, &b, "wip: stale orphan lane, saved by herdsman")?;
+                    let b = crate::check::wip_branch(ctx, &on, &format!("{fleet}-{role}-{n}"));
+                    crate::check::save_wip(&on, w, &b, "wip: stale orphan lane, saved by drover")?;
                 }
                 herdr::close(&on, pane)?;
                 writeln!(out, "closed stale orphan {agent} ({why})")?;

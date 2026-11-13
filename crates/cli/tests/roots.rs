@@ -3,9 +3,9 @@
 //! idle `~/.herdr/worktrees` worktree into `<root>/<repo>/<lane>`. git is real; herdr, gh and the host probes are fakes.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Real, Runner};
+use drover::config::Config;
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Real, Runner};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
@@ -48,7 +48,7 @@ fn git(dir: &Path, a: &[&str]) -> String {
 
 /// An origin with `staging` and a pushed `issue-12`, its clone (the fleet's `local`), and the two roots.
 struct Repo {
-    c: herdsman::Ctx,
+    c: drover::Ctx,
     origin: PathBuf,
     local: PathBuf,
     nvme: PathBuf,
@@ -127,7 +127,7 @@ fn working_on_nvme(r: &Repo) -> PathBuf {
     wt
 }
 
-fn spawns(c: &herdsman::Ctx) -> Vec<Event> {
+fn spawns(c: &drover::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .into_iter()
@@ -139,7 +139,7 @@ fn spawns(c: &herdsman::Ctx) -> Vec<Event> {
 fn a_new_lane_lands_in_the_first_mounted_root_and_skips_a_missing_one() {
     let r = repo("roots-place");
     let f = fake(&r.internal);
-    let worktree = |c: &herdsman::Ctx| {
+    let worktree = |c: &drover::Ctx| {
         let (code, out) = run(c, &f, &["spawn", "sendmeter", "12", "impl", "--dry-run", "--json"]);
         assert_eq!(code, 0, "{out}");
         serde_json::from_str::<serde_json::Value>(&out).unwrap()["worktree"].clone()
@@ -158,7 +158,9 @@ fn eject_saves_and_restarts_a_live_lane_on_the_next_root_then_reports_safe() {
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     assert!(out.contains(&format!("safe to unplug {}", r.nvme.display())), "{out}");
     // Saved: the uncommitted file is on `wip/<agent>-<stamp>` at origin, and the worktree is off the drive.
-    let wip = format!("wip/{AGENT}-1000000");
+    let saved = out.lines().find_map(|l| l.strip_prefix("saved "));
+    let wip = saved.and_then(|l| l.rsplit(" to ").next()).unwrap();
+    assert!(wip.starts_with(&format!("wip/{AGENT}-1000000-")), "{out}");
     assert!(git(&r.origin, &["show", &format!("{wip}:wip.txt")]).contains("half done"));
     assert!(
         !old.exists()
@@ -193,7 +195,7 @@ fn a_pulled_root_is_noted_once_and_its_lane_restarts_on_the_next_root_from_its_p
     let cfg = Config::load(&r.c.config).unwrap();
     let watch = || {
         let mut out = vec![];
-        herdsman::roots::watch(&r.c, &cfg, &Git(&f), &mut out).unwrap();
+        drover::roots::watch(&r.c, &cfg, &Git(&f), &mut out).unwrap();
         String::from_utf8(out).unwrap()
     };
     let out = watch();
@@ -245,7 +247,7 @@ fn migrate_moves_an_idle_worktree_into_the_new_layout() {
             "staging",
         ],
     );
-    let cache = r.c.home.join(".cache/herdsman/target/sendmeter");
+    let cache = r.c.home.join(".cache/drover/target/sendmeter");
     std::fs::create_dir_all(&cache).unwrap();
     let f = Fake::default().reply(
         "herdr agent list",
@@ -279,8 +281,8 @@ fn migrate_moves_an_idle_worktree_into_the_new_layout() {
 }
 
 /// Amendment A: a new lane's build folder `<root>/.build/<agent>` is a clone of its fleet's newest one on that root
-/// (another fleet's never), the files `.herdsman/worktree-include` lists come from the main checkout, and the lane's
-/// unsaved work shows in `herdsman status` and the Lanes tab's rows.
+/// (another fleet's never), the files `.drover/worktree-include` lists come from the main checkout, and the lane's
+/// unsaved work shows in `drover status` and the Lanes tab's rows.
 #[test]
 fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_files() {
     let r = repo("roots-warm");
@@ -294,12 +296,12 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         std::fs::write(b.join(d).join("release").join(f), f).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1100)); // mtimes in seconds: each newer
     }
-    std::fs::write(r.local.join(".herdsman-ignored.env"), "PORT=1\n").unwrap();
-    std::fs::write(r.local.join(".git/info/exclude"), ".herdsman-ignored.env\n").unwrap();
-    std::fs::create_dir_all(r.local.join(".herdsman")).unwrap();
+    std::fs::write(r.local.join(".drover-ignored.env"), "PORT=1\n").unwrap();
+    std::fs::write(r.local.join(".git/info/exclude"), ".drover-ignored.env\n").unwrap();
+    std::fs::create_dir_all(r.local.join(".drover")).unwrap();
     std::fs::write(
-        r.local.join(".herdsman/worktree-include"),
-        "# setup\n.herdsman-ignored.env\n../escape\nmissing\n",
+        r.local.join(".drover/worktree-include"),
+        "# setup\n.drover-ignored.env\n../escape\nmissing\n",
     )
     .unwrap();
     let f = spawnable(Fake::default().reply("herdr agent list", NO_AGENTS));
@@ -326,7 +328,7 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     drop(calls);
     let wt = r.nvme.join("sendmeter/issue-12");
     assert_eq!(
-        std::fs::read_to_string(wt.join(".herdsman-ignored.env")).unwrap(),
+        std::fs::read_to_string(wt.join(".drover-ignored.env")).unwrap(),
         "PORT=1\n"
     );
     // Unsaved work: one new file, one local commit.
@@ -339,8 +341,8 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     let cfg = Config::load(&r.c.config).unwrap();
     let a: serde_json::Value =
         serde_json::from_str(&agents(&[(AGENT, "working", &wt.to_string_lossy(), "w9:p1")])).unwrap();
-    let st = herdsman::events::states(&r.c.state).unwrap();
-    let ls = herdsman::lanes::join(
+    let st = drover::events::states(&r.c.state).unwrap();
+    let ls = drover::lanes::join(
         &cfg,
         &Git(&f),
         &r.c.worktrees,
@@ -352,7 +354,7 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     let l = ls.iter().find(|l| l.name == AGENT).unwrap();
     let u = l.unsaved(&Git(&f));
     assert_eq!(
-        (u, herdsman::spawn::unsaved_text(u).as_deref()),
+        (u, drover::spawn::unsaved_text(u).as_deref()),
         (Some((1, 1)), Some("+1 ⇡1"))
     );
 }
@@ -374,4 +376,110 @@ fn reflinks(d: &std::path::Path) -> bool {
         .is_ok_and(|s| s.success());
     let _ = (std::fs::remove_file(&src), std::fs::remove_file(&dst));
     ok
+}
+
+/// #790: a root gone under a live lane: the next drive pass restarts the lane on the other root at its pushed head,
+/// once, with one `root-moved` naming both roots; `waiting` no longer says "root gone".
+#[test]
+fn a_drive_pass_restarts_a_lane_whose_root_went_away_on_the_next_root_once() {
+    let r = repo("roots-drive");
+    working_on_nvme(&r);
+    std::fs::remove_dir_all(&r.nvme).unwrap(); // force-unmounted
+    let f = fake(&r.internal);
+    let (code, out) = run(&r.c, &Git(&f), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let sp = spawns(&r.c);
+    assert_eq!(
+        (sp.len(), sp.last().unwrap().str("root")),
+        (2, Some(&*r.internal.to_string_lossy())),
+        "{out}"
+    );
+    let new = r.internal.join("sendmeter/issue-12");
+    assert_eq!(
+        git(&new, &["rev-parse", "HEAD"]),
+        git(&r.origin, &["rev-parse", "issue-12"])
+    );
+    // The next pass: nothing new.
+    let (code, out) = run(&r.c, &Git(&f), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(spawns(&r.c).len(), 2, "{out}");
+    let ev = read(&r.c.state).unwrap();
+    let moved: Vec<&Event> = ev.iter().filter(|e| e.kind == "root-moved").collect();
+    assert_eq!(moved.len(), 1, "{moved:?}");
+    assert_eq!(moved[0].str("root"), Some(&*r.nvme.to_string_lossy()));
+    assert_eq!(moved[0].str("to"), Some(&*r.internal.to_string_lossy()));
+    let (code, out) = run(&r.c, &Git(&f), &["waiting"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("sendmeter #12") && !out.contains("root gone"), "{out}");
+}
+
+/// #790: a restart that fails (here gh and herdr answer nothing) logs no move and is tried again on the next pass.
+#[test]
+fn a_failed_restart_off_a_gone_root_is_retried_on_the_next_drive_pass() {
+    let r = repo("roots-retry");
+    working_on_nvme(&r);
+    std::fs::remove_dir_all(&r.nvme).unwrap();
+    let down = Fake::default().reply("herdr agent list", NO_AGENTS); // nothing else answers: the start fails
+    let (code, out) = run(&r.c, &Git(&down), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("{AGENT}: restart failed")), "{out}");
+    let moved = |c: &drover::Ctx| {
+        read(&c.state)
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "root-moved")
+            .count()
+    };
+    assert_eq!((spawns(&r.c).len(), moved(&r.c)), (1, 0), "{out}");
+    let (code, out) = run(&r.c, &Git(&fake(&r.internal)), &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!((spawns(&r.c).len(), moved(&r.c)), (2, 1), "{out}");
+}
+
+#[test]
+fn a_second_rev_round_reuses_the_first_rounds_build_folder_and_only_the_first_clones() {
+    let r = repo("roots-reuse");
+    let b = r.nvme.join(".build");
+    std::fs::create_dir_all(b.join("sendmeter-impl-12/release")).unwrap();
+    std::fs::write(b.join("sendmeter-impl-12/release/warm"), "w").unwrap();
+    git(&r.local, &["branch", "-q", "rev-12-r1", "origin/issue-12"]);
+    git(&r.local, &["branch", "-q", "rev-12-r2", "origin/issue-12"]);
+    let f = spawnable(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let (code, out) = run(&r.c, &Git(&f), &["spawn", "sendmeter", "12", "rev"]);
+    assert_eq!(code, 0, "{out}");
+    let cp = |f: &Fake| {
+        f.calls
+            .borrow()
+            .iter()
+            .filter(|c| c.starts_with("git -cR") || c.starts_with("git -R"))
+            .count()
+    };
+    assert_eq!(cp(&f), 1, "the first round clones: {:?}", f.calls.borrow());
+    let ev = read(&r.c.state).unwrap();
+    assert!(ev.iter().any(|e| e.kind == "build-cloned") && !ev.iter().any(|e| e.kind == "build-reused"));
+
+    let r1 = b.join("sendmeter-rev-12-r1");
+    std::fs::create_dir_all(r1.join("release")).unwrap();
+    std::fs::write(r1.join("release/built"), "r1").unwrap();
+    let verdict = json!({"verdict": "FAIL", "sha": "a".repeat(40), "body": "FAIL"});
+    append(
+        &r.c.state,
+        &Event::new(r.c.now, "sendmeter", Some(12), "verdict", verdict),
+    )
+    .unwrap();
+    let f = spawnable(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let (code, out) = run(&r.c, &Git(&f), &["spawn", "sendmeter", "12", "rev"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(cp(&f), 0, "the second round copies nothing: {:?}", f.calls.borrow());
+    let r2 = b.join("sendmeter-rev-12-r2");
+    assert_eq!(std::fs::read_to_string(r2.join("release/built")).unwrap(), "r1");
+    assert!(!r1.exists());
+    let ev = read(&r.c.state).unwrap();
+    let e = ev
+        .iter()
+        .find(|e| e.kind == "build-reused")
+        .expect("build-reused logged");
+    assert_eq!(e.str("from"), Some("sendmeter-rev-12-r1"));
+    assert_eq!(e.data["dirs"], json!([r2.display().to_string()]));
+    assert_eq!(ev.iter().filter(|e| e.kind == "build-cloned").count(), 1);
 }

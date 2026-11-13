@@ -1,4 +1,4 @@
-# `herdsman service` (#345, Phase C)
+# `drover service` (#345, Phase C)
 
 ADR, decided by the owner in #345's q355 (2026-11-05): "Build the full service now … Approved: the tokio dependency
 and the cap raise … Shape: API-first." This lifts the "no daemon / no async" rule for one process and one
@@ -6,13 +6,13 @@ dependency, `tokio`, in its own crate (`crates/service`); every other crate stay
 
 ## Shape
 
-- **One process**, `herdsman service --api <addr> [--board <addr>]`, kept alive by launchd (`KeepAlive`) or systemd
+- **One process**, `drover service --api <addr> [--board <addr>]`, kept alive by launchd (`KeepAlive`) or systemd
   (`Restart=always`). A second one refuses to start. It logs `service-started`; a stall logs `service-stalled`, which
   every notifier gets, and the process exits so the supervisor starts it again.
 - **Local socket** `service.sock` beside `state.db` (mode 0600). A kick (a lane's push, stop or ask, a verdict, an
   answer, a board tap) goes there and is driven in the service's process at once, not as a detached `kick --now`.
   With no service listening, every command goes on in today's direct mode: nothing is ever stuck on it.
-- **GitHub** is polled by the fast step (`drive --fast`) every 15 s inside the service; the `dev.herdsman.fast` job
+- **GitHub** is polled by the fast step (`drive --fast`) every 15 s inside the service; the `dev.drover.fast` job
   is no longer needed while it runs (`timer` doesn't reinstall it, `doctor` shows it "by the service"). The slow
   `tick` stays as the safety net. #530: each fleet's open PRs, check rollups and labels come in one GraphQL query; a
   fast step first sends three conditional REST reads (open PRs latest-updated first, Actions runs, integration's
@@ -37,7 +37,7 @@ dependency, `tokio`, in its own crate (`crates/service`); every other crate stay
 ## Remote lanes over HTTP
 
 With `[service] url = "http://<main host on the tailnet>:7778"` in fleet.toml, a lane spawned on another host gets
-`HERDSMAN_SERVICE` (that url) and `HERDSMAN_TOKEN` instead of #389's outbox (`HERDSMAN_OUTBOX`), so its commands
+`DROVER_SERVICE` (that url) and `DROVER_TOKEN` instead of #389's outbox (`DROVER_OUTBOX`), so its commands
 arrive at once. Its `ask`, `answer`, `verdict`, `done`, `kick` and its own events go to `/api/v1/cmd` with curl; a
 `--file` travels as its text.
 The main host keeps controlling other hosts over ssh (spawn, read, kill).
@@ -69,17 +69,17 @@ next service starts over the dead one's socket, the next pass sweeps the marker 
 
 ## Install
 
-`herdsman service --install [--api <addr>] [--board <addr>]` writes the unit (`dev.herdsman.service`) and prints the
+`drover service --install [--api <addr>] [--board <addr>]` writes the unit (`dev.drover.service`) and prints the
 commands that swap it in; it loads nothing itself. The API listens on `127.0.0.1:7778` by default; for remote lanes give
 `--api` the main host's tailnet address (the one `[service] url` names). On macOS, for example:
 
 ```
-launchctl bootout gui/$(id -u)/dev.herdsman.fast
-launchctl bootout gui/$(id -u)/dev.herdsman.serve      # with --board only
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.herdsman.service.plist
+launchctl bootout gui/$(id -u)/dev.drover.fast
+launchctl bootout gui/$(id -u)/dev.drover.serve      # with --board only
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.drover.service.plist
 ```
 
-To go back to direct mode, boot the service out and run `herdsman timer install`.
+To go back to direct mode, boot the service out and run `drover timer install`.
 
 ## Line cap
 

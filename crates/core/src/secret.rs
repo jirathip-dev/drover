@@ -1,20 +1,18 @@
-//! #387: secrets as `herdsman/<fleet>/<NAME>`; #441: only in the main host's OS store (`Runner::secret`, the keyring crate).
-//! The owner saves one from a thread's masked card (paired devices only) or imports `tokens.env`; spawn delivers a
-//! lane's `secret:<NAME>` env and account token to its host (`spawn::deliver`). The value never reaches the event
-//! log, the chat, a command line or a lane's output.
+//! #707: drover keeps no secret store. A secret is a file only its owner reads (0600, refused if looser): a lane's
+//! `secret:<NAME>` env is `<config>/secrets/<NAME>`, the webhook secret, a provider key or an account's `token-file:`
+//! is the file its config line names. The owner places one by hand or from a thread's masked card (paired devices
+//! only); spawn delivers a lane's to its host (`spawn::deliver`). The value never reaches the event log, the chat, a
+//! command line or a lane's output.
 use crate::config::Config;
 use crate::events::{emit, read, Event};
 use crate::gate::refused;
 use crate::runner::Runner;
-use crate::{conductor, Ctx};
-use anyhow::{bail, Context, Result};
+use crate::{orchestrator, Ctx};
+use anyhow::{Context, Result};
 use serde_json::json;
 use std::io::Write;
-
-/// The keychain service of `fleet`'s (or `all`'s) secret `name`.
-pub fn service(fleet: &str, name: &str) -> String {
-    format!("herdsman/{fleet}/{name}")
-}
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 
 /// A secret's name: `A-Z`, `0-9`, `_`.
 pub fn name_ok(name: &str) -> bool {
@@ -24,39 +22,28 @@ pub fn name_ok(name: &str) -> bool {
             .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == b'_')
 }
 
-/// `fleet`'s secret `name`, else the `all` one; None when neither is set.
-pub fn lookup(r: &dyn Runner, fleet: &str, name: &str) -> Result<Option<String>> {
-    match r.secret(&service(fleet, name))? {
-        None if fleet != "all" => r.secret(&service("all", name)),
-        v => Ok(v),
-    }
+/// `<config dir>/secrets/<name>`, where a `secret:<name>` env is read from.
+pub fn path(ctx: &Ctx, name: &str) -> PathBuf {
+    ctx.config.with_file_name("secrets").join(name)
 }
 
-/// #441: a main host with no usable OS store refuses at startup when `cfg` names a secret (an `[accounts]` token or a
-/// `secret:` env); there is no plain-file fallback.
-pub fn probe(r: &dyn Runner, cfg: &Config) -> Result<()> {
-    let env = cfg.fleet.values().flat_map(|f| f.env.values());
-    if cfg.accounts.names.is_empty() && !env.into_iter().any(|v| v.starts_with("secret:")) {
-        return Ok(());
+/// The secret in file `p`, trimmed (None: no such file); refused `SECRET_FILE_OPEN` when group or others may read it.
+pub fn file(p: &Path) -> Result<Option<String>> {
+    let Ok(m) = std::fs::metadata(p) else {
+        return Ok(None);
+    };
+    if m.permissions().mode() & 0o077 != 0 {
+        let fix = format!("chmod 600 {}", p.display());
+        return refused(
+            "SECRET_FILE_OPEN",
+            format!("{} is readable by others → {fix}", p.display()),
+        );
     }
-    match r.secret(&service("all", "HERDSMAN_PROBE")) {
-        Ok(_) => Ok(()),
-        Err(e) => refused(
-            "NO_STORE",
-            format!("this host has no usable secret store ({e:#}); herdsman keeps secrets nowhere else"),
-        ),
-    }
+    let v = std::fs::read_to_string(p).with_context(|| format!("secret file {}", p.display()))?;
+    Ok(Some(v.trim().to_string()).filter(|v| !v.is_empty()))
 }
 
-/// The keychain item's password (`all`'s `TELEGRAM_BOT_TOKEN`, …), for herdsman's own use.
-pub fn get(r: &dyn Runner, fleet: &str, name: &str) -> Result<String> {
-    let svc = service(fleet, name);
-    r.secret(&svc)?.with_context(|| {
-        format!("no keychain item {svc}: `herdsman secret request <thread> {name}` asks the owner for it")
-    })
-}
-
-/// `herdsman secret request <thread> <NAME> --why`: a masked-input card in the thread.
+/// `drover secret request <thread> <NAME> --why`: a masked-input card in the thread.
 pub fn request(ctx: &Ctx, cfg: &Config, thread: &str, name: &str, why: &str) -> Result<()> {
     if !name_ok(name) || why.trim().is_empty() {
         return refused(
@@ -64,7 +51,7 @@ pub fn request(ctx: &Ctx, cfg: &Config, thread: &str, name: &str, why: &str) -> 
             "a secret's name is A-Z, 0-9 and _, and --why says what it is for",
         );
     }
-    let t = conductor::find(&read(&ctx.state)?, thread)?.clone();
+    let t = orchestrator::find(&read(&ctx.state)?, thread)?.clone();
     let d = json!({"thread": thread, "name": name, "why": why});
     emit(
         &ctx.state,
@@ -75,11 +62,14 @@ pub fn request(ctx: &Ctx, cfg: &Config, thread: &str, name: &str, why: &str) -> 
 
 /// Thread `id`'s open request for `name` (no `secret-set` or `secret-dismissed` after it).
 pub fn open<'a>(events: &'a [Event], id: &str, name: &str) -> Option<&'a Event> {
-    let mine = |e: &&Event| e.kind.starts_with("secret-") && e.str("thread") == Some(id) && e.str("name") == Some(name);
-    events.iter().rfind(mine).filter(|e| e.kind == "secret-request")
+    let mine = |e: &&Event| e.kind.starts_with("secret-") && e.str("name") == Some(name);
+    crate::orchestrator::of(events, id)
+        .rfind(mine)
+        .filter(|e| e.kind == "secret-request")
 }
 
-/// A card's [save] (`value`, from a paired owner device) or [dismiss] (None); the line the thread records.
+/// A card's [save] (`value`, from a paired owner device: written 0600 to `path`) or [dismiss] (None); the line the
+/// thread records.
 pub fn settle(
     ctx: &Ctx,
     cfg: &Config,
@@ -91,18 +81,12 @@ pub fn settle(
     let Some(req) = open(&events, id, name) else {
         return refused("NO_SUCH_REQUEST", format!("{id} has no open request for secret {name}"));
     };
-    let (svc, d) = (
-        service(&req.fleet, name),
-        json!({"thread": id, "name": name, "by": "owner"}),
-    );
+    let d = json!({"thread": id, "name": name, "by": "owner"});
     let kind = if let Some(v) = value {
         if v.is_empty() || v.len() > 8192 {
             return refused("BAD_VALUE", "a secret is 1 to 8,192 bytes");
         }
-        r.set_secret(&svc, Some(v))?;
-        if r.secret(&svc)?.as_deref() != Some(v) {
-            bail!("the keychain did not take {svc}");
-        }
+        crate::hosts::On::new(r, None).write_private(&path(ctx, name), v)?;
         "secret-set"
     } else {
         "secret-dismissed"
@@ -113,11 +97,11 @@ pub fn settle(
         format!("secret {name} set ✓ (by owner)"),
     ];
     let line = &line[usize::from(value.is_some())];
-    let _ = conductor::say(ctx, cfg, r, (id, line, &[]), ("system", false)); // logged even if the conductor can't wake
+    let _ = orchestrator::say(ctx, cfg, r, (id, line, &[]), ("system", false));
     Ok(line.clone())
 }
 
-/// `herdsman secret ls` (owner only: the lane hook refuses it in a lane): `<fleet> <NAME>` of each secret set and not removed since.
+/// `drover secret ls` (owner only: the lane hook refuses it in a lane): `<fleet> <NAME>` of each secret set and not removed since.
 pub fn ls(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
     let mut set = std::collections::BTreeSet::new();
     for e in read(&ctx.state)?
@@ -135,9 +119,15 @@ pub fn ls(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
-/// `herdsman secret rm <fleet|all> <NAME>` (owner only): delete the keychain item; logs `secret-rm`.
-pub fn rm(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, name: &str) -> Result<()> {
-    r.set_secret(&service(fleet, name), None)?;
+/// `drover secret rm <fleet|all> <NAME>` (owner only): delete `<config>/secrets/<NAME>`; logs `secret-rm`.
+pub fn rm(ctx: &Ctx, cfg: &Config, fleet: &str, name: &str) -> Result<()> {
+    if !name_ok(name) {
+        return refused("BAD_VALUE", "a secret's name is A-Z, 0-9 and _");
+    }
+    match std::fs::remove_file(path(ctx, name)) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e)?,
+        _ => {}
+    }
     emit(
         &ctx.state,
         cfg,
@@ -145,34 +135,20 @@ pub fn rm(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, name: &str) -> R
     )
 }
 
-/// #441 `herdsman accounts import [FILE]` (owner only): each `[accounts]` token in the old `tokens.env` copied into the
-/// store as `all`'s secret of its variable name, read back and checked by sha256; the file is left for the owner.
-pub fn import(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, file: &str) -> Result<()> {
-    use sha2::{Digest, Sha256};
-    let path = crate::config::expand(file);
-    let text = std::fs::read_to_string(&path).with_context(|| format!("cannot read {}", path.display()))?;
-    let hash = |v: &str| Sha256::digest(v.as_bytes());
-    for (account, var) in &cfg.accounts.names {
-        let Some(v) = crate::usage::env_value(&text, var).filter(|v| !v.is_empty()) else {
-            writeln!(out, "{account:<8} ✗ {var} not in {}", path.display())?;
-            continue;
-        };
-        let svc = service("all", var);
-        r.set_secret(&svc, Some(&v))?;
-        let back = r.secret(&svc)?.unwrap_or_default();
-        anyhow::ensure!(
-            hash(&back) == hash(&v),
-            "{svc}: the store's copy does not match {}",
-            path.display()
-        );
-        let d = json!({"name": var, "account": account, "by": "owner"});
-        emit(&ctx.state, cfg, Event::new(ctx.now, "all", None, "secret-set", d))?;
-        writeln!(out, "{account:<8} ✓ {svc} (sha256 matches)")?;
-    }
+/// #707 `drover migrate`: the old store's Keychain items are left alone; the commands that delete them (each
+/// `secret-set` the log `state` names, and a search for the rest), for the owner to run.
+pub fn retired(state: &Path, out: &mut dyn Write) -> Result<()> {
+    let set = read(state).unwrap_or_default();
+    let svc: std::collections::BTreeSet<String> = (set.iter().filter(|e| e.kind == "secret-set"))
+        .map(|e| format!("herdsman/{}/{}", e.fleet, e.str("name").unwrap_or_default()))
+        .collect();
     writeln!(
         out,
-        "lanes now read the store, never {}; delete it when you are ready",
-        path.display()
+        "drover keeps no secret store now (#707); delete its old Keychain items yourself:"
     )?;
+    for s in svc {
+        writeln!(out, "  security delete-generic-password -a herdsman -s {s}")?;
+    }
+    writeln!(out, "  (list any others: security dump-keychain | grep '\"herdsman/')")?;
     Ok(())
 }

@@ -1,0 +1,25 @@
+{
+  "response": {
+    "repo": "sendmeter",
+    "threads": [
+      {
+        "archived": false,
+        "awake": true,
+        "id": "t1",
+        "last": {
+          "line": "conductor: Hand off \"Facets\" to which sendmeter thread? Nothing is delivered until you tap one.",
+          "ts": 1000000
+        },
+        "newest": true,
+        "title": "Let's talk about #30",
+        "unread": true
+      }
+    ]
+  },
+  "route": "GET /api/v1/repo/<fleet>/threads",
+  "schema": {
+    "repo": "string",
+    "threads": []
+  },
+  "type": "RepoThreads"
+}

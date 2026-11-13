@@ -2,9 +2,9 @@
 //! Real temp git repos (origin, a seed clone that pushes, the fleet's `local` clone); everything else is the fake.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, fold, read, Event};
-use herdsman::runner::{Out, Real, Runner};
+use drover::config::Config;
+use drover::events::{append, fold, read, Event};
+use drover::runner::{Out, Real, Runner};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
@@ -49,7 +49,7 @@ const A: &str = "1\n2\n3\n4\n5\n";
 
 /// origin with `staging` and `issue-1` (a.txt line 1), `issue-2` (a.txt line 1 too: conflicts with 1),
 /// `issue-3` (b.txt: clean); returns (dir, seed, ctx, fleet config).
-fn repos(name: &str) -> (PathBuf, PathBuf, herdsman::Ctx, Config) {
+fn repos(name: &str) -> (PathBuf, PathBuf, drover::Ctx, Config) {
     let d = tmpdir(name);
     let (origin, seed, local) = (d.join("origin.git"), d.join("seed"), d.join("local"));
     git(&d, &["init", "-q", "--bare", "-b", "staging", origin.to_str().unwrap()]);
@@ -81,7 +81,7 @@ fn head(seed: &Path, branch: &str) -> String {
 }
 
 /// An impl lane for `n`, a PASS at its pushed head when `pass`, and its open PR #(10 + n) in the PR cache.
-fn lane(c: &herdsman::Ctx, seed: &Path, n: u64, pass: bool) {
+fn lane(c: &drover::Ctx, seed: &Path, n: u64, pass: bool) {
     let spawn = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "branch": format!("issue-{n}"), "pane": format!("p{n}")});
     append(&c.state, &Event::new(10, "sendmeter", Some(n), "spawn", spawn)).unwrap();
     if pass {
@@ -95,7 +95,7 @@ fn lane(c: &herdsman::Ctx, seed: &Path, n: u64, pass: bool) {
 }
 
 /// #285: integration's protection read (cached) as strict, so a behind ready PR is caught up.
-fn strict(c: &herdsman::Ctx) {
+fn strict(c: &drover::Ctx) {
     let p = c.state.with_file_name("cache").join("strict-sendmeter-0.json");
     std::fs::write(p, json!({"ts": c.now, "strict": true}).to_string()).unwrap();
 }
@@ -126,7 +126,7 @@ fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(Fake::default().reply("herdr", NO_AGENTS));
     let mut out = vec![];
-    herdsman::drive::auto_update(&c, &cfg, &r, &mut out, "sendmeter").unwrap();
+    drover::drive::auto_update(&c, &cfg, &r, &mut out, "sendmeter").unwrap();
     let to = head(&seed, "issue-3");
     let ev = read(&c.state).unwrap();
     let up = ev.iter().find(|e| e.kind == "auto-updated").expect("auto-updated");
@@ -250,12 +250,12 @@ fn an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass() {
     strict(&c);
     let (h1, from) = (head(&seed, "issue-1"), head(&seed, "issue-3"));
     commit(&seed, "c.txt", "c\n", "staging"); // #1's merge lands on staging
-    let st = |c: &herdsman::Ctx| {
+    let st = |c: &drover::Ctx| {
         fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)]
             .state
             .clone()
     };
-    let pass = |c: &herdsman::Ctx, pr3: &str| {
+    let pass = |c: &drover::Ctx, pr3: &str| {
         let r = Mixed(
             Fake::default()
                 .reply("gh pr view issue-1 ", &green_pr(1, &h1))
@@ -305,15 +305,12 @@ fn conflicting_auto_update_spawns_an_update_lane() {
     git(&seed, &["merge", "-q", "--ff-only", "origin/issue-2"]);
     git(&seed, &["push", "-q", "origin", "HEAD:staging"]);
     let r = Mixed(Fake::default());
-    herdsman::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
+    drover::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
     assert_eq!(head(&seed, "issue-1"), before, "nothing pushed");
     let ev = read(&c.state).unwrap();
     assert!(ev.iter().all(|e| e.kind != "auto-updated"));
     let d = ev.iter().find(|e| e.kind == "driven").expect("driven");
-    assert_eq!(
-        d.str("cmd"),
-        Some("herdsman spawn sendmeter 1 impl --supersede --update")
-    );
+    assert_eq!(d.str("cmd"), Some("drover spawn sendmeter 1 impl --supersede --update"));
 }
 
 #[test]
@@ -323,19 +320,19 @@ fn merge_tree_finds_the_pair_and_its_files_once() {
         lane(&c, &seed, n, false);
     }
     let r = Mixed(Fake::default());
-    let got = herdsman::overlap::preview(&c, &cfg, &r, "sendmeter", &read(&c.state).unwrap()).unwrap();
+    let got = drover::overlap::preview(&c, &cfg, &r, "sendmeter", &read(&c.state).unwrap()).unwrap();
     assert_eq!(got[&1], vec![(2, vec!["a.txt".to_string()])]);
     assert_eq!(got[&2], vec![(1, vec!["a.txt".to_string()])]);
     assert!(!got.contains_key(&3), "{got:?}");
     let ev = read(&c.state).unwrap();
     let p: Vec<_> = ev.iter().filter(|e| e.kind == "conflict-predicted").collect();
     assert_eq!((p.len(), p[0].issue, &p[0].data["other"]), (1, Some(2), &json!(1)));
-    let card = "may conflict with #1; keep going, herdsman updates you after it merges";
+    let card = "may conflict with #1; keep going, drover updates you after it merges";
     assert_eq!(p[0].str("reason"), Some(card), "#320");
     // Same heads: cached, no merge-tree run and no second event.
     let trees = r.0.count("git -C");
     let r2 = Mixed(Fake::default());
-    let again = herdsman::overlap::preview(&c, &cfg, &r2, "sendmeter", &read(&c.state).unwrap()).unwrap();
+    let again = drover::overlap::preview(&c, &cfg, &r2, "sendmeter", &read(&c.state).unwrap()).unwrap();
     assert_eq!(again, got);
     assert!(trees > 0 && !r2.0.calls.borrow().iter().any(|l| l.contains("merge-tree")));
     assert_eq!(
@@ -346,7 +343,7 @@ fn merge_tree_finds_the_pair_and_its_files_once() {
             .count(),
         1
     );
-    assert_eq!(herdsman::overlap::cached(&c, "sendmeter"), got);
+    assert_eq!(drover::overlap::cached(&c, "sendmeter"), got);
     let (_, st) = run(&c, &r2, &["status", "sendmeter", "--json"]);
     let rows: serde_json::Value = serde_json::from_str(&st).unwrap();
     assert_eq!(rows[0]["conflicts"], json!([[2, ["a.txt"]]]));
@@ -386,11 +383,11 @@ fn heads_up_reaches_a_working_lane_once() {
     lane(&c, &seed, 2, true);
     let r = Mixed(Fake::default().reply("herdr", ""));
     for _ in 0..2 {
-        herdsman::overlap::preview(&c, &cfg, &r, "sendmeter", &read(&c.state).unwrap()).unwrap();
+        drover::overlap::preview(&c, &cfg, &r, "sendmeter", &read(&c.state).unwrap()).unwrap();
     }
     let want =
         "herdr agent prompt sendmeter-impl-1 HEADS-UP: #2 is ready to merge and touches a.txt: your branch may conflict \
-                with #2; keep going, herdsman updates you after it merges.";
+                with #2; keep going, drover updates you after it merges.";
     assert_eq!(r.0.count(want), 1, "{:?}", r.0.calls.borrow());
     assert_eq!(
         r.0.count("herdr agent prompt sendmeter-impl-2"),
@@ -422,7 +419,7 @@ fn cap_check_reads_the_limit_from_config() {
         .skip_while(|l| !l.contains("line cap"))
         .take(2)
         .collect::<String>();
-    assert!(step.contains("herdsman cap-check --config ci/cap.toml"), "{step}");
+    assert!(step.contains("drover cap-check --config ci/cap.toml"), "{step}");
     assert!(
         !step.chars().any(|c| c.is_ascii_digit()),
         "ci.yml holds no cap number: {step}"
@@ -430,12 +427,12 @@ fn cap_check_reads_the_limit_from_config() {
 }
 
 /// #207: `n` in review, its reviewer spawned at `sha` and done (`PASS` in verdict.md, not recorded yet).
-fn reviewed(c: &herdsman::Ctx, n: u64, sha: &str) -> String {
+fn reviewed(c: &drover::Ctx, n: u64, sha: &str) -> String {
     reviewed_with(c, n, sha, "PASS\nall good\n")
 }
 
 /// #293: the same with verdict.md's `body` (a `Reviewed head:` line names the sha the reviewer checked out).
-fn reviewed_with(c: &herdsman::Ctx, n: u64, sha: &str, body: &str) -> String {
+fn reviewed_with(c: &drover::Ctx, n: u64, sha: &str, body: &str) -> String {
     let wt = c.worktrees.join(format!("rev-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     std::fs::write(wt.join("verdict.md"), body).unwrap();
@@ -493,7 +490,7 @@ fn a_branch_in_review_is_not_updated() {
     let live = agents(&[("sendmeter-rev-3-r1", "working", "/wt", "p9")]);
     for list in [live.as_str(), NO_AGENTS] {
         let r = Mixed(Fake::default().reply("herdr", list));
-        herdsman::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
+        drover::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
         assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
     }
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "auto-updated"));
@@ -589,7 +586,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     let from = head(&seed, "issue-3");
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(merger(3, &from).0.reply(PROTECTION, "false\n"));
-    herdsman::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
+    drover::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
     assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
     let ev = read(&c.state).unwrap();
     assert!(
@@ -604,7 +601,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
             .reply("gh pr view issue-3 ", &behind.to_string())
             .reply("herdr", NO_AGENTS),
     );
-    let ws = herdsman::waiting::scan(&c, &cfg, &w, &read(&c.state).unwrap(), &[], true);
+    let ws = drover::waiting::scan(&c, &cfg, &w, &read(&c.state).unwrap(), &[], true);
     let what = &ws.iter().find(|(s, _)| s.issue == 3).expect("#3").1.what;
     assert!(
         what.starts_with("PASS · behind staging (not required) · merging when CI green"),
@@ -640,7 +637,7 @@ fn strict_rule_auto_updates_and_puts_the_merge_label_back() {
             .reply("herdr", NO_AGENTS),
     );
     let mut out = vec![];
-    herdsman::drive::auto_update(&c, &cfg, &r, &mut out, "sendmeter").unwrap();
+    drover::drive::auto_update(&c, &cfg, &r, &mut out, "sendmeter").unwrap();
     let out = String::from_utf8_lossy(&out);
     let to = head(&seed, "issue-3");
     assert!(out.contains("auto-updated"), "{out}");
@@ -669,9 +666,9 @@ fn a_pure_merge_head_keeps_the_label_and_a_new_change_loses_it() {
     let m = head(&seed, "issue-3");
     let st = || fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)].clone();
     let r = Mixed(Fake::default().reply("gh pr edit", ""));
-    herdsman::gate::sync_label(&c, &cfg, &r, &mut vec![], &st(), &pr3(&m, &["merge-ready"])).unwrap();
+    drover::gate::sync_label(&c, &cfg, &r, &mut vec![], &st(), &pr3(&m, &["merge-ready"])).unwrap();
     assert!(!r.0.called("gh pr edit"), "kept: {:?}", r.0.calls.borrow());
-    herdsman::gate::sync_label(&c, &cfg, &r, &mut vec![], &st(), &pr3(&m, &[])).unwrap();
+    drover::gate::sync_label(&c, &cfg, &r, &mut vec![], &st(), &pr3(&m, &[])).unwrap();
     assert!(r
         .0
         .called("gh pr edit 13 -R jirathip-dev/sendmeter --add-label merge-ready"));
@@ -680,7 +677,7 @@ fn a_pure_merge_head_keeps_the_label_and_a_new_change_loses_it() {
     std::fs::remove_dir_all(d.join("w")).unwrap();
     merge_staging(&d, Some("sneaky\n"));
     let h = head(&seed, "issue-3");
-    herdsman::gate::sync_label(&c, &cfg, &r, &mut vec![], &st(), &pr3(&h, &["merge-ready"])).unwrap();
+    drover::gate::sync_label(&c, &cfg, &r, &mut vec![], &st(), &pr3(&h, &["merge-ready"])).unwrap();
     assert!(r
         .0
         .called("gh pr edit 13 -R jirathip-dev/sendmeter --remove-label merge-ready"));
@@ -838,7 +835,7 @@ fn check_emits_cap_near_once_per_integration_sha() {
         ev.into_iter().filter(|e| e.kind == "cap-near").collect::<Vec<_>>()
     };
     for _ in 0..2 {
-        herdsman::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
+        drover::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
     }
     let got = near();
     assert_eq!(got.len(), 1, "once per sha, not per pass: {got:?}");
@@ -850,7 +847,7 @@ fn check_emits_cap_near_once_per_integration_sha() {
     );
     let page = || {
         let f = Fake::default();
-        let s = herdsman::serve::Server::new(&c, &f, Some("127.0.0.1:7777".into()));
+        let s = drover::serve::Server::new(&c, &f, Some("127.0.0.1:7777".into()));
         queue_tab(&s, "127.0.0.1:7777", c.now) // #268: the board's Queue tab
     };
     assert!(
@@ -858,12 +855,12 @@ fn check_emits_cap_near_once_per_integration_sha() {
         "board banner"
     );
     let second = put(&[("c.txt", "c\n")]);
-    herdsman::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
+    drover::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
     let got = near();
     assert_eq!(got.len(), 2, "{got:?}");
     assert_eq!(got[1].str("key"), Some(second.as_str()));
     put(&[("ci/cap.toml", "[fleet.sendmeter]\nline_cap = 505\n")]);
-    herdsman::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
+    drover::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
     assert_eq!(near().len(), 2, "500 lines of headroom is not near");
     assert!(!page().contains("cap-near"), "no banner after the raise");
 }
@@ -880,7 +877,7 @@ fn cap_check_reports_web_lines_without_capping_them() {
     std::fs::write(d.join("web/src/board.css"), "a {}\n".repeat(9)).unwrap();
     let cap = |n: u32| {
         std::fs::write(d.join("cap.toml"), format!("[fleet.x]\nline_cap = {n}\n")).unwrap();
-        let o = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
+        let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
             .args(["cap-check", "--config", "cap.toml"])
             .current_dir(&d)
             .output()
@@ -901,7 +898,7 @@ fn cap_check_reports_web_lines_without_capping_them() {
     }
 }
 
-/// #668: `herdsman cap <fleet>` sums every open PR's `src/ net` (its body's, else its measured diff) onto integration's
+/// #668: `drover cap <fleet>` sums every open PR's `src/ net` (its body's, else its measured diff) onto integration's
 /// total, lists the queued issues with no PR and proposes one raise to the projected total plus margin.
 #[test]
 fn cap_prints_the_queue_wide_view() {
@@ -945,8 +942,148 @@ fn cap_prints_the_queue_wide_view() {
         "  #4 (PR #14): +3 (measured)",
         "queued, no PR: #9\n",
         "sum of open PRs: +1403; projected total 1413 / cap 1000, headroom -413",
-        "raise to 1513 in one conductor-filed issue (recommended) 2. trim",
+        "raise to 1513 in one orchestrator-filed issue (recommended) 2. trim",
     ] {
         assert!(out.contains(want), "{want:?} in\n{out}");
     }
+}
+
+/// git and `sh` run for real (a fleet's cap script), the rest is scripted.
+struct Shell(Mixed);
+
+impl Runner for Shell {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        if prog == "sh" {
+            return Real.run(prog, args);
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+/// #754: `repos` with `key` (a `premerge` or `cap_script` line) in the fleet, `script` as `scripts/line-cap.sh`,
+/// `src/a.rs` (10 lines) and `web/ts/b.ts` (5) on staging, and `issue-4` adding `web/ts/c.ts` (3) as open PR #14.
+fn script_repos(name: &str, key: &str, script: &str) -> (drover::Ctx, Shell) {
+    let (d, seed, _, _) = repos(name);
+    for dir in ["src", "web/ts", "scripts"] {
+        std::fs::create_dir_all(seed.join(dir)).unwrap();
+    }
+    std::fs::write(seed.join("scripts/line-cap.sh"), script).unwrap();
+    std::fs::write(seed.join("web/ts/b.ts"), "1\n2\n3\n4\n5\n").unwrap();
+    commit(&seed, "src/a.rs", "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n", "staging");
+    git(&seed, &["checkout", "-q", "-B", "issue-4", "staging"]);
+    commit(&seed, "web/ts/c.ts", "1\n2\n3\n", "issue-4");
+    git(&seed, &["checkout", "-q", "staging"]);
+    let config = CONFIG.replace("/tmp/does-not-matter/sendmeter", d.join("local").to_str().unwrap());
+    let c = ctx(
+        &d,
+        &config.replace(
+            "integration = \"staging\"",
+            &format!("integration = \"staging\"\n{key}"),
+        ),
+    );
+    let pr = json!({"number": 14, "state": "OPEN", "baseRefName": "staging", "body": "src/ net +0 (budget +0)"});
+    let r = Shell(Mixed(Fake::default().reply("gh pr view issue-4", &pr.to_string())));
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "4"]).0, 0);
+    (c, r)
+}
+
+/// #754: a repo whose `premerge` cap script also counts TypeScript: `drover cap` shows the script's total, each
+/// open PR's net by the script on its merge, and projects and raises from that count, not the built-in Rust one.
+#[test]
+fn cap_uses_the_fleets_own_cap_script() {
+    let script = "n=$(cat src/*.rs web/ts/*.ts | grep -c .)\necho \"line cap: $n / cap 100\"\n[ \"$n\" -le 100 ]\n";
+    let (c, r) = script_repos("cap-script", "premerge = [\"sh scripts/line-cap.sh\"]", script);
+    let (code, out) = run(&c, &r, &["cap", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    for want in [
+        "sendmeter: line cap 15 / cap 100 at staging",
+        "headroom 85\n",
+        "  #4 (PR #14): +3 (script)",
+        "sum of open PRs: +3; projected total 18 / cap 100, headroom 82",
+        "ask options: 1. raise line cap to 518 in one orchestrator-filed issue (recommended) 2. trim",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+}
+
+/// #754: a `cap_script` that prints two caps: each is shown, projected and raised with its own headroom.
+#[test]
+fn cap_shows_each_cap_a_script_prints() {
+    let script = "echo \"src: $(cat src/*.rs | grep -c .) / cap 100\"\necho \"apple_cap: $(cat web/ts/*.ts | grep -c .) / cap 6\"\n";
+    let (c, r) = script_repos("cap-two", "cap_script = \"sh scripts/line-cap.sh\"", script);
+    let (code, out) = run(&c, &r, &["cap", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    for want in [
+        "sendmeter: src 10 / cap 100 at staging",
+        "headroom 90\n",
+        "sendmeter: apple_cap 5 / cap 6 at staging",
+        "headroom 1\n",
+        "  #4 (PR #14): +0 src, +3 apple_cap (script)",
+        "src: sum of open PRs: +0; projected total 10 / cap 100, headroom 90",
+        "apple_cap: sum of open PRs: +3; projected total 8 / cap 6, headroom -2",
+        "ask options: 1. raise apple_cap to 508 in one orchestrator-filed issue (recommended) 2. trim",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+}
+
+#[test]
+fn cap_runs_the_repos_line_cap_script_when_the_fleet_names_none() {
+    let script = include_str!("support/cooee-line-cap.sh");
+    let (c, r) = script_repos("cap-repo-script", "", script);
+    let seed = c.worktrees.with_file_name("seed");
+    for dir in ["crates/core/src", "web/src", "ci"] {
+        std::fs::create_dir_all(seed.join(dir)).unwrap();
+    }
+    std::fs::write(
+        seed.join("ci/cap.toml"),
+        "[fleet.cooee]\nline_cap = 1000\napple_cap = 50\n",
+    )
+    .unwrap();
+    std::fs::write(seed.join("web/src/main.rs"), "fn main() {}\n").unwrap();
+    let lib = "fn a() {}\n\nfn b() {}\n#[cfg(test)]\nmod t {\n    fn x() {}\n}\n";
+    commit(&seed, "crates/core/src/lib.rs", lib, "staging");
+    let (code, out) = run(&c, &r, &["cap", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    for want in [
+        "sendmeter: non-test lines 8 / cap 1000 at staging",
+        "headroom 992\n",
+        "sendmeter: apple lines 0 / cap 50 at staging",
+        "counted by `sh scripts/line-cap.sh`",
+        "  #4 (PR #14): +3 non-test lines, +0 apple lines (script)",
+        "non-test lines: sum of open PRs: +3; projected total 11 / cap 1000, headroom 989",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+}
+
+/// #788: no `premerge` or `cap_script`, but the repo has `scripts/line-cap.sh` printing cooee's `label: N / M` lines
+/// (no `cap` word) for two caps: `drover cap` counts by that script, extra paths included, each cap on its own.
+#[test]
+fn cap_finds_the_repos_own_line_cap_script() {
+    let script =
+        "echo \"non-test lines: $(cat src/*.rs web/ts/*.ts | grep -c .) / 100\"\necho \"apple lines: 0 / 50\"\n";
+    let (c, r) = script_repos("cap-own", "", script);
+    let (code, out) = run(&c, &r, &["cap", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    for want in [
+        "sendmeter: non-test lines 15 / cap 100 at staging",
+        "sendmeter: apple lines 0 / cap 50 at staging",
+        "  #4 (PR #14): +3 non-test lines, +0 apple lines (script)",
+        "non-test lines: sum of open PRs: +3; projected total 18 / cap 100, headroom 82",
+    ] {
+        assert!(out.contains(want), "{want:?} in\n{out}");
+    }
+}
+
+/// #788: a cap script whose output has no `N / cap M` line is reported as that, with the line it printed.
+#[test]
+fn cap_reports_a_script_it_cannot_parse() {
+    let script = "echo 'counting...'\necho 'total: 15 lines, limit 100'\n";
+    let (c, r) = script_repos("cap-garbled", "", script);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let err = drover::overlap::cap_view(&c, &cfg, &r, "sendmeter", &mut Vec::new()).unwrap_err();
+    let want = "`sh scripts/line-cap.sh` at origin/staging printed no `N / cap M` line drover can parse: printed `total: 15 lines, limit 100`";
+    assert_eq!(err.to_string(), want);
 }

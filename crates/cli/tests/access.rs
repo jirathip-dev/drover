@@ -1,14 +1,14 @@
 //! #5: per-role Anthropic accounts with cap fallback; per-role MCP allowlist.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::{json, Value};
 use std::path::Path;
 
 const TOKEN_A: &str = concat!("sk", "-ant-oat01-AAAA-secret");
 const TOKEN_B: &str = concat!("sk", "-ant-oat01-BBBB-secret");
 
-/// Claude impl role with `role_extra` lines, `[accounts]` A/B/C (tokens in the store, `store`), local repo `<dir>/repo`.
+/// Claude impl role with `role_extra` lines, `[accounts]` A/B/C, local repo `<dir>/repo`.
 fn config(d: &Path, role_extra: &str) -> String {
     let repo = d.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -20,20 +20,31 @@ fn config(d: &Path, role_extra: &str) -> String {
         + "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\nC = \"CLAUDE_CODE_OAUTH_TOKEN_C\"\n"
 }
 
-/// #441: the accounts' tokens in the fake store.
-fn store(f: Fake) -> Fake {
-    let svc = |v: &str| format!("herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_{v}");
-    f.stored(&svc("A"), TOKEN_A)
-        .stored(&svc("B"), TOKEN_B)
-        .stored(&svc("C"), "c")
+/// #683: `config` with the accounts' folders `<dir>/accounts/<name>` as `[accounts.usage]`.
+fn folders(d: &Path, role_extra: &str) -> String {
+    let dirs = format!(
+        "A = \"{0}/A\"\nB = \"{0}/B\"\nC = \"{0}/C\"\n",
+        d.join("accounts").display()
+    );
+    config(d, role_extra) + "\n[accounts.usage]\n" + &dirs
 }
 
-/// A real (faked herdr/gh/git) impl spawn of issue `n` in pane `w9:p<n>`; the token its pane's shell exported.
-fn spawn(c: &herdsman::Ctx, n: u64) -> (Fake, String) {
+/// A real (faked herdr/gh/git) impl spawn of issue `n` in pane `w9:p<n>`; its pane's shell's `SIGN_IN`.
+fn spawn(c: &drover::Ctx, n: u64) -> (Fake, String) {
+    spawn_var(c, n, SIGN_IN)
+}
+
+/// As `spawn`; `var` is what its pane's shell printed of `"$<var>"`.
+fn spawn_var(c: &drover::Ctx, n: u64, var: &'static str) -> (Fake, String) {
+    spawn_with(c, n, var, |r| r)
+}
+
+/// As `spawn_var`, its runner given more replies by `more`.
+fn spawn_with(c: &drover::Ctx, n: u64, var: &'static str, more: impl Fn(Fake) -> Fake) -> (Fake, String) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     let pane = format!("w9:p{n}");
-    let r = store(Fake::default())
+    let r = more(Fake::default())
         .reply("herdr agent list", NO_AGENTS)
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply(&format!("gh issue view {n}"), r#"{"title":"t","body":"b"}"#)
@@ -49,7 +60,7 @@ fn spawn(c: &herdsman::Ctx, n: u64) -> (Fake, String) {
         .reply(&format!("herdr pane run {pane} export"), "{}")
         .reply("herdr agent start", "{}")
         .reply("herdr agent wait", "{}");
-    let sh = Shell(&r, "CLAUDE_CODE_OAUTH_TOKEN", Shared::default());
+    let sh = Shell(&r, var, Shared::default());
     let (code, out) = run(c, &sh, &["spawn", "sendmeter", &n.to_string(), "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     assert!(
@@ -64,7 +75,7 @@ fn spawn(c: &herdsman::Ctx, n: u64) -> (Fake, String) {
     (r, token)
 }
 
-fn dry_account(c: &herdsman::Ctx, n: u64) -> Value {
+fn dry_account(c: &drover::Ctx, n: u64) -> Value {
     let (code, out) = run(
         c,
         &Fake::default(),
@@ -74,8 +85,8 @@ fn dry_account(c: &herdsman::Ctx, n: u64) -> Value {
     serde_json::from_str::<Value>(&out).unwrap()["account"].clone()
 }
 
-fn no_token_in_log(c: &herdsman::Ctx) {
-    let log = herdsman::events::jsonl(&c.state).unwrap_or_default();
+fn no_token_in_log(c: &drover::Ctx) {
+    let log = drover::events::jsonl(&c.state).unwrap_or_default();
     assert!(
         !log.contains(TOKEN_A) && !log.contains(TOKEN_B),
         "token in events: {log}"
@@ -83,20 +94,16 @@ fn no_token_in_log(c: &herdsman::Ctx) {
 }
 
 #[test]
-fn role_account_b_exports_its_token_into_the_lane_and_nowhere_else() {
+fn role_account_b_signs_in_with_its_folder_and_no_token_with_no_helper() {
     let d = tmpdir("acct-b");
-    let c = ctx(&d, &config(&d, "account = \"B\""));
+    let c = ctx(&d, &folders(&d, "account = \"B\""));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let (r, token) = spawn(&c, 12);
-    // #441: the pane's shell sourced the secrets file spawn wrote; spawn removed it once the harness started.
+    let (r, got) = spawn(&c, 12);
+    // #683: with no `account_env`, B's folder as CLAUDE_CONFIG_DIR; no token, no secrets file.
     let calls = r.calls.borrow();
     assert!(!calls.iter().any(|l| l.contains(TOKEN_B)), "token passed through argv");
-    assert_eq!(token, TOKEN_B);
-    let file = c.worktrees.join("sendmeter/issue-12.env");
-    let sourced = format!("&& . '{}'", file.display());
-    assert!(calls
-        .iter()
-        .any(|l| l.starts_with("herdr pane run w9:p12 export") && l.ends_with(&sourced)));
+    assert_eq!(got, format!("{}/accounts/B|", d.display()));
+    assert!(!calls.iter().any(|l| l.contains("&& . '")), "a secrets file: {calls:?}");
     assert!(r.index("herdr pane run w9:p12 export").unwrap() < r.index("herdr agent start").unwrap());
     let ev = read(&c.state).unwrap();
     assert_eq!(ev.last().unwrap().str("account"), Some("B"));
@@ -107,7 +114,7 @@ fn role_account_b_exports_its_token_into_the_lane_and_nowhere_else() {
         &["spawn", "sendmeter", "13", "impl", "--dry-run", "--json"][..],
         &["accounts"],
     ] {
-        let o = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
+        let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
             .args(args)
             .env("FLEET_CONFIG", &c.config)
             .env("FLEET_STATE", &c.state)
@@ -132,7 +139,7 @@ fn capped_account_is_skipped_until_reset() {
     assert_eq!(read(&c.state).unwrap().last().unwrap().str("account"), Some("A"));
 
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = store(Fake::default())
+    let r = Fake::default()
         .reply(
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
@@ -167,7 +174,171 @@ fn capped_account_is_skipped_until_reset() {
     // The capped lane still shows the banner, but its cap was already reported: no re-cap.
     assert_eq!(run(&c, &r, &["check"]).1, "");
     assert_eq!(dry_account(&c, 14), "A");
+    // #683: A capped again, a real spawn signs in with B's (default) folder, never a token.
+    let d = json!({"account": "A", "agent": "sendmeter-impl-12", "until": c.now + 3600});
+    append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "account-capped", d)).unwrap();
+    let (_, got) = spawn(&c, 15);
+    let b = drover::config::home().join(".config/drover/accounts/B");
+    assert_eq!(got, format!("{}|", b.display()), "B's default folder, no token");
     no_token_in_log(&c);
+}
+
+/// #683: what the pane's shell printed of the account env: `$CLAUDE_CONFIG_DIR|$CLAUDE_CODE_OAUTH_TOKEN`.
+const SIGN_IN: &str = "CLAUDE_CONFIG_DIR|$CLAUDE_CODE_OAUTH_TOKEN";
+
+/// #683: Claude Code's own login in folder `dir` (`.claude.json`'s `oauthAccount`).
+fn sign_in(dir: &Path) {
+    std::fs::create_dir_all(dir).unwrap();
+    std::fs::write(dir.join(".claude.json"), r#"{"oauthAccount": {"emailAddress": "a@x"}}"#).unwrap();
+}
+
+#[test]
+fn the_profile_hook_still_refuses_a_guarded_command_on_the_accounts_folder() {
+    let d = tmpdir("acct-hook");
+    let mut c = ctx(&d, &folders(&d, "account = \"A\""));
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let (r, got) = spawn_var(&c, 12, SIGN_IN);
+    let a = d.join("accounts/A");
+    assert_eq!(got, format!("{}|", a.display()));
+    // The profile goes on top of the account's login.
+    let profile = c.config.with_file_name("claude").join("fleet-impl");
+    let calls = r.calls.borrow();
+    let start = calls.iter().find(|l| l.starts_with("herdr agent start")).unwrap();
+    assert!(
+        start.contains(&format!("--settings {}", profile.join("settings.json").display())),
+        "{start}"
+    );
+    // That profile's `PreToolUse` hook, run as Claude Code runs it in the lane's env, refuses a guarded command.
+    let s: Value = serde_json::from_str(&std::fs::read_to_string(profile.join("settings.json")).unwrap()).unwrap();
+    let hook = s["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let call = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git push origin staging"}, "cwd": wt});
+    let mut ch = std::process::Command::new("sh")
+        .args(["-c", hook])
+        .env_clear()
+        .env("PATH", std::env::var("PATH").unwrap())
+        .env("DROVER_LANE", "sendmeter:12:impl")
+        .env("CLAUDE_CONFIG_DIR", &a)
+        .env("FLEET_CONFIG", &c.config)
+        .env("FLEET_STATE", &c.state)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    use std::io::Write as _;
+    ch.stdin.take().unwrap().write_all(call.to_string().as_bytes()).unwrap();
+    let o = String::from_utf8(ch.wait_with_output().unwrap().stdout).unwrap();
+    let v: Value = serde_json::from_str(&o).unwrap_or_else(|_| panic!("{o}"));
+    assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny", "{o}");
+}
+
+/// `config` with `account_env` set to a fake helper (`fake-cooee`, answered by the test's runner).
+fn helper_config(d: &Path) -> String {
+    config(d, "account = \"A\"").replace(
+        "[accounts]\n",
+        "[accounts]\naccount_env = \"fake-cooee accounts env {provider} {name}\"\n",
+    )
+}
+
+#[test]
+fn a_helpers_json_env_reaches_the_lane_and_nothing_else_signs_it_in() {
+    let d = tmpdir("acct-helper");
+    let c = ctx(&d, &helper_config(&d));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let env = r#"{"CLAUDE_CONFIG_DIR": "/cooee/accounts/claude/A", "COOEE_ACCOUNT": "it's A"}"#;
+    let f = |r: Fake| r.reply("fake-cooee accounts env claude A", env);
+    let (r, got) = spawn_with(&c, 12, "CLAUDE_CONFIG_DIR|$COOEE_ACCOUNT|$CLAUDE_CODE_OAUTH_TOKEN", f);
+    assert_eq!(
+        got, "/cooee/accounts/claude/A|it's A|",
+        "the helper's env exactly, no token"
+    );
+    assert_eq!(r.count("fake-cooee accounts env claude A"), 1);
+}
+
+#[test]
+fn a_failing_or_non_json_helper_refuses_the_spawn_with_its_stderr() {
+    let d = tmpdir("acct-helper-bad");
+    let c = ctx(&d, &helper_config(&d));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let fails = [
+        Fake::default().once_err("fake-cooee", 2, "cooee: no account claude/A"),
+        Fake::default().reply("fake-cooee", "CLAUDE_CONFIG_DIR=/x"),
+        Fake::default().reply("fake-cooee", r#"{"BAD KEY; rm -rf /": "x"}"#),
+    ];
+    for (i, r) in fails.into_iter().enumerate() {
+        let r = r.reply("herdr agent list", NO_AGENTS).reply("git -C", "");
+        let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+        assert_eq!(code, 3, "{i}: {out}");
+        assert!(
+            out.contains("REFUSED ACCOUNT_ENV: account A: `fake-cooee accounts env claude A`"),
+            "{i}: {out}"
+        );
+        assert!(
+            i != 0 || out.contains("exited 2") && out.contains("cooee: no account claude/A"),
+            "{out}"
+        );
+        assert!(
+            !r.called("herdr worktree open") && !r.called("herdr agent start"),
+            "{i}: {:?}",
+            r.calls.borrow()
+        );
+    }
+}
+
+#[test]
+fn doctor_shows_one_account_source_row_and_accounts_ask_each_folders_cli_never_the_keychain() {
+    let d = tmpdir("acct-doctor");
+    let c = ctx(&d, &folders(&d, "account = \"A\""));
+    let (a, b) = (d.join("accounts/A"), d.join("accounts/B"));
+    sign_in(&a);
+    std::fs::create_dir_all(&b).unwrap(); // B's folder, signed out
+                                          // #707: no secret store at all; #785: each folder's own CLI says whether it is signed in.
+    let r = Fake::default()
+        .reply(&auth_status(&d, "A"), r#"{"loggedIn": true}"#)
+        .reply(&auth_status(&d, "B"), r#"{"loggedIn": false}"#);
+    let out = run(&c, &r, &["doctor"]).1;
+    // #707 (q855): one account-source row; the per-account rows are retired.
+    let src: Vec<&str> = out.lines().filter(|l| l.contains(" account")).collect();
+    assert_eq!(
+        src,
+        ["✓ accounts — sign in from each account's own folder (`/login` in it, docs/accounts.md)"],
+        "{out}"
+    );
+    let helper = c.config.with_file_name("helper.toml");
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(
+        &helper,
+        text.replace(
+            "[accounts]\n",
+            "[accounts]\naccount_env = \"cooee accounts env {provider} {name}\"\n",
+        ),
+    )
+    .unwrap();
+    let h = drover::Ctx {
+        config: helper,
+        ..c.clone()
+    };
+    let out_h = run(&h, &r, &["doctor"]).1;
+    assert!(
+        out_h.contains("✓ accounts — sign in from the account_env helper `cooee accounts env {provider} {name}`"),
+        "{out_h}"
+    );
+    assert_eq!(
+        run(&c, &r, &["doctor", "--tokens"]).0,
+        2,
+        "`doctor --tokens` is retired"
+    );
+    let list = run(&c, &r, &["accounts"]).1;
+    assert!(list.contains(&format!("signed in ({})\n", a.display())), "{list}");
+    assert!(
+        list.contains(&format!("✗ signed in ({}) → cooee", b.display())),
+        "{list}"
+    );
+    assert!(!out.contains("Keychain") && !out.contains("partition-list"), "{out}");
+    let calls = r.calls.borrow();
+    assert!(!calls.iter().any(|l| l.starts_with("security ")), "{calls:?}");
+    assert!(calls.contains(&auth_status(&d, "B")), "{calls:?}");
 }
 
 #[test]
@@ -180,7 +351,7 @@ fn cap_expires_after_cap_reset_minutes() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, 12);
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = store(Fake::default())
+    let r = Fake::default()
         .reply(
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
@@ -192,10 +363,10 @@ fn cap_expires_after_cap_reset_minutes() {
     assert_eq!(dry_account(&c, 13), "A");
 }
 
-/// Caps lane `sendmeter-impl-12` (pane `w9:p12`) with `banner` via `herdsman check`.
-fn cap(c: &herdsman::Ctx, banner: &str) {
+/// Caps lane `sendmeter-impl-12` (pane `w9:p12`) with `banner` via `drover check`.
+fn cap(c: &drover::Ctx, banner: &str) {
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = store(Fake::default())
+    let r = Fake::default()
         .reply(
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
@@ -206,10 +377,10 @@ fn cap(c: &herdsman::Ctx, banner: &str) {
 
 #[test]
 fn cap_until_parses_the_banner_reset_in_local_time() {
-    let cfg = herdsman::config::Config::parse("").unwrap();
+    let cfg = drover::config::Config::parse("").unwrap();
     let bkk = Fake::default().reply("date -r", "+0700\n");
     let now = 1_793_502_000; // 2026-11-01 10:00 +07
-    let until = |s: &str| herdsman::access::cap_until(&cfg, &bkk, s, now);
+    let until = |s: &str| drover::access::cap_until(&cfg, &bkk, s, now);
     // The banner shapes `cap_pattern` matches.
     assert_eq!(
         until("  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)"),
@@ -272,14 +443,14 @@ fn capped_lane_waits_on_drive_to_respawn_on_a_free_account() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, 12);
     cap(&c, "You've hit your limit · resets 3pm");
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let agents = [serde_json::json!({"name": "sendmeter-impl-12", "agent_status": "idle"})];
     let ev = read(&c.state).unwrap();
-    let waits = herdsman::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false);
+    let waits = drover::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false);
     let w = &waits.iter().find(|(s, _)| s.issue == 12).unwrap().1;
     assert_eq!(w.who, "drive", "{w:?}");
     let cmd = w.next_cmd.clone().unwrap();
-    assert_eq!(cmd, "herdsman spawn sendmeter 12 impl --supersede");
+    assert_eq!(cmd, "drover spawn sendmeter 12 impl --supersede");
     // That respawn (as drive runs it) picks the free account.
     let mut args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
     args.extend(["--dry-run", "--json"]);
@@ -297,10 +468,10 @@ fn capped_ready_lane_is_not_told_to_respawn() {
     cap(&c, "You've hit your limit · resets 3pm");
     let pass = json!({"verdict": "PASS", "sha": "1".repeat(40)});
     append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "verdict", pass)).unwrap();
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let agents = [json!({"name": "sendmeter-impl-12", "agent_status": "idle"})];
     let ev = read(&c.state).unwrap();
-    let waits = herdsman::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false);
+    let waits = drover::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false);
     let w = &waits.iter().find(|(s, _)| s.issue == 12).unwrap().1;
     assert!(
         !w.next_cmd.as_deref().unwrap_or_default().contains("--supersede"),
@@ -362,7 +533,7 @@ fn hermes_profile_gets_only_the_listed_mcp_servers() {
     let d = tmpdir("mcp-hermes");
     let cfg = config(&d, "mcp = [\"supabase-dev\"]").replace("harness = \"claude\"\nmcp", "harness = \"hermes\"\nmcp");
     let c = ctx(&d, &cfg);
-    let yaml = c.hermes.join("fleet-impl/config.yaml");
+    let yaml = c.homes["hermes"].join("fleet-impl/config.yaml");
     std::fs::create_dir_all(yaml.parent().unwrap()).unwrap();
     std::fs::write(
         &yaml,
@@ -381,10 +552,10 @@ fn hermes_profile_gets_only_the_listed_mcp_servers() {
     );
 }
 
-/// #640: lane `sendmeter-impl-12` on account A shows `screen`; `herdsman check`'s output.
-fn check_shows(c: &herdsman::Ctx, screen: &str) -> String {
+/// #640: lane `sendmeter-impl-12` on account A shows `screen`; `drover check`'s output.
+fn check_shows(c: &drover::Ctx, screen: &str) -> String {
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let r = store(Fake::default())
+    let r = Fake::default()
         .reply(
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "idle", wt.to_str().unwrap(), "w9:p12")]),
@@ -396,13 +567,13 @@ fn check_shows(c: &herdsman::Ctx, screen: &str) -> String {
 }
 
 /// #640: account A's latest status-line reading (`usage.jsonl`), read `ago` seconds before now.
-fn reading(c: &herdsman::Ctx, five: Value, seven: Value, ago: u64) {
+fn reading(c: &drover::Ctx, five: Value, seven: Value, ago: u64) {
     let row = json!({"ts": c.now - ago, "account": "A", "five_hour_pct": five, "five_hour_reset": null,
         "seven_day_pct": seven, "seven_day_reset": 1_200_000});
     std::fs::write(c.state.with_file_name("usage.jsonl"), format!("{row}\n")).unwrap();
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -506,26 +677,183 @@ fn signed_out_is_its_own_state_never_a_cap() {
     assert_eq!(dry_account(&c, 13), "A");
 }
 
+/// #707: `config` with account A's hand-placed `token-file:` at `<dir>/tokens/A` (mode `mode`).
+fn token_file(d: &Path, mode: u32) -> (String, std::path::PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
+    let f = d.join("tokens/A");
+    std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+    std::fs::write(&f, format!("{TOKEN_A}\n")).unwrap();
+    std::fs::set_permissions(&f, std::fs::Permissions::from_mode(mode)).unwrap();
+    let cfg = config(d, "account = \"A\"").replace(
+        "A = \"CLAUDE_CODE_OAUTH_TOKEN_A\"",
+        &format!("A = \"token-file:{}\"", f.display()),
+    );
+    (cfg, f)
+}
+
 #[test]
-fn a_banner_with_a_401_usage_reading_is_signed_out() {
-    let d = tmpdir("acct-meter-401");
-    let cfg = config(&d, "accounts = [\"A\", \"B\"]") + "\n[accounts.usage]\nA = \"~/logins/A\"\n";
+fn a_token_file_account_reaches_only_its_lanes_shell_as_the_oauth_token() {
+    let d = tmpdir("acct-token-file");
+    let (cfg, _) = token_file(&d, 0o600);
     let c = ctx(&d, &cfg);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12);
-    let dir = c.state.parent().unwrap().join("usage");
-    std::fs::create_dir_all(&dir).unwrap();
-    let m = json!({"checked": c.now, "ts": c.now - 7200, "login_needed": true});
-    std::fs::write(dir.join("A.json"), m.to_string()).unwrap();
-    let out = check_shows(&c, "You've hit your limit · resets 3pm");
+    let (r, got) = spawn(&c, 12);
+    // The token from the file, through the secrets file the pane sources: no config folder, never argv or the log.
+    assert_eq!(got, format!("|{TOKEN_A}"));
+    let calls = r.calls.borrow();
+    assert!(calls.iter().any(|l| l.contains("&& . '")), "{calls:?}");
+    assert!(!calls.iter().any(|l| l.contains(TOKEN_A)), "token in argv: {calls:?}");
+    no_token_in_log(&c);
+    let (_, out) = run(&c, &Fake::default(), &["doctor"]);
     assert!(
-        out.contains("account-signed-out") && !out.contains("account-capped"),
+        out.contains("✓ accounts — sign in from each account's own folder"),
         "{out}"
     );
-    let (_, list) = run(&c, &Fake::default(), &["accounts"]);
+    assert!(out.contains("✓ account A token file — "), "{out}");
+    assert!(!out.contains(TOKEN_A), "{out}");
+}
+
+#[test]
+fn a_token_file_others_can_read_refuses_the_spawn() {
+    let d = tmpdir("acct-token-0644");
+    let (cfg, f) = token_file(&d, 0o644);
+    let c = ctx(&d, &cfg);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    std::fs::create_dir_all(&wt).unwrap();
+    let r = Fake::default()
+        .reply("herdr agent list", NO_AGENTS)
+        .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
+        .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
+        .reply("git -C", "")
+        .reply(
+            "herdr worktree open",
+            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
+        )
+        .reply(
+            "herdr pane list --workspace w9",
+            r#"{"result":{"panes":[{"pane_id":"w9:p12","agent":null}]}}"#,
+        );
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 3, "{out}");
     assert!(
-        list.lines()
-            .any(|l| l.starts_with("A ") && l.contains("signed out: usage 401 at")),
-        "{list}"
+        out.contains(&format!(
+            "REFUSED SECRET_FILE_OPEN: {} is readable by others",
+            f.display()
+        )),
+        "{out}"
     );
+    assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    assert!(!out.contains(TOKEN_A), "{out}");
+    let (_, out) = run(&c, &Fake::default(), &["doctor"]);
+    assert!(
+        out.contains("! account A token file — REFUSED SECRET_FILE_OPEN"),
+        "{out}"
+    );
+}
+
+/// #785: Claude Code's own answer for folder `<d>/accounts/<name>`: `claude auth status` there, the env's token unset.
+fn auth_status(d: &Path, name: &str) -> String {
+    let dir = d.join("accounts").join(name);
+    format!(
+        "env -u CLAUDE_CODE_OAUTH_TOKEN CLAUDE_CONFIG_DIR={} claude auth status",
+        dir.display()
+    )
+}
+
+#[test]
+fn a_signed_out_folder_account_is_skipped_with_one_alert_in_standalone() {
+    let d = tmpdir("acct-785-folder");
+    let c = ctx(&d, &folders(&d, "accounts = [\"A\", \"B\"]"));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    // A's folder holds a stale login file, but its CLI says it is signed out; B's says signed in.
+    sign_in(&d.join("accounts/A"));
+    let status = |r: Fake| {
+        r.reply(&auth_status(&d, "A"), r#"{"loggedIn": false}"#)
+            .reply(&auth_status(&d, "B"), r#"{"loggedIn": true}"#)
+    };
+    let (r, got) = spawn_with(&c, 12, SIGN_IN, status);
+    assert!(r.called(&auth_status(&d, "A")), "{:?}", r.calls.borrow());
+    assert_eq!(got, format!("{}/accounts/B|", d.display()), "the lane is on B");
+    assert_eq!(kinds(&c, "spawn")[0].str("account"), Some("B"));
+    let out = kinds(&c, "account-signed-out");
+    assert_eq!(out.len(), 1, "{out:?}");
+    assert_eq!(out[0].str("account"), Some("A"));
+    assert!(
+        out[0].str("reason").unwrap().contains("claude /login"),
+        "names the sign-in: {out:?}"
+    );
+    // The next spawn skips A without asking again: still one alert.
+    let (r, got) = spawn_with(&c, 13, SIGN_IN, status);
+    assert_eq!(got, format!("{}/accounts/B|", d.display()));
+    assert!(!r.called(&auth_status(&d, "A")));
+    assert_eq!(kinds(&c, "account-signed-out").len(), 1);
+}
+
+#[test]
+fn an_account_env_exit_3_is_signed_out_and_skipped() {
+    let d = tmpdir("acct-785-helper");
+    let cfg = config(&d, "accounts = [\"A\", \"B\"]").replace(
+        "[accounts]\n",
+        "[accounts]\naccount_env = \"fake-cooee accounts env {provider} {name} --require-signed-in\"\n",
+    );
+    let c = ctx(&d, &cfg);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let f = |r: Fake| {
+        r.once_err("fake-cooee accounts env claude A", 3, "cooee: claude/A is signed out")
+            .reply(
+                "fake-cooee accounts env claude B",
+                r#"{"CLAUDE_CONFIG_DIR": "/cooee/B"}"#,
+            )
+    };
+    let (_, got) = spawn_with(&c, 12, SIGN_IN, f);
+    assert_eq!(got, "/cooee/B|", "the lane is on B");
+    let out = kinds(&c, "account-signed-out");
+    assert_eq!((out.len(), out[0].str("account")), (1, Some("A")), "{out:?}");
+    assert!(out[0].str("reason").unwrap().contains("signed out"), "{out:?}");
+}
+
+#[test]
+fn accounts_lists_live_lanes_only() {
+    let d = tmpdir("acct-785-live");
+    let c = ctx(&d, &config(&d, "accounts = [\"A\", \"B\"]"));
+    let ev = |issue: Option<u64>, kind: &str, d: Value| {
+        append(&c.state, &Event::new(c.now - 100, "sendmeter", issue, kind, d)).unwrap();
+    };
+    for (n, agent) in [
+        (12, "sendmeter-impl-12"),
+        (13, "sendmeter-impl-13"),
+        (14, "sendmeter-impl-14"),
+    ] {
+        ev(
+            Some(n),
+            "spawn",
+            json!({"agent": agent, "role": "impl", "account": "A"}),
+        );
+    }
+    ev(
+        None,
+        "spawn",
+        json!({"agent": "conductor-t1", "role": "conductor", "account": "A"}),
+    );
+    // 13's lane died, 14's ACP session is gone, the conductor's was superseded: only 12 still runs.
+    ev(
+        Some(13),
+        "lane-dead",
+        json!({"key": "1:sendmeter-impl-13", "reason": "gone"}),
+    );
+    ev(
+        Some(14),
+        "lane-state",
+        json!({"agent": "sendmeter-impl-14", "state": "gone", "cause": "killed"}),
+    );
+    ev(
+        None,
+        "supersede",
+        json!({"agent": "conductor-t1", "killed": ["conductor-t1"]}),
+    );
+    let (code, list) = run(&c, &Fake::default(), &["accounts"]);
+    assert_eq!(code, 0, "{list}");
+    let a = list.lines().find(|l| l.starts_with("A ")).unwrap();
+    assert!(a.ends_with("1 lanes sendmeter-impl-12"), "{list}");
 }

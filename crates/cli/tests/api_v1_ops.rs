@@ -1,10 +1,7 @@
-//! #555: the drover plugins' `/api/v1` routes: each runs the old board's code (`/send`, `/answer`, `/act`, `/setup`,
-//! `/herd.json`, the [config] sheet, `/thread`'s `new`) or a new op (`chat`, `close`), JSON in and `Reply` out; the
-//! paired-only ones answer 401 UNPAIRED to an unpaired device and run nothing.
 mod common;
 use common::*;
-use herdsman::events::{read, Event};
-use herdsman::serve::Server;
+use drover::events::{read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -39,7 +36,7 @@ fn mtime(s: &Server) -> String {
         .into()
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -138,7 +135,7 @@ fn setup_starts_a_configured_terminal_and_reads_its_screen() {
     let typed = json!({"setup": "w9:p1", "text": "sk-SECRET-4242"});
     assert_eq!(post(&s, "send", typed, &ck).1, "OK");
     assert!(r.called("herdr --machine bazzite pane send-text w9:p1 sk-SECRET-4242"));
-    assert!(!herdsman::events::jsonl(&c.state).unwrap().contains("SECRET"));
+    assert!(!drover::events::jsonl(&c.state).unwrap().contains("SECRET"));
 }
 
 #[test]
@@ -164,7 +161,7 @@ fn herd_and_roles_read_as_the_old_board_draws_them() {
         .iter()
         .map(|r| r["name"].clone())
         .collect();
-    assert_eq!(names, [json!("impl"), json!("rev")]);
+    assert_eq!(names, [json!("impl"), json!("orchestrator"), json!("rev")]);
     assert_eq!(roles["config"]["roles"][0]["model"], "opus");
     assert_eq!(
         (
@@ -185,7 +182,7 @@ fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
     let set = json!({"fleet": "sendmeter", "role": "rev", "model": "sonnet", "mtime": mtime(&s)});
     assert_eq!(post(&s, "set", set, "").1, "OK");
     let roles = |s: &Server| req(s, "GET", "/api/v1/roles?fleet=sendmeter", "", "").1;
-    assert_eq!(roles(&s)["config"]["roles"][1]["model"], "sonnet");
+    assert_eq!(roles(&s)["config"]["roles"][2]["model"], "sonnet");
     let chat = |m: &str, v: Value| {
         let mut b = json!({"mtime": m});
         b.as_object_mut().unwrap().extend(v.as_object().unwrap().clone());
@@ -258,7 +255,7 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
     );
     assert_eq!(
         post(&s, "chat-about", json!({"fleet": "nope", "issue": 30}), &ck).1,
-        "NO_CONDUCTOR"
+        "NO_ORCHESTRATOR"
     );
     // [close]: a backlog issue only; #12 has a lane.
     assert_eq!(
@@ -274,6 +271,6 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
         (e.issue, e.str("why"), e.str("via")),
         (Some(30), Some("backlog"), Some("web"))
     );
-    let st = herdsman::events::fold(&read(&c.state).unwrap());
+    let st = drover::events::fold(&read(&c.state).unwrap());
     assert_eq!(st[&("sendmeter".to_string(), 30)].state, "closed");
 }

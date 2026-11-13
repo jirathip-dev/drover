@@ -1,28 +1,28 @@
 //! #325: a lane's ask stores its agent; the answer is typed into that lane (else the issue's current one), logged
 //! `answer-delivered` / `answer-undelivered`, and drive's fast step retries an undelivered one.
-//! Every test here runs inside the same lane (`HERDSMAN_LANE` is process-wide: its own test binary).
+//! Every test here runs inside the same lane (`DROVER_LANE` is process-wide: its own test binary).
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const NOW: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-36";
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn spawn(c: &herdsman::Ctx, extra: Value) {
+fn spawn(c: &drover::Ctx, extra: Value) {
     let mut d = json!({"role": "impl", "agent": LANE, "pane": "w1:p1", "host": "mini"});
     d.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
     append(&c.state, &Event::new(NOW - 60, "sendmeter", Some(36), "spawn", d)).unwrap();
 }
 
-/// `herdsman ask` run inside the lane `sendmeter:36:impl`.
-fn lane_ask(c: &herdsman::Ctx) {
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:36:impl");
+/// `drover ask` run inside the lane `sendmeter:36:impl`.
+fn lane_ask(c: &drover::Ctx) {
+    std::env::set_var("DROVER_LANE", "sendmeter:36:impl");
     let args = [
         "ask",
         "sendmeter",
@@ -57,7 +57,7 @@ fn a_lane_ask_stores_its_agent_and_the_answer_is_typed_into_its_pane() {
     let a = &kinds(&c, "needs-decision")[0];
     assert_eq!((a.str("agent"), a.str("host")), (Some(LANE), Some("mini")));
     let r = ok_herdr("");
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "2", "--by", "conductor"]);
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "2", "--by", "orchestrator"]);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: no -> sendmeter-impl-36\n"));
     assert!(
         r.called("herdr agent prompt sendmeter-impl-36 DECISION q1: no"),

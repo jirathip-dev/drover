@@ -1,18 +1,18 @@
-//! #511: an impl lane's typed turn end (`herdsman turn`), drive's action on each state, the stop hook's one prompt.
-//! Every test here runs inside the same lane (`HERDSMAN_LANE` is process-wide: its own test binary).
+//! #511: an impl lane's typed turn end (`drover turn`), drive's action on each state, the stop hook's one prompt.
+//! Every test here runs inside the same lane (`DROVER_LANE` is process-wide: its own test binary).
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
 const LANE: &str = "sendmeter-impl-12";
 
-fn setup(name: &str) -> herdsman::Ctx {
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
+fn setup(name: &str) -> drover::Ctx {
+    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
     ctx(&tmpdir(name), CONFIG)
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
@@ -20,8 +20,8 @@ fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
 
-fn at(c: &herdsman::Ctx, secs: u64) -> herdsman::Ctx {
-    herdsman::Ctx {
+fn at(c: &drover::Ctx, secs: u64) -> drover::Ctx {
+    drover::Ctx {
         now: c.now + secs,
         ..c.clone()
     }
@@ -29,11 +29,11 @@ fn at(c: &herdsman::Ctx, secs: u64) -> herdsman::Ctx {
 
 /// #12's impl lane, spawned at ts 10 in a real worktree, and a Fake on which it sits idle in its pane (`live`) or is
 /// gone; `pr` = the PR view (`None`: no PR), `head` = the worktree's (`None`: unread).
-fn lane(name: &str, live: bool, pr: Option<&str>) -> (herdsman::Ctx, Fake) {
+fn lane(name: &str, live: bool, pr: Option<&str>) -> (drover::Ctx, Fake) {
     lane_at(name, live, pr, None)
 }
 
-fn lane_at(name: &str, live: bool, pr: Option<&str>, head: Option<&str>) -> (herdsman::Ctx, Fake) {
+fn lane_at(name: &str, live: bool, pr: Option<&str>, head: Option<&str>) -> (drover::Ctx, Fake) {
     let c = setup(name);
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
@@ -71,19 +71,20 @@ fn pr(head: &str, ci: &str) -> String {
         "green" => json!({"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}),
         _ => json!({"__typename": "CheckRun", "name": "ci", "status": "IN_PROGRESS"}),
     };
-    json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": [check]})
+    let body = format!("## For humans\n\nx\n\n## Evidence (head {head})");
+    json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": [check], "body": body})
         .to_string()
 }
 
-/// `herdsman turn <args>` as the lane: its exit code.
-fn turn(c: &herdsman::Ctx, r: &Fake, args: &[&str]) -> String {
+/// `drover turn <args>` as the lane: its exit code.
+fn turn(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
     let (code, out) = run(c, r, &[&["turn"], args].concat());
     assert_eq!(code, 0, "{out}");
     out
 }
 
-/// `herdsman drive`: (output, `driven` steps logged by this pass).
-fn drive(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
+/// `drover drive`: (output, `driven` steps logged by this pass).
+fn drive(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
     let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
@@ -92,26 +93,26 @@ fn drive(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
     (out, steps.map(|e| e.str("step").unwrap().to_string()).collect())
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn state(c: &herdsman::Ctx) -> String {
+fn state(c: &drover::Ctx) -> String {
     fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)]
         .state
         .clone()
 }
 
 /// The `waiting` and `status` lines of #12.
-fn texts(c: &herdsman::Ctx, r: &Fake) -> (String, String) {
+fn texts(c: &drover::Ctx, r: &Fake) -> (String, String) {
     (
         run(c, r, &["waiting", "sendmeter"]).1,
         run(c, r, &["status", "sendmeter"]).1,
     )
 }
 
-const NUDGE: &str = "herdr agent prompt sendmeter-impl-12 herdsman: you reported `done`, but nothing new is pushed";
-const GO_ON: &str = "herdr agent prompt sendmeter-impl-12 herdsman: continue the task";
+const NUDGE: &str = "herdr agent prompt sendmeter-impl-12 drover: you reported `done`, but nothing new is pushed";
+const GO_ON: &str = "herdr agent prompt sendmeter-impl-12 drover: continue the task";
 
 #[test]
 fn the_verb_logs_turn_end_with_the_lanes_role_and_is_no_issue_activity() {
@@ -149,6 +150,10 @@ fn done_at_a_pushed_head_spawns_review_at_once_without_waiting_for_ci() {
     let (c, r) = lane_at("turn-done-pushed", true, Some(&pr(&head, "pending")), Some(&sha("def")));
     let (w, _) = texts(&c, &r);
     assert!(w.contains("idle without pushing"), "{w}");
+    // #677: with its why note (git and gh writes are the Fake's).
+    ev(&c, 11, "decision", json!({"id": "q1", "choice": "yes", "by": "owner"}));
+    let note = "Decided: d\nBecause: q1\nRejected: r — x\nCheck: c\nOwner: o\n";
+    std::fs::write(c.worktrees.join("sendmeter/issue-12/why.md"), note).unwrap();
     turn(&c, &r, &["done"]);
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["review"], "{out}");
@@ -278,12 +283,12 @@ fn a_reported_lane_whose_pane_is_gone_takes_the_respawn_path() {
     assert_eq!(steps, ["respawn"], "{out}");
 }
 
-/// `herdsman hook` fed Claude's `event` JSON (`active`: its `stop_hook_active`): its stdout.
-fn hook(c: &herdsman::Ctx, event: &str, active: bool) -> String {
+/// `drover hook` fed Claude's `event` JSON (`active`: its `stop_hook_active`): its stdout.
+fn hook(c: &drover::Ctx, event: &str, active: bool) -> String {
     let input = json!({"hook_event_name": event, "stop_hook_active": active, "session_id": "s"}).to_string();
     let mut out = Vec::new();
-    let argv = ["herdsman", "hook", "--role", "impl"].map(String::from).to_vec();
-    let code = herdsman::main_with(argv, c, &Fake::default(), &mut out, &mut input.as_bytes());
+    let argv = ["drover", "hook", "--role", "impl"].map(String::from).to_vec();
+    let code = drover::main_with(argv, c, &Fake::default(), &mut out, &mut input.as_bytes());
     assert_eq!(code, 0);
     String::from_utf8(out).unwrap()
 }
@@ -293,7 +298,7 @@ fn the_stop_hook_asks_for_the_turn_once_per_prompt_and_never_loops() {
     let (c, r) = lane("turn-hook", true, None);
     let asked = |o: &str| {
         let v: serde_json::Value = serde_json::from_str(o.trim()).unwrap();
-        v["decision"] == "block" && v["reason"] == herdsman::hook::TURN_ASK
+        v["decision"] == "block" && v["reason"] == drover::hook::TURN_ASK
     };
     assert_eq!(hook(&c, "UserPromptSubmit", false), "");
     let out = hook(&c, "Stop", false);
@@ -314,9 +319,9 @@ fn the_stop_hook_asks_for_the_turn_once_per_prompt_and_never_loops() {
 #[test]
 fn the_stop_hook_leaves_check_lanes_alone() {
     let c = setup("turn-hook-rev");
-    let mark = herdsman::hook::turn_mark(&c.state, "sendmeter:12:rev");
+    let mark = drover::hook::turn_mark(&c.state, "sendmeter:12:rev");
     std::fs::create_dir_all(mark.parent().unwrap()).unwrap();
     let input = json!({"hook_event_name": "Stop"});
-    assert!(herdsman::hook::turn_end(&input, &mark, || false).is_none());
-    assert!(herdsman::hook::turn_end(&input, &mark, || true).is_some());
+    assert!(drover::hook::turn_end(&input, &mark, || false).is_none());
+    assert!(drover::hook::turn_end(&input, &mark, || true).is_some());
 }

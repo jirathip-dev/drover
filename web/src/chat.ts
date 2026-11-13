@@ -100,7 +100,7 @@ function msg(now: number, id: string, m: Msg, rw: boolean): string {
     }
     case 'handoff': b = `<p class=qs>${lk}· ${refs(esc(m.text))}</p>`; break;
     case 'msg': {
-      const [k, who] = m.from === 'conductor' ? ['ai', 'conductor'] : lk ? ['ai', lk.trimEnd()] : ['me', 'you'];
+      const [k, who] = ['conductor', 'orchestrator'].includes(m.from) ? ['ai', 'conductor'] : lk ? ['ai', lk.trimEnd()] : ['me', 'you'];
       b = block(now, k, who, m.text, `<div class=md data-md="${esc(m.text)}">${prose(m.text)}</div>${files(id, m)}`, m.ts); // #407: [copy as markdown]
       break;
     }

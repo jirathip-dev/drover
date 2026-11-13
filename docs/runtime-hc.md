@@ -1,9 +1,9 @@
 # Runtime spike: herdr-core (`hc`) as an optional runtime (#197)
 
-Spike, docs only: no `src/` change. The question: should herdsman support herdr-core (`hc`) next to herdr, and if
+Spike, docs only: no `src/` change. The question: should drover support herdr-core (`hc`) next to herdr, and if
 so, how? **Answer: no-go for now, with a trigger (end of page).**
 
-Measured 2026-11-02 on the Mac Mini at herdsman `fe63c47` (staging), against `hc 0.1.16` (core `0.1.16`, OpenRPC
+Measured 2026-11-02 on the Mac Mini at drover `fe63c47` (staging), against `hc 0.1.16` (core `0.1.16`, OpenRPC
 `1.3.2`, "Protocol generation 1") and `herdr 0.9.5`. hc `0.1.17` came out the same day
 ([CHANGELOG](https://github.com/herdrdev/herdr-core/blob/main/CHANGELOG.md)); it was not installed for this spike.
 Every hc claim below is either real output from this host (a `$ hc …` block) or quoted with a link. In the output,
@@ -42,9 +42,9 @@ with the row it maps to. They split as:
 | Other text (the CLI `about`, the worktree path `~/.herdr/worktrees`) | 3 |
 | **Total** | **195** |
 
-Recount: `git grep -n 'herdr' src/ | wc -l` → `195`. The 26 rows below are every distinct herdr command herdsman
+Recount: `git grep -n 'herdr' src/ | wc -l` → `195`. The 26 rows below are every distinct herdr command drover
 runs: R1–R24 cover every function in `src/herdr.rs` (its argv builders and the helpers built on them), R25 is `--machine` in `src/hosts.rs`, and R26 the `update --handoff`
-hint. (The issue's list named `agent get` and `workspace create|close`; herdsman calls none of them today. `pane get`
+hint. (The issue's list named `agent get` and `workspace create|close`; drover calls none of them today. `pane get`
 stands in for `agent get`, and `worktree create` creates the workspace.)
 
 ### The table
@@ -71,7 +71,7 @@ stands in for `agent get`, and `worktree create` creates the workspace.)
 | R16 | `agent start <a> --kind <k> --pane <p> --timeout 90000 -- <args>` (`herdr.rs:148-153`) | claude and hermes launch | `hc run --bg --json --name <a> --cwd <wt> --label lane=<a> --no-parent [--outlive-parent] -- <cmd> <args>` ([out](#run)) | No `--kind` and no readiness timeout: `run --bg` returns at once; readiness = a reported `idle` (`hc wait`). `run` has no `--env` (only `exec` has), so env still goes through a shell line (R15) or `sh -c`. |
 | R17 | `agent wait <a> --until working --until blocked --timeout ms` (`herdr.rs:156-168`) | claude kick confirm, hermes kick, R10 | none | **Gap**: `hc wait` waits until it is *not* working (*"any word but working"*, `hc schema`). The inverse is `send --wait`, or watching `hc events` for `working`. |
 | R18 | `pane wait-output <p> --match X --source visible --timeout ms` (`herdr.rs:170-182`) | hermes kick (waits for `❯`) | `hc wait <t> --output X --timeout s` ([out](#wait)) | **Semantics**: hc matches only *"output printed after the wait started"*; herdr matches what is already visible. Read first (R4), then wait. |
-| R19 | `worktree create --cwd --branch --base --path --label --no-focus` (`herdr.rs:184-200`) | spawn | `git worktree add -b <branch> <path> <base>` (local, or `hc exec --on <m>`), then R16 with `--cwd` | **Gap**: hc has no worktree or workspace commands (`hc --help`). herdsman runs git itself, as `drive.rs:552` already does for scratch trees. |
+| R19 | `worktree create --cwd --branch --base --path --label --no-focus` (`herdr.rs:184-200`) | spawn | `git worktree add -b <branch> <path> <base>` (local, or `hc exec --on <m>`), then R16 with `--cwd` | **Gap**: hc has no worktree or workspace commands (`hc --help`). drover runs git itself, as `drive.rs:552` already does for scratch trees. |
 | R20 | `worktree open --cwd --path --label` (`herdr.rs:202-204`) | spawn (fix rounds reuse the tree) | nothing: the tree exists, R16 `--cwd` it | gap, but trivial. |
 | R21 | `workspace rename <ws> <label>` (`herdr.rs:206-208`) | spawn (#194) | `hc label` | gap; not needed without workspaces. |
 | R22 | `worktree remove --workspace <ws>` (`herdr.rs:211-213`) | clean, gate | `git worktree remove` | gap; `check.rs:659-661` already falls back to `git worktree remove`. |
@@ -94,12 +94,12 @@ One Claude Code terminal (it reports status) next to a plain `sh` (it does not):
 ```
 $ hc ls --json
 {"hidden_finished":15,"terminals":[{"address":"t17","agent":"claude-code","cwd":"$S/cc","name":"hs-cc-197","state":"live","status":"idle","turn":0}]}
-$ hc run --bg --json --name spike197 --cwd $S/wt --label herdsman=spike --no-parent sh
+$ hc run --bg --json --name spike197 --cwd $S/wt --label drover=spike --no-parent sh
 {"address":"t18","agent":"sh","cwd":"$S/wt","name":"spike197","state":"live","turn":0}
 ```
 For comparison, one row of `herdr agent list` (0.9.5):
 ```
-{"agent":"claude","agent_status":"idle","completion_seq":112,"cwd":"…/issue-182","focused":false,"foreground_cwd":"…/issue-182","interactive_ready":true,"name":"herdsman-impl-182","pane_id":"w5:p1","revision":1,"state_change_seq":112,"tab_id":"w5:t1","terminal_id":"term_65f45daa27d8d5","terminal_title":"✳ herdsman · impl #182 · …","workspace_id":"w5"}
+{"agent":"claude","agent_status":"idle","completion_seq":112,"cwd":"…/issue-182","focused":false,"foreground_cwd":"…/issue-182","interactive_ready":true,"name":"drover-impl-182","pane_id":"w5:p1","revision":1,"state_change_seq":112,"tab_id":"w5:t1","terminal_id":"term_65f45daa27d8d5","terminal_title":"✳ drover · impl #182 · …","workspace_id":"w5"}
 ```
 
 #### get
@@ -107,7 +107,7 @@ For comparison, one row of `herdr agent list` (0.9.5):
 $ hc get t17 --json
 {"address":"t17","argv":["claude"],"cols":200,"created_ms":<ms>,"cwd":"$S/cc","die_with_parent":false,"exit_code":null,"finished_ms":null,"foreground":{"argv":["claude"],"cwd":"$S/cc","name":"2.1.309","pid":50052},"identity":"ghostty","keep":false,"labels":{},"name":"hs-cc-197","notify":true,"parent":null,"pid":50052,"reason":null,"reported":true,"rm":false,"rows":120,"screen":"exact","signal":null,"state":"live","status":{"app":"claude-code","state":"idle"},"status_ms":<ms>,"template":null,"title":"Claude Code","turn":0}
 $ hc get spike197 --json
-{"address":"t18","argv":["sh"],…,"labels":{"herdsman":"spike"},"name":"spike197",…,"reported":false,…,"state":"live","status":null,"status_ms":null,"template":null,"title":"","turn":0}
+{"address":"t18","argv":["sh"],…,"labels":{"drover":"spike"},"name":"spike197",…,"reported":false,…,"state":"live","status":null,"status_ms":null,"template":null,"title":"","turn":0}
 ```
 Note: `ls` gives `status` as a string; `get` gives `{"app","state"}`.
 
@@ -156,9 +156,9 @@ A timeout exits 0 with `"reason":"timeout"`: the adapter must read `reason`, not
 
 #### label and filter
 ```
-$ hc label spike197 lane=herdsman-impl-197 --json
-{…,"labels":{"herdsman":"spike","lane":"herdsman-impl-197"},"name":"spike197",…}
-$ hc ls --label lane=herdsman-impl-197 --json
+$ hc label spike197 lane=drover-impl-197 --json
+{…,"labels":{"drover":"spike","lane":"drover-impl-197"},"name":"spike197",…}
+$ hc ls --label lane=drover-impl-197 --json
 {"hidden_finished":0,"terminals":[{"address":"t18","agent":"sh","cwd":"$S/wt","name":"spike197","state":"live","turn":0}]}
 ```
 
@@ -195,12 +195,12 @@ git version 2.56.0
 $ hc events --json --terminal t17      # first line: a snapshot of matching terminals
 {"channel":null,"seq":16,"terminals":[{"address":"t17",…,"status":{"app":"claude-code","state":"idle"},…}]}
 ```
-herdr has no event stream herdsman uses; `herdsman serve` polls `agent list` every 2 s (`serve.rs:641`). `hc events`
+herdr has no event stream drover uses; `drover serve` polls `agent list` every 2 s (`serve.rs:641`). `hc events`
 could replace that poll, but it is not needed for a first cut.
 
 ## 2. Adapter shape
 
-**Setting:** `runtime = "herdr" | "hc"` in `[fleet.<name>]`, default `herdr`. herdsman checks it in `doctor` (is the
+**Setting:** `runtime = "herdr" | "hc"` in `[fleet.<name>]`, default `herdr`. drover checks it in `doctor` (is the
 binary on PATH, does `hc server status` answer) and records it in each `spawn` event, so a lane keeps the runtime it
 started on even if the setting changes later.
 
@@ -218,7 +218,7 @@ src/runtime/hc.rs    the hc impl; git worktree through hosts::On
 
 ```rust
 pub trait Runtime {
-    fn agents(&self) -> Result<Vec<Agent>>;                 // R2/R3 (hc: ls --label herdsman=<fleet>)
+    fn agents(&self) -> Result<Vec<Agent>>;                 // R2/R3 (hc: ls --label drover=<fleet>)
     fn read(&self, pane: &str, lines: Option<u32>) -> Result<String>;   // R4/R5
     fn keys(&self, pane: &str, key: Key) -> Result<()>;     // R6
     fn reply(&self, a: &Agent, text: &str) -> Result<()>;   // R7-R9
@@ -236,7 +236,7 @@ pub trait Runtime {
 `Started`'s error enum replaces `failed_with` (R12). The harnesses keep their per-harness steps (settle, kick,
 confirm) but ask the runtime for each step instead of building argv.
 
-**Size estimate** (formatted lines, as `herdsman cap-check` counts them):
+**Size estimate** (formatted lines, as `drover cap-check` counts them):
 
 | Part | Lines |
 |---|---|
@@ -252,7 +252,7 @@ fits, leaving about 650.
 
 ## 3. Status mapping
 
-| herdr `agent_status` | hc OSC 7501 (`hc get` `.status.state`) | herdsman meaning |
+| herdr `agent_status` | hc OSC 7501 (`hc get` `.status.state`) | drover meaning |
 |---|---|---|
 | `working` | `working` | busy: no stall, no reap, gate leaves the reviewer alone |
 | `idle` | `idle` | waiting for input |
@@ -291,7 +291,7 @@ would get):
   succeeds.
 
 **Rule for a fleet on `hc`:** every harness the fleet uses must report OSC 7501, checked by `doctor` (start it, wait
-for `reported:true`). A harness that does not stays on `herdr`. No screen-scraped status in herdsman: that is the
+for `reported:true`). A harness that does not stays on `herdr`. No screen-scraped status in drover: that is the
 thing hc deliberately does not do.
 
 ## 4. Multi-host: #157 on `herdr --machine` vs `hc machine`
@@ -316,22 +316,22 @@ lane. A narrower step that needs no runtime switch: use `hc exec --on` / `hc fil
 
 - **A young 0.1.x API.** hc was created 2026-10-16 (`gh api repos/herdrdev/herdr-core`); the CHANGELOG lists 0.1.11 to
   0.1.17 between 2026-10-26 and 2026-11-02: seven releases in eight days. The ones read here are fixes and additions,
-  no CLI removal, but they include behaviour changes herdsman would feel: *"Child terminals end when their parent ends
-  by default"* (0.1.13). herdsman would start lanes with `--no-parent` (and `--outlive-parent` where a parent is set).
+  no CLI removal, but they include behaviour changes drover would feel: *"Child terminals end when their parent ends
+  by default"* (0.1.13). drover would start lanes with `--no-parent` (and `--outlive-parent` where a parent is set).
   Track: the CHANGELOG, `hc schema` (`info.version`), and the `hello` method's *"protocol generation"*.
 - **Telemetry.** The herdr-app README: *"Usage telemetry is on by default in releases. Turn it off in Settings →
-  Privacy."* The hc README, `docs/security.md` and `docs/machines.md` do not mention telemetry; the only outbound call
-  they name is updates: *"The default release service is HTTPS at releases.herdr.dev."* herdsman would need only
+  Privacy."* The hc README, its docs/security.md and docs/machines.md do not mention telemetry; the only outbound call
+  they name is updates: *"The default release service is HTTPS at releases.herdr.dev."* drover would need only
   `hc`, never the app. That the core sends none was not verified at the network level.
 - **Updates and running lanes.** *"Updates restart the core while holders keep the terminals running"*
   (security.md). The 0.1.17 entry *"On macOS, quitting Herdr no longer stops your agents … Agents that were already
   running before the update pick this up the next time they start"* shows that a lane's behaviour can depend on the
-  version it started under. `herdsman tick` should not run `hc update` itself; the owner updates between lanes.
+  version it started under. `drover tick` should not run `hc update` itself; the owner updates between lanes.
 - **Two runtimes at once.** herdr 0.9.5 and hc 0.1.16 run side by side on the Mini today; lanes are on herdr, hc only
   shows the owner's app terminals. `hc ls` lists *"all live terminals, not just yours"* (`hc --skill`), so a fleet on
-  hc must filter by its own label (`herdsman=<fleet>`) and never touch other terminals.
+  hc must filter by its own label (`drover=<fleet>`) and never touch other terminals.
 - **Trust.** *"There is no separate API password or per-client permission check"* (security.md), same as herdr's
-  socket today. The account token herdsman exports into a lane's shell (R15) stays out of `hc get`'s `argv` only if it
+  socket today. The account token drover exports into a lane's shell (R15) stays out of `hc get`'s `argv` only if it
   is typed into a shell, not passed to `hc run`.
 - **Windows:** not needed; not looked at.
 - **Leftover found:** a `claude` terminal `hs-cc-197` (t17) from an earlier attempt at this lane was live in hc; it is
@@ -339,14 +339,14 @@ lane. A narrower step that needs no runtime switch: use `hc exec --on` / `hc fil
 
 ## 6. Go / no-go
 
-**No-go now.** herdr 0.9.5 does everything herdsman needs; hc would need herdsman to take over worktrees (R19–R22),
+**No-go now.** herdr 0.9.5 does everything drover needs; hc would need drover to take over worktrees (R19–R22),
 lose coloured transcripts (R5) and two waits (R17, R18 semantics), and it has no proof yet that Hermes and dsh report
 status. The cost is ≈ +375 src lines out of about 1,030 left under the cap, for no new capability the owner asked
 for.
 
 **Go when all of these hold:**
 
-1. hc ≥ 0.2, and the `hc schema` methods herdsman uses (`terminal.run/list/get/read/send/keys/wait/kill/rm/label`,
+1. hc ≥ 0.2, and the `hc schema` methods drover uses (`terminal.run/list/get/read/send/keys/wait/kill/rm/label`,
    `machine.exec`, `file.*`) are unchanged across two releases in a row (diff `hc schema` output);
 2. every harness in use reports OSC 7501 (Claude Code does; Hermes and dsh to be measured);
 3. a wait-until-working exists (or `send --wait` is measured to cover #143's `landed`), and `read` can return ANSI
@@ -366,7 +366,7 @@ name and the runner seam); "—" is not a runtime call.
 | Line | Row | Text |
 |---|---|---|
 | `src/check.rs:11` | — use/mod | `use crate::{gh, herdr};` |
-| `src/check.rs:44` | R2 | `.map_err(\|e\| eprintln!("herdsman check: herdr agent list failed ({e:#}); skipping lane c` |
+| `src/check.rs:44` | R2 | `.map_err(\|e\| eprintln!("drover check: herdr agent list failed ({e:#}); skipping lane c` |
 | `src/check.rs:91` | R4 | `let screen = herdr::read(r, p).unwrap_or_default();` |
 | `src/check.rs:100` | R5 | `crate::lanes::roll(&f, &crate::lanes::body(&herdr::recent(r, p, "200").unwrap_or_default()` |
 | `src/check.rs:106` | R9 | `if !seen && herdr::reply(r, dsh, lane, p, &line).is_ok() {` |
@@ -380,7 +380,7 @@ name and the runner seam); "—" is not a runtime call.
 | `src/check.rs:659` | — comment/doc | `/// herdr first; else 'git worktree remove' (never '--force') of the re-checked tree minus` |
 | `src/check.rs:661` | R22 | `if !ws.is_empty() && herdr::worktree_remove(r, ws)? {` |
 | `src/check.rs:698` | R6 | `herdr::keys(&On::of(r, Some(e)), e.str("pane").unwrap_or_default(), "Escape")?;` |
-| `src/check.rs:707` | — comment/doc | `/// 'herdsman close': close a non-lane herdr agent's pane (by name or pane id); files stay` |
+| `src/check.rs:707` | — comment/doc | `/// 'drover close': close a non-lane herdr agent's pane (by name or pane id); files stay` |
 | `src/check.rs:709` | R2 | `let (events, agents) = (read(&ctx.state)?, herdr::agents(r)?);` |
 | `src/check.rs:715` | R2 | `let pane = a.and_then(\|a\| a["pane_id"].as_str()).context("no such herdr agent")?;` |
 | `src/check.rs:716` | R11 | `herdr::close(r, pane)?;` |
@@ -391,7 +391,7 @@ name and the runner seam); "—" is not a runtime call.
 | `src/cli.rs:65` | — comment/doc | `/// The herdr pane the harness runs in` |
 | `src/cli.rs:188` | — comment/doc | `/// With --export: the inert demo, its herdr/gh/host reads canned in runner.json next to f` |
 | `src/cli.rs:236` | — comment/doc | `/// Read-only host check: herdr, gh, config, accounts, harnesses, serve, phone, watchdog; ` |
-| `src/cli.rs:258` | — comment/doc | `/// Close the pane of a herdr agent that is not a herdsman lane (IS_LANE for lanes); files` |
+| `src/cli.rs:258` | — comment/doc | `/// Close the pane of a herdr agent that is not a drover lane (IS_LANE for lanes); files` |
 | `src/config.rs:28` | — comment/doc | `/// #157: one host: its herdr machine label (unset = this host), hand tags, worktree root,` |
 | `src/doctor.rs:24` | R1 | `if let Some((client, server, older)) = crate::timer::herdr_versions(r) {` |
 | `src/doctor.rs:25` | R26 | `let line = format!("herdr — client {client}, server {server} → herdr update --handoff");` |
@@ -448,7 +448,7 @@ name and the runner seam); "—" is not a runtime call.
 | `src/herdr.rs:18` | R0 | `std::iter::once("herdr".to_string()).chain(a).collect()` |
 | `src/herdr.rs:23` | R0 | `runner::ok(r, "herdr", a)` |
 | `src/herdr.rs:28` | R0 | `runner::json(r, "herdr", a)` |
-| `src/herdr.rs:31` | R1 | `/// 'herdr status': client and server versions ('herdsman doctor').` |
+| `src/herdr.rs:31` | R1 | `/// 'herdr status': client and server versions ('drover doctor').` |
 | `src/herdr.rs:36` | R2/R3 | `/// 'herdr agent list' or 'workspace list' ('what'), as JSON.` |
 | `src/herdr.rs:41` | R2/R3 | `/// Live herdr agents ('herdr agent list').` |
 | `src/herdr.rs:49` | R2/R3 | `/// 'herdr agent list''s stdout when it ran OK (serve's watcher hashes it).` |
@@ -462,7 +462,7 @@ name and the runner seam); "—" is not a runtime call.
 | `src/herdr.rs:155` | R17 | `/// 'herdr agent wait' until the kick shows as working or blocked.` |
 | `src/herdr.rs:210` | R22 | `/// Remove the lane's worktree through herdr (by its workspace); false when herdr would no` |
 | `src/host.rs:3` | R2 | `pub use crate::herdr::agents;` |
-| `src/host.rs:19` | R0 | `const SPARE: &[&str] = &[crate::herdr::BIN, "herdsman", "launchd"];` |
+| `src/host.rs:19` | R0 | `const SPARE: &[&str] = &[crate::herdr::BIN, "drover", "launchd"];` |
 | `src/hosts.rs:2` | — comment/doc | `//! as a Runner: herdr gets '--machine', every other tool runs over 'ssh'. No '[hosts]' = ` |
 | `src/hosts.rs:35` | R25 | `if prog == crate::herdr::BIN {` |
 | `src/hosts.rs:241` | — text/path | `ex("~/.herdr/worktrees")` |
@@ -514,7 +514,7 @@ name and the runner seam); "—" is not a runtime call.
 | `src/serve.rs:1889` | R2 | `let left = cfg.zip(herdr::agents(r).ok()).map_or(vec![], \|(c, a)\| {` |
 | `src/serve.rs:1916` | R0 | `let svc = \|s: &&crate::timer::Row\| ["board", "tick", herdr::BIN].contains(&s.0.as_str())` |
 | `src/spawn.rs:7` | — use/mod | `use crate::herdr;` |
-| `src/spawn.rs:124` | R15 | `let mut c = herdr::run_argv(pane, &["export", &lane, &format!("HERDSMAN_PORT={port}")]);` |
+| `src/spawn.rs:124` | R15 | `let mut c = herdr::run_argv(pane, &["export", &lane, &format!("DROVER_PORT={port}")]);` |
 | `src/spawn.rs:321` | — comment/doc | `/// The herdr argv that creates the lane's worktree.` |
 | `src/spawn.rs:323` | R19 | `herdr::worktree_create_argv(local, &p.branch, &p.base, &p.worktree.to_string_lossy(), &p.a` |
 | `src/spawn.rs:337` | R19 | `cmds.push(herdr::line(create_argv(&local, p)));` |
@@ -548,7 +548,7 @@ name and the runner seam); "—" is not a runtime call.
 | `src/spawn.rs:796` | R13 | `herdr::ok(r, &herdr::rename_argv(pane, &p.agent))?;` |
 | `src/timer.rs:5` | — use/mod | `use crate::{drive, herdr, host, Ctx};` |
 | `src/timer.rs:16` | R26 | `const HANDOFF: &str = "restart herdr to finish the update: 'herdr update --handoff'";` |
-| `src/timer.rs:66` | — comment/doc | `/// The jobs' PATH: the dirs of the harness binaries, 'gh', 'herdr' and herdsman, then the` |
+| `src/timer.rs:66` | — comment/doc | `/// The jobs' PATH: the dirs of the harness binaries, 'gh', 'herdr' and drover, then the` |
 | `src/timer.rs:72` | R0 | `.chain(["gh", herdr::BIN])` |
 | `src/timer.rs:151` | — comment/doc | `/// A refusal exits 0; a real error (config, herdr) logs 'tick-failed', alerted at most ho` |
 | `src/timer.rs:160` | R1 | `herdr::status(r).map_err(\|e\| anyhow::anyhow!("herdr: {e:#}"))?;` |

@@ -6,7 +6,7 @@ use crate::api::{
 };
 use crate::conductor::{self, of};
 use crate::config::Config;
-use crate::events::{closed, Event};
+use crate::events::{ask_event, closed, Event};
 use crate::runner::Runner;
 use crate::Ctx;
 use anyhow::{bail, Context, Result};
@@ -43,13 +43,10 @@ fn open_ask<'a>(events: &'a [Event], id: &'a str) -> Option<&'a Event> {
 /// answer the last, under `CHANGE` old).
 fn change<'a>(ctx: &Ctx, events: &'a [Event], e: &Event) -> Option<&'a Event> {
     let id = e.str("change")?;
-    let is = |d: &&Event| d.kind == "decision" && d.fleet == e.fleet && d.str("id") == Some(id);
-    let d = events.iter().rfind(is)?;
+    let d = ask_event(events, "decision", &e.fleet, id)?;
     let by = d.str("by").unwrap_or_default();
-    (by.starts_with("conductor-") && ctx.now < d.ts + crate::CHANGE).then_some(())?;
-    events
-        .iter()
-        .find(|a| a.kind == "needs-decision" && a.fleet == e.fleet && a.str("id") == Some(id))
+    (by.starts_with("orchestrator-") && ctx.now < d.ts + crate::CHANGE).then_some(())?;
+    ask_event(events, "needs-decision", &e.fleet, id)
 }
 
 /// #407: a queued message's id, and its files.
@@ -76,11 +73,11 @@ fn queued<'a>(events: &'a [Event], id: &'a str) -> BTreeMap<u64, &'a Event> {
 
 /// `choose` (an open ask), `working` (mid-turn), `asleep`, `awake` or `new` (no conductor yet).
 fn state(events: &[Event], id: &str, agents: &[Value]) -> &'static str {
-    let lane = of(events, id).rfind(|e| e.kind.starts_with("conductor-"));
+    let lane = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     let a = lane.and_then(|l| agents.iter().find(|a| l.data.get("agent") == Some(&a["name"])));
     match lane {
         _ if open_ask(events, id).is_some() => "choose",
-        Some(l) if l.kind == "conductor-sleep" => "asleep",
+        Some(l) if l.kind == "orchestrator-sleep" => "asleep",
         Some(_) if a.is_some_and(|a| a["agent_status"] == "working") => "working",
         Some(_) => "awake",
         None => "new",
@@ -89,7 +86,7 @@ fn state(events: &[Event], id: &str, agents: &[Value]) -> &'static str {
 
 /// `[chat·N]`: the threads where a choice waits for the owner.
 pub fn choosing(events: &[Event]) -> usize {
-    let ids = events.iter().filter(|e| e.kind == "thread-new");
+    let ids = conductor::threads(events).into_iter();
     ids.filter(|t| open_ask(events, t.str("thread").unwrap_or_default()).is_some())
         .count()
 }
@@ -104,8 +101,7 @@ fn link(e: &Event) -> Option<Link> {
 
 /// An ask as its thread shows it: decided, the answer; else open (no `closed` event) for the choice rows.
 fn ask(events: &[Event], a: &Event, m: Msg) -> Msg {
-    let is = |e: &&Event| e.kind == "decision" && e.fleet == a.fleet && e.str("id") == a.str("id");
-    let answer = events.iter().rfind(is).map(|d| {
+    let answer = ask_event(events, "decision", &a.fleet, a.str("id").unwrap_or_default()).map(|d| {
         let c = d.str("choice").unwrap_or_default();
         let opts = a.data["options"].as_array().into_iter().flatten();
         Answered {
@@ -246,9 +242,9 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
                     ..m("run", s("cmd"))
                 }
             }
-            ("conductor-start", _) if e.data.get("resumed") == Some(&json!(true)) => m("resumed", s("session")),
+            ("orchestrator-start", _) if e.data.get("resumed") == Some(&json!(true)) => m("resumed", s("session")),
             ("thread-model", _) => m("note", conductor::picked(e)),
-            ("conductor-sleep", _) if s("why") != "model" => m("sleep", String::new()),
+            ("orchestrator-sleep", _) if s("why") != "model" => m("sleep", String::new()),
             _ => continue,
         };
         if m.kind == "cmd" {
@@ -284,7 +280,7 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
 
 /// #408: API v1 `thread/<t>?before=<seq>&n=30`: the page of messages before `before`.
 pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>) -> Option<ThreadPage> {
-    let (cfg, t) = (Config::load(&ctx.config).ok()?, conductor::find(events, id).ok()?);
+    let (cfg, t) = (Config::kept(ctx).ok()?, conductor::find(events, id).ok()?);
     let before = q.get("before").and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
     let n = q.get("n").and_then(|v| v.parse().ok()).unwrap_or(30);
     Some(page(ctx, &cfg, events, t, (before, n), u64::MAX))
@@ -340,7 +336,7 @@ fn chips(cfg: &Config, r: &crate::config::Role) -> Vec<Chip> {
     let effort = r.effort_or(&cfg.limits);
     let all = [
         chip("model", r.model.as_deref(), &models),
-        chip("effort", effort.as_deref(), crate::harness::efforts(&r.harness)),
+        chip("effort", effort.as_deref(), crate::providers::get(&r.harness).efforts()),
     ];
     all.into_iter()
         .filter(|c| c.all.len() > 1 || c.cur.is_none() && !c.all.is_empty())
@@ -401,7 +397,7 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Va
             return tab;
         }
     };
-    let threads: Vec<&Event> = events.iter().filter(|e| e.kind == "thread-new").collect();
+    let threads = conductor::threads(events);
     let repos = std::iter::once(("all", "x")).chain(cfg.fleet.iter().map(|(n, f)| (n.as_str(), f.color(n))));
     for (repo, k) in repos {
         let (mut rows, mut arch) = (vec![], vec![]);
@@ -419,7 +415,7 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Va
             harness: chip(
                 "harness",
                 conductor::defaults(cfg, repo).ok().map(|d| d.1.harness).as_deref(),
-                &crate::harness::NAMES,
+                &crate::providers::lane_names(),
             ),
         });
     }
@@ -430,22 +426,20 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Va
 impl super::Server<'_> {
     /// #269: the [chat] tab's data for a device that writes (`rw`) or only reads. #620: the fold is kept by the log's
     /// last seq, fleet.toml's mtime, the agents, `rw` and the minute; a request in between reuses it, the log unread.
+    /// #701: one per `rw` (a paired and an unpaired device no longer evict each other's every tick), keyed by each
+    /// agent's name and status only (all a thread's state reads).
     pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> Value {
         let agents = self.herdr_json(ctx.now, "agent");
         let agents = agents
             .and_then(|j| j["result"]["agents"].as_array().cloned())
             .unwrap_or_default();
-        let key = json!([
-            crate::db::last_seq(&ctx.state),
-            super::mtime(ctx),
-            agents,
-            rw,
-            ctx.now / 60
-        ]);
-        let mut c = self.chat.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let seen: Vec<_> = agents.iter().map(|a| [&a["name"], &a["agent_status"]]).collect();
+        let key = json!([crate::db::last_seq(&ctx.state), super::mtime(ctx), seen, ctx.now / 60]);
+        let mut all = self.chat.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let c = &mut all[usize::from(rw)];
         if c.0 != key {
             // #483: a config or log read error shows its own text (as the Queue tab does).
-            let (cfg, events) = match (Config::load(&ctx.config), crate::events::shared(&ctx.state)) {
+            let (cfg, events) = match (Config::kept(ctx), crate::events::shared(&ctx.state)) {
                 (Ok(c), Ok(e)) => (Ok(c), e),
                 (Err(e), _) | (_, Err(e)) => (Err(format!("{e:#}")), std::sync::Arc::default()),
             };
@@ -474,7 +468,7 @@ pub fn file(ctx: &Ctx, events: &[Event], id: &str, name: &str, demo: bool) -> Op
     if demo && fixture {
         return Some(p.into());
     }
-    conductor::inside(ctx, &Config::load(&ctx.config).ok()?, id, p)
+    conductor::inside(ctx, &Config::kept(ctx).ok()?, id, p)
 }
 
 /// `POST /thread` from a paired owner device: `new` (#405: a first message starts a thread and its conductor), `say`
@@ -488,7 +482,7 @@ pub fn post(
     f: &BTreeMap<String, String>,
     later: &mut Vec<(Event, String)>,
 ) -> Result<String> {
-    let cfg = Config::load(&ctx.config)?;
+    let cfg = Config::kept(ctx)?;
     let events = crate::events::shared(&ctx.state)?;
     let g = |k: &str| f.get(k).map_or("", String::as_str);
     let (id, mut out) = (g("t"), vec![]);
@@ -613,8 +607,11 @@ fn unqueue(ctx: &Ctx, e: &Event, why: &str) -> Result<()> {
 
 /// #407: Esc into the thread's live conductor: its turn stops (an asleep one has none).
 fn stop(r: &dyn Runner, events: &[Event], id: &str) {
-    let last = of(events, id).rfind(|e| e.kind.starts_with("conductor-"));
-    if let Some(p) = last.filter(|e| e.kind == "conductor-start").and_then(|e| e.str("pane")) {
+    let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
+    if let Some(p) = last
+        .filter(|e| e.kind == "orchestrator-start")
+        .and_then(|e| e.str("pane"))
+    {
         drop(crate::herdr::keys(r, p, "Escape"));
     }
 }
@@ -622,11 +619,11 @@ fn stop(r: &dyn Runner, events: &[Event], id: &str) {
 /// #407: at a turn's end (the conductor no longer working) its queued messages go in, oldest first, each logged as
 /// the owner's and unqueued; the lines for `deliver`.
 pub fn flush(ctx: &Ctx, agents: &[Value]) -> Vec<(Event, String)> {
-    let (Ok(cfg), Ok(events)) = (Config::load(&ctx.config), crate::events::shared(&ctx.state)) else {
+    let (Ok(cfg), Ok(events)) = (Config::kept(ctx), crate::events::shared(&ctx.state)) else {
         return vec![];
     };
     let mut out = vec![];
-    for t in events.iter().filter(|e| e.kind == "thread-new") {
+    for t in conductor::threads(&events) {
         let id = t.str("thread").unwrap_or_default();
         for e in queued(&events, id)
             .values()
@@ -651,7 +648,7 @@ pub fn flush(ctx: &Ctx, agents: &[Value]) -> Vec<(Event, String)> {
 /// #403: type a logged message into its conductor (after the reply went out); a failure is a red system line whose
 /// [retry] types it again.
 pub fn deliver(ctx: &Ctx, r: &dyn Runner, (t, line): &(Event, String)) {
-    let Ok(cfg) = Config::load(&ctx.config) else { return };
+    let Ok(cfg) = Config::kept(ctx) else { return };
     if let Err(e) = conductor::deliver(ctx, &cfg, r, t, line) {
         let text = format!("✗ not delivered: {e:#}");
         let d = json!({"thread": t.str("thread"), "from": "system", "text": text, "line": line});

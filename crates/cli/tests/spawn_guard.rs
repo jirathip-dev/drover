@@ -2,21 +2,21 @@
 //! WORKTREE_DIRTY, --supersede), the Hermes kick retry (#9) and the NO_ORCH refusal (#155).
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::path::PathBuf;
 
 const WS: &str = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
 const PANES: &str = r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#;
 
-fn wt(c: &herdsman::Ctx) -> PathBuf {
+fn wt(c: &drover::Ctx) -> PathBuf {
     c.worktrees.join("sendmeter/issue-12")
 }
 
-/// A Fake on which `herdsman spawn sendmeter 12 impl` (hermes) succeeds end to end.
+/// A Fake on which `drover spawn sendmeter 12 impl` (hermes) succeeds end to end.
 /// Prepend `once` replies or pass `agent_list` to steer it.
-fn happy(c: &herdsman::Ctx, agent_list: &str) -> Fake {
+fn happy(c: &drover::Ctx, agent_list: &str) -> Fake {
     let w = wt(c);
     std::fs::create_dir_all(&w).unwrap();
     Fake::default()
@@ -38,13 +38,13 @@ fn happy(c: &herdsman::Ctx, agent_list: &str) -> Fake {
         .reply("herdr agent wait", "{}")
 }
 
-fn spawn(c: &herdsman::Ctx, r: &dyn Runner, extra: &[&str]) -> (i32, String) {
+fn spawn(c: &drover::Ctx, r: &dyn Runner, extra: &[&str]) -> (i32, String) {
     let mut a = vec!["spawn", "sendmeter", "12", "impl"];
     a.extend(extra);
     run(c, r, &a)
 }
 
-fn assert_refused(c: &herdsman::Ctx, r: &Fake, extra: &[&str], code: &str) -> String {
+fn assert_refused(c: &drover::Ctx, r: &Fake, extra: &[&str], code: &str) -> String {
     let before = read(&c.state).unwrap().len();
     let (exit, out) = spawn(c, r, extra);
     assert_eq!(exit, 3, "{out} {:?}", r.calls.borrow());
@@ -125,7 +125,7 @@ fn disk_low_under_min_free_gb() {
     let r = happy(&c, NO_AGENTS).once("df -k /", 0, &df(9 * 1_048_576));
     let out = assert_refused(&c, &r, &[], "DISK_LOW");
     assert!(
-        out.contains("9.0 GB free < 10;") && out.contains("herdsman clean --yes"),
+        out.contains("9.0 GB free < 10;") && out.contains("drover clean --yes"),
         "{out}"
     );
     let r = happy(&c, NO_AGENTS).once("df -k /", 0, &df(19 * 1_048_576));
@@ -140,6 +140,27 @@ fn host_busy_on_load_per_cpu() {
     let r = happy(&c, NO_AGENTS).once("sysctl -n vm.loadavg", 0, "{ 26.00 3.00 2.00 }\n");
     let out = assert_refused(&c, &r, &[], "HOST_BUSY");
     assert!(out.contains("load/cpu 2.60"), "{out}");
+}
+
+#[test]
+fn load_from_drovers_own_processes_admits_and_an_outside_one_is_named() {
+    let c = ctx(&tmpdir("host-own-load"), CONFIG);
+    let ps = "  101     1 600.0 /opt/drover/bin/drover\n  102   101 350.0 /bin/cp\n  103     1   5.0 /usr/sbin/mds\n";
+    let own = happy(&c, NO_AGENTS)
+        .once("sysctl -n vm.loadavg", 0, "{ 26.00 3.00 2.00 }\n")
+        .reply("ps -Ao", ps);
+    let (exit, out) = spawn(&c, &own, &[]);
+    assert_eq!(exit, 0, "drover's own drive and clone: {out}");
+    let busy = format!("{ps}  104     1 900.0 /usr/bin/rustc\n  105     1 120.0 /usr/libexec/fseventsd\n");
+    let c = ctx(&tmpdir("host-other-load"), CONFIG);
+    let other = happy(&c, NO_AGENTS)
+        .once("sysctl -n vm.loadavg", 0, "{ 36.00 3.00 2.00 }\n")
+        .reply("ps -Ao", &busy);
+    let out = assert_refused(&c, &other, &[], "HOST_BUSY");
+    assert!(
+        out.contains("load/cpu 2.65 > 2.5 (top: rustc 900%, fseventsd 120%, mds 5%)"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -346,7 +367,7 @@ fn an_orch_spawn_is_refused_and_every_lane_takes_an_issue() {
         assert_eq!(exit, 3, "{out}");
         assert_eq!(
             out.trim(),
-            "REFUSED NO_ORCH: herdsman drives fleets itself; see herdsman timer"
+            "REFUSED NO_ORCH: drover drives fleets itself; see drover timer"
         );
         assert!(!r.called("herdr"), "{:?}", r.calls.borrow());
     }
@@ -455,6 +476,31 @@ fn start_timeout_without_harness_closes_pane_and_retries_once() {
             .all(|e| matches!(e.kind.as_str(), "spawn-started" | "intent" | "failed")), // #509: its try
         "nothing but the intent (#376) logged"
     );
+}
+
+/// #718: a pane whose title changes on every read (a busy spinner) but never confirms still gives up at 120 s: a
+/// title change never extends confirm's window.
+#[test]
+fn a_title_that_changes_every_read_never_extends_the_confirm_window() {
+    let d = tmpdir("timeout-spinner");
+    let c = ctx(&d, CONFIG);
+    let mut r = happy(&c, NO_AGENTS)
+        .once_err("herdr agent start", 1, TIMEOUT)
+        .once_err("herdr agent start", 1, TIMEOUT)
+        .once(
+            "herdr pane split w9:p1",
+            0,
+            r#"{"result":{"pane":{"pane_id":"w9:p2"}}}"#,
+        );
+    for i in 0..200 {
+        let pane = json!({"result": {"pane": {"pane_id": "w9:p1", "agent": null, "terminal_title": format!("⠋ {i}")}}});
+        r = r.once("herdr pane get w9:p", 0, &pane.to_string());
+    }
+    let (exit, out) = spawn(&c, &r, &[]);
+    assert_eq!(exit, 1, "{out}");
+    assert_eq!(r.count("herdr agent start"), 2, "retried once");
+    assert_eq!(r.count("sleep 5"), 2 * 24, "each confirm gives up at 120 s");
+    assert!(r.called("herdr pane close w9:p1") && r.called("herdr pane close w9:p2"));
 }
 
 /// #359: the retried start succeeds: the lane runs on the fresh pane.
@@ -624,7 +670,7 @@ const TAKEN: &str = r#"{"error":{"code":"agent_name_taken","message":"agent name
 const PANE_P7: &str = r#"{"result":{"pane":{"pane_id":"w9:p7","workspace_id":"w9","agent":"hermes"}}}"#;
 
 /// The guard's `agent list` sees nothing; after `agent_name_taken` the next one shows the orphan in `cwd`.
-fn name_taken(c: &herdsman::Ctx, cwd: &str) -> Fake {
+fn name_taken(c: &drover::Ctx, cwd: &str) -> Fake {
     let list = agents(&[("sendmeter-impl-12", "working", cwd, "w9:p7")]);
     happy(c, &list)
         .once("herdr agent list", 0, NO_AGENTS)
@@ -753,7 +799,7 @@ fn lane_live_on_an_idle_unlogged_pane_names_its_age_and_the_way_out() {
     let list = json!({"result": {"agents": [{"agent_status": "idle", "cwd": w, "pane_id": "w6N5:p1"}]}}).to_string();
     let out = assert_refused(&c, &happy(&c, &list), &[], "LANE_LIVE");
     assert!(
-        out.contains("stale pane w6N5:p1 (idle 3h): herdsman adopt or --supersede"),
+        out.contains("stale pane w6N5:p1 (idle 3h): drover adopt or --supersede"),
         "{out}"
     );
 }
@@ -798,7 +844,7 @@ fn chain(harness: &str) -> String {
 }
 
 /// The error a failed start logged.
-fn failed(c: &herdsman::Ctx) -> String {
+fn failed(c: &drover::Ctx) -> String {
     let ev = read(&c.state).unwrap();
     let f = ev
         .iter()
@@ -831,7 +877,7 @@ fn a_start_failure_records_the_pane_screen() {
     );
 }
 
-fn claude_ctx(name: &str) -> (PathBuf, herdsman::Ctx) {
+fn claude_ctx(name: &str) -> (PathBuf, drover::Ctx) {
     let d = tmpdir(name);
     let c = ctx(&d, &chain("claude"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
@@ -908,7 +954,7 @@ fn a_known_first_start_prompt_is_answered_and_the_spawn_confirms() {
     }
 }
 
-/// A prompt herdsman does not know is never answered: the spawn fails with that screen in its error.
+/// A prompt drover does not know is never answered: the spawn fails with that screen in its error.
 #[test]
 fn an_unknown_first_start_prompt_fails_with_its_screen() {
     let (_d, c) = claude_ctx("first-start-unknown");

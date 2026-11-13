@@ -1,18 +1,18 @@
 //! #561: a remote host that never answers (the Air, offline) costs a tick one 5 s probe: the tick stays in budget,
-//! drive still starts work, the host shows offline; a disabled host's worktrees are never probed by clean; a call
+//! drive still starts work, the host shows offline; a disabled host's worktrees are never probed by the tick's clean; a call
 //! through a dead shared ssh connection drops its socket and runs once more; a tick 10 min old raises `tick-stuck` once.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::time::Duration;
 
 const NOW: u64 = 1_000_000;
 const WT: &str = "/Users/me/.herdr/worktrees/sendmeter/issue-9";
-const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
+const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
 
-fn setup(name: &str, extra: &str) -> herdsman::Ctx {
+fn setup(name: &str, extra: &str) -> drover::Ctx {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n{extra}");
     let c = ctx(&tmpdir(name), &toml);
@@ -69,6 +69,7 @@ struct Hang {
     mark: std::path::PathBuf,
     spent: Shared<u64>,
     seen: Shared<Vec<String>>,
+    beats: Shared<Vec<String>>,
 }
 
 fn air(prog: &str, args: &[String]) -> bool {
@@ -92,6 +93,10 @@ impl Runner for Hang {
         self.seen
             .borrow_mut()
             .push(std::fs::read_to_string(&self.mark).unwrap_or_default());
+        let beat = self.mark.with_file_name("tick.beat");
+        self.beats
+            .borrow_mut()
+            .push(std::fs::read_to_string(beat).unwrap_or_default());
         self.spent.set(self.spent.get() + limit.as_secs());
         Ok(Out {
             code: 124,
@@ -100,9 +105,6 @@ impl Runner for Hang {
     }
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> anyhow::Result<u32> {
         self.f.detach(exe, args, log)
-    }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.f.secret(svc)
     }
 }
 
@@ -120,6 +122,7 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
         mark: c.state.with_file_name("tick.step"),
         spent: Shared::new(0),
         seen: Shared::default(),
+        beats: Shared::default(),
     };
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
@@ -138,28 +141,35 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
     let mark = r.seen.borrow()[0].clone();
     assert!(mark.contains(r#""step":"check""#) && mark.contains("air"), "{mark}");
     assert!(!r.mark.exists(), "the tick's step marker goes when it ends");
-    let cached = herdsman::hosts::cached(&c);
+    // #791: a running tick's heartbeat (`<started> <beat>`), gone when it ends.
+    assert_eq!(r.beats.borrow()[0], format!("{NOW} {NOW}"));
+    assert!(
+        !r.mark.with_file_name("tick.beat").exists(),
+        "the heartbeat goes when the tick ends"
+    );
+    let cached = drover::hosts::cached(&c);
     assert!(!cached["air"].up, "the Air shows offline");
     assert!(
-        out.contains(&format!("keep air:{WT}: host offline (not cleaned)")),
+        out.contains(&format!("keep air:{WT}: host unreachable (not cleaned)")),
         "{out}"
     );
     let (_, status) = run(&c, &Fake::default(), &["status"]);
     assert!(status.contains("host offline: air"), "{status}");
 }
 
+/// #678: drive's hourly clean and trim still leave a disabled host alone: listed, never removed or swept.
 #[test]
-fn clean_never_probes_a_disabled_hosts_worktrees() {
+fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
     let c = setup("stuck-disabled", "enabled = false");
     let r = local().reply("herdr --machine air agent list", NO_AGENTS);
-    let (code, out) = run(&c, &r, &["clean", "--yes"]);
+    let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains(&format!("keep air:{WT}: on a disabled host (not cleaned)")),
+        out.contains(&format!("keep air:{WT}: host unreachable (not cleaned)")),
         "{out}"
     );
-    let calls = r.calls.borrow();
-    assert!(!calls.iter().any(|l| l.starts_with(SSH)), "{calls:?}");
+    assert!(!r.called("herdr --machine air worktree remove"), "{out}");
+    assert!(!out.contains("scratch: air:"), "no scratch sweep there: {out}");
     // Enabled again: probed and removed as before.
     let c2 = setup("stuck-enabled", "");
     let r = local()
@@ -170,16 +180,45 @@ fn clean_never_probes_a_disabled_hosts_worktrees() {
     assert!(!out.contains("not cleaned"), "{out}");
 }
 
+/// #678: an explicit `clean --yes` on a disabled host that never answers: one bounded probe, `offline (not cleaned)`,
+/// nothing else sent there.
+#[test]
+fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
+    let c = setup("stuck-disabled-silent", "enabled = false");
+    let r = Hang {
+        f: local(),
+        mark: c.state.with_file_name("tick.step"),
+        spent: Shared::new(0),
+        seen: Shared::default(),
+        beats: Shared::default(),
+    };
+    let (code, out) = run(&c, &r, &["clean", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains(&format!("keep air:{WT}: host unreachable (not cleaned)")),
+        "{out}"
+    );
+    assert!(out.contains("scratch: air: host offline (not cleaned)"), "{out}");
+    let calls = r.f.calls.borrow();
+    let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
+    assert_eq!(
+        to_air,
+        ["ssh -oBatchMode=yes -oConnectTimeout=5 -oControlPath=none air -- true"],
+        "one probe, nothing after it"
+    );
+    assert!(r.spent.get() <= 5, "{}s on the Air", r.spent.get());
+}
+
 #[test]
 fn a_dead_shared_connection_drops_its_socket_and_runs_once_more_without_it() {
     let c = setup("stuck-socket", "");
-    let sock = c.state.with_file_name("herdsman-ssh-abc");
+    let sock = c.state.with_file_name("drover-ssh-abc");
     std::fs::write(&sock, "").unwrap();
     let probe = format!("{SSH}'sh' '-c' 'test -e");
     let r = local()
         .reply("herdr --machine air agent list", NO_AGENTS)
         .reply(
-            "ssh -G -oControlPath=/tmp/herdsman-ssh-%C air",
+            "ssh -G -oControlPath=/tmp/drover-ssh-%C air",
             &format!("user me\ncontrolpath {}\n", sock.display()),
         )
         .once_err(
@@ -209,40 +248,144 @@ fn a_dead_shared_connection_drops_its_socket_and_runs_once_more_without_it() {
 }
 
 #[test]
-fn a_tick_ten_minutes_old_raises_tick_stuck_once_naming_its_step_and_child() {
+fn a_tick_ten_minutes_old_it_cannot_name_raises_slo_tick_and_stuck_once() {
     let c = setup("stuck-alert", "");
     let mark = c.state.with_file_name("tick.step");
     let child = "ssh -oBatchMode=yes air -- 'sh' '-c' 'test -e \"$1\"'";
-    let stuck = |c: &herdsman::Ctx| -> Vec<Event> {
-        assert_eq!(run(c, &local(), &["drive", "--fast"]).0, 0);
-        read(&c.state)
-            .unwrap()
-            .into_iter()
-            .filter(|e| e.kind == "tick-stuck")
-            .collect()
+    let kinds = |c: &drover::Ctx, k: &str| -> Vec<Event> {
+        read(&c.state).unwrap().into_iter().filter(|e| e.kind == k).collect()
     };
+    let drive = |c: &drover::Ctx| assert_eq!(run(c, &local(), &["drive", "--fast"]).0, 0);
     std::fs::write(
         &mark,
         json!({"since": NOW - 300, "step": "clean", "child": child}).to_string(),
     )
     .unwrap();
-    assert!(stuck(&c).is_empty(), "5 min is not stuck");
+    drive(&c);
+    assert!(kinds(&c, "slo-tick").is_empty(), "5 min is not stuck");
     std::fs::write(
         &mark,
         json!({"since": NOW - 700, "step": "clean", "child": child}).to_string(),
     )
     .unwrap();
-    let later = herdsman::Ctx {
+    let later = drover::Ctx {
         now: NOW + 60,
         ..c.clone()
     };
     for c in [&c, &c, &later] {
-        let e = stuck(c);
+        drive(c);
+        let e = kinds(c, "slo-tick");
         assert_eq!(e.len(), 1, "once: {e:?}");
-        assert_eq!((e[0].str("step"), e[0].str("child")), (Some("clean"), Some(child)));
         assert!(
-            e[0].str("reason").unwrap().contains("tick running 11 min, in clean"),
+            e[0].str("reason")
+                .unwrap()
+                .contains(&format!("tick running 11 min, in clean; waiting on: {child}")),
             "{e:?}"
         );
+        let s = kinds(c, "stuck");
+        assert_eq!(
+            s.len(),
+            1,
+            "no heal for a tick with no pid: alerted at once, once: {s:?}"
+        );
+        assert!(
+            s[0].str("reason").unwrap().ends_with("tried: nothing (no known heal)"),
+            "{s:?}"
+        );
     }
+    assert!(kinds(&c, "self-heal").is_empty());
+}
+
+#[test]
+fn a_drover_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self_heal() {
+    let c = setup("stuck-kill", "");
+    let mark = c.state.with_file_name("tick.step");
+    std::fs::write(
+        &mark,
+        json!({"since": NOW - 700, "step": "drive", "child": "", "pid": 4242}).to_string(),
+    )
+    .unwrap();
+    let r = local()
+        .once("kill -0 4242", 0, "")
+        .reply("ps -o command= -p 4242", "/Users/me/.local/bin/drover tick\n")
+        .reply("kill -TERM 4242", "");
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(r.count("kill -TERM 4242"), 1);
+    assert!(!r.called("kill -KILL"), "it ended on SIGTERM");
+    let ev = read(&c.state).unwrap();
+    let heal: Vec<&Event> = ev.iter().filter(|e| e.kind == "self-heal").collect();
+    assert_eq!(heal.len(), 1, "{heal:?}");
+    assert_eq!(heal[0].str("did"), Some("stopped tick pid 4242 (SIGTERM)"));
+    assert_eq!(ev.iter().filter(|e| e.kind == "slo-tick").count(), 1);
+    let later = drover::Ctx {
+        now: NOW + 600,
+        ..c.clone()
+    };
+    let r = local().reply("ps -o command= -p 4242", "/Users/me/.local/bin/drover tick\n");
+    assert_eq!(run(&later, &r, &["drive", "--fast"]).0, 0);
+    assert!(!r.called("kill -TERM"), "a stopped tick is not stopped again");
+    let kinds: Vec<String> = read(&c.state)
+        .unwrap()
+        .into_iter()
+        .map(|e| e.kind)
+        .filter(|k| k.starts_with("s"))
+        .collect();
+    assert!(
+        kinds.ends_with(&["slo-tick".into(), "self-heal".into(), "slo-ok".into()]),
+        "{kinds:?}"
+    );
+    assert!(!kinds.contains(&"stuck".to_string()), "healed: no alert");
+}
+
+#[test]
+fn a_process_that_is_no_drover_tick_is_never_killed() {
+    let c = setup("stuck-foreign", "");
+    let mark = c.state.with_file_name("tick.step");
+    std::fs::write(
+        &mark,
+        json!({"since": NOW - 700, "step": "drive", "child": "", "pid": 4243}).to_string(),
+    )
+    .unwrap();
+    let r = local()
+        .reply("kill -0 4243", "")
+        .reply("ps -o command= -p 4243", "/usr/bin/vim notes.txt\n");
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert!(
+        !r.called("kill -TERM") && !r.called("kill -KILL"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    let ev = read(&c.state).unwrap();
+    assert!(
+        ev.iter().any(|e| e.kind == "stuck"),
+        "a tick it cannot name is the owner's at once"
+    );
+}
+
+#[test]
+fn a_tick_that_ignores_sigterm_is_killed_after_10_s() {
+    let c = setup("stuck-sigkill", "");
+    let mark = c.state.with_file_name("tick.step");
+    std::fs::write(
+        &mark,
+        json!({"since": NOW - 700, "step": "drive", "child": "", "pid": 4244}).to_string(),
+    )
+    .unwrap();
+    let r = local()
+        .reply("kill -0 4244", "")
+        .reply("ps -o command= -p 4244", "drover drive\n")
+        .reply("kill -TERM 4244", "")
+        .reply("kill -KILL 4244", "");
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
+    assert_eq!(
+        (
+            r.count("kill -TERM 4244"),
+            r.count("sleep 1"),
+            r.count("kill -KILL 4244")
+        ),
+        (1, 10, 1)
+    );
+    let ev = read(&c.state).unwrap();
+    let heal = ev.iter().find(|e| e.kind == "self-heal").unwrap();
+    assert_eq!(heal.str("did"), Some("stopped tick pid 4244 (SIGKILL after 10 s)"));
 }

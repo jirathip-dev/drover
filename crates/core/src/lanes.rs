@@ -1,7 +1,7 @@
 //! The page's Lanes tab (docs/serve.md): herdr agents joined with the log, grouped, plus masked pane text.
 use crate::config::Config;
 use crate::events::{Event, States};
-use crate::harness;
+use crate::providers;
 use crate::runner::{ok, Runner};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,7 +15,7 @@ pub struct Lane {
     /// Agent name, or the workspace label for an unnamed agent outside any fleet.
     pub name: String,
     pub issue: Option<u64>,
-    /// impl | rev | design | conductor, or `other` when herdsman did not spawn it.
+    /// impl | rev | design | orchestrator, or `other` when drover did not spawn it.
     pub role: String,
     pub harness: String,
     pub model: Option<String>,
@@ -24,7 +24,7 @@ pub struct Lane {
     pub port: Option<String>,
     /// herdr's live state (idle | working | done | blocked | unknown), or `dead` | `parked` (log only, no pane).
     pub state: String,
-    /// When herdsman spawned it (0: unknown).
+    /// When drover spawned it (0: unknown).
     pub since: u64,
     pub pane: Option<String>,
     /// #83: a log-only lane whose worktree is clean and pushed: its short head sha.
@@ -40,8 +40,13 @@ pub struct Lane {
     pub root: Option<String>,
     /// #302: `on <entry> (<entries> resting until 18:40)` when a `fallback` entry carries on.
     pub resting: Option<String>,
-    /// #422: a conductor's chat thread (`t6`); with no pane it is `asleep`.
+    /// #422: an orchestrator's chat thread (`t6`); with no pane it is `asleep`.
     pub thread: Option<String>,
+    /// #609: the runtime it was spawned in (`herdr` | `shed` | `shed-acp`), from its spawn: never the config's now.
+    pub runtime: String,
+    /// #609: where it runs, as every surface shows it: its host while 2+ hosts are enabled, then `herdr` or `shed`
+    /// while live lanes span both, joined with ` · ` (`mini · shed`, `air`, `shed`, or empty).
+    pub place: String,
 }
 
 /// Join `herdr agent list` rows with the log. `ws` maps workspace id -> label.
@@ -62,7 +67,7 @@ pub fn join(
     }
     let (mut out, mut seen) = (vec![], BTreeSet::new());
     // #422: each thread's last `conductor-start`, by its agent (`conductor-<thread>`).
-    let starts = events.iter().filter(|e| e.kind == "conductor-start");
+    let starts = events.iter().filter(|e| e.kind == "orchestrator-start");
     let mut cs: BTreeMap<&str, &Event> = starts.filter_map(|e| Some((e.str("agent")?, e))).collect();
     for a in agents {
         let s = |k: &str| a[k].as_str().filter(|v| !v.is_empty());
@@ -79,6 +84,7 @@ pub fn join(
             pane: pane.map(String::from),
             host: s("host").map(String::from),
             machine: s("machine").map(String::from),
+            runtime: s("runtime").unwrap_or(crate::herdr::BIN).into(),
             ..Lane::default()
         };
         if let Some(e) = sp {
@@ -99,7 +105,7 @@ pub fn join(
                 continue;
             }
         } else if let Some(e) = name.and_then(|n| cs.remove(n)) {
-            l = conductor(events, e, l);
+            l = orchestrator(events, e, l);
         } else {
             let inside = |d: &Path| {
                 ["cwd", "foreground_cwd"]
@@ -142,17 +148,38 @@ pub fn join(
             });
         }
     }
-    out.extend(cs.into_values().map(|e| conductor(events, e, Lane::default())));
+    out.extend(cs.into_values().map(|e| orchestrator(events, e, Lane::default())));
     for l in &mut out {
         let mark = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "lane-closed" | "lane-kept-dirty");
         let last = events.iter().rev().find(|e| mark(e) && e.str("agent") == Some(&l.name));
         let why = last.filter(|e| e.kind == "lane-kept-dirty").and_then(|e| e.str("why"));
         l.kept = why.filter(|_| l.state == "done").map(String::from);
     }
+    place(cfg, &mut out);
     out
 }
 
+/// #609: each lane's `place` and, with `[hosts]`, its host (none: the main host's).
+fn place(cfg: &Config, all: &mut [Lane]) {
+    let herdr = crate::herdr::BIN;
+    let word = |l: &Lane| if l.runtime == herdr { herdr } else { "shed" };
+    let live = all.iter().filter(|l| l.pane.is_some() && l.role != "other");
+    let both = live.map(word).collect::<BTreeSet<_>>().len() > 1;
+    let hosts = cfg.hosts.values().filter(|h| h.enabled).count() > 1;
+    let main = cfg.hosts.iter().find(|h| h.1.machine.is_none()).map(|h| h.0.clone());
+    for l in all {
+        l.host = l.host.take().or_else(|| main.clone());
+        let host = hosts.then(|| l.at());
+        let parts: Vec<String> = host.into_iter().chain(both.then(|| word(l).into())).collect();
+        l.place = parts.join(" · ");
+    }
+}
+
 impl Lane {
+    /// #609: its host as API v1 sends it: `local` with no `[hosts]`.
+    pub fn at(&self) -> String {
+        self.host.clone().unwrap_or_else(|| "local".into())
+    }
     /// #630: its worktree's uncommitted files and unpushed commits, read on `r` when shown (never in a drive pass).
     pub fn unsaved(&self, r: &dyn Runner) -> Option<(u64, u64)> {
         let wt = self.worktree.as_deref().filter(|_| self.thread.is_none())?;
@@ -165,13 +192,13 @@ impl Lane {
     /// #260: a local lane's newest session transcript, when its harness keeps one (`Harness::transcript`).
     pub fn session(&self) -> Option<std::path::PathBuf> {
         let wt = self.worktree.as_ref().filter(|_| self.machine.is_none())?;
-        harness::get(&self.harness).transcript(&crate::config::home(), wt)
+        providers::get(&self.harness).transcript(&crate::config::home(), wt)
     }
 }
 
 /// The newest session transcript any harness keeps for worktree `wt` under `home`.
 pub fn session_file(home: &Path, wt: &str) -> Option<std::path::PathBuf> {
-    harness::all().find_map(|h| h.1.transcript(home, wt))
+    providers::lanes().find_map(|h| h.transcript(home, wt))
 }
 
 fn from_spawn(e: &Event, l: Lane) -> Lane {
@@ -191,16 +218,17 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
         worktree: s("worktree"),
         root: s("root"),
         resting: s("resting"),
+        runtime: s("runtime").unwrap_or_else(|| crate::herdr::BIN.into()),
         ..l
     }
 }
 
 /// #422: the conductor `e` started: role `conductor`, named `<thread title> · <thread>`, `asleep` with no pane.
-fn conductor(events: &[Event], e: &Event, l: Lane) -> Lane {
+fn orchestrator(events: &[Event], e: &Event, l: Lane) -> Lane {
     let (id, mut l) = (e.str("thread").unwrap_or_default(), from_spawn(e, l));
     let t = (events.iter()).find(|t| t.kind == "thread-new" && t.str("thread") == Some(id));
     l.name = format!("{} · {id}", t.and_then(|t| t.str("title")).unwrap_or_default());
-    (l.role, l.thread) = ("conductor".into(), Some(id.into()));
+    (l.role, l.thread) = ("orchestrator".into(), Some(id.into()));
     l.state = l.pane.as_ref().map_or("asleep".into(), |_| l.state);
     l
 }
@@ -219,7 +247,7 @@ pub fn group(all: &[Lane], changed: impl Fn(&Lane) -> u64) -> Groups<'_> {
             section(l),
             l.fleet.is_none(),
             l.fleet.clone(),
-            l.role != "conductor", // #422: a repo's conductors first
+            l.role != "orchestrator",
             std::cmp::Reverse(changed(l)),
         )
     });
@@ -457,7 +485,7 @@ pub fn roll(file: &Path, body: &[String]) -> (Vec<String>, usize) {
 pub fn activity(harness: &str, screen: &str) -> String {
     let (body, status) = chat(screen);
     let lines: Vec<&str> = body.into_iter().map(str::trim).filter(|l| !l.is_empty()).collect();
-    let line = lines.into_iter().rev().find(|l| harness::get(harness).now_line(l));
+    let line = lines.into_iter().rev().find(|l| providers::get(harness).now_line(l));
     let m = mask(status.or(line).unwrap_or_default());
     if m.chars().count() > 60 {
         m.chars().take(59).collect::<String>() + "…"
@@ -525,21 +553,21 @@ pub fn short(cmd: &str) -> String {
 
 /// #276: the live spinner's word and elapsed time (`Harness::status_word`).
 pub fn spin(harness: &str, screen: &str) -> Option<(String, Option<String>)> {
-    harness::get(harness).status_word(screen)
+    providers::get(harness).status_word(screen)
 }
 
 /// #260: the pane's last tool line, as any harness reads it (`Harness::tool_line`), as a `now:` line.
 pub fn now(screen: &str) -> Option<String> {
     chat(screen).0.iter().rev().find_map(|l| {
         let t = strip(l);
-        let (tool, arg) = harness::all().find_map(|h| h.1.tool_line(t.trim()))?;
+        let (tool, arg) = providers::lanes().find_map(|h| h.tool_line(t.trim()))?;
         Some(doing(&tool, &arg))
     })
 }
 
 /// A blocked pane's pending prompt, as any harness reads it (`Harness::pending_menu`).
 pub fn pending(screen: &str) -> Option<(String, Vec<String>)> {
-    harness::all().find_map(|h| h.1.pending_menu(screen))
+    providers::lanes().find_map(|h| h.pending_menu(screen))
 }
 
 /// #362: a transcript's cached tail: its inode, the offset read up to (past its last full line), the 64 bytes before
@@ -606,9 +634,6 @@ pub fn now_of(l: &Lane, screen: &str) -> Option<String> {
     tail.map_or_else(|| now(screen), |t| said(&t).1)
 }
 
-/// #260: a Claude session transcript (`.jsonl`): its prompts and each turn's final text reply as `{k: me | ai, text, at}`
-/// (masked; meta lines, tool results and `<…>` wrappers dropped), and its last tool call as a `now:` line (none once text
-/// follows it: the turn replied).
 pub fn said(jsonl: &str) -> (Vec<Value>, Option<String>) {
     let (mut out, mut now, keys) = (Vec::<Value>::new(), None, ["command", "file_path", "path", "pattern"]);
     for v in jsonl.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {

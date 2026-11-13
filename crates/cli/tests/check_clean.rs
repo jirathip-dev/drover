@@ -1,19 +1,19 @@
-//! M2: `herdsman check` alerts (once per state), `herdsman clean`, plain-text notifications.
+//! M2: `drover check` alerts (once per state), `drover clean`, plain-text notifications.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, emit, plain, read, Event};
+use drover::config::Config;
+use drover::events::{append, emit, plain, read, Event};
 use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
 const NOW: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-12";
 
-fn ev(c: &herdsman::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(issue), kind, d)).unwrap();
 }
 
-fn spawn_ev(c: &herdsman::Ctx, ts: u64, issue: u64, agent: &str) {
+fn spawn_ev(c: &drover::Ctx, ts: u64, issue: u64, agent: &str) {
     ev(
         c,
         ts,
@@ -23,11 +23,11 @@ fn spawn_ev(c: &herdsman::Ctx, ts: u64, issue: u64, agent: &str) {
     );
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> usize {
+fn kinds(c: &drover::Ctx, kind: &str) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == kind).count()
 }
 
-fn check(c: &herdsman::Ctx, r: &Fake) -> String {
+fn check(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["check"]);
     assert_eq!(code, 0, "{out}");
     out
@@ -291,7 +291,7 @@ fn clean_removes_only_merged_clean_idle_lanes() {
         all.iter().all(|p| p.exists()) && !dry.contains("freed"),
         "a dry run frees nothing: {dry}"
     );
-    let freed = herdsman::check::du(&gone) + herdsman::check::du(&kept_wt); // #185: blocks used, not 2000 bytes
+    let freed = drover::check::du(&gone) + drover::check::du(&kept_wt); // #185: blocks used, not 2000 bytes
     let r1 = r();
     let (code, done) = run(&c, &r1, &["clean", "--yes"]);
     assert_eq!(code, 0, "{done}");
@@ -330,10 +330,10 @@ fn clean_removes_only_merged_clean_idle_lanes() {
 /// Real git; herdr is scripted (no agents, workspace already gone).
 struct GitHerdr(Fake);
 
-impl herdsman::runner::Runner for GitHerdr {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for GitHerdr {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog == "git" {
-            return herdsman::runner::Real.run(prog, args);
+            return drover::runner::Real.run(prog, args);
         }
         self.0.run(prog, args)
     }
@@ -425,7 +425,12 @@ fn clean_falls_back_to_git_dropping_only_fleets_own_files_and_keeps_going() {
     // #164: unknown dirt is never dropped: it is saved to wip/ first (tests/disk.rs), then the worktree goes.
     assert!(!user.exists(), "{done}");
     let wip = std::process::Command::new("git")
-        .args(["-C", origin.to_str().unwrap(), "show", "wip/impl-13-1000000:notes.txt"])
+        .args([
+            "-C",
+            origin.to_str().unwrap(),
+            "show",
+            &format!("{}:notes.txt", saved_as(&done, "wip/impl-13-1000000-")),
+        ])
         .output()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&wip.stdout), "x");
@@ -511,7 +516,12 @@ fn clean_removes_merged_worktrees_holding_only_lane_artifacts_and_unlogged_rev_t
     assert!(!shots.exists() && !rev.exists() && !dirt.exists(), "{done}");
     assert!(open.exists(), "{done}");
     let wip = std::process::Command::new("git")
-        .args(["-C", origin.to_str().unwrap(), "show", "wip/impl-17-1000000:notes.txt"])
+        .args([
+            "-C",
+            origin.to_str().unwrap(),
+            "show",
+            &format!("{}:notes.txt", saved_as(&done, "wip/impl-17-1000000-")),
+        ])
         .output()
         .unwrap();
     assert_eq!(
@@ -572,7 +582,7 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
     );
 
     // #138: a removed lane's rolling transcript goes with it; a kept lane's stays.
-    let log = |a: &str| herdsman::lanes::log(&c.state, a).unwrap();
+    let log = |a: &str| drover::lanes::log(&c.state, a).unwrap();
     std::fs::create_dir_all(log("impl-21").parent().unwrap()).unwrap();
     for a in ["impl-21", "impl-22"] {
         std::fs::write(log(a), "⏺ hi\n").unwrap();
@@ -671,7 +681,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
                 format!("{w}: 1 uncommitted change(s)")
             }
         );
-        let st = &herdsman::events::fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
+        let st = &drover::events::fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
         assert_eq!(
             (st.state.as_str(), st.last_event.as_str()),
             ("fix(1)", "verdict"),
@@ -689,7 +699,7 @@ fn du_counts_blocks_used_not_apparent_size() {
         .set_len(1 << 30)
         .unwrap();
     std::fs::write(d.join("data"), vec![1u8; 64 << 10]).unwrap();
-    let n = herdsman::check::du(&d);
+    let n = drover::check::du(&d);
     assert!((64 << 10..1 << 20).contains(&n), "{n}");
 }
 
@@ -767,4 +777,82 @@ fn a_blocked_live_lane_is_held_shown_held_and_never_stalls() {
     assert!(out.contains("held until #11 merges"), "{out}");
     assert_eq!(check(&c, &r), "", "a held lane is no stall");
     assert_eq!(kinds(&c, "stall"), 0);
+}
+
+/// #664: the wip branch `clean` reports saving to, named from `prefix` (seconds plus a random tag).
+fn saved_as(out: &str, prefix: &str) -> String {
+    let at = out.find(prefix).unwrap_or_else(|| panic!("no {prefix} in {out}"));
+    out[at..].split_whitespace().next().unwrap().to_string()
+}
+
+#[test]
+fn clean_and_the_wip_snapshot_treat_spawns_claude_files_as_the_lanes_own() {
+    let d = tmpdir("clean-claude-local");
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        let o = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    };
+    let (origin, local) = (d.join("origin.git"), d.join("local"));
+    git(&d, &["init", "-q", "--bare", origin.to_str().unwrap()]);
+    git(&d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
+    git(&local, &["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&local, &["push", "-q", "origin", "HEAD"]);
+    let c = ctx(
+        &d,
+        &CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap()),
+    );
+    let wt = |n: &str, files: &[&str]| {
+        let p = c.worktrees.join("sendmeter").join(n);
+        git(&local, &["worktree", "add", "-q", "-b", n, p.to_str().unwrap()]);
+        for f in ["CLAUDE.local.md", ".claude/settings.local.json"].iter().chain(files) {
+            std::fs::create_dir_all(p.join(f).parent().unwrap()).unwrap();
+            std::fs::write(p.join(f), "x").unwrap();
+        }
+        p
+    };
+    let (ours, user) = (wt("issue-12", &[]), wt("issue-13", &["notes.txt"]));
+    for (ts, issue, p) in [(10, 12, &ours), (11, 13, &user)] {
+        let w = p.to_str().unwrap();
+        ev(
+            &c,
+            ts,
+            issue,
+            "spawn",
+            json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": w, "pane": format!("w{issue}:p1"), "workspace": format!("w{issue}")}),
+        );
+        ev(
+            &c,
+            50,
+            issue,
+            "merged",
+            json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
+        );
+    }
+    let r = || GitHerdr(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let (code, out) = run(&c, &r(), &["clean", "--lane", "impl-12", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!ours.exists(), "{out}");
+    let (_, dry) = run(&c, &r(), &["clean"]);
+    let user_s = user.display().to_string();
+    assert!(
+        dry.contains(&format!(
+            "would save {user_s} to wip/ (1 uncommitted change(s)), then remove it"
+        )),
+        "{dry}"
+    );
+    let (_, done) = run(&c, &r(), &["clean", "--yes"]);
+    let wip = saved_as(&done, "wip/impl-13-1000000-");
+    let files = git(&origin, &["ls-tree", "-r", "--name-only", &wip]);
+    assert_eq!(files, "notes.txt\n", "{done}");
 }

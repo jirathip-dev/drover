@@ -3,14 +3,14 @@
 //! supersede's pane left there is killed once it is back, and `kill`/`close --host` pick one host's agent of a name.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, read, Event};
+use drover::config::Config;
+use drover::events::{append, read, Event};
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
 const WT: &str = "/home/me/.herdr/worktrees/sendmeter/issue-12";
 
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
     let c = ctx(&tmpdir(name), &toml);
@@ -25,12 +25,12 @@ fn setup(name: &str) -> herdsman::Ctx {
     c
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
 /// #12's impl lane, spawned on bazzite in pane w9:p1.
-fn remote_spawn(c: &herdsman::Ctx) {
+fn remote_spawn(c: &drover::Ctx) {
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w9:p1", "workspace": "w9",
                    "worktree": WT, "branch": "issue-12", "host": "bazzite", "machine": "bazzite"});
     ev(c, NOW - 900, "spawn", d);
@@ -57,7 +57,7 @@ fn mini_only() -> Fake {
         .reply("herdr agent wait", "{}")
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -71,12 +71,16 @@ fn an_unreachable_host_refuses_only_its_own_spawns() {
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "14", "impl", "--host", "mini"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     assert!(r.called("herdr agent start sendmeter-impl-14"));
-    // A lane that sticks to bazzite (its last spawn there) is refused the same way, never a generic error.
+    // #676: a lane whose issue last ran on bazzite leaves it while it is unreachable: the main host takes it.
     remote_spawn(&c);
     ev(&c, NOW - 100, "verdict", json!({"verdict": "FAIL", "sha": "abc"}));
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
-    assert_eq!(code, 3, "{out}");
-    assert!(out.contains("REFUSED HOST_OFFLINE"), "{out}");
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        r.called("herdr agent start sendmeter-rev-12-r2"),
+        "{:?}",
+        r.calls.borrow()
+    );
 }
 
 #[test]
@@ -149,7 +153,7 @@ fn a_pane_a_supersede_left_on_a_down_host_is_killed_once_it_is_back() {
     );
     let cfg = Config::load(&c.config).unwrap();
     // Still down: nothing happens.
-    herdsman::check::stale(&c, &cfg, &r, &mut Vec::new()).unwrap();
+    drover::check::stale(&c, &cfg, &r, &mut Vec::new()).unwrap();
     assert!(kinds(&c, "stale-pane-killed").is_empty());
     // Back, with the old pane there and the new lane of the same name on mini.
     let back = Fake::default()
@@ -157,13 +161,15 @@ fn a_pane_a_supersede_left_on_a_down_host_is_killed_once_it_is_back() {
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "working", "/x", "w1:p1")]),
         )
-        .reply(
+        .once(
             "herdr --machine bazzite agent list",
+            0,
             &agents(&[("sendmeter-impl-12", "idle", WT, "w9:p1")]),
         )
+        .reply("herdr --machine bazzite agent list", NO_AGENTS)
         .reply("herdr --machine bazzite pane close w9:p1", "{}");
     for _ in 0..2 {
-        herdsman::check::stale(&c, &cfg, &back, &mut Vec::new()).unwrap();
+        drover::check::stale(&c, &cfg, &back, &mut Vec::new()).unwrap();
     }
     assert_eq!(
         back.count("herdr --machine bazzite pane close w9:p1"),
@@ -204,10 +210,12 @@ fn kill_and_close_take_a_host_when_names_collide() {
             "herdr agent list",
             &agents(&[("sendmeter-impl-12", "working", "/x", "w1:p1")]),
         )
-        .reply(
+        .once(
             "herdr --machine bazzite agent list",
+            0,
             &agents(&[("sendmeter-impl-12", "idle", WT, "w9:p1")]),
         )
+        .reply("herdr --machine bazzite agent list", NO_AGENTS)
         .reply("herdr --machine bazzite pane close w9:p1", "{}");
     let (code, out) = run(&c, &r, &["close", "sendmeter-impl-12"]);
     assert_eq!(code, 3, "{out}");
@@ -228,23 +236,23 @@ fn kill_and_close_take_a_host_when_names_collide() {
 
 #[test]
 fn another_hosts_agent_list_is_cut_off_at_its_limit() {
-    use herdsman::runner::{argv, limit, Real};
+    use drover::runner::{argv, limit, Real};
     use std::time::{Duration, Instant};
     let list = argv(&["--machine", "air", "agent", "list"]);
-    assert_eq!(limit("herdr", &list), Some(Duration::from_secs(20)));
+    assert_eq!(limit("herdr", &list), Duration::from_secs(20));
     assert_eq!(
         limit("herdr", &argv(&["agent", "list"])),
-        None,
-        "this host's own herdr waits"
+        Duration::from_mins(1),
+        "#713: this host's own herdr gets the default"
     );
     assert_eq!(
         limit("herdr", &argv(&["--machine", "air", "agent", "start"])),
-        None,
-        "only a read is cut off"
+        Duration::from_mins(1),
+        "only a read is cut short"
     );
     let t = Instant::now();
     let o = Real
-        .within("sh", &argv(&["-c", "sleep 30"]), "", Some(Duration::from_millis(300)))
+        .within("sh", &argv(&["-c", "sleep 30"]), b"", Duration::from_millis(300))
         .unwrap();
     assert_eq!(o.code, 124, "{o:?}");
     assert!(o.stderr.contains("no answer"), "{}", o.stderr);
@@ -253,7 +261,131 @@ fn another_hosts_agent_list_is_cut_off_at_its_limit() {
         "killed at its limit, not after the sleep"
     );
     let o = Real
-        .within("sh", &argv(&["-c", "echo up"]), "", Some(Duration::from_secs(5)))
+        .within("sh", &argv(&["-c", "echo up"]), b"", Duration::from_secs(5))
         .unwrap();
     assert_eq!((o.code, o.stdout.trim()), (0, "up"), "an answer in time is kept");
+}
+
+#[test]
+fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
+    let c = setup("offline-move");
+    let st = c.state.parent().unwrap();
+    let note = st.join("notes.txt");
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    let sink = format!(
+        "\n[[notify]]\ncmd = \"cat >> '{}'\"\non = [\"lanes-moved\"]\n",
+        note.display()
+    );
+    std::fs::write(&c.config, toml + &sink).unwrap();
+    let hosts = |up: bool| {
+        let cache = json!({
+            "mini": {"tags": ["os:macos"], "home": "/Users/me", "probed": NOW, "seen": NOW, "up": true},
+            "bazzite": {"tags": ["os:linux"], "home": "/home/me", "probed": NOW, "seen": if up { NOW } else { NOW - 901 }, "up": up},
+        });
+        std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
+    };
+    hosts(false);
+    remote_spawn(&c);
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-13", "harness": "claude", "pane": "w9:p2", "workspace": "w9",
+                   "worktree": "/home/me/.herdr/worktrees/sendmeter/issue-13", "branch": "issue-13", "host": "bazzite", "machine": "bazzite"});
+    append(&c.state, &Event::new(NOW - 800, "sendmeter", Some(13), "spawn", d)).unwrap();
+    let local = "git -C /tmp/does-not-matter/sendmeter";
+    let fail = |p: String| {
+        (
+            p,
+            drover::runner::Out {
+                code: 1,
+                ..Default::default()
+            },
+        )
+    };
+    let mut r = mini_only();
+    r.replies.insert(0, fail(format!("{local} fetch origin issue-13")));
+    r.replies
+        .insert(0, fail(format!("{local} rev-parse --verify --quiet origin/issue-13")));
+    let sha = "1234567890abcdef1234567890abcdef12345678";
+    r.replies.insert(
+        0,
+        (
+            format!("{local} rev-parse --verify --quiet origin/issue-12"),
+            drover::runner::Out {
+                stdout: sha.into(),
+                ..Default::default()
+            },
+        ),
+    );
+
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    for n in [12, 13] {
+        let sp = read(&c.state)
+            .unwrap()
+            .into_iter()
+            .rfind(|e| e.is("spawn", "sendmeter", n))
+            .unwrap();
+        assert_eq!(
+            (sp.str("host"), sp.str("role")),
+            (Some("mini"), Some("impl")),
+            "#{n}: {out}"
+        );
+        assert!(
+            r.called(&format!("herdr agent start sendmeter-impl-{n}")),
+            "{:?}",
+            r.calls.borrow()
+        );
+    }
+    let creates: Vec<String> = r
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| c.starts_with("herdr worktree create"))
+        .cloned()
+        .collect();
+    assert!(
+        creates
+            .iter()
+            .any(|c| c.contains("--branch issue-12 --base origin/issue-12")),
+        "{creates:?}"
+    );
+    assert!(
+        creates
+            .iter()
+            .any(|c| c.contains("--branch issue-13 --base origin/staging")),
+        "{creates:?}"
+    );
+    let moved = kinds(&c, "lane-moved");
+    let m = |n: u64| moved.iter().find(|e| e.issue == Some(n)).unwrap();
+    assert_eq!(moved.len(), 2, "{moved:?}");
+    assert_eq!(
+        (m(12).str("host"), m(12).str("agent"), m(12).str("sha")),
+        (Some("bazzite"), Some("sendmeter-impl-12"), Some(sha))
+    );
+    assert_eq!(
+        (m(13).str("host"), m(13).str("agent"), m(13).str("sha")),
+        (Some("bazzite"), Some("sendmeter-impl-13"), None)
+    );
+    let posted = std::fs::read_to_string(&note).unwrap_or_default();
+    assert_eq!(posted.lines().count(), 1, "one line: {posted:?}");
+    assert!(
+        posted.contains("sendmeter-impl-12") && posted.contains("sendmeter-impl-13"),
+        "{posted}"
+    );
+    assert!(posted.contains("unpushed work stayed on bazzite"), "{posted}");
+    let (_, status) = run(&c, &r, &["status"]);
+    assert!(!status.contains("host offline"), "the old lanes are gone: {status}");
+
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    hosts(true);
+    let up = mini_only().reply("herdr --machine bazzite agent list", NO_AGENTS);
+    let (code, out) = run(&c, &up, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(kinds(&c, "spawn").len(), 4, "{out}");
+    assert_eq!(kinds(&c, "lane-moved").len(), 2);
+    assert_eq!(std::fs::read_to_string(&note).unwrap().lines().count(), 1);
+    assert!(
+        !up.called("herdr --machine bazzite agent start"),
+        "{:?}",
+        up.calls.borrow()
+    );
 }

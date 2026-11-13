@@ -1,7 +1,7 @@
 //! #685: one run's fleet metrics, from the events as they were appended (true time) and the model's ground truth;
 //! `summary` aggregates runs, `table` prints them beside the last staging baseline.
 use crate::sched::World;
-use herdsman::events::Event;
+use drover::events::Event;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -13,7 +13,7 @@ pub struct Metrics {
     /// Seconds from an issue's first queue add to its merged event, per merged issue.
     pub to_merge: Vec<u64>,
     pub spawns: u64,
-    /// Spawns whose pane pushed no head and wrote no verdict herdsman takes.
+    /// Spawns whose pane pushed no head and wrote no verdict drover takes.
     pub wasted: u64,
     pub supersedes: u64,
     /// Distinct lane names spawned.
@@ -42,7 +42,7 @@ pub fn of(w: &World) -> Metrics {
 }
 
 /// #686: the metrics a log alone gives (each event with the true time it was appended at; `produced`: a spawn whose
-/// lane pushed a head or wrote a verdict herdsman takes), for the sim's run and a real one alike.
+/// lane pushed a head or wrote a verdict drover takes), for the sim's run and a real one alike.
 pub fn log<'a>(evs: impl Iterator<Item = (u64, &'a Event)> + Clone, produced: impl Fn(&Event) -> bool) -> Metrics {
     let mut m = Metrics::default();
     let mut queued: BTreeMap<u64, u64> = BTreeMap::new();

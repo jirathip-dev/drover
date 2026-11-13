@@ -1,4 +1,5 @@
 //! #412: an issue's optional design stage: the design lane's hand-off for review, and the owner's decision on it.
+//! #730: an architect stage works the same way; its events name `role: architect` (none: `design`).
 use crate::config::Config;
 use crate::events::{emit, last_spawn, read, Event, IssueState};
 use crate::runner::{ok, Runner};
@@ -11,25 +12,135 @@ use std::path::Path;
 /// The design ask's options; free text is a revise note.
 pub const OPTIONS: [&str; 3] = ["approve", "revise", "reject"];
 
+/// #868: a design lane's hook scope: its worktree top (from the hook input's `cwd`) and its issue's design paths.
+pub fn scope(ctx: &Ctx, r: &dyn Runner, input: &Value, fleet: &str, n: Option<u64>) -> crate::hook::Design {
+    let here = std::env::current_dir()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    let cwd = input["cwd"].as_str().unwrap_or(&here);
+    let top = ok(r, "git", &["-C", cwd, "rev-parse", "--show-toplevel"]);
+    let spec = n
+        .and_then(|n| crate::gh::cached_spec(ctx, fleet, n))
+        .unwrap_or_default();
+    let root = top.map_or_else(|_| cwd.to_string(), |t| t.trim().to_string());
+    let text = std::fs::read_to_string(crate::repo_path(&Path::new(&root).join(RECIPE))).unwrap_or_default();
+    let allow = Recipe::of(&text, spec["body"].as_str().unwrap_or_default()).folders;
+    crate::hook::Design { root, allow }
+}
+
+/// #873: a repo's design recipe.
+pub const RECIPE: &str = ".drover/design.md";
+
+/// #873: what a design lane draws, where, how it renders and the host tags it needs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Recipe {
+    pub medium: String,
+    pub folders: Vec<String>,
+    pub render: Option<String>,
+    pub sizes: String,
+    pub clip: bool,
+    pub tools: Vec<String>,
+}
+
+impl Recipe {
+    /// The issue `body`'s own design path (#868), else the recipe `text`'s `key: value` lines, else HTML at 1440/390.
+    pub fn of(text: &str, body: &str) -> Recipe {
+        let mut r = Recipe {
+            medium: medium(body).into(),
+            folders: paths(body),
+            render: None,
+            sizes: "1440 and 390 wide".into(),
+            clip: false,
+            tools: vec![],
+        };
+        if r.folders.len() > 1 {
+            return r;
+        }
+        for l in text.lines() {
+            let Some((k, v)) = l.trim().trim_start_matches(['-', '*', ' ']).split_once(':') else {
+                continue;
+            };
+            let v = v.trim().trim_matches('`').trim();
+            let key = k.trim().trim_matches('*').to_ascii_lowercase();
+            match key.as_str() {
+                _ if v.is_empty() => {}
+                "medium" => r.medium = v.into(),
+                "folder" if !v.starts_with(['/', '~', '$']) && !v.split('/').any(|c| c == "..") => {
+                    r.folders = vec![v.trim_end_matches('/').into()];
+                }
+                "render" => r.render = Some(v.into()),
+                "sizes" => r.sizes = v.into(),
+                "clip" => r.clip = !matches!(v.to_ascii_lowercase().as_str(), "no" | "none" | "false"),
+                "tools" => {
+                    r.tools = v
+                        .split([',', ' '])
+                        .filter(|t| !t.is_empty())
+                        .map(String::from)
+                        .collect();
+                }
+                _ => {}
+            }
+        }
+        r
+    }
+
+    /// The recipe at `rev` of the checkout `dir`, for an issue `body`.
+    pub fn at(r: &dyn Runner, dir: &str, rev: &str, body: &str) -> Recipe {
+        let show = |p: &str| ok(r, "git", &["-C", dir, "show", &format!("{rev}:{p}")]).ok();
+        Recipe::of(&crate::repo_read("design.md", show).unwrap_or_default(), body)
+    }
+}
+
+/// #868: the folders a design lane writes: `docs/design` and each backquoted `…/design/…` path its issue `body` names.
+fn paths(body: &str) -> Vec<String> {
+    let mut out = vec!["docs/design".to_string()];
+    for span in body.split('`').skip(1).step_by(2) {
+        let keep = |c: &&str| !c.contains(['*', '<', '{', '…']) && !c.ends_with("...");
+        let parts: Vec<&str> = span
+            .trim()
+            .split('/')
+            .take_while(keep)
+            .filter(|c| !c.is_empty())
+            .collect();
+        let named = parts.contains(&"design") && !span.starts_with(['/', '~', '$']);
+        let p = parts.join("/");
+        if named
+            && !parts.iter().any(|c| *c == ".." || c.contains(char::is_whitespace))
+            && !out.iter().any(|o| Path::new(&p).starts_with(o))
+        {
+            out.push(p);
+        }
+    }
+    out
+}
+
+/// #868: the medium a design issue asks for: a native one it names along with a design path of its own, else HTML.
+fn medium(body: &str) -> &'static str {
+    let native = ["SwiftUI", "UIKit", "AppKit", "Jetpack Compose"];
+    let own = paths(body).len() > 1;
+    native.into_iter().find(|m| own && body.contains(m)).unwrap_or("HTML")
+}
+
 /// A design's ask (`needs-decision` with `design: true`).
 pub fn is_ask(e: &Event) -> bool {
     e.kind == "needs-decision" && e.data.get("design") == Some(&Value::Bool(true))
 }
 
-/// The head the issue's design started from: the first design spawn's since the last reject.
-fn pre<'a>(ev: &'a [Event], f: &str, n: u64) -> Option<&'a str> {
+/// The head the issue's `role` stage started from: its first spawn's since the last reject.
+fn pre<'a>(ev: &'a [Event], f: &str, n: u64, role: &str) -> Option<&'a str> {
     let from = ev
         .iter()
         .rposition(|e| e.is("design-rejected", f, n))
         .map_or(0, |i| i + 1);
-    let design = |e: &&Event| e.is("spawn", f, n) && e.str("role") == Some("design");
+    let design = |e: &&Event| e.is("spawn", f, n) && e.str("role") == Some(role);
     ev[from..]
         .iter()
         .filter(design)
         .find_map(|e| e.str("sha").filter(|s| !s.is_empty()))
 }
 
-/// A design lane that ended its turn (not working) with a pushed commit made since it spawned hands off:
+/// A design lane that ended its turn (not working) on a head that carries its stage's files and was never handed off:
 /// `design-review`, then one ask that the board card and the conductor thread which queued it (if any) both answer.
 pub fn handoff(
     ctx: &Ctx,
@@ -54,33 +165,64 @@ pub fn handoff(
     let Some(wt) = sp.str("worktree").filter(|_| !busy) else {
         return Ok(());
     };
-    let log = ok(r, "git", &["-C", wt, "log", "-1", "--format=%H %ct"]).unwrap_or_default();
-    let (head, t) = log.trim().split_once(' ').unwrap_or_default();
-    let new = t.parse().is_ok_and(|t: u64| t > sp.ts) && sp.str("sha") != Some(head);
-    if !new || crate::spawn::dirty(r, Path::new(wt)).is_some() {
+    let log = ok(r, "git", &["-C", wt, "log", "-1", "--format=%H"]).unwrap_or_default();
+    let head = log.trim();
+    let (f, n) = (s.fleet.as_str(), s.issue);
+    // #789: the head's design is handed off once, whichever lane pushed it (a `--supersede` one pushes nothing new).
+    let handed = ev
+        .iter()
+        .any(|e| e.is("design-review", f, n) && e.str("sha") == Some(head));
+    if head.is_empty() || crate::spawn::dirty(r, Path::new(wt)).is_some() {
         return Ok(());
     }
-    let (f, n) = (s.fleet.as_str(), s.issue);
-    let pre = pre(&ev, f, n).unwrap_or(head);
-    let names = ok(
-        r,
-        "git",
-        &["-C", wt, "diff", "--name-only", pre, head, "--", "docs/design"],
-    )
-    .unwrap_or_default();
-    let png = |l: &&str| l.to_ascii_lowercase().ends_with(".png");
+    let role = sp.str("role").unwrap_or("design");
+    if handed {
+        return failed(ctx, cfg, out, &ev, sp, (f, n, role));
+    }
+    let pre = pre(&ev, f, n, role).unwrap_or(head);
+    let dirs = if role == "architect" {
+        vec!["docs/architecture".to_string()]
+    } else {
+        let spec = crate::gh::cached_spec(ctx, f, n).unwrap_or_default();
+        Recipe::at(r, wt, head, spec["body"].as_str().unwrap_or_default()).folders
+    };
+    let (range, int) = (
+        format!("{pre}..{head}"),
+        format!("^origin/{}", cfg.fleet(f)?.integration),
+    );
+    let mut args = vec!["-C", wt, "log", "--format=", "--name-only", &range, &int, "--"];
+    args.extend(dirs.iter().map(String::as_str));
+    let log = ok(r, "git", &args).unwrap_or_default();
+    let mut names: Vec<&str> = vec![];
+    for l in log.lines().filter(|l| !l.is_empty()) {
+        if !names.contains(&l) {
+            names.push(l);
+        }
+    }
+    if names.is_empty() {
+        return failed(ctx, cfg, out, &ev, sp, (f, n, role));
+    }
+    // #730: the ADR's folder, `docs/architecture/<slug>`, which the impl and rev briefs link once approved.
+    let dir = folder(names[0], &dirs);
+    let adr = (role == "architect").then(|| dir.clone());
+    let png = |l: &&str| {
+        [".png", ".gif", ".mp4"]
+            .iter()
+            .any(|x| l.to_ascii_lowercase().ends_with(x))
+    };
     let files: Vec<Value> = names
-        .lines()
+        .iter()
+        .copied()
         .filter(png)
         .map(|l| json!({"name": l, "path": Path::new(wt).join(l)}))
         .collect();
     writeln!(out, "{f} #{n} design-review: {head:.7}")?;
-    let d = json!({"sha": head, "pre": pre, "agent": sp.str("agent"), "files": files});
+    let d = json!({"sha": head, "pre": pre, "agent": sp.str("agent"), "files": files, "role": role, "adr": adr});
     emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "design-review", d))?;
     let mark = |e: &&Event| {
         e.kind == "queue"
             && e.fleet == f
-            && e.data.get("design").is_some()
+            && (e.data.get("design").is_some() || e.data.get("architect").is_some())
             && e.data["issues"].as_array().is_some_and(|a| a.contains(&json!(n)))
     };
     let thread = ev
@@ -89,10 +231,97 @@ pub fn handoff(
         .and_then(|e| e.str("design_thread"))
         .filter(|t| !t.is_empty());
     let id = format!("q{}", ev.iter().filter(|e| e.kind == "needs-decision").count() + 1);
-    let q = format!("Design for #{n} is ready ({head:.7}): approve, revise (type a note) or reject?");
+    let what = if role == "architect" {
+        "Architecture (ADR)"
+    } else {
+        "Design"
+    };
+    let q = format!("{what} for #{n} is ready ({head:.7}): approve, revise (type a note) or reject?");
+    let link = format!("https://github.com/{}/tree/{head}/{dir}/", cfg.fleet(f)?.repo);
+    let summary = summary(r, wt, head, &dir);
+    let q = summary.as_ref().map_or(q.clone(), |s| format!("{s}\n\n{link}\n\n{q}"));
     let d = json!({"id": id, "question": q, "options": OPTIONS, "recommend": null, "kind": "owner", "design": true, "files": files,
-        "thread": thread});
+        "thread": thread, "role": role, "summary": summary, "link": link});
     emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "needs-decision", d))
+}
+
+fn failed(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    ev: &[Event],
+    sp: &Event,
+    (f, n, role): (&str, u64, &str),
+) -> Result<()> {
+    let agent = sp.str("agent").unwrap_or_default();
+    let mine = |e: &&Event| e.kind == "lane-state" && e.str("agent") == Some(agent) && e.ts >= sp.ts;
+    let Some(end) = ev
+        .iter()
+        .rfind(mine)
+        .filter(|e| matches!(e.str("state"), Some("error" | "gone")))
+    else {
+        return Ok(());
+    };
+    let note = ["note", "cause", "why"]
+        .iter()
+        .find_map(|k| end.str(k))
+        .unwrap_or("no reason given");
+    let why = format!(
+        "{role} lane {agent} ended ({}: {note}) with no {role} commit of its own",
+        end.str("state").unwrap_or_default()
+    );
+    writeln!(out, "{f} #{n} needs-human: {why}")?;
+    let d = json!({"code": "LANE_FAILED", "reason": why, "agent": agent, "role": role});
+    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "needs-human", d))
+}
+
+fn folder(name: &str, dirs: &[String]) -> String {
+    let under = dirs
+        .iter()
+        .find_map(|d| Some((d, name.strip_prefix(d.as_str())?.strip_prefix('/')?)));
+    match under {
+        Some((d, rest)) => match rest.split_once('/') {
+            Some((slug, _)) => format!("{d}/{slug}"),
+            None => d.clone(),
+        },
+        None => name.rsplit_once('/').map_or("", |p| p.0).to_string(),
+    }
+}
+
+fn section(md: &str, name: &str) -> Option<String> {
+    let level = |l: &str| l.len() - l.trim_start_matches('#').len();
+    let lines: Vec<&str> = md.lines().collect();
+    let at = lines
+        .iter()
+        .position(|l| level(l) > 0 && l.trim_start_matches('#').trim().eq_ignore_ascii_case(name))?;
+    let body: Vec<&str> = lines[at + 1..]
+        .iter()
+        .take_while(|l| !(1..=level(lines[at])).contains(&level(l)))
+        .copied()
+        .collect();
+    Some(body.join("\n").trim().to_string()).filter(|b| !b.is_empty())
+}
+
+fn summary(r: &dyn Runner, wt: &str, head: &str, dir: &str) -> Option<String> {
+    let show = |f: &str| ok(r, "git", &["-C", wt, "show", &format!("{head}:{dir}/{f}")]).unwrap_or_default();
+    let adr = show("adr.md");
+    let own = section(&show("README.md"), "Summary").or_else(|| section(&adr, "Summary"));
+    let text = own.or_else(|| {
+        let open = section(&adr, "Open questions").unwrap_or_else(|| "none".into());
+        Some(format!(
+            "Decision: {}\nOpen questions: {open}",
+            section(&adr, "Decision")?
+        ))
+    })?;
+    let mut out = String::new();
+    for l in text.lines() {
+        if out.chars().count() + l.chars().count() > 600 {
+            let cut: String = l.chars().take(600_usize.saturating_sub(out.chars().count())).collect();
+            return Some(format!("{out}{}…", if out.is_empty() { cut } else { String::new() }));
+        }
+        out = format!("{out}{l}\n");
+    }
+    Some(out.trim_end().to_string())
 }
 
 /// The owner's answer `text` to design ask `ask`: approve, reject, or (anything else) revise with it as the note.
@@ -131,5 +360,48 @@ pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, 
         (d["pre"], d["sha"]) = (json!(pre), json!(c));
     }
     (d["id"], d["by"]) = (ask.data["id"].clone(), json!(by));
-    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), kind, d))
+    (d["role"], d["adr"]) = (
+        ask.data["role"].clone(),
+        review.map_or(Value::Null, |e| e.data["adr"].clone()),
+    );
+    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), kind, d))?;
+    // #778: approve starts impl, revise the design lane again: pending until it spawns.
+    let (action, role) = match kind {
+        "design-approved" => ("approve", cfg.fleet(f)?.flow().start()),
+        "design-revise" => ("revise", ask.str("role").unwrap_or("design")),
+        _ => return Ok(()),
+    };
+    crate::pending::record(ctx, (f, n), action, role, None)
+}
+
+/// #873: a recipe tool tag the main host lacks ends the design lane's turn `blocked`, naming it, before anything is drawn.
+pub fn tools(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (f, n, agent): (&str, u64, &str), rc: &Recipe) -> Result<()> {
+    if rc.tools.is_empty() {
+        return Ok(());
+    }
+    let mut have = crate::hosts::probe(r).map(|p| p.0).unwrap_or_default();
+    have.extend(
+        cfg.hosts
+            .values()
+            .filter(|h| h.machine.is_none())
+            .flat_map(|h| h.tags.clone()),
+    );
+    let lacks: Vec<&str> = rc
+        .tools
+        .iter()
+        .filter(|t| !have.contains(t))
+        .map(String::as_str)
+        .collect();
+    if lacks.is_empty() {
+        return Ok(());
+    }
+    let why = format!(
+        "missing tool {}: the design recipe ({RECIPE}) needs it on the main host; install it, then spawn the design lane again",
+        lacks.join(", ")
+    );
+    let d = json!({"state": "blocked", "why": why, "role": "design", "agent": agent});
+    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
+    let d = json!({"code": "LANE_BLOCKED", "reason": format!("lane blocked: {why}"), "agent": agent});
+    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "needs-human", d))?;
+    crate::gate::refused("MISSING_TOOL", why)
 }

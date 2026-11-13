@@ -1,4 +1,4 @@
-//! `herdsman serve`, the phone page (docs/serve.md): std `TcpListener`, a thread per request (at most 16, then 503);
+//! `drover serve`, the phone page (docs/serve.md): std `TcpListener`, a thread per request (at most 16, then 503);
 //! `/live` SSE clients get a thread each, fed by the 1 s watcher thread.
 use crate::api::{
     body, Account, Backlog, BacklogIssue, Balance, Bar, Blocked, Cell, Chat, Conductor, ConfigSheet, Disk, DoneRow,
@@ -9,6 +9,7 @@ use crate::api::{
 use crate::config::{Config, Limits, Role};
 use crate::events::{age, append, shared, Event, IssueState, States};
 use crate::gate::{gate, refused, Refusal};
+use crate::handover::Handover;
 use crate::host::{self, Host};
 use crate::runner::{Out, Runner};
 use crate::snapshot::Snapshot;
@@ -27,6 +28,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod chat;
+mod fresh;
+#[path = "screens.rs"]
+mod screens;
+mod slo;
 mod v1;
 
 const SW: &str = include_str!("../assets/sw.js");
@@ -48,7 +53,7 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     // #265: the TypeScript board's build (web/dist, committed: `cargo install` needs no Node).
     ("board.js", "text/javascript", include_bytes!("../web/dist/board.js")),
     ("board.css", "text/css", include_bytes!("../web/dist/board.css")),
-    // #172: the built-in themes; `herdsman serve` serves the active one at `/theme/<file>` (`theme`).
+    // #172: the built-in themes; `drover serve` serves the active one at `/theme/<file>` (`theme`).
     th!("farm/sprites.svg", SVG),
     th!("farm/theme.json", JSON),
     th!("kitchen/sprites.svg", SVG),
@@ -142,29 +147,32 @@ type Job = (Ctx, BTreeMap<String, String>, String);
 /// When this board started (the Services board row's uptime).
 static STARTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
-pub fn serve(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool) -> Result<()> {
-    let l = TcpListener::bind(addr)?;
-    let mode = if read_only { "read-only view" } else { "phone page" };
-    eprintln!("herdsman serve: {mode} on http://{}/", l.local_addr()?);
-    serve_on(ctx, r, l, read_only)
+pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> Result<()> {
+    serve_with(ctx, r, l, read_only, None)
 }
 
 #[allow(clippy::needless_pass_by_value)] // public API: the listener is handed over and lives as long as the server
-pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> Result<()> {
+pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho: Option<&Handover>) -> Result<()> {
+    devices::cooee_token(ctx)?;
     let addr = (!read_only)
         .then(|| l.local_addr().map(|a| a.to_string()))
         .transpose()?;
     // #603: shed's lanes (#565: or one fleet's) as the CLI reaches them; `service --board` hands over a bare runner.
     let with = (r.shed().is_none())
-        .then(|| Config::load(&ctx.config).ok()?.shed())
+        .then(|| Config::kept(ctx).ok()?.shed())
         .flatten()
         .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
     let (tx, rx) = channel();
     let s = Server {
         jobs: Some(tx),
-        ..Server::new(ctx, r, addr)
+        ..Server::new(ctx, r, addr).deferring()
     };
+    STARTED.get_or_init(|| ctx.now);
+    for _ in 0..2 {
+        s.warm();
+        s.refresh(crate::now());
+    }
     let (h, w) = (
         s.host.clone(),
         Server {
@@ -176,16 +184,28 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
             ..Server::new(ctx, r, s.addr.clone())
         },
     );
-    let (s, busy) = (&s, &AtomicUsize::new(0));
-    STARTED.get_or_init(|| ctx.now);
+    let (s, busy, open) = (&s, &AtomicUsize::new(0), &AtomicUsize::new(0));
     std::thread::scope(|sc| {
+        let limits = || Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
         // #57: the host every 10 s (its 2 s vm_stat delta included) here, never on a request.
         sc.spawn(move || loop {
             let mut hs = host::sample(r);
             host::window(&ctx.state, &mut hs);
             *lock(&h) = hs;
-            std::thread::sleep(Duration::from_secs(10));
+            s.r.sampled(crate::now());
+            std::thread::sleep(Duration::from_secs(limits().serve_host_secs.max(1)));
         });
+        for src in fresh::Source::ALL {
+            sc.spawn(move || loop {
+                s.r.refresh(src, src.every(&limits()), crate::now());
+                std::thread::sleep(Duration::from_secs(1));
+            });
+        }
+        sc.spawn(move || loop {
+            s.slo(crate::now());
+            std::thread::sleep(Duration::from_secs(60));
+        });
+        w.tick();
         sc.spawn(move || loop {
             w.tick();
             std::thread::sleep(Duration::from_secs(1));
@@ -199,12 +219,30 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
                 lock(&s.clients).retain(|c| c.0.send(format!("id: {id}\nevent: toast\ndata: {msg}\n\n")).is_ok());
             }
         });
+        let sock = ho.and_then(Handover::ready);
+        if let Some((h, sock)) = ho.zip(sock) {
+            sc.spawn(move || h.control(&sock));
+        }
         for mut st in l.incoming().flatten() {
             if busy.fetch_add(1, Relaxed) < 16 {
-                sc.spawn(move || (drop(s.handle(st)), busy.fetch_sub(1, Relaxed)));
+                open.fetch_add(1, Relaxed);
+                // #715: its deliveries (a conductor start can take minutes) run after it frees its request slot.
+                sc.spawn(move || {
+                    drop(s.handle(st));
+                    busy.fetch_sub(1, Relaxed);
+                    s.deliver();
+                    open.fetch_sub(1, Relaxed);
+                });
             } else {
                 busy.fetch_sub(1, Relaxed);
                 drop(st.write_all(b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n"));
+            }
+            if let Some(h) = ho.filter(|h| h.stopping()) {
+                h.left();
+                lock(&s.clients)
+                    .drain(..)
+                    .for_each(|c| drop(c.0.send("retry: 250\n\n".into())));
+                h.finish(|| open.load(Relaxed) == 0 && lock(&s.running).is_empty());
             }
         }
     });
@@ -213,13 +251,14 @@ pub fn serve_on(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool) -> R
 
 /// `Server::cached` as a Runner (runner, cache, now, ttl): also `waiting::scan`'s per-issue `git log` on a request.
 /// A read the step's snapshot (#337) has comes from it; one it lacks on another host fails, never runs on a request.
-struct Memo<'a>(&'a dyn Runner, &'a Cache, u64, u64, Arc<Snapshot>);
+struct Memo<'a>(&'a fresh::Fresh<'a>, &'a Cache, u64, u64, Arc<Snapshot>);
 impl Runner for Memo<'_> {
     fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
         let (key, cache) = (crate::snapshot::key(prog, args), || lock(self.1));
         match self.4.reads.get(&key) {
             Some(v) => return Ok(crate::snapshot::out(v.clone())),
             None if self.4.ts > 0 && crate::snapshot::remote(prog, args) => return Ok(crate::snapshot::out(None)),
+            None if self.0.defer && crate::runner::in_request() => return self.0.run(prog, args),
             None => {}
         }
         let hit = cache()
@@ -325,7 +364,7 @@ fn window<T: std::fmt::Debug>(v: &[T], n: usize, kb: usize) -> &[T] {
 
 pub struct Server<'a> {
     ctx: &'a Ctx,
-    r: &'a dyn Runner,
+    r: fresh::Fresh<'a>,
     /// The bind address a POST's `Host` must name; None: read-only.
     addr: Option<String>,
     /// Command stdout by argv, with its time: rate-limited reads, shared with the watcher, which (`fresh`) re-reads at a third of the ttl.
@@ -350,7 +389,8 @@ pub struct Server<'a> {
     /// #403: the conductor lines `POST /thread` logged, typed in once its reply is out.
     later: Mutex<Vec<(Ctx, (Event, String))>>,
     /// #620: the [chat] tab's fold, by its key (`chat_tab`).
-    chat: Mutex<(serde_json::Value, serde_json::Value)>,
+    chat: Mutex<[(serde_json::Value, serde_json::Value); 2]>,
+    timing: Mutex<slo::Timing>,
 }
 
 const JSON: &str = "application/json; charset=utf-8";
@@ -454,6 +494,23 @@ fn drive(ctx: &Ctx, events: &[Event], fleet: &str, meta: Vec<String>) -> Drive {
     }
 }
 
+/// #775: a route's file from disk within the runner's limit: 504 for this file alone when its disk does not answer.
+fn disk_file<P: AsRef<std::path::Path>>(
+    at: Option<P>,
+    ct: &'static str,
+    missing: &str,
+) -> (&'static str, &'static str, Vec<u8>) {
+    match at.map(crate::runner::read_file) {
+        Some(Ok(b)) => ("200 OK", ct, b),
+        Some(Err(e)) if e.kind() == std::io::ErrorKind::TimedOut => (
+            "504 Gateway Timeout",
+            "text/plain",
+            b"its disk is not answering\n".to_vec(),
+        ),
+        _ => ("404 Not Found", "text/plain", missing.as_bytes().to_vec()),
+    }
+}
+
 /// #386: a thread file's type by its extension.
 fn ctype(name: &str) -> &'static str {
     match chat::ext(name).as_str() {
@@ -513,7 +570,7 @@ pub fn tone(state: &str) -> &'static str {
 
 /// Form ops only a paired device may POST.
 const PAIRED_OPS: &[&str] = &[
-    "unpair", "answer", "drive", "override", "extend", "park", "orphans", "reap", "host", "bqueue", "cond",
+    "unpair", "answer", "drive", "override", "extend", "park", "unpark", "orphans", "reap", "host", "bqueue", "cond",
 ];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).
@@ -658,7 +715,7 @@ impl<'a> Server<'a> {
     pub fn new(ctx: &'a Ctx, r: &'a dyn Runner, addr: Option<String>) -> Self {
         Server {
             ctx,
-            r,
+            r: fresh::Fresh::new(r),
             addr,
             cache: Arc::default(),
             fresh: false,
@@ -673,6 +730,22 @@ impl<'a> Server<'a> {
             snap: Mutex::default(),
             later: Mutex::default(),
             chat: Mutex::default(),
+            timing: Mutex::default(),
+        }
+    }
+
+    /// #859: a request reads only what the background read (`refresh`), never starting a process (`serve_on`'s).
+    #[must_use]
+    pub fn deferring(mut self) -> Self {
+        self.r.defer = true;
+        self
+    }
+
+    /// #859: read again, at `now`, each source's reads due by its `[limits] serve_<source>_secs` (a new one at once).
+    pub fn refresh(&self, now: u64) {
+        let l = Config::kept(self.ctx).map(|c| c.limits).unwrap_or_default();
+        for src in fresh::Source::ALL {
+            self.r.refresh(src, src.every(&l), now);
         }
     }
 
@@ -782,17 +855,23 @@ impl<'a> Server<'a> {
             return Ok(());
         }
         drop(clients);
+        if req.starts_with("GET ") && path.starts_with("/screens/") && path.ends_with("/stream") {
+            return self.stream(&mut s, &req, path, query);
+        }
         s.write_all(&self.reply(&req, crate::now()))?;
-        drop(s);
-        self.deliver();
         Ok(())
+    }
+
+    /// #715: deliveries to type in once the reply is out (`deliver`).
+    pub(crate) fn later(&self, ctx: &Ctx, jobs: impl IntoIterator<Item = (Event, String)>) {
+        lock(&self.later).extend(jobs.into_iter().map(|l| (ctx.clone(), l)));
     }
 
     /// #403: type in the lines `POST /thread` logged (`chat::deliver`).
     fn deliver(&self) {
         let jobs = std::mem::take(&mut *lock(&self.later));
         for (c, job) in jobs {
-            chat::deliver(&c, self.r, &job);
+            chat::deliver(&c, &self.r, &job);
             self.kick.store(true, Relaxed);
         }
     }
@@ -825,7 +904,7 @@ impl<'a> Server<'a> {
             changed |= hash(&at) != w.herdr.1;
             w.herdr = (now, hash(&at));
         } else if now >= w.herdr.0 + 2 {
-            let out = herdr::agent_list(self.r);
+            let out = herdr::agent_list(&self.r);
             changed |= hash(&out) != w.herdr.1;
             w.herdr = (now, hash(&out));
             lock(&self.cache).insert("herdr agent list".into(), (now, out));
@@ -852,7 +931,7 @@ impl<'a> Server<'a> {
             .and_then(|j| j["result"]["agents"].as_array().map(|a| chat::flush(at, a)))
             .unwrap_or_default()
         {
-            chat::deliver(at, self.r, &job);
+            chat::deliver(at, &self.r, &job);
         }
         // #560: the parts are rendered only for an audience listening (a client that connects reads them afresh).
         let heard = |p: bool| lock(&self.clients).iter().any(|c| c.1.is_some() == p);
@@ -900,7 +979,7 @@ impl<'a> Server<'a> {
     /// The runner whose reads that ran OK within the last `ttl` seconds come from the cache (else run now).
     fn cached(&self, now: u64, ttl: u64) -> Memo<'_> {
         Memo(
-            self.r,
+            &self.r,
             &self.cache,
             now,
             if self.fresh { ttl / 3 } else { ttl },
@@ -926,6 +1005,19 @@ impl<'a> Server<'a> {
     }
 
     fn reply(&self, req: &str, now: u64) -> Vec<u8> {
+        let t = Instant::now();
+        let res = if req.starts_with("GET ") {
+            crate::runner::request(|| self.route(req, now))
+        } else {
+            self.route(req, now)
+        };
+        let path = req.split_whitespace().nth(1).unwrap_or_default();
+        let ms = t.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+        lock(&self.timing).add(now, path.split('?').next().unwrap_or_default(), ms);
+        res
+    }
+
+    fn route(&self, req: &str, now: u64) -> Vec<u8> {
         let (head, body) = req.split_once("\r\n\r\n").unwrap_or((req, ""));
         let mut w = head.split_whitespace();
         let (method, target) = (w.next().unwrap_or_default(), w.next().unwrap_or_default());
@@ -980,6 +1072,7 @@ impl<'a> Server<'a> {
         };
         let (status, ctype, body) = match (method, path) {
             (_, p) if p.starts_with("/api/") => self.api(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
+            (_, p) if p.starts_with("/screens/") || p == "/action" => self.screens(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
             ("POST", _) if self.addr.is_none() => ("405 Method Not Allowed", "text/plain", text("read-only: GET only\n")),
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),
             // #501: `/pair/status` asks whether this browser is paired (no secrets): the page asks it on a 401.
@@ -1011,10 +1104,7 @@ impl<'a> Server<'a> {
                 let (t, name) = p[8..].split_once('/').unwrap_or_default();
                 let name = form(&format!("n={name}")).remove("n").unwrap_or_default();
                 let at = shared(&ctx.state).ok().and_then(|ev| chat::file(ctx, &ev, t, &name, false));
-                match at.and_then(|p| std::fs::read(p).ok()) {
-                    Some(b) => ("200 OK", ctype(&name), b),
-                    None => ("404 Not Found", "text/plain", text("no such file in the thread\n")),
-                }
+                disk_file(at, ctype(&name), "no such file in the thread\n")
             }
             // #412: a PNG of the design waiting for the owner's decision.
             ("GET", p) if p.starts_with("/design/") => {
@@ -1024,10 +1114,7 @@ impl<'a> Server<'a> {
                 let ask = |e: &&Event| crate::design::is_ask(e) && e.fleet == f && e.issue.map(|n| n.to_string()).as_deref() == Some(n);
                 let ev = shared(&ctx.state).unwrap_or_default();
                 let at = ev.iter().rfind(ask).and_then(|a| chat::files_of(a).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
-                match at.and_then(|p| std::fs::read(p).ok()) {
-                    Some(b) => ("200 OK", PNG, b),
-                    None => ("404 Not Found", "text/plain", text("no such design file\n")),
-                }
+                disk_file(at, PNG, "no such design file\n")
             }
             // #417: a screenshot the issue's last verdict lists.
             ("GET", p) if p.starts_with("/shot/") => {
@@ -1037,10 +1124,7 @@ impl<'a> Server<'a> {
                 let ev = shared(&ctx.state).unwrap_or_default();
                 let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n))).unwrap_or_default();
                 let at = i.parse().ok().and_then(|i: usize| shots.into_iter().nth(i));
-                match at.and_then(|(_, p)| std::fs::read(p).ok()) {
-                    Some(b) => ("200 OK", PNG, b),
-                    None => ("404 Not Found", "text/plain", text("no such screenshot\n")),
-                }
+                disk_file(at.map(|(_, p)| p), PNG, "no such screenshot\n")
             }
             ("GET", "/sw.js") => ("200 OK", "text/javascript", text(&SW.replace("@V", &format!("{VER:08x}")))),
             ("GET", p) => {
@@ -1060,9 +1144,9 @@ impl<'a> Server<'a> {
             {
                 Ok(Some((code, t))) => {
                     extra = format!("Set-Cookie: hd={t}; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Strict\r\n");
-                    let hint = Config::load(&ctx.config).ok().and_then(|c| c.serve.approve_hint).unwrap_or_default();
+                    let hint = Config::kept(ctx).ok().and_then(|c| c.serve.approve_hint).unwrap_or_default();
                     let host = loopback && client(head).parse::<std::net::IpAddr>().is_ok_and(|p| p.is_loopback());
-                    let line = if host { format!("herdsman serve approve {code}\n") } else { String::new() };
+                    let line = if host { format!("drover serve approve {code}\n") } else { String::new() };
                     ("200 OK", "text/plain", format!("{code}\n{}\n{line}", hint.replace("{code}", &code)).into_bytes())
                 }
                 Ok(None) => ("429 Too Many Requests", "text/plain", text("4 pairing requests open (2 per address), or a code clash: approve one, tap Pair again or wait 10 min\n")),
@@ -1074,11 +1158,11 @@ impl<'a> Server<'a> {
             },
             ("POST", "/pair/claim") => match dev() {
                 Some(d) => (extra = format!("Set-Cookie: {}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Strict\r\n", header(head, "cookie").unwrap_or_default().split(';').map(str::trim).find(|c| c.starts_with("hd=")).unwrap_or_default()), ("200 OK", "text/plain", format!("paired as {}\n", d.label).into_bytes())).1,
-                None => ("403 Forbidden", "text/plain", text("not approved yet: `herdsman serve approve <code>` on the Mac\n")),
+                None => ("403 Forbidden", "text/plain", text("not approved yet: `drover serve approve <code>` on the Mac\n")),
             },
             ("POST", "/push/subscribe" | "/push/unsubscribe") if dev().is_none() => deny("pair this device first\n"),
             ("POST", "/push/subscribe") => {
-                let sub = Config::load(&ctx.config).ok().and_then(|c| c.webpush_sub().map(String::from));
+                let sub = Config::kept(ctx).ok().and_then(|c| c.webpush_sub().map(String::from));
                 match crate::webpush::subscribe(&ctx.state, &form(body.trim()), &kind(head), now, sub.as_deref()) {
                     Ok(msg) => ("200 OK", "text/plain", format!("{msg}\n").into_bytes()),
                     Err(e) => ("400 Bad Request", "text/plain", format!("{}\n", shown(&e)).into_bytes()),
@@ -1124,11 +1208,7 @@ impl<'a> Server<'a> {
     /// `Host` names the bind address or a `[serve].allowed_hosts` name, and any `Origin` is one of those.
     fn allowed(&self, ctx: &Ctx, head: &str) -> bool {
         let mut hosts = vec![self.addr.clone().unwrap_or_default()];
-        hosts.extend(
-            Config::load(&ctx.config)
-                .map(|c| c.serve.allowed_hosts)
-                .unwrap_or_default(),
-        );
+        hosts.extend(Config::kept(ctx).map(|c| c.serve.allowed_hosts).unwrap_or_default());
         let host = header(head, "host").unwrap_or_default();
         let origin =
             header(head, "origin").map(|o| o.strip_prefix("https://").or(o.strip_prefix("http://")).unwrap_or("\0"));
@@ -1164,33 +1244,37 @@ impl<'a> Server<'a> {
             e if busy(e) => return ("503 Service Unavailable", "board busy, retrying".into()),
             Err(_) => return ("401 Unauthorized", "pair this device: tap Pair this phone".into()),
         };
-        let mut sent = lock(&self.sent);
-        let times = sent.entry(dev.hash.clone()).or_default();
-        times.retain(|t| ctx.now < t + 60);
-        if times.len() >= 10 {
-            return ("429 Too Many Requests", "10 sends a minute: wait a moment".into());
+        // #715: the lock covers the check and the record only, never the action below.
+        {
+            let mut sent = lock(&self.sent);
+            let times = sent.entry(dev.hash.clone()).or_default();
+            times.retain(|t| ctx.now < t + 60);
+            if times.len() >= 10 {
+                return ("429 Too Many Requests", "10 sends a minute: wait a moment".into());
+            }
+            times.push(ctx.now);
         }
-        times.push(ctx.now);
         let (pick, act) = (path == "/answer", path == "/act");
         let res = if path == "/thread" {
             let mut later = vec![];
-            let res = chat::post(ctx, self.r, f, &mut later);
-            lock(&self.later).extend(later.into_iter().map(|l| (ctx.clone(), l)));
+            // #715: an answer's or a card's conductor wake is delivered after the reply too.
+            let (res, more) = crate::conductor::deferred(|| chat::post(ctx, &self.r, f, &mut later));
+            self.later(ctx, later.into_iter().chain(more));
             res
         } else if path == "/setup" {
             let (via, s) = (format!("web {}", dev.label), body::<crate::api::Setup>(f));
-            Config::load(&ctx.config).and_then(|c| crate::setup::start(ctx, &c, self.r, &s.host, &s.name, &via))
+            Config::kept(ctx).and_then(|c| crate::setup::start(ctx, &c, &self.r, &s.host, &s.name, &via))
         } else if pick {
             self.pick(ctx, dev, &body(f))
         } else if act {
             self.act(ctx, dev, &body(f))
         } else if path == "/report" {
-            Config::load(&ctx.config).and_then(|c| crate::report::save(ctx, &c, f, &dev.label))
+            Config::kept(ctx).and_then(|c| crate::report::save(ctx, &c, f, &dev.label))
         } else {
             let s = body::<crate::api::Send>(f);
             s.setup.as_deref().map_or_else(
                 || self.prompt(ctx, dev, &s),
-                |p| crate::setup::send(ctx, self.r, p, &s.text),
+                |p| crate::setup::send(ctx, &self.r, p, &s.text),
             )
         };
         if pick || act || path == "/thread" {
@@ -1202,7 +1286,7 @@ impl<'a> Server<'a> {
 
     /// The live fleet lane `agent` with its fleet and pane; refused PAUSED when its fleet is.
     fn lane(&self, ctx: &Ctx, agent: &str) -> Result<(lanes::Lane, String, String)> {
-        let (cfg, events) = (Config::load(&ctx.config)?, shared(&ctx.state)?);
+        let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
         let all = self
             .lanes(ctx.now, &cfg, &events, &events.states)
             .context("herdr agent list failed")?;
@@ -1214,7 +1298,7 @@ impl<'a> Server<'a> {
             bail!("`{agent}` is not a live fleet lane")
         };
         if cfg.fleet.get(&fleet).is_some_and(|f| f.paused) {
-            return refused("PAUSED", format!("{fleet} is paused (`herdsman resume {fleet}`)"));
+            return refused("PAUSED", format!("{fleet} is paused (`drover resume {fleet}`)"));
         }
         Ok((l, fleet, pane))
     }
@@ -1225,9 +1309,9 @@ impl<'a> Server<'a> {
     fn pick(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Answer) -> Result<String> {
         let (agent, choice) = (f.agent.as_str(), f.choice.as_str());
         let (l, fleet, pane) = self.lane(ctx, agent)?;
-        let on = l.on(self.r);
+        let on = l.on(&self.r);
         let screen = || herdr::read(&on, &pane);
-        let h = crate::harness::get(&l.harness);
+        let h = crate::providers::get(&l.harness);
         let menu = h.pending_menu(&screen()?);
         let Some((q, opts)) = menu.filter(|p| !p.1.is_empty()) else {
             return refused(
@@ -1253,7 +1337,7 @@ impl<'a> Server<'a> {
         append(&ctx.state, &Event::new(ctx.now, &fleet, l.issue, "answer", d))?;
         // #337: a board tap is a kick: the snapshot is looked at again at once.
         if let Some(n) = l.issue {
-            crate::drive::kick(ctx, self.r, &fleet, n, "board");
+            crate::drive::kick(ctx, &self.r, &fleet, n, "board");
         }
         self.r.sleep(1);
         Ok(if h.pending_menu(&screen()?) == Some((q, opts)) {
@@ -1278,36 +1362,36 @@ impl<'a> Server<'a> {
         if text.chars().any(|c| (c < ' ' && c != '\n') || c == '\x7f') {
             return refused("BAD_VALUE", "a message has no control characters (newlines are fine)");
         }
-        herdr::reply(&l.on(self.r), l.harness == "dsh", agent, pane, text)?;
+        herdr::reply(&l.on(&self.r), l.harness == "dsh", agent, pane, text)?;
         let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "chars": n});
         append(&ctx.state, &Event::new(ctx.now, fleet, l.issue, "prompt", d))?;
         if let Some(n) = l.issue {
-            crate::drive::kick(ctx, self.r, fleet, n, "board");
+            crate::drive::kick(ctx, &self.r, fleet, n, "board");
         }
         Ok(format!("sent to {agent}"))
     }
 
-    /// A sheet action (`herdsman stop|kill|clean --lane`, or `close <pane>` for an Others agent; kill and clean dry-run without `confirm=1`); logs `act` unless a dry run.
+    /// A sheet action (`drover stop|kill|clean --lane`, or `close <pane>` for an Others agent; kill and clean dry-run without `confirm=1`); logs `act` unless a dry run.
     fn act(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Act) -> Result<String> {
-        let (mut out, cfg) = (vec![], Config::load(&ctx.config)?);
+        let (mut out, cfg) = (vec![], Config::kept(ctx)?);
         let (agent, yes, op) = (f.agent.as_str(), f.confirm == "1", f.op.as_str());
         let sp = crate::events::last_spawn(&shared(&ctx.state)?, agent).map(|e| (e.fleet.clone(), e.issue));
         let Some((fleet, issue)) = sp.or_else(|| (op == "close").then(|| (String::new(), None))) else {
             return refused("NO_SUCH_AGENT", format!("no lane `{agent}` in the log"));
         };
         match op {
-            "stop" => crate::check::stop(ctx, &cfg, self.r, &mut out, agent)?,
-            "kill" => crate::check::kill(ctx, &cfg, self.r, &mut out, (agent, None), yes)?,
+            "stop" => crate::check::stop(ctx, &cfg, &self.r, &mut out, agent)?,
+            "kill" => crate::check::kill(ctx, &cfg, &self.r, &mut out, (agent, None), yes)?,
             "clean" => crate::check::clean(
                 ctx,
                 &cfg,
-                self.r,
+                &self.r,
                 &mut out,
                 Some(&fleet),
                 (None, Some(agent), false),
                 yes,
             )?,
-            "close" => crate::check::close(ctx, &cfg, self.r, &mut out, agent, None)?,
+            "close" => crate::check::close(ctx, &cfg, &self.r, &mut out, agent, None)?,
             op => return refused("BAD_VALUE", format!("op is stop, kill, clean or close, not `{op}`")),
         }
         if yes || op == "stop" {
@@ -1321,15 +1405,14 @@ impl<'a> Server<'a> {
     /// transcript (#138; the export reads the screen only), the live block's length and the status line, as JSON.
     fn transcript(&self, ctx: &Ctx, q: &BTreeMap<String, String>) -> Option<String> {
         if let Some(p) = q.get("setup") {
-            return crate::setup::screen(ctx, self.r, p).ok().map(|j| j.to_string());
+            return crate::setup::screen(ctx, &self.r, p).ok().map(|j| j.to_string());
         }
         let n = |k: &str, d: usize| q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d);
         let (lines, before) = (n("lines", 200).min(200), n("before", 0));
-        let (cfg, events) = (Config::load(&ctx.config).ok()?, shared(&ctx.state).ok()?);
+        let (cfg, events) = (Config::kept(ctx).ok()?, shared(&ctx.state).ok()?);
         let agent = q.get("agent")?;
         let ls = self.lanes(ctx.now, &cfg, &events, &events.states)?;
         let file = lanes::log(&ctx.state, agent).filter(|_| self.export.is_none());
-        // #218: a lane with no pane: its stored transcript (#248: Claude's saved session first), no live block.
         let Some(l) = ls.into_iter().find(|l| &l.name == agent && l.pane.is_some()) else {
             let wt = crate::events::last_spawn(&events, agent).and_then(|e| e.str("worktree"));
             let saved = wt.and_then(|wt| lanes::session(&ctx.home, wt));
@@ -1345,14 +1428,13 @@ impl<'a> Server<'a> {
             .ok();
         };
         // #337: a lane's chat always reads its pane live (5 s cache), never from the snapshot.
-        let live = Memo(self.r, &self.cache, ctx.now, 5, Arc::default());
+        let live = Memo(&self.r, &self.cache, ctx.now, 5, Arc::default());
         let screen = herdr::recent(&l.on(&live), l.pane.as_deref()?, "200").ok()?;
         let body = lanes::body(&screen);
         let (all, live) = file.map_or((body.clone(), body.len()), |f| lanes::roll(&f, &body));
         let end = all.len().saturating_sub(before);
         let page = window(&all[..end], lines, 32);
         let status = lanes::chat(&screen).1.map(lanes::strip);
-        // #260: the default view's source: Claude's session transcript, else (null) the pane's role runs.
         let ok = self.export.is_none();
         // #351: the last `turns` (10, more as the sheet scrolls up) within 3.2 KB each: a chat opens with ~64 KB at most.
         let said = l.session().filter(|_| ok).and_then(|p| lanes::read_tail(&p, 1 << 21));
@@ -1410,8 +1492,8 @@ impl<'a> Server<'a> {
                 let n = |k: &str| g(k).parse::<u64>().ok();
                 let issue = n("issue").context("no issue")?;
                 let d = queue::op("mv", &[issue], false, n("before"), n("after"), None);
-                crate::queue_change(ctx, &Config::load(&ctx.config)?, fleet, d, Some("web"))?;
-                crate::drive::kick(ctx, self.r, fleet, issue, "board");
+                crate::queue_change(ctx, &Config::kept(ctx)?, fleet, d, Some("web"))?;
+                crate::drive::kick(ctx, &self.r, fleet, issue, "board");
                 format!(
                     "moved #{issue} {}",
                     n("before").map_or_else(|| format!("after #{}", g("after")), |b| format!("before #{b}"))
@@ -1428,7 +1510,7 @@ impl<'a> Server<'a> {
                     .map(|k| (k, g(k).to_string()))
                     .collect();
                 if op == "cond" {
-                    return crate::conductor::set(ctx, self.r, fleet, &wanted); // #401
+                    return crate::conductor::set(ctx, &self.r, fleet, &wanted);
                 }
                 let line = wanted
                     .iter()
@@ -1442,42 +1524,50 @@ impl<'a> Server<'a> {
                 let choice = if g("choice").is_empty() { g("text") } else { g("choice") };
                 crate::answer(
                     ctx,
-                    &Config::load(&ctx.config)?,
-                    self.r,
+                    &Config::kept(ctx)?,
+                    &self.r,
                     &mut out,
                     (fleet, g("id")),
                     choice,
                     ("owner", Some("web")),
                 )?;
+                drop(shared(&ctx.state));
                 format!("answered {}", g("id"))
             }
             "drive" => {
-                let cfg = Config::load(&ctx.config)?;
-                crate::drive::drive(ctx, &cfg, self.r, &mut out, Some(fleet), true, false)?;
+                let cfg = Config::kept(ctx)?;
+                crate::drive::drive(ctx, &cfg, &self.r, &mut out, Some(fleet), true, false)?;
                 crate::drive::summary(fleet, &String::from_utf8_lossy(&out))
             }
             // #130: a needs-human card's buttons.
             op @ ("override" | "extend" | "park") => {
                 let n = g("issue").parse().context("no issue")?;
+                let why = (op == "park").then_some(g("why"));
                 crate::gate::needs_human(
                     ctx,
-                    &Config::load(&ctx.config)?,
-                    self.r,
+                    &Config::kept(ctx)?,
+                    &self.r,
                     &mut out,
                     (fleet, n),
                     op,
-                    (true, "owner"),
+                    (true, "owner", why),
                 )?;
-                crate::drive::kick(ctx, self.r, fleet, n, "board");
+                crate::drive::kick(ctx, &self.r, fleet, n, "board");
                 format!("#{n}: {op}")
             }
+            // #712: a parked row's [unpark]; drive's next pass picks it up.
+            "unpark" => {
+                let n = g("issue").parse().context("no issue")?;
+                crate::gate::unpark(ctx, &Config::load(&ctx.config)?, &mut out, (fleet, n), "owner")?;
+                format!("#{n}: unparked")
+            }
             "orphans" => {
-                let n = crate::check::orphans(ctx, &Config::load(&ctx.config)?, &mut out, true)?;
+                let n = crate::check::orphans(ctx, &Config::kept(ctx)?, &mut out, true)?;
                 format!("removed {n} orphan folder(s)")
             }
             "reap" => {
-                let cfg = Config::load(&ctx.config)?;
-                let n = crate::check::leftovers(ctx, &cfg, self.r, &herdr::agents(self.r)?, true)?.len();
+                let cfg = Config::kept(ctx)?;
+                let n = crate::check::leftovers(ctx, &cfg, &self.r, &herdr::agents(&self.r)?, true)?.len();
                 format!("reaped {n} leftover process(es)")
             }
             "host" => {
@@ -1489,7 +1579,7 @@ impl<'a> Server<'a> {
                 let ns: Vec<u64> = g("issues").split(',').filter_map(|n| n.trim().parse().ok()).collect();
                 let mut d = queue::op("add", &ns, false, None, None, None);
                 d["check"] = json!(true);
-                crate::queue_change(ctx, &Config::load(&ctx.config)?, fleet, d, Some("web"))? + " (needs-check)"
+                crate::queue_change(ctx, &Config::kept(ctx)?, fleet, d, Some("web"))? + " (needs-check)"
             }
             "unpair" => {
                 let _g = devices::lock();
@@ -1544,7 +1634,7 @@ impl<'a> Server<'a> {
             msg
         };
         let msg = if demo {
-            "<p class=\"msg a\">Demo with fake data. Install herdsman to run your own.</p>".to_string()
+            "<p class=\"msg a\">Demo with fake data. Install drover to run your own.</p>".to_string()
         } else {
             msg
         };
@@ -1610,10 +1700,10 @@ impl<'a> Server<'a> {
              <meta name=viewport content=\"width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover\">\
              <meta name=theme-color content=\"#1f2a38\"><meta name=apple-mobile-web-app-capable content=yes>\
              <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png?v={VER:08x}><link rel=apple-touch-icon href={root}icon-180.png?v={VER:08x}>\
-             <title>herdsman</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
+             <title>drover</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
              <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','chat'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
              let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
-             <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<i id=dot class=a></i>\
+             <body data-ts={} data-mode=scene{ro}><header><b>drover</b>{badge}<i id=dot class=a></i>\
              <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=strip><span id=ld class=tld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></span><span class=ldw>loading</span><span id=stale hidden></span></div>{msg}<div id=needs></div><main>\
              <section id=queue></section><section id=lanes></section><section id=chat></section></main>\
              <nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a><a href=#chat><span>chat</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script><script type=module src={root}a/{VER:08x}/board.js></script></body></html>\n",
@@ -1626,7 +1716,7 @@ impl<'a> Server<'a> {
     /// lane's pending prompt, then the `needs-human` issues.
     fn needs_tab(&self, ctx: &Ctx, paired: bool) -> NeedsTab {
         let events = shared(&ctx.state).unwrap_or_default();
-        let (cfg, st) = (Config::load(&ctx.config).ok(), events.states.clone());
+        let (cfg, st) = (Config::kept(ctx).ok(), events.states.clone());
         let (cfg, ev, st) = (cfg.as_ref(), &events, &st);
         let all = cfg.and_then(|c| self.lanes(ctx.now, c, ev, st)).unwrap_or_default();
         let mins = cfg.map_or(Limits::default().ask_default_minutes, |c| c.limits.ask_default_minutes);
@@ -1650,6 +1740,7 @@ impl<'a> Server<'a> {
                 .filter_map(|l| self.blocked(ctx, l, paired))
                 .collect(),
             issues: Self::needs_human(ctx, cfg, ev, st),
+            config: Config::loaded(ctx).err().map(|e| format!("{:#}", e.0)),
         }
     }
 
@@ -1704,7 +1795,7 @@ impl<'a> Server<'a> {
             .and_then(|p| herdr::read(&l.on(&self.cached(ctx.now, 2)), p).ok())
             .unwrap_or_default();
         let rw = self.addr.is_some() && paired;
-        let h = crate::harness::get(&l.harness);
+        let h = crate::providers::get(&l.harness);
         let c = lanes::prompt(&screen).unwrap_or_default();
         let menu = h.pending_menu(&screen);
         if menu.is_none() && h.status_word(&screen).is_some() {
@@ -1748,7 +1839,7 @@ impl<'a> Server<'a> {
             ..QueueTab::default()
         };
         // #483: the error's own text, config or log (e.g. `migrate --live`), not a fixed line.
-        let (cfg, events) = match (Config::load(&ctx.config), shared(&ctx.state)) {
+        let (cfg, events) = match (Config::kept(ctx), shared(&ctx.state)) {
             (Ok(c), Ok(e)) => (c, e),
             (Err(e), _) | (_, Err(e)) => {
                 d.error = Some(format!("{e:#}"));
@@ -1800,6 +1891,7 @@ impl<'a> Server<'a> {
                     _ => 3,
                 };
                 let lane = s.and_then(|s| s.lane.as_deref()).unwrap_or_default();
+                let on = ls.iter().find(|l| !lane.is_empty() && l.name == lane); // #609
                 let pr = gh::cached_pr(ctx, f, n);
                 let head = pr["headRefOid"].as_str().unwrap_or_default();
                 let mut seen = BTreeSet::new();
@@ -1818,6 +1910,8 @@ impl<'a> Server<'a> {
                     })
                     .collect();
                 let mut notes: Vec<String> = crate::land::note(events, f, n).into_iter().collect();
+                // #712: why it was parked (`park --why`).
+                notes.extend(queue::park_why(events, st, f, n).map(|w| format!("parked: {w}")));
                 // #417: a verify stage passed on at this head for want of the repo's recipe.
                 let bare = |e: &&Event| e.is("verify-no-recipe", f, n) && e.str("sha") == Some(head);
                 notes.extend(
@@ -1881,6 +1975,9 @@ impl<'a> Server<'a> {
                         up: k.filter(|&k| mv && k > 0).map(|k| q[k - 1].issue),
                         down: k.filter(|_| mv).and_then(|k| q.get(k + 1)).map(|x| x.issue),
                         lanes: qls,
+                        runtime: on.map(|l| l.runtime.clone()).unwrap_or_default(),
+                        host: on.map(lanes::Lane::at).unwrap_or_default(),
+                        place: on.map(|l| l.place.clone()).unwrap_or_default(),
                     },
                 ));
             }
@@ -2019,7 +2116,7 @@ impl<'a> Server<'a> {
     /// `weather` (loopback only) forces the host values.
     fn herd(&self, ctx: &Ctx, weather: Option<&str>) -> Result<Herd> {
         let events = shared(&ctx.state)?;
-        let (cfg, st) = (Config::load(&ctx.config)?, events.states.clone());
+        let (cfg, st) = (Config::kept(ctx)?, events.states.clone());
         let all = self.lanes(ctx.now, &cfg, &events, &st).unwrap_or_default();
         let waits = self.waits(ctx, &cfg, &events, &all);
         let lanes = |f: Option<&String>| -> Vec<_> {
@@ -2046,6 +2143,8 @@ impl<'a> Server<'a> {
                         effort: l.effort.clone(),
                         account: l.account.clone(),
                         host: l.host.clone(),
+                        runtime: l.runtime.clone(),
+                        place: l.place.clone(),
                         state: l.state.clone(),
                         shown,
                         tone: tone.into(),
@@ -2125,10 +2224,11 @@ impl<'a> Server<'a> {
             live: self.addr.is_some() && self.export.is_none(),
             paired,
             pair: !self.pairb().is_empty(),
+            mtime: mtime(ctx),
             ..LanesTab::default()
         };
         let events = shared(&ctx.state).unwrap_or_default();
-        let (Ok(cfg), st) = (Config::load(&ctx.config), events.states.clone()) else {
+        let (Ok(cfg), st) = (Config::kept(ctx), events.states.clone()) else {
             t.error = Some("no fleet.toml".into());
             return t;
         };
@@ -2192,8 +2292,6 @@ impl<'a> Server<'a> {
             a,
         ];
         let screen = screen.unwrap_or_default();
-        // #276: a `now:` line is one line from the server (full text on long-press): Claude's spinner word, the action (a
-        // command summarised; cut first), the elapsed time.
         let (now, spin) = (lanes::now_of(l, &screen), lanes::spin(&l.harness, &screen));
         let busy = (now.is_some() || spin.is_some()).then(|| {
             let (w, t) = spin.map_or((None, None), |(w, t)| (Some(w), t));
@@ -2220,6 +2318,9 @@ impl<'a> Server<'a> {
         let since = w.filter(|_| sup.is_none()).map_or(l.since, |w| w.since);
         let fc = l.fleet.as_ref().and_then(|f| cfg.fleet.get(f));
         LaneRow {
+            runtime: l.runtime.clone(),
+            host: l.at(),
+            place: l.place.clone(),
             name: l.name.clone(),
             role: l.role.clone(),
             state: l.state.clone(),
@@ -2247,6 +2348,7 @@ impl<'a> Server<'a> {
             repo: fc.map(|c| c.repo.clone()),
             dead: l.state == "dead",
             blocked: (l.state == "blocked").then(|| self.blocked(ctx, l, paired)).flatten(),
+            unpark: l.fleet.clone().filter(|_| s.is_some_and(|s| s.state == "parked")),
         }
     }
 
@@ -2257,7 +2359,7 @@ impl<'a> Server<'a> {
     /// #141: the Host tab as data (API v1's `host`; web/src/host.ts draws it): the host cards, then FLEET DISK, SERVICES,
     /// FLEETS and ALERTS rows with a status; serve.js ranks them.
     fn host_tab(&self, ctx: &Ctx) -> HostTab {
-        let (cfg, events) = (Config::load(&ctx.config).ok(), shared(&ctx.state).unwrap_or_default());
+        let (cfg, events) = (Config::kept(ctx).ok(), shared(&ctx.state).unwrap_or_default());
         let (cfg, events) = (cfg.as_ref(), &events);
         let (hs, r, dl, dc) = (
             self.sample(),
@@ -2334,10 +2436,10 @@ impl<'a> Server<'a> {
             .into_iter()
             .flat_map(|c| c.accounts.names.keys().map(move |n| (c, n)))
         {
-            let cap = crate::access::cap_line(c, self.r, events, name, ctx.now);
+            let cap = crate::access::cap_line(c, &self.r, events, name, ctx.now);
             let login = c.accounts.usage.get(name).map_or("", String::as_str);
-            let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, self.r, name))
-                .map(|m| crate::usage::shown(self.r, &m, login, ctx.now));
+            let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, &self.r, name))
+                .map(|m| crate::usage::shown(&self.r, &m, login, ctx.now));
             let (meters, pace, hint) = match usage {
                 Some(Ok((parts, pace))) => (
                     parts.into_iter().map(|(label, pct)| Meter { label, pct }).collect(),
@@ -2359,7 +2461,7 @@ impl<'a> Server<'a> {
             });
         }
         d.deepseek = cfg
-            .and_then(|c| crate::usage::deepseek(ctx, c, self.r))
+            .and_then(|c| crate::usage::deepseek(ctx, c, &self.r))
             .map(|b| match b {
                 Ok((b, low)) => Balance {
                     balance: Some(format!("{} {:.2}", b.currency, b.total)),
@@ -2375,7 +2477,7 @@ impl<'a> Server<'a> {
         for (name, fc) in cfg.map(|c| &c.fleet).into_iter().flatten() {
             let last = events.iter().rfind(|e| e.kind == "driven" && e.fleet == *name);
             let (t, w, x) = match last {
-                _ if fc.paused => ("m", "paused", format!("`herdsman resume {name}` starts it again")),
+                _ if fc.paused => ("m", "paused", format!("`drover resume {name}` starts it again")),
                 Some(e) => in_words(e, fc.serial_label()),
                 None => ("m", "nothing yet", String::new()),
             };
@@ -2477,8 +2579,8 @@ impl<'a> Server<'a> {
                     .iter()
                     .filter_map(|a| Some((a, a["agent"].as_str().filter(|l| !l.is_empty())?)))
                 {
-                    let h = crate::harness::all().find(|h| h.1.process_names().contains(&label));
-                    by.entry(h.map_or(label, |h| h.0).into()).or_default().push(a);
+                    let h = crate::providers::lanes().find(|h| h.process_names().contains(&label));
+                    by.entry(h.map_or(label, |h| h.name).into()).or_default().push(a);
                 }
                 for (h, ours) in by {
                     let n = |st: &str| ours.iter().filter(|a| a["agent_status"] == st).count();
@@ -2689,13 +2791,13 @@ fn gauge(x: f64) -> Bar {
 /// #141: a `driven` result as the Host tab says it, by code (`ok:<step>` when it ran): status, word, the plain rest with
 /// what clears it. `{why}`/`{then}`: the raw reason's first two `;` parts; `{busy}`: the issues in the way.
 const WORDS: &str = "HOST_BUSY|a|held|the host is busy: {why} · starts again when it drops
-DISK_LOW|a|held|{why} GB floor · `herdsman clean --yes`
+DISK_LOW|a|held|{why} GB floor · `drover clean --yes`
 ALL_CAPPED|a|waiting|{why} · {then}
 CAP|a|waiting|{why} · starts when a lane finishes
 NO_HOST HOST_OFFLINE|a|waiting|{why}
 SERIAL_BUSY|a|waiting|{slots} full ({busy} must merge first)
 ROUND_LIMIT UPDATE_LIMIT|r|needs you|#{n}: {why} · your call on its card
-WORKTREE_DIRTY|r|needs you|#{n}: {why} · `herdsman kill` it, or spawn `--supersede`
+WORKTREE_DIRTY|r|needs you|#{n}: {why} · `drover kill` it, or spawn `--supersede`
 CI_NOT_GREEN|a|waiting|#{n}'s CI is not green yet
 NO_VERDICT STALE_VERDICT VERDICT_FAIL|a|waiting|#{n} has no PASS for its head · a new round
 PAUSED|m|paused|{then}
@@ -2792,7 +2894,7 @@ pub fn stage(state: &str, act: &str) -> &'static str {
 
 /// The board's theme: `[serve] theme`, default `farm`.
 fn active(ctx: &Ctx) -> String {
-    Config::load(&ctx.config)
+    Config::kept(ctx)
         .ok()
         .and_then(|c| c.serve.theme)
         .unwrap_or_else(|| "farm".into())
@@ -3124,14 +3226,14 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
                 f["name"].as_str().unwrap_or_default(),
             );
             let to = dir.join("thread").join(t);
-            let b = chat::file(ctx, &events, t, name, demo).and_then(|p| std::fs::read(p).ok());
+            let b = chat::file(ctx, &events, t, name, demo).and_then(|p| crate::runner::read_file(p).ok());
             if let Some(b) = b.filter(|_| !name.contains('/')) {
                 std::fs::create_dir_all(&to)?;
                 std::fs::write(to.join(name), b)?;
             }
         }
     }
-    let (cfg, st) = (Config::load(&ctx.config)?, events.states.clone());
+    let (cfg, st) = (Config::kept(ctx)?, events.states.clone());
     for l in s
         .lanes(ctx.now, &cfg, &events, &st)
         .unwrap_or_default()
@@ -3149,7 +3251,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     Ok(())
 }
 
-/// #268: an issue's PR line as data (web/src/queue.ts draws it), from the cached `herdsman pr` read only (never calls
+/// #268: an issue's PR line as data (web/src/queue.ts draws it), from the cached `drover pr` read only (never calls
 /// `gh`); #269: `fc` none, a lane's fleet not configured (no links, no required checks).
 fn pr_data(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64, s: Option<&IssueState>) -> PrLine {
     let pr = gh::cached_pr(ctx, fleet, issue);
@@ -3213,13 +3315,12 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         harness: r.harness.clone(),
         model: r.model.clone(),
         effort: r.effort.clone(),
-        efforts: strs(crate::harness::efforts(&r.harness)),
+        efforts: strs(crate::providers::get(&r.harness).efforts()),
         // Unset: what the lane actually gets (the profile's/harness's model, `[limits].effort`).
-        model_default: if r.harness == "hermes" {
-            "profile".into()
-        } else {
-            r.harness.clone()
-        },
+        model_default: crate::providers::get(&r.harness)
+            .model_default()
+            .unwrap_or(&r.harness)
+            .into(),
         effort_default: l.effort.clone().unwrap_or_else(|| "none".into()),
         accounts: r.account_list(),
         mcp: r.mcp.clone(),
@@ -3230,12 +3331,12 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         harness: r.harness.clone(),
         model: r.model.clone(),
         effort: r.effort.clone(),
-        efforts: strs(crate::harness::efforts(&r.harness)),
+        efforts: strs(crate::providers::get(&r.harness).efforts()),
         models: strs(&crate::conductor::models(fc)),
     });
     let harness = |h: &&str| Harness {
         name: (*h).into(),
-        efforts: strs(crate::harness::efforts(h)),
+        efforts: strs(crate::providers::get(h).efforts()),
     };
     ConfigSheet {
         path: path.strip_prefix(&home).map_or(path.clone(), |p| format!("~{p}")),
@@ -3269,7 +3370,7 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
         global: notify(&cfg.notify),
         pipe: pipe(fleet, fc, st),
         models: cfg.models.clone(),
-        harnesses: crate::harness::NAMES.iter().map(harness).collect(),
+        harnesses: crate::providers::lane_names().iter().map(harness).collect(),
         roles: fc.role.iter().filter(|r| r.0 != "conductor").map(role).collect(),
         conductor,
     }
@@ -3278,7 +3379,7 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
 type Words = (&'static str, &'static str, String, bool);
 
 /// #170: an event as the Events tab says it: (glyph, tone, plain words, shown under `[important]`). `blocked` and
-/// `driven` take #141's WORDS; the capacity holds stay out of `[important]` (herdsman waiting for room).
+/// `driven` take #141's WORDS; the capacity holds stay out of `[important]` (drover waiting for room).
 pub fn words(e: &Event, serial: &str) -> Words {
     let s = |k: &str| e.str(k).unwrap_or_default();
     let (r, round) = (
@@ -3354,7 +3455,7 @@ fn check(stage: &str) -> &'static str {
 
 /// A check role's lane (`rev`, or #173 any check stage's): read-only from the page.
 fn reviewer(ctx: &Ctx, fleet: &str, role: &str) -> bool {
-    let cfg = Config::load(&ctx.config).ok();
+    let cfg = Config::kept(ctx).ok();
     role == "rev" || cfg.and_then(|c| Some(c.fleet.get(fleet)?.family(role) == "rev")) == Some(true)
 }
 

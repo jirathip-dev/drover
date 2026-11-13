@@ -4,8 +4,8 @@
 //! choice from the [config] sheet.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -78,7 +78,7 @@ fn form(html: &str, op: &str, with: Option<(&str, &str)>) -> Form {
         .unwrap_or_else(|| panic!("no {op} form {with:?}: {html}"))
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -108,7 +108,7 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
         json!({"number": n, "title": format!("t{n}"), "state": "OPEN", "created": "2026-01-01T00:00:00Z",
             "updated": "2026-01-02T00:00:00Z", "labels": [], "ac": true, "pr": false})
     };
-    let cache = herdsman::gh::cache_path(&c, "backlog", "sendmeter", 0);
+    let cache = drover::gh::cache_path(&c, "backlog", "sendmeter", 0);
     std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
     std::fs::write(
         &cache,
@@ -137,9 +137,9 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     let (mv, _) = form(&tab(), "mv", Some(("issue", "12")));
     assert_eq!(mv.get("after").map(String::as_str), Some("17"), "{mv:?}");
     ok(&mv);
-    let order: Vec<u64> = herdsman::queue::view(
+    let order: Vec<u64> = drover::queue::view(
         &read(&c.state).unwrap(),
-        &herdsman::events::fold(&read(&c.state).unwrap()),
+        &drover::events::fold(&read(&c.state).unwrap()),
         "sendmeter",
     )
     .iter()
@@ -188,21 +188,17 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     ok(&form(&paused, "resume", None).0);
     assert!(!tab().contains("<details class=\"fc off "));
 
-    // The [config] sheet: a role's [Set] (sonnet for impl), then a Conductor choice.
     let sheet = queue_js(&s, ADDR, T, "sheet(d, 'sendmeter')");
     let (mut set, _) = form(&sheet, "set", Some(("role", "impl")));
     set.extend([("harness", "hermes"), ("model", "sonnet"), ("effort", "")].map(|(k, v)| (k.into(), v.into())));
     assert!(ok(&set).contains("model sonnet"));
     let sheet = queue_js(&s, ADDR, T, "sheet(d, 'sendmeter')");
-    let (mut cond, _) = form(&sheet, "cond", Some(("model", "sonnet")));
-    cond.insert("model".into(), "sonnet".into());
-    assert!(ok(&cond).contains("conductor: model sonnet"));
-    let text = std::fs::read_to_string(&c.config).unwrap();
     assert!(
-        text.contains("[fleet.sendmeter.role.conductor]") && text.contains("model = \"sonnet\""),
-        "{text}"
+        forms(&sheet)
+            .iter()
+            .all(|(h, _)| h.get("op").map(String::as_str) != Some("cond")),
+        "{sheet}"
     );
-
     // Unpaired, a paired op through the API is refused; the board's mtime is checked as the form's.
     let v = post(&s, "", &form(&tab(), "drive", None).0);
     assert_eq!(v["code"], "UNPAIRED", "{v}");
@@ -259,7 +255,7 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
         (d.len(), d[0].str("choice"), d[0].str("by")),
         (1, Some("after #10"), Some("owner"))
     );
-    assert!(r.called("herdr agent start conductor-t6"), "{:?}", r.calls.borrow());
+    assert!(r.called("herdr agent start orchestrator-t6"), "{:?}", r.calls.borrow());
     // The thread's copy is answered, not open; the card has no form left.
     let chat: Value = serde_json::from_str(&api(&s, ADDR, &cookie, T, "chat")).unwrap();
     let t = (chat["threads"].as_array().unwrap().iter())

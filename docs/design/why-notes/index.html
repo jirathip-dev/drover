@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>#677 why notes — design</title>
+<style>
+  :root { --fg:#1d1f23; --mute:#5d6470; --line:#d9dce1; --bg:#fbfbfa; --card:#fff; --acc:#2f5fd0; --ok:#1f7a45; --bad:#b3261e; --code:#f3f4f6; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  main { max-width:1120px; margin:0 auto; padding:28px 20px 60px; }
+  h1 { font-size:24px; margin:0 0 4px; }
+  h2 { font-size:18px; margin:34px 0 10px; padding-top:14px; border-top:1px solid var(--line); }
+  h3 { font-size:15px; margin:18px 0 6px; }
+  p, li { max-width:78ch; }
+  .sub { color:var(--mute); margin:0 0 18px; }
+  .chips span { display:inline-block; border:1px solid var(--line); background:var(--card); border-radius:999px; padding:2px 10px; margin:0 6px 6px 0; font-size:13px; }
+  pre, code { font:12.5px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  code { background:var(--code); padding:1px 4px; border-radius:4px; }
+  pre { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:12px 14px; overflow-x:auto; margin:8px 0 14px; }
+  pre.term { background:#16181d; color:#e6e6e6; border-color:#16181d; }
+  pre.term .k { color:#8ab4f8; } pre.term .m { color:#9aa0a6; } pre.term .g { color:#81c995; } pre.term .r { color:#f28b82; }
+  table { border-collapse:collapse; width:100%; background:var(--card); border:1px solid var(--line); border-radius:8px; overflow:hidden; margin:8px 0 14px; font-size:14px; }
+  th, td { text-align:left; vertical-align:top; padding:7px 10px; border-bottom:1px solid var(--line); }
+  th { background:#f1f2f4; font-weight:600; }
+  tr:last-child td { border-bottom:0; }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  .grid > div { min-width:0; }
+  .flow { counter-reset:s; list-style:none; padding:0; }
+  .flow li { counter-increment:s; position:relative; padding:6px 0 6px 34px; max-width:none; }
+  .flow li::before { content:counter(s); position:absolute; left:0; top:6px; width:22px; height:22px; border-radius:50%; background:var(--acc); color:#fff; font-size:12px; text-align:center; line-height:22px; }
+  .note { border-left:3px solid var(--acc); background:#eef3fd; padding:8px 12px; border-radius:0 6px 6px 0; margin:10px 0; }
+  .warn { border-left-color:#c88a00; background:#fdf6e6; }
+  .ok { color:var(--ok); font-weight:600; } .bad { color:var(--bad); font-weight:600; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  @media (max-width:760px) {
+    main { padding:18px 14px 40px; }
+    h1 { font-size:20px; }
+    .grid { grid-template-columns:1fr; }
+    table { font-size:13px; table-layout:fixed; }
+    th, td { padding:6px 7px; overflow-wrap:anywhere; }
+    td code { overflow-wrap:anywhere; }
+    pre { font-size:11.5px; }
+  }
+</style>
+</head>
+<body>
+<main>
+<h1>Why notes: each lane commit linked to its reasoning</h1>
+<p class="sub">Design for drover#677 · branch <code>issue-677</code> · design lane, 2026-11-08</p>
+<div class="chips"><span>git notes <code>refs/notes/why</code></span><span>no new dependency</span><span>no old-board UI file</span><span>src/ estimate <b>+215</b> (issue guess +150)</span></div>
+
+<p>A lane writes a short <code>why.md</code>. On <code>drover turn done</code> drover checks it and attaches it to the pushed head as a git note. The note is also copied into the PR body and logged as a <code>why</code> event. Briefs, reviewers and <code>drover why &lt;file:line&gt;</code> read it back. Only drover writes notes, and it writes them from the main host's clone, never from a lane.</p>
+
+<h2>1 · The note form</h2>
+<div class="grid">
+<div>
+<pre><b>why.md</b>  (worktree root, never committed)
+Decided: per-file 5 MB and per-snapshot 50 MB caps; a skipped file is listed in the wip commit
+Because: "A per-file cap (default 5 MB) and a per-snapshot cap (default 50 MB) skip larger files."
+Decided: build dirs are excluded by pathspec, not by .gitignore
+Because: "whatever a repo's `.gitignore` says"
+Rejected: reading .gitignore only — other fleet repos ignore only target/
+Rejected: splitting wip prune into a follow-up — the owner chose a cap raise
+Because: q799
+Check: kill with a 60 MB file under target-lane/ names it skipped
+Owner: wip saves stop carrying build output; huge files are listed, not pushed</pre>
+</div>
+<div>
+<table>
+<tr><th>key</th><th>count</th><th>what</th></tr>
+<tr><td><code>Decided:</code></td><td>≥ 1</td><td>One choice the diff makes.</td></tr>
+<tr><td><code>Because:</code></td><td>≥ 1</td><td>Its reason. Must carry a citation (below). It covers the <code>Decided:</code>/<code>Rejected:</code> line above it.</td></tr>
+<tr><td><code>Rejected:</code></td><td>≥ 1</td><td><code>alternative — why</code> (an em dash or <code>--</code>). <code>Rejected: none — …</code> is allowed.</td></tr>
+<tr><td><code>Check:</code></td><td>≥ 1</td><td>What the reviewer should verify.</td></tr>
+<tr><td><code>Owner:</code></td><td>exactly 1, last line</td><td>One plain-words line. This is the line the merge comment and <code>/api/v1</code> show.</td></tr>
+</table>
+<p>Lines may repeat in any order, except that <code>Owner:</code> comes last. Blank lines are ignored. At most 15 non-blank lines, each at most 240 chars, 2 KB in total. No other line prefixes, so no prose and no headings.</p>
+</div>
+</div>
+
+<h3>Citations on <code>Because:</code> (every one is checked, not only shaped)</h3>
+<table>
+<tr><th>form</th><th>accepted when</th></tr>
+<tr><td><code>"quoted text"</code></td><td>The quote appears verbatim in the issue spec cached at spawn plus its <code>## Amendments</code>, comparing with whitespace collapsed and backticks kept. At least 12 chars.</td></tr>
+<tr><td><code>q&lt;id&gt;</code></td><td>The id is an ask on this fleet that is answered (a <code>decision</code> event, owner or <code>by: default</code>).</td></tr>
+<tr><td><code>path:line</code></td><td>The path is in the head commit's tree and the line is within its length. <code>.drover/rules.md:7</code> works too.</td></tr>
+</table>
+<p>A line can carry more than one citation. One valid citation is enough.</p>
+
+<h3>Refusal: <code>REFUSED WHY_INVALID: &lt;reason&gt;</code> (exit 3, nothing written or pushed)</h3>
+<table>
+<tr><th>reason</th><th>example output</th></tr>
+<tr><td><code>missing</code></td><td><code>why.md missing: write it (Decided/Because/Rejected/Check/Owner), then turn done again</code></td></tr>
+<tr><td><code>form</code></td><td><code>why.md:4 form: no Rejected: line</code> · <code>why.md form: 17 lines (max 15)</code> · <code>why.md:2 form: "Summary:" is no note key</code></td></tr>
+<tr><td><code>uncited</code></td><td><code>why.md:3 uncited: a Because: needs "spec quote", q&lt;id&gt; or file:line</code></td></tr>
+<tr><td><code>cite</code></td><td><code>why.md:3 cite: q912 is no answered ask</code> · <code>"…" is not in #646's spec</code> · <code>check.rs:9000 past its end (1888)</code></td></tr>
+<tr><td><code>secret</code></td><td><code>why.md:5 secret: Because: token ghp_••• …</code>. It is the same <code>lanes::redact</code> scan the <code>wip/</code> snapshot runs (<code>SECRET_IN_WIP</code>), masked the same way.</td></tr>
+</table>
+
+<h2>2 · Writing: <code>turn done</code> → note on origin</h2>
+<ol class="flow">
+<li><b>Lane side.</b> <code>drover turn done</code> reads <code>why.md</code> and runs the form and secret checks right away. These are pure checks, so a remote lane gets the refusal before its line goes to the outbox (#389).</li>
+<li><b>Main host</b> (local lanes directly; remote lanes when drive delivers the outbox). This applies only when the turn is <code>done</code> and the PR head is a <b>new push</b>, using the condition <code>TURN_NUDGE</code> already uses. Otherwise nothing note-related happens. drover reads <code>why.md</code> through the lane's host (<code>hosts::On</code>, so ssh for a remote lane) and runs the full check, citations included.</li>
+<li><b>Invalid:</b> <code>turn-end</code> is still logged, with <code>"note":"WHY_INVALID: …"</code>, and the turn exits 3. Drive answers with <code>WHY_NUDGE</code>: one prompt that quotes the reason, sent <i>before</i> the review starts. After that one nudge, the next <code>turn done</code> goes to review even with no note. The rev brief then says <code>no why note: &lt;reason&gt;</code>, so a doc never blocks the pipeline (open question 1).</li>
+<li><b>Valid:</b> drover takes the lease <code>why-notes:&lt;fleet&gt;</code> (the <code>leases</code> table, 120 s) and works in the fleet's local clone (<code>repo.local</code>):
+<pre>git fetch origin &lt;branch&gt; +refs/notes/why:refs/notes/why-origin   # head object + origin's notes (ref may not exist yet)
+git notes --ref why merge -s theirs refs/notes/why-origin          # skipped when why-origin is absent
+git notes --ref why add -f -F &lt;tmp&gt; &lt;head&gt;
+git push origin refs/notes/why:refs/notes/why                      # never --force</pre>
+A non-fast-forward reject loops back to the fetch, up to 3 times. The lease serialises drover's own processes. The fetch, merge and retry cover any other writer. If all 3 tries fail, drover logs <code>why-failed</code> with the git error, the review is not blocked, and the next drive pass retries from the kept copy.</li>
+<li><b>PR body:</b> <code>gh pr view --json body</code>. The section <code>## Why (round n)</code> is replaced if present (up to the next <code>## </code>), else appended. Then <code>gh pr edit --body</code>. <code>n</code> = the review round this head enters (<code>rounds + 1</code>). A second push in the same round replaces that round's section, and the older head keeps its own note.</li>
+<li><b>Event</b> <code>why</code>: <code>{sha, round, branch, agent, owner, files}</code>. <code>files</code> lists the paths changed since the previous noted head (else since the base). <code>owner</code> is the <code>Owner:</code> line, so <code>/api/v1</code> and the merge comment never read git.</li>
+<li><b>Consume:</b> <code>why.md</code> is moved to <code>.drover/why-r&lt;n&gt;.md</code> in the worktree. A fix round has to write a fresh one, and a stale note can never be re-attached. <code>why.md</code> joins <code>OWN_FILES</code>, so wip snapshots and <code>clean</code> treat it as scratch.</li>
+</ol>
+<div class="note"><b>Only drover writes notes.</b> The hook gains one guard for every lane: <code>git notes</code> writes (<code>add|append|edit|copy|merge|remove</code> on any ref) and any <code>git push</code> naming <code>refs/notes</code> → <code>REFUSED NOTES_DROVER_ONLY</code>. Reading (<code>git notes show</code>, <code>git log --notes=why</code>, <code>git fetch … refs/notes/why</code>) stays allowed.</div>
+
+<h3>PR body as GitHub shows it</h3>
+<pre>…the impl's own body…
+
+## Why (round 1)
+Decided: per-file 5 MB and per-snapshot 50 MB caps; a skipped file is listed in the wip commit
+Because: "A per-file cap (default 5 MB) and a per-snapshot cap (default 50 MB) skip larger files."
+…
+Owner: wip saves stop carrying build output; huge files are listed, not pushed
+&lt;sub&gt;note on bc11d3a · git log --notes=why&lt;/sub&gt;</pre>
+
+<h3>Survival through merge</h3>
+<p>Merges already use <code>gh pr merge --merge</code> (<code>gate.rs</code>, unchanged), so the branch commits and the notes on them reach <code>staging</code>. Notes live in <code>refs/notes/why</code> on origin, apart from any branch, so deleting a branch, running <code>wip prune</code> or a <code>--update</code> merge never drops them. Plain git reads them:</p>
+<pre>git fetch origin refs/notes/why:refs/notes/why &amp;&amp; git log --notes=why</pre>
+
+<h3>Tests (one per AC row)</h3>
+<table>
+<tr><th>test</th><th>shows</th></tr>
+<tr><td><code>why_note_written</code></td><td>A fake gh plus a bare-repo origin. Afterwards <code>git notes --ref why show &lt;head&gt;</code> on origin works, the PR body edit has <code>## Why (round 1)</code>, the <code>why</code> event is in the log, and <code>why.md</code> has moved.</td></tr>
+<tr><td><code>why_note_refused_*</code></td><td>Missing field, uncited <code>Because:</code>, a fake <code>ghp_</code> token. Each run exits 3 with the named reason, <code>refs/notes/why</code> stays absent on origin, and there is no body edit.</td></tr>
+<tr><td><code>why_notes_race</code></td><td>Two <code>turn done</code> processes for two issues start together against one origin. Both notes end up on origin. A variant pre-pushes a foreign note between the fetch and the push, and the retry keeps all three.</td></tr>
+<tr><td><code>why_cmd_merged_line</code></td><td>A merged fixture PR: text output has the note, issue and asks with answers; <code>--json</code> parses.</td></tr>
+<tr><td><code>brief_notes_{fix,update,respawn,impl,rev}</code></td><td>Each brief kind carries its section (§4).</td></tr>
+<tr><td><code>merge_comment_owner_line</code>, <code>v1_issue_why</code></td><td>The <code>Owner:</code> line appears in both.</td></tr>
+</table>
+
+<h2>3 · Reading: <code>drover why &lt;file:line&gt; [--json]</code></h2>
+<ol class="flow">
+<li>Fetch notes quietly into the repo that holds the cwd (any worktree, or <code>repo.local</code> with <code>--fleet</code>). A fetch failure is ignored.</li>
+<li><code>git blame --porcelain -L n,n -- file</code> gives the commit <b>S</b>.</li>
+<li><b>Issue:</b> the first-parent merge that brought S into the integration branch (<code>git log --merges --first-parent --ancestry-path S..&lt;integration&gt;</code>, last one), then the <code>merged</code> event with that <code>merge_sha</code>. Fallback: the <code>(#N)</code> in S's subject. When the line is still on an open branch, the branch name <code>issue-N</code> gives the issue.</li>
+<li><b>Note:</b> S's own note, else the issue's earliest <code>why</code> event whose head S is an ancestor of. That is the round that pushed S, since notes sit on round heads and blame usually lands on an earlier branch commit.</li>
+<li><b>Asks:</b> the issue's <code>needs-decision</code> events with their <code>decision</code> (choice, by, via), plus every <code>q&lt;id&gt;</code> the note cites.</li>
+</ol>
+
+<div class="note warn">The sample below uses <b>real</b> data: blame, sha, PR, merge and the q799 ask and answer come from the live repo and event log. #646 predates notes, so its <b>note text is illustrative</b>, written the way the #646 impl lane would have written it.</div>
+
+<pre class="term"><span class="m">$</span> drover why crates/core/src/check.rs:1763
+<span class="k">line</span>    crates/core/src/check.rs:1763  const CAPS: (u64, u64) = (5 &lt;&lt; 20, 50 &lt;&lt; 20);
+<span class="k">commit</span>  3e8e5710f  wip: snapshots skip build output and files over the size caps, lean clones, wip prune (#646)
+<span class="k">issue</span>   #646 wip snapshots commit Cargo build output … owner-approved wip prune
+        PR #661 · merged dcc928495 into staging · 1 review round · PASS bc11d3a0b
+<span class="k">note</span>    round 1 · on bc11d3a0b (head of the round that pushed 3e8e5710f)
+  Decided: per-file 5 MB and per-snapshot 50 MB caps; a skipped file is listed in the wip commit
+  Because: "A per-file cap (default 5 MB) and a per-snapshot cap (default 50 MB) skip larger files."
+  Decided: build dirs are excluded by pathspec, not by .gitignore
+  Because: "whatever a repo's `.gitignore` says"
+  Rejected: reading .gitignore only — other fleet repos ignore only target/
+  Rejected: splitting wip prune into a follow-up — the owner chose a cap raise
+  Because: q799
+  Check: kill with a 60 MB file under target-lane/ names it skipped
+  Owner: wip saves stop carrying build output; huge files are listed, not pushed
+<span class="k">asks</span>
+  q799 owner · #646 can't fit under ci/cap.toml. Staging is at 31493/31500 (7 lines of headroom). This PR,
+       already trimmed, adds a net +98 src lines … How should I proceed?
+       <span class="g">→ owner (web): Raise line_cap 31500 -&gt; 31700 in this PR, recorded in docs/cap-history/2026-11-07-646.md</span>
+<span class="m">git log --notes=why -1 bc11d3a0b</span></pre>
+
+<p>No note at all (an older commit, or a lane that skipped its note) prints the same block with <code>note    none</code>, so issue and asks still answer the question. A commit drover cannot map prints <code>issue none</code> and exits 0.</p>
+
+<pre>{"file":"crates/core/src/check.rs","line":1763,"text":"const CAPS: (u64, u64) = (5 << 20, 50 << 20);",
+ "commit":{"sha":"3e8e5710f9dd3eef69e1159f5cf97cdfa4a249db","subject":"wip: snapshots skip build output …(#646)"},
+ "issue":{"fleet":"drover","number":646,"title":"wip snapshots commit Cargo build output …","pr":661,
+          "merge_sha":"dcc92849548869a50319220dc754859fb7dc0b56","into":"staging","rounds":1},
+ "note":{"sha":"bc11d3a0bb83be9a5b5c92768859f0d715a8f838","round":1,"text":"Decided: …\nOwner: …",
+         "owner":"wip saves stop carrying build output; huge files are listed, not pushed"},
+ "asks":[{"id":"q799","kind":"owner","question":"#646 can't fit under ci/cap.toml. …",
+          "answer":{"choice":"Raise line_cap 31500 -> 31700 in this PR, …","by":"owner","via":"web"}}]}</pre>
+
+<h2>4 · Briefs</h2>
+<table>
+<tr><th>brief</th><th>section</th><th>source</th></tr>
+<tr><td>fix · update · respawn (impl family, a branch with pushes)</td><td><code>## Why notes on this branch</code>: every note, oldest first, with sha and round</td><td><code>git log --notes=why --format=… &lt;base&gt;..&lt;head&gt;</code>, keeping commits that carry a note</td></tr>
+<tr><td>new impl (round 0, no branch yet)</td><td><code>## Why notes for the files this issue names</code>: the latest 1–3 per file</td><td>The paths in the spec that exist in the tree, matched against the <code>files</code> of the fleet's <code>why</code> events (newest first), with text from <code>git notes show</code>. At most 5 files, 3 notes each, 60 lines in total.</td></tr>
+<tr><td>rev (and verify)</td><td><code>## Why note for this round</code>: the head's note, or <code>no why note: &lt;reason&gt;</code></td><td><code>git notes --ref why show &lt;sha&gt;</code> for the sha under review</td></tr>
+</table>
+<p>The rev brief gains one rule line. It needs no gate change: <code>Proof: spec</code> already accepts any <code>&gt;</code> quote plus <code>file:line</code>.</p>
+<pre>A why note that contradicts the diff is a blocking finding:
+- blocking [why] crates/core/src/check.rs:1763: the note says 50 MB per snapshot; the code caps 5 MB
+  Proof: spec
+  &gt; Decided: per-file 5 MB and per-snapshot 50 MB caps   (why note, bc11d3a)
+  crates/core/src/check.rs:1763</pre>
+<p>The impl brief template (<code>roles/brief-impl.md</code>) gets the <code>why.md</code> form, with the five keys and the three citation kinds, plus <i>never commit why.md; drover attaches it</i>.</p>
+
+<h2>5 · Merge comment and <code>/api/v1</code></h2>
+<div class="grid">
+<div>
+<pre>Merged via `drover merge`: PR #661 → `staging` @ `dcc9284…`
+Pinned PASS verdict sha: `bc11d3a…`
+Why: wip saves stop carrying build output; huge files are listed, not pushed</pre>
+<p>This is the latest <code>why</code> event's <code>owner</code>. The comment stays ≤ 5 lines, and the <code>Why:</code> line is left out when there is no note.</p>
+</div>
+<div>
+<pre>GET /api/v1/issue/drover/646
+{ …,
+  "why": { "sha": "bc11d3a0…", "round": 1,
+           "owner": "wip saves stop carrying build output; …" } }</pre>
+<p><code>serve/v1.rs</code> plus its type in <code>api.rs</code>. Both are outside <code>board-freeze</code>'s file list (<code>serve/</code> but <code>v1.rs</code>). <code>assets/</code>, <code>web/</code>, <code>serve.rs</code> and <code>serve/chat.rs</code> are untouched.</p>
+</div>
+</div>
+
+<h2>6 · src/ line estimate</h2>
+<table>
+<tr><th>where</th><th>what</th><th class="num">lines</th></tr>
+<tr><td><code>core/src/why.rs</code> (new)</td><td>parse and validate, citation checks</td><td class="num">55</td></tr>
+<tr><td></td><td>lease, then fetch, merge, add, push with retry; body section; event; consume</td><td class="num">50</td></tr>
+<tr><td></td><td><code>drover why</code>: blame → issue → note → asks, text and json</td><td class="num">50</td></tr>
+<tr><td></td><td>brief sections (branch notes, file notes, round note)</td><td class="num">25</td></tr>
+<tr><td><code>cli.rs</code></td><td><code>Why</code> verb; the <code>turn done</code> hook-in and exit 3</td><td class="num">15</td></tr>
+<tr><td><code>waiting.rs</code> / <code>drive.rs</code></td><td><code>WHY_NUDGE</code>, sent once before review</td><td class="num">10</td></tr>
+<tr><td><code>spawn.rs</code>, <code>hook.rs</code>, <code>gate.rs</code>, <code>serve/v1.rs</code>, <code>api.rs</code>, <code>events.rs</code></td><td>brief slots, <code>NOTES_DROVER_ONLY</code>, the comment line, the API field, event names, <code>OWN_FILES</code></td><td class="num">10</td></tr>
+<tr><td colspan="2"><b>total</b> (staging at 32,489 / cap 35,500)</td><td class="num"><b>+215</b></td></tr>
+</table>
+<p>This is above the issue's +150 guess because every citation is actually checked and because of the remote-lane path. Dropping the quote-in-spec check (shape only) saves about 15 lines.</p>
+
+<h2>7 · Open questions for the owner</h2>
+<ol>
+<li><b>After the one nudge.</b> If the lane still has no valid note, should review go ahead without it (recommended: the rev brief names the gap and the reviewer may FAIL it), or should the issue block until a note lands?</li>
+<li><b>Note per head or per commit.</b> The spec says head, and this design keeps that. <code>why</code> maps an earlier branch commit to its round's head. The alternative is noting every commit of the push: blame lands directly on a note, at the cost of more notes and the same text repeated.</li>
+<li><b>Quote check strictness.</b> A <code>"spec quote"</code> must appear verbatim in the cached spec plus amendments. Is that right, or should a shape check be enough?</li>
+<li><b>The update round's note.</b> An <code>--update</code> head is often a pure merge from staging. Should it need a full note, or would a one-line <code>Decided: merged staging; Because: q&lt;id&gt;|file:line …</code> be allowed (the form stays the same, only shorter)?</li>
+</ol>
+</main>
+</body>
+</html>

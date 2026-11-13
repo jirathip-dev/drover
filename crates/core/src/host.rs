@@ -1,4 +1,4 @@
-//! Host-load gate for `herdsman spawn` (an unreadable signal admits) and the live-agent view.
+//! Host-load gate for `drover spawn` (an unreadable signal admits) and the live-agent view.
 use crate::config::Limits;
 pub use crate::herdr::agents;
 use crate::runner::{ok, Runner};
@@ -16,7 +16,7 @@ pub fn live_in<'a>(agents: &'a [Value], name: &str, dir: &Path) -> Vec<&'a Value
 }
 
 /// #186: never signalled, whatever their cwd.
-const SPARE: &[&str] = &[crate::herdr::BIN, "herdsman", "launchd"];
+const SPARE: &[&str] = &[crate::herdr::BIN, "drover", "herdsman", "launchd"];
 
 /// #186: `(pid, command, cwd)` of every process `lsof` sees, but `SPARE`, pid 1, this process and its parent.
 pub fn cwds(r: &dyn Runner) -> Vec<(String, String, String)> {
@@ -83,6 +83,47 @@ pub fn reap(r: &dyn Runner, dir: &Path, trim: bool, spare: Option<&str>) -> (Vec
     (first.into_iter().map(|p| p.1).collect(), kb / 1024)
 }
 
+/// #710: a process stuck on the Keychain: pid, seconds up, its parent's name (never an argument).
+pub type Stuck = (String, u64, String);
+
+/// #710: `security find-generic-password` readers up over 60 s and a `SecurityAgent` up over 10 min (troubleshooting §2);
+/// securityd and every other `security` verb never match.
+pub fn keychain_jam(r: &dyn Runner) -> (Vec<Stuck>, Option<Stuck>) {
+    let ps = stdout(r, "ps", &["-axo", "pid=,ppid=,etime=,command="]).unwrap_or_default();
+    let rows: Vec<Vec<&str>> = ps.lines().map(|l| l.split_whitespace().collect()).collect();
+    let name = |w: Option<&&str>| w.map_or("?", |w| w.rsplit('/').next().unwrap_or(w)).to_string();
+    let parent = |ppid: &str| name(rows.iter().find(|w| w.first() == Some(&ppid)).and_then(|w| w.get(3)));
+    let (mut readers, mut agent) = (vec![], None);
+    for w in rows.iter().filter(|w| w.len() > 3) {
+        let up = w[2].split(['-', ':']).rev().zip([1, 60, 3600, 86_400]);
+        let up: u64 = up.map(|(n, k)| n.parse::<u64>().unwrap_or(0) * k).sum();
+        let stuck = (w[0].to_string(), up, parent(w[1]));
+        match (name(w.get(3)).as_str(), w.get(4)) {
+            ("security", Some(&"find-generic-password")) if up > 60 => readers.push(stuck),
+            ("SecurityAgent", _) if up > 600 => agent = Some(stuck),
+            _ => {}
+        }
+    }
+    (readers, agent)
+}
+
+/// #710: `keychain_jam`'s readers and agent as one line, with troubleshooting §2's fix for those pids.
+pub fn jam_line((readers, agent): &(Vec<Stuck>, Option<Stuck>)) -> String {
+    let each: Vec<String> = readers.iter().map(|p| format!("{} ({})", p.0, p.2)).collect();
+    let pids: Vec<&str> = readers.iter().map(|p| p.0.as_str()).collect();
+    let oldest = readers.iter().map(|p| p.1).max();
+    let oldest = oldest.map_or(String::new(), |t| format!(", oldest {}", crate::events::age(t)));
+    let up = agent.as_ref().map_or(String::new(), |a| {
+        format!("; SecurityAgent {} up {}", a.0, crate::events::age(a.1))
+    });
+    format!(
+        "{} waiting over 60 s{oldest}: {}{up} → kill {} && kill \"$(pgrep -x SecurityAgent)\" (docs/troubleshooting.md §2)",
+        readers.len(),
+        each.join(", "),
+        pids.join(" ")
+    )
+}
+
 /// #248: the MB each agent's processes hold (those whose cwd is inside the agent's cwd).
 pub fn held(r: &dyn Runner, agents: &[&Value]) -> Vec<u64> {
     let (ps, rss) = (cwds(r), stdout(r, "ps", &["-axo", "pid=,rss="]).unwrap_or_default());
@@ -117,12 +158,12 @@ pub fn top(r: &dyn Runner, agents: &[Value]) -> Vec<String> {
     out.split_once("MEM")
         .map_or(vec![], |(_, t)| t.lines().filter_map(row).collect())
 }
-/// #352: the MB `ps` sees per group, never per PID: lanes (a harness's process), CI/Colima, browsers, herdsman, other.
+/// #352: the MB `ps` sees per group, never per PID: lanes (a harness's process), CI/Colima, browsers, drover, other.
 pub fn groups(r: &dyn Runner) -> [u64; 5] {
-    const G: [&str; 3] = ["colima qemu lima virtualiz", "chrom safari firefox", "herd"];
+    const G: [&str; 3] = ["colima qemu lima virtualiz", "chrom safari firefox", "herd drover"];
     let (ps, mut kb) = (stdout(r, "ps", &["-axo", "rss=,command="]).unwrap_or_default(), [0; 5]);
     for (k, cmd) in ps.to_lowercase().lines().filter_map(|l| l.trim().split_once(' ')) {
-        let lane = crate::harness::all().any(|h| h.1.process_names().iter().any(|w| cmd.contains(w)));
+        let lane = crate::providers::lanes().any(|h| h.process_names().iter().any(|w| cmd.contains(w)));
         let i = G.iter().position(|g| g.split(' ').any(|w| cmd.contains(w)));
         kb[if lane { 0 } else { i.map_or(4, |i| i + 1) }] += k.parse::<u64>().unwrap_or(0);
     }
@@ -142,6 +183,31 @@ pub struct Host {
     pub free_mem_gb: Option<f64>,
     /// #234: the memory size in GB.
     pub mem_total_gb: Option<f64>,
+    /// #825: the 3 busiest processes drover did not start, `name cpu%`.
+    pub top: Vec<String>,
+}
+
+fn own_load(ps: &str) -> (f64, Vec<String>) {
+    let row = |l: &str| {
+        let mut w = l.split_whitespace();
+        let (pid, parent, cpu) = (
+            w.next()?.parse::<u64>().ok()?,
+            w.next()?.parse::<u64>().ok()?,
+            w.next()?,
+        );
+        let comm = w.collect::<Vec<_>>().join(" ");
+        let name = comm.rsplit('/').next().unwrap_or_default().to_string();
+        Some((pid, parent, cpu.parse::<f64>().ok()?, name))
+    };
+    let procs: Vec<_> = ps.lines().filter_map(row).collect();
+    let ours: Vec<u64> = (procs.iter().filter(|p| ["drover", "herdsman"].contains(&p.3.as_str())))
+        .map(|p| p.0)
+        .collect();
+    let (own, mut other): (Vec<_>, Vec<_>) =
+        (procs.iter()).partition(|p| ours.contains(&p.0) || p.3 == "cp" && ours.contains(&p.1));
+    other.sort_by(|a, b| b.2.total_cmp(&a.2));
+    let top = other.iter().take(3).map(|p| format!("{} {:.0}%", p.3, p.2)).collect();
+    (own.iter().map(|p| p.2 / 100.0).sum(), top)
 }
 
 fn stdout(r: &dyn Runner, prog: &str, args: &[&str]) -> Option<String> {
@@ -195,7 +261,8 @@ pub fn sample(r: &dyn Runner) -> Host {
     let load = load.or_else(|| word(linux("cat", &["/proc/loadavg"]), 0));
     let ncpu = ncpu.or_else(|| word(linux("nproc", &[]), 0));
     let avail = || Some(word(linux("grep", &["MemAvailable", "/proc/meminfo"]), 1)? / 1_048_576.0);
-    let load_per_cpu = load.zip(ncpu.filter(|n| *n > 0.0)).map(|(l, n)| l / n);
+    let (own, top) = own_load(&stdout(r, "ps", &["-Ao", "pid=,ppid=,pcpu=,comm="]).unwrap_or_default());
+    let load_per_cpu = load.zip(ncpu.filter(|n| *n > 0.0)).map(|(l, n)| (l - own).max(0.0) / n);
     let size = stdout(r, "sysctl", &["-n", "hw.memsize"]).and_then(|s| s.trim().parse::<f64>().ok());
     let size = size.map(|b| b / 1_073_741_824.0);
     let size = size.or_else(|| Some(word(linux("grep", &["MemTotal", "/proc/meminfo"]), 1)? / 1_048_576.0));
@@ -206,6 +273,7 @@ pub fn sample(r: &dyn Runner) -> Host {
         load_per_cpu,
         free_mem_gb: mem_gb(&b).or_else(avail),
         mem_total_gb: size,
+        top,
     }
 }
 
@@ -254,7 +322,12 @@ pub fn admit(h: &Host, l: &Limits) -> Result<(), String> {
         why.push(format!("swap-out median {s} pages/2s > {}", l.swapout_rate));
     }
     if let Some(x) = h.load_per_cpu.filter(|x| *x > l.load_per_cpu) {
-        why.push(format!("load/cpu {x:.2} > {}", l.load_per_cpu));
+        let top = (!h.top.is_empty()).then(|| format!(" (top: {})", h.top.join(", ")));
+        why.push(format!(
+            "load/cpu {x:.2} > {}{}",
+            l.load_per_cpu,
+            top.unwrap_or_default()
+        ));
     }
     if why.is_empty() {
         Ok(())

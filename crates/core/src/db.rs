@@ -1,4 +1,4 @@
-//! #344: herdsman's state in one SQLite file, `state.db` beside the log path (`FLEET_STATE`), in WAL mode: the event
+//! #344: drover's state in one SQLite file, `state.db` beside the log path (`FLEET_STATE`), in WAL mode: the event
 //! log, leases (every lock and marker), paired devices, push subscriptions and the snapshots (docs/architecture.md).
 use crate::events::{self, Event};
 use anyhow::{Context, Result};
@@ -40,7 +40,7 @@ impl Scratch {
     pub fn start() -> Scratch {
         static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let p = std::env::temp_dir().join(format!("herdsman-scratch-{}-{n}.db", std::process::id()));
+        let p = std::env::temp_dir().join(format!("drover-scratch-{}-{n}.db", std::process::id()));
         SCRATCH.set(Some(p.clone()));
         Scratch(p)
     }
@@ -74,7 +74,7 @@ fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection)
     let scratch = SCRATCH.with_borrow(Option::is_some);
     anyhow::ensure!(
         !old || scratch || !live(state) || LIVE.load(std::sync::atomic::Ordering::Relaxed),
-        "{} still has files from before #344: run `herdsman migrate --live` to import them",
+        "{} still has files from before #344: run `drover migrate --live` to import them",
         state.parent().unwrap_or(Path::new(".")).display()
     );
     let cached = OPEN.with_borrow_mut(|v| Some(v.swap_remove(v.iter().position(|x| x.0 == p)?)));
@@ -99,14 +99,15 @@ fn open(state: &Path) -> Result<Connection> {
     let mut o = std::fs::OpenOptions::new();
     drop(std::os::unix::fs::OpenOptionsExt::mode(o.create(true).append(true), 0o600).open(file(state))?);
     let c = Connection::open(file(state)).with_context(|| format!("cannot open {}", file(state).display()))?;
-    c.busy_timeout(std::time::Duration::from_secs(60))?;
+    let l = crate::config::limits();
+    c.busy_timeout(std::time::Duration::from_secs(l.db_busy_secs))?;
     // Switching to WAL needs the file alone and SQLite does not wait for it: a new database's first openers retry.
     let mode = |c: &Connection| c.pragma_query_value(None, "journal_mode", |r| r.get::<_, String>(0));
     for _ in 0..6000 {
         if mode(&c)? == "wal" || c.pragma_update(None, "journal_mode", "WAL").is_ok() {
             break;
         }
-        std::thread::sleep(std::time::Duration::from_millis(10));
+        std::thread::sleep(std::time::Duration::from_millis(l.db_retry_millis));
     }
     anyhow::ensure!(mode(&c)? == "wal", "{} is not in WAL mode", file(state).display());
     c.execute_batch(SCHEMA)?;
@@ -114,7 +115,11 @@ fn open(state: &Path) -> Result<Connection> {
 }
 
 fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Result<()> {
-    let json = serde_json::to_string(&Event { seq: 0, ..ev.clone() })?;
+    let mut ev = Event { seq: 0, ..ev.clone() };
+    if let Some(id) = crate::orchestrator::acting() {
+        ev.data.entry("orchestrator").or_insert(id.into());
+    }
+    let json = serde_json::to_string(&ev)?;
     c.execute(
         "INSERT INTO events (seq, ts, fleet, issue, type, json, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![seq, ev.ts, ev.fleet, ev.issue, ev.kind, json, archived],
@@ -133,15 +138,19 @@ pub(crate) fn events(state: &Path, filter: &str, arg: u64) -> Result<Vec<Event>>
     with(state, false, vec![], |c| rows(c, filter, arg))
 }
 
+/// #701: event rows read from the database (a full read's cost is the log's length).
+pub static ROWS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
 fn rows(c: &Connection, filter: &str, arg: u64) -> Result<Vec<Event>> {
     let mut q = c.prepare(&format!("SELECT seq, json FROM events WHERE {filter} ORDER BY seq"))?;
     let rows = q.query_map([arg], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?;
     rows.map(|r| {
         let (seq, json) = r?;
-        Ok(Event {
+        ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Ok(crate::events::aliased(Event {
             seq,
             ..serde_json::from_str(&json)?
-        })
+        }))
     })
     .collect()
 }
@@ -408,19 +417,19 @@ fn legacy(state: &Path) -> (Vec<PathBuf>, [PathBuf; 2]) {
     (logs, [dir.join("serve/devices.json"), dir.join("webpush/subs.json")])
 }
 
-/// Set by `herdsman migrate --live`: the only way files in the owner's own state dir (`live`) are imported.
+/// Set by `drover migrate --live`: the only way files in the owner's own state dir (`live`) are imported.
 pub static LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// The owner's default state dir, `$HOME/.local/state/herdsman` (or its pre-rename `fleet`): never imported on its
+/// The owner's default state dir, `$HOME/.local/state/drover` (or its pre-rename `herdsman`): never imported on its
 /// own, so a test build run without `FLEET_STATE` cannot take the installed build's log away.
 pub fn live(state: &Path) -> bool {
     let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
     let dir = canon(state.parent().unwrap_or(Path::new(".")));
     let root = crate::config::home().join(".local/state");
-    ["herdsman", "fleet"].iter().any(|d| canon(&root.join(d)) == dir)
+    ["drover", "herdsman"].iter().any(|d| canon(&root.join(d)) == dir)
 }
 
-/// `herdsman migrate` and every first open: the log (and its archives), devices and push subscriptions into the
+/// `drover migrate` and every first open: the log (and its archives), devices and push subscriptions into the
 /// database, in one transaction, checked by a full fold before and after; then each file goes to `*.migrated`.
 /// Idempotent: a second run finds nothing left. Events keep their seq unless the database already has a later one.
 fn import(c: &mut Connection, state: &Path) -> Result<()> {
@@ -445,7 +454,14 @@ fn import(c: &mut Connection, state: &Path) -> Result<()> {
             max = seq;
         }
         seen.extend(all);
-        let fold = |ev: &[Event]| serde_json::to_value(events::fold(ev).into_values().collect::<Vec<_>>()).ok();
+        let fold = |ev: &[Event]| {
+            serde_json::to_value(
+                events::fold_into(events::States::new(), ev)
+                    .into_values()
+                    .collect::<Vec<_>>(),
+            )
+            .ok()
+        };
         anyhow::ensure!(
             fold(&seen) == fold(&rows(&tx, "seq > ?1", 0)?),
             "import of {} changes the fold; nothing imported",
@@ -467,7 +483,7 @@ fn import(c: &mut Connection, state: &Path) -> Result<()> {
     tx.commit().context("import commit")
 }
 
-/// `herdsman migrate`'s #344 step: import what is left, say what the database holds.
+/// `drover migrate`'s #344 step: import what is left, say what the database holds.
 pub fn migrate(state: &Path, out: &mut dyn std::io::Write) -> Result<()> {
     let left = legacy(state).0.len();
     let n: u64 = with(state, true, 0, |c| {

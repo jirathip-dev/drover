@@ -2,7 +2,7 @@
 //! and the git pre-push hook that stands in for a pre-tool hook.
 mod common;
 use common::*;
-use herdsman::events::read;
+use drover::events::read;
 use serde_json::Value;
 use std::path::Path;
 use std::process::Command;
@@ -20,12 +20,12 @@ fn pane(agent: &str, status: &str) -> String {
 }
 
 /// A dsh rev spawn up to the kick; `states` are the successive `herdr pane get` answers.
-fn spawn_rev(name: &str, states: &[(&str, &str)]) -> (herdsman::Ctx, Fake, i32, String) {
+fn spawn_rev(name: &str, states: &[(&str, &str)]) -> (drover::Ctx, Fake, i32, String) {
     spawn_rev_with(name, states, "  ⌸ ❯\n")
 }
 
 /// As `spawn_rev`, with `screen` as the lane's visible screen once idle.
-fn spawn_rev_with(name: &str, states: &[(&str, &str)], screen: &str) -> (herdsman::Ctx, Fake, i32, String) {
+fn spawn_rev_with(name: &str, states: &[(&str, &str)], screen: &str) -> (drover::Ctx, Fake, i32, String) {
     let d = tmpdir(name);
     let c = ctx(&d, &dsh_config());
     let wt = c.worktrees.join("sendmeter/rev-12-r1");
@@ -144,7 +144,7 @@ fn spawn_waits_for_dsh_tui_idle_then_kicks_and_confirms_working() {
         r.index("herdr pane send-text").unwrap(),
     );
     assert!(start < idle && idle < rename && rename < prompt, "{calls:?}");
-    assert!(calls[start - 1].starts_with("herdr pane run w9:p1 export HERDSMAN_LANE='sendmeter:12:rev'"));
+    assert!(calls[start - 1].starts_with("herdr pane run w9:p1 export DROVER_LANE='sendmeter:12:rev'"));
     // The pre-push hook is installed in this worktree only, before the harness starts.
     let wt_cfg = calls
         .iter()
@@ -155,7 +155,7 @@ fn spawn_waits_for_dsh_tui_idle_then_kicks_and_confirms_working() {
     let hook = std::fs::read_to_string(root.join("gitdir/fleet-hooks/pre-push")).unwrap();
     assert_eq!(
         hook,
-        "#!/bin/sh\nexec '/opt/herdsman/bin/herdsman' hook --role rev --git-pre-push\n"
+        "#!/bin/sh\nexec '/opt/drover/bin/drover' hook --role rev --git-pre-push\n"
     );
     let ev = read(&c.state).unwrap();
     let last = ev.last().unwrap();
@@ -223,7 +223,7 @@ fn unconfirmed_prompt_is_retried_and_a_typed_kick_gets_enter() {
     assert_eq!(r.count("sleep 5"), 1);
 }
 
-/// dsh-TUI's own state reports drop the herdr agent name: `herdsman check` still finds
+/// dsh-TUI's own state reports drop the herdr agent name: `drover check` still finds
 /// the lane by its spawn pane instead of calling it dead.
 #[test]
 fn check_finds_unnamed_dsh_lane_by_its_pane() {
@@ -248,12 +248,12 @@ fn spawn_refuses_unpinned_dsh_tui() {
     assert!(!r.called("herdr"), "{:?}", r.calls.borrow());
 }
 
-fn pre_push(c: &herdsman::Ctx, role: &str, lines: &str) -> (i32, String) {
+fn pre_push(c: &drover::Ctx, role: &str, lines: &str) -> (i32, String) {
     let mut out = Vec::new();
-    let args = ["herdsman", "hook", "--role", role, "--git-pre-push"]
+    let args = ["drover", "hook", "--role", role, "--git-pre-push"]
         .map(String::from)
         .to_vec();
-    let code = herdsman::main_with(args, c, &Fake::default(), &mut out, &mut lines.as_bytes());
+    let code = drover::main_with(args, c, &Fake::default(), &mut out, &mut lines.as_bytes());
     (code, String::from_utf8(out).unwrap())
 }
 
@@ -288,10 +288,10 @@ fn pre_push_refuses_scripts_that_start_containers() {
     let push = |diff: &str| {
         let r = Fake::default().reply("git log -p", diff);
         let mut out = Vec::new();
-        let args = ["herdsman", "hook", "--role", "impl", "--git-pre-push"]
+        let args = ["drover", "hook", "--role", "impl", "--git-pre-push"]
             .map(String::from)
             .to_vec();
-        let code = herdsman::main_with(args, &c, &r, &mut out, &mut line.as_bytes());
+        let code = drover::main_with(args, &c, &r, &mut out, &mut line.as_bytes());
         let scanned = r
             .calls
             .borrow()
@@ -373,8 +373,7 @@ fn installed_hook_refuses_real_push_to_staging_from_lane_worktree_only() {
     )
     .status
     .success());
-    herdsman::harness::install_pre_push(&herdsman::runner::Real, env!("CARGO_BIN_EXE_herdsman"), &lane, "impl")
-        .unwrap();
+    drover::providers::install_pre_push(&drover::runner::Real, env!("CARGO_BIN_EXE_drover"), &lane, "impl").unwrap();
 
     let o = git(&lane, &["push", "origin", "HEAD:staging"]);
     assert!(!o.status.success());
@@ -396,6 +395,6 @@ fn installed_hook_refuses_real_push_to_staging_from_lane_worktree_only() {
     );
     assert!(
         git(&main, &["push", "-q", "origin", "HEAD:staging"]).status.success(),
-        "main checkout has no herdsman hook"
+        "main checkout has no drover hook"
     );
 }

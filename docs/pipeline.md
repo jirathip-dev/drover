@@ -1,7 +1,7 @@
 # Pipeline (#173)
 
 A fleet's pipeline is data in `fleet.toml`: named stages, each of a fixed kind, and where each outcome goes.
-herdsman validates it when it loads the config. `drive`, the gates and the board all follow it.
+drover validates it when it loads the config. `drive`, the gates and the board all follow it.
 Without a `[fleet.<n>.pipeline]`, a fleet runs the built-in pipeline, which is the impl → rev loop from before #173.
 
 ## Kinds
@@ -10,7 +10,7 @@ Without a `[fleet.<n>.pipeline]`, a fleet runs the built-in pipeline, which is t
 |---|---|---|
 | `build` ▲ | a lane that pushes code (`roles/impl.md`) | `push` |
 | `check` ◆ | a lane that gives PASS or FAIL at the head (`roles/rev.md`, read-only) | `PASS`, `FAIL` |
-| `gate` ◫ | herdsman's own: CI, PASS at the head, serial, mergeable | `ok`, `ci_red`, `conflict` |
+| `gate` ◫ | drover's own: CI, PASS at the head, serial, mergeable | `ok`, `ci_red`, `conflict` |
 | end | `merge` ✓ or `park` ! (needs you) | none |
 
 New kinds need code. A target is a stage name, `merge` or `park`. A target of `<build>:update` is an update round
@@ -61,7 +61,7 @@ next = { PASS = "gates", FAIL = "impl" }
 ```
 
 - **What it does:** a read-only lane (`roles/verify.md`) launches the app at the head, following the repo's
-  `.herdsman/verify.md`, runs its Doctor, drives each acceptance criterion a user can see and records PASS or FAIL.
+  `.drover/verify.md`, runs its Doctor, drives each acceptance criterion a user can see and records PASS or FAIL.
   Any visual deviation from the approved `docs/design/<slug>/` PNGs is a FAIL. Its screenshots (1440 and 390 wide)
   stay in its lane's folder, listed by path in `verdict.md`; the verdict event carries them, and the board's
   needs-you card shows them inline.
@@ -70,9 +70,9 @@ next = { PASS = "gates", FAIL = "impl" }
 - **When it runs:** for a head rev PASSed, if the issue had a design stage (#412), the PR touches the fleet's
   `ui_paths` (globs), or it is queued `--verify`. `queue add N --verify [on|off]` and `queue set N verify on|off`
   force it either way. Otherwise drive logs `verify-skipped` at that head and the issue goes on to the gates.
-- **No recipe:** when it should run but the head has no `.herdsman/verify.md`, drive logs `verify-no-recipe`, the
+- **No recipe:** when it should run but the head has no `.drover/verify.md`, drive logs `verify-no-recipe`, the
   Queue card says so, and the issue goes on to the gates. It never blocks. `roles/verify-recipe.md` is the brief
-  for an impl lane that writes the recipe (Launch, Doctor, Drive, Evidence, Feature map), proving each step.
+  for an impl lane that writes the recipe (Launch, Doctor, Drive, Evidence, Feature map, Known noise), proving each step.
 - Fleets without a `verify` role run the pipeline above, unchanged. A custom pipeline places a check with role
   `verify` itself; it gets the same prompt and skip rules, and counts its own rounds.
 
@@ -82,7 +82,7 @@ next = { PASS = "gates", FAIL = "impl" }
 [fleet.atlas.role.sec]
 harness = "claude"
 model = "claude-opus-5-5"
-prompt = "~/.config/herdsman/prompts/sec.md"   # appended to the check prompt
+prompt = "~/.config/drover/prompts/sec.md"   # appended to the check prompt
 
 [[fleet.atlas.pipeline.stage]]
 name = "impl"
@@ -112,7 +112,7 @@ next = { ok = "merge", ci_red = "impl", conflict = "impl:update" }
 ```
 
 - rev's PASS spawns a `sec` lane on the same head.
-- `herdsman merge` needs a PASS from rev **and** sec at the PR's head (`STALE_VERDICT` names the missing one).
+- `drover merge` needs a PASS from rev **and** sec at the PR's head (`STALE_VERDICT` names the missing one).
 - A FAIL in either check goes to a fix round in impl. The new head is reviewed from rev again.
 - Each check counts its own rounds: sec parks on its 2nd FAIL, whatever rev has used.
 
@@ -140,7 +140,7 @@ The first stage is the start. Each rule names the stage and its `fleet.toml` lin
 
 A broken pipeline stops only its fleet. `drive` skips it, and `spawn`, `verdict`, `merge` and `set` refuse
 `BAD_PIPELINE` with every rule it breaks. Lanes already running keep working, and the other fleets run.
-`herdsman doctor` lists the errors. The board shows them in the Pipeline group of the fleet's `[config]` sheet, with a red line on its
+`drover doctor` lists the errors. The board shows them in the Pipeline group of the fleet's `[config]` sheet, with a red line on its
 Queue card.
 
 ## Events
@@ -154,5 +154,5 @@ The Pipeline group of the fleet's `[config]` sheet draws the pipeline as a node 
 data (`data-pipe`: stages, outcomes, rounds, `n here` counts, broken rules), and `assets/serve.js` draws it.
 The graph shows each stage's kind, role and `n here`, the loops back with their round limits, and the rail to park.
 It is read-only: edit `fleet.toml`. Each issue card starts with its chain (`○ ─ ▲ impl ─ ◆ rev ─ ◫ gates ─ ✓ merge`),
-with the current stage lit and a check that PASSed at the head ticked. The mockup is in `docs/design/pipeline/` on
+with the current stage lit and a check that PASSed at the head ticked. The mockup is in docs/design/pipeline/ on
 branch `design-173`.

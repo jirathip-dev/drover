@@ -1,12 +1,7 @@
-//! #555: API v1's contract with cooee and the drover plugins: one fixture per route in tests/golden/api_v1/ (drover's
-//! module tests copy them), each holding the route, its Rust type, that type's schema (`schema`: serde's JSON of its
-//! default, every field; generated here) and a recorded response. A route whose response shape (its keys, each
-//! value's JSON type; `null` fits any) leaves the fixture's, or a type whose schema changed, fails until the fixture
-//! is updated in the same PR: `BLESS=1 cargo test --test api_v1_contract` rewrites them.
 mod common;
 use common::*;
-use herdsman::serve::Server;
-use herdsman_server::api::*;
+use drover::serve::Server;
+use drover_server::api::*;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::path::Path;
@@ -26,6 +21,7 @@ const POSTS: &[&str] = &[
     "override",
     "extend",
     "park",
+    "unpark",
     "orphans",
     "reap",
     "host",
@@ -136,7 +132,7 @@ fn check(name: &str, route: &str, (ty, schema): (&str, Value), got: Value, fails
 }
 
 /// `method path` on the board as `cookie`'s device: its JSON reply, the test's folder shown as `<tmp>`.
-fn call(s: &Server, c: &herdsman::Ctx, (method, path): (&str, &str), body: &str, cookie: &str) -> Value {
+fn call(s: &Server, c: &drover::Ctx, (method, path): (&str, &str), body: &str, cookie: &str) -> Value {
     let r = format!(
         "{method} {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
         body.len()
@@ -156,7 +152,7 @@ fn every_route_keeps_its_fixtures_shape() {
     let post = |op: &str, v: Value| call(&s, &c, ("POST", &format!("/api/v1/{op}")), &v.to_string(), &ck);
     // A thread to read, and a setup pane open.
     post("chat-about", json!({"fleet": "sendmeter", "issue": 30}));
-    let ev = herdsman::events::read(&c.state).unwrap();
+    let ev = drover::events::read(&c.state).unwrap();
     let t = ev.iter().rev().find_map(|e| e.str("thread")).unwrap().to_string();
     post("setup", json!({"host": "bazzite", "name": "claude B"}));
     let mut fails = vec![];
@@ -174,10 +170,17 @@ fn every_route_keeps_its_fixtures_shape() {
         ("host", "/api/v1/host", HostTab),
         ("queue", "/api/v1/queue", QueueTab),
         ("needs", "/api/v1/needs", NeedsTab),
-        ("lanes", "/api/v1/lanes", LanesTab),
+        ("lanes", "/api/v1/lanes", LanesTab)
+    );
+    // #681: a pending repo handoff from it: its `handoff` item (with the card's rows) in `thread/<t>` and `chat`.
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let h = [t.as_str(), "sendmeter", "Facets", "add facets\nthen reindex"];
+    drover::orchestrator::handoff(&c, &cfg, &r, h).unwrap();
+    gets!(
         ("chat", "/api/v1/chat", ChatTab),
         ("thread/<t>", format!("/api/v1/thread/{t}"), ThreadPage),
-        ("lane/<agent>", format!("/api/v1/lane/{IMPL}"), Chat),
+        ("repo/<fleet>/threads", "/api/v1/repo/sendmeter/threads", RepoThreads),
+        ("lane/<agent>", format!("/api/v1/lane/{IMPL}"), LaneChat),
         ("herd", "/api/v1/herd", Herd),
         ("roles", "/api/v1/roles?fleet=sendmeter", Roles),
         ("setup/<pane>", "/api/v1/setup/w9:p1", SetupScreen),

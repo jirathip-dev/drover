@@ -1,6 +1,6 @@
 #![allow(dead_code)]
-use herdsman::runner::{Out, Runner};
-use herdsman::Ctx;
+use drover::runner::{Out, Runner};
+use drover::Ctx;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -61,11 +61,10 @@ pub struct Fake {
     pub calls: Shared<Vec<String>>,
     pub replies: Vec<(String, Out)>,
     pub onces: Shared<Vec<(String, Out)>>,
-    /// #441: the fake OS store (service -> secret); `no_store` makes it unusable, as on a host without one.
-    pub store: Shared<std::collections::BTreeMap<String, String>>,
-    pub no_store: bool,
     /// Each `run_in`'s command line and its stdin.
     pub inputs: Shared<Vec<(String, String)>>,
+    /// #664: `closing()`: the panes a `herdr … pane close` closed, left out of every later `agent list`.
+    pub closed: Option<Shared<Vec<String>>>,
 }
 
 impl Fake {
@@ -102,9 +101,9 @@ impl Fake {
         ));
         self
     }
-    /// #441: `svc` holds `value` in the fake store.
-    pub fn stored(self, svc: &str, value: &str) -> Self {
-        self.store.borrow_mut().insert(svc.into(), value.into());
+    /// #664: a closed pane leaves herdr's agent list, as on a real host.
+    pub fn closing(mut self) -> Self {
+        self.closed = Some(Shared::default());
         self
     }
     pub fn called(&self, prefix: &str) -> bool {
@@ -123,6 +122,56 @@ pub const BATCH: &str = " </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"";
 
 impl Runner for Fake {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        let mut o = self.answer(prog, args)?;
+        let Some(closed) = &self.closed else {
+            return Ok(o);
+        };
+        match args {
+            [.., a, b, p] if prog == "herdr" && a == "pane" && b == "close" && o.code == 0 => {
+                closed.borrow_mut().push(p.clone())
+            }
+            [.., a, b] if prog == "herdr" && a == "agent" && b == "list" => {
+                if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&o.stdout) {
+                    if let Some(l) = v["result"]["agents"].as_array_mut() {
+                        l.retain(|a| !closed.borrow().iter().any(|p| a["pane_id"] == p.as_str()));
+                        o.stdout = v.to_string();
+                    }
+                }
+            }
+            _ => {}
+        }
+        Ok(o)
+    }
+    fn sleep(&self, secs: u64) {
+        self.calls.borrow_mut().push(format!("sleep {secs}"));
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        let line = format!("{prog} {}", args.join(" "));
+        self.inputs.borrow_mut().push((line, input.into()));
+        let batch = drover::hosts::quote("sh", &["-c".into(), drover::hosts::EXISTS.into()]);
+        if prog == "ssh" && args.last() == Some(&batch) {
+            self.calls.borrow_mut().push(format!("{prog} {}", args.join(" ")));
+            let mut stdout = String::new();
+            for p in input.lines() {
+                let test = drover::hosts::quote("sh", &["-c".into(), "test -e \"$1\"".into(), "sh".into(), p.into()]);
+                let o = self.run(prog, &[&args[..args.len() - 1], &[test]].concat())?;
+                if matches!(o.code, 124 | 255) {
+                    return Ok(o);
+                }
+                stdout += if o.code == 0 { "y\n" } else { "n\n" };
+            }
+            return Ok(Out {
+                stdout,
+                ..Out::default()
+            });
+        }
+        self.run(prog, args)
+    }
+}
+
+impl Fake {
+    /// The scripted answer to one command line.
+    fn answer(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
         self.calls.borrow_mut().push(line.clone());
         // #337: a batched ssh script answers each of its reads as the one call it stands for (also logged).
@@ -170,27 +219,6 @@ impl Runner for Fake {
             stdout: String::new(),
             stderr: format!("unscripted: {line}"),
         })
-    }
-    fn sleep(&self, secs: u64) {
-        self.calls.borrow_mut().push(format!("sleep {secs}"));
-    }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
-        let line = format!("{prog} {}", args.join(" "));
-        self.inputs.borrow_mut().push((line, input.into()));
-        self.run(prog, args)
-    }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        anyhow::ensure!(!self.no_store, "no secret store (fake)");
-        Ok(self.store.borrow().get(svc).cloned())
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
-        anyhow::ensure!(!self.no_store, "no secret store (fake)");
-        let mut m = self.store.borrow_mut();
-        let _ = match value {
-            Some(v) => m.insert(svc.into(), v.into()),
-            None => m.remove(svc),
-        };
-        Ok(())
     }
 }
 
@@ -284,6 +312,16 @@ pub fn tmpdir(name: &str) -> PathBuf {
     d
 }
 
+/// #707: secret `name` as the 0600 (or `mode`) file `<config>/secrets/<name>`; its path.
+pub fn secret_file(c: &Ctx, name: &str, value: &str, mode: u32) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let p = c.config.with_file_name("secrets").join(name);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, value).unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(mode)).unwrap();
+    p
+}
+
 pub fn ctx(dir: &Path, config: &str) -> Ctx {
     let cfgdir = dir.join("config");
     std::fs::create_dir_all(&cfgdir).unwrap();
@@ -292,8 +330,8 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
         config: cfgdir.join("fleet.toml"),
         state: dir.join("state/events.jsonl"),
         worktrees: dir.join("worktrees"),
-        hermes: dir.join("hermes"),
-        exe: "/opt/herdsman/bin/herdsman".into(),
+        homes: [("hermes", dir.join("hermes"))].into(),
+        exe: "/opt/drover/bin/drover".into(),
         now: 1_000_000,
         home: dir.join("home"),
         hints: vec![],
@@ -302,23 +340,21 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
 
 pub fn run(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
     let mut out = Vec::new();
-    let mut argv = vec!["herdsman".to_string()];
+    let mut argv = vec!["drover".to_string()];
     argv.extend(args.iter().map(|s| s.to_string()));
-    let code = herdsman::main_with(argv, ctx, r, &mut out, &mut std::io::empty());
+    let code = drover::main_with(argv, ctx, r, &mut out, &mut std::io::empty());
     (code, String::from_utf8(out).unwrap())
 }
 
-/// `swift` for tests/support/webview.swift, its page based at a local server of serve's `/a/<hash>/`
-/// assets (#57: the page links them; a same-origin base lets herd.js fetch horses.svg). #560: it runs under
-/// scripts/ui-lock.sh, one WebKit audit at a time on the host.
-pub fn swift() -> std::process::Command {
+/// `node tests/support/webview.mjs` (Playwright's WebKit) under scripts/ui-lock.sh, its page based at serve's assets.
+pub fn webview() -> std::process::Command {
     static BASE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let base = BASE.get_or_init(|| {
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let base = format!("http://{}/", l.local_addr().unwrap());
         std::thread::spawn(move || {
             let (c, r) = (ctx(&tmpdir("assets"), CONFIG), Fake::default());
-            let s = herdsman::serve::Server::new(&c, &r, None);
+            let s = drover::serve::Server::new(&c, &r, None);
             for mut st in l.incoming().flatten() {
                 let mut buf = [0u8; 4096];
                 let n = std::io::Read::read(&mut st, &mut buf).unwrap_or(0);
@@ -327,15 +363,32 @@ pub fn swift() -> std::process::Command {
         });
         base
     });
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.mjs");
     // #560: WebKit under the user's home, never a test's temporary `$HOME` (live_board's, deleted when it ends).
-    if HELD.load(Ordering::SeqCst) {
-        let mut c = std::process::Command::new("swift");
-        c.env("HERDSMAN_BASE", base).env("HOME", user_home());
-        return c;
-    }
-    let mut c = std::process::Command::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/ui-lock.sh"));
-    c.arg("swift").env("HERDSMAN_BASE", base).env("HOME", user_home());
+    let mut c = if HELD.load(Ordering::SeqCst) {
+        std::process::Command::new("node")
+    } else {
+        let mut c = std::process::Command::new(concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/ui-lock.sh"));
+        c.arg("node");
+        c
+    };
+    c.arg(script).env("DROVER_BASE", base).env("HOME", user_home());
     c
+}
+
+/// #862: true (and a skip message) where node cannot load Playwright (`NODE_PATH`), so a WebKit test returns early.
+pub fn no_webkit() -> bool {
+    static NO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    let no = *NO.get_or_init(|| {
+        let o = std::process::Command::new("node")
+            .args(["-e", "require('playwright')"])
+            .output();
+        !o.is_ok_and(|o| o.status.success())
+    });
+    if no {
+        eprintln!("skipping: no node/Playwright here (NODE_PATH with playwright, see the ui-webkit CI job)");
+    }
+    no
 }
 
 /// The user's home from the password database, as scripts/ui-lock.sh finds it (a test may point `$HOME` elsewhere).
@@ -355,8 +408,7 @@ pub struct UiLock(std::fs::File, std::sync::MutexGuard<'static, ()>);
 pub fn ui_lock() -> UiLock {
     static ONE: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let path =
-        std::env::var_os("UI_AUDIT_LOCK").map_or(user_home().join(".cache/herdsman/ui-audit.lock"), PathBuf::from);
+    let path = std::env::var_os("UI_AUDIT_LOCK").map_or(user_home().join(".cache/drover/ui-audit.lock"), PathBuf::from);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let mut f = std::fs::OpenOptions::new()
         .create(true)
@@ -368,7 +420,7 @@ pub fn ui_lock() -> UiLock {
         eprintln!("waiting for the UI audit lock (held by {})", by.trim());
         f.lock().unwrap();
     }
-    let me = std::env::var("HERDSMAN_LANE").unwrap_or_else(|_| format!("pid {}", std::process::id()));
+    let me = std::env::var("DROVER_LANE").unwrap_or_else(|_| format!("pid {}", std::process::id()));
     f.set_len(0).unwrap();
     std::io::Write::write_all(&mut f, format!("{me}\n").as_bytes()).unwrap();
     HELD.store(true, Ordering::SeqCst);
@@ -382,7 +434,7 @@ impl Drop for UiLock {
 }
 
 /// #59: pair a browser at `now` as the page does (Pair → `serve approve <code>` → claim): its `Cookie:` line.
-pub fn pair(s: &herdsman::serve::Server, c: &Ctx, ua: &str, now: u64) -> String {
+pub fn pair(s: &drover::serve::Server, c: &Ctx, ua: &str, now: u64) -> String {
     let post = |path: &str, extra: &str| {
         String::from_utf8_lossy(&s.respond(
             &format!("POST {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n{extra}Content-Length: 0\r\n\r\n"),
@@ -419,7 +471,7 @@ pub fn chat_fixture() -> serde_json::Value {
         "⏺ I read the brief. The overlap check skips **merged** issues only, so a closed one still counts.".into(),
         "⏺ Bash(cargo test --locked)".into(),
         "  ⎿  test result: \x1b[38;2;80;200;80mok\x1b[0m. 218 passed; 0 failed".into(),
-        herdsman::lanes::GAP.into(),
+        drover::lanes::GAP.into(),
         "⏺ # Plan".into(),
         "  Base is green. The bug is in `src/overlap.rs`: the list keeps every issue that is not **merged**.".into(),
         "  1. Swap `s.state != \"merged\"` for `!s.done()`, which the board already uses everywhere.".into(),
@@ -464,7 +516,7 @@ pub fn chat_scene(open: bool) -> String {
 
 /// #266: the Events tab as the TypeScript board draws it: web/src/events.ts under node, from `s`'s `/api/v1/state` and
 /// `/api/v1/events` at `now`; `opts` (a JS object) overrides the draw's `all`, `shown` or `f`. None where node is missing.
-pub fn events_tab(s: &herdsman::serve::Server, host: &str, now: u64, opts: &str) -> Option<String> {
+pub fn events_tab(s: &drover::serve::Server, host: &str, now: u64, opts: &str) -> Option<String> {
     if std::process::Command::new("node").arg("--version").output().is_err() {
         eprintln!("skipping: no node here");
         return None;
@@ -498,7 +550,7 @@ pub fn events_tab(s: &herdsman::serve::Server, host: &str, now: u64, opts: &str)
 
 /// #267: the Host tab as the TypeScript board draws it: web/src/host.ts under node, from `s`'s `/api/v1/host` at `now`
 /// (`host` the request's Host: a read-only server takes an empty one).
-pub fn host_tab(s: &herdsman::serve::Server, host: &str, now: u64) -> String {
+pub fn host_tab(s: &drover::serve::Server, host: &str, now: u64) -> String {
     let r = s.respond(&format!("GET /api/v1/host HTTP/1.1\r\nHost: {host}\r\n\r\n"), now);
     let r = String::from_utf8_lossy(&r).into_owned();
     assert!(r.starts_with("HTTP/1.1 200"), "/api/v1/host: {r}");
@@ -528,7 +580,7 @@ pub fn host_html(json: &str) -> String {
 
 /// #268: `expr` (JS, over API v1 `queue` data `d`: `tab(d)`, `sheet(d, fleet)`) from web/src/queue.ts under node, from
 /// `s`'s `/api/v1/queue` at `now` (`host` the request's Host: a read-only server takes an empty one).
-pub fn queue_js(s: &herdsman::serve::Server, host: &str, now: u64, expr: &str) -> String {
+pub fn queue_js(s: &drover::serve::Server, host: &str, now: u64, expr: &str) -> String {
     let r = s.respond(&format!("GET /api/v1/queue HTTP/1.1\r\nHost: {host}\r\n\r\n"), now);
     let r = String::from_utf8_lossy(&r).into_owned();
     assert!(r.starts_with("HTTP/1.1 200"), "/api/v1/queue: {r}");
@@ -536,7 +588,7 @@ pub fn queue_js(s: &herdsman::serve::Server, host: &str, now: u64, expr: &str) -
 }
 
 /// #268: the Queue tab as the TypeScript board draws it (`queue_js`'s `tab(d)`).
-pub fn queue_tab(s: &herdsman::serve::Server, host: &str, now: u64) -> String {
+pub fn queue_tab(s: &drover::serve::Server, host: &str, now: u64) -> String {
     queue_js(s, host, now, "tab(d)")
 }
 
@@ -562,7 +614,7 @@ pub fn queue_html(json: &str, expr: &str) -> String {
 /// #440: a `<script>` painting what the TypeScript board draws into the System sheet (main.ts), for a page cut before
 /// board.js: Hosts & health from `s`'s `/api/v1/host`, Agent providers and Notifications from the same, Fleets and
 /// Conductor from `/api/v1/queue`, Activity from its events (`events`, `events_tab`'s HTML).
-pub fn system_frags(s: &herdsman::serve::Server, host: &str, now: u64, events: &str) -> String {
+pub fn system_frags(s: &drover::serve::Server, host: &str, now: u64, events: &str) -> String {
     let get = |p: &str| {
         let r =
             String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {host}\r\n\r\n"), now)).into_owned();
@@ -598,7 +650,7 @@ pub fn system_frags(s: &herdsman::serve::Server, host: &str, now: u64, events: &
 /// #268: a page response `res` with its Queue tab as the board draws it (`queue_tab`) in `<section id=queue>` (`host`
 /// the request's Host, else an empty one: a read-only server's); #269: and every other part the board draws
 /// (`with_board`, for an unpaired request).
-pub fn with_queue(res: &str, s: &herdsman::serve::Server, host: &str, now: u64) -> String {
+pub fn with_queue(res: &str, s: &drover::serve::Server, host: &str, now: u64) -> String {
     with_board(res, s, host, "", now)
 }
 
@@ -632,7 +684,7 @@ pub fn board_js(parts: &[(&str, &str)]) -> Vec<String> {
 
 /// #269: API v1 `path` from `s` for a request with Host `host` (none taken: an empty one, a read-only server's) and
 /// `extra` header lines (a `Cookie: …\r\n`) at `now`: the body.
-pub fn api(s: &herdsman::serve::Server, host: &str, extra: &str, now: u64, path: &str) -> String {
+pub fn api(s: &drover::serve::Server, host: &str, extra: &str, now: u64, path: &str) -> String {
     let req = |h: &str| format!("GET /api/v1/{path} HTTP/1.1\r\nHost: {h}\r\n{extra}\r\n");
     let mut r = String::from_utf8_lossy(&s.respond(&req(host), now)).into_owned();
     if !r.starts_with("HTTP/1.1 200") {
@@ -643,21 +695,21 @@ pub fn api(s: &herdsman::serve::Server, host: &str, extra: &str, now: u64, path:
 }
 
 /// #269: the needs cards, the Lanes tab and the [chat] tab as the board draws them for that request (`api`'s).
-pub fn parts(s: &herdsman::serve::Server, host: &str, extra: &str, now: u64) -> [String; 3] {
+pub fn parts(s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> [String; 3] {
     let [n, l, c] = ["needs", "lanes", "chat"].map(|p| api(s, host, extra, now, p));
     let v = board_js(&[(&n, "needs.tab(d)"), (&l, "lanes.tab(d)"), (&c, "chat.tab(d)")]);
     [v[0].clone(), v[1].clone(), v[2].clone()]
 }
 
 /// #269: what `/frags?tab=` sent before the board drew them: `needs` and the tab's part (`lanes`, `chat`) by id.
-pub fn frags(s: &herdsman::serve::Server, host: &str, extra: &str, now: u64) -> serde_json::Value {
+pub fn frags(s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> serde_json::Value {
     let [needs, lanes, chat] = parts(s, host, extra, now);
     serde_json::json!({ "needs": needs, "lanes": lanes, "chat": chat })
 }
 
 /// #269: a page response `res` with every tab the board draws in it (the Queue tab's as `with_queue`), as the page shows
 /// them once drawn, for the request with Host `host` and `extra` header lines.
-pub fn with_board(res: &str, s: &herdsman::serve::Server, host: &str, extra: &str, now: u64) -> String {
+pub fn with_board(res: &str, s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> String {
     let req = |h: &str| format!("GET /api/v1/queue HTTP/1.1\r\nHost: {h}\r\n\r\n");
     let ok = String::from_utf8_lossy(&s.respond(&req(host), now)).starts_with("HTTP/1.1 200");
     let q = queue_tab(s, if ok { host } else { "" }, now);
@@ -682,7 +734,7 @@ pub fn with_board(res: &str, s: &herdsman::serve::Server, host: &str, extra: &st
 
 /// #269: the Lanes row's avatar (web/src/lanes.ts's `avatar`) for each (name, role, herdr state), under node.
 pub fn avatars(of: &[(&str, &str, &str)]) -> Vec<String> {
-    use herdsman::serve::{act, coat, tone};
+    use drover::serve::{act, coat, tone};
     let j: Vec<String> = of
         .iter()
         .map(|(n, r, s)| {
@@ -694,7 +746,7 @@ pub fn avatars(of: &[(&str, &str, &str)]) -> Vec<String> {
 
 /// #269: a page response `res` as the board leaves it drawn (`with_board`), for a static copy (the WebKit tests' page
 /// file): without the board's module, which would read the API of the server the copy's assets come from.
-pub fn drawn(res: &str, s: &herdsman::serve::Server, host: &str, extra: &str, now: u64) -> String {
+pub fn drawn(res: &str, s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> String {
     let page = with_board(res, s, host, extra, now);
     let at = page.find("<script type=module").expect("the board's module");
     let end = at + page[at..].find("</script>").unwrap() + 9;
@@ -713,17 +765,13 @@ pub fn rewrite_log(state: &Path, text: &str) {
 
 /// #344: lease `key` as process `pid` would hold it: taken at `at` for `secs`.
 pub fn lease_as(c: &Ctx, key: &str, pid: u32, at: u64, secs: u64) {
-    let l = herdsman::db::take(&c.state, key, at, secs, "", &|_| true).unwrap();
-    assert!(herdsman::db::renew(
-        &c.state,
-        &l,
-        &herdsman::db::Lease { pid, ..l.clone() }
-    ));
+    let l = drover::db::take(&c.state, key, at, secs, "", &|_| true).unwrap();
+    assert!(drover::db::renew(&c.state, &l, &drover::db::Lease { pid, ..l.clone() }));
 }
 
 /// #344: the lease on `key`, expired or not.
-pub fn lease_on(c: &Ctx, key: &str) -> Option<herdsman::db::Lease> {
-    herdsman::db::leases(&c.state, key).into_iter().find(|l| l.key == key)
+pub fn lease_on(c: &Ctx, key: &str) -> Option<drover::db::Lease> {
+    drover::db::leases(&c.state, key).into_iter().find(|l| l.key == key)
 }
 
 /// #441: `.0`, except that a `pane run <pane> export …` line also runs in a real `sh`, as the pane's shell would
@@ -734,7 +782,10 @@ impl Runner for Shell<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         if let Some(i) = args.iter().position(|a| a == "export").filter(|_| prog == "herdr") {
             let line = format!("{}; printf %s \"${}\"", args[i..].join(" "), self.1);
-            let o = std::process::Command::new("sh").arg("-c").arg(line).output()?;
+            // #683: the pane's shell starts with neither credential var of the test's own env.
+            let mut sh = std::process::Command::new("sh");
+            sh.env_remove("CLAUDE_CODE_OAUTH_TOKEN").env_remove("CLAUDE_CONFIG_DIR");
+            let o = sh.arg("-c").arg(line).output()?;
             self.2.borrow_mut().push(String::from_utf8_lossy(&o.stdout).into());
         }
         self.0.run(prog, args)
@@ -745,12 +796,6 @@ impl Runner for Shell<'_> {
     fn sleep(&self, secs: u64) {
         self.0.sleep(secs);
     }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.0.secret(svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
-        self.0.set_secret(svc, value)
-    }
 }
 
 pub const IMPL: &str = "sendmeter-impl-12";
@@ -760,14 +805,17 @@ pub const V1_PERMISSION: &str = "╭──────────────�
 
 /// #555: API v1's board: sendmeter: #12's impl lane working on w1:p2, #9's rev lane blocked on a permission menu on w1:p3, a setup
 /// terminal `claude B` on host bazzite; gh and herdr's writes succeed.
-pub fn v1_board(name: &str) -> (herdsman::Ctx, Fake) {
+/// #641: herdr's one saved machine profile for bazzite (`herdr machine list --json`).
+pub const BAZZITE: &str = r#"[{"id": "b1", "label": "bazzite"}]"#;
+
+pub fn v1_board(name: &str) -> (drover::Ctx, Fake) {
     let cfg = format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}\n[hosts.bazzite]\nmachine = \"bazzite\"\n\n[[setup]]\nname = \"claude B\"\ncmd = \"claude /login\"\n");
     let c = ctx(&tmpdir(name), &cfg);
     for (issue, role, agent, pane) in [(12, "impl", IMPL, "w1:p2"), (9, "rev", REV, "w1:p3")] {
         let d = serde_json::json!({"role": role, "agent": agent, "harness": "claude", "pane": pane});
-        herdsman::events::append(
+        drover::events::append(
             &c.state,
-            &herdsman::events::Event::new(1_000_000 - 100, "sendmeter", Some(issue), "spawn", d),
+            &drover::events::Event::new(1_000_000 - 100, "sendmeter", Some(issue), "spawn", d),
         )
         .unwrap();
     }
@@ -776,6 +824,7 @@ pub fn v1_board(name: &str) -> (herdsman::Ctx, Fake) {
         .reply("herdr agent list", &list)
         .reply("herdr pane read", V1_PERMISSION)
         .reply("herdr --machine bazzite pane read", "Paste code here >\n")
+        .reply("herdr machine list --json", BAZZITE)
         .reply("herdr", V1_WS)
         .reply("gh issue close", "");
     (c, r)

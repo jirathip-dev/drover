@@ -1,8 +1,8 @@
-//! #43: lane actions (`herdsman stop|kill|clean --lane`, the page's `/act`) and the per-turn transcript.
+//! #43: lane actions (`drover stop|kill|clean --lane`, the page's `/act`) and the per-turn transcript.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, fold, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -10,7 +10,7 @@ const T: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-12";
 
 /// sendmeter #12's impl lane in a real (empty) worktree dir, pane w1:p2; git answers per test.
-fn lane(name: &str) -> (herdsman::Ctx, String) {
+fn lane(name: &str) -> (drover::Ctx, String) {
     let d = tmpdir(name);
     let c = ctx(&d, CONFIG);
     let wt = d.join("wt").to_string_lossy().into_owned();
@@ -26,11 +26,11 @@ fn git(wt: &str, status: &str, ahead: &str, log: &str) -> Fake {
         .reply(&format!("git -C {wt} rev-list --count"), ahead)
         .reply(&format!("git -C {wt} log -p"), log)
         .reply(&format!("git -C {wt} "), "")
-        .reply("date -r", "20261031-1200\n")
+        .reply("date -r", "20261031-120000\n")
         .reply("herdr pane", "")
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> usize {
+fn kinds(c: &drover::Ctx, kind: &str) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == kind).count()
 }
 
@@ -40,8 +40,12 @@ fn kill_dry_run_lists_what_is_lost() {
     let r = git(&wt, "?? .brief.md\n M src/a.rs\n?? new.rs\n", "3\n", "");
     let (code, out) = run(&c, &r, &["kill", LANE]);
     assert_eq!(code, 0, "{out}");
-    let want = format!("{LANE} · impl · 3 unpushed commit(s), 2 dirty file(s) → wip/{LANE}-20261031-1200 · pane closes, worktree kept\n");
-    assert!(out.starts_with(&want) && out.contains("dry run"), "{out}");
+    let want = format!("{LANE} · impl · 3 unpushed commit(s), 2 dirty file(s) → wip/{LANE}-20261031-120000-");
+    assert!(
+        out.starts_with(&want) && out.contains(" · pane closes, worktree kept\n"),
+        "{out}"
+    );
+    assert!(out.contains("dry run"), "{out}");
     assert!(
         !r.called("herdr pane close")
             && !r.called(&format!("git -C {wt} push"))
@@ -59,17 +63,18 @@ fn kill_pushes_wip_then_closes_and_logs() {
     let (c, wt) = lane("kill-yes");
     // #646: a commit only when something is staged.
     let r = git(&wt, " M src/a.rs\n", "2\n", "+fn x() {}\n")
+        .reply("herdr agent list", NO_AGENTS)
         .once(&format!("git -C {wt} diff --cached --name-only"), 0, "")
         .once(&format!("git -C {wt} diff --cached"), 0, "+fn x() {}\n");
     // #138: the lane's rolling transcript goes with it.
-    let log = herdsman::lanes::log(&c.state, LANE).unwrap();
+    let log = drover::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, "⏺ hi\n").unwrap();
     let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(!log.exists());
     assert!(
-        out.contains(&format!("killed {LANE}: work pushed to wip/{LANE}-20261031-1200")),
+        out.contains(&format!("killed {LANE}: work pushed to wip/{LANE}-20261031-120000-")),
         "{out}"
     );
     let at = |p: &str| {
@@ -80,7 +85,7 @@ fn kill_pushes_wip_then_closes_and_logs() {
         at("add -A") < at("reset -q -- .brief.md")
             && at("reset -q -- .brief.md") < at("commit -q --no-verify -m wip: kill snapshot")
     );
-    assert!(at("commit") < at(&format!("push origin HEAD:refs/heads/wip/{LANE}-20261031-1200")));
+    assert!(at("commit") < at(&format!("push origin HEAD:refs/heads/wip/{LANE}-20261031-120000-")));
     assert!(at("push") < r.index("herdr pane close w1:p2").unwrap());
     // Never main/staging, never force: the one push names the wip ref.
     let pushes: Vec<String> = r
@@ -90,17 +95,11 @@ fn kill_pushes_wip_then_closes_and_logs() {
         .filter(|l| l.contains(" push "))
         .cloned()
         .collect();
-    assert_eq!(
-        pushes,
-        [format!(
-            "git -C {wt} push origin HEAD:refs/heads/wip/{LANE}-20261031-1200"
-        )]
-    );
+    let ref_ = format!("git -C {wt} push origin HEAD:refs/heads/wip/{LANE}-20261031-120000-");
+    assert!(pushes.len() == 1 && pushes[0].starts_with(&ref_), "{pushes:?}");
     let e = read(&c.state).unwrap().pop().unwrap();
-    assert_eq!(
-        (e.kind.as_str(), e.str("wip"), e.str("role")),
-        ("lane-killed", Some(&*format!("wip/{LANE}-20261031-1200")), Some("impl"))
-    );
+    assert_eq!((e.kind.as_str(), e.str("role")), ("lane-killed", Some("impl")));
+    assert_eq!(e.str("wip"), pushes[0].rsplit("refs/heads/").next());
     // The impl goes back to queued (re-spawnable); a second kill finds no lane.
     let s = fold(&read(&c.state).unwrap())
         .remove(&("sendmeter".into(), 12))
@@ -142,7 +141,7 @@ fn kill_skips_lockfile_checksums_but_not_secrets() {
         concat!("gh", "p_abcdefghijklmnopqrstu1234")
     );
     let (c, wt) = lane("kill-lock");
-    let r = git(&wt, "", "1\n", &lock);
+    let r = git(&wt, "", "1\n", &lock).reply("herdr agent list", NO_AGENTS);
     assert_eq!(run(&c, &r, &["kill", LANE, "--yes"]).0, 0);
     assert!(r.called(&format!("git -C {wt} push origin HEAD:refs/heads/wip/")));
     let jwt = concat!("ey", "JhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc");
@@ -161,7 +160,7 @@ fn kill_skips_lockfile_checksums_but_not_secrets() {
     .enumerate()
     {
         let (c, wt) = lane(&format!("kill-lock-secret-{i}"));
-        let r = git(&wt, "", "1\n", &format!("{lock}{bad}\n"));
+        let r = git(&wt, "", "1\n", &format!("{lock}{bad}\n")).reply("herdr agent list", NO_AGENTS);
         let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
         assert!(code == 3 && out.contains("REFUSED SECRET_IN_WIP"), "{bad}: {out}");
         assert!(
@@ -175,20 +174,20 @@ fn kill_skips_lockfile_checksums_but_not_secrets() {
 /// scratch written), failing any git call containing `fail`; herdr and date are faked.
 struct RealGit(Fake, &'static str);
 
-impl herdsman::runner::Runner for RealGit {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for RealGit {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog != "git" {
             return self.0.run(prog, args);
         }
         self.0.calls.borrow_mut().push(format!("git {}", args.join(" ")));
         if !self.1.is_empty() && args.join(" ").contains(self.1) {
-            return Ok(herdsman::runner::Out {
+            return Ok(drover::runner::Out {
                 code: 1,
                 stdout: String::new(),
                 stderr: "forced".into(),
             });
         }
-        herdsman::runner::Real.run(prog, args)
+        drover::runner::Real.run(prog, args)
     }
 }
 
@@ -219,8 +218,9 @@ fn repo(wt: &str, fail: &'static str) -> RealGit {
     }
     RealGit(
         Fake::default()
-            .reply("date -r", "20261031-1200\n")
-            .reply("herdr pane", ""),
+            .reply("date -r", "20261031-120000\n")
+            .reply("herdr pane", "")
+            .reply("herdr agent list", NO_AGENTS),
         fail,
     )
 }
@@ -267,15 +267,9 @@ fn kill_snapshots_only_the_real_dirty_file() {
         .contains("0 unpushed commit(s), 1 dirty file(s)"));
     let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
     assert_eq!(code, 0, "{out}");
+    let w = out.rsplit("work pushed to ").next().unwrap().trim();
     let o = std::process::Command::new("git")
-        .args([
-            "-C",
-            &format!("{wt}.git"),
-            "show",
-            "--name-only",
-            "--format=",
-            &format!("wip/{LANE}-20261031-1200"),
-        ])
+        .args(["-C", &format!("{wt}.git"), "show", "--name-only", "--format=", w])
         .output()
         .unwrap();
     assert_eq!(String::from_utf8(o.stdout).unwrap().trim(), "real.rs");
@@ -403,7 +397,7 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
         "{res}"
     );
     let e = read(&c.state).unwrap().pop().unwrap();
-    let label = herdsman::devices::load(&c)[0].label.clone();
+    let label = drover::devices::load(&c)[0].label.clone();
     assert_eq!(
         (e.kind.as_str(), e.str("via"), e.str("device"), e.str("op")),
         ("act", Some("web"), Some(&*label), Some("stop"))
@@ -427,7 +421,7 @@ fn screen() -> String {
 #[test]
 fn lane_pages_back_through_the_rolling_transcript() {
     let (c, _) = lane("more");
-    let log = herdsman::lanes::log(&c.state, LANE).unwrap();
+    let log = drover::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, (0..450).map(|i| format!("  out {i}\n")).collect::<String>()).unwrap();
     let list = agents(&[(LANE, "working", "/x", "w1:p2")]);
@@ -455,7 +449,7 @@ fn lane_pages_back_through_the_rolling_transcript() {
     assert_eq!(
         (&lines[193], &lines[194], &lines[199]),
         (
-            &json!(herdsman::lanes::GAP),
+            &json!(drover::lanes::GAP),
             &json!("> fix it"),
             &json!("⏺ Bash(cargo fmt)")
         )
@@ -490,7 +484,7 @@ fn a_gone_lane_reads_its_stored_transcript() {
         res
     };
     assert!(get().starts_with("HTTP/1.1 404"), "{}", get());
-    let log = herdsman::lanes::log(&c.state, LANE).unwrap();
+    let log = drover::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, (0..250).map(|i| format!("  out {i}\n")).collect::<String>()).unwrap();
     let res = get();
@@ -524,7 +518,7 @@ fn inputs_are_16px_and_zoom_is_off() {
 /// Token-shaped fixtures here and in other tests are split with `concat!` so no source literal reads as a live secret.
 #[test]
 fn secret_flags_real_shapes_only() {
-    use herdsman::lanes::secret;
+    use drover::lanes::secret;
     for ok in [
         "fn check_prompts_an_idle_orch_after_5_min_then_alerts_after_15() {",
         "    let api_key = config.key();",
@@ -652,7 +646,7 @@ fn kill_saves_code_and_names_the_secret_line() {
     let ok = "diff --git a/src/check.rs b/src/check.rs\n+++ b/src/check.rs\n@@ -10,2 +10,3 @@\n \
               fn a() {}\n+fn check_prompts_an_idle_orch_after_5_min_then_alerts_after_15() {}\n";
     let (c, wt) = lane("kill-96-ok");
-    let r = git(&wt, "", "2\n", ok);
+    let r = git(&wt, "", "2\n", ok).reply("herdr agent list", NO_AGENTS);
     assert_eq!(run(&c, &r, &["kill", LANE, "--yes"]).0, 0);
     assert!(r.called(&format!("git -C {wt} push origin HEAD:refs/heads/wip/")));
     let bad = format!(
@@ -660,7 +654,7 @@ fn kill_saves_code_and_names_the_secret_line() {
         "aB3".repeat(12)
     );
     let (c, wt) = lane("kill-96-bad");
-    let r = git(&wt, "", "2\n", &bad);
+    let r = git(&wt, "", "2\n", &bad).reply("herdr agent list", NO_AGENTS);
     let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
     assert_eq!(code, 3, "{out}");
     assert!(
@@ -670,7 +664,7 @@ fn kill_saves_code_and_names_the_secret_line() {
     assert!(!r.called(&format!("git -C {wt} push")));
 }
 
-/// #248: a lane herdsman closed reads back Claude's saved session for its worktree (the newest) over the rolling
+/// #248: a lane drover closed reads back Claude's saved session for its worktree (the newest) over the rolling
 /// transcript; prompts `❯`, replies and tool calls `⏺`, masked.
 #[test]
 fn a_closed_lane_reads_claudes_saved_session() {
@@ -692,7 +686,7 @@ fn a_closed_lane_reads_claudes_saved_session() {
     let jsonl: String = rows.iter().map(|r| format!("{r}\n")).collect();
     std::fs::write(dir.join("s-1.jsonl"), jsonl).unwrap();
     std::fs::write(dir.join("notes.txt"), "not a session").unwrap();
-    let log = herdsman::lanes::log(&c.state, LANE).unwrap();
+    let log = drover::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, "  rolled\n").unwrap();
     let r = Fake::default().reply("herdr agent list", &agents(&[]));
@@ -730,10 +724,16 @@ fn kill_skips_build_output_and_names_it() {
     let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("skipped") && out.contains("target-lane/"), "{out}");
+    let b = out
+        .split("work pushed to ")
+        .nth(1)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap();
     let show = |fmt: &str| {
-        let b = format!("wip/{LANE}-20261031-1200");
         let o = std::process::Command::new("git")
-            .args(["-C", &format!("{wt}.git"), "show", "--name-only", fmt, &b])
+            .args(["-C", &format!("{wt}.git"), "show", "--name-only", fmt, b])
             .output()
             .unwrap();
         String::from_utf8(o.stdout).unwrap()
@@ -757,7 +757,14 @@ fn kill_skips_a_file_over_the_size_cap() {
     );
     let o = std::process::Command::new("git")
         .args(["-C", &format!("{wt}.git"), "show", "--name-only", "--format="])
-        .arg(format!("wip/{LANE}-20261031-1200"))
+        .arg(
+            out.split("work pushed to ")
+                .nth(1)
+                .unwrap()
+                .split_whitespace()
+                .next()
+                .unwrap(),
+        )
         .output()
         .unwrap();
     assert_eq!(String::from_utf8(o.stdout).unwrap().trim(), "real.rs");
@@ -807,6 +814,8 @@ fn wip_prune_dry_run_lists_and_deletes_nothing() {
     let (code, out) = run(&c, &r, &["wip", "prune", "sendmeter", "--dry-run"]);
     assert_eq!(code, 0, "{out}");
     let want = [
+        "#7 merged: 2 wip, 1 would delete, 1 kept",
+        "#8 ?: 1 wip, 0 would delete, 1 kept",
         "wip/sendmeter-impl-7-20261101-1200 · 2 MB · #7 merged · build output · would delete",
         "wip/sendmeter-impl-8-20261101-1200 · 2 MB · #8 ? · build output · kept",
         "wip/sendmeter-rev-7-r2-20261101-1300 · 2 MB · #7 merged · kept",
@@ -821,4 +830,82 @@ fn wip_prune_dry_run_lists_and_deletes_nothing() {
         "{out}"
     );
     assert_eq!(remote(), 2);
+}
+
+fn sh_git(a: &[&str]) -> String {
+    let s = std::process::Command::new("git").args(a).output().unwrap();
+    assert!(s.status.success(), "{a:?}: {}", String::from_utf8_lossy(&s.stderr));
+    String::from_utf8(s.stdout).unwrap()
+}
+
+/// #779: a closed issue's 5 wip branches of one role → its newest is left, whatever they hold; an open issue's are
+/// untouched. The run lists the counts per issue first.
+#[test]
+fn wip_prune_keeps_only_the_newest_of_a_closed_issue() {
+    let d = tmpdir("wip-prune-newest");
+    let (origin, local) = (d.join("o.git"), d.join("local"));
+    let (o, l) = (
+        origin.to_string_lossy().into_owned(),
+        local.to_string_lossy().into_owned(),
+    );
+    sh_git(&["init", "-q", "--bare", &o]);
+    sh_git(&["clone", "-q", &o, &l]);
+    for (k, v) in [("user.name", "t"), ("user.email", "t@t"), ("commit.gpgsign", "false")] {
+        sh_git(&["-C", &l, "config", k, v]);
+    }
+    sh_git(&["-C", &l, "commit", "-q", "--allow-empty", "-m", "init"]);
+    sh_git(&["-C", &l, "push", "-q", "origin", "HEAD:refs/heads/staging"]);
+    let wip = |name: &str| {
+        sh_git(&["-C", &l, "checkout", "-q", "--detach", "origin/staging"]);
+        std::fs::write(local.join("a.rs"), name).unwrap();
+        sh_git(&["-C", &l, "add", "a.rs"]);
+        sh_git(&["-C", &l, "commit", "-qm", "wip"]);
+        sh_git(&["-C", &l, "push", "-q", "origin", &format!("HEAD:refs/heads/wip/{name}")]);
+    };
+    for t in ["0801", "0802", "0803", "0804", "0805"] {
+        wip(&format!("sendmeter-impl-48-2026110{}-{t}00-ab12", &t[3..]));
+    }
+    for t in ["0801", "0802"] {
+        wip(&format!("sendmeter-impl-49-2026110{}-{t}00-cd34", &t[3..]));
+    }
+    let c = ctx(&d, &CONFIG.replace("/tmp/does-not-matter/sendmeter", &l));
+    append(&c.state, &Event::new(T, "sendmeter", Some(48), "closed", json!({}))).unwrap();
+    append(
+        &c.state,
+        &Event::new(T, "sendmeter", Some(49), "spawn", json!({"role": "impl"})),
+    )
+    .unwrap();
+    let r = RealGit(Fake::default().reply("herdr agent list", NO_AGENTS), "");
+    let remote = || sh_git(&["ls-remote", "--heads", &o, "wip/*"]);
+    let (code, out) = run(&c, &r, &["wip", "prune", "sendmeter", "--dry-run"]);
+    assert_eq!(code, 0, "{out}");
+    let lines: Vec<&str> = out.lines().collect();
+    assert_eq!(
+        lines[..2],
+        [
+            "#48 closed: 5 wip, 4 would delete, 1 kept",
+            "#49 impl: 2 wip, 0 would delete, 2 kept"
+        ],
+        "{out}"
+    );
+    assert_eq!(remote().lines().count(), 7, "a dry run deletes nothing");
+    let (code, out) = run(&c, &r, &["clean", "sendmeter"]);
+    assert!(
+        code == 0 && out.contains("#48 closed: 5 wip, 4 would delete, 1 kept\n"),
+        "{code} {out}"
+    );
+    assert_eq!(remote().lines().count(), 7, "clean without --yes deletes nothing");
+    let (code, out) = run(&c, &r, &["wip", "prune", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.starts_with("#48 closed: 5 wip, 4 deleted, 1 kept\n"), "{out}");
+    let left = remote();
+    let left: Vec<&str> = left.lines().filter_map(|l| l.split("refs/heads/").nth(1)).collect();
+    assert_eq!(
+        left,
+        [
+            "wip/sendmeter-impl-48-20261105-080500-ab12",
+            "wip/sendmeter-impl-49-20261101-080100-cd34",
+            "wip/sendmeter-impl-49-20261102-080200-cd34"
+        ]
+    );
 }

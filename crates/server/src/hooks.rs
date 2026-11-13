@@ -1,6 +1,7 @@
 //! #626: serve's Funnel listener (`[serve] hooks_addr`): `POST /hooks/github` and nothing else; every other path is a
 //! bare 404, so the board stays tailnet-only whatever Funnel maps here (docs/serve.md).
 use crate::config::Config;
+use crate::handover::Handover;
 use crate::runner::Runner;
 use crate::{webhook, Ctx};
 use anyhow::Result;
@@ -9,43 +10,65 @@ use std::net::TcpListener;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::Duration;
 
-/// `herdsman serve`: the board on `addr` plus, unless read-only, the Funnel listener on `[serve] hooks_addr` (#626).
+/// `drover serve`: the board on `addr` plus, unless read-only, the Funnel listener on `[serve] hooks_addr` (#626).
 pub fn serve(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool) -> Result<()> {
-    let hooks = Config::load(&ctx.config)
-        .map(|c| c.serve.hooks_addr())
-        .unwrap_or_default();
-    let hooks = (!read_only && !hooks.is_empty()).then(|| TcpListener::bind(&hooks).map_err(|e| (hooks, e)));
+    board(ctx, r, addr, read_only, !read_only)
+}
+
+/// #894: `serve`; `handover`: take over a predecessor's listeners and hand them to a successor (`crate::handover`).
+pub fn board(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool, handover: bool) -> Result<()> {
+    let mut got = if handover { crate::runner::inherited() } else { vec![] }.into_iter();
+    let inherited = got.len() > 0;
+    let l = got.next().map_or_else(|| TcpListener::bind(addr), Ok)?;
+    let mode = if read_only { "read-only view" } else { "phone page" };
+    eprintln!("drover serve: {mode} on http://{}/", l.local_addr()?);
+    let hooks = Config::kept(ctx).map(|c| c.serve.hooks_addr()).unwrap_or_default();
+    let hooks = (!read_only && !hooks.is_empty()).then(|| {
+        got.next()
+            .map_or_else(|| TcpListener::bind(&hooks), Ok)
+            .map_err(|e| (hooks, e))
+    });
+    drop(got);
+    let ls: Vec<_> = std::iter::once(&l)
+        .chain(hooks.as_ref().and_then(|h| h.as_ref().ok()))
+        .collect();
+    let ho = handover.then(|| Handover::new(ctx, &ls, inherited)).transpose()?;
+    let ho = ho.as_ref();
     std::thread::scope(|sc| {
-        match hooks {
+        match &hooks {
             Some(Ok(h)) => {
-                eprintln!("herdsman serve: webhooks on http://{}/hooks/github", h.local_addr()?);
-                sc.spawn(move || listen(ctx, r, &h));
+                eprintln!("drover serve: webhooks on http://{}/hooks/github", h.local_addr()?);
+                sc.spawn(move || listen(ctx, r, h, ho));
             }
-            Some(Err((a, e))) => eprintln!("herdsman serve: no webhooks: {a}: {e}"),
+            Some(Err((a, e))) => eprintln!("drover serve: no webhooks: {a}: {e}"),
             None => {}
         }
-        crate::serve::serve(ctx, r, addr, read_only)
+        crate::serve::serve_with(ctx, r, l, read_only, ho)
     })
 }
 
-/// Serve `l` for good: a thread per delivery, at most 4 at once (then 503).
-pub fn listen(ctx: &Ctx, r: &dyn Runner, l: &TcpListener) {
+/// Serve `l` until a successor takes over (`ho`): a thread per delivery, at most 4 at once (then 503).
+pub fn listen(ctx: &Ctx, r: &dyn Runner, l: &TcpListener, ho: Option<&Handover>) {
     let busy = &AtomicUsize::new(0);
     std::thread::scope(|sc| {
         for mut s in l.incoming().flatten() {
             if busy.fetch_add(1, Relaxed) >= 4 {
                 busy.fetch_sub(1, Relaxed);
                 drop(s.write_all(&status(503, "busy")));
-                continue;
+            } else {
+                sc.spawn(move || {
+                    let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
+                    let res = reply(ctx, r, &mut s);
+                    drop(s.write_all(&res));
+                    busy.fetch_sub(1, Relaxed);
+                });
             }
-            sc.spawn(move || {
-                let _ = s.set_read_timeout(Some(Duration::from_secs(10)));
-                let res = reply(ctx, r, &mut s);
-                drop(s.write_all(&res));
-                busy.fetch_sub(1, Relaxed);
-            });
+            if ho.is_some_and(Handover::stopping) {
+                break;
+            }
         }
     });
+    ho.map(Handover::left);
 }
 
 /// The response to the one request read from `s`. A body over GitHub's 25 MB is refused from its `Content-Length`

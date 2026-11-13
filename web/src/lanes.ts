@@ -3,7 +3,7 @@
 import type { LaneRow, LanesTab } from '../../assets/types/api';
 import { esc } from './events.ts'; // node runs this file as is: the extension
 import { blocked } from './needs.ts';
-import { prLine } from './queue.ts';
+import { form, hidden, prLine } from './queue.ts';
 
 const GALLOP = ['    _/>\n~(___)\n /  \\', '    _/>\n~(___)\n  ><'], STAND = '    _/>\n~(___)\n  | |', REST = '\n    _/>\n~(___)_', REAR = '     />\n ~(_/\n  / \\';
 
@@ -17,6 +17,9 @@ export function avatar(a: Pick<LaneRow, 'state' | 'act' | 'grow' | 'issue' | 'at
   return `<span class="av ${a.atone} ${a.state}" data-act=${a.act} data-grow=${a.grow}${a.issue == null ? '' : ` data-i=${a.issue}`}><i class=gl>${glyph}</i>${art}<svg class=px viewBox="0 0 132 100" style="${a.coat}"><use href=#ha-${a.act} /></svg></span>`;
 }
 
+/** #609: a lane's `where` chip (`mini · shed`), none when nothing varies. */
+const whereChip = (w: string) => (w ? ` <span class="tag m">${esc(w)}</span>` : '');
+
 /** #53: line 1 the name + `state age`; line 2 the reason, or `superseded by`; then the activity or #276's `now:` line. */
 function row(d: LanesTab, l: LaneRow): string {
   const why = l.why == null ? '' : `<span class="why ${l.why_tone}">${esc(l.why)}</span>`;
@@ -25,9 +28,11 @@ function row(d: LanesTab, l: LaneRow): string {
   const card = [esc(l.head), esc(l.shown), esc(l.facts)];
   if (l.pr != null && l.issue != null) card.push(prLine(l.pr, l.repo, l.issue));
   if (l.dead) card.push('<span class=r>⚠ log/pane mismatch: the log has this lane open, herdr has no pane</span>');
+  // #712: its issue is parked: [unpark] (paired only, as [park]).
+  if (l.unpark != null && l.issue != null && d.rw && d.paired) card.push(`${form(d)}${hidden('unpark', l.unpark, d.mtime)}<input type=hidden name=issue value=${l.issue}><button>unpark</button></form>`);
   const ps = card.filter(Boolean).map(x => `<p>${x}</p>`).join('') + (l.blocked ? blocked(d, l.blocked) : '');
   const th = l.thread == null ? '' : ` data-thread=${esc(l.thread)}`; // #422: a tap opens it
-  return `<div class=lane data-agent="${esc(l.name)}" data-role=${esc(l.role)}${l.gone ? ' data-gone' : ''}${th}><button type=button class=lr>${avatar(l)}<span class="nw el">${esc(l.name)}</span><span class="nw ${l.tone}">${esc(l.state)} ${l.ago}</span>${why}${act}</button><div class=card hidden>${ps}</div></div>`;
+  return `<div class=lane data-agent="${esc(l.name)}" data-role=${esc(l.role)}${l.gone ? ' data-gone' : ''}${th}><button type=button class=lr>${avatar(l)}<span class="nw el">${esc(l.name)}${whereChip(l.where)}</span><span class="nw ${l.tone}">${esc(l.state)} ${l.ago}</span>${why}${act}</button><div class=card hidden>${ps}</div></div>`;
 }
 
 export function tab(d: LanesTab): string {

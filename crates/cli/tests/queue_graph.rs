@@ -1,11 +1,11 @@
 //! #115: the Queue tab as a git-log style graph. `serial_label` config, the rows' graph data, and (WebKit, 390 px) the
 //! drawn graph on a fixture with chains, a fork, a clamped chain and a blocker out of view, the [?] legend sheet and
-//! the control audit on both. Screenshots go to `$HERDSMAN_SNAPSHOTS`.
+//! the control audit on both. Screenshots go to `$DROVER_SNAPSHOTS`.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::config::Config;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -62,7 +62,7 @@ fn req(s: &Server, path: &str, extra: &str) -> String {
 
 /// acme: 1 → 2 → 3 → 4 → 5 (5 clamps at depth 4), 6 also on 1 (a fork), 7 on #99 (not queued), 8 serial.
 /// beta: 22 on 21, both serial. #1 has an impl lane.
-fn fixture() -> (herdsman::Ctx, Fake) {
+fn fixture() -> (drover::Ctx, Fake) {
     let c = ctx(&tmpdir("queue-graph"), &config("serial_label = \"db\""));
     let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
     ok(&["queue", "acme", "add", "1", "2", "3", "4", "5", "6", "7"]);
@@ -117,8 +117,7 @@ fn rows_carry_the_graph_data_and_the_fleet_its_serial_paths() {
 
 #[test]
 fn the_graph_and_its_legend_pass_the_audit_at_390px() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture();
@@ -177,14 +176,12 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
     ] {
         let js =
             format!("{stub}; {audit}; {{ {then} }}; window.measure = [audit('{root}')]; tab('queue'); {{ {then} }}");
-        let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
+        let png = std::env::var("DROVER_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("{name}.png"))
         });
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
-        let o = swift()
-            .env("HERDSMAN_TAB", "queue") // #440: its own localStorage: no earlier run's Herd mode on this origin
+        let o = webview()
+            .env("DROVER_TAB", "queue") // #440: its own localStorage: no earlier run's Herd mode on this origin
             .args([
-                script,
                 file.to_str().unwrap(),
                 "390",
                 "queue",

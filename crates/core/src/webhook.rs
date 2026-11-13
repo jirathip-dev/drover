@@ -1,11 +1,12 @@
 //! #626: GitHub webhooks, `POST /hooks/github` on serve's Funnel listener (docs/serve.md). The `X-Hub-Signature-256`
 //! HMAC-SHA256 of the raw body, checked in constant time against `GITHUB_WEBHOOK_SECRET`; a PR or CI event on a fleet
-//! repo re-reads that issue's PR into the cache `herdsman pr` reads and kicks drive for it. The fast step's slow
+//! repo re-reads that issue's PR into the cache `drover pr` reads and kicks drive for it. The fast step's slow
 //! catch-up read (`[limits] webhook_poll_minutes`) covers what a sleeping Mac or a down Funnel missed.
 use crate::config::Config;
 use crate::events::{fold, read};
 use crate::runner::Runner;
 use crate::{gate, gh, Ctx};
+use anyhow::Result;
 use hkdf::hmac::{Hmac, KeyInit, Mac};
 use serde_json::Value;
 use std::path::PathBuf;
@@ -20,10 +21,13 @@ const BRANCH: [&str; 3] = [
     "/check_run/check_suite/head_branch",
 ];
 
-/// Each fleet's webhook secret (its own, else `all`'s); empty: webhooks are off.
-pub fn secrets(cfg: &Config, r: &dyn Runner) -> Vec<(String, String)> {
-    let key = |f: &String| Some((f.clone(), crate::secret::lookup(r, f, SECRET).ok()??));
-    cfg.fleet.keys().filter_map(key).collect()
+/// #707: the secret in `[serve] webhook_secret_file` (0600), for each fleet; empty: webhooks are off.
+pub fn secrets(cfg: &Config) -> Result<Vec<(String, String)>> {
+    let f = cfg.serve.webhook_secret_file.as_deref().map(crate::config::expand);
+    let Some(key) = f.as_deref().map(crate::secret::file).transpose()?.flatten() else {
+        return Ok(vec![]);
+    };
+    Ok(cfg.fleet.keys().map(|f| (f.clone(), key.clone())).collect())
 }
 
 /// `sig` (`sha256=<hex>`) is `body`'s HMAC-SHA256 under `secret`, compared in constant time.
@@ -78,10 +82,11 @@ pub fn deliver(ctx: &Ctx, r: &dyn Runner, event: &str, sig: Option<&str>, body: 
     let Ok(cfg) = Config::load(&ctx.config) else {
         return (503, "no fleet.toml".into());
     };
-    let keys = secrets(&cfg, r);
-    if keys.is_empty() {
-        return (503, format!("webhook off: no {SECRET}"));
-    }
+    let keys = match secrets(&cfg) {
+        Ok(k) if !k.is_empty() => k,
+        Ok(_) => return (503, format!("webhook off: no {SECRET}")),
+        Err(e) => return (503, format!("webhook off: {e:#}")),
+    };
     let ok: Vec<&str> = keys
         .iter()
         .filter(|k| sig.is_some_and(|s| signed(&k.1, body, s)))

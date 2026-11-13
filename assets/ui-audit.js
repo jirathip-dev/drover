@@ -16,7 +16,7 @@
   // confirms unpaired, as the board answers an unpaired browser.
   const F = window.fetch, early = [], wait = () => new Promise(r => setTimeout(r, 300));
   const LONG = {
-    pair: 'pair this device: tap Pair this phone, then `herdsman serve approve <code>` on the Mac',
+    pair: 'pair this device: tap Pair this phone, then `drover serve approve <code>` on the Mac',
     sub: 'push subscribe refused: the endpoint https://web.push.apple.com/QGx2c3Rlc3Qtc3Vic2NyaXB0aW9uLWVuZHBvaW50LWlk is not https or not a known push service',
     kill: 'REFUSED UNSAFE_CLEAN: acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx has 3 unpushed commits and a dirty tree; push them first',
     dry: 'dry run; would push 3 commits and 2 dirty files to wip/acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx-20261031-1943, then close pane w1:p5',
@@ -95,8 +95,17 @@
     e.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: r.left + 10, clientY: r.top + 10 }));
     e.click(); // the click a release ends with: it does nothing else
   };
+  const folded = () => {
+    const cards = [...$$('#needs>.ask')];
+    if (cards.length < 3) return early.push(`${cards.length} needs-you cards in the demo, not 3`), false;
+    for (const c of cards) {
+      const s = c.querySelector(':scope>summary'), t = s?.firstElementChild;
+      if (c.open || !t || !seen(s) || t.offsetHeight > 1.5 * parseFloat(getComputedStyle(t).lineHeight) || getComputedStyle(t).textOverflow !== 'ellipsis') early.push(`needs card not one folded line: ${c.textContent.slice(0, 40)}`);
+    }
+    return true;
+  };
   const VIEWS = {
-    queue: () => tab('queue'),
+    queue: () => { tab('queue'); if ([...$$('#needs>.ask, .later:has(+#needs)')].some(seen)) early.push('a needs-you card on Queue'); },
     // #281 gate 2: the Queue and Events rows in the shot (no needs cards above them, in the check too), so their sprites' pixels are checked.
     'queue-rows': () => { tab('queue'); $('#needs').hidden = true; },
     'events-rows': () => { sys('activity'); $('#needs').hidden = true; },
@@ -114,7 +123,7 @@
       $('#queue').prepend(d);
       if (!DBG.get('check')) $('#needs').hidden = true;
       d.open = true;
-      const ls = [...d.querySelectorAll('.qls>.ql')], long = ['herdsman-impl-157-queue-card-lane-overflow', 'acme-rev-2940-r1-settings-contrast-audit', 'herdsman-impl-205-queue-card-lanes-newest-first'];
+      const ls = [...d.querySelectorAll('.qls>.ql')], long = ['drover-impl-157-queue-card-lane-overflow', 'acme-rev-2940-r1-settings-contrast-audit', 'drover-impl-205-queue-card-lanes-newest-first'];
       if (ls.length !== 3) early.push(`#38 lists ${ls.length} lanes, not 3`);
       ls.forEach((l, i) => { l.querySelector('.qn').textContent = long[i]; if (l.dataset.agent) l.dataset.agent = long[i]; });
       const hs = [...d.querySelectorAll('.cd>.ch')].map(h => h.textContent).join(', ');
@@ -145,7 +154,7 @@
       $('#queue').prepend(d);
       if (!DBG.get('check')) $('#needs').hidden = true; // the shot shows the row; the check keeps the needs cards
     },
-    // #92: the demo's `driver = "herdsman"` fleet (docs): its card with the `drive · …` line and [drive now], moved to the
+    // #92: the demo's `driver = "drover"` fleet (docs): its card with the `drive · …` line and [drive now], moved to the
     // top (a scrolled view shoots blank).
     'queue-drive': () => {
       tab('queue');
@@ -176,7 +185,41 @@
     // impl → rev → sec → gates.
     pipeline: () => pipe('acme-web'),
     'pipeline-custom': () => pipe('acme-api'),
-    lanes: () => tab('lanes'),
+    lanes: () => { tab('lanes'); folded(); },
+    'needs-fold': async () => {
+      tab('lanes');
+      if (!folded()) return;
+      $$('[inert]').forEach(e => { e.inert = false; });
+      const sent = [], grab = e => { e.preventDefault(); e.stopImmediatePropagation(); sent.push(JSON.stringify([...new FormData(e.target, e.submitter)])); };
+      addEventListener('submit', grab, true);
+      const mains = [...$$('#needs>.ask>summary>button')];
+      if (!mains.length) early.push('no main button on a folded line');
+      for (const b of mains) {
+        const c = b.closest('.ask'), twin = b.form && [...b.form.elements].find(x => x !== b && x.name === b.name && x.value === b.value);
+        if (!twin || !c.contains(twin)) { early.push(`${label(b)}: no twin in its card's form`); continue; }
+        b.disabled = twin.disabled = false;
+        b.scrollIntoView({ block: 'center', behavior: 'instant' });
+        const r = b.getBoundingClientRect();
+        document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2).click();
+        twin.click();
+        if (sent.length !== 2 || sent[0] !== sent[1]) early.push(`${label(b)}: the line's button sent ${sent[0]}, the card's ${sent[1]}`);
+        if (c.open) early.push(`${label(b)}: the line's button opened the card`);
+        sent.length = 0;
+      }
+      window.removeEventListener('submit', grab, true);
+      const d = await (await fetch(new URL('api/v1/needs', document.baseURI))).json(), c = [...$$('#needs>.ask')].pop(), k = c.querySelector('summary>span').textContent;
+      c.querySelector('summary').click();
+      if (!c.open) early.push('a tap on the line left the card folded');
+      d.asks.shift();
+      d.now += 600;
+      dispatchEvent(new CustomEvent('herd-needs', { detail: d }));
+      const o = [...$$('#needs>.ask')].filter(x => x.open).map(x => x.querySelector('summary>span').textContent);
+      if (o.join() !== k) early.push(`after a herd-needs redraw the open cards are [${o}], not [${k}]`);
+      const a = [...$$('#needs>.ask')].find(x => x.open);
+      a?.querySelector('summary').click();
+      if (a?.open) early.push('a second tap on the line left the card open');
+      a?.querySelector('summary').click();
+    },
     // #386: the [chat] tab's thread list (the needs-you stack folded with [later all]), and one thread open from its
     // first message, with the choice rows, images, a file row and the composer (scrolled to the top: a scrolled view
     // shoots blank); at 1440 the list and the thread side by side.
@@ -570,6 +613,21 @@
       await wait();
       if ($('.fv').ariaPressed !== 'true' || !$('.chat>.now .blk.run')) early.push('[full conversation]: not pressed, or no tool run shown');
     },
+    // #750: a lane whose transcript is an ACP session's (shed's `> prompt`, `[tool] title (status)`, the reply, as
+    // crates/cli/tests/golden/screens/acp.txt): its text on separate lines, each tool one line, its rest behind a tap.
+    'sheet-acp': async () => {
+      const lines = ['> # Brief — acme-web-impl-41 (acme/acme-web#41)', 'Implement #41: dark-mode toggle persists across reloads.', 'Run `pnpm test` before you push.',
+        '[tool] Read src/settings/store.ts (completed)', '[tool] Edit src/settings/store.ts (completed)',
+        '[tool] `cd /srv/acme/worktrees/acme-web-impl-41 && pnpm test settings --reporter=dot 2>&1 | tee test.log`', '`git add -A && git commit -m "settings: keep the theme across reloads (#41)"` (completed)',
+        '[tool] git push -u origin issue-41 (failed)', 'The theme now loads from storage before the first paint.', 'Tests pass; the push was refused, so I stopped there.'];
+      window.fetch = (u, o) => String(u).includes('lane/') ? Promise.resolve(Response.json({ harness: 'claude', lines, live: 0 })) : F(u, o);
+      tab('lanes');
+      open($('.lane[data-agent="acme-web-impl-41"]'));
+      await wait();
+      const txt = [...$$('.chat>.now>.txt')], tools = [...$$('.chat>.now>.blk.run')];
+      if (txt.length !== 2 || getComputedStyle(txt[0]).whiteSpace !== 'pre-wrap' || txt[0].offsetHeight < 3 * parseFloat(getComputedStyle(txt[0]).lineHeight)) early.push(`text: ${txt.length} blocks, not 2 on separate lines`);
+      if (tools.length !== 4 || tools.some(t => t.open || t.querySelector('.cmd').offsetHeight > 1.5 * parseFloat(getComputedStyle(t.querySelector('.cmd')).lineHeight))) early.push(`tools: ${tools.length}, not 4 closed one-line rows`);
+    },
     // #83: the demo's parked lane (no pane, its work on PR #15): the card's parked line, [clean] disabled with its
     // reason in p.st, [stop]/[kill] hidden, and nothing in the sheet in the red (danger) colour.
     'sheet-parked': async () => {
@@ -598,7 +656,7 @@
       await wait();
       const probe = S.appendChild(Object.assign(document.createElement('i'), { className: 'r' })), red = getComputedStyle(probe).color;
       probe.remove();
-      if (st.textContent !== 'not a herdsman lane: herdsman can only close its pane') early.push(`p.st reads "${st.textContent}"`);
+      if (st.textContent !== 'not a drover lane: drover can only close its pane') early.push(`p.st reads "${st.textContent}"`);
       for (const op of ['stop', 'kill', 'clean']) if (seen($(`[data-op=${op}]`))) early.push(`[${op}] shown on an Others agent`);
       if (!seen($('[data-op=close]'))) early.push('no [close pane] on an Others agent');
       for (const e of [S, ...S.querySelectorAll('*')].filter(seen)) if (e.matches('.r') || getComputedStyle(e).color === red) early.push(`red in the sheet: ${e.outerHTML.slice(0, 60)}`);
@@ -673,7 +731,7 @@
     // #154: three needs-you cards through the live path (frag): [later] on one → `1 need you ▸` and 2 cards; [later all]
     // → the line alone; a tap on it → all 3; a changed card (its question) comes back by itself. Measured as it ends.
     'needs-later': () => {
-      tab('queue');
+      tab('lanes');
       put('later', '{}');
       const cards = [...$$('#needs>.ask')].slice(0, 3).map(c => { const x = c.cloneNode(true); x.querySelector('.lat').remove(); x.className = 'ask'; return x; });
       if (cards.length < 3) return early.push(`${cards.length} needs-you cards in the demo, not 3`);
@@ -694,8 +752,18 @@
       if (!seen($$('#needs>.ask')[1])) early.push('the changed card did not come back');
     },
     // #217 gate 2: a tapped [one more round]: the needs-human card is one muted pending line with no buttons, at the top.
+    // #859: an ask's answer tap takes its card off at once, before the POST answers; a failed POST draws the cards again.
+    'needs-answered': async () => {
+      tab('lanes');
+      $('#needs').insertAdjacentHTML('afterbegin', '<div class=ask id=aud859><p>Which DB?</p><form><input type=hidden name=op value=answer><input type=hidden name=fleet value=acme-web><input type=hidden name=id value=q859><button name=choice value=1>1. sqlite</button></form></div>');
+      const hold = [];
+      window.fetch = (u, o) => o && o.method === 'POST' ? new Promise(r => hold.push(r)) : F(u, o);
+      $('#aud859 form').requestSubmit($('#aud859 button'));
+      if (!hold.length || $('#aud859')) early.push(`after the tap: ${hold.length} POSTs, the card ${$('#aud859') ? 'still shown' : 'gone'}`);
+      window.fetch = F;
+    },
     'needs-pending': () => {
-      tab('queue');
+      tab('lanes');
       const c = [...$$('#needs>.ask[data-n]')].find(c => /needs you/.test(c.textContent));
       if (!c) return early.push('no needs-human card in the demo');
       $('#needs').prepend(c);
@@ -1121,10 +1189,10 @@
     if (V === 'herd-garden-still' && (!matchMedia('(prefers-reduced-motion: reduce)').matches || s.animationName !== 'none')) early.push(`still: #herd animates (${s.animationName})`);
   }
   let toasted = null, drove = null, href = null;
-  const ERR = 'error: herdsman: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
+  const ERR = 'error: drover: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-garden': 0, 'herd-garden-busy': 0, 'herd-garden-held': 0, 'herd-garden-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
-  const ROOTS = { 'loading-tap': () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
+  const ROOTS = { 'loading-tap': () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], 'sheet-acp': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };
   const CTL = 'button:not(.lr,.hh,.hqh), .pk, [role=button]', ROW = 'summary, .lr, .hh, .hqh, .ql, .lko', NAME = '.nw, .hl b';
   const CHOICE = 'button[name=choice], .pick'; // amendment A (#139: wherever it renders): wraps, ≤ 4 lines, instead of 28 px
   // A closed <details> keeps its content's boxes (content-visibility), so ask the browser what is shown.
@@ -1190,7 +1258,7 @@
     // #370 gate 2: the tab's own line and its labels pair the theme word with the plain one, and the muted plain word is
     // ≥ 4.5:1 on what is under it (the first ancestor with a background, over --bg when see-through).
     if (!on(sec ? `#sy-${sec}>.syh .thw` : `#${tb}>.tsub>.thw`).length) bad.push(`${tb}: no theme line`);
-    const LBL = { queue: '#queue .qg>h3, #queue details.done>summary>span, #needs .ask>p:first-child>b', lanes: '#lanes h2>span', events: '#events details.er:is([data-k=merged],[data-k=verdict],[data-k=spawn],[data-k=queue]) .sm', host: '#host .hcd .hhd .hnm' }[tb];
+    const LBL = { queue: '#queue .qg>h3, #queue details.done>summary>span, #needs .ask>p:first-of-type>b', lanes: '#lanes h2>span', events: '#events details.er:is([data-k=merged],[data-k=verdict],[data-k=spawn],[data-k=queue]) .sm', host: '#host .hcd .hhd .hnm' }[tb];
     for (const e of on(LBL)) if (!e.querySelector('.thw') || !e.querySelector('.pw') && tb !== 'events') bad.push(`${tb}: label without its theme word: "${e.textContent.slice(0, 30)}"`);
     const rgb = c => { const v = c.match(/[\d.]+/g).map(Number); return c.startsWith('color(') ? [...v.slice(0, 3).map(x => x * 255), v[3] ?? 1] : [...v.slice(0, 3), v[3] ?? 1]; };
     const under = e => { for (; e; e = e.parentElement) { const c = rgb(getComputedStyle(e).backgroundColor); if (c[3] > 0) return c[3] < 1 ? over(c.slice(0, 3), rgb(getComputedStyle(B).backgroundColor), c[3]) : c.slice(0, 3); } return rgb(getComputedStyle(B).backgroundColor); };

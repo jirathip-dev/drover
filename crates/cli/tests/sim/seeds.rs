@@ -12,14 +12,6 @@ pub const INCIDENT: u64 = 1;
 /// Seeds that found a cause of their own, parked `#[ignore]` (`parked_seeds`) until its issue's fix unparks them.
 pub const PARKED: &[(u64, &str)] = &[
     (
-        16,
-        "merged race: the fast step logs a PR it sees merged (no verdict_sha) while the kick's own merge is in flight",
-    ),
-    (
-        1382,
-        "stranded: an owner `merge` refused NO_PR logs `blocked`, which takes a queued issue out of the start queue",
-    ),
-    (
         2335,
         "lock wait: a kick waits 120 s in drive::update on a crashed pass's drive.lock (held() ignores a dead holder)",
     ),
@@ -28,6 +20,9 @@ pub const PARKED: &[(u64, &str)] = &[
         "NO_PROOF re-review loop: a reviewer that never adds its Proof is told once, then superseded, without end",
     ),
 ];
+
+/// #688: plans a hunt found (`Plan::text`, as its failure printed it), each joining with its fix like a seed.
+pub const PLANS: &[(&str, &str)] = &[];
 
 /// Seeds 2–24: random fleets (`scenario::random`).
 pub const FIXED: &[(u64, &str)] = &[
@@ -46,6 +41,7 @@ pub const FIXED: &[(u64, &str)] = &[
     (13, "random"),
     (14, "random"),
     (15, "random"),
+    (16, "#854: the fast step no longer logs a merge in flight as external"),
     (17, "random"),
     (18, "random"),
     (19, "random"),
@@ -54,11 +50,15 @@ pub const FIXED: &[(u64, &str)] = &[
     (22, "random"),
     (23, "random"),
     (24, "random"),
+    (
+        1382,
+        "#854: an owner `merge` refused NO_PR before any lane no longer strands the queued issue",
+    ),
 ];
 
 /// Seed 1's fleet: #370 queued, its impl pushes, its first reviewer writes a FAIL without Proof and ignores the
 /// refusal; each reviewer after it writes the same FAIL 5 s in.
-pub fn incident() -> (Model, String) {
+pub fn incident() -> (Model, (u64, u64)) {
     let mut rng = Rng::new(INCIDENT);
     let mut m = Model::default();
     let s = m.sha();
@@ -86,7 +86,7 @@ pub fn incident() -> (Model, String) {
         ci: None,
     };
     m.scripts.insert("impl".into(), vec![push; 6]);
-    (m, config(4, 3))
+    (m, (4, 3))
 }
 
 /// #685's known-answer fleet: #201 and #202 queued together at t+0; every impl works 600 s and pushes a green head,

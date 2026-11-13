@@ -43,6 +43,11 @@ pub struct HerdLane {
     pub effort: Option<String>,
     pub account: Option<String>,
     pub host: Option<String>,
+    // #609: the runtime the lane was spawned in (`herdr`, `shed`, `shed-acp`), its host, and `where`, the one label
+    // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
+    pub runtime: String,
+    #[serde(rename = "where")]
+    pub place: String,
     pub state: String,
     pub shown: String,
     pub tone: String,
@@ -87,6 +92,22 @@ pub struct Notice {
     pub text: String,
 }
 
+/// #749: API v1's `lane/<agent>`: the sheet's chat plus `blocks`, its transcript as blocks: an ACP lane's from shed's
+/// events (no `lines`; `before` is the oldest event's `seq`, the next page's `before`), else one `screen` block (the
+/// screen is `lines`).
+pub struct LaneChat {
+    #[serde(flatten)]
+    pub chat: Chat,
+    pub blocks: Vec<Block>,
+}
+
+/// #749: one of an approval's options, as ACP sent it (`allow_once`, `reject_once`, …).
+pub struct ApprovalChoice {
+    pub id: String,
+    pub name: String,
+    pub kind: String,
+}
+
 /// `/live`'s `ev`: an event's seq, time and theme moment (`serve::moment`); #370 its fleet and issue, for row moments.
 pub struct Moment {
     pub seq: u64,
@@ -113,6 +134,8 @@ pub struct NeedsTab {
     pub asks: Vec<NeedAsk>,
     pub blocked: Vec<Blocked>,
     pub issues: Vec<NeedIssue>,
+    /// #709: fleet.toml fails to load: `config invalid: <error> (fleet.toml:<line>)`, the red banner above every tab.
+    pub config: Option<String>,
 }
 
 /// An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
@@ -184,6 +207,8 @@ pub struct LanesTab {
     pub sections: Vec<LaneSection>,
     /// #630: each lane's workspace root and unsaved work.
     pub unsaved: Vec<LaneUnsaved>,
+    /// #712: fleet.toml's mtime, for a row's [unpark] form.
+    pub mtime: String,
 }
 
 /// #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.
@@ -234,6 +259,14 @@ pub struct LaneRow {
     pub repo: Option<String>,
     pub dead: bool,
     pub blocked: Option<Blocked>,
+    /// #712: its issue is parked: the fleet its [unpark] posts to.
+    pub unpark: Option<String>,
+    // #609: the runtime the lane was spawned in (`herdr`, `shed`, `shed-acp`), its host, and `where`, the one label
+    // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
+    pub runtime: String,
+    pub host: String,
+    #[serde(rename = "where")]
+    pub place: String,
 }
 
 /// #276: a `now:` line: the spinner word `w`, the action `n`, the elapsed time `t`, the full text as `title`.
@@ -343,6 +376,7 @@ pub struct Msg {
     pub answer: Option<Answered>,
     pub open: bool,
     pub cmds: Vec<String>,
+    pub handoff: Option<Handoff>,
     pub run: Option<RunCard>,
 }
 
@@ -361,6 +395,66 @@ pub struct RunCard {
     pub by: Option<String>,
     pub code: Option<i64>,
     pub tail: String,
+}
+
+
+/// #681: a handoff as one agent→agent item (cooee): `id` its seq (a repo handoff's: its card's), `from` the sending
+/// conductor, `to` the thread id once delivered, else `{repo, pending: true}`; `summary` the text's first line;
+/// `state` pending, delivered, failed (`error`) or forwarded; `folded` in the sender's thread, the message form in the
+/// receiver's; while pending, the card's `choices`.
+pub struct Handoff {
+    pub kind: String,
+    pub id: u64,
+    pub from: HandoffFrom,
+    pub to: Value,
+    pub title: String,
+    pub summary: String,
+    pub text: String,
+    pub state: String,
+    pub error: Option<String>,
+    pub folded: bool,
+    pub choices: Vec<HandoffChoice>,
+}
+
+pub struct HandoffFrom {
+    pub agent: String,
+    pub thread: String,
+    pub repo: String,
+}
+
+/// #681: a pending handoff's row as the board's card shows it: option `n`, its `text`, the `thread` it delivers to
+/// (`new`: a new thread); picked by the paired `POST /api/v1/<op>` with `fleet`, `id`, `choice` = `n` and `mtime`.
+pub struct HandoffChoice {
+    pub n: u64,
+    pub text: String,
+    pub thread: String,
+    pub op: String,
+    pub fleet: String,
+    pub id: String,
+}
+
+/// #681: API v1's `repo/<fleet>/threads`: the repo's conductor threads, newest-active first.
+pub struct RepoThreads {
+    pub repo: String,
+    pub threads: Vec<RepoThread>,
+}
+
+/// #681: a conductor thread: its `last` line and time, `awake` (its conductor not asleep), `newest` on the ongoing
+/// one (the first not archived).
+#[allow(clippy::struct_excessive_bools)] // the four flags #681's cooee contract names
+pub struct RepoThread {
+    pub id: String,
+    pub title: String,
+    pub last: LastLine,
+    pub unread: bool,
+    pub awake: bool,
+    pub archived: bool,
+    pub newest: bool,
+}
+
+pub struct LastLine {
+    pub line: String,
+    pub ts: u64,
 }
 
 pub struct FileRef {
@@ -432,6 +526,8 @@ pub struct State {
     pub hosts: Vec<Row>,
     pub services: Vec<Row>,
     pub alerts: Vec<Row>,
+    /// #859: when the background last read each source the lanes come from (herdr, shed, remote, host).
+    pub sources: BTreeMap<String, u64>,
 }
 
 pub struct Fleet {
@@ -449,6 +545,17 @@ pub struct Queued {
     pub blocked_by: Option<u64>,
     /// #667: its blockers in another fleet or repo, as `owner/repo#N`.
     pub blocked_on: Vec<String>,
+    /// #778: a tapped start waiting for its lane, and the row's `starting, waiting for host: <reason> · <age>`.
+    pub pending: Option<PendingStart>,
+    pub status: Option<String>,
+}
+
+/// #778: a card tap's lane start not begun yet: its `action` (extend, answer, approve, revise), since when, the last
+/// refusal `reason` (a code; a hard one with its words).
+pub struct PendingStart {
+    pub action: String,
+    pub since: u64,
+    pub reason: Option<String>,
 }
 
 /// `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
@@ -464,6 +571,12 @@ pub struct Lane {
     pub shown: String,
     pub tone: String,
     pub since: u64,
+    // #609: the runtime the lane was spawned in (`herdr`, `shed`, `shed-acp`), its host, and `where`, the one label
+    // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
+    pub runtime: String,
+    pub host: String,
+    #[serde(rename = "where")]
+    pub place: String,
 }
 
 pub struct Ask {
@@ -508,6 +621,19 @@ pub struct HostTab {
     pub subs: Vec<Sub>,
     pub devices: Vec<Paired>,
     pub notify: Vec<Notifier>,
+    pub vendors: Vendors,
+}
+
+/// #830: the provider vendor of each account and each [sign in ▾] login that is a provider's.
+pub struct Vendors {
+    pub accounts: Vec<Vendor>,
+    pub setups: Vec<Vendor>,
+}
+
+/// #830: an account's or a login's `name` and its provider's `vendor`.
+pub struct Vendor {
+    pub name: String,
+    pub vendor: String,
 }
 
 /// #440: a global `[[notify]]` in words (System → Notifications): `web push` or `command`, and its events.
@@ -712,6 +838,11 @@ pub struct QueueRow {
     pub up: Option<u64>,
     pub down: Option<u64>,
     pub lanes: Vec<QueueLane>,
+    // #609: its active lane's (`Lane`'s), empty with none.
+    pub runtime: String,
+    pub host: String,
+    #[serde(rename = "where")]
+    pub place: String,
 }
 
 /// #173: a pipeline chip: its kind's glyph `g` and class `k`, `at` before (`-1`), on (`0`) or after (`1`) where the
@@ -854,11 +985,20 @@ pub struct Ev {
     pub run: Option<String>,
 }
 
-/// #576: API v1's `issue/<fleet>/<n>`: its recorded verdicts, newest first.
+/// #576: API v1's `issue/<fleet>/<n>`: its recorded verdicts, newest first; #677: its latest why note.
 pub struct IssueView {
     pub fleet: String,
     pub issue: u64,
     pub verdicts: Vec<Verdict>,
+    pub why: Option<WhyNote>,
+    pub pending: Option<PendingStart>,
+}
+
+/// #677: the issue's latest why note: the round head it is on, its round and its `Owner:` line.
+pub struct WhyNote {
+    pub sha: String,
+    pub round: u64,
+    pub owner: String,
 }
 
 /// A verdict: its `role` (the stage: `rev`, `verify`, or the gate's), round, sha, `verdict` (PASS or FAIL), `findings`
@@ -901,7 +1041,7 @@ pub struct LessonRun {
     pub state: String,
 }
 
-/// #576: `lessons/<fleet>/digest?days=N`: `herdsman lesson digest`'s text.
+/// #576: `lessons/<fleet>/digest?days=N`: `drover lesson digest`'s text.
 pub struct Digest {
     pub fleet: String,
     pub days: u64,
@@ -932,6 +1072,25 @@ pub struct ChatDefaults {
     pub harnesses: Vec<Harness>,
 }
 
+/// #709: `/api/v1/health`: `ok` unless fleet.toml fails to load (`config` `invalid`, its `error`); a dead process
+/// answers nothing.
+pub struct Health {
+    pub ok: bool,
+    pub config: String,
+    pub error: Option<String>,
+    /// #859: each route's request times over the last 10 min, slowest p95 first; each source's `refreshed_at`.
+    pub routes: Vec<RouteTime>,
+    pub sources: BTreeMap<String, u64>,
+}
+
+/// #859: one route's requests in the window: how many, their median and 95th percentile in ms.
+pub struct RouteTime {
+    pub route: String,
+    pub count: u64,
+    pub p50: u64,
+    pub p95: u64,
+}
+
 /// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
 pub struct Reply {
     pub ok: bool,
@@ -946,7 +1105,7 @@ pub struct ConductorAttach {
     pub message: String,
     /// `roles/conductor.md`, the repo and the owner's conductor instructions.
     pub brief: String,
-    /// The synced conductor Claude settings (`PreToolUse`: `herdsman hook`).
+    /// The synced conductor provider settings (`PreToolUse`: `drover hook`).
     pub settings: String,
     pub env: AttachEnv,
     /// #565's ACP guard holds; else `why` not.
@@ -955,14 +1114,49 @@ pub struct ConductorAttach {
 }
 
 pub struct AttachEnv {
-    #[serde(rename = "HERDSMAN_LANE")]
+    #[serde(rename = "DROVER_LANE")]
     pub lane: String,
-    #[serde(rename = "HERDSMAN_THREAD")]
+    #[serde(rename = "DROVER_THREAD")]
     pub thread: String,
-    #[serde(rename = "HERDSMAN_PORT")]
+    #[serde(rename = "DROVER_PORT")]
     pub port: String,
+    /// #683: the role's account env (`access::account_env`), the thread's own login (empty: no account).
+    #[serde(flatten)]
+    pub account: BTreeMap<String, String>,
 }
 
+}
+
+/// #749: one block of a lane's transcript, tagged `k`, built from ACP's own fields only (never an agent's wording): a
+/// prompt, a reply's markdown (its text chunks joined), a tool call (its updates folded into one; `title_line`, the
+/// title's first line, cut), the plan, an approval (`answered`: the option taken); a PTY lane's screen is one `screen`, its `lines`.
+#[derive(Serialize, Deserialize)]
+#[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
+#[serde(tag = "k", rename_all = "lowercase")]
+pub enum Block {
+    Prompt {
+        text: String,
+    },
+    Reply {
+        markdown: String,
+    },
+    Tool {
+        id: String,
+        kind: Option<String>,
+        title_line: String,
+        title: String,
+        status: String,
+    },
+    Plan {
+        entries: Vec<Value>,
+    },
+    Approval {
+        tool: String,
+        options: Vec<ApprovalChoice>,
+        answered: Option<String>,
+    },
+    /// A PTY lane's screen: the response's `lines` (sent once, within the chat's 64 KB budget).
+    Screen,
 }
 
 /// A form body (`application/x-www-form-urlencoded`, decoded) as one of the action bodies above.

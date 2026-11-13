@@ -6,15 +6,15 @@ import { esc } from './events.ts'; // node runs this file as is (tests/queue_boa
 
 /** A form: a live board's posts; an export's are inert. */
 export const form = (d: { live: boolean }, rest = '') => `<form ${d.live ? 'method=post' : 'inert'}${rest}>`;
-export const hidden = (op: string, fleet: string, mt: string) => `<input type=hidden name=op value=${op}><input type=hidden name=fleet value="${esc(fleet)}"><input type=hidden name=mtime value=${mt}>`;
+export const hidden = (op: string, fleet: string, mt: string) => `${op && `<input type=hidden name=op value=${op}>`}<input type=hidden name=fleet value="${esc(fleet)}"><input type=hidden name=mtime value=${mt}>`;
 const none = '<span class=m>none</span>', all = '<span class="tag m">all fleets</span>';
 const list = (v: string[], sep = ', ') => (v.length ? esc(v.join(sep)) : none);
 
 /** Ask `a`'s answer form: option buttons (recommended first) and a free-text box. */
-export function answer(d: { live: boolean; mtime: string }, a: Ask, send: string): string {
+export function answer(d: { live: boolean; mtime: string }, a: Ask, send: string, id = ''): string {
   const opts = a.options.map((o, i) => [o, i + 1] as const).sort((x, y) => +(x[1] !== a.recommend) - +(y[1] !== a.recommend));
   const btns = opts.map(([o, n]) => `<button name=choice value=${n}>${n}. ${esc(o)}${n === a.recommend ? ' <small>(recommended)</small>' : ''}</button>`).join('');
-  return `${form(d)}${hidden('answer', a.fleet, d.mtime)}<input type=hidden name=id value="${esc(a.id)}"><input name=text aria-label=answer placeholder="or type an answer"><button>${send}</button>${btns}</form>`;
+  return `${form(d, id && ` id="${id}"`)}${hidden('answer', a.fleet, d.mtime)}<input type=hidden name=id value="${esc(a.id)}"><input name=text aria-label=answer placeholder="or type an answer"><button>${send}</button>${btns}</form>`;
 }
 
 /** #517: an open ask's question and, asked in a thread, `asked in <title> · <id>` (a tap opens it, serve.js). */
@@ -71,10 +71,12 @@ function row(d: QueueTab, c: QueueCard, r: QueueRow): string {
     const mv = (label: string, key: string, to: number) => `${form(d)}${hidden('mv', c.name, d.mtime)}<input type=hidden name=issue value=${n}><input type=hidden name=${key} value=${to}><button>${label}</button></form>`;
     lines.push(`<span class=btns>${r.up == null ? '' : mv('▲ up', 'before', r.up)}${r.down == null ? '' : mv('▼ down', 'after', r.down)}</span>`);
   }
+  // #712: a parked issue back to the state it had (paired only, as [park]).
+  if (r.state === 'parked' && d.rw) lines.push(`${form(d)}${hidden('unpark', c.name, d.mtime)}<input type=hidden name=issue value=${n}><button>unpark</button></form>`);
   const card = lines.filter(Boolean).map(l => `<p>${l}</p>`).join('');
   const ls = r.lanes.map(qlane), more = ls.length > 5 ? `<details class=qm><summary>+${ls.length - 5} older</summary>${ls.slice(5).join('')}</details>` : '';
   const qls = ls.length ? `<div class=qls>${ls.slice(0, 5).join('')}${more}</div>` : '';
-  const data = `${r.queued ? ' data-q' : ''}${r.check ? ' data-ck' : ''}${r.blocked_by == null ? '' : ` data-b=${r.blocked_by}`}${r.groups.length ? ` data-s="${esc(r.groups.join(' '))}"` : ''} data-act=${r.act} data-grow=${r.grow} data-i=${n}${r.coat ? ` style="${r.coat}"` : ''}`;
+  const data = `${r.queued ? ' data-q' : ''}${r.check ? ' data-ck' : ''}${r.blocked_by == null ? '' : ` data-b=${r.blocked_by}`}${r.groups.length ? ` data-s="${esc(r.groups.join(' '))}"` : ''}${r.where ? ` data-w="${esc(r.where)}"` : ''} data-act=${r.act} data-grow=${r.grow} data-i=${n}${r.coat ? ` style="${r.coat}"` : ''}`;
   const title = r.title == null ? '' : `<span class=tl title="${esc(r.title)}">${esc(r.title)}</span>`;
   return `<details class="q"${data}><summary><span><a href="https://github.com/${esc(c.config.repo)}/issues/${n}">#${n}</a></span><span class=${r.tone}>${esc(r.state)}</span><span class=m data-t=${r.t}>${esc(r.age)}</span>${title}</summary>${card}${qls}</details>`;
 }
@@ -134,7 +136,7 @@ export function sheet(d: QueueTab, fleet: string): string | null {
     ['repo', esc(g.repo)],
     ['local', esc(g.local)],
     ['integration', esc(g.integration)],
-    ['driver', 'herdsman <span class=m>(herdsman drive)</span>'],
+    ['driver', 'drover <span class=m>(drover drive)</span>'],
     ['default effort', `${g.effort == null ? '<span class=m>unset → none</span>' : esc(g.effort)}${all}`],
     ['colour', `<span class=${c.k}>■</span> --${c.k} <span class=m>(${g.color_set ? 'set' : 'auto'})</span>`],
     ['env', list(g.env)],

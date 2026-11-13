@@ -1,12 +1,12 @@
 //! #686: a real stretch of one fleet's state.db as a scenario: when issues were queued (and blocked, unblocked,
 //! removed), what each lane's agent did and how long it took (push, verdict, death, usage cap), each push's CI time and
-//! colour, and the host's busy and offline windows. Today's herdsman then drives it in the sim; its invariants hold or
+//! colour, and the host's busy and offline windows. Today's drover then drives it in the sim; its invariants hold or
 //! fail as for any seed, and its #685 metrics are set beside the real ones. Only ids, timings and outcomes enter the
 //! scenario: no issue text, verdict body, path or secret.
 use crate::model::{Ev, Model, Script, FLEET};
 use crate::scenario::{args, config, timers, T0};
 use crate::sched::Rng;
-use herdsman::events::Event;
+use drover::events::Event;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
@@ -306,7 +306,7 @@ pub fn model(s: &Scenario) -> (Model, String) {
 /// Replay `s` to its end; the run and what the sim did.
 pub fn run(s: &Scenario) -> (crate::Outcome, Run) {
     let (m, cfg) = model(s);
-    let o = crate::play(s.from, m, &cfg, T0 + (s.to - s.from), u64::MAX / 2, true);
+    let o = crate::play(s.from, m, &cfg, T0 + (s.to - s.from), u64::MAX / 2, u64::MAX / 2, true);
     let metrics = crate::metrics::summary(std::slice::from_ref(&o.metrics));
     let sim = Run {
         merged: merged(&o.events),

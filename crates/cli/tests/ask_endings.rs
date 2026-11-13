@@ -2,23 +2,23 @@
 //! handoff delivered or failed, 24 h expiry unless its lane is live (that one re-alerts once a day); a one-time sweep.
 mod common;
 use common::*;
-use herdsman::events::{append, open_asks, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, open_asks, read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const NOW: u64 = 1_000_000;
 const H: u64 = 3600;
 const LANE: &str = "sendmeter-impl-36";
 
-fn log(c: &herdsman::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: Value) {
+fn log(c: &drover::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", issue, kind, d)).unwrap();
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn open(c: &herdsman::Ctx) -> Vec<String> {
+fn open(c: &drover::Ctx) -> Vec<String> {
     let events = read(&c.state).unwrap();
     open_asks(&events)
         .iter()
@@ -27,7 +27,7 @@ fn open(c: &herdsman::Ctx) -> Vec<String> {
 }
 
 /// Threads t1 and t2 (`ts` before everything else).
-fn threads(c: &herdsman::Ctx, ts: u64) {
+fn threads(c: &drover::Ctx, ts: u64) {
     for t in ["t1", "t2"] {
         log(
             c,
@@ -39,13 +39,13 @@ fn threads(c: &herdsman::Ctx, ts: u64) {
     }
 }
 
-fn thread_ask(c: &herdsman::Ctx, ts: u64, id: &str, thread: &str) {
+fn thread_ask(c: &drover::Ctx, ts: u64, id: &str, thread: &str) {
     let d = json!({"id": id, "question": "Ship it?", "options": ["yes", "no"], "recommend": 1, "kind": "owner",
         "thread": thread, "agent": null});
     log(c, ts, None, "needs-decision", d);
 }
 
-fn said(c: &herdsman::Ctx, ts: u64, thread: &str, from: &str, text: &str) {
+fn said(c: &drover::Ctx, ts: u64, thread: &str, from: &str, text: &str) {
     log(
         c,
         ts,
@@ -55,8 +55,8 @@ fn said(c: &herdsman::Ctx, ts: u64, thread: &str, from: &str, text: &str) {
     );
 }
 
-/// The `herdsman asks --all` row of ask `id`.
-fn row(c: &herdsman::Ctx, id: &str) -> String {
+/// The `drover asks --all` row of ask `id`.
+fn row(c: &drover::Ctx, id: &str) -> String {
     let all = run(c, &Fake::default(), &["asks", "--all"]).1;
     let row = all.lines().find(|l| l.split(' ').nth(1) == Some(id));
     row.unwrap_or_else(|| panic!("no {id} in {all}")).to_string()
@@ -69,12 +69,12 @@ fn a_typed_answer_closes_the_ask_only_with_the_owners_exact_line_after_it_in_its
     said(&c, NOW - 100, "t1", "owner", "before the ask");
     thread_ask(&c, NOW - 90, "q1", "t1");
     said(&c, NOW - 80, "t2", "owner", "in another thread");
-    said(&c, NOW - 70, "t1", "conductor", "the conductor's line");
+    said(&c, NOW - 70, "t1", "orchestrator", "the orchestrator's line");
     said(&c, NOW - 60, "t1", "owner", "Ok as recommended then");
     for (line, why) in [
         ("before the ask", "before"),
         ("in another thread", "t2"),
-        ("the conductor's line", "no owner message"),
+        ("the orchestrator's line", "no owner message"),
         ("never said", "no owner message"),
     ] {
         let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "--typed", line]);
@@ -108,9 +108,9 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
     let (code, out) = run(
         &c,
         &Fake::default(),
-        &["ask", "withdraw", "sendmeter", "q2", "--by", "conductor-t2"],
+        &["ask", "withdraw", "sendmeter", "q2", "--by", "orchestrator-t2"],
     );
-    assert_eq!(code, 3, "only its own thread's conductor withdraws it: {out}");
+    assert_eq!(code, 3, "only its own thread's orchestrator withdraws it: {out}");
     let (code, out) = run(
         &c,
         &Fake::default(),
@@ -120,7 +120,7 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
             "sendmeter",
             "q1",
             "--by",
-            "conductor-t1",
+            "orchestrator-t1",
             "--for",
             "q2",
         ],
@@ -132,13 +132,13 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
 }
 
 /// A conductor role, its profile, and a handoff card from t1 to the repo with t2 and a new thread as its rows.
-fn handoff(name: &str) -> herdsman::Ctx {
+fn handoff(name: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     threads(&c, NOW - 200);
@@ -177,14 +177,14 @@ fn a_handoff_ask_closes_when_it_is_delivered_and_when_it_fails() {
     assert!(row(&c, "q1").ends_with("[failed]"), "{}", row(&c, "q1"));
 }
 
-fn check(c: &herdsman::Ctx, r: &Fake) -> String {
+fn check(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["check"]);
     assert_eq!(code, 0, "{out}");
     out
 }
 
 /// `[chat·N]`: the threads showing `! choose`.
-fn choosing(c: &herdsman::Ctx) -> u64 {
+fn choosing(c: &drover::Ctx) -> u64 {
     let r = Fake::default();
     let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
     let needs: Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", c.now, "needs")).unwrap();
@@ -207,7 +207,7 @@ fn a_thread_ask_nobody_waits_on_expires_after_24_h_and_its_choose_goes() {
 }
 
 /// The asking lane's spawn on #36, and its ask `id` at `ts`.
-fn lane_ask(c: &herdsman::Ctx, ts: u64, id: &str) {
+fn lane_ask(c: &drover::Ctx, ts: u64, id: &str) {
     log(
         c,
         ts - 60,
@@ -226,7 +226,7 @@ fn a_live_lanes_ask_never_expires_and_re_alerts_once_a_day() {
     let t0 = NOW - 30 * H;
     lane_ask(&c, t0, "q1");
     let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p1")]));
-    let waiting = |c: &herdsman::Ctx| kinds(c, "ask-waiting").len();
+    let waiting = |c: &drover::Ctx| kinds(c, "ask-waiting").len();
     c.now = t0 + 40 * 60;
     check(&c, &r);
     assert_eq!(waiting(&c), 1);

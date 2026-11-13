@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[serde(deny_unknown_fields)]
 pub struct Stage {
     pub name: String,
-    /// build (pushes code) | check (PASS or FAIL) | gate (herdsman's own: CI, serial, mergeable)
+    /// build (pushes code) | check (PASS or FAIL) | gate (drover's own: CI, serial, mergeable)
     pub kind: String,
     pub role: Option<String>,
     /// outcome -> a stage, `merge` or `park`; `<build>:update` is an update round.
@@ -362,10 +362,10 @@ impl Pipeline {
         for s in self.stage.iter().filter(|s| s.kind != "gate") {
             match s.role.as_deref() {
                 None => bad("no role", s, format!("stage {}: a {} needs a role", s.name, s.kind)),
-                Some("design") => bad(
+                Some(r @ ("design" | "architect")) => bad(
                     "no role",
                     s,
-                    format!("stage {}: design is owner-only, never a stage", s.name),
+                    format!("stage {}: {r} is owner-only, never a stage", s.name),
                 ),
                 Some(r) if !roles.contains_key(r) => {
                     bad(

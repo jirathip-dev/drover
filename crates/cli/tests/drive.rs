@@ -1,7 +1,7 @@
-//! #92 `herdsman drive`: each step once per pass, a second pass a no-op; paused, HOST_BUSY and the lock.
+//! #92 `drover drive`: each step once per pass, a second pass a no-op; paused, HOST_BUSY and the lock.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 use std::path::PathBuf;
 
@@ -12,16 +12,16 @@ fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
 
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     ctx(&tmpdir(name), CONFIG)
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
 /// A lane of #12 logged as spawned, in a real worktree dir.
-fn lane(c: &herdsman::Ctx, ts: u64, role: &str, agent: &str, dir: &str) -> PathBuf {
+fn lane(c: &drover::Ctx, ts: u64, role: &str, agent: &str, dir: &str) -> PathBuf {
     let wt = c.worktrees.join("sendmeter").join(dir);
     std::fs::create_dir_all(&wt).unwrap();
     let d = json!({"role": role, "agent": agent, "pane": format!("w9:{agent}"), "workspace": "w9", "worktree": wt,
@@ -43,7 +43,7 @@ fn pr(head: &str, ci: &str) -> String {
 
 /// A Fake on which spawns succeed and the host is calm; `agents` = the herdr agent list.
 /// #285: integration's protection read (cached) as strict, so a behind ready PR is caught up.
-fn strict(c: &herdsman::Ctx) {
+fn strict(c: &drover::Ctx) {
     let cache = c.state.with_file_name("cache");
     std::fs::create_dir_all(&cache).unwrap();
     std::fs::write(
@@ -70,8 +70,8 @@ fn fake(agents: &str) -> Fake {
         .reply("herdr agent wait", "{}")
 }
 
-/// `herdsman drive`: (output, `driven` steps logged by this pass).
-fn drive(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
+/// `drover drive`: (output, `driven` steps logged by this pass).
+fn drive(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
     let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
@@ -86,7 +86,7 @@ fn drive(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
 }
 
 /// The second pass changes nothing: no output, no event but its own `drive-pass` record (#166).
-fn idle(c: &herdsman::Ctx, r: &Fake) {
+fn idle(c: &drover::Ctx, r: &Fake) {
     let acts = || {
         read(&c.state)
             .unwrap()
@@ -99,7 +99,7 @@ fn idle(c: &herdsman::Ctx, r: &Fake) {
     assert_eq!(acts(), before);
 }
 
-fn state(c: &herdsman::Ctx) -> String {
+fn state(c: &drover::Ctx) -> String {
     fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)]
         .state
         .clone()
@@ -417,7 +417,7 @@ fn clean_reclaims_merged_lanes() {
 }
 
 /// #605: drive's pass over #12's impl lane, its pane listed as `status`, `s` seconds after `c.now`.
-fn idle_lane(name: &str, merged: bool, status: &str) -> (herdsman::Ctx, PathBuf, impl Fn(u64) -> Fake) {
+fn idle_lane(name: &str, merged: bool, status: &str) -> (drover::Ctx, PathBuf, impl Fn(u64) -> Fake) {
     let c = setup(name);
     // #666: an open issue's lane spawned a minute ago, so no pass here finds it stalled.
     let t = if merged { 10 } else { c.now - 60 };
@@ -430,16 +430,17 @@ fn idle_lane(name: &str, merged: bool, status: &str) -> (herdsman::Ctx, PathBuf,
     // One unpushed commit until the wip push.
     let r = move |_| {
         fake(&list)
+            .closing()
             .once(&format!("git -C {w} rev-list"), 0, "1\n")
             .reply(&format!("git -C {w} rev-list"), "0\n")
-            .reply("date -r", "20261107-1200\n")
+            .reply("date -r", "20261107-120000\n")
             .reply("git -C", "")
     };
     (c, wt, r)
 }
 
-fn at(c: &herdsman::Ctx, s: u64) -> herdsman::Ctx {
-    herdsman::Ctx {
+fn at(c: &drover::Ctx, s: u64) -> drover::Ctx {
+    drover::Ctx {
         now: c.now + s,
         ..c.clone()
     }
@@ -460,18 +461,20 @@ fn a_merged_issues_idle_lane_pane_closes_after_the_limit_with_its_work_on_wip() 
     let (code, out) = run(&at(&c, 900), &r1, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let w = wt.display();
-    let push = format!("git -C {w} push origin HEAD:refs/heads/wip/sendmeter-impl-12-20261107-1200");
+    let push = format!("git -C {w} push origin HEAD:refs/heads/wip/sendmeter-impl-12-20261107-120000-");
     let close = r1.index("herdr pane close w9:sendmeter-impl-12").expect("pane closed");
     assert!(r1.index(&push).expect("wip pushed") < close, "{:?}", r1.calls.borrow());
     let all = read(&c.state).unwrap();
     let e = all.iter().find(|e| e.kind == "lane-closed").expect("lane-closed");
     assert_eq!(
-        (e.str("agent"), e.str("why"), e.str("wip")),
-        (
-            Some("sendmeter-impl-12"),
-            Some("merged-idle"),
-            Some("wip/sendmeter-impl-12-20261107-1200")
-        )
+        (e.str("agent"), e.str("why")),
+        (Some("sendmeter-impl-12"), Some("merged-idle"))
+    );
+    assert!(
+        e.str("wip")
+            .unwrap()
+            .starts_with("wip/sendmeter-impl-12-20261107-120000-"),
+        "{e:?}"
     );
     // Then the worktree goes the clean way.
     assert!(close < r1.index("herdr worktree remove --workspace w9").expect("removed"));
@@ -563,7 +566,7 @@ fn gone_pr(state: &str) -> String {
 }
 
 #[test]
-fn a_pr_merged_outside_herdsman_is_logged_merged_and_its_lanes_cleaned() {
+fn a_pr_merged_outside_drover_is_logged_merged_and_its_lanes_cleaned() {
     let c = setup("drive-external-merge");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     ev(
@@ -578,7 +581,7 @@ fn a_pr_merged_outside_herdsman_is_logged_merged_and_its_lanes_cleaned() {
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
         .reply("git -C", "");
     let (out, steps) = drive(&c, &r);
-    assert!(out.contains("sendmeter #12 merged outside herdsman (PR #100)"), "{out}");
+    assert!(out.contains("sendmeter #12 merged outside drover (PR #100)"), "{out}");
     let ev = read(&c.state).unwrap();
     let m = ev.iter().find(|e| e.is("merged", "sendmeter", 12)).expect("merged");
     assert_eq!(
@@ -599,7 +602,7 @@ fn a_pr_merged_outside_herdsman_is_logged_merged_and_its_lanes_cleaned() {
 }
 
 #[test]
-fn a_pr_closed_outside_herdsman_closes_or_blocks_the_issue_once() {
+fn a_pr_closed_outside_drover_closes_or_blocks_the_issue_once() {
     for (issues, want) in [(r#"[{"number":12}]"#, "closed"), ("[]", "blocked")] {
         let c = setup(&format!("drive-external-{want}"));
         lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
@@ -615,7 +618,7 @@ fn a_pr_closed_outside_herdsman_closes_or_blocks_the_issue_once() {
             .reply("git -C", "");
         let (out, _) = drive(&c, &r);
         assert!(
-            out.contains(&format!("sendmeter #12 {want} outside herdsman (PR #100)")),
+            out.contains(&format!("sendmeter #12 {want} outside drover (PR #100)")),
             "{out}"
         );
         assert_eq!(state(&c), want);
@@ -627,7 +630,7 @@ fn a_pr_closed_outside_herdsman_closes_or_blocks_the_issue_once() {
         if want == "blocked" {
             assert_eq!(
                 (e.str("code"), e.str("reason")),
-                (Some("PR_CLOSED"), Some("PR closed outside herdsman"))
+                (Some("PR_CLOSED"), Some("PR closed outside drover"))
             );
         } else {
             assert_eq!(e.str("by"), Some("external"));
@@ -647,7 +650,7 @@ fn paused_fleets_and_host_busy_are_no_ops() {
     idle(&c, &r);
     assert!(!r.called("herdr"), "{:?}", r.calls.borrow());
     assert_eq!(
-        herdsman::drive::last_pass(&c, "sendmeter"),
+        drover::drive::last_pass(&c, "sendmeter"),
         None,
         "a paused fleet had no pass"
     );
@@ -692,7 +695,7 @@ fn the_lock_keeps_passes_apart_and_a_stale_one_is_taken_over() {
     lease_as(&c, "drive.lock", 4242, c.now - 7200, 3600);
     assert_eq!(drive(&c, &r).1, ["start"]);
     assert!(lease_on(&c, "drive.lock").is_none(), "released after the pass");
-    assert_eq!(herdsman::drive::last_pass(&c, "sendmeter"), Some(c.now));
+    assert_eq!(drover::drive::last_pass(&c, "sendmeter"), Some(c.now));
 }
 
 /// #168: a lock with a dead pid is taken over at once, a live pid's is respected; the pass's pid is written.
@@ -725,8 +728,8 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
     let c = setup("drive-web");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let r = fake(NO_AGENTS).reply("git -C", "");
-    let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let get = |s: &herdsman::serve::Server| {
+    let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let get = |s: &drover::serve::Server| {
         let res = s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now);
         with_queue(&String::from_utf8_lossy(&res), s, "127.0.0.1:7777", c.now) // #268: the board's Queue tab
     };
@@ -768,16 +771,16 @@ fn the_drive_summary_groups_per_action() {
         sendmeter #2757 start: REFUSED HOST_BUSY: y\nsendmeter #3 fix: error: boom\nsendmeter #4 start: REFUSED HOST_BUSY: z\n\
         sendmeter clean: removed 1\n";
     assert_eq!(
-        herdsman::drive::summary("sendmeter", out),
+        drover::drive::summary("sendmeter", out),
         "sendmeter: clean · merged #2752, #2781 · reviewed #9 · started #2755 · 4 skipped (HOST_BUSY, SERIAL_BUSY, error)"
     );
-    assert_eq!(herdsman::drive::summary("sendmeter", ""), "sendmeter: nothing due");
+    assert_eq!(drover::drive::summary("sendmeter", ""), "sendmeter: nothing due");
 }
 
 /// Sleeps 3 s on each agent start: a slow drive pass.
 struct Slow(Fake);
-impl herdsman::runner::Runner for Slow {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for Slow {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog == "herdr" && args.join(" ").starts_with("agent start") {
             std::thread::sleep(std::time::Duration::from_secs(3));
         }
@@ -794,7 +797,7 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
     let c = setup("drive-bg");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let cookie = pair(
-        &herdsman::serve::Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())),
+        &drover::serve::Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())),
         &c,
         "",
         // #288: a pairing lasts a year after last use; `serve_on` reads the real clock.
@@ -806,7 +809,7 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &Slow(fake(NO_AGENTS).reply("git -C", "")), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &Slow(fake(NO_AGENTS).reply("git -C", "")), l, false));
     let send = |req: String| {
         let mut s = std::net::TcpStream::connect(addr).unwrap();
         s.write_all(req.as_bytes()).unwrap();
@@ -886,7 +889,7 @@ fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
             "verdict",
             json!({"verdict": "PASS", "sha": sha(p), "body": "PASS"}),
         );
-        herdsman::gh::forget_pr(&c, "sendmeter", 12);
+        drover::gh::forget_pr(&c, "sendmeter", 12);
         let r = fake(NO_AGENTS)
             .reply("gh pr view issue-12", &stale_pr(&sha(p), "CONFLICTING", "DIRTY"))
             .reply("git -C", "");
@@ -898,7 +901,7 @@ fn a_conflicting_pr_after_pass_gets_update_rounds_then_needs_human() {
             "{out}"
         );
         assert!(
-            out.contains("herdsman spawn sendmeter 12 impl --supersede --update"),
+            out.contains("drover spawn sendmeter 12 impl --supersede --update"),
             "{out}"
         );
         let (out, steps) = drive(&c, &r);
@@ -954,7 +957,7 @@ fn a_pushed_update_or_fix_head_still_conflicting_gets_a_review_not_another_updat
         json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
     );
     let pr_at = |head: &str| {
-        herdsman::gh::forget_pr(&c, "sendmeter", 12);
+        drover::gh::forget_pr(&c, "sendmeter", 12);
         fake(NO_AGENTS)
             .reply("gh pr view issue-12", &stale_pr(&sha(head), "CONFLICTING", "DIRTY"))
             .reply("git -C", "")
@@ -968,7 +971,7 @@ fn a_pushed_update_or_fix_head_still_conflicting_gets_a_review_not_another_updat
         "{out}"
     );
     assert!(
-        out.contains("herdsman spawn sendmeter 12 rev") && !out.contains("--update"),
+        out.contains("drover spawn sendmeter 12 rev") && !out.contains("--update"),
         "{out}"
     );
     // A FAIL's fix round pushing a conflicting head is reviewed, too.
@@ -996,7 +999,7 @@ fn a_pushed_update_or_fix_head_still_conflicting_gets_a_review_not_another_updat
 const SERIAL: &str = "serial_paths = [\"supabase/migrations/**\"]";
 
 /// #100: a driven fleet with `extra` config lines, issues `ns` queued.
-fn fanout(name: &str, extra: &str, ns: &[&str]) -> herdsman::Ctx {
+fn fanout(name: &str, extra: &str, ns: &[&str]) -> drover::Ctx {
     let c = ctx(
         &tmpdir(name),
         &CONFIG.replace(
@@ -1016,7 +1019,7 @@ fn fan_fake(agents: &str) -> Fake {
 }
 
 /// The herdr agent list with issues `ns`' impl lanes working.
-fn working(c: &herdsman::Ctx, ns: &[u64]) -> String {
+fn working(c: &drover::Ctx, ns: &[u64]) -> String {
     let wt = |n: u64| {
         c.worktrees
             .join(format!("sendmeter/issue-{n}"))
@@ -1031,7 +1034,7 @@ fn working(c: &herdsman::Ctx, ns: &[u64]) -> String {
     agents(&rows)
 }
 
-fn state_of(c: &herdsman::Ctx, n: u64) -> String {
+fn state_of(c: &drover::Ctx, n: u64) -> String {
     fold(&read(&c.state).unwrap())
         .get(&("sendmeter".to_string(), n))
         .map_or("queued".into(), |s| s.state.clone())
@@ -1213,10 +1216,10 @@ fn host_busy_stops_the_pass_and_cap_stops_starting() {
 }
 
 /// #149: unmarked #12 at PASS + green whose PR changes `files`: one drive pass, then the `serial-joined` events (#294).
-fn serial_auto(name: &str, files: &str) -> (herdsman::Ctx, Fake, String, Vec<Event>) {
+fn serial_auto(name: &str, files: &str) -> (drover::Ctx, Fake, String, Vec<Event>) {
     let cfg = CONFIG.replace(
         "integration = \"staging\"",
-        &format!("integration = \"staging\"\ndriver = \"herdsman\"\n{SERIAL}"),
+        &format!("integration = \"staging\"\ndriver = \"drover\"\n{SERIAL}"),
     );
     let c = ctx(&tmpdir(name), &cfg);
     lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
@@ -1314,7 +1317,7 @@ fn a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it() {
     idle(&c, &r);
     assert!(!r.called("gh pr edit"));
     // The head moved past the PASS (a fresh PR read, as after 60 s): the label comes off, and is never added back.
-    herdsman::gh::forget_pr(&c, "sendmeter", 12);
+    drover::gh::forget_pr(&c, "sendmeter", 12);
     let r = fake(NO_AGENTS)
         .reply("gh pr view issue-12", &labelled_pr(&moved, &["merge-ready"]))
         .reply("gh pr edit", "");
@@ -1324,7 +1327,7 @@ fn a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it() {
         "{out}"
     );
     assert_eq!((kinds("labelled"), kinds("unlabelled")), (1, 1));
-    herdsman::gh::forget_pr(&c, "sendmeter", 12);
+    drover::gh::forget_pr(&c, "sendmeter", 12);
     let r = fake(NO_AGENTS)
         .reply("gh pr view issue-12", &labelled_pr(&moved, &[]))
         .reply("gh pr edit", "");
@@ -1360,7 +1363,7 @@ fn status_says_a_ready_pr_lacks_the_merge_label() {
 }
 
 /// #166: the `drive-pass` events of `c` (newest last).
-fn passes(c: &herdsman::Ctx) -> Vec<Event> {
+fn passes(c: &drover::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .into_iter()
@@ -1381,9 +1384,9 @@ fn every_pass_manual_or_automatic_writes_a_drive_pass_with_each_action_a_silent_
     };
     drive(&c, &busy());
     let mut out = vec![];
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     // The second pass is a manual press and prints nothing (a repeat), but its record still lists the refusal.
-    herdsman::drive::drive(&c, &cfg, &busy(), &mut out, Some("sendmeter"), true, false).unwrap();
+    drover::drive::drive(&c, &cfg, &busy(), &mut out, Some("sendmeter"), true, false).unwrap();
     let p = passes(&c);
     assert_eq!(p.len(), 2, "{p:?}");
     assert_eq!((p[0].str("by"), p[1].str("by")), (Some("auto"), Some("manual")));
@@ -1402,7 +1405,7 @@ fn every_pass_manual_or_automatic_writes_a_drive_pass_with_each_action_a_silent_
             "{a}"
         );
     }
-    let (tone, line) = herdsman::drive::result(&p[1]);
+    let (tone, line) = drover::drive::result(&p[1]);
     assert_eq!(tone, "a", "everything held back: amber");
     assert!(
         line.ends_with(" · started 0 · merged 0 · 1 waiting: Mac busy (memory pressure critical)"),
@@ -1411,9 +1414,9 @@ fn every_pass_manual_or_automatic_writes_a_drive_pass_with_each_action_a_silent_
 }
 
 /// The other pass: it ends (its record, then the lock goes) on the press's 3rd one-second wait.
-struct Other<'a>(&'a Fake, &'a herdsman::Ctx, std::sync::atomic::AtomicUsize);
-impl herdsman::runner::Runner for Other<'_> {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+struct Other<'a>(&'a Fake, &'a drover::Ctx, std::sync::atomic::AtomicUsize);
+impl drover::runner::Runner for Other<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         self.0.run(prog, args)
     }
     fn sleep(&self, _: u64) {
@@ -1427,7 +1430,7 @@ impl herdsman::runner::Runner for Other<'_> {
                 &Event::new(self.1.now - 3, "sendmeter", None, "drive-pass", d),
             )
             .unwrap();
-            assert!(herdsman::db::release(&self.1.state, "drive.lock", None));
+            assert!(drover::db::release(&self.1.state, "drive.lock", None));
         }
     }
 }
@@ -1437,11 +1440,11 @@ fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions()
     let c = setup("drive-wait");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     lease_as(&c, "drive.lock", 4242, c.now, 3600);
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    assert!(herdsman::drive::running(&c, "sendmeter"));
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    assert!(drover::drive::running(&c, "sendmeter"));
     let (f, mut out) = (fake(NO_AGENTS).reply("git -C", "").reply("kill -0 4242", ""), vec![]);
     let r = Other(&f, &c, 0.into());
-    herdsman::drive::drive(&c, &cfg, &r, &mut out, Some("sendmeter"), true, false).unwrap();
+    drover::drive::drive(&c, &cfg, &r, &mut out, Some("sendmeter"), true, false).unwrap();
     let out = String::from_utf8(out).unwrap();
     assert_eq!(
         out,
@@ -1450,7 +1453,7 @@ fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions()
     assert_eq!(r.2.into_inner(), 3, "waited 3 s, then ran no pass of its own");
     assert!(!f.called("herdr"), "never two passes");
     assert_eq!(
-        herdsman::drive::summary("sendmeter", &out),
+        drover::drive::summary("sendmeter", &out),
         "sendmeter: started #12 · 1 skipped (CAP)"
     );
     assert_eq!(passes(&c).len(), 1);
@@ -1458,7 +1461,7 @@ fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions()
     // Bounded: a pass still running after 120 s leaves the press with a pointer to the line.
     lease_as(&c, "drive.lock", 4242, c.now, 3600);
     let mut out = vec![];
-    herdsman::drive::drive(&c, &cfg, &f, &mut out, Some("sendmeter"), true, false).unwrap();
+    drover::drive::drive(&c, &cfg, &f, &mut out, Some("sendmeter"), true, false).unwrap();
     assert_eq!(
         String::from_utf8(out).unwrap(),
         "drive: still driving · result will appear here\n"
@@ -1469,7 +1472,7 @@ fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions()
 #[test]
 fn the_result_line_is_red_on_an_error_green_on_a_start_or_merge_amber_when_all_held_back() {
     let line = |acts: serde_json::Value| {
-        herdsman::drive::result(&Event::new(
+        drover::drive::result(&Event::new(
             1,
             "f",
             None,
@@ -1522,7 +1525,7 @@ fn a_pr_head_moved_without_a_handoff_is_handed_off_by_the_pr_once_ci_is_done() {
     };
     // The worktree is elsewhere and no handoff was logged; CI still runs at the PR head: nothing yet.
     idle(&c, &r("pending"));
-    herdsman::gh::forget_pr(&c, "sendmeter", 12);
+    drover::gh::forget_pr(&c, "sendmeter", 12);
     let (out, steps) = drive(&c, &r("green"));
     assert_eq!(steps, ["review"], "{out}");
     assert!(out.contains("sendmeter #12 pushed: bee0000 via pr"), "{out}");
@@ -1591,8 +1594,8 @@ fn under_limited_admission_a_review_goes_before_any_fleets_new_start() {
     assert_eq!(state(&c), "review(1)");
 }
 
-/// #212: `herdsman drive --fast` (output, `driven` steps logged by it).
-fn fast(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
+/// #212: `drover drive --fast` (output, `driven` steps logged by it).
+fn fast(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
     let (code, out) = run(c, r, &["drive", "--fast"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
@@ -1626,13 +1629,13 @@ fn the_fast_step_merges_past_a_held_slow_lock_and_starts_no_lane() {
     // An issue whose own lock a live pass holds is skipped.
     lease_as(&c, "drive-sendmeter-12.lock", 4242, c.now, 3600);
     assert_eq!(fast(&c, &r).1, Vec::<String>::new());
-    assert!(herdsman::db::release(&c.state, "drive-sendmeter-12.lock", None));
+    assert!(drover::db::release(&c.state, "drive-sendmeter-12.lock", None));
     let (out, steps) = fast(&c, &r);
     assert_eq!(steps, ["verdict", "merge"], "{out}");
     assert_eq!(state(&c), "merged");
     assert!(!r.called("herdr agent start") && !r.called("git -C /tmp/does-not-matter/sendmeter fetch"));
     assert_eq!(lease_on(&c, "drive.lock").unwrap().pid, 4242, "the slow lock stays");
-    assert_eq!(herdsman::drive::last_pass(&c, "sendmeter"), None, "no slow pass ran");
+    assert_eq!(drover::drive::last_pass(&c, "sendmeter"), None, "no slow pass ran");
     assert!(
         lease_on(&c, "drive-sendmeter-12.lock").is_none(),
         "the issue lock is released"
@@ -1651,7 +1654,7 @@ fn the_fast_step_refreshes_the_card_cache_and_the_wording_reads_it() {
         "verdict",
         json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
     );
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let f = cfg.fleet("sendmeter").unwrap();
     let check =
         |n: &str, st: &str, con: &str| json!({"__typename": "CheckRun", "name": n, "status": st, "conclusion": con});
@@ -1660,7 +1663,7 @@ fn the_fast_step_refreshes_the_card_cache_and_the_wording_reads_it() {
             .to_string()
     };
     let card = || {
-        let ws = herdsman::waiting::scan(&c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false);
+        let ws = drover::waiting::scan(&c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false);
         ws.into_iter().find(|w| w.1.issue == 12).unwrap().1
     };
     // Cached ten minutes ago: three of five green.
@@ -1669,7 +1672,7 @@ fn the_fast_step_refreshes_the_card_cache_and_the_wording_reads_it() {
         .collect();
     five.extend((3..5).map(|i| check(&format!("c{i}"), "IN_PROGRESS", "")));
     let old = Fake::default().reply("gh pr view issue-12", &view(five.clone()));
-    herdsman::gh::pr(&c, &old, f, ("sendmeter", 12), "issue-12", c.now - 600).unwrap();
+    drover::gh::pr(&c, &old, f, ("sendmeter", 12), "issue-12", c.now - 600).unwrap();
     assert_eq!(card().what, "PASS · CI running 3/5 · checked 10m ago");
     // The fast step reads it afresh: one red check.
     five[4] = check("lint", "COMPLETED", "FAILURE");
@@ -1677,7 +1680,7 @@ fn the_fast_step_refreshes_the_card_cache_and_the_wording_reads_it() {
         .reply("gh pr view issue-12", &view(five))
         .reply("git -C", "");
     fast(&c, &r);
-    assert_eq!(herdsman::gh::cached_at(&c, "sendmeter", 12), Some(c.now));
+    assert_eq!(drover::gh::cached_at(&c, "sendmeter", 12), Some(c.now));
     assert_eq!((card().who, card().what.as_str()), ("ci", "PASS · CI red: lint"));
     assert!(!r.called("gh run view"), "a red CI's fix round is the slow step's");
     // All green: merging within a minute.
@@ -1685,7 +1688,7 @@ fn the_fast_step_refreshes_the_card_cache_and_the_wording_reads_it() {
         .map(|i| check(&format!("c{i}"), "COMPLETED", "SUCCESS"))
         .collect();
     let now = Fake::default().reply("gh pr view issue-12", &view(green));
-    herdsman::gh::pr(&c, &now, f, ("sendmeter", 12), "issue-12", c.now + 60).unwrap();
+    drover::gh::pr(&c, &now, f, ("sendmeter", 12), "issue-12", c.now + 60).unwrap();
     assert_eq!(card().what, "PASS · CI green · merging within 1 min");
 }
 
@@ -1915,9 +1918,9 @@ fn blocked_with_an_open_pr_takes_the_next_step_and_without_one_logs_no_action() 
 }
 
 /// Notes, at each command run, whether the log already holds `round-extended` and drive.lock is held.
-struct Spy<'a>(Fake, &'a herdsman::Ctx, std::sync::Mutex<Vec<bool>>);
-impl herdsman::runner::Runner for Spy<'_> {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+struct Spy<'a>(Fake, &'a drover::Ctx, std::sync::Mutex<Vec<bool>>);
+impl drover::runner::Runner for Spy<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let held = lease_on(self.1, "drive.lock").is_some();
         let logged = held && read(&self.1.state).unwrap().iter().any(|e| e.kind == "round-extended");
         self.2.lock().unwrap().push(logged);
@@ -1925,9 +1928,9 @@ impl herdsman::runner::Runner for Spy<'_> {
     }
 }
 
-/// #217: `[one more round]` logs its decision before the spawn runs; a spawn refused HOST_BUSY logs `extend-failed`
-/// with the reason, and the next drive pass starts the recorded round as its fix step. The spawn runs under
-/// drive.lock, so no pass starts the same round meanwhile.
+/// #217: `[one more round]` logs its decision before the spawn runs; #778: a spawn refused HOST_BUSY keeps it pending
+/// with the reason (no `extend-failed`), and the next drive pass starts the recorded round as its fix step. The spawn
+/// runs under drive.lock, so no pass starts the same round meanwhile.
 #[test]
 fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     let c = setup("drive-extend");
@@ -1953,20 +1956,18 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
     let spy = Spy(busy, &c, Default::default());
     let (code, out) = run(&c, &spy, &["extend", "sendmeter", "12"]);
-    assert!(code == 3 && out.contains("REFUSED HOST_BUSY"), "{out}");
+    assert!(code == 0 && out.contains("waiting for host (HOST_BUSY)"), "{out}");
     let seen = spy.2.lock().unwrap().clone();
     assert!(
         !seen.is_empty() && seen.iter().all(|&l| l),
         "a command ran before the decision or outside drive.lock: {seen:?}"
     );
     let all = read(&c.state).unwrap();
-    let failed = all
-        .iter()
-        .find(|e| e.kind == "extend-failed")
-        .expect("no extend-failed");
-    assert!(
-        failed.str("reason").unwrap().starts_with("REFUSED HOST_BUSY"),
-        "{failed:?}"
+    assert!(!all.iter().any(|e| e.kind == "extend-failed"), "{all:?}");
+    let p = drover::pending::of(&all, "sendmeter", 12).expect("pending");
+    assert_eq!(
+        (p.action.as_str(), p.reason.as_deref(), p.failed),
+        ("extend", Some("HOST_BUSY"), false)
     );
     assert_eq!(state(&c), "fix(3)");
 
@@ -1974,6 +1975,7 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["fix"], "{out}");
     assert!(r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    assert_eq!(drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
 }
 
 /// #217 review finding 1: an extend while a drive pass holds drive.lock records the round and spawns nothing (the
@@ -2008,7 +2010,7 @@ fn an_extend_during_a_pass_leaves_the_spawn_to_the_next_pass() {
         1
     );
 
-    assert!(herdsman::db::release(&c.state, "drive.lock", None));
+    assert!(drover::db::release(&c.state, "drive.lock", None));
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["fix"], "{out}");
     assert!(r.called("herdr agent start"), "{:?}", r.calls.borrow());
@@ -2038,11 +2040,11 @@ fn an_extend_no_spawn_is_never_a_due_fix_over_a_live_lane() {
 // --- #319: a fix round that ends with no new commit still moves on ---
 
 /// #12 FAILed at `head` with `body` (`stage`), then its fix lane (spawned at 40) went idle without a new commit.
-fn no_change(name: &str, stage: &str, body: &str, ci: &str) -> (herdsman::Ctx, Fake, String) {
+fn no_change(name: &str, stage: &str, body: &str, ci: &str) -> (drover::Ctx, Fake, String) {
     no_change_in(CONFIG, name, stage, body, ci)
 }
 
-fn no_change_in(cfg: &str, name: &str, stage: &str, body: &str, ci: &str) -> (herdsman::Ctx, Fake, String) {
+fn no_change_in(cfg: &str, name: &str, stage: &str, body: &str, ci: &str) -> (drover::Ctx, Fake, String) {
     let c = ctx(&tmpdir(name), cfg);
     let head = sha("abc");
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
@@ -2066,7 +2068,7 @@ fn no_change_in(cfg: &str, name: &str, stage: &str, body: &str, ci: &str) -> (he
     (c, r, head)
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -2092,7 +2094,7 @@ fn a_code_fail_with_no_change_is_reviewed_again_at_the_same_head() {
     let (c, r, head) = no_change("drive-noop-code", "rev", body, "green");
     // Green CI alone does not answer a code finding: the lane must say why nothing changed.
     idle(&c, &r);
-    let earlier = herdsman::Ctx {
+    let earlier = drover::Ctx {
         now: c.now - 600,
         ..c.clone()
     };
@@ -2122,7 +2124,7 @@ fn an_unchanged_head_with_red_ci_stays_and_the_stall_says_what_is_missing() {
     let (code, out) = run(&at(&c, 1800), &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     let s = &kinds(&c, "stall")[0];
-    let want = "fix lane idle, head unchanged, CI failed: run herdsman done sendmeter 12 --no-change \"<why>\" or push";
+    let want = "fix lane idle, head unchanged, CI failed: run drover done sendmeter 12 --no-change \"<why>\" or push";
     assert!(s.str("reason").unwrap().ends_with(want), "{:?}", s.data);
 }
 
@@ -2136,7 +2138,7 @@ fn a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absen
     );
     let body = "FAIL (form-only)\n1. blocking [form]: the PR body lacks For humans";
     let (c, r, head) = no_change_in(&cfg, "drive-noop-label", "rev", body, "pending");
-    let earlier = herdsman::Ctx {
+    let earlier = drover::Ctx {
         now: c.now - 3 * 3600,
         ..c.clone()
     };
@@ -2163,7 +2165,7 @@ fn a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absen
     assert!(
         stalls
             .iter()
-            .any(|s| s.ends_with("fix-done recorded, waiting for drive to spawn review")),
+            .any(|s| s.ends_with("fix-done recorded, waiting for drive (next pass ≤ 5 min) to spawn review")),
         "{stalls:?}"
     );
     let (out, steps) = drive(&c, &r);
@@ -2187,18 +2189,18 @@ fn no_checks_after_the_grace_is_ci_missing_not_running() {
         "verdict",
         json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
     );
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let f = cfg.fleet("sendmeter").unwrap();
     let view = |checks: serde_json::Value| {
         json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": checks})
             .to_string()
     };
-    let card = |c: &herdsman::Ctx| {
-        let ws = herdsman::waiting::scan(c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false);
+    let card = |c: &drover::Ctx| {
+        let ws = drover::waiting::scan(c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false);
         ws.into_iter().find(|w| w.1.issue == 12).unwrap().1
     };
     let empty = Fake::default().reply("gh pr view issue-12", &view(json!([])));
-    herdsman::gh::pr(&c, &empty, f, ("sendmeter", 12), "issue-12", c.now).unwrap();
+    drover::gh::pr(&c, &empty, f, ("sendmeter", 12), "issue-12", c.now).unwrap();
     assert_eq!(
         card(&c).what,
         "PASS · CI running 0/0",
@@ -2206,7 +2208,7 @@ fn no_checks_after_the_grace_is_ci_missing_not_running() {
     );
     let mut later = c.clone();
     later.now = c.now + 300;
-    herdsman::gh::pr(&c, &empty, f, ("sendmeter", 12), "issue-12", later.now).unwrap();
+    drover::gh::pr(&c, &empty, f, ("sendmeter", 12), "issue-12", later.now).unwrap();
     assert_eq!(
         (card(&later).who, card(&later).what.as_str()),
         ("ci", "PASS · CI missing (no checks 10m after push)")
@@ -2214,7 +2216,7 @@ fn no_checks_after_the_grace_is_ci_missing_not_running() {
     let pending = json!([{"__typename": "CheckRun", "name": "ci", "status": "IN_PROGRESS"}]);
     let r = Fake::default().reply("gh pr view issue-12", &view(pending));
     later.now += 60;
-    herdsman::gh::pr(&c, &r, f, ("sendmeter", 12), "issue-12", later.now).unwrap();
+    drover::gh::pr(&c, &r, f, ("sendmeter", 12), "issue-12", later.now).unwrap();
     assert_eq!(
         card(&later).what,
         "PASS · CI running 0/1",
@@ -2258,7 +2260,7 @@ fn a_workflow_that_never_started_is_ci_broken_and_gets_a_fix_round() {
 }
 
 /// #425: #12's impl lane held on #11, which merged; `agents` = the herdr agent list.
-fn held(name: &str, agents: &str) -> (herdsman::Ctx, Fake) {
+fn held(name: &str, agents: &str) -> (drover::Ctx, Fake) {
     let c = setup(name);
     lane(&c, c.now - 600, "impl", "sendmeter-impl-12", "issue-12");
     ev(&c, c.now - 500, "held", json!({"agent": "sendmeter-impl-12", "on": 11}));
@@ -2339,7 +2341,7 @@ fn a_lane_held_on_two_blockers_waits_for_both() {
 // --- #444: a fix round whose lane ended without pushing is driven again ---
 
 /// #363's log: FAIL at the head, supersede, a spawn whose prompt never landed (exit 4), its pane closed `done`.
-fn ended(name: &str) -> (herdsman::Ctx, Fake) {
+fn ended(name: &str) -> (drover::Ctx, Fake) {
     let c = setup(name);
     let head = sha("abc");
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
@@ -2375,7 +2377,7 @@ fn the_363_sequence_replayed_respawns_impl_once_per_30_min() {
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains("#12 drive: lane gone, no push: respawning impl")
-            && out.contains("→ herdsman spawn sendmeter 12 impl --supersede"),
+            && out.contains("→ drover spawn sendmeter 12 impl --supersede"),
         "{out}"
     );
     let (_, st) = run(&c, &r, &["status", "sendmeter"]);
@@ -2395,7 +2397,7 @@ fn the_363_sequence_replayed_respawns_impl_once_per_30_min() {
 #[test]
 fn two_respawns_without_a_push_go_to_needs_human() {
     let (c, r) = ended("drive-ended-twice");
-    let at = |s: u64| herdsman::Ctx {
+    let at = |s: u64| drover::Ctx {
         now: c.now + s,
         ..c.clone()
     };
@@ -2443,7 +2445,7 @@ const PROOFLESS: &str = "FAIL\n\n- blocking [code] src/x.rs:9: off by one\n";
 const PROVEN: &str = "FAIL\n\n- blocking [code] src/x.rs:9: off by one\n  Proof: spec\n  > AC 1: totals add up\n";
 
 /// #491: a rev lane at `head` whose verdict.md is `body`, and a Fake on which that reviewer is gone or idle.
-fn proofless(name: &str, body: &str, live: bool) -> (herdsman::Ctx, PathBuf, Fake) {
+fn proofless(name: &str, body: &str, live: bool) -> (drover::Ctx, PathBuf, Fake) {
     let c = setup(name);
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let rev = lane(&c, 20, "rev", "sendmeter-rev-12-r1", "rev-12-r1");
@@ -2470,11 +2472,7 @@ fn a_proofless_fail_from_an_ended_reviewer_gets_one_fresh_review_of_the_same_hea
     assert_eq!(r.count("herdr agent start sendmeter-rev-12-r1"), 1, "{out}");
     let all = read(&c.state).unwrap();
     let d = all.iter().rfind(|e| e.kind == "driven").unwrap();
-    assert_eq!(
-        d.str("cmd"),
-        Some("herdsman spawn sendmeter 12 rev --supersede"),
-        "{out}"
-    );
+    assert_eq!(d.str("cmd"), Some("drover spawn sendmeter 12 rev --supersede"), "{out}");
     let lost = all.iter().rfind(|e| e.kind == "lane-lost").unwrap();
     assert_eq!(lost.str("why"), Some("verdict refused NO_PROOF: re-review"));
     assert_eq!(
@@ -2486,7 +2484,7 @@ fn a_proofless_fail_from_an_ended_reviewer_gets_one_fresh_review_of_the_same_hea
 }
 
 fn told(r: &Fake) -> usize {
-    r.count("herdr agent prompt sendmeter-rev-12-r1 herdsman verdict refused your verdict.md: REFUSED NO_PROOF")
+    r.count("herdr agent prompt sendmeter-rev-12-r1 drover verdict refused your verdict.md: REFUSED NO_PROOF")
 }
 
 #[test]
@@ -2534,7 +2532,7 @@ fn a_no_repro_pass_tells_a_live_reviewer_once_and_waiting_names_the_refusal() {
     let (code, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--repro"]);
     assert_eq!(code, 0, "{out}");
     let told = || {
-        r.count("herdr agent prompt sendmeter-rev-12-r1 herdsman verdict refused your verdict.md: REFUSED NO_REPRO: `Repro: run` needs")
+        r.count("herdr agent prompt sendmeter-rev-12-r1 drover verdict refused your verdict.md: REFUSED NO_REPRO: `Repro: run` needs")
     };
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["verdict"], "{out}");
@@ -2559,7 +2557,7 @@ fn a_no_repro_pass_tells_a_live_reviewer_once_and_waiting_names_the_refusal() {
 // --- #517: a lesson lane that ends with no push and no `done` ---
 
 /// A lesson lane of #12 (no PR) and a Fake that lists it `idle` (`live`) or not at all.
-fn lesson(name: &str, live: bool) -> (herdsman::Ctx, Fake) {
+fn lesson(name: &str, live: bool) -> (drover::Ctx, Fake) {
     let c = setup(name);
     let wt = lane(&c, 10, "lesson", "sendmeter-lesson-12", "issue-12");
     let list = agents(&[(
@@ -2579,7 +2577,7 @@ const CLOSE: &str = "gh issue close 12 -R jirathip-dev/sendmeter --comment no re
 #[test]
 fn a_lesson_lane_ending_without_a_push_is_prompted_once_then_closed_never_lane_ends() {
     let (c, r) = lesson("drive-lesson-ended", true);
-    let at = |s: u64| herdsman::Ctx {
+    let at = |s: u64| drover::Ctx {
         now: c.now + s,
         ..c.clone()
     };
@@ -2590,7 +2588,7 @@ fn a_lesson_lane_ending_without_a_push_is_prompted_once_then_closed_never_lane_e
     );
     let (out, _) = drive(&c, &r);
     assert!(out.contains("sendmeter #12 lesson lane prompted: sent"), "{out}");
-    let prompt = "herdr agent prompt sendmeter-lesson-12 no repeated class? end with `herdsman done --no-change \"no repeated class\" sendmeter 12`";
+    let prompt = "herdr agent prompt sendmeter-lesson-12 no repeated class? end with `drover done --no-change \"no repeated class\" sendmeter 12`";
     assert!(r.called(prompt), "{:?}", r.calls.borrow());
     // Unanswered for under 30 min: nothing more, the prompt is never sent twice.
     idle(&at(600), &r);
@@ -2638,7 +2636,7 @@ fn a_lesson_issue_parked_lane_ends_is_closed_on_install() {
 }
 
 /// #534: cooee #1's shape: a reviewer spawned before the impl lane, done in herdr, holds the name the next review plans.
-fn old_reviewer(name: &str, status: &str) -> (herdsman::Ctx, Fake) {
+fn old_reviewer(name: &str, status: &str) -> (drover::Ctx, Fake) {
     let c = setup(name);
     let rev = lane(&c, 5, "rev", "sendmeter-rev-12-r1", "rev-12-r1");
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
@@ -2697,7 +2695,7 @@ fn the_replayed_cooee_1_log_recovers_in_one_pass() {
     let old = "REFUSED LANE_LIVE: finished (done) lane(s) [\"sendmeter-rev-12-r1\"] in /wt/rev-12-r1; `--supersede` \
         replaces it";
     for ts in [20, 600, 1200] {
-        let d = json!({"step": "review", "cmd": "herdsman spawn sendmeter 12 rev", "result": old, "code": "LANE_LIVE"});
+        let d = json!({"step": "review", "cmd": "drover spawn sendmeter 12 rev", "result": old, "code": "LANE_LIVE"});
         ev(&c, ts, "driven", d);
         ev(
             &c,
@@ -2742,7 +2740,7 @@ fn passes_follow_a_fleet_added_then_removed_in_fleet_toml() {
     let (_, out) = run(&c, &r, &["waiting", "drover"]);
     assert!(
         out.contains("drover #12 drive: next in the queue: drive starts it")
-            && out.contains("→ drive hasn't passed this fleet yet: herdsman drive drover"),
+            && out.contains("→ drive hasn't passed this fleet yet: drover drive drover"),
         "{out}"
     );
     let (out, _) = drive(&c, &r);
@@ -2804,4 +2802,194 @@ fn a_hold_outliving_a_pass_past_its_blockers_merge_is_logged_hold_stale_once() {
     let stale = kinds(&c, "hold-stale");
     assert_eq!(stale.len(), 1, "logged once");
     assert_eq!((stale[0].issue, &stale[0].data["on"]), (Some(12), &json!([11])));
+}
+
+/// #712: a parked issue is skipped; `unpark` (a paired device's [unpark], never an unpaired one) puts it back in the
+/// state it had before its needs-human, in its queue place, and the next pass starts it.
+#[test]
+fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
+    let c = setup("drive-unpark");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
+    ev(&c, 10, "needs-human", json!({"code": "START_FAILED"}));
+    let (code, out) = run(&c, &Fake::default(), &["unpark", "sendmeter", "12"]);
+    assert!(
+        code == 3 && out.contains("REFUSED NOT_PARKED: #12 is needs-human, not parked"),
+        "{out}"
+    );
+    let park = ["park", "sendmeter", "12", "--why", "host mini is down"];
+    assert_eq!(run(&c, &Fake::default(), &park).0, 0);
+    let (code, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "ls"]);
+    assert!(code == 0 && out.contains("parked: host mini is down"), "{out}");
+    let r = fake(NO_AGENTS).reply("git -C", "");
+    assert!(drive(&c, &r).1.is_empty());
+    assert!(!r.called("herdr agent start"), "a parked issue is skipped");
+
+    let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let page = with_queue(
+        &String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)),
+        &s,
+        "127.0.0.1:7777",
+        c.now,
+    );
+    assert!(
+        page.contains("<span class=r>parked: host mini is down</span>"),
+        "{page}"
+    );
+    assert!(page.contains("<input type=hidden name=op value=unpark>"), "{page}");
+    let i = page.find("name=mtime value=").unwrap() + 17;
+    let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let body = format!("op=unpark&fleet=sendmeter&issue=12&mtime={mtime}");
+    let post = |extra: &str| {
+        let req = format!(
+            "POST / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n{extra}Content-Length: {}\r\n\r\n{body}",
+            body.len()
+        );
+        String::from_utf8_lossy(&s.respond(&req, c.now)).into_owned()
+    };
+    assert!(post("").starts_with("HTTP/1.1 401"), "an unpaired device cannot unpark");
+    assert_eq!(state(&c), "parked");
+    let cookie = pair(&s, &c, "", c.now);
+    let res = post(&cookie);
+    assert!(res.starts_with("HTTP/1.1 303") && res.contains("unparked"), "{res}");
+    assert_eq!(state(&c), "queued");
+    let all = read(&c.state).unwrap();
+    let kinds: Vec<(&str, Option<&str>)> = (all.iter())
+        .filter(|e| ["parked", "unparked"].contains(&e.kind.as_str()))
+        .map(|e| (e.kind.as_str(), e.str("by")))
+        .collect();
+    assert_eq!(kinds, [("parked", Some("owner")), ("unparked", Some("owner"))]);
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["start"], "{out}");
+    assert!(r.called("herdr agent start sendmeter-impl-12"));
+}
+
+#[test]
+fn a_conflicting_pass_with_an_idle_impl_lane_gets_its_update_in_one_pass() {
+    let c = setup("drive-conflict-idle");
+    let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(
+        &c,
+        20,
+        "verdict",
+        json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
+    );
+    ev(
+        &c,
+        21,
+        "blocked",
+        json!({"code": "NOT_MERGEABLE", "reason": "a100000 conflicts with origin/staging"}),
+    );
+    ev(
+        &c,
+        22,
+        "lane-state",
+        json!({"agent": "sendmeter-impl-12", "state": "hibernated"}),
+    );
+    let list = agents(&[(
+        "sendmeter-impl-12",
+        "hibernated",
+        &wt.to_string_lossy(),
+        "w9:sendmeter-impl-12",
+    )]);
+    let r = fake(&list)
+        .reply("gh pr view issue-12", &stale_pr(&sha("a1"), "CONFLICTING", "DIRTY"))
+        .reply("git -C", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["conflict"], "{out}");
+    assert_eq!(state(&c), "fix(1)+u1", "{out}");
+    let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(!out.contains("catching up next pass"), "{out}");
+}
+
+#[test]
+fn a_refused_update_round_shows_its_reason_not_catching_up() {
+    let c = setup("drive-conflict-held");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
+    ev(
+        &c,
+        20,
+        "verdict",
+        json!({"verdict": "PASS", "sha": sha("a1"), "body": "PASS"}),
+    );
+    let busy = Fake::default().once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
+    let busy = Fake {
+        replies: fake(NO_AGENTS)
+            .reply("gh pr view issue-12", &stale_pr(&sha("a1"), "CONFLICTING", "DIRTY"))
+            .reply("git -C", "")
+            .replies,
+        ..busy
+    };
+    let (out, steps) = drive(&c, &busy);
+    assert_eq!(steps, ["conflict"], "{out}");
+    assert!(out.contains("REFUSED HOST_BUSY"), "{out}");
+    let (_, out) = run(&c, &busy, &["waiting", "sendmeter"]);
+    assert!(out.contains("PASS · conflicts with staging · held: HOST_BUSY"), "{out}");
+    assert!(!out.contains("catching up next pass"), "{out}");
+}
+
+fn draft_pr(head: &str, ci: &str) -> String {
+    let mut v: serde_json::Value = serde_json::from_str(&pr(head, ci)).unwrap();
+    v["isDraft"] = json!(true);
+    v.to_string()
+}
+
+#[test]
+fn a_draft_pr_with_a_pass_is_marked_ready_once_then_merged() {
+    let c = setup("drive-839-draft");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
+    std::fs::remove_dir_all(c.worktrees.join("sendmeter/gone-12")).unwrap();
+    let head = sha("abc");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let ready = "gh pr ready 100 -R jirathip-dev/sendmeter";
+    let kinds = |k: &str| read(&c.state).unwrap().iter().filter(|e| e.kind == k).count();
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &draft_pr(&head, "green"))
+        .reply("gh pr ready 100", "")
+        .reply("gh pr merge 100", "")
+        .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
+        .reply("gh issue", "");
+    let (out, _) = drive(&c, &r);
+    assert_eq!(r.count(ready), 1, "{out}");
+    assert!(!r.called("gh pr merge"), "a draft never merges: {out}");
+    assert_eq!(kinds("marked-ready"), 1);
+    drover::gh::forget_pr(&c, "sendmeter", 12);
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &pr(&head, "green"))
+        .reply("gh pr ready 100", "")
+        .reply("gh pr merge 100", "")
+        .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
+        .reply("gh issue", "");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["merge"], "{out}");
+    assert!(!r.called(ready), "marked ready once only: {out}");
+    assert_eq!(kinds("marked-ready"), 1);
+    assert_eq!(state(&c), "merged");
+}
+
+#[test]
+fn a_draft_pr_that_cannot_be_marked_ready_says_so_in_status() {
+    let c = setup("drive-839-draft-stuck");
+    lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
+    std::fs::remove_dir_all(c.worktrees.join("sendmeter/gone-12")).unwrap();
+    let head = sha("abc");
+    ev(
+        &c,
+        30,
+        "verdict",
+        json!({"verdict": "PASS", "sha": head, "body": "PASS"}),
+    );
+    let r = fake(NO_AGENTS)
+        .reply("gh pr view issue-12", &draft_pr(&head, "pending"))
+        .once_err("gh pr ready 100", 1, "GraphQL: Resource not accessible by integration");
+    let (out, _) = drive(&c, &r);
+    assert!(r.called("gh pr ready 100"), "{out}");
+    let (code, out) = run(&c, &r, &["status", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("PR is a draft"), "{out}");
+    assert!(!out.contains("merging"), "{out}");
 }

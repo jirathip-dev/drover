@@ -6,7 +6,8 @@ use crate::runner::{argv, Out, Runner};
 use crate::shed;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
-use shed_proto::{KeysParams, LsParams, Method, ReadParams, RunParams, SendParams, Target, TerminalInfo, WaitParams};
+use shed_proto::{KeysParams, Logged, LsParams, Method, ReadParams, ReadResult, RunParams, SendParams, Target};
+use shed_proto::{TerminalInfo, WaitParams};
 use std::path::Path;
 
 /// The program name, for PATH lookups and the Services row.
@@ -64,6 +65,24 @@ impl Shed {
             Target { name: name.into() },
         )?)?)
     }
+    /// #749: ACP terminal `name`'s transcript events (`read events`), the last `n` before `seq` `before`; None when
+    /// it is no ACP terminal (a PTY's screen is read as herdr's).
+    pub fn transcript(&self, r: &dyn Runner, name: &str, before: Option<u64>, n: usize) -> Result<Option<Vec<Logged>>> {
+        if self.get(r, name)?.acp.is_none() {
+            return Ok(None);
+        }
+        let p = ReadParams {
+            name: name.into(),
+            lines: None,
+            history: false,
+            events: true,
+            before,
+            n: Some(n),
+        };
+        Ok(Some(
+            serde_json::from_value::<ReadResult>(self.call(r, Method::Read, p)?)?.events,
+        ))
+    }
     /// Whether herdr argv `a` is for one of shed's terminals: a pane without herdr's `ws:pane` colon, an agent shed runs.
     fn mine(&self, r: &dyn Runner, a: &[String]) -> bool {
         let t = a.get(2).map_or("", String::as_str);
@@ -85,6 +104,9 @@ impl Shed {
             idle_after: None,
             cmd,
             acp: None,
+            resume: None,
+            mcp_servers: vec![],
+            no_hibernate: false,
         }
     }
     /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), #565:
@@ -173,7 +195,10 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
                 json!(ReadParams {
                     name: t.into(),
                     lines,
-                    history: lines.is_some()
+                    history: lines.is_some(),
+                    events: false,
+                    before: None,
+                    n: None,
                 }),
             )
         }
@@ -361,7 +386,7 @@ pub fn json(r: &dyn Runner, a: &[String]) -> Result<Value> {
     serde_json::from_str(&ok(r, a)?).with_context(|| format!("herdr {}: not JSON", a.join(" ")))
 }
 
-/// `herdr status`: client and server versions (`herdsman doctor`).
+/// `herdr status`: client and server versions (`drover doctor`).
 pub fn status(r: &dyn Runner) -> Result<String> {
     ok(r, &argv(&["status"]))
 }
@@ -527,7 +552,7 @@ pub fn run_argv(pane: &str, words: &[&str]) -> Vec<String> {
 /// #235: type `line` into a pane of a throwaway workspace at `cwd`, wait up to 20 s for `done`, read the screen,
 /// close the workspace; the screen (None: no pane).
 pub fn in_pane(r: &dyn Runner, cwd: &str, line: &str, done: &str) -> Option<String> {
-    let pane = workspace_create(r, cwd, "herdsman-health").ok()?;
+    let pane = workspace_create(r, cwd, "drover-health").ok()?;
     let _ = exec(r, &run_argv(&pane, &[line]));
     let _ = exec(r, &wait_output_argv(&pane, done, "20000"));
     let text = read(r, &pane).unwrap_or_default();
