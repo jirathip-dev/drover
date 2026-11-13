@@ -1,0 +1,12 @@
+Decided: the hook rewrites a matching Bash call (claude's updatedInput) to `drover heavy <kind> ... -- '<cmd>'`, which holds a slot file under flock while bash runs the command.
+Because: "The lane hook wraps a matching Bash command so it first takes a host slot"
+Decided: slots are lock files in `<state>/heavy/`; a holder's flock dies with its process, so a SIGKILLed holder's file is found unlocked and removed.
+Because: "a slot holder killed with SIGKILL frees its slot (no slot is held forever)"
+Decided: the line is FIFO by join time; a waiter whose kind is at its own cap lets later kinds take shared room.
+Because: "holds a second command of that kind while the shared count still has room for other kinds"
+Decided: heavy_max, heavy_kind_max and heavy_wait_minutes sit on [hosts.<n>]; the hook passes them as args, so a remote host needs no fleet.toml.
+Because: "One shared limit per host: `[hosts.<name>] heavy_max` (default 3 on the Mini)"
+Rejected: a [limits] key for heavy_wait_minutes — the limits are per host, like the slots.
+Rejected: codex/hermes rewrite — their dialects have no input rewrite; their calls run unwrapped.
+Check: Rules.heavy is skipped when a fleet has no heavy table, so remote lanes' frozen rules don't go stale.
+Owner: Heavy checks named in fleet config now take turns per host instead of all starting at once.
