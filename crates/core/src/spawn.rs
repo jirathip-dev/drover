@@ -825,12 +825,16 @@ pub fn clone_build(r: &dyn Runner, dirs: &[String], local: &Path, wt: &Path) -> 
             Ok(()) => done.push(d),
             Err(e) => {
                 let _ = std::fs::remove_dir_all(&tmp);
-                errs.push(format!("{d}: {e:#}"));
+                errs.push(format!("{d}: {}", first_lines(&e)));
             }
         }
     }
     let secs = t.elapsed().as_secs();
     (!done.is_empty() || !errs.is_empty()).then(|| json!({"dirs": done, "secs": secs, "errors": errs}))
+}
+
+fn first_lines(e: &anyhow::Error) -> String {
+    format!("{e:#}").lines().take(5).collect::<Vec<_>>().join("\n")
 }
 
 fn reuse(p: &Plan, dirs: &[String], target: Option<&String>, agents: &[Value]) -> Option<Value> {
@@ -875,7 +879,7 @@ pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
     };
     let res = ok(r, "cp", &[args, &[&s, &d]].concat());
     let res = res.and_then(|_| Ok(std::fs::rename(&tmp, t)?));
-    let errs: Vec<String> = res.err().map(|e| format!("{e:#}")).into_iter().collect();
+    let errs: Vec<String> = res.err().map(|e| first_lines(&e)).into_iter().collect();
     let _ = std::fs::remove_dir_all(&tmp);
     let dirs: Vec<String> = errs.is_empty().then(|| t.display().to_string()).into_iter().collect();
     Some(json!({"dirs": dirs, "from": src, "secs": at.elapsed().as_secs(), "errors": errs}))
