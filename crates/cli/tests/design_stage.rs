@@ -967,7 +967,7 @@ fn a_long_summary_is_cut_at_a_line_end_near_600_characters() {
 #[test]
 fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_raises_no_ask_but_a_card() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (c, w, r) = staged("architect-error", "--architect");
+    let (c, w, r, _sh) = staged("architect-error", "--architect");
     let local = w.parent().unwrap().parent().unwrap().parent().unwrap().join("local");
     let routines = local.join("docs/architecture/routines");
     std::fs::create_dir_all(&routines).unwrap();
@@ -978,7 +978,7 @@ fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_rai
     git(&w, &["reset", "-q", "--hard", "origin/staging"]);
     let agent = kinds(&c, "spawn")[0].str("agent").unwrap().to_string();
     let d = serde_json::json!({"agent": agent, "state": "error", "note": "no response"});
-    herdsman::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "lane-state", d)).unwrap();
+    drover::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "lane-state", d)).unwrap();
     drive(&c, &r);
     assert!(kinds(&c, "design-review").is_empty() && kinds(&c, "needs-decision").is_empty());
     let card = &kinds(&c, "needs-human")[0];
