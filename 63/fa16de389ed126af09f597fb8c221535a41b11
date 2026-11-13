@@ -1,0 +1,12 @@
+Decided: a log's events live in one buffer its later versions share and append to in place (`Events`); each version sees only its own length
+Because: "appends a new event without deep-copying the log while a reader holds it"
+Decided: `cached` finds any live `Log` through a weak list `shared` keeps, not only the newest one in `LOGS`
+Because: "key the cache by something that survives `catch_up`"
+Rejected: passing the `Log` instead of a slice to `closed`/`ending`/`ask_event` — touches every caller, and the frozen board (serve.rs, serve/) calls them with slices
+Rejected: a persistent-structure crate — a new dependency for one append-only buffer
+Decided: the buffer grows by powers of two and clones only on growth or when a stale version appends; `catch_up` reserves the batch so a cold start clones nothing
+Check: the unsafe in `Events` (crates/core/src/events.rs): a cell is written once under the buffer's lock, before its length passes it, and only cells below a handle's length are read
+Decided: staging build fix: drive_sim.rs and design_stage.rs still named the pre-rename crate `herdsman::`
+Decided: AC4 amended to "no ask-index rebuild, RSS lower"; the per-redraw full-log scans and the 15 s redraw go to a follow-up issue
+Because: q1588
+Owner: serve no longer rebuilds the ask index or copies the whole event log each time an event lands while a page is rendering
