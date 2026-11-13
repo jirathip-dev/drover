@@ -438,6 +438,7 @@ pub const PASSIVE: &[&str] = &[
     // #798: a finished lane's build folder or scratch removed.
     "build-freed",
     "wip-saved",
+    "wip-skipped",
     "wip-blocked",
     // #662: a gone ACP lane's local commits drive pushed before resuming it.
     "lane-pushed",

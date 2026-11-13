@@ -1215,11 +1215,12 @@ pub fn spawn(
         let listed = host::agents(&old);
         // #478: its host unreachable: the pane it left is drive's to kill (and save) once that host is back (`check::stale`).
         let stale = was.filter(|_| listed.is_err() && old.machine.is_some());
+        let hung = was.is_some_and(|e| crate::roots::unreachable(ctx, cfg, e));
         // #649: its dirty or unpushed work goes to `wip/` on its host before any pane closes; a failed save refuses.
         // #662: a lane resumed in its own worktree keeps it as it is (drive pushed its commits; staged stays staged).
         let cause = crate::shed::exit_cause(&events, &p.agent).filter(|c| crate::shed::RESUMABLE.contains(c));
         let here = cause.is_some() && owt == wt && old.machine == on.machine;
-        if stale.is_none() && !here {
+        if stale.is_none() && !here && !hung {
             wip = crate::check::save_lane(ctx, &old, &p.agent, owt)?;
         }
         for a in host::live_in(listed.as_deref().unwrap_or_default(), &p.agent, Path::new(owt)) {
@@ -1227,7 +1228,7 @@ pub fn spawn(
                 herdr::close(&old, pane)?;
             }
         }
-        if stale.is_none() {
+        if stale.is_none() && !hung {
             crate::check::reap(ctx, cfg, &old, (fleet, Some(issue)), owt)?; // #186: before the new lane starts
         }
         let why: Vec<&str> = dup.iter().map(|d| d.1.as_str()).collect();

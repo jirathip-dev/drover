@@ -111,9 +111,15 @@ fn a_root_whose_listing_never_returns_costs_one_probe_and_the_pass_goes_on() {
     let alerts = hung_alerts(&r.c);
     assert_eq!(alerts.len(), 1, "{alerts:#?}");
     assert_eq!(alerts[0].str("root"), Some(&*r.dead.to_string_lossy()));
+    let dead = r.dead.to_string_lossy();
+    let calls = f.calls.borrow().clone();
+    assert!(
+        !calls.iter().any(|c| c.starts_with("git") && c.contains(&*dead)),
+        "{calls:#?}"
+    );
     let (_, w) = run(&r.c, &f, &["waiting", "sendmeter"]);
     let line = w.lines().find(|l| l.contains("#11")).unwrap_or_default();
-    assert!(line.contains("root unreachable"), "{w}");
+    assert!(line.contains("root hung"), "{w}");
 }
 
 #[test]
@@ -134,7 +140,7 @@ fn root_hung_alerts_once_per_episode_and_clears_when_the_root_answers() {
     let events = read(&r.c.state).unwrap();
     assert!(events.iter().any(|e| e.kind == "root-answers"), "the episode clears");
     let (_, w) = run(&r.c, &f, &["waiting", "sendmeter"]);
-    assert!(!w.contains("root unreachable"), "{w}");
+    assert!(!w.contains("root hung"), "{w}");
     let _again = hang(&r.dead);
     assert_eq!(run(&r.c, &f, &["check"]).0, 0);
     assert_eq!(hung_alerts(&r.c).len(), 2, "a new episode alerts again");
