@@ -1,0 +1,5 @@
+Decided: delete the doc comment over the private static LIVE rather than rename it
+Because: "the comment at `crates/core/src/events.rs:763` is removed, or moved into the code as a name"
+Rejected: renaming LIVE to carry the comment — the name plus its users at events.rs already say it
+Check: drover arch-check --base origin/main exits 0 with 0 violations at the head
+Owner: the one stray comment blocking staging's promotion to main is gone
