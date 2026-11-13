@@ -1,0 +1,9 @@
+Decided: eject on a hung root closes each lane's pane, drops the local repo's record of its worktree (by path or by the branch checked out there) and restarts it, without any stat, git or save on the dead disk.
+Because: "skips saving (noted per lane: unsaved work stays on the disk), and restarts the lanes on the next root from their pushed branches"
+Because: crates/core/src/roots.rs:325 git worktree prune/remove stat the dead path, so forget drops the record from the local repo only
+Decided: spawn --supersede skips save_lane and reap for a lane under a hung root, since both stat or lsof its worktree.
+Decided: the waiting/board row now reads "root hung: <root>".
+Rejected: a new probe or card — #972 already probes each root per tick, skips it in pick and alerts once per root-hung episode.
+Rejected: git worktree add --force — only the shed path runs git worktree add; dropping the stale record fixes both paths
+Check: crates/cli/tests/roots.rs eject_of_a_hung_root... fails on staging (it saves from the dead disk) and passes here.
+Owner: ejecting a frozen disk now returns at once and moves its lanes; anything unsaved there stays on that disk.
