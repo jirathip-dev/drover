@@ -760,7 +760,6 @@ type Gated = (Arc<Mutex<()>>, Arc<Log>);
 
 static LOGS: Mutex<BTreeMap<PathBuf, Gated>> = Mutex::new(BTreeMap::new());
 
-/// #944: each `Log` `shared` has made, while a reader holds it (`cached` finds them).
 static LIVE: Mutex<Vec<Weak<Log>>> = Mutex::new(Vec::new());
 
 /// #560, #632: the cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq:
