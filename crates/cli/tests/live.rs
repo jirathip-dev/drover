@@ -423,7 +423,7 @@ fn answer_sends_the_digit_and_logs_no_question() {
         "{res}"
     );
     assert_eq!(r.keys(), [json!({"name": "sendmeter-impl-12", "keys": ["2"]})]);
-    let e = read(&c.state).unwrap().pop().unwrap();
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!((e.kind.as_str(), e.issue), ("answer", Some(12)));
     assert_eq!(
         serde_json::Value::Object(e.data.clone()),

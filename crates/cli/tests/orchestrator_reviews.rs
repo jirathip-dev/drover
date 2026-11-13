@@ -20,7 +20,12 @@ fn log(c: &drover::Ctx, ts: u64, fleet: &str, issue: Option<u64>, kind: &str, d:
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {

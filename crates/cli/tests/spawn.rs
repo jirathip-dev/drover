@@ -680,6 +680,7 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
     );
     let ev = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "spawn")
         .unwrap();

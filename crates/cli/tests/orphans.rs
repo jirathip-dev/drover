@@ -47,7 +47,12 @@ fn fast(c: &drover::Ctx, r: &dyn drover::runner::Runner) -> String {
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 /// #12's impl lane, logged, and a review worktree no spawn logged holding `verdict`.
@@ -162,7 +167,7 @@ fn a_finished_orphan_review_at_the_head_is_recorded_then_closed() {
         closed.first().and_then(|e| e.str("reason")),
         Some("verdict recorded"),
         "{out} {:?}",
-        read(&c.state).unwrap()
+        read(&c.state).unwrap().to_vec()
     );
     let (get, kill) = (at(&sh, "get", name).unwrap(), at(&sh, "kill", name).unwrap());
     assert!(kill > get, "{:?}", sh.methods());

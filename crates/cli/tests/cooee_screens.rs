@@ -346,7 +346,7 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
 
     let (status, v) = post(drop17, &ck);
     assert_eq!(status, 200, "{v}");
-    let last = read(&c.state).unwrap().pop().unwrap();
+    let last = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!(
         (last.kind.as_str(), &last.data["op"], &last.data["issues"]),
         ("queue", &json!("rm"), &json!([17]))
@@ -364,6 +364,7 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
     assert!(!state["asks"].to_string().contains("\"q7\""), "{state}");
     let d = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "decision")
         .unwrap();
@@ -382,6 +383,7 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
     assert_eq!(status, 200, "{v}");
     let settled = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "run-settled")
         .unwrap();
@@ -403,6 +405,7 @@ fn a_folded_cards_main_button_answers_its_ask() {
     assert_eq!(status, 200, "{v}");
     let d = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "decision")
         .unwrap();

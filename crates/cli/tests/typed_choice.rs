@@ -10,7 +10,12 @@ fn log(c: &drover::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: Value) {
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn design_ask(name: &str, line: &str) -> drover::Ctx {

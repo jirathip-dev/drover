@@ -47,6 +47,7 @@ fn field<'a>(v: &'a Value, path: &str) -> &'a Value {
 fn edits(c: &drover::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "config-edit")
         .collect()
@@ -205,7 +206,12 @@ fn a_fleet_is_added_removed_paused_and_resumed_with_each_logged() {
             .unwrap()
             .paused;
         assert_eq!(paused, op == "pause");
-        let e = read(&c.state).unwrap().into_iter().rfind(|e| e.kind == op).unwrap();
+        let e = read(&c.state)
+            .unwrap()
+            .to_vec()
+            .into_iter()
+            .rfind(|e| e.kind == op)
+            .unwrap();
         assert_eq!((e.fleet.as_str(), e.str("via")), ("sendmeter", Some("web")));
     }
 }

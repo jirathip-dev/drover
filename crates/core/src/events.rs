@@ -77,8 +77,8 @@ pub fn append(path: &Path, ev: &Event) -> Result<()> {
 }
 
 /// The live log (#343: without the events a rotation archived), by seq.
-pub fn read(path: &Path) -> Result<Vec<Event>> {
-    Ok(shared(path)?.to_vec())
+pub fn read(path: &Path) -> Result<Arc<Log>> {
+    shared(path)
 }
 
 /// #344: the log in the JSONL format before #344, one event a line with its seq (`drover events --jsonl`).
@@ -173,17 +173,88 @@ pub fn checkpoint(path: &Path) -> Result<u64> {
     Ok(seq)
 }
 
+/// #943: the most bytes of JSON one event is stored in.
+pub const EVENT_MAX: usize = 16 << 10;
+
+const NOISE: [&str; 6] = [
+    "driven",
+    "kick",
+    "drive-pass",
+    "lane-state",
+    "conflict-predicted",
+    "intent",
+];
+const NOISE_SECS: u64 = 2 * 86_400;
+
+/// #943: `ev` in at most `EVENT_MAX` bytes: long strings keep a head and a tail, long arrays their first items.
+pub fn capped(ev: &Event) -> Event {
+    let size = |e: &Event| serde_json::to_string(e).map_or(0, |s| s.len());
+    let mut keep = EVENT_MAX / 2;
+    let mut out = ev.clone();
+    while size(&out) > EVENT_MAX && keep >= 64 {
+        out.data.clone_from(&ev.data);
+        out.data.values_mut().for_each(|v| cut(v, keep));
+        keep /= 2;
+    }
+    out
+}
+
+fn cut(v: &mut Value, keep: usize) {
+    match v {
+        Value::String(s) if s.len() > keep => {
+            let (h, t) = (
+                s.floor_char_boundary(keep / 2),
+                s.ceil_char_boundary(s.len() - keep / 2),
+            );
+            *s = format!("{}… {} bytes cut …{}", &s[..h], t - h, &s[t..]);
+        }
+        Value::Array(a) => {
+            let n = (keep / 256).max(1);
+            if a.len() > n {
+                let more = a.len() - n;
+                a.truncate(n);
+                a.push(format!("… {more} more").into());
+            }
+            for x in a.iter_mut() {
+                cut(x, keep);
+            }
+        }
+        Value::Object(m) => m.values_mut().for_each(|x| cut(x, keep)),
+        _ => {}
+    }
+}
+
+fn shed_oversize(path: &Path) -> Result<()> {
+    let big = crate::db::events(
+        path,
+        "archived = 0 AND LENGTH(CAST(json AS BLOB)) > ?1",
+        EVENT_MAX as u64,
+    )?;
+    let (passive, read): (Vec<Event>, Vec<Event>) = big.into_iter().partition(|e| PASSIVE.contains(&e.kind.as_str()));
+    crate::db::rewrite(path, &read.iter().map(capped).collect::<Vec<_>>())?;
+    crate::db::archive(path, &passive.iter().map(|e| e.seq).collect::<Vec<_>>())
+}
+
 /// #343: over `max` bytes of live log, the events up to the checkpoint and older than 30 days are archived (#344: kept
 /// in the database for `history`, out of `read`). The live log keeps what its readers need: queue changes, every event
 /// of an issue still open or active in the 30 days, and a done issue's merge or close.
 pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
+    shed_oversize(path)?;
     if crate::db::live_bytes(path)? <= max {
         return Ok(());
     }
     let (cut, st, all) = (checkpoint(path)?, states(path)?, read(path)?);
+    let mut newest = HashMap::new();
+    for e in all.iter().filter(|e| NOISE.contains(&e.kind.as_str())) {
+        newest.insert((&e.kind, &e.fleet, e.issue, e.str("agent"), e.str("step")), e.seq);
+    }
+    let newest: std::collections::HashSet<u64> = newest.into_values().collect();
+    let noise = |e: &Event| {
+        NOISE.contains(&e.kind.as_str()) && e.seq <= cut && e.ts + NOISE_SECS < now && !newest.contains(&e.seq)
+    };
     let old = |e: &Event| e.seq <= cut && e.ts + 30 * 86_400 < now && e.kind != "queue";
     let mut live_issue: BTreeMap<(&str, u64), bool> = BTreeMap::new();
-    for e in &all {
+    for e in all.iter() {
         if let Some(n) = e.issue {
             let done = st.get(&(e.fleet.clone(), n)).is_some_and(IssueState::done);
             *live_issue.entry((&e.fleet, n)).or_default() |= !done || !old(e);
@@ -197,6 +268,7 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
         }
     };
     let moved = |e: &&Event| match e.issue {
+        _ if noise(e) => true,
         Some(n) => !live_issue[&(e.fleet.as_str(), n)] && !ends(e, &st[&(e.fleet.clone(), n)]),
         None => old(e),
     };

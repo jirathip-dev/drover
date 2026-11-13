@@ -70,7 +70,12 @@ fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 /// herdr with `agents` live, ready to start a conductor in a new workspace or type into one.
