@@ -186,6 +186,7 @@ fn the_config_sheet_shows_every_group_and_its_pickers_post_through_set() {
     );
     let sets: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "set")
         .collect();

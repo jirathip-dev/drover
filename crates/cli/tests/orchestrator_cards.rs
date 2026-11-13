@@ -25,7 +25,12 @@ fn chat(s: &Server, cookie: &str, now: u64) -> String {
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn setup(name: &str, role_extra: &str, extra: &str) -> drover::Ctx {

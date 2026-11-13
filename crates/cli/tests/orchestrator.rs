@@ -69,7 +69,12 @@ fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn herdr(agents: &str) -> Fake {
@@ -122,6 +127,10 @@ fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
         dir.display()
     );
     assert!(calls[0].starts_with(&head), "{calls:?}");
+    assert!(
+        !calls[0].contains("taskpolicy") && !calls[0].contains("renice"),
+        "{calls:?}"
+    );
     let st = &kinds(&c, "orchestrator-start")[0];
     assert_eq!(
         (st.str("runtime"), st.data["resumed"].clone()),

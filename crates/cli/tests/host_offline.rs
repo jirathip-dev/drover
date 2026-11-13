@@ -51,7 +51,12 @@ fn with_bazzite<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 #[test]
@@ -286,6 +291,7 @@ fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
     for n in [12, 13] {
         let sp = read(&c.state)
             .unwrap()
+            .to_vec()
             .into_iter()
             .rfind(|e| e.is("spawn", "sendmeter", n))
             .unwrap();

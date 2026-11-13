@@ -320,6 +320,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
     assert!(ask_pair(&s, "10.0.0.7", T + 700).0.contains("429 "), "4 open");
     let ev: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind.starts_with("pair"))
         .collect();
@@ -449,7 +450,7 @@ fn pairing_codes_devices_and_prompt_events() {
         r.1.last("keys"),
         json!({"name": "sendmeter-impl-12", "keys": ["Enter"]})
     );
-    let e = read(&c.state).unwrap().pop().unwrap();
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     let label = drover::devices::load(&c)[0].label.clone();
     assert!(label.starts_with("iPhone "), "{label}");
     assert_eq!(

@@ -1215,6 +1215,7 @@ fn a_closed_deny_logs_one_event_and_alerts_once_per_cause_an_hour() {
     assert_eq!(alerts(), 2, "another cause alerts");
     let evs: Vec<_> = drover::events::read(&state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "hook-failed-closed" && e.ts >= now)
         .collect();
@@ -1236,7 +1237,7 @@ fn a_closed_deny_logs_one_event_and_alerts_once_per_cause_an_hour() {
     }
     std::fs::write(d.join("fleet.toml"), "[fleet.x\n").unwrap();
     run(&pre_bash("ls").to_string());
-    let last = drover::events::read(&state).unwrap().pop().unwrap();
+    let last = drover::events::read(&state).unwrap().to_vec().pop().unwrap();
     assert_eq!(
         (last.kind.as_str(), last.str("cause")),
         ("hook-failed-closed", Some("fleet.toml failed to load"))

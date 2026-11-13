@@ -56,7 +56,7 @@ fn host() -> Fake {
 }
 
 fn starts(c: &drover::Ctx) -> Vec<Event> {
-    let all = read(&c.state).unwrap().into_iter();
+    let all = read(&c.state).unwrap().to_vec().into_iter();
     all.filter(|e| e.kind == "orchestrator-start").collect()
 }
 
@@ -129,7 +129,12 @@ fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_
         std::fs::read_to_string(c.config.with_extension("toml.bak")).unwrap(),
         orig
     );
-    let set = read(&c.state).unwrap().into_iter().rfind(|e| e.kind == "set").unwrap();
+    let set = read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .rfind(|e| e.kind == "set")
+        .unwrap();
     assert_eq!(
         (set.str("role"), set.str("key"), set.str("new")),
         (Some("orchestrator"), Some("model"), Some("sonnet"))

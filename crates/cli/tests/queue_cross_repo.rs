@@ -35,7 +35,7 @@ fn drive(c: &drover::Ctx, r: &Fake, secs: u64) -> Vec<String> {
     };
     let before = read(&c.state).unwrap().len();
     ok(&c, r, &["drive"]);
-    let new = read(&c.state).unwrap().split_off(before);
+    let new = read(&c.state).unwrap().to_vec().split_off(before);
     let steps = new.iter().filter(|e| e.kind == "driven" && e.issue == Some(12));
     steps.map(|e| e.str("step").unwrap().to_string()).collect()
 }
@@ -80,6 +80,7 @@ fn a_blocker_in_another_repo_is_released_once_it_reads_closed() {
     assert_eq!(r.count(view), 2);
     let closed = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "blocker-closed");
     assert_eq!(

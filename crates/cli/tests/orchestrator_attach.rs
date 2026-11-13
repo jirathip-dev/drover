@@ -86,7 +86,7 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     );
     let attached = read(&c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "orchestrator-attached")
         .count();
     assert_eq!(attached, 2);
@@ -128,6 +128,7 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     assert_eq!(ans["ok"], true, "{ans}");
     let d = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "decision")
         .unwrap();
@@ -141,7 +142,7 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     );
     let starts = read(&c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "orchestrator-start")
         .count();
     assert_eq!(starts, 0);
@@ -152,6 +153,7 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     assert_eq!(code, 0);
     let q = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "needs-decision")
         .unwrap();

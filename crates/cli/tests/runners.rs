@@ -84,12 +84,17 @@ fn fake(list: &str) -> Fake {
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn no_token(c: &drover::Ctx, r: &Fake, out: &str) {
     let log = std::fs::read_to_string(c.state.with_file_name("events.db")).unwrap_or_default()
-        + &serde_json::to_string(&read(&c.state).unwrap()).unwrap();
+        + &serde_json::to_string(&read(&c.state).unwrap().to_vec()).unwrap();
     assert!(!log.contains(TOK) && !log.contains(KEY), "{log}");
     assert!(!out.contains(TOK), "{out}");
     assert!(r.calls.borrow().iter().all(|l| !l.contains(TOK) && !l.contains(KEY)));

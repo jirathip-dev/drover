@@ -229,7 +229,7 @@ fn spawn_fake() -> Fake {
 }
 
 fn spawned(c: &drover::Ctx) -> Vec<drover::events::Event> {
-    let ev = drover::events::read(&c.state).unwrap();
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
     ev.into_iter().filter(|e| e.kind == "spawn").collect()
 }
 

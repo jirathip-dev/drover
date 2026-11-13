@@ -203,6 +203,7 @@ fn a_lane_spawns_on_shed() {
     assert_eq!(b.last("wait")["until"], json!(["working", "blocked"]));
     let ev = drover::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "spawn")
         .unwrap();
@@ -214,6 +215,9 @@ fn a_lane_spawns_on_shed() {
     assert!(std::fs::read_to_string(wt.join(".brief.md"))
         .unwrap()
         .contains("AC: it works"));
+    assert_eq!(ev.str("qos"), Some("background"));
+    let (_, st) = run(&c, &spawn_fake(), &["status", "sendmeter"]);
+    assert!(st.contains(" · qos background"), "{st}");
 
     let (code, out) = run(&c, &spawn_fake(), &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 3, "{out}");
@@ -520,7 +524,7 @@ fn an_acp_lanes_state_follows_its_turn_events() {
     assert_eq!(shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap(), 4);
     let states: Vec<_> = drover::events::read(&c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "lane-state")
         .map(|e| (e.str("state").map(String::from), e.str("note").map(String::from)))
         .collect();
@@ -618,6 +622,7 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
     assert_eq!(b.last("events"), json!({"labels": {}, "since": 0}));
     let logged: Vec<_> = drover::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "lane-state")
         .collect();
@@ -729,7 +734,7 @@ fn the_service_follows_sheds_events_and_says_when_the_stream_drops() {
     std::thread::spawn(move || drover_service::run(sc, r, || 1_000_000, api, None));
     let logged = |kind: &str| -> Vec<drover::events::Event> {
         let all = drover::events::read(&c.state).unwrap_or_default();
-        all.into_iter().filter(|e| e.kind == kind).collect()
+        all.iter().filter(|e| e.kind == kind).cloned().collect()
     };
     let t0 = std::time::Instant::now();
     while logged("lane-state").len() < 2 {
@@ -874,7 +879,7 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     for _ in 0..2 {
         assert_eq!(run(&c, &f, &["check"]).0, 0);
     }
-    let evs = drover::events::read(&c.state).unwrap();
+    let evs = drover::events::read(&c.state).unwrap().to_vec();
     assert!(!evs.iter().any(|e| e.kind == "host-offline"), "{evs:?}");
     let (_, status) = run(&c, &f, &["status"]);
     assert!(!status.contains("host offline"), "{status}");
@@ -964,7 +969,7 @@ fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
     );
     drive(&at(t0 + 1202));
     assert_eq!(sends(), 1);
-    let ev = drover::events::read(&c.state).unwrap();
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
     assert!(
         !ev.iter().any(|e| matches!(e.kind.as_str(), "respawn" | "needs-human")),
         "{ev:?}"
@@ -1112,7 +1117,7 @@ fn later(c: &drover::Ctx, secs: u64) -> drover::Ctx {
 }
 
 fn logged(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    let all = drover::events::read(&c.state).unwrap();
+    let all = drover::events::read(&c.state).unwrap().to_vec();
     all.into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -1180,7 +1185,7 @@ fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
 }
 
 fn thread_events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    let all = drover::events::read(&c.state).unwrap();
+    let all = drover::events::read(&c.state).unwrap().to_vec();
     all.into_iter().filter(|e| e.kind == kind).collect()
 }
 

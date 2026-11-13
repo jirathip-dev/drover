@@ -76,7 +76,12 @@ fn loaded() -> Fake {
 }
 
 fn of_kind(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn pending(c: &drover::Ctx, n: u64) -> Option<drover::pending::Pending> {

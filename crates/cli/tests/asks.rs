@@ -8,7 +8,12 @@ const NOW: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-36";
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn lane_spawn(c: &drover::Ctx, ts: u64) {

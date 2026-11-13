@@ -955,7 +955,8 @@ fn merged(
         let d = json!({"mode": mode, "sha": merge_sha, "pr": num, "checks_secs": secs});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "landed", d))?;
     }
-    let why = read(&ctx.state)?.into_iter().rfind(|e| e.is("why", fleet, issue));
+    let log = read(&ctx.state)?;
+    let why = log.iter().rfind(|e| e.is("why", fleet, issue));
     let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(
         "Merged via `drover merge`: PR #{num} → `{}` @ `{merge_sha}`\nPinned PASS verdict sha: `{head}`{}{}",

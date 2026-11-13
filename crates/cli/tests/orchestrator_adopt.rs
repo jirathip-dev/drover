@@ -86,7 +86,7 @@ fn say(c: &drover::Ctx, r: &dyn drover::runner::Runner, text: &str) -> String {
 }
 
 fn starts(c: &drover::Ctx) -> Vec<drover::events::Event> {
-    let all = drover::events::read(&c.state).unwrap();
+    let all = drover::events::read(&c.state).unwrap().to_vec();
     all.into_iter().filter(|e| e.kind == "orchestrator-start").collect()
 }
 

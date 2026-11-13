@@ -182,6 +182,7 @@ fn tick_failed_is_logged_at_most_once_an_hour() {
     assert_eq!(code, 1, "{out}");
     let e = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .find(|e| e.kind == "tick-failed")
         .unwrap();
@@ -491,7 +492,7 @@ fn tick_repairs_only_the_missing_job() {
         .collect();
     assert!(loads.len() == 1 && loads[0].contains("dev.drover.fast"), "{loads:?}");
     assert!(job(&c, "dev.drover.fast").exists());
-    let events = read(&c.state).unwrap();
+    let events = read(&c.state).unwrap().to_vec();
     let fixed: Vec<_> = events.iter().filter(|e| e.kind == "timer-repaired").collect();
     assert_eq!(fixed.len(), 1, "{events:?}");
     assert_eq!(
@@ -504,7 +505,7 @@ fn tick_repairs_only_the_missing_job() {
     for _ in 0..2 {
         assert_eq!(run(&c, &r, &["tick"]).0, 0);
     }
-    let events = read(&c.state).unwrap();
+    let events = read(&c.state).unwrap().to_vec();
     let count = |k: &str| events.iter().filter(|e| e.kind == k).count();
     assert_eq!(
         (count("timer-repaired"), count("timer-repair-failed")),

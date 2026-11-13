@@ -178,7 +178,7 @@ fn a_finished_lanes_build_folder_goes_at_once_even_with_its_session_open() {
 }
 
 fn events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    let all = drover::events::read(&c.state).unwrap();
+    let all = drover::events::read(&c.state).unwrap().to_vec();
     all.into_iter().filter(|e| e.kind == kind).collect()
 }
 

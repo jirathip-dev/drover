@@ -15,7 +15,7 @@ fn log(c: &drover::Ctx, issue: Option<u64>, kind: &str, d: Value) {
 
 fn asks(c: &drover::Ctx) -> Vec<Event> {
     let events = read(&c.state).unwrap();
-    events.into_iter().filter(|e| e.kind == "needs-decision").collect()
+    events.iter().filter(|e| e.kind == "needs-decision").cloned().collect()
 }
 
 fn endings(c: &drover::Ctx) -> Vec<(String, Option<&'static str>)> {
@@ -148,7 +148,12 @@ const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\npro
 const HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 struct Meet {

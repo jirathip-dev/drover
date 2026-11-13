@@ -244,6 +244,7 @@ fn delivery_201_sent_410_pruned_500_notify_failed() {
     );
     let ev = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "notify-failed")
         .unwrap();
@@ -394,10 +395,12 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
         "one push each, to the new device only"
     );
     let json: serde_json::Value =
-        serde_json::from_slice(&decrypt(&std::fs::read(dir.join("body")).unwrap(), &ua, &d(AUTH)).unwrap()).unwrap();
+        serde_json::from_slice(&decrypt(&std::fs::read(dir.join("body")).unwrap().to_vec(), &ua, &d(AUTH)).unwrap())
+            .unwrap();
     assert!(json["body"].as_str().unwrap().ends_with("alerts are on"), "{json}");
     let sent: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "push-sent")
         .collect();

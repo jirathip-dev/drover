@@ -47,6 +47,7 @@ fn fake(pr_body: &str) -> Fake {
 fn verdicts(c: &drover::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "verdict")
         .collect()

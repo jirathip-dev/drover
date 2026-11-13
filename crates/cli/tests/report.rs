@@ -95,7 +95,7 @@ fn a_paired_report_is_kept_and_named_to_the_notifier() {
     assert_eq!(b["device"], json!(drover::devices::load(&c)[0].label));
     assert!(b["build"].as_str().unwrap().contains('('), "names the build sha");
     assert!(std::fs::read(dir.join("shot.png")).unwrap().starts_with(b"\x89PNG"));
-    let e = read(&c.state).unwrap().pop().unwrap();
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!((e.kind.as_str(), e.fleet.as_str()), ("report", "sendmeter"));
     let path = dir.join("bundle.json").display().to_string();
     assert!(

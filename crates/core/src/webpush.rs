@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Sub {
@@ -215,7 +216,7 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
     let evs = if n.is_some() || thread.is_some() {
         read(log)?
     } else {
-        vec![]
+        Arc::default()
     };
     let first = n.and_then(|n| finding(&evs, &ev.fleet, n)).unwrap_or("");
     let (title, mut body) = match n {

@@ -329,7 +329,7 @@ fn clean_removes_only_merged_clean_idle_lanes() {
     assert!(sh.has("someone"), "the live agent stays");
     let cleaned: Vec<_> = read(&c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "clean")
         .map(|e| e.str("worktree").unwrap().to_string())
         .collect();
@@ -685,7 +685,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
         ];
         let (code, out) = run(&c, &r, &args);
         assert_eq!(code, 0, "{out}");
-        let e = read(&c.state).unwrap().pop().unwrap();
+        let e = read(&c.state).unwrap().to_vec().pop().unwrap();
         assert_eq!(e.kind, kind, "{out}");
         let gone = kind == "lane-closed";
         assert_eq!(sh.called("kill", REV), gone, "{out}");
@@ -784,6 +784,7 @@ fn a_blocked_live_lane_is_held_shown_held_and_never_stalls() {
     assert_eq!(code, 0, "{out}");
     let held: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "held")
         .collect();

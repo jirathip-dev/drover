@@ -108,6 +108,7 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
     if let Some(id) = crate::orchestrator::acting() {
         ev.data.entry("orchestrator").or_insert(id.into());
     }
+    let ev = if seq.is_none() { crate::events::capped(&ev) } else { ev };
     let json = serde_json::to_string(&ev)?;
     c.execute(
         "INSERT INTO events (seq, ts, fleet, issue, type, json, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
@@ -225,10 +226,30 @@ pub fn live_bytes(state: &Path) -> Result<u64> {
 }
 
 pub(crate) fn archive(state: &Path, seqs: &[u64]) -> Result<()> {
+    let rows: Vec<(u64, Option<String>)> = seqs.iter().map(|s| (*s, None)).collect();
+    update(state, &rows)
+}
+
+pub(crate) fn rewrite(state: &Path, evs: &[Event]) -> Result<()> {
+    let json = |e: &Event| serde_json::to_string(&Event { seq: 0, ..e.clone() });
+    let rows = evs
+        .iter()
+        .map(|e| Ok((e.seq, Some(json(e)?))))
+        .collect::<Result<Vec<_>>>()?;
+    update(state, &rows)
+}
+
+fn update(state: &Path, rows: &[(u64, Option<String>)]) -> Result<()> {
+    if rows.is_empty() {
+        return Ok(());
+    }
     with(state, true, (), |c| {
         let tx = c.transaction()?;
-        for s in seqs {
-            tx.execute("UPDATE events SET archived = 1 WHERE seq = ?1", [s])?;
+        for (s, json) in rows {
+            match json {
+                None => tx.execute("UPDATE events SET archived = 1 WHERE seq = ?1", [s])?,
+                Some(j) => tx.execute("UPDATE events SET json = ?2 WHERE seq = ?1", params![s, j])?,
+            };
         }
         tx.execute(
             "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', 0, '{}')",

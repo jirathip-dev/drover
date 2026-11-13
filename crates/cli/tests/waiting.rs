@@ -582,6 +582,7 @@ fn a_pass_left_unmerged_for_three_passes_shows_the_missed_promise_with_the_real_
     }
     let missed: Vec<Event> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "promise-missed" && e.issue == Some(4))
         .collect();

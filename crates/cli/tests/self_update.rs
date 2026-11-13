@@ -47,7 +47,12 @@ fn sign_script(c: &drover::Ctx) -> String {
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn heads(c: &drover::Ctx, live: &std::path::Path, heads: &[(&str, &str)]) -> Fake {

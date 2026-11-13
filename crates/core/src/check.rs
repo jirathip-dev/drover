@@ -1,5 +1,5 @@
 use crate::config::{Config, Fleet};
-use crate::events::{age, emit, fold, held_on, last_spawn, open_asks, plain, read, Event, IssueState};
+use crate::events::{age, emit, fold, held_on, last_spawn, open_asks, plain, read, Event, IssueState, Log};
 use crate::gate::gate;
 use crate::host;
 use crate::hosts::On;
@@ -12,6 +12,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::Arc;
 
 fn ready<'a>(ctx: &Ctx, r: &dyn Runner, cfg: &'a Config, s: &IssueState) -> Option<(&'a Fleet, Value)> {
     let f = cfg.fleet(&s.fleet).ok().filter(|_| s.state == "ready")?;
@@ -623,10 +624,10 @@ fn expire(
     ctx: &Ctx,
     cfg: &Config,
     out: &mut dyn Write,
-    events: Vec<Event>,
+    events: Arc<Log>,
     agents: Option<&[Value]>,
     remote: &BTreeMap<String, Option<Vec<Value>>>,
-) -> Result<Vec<Event>> {
+) -> Result<Arc<Log>> {
     let sweep = !events.iter().any(|e| e.kind == "asks-swept") && events.iter().any(|e| e.kind == "needs-decision");
     let lists = || agents.into_iter().flatten().chain(remote.values().flatten().flatten());
     let live = |q: &Event, a: &str| {
@@ -1783,13 +1784,7 @@ fn clone_id(_: &Path) -> Option<u64> {
     None
 }
 
-fn closed_on_github(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    ev: Vec<Event>,
-) -> Result<Vec<Event>> {
+fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: Arc<Log>) -> Result<Arc<Log>> {
     let st = fold(&ev);
     let mut any = false;
     for (name, f) in &cfg.fleet {

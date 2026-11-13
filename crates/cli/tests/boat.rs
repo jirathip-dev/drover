@@ -113,7 +113,7 @@ fn bootstrap_boat1_creates_it_with_the_current_boat_cli_and_gets_past_start() {
     );
     let made = calls(&bin);
     assert!(made.contains("new --type default --name boat1"), "{made}");
-    let kinds: Vec<_> = read(&c.state).unwrap().into_iter().map(|e| e.kind).collect();
+    let kinds: Vec<_> = read(&c.state).unwrap().to_vec().into_iter().map(|e| e.kind).collect();
     assert_eq!(kinds, ["cloud-start", "cloud-up"]);
     let conf = std::fs::read_to_string(c.home.join(".ssh/config.d/herdsman")).unwrap();
     assert!(

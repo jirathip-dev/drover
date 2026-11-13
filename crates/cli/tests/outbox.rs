@@ -84,7 +84,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     .unwrap();
     let r = Air(Fake::default());
     run(&main, &r, &["drive", "--fast"]);
-    let ev = read(&main.state).unwrap();
+    let ev = read(&main.state).unwrap().to_vec();
     let asks: Vec<_> = ev.iter().filter(|e| e.kind == "needs-decision").collect();
     assert_eq!(asks.len(), 1, "{ev:?}");
     assert_eq!(
@@ -141,7 +141,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     let stale = |c: &drover::Ctx| {
         read(&c.state)
             .unwrap()
-            .into_iter()
+            .iter()
             .filter(|e| e.kind == "outbox-stale")
             .count()
     };
