@@ -1,0 +1,5 @@
+Decided: regenerate docs/workflow.md with drover diagram as a staging build fix
+Because: crates/cli/tests/diagram.rs:19
+Rejected: hand-editing the two lines — the file is generated and the test compares it to the generator
+Check: cargo test -p drover --test diagram exits 0 and arch-check --base origin/main reports 0 violations
+Owner: staging's build was red from a stale generated page; regenerated, no behaviour change
