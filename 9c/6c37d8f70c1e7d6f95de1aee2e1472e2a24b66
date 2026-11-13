@@ -1,0 +1,6 @@
+Decided: rename herdsman:: to drover:: and the fake tick's /opt/herdsman/bin/herdsman cmdline to /opt/drover/bin/drover in the two tests
+Because: "Rename the stale references in those two test files to the crate's new name"
+Because: crates/core/src/slo.rs:175
+Rejected: leaving the old binary path in the fake cmdline — slo.rs matches both names, but the scope asks for every pre-rename name these tests use
+Check: design_stage still runs 20 tests and drive_sim runs 5; clippy --all-targets is green
+Owner: Staging's Rust build is green again; only two test files changed.
