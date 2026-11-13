@@ -1,0 +1,7 @@
+Decided: eject on a hung root closes each lane's pane, drops the local repo's record of its worktree and restarts it, without any stat, git or save on the dead disk.
+Because: "skips saving (noted per lane: unsaved work stays on the disk), and restarts the lanes on the next root from their pushed branches"
+Decided: spawn --supersede skips save_lane and reap for a lane under a hung root, since both stat or lsof its worktree.
+Decided: fix round 1 merges origin/staging so the PR carries staging's docs/workflow.md generator; nothing else changed.
+Rejected: regenerating docs/workflow.md on the old base — staging owns that file and the merge is clean.
+Check: cargo test -p drover --test diagram passes at the head; roots eject_of_a_hung_root test still passes.
+Owner: ejecting a frozen disk now returns at once and moves its lanes; anything unsaved there stays on that disk.
