@@ -1,0 +1,13 @@
+Decided: an owner extend is an issue with a live `extend` pending-action; spawn and drive's launch read that, so the CLI, the board and drive's retry all skip HOST_BUSY and SPAWN_PENDING the same way.
+Because: "It skips the `HOST_BUSY` load/cpu and swap gates, and logs `override` with `why: owner-extend`"
+Because: "Every extend already pending when this lands (round-extended with no spawn since) starts on the first drive pass after install"
+Decided: extend no longer takes drive.lock; spawn's #509 intent key already makes a racing pass's spawn of the same round IN_FLIGHT.
+Because: "Extend never blocks another card's [one more round]"
+Rejected: a new `--owner-extend` spawn flag — drive's retry of an old pending extend would never pass it, so AC7 would need a second path.
+Decided: the board logs the extend decision in `op()` at the tap (after the same STALE check), then queues the spawn per issue (`fleet#n`), not per fleet.
+Because: "A board card leaves needs-human the moment [one more round] is tapped"
+Decided: a re-tap while the extend's start is pending retries the start and grants no extra round (held() accepts it unless merged, closed or parked).
+Decided: tests that used memory pressure (HOST_BUSY) to hold an extend now use MEM_LOW; the #825 load-alone test now holds an answer's start.
+Decided: docs/workflow.md regenerated: it was stale on staging (the diagram test fails at a10730bed), a staging build fix.
+Check: owner_extend.rs drives ten CLI extends at load 4.0/cpu with 4 live spawn markers and drive.lock held; a real board server takes a drive and a second extend while the first spawn sleeps.
+Owner: tapping one more round now starts the lane right away even on a busy Mac; only low memory or disk still hold it, and the card says which.
