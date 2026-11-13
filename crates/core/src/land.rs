@@ -61,7 +61,8 @@ pub fn based(r: &dyn Runner, f: &Fleet, head: &str) -> bool {
 /// (`none`: no run at all), and the checks.
 pub(crate) fn suite(r: &dyn Runner, f: &Fleet, sha: &str) -> (&'static str, Value) {
     let jq = "[.check_runs[] | {__typename: \"CheckRun\", name, status: (.status | ascii_upcase), conclusion: \
-        ((.conclusion // \"\") | ascii_upcase), startedAt: .started_at, detailsUrl: .details_url}]";
+        ((.conclusion // \"\") | ascii_upcase), databaseId: .id, startedAt: .started_at, completedAt: .completed_at, \
+        detailsUrl: .details_url}]";
     let api = format!("repos/{}/commits/{sha}/check-runs?per_page=100", f.repo);
     let all = json(r, "gh", &["api", &api, "--jq", jq]).unwrap_or(json!([]));
     let c = gh::required(&all, &f.required_checks);
