@@ -322,7 +322,6 @@ fn restart(
     Ok(())
 }
 
-/// #776: drop `local`'s record of worktree `wt` or of `branch`'s checkout without touching `wt`'s disk.
 fn forget(local: &Path, wt: &Path, branch: &str) -> Result<()> {
     let head = format!("ref: refs/heads/{branch}");
     for d in std::fs::read_dir(local.join(".git/worktrees"))
