@@ -691,7 +691,7 @@ pub fn held(ctx: &Ctx, cfg: &Config, sp: &Event) -> bool {
     let off = |h: &str| cfg.hosts.get(h).is_some_and(|c| !c.enabled);
     offline(ctx, Some(sp)).is_some()
         || sp.str("machine").is_some() && sp.str("host").is_some_and(off)
-        || crate::roots::unreachable(ctx, cfg, sp)
+        || crate::roots::skip(ctx, cfg, sp).is_some()
 }
 
 /// This host's live agents, then the remote ones.

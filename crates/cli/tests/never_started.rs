@@ -39,6 +39,16 @@ fn fake(level: &str) -> Fake {
         .reply("kill -0", "")
 }
 
+fn low_mem(level: &str) -> Fake {
+    let vm = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 16384.\n\
+        Pages inactive: 16384.\nSwapouts: 100.\n";
+    let low = Fake::default().reply("vm_stat", vm);
+    Fake {
+        replies: [low.replies, fake(level).replies].concat(),
+        ..Default::default()
+    }
+}
+
 fn spawns(c: &drover::Ctx) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count()
 }
@@ -56,11 +66,11 @@ fn stuck(name: &str) -> drover::Ctx {
 #[test]
 fn a_granted_extend_on_a_never_started_lane_spawns_it_once_the_host_admits() {
     let c = stuck("never-started-extend");
-    let (code, out) = run(&c, &fake("4"), &["extend", "sendmeter", "12"]);
-    assert_eq!(code, 0, "{out}");
-    let (code, out) = run(&c, &fake("4"), &["drive"]);
-    assert_eq!((code, spawns(&c)), (0, 0), "still refused on load: {out}");
-    let calm = fake("1");
+    let (code, out) = run(&c, &low_mem("4"), &["extend", "sendmeter", "12"]);
+    assert!(code == 0 && out.contains("(MEM_LOW)"), "{out}");
+    let (code, out) = run(&c, &low_mem("1"), &["drive"]);
+    assert_eq!((code, spawns(&c)), (0, 0), "still refused on memory: {out}");
+    let calm = fake("4");
     let (code, out) = run(&c, &calm, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert!(started("sendmeter-impl-12"), "{out}");
@@ -126,10 +136,10 @@ fn waiting_names_the_card_or_the_load_never_a_question_mark() {
     let card = "sendmeter #12 owner: needs-human: your card's [one more round]";
     assert!(w.contains(card) && w.contains("→ drover extend sendmeter 12"), "{w}");
 
-    assert_eq!(run(&c, &fake("4"), &["extend", "sendmeter", "12"]).0, 0);
+    assert_eq!(run(&c, &low_mem("4"), &["extend", "sendmeter", "12"]).0, 0);
     let w = waiting(&c);
     assert!(
-        w.contains("sendmeter #12 drive: starting, waiting for host: HOST_BUSY"),
+        w.contains("sendmeter #12 drive: extended · starting, waiting for host: MEM_LOW"),
         "{w}"
     );
     let legacy = stuck("never-started-legacy");

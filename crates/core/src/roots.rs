@@ -106,10 +106,47 @@ pub fn answering(ctx: &Ctx, cfg: &Config) -> Vec<PathBuf> {
         .collect()
 }
 
-/// #972: spawn `sp`'s lane is on this host, under a root whose listing does not answer.
-pub fn unreachable(ctx: &Ctx, cfg: &Config, sp: &Event) -> bool {
-    sp.str("machine").is_none() && (local(ctx, cfg).iter()).any(|r| inside(sp, r) && !crate::runner::answers(r))
+/// #976: why a pass skips `sp`'s worktree: `off-root`, `root unreachable` or `root-hung` (its `.git` read timed out).
+pub fn skip(ctx: &Ctx, cfg: &Config, sp: &Event) -> Option<&'static str> {
+    let wt = sp.str("worktree").filter(|_| sp.str("machine").is_none())?;
+    let (roots, set) = (local(ctx, cfg), cfg.hosts.values().find(|h| h.machine.is_none()));
+    let root = roots.iter().find(|r| inside(sp, r));
+    if root.is_none() && set.is_some_and(|h| !h.roots().is_empty()) {
+        return Some("off-root");
+    }
+    if root.is_some_and(|r| !crate::runner::answers(r)) {
+        return Some("root unreachable");
+    }
+    let wait = std::time::Duration::from_secs(cfg.limits.lane_read_secs);
+    let hung = crate::runner::hung(wt, wait, |d| {
+        use std::os::unix::fs::MetadataExt;
+        let dev = std::fs::metadata(d).ok()?.dev();
+        drop(std::fs::read(Path::new(d).join(".git")));
+        Some(dev)
+    });
+    let mut open = HANGS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let open = open.entry(ctx.state.clone()).or_insert_with(|| {
+        let mut set = std::collections::BTreeSet::new();
+        for e in crate::events::shared(&ctx.state).iter().flat_map(|l| l.iter()) {
+            match (e.kind.as_str(), e.str("worktree")) {
+                ("root-hung", Some(w)) => set.insert(w.to_string()),
+                ("root-answers", Some(w)) => set.remove(w),
+                _ => false,
+            };
+        }
+        set
+    });
+    if hung != open.contains(wt) {
+        let (kind, how) = [("root-answers", "answers again"), ("root-hung", "not answering")][usize::from(hung)];
+        let d = json!({"worktree": wt, "under": root, "reason": format!("lane worktree {wt} {how}")});
+        let _ = emit(&ctx.state, cfg, Event::new(ctx.now, &sp.fleet, sp.issue, kind, d));
+        let _ = if hung { open.insert(wt.into()) } else { open.remove(wt) };
+    }
+    hung.then_some("root-hung")
 }
+
+static HANGS: std::sync::Mutex<std::collections::BTreeMap<PathBuf, std::collections::BTreeSet<String>>> =
+    std::sync::Mutex::new(std::collections::BTreeMap::new());
 
 /// #972: the roots whose last `root-hung` / `root-answers` is `root-hung`.
 pub fn hung_now(events: &[Event]) -> Vec<&str> {

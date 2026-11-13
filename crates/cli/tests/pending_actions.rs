@@ -65,6 +65,16 @@ fn fake(level: &str) -> Fake {
         .reply("kill -0", "")
 }
 
+fn low_mem(level: &str) -> Fake {
+    let vm = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 16384.\n\
+        Pages inactive: 16384.\nSwapouts: 100.\n";
+    let low = Fake::default().reply("vm_stat", vm);
+    Fake {
+        replies: [low.replies, fake(level).replies].concat(),
+        ..Default::default()
+    }
+}
+
 fn get(c: &drover::Ctx, r: &Fake, path: &str, now: u64) -> Value {
     let sh = drover::config::Config::load(&c.config).unwrap().shed().unwrap();
     let r = drover::shed::With(r, sh);
@@ -100,28 +110,29 @@ fn pending(c: &drover::Ctx) -> Option<drover::pending::Pending> {
     drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12)
 }
 
-/// AC1: [one more round] while spawns are refused HOST_BUSY: the card goes at once and stays gone through a busy pass,
-/// the issue row, `status` and `waiting` say what it waits for; once load drops, drive starts it with no second tap.
 #[test]
 fn a_held_back_extend_stays_answered_and_drive_starts_it_with_no_second_tap() {
     let (c, sh) = setup("pending-extend");
-    let (busy, calm) = (fake("4"), fake("1"));
+    let (busy, calm) = (low_mem("1"), fake("1"));
     assert_eq!(cards(&c, &calm, c.now).len(), 1, "the needs-human card before the tap");
     let (code, out) = run(&c, &busy, &["extend", "sendmeter", "12"]);
-    assert!(code == 0 && out.contains("waiting for host (HOST_BUSY)"), "{out}");
+    assert!(code == 0 && out.contains("waiting for host (MEM_LOW)"), "{out}");
     let (code, out) = run(&c, &busy, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(spawns(&c), 1, "nothing started on a busy host");
     assert_eq!(cards(&c, &calm, c.now), [], "gone, and stays gone");
     let q = row(&c, &calm);
     assert_eq!(q["pending"]["action"], "extend", "{q}");
-    assert_eq!(q["pending"]["reason"], "HOST_BUSY", "{q}");
-    assert_eq!(q["status"], "starting, waiting for host: HOST_BUSY · 0s", "{q}");
+    assert_eq!(q["pending"]["reason"], "MEM_LOW", "{q}");
+    assert_eq!(
+        q["status"], "extended · starting, waiting for host: MEM_LOW · 0s",
+        "{q}"
+    );
     let (_, st) = run(&c, &calm, &["status", "sendmeter"]);
-    assert!(st.contains("starting, waiting for host: HOST_BUSY"), "{st}");
+    assert!(st.contains("extended · starting, waiting for host: MEM_LOW"), "{st}");
     let (_, w) = run(&c, &calm, &["waiting", "sendmeter"]);
     assert!(
-        w.contains("sendmeter #12 drive: starting, waiting for host: HOST_BUSY"),
+        w.contains("sendmeter #12 drive: extended · starting, waiting for host: MEM_LOW"),
         "{w}"
     );
 
@@ -137,7 +148,7 @@ fn a_held_back_extend_stays_answered_and_drive_starts_it_with_no_second_tap() {
 #[test]
 fn a_start_pending_for_30_minutes_brings_its_card_back_once() {
     let (mut c, sh) = setup("pending-late");
-    let (busy, calm) = (fake("4"), fake("1"));
+    let (busy, calm) = (low_mem("1"), fake("1"));
     assert_eq!(run(&c, &busy, &["extend", "sendmeter", "12"]).0, 0);
     assert_eq!(cards(&c, &calm, c.now + 1799), []);
     let back = cards(&c, &calm, c.now + 1800);
@@ -146,7 +157,7 @@ fn a_start_pending_for_30_minutes_brings_its_card_back_once() {
         back[0],
         (
             12,
-            "extend did not start a lane (still waiting after 30m): HOST_BUSY".into()
+            "extend did not start a lane (still waiting after 30m): MEM_LOW".into()
         )
     );
     c.now += 1800;
@@ -167,7 +178,7 @@ fn a_start_pending_for_30_minutes_brings_its_card_back_once() {
 #[test]
 fn soft_refusals_keep_it_pending_and_a_hard_one_brings_the_card_back_at_once() {
     let (c, sh) = setup("pending-hard");
-    let busy = fake("4");
+    let busy = low_mem("1");
     assert_eq!(run(&c, &busy, &["extend", "sendmeter", "12"]).0, 0);
     for code in drover::pending::SOFT {
         assert!(
@@ -284,7 +295,12 @@ fn an_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once() {
 
 #[test]
 fn a_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_admitted() {
-    let (mut c, sh) = setup("pending-load");
+    let mut c = ctx(&tmpdir("pending-load"), CONFIG);
+    let sh = FakeShed::attached(&c);
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
+    let ask = json!({"id": "q1", "question": "Which DB?", "options": ["sqlite", "postgres"], "kind": "owner",
+        "agent": "sendmeter-impl-12"});
+    ev(&c, 20, "needs-decision", ask);
     let load = Out {
         stdout: "{ 40.00 3.00 2.00 }\n".into(),
         ..Out::default()
@@ -305,16 +321,16 @@ fn a_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_
         ..Fake::default()
     };
     let calm = fake("1");
-    let (code, out) = run(&c, &loaded, &["extend", "sendmeter", "12"]);
-    assert!(code == 0 && out.contains("waiting for host (HOST_BUSY)"), "{out}");
+    let (code, out) = run(&c, &loaded, &["answer", "sendmeter", "q1", "1"]);
+    assert!(code == 0 && out.contains("asking agent gone"), "{out}");
     c.now += 7200;
     let (code, out) = run(&c, &loaded, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(spawns(&c), 1, "nothing started on a loaded host");
+    assert_eq!(spawns(&c), 0, "nothing started on a loaded host");
     assert_eq!(pending(&c).unwrap().reason.as_deref(), Some(drover::pending::LOAD));
     assert_eq!(cards(&c, &calm, c.now), [], "two hours on load alone: no card");
     let (code, out) = run(&c, &calm, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(started(&sh), 1, "{out}");
-    assert_eq!((spawns(&c), pending(&c)), (2, None));
+    assert_eq!((spawns(&c), pending(&c)), (1, None));
 }

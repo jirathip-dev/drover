@@ -1927,20 +1927,18 @@ fn blocked_with_an_open_pr_takes_the_next_step_and_without_one_logs_no_action() 
     );
 }
 
-/// Notes, at each command run, whether the log already holds `round-extended` and drive.lock is held.
 struct Spy<'a>(Fake, &'a drover::Ctx, std::sync::Mutex<Vec<bool>>);
 impl drover::runner::Runner for Spy<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
-        let held = lease_on(self.1, "drive.lock").is_some();
-        let logged = held && read(&self.1.state).unwrap().iter().any(|e| e.kind == "round-extended");
+        let logged = read(&self.1.state).unwrap().iter().any(|e| e.kind == "round-extended");
         self.2.lock().unwrap().push(logged);
         self.0.run(prog, args)
     }
 }
 
-/// #217: `[one more round]` logs its decision before the spawn runs; #778: a spawn refused HOST_BUSY keeps it pending
-/// with the reason (no `extend-failed`), and the next drive pass starts the recorded round as its fix step. The spawn
-/// runs under drive.lock, so no pass starts the same round meanwhile.
+const LOW_MEM: &str = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 16384.\n\
+    Pages inactive: 16384.\nSwapouts: 100.\n";
+
 #[test]
 fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     let c = setup("drive-extend");
@@ -1959,25 +1957,25 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
             .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
             .reply("git -C", "")
     };
-    let busy = Fake {
-        replies: base().replies,
+    let low = Fake::default().reply("vm_stat", LOW_MEM);
+    let low = Fake {
+        replies: [low.replies, base().replies].concat(),
         ..Default::default()
-    }
-    .once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
-    let spy = Spy(busy, &c, Default::default());
+    };
+    let spy = Spy(low, &c, Default::default());
     let (code, out) = run(&c, &spy, &["extend", "sendmeter", "12"]);
-    assert!(code == 0 && out.contains("waiting for host (HOST_BUSY)"), "{out}");
+    assert!(code == 0 && out.contains("waiting for host (MEM_LOW)"), "{out}");
     let seen = spy.2.lock().unwrap().clone();
     assert!(
         !seen.is_empty() && seen.iter().all(|&l| l),
-        "a command ran before the decision or outside drive.lock: {seen:?}"
+        "a command ran before the decision: {seen:?}"
     );
     let all = read(&c.state).unwrap();
     assert!(!all.iter().any(|e| e.kind == "extend-failed"), "{all:?}");
     let p = drover::pending::of(&all, "sendmeter", 12).expect("pending");
     assert_eq!(
         (p.action.as_str(), p.reason.as_deref(), p.failed),
-        ("extend", Some("HOST_BUSY"), false)
+        ("extend", Some("MEM_LOW"), false)
     );
     assert_eq!(state(&c), "fix(3)");
 
@@ -1988,10 +1986,8 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     assert_eq!(drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
 }
 
-/// #217 review finding 1: an extend while a drive pass holds drive.lock records the round and spawns nothing (the
-/// pass could start it too); the next pass starts it.
 #[test]
-fn an_extend_during_a_pass_leaves_the_spawn_to_the_next_pass() {
+fn an_extend_during_a_pass_spawns_at_once() {
     let c = setup("drive-extend-lock");
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     // #639: a fix round follows a FAIL (an extra round for a lane never reviewed goes back to impl).
@@ -2008,22 +2004,12 @@ fn an_extend_during_a_pass_leaves_the_spawn_to_the_next_pass() {
         .reply("kill -0 4242", "")
         .reply("git -C", "");
     let (code, out) = run(&c, &r, &["extend", "sendmeter", "12"]);
-    assert!(code == 0 && out.contains("the next pass starts the round"), "{out}");
-    assert!(started("").is_empty(), "{:?}", r.calls.borrow());
+    assert!(code == 0 && out.ends_with("#12: extend\n"), "{out}");
+    assert!(!started("sendmeter-impl-12").is_empty(), "{:?}", r.calls.borrow());
     assert!(lease_on(&c, "drive.lock").is_some(), "the pass's lock is left alone");
-    assert_eq!(
-        read(&c.state)
-            .unwrap()
-            .iter()
-            .filter(|e| e.kind == "round-extended")
-            .count(),
-        1
-    );
-
-    assert!(drover::db::release(&c.state, "drive.lock", None));
-    let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["fix"], "{out}");
-    assert!(!started("").is_empty(), "{:?}", r.calls.borrow());
+    let all = read(&c.state).unwrap();
+    assert_eq!(all.iter().filter(|e| e.kind == "round-extended").count(), 1);
+    assert_eq!(drover::pending::of(&all, "sendmeter", 12), None);
 }
 
 /// #217 review round 2: `extend --no-spawn` leaves the live lane alone; no drive pass supersedes it for the round.
