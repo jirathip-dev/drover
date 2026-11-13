@@ -1,0 +1,10 @@
+Decided: background QoS is set on the lane's shell (`taskpolicy -b -p $$`) after its exports, so the harness exec'd from it and every build inherit it
+Because: crates/core/src/spawn.rs:190
+Rejected: prefixing each provider's exec line with `taskpolicy -b` — five providers and the ACP adapter line would each need it; the shell step already covers all of them
+Decided: background iff the plan's family is impl or rev; design, architect and orchestrator families keep normal priority
+Because: "drive, tick, serve, design, architect and orchestrator lanes keep their normal priority"
+Decided: `/usr/sbin/taskpolicy` by absolute path, since a pane's PATH may lack /usr/sbin; otherwise renice 10 plus ionice -c3 when present
+Because: "Other OSes use `nice -n 10` plus `ionice -c3` where available."
+Check: on a Mac, `sh -c "<impl export line> && ps -o pri= -p \$\$"` prints 4 (the spawn.rs test runs exactly this)
+Check: host admission (hosts.rs DISK_LOW/MEM_LOW/HOST_BUSY) is untouched by the diff
+Owner: build and review lanes now yield the Mac to drive, serve and the orchestrators
