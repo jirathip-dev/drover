@@ -1,4 +1,4 @@
-//! #419: the lesson role: `herdsman lesson digest` (a fleet's recent mistakes) and `herdsman lesson` (its issue and
+//! #419: the lesson role: `drover lesson digest` (a fleet's recent mistakes) and `drover lesson` (its issue and
 //! lane), run weekly by `tick` and on demand by a conductor.
 use crate::access::{civil_month_day, civil_year};
 use crate::config::Config;
@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use std::io::Write;
 
-/// `herdsman lesson digest`: the last `days` of rev FAIL findings, the owner's lines in the fleet's conductor threads,
+/// `drover lesson digest`: the last `days` of rev FAIL findings, the owner's lines in the fleet's conductor threads,
 /// `by: owner` events and reverts on integration, secret-looking values redacted.
 pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -> Result<String> {
     let f = cfg.fleet(fleet)?;
@@ -76,11 +76,11 @@ pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -
         }
     }
     // #510: the lesson checks on integration, each with what this run does with it.
-    let show = format!("{integration}:.herdsman/rules.md");
-    let rules = ok(r, "git", &["-C", local.as_str(), "show", &show]).unwrap_or_default();
+    let show = |p: &str| ok(r, "git", &["-C", local.as_str(), "show", &format!("{integration}:{p}")]).ok();
+    let rules = crate::repo_read("rules.md", show).unwrap_or_default();
     let checks = review(ctx, cfg, r, fleet, &rules)?;
     if !checks.is_empty() {
-        s += "\n## Lesson checks (`herdsman lesson apply` promotes and retires them)\n\n";
+        s += "\n## Lesson checks (`drover lesson apply` promotes and retires them)\n\n";
     }
     for (c, stats, decision) in checks {
         s += &format!("- {}: {stats} → {decision}\n", c.name);
@@ -88,7 +88,7 @@ pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -
     Ok(s.lines().map(crate::lanes::redact).collect::<Vec<_>>().join("\n") + "\n")
 }
 
-/// `herdsman lesson`: file this week's lessons issue, queue it on top and spawn its `lesson` lane; false when the
+/// `drover lesson`: file this week's lessons issue, queue it on top and spawn its `lesson` lane; false when the
 /// lane's prompt was not confirmed (exit 4, as `spawn`). #576: the board's run logs the paired device it came from (`by`).
 pub fn run(
     ctx: &Ctx,
@@ -175,7 +175,7 @@ pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
     Ok(())
 }
 
-/// #419: a lesson lane's `done --no-change` before any review: no class repeated, so herdsman closes its issue with
+/// #419: a lesson lane's `done --no-change` before any review: no class repeated, so drover closes its issue with
 /// that line.
 pub fn done(
     ctx: &Ctx,
@@ -207,7 +207,8 @@ pub fn done(
 }
 
 /// #733: rev's rule for a lesson PR, the finding a prose-only one's PASS is recorded as a FAIL with.
-pub const PROSE_ONLY: &str = "- blocking [lesson] .herdsman/rules.md:1: this lesson PR adds or changes no enforcer \
+const RULES: [&str; 2] = [".drover/rules.md", ".herdsman/rules.md"];
+pub const PROSE_ONLY: &str = "- blocking [lesson] .drover/rules.md:1: this lesson PR adds or changes no enforcer \
 (a CI step, a test, a type, a lint rule, a lesson check) and retires no rules line\n  Proof: spec\n  > A PR that only \
 edits prose is a FAIL in rev, unless it retires lines.\n  roles/lesson.md:3 says each class is fixed by a check";
 
@@ -217,7 +218,7 @@ pub fn is_lesson(ctx: &Ctx, st: Option<&crate::events::IssueState>, (fleet, n): 
         || crate::gh::cached_title(ctx, fleet, n).is_some_and(|t| t.starts_with("lessons: "))
 }
 
-/// #733: whether a PR's unified `diff` only edits prose: every file Markdown, no `.herdsman/rules.md` line removed or
+/// #733: whether a PR's unified `diff` only edits prose: every file Markdown, no `.drover/rules.md` line removed or
 /// changed (a retirement or promotion), no lesson check added.
 pub fn prose_only(diff: &str) -> bool {
     let (mut file, mut added) = ("", String::new());
@@ -230,11 +231,11 @@ pub fn prose_only(diff: &str) -> bool {
             {
                 return false;
             }
-        } else if file == ".herdsman/rules.md" && l.starts_with('-') && !l.starts_with("---") {
+        } else if RULES.contains(&file) && l.starts_with('-') && !l.starts_with("---") {
             return false;
         } else if let Some(a) = l
             .strip_prefix('+')
-            .filter(|_| file == ".herdsman/rules.md" && !l.starts_with("+++"))
+            .filter(|_| RULES.contains(&file) && !l.starts_with("+++"))
         {
             added += &format!("{a}\n");
         }
@@ -244,10 +245,10 @@ pub fn prose_only(diff: &str) -> bool {
 
 /// #517: the one prompt a lesson lane gets when its turn ends with no push and no `done`.
 pub fn prompt(fleet: &str, n: u64) -> String {
-    format!("no repeated class? end with `herdsman done --no-change \"no repeated class\" {fleet} {n}`")
+    format!("no repeated class? end with `drover done --no-change \"no repeated class\" {fleet} {n}`")
 }
 
-/// #510: a check a lesson PR added: a `.herdsman/rules.md` line `- don't X (enforced by: <name> `<cmd>`, shadow since
+/// #510: a check a lesson PR added: a `.drover/rules.md` line `- don't X (enforced by: <name> `<cmd>`, shadow since
 /// <date>)` (or `active since`). A line without that mark is hand-written: the lesson role never runs or changes it.
 pub struct LessonCheck {
     pub line: usize,
@@ -285,7 +286,7 @@ fn failing(r: &dyn Runner, dir: &std::path::Path, cs: Vec<LessonCheck>) -> Vec<(
     cs.into_iter().filter_map(run).collect()
 }
 
-/// #510: `herdsman lesson-check` (CI, at the repo root): a shadow check that fails is reported as would-fail (stdout and
+/// #510: `drover lesson-check` (CI, at the repo root): a shadow check that fails is reported as would-fail (stdout and
 /// `$GITHUB_STEP_SUMMARY`) and never fails the build; an active one that fails exits 1.
 pub fn ci(r: &dyn Runner, rules: &std::path::Path, out: &mut dyn Write) -> Result<i32> {
     let text = std::fs::read_to_string(rules).unwrap_or_default();
@@ -306,7 +307,7 @@ pub fn ci(r: &dyn Runner, rules: &std::path::Path, out: &mut dyn Write) -> Resul
 /// #510: at a merge's premerge (`wt`: the PR merged with integration) each shadow check runs; one `lesson-shadow`
 /// event (the checks run, those that would fail) is the history the next lesson run promotes or retires by.
 pub fn record(ctx: &Ctx, r: &dyn Runner, wt: &std::path::Path, (fleet, n): (&str, u64)) -> Result<()> {
-    let text = std::fs::read_to_string(wt.join(".herdsman/rules.md")).unwrap_or_default();
+    let text = std::fs::read_to_string(crate::repo_path(&wt.join(".drover/rules.md"))).unwrap_or_default();
     let shadow: Vec<LessonCheck> = checks(&text).into_iter().filter(|c| !c.active).collect();
     if shadow.is_empty() {
         return Ok(());
@@ -317,7 +318,8 @@ pub fn record(ctx: &Ctx, r: &dyn Runner, wt: &std::path::Path, (fleet, n): (&str
     crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "lesson-shadow", d))
 }
 
-fn ymd(day: u64) -> String {
+/// #510: day number `day` as `YYYY-MM-DD`.
+pub fn ymd(day: u64) -> String {
     let (m, d) = civil_month_day(day);
     format!("{}-{m:02}-{d:02}", civil_year(day))
 }
@@ -394,7 +396,7 @@ pub fn review(
     Ok(cs.into_iter().map(decide).collect())
 }
 
-/// #510: `herdsman lesson apply`: the lesson run rewrites `rules` (its worktree's `.herdsman/rules.md`) by `review`: a
+/// #510: `drover lesson apply`: the lesson run rewrites `rules` (its worktree's `.drover/rules.md`) by `review`: a
 /// promoted check becomes `active since <today>`, a retired one is deleted (the commit is its history); fix-or-remove
 /// ones are listed for the lane. Hand-written lines stay byte for byte.
 pub fn apply(

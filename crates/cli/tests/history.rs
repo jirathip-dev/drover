@@ -3,8 +3,8 @@
 //! `events?since=&until=` windows).
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";

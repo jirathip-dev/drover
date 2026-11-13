@@ -4,7 +4,7 @@
 //! the `.blocks.json` goldens.
 mod common;
 use common::*;
-use herdsman::lanes::{body, now, roll, said, short, spin, strip, GAP};
+use drover::lanes::{body, now, roll, said, short, spin, strip, GAP};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -175,7 +175,7 @@ fn an_acp_transcript_keeps_its_line_breaks_and_one_line_per_tool() {
     assert_eq!(kinds, ["txt", "run", "run", "run", "run", "txt"]);
     assert_eq!(
         full[0].1,
-        "<div class=txt>&#62; # Brief — herdsman-impl-12 (acme/sendmeter#12)\nImplement #12: retry a failed send once.\nRun `cargo test` before you push.</div>"
+        "<div class=txt>&#62; # Brief — drover-impl-12 (acme/sendmeter#12)\nImplement #12: retry a failed send once.\nRun `cargo test` before you push.</div>"
     );
     assert_eq!(
         full[1].1,
@@ -253,7 +253,7 @@ fn a_session_transcript_keeps_prompts_and_final_replies() {
     assert_eq!(now.as_deref(), Some("now: running cargo test 2>&1 | tee t.log"));
     // The turn's final reply after it: nothing is running now.
     let done = r#"{"type": "assistant", "message": {"content": [{"type": "text", "text": "Tests pass."}]}}"#;
-    assert_eq!(herdsman::lanes::said(&format!("{jsonl}{done}\n")).1, None);
+    assert_eq!(drover::lanes::said(&format!("{jsonl}{done}\n")).1, None);
 }
 
 /// #260: the pane's `now:` line is its last tool line (prose `⏺` lines and status bars skipped), Claude and Hermes.

@@ -1,4 +1,4 @@
-//! #92 `herdsman drive`: one pass of the fleet loop, no AI; each action logs a passive `driven` event.
+//! #92 `drover drive`: one pass of the fleet loop, no AI; each action logs a passive `driven` event.
 use crate::config::Config;
 use crate::events::{append, emit, fold, read, Event, IssueState};
 use crate::overlap::git;
@@ -13,7 +13,7 @@ use std::io::Write;
 use std::path::Path;
 
 /// #677: drive's one prompt on a `done` whose why note was refused.
-pub const WHY_NUDGE: &str = "your why note was refused: ";
+pub const WHY_NUDGE: &str = "your `turn done` was refused: ";
 /// #168: a pass's lease outlives a hung pass by this much; #344: a dead holder's goes at once.
 const STALE_LOCK_SECS: u64 = 3600;
 
@@ -219,7 +219,7 @@ pub fn in_act() -> bool {
     IN_ACT.get()
 }
 
-/// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (#389: none from a lane on
+/// #304: `drover kick`: drive `issue`'s due steps now in a detached `kick --now` (#389: none from a lane on
 /// another host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
 /// own session.
 pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Option<u32> {
@@ -824,20 +824,20 @@ pub fn drive(
     // #343: a slow pass folds the log into its checkpoint, and rotates a log over `rotate_mb`; #365: reads backlogs.
     if !fast && KICK.get().is_none() {
         for n in &fleets {
-            crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("herdsman: {n} backlog: {e:#}"));
+            crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("drover: {n} backlog: {e:#}"));
         }
-        crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("herdsman: stale panes: {e:#}"));
-        crate::check::dedup(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("herdsman: lane-dup: {e:#}"));
+        crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: stale panes: {e:#}"));
+        crate::check::dedup(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: lane-dup: {e:#}"));
         let max = cfg.limits.rotate_mb << 20;
         let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
-        cp.unwrap_or_else(|e| eprintln!("herdsman: checkpoint: {e:#}"));
+        cp.unwrap_or_else(|e| eprintln!("drover: checkpoint: {e:#}"));
     }
     lap("backlog, checkpoint");
     let secs = t0.elapsed().as_secs_f64();
     if t0.elapsed().as_secs() > cfg.limits.pass_max_secs {
         let r1 = |x: f64| (x * 10.0).round() / 10.0;
         let d = json!({"fast": fast, "secs": r1(secs), "step": slow.1, "step_secs": r1(slow.2), "kick": KICK.get()});
-        let _ = append(&ctx.state, &Event::new(ctx.now, "herdsman", None, "pass-slow", d));
+        let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-slow", d));
     }
     res
 }
@@ -1165,14 +1165,10 @@ fn pass(
             .is_some_and(|r| f.family(r) == "rev")
     };
     // #207: every written verdict is recorded before any merge (and the auto-update after it) moves a head.
-    let verdict = |w: &Waiting| {
-        w.next_cmd
-            .as_deref()
-            .is_some_and(|c| c.starts_with("herdsman verdict "))
-    };
+    let verdict = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover verdict "));
     // #560: verdicts, then merges, then reviews of pushed heads, then fix and update rounds and respawns (new starts
     // follow every fleet's pass): a host short of room spends it in that order.
-    let merge = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("herdsman merge "));
+    let merge = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover merge "));
     waits.sort_by_key(|(s, w)| (!verdict(w), !merge(w), !rev(w), conflicts.contains_key(&s.issue)));
     let (mut go, mut updated) = (true, false);
     for (s, w) in waits
@@ -1221,13 +1217,13 @@ fn pass(
         } else if w.who == "drive" && matches!(w.what.as_str(), waiting::TURN_NUDGE | waiting::TURN_GO_ON) && !fast {
             // #511: a `done` with nothing new pushed is nudged once; a `working` lane gone idle is told to go on.
             let (state, text) = if w.what == waiting::TURN_NUDGE {
-                let text = "herdsman: you reported `done`, but nothing new is pushed at the PR head (or there is no \
-                    PR). Push and open the PR, then `herdsman turn done`; or `herdsman turn blocked --why <reason>`.";
+                let text = "drover: you reported `done`, but nothing new is pushed at the PR head (or there is no \
+                    PR). Push and open the PR, then `drover turn done`; or `drover turn blocked --why <reason>`.";
                 ("done", text)
             } else {
                 (
                     "working",
-                    "herdsman: continue the task; end the turn with `herdsman turn …`.",
+                    "drover: continue the task; end the turn with `drover turn …`.",
                 )
             };
             let sent = tell(r, &events, &w.lane, text);
@@ -1457,7 +1453,7 @@ fn no_proof(
     let told = mine.iter().any(|e| e.data["prompted"] == true);
     if !seen {
         act(ctx, cfg, r, out, ev, (fleet, Some(n), "verdict"), args)?;
-        let text = format!("herdsman verdict refused your verdict.md: REFUSED NO_PROOF: {why}. Add the Proof blocks.");
+        let text = format!("drover verdict refused your verdict.md: REFUSED NO_PROOF: {why}. Add the Proof blocks.");
         let tell =
             |p| crate::herdr::reply(&on, false, lane, p, &text).is_ok() && crate::herdr::landed(&on, lane, p, &text);
         let prompted = open.filter(|_| !told).is_some_and(tell);
@@ -1515,7 +1511,7 @@ fn repro_refused(
     let pane = sp
         .and_then(|e| e.str("pane"))
         .filter(|_| !told && agents.iter().any(|a| a["name"] == lane));
-    let text = format!("herdsman verdict refused your verdict.md: REFUSED NO_REPRO: {why}. Fix the Repro block.");
+    let text = format!("drover verdict refused your verdict.md: REFUSED NO_REPRO: {why}. Fix the Repro block.");
     let tell = |p| crate::herdr::reply(&on, false, lane, p, &text).is_ok() && crate::herdr::landed(&on, lane, p, &text);
     let prompted = pane.is_some_and(tell);
     let d = json!({"sha": args[5], "hash": hash, "agent": lane, "why": why, "prompted": prompted});
@@ -1720,7 +1716,7 @@ fn handoff(
             let told = |e: &&Event| e.is("why-nudged", fleet, s.issue) && e.str("agent") == Some(&w.lane) && e.ts >= sp;
             match ev.iter().rfind(told) {
                 None => {
-                    let text = format!("herdsman: {WHY_NUDGE}{}. Fix why.md, then `herdsman turn done`.", why.1);
+                    let text = format!("drover: {WHY_NUDGE}{}. Fix it, then `drover turn done`.", why.1);
                     let sent = tell(r, ev, &w.lane, &text);
                     writeln!(out, "{fleet} #{} why note refused: nudged", s.issue)?;
                     let d = json!({"agent": w.lane, "note": why.1, "sent": sent});
@@ -1740,7 +1736,7 @@ fn handoff(
 }
 
 /// #319: a settled fix lane left the head of the FAIL as it was. A CI-only FAIL (a gate's CI red, or every blocker tagged
-/// `[ci]`) with CI green there now is resolved: a PASS at that head, so it merges. Any other FAIL after `herdsman done
+/// `[ci]`) with CI green there now is resolved: a PASS at that head, so it merges. Any other FAIL after `drover done
 /// --no-change` is reviewed again at the same head (`waiting`). True if `fix-no-change` was logged.
 fn no_change(
     ctx: &Ctx,
@@ -1784,7 +1780,7 @@ fn no_change(
     Ok(true)
 }
 
-/// #285: a tracked issue whose PR (as last read) was merged or closed outside herdsman is logged once, no comment:
+/// #285: a tracked issue whose PR (as last read) was merged or closed outside drover is logged once, no comment:
 /// `merged`/`closed` `by: external`, or `blocked` while its issue is open; `clean` takes its lanes.
 fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let events = read(&ctx.state)?;
@@ -1807,12 +1803,12 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
             Some("CLOSED") if closed()? => ("closed", json!({})),
             Some("CLOSED") if !events.iter().any(seen) => (
                 "blocked",
-                json!({"code": "PR_CLOSED", "reason": "PR closed outside herdsman"}),
+                json!({"code": "PR_CLOSED", "reason": "PR closed outside drover"}),
             ),
             _ => continue,
         };
         (d["pr"], d["by"]) = (json!(num), json!("external"));
-        writeln!(out, "{fleet} #{} {kind} outside herdsman (PR #{num})", s.issue)?;
+        writeln!(out, "{fleet} #{} {kind} outside drover (PR #{num})", s.issue)?;
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))?;
     }
     Ok(())
@@ -2166,6 +2162,6 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
         return Ok(code);
     }
     writeln!(out, "{who} {step}: {result}")?;
-    let d = json!({"step": step, "cmd": format!("herdsman {}", c.join(" ")), "result": result, "code": code});
+    let d = json!({"step": step, "cmd": format!("drover {}", c.join(" ")), "result": result, "code": code});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "driven", d)).map(|()| code)
 }

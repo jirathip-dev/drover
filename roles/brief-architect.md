@@ -3,5 +3,5 @@
   the data shapes, the module boundaries, a statechart where state matters, the callers' usage first. No product code.
   Push it and end your turn. The owner then approves, revises (a note in your next brief) or rejects it; the design
   (if queued) or impl continues on this branch.
-- Architect lanes take no part in `herdsman verdict` or `herdsman merge`.
+- Architect lanes take no part in `drover verdict` or `drover merge`.
 - Report: what you decided and where.

@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 use std::sync::{Mutex, MutexGuard};
 
@@ -15,19 +15,19 @@ fn env() -> MutexGuard<'static, ()> {
     ENV.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn log(c: &herdsman::Ctx, ts: u64, fleet: &str, issue: Option<u64>, kind: &str, d: Value) {
+fn log(c: &drover::Ctx, ts: u64, fleet: &str, issue: Option<u64>, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, fleet, issue, kind, d)).unwrap();
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
-    herdsman::Ctx { now, ..c.clone() }
+fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
+    drover::Ctx { now, ..c.clone() }
 }
 
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let other = "[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/does-not-matter/other\"\n\
                  integration = \"staging\"\n\n[fleet.other.role.impl]\nharness = \"hermes\"\n\n\
                  [fleet.other.role.orchestrator]\nharness = \"claude\"\n";
@@ -54,7 +54,7 @@ fn setup(name: &str) -> herdsman::Ctx {
     c
 }
 
-fn said(c: &herdsman::Ctx, ts: u64, t: &str, text: &str) {
+fn said(c: &drover::Ctx, ts: u64, t: &str, text: &str) {
     let fleet = if t == "t1" { "sendmeter" } else { "other" };
     log(
         c,
@@ -66,13 +66,13 @@ fn said(c: &herdsman::Ctx, ts: u64, t: &str, text: &str) {
     );
 }
 
-fn design_ask(c: &herdsman::Ctx, ts: u64) {
+fn design_ask(c: &drover::Ctx, ts: u64) {
     let d = json!({"id": "q1", "question": "Design for #36 is ready (abc1234): approve, revise (type a note) or reject?",
         "options": ["approve", "revise", "reject"], "recommend": null, "kind": "owner", "design": true, "role": "design"});
     log(c, ts, "sendmeter", Some(36), "needs-decision", d);
 }
 
-fn needs_human(c: &herdsman::Ctx, ts: u64) {
+fn needs_human(c: &drover::Ctx, ts: u64) {
     let d = json!({"code": "ROUND_LIMIT", "reason": "review rounds exceed 3"});
     log(c, ts, "sendmeter", Some(36), "needs-human", d);
 }
@@ -85,24 +85,24 @@ fn host() -> Fake {
         .reply("herdr", "")
 }
 
-fn by(c: &herdsman::Ctx, t: Option<&str>, now: u64, args: &[&str]) -> (i32, String) {
+fn by(c: &drover::Ctx, t: Option<&str>, now: u64, args: &[&str]) -> (i32, String) {
     match t {
         Some(t) => {
-            std::env::set_var("HERDSMAN_LANE", "sendmeter:-:orchestrator");
-            std::env::set_var("HERDSMAN_THREAD", t);
+            std::env::set_var("DROVER_LANE", "sendmeter:-:orchestrator");
+            std::env::set_var("DROVER_THREAD", t);
         }
         None => {
-            std::env::remove_var("HERDSMAN_LANE");
-            std::env::remove_var("HERDSMAN_THREAD");
+            std::env::remove_var("DROVER_LANE");
+            std::env::remove_var("DROVER_THREAD");
         }
     }
     let got = run(&at(c, now), &host(), args);
-    std::env::remove_var("HERDSMAN_LANE");
-    std::env::remove_var("HERDSMAN_THREAD");
+    std::env::remove_var("DROVER_LANE");
+    std::env::remove_var("DROVER_THREAD");
     got
 }
 
-fn chat(c: &herdsman::Ctx, now: u64) -> String {
+fn chat(c: &drover::Ctx, now: u64) -> String {
     let r = Fake::default();
     let c = at(c, now);
     let s = Server::new(&c, &r, Some(ADDR.into()));
@@ -296,6 +296,6 @@ fn a_basis_extend_posts_an_fyi_whose_change_parks_within_30_minutes_only() {
     let (code, out) = by(&c, None, NOW + 29 * 60, &["answer", "sendmeter", "q1", "park"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(kinds(&c, "parked")[0].str("by"), Some("owner"));
-    let st = herdsman::events::fold(&read(&c.state).unwrap());
+    let st = drover::events::fold(&read(&c.state).unwrap());
     assert_eq!(st[&("sendmeter".to_string(), 36)].state, "parked");
 }

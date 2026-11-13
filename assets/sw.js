@@ -1,11 +1,11 @@
-// herdsman service worker: the page stale-while-revalidate (the cached copy paints first, the network
+// drover service worker: the page stale-while-revalidate (the cached copy paints first, the network
 // refresh replaces it on a 200; no copy yet: the network answer as is), the `a/@V/` assets precached at
 // install (immutable), other static files cache-first; the live /lane transcript, the /live stream,
 // /herd.json, the JSON API (#265, `api/…`) and `?…` reads are never cached. A navigation to any other URL (#67: iOS restoring a fetch
 // URL as the page) gets the page: the cached copy, else the network's; but a thread's file (`thread/…`, #406) is always the file.
-// Paths are under the registration's scope (`/` live, e.g. `/herdsman/` for the Pages demo); one cache per scope and
+// Paths are under the registration's scope (`/` live, e.g. `/drover/` for the Pages demo); one cache per scope and
 // build (#241: a new build drops the old one, so `themes/…`, cache-first, never outlives an upgrade).
-const P = self.registration ? new URL(self.registration.scope).pathname : '/', C = 'herdsman-v6-@V:' + P;
+const P = self.registration ? new URL(self.registration.scope).pathname : '/', C = 'drover-v6-@V:' + P;
 const A = ['serve.css', 'herd.css', 'serve.js', 'herd.js', 'themes/farm/sprites.svg', 'themes/farm/theme.json'].map(f => P + 'a/@V/' + f);
 self.addEventListener('install', e => { self.skipWaiting(); e.waitUntil(caches.open(C).then(c => c.addAll(A)).catch(() => {})); });
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k.endsWith(':' + P) && k !== C).map(k => caches.delete(k)))).then(() => self.clients.claim())));
@@ -33,7 +33,7 @@ self.addEventListener('fetch', e => {
 // Web push (#18): show the alert; a tap opens (or focuses) the page on its tab and issue.
 self.addEventListener('push', e => {
   const j = e.data ? e.data.json() : {};
-  e.waitUntil(self.registration.showNotification(j.title || 'herdsman', { body: j.body || '', data: j.url || P }));
+  e.waitUntil(self.registration.showNotification(j.title || 'drover', { body: j.body || '', data: j.url || P }));
 });
 self.addEventListener('notificationclick', e => {
   e.notification.close();

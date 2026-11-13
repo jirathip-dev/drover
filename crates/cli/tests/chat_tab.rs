@@ -3,7 +3,7 @@
 mod common;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use common::*;
-use herdsman::serve::Server;
+use drover::serve::Server;
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -27,7 +27,7 @@ fn frags(s: &Server, cookie: &str, now: u64) -> (String, String) {
 }
 
 /// The demo's fleets and log, in a temp dir; its thread files' paths are relative to the repo root.
-fn demo() -> herdsman::Ctx {
+fn demo() -> drover::Ctx {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     std::env::set_current_dir(&root).unwrap();
     let d = tmpdir("chat-demo");
@@ -74,7 +74,7 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
         "<code>/v1/search</code>",
         "<figure class=im><img src=\"thread/t4/IMG%5F2041%2EPNG\"",
         "<figcaption>IMG_2041.PNG · 218 KB</figcaption>",
-        " class=\"blk run\"><summary><span class=k>$</span><span class=cmd>herdsman brief acme-api 19</span>",
+        " class=\"blk run\"><summary><span class=k>$</span><span class=cmd>drover brief acme-api 19</span>",
         "<p class=ans>✓ 1. per API key <span class=m>· you · ",
         "<p class=ans>✓ other: \"600 a minute, burst 100\" <span class=m>· you · ",
         "<a class=tf href=\"thread/t4/429%2Dbody%2Ejson\"><span>▤ 429-body.json</span><span class=m>87 B</span></a>",
@@ -105,7 +105,7 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
 }
 
 /// The conductor's tool rows come from the lane hook; a conductor's thread with `fleet` and conductor role.
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
@@ -285,15 +285,12 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     let toml = c.config.to_str().unwrap();
     let (code, out) = run(&c, &r, &["thread", "reply", "t1", "x", "--file", toml]);
     assert_ne!(code, 0, "{out}");
-    assert!(
-        !herdsman::events::jsonl(&c.state).unwrap().contains(toml),
-        "never logged"
-    );
+    assert!(!drover::events::jsonl(&c.state).unwrap().contains(toml), "never logged");
     std::os::unix::fs::symlink(&c.config, folder.join("link.toml")).unwrap();
     let line = |n: &str, p: &str| {
         format!("{{\"ts\":{T},\"fleet\":\"sendmeter\",\"type\":\"thread-msg\",\"thread\":\"t1\",\"from\":\"conductor\",\"text\":\"x\",\"files\":[{{\"name\":\"{n}\",\"path\":\"{p}\",\"size\":1}}]}}\n")
     };
-    let mut log = herdsman::events::jsonl(&c.state).unwrap();
+    let mut log = drover::events::jsonl(&c.state).unwrap();
     log += &line("keys.toml", toml);
     log += &line("link.toml", folder.join("link.toml").to_str().unwrap());
     rewrite_log(&c.state, &log);
@@ -322,7 +319,7 @@ fn a_reply_file_from_a_lane_worktree_is_copied_into_the_thread_folder() {
     );
     assert_eq!(code, 0, "{out}");
     let folder = c.state.with_file_name("orchestrator").join("t1");
-    let log = herdsman::events::jsonl(&c.state).unwrap();
+    let log = drover::events::jsonl(&c.state).unwrap();
     let msg = log.lines().rfind(|l| l.contains("The mockup.")).unwrap();
     let e: serde_json::Value = serde_json::from_str(msg).unwrap();
     let f = &e["files"][0];
@@ -339,7 +336,7 @@ fn a_reply_file_from_a_lane_worktree_is_copied_into_the_thread_folder() {
         std::fs::write(&p, b"x").unwrap();
         let (code, out) = run(&c, &r, &["thread", "reply", "t1", "x", "--file", p.to_str().unwrap()]);
         assert_ne!(code, 0, "{}: {out}", p.display());
-        assert!(!herdsman::events::jsonl(&c.state).unwrap().contains(p.to_str().unwrap()));
+        assert!(!drover::events::jsonl(&c.state).unwrap().contains(p.to_str().unwrap()));
     }
 }
 
@@ -418,7 +415,7 @@ fn a_large_attachment_arrives_whole_over_the_socket() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &live(), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &live(), l, false));
     let png: Vec<u8> = (0..600_000u32).map(|i| (i % 253) as u8).collect();
     let body = format!("op=say&t=t1&text=big&name=big.png&data={}", url_enc(&B64.encode(&png)));
     let mut s = std::net::TcpStream::connect(addr).unwrap();
@@ -552,7 +549,7 @@ fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_ima
           window.late = at; })()";
     let png = tmpdir("chat-viewer-png").join("thread.png");
     let o = webview()
-        .env("HERDSMAN_WAIT", "3")
+        .env("DROVER_WAIT", "3")
         .args([
             &format!("http://{addr}/deep/thread/t1/icon-180.png"),
             "390",
@@ -577,8 +574,8 @@ struct Held(
     std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
     std::sync::Mutex<std::sync::mpsc::Sender<String>>,
 );
-impl herdsman::runner::Runner for Held {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for Held {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let typing = prog == "herdr" && args.starts_with(&["agent".into(), "prompt".into()]);
         if typing {
             self.1.lock().unwrap().recv().unwrap();
@@ -626,7 +623,7 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
     let c2 = c.clone();
     std::thread::spawn(move || {
         let r = Held(live(), held.into(), typed.into());
-        herdsman::serve::serve_on(&c2, &r, l, false)
+        drover::serve::serve_on(&c2, &r, l, false)
     });
     let body = "op=say&t=t1&text=a+long+message";
     let mut s = std::net::TcpStream::connect(addr).unwrap();
@@ -645,7 +642,7 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
         "{res}"
     );
     assert!(
-        herdsman::events::jsonl(&c.state)
+        drover::events::jsonl(&c.state)
             .unwrap()
             .contains("\"from\":\"owner\",\"text\":\"a long message\""),
         "logged"
@@ -687,7 +684,7 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     let res = req(&s, "POST", "/thread", &format!("op=retry&t=t1&n={n}"), &cookie, T + 10);
     assert_eq!(body(&res), "retrying\n", "{res}");
     assert!(r.called("herdr agent start orchestrator-t1"), "{:?}", r.calls.borrow());
-    let log = herdsman::events::jsonl(&c.state).unwrap();
+    let log = drover::events::jsonl(&c.state).unwrap();
     assert_eq!(log.matches("\"from\":\"owner\",\"text\":\"hello\"").count(), 1, "{log}");
     let res = req(&s, "POST", "/thread", "op=retry&t=t1&n=1", &cookie, T + 20);
     assert!(body(&res).contains("nothing to retry"), "{res}");
@@ -705,7 +702,7 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
 }
 
 /// #408: thread t1 with `n` conductor messages `m1`…; a paired cookie at `now`.
-fn long(name: &str, n: u64, now: u64) -> (herdsman::Ctx, String) {
+fn long(name: &str, n: u64, now: u64) -> (drover::Ctx, String) {
     let c = setup(name);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Long"]).1,
@@ -713,8 +710,8 @@ fn long(name: &str, n: u64, now: u64) -> (herdsman::Ctx, String) {
     );
     for i in 1..=n {
         let d = serde_json::json!({"thread": "t1", "from": "conductor", "text": format!("m{i}")});
-        let e = herdsman::events::Event::new(T + i, "sendmeter", None, "thread-msg", d);
-        herdsman::events::append(&c.state, &e).unwrap();
+        let e = drover::events::Event::new(T + i, "sendmeter", None, "thread-msg", d);
+        drover::events::append(&c.state, &e).unwrap();
     }
     let cookie = pair(
         &Server::new(&c, &Fake::default(), Some(ADDR.into())),
@@ -785,7 +782,7 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
     let (c, cookie) = long("chat-window-webkit", 100, now);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c, &live(), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c, &live(), l, false));
     let js = "const tc = () => $('#chat .cvp[data-t=\"t1\"] .tc'), n = () => tc() ? tc().querySelectorAll(':scope>[data-n]').length : 0; \
         const until = f => new Promise(r => (function go() { f() ? r() : setTimeout(go, 50); })()); \
         (async () => { const at = window.late = []; await until(() => n()); at.push(n()); \
@@ -800,8 +797,8 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
           at.push(+(tc().querySelector(':scope>[data-n] .pv').textContent === 'm1'), +tc().firstElementChild.textContent.startsWith('thread started'), +(n() > 100), errs.length); })()";
     let png = tmpdir("chat-window-png").join("thread.png");
     let o = webview()
-        .env("HERDSMAN_WAIT", "12")
-        .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
+        .env("DROVER_WAIT", "12")
+        .env("DROVER_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
         .args([
             &format!("http://{addr}/"),
             "390",
@@ -828,7 +825,7 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
 /// [copy]; the text around them prose; an unclosed fence runs to the end.
 const CODE: &str = "Run this:\n\n```sh\n  if [ 1 < 2 ] && true; then\n\n    echo \"b & c\"\nfi\n```\nThen check `x`.\n\n```\nunclosed <tail>\n  more";
 
-fn coded(name: &str) -> herdsman::Ctx {
+fn coded(name: &str) -> drover::Ctx {
     let c = setup(name);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Code"]).1,
@@ -901,8 +898,8 @@ fn copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_
         serde_json::json!(second)
     );
     let o = webview()
-        .env("HERDSMAN_WAIT", "3")
-        .env("HERDSMAN_PRE", pre)
+        .env("DROVER_WAIT", "3")
+        .env("DROVER_PRE", pre)
         .args([
             &format!("http://{addr}/"),
             "390",
@@ -921,8 +918,8 @@ fn copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_
     assert_eq!(m, [2., 1., 1., 1., 1., 1., 1., 0.], "{out}");
 }
 
-fn log(c: &herdsman::Ctx) -> String {
-    herdsman::events::jsonl(&c.state).unwrap_or_default()
+fn log(c: &drover::Ctx) -> String {
+    drover::events::jsonl(&c.state).unwrap_or_default()
 }
 
 /// #405: [+ thread] opens an empty thread that logs nothing; its first message starts the thread, titled with the
@@ -955,7 +952,7 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
         T,
     );
     assert_eq!(body(&res), "t1 started\n", "{res}");
-    let events = herdsman::events::read(&c.state).unwrap();
+    let events = drover::events::read(&c.state).unwrap();
     let new = events.iter().find(|e| e.kind == "thread-new").unwrap();
     assert_eq!(new.str("title"), Some("Grill me on #12"));
     let msgs: Vec<_> = events.iter().filter(|e| e.kind == "thread-msg").collect();
@@ -971,7 +968,7 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     // The conductor's summary title, after its first reply.
     let (code, out) = run(&c, &r, &["thread", "title", "t1", "Land mode for #12"]);
     assert_eq!(code, 0, "{out}");
-    let t = herdsman::events::read(&c.state)
+    let t = drover::events::read(&c.state)
         .unwrap()
         .into_iter()
         .rfind(|e| e.kind == "thread-title")
@@ -1006,7 +1003,7 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
         T + 9,
     );
     assert_eq!(body(&res), "t2 started\n", "{res}");
-    let t2 = herdsman::events::read(&c.state)
+    let t2 = drover::events::read(&c.state)
         .unwrap()
         .into_iter()
         .rfind(|e| e.kind == "thread-new")
@@ -1053,8 +1050,8 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
         before.iter().any(|f| f.ends_with(format!("uploads/{T}-a.png"))),
         "{before:?}"
     );
-    let session = |c: &herdsman::Ctx| {
-        let s: Vec<_> = herdsman::events::read(&c.state)
+    let session = |c: &drover::Ctx| {
+        let s: Vec<_> = drover::events::read(&c.state)
             .unwrap()
             .into_iter()
             .filter(|e| e.kind == "orchestrator-start")
@@ -1066,7 +1063,7 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     let res = req(&s, "POST", "/thread", "op=archive&t=t1", &cookie, T + 10);
     assert_eq!(body(&res), "t1 archived\n", "{res}");
     assert!(r.called("herdr workspace close"), "{:?}", r.calls.borrow());
-    let sleep = herdsman::events::read(&c.state)
+    let sleep = drover::events::read(&c.state)
         .unwrap()
         .into_iter()
         .rfind(|e| e.kind == "orchestrator-sleep")
@@ -1212,7 +1209,7 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
     let (c, cookie) = long("chat-kb", 30, now);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c, &live(), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c, &live(), l, false));
     // (A frame is two animation frames or 300 ms: a busy host throttles an offscreen view's animation frames. Each state
     // is read once it holds, or as it is after 2 s.)
     // Per state: |composer bottom − visual viewport bottom (the tab bar's top, keyboard down)|, the page's scrollTop, the same block just above the box
@@ -1233,12 +1230,12 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
           box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); await new Promise(r => st(r, 100)); kb(0); await look(() => $('nav').getBoundingClientRect().top); \
           box.focus(); kb(336, true); box.value = 'grill me on the land mode'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
           at.push(errs.length); window.late = at; } catch (e) { window.late = [-1]; } })()";
-    let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(tmpdir("chat-kb-png").join("chat-kb.png"), |p| {
+    let png = std::env::var("DROVER_SNAPSHOTS").map_or(tmpdir("chat-kb-png").join("chat-kb.png"), |p| {
         std::path::Path::new(&p).join("chat-kb.png")
     });
     let o = webview()
-        .env("HERDSMAN_WAIT", "12")
-        .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
+        .env("DROVER_WAIT", "12")
+        .env("DROVER_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
         .args([
             &format!("http://{addr}/"),
             "390",
@@ -1274,15 +1271,15 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
 
 /// #407: herdr whose `conductor-t1` (pane w9:p1) is working while `.1` is set, else idle; every call recorded.
 struct Flip(Fake, std::sync::atomic::AtomicBool);
-impl herdsman::runner::Runner for Flip {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for Flip {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let out = self.0.run(prog, args);
         if !args.starts_with(&["agent".into(), "list".into()]) {
             return out;
         }
         let st = ["idle", "working"][usize::from(self.1.load(std::sync::atomic::Ordering::SeqCst))];
         let stdout = agents(&[("orchestrator-t1", st, "/x", "w9:p1")]);
-        Ok(herdsman::runner::Out {
+        Ok(drover::runner::Out {
             code: 0,
             stdout,
             stderr: String::new(),
@@ -1308,8 +1305,8 @@ fn body_of(res: &str) -> String {
 }
 
 /// The thread's queued messages' ids by text, as the log has them.
-fn queued_ids(c: &herdsman::Ctx) -> Vec<(u64, String)> {
-    let ev = herdsman::events::read(&c.state).unwrap();
+fn queued_ids(c: &drover::Ctx) -> Vec<(u64, String)> {
+    let ev = drover::events::read(&c.state).unwrap();
     let q = ev
         .iter()
         .filter(|e| e.kind == "thread-queue" && e.data.get("q").is_none());
@@ -1353,7 +1350,7 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let (c2, r2) = (c.clone(), r.clone());
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &*r2, l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &*r2, l, false));
     let typed = |t: &str| {
         r.0.called(&format!("herdr agent prompt orchestrator-t1 [t1] owner: {t}"))
     };
@@ -1439,10 +1436,10 @@ fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
         "t1\n"
     );
     let cmd = |n: &str| {
-        let d = serde_json::json!({"thread": "t1", "cmd": format!("herdsman brief sendmeter {n}")});
-        herdsman::events::append(
+        let d = serde_json::json!({"thread": "t1", "cmd": format!("drover brief sendmeter {n}")});
+        drover::events::append(
             &c.state,
-            &herdsman::events::Event::new(T, "sendmeter", None, "thread-cmd", d),
+            &drover::events::Event::new(T, "sendmeter", None, "thread-cmd", d),
         )
         .unwrap();
     };
@@ -1453,9 +1450,9 @@ fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
     assert_eq!(run(&c, &live(), &["thread", "say", "t1", "again"]).0, 0);
     cmd("3");
     let row = |n: &str| {
-        format!("<details class=\"blk run\"><summary><span class=k>$</span><span class=cmd>herdsman brief sendmeter {n}</span><i class=cv></i></summary></details>")
+        format!("<details class=\"blk run\"><summary><span class=k>$</span><span class=cmd>drover brief sendmeter {n}</span><i class=cv></i></summary></details>")
     };
-    let ev = herdsman::events::read(&c.state).unwrap();
+    let ev = drover::events::read(&c.state).unwrap();
     let seq = |n: &str| {
         ev.iter()
             .find(|e| e.str("cmd").is_some_and(|x| x.ends_with(n)))
@@ -1512,7 +1509,7 @@ fn a_stream_with_a_thread_open_stamps_its_watch_file() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &live(), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &live(), l, false));
     let open = |q: &str| {
         let mut s = std::net::TcpStream::connect(addr).unwrap();
         write!(s, "GET /live?tab=chat{q} HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n").unwrap();
@@ -1610,8 +1607,8 @@ fn the_thread_follows_its_end_until_you_drag_and_drafts_survive_a_reload() {
           at.push(+(box.value === 'a draft'), +(localStorage.getItem('draft:t1') === 'a draft'), f.querySelectorAll('.att').length); \
           window.late = [...at, errs.length]; } catch (e) { window.late = [-1, window.late.length]; } })()";
     let o = webview()
-        .env("HERDSMAN_WAIT", "10")
-        .env("HERDSMAN_PRE", pre)
+        .env("DROVER_WAIT", "10")
+        .env("DROVER_PRE", pre)
         .args([
             &format!("http://{addr}/?thread=t1#chat"),
             "390",

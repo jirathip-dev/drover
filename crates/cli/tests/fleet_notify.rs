@@ -1,8 +1,8 @@
 //! #14: per-fleet notifiers replace the global ones; `notify_global` sends to both.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{emit, Event};
+use drover::config::Config;
+use drover::events::{emit, Event};
 use std::path::Path;
 
 fn sink(cmd: &Path) -> String {

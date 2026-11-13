@@ -1,4 +1,4 @@
-//! #97: `herdsman doctor` is read-only, prints ✓/✗/! with a fix per line, exits 1 on any ✗, never echoes a secret.
+//! #97: `drover doctor` is read-only, prints ✓/✗/! with a fix per line, exits 1 on any ✗, never echoes a secret.
 mod common;
 use common::*;
 use std::os::unix::fs::PermissionsExt;
@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 const TOKEN: &str = concat!("sk", "-ant-oat01-FAKEtokenFAKEtokenFAKEtoken0123456789");
 const HERDR: &str = "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n";
-const PLIST: &str = "<plist><dict><key>ProgramArguments</key><array><string>/x/herdsman</string>\
+const PLIST: &str = "<plist><dict><key>ProgramArguments</key><array><string>/x/drover</string>\
 <string>serve</string><string>--addr</string><string>127.0.0.1:7777</string></array></dict></plist>";
 const SUB: &str = r#"[{"endpoint":"https://push.example/x","p256dh":"k","auth":"a","label":"phone","created":1}]"#;
 
@@ -48,7 +48,7 @@ fn write(p: &Path, text: &str, mode: u32) {
 }
 
 /// A host where every check passes.
-fn setup(name: &str, harness: &str) -> (herdsman::Ctx, PathBuf) {
+fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
     let d = tmpdir(name);
     let c = ctx(&d, &config(&d, harness));
     std::fs::create_dir_all(d.join("local")).unwrap();
@@ -58,7 +58,7 @@ fn setup(name: &str, harness: &str) -> (herdsman::Ctx, PathBuf) {
     // #707: the webhook secret's 0600 file.
     write(&d.join("config/secrets/GITHUB_WEBHOOK_SECRET"), "hook", 0o600);
     write(
-        &c.home.join("Library/LaunchAgents/dev.herdsman.serve.plist"),
+        &c.home.join("Library/LaunchAgents/dev.drover.serve.plist"),
         PLIST,
         0o644,
     );
@@ -93,7 +93,7 @@ fn good() -> Fake {
         .reply("gh repo view o/demo", "{}")
         .reply("git -C ", "abc\n")
         .reply("which ", "/bin/x\n")
-        .reply("lsof ", "herdsman 1 u LISTEN\n")
+        .reply("lsof ", "drover 1 u LISTEN\n")
         .reply("tailscale serve status", "|-- / proxy http://127.0.0.1:7777\n")
         .reply("launchctl print gui/", "state = running\n")
         .reply("systemctl --user is-active", "active\n")
@@ -149,11 +149,11 @@ fn all_good_exits_zero_and_never_writes() {
     );
     if cfg!(target_os = "macos") {
         assert!(
-            line(&out, "signature").contains(&format!("{} signed by \"herdsman-local\"", c.exe)),
+            line(&out, "signature").contains(&format!("{} signed by \"drover-local\"", c.exe)),
             "{out}"
         );
         assert!(r.called(&format!(
-            "codesign -v -R =certificate leaf[subject.CN] = \"herdsman-local\" {}",
+            "codesign -v -R =certificate leaf[subject.CN] = \"drover-local\" {}",
             c.exe
         )));
     }
@@ -185,7 +185,7 @@ fn all_good_exits_zero_and_never_writes() {
         &c.config,
         text.replace(
             "integration = \"staging\"",
-            "integration = \"staging\"\ndriver = \"herdsman\"",
+            "integration = \"staging\"\ndriver = \"drover\"",
         ),
     )
     .unwrap();
@@ -216,7 +216,7 @@ fn secrets_never_echo() {
 /// Each failure: (what breaks, the check, its fix).
 #[test]
 fn each_check_fails_with_its_fix_and_exit_one() {
-    type Break = fn(&herdsman::Ctx, &Path, Fake) -> Fake;
+    type Break = fn(&drover::Ctx, &Path, Fake) -> Fake;
     let cases: Vec<(Break, &str, &str)> = vec![
         (|_, _, r| r.once("herdr status", 1, ""), "herdr", "→ herdr"),
         (|_, _, r| r.once("vm_stat", 1, ""), "host", "→ put /usr/sbin"),
@@ -243,7 +243,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         (
             |_, _, r| r.once("lsof ", 1, ""),
             "serve",
-            "→ herdsman serve --addr 127.0.0.1:7777",
+            "→ drover serve --addr 127.0.0.1:7777",
         ),
         (
             |_, _, r| r.once("tailscale serve status", 0, "No serve config\n"),
@@ -257,16 +257,16 @@ fn each_check_fails_with_its_fix_and_exit_one() {
         ),
         (
             |c, _, r| {
-                std::fs::remove_file(c.home.join("Library/LaunchAgents/dev.herdsman.serve.plist")).unwrap();
+                std::fs::remove_file(c.home.join("Library/LaunchAgents/dev.drover.serve.plist")).unwrap();
                 r
             },
             "launchd",
-            "no plist runs herdsman serve",
+            "no plist runs drover serve",
         ),
         (
             |_, _, r| r.once("codesign -v -R", 3, ""),
             "signature",
-            "→ sh scripts/signing-identity.sh in the herdsman checkout (once), then sh scripts/signing-identity.sh sign ",
+            "→ sh scripts/signing-identity.sh in the drover checkout (once), then sh scripts/signing-identity.sh sign ",
         ),
         (
             |c, _, r| {
@@ -283,7 +283,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
                 r
             },
             "vapid.key",
-            "missing → herdsman push test",
+            "missing → drover push test",
         ),
         (
             |c, _, r| {
@@ -299,7 +299,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
                 r
             },
             "watchdog drive",
-            "→ herdsman timer install",
+            "→ drover timer install",
         ),
         (
             // macOS: the serve job's probe passes, the tick job's fails; Linux probes systemd.
@@ -308,7 +308,7 @@ fn each_check_fails_with_its_fix_and_exit_one() {
                 false => r.once("systemctl --user is-active", 3, ""),
             },
             "timer",
-            "dev.herdsman.tick missing → herdsman timer install",
+            "dev.drover.tick missing → drover timer install",
         ),
     ];
     for (i, (brk, check, fix)) in cases.into_iter().enumerate() {
@@ -330,7 +330,7 @@ fn warnings_do_not_fail() {
     let (c, _) = setup("doc-warn", "claude");
     // #344: no paired phone, no push subscription (setup's files were imported into state.db).
     for t in ["devices", "push"] {
-        herdsman::db::store::<serde_json::Value>(&c.state, t, &[]).unwrap();
+        drover::db::store::<serde_json::Value>(&c.state, t, &[]).unwrap();
     }
     let old = HERDR.replacen("version: 0.9.5\n\n", "version: 0.9.6\n\n", 1);
     let r = good().once("herdr status", 0, &old);
@@ -348,8 +348,8 @@ fn warnings_do_not_fail() {
 #[test]
 fn tailscale_missing_is_a_warning() {
     struct NoTailscale(Fake);
-    impl herdsman::runner::Runner for NoTailscale {
-        fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+    impl drover::runner::Runner for NoTailscale {
+        fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
             anyhow::ensure!(prog != "tailscale", "cannot run tailscale");
             self.0.run(prog, args)
         }
@@ -393,14 +393,14 @@ fn bad_config_and_hermes_profiles() {
     let (code, out) = run(&c, &good(), &["doctor"]);
     assert_eq!(code, 1, "{out}");
     assert!(line(&out, "hermes fleet-impl").starts_with('✓'), "{out}");
-    assert!(line(&out, "hermes hooks").contains("→ herdsman profiles sync"), "{out}");
+    assert!(line(&out, "hermes hooks").contains("→ drover profiles sync"), "{out}");
 
     let hook = |role: &str| format!("'{}' hook --role {role} ✓ allowed", c.exe);
     let (code, out) = run(
         &c,
         &good()
-            .reply("env HERDSMAN_LANE=demo:-:impl hermes", &hook("impl"))
-            .reply("env HERDSMAN_LANE=demo:-:orchestrator hermes", &hook("orchestrator")),
+            .reply("env DROVER_LANE=demo:-:impl hermes", &hook("impl"))
+            .reply("env DROVER_LANE=demo:-:orchestrator hermes", &hook("orchestrator")),
         &["doctor"],
     );
     assert_eq!(code, 0, "{out}");
@@ -436,7 +436,7 @@ fn retired_accounts_env_warns_until_the_line_is_dropped() {
 #[test]
 fn a_hook_naming_another_binary_is_named() {
     let (mut c, d) = setup("doc-stray-hook", "claude");
-    let other = d.join("other/herdsman");
+    let other = d.join("other/drover");
     write(&other, "", 0o755);
     let real = c.exe.clone();
     c.exe = other.display().to_string();
@@ -455,8 +455,8 @@ fn a_hook_naming_another_binary_is_named() {
     assert!(code == 0 && line(&out, "profile hooks").starts_with('✓'), "{out}");
 }
 
-/// #708: the launchd row follows `[serve] launchd_label` (default `dev.herdsman.serve`), never another plist that
-/// mentions `herdsman serve`; a missing one lists what it found.
+/// #708: the launchd row follows `[serve] launchd_label` (default `dev.drover.serve`), never another plist that
+/// mentions `drover serve`; a missing one lists what it found.
 #[test]
 fn launchd_row_follows_the_configured_label() {
     if !cfg!(target_os = "macos") {
@@ -464,13 +464,13 @@ fn launchd_row_follows_the_configured_label() {
     }
     let (c, _) = setup("doc-launchd", "claude");
     let agents = c.home.join("Library/LaunchAgents");
-    for old in ["com.a.herdsman.plist", "local.herdsman.plist", "zz.herdsman.old.plist"] {
+    for old in ["com.a.drover.plist", "local.drover.plist", "zz.drover.old.plist"] {
         write(&agents.join(old), PLIST, 0o644);
     }
     let (code, out) = run(&c, &good(), &["doctor"]);
     assert_eq!(code, 0, "{out}");
     let l = line(&out, "launchd");
-    assert!(l.starts_with('✓') && l.ends_with("/dev.herdsman.serve loaded"), "{l}");
+    assert!(l.starts_with('✓') && l.ends_with("/dev.drover.serve loaded"), "{l}");
 
     let text = std::fs::read_to_string(&c.config).unwrap();
     let mine = text.replace("[serve]\n", "[serve]\nlaunchd_label = \"dev.mine.serve\"\n");
@@ -479,7 +479,7 @@ fn launchd_row_follows_the_configured_label() {
     assert_eq!(code, 1, "{out}");
     let l = line(&out, "launchd");
     assert!(l.starts_with('✗') && l.contains("dev.mine.serve.plist missing"), "{l}");
-    assert!(l.contains("found") && l.contains("dev.herdsman.serve.plist"), "{l}");
+    assert!(l.contains("found") && l.contains("dev.drover.serve.plist"), "{l}");
     write(&agents.join("dev.mine.serve.plist"), PLIST, 0o644);
     let (code, out) = run(&c, &good(), &["doctor"]);
     assert_eq!(code, 0, "{out}");
@@ -493,14 +493,14 @@ fn spawns_row_dedupes_stale_names() {
     let mut names: Vec<String> = (1..=8).map(|n| format!("spawn-demo-{n}.pending")).collect();
     names.extend(std::iter::repeat_n("spawn-demo-1.pending".to_string(), 299));
     for (i, f) in names.iter().enumerate() {
-        let ev = herdsman::events::Event::new(
+        let ev = drover::events::Event::new(
             c.now - 600 + i as u64,
             "demo",
             Some(1),
             "stale-marker",
             serde_json::json!({ "file": f }),
         );
-        herdsman::events::append(&c.state, &ev).unwrap();
+        drover::events::append(&c.state, &ev).unwrap();
     }
     let (code, out) = run(&c, &good(), &["doctor"]);
     assert_eq!(code, 0, "{out}");
@@ -525,7 +525,7 @@ fn a_paused_self_update_shows_in_doctor_and_the_board() {
         .find(|l| l.contains(" self-update — "))
         .unwrap_or_else(|| panic!("{out}"));
     assert!(row.starts_with("! self-update — paused since "), "{row}");
-    assert!(row.ends_with(" → herdsman self-update --resume"), "{row}");
+    assert!(row.ends_with(" → drover self-update --resume"), "{row}");
     let (_, board) = run(&c, &r, &["board"]);
     assert!(board.lines().any(|l| l == row), "{board}");
 
@@ -577,4 +577,15 @@ fn a_long_tick_with_a_fresh_heartbeat_is_running_not_stuck() {
     assert_eq!(code, 1, "{out}");
     let l = line(&out, "watchdog check");
     assert!(l.starts_with('✗') && l.contains("ran 18m"), "{l}");
+}
+
+#[test]
+fn an_archived_fleet_repo_is_named_with_its_fix() {
+    let (c, _) = setup("doc-archived", "claude");
+    let r = good().once("gh repo view", 0, r#"{"isArchived":true,"name":"demo"}"#);
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(line(&out, "gh demo").starts_with('✓'), "{out}");
+    let fix = "! gh demo — o/demo is archived → remove [fleet.demo] from fleet.toml";
+    assert!(out.contains(fix), "{out}");
 }

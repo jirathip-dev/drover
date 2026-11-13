@@ -1,6 +1,6 @@
 //! #626: GitHub webhooks, `POST /hooks/github` on serve's Funnel listener (docs/serve.md). The `X-Hub-Signature-256`
 //! HMAC-SHA256 of the raw body, checked in constant time against `GITHUB_WEBHOOK_SECRET`; a PR or CI event on a fleet
-//! repo re-reads that issue's PR into the cache `herdsman pr` reads and kicks drive for it. The fast step's slow
+//! repo re-reads that issue's PR into the cache `drover pr` reads and kicks drive for it. The fast step's slow
 //! catch-up read (`[limits] webhook_poll_minutes`) covers what a sleeping Mac or a down Funnel missed.
 use crate::config::Config;
 use crate::events::{fold, read};

@@ -1,4 +1,4 @@
-//! `herdsman check` (alerts, each once per state) and `herdsman clean` (reclaim merged or closed lanes).
+//! `drover check` (alerts, each once per state) and `drover clean` (reclaim merged or closed lanes).
 
 use crate::config::{Config, Fleet};
 use crate::events::{age, emit, fold, held_on, last_spawn, open_asks, plain, read, Event, IssueState};
@@ -31,7 +31,7 @@ fn amendment(ctx: &Ctx, on: &On, cfg: &Config, s: &IssueState, wt: &str) -> Opti
     let url = spec["amended"].as_str().filter(|u| !brief.contains(*u))?;
     let n = s.issue;
     let fleet = &s.fleet;
-    let line = format!("AMENDMENT on #{n} ({url}): run `herdsman brief {fleet} {n}` and apply it");
+    let line = format!("AMENDMENT on #{n} ({url}): run `drover brief {fleet} {n}` and apply it");
     Some((url.to_string(), line))
 }
 
@@ -42,7 +42,7 @@ pub fn config(ctx: &Ctx) -> Result<Config> {
     let kinds = ["config-invalid", "config-ok"];
     let last = events.iter().rev().find(|e| kinds.contains(&e.kind.as_str()));
     let was = last.filter(|e| e.kind == kinds[0]).and_then(|e| e.str("key"));
-    let say = |cfg: &Config, kind, d| emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d));
+    let say = |cfg: &Config, kind, d| emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d));
     match loaded {
         Ok(cfg) if was.is_some() => say(&cfg, kinds[1], json!({})).map(|()| cfg),
         Ok(cfg) => Ok(cfg),
@@ -66,7 +66,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     PUSHES.set((0, 0));
     let _ = std::fs::write(ctx.state.with_file_name("check.at"), ctx.now.to_string());
     let agents = host::agents(r)
-        .map_err(|e| eprintln!("herdsman check: herdr agent list failed ({e:#}); skipping lane checks"))
+        .map_err(|e| eprintln!("drover check: herdr agent list failed ({e:#}); skipping lane checks"))
         .ok();
     if let Some(a) = &agents {
         crate::orchestrator::sleep_idle(ctx, cfg, r, &events, a)?;
@@ -92,7 +92,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             let lanes = crate::hosts::lanes_on(cfg, &events, name);
             let why = format!("{name} {}; lanes: {}", &kind[5..], lanes.join(", "));
             let d = json!({"key": last.map_or(0, |e| e.ts), "host": name, "reason": why});
-            fire(ctx, cfg, out, &events, ("herdsman", None), kind, d)?;
+            fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
         }
     }
     crate::setup::reap(ctx, r, &events)?;
@@ -104,16 +104,16 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             if (on < want) != last.is_some_and(|e| e.kind == "runners-low") {
                 let kind = ["runners-ok", "runners-low"][usize::from(on < want)];
                 let d = json!({"key": last.map_or(0, |e| e.ts), "reason": format!("CI runners {on}/{want} online")});
-                fire(ctx, cfg, out, &events, ("herdsman", None), kind, d)?;
+                fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
             }
         }
-        Some(Err(e)) => eprintln!("herdsman check: CI runners: {e:#}"),
+        Some(Err(e)) => eprintln!("drover check: CI runners: {e:#}"),
         None => {}
     }
     // #539: a retired config key still set alerts once per key.
     for (k, w) in cfg.warnings() {
         let d = json!({"key": k, "reason": format!("{k} is {w}")});
-        fire(ctx, cfg, out, &events, ("herdsman", None), "config-warning", d)?;
+        fire(ctx, cfg, out, &events, ("drover", None), "config-warning", d)?;
     }
     for (name, f) in &cfg.fleet {
         let _ = crate::overlap::preview(ctx, cfg, r, name, &events);
@@ -223,7 +223,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     }
     if let Some((since, _, (_, host, why))) = busy.filter(|b| ctx.now >= b.0 + 1800 && ctx.now < b.1 + 900) {
         let d = json!({"key": since, "host": host, "reason": why});
-        fire(ctx, cfg, out, &events, ("herdsman", None), "host-busy", d)?;
+        fire(ctx, cfg, out, &events, ("drover", None), "host-busy", d)?;
     }
     // #424: an answer that never reached its lane alerts once per ask (drive keeps retrying it); a day on, never.
     let undelivered = cfg.fleet.keys().flat_map(|f| crate::undelivered(&events, f));
@@ -273,7 +273,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             } else {
                 format!("{}:{lane}", s.last_ts)
             };
-            // #248: a lane herdsman closed once its handoff was logged is not gone.
+            // #248: a lane drover closed once its handoff was logged is not gone.
             let mine = |e: &Event, sp| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
             let closed = spawned.is_some_and(|sp| events.iter().any(|e| mine(e, sp)));
             if status.is_none() && !closed {
@@ -316,7 +316,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                             let cmd = fix.and_then(|f| Some(f.split_once(" → ")?.1.rsplit(", or ").next()?.to_string()));
                             let fix = cmd.map_or("sign in".into(), |c| format!("sign in (`{c}`)"));
                             let fix = format!("{fix} or replace its token");
-                            format!("{name}: {role} lane {lane} is signed out; spawns skip {name} until you {fix} (an account: then `herdsman accounts reset {name}`)")
+                            format!("{name}: {role} lane {lane} is signed out; spawns skip {name} until you {fix} (an account: then `drover accounts reset {name}`)")
                         }
                     };
                     hits.push((kind, format!("{lane}:{name}{auth}"), why));
@@ -374,7 +374,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     }
                     .line(),
                     Ok(ci) if same => format!(
-                        "fix lane idle, head unchanged, CI {ci}: run herdsman done {} {} --no-change \"<why>\" or push",
+                        "fix lane idle, head unchanged, CI {ci}: run drover done {} {} --no-change \"<why>\" or push",
                         s.fleet, s.issue
                     ),
                     _ => format!("{role} lane {lane} is {st}"),
@@ -393,7 +393,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             }
             if let Some(head) = gate(f, &pr, Some(s), false).ok().filter(|_| idle > stall) {
                 let (short, ago) = (&head[..7.min(head.len())], age(idle));
-                let why = format!("PASS @ {short} with green CI, unmerged for {ago}; run `herdsman merge`");
+                let why = format!("PASS @ {short} with green CI, unmerged for {ago}; run `drover merge`");
                 hits.push(("ready-unmerged", format!("{}:{head}", s.last_ts), why));
             }
         }
@@ -471,7 +471,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let key = events.iter().rev().find(|e| e.kind == "keychain-clear");
         let why = format!("Keychain readers {}", host::jam_line(&jam));
         let d = json!({"key": key.map_or(0, |e| e.seq), "reason": why});
-        fire(ctx, cfg, out, &events, ("herdsman", None), "keychain-jammed", d)?;
+        fire(ctx, cfg, out, &events, ("drover", None), "keychain-jammed", d)?;
         // Optional: kill the readers, then the stale SecurityAgent (macOS restarts it); securityd never matches.
         if cfg.limits.reap_keychain_readers {
             let pids: Vec<String> = jam.0.iter().map(|p| p.0.clone()).collect();
@@ -482,7 +482,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             }
             let e = Event::new(
                 ctx.now,
-                "herdsman",
+                "drover",
                 None,
                 "keychain-reap",
                 json!({"pids": pids, "agent": agent}),
@@ -490,7 +490,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             emit(&ctx.state, cfg, e)?;
         }
     } else if last.is_some_and(|e| e.kind == "keychain-jammed") {
-        let e = Event::new(ctx.now, "herdsman", None, "keychain-clear", json!({}));
+        let e = Event::new(ctx.now, "drover", None, "keychain-clear", json!({}));
         crate::events::append(&ctx.state, &e)?;
     }
     // #389: a remote lane's outbox line drive has not delivered in 5 min; once per lane and line.
@@ -558,7 +558,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     }
     if let (sent, held @ 1..) = PUSHES.replace((0, 0)) {
         let d = json!({"key": ctx.now, "reason": format!("{} questions waiting — open the board", sent + held)});
-        fire(ctx, cfg, out, &events, ("herdsman", None), "ask-waiting", d)?;
+        fire(ctx, cfg, out, &events, ("drover", None), "ask-waiting", d)?;
     }
     // #87: devices subscribed but no webpush notifier: the page's alerts never send; once per device count.
     let subs = crate::webpush::load(&ctx.state).len();
@@ -569,7 +569,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             cfg,
             out,
             &events,
-            ("herdsman", None),
+            ("drover", None),
             "alerts-off",
             json!({"key": subs, "reason": why}),
         )?;
@@ -708,7 +708,7 @@ fn expire(
         n += 1;
     }
     if sweep {
-        let ev = Event::new(ctx.now, "herdsman", None, "asks-swept", json!({"count": n}));
+        let ev = Event::new(ctx.now, "drover", None, "asks-swept", json!({"count": n}));
         if n > 0 {
             writeln!(out, "{}", plain(&ev))?;
         }
@@ -717,7 +717,7 @@ fn expire(
     Ok(if n > 0 { read(&ctx.state)? } else { events })
 }
 
-/// After `herdsman merge`: close the issue's clean lane panes, then `herdsman clean --yes` them.
+/// After `drover merge`: close the issue's clean lane panes, then `drover clean --yes` them.
 pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, issue: u64) -> Result<()> {
     let events = read(&ctx.state)?;
     let mut seen = std::collections::BTreeSet::new();
@@ -753,7 +753,7 @@ pub fn clean(
     clean_all(ctx, cfg, r, out, fleet, (issue, lane, sched, false), yes)
 }
 
-/// `clean`; #678: `all` (an explicit `herdsman clean`) also sweeps each disabled host that answers its one bounded
+/// `clean`; #678: `all` (an explicit `drover clean`) also sweeps each disabled host that answers its one bounded
 /// probe: its worktrees and dead lanes' scratch.
 pub fn clean_all(
     ctx: &Ctx,
@@ -822,7 +822,7 @@ pub fn clean_all(
         }
         let unsafe_lane =
             |why: &str| crate::gate::refused("UNSAFE_CLEAN", format!("{}: {why}", lane.unwrap_or_default()));
-        // Merged by `herdsman merge`, or closed on GitHub by any other route.
+        // Merged by `drover merge`, or closed on GitHub by any other route.
         let why = if states.get(&(e.fleet.clone(), n)).is_some_and(|s| s.state == "merged") {
             "merged"
         } else if closed_issues(ctx, cfg, r, out, &mut closed, &e.fleet).contains(&n) {
@@ -1038,7 +1038,7 @@ pub fn clean_all(
 /// #605: the `snapshot` row of merged lanes' idle-since times.
 const IDLE: &str = "idle-merged";
 
-/// #557 `clean --scheduled`, the daily `dev.herdsman.clean` job: `clean --yes` held to lanes idle 3 days (10 a run),
+/// #557 `clean --scheduled`, the daily `dev.drover.clean` job: `clean --yes` held to lanes idle 3 days (10 a run),
 /// then each herdr workspace whose checkout folder is gone is closed. A refusal or failure alerts `clean-failed`
 /// once (until a run passes); a clean no-op is silent.
 pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
@@ -1065,11 +1065,7 @@ pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -
     if std::fs::read_to_string(&mark).ok().as_deref() != Some(why.as_str()) {
         std::fs::write(&mark, &why)?;
         let d = json!({"key": "clean", "reason": why});
-        emit(
-            &ctx.state,
-            cfg,
-            Event::new(ctx.now, "herdsman", None, "clean-failed", d),
-        )?;
+        emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "clean-failed", d))?;
     }
     Err(e)
 }
@@ -1162,7 +1158,7 @@ fn save(
 ) -> Result<Option<String>> {
     let agent = e.str("agent").unwrap_or_default();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", wt][..], a].concat());
-    let (w, sha) = match snapshot(r, wt, &wip_branch(ctx, r, agent), "wip: auto-saved by herdsman") {
+    let (w, sha) = match snapshot(r, wt, &wip_branch(ctx, r, agent), "wip: auto-saved by drover") {
         Err(Snap::Secret(hit)) => {
             let why = format!("unsaved work has a secret ({hit})");
             let d = json!({"key": wt, "agent": agent, "reason": format!("{wt}: {why}; kept")});
@@ -1888,7 +1884,7 @@ fn clone_id(_: &Path) -> Option<u64> {
 
 /// #639: an open issue (queued, in a round, needs-human or parked) closed on GitHub by any route is `closed-other`
 /// within one pass, from the fleet's one cached closed-issue read: no respawn, stall, orphan or ask alert follows, its
-/// asks close and `clean` takes its lanes. A PR merged outside herdsman is drive's (`merged`, by: external). The log
+/// asks close and `clean` takes its lanes. A PR merged outside drover is drive's (`merged`, by: external). The log
 /// read again.
 fn closed_on_github(
     ctx: &Ctx,
@@ -1996,7 +1992,7 @@ fn spawned<'a>(events: &'a [Event], agent: &str, host: Option<&str>) -> Result<&
     }
 }
 
-/// `herdsman stop`: Esc to the agent's pane (it pauses); logs `stop`.
+/// `drover stop`: Esc to the agent's pane (it pauses); logs `stop`.
 pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent: &str) -> Result<()> {
     let events = read(&ctx.state)?;
     let e = spawned(&events, agent, None)?;
@@ -2009,7 +2005,7 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
     Ok(writeln!(out, "sent Esc to {agent}")?)
 }
 
-/// `herdsman close`: close a non-lane herdr agent's pane (by name or pane id); files stay. Logs `closed-other`.
+/// `drover close`: close a non-lane herdr agent's pane (by name or pane id); files stay. Logs `closed-other`.
 /// #478: `host` picks that machine's agent when names collide (a lane is only the one its newest spawn there).
 pub fn close(
     ctx: &Ctx,
@@ -2040,7 +2036,7 @@ pub fn close(
     Ok(writeln!(out, "closed {name}'s pane; its worktree and files stay")?)
 }
 
-/// `herdsman kill`: the dry-run line (what is lost); with `yes`, unpushed or dirty work goes to
+/// `drover kill`: the dry-run line (what is lost); with `yes`, unpushed or dirty work goes to
 /// `wip/<agent>-<stamp>` first (refused `SECRET_IN_WIP`, naming `file:line`, on a real secret), then the pane closes.
 /// The worktree is kept.
 /// #478: `host` kills the agent's newest lane there; one an other host's lane superseded logs `stale-pane-killed`.
@@ -2482,10 +2478,10 @@ fn snapshot(r: &dyn Runner, wt: &str, w: &str, msg: &str) -> std::result::Result
         return Err(Snap::Secret(hit));
     }
     if !staged.is_empty() {
-        // A host with no git identity still saves: herdsman signs only when none is configured.
+        // A host with no git identity still saves: drover signs only when none is configured.
         let unset = ["user.name", "user.email"].iter().any(|k| git(&["config", k]).is_err());
         let id: &[&str] = if unset {
-            &["-c", "user.name=herdsman", "-c", "user.email=herdsman@localhost"]
+            &["-c", "user.name=drover", "-c", "user.email=drover@localhost"]
         } else {
             &[]
         };

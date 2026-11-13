@@ -1,6 +1,6 @@
 [package]
-name = "herdsman-server"
-description = "`herdsman serve`, the phone page, over herdsman-core"
+name = "drover-server"
+description = "`drover serve`, the phone page, over drover-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -11,7 +11,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 base64.workspace = true
-herdsman-core.workspace = true
+drover-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
@@ -19,4 +19,4 @@ ts-rs = { workspace = true, optional = true }
 
 [features]
 # #375: `just types` (assets/types/); off in the release build.
-ts = ["dep:ts-rs", "herdsman-core/ts"]
+ts = ["dep:ts-rs", "drover-core/ts"]
