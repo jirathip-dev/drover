@@ -242,10 +242,20 @@ fn green_is_built_signed_gated_swapped_synced_and_restarted() {
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("would build abcdef1") && !r.called("cargo"), "{out}");
 
+    let old = live.with_file_name("drover.running");
+    std::fs::hard_link(&live, &old).unwrap();
     let (code, out) = run(&c, &r, &["self-update"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.starts_with("✓ installed abcdef1 at "), "{out}");
     assert_eq!(std::fs::read_to_string(&live).unwrap(), "NEW", "swapped in");
+    use std::os::unix::fs::MetadataExt;
+    let ino = |p: &std::path::Path| std::fs::metadata(p).unwrap().ino();
+    assert_ne!(ino(&live), ino(&old), "renamed over, never rewritten in place");
+    assert_eq!(
+        std::fs::read_to_string(&old).unwrap(),
+        "OLD",
+        "a running serve keeps its file"
+    );
     assert!(!PathBuf::from(&new).exists());
     let at = |p: &str| {
         r.index(p)
