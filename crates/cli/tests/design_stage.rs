@@ -987,7 +987,7 @@ fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_rai
     git(&w, &["reset", "-q", "--hard", "origin/staging"]);
     let agent = kinds(&c, "spawn")[0].str("agent").unwrap().to_string();
     let d = serde_json::json!({"agent": agent, "state": "error", "note": "no response"});
-    herdsman::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "lane-state", d)).unwrap();
+    drover::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "lane-state", d)).unwrap();
     drive(&c, &r);
     assert!(kinds(&c, "design-review").is_empty() && kinds(&c, "needs-decision").is_empty());
     let card = &kinds(&c, "needs-human")[0];
