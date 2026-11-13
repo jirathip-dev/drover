@@ -1219,7 +1219,7 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
     // (1/0) and how far its top moved against the box's top.
     let js = "(async () => { try { const st = window.setTimeout, v = () => $('#chat .cvp[data-t=\"t1\"]'); \
           while (!(v() && v().querySelectorAll('.tc .blk').length > 20)) await new Promise(r => st(r, 50)); \
-          chatOpen('t1'); \
+          console.log('S ' + Math.round(performance.now())); chatOpen('t1'); \
           const frame = () => new Promise(r => { requestAnimationFrame(() => requestAnimationFrame(r)); st(r, 300); }); await frame(); \
           const tc = v().querySelector('.tc'), tw = v().querySelector('.tw'), box = tw.elements.text, vv = visualViewport; \
           const above = () => { const y = tw.getBoundingClientRect().top; const b = [...tc.querySelectorAll('.blk')].filter(b => b.getBoundingClientRect().top < y - 1).pop(); return [b, b.getBoundingClientRect().top - y]; }; \
@@ -1227,17 +1227,19 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
           const [b0, d0] = above(), at = [tc.scrollTop > 0 ? 1 : 0]; \
           const look = async (y = () => vv.offsetTop + vv.height) => { await frame(); \
             const m = () => { const [b, d] = above(); return [Math.abs(tw.getBoundingClientRect().bottom - y()), document.scrollingElement.scrollTop, +(b === b0), Math.abs(d - d0)]; }; \
-            let r = m(); for (let i = 0; i < 40 && (r[0] > 1 || r[1] || !r[2] || r[3] > 1); i++) { await new Promise(q => st(q, 50)); r = m(); } at.push(...r); }; \
+            let r = m(); for (let i = 0; i < 40 && (r[0] > 1 || r[1] || !r[2] || r[3] > 1); i++) { await new Promise(q => st(q, 50)); r = m(); } at.push(...r); const [bb] = above(); console.log('L ' + JSON.stringify({ t: Math.round(performance.now()), r, st: tc.scrollTop, sh: tc.scrollHeight, ch: tc.clientHeight, end: tc.end, kh: tc.kh, fol: window.FOL, b0c: b0.isConnected, b0: b0.textContent.slice(0, 24), b: bb && bb.textContent.slice(0, 24), n: tc.querySelectorAll('.blk').length, tmo: !!tc.querySelector('.tmo'), kb: document.documentElement.style.getPropertyValue('--kb'), bh: tw.getBoundingClientRect().height })); }; \
           box.focus(); await new Promise(r => st(r, 100)); kb(336); await look(); \
           box.value = 'one\\ntwo\\nthree'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
           box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); await new Promise(r => st(r, 100)); kb(0); await look(() => $('nav').getBoundingClientRect().top); \
-          box.focus(); kb(336, true); box.value = 'grill me on the land mode'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
+          console.log('F ' + Math.round(performance.now())); box.focus(); kb(336, true); box.value = 'grill me on the land mode'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
           at.push(errs.length); window.late = at; } catch (e) { window.late = [-1]; } })()";
     let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(tmpdir("chat-kb-png").join("chat-kb.png"), |p| {
         std::path::Path::new(&p).join("chat-kb.png")
     });
-    let o = webview()
-        .env("HERDSMAN_WAIT", "12")
+    let mut bad = 0;
+    for run in 0..8 {
+        let o = webview()
+        .env("HERDSMAN_WAIT", "12").env("HERDSMAN_PRE", "const __f = window.fetch; window.fetch = (u, ...a) => (console.log('fetch ' + String(u).split('?')[0] + ' ' + Math.round(performance.now())), __f(u, ...a).then(r => (console.log('fetched ' + String(u).split('?')[0] + ' ' + Math.round(performance.now())), r))); addEventListener('herd-chat', () => console.log('HC ' + Math.round(performance.now()))); new MutationObserver(ms => ms.forEach(m => m.target.closest && m.target.closest('.tc') && [...m.removedNodes].some(n => n.classList && n.classList.contains('blk')) && console.log('blk-removed ' + Math.round(performance.now())))).observe(document, { childList: true, subtree: true });")
         .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
         .args([
             &format!("http://{addr}/"),
@@ -1249,27 +1251,42 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
         ])
         .output()
         .unwrap();
-    let out = String::from_utf8_lossy(&o.stdout);
-    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
-    let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    assert_eq!(m.len(), 18, "{out}");
-    assert_eq!(m[0], 1.0, "the thread starts scrolled to its end: {out}");
-    for (i, s) in m[1..17].chunks(4).enumerate() {
-        let what = ["keyboard up", "box grown", "keyboard down", "keyboard up again"][i];
-        assert!(
-            s[0] <= 1.0,
-            "{what}: the composer is {} px off the keyboard or tab bar ({out})",
-            s[0]
-        );
-        assert_eq!(s[1], 0.0, "{what}: the page scrolled ({out})");
-        assert_eq!(s[2], 1.0, "{what}: another message above the box ({out})");
-        assert!(
-            s[3] <= 1.0,
-            "{what}: the message above the box moved {} px ({out})",
-            s[3]
-        );
+        let out = String::from_utf8_lossy(&o.stdout);
+        eprintln!("DIAG run {run}: {out}\n{}", String::from_utf8_lossy(&o.stderr));
+        let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
+        if m.len() != 18
+            || m[1..17]
+                .chunks(4)
+                .any(|s| s[0] > 1.0 || s[1] != 0.0 || s[2] != 1.0 || s[3] > 1.0)
+        {
+            bad += 1;
+            eprintln!("DIAG run {run} BAD");
+        }
+        if run < 7 {
+            continue;
+        }
+        assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
+        let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
+        assert_eq!(m.len(), 18, "{out}");
+        assert_eq!(m[0], 1.0, "the thread starts scrolled to its end: {out}");
+        for (i, s) in m[1..17].chunks(4).enumerate() {
+            let what = ["keyboard up", "box grown", "keyboard down", "keyboard up again"][i];
+            assert!(
+                s[0] <= 1.0,
+                "{what}: the composer is {} px off the keyboard or tab bar ({out})",
+                s[0]
+            );
+            assert_eq!(s[1], 0.0, "{what}: the page scrolled ({out})");
+            assert_eq!(s[2], 1.0, "{what}: another message above the box ({out})");
+            assert!(
+                s[3] <= 1.0,
+                "{what}: the message above the box moved {} px ({out})",
+                s[3]
+            );
+        }
+        assert_eq!(m[17], 0.0, "page errors: {out}");
     }
-    assert_eq!(m[17], 0.0, "page errors: {out}");
+    assert_eq!(bad, 0, "DIAG bad runs");
 }
 
 /// #407: herdr whose `conductor-t1` (pane w9:p1) is working while `.1` is set, else idle; every call recorded.

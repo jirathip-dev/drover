@@ -77,6 +77,7 @@ at = "newPage";
 const page = await ctx.newPage();
 for (const e of ["crash", "dialog", "framenavigated", "pageerror", "requestfailed"])
   page.on(e, (x) => console.error(`${at}: ${e} ${x?.url?.() ?? x?.message?.() ?? x ?? ""}`));
+page.on('console', (m) => m.type() === 'log' && console.error('console: ' + m.text()));
 const shot = () => page.screenshot({ caret: "initial" });
 const run = async (js) => page.evaluate((s) => (0, eval)(s), js);
 const body = async (js) => page.evaluate((s) => (0, eval)(`(async () => { ${s} })()`), js);
