@@ -1,0 +1,7 @@
+Decided: merged origin/staging to take #964's ui-webkit first-paint deflake, the cause of the red ui-webkit check at 1dcbf1f.
+Because: crates/cli/tests/perf.rs:283
+Decided: the lane_actions, lanes_sheet, live and spawn conflicts take staging's fake-shed tests, reading the shared Arc<Log> through to_vec or iter.
+Because: q1574
+Rejected: changing the first-paint test on this branch — staging already fixed it in #964.
+Check: ui-webkit is green at the head; the rest of the gates are unchanged from round 3.
+Owner: The branch picks up the latest staging, including a fix for a flaky browser speed test; herdsman's behaviour does not change.
