@@ -545,45 +545,6 @@ fn drive(ctx: &Ctx, events: &[Event], fleet: &str, meta: Vec<String>) -> Drive {
 }
 
 /// #775: a route's file from disk within the runner's limit: 504 for this file alone when its disk does not answer.
-impl Server<'_> {
-    fn round_file(
-        &self,
-        sha: Option<&str>,
-        path: Option<String>,
-        missing: &str,
-    ) -> (&'static str, &'static str, Vec<u8>) {
-        let p = path.as_deref().map(std::path::Path::new);
-        let (dir, name) = (
-            p.and_then(std::path::Path::parent),
-            p.and_then(std::path::Path::file_name),
-        );
-        let show = |(sha, dir, name): (&str, &std::path::Path, &std::ffi::OsStr)| {
-            let args = crate::runner::argv(&["-C", &dir.to_string_lossy(), "cat-file", "--batch"]);
-            let mut b = vec![];
-            let mut out = self
-                .r
-                .r
-                .stream("git", &args, &format!("{sha}:./{}\n", name.to_string_lossy()))
-                .ok()?;
-            std::io::Read::read_to_end(&mut out, &mut b).ok()?;
-            let (head, body) = b.split_at(b.iter().position(|&c| c == b'\n')? + 1);
-            let size = String::from_utf8_lossy(head)
-                .strip_suffix('\n')?
-                .split_once(" blob ")?
-                .1
-                .parse()
-                .ok()?;
-            body.get(..size).map(<[u8]>::to_vec)
-        };
-        let git = sha
-            .zip(dir.filter(|d| crate::runner::answers(d)))
-            .zip(name)
-            .map(|((s, d), n)| (s, d, n));
-        git.and_then(show)
-            .map_or_else(|| disk_file(path, PNG, missing), |b| ("200 OK", PNG, b))
-    }
-}
-
 fn disk_file<P: AsRef<std::path::Path>>(
     at: Option<P>,
     ct: &'static str,
@@ -597,6 +558,42 @@ fn disk_file<P: AsRef<std::path::Path>>(
             b"its disk is not answering\n".to_vec(),
         ),
         _ => ("404 Not Found", "text/plain", missing.as_bytes().to_vec()),
+    }
+}
+
+impl Server<'_> {
+    fn round_file(
+        &self,
+        sha: Option<&str>,
+        path: Option<String>,
+        missing: &str,
+    ) -> (&'static str, &'static str, Vec<u8>) {
+        let p = path.as_deref().map(std::path::Path::new);
+        let show = |(sha, dir, name): (&str, &std::path::Path, &std::ffi::OsStr)| {
+            let args = crate::runner::argv(&["-C", &dir.to_string_lossy(), "cat-file", "--batch"]);
+            let spec = format!("{sha}:./{}\n", name.to_string_lossy());
+            let mut b = vec![];
+            std::io::Read::read_to_end(&mut self.r.r.stream("git", &args, &spec).ok()?, &mut b).ok()?;
+            let (head, body) = b.split_at(b.iter().position(|&c| c == b'\n')? + 1);
+            let size = String::from_utf8_lossy(head)
+                .trim_end()
+                .rsplit(' ')
+                .next()?
+                .parse()
+                .ok()?;
+            body.get(..size).map(<[u8]>::to_vec)
+        };
+        let (dir, name) = (
+            p.and_then(std::path::Path::parent),
+            p.and_then(std::path::Path::file_name),
+        );
+        let git = sha
+            .zip(dir)
+            .zip(name)
+            .map(|((s, d), n)| (s, d, n))
+            .filter(|g| crate::runner::answers(g.1));
+        git.and_then(show)
+            .map_or_else(|| disk_file(path, PNG, missing), |b| ("200 OK", PNG, b))
     }
 }
 

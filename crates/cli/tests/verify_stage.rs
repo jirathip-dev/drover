@@ -387,7 +387,10 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
         String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now)).into_owned()
     };
     let [needs, ..] = parts(&s, ADDR, "", c.now);
-    assert!(needs.contains("<img src=\"shot/sendmeter/12/0\""), "{needs}");
+    assert!(
+        needs.contains(&format!("<img src=\"shot/sendmeter/12/0/{h}\"")),
+        "{needs}"
+    );
     let png = get("/shot/sendmeter/12/0");
     assert!(
         png.starts_with("HTTP/1.1 200") && png.ends_with("\u{fffd}PNG narrow"),
