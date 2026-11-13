@@ -768,6 +768,9 @@ pub fn drive(
             writeln!(out, "repair: {e:#}")?;
         }
     }
+    if !fast && KICK.get().is_none() && !fleets.is_empty() {
+        crate::breaker::probe(ctx, cfg, r, out).unwrap_or_else(|e| drop(writeln!(out, "runtime canary: {e:#}")));
+    }
     let grew = log();
     // #389: remote lanes' commands that found no route here, as the look read them.
     if fast {
@@ -1255,6 +1258,13 @@ fn pass(
         } else if w.who == "drive" {
             // #444: a gone lane with no push is respawned once due; past two respawns it needs a human.
             let gone = w.what.split_once(waiting::NO_PUSH);
+            let ends =
+                gone.filter(|g| (w.next_cmd.is_none() || g.1.starts_with("respawning")) && !waiting::resumed(g.0));
+            if let Some(g) = ends.filter(|_| !fast) {
+                if crate::breaker::failed(ctx, cfg, out, (fleet, s.issue), &w.lane, g.0)? {
+                    continue;
+                }
+            }
             if gone.is_some() && w.next_cmd.is_none() && !fast {
                 let why = "lane keeps ending without a push";
                 writeln!(out, "{fleet} #{n} needs-human: {why}")?;
@@ -1385,6 +1395,13 @@ fn pass(
             .flatten()
         {
             // #666: a live lane stalled or never started: superseded once, then the owner's.
+            let start = matches!(
+                &a,
+                stall::Act::Respawn(_, "failed start") | stall::Act::Escalate("START_FAILED", _)
+            );
+            if start && crate::breaker::failed(ctx, cfg, out, (fleet, s.issue), &w.lane, "no output after its spawn")? {
+                continue;
+            }
             match a {
                 stall::Act::Respawn(role, why) => {
                     let args = ["spawn", fleet, &n, &role, "--supersede", "--force"];

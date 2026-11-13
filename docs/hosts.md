@@ -178,6 +178,13 @@ logs `host-key-changed <host>` once (again only after the host was back online) 
   close the old pane there logs it (`stale_host`, `stale_pane`); drive kills it once the host answers (wip first, as
   `kill` does) and logs `stale-pane-killed`. `herdsman kill|close --host <name> <agent>` picks that host's agent when
   another host has a lane of the same name.
+- #938: a runtime breaker per host. `[limits] runtime_down_failures` (5) lanes there failing to start or ending
+  without a push within `runtime_down_minutes` (30) make drive log one `runtime-down` (host, count, a sample reason;
+  one alert). While it is open a spawn there is refused `RUNTIME_DOWN`, those lanes show `runtime down on <host> since
+  <HH:MM> UTC` in `status` and `waiting`, and drive neither respawns them nor parks them needs-human. Each slow pass
+  runs one canary there (shed: a throwaway session echoing a computed word; herdr: the same line in a throwaway pane);
+  once it passes drive logs `runtime-up`, the held issues' earlier respawns stop counting, and spawns resume paced by
+  `max_parallel_spawns`.
 - History (#234): `<state dir>/host-history.jsonl` keeps 24 h of `{ts, host, load_cpu, pressure, swap_out, mem_free_gb,
   disk_free_gb, lanes}`: the main host a row a minute (`drive --fast`), a remote host a row every 5 minutes (`check`'s
   survey, no extra SSH). Rows past 24 h are dropped when it is rewritten (at most hourly), and it stays under
