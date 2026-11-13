@@ -1,0 +1,9 @@
+Decided: the reinstall line drover merge prints builds, then runs scripts/install-gate.sh, which signs DEST.new and renames it over bin/drover
+Because: "preferably by calling `scripts/install-gate.sh`"
+Decided: doctor's signature fix line reinstalls through install-gate.sh with the binary as both NEW and DEST, so the re-sign also goes through a copy
+Because: crates/core/src/doctor.rs:217
+Decided: docs/setup.md's first install and herdsman cut-over sign bin/drover.new and mv it; install-gate.sh is not used there because its doctor --config-only gate needs a config that does not exist yet
+Because: scripts/install-gate.sh:9
+Rejected: changing self-update's install in update.rs — it already signs live.new and renames it (the new inode test passes on the base too)
+Check: on this Mac, codesign --force and cargo install --force each replaced the inode in a scratch run and a running serve survived, so the original -9 may have another cause; the live check on the mini is the owner's
+Owner: every install path now signs a copy and renames it over the running binary; the live before/after on the mini still needs your run
