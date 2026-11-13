@@ -833,7 +833,7 @@ pub fn scan(
         let stuck = ["idle without pushing", "rev idle without", "reviewer exited"]
             .iter()
             .any(|p| w.what.starts_with(p));
-        let spawning = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("herdsman spawn "));
+        let spawning = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover spawn "));
         let hold = stuck || spawning || w.what.contains(NO_PUSH);
         if let Some(t) = sp
             .and_then(|e| crate::breaker::says(log.all, crate::breaker::host(e)))

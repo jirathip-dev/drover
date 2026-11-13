@@ -8,8 +8,8 @@ use serde_json::json;
 use std::io::Write;
 
 /// The line a canary types; its output, not the echoed line, holds `CANARY_OUT`.
-pub const CANARY: &str = "echo herdsman-canary-$((6*7))";
-pub const CANARY_OUT: &str = "herdsman-canary-42";
+pub const CANARY: &str = "echo drover-canary-$((6*7))";
+pub const CANARY_OUT: &str = "drover-canary-42";
 
 /// The host spawn `sp`'s lane runs on (`local` without `[hosts]`).
 pub fn host(sp: &Event) -> &str {

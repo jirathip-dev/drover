@@ -130,7 +130,7 @@ impl Shed {
     }
     /// #938: a throwaway terminal running the breaker's canary shows its output: shed starts sessions again.
     pub fn canary(&self, r: &dyn Runner) -> bool {
-        let name = "herdsman-canary";
+        let name = "drover-canary";
         let _ = self.call(r, Method::Rm, Target { name: name.into() });
         let mut p = Self::run_params(name, &[], "/");
         p.cmd = argv(&["sh", "-c", crate::breaker::CANARY]);

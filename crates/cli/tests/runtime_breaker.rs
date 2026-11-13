@@ -1,23 +1,23 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 
 const START: u64 = 10 * 60;
 
-fn ev(c: &herdsman::Ctx, ts: u64, n: Option<u64>, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, n: Option<u64>, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", n, kind, d)).unwrap();
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
-    herdsman::Ctx { now, ..c.clone() }
+fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
+    drover::Ctx { now, ..c.clone() }
 }
 
-fn six_lanes(c: &herdsman::Ctx, t0: u64) -> Vec<(String, String, String)> {
+fn six_lanes(c: &drover::Ctx, t0: u64) -> Vec<(String, String, String)> {
     (1..=6u64)
         .map(|n| {
             let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
@@ -55,7 +55,7 @@ fn fake(agents: &str, screen: &str) -> Fake {
         .reply("herdr workspace", "{}")
 }
 
-fn drive(c: &herdsman::Ctx, r: &Fake) -> String {
+fn drive(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     out
@@ -130,17 +130,17 @@ fn a_passing_canary_closes_the_breaker_and_the_held_lanes_respawn_paced_by_admis
     assert!(out.contains("canary failed"), "{out}");
     assert_eq!(r.count("sh -c nohup"), 0, "{out}");
     assert!(kinds(&c, "needs-human").is_empty(), "{out}");
-    let r = fake(NO_AGENTS, "herdsman-canary-42\n$ ");
+    let r = fake(NO_AGENTS, "drover-canary-42\n$ ");
     let out = drive(&late, &r);
     assert!(
-        r.called("herdr pane run w8:c1 echo herdsman-canary-$((6*7))"),
+        r.called("herdr pane run w8:c1 echo drover-canary-$((6*7))"),
         "{:?}",
         r.calls.borrow()
     );
     let up = kinds(&c, "runtime-up");
     assert_eq!(up.len(), 1, "{out}");
     assert_eq!(up[0].str("host"), Some("local"));
-    let kicks = r.count("sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter");
+    let kicks = r.count("sh -c nohup '/opt/drover/bin/drover' kick sendmeter");
     assert_eq!(kicks, 2, "respawns resume, at most max_parallel_spawns at once: {out}");
     assert!(kinds(&c, "needs-human").is_empty(), "{out}");
     assert!(kinds(&c, "runtime-down").len() == 1 && kinds(&c, "runtime-up").len() == 1);
