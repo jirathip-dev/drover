@@ -1,0 +1,4 @@
+Decided: merged origin/staging; events::read keeps returning the cached Arc<Log>, and catch_up takes #944's Events reserve-and-push in place of this branch's Vec swap.
+Because: q1574
+Rejected: none
+Owner: The branch now sits on top of the latest staging, including the rename to drover, with no change in behaviour.
