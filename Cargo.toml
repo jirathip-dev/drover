@@ -39,8 +39,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "net", "io-util", "time"
 toml = "0.8"
 # #375: TS bindings for the board (assets/types/), behind the `ts` feature only: never in the release build.
 ts-rs = { version = "12", features = ["serde-json-impl"] }
-# #298, #455: shed's wire types only (serde, no I/O), pinned to shed's rename merge commit until it tags a release.
-shed-proto = { git = "https://github.com/jirathip-dev/shed", rev = "56de739060d99e54e2ded43ab9702ff1c5270c37" }
+# #298, #455: shed's wire types only (serde, no I/O), pinned to shed main (protocol 1 hello, shed#100) until it tags a release.
+shed-proto = { git = "https://github.com/jirathip-dev/shed", rev = "4ac443dbbcb51227dc9df2fb55e2f0834d6a91eb" }
 drover-core = { path = "crates/core" }
 drover-server = { path = "crates/server" }
 drover-service = { path = "crates/service" }

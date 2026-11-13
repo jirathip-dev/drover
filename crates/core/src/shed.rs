@@ -7,7 +7,7 @@ use crate::runner::{argv, Out, Runner};
 use crate::Ctx;
 use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
-use shed_proto::{EventKind, EventsParams, Hello, Method, Request, Response, VERSION};
+use shed_proto::{EventKind, EventsParams, Hello, Method, Request, Response};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
@@ -20,7 +20,7 @@ pub use shed_proto as proto;
 pub fn git() -> String {
     env!("CARGO_PKG_REPOSITORY").replace("/herdsman", "/shed")
 }
-pub const REV: &str = "56de739060d99e54e2ded43ab9702ff1c5270c37";
+pub const REV: &str = "4ac443dbbcb51227dc9df2fb55e2f0834d6a91eb";
 
 /// Where a host's shed server answers.
 #[derive(Clone, Debug, PartialEq)]
@@ -64,10 +64,12 @@ fn answer(text: &str) -> Result<Value> {
         bail!("{}", e.message);
     }
     let theirs = hello.result.and_then(|v| serde_json::from_value::<Hello>(v).ok());
+    let side = |h: &Hello| format!("{} ({}) protocol {}", h.version, h.label(), h.protocol);
     ensure!(
-        theirs.as_ref() == Some(&Hello::ours()),
-        "SHED_VERSION: drover speaks shed {VERSION}, the server is {}",
-        theirs.map_or("?".into(), |h| h.label())
+        theirs.as_ref().is_some_and(Hello::compatible),
+        "SHED_VERSION: drover speaks shed {}, the server is {}",
+        side(&Hello::ours()),
+        theirs.as_ref().map_or("?".into(), side)
     );
     match next()? {
         Response { error: Some(e), .. } => bail!("{}", e.message),

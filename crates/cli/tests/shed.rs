@@ -93,10 +93,29 @@ fn a_wait_that_times_out_answers_as_herdr() {
 }
 
 #[test]
-fn another_shed_version_is_refused() {
+fn another_build_of_the_same_protocol_is_accepted() {
     let b = FakeShed::start("9.9.9", vec![]);
-    let e = shed::call(&Fake::default(), &b.shed().wire, shed::proto::Method::Ls, json!({})).unwrap_err();
-    assert!(format!("{e:#}").starts_with("SHED_VERSION"), "{e:#}");
+    b.state.lock().unwrap().hello.as_mut().unwrap().build = "0000000".into();
+    shed::call(&Fake::default(), &b.shed().wire, shed::proto::Method::Ls, json!({})).unwrap();
+    assert_eq!(b.methods(), ["ls"]);
+}
+
+#[test]
+fn another_shed_protocol_is_refused_naming_both_sides() {
+    use shed::proto::{BUILD, PROTOCOL, VERSION};
+    for protocol in [PROTOCOL - 1, PROTOCOL + 1] {
+        let b = FakeShed::start("9.9.9", vec![]);
+        b.state.lock().unwrap().hello.as_mut().unwrap().build = "0000000".into();
+        b.state.lock().unwrap().hello.as_mut().unwrap().protocol = protocol;
+        let e = shed::call(&Fake::default(), &b.shed().wire, shed::proto::Method::Ls, json!({})).unwrap_err();
+        assert_eq!(
+            format!("{e:#}"),
+            format!(
+                "SHED_VERSION: drover speaks shed {VERSION} ({BUILD}) protocol {PROTOCOL}, \
+                 the server is 9.9.9 (0000000) protocol {protocol}"
+            )
+        );
+    }
 }
 
 #[test]
