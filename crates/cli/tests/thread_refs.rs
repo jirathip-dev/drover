@@ -142,9 +142,11 @@ fn a_tapped_ref_opens_that_thread_and_back_returns_scrolled_where_you_were() {
         "Mozilla/5.0 (iPhone)",
         now,
     );
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || drover::serve::serve_on(&c, &Fake::default().reply("herdr", ""), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c, &Fake::default(), l, false));
     let js = "const v = t => $(`#chat .cvp[data-t=\"${t}\"]`), vis = t => !!v(t) && v(t).getBoundingClientRect().height > 0; \
         const until = f => new Promise(r => { const t0 = Date.now(); (function go() { f() || Date.now() - t0 > 3000 ? r() : setTimeout(go, 50); })(); }); \
         const tap = e => e.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); \

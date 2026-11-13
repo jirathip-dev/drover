@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-struct SlowGh(Fake, Arc<AtomicUsize>);
+struct SlowGh(OnShed, Arc<AtomicUsize>);
 
 impl Runner for SlowGh {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
@@ -19,6 +19,9 @@ impl Runner for SlowGh {
         }
         self.0.run(prog, args)
     }
+    fn shed(&self) -> Option<drover::shed::Shed> {
+        self.0.shed()
+    }
 }
 
 fn server(name: &str, config: &str) -> (drover::Ctx, SocketAddr, Arc<AtomicUsize>) {
@@ -27,7 +30,7 @@ fn server(name: &str, config: &str) -> (drover::Ctx, SocketAddr, Arc<AtomicUsize
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let (c2, gh) = (c.clone(), Arc::new(AtomicUsize::new(0)));
-    let r = SlowGh(Fake::default().reply("herdr agent list", NO_AGENTS), gh.clone());
+    let r = SlowGh(OnShed::new(Fake::default()), gh.clone());
     std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
     (c, addr, gh)
 }

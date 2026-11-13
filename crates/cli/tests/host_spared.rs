@@ -14,10 +14,10 @@ Host key for boat1 has changed and you have requested strict checking.\r\n\
 Host key verification failed.\r\n";
 
 fn boat1(prog: &str, args: &[String]) -> bool {
-    matches!(prog, "ssh" | "herdr") && args.iter().any(|a| a == "boat1")
+    prog == "ssh" && args.iter().any(|a| a == "boat1")
 }
 
-fn setup(name: &str, extra: &str) -> drover::Ctx {
+fn setup(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.boat1]\nmachine = \"boat1\"\n{extra}");
     let c = ctx(&tmpdir(name), &toml);
@@ -28,7 +28,7 @@ fn setup(name: &str, extra: &str) -> drover::Ctx {
         "boat1": {"tags": ["os:macos"], "home": "/Users/me", "probed": NOW, "seen": NOW, "up": true},
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-9", "pane": "w9:p1", "workspace": "w9",
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-9", "pane": "sendmeter-impl-9", "workspace": "",
                    "worktree": "/Users/me/.herdr/worktrees/sendmeter/issue-9", "branch": "issue-9", "host": "boat1",
                    "machine": "boat1"});
     append(&c.state, &Event::new(NOW - 900, "sendmeter", Some(9), "spawn", d)).unwrap();
@@ -39,7 +39,8 @@ fn setup(name: &str, extra: &str) -> drover::Ctx {
     .unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    c
+    let sh = FakeShed::attached(&c);
+    (c, sh)
 }
 
 fn local() -> Fake {
@@ -48,24 +49,16 @@ fn local() -> Fake {
             "herdr status",
             "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
         )
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr --machine boat1 agent list", NO_AGENTS)
         .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
         .reply("sysctl -n hw.ncpu", "4")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("git ", "")
         .reply("gh issue view", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(
-            "herdr worktree create",
-            r#"{"result":{"workspace":{"workspace_id":"w1"}}}"#,
+            "which shed",
+            "/opt/shed/bin/shed
+",
         )
-        .reply(
-            "herdr pane list --workspace w1",
-            r#"{"result":{"panes":[{"pane_id":"w1:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run w1:p1 export", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr agent wait", "{}")
 }
 
 fn to_boat1(f: &Fake) -> Vec<String> {
@@ -75,15 +68,12 @@ fn to_boat1(f: &Fake) -> Vec<String> {
 
 #[test]
 fn a_disabled_host_with_no_lane_there_gets_no_ssh_from_a_tick_or_status() {
-    let c = setup("spared-off", "enabled = false\n");
+    let (c, sh) = setup("spared-off", "enabled = false\n");
     let r = local();
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(to_boat1(&r), Vec::<String>::new(), "{out}");
-    assert!(
-        r.called("herdr agent start sendmeter-impl-12"),
-        "drive still starts: {out}"
-    );
+    assert!(sh.called("run", "sendmeter-impl-12"), "drive still starts: {out}");
     let (_, status) = run(&c, &r, &["status"]);
     assert_eq!(to_boat1(&r), Vec::<String>::new(), "{status}");
     let ev = read(&c.state).unwrap();
@@ -92,15 +82,19 @@ fn a_disabled_host_with_no_lane_there_gets_no_ssh_from_a_tick_or_status() {
 
 #[test]
 fn a_disabled_host_with_a_live_lane_there_is_still_looked_at() {
-    let c = setup("spared-off-live", "enabled = false\n");
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "pane": "w8:p1", "workspace": "w8",
+    let (c, _sh) = setup("spared-off-live", "enabled = false\n");
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "pane": "sendmeter-impl-11", "workspace": "",
                    "worktree": "/Users/me/.herdr/worktrees/sendmeter/issue-11", "branch": "issue-11", "host": "boat1",
                    "machine": "boat1"});
     append(&c.state, &Event::new(NOW - 600, "sendmeter", Some(11), "spawn", d)).unwrap();
     let r = local();
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert!(r.called("herdr --machine boat1 agent list"), "{out}");
+    let calls = to_boat1(&r);
+    assert!(
+        calls.iter().any(|l| l.contains("'shed' 'connect'")),
+        "{out}: {calls:#?}"
+    );
 }
 struct KeyChanged(Fake);
 
@@ -129,7 +123,7 @@ impl Runner for KeyChanged {
 
 #[test]
 fn a_changed_host_key_alerts_once_and_is_never_retried_in_a_loop() {
-    let c = setup("spared-key", "");
+    let (c, _sh) = setup("spared-key", "");
     for (i, now) in [NOW, NOW + 300, NOW + 600].into_iter().enumerate() {
         let c = drover::Ctx { now, ..c.clone() };
         let r = KeyChanged(local());

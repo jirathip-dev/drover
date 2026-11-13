@@ -419,7 +419,7 @@ pub fn land(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) 
     };
     // #584: a handoff that fails to go out closes its card as failed; #621: its full error is a row in the source.
     if let Err(e) = &sent {
-        let d = json!({"id": id, "to": to, "reason": format!("{e:#}")});
+        let d = json!({"id": id, "ask_seq": ask.seq, "to": to, "reason": format!("{e:#}")});
         emit(&ctx.state, cfg, Event::new(ctx.now, &ask.fleet, None, "ask-failed", d))?;
         let text = format!("✗ {id} not delivered to {to}: {e:#}");
         log(ctx, cfg, find(&events, from)?, "system", (&text, &[]))?;

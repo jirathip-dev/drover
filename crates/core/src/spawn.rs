@@ -1187,11 +1187,15 @@ pub fn spawn(
         let why = crate::check::worktree_why(ctx);
         return refused("DISK_BUDGET", format!("worktrees {gb:.1} GB > {budget} GB; {why}"));
     }
+    let extend = crate::pending::extending(&events, fleet, issue);
     match refusal {
-        Some(("HOST_BUSY", why)) if o.force => event(
-            "override",
-            json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent}),
-        )?,
+        Some(("HOST_BUSY", why)) if o.force || extend => {
+            let mut d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent});
+            if extend {
+                d["why"] = "owner-extend".into();
+            }
+            event("override", d)?;
+        }
         Some(("HOST_BUSY", why)) => return refused("HOST_BUSY", format!("{why}; retry later or pass --force")),
         Some((code, why)) => return refused(code, why),
         None => {}

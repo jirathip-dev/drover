@@ -9,8 +9,8 @@ use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
-const WS: &str = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
-const PANES: &str = r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#;
+const IMPL: &str = "sendmeter-impl-12";
+const ADD: &str = "git -C /tmp/does-not-matter/sendmeter worktree add";
 
 fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
@@ -20,14 +20,12 @@ fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
-/// #12 queued, its impl lane through three FAILs, then out of rounds (needs-human).
-fn setup(name: &str) -> drover::Ctx {
+fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), CONFIG);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let wt = c.worktrees.join("sendmeter/issue-12");
-    std::fs::create_dir_all(&wt).unwrap();
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w9:x", "workspace": "w9", "worktree": wt,
-        "branch": "issue-12"});
+    let d = json!({"role": "impl", "agent": IMPL, "pane": IMPL, "worktree": wt, "branch": "issue-12"});
     ev(&c, 10, "spawn", d);
     for (ts, p) in [(11, "1"), (12, "2"), (13, "3")] {
         ev(
@@ -43,7 +41,11 @@ fn setup(name: &str) -> drover::Ctx {
         "needs-human",
         json!({"code": "ROUND_LIMIT", "reason": "out of rounds"}),
     );
-    c
+    (c, sh)
+}
+
+fn started(sh: &FakeShed) -> usize {
+    sh.all("run").iter().filter(|p| p["name"] == IMPL).count()
 }
 
 /// Spawns succeed; memory pressure `level` (4: the host is busy, HOST_BUSY).
@@ -51,26 +53,32 @@ fn fake(level: &str) -> Fake {
     let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": sha("3"),
         "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]});
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", &format!("{level}\n"))
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
         .reply("gh pr view issue-12", &pr.to_string())
+        .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
         .reply("git -C", "")
-        .reply("herdr worktree", WS)
-        .reply("herdr pane list", PANES)
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr pane", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr agent wait", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("kill -0", "")
 }
 
+fn low_mem(level: &str) -> Fake {
+    let vm = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 16384.\n\
+        Pages inactive: 16384.\nSwapouts: 100.\n";
+    let low = Fake::default().reply("vm_stat", vm);
+    Fake {
+        replies: [low.replies, fake(level).replies].concat(),
+        ..Default::default()
+    }
+}
+
 fn get(c: &drover::Ctx, r: &Fake, path: &str, now: u64) -> Value {
-    let s = Server::new(c, r, Some(ADDR.into()));
+    let sh = drover::config::Config::load(&c.config).unwrap().shed().unwrap();
+    let r = drover::shed::With(r, sh);
+    let s = Server::new(c, &r, Some(ADDR.into()));
     serde_json::from_str(&api(&s, ADDR, "", now, path)).unwrap()
 }
 
@@ -102,34 +110,35 @@ fn pending(c: &drover::Ctx) -> Option<drover::pending::Pending> {
     drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12)
 }
 
-/// AC1: [one more round] while spawns are refused HOST_BUSY: the card goes at once and stays gone through a busy pass,
-/// the issue row, `status` and `waiting` say what it waits for; once load drops, drive starts it with no second tap.
 #[test]
 fn a_held_back_extend_stays_answered_and_drive_starts_it_with_no_second_tap() {
-    let c = setup("pending-extend");
-    let (busy, calm) = (fake("4"), fake("1"));
+    let (c, sh) = setup("pending-extend");
+    let (busy, calm) = (low_mem("1"), fake("1"));
     assert_eq!(cards(&c, &calm, c.now).len(), 1, "the needs-human card before the tap");
     let (code, out) = run(&c, &busy, &["extend", "sendmeter", "12"]);
-    assert!(code == 0 && out.contains("waiting for host (HOST_BUSY)"), "{out}");
+    assert!(code == 0 && out.contains("waiting for host (MEM_LOW)"), "{out}");
     let (code, out) = run(&c, &busy, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(spawns(&c), 1, "nothing started on a busy host");
     assert_eq!(cards(&c, &calm, c.now), [], "gone, and stays gone");
     let q = row(&c, &calm);
     assert_eq!(q["pending"]["action"], "extend", "{q}");
-    assert_eq!(q["pending"]["reason"], "HOST_BUSY", "{q}");
-    assert_eq!(q["status"], "starting, waiting for host: HOST_BUSY · 0s", "{q}");
+    assert_eq!(q["pending"]["reason"], "MEM_LOW", "{q}");
+    assert_eq!(
+        q["status"], "extended · starting, waiting for host: MEM_LOW · 0s",
+        "{q}"
+    );
     let (_, st) = run(&c, &calm, &["status", "sendmeter"]);
-    assert!(st.contains("starting, waiting for host: HOST_BUSY"), "{st}");
+    assert!(st.contains("extended · starting, waiting for host: MEM_LOW"), "{st}");
     let (_, w) = run(&c, &calm, &["waiting", "sendmeter"]);
     assert!(
-        w.contains("sendmeter #12 drive: starting, waiting for host: HOST_BUSY"),
+        w.contains("sendmeter #12 drive: extended · starting, waiting for host: MEM_LOW"),
         "{w}"
     );
 
     let (code, out) = run(&c, &calm, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert!(calm.called("herdr agent start sendmeter-impl-12"), "{out}");
+    assert_eq!(started(&sh), 1, "{out}");
     assert_eq!((spawns(&c), pending(&c)), (2, None));
     assert_eq!(cards(&c, &calm, c.now), []);
     assert_eq!(row(&c, &calm)["status"], Value::Null);
@@ -138,8 +147,8 @@ fn a_held_back_extend_stays_answered_and_drive_starts_it_with_no_second_tap() {
 /// AC3: still unstarted at 30 min, one card comes back naming the reason and the wait; a tap on it starts the round.
 #[test]
 fn a_start_pending_for_30_minutes_brings_its_card_back_once() {
-    let mut c = setup("pending-late");
-    let (busy, calm) = (fake("4"), fake("1"));
+    let (mut c, sh) = setup("pending-late");
+    let (busy, calm) = (low_mem("1"), fake("1"));
     assert_eq!(run(&c, &busy, &["extend", "sendmeter", "12"]).0, 0);
     assert_eq!(cards(&c, &calm, c.now + 1799), []);
     let back = cards(&c, &calm, c.now + 1800);
@@ -148,13 +157,13 @@ fn a_start_pending_for_30_minutes_brings_its_card_back_once() {
         back[0],
         (
             12,
-            "extend did not start a lane (still waiting after 30m): HOST_BUSY".into()
+            "extend did not start a lane (still waiting after 30m): MEM_LOW".into()
         )
     );
     c.now += 1800;
     let (code, out) = run(&c, &calm, &["extend", "sendmeter", "12"]);
     assert_eq!(code, 0, "the returned card's tap: {out}");
-    assert!(calm.called("herdr agent start sendmeter-impl-12"), "{out}");
+    assert_eq!(started(&sh), 1, "{out}");
     assert_eq!((pending(&c), cards(&c, &calm, c.now)), (None, vec![]));
     let rounds = read(&c.state)
         .unwrap()
@@ -168,8 +177,8 @@ fn a_start_pending_for_30_minutes_brings_its_card_back_once() {
 /// back at once with the code, until a lane starts after all (#724's retry of a failed spawn).
 #[test]
 fn soft_refusals_keep_it_pending_and_a_hard_one_brings_the_card_back_at_once() {
-    let c = setup("pending-hard");
-    let busy = fake("4");
+    let (c, sh) = setup("pending-hard");
+    let busy = low_mem("1");
     assert_eq!(run(&c, &busy, &["extend", "sendmeter", "12"]).0, 0);
     for code in drover::pending::SOFT {
         assert!(
@@ -187,7 +196,7 @@ fn soft_refusals_keep_it_pending_and_a_hard_one_brings_the_card_back_at_once() {
     );
     assert_eq!(cards(&c, &busy, c.now), []);
 
-    let broken = fake("1").once_err("herdr worktree", 1, "worktree exists");
+    let broken = fake("1").once_err(ADD, 1, "worktree exists");
     let (code, out) = run(&c, &broken, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let p = pending(&c).unwrap();
@@ -211,7 +220,7 @@ fn soft_refusals_keep_it_pending_and_a_hard_one_brings_the_card_back_at_once() {
     }
     let calm = fake("1");
     let (code, out) = run(&c, &calm, &["drive"]);
-    assert!(code == 0 && calm.called("herdr agent start sendmeter-impl-12"), "{out}");
+    assert!(code == 0 && started(&sh) == 1, "{out}");
     assert_eq!((pending(&c), cards(&c, &calm, c.now)), (None, vec![]));
 }
 
@@ -239,6 +248,7 @@ impl Runner for Hooked<'_> {
 #[test]
 fn an_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once() {
     let c = ctx(&tmpdir("pending-answer"), CONFIG);
+    let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let ask = json!({"id": "q1", "question": "Which DB?", "options": ["sqlite", "postgres"], "kind": "owner",
         "agent": "sendmeter-impl-12"});
@@ -260,7 +270,7 @@ fn an_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once() {
     };
     let a = Hooked {
         fake: &calm,
-        at: "herdr worktree",
+        at: ADD,
         hook: &race,
         fired: Shared::new(false),
     };
@@ -271,7 +281,7 @@ fn an_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once() {
         "{:?}",
         second.borrow()
     );
-    assert_eq!(calm.count("herdr agent start sendmeter-impl-12"), 1);
+    assert_eq!(started(&sh), 1);
     assert_eq!((spawns(&c), pending(&c)), (1, None));
     let failed = read(&c.state)
         .unwrap()
@@ -285,7 +295,12 @@ fn an_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once() {
 
 #[test]
 fn a_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_admitted() {
-    let mut c = setup("pending-load");
+    let mut c = ctx(&tmpdir("pending-load"), CONFIG);
+    let sh = FakeShed::attached(&c);
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
+    let ask = json!({"id": "q1", "question": "Which DB?", "options": ["sqlite", "postgres"], "kind": "owner",
+        "agent": "sendmeter-impl-12"});
+    ev(&c, 20, "needs-decision", ask);
     let load = Out {
         stdout: "{ 40.00 3.00 2.00 }\n".into(),
         ..Out::default()
@@ -306,16 +321,16 @@ fn a_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_
         ..Fake::default()
     };
     let calm = fake("1");
-    let (code, out) = run(&c, &loaded, &["extend", "sendmeter", "12"]);
-    assert!(code == 0 && out.contains("waiting for host (HOST_BUSY)"), "{out}");
+    let (code, out) = run(&c, &loaded, &["answer", "sendmeter", "q1", "1"]);
+    assert!(code == 0 && out.contains("asking agent gone"), "{out}");
     c.now += 7200;
     let (code, out) = run(&c, &loaded, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert_eq!(spawns(&c), 1, "nothing started on a loaded host");
+    assert_eq!(spawns(&c), 0, "nothing started on a loaded host");
     assert_eq!(pending(&c).unwrap().reason.as_deref(), Some(drover::pending::LOAD));
     assert_eq!(cards(&c, &calm, c.now), [], "two hours on load alone: no card");
     let (code, out) = run(&c, &calm, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert!(calm.called("herdr agent start sendmeter-impl-12"), "{out}");
-    assert_eq!((spawns(&c), pending(&c)), (2, None));
+    assert_eq!(started(&sh), 1, "{out}");
+    assert_eq!((spawns(&c), pending(&c)), (1, None));
 }

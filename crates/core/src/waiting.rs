@@ -69,7 +69,7 @@ pub fn unspawned(events: &[Event], s: &IssueState) -> bool {
         .iter()
         .rev()
         .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue));
-    crate::pending::of(events, &s.fleet, s.issue).is_some_and(|p| p.action == "extend" && !p.failed)
+    crate::pending::extending(events, &s.fleet, s.issue)
         || last.is_some_and(|e| e.kind == "round-extended" && e.data.get("spawn") == Some(&Value::Bool(true)))
 }
 

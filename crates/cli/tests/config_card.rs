@@ -127,15 +127,14 @@ fn drain(s: &mut TcpStream, ms: u64) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// A real `serve` on a socket; its address.
-fn serve(c: &drover::Ctx) -> std::net::SocketAddr {
+fn serve(c: &drover::Ctx) -> (std::net::SocketAddr, FakeShed) {
+    let sh = FakeShed::new();
+    sh.attach(c);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || {
-        drover::serve::serve_on(&c2, &Fake::default().reply("herdr agent list", NO_AGENTS), l, false)
-    });
-    addr
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, false));
+    (addr, sh)
 }
 
 /// The `/live` stream of a phone with t1 open: a proposal (with a burst of 40 messages after it, in the same second)
@@ -143,7 +142,7 @@ fn serve(c: &drover::Ctx) -> std::net::SocketAddr {
 #[test]
 fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
     let c = setup("cfg-live");
-    let addr = serve(&c);
+    let (addr, _sh) = serve(&c);
     let mut s = TcpStream::connect(addr).unwrap();
     s.write_all(format!("GET /live?tab=chat&thread=t1 HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
         .unwrap();
@@ -214,7 +213,8 @@ fn the_card_lands_live_in_view_and_stays_reachable_in_webkit() {
     let now = drover::now();
     let c = setup("cfg-webkit");
     let cookie = pair(&Server::new(&c, &Fake::default(), Some(ADDR.into())), &c, "Safari", now);
-    let url = format!("http://{}/", serve(&c));
+    let (addr, _sh) = serve(&c);
+    let url = format!("http://{addr}/");
     let c2 = c.clone();
     let later = std::thread::spawn(move || {
         // Once the page's stream watches t1 (serve stamps it each second).

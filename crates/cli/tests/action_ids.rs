@@ -6,26 +6,18 @@ use drover::events::{append, fold, read, Event};
 use drover::runner::{Out, Runner};
 use serde_json::json;
 
-const WS: &str = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
-const PANES: &str = r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#;
 const HEAD: &str = "1111111111111111111111111111111111111111";
 
 fn fake() -> Fake {
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
+        .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
         .reply("git -C", "")
-        .reply("herdr worktree", WS)
-        .reply("herdr pane list", PANES)
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr pane", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr agent wait", "{}")
         .reply("kill -0", "") // the intent's process (this test) still runs
 }
 
@@ -60,6 +52,8 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
 #[test]
 fn two_passes_racing_the_same_spawn_start_it_once_and_the_other_skips() {
     let c = ctx(&tmpdir("race-spawn"), CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let r = fake();
     let second = Shared::<Vec<String>>::default();
@@ -72,7 +66,7 @@ fn two_passes_racing_the_same_spawn_start_it_once_and_the_other_skips() {
     };
     let a = Hooked {
         fake: &r,
-        at: "herdr worktree",
+        at: "git -C /tmp/does-not-matter/sendmeter worktree add",
         after: false,
         hook: &race,
         fired: Shared::new(false),
@@ -85,12 +79,10 @@ fn two_passes_racing_the_same_spawn_start_it_once_and_the_other_skips() {
         b.contains("REFUSED IN_FLIGHT: skipped: sendmeter#12:spawn@impl@0 in flight"),
         "{b}"
     );
-    assert_eq!(
-        r.count("herdr agent start sendmeter-impl-12"),
-        1,
-        "{:?}",
-        r.calls.borrow()
-    );
+    let runs = sh.all("run");
+    assert_eq!(runs.len(), 1, "{:?}", r.calls.borrow());
+    assert_eq!(runs[0]["name"], "sendmeter-impl-12");
+    assert_eq!(r.count("git -C /tmp/does-not-matter/sendmeter worktree add"), 1);
     assert_eq!(kinds(&c, "spawn").len(), 1);
     let id = |e: &Event| e.str("action_id").map(String::from);
     assert_eq!(
@@ -199,6 +191,8 @@ fn a_timed_out_merge_intent_whose_pr_never_merged_fails_and_merges_once() {
 #[test]
 fn the_same_kick_id_is_driven_once() {
     let c = ctx(&tmpdir("kick-once"), CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = fake();
     let kick = |id: &str| {
         run(

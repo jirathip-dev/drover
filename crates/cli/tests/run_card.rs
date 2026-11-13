@@ -90,15 +90,30 @@ fn groups_default_to_all_but_pause_and_set_and_name_only_known_groups() {
 
 #[test]
 fn the_orchestrator_brief_lists_the_fleets_groups() {
-    let c = setup("card-brief", "\n[orchestrator]\nallow = [\"clean\", \"pause\"]\n");
-    let r = Fake::default()
-        .reply("herdr agent list", r#"{"result":{"agents":[]}}"#)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
-        )
-        .reply("herdr", "");
-    assert_eq!(run(&c, &r, &["thread", "say", "t1", "tidy up"]).0, 0);
+    let sh = FakeShed::new();
+    let acp = format!(
+        "account = \"C\"\n\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        sh.sock.display()
+    );
+    let mut c = setup(
+        "card-brief",
+        &format!("{acp}\n[orchestrator]\nallow = [\"clean\", \"pause\"]\n"),
+    );
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let agents =
+        json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo", "claude-agent-acp"]}]);
+    let f = Fake::default()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed", "");
+    let r = sh.cli(&f);
+    assert_eq!(
+        run(&c, &r, &["thread", "say", "t1", "tidy up"]).0,
+        0,
+        "{:?}",
+        f.calls.borrow()
+    );
+    assert!(sh.has("orchestrator-t1"), "{:?}", sh.methods());
     let brief = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t1/.brief.md")).unwrap();
     for want in [
         "## Capability groups ([orchestrator] allow)",
