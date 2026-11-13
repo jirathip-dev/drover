@@ -116,36 +116,6 @@ fn post(s: &Server, path: &str, body: &str, extra: &str) -> String {
     String::from_utf8_lossy(&s.respond(&req, 1_000_000)).into_owned()
 }
 
-struct OnShed(Fake, FakeShed);
-
-impl OnShed {
-    fn new(f: Fake) -> OnShed {
-        OnShed(f, FakeShed::new())
-    }
-}
-
-impl std::ops::Deref for OnShed {
-    type Target = Fake;
-    fn deref(&self) -> &Fake {
-        &self.0
-    }
-}
-
-impl drover::runner::Runner for OnShed {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
-        self.0.run(prog, args)
-    }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
-        self.0.run_in(prog, args, input)
-    }
-    fn sleep(&self, secs: u64) {
-        self.0.sleep(secs);
-    }
-    fn shed(&self) -> Option<drover::shed::Shed> {
-        Some(self.1.shed())
-    }
-}
-
 #[test]
 fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     let dir = tmpdir("wp-sub");

@@ -21,36 +21,6 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str, now: u64) 
     String::from_utf8_lossy(&s.respond(&r, now)).into_owned()
 }
 
-struct OnShed(Fake, FakeShed);
-
-impl OnShed {
-    fn new(f: Fake) -> OnShed {
-        OnShed(f, FakeShed::new())
-    }
-}
-
-impl std::ops::Deref for OnShed {
-    type Target = Fake;
-    fn deref(&self) -> &Fake {
-        &self.0
-    }
-}
-
-impl drover::runner::Runner for OnShed {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
-        self.0.run(prog, args)
-    }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
-        self.0.run_in(prog, args, input)
-    }
-    fn sleep(&self, secs: u64) {
-        self.0.sleep(secs);
-    }
-    fn shed(&self) -> Option<drover::shed::Shed> {
-        Some(self.1.shed())
-    }
-}
-
 fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     let c = ctx(&tmpdir(name), &two());
     let spawn = |fleet: &str, issue: u64, ts: u64, role: &str, agent: &str| {

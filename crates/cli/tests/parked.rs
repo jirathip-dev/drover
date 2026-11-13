@@ -9,36 +9,6 @@ const NOW: u64 = 1_000_000;
 const SAFE: &str = "sendmeter-impl-12";
 const RISKY: &str = "sendmeter-impl-14";
 
-struct OnShed(Fake, FakeShed);
-
-impl OnShed {
-    fn new(f: Fake) -> OnShed {
-        OnShed(f, FakeShed::new())
-    }
-}
-
-impl std::ops::Deref for OnShed {
-    type Target = Fake;
-    fn deref(&self) -> &Fake {
-        &self.0
-    }
-}
-
-impl drover::runner::Runner for OnShed {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
-        self.0.run(prog, args)
-    }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
-        self.0.run_in(prog, args, input)
-    }
-    fn sleep(&self, secs: u64) {
-        self.0.sleep(secs);
-    }
-    fn shed(&self) -> Option<drover::shed::Shed> {
-        Some(self.1.shed())
-    }
-}
-
 fn fixture(name: &str, paused: bool) -> (drover::Ctx, OnShed) {
     let cfg = CONFIG.replace(
         "integration = \"staging\"   # never main",

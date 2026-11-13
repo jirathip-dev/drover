@@ -216,36 +216,6 @@ fn the_card_says_not_counted_in_amber() {
     );
 }
 
-struct OnShed(Fake, FakeShed);
-
-impl OnShed {
-    fn new(f: Fake) -> OnShed {
-        OnShed(f, FakeShed::new())
-    }
-}
-
-impl std::ops::Deref for OnShed {
-    type Target = Fake;
-    fn deref(&self) -> &Fake {
-        &self.0
-    }
-}
-
-impl drover::runner::Runner for OnShed {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
-        self.0.run(prog, args)
-    }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
-        self.0.run_in(prog, args, input)
-    }
-    fn sleep(&self, secs: u64) {
-        self.0.sleep(secs);
-    }
-    fn shed(&self) -> Option<drover::shed::Shed> {
-        Some(self.1.shed())
-    }
-}
-
 /// #249: a `## Blocking` heading is no finding; tagged items under it are form-only, an untagged one is not.
 #[test]
 fn a_blocking_heading_is_ignored() {
