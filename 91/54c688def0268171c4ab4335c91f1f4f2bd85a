@@ -1,0 +1,7 @@
+Decided: an empty commit on 7fec3eec1 (same tree) whose body named it before the push, so the evidence check's push run reads the right body
+Because: .github/workflows/evidence.yml:18
+Rejected: re-running the failed run — a re-run replays the push event's old body and failed again (run 43469261398 attempt 2)
+Decided: the PR body's evidence names head 9154c688d, fixing the red evidence check at 7fec3eec1
+Because: "The PR states the before and after count of `herdr` lines in `crates/*/tests`"
+Check: git diff 7fec3eec1 9154c688d is empty; git diff on crates/*/src against staging is empty; herdr lines in crates/*/tests stay 709
+Owner: Test code only; no code changed this round, the PR's evidence now names its latest commit so the check goes green.
