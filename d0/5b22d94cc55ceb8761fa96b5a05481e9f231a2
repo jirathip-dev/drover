@@ -1,0 +1,4 @@
+Decided: merge origin/staging again after it moved past the round-4 push; no rebase, no force-push
+Because: crates/core/src/herdr.rs:144 is unchanged by this merge; staging only touched two test files, both merged cleanly
+Rejected: none
+Owner: the branch is current with staging again; nothing in this PR's behaviour changed
