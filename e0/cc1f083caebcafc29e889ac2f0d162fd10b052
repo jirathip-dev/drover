@@ -1,0 +1,5 @@
+Decided: no code change this round; merge origin/staging, rerun the gates at the new head and put that sha in the PR body
+Because: "Staging passes `drover arch-check` diffed against `origin/main`"
+Rejected: an empty commit just to retrigger CI — the staging merge already makes a new head that needs fresh evidence
+Check: the evidence CI check is green at the head and arch-check --base origin/main reports 0 violations with the branch-built binary
+Owner: the PR body now names the commit it was tested at, so the evidence check can pass
