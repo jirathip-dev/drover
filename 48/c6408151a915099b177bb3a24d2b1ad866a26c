@@ -1,0 +1,5 @@
+Decided: push an empty commit 48c64081 after the PR body already named it, so evidence runs once on a current body
+Because: scripts/evidence-check.sh:10
+Rejected: rerunning the failed evidence job — it re-reads the old body from its event payload (.github/workflows/evidence.yml:19)
+Check: git diff d75000e74 48c64081 is empty; the only evidence run at 48c64081 is green
+Owner: No code change; CI's evidence check is re-run on a head whose PR description is already up to date.
