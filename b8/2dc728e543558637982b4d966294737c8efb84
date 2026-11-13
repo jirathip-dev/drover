@@ -1,0 +1,11 @@
+Decided: origin/staging merged up to d91e72684, #456's herdsman -> drover rename included, by a three-way merge with the rename applied to this branch's side
+Because: "Outside the tests the PR lists for #721 to delete, no test file fakes a herdr reply"
+Decided: #856's drive_sim.rs runs its lanes as fake-shed terminals; each `run` is a new lane, since a superseding reviewer keeps its terminal name on shed
+Because: crates/cli/tests/drive_sim.rs:292
+Decided: #939's host_deadline.rs counts the shed connect and its one retry off the control socket; `ssh -G` stays local
+Because: crates/cli/tests/host_deadline.rs:16
+Rejected: listing drive_sim.rs for #721 — it tests drive, not herdr, so retiring herdr would break it
+Decided: the PR body's evidence names the new head b82dc728e, fixing the red evidence check at 0b28143fe
+Because: "The PR states the before and after count of `herdr` lines in `crates/*/tests`"
+Check: git diff on crates/*/src against staging is empty; herdr lines in crates/*/tests 1831 -> 708; full suite exits 0
+Owner: Test code only; caught up with staging's rename to drover, and its newest drive and host tests also run on the pretend shed.
