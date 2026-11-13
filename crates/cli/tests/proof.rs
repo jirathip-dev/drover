@@ -1,7 +1,7 @@
-//! #418: `herdsman verdict FAIL` refuses `NO_PROOF` unless each blocking finding carries a well-formed Proof block.
+//! #418: `drover verdict FAIL` refuses `NO_PROOF` unless each blocking finding carries a well-formed Proof block.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
 const RUN: &str =
@@ -11,7 +11,7 @@ const SPEC: &str = "- blocking [code] src/x.rs:9: no refusal\n  Proof: spec\n  >
 const BODY: &str = "- blocking [pr-body] PR body: no `## For humans`\n  Proof: spec\n  \
 > The PR body has a `## For humans` section\n  PR#34:1 has none\n";
 
-fn verdict(v: &str, body: &str) -> (i32, String, herdsman::Ctx) {
+fn verdict(v: &str, body: &str) -> (i32, String, drover::Ctx) {
     let d = tmpdir("proof");
     let c = ctx(&d, CONFIG);
     for (ts, role) in [(1, "impl"), (2, "rev")] {
@@ -35,7 +35,7 @@ fn verdict(v: &str, body: &str) -> (i32, String, herdsman::Ctx) {
     (code, out, c)
 }
 
-fn verdicts(c: &herdsman::Ctx) -> usize {
+fn verdicts(c: &drover::Ctx) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == "verdict").count()
 }
 
@@ -129,7 +129,7 @@ fn pass_and_notes_are_free_form() {
 
 #[test]
 fn proof_output_and_quotes_are_never_findings() {
-    let body = "FAIL\n- blocking [code] src/x.rs:9: wrong\n  Proof: run\n  ```\n  herdsman verdict\n  ```\n  \
+    let body = "FAIL\n- blocking [code] src/x.rs:9: wrong\n  Proof: run\n  ```\n  drover verdict\n  ```\n  \
 ```\n  - blocking [x] pasted output\n  ```\n";
     let (code, out, _) = verdict("FAIL", body);
     assert_eq!(code, 0, "{out}");

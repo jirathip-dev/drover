@@ -24,7 +24,7 @@ impl (or the design, if the issue is also queued `--design`) starts only after a
   - The callers' usage, sketched first: how the code that uses it will read.
 - Keep it short enough for the owner to read in one sitting.
 - Never comment on GitHub issues or PRs; report in your pane.
-- You take no part in `herdsman verdict` or `herdsman merge`.
+- You take no part in `drover verdict` or `drover merge`.
 
 ## Report
 

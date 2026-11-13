@@ -1,8 +1,8 @@
 //! #483: the Queue and Chat tabs show why they cannot read, config or log, in the error's own words.
 mod common;
 use common::*;
-use herdsman::events::Event;
-use herdsman::serve::Server;
+use drover::events::Event;
+use drover::serve::Server;
 use serde_json::Value;
 
 const CFG: &str =
@@ -20,11 +20,11 @@ fn error(s: &Server, tab: &str) -> String {
 
 #[test]
 fn a_tab_names_the_real_read_error() {
-    // The owner's own state dir (`$HOME/.local/state/herdsman`) with a log from before #344: reads refuse it.
+    // The owner's own state dir (`$HOME/.local/state/drover`) with a log from before #344: reads refuse it.
     let h = tmpdir("board-errors");
     std::env::set_var("HOME", &h);
     let mut c = ctx(&h, CFG);
-    c.state = h.join(".local/state/herdsman/events.jsonl");
+    c.state = h.join(".local/state/drover/events.jsonl");
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let ev = Event::new(1, "acme", Some(1), "queue-add", serde_json::json!({}));
     std::fs::write(&c.state, serde_json::to_string(&ev).unwrap() + "\n").unwrap();

@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::time::Duration;
 
@@ -17,7 +17,7 @@ fn boat1(prog: &str, args: &[String]) -> bool {
     matches!(prog, "ssh" | "herdr") && args.iter().any(|a| a == "boat1")
 }
 
-fn setup(name: &str, extra: &str) -> herdsman::Ctx {
+fn setup(name: &str, extra: &str) -> drover::Ctx {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.boat1]\nmachine = \"boat1\"\n{extra}");
     let c = ctx(&tmpdir(name), &toml);
@@ -131,7 +131,7 @@ impl Runner for KeyChanged {
 fn a_changed_host_key_alerts_once_and_is_never_retried_in_a_loop() {
     let c = setup("spared-key", "");
     for (i, now) in [NOW, NOW + 300, NOW + 600].into_iter().enumerate() {
-        let c = herdsman::Ctx { now, ..c.clone() };
+        let c = drover::Ctx { now, ..c.clone() };
         let r = KeyChanged(local());
         let (code, out) = run(&c, &r, &["tick"]);
         assert_eq!(code, 0, "pass {i}: {out}");

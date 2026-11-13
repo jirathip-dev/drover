@@ -1,4 +1,4 @@
-//! #537 `herdsman runners`: the owner's `[ci_runners]` VMs and their GitHub runners (docs/hosts.md). Each verb is
+//! #537 `drover runners`: the owner's `[ci_runners]` VMs and their GitHub runners (docs/hosts.md). Each verb is
 //! logged `runners-<verb>`. The registration token goes to a VM on stdin (`cloud::run`), never into argv, the log or
 //! the output; the provider key stays on this host.
 use crate::config::{CiRunners, Config};
@@ -27,7 +27,7 @@ fn conf(cfg: &Config) -> Result<&CiRunners> {
 }
 
 fn log(ctx: &Ctx, cfg: &Config, kind: &str, d: Value) -> Result<()> {
-    emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))
+    emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))
 }
 
 /// The VMs now: `vms`, then each `runners-add` and `runners-remove` in the log.
@@ -157,7 +157,7 @@ fn ask_owner<T>(code: &'static str, why: &str, verb: &str) -> Result<T> {
     refused(
         code,
         format!(
-            "{why}: ask the owner (`herdsman ask <fleet> \"herdsman runners {verb}: ok?\" --option yes --option no \
+            "{why}: ask the owner (`drover ask <fleet> \"drover runners {verb}: ok?\" --option yes --option no \
              --kind owner`), then run it again with --approved <id>"
         ),
     )
@@ -195,13 +195,13 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Option
         .map_or(0, |e| e.ts);
     if last + cfg.limits.token_refresh_minutes * 60 <= ctx.now {
         if let Err(e) = push_tokens(ctx, cfg, r, c) {
-            eprintln!("herdsman check: runner tokens: {e:#}");
+            eprintln!("drover check: runner tokens: {e:#}");
         }
     }
     Some(health(r, c, events))
 }
 
-/// `herdsman runners <verb>`; `ok_id` an owner ask that approved going past a gate.
+/// `drover runners <verb>`; `ok_id` an owner ask that approved going past a gate.
 pub fn run(
     ctx: &Ctx,
     cfg: &Config,
@@ -336,7 +336,7 @@ pub fn run(
             let ago = last.map_or("never".into(), |e| format!("{} ago", age(ctx.now - e.ts)));
             Ok(writeln!(
                 out,
-                "tokens: a fresh one on {n}/{} VMs; the refresher is `herdsman check` (the 5-minute timer), every {} \
+                "tokens: a fresh one on {n}/{} VMs; the refresher is `drover check` (the 5-minute timer), every {} \
                  min (before this: {ago})",
                 all.len(),
                 cfg.limits.token_refresh_minutes

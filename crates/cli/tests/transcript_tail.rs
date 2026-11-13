@@ -2,7 +2,7 @@
 //! 64 bytes before its offset hold; truncation, rotation or a changed prefix reads it whole again.
 mod common;
 use common::tmpdir;
-use herdsman::lanes::{read_tail, Tail};
+use drover::lanes::{read_tail, Tail};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::MetadataExt;
 use std::path::Path;

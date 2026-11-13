@@ -3,7 +3,7 @@
 //! with no transcript; the ascii frames across a `/live` update.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
+use drover::events::{append, Event};
 use serde_json::json;
 use std::path::Path;
 
@@ -26,13 +26,13 @@ fn screen(prompt: &str, reply: &str) -> String {
         &format!("\x1b[38;2;136;136;136m{rule}\x1b[0m\r"),
         "❯ \r",
         &format!("\x1b[38;2;136;136;136m{rule}\x1b[0m\r"),
-        "  herdsman #12 · 7d 53%\r",
+        "  drover #12 · 7d 53%\r",
         "  ⏵⏵ bypass permissions on (shift+tab to cycle)\r",
     ]
     .join("\n")
 }
 
-fn spawn(c: &herdsman::Ctx, ts: u64, issue: u64, agent: &str, machine: Option<&str>) {
+fn spawn(c: &drover::Ctx, ts: u64, issue: u64, agent: &str, machine: Option<&str>) {
     let mut d = json!({"role": "impl", "agent": agent, "harness": "claude", "worktree": format!("/wt/{agent}")});
     if let Some(m) = machine {
         d["machine"] = json!(m);
@@ -43,7 +43,7 @@ fn spawn(c: &herdsman::Ctx, ts: u64, issue: u64, agent: &str, machine: Option<&s
 
 /// A real `serve` with three working Claude lanes: 12 (local, a session transcript under `home`), 13 (on the Air)
 /// and 14 (local, no transcript); returns its URL and a paired cookie (`name=value`).
-fn board(name: &str, home: &Path) -> (herdsman::Ctx, String, String) {
+fn board(name: &str, home: &Path) -> (drover::Ctx, String, String) {
     let c = ctx(&tmpdir(name), CONFIG);
     spawn(&c, 900_100, 12, "sendmeter-impl-12", None);
     spawn(&c, 900_200, 13, "sendmeter-impl-13", Some("air"));
@@ -77,7 +77,7 @@ fn board(name: &str, home: &Path) -> (herdsman::Ctx, String, String) {
         .unwrap()
         .as_secs();
     let cookie = pair(
-        &herdsman::serve::Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())),
+        &drover::serve::Server::new(&c, &Fake::default(), Some("127.0.0.1:7777".into())),
         &c,
         "Safari",
         now,
@@ -85,7 +85,7 @@ fn board(name: &str, home: &Path) -> (herdsman::Ctx, String, String) {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/", l.local_addr().unwrap());
     let c2 = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &r, l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
     (c, url, cookie.trim().trim_start_matches("Cookie: ").to_string())
 }
 
@@ -94,9 +94,9 @@ fn board(name: &str, home: &Path) -> (herdsman::Ctx, String, String) {
 #[allow(clippy::too_many_arguments)]
 fn page(url: &str, cookie: &str, tab: &str, mode: &str, pre: &str, js: &str, wait: &str, png: &Path) -> Vec<f64> {
     let o = webview()
-        .env("HERDSMAN_COOKIE", cookie)
-        .env("HERDSMAN_WAIT", wait)
-        .env("HERDSMAN_PRE", pre)
+        .env("DROVER_COOKIE", cookie)
+        .env("DROVER_WAIT", wait)
+        .env("DROVER_PRE", pre)
         .args([url, "390", tab, mode, png.to_str().unwrap(), js])
         .output()
         .unwrap();
@@ -120,7 +120,7 @@ fn live_board_chat_and_ascii_in_webkit() {
     // Lane::session() reads $HOME/.claude; no other test here reads it.
     std::env::set_var("HOME", &home);
     let (c, url, cookie) = board("live334", &home);
-    let shots = std::env::var("HERDSMAN_SNAPSHOTS").map_or_else(|_| tmpdir("live334-png"), std::path::PathBuf::from);
+    let shots = std::env::var("DROVER_SNAPSHOTS").map_or_else(|_| tmpdir("live334-png"), std::path::PathBuf::from);
     // Bug 2: each sheet's default view shows ≥ 1 message, the full view ≥ 1 block, no page error, via the real /lane.
     for agent in ["sendmeter-impl-12", "sendmeter-impl-13", "sendmeter-impl-14"] {
         let js = format!(
@@ -203,7 +203,7 @@ fn herd_paints_at_once_and_refresh_is_the_plain_spinner() {
     }
     let _lock = ui_lock();
     let (_c, url, cookie) = board("herd334", &tmpdir("home-herd334"));
-    let shots = std::env::var("HERDSMAN_SNAPSHOTS").map_or_else(|_| tmpdir("herd334-png"), std::path::PathBuf::from);
+    let shots = std::env::var("DROVER_SNAPSHOTS").map_or_else(|_| tmpdir("herd334-png"), std::path::PathBuf::from);
     let pre = "localStorage.herd = '1'; const f = fetch; window.fetch = (u, o) => String(u).includes('herd.json') ? \
                new Promise(r => setTimeout(r, 3000)).then(() => f(u, o)) : f(u, o); \
                new MutationObserver((_, ob) => { if (document.querySelector('#herd .hh')) { ob.disconnect(); \

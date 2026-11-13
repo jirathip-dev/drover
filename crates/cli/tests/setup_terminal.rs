@@ -2,8 +2,8 @@
 //! reaches the event log, and a setup closes on its 10-minute timeout (lanes are hook-blocked: tests/hook.rs).
 mod common;
 use common::*;
-use herdsman::events::read;
-use herdsman::serve::Server;
+use drover::events::read;
+use drover::serve::Server;
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -13,8 +13,8 @@ fn config() -> String {
     format!("{CONFIG}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n\n[[setup]]\nname = \"claude B\"\ncmd = \"claude /login\"\nenv = {{CLAUDE_CONFIG_DIR = \"~/accounts/B\"}}\n")
 }
 
-fn log(c: &herdsman::Ctx) -> String {
-    herdsman::events::jsonl(&c.state).unwrap_or_default()
+fn log(c: &drover::Ctx) -> String {
+    drover::events::jsonl(&c.state).unwrap_or_default()
 }
 
 #[test]
@@ -33,7 +33,7 @@ fn only_configured_names_run_and_a_remote_pane_uses_machine() {
     );
     let (code, out) = run(&c, &r, &["setup", "bazzite", "claude B"]);
     assert_eq!(code, 0, "{out}");
-    assert!(r.called("herdr --machine bazzite workspace create --cwd /tmp --label herdsman-setup"));
+    assert!(r.called("herdr --machine bazzite workspace create --cwd /tmp --label drover-setup"));
     assert!(
         r.called("herdr --machine bazzite pane run w9:p1 cd; CLAUDE_CONFIG_DIR=~/'accounts/B' claude /login; exit"),
         "{:?}",
@@ -107,17 +107,17 @@ fn a_setup_closes_on_its_timeout() {
         .reply("herdr machine list --json", BAZZITE)
         .reply("herdr", WS);
     assert_eq!(run(&c, &r, &["setup", "bazzite", "gh"]).0, 0);
-    let at = |now| herdsman::Ctx { now, ..c.clone() };
-    herdsman::setup::reap(&at(T + 599), &r, &read(&c.state).unwrap()).unwrap();
+    let at = |now| drover::Ctx { now, ..c.clone() };
+    drover::setup::reap(&at(T + 599), &r, &read(&c.state).unwrap()).unwrap();
     assert!(!r.called("herdr --machine bazzite workspace close"));
-    herdsman::setup::reap(&at(T + 600), &r, &read(&c.state).unwrap()).unwrap();
+    drover::setup::reap(&at(T + 600), &r, &read(&c.state).unwrap()).unwrap();
     assert_eq!(r.count("herdr --machine bazzite workspace close w9"), 1);
     let e = read(&c.state).unwrap();
     assert_eq!((e[1].kind.as_str(), e[1].str("why")), ("setup-closed", Some("timeout")));
-    herdsman::setup::reap(&at(T + 900), &r, &e).unwrap();
+    drover::setup::reap(&at(T + 900), &r, &e).unwrap();
     assert_eq!(r.count("herdr --machine bazzite workspace close"), 1, "closed once");
     assert!(
-        herdsman::setup::send(&at(T + 900), &r, "w9:p1", "x").is_err(),
+        drover::setup::send(&at(T + 900), &r, "w9:p1", "x").is_err(),
         "no typing into a closed setup"
     );
 }

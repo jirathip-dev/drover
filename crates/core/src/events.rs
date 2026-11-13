@@ -79,7 +79,7 @@ pub fn read(path: &Path) -> Result<Vec<Event>> {
     Ok(shared(path)?.events.clone())
 }
 
-/// #344: the log in the JSONL format before #344, one event a line with its seq (`herdsman events --jsonl`).
+/// #344: the log in the JSONL format before #344, one event a line with its seq (`drover events --jsonl`).
 pub fn jsonl(path: &Path) -> Result<String> {
     history(path)?
         .iter()
@@ -109,7 +109,7 @@ fn parse(text: &str, path: &Path) -> Vec<Event> {
             Ok(ev) => out.push(aliased(ev)),
             Err(_) if l.trim().is_empty() || i + 1 == lines.len() => {}
             Err(e) => eprintln!(
-                "herdsman: {}: line {}: skipping corrupt record: {e}",
+                "drover: {}: line {}: skipping corrupt record: {e}",
                 path.display(),
                 i + 1
             ),
@@ -239,7 +239,7 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
         };
         if let Err(e) = res {
             let cmd = if n.webpush() { "webpush" } else { &n.cmd };
-            eprintln!("herdsman: notifier `{cmd}` failed: {e:#}");
+            eprintln!("drover: notifier `{cmd}` failed: {e:#}");
             let d = serde_json::json!({"cmd": cmd, "event": ev.kind, "error": format!("{e:#}")});
             let _ = append(state, &Event::new(ev.ts, &ev.fleet, ev.issue, "notify-failed", d));
         }
@@ -273,7 +273,7 @@ pub fn plain(ev: &Event) -> String {
                 })
                 .collect();
             format!(
-                "{who} needs you ({} asks {}): {}{opts}\n  herdsman answer {} {} <n|\"text\">",
+                "{who} needs you ({} asks {}): {}{opts}\n  drover answer {} {} <n|\"text\">",
                 s("agent"),
                 s("id"),
                 s("question"),
@@ -398,7 +398,7 @@ pub fn checks(e: &Event) -> bool {
         .unwrap_or(e.str("role") == Some("rev"))
 }
 
-/// Events `herdsman check` and notifiers write about an issue; they are not activity.
+/// Events `drover check` and notifiers write about an issue; they are not activity.
 pub const PASSIVE: &[&str] = &[
     // #778: a tapped start still waiting; the decision before it moved the issue.
     "pending-action",
@@ -721,7 +721,7 @@ fn ending<'a>(events: &'a [Event], a: &Event) -> Option<(&'static str, &'a Event
     Some((ORDER[end.0], &events[end.1]))
 }
 
-/// #584: `closed` as `herdsman asks` shows it: `withdrawn → q<new>`, `delivered to t<n>`.
+/// #584: `closed` as `drover asks` shows it: `withdrawn → q<new>`, `delivered to t<n>`.
 pub fn closed_row(events: &[Event], a: &Event) -> Option<String> {
     let (why, e) = ending(events, a)?;
     Some(match (why, e.str("for"), e.str("to")) {

@@ -32,8 +32,8 @@ the demo banner and needs-you cards are removed, so the board fills each shot.
 Regenerate with:
 
 ```sh
-HERDSMAN_HOME=<demo copy> FLEET_CONFIG=<demo copy>/fleet.toml FLEET_STATE=<demo copy>/events.jsonl \
-  ./target/release/herdsman serve --export <site> --demo && scripts/host-fixtures.sh <site>
+DROVER_HOME=<demo copy> FLEET_CONFIG=<demo copy>/fleet.toml FLEET_STATE=<demo copy>/events.jsonl \
+  ./target/release/drover serve --export <site> --demo && scripts/host-fixtures.sh <site>
 node docs/design/pickers/shoot.mjs <site> <chrome-headless-shell>
 ```
 
@@ -103,7 +103,7 @@ The CSS class `.lk` (Queue, `serve.css:471`) and herd.js's top-level `const look
    icon keeps its install-time look"). The toast sits under the header at z-index 2, so the sheet (z 3) would cover it.
    **Recommend: the note.**
 5. **The offline note becomes `as of 14:05`** (its title stays `last update 14:05`). Offline, the live Queue header is
-   at its fullest: `herdsman`, the note, the dot and four controls. `last update 14:05` plus `[◐]` wrapped the title one
+   at its fullest: `drover`, the note, the dot and four controls. `last update 14:05` plus `[◐]` wrapped the title one
    letter per line. In the demo it already wraps to 3 lines today (`headers-390.png`, bottom left, shot without the
    demo tag). Proposed: the title never wraps, the shorter note fits whole (measured: not cut), and it ellipsises only as
    a last resort. This is outside the issue's letter, but the AC's "Queue header fits at 390" needs it.

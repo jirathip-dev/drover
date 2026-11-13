@@ -6,5 +6,5 @@
 - A `README.md` beside them maps each image to the decision it shows. Keep it small (at most 3 pages or screens, one
   commit within 60 min) unless the issue asks for variants; push it and end your turn.
   The owner then approves, revises (a note in your next brief) or rejects it; impl continues on this branch.
-- Design lanes take no part in `herdsman verdict` or `herdsman merge`; a PR, if any, is the owner's call.
+- Design lanes take no part in `drover verdict` or `drover merge`; a PR, if any, is the owner's call.
 - Report: what you produced and where.

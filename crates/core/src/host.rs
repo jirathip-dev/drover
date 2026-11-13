@@ -1,4 +1,4 @@
-//! Host-load gate for `herdsman spawn` (an unreadable signal admits) and the live-agent view.
+//! Host-load gate for `drover spawn` (an unreadable signal admits) and the live-agent view.
 use crate::config::Limits;
 pub use crate::herdr::agents;
 use crate::runner::{ok, Runner};
@@ -16,7 +16,7 @@ pub fn live_in<'a>(agents: &'a [Value], name: &str, dir: &Path) -> Vec<&'a Value
 }
 
 /// #186: never signalled, whatever their cwd.
-const SPARE: &[&str] = &[crate::herdr::BIN, "herdsman", "launchd"];
+const SPARE: &[&str] = &[crate::herdr::BIN, "drover", "herdsman", "launchd"];
 
 /// #186: `(pid, command, cwd)` of every process `lsof` sees, but `SPARE`, pid 1, this process and its parent.
 pub fn cwds(r: &dyn Runner) -> Vec<(String, String, String)> {
@@ -158,9 +158,9 @@ pub fn top(r: &dyn Runner, agents: &[Value]) -> Vec<String> {
     out.split_once("MEM")
         .map_or(vec![], |(_, t)| t.lines().filter_map(row).collect())
 }
-/// #352: the MB `ps` sees per group, never per PID: lanes (a harness's process), CI/Colima, browsers, herdsman, other.
+/// #352: the MB `ps` sees per group, never per PID: lanes (a harness's process), CI/Colima, browsers, drover, other.
 pub fn groups(r: &dyn Runner) -> [u64; 5] {
-    const G: [&str; 3] = ["colima qemu lima virtualiz", "chrom safari firefox", "herd"];
+    const G: [&str; 3] = ["colima qemu lima virtualiz", "chrom safari firefox", "herd drover"];
     let (ps, mut kb) = (stdout(r, "ps", &["-axo", "rss=,command="]).unwrap_or_default(), [0; 5]);
     for (k, cmd) in ps.to_lowercase().lines().filter_map(|l| l.trim().split_once(' ')) {
         let lane = crate::providers::lanes().any(|h| h.process_names().iter().any(|w| cmd.contains(w)));
@@ -183,7 +183,7 @@ pub struct Host {
     pub free_mem_gb: Option<f64>,
     /// #234: the memory size in GB.
     pub mem_total_gb: Option<f64>,
-    /// #825: the 3 busiest processes herdsman did not start, `name cpu%`.
+    /// #825: the 3 busiest processes drover did not start, `name cpu%`.
     pub top: Vec<String>,
 }
 
@@ -200,7 +200,9 @@ fn own_load(ps: &str) -> (f64, Vec<String>) {
         Some((pid, parent, cpu.parse::<f64>().ok()?, name))
     };
     let procs: Vec<_> = ps.lines().filter_map(row).collect();
-    let ours: Vec<u64> = (procs.iter().filter(|p| p.3 == "herdsman")).map(|p| p.0).collect();
+    let ours: Vec<u64> = (procs.iter().filter(|p| ["drover", "herdsman"].contains(&p.3.as_str())))
+        .map(|p| p.0)
+        .collect();
     let (own, mut other): (Vec<_>, Vec<_>) =
         (procs.iter()).partition(|p| ours.contains(&p.0) || p.3 == "cp" && ours.contains(&p.1));
     other.sort_by(|a, b| b.2.total_cmp(&a.2));
