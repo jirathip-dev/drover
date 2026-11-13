@@ -1215,7 +1215,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         .and_then(|e| e.str("worktree"));
                     let u = wt.and_then(|wt| crate::spawn::unsaved(r, std::path::Path::new(wt)));
                     let u = crate::spawn::unsaved_text(u).map(|u| format!(" · {u}"));
-                    root.unwrap_or_default() + &u.unwrap_or_default()
+                    let qos = e.filter(|_| !s.done()).and_then(|e| e.str("qos"));
+                    let qos = qos.map(|q| format!(" · qos {q}"));
+                    root.unwrap_or_default() + &u.unwrap_or_default() + &qos.unwrap_or_default()
                 };
                 writeln!(
                     out,
