@@ -106,8 +106,7 @@ pub fn answering(ctx: &Ctx, cfg: &Config) -> Vec<PathBuf> {
         .collect()
 }
 
-/// #976: why a pass must not touch spawn `sp`'s worktree on this host: `off-root` (under none of the roots this host
-/// sets: no fs call is made), `root unreachable`, or `root-hung` (its `.git` unread in `lane_read_secs`, logged once).
+/// #976: why a pass skips `sp`'s worktree: `off-root`, `root unreachable` or `root-hung` (its `.git` read timed out).
 pub fn skip(ctx: &Ctx, cfg: &Config, sp: &Event) -> Option<&'static str> {
     let wt = sp.str("worktree").filter(|_| sp.str("machine").is_none())?;
     let (roots, set) = (local(ctx, cfg), cfg.hosts.values().find(|h| h.machine.is_none()));
@@ -146,7 +145,6 @@ pub fn skip(ctx: &Ctx, cfg: &Config, sp: &Event) -> Option<&'static str> {
     hung.then_some("root-hung")
 }
 
-/// #976: per event log, the lane worktrees whose last mark is `root-hung`, read once a process.
 static HANGS: std::sync::Mutex<std::collections::BTreeMap<PathBuf, std::collections::BTreeSet<String>>> =
     std::sync::Mutex::new(std::collections::BTreeMap::new());
 

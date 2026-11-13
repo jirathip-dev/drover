@@ -380,8 +380,8 @@ pub fn sicken(dir: &str) {
 }
 
 /// #776: whether `dir`'s disk has stopped answering: `probe(dir)` (its disk and a listing) runs on its own thread and
-/// must finish within `wait`. A probe still running is never repeated: a caller waits out its time, then the folder
-/// stays hung, with no new thread, until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
+/// must finish within `wait`. A probe still running is never repeated: the folder stays hung, with no new thread,
+/// until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
 pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> + Send + 'static) -> bool {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
     use std::sync::Arc;
