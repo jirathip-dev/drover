@@ -200,11 +200,6 @@ pub fn last_pass(ctx: &Ctx, fleet: &str) -> Option<u64> {
         .ok()
 }
 
-/// #217: `drive.lock` over an extend's spawn, so no pass starts the same round meanwhile; `None` while a pass runs.
-pub fn hold(ctx: &Ctx, r: &dyn Runner, fleet: &str) -> Option<impl Drop> {
-    take(ctx, r, "drive.lock", STALE_LOCK_SECS, fleet)
-}
-
 fn state_dir(ctx: &Ctx) -> &Path {
     ctx.state.parent().unwrap_or(&ctx.state)
 }
@@ -379,16 +374,19 @@ fn launch(
         .iter()
         .filter(|p| p.fleet == fleet && !bound(p).is_some_and(low))
         .count();
-    if n_live >= max - usize::from(start && max > 1)
-        || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n))
-        || (mine >= max.div_ceil(2) && waits_elsewhere(ctx, cfg, ev, fleet))
+    let extend = crate::pending::extending(ev, fleet, n);
+    if live.iter().any(|e| e.fleet == fleet && e.issue == Some(n))
+        || !extend
+            && (n_live >= max - usize::from(start && max > 1)
+                || (mine >= max.div_ceil(2) && waits_elsewhere(ctx, cfg, ev, fleet)))
     {
         let by = Some(held_by(ctx, cfg, r)).filter(|b| !b.is_empty());
         let by = by.map_or(String::new(), |b| format!(": {b}"));
         return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting{by}"));
     }
     crate::spawn::lane_admit(ctx, (cfg, r), ev, fleet, n, role)?;
-    if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && c.contains(&"--force"))) {
+    if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && (extend || c.contains(&"--force"))))
+    {
         return crate::gate::refused(code, why);
     }
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});

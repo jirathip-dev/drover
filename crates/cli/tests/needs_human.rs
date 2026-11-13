@@ -165,7 +165,7 @@ fn herd_marks_the_issue_and_park_clears_the_card() {
 
 /// Finding 1/2 of the first review: the card ops act only on a needs-human issue. #217: `[one more round]` logs
 /// `round-extended` first; #778: a spawn held back (PAUSED) keeps it pending, its card answered, and a second tap grants
-/// no more.
+/// no more (#975: it only retries the start).
 #[test]
 fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     let c = fixture("nh-guard", "FAIL");
@@ -203,7 +203,10 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
         !get(&s, "/", &cookie).contains("<details class=ask data-n=12>"),
         "the card stays answered"
     );
-    assert!(post("extend").contains("not%20needs"), "a second tap");
+    assert!(
+        post("extend").contains("msg=%2312%3A%20extend"),
+        "a second tap retries the start"
+    );
     assert_eq!(extended(), 1, "the decision is logged once, before the spawn");
     assert_eq!(fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].extra, 1);
     let failed = read(&c.state)
