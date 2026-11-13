@@ -1,0 +1,7 @@
+Decided: merge origin/staging rather than rebase; the branch is pushed and history is never rewritten
+Because: crates/core/src/drive.rs:830 keeps the lane-dup pass beside stale after the rename merge, with the drover: prefix
+Decided: rename the herdsman crate paths in drive_sim.rs and design_stage.rs as a staging build fix
+Because: crates/cli/tests/drive_sim.rs:3 named the herdsman crate after #456, so staging's test targets did not compile
+Rejected: waiting for another PR to fix staging — a lane fixes the minimal break and says so in the body
+Check: cargo test --locked --no-fail-fast with lane env unset exits 0, drive_sim's five scenarios included
+Owner: the branch now runs on the renamed drover code, and staging's broken test build is fixed in this PR
