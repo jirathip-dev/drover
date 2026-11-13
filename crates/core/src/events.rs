@@ -525,7 +525,7 @@ pub struct Asks {
     by: HashMap<(u8, String, Option<String>), Vec<usize>>,
     /// The first `spawn-started` of each (agent, pane).
     started: HashMap<(Option<String>, Option<String>), usize>,
-    ids: std::collections::HashSet<(String, String)>,
+    ids: std::collections::HashSet<String>,
 }
 
 impl Asks {
@@ -540,7 +540,7 @@ impl Asks {
         let issue = e.issue.map(|n| n.to_string());
         if e.kind == "spawn-started" {
             self.started.entry((s("agent"), s("pane"))).or_insert(i);
-        } else if e.kind == "needs-decision" && s("id").is_some_and(|id| !self.ids.insert((e.fleet.clone(), id))) {
+        } else if e.kind == "needs-decision" && twin(e).is_some_and(|k| !self.ids.insert(k)) {
             self.ends.insert(i, Some((ORDER.len() - 1, i)));
         } else if e.kind == "needs-decision" {
             self.ends.insert(i, None);
@@ -646,10 +646,14 @@ pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> 
     map.get(&(fleet.into(), id.into())).map(|i| &events[*i])
 }
 
-/// #900: `e` repeats an ask id logged before it (two passes raced to post it): every view shows the first alone.
+/// #900: `e` repeats an ask logged before it (two passes raced to post it): every view shows the first alone.
 pub fn repeat(events: &[Event], e: &Event) -> bool {
-    let first = |id| ask_event(events, "needs-decision", &e.fleet, id);
-    e.kind == "needs-decision" && e.str("id").and_then(first).is_some_and(|a| !std::ptr::eq(a, e))
+    closed(events, e) == Some("repeat")
+}
+
+fn twin(e: &Event) -> Option<String> {
+    let k = (&e.fleet, e.issue, e.str("thread"), e.str("question"));
+    e.str("id").map(|id| format!("{id} {k:?}"))
 }
 
 /// #859: ask indexes built from a slice that is no cached `Log` (`index`'s one-pass fallback): serve's reads build none.
@@ -832,13 +836,19 @@ pub fn closed_row(events: &[Event], a: &Event) -> Option<String> {
     })
 }
 
+/// #906: decision or `ask-*` ending `e` is about ask `a` (by `ask_seq`, else by id on its issue).
+pub fn names(e: &Event, a: &Event) -> bool {
+    let seq = e.data.get("ask_seq").and_then(Value::as_u64);
+    e.str("id") == a.str("id") && seq.map_or(e.issue.is_none() || e.issue == a.issue, |s| s == a.seq)
+}
+
 /// #447: what later event `e` does to ask `a` (`closed`'s reasons, one event at a time). `own`: `e`'s
 /// `spawn-started` came before the ask, so a `spawn` `e` is the asking lane itself (#446).
 fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option<&'static str> {
     VISITS.fetch_add(1, Relaxed);
     let on = |k: &str| e.kind == k && a.issue.is_some() && e.issue == a.issue;
     let mine = matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
-    let id = e.str("id") == a.str("id");
+    let id = names(e, a);
     if e.fleet != a.fleet {
         None
     } else if e.kind == "decision" && id {

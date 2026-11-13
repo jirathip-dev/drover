@@ -532,9 +532,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let routine = |a: &&&Event| a.str("kind") == Some("routine");
     let due = |a: &&&Event| ctx.now.saturating_sub(a.ts) >= cfg.limits.ask_default_minutes * 60;
     for a in open.iter().filter(routine).filter(due) {
-        let id = a.str("id").unwrap_or_default();
         let rec = a.data["recommend"].to_string();
-        crate::answer(ctx, cfg, r, out, (&a.fleet, id), &rec, ("default", None))?;
+        crate::answer_with(ctx, cfg, r, out, a, &rec, ("default", None), (None, None))?;
     }
     let waiting = |a: &&&Event| {
         !routine(a) && a.str("from").is_none() && ctx.now.saturating_sub(a.ts) > cfg.limits.ask_waiting_minutes * 60
@@ -701,7 +700,7 @@ fn expire(
         } else {
             continue;
         };
-        (d["key"], d["id"]) = (json!(id), json!(id));
+        (d["key"], d["id"], d["ask_seq"]) = (json!(id), json!(id), json!(q.seq));
         fire(ctx, cfg, out, &events, (&q.fleet, q.issue), kind, d)?;
         n += 1;
     }
