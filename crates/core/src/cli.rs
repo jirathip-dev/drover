@@ -1192,7 +1192,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     json!({"kind": t.kind, "cmd": t.cmd, "since": t.since}),
                 );
             };
-            return crate::heavy::run(&ctx.state.with_file_name("heavy"), me, max, wait, timeout);
+            return crate::heavy::run(r, &ctx.state.with_file_name("heavy"), me, max, wait, timeout);
         }
         Cmd::Status(Scope { fleet, json }) => {
             let (events, all) = (read(&ctx.state)?, crate::events::states(&ctx.state)?);

@@ -107,8 +107,14 @@ fn admitted(dir: &Path, me: &str, max: usize) -> bool {
 }
 
 /// Wait in `dir`'s line as `me` (past `wait_minutes`: `late`, then run anyway), run its command, free the slot on exit.
-pub fn run(dir: &Path, mut me: Ticket, max: usize, wait_minutes: u64, late: impl FnOnce(&Ticket)) -> Result<i32> {
-    use std::os::unix::process::ExitStatusExt;
+pub fn run(
+    r: &dyn crate::runner::Runner,
+    dir: &Path,
+    mut me: Ticket,
+    max: usize,
+    wait_minutes: u64,
+    late: impl FnOnce(&Ticket),
+) -> Result<i32> {
     std::fs::create_dir_all(dir)?;
     let guard = File::create(dir.join(".lock"))?;
     guard.lock()?;
@@ -143,8 +149,7 @@ pub fn run(dir: &Path, mut me: Ticket, max: usize, wait_minutes: u64, late: impl
     if timed_out {
         late(&me);
     }
-    let st = std::process::Command::new("bash").arg("-c").arg(&me.cmd).status();
+    let code = r.attached("bash", &["-c".into(), me.cmd.clone()]);
     let _ = std::fs::remove_file(&path);
-    let st = st?;
-    Ok(st.code().or(st.signal().map(|s| 128 + s)).unwrap_or(1))
+    code
 }
