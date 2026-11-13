@@ -128,6 +128,25 @@ impl Shed {
         let a = self.acp_argv(name, labels, cwd, cmd);
         shed::cli(r, &a.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
     }
+    /// #938: a throwaway terminal running the breaker's canary shows its output: shed starts sessions again.
+    pub fn canary(&self, r: &dyn Runner) -> bool {
+        let name = "drover-canary";
+        let _ = self.call(r, Method::Rm, Target { name: name.into() });
+        let mut p = Self::run_params(name, &[], "/");
+        p.cmd = argv(&["sh", "-c", crate::breaker::CANARY]);
+        let wait = WaitParams {
+            name: name.into(),
+            until: vec![],
+            output: Some(crate::breaker::CANARY_OUT.into()),
+            timeout: Some(20.0),
+        };
+        let ok = self.call(r, Method::Run, p).is_ok()
+            && self
+                .call(r, Method::Wait, wait)
+                .is_ok_and(|v| v["outcome"] == "matched");
+        let _ = self.call(r, Method::Rm, Target { name: name.into() });
+        ok
+    }
     /// The `shed run --acp` words that start ACP lane `name`.
     pub fn acp_argv(&self, name: &str, labels: &[(&str, String)], cwd: &str, cmd: &[String]) -> Vec<String> {
         let id = self.0.acp.as_deref().unwrap_or_default();

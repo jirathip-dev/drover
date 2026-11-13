@@ -3,6 +3,7 @@ pub mod access;
 pub mod action;
 pub mod amend;
 pub mod arch;
+pub mod breaker;
 pub mod card;
 pub mod check;
 #[allow(clippy::doc_markdown)] // its doc comments are clap help text, printed verbatim
@@ -12,6 +13,7 @@ pub mod config;
 pub mod db;
 pub mod design;
 pub mod devices;
+pub mod diagram;
 pub mod doctor;
 pub mod drive;
 pub mod events;
@@ -58,7 +60,7 @@ pub mod webhook;
 pub mod webpush;
 pub mod why;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 pub use cli::{main_with, usage_doc, HELP_AGENT_MAX, SERVE, SERVICE};
 use config::{home, set_in, set_value, write_atomic, Config};
 use events::{emit, read, Event};
@@ -405,14 +407,18 @@ pub fn ask(
     if let Some(t) = routed {
         d["routed"] = json!(t);
     }
-    let ev = events::emit_ask(&ctx.state, cfg, &Event::new(ctx.now, fleet, issue, "needs-decision", d))?;
+    let ev = Event::new(ctx.now, fleet, issue, "needs-decision", d);
+    let ev = events::ask(&ctx.state, cfg, vec![ev], None)?
+        .pop()
+        .context("ask not logged")?;
+    let id = ev.str("id").unwrap_or_default();
     // #633: an attached cooee thread reads the ask from `/api/v1/events`; no drover conductor to type it into.
     if let Some(t) = routed.filter(|t| orchestrator::attached(&events, t).is_none()) {
         if let Err(e) = orchestrator::lane_ask(ctx, cfg, r, t, &ev) {
             orchestrator::to_owner(ctx, cfg, t, &ev, None, &format!("orchestrator not reached: {e:#}"))?;
         }
     }
-    Ok(writeln!(out, "{}", ev.str("id").unwrap_or_default())?)
+    Ok(writeln!(out, "{id}")?)
 }
 
 /// #541: how long the owner may change a conductor's answer, in seconds (the board reads it).
@@ -509,17 +515,20 @@ pub fn orchestrator_extend(
         .iter()
         .rfind(open)
         .filter(|a| events::closed(&events, a).is_none());
-    let id = if let Some(a) = ask {
-        a.str("id").unwrap_or_default().to_string()
+    let ask = if let Some(a) = ask {
+        a.clone()
     } else {
         let why = card.and_then(|c| c.str("reason")).unwrap_or("needs-human");
         let q = format!("One more round for #{n}? ({why})");
         let d = json!({"question": q, "options": ["one more round", "park"], "recommend": 1,
             "kind": "owner", "extend": true, "spawn": spawn});
-        let ev = events::ask(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "needs-decision", d))?;
-        ev.str("id").unwrap_or_default().to_string()
+        let ev = Event::new(ctx.now, fleet, Some(n), "needs-decision", d);
+        db::ask(&ctx.state, vec![ev], None)?
+            .and_then(|mut v| v.pop())
+            .context("ask not logged")?
     };
-    orchestrator_answer(ctx, cfg, r, out, (fleet, &id), "1", (t, basis.unwrap_or_default()))
+    let id = ask.str("id").unwrap_or_default();
+    orchestrator_answer(ctx, cfg, r, out, (fleet, id), "1", (t, basis.unwrap_or_default()))
 }
 
 /// #584: who a typed answer is by.

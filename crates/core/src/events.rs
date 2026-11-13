@@ -76,11 +76,6 @@ pub fn append(path: &Path, ev: &Event) -> Result<()> {
     crate::db::append(path, ev)
 }
 
-/// #906: ask `ev`, a `needs-decision`, under a fresh id (`db::ask`); the event as logged.
-pub fn ask(path: &Path, ev: &Event) -> Result<Event> {
-    crate::db::ask(path, ev)
-}
-
 /// The live log (#343: without the events a rotation archived), by seq.
 pub fn read(path: &Path) -> Result<Vec<Event>> {
     Ok(shared(path)?.to_vec())
@@ -216,11 +211,11 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     notify(state, cfg, &ev)
 }
 
-/// #906: `ask`, then `emit`'s notifiers; the ask as logged.
-pub fn emit_ask(state: &Path, cfg: &Config, ev: &Event) -> Result<Event> {
-    let ev = ask(state, ev)?;
-    notify(state, cfg, &ev)?;
-    Ok(ev)
+/// #900: `db::ask`, then notify each event logged: they, the asks numbered, or none when `once` is logged already.
+pub fn ask(state: &Path, cfg: &Config, evs: Vec<Event>, once: Option<&str>) -> Result<Vec<Event>> {
+    let evs = crate::db::ask(state, evs, once)?.unwrap_or_default();
+    evs.iter().try_for_each(|ev| notify(state, cfg, ev))?;
+    Ok(evs)
 }
 
 fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
@@ -506,7 +501,7 @@ pub const PASSIVE: &[&str] = &[
 ];
 
 /// #584: an ask's endings, the first that applies naming why it closed.
-const ORDER: [&str; 8] = [
+const ORDER: [&str; 9] = [
     "answered",
     "withdrawn",
     "delivered",
@@ -515,6 +510,7 @@ const ORDER: [&str; 8] = [
     "closed: merged",
     "closed: issue closed",
     "closed: lane gone",
+    "repeat",
 ];
 
 /// #632: events indexed and (ask, event) pairs checked: the ask endings' work, counted.
@@ -529,6 +525,7 @@ pub struct Asks {
     by: HashMap<(u8, String, Option<String>), Vec<usize>>,
     /// The first `spawn-started` of each (agent, pane).
     started: HashMap<(Option<String>, Option<String>), usize>,
+    ids: std::collections::HashSet<String>,
 }
 
 impl Asks {
@@ -543,6 +540,8 @@ impl Asks {
         let issue = e.issue.map(|n| n.to_string());
         if e.kind == "spawn-started" {
             self.started.entry((s("agent"), s("pane"))).or_insert(i);
+        } else if e.kind == "needs-decision" && twin(e).is_some_and(|k| !self.ids.insert(k)) {
+            self.ends.insert(i, Some((ORDER.len() - 1, i)));
         } else if e.kind == "needs-decision" {
             self.ends.insert(i, None);
             let keys = [key(0, s("id")), key(2, s("agent"))]
@@ -645,6 +644,16 @@ pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> 
     let x = &l.threads;
     let map = if kind == "decision" { &x.decisions } else { &x.asks };
     map.get(&(fleet.into(), id.into())).map(|i| &events[*i])
+}
+
+/// #900: `e` repeats an ask logged before it (two passes raced to post it): every view shows the first alone.
+pub fn repeat(events: &[Event], e: &Event) -> bool {
+    closed(events, e) == Some("repeat")
+}
+
+fn twin(e: &Event) -> Option<String> {
+    let k = (&e.fleet, e.issue, e.str("thread"), e.str("question"));
+    e.str("id").map(|id| format!("{id} {k:?}"))
 }
 
 /// #859: ask indexes built from a slice that is no cached `Log` (`index`'s one-pass fallback): serve's reads build none.
@@ -1045,7 +1054,87 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
             _ => {}
         }
     }
+    debug_assert!(m.values().all(|s| state(&s.state).is_some()), "a state not in STATES");
     m
+}
+
+/// #845: every state `fold` gives an issue (a round's `(n)`, `·f` and `+uN` aside), each with its ways out.
+pub const STATES: &[(&str, &[(&str, &str)])] = &[
+    (
+        "queued",
+        &[
+            ("design", "queued with an architect or design mark, that lane first"),
+            (
+                "impl",
+                "impl spawned, refused while SERIAL_BUSY, HOST_BUSY, DISK_BUDGET, LANE_LIVE or CAP",
+            ),
+            ("closed", "issue closed on GitHub"),
+        ],
+    ),
+    ("design", &[("design-review", "design pushed, the owner's ask")]),
+    (
+        "design-review",
+        &[("queued", "approve or revise"), ("needs-human", "reject")],
+    ),
+    (
+        "impl",
+        &[
+            ("review(n)", "turn done with a push, review spawned"),
+            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+            ("queued", "lane killed, or repaired while blocked"),
+        ],
+    ),
+    (
+        "review(n)",
+        &[
+            ("ready", "PASS at head"),
+            ("fix(n)", "FAIL at head"),
+            ("needs-human", "ROUND_LIMIT after review_rounds"),
+        ],
+    ),
+    (
+        "fix(n)",
+        &[
+            ("review(n)", "fix pushed, next review round"),
+            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+        ],
+    ),
+    (
+        "ready",
+        &[
+            ("review(n)", "verify stage at head for ui_paths, a verify or repro mark"),
+            (
+                "fix(n)",
+                "update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds",
+            ),
+            ("merged", "merge with PASS at head and CI green, no STAGING_WOULD_BREAK"),
+            ("blocked", "merge refused, or PR closed outside drover"),
+        ],
+    ),
+    (
+        "blocked",
+        &[
+            ("fix(n)", "fix round spawned"),
+            ("review(n)", "review spawned at a new head"),
+        ],
+    ),
+    (
+        "needs-human",
+        &[
+            ("queued", "extend with no lane yet, start lane"),
+            ("fix(n)", "extend, one more round"),
+            ("parked", "park"),
+        ],
+    ),
+    ("parked", &[("needs-human", "unpark, the state before it")]),
+    ("merged", &[]),
+    ("closed", &[]),
+];
+
+/// #845: `state`'s `STATES` entry, matched on its name before any `(` or `+`.
+pub fn state(state: &str) -> Option<&'static (&'static str, &'static [(&'static str, &'static str)])> {
+    let base = state.split(['(', '+']).next();
+    STATES.iter().find(|(name, _)| name.split('(').next() == base)
 }
 
 /// #412: the states a design spawn moves into `design` (before impl).

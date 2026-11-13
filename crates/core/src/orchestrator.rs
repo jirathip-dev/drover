@@ -30,6 +30,7 @@ pub fn of<'a>(events: &'a [Event], id: &str) -> impl DoubleEndedIterator<Item = 
     });
     let at = at.into_iter().flatten().map(move |i| &events[i]);
     at.chain(all.into_iter().flatten())
+        .filter(move |e| !events::repeat(events, e))
 }
 
 /// #701: every thread's `thread-new`, oldest first.
@@ -352,14 +353,11 @@ pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]:
     let question = format!("Hand off \"{title}\" to which {to} thread? Nothing is delivered until you tap one.");
     let d = json!({"question": question, "options": opts, "recommend": null, "kind": "owner", "thread": from,
         "handoff": {"repo": to, "title": title, "text": text, "targets": targets}, "forwards": fwd});
-    let ev = events::emit_ask(
-        &ctx.state,
-        cfg,
-        &Event::new(ctx.now, &t.fleet, None, "needs-decision", d),
-    )?;
+    let ev = Event::new(ctx.now, &t.fleet, None, "needs-decision", d);
+    let ev = events::ask(&ctx.state, cfg, vec![ev], None)?.pop();
+    let q = ev.as_ref().and_then(|e| e.str("id")).unwrap_or_default();
     Ok(format!(
-        "{}: the owner picks the thread; nothing is delivered until then",
-        ev.str("id").unwrap_or_default()
+        "{q}: the owner picks the thread; nothing is delivered until then"
     ))
 }
 
