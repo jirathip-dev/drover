@@ -194,6 +194,7 @@ const PER_DEVICE: usize = 4;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 /// A form op for `serve_on`'s job thread: (ctx, form, fleet).
 type Job = (Ctx, BTreeMap<String, String>, String);
+const BUSY: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n";
 /// When this board started (the Services board row's uptime).
 static STARTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
@@ -262,11 +263,8 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
         });
         // #140: drive and the needs-human ops run here, one at a time; the board toasts the result.
         sc.spawn(move || {
-            for (c, f, fleet) in rx {
-                let msg = json!(s.write(&c, &f).unwrap_or_else(|e| shown(&e)));
-                s.kick.store(lock(&s.running).remove(&fleet), Relaxed);
-                let id = lock(&s.watch).seen.unwrap_or(0);
-                lock(&s.clients).retain(|c| c.0.send(format!("id: {id}\nevent: toast\ndata: {msg}\n\n")).is_ok());
+            for key in rx {
+                sc.spawn(move || s.work(&key));
             }
         });
         let sock = ho.and_then(Handover::ready);
@@ -274,7 +272,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             sc.spawn(move || h.control(&sock));
         }
         for mut st in l.incoming().flatten() {
-            if busy.fetch_add(1, Relaxed) < 16 {
+            if busy.fetch_add(1, Relaxed) < 256 {
                 open.fetch_add(1, Relaxed);
                 // #715: its deliveries (a conductor start can take minutes) run after it frees its request slot.
                 sc.spawn(move || {
@@ -285,7 +283,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
                 });
             } else {
                 busy.fetch_sub(1, Relaxed);
-                drop(st.write_all(b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n"));
+                drop(st.write_all(BUSY));
             }
             if let Some(h) = ho.filter(|h| h.stopping()) {
                 h.left();
@@ -430,8 +428,9 @@ pub struct Server<'a> {
     kick: Arc<AtomicBool>,
     watch: Mutex<Watch>,
     /// `serve_on`'s background queue for ops that can spawn or merge, and the fleets with one in flight.
-    jobs: Option<Sender<Job>>,
-    running: Mutex<BTreeSet<String>>,
+    jobs: Option<Sender<String>>,
+    running: Mutex<BTreeMap<String, std::collections::VecDeque<Job>>>,
+    writes: AtomicUsize,
     /// `serve --export` (#39): Some(demo), static files with relative URLs; `true` is the inert demo.
     export: Option<bool>,
     /// #337: the step's snapshot as last loaded, by the file's mtime.
@@ -776,6 +775,7 @@ impl<'a> Server<'a> {
             watch: Mutex::default(),
             jobs: None,
             running: Mutex::default(),
+            writes: AtomicUsize::new(0),
             export: None,
             snap: Mutex::default(),
             later: Mutex::default(),
@@ -930,8 +930,35 @@ impl<'a> Server<'a> {
         if req.starts_with("GET ") && path.starts_with("/screens/") && path.ends_with("/stream") {
             return self.stream(&mut s, &req, path, query);
         }
-        s.write_all(&self.reply(&req, crate::now()))?;
-        Ok(())
+        let write = !req.starts_with("GET ");
+        if write && self.writes.fetch_add(1, Relaxed) >= 16 {
+            self.writes.fetch_sub(1, Relaxed);
+            return s.write_all(BUSY);
+        }
+        let out = self.reply(&req, crate::now());
+        if write {
+            self.writes.fetch_sub(1, Relaxed);
+        }
+        s.write_all(&out)
+    }
+
+    fn work(&self, key: &str) {
+        let next = || lock(&self.running).get(key).and_then(|q| q.front().cloned());
+        while let Some((c, f, _)) = next() {
+            let msg = json!(self.write(&c, &f).unwrap_or_else(|e| shown(&e)));
+            let mut q = lock(&self.running);
+            let last = q.get_mut(key).is_none_or(|j| j.pop_front().is_some() && j.is_empty());
+            if last {
+                q.remove(key);
+            }
+            drop(q);
+            self.kick.store(true, Relaxed);
+            let id = lock(&self.watch).seen.unwrap_or(0);
+            lock(&self.clients).retain(|c| c.0.send(format!("id: {id}\nevent: toast\ndata: {msg}\n\n")).is_ok());
+            if last {
+                break;
+            }
+        }
     }
 
     /// #715: deliveries to type in once the reply is out (`deliver`).

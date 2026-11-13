@@ -358,8 +358,6 @@ fn launch(
 ) -> Result<i32> {
     let role = c[3];
     markers(ctx, cfg, r, true); // #333: only live kicks count; a dead or old marker goes first
-    let live = pending(ctx, cfg, r);
-    // #416: one bound for a full host (its earlier lanes' worktree is there) is refused there: it holds no slot.
     let low =
         |e: &Event| crate::host::free_gb(&crate::hosts::On::of(r, Some(e))).is_some_and(|g| g < cfg.limits.min_free_gb);
     let bound = |p: &Event| {
@@ -367,18 +365,24 @@ fn launch(
             .rev()
             .find(|e| p.issue.is_some_and(|n| e.is("spawn", &p.fleet, n)))
     };
-    let n_live = live.iter().filter(|p| !bound(p).is_some_and(low)).count();
+    let full: Vec<_> = (pending(ctx, cfg, r).into_iter())
+        .filter(|p| bound(p).is_some_and(low))
+        .map(|p| (p.fleet, p.issue))
+        .collect();
+    let others = waits_elsewhere(ctx, cfg, ev, fleet);
+    let _admit = admit(ctx, r)?;
+    let live = pending(ctx, cfg, r);
+    let counts = |p: &&Event| !full.iter().any(|f| f.0 == p.fleet && f.1 == p.issue);
+    let n_live = live.iter().filter(counts).count();
     let max = cfg.limits.max_parallel_spawns;
     // #724: no fleet holds over half the slots while another fleet has a spawn waiting.
-    let mine = live
-        .iter()
-        .filter(|p| p.fleet == fleet && !bound(p).is_some_and(low))
-        .count();
+    let mine = live.iter().filter(counts).filter(|p| p.fleet == fleet).count();
+    let weight = cfg.fleet(fleet)?.weight.unwrap_or(1).max(1);
+    let share = start && mine * (weight + others) >= (max - usize::from(max > 1)) * weight;
     let extend = crate::pending::extending(ev, fleet, n);
     if live.iter().any(|e| e.fleet == fleet && e.issue == Some(n))
         || !extend
-            && (n_live >= max - usize::from(start && max > 1)
-                || (mine >= max.div_ceil(2) && waits_elsewhere(ctx, cfg, ev, fleet)))
+            && (n_live >= max - usize::from(start && max > 1) || others > 0 && (mine >= max.div_ceil(2) || share))
     {
         let by = Some(held_by(ctx, cfg, r)).filter(|b| !b.is_empty());
         let by = by.map_or(String::new(), |b| format!(": {b}"));
@@ -405,9 +409,9 @@ fn launch(
 }
 
 /// #724: another fleet has a spawn waiting: a startable issue not backing off, or its last pass held one for a slot.
-fn waits_elsewhere(ctx: &Ctx, cfg: &Config, ev: &[Event], fleet: &str) -> bool {
+fn waits_elsewhere(ctx: &Ctx, cfg: &Config, ev: &[Event], fleet: &str) -> usize {
     let others = cfg.fleet.iter().filter(|(g, f)| *g != fleet && !f.paused);
-    others.map(|(g, _)| g.as_str()).any(|g| {
+    let waits = |g: &str| {
         let start = |n: &String| n.parse().is_ok_and(|n| backoff(ctx, ev, g, n).is_none());
         let pass = |e: &&Event| e.kind == "drive-pass" && e.fleet == g && e.data.get("kick").is_none_or(Value::is_null);
         let held = ev
@@ -415,7 +419,25 @@ fn waits_elsewhere(ctx: &Ctx, cfg: &Config, ev: &[Event], fleet: &str) -> bool {
             .rfind(pass)
             .and_then(|e| e.data.get("actions")?.as_array().cloned());
         queue::startable(ev, g).iter().any(start) || held.into_iter().flatten().any(|a| a["code"] == "SPAWN_PENDING")
-    })
+    };
+    others
+        .filter(|(g, _)| waits(g))
+        .map(|(_, f)| f.weight.unwrap_or(1).max(1))
+        .sum()
+}
+
+static ADMIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn admit(ctx: &Ctx, r: &dyn Runner) -> Result<(Lock, std::sync::MutexGuard<'static, ()>)> {
+    let mine = ADMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for _ in 0..30 {
+        let now = crate::now();
+        if let Some(l) = crate::db::take(&ctx.state, "admit.lock", now, 60, "", &|l| gone(r, l, now)) {
+            return Ok((Lock(ctx.state.clone(), l), mine));
+        }
+        r.sleep(1);
+    }
+    crate::gate::refused("SPAWN_PENDING", "another pass is admitting a spawn")
 }
 
 /// #724: `fleet` #`n`'s failed spawns (`spawn-error`) since its last spawn that started, oldest first.
@@ -552,7 +574,7 @@ fn ended(ev: &[Event], fleet: &str, a: &mut Value, since: u64) {
 /// action takes the kick's outcome: that pass is logged again, updated.
 fn update(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, fleet: &str, n: u64) -> Result<()> {
     for _ in 0..120 {
-        if held(ctx, "drive.lock").is_none() {
+        if !running(ctx, fleet) {
             break;
         }
         r.sleep(1);
@@ -634,6 +656,11 @@ pub fn result(e: &Event) -> (&'static str, String) {
     if failed > 0 {
         line += &format!(" · {failed} failed");
     }
+    line += &e
+        .data
+        .get("secs")
+        .and_then(Value::as_f64)
+        .map_or(String::new(), |s| format!(" · {s} s"));
     let tone = match () {
         () if failed > 0 => "r",
         () if started + merged > 0 => "g",
@@ -645,7 +672,13 @@ pub fn result(e: &Event) -> (&'static str, String) {
 
 /// #166: a pass is driving `fleet` now (the lock names the fleet a manual press drives; empty: every fleet).
 pub fn running(ctx: &Ctx, fleet: &str) -> bool {
-    held(ctx, "drive.lock").is_some_and(|l| l.data.is_empty() || fleet.is_empty() || l.data == fleet)
+    let name = |l: &crate::db::Lease| l.key.strip_prefix("drive-")?.strip_suffix(".lock").map(str::to_string);
+    let pass = |f: &str| !f.starts_with("fast-") && f.rsplit('-').next().is_none_or(|n| n.parse::<u64>().is_err());
+    let live = crate::db::leases(&ctx.state, "drive-")
+        .into_iter()
+        .filter(|l| l.expires_at > ctx.now);
+    live.filter_map(|l| name(&l))
+        .any(|f| pass(&f) && (fleet.is_empty() || f == fleet))
 }
 
 /// A recorded action as `drive` prints it (`<fleet> #<n> <step>: <words>`, a refusal's code before its words).
@@ -725,27 +758,12 @@ pub fn drive(
     let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
     let _ = std::fs::write(&stamp, ctx.now.to_string());
     let max = 3 * cfg.limits.pass_max_secs;
-    let stuck = (crate::db::leases(&ctx.state, lock).into_iter())
-        .find(|l| l.key == lock && l.expires_at <= ctx.now && !gone(r, l, ctx.now))
-        .filter(|_| KICK.get().is_none());
-    // #318: a kick's lease is `kick-<fleet>-<n>.lock`
-    let mine = || take(ctx, r, lock, max, only.unwrap_or_default()).map(Some);
-    let Some(_held) = KICK.get().map_or_else(mine, |_| Some(None)) else {
-        if manual {
-            return wait(ctx, r, out, lock, only);
-        }
-        return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?);
+    let lead = match KICK.get() {
+        Some(_) => None,
+        None => lease(ctx, r, out, lock, max, only.unwrap_or_default())?,
     };
-    if let Some(l) = stuck {
-        let at = std::fs::read_to_string(&mark).unwrap_or_default();
-        let d = json!({"lock": lock, "pid": l.pid, "since": l.at, "step": format!("after {}", at.trim())});
-        writeln!(out, "! a pass held {lock} past {max} s, {}: taken over", d["step"])?;
-        let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-stuck", d));
-    }
-    if KICK.get().is_none() {
-        let _ = std::fs::write(&mark, "start");
-    }
-    if let Some((step, secs)) = crate::timer::stuck_step(ctx, cfg).filter(|_| fast) {
+    let first = KICK.get().is_some() || lead.is_some();
+    if let Some((step, secs)) = crate::timer::stuck_step(ctx, cfg).filter(|_| fast && first) {
         writeln!(
             out,
             "! tick stuck in {step} for {}: drover doctor",
@@ -753,27 +771,27 @@ pub fn drive(
         )?;
     }
     // #234: the fast step samples every host into the 24 h history (the Host tab's sparklines).
-    if fast {
+    if fast && first {
         if let Err(e) = crate::hosts::sample(ctx, cfg, r, &crate::events::read(&ctx.state)?) {
             writeln!(out, "host history: {e:#}")?;
         }
     }
     lap("read log, host sample");
     // #298: shed's state changes since the last pass, logged per lane; the agent list each pass polls is the fallback.
-    if let Some(b) = r.shed().filter(|_| !fast) {
+    if let Some(b) = r.shed().filter(|_| !fast && first) {
         if let Err(e) = crate::shed::intake(ctx, cfg, &b.wire) {
             writeln!(out, "shed events: {e:#}")?;
         }
     }
     // #164: the disk budget before any start (the tick's pass only: a page's one-fleet drive skips the walk).
-    if only.is_none() {
+    if only.is_none() && first {
         if let Err(e) = crate::check::budget(ctx, cfg, r, out) {
             writeln!(out, "budget: {e:#}")?;
         }
     }
     lap("disk budget");
     // #630/#790: a lane whose root went away restarts on the next root (the full pass only).
-    if only.is_none() && !fast {
+    if only.is_none() && !fast && first {
         if let Err(e) = crate::roots::watch(ctx, cfg, r, out) {
             writeln!(out, "roots: {e:#}")?;
         }
@@ -787,7 +805,7 @@ pub fn drive(
         .collect();
     let fleets: Vec<&str> = live.iter().copied().filter(|n| !cfg.fleet[*n].paused).collect();
     // #325: an answer that never reached its lane is typed again each fast step, until it lands or the lane is gone.
-    let events = fast
+    let events = (fast && first)
         .then(|| crate::events::read(&ctx.state).ok())
         .flatten()
         .unwrap_or_default();
@@ -796,26 +814,16 @@ pub fn drive(
             writeln!(out, "redeliver: {e:#}")?;
         }
     }
-    // A paused fleet gets no pass (and no `last pass`); one fleet's error doesn't skip the others.
-    let (mut res, mut start) = (Ok(()), true);
-    ACTS.with_borrow_mut(BTreeMap::clear);
-    ROOM.set((false, None));
-    let mut fail = |name: &str, e: anyhow::Error| {
-        let w = format!("failed: {e:#}");
-        let a = json!({"step": "pass", "outcome": "error", "code": "ERROR", "words": w});
-        ACTS.with_borrow_mut(|m| m.entry(name.into()).or_default().push(a));
-        res = Err(e);
-    };
     // #337: one look per step (each remote host in one ssh call), saved for the board; the passes scan it.
     lap("roots, redeliver");
     let log = || crate::db::last_seq(&ctx.state);
-    let mut seen = if fleets.is_empty() && (!fast || live.is_empty()) {
+    let mut seen = if !first || fleets.is_empty() && (!fast || live.is_empty()) {
         crate::snapshot::Snap::read(ctx, r) // every fleet paused, no drain: nothing to look at
     } else {
         crate::snapshot::take(ctx, cfg, r)
     };
     // #376: lane-shaped panes no spawn logged are adopted (or closed, stale) before any step reads the lanes.
-    if !fleets.is_empty() && KICK.get().is_none() {
+    if !fleets.is_empty() && lead.is_some() {
         match crate::spawn::orphans(ctx, cfg, (r, &seen), out) {
             Ok(true) => seen = crate::snapshot::take(ctx, cfg, r),
             Ok(false) => {}
@@ -823,38 +831,52 @@ pub fn drive(
         }
     }
     lap("look, orphans");
-    if !fast {
+    if !fast && first {
         if let Err(e) = repair(ctx, cfg, (r, &seen), out) {
             writeln!(out, "repair: {e:#}")?;
         }
     }
-    if !fast && KICK.get().is_none() && !fleets.is_empty() {
+    if !fast && lead.is_some() && !fleets.is_empty() {
         crate::breaker::probe(ctx, cfg, r, out).unwrap_or_else(|e| drop(writeln!(out, "runtime canary: {e:#}")));
     }
     let grew = log();
     // #389: remote lanes' commands that found no route here, as the look read them.
-    if fast {
+    if fast && first {
         crate::outbox::drain(ctx, (r, &seen), out, &live).unwrap_or_else(|e| drop(writeln!(out, "outbox: {e:#}")));
     }
-    // #182: every fleet's due steps (reviews first) before any fleet starts new work.
-    let mut due = vec![];
     lap("repair, outbox");
-    for name in &fleets {
-        match pass(ctx, cfg, (r, &seen), out, name, fast) {
-            Ok(go) => {
-                start &= go;
-                due.push(*name);
-            }
-            Err(e) => fail(name, e),
+    drop(lead);
+    let mut res = Ok(());
+    if fleets.len() > 1 {
+        let seen = &seen;
+        let catchup = gh::CATCHUP.get();
+        let done: Vec<(Vec<u8>, Result<()>)> = std::thread::scope(|s| {
+            let hs: Vec<_> = fleets
+                .iter()
+                .map(|&name| {
+                    s.spawn(move || {
+                        gh::FORCE.set(fast);
+                        gh::CATCHUP.set(catchup);
+                        let mut buf = vec![];
+                        let res = one(ctx, cfg, (r, seen), &mut buf, name, (manual, fast));
+                        (buf, res)
+                    })
+                })
+                .collect();
+            let join = |h: std::thread::ScopedJoinHandle<'_, _>| {
+                h.join()
+                    .unwrap_or_else(|_| (vec![], Err(anyhow::anyhow!("a fleet's pass panicked"))))
+            };
+            hs.into_iter().map(join).collect()
+        });
+        for (buf, r) in done {
+            out.write_all(&buf)?;
+            res = res.and(r);
         }
-        lap(&format!("{name}: PR reads, gates, steps"));
-    }
-    if !fast {
-        for (name, e) in starts(ctx, cfg, r, out, &due, start) {
-            fail(name, e);
+    } else {
+        for name in &fleets {
+            res = res.and(one(ctx, cfg, (r, &seen), out, name, (manual, fast)));
         }
-    } else if only.is_none() && KICK.get().is_none() {
-        crate::slo::pass(ctx, cfg, (r, &seen), out, &fleets).unwrap_or_else(|e| drop(writeln!(out, "slo: {e:#}")));
     }
     lap("spawns");
     // #337: a step that logged something is looked at again, so the board shows what it did.
@@ -866,29 +888,12 @@ pub fn drive(
     if fast {
         let _ = std::fs::write(&stamp, format!("{} {secs}", ctx.now));
     }
-    settle(ctx, r, out)?;
-    for &name in &fleets {
-        let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
-        if !fast && KICK.get().is_none() {
-            let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
-        } else if acts.is_empty() {
-            continue; // a fast step or kick that did nothing logs no pass
-        }
-        // #166: one `drive-pass` per fleet and pass, manual or automatic: the board's result line.
-        let end = crate::now();
-        let (by, at) = (
-            ["auto", "manual", "fast"][usize::from(manual) + 2 * usize::from(fast)],
-            crate::usage::date(r, end, "+%H:%M"),
-        );
-        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs,
-            "spawns_launched": launched(&acts), "actions": acts, "kick": KICK.get()});
-        let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
+    let tail = KICK.get().is_none().then(|| take(ctx, r, lock, max, "")).flatten();
+    if fast && only.is_none() && tail.is_some() {
+        crate::slo::pass(ctx, cfg, (r, &seen), out, &fleets).unwrap_or_else(|e| drop(writeln!(out, "slo: {e:#}")));
     }
     // #343: a slow pass folds the log into its checkpoint, and rotates a log over `rotate_mb`; #365: reads backlogs.
-    if !fast && KICK.get().is_none() {
-        for n in &fleets {
-            crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("drover: {n} backlog: {e:#}"));
-        }
+    if !fast && tail.is_some() {
         crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: stale panes: {e:#}"));
         crate::check::dedup(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: lane-dup: {e:#}"));
         let max = cfg.limits.rotate_mb << 20;
@@ -901,6 +906,77 @@ pub fn drive(
         let r1 = |x: f64| (x * 10.0).round() / 10.0;
         let d = json!({"fast": fast, "secs": r1(secs), "step": slow.1, "step_secs": r1(slow.2), "kick": KICK.get()});
         let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-slow", d));
+    }
+    res
+}
+
+fn lease(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, lock: &str, max: u64, data: &str) -> Result<Option<Lock>> {
+    let mark = ctx.state.with_file_name(format!("{lock}.step"));
+    let stuck = (crate::db::leases(&ctx.state, lock).into_iter())
+        .find(|l| l.key == lock && l.expires_at <= ctx.now && !gone(r, l, ctx.now));
+    let Some(held) = take(ctx, r, lock, max, data) else {
+        return Ok(None);
+    };
+    if let Some(l) = stuck {
+        let at = std::fs::read_to_string(&mark).unwrap_or_default();
+        let d = json!({"lock": lock, "pid": l.pid, "since": l.at, "step": format!("after {}", at.trim())});
+        writeln!(out, "! a pass held {lock} past {max} s, {}: taken over", d["step"])?;
+        let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-stuck", d));
+    }
+    let _ = std::fs::write(&mark, "start");
+    Ok(Some(held))
+}
+
+fn one(
+    ctx: &Ctx,
+    cfg: &Config,
+    (r, seen): (&dyn Runner, &dyn Runner),
+    out: &mut dyn Write,
+    name: &str,
+    (manual, fast): (bool, bool),
+) -> Result<()> {
+    let t0 = std::time::Instant::now();
+    let lock = format!("drive{}-{name}.lock", ["", "-fast"][usize::from(fast)]);
+    let _held = match KICK.get() {
+        Some(_) => None,
+        None => match lease(ctx, r, out, &lock, 3 * cfg.limits.pass_max_secs, name)? {
+            Some(l) => Some(l),
+            None if manual => return wait(ctx, r, out, &lock, Some(name)),
+            None => return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?),
+        },
+    };
+    ACTS.with_borrow_mut(BTreeMap::clear);
+    ROOM.set((false, None));
+    let res = pass(ctx, cfg, (r, seen), out, name, fast).and_then(|go| {
+        if fast {
+            Ok(())
+        } else {
+            starts(ctx, cfg, r, out, name, go)
+        }
+    });
+    if let Err(e) = &res {
+        let a = json!({"step": "pass", "outcome": "error", "code": "ERROR", "words": format!("failed: {e:#}")});
+        ACTS.with_borrow_mut(|m| m.entry(name.into()).or_default().push(a));
+    }
+    settle(ctx, r, out)?;
+    let acts = ACTS.with_borrow_mut(|m| m.remove(name)).unwrap_or_default();
+    if !fast && KICK.get().is_none() {
+        let _ = std::fs::write(state_dir(ctx).join(format!("drive-{name}.last")), ctx.now.to_string());
+    }
+    if !acts.is_empty() || !fast && KICK.get().is_none() {
+        let end = crate::now();
+        let (by, at) = (
+            ["auto", "manual", "fast"][usize::from(manual) + 2 * usize::from(fast)],
+            crate::usage::date(r, end, "+%H:%M"),
+        );
+        let secs = (t0.elapsed().as_secs_f64() * 10.0).round() / 10.0;
+        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs,
+            "spawns_launched": launched(&acts), "actions": acts, "kick": KICK.get()});
+        let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
+    }
+    if !fast && KICK.get().is_none() {
+        crate::gh::backlog(ctx, r, cfg.fleet(name)?, name)
+            .unwrap_or_else(|e| eprintln!("drover: {name} backlog: {e:#}"));
     }
     res
 }
@@ -1968,47 +2044,14 @@ pub fn holders(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     by.join(", ")
 }
 
-/// Every fleet's starts (each startable queued issue in order), then clean merged lanes. #638: the fleets take turns,
-/// one issue each, beginning after the fleet that started first last pass; while another fleet still has issues, none
-/// holds more than its `weight` share of the start slots. A refused item is skipped, `CAP` ends that fleet's starts,
-/// `HOST_BUSY`/`DISK_LOW`/`ALL_CAPPED` all fleets'. Each fleet's error, to log.
-fn starts<'a>(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    fleets: &[&'a str],
-    mut go: bool,
-) -> Vec<(&'a str, anyhow::Error)> {
-    let mut errs = vec![];
-    let events = match read(&ctx.state) {
-        Ok(e) => e,
-        Err(e) => return vec![(fleets.first().copied().unwrap_or_default(), e)],
-    };
-    let rr = state_dir(ctx).join("drive.first");
-    let last = std::fs::read_to_string(&rr).unwrap_or_default();
-    let mut order = fleets.to_vec();
-    order.rotate_left(fleets.iter().position(|f| *f == last).map_or(0, |i| i + 1) % fleets.len().max(1));
+fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, mut go: bool) -> Result<()> {
+    let events = read(&ctx.state)?;
     let one = |n: &String| KICK.get().is_none_or(|k| n == &k.to_string());
-    let mut todo: Vec<(&str, std::collections::VecDeque<String>)> = order
-        .iter()
-        .map(|f| (*f, queue::startable(&events, f).into_iter().filter(one).collect()))
-        .filter(|(_, q): &(_, std::collections::VecDeque<_>)| go && !q.is_empty())
-        .collect();
-    let max = cfg.limits.max_parallel_spawns;
-    let weight = |f: &str| cfg.fleet.get(f).and_then(|f| f.weight).unwrap_or(1).max(1);
-    let total: usize = todo.iter().map(|(f, _)| weight(f)).sum();
-    let share = |f: &str| (max - usize::from(max > 1)) * weight(f);
-    let (mut first, mut i) = (None, 0);
-    while go && !todo.is_empty() {
-        i %= todo.len();
-        let fleet = todo[i].0;
-        let held = || pending(ctx, cfg, r).iter().filter(|p| p.fleet == fleet).count();
-        let full = max > 0 && KICK.get().is_none() && todo.len() > 1 && held() * total >= share(fleet);
-        let Some(n) = todo[i].1.pop_front().filter(|_| !full) else {
-            todo.remove(i);
-            continue;
-        };
+    let mut res = Ok(());
+    for n in queue::startable(&events, fleet).into_iter().filter(one) {
+        if !go {
+            break;
+        }
         let at = (fleet, n.parse().ok(), "start");
         // #412: a design-marked issue gets its design lane (again, after a revise) until the owner approves it; #730: an
         // architect-marked one its architect lane first.
@@ -2021,31 +2064,16 @@ fn starts<'a>(
         let code = match act(ctx, cfg, r, out, &events, at, &c[..4 + usize::from(design.is_some())]) {
             Ok(c) => c,
             Err(e) => {
-                errs.push((fleet, e));
-                todo.remove(i);
-                continue;
+                res = Err(e);
+                break;
             }
         };
-        first = first.or(code.is_none().then_some(fleet));
         go &= !matches!(
             code,
-            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED")
+            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED" | "CAP")
         );
-        if matches!(code, Some("CAP")) {
-            todo.remove(i);
-            continue;
-        }
-        i += 1;
     }
-    if let Some(f) = first.filter(|_| KICK.get().is_none()) {
-        let _ = std::fs::write(&rr, f);
-    }
-    for fleet in fleets {
-        if let Err(e) = clean_merged(ctx, cfg, r, out, &events, fleet) {
-            errs.push((fleet, e));
-        }
-    }
-    errs
+    res.and(clean_merged(ctx, cfg, r, out, &events, fleet))
 }
 
 /// A merged issue's lane worktree still there: `clean --yes`.

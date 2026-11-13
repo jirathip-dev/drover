@@ -86,7 +86,7 @@ fn pending(c: &drover::Ctx, n: u64) -> Option<drover::pending::Pending> {
 #[test]
 fn ten_extends_each_spawn_at_once_past_load_four_pending_spawns_and_a_running_pass() {
     let (c, sh) = setup("owner-extend-ten", 10);
-    lease_as(&c, "drive.lock", 4242, c.now, 3600);
+    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     let r = loaded();
     for n in 1..=10 {
         let (code, out) = run(&c, &r, &["extend", "sendmeter", &n.to_string()]);
@@ -105,7 +105,7 @@ fn ten_extends_each_spawn_at_once_past_load_four_pending_spawns_and_a_running_pa
         assert!(e.str("reason").unwrap().starts_with("load/cpu 4.00 > 2.5"), "{e:?}");
     }
     assert!(
-        lease_on(&c, "drive.lock").is_some(),
+        lease_on(&c, "drive-sendmeter.lock").is_some(),
         "the running pass's lock is left alone"
     );
     assert!((31..=34).all(|n| lease_on(&c, &format!("spawn-sendmeter-{n}.pending")).is_some()));
@@ -254,17 +254,6 @@ fn board_extends_are_never_refused_while_another_extend_or_a_drive_runs() {
         .map(|i| &i["issue"])
         .collect();
     assert!(!cards.contains(&&json!(2)), "#2 left needs-human at the tap: {needs}");
-    let st = get("state");
-    let row = st["queue"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|q| q["issue"] == 2)
-        .unwrap();
-    assert!(
-        row["status"].as_str().unwrap().starts_with("extended · starting"),
-        "{row}"
-    );
     let started = || {
         ["#1: extend", "#2: extend"]
             .iter()

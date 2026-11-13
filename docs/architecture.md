@@ -16,7 +16,7 @@ import or a device change is all or nothing) and **leases** (a lock can no longe
 | Table | What |
 |---|---|
 | `events` | the log: `seq`, `ts`, `fleet`, `issue`, `type`, the event's JSON, `archived`; indexed by (fleet, issue) and type |
-| `leases` | every lock and marker: `drive.lock`, `drive-fast.lock`, `drive-<fleet>-<n>.lock`, `kick-<fleet>-<n>.lock` and `.again`, `spawn-<fleet>-<n>.pending` |
+| `leases` | every lock and marker: `drive.lock`, `drive-fast.lock`, `drive-<fleet>.lock`, `drive-fast-<fleet>.lock`, `admit.lock`, `drive-<fleet>-<n>.lock`, `kick-<fleet>-<n>.lock` and `.again`, `spawn-<fleet>-<n>.pending` |
 | `devices`, `push` | paired phones and web push subscriptions (were `serve/devices.json`, `webpush/subs.json`) |
 | `snapshot` | `board`: #337's reads; `states`: #343's fold checkpoint |
 | `processed` | #509: the trigger ids (`kick --id`: a verdict's sha, a decision) already driven, each driven once |

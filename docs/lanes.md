@@ -245,9 +245,13 @@ never passes `--force`, and never bypasses a refusal: `REFUSED` (e.g. `HOST_BUSY
 next pass. Starts fan out: a pass tries every startable item in queue order, each spawn sampling the host
 afresh. An item-specific refusal (`SERIAL_BUSY`, `MCP_FORBIDDEN`, …) skips that item for the pass; it keeps
 its queue place and status reads `skipped this pass: <CODE> (<why>)` (board lane `skip <CODE>`). `CAP` ends
-the fleet's starts; `HOST_BUSY` and `ALL_CAPPED` end starting for every later fleet in the pass too (same Mac). Every action logs a passive `driven` event (step, command, result). A pass holds
-the `drive.lock` lease (#344: taken over once its pid is gone, or after an hour), so cron and the button never overlap; the
-board shows `driver: drover · last pass <age> ago`.
+the fleet's starts; `HOST_BUSY` and `ALL_CAPPED` end that fleet's starts in the pass. Every action logs a passive `driven` event (step, command, result).
+#896: each fleet's pass runs on its own thread under its own `drive-<fleet>.lock` lease (`drive-fast-<fleet>.lock` for
+the fast step; #344: taken over once its pid is gone, or after an hour), so cron and the button never overlap on one
+fleet and a slow fleet never holds another. The steps every fleet shares (the look, orphans, repair, checkpoint) run
+under `drive.lock`; a pass that finds it held skips them. A spawn's admission (slot count, host room, its marker) runs
+under the short `admit.lock`, so two fleets' passes never both take the last slot. The board shows each fleet's
+`⟳ driving…` and its last pass's length.
 
 A fix lane may push back on a finding in its report with file:line proof; that is not a fix,
 and the next (fresh) reviewer decides.
