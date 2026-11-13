@@ -12,6 +12,43 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+/// #845: one pass's steps in order (`lap` names each, `pass-slow` the slowest) and the `[limits]` keys that time them.
+pub const STEPS: [(&str, &[&str]); 8] = [
+    ("read log, host sample", &[]),
+    (
+        "disk budget",
+        &["shed_read_millis", "worktree_budget_gb", "build_budget_gb"],
+    ),
+    ("roots, redeliver", &["host_offline_minutes"]),
+    (
+        "look, orphans",
+        &["ssh_quick_secs", "ssh_call_secs", "import_max_age_hours"],
+    ),
+    ("repair, outbox", &[]),
+    (
+        "PR reads, gates, steps",
+        &[
+            "webhook_poll_minutes",
+            "silent_minutes",
+            "ci_start_minutes",
+            "gate_check_minutes",
+            "review_rounds",
+            "update_rounds",
+        ],
+    ),
+    (
+        "spawns",
+        &[
+            "max_parallel_spawns",
+            "spawn_pending_max_secs",
+            "respawn_max",
+            "respawn_window_minutes",
+            "fallback_rest_minutes",
+            "overflow_after_minutes",
+        ],
+    ),
+    ("backlog, checkpoint", &["rotate_mb"]),
+];
 /// #677: drive's one prompt on a `done` whose why note was refused.
 pub const WHY_NUDGE: &str = "your `turn done` was refused: ";
 /// #168: a pass's lease outlives a hung pass by this much; #344: a dead holder's goes at once.
@@ -161,11 +198,6 @@ pub fn last_pass(ctx: &Ctx, fleet: &str) -> Option<u64> {
         .trim()
         .parse()
         .ok()
-}
-
-/// #217: `drive.lock` over an extend's spawn, so no pass starts the same round meanwhile; `None` while a pass runs.
-pub fn hold(ctx: &Ctx, r: &dyn Runner, fleet: &str) -> Option<impl Drop> {
-    take(ctx, r, "drive.lock", STALE_LOCK_SECS, fleet)
 }
 
 fn state_dir(ctx: &Ctx) -> &Path {
@@ -342,16 +374,19 @@ fn launch(
         .iter()
         .filter(|p| p.fleet == fleet && !bound(p).is_some_and(low))
         .count();
-    if n_live >= max - usize::from(start && max > 1)
-        || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n))
-        || (mine >= max.div_ceil(2) && waits_elsewhere(ctx, cfg, ev, fleet))
+    let extend = crate::pending::extending(ev, fleet, n);
+    if live.iter().any(|e| e.fleet == fleet && e.issue == Some(n))
+        || !extend
+            && (n_live >= max - usize::from(start && max > 1)
+                || (mine >= max.div_ceil(2) && waits_elsewhere(ctx, cfg, ev, fleet)))
     {
         let by = Some(held_by(ctx, cfg, r)).filter(|b| !b.is_empty());
         let by = by.map_or(String::new(), |b| format!(": {b}"));
         return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting{by}"));
     }
     crate::spawn::lane_admit(ctx, (cfg, r), ev, fleet, n, role)?;
-    if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && c.contains(&"--force"))) {
+    if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && (extend || c.contains(&"--force"))))
+    {
         return crate::gate::refused(code, why);
     }
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
@@ -670,6 +705,7 @@ pub fn drive(
     let t0 = std::time::Instant::now();
     let mut slow = (t0, String::new(), 0.0);
     let mut lap = |step: &str| {
+        debug_assert!(STEPS.iter().any(|(s, _)| step.ends_with(s)), "{step} is not in STEPS");
         let secs = slow.0.elapsed().as_secs_f64();
         if secs > slow.2 {
             (slow.1, slow.2) = (step.to_string(), secs);
@@ -774,6 +810,9 @@ pub fn drive(
         if let Err(e) = repair(ctx, cfg, (r, &seen), out) {
             writeln!(out, "repair: {e:#}")?;
         }
+    }
+    if !fast && KICK.get().is_none() && !fleets.is_empty() {
+        crate::breaker::probe(ctx, cfg, r, out).unwrap_or_else(|e| drop(writeln!(out, "runtime canary: {e:#}")));
     }
     let grew = log();
     // #389: remote lanes' commands that found no route here, as the look read them.
@@ -1028,7 +1067,7 @@ fn silent(
                     append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "respawned-silent", d))?;
                 }
             }
-            stall::Silent::Escalate(why) => escalate(ctx, cfg, out, (fleet, n), &lane, "LANE_SILENT", &why)?,
+            stall::Silent::Escalate(why) => escalate(ctx, cfg, out, (fleet, n), (&lane, None), "LANE_SILENT", &why)?,
         }
     }
     let reviews = fold(&ev)
@@ -1084,12 +1123,12 @@ fn escalate(
     cfg: &Config,
     out: &mut dyn Write,
     (fleet, n): (&str, u64),
-    lane: &str,
+    (lane, on): (&str, Option<&str>),
     code: &str,
     why: &str,
 ) -> Result<()> {
     writeln!(out, "{fleet} #{n} needs-human: {why}")?;
-    let d = json!({"code": code, "reason": why, "agent": lane});
+    let d = json!({"code": code, "reason": why, "agent": lane, "failed_on": on});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "needs-human", d))
 }
 
@@ -1284,10 +1323,18 @@ fn pass(
         } else if w.who == "drive" {
             // #444: a gone lane with no push is respawned once due; past two respawns it needs a human.
             let gone = w.what.split_once(waiting::NO_PUSH);
+            let ends =
+                gone.filter(|g| (w.next_cmd.is_none() || g.1.starts_with("respawning")) && !waiting::resumed(g.0));
+            if let Some(g) = ends.filter(|_| !fast) {
+                if crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, g.0)? {
+                    continue;
+                }
+            }
             if gone.is_some() && w.next_cmd.is_none() && !fast {
                 let why = "lane keeps ending without a push";
                 writeln!(out, "{fleet} #{n} needs-human: {why}")?;
-                let d = json!({"code": "LANE_ENDS", "reason": why, "agent": w.lane});
+                let on = crate::breaker::blame(&events, &w.lane);
+                let d = json!({"code": "LANE_ENDS", "reason": why, "agent": w.lane, "failed_on": on});
                 emit(
                     &ctx.state,
                     cfg,
@@ -1368,7 +1415,8 @@ fn pass(
                 repro_refused(ctx, cfg, r, (&events, &agents), (fleet, s.issue, &w.lane), &args, &hash)?;
             }
             if let Some((why, _)) = gone.filter(|_| code.is_none()) {
-                let d = json!({"role": args.get(3), "agent": w.lane, "why": why});
+                let on = crate::breaker::blame(&events, &w.lane);
+                let d = json!({"role": args.get(3), "agent": w.lane, "why": why, "failed_on": on});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
             }
             go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
@@ -1414,17 +1462,28 @@ fn pass(
             .flatten()
         {
             // #666: a live lane stalled or never started: superseded once, then the owner's.
+            let start = matches!(
+                &a,
+                stall::Act::Respawn(_, "failed start") | stall::Act::Escalate("START_FAILED", _)
+            );
+            if start && crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, "no output after its spawn")? {
+                continue;
+            }
             match a {
                 stall::Act::Respawn(role, why) => {
                     let args = ["spawn", fleet, &n, &role, "--supersede", "--force"];
                     let code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "respawn"), &args)?;
                     if code.is_none() {
-                        let d = json!({"role": role, "agent": w.lane, "why": why});
+                        let on = crate::breaker::blame(&events, &w.lane);
+                        let d = json!({"role": role, "agent": w.lane, "why": why, "failed_on": on});
                         append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
                     }
                     go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
                 }
-                stall::Act::Escalate(code, why) => escalate(ctx, cfg, out, (fleet, s.issue), &w.lane, code, &why)?,
+                stall::Act::Escalate(code, why) => {
+                    let on = crate::breaker::blame(&events, &w.lane);
+                    escalate(ctx, cfg, out, (fleet, s.issue), (&w.lane, on), code, &why)?;
+                }
             }
         } else if s.state == "blocked" && s.last_event != "no-action" {
             // #214: a block drive has no step for is logged once, never left silent.

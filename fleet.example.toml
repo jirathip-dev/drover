@@ -185,6 +185,7 @@ spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or
 # serve_shed_secs = 5    # shed's sessions
 # serve_remote_secs = 10   # the remote hosts' agents (ssh)
 # serve_host_secs = 10   # the host sample
+# serve_heartbeat_secs = 15   # #893: /live pings this often; a stream whose last 2 pings are still unsent is dropped
 # slo_api_p95_ms = 1000   # #859: /api/v1 p95 over this for `slo_api_minutes` pushes `slo-api` and shows a card
 # slo_api_minutes = 10
 # slo_idle_minutes = 20   # #855: no lane working this long with spawnable work queued: `slo-idle`, a heal, then `stuck`

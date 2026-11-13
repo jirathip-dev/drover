@@ -48,7 +48,8 @@ fn claude_role_dry_run_uses_synced_profile() {
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
             "DISABLE_AUTOUPDATER=1",
             // #708: no account, so a token the pane inherited from a login shell never picks one.
-            "&& unset CLAUDE_CODE_OAUTH_TOKEN"
+            "&& unset CLAUDE_CODE_OAUTH_TOKEN",
+            drover::spawn::LOW,
         ]
     );
     let start = words(&p["commands"][3]);
@@ -217,6 +218,7 @@ fn fleet_env_is_exported_into_the_lane() {
             port12(),
             format!("CARGO_TARGET_DIR='{home}/.cache/drover/target/sendmeter'"),
             "npm_config_cache='/c/npm'".into(),
+            drover::spawn::LOW.into(),
         ]
     );
 }
@@ -231,7 +233,10 @@ fn shared_cache_is_exported_into_the_lane() {
     let c = ctx(&tmpdir("spawn-shared-cache"), &cfg);
     assert_eq!(
         words(&plan(&c, &Fake::default(), "impl")["commands"][2])[7..],
-        ["CARGO_TARGET_DIR='/c/cache/sendmeter/target'".to_string()]
+        [
+            "CARGO_TARGET_DIR='/c/cache/sendmeter/target'".to_string(),
+            drover::spawn::LOW.into()
+        ]
     );
 }
 
@@ -348,7 +353,11 @@ fn fleet_env_expands_drover_port() {
     let p = lane_port(None, "sendmeter/issue-12", &[]);
     assert_eq!(
         words(&plan(&c, &Fake::default(), "impl")["commands"][2])[7..],
-        [format!("PORT='{p}'"), format!("VITE='http://127.0.0.1:{p}/'")]
+        [
+            format!("PORT='{p}'"),
+            format!("VITE='http://127.0.0.1:{p}/'"),
+            drover::spawn::LOW.into()
+        ]
     );
 }
 
@@ -540,7 +549,8 @@ fn hermes_role_dry_run_kicks_prompt_after_boot() {
         [
             "export".to_string(),
             "DROVER_LANE='sendmeter:12:rev'".into(),
-            format!("DROVER_PORT={}", lane_port(None, "sendmeter/rev-12-r1", &[]))
+            format!("DROVER_PORT={}", lane_port(None, "sendmeter/rev-12-r1", &[])),
+            drover::spawn::LOW.into(),
         ]
     );
     let start = words(&p["commands"][3]);
@@ -850,4 +860,17 @@ fn lane_title_strips_prefixes_and_cuts_at_words() {
     let thai = lane_title(h, &"ภาษาไทย".repeat(10));
     assert!(thai.ends_with('…') && thai.chars().count() <= 60, "{thai}");
     assert!(thai.starts_with("synergy · impl #2840 · ภาษาไทยภาษาไทย"));
+}
+
+#[test]
+fn a_spawned_lanes_build_command_runs_at_low_priority() {
+    let c = ctx(&tmpdir("spawn-nice"), CONFIG);
+    let line = words(&plan(&c, &Fake::default(), "impl")["commands"][2])[4..].join(" ");
+    let build = "sh -c 'ps -o nice= -p $$'";
+    let out = std::process::Command::new("sh")
+        .args(["-c", &format!("{line} && {build}")])
+        .output()
+        .unwrap();
+    let nice: i32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+    assert!(nice >= 10, "the build's nice: {nice}");
 }
