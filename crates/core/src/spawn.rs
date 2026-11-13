@@ -590,8 +590,8 @@ pub fn unguarded(
         format!("ACP agent {id} runs no {h} hook")
     } else if !remote && !hooks.any(|h| h["command"].as_str().is_some_and(|c| providers::guards(ctx, c, family))) {
         format!("profile {profile} has no drover PreToolUse hook; run `drover profiles sync`")
-    } else if !account {
-        "an ACP lane signs in with its role's [accounts] account env".into()
+    } else if !account && remote {
+        "an ACP lane on another host signs in with its role's [accounts] account, through the main host's proxy".into()
     } else {
         String::new()
     }
