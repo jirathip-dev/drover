@@ -635,6 +635,7 @@ pub struct Limits {
     pub disk_probe_secs: u64,
     pub disk_sick_secs: u64,
     pub disk_trust_secs: u64,
+    pub lane_read_secs: u64,
     pub poll_millis: u64,
     pub tick_beat_secs: u64,
     pub orchestrator_idle_minutes: u64,
@@ -752,6 +753,7 @@ impl Default for Limits {
             disk_probe_secs: 2,
             disk_sick_secs: 300,
             disk_trust_secs: 60,
+            lane_read_secs: 5,
             poll_millis: 20,
             tick_beat_secs: 60,
             orchestrator_idle_minutes: 30,
@@ -901,7 +903,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "respawn_window_minutes",
         "the window `respawn_max` counts failed starts in",
     ),
-    ("pass_max_secs", "a drive pass longer than this logs `pass-slow`"),
+    (
+        "pass_max_secs",
+        "a drive pass longer than this logs `pass-slow`; past 3 × it logs `pass-stuck` and frees its lock",
+    ),
     ("ssh_connect_secs", "every host ssh's `-oConnectTimeout`"),
     (
         "ssh_quick_secs",
@@ -949,6 +954,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "disk_trust_secs",
         "a folder that answered is trusted this long before it is probed again",
+    ),
+    (
+        "lane_read_secs",
+        "a lane worktree read slower than this skips the lane for the pass (`root-hung`)",
     ),
     (
         "poll_millis",

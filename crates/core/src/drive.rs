@@ -669,7 +669,13 @@ pub fn drive(
 ) -> Result<()> {
     let t0 = std::time::Instant::now();
     let mut slow = (t0, String::new(), 0.0);
+    let i = usize::from(fast);
+    let lock = ["drive.lock", "drive-fast.lock"][i];
+    let mark = ctx.state.with_file_name(format!("{lock}.step"));
     let mut lap = |step: &str| {
+        if KICK.get().is_none() {
+            let _ = std::fs::write(&mark, step);
+        }
         let secs = slow.0.elapsed().as_secs_f64();
         if secs > slow.2 {
             (slow.1, slow.2) = (step.to_string(), secs);
@@ -678,20 +684,29 @@ pub fn drive(
     };
     only.map(|f| cfg.fleet(f)).transpose()?;
     std::fs::create_dir_all(state_dir(ctx))?;
-    let i = usize::from(fast);
     gh::FORCE.set(fast || KICK.get().is_some());
     gh::CATCHUP.set(if fast { cfg.limits.webhook_poll_minutes * 60 } else { 0 });
     let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
     let _ = std::fs::write(&stamp, ctx.now.to_string());
-    let lock = ["drive.lock", "drive-fast.lock"][i];
+    let max = 3 * cfg.limits.pass_max_secs;
+    let stuck = (crate::db::leases(&ctx.state, lock).into_iter())
+        .find(|l| l.key == lock && l.expires_at <= ctx.now && !gone(r, l, ctx.now))
+        .filter(|_| KICK.get().is_none());
     // #318: a kick's lease is `kick-<fleet>-<n>.lock`
-    let mine = || take(ctx, r, lock, STALE_LOCK_SECS, only.unwrap_or_default()).map(Some);
+    let mine = || take(ctx, r, lock, max, only.unwrap_or_default()).map(Some);
     let Some(_held) = KICK.get().map_or_else(mine, |_| Some(None)) else {
         if manual {
             return wait(ctx, r, out, lock, only);
         }
         return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?);
     };
+    if let Some(l) = stuck {
+        let at = std::fs::read_to_string(&mark).unwrap_or_default();
+        let d = json!({"lock": lock, "pid": l.pid, "since": l.at, "step": format!("after {}", at.trim())});
+        writeln!(out, "! a pass held {lock} past {max} s, {}: taken over", d["step"])?;
+        let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-stuck", d));
+    }
+    lap("start");
     if let Some((step, secs)) = crate::timer::stuck_step(ctx, cfg).filter(|_| fast) {
         writeln!(
             out,

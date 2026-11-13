@@ -129,7 +129,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `reap_keychain_readers` | `false` | kill those stuck Keychain readers too |
 | `respawn_max` | `3` | failed starts of an issue's role in the window before spawn refuses RESPAWN_LOOP |
 | `respawn_window_minutes` | `60` | the window `respawn_max` counts failed starts in |
-| `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow` |
+| `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow`; past 3 × it logs `pass-stuck` and frees its lock |
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout` |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
@@ -145,6 +145,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `disk_probe_secs` | `2` | a folder listing slower than this marks its disk as not answering |
 | `disk_sick_secs` | `300` | a disk that let a call run out of time stays hung this long |
 | `disk_trust_secs` | `60` | a folder that answered is trusted this long before it is probed again |
+| `lane_read_secs` | `5` | a lane worktree read slower than this skips the lane for the pass (`root-hung`) |
 | `poll_millis` | `20` | the pause between polls of a child process or disk probe |
 | `tick_beat_secs` | `60` | a running tick writes `tick.beat` this often |
 | `orchestrator_idle_minutes` | `30` | an orchestrator whose thread is quiet this long closes on the next `check` |
