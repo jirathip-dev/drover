@@ -31,7 +31,6 @@ fn fake(level: &str) -> Fake {
         .reply("kill -0", "")
 }
 
-/// `fake(level)` with 0.5 GB of memory free + inactive: under the default `min_free_mem_gb` (2), MEM_LOW.
 fn low_mem(level: &str) -> Fake {
     let vm = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 16384.\n\
         Pages inactive: 16384.\nSwapouts: 100.\n";
@@ -56,7 +55,6 @@ fn stuck(name: &str) -> drover::Ctx {
     c
 }
 
-/// #975: a busy host never holds the owner's extend; low memory still does, until the host admits.
 #[test]
 fn a_granted_extend_on_a_never_started_lane_spawns_it_once_the_host_admits() {
     let c = stuck("never-started-extend");

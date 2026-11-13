@@ -69,8 +69,6 @@ fn fake(level: &str) -> Fake {
         .reply("kill -0", "")
 }
 
-/// `fake(level)` with 0.5 GB of memory free + inactive: under the default `min_free_mem_gb` (2), MEM_LOW (#975: the
-/// host gate an owner's extend still meets).
 fn low_mem(level: &str) -> Fake {
     let vm = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 16384.\n\
         Pages inactive: 16384.\nSwapouts: 100.\n";
@@ -114,8 +112,6 @@ fn pending(c: &drover::Ctx) -> Option<drover::pending::Pending> {
     drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12)
 }
 
-/// AC1: [one more round] while spawns are refused MEM_LOW: the card goes at once and stays gone through a busy pass,
-/// the issue row, `status` and `waiting` say what it waits for; once load drops, drive starts it with no second tap.
 #[test]
 fn a_held_back_extend_stays_answered_and_drive_starts_it_with_no_second_tap() {
     let c = setup("pending-extend");
@@ -298,8 +294,6 @@ fn an_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once() {
     );
 }
 
-/// #825: a start held by host load alone never goes back to the owner (#975: an answer's; an owner's extend never
-/// waits on load).
 #[test]
 fn a_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_admitted() {
     let mut c = ctx(&tmpdir("pending-load"), CONFIG);

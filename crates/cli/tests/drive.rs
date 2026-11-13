@@ -1917,7 +1917,6 @@ fn blocked_with_an_open_pr_takes_the_next_step_and_without_one_logs_no_action() 
     );
 }
 
-/// Notes, at each command run, whether the log already holds `round-extended`.
 struct Spy<'a>(Fake, &'a drover::Ctx, std::sync::Mutex<Vec<bool>>);
 impl drover::runner::Runner for Spy<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
@@ -1927,13 +1926,9 @@ impl drover::runner::Runner for Spy<'_> {
     }
 }
 
-/// `vm_stat` with 0.5 GB free + inactive: under the default `min_free_mem_gb` (2), MEM_LOW.
 const LOW_MEM: &str = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 16384.\n\
     Pages inactive: 16384.\nSwapouts: 100.\n";
 
-/// #217: `[one more round]` logs its decision before the spawn runs; #778: a spawn refused MEM_LOW (#975: the one
-/// host gate an owner's extend still meets) keeps it pending with the reason (no `extend-failed`), and the next drive
-/// pass starts the recorded round as its fix step.
 #[test]
 fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     let c = setup("drive-extend");
@@ -1981,8 +1976,6 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     assert_eq!(drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
 }
 
-/// #975 AC3: an extend while a drive pass holds drive.lock records the round and spawns it at once (#217 left it to
-/// the next pass); the pass's lock is left alone.
 #[test]
 fn an_extend_during_a_pass_spawns_at_once() {
     let c = setup("drive-extend-lock");

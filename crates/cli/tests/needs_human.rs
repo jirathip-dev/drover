@@ -165,7 +165,7 @@ fn herd_marks_the_issue_and_park_clears_the_card() {
 
 /// Finding 1/2 of the first review: the card ops act only on a needs-human issue. #217: `[one more round]` logs
 /// `round-extended` first; #778: a spawn held back (PAUSED) keeps it pending, its card answered, and a second tap grants
-/// no more (#975: it only retries the start).
+/// no more.
 #[test]
 fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     let c = fixture("nh-guard", "FAIL");

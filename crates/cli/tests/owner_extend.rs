@@ -1,5 +1,3 @@
-//! #975: the owner's [one more round] starts its lane at once: past host load (`HOST_BUSY`, logged `override` with
-//! `why: owner-extend`) and the spawn-pending gate, whatever pass or other extend runs; low memory still holds it.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -18,7 +16,6 @@ fn ev(c: &drover::Ctx, n: u64, ts: u64, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(n), kind, d)).unwrap();
 }
 
-/// `max_parallel_spawns = 4`, with 4 kicks still starting (#31–#34, live pid 4242); #1..=`extends` out of rounds.
 fn setup(name: &str, extends: u64) -> drover::Ctx {
     let c = ctx(
         &tmpdir(name),
@@ -44,7 +41,6 @@ fn setup(name: &str, extends: u64) -> drover::Ctx {
     c
 }
 
-/// #`n`'s impl lane through three FAILs, then needs-human (ROUND_LIMIT).
 fn out_of_rounds(c: &drover::Ctx, n: u64) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
@@ -64,7 +60,6 @@ fn out_of_rounds(c: &drover::Ctx, n: u64) {
     ev(c, n, 14, "needs-human", nh);
 }
 
-/// Load 40 on 10 cores (4.0 per CPU, over `load_per_cpu`), no memory pressure; spawns and kicks succeed.
 fn loaded() -> Fake {
     let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": sha("3"),
         "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]});
@@ -93,8 +88,6 @@ fn pending(c: &drover::Ctx, n: u64) -> Option<drover::pending::Pending> {
     drover::pending::of(&read(&c.state).unwrap(), "sendmeter", n)
 }
 
-/// AC1–AC3: ten extends tapped in a row on a host over `load_per_cpu`, 4 spawns already pending and a drive pass holding
-/// drive.lock: each spawns its lane in its own call, past HOST_BUSY (`override`, `why: owner-extend`), none pending.
 #[test]
 fn ten_extends_each_spawn_at_once_past_load_four_pending_spawns_and_a_running_pass() {
     let c = setup("owner-extend-ten", 10);
@@ -126,7 +119,6 @@ fn ten_extends_each_spawn_at_once_past_load_four_pending_spawns_and_a_running_pa
     assert!((31..=34).all(|n| lease_on(&c, &format!("spawn-sendmeter-{n}.pending")).is_some()));
 }
 
-/// AC1: the floors still hold an extend: low memory keeps it pending with its code, no `override` logged.
 #[test]
 fn low_memory_still_holds_an_owner_extend_and_says_so() {
     let c = setup("owner-extend-mem", 1);
@@ -144,8 +136,6 @@ fn low_memory_still_holds_an_owner_extend_and_says_so() {
     assert!(of_kind(&c, "override").is_empty());
 }
 
-/// AC2, AC7: extends left pending before this change (held on load) start on the first pass, with all 4 spawn slots
-/// taken: each gets its kick, while a plain fix round on the same pass is held SPAWN_PENDING. The kick spawns past load.
 #[test]
 fn extends_already_pending_start_on_the_first_pass_past_load_and_full_spawn_slots() {
     let c = setup("owner-extend-pass", 10);
@@ -185,7 +175,6 @@ fn extends_already_pending_start_on_the_first_pass_past_load_and_full_spawn_slot
     assert_eq!(o[0].str("why"), Some("owner-extend"));
 }
 
-/// The Fake; its first `herdr worktree` (the first extend's spawn) takes 1.5 s, so that spawn is still running.
 struct Slow(Fake, AtomicBool);
 impl Runner for Slow {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
@@ -210,8 +199,6 @@ fn http(addr: &str, req: &str) -> String {
     res
 }
 
-/// AC3, AC5, AC6: on the board, a second card's [one more round] and a [drive] while the first extend's spawn runs are
-/// both taken (never DRIVE_RUNNING); the second card leaves needs-human at the tap and reads `extended · starting`.
 #[test]
 fn board_extends_are_never_refused_while_another_extend_or_a_drive_runs() {
     let c = setup("owner-extend-board", 2);
