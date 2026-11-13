@@ -257,6 +257,10 @@ pub struct HostCfg {
     pub allow_commands: Option<Vec<String>>,
     /// #637: `herdr` or `shed-acp`: the runtime its lanes start in (unset: the fleet's, as before).
     pub runtime: Option<RuntimeKind>,
+    /// #984: lanes running a turn at once on this host, all fleets (unset: no cap).
+    pub max_working: Option<usize>,
+    /// #984: live lanes that need `sim` on this host at once (unset: no cap).
+    pub max_simulators: Option<usize>,
 }
 
 /// #256: a cloud host is a disposable machine: its lanes may start containers.

@@ -516,7 +516,11 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let events = expire(ctx, cfg, out, events, agents.as_deref(), &remote)?;
     let open = open_asks(&events);
     // #248: a done lane whose handoff is logged closes its session after `done_close_minutes`; its worktree stays.
-    for a in agents.iter().flatten().filter(|a| a["agent_status"] == "done") {
+    for a in agents
+        .iter()
+        .flatten()
+        .filter(|a| matches!(a["agent_status"].as_str(), Some("done" | "idle")))
+    {
         let e = a["name"].as_str().and_then(|n| last_spawn(&events, n));
         let (Some(name), Some(pane), Some(e)) = (a["name"].as_str(), a["pane_id"].as_str(), e) else {
             continue;
@@ -524,8 +528,20 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let (Some(n), Some(wt), None) = (e.issue, e.str("worktree"), On::of(r, Some(e)).machine) else {
             continue;
         };
+        let check = crate::events::checks(e);
+        let next = |x: &Event| {
+            [
+                x.is("spawn", &e.fleet, n) && crate::events::checks(x),
+                x.is("verdict", &e.fleet, n),
+            ]
+        };
+        let acted = events.iter().any(|x| x.ts >= e.ts && next(x)[usize::from(check)]);
+        if a["agent_status"] == "idle" && !acted {
+            continue;
+        }
+        let wait = [cfg.limits.done_close_minutes * 60, 0][usize::from(acted)];
         let asking = open.iter().any(|q| q.str("agent") == Some(name));
-        let due = handoff(r, &events, e, (n, wt)).filter(|t| ctx.now >= t + cfg.limits.done_close_minutes * 60);
+        let due = handoff(r, &events, e, (n, wt)).filter(|t| ctx.now >= t + wait);
         // #444: a spawn whose prompt never landed is no finished lane: drive retries it.
         let landed = e.data.get("confirmed") != Some(&json!(false));
         let Some(at) = due.filter(|_| !asking && landed) else {

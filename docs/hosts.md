@@ -103,6 +103,17 @@ all (or only a cloud host over its budget fits), it is refused with `REFUSED NO_
 ` (cloud host stopped or over budget)` when fleet.toml has a cloud host; the Host tab reads it as `waiting`. drive
 retries on its next pass.
 
+### Working-lane and simulator slots (#984)
+
+`[hosts.<name>] max_working = 12` caps the lanes running a turn on that host, across all fleets; `max_simulators = 1`
+caps the live lanes that need the `sim` tag (by fleet, role or `queue add --needs sim`). Unset means no cap. A lane
+idle at its prompt, or whose issue is `ready`, `needs-human`, `parked`, `blocked` or done, holds no working slot; a
+`sim` lane holds its simulator slot while its pane lives (unless its issue is in one of those states). Over a cap a
+start is not refused for good: drive skips it with `HOST_FULL` (`waiting for a slot: 12/12 working on mini`), counting
+spawns still starting, and starts it in queue order once a slot frees. `drover status` prints `mini: working N/12 ·
+simulators N/1` for each capped host. Once its verdict is in, a reviewer's idle pane closes on the next `check`.
+Likewise, a builder's idle pane closes once a review started after it. Their worktrees stay until merge.
+
 The `spawn` event records the lane's `host` and `machine`. From then on, every herdr call for that lane carries
 `--machine` (pane reads, prompts, stop, kill, close), and its worktree work runs over ssh on that host:
 `git worktree`, the brief and MCP files, the reviewer's `verdict.md`, the dirty and unpushed checks, and `clean`.

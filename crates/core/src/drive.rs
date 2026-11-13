@@ -385,6 +385,9 @@ fn launch(
         return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting{by}"));
     }
     crate::spawn::lane_admit(ctx, (cfg, r), ev, fleet, n, role)?;
+    if let Some(why) = crate::hosts::slot_before(ctx, cfg, r, ev, (fleet, n, role), &live) {
+        return crate::gate::refused("HOST_FULL", why);
+    }
     if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && (extend || c.contains(&"--force"))))
     {
         return crate::gate::refused(code, why);
@@ -595,7 +598,7 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
             Some((_, by)) => crate::promise::Say::SpawnSlot(Some(by.into())).line(),
             None => crate::promise::Say::SpawnSlot(None).line(),
         },
-        Some("SPAWN_BACKOFF") => why.into(),
+        Some("SPAWN_BACKOFF" | "HOST_FULL") => why.into(),
         Some("SERIAL_BUSY") => "another one-at-a-time issue is in flight".into(),
         Some("IN_FLIGHT" | "ALREADY_DONE") => "skipped: another pass is on it or did it".into(),
         Some("LANE_LIVE") if why.starts_with("stale pane") => why.into(),

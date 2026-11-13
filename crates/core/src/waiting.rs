@@ -1016,7 +1016,14 @@ pub fn recovered(events: &[Event], lane: &str, now: u64) -> String {
 }
 
 /// #493: a refusal that stops drive's starts for every fleet (`CAP`: its own); the queue waits on it.
-const HOST_WAIT: [&str; 5] = ["HOST_BUSY", "DISK_LOW", "DISK_BUDGET", "MEM_LOW", "ALL_CAPPED"];
+const HOST_WAIT: [&str; 6] = [
+    "HOST_BUSY",
+    "HOST_FULL",
+    "DISK_LOW",
+    "DISK_BUDGET",
+    "MEM_LOW",
+    "ALL_CAPPED",
+];
 pub const ORPHAN_SECS: u64 = 1800;
 
 /// #493: since when nothing has driven guarded issue `s`, once that is 30 min: no working lane, no drive action on it
