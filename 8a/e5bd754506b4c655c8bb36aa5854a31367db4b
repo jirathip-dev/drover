@@ -1,0 +1,7 @@
+Decided: the red diagram test was staging's stale docs/workflow.md at the time; merged origin/staging, where the generated file matches again
+Because: crates/cli/tests/diagram.rs:19
+Decided: no install code changed this round; the round 1 reinstall line in gate.rs stands
+Because: crates/core/src/gate.rs:1
+Rejected: regenerating docs/workflow.md on this branch — staging already carries the matching file, so the merge alone fixes it
+Check: cargo test -p drover --test diagram passes at the merge head
+Owner: CI failure came from the shared branch, not this change; refreshed onto the latest shared branch
