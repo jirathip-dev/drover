@@ -48,11 +48,15 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
             None => touched.entry(l.to_string()).or_default().push(sha.to_string()),
         }
     }
-    let arch_toml = format!("{range}:.herdsman/arch.toml");
-    let arch = r.run("git", &argv(&["-C", &local, "show", &arch_toml]))?;
-    let converted = match arch.code {
-        0 => crate::arch::converted(&arch.stdout)?,
-        _ => vec![],
+    let show = |p: &str| {
+        let o = r
+            .run("git", &argv(&["-C", &local, "show", &format!("{range}:{p}")]))
+            .ok()?;
+        (o.code == 0).then_some(o.stdout)
+    };
+    let converted = match crate::repo_read("arch.toml", show) {
+        Some(text) => crate::arch::converted(&text)?,
+        None => vec![],
     };
     touched.retain(|f, _| !crate::arch::any(&converted, f));
     let events = read(&ctx.state)?;
@@ -93,7 +97,7 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
     Ok(hot)
 }
 
-/// #889: the report `herdsman hotspots` prints and its issue's body.
+/// #889: the report `drover hotspots` prints and its issue's body.
 pub fn report(fleet: &str, hot: &[Hot]) -> String {
     let mut s = format!("Hot files in {fleet}: {HOT} or more merged PRs in the last {DAYS} days\n\n");
     if hot.is_empty() {

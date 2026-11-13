@@ -1,5 +1,5 @@
 // #370 phase 1: the fixtures and the gate-2 measurements, shot from the real board. Takes an exported demo
-// (`herdsman serve --export <site> --demo`), copies it twice: `today/` as exported, `next/` with the proposed theme
+// (`drover serve --export <site> --demo`), copies it twice: `today/` as exported, `next/` with the proposed theme
 // files (proposed/, from build.mjs) and proposal.js/.css loaded after serve.js/herd.js. Then: every tab × farm, kitchen,
 // terminal × 390 (DPR 2) and 1440; the loops, Reduce Motion, the moments, the empty states, contrast; report.json.
 // Usage: node build.mjs && node shoot.mjs <site dir> <chrome-headless-shell>

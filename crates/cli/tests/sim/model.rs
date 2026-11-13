@@ -1,12 +1,12 @@
-//! The in-process world herdsman's calls land in: herdr panes and agents, gh PRs and checks, git heads, pids and the
+//! The in-process world drover's calls land in: herdr panes and agents, gh PRs and checks, git heads, pids and the
 //! host's load. Each argv is matched by its leading words; one it does not know fails the run ("unmodelled call").
 use crate::sched::{Sim, World};
-use herdsman::runner::Out;
+use drover::runner::Out;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-pub const FLEET: &str = "herdsman";
+pub const FLEET: &str = "drover";
 pub const REPO: &str = "jirathip-dev/herdsman";
 
 /// What a lane's agent does once its prompt lands.
@@ -104,7 +104,7 @@ pub struct Model {
     pub ci_secs: Option<u64>,
     /// #685 ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live
     /// lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed
-    /// a head or wrote a verdict herdsman takes.
+    /// a head or wrote a verdict drover takes.
     pub ci_since: BTreeMap<String, u64>,
     pub ci_wait: u64,
     pub idle: u64,

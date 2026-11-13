@@ -109,7 +109,7 @@ body.v-g :is(.chq,.reply){opacity:.6;pointer-events:none}
 .shot .cvp .reply{position:static}
 </style></head>
 <body class=v-l>
-<header><b>herdsman</b><span id=stale hidden></span><i id=dot class=g></i><button type=button class=qhelp aria-label="what the marks mean">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=look type=button aria-label="look: theme and colours">◐</button></header>
+<header><b>drover</b><span id=stale hidden></span><i id=dot class=g></i><button type=button class=qhelp aria-label="what the marks mean">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=look type=button aria-label="look: theme and colours">◐</button></header>
 <div class=later><button type=button class=lo>3 need you ▸</button><button type=button class=lall>later all</button></div>
 <main id=chat>
 
@@ -139,13 +139,13 @@ body.v-g :is(.chq,.reply){opacity:.6;pointer-events:none}
 <div class=cvp>
 <div class=th><button type=button class=bk aria-label="back to threads">‹</button><div><b>Rate limits for /v1/search</b><span class=ds><i class=dt></i>acme-api · claude · opus · awake · tg topic</span></div></div>
 <div class=chat>
-<p class=qs>thread started by owner · 09:12 · conductor in ~/.local/state/herdsman/conductor/t3</p>
+<p class=qs>thread started by owner · 09:12 · conductor in ~/.local/state/drover/conductor/t3</p>
 
 <details class="blk me" open><summary><span class=k>you</span><span class=pv>One integration is hammering search</span><span class=tm>09:12</span><i class=cv></i></summary>
 <div class=md><p>One customer's integration is hammering <code>/v1/search</code> and #19's webhook retries keep hitting 429s, see the events. I want proper rate limits. Grill me, then file it.</p></div>
 <figure class=im><img src=../farm-v2/board-events-390.png alt="screenshot: the board's Events tab"><figcaption>IMG_2041.PNG · 224 KB</figcaption></figure>
 </details>
-<details class="blk run"><summary><span class=k>$</span><span class=cmd>herdsman brief acme-api 19</span><i class=cv></i></summary></details>
+<details class="blk run"><summary><span class=k>$</span><span class=cmd>drover brief acme-api 19</span><i class=cv></i></summary></details>
 <details class="blk run"><summary><span class=k>Read</span><span class=cmd>uploads/IMG_2041.PNG</span><i class=cv></i></summary></details>
 
 <details class="blk ai" open><summary><span class=k>conductor</span><span class=pv>I see it</span><span class=tm>09:13</span><i class=cv></i></summary>
@@ -162,7 +162,7 @@ body.v-g :is(.chq,.reply){opacity:.6;pointer-events:none}
 <div class=md><p>Filing it, and queueing it right after #21 (the per-key auth it builds on).</p></div>
 </details>
 <details class="blk run"><summary><span class=k>$</span><span class=cmd>gh issue create -R acme/acme-api -t "Rate-limit /v1/search per API key (600/min, burst 100)" -F -</span><i class=cv></i></summary></details>
-<details class="blk run"><summary><span class=k>$</span><span class=cmd>herdsman queue acme-api add 52 --after 21</span><i class=cv></i></summary></details>
+<details class="blk run"><summary><span class=k>$</span><span class=cmd>drover queue acme-api add 52 --after 21</span><i class=cv></i></summary></details>
 
 <details class="blk ai" open><summary><span class=k>conductor</span><span class=pv>Filed #52</span><span class=tm>09:19</span><i class=cv></i></summary>
 <div class=md><p>Filed <a href=#>#52</a> and queued it after #21. Here is the docs page I'd ship with it:</p></div>
@@ -189,7 +189,7 @@ body.v-g :is(.chq,.reply){opacity:.6;pointer-events:none}
 <span class=hh>@@ [fleet.acme-api]</span>
 <span class=bg-r>-serial_paths = ["db/migrations/**"]</span>
 <span class=bg-g>+serial_paths = ["db/migrations/**", "src/middleware/**"]</span></pre></div>
-<p class=chk>✓ validates · on apply: backup, herdsman doctor, a config-applied event</p>
+<p class=chk>✓ validates · on apply: backup, drover doctor, a config-applied event</p>
 <div class="btns own"><button type=button class=ap>apply</button><button type=button>discard</button></div>
 <div class="btns gst"><button type=button disabled>apply</button><button type=button>pair this phone</button></div>
 <p class="st own">only the owner applies; the conductor can propose, never apply</p>
@@ -202,7 +202,7 @@ body.v-g :is(.chq,.reply){opacity:.6;pointer-events:none}
 <div class=oc><p class=oh><b>🔒 secret request</b><span class=m>RESEND_API_KEY · acme-api</span></p>
 <p>why: "#52's over-limit email goes through Resend"</p>
 <form class=own><input type=password autocomplete=off aria-label="RESEND_API_KEY value" placeholder="paste the value"><button type=button class=ap>save</button><button type=button>dismiss</button></form>
-<p class="st own">goes to this host's keychain as herdsman/acme-api/RESEND_API_KEY; lanes get it at spawn, nobody reads it back, the chat keeps only its name</p>
+<p class="st own">goes to this host's keychain as drover/acme-api/RESEND_API_KEY; lanes get it at spawn, nobody reads it back, the chat keeps only its name</p>
 <p class="st gst">only a paired owner device can set a secret</p>
 </div>
 
@@ -244,7 +244,7 @@ body.v-g :is(.chq,.reply){opacity:.6;pointer-events:none}
 <div class=btns><button type=button>discard</button></div></div>
 
 <h3>config proposal: the conductor tried to apply it</h3>
-<p class=qs>conductor ran herdsman config apply c8 → REFUSED OWNER_ONLY: only the owner's tap applies a proposal</p>
+<p class=qs>conductor ran drover config apply c8 → REFUSED OWNER_ONLY: only the owner's tap applies a proposal</p>
 
 <h3>secret: saved, dismissed, another device</h3>
 <p class="qs ok">🔒 secret RESEND_API_KEY set ✓ (by owner) · 09:36</p>

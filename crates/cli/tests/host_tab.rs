@@ -3,7 +3,7 @@
 //! it is System's Hosts & health (serve.js makes its section); ALERTS moved to Notifications & devices (system.ts).
 mod common;
 use common::*;
-use herdsman::serve::Server;
+use drover::serve::Server;
 use std::path::PathBuf;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -20,18 +20,18 @@ fn groups(h: &str) -> Vec<&str> {
 fn an_export_ships_the_host_data_and_its_forms_are_inert() {
     let demo = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../demo"));
     let d = tmpdir("host-export");
-    let c = herdsman::Ctx {
+    let c = drover::Ctx {
         config: demo.join("fleet.toml"),
         state: demo.join("events.jsonl"),
         worktrees: d.join("wt"),
         homes: [("hermes", d.join("hermes"))].into(),
-        exe: "herdsman".into(),
+        exe: "drover".into(),
         now: 1,
         home: d.join("home"),
         hints: vec![],
     };
     std::fs::create_dir_all(d.join("wt/oldproj")).unwrap(); // an orphan folder: [remove orphans]
-    herdsman::serve::export(&c, &Fake::default(), &d.join("site"), true).unwrap();
+    drover::serve::export(&c, &Fake::default(), &d.join("site"), true).unwrap();
     let page = std::fs::read_to_string(d.join("site/index.html")).unwrap();
     assert!(
         !page.contains("id=host") && !page.contains("class=hcd"),

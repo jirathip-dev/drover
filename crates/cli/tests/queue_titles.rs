@@ -2,7 +2,7 @@
 //! no lane display mode button (#335: the look sheet's style); sw.js never caches a non-200 page.
 mod common;
 use common::*;
-use herdsman::serve::Server;
+use drover::serve::Server;
 use serde_json::json;
 
 /// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
@@ -15,7 +15,7 @@ fn get(s: &Server, path: &str) -> String {
     with_queue(&res, s, "127.0.0.1:7777", 1_000_000)
 }
 
-fn queued(name: &str) -> herdsman::Ctx {
+fn queued(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "17"]).0,

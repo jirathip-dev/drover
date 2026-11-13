@@ -15,8 +15,8 @@ use std::time::Duration;
 
 pub use shed_proto as proto;
 
-/// #637: the shed a `shed-acp` host's bootstrap installs: the build proven with herdsman on the main host.
-/// shed's repo, beside herdsman's own.
+/// #637: the shed a `shed-acp` host's bootstrap installs: the build proven with drover on the main host.
+/// shed's repo, beside drover's own.
 pub fn git() -> String {
     env!("CARGO_PKG_REPOSITORY").replace("/herdsman", "/shed")
 }
@@ -66,7 +66,7 @@ fn answer(text: &str) -> Result<Value> {
     let theirs = hello.result.and_then(|v| serde_json::from_value::<Hello>(v).ok());
     ensure!(
         theirs.as_ref() == Some(&Hello::ours()),
-        "SHED_VERSION: herdsman speaks shed {VERSION}, the server is {}",
+        "SHED_VERSION: drover speaks shed {VERSION}, the server is {}",
         theirs.map_or("?".into(), |h| h.label())
     );
     match next()? {
@@ -166,7 +166,7 @@ pub fn seen(ctx: &Ctx) -> u64 {
         .unwrap_or(0)
 }
 
-/// #662: an ACP lane's exit causes herdsman resumes it from (same worktree, next account, never `LANE_ENDS`).
+/// #662: an ACP lane's exit causes drover resumes it from (same worktree, next account, never `LANE_ENDS`).
 pub const RESUMABLE: [&str; 2] = ["account limit", "adapter crash"];
 
 /// #662: why lane `agent`'s latest session ended, as the `gone` lane-state after its last spawn logged it.

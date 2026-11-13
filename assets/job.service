@@ -1,5 +1,5 @@
 [Unit]
-Description=herdsman {label}
+Description=drover {label}
 
 [Service]
 Environment=PATH={path}

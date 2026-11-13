@@ -1,5 +1,5 @@
 //! #677: why notes (docs/design/why-notes): a lane's `why.md`, checked at `turn done` and put on the pushed head under
-//! `refs/notes/why` by herdsman alone; read back by briefs, the merge comment, `/api/v1` and `herdsman why <file:line>`.
+//! `refs/notes/why` by drover alone; read back by briefs, the merge comment, `/api/v1` and `drover why <file:line>`.
 use crate::config::{Config, Fleet};
 use crate::events::{emit, fold, last_spawn, read, Event};
 use crate::runner::{argv, json, ok, Runner};
@@ -282,7 +282,7 @@ pub fn attach(
         for _ in 0..3 {
             git(&["update-ref", "-d", &mine], "")?;
             let _ = git(&["fetch", "-q", "origin", &format!("+refs/notes/why:{mine}")], "");
-            let id = ["-c", "user.name=herdsman", "-c", "user.email=herdsman@localhost"];
+            let id = ["-c", "user.name=drover", "-c", "user.email=drover@localhost"];
             let o = git(
                 &[&id[..], &["notes", "--ref", &mine, "add", "-f", "-F", "-", head]].concat(),
                 text,
@@ -402,12 +402,12 @@ pub fn brief(
     (!files.is_empty()).then(|| s.lines().take(60).collect::<Vec<_>>().join("\n"))
 }
 
-/// `herdsman why <file:line>`: blame's commit, the issue that merged it, the note on it (else on the round head that
+/// `drover why <file:line>`: blame's commit, the issue that merged it, the note on it (else on the round head that
 /// pushed it) and the issue's asks with their answers; plain text, or `json`.
 pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &str, as_json: bool) -> Result<()> {
     let (file, line) = (at.rsplit_once(':'))
         .and_then(|(f, l)| Some((f, l.parse::<u64>().ok()?)))
-        .context("usage: herdsman why <file:line>")?;
+        .context("usage: drover why <file:line>")?;
     let p = Path::new(file);
     let dir = p
         .parent()

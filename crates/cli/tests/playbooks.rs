@@ -2,7 +2,7 @@
 //! (`NO_BASELINE`), or a test diff that only moves or renames tests (`TESTS_CHANGED`).
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 
 const BRANCH: &str = "gh api repos/jirathip-dev/sendmeter/branches/issue-12";
@@ -11,7 +11,7 @@ const DIFF: &str = "gh pr diff issue-12 -R jirathip-dev/sendmeter";
 const PERF: &str = "Perf:\n```\ncargo bench totals\n```\nbefore 41 ms, after 12 ms (3.4x), 5 runs each, spread 2%\n";
 
 /// #12 built and under rev, queued with `flag`.
-fn setup(name: &str, flag: &str) -> (herdsman::Ctx, std::path::PathBuf) {
+fn setup(name: &str, flag: &str) -> (drover::Ctx, std::path::PathBuf) {
     let d = tmpdir(name);
     let c = ctx(&d, CONFIG);
     let (code, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", flag]);
@@ -24,7 +24,7 @@ fn setup(name: &str, flag: &str) -> (herdsman::Ctx, std::path::PathBuf) {
     (c, d)
 }
 
-fn pass(c: &herdsman::Ctx, d: &std::path::Path, r: &Fake, body: &str) -> (i32, String, usize) {
+fn pass(c: &drover::Ctx, d: &std::path::Path, r: &Fake, body: &str) -> (i32, String, usize) {
     let file = d.join("verdict.md");
     std::fs::write(&file, format!("PASS\n\nAll ACs hold.\n\n{body}")).unwrap();
     let sha = "a".repeat(40);
