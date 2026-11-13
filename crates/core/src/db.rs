@@ -302,17 +302,29 @@ pub fn try_list<T: DeserializeOwned>(state: &Path, table: &str) -> Result<Vec<T>
 
 /// Replace every row of `table` with `all`, in one transaction.
 pub fn store<T: Serialize>(state: &Path, table: &str, all: &[T]) -> Result<()> {
+    with(state, true, (), |c| replace(c, table, all))
+}
+
+/// #893: `store`, failing at once while another connection holds the write lock (never waiting for it).
+pub fn store_now<T: Serialize>(state: &Path, table: &str, all: &[T]) -> Result<()> {
     with(state, true, (), |c| {
-        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(&format!("DELETE FROM {table}"), [])?;
-        for v in all {
-            tx.execute(
-                &format!("INSERT INTO {table} (json) VALUES (?1)"),
-                [serde_json::to_string(v)?],
-            )?;
-        }
-        Ok(tx.commit()?)
+        c.busy_timeout(std::time::Duration::ZERO)?;
+        let r = replace(c, table, all);
+        c.busy_timeout(std::time::Duration::from_secs(crate::config::limits().db_busy_secs))?;
+        r
     })
+}
+
+fn replace<T: Serialize>(c: &mut Connection, table: &str, all: &[T]) -> Result<()> {
+    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute(&format!("DELETE FROM {table}"), [])?;
+    for v in all {
+        tx.execute(
+            &format!("INSERT INTO {table} (json) VALUES (?1)"),
+            [serde_json::to_string(v)?],
+        )?;
+    }
+    Ok(tx.commit()?)
 }
 
 /// A lease: who holds `key` (pid on host), since `at`, until `expires_at`, with the holder's `data`.

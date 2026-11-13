@@ -163,7 +163,14 @@ fn turned(events: &[Event], t: &Event, lane: &str, now: u64, stall: u64) -> (Who
 
 /// #444: the `respawn`s since the issue's last push, verdict or needs-human: (count, the last one's time).
 pub(crate) fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
-    let reset = ["pushed", "verdict", "needs-human", "round-extended", "repaired"];
+    let reset = [
+        "pushed",
+        "verdict",
+        "needs-human",
+        "round-extended",
+        "repaired",
+        "runtime-cleared",
+    ];
     let mine = events.iter().rev().filter(|e| e.fleet == fleet && e.issue == Some(n));
     let at: Vec<&Event> = mine
         .take_while(|e| !reset.contains(&e.kind.as_str()))
@@ -837,6 +844,17 @@ pub fn scan(
         // #478: an active lane on a host the last look could not reach is not gone: nothing respawns it.
         if let Some(h) = crate::hosts::offline(ctx, sp).filter(|_| s.active_lane().is_some()) {
             (w.who, w.what, w.next_cmd, w.promise) = ("none", format!("host offline: {h}"), None, None);
+        }
+        let stuck = ["idle without pushing", "rev idle without", "reviewer exited"]
+            .iter()
+            .any(|p| w.what.starts_with(p));
+        let spawning = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover spawn "));
+        let hold = stuck || spawning || w.what.contains(NO_PUSH);
+        if let Some(t) = sp
+            .and_then(|e| crate::breaker::says(log.all, crate::breaker::host(e)))
+            .filter(|_| hold)
+        {
+            (w.who, w.what, w.next_cmd, w.promise) = ("none", t, None, None);
         }
         // #592: a live remote lane's rules, frozen at spawn, that fleet.toml now resolves otherwise: a respawn takes them.
         let sp = s.active_lane().and_then(|(_, a)| last_spawn(mine, a));

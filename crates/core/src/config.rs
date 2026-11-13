@@ -619,6 +619,8 @@ pub struct Limits {
     pub reap_keychain_readers: bool,
     pub respawn_max: u32,
     pub respawn_window_minutes: u64,
+    pub runtime_down_failures: u64,
+    pub runtime_down_minutes: u64,
     pub pass_max_secs: u64,
     pub ssh_connect_secs: u64,
     pub ssh_quick_secs: u64,
@@ -649,6 +651,7 @@ pub struct Limits {
     pub serve_shed_secs: u64,
     pub serve_remote_secs: u64,
     pub serve_host_secs: u64,
+    pub serve_heartbeat_secs: u64,
     pub serve_handover_secs: u64,
     pub slo_api_p95_ms: u64,
     pub slo_api_minutes: u64,
@@ -737,6 +740,8 @@ impl Default for Limits {
             reap_keychain_readers: false,
             respawn_max: 3,
             respawn_window_minutes: 60,
+            runtime_down_failures: 5,
+            runtime_down_minutes: 30,
             pass_max_secs: 120,
             ssh_connect_secs: 10,
             ssh_quick_secs: 5,
@@ -767,6 +772,7 @@ impl Default for Limits {
             serve_shed_secs: 5,
             serve_remote_secs: 10,
             serve_host_secs: 10,
+            serve_heartbeat_secs: 15,
             serve_handover_secs: 300,
             slo_api_p95_ms: 1000,
             slo_api_minutes: 10,
@@ -904,6 +910,14 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "the window `respawn_max` counts failed starts in",
     ),
     (
+        "runtime_down_failures",
+        "lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there",
+    ),
+    (
+        "runtime_down_minutes",
+        "the window `runtime_down_failures` counts in",
+    ),
+    (
         "pass_max_secs",
         "a drive pass longer than this logs `pass-slow`; past 3 × it logs `pass-stuck` and frees its lock",
     ),
@@ -1009,6 +1023,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "serve re-samples this host's load in the background this often",
     ),
     (
+        "serve_heartbeat_secs",
+        "`/live` pings this often; a stream whose last 2 pings are still unsent is dropped",
+    ),
+    (
         "serve_handover_secs",
         "`self-update` waits this long for the running serve to hand over before restarting it",
     ),
@@ -1100,6 +1118,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "clean-failed",
     "runners-low",
     "runners-ok",
+    "runtime-down",
 ];
 
 impl Notify {

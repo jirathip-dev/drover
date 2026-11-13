@@ -3,6 +3,7 @@ pub mod access;
 pub mod action;
 pub mod amend;
 pub mod arch;
+pub mod breaker;
 pub mod card;
 pub mod check;
 #[allow(clippy::doc_markdown)] // its doc comments are clap help text, printed verbatim
@@ -12,6 +13,7 @@ pub mod config;
 pub mod db;
 pub mod design;
 pub mod devices;
+pub mod diagram;
 pub mod doctor;
 pub mod drive;
 pub mod events;

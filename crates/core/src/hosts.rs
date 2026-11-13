@@ -303,6 +303,10 @@ impl<'a> Pass<'a> {
         }
     }
     pub fn step(&self, s: &str) {
+        debug_assert!(
+            crate::timer::TICK_STEPS.iter().any(|t| t.0 == s),
+            "{s} is not in TICK_STEPS"
+        );
         *self.step.lock().unwrap() = (s.into(), self.t0.elapsed().as_secs());
         self.note("");
     }
