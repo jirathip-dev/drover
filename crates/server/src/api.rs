@@ -1041,7 +1041,7 @@ pub struct LessonRun {
     pub state: String,
 }
 
-/// #576: `lessons/<fleet>/digest?days=N`: `herdsman lesson digest`'s text.
+/// #576: `lessons/<fleet>/digest?days=N`: `drover lesson digest`'s text.
 pub struct Digest {
     pub fleet: String,
     pub days: u64,
@@ -1105,7 +1105,7 @@ pub struct ConductorAttach {
     pub message: String,
     /// `roles/conductor.md`, the repo and the owner's conductor instructions.
     pub brief: String,
-    /// The synced conductor provider settings (`PreToolUse`: `herdsman hook`).
+    /// The synced conductor provider settings (`PreToolUse`: `drover hook`).
     pub settings: String,
     pub env: AttachEnv,
     /// #565's ACP guard holds; else `why` not.
@@ -1114,11 +1114,11 @@ pub struct ConductorAttach {
 }
 
 pub struct AttachEnv {
-    #[serde(rename = "HERDSMAN_LANE")]
+    #[serde(rename = "DROVER_LANE")]
     pub lane: String,
-    #[serde(rename = "HERDSMAN_THREAD")]
+    #[serde(rename = "DROVER_THREAD")]
     pub thread: String,
-    #[serde(rename = "HERDSMAN_PORT")]
+    #[serde(rename = "DROVER_PORT")]
     pub port: String,
     /// #683: the role's account env (`access::account_env`), the thread's own login (empty: no account).
     #[serde(flatten)]

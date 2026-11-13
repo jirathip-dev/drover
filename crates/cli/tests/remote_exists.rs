@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, Event};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::collections::BTreeSet;
 use std::time::Duration;
@@ -82,7 +82,7 @@ impl Runner for Air {
     }
 }
 
-fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
+fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n");
     let c = ctx(&tmpdir(name), &toml);

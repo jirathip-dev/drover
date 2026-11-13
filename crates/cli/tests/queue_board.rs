@@ -4,8 +4,8 @@
 //! choice from the [config] sheet.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -78,7 +78,7 @@ fn form(html: &str, op: &str, with: Option<(&str, &str)>) -> Form {
         .unwrap_or_else(|| panic!("no {op} form {with:?}: {html}"))
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -97,17 +97,17 @@ impl std::ops::Deref for OnShed {
     }
 }
 
-impl herdsman::runner::Runner for OnShed {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for OnShed {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         self.0.run(prog, args)
     }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
         self.0.run_in(prog, args, input)
     }
     fn sleep(&self, secs: u64) {
         self.0.sleep(secs);
     }
-    fn shed(&self) -> Option<herdsman::shed::Shed> {
+    fn shed(&self) -> Option<drover::shed::Shed> {
         Some(self.1.shed())
     }
 }
@@ -138,7 +138,7 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
         json!({"number": n, "title": format!("t{n}"), "state": "OPEN", "created": "2026-01-01T00:00:00Z",
             "updated": "2026-01-02T00:00:00Z", "labels": [], "ac": true, "pr": false})
     };
-    let cache = herdsman::gh::cache_path(&c, "backlog", "sendmeter", 0);
+    let cache = drover::gh::cache_path(&c, "backlog", "sendmeter", 0);
     std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
     std::fs::write(
         &cache,
@@ -164,9 +164,9 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     let (mv, _) = form(&tab(), "mv", Some(("issue", "12")));
     assert_eq!(mv.get("after").map(String::as_str), Some("17"), "{mv:?}");
     ok(&mv);
-    let order: Vec<u64> = herdsman::queue::view(
+    let order: Vec<u64> = drover::queue::view(
         &read(&c.state).unwrap(),
-        &herdsman::events::fold(&read(&c.state).unwrap()),
+        &drover::events::fold(&read(&c.state).unwrap()),
         "sendmeter",
     )
     .iter()
@@ -245,7 +245,7 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
         sh.sock.display()
     );
     let mut c = ctx(&tmpdir("queue-thread-ask"), &cfg);
-    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "2"]).0, 0);
     let ev = |n: Option<u64>, kind: &str, d: Value| {
@@ -261,7 +261,7 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
         .reply("shed agents --json", &agents.to_string())
         .reply("shed", "");
     let cli = sh.cli(&host);
-    let r = herdsman::shed::With(&cli, sh.shed());
+    let r = drover::shed::With(&cli, sh.shed());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let html = queue_tab(&s, ADDR, T);

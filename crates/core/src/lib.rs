@@ -21,6 +21,7 @@ pub mod herdr;
 pub mod hook;
 pub mod host;
 pub mod hosts;
+pub mod hotspots;
 pub mod land;
 pub mod lanes;
 pub mod lesson;
@@ -66,8 +67,8 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
 
-/// #235: `herdsman --version`: the crate version and the git sha it is built from (build.rs).
-pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("HERDSMAN_SHA"), ")");
+/// #235: `drover --version`: the crate version and the git sha it is built from (build.rs).
+pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (", env!("DROVER_SHA"), ")");
 
 #[derive(Clone)]
 pub struct Ctx {
@@ -77,7 +78,7 @@ pub struct Ctx {
     pub homes: std::collections::BTreeMap<&'static str, PathBuf>,
     pub exe: String,
     pub now: u64,
-    /// Tree `herdsman migrate` works on: `HERDSMAN_HOME`, else `$HOME`.
+    /// Tree `drover migrate` works on: `DROVER_HOME`, else `$HOME`.
     pub home: PathBuf,
     /// Pre-rename fallbacks in use this run; data commands print them on stderr.
     pub hints: Vec<String>,
@@ -85,26 +86,36 @@ pub struct Ctx {
 
 impl Ctx {
     pub fn from_env() -> Ctx {
+        for (k, v) in std::env::vars_os() {
+            let new = k
+                .to_str()
+                .and_then(|k| k.strip_prefix("HERDSMAN_"))
+                .map(|k| format!("DROVER_{k}"));
+            if let Some(new) = new.filter(|n| std::env::var_os(n).is_none()) {
+                std::env::set_var(new, v);
+            }
+        }
         let env = |k: &str, d: PathBuf| var(k).map_or(d, PathBuf::from);
-        let root = var("HERDSMAN_HOME").map_or_else(home, PathBuf::from);
-        let mut hints = vec![];
+        let root = var("DROVER_HOME").map_or_else(home, PathBuf::from);
+        let mut old = vec![];
         // Read the pre-rename dir, never move it, while the new one is missing.
-        let mut path = |k: &str, what: &str, d: &str, file: &str| {
+        let mut path = |k: &str, d: &str, file: &str| {
             if let Some(p) = var(k) {
                 return PathBuf::from(p);
             }
-            let (old, new) = (root.join(d).join("fleet"), root.join(d).join("herdsman"));
-            if old.is_dir() && !new.exists() {
-                hints.push(format!(
-                    "herdsman: found pre-rename {what} at {}; run 'herdsman migrate' to move it",
-                    old.display()
-                ));
-                return old.join(file);
+            let (was, new) = (root.join(d).join("herdsman"), root.join(d).join("drover"));
+            if was.is_dir() && !new.exists() {
+                old.push(was.display().to_string());
+                return was.join(file);
             }
             new.join(file)
         };
-        let config = path("FLEET_CONFIG", "config", ".config", "fleet.toml");
-        let state = path("FLEET_STATE", "state", ".local/state", "events.jsonl");
+        let config = path("FLEET_CONFIG", ".config", "fleet.toml");
+        let state = path("FLEET_STATE", ".local/state", "events.jsonl");
+        let hint = format!(
+            "drover: {} is from before the rename: run `drover migrate` first",
+            old.join(", ")
+        );
         Ctx {
             config,
             state,
@@ -112,10 +123,10 @@ impl Ctx {
             homes: providers::all()
                 .filter_map(|p| Some((p.name, p.home()?.resolve(&home()))))
                 .collect(),
-            exe: std::env::current_exe().map_or("herdsman".into(), |p| p.to_string_lossy().into()),
+            exe: std::env::current_exe().map_or("drover".into(), |p| p.to_string_lossy().into()),
             now: now(),
             home: root,
-            hints,
+            hints: if old.is_empty() { vec![] } else { vec![hint] },
         }
     }
 }
@@ -125,20 +136,33 @@ fn var(k: &str) -> Option<std::ffi::OsString> {
     std::env::var_os(k).filter(|v| !v.is_empty())
 }
 
-/// `herdsman migrate` (docs/architecture.md): both moves or neither.
+/// `drover migrate` (docs/architecture.md): both moves or neither.
 pub fn migrate(home: &std::path::Path, out: &mut dyn Write) -> Result<()> {
-    let mut moved: Vec<(PathBuf, PathBuf)> = vec![];
-    for d in [".config", ".local/state"] {
-        let (old, new) = (home.join(d).join("fleet"), home.join(d).join("herdsman"));
-        if new.exists() {
-            writeln!(out, "nothing to move: {} already exists", new.display())?;
+    let tree = |d| (home.join(d).join("herdsman"), home.join(d).join("drover"));
+    let trees = [".config", ".local/state", ".local/share"].map(tree);
+    if let Some((old, new)) = trees
+        .iter()
+        .find(|(old, new)| new.exists() && old.is_dir() && !same(old, new))
+    {
+        bail!(
+            "both {} and {} exist: nothing moved; keep one",
+            old.display(),
+            new.display()
+        );
+    }
+    let mut moved: Vec<&(PathBuf, PathBuf)> = vec![];
+    for t in &trees {
+        let (old, new) = t;
+        if new.exists() || !old.is_dir() {
+            let why = if new.exists() {
+                format!("{} is in place", new.display())
+            } else {
+                format!("no {}", old.display())
+            };
+            writeln!(out, "nothing to move: {why}")?;
             continue;
         }
-        if !old.is_dir() {
-            writeln!(out, "nothing to move: no {}", old.display())?;
-            continue;
-        }
-        if let Err(e) = std::fs::rename(&old, &new) {
+        if let Err(e) = std::fs::rename(old, new) {
             let mut msg = format!("moving {} -> {} failed: {e}", old.display(), new.display());
             for (o, n) in moved.iter().rev() {
                 msg += &match std::fs::rename(n, o) {
@@ -149,9 +173,34 @@ pub fn migrate(home: &std::path::Path, out: &mut dyn Write) -> Result<()> {
             bail!(msg);
         }
         writeln!(out, "moved {} -> {}", old.display(), new.display())?;
-        moved.push((old, new));
+        moved.push(t);
+    }
+    for (old, new) in moved {
+        std::os::unix::fs::symlink(new, old)?;
     }
     Ok(())
+}
+
+fn same(a: &std::path::Path, b: &std::path::Path) -> bool {
+    a.canonicalize().is_ok_and(|a| b.canonicalize().is_ok_and(|b| a == b))
+}
+
+/// #456: a repo's `.drover/…` path, or its pre-rename `.herdsman/…` twin while only that exists (one release).
+pub fn repo_path(p: &std::path::Path) -> PathBuf {
+    let old = |c| if c == ".drover" { ".herdsman".as_ref() } else { c };
+    let old: PathBuf = p.iter().map(old).collect();
+    if !p.exists() && old.exists() {
+        old
+    } else {
+        p.to_path_buf()
+    }
+}
+
+/// The same for a read off the local disk (git, the API, another host): the first folder that answers.
+pub fn repo_read<T>(name: &str, read: impl Fn(&str) -> Option<T>) -> Option<T> {
+    [".drover", ".herdsman"]
+        .iter()
+        .find_map(|d| read(&format!("{d}/{name}")))
 }
 
 /// Seconds since the epoch.
@@ -164,7 +213,7 @@ pub fn now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// Apply one queue change and log it (`herdsman queue`, and the page's ▲/▼ with `via`); the new order as shown.
+/// Apply one queue change and log it (`drover queue`, and the page's ▲/▼ with `via`); the new order as shown.
 pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<&str>) -> Result<String> {
     cfg.fleet(fleet)?;
     let events = read(&ctx.state)?;
@@ -201,7 +250,7 @@ pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<
     Ok(format!("{fleet} queue: {order}"))
 }
 
-/// `herdsman set` (and the page's model/effort dropdowns, with `via`): `wanted` is (key, new value).
+/// `drover set` (and the page's model/effort dropdowns, with `via`): `wanted` is (key, new value).
 pub fn set(
     ctx: &Ctx,
     out: &mut dyn Write,
@@ -263,7 +312,7 @@ fn with_via(mut d: Value, via: Option<&str>) -> Value {
     d
 }
 
-/// `herdsman pause|resume <fleet>` (and the page's button, with `via`): `paused = true|false`.
+/// `drover pause|resume <fleet>` (and the page's button, with `via`): `paused = true|false`.
 pub fn pause(ctx: &Ctx, out: &mut dyn Write, fleet: &str, paused: bool, via: Option<&str>) -> Result<()> {
     let text = std::fs::read_to_string(&ctx.config)?;
     let cfg = Config::parse(&text)?;
@@ -301,7 +350,7 @@ fn owner_topic(text: &str) -> bool {
     text.contains('$') || words.any(|w| OWNER_WORDS.split_whitespace().any(|o| o == w))
 }
 
-/// `herdsman ask`: log a `needs-decision` for the asking lane (`HERDSMAN_LANE`, else none), notify, print its id.
+/// `drover ask`: log a `needs-decision` for the asking lane (`DROVER_LANE`, else none), notify, print its id.
 /// #541: a lane's ask (not a conductor's) goes to its repo's conductor thread first (`routed`, no push); with none,
 /// or the conductor not reached, to the owner.
 pub fn ask(
@@ -332,7 +381,7 @@ pub fn ask(
     }
     let id = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
     // `<fleet>:<issue|->:<role>` names the newest spawn of that lane.
-    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+    let lane = std::env::var("DROVER_LANE").unwrap_or_default();
     let at = |e: &Event| {
         format!(
             "{}:{}:{}",
@@ -360,7 +409,7 @@ pub fn ask(
     }
     let ev = Event::new(ctx.now, fleet, issue, "needs-decision", d);
     emit(&ctx.state, cfg, ev.clone())?;
-    // #633: an attached cooee thread reads the ask from `/api/v1/events`; no herdsman conductor to type it into.
+    // #633: an attached cooee thread reads the ask from `/api/v1/events`; no drover conductor to type it into.
     if let Some(t) = routed.filter(|t| orchestrator::attached(&events, t).is_none()) {
         if let Err(e) = orchestrator::lane_ask(ctx, cfg, r, t, &ev) {
             orchestrator::to_owner(ctx, cfg, t, &ev, None, &format!("orchestrator not reached: {e:#}"))?;
@@ -379,7 +428,7 @@ fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
         .unwrap_or(choice)
 }
 
-/// #541: `herdsman answer --basis`, run by thread `t`'s conductor: answered `by: conductor-<t>` only if the ask is a
+/// #541: `drover answer --basis`, run by thread `t`'s conductor: answered `by: conductor-<t>` only if the ask is a
 /// lane ask on its repo, names no owner topic, and `basis` quotes the issue's spec (3 words or more, verbatim) or
 /// names an answered decision; else `OWNER_ASK`, and a lane ask on its repo is put to the owner in the thread.
 pub fn orchestrator_answer(
@@ -440,7 +489,7 @@ pub fn orchestrator_answer(
     )
 }
 
-/// #817: `herdsman extend` by thread `t`'s orchestrator: the owner's `typed` line, else its extend ask answered on `basis`.
+/// #817: `drover extend` by thread `t`'s orchestrator: the owner's `typed` line, else its extend ask answered on `basis`.
 #[allow(clippy::too_many_arguments)]
 pub fn orchestrator_extend(
     ctx: &Ctx,
@@ -490,7 +539,7 @@ pub fn orchestrator_extend(
 /// #584: who a typed answer is by.
 pub(crate) const TYPED: &str = "owner (typed)";
 
-/// #584: `herdsman answer --typed <line>`: the owner's words, accepted only when `line` is the owner's message in the
+/// #584: `drover answer --typed <line>`: the owner's words, accepted only when `line` is the owner's message in the
 /// ask's thread (its own, or the one its lane ask was put to the owner in) after the ask; else `NOT_TYPED`.
 pub fn answer_typed(
     ctx: &Ctx,
@@ -553,7 +602,7 @@ pub fn answer_typed(
         .map_or(Ok(()), |(n, note)| amend::amend(ctx, cfg, r, out, (fleet, n), id, note))
 }
 
-/// #584: `herdsman ask withdraw`: the ask's own thread's orchestrator (`by`) closes an ask it replaced (`for`).
+/// #584: `drover ask withdraw`: the ask's own thread's orchestrator (`by`) closes an ask it replaced (`for`).
 pub fn withdraw(
     ctx: &Ctx,
     cfg: &Config,
@@ -590,7 +639,7 @@ pub fn withdraw(
     Ok(writeln!(out, "{fleet} {id}: withdrawn{to}")?)
 }
 
-/// `herdsman answer` (and the page's needs-you card, with `via`): log the decision, prompt the asking agent.
+/// `drover answer` (and the page's needs-you card, with `via`): log the decision, prompt the asking agent.
 pub fn answer(
     ctx: &Ctx,
     cfg: &Config,
@@ -785,7 +834,7 @@ pub fn undelivered<'a>(events: &'a [Event], fleet: &str) -> Vec<&'a Event> {
     last.filter(|e| e.kind == "answer-undelivered").collect()
 }
 
-/// `herdsman asks`: the open asks (`all`: closed ones too, with why), oldest first, with age.
+/// `drover asks`: the open asks (`all`: closed ones too, with why), oldest first, with age.
 pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, all: bool) -> Result<()> {
     let events = events::shared(&ctx.state)?; // #632: one ask index for every row
     let shown = |e: &&Event| fleet.is_none_or(|f| f == e.fleet) && (all || events::closed(&events, e).is_none());

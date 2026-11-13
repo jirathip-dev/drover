@@ -2,8 +2,8 @@
 //! the PR, never merged twice; the same kick id is driven once.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, fold, read, Event};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
@@ -45,7 +45,7 @@ impl Runner for Hooked<'_> {
     }
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -101,7 +101,7 @@ fn two_passes_racing_the_same_spawn_start_it_once_and_the_other_skips() {
     );
 }
 
-fn ready(name: &str) -> herdsman::Ctx {
+fn ready(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
     append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();

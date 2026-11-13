@@ -52,12 +52,12 @@ fn config_show_lists_every_limit_and_docs_table_matches() {
     let (code, out) = run(&c, &Fake::default(), &["config", "show"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("db_busy_secs = 7  # the SQLite busy timeout\n"), "{out}");
-    let fields = toml::Table::try_from(herdsman::config::Limits::default()).unwrap();
+    let fields = toml::Table::try_from(drover::config::Limits::default()).unwrap();
     let shown: Vec<&str> = out.lines().filter_map(|l| l.split_once(" = ").map(|p| p.0)).collect();
     for k in fields.keys() {
         assert!(shown.contains(&k.as_str()), "`config show` lacks {k}: {out}");
     }
-    assert_eq!(shown.len(), herdsman::config::LIMIT_DOCS.len());
+    assert_eq!(shown.len(), drover::config::LIMIT_DOCS.len());
     let docs = std::fs::read_to_string(root().join("docs/config.md")).unwrap();
     let c = ctx(&tmpdir("limits-defaults"), "");
     let (_, defaults) = run(&c, &Fake::default(), &["config", "show"]);

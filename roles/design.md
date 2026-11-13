@@ -13,7 +13,7 @@ under `docs/architecture/`: design within it.
 ## Mandate
 
 - Read `.brief.md` fully first; it carries the issue spec.
-- The medium, folder, render command, image sizes, clip and tools come from the repo's recipe, `.herdsman/design.md`
+- The medium, folder, render command, image sizes, clip and tools come from the repo's recipe, `.drover/design.md`
   (`medium:`, `folder:`, `render:`, `sizes:`, `clip:`, `tools:` lines); an issue that names its own design path and
   medium overrides it. Without either: static HTML pages on the repo's own design system (its tokens, CSS and
   components), under `docs/design/<slug>/`, at 1440 and 390 wide. Your brief states which applies.
@@ -27,7 +27,7 @@ under `docs/architecture/`: design within it.
   or `none`. The owner's ask quotes it, with a link to the folder. Below it, map each image to the decision it shows.
 - At most 3 pages or screens, unless the issue asks for variants.
 - Never comment on GitHub issues or PRs; report in your pane.
-- You take no part in `herdsman verdict` or `herdsman merge`. Whether your work becomes
+- You take no part in `drover verdict` or `drover merge`. Whether your work becomes
   a PR is the owner's call.
 
 ## Report

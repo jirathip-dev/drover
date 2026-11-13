@@ -1,10 +1,10 @@
 //! #58 amendment B: one terminal-style control system. The `tests/ui/audit.js` console audit on every
 //! screen (Queue with rows open, a fleet's [config] in System, Lanes, System's Hosts & health and Activity, the sheet,
-//! Herd): zero outliers. 390 px screenshots go to `$HERDSMAN_SNAPSHOTS`.
+//! Herd): zero outliers. 390 px screenshots go to `$DROVER_SNAPSHOTS`.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -119,7 +119,7 @@ fn every_control_passes_the_audit_at_390px() {
             + [...c.querySelectorAll('pre, .blk')].filter(e => e.scrollWidth > e.clientWidth).length, \
             [...c.querySelectorAll('*')].filter(e => e.childNodes.length && [...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim()) && !['11px', '13px'].includes(getComputedStyle(e).fontSize)).length, c.querySelectorAll('.blk, .qs').length, c.querySelectorAll('.blk[open]').length)";
         let js = format!("{stub}; {audit}; {then}; window.measure = [audit('{root}')]; tab('{tab}'); {then}; {fit}");
-        let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
+        let png = std::env::var("DROVER_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("{name}.png"))
         });
         let o = webview()
@@ -189,7 +189,7 @@ fn closing_a_sheet_never_repaints_the_page() {
         ),
         ("legend", "queue", "legend()", "close()"),
     ] {
-        let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(file.with_file_name(format!("close-{name}.png")), |p| {
+        let png = std::env::var("DROVER_SNAPSHOTS").map_or(file.with_file_name(format!("close-{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("close-{name}.png"))
         });
         let o = webview()
@@ -248,11 +248,11 @@ fn the_first_paint_is_the_stored_tab_and_the_settled_layout() {
     let measure = "window.measure = [...['#queue', '#lanes', '#chat', 'header .qhelp'].map(s => getComputedStyle(document.querySelector(s)).display === 'none' ? 0 : 1), \
         ...[...document.querySelectorAll('details.q')].flatMap(d => [d.querySelector('summary').getBoundingClientRect().height, d.querySelector('summary>span').getBoundingClientRect().width])]";
     let shot = |tab: &str, frame: &str, file: &std::path::Path| {
-        let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("first-{tab}-{frame}.png")), |p| {
+        let png = std::env::var("DROVER_SNAPSHOTS").map_or(d.join(format!("first-{tab}-{frame}.png")), |p| {
             std::path::Path::new(&p).join(format!("first-{tab}-{frame}.png"))
         });
         let o = webview()
-            .env("HERDSMAN_TAB", tab)
+            .env("DROVER_TAB", tab)
             .args([
                 file.to_str().unwrap(),
                 "390",

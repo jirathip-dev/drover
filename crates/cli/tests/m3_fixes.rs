@@ -2,11 +2,11 @@
 //! #17 6(b): notifiers run without the lane's HERMES_* environment.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 use std::process::Command;
 
-fn merged_13(c: &herdsman::Ctx) {
+fn merged_13(c: &drover::Ctx) {
     let e = |ts, kind: &str, d| append(&c.state, &Event::new(ts, "sendmeter", Some(13), kind, d)).unwrap();
     e(
         10,
@@ -81,7 +81,7 @@ fn notifier_runs_without_lane_hermes_env() {
         sink.display()
     );
     std::fs::write(d.join("fleet.toml"), cfg).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_herdsman"))
+    let out = Command::new(env!("CARGO_BIN_EXE_drover"))
         .args(["set", "sendmeter", "impl", "--harness", "claude"])
         .env("FLEET_CONFIG", d.join("fleet.toml"))
         .env("FLEET_STATE", d.join("state/events.jsonl"))

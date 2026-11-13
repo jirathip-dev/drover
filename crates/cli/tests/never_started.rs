@@ -1,6 +1,6 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::{json, Value};
 use std::rc::Rc;
 
@@ -12,7 +12,7 @@ fn sh() -> Rc<FakeShed> {
     SHED.with(Rc::clone)
 }
 
-fn ctx(dir: &std::path::Path, config: &str) -> herdsman::Ctx {
+fn ctx(dir: &std::path::Path, config: &str) -> drover::Ctx {
     let c = common::ctx(dir, config);
     sh().attach(&c);
     c
@@ -22,7 +22,7 @@ fn started(name: &str) -> bool {
     sh().all("run").iter().any(|p| p["name"] == name)
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
@@ -39,11 +39,11 @@ fn fake(level: &str) -> Fake {
         .reply("kill -0", "")
 }
 
-fn spawns(c: &herdsman::Ctx) -> usize {
+fn spawns(c: &drover::Ctx) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count()
 }
 
-fn stuck(name: &str) -> herdsman::Ctx {
+fn stuck(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let (code, out) = run(&c, &fake("4"), &["drive"]);
@@ -67,7 +67,7 @@ fn a_granted_extend_on_a_never_started_lane_spawns_it_once_the_host_admits() {
     assert_eq!(spawns(&c), 1, "{out}");
 }
 
-fn used(name: &str) -> herdsman::Ctx {
+fn used(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "workspace": "", "runtime": "shed", "branch": "issue-12"});
@@ -84,10 +84,10 @@ fn used(name: &str) -> herdsman::Ctx {
     c
 }
 
-fn card(c: &herdsman::Ctx) -> Value {
+fn card(c: &drover::Ctx) -> Value {
     let r = fake("1");
     let on = sh().on(&r);
-    let s = herdsman::serve::Server::new(c, &on, Some("127.0.0.1:7777".into()));
+    let s = drover::serve::Server::new(c, &on, Some("127.0.0.1:7777".into()));
     let res = s.respond("GET /screens/cards HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now);
     let res = String::from_utf8_lossy(&res).into_owned();
     let cards: Value = serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap();
@@ -112,7 +112,7 @@ fn the_card_offers_start_lane_only_for_a_lane_that_never_ran() {
 
 #[test]
 fn waiting_names_the_card_or_the_load_never_a_question_mark() {
-    let waiting = |c: &herdsman::Ctx| {
+    let waiting = |c: &drover::Ctx| {
         let (code, w) = run(c, &fake("4"), &["waiting", "sendmeter"]);
         assert!(code == 0 && !w.contains("→ ?"), "{w}");
         w
@@ -120,11 +120,11 @@ fn waiting_names_the_card_or_the_load_never_a_question_mark() {
     let c = stuck("never-started-waiting");
     let w = waiting(&c);
     let card = "sendmeter #12 owner: needs-human: your card's [start lane]";
-    assert!(w.contains(card) && w.contains("→ herdsman extend sendmeter 12"), "{w}");
+    assert!(w.contains(card) && w.contains("→ drover extend sendmeter 12"), "{w}");
     let u = used("used-rounds-waiting");
     let w = waiting(&u);
     let card = "sendmeter #12 owner: needs-human: your card's [one more round]";
-    assert!(w.contains(card) && w.contains("→ herdsman extend sendmeter 12"), "{w}");
+    assert!(w.contains(card) && w.contains("→ drover extend sendmeter 12"), "{w}");
 
     assert_eq!(run(&c, &fake("4"), &["extend", "sendmeter", "12"]).0, 0);
     let w = waiting(&c);

@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, Event};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::time::Duration;
 
@@ -47,7 +47,7 @@ impl Runner for Dead {
     }
 }
 
-fn setup(name: &str, air_cfg: &str) -> (herdsman::Ctx, FakeShed) {
+fn setup(name: &str, air_cfg: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n{air_cfg}");
     let c = ctx(&tmpdir(name), &toml);
@@ -131,7 +131,7 @@ fn a_host_whose_ssh_never_connects_with_50_worktrees_costs_the_tick_under_a_minu
 fn a_reachable_off_host_is_still_cleaned_and_killed_when_asked_directly() {
     let (c, _sh) = setup("dead-off-asked", "enabled = false\n");
     let wt = "/Users/me/.herdr/worktrees/sendmeter/issue-100";
-    let test_e = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- 'sh' '-c' 'test -e";
+    let test_e = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- 'sh' '-c' 'test -e";
     let air = FakeShed::new();
     let on_air = |f| OverSsh {
         f,
@@ -142,7 +142,7 @@ fn a_reachable_off_host_is_still_cleaned_and_killed_when_asked_directly() {
     assert_eq!(code, 0, "{out}");
     assert!(r.called(&format!("{test_e} \"$1\"' 'sh' '{wt}'")), "{out}");
     assert!(out.contains(&format!("would save air:{wt}")), "{out}");
-    let git = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- 'git'";
+    let git = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- 'git'";
     let r = main_host().reply(test_e, "").reply(git, "0\n");
     let (code, out) = run(&c, &on_air(&r), &["kill", "sendmeter-impl-100"]);
     assert_eq!(code, 0, "{out}");

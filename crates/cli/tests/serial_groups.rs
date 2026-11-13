@@ -2,8 +2,8 @@
 //! until the holder merges (then an update round), fixed-order slots over two groups, grandfathering and the wording.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, fold, read, Event};
+use drover::config::Config;
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
 const DB_CI: &str = r#"[[fleet.sendmeter.serial]]
@@ -20,11 +20,11 @@ paths = [".github/workflows/ci.yml", "scripts/lib/ci*", "scripts/check-*"]
 fn config(keys: &str, tables: &str) -> String {
     CONFIG.replace(
         "integration = \"staging\"   # never main",
-        &format!("integration = \"staging\"\ndriver = \"herdsman\"\n{keys}\n{tables}"),
+        &format!("integration = \"staging\"\ndriver = \"drover\"\n{keys}\n{tables}"),
     )
 }
 
-fn sctx(name: &str, cfg: &str) -> (herdsman::Ctx, FakeShed) {
+fn sctx(name: &str, cfg: &str) -> (drover::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), cfg);
     let sh = FakeShed::new();
     sh.attach(&c);
@@ -35,12 +35,12 @@ fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
 
-fn ev(c: &herdsman::Ctx, n: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, n: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(10, "sendmeter", Some(n), kind, d)).unwrap();
 }
 
 /// An impl lane of `n` logged as spawned, in a real worktree dir.
-fn lane(c: &herdsman::Ctx, n: u64) {
+fn lane(c: &drover::Ctx, n: u64) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     let agent = format!("sendmeter-impl-{n}");
@@ -75,7 +75,7 @@ fn fake(prs: &[(u64, &str)]) -> Fake {
     f
 }
 
-fn drive(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
+fn drive(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
     let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -88,7 +88,7 @@ fn drive(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
 }
 
 /// `kind` events of `n`, as `group` (`holder`).
-fn logged(c: &herdsman::Ctx, n: u64, kind: &str) -> Vec<String> {
+fn logged(c: &drover::Ctx, n: u64, kind: &str) -> Vec<String> {
     let all = read(&c.state).unwrap();
     let mine = all.iter().filter(|e| e.kind == kind && e.issue == Some(n));
     mine.map(|e| match e.data.get("holder") {
@@ -98,11 +98,11 @@ fn logged(c: &herdsman::Ctx, n: u64, kind: &str) -> Vec<String> {
     .collect()
 }
 
-fn queue_groups(c: &herdsman::Ctx, n: u64) -> Vec<String> {
+fn queue_groups(c: &drover::Ctx, n: u64) -> Vec<String> {
     let cfg = Config::load(&c.config).unwrap();
     let ev = read(&c.state).unwrap();
-    let q = herdsman::queue::replay(&ev, "sendmeter");
-    let gs = herdsman::queue::groups(&q, &ev, &cfg.fleet["sendmeter"], "sendmeter", n);
+    let q = drover::queue::replay(&ev, "sendmeter");
+    let gs = drover::queue::groups(&q, &ev, &cfg.fleet["sendmeter"], "sendmeter", n);
     gs.iter().map(|g| g.name.clone()).collect()
 }
 

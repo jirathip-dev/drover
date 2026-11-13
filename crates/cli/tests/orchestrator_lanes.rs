@@ -1,29 +1,28 @@
 //! #422: the Lanes tab shows each thread's conductor as a known lane of the thread's repo (role `conductor`), first in
 //! its subgroup, named by the thread, `asleep` (dimmed) once its pane closed; an `all` thread's in `all repos`; a tap
-//! opens the thread; Others keeps only agents herdsman did not start.
+//! opens the thread; Others keeps only agents drover did not start.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const T: u64 = 1_000_000;
 
 /// The log: impl #5 (newer than the conductors), threads t6 (awake), t7 (`all`, awake) and t8 (asleep), plus t9
-fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
-    let cfg = format!(
-        "{CONFIG}\n[fleet.herdsman]\nrepo = \"o/herdsman\"\nlocal = \"/p/herdsman\"\nintegration = \"staging\"\n"
-    );
+fn setup(name: &str) -> (drover::Ctx, FakeShed) {
+    let cfg =
+        format!("{CONFIG}\n[fleet.drover]\nrepo = \"o/drover\"\nlocal = \"/p/drover\"\nintegration = \"staging\"\n");
     let c = ctx(&tmpdir(name), &cfg);
     let ev = |ts: u64, fleet: &str, issue: Option<u64>, kind: &str, d: Value| {
         append(&c.state, &Event::new(ts, fleet, issue, kind, d)).unwrap()
     };
-    let spawn = json!({"role": "impl", "agent": "herdsman-impl-5", "harness": "claude", "model": "sonnet"});
-    ev(900_500, "herdsman", Some(5), "spawn", spawn);
+    let spawn = json!({"role": "impl", "agent": "drover-impl-5", "harness": "claude", "model": "sonnet"});
+    ev(900_500, "drover", Some(5), "spawn", spawn);
     for (id, fleet, title, ts) in [
-        ("t6", "herdsman", "Orchestrator-run design lanes", 900_200),
+        ("t6", "drover", "Orchestrator-run design lanes", 900_200),
         ("t7", "all", "Every repo", 900_100),
-        ("t8", "herdsman", "Old chat", 900_000),
+        ("t8", "drover", "Old chat", 900_000),
     ] {
         ev(ts, fleet, None, "thread-new", json!({"thread": id, "title": title}));
         let agent = format!("orchestrator-{id}");
@@ -32,14 +31,14 @@ fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     }
     ev(
         900_300,
-        "herdsman",
+        "drover",
         None,
         "orchestrator-sleep",
         json!({"thread": "t8", "agent": "orchestrator-t8", "why": "idle"}),
     );
     ev(
         900_300,
-        "herdsman",
+        "drover",
         None,
         "thread-new",
         json!({"thread": "t9", "title": "Never started"}),
@@ -47,7 +46,7 @@ fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     let b = FakeShed::new();
     b.attach(&c);
     for (name, status) in [
-        ("herdsman-impl-5", "idle"),
+        ("drover-impl-5", "idle"),
         ("orchestrator-t6", "idle"),
         ("orchestrator-t7", "working"),
         ("orchestrator-t99", "idle"),
@@ -65,11 +64,11 @@ fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
 #[test]
 fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed() {
     let (c, b) = setup("orchestrator-lanes");
-    let agents = herdsman::herdr::agents(&b.on(&Fake::default())).unwrap();
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let agents = drover::herdr::agents(&b.on(&Fake::default())).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let events = read(&c.state).unwrap();
-    let st = herdsman::events::fold(&events);
-    let lanes = herdsman::lanes::join(
+    let st = drover::events::fold(&events);
+    let lanes = drover::lanes::join(
         &cfg,
         &Fake::default(),
         &c.worktrees,
@@ -78,7 +77,7 @@ fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_clos
         &agents,
         &Default::default(),
     );
-    let row = |l: &herdsman::lanes::Lane| {
+    let row = |l: &drover::lanes::Lane| {
         let s = |v: &Option<String>| v.clone().unwrap_or_default();
         (
             s(&l.fleet),
@@ -97,9 +96,9 @@ fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_clos
     assert_eq!(
         got,
         [
-            r("herdsman", "herdsman-impl-5", "impl", "idle", "sonnet", "", Some(5)),
+            r("drover", "drover-impl-5", "impl", "idle", "sonnet", "", Some(5)),
             r(
-                "herdsman",
+                "drover",
                 "Orchestrator-run design lanes · t6",
                 "orchestrator",
                 "idle",
@@ -108,22 +107,14 @@ fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_clos
                 None
             ),
             r("all", "Every repo · t7", "orchestrator", "working", "opus", "t7", None),
-            // A `conductor-<id>` name with no such thread in the log is no lane of herdsman's.
+            // A `conductor-<id>` name with no such thread in the log is no lane of drover's.
             r("", "orchestrator-t99", "other", "idle", "", "", None),
             r("", "side", "other", "idle", "", "", None),
-            r(
-                "herdsman",
-                "Old chat · t8",
-                "orchestrator",
-                "asleep",
-                "opus",
-                "t8",
-                None
-            ),
+            r("drover", "Old chat · t8", "orchestrator", "asleep", "opus", "t8", None),
         ]
     );
-    // Grouped: the herdsman subgroup opens with its conductors (newest first), then the impl that changed later.
-    let groups = herdsman::lanes::group(&lanes, |l| l.since);
+    // Grouped: the drover subgroup opens with its conductors (newest first), then the impl that changed later.
+    let groups = drover::lanes::group(&lanes, |l| l.since);
     let names = |sec: &str, f: &str| -> Vec<String> {
         let subs = &groups.iter().find(|g| g.0 == sec).unwrap().1;
         subs.iter()
@@ -142,10 +133,10 @@ fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_clos
         .iter()
         .map(|s| s.0.as_str())
         .collect();
-    assert_eq!(idle, ["herdsman", "Others"]);
+    assert_eq!(idle, ["drover", "Others"]);
     assert_eq!(
-        names("idle", "herdsman"),
-        ["Orchestrator-run design lanes · t6", "Old chat · t8", "herdsman-impl-5"]
+        names("idle", "drover"),
+        ["Orchestrator-run design lanes · t6", "Old chat · t8", "drover-impl-5"]
     );
     assert_eq!(names("working", "all repos"), ["Every repo · t7"]);
     assert_eq!(names("idle", "Others"), ["orchestrator-t99", "side"]);
@@ -166,9 +157,9 @@ fn the_lanes_tab_renders_orchestrator_rows_with_their_thread() {
     );
     let at = |s: &str| page.find(s).unwrap_or_else(|| panic!("{s} missing"));
     let idle = &page[at("<h2><span class=a>idle (")..];
-    let herd = &idle[idle.find("<h3>herdsman (3)</h3>").unwrap()..];
+    let herd = &idle[idle.find("<h3>drover (3)</h3>").unwrap()..];
     assert!(
-        herd.starts_with("<h3>herdsman (3)</h3><div class=lane data-agent=\"Orchestrator-run design lanes · t6\" data-role=orchestrator data-thread=t6>"),
+        herd.starts_with("<h3>drover (3)</h3><div class=lane data-agent=\"Orchestrator-run design lanes · t6\" data-role=orchestrator data-thread=t6>"),
         "{herd}"
     );
     assert!(

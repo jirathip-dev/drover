@@ -1,8 +1,8 @@
-//! #376: lanes herdsman never logged: `spawn-started` before the harness starts, and each drive step adopts a
+//! #376: lanes drover never logged: `spawn-started` before the harness starts, and each drive step adopts a
 //! lane-shaped orphan pane of a tracked issue (its verdict then recorded as any lane's), closes a stale one, and leaves
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 use std::path::PathBuf;
 
@@ -10,7 +10,7 @@ fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
@@ -20,7 +20,7 @@ fn pr(head: &str) -> String {
         .to_string()
 }
 
-fn shed_ctx(name: &str, extra: &str) -> (herdsman::Ctx, FakeShed) {
+fn shed_ctx(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
     let sh = FakeShed::new();
     let c = ctx(&tmpdir(name), &sh.config(&format!("{CONFIG}{extra}")));
     (c, sh)
@@ -40,18 +40,18 @@ fn fake() -> Fake {
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
 }
 
-fn fast(c: &herdsman::Ctx, r: &dyn herdsman::runner::Runner) -> String {
+fn fast(c: &drover::Ctx, r: &dyn drover::runner::Runner) -> String {
     let (code, out) = run(c, r, &["drive", "--fast"]);
     assert_eq!(code, 0, "{out}");
     out
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
 /// #12's impl lane, logged, and a review worktree no spawn logged holding `verdict`.
-fn review(c: &herdsman::Ctx, verdict: &str) -> PathBuf {
+fn review(c: &drover::Ctx, verdict: &str) -> PathBuf {
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "worktree": wt,
@@ -75,7 +75,7 @@ fn spawn_logs_spawn_started_before_the_harness_starts() {
         sh.sock.display()
     );
     let mut c = ctx(&tmpdir("orphan-started"), &cfg);
-    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let f = fake()
         .reply("which shed", "/opt/shed/bin/shed\n")
@@ -279,7 +279,7 @@ fn a_remote_orphan_is_adopted_on_its_host() {
 }
 
 /// before it starts the harness (its `spawn` comes once the prompt is confirmed, after this pass).
-struct Racing<'a>(&'a OverSsh<'a>, &'a herdsman::Ctx, &'a str);
+struct Racing<'a>(&'a OverSsh<'a>, &'a drover::Ctx, &'a str);
 
 impl Racing<'_> {
     fn race(&self, line: &str, input: &str) {
@@ -292,11 +292,11 @@ impl Racing<'_> {
     }
 }
 
-impl herdsman::runner::Runner for Racing<'_> {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for Racing<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         self.0.run(prog, args)
     }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
         self.race(&format!("{prog} {}", args.join(" ")), input);
         self.0.run_in(prog, args, input)
     }

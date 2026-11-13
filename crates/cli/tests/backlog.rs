@@ -5,8 +5,8 @@
 //! is gate 2's `queue/queue-backlog` (docs/ui.md).
 mod common;
 use common::*;
-use herdsman::events::read;
-use herdsman::serve::Server;
+use drover::events::read;
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -50,7 +50,7 @@ fn mtime(page: &str) -> String {
     page[i..].chars().take_while(char::is_ascii_digit).collect()
 }
 
-fn cache(c: &herdsman::Ctx) -> Value {
+fn cache(c: &drover::Ctx) -> Value {
     let p = c.state.with_file_name("cache").join("backlog-sendmeter-0.json");
     serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
 }
@@ -169,14 +169,14 @@ fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
     let _sh = FakeShed::new();
     _sh.attach(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "20"]).0, 0);
-    let ev = herdsman::events::Event::new(
+    let ev = drover::events::Event::new(
         1,
         "sendmeter",
         Some(21),
         "spawn",
         json!({"agent": "sendmeter-impl-21", "role": "impl"}),
     );
-    herdsman::events::append(&c.state, &ev).unwrap();
+    drover::events::append(&c.state, &ev).unwrap();
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "", NOW);
@@ -335,7 +335,7 @@ fn the_backlog_draws_on_a_fresh_load_and_after_a_live_patch() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &Fake::default(), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, false));
     let mut s = std::net::TcpStream::connect(addr).unwrap();
     std::io::Write::write_all(&mut s, format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes()).unwrap();
     let mut head = [0; 160];
@@ -354,7 +354,7 @@ fn the_backlog_draws_on_a_fresh_load_and_after_a_live_patch() {
     let line = |n: u64, t: u64| {
         json!({"ts": t, "fleet": "sendmeter", "type": "queue", "op": "add", "issues": [n]}).to_string()
     };
-    let now = herdsman::now();
+    let now = drover::now();
     let o = std::process::Command::new("node")
         .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/ui/live.mjs"))
         .args([

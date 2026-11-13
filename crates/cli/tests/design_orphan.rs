@@ -3,35 +3,35 @@
 //! that way before the fix is put back.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
 const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
 const HEAD: &str = "5bf04afe07dae022b35684353f2040f9a37d33a6";
 
-fn sctx(name: &str, cfg: &str) -> (herdsman::Ctx, FakeShed) {
+fn sctx(name: &str, cfg: &str) -> (drover::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), cfg);
     let sh = FakeShed::new();
     sh.attach(&c);
     (c, sh)
 }
 
-fn ev(c: &herdsman::Ctx, n: u64, ts: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, n: u64, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(n), kind, d)).unwrap();
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn state(c: &herdsman::Ctx, n: u64) -> String {
+fn state(c: &drover::Ctx, n: u64) -> String {
     fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), n)]
         .state
         .clone()
 }
 
 /// #n built, reviewed (the second review's prompt never confirmed, as #404's), FAILed at HEAD; its impl lane closed.
-fn failed(c: &herdsman::Ctx, n: u64) {
+fn failed(c: &drover::Ctx, n: u64) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("sendmeter-impl-{n}"), "worktree": wt,
         "branch": format!("issue-{n}")});
@@ -63,7 +63,7 @@ fn fake(pressure: &str) -> Fake {
         .reply("gh pr view", &pr.to_string())
 }
 
-fn waiting(c: &herdsman::Ctx, r: &Fake, n: u64) -> serde_json::Value {
+fn waiting(c: &drover::Ctx, r: &Fake, n: u64) -> serde_json::Value {
     let (code, j) = run(c, r, &["waiting", "--json"]);
     assert_eq!(code, 0, "{j}");
     let all: serde_json::Value = serde_json::from_str(&j).unwrap();
@@ -108,7 +108,7 @@ fn a_finished_design_lane_is_adopted_once_and_never_hides_the_fix_round() {
     assert!(w["what"].as_str().is_some_and(|x| x.starts_with(fix)), "{w}");
     assert_eq!(
         w["next_cmd"].as_str(),
-        Some("herdsman spawn sendmeter 12 impl --supersede"),
+        Some("drover spawn sendmeter 12 impl --supersede"),
         "{w}"
     );
 }

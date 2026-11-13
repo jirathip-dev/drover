@@ -1,22 +1,22 @@
 //! AC5: spawn launches the right harness with the synced profile.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
-use herdsman::spawn::lane_port;
+use drover::events::{append, fold, read, Event};
+use drover::spawn::lane_port;
 use serde_json::{json, Value};
 
 /// #187: issue 12's impl lane port with nothing taken.
 fn port12() -> String {
-    format!("HERDSMAN_PORT={}", lane_port(None, "sendmeter/issue-12", &[]))
+    format!("DROVER_PORT={}", lane_port(None, "sendmeter/issue-12", &[]))
 }
 
-fn plan(c: &herdsman::Ctx, r: &Fake, role: &str) -> Value {
+fn plan(c: &drover::Ctx, r: &Fake, role: &str) -> Value {
     let (code, out) = run(c, r, &["spawn", "sendmeter", "12", role, "--dry-run", "--json"]);
     assert_eq!(code, 0, "{out}");
     serde_json::from_str(&out).unwrap()
 }
 
-fn on_shed(c: &herdsman::Ctx) -> FakeShed {
+fn on_shed(c: &drover::Ctx) -> FakeShed {
     let sh = FakeShed::new();
     sh.attach(c);
     sh
@@ -85,7 +85,7 @@ fn claude_role_dry_run_uses_synced_profile() {
         export(&p),
         [
             "export",
-            "HERDSMAN_LANE='sendmeter:12:impl'",
+            "DROVER_LANE='sendmeter:12:impl'",
             &port12(),
             // #248: no updater, telemetry or other background traffic in a Claude lane.
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
@@ -186,15 +186,15 @@ fn profiles_turn_attribution_off_and_role_md_has_the_rule() {
     let role = std::fs::read_to_string(dir.join("fleet-impl/role.md")).unwrap();
     assert!(role.contains("No AI co-author or 'generated with' trailers in commits or PR bodies"));
     assert!(role.contains("## For humans"));
-    assert!(herdsman::spawn::role_prompt("rev").contains("## For humans"));
+    assert!(drover::spawn::role_prompt("rev").contains("## For humans"));
 }
 
 /// #226: a reviewer never FAILs on an older commit's trailer; the fix would be a forbidden force-push.
 #[test]
 fn rev_role_flags_new_commit_trailers_only() {
-    let rev = herdsman::spawn::role_prompt("rev");
+    let rev = drover::spawn::role_prompt("rev");
     assert!(rev.contains("new commits only, never force-push"), "{rev}");
-    assert!(herdsman::spawn::role_prompt("impl").contains("never rewrite history or force-push"));
+    assert!(drover::spawn::role_prompt("impl").contains("never rewrite history or force-push"));
 }
 
 /// #320: a predicted conflict is information, not a hold; no generated prompt tells a lane to wait for a merge.
@@ -203,7 +203,7 @@ fn rev_role_flags_new_commit_trailers_only() {
 fn cap_asks_only_when_your_own_pr_crosses() {
     let d = tmpdir("help-429");
     let (_, help) = run(&ctx(&d, CONFIG), &Fake::default(), &["help", "--agent"]);
-    let impl_ = herdsman::spawn::role_prompt("impl").replace("\n  ", " ");
+    let impl_ = drover::spawn::role_prompt("impl").replace("\n  ", " ");
     for t in [impl_.as_str(), help.as_str()] {
         for w in [
             "The cap in `ci/cap.toml` is a total for the repo",
@@ -212,7 +212,7 @@ fn cap_asks_only_when_your_own_pr_crosses() {
             "A `STAGING_WOULD_BREAK` from the cap after another merge is a fix round: trim, or ask under the same rule.",
             // #668: one conductor-filed raise for the queue, never a lane's own edit.
             "Never edit `ci/cap.toml` (the hook refuses it",
-            "`herdsman cap <fleet>`'s queue-wide view",
+            "`drover cap <fleet>`'s queue-wide view",
             "in one orchestrator-filed issue (recommended), or trim.",
         ] {
             assert!(t.contains(w), "{w}");
@@ -224,14 +224,14 @@ fn cap_asks_only_when_your_own_pr_crosses() {
 fn conflict_predicted_is_not_a_hold() {
     let d = tmpdir("help-320");
     let (_, help) = run(&ctx(&d, CONFIG), &Fake::default(), &["help", "--agent"]);
-    let impl_ = herdsman::spawn::role_prompt("impl");
+    let impl_ = drover::spawn::role_prompt("impl");
     for t in [impl_, help.as_str()] {
         assert!(t.contains("`conflict-predicted` note means another open PR touches the same files"));
-        assert!(t.contains("herdsman gives you an update round"));
+        assert!(t.contains("drover gives you an update round"));
     }
     assert!(impl_.contains("Don't wait for it.") && help.contains("don't wait for it"));
     for t in ["impl", "rev", "design"]
-        .map(herdsman::spawn::role_prompt)
+        .map(drover::spawn::role_prompt)
         .into_iter()
         .chain([help.as_str()])
     {
@@ -239,13 +239,13 @@ fn conflict_predicted_is_not_a_hold() {
     }
 }
 
-/// #103: `[fleet.<n>] env` is exported into the lane's shell after HERDSMAN_LANE, `~/` expanded.
+/// #103: `[fleet.<n>] env` is exported into the lane's shell after DROVER_LANE, `~/` expanded.
 #[test]
 fn fleet_env_is_exported_into_the_lane() {
     let d = tmpdir("spawn-env");
     let cfg = CONFIG.replace(
         "[fleet.sendmeter.role.impl]",
-        "[fleet.sendmeter.env]\nCARGO_TARGET_DIR = \"~/.cache/herdsman/target/sendmeter\"\nnpm_config_cache = \"/c/npm\"\n\n[fleet.sendmeter.role.impl]",
+        "[fleet.sendmeter.env]\nCARGO_TARGET_DIR = \"~/.cache/drover/target/sendmeter\"\nnpm_config_cache = \"/c/npm\"\n\n[fleet.sendmeter.role.impl]",
     );
     let c = ctx(&d, &cfg);
     let _sh = on_shed(&c);
@@ -255,9 +255,9 @@ fn fleet_env_is_exported_into_the_lane() {
         export(&p),
         [
             "export".to_string(),
-            "HERDSMAN_LANE='sendmeter:12:impl'".into(),
+            "DROVER_LANE='sendmeter:12:impl'".into(),
             port12(),
-            format!("CARGO_TARGET_DIR='{home}/.cache/herdsman/target/sendmeter'"),
+            format!("CARGO_TARGET_DIR='{home}/.cache/drover/target/sendmeter'"),
             "npm_config_cache='/c/npm'".into(),
         ]
     );
@@ -313,25 +313,25 @@ fn each_lane_gets_a_private_scratch_dir_under_its_roots_build_folder() {
         &(CONFIG.to_string() + "\n[hosts.mini]\nroot = \"/c\"\n"),
     );
     let _sh = on_shed(&c);
-    let scratch = |c: &herdsman::Ctx, role: &str| {
+    let scratch = |c: &drover::Ctx, role: &str| {
         raw_export(&plan(c, &shed_fake(), role))
             .into_iter()
-            .find(|w| w.starts_with("HERDSMAN_SCRATCH_TARGET="))
+            .find(|w| w.starts_with("DROVER_SCRATCH_TARGET="))
     };
     assert_eq!(
         scratch(&c, "impl").as_deref(),
-        Some("HERDSMAN_SCRATCH_TARGET='/c/.build/.scratch/sendmeter-impl-12'")
+        Some("DROVER_SCRATCH_TARGET='/c/.build/.scratch/sendmeter-impl-12'")
     );
     assert_eq!(
         scratch(&c, "rev").as_deref(),
-        Some("HERDSMAN_SCRATCH_TARGET='/c/.build/.scratch/sendmeter-rev-12-r1'")
+        Some("DROVER_SCRATCH_TARGET='/c/.build/.scratch/sendmeter-rev-12-r1'")
     );
     let bare = ctx(&tmpdir("spawn-scratch-bare"), CONFIG);
     let _bare_sh = on_shed(&bare);
     let want = bare.worktrees.join(".build/.scratch/sendmeter-impl-12");
     assert_eq!(
         scratch(&bare, "impl"),
-        Some(format!("HERDSMAN_SCRATCH_TARGET='{}'", want.display()))
+        Some(format!("DROVER_SCRATCH_TARGET='{}'", want.display()))
     );
 }
 
@@ -379,12 +379,12 @@ fn lane_port_collision_takes_the_next_free_one() {
     assert_eq!(plan(&c, &shed_fake(), "impl")["port"], 14001 - mine);
 }
 
-/// #187: `$HERDSMAN_PORT` in a fleet's env expands to the lane's port.
+/// #187: `$DROVER_PORT` in a fleet's env expands to the lane's port.
 #[test]
-fn fleet_env_expands_herdsman_port() {
+fn fleet_env_expands_drover_port() {
     let cfg = CONFIG.replace(
         "[fleet.sendmeter.role.impl]",
-        "[fleet.sendmeter.env]\nPORT = \"$HERDSMAN_PORT\"\nVITE = \"http://127.0.0.1:$HERDSMAN_PORT/\"\n\n[fleet.sendmeter.role.impl]",
+        "[fleet.sendmeter.env]\nPORT = \"$DROVER_PORT\"\nVITE = \"http://127.0.0.1:$DROVER_PORT/\"\n\n[fleet.sendmeter.role.impl]",
     );
     let c = ctx(&tmpdir("spawn-env-port"), &cfg);
     let _sh = on_shed(&c);
@@ -402,7 +402,7 @@ fn lockfiles_match_needs_an_identical_lockfile() {
     let (local, wt) = (d.join("local"), d.join("wt"));
     std::fs::create_dir_all(&local).unwrap();
     std::fs::create_dir_all(&wt).unwrap();
-    let m = || herdsman::spawn::lockfiles_match(&["package-lock.json", "pnpm-lock.yaml"], &local, &wt);
+    let m = || drover::spawn::lockfiles_match(&["package-lock.json", "pnpm-lock.yaml"], &local, &wt);
     assert!(!m(), "no lockfile anywhere is no match");
     std::fs::write(local.join("package-lock.json"), "a").unwrap();
     assert!(!m(), "missing in the lane");
@@ -424,7 +424,7 @@ fn clone_build_clones_on_a_lockfile_match_and_logs_failures() {
     std::fs::write(local.join("Cargo.lock"), "a").unwrap();
     std::fs::write(wt.join("Cargo.lock"), "b").unwrap();
     let dirs = ["target".to_string(), "node_modules".into()];
-    let clone = |r: &Fake| herdsman::spawn::clone_build(r, &dirs, &local, &wt);
+    let clone = |r: &Fake| drover::spawn::clone_build(r, &dirs, &local, &wt);
     let r = Fake::default().reply("cp ", "");
     assert_eq!(clone(&r), None, "mismatch: no clone");
     assert!(!r.called("cp "));
@@ -448,7 +448,7 @@ fn clone_build_clones_on_a_lockfile_match_and_logs_failures() {
     let d = clone(&Fake::default()).unwrap();
     assert_eq!(d["dirs"], json!([]));
     assert!(d["errors"][0].as_str().unwrap().starts_with("target: "), "{d}");
-    let d = herdsman::spawn::clone_build(&r, &["targt".into()], &local, &wt).unwrap();
+    let d = drover::spawn::clone_build(&r, &["targt".into()], &local, &wt).unwrap();
     assert_eq!(d["errors"], json!(["targt: not target or node_modules"]));
     assert_eq!(r.count("cp "), 1);
 }
@@ -509,8 +509,8 @@ fn within(ok: impl Fn() -> bool) -> bool {
     ok()
 }
 
-impl herdsman::runner::Runner for Checkout<'_> {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for Checkout<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog == "git" && args.get(2..4) == Some(&["worktree".into(), "add".into()]) {
             std::fs::create_dir_all(&self.wt).unwrap();
             std::fs::write(self.wt.join("Cargo.lock"), "a").unwrap();
@@ -590,8 +590,8 @@ fn hermes_role_dry_run_kicks_prompt_after_boot() {
         export(&p),
         [
             "export".to_string(),
-            "HERDSMAN_LANE='sendmeter:12:rev'".into(),
-            format!("HERDSMAN_PORT={}", lane_port(None, "sendmeter/rev-12-r1", &[]))
+            "DROVER_LANE='sendmeter:12:rev'".into(),
+            format!("DROVER_PORT={}", lane_port(None, "sendmeter/rev-12-r1", &[]))
         ]
     );
     let start = launch(&p);
@@ -628,7 +628,7 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
     let s: Value = serde_json::from_str(&settings).unwrap();
     assert_eq!(
         s["hooks"]["PreToolUse"][0]["hooks"][0]["command"],
-        "'/opt/herdsman/bin/herdsman' hook --role impl"
+        "'/opt/drover/bin/drover' hook --role impl"
     );
     let r = shed_fake()
         .reply(&format!("git -C {} rev-list", wt.display()), "0\n")
@@ -639,7 +639,7 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
     let sent = sh.sent(LANE);
     assert!(
         sent.len() == 2
-            && sent[0].starts_with("export HERDSMAN_LANE='sendmeter:12:impl'")
+            && sent[0].starts_with("export DROVER_LANE='sendmeter:12:impl'")
             && sent[1].starts_with("exec 'claude'"),
         "{sent:?}"
     );
@@ -684,7 +684,7 @@ fn herdr_reopened_workspace_keeps_the_lane_name() {
             "herdr pane list --workspace w9",
             r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
         )
-        .reply("herdr pane run w9:p1 export HERDSMAN_LANE='sendmeter:12:impl'", "{}")
+        .reply("herdr pane run w9:p1 export DROVER_LANE='sendmeter:12:impl'", "{}")
         .reply("herdr agent start sendmeter-impl-12 --kind claude --pane w9:p1", "{}")
         .reply("herdr agent wait sendmeter-impl-12", "{}");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
@@ -733,21 +733,21 @@ fn help_agent_doc_is_short_and_complete() {
     let (code, out) = run(&c, &Fake::default(), &["help", "--agent"]);
     assert_eq!(code, 0);
     assert!(
-        out.lines().count() <= herdsman::HELP_AGENT_MAX,
+        out.lines().count() <= drover::HELP_AGENT_MAX,
         "{} lines",
         out.lines().count()
     );
     for w in [
-        "herdsman spawn",
-        "herdsman merge",
-        "herdsman verdict",
-        "herdsman set",
-        "herdsman status",
-        "herdsman profiles sync",
-        "herdsman timer install",
-        "herdsman check",
-        "herdsman clean",
-        "herdsman adopt",
+        "drover spawn",
+        "drover merge",
+        "drover verdict",
+        "drover set",
+        "drover status",
+        "drover profiles sync",
+        "drover timer install",
+        "drover check",
+        "drover clean",
+        "drover adopt",
         "--force",
         "--supersede",
         "--yes",
@@ -763,14 +763,14 @@ fn help_agent_doc_is_short_and_complete() {
         "BAD_VALUE",
         "design",
         "owner-only",
-        "herdsman stop",
-        "herdsman kill",
+        "drover stop",
+        "drover kill",
         "--lane",
         "SECRET_IN_WIP",
     ] {
         assert!(out.contains(w), "missing {w}");
     }
-    assert!(!out.contains("herdsman hook"));
+    assert!(!out.contains("drover hook"));
 }
 
 /// #2 AC1: a role's effort (or the `[limits]` default) is mapped per harness in the launch argv.
@@ -836,7 +836,7 @@ fn invalid_effort_is_refused_at_config_load() {
     ] {
         let d = tmpdir("effort-bad");
         let c = ctx(&d, &cfg);
-        let err = herdsman::config::Config::load(&c.config).unwrap_err();
+        let err = drover::config::Config::load(&c.config).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains(want), "{msg}");
         let (code, _) = run(&c, &Fake::default(), &["spawn", "sendmeter", "12", "rev", "--dry-run"]);
@@ -880,7 +880,7 @@ fn claude_dry_run_names_every_role() {
 
 #[test]
 fn lane_title_strips_prefixes_and_cuts_at_words() {
-    use herdsman::spawn::lane_title;
+    use drover::spawn::lane_title;
     let h = "synergy · impl #2840";
     assert_eq!(
         lane_title(h, "M- prefix for Mango numbers"),

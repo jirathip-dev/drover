@@ -1,9 +1,9 @@
-//! #537: `herdsman runners` over a fake recipe and a fake GitHub: the health line, revive (a token and a restart), add
+//! #537: `drover runners` over a fake recipe and a fake GitHub: the health line, revive (a token and a restart), add
 //! within the cap and refused past it (an owner ask the only way on), remove draining first, retire-local, `check`'s
 //! `runners-low` / `runners-ok` once each, and the registration token never in argv, the log or the output.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
@@ -34,7 +34,7 @@ fn on(vm: &str, tok: bool, c: &str) -> String {
     rc(tok, &format!("export C='{c}'; fakeboat exec {vm}"))
 }
 
-fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
+fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let cfg = format!(
         "{CONFIG}\n[ci_runners]\nprovider = \"fake\"\nrepo = \"o/app\"\nlabel = \"boat\"\nsize = \"large\"\nslots = 3\n\
          max_vms = 3\nusd_day = 40\nvms = [\"vm1\", \"vm2\"]\nlocal_label = \"self\"\nlocal_stop = \"stop-local\"\n"
@@ -90,12 +90,12 @@ fn fake(list: &str) -> Fake {
         .reply(&rc(true, "export C="), "ok\n")
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// Nothing herdsman wrote or ran shows the token: not the log, the output or any argv; only the VM step's stdin.
-fn no_token(c: &herdsman::Ctx, r: &Fake, out: &str) {
+/// Nothing drover wrote or ran shows the token: not the log, the output or any argv; only the VM step's stdin.
+fn no_token(c: &drover::Ctx, r: &Fake, out: &str) {
     let log = std::fs::read_to_string(c.state.with_file_name("events.db")).unwrap_or_default()
         + &serde_json::to_string(&read(&c.state).unwrap()).unwrap();
     assert!(!log.contains(TOK) && !log.contains(KEY), "{log}");
@@ -104,7 +104,7 @@ fn no_token(c: &herdsman::Ctx, r: &Fake, out: &str) {
 }
 
 /// An owner ask `id` about `question`, answered `choice` by `by`.
-fn asked(c: &herdsman::Ctx, id: &str, question: &str, choice: &str, by: &str) {
+fn asked(c: &drover::Ctx, id: &str, question: &str, choice: &str, by: &str) {
     let q = json!({"id": id, "question": question, "options": ["yes", "no"], "kind": "owner"});
     append(&c.state, &Event::new(NOW - 60, "synergy", None, "needs-decision", q)).unwrap();
     let d = json!({"id": id, "choice": choice, "by": by});
@@ -175,15 +175,15 @@ fn add_creates_within_the_cap_refuses_past_it_and_only_an_owner_yes_lets_it_on()
         "{out}"
     );
     // A conductor's or a defaulted answer is no approval; nor an ask about another verb.
-    asked(&c, "q1", "herdsman runners add 1: ok?", "yes", "orchestrator-t1");
-    asked(&c, "q2", "herdsman runners add 1: ok?", "yes", "default");
-    asked(&c, "q3", "herdsman runners remove vm1: ok?", "yes", "owner");
-    asked(&c, "q4", "herdsman runners add 1: ok?", "no", "owner");
+    asked(&c, "q1", "drover runners add 1: ok?", "yes", "orchestrator-t1");
+    asked(&c, "q2", "drover runners add 1: ok?", "yes", "default");
+    asked(&c, "q3", "drover runners remove vm1: ok?", "yes", "owner");
+    asked(&c, "q4", "drover runners add 1: ok?", "no", "owner");
     for id in ["q1", "q2", "q3", "q4"] {
         assert_eq!(run(&c, &r, &["runners", "add", "--approved", id]).0, 3, "{id}");
     }
     assert_eq!(r.count(&rc(false, "fakeboat create")), made);
-    asked(&c, "q5", "herdsman runners add 1: ok?", "yes", "owner");
+    asked(&c, "q5", "drover runners add 1: ok?", "yes", "owner");
     let (code, out) = run(&c, &r, &["runners", "add", "--approved", "q5"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(r.count(&rc(false, "fakeboat create")), made + 1);
@@ -294,7 +294,7 @@ fn tokens_reach_every_vm_and_check_refreshes_them_and_alerts_low_and_ok_once_eac
 fn check_pushes_a_token_once_the_last_is_30_min_old() {
     let (c, _sh) = setup("runners-refresh");
     let d = json!({"vms": 2, "failed": []});
-    append(&c.state, &Event::new(NOW - 1800, "herdsman", None, "runners-tokens", d)).unwrap();
+    append(&c.state, &Event::new(NOW - 1800, "drover", None, "runners-tokens", d)).unwrap();
     let r = fake(&fleet(3, false));
     assert_eq!(run(&c, &r, &["check"]).0, 0);
     assert_eq!(kinds(&c, "runners-tokens").len(), 2);
@@ -304,7 +304,7 @@ fn check_pushes_a_token_once_the_last_is_30_min_old() {
 #[test]
 fn the_built_in_boat_recipe_has_every_runner_command() {
     let (c, _sh) = setup("runners-boat");
-    let t = herdsman::cloud::load(&c, "boat").unwrap();
+    let t = drover::cloud::load(&c, "boat").unwrap();
     for k in [
         "create",
         "runner_create",

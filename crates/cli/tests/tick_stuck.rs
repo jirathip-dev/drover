@@ -3,22 +3,22 @@
 //! through a dead shared ssh connection drops its socket and runs once more; a tick 10 min old raises `tick-stuck` once.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::time::Duration;
 
 const NOW: u64 = 1_000_000;
-const WT: &str = "/Users/me/.local/share/herdsman/work/sendmeter/issue-9";
-const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
+const WT: &str = "/Users/me/.local/share/drover/work/sendmeter/issue-9";
+const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
 
-fn setup(name: &str, extra: &str) -> (herdsman::Ctx, FakeShed) {
+fn setup(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
     let (c, sh) = setup_on(name, extra);
     sh.attach(&c);
     (c, sh)
 }
 
-fn setup_on(name: &str, extra: &str) -> (herdsman::Ctx, FakeShed) {
+fn setup_on(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n{extra}");
     let c = ctx(&tmpdir(name), &toml);
@@ -126,7 +126,7 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     // #11's lane is live on the Air.
     let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "pane": "w8:p1", "workspace": "w8",
-                   "worktree": "/Users/me/.local/share/herdsman/work/sendmeter/issue-11", "branch": "issue-11",
+                   "worktree": "/Users/me/.local/share/drover/work/sendmeter/issue-11", "branch": "issue-11",
                    "host": "air", "machine": "air"});
     append(&c.state, &Event::new(NOW - 600, "sendmeter", Some(11), "spawn", d)).unwrap();
     let r = Hang {
@@ -159,7 +159,7 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
         !r.mark.with_file_name("tick.beat").exists(),
         "the heartbeat goes when the tick ends"
     );
-    let cached = herdsman::hosts::cached(&c);
+    let cached = drover::hosts::cached(&c);
     assert!(!cached["air"].up, "the Air shows offline");
     assert!(
         out.contains(&format!("keep air:{WT}: host unreachable (not cleaned)")),
@@ -237,12 +237,12 @@ fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
 fn a_dead_shared_connection_drops_its_socket_and_runs_once_more_without_it() {
     let (c, _sh) = setup("stuck-socket", "");
     let air = FakeShed::new();
-    let sock = c.state.with_file_name("herdsman-ssh-abc");
+    let sock = c.state.with_file_name("drover-ssh-abc");
     std::fs::write(&sock, "").unwrap();
     let probe = format!("{SSH}'sh' '-c' 'test -e");
     let r = local()
         .reply(
-            "ssh -G -oControlPath=/tmp/herdsman-ssh-%C air",
+            "ssh -G -oControlPath=/tmp/drover-ssh-%C air",
             &format!("user me\ncontrolpath {}\n", sock.display()),
         )
         .once_err(
@@ -283,10 +283,10 @@ fn a_tick_ten_minutes_old_it_cannot_name_raises_slo_tick_and_stuck_once() {
     let (c, _sh) = setup("stuck-alert", "");
     let mark = c.state.with_file_name("tick.step");
     let child = "ssh -oBatchMode=yes air -- 'sh' '-c' 'test -e \"$1\"'";
-    let kinds = |c: &herdsman::Ctx, k: &str| -> Vec<Event> {
+    let kinds = |c: &drover::Ctx, k: &str| -> Vec<Event> {
         read(&c.state).unwrap().into_iter().filter(|e| e.kind == k).collect()
     };
-    let drive = |c: &herdsman::Ctx| assert_eq!(run(c, &local(), &["drive", "--fast"]).0, 0);
+    let drive = |c: &drover::Ctx| assert_eq!(run(c, &local(), &["drive", "--fast"]).0, 0);
     std::fs::write(
         &mark,
         json!({"since": NOW - 300, "step": "clean", "child": child}).to_string(),
@@ -299,7 +299,7 @@ fn a_tick_ten_minutes_old_it_cannot_name_raises_slo_tick_and_stuck_once() {
         json!({"since": NOW - 700, "step": "clean", "child": child}).to_string(),
     )
     .unwrap();
-    let later = herdsman::Ctx {
+    let later = drover::Ctx {
         now: NOW + 60,
         ..c.clone()
     };
@@ -328,7 +328,7 @@ fn a_tick_ten_minutes_old_it_cannot_name_raises_slo_tick_and_stuck_once() {
 }
 
 #[test]
-fn a_herdsman_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self_heal() {
+fn a_drover_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self_heal() {
     let (c, _sh) = setup("stuck-kill", "");
     let mark = c.state.with_file_name("tick.step");
     std::fs::write(
@@ -338,7 +338,7 @@ fn a_herdsman_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_se
     .unwrap();
     let r = local()
         .once("kill -0 4242", 0, "")
-        .reply("ps -o command= -p 4242", "/Users/me/.local/bin/herdsman tick\n")
+        .reply("ps -o command= -p 4242", "/Users/me/.local/bin/drover tick\n")
         .reply("kill -TERM 4242", "");
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     assert_eq!(r.count("kill -TERM 4242"), 1);
@@ -348,11 +348,11 @@ fn a_herdsman_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_se
     assert_eq!(heal.len(), 1, "{heal:?}");
     assert_eq!(heal[0].str("did"), Some("stopped tick pid 4242 (SIGTERM)"));
     assert_eq!(ev.iter().filter(|e| e.kind == "slo-tick").count(), 1);
-    let later = herdsman::Ctx {
+    let later = drover::Ctx {
         now: NOW + 600,
         ..c.clone()
     };
-    let r = local().reply("ps -o command= -p 4242", "/Users/me/.local/bin/herdsman tick\n");
+    let r = local().reply("ps -o command= -p 4242", "/Users/me/.local/bin/drover tick\n");
     assert_eq!(run(&later, &r, &["drive", "--fast"]).0, 0);
     assert!(!r.called("kill -TERM"), "a stopped tick is not stopped again");
     let kinds: Vec<String> = read(&c.state)
@@ -369,7 +369,7 @@ fn a_herdsman_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_se
 }
 
 #[test]
-fn a_process_that_is_no_herdsman_tick_is_never_killed() {
+fn a_process_that_is_no_drover_tick_is_never_killed() {
     let (c, _sh) = setup("stuck-foreign", "");
     let mark = c.state.with_file_name("tick.step");
     std::fs::write(
@@ -404,7 +404,7 @@ fn a_tick_that_ignores_sigterm_is_killed_after_10_s() {
     .unwrap();
     let r = local()
         .reply("kill -0 4244", "")
-        .reply("ps -o command= -p 4244", "herdsman drive\n")
+        .reply("ps -o command= -p 4244", "drover drive\n")
         .reply("kill -TERM 4244", "")
         .reply("kill -KILL 4244", "");
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);

@@ -1,10 +1,7 @@
-//! #555: the drover plugins' `/api/v1` routes: each runs the old board's code (`/send`, `/answer`, `/act`, `/setup`,
-//! `/herd.json`, the [config] sheet, `/thread`'s `new`) or a new op (`chat`, `close`), JSON in and `Reply` out; the
-//! paired-only ones answer 401 UNPAIRED to an unpaired device and run nothing.
 mod common;
 use common::*;
-use herdsman::events::{read, Event};
-use herdsman::serve::Server;
+use drover::events::{read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -39,7 +36,7 @@ fn mtime(s: &Server) -> String {
         .into()
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -138,7 +135,7 @@ fn setup_starts_a_configured_terminal_and_reads_its_screen() {
     let typed = json!({"setup": "w9:p1", "text": "sk-SECRET-4242"});
     assert_eq!(post(&s, "send", typed, &ck).1, "OK");
     assert!(r.called("herdr --machine bazzite pane send-text w9:p1 sk-SECRET-4242"));
-    assert!(!herdsman::events::jsonl(&c.state).unwrap().contains("SECRET"));
+    assert!(!drover::events::jsonl(&c.state).unwrap().contains("SECRET"));
 }
 
 #[test]
@@ -245,10 +242,10 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
         sh.sock.display()
     );
     let mut c = ctx(&tmpdir("v1-backlog"), &cfg);
-    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let d = json!({"role": "impl", "agent": IMPL, "harness": "claude", "pane": IMPL});
-    herdsman::events::append(&c.state, &Event::new(T - 100, "sendmeter", Some(12), "spawn", d)).unwrap();
+    drover::events::append(&c.state, &Event::new(T - 100, "sendmeter", Some(12), "spawn", d)).unwrap();
     let agents =
         json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo", "claude-agent-acp"]}]);
     let host = Fake::default()
@@ -256,7 +253,7 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
         .reply("shed", "")
         .reply("gh issue close", "");
     let cli = sh.cli(&host);
-    let r = herdsman::shed::With(&cli, sh.shed());
+    let r = drover::shed::With(&cli, sh.shed());
     let cache = c.state.parent().unwrap().join("cache");
     std::fs::create_dir_all(&cache).unwrap();
     let bl = json!({"ts": T, "issues": {"30": {"number": 30, "title": "Meter export", "state": "OPEN"}}});
@@ -292,6 +289,6 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
         (e.issue, e.str("why"), e.str("via")),
         (Some(30), Some("backlog"), Some("web"))
     );
-    let st = herdsman::events::fold(&read(&c.state).unwrap());
+    let st = drover::events::fold(&read(&c.state).unwrap());
     assert_eq!(st[&("sendmeter".to_string(), 30)].state, "closed");
 }

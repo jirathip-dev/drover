@@ -2,8 +2,8 @@
 //! transcript is stored (`data-gone`). The name and `state age` are spans, so the name ellipsises first.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const T: u64 = 1_000_000;
@@ -64,7 +64,7 @@ fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
         "a gone lane has no tap target: {card}"
     );
     // #218: a gone lane with a stored transcript links to it, marked `data-gone`.
-    let log = herdsman::lanes::log(&c.state, "rev-3-r2").unwrap();
+    let log = drover::lanes::log(&c.state, "rev-3-r2").unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, "  out\n").unwrap();
     let page2 = queue_tab(&Server::new(&c, &r, None), "", T);

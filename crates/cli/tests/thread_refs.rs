@@ -3,8 +3,8 @@
 //! archived thread opens read-only with [restore]. API v1 gives each thread page its `id` and `archived`.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -12,7 +12,7 @@ const T: u64 = 1_000_000;
 
 /// Threads t1…t27 on sendmeter (t27 archived); in t1 `extra` conductor lines, then a message naming t27, t999 (no
 /// such thread) and `t27` in inline code, a handoff to t27, a system line and an ask whose option names t27.
-fn setup(name: &str, extra: u64) -> herdsman::Ctx {
+fn setup(name: &str, extra: u64) -> drover::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
@@ -146,7 +146,7 @@ fn a_tapped_ref_opens_that_thread_and_back_returns_scrolled_where_you_were() {
     _sh.attach(&c);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c, &Fake::default(), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c, &Fake::default(), l, false));
     let js = "const v = t => $(`#chat .cvp[data-t=\"${t}\"]`), vis = t => !!v(t) && v(t).getBoundingClientRect().height > 0; \
         const until = f => new Promise(r => { const t0 = Date.now(); (function go() { f() || Date.now() - t0 > 3000 ? r() : setTimeout(go, 50); })(); }); \
         const tap = e => e.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); \
@@ -164,10 +164,10 @@ fn a_tapped_ref_opens_that_thread_and_back_returns_scrolled_where_you_were() {
           tap(tc.querySelector('.md .tl')); await until(() => vis('t27')); tap(v('t27').querySelector('.rst')); \
           await until(() => v('t27') && !v('t27').querySelector('.tw textarea').disabled); \
           at.push(+!v('t27').querySelector('.tw textarea').disabled, +!v('t27').querySelector('.rst'), errs.length); })()";
-    let png = std::env::var_os("HERDSMAN_SHOT").map_or_else(|| tmpdir("thread-refs-png").join("refs.png"), Into::into);
+    let png = std::env::var_os("DROVER_SHOT").map_or_else(|| tmpdir("thread-refs-png").join("refs.png"), Into::into);
     let o = webview()
-        .env("HERDSMAN_WAIT", "12")
-        .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
+        .env("DROVER_WAIT", "12")
+        .env("DROVER_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
         .args([
             &format!("http://{addr}/"),
             "390",

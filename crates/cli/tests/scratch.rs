@@ -2,17 +2,17 @@
 //! `clean` removes stray Cargo folders in the stray roots and a removed worktree's Claude temp dir.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, Event};
+use drover::config::Config;
+use drover::events::{append, Event};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 
-fn ev(c: &herdsman::Ctx, issue: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, issue: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(10, "sendmeter", Some(issue), kind, d)).unwrap();
 }
 
-fn spawn(c: &herdsman::Ctx, issue: u64, role: &str, agent: &str) {
+fn spawn(c: &drover::Ctx, issue: u64, role: &str, agent: &str) {
     let w = c.worktrees.join("sendmeter").join(agent);
     std::fs::create_dir_all(&w).unwrap();
     let d = json!({"role": role, "agent": agent, "worktree": w, "pane": agent, "runtime": "shed"});
@@ -20,13 +20,13 @@ fn spawn(c: &herdsman::Ctx, issue: u64, role: &str, agent: &str) {
 }
 
 /// #651: a lane spawned on the remote host `air`.
-fn air_spawn(c: &herdsman::Ctx, issue: u64, role: &str, agent: &str) {
+fn air_spawn(c: &drover::Ctx, issue: u64, role: &str, agent: &str) {
     let d = json!({"role": role, "agent": agent, "worktree": format!("/Users/me/worktrees/sendmeter/{agent}"),
                    "pane": agent, "runtime": "shed", "host": "air", "machine": "air"});
     ev(c, issue, "spawn", d);
 }
 
-fn merged(c: &herdsman::Ctx, issue: u64) {
+fn merged(c: &drover::Ctx, issue: u64) {
     ev(
         c,
         issue,
@@ -53,7 +53,7 @@ fn age(p: &Path, at: u64) {
     f.set_modified(UNIX_EPOCH + Duration::from_secs(at)).unwrap();
 }
 
-fn setup(name: &str, budget_bytes: u64) -> (herdsman::Ctx, PathBuf) {
+fn setup(name: &str, budget_bytes: u64) -> (drover::Ctx, PathBuf) {
     let d = tmpdir(name);
     let root = d.join("worktrees/.build"); // #630: the root's build folder
     let cfg = CONFIG.replace(
@@ -63,9 +63,9 @@ fn setup(name: &str, budget_bytes: u64) -> (herdsman::Ctx, PathBuf) {
     (ctx(&d, &cfg), root.join(".scratch"))
 }
 
-fn budget(c: &herdsman::Ctx, sh: &FakeShed) -> String {
+fn budget(c: &drover::Ctx, sh: &FakeShed) -> String {
     let (mut out, f) = (vec![], Fake::default());
-    herdsman::check::budget(c, &Config::load(&c.config).unwrap(), &sh.on(&f), &mut out).unwrap();
+    drover::check::budget(c, &Config::load(&c.config).unwrap(), &sh.on(&f), &mut out).unwrap();
     String::from_utf8(out).unwrap()
 }
 
@@ -186,8 +186,8 @@ fn a_finished_lanes_build_folder_goes_at_once_even_with_its_session_open() {
     drop(held);
 }
 
-fn events(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    let all = herdsman::events::read(&c.state).unwrap();
+fn events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
+    let all = drover::events::read(&c.state).unwrap();
     all.into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -302,8 +302,8 @@ struct Air<'a> {
 
 const AIR_ROOT: &str = "~/.cache/hs-651-air";
 
-impl herdsman::runner::Runner for Air<'_> {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for Air<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let line = args.iter().position(|a| a == "--").map(|i| args[i + 1..].join(" "));
         let Some(line) = line.filter(|_| prog == "ssh" && args.iter().any(|a| a == "air")) else {
             return self.over.run(prog, args);
@@ -314,7 +314,7 @@ impl herdsman::runner::Runner for Air<'_> {
                 "Filesystem 1024-blocks Used Available\n/dev/disk3 488000000 1 {}\n",
                 self.free_kb
             );
-            return Ok(herdsman::runner::Out {
+            return Ok(drover::runner::Out {
                 stdout: df,
                 ..Default::default()
             });
@@ -326,14 +326,14 @@ impl herdsman::runner::Runner for Air<'_> {
             .args(["-c", &line])
             .env("HOME", &self.home)
             .output()?;
-        Ok(herdsman::runner::Out {
+        Ok(drover::runner::Out {
             code: o.status.code().unwrap_or(1),
             stdout: String::from_utf8_lossy(&o.stdout).into(),
             stderr: String::from_utf8_lossy(&o.stderr).into(),
         })
     }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
-        let batch = herdsman::hosts::quote("sh", &["-c".into(), herdsman::hosts::EXISTS.into()]);
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
+        let batch = drover::hosts::quote("sh", &["-c".into(), drover::hosts::EXISTS.into()]);
         match args.last() == Some(&batch) || args.iter().any(|a| a.contains("'shed' 'connect'")) {
             true => self.over.run_in(prog, args, input),
             false => self.run(prog, args),
@@ -344,7 +344,7 @@ impl herdsman::runner::Runner for Air<'_> {
 
 /// A ctx whose fleet has the remote host `air` (workspace root `AIR_ROOT` there, absent here); air's `$HOME` and its
 /// `.build/.scratch`.
-fn air_setup(name: &str) -> (herdsman::Ctx, PathBuf, PathBuf) {
+fn air_setup(name: &str) -> (drover::Ctx, PathBuf, PathBuf) {
     let d = tmpdir(name);
     let cfg = CONFIG.replace("build_root = \"\"", "build_budget_gb = 1000");
     let c = ctx(
@@ -356,7 +356,7 @@ fn air_setup(name: &str) -> (herdsman::Ctx, PathBuf, PathBuf) {
     (c, home, s)
 }
 
-fn tick(c: &herdsman::Ctx, home: &Path, air: &[(&str, &str)], free_kb: u64) -> (Vec<String>, String) {
+fn tick(c: &drover::Ctx, home: &Path, air: &[(&str, &str)], free_kb: u64) -> (Vec<String>, String) {
     let sh = FakeShed::new();
     sh.attach(c);
     let air_sh = FakeShed::new();
@@ -468,7 +468,7 @@ fn a_host_short_of_disk_drops_non_working_scratch_largest_first() {
 
 /// #678: `air` turned off for new lanes but answering: its merged lane #12 (worktree and scratch), #13's lane now live
 /// on this host, #14's lane live on the Air.
-fn air_off(name: &str) -> (herdsman::Ctx, PathBuf, [PathBuf; 3]) {
+fn air_off(name: &str) -> (drover::Ctx, PathBuf, [PathBuf; 3]) {
     let (c, home, s) = air_setup(name);
     let text = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, format!("{text}enabled = false\n")).unwrap();
@@ -495,9 +495,9 @@ fn air_off_runner<'a>(home: &Path, f: &'a Fake, air: &'a FakeShed) -> Air<'a> {
     }
 }
 
-fn air_off_hosts(c: &herdsman::Ctx) -> (Fake, FakeShed, FakeShed) {
+fn air_off_hosts(c: &drover::Ctx) -> (Fake, FakeShed, FakeShed) {
     let wt = AIR_WT;
-    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
     let f = Fake::default()
         .reply("gh issue list", "[]")
         .reply(&format!("{ssh}'sh' '-c' 'test -e"), "")

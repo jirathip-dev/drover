@@ -1,4 +1,4 @@
-//! #574: `herdsman amend`: an owner-decided amendment written into the issue body itself (a body edit, never a
+//! #574: `drover amend`: an owner-decided amendment written into the issue body itself (a body edit, never a
 //! comment), so checks that read the spec (board-freeze) see it, and their failed runs on the open PR go again.
 use crate::config::Config;
 use crate::events::{emit, read, Event};

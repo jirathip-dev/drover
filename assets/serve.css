@@ -448,7 +448,7 @@ body:not(.unf) .ask.lt{display:none}
 .dp ul{margin:0 0 var(--s2);padding-left:var(--s4);color:var(--fg);font-size:var(--fs-meta)}.dp code{font-size:var(--fs-meta)}
 /* #173: the pipeline group (in a fleet's [config] sheet) and the card's current stage. */
 /* Stage kinds: a glyph in a fixed colour. ▲ build (pushes code) amber, ◆ check (PASS/FAIL) purple, ◫ gate
-   (herdsman's own) cyan, ✓ merge green, ! park red ("needs you", as everywhere on the board). */
+   (drover's own) cyan, ✓ merge green, ! park red ("needs you", as everywhere on the board). */
 .kd{font-style:normal;color:var(--mute)}.kd.b{color:var(--a)}.kd.c{color:var(--p)}.kd.g{color:var(--c)}.kd.m{color:var(--g)}.kd.x{color:var(--r)}
 /* The graph: one grid row per text line, all --ln tall, so every edge meets a line's middle. Column 1 is the
    park rail, column 2 the stage boxes, then one 2ch rail per loop target (shortest span innermost).

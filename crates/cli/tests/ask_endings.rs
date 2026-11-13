@@ -2,23 +2,23 @@
 //! handoff delivered or failed, 24 h expiry unless its lane is live (that one re-alerts once a day); a one-time sweep.
 mod common;
 use common::*;
-use herdsman::events::{append, open_asks, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, open_asks, read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const NOW: u64 = 1_000_000;
 const H: u64 = 3600;
 const LANE: &str = "sendmeter-impl-36";
 
-fn log(c: &herdsman::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: Value) {
+fn log(c: &drover::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", issue, kind, d)).unwrap();
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn open(c: &herdsman::Ctx) -> Vec<String> {
+fn open(c: &drover::Ctx) -> Vec<String> {
     let events = read(&c.state).unwrap();
     open_asks(&events)
         .iter()
@@ -27,7 +27,7 @@ fn open(c: &herdsman::Ctx) -> Vec<String> {
 }
 
 /// Threads t1 and t2 (`ts` before everything else).
-fn threads(c: &herdsman::Ctx, ts: u64) {
+fn threads(c: &drover::Ctx, ts: u64) {
     for t in ["t1", "t2"] {
         log(
             c,
@@ -39,13 +39,13 @@ fn threads(c: &herdsman::Ctx, ts: u64) {
     }
 }
 
-fn thread_ask(c: &herdsman::Ctx, ts: u64, id: &str, thread: &str) {
+fn thread_ask(c: &drover::Ctx, ts: u64, id: &str, thread: &str) {
     let d = json!({"id": id, "question": "Ship it?", "options": ["yes", "no"], "recommend": 1, "kind": "owner",
         "thread": thread, "agent": null});
     log(c, ts, None, "needs-decision", d);
 }
 
-fn said(c: &herdsman::Ctx, ts: u64, thread: &str, from: &str, text: &str) {
+fn said(c: &drover::Ctx, ts: u64, thread: &str, from: &str, text: &str) {
     log(
         c,
         ts,
@@ -55,8 +55,8 @@ fn said(c: &herdsman::Ctx, ts: u64, thread: &str, from: &str, text: &str) {
     );
 }
 
-/// The `herdsman asks --all` row of ask `id`.
-fn row(c: &herdsman::Ctx, id: &str) -> String {
+/// The `drover asks --all` row of ask `id`.
+fn row(c: &drover::Ctx, id: &str) -> String {
     let all = run(c, &Fake::default(), &["asks", "--all"]).1;
     let row = all.lines().find(|l| l.split(' ').nth(1) == Some(id));
     row.unwrap_or_else(|| panic!("no {id} in {all}")).to_string()
@@ -131,14 +131,14 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
     assert!(row(&c, "q1").ends_with("[withdrawn → q2]"), "{}", row(&c, "q1"));
 }
 
-fn handoff(name: &str, sh: &FakeShed) -> herdsman::Ctx {
+fn handoff(name: &str, sh: &FakeShed) -> drover::Ctx {
     let cfg = format!(
         "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
          [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
         sh.sock.display()
     );
     let mut c = ctx(&tmpdir(name), &cfg);
-    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     threads(&c, NOW - 200);
     let d = json!({"id": "q1", "question": "Hand off \"Grill\" to which sendmeter thread?",
@@ -181,14 +181,14 @@ fn a_handoff_ask_closes_when_it_is_delivered_and_when_it_fails() {
     assert!(row(&c, "q1").ends_with("[failed]"), "{}", row(&c, "q1"));
 }
 
-fn check(c: &herdsman::Ctx, r: &Fake) -> String {
+fn check(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["check"]);
     assert_eq!(code, 0, "{out}");
     out
 }
 
 /// `[chat·N]`: the threads showing `! choose`.
-fn choosing(c: &herdsman::Ctx) -> u64 {
+fn choosing(c: &drover::Ctx) -> u64 {
     let r = Fake::default();
     let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
     let needs: Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", c.now, "needs")).unwrap();
@@ -212,7 +212,7 @@ fn a_thread_ask_nobody_waits_on_expires_after_24_h_and_its_choose_goes() {
 }
 
 /// The asking lane's spawn on #36, and its ask `id` at `ts`.
-fn lane_ask(c: &herdsman::Ctx, ts: u64, id: &str) {
+fn lane_ask(c: &drover::Ctx, ts: u64, id: &str) {
     log(
         c,
         ts - 60,
@@ -233,7 +233,7 @@ fn a_live_lanes_ask_never_expires_and_re_alerts_once_a_day() {
     let t0 = NOW - 30 * H;
     lane_ask(&c, t0, "q1");
     let r = Fake::default();
-    let waiting = |c: &herdsman::Ctx| kinds(c, "ask-waiting").len();
+    let waiting = |c: &drover::Ctx| kinds(c, "ask-waiting").len();
     c.now = t0 + 40 * 60;
     check(&c, &r);
     assert_eq!(waiting(&c), 1);

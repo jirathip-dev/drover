@@ -2,7 +2,7 @@
 //! and the conductor-only design role.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
@@ -33,20 +33,20 @@ fn happy() -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-fn spawned(c: &herdsman::Ctx, n: u64, role: &str) {
+fn spawned(c: &drover::Ctx, n: u64, role: &str) {
     let d = json!({"role": role, "agent": format!("sendmeter-{role}-{n}"), "branch": format!("issue-{n}")});
     append(&c.state, &Event::new(10, "sendmeter", Some(n), "spawn", d)).unwrap();
 }
 
-fn log(c: &herdsman::Ctx, n: u64, kind: &str, d: serde_json::Value) {
+fn log(c: &drover::Ctx, n: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(20, "sendmeter", Some(n), kind, d)).unwrap();
 }
 
-fn spawn(c: &herdsman::Ctx, n: u64, role: &str) -> (i32, String) {
+fn spawn(c: &drover::Ctx, n: u64, role: &str) -> (i32, String) {
     run(c, &happy(), &["spawn", "sendmeter", &n.to_string(), role])
 }
 
-fn refused(c: &herdsman::Ctx, n: u64, role: &str, code: &str) {
+fn refused(c: &drover::Ctx, n: u64, role: &str, code: &str) {
     let before = read(&c.state).unwrap().len();
     let (exit, out) = spawn(c, n, role);
     assert_eq!(exit, 3, "{out}");
@@ -169,7 +169,7 @@ fn merge(serial: bool, files: &str) -> (i32, String, Fake) {
     merge_on(serial, merge_fake(files)).2
 }
 
-fn merge_on(serial: bool, r: Fake) -> (herdsman::Ctx, FakeShed, (i32, String, Fake)) {
+fn merge_on(serial: bool, r: Fake) -> (drover::Ctx, FakeShed, (i32, String, Fake)) {
     let d = tmpdir("serial-merge");
     let c = ctx(&d, &config(SERIAL));
     let sh = FakeShed::new();
@@ -210,7 +210,7 @@ fn a_2011_file_pr_is_listed_whole_and_its_last_page_serial_path_refuses() {
 fn a_rename_out_of_a_serial_path_reports_both_names() {
     let (c, _sh, (exit, out, _)) = merge_on(false, merge_fake("src/x.sql\tsupabase/migrations/x.sql\n"));
     assert!(exit == 3 && out.contains("supabase/migrations/x.sql"), "{out}");
-    let cache = herdsman::gh::cache_path(&c, "diff", "sendmeter", 12);
+    let cache = drover::gh::cache_path(&c, "diff", "sendmeter", 12);
     let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(cache).unwrap()).unwrap();
     assert_eq!(v["files"], json!(["src/x.sql", "supabase/migrations/x.sql"]));
 }
@@ -286,7 +286,7 @@ fn pr_outside_serial_globs_merges_unmarked() {
 
 #[test]
 fn serial_globs() {
-    use herdsman::config::glob;
+    use drover::config::glob;
     let g = |p: &str, s: &str| glob(p.as_bytes(), s.as_bytes());
     assert!(g("supabase/migrations/**", "supabase/migrations/x.sql"));
     assert!(g("supabase/migrations/**", "supabase/migrations/a/b.sql"));

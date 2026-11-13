@@ -3,8 +3,8 @@
 //! `state.db`, each store one transaction.
 mod common;
 use common::*;
-use herdsman::devices;
-use herdsman::events::read;
+use drover::devices;
+use drover::events::read;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
@@ -13,8 +13,8 @@ fn chmod(p: &Path, mode: u32) {
 }
 
 /// #344: every device write fails (as a full disk would) until `fix`.
-fn break_writes(c: &herdsman::Ctx) -> impl Fn() {
-    let file = herdsman::db::file(&c.state);
+fn break_writes(c: &drover::Ctx) -> impl Fn() {
+    let file = drover::db::file(&c.state);
     let db = move || rusqlite::Connection::open(&file).unwrap();
     let t = "CREATE TRIGGER full BEFORE DELETE ON devices BEGIN SELECT RAISE(ABORT, 'disk full'); END";
     db().execute(t, []).unwrap();
@@ -25,7 +25,7 @@ fn break_writes(c: &herdsman::Ctx) -> impl Fn() {
 fn a_failed_write_keeps_the_old_devices_and_logs_once_an_hour() {
     let mut c = ctx(&tmpdir("state-write-fail"), CONFIG);
     devices::request(&c, "iPhone", "10.0.0.2").unwrap().unwrap();
-    let file = herdsman::db::file(&c.state);
+    let file = drover::db::file(&c.state);
     let before = devices::load(&c);
     let fix = break_writes(&c);
     assert!(devices::store(&c, &[]).is_err());
@@ -47,12 +47,10 @@ fn a_failed_write_keeps_the_old_devices_and_logs_once_an_hour() {
     assert_eq!(failed[0].str("error"), Some("other error"), "the error kind only");
     let hash = &devices::load(&c)[0].hash;
     assert!(
-        !herdsman::events::jsonl(&c.state).unwrap().contains(hash.as_str()),
+        !drover::events::jsonl(&c.state).unwrap().contains(hash.as_str()),
         "no token hash in the log"
     );
-    assert!(
-        herdsman::events::plain(&failed[0]).starts_with(&format!("herdsman state-write-failed: {}: ", file.display()))
-    );
+    assert!(drover::events::plain(&failed[0]).starts_with(&format!("drover state-write-failed: {}: ", file.display())));
     // A write that succeeds replaces them, the file still 0600.
     devices::store(&c, &[]).unwrap();
     assert!(devices::load(&c).is_empty());
@@ -62,11 +60,11 @@ fn a_failed_write_keeps_the_old_devices_and_logs_once_an_hour() {
 #[test]
 fn an_existing_vapid_key_is_never_rewritten() {
     let c = ctx(&tmpdir("state-write-vapid"), CONFIG);
-    let k = herdsman::webpush::vapid(&c.state).unwrap();
+    let k = drover::webpush::vapid(&c.state).unwrap();
     let file = c.state.parent().unwrap().join("webpush/vapid.key");
     let before = std::fs::read(&file).unwrap();
     chmod(file.parent().unwrap(), 0o500); // any rewrite (temp + rename) would now fail
-    let again = herdsman::webpush::vapid(&c.state);
+    let again = drover::webpush::vapid(&c.state);
     chmod(file.parent().unwrap(), 0o700);
     assert_eq!(again.unwrap().to_bytes(), k.to_bytes());
     assert_eq!(std::fs::read(&file).unwrap(), before);
@@ -78,7 +76,7 @@ fn last_seen_is_written_at_most_hourly() {
     let (code, token) = devices::request(&c, "iPhone", "10.0.0.2").unwrap().unwrap();
     devices::approve(&c, &code).unwrap();
     let cookie = format!("hd={token}");
-    let used = |c: &herdsman::Ctx| devices::load(c)[0].used;
+    let used = |c: &drover::Ctx| devices::load(c)[0].used;
     let t0 = c.now;
     c.now = t0 + 3599;
     assert!(devices::find(&c, &cookie).is_some());

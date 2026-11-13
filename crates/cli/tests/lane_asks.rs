@@ -1,12 +1,12 @@
 //! #541: a lane's ask goes to its repo's conductor thread first (the pinned one, else the newest; none: the owner);
 //! the conductor answers only with a basis and never an owner topic; its answer posts an FYI line the owner may
-//! [change] for 30 min. Its own test binary: `HERDSMAN_LANE`, `HERDSMAN_THREAD` and `PATH` are process-wide.
+//! [change] for 30 min. Its own test binary: `DROVER_LANE`, `DROVER_THREAD` and `PATH` are process-wide.
 mod common;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
-use herdsman::webpush;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
+use drover::webpush;
 use serde_json::json;
 use std::os::unix::fs::PermissionsExt;
 use std::sync::{Mutex, MutexGuard};
@@ -24,29 +24,29 @@ fn env() -> MutexGuard<'static, ()> {
 }
 
 fn as_lane() {
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:36:impl");
-    std::env::remove_var("HERDSMAN_THREAD");
+    std::env::set_var("DROVER_LANE", "sendmeter:36:impl");
+    std::env::remove_var("DROVER_THREAD");
 }
 
 fn as_orchestrator(t: &str) {
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:-:orchestrator");
-    std::env::set_var("HERDSMAN_THREAD", t);
+    std::env::set_var("DROVER_LANE", "sendmeter:-:orchestrator");
+    std::env::set_var("DROVER_THREAD", t);
 }
 
 fn as_owner() {
-    std::env::remove_var("HERDSMAN_LANE");
-    std::env::remove_var("HERDSMAN_THREAD");
+    std::env::remove_var("DROVER_LANE");
+    std::env::remove_var("DROVER_THREAD");
 }
 
-fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
-    herdsman::Ctx { now, ..c.clone() }
+fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
+    drover::Ctx { now, ..c.clone() }
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn setup(name: &str, extra: &str, threads: &[&str]) -> (herdsman::Ctx, FakeShed) {
+fn setup(name: &str, extra: &str, threads: &[&str]) -> (drover::Ctx, FakeShed) {
     let d = tmpdir(name);
     let conf = CONFIG.replace(
         "integration = \"staging\"",
@@ -61,7 +61,7 @@ fn setup(name: &str, extra: &str, threads: &[&str]) -> (herdsman::Ctx, FakeShed)
         sh.sock.display()
     );
     let mut c = ctx(&d, &conf);
-    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     sh.lane(LANE, "idle", "/x");
     let bin = d.join("bin");
@@ -92,7 +92,7 @@ fn setup(name: &str, extra: &str, threads: &[&str]) -> (herdsman::Ctx, FakeShed)
 }
 
 /// Web pushes sent so far.
-fn pushes(c: &herdsman::Ctx) -> usize {
+fn pushes(c: &drover::Ctx) -> usize {
     let calls = c.state.parent().unwrap().parent().unwrap().join("calls");
     std::fs::read_to_string(calls).unwrap_or_default().lines().count()
 }
@@ -110,7 +110,7 @@ fn host() -> Fake {
 }
 
 /// The lane's ask `q`, its id.
-fn lane_ask(c: &herdsman::Ctx, sh: &FakeShed, q: &str) -> String {
+fn lane_ask(c: &drover::Ctx, sh: &FakeShed, q: &str) -> String {
     as_lane();
     let args = [
         "ask",
@@ -129,7 +129,7 @@ fn lane_ask(c: &herdsman::Ctx, sh: &FakeShed, q: &str) -> String {
     out.trim().into()
 }
 
-fn orchestrator_answer(c: &herdsman::Ctx, sh: &FakeShed, t: &str, id: &str, n: &str, basis: &str) -> (i32, String) {
+fn orchestrator_answer(c: &drover::Ctx, sh: &FakeShed, t: &str, id: &str, n: &str, basis: &str) -> (i32, String) {
     as_orchestrator(t);
     let (code, out) = run(c, &sh.cli(&host()), &["answer", "sendmeter", id, n, "--basis", basis]);
     as_owner();
@@ -145,7 +145,7 @@ fn typed(sh: &FakeShed, text: &str) -> bool {
 }
 
 /// The [chat] tab as the board draws it at `now`.
-fn chat(c: &herdsman::Ctx, now: u64) -> String {
+fn chat(c: &drover::Ctx, now: u64) -> String {
     let r = Fake::default();
     let c = at(c, now);
     let s = Server::new(&c, &r, Some(ADDR.into()));
@@ -165,7 +165,7 @@ fn a_lane_ask_wakes_the_newest_thread_and_stays_open_without_a_push() {
     assert_eq!(
         std::fs::read_to_string(thread).unwrap(),
         "system: lane ask q1 on #36 from sendmeter-impl-36 (owner): Split it? [1] yes [2] no (recommended). \
-         Answer it only if the issue spec or a past decision settles it: `herdsman answer sendmeter q1 <n> --basis \
+         Answer it only if the issue spec or a past decision settles it: `drover answer sendmeter q1 <n> --basis \
          \"<verbatim spec quote | q<id>>\"`; else run it without --basis and it goes to the owner.\n"
     );
     let st = &kinds(&c, "orchestrator-start")[0];

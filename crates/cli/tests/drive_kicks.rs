@@ -2,13 +2,13 @@
 //! `max_parallel_spawns` bounds them, a `spawn-<fleet>-<n>.pending` marker stops a double launch until the kick ends.
 mod common;
 use common::*;
-use herdsman::events::read;
+use drover::events::read;
 
-fn fleet(name: &str, max: usize, issues: u64) -> (herdsman::Ctx, FakeShed) {
+fn fleet(name: &str, max: usize, issues: u64) -> (drover::Ctx, FakeShed) {
     fleet_with(name, max, "", issues, &[])
 }
 
-fn fleet_with(name: &str, max: usize, extra: &str, issues: u64, flags: &[&str]) -> (herdsman::Ctx, FakeShed) {
+fn fleet_with(name: &str, max: usize, extra: &str, issues: u64, flags: &[&str]) -> (drover::Ctx, FakeShed) {
     let cfg = CONFIG
         .replace("max_parallel_spawns = 0", &format!("max_parallel_spawns = {max}"))
         .replace(
@@ -60,15 +60,15 @@ fn pending(d: &serde_json::Value) -> u64 {
 
 fn launched(r: &Fake, n: u64) -> usize {
     r.count(&format!(
-        "sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter {n} --why drive --now"
+        "sh -c nohup '/opt/drover/bin/drover' kick sendmeter {n} --why drive --now"
     ))
 }
 
-fn marker(c: &herdsman::Ctx, n: u64) -> Option<herdsman::db::Lease> {
+fn marker(c: &drover::Ctx, n: u64) -> Option<drover::db::Lease> {
     lease_on(c, &format!("spawn-sendmeter-{n}.pending"))
 }
 
-fn pass(c: &herdsman::Ctx, r: &Fake) -> serde_json::Value {
+fn pass(c: &drover::Ctx, r: &Fake) -> serde_json::Value {
     let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let ev = read(&c.state).unwrap();
@@ -194,18 +194,14 @@ fn a_hook_kick_never_clears_a_launched_kicks_marker() {
 }
 
 /// #333: a marker for `n` holding `pid`, taken `age` secs ago (#344: a lease for `spawn_pending_max_secs`).
-fn mark(c: &herdsman::Ctx, n: u64, pid: u32, age: u64) {
+fn mark(c: &drover::Ctx, n: u64, pid: u32, age: u64) {
     let e = serde_json::json!({"ts": 1, "fleet": "sendmeter", "issue": n, "type": "spawn", "role": "impl", "pid": pid});
     let key = format!("spawn-sendmeter-{n}.pending");
-    let l = herdsman::db::take(&c.state, &key, c.now - age, 300, &e.to_string(), &|_| true).unwrap();
-    assert!(herdsman::db::renew(
-        &c.state,
-        &l,
-        &herdsman::db::Lease { pid, ..l.clone() }
-    ));
+    let l = drover::db::take(&c.state, &key, c.now - age, 300, &e.to_string(), &|_| true).unwrap();
+    assert!(drover::db::renew(&c.state, &l, &drover::db::Lease { pid, ..l.clone() }));
 }
 
-fn stale(c: &herdsman::Ctx) -> Vec<herdsman::events::Event> {
+fn stale(c: &drover::Ctx) -> Vec<drover::events::Event> {
     read(&c.state)
         .unwrap()
         .into_iter()
@@ -269,8 +265,8 @@ fn six_dead_markers_never_hold_a_new_spawn() {
 }
 
 struct Panics(Fake);
-impl herdsman::runner::Runner for Panics {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for Panics {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         assert!(
             !(prog == "git" && args.get(2..4) == Some(&["worktree".into(), "add".into()])),
             "boom"
@@ -298,8 +294,8 @@ fn spawn_pending_for_15_minutes_alerts_once() {
     let (c, _sh) = fleet("kicks-held", 6, 1);
     let held = |ts| {
         let a = serde_json::json!([{"issue": 3, "step": "spawn", "outcome": "waiting", "code": "SPAWN_PENDING"}]);
-        let e = herdsman::events::Event::new(ts, "sendmeter", None, "drive-pass", serde_json::json!({"actions": a}));
-        herdsman::events::append(&c.state, &e).unwrap();
+        let e = drover::events::Event::new(ts, "sendmeter", None, "drive-pass", serde_json::json!({"actions": a}));
+        drover::events::append(&c.state, &e).unwrap();
     };
     held(c.now - 600);
     let alerts = || {
@@ -312,7 +308,7 @@ fn spawn_pending_for_15_minutes_alerts_once() {
     assert_eq!(run(&c, &Fake::default(), &["check"]).0, 0);
     assert_eq!(alerts(), 0, "held 10 min");
     // Still held in every pass 7 min later: 17 min in all.
-    let later = herdsman::Ctx {
+    let later = drover::Ctx {
         now: c.now + 420,
         ..c.clone()
     };
@@ -352,13 +348,13 @@ fn a_full_hosts_pending_spawn_holds_no_slot_for_another_host() {
     let (c, _sh) = fleet_with("kicks-full-host", 1, hosts, 2, &[]);
     let d = serde_json::json!({"role": "impl", "agent": "sendmeter-impl-1", "pane": "sendmeter-impl-1", "host": "bazzite",
         "machine": "bazzite", "worktree": "/home/me/worktrees/sendmeter/issue-1", "branch": "issue-1"});
-    herdsman::events::append(
+    drover::events::append(
         &c.state,
-        &herdsman::events::Event::new(1, "sendmeter", Some(1), "spawn", d),
+        &drover::events::Event::new(1, "sendmeter", Some(1), "spawn", d),
     )
     .unwrap();
     mark(&c, 1, 4242, 0);
-    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
     let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 1048576 99% /\n";
     let r = fake("1.0")
         .reply(&format!("{ssh}'df' '-k' '/'"), df)
@@ -369,15 +365,15 @@ fn a_full_hosts_pending_spawn_holds_no_slot_for_another_host() {
 }
 
 /// #513: issue `n` (not queued) built, pushed and FAILed: its fix round is due.
-fn fix_due(c: &herdsman::Ctx, n: u64) {
+fn fix_due(c: &drover::Ctx, n: u64) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     let d = serde_json::json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("sendmeter-impl-{n}"),
         "worktree": wt, "branch": format!("issue-{n}")});
-    let at = |kind, d| herdsman::events::Event::new(10, "sendmeter", Some(n), kind, d);
-    herdsman::events::append(&c.state, &at("spawn", d)).unwrap();
+    let at = |kind, d| drover::events::Event::new(10, "sendmeter", Some(n), kind, d);
+    drover::events::append(&c.state, &at("spawn", d)).unwrap();
     let v = serde_json::json!({"verdict": "FAIL", "sha": "a".repeat(40), "body": "FAIL\nsrc/x.rs:3 off by one"});
-    herdsman::events::append(&c.state, &at("verdict", v)).unwrap();
+    drover::events::append(&c.state, &at("verdict", v)).unwrap();
 }
 
 /// #513: in-flight fix rounds launch before any start, and starts leave the last slot free.
@@ -387,7 +383,7 @@ fn fix_rounds_launch_before_starts_and_starts_keep_one_slot_free() {
     (21..=22).for_each(|n| fix_due(&c, n));
     let r = fake("1.0");
     let d = pass(&c, &r);
-    let at = |n: u64| r.index(&format!("sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter {n} "));
+    let at = |n: u64| r.index(&format!("sh -c nohup '/opt/drover/bin/drover' kick sendmeter {n} "));
     let (fixes, starts) = ([at(21), at(22)], (1..=10).filter_map(at).collect::<Vec<_>>());
     assert!(fixes.iter().all(Option::is_some), "{d}");
     assert!(starts.iter().all(|s| fixes.iter().all(|f| f < &Some(*s))), "{d}");
@@ -418,15 +414,15 @@ fn one_slot_and_nothing_in_flight_still_starts() {
 }
 
 /// #560: issue `n` (not queued) built, pushed and its PR open: its review is due. Its worktree's head for `fake_with`.
-fn review_due(c: &herdsman::Ctx, n: u64, f: Fake) -> Fake {
+fn review_due(c: &drover::Ctx, n: u64, f: Fake) -> Fake {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     let d = serde_json::json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("sendmeter-impl-{n}"),
         "worktree": wt, "branch": format!("issue-{n}")});
-    let at = |kind, d| herdsman::events::Event::new(10, "sendmeter", Some(n), kind, d);
-    herdsman::events::append(&c.state, &at("spawn", d)).unwrap();
+    let at = |kind, d| drover::events::Event::new(10, "sendmeter", Some(n), kind, d);
+    drover::events::append(&c.state, &at("spawn", d)).unwrap();
     let head = "b".repeat(40);
-    herdsman::events::append(&c.state, &at("pushed", serde_json::json!({"sha": head}))).unwrap();
+    drover::events::append(&c.state, &at("pushed", serde_json::json!({"sha": head}))).unwrap();
     let cache = c.state.parent().unwrap().join("cache");
     std::fs::create_dir_all(&cache).unwrap();
     let pr = serde_json::json!({"number": 100 + n, "state": "OPEN", "headRefOid": head, "statusCheckRollup": []});
@@ -463,7 +459,7 @@ fn a_busy_host_holds_every_spawn_behind_the_review() {
     // The room back: the review launches first.
     let r = fake_with("1.0", review_due(&c, 22, Fake::default()));
     pass(&c, &r);
-    let at = |n: u64| r.index(&format!("sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter {n} "));
+    let at = |n: u64| r.index(&format!("sh -c nohup '/opt/drover/bin/drover' kick sendmeter {n} "));
     assert!(at(22).is_some() && at(22) < at(1), "{:?}", r.calls.borrow());
 }
 
@@ -485,9 +481,9 @@ fn waiting_names_the_reviews_ahead() {
 }
 
 /// #604: a runner whose detached kick runs to its end at once (its own thread, on a host at `load`).
-struct Inline(Fake, herdsman::Ctx, &'static str);
-impl herdsman::runner::Runner for Inline {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+struct Inline(Fake, drover::Ctx, &'static str);
+impl drover::runner::Runner for Inline {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         self.0.run(prog, args)
     }
     fn sleep(&self, _: u64) {}
@@ -532,7 +528,7 @@ fn a_kick_refused_host_busy_is_logged_refused_not_launched() {
     );
     assert_eq!(d["spawns_launched"], 0, "{d}");
     let e = ev.iter().rfind(|e| e.kind == "drive-pass").unwrap();
-    assert!(!herdsman::drive::result(e).1.contains("started 1"), "{d}");
+    assert!(!drover::drive::result(e).1.contains("started 1"), "{d}");
     // `waiting` names the refusal for the queued issue.
     let (code, out) = run(&c, &fake("1.0"), &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
@@ -585,8 +581,8 @@ fn every_start_refused_by_one_host_gate_for_30_min_alerts_once() {
     let pass = |ts| {
         let a = serde_json::json!([{"issue": 3, "step": "start", "outcome": "waiting", "code": "HOST_BUSY",
             "why": "mini: memory pressure warn; retry later or pass --force"}]);
-        let e = herdsman::events::Event::new(ts, "sendmeter", None, "drive-pass", serde_json::json!({"actions": a}));
-        herdsman::events::append(&c.state, &e).unwrap();
+        let e = drover::events::Event::new(ts, "sendmeter", None, "drive-pass", serde_json::json!({"actions": a}));
+        drover::events::append(&c.state, &e).unwrap();
     };
     let alerts = || {
         read(&c.state)
@@ -599,7 +595,7 @@ fn every_start_refused_by_one_host_gate_for_30_min_alerts_once() {
     pass(c.now - 60);
     assert_eq!(run(&c, &Fake::default(), &["check"]).0, 0);
     assert_eq!(alerts(), 0, "busy 20 min");
-    let later = herdsman::Ctx {
+    let later = drover::Ctx {
         now: c.now + 600,
         ..c.clone()
     };
@@ -629,7 +625,7 @@ fn a_kick_that_spawns_inside_its_pass_counts_as_launched() {
 }
 
 /// #638: fleets `names`, each with `max_parallel_spawns = max` and issues 1..=`issues` queued.
-fn fleets(dir: &str, names: &[&str], max: usize, issues: u64) -> (herdsman::Ctx, FakeShed) {
+fn fleets(dir: &str, names: &[&str], max: usize, issues: u64) -> (drover::Ctx, FakeShed) {
     let (fleet, limits) = CONFIG.split_once("[limits]").unwrap();
     let all: String = names.iter().map(|n| fleet.replace("sendmeter", n)).collect();
     let limits = limits.replace("max_parallel_spawns = 0", &format!("max_parallel_spawns = {max}"));
@@ -650,7 +646,7 @@ fn kicked_fleets(r: &Fake) -> Vec<String> {
     let calls = r.calls.borrow();
     let kick = |c: &String| {
         Some(
-            c.strip_prefix("sh -c nohup '/opt/herdsman/bin/herdsman' kick ")?
+            c.strip_prefix("sh -c nohup '/opt/drover/bin/drover' kick ")?
                 .split(' ')
                 .next()?
                 .to_string(),
@@ -682,16 +678,16 @@ fn starts_share_slots_round_robin_across_fleets() {
         );
         firsts.push(k[0].clone());
         // Every kick ends before the next pass: its slot is free again.
-        for l in herdsman::db::leases(&c.state, "spawn-") {
-            herdsman::db::release(&c.state, &l.key, None);
+        for l in drover::db::leases(&c.state, "spawn-") {
+            drover::db::release(&c.state, &l.key, None);
         }
     }
     assert_eq!(firsts, ["alpha", "beta", "gamma"]);
 }
 
-struct Watch(Fake, herdsman::Ctx, Shared<Vec<bool>>);
-impl herdsman::runner::Runner for Watch {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+struct Watch(Fake, drover::Ctx, Shared<Vec<bool>>);
+impl drover::runner::Runner for Watch {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog == "df" {
             self.2.borrow_mut().push(marker(&self.1, 1).is_some());
         }
@@ -727,7 +723,7 @@ fn waiting_names_the_slot_holders() {
 
 fn broken(f: Fake) -> Fake {
     let mut f = fake_with("1.0", f);
-    let used = herdsman::runner::Out {
+    let used = drover::runner::Out {
         code: 1,
         stderr: "fatal: 'issue-1' is already used by worktree at '/w/old/worktrees/x'".into(),
         ..Default::default()
@@ -738,7 +734,7 @@ fn broken(f: Fake) -> Fake {
 }
 
 /// #724: `fleet` #`n`'s launched kick runs on `r` and its spawn fails, as a detached kick would.
-fn fail_kick(c: &herdsman::Ctx, r: &Fake, fleet: &str, n: u64) {
+fn fail_kick(c: &drover::Ctx, r: &Fake, fleet: &str, n: u64) {
     let (code, out) = run(c, r, &["kick", fleet, &n.to_string(), "--why", "drive", "--now"]);
     assert_eq!(code, 0, "{out}");
 }
@@ -776,7 +772,7 @@ fn a_failing_spawn_backs_off_and_a_kick_retries_it_at_once() {
     pass(&c, &r);
     assert_eq!(launched(&r, 1), 1, "a first failure retries at once");
     fail_kick(&c, &bad, "sendmeter", 1);
-    let at = |s: u64| herdsman::Ctx {
+    let at = |s: u64| drover::Ctx {
         now: c.now + s,
         ..c.clone()
     };
@@ -853,7 +849,7 @@ fn waiting_names_a_slot_wait_not_a_stuck_tick() {
     .unwrap();
     std::fs::write(c.state.with_file_name("drive.at"), (c.now - 60).to_string()).unwrap();
     fail_kick(
-        &herdsman::Ctx {
+        &drover::Ctx {
             now: c.now - 100,
             ..c.clone()
         },
@@ -862,14 +858,14 @@ fn waiting_names_a_slot_wait_not_a_stuck_tick() {
         1,
     );
     let a = serde_json::json!([{"issue": 1, "step": "start", "outcome": "waiting", "code": "SPAWN_PENDING"}]);
-    let e = herdsman::events::Event::new(
+    let e = drover::events::Event::new(
         c.now - 60,
         "sendmeter",
         None,
         "drive-pass",
         serde_json::json!({"actions": a}),
     );
-    herdsman::events::append(&c.state, &e).unwrap();
+    drover::events::append(&c.state, &e).unwrap();
     let (code, out) = run(&c, &fake("1.0"), &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
     assert!(
@@ -879,7 +875,7 @@ fn waiting_names_a_slot_wait_not_a_stuck_tick() {
     assert!(!out.contains("tick stuck?"), "{out}");
 }
 
-fn dead_six_live_one(name: &str) -> (herdsman::Ctx, Fake, FakeShed) {
+fn dead_six_live_one(name: &str) -> (drover::Ctx, Fake, FakeShed) {
     let (c, sh) = fleet(name, 6, 1);
     (11..=16).for_each(|n| mark(&c, n, 4242, 10));
     mark(&c, 17, 4343, 30);
@@ -899,9 +895,9 @@ fn a_dead_kicks_marker_counts_nowhere_and_the_hold_names_the_live_one() {
     let held = serde_json::json!([{"issue": 3, "step": "spawn", "outcome": "waiting", "code": "SPAWN_PENDING"}]);
     for ts in [c.now - 1200, c.now - 60] {
         let d = serde_json::json!({"actions": held});
-        herdsman::events::append(
+        drover::events::append(
             &c.state,
-            &herdsman::events::Event::new(ts, "sendmeter", None, "drive-pass", d),
+            &drover::events::Event::new(ts, "sendmeter", None, "drive-pass", d),
         )
         .unwrap();
     }
@@ -919,11 +915,11 @@ fn a_dead_kicks_marker_counts_nowhere_and_the_hold_names_the_live_one() {
 fn waiting_names_the_marker_that_holds_the_slot() {
     let (c, r, _sh) = dead_six_live_one("kicks-812-waiting");
     fix_due(&c, 21);
-    let d = serde_json::json!({"step": "fix", "cmd": "herdsman spawn sendmeter 21 impl --supersede",
+    let d = serde_json::json!({"step": "fix", "cmd": "drover spawn sendmeter 21 impl --supersede",
         "result": "REFUSED SPAWN_PENDING: 6 spawns starting", "code": "SPAWN_PENDING"});
-    herdsman::events::append(
+    drover::events::append(
         &c.state,
-        &herdsman::events::Event::new(c.now - 30, "sendmeter", Some(21), "driven", d),
+        &drover::events::Event::new(c.now - 30, "sendmeter", Some(21), "driven", d),
     )
     .unwrap();
     let (code, out) = run(&c, &r, &["waiting", "sendmeter"]);

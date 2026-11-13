@@ -4,8 +4,8 @@
 mod common;
 use common::fake_shed::Cli;
 use common::*;
-use herdsman::runner::{Out, Runner};
-use herdsman::serve::Server;
+use drover::runner::{Out, Runner};
+use drover::serve::Server;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
@@ -13,14 +13,14 @@ use std::time::{Duration, Instant};
 
 const ADDR: &str = "127.0.0.1:7777";
 const TIMEOUT: &str = "timed out waiting for agent startup";
-fn setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
+fn setup(name: &str, b: &FakeShed) -> drover::Ctx {
     let cfg = format!(
         "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
          [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
         b.sock.display()
     );
     let mut c = ctx(&tmpdir(name), &cfg);
-    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
     let f = Fake::default();
     assert_eq!(run(&c, &f, &["profiles", "sync"]).0, 0);
     assert_eq!(run(&c, &f, &["thread", "new", "sendmeter", "Look"]).1, "t1\n");
@@ -96,13 +96,13 @@ fn a_blocked_orchestrator_start_holds_no_request() {
     let c = setup("cold-start", sh);
     let f: &'static Fake = Box::leak(Box::new(acp()));
     let r = Slow(sh.cli(f), AtomicBool::new(false), AtomicBool::new(false));
-    let (c, r): (&'static herdsman::Ctx, &'static Slow) = (Box::leak(Box::new(c)), Box::leak(Box::new(r)));
+    let (c, r): (&'static drover::Ctx, &'static Slow) = (Box::leak(Box::new(c)), Box::leak(Box::new(r)));
     let pairing = Server::new(c, r, Some(ADDR.into()));
-    let a = pair(&pairing, c, "Mozilla/5.0 (iPhone)", herdsman::now());
-    let b = pair(&pairing, c, "Mozilla/5.0 (iPad)", herdsman::now());
+    let a = pair(&pairing, c, "Mozilla/5.0 (iPhone)", drover::now());
+    let b = pair(&pairing, c, "Mozilla/5.0 (iPad)", drover::now());
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || herdsman::serve::serve_on(c, r, l, false));
+    std::thread::spawn(move || drover::serve::serve_on(c, r, l, false));
 
     // Device A answers t1's ask: its conductor is asleep, so the answer wakes it (the start blocks).
     let (tx, rx) = std::sync::mpsc::channel();
@@ -144,7 +144,7 @@ fn a_blocked_orchestrator_start_holds_no_request() {
     let (t, mut last) = (Instant::now(), String::new());
     while t.elapsed() < Duration::from_secs(10) {
         std::thread::sleep(Duration::from_millis(300));
-        let log = herdsman::events::jsonl(&c.state).unwrap_or_default();
+        let log = drover::events::jsonl(&c.state).unwrap_or_default();
         if log.contains("\"orchestrator-start\"") && log == last {
             break;
         }
@@ -171,7 +171,7 @@ fn a_failed_background_start_shows_in_the_thread_its_message_kept() {
         res.starts_with("HTTP/1.1 200") && res.ends_with("answered q1\n"),
         "{res}"
     );
-    let log = herdsman::events::jsonl(&c.state).unwrap();
+    let log = drover::events::jsonl(&c.state).unwrap();
     assert!(
         log.contains(r#""text":"DECISION q1: b""#),
         "the message stays logged: {log}"

@@ -2,8 +2,8 @@
 //! (a reviewer's event too), else the issue branch's latest run read by the tick; never a query-string Actions URL.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const GH: &str = "https://github.com/jirathip-dev/sendmeter";
@@ -23,7 +23,7 @@ fn section(page: &str, id: &str) -> String {
     page[i..i + page[i..].find("</section>").unwrap()].to_string()
 }
 
-fn spawned(name: &str) -> herdsman::Ctx {
+fn spawned(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "17"]).0,

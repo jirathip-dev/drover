@@ -3,11 +3,11 @@
 //! One test: the lane's env vars and cwd are process-wide.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 
-const AIR_SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
+const AIR_SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
 
 struct Air<'a>(OverSsh<'a>);
 
@@ -55,15 +55,15 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     std::fs::create_dir_all(&wt).unwrap();
     std::fs::write(wt.join(".git"), "gitdir: elsewhere\n").unwrap();
     std::env::set_current_dir(&wt).unwrap();
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
-    std::env::set_var("HERDSMAN_OUTBOX", "1");
+    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    std::env::set_var("DROVER_OUTBOX", "1");
     let ask = ["ask", "sendmeter", "12", "Which way?", "--option", "a", "--option", "b"];
     assert_eq!(run(&lane, &Fake::default(), &ask).0, 0);
     assert_eq!(run(&lane, &Fake::default(), &["turn", "need-input"]).0, 0);
-    let ob = wt.join(".herdsman/outbox.jsonl");
+    let ob = wt.join(".drover/outbox.jsonl");
     assert_eq!(std::fs::read_to_string(&ob).unwrap().lines().count(), 2);
-    std::env::remove_var("HERDSMAN_OUTBOX");
-    std::env::remove_var("HERDSMAN_LANE");
+    std::env::remove_var("DROVER_OUTBOX");
+    std::env::remove_var("DROVER_LANE");
 
     // The main host: the fleet is paused, #12's lane lives on air, and #13 waits in the queue.
     assert_eq!(run(&main, &Fake::default(), &["queue", "sendmeter", "add", "13"]).0, 0);
@@ -84,7 +84,7 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     assert_eq!(asks[0].str("agent"), Some("sendmeter-impl-12"));
     let turns: Vec<_> = ev.iter().filter(|e| e.kind == "turn-end").collect();
     assert!(turns.len() == 1 && turns[0].issue == Some(12), "{ev:?}");
-    assert!(!ob.exists() && !wt.join(".herdsman/outbox.jsonl.draining").exists());
+    assert!(!ob.exists() && !wt.join(".drover/outbox.jsonl.draining").exists());
     let (_, asked) = run(&main, &r, &["asks", "sendmeter"]);
     assert!(asked.contains("q1 #12") && asked.contains("Which way?"), "{asked}");
 
@@ -106,9 +106,9 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     run(&main, &Air::new(&f, &air), &["drive"]);
     assert_eq!(ev_count(&main, "spawn"), 1, "only #12's seeded spawn");
     assert_eq!(ev_count(&main, "drive-pass"), 0);
-    assert_eq!(herdsman::drive::last_pass(&main, "sendmeter"), None);
+    assert_eq!(drover::drive::last_pass(&main, "sendmeter"), None);
 }
 
-fn ev_count(c: &herdsman::Ctx, kind: &str) -> usize {
+fn ev_count(c: &drover::Ctx, kind: &str) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == kind).count()
 }

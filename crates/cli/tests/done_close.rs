@@ -1,13 +1,13 @@
-//! #248: `herdsman check` closes a done lane's session once its handoff is logged; dirty or unpushed lanes stay.
+//! #248: `drover check` closes a done lane's session once its handoff is logged; dirty or unpushed lanes stay.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 
 const T: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-12";
 
-fn lane(name: &str, pushed: u64) -> (herdsman::Ctx, String, FakeShed) {
+fn lane(name: &str, pushed: u64) -> (drover::Ctx, String, FakeShed) {
     let c = ctx(&tmpdir(name), CONFIG);
     let sh = FakeShed::new();
     sh.attach(&c);
@@ -38,7 +38,7 @@ fn with(wt: &str, status: &str, ahead: &str) -> Fake {
         .reply("ps -axo pid=,rss=", "  201 276480\n")
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -89,7 +89,7 @@ fn a_dirty_or_unpushed_lane_stays_open_with_an_event() {
         // The card says why it stays open.
         let f = fake(&sh, &wt, status, ahead);
         let r = sh.on(&f);
-        let s = herdsman::serve::Server::new(&c, &r, None);
+        let s = drover::serve::Server::new(&c, &r, None);
         let page = with_queue(
             &String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)),
             &s,

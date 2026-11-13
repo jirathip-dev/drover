@@ -80,7 +80,7 @@ mod tests {
             state: d.join("events.jsonl"),
             worktrees: d.join("w"),
             homes: std::collections::BTreeMap::default(),
-            exe: "herdsman".into(),
+            exe: "drover".into(),
             now: 0,
             home: d,
             hints: vec![],

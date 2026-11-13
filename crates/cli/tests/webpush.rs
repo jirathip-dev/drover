@@ -7,10 +7,10 @@ use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::Aes128Gcm;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{emit, read, Event};
-use herdsman::serve::Server;
-use herdsman::webpush;
+use drover::config::Config;
+use drover::events::{emit, read, Event};
+use drover::serve::Server;
+use drover::webpush;
 use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
 use p256::{PublicKey, SecretKey};
 use std::os::unix::fs::PermissionsExt;
@@ -131,17 +131,17 @@ impl std::ops::Deref for OnShed {
     }
 }
 
-impl herdsman::runner::Runner for OnShed {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for OnShed {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         self.0.run(prog, args)
     }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
         self.0.run_in(prog, args, input)
     }
     fn sleep(&self, secs: u64) {
         self.0.sleep(secs);
     }
-    fn shed(&self) -> Option<herdsman::shed::Shed> {
+    fn shed(&self) -> Option<drover::shed::Shed> {
         Some(self.1.shed())
     }
 }
@@ -580,18 +580,18 @@ fn push_titles_use_each_devices_theme_words() {
             ("plain".to_string(), b.to_string()),
         ]
     };
-    assert_eq!(titles("merged"), pair("Order up: #7 merged", "herdsman"));
+    assert_eq!(titles("merged"), pair("Order up: #7 merged", "drover"));
     assert_eq!(
         titles("needs-human"),
         pair("The bell: sendmeter #7 needs you", "#7 needs you: r")
     );
     assert_eq!(
         titles("needs-decision"),
-        pair("The bell: sendmeter #7 needs you", "herdsman")
+        pair("The bell: sendmeter #7 needs you", "drover")
     );
     assert_eq!(
         titles("blocked"),
-        pair("herdsman", "herdsman"),
+        pair("drover", "drover"),
         "no theme words for other events"
     );
 }

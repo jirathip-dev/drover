@@ -1,9 +1,9 @@
 //! #316: a harness core has never heard of runs on the generic fallbacks: spawn → chat → card → memory row.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::providers;
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::providers;
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -19,7 +19,7 @@ fn the_generic_harness_has_every_fallback() {
     assert_eq!(h.credential(), providers::Credential::None);
     assert!(h.login().is_none() && h.hook_dialect().is_none() && h.usage().is_none());
     let c = ctx(&tmpdir("generic-fallbacks"), CONFIG);
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let banner = "Claude usage limit reached. Your limit will reset at 3pm.";
     assert!(!h.signed_out("Please run /login") && h.usage_limited(&cfg, &Fake::default(), banner, T).is_none());
     assert_eq!(h.tool_line("⏺ Bash(cargo test)"), None);
@@ -31,7 +31,7 @@ fn the_generic_harness_has_every_fallback() {
     assert_eq!(h.transcript(std::path::Path::new("/"), "/wt"), None);
     assert!(h.now_line("$ cargo test") && !h.now_line("────────────────────"));
     assert_eq!(
-        herdsman::lanes::activity("gemini", MENU),
+        drover::lanes::activity("gemini", MENU),
         "2. Postgres",
         "the last non-chrome line"
     );

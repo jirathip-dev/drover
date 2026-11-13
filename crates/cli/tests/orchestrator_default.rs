@@ -2,8 +2,8 @@
 //! and the [config] sheet's Conductor choices write that table in place (backup first, refused unless doctor passes).
 mod common;
 use common::*;
-use herdsman::events::{read, Event};
-use herdsman::serve::Server;
+use drover::events::{read, Event};
+use drover::serve::Server;
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -22,7 +22,7 @@ fn config_sheet(s: &Server) -> String {
     queue_js(s, ADDR, T, "sheet(d, 'sendmeter')")
 }
 
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let text = CONFIG.replace(
         "profile = \"fleet-rev\"\n",
         "profile = \"fleet-rev\"\nmodel = \"sonnet\"\n",
@@ -30,7 +30,7 @@ fn setup(name: &str) -> herdsman::Ctx {
     ctx(&tmpdir(name), &text)
 }
 
-fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
+fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
     let text = CONFIG
         .replace(
             "profile = \"fleet-rev\"\n",
@@ -45,7 +45,7 @@ fn acp_setup(name: &str, b: &FakeShed) -> herdsman::Ctx {
         b.sock.display()
     );
     let mut c = ctx(&tmpdir(name), &text);
-    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
     c
 }
 
@@ -59,7 +59,7 @@ fn host() -> Fake {
         .reply("which claude", "/usr/local/bin/claude\n")
 }
 
-fn starts(c: &herdsman::Ctx) -> Vec<Event> {
+fn starts(c: &drover::Ctx) -> Vec<Event> {
     let all = read(&c.state).unwrap().into_iter();
     all.filter(|e| e.kind == "orchestrator-start").collect()
 }

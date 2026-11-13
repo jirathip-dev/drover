@@ -6,8 +6,8 @@
 //! change is the changed part's data only (#269: JSON the board draws), under 5 KB. Budgets: docs/performance.md.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, Event};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
@@ -42,7 +42,7 @@ fn shed() -> &'static FakeShed {
 }
 
 /// 30 impl lanes, #1–#15 on mini and #16–#30 on bazzite, each idle with a pane and an unpushed worktree.
-fn fixture() -> (herdsman::Ctx, Slow) {
+fn fixture() -> (drover::Ctx, Slow) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let cfg = format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
     let c = ctx(&tmpdir("perf"), &cfg);
@@ -81,7 +81,7 @@ fn fixture() -> (herdsman::Ctx, Slow) {
         .reply("herdr --machine bazzite pane read", "⏺ Working on it\n\n❯ \n")
         .reply("git -C", &format!("{} {}\n", "a".repeat(40), NOW - 600))
         // #389: no lane has queued anything for the main host.
-        .reply("ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' 'd=", "")
+        .reply("ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' 'd=", "")
         .reply("ssh", &format!("{} {}\n", "a".repeat(40), NOW - 600));
     (c, Slow(f, Mutex::default(), AtomicUsize::new(0)))
 }
@@ -90,12 +90,12 @@ fn ms(t: Instant) -> u128 {
     t.elapsed().as_millis()
 }
 
-/// `serve_on` (the real server: socket, sampler, watcher) on this fixture, as `herdsman serve` runs it; its address.
-fn serve<R: Runner + 'static>(c: herdsman::Ctx, r: R) -> (&'static herdsman::Ctx, &'static R, std::net::SocketAddr) {
-    let (c, r): (&'static herdsman::Ctx, &'static R) = (Box::leak(Box::new(c)), Box::leak(Box::new(r)));
+/// `serve_on` (the real server: socket, sampler, watcher) on this fixture, as `drover serve` runs it; its address.
+fn serve<R: Runner + 'static>(c: drover::Ctx, r: R) -> (&'static drover::Ctx, &'static R, std::net::SocketAddr) {
+    let (c, r): (&'static drover::Ctx, &'static R) = (Box::leak(Box::new(c)), Box::leak(Box::new(r)));
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || herdsman::serve::serve_on(c, r, l, false));
+    std::thread::spawn(move || drover::serve::serve_on(c, r, l, false));
     get(addr, "/sw.js");
     (c, r, addr)
 }
@@ -155,7 +155,7 @@ fn a_step_makes_one_remote_call_per_host_and_requests_make_none() {
     assert_eq!(code, 0, "{out}");
     let calls = std::mem::take(&mut *r.1.lock().unwrap());
     assert!(calls.len() <= 1, "remote calls in one step: {calls:?}");
-    assert!(herdsman::snapshot::load(&c).is_some_and(|s| s.reads.keys().any(|k| k.contains("issue-20"))));
+    assert!(drover::snapshot::load(&c).is_some_and(|s| s.reads.keys().any(|k| k.contains("issue-20"))));
     let before = r.2.load(Relaxed);
     let (c, r, addr) = serve(c, r);
     get(addr, "/"); // warm, as a phone's second load is
@@ -199,7 +199,7 @@ fn a_recorded_verdict_and_a_merged_lane_are_never_read() {
     )
     .unwrap();
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
-    let keys: Vec<String> = herdsman::snapshot::load(&c).unwrap().reads.into_keys().collect();
+    let keys: Vec<String> = drover::snapshot::load(&c).unwrap().reads.into_keys().collect();
     assert!(keys.iter().any(|k| k.contains("issue-18")), "{keys:?}");
     assert!(!keys.iter().any(|k| k.contains("rev-16-r1/verdict.md")), "{keys:?}");
     assert!(!keys.iter().any(|k| k.contains("issue-17'")), "{keys:?}");
@@ -211,7 +211,7 @@ fn a_recorded_verdict_and_a_merged_lane_are_never_read() {
 fn the_page_carries_no_tab_and_each_part_is_its_own_read() {
     let (c, r) = fixture();
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
-    let s = herdsman::serve::Server::new(&c, &r, Some(ADDR.into()));
+    let s = drover::serve::Server::new(&c, &r, Some(ADDR.into()));
     let body = |path: &str, extra: &str| {
         let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{extra}\r\n"), NOW);
         String::from_utf8_lossy(&res).into_owned()
@@ -237,7 +237,7 @@ fn the_page_carries_no_tab_and_each_part_is_its_own_read() {
 fn the_loader_and_the_age_are_one_strip_under_the_header() {
     let (c, r) = fixture();
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
-    let s = herdsman::serve::Server::new(&c, &r, Some(ADDR.into()));
+    let s = drover::serve::Server::new(&c, &r, Some(ADDR.into()));
     let res = s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW + 600);
     let page = String::from_utf8_lossy(&res);
     let (head, rest) = page.split_once("</header>").unwrap();
@@ -264,7 +264,7 @@ fn the_loader_and_the_age_are_one_strip_under_the_header() {
         NOW + 600,
     );
     let needs = String::from_utf8_lossy(&res);
-    let ts = herdsman::snapshot::load(&c).unwrap().ts;
+    let ts = drover::snapshot::load(&c).unwrap().ts;
     assert!(
         ts > 0 && needs.contains(&format!("\"snap\":{ts},")) && !needs.contains("\"age\""),
         "{needs}"
@@ -288,7 +288,7 @@ fn the_first_paint_in_webkit_is_under_300ms() {
     let paint = |warm: bool| {
         let mut sw = webview();
         if warm {
-            sw.env("HERDSMAN_WARM", "1");
+            sw.env("DROVER_WARM", "1");
         }
         let o = sw
             .args([&base, "390", "-", "horse"])
@@ -393,11 +393,11 @@ fn a_steady_state_live_change_is_one_part_under_5kb() {
 
 /// #447: a 30,000-event log and 200 idle lanes, each with an answered ask, a review round and the step's chatter;
 /// ten asks still open.
-fn big() -> (herdsman::Ctx, Fake, &'static FakeShed) {
+fn big() -> (drover::Ctx, Fake, &'static FakeShed) {
     big_with(200)
 }
 
-fn big_with(lanes: u64) -> (herdsman::Ctx, Fake, &'static FakeShed) {
+fn big_with(lanes: u64) -> (drover::Ctx, Fake, &'static FakeShed) {
     let c = ctx(&tmpdir("perf-big"), CONFIG);
     let sh = shed();
     sh.attach(&c);
@@ -445,16 +445,16 @@ fn big_with(lanes: u64) -> (herdsman::Ctx, Fake, &'static FakeShed) {
 #[test]
 fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
     let (c, r, sh) = big();
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    let events = herdsman::events::read(&c.state).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let events = drover::events::read(&c.state).unwrap();
     assert_eq!(events.len(), 30_000);
     let on = sh.on(&r);
-    let list = herdsman::herdr::list(&on, "agent").unwrap();
-    let st = herdsman::events::fold(&events);
-    let all = herdsman::snapshot::lanes(&cfg, &on, &c, (&events, &st), &list);
+    let list = drover::herdr::list(&on, "agent").unwrap();
+    let st = drover::events::fold(&events);
+    let all = drover::snapshot::lanes(&cfg, &on, &c, (&events, &st), &list);
     assert_eq!(all.len(), 200);
     let t = Instant::now();
-    let w = herdsman::snapshot::waits(&c, &cfg, &on, &events, &all);
+    let w = drover::snapshot::waits(&c, &cfg, &on, &events, &all);
     let waits = ms(t);
     let owner: Vec<_> = w
         .iter()
@@ -462,13 +462,13 @@ fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
         .collect();
     assert_eq!(owner.len(), 10, "{owner:?}");
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
-    let mut snap = herdsman::snapshot::load(&c).unwrap();
+    let mut snap = drover::snapshot::load(&c).unwrap();
     assert_eq!(snap.waits.len(), w.len(), "the step saves the waits the board reads");
     // Tag the saved waits: a request that shows the tag read the snapshot instead of scanning the log.
     for w in &mut snap.waits {
         w.what = format!("snaphit {}", w.what);
     }
-    herdsman::db::put(&c.state, "board", snap.ts, &snap).unwrap();
+    drover::db::put(&c.state, "board", snap.ts, &snap).unwrap();
     let (_, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0)));
     let mut lanes = 0;
     for path in ["/api/v1/lanes", "/herd.json"] {
@@ -553,7 +553,7 @@ fn a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget() {
 
 const FLEETS: [&str; 5] = ["sendmeter", "alpha", "bravo", "charlie", "delta"];
 
-fn huge() -> (herdsman::Ctx, Fake) {
+fn huge() -> (drover::Ctx, Fake) {
     let sh = shed();
     let mut cfg = CONFIG.to_string();
     for f in &FLEETS[1..] {
@@ -646,7 +646,7 @@ fn send(addr: std::net::SocketAddr, req: &str) -> String {
     String::from_utf8_lossy(&res).into_owned()
 }
 
-fn pair_on(addr: std::net::SocketAddr, c: &herdsman::Ctx) -> String {
+fn pair_on(addr: std::net::SocketAddr, c: &drover::Ctx) -> String {
     let post = |path: &str, extra: &str| {
         send(
             addr,
@@ -664,9 +664,9 @@ fn pair_on(addr: std::net::SocketAddr, c: &herdsman::Ctx) -> String {
         .to_string();
     let set = res.lines().find_map(|l| l.strip_prefix("Set-Cookie: ")).unwrap();
     let cookie = format!("Cookie: {}\r\n", &set[..set.find(';').unwrap()]);
-    let now = herdsman::now();
+    let now = drover::now();
     let (rc, out) = run(
-        &herdsman::Ctx { now, ..c.clone() },
+        &drover::Ctx { now, ..c.clone() },
         &Fake::default(),
         &["serve", "approve", &code],
     );
@@ -694,11 +694,11 @@ fn op(addr: std::net::SocketAddr, cookie: &str, body: &str) -> String {
 
 #[test]
 fn the_state_read_stays_under_300ms_on_a_150k_event_log() {
-    let live = std::env::var("HERDSMAN_PERF_DB");
+    let live = std::env::var("DROVER_PERF_DB");
     let (c, r) = match &live {
         Ok(db) => {
             let cfg =
-                std::env::var("HERDSMAN_PERF_CONFIG").map_or(CONFIG.into(), |p| std::fs::read_to_string(p).unwrap());
+                std::env::var("DROVER_PERF_CONFIG").map_or(CONFIG.into(), |p| std::fs::read_to_string(p).unwrap());
             let c = ctx(&tmpdir("perf-live"), &cfg);
             std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
             std::fs::copy(db, c.state.with_file_name("state.db")).unwrap();
@@ -708,10 +708,10 @@ fn the_state_read_stays_under_300ms_on_a_150k_event_log() {
     };
     let (c, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0)));
     let first = fetch(addr, "/api/v1/state").0;
-    let rebuilt = herdsman::events::REBUILDS.load(Relaxed);
+    let rebuilt = drover::events::REBUILDS.load(Relaxed);
     let mut t: Vec<u128> = (0..5).map(|_| fetch(addr, "/api/v1/state").0).collect();
     t.sort_unstable();
-    let n = herdsman::events::read(&c.state).unwrap().len();
+    let n = drover::events::read(&c.state).unwrap().len();
     report(&format!(
         "#859 perf ({n} events): GET /api/v1/state first {first} ms, runs {t:?} ms, median {} ms",
         t[2]
@@ -733,7 +733,7 @@ fn the_state_read_stays_under_300ms_on_a_150k_event_log() {
         assert!(res.starts_with("HTTP/1.1 200"), "{p}: {}", &res[..res.len().min(200)]);
     }
     assert_eq!(
-        herdsman::events::REBUILDS.load(Relaxed),
+        drover::events::REBUILDS.load(Relaxed),
         rebuilt,
         "a board read built an ask index from a copied slice of the log"
     );
@@ -766,7 +766,7 @@ fn the_state_read_stays_under_300ms_on_a_150k_event_log() {
 struct NoSpawn(Slow, Mutex<Vec<String>>);
 impl Runner for NoSpawn {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
-        if herdsman::runner::in_request() {
+        if drover::runner::in_request() {
             let line = format!("{prog} {}", args.join(" "));
             self.1.lock().unwrap().push(line.clone());
             panic!("#859: `{line}` started on a board request");
@@ -835,11 +835,11 @@ fn a_big_fold_holds_up_no_other_logs_read() {
     let (big, _) = huge();
     let (small, _) = fixture();
     let p = big.state.clone();
-    let h = std::thread::spawn(move || herdsman::events::shared(&p).map(|l| l.len()));
+    let h = std::thread::spawn(move || drover::events::shared(&p).map(|l| l.len()));
     std::thread::sleep(Duration::from_millis(50));
     let (t, folding) = (Instant::now(), !h.is_finished());
     append(&small.state, &Event::new(NOW, "sendmeter", None, "note", json!({}))).unwrap();
-    herdsman::events::shared(&small.state).unwrap();
+    drover::events::shared(&small.state).unwrap();
     let waited = ms(t);
     assert_eq!(h.join().unwrap().unwrap(), 150_000);
     assert!(

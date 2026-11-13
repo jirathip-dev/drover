@@ -1,10 +1,10 @@
 //! #677: why notes. `turn done` checks the lane's why.md and puts it on the pushed head under `refs/notes/why` on a
-//! real (bare) origin, the PR body and the log; refusals push nothing; concurrent writers lose no note; `herdsman why`
+//! real (bare) origin, the PR body and the log; refusals push nothing; concurrent writers lose no note; `drover why`
 //! reads a merged line back; every brief kind carries its notes. Every test runs as #12's impl lane (process-wide env).
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Runner};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -135,8 +135,8 @@ fn repo(name: &str) -> Repo {
     }
 }
 
-fn lane(repo: &Repo, update: bool) -> (herdsman::Ctx, FakeShed) {
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
+fn lane(repo: &Repo, update: bool) -> (drover::Ctx, FakeShed) {
+    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
     let c = ctx(
         &repo.dir,
         &CONFIG.replace("/tmp/does-not-matter/sendmeter", repo.local.to_str().unwrap()),
@@ -163,8 +163,16 @@ fn lane(repo: &Repo, update: bool) -> (herdsman::Ctx, FakeShed) {
 }
 
 /// The Fake around git: #12's open PR at `head`, its spec, and the writes it allows.
+fn body(head: &str) -> String {
+    format!("Closes #12\n\n## For humans\n\nx\n\n## Evidence (head {head})")
+}
+
 fn fake(head: &str) -> Fake {
-    let pr = json!({"number": 100, "state": "OPEN", "headRefOid": head, "body": "Closes #12\n\n## For humans\n\nx"});
+    fake_body(head, &body(head))
+}
+
+fn fake_body(head: &str, body: &str) -> Fake {
+    let pr = json!({"number": 100, "state": "OPEN", "headRefOid": head, "body": body});
     Fake::default()
         .reply("gh pr view issue-12", &pr.to_string())
         .reply(
@@ -193,7 +201,7 @@ fn origin_note(repo: &Repo, sha: &str) -> Option<String> {
         .then(|| String::from_utf8_lossy(&o.stdout).into_owned())
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -342,14 +350,13 @@ fn two_lanes_finishing_at_once_both_keep_their_notes() {
     g(&seed, &["commit", "-qm", "b"]);
     g(&seed, &["push", "-q", "origin", "issue-13"]);
     let other = g(&seed, &["rev-parse", "HEAD"]);
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let f = cfg.fleet("sendmeter").unwrap();
     let r = Fake::default();
     let git = Git::new(&r);
     std::thread::scope(|s| {
-        let a =
-            s.spawn(|| herdsman::why::attach(&c, &git, f, "sendmeter", ("issue-12", &repo.head), "Owner: twelve\n"));
-        let b = s.spawn(|| herdsman::why::attach(&c, &git, f, "sendmeter", ("issue-13", &other), "Owner: thirteen\n"));
+        let a = s.spawn(|| drover::why::attach(&c, &git, f, "sendmeter", ("issue-12", &repo.head), "Owner: twelve\n"));
+        let b = s.spawn(|| drover::why::attach(&c, &git, f, "sendmeter", ("issue-13", &other), "Owner: thirteen\n"));
         a.join().unwrap().unwrap();
         b.join().unwrap().unwrap();
     });
@@ -423,19 +430,19 @@ fn a_refused_note_is_nudged_once_then_review_goes_ahead() {
     let wt = repo.wt.to_string_lossy().into_owned();
     sh.lane("sendmeter-impl-12", "idle", &wt);
     let ci = json!([{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
-    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": repo.head, "statusCheckRollup": ci});
+    let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": repo.head, "statusCheckRollup": ci, "body": body(&repo.head)});
     let r = Fake::default().reply("gh pr view issue-12", &pr.to_string()).reply(
         "gh issue view 12",
         &json!({"title": "Meter sends", "body": SPEC}).to_string(),
     );
     assert_eq!(run(&c, &Git::new(&r), &["turn", "done"]).0, 3);
-    let later = |s| herdsman::Ctx {
+    let later = |s| drover::Ctx {
         now: c.now + s,
         ..c.clone()
     };
     let (code, out) = run(&later(200), &Git::new(&r), &["drive"]);
     assert_eq!(code, 0, "{out}");
-    let nudge = "herdsman: your why note was refused: WHY_INVALID: why.md missing";
+    let nudge = "drover: your `turn done` was refused: WHY_INVALID: why.md missing";
     let nudges = || {
         sh.sent("sendmeter-impl-12")
             .iter()
@@ -449,4 +456,48 @@ fn a_refused_note_is_nudged_once_then_review_goes_ahead() {
     run(&later(400), &Git::new(&r), &["drive"]);
     assert_eq!(nudges(), 1);
     assert_eq!(kinds(&c, "pushed").len(), 1, "{:?}", r.calls.borrow());
+}
+
+#[test]
+fn a_pr_body_without_the_heads_evidence_is_refused_before_review() {
+    let repo = repo("why-pr-body");
+    let base = g(&repo.wt, &["rev-parse", "HEAD^1"]);
+    let stale = format!("## For humans\n\nx\n\n## Evidence (head {base})\n\ncargo test: exit 0");
+    let cases = [
+        (stale, "names no sha of head"),
+        (
+            "## For humans\n\nx\n\n## Evidence (head SHA_PLACEHOLDER)\n\nWEEK_PLACEHOLDER".into(),
+            "names no sha of head",
+        ),
+        (
+            format!("## What changed\n\nx\n\n## Evidence (head {})", repo.head),
+            "no `## For humans` section",
+        ),
+        (
+            format!(
+                "{}\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)",
+                body(&repo.head)
+            ),
+            "carries `🤖 Generated with [Claude Code]",
+        ),
+    ];
+    let (c, _sh) = lane(&repo, false);
+    std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
+    for (b, why) in cases {
+        let r = fake_body(&repo.head, &b);
+        let (code, out) = run(&c, &Git::new(&r), &["turn", "done"]);
+        assert_eq!(code, 3, "{why}: {out}");
+        assert!(out.contains("REFUSED PR_BODY: ") && out.contains(why), "{why}: {out}");
+        assert!(!r.called("gh pr edit") && kinds(&c, "why").is_empty(), "{why}");
+        let t = kinds(&c, "turn-end").pop().unwrap();
+        assert!(
+            t.str("note").unwrap().starts_with("PR_BODY: "),
+            "{why}: the turn still ends"
+        );
+    }
+    let merged = "Merge remote-tracking branch 'origin/staging' into issue-12";
+    g(&repo.wt, &["commit", "-q", "--allow-empty", "-m", merged]);
+    let top = g(&repo.wt, &["rev-parse", "HEAD"]);
+    let (code, out) = run(&c, &Git::new(&fake_body(&top, &body(&repo.head))), &["turn", "done"]);
+    assert_eq!(code, 0, "a staging merge over the named head passes: {out}");
 }

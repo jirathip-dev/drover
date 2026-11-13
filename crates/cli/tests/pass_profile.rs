@@ -16,16 +16,16 @@ fn cpu() -> f64 {
 #[test]
 #[ignore]
 fn pass_profile() {
-    let src = PathBuf::from(std::env::var("HERDSMAN_PROFILE").expect("HERDSMAN_PROFILE"));
-    let fast = std::env::var("HERDSMAN_PROFILE_MODE").as_deref() == Ok("fast");
-    let runs: usize = std::env::var("HERDSMAN_PROFILE_RUNS").map_or(3, |n| n.parse().unwrap());
+    let src = PathBuf::from(std::env::var("DROVER_PROFILE").expect("DROVER_PROFILE"));
+    let fast = std::env::var("DROVER_PROFILE_MODE").as_deref() == Ok("fast");
+    let runs: usize = std::env::var("DROVER_PROFILE_RUNS").map_or(3, |n| n.parse().unwrap());
     let cfg: String = std::fs::read_to_string(src.join("fleet.toml"))
         .unwrap()
         .lines()
         .filter(|l| !l.trim_start().starts_with("roots"))
         .map(|l| format!("{l}\n"))
         .collect();
-    let log = herdsman::events::read(&src.join("events.jsonl")).unwrap();
+    let log = drover::events::read(&src.join("events.jsonl")).unwrap();
     let (len, now) = (log.len(), log.iter().map(|e| e.ts).max().unwrap() + 60);
     drop(log);
     for i in 0..runs {
@@ -42,12 +42,12 @@ fn pass_profile() {
                 .reply("vm_stat", "Pages free: 100000.\nSwapouts: 100.\n"),
         );
         let args: &[&str] = if fast { &["drive", "--fast"] } else { &["drive"] };
-        let (r0, c0, t0) = (herdsman::db::ROWS.load(Relaxed), cpu(), Instant::now());
+        let (r0, c0, t0) = (drover::db::ROWS.load(Relaxed), cpu(), Instant::now());
         let (code, _) = run(&c, &f, args);
         let (wall, cpu, rows) = (
             t0.elapsed().as_secs_f64(),
             cpu() - c0,
-            herdsman::db::ROWS.load(Relaxed) - r0,
+            drover::db::ROWS.load(Relaxed) - r0,
         );
         println!(
             "run {i} {:?}: exit {code} wall {wall:.2}s cpu {cpu:.2}s rows {rows} ({:.1} full-log reads of {len})",

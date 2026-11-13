@@ -1,10 +1,10 @@
 name = "drover"
 version = "0.1.0"
 build = "true"
-run = "exec herdsman serve --addr 127.0.0.1:$PORT"
-needs = ["herdsman"]
+run = "exec drover serve --addr 127.0.0.1:$PORT"
+needs = ["drover"]
 attach = "http://127.0.0.1:7777"
-attach_token = "~/.config/herdsman/cooee-token"
+attach_token = "~/.config/drover/cooee-token"
 
 [[places]]
 type = "header-strip"
@@ -27,7 +27,7 @@ persona = "conductor"
 [[places]]
 type = "menu-row"
 label = "drover"
-subtitle = "herdsman's fleets"
+subtitle = "drover's fleets"
 screen = "/screens/fleets"
 
 [permissions]

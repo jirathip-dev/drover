@@ -9,9 +9,9 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 const NOW: u64 = 1_000_000;
-const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
+const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
 
-fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
+fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let c = ctx(
         &tmpdir(name),
@@ -38,7 +38,7 @@ fn remote_fake() -> Fake {
         .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "0.4 1 1 1/9 42")
         .reply(&format!("{SSH}'nproc'"), "4")
         .reply(
-            &format!("{SSH}'/opt/herdsman/bin/herdsman' 'profiles' 'sync' '--profile'"),
+            &format!("{SSH}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile'"),
             "",
         )
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
@@ -87,21 +87,21 @@ fn lane_env(r: &Fake, bazzite: &FakeShed, remote: &Path) -> BTreeMap<String, Str
     env
 }
 
-/// `herdsman hook --role impl` on bazzite: the lane's env, that host's own `fleet.toml` (`None`: none at all).
+/// `drover hook --role impl` on bazzite: the lane's env, that host's own `fleet.toml` (`None`: none at all).
 fn hook_there(env: &BTreeMap<String, String>, remote: &Path, toml: Option<&str>, cmd: &str) -> String {
     let conf = remote.join("fleet.toml");
     let _ = std::fs::remove_file(&conf);
     if let Some(t) = toml {
         std::fs::write(&conf, t).unwrap();
     }
-    let mut c = Command::new(env!("CARGO_BIN_EXE_herdsman"));
-    c.env_remove("HERDSMAN_SCRATCH_TARGET").env_remove("FLEET_LANE");
-    for k in ["HERDSMAN_LANE", "HERDSMAN_HOST", "HERDSMAN_RULES"] {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_drover"));
+    c.env_remove("DROVER_SCRATCH_TARGET").env_remove("FLEET_LANE");
+    for k in ["DROVER_LANE", "DROVER_HOST", "DROVER_RULES"] {
         c.env_remove(k);
     }
     for (k, v) in env
         .iter()
-        .filter(|(k, _)| !["HERDSMAN_OUTBOX", "HERDSMAN_SERVICE"].contains(&k.as_str()))
+        .filter(|(k, _)| !["DROVER_OUTBOX", "DROVER_SERVICE"].contains(&k.as_str()))
     {
         c.env(k, v);
     }
@@ -154,12 +154,12 @@ fn a_remote_lanes_hook_judges_a_fleet_its_host_never_heard_of() {
     }
 }
 
-/// `herdsman hook` in a remote lane whose `HERDSMAN_RULES` names `rules`, its host's fleet.toml knowing its fleet.
+/// `drover hook` in a remote lane whose `DROVER_RULES` names `rules`, its host's fleet.toml knowing its fleet.
 fn hook_with_rules(remote: &Path, rules: &Path) -> String {
     let env = BTreeMap::from([
-        ("HERDSMAN_LANE".to_string(), "sendmeter:12:impl".to_string()),
-        ("HERDSMAN_HOST".to_string(), "bazzite".to_string()),
-        ("HERDSMAN_RULES".to_string(), rules.display().to_string()),
+        ("DROVER_LANE".to_string(), "sendmeter:12:impl".to_string()),
+        ("DROVER_HOST".to_string(), "bazzite".to_string()),
+        ("DROVER_RULES".to_string(), rules.display().to_string()),
     ]);
     hook_there(&env, remote, Some(CONFIG), "git status")
 }
@@ -197,7 +197,7 @@ fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
     };
     let (code, out) = run(&c, &o, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
-    let wt = "/home/me/.local/share/herdsman/work/sendmeter/issue-12"; // #630
+    let wt = "/home/me/.local/share/drover/work/sendmeter/issue-12"; // #630
     let inputs = r.inputs.borrow();
     let rules = inputs
         .iter()
@@ -221,8 +221,8 @@ fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
     let file = tmpdir("remote-rules-wt").join("issue-12.rules.json");
     std::fs::write(&file, &rules.1).unwrap();
     let env = BTreeMap::from([
-        ("HERDSMAN_LANE".to_string(), "sendmeter:12:impl".to_string()),
-        ("HERDSMAN_RULES".to_string(), file.display().to_string()),
+        ("DROVER_LANE".to_string(), "sendmeter:12:impl".to_string()),
+        ("DROVER_RULES".to_string(), file.display().to_string()),
     ]);
     let edit = hook_there(&env, &remote, None, &format!("echo '{{}}' > {}", file.display()));
     assert!(
@@ -275,7 +275,7 @@ fn spawn_syncs_the_lanes_profile_on_a_host_with_no_fleet_toml() {
         run(&c, &o, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]).0,
         0
     );
-    let sync = format!("{SSH}'/opt/herdsman/bin/herdsman' 'profiles' 'sync' '--profile' 'fleet-impl' '--role' 'impl'");
+    let sync = format!("{SSH}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile' 'fleet-impl' '--role' 'impl'");
     let (at, start) = (r.index(&sync), shed_call_at(&r, "run"));
     assert!(at.is_some() && at < start, "{:?}", r.calls.borrow());
     // There: that one profile is written with no fleet.toml at all.

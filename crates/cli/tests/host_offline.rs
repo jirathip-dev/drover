@@ -2,14 +2,14 @@
 //! supersede's pane left there is killed once it is back, and `kill`/`close --host` pick one host's agent of a name.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, read, Event};
+use drover::config::Config;
+use drover::events::{append, read, Event};
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
 const WT: &str = "/home/me/.herdr/worktrees/sendmeter/issue-12";
 
-fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
+fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
     let c = ctx(&tmpdir(name), &toml);
@@ -26,11 +26,11 @@ fn setup(name: &str) -> (herdsman::Ctx, FakeShed) {
     (c, sh)
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
-fn remote_spawn(c: &herdsman::Ctx) {
+fn remote_spawn(c: &drover::Ctx) {
     let d = json!({"role": "impl", "agent": IMPL, "harness": "claude", "pane": IMPL, "workspace": "",
                    "worktree": WT, "branch": "issue-12", "host": "bazzite", "machine": "bazzite"});
     ev(c, NOW - 900, "spawn", d);
@@ -52,7 +52,7 @@ fn with_bazzite<'a>(f: &'a Fake, bazzite: &'a FakeShed) -> OverSsh<'a> {
     }
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -143,7 +143,7 @@ fn a_pane_a_supersede_left_on_a_down_host_is_killed_once_it_is_back() {
     );
     let cfg = Config::load(&c.config).unwrap();
     // Still down: nothing happens.
-    herdsman::check::stale(&c, &cfg, &sh.on(&r), &mut Vec::new()).unwrap();
+    drover::check::stale(&c, &cfg, &sh.on(&r), &mut Vec::new()).unwrap();
     assert!(kinds(&c, "stale-pane-killed").is_empty());
     // Back, with the old pane there and the new lane of the same name on mini.
     sh.lane(IMPL, "working", "/x");
@@ -151,7 +151,7 @@ fn a_pane_a_supersede_left_on_a_down_host_is_killed_once_it_is_back() {
     bazzite.lane(IMPL, "idle", WT);
     let back = with_bazzite(&f, &bazzite);
     for _ in 0..2 {
-        herdsman::check::stale(&c, &cfg, &sh.on(&back), &mut Vec::new()).unwrap();
+        drover::check::stale(&c, &cfg, &sh.on(&back), &mut Vec::new()).unwrap();
     }
     assert_eq!(bazzite.all("kill").len(), 1, "{:?}", bazzite.methods());
     assert!(!bazzite.has(IMPL), "the old pane is gone");
@@ -206,7 +206,7 @@ fn kill_and_close_take_a_host_when_names_collide() {
 
 #[test]
 fn another_hosts_agent_list_is_cut_off_at_its_limit() {
-    use herdsman::runner::{argv, limit, Real};
+    use drover::runner::{argv, limit, Real};
     use std::time::{Duration, Instant};
     let list = argv(&["--machine", "air", "agent", "list"]);
     assert_eq!(limit("herdr", &list), Duration::from_secs(20));
@@ -263,7 +263,7 @@ fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
     let fail = |p: String| {
         (
             p,
-            herdsman::runner::Out {
+            drover::runner::Out {
                 code: 1,
                 ..Default::default()
             },
@@ -282,7 +282,7 @@ fn a_host_offline_15_min_gets_its_lanes_restarted_on_the_main_host() {
         0,
         (
             format!("{local} rev-parse --verify --quiet origin/issue-12"),
-            herdsman::runner::Out {
+            drover::runner::Out {
                 stdout: sha.into(),
                 ..Default::default()
             },

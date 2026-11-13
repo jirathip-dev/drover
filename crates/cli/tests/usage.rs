@@ -1,10 +1,10 @@
-//! #31: herdsman lane-hours, the usage meter (#707: the status line's rows only), the DeepSeek balance, SECRET_IN_CONFIG.
+//! #31: drover lane-hours, the usage meter (#707: the status line's rows only), the DeepSeek balance, SECRET_IN_CONFIG.
 mod common;
 use common::*;
-use herdsman::events::{read, Event};
-use herdsman::runner::{Out, Runner};
-use herdsman::serve::Server;
-use herdsman::usage::{epoch, lane_secs, parse_balance};
+use drover::events::{read, Event};
+use drover::runner::{Out, Runner};
+use drover::serve::Server;
+use drover::usage::{epoch, lane_secs, parse_balance};
 use serde_json::json;
 use std::path::Path;
 
@@ -143,14 +143,14 @@ fn no_secret(what: &str, text: &str) {
 
 /// Every secret went to stdin only: never argv, CLI output, the event log, a cache file or the page; #707: no
 /// Keychain call at all.
-fn assert_no_leaks(c: &herdsman::Ctx, r: &Stdin, outs: &[&str], page: &str) {
+fn assert_no_leaks(c: &drover::Ctx, r: &Stdin, outs: &[&str], page: &str) {
     let calls = r.0.calls.borrow().join("\n");
     no_secret("argv", &calls);
     assert!(!calls.contains("security "), "{calls}");
     for o in outs {
         no_secret("CLI output", o);
     }
-    no_secret("event log", &herdsman::events::jsonl(&c.state).unwrap_or_default());
+    no_secret("event log", &drover::events::jsonl(&c.state).unwrap_or_default());
     for f in std::fs::read_dir(c.state.parent().unwrap().join("usage"))
         .into_iter()
         .flatten()
@@ -183,7 +183,7 @@ fn meter_balance_and_lane_hours_show_without_leaking_secrets() {
         out.contains("session 9% (resets 60m) · week 50% (resets Mon 19)"),
         "{out}"
     );
-    assert!(out.contains("5h 0.0 · 7d 0.0 herdsman lane-hours"), "{out}");
+    assert!(out.contains("5h 0.0 · 7d 0.0 drover lane-hours"), "{out}");
     assert!(out.contains("deepseek · USD 2.28 · low"), "{out}");
     let sent = r.1.borrow().join("\n");
     assert!(
@@ -197,7 +197,7 @@ fn meter_balance_and_lane_hours_show_without_leaking_secrets() {
     assert_eq!(r.0.count("curl"), n);
     assert!(
         // #440: System's Agent providers, the account's gauges and lane-hours.
-        page.contains("▏</span> <b class=g>50%</b></span>") && page.contains("herdsman lane-hours"),
+        page.contains("▏</span> <b class=g>50%</b></span>") && page.contains("drover lane-hours"),
         "{page}"
     );
     assert!(page.contains("<span class=\"pvs a\">✓ USD 2.28 · low</span>"), "{page}");
@@ -293,10 +293,10 @@ fn status(five: f64, week: f64, now: u64) -> String {
     .to_string()
 }
 
-fn row(c: &herdsman::Ctx, account: &str, ts: u64, five: f64, week: f64) {
+fn row(c: &drover::Ctx, account: &str, ts: u64, five: f64, week: f64) {
     let mut c = c.clone();
     c.now = ts;
-    herdsman::usage::statusline(&c, account, "", &status(five, week, ts), &mut Vec::new());
+    drover::usage::statusline(&c, account, "", &status(five, week, ts), &mut Vec::new());
 }
 
 #[test]
@@ -304,9 +304,9 @@ fn statusline_appends_a_throttled_row_and_shrugs_off_garbage() {
     let d = tmpdir("usage-statusline");
     let mut c = ctx(&d, &config(&d));
     let log = d.join("state/usage.jsonl");
-    let line = |c: &herdsman::Ctx, account: &str, input: &str| {
+    let line = |c: &drover::Ctx, account: &str, input: &str| {
         let mut out = Vec::new();
-        herdsman::usage::statusline(c, account, "synergy:2940:impl", input, &mut out);
+        drover::usage::statusline(c, account, "synergy:2940:impl", input, &mut out);
         String::from_utf8(out).unwrap()
     };
     let rows = || std::fs::read_to_string(&log).unwrap_or_default().lines().count();

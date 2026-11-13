@@ -1,7 +1,7 @@
-//! #361: `herdsman reclaim`: preview by default; only rebuildable folders, only in worktrees idle 7 days.
+//! #361: `drover reclaim`: preview by default; only rebuildable folders, only in worktrees idle 7 days.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
+use drover::events::{append, Event};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
@@ -10,7 +10,7 @@ const NOW: u64 = 1_800_000_000;
 const DAY: u64 = 86_400;
 
 /// A lane's spawn event and its worktree, with `target/`, `node_modules/`, `.cache/`, `build/` and `src/` in it.
-fn lane(c: &herdsman::Ctx, issue: u64) -> PathBuf {
+fn lane(c: &drover::Ctx, issue: u64) -> PathBuf {
     let w = c.worktrees.join("sendmeter").join(format!("issue-{issue}"));
     for d in ["target", "node_modules", ".cache", "build", "src"] {
         std::fs::create_dir_all(w.join(d)).unwrap();
@@ -34,7 +34,7 @@ fn git(r: Fake, w: &Path, head_at: u64, status: &str) -> Fake {
         .reply(&format!("git -C {w} status"), status)
 }
 
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let cfg = CONFIG.replace(
         "[fleet.sendmeter.role.impl]",
         "build_dirs = [\"build\"]\n\n[fleet.sendmeter.role.impl]",
@@ -90,8 +90,8 @@ fn a_y_answer_applies() {
         .reply("lsof", "")
         .reply("git -C", "");
     let mut out = Vec::new();
-    let argv = ["herdsman", "reclaim"].map(String::from).to_vec();
-    let code = herdsman::main_with(argv, &c, &r, &mut out, &mut &b"y\n"[..]);
+    let argv = ["drover", "reclaim"].map(String::from).to_vec();
+    let code = drover::main_with(argv, &c, &r, &mut out, &mut &b"y\n"[..]);
     assert_eq!(code, 0, "{}", String::from_utf8_lossy(&out));
     assert_eq!(gone(&w), [true, true, true, true, false]);
 }

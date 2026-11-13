@@ -1,7 +1,7 @@
 use super::{Fake, Shared};
-use herdsman::runner::{Out, Runner};
-use herdsman::shed::proto::{ErrorCode, Request, Response, RpcError, VERSION};
-use herdsman::shed::{Shed, Wire};
+use drover::runner::{Out, Runner};
+use drover::shed::proto::{ErrorCode, Request, Response, RpcError, VERSION};
+use drover::shed::{Shed, Wire};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
@@ -36,7 +36,7 @@ impl Drop for FakeShed {
 }
 
 impl FakeShed {
-    /// A server at herdsman's shed version, no terminals and no events.
+    /// A server at drover's shed version, no terminals and no events.
     pub fn new() -> FakeShed {
         FakeShed::start(VERSION, vec![])
     }
@@ -73,8 +73,8 @@ impl FakeShed {
         }
     }
     /// Runner `r` with its lanes on this server, as the CLI and `serve` wrap theirs (for a caller that skips them).
-    pub fn on<'a>(&self, r: &'a dyn Runner) -> herdsman::shed::With<'a> {
-        herdsman::shed::With(r, self.shed())
+    pub fn on<'a>(&self, r: &'a dyn Runner) -> drover::shed::With<'a> {
+        drover::shed::With(r, self.shed())
     }
     /// Fleet config `base` with its lanes on this server (`[runtime] kind = "shed"`).
     pub fn config(&self, base: &str) -> String {
@@ -83,13 +83,13 @@ impl FakeShed {
             self.sock.display()
         )
     }
-    pub fn attach(&self, c: &herdsman::Ctx) {
+    pub fn attach(&self, c: &drover::Ctx) {
         let base = std::fs::read_to_string(&c.config).unwrap();
         let base = base.split("\n[runtime]\nkind = \"shed\"\n").next().unwrap_or_default();
         std::fs::write(&c.config, self.config(base)).unwrap();
     }
     /// A new server, ctx `c`'s lanes on it (`attach`).
-    pub fn attached(c: &herdsman::Ctx) -> FakeShed {
+    pub fn attached(c: &drover::Ctx) -> FakeShed {
         let sh = FakeShed::new();
         sh.attach(c);
         sh

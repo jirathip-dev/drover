@@ -3,9 +3,9 @@
 //! (`db::ROWS`) and never walk the whole log for a thread (`conductor::WALKS`: the events a thread lookup looks at).
 mod common;
 use common::*;
-use herdsman::db::ROWS;
-use herdsman::orchestrator::WALKS;
-use herdsman::serve::Server;
+use drover::db::ROWS;
+use drover::orchestrator::WALKS;
+use drover::serve::Server;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering::Relaxed;
 

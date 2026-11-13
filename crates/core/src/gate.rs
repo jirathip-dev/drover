@@ -1,4 +1,4 @@
-//! `herdsman verdict` and `herdsman merge`: the review → merge gate.
+//! `drover verdict` and `drover merge`: the review → merge gate.
 use crate::config::{Check, Config, Fleet, Premerge};
 use crate::events::{emit, fold, read, Event, IssueState};
 use crate::overlap::git;
@@ -607,7 +607,7 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Resul
     if verdicts.is_empty() {
         return Err(refuse(
             "NO_VERDICT",
-            "no review verdict recorded; run a reviewer and `herdsman verdict`",
+            "no review verdict recorded; run a reviewer and `drover verdict`",
         ));
     }
     let at = |x: &&(String, String, String)| x.0.eq_ignore_ascii_case(&head);
@@ -673,7 +673,7 @@ fn premerge(
 ) -> Result<Result<Option<u64>, Refusal>> {
     let f = cfg.fleet(fleet)?;
     let checks = premerge_checks(ctx, f);
-    let rules = std::fs::read_to_string(f.local_path().join(".herdsman/rules.md")).unwrap_or_default();
+    let rules = std::fs::read_to_string(crate::repo_path(&f.local_path().join(".drover/rules.md"))).unwrap_or_default();
     // #510: shadow lesson checks need the merged tree too, else they are never recorded and retire unrun.
     if checks.is_empty() && crate::lesson::checks(&rules).iter().all(|c| c.active) {
         return Ok(Ok(None));
@@ -1014,7 +1014,7 @@ fn merged(
     let why = read(&ctx.state)?.into_iter().rfind(|e| e.is("why", fleet, issue));
     let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(
-        "Merged via `herdsman merge`: PR #{num} → `{}` @ `{merge_sha}`\nPinned PASS verdict sha: `{head}`{}{}",
+        "Merged via `drover merge`: PR #{num} → `{}` @ `{merge_sha}`\nPinned PASS verdict sha: `{head}`{}{}",
         f.integration,
         if over { "\nOwner override: ROUND_LIMIT" } else { "" },
         why.unwrap_or_default()
@@ -1043,24 +1043,25 @@ fn merged(
     if let Err(e) = crate::check::teardown(ctx, cfg, r, out, fleet, issue) {
         writeln!(out, "teardown: {e:#}")?;
     }
-    if f.repo.ends_with("/herdsman") {
+    if crate::update::ours(f) {
         // Dogfood fleet: say how to pick up the merged code; never run it.
         let exe = std::path::Path::new(&ctx.exe);
         let root = exe.parent().and_then(|b| b.parent()).unwrap_or(exe);
         let src = f.local_path();
         writeln!(
             out,
-            "cargo install --path {}/crates/cli --locked --root {} --force && sh {}/scripts/signing-identity.sh sign {}/bin/herdsman",
+            "cargo install --path {}/crates/cli --locked --root {} --force && sh {}/scripts/signing-identity.sh sign {}/bin/drover && ln -sf drover {}/bin/herdsman",
             src.display(),
             root.display(),
             src.display(),
+            root.display(),
             root.display()
         )?;
     }
     Ok(())
 }
 
-/// #130: a needs-human card's `override` / `extend` / `park`; #151: `herdsman extend|park` (`spawn: false` = `--no-spawn`).
+/// #130: a needs-human card's `override` / `extend` / `park`; #151: `drover extend|park` (`spawn: false` = `--no-spawn`).
 /// #712: `why` is `park --why`, stored on the `parked` event.
 pub fn needs_human(
     ctx: &Ctx,
@@ -1145,7 +1146,7 @@ pub fn park(
     Ok(writeln!(out, "#{n}: park")?)
 }
 
-/// #712: `herdsman unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human
+/// #712: `drover unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human
 /// that the park closed (or, parked from a failed extend's card, the state it was parked in); `unparked` stores it as
 /// `repaired` does. Its queue place is kept; out of the queue, it goes to the end.
 pub fn unpark(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, (fleet, n): (&str, u64), by: &str) -> Result<()> {

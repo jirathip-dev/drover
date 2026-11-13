@@ -1,12 +1,12 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const NOW: u64 = 1_000_000;
 
-fn setup(name: &str) -> (herdsman::Ctx, std::path::PathBuf, FakeShed) {
+fn setup(name: &str) -> (drover::Ctx, std::path::PathBuf, FakeShed) {
     let dir = tmpdir(name);
     let sink = dir.join("push.txt");
     let cfg = format!(
@@ -24,14 +24,14 @@ fn setup(name: &str) -> (herdsman::Ctx, std::path::PathBuf, FakeShed) {
     (c, sink, sh)
 }
 
-fn at(c: &herdsman::Ctx, secs: u64) -> herdsman::Ctx {
-    herdsman::Ctx {
+fn at(c: &drover::Ctx, secs: u64) -> drover::Ctx {
+    drover::Ctx {
         now: NOW + secs,
         ..c.clone()
     }
 }
 
-fn fast(c: &herdsman::Ctx, sh: &FakeShed) -> Fake {
+fn fast(c: &drover::Ctx, sh: &FakeShed) -> Fake {
     let r = Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git ", "")
@@ -41,13 +41,13 @@ fn fast(c: &herdsman::Ctx, sh: &FakeShed) -> Fake {
     r
 }
 
-fn kinds(c: &herdsman::Ctx) -> Vec<String> {
+fn kinds(c: &drover::Ctx) -> Vec<String> {
     let ours = ["slo-idle", "self-heal", "stuck", "slo-ok"];
     let ev = read(&c.state).unwrap().into_iter().map(|e| e.kind);
     ev.filter(|k| ours.contains(&k.as_str())).collect()
 }
 
-fn card(c: &herdsman::Ctx, sh: &FakeShed, now: u64) -> Option<Value> {
+fn card(c: &drover::Ctx, sh: &FakeShed, now: u64) -> Option<Value> {
     let f = Fake::default();
     let r = sh.on(&f);
     let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));

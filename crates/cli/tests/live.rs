@@ -2,9 +2,9 @@
 //! answering a blocked Claude menu from the needs-you card.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::lanes::{pending, prompt};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::lanes::{pending, prompt};
+use drover::serve::Server;
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -13,14 +13,14 @@ use std::time::{Duration, Instant};
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-fn live_server(name: &str) -> (herdsman::Ctx, std::net::SocketAddr, FakeShed) {
+fn live_server(name: &str) -> (drover::Ctx, std::net::SocketAddr, FakeShed) {
     let c = ctx(&tmpdir(name), CONFIG);
     append(&c.state, &Event::new(T, "sendmeter", None, "note", json!({}))).unwrap();
     let sh = FakeShed::new();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let (c2, b) = (c.clone(), sh.shed());
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &herdsman::shed::With(&Fake::default(), b), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &drover::shed::With(&Fake::default(), b), l, false));
     (c, addr, sh)
 }
 
@@ -53,11 +53,11 @@ impl Lanes {
     }
 }
 
-impl herdsman::runner::Runner for Lanes {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for Lanes {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         self.f.run(prog, args)
     }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
         self.f.run_in(prog, args, input)
     }
     fn sleep(&self, secs: u64) {
@@ -68,7 +68,7 @@ impl herdsman::runner::Runner for Lanes {
             self.sh.screen(&name, &screen);
         }
     }
-    fn shed(&self) -> Option<herdsman::shed::Shed> {
+    fn shed(&self) -> Option<drover::shed::Shed> {
         Some(self.sh.shed())
     }
 }
@@ -227,7 +227,7 @@ fn prompt_parser_fixtures() {
         Some(("Should I also update the README?".into(), vec![]))
     );
     assert_eq!(
-        pending("dsh> cargo build\n   Compiling herdsman\n    Finished dev\ndsh> "),
+        pending("dsh> cargo build\n   Compiling drover\n    Finished dev\ndsh> "),
         None,
         "dsh pane"
     );
@@ -263,7 +263,7 @@ fn prompt_card_golden_from_the_auto_deny_screen() {
         json!({
             "title": "Bash command",
             "reason": "Dangerous rm operation on possibly-empty variable path: $S/*.png in `rm -f $S/*.png` (rewrite it as \"${S:?}\"/*.png or use a literal path)",
-            "command": "cp /Users/me/qg.bak tests/queue_graph.rs && cargo fmt && S=/Users/me/snaps; rm -f $S/*.png; HERDSMAN_SNAPSHOTS=$S cargo test --test queue_graph",
+            "command": "cp /Users/me/qg.bak tests/queue_graph.rs && cargo fmt && S=/Users/me/snaps; rm -f $S/*.png; DROVER_SNAPSHOTS=$S cargo test --test queue_graph",
             "countdown": 14,
             "question": "Do you want to proceed?",
             "options": ["Yes", "No"],
@@ -316,7 +316,7 @@ fn countdown_card_shows_reason_command_and_clears_when_the_prompt_goes() {
     assert!(!needs.contains("sendmeter-impl-12"), "no stale card: {needs}");
 }
 
-fn blocked(name: &str, imp: &str, rev: &str) -> (herdsman::Ctx, Lanes) {
+fn blocked(name: &str, imp: &str, rev: &str) -> (drover::Ctx, Lanes) {
     let c = ctx(&tmpdir(name), CONFIG);
     for (issue, role, agent) in [(12, "impl", "sendmeter-impl-12"), (9, "rev", "sendmeter-rev-9-r1")] {
         append(
@@ -357,7 +357,7 @@ fn shown_h(page: &str) -> String {
 }
 
 /// Paired at the real clock (#288: a pairing lasts a year after last use), as `serve_on` reads it.
-fn cookie(s: &Server, c: &herdsman::Ctx) -> String {
+fn cookie(s: &Server, c: &drover::Ctx) -> String {
     pair(
         s,
         c,
@@ -427,7 +427,7 @@ fn answer_sends_the_digit_and_logs_no_question() {
         json!({"via": "web", "agent": "sendmeter-impl-12", "device": e.str("device").unwrap(), "choice": "2"})
     );
     assert!(
-        !herdsman::events::jsonl(&c.state).unwrap().contains("proceed"),
+        !drover::events::jsonl(&c.state).unwrap().contains("proceed"),
         "never the question text"
     );
     // The prompt is still there after the key: "still waiting". A reviewer may answer a permission prompt.
@@ -525,7 +525,7 @@ fn unparsed_blocked_pane_shows_masked_tail_and_reply() {
 /// The PR's 390 px screenshots (fixture config): the sync dot's three states, a pull in
 /// progress, a blocked agent's permission menu on the needs-you card and in its sheet, and
 /// the card after an answer; each with no horizontal scroll. Runs where WebKit is at hand;
-/// PNGs go to `$HERDSMAN_SNAPSHOTS` when set.
+/// PNGs go to `$DROVER_SNAPSHOTS` when set.
 #[test]
 fn live_board_fits_390px() {
     if no_webkit() {
@@ -550,7 +550,7 @@ fn live_board_fits_390px() {
         ("answer-sent", "queue", format!("sync('g'); {stub}; document.querySelector('.ask .pick[value=\"1\"]').click()")),
         ("sheet-blocked", "lanes", "sync('g'); open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]'))".into()),
     ];
-    let dir = std::env::var("HERDSMAN_SNAPSHOTS").ok();
+    let dir = std::env::var("DROVER_SNAPSHOTS").ok();
     for (name, tab, js) in scenes {
         let png = dir.as_ref().map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(p).join(format!("{name}.png"))
@@ -715,7 +715,7 @@ fn unpaired_viewers_see_no_pane_text() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let (c2, b) = (c.clone(), live.shed());
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &herdsman::shed::With(&Fake::default(), b), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &drover::shed::With(&Fake::default(), b), l, false));
     let sub = |extra: &str| {
         let mut s = TcpStream::connect(addr).unwrap();
         s.write_all(format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n{extra}\r\n").as_bytes())
@@ -741,7 +741,7 @@ fn unpaired_viewers_see_no_pane_text() {
         "paired stream: {d}"
     );
     // The device is removed: its stream closes before the next push, so no more pane text reaches it.
-    herdsman::devices::store(&c, &[]).unwrap();
+    drover::devices::store(&c, &[]).unwrap();
     append(&c.state, &Event::new(T + 5, "sendmeter", None, "note", json!({}))).unwrap();
     let after = drain(&mut dev, 2_500);
     assert!(pane.iter().all(|p| !after.contains(p)), "revoked device: {after}");
@@ -759,7 +759,7 @@ fn the_sampler_thread_fills_the_host() {
         .reply("vm_stat", "Swapouts: 100.\n")
         .reply("sysctl", "4\n");
     let b = sh.shed();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c, &herdsman::shed::With(&r, b), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c, &drover::shed::With(&r, b), l, false));
     let end = Instant::now() + Duration::from_secs(5);
     loop {
         let mut s = TcpStream::connect(addr).unwrap();

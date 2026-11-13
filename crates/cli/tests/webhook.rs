@@ -1,17 +1,17 @@
 //! #626: `POST /hooks/github` on serve's Funnel listener: signed GitHub events refresh the PR cache and kick drive.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::hooks::{listen, reply};
+use drover::events::{append, Event};
+use drover::hooks::{listen, reply};
 use hkdf::hmac::{Hmac, KeyInit, Mac};
 use serde_json::json;
 use std::io::{Read, Write};
 
 const SECRET: &str = "s3cret-hook";
-const KICK: &str = "sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter 7 --why webhook --now";
+const KICK: &str = "sh -c nohup '/opt/drover/bin/drover' kick sendmeter 7 --why webhook --now";
 
 /// A sendmeter fleet with an impl lane on `issue-7`; #707: its webhook secret in the 0600 file `[serve]` names.
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     let f = secret_file(&c, "GITHUB_WEBHOOK_SECRET", SECRET, 0o600);
     let line = format!("\n[serve]\nwebhook_secret_file = \"{}\"\n", f.display());
@@ -35,7 +35,7 @@ fn request(event: &str, sig: Option<&str>, body: &str) -> Vec<u8> {
         .into_bytes()
 }
 
-fn send(c: &herdsman::Ctx, r: &Fake, req: Vec<u8>) -> String {
+fn send(c: &drover::Ctx, r: &Fake, req: Vec<u8>) -> String {
     String::from_utf8(reply(c, r, &mut std::io::Cursor::new(req))).unwrap()
 }
 
@@ -62,8 +62,8 @@ fn a_signed_check_suite_completed_refreshes_the_pr_cache_and_kicks_drive() {
     let (code, out) = run(&c, &before, &["pr", "sendmeter", "7"]);
     assert!(code == 0 && out.contains("ci pending"), "{out}");
 
-    herdsman::db::put(&c.state, "board", 1, &herdsman::snapshot::Snapshot::default()).unwrap();
-    let board = herdsman::db::stamp(&c.state, "board");
+    drover::db::put(&c.state, "board", 1, &drover::snapshot::Snapshot::default()).unwrap();
+    let board = drover::db::stamp(&c.state, "board");
     let r = Fake::default().reply("gh pr view issue-7", &pr("COMPLETED", Some("SUCCESS")));
     let body = suite("jirathip-dev/sendmeter", "issue-7");
     let res = send(&c, &r, request("check_suite", Some(&sign(SECRET, &body)), &body));
@@ -71,17 +71,13 @@ fn a_signed_check_suite_completed_refreshes_the_pr_cache_and_kicks_drive() {
     assert!(res.contains("refreshed sendmeter #7"), "{res}");
     assert_eq!(r.count("gh pr view issue-7"), 1, "{:?}", r.calls.borrow());
     assert_eq!(r.count(KICK), 1, "drive woken for #7: {:?}", r.calls.borrow());
-    let cached = herdsman::gh::cached_pr(&c, "sendmeter", 7);
+    let cached = drover::gh::cached_pr(&c, "sendmeter", 7);
     assert_eq!(cached["statusCheckRollup"][0]["conclusion"], "SUCCESS", "{cached}");
-    assert_ne!(
-        herdsman::db::stamp(&c.state, "board"),
-        board,
-        "the board re-renders now"
-    );
+    assert_ne!(drover::db::stamp(&c.state, "board"), board, "the board re-renders now");
 
-    // `herdsman pr` right after reads the refreshed cache: green, and no poll of its own.
-    let now = herdsman::Ctx {
-        now: herdsman::now(),
+    // `drover pr` right after reads the refreshed cache: green, and no poll of its own.
+    let now = drover::Ctx {
+        now: drover::now(),
         ..c.clone()
     };
     let (code, out) = run(&now, &r, &["pr", "sendmeter", "7"]);
@@ -108,8 +104,8 @@ fn a_bad_missing_or_wrong_secret_signature_is_401_and_changes_nothing() {
         assert!(res.starts_with("HTTP/1.1 401 Unauthorized"), "{sig:?}: {res}");
     }
     assert!(r.calls.borrow().is_empty(), "{:?}", r.calls.borrow());
-    assert!(herdsman::gh::cached_pr(&c, "sendmeter", 7).is_null());
-    assert_eq!(herdsman::webhook::rejected(&c), sigs.len() as u64);
+    assert!(drover::gh::cached_pr(&c, "sendmeter", 7).is_null());
+    assert_eq!(drover::webhook::rejected(&c), sigs.len() as u64);
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(
         out.contains("✓ webhook — secret set · 6 refused (bad signature)"),
@@ -132,7 +128,7 @@ fn an_unknown_repo_or_branch_is_202_and_ignored_ping_is_200() {
     let res = send(&c, &r, request("ping", Some(&sign(SECRET, &body)), &body));
     assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
     assert!(r.calls.borrow().is_empty(), "{:?}", r.calls.borrow());
-    assert!(herdsman::gh::cached_pr(&c, "sendmeter", 7).is_null());
+    assert!(drover::gh::cached_pr(&c, "sendmeter", 7).is_null());
 }
 
 #[test]
@@ -183,17 +179,17 @@ fn a_webhook_secret_inline_in_fleet_toml_is_still_refused() {
 fn the_signature_check_matches_githubs_documented_example() {
     // docs.github.com "Validating webhook deliveries": secret, payload and the header GitHub sends.
     let sig = "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17";
-    assert!(herdsman::webhook::signed(
+    assert!(drover::webhook::signed(
         "It's a Secret to Everybody",
         b"Hello, World!",
         sig
     ));
-    assert!(!herdsman::webhook::signed(
+    assert!(!drover::webhook::signed(
         "It's a Secret to Everybody",
         b"Hello, World?",
         sig
     ));
-    assert!(!herdsman::webhook::signed(
+    assert!(!drover::webhook::signed(
         "It's a Secret to Everybody",
         b"Hello, World!",
         &sig.to_uppercase()[..]
@@ -252,7 +248,7 @@ fn the_funnel_listener_answers_no_path_but_hooks_github() {
         funnel,
         ["tailscale funnel --bg --https=10000 --set-path /hooks/github http://127.0.0.1:7778/hooks/github"]
     );
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     assert_eq!(cfg.serve.hooks_addr(), "127.0.0.1:7778");
 }
 
@@ -276,7 +272,7 @@ fn with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_a
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh api graphql", &open_pr())
         .reply("gh pr view issue-7", &pr("COMPLETED", Some("SUCCESS")));
-    let at = |t: u64| herdsman::Ctx {
+    let at = |t: u64| drover::Ctx {
         now: c.now + t,
         ..c.clone()
     };

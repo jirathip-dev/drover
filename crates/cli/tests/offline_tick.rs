@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, Event};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::time::Duration;
 
@@ -61,7 +61,7 @@ fn main_host() -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-fn setup(name: &str, air_cfg: &str, limits: &str) -> (herdsman::Ctx, FakeShed) {
+fn setup(name: &str, air_cfg: &str, limits: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG
         .replace("harness  =  \"hermes\"", "harness = \"claude\"")
         .replace("[limits]\n", &format!("[limits]\n{limits}"));

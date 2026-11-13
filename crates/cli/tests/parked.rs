@@ -1,8 +1,8 @@
 //! #83: a lane whose pane is gone but whose work is safe (clean tree, nothing unpushed) is `parked`, not `dead`.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
@@ -24,22 +24,22 @@ impl std::ops::Deref for OnShed {
     }
 }
 
-impl herdsman::runner::Runner for OnShed {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for OnShed {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         self.0.run(prog, args)
     }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
         self.0.run_in(prog, args, input)
     }
     fn sleep(&self, secs: u64) {
         self.0.sleep(secs);
     }
-    fn shed(&self) -> Option<herdsman::shed::Shed> {
+    fn shed(&self) -> Option<drover::shed::Shed> {
         Some(self.1.shed())
     }
 }
 
-fn fixture(name: &str, paused: bool) -> (herdsman::Ctx, OnShed) {
+fn fixture(name: &str, paused: bool) -> (drover::Ctx, OnShed) {
     let cfg = CONFIG.replace(
         "integration = \"staging\"   # never main",
         &format!("integration = \"staging\"\npaused = {paused}"),
@@ -174,8 +174,8 @@ fn parked_lane_alerts_once_and_never_stalls() {
 fn unpaused_fleet_resumes_a_parked_impl_to_review() {
     let (c, r) = fixture("parked-resume", false);
     let events = read(&c.state).unwrap();
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    let waits = herdsman::waiting::scan(&c, &cfg, &r, &events, &[], false);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let waits = drover::waiting::scan(&c, &cfg, &r, &events, &[], false);
     let w = &waits.iter().find(|(s, _)| s.issue == 12).unwrap().1;
     assert_eq!(
         (w.who, w.what.as_str()),
@@ -184,14 +184,14 @@ fn unpaused_fleet_resumes_a_parked_impl_to_review() {
             "pushed 6a258db, waiting for drive (next pass ≤ 5 min) to spawn review"
         )
     );
-    assert_eq!(w.next_cmd.as_deref(), Some("herdsman spawn sendmeter 12 rev"));
+    assert_eq!(w.next_cmd.as_deref(), Some("drover spawn sendmeter 12 rev"));
 }
 
 /// #128 amendment A: a lane `clean` removed (issue closed on GitHub) is never dead; a truly vanished lane still is.
 #[test]
 fn cleaned_lane_of_a_closed_issue_is_not_dead() {
     let (c, r) = fixture("closed-not-dead", false);
-    let check = |c: &herdsman::Ctx| {
+    let check = |c: &drover::Ctx| {
         let (code, out) = run(c, &r, &["check"]);
         assert_eq!(code, 0, "{out}");
         read(&c.state).unwrap()
@@ -208,7 +208,7 @@ fn cleaned_lane_of_a_closed_issue_is_not_dead() {
     let c = fixture("closed-cleaned", false).0;
     let d = json!({"worktree": format!("/wt/{RISKY}"), "pane": "w1:14", "why": "issue closed"});
     append(&c.state, &Event::new(NOW - 3600, "sendmeter", Some(14), "clean", d)).unwrap();
-    let st = herdsman::events::fold(&read(&c.state).unwrap());
+    let st = drover::events::fold(&read(&c.state).unwrap());
     assert_eq!(st[&("sendmeter".to_string(), 14)].state, "closed");
     assert!(!hits(&check(&c), 14), "no stall or lane-dead for a closed issue");
     let page = get(&Server::new(&c, &r, None), "/?all=1");

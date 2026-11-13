@@ -3,7 +3,7 @@
 //! #82: the fixture fleet is renamed `api` (`acme/api`), so the goldens carry neutral names.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
+use drover::events::{append, Event};
 use serde_json::json;
 use std::path::Path;
 
