@@ -12,6 +12,43 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+/// #845: one pass's steps in order (`lap` names each, `pass-slow` the slowest) and the `[limits]` keys that time them.
+pub const STEPS: [(&str, &[&str]); 8] = [
+    ("read log, host sample", &[]),
+    (
+        "disk budget",
+        &["shed_read_millis", "worktree_budget_gb", "build_budget_gb"],
+    ),
+    ("roots, redeliver", &["host_offline_minutes"]),
+    (
+        "look, orphans",
+        &["ssh_quick_secs", "ssh_call_secs", "import_max_age_hours"],
+    ),
+    ("repair, outbox", &[]),
+    (
+        "PR reads, gates, steps",
+        &[
+            "webhook_poll_minutes",
+            "silent_minutes",
+            "ci_start_minutes",
+            "gate_check_minutes",
+            "review_rounds",
+            "update_rounds",
+        ],
+    ),
+    (
+        "spawns",
+        &[
+            "max_parallel_spawns",
+            "spawn_pending_max_secs",
+            "respawn_max",
+            "respawn_window_minutes",
+            "fallback_rest_minutes",
+            "overflow_after_minutes",
+        ],
+    ),
+    ("backlog, checkpoint", &["rotate_mb"]),
+];
 /// #677: drive's one prompt on a `done` whose why note was refused.
 pub const WHY_NUDGE: &str = "your `turn done` was refused: ";
 /// #168: a pass's lease outlives a hung pass by this much; #344: a dead holder's goes at once.
@@ -670,6 +707,7 @@ pub fn drive(
     let t0 = std::time::Instant::now();
     let mut slow = (t0, String::new(), 0.0);
     let mut lap = |step: &str| {
+        debug_assert!(STEPS.iter().any(|(s, _)| step.ends_with(s)), "{step} is not in STEPS");
         let secs = slow.0.elapsed().as_secs_f64();
         if secs > slow.2 {
             (slow.1, slow.2) = (step.to_string(), secs);

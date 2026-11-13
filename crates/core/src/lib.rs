@@ -12,6 +12,7 @@ pub mod config;
 pub mod db;
 pub mod design;
 pub mod devices;
+pub mod diagram;
 pub mod doctor;
 pub mod drive;
 pub mod events;
