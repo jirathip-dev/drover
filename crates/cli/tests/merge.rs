@@ -418,7 +418,7 @@ fn merge_into_fleet_repo_prints_reinstall_command_last() {
     assert_eq!(exit, 0, "{out}");
     assert_eq!(
         out.lines().last(),
-        Some("cargo install --path /tmp/does-not-matter/sendmeter/crates/cli --locked --root /opt/drover --force && sh /tmp/does-not-matter/sendmeter/scripts/signing-identity.sh sign /opt/drover/bin/drover && ln -sf drover /opt/drover/bin/herdsman"),
+        Some("cargo build --release --locked -p drover --manifest-path /tmp/does-not-matter/sendmeter/Cargo.toml && sh /tmp/does-not-matter/sendmeter/scripts/install-gate.sh /tmp/does-not-matter/sendmeter/target/release/drover /opt/drover/bin/drover && ln -sf drover /opt/drover/bin/herdsman"),
         "{out}"
     );
     assert!(!r.called("cargo"), "printed, never run");
