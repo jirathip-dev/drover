@@ -3,11 +3,10 @@ use common::*;
 use drover::events::{append, read, Event};
 use serde_json::json;
 
-fn board(name: &str) -> (drover::Ctx, String, String) {
+fn board(name: &str) -> (drover::Ctx, String, String, FakeShed) {
     let c = ctx(&tmpdir(name), CONFIG);
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#);
+    let sh = FakeShed::attached(&c);
+    let r = Fake::default();
     assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "12", "20"]).0, 0);
     assert_eq!(run(&c, &r, &["pause", "sendmeter"]).0, 0);
     let ev = |ts, n, kind, d| append(&c.state, &Event::new(ts, "sendmeter", Some(n), kind, d)).unwrap();
@@ -38,13 +37,15 @@ fn board(name: &str) -> (drover::Ctx, String, String) {
         .unwrap()
         .as_secs();
     let fake = Fake::default();
-    let s = drover::serve::Server::new(&c, &fake, Some("127.0.0.1:7777".into()));
+    let on = sh.on(&fake);
+    let s = drover::serve::Server::new(&c, &on, Some("127.0.0.1:7777".into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/", l.local_addr().unwrap());
-    let c2 = c.clone();
-    std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
-    (c, url, cookie.trim().trim_start_matches("Cookie: ").to_string())
+    let (c2, b) = (c.clone(), sh.shed());
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &drover::shed::With(&r, b), l, false));
+    let cookie = cookie.trim().trim_start_matches("Cookie: ").to_string();
+    (c, url, cookie, sh)
 }
 
 const PRE: &str = "window.posts = []; const F = fetch; \
@@ -73,7 +74,7 @@ fn folded_main_buttons_post_their_op_in_webkit() {
     let _lock = ui_lock();
     let shots = std::env::var("DROVER_SNAPSHOTS").map_or_else(|_| tmpdir("needs871-png"), std::path::PathBuf::from);
     for w in ["390", "1440"] {
-        let (c, url, cookie) = board(&format!("needs871-{w}"));
+        let (c, url, cookie, _sh) = board(&format!("needs871-{w}"));
         let png = shots.join(format!("needs-fold-ops-{w}.png"));
         let o = webview()
             .env("DROVER_COOKIE", &cookie)

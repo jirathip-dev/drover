@@ -145,8 +145,7 @@ fn call(s: &Server, c: &drover::Ctx, (method, path): (&str, &str), body: &str, c
 
 #[test]
 fn every_route_keeps_its_fixtures_shape() {
-    let (c, r) = v1_board("v1-contract");
-    let r = r.reply("gh", "");
+    let (c, r) = v1_board_on("v1-contract", herdr_setup(Fake::default().reply("gh", "")));
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let post = |op: &str, v: Value| call(&s, &c, ("POST", &format!("/api/v1/{op}")), &v.to_string(), &ck);

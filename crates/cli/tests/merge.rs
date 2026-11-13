@@ -370,29 +370,31 @@ fn merge_tears_down_clean_lanes_and_keeps_unpushed_ones() {
         p.to_string_lossy().into_owned()
     };
     let (imp, rev) = (wt("issue-12"), wt("rev-12-r1"));
-    for (ts, role, w, ws) in [(11, "impl", &imp, "wA"), (12, "rev", &rev, "wB")] {
-        let d = json!({"role": role, "agent": format!("{role}-12"), "worktree": w, "pane": format!("{ws}:p1"), "workspace": ws});
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    for (ts, role, w) in [(11, "impl", &imp), (12, "rev", &rev)] {
+        let agent = format!("{role}-12");
+        let d = json!({"role": role, "agent": agent, "worktree": w, "pane": agent});
         append(&c.state, &Event::new(ts, "sendmeter", Some(12), "spawn", d)).unwrap();
+        sh.lane(&agent, "idle", w);
     }
-    // After the clean impl pane is closed only the rev agent (unpushed work) is left.
     let r = pr("staging", green())
-        .reply("herdr agent list", &agents(&[("rev-12", "idle", &rev, "wB:p1")]))
         .reply(&format!("git -C {rev} rev-list"), "1\n")
         .reply(&format!("git -C {imp} rev-list"), "0\n")
-        .reply("git -C", "")
-        .reply("herdr", "{}");
+        .reply("git -C", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
-    assert!(r.called("herdr pane close wA:p1"), "{:?}", r.calls.borrow());
-    assert!(r.called("herdr worktree remove --workspace wA"));
+    assert!(sh.called("kill", "impl-12") && !sh.has("impl-12"), "{:?}", sh.methods());
+    let remove = |w: &str| format!("git -C /tmp/does-not-matter/sendmeter worktree remove {w}");
+    assert!(r.called(&remove(&imp)), "{:?}", r.calls.borrow());
     assert!(out.contains(&format!("removed {imp}")), "{out}");
     assert!(
-        !r.called("herdr pane close wB:p1"),
+        !sh.called("kill", "rev-12") && sh.has("rev-12"),
         "a lane with unpushed commits keeps its pane"
     );
-    assert!(!r.called("herdr worktree remove --workspace wB"));
+    assert!(!r.called(&remove(&rev)));
     assert!(
-        out.contains(&format!("keep pane wB:p1 ({rev}): 1 unpushed commit(s)")),
+        out.contains(&format!("keep pane rev-12 ({rev}): 1 unpushed commit(s)")),
         "{out}"
     );
     assert!(

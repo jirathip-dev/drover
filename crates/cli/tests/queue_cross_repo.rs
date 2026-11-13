@@ -5,24 +5,23 @@ use common::*;
 use drover::events::{append, read, Event};
 use serde_json::json;
 
-fn setup(name: &str, fake: Fake) -> (drover::Ctx, Fake) {
+fn setup(name: &str, fake: Fake) -> (drover::Ctx, Fake, FakeShed) {
     let cfg = CONFIG.replace(
         "[limits]",
         "[fleet.drover]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"/tmp/x\"\nintegration = \"staging\"\n\n[limits]",
     );
     let c = ctx(&tmpdir(name), &cfg);
     let r = fake
-        .reply("herdr agent list", NO_AGENTS)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view 12", &json!({"title": "t", "body": "b"}).to_string())
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply("herdr pane", "{}")
-        .reply("herdr agent", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "");
-    (c, r)
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    (c, r, sh)
 }
 
 fn ok(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
@@ -46,7 +45,7 @@ fn drive(c: &drover::Ctx, r: &Fake, secs: u64) -> Vec<String> {
 
 #[test]
 fn another_fleets_blocker_holds_the_start_until_its_merged_event() {
-    let (c, r) = setup("xrepo-fleet", Fake::default());
+    let (c, r, sh) = setup("xrepo-fleet", Fake::default());
     ok(&c, &r, &["queue", "sendmeter", "add", "12"]);
     ok(&c, &r, &["queue", "sendmeter", "block", "12", "--on", "drover#633"]);
     let (code, out) = run(&c, &r, &["queue", "sendmeter", "block", "12", "--on", "nofleet#1"]);
@@ -55,7 +54,7 @@ fn another_fleets_blocker_holds_the_start_until_its_merged_event() {
     assert!(ls.contains("#12    queued  blocked by drover#633"), "{ls}");
     assert!(drive(&c, &r, 0).is_empty());
     assert!(drive(&c, &r, 3600).is_empty(), "never while it is open");
-    assert!(!r.called("herdr agent start"));
+    assert!(sh.all("run").is_empty(), "no lane started");
     let d = json!({"pr": "640", "merge_sha": "abc", "into": "staging"});
     append(&c.state, &Event::new(c.now, "drover", Some(633), "merged", d)).unwrap();
     assert_eq!(drive(&c, &r, 3700), ["start"]);
@@ -65,7 +64,7 @@ fn another_fleets_blocker_holds_the_start_until_its_merged_event() {
 fn a_blocker_in_another_repo_is_released_once_it_reads_closed() {
     let view = "gh issue view 87 -R jirathip-dev/cooee --json state";
     let fake = Fake::default().once(view, 0, r#"{"state":"OPEN"}"#);
-    let (c, r) = setup("xrepo-gh", fake.reply(view, r#"{"state":"CLOSED"}"#));
+    let (c, r, _sh) = setup("xrepo-gh", fake.reply(view, r#"{"state":"CLOSED"}"#));
     ok(&c, &r, &["queue", "sendmeter", "add", "12"]);
     let on = ["--on", "drover#633", "--on", "jirathip-dev/cooee#87"];
     ok(&c, &r, &[&["queue", "sendmeter", "block", "12"][..], &on].concat());

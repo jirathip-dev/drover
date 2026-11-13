@@ -34,8 +34,7 @@ fn on(vm: &str, tok: bool, c: &str) -> String {
     rc(tok, &format!("export C='{c}'; fakeboat exec {vm}"))
 }
 
-/// vm1 and vm2 (3 slots each, $12 a day each, cap 3 VMs / $40), this host's runners labelled `self`.
-fn setup(name: &str) -> drover::Ctx {
+fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let cfg = format!(
         "{CONFIG}\n[ci_runners]\nprovider = \"fake\"\nrepo = \"o/app\"\nlabel = \"boat\"\nsize = \"large\"\nslots = 3\n\
          max_vms = 3\nusd_day = 40\nvms = [\"vm1\", \"vm2\"]\nlocal_label = \"self\"\nlocal_stop = \"stop-local\"\n"
@@ -45,7 +44,9 @@ fn setup(name: &str) -> drover::Ctx {
     std::fs::write(c.config.with_file_name("recipes/fake.toml"), RECIPE).unwrap();
     secret_file(&c, "FAKE_KEY", KEY, 0o600); // #707: the `[ci_runners]` API key's 0600 file
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    c
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    (c, sh)
 }
 
 /// GitHub's runner list: (id, name, label, online, busy) each.
@@ -87,7 +88,6 @@ fn fake(list: &str) -> Fake {
         .reply(&rc(false, "fakeboat delete"), "")
         .reply(&rc(false, "export C="), "ok\n")
         .reply(&rc(true, "export C="), "ok\n")
-        .reply("herdr agent list", NO_AGENTS)
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
@@ -113,7 +113,7 @@ fn asked(c: &drover::Ctx, id: &str, question: &str, choice: &str, by: &str) {
 
 #[test]
 fn status_prints_the_health_line_each_vm_and_each_runner() {
-    let c = setup("runners-status");
+    let (c, _sh) = setup("runners-status");
     let r = fake(&fleet(2, false));
     let (code, out) = run(&c, &r, &["runners", "status"]);
     assert_eq!(code, 0, "{out}");
@@ -131,7 +131,7 @@ fn status_prints_the_health_line_each_vm_and_each_runner() {
 
 #[test]
 fn revive_pushes_a_fresh_token_restarts_and_logs_it_never_showing_the_token() {
-    let c = setup("runners-revive");
+    let (c, _sh) = setup("runners-revive");
     let r = fake(&fleet(0, false));
     let (code, out) = run(&c, &r, &["runners", "revive", "vm2"]);
     assert_eq!(code, 0, "{out}");
@@ -157,7 +157,7 @@ fn revive_pushes_a_fresh_token_restarts_and_logs_it_never_showing_the_token() {
 
 #[test]
 fn add_creates_within_the_cap_refuses_past_it_and_only_an_owner_yes_lets_it_on() {
-    let c = setup("runners-add");
+    let (c, _sh) = setup("runners-add");
     let r = fake(&fleet(3, false));
     let (code, out) = run(&c, &r, &["runners", "add"]);
     assert_eq!(code, 0, "{out}");
@@ -194,7 +194,7 @@ fn add_creates_within_the_cap_refuses_past_it_and_only_an_owner_yes_lets_it_on()
 
 #[test]
 fn remove_drains_then_deregisters_then_deletes_and_the_last_vm_needs_the_owner() {
-    let c = setup("runners-remove");
+    let (c, _sh) = setup("runners-remove");
     // vm1 runs a job through the first poll, then is idle.
     let r = fake(&fleet(3, false))
         .once(LIST, 0, &fleet(3, true))
@@ -223,7 +223,7 @@ fn remove_drains_then_deregisters_then_deletes_and_the_last_vm_needs_the_owner()
     let (_, out) = run(&c, &r, &["runners", "status"]);
     assert!(!out.contains("vm vm1") && out.contains("(1 VMs × 3 slots"), "{out}");
     // vm2 down to no online runner elsewhere: vm1 is the last VM with online runners.
-    let c = setup("runners-remove-last");
+    let (c, _sh) = setup("runners-remove-last");
     let r = fake(&fleet(0, false));
     let (code, out) = run(&c, &r, &["runners", "remove", "vm1"]);
     assert_eq!(code, 3, "{out}");
@@ -238,7 +238,7 @@ fn remove_drains_then_deregisters_then_deletes_and_the_last_vm_needs_the_owner()
 
 #[test]
 fn retire_local_stops_and_deregisters_the_idle_local_runners_only_with_the_vms_up() {
-    let c = setup("runners-retire");
+    let (c, _sh) = setup("runners-retire");
     let r = fake(&fleet(2, false));
     let (code, out) = run(&c, &r, &["runners", "retire-local"]);
     assert_eq!(code, 3, "{out}");
@@ -262,7 +262,7 @@ fn retire_local_stops_and_deregisters_the_idle_local_runners_only_with_the_vms_u
 
 #[test]
 fn tokens_reach_every_vm_and_check_refreshes_them_and_alerts_low_and_ok_once_each() {
-    let c = setup("runners-check");
+    let (c, _sh) = setup("runners-check");
     let r = fake(&fleet(0, false));
     let (code, out) = run(&c, &r, &["runners", "tokens"]);
     assert_eq!(code, 0, "{out}");
@@ -292,7 +292,7 @@ fn tokens_reach_every_vm_and_check_refreshes_them_and_alerts_low_and_ok_once_eac
 
 #[test]
 fn check_pushes_a_token_once_the_last_is_30_min_old() {
-    let c = setup("runners-refresh");
+    let (c, _sh) = setup("runners-refresh");
     let d = json!({"vms": 2, "failed": []});
     append(&c.state, &Event::new(NOW - 1800, "drover", None, "runners-tokens", d)).unwrap();
     let r = fake(&fleet(3, false));
@@ -303,7 +303,7 @@ fn check_pushes_a_token_once_the_last_is_30_min_old() {
 
 #[test]
 fn the_built_in_boat_recipe_has_every_runner_command() {
-    let c = setup("runners-boat");
+    let (c, _sh) = setup("runners-boat");
     let t = drover::cloud::load(&c, "boat").unwrap();
     for k in [
         "create",

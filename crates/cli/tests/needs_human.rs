@@ -45,10 +45,8 @@ fn fixture(name: &str, last: &str) -> drover::Ctx {
     c
 }
 
-fn runner() -> Fake {
-    Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
+fn runner() -> OnShed {
+    OnShed::new(Fake::default())
 }
 
 /// The response at `path`; the page (#269) with its needs cards as the board draws them.
