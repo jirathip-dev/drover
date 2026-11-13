@@ -263,7 +263,7 @@ impl Sim {
         let (w, c) = (self.w.clone(), self.at());
         w.procs
             .borrow_mut()
-            .insert(pid, (format!("/opt/herdsman/bin/herdsman {}", args.join(" ")), c.now));
+            .insert(pid, (format!("/opt/drover/bin/drover {}", args.join(" ")), c.now));
         *w.hung.0.lock().unwrap() = None;
         let h = std::thread::spawn(move || {
             PID.set(pid);
