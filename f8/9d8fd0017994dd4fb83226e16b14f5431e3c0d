@@ -1,0 +1,10 @@
+Decided: one breaker per host in crates/core/src/breaker.rs, counted from the respawn and needs-human events drive already logs, each stamped failed_on with the failed lane's host; no new state file and no new event on a healthy host.
+Because: "drive stops spawning and respawning on that host. It logs one `runtime-down` event"
+Rejected: a lane-failed event per failure — every append is a sim scheduling point, so it reshuffled crates/cli/tests/sim and its hunt test stopped finding the planted bug in 40 rounds (staging finds it at round 18).
+Decided: while open, a spawn there is refused RUNTIME_DOWN, a soft refusal, so the action stays pending and the issue keeps its state.
+Because: "Issues keep their state (queued, or fix/review round) instead of going to needs-human."
+Decided: a passing canary logs runtime-cleared per issue with a respawn on that host in the window, which resets its respawn count, so held lanes respawn without one more round; max_parallel_spawns paces them.
+Because: "A passing canary closes the breaker (logs `runtime-up`) and spawns resume, paced by admission."
+Check: crates/cli/tests/stalled_lanes.rs still sends a single blank-pane lane to needs-human START_FAILED and trips no breaker.
+Check: the sim test was run once with an alarm per q1591 and passes.
+Owner: when a host's runtime stops starting lanes, drive now pauses that host and waits for a test session to work, instead of parking every issue as needs-human.
