@@ -133,7 +133,7 @@ pub fn append(state: &Path, ev: &Event) -> Result<()> {
     with(state, true, (), |c| insert(c, ev, None, false))
 }
 
-/// #900: `evs` in one transaction, each `needs-decision` under the next ask id; none if an ask keyed `once` is logged.
+/// #900, #906: `evs` in one transaction, each `needs-decision` under the highest `q<n>` logged plus 1; none if an ask keyed `once` is logged.
 pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Option<Vec<Event>>> {
     for ev in &evs {
         crate::sim::point(&crate::sim::Point::Append(ev));
@@ -149,7 +149,9 @@ pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Opti
                 return Ok(None);
             }
         }
-        let mut n = count("", &[])?;
+        let q = "SELECT COALESCE(MAX(CAST(SUBSTR(json_extract(json, '$.id'), 2) AS INTEGER)), 0) FROM events \
+            WHERE type = 'needs-decision' AND json_extract(json, '$.id') GLOB 'q[0-9]*'";
+        let mut n: u64 = tx.query_row(q, [], |r| r.get(0))?;
         for ev in evs.iter_mut().filter(|e| e.kind == "needs-decision") {
             n += 1;
             ev.data.insert("id".into(), format!("q{n}").into());
