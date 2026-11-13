@@ -117,6 +117,7 @@ flowchart TD
     other -.- k_disk_probe_secs(["disk_probe_secs = 2"])
     other -.- k_disk_sick_secs(["disk_sick_secs = 300"])
     other -.- k_disk_trust_secs(["disk_trust_secs = 60"])
+    other -.- k_lane_read_secs(["lane_read_secs = 5"])
     other -.- k_poll_millis(["poll_millis = 20"])
     other -.- k_tick_beat_secs(["tick_beat_secs = 60"])
     other -.- k_orchestrator_idle_minutes(["orchestrator_idle_minutes = 30"])
