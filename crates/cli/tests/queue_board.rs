@@ -1,7 +1,3 @@
-//! #268: the Queue tab is the TypeScript board's (web/src/queue.ts, run under node), drawn from API v1's `queue`: the
-//! page carries none of it, and every form the board draws posts through API v1 with exactly its fields: [▼], [Drive
-//! now], [Pause], [Resume], a defaulted decision's [change], the backlog's [queue N], a role's [Set] and a Conductor
-//! choice from the [config] sheet.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -12,10 +8,8 @@ use std::collections::BTreeMap;
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// A drawn form: its hidden fields, its buttons' `name=value`.
 type Form = (BTreeMap<String, String>, Vec<(String, String)>);
 
-/// Each live form in `html` (`<form method=post …>`): its hidden fields, then each button's `name=value` (if any).
 fn forms(html: &str) -> Vec<Form> {
     let attr = |tag: &str, k: &str| {
         let at = tag.find(&format!(" {k}="))? + k.len() + 2;
@@ -49,7 +43,6 @@ fn forms(html: &str) -> Vec<Form> {
         .collect()
 }
 
-/// POST `fields` to `/api/v1/<op>` as a paired device: the reply's JSON.
 fn post(s: &Server, cookie: &str, fields: &BTreeMap<String, String>) -> Value {
     let body = fields
         .iter()
@@ -66,7 +59,6 @@ fn post(s: &Server, cookie: &str, fields: &BTreeMap<String, String>) -> Value {
     serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap_or_else(|_| panic!("{res}"))
 }
 
-/// The drawn form whose hidden `op` is `op` (and, given, whose fields include `k=v`).
 fn form(html: &str, op: &str, with: Option<(&str, &str)>) -> Form {
     forms(html)
         .into_iter()
@@ -95,7 +87,6 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "17", "18"]).0,
         0
     );
-    // #12: a routine ask decided by default (its [change]); a backlog read with #30 and #31 in it.
     let ev =
         |n: u64, kind: &str, d: Value| append(&c.state, &Event::new(T - 60, "sendmeter", Some(n), kind, d)).unwrap();
     ev(
@@ -130,7 +121,6 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
         v["message"].as_str().unwrap().to_string()
     };
 
-    // [▼] on #12: the queue order moves as `queue mv` would.
     let (mv, _) = form(&tab(), "mv", Some(("issue", "12")));
     assert_eq!(mv.get("after").map(String::as_str), Some("17"), "{mv:?}");
     ok(&mv);
@@ -144,7 +134,6 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     .collect();
     assert_eq!(order, [17, 12, 18]);
 
-    // [change] on the defaulted decision: a new decision, the owner's.
     let (mut change, buttons) = form(&tab(), "answer", Some(("id", "q1")));
     assert_eq!(
         buttons[0],
@@ -160,7 +149,6 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
         "{d:?}"
     );
 
-    // The backlog's [queue N] (serve.js fills `issues` with the ticks, in tick order).
     let (mut bq, _) = form(&tab(), "bqueue", None);
     bq.insert("issues".into(), "31,30".into());
     assert!(ok(&bq).ends_with("(needs-check)"));
@@ -173,12 +161,10 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
         (json!([31, 30]), json!(true))
     );
 
-    // [Drive now]: a pass runs.
     let before = kinds(&c, "drive-pass").len();
     ok(&form(&tab(), "drive", None).0);
     assert_eq!(kinds(&c, "drive-pass").len(), before + 1);
 
-    // [Pause], then the paused card's [Resume].
     ok(&form(&tab(), "pause", None).0);
     let paused = tab();
     assert!(paused.contains("<details class=\"fc off "), "{paused}");
@@ -196,7 +182,6 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
             .all(|(h, _)| h.get("op").map(String::as_str) != Some("cond")),
         "{sheet}"
     );
-    // Unpaired, a paired op through the API is refused; the board's mtime is checked as the form's.
     let v = post(&s, "", &form(&tab(), "drive", None).0);
     assert_eq!(v["code"], "UNPAIRED", "{v}");
     let mut stale = form(&tab(), "pause", None).0;
@@ -204,8 +189,6 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     assert_eq!(post(&s, &cookie, &stale)["code"], "STALE");
 }
 
-/// #517: a conductor's thread ask on an issue: its question and options on that issue's queue card (and the needs
-/// card), `asked in <title> · <id>`; answered there, the thread's copy shows it answered, no longer open.
 #[test]
 fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
     let sh = FakeShed::new();
@@ -242,7 +225,6 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
     );
     let (mut f, buttons) = form(&html, "answer", Some(("id", "q398")));
     assert_eq!(buttons[0], ("choice".into(), "1".into()), "{buttons:?}");
-    // The needs card shows it too, with the same thread line.
     let [needs, _, _] = parts(&s, ADDR, &cookie, T);
     assert!(
         needs.contains("ship the bell now?") && needs.contains("the bell · t6"),
@@ -261,7 +243,6 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
         "{:?}",
         host.calls.borrow()
     );
-    // The thread's copy is answered, not open; the card has no form left.
     let chat: Value = serde_json::from_str(&api(&s, ADDR, &cookie, T, "chat")).unwrap();
     let t = (chat["threads"].as_array().unwrap().iter())
         .find(|t| t["id"] == "t6")

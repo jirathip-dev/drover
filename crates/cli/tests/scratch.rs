@@ -1,5 +1,3 @@
-//! #536: lanes' private scratch under `build_root`: drive deletes an ended lane's and trims the oldest over budget;
-//! `clean` removes stray Cargo folders in the stray roots and a removed worktree's Claude temp dir.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -19,7 +17,6 @@ fn spawn(c: &drover::Ctx, issue: u64, role: &str, agent: &str) {
     ev(c, issue, "spawn", d);
 }
 
-/// #651: a lane spawned on the remote host `air`.
 fn air_spawn(c: &drover::Ctx, issue: u64, role: &str, agent: &str) {
     let d = json!({"role": role, "agent": agent, "worktree": format!("/Users/me/worktrees/sendmeter/{agent}"),
                    "pane": agent, "runtime": "shed", "host": "air", "machine": "air"});
@@ -35,7 +32,6 @@ fn merged(c: &drover::Ctx, issue: u64) {
     );
 }
 
-/// `<dir>/<rel>` holding a 4096-byte blob.
 fn blob(dir: &Path, rel: &str) -> PathBuf {
     let p = dir.join(rel);
     std::fs::create_dir_all(&p).unwrap();
@@ -43,7 +39,6 @@ fn blob(dir: &Path, rel: &str) -> PathBuf {
     p
 }
 
-/// `p` and its entries last modified at `at`.
 fn age(p: &Path, at: u64) {
     for e in std::fs::read_dir(p).unwrap().flatten() {
         let f = std::fs::File::open(e.path()).unwrap();
@@ -55,7 +50,7 @@ fn age(p: &Path, at: u64) {
 
 fn setup(name: &str, budget_bytes: u64) -> (drover::Ctx, PathBuf) {
     let d = tmpdir(name);
-    let root = d.join("worktrees/.build"); // #630: the root's build folder
+    let root = d.join("worktrees/.build");
     let cfg = CONFIG.replace(
         "build_root = \"\"",
         &format!("build_budget_gb = {}", budget_bytes as f64 / 1_073_741_824.0),
@@ -69,7 +64,6 @@ fn budget(c: &drover::Ctx, sh: &FakeShed) -> String {
     String::from_utf8(out).unwrap()
 }
 
-/// An ended lane's scratch goes at drive's pass (merged, superseded by a later round, or unknown); an open issue's
 #[test]
 fn drive_deletes_an_ended_lanes_scratch() {
     let (c, s) = setup("scratch-sweep", 1 << 40);
@@ -96,7 +90,7 @@ fn drive_deletes_an_ended_lanes_scratch() {
     let lock = s.join("sendmeter-rev-15-r1/base/target/debug/.cargo-lock");
     std::fs::write(&lock, "").unwrap();
     let held = std::fs::File::open(&lock).unwrap();
-    held.lock().unwrap(); // a cargo build running there
+    held.lock().unwrap();
     let sh = FakeShed::new();
     sh.attach(&c);
     sh.lane("sendmeter-impl-14", "idle", "/x");
@@ -110,9 +104,6 @@ fn drive_deletes_an_ended_lanes_scratch() {
     assert!(out.contains("(lane ended)"), "{out}");
 }
 
-/// #798: a lane's `.build/<agent>` folder and its scratch go on the next pass once it is finished (a recorded verdict,
-/// its own `turn done`, or replaced by a newer round), its session open or not; a working, building, active or unknown
-/// one stays. Worktrees are never touched; each removal logs `build-freed`.
 #[test]
 fn a_finished_lanes_build_folder_goes_at_once_even_with_its_session_open() {
     let (c, s) = setup("build-finished", 1 << 40);
@@ -121,7 +112,7 @@ fn a_finished_lanes_build_folder_goes_at_once_even_with_its_session_open() {
     spawn(&c, 13, "impl", "sendmeter-impl-13");
     spawn(&c, 13, "rev", "sendmeter-rev-13-r1");
     verdict(13);
-    spawn(&c, 13, "impl", "sendmeter-impl-13-f1"); // the fix round's newer lane
+    spawn(&c, 13, "impl", "sendmeter-impl-13-f1");
     for n in [14, 15] {
         spawn(&c, n, "rev", &format!("sendmeter-rev-{n}-r1"));
         verdict(n);
@@ -143,7 +134,7 @@ fn a_finished_lanes_build_folder_goes_at_once_even_with_its_session_open() {
         std::fs::write(b.join("debug/.cargo-lock"), "").unwrap();
     }
     let held = std::fs::File::open(builds[4].join("debug/.cargo-lock")).unwrap();
-    held.lock().unwrap(); // cargo building in #15's rev lane
+    held.lock().unwrap();
     let wts = lanes.map(|a| blob(&c.worktrees.join("sendmeter"), &format!("{a}/src")));
     let sh = FakeShed::new();
     sh.attach(&c);
@@ -191,7 +182,6 @@ fn events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     all.into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// Over `build_budget_gb`, scratch dirs count and the oldest unlocked one goes first.
 #[test]
 fn the_oldest_scratch_is_trimmed_over_budget() {
     let (c, s) = setup("scratch-trim", 6000);
@@ -199,7 +189,6 @@ fn the_oldest_scratch_is_trimmed_over_budget() {
     spawn(&c, 13, "impl", "sendmeter-impl-13");
     let (old, new) = (blob(&s, "sendmeter-rev-9-r1"), blob(&s, "sendmeter-impl-13"));
     age(&old, 1_000);
-    // #634: no live agent for either (spawned long ago); a live one's scratch is never trimmed (tests/shed.rs).
     let sh = FakeShed::new();
     sh.attach(&c);
     let out = budget(&c, &sh);
@@ -207,8 +196,6 @@ fn the_oldest_scratch_is_trimmed_over_budget() {
     assert!(out.contains("builds: trimmed"), "{out}");
 }
 
-/// `clean` lists stray Cargo folders older than a day in the stray roots; `--yes` removes them and the removed
-/// worktree's Claude temp dir.
 #[test]
 fn clean_removes_stray_cargo_folders_and_claude_temp_dirs() {
     let d = tmpdir("scratch-clean");
@@ -293,7 +280,6 @@ fn clean_removes_stray_cargo_folders_and_claude_temp_dirs() {
     );
 }
 
-/// #651: a remote host `air` whose build-folder commands run here, in a shell with `home` as `$HOME`, against real
 struct Air<'a> {
     over: OverSsh<'a>,
     free_kb: u64,
@@ -342,8 +328,6 @@ impl drover::runner::Runner for Air<'_> {
     fn sleep(&self, _: u64) {}
 }
 
-/// A ctx whose fleet has the remote host `air` (workspace root `AIR_ROOT` there, absent here); air's `$HOME` and its
-/// `.build/.scratch`.
 fn air_setup(name: &str) -> (drover::Ctx, PathBuf, PathBuf) {
     let d = tmpdir(name);
     let cfg = CONFIG.replace("build_root = \"\"", "build_budget_gb = 1000");
@@ -386,8 +370,6 @@ fn tick(c: &drover::Ctx, home: &Path, air: &[(&str, &str)], free_kb: u64) -> (Ve
     (calls, out)
 }
 
-/// #651: one tick on a remote host with three scratch folders (a merged lane whose agent sits `done`, a working lane,
-/// an orphan) removes the merged and orphan ones there, through its runner, and keeps the working one.
 #[test]
 fn a_remote_hosts_ended_and_orphan_scratch_goes_at_the_tick() {
     let (c, home, s) = air_setup("scratch-remote");
@@ -396,7 +378,6 @@ fn a_remote_hosts_ended_and_orphan_scratch_goes_at_the_tick() {
     air_spawn(&c, 13, "impl", "sendmeter-impl-13");
     let [ended, working, orphan] =
         ["sendmeter-impl-12", "sendmeter-impl-13", "sendmeter-rev-9-r1"].map(|a| blob(&s, &format!("{a}/debug")));
-    // #798: the lanes' build folders there too: the finished one goes, the working one and an unknown one stay.
     let b = s.parent().unwrap();
     let [built, building, unknown] =
         ["sendmeter-impl-12", "sendmeter-impl-13", "sendmeter-rev-9-r1"].map(|a| blob(b, &format!("{a}/debug")));
@@ -428,8 +409,6 @@ fn a_remote_hosts_ended_and_orphan_scratch_goes_at_the_tick() {
     assert!(out.contains("(lane ended)"), "{out}");
 }
 
-/// #651: under `min_free_gb` a host's scratch of every non-working lane goes, largest first, each logged with the host,
-/// size and reason; a working lane's stays.
 #[test]
 fn a_host_short_of_disk_drops_non_working_scratch_largest_first() {
     let (c, home, s) = air_setup("scratch-low");
@@ -466,8 +445,6 @@ fn a_host_short_of_disk_drops_non_working_scratch_largest_first() {
     assert!(out.contains("(disk low)"), "{out}");
 }
 
-/// #678: `air` turned off for new lanes but answering: its merged lane #12 (worktree and scratch), #13's lane now live
-/// on this host, #14's lane live on the Air.
 fn air_off(name: &str) -> (drover::Ctx, PathBuf, [PathBuf; 3]) {
     let (c, home, s) = air_setup(name);
     let text = std::fs::read_to_string(&c.config).unwrap();
@@ -513,8 +490,6 @@ fn air_off_hosts(c: &drover::Ctx) -> (Fake, FakeShed, FakeShed) {
 
 const AIR_WT: &str = "/Users/me/worktrees/sendmeter/sendmeter-impl-12";
 
-/// #678: an explicit `clean` sweeps a disabled host that answers: the dry run lists the merged lane's worktree and the
-/// dead lane's scratch there, `--yes` removes both.
 #[test]
 fn clean_sweeps_a_disabled_but_reachable_host() {
     let (c, home, [dead, ..]) = air_off("scratch-off-clean");
@@ -561,8 +536,6 @@ fn clean_sweeps_a_disabled_but_reachable_host() {
     );
 }
 
-/// #678: on a disabled host a lane's scratch stays only while an agent of that name is live there: one that moved to
-/// another host loses its old copy (`reclaim --apply` too).
 #[test]
 fn a_disabled_hosts_scratch_stays_only_for_its_own_live_agents() {
     let (c, home, [dead, moved, live]) = air_off("scratch-off-reclaim");

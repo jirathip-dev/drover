@@ -1,6 +1,3 @@
-//! #725: the lifeboat at `/api/v1/lifeboat`: an unpaired device gets the pair hint only; a paired one sees each fleet,
-//! the queue, the live lanes, the open asks and the open run cards, with no subprocess on a load (#337); its posts
-//! (pause/resume, an answer, a card's approve/deny) log the CLI verb's own event `via: lifeboat`.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -11,7 +8,6 @@ const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const CMD: &str = "uptime";
 
-/// API v1's board (#12 impl working, #9 rev blocked) with #30 queued, ask q1 on #12 and run cards r1 and r2 open.
 fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     let (c, r) = v1_board(name);
     seed(&c, &r);
@@ -50,7 +46,6 @@ fn seed(c: &drover::Ctx, r: &Fake) {
     }
 }
 
-/// `method /api/v1/lifeboat[query]` with `body` (a form) as `cookie`'s device: (status line, body).
 fn req(s: &Server, method: &str, query: &str, body: &str, cookie: &str) -> (String, String) {
     let r = format!(
         "{method} /api/v1/lifeboat{query} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
@@ -86,7 +81,7 @@ fn an_unpaired_device_sees_the_pair_hint_and_nothing_else() {
 #[test]
 fn a_paired_device_sees_queue_lanes_asks_and_cards_and_a_load_runs_no_subprocess() {
     let (c, r) = herdr_fixture("lifeboat-paired");
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0); // the step's snapshot, as on a live host
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let before = r.calls.borrow().len();
@@ -158,7 +153,6 @@ fn each_post_logs_the_cli_verbs_event_via_lifeboat() {
         (e.str("id"), e.data["approved"].clone(), e.str("via")),
         (Some("r2"), json!(false), Some("lifeboat"))
     );
-    // A settled card is gone from the page; a second tap is the CLI's refusal, shown back.
     let page = req(&s, "GET", "", "", &ck).1;
     assert!(
         !page.contains("<button>approve</button>") && !page.contains("Which database?"),
@@ -168,8 +162,6 @@ fn each_post_logs_the_cli_verbs_event_via_lifeboat() {
     assert!(back.contains("REFUSED%20ALREADY%5FSETTLED"), "{back}");
 }
 
-/// The `ui` job's 390 px audit (scripts/ui-audit.sh's `lifeboat/page`): with `LIFEBOAT_SITE` set, the paired page goes
-/// to `<site>/lifeboat/index.html` with an audit that fails on sideways scroll or a control under 44 px.
 #[test]
 fn the_page_for_the_ui_audit() {
     let Some(site) = std::env::var_os("LIFEBOAT_SITE") else {

@@ -1,6 +1,3 @@
-//! #541: a lane's ask goes to its repo's conductor thread first (the pinned one, else the newest; none: the owner);
-//! the conductor answers only with a basis and never an owner topic; its answer posts an FYI line the owner may
-//! [change] for 30 min. Its own test binary: `DROVER_LANE`, `DROVER_THREAD` and `PATH` are process-wide.
 mod common;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
 use common::*;
@@ -17,7 +14,6 @@ const UA_PRIVATE: &str = "q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94";
 const LANE: &str = "sendmeter-impl-36";
 const SPEC: &str = "Split the sender.\n\nKeep the old sender behind a flag\nuntil the owner says so.";
 
-/// Held for the test: the env this binary's tests set is shared.
 fn env() -> MutexGuard<'static, ()> {
     static ENV: Mutex<()> = Mutex::new(());
     ENV.lock().unwrap_or_else(|e| e.into_inner())
@@ -91,7 +87,6 @@ fn setup(name: &str, extra: &str, threads: &[&str]) -> (drover::Ctx, FakeShed) {
     (c, sh)
 }
 
-/// Web pushes sent so far.
 fn pushes(c: &drover::Ctx) -> usize {
     let calls = c.state.parent().unwrap().parent().unwrap().join("calls");
     std::fs::read_to_string(calls).unwrap_or_default().lines().count()
@@ -109,7 +104,6 @@ fn host() -> Fake {
         .reply("gh issue view 36", &issue.to_string())
 }
 
-/// The lane's ask `q`, its id.
 fn lane_ask(c: &drover::Ctx, sh: &FakeShed, q: &str) -> String {
     as_lane();
     let args = [
@@ -144,7 +138,6 @@ fn typed(sh: &FakeShed, text: &str) -> bool {
     sh.sent(LANE).iter().any(|t| t == text) && enter
 }
 
-/// The [chat] tab as the board draws it at `now`.
 fn chat(c: &drover::Ctx, now: u64) -> String {
     let r = Fake::default();
     let c = at(c, now);
@@ -206,7 +199,6 @@ fn a_spec_quote_answer_reaches_the_lane_posts_an_fyi_and_pushes_nothing() {
     let _env = env();
     let (c, sh) = setup("lane-ask-answer", "", &["Run"]);
     lane_ask(&c, &sh, "Split it?");
-    // Line breaks in the spec don't matter; the words must be verbatim.
     let quote = "Keep the old sender behind a flag until the owner says so.";
     let (code, out) = orchestrator_answer(&c, &sh, "t1", "q1", "2", quote);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: no -> sendmeter-impl-36\n"));
@@ -224,7 +216,6 @@ fn a_spec_quote_answer_reaches_the_lane_posts_an_fyi_and_pushes_nothing() {
     );
     assert_eq!(pushes(&c), 0, "an orchestrator's answer pushes nothing");
 
-    // A past decision's id is a basis too; the ask's own id is not.
     let q2 = lane_ask(&c, &sh, "Split the tests too?");
     let (code, out) = orchestrator_answer(&c, &sh, "t1", &q2, "1", &q2);
     assert!(code == 3 && out.contains("REFUSED OWNER_ASK"), "{out}");
@@ -255,7 +246,6 @@ fn an_owner_topic_is_refused_and_put_to_the_owner_in_the_thread() {
         [(Some("q1"), Some("t1"), json!(1)), (Some("q2"), Some("t1"), json!(1))]
     );
     assert_eq!(pushes(&c), 2, "each pushes as an ask");
-    // The owner's choice row in the thread: the conductor's pick first; the tap answers the lane.
     let chat = chat(&c, NOW + 5);
     assert!(chat.contains("data-id=\"q1\""), "{chat}");
     as_owner();
@@ -293,7 +283,6 @@ fn the_owner_changes_a_orchestrator_answer_within_30_minutes_only() {
     assert_eq!(orchestrator_answer(&c, &sh, "t1", "q1", "2", quote).0, 0);
     let board = chat(&c, NOW + 60);
     assert!(board.contains("answered q1 for #36: no, because Keep the old sender behind a flag</p><details class=chg><summary>change</summary><form class=chq data-id=\"q1\""), "{board}");
-    // A conductor may not change it.
     let (code, out) = orchestrator_answer(&c, &sh, "t1", "q1", "1", quote);
     assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
     as_owner();
@@ -310,7 +299,6 @@ fn the_owner_changes_a_orchestrator_answer_within_30_minutes_only() {
         "changed: no more [change]"
     );
 
-    // After 30 min: no [change], and the owner's answer is refused.
     lane_ask(&c, &sh, "Split the tests too?");
     assert_eq!(orchestrator_answer(&c, &sh, "t1", "q2", "2", quote).0, 0);
     assert!(chat(&c, NOW + 60).contains("<form class=chq data-id=\"q2\""));

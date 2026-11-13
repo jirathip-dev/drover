@@ -1,5 +1,3 @@
-//! #584: an ask closes on every real ending: the owner's typed answer (`answer --typed`), a conductor's withdraw, a
-//! handoff delivered or failed, 24 h expiry unless its lane is live (that one re-alerts once a day); a one-time sweep.
 mod common;
 use common::*;
 use drover::events::{append, open_asks, read, Event};
@@ -26,7 +24,6 @@ fn open(c: &drover::Ctx) -> Vec<String> {
         .collect()
 }
 
-/// Threads t1 and t2 (`ts` before everything else).
 fn threads(c: &drover::Ctx, ts: u64) {
     for t in ["t1", "t2"] {
         log(
@@ -55,7 +52,6 @@ fn said(c: &drover::Ctx, ts: u64, thread: &str, from: &str, text: &str) {
     );
 }
 
-/// The `drover asks --all` row of ask `id`.
 fn row(c: &drover::Ctx, id: &str) -> String {
     let all = run(c, &Fake::default(), &["asks", "--all"]).1;
     let row = all.lines().find(|l| l.split(' ').nth(1) == Some(id));
@@ -187,7 +183,6 @@ fn check(c: &drover::Ctx, r: &Fake) -> String {
     out
 }
 
-/// `[chat·N]`: the threads showing `! choose`.
 fn choosing(c: &drover::Ctx) -> u64 {
     let r = Fake::default();
     let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
@@ -211,7 +206,6 @@ fn a_thread_ask_nobody_waits_on_expires_after_24_h_and_its_choose_goes() {
     assert!(row(&c, "q1").ends_with("[expired]"), "{}", row(&c, "q1"));
 }
 
-/// The asking lane's spawn on #36, and its ask `id` at `ts`.
 fn lane_ask(c: &drover::Ctx, ts: u64, id: &str) {
     log(
         c,
@@ -269,7 +263,6 @@ fn the_sweep_closes_a_logs_stale_asks_once() {
     let sh = FakeShed::attached(&c);
     sh.lane(LANE, "idle", "/x");
     threads(&c, NOW - 40 * H);
-    // A handoff card whose handoff went out (before #584 no decision was logged for it).
     let d = json!({"id": "q1", "question": "Hand off \"Grill\" to which sendmeter thread?",
         "options": ["thread t2 · t2"], "recommend": null, "kind": "owner", "thread": "t1",
         "handoff": {"repo": "sendmeter", "title": "Grill", "text": "grill #12", "targets": ["t2"]}});

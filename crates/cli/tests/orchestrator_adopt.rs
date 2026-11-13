@@ -1,5 +1,3 @@
-//! #477: a conductor start that times out (or finds its name taken) but whose agent is up is adopted, not failed;
-//! deliveries to one thread wait for its start; a failure row shows herdr's message, not its JSON.
 mod common;
 use common::fake_shed::Cli;
 use common::*;
@@ -55,12 +53,10 @@ fn acp() -> Fake {
         .reply("shed send", "")
 }
 
-/// The thread's conductor folder, as herdr reports an agent's cwd.
 fn folder(c: &drover::Ctx) -> String {
     c.state.with_file_name("orchestrator").join("t1").display().to_string()
 }
 
-/// herdr with `list` as its agents, ready to start a conductor in workspace w9 or type into one.
 fn herdr(list: &str) -> Fake {
     Fake::default()
         .reply("herdr agent list", list)
@@ -146,7 +142,6 @@ fn a_name_taken_by_an_agent_in_another_folder_is_still_not_delivered() {
 #[test]
 fn a_failed_start_shows_herdrs_message_not_its_json() {
     let c = setup("adopt-message");
-    // #623: it is tried twice (an automatic retry), each waiting 120 s for its agent; one row.
     let r = herdr(NO_AGENTS)
         .once_err("herdr agent start", 1, TIMEOUT)
         .once_err("herdr agent start", 1, TIMEOUT);
@@ -228,9 +223,6 @@ fn a_failed_start_is_tried_once_more_and_shows_one_row() {
     assert_eq!(starts(&c)[0].str("runtime"), Some("shed-acp"));
 }
 
-/// #623: herdr on a loaded host: `agent start` times out once, and the conductor shows in the list only after the
-/// starting thread has slept `after` s (a fake clock). Another thread's `sleep` (a message behind the start) holds
-/// until the test says the first delivery is done.
 struct Late {
     f: Fake,
     after: u64,
@@ -324,7 +316,6 @@ const LOST: &str = r#"{"error":{"code":"agent_name_not_found","message":"named a
 #[test]
 fn a_stale_name_is_cleared_and_the_start_succeeds_on_its_second_try() {
     let c = setup("stale-name");
-    // Its earlier conductor ran in w9 and is gone now; herdr still holds the name.
     say(&c, &herdr(NO_AGENTS), "hello");
     let r = herdr(NO_AGENTS).once_err("herdr agent start", 1, LOST);
     let log = say(&c, &r, "again");
@@ -344,10 +335,7 @@ fn a_stale_name_is_cleared_and_the_start_succeeds_on_its_second_try() {
     assert!(s[1].data.get("adopted").is_none(), "{:?}", s[1].data);
 }
 
-// --- #736: a conductor start blocked by a first-start prompt answers it as spawn does ---
-
 const NOT_READY: &str = r#"{"error":{"code":"agent_not_ready","message":"agent orchestrator-t1 is blocked during startup and is not ready for prompts"}}"#;
-/// #484: a real failed start's screen: the unnumbered trust menu under the shell's own `❯` prompts.
 const TRUST_LIVE: &str = include_str!("golden/spawn/trust-live.txt");
 const BYPASS: &str = " WARNING: Claude Code running in Bypass Permissions mode\n\n By proceeding, you accept all responsibility?\n\n ❯ 1. No, exit\n   2. Yes, I accept\n\n Enter to confirm · Esc to cancel\n";
 
@@ -385,7 +373,6 @@ fn a_orchestrator_start_blocked_by_a_known_first_start_prompt_answers_it_and_del
             (s.str("pane"), &s.data["confirmed"]),
             (Some("w9:p1"), &serde_json::json!(true))
         );
-        // The first start's line is in its thread file, which the start's kick points it at.
         let thread = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t1/.thread.md")).unwrap();
         assert!(thread.contains("hello"), "{thread}");
     }

@@ -1,6 +1,3 @@
-//! #460: a config proposal's card in a thread: delivered live to a thread open on the phone, kept on the first page
-//! past the 30-message window while it waits (`config cN waiting` on the thread's bar and row), and stale once
-//! fleet.toml moves (no [apply]; `config apply` refuses it).
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -14,7 +11,6 @@ const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const CARD: &str = "<form class=chc data-id=\"c1\"><button name=act value=apply>apply</button>";
 
-/// Thread t1 with a conductor role; `config propose` of an impl model change gives `c1`.
 fn setup(name: &str) -> drover::Ctx {
     let c = ctx(
         &tmpdir(name),
@@ -40,7 +36,6 @@ fn propose(c: &drover::Ctx) {
     assert_eq!((code, out.as_str()), (0, "c1\n"));
 }
 
-/// Conductor messages `m<i>` in t1.
 fn msgs(c: &drover::Ctx, ts: u64, ids: std::ops::Range<u64>) {
     for i in ids {
         let d = json!({"thread": "t1", "from": "orchestrator", "text": format!("m{i}")});
@@ -48,14 +43,12 @@ fn msgs(c: &drover::Ctx, ts: u64, ids: std::ops::Range<u64>) {
     }
 }
 
-/// The [chat] tab as the board draws it (#269) from API v1's `chat`: the t1 view and the list.
 fn chat(s: &Server, cookie: &str) -> (String, String) {
     let h = board_js(&[(&api(s, ADDR, cookie, T + 500, "chat"), "chat.tab(d)")]).remove(0);
     let at = h.find("<div class=cvp data-t=\"t1\">").unwrap();
     (h[at..].into(), h[..at].into())
 }
 
-/// API v1's page of t1 (`q`: `before=`'s value and more), as the board draws it.
 fn page(s: &Server, cookie: &str, q: &str) -> String {
     let j = api(s, ADDR, cookie, T + 500, &format!("thread/t1?before={q}"));
     board_js(&[(&j, "chat.page(0, 't1', d, true)")]).remove(0)
@@ -65,7 +58,7 @@ fn page(s: &Server, cookie: &str, q: &str) -> String {
 fn a_waiting_card_stays_on_the_first_page_and_a_stale_one_cannot_apply() {
     let c = setup("cfg-window");
     propose(&c);
-    msgs(&c, T + 100, 0..40); // 40 messages after it: the card is past the last 30
+    msgs(&c, T + 100, 0..40);
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T + 500);
@@ -89,12 +82,10 @@ fn a_waiting_card_stays_on_the_first_page_and_a_stale_one_cannot_apply() {
         list.contains("<b class=\"a cw\">config c1 waiting</b>"),
         "on its row: {list}"
     );
-    // The older page leaves it out (the first page has it).
     let b = &view[view.find("data-b=").unwrap() + 7..];
     let older = page(&s, &cookie, &format!("{}&n=30", &b[..b.find('>').unwrap()]));
     assert!(older.contains(">m9</span>") && !older.contains("class=chc"), "{older}");
 
-    // fleet.toml moves (another proposal applied, a hand edit): stale, no [apply], not pinned, not waiting.
     let cur = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, cur + "\n# hand edit\n").unwrap();
     let (view, list) = chat(&s, &cookie);
@@ -114,7 +105,6 @@ fn a_waiting_card_stays_on_the_first_page_and_a_stale_one_cannot_apply() {
     assert!(std::fs::read_to_string(&c.config).unwrap().ends_with("# hand edit\n"));
 }
 
-/// What `s` sends within `ms`.
 fn drain(s: &mut TcpStream, ms: u64) -> String {
     let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], [0u8; 65_536]);
     while Instant::now() < end {
@@ -137,8 +127,6 @@ fn serve(c: &drover::Ctx) -> (std::net::SocketAddr, FakeShed) {
     (addr, sh)
 }
 
-/// The `/live` stream of a phone with t1 open: a proposal (with a burst of 40 messages after it, in the same second)
-/// arrives as the [chat] data (#269) carrying the card and the waiting marker.
 #[test]
 fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
     let c = setup("cfg-live");
@@ -156,7 +144,6 @@ fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
             .filter_map(|l| serde_json::from_str::<Value>(l.lines().next()?).ok())
             .last()
     };
-    // (A tick may land mid-burst: the last data sent, once the burst's end is in.)
     let (t0, mut got) = (Instant::now(), String::new());
     while !chat(&got).is_some_and(|j| j.to_string().contains("\"text\":\"m39\""))
         && t0.elapsed() < Duration::from_secs(5)
@@ -188,7 +175,6 @@ fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
     assert_eq!(repo["rows"][0]["waiting"], json!(["c1"]), "{repo}");
 }
 
-/// The page at a phone's width in WebKit on a real `serve`, `js` run on the chat tab; `window.late` after `wait` s.
 fn webkit(url: &str, cookie: &str, js: &str, wait: &str, png: &std::path::Path) -> Vec<f64> {
     let o = webview()
         .env("DROVER_WAIT", wait)
@@ -201,9 +187,6 @@ fn webkit(url: &str, cookie: &str, js: &str, wait: &str, png: &std::path::Path) 
     out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect()
 }
 
-/// The same in WebKit at 390 px: the card lands in the open thread without a reload, at its end in view; 40 messages
-/// after it, it is still there once, and a tap on `config c1 waiting` brings it into view. Then the row's marker in the
-/// list, and the card once stale. (DROVER_SNAPSHOTS keeps the three shots.)
 #[test]
 fn the_card_lands_live_in_view_and_stays_reachable_in_webkit() {
     if no_webkit() {
@@ -217,7 +200,6 @@ fn the_card_lands_live_in_view_and_stays_reachable_in_webkit() {
     let url = format!("http://{addr}/");
     let c2 = c.clone();
     let later = std::thread::spawn(move || {
-        // Once the page's stream watches t1 (serve stamps it each second).
         let w = c2.state.with_file_name("watch-t1.at");
         while !w.exists() {
             std::thread::sleep(Duration::from_millis(50));
@@ -236,8 +218,6 @@ fn the_card_lands_live_in_view_and_stays_reachable_in_webkit() {
           late.push(seen(cards()[0]), errs.length); })()";
     let m = webkit(&url, &cookie, js, "12", &shots.join("config-live.png"));
     later.join().unwrap();
-    // In view on arrival, marked waiting on its bar and row; once after the burst, scrolled away (the thread follows its
-    // end); the tap on the marker: in view; no errors.
     assert_eq!(
         m,
         [1., 2., 1., 0., 1., 0.],
@@ -260,8 +240,6 @@ fn the_card_lands_live_in_view_and_stays_reachable_in_webkit() {
     );
 }
 
-/// #558: `config apply` of a proposal adding a fleet kicks drive for its first queued issue at once; an existing
-/// fleet's queue is left to the pass.
 #[test]
 fn applying_a_new_fleet_kicks_its_first_queued_issue() {
     let c = setup("cfg-add-fleet");
@@ -290,8 +268,6 @@ fn applying_a_new_fleet_kicks_its_first_queued_issue() {
     );
 }
 
-/// #732: `config apply` syncs the profiles itself: a role it adds has its hook (and a Hermes profile its approval)
-/// before doctor runs, so an apply never leaves `✗ hermes hooks`.
 #[test]
 fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
     let c = setup("cfg-sync");
@@ -309,7 +285,6 @@ fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
     );
     let (code, out) = run(&c, &r, &["config", "apply", "c1"]);
     assert_eq!(code, 0, "{out}");
-    // A check role's hook is rev's (read-only).
     let allow = std::fs::read_to_string(c.homes["hermes"].join("fleet-verify/shell-hooks-allowlist.json")).unwrap();
     assert!(allow.contains("hook --role rev"), "{allow}");
     assert!(std::fs::read_to_string(&yaml).unwrap().contains("hooks:"));

@@ -1,6 +1,3 @@
-//! #538: conductor access: capability groups in `[conductor] allow` (their default, the brief's list, a config card
-//! that switches one only on the owner's [apply]) and run cards (approve runs the exact command once and posts its
-//! output, deny runs nothing, a changed or expired card is refused, a hard no is refused at posting).
 mod common;
 use common::*;
 use drover::config::Config;
@@ -35,7 +32,6 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// `drover hook` as thread t1's conductor under `c`'s fleet.toml: its stdout ("" allows).
 fn orchestrator_hook(c: &drover::Ctx, cmd: &str) -> String {
     let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
     let mut child = Command::new(env!("CARGO_BIN_EXE_drover"))
@@ -145,7 +141,6 @@ fn a_config_card_switches_a_group_on_only_at_the_owners_apply() {
         &["config", "propose", "t1", file.to_str().unwrap()],
     );
     assert_eq!((code, out.as_str()), (0, "c1\n"));
-    // Proposed, not applied: still off, and the conductor can't apply it itself.
     assert!(orchestrator_hook(&c, "drover pause sendmeter").contains("REFUSED GROUP_OFF"));
     assert!(orchestrator_hook(&c, "drover config apply c1").contains("REFUSED OWNER_ONLY"));
     let (code, out) = run(&c, &Fake::default(), &["config", "apply", "c1"]);
@@ -155,7 +150,6 @@ fn a_config_card_switches_a_group_on_only_at_the_owners_apply() {
         orchestrator_hook(&c, "drover hosts off mini").contains("REFUSED GROUP_OFF"),
         "hosts is off now"
     );
-    // A group verb the conductor runs shows in its thread with the group.
     assert_eq!(orchestrator_hook(&c, "drover clean sendmeter --yes"), "");
     let row = kinds(&c, "thread-cmd").pop().unwrap();
     assert_eq!(
@@ -225,7 +219,6 @@ fn approve_runs_the_exact_command_once_and_posts_its_masked_output() {
         (Some("owner"), Some("r1"), json!(0))
     );
 
-    // Once only.
     let again = Fake::default().reply("sh -c", "");
     let (code, out) = run(&at5, &again, &["card", "approve", "r1"]);
     assert_eq!((code, out.contains("REFUSED ALREADY_SETTLED")), (3, true), "{out}");
@@ -239,10 +232,8 @@ fn a_changed_or_expired_card_is_refused_and_deny_runs_nothing() {
     assert_eq!(post(&c, "terraform apply -auto-approve").1, "r2\n");
     let other = kinds(&c, "run-card")[1].str("sha").unwrap().to_string();
     let r = Fake::default().reply("sh -c", "");
-    // The approval names r2's command, not r1's: refused, nothing runs.
     let (code, out) = run(&at(&c, T + 60), &r, &["card", "approve", "r1", "--sha", &other[..12]]);
     assert_eq!((code, out.contains("REFUSED CARD_CHANGED")), (3, true), "{out}");
-    // 15 min after posting it expires.
     let (code, out) = run(&at(&c, T + 901), &r, &["card", "approve", "r1"]);
     assert_eq!((code, out.contains("REFUSED EXPIRED")), (3, true), "{out}");
     assert!(!r.called("sh -c"));

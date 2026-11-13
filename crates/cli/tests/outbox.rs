@@ -1,6 +1,3 @@
-//! #389: a lane on another host never connects to the main host: every command it runs waits in its worktree's
-//! outbox; drive's fast step pulls it over main → host ssh and runs it as the lane its spawn names, and `check`
-//! alerts on a line left there 5 min. One test: the lane's env vars and cwd are process-wide.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -9,7 +6,6 @@ use serde_json::json;
 
 const AIR_SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
 
-/// The main host's runner: a shell line over ssh to `air` runs here (the lane's worktree is a local folder).
 struct Air(Fake);
 
 impl Runner for Air {
@@ -38,7 +34,6 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     std::env::set_current_dir(wt.join("src")).unwrap();
     std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
     std::env::set_var("DROVER_OUTBOX", "1");
-    // The main host would answer over ssh: the lane never tries it.
     let r = Fake::default().reply("ssh", "q9\n");
     let (code, out) = run(
         &lane,
@@ -46,7 +41,6 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
         &["ask", "sendmeter", "12", "Which way?", "--option", "a", "--option", "b"],
     );
     assert_eq!((code, out.as_str()), (0, drover::outbox::QUEUED));
-    // A verdict queues too, its file as an absolute path (drive reads it over ssh on this host).
     let sha = "a".repeat(40);
     let verdict = [
         "verdict",
@@ -59,7 +53,6 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
         "verdict.md",
     ];
     assert_eq!(run(&lane, &r, &verdict).0, 0);
-    // A command for another issue is queued too: drive refuses it.
     let (code, _) = run(&lane, &r, &["done", "sendmeter", "13", "--no-change", "nothing"]);
     assert_eq!(code, 0);
     assert!(
@@ -76,12 +69,10 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     assert_eq!(lines.lines().count(), 3, "{lines}");
     let file = wt.canonicalize().unwrap().join("src/verdict.md").display().to_string();
     assert!(lines.contains(&format!("\"--file\",\"{file}\"")), "{lines}");
-    // A line that names another role of the issue is refused as well.
     let forged = json!({"args": ["done", "sendmeter", "12", "--no-change", "x"], "lane": "sendmeter:12:rev", "ts": 1});
     lines += &format!("{forged}\n");
     std::fs::write(&ob, &lines).unwrap();
 
-    // The main host: the lane's spawn names its host and worktree.
     std::env::remove_var("DROVER_OUTBOX");
     std::env::remove_var("DROVER_LANE");
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w9:p1", "workspace": "w9",
@@ -137,7 +128,6 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     let (_, asked) = run(&main, &r, &["asks", "sendmeter"]);
     assert!(asked.contains("q1 #12") && asked.contains("Which way?"), "{asked}");
 
-    // A drain cut short leaves its lines behind: the next one applies none of them again.
     std::fs::write(wt.join(".drover/outbox.jsonl.draining"), &lines).unwrap();
     run(&main, &r, &["drive", "--fast"]);
     let ev = read(&main.state).unwrap();
@@ -145,7 +135,6 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     assert_eq!(ev.iter().filter(|e| e.kind == "outbox").count(), 4);
     assert!(!wt.join(".drover/outbox.jsonl.draining").exists());
 
-    // A line drive has not delivered: `check` alerts once it is 5 min old, and once only.
     let at = |s: u64| json!({"args": ["ask", "sendmeter", "12", "Late?"], "lane": "sendmeter:12:impl", "ts": s * 1000});
     std::fs::write(&ob, format!("{}\n", at(1_000_000 - 200))).unwrap();
     run(&main, &r, &["check"]);

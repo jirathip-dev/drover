@@ -1,5 +1,3 @@
-//! #350: fast-first landing: the landable rule, swap-if-unchanged, the watch on integration (pause, infra re-run,
-//! culprit, bisect, revert, resume), full-first changes never reverted, and the default left as it was.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -12,7 +10,6 @@ const OLD: &str = "2222222222222222222222222222222222222222";
 const REPO: &str = "jirathip-dev/sendmeter";
 const DIR: &str = "/tmp/does-not-matter/sendmeter";
 
-/// `CONFIG`'s fleet table with `merge_label` inside it, `[land]` and a fleet notifier on `merged` only.
 fn setup(name: &str, land: bool, verdict: &str) -> (std::path::PathBuf, drover::Ctx) {
     let d = tmpdir(name);
     let text = if land {
@@ -40,7 +37,6 @@ fn check(name: &str, status: &str, conclusion: &str) -> Value {
         "detailsUrl": "https://github.com/jirathip-dev/sendmeter/actions/runs/99/job/1"})
 }
 
-/// The fast `unit` check green, the full `e2e` one still running.
 fn fast_green() -> Value {
     json!([check("unit", "COMPLETED", "SUCCESS"), check("e2e", "IN_PROGRESS", "")])
 }
@@ -132,7 +128,6 @@ fn default_config_still_needs_the_full_suite() {
 #[test]
 fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
     let (d, c) = setup("land-swap", true, HEAD);
-    // Integration moved past the head the fast checks ran on: no landing, no block.
     let r = pr(HEAD, fast_green(), "src/a.rs\n")
         .once("git -C /tmp/does-not-matter/sendmeter merge-base --is-ancestor", 1, "")
         .reply("git", "");
@@ -141,7 +136,6 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
     assert!(out.contains("REFUSED BEHIND"), "{out}");
     assert!(!r.called("gh pr merge"));
     assert_eq!(state(&c, 12), "ready");
-    // Drive catches it up (merge integration in, push) and leaves the full run's label off.
     let wt = d.join("state/update-sendmeter");
     let r = Fake::default()
         .once(&format!("git -C {DIR} rev-parse origin/issue-12"), 0, HEAD)
@@ -154,7 +148,6 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
     assert!(!r.called("gh pr edit"), "{:?}", r.calls.borrow());
     let u = event(&c, "auto-updated").expect("auto-updated");
     assert_eq!((u.str("from"), u.str("to")), (Some(HEAD), Some(NEW)));
-    // At the new head only the fast checks count again: the full one still runs, it lands.
     let c = drover::Ctx { now: c.now + 120, ..c };
     let r = pr(NEW, fast_green(), "src/a.rs\n")
         .reply(
@@ -169,7 +162,6 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
     assert!(r.called(&format!("gh pr merge 34 -R {REPO} --merge --match-head-commit {NEW}")));
 }
 
-/// `landed` events (issue, mode, merge sha) after #12's merge, as `merge` writes them.
 fn landed(c: &drover::Ctx, rows: &[(u64, &str, &str)]) {
     for (i, (n, mode, sha)) in rows.iter().enumerate() {
         let ts = 100 + i as u64;
@@ -191,7 +183,6 @@ fn watch(c: &drover::Ctx, r: &Fake) -> String {
     String::from_utf8(out).unwrap()
 }
 
-/// The integration tip at `tip`, each sha's check runs.
 fn integration(tip: &str, suites: &[(&str, Value)]) -> Fake {
     let mut r = Fake::default().reply(&format!("gh api repos/{REPO}/branches/staging"), tip);
     for (sha, checks) in suites {
@@ -236,7 +227,6 @@ fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log() {
     let p = event(&c, "land-paused").expect("paused");
     assert_eq!((p.str("red_sha"), p.str("job")), (Some("m1"), Some("e2e")));
     assert_eq!(event(&c, "revert-opened").unwrap().str("pr"), Some("77"));
-    // A minute later (the next fast step) its fast checks are green: it lands, the issue goes back to a fix round.
     let c = drover::Ctx { now: c.now + 60, ..c };
     let rv =
         json!({"state": "OPEN", "headRefOid": "r3v", "statusCheckRollup": [check("unit", "COMPLETED", "SUCCESS")]});
@@ -258,7 +248,6 @@ fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log() {
     assert_eq!(state(&c, 12), "fix(2)");
     let v = event(&c, "verdict").unwrap();
     assert!(v.str("body").unwrap().contains("boom: assertion failed"), "{v:?}");
-    // The fix lane is due, not "nothing to do (merged)".
     let ev = read(&c.state).unwrap();
     let s = &fold(&ev)[&("sendmeter".to_string(), 12)];
     let merged = json!({"number": 34, "state": "MERGED", "headRefOid": HEAD});
@@ -280,7 +269,6 @@ fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log() {
         drover::land::note(&ev, "sendmeter", 12).as_deref(),
         Some("reverted: e2e red")
     );
-    // Pause and revert reach the fleet's notifier, though it is set to `merged` only.
     let alerts = std::fs::read_to_string(d.join("alerts.txt")).unwrap();
     assert!(
         alerts.contains("land-paused") && alerts.contains("reverted"),
@@ -299,7 +287,6 @@ fn several_landings_bisect_to_the_first_red_one() {
             (14, "fast-first", "m3"),
         ],
     );
-    // m2 has no run of its own yet: a temp ref gets the red run's workflow, nothing is reverted meanwhile.
     let r = integration("m3", &[("m1", green()), ("m2", json!([])), ("m3", red())])
         .reply("gh run view 99", "{\"workflowName\": \"CI\"}")
         .reply("gh workflow run", "")
@@ -311,7 +298,6 @@ fn several_landings_bisect_to_the_first_red_one() {
     assert!(r.called(&format!("gh workflow run CI -R {REPO} --ref drover-bisect-m2")));
     assert!(!r.called("gh pr create"));
     assert_eq!(event(&c, "land-bisect").unwrap().issue, Some(13));
-    // Its run is red: #13 is the culprit, not the newest landing.
     let r = integration("m3", &[("m1", green()), ("m2", red()), ("m3", red())])
         .reply(
             &format!("gh pr create -R {REPO}"),
@@ -328,7 +314,6 @@ fn several_landings_bisect_to_the_first_red_one() {
 fn red_pauses_fast_first_landings_and_green_resumes_them() {
     let (_d, c) = setup("land-pause", true, HEAD);
     landed(&c, &[(13, "fast-first", "m1")]);
-    // A runner/infra red is re-run once before it counts.
     let infra = json!([
         check("unit", "COMPLETED", "SUCCESS"),
         check("e2e", "COMPLETED", "CANCELLED")
@@ -347,19 +332,16 @@ fn red_pauses_fast_first_landings_and_green_resumes_them() {
     assert!(!r.called("gh run rerun"), "re-run once only");
     let ev = read(&c.state).unwrap();
     assert!(drover::land::paused(&ev, "sendmeter").is_some());
-    // While paused a PASS needs the full suite (it lands full-first).
     let r = pr(HEAD, fast_green(), "src/a.rs\n").reply("git", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
     assert!(out.contains("REFUSED CI_NOT_GREEN"), "{out}");
-    // Integration green again: landings resume.
     let r = integration("r3v", &[("r3v", green())]).reply("gh pr view 79", "{}");
     let out = watch(&c, &r);
     assert!(out.contains("landing resumed"), "{out}");
     let ev = read(&c.state).unwrap();
     assert!(drover::land::paused(&ev, "sendmeter").is_none());
     assert_eq!(event(&c, "land-resumed").unwrap().str("sha"), Some("r3v"));
-    // Nothing landed since green: the next watch reads nothing but the open revert.
     let r = Fake::default().reply("gh pr view 79", "{}");
     watch(&c, &r);
     assert!(
@@ -387,7 +369,6 @@ fn a_full_first_landing_is_never_reverted_only_fixed() {
     assert!(event(&c, "reverted").is_none());
     assert_eq!(event(&c, "land-fix").unwrap().str("culprit"), Some("m1"));
     assert!(state(&c, 12).starts_with("fix("));
-    // Still red on the next watch: still paused, the culprit is not fixed twice.
     let r = integration("m1", &[("m1", red())]);
     watch(&c, &r);
     assert!(!r.called("gh issue reopen"));
@@ -403,7 +384,6 @@ fn stats_land_reports_both_modes() {
     assert!(out.contains("sendmeter fast-first: 1 landed"), "{out}");
     assert!(out.contains("sendmeter full-first: 1 landed"), "{out}");
     assert!(out.contains("integration red (landings paused): 0 min"), "{out}");
-    // One landing over two days is half a landing a day, not 0.
     let c = drover::Ctx {
         now: 100 + 2 * 86_400,
         ..c
@@ -416,7 +396,6 @@ fn stats_land_reports_both_modes() {
 fn a_revert_that_does_not_apply_is_logged_and_alerted_once() {
     let (d, c) = setup("land-revert-failed", true, HEAD);
     landed(&c, &[(12, "fast-first", "m1")]);
-    // Only the repo's own git works: `git revert` in the revert worktree conflicts (unscripted = exit 1).
     let r = integration("m1", &[("m1", red())]).reply(&format!("git -C {DIR}"), "");
     let out = watch(&c, &r);
     assert!(out.contains("revert of m1 failed"), "{out}");
@@ -425,7 +404,6 @@ fn a_revert_that_does_not_apply_is_logged_and_alerted_once() {
     assert_eq!(e.str("culprit"), Some("m1"));
     let alerts = std::fs::read_to_string(d.join("alerts.txt")).unwrap();
     assert!(alerts.contains("revert-failed"), "{alerts}");
-    // The next watch tries no second revert.
     watch(&c, &r);
     assert_eq!(kinds(&c).iter().filter(|k| *k == "revert-failed").count(), 1);
 }
@@ -441,7 +419,6 @@ fn a_cancelled_intermediate_run_is_no_verdict_until_its_own_run_repeats_it() {
             (14, "fast-first", "m3"),
         ],
     );
-    // m2's run was cancelled by m3's push: not blamed, it gets a run of its own.
     let mut old = check("e2e", "COMPLETED", "CANCELLED");
     old["startedAt"] = json!("1970-01-01T00:00:10Z");
     let cancelled = json!([check("unit", "COMPLETED", "SUCCESS"), old.clone()]);
@@ -452,11 +429,9 @@ fn a_cancelled_intermediate_run_is_no_verdict_until_its_own_run_repeats_it() {
     watch(&c, &r);
     assert!(r.called(&format!("gh workflow run CI -R {REPO} --ref drover-bisect-m2")));
     assert!(!r.called("gh pr create"));
-    // Only the stale cancelled check so far: still waiting, no second dispatch.
     let r = integration("m3", &[("m1", green()), ("m2", json!([old])), ("m3", red())]).reply("git", "");
     watch(&c, &r);
     assert!(!r.called("gh workflow run") && !r.called("gh pr create"));
-    // Its own run is red: #13 is the culprit.
     let r = integration("m3", &[("m1", green()), ("m2", red()), ("m3", red())])
         .reply(
             &format!("gh pr create -R {REPO}"),
@@ -472,7 +447,6 @@ fn a_cancelled_intermediate_run_is_no_verdict_until_its_own_run_repeats_it() {
 fn a_bisect_run_that_does_not_start_is_alerted_once_and_retried() {
     let (d, c) = setup("land-bisect-fail", true, HEAD);
     landed(&c, &[(12, "fast-first", "m1"), (13, "fast-first", "m2")]);
-    // `gh workflow run` unscripted: it fails.
     let fake = || {
         integration("m2", &[("m1", json!([])), ("m2", red())])
             .reply("gh run view 99", "{\"workflowName\": \"CI\"}")

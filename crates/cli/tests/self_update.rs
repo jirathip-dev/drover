@@ -7,7 +7,6 @@ use std::path::PathBuf;
 const SHA: &str = "abcdef1234567890abcdef1234567890abcdef12";
 const FLEET: &str = "[fleet.drover]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"/x/drover\"\nintegration = \"staging\"\n\n[fleet.drover.role.impl]\nharness = \"claude\"\n";
 
-/// A ctx whose live binary (`OLD`) and a finished build (`NEW`) are real files; the live path, canonical.
 fn setup(name: &str) -> (drover::Ctx, PathBuf) {
     setup_with(name, FLEET)
 }
@@ -299,7 +298,6 @@ fn a_failed_doctor_keeps_the_old_binary_and_alerts_once_per_head() {
     let failed = kinds(&c, "self-update-failed");
     assert_eq!(failed.len(), 1);
     assert!(failed[0].str("reason").unwrap().contains("limits.effort"));
-    // The same head fails again: no second alert.
     let r2 = r();
     assert_eq!(run(&c, &r2, &["self-update"]).0, 1);
     assert!(!r2.called("profiles sync"));
@@ -376,7 +374,6 @@ fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_closes_orphan_work
         {"workspace_id": "wX", "worktree": {"checkout_path": gone}},
         {"workspace_id": "wY", "worktree": {"checkout_path": d.to_string_lossy()}},
     ]}});
-    // Every worktree pushed and clean (no status lines, 0 unpushed) but `dirty`, whose wip save fails.
     let all: Vec<&String> = removable.iter().chain([&fresh, &live, &dirty]).collect();
     let git = |f: Fake| {
         let f = all
@@ -421,8 +418,6 @@ fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_closes_orphan_work
     assert!(kinds(&c, "clean-failed").is_empty(), "a passing run alerts nothing");
     cleaned.iter().for_each(|w| std::fs::remove_dir_all(w).unwrap());
 
-    // The next run takes the rest (the live one has stopped, the dirty one is clean now); a failure alerts once, not
-    // again while it repeats.
     sh.remove("impl-21");
     let r = || {
         git(Fake::default().reply("herdr workspace list", &ws.to_string()).once_err(

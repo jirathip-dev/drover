@@ -1,11 +1,9 @@
-//! #343: the event log's folded checkpoint and its rotation out of the live log (#344: archived rows in `state.db`).
 mod common;
 use common::tmpdir;
 use drover::events::{append, checkpoint, fold, history, read, rotate, states, Event, States};
 use serde_json::{json, Value};
 use std::path::Path;
 
-/// A deterministic xorshift, so a failing case replays.
 struct Rng(u64);
 impl Rng {
     fn n(&mut self, k: u64) -> u64 {
@@ -16,7 +14,6 @@ impl Rng {
     }
 }
 
-/// `n` events over 12 issues of two fleets: spawns, verdicts, merges, closes, kills, extensions, passive and queue rows.
 fn log(seed: u64, n: u64, t0: u64) -> Vec<Event> {
     let mut r = Rng(seed);
     (0..n)
@@ -54,7 +51,6 @@ fn same(a: &States, b: &States) {
     );
 }
 
-/// Bulk rows numbered on from the log's last, as an old JSONL log the next read imports (#344).
 fn write(p: &Path, ev: &[Event]) {
     let n = read(p).unwrap().last().map_or(0, |e| e.seq);
     let rows: String = (ev.iter().zip(n + 1..))
@@ -75,7 +71,6 @@ fn a_checkpoint_plus_its_tail_folds_like_the_whole_log() {
         checkpoint(&p).unwrap();
         write(&p, &ev[cut..]);
         same(&states(&p).unwrap(), &fold(&read(&p).unwrap()));
-        // A second checkpoint mid-way, then more rows: still the whole fold.
         checkpoint(&p).unwrap();
         write(&p, &log(seed + 99, 30, 200_000));
         same(&states(&p).unwrap(), &fold(&read(&p).unwrap()));
@@ -88,7 +83,7 @@ fn rotation_keeps_every_event_and_deleting_the_checkpoint_is_harmless() {
         let d = tmpdir("rot");
         let p = d.join("events.jsonl");
         let now = 90 * 86_400;
-        write(&p, &log(seed, 400, 0)); // 400 × 10 min: all older than 30 days
+        write(&p, &log(seed, 400, 0));
         let recent = (0..40).map(|i| Event::new(now - 86_400 + i, "a", Some(1), "stall", json!({})));
         write(&p, &recent.collect::<Vec<_>>());
         let before = read(&p).unwrap();
@@ -111,7 +106,6 @@ fn rotation_keeps_every_event_and_deleting_the_checkpoint_is_harmless() {
             "the archives and the live log hold every event once"
         );
         same(&states(&p).unwrap(), &full);
-        // The live log alone still says what is open, queued and done.
         let live = fold(&read(&p).unwrap());
         for (k, s) in &full {
             let l = live.get(k).map(|s| (s.state.as_str(), s.done()));
@@ -123,18 +117,16 @@ fn rotation_keeps_every_event_and_deleting_the_checkpoint_is_harmless() {
         }
         let queue = |v: &[Event]| v.iter().filter(|e| e.kind == "queue").count();
         assert_eq!(queue(&read(&p).unwrap()), queue(&before));
-        // A new row continues the seq; deleting the checkpoint rebuilds the same states from the logs.
         append(&p, &Event::new(now, "a", Some(1), "stall", json!({}))).unwrap();
         assert_eq!(read(&p).unwrap().last().unwrap().seq, before.len() as u64 + 1);
         let with = states(&p).unwrap();
-        drover::db::put(&p, "states", 0, &json!({})).unwrap(); // an unreadable checkpoint
+        drover::db::put(&p, "states", 0, &json!({})).unwrap();
         same(&states(&p).unwrap(), &with);
         checkpoint(&p).unwrap();
         same(&states(&p).unwrap(), &with);
     }
 }
 
-/// #560: `shared` (serve's read) is `read` at every point: rows appended, a rotation's archive, a new log.
 #[test]
 fn the_shared_read_follows_appends_and_rotations() {
     let d = tmpdir("shared");
@@ -142,7 +134,7 @@ fn the_shared_read_follows_appends_and_rotations() {
     let now = 90 * 86_400;
     let seqs = |v: &[Event]| v.iter().map(|e| e.seq).collect::<Vec<_>>();
     let same = || assert_eq!(seqs(&drover::events::shared(&p).unwrap()), seqs(&read(&p).unwrap()));
-    same(); // no database yet
+    same();
     write(&p, &log(3, 400, 0));
     same();
     let first = drover::events::shared(&p).unwrap();
@@ -156,8 +148,6 @@ fn the_shared_read_follows_appends_and_rotations() {
     same();
 }
 
-/// #343 measure: `status` / `queue ls` fold a 50 MB log in under 20 ms from its checkpoint (release:
-/// `cargo test --release --test compaction -- --ignored --nocapture`).
 #[test]
 #[ignore = "builds a 50 MB log; run in release"]
 fn the_fold_of_a_50mb_log_takes_under_20ms() {
@@ -176,7 +166,6 @@ fn the_fold_of_a_50mb_log_takes_under_20ms() {
     }
     std::fs::write(&p, text).unwrap();
     checkpoint(&p).unwrap();
-    // #344: the rows after the checkpoint as live writers add them.
     log(7, 50, seq * 600).iter().for_each(|e| append(&p, e).unwrap());
     let t = std::time::Instant::now();
     let st = states(&p).unwrap();

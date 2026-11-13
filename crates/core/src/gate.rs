@@ -1,4 +1,3 @@
-//! `drover verdict` and `drover merge`: the review → merge gate.
 use crate::config::{Check, Config, Fleet, Premerge};
 use crate::events::{emit, fold, read, Event, IssueState};
 use crate::overlap::git;
@@ -45,15 +44,14 @@ pub fn branch_of(st: Option<&IssueState>, issue: u64) -> String {
         .unwrap_or_else(|| format!("issue-{issue}"))
 }
 
-/// #418: each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call.
-/// The `NO_PROOF` text naming each one that doesn't.
+/// #418: each blocker of a FAIL carries a well-formed Proof block; whether it holds is the next round's call. The `NO_PROOF` text naming each one that doesn't.
 pub fn no_proof(body: &str) -> Option<String> {
     let proofless = |(b, ls): (bool, Vec<&str>)| Some(format!("`{}` ({})", ls[0].trim(), unproven(&ls).filter(|_| b)?));
     let bad: Vec<String> = findings(body).into_iter().filter_map(proofless).collect();
     (!bad.is_empty()).then(|| bad.join("; "))
 }
 
-#[allow(clippy::too_many_arguments)] // the CLI's verdict arguments, one each
+#[allow(clippy::too_many_arguments)]
 pub fn verdict(
     ctx: &Ctx,
     cfg: &Config,
@@ -68,7 +66,6 @@ pub fn verdict(
     if sha.len() != 40 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
         return refused("BAD_SHA", format!("--sha {sha} must be a full 40-hex commit sha"));
     }
-    // #249: a verdict.md in a remote review lane's worktree is read on that lane's host.
     let evs = read(&ctx.state)?;
     let reviewer = |e: &&Event| e.is("spawn", fleet, issue) && crate::events::checks(e);
     let at = evs
@@ -85,7 +82,6 @@ pub fn verdict(
     let branch = branch_of(st.as_ref(), issue);
     let api = format!("repos/{}/branches/{}", f.repo, branch);
     let head = ok(r, "gh", &["api", &api, "--jq", ".commit.sha"])?.trim().to_string();
-    // #207: a head that merges `sha` with integration and adds nothing takes the verdict at `sha`; merge carries it.
     let carried = || {
         st.as_ref()
             .is_some_and(|s| crate::overlap::carries(r, f, s, sha, &head))
@@ -94,15 +90,12 @@ pub fn verdict(
         return refused("STALE_SHA", format!("{branch} head is {head}, not {sha}"));
     }
     let head = sha.to_ascii_lowercase();
-    // #173: a review lane's verdict is its check stage's; any other (CI red while ready) is the gate's, and counts
-    // against the rounds of the check its fix goes back to.
     let p = f.flow();
     let stage = match st.as_ref() {
         Some(s) if s.state.starts_with("review") && s.check.is_some() => s.stage.as_str(),
         _ => p.gate(),
     };
     let lp = p.loop_of(stage);
-    // #733: rev's PASS of a lesson PR that only edits prose (retiring no line) is recorded as a FAIL.
     let prose = pass && stage != "verify" && crate::lesson::is_lesson(ctx, st.as_ref(), (fleet, issue)) && {
         crate::lesson::prose_only(&ok(r, "gh", &["pr", "diff", &branch, "-R", &f.repo])?)
     };
@@ -113,7 +106,6 @@ pub fn verdict(
         (pass, body)
     };
     let v = if pass { "PASS" } else { "FAIL" };
-    // #420: a `--repro` issue's PASS (rev's, not verify's) proves its test fails on the base and passes at the head.
     let repro = if pass && stage != "verify" && crate::queue::repro(&evs, fleet, issue) {
         let view = ["pr", "view", &branch, "-R", &f.repo, "--json", "body", "--jq", ".body"];
         let section = || ok(r, "gh", &view).ok().and_then(|b| repro_section(&b));
@@ -121,7 +113,6 @@ pub fn verdict(
     } else {
         None
     };
-    // #734: a `--perf` PASS needs commit 1's baseline and a `Perf:` block; a `--refactor` one an unchanged test diff.
     match crate::queue::playbook(&evs, fleet, issue)
         .filter(|_| pass && stage != "verify")
         .as_deref()
@@ -154,9 +145,7 @@ pub fn verdict(
         }
         _ => {}
     }
-    // #417: a FAIL of a check that shares another's rounds (verify: rev's) is in that check's round at this head.
     let cnt = p.counts(lp);
-    // #228: `FAIL (form-only)` with every blocker tagged a form category doesn't count, `form_rounds` times per issue.
     let (used, of) = (st.as_ref().map_or(0, |s| s.form), f.form_rounds.unwrap_or_default());
     let tagged = !pass && body.lines().next().is_some_and(|l| l.trim() == "FAIL (form-only)");
     let demoted = if !tagged {
@@ -179,7 +168,6 @@ pub fn verdict(
         let new = !s.verdicts.iter().any(|x| x.0.eq_ignore_ascii_case(&head) && x.2 == cnt);
         s.stage_rounds.get(cnt).copied().unwrap_or_default() + u32::from(new && !form)
     });
-    // #547: only verify's own verdict lists screenshots, inside its lane's folder.
     let lane = at.filter(|_| stage == "verify").and_then(|e| e.str("worktree"));
     let shots = crate::verify::shots(&body, Path::new(file), lane);
     let data = json!({"verdict": v, "sha": head, "branch": branch, "file": file, "body": body, "round": round,
@@ -213,7 +201,6 @@ pub fn verdict(
         writeln!(out, "round limit reached → needs-human")?;
     }
     if pass && f.merge_label.is_some() {
-        // The label is retried by the next drive pass; the verdict stands either way.
         gh::forget_pr(ctx, fleet, issue);
         let pr = gh::pr(ctx, r, f, (fleet, issue), &branch, ctx.now)?;
         if let Some(s) = issue_state(ctx, fleet, issue)? {
@@ -222,9 +209,7 @@ pub fn verdict(
             }
         }
     }
-    // #128: the verdict is the reviewer's only work: remove its worktree and close its pane, or keep a dirty one.
     let events = read(&ctx.state)?;
-    // #164: a PASS at the head leaves the builder waiting for merge: its build folders go (a fix round rebuilds).
     let is_impl = |e: &&Event| pass && e.is("spawn", fleet, issue) && !crate::events::checks(e);
     if let Some(b) = events.iter().rfind(is_impl) {
         let wt = Path::new(b.str("worktree").unwrap_or_default());
@@ -241,7 +226,6 @@ pub fn verdict(
         return Ok(());
     };
     let (agent, pane) = (e.str("agent"), e.str("pane").unwrap_or_default());
-    // A reviewer herdr still shows `working` (or an unreadable agent list) is left alone.
     let busy = herdr::agents(r).map_or(true, |a| {
         a.iter()
             .any(|a| a["name"].as_str() == agent && a["agent_status"] == "working")
@@ -249,7 +233,6 @@ pub fn verdict(
     if busy {
         return Ok(());
     }
-    // #164: its build folders go now, even when a dirty worktree stays.
     check::purge(r, cfg, fleet, out, Path::new(wt), false)?;
     let ws = e.str("workspace").unwrap_or_default();
     let gone = match crate::spawn::dirty(r, Path::new(wt)) {
@@ -265,7 +248,6 @@ pub fn verdict(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d))
 }
 
-/// A PASS stands at `head`: its own, or (#129) that of the head an auto-update chain started from.
 fn passed(events: &[Event], s: &IssueState, head: &str) -> bool {
     let mut h = head;
     loop {
@@ -282,8 +264,7 @@ fn passed(events: &[Event], s: &IssueState, head: &str) -> bool {
     }
 }
 
-/// #150: keep the fleet's `merge_label` on the open PR exactly while a PASS stands at its head: add it once
-/// (`labelled`), take it off a head that moved past the PASS (`unlabelled`), so a stale PASS never starts the full run.
+/// #150: keep the fleet's `merge_label` on the open PR exactly while a PASS stands at its head: add it once (`labelled`), take it off a head that moved past the PASS (`unlabelled`), so a stale PASS never starts the full run.
 pub fn sync_label(
     ctx: &Ctx,
     cfg: &Config,
@@ -297,11 +278,9 @@ pub fn sync_label(
     let (Some(label), Some(num)) = (&f.merge_label, pr["number"].as_u64()) else {
         return Ok(());
     };
-    // #350: a fast-first PR lands without its full run.
     if s.done() || pr["state"] != "OPEN" || head.is_empty() || pr["landing"] == "fast-first" {
         return Ok(());
     }
-    // #285: a pure merge of the PASS head with integration (#207's carry) keeps the PASS, so the label stays.
     let carried = || s.verdicts.iter().any(|v| v.1 == "PASS") && crate::overlap::pure(r, f, s, head);
     let (flag, kind) = match (
         passed(&read(&ctx.state)?, s, head) || carried(),
@@ -362,8 +341,7 @@ pub fn ci_green(rollup: &Value, required: &[String]) -> Result<(), String> {
     gh::not_green(&gh::required(rollup, required)).map_or(Ok(()), |m| Err(format!("{prefix}{m}")))
 }
 
-/// #228: every blocking finding (a `blocking` line, not `non-blocking`) is tagged `blocking [<category>]` with one
-/// of `cats`; at least one blocker.
+/// #228: every blocking finding (a `blocking` line, not `non-blocking`) is tagged `blocking [<category>]` with one of `cats`; at least one blocker.
 #[doc(hidden)]
 pub fn form_only(body: &str, cats: &[String]) -> bool {
     let blockers: Vec<String> = findings(body)
@@ -379,8 +357,6 @@ pub fn form_only(body: &str, cats: &[String]) -> bool {
     !blockers.is_empty() && blockers.iter().all(|l| tag(l).is_some_and(|t| cats.contains(&t)))
 }
 
-/// #418: each finding (a `-`/`*`/`1.` item saying `blocking`, or not when `non-blocking`) with the lines under it,
-/// up to the next finding, heading or unindented prose line (#249: these end it as none); fenced lines never are.
 pub(crate) fn findings(body: &str) -> Vec<(bool, Vec<&str>)> {
     let (mut out, mut fence) = (Vec::<(bool, Vec<&str>)>::new(), false);
     for l in body.lines().skip(1) {
@@ -400,8 +376,6 @@ pub(crate) fn findings(body: &str) -> Vec<(bool, Vec<&str>)> {
     out
 }
 
-/// #418: what a finding's `Proof: run` (a fenced command then its output, or a screenshot path) or `Proof: spec` (a
-/// `>` quoted rule and a `file:line`) lacks.
 fn unproven(ls: &[&str]) -> Option<&'static str> {
     let lc: Vec<String> = ls.iter().map(|l| l.to_lowercase()).collect();
     let Some(at) = lc
@@ -436,9 +410,6 @@ fn unproven(ls: &[&str]) -> Option<&'static str> {
     }
 }
 
-/// #420: a `--repro` PASS's `Repro:` block (to the next heading), `run` or `verify`, or what it lacks: a `run` block
-/// two runs (base plus commit 1, then head), each a fenced command and its fenced output; a `verify` block a `>`
-/// quoted reason found in the PR body's `## Repro` section (`section`).
 fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'static str, String> {
     let (kind, block) = repro_block(body).ok_or("no `Repro: run` or `Repro: verify` block")?;
     let flat = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase();
@@ -450,7 +421,6 @@ fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'
                 .map(|p| p.split_once('\n').map_or("", |x| x.1).trim())
                 .filter(|b| !b.is_empty())
                 .collect();
-            // #607: the command fenced once or before each run; the outputs are the other blocks, base's first.
             let outs: Vec<&str> = blocks
                 .iter()
                 .skip(1)
@@ -486,7 +456,6 @@ fn reproduced(body: &str, section: impl FnOnce() -> Option<String>) -> Result<&'
     }
 }
 
-/// #734: the test files a diff edits beyond moves and renames (its removed and added test lines differ), if any.
 fn tests_changed(diff: &str) -> Option<String> {
     let (mut files, mut test, mut hunk, mut minus, mut plus) = (vec![], false, false, vec![], vec![]);
     for l in diff.lines() {
@@ -518,8 +487,7 @@ fn tests_changed(diff: &str) -> Option<String> {
     (minus != plus).then(|| files.join(", "))
 }
 
-/// #420: a verdict's `Repro:` block: the rest of its head line (lowercase, after `repro:`), then its lines to the next
-/// heading outside a fence.
+/// #420: a verdict's `Repro:` block: the rest of its head line (lowercase, after `repro:`), then its lines to the next heading outside a fence.
 pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
     let key = |l: &str| l.trim_start_matches(['-', '*', '_', '#', ' ']).to_lowercase();
     let ls: Vec<&str> = body.lines().collect();
@@ -536,7 +504,6 @@ pub fn repro_block(body: &str) -> Option<(String, Vec<&str>)> {
     Some((key(ls[at]).split_off(6), block))
 }
 
-/// #420: the PR body's `## Repro` section, to the next heading.
 fn repro_section(pr_body: &str) -> Option<String> {
     let mut ls = pr_body
         .lines()
@@ -545,7 +512,6 @@ fn repro_section(pr_body: &str) -> Option<String> {
     Some(ls.take_while(|l| !l.starts_with('#')).collect::<Vec<_>>().join("\n"))
 }
 
-/// #420: a `Repro: verify` PASS at `head` with no verify PASS there.
 fn unverified(events: &[Event], (fleet, n): (&str, u64), head: &str) -> bool {
     let at = |e: &&Event| e.is("verdict", fleet, n) && e.str("sha").is_some_and(|s| s.eq_ignore_ascii_case(head));
     let mut here = events.iter().filter(at);
@@ -562,12 +528,10 @@ pub fn limit(f: &Fleet, stage: &str, st: Option<&IssueState>) -> (u32, String) {
     }
 }
 
-/// #650: the one rule for "verified enough to merge", shared by `gate`, drive and `waiting`: every check stage's
-/// last outcome at `head` is a PASS (a `verify-skipped`/`verify-no-recipe` there is verify's), within its rounds.
+/// #650: the one rule for "verified enough to merge", shared by `gate`, drive and `waiting`: every check stage's last outcome at `head` is a PASS (a `verify-skipped`/`verify-no-recipe` there is verify's), within its rounds.
 pub fn verified(f: &Fleet, st: Option<&IssueState>, head: &str, over: bool) -> Result<(), Refusal> {
     let verdicts = st.map(|s| s.verdicts.as_slice()).unwrap_or_default();
     let at = |x: &&(String, String, String)| x.0.eq_ignore_ascii_case(head);
-    // #173: a 2-check pipeline merges only with a PASS from each at this head.
     for c in f.flow().checks() {
         let last = verdicts.iter().rev().filter(at).find(|x| x.2 == c.name);
         match last.map(|x| x.1.as_str()) {
@@ -585,8 +549,7 @@ pub fn verified(f: &Fleet, st: Option<&IssueState>, head: &str, over: bool) -> R
     Ok(())
 }
 
-/// Pure merge gate: every check stage's PASS at the head, within its rounds (`over`: past them). Returns the head sha
-/// that may be merged.
+/// Pure merge gate: every check stage's PASS at the head, within its rounds (`over`: past them). Returns the head sha that may be merged.
 pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Result<String, Refusal> {
     let integration = f.integration.as_str();
     let base = pr["baseRefName"].as_str().unwrap_or_default();
@@ -625,8 +588,7 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Resul
     Ok(head)
 }
 
-/// #198: the merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines and a
-/// facts line. Returns (subject, body, whether the summary was there).
+/// #198: the merge commit reads like a changelog: `<title> (#PR)`, then the PR body's `## For humans` lines and a facts line. Returns (subject, body, whether the summary was there).
 pub fn merge_message(pr: &Value, issue: u64, rounds: u32, sha: &str) -> (String, String, bool) {
     let title = pr["title"].as_str().unwrap_or_default().trim();
     let strip = |open: &str, close: char| {
@@ -661,8 +623,6 @@ fn premerge_file(ctx: &Ctx, fleet: &str, issue: u64) -> std::path::PathBuf {
     ctx.state.with_file_name(format!("premerge-{fleet}-{issue}.md"))
 }
 
-/// #272: the fleet's `premerge` checks on `head` merged into current integration, in a scratch worktree; the seconds
-/// they took (`None`: no checks). Integration moving during the checks re-runs them once. A failed check is a fix round.
 fn premerge(
     ctx: &Ctx,
     cfg: &Config,
@@ -674,7 +634,6 @@ fn premerge(
     let f = cfg.fleet(fleet)?;
     let checks = premerge_checks(ctx, f);
     let rules = std::fs::read_to_string(crate::repo_path(&f.local_path().join(".drover/rules.md"))).unwrap_or_default();
-    // #510: shadow lesson checks need the merged tree too, else they are never recorded and retire unrun.
     if checks.is_empty() && crate::lesson::checks(&rules).iter().all(|c| c.active) {
         return Ok(Ok(None));
     }
@@ -729,7 +688,6 @@ pub(crate) fn premerge_checks(ctx: &Ctx, f: &Fleet) -> Vec<Check> {
     all.into_iter().map(check).collect()
 }
 
-/// #373: the first failing check (and its output) in the scratch worktree `wt`, `base` merged with the PR.
 pub(crate) fn run_checks<'a>(r: &dyn Runner, wt: &Path, base: &str, cs: &'a [Check]) -> Option<(&'a Check, String)> {
     let diff = || git(r, wt, &["diff", "--name-only", base, "HEAD"]).unwrap_or_default();
     let files = cs.iter().any(|c| !c.when.is_empty()).then(diff).unwrap_or_default();
@@ -743,8 +701,6 @@ pub(crate) fn run_checks<'a>(r: &dyn Runner, wt: &Path, base: &str, cs: &'a [Che
     })
 }
 
-/// #272/#373: a failed check at `head` is a FAIL verdict (a fix round briefed with its output or `fix` text, no new
-/// review round) and `premerge-failed`; returns the refusal: the check's `code` (else `STAGING_WOULD_BREAK`).
 pub(crate) fn premerge_failed(
     ctx: &Ctx,
     cfg: &Config,
@@ -777,7 +733,6 @@ pub(crate) fn premerge_failed(
     Ok(refuse(code, msg))
 }
 
-/// #294: the serial groups (name order) `n`'s PR diff touches and it is not in yet, each with the first such file.
 pub(crate) fn unjoined<'a>(
     ctx: &Ctx,
     r: &dyn Runner,
@@ -817,14 +772,12 @@ pub fn merge(
     let f = cfg.fleet(fleet)?;
     let events = read(&ctx.state)?;
     let st = fold(&events).remove(&(fleet.to_string(), issue));
-    // A retry after a merge is a no-op: no PR lookup, no event, no alert.
     if st.as_ref().is_some_and(|s| s.state == "merged") {
         let m = events.iter().find(|e| e.is("merged", fleet, issue));
         let s = |k| m.and_then(|e| e.str(k)).unwrap_or("?");
         writeln!(out, "already merged → {} (PR #{})", s("merge_sha"), s("pr"))?;
         return Ok(());
     }
-    // #509: a merge whose `merged` was never logged: in flight until its timeout, then done or the PR's own state.
     let landed = |num: &str| -> Result<bool> {
         Ok(json(r, "gh", &["pr", "view", num, "-R", &f.repo, "--json", "state"])?["state"] == "MERGED")
     };
@@ -863,7 +816,6 @@ pub fn merge(
     };
     crate::land::mark(ctx, Some(r), f, (fleet, issue), &events, &mut pr);
     let fast = pr["landing"] == "fast-first";
-    // #129: an auto-update (a merge of integration that adds nothing) keeps the PASS of the head it updated.
     let h = pr["headRefOid"].as_str().unwrap_or_default();
     let st = st.map(|mut s| {
         if !h.is_empty() && !s.reviewed(h) && crate::overlap::pure(r, f, &s, h) {
@@ -878,7 +830,6 @@ pub fn merge(
     } else {
         gate(f, &pr, st.as_ref(), over)
     };
-    // #294: belt and braces: a group the PR touches but drive never joined it to.
     let res = match res {
         Ok(head) => match unjoined(ctx, r, f, (fleet, issue), (&num, &head))?.first() {
             Some((g, p)) => Err(refuse(
@@ -893,7 +844,6 @@ pub fn merge(
         },
         res => res,
     };
-    // #350: swap-if-unchanged: a fast-first PR lands only on the integration its fast checks ran against.
     let res = match res {
         Ok(h) if fast && !crate::land::based(r, f, &h) => Err(refuse(
             "BEHIND",
@@ -910,7 +860,6 @@ pub fn merge(
     };
     let (head, secs) = match res {
         Ok(h) => h,
-        // #148: CI not reported yet or still running is no block; the item stays ready, waiting for CI.
         Err(rf)
             if rf.code == "STAGING_MOVED"
                 || rf.code == "BEHIND"
@@ -955,7 +904,6 @@ pub fn merge(
     let inputs = json!({"pr": num, "head": head, "over": over, "fast": fast});
     let probe = |_: &Event| Ok(landed(&num)?.then(|| json!({"pr": num, "head": head})));
     let at = (fleet, issue, "merge", head.as_str());
-    // Done meanwhile by another pass: skipped here, logged by the next (above).
     let intent = crate::action::begin(r, &ctx.state, ctx.now, at, inputs, MERGE_SECS, &probe)?.act()?;
     ok(r, "gh", &[&["pr", "merge", &num, "-R", &f.repo][..], &m].concat())?;
     intent.done(json!({"pr": num, "head": head}))?;
@@ -968,10 +916,8 @@ pub fn unlogged_merge<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Optio
     crate::action::last(events, fleet, issue, "merge").filter(|a| a.kind != "failed" && !logged(a))
 }
 
-/// #509: how long a merge's intent may stay open before the next pass recovers it from the PR.
 const MERGE_SECS: u64 = 600;
 
-/// After the PR merged: log it and its landing, the evidence comment, close the issue, tear its lanes down.
 fn merged(
     ctx: &Ctx,
     cfg: &Config,
@@ -993,7 +939,6 @@ fn merged(
     }
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "merged", d))?;
     if f.land.is_some() {
-        // #350: what `land::watch` and `stats land` read: the landing's mode and how long its gating checks took.
         let checks = gh::required(&pr["statusCheckRollup"], f.checks(pr));
         let at = |k: &'static str| {
             checks
@@ -1010,7 +955,6 @@ fn merged(
         let d = json!({"mode": mode, "sha": merge_sha, "pr": num, "checks_secs": secs});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "landed", d))?;
     }
-    // The one GitHub comment fleet writes: ≤ 5 lines, merge sha + verdict sha; #677: the latest why note's Owner line.
     let why = read(&ctx.state)?.into_iter().rfind(|e| e.is("why", fleet, issue));
     let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(
@@ -1034,17 +978,14 @@ fn merged(
         emit(&ctx.state, cfg, e)?;
         bail!("{reason}; issue #{issue} left open");
     }
-    // Already closed by `Closes #N` is fine.
     let _ = r.run(
         "gh",
         &argv(&["issue", "close", &n, "-R", &f.repo, "--reason", "completed"]),
     );
-    // The merge stands either way; a teardown problem is reported, not fatal.
     if let Err(e) = crate::check::teardown(ctx, cfg, r, out, fleet, issue) {
         writeln!(out, "teardown: {e:#}")?;
     }
     if crate::update::ours(f) {
-        // Dogfood fleet: say how to pick up the merged code; never run it.
         let exe = std::path::Path::new(&ctx.exe);
         let root = exe.parent().and_then(|b| b.parent()).unwrap_or(exe);
         let src = f.local_path();
@@ -1058,8 +999,7 @@ fn merged(
     Ok(())
 }
 
-/// #130: a needs-human card's `override` / `extend` / `park`; #151: `drover extend|park` (`spawn: false` = `--no-spawn`).
-/// #712: `why` is `park --why`, stored on the `parked` event.
+/// #130: a needs-human card's `override` / `extend` / `park`; #151: `drover extend|park` (`spawn: false` = `--no-spawn`). #712: `why` is `park --why`, stored on the `parked` event.
 pub fn needs_human(
     ctx: &Ctx,
     cfg: &Config,
@@ -1074,7 +1014,6 @@ pub fn needs_human(
     match op {
         "override" => merge(ctx, cfg, r, out, fleet, n, true)?,
         "extend" => {
-            // #217: the decision is logged first (the card goes at once); a failed spawn is drive's next due step.
             extended(ctx, (fleet, n), (spawn, by), state)?;
             if spawn {
                 let o = crate::spawn::Opts {
@@ -1082,7 +1021,6 @@ pub fn needs_human(
                     ..Default::default()
                 };
                 if let Err(e) = crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, "impl"), &o) {
-                    // #778: a soft refusal keeps the round pending: drive starts it, the card stays answered.
                     let rf = e.downcast_ref::<Refusal>();
                     let (code, why) = rf.map_or(("ERROR", format!("{e:#}")), |r| (r.code, r.msg.clone()));
                     if crate::pending::refused(ctx, (fleet, n), code, &why)? {
@@ -1149,9 +1087,7 @@ pub fn park(
     Ok(writeln!(out, "#{n}: park")?)
 }
 
-/// #712: `drover unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human
-/// that the park closed (or, parked from a failed extend's card, the state it was parked in); `unparked` stores it as
-/// `repaired` does. Its queue place is kept; out of the queue, it goes to the end.
+/// #712: `drover unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human that the park closed (or, parked from a failed extend's card, the state it was parked in); `unparked` stores it as `repaired` does. Its queue place is kept; out of the queue, it goes to the end.
 pub fn unpark(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, (fleet, n): (&str, u64), by: &str) -> Result<()> {
     let events = read(&ctx.state)?;
     let mine = |e: &&Event| e.fleet == fleet && e.issue == Some(n);

@@ -1,5 +1,3 @@
-//! #412: the optional per-issue design stage: `queue add --design`, drive's design lane, the hand-off to the owner, and
-//! approve / revise / reject from the board card or the conductor thread.
 mod common;
 use common::*;
 use drover::events::{fold, read, Event};
@@ -8,7 +6,6 @@ use drover::serve::Server;
 use std::path::Path;
 use std::sync::Mutex;
 
-/// `DROVER_THREAD` is process-wide: the tests here run one at a time.
 static ONE: Mutex<()> = Mutex::new(());
 const ADDR: &str = "127.0.0.1:7777";
 const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
@@ -28,7 +25,6 @@ fn wt(c: &drover::Ctx, n: u64) -> String {
     c.worktrees.join(format!("sendmeter/issue-{n}")).display().to_string()
 }
 
-/// Spawns succeed, the host is calm; #12's design worktree is at the pushed commit `head`, touching two PNGs.
 fn fake(c: &drover::Ctx, head: &str) -> Fake {
     let w = wt(c, 12);
     Fake::default()
@@ -87,7 +83,6 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     );
     assert!(r.called(&wt12), "{:?}", r.calls.borrow());
     assert_eq!((state(&c, 12).as_str(), state(&c, 13).as_str()), ("design", "impl"));
-    // The lane's turn ended with a pushed commit: the owner gets it, with both PNGs.
     let out = drive(&c, &r);
     assert!(
         out.contains(&format!("sendmeter #12 design-review: {:.7}", HEAD)),
@@ -111,7 +106,6 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "approve"]).0, 0);
     assert_eq!(kinds(&c, "design-approved").len(), 1);
     assert!(sh.called("kill", "sendmeter-design-12"), "the design pane goes");
-    // #778: approved on a busy host: impl's start stays pending with the reason, then starts once load drops.
     let busy = fake(&c, HEAD).once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
     drive(&c, &busy);
     let p = drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
@@ -151,7 +145,6 @@ fn a_design_lane_whose_only_untracked_file_is_its_claude_local_md_hands_off() {
     );
 }
 
-/// A paired device's `POST path` with `body`.
 fn post(s: &Server, path: &str, body: &str, cookie: &str, now: u64) -> String {
     let r = format!(
         "POST {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
@@ -160,7 +153,6 @@ fn post(s: &Server, path: &str, body: &str, cookie: &str, now: u64) -> String {
     String::from_utf8_lossy(&s.respond(&r, now)).into_owned()
 }
 
-/// The needs cards and the [chat] tab as the board draws them (#269) for the device.
 fn needs_and_chat(s: &Server, cookie: &str, now: u64) -> (String, String) {
     let [needs, _, chat] = parts(s, ADDR, cookie, now);
     (needs, chat)
@@ -177,7 +169,6 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
     assert!(post(&s, "/thread", "op=new&repo=sendmeter&text=Design+first", &cookie, c.now).contains("t1"));
-    // The conductor queues both issues `--design` from its thread.
     std::env::set_var("DROVER_THREAD", "t1");
     let q = run(
         &c,
@@ -191,7 +182,6 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     std::fs::write(png.join("1440.png"), b"\x89PNG wide").unwrap();
     drive(&c, &r);
     drive(&c, &r);
-    // #12 hands off (its worktree has the commit); #13's lane is still at it.
     let ask = &kinds(&c, "needs-decision")[0];
     assert_eq!((ask.issue, ask.str("thread")), (Some(12), Some("t1")));
     let (needs, chat) = needs_and_chat(&s, &cookie, c.now + 5);
@@ -209,7 +199,6 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
         res.starts_with("HTTP/1.1 200") && res.ends_with("\u{fffd}PNG wide"),
         "{res}"
     );
-    // Approve on the board: the thread's rows fold; the thread's own tap is then refused.
     let i = needs.find("name=mtime value=").unwrap() + 17;
     let mt: String = needs[i..].chars().take_while(char::is_ascii_digit).collect();
     let res = post(
@@ -229,7 +218,6 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     assert!(chat.contains("✓ 1. approve"), "{chat}");
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "reject"]);
     assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
-    // The reverse, on #13: answered in the thread first, the board's answer is refused.
     std::fs::create_dir_all(wt(&c, 13)).unwrap();
     let w = wt(&c, 13);
     let r13 = Fake::default()
@@ -262,7 +250,6 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     assert!(kinds(&c, "design-rejected").is_empty());
 }
 
-/// `a` first, then `b` for whatever `a` has no script for.
 struct Both<'a>(Fake, &'a dyn Runner);
 impl Runner for Both<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
@@ -284,7 +271,6 @@ fn revise_redoes_the_design_with_the_note_in_its_brief_five_times_in_a_row() {
         0
     );
     for k in 1..=5 {
-        // Each round's design lane pushes a new head.
         let r = fake(&c, &k.to_string().repeat(40));
         drive(&c, &r);
         drive(&c, &r);
@@ -302,7 +288,6 @@ fn revise_redoes_the_design_with_the_note_in_its_brief_five_times_in_a_row() {
     assert_eq!(spawned(&c, "impl"), 0);
 }
 
-/// `git` runs for real (in a temp repo); everything else is the fake.
 struct RealGit(Fake);
 impl Runner for RealGit {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
@@ -373,7 +358,6 @@ fn reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human(
     drive(&c, &r);
     let pre = git(&w, &["rev-parse", "HEAD"]);
     assert_eq!(kinds(&c, "spawn")[0].str("sha"), Some(pre.as_str()));
-    // The design lane's work: two commits, pushed.
     std::fs::create_dir_all(w.join("docs/design/meter")).unwrap();
     std::fs::write(w.join("docs/design/meter/1440.png"), "png").unwrap();
     std::fs::write(w.join("app.rs"), "fn main() { meter() }\n").unwrap();
@@ -460,7 +444,6 @@ fn a_paused_fleet_auto_spawns_no_design_but_the_orchestrator_still_can() {
 
 const ARCHITECT: &str = "\n[fleet.sendmeter.role.architect]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
 
-/// The architect lane's pushed commit `head` touches `docs/architecture/meter/` (put before `fake`).
 fn adr(c: &drover::Ctx, head: &str) -> Fake {
     let w = wt(c, 12);
     Fake::default().reply(
@@ -507,7 +490,6 @@ fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr(
     drive(&c, &r);
     assert!(sh.called("run", "sendmeter-design-12"), "the design comes next");
     assert_eq!((state(&c, 12).as_str(), spawned(&c, "impl")), ("design", 0));
-    // The design lane pushes its own head on top of the approved ADR.
     let r = fake(&c, &"e".repeat(40));
     drive(&c, &r);
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q2", "approve"]).0, 0);
@@ -542,7 +524,7 @@ fn architect_revise_reruns_it_with_the_note_and_reject_needs_a_human() {
     let note = "split the store from the sync";
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", note]).0, 0);
     c.now += 1000;
-    let head = "e".repeat(40); // the revised ADR
+    let head = "e".repeat(40);
     let base = fake(&c, &head);
     let r = Both(adr(&c, &head), &base);
     drive(&c, &r);
@@ -564,12 +546,10 @@ fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
     );
-    // Lane 1 pushes its design while it is still at it, so no hand-off yet.
     drive(&c, &fake(&c, HEAD));
     sh.lane("sendmeter-design-12", "working", &wt(&c, 12));
     drive(&c, &fake(&c, HEAD));
     assert_eq!(state(&c, 12), "design");
-    // Lane 2 replaces it with nothing new to push: the design on the branch is still handed off, once.
     c.now += 1000;
     let r = fake(&c, HEAD);
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design", "--supersede"]);
@@ -586,7 +566,6 @@ fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
     );
     drive(&c, &r);
     assert_eq!(kinds(&c, "design-review").len(), 1);
-    // A revise lane with no new commit leaves the head already handed off alone.
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "make it blue"]).0, 0);
     c.now += 1000;
     drive(&c, &r);

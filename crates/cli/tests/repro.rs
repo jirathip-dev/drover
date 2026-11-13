@@ -1,6 +1,3 @@
-//! #420: an issue queued `--repro`: its briefs carry the repro steps, and rev's PASS needs a `Repro: run` block (the
-//! test failing on the base, passing at the head) or a `Repro: verify` block quoting the PR's `## Repro` section,
-//! which forces the verify stage and a verify PASS before merge (`NO_REPRO`).
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
@@ -21,7 +18,6 @@ fn sha() -> String {
     "a".repeat(40)
 }
 
-/// #12 built and under rev (`cfg`), queued `--repro` when `marked`.
 fn setup(name: &str, cfg: &str, marked: bool) -> (drover::Ctx, std::path::PathBuf) {
     let d = tmpdir(name);
     let c = ctx(&d, cfg);
@@ -87,7 +83,6 @@ fn a_full_run_block_is_recorded_and_a_missing_or_half_one_is_no_repro() {
     assert_eq!((v.len(), v[0].str("repro")), (1, Some("run")));
 }
 
-/// #607: rev-601-r1's shape: the command fenced once, then the base plus commit 1 output, then the head output.
 const ONE_COMMAND: &str = "Repro: run\n```\ncargo test --locked -p drover --test shed a_remote_host\n```\n\
 At base + commit 1 (4c43ddc55), failing:\n```\nshed connect failed (1)\ntest result: FAILED. 0 passed; 1 failed\n```\n\
 Same command at head 5c77f77, passing:\n```\ntest a_remote_host ... ok\ntest result: ok. 1 passed; 0 failed\n```\n";
@@ -209,7 +204,6 @@ fn a_repro_verify_pass_goes_to_verify_outside_ui_paths() {
 fn a_repro_verify_pass_merges_only_after_a_verify_pass_at_the_head() {
     let (c, d) = setup("repro-merge", &(CONFIG.to_string() + VERIFY), true);
     assert_eq!(pass(&c, &d, SECTION, VERIFY_BLOCK).0, 0);
-    // No recipe: the verify stage passes on as `verify-no-recipe`, but the merge needs a real verify PASS.
     let sh = FakeShed::new();
     sh.attach(&c);
     let r = drive_fake();

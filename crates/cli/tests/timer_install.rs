@@ -1,5 +1,3 @@
-//! #461: every `timer install` logs `timer-install` with its `by`; a conductor's shows in its thread.
-//! Its own test binary: `DROVER_LANE` and `DROVER_THREAD` are process-wide.
 mod common;
 use common::*;
 use drover::events::{read, Event};

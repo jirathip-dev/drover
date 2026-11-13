@@ -1,4 +1,3 @@
-//! M2: `drover check` alerts (once per state), `drover clean`, plain-text notifications.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -54,7 +53,6 @@ fn stall_fires_once_and_again_after_state_change() {
     assert_eq!(kinds(&c, "stall"), 1);
     assert_eq!(check(&c, &r), "", "no re-fire on the next run");
     assert_eq!(kinds(&c, "stall"), 1);
-    // A new event resets the clock; once it is stale again, it fires again.
     ev(&c, NOW + 10, 12, "spawn", json!({"role": "impl", "agent": LANE}));
     assert_eq!(check(&c, &r), "", "fresh activity");
     c.now = NOW + 10 + 3600;
@@ -120,7 +118,6 @@ fn ready_unmerged_fires_once_and_again_after_state_change() {
         0,
         "a ready issue has no active lane"
     );
-    // PASS at an older head: not ready-unmerged.
     let d2 = tmpdir("ready-stale");
     let c2 = ctx(&d2, CONFIG);
     let _sh2 = shed(&c2, &[]);
@@ -133,7 +130,6 @@ fn ready_unmerged_fires_once_and_again_after_state_change() {
         json!({"verdict": "PASS", "sha": "2".repeat(40)}),
     );
     assert_eq!(check(&c2, &r), "");
-    // New PASS (state change) → fires again once stale.
     let head2 = "3".repeat(40);
     ev(&c, NOW + 5, 12, "verdict", json!({"verdict": "PASS", "sha": head2}));
     c.now = NOW + 5 + 3600;
@@ -159,8 +155,6 @@ fn merged_issues_are_never_flagged() {
     assert_eq!(check(&c, &r), "");
     assert_eq!(read(&c.state).unwrap().len(), 3);
 }
-
-// --- notifications ---
 
 #[test]
 fn plain_lines_for_merged_stall_needs_human() {
@@ -210,8 +204,6 @@ fn notifier_gets_plain_line_unless_format_json() {
         (Some("merged"), Some("8ed4a064"))
     );
 }
-
-// --- clean ---
 
 #[test]
 fn clean_removes_only_merged_clean_idle_lanes() {
@@ -291,7 +283,6 @@ fn clean_removes_only_merged_clean_idle_lanes() {
     );
     assert_eq!(kinds(&c, "clean"), 0);
 
-    // #103: build folders go for merged lanes, even kept (unpushed) ones; a live lane keeps its own.
     let build = |w: &str, d: &str| {
         let p = std::path::Path::new(w).join(d).join("deep");
         std::fs::create_dir_all(&p).unwrap();
@@ -312,7 +303,7 @@ fn clean_removes_only_merged_clean_idle_lanes() {
         all.iter().all(|p| p.exists()) && !dry.contains("freed"),
         "a dry run frees nothing: {dry}"
     );
-    let freed = drover::check::du(&gone) + drover::check::du(&kept_wt); // #185: blocks used, not 2000 bytes
+    let freed = drover::check::du(&gone) + drover::check::du(&kept_wt);
     let r1 = r();
     let (code, done) = run(&c, &r1, &["clean", "--yes"]);
     assert_eq!(code, 0, "{done}");
@@ -395,7 +386,6 @@ fn clean_falls_back_to_git_dropping_only_fleets_own_files_and_keeps_going() {
     let user = wt("issue-13", &[".brief.md", "notes.txt"]);
     let locked = wt("issue-14", &[".brief.md"]);
     git(&local, &["worktree", "lock", locked.to_str().unwrap()]);
-    // Newest spawn is visited first: the locked one fails before the others are tried.
     for (ts, issue, p) in [(10, 12, &ours), (11, 13, &user), (12, 14, &locked)] {
         let w = p.to_str().unwrap();
         ev(
@@ -441,7 +431,6 @@ fn clean_falls_back_to_git_dropping_only_fleets_own_files_and_keeps_going() {
         "loop continues past the failure: {done}"
     );
     assert!(!ours.exists(), "fleet's own files no longer block removal");
-    // #164: unknown dirt is never dropped: it is saved to wip/ first (tests/disk.rs), then the worktree goes.
     assert!(!user.exists(), "{done}");
     let wip = std::process::Command::new("git")
         .args([
@@ -499,7 +488,6 @@ fn clean_removes_merged_worktrees_holding_only_lane_artifacts_and_unlogged_rev_t
         &["ui-390/board.png", "ui-1440/board.png", "verdict.md", "site/index.html"],
     );
     let dirt = wt("issue-17", &["ui-390/board.png", "notes.txt"]);
-    // No spawn names these reviewer trees (#518): only the merged issue's goes.
     let rev = wt("rev-15-r1", &["verdict.md", ".mcp.lane.json"]);
     let open = wt("rev-16-r1", &["verdict.md"]);
     for (issue, p) in [(15, &shots), (17, &dirt)] {
@@ -609,7 +597,6 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
         "no GitHub writes"
     );
 
-    // #138: a removed lane's rolling transcript goes with it; a kept lane's stays.
     let log = |a: &str| drover::lanes::log(&c.state, a).unwrap();
     std::fs::create_dir_all(log("impl-21").parent().unwrap()).unwrap();
     for a in ["impl-21", "impl-22"] {
@@ -661,7 +648,6 @@ fn orphan_lane_fires_once_per_agent() {
     assert_eq!(check(&c, &r), "", "once");
 }
 
-/// #128: a verdict closes the reviewer's pane and removes its worktree; a dirty one stays, with the reason logged;
 #[test]
 fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
     const REV: &str = "sendmeter-rev-12-r1";
@@ -730,7 +716,6 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
     }
 }
 
-/// #185/#164: the worktree budget counts blocks used (`du -k`), not apparent size, so unwritten space costs nothing.
 #[test]
 fn du_counts_blocks_used_not_apparent_size() {
     let d = tmpdir("du-blocks");
@@ -743,7 +728,6 @@ fn du_counts_blocks_used_not_apparent_size() {
     assert!((64 << 10..1 << 20).contains(&n), "{n}");
 }
 
-/// #388: a PASSed head with no checks raises `ci-missing` once the grace is over, once per head.
 #[test]
 fn ci_missing_fires_once_per_head_after_the_grace() {
     let d = tmpdir("ci-missing");
@@ -765,7 +749,6 @@ fn ci_missing_fires_once_per_head_after_the_grace() {
     assert_eq!(kinds(&c, "ci-missing"), 1);
 }
 
-/// #425: an unheld lane idle without pushing alerts at the stall threshold. #666: once, then nothing until it changes.
 #[test]
 fn an_unheld_idle_lane_stalls_once_until_it_changes() {
     let mut c = ctx(&tmpdir("stall-repeat"), CONFIG);
@@ -780,7 +763,6 @@ fn an_unheld_idle_lane_stalls_once_until_it_changes() {
     assert_eq!(kinds(&c, "stall"), 1);
 }
 
-/// #425: `queue block` on an issue with a live lane holds it: `held`, status says so, and `check` never stalls it.
 #[test]
 fn a_blocked_live_lane_is_held_shown_held_and_never_stalls() {
     let mut c = ctx(&tmpdir("held"), CONFIG);
@@ -820,7 +802,6 @@ fn a_blocked_live_lane_is_held_shown_held_and_never_stalls() {
     assert_eq!(kinds(&c, "stall"), 0);
 }
 
-/// #664: the wip branch `clean` reports saving to, named from `prefix` (seconds plus a random tag).
 fn saved_as(out: &str, prefix: &str) -> String {
     let at = out.find(prefix).unwrap_or_else(|| panic!("no {prefix} in {out}"));
     out[at..].split_whitespace().next().unwrap().to_string()

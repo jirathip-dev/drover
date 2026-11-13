@@ -1,5 +1,3 @@
-//! #164: build folders freed when a lane finishes, the worktree budget (DISK_BUDGET), the hourly clean, leftovers
-//! auto-saved to wip/, orphan folders.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -18,7 +16,6 @@ fn events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-/// `<wt>/<dir>/deep/blob` of `bytes`; the build folder.
 fn build(wt: &Path, dir: &str, bytes: usize) -> PathBuf {
     let p = wt.join(dir).join("deep");
     std::fs::create_dir_all(&p).unwrap();
@@ -54,7 +51,6 @@ fn verdict(c: &drover::Ctx, r: &Fake, v: &str) -> String {
     out
 }
 
-/// The reviewer's build folders go at its verdict, even when its dirty worktree stays.
 #[test]
 fn a_reviewer_verdict_frees_its_build_folders() {
     let c = ctx(&tmpdir("disk-rev"), CONFIG);
@@ -75,7 +71,6 @@ fn a_reviewer_verdict_frees_its_build_folders() {
     assert_eq!(events(&c, "lane-kept").len(), 1);
 }
 
-/// A PASS at the head frees the builder's build folders; never while it is working; a tracked one stays.
 #[test]
 fn a_builder_with_a_pass_frees_its_build_folders() {
     for (status, freed) in [("idle", true), ("working", false)] {
@@ -94,11 +89,8 @@ fn a_builder_with_a_pass_frees_its_build_folders() {
     }
 }
 
-/// Over `worktree_budget_gb`: the idlest lane's build folders go first, a working one's never; still over → the
-/// stamp makes spawn refuse DISK_BUDGET, and drive's pass stops starting.
 #[test]
 fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
-    // 2.5 blocks of budget (`du` counts 4096-byte blocks).
     let cfg = |gb: f64| format!("{CONFIG}worktree_budget_gb = {gb}\n");
     let d = tmpdir("disk-budget");
     let c = ctx(&d, &cfg(10240.0 / 1_073_741_824.0));
@@ -109,7 +101,7 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
         lane(&c, 20, 8, "impl", "issue-8"),
         lane(&c, 5, 9, "impl", "issue-9"),
     );
-    ev(&c, 30, 7, "verdict", json!({"verdict": "PASS", "sha": HEAD})); // #7's last activity: 30
+    ev(&c, 30, 7, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
     let (o, n, b) = (
         build(&old, "target", 4096),
         build(&new, "target", 4096),
@@ -140,7 +132,6 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
     };
     assert_eq!(stamp(), format!("8192 {}", c.now));
 
-    // Half a block: #7 goes too, the working #9 keeps 4096 → still over.
     let c = ctx(&d, &cfg(2048.0 / 1_073_741_824.0));
     sh.attach(&c);
     run_budget(&c);
@@ -199,7 +190,6 @@ fn a_missing_root_counts_zero() {
     );
 }
 
-/// drive walks the worktrees first: over budget with nothing to free, the start is refused and the pass stops.
 #[test]
 fn drive_refuses_starts_over_budget() {
     let c = ctx(
@@ -228,10 +218,8 @@ fn drive_refuses_starts_over_budget() {
     assert!(!out.contains("#2 start"), "the pass stops: {out}");
 }
 
-/// The tick's `clean --yes` sweep runs once an hour (a merged lane's worktree goes), not only after a merge.
 #[test]
 fn the_hourly_sweep_runs_once_per_hour() {
-    // Paused: drive's own after-merge `clean` (#155: every unpaused fleet gets a pass) would sweep too.
     let cfg = CONFIG.replace("integration = \"staging\"", "integration = \"staging\"\npaused = true");
     let mut c = ctx(&tmpdir("disk-hourly"), &cfg);
     let _sh = FakeShed::attached(&c);
@@ -305,8 +293,6 @@ impl drover::runner::Runner for GitHerdr {
     }
 }
 
-/// A merged lane's unsaved work: a clean scan → committed, pushed to `wip/`, the remote sha read back, removed;
-/// a secret → kept, `wip-blocked` once, and it goes to the phone.
 #[test]
 fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
     let d = tmpdir("disk-wip");
@@ -413,7 +399,6 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
     );
 }
 
-/// Folders under the worktree root of no fleet are listed by `clean`, removed only with `--orphans --yes`.
 #[test]
 fn orphans_are_listed_and_removed_only_with_the_flag() {
     let c = ctx(&tmpdir("disk-orphans"), CONFIG);
@@ -448,7 +433,6 @@ fn orphans_are_listed_and_removed_only_with_the_flag() {
     assert!(out.contains(&format!("removed orphan {}", old.display())), "{out}");
 }
 
-/// The Host tab's [remove orphans]: shown with a confirm when there are orphans; only a paired device may POST it.
 #[test]
 fn the_host_tab_removes_orphans_for_a_paired_device_only() {
     const ADDR: &str = "127.0.0.1:7777";
@@ -517,8 +501,6 @@ impl drover::runner::Runner for TwoHosts<'_> {
     }
 }
 
-/// #716: lane `impl-48` left dirty work on this host and on the Air; one `clean --yes` saves each to its own wip/
-/// branch (no push rejected), removes both worktrees though a skipped build file stays, and the next clean is silent.
 #[test]
 fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
     let d = tmpdir("disk-wip-716");
@@ -534,7 +516,7 @@ fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
         let p = c.worktrees.join(dir).join("issue-48");
         git(&local, &["worktree", "add", "-q", "--detach", p.to_str().unwrap()]);
         std::fs::write(p.join("notes.txt"), format!("{dir}\n")).unwrap();
-        build(&p, "target", 10); // skipped by the save, left in the folder
+        build(&p, "target", 10);
         let mut e = json!({"role": "impl", "agent": "impl-48", "worktree": p, "pane": "impl-48", "workspace": ""});
         if let Some(h) = host {
             e["host"] = json!(h);

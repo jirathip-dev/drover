@@ -4,7 +4,6 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 pub const TIMEOUT: u64 = 600;
-/// #255: a cloud host's gh login: the token read without echo, piped by a shell builtin (never in argv), then HTTPS git.
 const GH_TOKEN: &str =
     "printf 'Fine-grained GitHub token: '; read -rs T; printf %s \"$T\" | gh auth login --with-token";
 
@@ -40,7 +39,7 @@ pub fn vendors(cfg: &Config) -> Vec<(String, String)> {
 
 /// Start setup `name` on `host` in a new workspace there; logs `setup` (no command line, no input); the pane id.
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, via: &str) -> Result<String> {
-    let boot = ("gh-token".to_string(), GH_TOKEN.to_string()); // #255: bootstrap's, not on the host cards
+    let boot = ("gh-token".to_string(), GH_TOKEN.to_string());
     let Some((_, line)) = all(cfg).into_iter().chain([boot]).find(|s| s.0 == name) else {
         return refused("NO_SUCH_SETUP", format!("no setup `{name}`"));
     };
@@ -50,7 +49,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
     }
     let on = On::new(r, h.and_then(|h| h.machine.as_deref()));
     if let Some(m) = on.machine {
-        crate::hosts::resolve(r, m, false)?; // #641: never a pane here for a host herdr can't pin down
+        crate::hosts::resolve(r, m, false)?;
     }
     let ws = "workspace create --cwd /tmp --label drover-setup --no-focus";
     let ws = herdr::json(&on, &argv(&ws.split(' ').collect::<Vec<_>>()))?;

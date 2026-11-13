@@ -1,11 +1,9 @@
-//! #302: a role's `fallback` chain: an unavailable agent rests, the next `harness[:account]` carries on.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
 use serde_json::{json, Value};
 use std::path::Path;
 
-/// Claude impl role with `role_extra` lines, `[accounts]` A/B (tokens in `fake`'s store), local repo `<dir>/repo`.
 fn config(d: &Path, role_extra: &str) -> String {
     let repo = d.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -38,7 +36,6 @@ fn fake(c: &drover::Ctx, n: u64) -> Fake {
         .reply("git -C", "")
 }
 
-/// A real (faked) impl spawn of issue `n` that succeeds.
 fn spawn(c: &drover::Ctx, n: u64, extra: &[&str]) {
     let r = fake(c, n);
     let n = n.to_string();
@@ -46,7 +43,6 @@ fn spawn(c: &drover::Ctx, n: u64, extra: &[&str]) {
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
 }
 
-/// The dry-run plan of an impl spawn of issue `n`: (harness, account).
 fn dry(c: &drover::Ctx, n: u64) -> (Value, Value) {
     let args = ["spawn", "sendmeter", &n.to_string(), "impl", "--dry-run", "--json"];
     let (code, out) = run(c, &Fake::default().reply("which shed", "/opt/shed/bin/shed\n"), &args);
@@ -90,7 +86,6 @@ fn all_claude_accounts_resting_carries_on_with_the_next_harness() {
         rest(&c, json!({"harness": "claude", "account": a, "until": c.now + 600}));
     }
     assert_eq!(dry(&c, 13), (json!("dsh"), Value::Null));
-    // The dsh harness itself resting too: nothing is left.
     rest(&c, json!({"harness": "dsh", "account": null, "until": c.now + 600}));
     let (code, out) = run(&c, &Fake::default(), &["spawn", "sendmeter", "13", "impl", "--dry-run"]);
     assert!(code == 3 && out.contains("ALL_CAPPED"), "{code} {out}");
@@ -113,7 +108,6 @@ fn a_signed_out_lane_rests_and_its_successor_gets_the_carry_over() {
     let out = check(&c, &sh, "API Error: 401 · Please run /login");
     assert!(out.contains("signed out"), "{out}");
     let ev = read(&c.state).unwrap();
-    // #640: an account's sign-out is its own state, without a reset time.
     let u = ev.iter().rfind(|e| e.kind == "account-signed-out").unwrap();
     assert_eq!(
         (u.str("account"), u.str("agent")),
@@ -168,7 +162,7 @@ fn a_harness_that_wont_start_twice_rests() {
     let ev: Vec<_> = read(&c.state)
         .unwrap()
         .into_iter()
-        .filter(|e| !["spawn-started", "intent", "failed"].contains(&e.kind.as_str())) // #509: around each try
+        .filter(|e| !["spawn-started", "intent", "failed"].contains(&e.kind.as_str()))
         .collect();
     let kinds: Vec<_> = ev.iter().map(|e| e.kind.as_str()).collect();
     assert_eq!(kinds, ["spawn-failed", "agent-unavailable"]);
@@ -185,13 +179,11 @@ fn default_config_is_unchanged() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     assert_eq!(dry(&c, 13), (json!("claude"), json!("A")));
     spawn(&c, 12, &[]);
-    // No chain: a cap is the account cap it always was; #640: a sign-out is its own state.
     assert!(check(&c, &sh, "Please run /login").contains("account-signed-out"));
     assert!(check(&c, &sh, "Claude usage limit reached.").contains("account-capped"));
     assert_eq!(dry(&c, 13), (json!("claude"), json!("B")));
     spawn(&c, 12, &["--supersede"]);
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
-    // #353: a superseded lane's successor still gets the handover note.
     assert!(brief.contains(HONEST), "{brief}");
     let ev = read(&c.state).unwrap();
     assert!(!ev
@@ -200,15 +192,12 @@ fn default_config_is_unchanged() {
     assert!(ev.iter().rfind(|e| e.kind == "spawn").unwrap().data["resting"].is_null());
 }
 
-/// #353: the sentence every handover note carries.
 const HONEST: &str = "Summary of the previous lane; its tool state and approvals are not carried over.";
 
-/// The brief of issue 12's lane.
 fn brief12(c: &drover::Ctx) -> String {
     std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap()
 }
 
-/// Lane `sendmeter-impl-12` signed out (via `drover check`), then superseded by the next entry with `r` as the fake.
 fn sign_out_and_supersede(c: &drover::Ctx, sh: &FakeShed, r: &Fake) {
     assert!(check(c, sh, "API Error: 401 · Please run /login").contains("signed out"));
     let (code, out) = run(c, r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
@@ -280,7 +269,6 @@ fn the_fallback_brief_carries_a_capped_handover_from_the_transcript() {
     .collect();
     assert!(order.windows(2).all(|w| w[0] < w[1]), "{note}");
     assert!(note.lines().all(|l| l.chars().count() <= 242), "{note}");
-    // The note is logged on the spawn: the next handover lists it among the prior notes.
     let ev = read(&c.state).unwrap();
     let sp = ev.iter().rfind(|e| e.kind == "spawn").unwrap();
     assert!(sp.str("handover").unwrap().starts_with("Handover: "), "{sp:?}");
@@ -298,7 +286,6 @@ fn without_a_transcript_the_handover_reads_the_pane_log() {
         "❯ Read the brief\n⏺ Bash(cargo build)\n  ⎿ ok\n\n⏺ Built it\n  and pushed.\n\n❯ \n",
     )
     .unwrap();
-    // check rolls the pane into the log too; the lines above are what it had before.
     assert!(check(&c, &sh, "API Error: 401 · Please run /login").contains("signed out"));
     let (code, out) = run(&c, &fake(&c, 12), &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert_eq!(code, 0, "{out}");
@@ -317,7 +304,7 @@ fn without_a_transcript_the_handover_reads_the_pane_log() {
 fn an_entry_that_ran_before_gets_only_the_delta() {
     let (mut c, sh) = on_shed("ho-delta", CHAIN);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    spawn(&c, 12, &[]); // claude:A
+    spawn(&c, 12, &[]);
     ask(&c, "needs-decision", json!({"id": "early", "question": "q?"}));
     c.now += 60;
     sign_out_and_supersede(&c, &sh, &fake(&c, 12));
@@ -327,7 +314,7 @@ fn an_entry_that_ran_before_gets_only_the_delta() {
         "{full}"
     );
 
-    c.now += 4000; // #640: A was signed in again; B goes unavailable
+    c.now += 4000;
     assert_eq!(run(&c, &Fake::default(), &["accounts", "reset", "A"]).0, 0);
     ask(&c, "needs-decision", json!({"id": "late", "question": "q?"}));
     ask(

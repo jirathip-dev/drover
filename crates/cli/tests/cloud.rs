@@ -1,7 +1,3 @@
-//! #254: cloud hosts with a fake recipe runner: on-demand start → address refresh → spawn, overflow after the local
-//! hosts were held `overflow_after_minutes`, idle stop and `hosts destroy` with the wip save (aborted on a failed push
-//! or an unreachable host), the budget
-//! refusal and the 80 % warning, an idempotent ssh include, and the provider key never in argv or the log.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -25,13 +21,10 @@ destroy = "fakecloud destroy {name}"
 small = 1.0
 "#;
 
-/// The `sh -c` line a recipe command runs as.
 fn rc(verb: &str) -> String {
     format!("sh -c IFS= read -r K; export FAKE_CLOUD_KEY=\"$K\"; unset K; fakecloud {verb} cloud1")
 }
 
-/// mini (this host) and cloud1 (the fake recipe, $10 a month, 20 h a day, a `docker` hand tag); #707: the key in
-/// `<config>/secrets/FAKE_CLOUD_KEY`, 0600.
 fn setup(name: &str) -> drover::Ctx {
     let dir = tmpdir(name);
     std::fs::create_dir_all(&dir).unwrap();
@@ -79,7 +72,6 @@ fn healthy(f: Fake) -> Fake {
         )
 }
 
-/// mini at load/cpu `mini`; cloud1 reachable, idle, healthy, and its recipe answering.
 fn fake(mini: f64) -> Fake {
     healthy(Fake::default())
         .reply("which shed", "/opt/shed/bin/shed\n")
@@ -157,7 +149,6 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
         &Fake::default(),
         &["queue", "sendmeter", "add", "12", "--needs", "docker"],
     );
-    // A dry run never starts it.
     let r = spawn_fake();
     let (code, out) = run(
         &c,
@@ -170,7 +161,6 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     let (code, out) = run(&c, &on_cloud(&r, &cloud), &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let i = |p: &str| r.index(p).unwrap_or_else(|| panic!("no {p}: {:?}", r.calls.borrow()));
-    // #635: `status` first (an empty one would `create`), then `start`, then `address`.
     assert!(i(&rc("status")) < i(&rc("start")) && i(&rc("start")) < i(&rc("address")));
     let started = shed_call_at(&r, "run").unwrap_or_else(|| panic!("no run: {:?}", r.calls.borrow()));
     assert!(i(&rc("address")) < started);
@@ -191,11 +181,9 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     assert_eq!(kinds, ["cloud-start", "cloud-up"]);
     let s = events.iter().rfind(|e| e.kind == "spawn").unwrap();
     assert_eq!(s.str("host"), Some("cloud1"));
-    // #256: why it went there, and the lane hook's host.
     assert_eq!(s.str("why"), Some("needs docker: no local host has it"));
     let sent = cloud.sent("sendmeter-impl-12");
     assert!(sent.iter().any(|c| c.contains("DROVER_HOST='cloud1'")), "{sent:?}");
-    // #646: its first use there clones lean: the integration branch only, `wip/*` never fetched.
     let clone: Vec<_> = (r.calls.borrow().iter())
         .filter(|c| c.contains("git clone"))
         .cloned()
@@ -209,11 +197,9 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
 #[test]
 fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enough() {
     let c = setup("cloud-overflow");
-    // mini admits: mini (cloud1 is stopped and never looked at over SSH).
     let r = fake(0.1);
     assert_eq!(placed(&c, &r, None).as_deref(), Ok("mini"));
     assert!(!r.called(SSH), "{:?}", r.calls.borrow());
-    // mini held: its refusal until it has been held 10 minutes, then the stopped cloud host.
     let e = placed(&c, &fake(3.0), None).unwrap_err();
     assert!(e.starts_with("HOST_BUSY: mini"), "{e}");
     let later = drover::Ctx {
@@ -224,7 +210,6 @@ fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enou
         placed(&later, &fake(3.0), None).unwrap_err(),
         "CLOUD_STOPPED: cloud1: stopped"
     );
-    // mini admits again: the clock resets.
     assert_eq!(placed(&later, &fake(0.1), None).as_deref(), Ok("mini"));
     assert!(!c.state.with_file_name("held-since").exists());
     let e = placed(
@@ -237,7 +222,6 @@ fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enou
     )
     .unwrap_err();
     assert!(e.starts_with("HOST_BUSY: mini"), "{e}");
-    // A mark left hours ago with no placement since is stale: the first busy moment after it starts the clock over.
     let e = placed(
         &drover::Ctx {
             now: NOW + 5 * 3600,
@@ -250,8 +234,6 @@ fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enou
     assert!(e.starts_with("HOST_BUSY: mini"), "{e}");
 }
 
-/// #256: a Mac goes first even while the cloud host runs idle; the cloud takes overflow only after the delay, or a need
-/// only it covers at once, and says why.
 #[test]
 fn a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked() {
     let c = setup("cloud-running-overflow");
@@ -271,9 +253,7 @@ fn a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked() {
         let p = p.unwrap().unwrap();
         (p.name, p.refusal.map(|r| r.0), p.why)
     };
-    // mini at load/cpu 2.0 admits: it wins over the idler cloud1 (0.1).
     assert_eq!(pick(&c, &fake(2.0)), ("mini".into(), None, None));
-    // mini held: its refusal until it has been held 10 minutes, then cloud1.
     assert_eq!(pick(&c, &fake(3.0)).1, Some("HOST_BUSY"));
     let later = drover::Ctx {
         now: NOW + 601,
@@ -281,7 +261,6 @@ fn a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked() {
     };
     let why = Some("overflow: every local host busy 10 min".to_string());
     assert_eq!(pick(&later, &fake(3.0)), ("cloud1".into(), None, why));
-    // A need only cloud1 covers goes there at once, mini idle or not.
     run(
         &c,
         &Fake::default(),
@@ -291,7 +270,6 @@ fn a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked() {
     assert_eq!(pick(&c, &fake(0.1)), ("cloud1".into(), None, why));
 }
 
-/// cloud1 running since 3000 s ago with a lane whose worktree is 1 commit ahead.
 fn running(name: &str) -> (drover::Ctx, Config) {
     let c = setup(name);
     ev(&c, NOW - 3000, "cloud-start");
@@ -311,7 +289,6 @@ fn lane_fake() -> Fake {
         .reply(&git, "")
 }
 
-/// `check`'s cloud step: its output lines.
 fn tick(
     c: &drover::Ctx,
     cfg: &Config,
@@ -344,7 +321,6 @@ fn an_idle_cloud_host_saves_each_lane_to_wip_then_stops() {
     let stop = events.iter().rfind(|e| e.kind == "cloud-stop").unwrap();
     assert_eq!(stop.data["wip"], json!(["wip/cloud1-sendmeter-impl-12"]));
     assert_eq!(drover::cloud::state(&events, "cloud1"), "stopped");
-    // A live agent there, or a recent one, keeps it running.
     let (c, cfg) = running("cloud-busy");
     let live = BTreeMap::from([("cloud1".to_string(), Some(vec![json!({"name": "x"})]))]);
     assert!(tick(&c, &cfg, &lane_fake(), &live).is_empty());
@@ -370,7 +346,6 @@ fn a_failed_wip_push_aborts_the_stop() {
 
 #[test]
 fn an_unreachable_host_aborts_the_stop_and_destroy_saves_first() {
-    // ssh fails (255) probing the worktree: never "nothing to save", so neither stop nor destroy runs.
     let (c, cfg) = running("cloud-unreachable");
     let r = lane_fake().once_err(&format!("{SSH}'test' '-e'"), 255, "Connection timed out");
     let (code, out) = run(&c, &r, &["hosts", "destroy", "cloud1"]);
@@ -388,7 +363,6 @@ fn an_unreachable_host_aborts_the_stop_and_destroy_saves_first() {
     let events = read(&c.state).unwrap();
     assert_eq!(events.iter().filter(|e| e.kind == "cloud-abort").count(), 2);
     assert_eq!(drover::cloud::state(&events, "cloud1"), "running");
-    // Reachable: the wip push, then `destroy`.
     let r = lane_fake().reply(&rc("destroy"), "");
     let (code, out) = run(&c, &r, &["hosts", "destroy", "cloud1"]);
     assert_eq!(code, 0, "{out}");
@@ -406,7 +380,6 @@ fn the_budget_warns_at_80_percent_and_refuses_when_used_up() {
         let cfg = Config::load(&c.config).unwrap();
         drover::cloud::card(c, &cfg, &read(&c.state).unwrap(), ("cloud1", 0)).unwrap()
     };
-    // 2 h at $1/h: green, stopped.
     let c = setup("cloud-budget");
     ev(&c, NOW - 7200, "cloud-start");
     ev(&c, NOW, "cloud-stop");
@@ -417,14 +390,12 @@ fn the_budget_warns_at_80_percent_and_refuses_when_used_up() {
         text.starts_with("fake small · spent $2 of $10 · 2.0 h today of 20 · address never"),
         "{text}"
     );
-    // 8.5 h: amber (85 %), still placeable.
     let c = setup("cloud-budget-80");
     ev(&c, NOW - 30_600, "cloud-start");
     ev(&c, NOW - 30_000, "cloud-up");
     let [head, tone, text] = card(&c);
     assert_eq!((head.as_str(), tone.as_str()), ("", "a"), "{text}");
     assert!(text.contains("spent $8 of $10 · 8.5 h today"), "{text}");
-    // 11 h: red, and placement refuses CLOUD_BUDGET even when forced.
     let c = setup("cloud-budget-over");
     ev(&c, NOW - 39_600, "cloud-start");
     ev(&c, NOW - 39_000, "cloud-up");
@@ -433,7 +404,6 @@ fn the_budget_warns_at_80_percent_and_refuses_when_used_up() {
         placed(&c, &fake(0.1), Some("cloud1")).unwrap_err(),
         "CLOUD_BUDGET: cloud1: spent $11.00 of $10 this month"
     );
-    // #256: a need only it covers waits, in plain words.
     run(
         &c,
         &Fake::default(),
@@ -443,11 +413,9 @@ fn the_budget_warns_at_80_percent_and_refuses_when_used_up() {
         placed(&c, &fake(0.1), None).unwrap_err(),
         "REFUSED NO_HOST: no host with docker (cloud host stopped or over budget)"
     );
-    // A running host at its limit is stopped (after the wip save).
     let cfg = Config::load(&c.config).unwrap();
     let out = tick(&c, &cfg, &fake(0.1), &BTreeMap::from([("cloud1".into(), Some(vec![]))]));
     assert!(out[0].contains("stopped (spent $11.00 of $10 this month)"), "{out:?}");
-    // Last month's spend does not count: on 10 Feb 1970, a span from 31 Jan 02:13 to 1 Feb 01:00 counts 1 h.
     let c = drover::Ctx {
         now: 40 * 86_400,
         ..setup("cloud-budget-month")
@@ -473,8 +441,6 @@ fn the_ssh_include_rewrite_is_idempotent_and_keeps_other_blocks() {
         once.starts_with(other) && once.matches("Host cloud1").count() == 1,
         "{once}"
     );
-    // A new address replaces the block (#635: the pinned host key stays the same).
-    // A moved box answers the new address on every read (start's refresh and the survey's #635 D check).
     let mut r = fake(0.1);
     let stdout = "ubuntu@10.0.0.9 22\nssh-ed25519 AAAAC3fakekey\n".into();
     r.replies.insert(
@@ -508,7 +474,6 @@ fn a_lost_end_marker_keeps_later_blocks_and_a_bad_address_is_refused() {
         now.starts_with(other) && now.matches("Host cloud1").count() == 1,
         "{now}"
     );
-    // A reply that would add an ssh directive (`Port 22 ProxyCommand …`) is refused; the file is untouched.
     let r = fake(0.1).once(
         &rc("address"),
         0,
@@ -519,7 +484,6 @@ fn a_lost_end_marker_keeps_later_blocks_and_a_bad_address_is_refused() {
     assert_eq!(std::fs::read_to_string(dir.join("herdsman")).unwrap(), now);
 }
 
-/// Records each call's stdin.
 struct Stdin(Fake, Shared<Vec<String>>);
 
 impl Runner for Stdin {
@@ -583,14 +547,11 @@ fn a_cloud_key_file_others_can_read_is_refused() {
     assert!(!r.0.called("sh -c"), "nothing ran: {:?}", r.0.calls.borrow());
 }
 
-/// The start of the ssh line a bootstrap step's shell `cmd` runs as on cloud1.
 fn step(cmd: &str) -> String {
     let s = format!("{}{cmd}", drover::cloud::SH).replace('\'', "'\\''");
     format!("{SSH}'sh' '-c' '{s}")
 }
 
-/// cloud1 running, reachable, herdr 0.9.5 here and there; every tool there but gh (installed once) and drover
-/// (built once); claude logged in and gh `gh_in` (logged in or not).
 fn boot_fake(gh_in: bool) -> Fake {
     let ws = r#"{"result":{"root_pane":{"pane_id":"w7:p1"}}}"#;
     let mine = format!(
@@ -653,7 +614,6 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_pan
         "cargo install --git https://github.com/jirathip-dev/herdsman --rev {sha} --locked --root '/opt/drover'"
     );
     assert!(r.called(&step(&build)), "{:?}", r.calls.borrow());
-    // claude is logged in: only gh's pane, the token read there without echo, never on a command line.
     let runs: Vec<_> = r
         .calls
         .borrow()
@@ -691,7 +651,6 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
         out.contains("✓ git over https — installed") && out.contains("bootstrapped"),
         "{out}"
     );
-    // #646: a lean clone: the integration branch only, and no later fetch brings `wip/*`.
     let clone = "git clone --single-branch --branch 'staging' https://github.com/jirathip-dev/sendmeter.git \
                  '/tmp/does-not-matter/sendmeter' && git -C '/tmp/does-not-matter/sendmeter' config remote.origin.fetch \
                  '+refs/heads/*:refs/remotes/origin/*' && git -C '/tmp/does-not-matter/sendmeter' config --add \
@@ -702,7 +661,6 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
         !r.0.calls.borrow().iter().any(|c| c.contains("--with-token")),
         "no login pane"
     );
-    // #592: no fleet.toml goes there (spawn syncs each lane's profile); with none there, no full sync either.
     let written = r.1.borrow().join("\n");
     assert!(!written.contains("[fleet") && !written.contains("SEKRIT"), "{written}");
     let conf = c.config.display().to_string();
@@ -723,8 +681,6 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
         .any(|c| c.contains(KEY) || c.contains("SEKRIT")));
 }
 
-/// #647: a fake cloud1 whose files are real: an ssh line naming its fleet.toml (`.1`, the path bootstrap uses there)
-/// runs in a real `sh` against `.2/fleet.toml`, its drover this build's.
 struct Remote<'a>(&'a Fake, String, std::path::PathBuf);
 
 impl Runner for Remote<'_> {
@@ -752,8 +708,6 @@ impl Runner for Remote<'_> {
     }
 }
 
-/// #647: the fleet.toml a pre-#592 bootstrap wrote there: the `[fleet.*]` tables (a role's account pin, no
-/// `[accounts]`) and this host's command rules.
 const OLD_CONF: &str = r#"[fleet.sendmeter]
 integration = "staging"
 local = "/tmp/does-not-matter/sendmeter"
@@ -768,7 +722,6 @@ profile = "fleet-impl"
 allow_commands = ["docker"]
 "#;
 
-/// boot_fake(true) past the logins, git over https and the clone.
 fn boot_again() -> Fake {
     boot_fake(true)
         .reply(&step("git config --global --get credential"), "")
@@ -785,7 +738,6 @@ fn bootstrap_repairs_an_old_bootstrap_fleet_toml_so_profiles_sync_passes_there()
     let conf = c.config.display().to_string();
     let r = Remote(&f, conf.clone(), there.clone());
     let sync = format!("test ! -e '{conf}' || '{}' profiles sync", c.exe);
-    // The old file fails to load there, as on boat1.
     let o = r.run("ssh", &["cloud1".into(), sync.clone()]).unwrap();
     assert!(o.stderr.contains("account 'C' is not in [accounts]"), "{o:?}");
     let mut out = vec![];
@@ -838,7 +790,7 @@ fn a_failed_bootstrap_step_shows_its_command_exit_code_and_output_and_logs_them(
 #[test]
 fn the_token_expiry_parses_and_warns_from_14_days() {
     let day = 86_400;
-    let now = 20_000 * day; // 2024-10-04
+    let now = 20_000 * day;
     let head = |d: &str| {
         format!("HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: {d}\n\n[{{\"full_name\":\"a/b\"}},{{\"full_name\":\"a/c\"}}]")
     };
@@ -854,7 +806,6 @@ fn the_token_expiry_parses_and_warns_from_14_days() {
         drover::cloud::token("HTTP/2.0 200 OK\n\n[]", now).0,
         "github: token · 0 repos · no expiry"
     );
-    // gh rejects an expired or revoked token: no headers at all, and the host turns red.
     let (card, warn) = drover::cloud::token("", now);
     assert_eq!(card, "github: unreadable");
     assert!(warn.unwrap().starts_with("✗ github — gh there has no working token"));
@@ -880,7 +831,6 @@ fn a_snapshot_needs_a_green_health_check_first() {
     );
 }
 
-/// #641: herdr's saved machines as `herdr machine list --json` shows them; `machine add`/`remove` change the list.
 struct Machines(Fake, Shared<Vec<(String, String)>>);
 
 impl Runner for Machines {
@@ -971,7 +921,6 @@ fn a_setup_pane_for_a_host_with_no_machine_profile_is_refused_never_opened_here(
 #[test]
 fn recreating_a_cloud_host_replaces_its_machine_profile() {
     let (c, cfg) = running("cloud-recreate");
-    // A new box under the same name: no herdr there yet, so bootstrap's herdr step runs `machine add` again.
     let f = boot_fake(false).once(&step("herdr --version | grep -qx 'herdr 0.9.5'"), 1, "");
     let r = machines(f.reply("herdr machine add cloud1 --label cloud1", ""), &["old1"]);
     let e = drover::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut vec![]).unwrap_err();

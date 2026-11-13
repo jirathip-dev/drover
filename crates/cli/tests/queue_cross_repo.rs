@@ -1,5 +1,3 @@
-//! #667: a queue blocker in another fleet (`fleet#N`) or repo (`owner/repo#N`) holds every start until it is merged in
-//! its fleet or reads closed on GitHub (one cached `gh issue view` per 5 min).
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -30,7 +28,6 @@ fn ok(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
     out
 }
 
-/// `drover drive` at `now + secs`: the `driven` steps it logged.
 fn drive(c: &drover::Ctx, r: &Fake, secs: u64) -> Vec<String> {
     let c = drover::Ctx {
         now: c.now + secs,
@@ -72,13 +69,11 @@ fn a_blocker_in_another_repo_is_released_once_it_reads_closed() {
     assert!(ls.contains("blocked by drover#633, cooee#87"), "{ls}");
     let v: serde_json::Value = serde_json::from_str(&ok(&c, &r, &["queue", "sendmeter", "ls", "--json"])).unwrap();
     assert_eq!(v[0]["blocked_ext"], json!(["drover#633", "jirathip-dev/cooee#87"]));
-    // Unblocking the fleet one leaves the repo one.
     ok(&c, &r, &["queue", "sendmeter", "unblock", "12", "--on", "drover#633"]);
     assert!(drive(&c, &r, 0).is_empty(), "reads OPEN");
     assert_eq!(r.count(view), 1);
     let next = run(&c, &r, &["next", "sendmeter"]);
     assert_eq!(next, (2, "#12 is blocked by cooee#87\n".into()));
-    // Within 5 min the cached read stands: no `gh` call, still held.
     assert!(drive(&c, &r, 200).is_empty());
     assert_eq!(r.count(view), 1, "one read per 5 min");
     assert_eq!(drive(&c, &r, 400), ["start"], "reads CLOSED: starts this pass");

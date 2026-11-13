@@ -1,8 +1,3 @@
-//! #365 step 1: the Queue tab's backlog. The tick's pass (and [Drive now]) reads a repo's open issues in one GraphQL
-//! call, then only those updated since; the board renders it from that read with no GitHub call; [queue N] queues the
-//! ticked issues in tick order, each row marked `needs-check`. The read's `--jq` runs under jq on a raw GraphQL page;
-//! serve.js's pure backlog part (rows, search, quick filters, tick order) under node; the 390 px view with 100 issues
-//! is gate 2's `queue/queue-backlog` (docs/ui.md).
 mod common;
 use common::*;
 use drover::events::read;
@@ -13,7 +8,6 @@ const ADDR: &str = "127.0.0.1:7777";
 const NOW: u64 = 10_000_000;
 const READ: &str = "gh api graphql --paginate --jq .data.repository.issues";
 
-/// One issue as the read's `--jq` prints it.
 fn issue(n: u64, state: &str, updated: &str, labels: &[&str], ac: bool, pr: bool) -> String {
     let i = json!({"number": n, "title": format!("issue {n} title"), "state": state, "created": updated,
         "updated": updated, "labels": labels, "ac": ac, "pr": pr});
@@ -31,7 +25,6 @@ fn first_read() -> String {
     .concat()
 }
 
-/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn get(s: &Server, path: &str, cookie: &str) -> String {
     let req = format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n");
     with_board(&String::from_utf8_lossy(&s.respond(&req, NOW)), s, ADDR, cookie, NOW)
@@ -59,9 +52,6 @@ fn keys(v: &Value) -> Vec<String> {
     v.as_object().unwrap().keys().cloned().collect()
 }
 
-/// The tick's pass reads every open issue once; a fast step never does. The next read asks only for issues updated
-/// since the newest one seen, open or closed: a closed one leaves, a changed one is replaced, a new one joins. A failed
-/// read keeps the last one and the pass goes on.
 #[test]
 fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
     let c = ctx(&tmpdir("backlog-tick"), CONFIG);
@@ -115,8 +105,6 @@ fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
     assert_eq!(cache(&c)["issues"], b["issues"], "the last read kept");
 }
 
-/// The read's `--jq` (taken from the call the pass made) on a raw GraphQL page, under jq: each issue flattened, `ac`
-/// when the body has acceptance criteria (the words or an `AC` heading), `pr` when a merged or closed PR mentions it.
 #[test]
 fn the_reads_jq_flattens_each_issue() {
     if std::process::Command::new("jq").arg("--version").output().is_err() {
@@ -161,8 +149,6 @@ fn the_reads_jq_flattens_each_issue() {
     );
 }
 
-/// The page and every live fragment carry the backlog from the last read alone (no `gh` call per view), leaving out
-/// queued issues and those with a lane; before any read there is no backlog section.
 #[test]
 fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
     let c = ctx(&tmpdir("backlog-board"), CONFIG);
@@ -185,7 +171,6 @@ fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
         "never read: no backlog section"
     );
     assert_eq!(run(&c, &Fake::default().once(READ, 0, &first_read()), &["drive"]).0, 0);
-    // #268: the Queue tab (the backlog in it) is the TypeScript board's, from API v1's `queue`: paired or not.
     for out in [get(&s, "/", &cookie), get(&s, "/", "")] {
         let out = out.replace("\\\"", "\"");
         let at = out
@@ -204,8 +189,6 @@ fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
     assert_eq!(r.count("gh"), 0, "no GitHub call per view: {:?}", r.calls.borrow());
 }
 
-/// [queue N] queues the ticked issues in the order they were ticked (serve.js sends `issues` so), behind the queue;
-/// each row says `needs-check`, which a later move keeps. Unpaired, it is refused.
 #[test]
 fn queue_n_follows_tick_order_and_marks_needs_check() {
     let c = ctx(&tmpdir("backlog-queue"), CONFIG);
@@ -256,7 +239,6 @@ fn queue_n_follows_tick_order_and_marks_needs_check() {
     );
 }
 
-/// serve.js's pure backlog part plus `js`, under node: its stdout as JSON. None where node is missing.
 fn node(js: &str) -> Option<Value> {
     if std::process::Command::new("node").arg("--version").output().is_err() {
         eprintln!("skipping: no node here");
@@ -271,8 +253,6 @@ fn node(js: &str) -> Option<Value> {
     Some(serde_json::from_slice(&o.stdout).unwrap())
 }
 
-/// The server's read as rows: newest first, ages from `created`, `stale` past 90 days untouched. Then search (number,
-/// title, label; every word, any case), each quick filter, a label, and ticks kept in tick order.
 #[test]
 fn rows_search_filters_and_ticks_in_serve_js() {
     let js = "(() => { const now = Date.parse('2026-06-01T00:00:00Z') / 1000;
@@ -311,11 +291,6 @@ fn rows_search_filters_and_ticks_in_serve_js() {
     );
 }
 
-/// #391 in headless Chrome (`CHROME`, the ui job's chrome-headless-shell; skipped without it): the real server
-/// (`serve_on`), a backlog and a 3-step chain. The backlog draws its count, rows, search and quick filters on a fresh
-/// load, after a `/live` change (#268: each a `queue`, drawn by the TypeScript board), and on a page that carried the
-/// Lanes tab only, with no uncaught error. A `build` of
-/// another build reloads the page once; its own build none. The stream's first event names the server's build.
 #[test]
 fn the_backlog_draws_on_a_fresh_load_and_after_a_live_patch() {
     let Some(chrome) = std::env::var_os("CHROME") else {

@@ -1,4 +1,3 @@
-//! #186: a closing lane's leftover processes (cwd inside its worktree) get TERM, 5 s, then KILL; nothing else does.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -24,8 +23,6 @@ fn setup(name: &str) -> (std::path::PathBuf, drover::Ctx, String, String, FakeSh
     (d, c, mine, sibling, sh)
 }
 
-/// `lsof -Fpcn` rows: two children in the lane's worktree, one in a sibling (prefix trap),
-/// one outside, and the board server (`drover serve`) started from inside it.
 fn lsof(mine: &str, sibling: &str) -> String {
     format!(
         "p101\ncnode\nfcwd\nn{mine}/web\np102\ncChrome Helper\nfcwd\nn{mine}\n\
@@ -262,7 +259,7 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
     assert_eq!(ev[0].data["killed"], json!(["node", "node"]));
     assert_eq!(ev[0].data["freed_mb"], 2148);
 
-    let young = c.now - 60; // done, but its last event is under `idle_reap_minutes` old
+    let young = c.now - 60;
     let c2 = drover::Ctx {
         now: young + 120,
         ..ctx(&tmpdir("trim-young"), CONFIG)
@@ -286,7 +283,6 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
     assert!(kills(&r).is_empty() && trimmed(&c2).is_empty(), "too soon to trim");
 }
 
-/// #223: the Host tab names the top memory users and their owner: a lane, the VM, or other.
 #[test]
 fn host_tab_shows_top_memory_users_with_their_owner() {
     use drover::serve::Server;
@@ -308,7 +304,6 @@ fn host_tab_shows_top_memory_users_with_their_owner() {
     assert!(page.contains("703M python3.14 (other)"));
 }
 
-/// #248: the Host tab sums what the Claude lanes hold, working and done apart.
 #[test]
 fn host_tab_sums_claude_lane_memory_by_state() {
     use drover::serve::Server;
@@ -331,8 +326,6 @@ fn host_tab_sums_claude_lane_memory_by_state() {
     );
 }
 
-/// #679: a shed-acp lane `done` between turns keeps its agent's tree (adapter, `node`, `claude`, their background job);
-/// while its last turn is `working` nothing is trimmed; after a `turn done` only what is not the agent's goes.
 #[test]
 fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
     let d = tmpdir("trim-acp");
@@ -349,8 +342,6 @@ fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
     );
     let why = "full cargo test running in background";
     ev("turn-end", json!({"state": "working", "why": why, "role": "impl"}));
-    // shed server 199 (outside) → sh 200 (the terminal's pid) → shed acp-bridge 201 → node 202 → claude 203 → zsh 204
-    // → cargo 205; a stray shell 300 (parent: launchd) → zsh 301 → vite 302, not the agent's.
     let rows = format!(
         "p200\ncsh\nfcwd\nn{wt}\np201\ncshed\nfcwd\nn{wt}\np202\ncnode\nfcwd\nn{wt}\np203\ncclaude\nfcwd\nn{wt}\n\
          p204\nczsh\nfcwd\nn{wt}\np205\nccargo\nfcwd\nn{wt}\np300\nczsh\nfcwd\nn{wt}\np301\nczsh\nfcwd\nn{wt}\n\

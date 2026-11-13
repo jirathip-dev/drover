@@ -1,6 +1,3 @@
-//! #714: pause holds back spawns and passes, never delivery: a paused fleet's live remote lane still has its outbox
-//! drained (its ask and turn land) and an answer that never reached it is typed again on the next fast step.
-//! One test: the lane's env vars and cwd are process-wide.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -65,7 +62,6 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     std::env::remove_var("DROVER_OUTBOX");
     std::env::remove_var("DROVER_LANE");
 
-    // The main host: the fleet is paused, #12's lane lives on air, and #13 waits in the queue.
     assert_eq!(run(&main, &Fake::default(), &["queue", "sendmeter", "add", "13"]).0, 0);
     assert_eq!(run(&main, &Fake::default(), &["pause", "sendmeter"]).0, 0);
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "sendmeter-impl-12",
@@ -88,7 +84,6 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     let (_, asked) = run(&main, &r, &["asks", "sendmeter"]);
     assert!(asked.contains("q1 #12") && asked.contains("Which way?"), "{asked}");
 
-    // The answer can't reach the lane at first: the next fast step types it again, paused or not.
     assert_eq!(run(&main, &Fake::default(), &["answer", "sendmeter", "q1", "1"]).0, 0);
     assert_eq!(ev_count(&main, "answer-undelivered"), 1);
     let f = Fake::default();
@@ -101,7 +96,6 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     );
     assert_eq!(ev_count(&main, "answer-delivered"), 1);
 
-    // Pause still holds: a slow pass starts nothing, and no pass is logged for the fleet.
     let f = Fake::default();
     run(&main, &Air::new(&f, &air), &["drive"]);
     assert_eq!(ev_count(&main, "spawn"), 1, "only #12's seeded spawn");

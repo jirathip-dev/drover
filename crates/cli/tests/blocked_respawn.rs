@@ -1,6 +1,3 @@
-//! #639: queue blockers hold every spawn, a `turn blocked` is never a no-push failure, an extra round for a lane that
-//! never pushed is no review FAIL, a lessons issue with no PR closes on `done --no-change`, and a GitHub-closed issue
-//! reads closed after one `check`. Every test runs as #12's impl lane (`DROVER_LANE` is process-wide).
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
@@ -54,7 +51,6 @@ fn ok(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
     out
 }
 
-/// `drover drive`: (output, `driven` steps logged by this pass).
 fn drive(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
     let out = ok(c, r, &["drive"]);
@@ -87,8 +83,6 @@ fn a_blocked_issue_given_an_extra_round_is_never_respawned_and_waits_for_its_blo
         &r,
         &["queue", "sendmeter", "block", "12", "--on", "11", "--on", "13"],
     );
-    // cooee #29's shape: a respawn after the block (its hold ends there), the lane ended without a push, the owner
-    // gave it another round.
     let t = c.now;
     spawn(&c, t);
     lane_ends(&c, t);
@@ -104,7 +98,6 @@ fn a_blocked_issue_given_an_extra_round_is_never_respawned_and_waits_for_its_blo
     assert!(ls.contains("#12    queued  blocked by #11, #13"), "{ls}");
     drive(&at(&c, 7200), &r);
     assert!(!started(&sh), "never while a blocker is open");
-    // Both blockers merged: the queue starts it as a first spawn.
     for n in [11, 13] {
         ev(
             &c,
@@ -129,7 +122,6 @@ fn two_blocked_turns_in_a_row_are_owner_cards_never_lane_ends() {
         out.contains("sendmeter #12 needs-human: lane blocked: waits on #11"),
         "{out}"
     );
-    // The owner gives it another round; its new lane ends blocked again.
     let c2 = at(&c, 100);
     ev(&c2, c2.now, 12, "round-extended", json!({"by": "owner", "spawn": true}));
     spawn(&c2, c2.now);
@@ -148,7 +140,6 @@ fn two_blocked_turns_in_a_row_are_owner_cards_never_lane_ends() {
 
 #[test]
 fn an_extra_round_for_a_lane_that_never_pushed_is_no_review_fail() {
-    // The root cause of cooee #29's "review FAIL" with no PR: `extend` on a build lane that never reached review.
     let (c, r, _sh) = lane("extend-impl", "t");
     lane_ends(&c, 20);
     ev(&c, 30, 12, "round-extended", json!({"by": "owner", "spawn": true}));
@@ -160,7 +151,6 @@ fn an_extra_round_for_a_lane_that_never_pushed_is_no_review_fail() {
 
 #[test]
 fn a_lessons_issue_done_with_no_change_and_no_pr_closes() {
-    // berth #22's shape: drive's queue start spawned the lessons issue as `impl`, not `lesson`.
     let (c, r, sh) = lane("lesson-close", "lessons: sendmeter week of 2026-11-05");
     ok(&c, &r, &["brief", "sendmeter", "12"]);
     let out = ok(&c, &r, &["done", "--no-change", "no repeated class", "sendmeter", "12"]);
@@ -196,8 +186,6 @@ fn an_issue_closed_on_github_reads_closed_after_one_check_and_drive_leaves_it() 
     assert_eq!(kinds(&c, "closed-other").len(), 1, "logged once");
 }
 
-/// #679: an issue parked `LANE_ENDS` whose lane exited right after an idle trim gets one respawn in its worktree;
-/// parked that way again, or with no trim before the exit, it stays parked.
 #[test]
 fn a_lane_ends_after_an_idle_trim_gets_one_respawn() {
     let (c, r, sh) = lane("trim-repair", "t");
@@ -243,14 +231,12 @@ fn a_lane_ends_after_an_idle_trim_gets_one_respawn() {
         "its lane restarted on shed in that worktree"
     );
 
-    // Trimmed and parked again: once only.
     let c2 = at(&c, 100);
     park(&c2, c2.now, true);
     let (out, _) = drive(&c2, &r);
     assert_eq!(kinds(&c2, "repaired").len(), 1, "{out}");
     assert_eq!(state(&c2), "needs-human");
 
-    // No trim before the exit: parked as before.
     let (c, r, _sh) = lane("trim-repair-none", "t");
     park(&c, 20, false);
     let (out, _) = drive(&c, &r);

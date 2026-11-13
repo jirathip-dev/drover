@@ -1,5 +1,3 @@
-//! #162: the Queue tab as one card per fleet (colour by a stable name hash or `color`, fleets needing you first, a
-//! paused fleet collapsed to one line) and the [config] sheet (every group; its pickers write through `set`).
 mod common;
 use common::*;
 use drover::config::Config;
@@ -10,7 +8,6 @@ use serde_json::json;
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// `alpha` works, `zeta` needs you (#5 needs-human), `beta` is paused and needs you (an open ask on #9).
 fn config(extra: &str) -> String {
     let fleet = |n: &str, more: &str| {
         format!(
@@ -27,14 +24,12 @@ fn config(extra: &str) -> String {
     )
 }
 
-/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn get(s: &Server, path: &str) -> String {
     let res =
         String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T)).into_owned();
     with_queue(&res, s, ADDR, T)
 }
 
-/// #268: a fleet's [config] sheet as the board draws it from API v1's `queue`.
 fn sheet(s: &Server, fleet: &str) -> String {
     queue_js(s, ADDR, T, &format!("sheet(d, {fleet:?})"))
 }
@@ -77,7 +72,6 @@ fn colour_is_a_stable_name_hash_and_color_overrides_it() {
         Config::load(&d.join("fleet.toml"))
     };
     let c = load("").unwrap();
-    // sha256(name)[0] % 5 over [l, p, c, g, a] (docs/design/fleet-cards): the same on every load.
     let auto: Vec<&str> = ["alpha", "beta", "zeta", "gamma"]
         .iter()
         .map(|f| c.fleet[*f].color(f))
@@ -98,7 +92,6 @@ fn colour_is_a_stable_name_hash_and_color_overrides_it() {
         e.contains("fleet.alpha.color: \"r\" must be one of [\"l\", \"p\", \"c\", \"g\", \"a\"]"),
         "{e}"
     );
-    // The card carries it.
     let d = tmpdir("fc-colour-page");
     let c = ctx(&d, &config("color = \"c\""));
     let page = get(&Server::new(&c, &Fake::default(), Some(ADDR.into())), "/");
@@ -116,9 +109,7 @@ fn fleets_that_need_you_go_first_then_by_name_and_a_paused_one_collapses() {
         page.find(&format!("<b>{n}</b>"))
             .unwrap_or_else(|| panic!("no {n}: {page}"))
     };
-    // Need you: beta (paused, an ask), zeta (needs-human); then alpha, gamma by name.
     assert!(at("beta") < at("zeta") && at("zeta") < at("alpha") && at("alpha") < at("gamma"));
-    // A paused fleet is one collapsed line with its need-you count and [resume]; no header, no [config].
     let beta = &page[page[..at("beta")].rfind("<details class=\"fc off").unwrap()..];
     assert!(
         beta.starts_with(&format!(
@@ -130,9 +121,8 @@ fn fleets_that_need_you_go_first_then_by_name_and_a_paused_one_collapses() {
     );
     assert!(beta[..beta.find("</summary>").unwrap()].contains("<button>Resume</button>"));
     let gamma = &page[at("gamma")..];
-    let gamma = &gamma[..gamma.find("</section>").unwrap()]; // the Queue tab's (#269: [chat] has its cards too)
+    let gamma = &gamma[..gamma.find("</section>").unwrap()];
     assert!(!gamma.contains("class=fh") && !gamma.contains("class=cfg"), "{gamma}");
-    // A working card: the header, [pause] [config], `need you` only where rows need you; needs-you rows first.
     let zeta = &page[at("zeta")..at("alpha")];
     assert!(zeta.contains("<span class=\"tag r\">! 1 need you</span>"), "{zeta}");
     assert!(
@@ -172,7 +162,6 @@ fn the_config_sheet_shows_every_group_and_its_pickers_post_through_set() {
         "<select name=model aria-label=model><option selected>opus</option><option>sonnet</option></select>"
     ));
     assert!(res.contains("<select name=effort aria-label=effort>"));
-    // The pickers write through `set`: the same validation (dsh takes only effort none) and the same events.
     let i = res.find("name=mtime value=").unwrap() + 17;
     let mt: String = res[i..].chars().take_while(char::is_ascii_digit).collect();
     let post = |body: &str| {
@@ -203,7 +192,6 @@ fn the_config_sheet_shows_every_group_and_its_pickers_post_through_set() {
     assert_eq!(sets.len(), 2, "harness and effort changed, model kept");
     assert_eq!(sets[0].data["key"], "harness");
     assert_eq!(sets[0].data["via"], "web");
-    // No `models`: the model picker is disabled with the fix, so a set never sends it.
     let d = tmpdir("fc-config-nomodels");
     let c = ctx(&d, &config("").replace("models = [\"opus\", \"sonnet\"]\n", ""));
     let res = sheet(&Server::new(&c, &Fake::default(), Some(ADDR.into())), "alpha");

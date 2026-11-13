@@ -1,6 +1,3 @@
-//! #630: a host's workspace roots. A lane's worktree is `<root>/<repo>/<lane>`, its builds go under `<root>/.build`.
-//! A new lane takes the first root that is mounted, writable and has `min_free_gb`; `hosts eject` empties one, and a
-//! pulled one's lanes restart on the next. Nothing moves back on its own.
 use crate::config::{Config, HostCfg};
 use crate::events::{emit, fold, read, Event};
 use crate::hosts::{under, On};
@@ -50,8 +47,7 @@ pub fn free(on: &On, root: &Path) -> Option<f64> {
     Some(s.lines().nth(1)?.split_whitespace().nth(3)?.parse::<f64>().ok()? / 1_048_576.0)
 }
 
-/// The root a new lane on host `name` takes: `prefer` (its issue's last) while it is active with room, else the first
-/// that is; none: the last.
+/// The root a new lane on host `name` takes: `prefer` (its issue's last) while it is active with room, else the first that is; none: the last.
 pub fn pick(cfg: &Config, events: &[Event], on: &On, name: &str, roots: &[PathBuf], prefer: Option<&str>) -> PathBuf {
     let fits = |p: &&PathBuf| {
         state(events, on, name, p) == "active" && free(on, p).is_none_or(|g| g >= cfg.limits.min_free_gb)
@@ -168,15 +164,13 @@ pub fn hung_under<'a>(hung: &[&'a str], sp: Option<&Event>) -> Option<&'a str> {
     hung.iter().copied().find(|r| inside(sp, Path::new(r)))
 }
 
-/// Is spawn `e`'s lane under `root` (its logged root, else its worktree's path)?
 fn inside(e: &Event, root: &Path) -> bool {
     let wt = e.str("worktree").map(Path::new);
     e.str("root")
         .map_or(wt.is_some_and(|w| w.starts_with(root)), |r| Path::new(r) == root)
 }
 
-/// `drover hosts eject <host> [<root>]` (default: its first root): no new lane goes there; each lane there is saved
-/// and restarted on the next root; then `safe to unplug <root>` once no herdr agent works there (exit 0), else 1.
+/// `drover hosts eject <host> [<root>]` (default: its first root): no new lane goes there; each lane there is saved and restarted on the next root; then `safe to unplug <root>` once no herdr agent works there (exit 0), else 1.
 pub fn eject(
     ctx: &Ctx,
     cfg: &Config,
@@ -219,8 +213,7 @@ pub fn eject(
     Ok(1)
 }
 
-/// #630: drive's look at each host's roots: one that vanished under a lane is noted once (`! root <path> gone`); #790:
-/// each pass, a lane still there restarts on the next root; one mounted again is logged back (new lanes use it).
+/// #630: drive's look at each host's roots: one that vanished under a lane is noted once (`! root <path> gone`); #790: each pass, a lane still there restarts on the next root; one mounted again is logged back (new lanes use it).
 pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = read(&ctx.state)?;
     let cache = crate::hosts::cached(ctx);
@@ -228,7 +221,7 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let home = cache.get(name).map(|s| s.home.as_str()).filter(|_| h.machine.is_some());
         let on = On::quick(r, h.machine.as_deref());
         if crate::host::agents(&on).is_err() {
-            continue; // an unreachable host is no gone root
+            continue;
         }
         for root in listed(cfg, name, home, &ctx.worktrees) {
             let s = root.to_string_lossy();
@@ -257,9 +250,6 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     Ok(())
 }
 
-/// Each open issue's lanes in `root` on host `name`: unsaved work to `wip/<agent>-<stamp>` (as `kill`), the worktree
-/// removed (`gone`: pruned), and the issue's active lane there spawned again on the next root. #790: only while that
-/// lane's last spawn is still there: `root-moved` (from and to) once it left, a failed start retried on the next pass.
 fn restart(
     ctx: &Ctx,
     cfg: &Config,
@@ -283,7 +273,7 @@ fn restart(
                 .cloned()
         };
         let Some(first) = latest(&events).filter(|e| here(&e)) else {
-            continue; // #790: its lane is on another root (moved already, or never here)
+            continue;
         };
         let mut seen = std::collections::BTreeSet::new();
         let mine: Vec<&Event> = (events.iter().rev())
@@ -338,7 +328,6 @@ fn restart(
         if let Err(e) = crate::spawn::spawn(ctx, cfg, r, out, (&s.fleet, s.issue, role), &o) {
             writeln!(out, "{agent}: restart failed: {e:#}")?;
         }
-        // #790: logged once its lane has left the root; a start that failed is tried again on the next pass.
         if let Some(to) = latest(&read(&ctx.state)?).filter(|e| !here(&e)) {
             let lost = lost.join("; ");
             let d = json!({"agent": agent, "host": name, "root": root, "to": to.str("root"), "to_host": to.str("host"), "lost": lost});
@@ -348,8 +337,7 @@ fn restart(
     Ok(())
 }
 
-/// `drover migrate`: each worktree under `~/.herdr/worktrees` moves to `<root>/<repo>/<lane>` (`git worktree move`),
-/// a live lane's after it ends; once all have, the old build caches (`~/.cache/drover/target`) go.
+/// `drover migrate`: each worktree under `~/.herdr/worktrees` moves to `<root>/<repo>/<lane>` (`git worktree move`), a live lane's after it ends; once all have, the old build caches (`~/.cache/drover/target`) go.
 pub fn migrate(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let old = ctx.home.join(".herdr/worktrees");
     let ls = |p: &Path| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path());

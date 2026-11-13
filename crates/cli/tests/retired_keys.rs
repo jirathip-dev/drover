@@ -1,5 +1,3 @@
-//! #539: a retired config key is a warning, never a load error. Each `upgrade/*.toml` is a fleet.toml from before a
-//! retired-key change; this build loads it. `check` and the board warn; the install gate refuses a binary that can't.
 mod common;
 use common::*;
 use std::os::unix::fs::PermissionsExt;
