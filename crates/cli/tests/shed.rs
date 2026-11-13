@@ -223,6 +223,9 @@ fn a_lane_spawns_on_shed() {
     assert!(std::fs::read_to_string(wt.join(".brief.md"))
         .unwrap()
         .contains("AC: it works"));
+    assert_eq!(ev.str("qos"), Some("background"));
+    let (_, st) = run(&c, &spawn_fake(), &["status", "sendmeter"]);
+    assert!(st.contains(" · qos background"), "{st}");
 
     // The live lane is seen: a second spawn is refused LANE_LIVE.
     let (code, out) = run(&c, &spawn_fake(), &["spawn", "sendmeter", "12", "impl"]);

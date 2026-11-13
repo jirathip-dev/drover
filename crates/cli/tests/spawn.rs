@@ -47,7 +47,7 @@ fn export(p: &Value) -> Vec<String> {
 }
 
 fn low() -> Vec<String> {
-    drover::spawn::LOW.split_whitespace().map(String::from).collect()
+    drover::spawn::BACKGROUND.split_whitespace().map(String::from).collect()
 }
 
 fn raw_export(p: &Value) -> Vec<String> {
@@ -98,14 +98,11 @@ fn claude_role_dry_run_uses_synced_profile() {
             "&&",
             "unset",
             "CLAUDE_CODE_OAUTH_TOKEN",
-            "&&",
-            "renice",
-            "-n",
-            "10",
-            "-p",
-            "$$",
-            ">/dev/null"
         ]
+        .map(String::from)
+        .into_iter()
+        .chain(low())
+        .collect::<Vec<_>>()
     );
     let start = launch(&p);
     let prof = c.config.parent().unwrap().join("claude/fleet-impl");
@@ -934,15 +931,31 @@ fn lane_title_strips_prefixes_and_cuts_at_words() {
 }
 
 #[test]
-fn a_spawned_lanes_build_command_runs_at_low_priority() {
-    let c = ctx(&tmpdir("spawn-nice"), CONFIG);
+fn a_spawned_lanes_build_command_runs_in_the_background_but_a_design_lanes_does_not() {
+    let stages = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\n\n[fleet.sendmeter.role.architect]\nharness = \"hermes\"\n";
+    let c = ctx(&tmpdir("spawn-nice"), &format!("{CONFIG}{stages}"));
     let _sh = on_shed(&c);
     let line = typed(&plan(&c, &shed_fake(), "impl"), "export ");
-    let build = "sh -c 'ps -o nice= -p $$'";
+    let build = "sh -c 'ps -o pri= -o nice= -p $$'";
     let out = std::process::Command::new("sh")
         .args(["-c", &format!("{line} && {build}")])
         .output()
         .unwrap();
-    let nice: i32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
-    assert!(nice >= 10, "the build's nice: {nice}");
+    let got: Vec<i32> = String::from_utf8_lossy(&out.stdout)
+        .split_whitespace()
+        .map(|w| w.parse().unwrap())
+        .collect();
+    let background = if cfg!(target_os = "macos") {
+        got[0] <= 4
+    } else {
+        got[1] >= 10
+    };
+    assert!(background, "the build's pri, nice: {got:?}");
+    for role in ["design", "architect"] {
+        let line = typed(&plan(&c, &shed_fake(), role), "export ");
+        assert!(
+            !line.contains("taskpolicy") && !line.contains("renice"),
+            "{role}: {line}"
+        );
+    }
 }
