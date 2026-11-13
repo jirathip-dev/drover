@@ -1,0 +1,8 @@
+Decided: eject on a hung root closes each lane's pane, drops the local repo's record of its worktree and restarts it, without any stat, git or save on the dead disk.
+Because: "skips saving (noted per lane: unsaved work stays on the disk), and restarts the lanes on the next root from their pushed branches"
+Decided: fix round 2 merges origin/staging and calls roots::skip in spawn's supersede guard, since #976 removed roots::unreachable.
+Because: crates/core/src/roots.rs:110 skip returns off-root, root unreachable or root-hung
+Decided: only the root unreachable and root-hung reasons skip the save; an off-root worktree is still readable and gets saved.
+Rejected: restoring roots::unreachable on this branch — staging owns roots.rs and skip already covers the same root check.
+Check: cargo build and env -u DROVER_LANE cargo test --locked --no-fail-fast pass at the head; the roots eject_of_a_hung_root test still passes.
+Owner: ejecting a frozen disk now returns at once and moves its lanes; anything unsaved there stays on that disk.
