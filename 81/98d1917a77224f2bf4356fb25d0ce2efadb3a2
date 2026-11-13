@@ -1,0 +1,5 @@
+Decided: merge origin/staging (#975) on top of 49c2e3e so the push-time evidence run accepts the body naming 49c2e3e, then name the new head in the body
+Because: scripts/evidence-check.sh:3
+Rejected: re-running the failed evidence run — it reuses the push event's old body and fails again
+Check: every evidence run at 8198d19 is green; cargo test -p drover --test ask_ids passes 7/7 at the head
+Owner: Nothing about asks changed this round; the branch caught up with staging and its test evidence now names the latest commit.
