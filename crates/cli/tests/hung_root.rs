@@ -78,7 +78,11 @@ fn hang(root: &Path) -> std::sync::mpsc::Sender<()> {
 }
 
 fn hung_alerts(c: &drover::Ctx) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == "root-hung").collect()
+    read(&c.state)
+        .unwrap()
+        .into_iter()
+        .filter(|e| e.kind == "root-hung")
+        .collect()
 }
 
 #[test]
@@ -91,11 +95,24 @@ fn a_root_whose_listing_never_returns_costs_one_probe_and_the_pass_goes_on() {
     let (code, out) = run(&r.c, &f, &["tick"]);
     let took = t.elapsed();
     assert_eq!(code, 0, "{out}");
-    assert!(took < drover::runner::probe_wait() + Duration::from_secs(20), "{took:?}");
-    assert!(f.called("herdr agent start sendmeter-impl-12"), "drive still starts: {out}");
+    assert!(
+        took < drover::runner::probe_wait() + Duration::from_secs(20),
+        "{took:?}"
+    );
+    assert!(
+        f.called("herdr agent start sendmeter-impl-12"),
+        "drive still starts: {out}"
+    );
     let events = read(&r.c.state).unwrap();
-    let sp = events.iter().rfind(|e| e.is("spawn", "sendmeter", 12)).expect("#12 spawned");
-    assert_eq!(sp.str("root"), Some(&*r.good.to_string_lossy()), "#12 takes the root that answers");
+    let sp = events
+        .iter()
+        .rfind(|e| e.is("spawn", "sendmeter", 12))
+        .expect("#12 spawned");
+    assert_eq!(
+        sp.str("root"),
+        Some(&*r.good.to_string_lossy()),
+        "#12 takes the root that answers"
+    );
     let alerts = hung_alerts(&r.c);
     assert_eq!(alerts.len(), 1, "{alerts:#?}");
     assert_eq!(alerts[0].str("root"), Some(&*r.dead.to_string_lossy()));
@@ -135,7 +152,10 @@ fn a_tick_stuck_on_one_step_shows_in_doctor_and_the_next_fast_drive() {
     let step = |at: u64| json!({"since": NOW - 4000, "at": at, "step": "check", "child": "", "pid": 1}).to_string();
     std::fs::write(&mark, step(NOW - 120)).unwrap();
     let (_, out) = run(&r.c, &Fake::default(), &["doctor"]);
-    assert!(!out.lines().any(|l| l.starts_with('✗') && l.contains("tick step")), "{out}");
+    assert!(
+        !out.lines().any(|l| l.starts_with('✗') && l.contains("tick step")),
+        "{out}"
+    );
     std::fs::write(&mark, step(NOW - 3 * 300 - 60)).unwrap();
     let (_, out) = run(&r.c, &Fake::default(), &["doctor"]);
     let row = out.lines().find(|l| l.contains("tick step")).unwrap_or_default();
