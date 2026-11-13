@@ -10,8 +10,9 @@ both read `/api/v1`, which stays open. CI's
 `crates/server/src/serve.rs`, `serve/` but `v1.rs`) unless its issue has a line starting `board-fix`.
 
 The board is live: the page keeps one `GET /live` Server-Sent Events stream open (same
-Host/Origin check, at most 8 clients, then 503; a `: ping` every 15 s; a closed client frees its
-slot within ~1 s). A watcher thread checks the
+Host/Origin check; #893: at most 4 streams per device (its paired token, else its address), its fifth closes its
+oldest; a `: ping` every `[limits] serve_heartbeat_secs` (15); a stream whose bytes stay untaken through 2 pings is
+dropped; a closed client frees its slot within ~1 s). A watcher thread checks the
 event log's size/mtime every 1 s and `herdr agent list` every 2 s (uncached); on a change (or
 every 15 s, for ages) it reads the needs-you cards and the five tabs again and pushes only the changed ones, as their
 API v1 data (#269: the server builds no HTML but the page shell; the TypeScript board in `web/` draws every tab):

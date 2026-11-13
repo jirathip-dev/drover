@@ -277,7 +277,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 .or_else(|| agents.iter().find(unnamed));
             let status = agent.map(|a| a["agent_status"].as_str().unwrap_or("unknown"));
             // #83: a gone lane with a clean, pushed worktree is parked: one `lane-dead`, never a stall.
-            let wt = spawned.and_then(|e| e.str("worktree"));
+            let wt = (spawned.filter(|e| crate::roots::skip(ctx, cfg, e).is_none())).and_then(|e| e.str("worktree"));
             let parked = status.is_none() && wt.is_some_and(|wt| dirty(r, Path::new(wt)).is_none());
             let key = if parked {
                 format!("parked:{lane}")
@@ -532,9 +532,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let routine = |a: &&&Event| a.str("kind") == Some("routine");
     let due = |a: &&&Event| ctx.now.saturating_sub(a.ts) >= cfg.limits.ask_default_minutes * 60;
     for a in open.iter().filter(routine).filter(due) {
-        let id = a.str("id").unwrap_or_default();
         let rec = a.data["recommend"].to_string();
-        crate::answer(ctx, cfg, r, out, (&a.fleet, id), &rec, ("default", None))?;
+        crate::answer_with(ctx, cfg, r, out, a, &rec, ("default", None), (None, None))?;
     }
     let waiting = |a: &&&Event| {
         !routine(a) && a.str("from").is_none() && ctx.now.saturating_sub(a.ts) > cfg.limits.ask_waiting_minutes * 60
@@ -701,7 +700,7 @@ fn expire(
         } else {
             continue;
         };
-        (d["key"], d["id"]) = (json!(id), json!(id));
+        (d["key"], d["id"], d["ask_seq"]) = (json!(id), json!(id), json!(q.seq));
         fire(ctx, cfg, out, &events, (&q.fleet, q.issue), kind, d)?;
         n += 1;
     }
@@ -723,7 +722,10 @@ pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
         let (Some(wt), Some(pane), on) = (e.str("worktree"), e.str("pane"), On::of(r, Some(e))) else {
             continue;
         };
-        if crate::events::design(e) || !seen.insert(wt) || !on.exists(Path::new(wt)) {
+        if crate::events::design(e) || !seen.insert(wt) || crate::roots::skip(ctx, cfg, e).is_some() {
+            continue;
+        }
+        if !on.exists(Path::new(wt)) {
             continue;
         }
         match dirty(&on, Path::new(wt)) {
@@ -806,7 +808,11 @@ pub fn clean_all(
             Some(h) => !off.iter().any(|o| o.0 == h && o.2.is_some()),
             None => crate::hosts::offline(ctx, Some(e)).is_some(),
         };
-        let root = crate::roots::unreachable(ctx, cfg, e).then_some("root unreachable (not cleaned)");
+        let root = crate::roots::skip(ctx, cfg, e).map(|w| match w {
+            "off-root" => "off-root (not cleaned)",
+            "root-hung" => "root-hung (not cleaned)",
+            _ => "root unreachable (not cleaned)",
+        });
         held.then_some("host unreachable (not cleaned)").or(root)
     };
     let there = crate::hosts::present(r, spawns.iter().copied().filter(|e| held(e).is_none()));
@@ -1178,7 +1184,7 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         let mut lanes: Vec<(u64, &Event, &str)> = (events.iter().rev())
             .filter(|e| e.kind == "spawn" && e.str("role") != Some("orch"))
             .filter_map(|e| Some((e, e.str("worktree")?)))
-            .filter(|(e, _)| !crate::roots::unreachable(ctx, cfg, e))
+            .filter(|(e, _)| crate::roots::skip(ctx, cfg, e).is_none())
             .filter(|(_, w)| Path::new(w).starts_with(&ctx.worktrees) && Path::new(w).exists() && seen.insert(*w))
             .filter(|(e, _)| e.ts < since && !e.str("agent").is_some_and(working))
             .map(|(e, w)| {
