@@ -1,0 +1,7 @@
+Decided: dedupe the rollup to the latest run per check name inside gh::required, used by every gate, waiting and board caller
+Because: "keep only the latest run of each check name (by `startedAt`, then by `completedAt`, then by the highest database id)"
+Because: crates/core/src/gh.rs:413
+Rejected: a separate dedupe step at each caller — nine callers, one rule; gh::required already narrows the rollup
+Rejected: comparing timestamps as epochs — GitHub's RFC 3339 UTC strings sort lexically
+Check: the GraphQL query now fetches databaseId and land.rs maps REST id/completed_at; gh pr view has no id, so ties there break on completedAt only
+Owner: a check that failed once and then passed on a rerun no longer blocks the merge
