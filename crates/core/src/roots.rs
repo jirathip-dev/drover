@@ -31,6 +31,7 @@ pub fn state(events: &[Event], on: &On, name: &str, root: &Path) -> &'static str
     let mark =
         |e: &&Event| KINDS.contains(&e.kind.as_str()) && e.str("host") == Some(name) && e.str("root") == Some(&r);
     let mounted = match on.machine {
+        None if !crate::runner::answers(root) => return "unreachable",
         None => root.is_dir() && std::fs::metadata(root).is_ok_and(|m| !m.permissions().readonly()),
         Some(_) => on
             .sh("test -d \"$1\" && test -w \"$1\"", root, "")
@@ -85,6 +86,49 @@ pub fn rows(cfg: &Config, events: &[Event], on: &On, name: &str, home: &str) -> 
         path: p.display().to_string(),
     };
     roots.map(row).collect()
+}
+
+/// This host's roots (the one `[hosts]` entry without a `machine`), whether they answer or not.
+pub fn local(ctx: &Ctx, cfg: &Config) -> Vec<PathBuf> {
+    let name = cfg
+        .hosts
+        .iter()
+        .find(|h| h.1.machine.is_none())
+        .map_or("", |h| h.0.as_str());
+    listed(cfg, name, None, &ctx.worktrees)
+}
+
+/// #972: this host's roots whose listing answered this pass.
+pub fn answering(ctx: &Ctx, cfg: &Config) -> Vec<PathBuf> {
+    local(ctx, cfg)
+        .into_iter()
+        .filter(|r| crate::runner::answers(r))
+        .collect()
+}
+
+/// #972: spawn `sp`'s lane is on this host, under a root whose listing does not answer.
+pub fn unreachable(ctx: &Ctx, cfg: &Config, sp: &Event) -> bool {
+    sp.str("machine").is_none() && (local(ctx, cfg).iter()).any(|r| inside(sp, r) && !crate::runner::answers(r))
+}
+
+/// #972: the roots whose last `root-hung` / `root-answers` is `root-hung`.
+pub fn hung_now(events: &[Event]) -> Vec<&str> {
+    let mut last = std::collections::BTreeMap::new();
+    for e in events
+        .iter()
+        .filter(|e| matches!(e.kind.as_str(), "root-hung" | "root-answers"))
+    {
+        if let Some(r) = e.str("root") {
+            last.insert(r, e.kind == "root-hung");
+        }
+    }
+    last.into_iter().filter(|x| x.1).map(|x| x.0).collect()
+}
+
+/// #972: the hung root (of `hung_now`) spawn `sp`'s lane on this host is under.
+pub fn hung_under<'a>(hung: &[&'a str], sp: Option<&Event>) -> Option<&'a str> {
+    let sp = sp.filter(|e| e.str("machine").is_none())?;
+    hung.iter().copied().find(|r| inside(sp, Path::new(r)))
 }
 
 /// Is spawn `e`'s lane under `root` (its logged root, else its worktree's path)?

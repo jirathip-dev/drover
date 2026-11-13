@@ -609,6 +609,7 @@ pub fn scan(
         }
     }
     let busy = |l: &str| agents.iter().any(|a| a["name"] == l && a["agent_status"] == "working");
+    let hung = crate::roots::hung_now(events);
     for s in fold(events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
         // #43: after a `lane-killed`, the issue's surviving lane carries its reason (a killed rev: spawn rev again).
         let Some(lane) = s.lane.clone().or_else(|| {
@@ -632,6 +633,20 @@ pub fn scan(
         }
         let mine = of.get(&(s.fleet.as_str(), s.issue)).map_or(&[][..], Vec::as_slice);
         let sp = last_spawn(mine, &lane);
+        if let Some(root) = crate::roots::hung_under(&hung, sp).filter(|_| !s.done()) {
+            let w = Waiting {
+                fleet: s.fleet.clone(),
+                issue: s.issue,
+                lane: lane.clone(),
+                who: "none",
+                what: format!("root unreachable: {root}"),
+                since: s.last_ts,
+                next_cmd: None,
+                promise: None,
+            };
+            out.push((s, w));
+            continue;
+        }
         let rested = |e: &Event| {
             crate::access::rests(&e.kind) && sp.is_some_and(|p| e.ts >= p.ts && e.str("account") == p.str("account"))
         };

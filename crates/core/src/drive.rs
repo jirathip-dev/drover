@@ -730,6 +730,13 @@ pub fn drive(
         }
         return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?);
     };
+    if let Some((step, secs)) = crate::timer::stuck_step(ctx, cfg).filter(|_| fast) {
+        writeln!(
+            out,
+            "! tick stuck in {step} for {}: drover doctor",
+            crate::events::age(secs)
+        )?;
+    }
     // #234: the fast step samples every host into the 24 h history (the Host tab's sparklines).
     if fast {
         if let Err(e) = crate::hosts::sample(ctx, cfg, r, &crate::events::read(&ctx.state)?) {

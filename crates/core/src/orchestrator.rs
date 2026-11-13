@@ -30,6 +30,7 @@ pub fn of<'a>(events: &'a [Event], id: &str) -> impl DoubleEndedIterator<Item = 
     });
     let at = at.into_iter().flatten().map(move |i| &events[i]);
     at.chain(all.into_iter().flatten())
+        .filter(move |e| !events::repeat(events, e))
 }
 
 /// #701: every thread's `thread-new`, oldest first.
@@ -349,15 +350,12 @@ pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]:
     // The newest 4, then the new thread; the rest after it, behind the board's `more` row.
     opts.insert(opts.len().min(4), format!("new thread: {title}"));
     targets.insert(targets.len().min(4), "new");
-    let q = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
     let question = format!("Hand off \"{title}\" to which {to} thread? Nothing is delivered until you tap one.");
-    let d = json!({"id": q, "question": question, "options": opts, "recommend": null, "kind": "owner", "thread": from,
+    let d = json!({"question": question, "options": opts, "recommend": null, "kind": "owner", "thread": from,
         "handoff": {"repo": to, "title": title, "text": text, "targets": targets}, "forwards": fwd});
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, &t.fleet, None, "needs-decision", d),
-    )?;
+    let ev = Event::new(ctx.now, &t.fleet, None, "needs-decision", d);
+    let ev = events::ask(&ctx.state, cfg, vec![ev], None)?.pop();
+    let q = ev.as_ref().and_then(|e| e.str("id")).unwrap_or_default();
     Ok(format!(
         "{q}: the owner picks the thread; nothing is delivered until then"
     ))
