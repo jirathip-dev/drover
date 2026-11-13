@@ -1,0 +1,12 @@
+Decided: one gate, roots::skip, for every pass read of a lane worktree: off-root first (no fs call), then the root listing, then a timed .git read
+Because: "Such lanes are listed once as `off-root` and skipped, with no fs or git call made on them"
+Because: crates/core/src/roots.rs:110
+Decided: the drive lease lasts 3 x pass_max_secs; the pass that takes an expired, still-live lease logs pass-stuck with the last step written to <lock>.step
+Because: "A drive or tick pass never holds its lock for more than `pass_max_secs × 3`"
+Decided: runner::hung waits out an in-flight probe's own deadline instead of answering hung at once
+Because: crates/core/src/runner.rs:391
+Rejected: rereading the event log on every skip call — HANGS caches it once per process so 246 lanes do not reread the log
+Rejected: the fixed 3600 s STALE_LOCK_SECS for drive passes — AC3 bounds it by pass_max_secs
+Check: hung_root.rs's three new tests fail on origin/staging (clean still running after 10 s) and pass at head
+Check: runner_limits still answers hung at once for a probe that already timed out
+Owner: drive skips old lanes on removed or dead disks instead of freezing, and a stuck pass loses its lock after 6 minutes by default
