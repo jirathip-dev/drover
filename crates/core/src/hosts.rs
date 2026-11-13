@@ -259,7 +259,8 @@ pub struct Pass<'a> {
     probe: bool,
     up: std::sync::Mutex<BTreeMap<String, bool>>,
     mark: Option<(PathBuf, u64)>,
-    step: std::sync::Mutex<String>,
+    step: std::sync::Mutex<(String, u64)>,
+    t0: std::time::Instant,
     pub until: Option<std::time::Instant>,
     late: std::sync::Mutex<std::collections::BTreeSet<String>>,
     off: std::collections::BTreeSet<String>,
@@ -275,6 +276,7 @@ impl<'a> Pass<'a> {
             up,
             mark,
             step,
+            t0: std::time::Instant::now(),
             until: None,
             late: std::sync::Mutex::default(),
             off: std::collections::BTreeSet::new(),
@@ -301,16 +303,15 @@ impl<'a> Pass<'a> {
         }
     }
     pub fn step(&self, s: &str) {
-        *self.step.lock().unwrap() = s.into();
+        *self.step.lock().unwrap() = (s.into(), self.t0.elapsed().as_secs());
         self.note("");
     }
     fn note(&self, child: &str) {
         if let Some((p, since)) = &self.mark {
-            let step = self.step.lock().unwrap().clone();
-            let _ = std::fs::write(
-                p,
-                json!({"since": since, "step": step, "child": child, "pid": crate::sim::pid()}).to_string(),
-            );
+            let (step, at) = self.step.lock().unwrap().clone();
+            let at = since + at;
+            let m = json!({"since": since, "at": at, "step": step, "child": child, "pid": crate::sim::pid()});
+            let _ = std::fs::write(p, m.to_string());
         }
     }
     /// The remote host `prog args` runs on: `herdr --machine m …` or `ssh [-o…] m -- …`.
@@ -684,7 +685,9 @@ pub fn offline<'a>(ctx: &Ctx, sp: Option<&'a Event>) -> Option<&'a str> {
 /// #877: spawn `sp`'s lane is on a host that is `off` or failed its last probe: a pass never reaches into it.
 pub fn held(ctx: &Ctx, cfg: &Config, sp: &Event) -> bool {
     let off = |h: &str| cfg.hosts.get(h).is_some_and(|c| !c.enabled);
-    offline(ctx, Some(sp)).is_some() || sp.str("machine").is_some() && sp.str("host").is_some_and(off)
+    offline(ctx, Some(sp)).is_some()
+        || sp.str("machine").is_some() && sp.str("host").is_some_and(off)
+        || crate::roots::unreachable(ctx, cfg, sp)
 }
 
 /// This host's live agents, then the remote ones.
