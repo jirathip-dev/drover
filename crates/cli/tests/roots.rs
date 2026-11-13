@@ -467,7 +467,7 @@ fn eject_of_a_hung_root_returns_at_once_skips_the_saves_and_restarts_on_the_next
         let _ = rx.recv();
         None
     }));
-    let f = fake(&r.internal);
+    let f = fake(&r, &r.nvme);
     let t = std::time::Instant::now();
     let (code, out) = run(&r.c, &Git(&f), &["hosts", "eject", "mini"]);
     assert!(t.elapsed() < std::time::Duration::from_secs(10), "{:?}", t.elapsed());
