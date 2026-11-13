@@ -1,0 +1,5 @@
+Decided: fix round only merges origin/staging; staging already regenerated docs/workflow.md, so the diagram test passes at the new head
+Because: crates/core/src/config.rs:917
+Rejected: regenerating docs/workflow.md on this branch — the PR never touched it and staging carries the fix
+Check: CI rust job green at the merge head; the gh.rs diff is unchanged from fd3d497
+Owner: the red check was a stale generated doc from staging, not this change; the branch now has staging's fix
