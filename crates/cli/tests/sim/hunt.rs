@@ -242,7 +242,7 @@ impl Found {
     pub fn report(&self) -> String {
         let t = self.small.text();
         format!(
-            "FAIL hunt round {}: {}\nminimised from {} to {} faults and scripts, {} to {} steps; for seeds.rs PLANS:\n    (\"{t}\", \"hunt: {}\"),\nreplay: HERDSMAN_SIM_PLAN='{t}' cargo test -p herdsman --test sim\n",
+            "FAIL hunt round {}: {}\nminimised from {} to {} faults and scripts, {} to {} steps; for seeds.rs PLANS:\n    (\"{t}\", \"hunt: {}\"),\nreplay: DROVER_SIM_PLAN='{t}' cargo test -p drover --test sim\n",
             self.round,
             self.failure,
             self.plan.size(),

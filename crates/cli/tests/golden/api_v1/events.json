@@ -53,12 +53,12 @@
         "data": {
           "device": "iPhone"
         },
-        "fleet": "herdsman",
+        "fleet": "drover",
         "glyph": "·",
         "imp": false,
         "issue": null,
         "k": null,
-        "plain": "herdsman pair-request",
+        "plain": "drover pair-request",
         "pr": null,
         "run": null,
         "seq": 3,
@@ -73,12 +73,12 @@
         "data": {
           "device": "iPhone f34c"
         },
-        "fleet": "herdsman",
+        "fleet": "drover",
         "glyph": "·",
         "imp": false,
         "issue": null,
         "k": null,
-        "plain": "herdsman pair-approve",
+        "plain": "drover pair-approve",
         "pr": null,
         "run": null,
         "seq": 4,

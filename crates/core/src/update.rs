@@ -7,7 +7,7 @@ use serde_json::json;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// `herdsman self-update [--dry-run | --pause | --resume]`.
+/// `drover self-update [--dry-run | --pause | --resume]`.
 pub fn self_update(
     ctx: &Ctx,
     cfg: &Config,
@@ -19,9 +19,9 @@ pub fn self_update(
     let events = read(&ctx.state)?;
     if pause || resume {
         let (kind, word) = [("self-update-resumed", "resumed"), ("self-update-paused", "paused")][usize::from(pause)];
-        let by = std::env::var("HERDSMAN_LANE").ok().filter(|l| !l.is_empty());
+        let by = std::env::var("DROVER_LANE").ok().filter(|l| !l.is_empty());
         let d = json!({"by": by.as_deref().unwrap_or("owner")});
-        emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))?;
+        emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))?;
         writeln!(out, "✓ self-update {word}")?;
         return Ok(0);
     }
@@ -29,11 +29,11 @@ pub fn self_update(
         .iter()
         .rfind(|e| e.kind == "self-update-paused" || e.kind == "self-update-resumed");
     if toggle.is_some_and(|e| e.kind == "self-update-paused") {
-        writeln!(out, "= self-update paused → herdsman self-update --resume")?;
+        writeln!(out, "= self-update paused → drover self-update --resume")?;
         return Ok(0);
     }
-    let Some(f) = cfg.fleet.values().find(|f| f.repo_name() == "herdsman") else {
-        writeln!(out, "= self-update: no fleet for the herdsman repo")?;
+    let Some(f) = cfg.fleet.values().find(|f| ours(f)) else {
+        writeln!(out, "= self-update: no fleet for the drover repo")?;
         return Ok(0);
     };
     let su = &cfg.self_update;
@@ -44,13 +44,18 @@ pub fn self_update(
         return Ok(code);
     }
     let home = ctx.state.with_file_name("update-staging");
-    let t = ("staging", home.clone(), home.join("bin/herdsman"), dry, true);
+    let t = ("staging", home.clone(), home.join("bin/drover"), dry, true);
     Ok(code.max(install(ctx, cfg, r, out, f, &events, t)?))
 }
 
-/// #894: the control socket of the serve listening on `port` (`herdsman_server::handover`).
+/// #894: the control socket of the serve listening on `port` (`drover_server::handover`).
 pub fn serve_sock(ctx: &Ctx, port: u16) -> PathBuf {
     ctx.state.with_file_name(format!("serve-{port}.sock"))
+}
+
+/// This repo's own fleet, by either name until the GitHub repo is renamed too (#456).
+pub fn ours(f: &crate::config::Fleet) -> bool {
+    ["drover", "herdsman"].contains(&f.repo_name())
 }
 
 type Target<'a> = (&'a str, PathBuf, PathBuf, bool, bool);
@@ -97,7 +102,7 @@ fn install(
                 home.join("src").display()
             ),
             format!(
-                "would sign it \"herdsman-local\", run its doctor --config-only and --tokens, then swap it in at {}",
+                "would sign it \"drover-local\", run its doctor --config-only and --tokens, then swap it in at {}",
                 live.display()
             ),
             then,
@@ -118,11 +123,7 @@ fn install(
     });
     let Err(e) = res else {
         let d = json!({"sha": sha, "branch": branch});
-        emit(
-            &ctx.state,
-            cfg,
-            Event::new(ctx.now, "herdsman", None, "self-updated", d),
-        )?;
+        emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "self-updated", d))?;
         let synced = if staging { "" } else { "profiles synced, " };
         let done = res.unwrap_or_default();
         writeln!(out, "✓ {what}installed {sha:.7} at {}; {synced}{done}", live.display())?;
@@ -144,7 +145,7 @@ fn install(
         emit(
             &ctx.state,
             cfg,
-            Event::new(ctx.now, "herdsman", None, "self-update-failed", d),
+            Event::new(ctx.now, "drover", None, "self-update-failed", d),
         )?;
     }
     Ok(1)
@@ -170,7 +171,7 @@ fn hand_over(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<String> {
         Ok(format!("serve handed over (bridge pid {pid})"))
     };
     asked().or_else(|_| {
-        let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.herdsman.serve");
+        let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
         crate::timer::restart(ctx, r, label).map(|_| "serve restarted".into())
     })
 }
@@ -200,11 +201,11 @@ pub fn paused_line(r: &dyn Runner, events: &[Event]) -> Option<String> {
         .filter(|e| e.kind == "self-update-paused")?;
     let at = crate::usage::date(r, e.ts, "+%b %-d %H:%M");
     Some(format!(
-        "! self-update — paused since {at} → herdsman self-update --resume"
+        "! self-update — paused since {at} → drover self-update --resume"
     ))
 }
 
-/// Check `sha` out in herdsman's own worktree (`<home>/src`), build it there and copy the binary to `new`.
+/// Check `sha` out in drover's own worktree (`<home>/src`), build it there and copy the binary to `new`.
 fn stage(r: &dyn Runner, local: &Path, home: &Path, sha: &str, new: &Path) -> Result<()> {
     let (src, target) = (home.join("src"), home.join("target"));
     let (s, t) = (src.to_string_lossy(), target.to_string_lossy());
@@ -216,14 +217,14 @@ fn stage(r: &dyn Runner, local: &Path, home: &Path, sha: &str, new: &Path) -> Re
         ok(r, "git", &["-C", &l, "worktree", "add", "-q", "--detach", &s, sha]).context("checkout")?;
     }
     let manifest = src.join("Cargo.toml");
-    let build = ["build", "--release", "--locked", "-p", "herdsman", "--manifest-path"];
+    let build = ["build", "--release", "--locked", "-p", "drover", "--manifest-path"];
     ok(
         r,
         "cargo",
         &[&build[..], &[&manifest.to_string_lossy(), "--target-dir", &t]].concat(),
     )
     .context("build")?;
-    std::fs::copy(target.join("release/herdsman"), new).context("copy the build")?;
+    std::fs::copy(target.join("release/drover"), new).context("copy the build")?;
     Ok(())
 }
 
@@ -234,7 +235,7 @@ fn gate(r: &dyn Runner, src: &Path, new: &Path) -> Result<()> {
         let o = r.run("sh", &crate::runner::argv(&[&script.to_string_lossy(), "sign", &n]))?;
         match o.code {
             0 => {}
-            2 => bail!("sign: no \"herdsman-local\" identity → sh scripts/signing-identity.sh, once"),
+            2 => bail!("sign: no \"drover-local\" identity → sh scripts/signing-identity.sh, once"),
             _ => bail!("sign: {}", format!("{}{}", o.stdout, o.stderr).trim()),
         }
     }

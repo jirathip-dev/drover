@@ -3,9 +3,9 @@
 //! refusal brings the card back at once with its code; 30 min unstarted brings it back naming the wait.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Runner};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Runner};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -16,12 +16,12 @@ fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
 /// #12 queued, its impl lane through three FAILs, then out of rounds (needs-human).
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let wt = c.worktrees.join("sendmeter/issue-12");
@@ -69,13 +69,13 @@ fn fake(level: &str) -> Fake {
         .reply("kill -0", "")
 }
 
-fn get(c: &herdsman::Ctx, r: &Fake, path: &str, now: u64) -> Value {
+fn get(c: &drover::Ctx, r: &Fake, path: &str, now: u64) -> Value {
     let s = Server::new(c, r, Some(ADDR.into()));
     serde_json::from_str(&api(&s, ADDR, "", now, path)).unwrap()
 }
 
 /// `/api/v1/needs`: the needs-human cards' (issue, why).
-fn cards(c: &herdsman::Ctx, r: &Fake, now: u64) -> Vec<(u64, String)> {
+fn cards(c: &drover::Ctx, r: &Fake, now: u64) -> Vec<(u64, String)> {
     let n = get(c, r, "needs", now);
     let i = n["issues"].as_array().unwrap().iter();
     i.map(|i| (i["issue"].as_u64().unwrap(), i["why"].as_str().unwrap().into()))
@@ -83,7 +83,7 @@ fn cards(c: &herdsman::Ctx, r: &Fake, now: u64) -> Vec<(u64, String)> {
 }
 
 /// `/api/v1/state`'s queue row for #12.
-fn row(c: &herdsman::Ctx, r: &Fake) -> Value {
+fn row(c: &drover::Ctx, r: &Fake) -> Value {
     let s = get(c, r, "state", c.now);
     s["queue"]
         .as_array()
@@ -94,12 +94,12 @@ fn row(c: &herdsman::Ctx, r: &Fake) -> Value {
         .clone()
 }
 
-fn spawns(c: &herdsman::Ctx) -> usize {
+fn spawns(c: &drover::Ctx) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count()
 }
 
-fn pending(c: &herdsman::Ctx) -> Option<herdsman::pending::Pending> {
-    herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12)
+fn pending(c: &drover::Ctx) -> Option<drover::pending::Pending> {
+    drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12)
 }
 
 /// AC1: [one more round] while spawns are refused HOST_BUSY: the card goes at once and stays gone through a busy pass,
@@ -171,15 +171,15 @@ fn soft_refusals_keep_it_pending_and_a_hard_one_brings_the_card_back_at_once() {
     let c = setup("pending-hard");
     let busy = fake("4");
     assert_eq!(run(&c, &busy, &["extend", "sendmeter", "12"]).0, 0);
-    for code in herdsman::pending::SOFT {
+    for code in drover::pending::SOFT {
         assert!(
-            herdsman::pending::refused(&c, ("sendmeter", 12), code, "x").unwrap(),
+            drover::pending::refused(&c, ("sendmeter", 12), code, "x").unwrap(),
             "{code}"
         );
         let p = pending(&c).unwrap();
         assert_eq!((p.reason.as_deref(), p.failed), (Some(code), false));
     }
-    assert!(herdsman::pending::refused(&c, ("sendmeter", 12), "IN_FLIGHT", "another pass").unwrap());
+    assert!(drover::pending::refused(&c, ("sendmeter", 12), "IN_FLIGHT", "another pass").unwrap());
     assert_eq!(
         pending(&c).unwrap().reason.as_deref(),
         Some("HOST_OFFLINE"),
@@ -201,9 +201,9 @@ fn soft_refusals_keep_it_pending_and_a_hard_one_brings_the_card_back_at_once() {
         "{back:?}"
     );
     for code in ["ROUND_LIMIT", "MERGED", "UPDATE_LIMIT", "BAD_VALUE", "DISK_LOW"] {
-        herdsman::pending::record(&c, ("sendmeter", 12), "extend", "impl", None).unwrap();
+        drover::pending::record(&c, ("sendmeter", 12), "extend", "impl", None).unwrap();
         assert!(
-            !herdsman::pending::refused(&c, ("sendmeter", 12), code, "x").unwrap(),
+            !drover::pending::refused(&c, ("sendmeter", 12), code, "x").unwrap(),
             "{code}"
         );
         let p = pending(&c).unwrap();
@@ -312,7 +312,7 @@ fn a_start_held_by_host_load_alone_never_goes_back_to_the_owner_and_starts_once_
     let (code, out) = run(&c, &loaded, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(spawns(&c), 1, "nothing started on a loaded host");
-    assert_eq!(pending(&c).unwrap().reason.as_deref(), Some(herdsman::pending::LOAD));
+    assert_eq!(pending(&c).unwrap().reason.as_deref(), Some(drover::pending::LOAD));
     assert_eq!(cards(&c, &calm, c.now), [], "two hours on load alone: no card");
     let (code, out) = run(&c, &calm, &["drive"]);
     assert_eq!(code, 0, "{out}");

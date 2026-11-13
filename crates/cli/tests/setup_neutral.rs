@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 /// Matched case-insensitively anywhere in a shipped file.
-/// #355 made `conductor` a herdsman role, so it is no longer an install's own name.
+/// #355 made `conductor` a drover role, so it is no longer an install's own name.
 const WORDS: [&str; 6] = [
     "jirathip",
     "synergy",

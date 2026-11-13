@@ -1,12 +1,12 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const NOW: u64 = 1_000_000;
 
-fn setup(name: &str) -> (herdsman::Ctx, std::path::PathBuf) {
+fn setup(name: &str) -> (drover::Ctx, std::path::PathBuf) {
     let dir = tmpdir(name);
     let sink = dir.join("push.txt");
     let cfg = format!(
@@ -23,14 +23,14 @@ fn setup(name: &str) -> (herdsman::Ctx, std::path::PathBuf) {
     (c, sink)
 }
 
-fn at(c: &herdsman::Ctx, secs: u64) -> herdsman::Ctx {
-    herdsman::Ctx {
+fn at(c: &drover::Ctx, secs: u64) -> drover::Ctx {
+    drover::Ctx {
         now: NOW + secs,
         ..c.clone()
     }
 }
 
-fn fast(c: &herdsman::Ctx, agents: &str) -> Fake {
+fn fast(c: &drover::Ctx, agents: &str) -> Fake {
     let r = Fake::default()
         .reply("herdr agent list", agents)
         .reply("git ", "")
@@ -40,13 +40,13 @@ fn fast(c: &herdsman::Ctx, agents: &str) -> Fake {
     r
 }
 
-fn kinds(c: &herdsman::Ctx) -> Vec<String> {
+fn kinds(c: &drover::Ctx) -> Vec<String> {
     let ours = ["slo-idle", "self-heal", "stuck", "slo-ok"];
     let ev = read(&c.state).unwrap().into_iter().map(|e| e.kind);
     ev.filter(|k| ours.contains(&k.as_str())).collect()
 }
 
-fn card(c: &herdsman::Ctx, now: u64) -> Option<Value> {
+fn card(c: &drover::Ctx, now: u64) -> Option<Value> {
     let r = Fake::default().reply("herdr agent list", NO_AGENTS);
     let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
     let res = s.respond("GET /screens/cards HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", now);

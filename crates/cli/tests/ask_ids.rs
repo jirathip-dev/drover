@@ -1,8 +1,8 @@
 mod common;
 use common::*;
-use herdsman::events::{read, Event};
-use herdsman::runner::{Out, Runner};
-use herdsman::serve::Server;
+use drover::events::{read, Event};
+use drover::runner::{Out, Runner};
+use drover::serve::Server;
 use serde_json::{json, Value};
 use std::sync::{Condvar, Mutex};
 use std::time::Duration;
@@ -11,7 +11,7 @@ const ADDR: &str = "127.0.0.1:7777";
 const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
 const HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -56,7 +56,7 @@ fn concurrent_full_fast_and_kick_passes_over_one_finished_design_lane_post_one_a
         .reply(&format!("git -C {wt} log -1"), &format!("{HEAD}\n"))
         .reply(&format!("git -C {wt} rev-list"), "0\n")
         .reply(
-            &format!("git -C {wt} diff --name-only"),
+            &format!("git -C {wt} log --format= --name-only"),
             "docs/design/meter/index.html\ndocs/design/meter/1440.png\n",
         )
         .reply("git -C", "")
@@ -76,7 +76,7 @@ fn concurrent_full_fast_and_kick_passes_over_one_finished_design_lane_post_one_a
     assert_eq!(kinds(&c, "spawn").len(), 1, "the design lane: {out}");
     let r = Meet {
         fake,
-        diff: format!("git -C {wt} diff --name-only"),
+        diff: format!("git -C {wt} log --format= --name-only"),
         met: Mutex::new(0),
         cv: Condvar::new(),
     };

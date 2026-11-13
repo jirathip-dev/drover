@@ -17,7 +17,7 @@ Screenshots (headless Chromium, full page, `?still=1`): `farm-v2-390.png` (DPR 2
 `sprite-sheet.png` (DPR 2), `board-queue-390.png`, `board-host-390.png`, `board-events-390.png` (DPR 2),
 `board-queue-1440.png` and `board-host-1440.png`.
 
-**Data:** the board is the public demo's rendered DOM (`herdsman serve --export --demo` from the synthetic `demo/`, after
+**Data:** the board is the public demo's rendered DOM (`drover serve --export --demo` from the synthetic `demo/`, after
 `serve.js` ran), with the scripts and the Lanes tab removed. It is all made up. The Herd page's lane names and queue
 numbers are illustrative, in the same made-up acme world. The coats on the sheet use a stand-in hash; the live page keeps
 `serve.rs`'s `coat()`.

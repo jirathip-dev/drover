@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # #560: one UI audit (WebKit or headless Chrome) at a time on this host: run "$@" holding a lock on
-# ~/.cache/herdsman/ui-audit.lock (the file names the holder, `$HERDSMAN_LANE`), so lanes queue for it instead of
+# ~/.cache/drover/ui-audit.lock (the file names the holder, `$DROVER_LANE`), so lanes queue for it instead of
 # rendering side by side. The lock is the kernel's (`flock`, kept across the `exec`): a holder that dies lets go at once;
 # one held 10 min is stale and run past. The user's home from the password database, not `$HOME` (a test may point
 # that at a temporary dir); `UI_AUDIT_LOCK` names another lock file.
 # Usage: scripts/ui-lock.sh <command> [args...]
 set -euo pipefail
-lock=${UI_AUDIT_LOCK:-$(eval echo "~$(id -un)")/.cache/herdsman/ui-audit.lock}
+lock=${UI_AUDIT_LOCK:-$(eval echo "~$(id -un)")/.cache/drover/ui-audit.lock}
 mkdir -p "${lock%/*}"
 exec perl -e '
 use Fcntl qw(:flock F_SETFD);
@@ -26,4 +26,4 @@ truncate($f, 0);
 syswrite($f, "$me\n");
 fcntl($f, F_SETFD, 0) or die "ui-lock: $!\n";
 exec { $ARGV[0] } @ARGV or die "ui-lock: $ARGV[0]: $!\n";
-' "$lock" "${HERDSMAN_LANE:-pid $$}" "$@"
+' "$lock" "${DROVER_LANE:-pid $$}" "$@"

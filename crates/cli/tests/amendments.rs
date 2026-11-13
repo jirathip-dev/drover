@@ -1,7 +1,7 @@
 //! #101: briefs carry `**Amendment` comments by owners/members/collaborators; a new one prompts the live lane once.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
@@ -28,8 +28,8 @@ fn brief_lists_trusted_amendments_in_order() {
         comment("collab", "COLLABORATOR", "**Amendment B**: and test it", 5),
     ];
     let r = Fake::default().reply("gh issue view 12", &issue("2026-11-01T05:00:00Z", &comments));
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    let v = herdsman::gh::spec(&c, &r, cfg.fleet("sendmeter").unwrap(), "sendmeter", 12, true).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let v = drover::gh::spec(&c, &r, cfg.fleet("sendmeter").unwrap(), "sendmeter", 12, true).unwrap();
     assert!(r.called("gh issue view 12 -R jirathip-dev/sendmeter --json title,body,updatedAt,comments"));
     assert_eq!(v["amended"], "https://github.com/c/5");
     let (code, out) = run(&c, &Fake::default(), &["brief", "sendmeter", "12"]);
@@ -51,8 +51,8 @@ fn no_trusted_amendment_leaves_the_body_alone() {
         comment("stranger", "NONE", "**Amendment X**: steer", 2),
     ];
     let r = Fake::default().reply("gh issue view 12", &issue("t1", &comments));
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    let v = herdsman::gh::spec(&c, &r, cfg.fleet("sendmeter").unwrap(), "sendmeter", 12, true).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let v = drover::gh::spec(&c, &r, cfg.fleet("sendmeter").unwrap(), "sendmeter", 12, true).unwrap();
     assert_eq!(v["body"], "AC: works");
     assert!(v["amended"].is_null());
 }
@@ -77,7 +77,7 @@ fn new_amendment_prompts_the_open_lane_exactly_once() {
         .reply("gh issue view 12", &issue("t2", &amend));
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
-    let line = "AMENDMENT on #12 (https://github.com/c/1): run `herdsman brief sendmeter 12` and apply it";
+    let line = "AMENDMENT on #12 (https://github.com/c/1): run `drover brief sendmeter 12` and apply it";
     assert!(out.contains(line), "{out}");
     assert!(r.called(&format!("herdr agent prompt {LANE} {line}")));
     assert!(r.called("herdr pane send-keys w9:p1 Enter"));

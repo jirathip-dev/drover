@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # #552: the old board takes bug fixes only. A PR's changed files (stdin, one per line) may touch the board's UI
 # files only when its issue's spec (the file argument: body plus trusted amendments) has a line starting `board-fix`.
-# /api/v1 (crates/server/src/api.rs, serve/v1.rs) stays open: cooee and the drover plugins read it.
+# /api/v1 (crates/server/src/api.rs, serve/v1.rs) stays open: cooee and Drover's screens (served by drover) read it.
 # Usage: scripts/board-freeze.sh <spec-file> < changed-files
 set -euo pipefail
 spec=${1:?usage: board-freeze.sh <spec-file> < changed-files}
@@ -15,6 +15,6 @@ while IFS= read -r f; do
 done
 ((${#frozen[@]})) || exit 0
 grep -qE '^[[:space:]]*([-*#]+[[:space:]]+)?(\*\*Amendment[^*]*\*\*:?[[:space:]]*)?`?board-fix' "$spec" 2>/dev/null && exit 0
-echo "::error::board-freeze: the old board takes bug fixes only (board-fix in the issue); new UI goes to cooee or the drover plugins"
+echo "::error::board-freeze: the old board takes bug fixes only (board-fix in the issue); new UI goes to cooee or Drover's screens (served by drover)"
 printf '  %s\n' "${frozen[@]}"
 exit 1

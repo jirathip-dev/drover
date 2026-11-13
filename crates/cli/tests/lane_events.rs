@@ -4,8 +4,8 @@
 //! the streamed list is the process's.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Runner};
 use serde_json::{json, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
@@ -81,7 +81,7 @@ fn the_service_keeps_lane_state_from_herdrs_events_and_polls_when_the_stream_dro
             let mut line = String::new();
             BufReader::new(&c).read_line(&mut line).unwrap();
             subs_tx.send(serde_json::from_str(&line).unwrap()).unwrap();
-            writeln!(&c, r#"{{"id":"herdsman","result":{{"type":"subscription_started"}}}}"#).unwrap();
+            writeln!(&c, r#"{{"id":"drover","result":{{"type":"subscription_started"}}}}"#).unwrap();
             c
         };
         let c1 = conn();
@@ -105,7 +105,7 @@ fn the_service_keeps_lane_state_from_herdrs_events_and_polls_when_the_stream_dro
     }));
     let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let (sc, hs) = (c.clone(), sock.clone());
-    std::thread::spawn(move || herdsman_service::run(sc, host, || NOW, api, Some(hs)));
+    std::thread::spawn(move || drover_service::run(sc, host, || NOW, api, Some(hs)));
     let states = || -> Vec<String> {
         let ev = read(&c.state).unwrap_or_default();
         let lane =
@@ -137,12 +137,12 @@ fn the_service_keeps_lane_state_from_herdrs_events_and_polls_when_the_stream_dro
 
     // The passes read the streamed list, not `herdr agent list`.
     let n = host.lists.load(SeqCst);
-    let agents = herdsman::herdr::agents(host).unwrap();
+    let agents = drover::herdr::agents(host).unwrap();
     assert_eq!((agents.len(), agents[0]["agent_status"].as_str()), (1, Some("done")));
     assert_eq!(host.lists.load(SeqCst), n, "no herdr agent list while the stream is up");
     // Another host's agents are never this host's streamed list: its own `herdr agent list` runs there.
-    let there = herdsman::hosts::On::new(host, Some("mini2"));
-    assert!(herdsman::herdr::agents(&there).unwrap().is_empty());
+    let there = drover::hosts::On::new(host, Some("mini2"));
+    assert!(drover::herdr::agents(&there).unwrap().is_empty());
 
     // kill -9: gone within 2 s, no drive pass.
     assert!(std::process::Command::new("kill")
@@ -153,7 +153,7 @@ fn the_service_keeps_lane_state_from_herdrs_events_and_polls_when_the_stream_dro
     let took = until("gone", 2.0, || states().last().map(String::as_str) == Some("gone"));
     assert!(took < Duration::from_secs(2), "{took:?}");
     assert_eq!(states(), ["idle", "working", "done", "gone"]);
-    assert!(herdsman::herdr::agents(host).unwrap().is_empty());
+    assert!(drover::herdr::agents(host).unwrap().is_empty());
     let s = subs.recv_timeout(Duration::from_secs(5)).unwrap();
     assert!(
         !s.to_string().contains("w1:p1"),
@@ -165,10 +165,10 @@ fn the_service_keeps_lane_state_from_herdrs_events_and_polls_when_the_stream_dro
     let down = |e: &Event| e.kind == "lane-stream" && e.str("state") == Some("down");
     until("stream down", 2.0, || read(&c.state).unwrap().iter().any(down));
     let n = host.lists.load(SeqCst);
-    herdsman::herdr::agents(host).unwrap();
+    drover::herdr::agents(host).unwrap();
     assert_eq!(host.lists.load(SeqCst), n + 1, "polled once the stream is down");
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    let rows = herdsman::timer::services(&c, &cfg, host, Some(String::new()));
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let rows = drover::timer::services(&c, &cfg, host, Some(String::new()));
     let row = rows
         .iter()
         .find(|r| r.0 == "herdr lane events")

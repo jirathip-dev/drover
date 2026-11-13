@@ -173,7 +173,7 @@ const DROP: [&str; 9] = [
     "expect",
 ];
 
-/// `herdsman proxy`: serve `[proxy] port` on 127.0.0.1 until killed, one thread per connection.
+/// `drover proxy`: serve `[proxy] port` on 127.0.0.1 until killed, one thread per connection.
 pub fn serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<()> {
     let l =
         TcpListener::bind(("127.0.0.1", cfg.proxy.port)).with_context(|| format!("proxy port {}", cfg.proxy.port))?;

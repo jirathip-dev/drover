@@ -2,9 +2,9 @@
 //! it started on (`thread new --harness`, the board's harness chip); its model/effort chip applies from the next turn.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::config::Config;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -37,7 +37,7 @@ fn chat(s: &Server, cookie: &str) -> String {
 
 /// herdr ready to start conductors (`agents`: its agent list), dsh-tui at the pinned profile.
 fn host(agents: &str) -> Fake {
-    let dsh = format!("profile: {}  /x\n", herdsman::providers::DSH_TUI_VERSION);
+    let dsh = format!("profile: {}  /x\n", drover::providers::DSH_TUI_VERSION);
     Fake::default()
         .reply("herdr agent list", agents)
         .reply(
@@ -52,20 +52,20 @@ fn host(agents: &str) -> Fake {
         .reply("dsh-tui version", &dsh)
 }
 
-fn kind(c: &herdsman::Ctx, k: &str) -> Vec<Event> {
+fn kind(c: &drover::Ctx, k: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == k).collect()
 }
 
 #[test]
 fn chat_defaults_come_from_the_chat_table_else_the_conductor_role() {
     let plain = Config::parse(&config("")).unwrap();
-    let (_, r) = herdsman::orchestrator::defaults(&plain, "sendmeter").unwrap();
+    let (_, r) = drover::orchestrator::defaults(&plain, "sendmeter").unwrap();
     assert_eq!(
         (r.harness.as_str(), r.model.as_deref(), r.effort.as_deref()),
         ("claude", Some("opus"), Some("high"))
     );
     let on = Config::parse(&config("[chat]\nmodel = \"sonnet\"\neffort = \"low\"\n")).unwrap();
-    let (_, r) = herdsman::orchestrator::defaults(&on, "sendmeter").unwrap();
+    let (_, r) = drover::orchestrator::defaults(&on, "sendmeter").unwrap();
     assert_eq!(
         (r.harness.as_str(), r.model.as_deref(), r.effort.as_deref()),
         ("claude", Some("sonnet"), Some("low"))
@@ -73,12 +73,12 @@ fn chat_defaults_come_from_the_chat_table_else_the_conductor_role() {
     // `[chat]`'s model is a pick on the harness its fleets' conductors default to.
     let m = Config::parse(&config("[chat]\nmodel = \"haiku\"\n")).unwrap();
     assert_eq!(
-        herdsman::orchestrator::harness_models(&m, "claude"),
+        drover::orchestrator::harness_models(&m, "claude"),
         ["haiku", "opus", "sonnet"]
     );
     // Another harness drops the role's model; its profile stays the conductor's.
     let h = Config::parse(&config("[chat]\nharness = \"hermes\"\n")).unwrap();
-    let (_, r) = herdsman::orchestrator::defaults(&h, "sendmeter").unwrap();
+    let (_, r) = drover::orchestrator::defaults(&h, "sendmeter").unwrap();
     assert_eq!(
         (r.harness.as_str(), r.model.as_deref(), r.profile.as_deref()),
         ("hermes", None, None)
@@ -159,7 +159,7 @@ fn the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread() {
         let (code, out) = run(&c, &r, &["thread", "say", &id, "hi"]);
         assert_eq!(code, 0, "{out}");
         assert_eq!(kind(&c, "orchestrator-start")[i].str("harness"), Some(*h));
-        let dir = herdsman::orchestrator::dir(&c, &Config::load(&c.config).unwrap(), &id);
+        let dir = drover::orchestrator::dir(&c, &Config::load(&c.config).unwrap(), &id);
         let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
         assert!(
             brief.contains("# Orchestrator brief: thread") && brief.contains("Always grill scope first."),
@@ -281,14 +281,14 @@ fn listed(models: &str) -> String {
     )
 }
 
-fn system(c: &herdsman::Ctx) -> Vec<String> {
+fn system(c: &drover::Ctx) -> Vec<String> {
     let sys = kind(c, "thread-msg")
         .into_iter()
         .filter(|e| e.str("from") == Some("system"));
     sys.map(|e| e.str("text").unwrap_or_default().to_string()).collect()
 }
 
-fn pick_fable(c: &herdsman::Ctx) {
+fn pick_fable(c: &drover::Ctx) {
     let r = Fake::default();
     let s = Server::new(c, &r, Some(ADDR.into()));
     let cookie = pair(&s, c, "Mozilla/5.0 (iPhone)", T);
@@ -300,10 +300,10 @@ fn pick_fable(c: &herdsman::Ctx) {
 fn the_model_chip_offers_the_models_list_and_a_pick_from_it_is_taken() {
     let m = Config::parse(&listed("\"opus\", \"fable\"")).unwrap();
     assert_eq!(
-        herdsman::orchestrator::harness_models(&m, "claude"),
+        drover::orchestrator::harness_models(&m, "claude"),
         ["claude-opus-5-5", "fable", "opus"]
     );
-    assert!(herdsman::orchestrator::harness_models(&m, "hermes").is_empty());
+    assert!(drover::orchestrator::harness_models(&m, "hermes").is_empty());
     let c = ctx(&tmpdir("pick-listed"), &listed("\"opus\", \"fable\""));
     assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).0, 0);
     pick_fable(&c);

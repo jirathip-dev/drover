@@ -3,8 +3,8 @@
 //! the thread, the message that triggered it still logged (#717).
 mod common;
 use common::*;
-use herdsman::runner::{Out, Runner};
-use herdsman::serve::Server;
+use drover::runner::{Out, Runner};
+use drover::serve::Server;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
@@ -14,7 +14,7 @@ const ADDR: &str = "127.0.0.1:7777";
 const TIMEOUT: &str = r#"{"error":{"code":"timeout","message":"timed out waiting for agent startup"}}"#;
 
 /// Thread t1 (conductor asleep: never started) with ask q1 from it.
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let c = ctx(
         &tmpdir(name),
         &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
@@ -100,13 +100,13 @@ fn call(addr: SocketAddr, method: &str, path: &str, cookie: &str, body: &str) ->
 fn a_blocked_orchestrator_start_holds_no_request() {
     let c = setup("cold-start");
     let r = Slow(herdr(), AtomicBool::new(false), AtomicBool::new(false));
-    let (c, r): (&'static herdsman::Ctx, &'static Slow) = (Box::leak(Box::new(c)), Box::leak(Box::new(r)));
+    let (c, r): (&'static drover::Ctx, &'static Slow) = (Box::leak(Box::new(c)), Box::leak(Box::new(r)));
     let pairing = Server::new(c, r, Some(ADDR.into()));
-    let a = pair(&pairing, c, "Mozilla/5.0 (iPhone)", herdsman::now());
-    let b = pair(&pairing, c, "Mozilla/5.0 (iPad)", herdsman::now());
+    let a = pair(&pairing, c, "Mozilla/5.0 (iPhone)", drover::now());
+    let b = pair(&pairing, c, "Mozilla/5.0 (iPad)", drover::now());
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || herdsman::serve::serve_on(c, r, l, false));
+    std::thread::spawn(move || drover::serve::serve_on(c, r, l, false));
 
     // Device A answers t1's ask: its conductor is asleep, so the answer wakes it (the start blocks).
     let (tx, rx) = std::sync::mpsc::channel();
@@ -148,7 +148,7 @@ fn a_blocked_orchestrator_start_holds_no_request() {
     let (t, mut last) = (Instant::now(), String::new());
     while t.elapsed() < Duration::from_secs(10) {
         std::thread::sleep(Duration::from_millis(300));
-        let log = herdsman::events::jsonl(&c.state).unwrap_or_default();
+        let log = drover::events::jsonl(&c.state).unwrap_or_default();
         if log.contains("\"orchestrator-start\"") && log == last {
             break;
         }
@@ -174,7 +174,7 @@ fn a_failed_background_start_shows_in_the_thread_its_message_kept() {
         res.starts_with("HTTP/1.1 200") && res.ends_with("answered q1\n"),
         "{res}"
     );
-    let log = herdsman::events::jsonl(&c.state).unwrap();
+    let log = drover::events::jsonl(&c.state).unwrap();
     assert!(
         log.contains(r#""text":"DECISION q1: b""#),
         "the message stays logged: {log}"

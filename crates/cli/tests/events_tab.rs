@@ -3,8 +3,8 @@
 //! (`serve::words`, in API v1's events); the tab is the TypeScript board's (web/src/events.ts, run under node).
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::{words, Server};
+use drover::events::{append, Event};
+use drover::serve::{words, Server};
 use serde_json::{json, Value};
 
 const NOW: u64 = 1_000_000; // 13:46:40 UTC; the Fake has no `date`, so the page counts days in UTC.

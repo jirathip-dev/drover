@@ -47,7 +47,7 @@ pub fn find<'a>(events: &'a [Event], id: &str) -> Result<&'a Event> {
         Some(t) => Ok(t),
         None => refused(
             "NO_SUCH_THREAD",
-            format!("no thread {id}; `herdsman thread new` starts one"),
+            format!("no thread {id}; `drover thread new` starts one"),
         ),
     }
 }
@@ -64,7 +64,7 @@ pub fn attached<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
     link_of(events, id).filter(|e| e.kind == "orchestrator-attached" && !since(e))
 }
 
-/// Thread `id`'s fleet: an attached cooee thread's, else herdsman's own thread's (`NO_SUCH_THREAD`).
+/// Thread `id`'s fleet: an attached cooee thread's, else drover's own thread's (`NO_SUCH_THREAD`).
 pub fn fleet_of<'a>(events: &'a [Event], id: &str) -> Result<&'a str> {
     Ok(&attached(events, id).map_or_else(|| find(events, id), Ok)?.fleet)
 }
@@ -80,7 +80,7 @@ pub fn attach(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, id: &str) ->
     }
     let events = shared(&ctx.state)?;
     if find(&events, id).is_ok() {
-        return refused("BAD_VALUE", format!("{id} is herdsman's own thread"));
+        return refused("BAD_VALUE", format!("{id} is drover's own thread"));
     }
     let t = Event::new(ctx.now, fleet, None, "orchestrator-attached", json!({"thread": id}));
     emit(&ctx.state, cfg, t.clone())?;
@@ -95,8 +95,8 @@ pub fn attach(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, id: &str) ->
     let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, (!acct.is_empty(), false));
     let port = crate::spawn::lane_port(f.port_range.as_deref(), &format!("{fleet}/orchestrator-{id}"), &[]);
     let settings = providers::profiles_root(ctx).join(&p).join("settings.json");
-    let mut env = json!({"HERDSMAN_LANE": format!("{fleet}:-:orchestrator"), "HERDSMAN_THREAD": id,
-        "HERDSMAN_PORT": port.to_string()});
+    let mut env = json!({"DROVER_LANE": format!("{fleet}:-:orchestrator"), "DROVER_THREAD": id,
+        "DROVER_PORT": port.to_string()});
     for (k, v) in acct {
         env[k] = json!(v);
     }
@@ -121,7 +121,7 @@ pub fn detach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<String> 
     Ok(format!("{id} detached from {fleet}"))
 }
 
-/// #780: the old role name a lane started before #780 still carries (`HERDSMAN_LANE`), read for one release.
+/// #780: the old role name a lane started before #780 still carries (`DROVER_LANE`), read for one release.
 pub fn is_role(role: &str) -> bool {
     matches!(role, "orchestrator" | "conductor")
 }
@@ -132,10 +132,10 @@ pub fn by(b: &str) -> String {
         .map_or_else(|| b.into(), |t| format!("orchestrator-{t}"))
 }
 
-/// #780: in an orchestrator lane, its `HERDSMAN_ORCHESTRATOR` id; every event it logs names it (`db::insert`).
+/// #780: in an orchestrator lane, its `DROVER_ORCHESTRATOR` id; every event it logs names it (`db::insert`).
 pub fn acting() -> Option<String> {
-    let lane = std::env::var("HERDSMAN_LANE").ok()?;
-    is_role(lane.split(':').nth(2)?).then(|| std::env::var("HERDSMAN_ORCHESTRATOR").ok())?
+    let lane = std::env::var("DROVER_LANE").ok()?;
+    is_role(lane.split(':').nth(2)?).then(|| std::env::var("DROVER_ORCHESTRATOR").ok())?
 }
 
 /// #780: the orchestrator a thread from before #780 (none named) belongs to, the one `[orchestrator]` itself names.
@@ -181,7 +181,7 @@ fn assign(cfg: &Config, repo: &str, want: Option<&str>) -> Result<String> {
     }
 }
 
-/// `herdsman thread new <fleet|all> <title> [--harness <h>]`: its id. #404: the thread keeps its harness (`harness`,
+/// `drover thread new <fleet|all> <title> [--harness <h>]`: its id. #404: the thread keeps its harness (`harness`,
 /// else the default's) for good.
 pub fn new(ctx: &Ctx, cfg: &Config, repo: &str, title: &str, harness: Option<&str>) -> Result<String> {
     new_with(ctx, cfg, repo, title, (harness, None))
@@ -228,7 +228,7 @@ pub fn title<'a>(events: &'a [Event], id: &str) -> &'a str {
     t.and_then(|e| e.str("title")).unwrap_or_default()
 }
 
-/// #405: `herdsman thread title <id> <title>`: the orchestrator's short summary title, once after its first reply.
+/// #405: `drover thread title <id> <title>`: the orchestrator's short summary title, once after its first reply.
 pub fn retitle(ctx: &Ctx, cfg: &Config, id: &str, title: &str) -> Result<()> {
     title_ok(title)?;
     let t = find(&shared(&ctx.state)?, id)?.clone();
@@ -522,7 +522,7 @@ pub fn lane_ask(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, a: &Event) ->
     let at = a.issue.map_or("the fleet".into(), |n| format!("#{n}"));
     let text = format!(
         "lane ask {} on {at} from {} ({}): {}{opts}. Answer it only if the issue spec or a past decision settles it: \
-         `herdsman answer {} {} <n> --basis \"<verbatim spec quote | q<id>>\"`; else run it without --basis and it \
+         `drover answer {} {} <n> --basis \"<verbatim spec quote | q<id>>\"`; else run it without --basis and it \
          goes to the owner.",
         s("id"),
         a.str("agent").unwrap_or("a lane"),
@@ -641,7 +641,7 @@ fn copy_in(ctx: &Ctx, cfg: &Config, t: &Event, p: &std::path::Path) -> Result<st
     to.canonicalize().map_err(Into::into)
 }
 
-/// `herdsman thread reply [--file <path>]…`: the orchestrator's message to the owner, its files shown inline.
+/// `drover thread reply [--file <path>]…`: the orchestrator's message to the owner, its files shown inline.
 pub fn reply(ctx: &Ctx, cfg: &Config, id: &str, text: &str, files: &[std::path::PathBuf]) -> Result<()> {
     text_ok(text)?;
     let events = shared(&ctx.state)?;
@@ -650,7 +650,7 @@ pub fn reply(ctx: &Ctx, cfg: &Config, id: &str, text: &str, files: &[std::path::
     log(ctx, cfg, t, "orchestrator", (text, &files))
 }
 
-/// `herdsman thread say` (and a thread ask's answer, `raw`: typed as is; #386: the board's, with `files`): log
+/// `drover thread say` (and a thread ask's answer, `raw`: typed as is; #386: the board's, with `files`): log
 /// `from`'s message, then type it into the thread's conductor, starting or resuming it first; the agent it went to.
 pub fn say(
     ctx: &Ctx,
@@ -1080,8 +1080,8 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         lane_key: None,
         token: None,
     };
-    p.env.insert("HERDSMAN_THREAD".into(), id.into());
-    p.env.insert("HERDSMAN_ORCHESTRATOR".into(), id_of(t).into());
+    p.env.insert("DROVER_THREAD".into(), id.into());
+    p.env.insert("DROVER_ORCHESTRATOR".into(), id_of(t).into());
     // #683: the conductor runs on this host: its account's env is its sign-in.
     crate::access::signed(ctx, cfg, r, (fleet, &role, false), &mut p)?;
     // #608: a shed-acp fleet's conductor is an ACP session under the same guard as its lanes (#565), or none at all.
@@ -1270,7 +1270,7 @@ fn profile(cfg: &Config, t: &Event, fleet: &str) -> String {
         let on = ["off", "on"][usize::from(c.groups().contains(g))];
         s += &format!("- `{g}` ({on}): {verbs}\n");
     }
-    s += "\nA verb of an off group is refused `GROUP_OFF`: propose `[orchestrator] allow` with `herdsman config propose`.\n";
+    s += "\nA verb of an off group is refused `GROUP_OFF`: propose `[orchestrator] allow` with `drover config propose`.\n";
     let skills = files(&c.skills);
     if !skills.is_empty() {
         s += "\n## Skills (read one when it applies)\n\n";
@@ -1306,7 +1306,7 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
         // #461: a conductor's `timer install`, a system line.
         "timer-install" => {
             let (by, w, l) = (e.str("by").unwrap_or("?"), &e.data["written"], &e.data["reloaded"]);
-            let text = format!("{by} ran `herdsman timer install`: wrote {w}, reloaded {l}");
+            let text = format!("{by} ran `drover timer install`: wrote {w}, reloaded {l}");
             Some(json!({"ts": e.ts, "from": "system", "text": text}))
         }
         "thread-handoff" => Some(
@@ -1388,7 +1388,7 @@ pub fn mark_read(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event) -> Result
     Ok(())
 }
 
-/// `herdsman thread show <id>`: the conversation; marks it read.
+/// `drover thread show <id>`: the conversation; marks it read.
 pub fn show(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, id: &str, as_json: bool) -> Result<()> {
     let events = shared(&ctx.state)?;
     let t = find(&events, id)?;
@@ -1402,7 +1402,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, id: &str, as_json: boo
     Ok(write!(out, "{}", render(&items, name(cfg, id_of(t))))?)
 }
 
-/// `herdsman thread ls [fleet]`: per repo, its threads with title, last message, unread dot and conductor state.
+/// `drover thread ls [fleet]`: per repo, its threads with title, last message, unread dot and conductor state.
 pub fn ls(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: Option<&str>, as_json: bool) -> Result<()> {
     let events = shared(&ctx.state)?;
     let mut rows: Vec<Value> = vec![];
