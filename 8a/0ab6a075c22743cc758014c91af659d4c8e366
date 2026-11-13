@@ -1,0 +1,6 @@
+Decided: merge origin/staging (no rebase); in herdr.rs keep #899's exited/rm and #938's canary, canary now removes via rm
+Because: crates/core/src/herdr.rs:144 calls self.rm, the one remove path both features share
+Decided: port the three #899 shed tests from the local Server to staging's shared FakeShed
+Because: crates/cli/tests/common/fake_shed.rs:27 replaced shed.rs's own fake server, so the old tests no longer compiled
+Rejected: none
+Owner: the branch is current with staging again and still stops an older round's lane before starting the new one
