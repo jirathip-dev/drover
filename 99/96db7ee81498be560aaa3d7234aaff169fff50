@@ -1,0 +1,10 @@
+Decided: events::read returns the one cached Arc<Log>; callers borrow it instead of cloning the whole log.
+Because: q1574
+Because: "the event log is loaded once per process and every events::read caller shares that one copy"
+Decided: waiting::scan takes each issue's events from the log's issue index, one issue at a time, instead of cloning every issue event into a map up front.
+Because: crates/core/src/waiting.rs:626
+Decided: catch_up keeps the fetched rows' Vec on a first load and indexes in place, so no doubling copy is made.
+Because: crates/core/src/events.rs:772
+Rejected: targeted SQLite queries per caller — the owner made this a follow-up (q1574).
+Check: status, drive --fast, tick and kick peak under 200 MB on the rotated copy of the mini's state.db (PR body table).
+Owner: Herdsman now keeps one copy of its event log in memory per process, so everyday commands use under 200 MB.
