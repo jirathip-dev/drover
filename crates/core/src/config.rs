@@ -648,6 +648,7 @@ pub struct Limits {
     pub serve_shed_secs: u64,
     pub serve_remote_secs: u64,
     pub serve_host_secs: u64,
+    pub serve_heartbeat_secs: u64,
     pub serve_handover_secs: u64,
     pub slo_api_p95_ms: u64,
     pub slo_api_minutes: u64,
@@ -765,6 +766,7 @@ impl Default for Limits {
             serve_shed_secs: 5,
             serve_remote_secs: 10,
             serve_host_secs: 10,
+            serve_heartbeat_secs: 15,
             serve_handover_secs: 300,
             slo_api_p95_ms: 1000,
             slo_api_minutes: 10,
@@ -998,6 +1000,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "serve_host_secs",
         "serve re-samples this host's load in the background this often",
+    ),
+    (
+        "serve_heartbeat_secs",
+        "`/live` pings this often; a stream whose last 2 pings are still unsent is dropped",
     ),
     (
         "serve_handover_secs",

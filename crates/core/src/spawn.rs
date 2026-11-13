@@ -149,6 +149,9 @@ pub struct Plan {
     pub token: Option<(String, PathBuf)>,
 }
 
+/// #893: the lane's shell, and so its agent and every build it starts, at low scheduling priority.
+pub const LOW: &str = "&& renice -n 10 -p $$ >/dev/null";
+
 impl Plan {
     /// Exports `DROVER_LANE`, `DROVER_PORT` and the fleet's `env`; #441: sources the secrets `deliver` wrote.
     pub fn lane_cmd(&self, pane: &str) -> Vec<String> {
@@ -178,6 +181,7 @@ impl Plan {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));
         }
+        c.push(LOW.into());
         c
     }
 
