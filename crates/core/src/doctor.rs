@@ -109,7 +109,12 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let line = format!("board auth — 24 h: {n401} × 401, {n503} × 503 → see {}", log.display());
     row(rows, n503 == 0, '!', &line);
     let line = format!("worktrees — {0} → mkdir -p {0}", ctx.worktrees.display());
-    row(rows, ctx.worktrees.is_dir(), '✗', &line);
+    row(
+        rows,
+        crate::runner::answers(&ctx.worktrees) && ctx.worktrees.is_dir(),
+        '✗',
+        &line,
+    );
     for (name, fleet) in &cfg.fleet {
         let repo = &fleet.repo;
         let view = ok(r, "gh", &["repo", "view", repo, "--json", "name,isArchived"]);
@@ -209,8 +214,8 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     if cfg!(target_os = "macos") {
         let req = ["-v", "-R", "=certificate leaf[subject.CN] = \"drover-local\"", &ctx.exe];
         let line = format!(
-            "signature — {} signed by \"drover-local\" → sh scripts/signing-identity.sh in the drover checkout (once), then sh scripts/signing-identity.sh sign {}",
-            ctx.exe, ctx.exe
+            "signature — {} signed by \"drover-local\" → sh scripts/signing-identity.sh in the drover checkout (once), then sh scripts/install-gate.sh {} {}",
+            ctx.exe, ctx.exe, ctx.exe
         );
         row(rows, ok(r, "codesign", &req).is_ok(), '✗', &line);
     }
@@ -306,6 +311,12 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("watchdog {what} — {ran} → drover timer install");
         row(rows, fresh || running.is_some(), '✗', &line);
     }
+    let stuck = crate::timer::stuck_step(ctx, cfg);
+    let line = stuck.as_ref().map_or("tick step — advancing".into(), |(step, secs)| {
+        let age = crate::events::age(*secs);
+        format!("tick step — stuck in {step} for {age} → stop the tick; what it waits on is not answering")
+    });
+    row(rows, stuck.is_none(), '✗', &line);
     for (label, state) in crate::timer::drift(ctx, cfg, r) {
         let line = format!("timer — {label} {state} → drover timer install (the owner or an orchestrator)");
         row(rows, state == "loaded", '✗', &line);

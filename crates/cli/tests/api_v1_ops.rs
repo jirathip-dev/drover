@@ -46,13 +46,13 @@ fn send_prompts_a_lane_with_the_boards_refusals_and_rate_limit() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let msg = json!({"agent": IMPL, "text": "run the tests again"});
     assert_eq!(post(&s, "send", msg.clone(), "").1, "UNPAIRED");
-    assert!(!r.called("herdr agent prompt"));
+    assert!(r.1.sent(IMPL).is_empty());
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     assert_eq!(
         post(&s, "send", msg.clone(), &ck),
         (200, "OK".into(), format!("sent to {IMPL}"))
     );
-    assert!(r.called(&format!("herdr agent prompt {IMPL} run the tests again")));
+    assert_eq!(r.1.sent(IMPL), ["run the tests again"]);
     let e = kinds(&c, "prompt").pop().unwrap();
     assert_eq!(
         (e.str("via"), e.str("agent"), e.data.get("text")),
@@ -82,10 +82,10 @@ fn menu_answers_the_card_it_was_shown_and_refuses_a_stale_one() {
     assert_eq!(post(&s, "menu", pick("1", &h), "").1, "UNPAIRED");
     assert_eq!(post(&s, "menu", pick("1", "123"), &ck).1, "STALE");
     assert_eq!(post(&s, "menu", pick("7", &h), &ck).1, "BAD_VALUE");
-    assert!(!r.called("herdr pane send-keys"), "never a guessed key");
+    assert!(r.1.all("keys").is_empty(), "never a guessed key");
     let (status, code, _) = post(&s, "menu", pick("1", &h), &ck);
     assert_eq!((status, code.as_str()), (200, "OK"));
-    assert!(r.called("herdr pane send-keys w1:p3 1"));
+    assert_eq!(r.1.all("keys"), [json!({"name": REV, "keys": ["1"]})]);
     let e = kinds(&c, "answer").pop().unwrap();
     assert_eq!(
         (e.issue, e.str("choice"), e.str("via")),
@@ -104,7 +104,7 @@ fn act_stops_a_lane_dry_runs_a_kill_and_refuses_unknowns() {
         (status, code.as_str(), msg.as_str()),
         (200, "OK", "sent Esc to sendmeter-impl-12")
     );
-    assert!(r.called("herdr pane send-keys w1:p2 Escape"));
+    assert_eq!(r.1.all("keys"), [json!({"name": IMPL, "keys": ["esc"]})]);
     assert_eq!(kinds(&c, "act").pop().unwrap().str("op"), Some("stop"));
     assert_eq!(
         post(&s, "act", json!({"agent": "nobody", "op": "stop"}), &ck).1,
@@ -116,7 +116,7 @@ fn act_stops_a_lane_dry_runs_a_kill_and_refuses_unknowns() {
 
 #[test]
 fn setup_starts_a_configured_terminal_and_reads_its_screen() {
-    let (c, r) = v1_board("v1-setup");
+    let (c, r) = v1_board_on("v1-setup", herdr_setup(Fake::default()));
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let start = json!({"host": "bazzite", "name": "claude B"});
     assert_eq!(post(&s, "setup", start.clone(), "").1, "UNPAIRED");
@@ -235,7 +235,25 @@ fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
 
 #[test]
 fn a_backlog_issue_gets_a_thread_or_closes() {
-    let (c, r) = v1_board("v1-backlog");
+    let sh = FakeShed::new();
+    let cfg = format!(
+        "{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\naccount = \"C\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        sh.sock.display()
+    );
+    let mut c = ctx(&tmpdir("v1-backlog"), &cfg);
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let d = json!({"role": "impl", "agent": IMPL, "harness": "claude", "pane": IMPL});
+    drover::events::append(&c.state, &Event::new(T - 100, "sendmeter", Some(12), "spawn", d)).unwrap();
+    let agents =
+        json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo", "claude-agent-acp"]}]);
+    let host = Fake::default()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed", "")
+        .reply("gh issue close", "");
+    let cli = sh.cli(&host);
+    let r = drover::shed::With(&cli, sh.shed());
     let cache = c.state.parent().unwrap().join("cache");
     std::fs::create_dir_all(&cache).unwrap();
     let bl = json!({"ts": T, "issues": {"30": {"number": 30, "title": "Meter export", "state": "OPEN"}}});
@@ -263,9 +281,9 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
         "NOT_BACKLOG"
     );
     assert_eq!(post(&s, "close", json!({"fleet": "sendmeter"}), &ck).1, "BAD_VALUE");
-    assert!(!r.called("gh issue close"));
+    assert!(!host.called("gh issue close"));
     assert_eq!(post(&s, "close", about, &ck), (200, "OK".into(), "closed #30".into()));
-    assert!(r.called("gh issue close 30 -R jirathip-dev/sendmeter"));
+    assert!(host.called("gh issue close 30 -R jirathip-dev/sendmeter"));
     let e = kinds(&c, "closed").pop().unwrap();
     assert_eq!(
         (e.issue, e.str("why"), e.str("via")),

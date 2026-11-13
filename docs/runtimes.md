@@ -106,7 +106,8 @@ Workflow list reads: `source=drover`, `group=<repo name>`, `item=#<issue>`, `rol
 **The guard.** The adapter after `--` is the installed agent's command (`shed agents --json`), run by `sh` after the
 lane's exports (`DROVER_LANE`, `DROVER_PORT`, the fleet's `env`, `DROVER_ACCOUNT`, and #683 the role's
 account env, `account_env`'s or its folder as `CLAUDE_CONFIG_DIR`, so the adapter signs in with that login and gets no
-token). It
+token; a role with no account signs in with the host's own login, an inherited token unset, and only a lane on another
+host still needs an account). It
 sets the role's model as `ANTHROPIC_MODEL`, copies the lane's synced profile (`~/.config/drover/claude/<profile>`)
 into the worktree as `.claude/settings.local.json` and `CLAUDE.local.md`, and unsets `$SHED`. The claude-acp adapter
 runs Claude Code with its user, project and local settings, so the profile's `settings.json` applies:

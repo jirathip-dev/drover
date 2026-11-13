@@ -131,16 +131,15 @@ fn a_withdrawn_ask_closes_and_names_the_ask_that_replaced_it() {
     assert!(row(&c, "q1").ends_with("[withdrawn → q2]"), "{}", row(&c, "q1"));
 }
 
-/// A conductor role, its profile, and a handoff card from t1 to the repo with t2 and a new thread as its rows.
-fn handoff(name: &str) -> drover::Ctx {
-    let d = tmpdir(name);
-    let c = ctx(
-        &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+fn handoff(name: &str, sh: &FakeShed) -> drover::Ctx {
+    let cfg = format!(
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        sh.sock.display()
     );
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
+    let mut c = ctx(&tmpdir(name), &cfg);
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     threads(&c, NOW - 200);
     let d = json!({"id": "q1", "question": "Hand off \"Grill\" to which sendmeter thread?",
         "options": ["thread t2 · t2", "new thread: Grill"], "recommend": null, "kind": "owner", "thread": "t1",
@@ -151,26 +150,31 @@ fn handoff(name: &str) -> drover::Ctx {
 
 #[test]
 fn a_handoff_ask_closes_when_it_is_delivered_and_when_it_fails() {
-    let c = handoff("handoff-ok");
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
-        )
-        .reply("herdr workspace close", "")
-        .reply("herdr pane run", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr agent start", "")
-        .reply("herdr agent wait", "")
-        .reply("herdr agent prompt", "");
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
-    assert_eq!(code, 0, "{out}");
+    let sh = FakeShed::new();
+    let c = handoff("handoff-ok", &sh);
+    let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
+    let f = Fake::default()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed run", "")
+        .reply("shed send", "");
+    let (code, out) = run(&c, &sh.cli(&f), &["answer", "sendmeter", "q1", "1"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    let sent = f
+        .calls
+        .borrow()
+        .iter()
+        .any(|l| l.starts_with("shed send orchestrator-t2 ") && l.contains("grill #12"));
+    assert!(sent, "{:?}", f.calls.borrow());
+    let herdr = |l: &&String| l.starts_with("herdr") && *l != "herdr agent list";
+    assert!(
+        !f.calls.borrow().iter().any(|l| herdr(&l)),
+        "no herdr pane: {:?}",
+        f.calls.borrow()
+    );
     assert!(open(&c).is_empty());
     assert!(row(&c, "q1").ends_with("[delivered to t2]"), "{}", row(&c, "q1"));
 
-    // herdr is down: nothing reaches t2's conductor; the card closes as failed.
-    let c = handoff("handoff-failed");
+    let c = handoff("handoff-failed", &FakeShed::new());
     let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "1"]);
     assert_ne!(code, 0, "{out}");
     assert!(open(&c).is_empty());
@@ -194,10 +198,11 @@ fn choosing(c: &drover::Ctx) -> u64 {
 #[test]
 fn a_thread_ask_nobody_waits_on_expires_after_24_h_and_its_choose_goes() {
     let mut c = ctx(&tmpdir("expire-thread"), CONFIG);
+    let _sh = FakeShed::attached(&c);
     threads(&c, NOW - 26 * H);
     thread_ask(&c, NOW - 25 * H, "q1", "t1");
     assert_eq!(choosing(&c), 1);
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let r = Fake::default();
     c.now = NOW;
     check(&c, &r);
     assert_eq!(kinds(&c, "ask-expired").len(), 1);
@@ -213,7 +218,7 @@ fn lane_ask(c: &drover::Ctx, ts: u64, id: &str) {
         ts - 60,
         Some(36),
         "spawn",
-        json!({"role": "impl", "agent": LANE, "pane": "w1:p1"}),
+        json!({"role": "impl", "agent": LANE, "pane": LANE}),
     );
     let d = json!({"id": id, "question": "Split the PR?", "options": ["yes", "no"], "recommend": 1,
         "kind": "owner", "agent": LANE});
@@ -223,9 +228,11 @@ fn lane_ask(c: &drover::Ctx, ts: u64, id: &str) {
 #[test]
 fn a_live_lanes_ask_never_expires_and_re_alerts_once_a_day() {
     let mut c = ctx(&tmpdir("expire-live"), CONFIG);
+    let sh = FakeShed::attached(&c);
+    sh.lane(LANE, "idle", "/x");
     let t0 = NOW - 30 * H;
     lane_ask(&c, t0, "q1");
-    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p1")]));
+    let r = Fake::default();
     let waiting = |c: &drover::Ctx| kinds(c, "ask-waiting").len();
     c.now = t0 + 40 * 60;
     check(&c, &r);
@@ -248,9 +255,10 @@ fn a_live_lanes_ask_never_expires_and_re_alerts_once_a_day() {
 #[test]
 fn an_ask_whose_lane_was_killed_expires_after_24_h() {
     let mut c = ctx(&tmpdir("expire-killed"), CONFIG);
+    let _sh = FakeShed::attached(&c);
     lane_ask(&c, NOW - 25 * H, "q1");
     c.now = NOW;
-    check(&c, &Fake::default().reply("herdr agent list", NO_AGENTS));
+    check(&c, &Fake::default());
     assert_eq!(kinds(&c, "ask-expired").len(), 1);
     assert!(open(&c).is_empty());
 }
@@ -258,6 +266,8 @@ fn an_ask_whose_lane_was_killed_expires_after_24_h() {
 #[test]
 fn the_sweep_closes_a_logs_stale_asks_once() {
     let mut c = ctx(&tmpdir("sweep"), CONFIG);
+    let sh = FakeShed::attached(&c);
+    sh.lane(LANE, "idle", "/x");
     threads(&c, NOW - 40 * H);
     // A handoff card whose handoff went out (before #584 no decision was logged for it).
     let d = json!({"id": "q1", "question": "Hand off \"Grill\" to which sendmeter thread?",
@@ -269,7 +279,7 @@ fn the_sweep_closes_a_logs_stale_asks_once() {
     thread_ask(&c, NOW - 30 * H, "q2", "t1");
     lane_ask(&c, NOW - 2 * H, "q3");
     assert_eq!(open(&c), ["q1", "q2", "q3"]);
-    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p1")]));
+    let r = Fake::default();
     c.now = NOW;
     check(&c, &r);
     assert_eq!(open(&c), ["q3"], "the lane's ask still waits");

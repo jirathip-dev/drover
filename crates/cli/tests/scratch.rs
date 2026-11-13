@@ -15,14 +15,14 @@ fn ev(c: &drover::Ctx, issue: u64, kind: &str, d: serde_json::Value) {
 fn spawn(c: &drover::Ctx, issue: u64, role: &str, agent: &str) {
     let w = c.worktrees.join("sendmeter").join(agent);
     std::fs::create_dir_all(&w).unwrap();
-    let d = json!({"role": role, "agent": agent, "worktree": w, "pane": format!("{agent}:p1"), "workspace": agent});
+    let d = json!({"role": role, "agent": agent, "worktree": w, "pane": agent, "runtime": "shed"});
     ev(c, issue, "spawn", d);
 }
 
 /// #651: a lane spawned on the remote host `air`.
 fn air_spawn(c: &drover::Ctx, issue: u64, role: &str, agent: &str) {
-    let d = json!({"role": role, "agent": agent, "worktree": format!("/Users/me/.herdr/worktrees/sendmeter/{agent}"),
-                   "pane": "w1:p1", "workspace": "w1", "host": "air", "machine": "air"});
+    let d = json!({"role": role, "agent": agent, "worktree": format!("/Users/me/worktrees/sendmeter/{agent}"),
+                   "pane": agent, "runtime": "shed", "host": "air", "machine": "air"});
     ev(c, issue, "spawn", d);
 }
 
@@ -63,14 +63,13 @@ fn setup(name: &str, budget_bytes: u64) -> (drover::Ctx, PathBuf) {
     (ctx(&d, &cfg), root.join(".scratch"))
 }
 
-fn budget(c: &drover::Ctx, r: &Fake) -> String {
-    let mut out = vec![];
-    drover::check::budget(c, &Config::load(&c.config).unwrap(), r, &mut out).unwrap();
+fn budget(c: &drover::Ctx, sh: &FakeShed) -> String {
+    let (mut out, f) = (vec![], Fake::default());
+    drover::check::budget(c, &Config::load(&c.config).unwrap(), &sh.on(&f), &mut out).unwrap();
     String::from_utf8(out).unwrap()
 }
 
 /// An ended lane's scratch goes at drive's pass (merged, superseded by a later round, or unknown); an open issue's
-/// active lane, a live herdr agent and a building one keep theirs.
 #[test]
 fn drive_deletes_an_ended_lanes_scratch() {
     let (c, s) = setup("scratch-sweep", 1 << 40);
@@ -98,8 +97,10 @@ fn drive_deletes_an_ended_lanes_scratch() {
     std::fs::write(&lock, "").unwrap();
     let held = std::fs::File::open(&lock).unwrap();
     held.lock().unwrap(); // a cargo build running there
-    let r = Fake::default().reply("herdr agent list", &agents(&[("sendmeter-impl-14", "idle", "/x", "p")]));
-    let out = budget(&c, &r);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane("sendmeter-impl-14", "idle", "/x");
+    let out = budget(&c, &sh);
     let gone = dirs.each_ref().map(|d| !d.exists());
     assert_eq!(
         gone,
@@ -144,12 +145,12 @@ fn a_finished_lanes_build_folder_goes_at_once_even_with_its_session_open() {
     let held = std::fs::File::open(builds[4].join("debug/.cargo-lock")).unwrap();
     held.lock().unwrap(); // cargo building in #15's rev lane
     let wts = lanes.map(|a| blob(&c.worktrees.join("sendmeter"), &format!("{a}/src")));
-    let open: Vec<_> = lanes[..6]
-        .iter()
-        .map(|a| (*a, if a.contains("-14-") { "working" } else { "idle" }, "/x", "p"))
-        .collect();
-    let r = Fake::default().reply("herdr agent list", &agents(&open));
-    let out = budget(&c, &r);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    for a in &lanes[..6] {
+        sh.lane(a, if a.contains("-14-") { "working" } else { "idle" }, "/x");
+    }
+    let out = budget(&c, &sh);
     let gone = builds.each_ref().map(|d| !d.exists());
     assert_eq!(
         gone,
@@ -199,8 +200,9 @@ fn the_oldest_scratch_is_trimmed_over_budget() {
     let (old, new) = (blob(&s, "sendmeter-rev-9-r1"), blob(&s, "sendmeter-impl-13"));
     age(&old, 1_000);
     // #634: no live agent for either (spawned long ago); a live one's scratch is never trimmed (tests/shed.rs).
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
-    let out = budget(&c, &r);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let out = budget(&c, &sh);
     assert!(!old.exists() && new.exists(), "{out}");
     assert!(out.contains("builds: trimmed"), "{out}");
 }
@@ -251,12 +253,12 @@ fn clean_removes_stray_cargo_folders_and_claude_temp_dirs() {
     let claude = blob(&tmp, &format!("claude-501/{key}"));
     let other = blob(&tmp, "claude-501/-Users-me-elsewhere");
 
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = || {
         Fake::default()
-            .reply("herdr agent list", NO_AGENTS)
             .reply(&format!("git -C {wt} rev-list"), "0\n")
             .reply("git -C", "")
-            .reply("herdr", "{}")
     };
     let (code, dry) = run(&c, &r(), &["clean"]);
     assert_eq!(code, 0, "{dry}");
@@ -292,23 +294,21 @@ fn clean_removes_stray_cargo_folders_and_claude_temp_dirs() {
 }
 
 /// #651: a remote host `air` whose build-folder commands run here, in a shell with `home` as `$HOME`, against real
-/// folders: every ssh line naming its build root runs through `sh -c`, `df` answers `free_kb`, the rest (herdr, probes)
-/// is `fake`'s.
-struct Air {
-    fake: Fake,
+struct Air<'a> {
+    over: OverSsh<'a>,
     free_kb: u64,
     home: PathBuf,
 }
 
 const AIR_ROOT: &str = "~/.cache/hs-651-air";
 
-impl drover::runner::Runner for Air {
+impl drover::runner::Runner for Air<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let line = args.iter().position(|a| a == "--").map(|i| args[i + 1..].join(" "));
         let Some(line) = line.filter(|_| prog == "ssh" && args.iter().any(|a| a == "air")) else {
-            return self.fake.run(prog, args);
+            return self.over.run(prog, args);
         };
-        self.fake.calls.borrow_mut().push(format!("ssh air -- {line}"));
+        self.over.f.calls.borrow_mut().push(format!("ssh air -- {line}"));
         if line.starts_with("'df'") {
             let df = format!(
                 "Filesystem 1024-blocks Used Available\n/dev/disk3 488000000 1 {}\n",
@@ -320,7 +320,7 @@ impl drover::runner::Runner for Air {
             });
         }
         if !line.contains(AIR_ROOT) {
-            return self.fake.run(prog, args);
+            return self.over.run(prog, args);
         }
         let o = std::process::Command::new("sh")
             .args(["-c", &line])
@@ -334,8 +334,8 @@ impl drover::runner::Runner for Air {
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
         let batch = drover::hosts::quote("sh", &["-c".into(), drover::hosts::EXISTS.into()]);
-        match args.last() == Some(&batch) {
-            true => self.fake.run_in(prog, args, input),
+        match args.last() == Some(&batch) || args.iter().any(|a| a.contains("'shed' 'connect'")) {
+            true => self.over.run_in(prog, args, input),
             false => self.run(prog, args),
         }
     }
@@ -356,23 +356,34 @@ fn air_setup(name: &str) -> (drover::Ctx, PathBuf, PathBuf) {
     (c, home, s)
 }
 
-fn tick(c: &drover::Ctx, home: &Path, air: &[(&str, &str, &str, &str)], free_kb: u64) -> (Air, String) {
-    let fake = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr --machine air agent list", &agents(air))
+fn tick(c: &drover::Ctx, home: &Path, air: &[(&str, &str)], free_kb: u64) -> (Vec<String>, String) {
+    let sh = FakeShed::new();
+    sh.attach(c);
+    let air_sh = FakeShed::new();
+    air.iter().for_each(|(n, st)| air_sh.lane(n, st, "/x"));
+    let f = Fake::default()
         .reply(
             "herdr status",
             "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
         )
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "");
     let r = Air {
-        fake,
+        over: OverSsh {
+            f: &f,
+            hosts: vec![("air", &air_sh)],
+        },
         free_kb,
         home: home.into(),
     };
     let (code, out) = run(c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
-    (r, out)
+    assert!(
+        air_sh.methods().contains(&"ls".to_string()),
+        "air's lanes listed on its shed"
+    );
+    let calls = f.calls.borrow().clone();
+    (calls, out)
 }
 
 /// #651: one tick on a remote host with three scratch folders (a merged lane whose agent sits `done`, a working lane,
@@ -389,11 +400,8 @@ fn a_remote_hosts_ended_and_orphan_scratch_goes_at_the_tick() {
     let b = s.parent().unwrap();
     let [built, building, unknown] =
         ["sendmeter-impl-12", "sendmeter-impl-13", "sendmeter-rev-9-r1"].map(|a| blob(b, &format!("{a}/debug")));
-    let air = [
-        ("sendmeter-impl-12", "done", "/x", "w1:p1"),
-        ("sendmeter-impl-13", "working", "/x", "w2:p1"),
-    ];
-    let (r, out) = tick(&c, &home, &air, 200 * 1_048_576);
+    let air = [("sendmeter-impl-12", "done"), ("sendmeter-impl-13", "working")];
+    let (calls, out) = tick(&c, &home, &air, 200 * 1_048_576);
     assert!(!ended.exists() && !orphan.exists(), "{out}");
     assert!(working.exists(), "a working lane's scratch stays: {out}");
     assert!(!built.parent().unwrap().exists(), "{out}");
@@ -406,9 +414,7 @@ fn a_remote_hosts_ended_and_orphan_scratch_goes_at_the_tick() {
         "{out}"
     );
     assert!(
-        r.fake
-            .calls
-            .borrow()
+        calls
             .iter()
             .any(|l| l.starts_with("ssh air -- 'sh' '-c'") && l.contains(".scratch")),
         "swept through air's runner"
@@ -442,9 +448,9 @@ fn a_host_short_of_disk_drops_non_working_scratch_largest_first() {
         sized("sendmeter-impl-14", 256),
     );
     let air = [
-        ("sendmeter-impl-13", "idle", "/x", "w1:p1"),
-        ("sendmeter-rev-13-r1", "done", "/x", "w2:p1"),
-        ("sendmeter-impl-14", "working", "/x", "w3:p1"),
+        ("sendmeter-impl-13", "idle"),
+        ("sendmeter-rev-13-r1", "done"),
+        ("sendmeter-impl-14", "working"),
     ];
     let (_, out) = tick(&c, &home, &air, 1_048_576);
     assert!(!small.exists() && !big.exists(), "{out}");
@@ -478,43 +484,49 @@ fn air_off(name: &str) -> (drover::Ctx, PathBuf, [PathBuf; 3]) {
     (c, home, dirs)
 }
 
-/// #678: the disabled Air's runner: #12's worktree there clean and pushed, removable.
-fn air_off_runner(home: &Path) -> Air {
-    let wt = "/Users/me/.herdr/worktrees/sendmeter/sendmeter-impl-12";
-    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
-    let fake = Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[("sendmeter-impl-13", "working", "/x", "w5:p1")]),
-        )
-        .reply(
-            "herdr --machine air agent list",
-            &agents(&[("sendmeter-impl-14", "idle", "/y", "w2:p1")]),
-        )
-        .reply("gh issue list", "[]")
-        .reply(&format!("{ssh}'sh' '-c' 'test -e"), "")
-        .reply(&format!("{ssh}'git' '-C' '{wt}' 'status'"), "")
-        .reply(&format!("{ssh}'git' '-C' '{wt}' 'rev-list'"), "0\n")
-        .reply("herdr --machine air worktree remove", "{}")
-        .reply("herdr --machine air pane close", "{}");
+fn air_off_runner<'a>(home: &Path, f: &'a Fake, air: &'a FakeShed) -> Air<'a> {
     Air {
-        fake,
+        over: OverSsh {
+            f,
+            hosts: vec![("air", air)],
+        },
         free_kb: 200 * 1_048_576,
         home: home.into(),
     }
 }
+
+fn air_off_hosts(c: &drover::Ctx) -> (Fake, FakeShed, FakeShed) {
+    let wt = AIR_WT;
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
+    let f = Fake::default()
+        .reply("gh issue list", "[]")
+        .reply(&format!("{ssh}'sh' '-c' 'test -e"), "")
+        .reply(&format!("{ssh}'git' '-C' '{wt}' 'status'"), "")
+        .reply(&format!("{ssh}'git' '-C' '{wt}' 'rev-list'"), "0\n")
+        .reply(ssh, "");
+    let here = FakeShed::attached(c);
+    here.lane("sendmeter-impl-13", "working", "/x");
+    let air = FakeShed::new();
+    air.lane("sendmeter-impl-14", "idle", "/y");
+    (f, here, air)
+}
+
+const AIR_WT: &str = "/Users/me/worktrees/sendmeter/sendmeter-impl-12";
 
 /// #678: an explicit `clean` sweeps a disabled host that answers: the dry run lists the merged lane's worktree and the
 /// dead lane's scratch there, `--yes` removes both.
 #[test]
 fn clean_sweeps_a_disabled_but_reachable_host() {
     let (c, home, [dead, ..]) = air_off("scratch-off-clean");
-    let wt = "/Users/me/.herdr/worktrees/sendmeter/sendmeter-impl-12";
-    let (code, dry) = run(&c, &air_off_runner(&home), &["clean"]);
+    let wt = AIR_WT;
+    let (f, _here, air) = air_off_hosts(&c);
+    let (code, dry) = run(&c, &air_off_runner(&home, &f, &air), &["clean"]);
     assert_eq!(code, 0, "{dry}");
     assert!(!dry.contains("not cleaned"), "{dry}");
     assert!(
-        dry.contains(&format!("would remove air:{wt} (pane w1:p1, sendmeter#12 merged)")),
+        dry.contains(&format!(
+            "would remove air:{wt} (pane sendmeter-impl-12, sendmeter#12 merged)"
+        )),
         "{dry}"
     );
     assert!(
@@ -524,17 +536,22 @@ fn clean_sweeps_a_disabled_but_reachable_host() {
         "{dry}"
     );
     assert!(dead.exists(), "a dry run removes nothing");
-    let r = air_off_runner(&home);
+    let (f, _here, air) = air_off_hosts(&c);
+    let r = air_off_runner(&home, &f, &air);
     let (code, out) = run(&c, &r, &["clean", "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains(&format!("removed air:{wt} (sendmeter#12 merged)")),
         "{out}"
     );
+    let calls = f.calls.borrow();
     assert!(
-        r.fake.called("herdr --machine air worktree remove --workspace w1"),
-        "{out}"
+        calls
+            .iter()
+            .any(|l| l.contains(" air ") && l.contains("worktree") && l.contains("remove") && l.contains(wt)),
+        "{calls:?}"
     );
+    drop(calls);
     assert!(!dead.exists(), "{out}");
     assert!(
         out.contains(&format!(
@@ -549,7 +566,8 @@ fn clean_sweeps_a_disabled_but_reachable_host() {
 #[test]
 fn a_disabled_hosts_scratch_stays_only_for_its_own_live_agents() {
     let (c, home, [dead, moved, live]) = air_off("scratch-off-reclaim");
-    let r = air_off_runner(&home);
+    let (f, _here, air) = air_off_hosts(&c);
+    let r = air_off_runner(&home, &f, &air);
     let (code, out) = run(&c, &r, &["reclaim", "--apply"]);
     assert_eq!(code, 0, "{out}");
     assert!(!dead.exists() && !moved.exists(), "{out}");
