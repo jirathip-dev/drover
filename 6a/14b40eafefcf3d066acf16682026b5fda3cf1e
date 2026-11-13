@@ -1,0 +1,7 @@
+Decided: restate the before/after table and the gate evidence at head 6a14b40, measured again three times on the loaded mini
+Because: "The PR body carries before/after numbers: p95 `/live` first byte and `/api/v1` latency"
+Rejected: reusing the reviewer's e687314 numbers — staging moved, so the head changed again
+Decided: merge origin/staging (#972, #900, #930) with no conflicts
+Because: crates/cli/tests/serve_load.rs:88
+Check: the PR body's table and evidence name 6a14b40eafefcf3d066acf16682026b5fda3cf1e
+Owner: numbers are fresh at the current head: about 3 ms for reads and 1 ms for live, with host load near 640
