@@ -309,7 +309,7 @@ impl<'a> Pass<'a> {
             let step = self.step.lock().unwrap().clone();
             let _ = std::fs::write(
                 p,
-                json!({"since": since, "step": step, "child": child, "pid": std::process::id()}).to_string(),
+                json!({"since": since, "step": step, "child": child, "pid": crate::sim::pid()}).to_string(),
             );
         }
     }
