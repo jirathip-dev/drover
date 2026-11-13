@@ -1,0 +1,7 @@
+Decided: round 3 merges origin/staging again; hosts.rs keeps the TICK_STEPS debug-assert and staging's (step, elapsed) tuple
+Because: crates/core/src/hosts.rs:306
+Decided: the PR body's evidence names head 251d2e7, so the evidence check passes on this head
+Because: "CI runs `herdsman diagram` and fails if the file differs"
+Rejected: an empty commit to rerun the evidence check alone — staging conflicted, so the merge was needed anyway
+Check: drover diagram | diff docs/workflow.md - is clean at this head and CI's evidence, rust and ui jobs are green
+Owner: the workflow diagram branch is caught up with staging again for review
