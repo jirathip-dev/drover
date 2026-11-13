@@ -1000,7 +1000,14 @@ fn save(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "lane-pushed", d))
 }
 
-fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: &[Value], fleet: &str) -> Result<()> {
+fn silent(
+    ctx: &Ctx,
+    cfg: &Config,
+    (r, seen): (&dyn Runner, &dyn Runner),
+    out: &mut dyn Write,
+    agents: &[Value],
+    fleet: &str,
+) -> Result<()> {
     let ev = read(&ctx.state)?;
     let found = stall::silent(ctx, cfg, &ev, agents, fleet);
     for (n, lane, a) in found.into_iter().filter(|x| KICK.get().is_none_or(|k| k == x.0)) {
@@ -1015,6 +1022,25 @@ fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: 
                 }
             }
             stall::Silent::Escalate(why) => escalate(ctx, cfg, out, (fleet, n), &lane, "LANE_SILENT", &why)?,
+        }
+    }
+    let reviews = fold(&ev)
+        .into_values()
+        .filter(|s| s.fleet == fleet && s.state.starts_with("review"));
+    for s in reviews.filter(|s| KICK.get().is_none_or(|k| k == s.issue)) {
+        let Some((role, old)) = s.active_lane() else { continue };
+        if !agents
+            .iter()
+            .any(|a| a["name"] == old && a["agent_status"] == "working")
+        {
+            continue;
+        }
+        let Some(mins) = stall::stale_check(ctx, seen, &ev, agents, (fleet, s.issue), old) else {
+            continue;
+        };
+        let (n, step) = (s.issue.to_string(), (fleet, Some(s.issue), "review"));
+        if act(ctx, cfg, r, out, &ev, step, &["spawn", fleet, &n, role, "--supersede"])?.is_none() {
+            stale_replaced(ctx, cfg, out, (fleet, s.issue), role, old, mins)?;
         }
     }
     Ok(())
@@ -1135,7 +1161,7 @@ fn pass(
     // #666: a lane the hook keeps refusing is ended and escalated at once, never left to stall.
     if !fast {
         crate::stall::refused(ctx, cfg, r, out, &read(&ctx.state)?, fleet)?;
-        silent(ctx, cfg, r, out, &agents, fleet)?;
+        silent(ctx, cfg, (r, seen), out, &agents, fleet)?;
     }
     let events = read(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);

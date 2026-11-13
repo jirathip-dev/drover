@@ -166,7 +166,7 @@ fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Breach> {
         .filter(|t| ctx.now >= t + cfg.limits.slo_tick_minutes * 60)?;
     let pid = m["pid"]
         .as_u64()
-        .filter(|p| *p != u64::from(std::process::id()))
+        .filter(|p| *p != u64::from(crate::sim::pid()))
         .map(|p| p.to_string());
     if pid.as_ref().is_some_and(|p| ok(r, "kill", &["-0", p]).is_err()) {
         return None;
