@@ -328,8 +328,8 @@ sh scripts/signing-identity.sh sign ~/.local/share/herdsman/bin/drover
 b=~/.local/share/herdsman/bin; ln -sf "$b/drover" "$b/herdsman"         # the old name, for one release
 ~/.local/share/herdsman/bin/drover migrate --live                      # config, state and share trees; old names become links
 drover timer install        # writes dev.drover.*; prints the unload, rm and load line of each old job: run them
-drover setup --no-load      # the serve job, the same way
 drover profiles sync
+drover setup --no-load      # the serve restart: writes dev.drover.serve and prints the swap lines the same way
 drover doctor
 ```
 
