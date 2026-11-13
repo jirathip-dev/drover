@@ -60,8 +60,9 @@ fn hang(root: &Path) -> std::sync::mpsc::Sender<()> {
 fn hung_alerts(c: &drover::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "root-hung")
+        .cloned()
         .collect()
 }
 

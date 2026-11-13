@@ -76,7 +76,7 @@ fn a_disabled_host_with_no_lane_there_gets_no_ssh_from_a_tick_or_status() {
     assert!(sh.called("run", "sendmeter-impl-12"), "drive still starts: {out}");
     let (_, status) = run(&c, &r, &["status"]);
     assert_eq!(to_boat1(&r), Vec::<String>::new(), "{status}");
-    let ev = read(&c.state).unwrap();
+    let ev = read(&c.state).unwrap().to_vec();
     assert!(!ev.iter().any(|e| e.kind == "host-offline"), "{ev:?}");
 }
 
@@ -133,6 +133,7 @@ fn a_changed_host_key_alerts_once_and_is_never_retried_in_a_loop() {
         assert_eq!(calls.len(), 1, "pass {i}: one try, then skipped: {calls:#?}");
         let alerts: Vec<Event> = read(&c.state)
             .unwrap()
+            .to_vec()
             .into_iter()
             .filter(|e| e.kind == "host-key-changed")
             .collect();

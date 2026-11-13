@@ -167,6 +167,7 @@ fn a_harness_that_wont_start_twice_rests() {
     }
     let ev: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| !["spawn-started", "intent", "failed"].contains(&e.kind.as_str())) // #509: around each try
         .collect();

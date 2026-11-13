@@ -254,8 +254,9 @@ impl Sim {
     fn events(&self, kind: &str) -> Vec<Event> {
         read(&self.c.state)
             .unwrap()
-            .into_iter()
+            .iter()
             .filter(|e| e.kind == kind)
+            .cloned()
             .collect()
     }
 
@@ -380,8 +381,9 @@ fn worktrees_sharing_files_count_once_and_hold_no_spawn() {
     );
     let held: Vec<Event> = read(&s.c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.str("code") == Some("DISK_BUDGET"))
+        .cloned()
         .collect();
     assert!(held.is_empty(), "{held:?} {}", s.story());
     assert!(

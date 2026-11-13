@@ -204,6 +204,7 @@ fn mark(c: &drover::Ctx, n: u64, pid: u32, age: u64) {
 fn stale(c: &drover::Ctx) -> Vec<drover::events::Event> {
     read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "stale-marker")
         .collect()
@@ -301,7 +302,7 @@ fn spawn_pending_for_15_minutes_alerts_once() {
     let alerts = || {
         read(&c.state)
             .unwrap()
-            .into_iter()
+            .iter()
             .filter(|e| e.kind == "spawn-held")
             .count()
     };
@@ -584,13 +585,7 @@ fn every_start_refused_by_one_host_gate_for_30_min_alerts_once() {
         let e = drover::events::Event::new(ts, "sendmeter", None, "drive-pass", serde_json::json!({"actions": a}));
         drover::events::append(&c.state, &e).unwrap();
     };
-    let alerts = || {
-        read(&c.state)
-            .unwrap()
-            .into_iter()
-            .filter(|e| e.kind == "host-busy")
-            .count()
-    };
+    let alerts = || read(&c.state).unwrap().iter().filter(|e| e.kind == "host-busy").count();
     pass(c.now - 1200);
     pass(c.now - 60);
     assert_eq!(run(&c, &Fake::default(), &["check"]).0, 0);
@@ -807,7 +802,7 @@ fn a_fleet_with_one_start_gets_a_slot_beside_one_with_six() {
 fn three_identical_spawn_failures_alert_once() {
     let (c, _sh) = fleet("kicks-724-alert", 6, 1);
     let alerts = || {
-        let ev = read(&c.state).unwrap();
+        let ev = read(&c.state).unwrap().to_vec();
         ev.into_iter().filter(|e| e.kind == "spawn-failing").collect::<Vec<_>>()
     };
     for i in 0..2 {

@@ -76,7 +76,12 @@ fn host(agents: &str) -> Fake {
 }
 
 fn kind(c: &drover::Ctx, k: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == k).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == k)
+        .collect()
 }
 
 #[test]

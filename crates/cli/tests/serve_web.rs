@@ -56,7 +56,7 @@ fn location(res: &str) -> String {
 
 /// The last event, minus `via`, and its `via`.
 fn last(c: &drover::Ctx) -> (serde_json::Value, Option<String>) {
-    let mut e = read(&c.state).unwrap().pop().unwrap();
+    let mut e = read(&c.state).unwrap().to_vec().pop().unwrap();
     let via = e.data.remove("via").and_then(|v| v.as_str().map(String::from));
     (json!({"type": e.kind, "fleet": e.fleet, "data": e.data}), via)
 }
@@ -225,6 +225,7 @@ fn role_dropdowns_set_like_drover_set() {
     let sets = |c: &drover::Ctx| {
         read(&c.state)
             .unwrap()
+            .to_vec()
             .into_iter()
             .filter(|e| e.kind == "set")
             .collect::<Vec<_>>()

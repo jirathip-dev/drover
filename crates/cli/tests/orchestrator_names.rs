@@ -9,7 +9,12 @@ const NOW: u64 = 1_000_000;
 static ENV: Mutex<()> = Mutex::new(());
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: Value) {
