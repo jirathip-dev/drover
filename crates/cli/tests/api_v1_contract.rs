@@ -169,7 +169,8 @@ fn every_route_keeps_its_fixtures_shape() {
         ("host", "/api/v1/host", HostTab),
         ("queue", "/api/v1/queue", QueueTab),
         ("needs", "/api/v1/needs", NeedsTab),
-        ("lanes", "/api/v1/lanes", LanesTab)
+        ("lanes", "/api/v1/lanes", LanesTab),
+        ("shed", "/api/v1/shed", Vec<ShedRow>)
     );
     // #681: a pending repo handoff from it: its `handoff` item (with the card's rows) in `thread/<t>` and `chat`.
     let cfg = drover::config::Config::load(&c.config).unwrap();

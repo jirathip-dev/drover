@@ -36,6 +36,7 @@ macro_rules! each {
             LaneRow,
             LaneUnsaved,
             LaneNow,
+            ShedRow,
             ChatTab,
             ChatRepo,
             Chip,

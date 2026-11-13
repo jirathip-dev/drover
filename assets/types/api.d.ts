@@ -96,7 +96,11 @@ unsaved: Array<LaneUnsaved>,
 /**
  * #712: fleet.toml's mtime, for a row's [unpark] form.
  */
-mtime: string, };
+mtime: string, 
+/**
+ * #611: a paired device's folded `Other in shed` rows (API v1's `shed`).
+ */
+shed: Array<ShedRow>, };
 
 /**
  * A state section (`tone`) and its repo groups.
@@ -126,6 +130,12 @@ export type LaneUnsaved = { name: string, root?: string | null, dirty?: number |
  * #276: a `now:` line: the spinner word `w`, the action `n`, the elapsed time `t`, the full text as `title`.
  */
 export type LaneNow = { title: string, w?: string | null, n?: string | null, t?: string | null, };
+
+/**
+ * #611: a session on an enabled host's shed no lane or conductor names (`runtime` `shed` or `acp`, `state` shed's,
+ * `last` its last line, `age` since the board first saw that state), or that host's shed failing (`error` alone).
+ */
+export type ShedRow = { host: string, error?: string | null, name?: string | null, runtime?: string | null, labels?: { [key in string]: string } | null, state?: string | null, last?: string | null, age?: string | null, };
 
 /**
  * #269: API v1's `chat`, the [chat] tab (#386): a card per repo (`all` first) with its threads, then every thread's
