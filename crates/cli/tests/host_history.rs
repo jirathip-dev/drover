@@ -2,16 +2,16 @@
 //! one), rows past 24 h dropped, the size bound, worst-per-bucket downsampling, and the cards and chart series served.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::hosts::{history, record, spark, survey, Row, BOUND};
-use herdsman::serve::Server;
+use drover::config::Config;
+use drover::hosts::{history, record, spark, survey, Row, BOUND};
+use drover::serve::Server;
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
 const ADDR: &str = "127.0.0.1:7777";
-const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
+const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
 
-fn two_hosts(name: &str) -> herdsman::Ctx {
+fn two_hosts(name: &str) -> drover::Ctx {
     let cfg = format!("{CONFIG}\n[hosts.mini]\ntags = [\"fast\"]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
     let c = ctx(&tmpdir(name), &cfg);
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
@@ -200,7 +200,7 @@ fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
 /// #352: `ps` lines with every group, the claude one's command line `len` bytes long.
 fn watched_fake(len: usize) -> Fake {
     let ps = format!(
-        "204800 /usr/local/bin/claude --settings {}\n102400 /opt/homebrew/bin/qemu-system-aarch64\n51200 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n10240 herdsman drive --fast\n20480 /bin/zsh\n",
+        "204800 /usr/local/bin/claude --settings {}\n102400 /opt/homebrew/bin/qemu-system-aarch64\n51200 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n10240 drover drive --fast\n20480 /bin/zsh\n",
         "x".repeat(len)
     );
     fake().reply("ps -axo rss=,command=", &ps)
@@ -227,7 +227,7 @@ fn sampling_resumes_once_the_host_tab_is_open() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &Fake::default(), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, false));
     let live = |q: &str| {
         use std::io::Write;
         let mut s = std::net::TcpStream::connect(addr).unwrap();
@@ -256,7 +256,7 @@ fn the_byte_bound_holds_with_long_command_lines() {
     for i in 0..1_700 {
         c.now = NOW + i * 60;
         std::fs::write(c.state.with_file_name("host-watch.at"), c.now.to_string()).unwrap();
-        herdsman::hosts::sample(&c, &cfg, &r, &[]).unwrap();
+        drover::hosts::sample(&c, &cfg, &r, &[]).unwrap();
     }
     let size = std::fs::metadata(c.state.with_file_name("host-history.jsonl"))
         .unwrap()

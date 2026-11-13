@@ -54,7 +54,7 @@ const DBG = new URLSearchParams(location.search);
 let want = DBG.get('issue');
 tab(document.documentElement.dataset.tab || 'queue');
 // #206 `?debug` (kept for the tab's session): how the page came up. A load or reload repaints it all; a pull only refresh()es.
-const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { sessionStorage.debug = 1; console.log('[herdsman]', ...a); } } catch (e) {} };
+const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { sessionStorage.debug = 1; console.log('[drover]', ...a); } } catch (e) {} };
 dbg('page', performance.getEntriesByType('navigation')[0]?.type, 'tab', document.documentElement.dataset.tab);
 addEventListener('pageshow', e => dbg('pageshow', e.persisted ? 'from bfcache' : 'loaded'));
 // #241: the Lanes modes are the theme's `modes` (farm, kitchen: scene, ascii; terminal: glyph alone); TT is the theme
@@ -1287,7 +1287,7 @@ function blocks(lines, harness, busy) {
     return { key, k: 'run', html: `<details class="blk run">${sum(shell ? '$' : esc(name), `<span class=cmd>${esc(cmd)}</span>${tag}`)}${text.trim() ? output(g.lines, fail) : ''}</details>` };
   });
 }
-// #260 the default view: prompts, each turn's final reply, asks and herdsman notices (`{at, text}`: spawned, ask,
+// #260 the default view: prompts, each turn's final reply, asks and drover notices (`{at, text}`: spawned, ask,
 // verdict, merged). #315 screen-first: the pane's role runs (you, and the last assistant run before each prompt; none:
 // every block), the notices first (pane lines have no times); `said` (Claude's session transcript, `[{k: me | ai, text,
 // at}]`), when it has a message, is an enhancement in time order. A Claude lane without one says so in a line.
@@ -1452,7 +1452,7 @@ function open(e) {
   now.replaceChildren();
   hist = []; tail = []; said = null; notes = []; turns = 10;
   $('.live').hidden = true;
-  say(spane ? 'typed text goes to the login, then Enter (empty: Enter only)' : rev ? 'reviewer lane: read-only' : other ? 'not a herdsman lane: herdsman can only close its pane' : '', other || spane ? null : true);
+  say(spane ? 'typed text goes to the login, then Enter (empty: Enter only)' : rev ? 'reviewer lane: read-only' : other ? 'not a drover lane: drover can only close its pane' : '', other || spane ? null : true);
   sh.className = 'sh';
   show(kb() ? 'full' : 'mid');
   poll();
@@ -1847,7 +1847,7 @@ document.addEventListener('click', async e => {
   if (!e.target.closest('#pairp')) (e.target.closest('.pairf') || $('header')).after(pp);
   pp.hidden = false;
   clearTimeout(ttl);
-  if (r.ok) pp.replaceChildren(el('p', 'code', t), el('p', 'm', `Waiting for approval on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')), ...(c ? [el('p', '', c), el('button', 'pairc', 'copy'), el('span', 'm', ' paste in Terminal ')] : []), el('button', 'pairx', 'cancel'));
+  if (r.ok) pp.replaceChildren(el('p', 'code', t), el('p', 'm', `Waiting for approval on the Mac: drover serve approve ${t}` + (h ? ` · ${h}` : '')), ...(c ? [el('p', '', c), el('button', 'pairc', 'copy'), el('span', 'm', ' paste in Terminal ')] : []), el('button', 'pairx', 'cancel'));
   else pp.replaceChildren(el('p', '', s));
   pp.scrollIntoView({ block: 'nearest' });
   if (!r.ok) return;
@@ -1901,10 +1901,10 @@ function pipeline(sec) {
     const both = d.checks.length > 1 ? ` · merge needs a PASS from ${d.checks.join(' and ')} at the same head` : '';
     h += `<p class=pv><span class=g>✓ valid</span> · ${S.length} stages (${esc(S.map(s => s.name).join(', '))}) · every stage reachable, every path ends, every loop has a limit${esc(both)}</p>`;
   }
-  const head = d.builtin ? `# Built-in: herdsman runs this while fleet.toml has no\n# [[fleet.${d.fleet}.pipeline.stage]]. Copy it there to change it.\n` : '';
+  const head = d.builtin ? `# Built-in: drover runs this while fleet.toml has no\n# [[fleet.${d.fleet}.pipeline.stage]]. Copy it there to change it.\n` : '';
   const toml = S.map(s => `\n[[fleet.${d.fleet}.pipeline.stage]]\nname = "${s.name}"\nkind = "${s.kind}"\n${s.role ? `role = "${s.role}"\n` : ''}${s.rounds != null ? `rounds = ${s.rounds}\n` : ''}next = { ${Object.entries(s.next).map(([o, t]) => `${o} = "${t}"`).join(', ')} }\n`).join('');
   const what = d.builtin ? 'the built-in pipeline' : `[fleet.${d.fleet}.pipeline]`;
-  const lg = '<i class="kd b">▲</i> build pushes code · <i class="kd c">◆</i> check: PASS or FAIL · <i class="kd g">◫</i> gate: herdsman\'s own · <i class="kd m">✓</i> merged · <i class="kd x">!</i> parked';
+  const lg = '<i class="kd b">▲</i> build pushes code · <i class="kd c">◆</i> check: PASS or FAIL · <i class="kd g">◫</i> gate: drover\'s own · <i class="kd m">✓</i> merged · <i class="kd x">!</i> parked';
   sec.innerHTML = h + `<div class=pw2><div>${pgraph(d)}<p class=lg>${lg}</p></div><details class=tm><summary><i class=cv></i><span>fleet.toml · ${esc(what)}</span></summary><pre>${esc((head + toml).trim())}</pre></details></div>`;
 }
 // One grid row per text line (`--ln` tall), so a rail meets each line at its middle: column 1 the park rail, 2 the
@@ -1924,7 +1924,7 @@ function pgraph(d) {
   S.forEach((s, i) => {
     const errs = d.bad.filter(b => b.stage === s.name), dead = !reach.includes(s.name), k = K[s.kind] ?? 'x';
     const tag = (s.here ? `<span class="tag m">${s.here} here</span>` : '') + (loops.includes(s.name) ? `<span class=lp>↺ ${esc(s.name)}</span>` : '');
-    const lines = [[`<i class="kd ${k}">${G[k]}</i><b>${esc(s.name)}</b><span class=m>${s.kind === 'gate' ? 'gate · herdsman' : esc(s.kind)}</span>${tag}`]];
+    const lines = [[`<i class="kd ${k}">${G[k]}</i><b>${esc(s.name)}</b><span class=m>${s.kind === 'gate' ? 'gate · drover' : esc(s.kind)}</span>${tag}`]];
     const ci = d.required.length ? d.required.join(' + ') : 'green', from = d.checks.length > 1 ? `from ${d.checks.join(' + ')} ` : '';
     const dt = esc(s.role ? `role ${s.role} · ${s.run ?? 'not defined'}` : `CI ${ci} · PASS ${from}at head · serial · mergeable`);
     lines.push([`<span class=dt title="${dt}">${dt}</span>`]);
@@ -2177,7 +2177,7 @@ document.addEventListener('input', e => {
   if (!(EDIT && EDIT.t === a.form.dataset.t)) draft(a.form.dataset.t, a.value);
 });
 // #407: the picked files of each thread in IndexedDB (their bytes, which every WebKit keeps), read back once at load.
-const IDB = new Promise(ok => { try { const q = indexedDB.open('herdsman', 1); q.onupgradeneeded = () => q.result.createObjectStore('att'); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); } catch (e) { ok(null); } });
+const IDB = new Promise(ok => { try { const q = indexedDB.open('drover', 1); q.onupgradeneeded = () => q.result.createObjectStore('att'); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); } catch (e) { ok(null); } });
 const idb = f => IDB.then(d => d && new Promise(ok => { const q = f(d.transaction('att', 'readwrite').objectStore('att')); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); })).catch(() => null);
 const attSave = async t => { const l = ATS[t] && await Promise.all(ATS[t].map(async f => ({ name: f.name, type: f.file.type, data: await f.file.arrayBuffer() }))); return idb(o => l ? o.put(l, t) : o.delete(t)); };
 var ATL = Promise.all([idb(o => o.getAllKeys()), idb(o => o.getAll())]).then(([ks, vs]) => {

@@ -1,9 +1,9 @@
-//! #39: `herdsman serve --export <dir> --demo` from the committed `demo/`: the file set, an inert page
+//! #39: `drover serve --export <dir> --demo` from the committed `demo/`: the file set, an inert page
 //! (no POST form, no absolute URL, no live endpoint, no pairing or alerts), canned transcripts, and no
 //! call to the passed runner (herdr/gh/host are all canned in `demo/runner.json`).
 mod common;
 use common::*;
-use herdsman::Ctx;
+use drover::Ctx;
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -15,13 +15,13 @@ fn export() -> (PathBuf, Fake) {
         state: demo.join("events.jsonl"),
         worktrees: d.join("wt"),
         homes: [("hermes", d.join("hermes"))].into(),
-        exe: "herdsman".into(),
+        exe: "drover".into(),
         now: 1,
         home: d.join("home"),
         hints: vec![],
     };
     let r = Fake::default();
-    herdsman::serve::export(&c, &r, &d.join("site"), true).unwrap();
+    drover::serve::export(&c, &r, &d.join("site"), true).unwrap();
     (d.join("site"), r)
 }
 
@@ -149,7 +149,7 @@ fn demo_page_is_inert_and_relative() {
         page.contains("data-demo=1") && page.contains("id=demo>demo</span>"),
         "demo badge"
     );
-    assert!(page.contains("Demo with fake data. Install herdsman to run your own."));
+    assert!(page.contains("Demo with fake data. Install drover to run your own."));
     assert_eq!(page.matches("<span class=g>merged</span>").count(), 4, "4 merges today");
     // #81: #39 merged with q1 unanswered; its ask is closed. #99: #21's owner ask waits, #44's routine one counts down;
     // #517: #21's thread ask (t4's q33) is tied to an issue, so it is here too.

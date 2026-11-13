@@ -24,7 +24,7 @@ is the AC's live readback: a grill (3 choices, one answered from Telegram), a fi
 mockup sent back, then a config proposal and a secret request. `IMG_2041.PNG` is `../farm-v2/board-events-390.png`
 (a real board screenshot). `rate-limits-docs-390.png` is the conductor's "mockup", made from
 `fixtures/rate-limits-docs.html`. The account names, times and ids (`q31`, `c8`) are made up. The working directory
-`~/.local/state/herdsman/conductor/t3` is the decided one (Q6, #386: the state folder, per thread).
+`~/.local/state/drover/conductor/t3` is the decided one (Q6, #386: the state folder, per thread).
 
 ## The list
 
@@ -55,20 +55,20 @@ mockup sent back, then a config proposal and a secret request. `IMG_2041.PNG` is
 - **Thread bar** (sticky under the header): `[‹]` back to the list (phone only), the title, and one 11 px line:
   repo · harness · model · state (green dot when awake) · `tg topic` when bridged.
 - **Blocks are #138's chat blocks:** `you` in the accent colour, `conductor` purple, and its commands as amber tool runs
-  that start closed (`$ gh issue create …`, `$ herdsman queue acme-api add 52 --after 21`, `Read uploads/IMG_2041.PNG`).
+  that start closed (`$ gh issue create …`, `$ drover queue acme-api add 52 --after 21`, `Read uploads/IMG_2041.PNG`).
   Routine verbs are visible this way without being loud. A block's time sits on the right, and a message that came
   in from Telegram says `via telegram`.
 - **Images:** shown at the bubble's width and at most 320 px tall. A tall screenshot is cut at the bottom, and a tap
   opens it whole (not mocked). The name and size are under the image. The owner's attachment and the conductor's
   mockup PNG look the same.
   **Files** are one 44 px row (`▤ 429-body.json  412 B`). **Links** are plain links.
-- **Choices** (`herdsman ask --thread`): the question in the conductor's block with an 11 px `q33 · 3 of 3`, then
+- **Choices** (`drover ask --thread`): the question in the conductor's block with an 11 px `q33 · 3 of 3`, then
   #63 A's choice rows, recommended first, and an `other: type an answer` box with `[send]`. A tap answers straight
   into the thread. Once answered, only a green `✓ 1. per API key · you · 09:14` line stays (also `✓ other: "…"`, and a
   routine ask's `by: default after 30 min · [change]`).
 - **Owner cards are amber**, meaning "waits for the owner" inside a thread. Red stays the board's needs-you stack.
   - **Config proposal:** a title, `repo · fleet.toml · N changes`, the diff in the tool-output panel (#138's
-    `-`/`+` tints, `@@ [table]` muted), `✓ validates · on apply: backup, herdsman doctor, a config-applied event`,
+    `-`/`+` tints, `@@ [table]` muted), `✓ validates · on apply: backup, drover doctor, a config-applied event`,
     `[apply] [discard]`, and who may act. Once settled it folds to one line: `✓ config c8 applied by owner · 09:40 ·
     backup … · doctor ✓` (green edge, the diff behind ▸) or `✕ discarded` (grey). A doctor failure after apply rolls
     back and says so in red on the card. A conductor that runs the apply itself gets a status line `→ REFUSED

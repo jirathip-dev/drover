@@ -1,4 +1,4 @@
-//! The clap CLI, `herdsman help --agent` and dispatch to the modules.
+//! The clap CLI, `drover help --agent` and dispatch to the modules.
 use crate::config::{home, Config};
 use crate::events::{emit, read, status_line, Event};
 use crate::hosts::all_agents;
@@ -16,13 +16,13 @@ use std::path::PathBuf;
 pub static SERVE: std::sync::OnceLock<(Serve, Export)> = std::sync::OnceLock::new();
 type Serve = fn(&Ctx, &dyn Runner, &str, bool) -> Result<()>;
 type Export = fn(&Ctx, &dyn Runner, &std::path::Path, bool) -> Result<()>;
-/// #345: `herdsman service` (api addr, board addr), set by the binary from the service crate.
+/// #345: `drover service` (api addr, board addr), set by the binary from the service crate.
 pub static SERVICE: std::sync::OnceLock<Service> = std::sync::OnceLock::new();
 type Service = fn(&Ctx, &str, Option<&str>) -> Result<()>;
 
 #[derive(Parser)]
 #[command(
-    name = "herdsman",
+    name = "drover",
     version = crate::VERSION,
     about = "State, gates and harness toggle over herdr",
     disable_help_subcommand = true
@@ -226,13 +226,13 @@ enum Cmd {
         #[command(subcommand)]
         cmd: WipCmd,
     },
-    /// #387: secrets in the host's keychain as `herdsman/<fleet>/<NAME>`; fleet `env` reads them as `secret:<NAME>`
+    /// #387: secrets in the host's keychain as `drover/<fleet>/<NAME>`; fleet `env` reads them as `secret:<NAME>`
     Secret {
         #[command(subcommand)]
         cmd: SecretCmd,
     },
     #[command(
-        about = "#538: run cards: an owner-level command an orchestrator posts in its thread; herdsman runs it once on the owner's [approve]"
+        about = "#538: run cards: an owner-level command an orchestrator posts in its thread; drover runs it once on the owner's [approve]"
     )]
     Card {
         #[command(subcommand)]
@@ -284,7 +284,7 @@ enum Cmd {
         live: bool,
         fleet: Option<String>,
     },
-    /// Poll `herdsman pr` with backoff (30 s → 5 min); exit 0 reached, 1 failed check/closed PR, 124 timeout
+    /// Poll `drover pr` with backoff (30 s → 5 min); exit 0 reached, 1 failed check/closed PR, 124 timeout
     Wait {
         fleet: String,
         issue: u64,
@@ -370,13 +370,13 @@ enum Cmd {
     CapCheck {
         #[arg(long)]
         config: std::path::PathBuf,
-        #[arg(long, default_value = ".herdsman/rules.md")]
+        #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
     },
     /// CI (#734): the layers, bans and size limits in --config; exit 1 on a violation
     #[command(hide = true)]
     ArchCheck {
-        #[arg(long, default_value = ".herdsman/arch.toml")]
+        #[arg(long, default_value = ".drover/arch.toml")]
         config: PathBuf,
         /// Write today's size offenders to the baseline file instead
         #[arg(long)]
@@ -389,7 +389,7 @@ enum Cmd {
     /// CI: run the lesson checks in --rules; a shadow one's failure is reported (job summary), an active one's exits 1
     #[command(hide = true)]
     LessonCheck {
-        #[arg(long, default_value = ".herdsman/rules.md")]
+        #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
     },
     /// Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun.
@@ -402,7 +402,7 @@ enum Cmd {
         #[arg(long)]
         no_load: bool,
     },
-    /// The 5-minute `herdsman tick` job: a launchd agent on macOS, a systemd user timer on Linux
+    /// The 5-minute `drover tick` job: a launchd agent on macOS, a systemd user timer on Linux
     Timer {
         #[arg(value_parser = ["install", "remove", "status"])]
         action: String,
@@ -489,7 +489,7 @@ enum Cmd {
     },
     /// Send Esc to an agent's pane (it pauses); logs `stop`
     Stop { agent: String },
-    /// Close the pane of a herdr agent that is not a herdsman lane (IS_LANE for lanes); files and worktrees stay
+    /// Close the pane of a herdr agent that is not a drover lane (IS_LANE for lanes); files and worktrees stay
     Close {
         agent: String,
         /// The agent on this `[hosts.<name>]` (when another host has one of the same name)
@@ -511,9 +511,9 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ProfilesCmd,
     },
-    /// Move pre-rename ~/.config/fleet and ~/.local/state/fleet to their herdsman paths (HERDSMAN_HOME selects the tree); all or nothing
+    /// Move the pre-rename herdsman config, state and share trees to their drover paths (DROVER_HOME selects the tree); all or nothing
     Migrate {
-        /// Allow it on the live state dir (~/.local/state/herdsman); without it migrate refuses there
+        /// Allow it on the live state dir (~/.local/state/drover); without it migrate refuses there
         #[arg(long)]
         live: bool,
     },
@@ -840,7 +840,7 @@ enum HostsCmd {
     Destroy { name: String },
     #[command(
         hide = true,
-        about = "Owner only: install herdr, herdsman, git, gh, the lane providers there over SSH, open its logins, clone its fleets"
+        about = "Owner only: install herdr, drover, git, gh, the lane providers there over SSH, open its logins, clone its fleets"
     )]
     Bootstrap { name: String },
     /// Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`
@@ -902,7 +902,7 @@ enum LessonCmd {
     /// Promote or retire the lesson checks in a rules file by their history (the lesson lane, in its worktree)
     Apply {
         fleet: String,
-        #[arg(long, default_value = ".herdsman/rules.md")]
+        #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
     },
 }
@@ -992,20 +992,26 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             return if e.use_stderr() { 2 } else { 0 };
         }
     };
-    if !matches!(
+    let quiet = matches!(
         cli.cmd,
         Cmd::Hook { .. } | Cmd::LaneEvent { .. } | Cmd::Statusline | Cmd::Migrate { .. } | Cmd::Help { .. }
-    ) {
-        for h in &ctx.hints {
-            eprintln!("{h}");
-        }
+    ) || matches!(
+        cli.cmd,
+        Cmd::CapCheck { .. } | Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. }
+    );
+    if !quiet && args.first().is_some_and(|a| a.ends_with("herdsman")) {
+        eprintln!("herdsman is now drover: the old name works for one more release");
+    }
+    if !quiet && !ctx.hints.is_empty() {
+        eprintln!("{}", ctx.hints.join("\n"));
+        return 1;
     }
     let lane_write = matches!(
         cli.cmd,
         Cmd::Ask { .. } | Cmd::Answer { .. } | Cmd::Verdict { .. } | Cmd::Done { .. } | Cmd::Turn { .. }
     );
     // #511: the stop hook on the lane's own host sees the turn reported, wherever it is logged.
-    if let (Cmd::Turn { .. }, Ok(lane)) = (&cli.cmd, std::env::var("HERDSMAN_LANE")) {
+    if let (Cmd::Turn { .. }, Ok(lane)) = (&cli.cmd, std::env::var("DROVER_LANE")) {
         let _ = std::fs::write(hook::turn_mark(&ctx.state, &lane), "turn");
     }
     let mut sent: Vec<String> = args.into_iter().skip(1).collect();
@@ -1035,32 +1041,32 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
                 let _ = writeln!(out, "{rf}");
                 3
             } else {
-                eprintln!("herdsman: {e:#}");
+                eprintln!("drover: {e:#}");
                 1
             }
         }
     }
 }
 
-/// #389: a lane on another host (`HERDSMAN_OUTBOX`) never connects to the main host: its `args` wait in its
+/// #389: a lane on another host (`DROVER_OUTBOX`) never connects to the main host: its `args` wait in its
 /// worktree's outbox, which drive pulls over main → host ssh and runs as the lane.
-/// #345: with `HERDSMAN_SERVICE` it goes over HTTP to the main host's service with the lane's own token instead.
+/// #345: with `DROVER_SERVICE` it goes over HTTP to the main host's service with the lane's own token instead.
 pub(crate) fn forward(r: &dyn Runner, args: &[String]) -> Option<Result<runner::Out>> {
-    if let (Ok(url), Ok(token)) = (std::env::var("HERDSMAN_SERVICE"), std::env::var("HERDSMAN_TOKEN")) {
+    if let (Ok(url), Ok(token)) = (std::env::var("DROVER_SERVICE"), std::env::var("DROVER_TOKEN")) {
         return Some(crate::service::post(r, &url, &token, args));
     }
     let lane = crate::outbox::lane()?;
     Some(crate::outbox::queue(&lane, args).map(|p| runner::Out {
         code: 0,
         stdout: crate::outbox::QUEUED.into(),
-        stderr: format!("herdsman: queued in {}\n", p.display()),
+        stderr: format!("drover: queued in {}\n", p.display()),
     }))
 }
 
 /// #389: why a lane's outbox line is not its own to run (`None`: it is): `ask`, `done`, `verdict`, `answer` for its
 /// issue, events.
 pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<String> {
-    let cli = Cli::try_parse_from(std::iter::once("herdsman").chain(args.iter().map(String::as_str)));
+    let cli = Cli::try_parse_from(std::iter::once("drover").chain(args.iter().map(String::as_str)));
     let is = |e: &&Event, f: &str, id: &str| e.kind == "needs-decision" && e.fleet == f && e.str("id") == Some(id);
     let asked = |f: &str, id: &str| events.iter().rfind(|e| is(e, f, id))?.issue;
     let (f, n) = match cli.map(|c| c.cmd) {
@@ -1080,28 +1086,28 @@ pub(crate) fn foreign(args: &[String], lane: &str, events: &[Event]) -> Option<S
     (!lane.starts_with(&format!("{f}:{n}:"))).then(|| format!("names {f}#{n}, not the lane's {lane}"))
 }
 
-/// One command run in process (`herdsman drive`): its exit code, or its error or refusal.
+/// One command run in process (`drover drive`): its exit code, or its error or refusal.
 pub(crate) fn run(args: &[&str], ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
-    let cli = Cli::try_parse_from(std::iter::once("herdsman").chain(args.iter().copied()))?;
+    let cli = Cli::try_parse_from(std::iter::once("drover").chain(args.iter().copied()))?;
     dispatch(cli.cmd, ctx, r, out, &mut std::io::empty())
 }
 
 fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read) -> Result<i32> {
     match cmd {
-        Cmd::Migrate { .. } if std::env::var_os("HERDSMAN_HOME").is_some_and(|v| v.is_empty()) => {
-            bail!("HERDSMAN_HOME is set but empty; unset it or point it at a home tree")
+        Cmd::Migrate { .. } if std::env::var_os("DROVER_HOME").is_some_and(|v| v.is_empty()) => {
+            bail!("DROVER_HOME is set but empty; unset it or point it at a home tree")
         }
         Cmd::Migrate { live: false } if crate::db::live(&ctx.state) => bail!(
-            "{} is the live state dir: `herdsman migrate --live` to migrate it",
+            "{} is the live state dir: `drover migrate --live` to migrate it",
             ctx.state.parent().unwrap_or(std::path::Path::new(".")).display()
         ),
         Cmd::Migrate { live } => {
             crate::db::LIVE.store(live, std::sync::atomic::Ordering::Relaxed);
             migrate(&ctx.home, out)?;
             // The log where the move above put it: this command's own state, never the environment's.
-            let old = ctx.home.join(".local/state/fleet");
+            let old = ctx.home.join(".local/state/herdsman");
             let state = match ctx.state.strip_prefix(&old) {
-                Ok(rest) if !old.exists() => ctx.home.join(".local/state/herdsman").join(rest),
+                Ok(rest) => ctx.home.join(".local/state/drover").join(rest),
                 _ => ctx.state.clone(),
             };
             crate::db::migrate(&state, out)?;
@@ -1110,14 +1116,23 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
         Cmd::Diagram { live, fleet } => crate::diagram::run(ctx, live, fleet.as_deref(), out)?,
-        Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &rules, out),
+        Cmd::CapCheck { config, rules } => return crate::overlap::cap_check(&config, &crate::repo_path(&rules), out),
         Cmd::ArchCheck {
             config,
             write_baseline,
             base,
             pr_body,
-        } => return crate::arch::check(&config, write_baseline, base.as_deref(), pr_body.as_deref(), r, out),
-        Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &rules, out),
+        } => {
+            return crate::arch::check(
+                &crate::repo_path(&config),
+                write_baseline,
+                base.as_deref(),
+                pr_body.as_deref(),
+                r,
+                out,
+            )
+        }
+        Cmd::LessonCheck { rules } => return crate::lesson::ci(r, &crate::repo_path(&rules), out),
         Cmd::Help { agent: true } => write!(out, "{}", usage_doc())?,
         Cmd::Help { agent: false } => write!(out, "{}", Cli::command().render_long_help())?,
         Cmd::Hook {
@@ -1132,7 +1147,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let mut buf = String::new();
             let _ = stdin.read_to_string(&mut buf);
             let env = |k: &str| std::env::var(k).unwrap_or_default();
-            crate::usage::statusline(ctx, &env("HERDSMAN_ACCOUNT"), &env("HERDSMAN_LANE"), &buf, out);
+            crate::usage::statusline(ctx, &env("DROVER_ACCOUNT"), &env("DROVER_LANE"), &buf, out);
         }
         Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
         Cmd::Status(Scope { fleet, json }) => {
@@ -1159,7 +1174,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 let mut serial: Vec<_> = rows.iter().filter_map(|s| serial(&s.fleet)).collect();
                 serial.dedup();
                 // #337: the fast step's snapshot (a remote read it lacks fails), and only the fleet asked for.
-                let look = crate::snapshot::Snap::read(ctx, r);
+                let off = cfg.as_ref().map(|c| crate::hosts::idle_off(c, &events));
+                let spared = crate::hosts::Pass::fast(r).sparing(off.unwrap_or_default(), None);
+                let look = crate::snapshot::Snap::read(ctx, &spared);
                 let skip = |s: &crate::events::IssueState| {
                     let f = cfg.as_ref().and_then(|c| c.fleet.get(&s.fleet));
                     let skip = queue::skipped(&events, &all, f, &s.fleet, s.issue, ctx.now);
@@ -1276,7 +1293,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let boards: Vec<_> = all.iter().map(board).collect();
             // #539: each retired config key, its own line above the boards.
             for (k, _) in cfg.iter().flat_map(Config::warnings) {
-                writeln!(out, "! {k} is retired → herdsman doctor")?;
+                writeln!(out, "! {k} is retired → drover doctor")?;
             }
             if let Some(l) = crate::update::paused_line(r, &events) {
                 writeln!(out, "{l}")?;
@@ -1332,7 +1349,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let Some(sub) = cfg.webpush_sub() else {
                 bail!("no `type = \"webpush\"` notifier in fleet.toml (docs/serve.md)")
             };
-            let ev = crate::events::Event::new(ctx.now, "herdsman", None, "push-test", json!({"reason": "test alert"}));
+            let ev = crate::events::Event::new(ctx.now, "drover", None, "push-test", json!({"reason": "test alert"}));
             writeln!(out, "{}", crate::webpush::send(&ctx.state, sub, &ev, None)?)?;
         }
         Cmd::Queue {
@@ -1429,6 +1446,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             } else {
                 crate::hosts::Pass::new(r, None)
             };
+            let off = match cmd {
+                Cmd::Check | Cmd::Drive { .. } => crate::hosts::idle_off(&cfg, &read(&ctx.state)?),
+                _ => std::collections::BTreeSet::new(),
+            };
+            let pass = pass.sparing(off, Some((ctx, &cfg)));
             let r: &dyn Runner = match cmd {
                 Cmd::Check | Cmd::Clean { .. } | Cmd::Drive { .. } | Cmd::Reclaim { .. } => &pass,
                 _ => r,
@@ -1450,10 +1472,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Spawn { fleet, issue, role, o } => {
                     // #155: the orch role is gone; `- orch` (and any orch spawn) is refused.
                     if crate::orchestrator::is_role(&role) {
-                        return gate::refused("BAD_VALUE", "an orchestrator starts from `herdsman thread say`");
+                        return gate::refused("BAD_VALUE", "an orchestrator starts from `drover thread say`");
                     }
                     if role == "orch" {
-                        let why = "herdsman drives fleets itself; see herdsman timer";
+                        let why = "drover drives fleets itself; see drover timer";
                         return gate::refused("NO_ORCH", why);
                     }
                     let issue = issue
@@ -1506,7 +1528,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     note,
                     ..
                 } => {
-                    let on = std::env::var("HERDSMAN_THREAD").ok();
+                    let on = std::env::var("DROVER_THREAD").ok();
                     let how = (choice.as_deref(), note.as_deref());
                     crate::answer_typed(ctx, &cfg, r, out, (&fleet, &id), (&line, on.as_deref()), how)?;
                 }
@@ -1517,7 +1539,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     by,
                     basis,
                     ..
-                } => match std::env::var("HERDSMAN_THREAD").ok().filter(|t| !t.is_empty()) {
+                } => match std::env::var("DROVER_THREAD").ok().filter(|t| !t.is_empty()) {
                     // #541: a conductor answers lane asks on its repo only with a basis.
                     Some(t) => {
                         let how = (t.as_str(), basis.as_deref().unwrap_or_default());
@@ -1542,7 +1564,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Check => check::check(ctx, &cfg, r, out)?,
                 Cmd::Thread { cmd } => match cmd {
                     // #413: every thread a conductor starts is logged with its source.
-                    ThreadCmd::New { .. } if std::env::var("HERDSMAN_THREAD").is_ok_and(|t| !t.is_empty()) => {
+                    ThreadCmd::New { .. } if std::env::var("DROVER_THREAD").is_ok_and(|t| !t.is_empty()) => {
                         gate::refused("USE_HANDOFF", "an orchestrator starts threads with `thread handoff`")?;
                     }
                     ThreadCmd::New {
@@ -1700,11 +1722,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         let slot = crate::drive::slot_wait(ctx, &events, &s.fleet, s.issue);
                         let why = match crate::drive::last_pass(ctx, &s.fleet) {
                             _ if s.lane.is_some() => None,
-                            _ if f.paused => Some(format!("paused: herdsman resume {}", s.fleet)),
-                            None => Some(format!(
-                                "drive hasn't passed this fleet yet: herdsman drive {}",
-                                s.fleet
-                            )),
+                            _ if f.paused => Some(format!("paused: drover resume {}", s.fleet)),
+                            None => Some(format!("drive hasn't passed this fleet yet: drover drive {}", s.fleet)),
                             // #724: passes run and only a spawn slot is wanting: not a stuck tick.
                             Some(t) if ctx.now.saturating_sub(t) > 600 && slot.is_some() => slot,
                             // #791: a long tick still beating is running, not stuck.
@@ -1715,7 +1734,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             Some(t) => {
                                 let late = ctx.now.saturating_sub(t);
                                 let stuck = if late > crate::timer::stuck_secs(&cfg) {
-                                    ": tick stuck? herdsman doctor"
+                                    ": tick stuck? drover doctor"
                                 } else {
                                     ""
                                 };
@@ -1843,7 +1862,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     no_spawn,
                     typed,
                     basis,
-                } => match std::env::var("HERDSMAN_THREAD").ok().filter(|t| !t.is_empty()) {
+                } => match std::env::var("DROVER_THREAD").ok().filter(|t| !t.is_empty()) {
                     Some(t) => {
                         let how = (typed.as_deref(), basis.as_deref());
                         crate::orchestrator_extend(ctx, &cfg, r, out, (&fleet, issue), !no_spawn, &t, how)?;
@@ -1867,10 +1886,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     crate::lesson::done(ctx, &cfg, r, out, (&fleet, issue), &no_change)?;
                 }
                 Cmd::Turn { state, why } => {
-                    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+                    let lane = std::env::var("DROVER_LANE").unwrap_or_default();
                     let mut it = lane.splitn(3, ':');
                     let (Some(f), Some(Ok(n)), Some(role)) = (it.next(), it.next().map(str::parse), it.next()) else {
-                        bail!("`herdsman turn` is a lane's own verb: HERDSMAN_LANE names no <fleet>:<issue>:<role>");
+                        bail!("`drover turn` is a lane's own verb: DROVER_LANE names no <fleet>:<issue>:<role>");
                     };
                     if cfg.fleet(f)?.family(role) != "impl" {
                         bail!("a {role} lane reports no turn: impl, fix and update lanes do");
@@ -1879,17 +1898,17 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     let note = (state == "done").then(|| crate::why::turn(ctx, &cfg, r, out, (f, n), role));
                     let note = note.transpose()?.flatten();
                     let mut d = json!({"state": state, "why": why, "role": role});
-                    if let Some(w) = &note {
-                        d["note"] = json!(format!("WHY_INVALID: {w}"));
+                    if let Some((code, w)) = &note {
+                        d["note"] = json!(format!("{code}: {w}"));
                     }
                     emit(&ctx.state, &cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
                     writeln!(out, "recorded {f}#{n} turn-end: {state}")?;
                     if state == "need-input" {
-                        writeln!(out, "ask the question with `herdsman ask {f} {n} …` if you have not")?;
+                        writeln!(out, "ask the question with `drover ask {f} {n} …` if you have not")?;
                     }
                     kick(f, n, "turn");
-                    if let Some(w) = note {
-                        return gate::refused("WHY_INVALID", w);
+                    if let Some((code, w)) = note {
+                        return gate::refused(code, w);
                     }
                 }
                 Cmd::Why { at, json } => crate::why::show(ctx, &cfg, r, out, &at, json)?,
@@ -1900,9 +1919,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Lesson {
                     cmd: Some(LessonCmd::Apply { fleet, rules }),
                     ..
-                } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &rules)?,
+                } => crate::lesson::apply(ctx, &cfg, r, out, &fleet, &crate::repo_path(&rules))?,
                 Cmd::Lesson { fleet, .. } => {
-                    let fleet = fleet.context("usage: herdsman lesson <FLEET> | herdsman lesson digest <FLEET>")?;
+                    let fleet = fleet.context("usage: drover lesson <FLEET> | drover lesson digest <FLEET>")?;
                     if !crate::lesson::run(ctx, &cfg, r, out, &fleet, None)? {
                         return Ok(4);
                     }
@@ -2043,7 +2062,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     };
                     // #412: a conductor's design (#730: or architect) mark: the approval asks in its thread too.
                     let mut d = d;
-                    if let Some(t) = std::env::var("HERDSMAN_THREAD")
+                    if let Some(t) = std::env::var("DROVER_THREAD")
                         .ok()
                         .filter(|_| d.get("design").is_some() || d.get("architect").is_some())
                     {
@@ -2073,7 +2092,7 @@ fn lane(issue: &str) -> Result<Option<u64>> {
 fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool) -> Result<()> {
     let mut buf = String::new();
     stdin.read_to_string(&mut buf)?;
-    let lane = std::env::var_os("HERDSMAN_LANE").or_else(|| std::env::var_os("FLEET_LANE"));
+    let lane = std::env::var_os("DROVER_LANE").or_else(|| std::env::var_os("FLEET_LANE"));
     let Some(lane) = lane.filter(|v| !v.is_empty()).map(|v| v.to_string_lossy().into_owned()) else {
         return Ok(());
     };
@@ -2098,12 +2117,12 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             shed_proto::Method::State,
             json!(shed_proto::StateParams { name, report }),
         ) {
-            eprintln!("herdsman hook: shed state: {e:#}");
+            eprintln!("drover hook: shed state: {e:#}");
         }
     }
     // #304: a turn's end or a push that went through kicks the lane's issue at once.
     if let Some(why) = hook::kick_why(&input) {
-        let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+        let lane = std::env::var("DROVER_LANE").unwrap_or_default();
         let mut it = lane.split(':');
         if let (Some(f), Some(n)) = (it.next(), it.next().and_then(|n| n.parse().ok())) {
             let id = input["tool_use_id"].as_str().filter(|_| why == "push");
@@ -2117,10 +2136,10 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         return Ok(());
     }
     // #413: an issue a handed-off thread's conductor filed goes back to the thread it came from.
-    let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();
+    let thread = std::env::var("DROVER_THREAD").unwrap_or_default();
     if let Some(text) = hook::issue_filed(&input).filter(|_| !thread.is_empty()) {
         if let Err(e) = Config::load(&ctx.config).and_then(|cfg| crate::orchestrator::flow(ctx, &cfg, &thread, &text)) {
-            eprintln!("herdsman hook: {e:#}");
+            eprintln!("drover hook: {e:#}");
         }
     }
     if hook::after(&input) {
@@ -2157,11 +2176,11 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             .filter_map(|p| Some(p.home()?.default))
             .map(|d| h.join(d).to_string_lossy().into()),
     );
-    paths.extend(std::env::var("HERDSMAN_RULES").ok()); // #592: a lane never edits its own rules
-                                                        // #410: a conductor (`HERDSMAN_LANE`'s role) spawns design lanes and writes its own thread folder.
+    paths.extend(std::env::var("DROVER_RULES").ok()); // #592: a lane never edits its own rules
+                                                      // #410: a conductor (`DROVER_LANE`'s role) spawns design lanes and writes its own thread folder.
     let orchestrator =
-        std::env::var("HERDSMAN_LANE").is_ok_and(|l| l.split(':').nth(2).is_some_and(crate::orchestrator::is_role));
-    let thread = std::env::var("HERDSMAN_THREAD").unwrap_or_default();
+        std::env::var("DROVER_LANE").is_ok_and(|l| l.split(':').nth(2).is_some_and(crate::orchestrator::is_role));
+    let thread = std::env::var("DROVER_THREAD").unwrap_or_default();
     let cfg = Config::load(&ctx.config)
         .ok()
         .filter(|_| orchestrator && !thread.is_empty() && !thread.contains(['/', '.']));
@@ -2178,7 +2197,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         orchestrator,
         own,
         groups: rules.groups,
-        scratch: std::env::var("HERDSMAN_SCRATCH_TARGET").ok().filter(|s| !s.is_empty()),
+        scratch: std::env::var("DROVER_SCRATCH_TARGET").ok().filter(|s| !s.is_empty()),
         cap,
         design: (lane.split(':').nth(2) == Some("design")).then(|| crate::design::scope(ctx, r, &input, fleet, n)),
     };
@@ -2197,7 +2216,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     if let Some(dir) = hook::push_dir(&input) {
         coauthor_warn(ctx, r, &dir, "HEAD");
     }
-    // #386: a conductor's `herdsman`/`gh` command shows in its thread as a closed tool row.
+    // #386: a conductor's `drover`/`gh` command shows in its thread as a closed tool row.
     // #538: a group verb's row names its group.
     if let Some(cmd) = hook::fleet_cmd(&input).filter(|_| !thread.is_empty()) {
         let mut d = json!({"thread": thread, "cmd": cmd});
@@ -2209,17 +2228,17 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     Ok(())
 }
 
-/// #592: lane `<fleet>:<issue>:<role>`'s hook rules: its rules file (`HERDSMAN_RULES`, a remote lane's) and only it, else
+/// #592: lane `<fleet>:<issue>:<role>`'s hook rules: its rules file (`DROVER_RULES`, a remote lane's) and only it, else
 /// resolved from this host's fleet.toml. Err: the cause the hook fails closed for.
 fn lane_rules(ctx: &Ctx, lane: &str) -> std::result::Result<hook::Rules, String> {
-    if let Some(p) = std::env::var_os("HERDSMAN_RULES") {
+    if let Some(p) = std::env::var_os("DROVER_RULES") {
         let p = PathBuf::from(p);
         let bad = |e: &dyn std::fmt::Display| format!("rules file {} is unreadable ({e})", p.display());
         let text = std::fs::read_to_string(&p).map_err(|e| bad(&e))?;
         return serde_json::from_str(&text).map_err(|e| bad(&e));
     }
     let cfg = Config::load(&ctx.config).map_err(|e| {
-        eprintln!("herdsman hook: {e:#}");
+        eprintln!("drover hook: {e:#}");
         "fleet.toml failed to load".to_string()
     })?;
     let mut it = lane.split(':');
@@ -2227,7 +2246,7 @@ fn lane_rules(ctx: &Ctx, lane: &str) -> std::result::Result<hook::Rules, String>
     if !cfg.fleet.contains_key(fleet) {
         return Err(format!("fleet `{fleet}` is not in fleet.toml"));
     }
-    let host = std::env::var("HERDSMAN_HOST").unwrap_or_default();
+    let host = std::env::var("DROVER_HOST").unwrap_or_default();
     Ok(hook::Rules::resolve(&cfg, fleet, role, &host))
 }
 
@@ -2245,11 +2264,11 @@ fn coauthor_warn(ctx: &Ctx, r: &dyn Runner, dir: &str, rev: &str) {
     let Some(trailer) = msgs.as_deref().ok().and_then(hook::ai_coauthor) else {
         return;
     };
-    eprintln!("herdsman: warning: a pushed commit carries `{trailer}`; lanes add no AI co-author trailers");
+    eprintln!("drover: warning: a pushed commit carries `{trailer}`; lanes add no AI co-author trailers");
     lane_event(ctx, "coauthor-trailer", json!({"line": trailer}));
 }
 
-/// Logs `kind` for this lane (`HERDSMAN_LANE`'s fleet and issue), its data plus `lane`.
+/// Logs `kind` for this lane (`DROVER_LANE`'s fleet and issue), its data plus `lane`.
 fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
     if forward(
         &crate::runner::Real,
@@ -2259,7 +2278,7 @@ fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
     {
         return;
     }
-    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+    let lane = std::env::var("DROVER_LANE").unwrap_or_default();
     let mut it = lane.split(':');
     let (fleet, issue) = (it.next().unwrap_or_default(), it.next().and_then(|n| n.parse().ok()));
     d["lane"] = json!(lane);
@@ -2277,9 +2296,9 @@ fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
 fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read, reviewer: bool) -> Result<i32> {
     let mut buf = String::new();
     stdin.read_to_string(&mut buf)?;
-    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+    let lane = std::env::var("DROVER_LANE").unwrap_or_default();
     let rules = lane_rules(ctx, &lane).unwrap_or_else(|_| {
-        let (mut it, host) = (lane.split(':'), std::env::var("HERDSMAN_HOST").unwrap_or_default());
+        let (mut it, host) = (lane.split(':'), std::env::var("DROVER_HOST").unwrap_or_default());
         let (fleet, role) = (it.next().unwrap_or_default(), it.nth(1).unwrap_or_default());
         hook::Rules::resolve(&Config::load(&ctx.config).unwrap_or_default(), fleet, role, &host)
     });
@@ -2289,14 +2308,14 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         if reviewer {
             writeln!(
                 out,
-                "herdsman: reviewers are read-only: no `git push` (to `{b}`); write verdict.md and report in your pane"
+                "drover: reviewers are read-only: no `git push` (to `{b}`); write verdict.md and report in your pane"
             )?;
             return Ok(1);
         }
         if rules.branches.iter().any(|x| x == b) {
             writeln!(
                 out,
-                "herdsman: pushing to `{b}` is blocked; integration branches change only via `herdsman merge`"
+                "drover: pushing to `{b}` is blocked; integration branches change only via `drover merge`"
             )?;
             return Ok(1);
         }
@@ -2311,7 +2330,7 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
         let mut hit = diff.lines().filter(|l| l.starts_with('+') && !l.starts_with("+++"));
         if let Some(d) = hit.find_map(|l| hook::denied(&l[1..], &deny)) {
             lane_event(ctx, "hook-denied", json!({"rule": d.reason()}));
-            writeln!(out, "herdsman: a pushed script runs `{}`: {}", d.cmd(), d.reason())?;
+            writeln!(out, "drover: a pushed script runs `{}`: {}", d.cmd(), d.reason())?;
             return Ok(1);
         }
         coauthor_warn(ctx, r, ".", sha);

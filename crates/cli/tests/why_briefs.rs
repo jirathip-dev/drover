@@ -3,8 +3,8 @@
 //! head's note, or why there is none.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, Event};
+use drover::runner::{Out, Runner};
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Command;
@@ -48,7 +48,7 @@ fn g(dir: &Path, args: &[&str]) -> String {
 }
 
 /// A local clone with two noted commits: #12's round 1 head and #7's (which changed src/meter.rs).
-fn setup(name: &str) -> (herdsman::Ctx, String, String) {
+fn setup(name: &str) -> (drover::Ctx, String, String) {
     let d = tmpdir(name);
     let local = d.join("local");
     g(&d, &["init", "-q", local.to_str().unwrap()]);
@@ -99,7 +99,7 @@ fn fake(rev_head: &str, wt: &Path) -> Fake {
 }
 
 /// Spawn `args` (after `spawn sendmeter 12`) and read the lane's brief.
-fn brief(c: &herdsman::Ctx, head: &str, args: &[&str]) -> String {
+fn brief(c: &drover::Ctx, head: &str, args: &[&str]) -> String {
     let dir = if args[0] == "rev" { "rev-12-r1" } else { "issue-12" };
     let wt = c.worktrees.join("sendmeter").join(dir);
     let f = fake(head, &wt);
@@ -108,7 +108,7 @@ fn brief(c: &herdsman::Ctx, head: &str, args: &[&str]) -> String {
     std::fs::read_to_string(wt.join(".brief.md")).unwrap()
 }
 
-fn noted_round(c: &herdsman::Ctx, sha: &str) {
+fn noted_round(c: &drover::Ctx, sha: &str) {
     let d = json!({"sha": sha, "round": 1, "owner": "#12 counts retries once", "files": ["src/meter.rs"]});
     append(&c.state, &Event::new(30, "sendmeter", Some(12), "why", d)).unwrap();
 }

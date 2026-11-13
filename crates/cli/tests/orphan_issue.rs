@@ -1,17 +1,17 @@
 //! #493: `check` alerts `orphan-issue` once for an open issue nothing drives for 30 min; `waiting` says so.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::{json, Value};
 
 const T0: u64 = 1_000_000;
 const SHA: &str = "1111111111111111111111111111111111111111";
 
-fn ev(c: &herdsman::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: Value) {
+fn ev(c: &drover::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", issue, kind, d)).unwrap();
 }
 
-fn spawn(c: &herdsman::Ctx, ts: u64, n: u64, role: &str) -> String {
+fn spawn(c: &drover::Ctx, ts: u64, n: u64, role: &str) -> String {
     let agent = format!("sendmeter-{role}-{n}");
     let d = json!({"role": role, "agent": agent, "branch": format!("issue-{n}"), "check": role == "rev"});
     ev(c, ts, Some(n), "spawn", d);
@@ -19,7 +19,7 @@ fn spawn(c: &herdsman::Ctx, ts: u64, n: u64, role: &str) -> String {
 }
 
 /// A drive pass at `ts` that acted on `acts` (issue, refusal code).
-fn pass(c: &herdsman::Ctx, ts: u64, acts: &[(u64, Option<&str>)]) {
+fn pass(c: &drover::Ctx, ts: u64, acts: &[(u64, Option<&str>)]) {
     let a: Vec<Value> = acts
         .iter()
         .map(|(n, code)| json!({"issue": n, "step": "x", "code": code}))
@@ -28,7 +28,7 @@ fn pass(c: &herdsman::Ctx, ts: u64, acts: &[(u64, Option<&str>)]) {
 }
 
 /// `check` at `now`; the `orphan-issue` alerts logged so far.
-fn check_at(c: &mut herdsman::Ctx, r: &Fake, now: u64) -> Vec<Event> {
+fn check_at(c: &mut drover::Ctx, r: &Fake, now: u64) -> Vec<Event> {
     c.now = now;
     let (code, out) = run(c, r, &["check"]);
     assert_eq!(code, 0, "{out}");
@@ -40,7 +40,7 @@ fn check_at(c: &mut herdsman::Ctx, r: &Fake, now: u64) -> Vec<Event> {
 }
 
 /// Each stall shape: silent at 29 min, one alert at 30 min, none more at 40 min and 2 h.
-fn fires_once(c: &mut herdsman::Ctx, r: &Fake, quiet_since: u64, n: u64) -> Event {
+fn fires_once(c: &mut drover::Ctx, r: &Fake, quiet_since: u64, n: u64) -> Event {
     assert!(check_at(c, r, quiet_since + 1740).is_empty(), "not before 30 min");
     let got = check_at(c, r, quiet_since + 1800);
     assert_eq!(got.len(), 1, "{got:?}");
@@ -231,7 +231,7 @@ fn waiting_names_why_drive_has_not_started_a_queued_issue() {
     let mut c = ctx(&d, CONFIG);
     ev(&c, T0, None, "queue", json!({"op": "add", "issues": [12]}));
     let r = Fake::default().reply("herdr agent list", NO_AGENTS);
-    let line = |c: &herdsman::Ctx| {
+    let line = |c: &drover::Ctx| {
         let (code, out) = run(c, &r, &["waiting", "sendmeter"]);
         assert_eq!(code, 0, "{out}");
         assert!(!out.contains("→ ?"), "{out}");
@@ -247,16 +247,12 @@ fn waiting_names_why_drive_has_not_started_a_queued_issue() {
     c.now = T0 + 1200;
     let l = line(&c);
     assert!(
-        l.ends_with("→ drive's next pass (last 20m ago): tick stuck? herdsman doctor"),
+        l.ends_with("→ drive's next pass (last 20m ago): tick stuck? drover doctor"),
         "{l}"
     );
     let paused = CONFIG.replace("integration = \"staging\"", "integration = \"staging\"\npaused = true");
     std::fs::write(&c.config, paused).unwrap();
-    assert!(
-        line(&c).ends_with("→ paused: herdsman resume sendmeter"),
-        "{}",
-        line(&c)
-    );
+    assert!(line(&c).ends_with("→ paused: drover resume sendmeter"), "{}", line(&c));
 }
 
 /// #791: drive's last finished pass is 30 min old but a tick runs with a fresh heartbeat: `running for Nm`, never
@@ -267,7 +263,7 @@ fn waiting_reads_a_long_running_tick_as_running_not_stuck() {
     let mut c = ctx(&d, CONFIG);
     ev(&c, T0, None, "queue", json!({"op": "add", "issues": [12]}));
     let r = Fake::default().reply("herdr agent list", NO_AGENTS);
-    let line = |c: &herdsman::Ctx| {
+    let line = |c: &drover::Ctx| {
         let (code, out) = run(c, &r, &["waiting", "sendmeter"]);
         assert_eq!(code, 0, "{out}");
         out.lines()
@@ -284,7 +280,7 @@ fn waiting_reads_a_long_running_tick_as_running_not_stuck() {
     std::fs::write(st.join("tick.beat"), format!("{} {}", c.now - 1200, c.now - 660)).unwrap();
     let l = line(&c);
     assert!(
-        l.ends_with("→ drive's next pass (last 30m ago): tick stuck? herdsman doctor"),
+        l.ends_with("→ drive's next pass (last 30m ago): tick stuck? drover doctor"),
         "{l}"
     );
 }

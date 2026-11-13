@@ -1,8 +1,8 @@
 //! The dsh harness's kick, moved out of `src/harness/dsh.rs`.
 use anyhow::Result;
-use herdsman::providers;
-use herdsman::runner::{Out, Runner};
-use herdsman::spawn::Plan;
+use drover::providers;
+use drover::runner::{Out, Runner};
+use drover::spawn::Plan;
 use std::path::PathBuf;
 
 /// Answers `pane get` idle, then working; records every herdr call.

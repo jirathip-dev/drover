@@ -3,8 +3,8 @@
 //! cached index alone, and a rotation since the last read reads the log again.
 mod common;
 use common::*;
-use herdsman::events::{append, shared, Event, VISITS};
-use herdsman::serve::Server;
+use drover::events::{append, shared, Event, VISITS};
+use drover::serve::Server;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering::Relaxed;
 

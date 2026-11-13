@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::config::{Limits, LIMIT_DOCS};
-use herdsman::events::{append, fold, Event, STATES};
+use drover::config::{Limits, LIMIT_DOCS};
+use drover::events::{append, fold, Event, STATES};
 use serde_json::json;
 
 const TIMING: [&str; 5] = ["_secs", "_millis", "_minutes", "_hours", "_days"];
@@ -18,7 +18,7 @@ fn the_diagram_is_docs_workflow_md_with_every_state_and_timing_limit() {
     let doc = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/workflow.md")).unwrap();
     assert_eq!(
         out, doc,
-        "docs/workflow.md is stale: `herdsman diagram > docs/workflow.md`"
+        "docs/workflow.md is stale: `drover diagram > docs/workflow.md`"
     );
     for s in [
         "queued",
@@ -39,11 +39,11 @@ fn the_diagram_is_docs_workflow_md_with_every_state_and_timing_limit() {
     assert!(STATES.iter().all(|(s, _)| out.contains(&format!("state \"{s}\" as "))));
     let l = serde_json::to_value(Limits::default()).unwrap();
     let timed = LIMIT_DOCS.iter().filter(|(k, _)| TIMING.iter().any(|t| k.ends_with(t)));
-    let stepped = (herdsman::drive::STEPS.iter().chain(&herdsman::timer::TICK_STEPS)).flat_map(|s| s.1.iter());
+    let stepped = (drover::drive::STEPS.iter().chain(&drover::timer::TICK_STEPS)).flat_map(|s| s.1.iter());
     for k in timed.map(|d| d.0).chain(stepped.copied()) {
         assert!(limit_line(&out, k, &l[k].to_string()), "{k} missing");
     }
-    for (step, _) in herdsman::drive::STEPS.iter().chain(&herdsman::timer::TICK_STEPS) {
+    for (step, _) in drover::drive::STEPS.iter().chain(&drover::timer::TICK_STEPS) {
         assert!(out.contains(&format!("[\"{step}\"]")), "{step} missing");
     }
 }

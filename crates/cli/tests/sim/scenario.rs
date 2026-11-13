@@ -2,7 +2,7 @@
 //! written out by hand; any other seed draws its own.
 use crate::model::{Ev, Model, Pr, Script, FLEET, REPO};
 use crate::sched::{Rng, Sim, World};
-use herdsman::Ctx;
+use drover::Ctx;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -42,7 +42,7 @@ pub fn ctx(root: &Path, now: u64) -> Ctx {
         state: root.join("state/events.jsonl"),
         worktrees: root.join("wt"),
         homes: [("hermes", root.join("hermes"))].into(),
-        exe: "/opt/herdsman/bin/herdsman".into(),
+        exe: "/opt/drover/bin/drover".into(),
         now,
         home: root.join("home"),
         hints: vec![],

@@ -1,19 +1,19 @@
 //! #173: the configurable pipeline. The built-in default replays both fleets' recorded histories with today's decisions.
 mod common;
-use herdsman::config::Config;
-use herdsman::events::{fold, Event};
-use herdsman::gate::gate;
-use herdsman::waiting::waiting_on;
+use drover::config::Config;
+use drover::events::{fold, Event};
+use drover::gate::gate;
+use drover::waiting::waiting_on;
 use serde_json::json;
 
 const FLEETS: &str = r#"
-[fleet.herdsman]
-repo = "o/herdsman"
+[fleet.drover]
+repo = "o/drover"
 local = "/tmp/h"
 integration = "staging"
-[fleet.herdsman.role.impl]
+[fleet.drover.role.impl]
 harness = "claude"
-[fleet.herdsman.role.rev]
+[fleet.drover.role.rev]
 harness = "claude"
 [fleet.atlas]
 repo = "o/atlas"
@@ -44,7 +44,7 @@ fn default_pipeline_replays_recorded_histories() {
                 "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]})
         };
         let moved = "e".repeat(40);
-        let log = herdsman::waiting::Log::new(&events[..=i]);
+        let log = drover::waiting::Log::new(&events[..=i]);
         let a = waiting_on(
             &log,
             &events[..=i],
@@ -263,7 +263,7 @@ fn next(cfg: &Config, events: &[Event], head: &str) -> (Option<String>, Result<(
     let f = cfg.fleet("atlas").unwrap();
     let s = &fold(events)[&("atlas".to_string(), 12)];
     let w = waiting_on(
-        &herdsman::waiting::Log::new(events),
+        &drover::waiting::Log::new(events),
         events,
         s,
         Some((head, 1)),
@@ -290,13 +290,13 @@ fn two_checks_merge_on_both_passes_and_either_fail_routes_to_fix() {
     ];
     assert_eq!(
         next(&cfg, &e, &a),
-        (Some("herdsman spawn atlas 12 sec".into()), Err("STALE_VERDICT"))
+        (Some("drover spawn atlas 12 sec".into()), Err("STALE_VERDICT"))
     );
     e.push(spawn(4, "sec", true));
     assert_eq!(fold(&e)[&("atlas".to_string(), 12)].shown(), "sec(1)");
     let mut pass = e.clone();
     pass.push(verdict(5, "sec", "PASS", &a));
-    assert_eq!(next(&cfg, &pass, &a), (Some("herdsman merge atlas 12".into()), Ok(())));
+    assert_eq!(next(&cfg, &pass, &a), (Some("drover merge atlas 12".into()), Ok(())));
     // A head with only rev's PASS does not merge, nor one whose sec PASS is for an older head.
     let mut moved = pass.clone();
     moved.extend([
@@ -307,7 +307,7 @@ fn two_checks_merge_on_both_passes_and_either_fail_routes_to_fix() {
     assert_eq!(next(&cfg, &moved, &b).1, Err("STALE_VERDICT"));
     // sec FAIL → fix in impl; then rev FAIL → fix in impl.
     e.push(verdict(5, "sec", "FAIL", &a));
-    let fix = Some("herdsman spawn atlas 12 impl --supersede".into());
+    let fix = Some("drover spawn atlas 12 impl --supersede".into());
     assert_eq!(next(&cfg, &e, &a), (fix.clone(), Err("VERDICT_FAIL")));
     e.extend([
         spawn(6, "impl", false),
@@ -326,7 +326,7 @@ fn round_limits_are_per_check_stage() {
     let file = d.join("v.md");
     std::fs::write(&file, "FAIL\n\nnope\n").unwrap();
     let file = file.to_string_lossy().to_string();
-    let log = |e: Event| herdsman::events::append(&c.state, &e).unwrap();
+    let log = |e: Event| drover::events::append(&c.state, &e).unwrap();
     let verdict = |v: &str, sha: &str| {
         let r = common::Fake::default().reply("gh api", sha);
         common::run(&c, &r, &["verdict", "atlas", "12", v, "--sha", sha, "--file", &file])
@@ -346,7 +346,7 @@ fn round_limits_are_per_check_stage() {
         out.contains("(round 2/2)") && out.contains("round limit reached → needs-human"),
         "{out}"
     );
-    let s = &fold(&herdsman::events::read(&c.state).unwrap())[&("atlas".to_string(), 12)];
+    let s = &fold(&drover::events::read(&c.state).unwrap())[&("atlas".to_string(), 12)];
     assert_eq!(
         (s.state.as_str(), s.stage_rounds["rev"], s.stage_rounds["sec"]),
         ("needs-human", 2, 2)
@@ -382,8 +382,7 @@ fn red_ci_in_the_last_round_goes_to_park() {
     let file = d.join("v.md");
     std::fs::write(&file, "FAIL\n\nCI red\n").unwrap();
     let file = file.to_string_lossy().to_string();
-    let log =
-        |ts, kind, d| herdsman::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
+    let log = |ts, kind, d| drover::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
     for (i, sha) in ["a", "b", "c"].iter().enumerate() {
         let t = 10 * i as u64;
         log(t, "spawn", json!({"role": "impl", "agent": "sendmeter-impl-12"}));
@@ -403,7 +402,7 @@ fn red_ci_in_the_last_round_goes_to_park() {
         &["verdict", "sendmeter", "12", "FAIL", "--sha", &head, "--file", &file],
     );
     assert!(out.contains("(round 3/3)") && out.contains("needs-human"), "{out}");
-    let events = herdsman::events::read(&c.state).unwrap();
+    let events = drover::events::read(&c.state).unwrap();
     let v = events.iter().rfind(|e| e.kind == "verdict").unwrap();
     assert_eq!((v.str("stage"), v.str("loop")), (Some("gates"), Some("rev")));
 }

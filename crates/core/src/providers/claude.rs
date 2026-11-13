@@ -111,7 +111,7 @@ impl Provider for Claude {
 
     fn ready(&self, ctx: &Ctx, _r: &dyn Runner, p: &Plan) -> Result<()> {
         if !root(ctx).join(&p.profile).join("settings.json").exists() {
-            bail!("Claude profile {} missing; run `herdsman profiles sync`", p.profile);
+            bail!("Claude profile {} missing; run `drover profiles sync`", p.profile);
         }
         Ok(())
     }

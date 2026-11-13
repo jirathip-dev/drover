@@ -1,8 +1,8 @@
 //! The invariants (design §2), checked against the model's ground truth (panes, PRs, true time) and the events as
-//! the yield hook saw each one appended: never against herdsman's own view. I1, I3, I4, I7, I9 and I10 hold after
+//! the yield hook saw each one appended: never against drover's own view. I1, I3, I4, I7, I9 and I10 hold after
 //! every step; I2 at each supersede; I5 at quiet points; I6 per full drive pass; I8 when a process exits.
 use crate::sched::World;
-use herdsman::events::Event;
+use drover::events::Event;
 use std::collections::BTreeMap;
 
 /// Test-only break switches (AC 3): each makes the model break one invariant on purpose.
@@ -253,7 +253,7 @@ fn liveness(w: &mut World) {
 /// `.again` flag is a message to the busy kick, not a hold.
 pub fn on_exit(w: &mut World, me: usize, pid: u32) {
     let state = crate::scenario::ctx(&w.root, 0).state;
-    let held: Vec<String> = (herdsman::db::leases(&state, "").into_iter())
+    let held: Vec<String> = (drover::db::leases(&state, "").into_iter())
         .filter(|l| l.pid == pid && l.expires_at > w.now && !l.key.ends_with(".again"))
         .map(|l| l.key)
         .collect();
