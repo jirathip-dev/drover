@@ -1,0 +1,6 @@
+Decided: keep the cherry-picked one-line commit 9fdd5206a and merge origin/staging on top; no history rewrite
+Because: "Set `[comments] policy` in `.drover/arch.toml` back to `\"off\"`, its value before #456. No other change."
+Because: .drover/arch.toml:2
+Rejected: rebasing to drop the draft's co-author trailer — lanes never rewrite history or force-push
+Check: drover arch-check with policy "off" exits 0 on the merged head, 918 files, 0 violations
+Owner: The check that refuses new code comments is on again after the rename.
