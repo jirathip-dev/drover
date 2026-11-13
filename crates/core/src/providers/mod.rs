@@ -135,10 +135,10 @@ impl Home {
     }
 }
 
-/// A `herdsman doctor` row: passed, its mark when not, its text.
+/// A `drover doctor` row: passed, its mark when not, its text.
 pub type Row = (bool, char, String);
 
-/// A harness's hook protocol, as `herdsman hook` reads and answers it: whether it `sent` a call, the keys of a call's
+/// A harness's hook protocol, as `drover hook` reads and answers it: whether it `sent` a call, the keys of a call's
 /// tool `input` (the first object wins), its `shell` and file-writing tools, its `hook_event_name` after a tool call
 /// and at a turn's end, and its `deny` answer.
 pub struct Dialect {
@@ -305,7 +305,7 @@ pub trait Provider: Sync {
     fn install(&self) -> Option<&'static str> {
         None
     }
-    /// Its `herdsman hook` protocol (generic: none, no tool guard but git's pre-push).
+    /// Its `drover hook` protocol (generic: none, no tool guard but git's pre-push).
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         None
     }
@@ -378,22 +378,22 @@ pub fn default_acp() -> Option<&'static str> {
     lanes().find_map(|h| h.acp())
 }
 
-/// The herdsman hook's command line, as Claude settings and Hermes config/allowlist name it.
+/// The drover hook's command line, as Claude settings and Hermes config/allowlist name it.
 pub fn hook_command(ctx: &Ctx, role: &str) -> String {
     format!("'{}' hook --role {role}", real(&ctx.exe))
 }
 
-/// #737: `path` with its symlinks resolved (unresolvable: as given), so `~/.local/bin/herdsman` and the binary agree.
+/// #737: `path` with its symlinks resolved (unresolvable: as given), so `~/.local/bin/drover` and the binary agree.
 fn real(path: &str) -> String {
     std::fs::canonicalize(path).map_or(path.into(), |p| p.to_string_lossy().into())
 }
 
-/// #737: the program of a herdsman hook command (`'<exe>' hook --role <r>`), any role; None for another hook.
+/// #737: the program of a drover hook command (`'<exe>' hook --role <r>`), any role; None for another hook.
 pub fn hook_program(cmd: &str) -> Option<&str> {
     cmd.strip_prefix('\'')?.split_once("' hook --role ").map(|(exe, _)| exe)
 }
 
-/// #737: herdsman hook command `cmd` runs the running binary, through a symlink or not.
+/// #737: drover hook command `cmd` runs the running binary, through a symlink or not.
 pub fn runs_this(ctx: &Ctx, cmd: &str) -> bool {
     hook_program(cmd).is_some_and(|exe| real(exe) == real(&ctx.exe))
 }

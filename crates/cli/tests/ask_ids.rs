@@ -1,28 +1,28 @@
 mod common;
 use common::*;
-use herdsman::events::{append, closed, read, Event};
-use herdsman::sim::{Hooks, Point};
+use drover::events::{append, closed, read, Event};
+use drover::sim::{Hooks, Point};
 use serde_json::{json, Value};
 
 const NOW: u64 = 1_000_000;
 
-fn log(c: &herdsman::Ctx, issue: Option<u64>, kind: &str, d: Value) {
+fn log(c: &drover::Ctx, issue: Option<u64>, kind: &str, d: Value) {
     append(&c.state, &Event::new(NOW - 100, "sendmeter", issue, kind, d)).unwrap();
 }
 
-fn asks(c: &herdsman::Ctx) -> Vec<Event> {
+fn asks(c: &drover::Ctx) -> Vec<Event> {
     let events = read(&c.state).unwrap();
     events.into_iter().filter(|e| e.kind == "needs-decision").collect()
 }
 
-fn endings(c: &herdsman::Ctx) -> Vec<(String, Option<&'static str>)> {
+fn endings(c: &drover::Ctx) -> Vec<(String, Option<&'static str>)> {
     let events = read(&c.state).unwrap();
     let asks = events.iter().filter(|e| e.kind == "needs-decision");
     asks.map(|a| (a.str("thread").unwrap_or("-").to_string(), closed(&events, a)))
         .collect()
 }
 
-fn thread_ask(c: &herdsman::Ctx, issue: Option<u64>, id: &str, thread: &str) {
+fn thread_ask(c: &drover::Ctx, issue: Option<u64>, id: &str, thread: &str) {
     let d = json!({"id": id, "question": "Ship it?", "options": ["yes", "no"], "recommend": 1, "kind": "owner",
         "thread": thread, "agent": null});
     log(c, issue, "needs-decision", d);
@@ -42,13 +42,13 @@ fn two_asks_racing_on_one_state_dir_get_distinct_ids() {
         let b = std::thread::spawn(move || run(&o, &Fake::default(), &["ask", "sendmeter", "12", "Second?"]));
         assert_eq!(b.join().unwrap().0, 0);
     };
-    herdsman::sim::set(Some(Hooks {
+    drover::sim::set(Some(Hooks {
         now: Box::new(|| NOW),
         pid: std::process::id(),
         point: Box::new(point),
     }));
     let (code, out) = run(&c, &Fake::default(), &["ask", "sendmeter", "12", "First?"]);
-    herdsman::sim::set(None);
+    drover::sim::set(None);
     assert_eq!(code, 0, "{out}");
     let ids: Vec<String> = asks(&c).iter().map(|a| a.str("id").unwrap().into()).collect();
     assert_eq!(ids.len(), 2, "{ids:?}");

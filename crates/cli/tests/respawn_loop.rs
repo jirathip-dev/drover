@@ -2,12 +2,12 @@
 //! (60); the next spawn is refused `RESPAWN_LOOP` with one owner ask ([try again] / [park]) and takes no wip snapshot.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 
 /// A Fake on which `spawn sendmeter 12 impl` starts a lane whose prompt never lands (exit 4); after the first start its
 /// worktree holds one unpushed commit, so each `--supersede` of it saves a `wip/` branch first.
-fn dying(c: &herdsman::Ctx) -> Fake {
+fn dying(c: &drover::Ctx) -> Fake {
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
     Fake::default()
@@ -29,15 +29,15 @@ fn dying(c: &herdsman::Ctx) -> Fake {
         .reply("herdr pane send-keys", "{}")
 }
 
-fn at(c: &herdsman::Ctx, mins: u64) -> herdsman::Ctx {
-    herdsman::Ctx {
+fn at(c: &drover::Ctx, mins: u64) -> drover::Ctx {
+    drover::Ctx {
         now: c.now + mins * 60,
         ..c.clone()
     }
 }
 
 /// `spawn sendmeter 12 impl --supersede` at `mins` past the first start: (exit, output).
-fn respawn(c: &herdsman::Ctx, r: &Fake, mins: u64) -> (i32, String) {
+fn respawn(c: &drover::Ctx, r: &Fake, mins: u64) -> (i32, String) {
     run(&at(c, mins), r, &["spawn", "sendmeter", "12", "impl", "--supersede"])
 }
 
@@ -49,7 +49,7 @@ fn wips(r: &Fake) -> usize {
         .count()
 }
 
-fn asks(c: &herdsman::Ctx) -> Vec<Event> {
+fn asks(c: &drover::Ctx) -> Vec<Event> {
     let ev = read(&c.state).unwrap();
     ev.into_iter().filter(|e| e.kind == "needs-decision").collect()
 }

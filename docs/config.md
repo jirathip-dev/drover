@@ -16,18 +16,18 @@ max = 1
 ```
 
 The old form, `serial_paths` / `serial_max` / `serial_label`, still works: it is one group named `serial_label` (unset:
-`db`). Giving both forms in one fleet is a config error; `herdsman doctor` suggests the new form.
+`db`). Giving both forms in one fleet is a config error; `drover doctor` suggests the new form.
 
 ## Joining
 
 An issue is in a group when
 
-- it is **marked**: `herdsman queue add N --serial ci`, or `queue set N serial ci,db` (replaces its marks). A plain
+- it is **marked**: `drover queue add N --serial ci`, or `queue set N serial ci,db` (replaces its marks). A plain
   `--serial` means the fleet's first group, as before; or
 - its **pushed diff** touches one of the group's paths: drive checks each open PR and logs
   `serial-joined {group, by: "diff"}`.
 
-`herdsman merge` still refuses `SERIAL_UNMARKED ci: PR touches scripts/check-x.mjs` for a PR touching a group it never
+`drover merge` still refuses `SERIAL_UNMARKED ci: PR touches scripts/check-x.mjs` for a PR touching a group it never
 joined (belt and braces).
 
 ## Slots
@@ -65,19 +65,28 @@ full_first_paths = ["db/migrations/**", ".github/workflows/**"]
   - **Red:** a runner/infra red (cancelled, timed out, never started) is re-run once. Otherwise fast-first landings
     pause (`land-paused`), and the culprit is found:
     - one landing since the last green is the culprit;
-    - several are bisected: each landing commit's own run, else one dispatched on a `herdsman-bisect-<sha>` ref.
+    - several are bisected: each landing commit's own run, else one dispatched on a `drover-bisect-<sha>` ref.
   - **Revert.** A revert PR opens and lands once its fast checks are green (`reverted`). The issue reopens in a fix
     round, with the failed job's log as its finding.
   - **Full-first culprit.** It is never reverted: it gets the fix round only (`land-fix`).
 - **Alerts.** `land-paused` and `reverted` go to every notifier of the fleet, whatever its `on` says.
-- **Numbers.** `herdsman stats land <fleet>` prints both modes' landings, per day, median PASS → landed, reverts and check
+- **Numbers.** `drover stats land <fleet>` prints both modes' landings, per day, median PASS → landed, reverts and check
   time, plus the minutes integration sat red.
 - **Promotion.** `main` stays human-only; promote a staging commit only once its full suite is green.
 
+## Hotspots (#889)
+
+`drover hotspots [FLEET]` (every fleet when none is named) lists the files 5 or more merged PRs touched in the
+last 14 days on the integration branch, any language, each with its `conflict-predicted` events and the update rounds of
+the issues that touched it (drover's log, every fleet on the same repo). It keeps the list in the state folder as
+`hotspots-<fleet>.json`. With any hot file it opens `hotspots: <fleet> week of <monday>`, or updates that issue while it
+is open, and queues it `--architect`. `drover tick` runs it weekly per fleet; `hotspots = "off"` in `[fleet.<n>]` opts
+out.
+
 ## Limits (#844)
 
-Every timing and cap herdsman core uses is a `[limits]` key; a fleet.toml without one keeps the default below.
-`herdsman config show` prints each key with its current value and this doc line, and CI's timing check
+Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without one keeps the default below.
+`drover config show` prints each key with its current value and this doc line, and CI's timing check
 (`scripts/timing-check.sh`) fails a hard-coded `Duration` in `crates/core/src` outside `config.rs` and tests.
 
 | key | default | what it sets |
@@ -93,7 +102,7 @@ Every timing and cap herdsman core uses is a `[limits]` key; a fleet.toml withou
 | `worktree_budget_gb` | `25.0` | over this many GB of worktrees drive frees build folders, then spawn refuses DISK_BUDGET |
 | `build_budget_gb` | `20.0` | over this many GB of lane build folders drive trims their unlocked profiles |
 | `sweep_remote` | `true` | the scratch sweep runs on every enabled remote host too |
-| `stray_roots` | `["/tmp", "$TMPDIR"]` | where `herdsman clean` looks for stray build folders and temp dirs |
+| `stray_roots` | `["/tmp", "$TMPDIR"]` | where `drover clean` looks for stray build folders and temp dirs |
 | `min_free_mem_gb` | `2.0` | spawn refuses MEM_LOW under this many GB of free + inactive memory |
 | `effort` | `unset` | default reasoning effort for roles that set none |
 | `ask_default_minutes` | `30` | a routine ask unanswered this long takes its recommended option |
@@ -123,7 +132,7 @@ Every timing and cap herdsman core uses is a `[limits]` key; a fleet.toml withou
 | `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow` |
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout` |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe |
-| `ssh_call_secs` | `15` | a remote call in a pass is killed after this long |
+| `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
 | `access_probe_secs` | `30` | an account probe (`account_env`) is killed after this long |
 | `db_busy_secs` | `60` | the SQLite busy timeout |
 | `db_retry_millis` | `10` | the pause between a new database's WAL switch retries |

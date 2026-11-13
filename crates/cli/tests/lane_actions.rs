@@ -1,8 +1,8 @@
-//! #43: lane actions (`herdsman stop|kill|clean --lane`, the page's `/act`) and the per-turn transcript.
+//! #43: lane actions (`drover stop|kill|clean --lane`, the page's `/act`) and the per-turn transcript.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, fold, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -10,7 +10,7 @@ const T: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-12";
 
 /// sendmeter #12's impl lane in a real (empty) worktree dir, pane w1:p2; git answers per test.
-fn lane(name: &str) -> (herdsman::Ctx, String) {
+fn lane(name: &str) -> (drover::Ctx, String) {
     let d = tmpdir(name);
     let c = ctx(&d, CONFIG);
     let wt = d.join("wt").to_string_lossy().into_owned();
@@ -30,7 +30,7 @@ fn git(wt: &str, status: &str, ahead: &str, log: &str) -> Fake {
         .reply("herdr pane", "")
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> usize {
+fn kinds(c: &drover::Ctx, kind: &str) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == kind).count()
 }
 
@@ -67,7 +67,7 @@ fn kill_pushes_wip_then_closes_and_logs() {
         .once(&format!("git -C {wt} diff --cached --name-only"), 0, "")
         .once(&format!("git -C {wt} diff --cached"), 0, "+fn x() {}\n");
     // #138: the lane's rolling transcript goes with it.
-    let log = herdsman::lanes::log(&c.state, LANE).unwrap();
+    let log = drover::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, "⏺ hi\n").unwrap();
     let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
@@ -174,20 +174,20 @@ fn kill_skips_lockfile_checksums_but_not_secrets() {
 /// scratch written), failing any git call containing `fail`; herdr and date are faked.
 struct RealGit(Fake, &'static str);
 
-impl herdsman::runner::Runner for RealGit {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for RealGit {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog != "git" {
             return self.0.run(prog, args);
         }
         self.0.calls.borrow_mut().push(format!("git {}", args.join(" ")));
         if !self.1.is_empty() && args.join(" ").contains(self.1) {
-            return Ok(herdsman::runner::Out {
+            return Ok(drover::runner::Out {
                 code: 1,
                 stdout: String::new(),
                 stderr: "forced".into(),
             });
         }
-        herdsman::runner::Real.run(prog, args)
+        drover::runner::Real.run(prog, args)
     }
 }
 
@@ -397,7 +397,7 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
         "{res}"
     );
     let e = read(&c.state).unwrap().pop().unwrap();
-    let label = herdsman::devices::load(&c)[0].label.clone();
+    let label = drover::devices::load(&c)[0].label.clone();
     assert_eq!(
         (e.kind.as_str(), e.str("via"), e.str("device"), e.str("op")),
         ("act", Some("web"), Some(&*label), Some("stop"))
@@ -421,7 +421,7 @@ fn screen() -> String {
 #[test]
 fn lane_pages_back_through_the_rolling_transcript() {
     let (c, _) = lane("more");
-    let log = herdsman::lanes::log(&c.state, LANE).unwrap();
+    let log = drover::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, (0..450).map(|i| format!("  out {i}\n")).collect::<String>()).unwrap();
     let list = agents(&[(LANE, "working", "/x", "w1:p2")]);
@@ -449,7 +449,7 @@ fn lane_pages_back_through_the_rolling_transcript() {
     assert_eq!(
         (&lines[193], &lines[194], &lines[199]),
         (
-            &json!(herdsman::lanes::GAP),
+            &json!(drover::lanes::GAP),
             &json!("> fix it"),
             &json!("⏺ Bash(cargo fmt)")
         )
@@ -484,7 +484,7 @@ fn a_gone_lane_reads_its_stored_transcript() {
         res
     };
     assert!(get().starts_with("HTTP/1.1 404"), "{}", get());
-    let log = herdsman::lanes::log(&c.state, LANE).unwrap();
+    let log = drover::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, (0..250).map(|i| format!("  out {i}\n")).collect::<String>()).unwrap();
     let res = get();
@@ -518,7 +518,7 @@ fn inputs_are_16px_and_zoom_is_off() {
 /// Token-shaped fixtures here and in other tests are split with `concat!` so no source literal reads as a live secret.
 #[test]
 fn secret_flags_real_shapes_only() {
-    use herdsman::lanes::secret;
+    use drover::lanes::secret;
     for ok in [
         "fn check_prompts_an_idle_orch_after_5_min_then_alerts_after_15() {",
         "    let api_key = config.key();",
@@ -664,7 +664,7 @@ fn kill_saves_code_and_names_the_secret_line() {
     assert!(!r.called(&format!("git -C {wt} push")));
 }
 
-/// #248: a lane herdsman closed reads back Claude's saved session for its worktree (the newest) over the rolling
+/// #248: a lane drover closed reads back Claude's saved session for its worktree (the newest) over the rolling
 /// transcript; prompts `❯`, replies and tool calls `⏺`, masked.
 #[test]
 fn a_closed_lane_reads_claudes_saved_session() {
@@ -686,7 +686,7 @@ fn a_closed_lane_reads_claudes_saved_session() {
     let jsonl: String = rows.iter().map(|r| format!("{r}\n")).collect();
     std::fs::write(dir.join("s-1.jsonl"), jsonl).unwrap();
     std::fs::write(dir.join("notes.txt"), "not a session").unwrap();
-    let log = herdsman::lanes::log(&c.state, LANE).unwrap();
+    let log = drover::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, "  rolled\n").unwrap();
     let r = Fake::default().reply("herdr agent list", &agents(&[]));

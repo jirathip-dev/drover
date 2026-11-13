@@ -52,7 +52,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
     if let Some(m) = on.machine {
         crate::hosts::resolve(r, m, false)?; // #641: never a pane here for a host herdr can't pin down
     }
-    let ws = "workspace create --cwd /tmp --label herdsman-setup --no-focus";
+    let ws = "workspace create --cwd /tmp --label drover-setup --no-focus";
     let ws = herdr::json(&on, &argv(&ws.split(' ').collect::<Vec<_>>()))?;
     let pane = ws["result"]["root_pane"]["pane_id"].as_str().context("no pane")?;
     herdr::ok(&on, &herdr::run_argv(pane, &[&format!("cd; {line}; exit")]))?;

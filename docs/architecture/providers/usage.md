@@ -41,7 +41,7 @@ let (a, b) = (providers::vendor_of_agent(impl_id), providers::vendor_of_agent(re
 ## Usage and limits through one shape
 
 ```rust
-// usage.rs: `herdsman statusline` (#707).
+// usage.rs: `drover statusline` (#707).
 let Some(u) = providers::accounts().and_then(|p| p.usage()) else { return Ok(()) };
 let l: Limits = u.reading(&status_json);          // was (Part, Part)
 row.five_hour = l.session;                        // usage.jsonl keys unchanged

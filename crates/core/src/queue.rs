@@ -1,4 +1,4 @@
-//! The per-fleet work queue (`queue` events): `herdsman queue`, `next` and `board`.
+//! The per-fleet work queue (`queue` events): `drover queue`, `next` and `board`.
 use crate::config::{Fleet, Serial};
 use crate::events::{age, fold, last_spawn, Event, IssueState, States};
 use crate::overlap::Conflicts;
@@ -203,7 +203,7 @@ pub fn released(events: &[Event], st: &States, b: &str) -> bool {
             .any(|e| e.kind == "blocker-closed" && e.str("ref") == Some(b))
 }
 
-/// #667: `#11, herdsman#633, cooee#87`: the item's open blockers, another repo's by its name.
+/// #667: `#11, drover#633, cooee#87`: the item's open blockers, another repo's by its name.
 pub fn labels(i: &Item) -> String {
     let ext = i.ext.iter().map(|b| b.rsplit('/').next().unwrap_or(b).to_string());
     let all: Vec<String> = i.blockers.iter().map(|n| format!("#{n}")).chain(ext).collect();
@@ -334,7 +334,7 @@ pub fn view(events: &[Event], st: &States, fleet: &str) -> Vec<Item> {
     .collect()
 }
 
-/// `herdsman next`: (exit code, line) for the first unblocked queued issue with no lane.
+/// `drover next`: (exit code, line) for the first unblocked queued issue with no lane.
 pub fn next(events: &[Event], fleet: &str) -> (i32, String) {
     let st = fold(events);
     let free: Vec<Item> = view(events, &st, fleet)

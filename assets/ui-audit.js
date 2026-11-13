@@ -16,7 +16,7 @@
   // confirms unpaired, as the board answers an unpaired browser.
   const F = window.fetch, early = [], wait = () => new Promise(r => setTimeout(r, 300));
   const LONG = {
-    pair: 'pair this device: tap Pair this phone, then `herdsman serve approve <code>` on the Mac',
+    pair: 'pair this device: tap Pair this phone, then `drover serve approve <code>` on the Mac',
     sub: 'push subscribe refused: the endpoint https://web.push.apple.com/QGx2c3Rlc3Qtc3Vic2NyaXB0aW9uLWVuZHBvaW50LWlk is not https or not a known push service',
     kill: 'REFUSED UNSAFE_CLEAN: acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx has 3 unpushed commits and a dirty tree; push them first',
     dry: 'dry run; would push 3 commits and 2 dirty files to wip/acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx-20261031-1943, then close pane w1:p5',
@@ -123,7 +123,7 @@
       $('#queue').prepend(d);
       if (!DBG.get('check')) $('#needs').hidden = true;
       d.open = true;
-      const ls = [...d.querySelectorAll('.qls>.ql')], long = ['herdsman-impl-157-queue-card-lane-overflow', 'acme-rev-2940-r1-settings-contrast-audit', 'herdsman-impl-205-queue-card-lanes-newest-first'];
+      const ls = [...d.querySelectorAll('.qls>.ql')], long = ['drover-impl-157-queue-card-lane-overflow', 'acme-rev-2940-r1-settings-contrast-audit', 'drover-impl-205-queue-card-lanes-newest-first'];
       if (ls.length !== 3) early.push(`#38 lists ${ls.length} lanes, not 3`);
       ls.forEach((l, i) => { l.querySelector('.qn').textContent = long[i]; if (l.dataset.agent) l.dataset.agent = long[i]; });
       const hs = [...d.querySelectorAll('.cd>.ch')].map(h => h.textContent).join(', ');
@@ -154,7 +154,7 @@
       $('#queue').prepend(d);
       if (!DBG.get('check')) $('#needs').hidden = true; // the shot shows the row; the check keeps the needs cards
     },
-    // #92: the demo's `driver = "herdsman"` fleet (docs): its card with the `drive · …` line and [drive now], moved to the
+    // #92: the demo's `driver = "drover"` fleet (docs): its card with the `drive · …` line and [drive now], moved to the
     // top (a scrolled view shoots blank).
     'queue-drive': () => {
       tab('queue');
@@ -656,7 +656,7 @@
       await wait();
       const probe = S.appendChild(Object.assign(document.createElement('i'), { className: 'r' })), red = getComputedStyle(probe).color;
       probe.remove();
-      if (st.textContent !== 'not a herdsman lane: herdsman can only close its pane') early.push(`p.st reads "${st.textContent}"`);
+      if (st.textContent !== 'not a drover lane: drover can only close its pane') early.push(`p.st reads "${st.textContent}"`);
       for (const op of ['stop', 'kill', 'clean']) if (seen($(`[data-op=${op}]`))) early.push(`[${op}] shown on an Others agent`);
       if (!seen($('[data-op=close]'))) early.push('no [close pane] on an Others agent');
       for (const e of [S, ...S.querySelectorAll('*')].filter(seen)) if (e.matches('.r') || getComputedStyle(e).color === red) early.push(`red in the sheet: ${e.outerHTML.slice(0, 60)}`);
@@ -1189,7 +1189,7 @@
     if (V === 'herd-garden-still' && (!matchMedia('(prefers-reduced-motion: reduce)').matches || s.animationName !== 'none')) early.push(`still: #herd animates (${s.animationName})`);
   }
   let toasted = null, drove = null, href = null;
-  const ERR = 'error: herdsman: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
+  const ERR = 'error: drover: herdr agent start failed: {"error":{"code":"invalid_agent_argument","message":"agent arguments cannot be encoded safely for the target shell"},"id":"cli:agent:start"}';
   const dragged = [];
   const HP = { herd1: 0, herd2: 1, 'herd-kitchen': 0, 'herd-kitchen-busy': 0, 'herd-kitchen-held': 0, 'herd-kitchen-still': 0, 'herd-garden': 0, 'herd-garden-busy': 0, 'herd-garden-held': 0, 'herd-garden-still': 0, 'herd-nodone': 0, 'herd-night': 0, 'herd-night-storm': 0, 'herd-nav': 1 }; // the views measuring one Herd page
   const ROOTS = { 'loading-tap': () => [$('#sheet')], sheet: () => [$('#sheet')], 'sheet-full': () => [$('#sheet')], 'sheet-acp': () => [$('#sheet')], 'sheet-parked': () => [$('#sheet')], 'sheet-other': () => [$('#sheet')], ...Object.fromEntries(['chat-viewer', 'chat-viewer-zoom', 'chat-viewer-multi'].map(v => [v, () => [$('.ivb')]])), ...Object.fromEntries(Object.entries(HP).map(([v, n]) => [v, () => [hp(n), $('.hlt'), $('.hx'), $('.hwx')]])) };

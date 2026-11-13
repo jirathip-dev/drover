@@ -1,6 +1,6 @@
 [package]
-name = "herdsman-service"
-description = "`herdsman service`: one supervised async process over herdsman-core and the board (docs/service.md)"
+name = "drover-service"
+description = "`drover service`: one supervised async process over drover-core and the board (docs/service.md)"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,7 +10,7 @@ workspace = true
 
 [dependencies]
 anyhow.workspace = true
-herdsman-core.workspace = true
-herdsman-server.workspace = true
+drover-core.workspace = true
+drover-server.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

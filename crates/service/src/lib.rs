@@ -1,13 +1,13 @@
-//! #345 `herdsman service` (docs/service.md): one supervised tokio process. A kick (a lane's push, stop or ask, a
+//! #345 `drover service` (docs/service.md): one supervised tokio process. A kick (a lane's push, stop or ask, a
 //! verdict, an answer, a board tap) arrives on the local socket and is driven in process at once; the fast step
 //! polls GitHub every 15 s; API v1 takes a remote lane's commands with its token and streams the event log; with
 //! `--board` the board runs in it; #529: lane state comes from herdr's and shed's event streams (`lanes`). Every job has a timeout and a bounded slot; a watchdog exits the process when the
 //! loop stalls 30 s, and launchd/systemd start it again.
 use anyhow::{bail, Result};
-use herdsman_core::config::Config;
-use herdsman_core::events::{append, emit, Event};
-use herdsman_core::runner::{argv, Real, Runner};
-use herdsman_core::{devices, service, Ctx};
+use drover_core::config::Config;
+use drover_core::events::{append, emit, Event};
+use drover_core::runner::{argv, Real, Runner};
+use drover_core::{devices, service, Ctx};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
@@ -44,7 +44,7 @@ pub struct Service {
     streams: std::sync::Mutex<std::collections::BTreeMap<&'static str, bool>>,
 }
 
-/// `herdsman service`: refuses a second one, then runs until killed.
+/// `drover service`: refuses a second one, then runs until killed.
 pub fn main(ctx: &Ctx, api: &str, board: Option<&str>) -> Result<()> {
     if let Some(pid) = service::up(ctx) {
         bail!("a service already runs (pid {pid})");
@@ -52,14 +52,14 @@ pub fn main(ctx: &Ctx, api: &str, board: Option<&str>) -> Result<()> {
     if let Some(b) = board.map(String::from) {
         let c = ctx.clone();
         std::thread::spawn(move || {
-            if let Err(e) = herdsman_server::hooks::board(&c, &Real, &b, false, false) {
-                eprintln!("herdsman service: board on {b}: {e:#}");
+            if let Err(e) = drover_server::hooks::board(&c, &Real, &b, false, false) {
+                eprintln!("drover service: board on {b}: {e:#}");
             }
         });
     }
     let api = std::net::TcpListener::bind(api)?;
     let herdr = std::env::var_os("HERDR_SOCKET_PATH").map_or(ctx.home.join(".config/herdr/herdr.sock"), Into::into);
-    run(ctx.clone(), &Real, herdsman_core::now, api, Some(herdr))
+    run(ctx.clone(), &Real, drover_core::now, api, Some(herdr))
 }
 
 /// The service on `api` and the state dir's socket, until the process ends; #529: lane state from herdr's socket
@@ -80,11 +80,11 @@ pub fn run(
         let local = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
         let s = Arc::new(Service {
-            beat: AtomicU64::new(herdsman_core::now()),
+            beat: AtomicU64::new(drover_core::now()),
             jobs: Semaphore::new(JOBS),
             conns: Arc::new(Semaphore::new(CONNS)),
             polling: AtomicBool::new(false),
-            seq: watch::channel(herdsman_core::db::last_seq(&ctx.state)).0,
+            seq: watch::channel(drover_core::db::last_seq(&ctx.state)).0,
             streams: std::sync::Mutex::default(),
             ctx,
             r,
@@ -113,10 +113,10 @@ pub fn run(
 
 impl Service {
     fn event(&self, kind: &str, d: Value) -> Event {
-        Event::new((self.clock)(), "herdsman", None, kind, d)
+        Event::new((self.clock)(), "drover", None, kind, d)
     }
 
-    /// `herdsman <args>` in process on a blocking thread, in a job slot, within `secs`; a timeout is logged and its
+    /// `drover <args>` in process on a blocking thread, in a job slot, within `secs`; a timeout is logged and its
     /// slot freed, so a stuck job never holds the others.
     async fn job(&self, args: Vec<String>, secs: u64) -> Option<i32> {
         let _slot = self.jobs.acquire().await.ok()?;
@@ -125,8 +125,8 @@ impl Service {
             ..self.ctx.clone()
         };
         let (r, a) = (self.r, args.clone());
-        let full = std::iter::once("herdsman".to_string()).chain(a).collect();
-        let run = move || herdsman_core::main_with(full, &c, r, &mut std::io::sink(), &mut std::io::empty());
+        let full = std::iter::once("drover".to_string()).chain(a).collect();
+        let run = move || drover_core::main_with(full, &c, r, &mut std::io::sink(), &mut std::io::empty());
         if let Ok(code) = timeout(Duration::from_secs(secs), tokio::task::spawn_blocking(run)).await {
             return code.ok();
         }
@@ -142,13 +142,13 @@ impl Service {
             let mut t = interval(Duration::from_secs(1));
             loop {
                 t.tick().await;
-                me.beat.store(herdsman_core::now(), Relaxed);
+                me.beat.store(drover_core::now(), Relaxed);
             }
         });
         let me = self.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_secs(5));
-            let late = herdsman_core::now().saturating_sub(me.beat.load(Relaxed));
+            let late = drover_core::now().saturating_sub(me.beat.load(Relaxed));
             if late > STALL_SECS {
                 let ev = me.event("service-stalled", json!({"secs": late, "pid": std::process::id()}));
                 let _ = Config::load(&me.ctx.config).map(|cfg| emit(&me.ctx.state, &cfg, ev));
@@ -163,7 +163,7 @@ impl Service {
         loop {
             t.tick().await;
             let state = self.ctx.state.clone();
-            let seq = tokio::task::spawn_blocking(move || herdsman_core::db::last_seq(&state));
+            let seq = tokio::task::spawn_blocking(move || drover_core::db::last_seq(&state));
             if let Ok(Ok(n)) = timeout(Duration::from_secs(5), seq).await {
                 self.seq.send_if_modified(|s| std::mem::replace(s, n) != n);
             }
@@ -214,7 +214,7 @@ impl Service {
             k.extend(id.into_iter().flatten());
             // A timed-out kick frees its spawn slot: the marker's pid (this process) outlives it.
             if self.job(k, KICK_SECS).await.is_none() {
-                herdsman_core::db::release(&self.ctx.state, &format!("spawn-{f}-{n}.pending"), None);
+                drover_core::db::release(&self.ctx.state, &format!("spawn-{f}-{n}.pending"), None);
             }
         }
     }
@@ -234,9 +234,9 @@ impl Service {
         let (path, query) = target.split_once('?').unwrap_or((target, ""));
         let out = match (method, path) {
             ("GET", "/api/v1/health") => {
-                let late = herdsman_core::now().saturating_sub(self.beat.load(Relaxed));
+                let late = drover_core::now().saturating_sub(self.beat.load(Relaxed));
                 let busy = JOBS - self.jobs.available_permits();
-                let d = json!({"ok": true, "pid": std::process::id(), "version": herdsman_core::VERSION, "jobs": busy, "beat_secs": late});
+                let d = json!({"ok": true, "pid": std::process::id(), "version": drover_core::VERSION, "jobs": busy, "beat_secs": late});
                 reply(200, &d)
             }
             ("GET", "/api/v1/events") if peer.ip().is_loopback() || self.paired(&head) => {
@@ -292,7 +292,7 @@ impl Service {
         }
     }
 
-    /// A remote lane's command: its token checked, its `--file`s written here, then `herdsman <args>` as that lane.
+    /// A remote lane's command: its token checked, its `--file`s written here, then `drover <args>` as that lane.
     async fn cmd(self: &Arc<Self>, body: &[u8]) -> Vec<u8> {
         let v: Value = serde_json::from_slice(body).unwrap_or_default();
         let token = v["token"].as_str().unwrap_or_default().to_string();
@@ -305,7 +305,7 @@ impl Service {
         let (ctx, r, files) = (self.ctx.clone(), self.r, v["files"].clone());
         let run = move || -> Result<(u16, Value)> {
             let ctx = Ctx {
-                now: herdsman_core::now(),
+                now: drover_core::now(),
                 ..ctx
             };
             let cfg = Config::load(&ctx.config)?;
@@ -318,16 +318,16 @@ impl Service {
                 if args[i - 1] == "--file" {
                     // Only the text the lane sent: never a path on this host.
                     let Some(text) = files[&args[i]].as_str() else {
-                        let e = format!("herdsman: --file {} came without its text\n", args[i]);
+                        let e = format!("drover: --file {} came without its text\n", args[i]);
                         return Ok((400, json!({"code": 2, "stdout": "", "stderr": e})));
                     };
                     std::fs::create_dir_all(&dir)?;
-                    let p = dir.join(herdsman_core::devices::sha256(text.as_bytes()) + ".md");
+                    let p = dir.join(drover_core::devices::sha256(text.as_bytes()) + ".md");
                     std::fs::write(&p, text)?;
                     args[i] = p.display().to_string();
                 }
             }
-            let a = [argv(&[&format!("HERDSMAN_LANE={lane}"), &ctx.exe]), args].concat();
+            let a = [argv(&[&format!("DROVER_LANE={lane}"), &ctx.exe]), args].concat();
             let o = r.run("env", &a)?;
             Ok((200, json!({"code": o.code, "stdout": o.stdout, "stderr": o.stderr})))
         };
@@ -338,11 +338,11 @@ impl Service {
             Ok(Ok(Ok((status, v)))) => reply(status, &v),
             Ok(Ok(Err(e))) => reply(
                 500,
-                &json!({"code": 1, "stdout": "", "stderr": format!("herdsman: {e:#}\n")}),
+                &json!({"code": 1, "stdout": "", "stderr": format!("drover: {e:#}\n")}),
             ),
             _ => reply(
                 504,
-                &json!({"code": 1, "stdout": "", "stderr": "herdsman service: timed out\n"}),
+                &json!({"code": 1, "stdout": "", "stderr": "drover service: timed out\n"}),
             ),
         }
     }

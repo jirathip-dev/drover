@@ -1,11 +1,11 @@
 //! #637: remote hosts run lanes as shed-acp sessions with no herdr. A fake remote host behind ssh (`Boat`): its shed
 //! answers `shed connect` lines and `shed run --acp`, its files are real files (written over ssh stdin), and its
-//! herdsman is this build. Covers the survey, a remote ACP spawn through the token proxy, the guard there, placement
+//! drover is this build. Covers the survey, a remote ACP spawn through the token proxy, the guard there, placement
 //! past an unguarded host, a shed-only bootstrap, and the proxy's lane keys.
 mod common;
 use common::*;
-use herdsman::runner::{Out, Runner};
-use herdsman::shed::proto::{Hello, Request, Response};
+use drover::runner::{Out, Runner};
+use drover::shed::proto::{Hello, Request, Response};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const TOKEN_C: &str = concat!("sk", "-ant-oat01-CCCC-secret");
-const EXE: &str = env!("CARGO_BIN_EXE_herdsman");
+const EXE: &str = env!("CARGO_BIN_EXE_drover");
 
 /// One remote host: its shed's terminals, its `shed agents --json` and whether its `profiles sync` writes the hook.
 #[derive(Default)]
@@ -63,7 +63,7 @@ fn out(code: i32, stdout: &str) -> Out {
 
 impl Boat<'_> {
     /// `hosts`: (machine, lists claude-acp, its `profiles sync` writes the hook).
-    fn new<'a>(c: &herdsman::Ctx, f: &'a Fake, hosts: &[(&str, bool, bool)]) -> Boat<'a> {
+    fn new<'a>(c: &drover::Ctx, f: &'a Fake, hosts: &[(&str, bool, bool)]) -> Boat<'a> {
         let acp = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["env"]}]);
         let m = hosts.iter().map(|(n, a, h)| {
             let agents = if *a { acp.clone() } else { json!([]) };
@@ -107,9 +107,9 @@ impl Boat<'_> {
         json!(Response::ok(id, res))
     }
     fn remote(&self, m: &str, w: &[String], input: &str) -> anyhow::Result<Out> {
-        // Its herdsman (this build, at its `$HOME`'s copy of the path) is this build.
+        // Its drover (this build, at its `$HOME`'s copy of the path) is this build.
         let mut w = w.to_vec();
-        if w[0].ends_with("/herdsman") {
+        if w[0].ends_with("/drover") {
             w[0] = EXE.into();
         }
         let w = &w[..];
@@ -159,7 +159,7 @@ impl Boat<'_> {
                 std::fs::write(dir.join("role.md"), "role").unwrap();
                 Ok(out(0, ""))
             }
-            // Its files and its herdsman are real (paths under the test's own dirs).
+            // Its files and its drover are real (paths under the test's own dirs).
             ["sh", "-c", script, "sh", _] if script.contains("cat >") || script.starts_with("test -e") => {
                 real(w, input)
             }
@@ -207,7 +207,7 @@ impl Runner for Boat<'_> {
 }
 
 /// sendmeter on Claude (account C), herdr runtime; `hosts`: each a `shed-acp` remote host; mini (this one) off.
-fn setup(name: &str, hosts: &[&str]) -> (herdsman::Ctx, PathBuf) {
+fn setup(name: &str, hosts: &[&str]) -> (drover::Ctx, PathBuf) {
     let base = CONFIG.replace(
         "harness  =  \"hermes\"    # toggled in tests",
         "harness = \"claude\"\naccount = \"C\"",
@@ -244,8 +244,8 @@ fn spawn_fake() -> Fake {
         .reply("sh -c nohup", "4242\n")
 }
 
-fn spawned(c: &herdsman::Ctx) -> Vec<herdsman::events::Event> {
-    let ev = herdsman::events::read(&c.state).unwrap();
+fn spawned(c: &drover::Ctx) -> Vec<drover::events::Event> {
+    let ev = drover::events::read(&c.state).unwrap();
     ev.into_iter().filter(|e| e.kind == "spawn").collect()
 }
 
@@ -262,17 +262,17 @@ fn adapter_env(b: &Boat) -> BTreeMap<String, String> {
 fn hook_there(env: &BTreeMap<String, String>, dir: &Path, cmd: &str) -> String {
     let mut ch = Command::new(EXE);
     for k in [
-        "HERDSMAN_LANE",
-        "HERDSMAN_HOST",
-        "HERDSMAN_RULES",
-        "HERDSMAN_SCRATCH_TARGET",
+        "DROVER_LANE",
+        "DROVER_HOST",
+        "DROVER_RULES",
+        "DROVER_SCRATCH_TARGET",
         "FLEET_LANE",
     ] {
         ch.env_remove(k);
     }
     let keep = env
         .iter()
-        .filter(|(k, _)| k.starts_with("HERDSMAN_") && !["HERDSMAN_OUTBOX", "HERDSMAN_SERVICE"].contains(&k.as_str()));
+        .filter(|(k, _)| k.starts_with("DROVER_") && !["DROVER_OUTBOX", "DROVER_SERVICE"].contains(&k.as_str()));
     let mut child = ch
         .envs(keep)
         .args(["hook", "--role", "impl"])
@@ -300,9 +300,9 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
     let (c, home) = setup("racp-spawn", &["boat1"]);
     let f = spawn_fake().reply("herdr --machine boat1 agent list", NO_AGENTS);
     let b = Boat::new(&c, &f, &[("boat1", true, true)]);
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     // Up from its shed alone: herdr there is never asked.
-    let live = herdsman::hosts::survey(&c, &cfg, &shed_runner(&b, &cfg), false);
+    let live = drover::hosts::survey(&c, &cfg, &shed_runner(&b, &cfg), false);
     assert_eq!(live.get("boat1"), Some(&Some(vec![])), "{:?}", f.calls.borrow());
     assert!(!f.called("herdr --machine boat1"), "{:?}", f.calls.borrow());
 
@@ -341,7 +341,7 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
     let key = env.get("ANTHROPIC_AUTH_TOKEN").unwrap();
     assert!(key.starts_with("hsk-"), "{key}");
     assert!(!env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"), "{env:?}");
-    let keys = herdsman::proxy::keys(&c);
+    let keys = drover::proxy::keys(&c);
     assert_eq!(
         (keys.len(), keys[0].agent.as_str(), keys[0].host.as_str()),
         (1, "sendmeter-impl-12", "boat1")
@@ -356,7 +356,7 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
         !std::path::Path::new(&format!("{}.env", wt.display())).exists(),
         "secrets file removed"
     );
-    assert!(!herdsman::events::jsonl(&c.state).unwrap().contains(TOKEN_C));
+    assert!(!drover::events::jsonl(&c.state).unwrap().contains(TOKEN_C));
     // The proxy and the host's tunnel were started from here.
     assert!(
         calls.iter().any(|l| l.contains("nohup") && l.contains("proxy")),
@@ -370,7 +370,7 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
     );
 
     // A guarded command is refused inside that lane, by its hook there.
-    let rules = env.get("HERDSMAN_RULES").unwrap();
+    let rules = env.get("DROVER_RULES").unwrap();
     assert!(Path::new(rules).exists(), "{rules}");
     let kill = ["p", "kill x"].concat();
     for (cmd, why) in [("git push origin staging", "staging"), (kill.as_str(), "NO_BROAD_KILL")] {
@@ -381,8 +381,8 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
 }
 
 /// The runner the CLI gives a fleet whose host runs shed (`shed::With`), for calls made outside `run`.
-fn shed_runner<'a>(b: &'a Boat, cfg: &herdsman::config::Config) -> herdsman::shed::With<'a> {
-    herdsman::shed::With(b, cfg.shed().unwrap())
+fn shed_runner<'a>(b: &'a Boat, cfg: &drover::config::Config) -> drover::shed::With<'a> {
+    drover::shed::With(b, cfg.shed().unwrap())
 }
 
 fn grep(dir: &Path, needle: &str) -> bool {
@@ -397,9 +397,9 @@ fn grep(dir: &Path, needle: &str) -> bool {
 fn a_host_whose_herdr_answers_but_whose_shed_does_not_is_offline() {
     let (c, _) = setup("racp-down", &["boat3"]);
     let f = Fake::default().reply("herdr --machine boat3 agent list", NO_AGENTS);
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    let r = herdsman::shed::With(&f, cfg.shed().unwrap());
-    assert_eq!(herdsman::hosts::survey(&c, &cfg, &r, false).get("boat3"), Some(&None));
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let r = drover::shed::With(&f, cfg.shed().unwrap());
+    assert_eq!(drover::hosts::survey(&c, &cfg, &r, false).get("boat3"), Some(&None));
 }
 
 #[test]
@@ -414,18 +414,18 @@ fn a_host_missing_the_adapter_or_the_hook_refuses_acp_unguarded_and_the_lane_goe
         o.contains("REFUSED ACP_UNGUARDED") && o.contains("boat1") && o.contains("lists no claude-acp"),
         "{o}"
     );
-    assert!(spawned(&c).is_empty() && herdsman::proxy::keys(&c).is_empty());
+    assert!(spawned(&c).is_empty() && drover::proxy::keys(&c).is_empty());
     assert!(b.runs.borrow().is_empty(), "nothing started");
     let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{o}");
     assert_eq!(spawned(&c)[0].str("host"), Some("boat2"));
 
-    // A host whose profile there has no herdsman hook refuses too.
+    // A host whose profile there has no drover hook refuses too.
     let (c, _) = setup("racp-nohook", &["boat1"]);
     let b = Boat::new(&c, &f, &[("boat1", true, false)]);
     let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl", "--host", "boat1"]);
     assert!(
-        code == 3 && o.contains("ACP_UNGUARDED") && o.contains("no herdsman PreToolUse hook"),
+        code == 3 && o.contains("ACP_UNGUARDED") && o.contains("no drover PreToolUse hook"),
         "{o}"
     );
     assert!(b.runs.borrow().is_empty());
@@ -470,7 +470,7 @@ fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     let has = |s: &str| calls.iter().any(|l| l.contains(s));
     assert!(has(&format!(
         "cargo install --git https://github.com/jirathip-dev/shed --rev {}",
-        herdsman::shed::REV
+        drover::shed::REV
     )));
     assert!(
         has("shed install --force") && has("shed agents add claude-acp"),
@@ -539,7 +539,7 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
         .unwrap()
         .replace("port = 9", &format!("port = 9\nupstream = \"http://127.0.0.1:{port}\""));
     std::fs::write(&c.config, toml).unwrap();
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     // #707: account C's hand-placed 0600 token file is what the proxy signs with.
     let tf = c.config.with_file_name("tokens/C");
     std::fs::create_dir_all(tf.parent().unwrap()).unwrap();
@@ -548,8 +548,8 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
     std::fs::set_permissions(&tf, std::fs::Permissions::from_mode(0o600)).unwrap();
     let acct = format!("token-file:{}", tf.display());
     let mint = |agent: &str| {
-        let k = herdsman::proxy::new_key().unwrap();
-        let id = herdsman::proxy::mint(&c, &cfg, &k, ("sendmeter", 12, agent), ("boat1", acct.as_str())).unwrap();
+        let k = drover::proxy::new_key().unwrap();
+        let id = drover::proxy::mint(&c, &cfg, &k, ("sendmeter", 12, agent), ("boat1", acct.as_str())).unwrap();
         (k, id)
     };
     let ((live, _), (gone, gone_id), (late, _)) = (
@@ -563,12 +563,11 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
     // The proxy runs until the test binary ends: its state leaked for its thread.
     let now: &'static Shared<u64> = Box::leak(Box::new(Shared::new(c.now)));
     let dir = c.config.parent().unwrap().parent().unwrap();
-    let pc: &'static herdsman::Ctx = Box::leak(Box::new(ctx(dir, &std::fs::read_to_string(&c.config).unwrap())));
-    let pcfg: &'static herdsman::config::Config =
-        Box::leak(Box::new(herdsman::config::Config::load(&c.config).unwrap()));
+    let pc: &'static drover::Ctx = Box::leak(Box::new(ctx(dir, &std::fs::read_to_string(&c.config).unwrap())));
+    let pcfg: &'static drover::config::Config = Box::leak(Box::new(drover::config::Config::load(&c.config).unwrap()));
     let pf: &'static Fake = Box::leak(Box::new(f));
     let f = pf;
-    std::thread::spawn(move || herdsman::proxy::serve_on(pc, pcfg, pf, &l, &|| now.get()));
+    std::thread::spawn(move || drover::proxy::serve_on(pc, pcfg, pf, &l, &|| now.get()));
     {
         let (status, body) = call(pport, &live);
         assert!(status.contains("200"), "{status} {body}");

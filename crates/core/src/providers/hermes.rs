@@ -62,7 +62,7 @@ impl Provider for Hermes {
             if !root(ctx).join(&profile).join("config.yaml").exists() {
                 continue;
             }
-            let lane = format!("HERDSMAN_LANE={name}:-:{role}");
+            let lane = format!("DROVER_LANE={name}:-:{role}");
             let o = r.run("env", &argv(&[&lane, "hermes", "-p", &profile, "hooks", "list"]))?;
             let cmd = hook_command(ctx, f.family(role));
             let allowed = o.code == 0 && o.stdout.lines().any(|l| l.contains(&cmd) && l.contains("✓ allowed"));
@@ -86,7 +86,7 @@ impl Provider for Hermes {
         }
         if !hermes.is_empty() {
             let synced = crate::spawn::profiles_check(ctx, cfg, r, &mut std::io::sink()).unwrap_or(false);
-            let line = "hermes hooks — profiles sync --check → herdsman profiles sync";
+            let line = "hermes hooks — profiles sync --check → drover profiles sync";
             rows.push((synced, '✗', line.into()));
         }
         rows

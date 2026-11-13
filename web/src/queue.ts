@@ -136,7 +136,7 @@ export function sheet(d: QueueTab, fleet: string): string | null {
     ['repo', esc(g.repo)],
     ['local', esc(g.local)],
     ['integration', esc(g.integration)],
-    ['driver', 'herdsman <span class=m>(herdsman drive)</span>'],
+    ['driver', 'drover <span class=m>(drover drive)</span>'],
     ['default effort', `${g.effort == null ? '<span class=m>unset → none</span>' : esc(g.effort)}${all}`],
     ['colour', `<span class=${c.k}>■</span> --${c.k} <span class=m>(${g.color_set ? 'set' : 'auto'})</span>`],
     ['env', list(g.env)],

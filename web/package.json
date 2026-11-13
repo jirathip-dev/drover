@@ -1,5 +1,5 @@
 {
-  "name": "herdsman-web",
+  "name": "drover-web",
   "private": true,
   "type": "module",
   "description": "#265: the TypeScript board; `npm run build` writes dist/ (committed, embedded in the binary)",

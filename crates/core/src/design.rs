@@ -24,13 +24,13 @@ pub fn scope(ctx: &Ctx, r: &dyn Runner, input: &Value, fleet: &str, n: Option<u6
         .and_then(|n| crate::gh::cached_spec(ctx, fleet, n))
         .unwrap_or_default();
     let root = top.map_or_else(|_| cwd.to_string(), |t| t.trim().to_string());
-    let text = std::fs::read_to_string(Path::new(&root).join(RECIPE)).unwrap_or_default();
+    let text = std::fs::read_to_string(crate::repo_path(&Path::new(&root).join(RECIPE))).unwrap_or_default();
     let allow = Recipe::of(&text, spec["body"].as_str().unwrap_or_default()).folders;
     crate::hook::Design { root, allow }
 }
 
 /// #873: a repo's design recipe.
-pub const RECIPE: &str = ".herdsman/design.md";
+pub const RECIPE: &str = ".drover/design.md";
 
 /// #873: what a design lane draws, where, how it renders and the host tags it needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,8 +87,8 @@ impl Recipe {
 
     /// The recipe at `rev` of the checkout `dir`, for an issue `body`.
     pub fn at(r: &dyn Runner, dir: &str, rev: &str, body: &str) -> Recipe {
-        let text = ok(r, "git", &["-C", dir, "show", &format!("{rev}:{RECIPE}")]);
-        Recipe::of(&text.unwrap_or_default(), body)
+        let show = |p: &str| ok(r, "git", &["-C", dir, "show", &format!("{rev}:{p}")]).ok();
+        Recipe::of(&crate::repo_read("design.md", show).unwrap_or_default(), body)
     }
 }
 
@@ -172,10 +172,13 @@ pub fn handoff(
     let handed = ev
         .iter()
         .any(|e| e.is("design-review", f, n) && e.str("sha") == Some(head));
-    if head.is_empty() || handed || crate::spawn::dirty(r, Path::new(wt)).is_some() {
+    if head.is_empty() || crate::spawn::dirty(r, Path::new(wt)).is_some() {
         return Ok(());
     }
     let role = sp.str("role").unwrap_or("design");
+    if handed {
+        return failed(ctx, cfg, out, &ev, sp, (f, n, role));
+    }
     let pre = pre(&ev, f, n, role).unwrap_or(head);
     let dirs = if role == "architect" {
         vec!["docs/architecture".to_string()]
@@ -183,14 +186,24 @@ pub fn handoff(
         let spec = crate::gh::cached_spec(ctx, f, n).unwrap_or_default();
         Recipe::at(r, wt, head, spec["body"].as_str().unwrap_or_default()).folders
     };
-    let mut args = vec!["-C", wt, "diff", "--name-only", pre, head, "--"];
+    let (range, int) = (
+        format!("{pre}..{head}"),
+        format!("^origin/{}", cfg.fleet(f)?.integration),
+    );
+    let mut args = vec!["-C", wt, "log", "--format=", "--name-only", &range, &int, "--"];
     args.extend(dirs.iter().map(String::as_str));
-    let names = ok(r, "git", &args).unwrap_or_default();
-    if names.trim().is_empty() {
-        return Ok(()); // no design on the branch yet
+    let log = ok(r, "git", &args).unwrap_or_default();
+    let mut names: Vec<&str> = vec![];
+    for l in log.lines().filter(|l| !l.is_empty()) {
+        if !names.contains(&l) {
+            names.push(l);
+        }
+    }
+    if names.is_empty() {
+        return failed(ctx, cfg, out, &ev, sp, (f, n, role));
     }
     // #730: the ADR's folder, `docs/architecture/<slug>`, which the impl and rev briefs link once approved.
-    let dir = folder(names.lines().next().unwrap_or_default(), &dirs);
+    let dir = folder(names[0], &dirs);
     let adr = (role == "architect").then(|| dir.clone());
     let png = |l: &&str| {
         [".png", ".gif", ".mp4"]
@@ -198,7 +211,8 @@ pub fn handoff(
             .any(|x| l.to_ascii_lowercase().ends_with(x))
     };
     let files: Vec<Value> = names
-        .lines()
+        .iter()
+        .copied()
         .filter(png)
         .map(|l| json!({"name": l, "path": Path::new(wt).join(l)}))
         .collect();
@@ -228,6 +242,36 @@ pub fn handoff(
     let d = json!({"question": q, "options": OPTIONS, "recommend": null, "kind": "owner", "design": true, "files": files,
         "thread": thread, "role": role, "summary": summary, "link": link});
     crate::events::emit_ask(&ctx.state, cfg, &Event::new(ctx.now, f, Some(n), "needs-decision", d)).map(drop)
+}
+
+fn failed(
+    ctx: &Ctx,
+    cfg: &Config,
+    out: &mut dyn Write,
+    ev: &[Event],
+    sp: &Event,
+    (f, n, role): (&str, u64, &str),
+) -> Result<()> {
+    let agent = sp.str("agent").unwrap_or_default();
+    let mine = |e: &&Event| e.kind == "lane-state" && e.str("agent") == Some(agent) && e.ts >= sp.ts;
+    let Some(end) = ev
+        .iter()
+        .rfind(mine)
+        .filter(|e| matches!(e.str("state"), Some("error" | "gone")))
+    else {
+        return Ok(());
+    };
+    let note = ["note", "cause", "why"]
+        .iter()
+        .find_map(|k| end.str(k))
+        .unwrap_or("no reason given");
+    let why = format!(
+        "{role} lane {agent} ended ({}: {note}) with no {role} commit of its own",
+        end.str("state").unwrap_or_default()
+    );
+    writeln!(out, "{f} #{n} needs-human: {why}")?;
+    let d = json!({"code": "LANE_FAILED", "reason": why, "agent": agent, "role": role});
+    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "needs-human", d))
 }
 
 fn folder(name: &str, dirs: &[String]) -> String {

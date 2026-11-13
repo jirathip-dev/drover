@@ -24,7 +24,7 @@ Everything here is shot from the real board: the `serve --export --demo` page wi
 To regenerate from the repo root:
 
 ```sh
-HERDSMAN_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl herdsman serve --export /tmp/site --demo
+DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl drover serve --export /tmp/site --demo
 cd docs/design/theme-370 && node build.mjs && node shoot.mjs /tmp/site <chrome-headless-shell>
 ```
 
@@ -148,9 +148,9 @@ The loading overlay keeps #337's sprite (already the cook / the trot) and adds t
 
 | event | farm | kitchen | terminal (today's, unchanged) |
 |---|---|---|---|
-| merged | `Over the fence: #2957 merged` | `Order up: #2957 merged` | `herdsman` |
+| merged | `Over the fence: #2957 merged` | `Order up: #2957 merged` | `drover` |
 | needs-human | `At the gate: api #2961 needs you` | `The bell: api #2961 needs you` | `#2961 needs you: <why>` |
-| needs-decision (owner ask) | `At the gate: api #2961 needs you` | `The bell: api #2961 needs you` | `herdsman` |
+| needs-decision (owner ask) | `At the gate: api #2961 needs you` | `The bell: api #2961 needs you` | `drover` |
 
 Only the title changes. The body stays today's (`plain(ev)`; for needs-human, the why and the first finding).
 

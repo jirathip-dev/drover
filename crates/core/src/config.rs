@@ -17,7 +17,7 @@ pub struct Config {
     /// MCP server names no lane is given (`*` wildcards, case-insensitive).
     #[serde(default = "mcp_deny")]
     pub mcp_deny: Vec<String>,
-    /// The models `herdsman serve` offers per role (its model dropdown).
+    /// The models `drover serve` offers per role (its model dropdown).
     pub models: Vec<String>,
     pub serve: Serve,
     pub providers: Providers,
@@ -35,7 +35,7 @@ pub struct Config {
     pub old_names: bool,
     /// #557: the Telegram bridge (#387) is removed; a leftover `[telegram]` is a warning (`Config::warnings`).
     pub telegram: Option<toml::Value>,
-    /// #345: `[service] url`, where lanes on other hosts reach `herdsman service`'s API (docs/service.md).
+    /// #345: `[service] url`, where lanes on other hosts reach `drover service`'s API (docs/service.md).
     pub service: ServiceCfg,
     /// #404: `[chat]`, new threads' orchestrator defaults over the fleet's `role.orchestrator` (`orchestrator::defaults`).
     pub chat: Chat,
@@ -154,7 +154,7 @@ pub struct Orchestrator {
     pub fleets: Vec<String>,
 }
 
-/// #538: each capability group an orchestrator may be allowed and its herdsman verbs (the hook's `group`).
+/// #538: each capability group an orchestrator may be allowed and its drover verbs (the hook's `group`).
 pub const GROUPS: &[(&str, &str)] = &[
     ("design", "`spawn … design` or `… architect`"),
     ("clean", "`clean --yes`, `--orphans`, `--lane`"),
@@ -322,7 +322,7 @@ pub struct Serve {
     #[serde(default)]
     pub allowed_hosts: Vec<String>,
     pub approve_hint: Option<String>,
-    /// #98 `herdsman setup`: the board job's label (default `dev.herdsman.serve`), address, `tailscale serve` port.
+    /// #98 `drover setup`: the board job's label (default `dev.drover.serve`), address, `tailscale serve` port.
     pub launchd_label: Option<String>,
     pub addr: Option<String>,
     pub tailscale_https_port: Option<u16>,
@@ -367,10 +367,10 @@ pub struct Accounts {
 
 impl Accounts {
     /// #683: account `name`'s own CLI login folder with no `account_env`: its `[accounts.usage]` one, else
-    /// `~/.config/herdsman/accounts/<name>`.
+    /// `~/.config/drover/accounts/<name>`.
     pub fn folder(&self, name: &str) -> PathBuf {
         let d = self.usage.get(name).cloned();
-        expand(&d.unwrap_or_else(|| format!("~/.config/herdsman/accounts/{name}")))
+        expand(&d.unwrap_or_else(|| format!("~/.config/drover/accounts/{name}")))
     }
 }
 
@@ -419,7 +419,7 @@ pub struct Fleet {
     pub notify: Vec<Notify>,
     #[serde(default)]
     pub notify_global: bool,
-    /// `herdsman pause`: `next` offers nothing and impl/rev spawns refuse PAUSED.
+    /// `drover pause`: `next` offers nothing and impl/rev spawns refuse PAUSED.
     #[serde(default)]
     pub paused: bool,
     /// #638: this fleet's share of the spawn slots against the others' (default 1).
@@ -435,7 +435,7 @@ pub struct Fleet {
     pub clone_build: Vec<String>,
     #[serde(default)]
     pub clone_node_modules: bool,
-    /// #187: lanes' `HERDSMAN_PORT` range, `lo-hi`; unset = `41000-41999`.
+    /// #187: lanes' `DROVER_PORT` range, `lo-hi`; unset = `41000-41999`.
     pub port_range: Option<String>,
     /// #164: build folders freed besides `target`, `node_modules`, `.next` and `dist` (paths in the worktree).
     #[serde(default)]
@@ -459,13 +459,15 @@ pub struct Fleet {
     pub deny_commands_add: Vec<Deny>,
     /// #272: fast checks `merge` runs on the PR merged into current integration; unset = the cap check if `ci/cap.toml`.
     pub premerge: Option<Vec<Premerge>>,
-    /// #754: the repo's own line-cap script `herdsman cap` reads `N / cap M` lines from; unset = the first `premerge`
+    /// #754: the repo's own line-cap script `drover cap` reads `N / cap M` lines from; unset = the first `premerge`
     /// check naming a cap, else the built-in Rust count.
     pub cap_script: Option<String>,
     /// #350: `[fleet.<n>.land]`: how a passed PR lands; unset = full-first (today's rule).
     pub land: Option<Land>,
-    /// #419: `weekly` (unset) has `tick` run `herdsman lesson` every 7 days; `off` opts out.
+    /// #419: `weekly` (unset) has `tick` run `drover lesson` every 7 days; `off` opts out.
     pub lessons: Option<String>,
+    /// #889: `weekly` (unset) has `tick` run `drover hotspots` every 7 days; `off` opts out.
+    pub hotspots: Option<String>,
     /// #417: globs of UI files: a PR touching one goes through the verify stage.
     #[serde(default)]
     pub ui_paths: Vec<String>,
@@ -737,7 +739,7 @@ impl Default for Limits {
             pass_max_secs: 120,
             ssh_connect_secs: 10,
             ssh_quick_secs: 5,
-            ssh_call_secs: 15,
+            ssh_call_secs: 20,
             access_probe_secs: 30,
             db_busy_secs: 60,
             db_retry_millis: 10,
@@ -772,7 +774,7 @@ impl Default for Limits {
     }
 }
 
-/// #844: every `[limits]` key and what it sets, in docs/config.md's order; `herdsman config show` prints them.
+/// #844: every `[limits]` key and what it sets, in docs/config.md's order; `drover config show` prints them.
 pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "review_rounds",
@@ -811,7 +813,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     ),
     (
         "stray_roots",
-        "where `herdsman clean` looks for stray build folders and temp dirs",
+        "where `drover clean` looks for stray build folders and temp dirs",
     ),
     (
         "min_free_mem_gb",
@@ -1028,7 +1030,7 @@ pub fn limits() -> std::sync::Arc<Limits> {
     active.unwrap_or_else(|| DEFAULT.get_or_init(Default::default).clone())
 }
 
-/// #844: `herdsman config show`: each `[limits]` key, its value and its doc line.
+/// #844: `drover config show`: each `[limits]` key, its value and its doc line.
 pub fn show(cfg: &Config, out: &mut dyn std::io::Write) -> Result<()> {
     let vals = toml::Table::try_from(&cfg.limits)?;
     for (k, doc) in LIMIT_DOCS {
@@ -1112,7 +1114,7 @@ impl Config {
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
         let run = |_| "retired (#441): drop the line (#683: accounts sign in with their own login)".to_string();
         let f = self.accounts.accounts_env.as_deref();
-        let tg = "removed (#557): herdsman has no Telegram bridge now; drop the table".to_string();
+        let tg = "removed (#557): drover has no Telegram bridge now; drop the table".to_string();
         let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));
         let old =
             "renamed (#780): call it [orchestrator] and role.orchestrator; the old names are read for one release";
@@ -1207,10 +1209,10 @@ impl Config {
             bail!("fleet.{n}.env: secret:{v} is not a secret name (A-Z, 0-9, _)");
         }
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
-            eprintln!("herdsman: [limits].max_agents is no longer used; ignoring it");
+            eprintln!("drover: [limits].max_agents is no longer used; ignoring it");
         }
         if c.runtime.kind == RuntimeKind::Berth {
-            eprintln!("herdsman: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
+            eprintln!("drover: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
         }
         let levels = crate::providers::EFFORTS;
         if let Some(e) = c.limits.effort.as_deref().filter(|e| !levels.contains(e)) {
@@ -1314,7 +1316,7 @@ impl Config {
                 bail!("fleet.{name}.serial: a name (serial_label) must be 1 to 8 characters");
             }
             if f.deny_commands.as_ref().is_some_and(Vec::is_empty) {
-                eprintln!("herdsman: fleet.{name}.deny_commands is empty: the lane hook denies no commands");
+                eprintln!("drover: fleet.{name}.deny_commands is empty: the lane hook denies no commands");
             }
             if let Some(k) = f.color.as_deref().filter(|k| !COLORS.contains(k)) {
                 bail!("fleet.{name}.color: \"{k}\" must be one of {COLORS:?}");

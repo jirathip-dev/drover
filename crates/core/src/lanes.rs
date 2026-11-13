@@ -15,7 +15,7 @@ pub struct Lane {
     /// Agent name, or the workspace label for an unnamed agent outside any fleet.
     pub name: String,
     pub issue: Option<u64>,
-    /// impl | rev | design | orchestrator, or `other` when herdsman did not spawn it.
+    /// impl | rev | design | orchestrator, or `other` when drover did not spawn it.
     pub role: String,
     pub harness: String,
     pub model: Option<String>,
@@ -24,7 +24,7 @@ pub struct Lane {
     pub port: Option<String>,
     /// herdr's live state (idle | working | done | blocked | unknown), or `dead` | `parked` (log only, no pane).
     pub state: String,
-    /// When herdsman spawned it (0: unknown).
+    /// When drover spawned it (0: unknown).
     pub since: u64,
     pub pane: Option<String>,
     /// #83: a log-only lane whose worktree is clean and pushed: its short head sha.
