@@ -8,6 +8,7 @@ use serde_json::json;
 fn installs(c: &herdsman::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "timer-install")
         .collect()

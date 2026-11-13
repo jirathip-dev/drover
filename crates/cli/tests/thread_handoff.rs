@@ -27,7 +27,12 @@ fn setup(name: &str) -> herdsman::Ctx {
 }
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 /// herdr with `agents` live, ready to start a conductor in a new workspace or type into one.

@@ -245,6 +245,7 @@ fn queue_n_follows_tick_order_and_marks_needs_check() {
     assert!(!row(20).contains("needs-check"), "queued by hand: no mark");
     let qs: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "queue")
         .collect();

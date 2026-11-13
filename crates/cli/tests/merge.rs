@@ -883,6 +883,7 @@ fn list_form_premerge_still_runs_its_checks() {
     assert!(!r.called("gh pr merge"));
     let p = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .find(|e| e.kind == "premerge-failed")
         .unwrap();

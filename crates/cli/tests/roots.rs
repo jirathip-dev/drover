@@ -130,6 +130,7 @@ fn working_on_nvme(r: &Repo) -> PathBuf {
 fn spawns(c: &herdsman::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "spawn")
         .collect()
@@ -220,7 +221,7 @@ fn a_pulled_root_is_noted_once_and_its_lane_restarts_on_the_next_root_from_its_p
     assert_eq!(spawns(&r.c).len(), 2);
     let gone = read(&r.c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "root-gone")
         .count();
     assert_eq!(gone, 1);

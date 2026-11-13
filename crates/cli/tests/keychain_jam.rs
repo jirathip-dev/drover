@@ -148,6 +148,7 @@ fn doctor_shows_the_reader_count() {
 fn log_kinds(c: &herdsman::Ctx) -> Vec<String> {
     herdsman::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .map(|e| e.kind)
         .collect()

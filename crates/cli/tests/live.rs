@@ -397,7 +397,7 @@ fn answer_sends_the_digit_and_logs_no_question() {
     );
     assert_eq!(r.count("herdr pane send-keys"), 1);
     assert!(r.called("herdr pane send-keys w1:p2 2"));
-    let e = read(&c.state).unwrap().pop().unwrap();
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!((e.kind.as_str(), e.issue), ("answer", Some(12)));
     assert_eq!(
         serde_json::Value::Object(e.data.clone()),

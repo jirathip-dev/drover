@@ -973,6 +973,7 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     assert_eq!(code, 0, "{out}");
     let t = herdsman::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "thread-title")
         .unwrap();
@@ -1008,6 +1009,7 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     assert_eq!(body(&res), "t2 started\n", "{res}");
     let t2 = herdsman::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "thread-new")
         .unwrap();
@@ -1056,6 +1058,7 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     let session = |c: &herdsman::Ctx| {
         let s: Vec<_> = herdsman::events::read(&c.state)
             .unwrap()
+            .to_vec()
             .into_iter()
             .filter(|e| e.kind == "orchestrator-start")
             .collect();
@@ -1068,6 +1071,7 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     assert!(r.called("herdr workspace close"), "{:?}", r.calls.borrow());
     let sleep = herdsman::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "orchestrator-sleep")
         .unwrap();

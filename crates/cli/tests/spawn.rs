@@ -629,6 +629,7 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
     // #187: the spawn event records the lane's port.
     let ev = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "spawn")
         .unwrap();

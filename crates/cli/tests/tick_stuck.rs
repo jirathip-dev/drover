@@ -253,7 +253,12 @@ fn a_tick_ten_minutes_old_it_cannot_name_raises_slo_tick_and_stuck_once() {
     let mark = c.state.with_file_name("tick.step");
     let child = "ssh -oBatchMode=yes air -- 'sh' '-c' 'test -e \"$1\"'";
     let kinds = |c: &herdsman::Ctx, k: &str| -> Vec<Event> {
-        read(&c.state).unwrap().into_iter().filter(|e| e.kind == k).collect()
+        read(&c.state)
+            .unwrap()
+            .to_vec()
+            .into_iter()
+            .filter(|e| e.kind == k)
+            .collect()
     };
     let drive = |c: &herdsman::Ctx| assert_eq!(run(c, &local(), &["drive", "--fast"]).0, 0);
     std::fs::write(
@@ -326,6 +331,7 @@ fn a_herdsman_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_se
     assert!(!r.called("kill -TERM"), "a stopped tick is not stopped again");
     let kinds: Vec<String> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .map(|e| e.kind)
         .filter(|k| k.starts_with("s"))

@@ -65,7 +65,7 @@ fn say(c: &herdsman::Ctx, r: &dyn herdsman::runner::Runner, text: &str) -> Strin
 }
 
 fn starts(c: &herdsman::Ctx) -> Vec<herdsman::events::Event> {
-    let all = herdsman::events::read(&c.state).unwrap();
+    let all = herdsman::events::read(&c.state).unwrap().to_vec();
     all.into_iter().filter(|e| e.kind == "orchestrator-start").collect()
 }
 

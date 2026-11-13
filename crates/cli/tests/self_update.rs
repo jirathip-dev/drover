@@ -48,7 +48,12 @@ fn sign_script(c: &herdsman::Ctx) -> String {
 }
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn heads(c: &herdsman::Ctx, live: &std::path::Path, heads: &[(&str, &str)]) -> Fake {

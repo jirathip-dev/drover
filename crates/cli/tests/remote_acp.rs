@@ -245,7 +245,7 @@ fn spawn_fake() -> Fake {
 }
 
 fn spawned(c: &herdsman::Ctx) -> Vec<herdsman::events::Event> {
-    let ev = herdsman::events::read(&c.state).unwrap();
+    let ev = herdsman::events::read(&c.state).unwrap().to_vec();
     ev.into_iter().filter(|e| e.kind == "spawn").collect()
 }
 

@@ -75,7 +75,7 @@ fn drive(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
     let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
-    let new = read(&c.state).unwrap().split_off(before);
+    let new = read(&c.state).unwrap().to_vec().split_off(before);
     (
         out,
         new.iter()
@@ -90,7 +90,7 @@ fn idle(c: &herdsman::Ctx, r: &Fake) {
     let acts = || {
         read(&c.state)
             .unwrap()
-            .into_iter()
+            .iter()
             .filter(|e| e.kind != "drive-pass")
             .count()
     };
@@ -231,6 +231,7 @@ fn a_head_moved_during_review_gets_a_fresh_reviewer_not_the_old_verdict() {
     assert_eq!(steps, ["verdict"], "{out}");
     let v = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .find(|e| e.kind == "verdict")
         .expect(&out);
@@ -548,6 +549,7 @@ fn a_secret_in_a_merged_lanes_wip_keeps_its_pane_reported_once_and_clean_dry_run
     }
     let kept: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "lane-kept-dirty")
         .collect();
@@ -624,6 +626,7 @@ fn a_pr_closed_outside_herdsman_closes_or_blocks_the_issue_once() {
         assert_eq!(state(&c), want);
         let e = read(&c.state)
             .unwrap()
+            .to_vec()
             .into_iter()
             .rfind(|e| e.is(want, "sendmeter", 12))
             .unwrap();
@@ -1243,6 +1246,7 @@ fn serial_auto(name: &str, files: &str) -> (herdsman::Ctx, Fake, String, Vec<Eve
     assert_eq!(state(&c), "merged");
     let auto = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "serial-joined");
     (c, r, out, auto.collect())
@@ -1366,6 +1370,7 @@ fn status_says_a_ready_pr_lacks_the_merge_label() {
 fn passes(c: &herdsman::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "drive-pass")
         .collect()
@@ -1599,7 +1604,7 @@ fn fast(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
     let (code, out) = run(c, r, &["drive", "--fast"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
-    let new = read(&c.state).unwrap().split_off(before);
+    let new = read(&c.state).unwrap().to_vec().split_off(before);
     let steps = new.iter().filter(|e| e.kind == "driven");
     (out, steps.map(|e| e.str("step").unwrap().to_string()).collect())
 }
@@ -1962,7 +1967,7 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
         !seen.is_empty() && seen.iter().all(|&l| l),
         "a command ran before the decision or outside drive.lock: {seen:?}"
     );
-    let all = read(&c.state).unwrap();
+    let all = read(&c.state).unwrap().to_vec();
     assert!(!all.iter().any(|e| e.kind == "extend-failed"), "{all:?}");
     let p = herdsman::pending::of(&all, "sendmeter", 12).expect("pending");
     assert_eq!(
@@ -2069,7 +2074,12 @@ fn no_change_in(cfg: &str, name: &str, stage: &str, body: &str, ci: &str) -> (he
 }
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 #[test]

@@ -63,11 +63,11 @@ fn state(c: &herdsman::Ctx, n: u64) -> String {
 }
 
 fn kinds(c: &herdsman::Ctx) -> Vec<String> {
-    read(&c.state).unwrap().into_iter().map(|e| e.kind).collect()
+    read(&c.state).unwrap().to_vec().into_iter().map(|e| e.kind).collect()
 }
 
 fn event(c: &herdsman::Ctx, kind: &str) -> Option<Event> {
-    read(&c.state).unwrap().into_iter().rfind(|e| e.kind == kind)
+    read(&c.state).unwrap().to_vec().into_iter().rfind(|e| e.kind == kind)
 }
 
 #[test]

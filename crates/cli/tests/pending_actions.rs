@@ -275,6 +275,7 @@ fn an_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once() {
     assert_eq!((spawns(&c), pending(&c)), (1, None));
     let failed = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "pending-action");
     assert!(

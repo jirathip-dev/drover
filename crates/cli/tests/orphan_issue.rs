@@ -34,6 +34,7 @@ fn check_at(c: &mut herdsman::Ctx, r: &Fake, now: u64) -> Vec<Event> {
     assert_eq!(code, 0, "{out}");
     read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "orphan-issue")
         .collect()

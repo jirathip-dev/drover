@@ -246,7 +246,7 @@ mod tests {
         let cfg = crate::config::Config::default();
         let ev = crate::events::read(&state).unwrap_or_default();
         pass(&ctx, &cfg, "f", &ev, rows).unwrap();
-        crate::events::read(&state).unwrap()
+        crate::events::read(&state).unwrap().to_vec()
     }
 
     fn tmp(name: &str) -> std::path::PathBuf {

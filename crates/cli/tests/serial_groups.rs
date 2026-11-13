@@ -79,7 +79,7 @@ fn drive(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
     let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    let new = read(&c.state).unwrap().split_off(before);
+    let new = read(&c.state).unwrap().to_vec().split_off(before);
     let steps = new
         .iter()
         .filter(|e| e.kind == "driven")

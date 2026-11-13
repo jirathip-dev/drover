@@ -138,6 +138,7 @@ fn amend_writes_an_owner_decision_into_the_spec_and_reruns_board_freeze() {
     assert!(!r.called("gh run rerun 88"), "only spec-reading checks re-run");
     let amends: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "amend")
         .collect();

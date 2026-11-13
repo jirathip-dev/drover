@@ -128,7 +128,7 @@ fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     let mut out = vec![];
     herdsman::drive::auto_update(&c, &cfg, &r, &mut out, "sendmeter").unwrap();
     let to = head(&seed, "issue-3");
-    let ev = read(&c.state).unwrap();
+    let ev = read(&c.state).unwrap().to_vec();
     let up = ev.iter().find(|e| e.kind == "auto-updated").expect("auto-updated");
     assert_eq!((up.str("from"), up.str("to")), (Some(from.as_str()), Some(to.as_str())));
     assert!(ev.iter().all(|e| e.kind != "spawn" || e.ts == 10), "no lane: {ev:?}");
@@ -591,7 +591,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     let r = Mixed(merger(3, &from).0.reply(PROTECTION, "false\n"));
     herdsman::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
     assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
-    let ev = read(&c.state).unwrap();
+    let ev = read(&c.state).unwrap().to_vec();
     assert!(
         ev.iter().all(|e| e.kind != "auto-updated" && e.kind != "driven"),
         "{ev:?}"
@@ -648,7 +648,7 @@ fn strict_rule_auto_updates_and_puts_the_merge_label_back() {
         r.0.called("gh pr edit 13 -R jirathip-dev/sendmeter --add-label merge-ready"),
         "{out}"
     );
-    let ev = read(&c.state).unwrap();
+    let ev = read(&c.state).unwrap().to_vec();
     assert!(
         ev.iter()
             .any(|e| e.kind == "labelled" && e.str("sha") == Some(to.as_str())),
@@ -834,7 +834,7 @@ fn check_emits_cap_near_once_per_integration_sha() {
     ]);
     let r = Mixed(Fake::default().reply("herdr", NO_AGENTS));
     let near = || {
-        let ev = read(&c.state).unwrap();
+        let ev = read(&c.state).unwrap().to_vec();
         ev.into_iter().filter(|e| e.kind == "cap-near").collect::<Vec<_>>()
     };
     for _ in 0..2 {

@@ -288,6 +288,7 @@ fn a_remote_lane_runs_every_command_on_its_host() {
     drop(calls);
     let e = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "spawn")
         .unwrap();
@@ -413,6 +414,7 @@ fn an_offline_host_never_pages_and_shows_grey() {
     assert_eq!(code, 0, "{out}");
     let pages: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| ["lane-dead", "stall"].contains(&e.kind.as_str()))
         .collect();
@@ -519,7 +521,7 @@ fn cli_and_board_toggles_both_log() {
     assert!(std::fs::read_to_string(&c.config)
         .unwrap()
         .contains("machine = \"bazzite\"\nenabled = false\n"));
-    let last = |c: &herdsman::Ctx| read(&c.state).unwrap().pop().unwrap();
+    let last = |c: &herdsman::Ctx| read(&c.state).unwrap().to_vec().pop().unwrap();
     let e = last(&c);
     assert_eq!(
         (e.kind.as_str(), e.str("host"), e.str("by")),
@@ -1176,6 +1178,7 @@ fn a_lost_agent_name_on_the_main_host_retries_or_keeps_the_harness() {
         assert!(!r.called("herdr --machine"));
         let spawned = read(&c.state)
             .unwrap()
+            .to_vec()
             .into_iter()
             .rfind(|e| e.kind == "spawn")
             .unwrap();
@@ -1244,6 +1247,7 @@ fn a_remote_supersede_stays_on_its_host_and_outlives_a_gone_workspace() {
     assert_eq!(r.count("herdr --machine bazzite worktree open"), 2, "{calls:?}");
     let e = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "spawn")
         .unwrap();
@@ -1324,6 +1328,7 @@ fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
     );
     let e = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "spawn")
         .unwrap();

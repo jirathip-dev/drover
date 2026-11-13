@@ -75,8 +75,8 @@ pub fn append(path: &Path, ev: &Event) -> Result<()> {
 }
 
 /// The live log (#343: without the events a rotation archived), by seq.
-pub fn read(path: &Path) -> Result<Vec<Event>> {
-    Ok(shared(path)?.events.clone())
+pub fn read(path: &Path) -> Result<Arc<Log>> {
+    shared(path)
 }
 
 /// #344: the log in the JSONL format before #344, one event a line with its seq (`herdsman events --jsonl`).
@@ -252,7 +252,7 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
     };
     let old = |e: &Event| e.seq <= cut && e.ts + 30 * 86_400 < now && e.kind != "queue";
     let mut live_issue: BTreeMap<(&str, u64), bool> = BTreeMap::new();
-    for e in &all {
+    for e in all.iter() {
         if let Some(n) = e.issue {
             let done = st.get(&(e.fleet.clone(), n)).is_some_and(IssueState::done);
             *live_issue.entry((&e.fleet, n)).or_default() |= !done || !old(e);
@@ -768,13 +768,18 @@ fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<
     let m = Arc::make_mut(l);
     m.seq = new.last().map_or(last, |e| e.seq.max(last));
     m.states = fold_into(std::mem::take(&mut m.states), &new);
-    for e in new {
-        if let Some(n) = e.issue {
-            m.issues.entry((e.fleet.clone(), n)).or_default().push(m.events.len());
+    let from = m.events.len();
+    if from == 0 {
+        m.events = new;
+    } else {
+        m.events.extend(new);
+    }
+    for i in from..m.events.len() {
+        if let Some(n) = m.events[i].issue {
+            m.issues.entry((m.events[i].fleet.clone(), n)).or_default().push(i);
         }
-        m.events.push(e);
-        m.asks.add(&m.events);
-        m.threads.add(&m.events);
+        m.asks.add(&m.events[..=i]);
+        m.threads.add(&m.events[..=i]);
     }
     Ok(())
 }

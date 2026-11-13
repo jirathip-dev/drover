@@ -38,6 +38,7 @@ fn fake(live: usize) -> Fake {
 fn kicks(c: &herdsman::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "kick")
         .collect()

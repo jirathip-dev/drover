@@ -72,6 +72,7 @@ fn closing_a_lane_terms_then_kills_only_its_worktree_pids() {
     );
     let ev = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .find(|e| e.kind == "lane-reaped")
         .unwrap();
@@ -195,6 +196,7 @@ fn check_reaps_closed_lanes_but_spares_active_and_live_ones() {
     );
     let reaped: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "lane-reaped")
         .collect();
@@ -228,6 +230,7 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
     let trimmed = |c: &herdsman::Ctx| {
         read(&c.state)
             .unwrap()
+            .to_vec()
             .into_iter()
             .filter(|e| e.kind == "lane-trimmed")
             .collect::<Vec<_>>()
@@ -363,7 +366,7 @@ fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
             .reply("kill", "")
     };
     let trimmed = |c: &herdsman::Ctx| {
-        let e = read(&c.state).unwrap();
+        let e = read(&c.state).unwrap().to_vec();
         e.into_iter().filter(|e| e.kind == "lane-trimmed").collect::<Vec<_>>()
     };
 

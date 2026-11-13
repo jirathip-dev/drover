@@ -165,6 +165,7 @@ fn tick_skips_lesson_for_a_young_or_quiet_fleet() {
     let skipped = |c: &herdsman::Ctx| -> Vec<Event> {
         read(&c.state)
             .unwrap()
+            .to_vec()
             .into_iter()
             .filter(|e| e.kind == "lesson-skipped")
             .collect()

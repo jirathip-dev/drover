@@ -42,7 +42,7 @@ fn fast(c: &herdsman::Ctx, agents: &str) -> Fake {
 
 fn kinds(c: &herdsman::Ctx) -> Vec<String> {
     let ours = ["slo-idle", "self-heal", "stuck", "slo-ok"];
-    let ev = read(&c.state).unwrap().into_iter().map(|e| e.kind);
+    let ev = read(&c.state).unwrap().to_vec().into_iter().map(|e| e.kind);
     ev.filter(|k| ours.contains(&k.as_str())).collect()
 }
 

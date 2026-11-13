@@ -348,6 +348,7 @@ fn an_unreachable_host_aborts_the_stop_and_destroy_saves_first() {
     assert!(!r.called(&rc("destroy")), "{:?}", r.calls.borrow());
     let abort = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "cloud-abort")
         .unwrap();

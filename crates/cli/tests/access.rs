@@ -153,6 +153,7 @@ fn capped_account_is_skipped_until_reset() {
     assert!(out.contains("account-capped: A:"), "{out}");
     let capped: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "account-capped")
         .collect();
@@ -574,7 +575,12 @@ fn reading(c: &herdsman::Ctx, five: Value, seven: Value, ago: u64) {
 }
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 #[test]

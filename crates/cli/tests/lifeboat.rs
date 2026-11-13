@@ -38,7 +38,12 @@ fn req(s: &Server, method: &str, query: &str, body: &str, cookie: &str) -> (Stri
 }
 
 fn last(c: &herdsman::Ctx, kind: &str) -> Event {
-    read(&c.state).unwrap().into_iter().rfind(|e| e.kind == kind).unwrap()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .rfind(|e| e.kind == kind)
+        .unwrap()
 }
 
 #[test]

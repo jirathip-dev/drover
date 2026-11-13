@@ -50,7 +50,7 @@ fn wips(r: &Fake) -> usize {
 }
 
 fn asks(c: &herdsman::Ctx) -> Vec<Event> {
-    let ev = read(&c.state).unwrap();
+    let ev = read(&c.state).unwrap().to_vec();
     ev.into_iter().filter(|e| e.kind == "needs-decision").collect()
 }
 

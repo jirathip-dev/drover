@@ -72,7 +72,12 @@ fn state(c: &herdsman::Ctx, n: u64) -> String {
 }
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn spawned(c: &herdsman::Ctx, role: &str) -> usize {

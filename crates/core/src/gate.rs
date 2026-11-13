@@ -1011,7 +1011,8 @@ fn merged(
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "landed", d))?;
     }
     // The one GitHub comment fleet writes: ≤ 5 lines, merge sha + verdict sha; #677: the latest why note's Owner line.
-    let why = read(&ctx.state)?.into_iter().rfind(|e| e.is("why", fleet, issue));
+    let log = read(&ctx.state)?;
+    let why = log.iter().rfind(|e| e.is("why", fleet, issue));
     let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(
         "Merged via `herdsman merge`: PR #{num} → `{}` @ `{merge_sha}`\nPinned PASS verdict sha: `{head}`{}{}",

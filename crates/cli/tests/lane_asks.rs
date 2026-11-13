@@ -42,7 +42,12 @@ fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
 }
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 /// A fleet with a claude conductor (`extra` in its `[fleet.sendmeter]`), a webpush notifier with one device behind a

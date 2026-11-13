@@ -97,7 +97,7 @@ fn kill_pushes_wip_then_closes_and_logs() {
         .collect();
     let ref_ = format!("git -C {wt} push origin HEAD:refs/heads/wip/{LANE}-20261031-120000-");
     assert!(pushes.len() == 1 && pushes[0].starts_with(&ref_), "{pushes:?}");
-    let e = read(&c.state).unwrap().pop().unwrap();
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!((e.kind.as_str(), e.str("role")), ("lane-killed", Some("impl")));
     assert_eq!(e.str("wip"), pushes[0].rsplit("refs/heads/").next());
     // The impl goes back to queued (re-spawnable); a second kill finds no lane.
@@ -319,7 +319,7 @@ fn close_shuts_an_others_pane_and_refuses_lanes() {
         (0, "closed dsh-tui-test's pane; its worktree and files stay\n")
     );
     assert!(r.called("herdr pane close w9:p1") && !r.called("git"));
-    let e = read(&c.state).unwrap().pop().unwrap();
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!(
         (e.kind.as_str(), e.str("agent")),
         ("closed-other", Some("dsh-tui-test"))
@@ -396,7 +396,7 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
         res.starts_with("HTTP/1.1 200 OK") && res.ends_with("sent Esc to sendmeter-impl-12\n"),
         "{res}"
     );
-    let e = read(&c.state).unwrap().pop().unwrap();
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     let label = herdsman::devices::load(&c)[0].label.clone();
     assert_eq!(
         (e.kind.as_str(), e.str("via"), e.str("device"), e.str("op")),

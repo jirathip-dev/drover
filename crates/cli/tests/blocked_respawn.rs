@@ -63,13 +63,18 @@ fn ok(c: &herdsman::Ctx, r: &Fake, args: &[&str]) -> String {
 fn drive(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
     let out = ok(c, r, &["drive"]);
-    let new = read(&c.state).unwrap().split_off(before);
+    let new = read(&c.state).unwrap().to_vec().split_off(before);
     let steps = new.iter().filter(|e| e.kind == "driven");
     (out, steps.map(|e| e.str("step").unwrap().to_string()).collect())
 }
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn state(c: &herdsman::Ctx) -> String {

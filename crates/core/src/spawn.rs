@@ -1195,7 +1195,7 @@ pub fn spawn(
         .map_or(0, |e| e.seq);
     let probe = |i: &Event| -> Result<Option<Value>> {
         let logged = read(&ctx.state)?
-            .into_iter()
+            .iter()
             .any(|e| e.seq > i.seq && e.is("spawn", fleet, issue));
         let up = (step == "spawn").then(|| host::agents(r).ok()).flatten();
         let up = up.is_some_and(|a| !host::live_in(&a, &p.agent, &p.worktree).is_empty());

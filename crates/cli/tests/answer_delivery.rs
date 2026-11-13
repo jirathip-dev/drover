@@ -11,7 +11,12 @@ const NOW: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-36";
 
 fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn spawn(c: &herdsman::Ctx, extra: Value) {
@@ -185,7 +190,7 @@ fn a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane() {
         .reply("herdr agent wait", "{}");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "36", "impl", "--supersede"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
-    let ev = read(&c.state).unwrap();
+    let ev = read(&c.state).unwrap().to_vec();
     let closed = ev
         .iter()
         .position(|e| e.kind == "lane-closed")

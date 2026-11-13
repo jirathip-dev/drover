@@ -106,7 +106,7 @@ fn a_slow_api_for_10_minutes_alerts_once_and_never_after_it_recovers() {
     let lines: Vec<String> = pushes().lines().map(String::from).collect();
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].contains("/api/v1/state"), "{lines:?}");
-    let alerts: Vec<_> = (read(&c.state).unwrap().into_iter())
+    let alerts: Vec<_> = (read(&c.state).unwrap().to_vec().into_iter())
         .filter(|e| e.kind.starts_with("slo-api"))
         .collect();
     assert_eq!(alerts.len(), 1);
@@ -118,7 +118,7 @@ fn a_slow_api_for_10_minutes_alerts_once_and_never_after_it_recovers() {
         get(&s, NOW + 60 * m, "/api/v1/state");
         s.slo(NOW + 60 * m);
     }
-    let kinds: Vec<String> = (read(&c.state).unwrap().into_iter())
+    let kinds: Vec<String> = (read(&c.state).unwrap().to_vec().into_iter())
         .filter(|e| e.kind.starts_with("slo-api"))
         .map(|e| e.kind)
         .collect();
