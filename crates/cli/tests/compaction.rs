@@ -189,7 +189,6 @@ fn the_fold_of_a_50mb_log_takes_under_20ms() {
     same(&st, &fold(&read(&p).unwrap()));
 }
 
-/// #943 repro: a `build-cloned` whose `errors` holds `cp`'s 5 MB stderr is stored in at most 16 KB, the rest unchanged.
 #[test]
 fn a_5mb_build_cloned_is_stored_in_16kb() {
     let d = tmpdir("cap");
@@ -229,14 +228,12 @@ fn a_5mb_build_cloned_is_stored_in_16kb() {
     same(&fold(&back), &fold(&ev));
 }
 
-/// #943: a 15-day log over `max` sheds its old noise (and its oversize rows) while issue states, queues and open asks
-/// stay exactly as they were.
 #[test]
 fn rotation_of_a_young_log_archives_old_noise_and_keeps_the_folds() {
     let d = tmpdir("young");
     let p = d.join("events.jsonl");
     let (now, day) = (100 * 86_400, 86_400);
-    let mut ev = log(5, 600, now - 15 * day); // 600 × 10 min ≈ 4 days of activity, 15 days ago
+    let mut ev = log(5, 600, now - 15 * day);
     let noise = [
         "driven",
         "kick",
