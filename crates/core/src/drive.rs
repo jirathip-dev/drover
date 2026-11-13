@@ -1031,7 +1031,7 @@ fn silent(
                     append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "respawned-silent", d))?;
                 }
             }
-            stall::Silent::Escalate(why) => escalate(ctx, cfg, out, (fleet, n), &lane, "LANE_SILENT", &why)?,
+            stall::Silent::Escalate(why) => escalate(ctx, cfg, out, (fleet, n), (&lane, None), "LANE_SILENT", &why)?,
         }
     }
     let reviews = fold(&ev)
@@ -1087,12 +1087,12 @@ fn escalate(
     cfg: &Config,
     out: &mut dyn Write,
     (fleet, n): (&str, u64),
-    lane: &str,
+    (lane, on): (&str, Option<&str>),
     code: &str,
     why: &str,
 ) -> Result<()> {
     writeln!(out, "{fleet} #{n} needs-human: {why}")?;
-    let d = json!({"code": code, "reason": why, "agent": lane});
+    let d = json!({"code": code, "reason": why, "agent": lane, "failed_on": on});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "needs-human", d))
 }
 
@@ -1290,14 +1290,15 @@ fn pass(
             let ends =
                 gone.filter(|g| (w.next_cmd.is_none() || g.1.starts_with("respawning")) && !waiting::resumed(g.0));
             if let Some(g) = ends.filter(|_| !fast) {
-                if crate::breaker::failed(ctx, cfg, out, (fleet, s.issue), &w.lane, g.0)? {
+                if crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, g.0)? {
                     continue;
                 }
             }
             if gone.is_some() && w.next_cmd.is_none() && !fast {
                 let why = "lane keeps ending without a push";
                 writeln!(out, "{fleet} #{n} needs-human: {why}")?;
-                let d = json!({"code": "LANE_ENDS", "reason": why, "agent": w.lane});
+                let on = crate::breaker::blame(&events, &w.lane);
+                let d = json!({"code": "LANE_ENDS", "reason": why, "agent": w.lane, "failed_on": on});
                 emit(
                     &ctx.state,
                     cfg,
@@ -1378,7 +1379,8 @@ fn pass(
                 repro_refused(ctx, cfg, r, (&events, &agents), (fleet, s.issue, &w.lane), &args, &hash)?;
             }
             if let Some((why, _)) = gone.filter(|_| code.is_none()) {
-                let d = json!({"role": args.get(3), "agent": w.lane, "why": why});
+                let on = crate::breaker::blame(&events, &w.lane);
+                let d = json!({"role": args.get(3), "agent": w.lane, "why": why, "failed_on": on});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
             }
             go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
@@ -1428,7 +1430,7 @@ fn pass(
                 &a,
                 stall::Act::Respawn(_, "failed start") | stall::Act::Escalate("START_FAILED", _)
             );
-            if start && crate::breaker::failed(ctx, cfg, out, (fleet, s.issue), &w.lane, "no output after its spawn")? {
+            if start && crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, "no output after its spawn")? {
                 continue;
             }
             match a {
@@ -1436,12 +1438,16 @@ fn pass(
                     let args = ["spawn", fleet, &n, &role, "--supersede", "--force"];
                     let code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "respawn"), &args)?;
                     if code.is_none() {
-                        let d = json!({"role": role, "agent": w.lane, "why": why});
+                        let on = crate::breaker::blame(&events, &w.lane);
+                        let d = json!({"role": role, "agent": w.lane, "why": why, "failed_on": on});
                         append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
                     }
                     go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
                 }
-                stall::Act::Escalate(code, why) => escalate(ctx, cfg, out, (fleet, s.issue), &w.lane, code, &why)?,
+                stall::Act::Escalate(code, why) => {
+                    let on = crate::breaker::blame(&events, &w.lane);
+                    escalate(ctx, cfg, out, (fleet, s.issue), (&w.lane, on), code, &why)?;
+                }
             }
         } else if s.state == "blocked" && s.last_event != "no-action" {
             // #214: a block drive has no step for is logged once, never left silent.

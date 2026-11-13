@@ -116,11 +116,9 @@ fn a_passing_canary_closes_the_breaker_and_the_held_lanes_respawn_paced_by_admis
                 t0 + k,
                 Some(n),
                 "respawn",
-                json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "why": "lane gone"}),
+                json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "why": "lane gone", "failed_on": "local"}),
             );
         }
-        let d = json!({"host": "local", "agent": format!("sendmeter-impl-{n}"), "spawn": t0, "why": "lane gone"});
-        ev(&c, t0 + 5, Some(n), "lane-failed", d);
     }
     let d = json!({"host": "local", "failures": 5, "sample": "lane gone", "reason": "runtime down on local"});
     ev(&c, t0 + 10, None, "runtime-down", d);

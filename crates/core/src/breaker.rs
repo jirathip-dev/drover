@@ -32,15 +32,19 @@ pub fn says(ev: &[Event], h: &str) -> Option<String> {
     ))
 }
 
-/// Lane `lane` failed to start or ended with no push: logged once per spawn; true while its host's breaker is open.
-pub fn failed(
-    ctx: &Ctx,
-    cfg: &Config,
-    out: &mut dyn Write,
-    (fleet, n): (&str, u64),
-    lane: &str,
-    why: &str,
-) -> Result<bool> {
+/// The host lane `lane`'s last spawn in `ev` ran on, stamped `failed_on` on the `respawn` or `needs-human` it ends in.
+pub fn blame<'a>(ev: &'a [Event], lane: &str) -> Option<&'a str> {
+    last_spawn(ev, lane).map(host)
+}
+
+fn failure_on(e: &Event, h: &str) -> bool {
+    let ends =
+        e.kind == "respawn" || e.kind == "needs-human" && matches!(e.str("code"), Some("LANE_ENDS" | "START_FAILED"));
+    ends && e.str("failed_on") == Some(h)
+}
+
+/// Lane `lane` failed to start or ended with no push: true while its host's breaker is open (trips it at the limit).
+pub fn failed(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str, lane: &str, why: &str) -> Result<bool> {
     let ev = read(&ctx.state)?;
     let Some(sp) = last_spawn(&ev, lane) else {
         return Ok(false);
@@ -57,18 +61,7 @@ pub fn failed(
     let since = up
         .map_or(0, |e| e.ts)
         .max(ctx.now.saturating_sub(l.runtime_down_minutes * 60));
-    let fails: Vec<&Event> = ev
-        .iter()
-        .filter(|e| e.kind == "lane-failed" && e.str("host") == Some(h) && e.ts >= since)
-        .collect();
-    let seen = fails
-        .iter()
-        .any(|e| e.str("agent") == Some(lane) && e.data["spawn"] == sp.ts);
-    if !seen {
-        let d = json!({"host": h, "agent": lane, "spawn": sp.ts, "why": why});
-        append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "lane-failed", d))?;
-    }
-    let count = fails.len() + usize::from(!seen);
+    let count = 1 + ev.iter().filter(|e| e.ts >= since && failure_on(e, h)).count();
     if (count as u64) < l.runtime_down_failures {
         return Ok(false);
     }
@@ -102,12 +95,9 @@ pub fn probe(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             continue;
         }
         writeln!(out, "runtime up on {h}: canary passed")?;
-        let up = ev
-            .iter()
-            .rfind(|u| u.kind == "runtime-up" && u.str("host") == Some(h))
-            .map_or(0, |u| u.ts);
+        let since = e.ts.saturating_sub(cfg.limits.runtime_down_minutes * 60);
         let mut held: Vec<(&str, u64)> = (ev.iter())
-            .filter(|f| f.kind == "lane-failed" && f.str("host") == Some(h) && f.ts >= up)
+            .filter(|f| f.ts >= since && f.kind == "respawn" && f.str("failed_on") == Some(h))
             .filter_map(|f| Some((f.fleet.as_str(), f.issue?)))
             .collect();
         held.sort_unstable();
