@@ -2,8 +2,8 @@
 //! fold-equal; `events --jsonl` exports the old format; leases expire instead of going stale.
 mod common;
 use common::*;
-use herdsman::db;
-use herdsman::events::{fold, history, jsonl, read, Event};
+use drover::db;
+use drover::events::{fold, history, jsonl, read, Event};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::Path;
@@ -78,12 +78,12 @@ fn migration_imports_once_with_an_equal_fold_and_the_export_is_the_old_format() 
     ] {
         assert!(!st.join(f).exists() && st.join(format!("{f}.migrated")).exists(), "{f}");
     }
-    assert_eq!(herdsman::devices::load(&c)[0].label, "phone");
-    assert_eq!(herdsman::webpush::load(&c.state).len(), 1);
+    assert_eq!(drover::devices::load(&c)[0].label, "phone");
+    assert_eq!(drover::webpush::load(&c.state).len(), 1);
     // Idempotent: a second run imports nothing more.
     assert_eq!(run(&c, &Fake::default(), &["migrate"]).0, 0);
     assert_eq!(history(&c.state).unwrap().len(), all.len());
-    assert_eq!(herdsman::devices::load(&c).len(), 1);
+    assert_eq!(drover::devices::load(&c).len(), 1);
     // The export is the old log, byte for byte.
     assert_eq!(jsonl(&c.state).unwrap(), rows(&all));
     let (code, out) = run(&c, &Fake::default(), &["events", "--jsonl"]);
@@ -95,7 +95,7 @@ fn migration_imports_once_with_an_equal_fold_and_the_export_is_the_old_format() 
 fn a_log_written_after_the_import_is_imported_after_it() {
     let d = tmpdir("db-late");
     let p = d.join("events.jsonl");
-    herdsman::events::append(&p, &Event::new(1, "app", Some(1), "spawn", json!({"role": "impl"}))).unwrap();
+    drover::events::append(&p, &Event::new(1, "app", Some(1), "spawn", json!({"role": "impl"}))).unwrap();
     std::fs::write(&p, rows(&[Event::new(2, "app", Some(1), "merged", json!({}))])).unwrap();
     let all = read(&p).unwrap();
     assert_eq!(all.iter().map(|e| (e.seq, e.ts)).collect::<Vec<_>>(), [(1, 1), (2, 2)]);
@@ -138,7 +138,7 @@ fn a_lease_is_held_until_it_expires_then_taken_over_with_no_stale_row_left() {
 fn the_database_is_owner_only() {
     use std::os::unix::fs::PermissionsExt;
     let d = tmpdir("db-mode");
-    herdsman::events::append(&d.join("events.jsonl"), &Event::new(1, "app", None, "x", json!({}))).unwrap();
+    drover::events::append(&d.join("events.jsonl"), &Event::new(1, "app", None, "x", json!({}))).unwrap();
     let mode = std::fs::metadata(d.join("state.db")).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
 }

@@ -502,7 +502,7 @@ export type LessonFleet = { fleet: string, lessons: string, last?: LessonRun | n
 export type LessonRun = { issue: number, ts: number, state: string, };
 
 /**
- * #576: `lessons/<fleet>/digest?days=N`: `herdsman lesson digest`'s text.
+ * #576: `lessons/<fleet>/digest?days=N`: `drover lesson digest`'s text.
  */
 export type Digest = { fleet: string, days: number, text: string, };
 
@@ -537,7 +537,7 @@ export type ConductorAttach = { ok: boolean, code: string, message: string,
  */
 brief: string, 
 /**
- * The synced conductor provider settings (`PreToolUse`: `herdsman hook`).
+ * The synced conductor provider settings (`PreToolUse`: `drover hook`).
  */
 settings: string, env: AttachEnv, 
 /**
@@ -545,7 +545,7 @@ settings: string, env: AttachEnv,
  */
 guarded: boolean, why: string, };
 
-export type AttachEnv = { HERDSMAN_LANE: string, HERDSMAN_THREAD: string, HERDSMAN_PORT: string, } & ({ [key in string]: string });
+export type AttachEnv = { DROVER_LANE: string, DROVER_THREAD: string, DROVER_PORT: string, } & ({ [key in string]: string });
 
 /**
  * #786: `GET /api/v1/config`: fleet.toml as cooee's config screens read it.

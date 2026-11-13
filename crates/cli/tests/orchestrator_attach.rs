@@ -1,10 +1,10 @@
 //! #633: a cooee thread attached as a repo's conductor (`POST /api/v1/conductor-attach`): its `guarded`, its asks in
 //! `/api/v1/events`, lane asks routed to it, and the link ended by detach or archive. Its own test binary:
-//! `HERDSMAN_LANE` is process-wide.
+//! `DROVER_LANE` is process-wide.
 mod common;
 use common::*;
-use herdsman::events::read;
-use herdsman::serve::Server;
+use drover::events::read;
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const T: u64 = 1_000_000;
@@ -20,7 +20,7 @@ fn call(s: &Server, ck: &str, (method, path): (&str, &str), body: &str) -> Value
 }
 
 /// `ask --thread <t>` on sendmeter: exit code and output.
-fn ask(c: &herdsman::Ctx, r: &Fake, thread: Option<&str>) -> (i32, String) {
+fn ask(c: &drover::Ctx, r: &Fake, thread: Option<&str>) -> (i32, String) {
     let mut a = vec![
         "ask",
         "sendmeter",
@@ -66,24 +66,18 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
         (json!(true), json!(false)),
         "{a}"
     );
-    assert!(
-        a["why"].as_str().unwrap().contains("no herdsman PreToolUse hook"),
-        "{a}"
-    );
+    assert!(a["why"].as_str().unwrap().contains("no drover PreToolUse hook"), "{a}");
     let settings = c
         .config
         .with_file_name("claude")
         .join("lane-orchestrator/settings.json");
     assert_eq!(a["settings"], settings.to_string_lossy().as_ref());
-    assert_eq!(a["env"]["HERDSMAN_LANE"], "sendmeter:-:orchestrator");
-    assert_eq!(a["env"]["HERDSMAN_THREAD"], COOEE);
+    assert_eq!(a["env"]["DROVER_LANE"], "sendmeter:-:orchestrator");
+    assert_eq!(a["env"]["DROVER_THREAD"], COOEE);
     // #683: the account's folder, no token.
     assert_eq!(a["env"]["CLAUDE_CONFIG_DIR"], "/accounts/claude/C");
     assert!(a["env"].get("CLAUDE_CODE_OAUTH_TOKEN").is_none(), "{a}");
-    assert!(
-        a["env"]["HERDSMAN_PORT"].as_str().unwrap().parse::<u16>().is_ok(),
-        "{a}"
-    );
+    assert!(a["env"]["DROVER_PORT"].as_str().unwrap().parse::<u16>().is_ok(), "{a}");
     let brief = a["brief"].as_str().unwrap();
     assert!(
         brief.contains("# ROLE: ORCHESTRATOR") && brief.contains("Fleet for asks: sendmeter"),
@@ -133,7 +127,7 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     assert_eq!(e["data"]["thread"], COOEE);
     assert_eq!(e["data"]["options"], json!(["small", "full"]));
     assert_eq!(e["data"]["recommend"], 2);
-    // The card's answer comes back through /api/v1/answer: decided, no herdsman conductor started for it.
+    // The card's answer comes back through /api/v1/answer: decided, no drover conductor started for it.
     let m = call(&s, &ck, ("GET", "/api/v1/state"), "")["mtime"].clone();
     let calls = r.calls.borrow().len();
     let ans = post(
@@ -151,9 +145,9 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     assert!(!started, "{:?}", r.calls.borrow());
 
     // #541: a lane's ask is routed to it (the event carries `routed`; cooee posts it), not typed into herdr.
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
+    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
     let (code, _) = ask(&c, &r, None);
-    std::env::remove_var("HERDSMAN_LANE");
+    std::env::remove_var("DROVER_LANE");
     assert_eq!(code, 0);
     let q = read(&c.state)
         .unwrap()

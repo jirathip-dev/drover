@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[serde(deny_unknown_fields)]
 pub struct Stage {
     pub name: String,
-    /// build (pushes code) | check (PASS or FAIL) | gate (herdsman's own: CI, serial, mergeable)
+    /// build (pushes code) | check (PASS or FAIL) | gate (drover's own: CI, serial, mergeable)
     pub kind: String,
     pub role: Option<String>,
     /// outcome -> a stage, `merge` or `park`; `<build>:update` is an update round.

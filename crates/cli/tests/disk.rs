@@ -2,19 +2,19 @@
 //! auto-saved to wip/, orphan folders.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, read, Event};
+use drover::config::Config;
+use drover::events::{append, read, Event};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
 const NOW: u64 = 1_000_000;
 
-fn ev(c: &herdsman::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(issue), kind, d)).unwrap();
 }
 
-fn events(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -27,7 +27,7 @@ fn build(wt: &Path, dir: &str, bytes: usize) -> PathBuf {
 }
 
 /// A lane's spawn event and its worktree dir under the root.
-fn lane(c: &herdsman::Ctx, ts: u64, issue: u64, role: &str, name: &str) -> PathBuf {
+fn lane(c: &drover::Ctx, ts: u64, issue: u64, role: &str, name: &str) -> PathBuf {
     let w = c.worktrees.join("sendmeter").join(name);
     std::fs::create_dir_all(&w).unwrap();
     let agent = format!("sendmeter-{role}-{issue}");
@@ -36,7 +36,7 @@ fn lane(c: &herdsman::Ctx, ts: u64, issue: u64, role: &str, name: &str) -> PathB
     w
 }
 
-fn verdict(c: &herdsman::Ctx, r: &Fake, v: &str) -> String {
+fn verdict(c: &drover::Ctx, r: &Fake, v: &str) -> String {
     let f = c.state.with_file_name("verdict.md");
     std::fs::create_dir_all(f.parent().unwrap()).unwrap();
     std::fs::write(&f, format!("{v}\n")).unwrap();
@@ -119,9 +119,9 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
         "herdr agent list",
         &agents(&[("sendmeter-impl-9", "working", "/x", "p")]),
     );
-    let run_budget = |c: &herdsman::Ctx| {
+    let run_budget = |c: &drover::Ctx| {
         let mut out = vec![];
-        herdsman::check::budget(c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+        drover::check::budget(c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     };
     let out = run_budget(&c);
@@ -166,7 +166,7 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
 #[test]
 fn a_missing_root_counts_zero() {
     let d = tmpdir("disk-gone");
-    let gone = d.join("Volumes/NVMe/herdsman");
+    let gone = d.join("Volumes/NVMe/drover");
     let roots = format!(
         "roots = [\"{}\", \"{}\"]",
         gone.display(),
@@ -178,7 +178,7 @@ fn a_missing_root_counts_zero() {
     build(&wt, "src", 4096);
     let r = Fake::default().reply("git -C", "").reply("herdr agent list", NO_AGENTS);
     let mut out = vec![];
-    herdsman::check::budget(&c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+    drover::check::budget(&c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "1", "impl"]);
     assert_eq!(code, 3, "{out}");
     let why = format!(
@@ -202,7 +202,7 @@ fn drive_refuses_starts_over_budget() {
             "{}worktree_budget_gb = 0.000001\n",
             CONFIG.replace(
                 "integration = \"staging\"",
-                "integration = \"staging\"\ndriver = \"herdsman\""
+                "integration = \"staging\"\ndriver = \"drover\""
             )
         ),
     );
@@ -227,7 +227,7 @@ fn the_hourly_sweep_runs_once_per_hour() {
     // Paused: drive's own after-merge `clean` (#155: every unpaused fleet gets a pass) would sweep too.
     let cfg = CONFIG.replace("integration = \"staging\"", "integration = \"staging\"\npaused = true");
     let mut c = ctx(&tmpdir("disk-hourly"), &cfg);
-    let merged = |c: &herdsman::Ctx, n: u64| {
+    let merged = |c: &drover::Ctx, n: u64| {
         ev(
             c,
             50,
@@ -248,7 +248,7 @@ fn the_hourly_sweep_runs_once_per_hour() {
             .reply("git -C", "")
             .reply("herdr", "{}")
     };
-    let tick = |c: &herdsman::Ctx| {
+    let tick = |c: &drover::Ctx| {
         let r = r();
         let (code, out) = run(c, &r, &["tick"]);
         assert_eq!(code, 0, "{out}");
@@ -284,10 +284,10 @@ fn git(dir: &Path, args: &[&str]) -> String {
 /// Real git; herdr and `date` are scripted (no agents, workspace already gone).
 struct GitHerdr(Fake);
 
-impl herdsman::runner::Runner for GitHerdr {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for GitHerdr {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog == "git" {
-            return herdsman::runner::Real.run(prog, args);
+            return drover::runner::Real.run(prog, args);
         }
         self.0.run(prog, args)
     }
@@ -367,7 +367,7 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
     assert_eq!(git(&origin, &["show", &format!("{sha}:notes.txt")]), "work\n");
     assert_eq!(
         git(&origin, &["log", "-1", "--format=%s", sha]).trim(),
-        "wip: auto-saved by herdsman"
+        "wip: auto-saved by drover"
     );
     assert!(
         git(&origin, &["ls-tree", "--name-only", sha])
@@ -401,7 +401,7 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
     run(&c, &r(), &["clean", "--yes"]);
     assert_eq!(events(&c, "wip-blocked").len(), 1, "once, not every sweep");
     assert!(
-        herdsman::config::WEBPUSH_ON.contains(&"wip-blocked"),
+        drover::config::WEBPUSH_ON.contains(&"wip-blocked"),
         "pushed to the phone"
     );
 }
@@ -448,7 +448,7 @@ fn the_host_tab_removes_orphans_for_a_paired_device_only() {
     let old = c.worktrees.join("oldproj");
     std::fs::create_dir_all(&old).unwrap();
     let r = Fake::default().reply("herdr agent list", NO_AGENTS);
-    let s = herdsman::serve::Server::new(&c, &r, Some(ADDR.into()));
+    let s = drover::serve::Server::new(&c, &r, Some(ADDR.into()));
     let page = host_tab(&s, ADDR, NOW);
     assert!(
         page.contains(
@@ -479,21 +479,21 @@ fn the_host_tab_removes_orphans_for_a_paired_device_only() {
 /// Real git; a `ssh <host> -- <line>` runs `<line>` here (the Air shares this disk); `date` and herdr are scripted.
 struct TwoHosts(Fake);
 
-impl herdsman::runner::Runner for TwoHosts {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for TwoHosts {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let line = args.last().map_or("", String::as_str);
         match prog {
-            "git" => herdsman::runner::Real.run(prog, args),
+            "git" => drover::runner::Real.run(prog, args),
             "ssh" if line.starts_with("'date' ") => self.0.run("date", &[]),
-            "ssh" => herdsman::runner::Real.run("sh", &["-c".into(), line.into()]),
+            "ssh" => drover::runner::Real.run("sh", &["-c".into(), line.into()]),
             _ => self.0.run(prog, args),
         }
     }
-    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<herdsman::runner::Out> {
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
         let line = args.last().map_or("", String::as_str);
         match prog {
             "ssh" if !line.starts_with("'date' ") => {
-                herdsman::runner::Real.run_in("sh", &["-c".into(), line.into()], input)
+                drover::runner::Real.run_in("sh", &["-c".into(), line.into()], input)
             }
             _ => self.run(prog, args),
         }
@@ -594,9 +594,9 @@ fn over_budget_frees_waiting_lanes_longest_waiting_first() {
             ("sendmeter-impl-9", "working", "/x", "p9"),
         ]),
     );
-    let run_budget = |c: &herdsman::Ctx| {
+    let run_budget = |c: &drover::Ctx| {
         let mut out = vec![];
-        herdsman::check::budget(c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+        drover::check::budget(c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
         String::from_utf8(out).unwrap()
     };
     let out = run_budget(&c);
@@ -607,7 +607,7 @@ fn over_budget_frees_waiting_lanes_longest_waiting_first() {
     let freed = events(&c, "budget-freed");
     assert_eq!(freed.len(), 1, "one line per pass");
     assert_eq!(
-        herdsman::events::plain(&freed[0]),
+        drover::events::plain(&freed[0]),
         "all budget-freed: freed 0.0 GB from sendmeter-impl-8"
     );
 
@@ -642,7 +642,7 @@ fn the_budget_counts_a_hard_link_and_a_clone_once() {
     let size = std::fs::metadata(&a).unwrap().blocks() * 512;
     let r = Fake::default().reply("git -C", "").reply("herdr agent list", NO_AGENTS);
     let mut out = vec![];
-    herdsman::check::budget(&c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+    drover::check::budget(&c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
     let stamp = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
     let total = stamp.split_whitespace().next();
     assert_eq!(total, Some(size.to_string().as_str()), "cloned: {cloned}");

@@ -1,10 +1,10 @@
 //! #677: why notes. `turn done` checks the lane's why.md and puts it on the pushed head under `refs/notes/why` on a
-//! real (bare) origin, the PR body and the log; refusals push nothing; concurrent writers lose no note; `herdsman why`
+//! real (bare) origin, the PR body and the log; refusals push nothing; concurrent writers lose no note; `drover why`
 //! reads a merged line back; every brief kind carries its notes. Every test runs as #12's impl lane (process-wide env).
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Runner};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -136,8 +136,8 @@ fn repo(name: &str) -> Repo {
 }
 
 /// #12's impl lane in `repo`'s worktree (spawned at ts 10, `update` for an update round), and q5 answered by the owner.
-fn lane(repo: &Repo, update: bool) -> herdsman::Ctx {
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
+fn lane(repo: &Repo, update: bool) -> drover::Ctx {
+    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
     let c = ctx(
         &repo.dir,
         &CONFIG.replace("/tmp/does-not-matter/sendmeter", repo.local.to_str().unwrap()),
@@ -201,7 +201,7 @@ fn origin_note(repo: &Repo, sha: &str) -> Option<String> {
         .then(|| String::from_utf8_lossy(&o.stdout).into_owned())
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -350,14 +350,13 @@ fn two_lanes_finishing_at_once_both_keep_their_notes() {
     g(&seed, &["commit", "-qm", "b"]);
     g(&seed, &["push", "-q", "origin", "issue-13"]);
     let other = g(&seed, &["rev-parse", "HEAD"]);
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let f = cfg.fleet("sendmeter").unwrap();
     let r = Fake::default();
     let git = Git::new(&r);
     std::thread::scope(|s| {
-        let a =
-            s.spawn(|| herdsman::why::attach(&c, &git, f, "sendmeter", ("issue-12", &repo.head), "Owner: twelve\n"));
-        let b = s.spawn(|| herdsman::why::attach(&c, &git, f, "sendmeter", ("issue-13", &other), "Owner: thirteen\n"));
+        let a = s.spawn(|| drover::why::attach(&c, &git, f, "sendmeter", ("issue-12", &repo.head), "Owner: twelve\n"));
+        let b = s.spawn(|| drover::why::attach(&c, &git, f, "sendmeter", ("issue-13", &other), "Owner: thirteen\n"));
         a.join().unwrap().unwrap();
         b.join().unwrap().unwrap();
     });
@@ -441,14 +440,14 @@ fn a_refused_note_is_nudged_once_then_review_goes_ahead() {
         )
         .reply("herdr", "{}");
     assert_eq!(run(&c, &Git::new(&r), &["turn", "done"]).0, 3);
-    let later = |s| herdsman::Ctx {
+    let later = |s| drover::Ctx {
         now: c.now + s,
         ..c.clone()
     };
     let (code, out) = run(&later(200), &Git::new(&r), &["drive"]);
     assert_eq!(code, 0, "{out}");
     let nudge =
-        "herdr agent prompt sendmeter-impl-12 herdsman: your `turn done` was refused: WHY_INVALID: why.md missing";
+        "herdr agent prompt sendmeter-impl-12 drover: your `turn done` was refused: WHY_INVALID: why.md missing";
     assert_eq!(r.count(nudge), 1, "{:?}", r.calls.borrow());
     assert!(kinds(&c, "pushed").is_empty(), "no review before the nudge is answered");
     // The lane answers with another `done`, still without a note: the review goes ahead, the nudge is not repeated.

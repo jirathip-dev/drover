@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Real, Runner};
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Real, Runner};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -18,10 +18,10 @@ fn boat1(prog: &str, args: &[String]) -> bool {
 
 impl Runner for Remote {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
-        self.run_for(prog, args, "", herdsman::runner::limit(prog, args))
+        self.run_for(prog, args, "", drover::runner::limit(prog, args))
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
-        self.run_for(prog, args, input, herdsman::runner::limit(prog, args))
+        self.run_for(prog, args, input, drover::runner::limit(prog, args))
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, limit: Duration) -> anyhow::Result<Out> {
         if !boat1(prog, args) {
@@ -55,7 +55,7 @@ fn alive(pid: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let base = CONFIG
         .replace("harness  =  \"hermes\"", "harness = \"claude\"")
         .replace("[limits]\n", "[limits]\nssh_call_secs = 2\nssh_quick_secs = 2\n");
@@ -126,7 +126,7 @@ fn an_ssh_that_never_returns_costs_one_deadline_and_drive_still_starts() {
             .filter(|l| l.contains(" boat1 ") && !l.ends_with("-- true"))
             .collect();
         assert_eq!(sent.len(), 1, "{name}: one call, then the host is skipped: {sent:#?}");
-        assert!(!herdsman::hosts::cached(&c)["boat1"].up, "{name}: boat1 shows offline");
+        assert!(!drover::hosts::cached(&c)["boat1"].up, "{name}: boat1 shows offline");
         assert!(
             read(&c.state)
                 .unwrap()

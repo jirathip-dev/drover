@@ -166,19 +166,20 @@ fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Breach> {
         .filter(|t| ctx.now >= t + cfg.limits.slo_tick_minutes * 60)?;
     let pid = m["pid"]
         .as_u64()
-        .filter(|p| *p != u64::from(std::process::id()))
+        .filter(|p| *p != u64::from(crate::sim::pid()))
         .map(|p| p.to_string());
     if pid.as_ref().is_some_and(|p| ok(r, "kill", &["-0", p]).is_err()) {
         return None;
     }
-    let ours = |c: &str| c.contains("herdsman") && [" tick", " drive"].iter().any(|w| c.contains(w));
+    let ours =
+        |c: &str| (c.contains("drover") || c.contains("herdsman")) && [" tick", " drive"].iter().any(|w| c.contains(w));
     let named = pid.filter(|p| ok(r, "ps", &["-o", "command=", "-p", p]).is_ok_and(|c| ours(&c)));
     let child = m["child"].as_str().filter(|c| !c.is_empty()).unwrap_or("none");
     let step = m["step"].as_str().unwrap_or("?");
     let mins = (ctx.now - since) / 60;
     Some(Breach {
         key: format!("slo-tick:{since}"),
-        fleet: "herdsman".into(),
+        fleet: "drover".into(),
         issue: None,
         slo: Some("slo-tick"),
         reason: format!("tick running {mins} min, in {step}; waiting on: {child}"),

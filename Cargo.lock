@@ -307,6 +307,68 @@ dependencies = [
 ]
 
 [[package]]
+name = "drover"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "base64",
+ "drover-core",
+ "drover-server",
+ "drover-service",
+ "hkdf",
+ "p256",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "toml",
+]
+
+[[package]]
+name = "drover-core"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "anyhow",
+ "base64",
+ "clap",
+ "hkdf",
+ "p256",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sha2",
+ "shed-proto",
+ "toml",
+ "ts-rs",
+]
+
+[[package]]
+name = "drover-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64",
+ "drover-core",
+ "serde",
+ "serde_json",
+ "toml",
+ "ts-rs",
+]
+
+[[package]]
+name = "drover-service"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "drover-core",
+ "drover-server",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "ecdsa"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -437,68 +499,6 @@ name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
-
-[[package]]
-name = "herdsman"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "base64",
- "herdsman-core",
- "herdsman-server",
- "herdsman-service",
- "hkdf",
- "p256",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "toml",
-]
-
-[[package]]
-name = "herdsman-core"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "anyhow",
- "base64",
- "clap",
- "hkdf",
- "p256",
- "rusqlite",
- "serde",
- "serde_json",
- "sha2",
- "shed-proto",
- "toml",
- "ts-rs",
-]
-
-[[package]]
-name = "herdsman-server"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "base64",
- "herdsman-core",
- "serde",
- "serde_json",
- "toml",
- "ts-rs",
-]
-
-[[package]]
-name = "herdsman-service"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "herdsman-core",
- "herdsman-server",
- "serde_json",
- "tokio",
-]
 
 [[package]]
 name = "hkdf"

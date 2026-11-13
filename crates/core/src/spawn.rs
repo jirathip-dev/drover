@@ -1,4 +1,4 @@
-//! `herdsman spawn`, `adopt` and `profiles sync` (docs/lanes.md); per-harness parts live in `harness`.
+//! `drover spawn`, `adopt` and `profiles sync` (docs/lanes.md); per-harness parts live in `harness`.
 use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, read, Event};
@@ -56,7 +56,7 @@ pub(crate) fn profiles(cfg: &Config) -> Vec<(&str, &Fleet, &str, &Role, String)>
     all.filter(|p| done.insert(p.4.clone())).collect()
 }
 
-/// Write every harness's files for every role's profile, so `herdsman set` alone can switch a role's harness;
+/// Write every harness's files for every role's profile, so `drover set` alone can switch a role's harness;
 /// a generated profile no role names any more (#155: a retired role's) is removed.
 pub fn profiles_sync(ctx: &Ctx, cfg: &Config, usage: &str, out: &mut dyn Write) -> Result<()> {
     let all = profiles(cfg);
@@ -83,7 +83,7 @@ pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Wri
     let stray = stray_hooks(ctx, cfg);
     let mut good = stray.is_empty();
     for s in stray {
-        writeln!(out, "✗ {s} → herdsman profiles sync")?;
+        writeln!(out, "✗ {s} → drover profiles sync")?;
     }
     for p in providers::lanes() {
         good &= p.hooks_allowed(ctx, cfg, r, out)?;
@@ -91,7 +91,7 @@ pub fn profiles_check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Wri
     Ok(good)
 }
 
-/// #737: each synced profile's herdsman hook whose program is not the running binary: `<profile> hook runs <exe>`.
+/// #737: each synced profile's drover hook whose program is not the running binary: `<profile> hook runs <exe>`.
 pub fn stray_hooks(ctx: &Ctx, cfg: &Config) -> Vec<String> {
     let mut stray = vec![];
     for (_, _, _, _, profile) in profiles(cfg) {
@@ -126,7 +126,7 @@ pub struct Plan {
     pub worktree: PathBuf,
     pub brief: PathBuf,
     pub kick: String,
-    /// `HERDSMAN_LANE` value (`<fleet>:<issue>:<role>`); arms `herdsman hook` in the lane.
+    /// `DROVER_LANE` value (`<fleet>:<issue>:<role>`); arms `drover hook` in the lane.
     pub lane: String,
     /// `[accounts]` lanes: the account name and (#683) the env it signs in with (`access::account_env`); that env is
     /// empty on a remote host (its lanes sign in through the main host's token proxy, #637).
@@ -150,14 +150,20 @@ pub struct Plan {
 }
 
 impl Plan {
-    /// Exports `HERDSMAN_LANE`, `HERDSMAN_PORT` and the fleet's `env`; #441: sources the secrets `deliver` wrote.
+    /// Exports `DROVER_LANE`, `DROVER_PORT` and the fleet's `env`; #441: sources the secrets `deliver` wrote.
     pub fn lane_cmd(&self, pane: &str) -> Vec<String> {
-        let (lane, port) = (format!("HERDSMAN_LANE='{}'", self.lane), self.port.to_string());
-        let mut c = herdr::run_argv(pane, &["export", &lane, &format!("HERDSMAN_PORT={port}")]);
-        let v = |v: &str| expand(v).display().to_string().replace("$HERDSMAN_PORT", &port);
+        let (lane, port) = (format!("DROVER_LANE='{}'", self.lane), self.port.to_string());
+        let mut c = herdr::run_argv(pane, &["export", &lane, &format!("DROVER_PORT={port}")]);
+        let v = |v: &str| {
+            expand(v)
+                .display()
+                .to_string()
+                .replace("$DROVER_PORT", &port)
+                .replace("$HERDSMAN_PORT", &port)
+        };
         let plain = self.env.iter().filter(|(_, x)| !x.starts_with("secret:"));
         c.extend(plain.map(|(k, x)| format!("{k}='{}'", v(x))));
-        c.extend(self.account.iter().map(|a| format!("HERDSMAN_ACCOUNT='{}'", a.0)));
+        c.extend(self.account.iter().map(|a| format!("DROVER_ACCOUNT='{}'", a.0)));
         // #683: the account's env, its own CLI login; the lane's profile goes on top (`--settings`, ACP's settings).
         let acct = self.account.iter().flat_map(|a| &a.1);
         c.extend(acct.map(|(k, d)| format!("{k}='{}'", d.replace('\'', r"'\''"))));
@@ -230,7 +236,7 @@ pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Pl
         let v = crate::secret::file(&f)?.or_else(|| cfg.legacy_secret(&name)); // #539
         let why = || {
             format!(
-                "{var}: secret {name} is not in {} (`herdsman secret request`)",
+                "{var}: secret {name} is not in {} (`drover secret request`)",
                 f.display()
             )
         };
@@ -412,7 +418,7 @@ fn shared_target<'a>(root: &Path, f: &'a Fleet, agent: &str) -> impl Iterator<It
     let b = root.join(crate::roots::BUILD);
     let d = b.join(agent).display().to_string();
     let s = b.join(SCRATCH).join(agent).display().to_string();
-    let vars = [("CARGO_TARGET_DIR".into(), d), ("HERDSMAN_SCRATCH_TARGET".into(), s)];
+    let vars = [("CARGO_TARGET_DIR".into(), d), ("DROVER_SCRATCH_TARGET".into(), s)];
     vars.into_iter()
         .filter(|v| !f.env.contains_key(&v.0) && !f.shared_cache.contains_key(&v.0))
 }
@@ -491,9 +497,9 @@ fn brief(
     let contract = contract.trim_end().to_string() + "\n" + steps + play;
     let head = "## Review findings to fix (latest FAIL verdict)";
     let fix = fix.map_or(String::new(), |v| format!("{head}\n\n{PUSHBACK}\n\n{v}\n\n"));
-    // #733: the shared rules pack, then (#419) the repo's lessons, `.herdsman/rules.md` at the lane's checkout.
+    // #733: the shared rules pack, then (#419) the repo's lessons, `.drover/rules.md` at the lane's checkout.
     let rules = rules.map_or(String::new(), |r| {
-        format!("## Repo rules (.herdsman/rules.md)\n\n{}\n\n", r.trim_end())
+        format!("## Repo rules (.drover/rules.md)\n\n{}\n\n", r.trim_end())
     });
     let shared = include_str!("../rules/shared.md").trim_end();
     let rules = format!("## Shared rules (rules/shared.md)\n\n{shared}\n\n{rules}");
@@ -565,7 +571,7 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
     k.filter(|_| p.family == "rev").unwrap_or(n)
 }
 
-/// #565: why herdsman's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (with an
+/// #565: why drover's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (with an
 /// account; #637: on a remote host, its profile checked there instead); empty when it would. #633: an attached cooee conductor's `guarded` too.
 pub fn unguarded(
     ctx: &Ctx,
@@ -583,7 +589,7 @@ pub fn unguarded(
     if providers::get(h).acp() != Some(id) {
         format!("ACP agent {id} runs no {h} hook")
     } else if !remote && !hooks.any(|h| h["command"].as_str().is_some_and(|c| providers::guards(ctx, c, family))) {
-        format!("profile {profile} has no herdsman PreToolUse hook; run `herdsman profiles sync`")
+        format!("profile {profile} has no drover PreToolUse hook; run `drover profiles sync`")
     } else if !account {
         "an ACP lane signs in with its role's [accounts] account env".into()
     } else {
@@ -594,7 +600,7 @@ pub fn unguarded(
 /// #565: an ACP lane's adapter (its agent's command in `shed agents`), run by `sh` after the lane's exports and secrets
 /// file, with its account's env as its sign-in (#683), its profile's settings and role as the
 /// worktree's local project settings and memory, and no `$SHED` (its state is the session's, not the hook's).
-/// Refused `ACP_UNGUARDED` when herdsman's hook would not guard it (#508: fail closed).
+/// Refused `ACP_UNGUARDED` when drover's hook would not guard it (#508: fail closed).
 pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&str>) -> Result<Vec<String>> {
     let dir = providers::profiles_root(ctx).join(&p.profile);
     let home = |a: Vec<String>| crate::hosts::rehome(a, remote);
@@ -728,7 +734,7 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
         cmds.extend(p.kick_cmds("<pane>").into_iter().map(|k| sent(herdr::BIN, k)));
     }
     // #345: the lane's service token is never shown (the plan is printed and `--json`).
-    if let Some(t) = p.env.get("HERDSMAN_TOKEN") {
+    if let Some(t) = p.env.get("DROVER_TOKEN") {
         cmds.iter_mut()
             .flatten()
             .for_each(|w| *w = w.replace(t.as_str(), "•••"));
@@ -756,7 +762,7 @@ pub const OWN_FILES: &[&str] = &[
     ".mcp.lane.json",
     "verdict.md",
     ".review-brief.md",
-    "why.md",              // #677: herdsman attaches it as a note; never committed
+    "why.md",              // #677: drover attaches it as a note; never committed
     ".verify-browser.mjs", // #731: scripts/verify-browser.mjs, for the verify lane's recipe
 ];
 
@@ -768,7 +774,7 @@ pub fn own_files() -> impl Iterator<Item = &'static str> {
 /// #518: screenshot folders a lane leaves behind; `clean` removes them with `OWN_FILES`.
 pub const SHOT_DIRS: &[&str] = &["ui-390/", "ui-1440/"];
 
-/// #646: a herdsman-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
+/// #646: a drover-made clone of `repo` in `dir`: `branch` only, then every branch but `wip/*` on each later fetch.
 pub fn clone_sh(repo: &str, branch: &str, dir: &str) -> String {
     let all = "'+refs/heads/*:refs/remotes/origin/*'";
     format!(
@@ -881,10 +887,10 @@ pub fn clone_warm(r: &dyn Runner, fleet: &str, t: &Path) -> Option<Value> {
     Some(json!({"dirs": dirs, "from": src, "secs": at.elapsed().as_secs(), "errors": errs}))
 }
 
-/// #630: the ignored files `.herdsman/worktree-include` lists (one path per line, `#` comments), copied from the main
+/// #630: the ignored files `.drover/worktree-include` lists (one path per line, `#` comments), copied from the main
 /// checkout into a new lane's worktree when missing there. Never secrets: those stay in `secret:` env.
 pub fn copy_included(local: &Path, wt: &Path) -> Result<()> {
-    let list = std::fs::read_to_string(local.join(".herdsman/worktree-include")).unwrap_or_default();
+    let list = std::fs::read_to_string(crate::repo_path(&local.join(".drover/worktree-include"))).unwrap_or_default();
     for l in list
         .lines()
         .map(str::trim)
@@ -975,7 +981,7 @@ pub fn spawn(
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
     if f.paused && !crate::events::STAGES.contains(&role) {
-        return refused("PAUSED", format!("{fleet} is paused; `herdsman resume {fleet}` first"));
+        return refused("PAUSED", format!("{fleet} is paused; `drover resume {fleet}` first"));
     }
     if o.update && f.family(role) != "impl" {
         return refused("BAD_VALUE", "--update is an impl fix round");
@@ -993,17 +999,17 @@ pub fn spawn(
     let (base, r): (&dyn Runner, &dyn Runner) = (r, &on);
     if let Some(pl) = &placed {
         p.at(&pl.root, f);
-        p.env.insert("HERDSMAN_HOST".into(), pl.name.clone()); // #256: the lane hook's per-host rules
+        p.env.insert("DROVER_HOST".into(), pl.name.clone()); // #256: the lane hook's per-host rules
         if pl.machine.is_some() {
             // #389: its asks, answers, verdicts and events wait in its outbox; it holds no route to the main host.
             // #345: they go to the service over HTTP when `[service] url` is set (its token is added below the dry run).
             match &cfg.service.url {
-                Some(url) => p.env.insert("HERDSMAN_SERVICE".into(), url.clone()),
-                None => p.env.insert("HERDSMAN_OUTBOX".into(), "1".into()),
+                Some(url) => p.env.insert("DROVER_SERVICE".into(), url.clone()),
+                None => p.env.insert("DROVER_OUTBOX".into(), "1".into()),
             };
             // #592: its host keeps no fleet.toml: its hook reads the rules this host resolves (written below).
             p.env
-                .insert("HERDSMAN_RULES".into(), p.rules_file().display().to_string());
+                .insert("DROVER_RULES".into(), p.rules_file().display().to_string());
         }
     }
     // #683: a lane on this host signs in with its account's env (a failing `account_env` refuses the spawn); a remote
@@ -1032,7 +1038,7 @@ pub fn spawn(
     // #600: drive's PATH is the timer's; a shed it lacks is named before anything is made.
     if bt.is_some() && on.machine.is_none() && ok(r, "which", &["shed"]).is_err() {
         let path = std::env::var("PATH").unwrap_or_default();
-        let fix = "`herdsman timer install` from a shell where `which shed` finds it";
+        let fix = "`drover timer install` from a shell where `which shed` finds it";
         return refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
     }
     let acp_id = bt.as_ref().and_then(|b| b.0.acp.clone());
@@ -1055,7 +1061,7 @@ pub fn spawn(
     if let Some(("HOST_OFFLINE", why)) = placed.as_ref().and_then(|pl| pl.refusal.clone()) {
         return refused("HOST_OFFLINE", why);
     }
-    if p.env.contains_key("HERDSMAN_SERVICE") {
+    if p.env.contains_key("DROVER_SERVICE") {
         let g = crate::service::Grant {
             fleet: fleet.into(),
             issue,
@@ -1064,7 +1070,7 @@ pub fn spawn(
             lane: p.lane.clone(),
             at: ctx.now,
         };
-        p.env.insert("HERDSMAN_TOKEN".into(), crate::service::grant(ctx, &g)?);
+        p.env.insert("DROVER_TOKEN".into(), crate::service::grant(ctx, &g)?);
     }
     let h = providers::get(&p.harness);
     h.ready(ctx, r, &p)?;
@@ -1091,7 +1097,7 @@ pub fn spawn(
         dup.push((
             "LANE_LIVE",
             format!(
-                "stale pane {} (idle {idle}): herdsman adopt or --supersede",
+                "stale pane {} (idle {idle}): drover adopt or --supersede",
                 names.join(", ")
             ),
         ));
@@ -1341,7 +1347,7 @@ pub fn spawn(
         let resume = cause.filter(|c| crate::shed::RESUMABLE.contains(c)).map(|c| {
             format!(
                 "Resume: your previous session in this worktree stopped mid-turn ({c}). Its local commits and staged \
-                 changes are kept here, and herdsman pushed the commits to `{}`: continue from them and push.",
+                 changes are kept here, and drover pushed the commits to `{}`: continue from them and push.",
                 p.branch
             )
         });
@@ -1390,7 +1396,7 @@ pub fn spawn(
                 &decided.fold(body.to_string(), |b, d| b + &d),
                 (
                     fix,
-                    on.read(&p.worktree.join(".herdsman/rules.md")).as_deref(),
+                    crate::repo_read("rules.md", |f| on.read(&p.worktree.join(f))).as_deref(),
                     crate::queue::repro(&events, fleet, issue),
                     crate::queue::playbook(&events, fleet, issue),
                 ),
@@ -1968,7 +1974,7 @@ fn lane_data(p: &Plan, pane: &str, ws: &str) -> Value {
         "pane": pane, "workspace": ws, "worktree": p.worktree, "branch": p.branch, "account": p.account.as_ref().map(|a| &a.0), "port": p.port})
 }
 
-/// `herdsman adopt`: log the lane running in `pane` and name its agent as planned; nothing is started. `extra` joins the
+/// `drover adopt`: log the lane running in `pane` and name its agent as planned; nothing is started. `extra` joins the
 /// `spawn` data (#376: an orphan's host, machine, worktree, `since`).
 pub fn adopt(
     ctx: &Ctx,
@@ -2106,7 +2112,7 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
             (|| {
                 if let Some(w) = wt.as_deref().filter(|w| dirty(&on, Path::new(w)).is_some()) {
                     let b = crate::check::wip_branch(ctx, &on, &format!("{fleet}-{role}-{n}"));
-                    crate::check::save_wip(&on, w, &b, "wip: stale orphan lane, saved by herdsman")?;
+                    crate::check::save_wip(&on, w, &b, "wip: stale orphan lane, saved by drover")?;
                 }
                 herdr::close(&on, pane)?;
                 writeln!(out, "closed stale orphan {agent} ({why})")?;

@@ -10,7 +10,7 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
   implementer's claims. Rerun the tests yourself.
 - Check correctness, edge cases, test quality (would each regression test go RED on the old
   code?), scope creep, leaked secrets, repo conventions.
-- Start any dev server on `$HERDSMAN_PORT`, never a fixed port. Stop only what you started: record
+- Start any dev server on `$DROVER_PORT`, never a fixed port. Stop only what you started: record
   its pid (`cmd & echo $! > server.pid`), then `kill "$(cat server.pid)"`; never `pkill`/`killall` (the hook refuses them).
 - Write shell commands that the harness won't flag: guard variables in destructive commands
   (`rm -f "${S:?}"/*.png`), quote paths, no `rm -rf` on computed paths.
@@ -27,7 +27,7 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
 - The implementer's standing answers (staging re-merges, a minimal "staging build fix", one
   host-tool retry, amendment text for the cap or shared files) are not findings.
 - A lesson PR (`lessons: <fleet> week of <date>`) adds or changes at least one enforcer (a CI step, a test, a type,
-  a lint rule, a lesson check). A PR that only edits prose is a FAIL in rev, unless it retires lines; `herdsman
+  a lint rule, a lesson check). A PR that only edits prose is a FAIL in rev, unless it retires lines; `drover
   verdict` records such a PASS as a FAIL.
 - Label every finding `blocking` or `non-blocking` with `file:line`.
 - A finding blocks only with proof; anything else is a `non-blocking` note. Right under each
@@ -38,7 +38,7 @@ Read-only: no edits, no commits, no pushes, no GitHub comments or reviews. Never
   - `Proof: spec`, then a `>` quoted line from the issue's acceptance criteria, its `## Amendments`,
     or a named rule in `roles/rev.md` or `docs/ui.md`, plus the `file:line` that breaks it (the PR
     body as `PR#<n>:<line>`). Form categories (`pr-body`, `trailer`, `format`) use this form.
-  `herdsman verdict` refuses a FAIL with `NO_PROOF` when a blocker's proof is missing or malformed.
+  `drover verdict` refuses a FAIL with `NO_PROOF` when a blocker's proof is missing or malformed.
 - Verdict is PASS or FAIL. `FAIL (form-only)` only if every blocker is in a form category (the
   brief lists them; e.g. `trailer`, `pr-body`, `format`); one substantive blocker makes it a
   plain FAIL. Name the single biggest remaining gap; on PASS, state exactly what you could NOT

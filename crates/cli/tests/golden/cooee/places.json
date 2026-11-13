@@ -4,6 +4,6 @@
     { "type": "header-strip", "id": "queue", "persona": "conductor", "label": "Queue", "screen": "/screens/queue" },
     { "type": "header-strip", "id": "events", "persona": "conductor", "label": "Events", "screen": "/screens/events" },
     { "type": "chat-cards", "persona": "conductor" },
-    { "type": "menu-row", "label": "drover", "subtitle": "herdsman's fleets", "screen": "/screens/fleets" }
+    { "type": "menu-row", "label": "drover", "subtitle": "drover's fleets", "screen": "/screens/fleets" }
   ]
 }

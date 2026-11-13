@@ -3,9 +3,9 @@
 # scripts/ui-audit.sh. Each is a copy of demo/ with a webpush device and 42 GB free; busy: load/cpu 4.24 over 2.5,
 # herdr half updated, docs' drive refused SERIAL_BUSY; healthy: load/cpu 1.84, docs' drive started #10; hosts (#157): healthy
 # with two `[hosts]`, mini (every lane on it) and bazzite (offline, last seen 33m), and 24 h of host history (#234).
-# Usage: scripts/host-fixtures.sh [site-dir] [herdsman-binary]
+# Usage: scripts/host-fixtures.sh [site-dir] [drover-binary]
 set -euo pipefail
-site=${1:-site} bin=${2:-./target/release/herdsman}
+site=${1:-site} bin=${2:-./target/release/drover}
 for fx in busy healthy hosts; do
   d=$(mktemp -d)
   cp -R demo/. "$d"
@@ -27,9 +27,9 @@ json.dump(r, open(f"{d}/runner.json", "w"))
 ts = max(json.loads(l)["ts"] for l in open(f"{d}/events.jsonl") if l.strip())
 if busy:
     why = "serial #6 is unmerged (impl), #7 is unmerged (fix(1)), #8 is unmerged (review(1)); retry after they merge"
-    d_ = {"step": "start", "cmd": "herdsman spawn docs 10 impl", "result": f"REFUSED SERIAL_BUSY: {why}", "code": "SERIAL_BUSY"}
+    d_ = {"step": "start", "cmd": "drover spawn docs 10 impl", "result": f"REFUSED SERIAL_BUSY: {why}", "code": "SERIAL_BUSY"}
 else:
-    d_ = {"step": "start", "cmd": "herdsman spawn docs 10 impl", "result": '"docs-impl-10" ["claude" "fleet-impl"]', "code": None}
+    d_ = {"step": "start", "cmd": "drover spawn docs 10 impl", "result": '"docs-impl-10" ["claude" "fleet-impl"]', "code": None}
 with open(f"{d}/events.jsonl", "a") as f:
     f.write(json.dumps({"ts": ts - 420, "fleet": "docs", "issue": 10, "type": "driven", **d_}) + "\n")
 toml = open(f"{d}/fleet.toml").read().replace("[fleet.docs]\n", '[fleet.docs]\nserial_label = "database"\n')
@@ -65,7 +65,7 @@ os.makedirs(f"{d}/webpush", exist_ok=True)
 sub = {"endpoint": "https://web.push.apple.com/demo", "p256dh": "p", "auth": "a", "label": "iPhone Safari", "created": ts - 28800}
 json.dump([sub], open(f"{d}/webpush/subs.json", "w"))
 EOF
-  export HOME="$d" HERDSMAN_HOME="$d" FLEET_CONFIG="$d/fleet.toml" FLEET_STATE="$d/events.jsonl"
+  export HOME="$d" DROVER_HOME="$d" FLEET_CONFIG="$d/fleet.toml" FLEET_STATE="$d/events.jsonl"
   # #461: install logs `timer-install` at the wall clock; dropped, so export's now stays the fixture's last event + 60 s.
   if [ "$fx" = healthy ]; then
     "$bin" timer install --no-load >/dev/null
@@ -115,5 +115,5 @@ iss = {str(n): {"title": f"acme-api backlog {n}: " + ("a title that runs well pa
     for n in range(500, 600)}
 json.dump({"ts": ts, "since": "2026-01-01T00:00:00Z", "issues": iss}, open(f"{d}/cache/backlog-acme-api-0.json", "w"))
 EOF
-HOME="$d" HERDSMAN_HOME="$d" FLEET_CONFIG="$d/fleet.toml" FLEET_STATE="$d/events.jsonl" "$bin" serve --export "$site/queue" --demo
+HOME="$d" DROVER_HOME="$d" FLEET_CONFIG="$d/fleet.toml" FLEET_STATE="$d/events.jsonl" "$bin" serve --export "$site/queue" --demo
 rm -rf "${d:?}"

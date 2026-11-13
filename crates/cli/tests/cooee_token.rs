@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::events::read;
-use herdsman::serve::Server;
+use drover::events::read;
+use drover::serve::Server;
 
 fn status(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> String {
     let r = format!(
@@ -37,7 +37,7 @@ fn the_manifest_attaches_to_the_running_serve_with_its_token_file() {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../cooee-plugin.toml");
     let m: toml::Value = toml::from_str(&std::fs::read_to_string(root).unwrap()).unwrap();
     assert_eq!(m["attach"].as_str(), Some("http://127.0.0.1:7777"));
-    assert_eq!(m["attach_token"].as_str(), Some("~/.config/herdsman/cooee-token"));
+    assert_eq!(m["attach_token"].as_str(), Some("~/.config/drover/cooee-token"));
 }
 
 fn ask(addr: std::net::SocketAddr, method: &str, path: &str, body: &str, extra: &str) -> String {
@@ -53,18 +53,18 @@ fn ask(addr: std::net::SocketAddr, method: &str, path: &str, body: &str, extra: 
     String::from_utf8_lossy(&res)[9..12].to_string()
 }
 
-fn start(c: &'static herdsman::Ctx) -> std::net::SocketAddr {
+fn start(c: &'static drover::Ctx) -> std::net::SocketAddr {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let r: &'static Fake = Box::leak(Box::default());
-    std::thread::spawn(move || herdsman::serve::serve_on(c, r, l, false));
+    std::thread::spawn(move || drover::serve::serve_on(c, r, l, false));
     addr
 }
 
 #[test]
 fn serve_makes_the_cooee_token_file_once_and_accepts_it_on_action_and_screens() {
     use std::os::unix::fs::PermissionsExt;
-    let c: &'static herdsman::Ctx = Box::leak(Box::new(ctx(&tmpdir("cooee-token-file"), CONFIG)));
+    let c: &'static drover::Ctx = Box::leak(Box::new(ctx(&tmpdir("cooee-token-file"), CONFIG)));
     assert_eq!(run(c, &Fake::default(), &["queue", "sendmeter", "add", "17"]).0, 0);
     let file = c.config.with_file_name("cooee-token");
     assert!(!file.exists());

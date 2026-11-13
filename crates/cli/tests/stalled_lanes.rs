@@ -2,7 +2,7 @@
 //! never started is retried once, then escalated; a lane the hook keeps refusing is ended with the refusal on its card.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
 const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
@@ -19,22 +19,22 @@ fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn state(c: &herdsman::Ctx) -> String {
+fn state(c: &drover::Ctx) -> String {
     fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)]
         .state
         .clone()
 }
 
-fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
-    herdsman::Ctx { now, ..c.clone() }
+fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
+    drover::Ctx { now, ..c.clone() }
 }
 
 fn pr(head: &str) -> String {
@@ -67,14 +67,14 @@ fn fake(agents: &str, screen: &str) -> Fake {
         .reply("herdr agent", "{}")
 }
 
-fn drive(c: &herdsman::Ctx, r: &Fake) -> String {
+fn drive(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     out
 }
 
 /// #12 built and rev PASSed at `head`; its verify lane spawned at `t` in a worktree with no verdict.md.
-fn verify_lane(name: &str, t: u64) -> (herdsman::Ctx, String) {
+fn verify_lane(name: &str, t: u64) -> (drover::Ctx, String) {
     let c = ctx(&tmpdir(name), &config());
     let head = sha("abc");
     ev(

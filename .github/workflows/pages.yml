@@ -21,7 +21,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     env:
-      HERDSMAN_HOME: ${{ github.workspace }}/demo
+      DROVER_HOME: ${{ github.workspace }}/demo
       FLEET_CONFIG: ${{ github.workspace }}/demo/fleet.toml
       FLEET_STATE: ${{ github.workspace }}/demo/events.jsonl
     steps:
@@ -30,7 +30,7 @@ jobs:
       - name: build
         run: cargo build --release --locked
       - name: export the demo
-        run: ./target/release/herdsman serve --export site --demo
+        run: ./target/release/drover serve --export site --demo
       - name: leak gate (no ts.net hostname, chat ID or /Users/ path)
         run: "! grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' demo/ site/"
       - uses: actions/upload-pages-artifact@v3

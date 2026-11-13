@@ -1,7 +1,7 @@
 //! AC2 (set round-trip, byte-identical) and AC7 (notifier).
 mod common;
 use common::*;
-use herdsman::events::read;
+use drover::events::read;
 
 #[test]
 fn set_round_trip_is_byte_identical() {
@@ -14,7 +14,7 @@ fn set_round_trip_is_byte_identical() {
     let mid = std::fs::read_to_string(&c.config).unwrap();
     assert!(mid.contains("harness  =  \"claude\"    # toggled in tests"), "{mid}");
     assert_eq!(
-        herdsman::config::Config::parse(&mid).unwrap().fleet["sendmeter"].role["impl"].harness,
+        drover::config::Config::parse(&mid).unwrap().fleet["sendmeter"].role["impl"].harness,
         "claude"
     );
 
@@ -59,9 +59,9 @@ fn set_inserts_missing_key_in_place() {
 
 #[test]
 fn set_finds_a_header_with_an_inline_comment_spaces_or_quotes() {
-    use herdsman::config::set_in;
+    use drover::config::set_in;
     for (head, find) in [
-        ("[hosts.mini]   # the main host: herdsman, board", "[hosts.mini]"),
+        ("[hosts.mini]   # the main host: drover, board", "[hosts.mini]"),
         ("[ hosts.mini ]", "[hosts.mini]"),
         ("[hosts.\"a#b\"]  # quoted", "[hosts.\"a#b\"]"),
     ] {

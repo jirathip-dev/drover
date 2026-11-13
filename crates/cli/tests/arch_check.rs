@@ -1,4 +1,4 @@
-//! #734: `herdsman arch-check` on fixture repos: a cross-layer `use` or import fails with file:line, a banned call
+//! #734: `drover arch-check` on fixture repos: a cross-layer `use` or import fails with file:line, a banned call
 //! outside its exception fails, and a file or function over its size limit fails unless the baseline lists it at
 //! that size, so an untouched offender passes and a grown one fails.
 mod common;
@@ -9,12 +9,12 @@ const ARCH: &str = r##"
 [[layer]]
 name = "core"
 paths = ["crates/core/src/**"]
-mods = ["herdsman_core"]
+mods = ["drover_core"]
 
 [[layer]]
 name = "server"
 paths = ["crates/server/src/**"]
-mods = ["herdsman_server"]
+mods = ["drover_server"]
 may_use = ["core"]
 
 [[layer]]
@@ -40,7 +40,7 @@ max_fn_lines = 4
 
 fn repo(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
     let d = tmpdir(name);
-    for (p, text) in [(".herdsman/arch.toml", ARCH)].iter().chain(files) {
+    for (p, text) in [(".drover/arch.toml", ARCH)].iter().chain(files) {
         let p = d.join(p);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, text).unwrap();
@@ -49,7 +49,7 @@ fn repo(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
 }
 
 fn arch(dir: &Path, args: &[&str]) -> (i32, String) {
-    let o = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
+    let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
         .arg("arch-check")
         .args(args)
         .current_dir(dir)
@@ -66,11 +66,11 @@ fn a_cross_layer_use_fails_with_file_and_line_and_an_allowed_one_passes() {
         &[
             (
                 "crates/core/src/lib.rs",
-                "//! core\nuse std::fmt;\nuse herdsman_server::api;\n",
+                "//! core\nuse std::fmt;\nuse drover_server::api;\n",
             ),
             (
                 "crates/server/src/lib.rs",
-                "use herdsman_core::{gate, queue};\nfn f() { herdsman_core::x(); }\n",
+                "use drover_core::{gate, queue};\nfn f() { drover_core::x(); }\n",
             ),
             ("web/src/ui/board.ts", "import { get } from \"../api/client\";\n"),
             (
@@ -82,7 +82,7 @@ fn a_cross_layer_use_fails_with_file_and_line_and_an_allowed_one_passes() {
     let (code, out) = arch(&d, &[]);
     assert_eq!(code, 1, "{out}");
     assert!(
-        out.contains("crates/core/src/lib.rs:3: layer `core` uses `server` (herdsman_server::api)"),
+        out.contains("crates/core/src/lib.rs:3: layer `core` uses `server` (drover_server::api)"),
         "{out}"
     );
     assert!(
@@ -136,7 +136,7 @@ fn a_file_or_fn_grown_past_its_baseline_fails_and_an_untouched_offender_passes()
     assert!(out.contains("`crates/core/src/big.rs:big` is 5 lines, over 4"), "{out}");
     let (code, out) = arch(&d, &["--write-baseline"]);
     assert_eq!(code, 0, "{out}");
-    let base = std::fs::read_to_string(d.join(".herdsman/arch-baseline.txt")).unwrap();
+    let base = std::fs::read_to_string(d.join(".drover/arch-baseline.txt")).unwrap();
     assert_eq!(base, "crates/core/src/big.rs 10\ncrates/core/src/big.rs:big 5\n");
     let (code, out) = arch(&d, &[]);
     assert_eq!(
@@ -168,7 +168,7 @@ fn a_file_or_fn_grown_past_its_baseline_fails_and_an_untouched_offender_passes()
 fn no_config_has_nothing_to_check() {
     let d = tmpdir("arch-none");
     let (code, out) = arch(&d, &[]);
-    assert_eq!((code, out.trim()), (0, "no .herdsman/arch.toml: nothing to check"));
+    assert_eq!((code, out.trim()), (0, "no .drover/arch.toml: nothing to check"));
 }
 
 fn git(dir: &Path, args: &[&str]) {
@@ -190,7 +190,7 @@ fn git(dir: &Path, args: &[&str]) {
 
 fn committed(name: &str, arch: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
     let d = tmpdir(name);
-    for (p, text) in [(".herdsman/arch.toml", arch)].iter().chain(files) {
+    for (p, text) in [(".drover/arch.toml", arch)].iter().chain(files) {
         let p = d.join(p);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, text).unwrap();
@@ -273,8 +273,8 @@ const DOCS: &str = "[docs]\npaths = [\"docs/**/*.md\", \"README.md\"]\nwatch = [
 
 #[test]
 fn a_doc_naming_a_missing_path_line_link_or_flag_fails() {
-    let readme = "See `src/lib.rs:2`, `src/lib.rs`, [doc](docs/a.md) and `herdsman spawn --dry-run <f>`.\n";
-    let doc = "`../src/lib.rs` and `herdsman queue <fleet> add --top 3`\n```\n`src/gone.rs`\n```\n";
+    let readme = "See `src/lib.rs:2`, `src/lib.rs`, [doc](docs/a.md) and `drover spawn --dry-run <f>`.\n";
+    let doc = "`../src/lib.rs` and `drover queue <fleet> add --top 3`\n```\n`src/gone.rs`\n```\n";
     let d = committed(
         "arch-docs",
         DOCS,
@@ -286,7 +286,7 @@ fn a_doc_naming_a_missing_path_line_link_or_flag_fails() {
     );
     let (code, out) = arch(&d, &[]);
     assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
-    let stale = "`src/gone.rs`, `src/lib.rs:3`, [x](docs/none.md), `herdsman spawn --gone`, `herdsman nope`\n";
+    let stale = "`src/gone.rs`, `src/lib.rs:3`, [x](docs/none.md), `drover spawn --gone`, `drover nope`\n";
     std::fs::write(d.join("docs/b.md"), stale).unwrap();
     let (code, out) = arch(&d, &[]);
     assert_eq!(code, 1, "{out}");
@@ -294,8 +294,8 @@ fn a_doc_naming_a_missing_path_line_link_or_flag_fails() {
         "docs/b.md:1: `src/gone.rs`: no such path",
         "docs/b.md:1: `src/lib.rs:3`: src/lib.rs has fewer than 3 lines",
         "docs/b.md:1: link `docs/none.md` does not exist",
-        "docs/b.md:1: `herdsman spawn --gone`: `spawn` has no `--gone`",
-        "docs/b.md:1: `herdsman nope`: no herdsman command `nope`",
+        "docs/b.md:1: `drover spawn --gone`: `spawn` has no `--gone`",
+        "docs/b.md:1: `drover nope`: no drover command `nope`",
         "5 violations",
     ] {
         assert!(out.contains(want), "{want}: {out}");
@@ -382,7 +382,7 @@ fn a_ban_with_comments_matches_a_comment_line_and_without_it_does_not() {
         out.contains("src/a.ts:2: `@ts-expect-error` is banned here: type it"),
         "{out}"
     );
-    std::fs::write(d.join(".herdsman/arch.toml"), ban("")).unwrap();
+    std::fs::write(d.join(".drover/arch.toml"), ban("")).unwrap();
     let (code, out) = arch(&d, &[]);
     assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
 }
@@ -414,7 +414,7 @@ const L: &str = \"Codex login\";
         "{out}"
     );
     assert!(out.contains("1 violations"), "{out}");
-    std::fs::write(d.join(".herdsman/arch.toml"), conf.replace("ignore_case = true\n", "")).unwrap();
+    std::fs::write(d.join(".drover/arch.toml"), conf.replace("ignore_case = true\n", "")).unwrap();
     let (code, out) = arch(&d, &[]);
     assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
 }
@@ -464,7 +464,7 @@ fn a_baselined_layer_crossing_passes_and_a_new_one_fails() {
     let d = repo(
         "arch-layer-base",
         &[
-            ("crates/core/src/lib.rs", "use herdsman_server::api;\n"),
+            ("crates/core/src/lib.rs", "use drover_server::api;\n"),
             ("crates/core/src/ok.rs", "use std::fmt;\n"),
             ("web/src/api/client.ts", "import { draw } from '../ui/board';\n"),
             ("web/src/ui/board.ts", "export const draw = 1;\n"),
@@ -472,17 +472,17 @@ fn a_baselined_layer_crossing_passes_and_a_new_one_fails() {
     );
     let (code, out) = arch(&d, &["--write-baseline"]);
     assert_eq!(code, 0, "{out}");
-    let base = std::fs::read_to_string(d.join(".herdsman/arch-baseline.txt")).unwrap();
+    let base = std::fs::read_to_string(d.join(".drover/arch-baseline.txt")).unwrap();
     assert_eq!(
         base,
         "crates/core/src/lib.rs -> server\nweb/src/api/client.ts -> web-ui\n"
     );
     let (code, out) = arch(&d, &[]);
     assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
-    std::fs::write(d.join("crates/core/src/ok.rs"), "use herdsman_server::x;\n").unwrap();
+    std::fs::write(d.join("crates/core/src/ok.rs"), "use drover_server::x;\n").unwrap();
     std::fs::write(
         d.join("web/src/api/client.ts"),
-        "import { draw } from '../ui/board';\nimport { s } from 'herdsman_server/s';\n",
+        "import { draw } from '../ui/board';\nimport { s } from 'drover_server/s';\n",
     )
     .unwrap();
     let (code, out) = arch(&d, &[]);
@@ -507,13 +507,13 @@ fn a_baselined_layer_crossing_passes_and_a_new_one_fails() {
     std::fs::write(d.join("web/src/api/client.ts"), "import { draw } from '../ui/board';\n").unwrap();
     let (code, out) = arch(&d, &["--write-baseline"]);
     assert_eq!(code, 0, "{out}");
-    let base = std::fs::read_to_string(d.join(".herdsman/arch-baseline.txt")).unwrap();
+    let base = std::fs::read_to_string(d.join(".drover/arch-baseline.txt")).unwrap();
     assert_eq!(base, "web/src/api/client.ts -> web-ui\n", "the list only shrinks");
 }
 
 #[test]
 fn a_commit_building_a_promise_phrase_outside_the_promise_module_fails_this_repos_arch_check() {
-    let conf = include_str!("../../../.herdsman/arch.toml");
+    let conf = include_str!("../../../.drover/arch.toml");
     let d = committed("arch-promise", conf, &[("crates/core/src/drive.rs", "fn a() {}\n")]);
     let add = |p: &str| {
         std::fs::write(d.join(p), "fn a() -> String {\n    format!(\"merging next pass\")\n}\n").unwrap();
@@ -534,7 +534,7 @@ fn a_commit_building_a_promise_phrase_outside_the_promise_module_fails_this_repo
 
 #[test]
 fn the_repos_provider_ban_fails_a_new_web_file_and_passes_the_two_frozen_board_files() {
-    let conf = include_str!("../../../.herdsman/arch.toml");
+    let conf = include_str!("../../../.drover/arch.toml");
     let board = "const C = '<b>Anthropic</b>' + ['claude', 'codex'].join();\n";
     let d = committed(
         "arch-ban-web",
@@ -593,4 +593,17 @@ fn a_generated_file_that_differs_from_its_regenerated_output_fails() {
     assert!(out.contains("gen/types.ts: differs from what `mkdir -p gen"), "{out}");
     let left = std::fs::read_to_string(d.join("gen/types.ts")).unwrap();
     assert_eq!(left, merged, "the check leaves the tree as it found it");
+}
+
+#[test]
+fn the_pre_rename_folder_is_read_only_while_the_new_one_has_no_such_file() {
+    let d = tmpdir("arch-old-folder");
+    std::fs::create_dir_all(d.join(".herdsman")).unwrap();
+    std::fs::write(d.join(".herdsman/arch.toml"), "[[ban").unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert!(code != 0 && out.contains("parsing .herdsman/arch.toml"), "{out}");
+    std::fs::create_dir_all(d.join(".drover")).unwrap();
+    std::fs::write(d.join(".drover/arch.toml"), "[[layer").unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert!(code != 0 && out.contains("parsing .drover/arch.toml"), "{out}");
 }

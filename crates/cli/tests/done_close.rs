@@ -1,14 +1,14 @@
-//! #248: `herdsman check` closes a done lane's session once its handoff is logged; dirty or unpushed lanes stay.
+//! #248: `drover check` closes a done lane's session once its handoff is logged; dirty or unpushed lanes stay.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 
 const T: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-12";
 
 /// sendmeter #12's impl lane (pane w1:p2) and, `pushed` seconds before now, its logged push.
-fn lane(name: &str, pushed: u64) -> (herdsman::Ctx, String) {
+fn lane(name: &str, pushed: u64) -> (drover::Ctx, String) {
     let c = ctx(&tmpdir(name), CONFIG);
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
@@ -39,7 +39,7 @@ fn with(list: &str, wt: &str, status: &str, ahead: &str) -> Fake {
         .reply("herdr", "{}")
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -64,7 +64,7 @@ fn a_done_pushed_lane_closes_after_the_delay() {
     assert_eq!(closed[0].data["agent"], LANE);
     assert_eq!(closed[0].data["freed_mb"], 270);
     assert!(std::path::Path::new(&wt).is_dir(), "the worktree stays");
-    // Closed by herdsman, herdr no longer lists it: never a `lane-dead`.
+    // Closed by drover, herdr no longer lists it: never a `lane-dead`.
     let r = with(NO_AGENTS, &wt, "", "0\n");
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
@@ -90,7 +90,7 @@ fn a_dirty_or_unpushed_lane_stays_open_with_an_event() {
         assert!(kinds(&c, "lane-closed").is_empty());
         // The card says why it stays open.
         let r = fake(&wt, status, ahead).reply("herdr workspace list", "{}");
-        let s = herdsman::serve::Server::new(&c, &r, None);
+        let s = drover::serve::Server::new(&c, &r, None);
         let page = with_queue(
             &String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)),
             &s,

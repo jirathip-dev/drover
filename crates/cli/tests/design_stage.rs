@@ -2,19 +2,19 @@
 //! approve / revise / reject from the board card or the conductor thread.
 mod common;
 use common::*;
-use herdsman::events::{fold, read, Event};
-use herdsman::runner::{Out, Real, Runner};
-use herdsman::serve::Server;
+use drover::events::{fold, read, Event};
+use drover::runner::{Out, Real, Runner};
+use drover::serve::Server;
 use std::path::Path;
 use std::sync::Mutex;
 
-/// `HERDSMAN_THREAD` is process-wide: the tests here run one at a time.
+/// `DROVER_THREAD` is process-wide: the tests here run one at a time.
 static ONE: Mutex<()> = Mutex::new(());
 const ADDR: &str = "127.0.0.1:7777";
 const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
 const HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
-fn setup(name: &str, extra: &str) -> herdsman::Ctx {
+fn setup(name: &str, extra: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), &format!("{CONFIG}{DESIGN}{extra}"));
     let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
@@ -22,12 +22,12 @@ fn setup(name: &str, extra: &str) -> herdsman::Ctx {
     c
 }
 
-fn wt(c: &herdsman::Ctx, n: u64) -> String {
+fn wt(c: &drover::Ctx, n: u64) -> String {
     c.worktrees.join(format!("sendmeter/issue-{n}")).display().to_string()
 }
 
 /// Spawns succeed, the host is calm; #12's design worktree is at the pushed commit `head`, touching two PNGs.
-fn fake(c: &herdsman::Ctx, head: &str) -> Fake {
+fn fake(c: &drover::Ctx, head: &str) -> Fake {
     let w = wt(c, 12);
     Fake::default()
         .reply(
@@ -42,7 +42,7 @@ fn fake(c: &herdsman::Ctx, head: &str) -> Fake {
         .reply(&format!("git -C {w} log -1"), &format!("{head}\n"))
         .reply(&format!("git -C {w} rev-list"), "0\n")
         .reply(
-            &format!("git -C {w} diff --name-only"),
+            &format!("git -C {w} log --format= --name-only"),
             "docs/design/meter/index.html\ndocs/design/meter/1440.png\ndocs/design/meter/390.png\n",
         )
         .reply("git -C", "")
@@ -59,23 +59,23 @@ fn fake(c: &herdsman::Ctx, head: &str) -> Fake {
         .reply("herdr agent", "{}")
 }
 
-fn drive(c: &herdsman::Ctx, r: &dyn Runner) -> String {
+fn drive(c: &drover::Ctx, r: &dyn Runner) -> String {
     let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     out
 }
 
-fn state(c: &herdsman::Ctx, n: u64) -> String {
+fn state(c: &drover::Ctx, n: u64) -> String {
     fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), n)]
         .state
         .clone()
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn spawned(c: &herdsman::Ctx, role: &str) -> usize {
+fn spawned(c: &drover::Ctx, role: &str) -> usize {
     kinds(c, "spawn").iter().filter(|e| e.str("role") == Some(role)).count()
 }
 
@@ -115,7 +115,7 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     let (_, st) = run(&c, &r, &["status", "sendmeter"]);
     assert!(st.contains("design-review"), "{st}");
     let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
-    assert!(w.contains("herdsman answer sendmeter q1 approve|revise|reject"), "{w}");
+    assert!(w.contains("drover answer sendmeter q1 approve|revise|reject"), "{w}");
     drive(&c, &r);
     assert_eq!(spawned(&c, "impl"), 1, "never impl before the approval");
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "approve"]).0, 0);
@@ -124,13 +124,13 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     // #778: approved on a busy host: impl's start stays pending with the reason, then starts once load drops.
     let busy = fake(&c, HEAD).once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
     drive(&c, &busy);
-    let p = herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
+    let p = drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
     assert_eq!((p.action.as_str(), p.reason.as_deref()), ("approve", Some("HOST_BUSY")));
     assert_eq!(spawned(&c, "impl"), 1, "only #13's");
     drive(&c, &r);
     assert!(r.called("herdr agent start sendmeter-impl-12"));
     assert_eq!((state(&c, 12).as_str(), spawned(&c, "design")), ("impl", 1));
-    assert_eq!(herdsman::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
+    assert_eq!(drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
 }
 
 #[test]
@@ -188,13 +188,13 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
     assert!(post(&s, "/thread", "op=new&repo=sendmeter&text=Design+first", &cookie, c.now).contains("t1"));
     // The conductor queues both issues `--design` from its thread.
-    std::env::set_var("HERDSMAN_THREAD", "t1");
+    std::env::set_var("DROVER_THREAD", "t1");
     let q = run(
         &c,
         &Fake::default(),
         &["queue", "sendmeter", "add", "12", "13", "--design"],
     );
-    std::env::remove_var("HERDSMAN_THREAD");
+    std::env::remove_var("DROVER_THREAD");
     assert_eq!(q.0, 0, "{}", q.1);
     let png = Path::new(&wt(&c, 12)).join("docs/design/meter");
     std::fs::create_dir_all(&png).unwrap();
@@ -244,7 +244,10 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     let w = wt(&c, 13);
     let r13 = Fake::default()
         .reply(&format!("git -C {w} log -1"), &format!("{}\n", "e".repeat(40)))
-        .reply(&format!("git -C {w} diff --name-only"), "docs/design/meter/1440.png\n")
+        .reply(
+            &format!("git -C {w} log --format= --name-only"),
+            "docs/design/meter/1440.png\n",
+        )
         .reply(&format!("git -C {w} rev-list"), "0\n");
     let r13 = Both(r13, &r);
     drive(&c, &r13);
@@ -336,7 +339,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&o.stdout).trim().to_string()
 }
 
-fn repo(d: &Path) -> (herdsman::Ctx, std::path::PathBuf) {
+fn repo(d: &Path) -> (drover::Ctx, std::path::PathBuf) {
     let (origin, local) = (d.join("origin.git"), d.join("local"));
     git(d, &["init", "-q", "--bare", "-b", "staging", origin.to_str().unwrap()]);
     git(d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
@@ -468,15 +471,15 @@ fn a_paused_fleet_auto_spawns_no_design_but_the_orchestrator_still_can() {
 const ARCHITECT: &str = "\n[fleet.sendmeter.role.architect]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
 
 /// The architect lane's pushed commit `head` touches `docs/architecture/meter/` (put before `fake`).
-fn adr(c: &herdsman::Ctx, head: &str) -> Fake {
+fn adr(c: &drover::Ctx, head: &str) -> Fake {
     let w = wt(c, 12);
     Fake::default().reply(
-        &format!("git -C {w} diff --name-only {head} {head} -- docs/architecture"),
+        &format!("git -C {w} log --format= --name-only {head}..{head} ^origin/staging -- docs/architecture"),
         "docs/architecture/meter/adr.md\ndocs/architecture/meter/statechart.md\n",
     )
 }
 
-fn brief(c: &herdsman::Ctx) -> String {
+fn brief(c: &drover::Ctx) -> String {
     std::fs::read_to_string(Path::new(&wt(c, 12)).join(".brief.md")).unwrap()
 }
 
@@ -633,7 +636,7 @@ fn a_design_brief_takes_the_medium_and_path_the_issue_names() {
     drive(&c, &r);
     let w = wt(&c, 12);
     assert!(base.called(&format!(
-        "git -C {w} diff --name-only {HEAD} {HEAD} -- docs/design apple/design/x"
+        "git -C {w} log --format= --name-only {HEAD}..{HEAD} ^origin/staging -- docs/design apple/design/x"
     )));
     assert_eq!(state(&c, 12), "design-review");
     let c = setup("design-medium-html", "");
@@ -693,7 +696,7 @@ fn a_design_pushed_under_the_issues_named_path_raises_the_ask_and_one_elsewhere_
             assert_eq!(got, ["apple/design/x/Mac.png", "apple/design/x/iphone.png"]);
         }
         assert!(
-            waiting.contains("herdsman answer sendmeter q1 approve|revise|reject"),
+            waiting.contains("drover answer sendmeter q1 approve|revise|reject"),
             "{waiting}"
         );
     }
@@ -759,9 +762,9 @@ fn a_recipe_with_a_clip_hands_off_the_images_and_the_clip() {
     );
     let r = RealGit(fake(&c, HEAD));
     drive(&c, &r);
-    std::fs::create_dir_all(w.join(".herdsman")).unwrap();
+    std::fs::create_dir_all(w.join(".drover")).unwrap();
     let game = "- medium: Godot scene\n- folder: game/design\n- sizes: 1920x1080\n- clip: yes\n";
-    std::fs::write(w.join(".herdsman/design.md"), game).unwrap();
+    std::fs::write(w.join(".drover/design.md"), game).unwrap();
     for f in [
         "game/design/x/title.png",
         "game/design/x/play.png",
@@ -823,15 +826,15 @@ fn a_recipe_tool_the_main_host_lacks_ends_the_design_turn_blocked_before_it_star
     assert_eq!(state(&c, 12), "needs-human");
 }
 
-fn staged(name: &str, flag: &str) -> (herdsman::Ctx, std::path::PathBuf, RealGit) {
+fn staged(name: &str, flag: &str) -> (drover::Ctx, std::path::PathBuf, RealGit) {
     let (c, w) = repo(&tmpdir(name));
     let toml = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, format!("{toml}{ARCHITECT}")).unwrap();
     let t = run(&c, &Fake::default(), &["thread", "new", "sendmeter", "meter"]);
     assert!(t.0 == 0 && t.1.contains("t1"), "{}", t.1);
-    std::env::set_var("HERDSMAN_THREAD", "t1");
+    std::env::set_var("DROVER_THREAD", "t1");
     let q = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", flag]);
-    std::env::remove_var("HERDSMAN_THREAD");
+    std::env::remove_var("DROVER_THREAD");
     assert_eq!(q.0, 0, "{}", q.1);
     let r = RealGit(fake(&c, HEAD));
     drive(&c, &r);
@@ -968,4 +971,26 @@ fn a_long_summary_is_cut_at_a_line_end_near_600_characters() {
     drive(&c, &r);
     let sum = kinds(&c, "needs-decision")[0].str("summary").unwrap().to_string();
     assert_eq!(sum, format!("{}\n…", lines[..12].join("\n")));
+}
+
+#[test]
+fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_raises_no_ask_but_a_card() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (c, w, r) = staged("architect-error", "--architect");
+    let local = w.parent().unwrap().parent().unwrap().parent().unwrap().join("local");
+    let routines = local.join("docs/architecture/routines");
+    std::fs::create_dir_all(&routines).unwrap();
+    std::fs::write(routines.join("adr.md"), "# Routines\n").unwrap();
+    git(&local, &["add", "."]);
+    git(&local, &["commit", "-qm", "routines adr"]);
+    git(&local, &["push", "-q", "origin", "HEAD:staging"]);
+    git(&w, &["reset", "-q", "--hard", "origin/staging"]);
+    let agent = kinds(&c, "spawn")[0].str("agent").unwrap().to_string();
+    let d = serde_json::json!({"agent": agent, "state": "error", "note": "no response"});
+    drover::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "lane-state", d)).unwrap();
+    drive(&c, &r);
+    assert!(kinds(&c, "design-review").is_empty() && kinds(&c, "needs-decision").is_empty());
+    let card = &kinds(&c, "needs-human")[0];
+    assert!(card.str("reason").unwrap().contains("no response"), "{card:?}");
+    assert_eq!(state(&c, 12), "needs-human");
 }

@@ -233,8 +233,8 @@ $('#ta').insertAdjacentHTML('beforeend', '<p class=tl2>farm (unchanged)</p><div 
 // Icons
 $('#icons').innerHTML = `<figure><img class=i512 src=icon/icon-512.png alt="">512 (shown at 256)</figure><figure><img class=i192 src=icon/icon-192.png alt="">192</figure>` +
   `<figure><img class=i180 src=icon/icon-180.png alt="">180 · apple-touch</figure><figure><img class=px32 src=icon/favicon-32.png alt="">favicon 32 (×2)</figure><figure><img class=px16 src=icon/favicon-16.png alt="">16</figure>` +
-  `<figure><span class=tabbar><img src=icon/favicon-32.png alt="">herdsman</span><span class="tabbar dk"><img src=icon/favicon-32.png alt="">herdsman</span>Safari tab, light and dark</figure>` +
-  `<figure><span class=home><figure><img src=../../../assets/icon-180.png alt="">herdsman</figure><figure><img src=icon/icon-180.png alt="">herdsman</figure><figure><i></i>Notes</figure><figure><i></i>Maps</figure></span>home screen: farm icon (as installed), kitchen icon after re-adding</figure>`;
+  `<figure><span class=tabbar><img src=icon/favicon-32.png alt="">drover</span><span class="tabbar dk"><img src=icon/favicon-32.png alt="">drover</span>Safari tab, light and dark</figure>` +
+  `<figure><span class=home><figure><img src=../../../assets/icon-180.png alt="">drover</figure><figure><img src=icon/icon-180.png alt="">drover</figure><figure><i></i>Notes</figure><figure><i></i>Maps</figure></span>home screen: farm icon (as installed), kitchen icon after re-adding</figure>`;
 
 // The picker (#241's header menu) and the one-time hint.
 $('#pick').innerHTML = `<div><div class=menu><p><span>theme</span><span class=pk><span>kitchen ▾</span><select><option>farm<option selected>kitchen<option>terminal</select></span></p>` +
@@ -246,7 +246,7 @@ const fx = await fetch('board-fixture.html').then(r => r.text());
 const fxd = new DOMParser().parseFromString(fx, 'text/html');
 const tpl = id => fxd.getElementById(id).innerHTML;
 const vars = Object.entries(SCHEME).filter(([k]) => k.startsWith('--')).map(([k, v]) => `${k}:${v}`).join(';');
-const head = `<header><b>herdsman</b><span class=tag id=demo>demo</span><span id=stale hidden></span><i id=dot class=g></i><button type=button class=qhelp aria-label="what the marks mean">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label="kitchen line mode"><svg viewBox="0 0 132 100" style="${style(0, 'l')}"><use href="#k-wait"/></svg></button></header>`;
+const head = `<header><b>drover</b><span class=tag id=demo>demo</span><span id=stale hidden></span><i id=dot class=g></i><button type=button class=qhelp aria-label="what the marks mean">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label="kitchen line mode"><svg viewBox="0 0 132 100" style="${style(0, 'l')}"><use href="#k-wait"/></svg></button></header>`;
 const nav = on => `<nav>${['queue', 'lanes', 'host', 'events'].map(t => `<a href=#${t}${t === on ? ' class=on' : ''}><span>${t}${t === 'queue' ? ' <b class=n>·2</b>' : ''}</span></a>`).join('')}</nav>`;
 const kframe = (lbl, body, on) => `<div class="ph kb" style="${vars}"><p class=lbl>${lbl}</p>${head}${body}${nav(on)}</div>`;
 $('#board').innerHTML = kframe('Queue, kitchen scheme', `<div id=needs>${tpl('fx-needs')}</div><main><section>${tpl('fx-queue')}</section></main>`, 'queue') +

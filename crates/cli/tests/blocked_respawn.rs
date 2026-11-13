@@ -1,25 +1,25 @@
 //! #639: queue blockers hold every spawn, a `turn blocked` is never a no-push failure, an extra round for a lane that
 //! never pushed is no review FAIL, a lessons issue with no PR closes on `done --no-change`, and a GitHub-closed issue
-//! reads closed after one `check`. Every test runs as #12's impl lane (`HERDSMAN_LANE` is process-wide).
+//! reads closed after one `check`. Every test runs as #12's impl lane (`DROVER_LANE` is process-wide).
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
 const LANE: &str = "sendmeter-impl-12";
 
-fn ev(c: &herdsman::Ctx, ts: u64, n: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, n: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(n), kind, d)).unwrap();
 }
 
-fn at(c: &herdsman::Ctx, secs: u64) -> herdsman::Ctx {
-    herdsman::Ctx {
+fn at(c: &drover::Ctx, secs: u64) -> drover::Ctx {
+    drover::Ctx {
         now: c.now + secs,
         ..c.clone()
     }
 }
 
-fn spawn(c: &herdsman::Ctx, ts: u64) {
+fn spawn(c: &drover::Ctx, ts: u64) {
     let wt = c.worktrees.join("sendmeter/issue-12");
     let d = json!({"role": "impl", "agent": LANE, "pane": "w9:p1", "workspace": "w9", "worktree": wt,
         "branch": "issue-12"});
@@ -27,8 +27,8 @@ fn spawn(c: &herdsman::Ctx, ts: u64) {
 }
 
 /// #12's impl lane spawned at ts 10, its pane gone (it ended), no PR; `title` = the issue's.
-fn lane(name: &str, title: &str) -> (herdsman::Ctx, Fake) {
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
+fn lane(name: &str, title: &str) -> (drover::Ctx, Fake) {
+    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
     let c = ctx(&tmpdir(name), CONFIG);
     std::fs::create_dir_all(c.worktrees.join("sendmeter/issue-12")).unwrap();
     spawn(&c, 10);
@@ -53,14 +53,14 @@ fn lane(name: &str, title: &str) -> (herdsman::Ctx, Fake) {
     (c, r)
 }
 
-fn ok(c: &herdsman::Ctx, r: &Fake, args: &[&str]) -> String {
+fn ok(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
     let (code, out) = run(c, r, args);
     assert_eq!(code, 0, "{args:?}: {out}");
     out
 }
 
-/// `herdsman drive`: (output, `driven` steps logged by this pass).
-fn drive(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
+/// `drover drive`: (output, `driven` steps logged by this pass).
+fn drive(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
     let out = ok(c, r, &["drive"]);
     let new = read(&c.state).unwrap().split_off(before);
@@ -68,17 +68,17 @@ fn drive(c: &herdsman::Ctx, r: &Fake) -> (String, Vec<String>) {
     (out, steps.map(|e| e.str("step").unwrap().to_string()).collect())
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn state(c: &herdsman::Ctx) -> String {
+fn state(c: &drover::Ctx) -> String {
     fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)]
         .state
         .clone()
 }
 
-fn lane_ends(c: &herdsman::Ctx, ts: u64) {
+fn lane_ends(c: &drover::Ctx, ts: u64) {
     let d = json!({"code": "LANE_ENDS", "reason": "lane keeps ending without a push", "agent": LANE});
     ev(c, ts, 12, "needs-human", d);
 }
@@ -205,7 +205,7 @@ fn an_issue_closed_on_github_reads_closed_after_one_check_and_drive_leaves_it() 
 #[test]
 fn a_lane_ends_after_an_idle_trim_gets_one_respawn() {
     let (c, r) = lane("trim-repair", "t");
-    let park = |c: &herdsman::Ctx, ts: u64, trim: bool| {
+    let park = |c: &drover::Ctx, ts: u64, trim: bool| {
         if trim {
             ev(
                 c,

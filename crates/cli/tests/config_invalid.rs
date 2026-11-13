@@ -4,8 +4,8 @@
 //! the banner and the alert, no restart.
 mod common;
 use common::*;
-use herdsman::events::read;
-use herdsman::serve::Server;
+use drover::events::read;
+use drover::serve::Server;
 use serde_json::Value;
 
 const HOST: &str = "127.0.0.1:7777";
@@ -21,7 +21,7 @@ fn health(s: &Server, now: u64) -> Value {
     serde_json::from_str(&api(s, HOST, "", now, "health")).unwrap()
 }
 
-fn alerts(c: &herdsman::Ctx, kind: &str) -> usize {
+fn alerts(c: &drover::Ctx, kind: &str) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == kind).count()
 }
 
