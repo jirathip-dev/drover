@@ -1,9 +1,9 @@
 //! #375: the board's TS types (`assets/types/api.d.ts`) come from the Rust payload types; `just types` writes them
 //! (`export_bindings`), and `tsc --noEmit` checks serde's JSON of each type against the same text (`serde_json_fits_the_types`).
 #![cfg(feature = "ts")]
-use herdsman_server::api::*;
-use herdsman_server::events::{fold, Event, IssueState};
-use herdsman_server::{hosts, propose, waiting::Waiting, Ctx};
+use drover_server::api::*;
+use drover_server::events::{fold, Event, IssueState};
+use drover_server::{hosts, propose, waiting::Waiting, Ctx};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use ts_rs::TS;
@@ -122,7 +122,7 @@ macro_rules! each {
             IssueState,
             Waiting,
             hosts::Seen,
-            herdsman_server::roots::Root,
+            drover_server::roots::Root,
             hosts::Row,
             Value
         )
@@ -152,18 +152,18 @@ fn export_bindings() {
 /// The demo export (`demo/`), as `serve --export --demo` writes it.
 fn demo() -> (PathBuf, Vec<Event>) {
     let demo = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../demo"));
-    let d = std::env::temp_dir().join(format!("herdsman-types-{}", std::process::id()));
+    let d = std::env::temp_dir().join(format!("drover-types-{}", std::process::id()));
     let ctx = Ctx {
         config: demo.join("fleet.toml"),
         state: demo.join("events.jsonl"),
         worktrees: d.join("wt"),
         homes: [("hermes", d.join("hermes"))].into(),
-        exe: "herdsman".into(),
+        exe: "drover".into(),
         now: 1,
         home: d.join("home"),
         hints: vec![],
     };
-    herdsman_server::serve::export(&ctx, &herdsman_server::runner::Real, &d.join("site"), true).unwrap();
+    drover_server::serve::export(&ctx, &drover_server::runner::Real, &d.join("site"), true).unwrap();
     // #344: the committed log itself: the export imports a copy of it, never `demo/`.
     let log = std::fs::read_to_string(&ctx.state).unwrap();
     (d, log.lines().map(|l| serde_json::from_str(l).unwrap()).collect())

@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, Event};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -21,14 +21,14 @@ impl Runner for SlowGh {
     }
 }
 
-fn server(name: &str, config: &str) -> (herdsman::Ctx, SocketAddr, Arc<AtomicUsize>) {
+fn server(name: &str, config: &str) -> (drover::Ctx, SocketAddr, Arc<AtomicUsize>) {
     let c = ctx(&tmpdir(name), config);
     append(&c.state, &Event::new(1_000_000, "sendmeter", None, "note", json!({}))).unwrap();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let (c2, gh) = (c.clone(), Arc::new(AtomicUsize::new(0)));
     let r = SlowGh(Fake::default().reply("herdr agent list", NO_AGENTS), gh.clone());
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &r, l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
     (c, addr, gh)
 }
 
@@ -55,15 +55,15 @@ fn p95(mut v: Vec<Duration>) -> Duration {
 #[test]
 fn api_v1_reads_and_live_answer_within_200ms_with_the_db_write_locked_and_gh_slow() {
     let (c, addr, gh) = server("load-locked", CONFIG);
-    let now = herdsman::now();
+    let now = drover::now();
     let r = Fake::default();
     let cookie = pair(
-        &herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into())),
+        &drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into())),
         &c,
         "",
         now,
     );
-    let db = rusqlite::Connection::open(herdsman::db::file(&c.state)).unwrap();
+    let db = rusqlite::Connection::open(drover::db::file(&c.state)).unwrap();
     let old = "UPDATE devices SET json = json_set(json, '$.used', ?1)";
     db.execute(old, [now - 7200]).unwrap();
     db.execute_batch("BEGIN IMMEDIATE; INSERT INTO leases VALUES ('drive', 1, 'h', 0, 0, '')")
@@ -99,8 +99,8 @@ fn eight_silent_live_streams_are_dropped_after_two_missed_heartbeats_and_a_ninth
         append(&c.state, &Event::new(1_000_000 + n, &fleet, None, "note", json!({}))).unwrap();
     }
     let r = Fake::default();
-    let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let now = herdsman::now();
+    let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let now = drover::now();
     let silent: Vec<TcpStream> = (0..8)
         .map(|_| {
             let cookie = pair(&s, &c, "", now);

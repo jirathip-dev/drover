@@ -1,5 +1,5 @@
 //! #732: Codex, as its ACP adapter `codex-acp` runs it (shed-acp lanes only): its login is the account folder's own
-//! (`CODEX_HOME`), its guard herdsman's hook in the session config (`codex-config.json`), its role `AGENTS.override.md`.
+//! (`CODEX_HOME`), its guard drover's hook in the session config (`codex-config.json`), its role `AGENTS.override.md`.
 use super::{hook_command, Accounts, Credential, Dialect, Provider, Surface};
 use crate::Ctx;
 use anyhow::Result;
@@ -25,7 +25,7 @@ static DIALECT: Dialect = Dialect {
     again: Some(|reason| json!({"decision": "block", "reason": reason})),
 };
 
-/// The session config `codex-acp` merges in (`CODEX_CONFIG`): herdsman's hook on every tool call, turn end and
+/// The session config `codex-acp` merges in (`CODEX_CONFIG`): drover's hook on every tool call, turn end and
 /// prompt, run without Codex's interactive trust review (a lane has no one to answer it).
 pub fn config(hook: &str) -> serde_json::Value {
     let h = json!([{"hooks": [{"type": "command", "command": hook}]}]);
@@ -73,7 +73,7 @@ impl Provider for Codex {
             head += &format!("\"model_reasoning_effort\":{},", json!(e));
         }
         vec![
-            ("HERDSMAN_CODEX", head),
+            ("DROVER_CODEX", head),
             ("INITIAL_AGENT_MODE", "agent-full-access".into()),
         ]
     }
@@ -90,7 +90,7 @@ impl Provider for Codex {
     fn acp_profile(&self, settings: &str, role: &str) -> String {
         let cfg = settings.replace("settings.json'", "codex-config.json'");
         format!(
-            " && export CODEX_CONFIG=\"{{$HERDSMAN_CODEX$(tail -c +2 {cfg})\" && {{ cat {role}; cat AGENTS.md 2>/dev/null || true; }} > AGENTS.override.md"
+            " && export CODEX_CONFIG=\"{{$DROVER_CODEX$(tail -c +2 {cfg})\" && {{ cat {role}; cat AGENTS.md 2>/dev/null || true; }} > AGENTS.override.md"
         )
     }
     fn credential(&self) -> Credential {

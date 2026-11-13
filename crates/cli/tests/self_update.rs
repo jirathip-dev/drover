@@ -1,24 +1,24 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 use std::path::PathBuf;
 
 const SHA: &str = "abcdef1234567890abcdef1234567890abcdef12";
-const FLEET: &str = "[fleet.herdsman]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"/x/herdsman\"\nintegration = \"staging\"\n\n[fleet.herdsman.role.impl]\nharness = \"claude\"\n";
+const FLEET: &str = "[fleet.drover]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"/x/drover\"\nintegration = \"staging\"\n\n[fleet.drover.role.impl]\nharness = \"claude\"\n";
 
 /// A ctx whose live binary (`OLD`) and a finished build (`NEW`) are real files; the live path, canonical.
-fn setup(name: &str) -> (herdsman::Ctx, PathBuf) {
+fn setup(name: &str) -> (drover::Ctx, PathBuf) {
     setup_with(name, FLEET)
 }
 
-fn setup_with(name: &str, config: &str) -> (herdsman::Ctx, PathBuf) {
+fn setup_with(name: &str, config: &str) -> (drover::Ctx, PathBuf) {
     let d = tmpdir(name);
     let mut c = ctx(&d, config);
     std::fs::create_dir_all(d.join("bin")).unwrap();
-    std::fs::write(d.join("bin/herdsman"), "OLD").unwrap();
-    c.exe = d.join("bin/herdsman").to_string_lossy().into();
-    let built = c.state.with_file_name("update/target/release/herdsman");
+    std::fs::write(d.join("bin/drover"), "OLD").unwrap();
+    c.exe = d.join("bin/drover").to_string_lossy().into();
+    let built = c.state.with_file_name("update/target/release/drover");
     std::fs::create_dir_all(built.parent().unwrap()).unwrap();
     std::fs::write(&built, "NEW").unwrap();
     std::fs::create_dir_all(&c.home).unwrap();
@@ -29,40 +29,40 @@ fn setup_with(name: &str, config: &str) -> (herdsman::Ctx, PathBuf) {
 fn host(conclusion: &str) -> Fake {
     let checks = json!([{"__typename": "CheckRun", "name": "rust", "status": "COMPLETED", "conclusion": conclusion}]);
     Fake::default()
-        .reply("git -C /x/herdsman rev-parse origin/main", &format!("{SHA}\n"))
+        .reply("git -C /x/drover rev-parse origin/main", &format!("{SHA}\n"))
         .reply("git -C", "")
         .reply(
             &format!("gh api repos/jirathip-dev/herdsman/commits/{SHA}/check-runs"),
             &checks.to_string(),
         )
-        .reply("cargo build --release --locked -p herdsman", "")
+        .reply("cargo build --release --locked -p drover", "")
         .reply("which codesign", "/usr/bin/codesign\n")
         .reply("sh ", "")
         .reply("launchctl kickstart -k gui/", "")
-        .reply("systemctl --user restart dev.herdsman.serve.service", "")
+        .reply("systemctl --user restart dev.drover.serve.service", "")
 }
 
-fn sign_script(c: &herdsman::Ctx) -> String {
+fn sign_script(c: &drover::Ctx) -> String {
     let s = c.state.with_file_name("update/src/scripts/signing-identity.sh");
     s.to_string_lossy().into()
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn heads(c: &herdsman::Ctx, live: &std::path::Path, heads: &[(&str, &str)]) -> Fake {
+fn heads(c: &drover::Ctx, live: &std::path::Path, heads: &[(&str, &str)]) -> Fake {
     let checks = json!([{"__typename": "CheckRun", "name": "rust", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
     let f = heads.iter().fold(Fake::default(), |f, (b, sha)| {
-        f.reply(&format!("git -C /x/herdsman rev-parse origin/{b}"), &format!("{sha}\n"))
+        f.reply(&format!("git -C /x/drover rev-parse origin/{b}"), &format!("{sha}\n"))
             .reply(
                 &format!("gh api repos/jirathip-dev/herdsman/commits/{sha}/check-runs"),
                 &checks.to_string(),
             )
     });
-    let staging = c.state.with_file_name("update-staging/bin/herdsman.new");
+    let staging = c.state.with_file_name("update-staging/bin/drover.new");
     f.reply("git -C", "")
-        .reply("cargo build --release --locked -p herdsman", "")
+        .reply("cargo build --release --locked -p drover", "")
         .reply("which codesign", "/usr/bin/codesign\n")
         .reply("sh ", "")
         .reply(&format!("{}.new doctor --config-only", live.display()), "")
@@ -85,13 +85,12 @@ fn branch_main_ignores_a_newer_green_staging_head_and_installs_a_new_green_main_
     assert_eq!(code, 0, "{out}");
     assert!(out.starts_with("✓ installed 1111111 at "), "{out}");
     assert!(
-        r.called("git -C /x/herdsman fetch -q origin main"),
+        r.called("git -C /x/drover fetch -q origin main"),
         "{:?}",
         r.calls.borrow()
     );
     assert!(
-        !r.called("git -C /x/herdsman fetch -q origin staging")
-            && !r.called("git -C /x/herdsman rev-parse origin/staging")
+        !r.called("git -C /x/drover fetch -q origin staging") && !r.called("git -C /x/drover rev-parse origin/staging")
     );
     assert!(!r.called(&format!("gh api repos/jirathip-dev/herdsman/commits/{STAGING}")));
     assert_eq!(installed(), MAIN);
@@ -120,7 +119,7 @@ fn branch_main_ignores_a_newer_green_staging_head_and_installs_a_new_green_main_
     assert_eq!(got, [("main", MAIN), ("main", STAGING)]);
 }
 
-fn job_args(c: &herdsman::Ctx, label: &str) -> Vec<String> {
+fn job_args(c: &drover::Ctx, label: &str) -> Vec<String> {
     if cfg!(target_os = "macos") {
         let p = std::fs::read_to_string(c.home.join(format!("Library/LaunchAgents/{label}.plist"))).unwrap();
         let a = p.split("<array>").nth(1).unwrap().split("</array>").next().unwrap();
@@ -139,13 +138,13 @@ fn job_args(c: &herdsman::Ctx, label: &str) -> Vec<String> {
 fn the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state() {
     let text = format!("{FLEET}\n[self_update]\nstaging_serve = true\nstaging_addr = \"127.0.0.1:0\"\n");
     let (c, live) = setup_with("upd-stg", &text);
-    let built = c.state.with_file_name("update-staging/target/release/herdsman");
+    let built = c.state.with_file_name("update-staging/target/release/drover");
     std::fs::create_dir_all(built.parent().unwrap()).unwrap();
-    std::fs::copy(env!("CARGO_BIN_EXE_herdsman"), &built).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_drover"), &built).unwrap();
     let r = heads(&c, &live, &[("staging", STAGING), ("main", MAIN)]);
     let (code, out) = run(&c, &r, &["self-update"]);
     assert_eq!(code, 0, "{out}");
-    let bin = c.state.with_file_name("update-staging/bin/herdsman");
+    let bin = c.state.with_file_name("update-staging/bin/drover");
     assert!(
         out.contains(&format!(
             "✓ staging serve: installed 3333333 at {}; staging serve on 127.0.0.1:0",
@@ -157,14 +156,14 @@ fn the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state() {
         r.called(&format!(
             "git -C {} checkout -q --detach {STAGING}",
             c.state.with_file_name("update-staging/src").display()
-        )) || r.called("git -C /x/herdsman worktree add")
+        )) || r.called("git -C /x/drover worktree add")
     );
     assert_eq!(
         std::fs::read_to_string(c.state.with_file_name("update-staging/sha")).unwrap(),
         STAGING
     );
     assert_eq!(std::fs::read_to_string(&live).unwrap(), "NEW", "main installed apart");
-    let args = job_args(&c, "dev.herdsman.serve-staging");
+    let args = job_args(&c, "dev.drover.serve-staging");
     assert_eq!(
         args,
         [
@@ -176,13 +175,13 @@ fn the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state() {
         ]
     );
 
-    append(&c.state, &Event::new(c.now, "herdsman", None, "note", json!({}))).unwrap();
+    append(&c.state, &Event::new(c.now, "drover", None, "note", json!({}))).unwrap();
     let before = read(&c.state).unwrap().len();
     let mut p = std::process::Command::new(&args[0])
         .args(&args[1..])
         .env("FLEET_CONFIG", &c.config)
         .env("FLEET_STATE", &c.state)
-        .env("HERDSMAN_HOME", &c.home)
+        .env("DROVER_HOME", &c.home)
         .env("PATH", "/usr/bin:/bin")
         .stderr(std::process::Stdio::piped())
         .spawn()
@@ -192,13 +191,13 @@ fn the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state() {
     std::io::BufRead::read_line(&mut err, &mut line).unwrap();
     let addr = line
         .trim()
-        .strip_prefix("herdsman serve: read-only view on http://")
+        .strip_prefix("drover serve: read-only view on http://")
         .unwrap()
         .trim_end_matches('/')
         .to_string();
     let post = |path: &str| {
         let mut s = std::net::TcpStream::connect(&addr).unwrap();
-        let body = "fleet=herdsman";
+        let body = "fleet=drover";
         let req = format!("POST {path} HTTP/1.1\r\nHost: {addr}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n\r\n{body}", body.len());
         std::io::Write::write_all(&mut s, req.as_bytes()).unwrap();
         let mut res = String::new();
@@ -304,7 +303,7 @@ fn a_missing_signing_identity_keeps_the_old_binary_and_alerts() {
     let (code, out) = run(&c, &r, &["self-update"]);
     assert_eq!(code, 1, "{out}");
     assert!(
-        out.contains("no \"herdsman-local\" identity") && out.contains("signing-identity.sh"),
+        out.contains("no \"drover-local\" identity") && out.contains("signing-identity.sh"),
         "{out}"
     );
     assert_eq!(std::fs::read_to_string(&live).unwrap(), "OLD");
@@ -315,7 +314,7 @@ fn a_missing_signing_identity_keeps_the_old_binary_and_alerts() {
     assert!(kinds(&c, "self-update-failed")[0]
         .str("reason")
         .unwrap()
-        .contains("no \"herdsman-local\" identity"));
+        .contains("no \"drover-local\" identity"));
 }
 
 #[test]
@@ -329,7 +328,7 @@ fn pause_and_resume_are_logged_and_pause_stops_the_job() {
     let (code, out) = run(&c, &r, &["self-update"]);
     assert_eq!(
         (code, out.as_str()),
-        (0, "= self-update paused → herdsman self-update --resume\n")
+        (0, "= self-update paused → drover self-update --resume\n")
     );
     assert!(r.calls.borrow().is_empty());
     assert_eq!(kinds(&c, "self-update-paused")[0].str("by"), Some("owner"));
@@ -428,15 +427,15 @@ fn setup_and_timer_write_the_update_and_daily_clean_jobs() {
     let (code, out) = run(&c, &r, &["timer", "install", "--no-load"]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        out.contains("✓ wrote dev.herdsman.update") && out.contains("✓ wrote dev.herdsman.clean"),
+        out.contains("✓ wrote dev.drover.update") && out.contains("✓ wrote dev.drover.clean"),
         "{out}"
     );
     let (update, clean) = if cfg!(target_os = "macos") {
         let p = |l: &str| std::fs::read_to_string(c.home.join(format!("Library/LaunchAgents/{l}.plist"))).unwrap();
-        (p("dev.herdsman.update"), p("dev.herdsman.clean"))
+        (p("dev.drover.update"), p("dev.drover.clean"))
     } else {
         let p = |l: &str| std::fs::read_to_string(c.home.join(format!(".config/systemd/user/{l}.timer"))).unwrap();
-        (p("dev.herdsman.update"), p("dev.herdsman.clean"))
+        (p("dev.drover.update"), p("dev.drover.clean"))
     };
     assert!(update.contains("300") && !update.contains("03:30"), "{update}");
     let daily = [
@@ -446,7 +445,7 @@ fn setup_and_timer_write_the_update_and_daily_clean_jobs() {
     assert!(daily.iter().any(|d| clean.contains(d)), "{clean}");
     let (_, out) = run(&c, &r, &["timer", "remove"]);
     assert!(
-        out.contains("✓ removed dev.herdsman.update") && out.contains("✓ removed dev.herdsman.clean"),
+        out.contains("✓ removed dev.drover.update") && out.contains("✓ removed dev.drover.clean"),
         "{out}"
     );
 }
@@ -458,6 +457,6 @@ fn a_config_with_telegram_keys_loads_with_a_warning() {
     let (code, out) = run(&c, &Fake::default(), &["doctor", "--config-only"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.starts_with("✓ config — "), "{out}");
-    let warn = "! config — [telegram] is removed (#557): herdsman has no Telegram bridge now; drop the table";
+    let warn = "! config — [telegram] is removed (#557): drover has no Telegram bridge now; drop the table";
     assert!(out.lines().any(|l| l == warn), "{out}");
 }

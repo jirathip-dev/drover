@@ -82,7 +82,7 @@ pub fn store(ctx: &Ctx, d: &[Device]) -> Result<()> {
     if let Some(e) = r.as_ref().err().filter(|_| !seen()) {
         let kind = e.downcast_ref().map_or(io::ErrorKind::Other, io::Error::kind);
         let d = json!({"path": p, "error": kind.to_string(), "reason": format!("{}: {kind}", p.display())});
-        let ev = Event::new(ctx.now, "herdsman", None, "state-write-failed", d);
+        let ev = Event::new(ctx.now, "drover", None, "state-write-failed", d);
         let _ = emit(&ctx.state, &Config::load(&ctx.config).unwrap_or_default(), ev);
     }
     r
@@ -127,7 +127,7 @@ pub fn request(ctx: &Ctx, label: &str, ip: &str) -> Result<Option<(String, Strin
     store(ctx, &all)?;
     append(
         &ctx.state,
-        &Event::new(ctx.now, "herdsman", None, "pair-request", json!({"device": label})),
+        &Event::new(ctx.now, "drover", None, "pair-request", json!({"device": label})),
     )?;
     Ok(Some((code, token)))
 }
@@ -158,7 +158,7 @@ pub fn approve(ctx: &Ctx, code: &str) -> Result<String> {
     store(ctx, &all)?;
     append(
         &ctx.state,
-        &Event::new(ctx.now, "herdsman", None, "pair-approve", json!({"device": label})),
+        &Event::new(ctx.now, "drover", None, "pair-approve", json!({"device": label})),
     )?;
     Ok(label)
 }
@@ -250,7 +250,7 @@ fn kind(e: &anyhow::Error) -> String {
     }
 }
 
-/// cooee's attach token (`cooee-token` beside fleet.toml): `herdsman serve` creates it once, mode 0600, never rewrites it.
+/// cooee's attach token (`cooee-token` beside fleet.toml): `drover serve` creates it once, mode 0600, never rewrites it.
 pub fn cooee_token(ctx: &Ctx) -> Result<String> {
     let p = ctx.config.with_file_name("cooee-token");
     std::fs::create_dir_all(p.parent().unwrap_or(&p))?;

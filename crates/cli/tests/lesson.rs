@@ -1,7 +1,7 @@
 //! #419: the lesson role: `lesson digest`, `lesson` (issue, queue, lane), its weekly tick, rules in briefs and CI.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::{json, Value};
 
 const NOW: u64 = 1_000_000;
@@ -9,7 +9,7 @@ const HOUR: u64 = 3600;
 const OLD: u64 = NOW - 8 * 86400;
 const TOKEN: &str = "ghp_a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8";
 
-fn ev(c: &herdsman::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: Value) {
+fn ev(c: &drover::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", issue, kind, d)).unwrap();
 }
 
@@ -127,7 +127,7 @@ fn tick_runs_lesson_once_a_week_and_never_when_off() {
     };
     let tick = |now: u64| {
         let r = fake();
-        let (code, out) = run(&herdsman::Ctx { now, ..c.clone() }, &r, &["tick"]);
+        let (code, out) = run(&drover::Ctx { now, ..c.clone() }, &r, &["tick"]);
         assert_eq!(code, 0, "{out}");
         let calls: Vec<String> = r
             .calls
@@ -144,7 +144,7 @@ fn tick_runs_lesson_once_a_week_and_never_when_off() {
         first[0].contains("-R jirathip-dev/sendmeter --title lessons: sendmeter week of 1970-01-12"),
         "{first:?}"
     );
-    let q = herdsman::queue::replay(&read(&c.state).unwrap(), "sendmeter");
+    let q = drover::queue::replay(&read(&c.state).unwrap(), "sendmeter");
     assert_eq!(q.first().map(|i| i.issue), Some(77));
     assert!(tick(NOW + 6 * 86400).is_empty(), "within the week");
     assert_eq!(tick(NOW + 7 * 86400).len(), 1, "a week on");
@@ -162,7 +162,7 @@ fn tick_skips_lesson_for_a_young_or_quiet_fleet() {
             "gh issue create",
             "https://github.com/jirathip-dev/sendmeter/issues/77\n",
         );
-    let skipped = |c: &herdsman::Ctx| -> Vec<Event> {
+    let skipped = |c: &drover::Ctx| -> Vec<Event> {
         read(&c.state)
             .unwrap()
             .into_iter()
@@ -232,7 +232,7 @@ fn lesson_files_queues_and_spawns_a_lesson_lane_that_may_close_with_no_change() 
     );
     let events = read(&c.state).unwrap();
     assert_eq!(
-        herdsman::queue::replay(&events, "sendmeter").first().map(|i| i.issue),
+        drover::queue::replay(&events, "sendmeter").first().map(|i| i.issue),
         Some(80)
     );
     let spawn = events.iter().find(|e| e.is("spawn", "sendmeter", 80)).expect("a lane");
@@ -243,7 +243,7 @@ fn lesson_files_queues_and_spawns_a_lesson_lane_that_may_close_with_no_change() 
     );
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-80/.brief.md")).unwrap();
     assert!(
-        brief.contains("# ROLE: LESSON") && brief.contains("herdsman lesson digest"),
+        brief.contains("# ROLE: LESSON") && brief.contains("drover lesson digest"),
         "{brief}"
     );
 
@@ -278,14 +278,14 @@ fn rules_file_is_in_impl_and_rev_briefs_and_missing_is_fine() {
     let rules = "- don't unwrap config reads (enforced by: clippy unwrap_used)\n";
     for (role, dir) in [("impl", "issue-12"), ("rev", "rev-12-r1")] {
         let wt = c.worktrees.join("sendmeter").join(dir);
-        std::fs::create_dir_all(wt.join(".herdsman")).unwrap();
-        std::fs::write(wt.join(".herdsman/rules.md"), rules).unwrap();
+        std::fs::create_dir_all(wt.join(".drover")).unwrap();
+        std::fs::write(wt.join(".drover/rules.md"), rules).unwrap();
         // The checkout herdr made: clean.
         let r = spawner(12).once(&format!("git -C {} status --porcelain", wt.display()), 0, "");
         let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", role]);
         assert!(code == 0 || code == 4, "{role}: {code} {out}");
         let brief = std::fs::read_to_string(wt.join(".brief.md")).unwrap();
-        let want = format!("## Repo rules (.herdsman/rules.md)\n\n{rules}\n## ");
+        let want = format!("## Repo rules (.drover/rules.md)\n\n{rules}\n## ");
         assert!(brief.contains(&want), "{role}: {brief}");
     }
     let c = ctx(&tmpdir("lesson-norules"), CONFIG);
@@ -341,7 +341,7 @@ fn a_rules_file_over_30_lines_fails_the_check() {
 #[test]
 fn a_failing_shadow_check_passes_ci_and_the_summary_shows_would_fail() {
     let d = tmpdir("lesson-shadow-ci");
-    std::fs::create_dir_all(d.join(".herdsman")).unwrap();
+    std::fs::create_dir_all(d.join(".drover")).unwrap();
     std::fs::write(d.join("a.rs"), "fn a() {}\nlet x = cfg.unwrap();\n").unwrap();
     let summary = d.join("summary.md");
     let check = |mark: &str| {
@@ -349,9 +349,9 @@ fn a_failing_shadow_check_passes_ci_and_the_summary_shows_would_fail() {
             "- don't unwrap config (enforced by: no-unwrap `! grep -Hn unwrap a.rs`, {mark} since 2026-11-01)\n\
              - don't hand (enforced by: hand `echo hand-ran; false`)\n"
         );
-        std::fs::write(d.join(".herdsman/rules.md"), rules).unwrap();
+        std::fs::write(d.join(".drover/rules.md"), rules).unwrap();
         let _ = std::fs::remove_file(&summary);
-        let o = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
+        let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
             .arg("lesson-check")
             .env("GITHUB_STEP_SUMMARY", &summary)
             .current_dir(&d)
@@ -434,7 +434,7 @@ fn lesson_apply_promotes_and_retires_by_history_and_never_touches_hand_written_c
             "Closes #90\npromote owned\nretire oldactive\nretire hand\n",
         )
         .reply(
-            "git -C /tmp/does-not-matter/sendmeter show origin/staging:.herdsman/rules.md",
+            "git -C /tmp/does-not-matter/sendmeter show origin/staging:.drover/rules.md",
             &rules,
         );
     let (code, out) = run(&c, &r, &["lesson", "digest", "sendmeter"]);
@@ -487,8 +487,8 @@ fn lesson_apply_promotes_and_retires_by_history_and_never_touches_hand_written_c
 fn briefs_carry_the_shared_pack_before_the_repo_rules() {
     let c = ctx(&tmpdir("lesson-shared"), CONFIG);
     let wt = c.worktrees.join("sendmeter").join("rev-12-r1");
-    std::fs::create_dir_all(wt.join(".herdsman")).unwrap();
-    std::fs::write(wt.join(".herdsman/rules.md"), "- don't X (enforced by: none)\n").unwrap();
+    std::fs::create_dir_all(wt.join(".drover")).unwrap();
+    std::fs::write(wt.join(".drover/rules.md"), "- don't X (enforced by: none)\n").unwrap();
     let r = spawner(12).once(&format!("git -C {} status --porcelain", wt.display()), 0, "");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
     assert!(code == 0 || code == 4, "{code} {out}");
@@ -521,7 +521,7 @@ fn lessons_missed_fires_once_after_8_days_and_never_when_off() {
     .unwrap();
     ev(&c, NOW - 7 * 86400, None, "lesson-skipped", json!({"why": "quiet"}));
     let check = |now: u64| {
-        let (code, out) = run(&herdsman::Ctx { now, ..c.clone() }, &r, &["check"]);
+        let (code, out) = run(&drover::Ctx { now, ..c.clone() }, &r, &["check"]);
         assert_eq!(code, 0, "{out}");
         out.lines()
             .filter(|l| l.contains("lessons-missed"))
@@ -562,8 +562,8 @@ fn lessons_missed_fires_once_after_8_days_and_never_when_off() {
 fn a_prose_only_lesson_pr_is_a_fail() {
     let head = "b".repeat(40);
     let prose = "diff --git a/roles/impl.md b/roles/impl.md\n--- a/roles/impl.md\n+++ b/roles/impl.md\n@@ -1 +1,2 @@\n x\n+- be careful with unwrap\n";
-    let check = "diff --git a/.herdsman/rules.md b/.herdsman/rules.md\n--- a/.herdsman/rules.md\n+++ b/.herdsman/rules.md\n@@ -0,0 +1 @@\n+- don't unwrap (enforced by: no-unwrap `! grep -rn unwrap src`, shadow since 1970-01-12)\n";
-    let retire = "diff --git a/.herdsman/rules.md b/.herdsman/rules.md\n--- a/.herdsman/rules.md\n+++ b/.herdsman/rules.md\n@@ -1 +0,0 @@\n-- don't X (enforced by: none)\n";
+    let check = "diff --git a/.drover/rules.md b/.drover/rules.md\n--- a/.drover/rules.md\n+++ b/.drover/rules.md\n@@ -0,0 +1 @@\n+- don't unwrap (enforced by: no-unwrap `! grep -rn unwrap src`, shadow since 1970-01-12)\n";
+    let retire = "diff --git a/.drover/rules.md b/.drover/rules.md\n--- a/.drover/rules.md\n+++ b/.drover/rules.md\n@@ -1 +0,0 @@\n-- don't X (enforced by: none)\n";
     let code_pr = "diff --git a/src/x.rs b/src/x.rs\n+fn typed() {}\n";
     for (diff, want) in [(prose, "FAIL"), (check, "PASS"), (retire, "PASS"), (code_pr, "PASS")] {
         let c = ctx(&tmpdir("lesson-prose"), CONFIG);
@@ -601,7 +601,7 @@ fn a_prose_only_lesson_pr_is_a_fail() {
                 body.starts_with("FAIL\n\n- blocking [lesson]") && body.contains("A PR that only edits prose"),
                 "{body}"
             );
-            assert!(herdsman::gate::no_proof(body).is_none(), "{body}");
+            assert!(drover::gate::no_proof(body).is_none(), "{body}");
         }
     }
     // Not a lesson issue: a prose PR passes and its diff is never read.

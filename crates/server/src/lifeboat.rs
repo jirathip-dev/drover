@@ -28,8 +28,8 @@ fn esc(s: &str) -> String {
 fn shell(body: &str) -> String {
     format!(
         "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport \
-         content=\"width=device-width,initial-scale=1\"><title>herdsman lifeboat</title><style>{CSS}</style></head>\
-         <body><h1>herdsman lifeboat</h1>{body}</body></html>"
+         content=\"width=device-width,initial-scale=1\"><title>drover lifeboat</title><style>{CSS}</style></head>\
+         <body><h1>drover lifeboat</h1>{body}</body></html>"
     )
 }
 
@@ -42,10 +42,10 @@ fn button(label: &str, fields: &[(&str, &str)]) -> String {
     s + &format!("<button>{}</button></form>", esc(label))
 }
 
-/// An unpaired device's page: how to pair it (`devices.rs`, the same pairing as every herdsman page), nothing else.
+/// An unpaired device's page: how to pair it (`devices.rs`, the same pairing as every drover page), nothing else.
 pub fn hint() -> String {
     shell(
-        "<p>Pair this device first: tap [pair], run the <code>herdsman serve approve</code> line with the code it \
+        "<p>Pair this device first: tap [pair], run the <code>drover serve approve</code> line with the code it \
          shows on the Mac, then come back, tap [claim] and open this page again.</p>\
          <form method=post action=/pair/request><button>pair</button></form>\
          <form method=post action=/pair/claim><button>claim</button></form>",

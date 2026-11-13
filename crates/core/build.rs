@@ -1,4 +1,4 @@
-//! #235: the git sha this binary is built from, for `herdsman --version` and the remote hosts' version check.
+//! #235: the git sha this binary is built from, for `drover --version` and the remote hosts' version check.
 use std::process::Command;
 
 fn git(args: &[&str]) -> String {
@@ -8,7 +8,7 @@ fn git(args: &[&str]) -> String {
 }
 
 fn main() {
-    println!("cargo:rustc-env=HERDSMAN_SHA={}", git(&["rev-parse", "HEAD"]));
+    println!("cargo:rustc-env=DROVER_SHA={}", git(&["rev-parse", "HEAD"]));
     let dir = git(&["rev-parse", "--git-dir"]);
     if !dir.is_empty() {
         println!("cargo:rerun-if-changed={dir}/logs/HEAD");

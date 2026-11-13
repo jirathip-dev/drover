@@ -8,7 +8,7 @@ set -euo pipefail
 [ -n "${UI_AUDIT_LOCKED:-}" ] || UI_AUDIT_LOCKED=1 exec "$(dirname "$0")/ui-lock.sh" "$0" "$@"
 site=${1:-site} shots=${2:-ui-390}
 chrome=${CHROME:-$(command -v google-chrome || command -v chromium || command -v chromium-browser || echo "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")}
-port=${UI_AUDIT_PORT:-${HERDSMAN_PORT:-8390}}
+port=${UI_AUDIT_PORT:-${DROVER_PORT:-8390}}
 mkdir -p "$shots" && shots=$(cd "$shots" && pwd)
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$site" >/dev/null 2>&1 &
 srv=$!

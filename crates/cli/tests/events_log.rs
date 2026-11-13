@@ -1,7 +1,7 @@
 //! AC6: the event log survives kill -9 mid-write. #344: the log is `state.db`; a JSONL log from before is imported.
 mod common;
 use common::tmpdir;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
 fn ev(i: u64) -> Event {
@@ -156,11 +156,6 @@ fn seq_is_monotonic_across_concurrent_writers() {
     let mut want = want;
     want.sort_unstable();
     assert_eq!(ts, want, "every writer's every event, once");
-    let line = herdsman::events::jsonl(&p)
-        .unwrap()
-        .lines()
-        .nth(400)
-        .unwrap()
-        .to_string();
+    let line = drover::events::jsonl(&p).unwrap().lines().nth(400).unwrap().to_string();
     assert!(line.starts_with("{\"seq\":401,"), "{line}");
 }

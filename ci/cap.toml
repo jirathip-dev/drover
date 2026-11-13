@@ -1,6 +1,6 @@
-# The src/ line cap `herdsman cap-check --config ci/cap.toml` enforces in CI (#129). Raising it needs the
+# The src/ line cap `drover cap-check --config ci/cap.toml` enforces in CI (#129). Raising it needs the
 # owner's OK in an issue; record each change as docs/cap-history/<date>-<issue>.md. #429: under `warn_within`
-# lines of headroom (default 500) cap-check warns and `herdsman check` alerts `cap-near`.
+# lines of headroom (default 500) cap-check warns and `drover check` alerts `cap-near`.
 # #270: it also prints the web/src TypeScript lines, a soft budget: reported in each PR, never blocking.
 [fleet.herdsman]
 line_cap = 45400

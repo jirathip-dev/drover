@@ -4,10 +4,12 @@ use crate::runner::{Real, Runner};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, HashMap};
+use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
@@ -76,10 +78,10 @@ pub fn append(path: &Path, ev: &Event) -> Result<()> {
 
 /// The live log (#343: without the events a rotation archived), by seq.
 pub fn read(path: &Path) -> Result<Vec<Event>> {
-    Ok(shared(path)?.events.clone())
+    Ok(shared(path)?.to_vec())
 }
 
-/// #344: the log in the JSONL format before #344, one event a line with its seq (`herdsman events --jsonl`).
+/// #344: the log in the JSONL format before #344, one event a line with its seq (`drover events --jsonl`).
 pub fn jsonl(path: &Path) -> Result<String> {
     history(path)?
         .iter()
@@ -109,7 +111,7 @@ fn parse(text: &str, path: &Path) -> Vec<Event> {
             Ok(ev) => out.push(aliased(ev)),
             Err(_) if l.trim().is_empty() || i + 1 == lines.len() => {}
             Err(e) => eprintln!(
-                "herdsman: {}: line {}: skipping corrupt record: {e}",
+                "drover: {}: line {}: skipping corrupt record: {e}",
                 path.display(),
                 i + 1
             ),
@@ -239,7 +241,7 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
         };
         if let Err(e) = res {
             let cmd = if n.webpush() { "webpush" } else { &n.cmd };
-            eprintln!("herdsman: notifier `{cmd}` failed: {e:#}");
+            eprintln!("drover: notifier `{cmd}` failed: {e:#}");
             let d = serde_json::json!({"cmd": cmd, "event": ev.kind, "error": format!("{e:#}")});
             let _ = append(state, &Event::new(ev.ts, &ev.fleet, ev.issue, "notify-failed", d));
         }
@@ -273,7 +275,7 @@ pub fn plain(ev: &Event) -> String {
                 })
                 .collect();
             format!(
-                "{who} needs you ({} asks {}): {}{opts}\n  herdsman answer {} {} <n|\"text\">",
+                "{who} needs you ({} asks {}): {}{opts}\n  drover answer {} {} <n|\"text\">",
                 s("agent"),
                 s("id"),
                 s("question"),
@@ -398,7 +400,7 @@ pub fn checks(e: &Event) -> bool {
         .unwrap_or(e.str("role") == Some("rev"))
 }
 
-/// Events `herdsman check` and notifiers write about an issue; they are not activity.
+/// Events `drover check` and notifiers write about an issue; they are not activity.
 pub const PASSIVE: &[&str] = &[
     // #778: a tapped start still waiting; the decision before it moved the issue.
     "pending-action",
@@ -605,11 +607,12 @@ impl Threads {
     }
 }
 
-/// #701: the cached `Log` whose events `events` are (none: a log read some other way).
+/// #701, #944: the `Log` whose events `events` are, the newest or one a reader still holds (none: read some other way).
 pub fn cached(events: &[Event]) -> Option<Arc<Log>> {
-    let logs = LOGS.lock().unwrap_or_else(PoisonError::into_inner);
-    let hit = logs.values().find(|l| std::ptr::eq(l.1.events.as_slice(), events));
-    hit.map(|l| l.1.clone())
+    let live = LIVE.lock().unwrap_or_else(PoisonError::into_inner);
+    live.iter()
+        .filter_map(Weak::upgrade)
+        .find(|l| std::ptr::eq(&raw const *l.events, events))
 }
 
 /// #701: the first `needs-decision` (`ask`) or the last `decision` of `fleet`'s ask `id`: the index's when `events` is
@@ -646,7 +649,7 @@ fn index<T>(events: &[Event], f: impl FnOnce(&Asks) -> T) -> T {
 /// folded alone (a rotation or another database file since: all again).
 #[derive(Default, Clone)]
 pub struct Log {
-    pub events: Vec<Event>,
+    pub events: Events,
     pub asks: Asks,
     pub threads: Threads,
     pub states: States,
@@ -662,9 +665,82 @@ impl std::ops::Deref for Log {
     }
 }
 
+/// #944: a log's events, in a buffer its later versions share and append to in place: each sees only its own `len`.
+#[derive(Default, Clone)]
+pub struct Events {
+    buf: Arc<Buf>,
+    len: usize,
+}
+
+#[derive(Default)]
+struct Buf {
+    len: Mutex<usize>,
+    cells: Box<[UnsafeCell<MaybeUninit<Event>>]>,
+}
+
+// SAFETY: a cell is written once, under `len`'s lock, before `len` passes it; only cells below `len` are ever read.
+unsafe impl Sync for Buf {}
+
+impl Drop for Buf {
+    fn drop(&mut self) {
+        let n = *self.len.get_mut().unwrap_or_else(PoisonError::into_inner);
+        for c in &mut self.cells[..n] {
+            // SAFETY: the first `n` cells were written (`push`) and are dropped only here.
+            unsafe { c.get_mut().assume_init_drop() };
+        }
+    }
+}
+
+impl std::ops::Deref for Events {
+    type Target = [Event];
+    fn deref(&self) -> &[Event] {
+        // SAFETY: the first `len` cells are written and never written again; a cell is laid out as its `Event`.
+        unsafe { std::slice::from_raw_parts(self.buf.cells.as_ptr().cast(), self.len) }
+    }
+}
+
+impl Events {
+    fn push(&mut self, e: Event) {
+        loop {
+            let mut at = self.buf.len.lock().unwrap_or_else(PoisonError::into_inner);
+            if *at == self.len && self.len < self.buf.cells.len() {
+                // SAFETY: cell `len` is past what every handle sees and `at`'s lock is held: nothing else touches it.
+                unsafe { (*self.buf.cells[self.len].get()).write(e) };
+                (*at, self.len) = (self.len + 1, self.len + 1);
+                return;
+            }
+            drop(at);
+            self.grow(1);
+        }
+    }
+
+    fn reserve(&mut self, n: usize) {
+        if self.len + n > self.buf.cells.len() {
+            self.grow(n);
+        }
+    }
+
+    fn grow(&mut self, n: usize) {
+        let cap = (self.len + n).next_power_of_two().max(64);
+        let cells = (0..cap).map(|_| UnsafeCell::new(MaybeUninit::uninit())).collect();
+        let mut next = Events {
+            buf: Arc::new(Buf {
+                len: Mutex::new(0),
+                cells,
+            }),
+            len: 0,
+        };
+        self.iter().for_each(|e| next.push(e.clone()));
+        *self = next;
+    }
+}
+
 type Gated = (Arc<Mutex<()>>, Arc<Log>);
 
 static LOGS: Mutex<BTreeMap<PathBuf, Gated>> = Mutex::new(BTreeMap::new());
+
+/// #944: each `Log` `shared` has made, while a reader holds it (`cached` finds them).
+static LIVE: Mutex<Vec<Weak<Log>>> = Mutex::new(Vec::new());
 
 /// #560, #632: the cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq:
 /// each call reads only the events appended since (serve's requests and watcher).
@@ -685,6 +761,9 @@ pub fn shared(path: &Path) -> Result<Arc<Log>> {
     };
     let got = catch_up(path, &mut l, last, key);
     logs().get_mut(&file).expect("added above").1 = l.clone();
+    let mut live = LIVE.lock().unwrap_or_else(PoisonError::into_inner);
+    live.retain(|w| w.strong_count() > 0 && !std::ptr::eq(w.as_ptr(), Arc::as_ptr(&l)));
+    live.push(Arc::downgrade(&l));
     got.map(|()| l)
 }
 
@@ -696,6 +775,7 @@ fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<
     let m = Arc::make_mut(l);
     m.seq = new.last().map_or(last, |e| e.seq.max(last));
     m.states = fold_into(std::mem::take(&mut m.states), &new);
+    m.events.reserve(new.len());
     for e in new {
         if let Some(n) = e.issue {
             m.issues.entry((e.fleet.clone(), n)).or_default().push(m.events.len());
@@ -721,7 +801,7 @@ fn ending<'a>(events: &'a [Event], a: &Event) -> Option<(&'static str, &'a Event
     Some((ORDER[end.0], &events[end.1]))
 }
 
-/// #584: `closed` as `herdsman asks` shows it: `withdrawn → q<new>`, `delivered to t<n>`.
+/// #584: `closed` as `drover asks` shows it: `withdrawn → q<new>`, `delivered to t<n>`.
 pub fn closed_row(events: &[Event], a: &Event) -> Option<String> {
     let (why, e) = ending(events, a)?;
     Some(match (why, e.str("for"), e.str("to")) {

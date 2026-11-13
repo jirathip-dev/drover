@@ -14,7 +14,7 @@ fn ps(jam: bool) -> String {
   200     1    01:00:00 /usr/sbin/securityd -i
   300     1 01-07:00:00 /System/Library/Frameworks/Security.framework/Versions/A/MachServices/SecurityAgent.bundle/Contents/MacOS/SecurityAgent
   400     1    01:05:00 /usr/bin/security find-generic-password -s Claude-Code-credentials -a acctNAME -w
-  401   500       10:00 security find-generic-password -s herdsman/sendmeter/API_KEY -w
+  401   500       10:00 security find-generic-password -s drover/sendmeter/API_KEY -w
   402   500       02:00 /usr/bin/security find-generic-password -s PLAINsvc -w
   403     1       00:30 /usr/bin/security find-generic-password -s young -w
   404     1       05:00 /usr/bin/security find-internet-password -s other
@@ -34,7 +34,7 @@ fn fake(jam: bool) -> Fake {
         .reply("kill ", "")
 }
 
-fn jammed(c: &herdsman::Ctx) -> usize {
+fn jammed(c: &drover::Ctx) -> usize {
     log_kinds(c).iter().filter(|k| *k == "keychain-jammed").count()
 }
 
@@ -54,7 +54,7 @@ fn a_jam_alerts_once_per_episode_with_pids_ages_parents_and_the_fix_but_no_secre
     run(&c, &fake(true), &["check"]);
     run(&c, &fake(true), &["check"]);
     assert_eq!(jammed(&c), 1, "none while it persists");
-    let log = herdsman::events::jsonl(&c.state).unwrap();
+    let log = drover::events::jsonl(&c.state).unwrap();
     let e = log.lines().find(|l| l.contains("keychain-jammed")).unwrap();
     for want in [
         "400",
@@ -145,8 +145,8 @@ fn doctor_shows_the_reader_count() {
     assert!(!out.contains("S3CRET") && !out.contains("API_KEY"), "{out}");
 }
 
-fn log_kinds(c: &herdsman::Ctx) -> Vec<String> {
-    herdsman::events::read(&c.state)
+fn log_kinds(c: &drover::Ctx) -> Vec<String> {
+    drover::events::read(&c.state)
         .unwrap()
         .into_iter()
         .map(|e| e.kind)

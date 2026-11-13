@@ -25,8 +25,8 @@ sheet rendered at 390 px and 1640 px. `<scheme>-queue-390.png` and `<scheme>-hos
 screenshots it with headless Chrome over CDP. It has no dependencies. Regenerate everything with:
 
 ```sh
-HERDSMAN_HOME=<demo copy> FLEET_CONFIG=<demo copy>/fleet.toml FLEET_STATE=<demo copy>/events.jsonl \
-  ./target/release/herdsman serve --export <site> --demo && scripts/host-fixtures.sh <site>
+DROVER_HOME=<demo copy> FLEET_CONFIG=<demo copy>/fleet.toml FLEET_STATE=<demo copy>/events.jsonl \
+  ./target/release/drover serve --export <site> --demo && scripts/host-fixtures.sh <site>
 node docs/design/schemes/check.mjs            # the gate alone: PASS/FAIL per scheme
 node docs/design/schemes/shoot.mjs <site> <chrome-headless-shell>   # the phones, report.json, index.html, the sheets
 ```
