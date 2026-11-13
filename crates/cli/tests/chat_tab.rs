@@ -1303,12 +1303,22 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let (c, cookie) = long("chat-kb", 30, now);
     let b = leaked();
-    b.attach(&c);
+    let (c, cookie) = fill(acp_setup("chat-kb", b), 30, now);
+    b.add(
+        "orchestrator-t1",
+        serde_json::json!({"fleet": "sendmeter", "role": "orchestrator", "thread": "t1"}),
+    );
+    working(b, false);
+    let st = serde_json::json!({"thread": "t1", "agent": "orchestrator-t1", "pane": "orchestrator-t1", "runtime": "shed-acp", "harness": "claude"});
+    let e = drover::events::Event::new(T, "sendmeter", None, "orchestrator-start", st);
+    drover::events::append(&c.state, &e).unwrap();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || drover::serve::serve_on(&c, &Fake::default(), l, false));
+    std::thread::spawn(move || {
+        let f = acp();
+        drover::serve::serve_on(&c, &b.cli(&f), l, false)
+    });
     // (A frame is two animation frames or 300 ms: a busy host throttles an offscreen view's animation frames. Each state
     // is read once it holds, or as it is after 2 s.)
     // Per state: |composer bottom − visual viewport bottom (the tab bar's top, keyboard down)|, the page's scrollTop, the same block just above the box
