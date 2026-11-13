@@ -1051,12 +1051,9 @@ fn merged(
         let src = f.local_path();
         writeln!(
             out,
-            "cargo install --path {}/crates/cli --locked --root {} --force && sh {}/scripts/signing-identity.sh sign {}/bin/drover && ln -sf drover {}/bin/herdsman",
-            src.display(),
-            root.display(),
-            src.display(),
-            root.display(),
-            root.display()
+            "cargo build --release --locked -p drover --manifest-path {s}/Cargo.toml && sh {s}/scripts/install-gate.sh {s}/target/release/drover {r}/bin/drover && ln -sf drover {r}/bin/herdsman",
+            s = src.display(),
+            r = root.display()
         )?;
     }
     Ok(())

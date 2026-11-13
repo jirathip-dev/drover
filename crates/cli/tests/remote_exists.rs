@@ -19,6 +19,7 @@ struct Air {
     present: BTreeSet<String>,
     hang: bool,
     sent: Shared<Vec<String>>,
+    shed: FakeShed,
 }
 
 impl Air {
@@ -51,6 +52,12 @@ impl Runner for Air {
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, _limit: Duration) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
+        if line.contains("air -- 'shed' 'connect'") {
+            return Ok(Out {
+                stdout: self.shed.connect(input),
+                ..Out::default()
+            });
+        }
         let air = prog == "ssh" && args.iter().any(|a| a == "air") && args[0] != "-G" && line != PROBE;
         if !air {
             return self.f.run_in(prog, args, input);
@@ -75,7 +82,7 @@ impl Runner for Air {
     }
 }
 
-fn setup(name: &str) -> drover::Ctx {
+fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n");
     let c = ctx(&tmpdir(name), &toml);
@@ -87,8 +94,8 @@ fn setup(name: &str) -> drover::Ctx {
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     for n in LANES {
-        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("w9:p{n}"),
-                       "workspace": "w9", "worktree": wt(n), "branch": format!("issue-{n}"), "host": "air",
+        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("sendmeter-impl-{n}"),
+                       "workspace": "", "worktree": wt(n), "branch": format!("issue-{n}"), "host": "air",
                        "machine": "air"});
         append(&c.state, &Event::new(NOW - 9000, "sendmeter", Some(n), "spawn", d)).unwrap();
         append(
@@ -98,7 +105,8 @@ fn setup(name: &str) -> drover::Ctx {
         .unwrap();
     }
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    c
+    let sh = FakeShed::attached(&c);
+    (c, sh)
 }
 
 fn main_host() -> Fake {
@@ -108,25 +116,13 @@ fn main_host() -> Fake {
             "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
         )
         .reply(PROBE, "")
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr --machine air agent list", NO_AGENTS)
         .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
         .reply("sysctl -n hw.ncpu", "4")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("vm_stat", "Swapouts: 5.\n")
         .reply("git ", "")
         .reply("gh issue view", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
-        .reply(
-            "herdr worktree create",
-            r#"{"result":{"workspace":{"workspace_id":"w1"}}}"#,
-        )
-        .reply(
-            "herdr pane list --workspace w1",
-            r#"{"result":{"panes":[{"pane_id":"w1:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run w1:p1 export", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr agent wait", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
 fn air(present: &[u64], hang: bool) -> Air {
@@ -135,6 +131,7 @@ fn air(present: &[u64], hang: bool) -> Air {
         present: present.iter().map(|&n| wt(n)).collect(),
         hang,
         sent: Shared::default(),
+        shed: FakeShed::new(),
     }
 }
 
@@ -144,7 +141,7 @@ fn checks(r: &Air) -> usize {
 
 #[test]
 fn a_drive_pass_checks_500_remote_worktrees_with_one_ssh_call() {
-    let c = setup("exists-drive");
+    let (c, _sh) = setup("exists-drive");
     let r = air(&[], false);
     let (code, out) = run(&c, &r, &["drive"]);
     eprintln!("drive: {} existence ssh call(s) to the Air", checks(&r));
@@ -162,7 +159,7 @@ fn a_drive_pass_checks_500_remote_worktrees_with_one_ssh_call() {
 
 #[test]
 fn a_clean_pass_reads_each_of_500_remote_worktrees_existence_from_one_ssh_call() {
-    let c = setup("exists-clean");
+    let (c, _sh) = setup("exists-clean");
     let present = [1000, 1177, 1499];
     let r = air(&present, false);
     let (code, out) = run(&c, &r, &["clean"]);
@@ -179,15 +176,12 @@ fn a_clean_pass_reads_each_of_500_remote_worktrees_existence_from_one_ssh_call()
 
 #[test]
 fn a_hung_host_is_logged_over_budget_and_the_other_hosts_spawn_goes_ahead() {
-    let c = setup("exists-hung");
+    let (c, sh) = setup("exists-hung");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let r = air(&[], true);
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        r.f.called("herdr agent start sendmeter-impl-12"),
-        "the spawn goes ahead: {out}"
-    );
+    assert!(sh.called("run", "sendmeter-impl-12"), "the spawn goes ahead: {out}");
     assert!(
         out.contains("tick: air: over budget; skipped for the rest of this pass"),
         "{out}"

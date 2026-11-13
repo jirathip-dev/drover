@@ -2,9 +2,25 @@ mod common;
 use common::*;
 use drover::events::{append, read, Event};
 use serde_json::{json, Value};
+use std::rc::Rc;
 
-const WS: &str = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
-const PANES: &str = r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#;
+thread_local! {
+    static SHED: Rc<FakeShed> = Rc::new(FakeShed::new());
+}
+
+fn sh() -> Rc<FakeShed> {
+    SHED.with(Rc::clone)
+}
+
+fn ctx(dir: &std::path::Path, config: &str) -> drover::Ctx {
+    let c = common::ctx(dir, config);
+    sh().attach(&c);
+    c
+}
+
+fn started(name: &str) -> bool {
+    sh().all("run").iter().any(|p| p["name"] == name)
+}
 
 fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
@@ -12,8 +28,6 @@ fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: Value) {
 
 fn fake(level: &str) -> Fake {
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", &format!("{level}\n"))
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -21,13 +35,7 @@ fn fake(level: &str) -> Fake {
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
         .reply("gh pr view issue-12", "")
         .reply("git -C", "")
-        .reply("herdr worktree", WS)
-        .reply("herdr pane list", PANES)
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr pane", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr agent wait", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("kill -0", "")
 }
 
@@ -65,15 +73,14 @@ fn a_granted_extend_on_a_never_started_lane_spawns_it_once_the_host_admits() {
     let calm = fake("4");
     let (code, out) = run(&c, &calm, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert!(calm.called("herdr agent start sendmeter-impl-12"), "{out}");
+    assert!(started("sendmeter-impl-12"), "{out}");
     assert_eq!(spawns(&c), 1, "{out}");
 }
 
 fn used(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    let d =
-        json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w9:x", "workspace": "w9", "branch": "issue-12"});
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "workspace": "", "runtime": "shed", "branch": "issue-12"});
     ev(&c, 10, "spawn", d);
     for (ts, p) in [(11, "1"), (12, "2"), (13, "3")] {
         ev(&c, ts, "verdict", json!({"verdict": "FAIL", "sha": p.repeat(40)}));
@@ -89,7 +96,8 @@ fn used(name: &str) -> drover::Ctx {
 
 fn card(c: &drover::Ctx) -> Value {
     let r = fake("1");
-    let s = drover::serve::Server::new(c, &r, Some("127.0.0.1:7777".into()));
+    let on = sh().on(&r);
+    let s = drover::serve::Server::new(c, &on, Some("127.0.0.1:7777".into()));
     let res = s.respond("GET /screens/cards HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now);
     let res = String::from_utf8_lossy(&res).into_owned();
     let cards: Value = serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap();
@@ -149,5 +157,5 @@ fn waiting_names_the_card_or_the_load_never_a_question_mark() {
     );
     let calm = fake("1");
     let (code, out) = run(&legacy, &calm, &["drive"]);
-    assert!(code == 0 && calm.called("herdr agent start sendmeter-impl-12"), "{out}");
+    assert!(code == 0 && started("sendmeter-impl-12"), "{out}");
 }

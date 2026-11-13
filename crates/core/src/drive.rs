@@ -890,6 +890,7 @@ pub fn drive(
             crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("drover: {n} backlog: {e:#}"));
         }
         crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: stale panes: {e:#}"));
+        crate::check::dedup(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: lane-dup: {e:#}"));
         let max = cfg.limits.rotate_mb << 20;
         let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
         cp.unwrap_or_else(|e| eprintln!("drover: checkpoint: {e:#}"));

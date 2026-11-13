@@ -6,7 +6,7 @@ use serde_json::{json, Value};
 
 const NOW: u64 = 1_000_000;
 
-fn setup(name: &str) -> (drover::Ctx, std::path::PathBuf) {
+fn setup(name: &str) -> (drover::Ctx, std::path::PathBuf, FakeShed) {
     let dir = tmpdir(name);
     let sink = dir.join("push.txt");
     let cfg = format!(
@@ -14,13 +14,14 @@ fn setup(name: &str) -> (drover::Ctx, std::path::PathBuf) {
         sink.display()
     );
     let c = ctx(&dir, &cfg);
+    let sh = FakeShed::attached(&c);
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let lane = c.worktrees.join("sendmeter/issue-9");
     std::fs::create_dir_all(&lane).unwrap();
     std::fs::write(lane.join("big.bin"), vec![1u8; 8192]).unwrap();
-    (c, sink)
+    (c, sink, sh)
 }
 
 fn at(c: &drover::Ctx, secs: u64) -> drover::Ctx {
@@ -30,12 +31,12 @@ fn at(c: &drover::Ctx, secs: u64) -> drover::Ctx {
     }
 }
 
-fn fast(c: &drover::Ctx, agents: &str) -> Fake {
+fn fast(c: &drover::Ctx, sh: &FakeShed) -> Fake {
     let r = Fake::default()
-        .reply("herdr agent list", agents)
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git ", "")
         .reply("sh -c nohup", "4321");
-    let (code, out) = run(c, &r, &["drive", "--fast"]);
+    let (code, out) = run(c, &sh.on(&r), &["drive", "--fast"]);
     assert_eq!(code, 0, "{out}");
     r
 }
@@ -46,8 +47,9 @@ fn kinds(c: &drover::Ctx) -> Vec<String> {
     ev.filter(|k| ours.contains(&k.as_str())).collect()
 }
 
-fn card(c: &drover::Ctx, now: u64) -> Option<Value> {
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+fn card(c: &drover::Ctx, sh: &FakeShed, now: u64) -> Option<Value> {
+    let f = Fake::default();
+    let r = sh.on(&f);
     let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
     let res = s.respond("GET /screens/cards HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", now);
     let res = String::from_utf8_lossy(&res);
@@ -61,12 +63,12 @@ fn card(c: &drover::Ctx, now: u64) -> Option<Value> {
 
 #[test]
 fn idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later() {
-    let (c, sink) = setup("slo-idle-stuck");
-    fast(&c, NO_AGENTS);
+    let (c, sink, sh) = setup("slo-idle-stuck");
+    fast(&c, &sh);
     assert!(kinds(&c).is_empty(), "idle starts now: no breach yet");
-    fast(&at(&c, 19 * 60), NO_AGENTS);
+    fast(&at(&c, 19 * 60), &sh);
     assert!(kinds(&c).is_empty(), "19 min is inside the SLO");
-    let r = fast(&at(&c, 21 * 60), NO_AGENTS);
+    let r = fast(&at(&c, 21 * 60), &sh);
     assert_eq!(kinds(&c), ["slo-idle", "self-heal"]);
     assert!(
         r.called("sh -c nohup")
@@ -86,12 +88,12 @@ fn idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later() {
         heal.str("did"),
         Some("recounted worktrees 0.0 → 0.0 GB; retried #12's spawn")
     );
-    fast(&at(&c, 22 * 60), NO_AGENTS);
+    fast(&at(&c, 22 * 60), &sh);
     assert_eq!(kinds(&c), ["slo-idle", "self-heal"], "the heal gets one pass");
     assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "");
-    fast(&at(&c, 26 * 60), NO_AGENTS);
-    fast(&at(&c, 27 * 60), NO_AGENTS);
-    fast(&at(&c, 40 * 60), NO_AGENTS);
+    fast(&at(&c, 26 * 60), &sh);
+    fast(&at(&c, 27 * 60), &sh);
+    fast(&at(&c, 40 * 60), &sh);
     assert_eq!(kinds(&c), ["slo-idle", "self-heal", "stuck"]);
     let pushes = std::fs::read_to_string(&sink).unwrap();
     assert_eq!(pushes.lines().count(), 1, "one push per episode: {pushes}");
@@ -102,46 +104,44 @@ fn idle_21_minutes_with_spawnable_work_heals_then_alerts_once_a_pass_later() {
                 .ends_with("tried: recounted worktrees 0.0 → 0.0 GB; retried #12's spawn"),
         "{pushes}"
     );
-    let shown = card(&c, NOW + 40 * 60).expect("the owner's card").to_string();
+    let shown = card(&c, &sh, NOW + 40 * 60).expect("the owner's card").to_string();
     assert!(
         shown.contains("sendmeter stuck: 0 lanes working") && shown.contains("tried: recounted"),
         "{shown}"
     );
-    let working = agents(&[("sendmeter-impl-12", "working", "/x", "w1:p1")]);
-    let d =
-        json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w1:p1", "worktree": "/x", "branch": "issue-12"});
+    sh.lane("sendmeter-impl-12", "working", "/x");
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "runtime": "shed", "worktree": "/x", "branch": "issue-12"});
     append(&c.state, &Event::new(NOW + 41 * 60, "sendmeter", Some(12), "spawn", d)).unwrap();
-    fast(&at(&c, 42 * 60), &working);
+    fast(&at(&c, 42 * 60), &sh);
     assert_eq!(kinds(&c), ["slo-idle", "self-heal", "stuck", "slo-ok"]);
-    assert_eq!(card(&c, NOW + 42 * 60), None, "recovered: the card clears");
+    assert_eq!(card(&c, &sh, NOW + 42 * 60), None, "recovered: the card clears");
 }
 
 #[test]
 fn idle_that_recovers_after_the_heal_never_alerts() {
-    let (c, sink) = setup("slo-idle-recovers");
-    fast(&c, NO_AGENTS);
-    fast(&at(&c, 21 * 60), NO_AGENTS);
+    let (c, sink, sh) = setup("slo-idle-recovers");
+    fast(&c, &sh);
+    fast(&at(&c, 21 * 60), &sh);
     assert_eq!(kinds(&c), ["slo-idle", "self-heal"]);
-    let working = agents(&[("sendmeter-impl-12", "working", "/x", "w1:p1")]);
-    let d =
-        json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w1:p1", "worktree": "/x", "branch": "issue-12"});
+    sh.lane("sendmeter-impl-12", "working", "/x");
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "runtime": "shed", "worktree": "/x", "branch": "issue-12"});
     append(&c.state, &Event::new(NOW + 22 * 60, "sendmeter", Some(12), "spawn", d)).unwrap();
-    fast(&at(&c, 23 * 60), &working);
-    fast(&at(&c, 30 * 60), &working);
+    fast(&at(&c, 23 * 60), &sh);
+    fast(&at(&c, 30 * 60), &sh);
     assert_eq!(kinds(&c), ["slo-idle", "self-heal", "slo-ok"]);
     assert_eq!(std::fs::read_to_string(&sink).unwrap_or_default(), "");
-    assert_eq!(card(&c, NOW + 30 * 60), None);
+    assert_eq!(card(&c, &sh, NOW + 30 * 60), None);
 }
 
 #[test]
 fn idle_with_no_known_cause_alerts_at_once_naming_the_refusal() {
-    let (c, sink) = setup("slo-idle-unknown");
+    let (c, sink, sh) = setup("slo-idle-unknown");
     std::fs::remove_dir_all(c.worktrees.join("sendmeter/issue-9")).unwrap();
     let d = json!({"code": "HOST_BUSY", "reason": "load 9.1 per cpu"});
     append(&c.state, &Event::new(NOW, "sendmeter", Some(12), "driven", d)).unwrap();
-    fast(&c, NO_AGENTS);
-    fast(&at(&c, 21 * 60), NO_AGENTS);
-    fast(&at(&c, 30 * 60), NO_AGENTS);
+    fast(&c, &sh);
+    fast(&at(&c, 21 * 60), &sh);
+    fast(&at(&c, 30 * 60), &sh);
     assert_eq!(kinds(&c), ["slo-idle", "stuck"]);
     let pushes = std::fs::read_to_string(&sink).unwrap();
     assert_eq!(
@@ -153,12 +153,11 @@ fn idle_with_no_known_cause_alerts_at_once_naming_the_refusal() {
 
 #[test]
 fn a_missed_promise_drive_healed_alerts_with_the_issue_reason_and_heal_one_pass_later() {
-    let (c, sink) = setup("slo-promise");
+    let (c, sink, sh) = setup("slo-promise");
     std::fs::remove_dir_all(c.worktrees.join("sendmeter/issue-9")).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "rm", "12"]).0, 0);
     let ev = |ts, kind: &str, d: Value| append(&c.state, &Event::new(NOW + ts, "sendmeter", Some(7), kind, d)).unwrap();
-    let d =
-        json!({"role": "impl", "agent": "sendmeter-impl-7", "pane": "w7:p1", "worktree": "/x", "branch": "issue-7"});
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-7", "pane": "sendmeter-impl-7", "runtime": "shed", "worktree": "/x", "branch": "issue-7"});
     ev(0, "spawn", d);
     let line = "PASS · verify skipped · merging next pass";
     ev(
@@ -172,16 +171,16 @@ fn a_missed_promise_drive_healed_alerts_with_the_issue_reason_and_heal_one_pass_
         "promise-missed",
         json!({"kind": "merging", "promised": line, "age": 680, "why": "now: PASS · CI pending"}),
     );
-    fast(&at(&c, 700), NO_AGENTS);
+    fast(&at(&c, 700), &sh);
     assert!(
         kinds(&c).is_empty(),
         "drive's heal (#839) was tried a pass ago: {:?}",
         kinds(&c)
     );
-    fast(&at(&c, 800), NO_AGENTS);
+    fast(&at(&c, 800), &sh);
     assert!(kinds(&c).is_empty(), "the heal gets one pass");
-    fast(&at(&c, 990), NO_AGENTS);
-    fast(&at(&c, 1100), NO_AGENTS);
+    fast(&at(&c, 990), &sh);
+    fast(&at(&c, 1100), &sh);
     let pushes = std::fs::read_to_string(&sink).unwrap();
     assert_eq!(
         pushes,

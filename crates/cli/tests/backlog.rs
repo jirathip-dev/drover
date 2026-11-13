@@ -59,17 +59,15 @@ fn keys(v: &Value) -> Vec<String> {
     v.as_object().unwrap().keys().cloned().collect()
 }
 
-fn agents() -> Fake {
-    Fake::default().reply("herdr agent list", r#"{"result":{"agents":[]}}"#)
-}
-
 /// The tick's pass reads every open issue once; a fast step never does. The next read asks only for issues updated
 /// since the newest one seen, open or closed: a closed one leaves, a changed one is replaced, a new one joins. A failed
 /// read keeps the last one and the pass goes on.
 #[test]
 fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
     let c = ctx(&tmpdir("backlog-tick"), CONFIG);
-    let r = agents().once(READ, 0, &first_read());
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
+    let r = Fake::default().once(READ, 0, &first_read());
     run(&c, &r, &["drive", "--fast"]);
     assert_eq!(r.count(READ), 0, "a fast step reads no backlog");
     assert_eq!(run(&c, &r, &["drive"]).0, 0);
@@ -96,7 +94,7 @@ fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
         issue(15, "OPEN", "1970-04-26T01:00:00Z", &["ui"], false, false),
         issue(30, "OPEN", "1970-04-26T02:00:00Z", &[], false, false),
     ];
-    let r = agents().once(READ, 0, &next.concat());
+    let r = Fake::default().once(READ, 0, &next.concat());
     assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let call = r.calls.borrow().iter().find(|l| l.starts_with(READ)).cloned().unwrap();
     assert!(
@@ -111,7 +109,7 @@ fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
     );
     assert_eq!(b["since"], "1970-04-26T02:00:00Z");
 
-    let r = agents().once_err(READ, 1, "HTTP 502");
+    let r = Fake::default().once_err(READ, 1, "HTTP 502");
     assert_eq!(run(&c, &r, &["drive"]).0, 0, "a failed read never fails the pass");
     assert_eq!(r.count(READ), 1);
     assert_eq!(cache(&c)["issues"], b["issues"], "the last read kept");
@@ -125,7 +123,9 @@ fn the_reads_jq_flattens_each_issue() {
         return eprintln!("skipping: no jq here");
     }
     let c = ctx(&tmpdir("backlog-jq"), CONFIG);
-    let r = agents();
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
+    let r = Fake::default();
     run(&c, &r, &["drive"]);
     let call = r.calls.borrow().iter().find(|l| l.starts_with(READ)).cloned().unwrap();
     let jq = &call[call.find("--jq ").unwrap() + 5..call.find(" -f owner=").unwrap()];
@@ -166,6 +166,8 @@ fn the_reads_jq_flattens_each_issue() {
 #[test]
 fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
     let c = ctx(&tmpdir("backlog-board"), CONFIG);
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "20"]).0, 0);
     let ev = drover::events::Event::new(
         1,
@@ -182,7 +184,7 @@ fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
         !get(&s, "/", &cookie).contains("class=bl"),
         "never read: no backlog section"
     );
-    assert_eq!(run(&c, &agents().once(READ, 0, &first_read()), &["drive"]).0, 0);
+    assert_eq!(run(&c, &Fake::default().once(READ, 0, &first_read()), &["drive"]).0, 0);
     // #268: the Queue tab (the backlog in it) is the TypeScript board's, from API v1's `queue`: paired or not.
     for out in [get(&s, "/", &cookie), get(&s, "/", "")] {
         let out = out.replace("\\\"", "\"");
@@ -322,17 +324,19 @@ fn the_backlog_draws_on_a_fresh_load_and_after_a_live_patch() {
         return;
     };
     let c = ctx(&tmpdir("backlog-live"), CONFIG);
-    let r = agents().reply("gh issue view", r#"{"title": "a title", "body": ""}"#);
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
+    let r = Fake::default().reply("gh issue view", r#"{"title": "a title", "body": ""}"#);
     assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "30", "31", "32", "33"]).0, 0);
     for (n, on) in [(31, 30), (32, 31)] {
         let (n, on) = (n.to_string(), on.to_string());
         assert_eq!(run(&c, &r, &["queue", "sendmeter", "block", "--on", &on, &n]).0, 0);
     }
-    assert_eq!(run(&c, &agents().once(READ, 0, &first_read()), &["drive"]).0, 0);
+    assert_eq!(run(&c, &Fake::default().once(READ, 0, &first_read()), &["drive"]).0, 0);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || drover::serve::serve_on(&c2, &agents(), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, false));
     let mut s = std::net::TcpStream::connect(addr).unwrap();
     std::io::Write::write_all(&mut s, format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes()).unwrap();
     let mut head = [0; 160];

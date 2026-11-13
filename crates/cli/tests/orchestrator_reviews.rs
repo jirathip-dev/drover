@@ -32,12 +32,13 @@ fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
     drover::Ctx { now, ..c.clone() }
 }
 
-fn setup(name: &str) -> drover::Ctx {
+fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let other = "[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/does-not-matter/other\"\n\
                  integration = \"staging\"\n\n[fleet.other.role.impl]\nharness = \"hermes\"\n\n\
                  [fleet.other.role.orchestrator]\nharness = \"claude\"\n";
     let conf = format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n\n{other}");
     let c = ctx(&tmpdir(name), &conf);
+    let sh = FakeShed::attached(&c);
     log(
         &c,
         NOW - 500,
@@ -54,9 +55,9 @@ fn setup(name: &str) -> drover::Ctx {
         "thread-new",
         json!({"thread": "t2", "title": "Other"}),
     );
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-36", "pane": "w1:p1"});
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-36", "pane": "sendmeter-impl-36", "runtime": "shed"});
     log(&c, NOW - 400, "sendmeter", Some(36), "spawn", d);
-    c
+    (c, sh)
 }
 
 fn said(c: &drover::Ctx, ts: u64, t: &str, text: &str) {
@@ -84,10 +85,7 @@ fn needs_human(c: &drover::Ctx, ts: u64) {
 
 fn host() -> Fake {
     let issue = json!({"title": "Split the sender", "body": SPEC, "updatedAt": "t1", "comments": []});
-    Fake::default()
-        .reply("gh issue view 36", &issue.to_string())
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr", "")
+    Fake::default().reply("gh issue view 36", &issue.to_string())
 }
 
 fn by(c: &drover::Ctx, t: Option<&str>, now: u64, args: &[&str]) -> (i32, String) {
@@ -119,7 +117,7 @@ fn chat(c: &drover::Ctx, now: u64) -> String {
 #[test]
 fn a_typed_design_answer_needs_the_owners_line_in_the_orchestrators_thread_after_the_ask() {
     let _env = env();
-    let c = setup("typed-design");
+    let (c, _sh) = setup("typed-design");
     said(&c, NOW - 300, "t1", "approve");
     design_ask(&c, NOW - 200);
     let typed = ["answer", "sendmeter", "q1", "--typed", "approve"];
@@ -144,7 +142,7 @@ fn a_typed_design_answer_needs_the_owners_line_in_the_orchestrators_thread_after
 #[test]
 fn a_typed_extend_grants_one_round_after_the_card_only() {
     let _env = env();
-    let c = setup("typed-extend");
+    let (c, _sh) = setup("typed-extend");
     said(&c, NOW - 300, "t1", "one more round");
     needs_human(&c, NOW - 200);
     let typed = ["extend", "sendmeter", "36", "--no-spawn", "--typed", "one more round"];
@@ -179,7 +177,7 @@ fn a_typed_extend_grants_one_round_after_the_card_only() {
 #[test]
 fn a_basis_answers_a_design_ask_with_an_fyi_and_refuses_a_non_quote_or_owner_topic() {
     let _env = env();
-    let c = setup("basis-design");
+    let (c, _sh) = setup("basis-design");
     design_ask(&c, NOW - 200);
     let (code, out) = by(
         &c,
@@ -242,7 +240,7 @@ fn a_basis_answers_a_design_ask_with_an_fyi_and_refuses_a_non_quote_or_owner_top
 #[test]
 fn a_basis_extend_posts_an_fyi_whose_change_parks_within_30_minutes_only() {
     let _env = env();
-    let c = setup("basis-extend");
+    let (c, _sh) = setup("basis-extend");
     needs_human(&c, NOW - 200);
     let ext = |b: &str| {
         by(

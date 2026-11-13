@@ -11,6 +11,7 @@ struct Roots {
     c: drover::Ctx,
     dead: PathBuf,
     good: PathBuf,
+    sh: FakeShed,
 }
 
 fn setup(name: &str) -> Roots {
@@ -25,41 +26,25 @@ fn setup(name: &str) -> Roots {
         .replace("[limits]\n", "[limits]\ndisk_trust_secs = 0\n");
     let c = ctx(&d, &format!("{base}\n[hosts.mini]\n{roots}\n"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let sh = FakeShed::attached(&c);
     let wt = dead.join("sendmeter/issue-11");
+    sh.lane("sendmeter-impl-11", "working", &wt.to_string_lossy());
     let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "harness": "claude", "pane": "w8:p1",
                    "workspace": "w8", "worktree": wt, "root": dead, "branch": "issue-11", "host": "mini"});
     append(&c.state, &Event::new(NOW - 600, "sendmeter", Some(11), "spawn", d)).unwrap();
-    Roots { c, dead, good }
+    Roots { c, dead, good, sh }
 }
 
-fn host(r: &Roots) -> Fake {
-    let wt = r.dead.join("sendmeter/issue-11");
+fn host() -> Fake {
     Fake::default()
-        .reply(
-            "herdr status",
-            "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
-        )
-        .reply(
-            "herdr agent list",
-            &agents(&[("sendmeter-impl-11", "working", &wt.to_string_lossy(), "w8:p1")]),
-        )
+        .reply("herdr status", "server:\n  status: running\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
         .reply("sysctl -n hw.ncpu", "8")
         .reply("vm_stat", "Swapouts: 5.\n")
         .reply("gh issue view", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git ", "")
-        .reply(
-            "herdr worktree create",
-            r#"{"result":{"workspace":{"workspace_id":"w1"}}}"#,
-        )
-        .reply(
-            "herdr pane list --workspace w1",
-            r#"{"result":{"panes":[{"pane_id":"w1:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run w1:p1 export", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr agent wait", "{}")
 }
 
 fn hang(root: &Path) -> std::sync::mpsc::Sender<()> {
@@ -86,7 +71,7 @@ fn a_root_whose_listing_never_returns_costs_one_probe_and_the_pass_goes_on() {
     let r = setup("hung-root-tick");
     let _held = hang(&r.dead);
     assert_eq!(run(&r.c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    let f = host(&r);
+    let f = host();
     let t = Instant::now();
     let (code, out) = run(&r.c, &f, &["tick"]);
     let took = t.elapsed();
@@ -95,10 +80,7 @@ fn a_root_whose_listing_never_returns_costs_one_probe_and_the_pass_goes_on() {
         took < drover::runner::probe_wait() + Duration::from_secs(20),
         "{took:?}"
     );
-    assert!(
-        f.called("herdr agent start sendmeter-impl-12"),
-        "drive still starts: {out}"
-    );
+    assert!(r.sh.called("run", "sendmeter-impl-12"), "drive still starts: {out}");
     let events = read(&r.c.state).unwrap();
     let sp = events
         .iter()
@@ -120,7 +102,7 @@ fn a_root_whose_listing_never_returns_costs_one_probe_and_the_pass_goes_on() {
 #[test]
 fn root_hung_alerts_once_per_episode_and_clears_when_the_root_answers() {
     let r = setup("hung-root-episode");
-    let f = host(&r);
+    let f = host();
     let held = hang(&r.dead);
     for _ in 0..2 {
         assert_eq!(run(&r.c, &f, &["check"]).0, 0);
@@ -156,7 +138,7 @@ fn a_tick_stuck_on_one_step_shows_in_doctor_and_the_next_fast_drive() {
     let (_, out) = run(&r.c, &Fake::default(), &["doctor"]);
     let row = out.lines().find(|l| l.contains("tick step")).unwrap_or_default();
     assert!(row.starts_with('✗') && row.contains("check"), "{out}");
-    let (_, out) = run(&r.c, &host(&r), &["drive", "--fast"]);
+    let (_, out) = run(&r.c, &host(), &["drive", "--fast"]);
     assert!(out.contains("tick stuck in check"), "{out}");
 }
 
@@ -192,11 +174,11 @@ fn a_lane_whose_reads_block_or_whose_root_was_removed_never_holds_clean_or_the_t
     let hung = lane(&r.c, 13, &r.good);
     let old = r.dead.with_file_name("removed");
     let off = lane(&r.c, 14, &old);
-    let (code, out) = within(&r.c, host(&r), &["clean", "--yes"]);
+    let (code, out) = within(&r.c, host(), &["clean", "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains(&format!("keep {}: off-root", off.display())), "{out}");
     assert!(out.contains(&format!("keep {}: root-hung", hung.display())), "{out}");
-    let (code, out) = within(&r.c, host(&r), &["tick"]);
+    let (code, out) = within(&r.c, host(), &["tick"]);
     assert_eq!(code, 0, "{out}");
     let events = read(&r.c.state).unwrap();
     let marks: Vec<&Event> = (events.iter())
@@ -210,7 +192,7 @@ fn a_lane_whose_reads_block_or_whose_root_was_removed_never_holds_clean_or_the_t
 #[test]
 fn a_pass_stuck_past_three_pass_max_secs_is_logged_and_the_next_pass_takes_its_lock() {
     let r = setup("pass-stuck");
-    let f = host(&r).reply("kill -0", "").reply("ps -o etime=", "01:00:00");
+    let f = host().reply("kill -0", "").reply("ps -o etime=", "01:00:00");
     assert_eq!(run(&r.c, &f, &["drive", "--fast"]).0, 0);
     let at = |ts: u64| drover::db::take(&r.c.state, "drive-fast.lock", ts, 360, "", &|_| false);
     let live = at(NOW - 300).expect("a pass holds the lock");

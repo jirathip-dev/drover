@@ -25,7 +25,7 @@ fn req(s: &Server, now: u64, method: &str, path: &str, body: &str, extra: &str) 
     (head[9..12].parse().unwrap(), serde_json::from_str(body).unwrap())
 }
 
-fn recorded(name: &str) -> (drover::Ctx, Fake) {
+fn recorded(name: &str) -> (drover::Ctx, OnShed) {
     let c = ctx(&tmpdir(name), &format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}"));
     for args in [
         &["queue", "sendmeter", "add", "17", "20"][..],
@@ -73,8 +73,17 @@ fn recorded(name: &str) -> (drover::Ctx, Fake) {
     let card = json!({"thread": "t1", "id": "r1", "cmd": "git push origin --delete wip/x", "why": "Delete #9's wip snapshot",
         "blast": "origin: 1 wip/ branch", "dir": "/tmp/sendmeter", "host": "main", "timeout": 60, "sha": "3b7e0c55a1d9".repeat(5)});
     ev(T - 120, None, "run-card", card);
-    let list = agents(&[("sendmeter-impl-12", "working", "/x", "w1:p2")]);
-    (c, Fake::default().reply("herdr agent list", &list))
+    let r = OnShed::new(Fake::default());
+    r.1.lane("sendmeter-impl-12", "working", "/x");
+    (c, r)
+}
+
+fn working() -> OnShed {
+    let r = OnShed::new(Fake::default());
+    for name in ["sendmeter-impl-12", "sendmeter-rev-12-r2", "sendmeter-impl-17"] {
+        r.1.lane(name, "working", "/x");
+    }
+    r
 }
 
 fn skeleton(v: &Value, at: &str, out: &mut BTreeSet<String>) {
@@ -489,14 +498,7 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap().to_string();
     let c2 = c.clone();
-    std::thread::spawn(move || {
-        let list = agents(&[
-            ("sendmeter-impl-12", "working", "/x", "w1:p2"),
-            ("sendmeter-rev-12-r2", "working", "/x", "w1:p3"),
-            ("sendmeter-impl-17", "working", "/x", "w1:p4"),
-        ]);
-        drover::serve::serve_on(&c2, &Fake::default().reply("herdr agent list", &list), l, false)
-    });
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &working(), l, false));
     let mut s = std::net::TcpStream::connect(&addr).unwrap();
     s.set_read_timeout(Some(std::time::Duration::from_secs(20))).unwrap();
     write!(
@@ -553,12 +555,7 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
     );
     apply(&mut screen, &ops);
 
-    let list = agents(&[
-        ("sendmeter-impl-12", "working", "/x", "w1:p2"),
-        ("sendmeter-rev-12-r2", "working", "/x", "w1:p3"),
-        ("sendmeter-impl-17", "working", "/x", "w1:p4"),
-    ]);
-    let r2 = Fake::default().reply("herdr agent list", &list);
+    let r2 = working();
     let fresh = req(
         &Server::new(&c, &r2, Some(ADDR.into())),
         drover::now(),

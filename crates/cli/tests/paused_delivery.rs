@@ -9,10 +9,18 @@ use serde_json::json;
 
 const AIR_SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
 
-/// The main host's runner: a shell line over ssh to `air` runs here (the lane's worktree is a local folder).
-struct Air(Fake);
+struct Air<'a>(OverSsh<'a>);
 
-impl Runner for Air {
+impl<'a> Air<'a> {
+    fn new(f: &'a Fake, air: &'a FakeShed) -> Self {
+        Air(OverSsh {
+            f,
+            hosts: vec![("air", air)],
+        })
+    }
+}
+
+impl Runner for Air<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
         let Some(sh) = line.strip_prefix(AIR_SSH) else {
@@ -25,12 +33,24 @@ impl Runner for Air {
             stderr: String::from_utf8_lossy(&o.stderr).into(),
         })
     }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        match args.join(" ").contains("air -- 'shed' 'connect'") {
+            true => self.0.run_in(prog, args, input),
+            false => self.run(prog, args),
+        }
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
 }
 
 #[test]
 fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answers() {
     let (md, ld) = (tmpdir("paused-main"), tmpdir("paused-lane"));
     let (main, lane) = (ctx(&md, CONFIG), ctx(&ld, CONFIG));
+    let (here, air) = (FakeShed::new(), FakeShed::new());
+    here.attach(&main);
+    air.lane("sendmeter-impl-12", "idle", "/x");
     let wt = ld.join("worktree");
     std::fs::create_dir_all(&wt).unwrap();
     std::fs::write(wt.join(".git"), "gitdir: elsewhere\n").unwrap();
@@ -48,14 +68,15 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     // The main host: the fleet is paused, #12's lane lives on air, and #13 waits in the queue.
     assert_eq!(run(&main, &Fake::default(), &["queue", "sendmeter", "add", "13"]).0, 0);
     assert_eq!(run(&main, &Fake::default(), &["pause", "sendmeter"]).0, 0);
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w9:p1", "workspace": "w9",
-                   "worktree": wt, "branch": "issue-12", "host": "air", "machine": "air"});
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "sendmeter-impl-12",
+                   "runtime": "shed", "worktree": wt, "branch": "issue-12", "host": "air", "machine": "air"});
     append(
         &main.state,
         &Event::new(1_000_000 - 60, "sendmeter", Some(12), "spawn", d),
     )
     .unwrap();
-    let r = Air(Fake::default());
+    let f = Fake::default();
+    let r = Air::new(&f, &air);
     run(&main, &r, &["drive", "--fast"]);
     let ev = read(&main.state).unwrap().to_vec();
     let asks: Vec<_> = ev.iter().filter(|e| e.kind == "needs-decision").collect();
@@ -70,20 +91,19 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     // The answer can't reach the lane at first: the next fast step types it again, paused or not.
     assert_eq!(run(&main, &Fake::default(), &["answer", "sendmeter", "q1", "1"]).0, 0);
     assert_eq!(ev_count(&main, "answer-undelivered"), 1);
-    let up = Air(Fake::default()
-        .reply("herdr --machine air agent prompt", "")
-        .reply("herdr --machine air pane send-keys", "")
-        .reply("herdr --machine air agent wait", ""));
-    run(&main, &up, &["drive", "--fast"]);
+    let f = Fake::default();
+    run(&main, &Air::new(&f, &air), &["drive", "--fast"]);
+    assert_eq!(air.sent("sendmeter-impl-12"), ["DECISION q1: a"], "{:?}", air.methods());
+    assert_eq!(air.last("keys")["keys"], json!(["Enter"]));
     assert!(
-        up.0.called("herdr --machine air agent prompt sendmeter-impl-12 DECISION q1: a"),
-        "{:?}",
-        up.0.calls.borrow()
+        !here.called("send", "sendmeter-impl-12"),
+        "nothing typed on this host's shed"
     );
     assert_eq!(ev_count(&main, "answer-delivered"), 1);
 
     // Pause still holds: a slow pass starts nothing, and no pass is logged for the fleet.
-    run(&main, &Air(Fake::default()), &["drive"]);
+    let f = Fake::default();
+    run(&main, &Air::new(&f, &air), &["drive"]);
     assert_eq!(ev_count(&main, "spawn"), 1, "only #12's seeded spawn");
     assert_eq!(ev_count(&main, "drive-pass"), 0);
     assert_eq!(drover::drive::last_pass(&main, "sendmeter"), None);

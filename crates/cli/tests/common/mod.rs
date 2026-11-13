@@ -5,6 +5,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+/// #771: the shared fake shed server lane tests run on.
+pub mod fake_shed;
+#[allow(unused_imports)]
+pub use fake_shed::{FakeShed, OnShed, OverSsh};
+
 pub const CONFIG: &str = r#"# fleet config (test)
 [fleet.sendmeter]
 repo = "jirathip-dev/sendmeter"
@@ -63,8 +68,6 @@ pub struct Fake {
     pub onces: Shared<Vec<(String, Out)>>,
     /// Each `run_in`'s command line and its stdin.
     pub inputs: Shared<Vec<(String, String)>>,
-    /// #664: `closing()`: the panes a `herdr … pane close` closed, left out of every later `agent list`.
-    pub closed: Option<Shared<Vec<String>>>,
 }
 
 impl Fake {
@@ -101,11 +104,6 @@ impl Fake {
         ));
         self
     }
-    /// #664: a closed pane leaves herdr's agent list, as on a real host.
-    pub fn closing(mut self) -> Self {
-        self.closed = Some(Shared::default());
-        self
-    }
     pub fn called(&self, prefix: &str) -> bool {
         self.calls.borrow().iter().any(|c| c.starts_with(prefix))
     }
@@ -122,25 +120,7 @@ pub const BATCH: &str = " </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"";
 
 impl Runner for Fake {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
-        let mut o = self.answer(prog, args)?;
-        let Some(closed) = &self.closed else {
-            return Ok(o);
-        };
-        match args {
-            [.., a, b, p] if prog == "herdr" && a == "pane" && b == "close" && o.code == 0 => {
-                closed.borrow_mut().push(p.clone())
-            }
-            [.., a, b] if prog == "herdr" && a == "agent" && b == "list" => {
-                if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&o.stdout) {
-                    if let Some(l) = v["result"]["agents"].as_array_mut() {
-                        l.retain(|a| !closed.borrow().iter().any(|p| a["pane_id"] == p.as_str()));
-                        o.stdout = v.to_string();
-                    }
-                }
-            }
-            _ => {}
-        }
-        Ok(o)
+        self.answer(prog, args)
     }
     fn sleep(&self, secs: u64) {
         self.calls.borrow_mut().push(format!("sleep {secs}"));
@@ -803,29 +783,34 @@ pub const REV: &str = "sendmeter-rev-9-r1";
 const V1_WS: &str = r#"{"result": {"root_pane": {"pane_id": "w9:p1"}}}"#;
 pub const V1_PERMISSION: &str = "╭──────────────────────────────────────────╮\n│ Bash command                             │\n│   cargo test --all                       │\n│ Do you want to proceed?                  │\n│ ❯ 1. Yes                                 │\n│   2. Yes, and don't ask again for cargo  │\n│      commands in /p/sendmeter            │\n│   3. No, and tell Claude what to do      │\n│      differently (esc)                   │\n╰──────────────────────────────────────────╯\n";
 
-/// #555: API v1's board: sendmeter: #12's impl lane working on w1:p2, #9's rev lane blocked on a permission menu on w1:p3, a setup
-/// terminal `claude B` on host bazzite; gh and herdr's writes succeed.
 /// #641: herdr's one saved machine profile for bazzite (`herdr machine list --json`).
 pub const BAZZITE: &str = r#"[{"id": "b1", "label": "bazzite"}]"#;
 
-pub fn v1_board(name: &str) -> (drover::Ctx, Fake) {
+pub fn v1_board_on(name: &str, f: Fake) -> (drover::Ctx, OnShed) {
     let cfg = format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}\n[hosts.bazzite]\nmachine = \"bazzite\"\n\n[[setup]]\nname = \"claude B\"\ncmd = \"claude /login\"\n");
     let c = ctx(&tmpdir(name), &cfg);
-    for (issue, role, agent, pane) in [(12, "impl", IMPL, "w1:p2"), (9, "rev", REV, "w1:p3")] {
-        let d = serde_json::json!({"role": role, "agent": agent, "harness": "claude", "pane": pane});
+    let r = OnShed::new(f.reply("gh issue close", ""));
+    r.1.attach(&c);
+    for (issue, role, agent, state) in [(12, "impl", IMPL, "working"), (9, "rev", REV, "blocked")] {
+        let d = serde_json::json!({"role": role, "agent": agent, "harness": "claude", "pane": agent});
         drover::events::append(
             &c.state,
             &drover::events::Event::new(1_000_000 - 100, "sendmeter", Some(issue), "spawn", d),
         )
         .unwrap();
+        r.1.lane(agent, state, "/x");
+        r.1.screen(agent, V1_PERMISSION);
     }
-    let list = agents(&[(IMPL, "working", "/x", "w1:p2"), (REV, "blocked", "/x", "w1:p3")]);
-    let r = Fake::default()
-        .reply("herdr agent list", &list)
-        .reply("herdr pane read", V1_PERMISSION)
-        .reply("herdr --machine bazzite pane read", "Paste code here >\n")
+    (c, r)
+}
+
+/// `v1_board_on` an empty Fake.
+pub fn v1_board(name: &str) -> (drover::Ctx, OnShed) {
+    v1_board_on(name, Fake::default())
+}
+
+pub fn herdr_setup(f: Fake) -> Fake {
+    f.reply("herdr --machine bazzite pane read", "Paste code here >\n")
         .reply("herdr machine list --json", BAZZITE)
         .reply("herdr", V1_WS)
-        .reply("gh issue close", "");
-    (c, r)
 }

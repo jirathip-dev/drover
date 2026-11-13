@@ -22,9 +22,12 @@ fn remote_plan(name: &str, limits: &str) -> String {
                     "load": 0.1, "mem": 12.0, "disk": 200.0},
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#);
+    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
+    let f = Fake::default().reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#);
+    let r = OverSsh {
+        f: &f,
+        hosts: vec![("bazzite", &bazzite)],
+    };
     let args = ["spawn", "sendmeter", "12", "impl", "--host", "bazzite", "--dry-run"];
     let (code, out) = run(&c, &r, &args);
     assert_eq!(code, 0, "{out}");

@@ -6,8 +6,6 @@ use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-const PANES: &str = r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#;
-
 fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
@@ -16,11 +14,12 @@ fn ev(c: &drover::Ctx, n: u64, ts: u64, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(n), kind, d)).unwrap();
 }
 
-fn setup(name: &str, extends: u64) -> drover::Ctx {
+fn setup(name: &str, extends: u64) -> (drover::Ctx, FakeShed) {
     let c = ctx(
         &tmpdir(name),
         &CONFIG.replace("max_parallel_spawns = 0", "max_parallel_spawns = 4"),
     );
+    let sh = FakeShed::attached(&c);
     let mut add = vec!["queue".to_string(), "sendmeter".into(), "add".into()];
     add.extend((1..=extends).map(|n| n.to_string()));
     let add: Vec<&str> = add.iter().map(String::as_str).collect();
@@ -38,7 +37,7 @@ fn setup(name: &str, extends: u64) -> drover::Ctx {
     for n in 1..=extends {
         out_of_rounds(&c, n);
     }
-    c
+    (c, sh)
 }
 
 fn out_of_rounds(c: &drover::Ctx, n: u64) {
@@ -64,8 +63,6 @@ fn loaded() -> Fake {
     let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": sha("3"),
         "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]});
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 40.00 40.00 40.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -73,9 +70,7 @@ fn loaded() -> Fake {
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
         .reply("gh pr view", &pr.to_string())
         .reply("git -C", "")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply("herdr pane list", PANES)
-        .reply("herdr", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("kill -0 4242", "")
         .reply("ps -o etime= -p 4242", "  00:10\n")
 }
@@ -95,16 +90,13 @@ fn pending(c: &drover::Ctx, n: u64) -> Option<drover::pending::Pending> {
 
 #[test]
 fn ten_extends_each_spawn_at_once_past_load_four_pending_spawns_and_a_running_pass() {
-    let c = setup("owner-extend-ten", 10);
+    let (c, sh) = setup("owner-extend-ten", 10);
     lease_as(&c, "drive.lock", 4242, c.now, 3600);
     let r = loaded();
     for n in 1..=10 {
         let (code, out) = run(&c, &r, &["extend", "sendmeter", &n.to_string()]);
         assert!(code == 0 && out.ends_with(&format!("#{n}: extend\n")), "#{n}: {out}");
-        assert!(
-            r.called(&format!("herdr agent start sendmeter-impl-{n} ")),
-            "#{n}: {out}"
-        );
+        assert!(sh.called("run", &format!("sendmeter-impl-{n}")), "#{n}: {out}");
         assert_eq!(pending(&c, n), None, "#{n} started, nothing pending");
     }
     let o = of_kind(&c, "override");
@@ -126,7 +118,7 @@ fn ten_extends_each_spawn_at_once_past_load_four_pending_spawns_and_a_running_pa
 
 #[test]
 fn low_memory_still_holds_an_owner_extend_and_says_so() {
-    let c = setup("owner-extend-mem", 1);
+    let (c, sh) = setup("owner-extend-mem", 1);
     let vm = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 16384.\n\
         Pages inactive: 16384.\nSwapouts: 100.\n";
     let low = Fake::default().reply("vm_stat", vm);
@@ -136,14 +128,14 @@ fn low_memory_still_holds_an_owner_extend_and_says_so() {
     };
     let (code, out) = run(&c, &low, &["extend", "sendmeter", "1"]);
     assert!(code == 0 && out.contains("waiting for host (MEM_LOW)"), "{out}");
-    assert!(!low.called("herdr agent start"), "{out}");
+    assert!(sh.all("run").is_empty(), "{out}");
     assert_eq!(pending(&c, 1).unwrap().reason.as_deref(), Some("MEM_LOW"));
     assert!(of_kind(&c, "override").is_empty());
 }
 
 #[test]
 fn extends_already_pending_start_on_the_first_pass_past_load_and_full_spawn_slots() {
-    let c = setup("owner-extend-pass", 10);
+    let (c, sh) = setup("owner-extend-pass", 10);
     for n in 1..=10 {
         ev(&c, n, 20, "round-extended", json!({"by": "owner", "spawn": true}));
         let d = json!({"action": "extend", "role": "impl", "since": 20, "after": null,
@@ -173,7 +165,7 @@ fn extends_already_pending_start_on_the_first_pass_past_load_and_full_spawn_slot
 
     let (code, out) = run(&c, &r, &["kick", "sendmeter", "1", "--why", "drive", "--now"]);
     assert_eq!(code, 0, "{out}");
-    assert!(r.called("herdr agent start sendmeter-impl-1 "), "{out}");
+    assert!(sh.called("run", "sendmeter-impl-1"), "{out}");
     assert_eq!(pending(&c, 1), None);
     let o = of_kind(&c, "override");
     assert_eq!(o.len(), 1, "{o:?}");
@@ -183,7 +175,8 @@ fn extends_already_pending_start_on_the_first_pass_past_load_and_full_spawn_slot
 struct Slow(Fake, AtomicBool);
 impl Runner for Slow {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
-        if prog == "herdr" && args.first().is_some_and(|a| a == "worktree") && !self.1.swap(true, Ordering::SeqCst) {
+        let add = prog == "git" && args.windows(2).any(|w| w == ["worktree", "add"]);
+        if add && !self.1.swap(true, Ordering::SeqCst) {
             std::thread::sleep(std::time::Duration::from_millis(1500));
         }
         self.0.run(prog, args)
@@ -206,7 +199,7 @@ fn http(addr: &str, req: &str) -> String {
 
 #[test]
 fn board_extends_are_never_refused_while_another_extend_or_a_drive_runs() {
-    let c = setup("owner-extend-board", 2);
+    let (c, _sh) = setup("owner-extend-board", 2);
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()

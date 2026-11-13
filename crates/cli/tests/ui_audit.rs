@@ -43,11 +43,14 @@ fn fixture() -> (String, String) {
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "18", "19", "20"]).0,
         0
     );
-    let a = |n: &str, st: &str, p: &str| json!({"name": n, "agent_status": st, "pane_id": p, "cwd": "/x"});
-    let list = json!({"result": {"agents": [a("sendmeter-impl-12", "working", "w1:p1"), a("sendmeter-impl-13", "blocked", "w1:p2")]}});
-    let r = Fake::default()
-        .reply("herdr agent list", &list.to_string())
-        .reply("herdr pane read", MENU);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    for (n, st) in [("sendmeter-impl-12", "working"), ("sendmeter-impl-13", "blocked")] {
+        sh.lane(n, st, "/x");
+        sh.screen(n, MENU);
+    }
+    let f = Fake::default();
+    let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let page = req(&s, "GET", "/?all=1", "", &ck);

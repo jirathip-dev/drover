@@ -62,7 +62,9 @@ fn fix_lane_ended_without_pushing_alerts_once_at_30_min() {
     ev(&c, T0 + 30, Some(7), "verdict", json!({"verdict": "FAIL", "sha": SHA}));
     let lane = spawn(&c, T0 + 40, 7, "impl");
     pass(&c, T0 + 40, &[(7, None)]);
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = Fake::default();
     let e = fires_once(&mut c, &r, T0 + 40, 7);
     let why = e.str("reason").unwrap();
     assert!(why.contains("#7 fix(1): nothing drives it for 30m"), "{why}");
@@ -90,7 +92,10 @@ fn no_change_fix_round_with_merge_label_alerts_once() {
     for t in (0..8).map(|k| T0 + 300 * k) {
         pass(&c, t, &[]); // drive runs, but nothing about #8
     }
-    let r = Fake::default().reply("herdr agent list", &agents(&[(&lane, "idle", "/x", "w1:p1")]));
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane(&lane, "idle", "/x");
+    let r = Fake::default();
     let e = fires_once(&mut c, &r, T0 + 50, 8);
     assert!(e.str("reason").unwrap().contains(&format!("last lane {lane} (idle)")));
 }
@@ -104,7 +109,10 @@ fn undelivered_answer_alerts_once_after_the_ask_closes() {
     pass(&c, T0, &[]); // drive runs, but nothing about #9
     let ask = json!({"id": "a1", "agent": lane, "question": "which?", "options": ["x", "y"]});
     ev(&c, T0 + 10, Some(9), "needs-decision", ask);
-    let r = Fake::default().reply("herdr agent list", &agents(&[(&lane, "idle", "/x", "w1:p1")]));
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane(&lane, "idle", "/x");
+    let r = Fake::default();
     assert!(
         check_at(&mut c, &r, T0 + 7200).is_empty(),
         "an open ask is a named wait"
@@ -124,7 +132,10 @@ fn drive_going_silent_on_an_issue_alerts_30_min_after_its_last_action() {
     for t in (1..=6).map(|k| T0 + 300 * k) {
         pass(&c, t, &[(10, Some("EXIT"))]);
     }
-    let r = Fake::default().reply("herdr agent list", &agents(&[(&lane, "done", "/x", "w1:p1")]));
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane(&lane, "done", "/x");
+    let r = Fake::default();
     fires_once(&mut c, &r, T0 + 1800, 10);
 }
 
@@ -159,7 +170,10 @@ fn a_healthy_fleet_raises_none() {
     for t in (0..=24).map(|k| T0 + 300 * k) {
         pass(&c, t, &[(2, Some("CAP")), (6, Some("HOST_BUSY"))]);
     }
-    let r = Fake::default().reply("herdr agent list", &agents(&[(&working, "working", "/x", "w1:p1")]));
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane(&working, "working", "/x");
+    let r = Fake::default();
     assert!(check_at(&mut c, &r, T0 + 7200).is_empty());
     // `waiting` lists every guarded issue; none is orphaned.
     let (code, out) = run(&c, &r, &["waiting", "sendmeter"]);
@@ -183,7 +197,9 @@ fn a_paused_fleet_raises_none() {
     );
     spawn(&c, T0, 7, "impl");
     pass(&c, T0, &[]); // drive runs, but nothing about #7
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = Fake::default();
     assert!(check_at(&mut c, &r, T0 + 7200).is_empty());
 }
 
@@ -194,7 +210,9 @@ fn waiting_names_an_issue_nothing_drives() {
     spawn(&c, T0, 7, "impl");
     ev(&c, T0, None, "queue", json!({"op": "add", "issues": [12]}));
     pass(&c, T0, &[]); // drive runs, but acts on neither
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = Fake::default();
     c.now = T0 + 2400;
     let (code, out) = run(&c, &r, &["waiting"]);
     assert_eq!(code, 0, "{out}");
@@ -220,7 +238,9 @@ fn a_lane_live_loop_on_a_finished_lane_is_an_orphan() {
             "words": "an old reviewer (done) is in the way: replacing it"});
         ev(&c, T0 + t, None, "drive-pass", json!({"actions": [a]}));
     }
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = Fake::default();
     fires_once(&mut c, &r, T0 + 10, 7);
 }
 
@@ -231,7 +251,9 @@ fn waiting_names_why_drive_has_not_started_a_queued_issue() {
     let d = tmpdir("orphan-558");
     let mut c = ctx(&d, CONFIG);
     ev(&c, T0, None, "queue", json!({"op": "add", "issues": [12]}));
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = Fake::default();
     let line = |c: &drover::Ctx| {
         let (code, out) = run(c, &r, &["waiting", "sendmeter"]);
         assert_eq!(code, 0, "{out}");
@@ -252,7 +274,7 @@ fn waiting_names_why_drive_has_not_started_a_queued_issue() {
         "{l}"
     );
     let paused = CONFIG.replace("integration = \"staging\"", "integration = \"staging\"\npaused = true");
-    std::fs::write(&c.config, paused).unwrap();
+    std::fs::write(&c.config, sh.config(&paused)).unwrap();
     assert!(line(&c).ends_with("→ paused: drover resume sendmeter"), "{}", line(&c));
 }
 
@@ -263,7 +285,9 @@ fn waiting_reads_a_long_running_tick_as_running_not_stuck() {
     let d = tmpdir("orphan-791");
     let mut c = ctx(&d, CONFIG);
     ev(&c, T0, None, "queue", json!({"op": "add", "issues": [12]}));
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = Fake::default();
     let line = |c: &drover::Ctx| {
         let (code, out) = run(c, &r, &["waiting", "sendmeter"]);
         assert_eq!(code, 0, "{out}");

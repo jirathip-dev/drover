@@ -9,13 +9,20 @@ use serde_json::json;
 use std::time::Duration;
 
 const NOW: u64 = 1_000_000;
-const WT: &str = "/Users/me/.herdr/worktrees/sendmeter/issue-9";
+const WT: &str = "/Users/me/.local/share/drover/work/sendmeter/issue-9";
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
 
-fn setup(name: &str, extra: &str) -> drover::Ctx {
+fn setup(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
+    let (c, sh) = setup_on(name, extra);
+    sh.attach(&c);
+    (c, sh)
+}
+
+fn setup_on(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let toml = format!("{base}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n{extra}");
     let c = ctx(&tmpdir(name), &toml);
+    let sh = FakeShed::new();
     let st = c.state.parent().unwrap();
     std::fs::create_dir_all(st).unwrap();
     let cache = json!({
@@ -24,8 +31,8 @@ fn setup(name: &str, extra: &str) -> drover::Ctx {
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     // #9's lane ran on the Air and is merged: clean's to remove.
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-9", "pane": "w9:p1", "workspace": "w9", "worktree": WT,
-                   "branch": "issue-9", "host": "air", "machine": "air"});
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-9", "pane": "sendmeter-impl-9", "workspace": "",
+                   "runtime": "shed", "worktree": WT, "branch": "issue-9", "host": "air", "machine": "air"});
     append(&c.state, &Event::new(NOW - 900, "sendmeter", Some(9), "spawn", d)).unwrap();
     append(
         &c.state,
@@ -33,21 +40,26 @@ fn setup(name: &str, extra: &str) -> drover::Ctx {
     )
     .unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    c
+    (c, sh)
 }
 
 fn local() -> Fake {
     Fake::default()
-        .reply(
-            "herdr status",
-            "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
-        )
-        .reply("herdr agent list", NO_AGENTS)
         .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
         .reply("sysctl -n hw.ncpu", "4")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("git ", "")
         .reply("gh issue view", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
+        .reply("which shed", "/opt/shed/bin/shed\n")
+}
+
+fn local_herdr() -> Fake {
+    local()
+        .reply(
+            "herdr status",
+            "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
+        )
+        .reply("herdr agent list", NO_AGENTS)
         .reply(
             "herdr worktree create",
             r#"{"result":{"workspace":{"workspace_id":"w1"}}}"#,
@@ -110,15 +122,15 @@ impl Runner for Hang {
 
 #[test]
 fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
-    let c = setup("stuck-air", "");
+    let (c, _sh) = setup_on("stuck-air", "");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     // #11's lane is live on the Air.
     let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "pane": "w8:p1", "workspace": "w8",
-                   "worktree": "/Users/me/.herdr/worktrees/sendmeter/issue-11", "branch": "issue-11", "host": "air",
-                   "machine": "air"});
+                   "worktree": "/Users/me/.local/share/drover/work/sendmeter/issue-11", "branch": "issue-11",
+                   "host": "air", "machine": "air"});
     append(&c.state, &Event::new(NOW - 600, "sendmeter", Some(11), "spawn", d)).unwrap();
     let r = Hang {
-        f: local(),
+        f: local_herdr(),
         mark: c.state.with_file_name("tick.step"),
         spent: Shared::new(0),
         seen: Shared::default(),
@@ -160,22 +172,34 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
 /// #678: drive's hourly clean and trim still leave a disabled host alone: listed, never removed or swept.
 #[test]
 fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
-    let c = setup("stuck-disabled", "enabled = false");
-    let r = local().reply("herdr --machine air agent list", NO_AGENTS);
-    let (code, out) = run(&c, &r, &["tick"]);
+    let (c, _sh) = setup("stuck-disabled", "enabled = false");
+    let r = local().reply("herdr status", "server:\n  status: running\n");
+    let air = FakeShed::new();
+    let on = OverSsh {
+        f: &r,
+        hosts: vec![("air", &air)],
+    };
+    let (code, out) = run(&c, &on, &["tick"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains(&format!("keep air:{WT}: host unreachable (not cleaned)")),
         "{out}"
     );
-    assert!(!r.called("herdr --machine air worktree remove"), "{out}");
+    let calls = r.calls.borrow();
+    let removes = calls
+        .iter()
+        .filter(|l| l.contains(" air ") && l.contains("worktree remove"));
+    assert_eq!(removes.count(), 0, "{calls:?}");
+    drop(calls);
     assert!(!out.contains("scratch: air:"), "no scratch sweep there: {out}");
     // Enabled again: probed and removed as before.
-    let c2 = setup("stuck-enabled", "");
-    let r = local()
-        .reply("herdr --machine air agent list", NO_AGENTS)
-        .reply(&format!("{SSH}'sh' '-c' 'test -e"), "");
-    let (_, out) = run(&c2, &r, &["clean"]);
+    let (c2, _sh2) = setup("stuck-enabled", "");
+    let r = local().reply(&format!("{SSH}'sh' '-c' 'test -e"), "");
+    let on = OverSsh {
+        f: &r,
+        hosts: vec![("air", &air)],
+    };
+    let (_, out) = run(&c2, &on, &["clean"]);
     assert!(r.called(&format!("{SSH}'sh' '-c' 'test -e")), "{out}");
     assert!(!out.contains("not cleaned"), "{out}");
 }
@@ -184,9 +208,9 @@ fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
 /// nothing else sent there.
 #[test]
 fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
-    let c = setup("stuck-disabled-silent", "enabled = false");
+    let (c, _sh) = setup_on("stuck-disabled-silent", "enabled = false");
     let r = Hang {
-        f: local(),
+        f: local_herdr(),
         mark: c.state.with_file_name("tick.step"),
         spent: Shared::new(0),
         seen: Shared::default(),
@@ -211,12 +235,12 @@ fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
 
 #[test]
 fn a_dead_shared_connection_drops_its_socket_and_runs_once_more_without_it() {
-    let c = setup("stuck-socket", "");
+    let (c, _sh) = setup("stuck-socket", "");
+    let air = FakeShed::new();
     let sock = c.state.with_file_name("drover-ssh-abc");
     std::fs::write(&sock, "").unwrap();
     let probe = format!("{SSH}'sh' '-c' 'test -e");
     let r = local()
-        .reply("herdr --machine air agent list", NO_AGENTS)
         .reply(
             "ssh -G -oControlPath=/tmp/drover-ssh-%C air",
             &format!("user me\ncontrolpath {}\n", sock.display()),
@@ -230,7 +254,14 @@ fn a_dead_shared_connection_drops_its_socket_and_runs_once_more_without_it() {
             "ssh -oControlPath=none -oBatchMode=yes -oConnectTimeout=10 air -- 'sh' '-c' 'test -e",
             "",
         );
-    let (code, out) = run(&c, &r, &["clean"]);
+    let (code, out) = run(
+        &c,
+        &OverSsh {
+            f: &r,
+            hosts: vec![("air", &air)],
+        },
+        &["clean"],
+    );
     assert_eq!(code, 0, "{out}");
     assert!(!sock.exists(), "the stale socket is removed");
     let calls = r.calls.borrow();
@@ -249,7 +280,7 @@ fn a_dead_shared_connection_drops_its_socket_and_runs_once_more_without_it() {
 
 #[test]
 fn a_tick_ten_minutes_old_it_cannot_name_raises_slo_tick_and_stuck_once() {
-    let c = setup("stuck-alert", "");
+    let (c, _sh) = setup("stuck-alert", "");
     let mark = c.state.with_file_name("tick.step");
     let child = "ssh -oBatchMode=yes air -- 'sh' '-c' 'test -e \"$1\"'";
     let kinds = |c: &drover::Ctx, k: &str| -> Vec<Event> {
@@ -303,7 +334,7 @@ fn a_tick_ten_minutes_old_it_cannot_name_raises_slo_tick_and_stuck_once() {
 
 #[test]
 fn a_drover_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self_heal() {
-    let c = setup("stuck-kill", "");
+    let (c, _sh) = setup("stuck-kill", "");
     let mark = c.state.with_file_name("tick.step");
     std::fs::write(
         &mark,
@@ -345,7 +376,7 @@ fn a_drover_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self
 
 #[test]
 fn a_process_that_is_no_drover_tick_is_never_killed() {
-    let c = setup("stuck-foreign", "");
+    let (c, _sh) = setup("stuck-foreign", "");
     let mark = c.state.with_file_name("tick.step");
     std::fs::write(
         &mark,
@@ -370,7 +401,7 @@ fn a_process_that_is_no_drover_tick_is_never_killed() {
 
 #[test]
 fn a_tick_that_ignores_sigterm_is_killed_after_10_s() {
-    let c = setup("stuck-sigkill", "");
+    let (c, _sh) = setup("stuck-sigkill", "");
     let mark = c.state.with_file_name("tick.step");
     std::fs::write(
         &mark,
