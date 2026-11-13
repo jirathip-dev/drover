@@ -284,7 +284,7 @@ fn the_first_paint_in_webkit_is_under_300ms() {
     let base = format!("http://{}/", serve(c, r).2);
     let file = tmpdir("perf-fcp").join("page.png");
     // Read after the shot's wait (`window.late`): the entry lands once the frame has painted.
-    let fcp = "Object.defineProperty(window, 'late', {get: () => [(performance.getEntriesByName('first-contentful-paint')[0] || {startTime: -1}).startTime]})";
+    let fcp = "Object.defineProperty(window, 'late', {get: () => new Promise(r => { const t = Date.now(), f = () => { const e = performance.getEntriesByName('first-contentful-paint')[0]; if (e || Date.now() - t > 5000) r([e ? e.startTime : -1]); else setTimeout(f, 20); }; f(); })})";
     let paint = |warm: bool| {
         let mut sw = webview();
         if warm {

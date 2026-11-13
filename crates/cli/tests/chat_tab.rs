@@ -1333,7 +1333,8 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
           const [b0, d0] = above(), at = [tc.scrollTop > 0 ? 1 : 0]; \
           const look = async (y = () => vv.offsetTop + vv.height) => { await frame(); \
             const m = () => { const [b, d] = above(); return [Math.abs(tw.getBoundingClientRect().bottom - y()), document.scrollingElement.scrollTop, +(b === b0), Math.abs(d - d0)]; }; \
-            let r = m(); for (let i = 0; i < 40 && (r[0] > 1 || r[1] || !r[2] || r[3] > 1); i++) { await new Promise(q => st(q, 50)); r = m(); } at.push(...r); }; \
+            const ok = r => r[0] <= 1 && !r[1] && r[2] && r[3] <= 1, paint = () => new Promise(q => requestAnimationFrame(() => requestAnimationFrame(q))); \
+            let r = m(); for (let i = 0; i < 40; i++) { const was = ok(r) && String(r); await (was ? paint() : new Promise(q => st(q, 50))); r = m(); if (was === String(r)) break; } at.push(...r); }; \
           box.focus(); await new Promise(r => st(r, 100)); kb(336); await look(); \
           box.value = 'one\\ntwo\\nthree'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
           box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); await new Promise(r => st(r, 100)); kb(0); await look(() => $('nav').getBoundingClientRect().top); \
