@@ -2,15 +2,15 @@
 //! source, flow-back rows (an issue filed, an ask answered), the board's chips, and a conductor's `thread new` refused.
 mod common;
 use common::*;
-use herdsman::events::{read, Event};
-use herdsman::serve::Server;
+use drover::events::{read, Event};
+use drover::serve::Server;
 use serde_json::json;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
 const ADDR: &str = "127.0.0.1:7777";
 
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
@@ -26,7 +26,7 @@ fn setup(name: &str) -> herdsman::Ctx {
     c
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -52,7 +52,7 @@ fn herdr(agents: &str) -> Fake {
 }
 
 /// #492: a handoff from t1 to `repo`, then the owner's tap on its card's new-thread row: the new thread's id.
-fn to_new(c: &herdsman::Ctx, r: &Fake, repo: &str, title: &str, text: &str) -> String {
+fn to_new(c: &drover::Ctx, r: &Fake, repo: &str, title: &str, text: &str) -> String {
     let (code, out) = run(c, r, &["thread", "handoff", "t1", repo, title, text]);
     assert_eq!(code, 0, "{out}");
     let card = kinds(c, "needs-decision").pop().unwrap();
@@ -63,26 +63,26 @@ fn to_new(c: &herdsman::Ctx, r: &Fake, repo: &str, title: &str, text: &str) -> S
     out.trim().rsplit(' ').next().unwrap().to_string()
 }
 
-fn show(c: &herdsman::Ctx, id: &str) -> String {
+fn show(c: &drover::Ctx, id: &str) -> String {
     run(c, &Fake::default(), &["thread", "show", id]).1
 }
 
-/// The real `herdsman` binary on `c`'s files, in a conductor lane of thread `thread` (`None`: the owner's shell).
-fn bin(c: &herdsman::Ctx, thread: Option<&str>, args: &[&str], stdin: &str) -> (i32, String) {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_herdsman"));
+/// The real `drover` binary on `c`'s files, in a conductor lane of thread `thread` (`None`: the owner's shell).
+fn bin(c: &drover::Ctx, thread: Option<&str>, args: &[&str], stdin: &str) -> (i32, String) {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_drover"));
     for k in [
-        "HERDSMAN_LANE",
+        "DROVER_LANE",
         "FLEET_LANE",
-        "HERDSMAN_THREAD",
-        "HERDSMAN_OUTBOX",
+        "DROVER_THREAD",
+        "DROVER_OUTBOX",
         "SHED",
         "BERTH",
     ] {
         cmd.env_remove(k);
     }
     if let Some(t) = thread {
-        cmd.env("HERDSMAN_LANE", "sendmeter:-:orchestrator")
-            .env("HERDSMAN_THREAD", t);
+        cmd.env("DROVER_LANE", "sendmeter:-:orchestrator")
+            .env("DROVER_THREAD", t);
     }
     let mut child = cmd
         .args(args)
@@ -100,7 +100,7 @@ fn bin(c: &herdsman::Ctx, thread: Option<&str>, args: &[&str], stdin: &str) -> (
 }
 
 /// The conductor of `thread` ran `cmd` in its shell, which printed `stdout` (a `PostToolUse` hook call).
-fn ran(c: &herdsman::Ctx, thread: &str, cmd: &str, stdout: &str) {
+fn ran(c: &drover::Ctx, thread: &str, cmd: &str, stdout: &str) {
     let input = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": cmd},
         "tool_response": {"stdout": stdout, "stderr": "", "interrupted": false}});
     let (code, out) = bin(c, Some(thread), &["hook", "--role", "orchestrator"], &input.to_string());
@@ -180,7 +180,7 @@ fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_orches
     // An awake t2 conductor: its start is logged.
     let st =
         json!({"thread": "t2", "agent": "orchestrator-t2", "pane": "w9:p2", "workspace": "w9", "harness": "claude"});
-    herdsman::events::append(
+    drover::events::append(
         &c.state,
         &Event::new(c.now, "sendmeter", None, "orchestrator-start", st),
     )
@@ -215,7 +215,7 @@ fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_orches
 }
 
 /// #492: t1 and t2–t8 in sendmeter, each t<n> with a conductor reply `n` minutes in (t5's a long one); t8 archived.
-fn threads(name: &str) -> herdsman::Ctx {
+fn threads(name: &str) -> drover::Ctx {
     let c = setup(name);
     let titles = [
         "Main chat",
@@ -228,7 +228,7 @@ fn threads(name: &str) -> herdsman::Ctx {
     ];
     for (i, t) in titles.iter().enumerate() {
         let n = i as u64 + 2;
-        let at = herdsman::Ctx {
+        let at = drover::Ctx {
             now: c.now + n * 60,
             ..c.clone()
         };
@@ -251,7 +251,7 @@ fn threads(name: &str) -> herdsman::Ctx {
 #[test]
 fn a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_before_the_tap() {
     let c = threads("handoff-card");
-    let at = herdsman::Ctx {
+    let at = drover::Ctx {
         now: c.now + 1000,
         ..c.clone()
     };
@@ -499,14 +499,11 @@ fn a_orchestrators_thread_new_is_refused_naming_handoff_and_the_owners_still_wor
     assert_eq!(kinds(&c, "thread-new")[2].fleet, "all");
     let usage = run(&c, &Fake::default(), &["help", "--agent"]).1;
     assert!(
-        usage.contains("`herdsman thread handoff <FROM> <TO> <TITLE> <TEXT>`"),
+        usage.contains("`drover thread handoff <FROM> <TO> <TITLE> <TEXT>`"),
         "{usage}"
     );
     let brief = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t3/.brief.md")).unwrap();
-    assert!(
-        brief.contains("herdsman thread handoff <thread> <repo|t<n>>"),
-        "{brief}"
-    );
+    assert!(brief.contains("drover thread handoff <thread> <repo|t<n>>"), "{brief}");
 }
 
 fn req(s: &Server, method: &str, path: &str, extra: &str, now: u64) -> String {
@@ -516,7 +513,7 @@ fn req(s: &Server, method: &str, path: &str, extra: &str, now: u64) -> String {
 }
 
 /// A linked pair, t1 → t2, with a flow-back line in t1.
-fn linked(name: &str) -> herdsman::Ctx {
+fn linked(name: &str) -> drover::Ctx {
     let c = setup(name);
     assert_eq!(to_new(&c, &herdr(NO_AGENTS), "sendmeter", "Rate limits", "go"), "t2");
     ran(
@@ -667,7 +664,7 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herd
 }
 
 /// #621: a card from t1 to sendmeter, whose rows are t2 (an existing thread) and a new one.
-fn card(name: &str, text: &str) -> herdsman::Ctx {
+fn card(name: &str, text: &str) -> drover::Ctx {
     let c = setup(name);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
@@ -681,7 +678,7 @@ fn card(name: &str, text: &str) -> herdsman::Ctx {
 }
 
 /// #621: the copies of handoff `text` in thread `id` and the `continued in` rows in t1.
-fn copies(c: &herdsman::Ctx, id: &str, text: &str) -> (usize, usize) {
+fn copies(c: &drover::Ctx, id: &str, text: &str) -> (usize, usize) {
     let msgs = kinds(c, "thread-msg");
     let into = msgs
         .iter()
@@ -843,7 +840,7 @@ fn a_pending_repo_handoff_is_one_item_with_choices_and_its_pick_delivers_it_in_b
 fn a_repos_threads_list_newest_active_first_with_newest_on_the_first() {
     let c = setup("repo-threads");
     for (n, t) in [(2, "Search"), (3, "Billing")] {
-        let at = herdsman::Ctx {
+        let at = drover::Ctx {
             now: c.now + n * 60,
             ..c.clone()
         };
@@ -856,7 +853,7 @@ fn a_repos_threads_list_newest_active_first_with_newest_on_the_first() {
             0
         );
     }
-    let late = herdsman::Ctx {
+    let late = drover::Ctx {
         now: c.now + 600,
         ..c.clone()
     };

@@ -2,8 +2,8 @@
 //! reply box (pairing, refusals, `prompt` events without text), vector/ASCII horses, no dashes.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -22,7 +22,7 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str, now: u64) 
 }
 
 /// Agents in every state across sendmeter, synergy and Others; sendmeter-impl-14 is dead (log only).
-fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
+fn fixture(name: &str) -> (drover::Ctx, Fake) {
     let c = ctx(&tmpdir(name), &two());
     let spawn = |fleet: &str, issue: u64, ts: u64, role: &str, agent: &str| {
         let d = json!({"role": role, "agent": agent, "harness": if role == "rev" { "hermes" } else { "claude" }});
@@ -117,7 +117,7 @@ fn lanes_group_by_state_then_repo_with_counts() {
     assert!(lanes.contains("<p>impl · round 0 · claude · "), "{lanes}");
 }
 
-/// #187: a lane's card shows the `HERDSMAN_PORT` its spawn logged.
+/// #187: a lane's card shows the `DROVER_PORT` its spawn logged.
 #[test]
 fn lane_card_shows_its_port() {
     let (c, r) = fixture("port");
@@ -200,7 +200,7 @@ fn others_sheet_offers_only_close_pane() {
 }
 
 /// Pair at `T` as an iPhone (Pair, `serve approve`, claim) and return the `Cookie:` header line.
-fn paired(s: &Server, c: &herdsman::Ctx) -> String {
+fn paired(s: &Server, c: &drover::Ctx) -> String {
     let cookie = pair(s, c, "Mozilla/5.0 (iPhone) Safari/604.1", T);
     assert_eq!(cookie.len() - "Cookie: hd=\r\n".len(), 64, "32 random bytes, hex");
     cookie
@@ -232,7 +232,7 @@ fn ask_pair(s: &Server, ip: &str, now: u64) -> (String, String, String) {
 fn pairing_is_a_phone_request_approved_on_the_mac() {
     let (c, r) = fixture("pair-req");
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let at = |now: u64| herdsman::Ctx { now, ..c.clone() };
+    let at = |now: u64| drover::Ctx { now, ..c.clone() };
     // The old code-entry endpoint is gone; `serve pair` prints the new way.
     assert!(req(&s, "POST", "/pair", "code=123456", "", T).starts_with("HTTP/1.1 404 "));
     let (rc, out) = run(&c, &Fake::default(), &["serve", "pair"]);
@@ -246,7 +246,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
     let host = host_tab(&s, ADDR, T);
     assert!(
         host.contains(
-            "no paired device yet: tap [pair this phone], then <code>herdsman serve approve &lt;code&gt;</code>"
+            "no paired device yet: tap [pair this phone], then <code>drover serve approve &lt;code&gt;</code>"
         ) && !(page.clone() + &host).contains("approve <code>"),
         "the hint's placeholder is text, never an open tag"
     );
@@ -341,7 +341,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
         "{ev:?}"
     );
     assert!(
-        !herdsman::events::jsonl(&c.state)
+        !drover::events::jsonl(&c.state)
             .unwrap()
             .contains(&mine[11..mine.len() - 2]),
         "no token in the log"
@@ -355,7 +355,7 @@ fn pairing_behind_a_proxy_and_retaps() {
     let (c, r) = fixture("pair-proxy");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let tap = |h: &str| req(&s, "POST", "/pair/request", "", h, T);
-    let open = || herdsman::devices::pending(&c).len();
+    let open = || drover::devices::pending(&c).len();
     // Two phones behind loopback with their own X-Forwarded-For each get 2.
     for ip in ["100.64.0.1", "100.64.0.2"] {
         let h = format!("X-Peer: 127.0.0.1\r\nX-Forwarded-For: {ip}\r\n");
@@ -395,11 +395,11 @@ fn pairing_behind_a_proxy_and_retaps() {
         let set = res.lines().find_map(|l| l.strip_prefix("Set-Cookie: ")).expect(&res);
         cookie = format!("Cookie: {}\r\n", &set[..set.find(';').unwrap()]);
     }
-    let left = herdsman::devices::pending(&c3);
+    let left = drover::devices::pending(&c3);
     assert_eq!(left.len(), 1, "{left:?}");
     let page = req(&s3, "GET", "/?all=1", "", "", T);
     assert!(!page.contains("pair separately"), "no device paired yet");
-    herdsman::devices::approve(&c3, left[0].code.as_deref().unwrap()).unwrap();
+    drover::devices::approve(&c3, left[0].code.as_deref().unwrap()).unwrap();
     assert!(req(&s3, "POST", "/pair/claim", "", &cookie, T + 1).starts_with("HTTP/1.1 200 OK"));
     // A paired device exists: an unpaired page (the other iOS app) says why it shows Pair.
     let page = req(&s3, "GET", "/?all=1", "", "", T + 1);
@@ -410,11 +410,11 @@ fn pairing_behind_a_proxy_and_retaps() {
     assert!(!req(&s3, "GET", "/?all=1", "", &cookie, T + 1).contains("pair separately"));
     // [cancel] drops the browser's open request; a paired device's cookie cancels nothing.
     let (_, _, mine) = ask_pair(&s3, "10.0.0.3", T + 2);
-    assert_eq!(herdsman::devices::pending(&c3).len(), 1);
+    assert_eq!(drover::devices::pending(&c3).len(), 1);
     for k in [&cookie, &mine] {
         assert!(req(&s3, "POST", "/pair/cancel", "", k, T + 3).starts_with("HTTP/1.1 200 OK"));
     }
-    assert_eq!(herdsman::devices::pending(&c3).len(), 0);
+    assert_eq!(drover::devices::pending(&c3).len(), 0);
     assert!(req(&s3, "POST", "/send", "agent=sendmeter-impl-12&text=hi", &cookie, T + 4).starts_with("HTTP/1.1 200 "));
 }
 
@@ -444,13 +444,13 @@ fn pairing_codes_devices_and_prompt_events() {
     assert!(String::from_utf8_lossy(&s.respond(evil, T)).starts_with("HTTP/1.1 403 "));
     // A valid code sets the cookie; only the token's hash is stored, 0600.
     let cookie = paired(&s, &c);
-    let file = herdsman::db::file(&c.state); // #344: the devices' home
-    let stored = serde_json::to_string(&herdsman::devices::load(&c)).unwrap();
+    let file = drover::db::file(&c.state); // #344: the devices' home
+    let stored = serde_json::to_string(&drover::devices::load(&c)).unwrap();
     use std::os::unix::fs::PermissionsExt;
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     let tok = &cookie[11..cookie.len() - 2];
     assert!(
-        !stored.contains(tok) && stored.contains(&herdsman::devices::sha256(tok.as_bytes())),
+        !stored.contains(tok) && stored.contains(&drover::devices::sha256(tok.as_bytes())),
         "{stored}"
     );
     // The next send succeeds: prompt + Enter, and a `prompt` event without the text.
@@ -462,7 +462,7 @@ fn pairing_codes_devices_and_prompt_events() {
     assert!(r.called("herdr agent prompt sendmeter-impl-12 hello secret words"));
     assert!(r.index("herdr agent prompt") < r.index("herdr pane send-keys w1:p2 Enter"));
     let e = read(&c.state).unwrap().to_vec().pop().unwrap();
-    let label = herdsman::devices::load(&c)[0].label.clone();
+    let label = drover::devices::load(&c)[0].label.clone();
     assert!(label.starts_with("iPhone "), "{label}");
     assert_eq!(
         (e.kind.as_str(), e.fleet.as_str(), e.issue),
@@ -473,7 +473,7 @@ fn pairing_codes_devices_and_prompt_events() {
         json!({"via": "web", "agent": "sendmeter-impl-12", "device": label, "chars": 18})
     );
     assert!(
-        !herdsman::events::jsonl(&c.state).unwrap().contains("secret"),
+        !drover::events::jsonl(&c.state).unwrap().contains("secret"),
         "no message text in the log"
     );
     // ESC, Ctrl-C, DEL, CR and tab are refused; a leading `-` goes through verbatim as herdr's text argument.
@@ -490,7 +490,7 @@ fn pairing_codes_devices_and_prompt_events() {
     );
     let mt = &host[host.find("name=mtime value=").unwrap() + 17..];
     let mt: String = mt.chars().take_while(char::is_ascii_digit).collect();
-    let hash = herdsman::devices::sha256(tok.as_bytes());
+    let hash = drover::devices::sha256(tok.as_bytes());
     let unpair = format!("op=unpair&fleet=&hash={hash}&mtime={mt}");
     assert!(
         req(&s, "POST", "/", &unpair, "", T).starts_with("HTTP/1.1 401 "),
@@ -501,13 +501,13 @@ fn pairing_codes_devices_and_prompt_events() {
         unpair.len()
     );
     assert!(String::from_utf8_lossy(&s.respond(&evil, T)).starts_with("HTTP/1.1 403 "));
-    assert_eq!(herdsman::devices::load(&c).len(), 1);
+    assert_eq!(drover::devices::load(&c).len(), 1);
     let res = req(&s, "POST", "/", &unpair, &cookie, T);
     assert!(
         res.starts_with("HTTP/1.1 303 ") && res.contains("device%20removed"),
         "{res}"
     );
-    assert!(herdsman::devices::load(&c).is_empty());
+    assert!(drover::devices::load(&c).is_empty());
     assert!(send(&cookie, "again").starts_with("HTTP/1.1 401 "));
 }
 
@@ -631,18 +631,18 @@ fn vector_horses_keep_a_coat_per_name() {
     let coats: std::collections::BTreeSet<String> = all[5..].iter().map(coat).collect();
     assert_eq!(coats.len(), 8, "all 8 Corral coats in use: {coats:?}");
     assert_eq!(
-        herdsman::devices::sha256(b"abc"),
+        drover::devices::sha256(b"abc"),
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     );
     assert_eq!(
-        herdsman::devices::sha256(&[b'a'; 56]),
+        drover::devices::sha256(&[b'a'; 56]),
         "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"
     );
 }
 
 /// The PR's 390 px screenshots (fixture config): Lanes in 3 modes, the sheet at 78 % and
 /// full, the pairing prompt, a sent reply; each with no horizontal scroll. Runs where
-/// WebKit is at hand; PNGs go to `$HERDSMAN_SNAPSHOTS` when set.
+/// WebKit is at hand; PNGs go to `$DROVER_SNAPSHOTS` when set.
 #[test]
 fn lanes_and_sheet_fit_390px() {
     if no_webkit() {
@@ -685,7 +685,7 @@ fn lanes_and_sheet_fit_390px() {
     let stub = |send: (u16, &str)| fake((200, &lane), send);
     let open = "open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]'))";
     let submit = "document.querySelector('.reply textarea').value = 'rerun the tests'; document.querySelector('.reply').requestSubmit()";
-    let dir = std::env::var("HERDSMAN_SNAPSHOTS").ok();
+    let dir = std::env::var("DROVER_SNAPSHOTS").ok();
     let d = tmpdir("shots-png");
     let file = d.join("page.html");
     std::fs::write(&file, drawn(&page[page.find("<!doctype").unwrap()..], &s, ADDR, "", T)).unwrap();
@@ -866,7 +866,7 @@ fn one_401_never_latches_unpaired() {
         );
         let png = d.join(format!("pair-{paired}.png"));
         let o = webview()
-            .env("HERDSMAN_WAIT", "1")
+            .env("DROVER_WAIT", "1")
             .args([
                 file.to_str().unwrap(),
                 "390",

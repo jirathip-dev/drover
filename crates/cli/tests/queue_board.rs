@@ -4,8 +4,8 @@
 //! choice from the [config] sheet.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
@@ -78,7 +78,7 @@ fn form(html: &str, op: &str, with: Option<(&str, &str)>) -> Form {
         .unwrap_or_else(|| panic!("no {op} form {with:?}: {html}"))
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -113,7 +113,7 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
         json!({"number": n, "title": format!("t{n}"), "state": "OPEN", "created": "2026-01-01T00:00:00Z",
             "updated": "2026-01-02T00:00:00Z", "labels": [], "ac": true, "pr": false})
     };
-    let cache = herdsman::gh::cache_path(&c, "backlog", "sendmeter", 0);
+    let cache = drover::gh::cache_path(&c, "backlog", "sendmeter", 0);
     std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
     std::fs::write(
         &cache,
@@ -142,9 +142,9 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     let (mv, _) = form(&tab(), "mv", Some(("issue", "12")));
     assert_eq!(mv.get("after").map(String::as_str), Some("17"), "{mv:?}");
     ok(&mv);
-    let order: Vec<u64> = herdsman::queue::view(
+    let order: Vec<u64> = drover::queue::view(
         &read(&c.state).unwrap(),
-        &herdsman::events::fold(&read(&c.state).unwrap()),
+        &drover::events::fold(&read(&c.state).unwrap()),
         "sendmeter",
     )
     .iter()

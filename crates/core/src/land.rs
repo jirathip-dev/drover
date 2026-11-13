@@ -1,6 +1,6 @@
 //! #350: fast-first landing: which checks a passed PR lands on, and the watch on integration after it lands: a red
 //! full suite pauses fast-first landings, finds the culprit (a bisect when several landed), reverts it and sends its
-//! issue back to a fix round; green again resumes. `herdsman stats land` counts how it goes.
+//! issue back to a fix round; green again resumes. `drover stats land` counts how it goes.
 use crate::config::{glob, Config, Fleet};
 use crate::events::{emit, Event};
 use crate::overlap::git;
@@ -259,7 +259,7 @@ fn culprit<'a>(
             "pending" => return Ok(None),
             _ => {}
         }
-        let tmp = format!("herdsman-bisect-{sha:.7}");
+        let tmp = format!("drover-bisect-{sha:.7}");
         let wf = json(r, "gh", &["run", "view", run, "-R", &f.repo, "--json", "workflowName"]).unwrap_or_default();
         let wf = wf["workflowName"].as_str().unwrap_or_default();
         let push = ["push", "-q", "-f", "origin", &format!("{sha}:refs/heads/{tmp}")];
@@ -322,7 +322,7 @@ fn reopen(
     Ok(())
 }
 
-/// `herdsman stats land <fleet>`: per mode, the median PASS → landed time, landings per day, reverts (fixes for
+/// `drover stats land <fleet>`: per mode, the median PASS → landed time, landings per day, reverts (fixes for
 /// full-first) and the median time the gating checks took; then the minutes integration sat red (paused).
 pub fn stats(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Result<()> {
     cfg.fleet(fleet)?;

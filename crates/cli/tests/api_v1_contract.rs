@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::serve::Server;
-use herdsman_server::api::*;
+use drover::serve::Server;
+use drover_server::api::*;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::path::Path;
@@ -132,7 +132,7 @@ fn check(name: &str, route: &str, (ty, schema): (&str, Value), got: Value, fails
 }
 
 /// `method path` on the board as `cookie`'s device: its JSON reply, the test's folder shown as `<tmp>`.
-fn call(s: &Server, c: &herdsman::Ctx, (method, path): (&str, &str), body: &str, cookie: &str) -> Value {
+fn call(s: &Server, c: &drover::Ctx, (method, path): (&str, &str), body: &str, cookie: &str) -> Value {
     let r = format!(
         "{method} {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
         body.len()
@@ -152,7 +152,7 @@ fn every_route_keeps_its_fixtures_shape() {
     let post = |op: &str, v: Value| call(&s, &c, ("POST", &format!("/api/v1/{op}")), &v.to_string(), &ck);
     // A thread to read, and a setup pane open.
     post("chat-about", json!({"fleet": "sendmeter", "issue": 30}));
-    let ev = herdsman::events::read(&c.state).unwrap();
+    let ev = drover::events::read(&c.state).unwrap();
     let t = ev.iter().rev().find_map(|e| e.str("thread")).unwrap().to_string();
     post("setup", json!({"host": "bazzite", "name": "claude B"}));
     let mut fails = vec![];
@@ -173,9 +173,9 @@ fn every_route_keeps_its_fixtures_shape() {
         ("lanes", "/api/v1/lanes", LanesTab)
     );
     // #681: a pending repo handoff from it: its `handoff` item (with the card's rows) in `thread/<t>` and `chat`.
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let h = [t.as_str(), "sendmeter", "Facets", "add facets\nthen reindex"];
-    herdsman::orchestrator::handoff(&c, &cfg, &r, h).unwrap();
+    drover::orchestrator::handoff(&c, &cfg, &r, h).unwrap();
     gets!(
         ("chat", "/api/v1/chat", ChatTab),
         ("thread/<t>", format!("/api/v1/thread/{t}"), ThreadPage),

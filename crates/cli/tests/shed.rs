@@ -2,12 +2,12 @@
 //! adapter call, a lane's spawn, the lane hook's state report, drive's event intake, ACP mode and `--on` hosts.
 mod common;
 use common::*;
-use herdsman::events::Event;
-use herdsman::herdr;
-use herdsman::hosts::On;
-use herdsman::runner::Runner;
-use herdsman::shed::proto::{ErrorCode, Request, Response, RpcError};
-use herdsman::shed::{self, Shed, Wire};
+use drover::events::Event;
+use drover::herdr;
+use drover::hosts::On;
+use drover::runner::Runner;
+use drover::shed::proto::{ErrorCode, Request, Response, RpcError};
+use drover::shed::{self, Shed, Wire};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
@@ -338,7 +338,7 @@ fn a_lane_spawns_on_shed() {
         .map(|s| s.1["text"].as_str().unwrap().into())
         .collect();
     assert!(
-        sends[0].starts_with("export HERDSMAN_LANE='sendmeter:12:impl'") && sends[0].ends_with('\r'),
+        sends[0].starts_with("export DROVER_LANE='sendmeter:12:impl'") && sends[0].ends_with('\r'),
         "{sends:?}"
     );
     assert!(
@@ -346,7 +346,7 @@ fn a_lane_spawns_on_shed() {
         "{sends:?}"
     );
     assert_eq!(b.last("wait")["until"], json!(["working", "blocked"]));
-    let ev = herdsman::events::read(&c.state)
+    let ev = drover::events::read(&c.state)
         .unwrap()
         .to_vec()
         .into_iter()
@@ -383,8 +383,8 @@ fn acp_config(sock: &std::path::Path, harness: &str, account: bool) -> String {
 
 /// #683: account C's default config folder, its own `claude /login`.
 fn acct_c() -> String {
-    herdsman::config::home()
-        .join(".config/herdsman/accounts/C")
+    drover::config::home()
+        .join(".config/drover/accounts/C")
         .display()
         .to_string()
 }
@@ -397,7 +397,7 @@ const TOKEN_C: &str = concat!("sk", "-ant-oat01-CCCC-secret");
 struct Cli<'a>(&'a Fake, Terms, Shared<Vec<String>>);
 
 impl Runner for Cli<'_> {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog == "shed" && args[0] == "run" {
             let name = &args[args.iter().position(|a| a == "--name").unwrap() + 1];
             let t = json!({"name": name, "labels": lane_labels(), "cwd": "/w", "cmd": ["shed"], "keep": false,
@@ -432,9 +432,9 @@ fn acp_fake(adapter: &[&str]) -> Fake {
 }
 
 /// An ACP lane's ctx: its profiles synced, the real binary as their hook.
-fn acp_ctx(name: &str, cfg: &str) -> herdsman::Ctx {
+fn acp_ctx(name: &str, cfg: &str) -> drover::Ctx {
     let mut c = ctx(&tmpdir(name), cfg);
-    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     c
 }
@@ -474,13 +474,13 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     assert_eq!(m.iter().filter(|m| *m == "rm").count(), 1, "{m:?}");
     assert!(!m.iter().any(|m| m == "send" || m == "keys" || m == "run"), "{m:?}");
     assert_eq!(b.last("wait")["until"], json!(["working", "blocked", "done"]));
-    let ev = herdsman::events::read(&c.state).unwrap();
+    let ev = drover::events::read(&c.state).unwrap();
     let sp = ev.iter().rfind(|e| e.kind == "spawn").unwrap();
     assert_eq!(
         (sp.str("pane"), sp.data["confirmed"].as_bool(), sp.str("runtime")),
         (Some("sendmeter-impl-12"), Some(true), Some("shed-acp")) // #609: the lane's runtime, as spawned
     );
-    assert!(!herdsman::events::jsonl(&c.state).unwrap().contains(TOKEN_C));
+    assert!(!drover::events::jsonl(&c.state).unwrap().contains(TOKEN_C));
 
     // A DECISION is a prompt through shed's CLI (the terminal is ACP; the runtime is the fleet's), with no Enter.
     drop(calls);
@@ -490,12 +490,12 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
         herdr::agents(&On::new(&none, Some("bazzite"))).is_err(),
         "neither answers: unreachable"
     );
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let d = json!({"id": "q1", "agent": "sendmeter-impl-12"});
     let ask = Event::new(c.now, "sendmeter", Some(12), "needs-decision", d);
-    herdsman::events::append(&c.state, &ask).unwrap();
+    drover::events::append(&c.state, &ask).unwrap();
     let r = shed::With(&f, cfg.shed().unwrap());
-    let to = herdsman::deliver(&c, &cfg, &r, &ask, "DECISION q1: go on", false).unwrap();
+    let to = drover::deliver(&c, &cfg, &r, &ask, "DECISION q1: go on", false).unwrap();
     assert_eq!(to.as_deref(), Some("sendmeter-impl-12"));
     assert!(f.called("shed send sendmeter-impl-12 DECISION q1: go on"));
     assert!(
@@ -525,7 +525,7 @@ fn a_guarded_command_is_refused_inside_an_acp_lane() {
     assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&acct_c().as_str()));
     assert!(!env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"), "{env:?}");
     assert!(!dump.contains(TOKEN_C));
-    assert_eq!(env.get("HERDSMAN_LANE"), Some(&"sendmeter:12:impl"));
+    assert_eq!(env.get("DROVER_LANE"), Some(&"sendmeter:12:impl"));
     assert_eq!(env.get("ANTHROPIC_MODEL"), Some(&"opus"));
     assert!(!env.contains_key("SHED"), "the session reports its state, not the hook");
     // As Claude Code in that adapter: the local project settings' (`<worktree>/.claude/settings.local.json`, the
@@ -537,7 +537,7 @@ fn a_guarded_command_is_refused_inside_an_acp_lane() {
     assert_eq!(s["permissions"]["defaultMode"], "bypassPermissions");
     assert!(std::fs::read_to_string(wt.join("CLAUDE.local.md"))
         .unwrap()
-        .contains("herdsman"));
+        .contains("drover"));
     let hook = s["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
     let tool = |cmd: &str| {
         let mut ch = std::process::Command::new("sh")
@@ -583,14 +583,10 @@ fn an_unguardable_acp_lane_refuses_to_start() {
     let unsynced = ctx(&tmpdir("acp-nohook"), &acp_config(&b.sock, "claude", true));
     let cases = [
         (
-            acp_ctx("acp-noacct", &acp_config(&b.sock, "claude", false)),
-            "[accounts] account env",
-        ),
-        (
             acp_ctx("acp-hermes", &acp_config(&b.sock, "hermes", true)),
             "runs no hermes hook",
         ),
-        (unsynced, "no herdsman PreToolUse hook"),
+        (unsynced, "no drover PreToolUse hook"),
     ];
     for (c, why) in cases {
         let f = acp_fake(&["env"]);
@@ -607,6 +603,33 @@ fn an_unguardable_acp_lane_refuses_to_start() {
         assert!(code == 3 && out.contains("ACP_UNGUARDED"), "the dry run too: {out}");
     }
     assert!(b.methods().is_empty(), "{:?}", b.methods());
+}
+
+#[test]
+fn an_acp_lane_with_no_account_starts_guarded_on_the_hosts_own_login() {
+    let b = Server::new(shed::proto::VERSION, vec![]);
+    let c = acp_ctx("acp-noacct", &acp_config(&b.sock, "claude", false));
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let cli = Cli(&f, b.terms.clone(), Shared::default());
+    let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    let calls = f.calls.borrow();
+    let start = calls
+        .iter()
+        .find(|c| c.starts_with("shed run --acp claude-acp"))
+        .unwrap();
+    assert!(
+        start.contains("settings.local.json"),
+        "its profile, so the hook guards it: {start}"
+    );
+    assert!(
+        !start.contains("CLAUDE_CONFIG_DIR=") && !start.contains("HERDSMAN_ACCOUNT="),
+        "no account env: {start}"
+    );
+    assert!(
+        start.contains("unset CLAUDE_CODE_OAUTH_TOKEN"),
+        "an inherited token never signs it in: {start}"
+    );
 }
 
 /// #600: drive's launchd PATH had no shed: spawn named it before making anything, doctor checks the timer's PATH
@@ -641,8 +664,8 @@ fn a_missing_shed_is_named_by_spawn_and_doctor_and_timer_install_adds_it() {
     let r = none.reply("which shed", &format!("{}\n", bin.join("shed").display()));
     assert_eq!(run(&c, &r, &["timer", "install", "--no-load"]).0, 0);
     let job = [
-        "Library/LaunchAgents/dev.herdsman.tick.plist",
-        ".config/systemd/user/dev.herdsman.tick.service",
+        "Library/LaunchAgents/dev.drover.tick.plist",
+        ".config/systemd/user/dev.drover.tick.service",
     ];
     let text = job
         .iter()
@@ -683,12 +706,12 @@ fn an_acp_lanes_state_follows_its_turn_events() {
     let b = Server::new(shed::proto::VERSION, events);
     let c = ctx(&tmpdir("acp-state"), &acp_config(&b.sock, "claude", true));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     assert!(cfg.runtime.shed().is_none(), "no global runtime: the fleet's own");
     let sh = cfg.shed_for("sendmeter").unwrap();
     assert_eq!((sh.acp.as_deref(), sh.policy.as_str()), (Some("claude-acp"), "allow"));
     assert_eq!(shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap(), 4);
-    let states: Vec<_> = herdsman::events::read(&c.state)
+    let states: Vec<_> = drover::events::read(&c.state)
         .unwrap()
         .iter()
         .filter(|e| e.kind == "lane-state")
@@ -706,18 +729,18 @@ fn an_acp_lanes_state_follows_its_turn_events() {
     );
 }
 
-/// `herdsman hook` in a shed terminal (`$SHED`) on `event`: its stderr.
+/// `drover hook` in a shed terminal (`$SHED`) on `event`: its stderr.
 fn hook(sock: &std::path::Path, event: &str) -> String {
     hook_in("shed", "SHED", sock, event)
 }
 
-/// `herdsman hook` with config `kind` and only env `var` naming the terminal, on `event`: its stderr.
+/// `drover hook` with config `kind` and only env `var` naming the terminal, on `event`: its stderr.
 fn hook_in(kind: &str, var: &str, sock: &std::path::Path, event: &str) -> String {
     let d = tmpdir("shed-hook");
     std::fs::write(d.join("fleet.toml"), kind_config(kind, sock, "")).unwrap();
-    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
         .args(["hook", "--role", "impl"])
-        .env("HERDSMAN_LANE", "sendmeter:-:impl") // no issue number: a turn's end kicks no real drive here
+        .env("DROVER_LANE", "sendmeter:-:impl") // no issue number: a turn's end kicks no real drive here
         .env_remove("SHED")
         .env_remove("BERTH")
         .env(var, "sendmeter-impl-12")
@@ -785,10 +808,10 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
     let d = tmpdir("shed-drive");
     let c = ctx(&d, &shed_config(&b.sock, ""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     assert_eq!(shed::intake(&c, &cfg, &b.shed().wire).unwrap(), 2);
     assert_eq!(b.last("events"), json!({"labels": {}, "since": 0}));
-    let logged: Vec<_> = herdsman::events::read(&c.state)
+    let logged: Vec<_> = drover::events::read(&c.state)
         .unwrap()
         .to_vec()
         .into_iter()
@@ -822,11 +845,11 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
 
 #[test]
 fn the_default_runtime_is_herdr() {
-    let cfg = herdsman::config::Config::parse(CONFIG).unwrap();
+    let cfg = drover::config::Config::parse(CONFIG).unwrap();
     assert!(cfg.runtime.shed().is_none());
     assert!(Fake::default().shed().is_none());
     let bad = format!("{CONFIG}\n[runtime]\nkind = \"tmux\"\n");
-    assert!(herdsman::config::Config::parse(&bad).is_err());
+    assert!(drover::config::Config::parse(&bad).is_err());
 }
 
 #[test]
@@ -872,7 +895,7 @@ fn drive_reads_berths_seq_file_once_when_sheds_is_missing() {
     let c = ctx(&d, &shed_config(&b.sock, ""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(c.state.with_file_name("berth.seq"), "8").unwrap();
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     assert_eq!(shed::intake(&c, &cfg, &b.shed().wire).unwrap(), 1);
     assert_eq!(b.last("events")["since"], 8);
     assert_eq!(
@@ -903,9 +926,9 @@ fn the_service_follows_sheds_events_and_says_when_the_stream_drops() {
     let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let r: &'static Fake = Box::leak(Box::new(Fake::default().reply("herdr", "{}")));
     let sc = c.clone();
-    std::thread::spawn(move || herdsman_service::run(sc, r, || 1_000_000, api, None));
-    let logged = |kind: &str| -> Vec<herdsman::events::Event> {
-        let all = herdsman::events::read(&c.state).unwrap_or_default();
+    std::thread::spawn(move || drover_service::run(sc, r, || 1_000_000, api, None));
+    let logged = |kind: &str| -> Vec<drover::events::Event> {
+        let all = drover::events::read(&c.state).unwrap_or_default();
         all.iter().filter(|e| e.kind == kind).cloned().collect()
     };
     let t0 = std::time::Instant::now();
@@ -953,12 +976,12 @@ fn the_lanes_tab_lists_a_running_shed_acp_lane_live() {
     let c = ctx(&tmpdir("acp-lanes-tab"), &acp_config(&b.sock, "claude", true));
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed",
         "pane": "sendmeter-impl-12", "worktree": "/w/issue-12"});
-    herdsman::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
+    drover::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
     let r: &'static Fake = Box::leak(Box::new(Fake::default().reply("herdr agent list", NO_AGENTS)));
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let sc = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&sc, r, l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&sc, r, l, false));
     let mut s = std::net::TcpStream::connect(addr).unwrap();
     write!(s, "GET /api/v1/lanes HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
     let mut body = String::new();
@@ -1011,11 +1034,11 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let wt = "/home/me/.herdr/worktrees/sendmeter/issue-12";
-    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C \
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C \
                -oControlPersist=10m bazzite -- ";
     let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w9:p1",
         "workspace": "w9", "worktree": wt, "branch": "issue-12", "host": "bazzite", "machine": "bazzite"});
-    herdsman::events::append(&c.state, &Event::new(c.now - 900, "sendmeter", Some(12), "spawn", sp)).unwrap();
+    drover::events::append(&c.state, &Event::new(c.now - 900, "sendmeter", Some(12), "spawn", sp)).unwrap();
     let f = Fake::default()
         .reply("herdr agent list", NO_AGENTS)
         .reply(
@@ -1030,8 +1053,8 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     assert!(on.shed().is_some(), "shed runtime on");
     let listed = herdr::agents(&on).expect("herdr answers there: the host is up");
     assert_eq!(listed[0]["name"], "sendmeter-impl-12", "{listed:?}");
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    let remote = herdsman::hosts::remote_agents(&cfg, &base);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let remote = drover::hosts::remote_agents(&cfg, &base);
     assert_eq!(remote.len(), 1, "its herdr agents are listed: {remote:?}");
 
     let (_, out) = run(&c, &f, &["spawn", "sendmeter", "13", "impl", "--host", "bazzite"]);
@@ -1058,7 +1081,7 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     for _ in 0..2 {
         assert_eq!(run(&c, &f, &["check"]).0, 0);
     }
-    let evs = herdsman::events::read(&c.state).unwrap().to_vec();
+    let evs = drover::events::read(&c.state).unwrap().to_vec();
     assert!(!evs.iter().any(|e| e.kind == "host-offline"), "{evs:?}");
     let (_, status) = run(&c, &f, &["status"]);
     assert!(!status.contains("host offline"), "{status}");
@@ -1075,7 +1098,7 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
 struct Lands<'a>(&'a Fake, Terms);
 
 impl Runner for Lands<'_> {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog == "shed" && args[0] == "send" {
             let mut t = self.1.lock().unwrap();
             t.get_mut(&args[1]).unwrap()["text"] = json!(format!("> {}", args[2]));
@@ -1085,7 +1108,7 @@ impl Runner for Lands<'_> {
     fn sleep(&self, _: u64) {}
 }
 
-/// #666 amendment A: herdsman-rev-603-r2 sat 8 h, its shed session `running` with an empty transcript: the brief never
+/// #666 amendment A: drover-rev-603-r2 sat 8 h, its shed session `running` with an empty transcript: the brief never
 /// landed as its first prompt (the spawn's `shed send` was dropped). Past the start window drive sends it again, once.
 #[test]
 fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
@@ -1106,7 +1129,7 @@ fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
     std::fs::create_dir_all(&wt).unwrap();
     std::fs::write(wt.join(".brief.md"), "# Brief — review #12\n").unwrap();
     let ev = |ts: u64, kind: &str, d: Value| {
-        herdsman::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
+        drover::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
     };
     ev(
         10,
@@ -1128,9 +1151,9 @@ fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
         .reply("git -C", "")
         .reply("shed send", "");
     let r = Lands(&f, b.terms.clone());
-    let at = |s: u64| herdsman::Ctx { now: s, ..c.clone() };
+    let at = |s: u64| drover::Ctx { now: s, ..c.clone() };
     let sends = || f.count(&format!("shed send {lane}"));
-    let drive = |c: &herdsman::Ctx| {
+    let drive = |c: &drover::Ctx| {
         let (code, out) = run(c, &r, &["drive"]);
         assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
         out
@@ -1143,7 +1166,7 @@ fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
         f.called(&format!("shed send {lane} # Brief — review #12")),
         "the brief itself"
     );
-    let ev = herdsman::events::read(&c.state).unwrap();
+    let ev = drover::events::read(&c.state).unwrap();
     assert!(
         ev.iter()
             .any(|e| e.kind == "start-resent" && e.str("agent") == Some(lane)),
@@ -1152,7 +1175,7 @@ fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
     // It landed this time: the session works on; nothing is sent again, superseded or escalated.
     drive(&at(t0 + 1202));
     assert_eq!(sends(), 1);
-    let ev = herdsman::events::read(&c.state).unwrap().to_vec();
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
     assert!(
         !ev.iter().any(|e| matches!(e.kind.as_str(), "respawn" | "needs-human")),
         "{ev:?}"
@@ -1181,7 +1204,7 @@ fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
         let w = c.worktrees.join("sendmeter").join(agent);
         std::fs::create_dir_all(&w).unwrap();
         let ev = json!({"role": "impl", "agent": agent, "worktree": w, "pane": agent, "workspace": agent});
-        herdsman::events::append(&c.state, &Event::new(10, "sendmeter", Some(n), "spawn", ev)).unwrap();
+        drover::events::append(&c.state, &Event::new(10, "sendmeter", Some(n), "spawn", ev)).unwrap();
         let p = root.join(".scratch").join(agent);
         std::fs::create_dir_all(p.join("target")).unwrap();
         std::fs::write(p.join("target/blob"), vec![0u8; 4096]).unwrap();
@@ -1207,8 +1230,8 @@ fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
     let f = Fake::default().reply("herdr agent list", NO_AGENTS);
     let r = shed::With(&f, b.shed());
     let mut out = vec![];
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    herdsman::check::budget(&c, &cfg, &r, &mut out).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    drover::check::budget(&c, &cfg, &r, &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
     assert!(profile.exists(), "a running lane's own build is never trimmed: {out}");
     assert!(
@@ -1245,12 +1268,12 @@ fn git(dir: &std::path::Path, a: &[&str]) -> String {
 struct Push<'a>(Cli<'a>, PathBuf);
 
 impl Runner for Push<'_> {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog == "git" && args.len() > 1 && args[0] == "-C" && std::path::Path::new(&args[1]).starts_with(&self.1) {
             self.0 .0.calls.borrow_mut().push(format!("git {}", args.join(" ")));
             let o = std::process::Command::new("git").args(args).output()?;
             let s = |b: Vec<u8>| String::from_utf8_lossy(&b).into_owned();
-            return Ok(herdsman::runner::Out {
+            return Ok(drover::runner::Out {
                 code: o.status.code().unwrap_or(1),
                 stdout: s(o.stdout),
                 stderr: s(o.stderr),
@@ -1263,8 +1286,8 @@ impl Runner for Push<'_> {
 
 /// #662: the ACP fleet with accounts C then D (#683: folders), and #12's impl lane spawned on C in a real worktree (its `origin` a
 /// bare repo holding `issue-12` at the base commit): (ctx, server, fake, worktree, origin).
-fn acp_lane(name: &str) -> (herdsman::Ctx, Server, Fake, PathBuf, PathBuf) {
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
+fn acp_lane(name: &str) -> (drover::Ctx, Server, Fake, PathBuf, PathBuf) {
+    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
     let b = Server::new(shed::proto::VERSION, vec![]);
     let cfg =
         acp_config(&b.sock, "claude", true).replace("account = \"C\"", "accounts = [\"C\", \"D\"]") + "D = \"D\"\n";
@@ -1304,15 +1327,15 @@ fn exits(b: &Server, kinds: &[Value]) {
     }
 }
 
-fn later(c: &herdsman::Ctx, secs: u64) -> herdsman::Ctx {
-    herdsman::Ctx {
+fn later(c: &drover::Ctx, secs: u64) -> drover::Ctx {
+    drover::Ctx {
         now: c.now + secs,
         ..c.clone()
     }
 }
 
-fn logged(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    let all = herdsman::events::read(&c.state).unwrap().to_vec();
+fn logged(c: &drover::Ctx, kind: &str) -> Vec<Event> {
+    let all = drover::events::read(&c.state).unwrap().to_vec();
     all.into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -1368,7 +1391,7 @@ fn an_acp_lane_that_exits_on_an_account_limit_is_pushed_and_resumed_in_its_workt
 fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
     let (c, b, f, wt, _) = acp_lane("acp-cause");
     exits(&b, &[json!({"event": "exited", "code": 139})]);
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let c = later(&c, 300);
     shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
     let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
@@ -1383,13 +1406,13 @@ fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
 }
 
 /// #608: a shed-acp fleet's thread, its conductor's events of `kind`.
-fn thread_events(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    let all = herdsman::events::read(&c.state).unwrap().to_vec();
+fn thread_events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
+    let all = drover::events::read(&c.state).unwrap().to_vec();
     all.into_iter().filter(|e| e.kind == kind).collect()
 }
 
-fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
-    herdsman::Ctx { now, ..c.clone() }
+fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
+    drover::Ctx { now, ..c.clone() }
 }
 
 #[test]
@@ -1515,8 +1538,8 @@ fn an_acp_orchestrator_runs_under_the_orchestrator_guard() {
     assert_eq!(run(&c, &cli, &["thread", "say", "t1", "hi"]).0, 0);
     let dump = cli.2.borrow().concat();
     let env: BTreeMap<&str, &str> = dump.lines().filter_map(|l| l.split_once('=')).collect();
-    assert_eq!(env.get("HERDSMAN_LANE"), Some(&"sendmeter:-:orchestrator"));
-    assert_eq!(env.get("HERDSMAN_THREAD"), Some(&"t1"));
+    assert_eq!(env.get("DROVER_LANE"), Some(&"sendmeter:-:orchestrator"));
+    assert_eq!(env.get("DROVER_THREAD"), Some(&"t1"));
     assert!(!env.contains_key("CLAUDE_CODE_OAUTH_TOKEN"), "{env:?}");
     assert_eq!(env.get("CLAUDE_CONFIG_DIR"), Some(&acct_c().as_str()));
     // The profile's `PreToolUse` hook, from its session folder's local settings, run in the adapter's env as Claude
@@ -1545,13 +1568,13 @@ fn an_acp_orchestrator_runs_under_the_orchestrator_guard() {
         assert!(o.status.success());
         String::from_utf8(o.stdout).unwrap()
     };
-    let o = tool("herdsman card approve c1 --sha abc");
+    let o = tool("drover card approve c1 --sha abc");
     let v: Value = serde_json::from_str(&o).unwrap_or_else(|_| panic!("{o}"));
     assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny", "{o}");
     assert!(o.contains("REFUSED OWNER_ONLY"), "{o}");
     // A conductor's own verb (an impl lane's CONDUCTOR_ONLY) runs.
     assert_eq!(
-        tool("herdsman amend sendmeter 12 'x' --basis q1"),
+        tool("drover amend sendmeter 12 'x' --basis q1"),
         "",
         "an orchestrator amends"
     );
@@ -1560,14 +1583,17 @@ fn an_acp_orchestrator_runs_under_the_orchestrator_guard() {
 #[test]
 fn an_unguardable_acp_orchestrator_refuses_with_a_system_line_and_never_falls_back_to_herdr() {
     let b = Server::new(shed::proto::VERSION, vec![]);
-    let c = acp_ctx("acp-orchestrator-noacct", &acp_config(&b.sock, "claude", false));
+    let c = ctx(
+        &tmpdir("acp-orchestrator-nohook"),
+        &acp_config(&b.sock, "claude", false),
+    );
     run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
     let f = acp_fake(&["env"]);
     let cli = Cli(&f, b.terms.clone(), Shared::default());
     let (code, out) = run(&c, &cli, &["thread", "say", "t1", "hi"]);
     assert_eq!(code, 3, "{out}");
     assert!(
-        out.contains("REFUSED ACP_UNGUARDED") && out.contains("[accounts] account env"),
+        out.contains("REFUSED ACP_UNGUARDED") && out.contains("no drover PreToolUse hook"),
         "{out}"
     );
     let calls = f.calls.borrow();
@@ -1585,12 +1611,12 @@ fn an_unguardable_acp_orchestrator_refuses_with_a_system_line_and_never_falls_ba
 }
 
 /// #609: `GET path` on a fresh board over runner `r` (a server per call: its lane cache starts empty).
-fn board_get(c: &herdsman::Ctx, r: Fake, path: &str) -> Value {
+fn board_get(c: &drover::Ctx, r: Fake, path: &str) -> Value {
     let r: &'static Fake = Box::leak(Box::new(r));
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let sc = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&sc, r, l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&sc, r, l, false));
     let mut s = std::net::TcpStream::connect(addr).unwrap();
     write!(s, "GET {path} HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
     let mut body = String::new();
@@ -1599,7 +1625,7 @@ fn board_get(c: &herdsman::Ctx, r: Fake, path: &str) -> Value {
 }
 
 /// #609: each named lane's `(runtime, host, where)` in `/api/v1/lanes`, `/api/v1/state` and `/herd.json`, which agree.
-fn wheres(c: &herdsman::Ctx, r: impl Fn() -> Fake) -> BTreeMap<String, (String, String, String)> {
+fn wheres(c: &drover::Ctx, r: impl Fn() -> Fake) -> BTreeMap<String, (String, String, String)> {
     let s = |v: &Value| v.as_str().unwrap_or("?").to_string();
     let lanes = board_get(c, r(), "/api/v1/lanes");
     let rows = lanes["sections"].as_array().unwrap_or_else(|| panic!("{lanes}"));
@@ -1648,9 +1674,8 @@ fn every_lane_says_where_it_runs() {
         &tmpdir("where-lanes"),
         &(acp_config(&b.sock, "claude", true) + &hosts(true)),
     );
-    let ev = |n, d: Value| {
-        herdsman::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(n), "spawn", d)).unwrap()
-    };
+    let ev =
+        |n, d: Value| drover::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(n), "spawn", d)).unwrap();
     ev(
         12,
         json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed-acp",
@@ -1756,7 +1781,7 @@ fn a_lane_keeps_its_spawn_runtime_after_the_config_changes() {
     let c = ctx(&tmpdir("acp-keeps-runtime"), &acp_config(&b.sock, "claude", true));
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed-acp",
         "pane": "sendmeter-impl-12", "worktree": "/w/issue-12"});
-    herdsman::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
+    drover::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
     let r = || Fake::default().reply("herdr agent list", NO_AGENTS);
     assert_eq!(wheres(&c, r)["sendmeter-impl-12"].0, "shed-acp");
     std::fs::write(
@@ -1764,7 +1789,7 @@ fn a_lane_keeps_its_spawn_runtime_after_the_config_changes() {
         CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""),
     )
     .unwrap();
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     assert!(
         cfg.shed_for("sendmeter").is_none(),
         "the fleet's new lanes start in herdr"
@@ -1782,7 +1807,7 @@ fn herdr_era_lane(
     sock: &std::path::Path,
     fix: bool,
     live: &[&str],
-) -> (herdsman::Ctx, Fake, PathBuf, PathBuf, PathBuf) {
+) -> (drover::Ctx, Fake, PathBuf, PathBuf, PathBuf) {
     let d = std::fs::canonicalize(tmpdir(name)).unwrap(); // git names worktrees by their real path
     let (local, old, origin) = (
         d.join("sendmeter"),
@@ -1820,7 +1845,7 @@ fn herdr_era_lane(
     .filter(|_| fix)
     {
         let e = Event::new(c.now - 900 + i as u64 * 60, "sendmeter", Some(12), kind, data);
-        herdsman::events::append(&c.state, &e).unwrap();
+        drover::events::append(&c.state, &e).unwrap();
     }
     let rows: Vec<_> = (live.iter())
         .map(|n| (*n, "working", old.to_str().unwrap(), "w1:p2"))
@@ -1904,10 +1929,10 @@ fn a_live_agent_in_the_herdr_era_worktree_refuses_lane_live() {
 #[test]
 fn a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path() {
     let b = Server::new(shed::proto::VERSION, vec![]);
-    let real = std::fs::canonicalize(env!("CARGO_BIN_EXE_herdsman")).unwrap();
+    let real = std::fs::canonicalize(env!("CARGO_BIN_EXE_drover")).unwrap();
     for (name, sync_via_link) in [("acp-link-sync", true), ("acp-real-sync", false)] {
         let dir = tmpdir(name);
-        let link = dir.join("bin/herdsman");
+        let link = dir.join("bin/drover");
         std::fs::create_dir_all(link.parent().unwrap()).unwrap();
         std::os::unix::fs::symlink(&real, &link).unwrap();
         let (sync, spawn) = if sync_via_link { (&link, &real) } else { (&real, &link) };
@@ -1927,13 +1952,13 @@ fn a_hook_synced_through_a_symlink_guards_a_spawn_through_the_real_path() {
 fn a_hook_naming_another_binary_refuses_acp_unguarded() {
     let b = Server::new(shed::proto::VERSION, vec![]);
     let dir = tmpdir("acp-other-bin");
-    let other = dir.join("other/herdsman");
+    let other = dir.join("other/drover");
     std::fs::create_dir_all(other.parent().unwrap()).unwrap();
     std::fs::write(&other, "").unwrap();
     let mut c = ctx(&dir, &acp_config(&b.sock, "claude", true));
     c.exe = other.display().to_string();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
     let f = acp_fake(&["env"]);
     let cli = Cli(&f, b.terms.clone(), Shared::default());
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--dry-run"]);
@@ -1941,7 +1966,7 @@ fn a_hook_naming_another_binary_refuses_acp_unguarded() {
 }
 
 /// #732: impl on `claude-acp` (account C, Claude's login) and rev on `codex-acp` (account X, Codex's login): each lane
-/// starts its role's agent with its own provider's config folder, and the codex lane's tools pass herdsman's hook.
+/// starts its role's agent with its own provider's config folder, and the codex lane's tools pass drover's hook.
 #[test]
 fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
     let b = Server::new(shed::proto::VERSION, vec![]);
@@ -1965,7 +1990,7 @@ fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out}");
     let ev = |kind: &str, d: Value| {
-        herdsman::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), kind, d)).unwrap();
+        drover::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), kind, d)).unwrap();
     };
     ev("pushed", json!({"sha": head}));
     ev("turn-end", json!({"state": "done", "agent": "sendmeter-impl-12"}));
@@ -1994,8 +2019,8 @@ fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
     assert!(!imp.contains_key("CODEX_HOME"), "{imp:?}");
     assert_eq!(rev.get("CODEX_HOME"), Some(&acct("X")), "{rev:?}");
     assert!(!rev.contains_key("CLAUDE_CONFIG_DIR"), "{rev:?}");
-    assert_eq!(rev.get("HERDSMAN_LANE").map(String::as_str), Some("sendmeter:12:rev"));
-    // The role's model and effort, and herdsman's hook on every tool call, in Codex's session config.
+    assert_eq!(rev.get("DROVER_LANE").map(String::as_str), Some("sendmeter:12:rev"));
+    // The role's model and effort, and drover's hook on every tool call, in Codex's session config.
     let codex: Value = serde_json::from_str(&rev["CODEX_CONFIG"]).unwrap();
     assert_eq!(
         (&codex["model"], &codex["model_reasoning_effort"]),
@@ -2004,7 +2029,7 @@ fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
     let wt = PathBuf::from(&rev["PWD"]);
     assert!(std::fs::read_to_string(wt.join("AGENTS.override.md"))
         .unwrap()
-        .contains("herdsman"));
+        .contains("drover"));
     let hook = codex["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
     assert!(hook.ends_with("hook --role rev"), "{hook}");
     let tool = |call: Value| {
@@ -2054,7 +2079,7 @@ fn a_rev_on_the_impls_provider_refuses_to_load() {
             &format!("[fleet.sendmeter.role.rev]\nagent = \"{agent}\""),
         )
     };
-    let load = |t: &str| herdsman::config::Config::parse(t).map_err(|e| format!("{e:#}"));
+    let load = |t: &str| drover::config::Config::parse(t).map_err(|e| format!("{e:#}"));
     // Named on rev, inherited by impl from the fleet's runtime (claude-acp): both anthropic.
     let err = load(&rev("claude-acp")).unwrap_err();
     assert!(
@@ -2100,10 +2125,10 @@ fn lane_json(b: &Server, agent: &str, query: &str) -> Value {
         &acp_config(&b.sock, "claude", false),
     );
     let d = json!({"role": "impl", "agent": agent, "harness": "claude", "runtime": "shed", "pane": agent});
-    herdsman::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
+    drover::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
     let fake = Fake::default().reply("herdr agent list", NO_AGENTS);
     let r = shed::With(&fake, b.shed());
-    let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone) Safari/604.1", 1_000_000);
     let q = format!("GET /api/v1/lane/{agent}{query} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n{cookie}\r\n");
     let res = String::from_utf8_lossy(&s.respond(&q, 1_000_000)).into_owned();
@@ -2253,14 +2278,14 @@ fn cpu(pct: u64) -> Value {
 
 const SILENT: u64 = 600;
 
-fn drive_at(c: &herdsman::Ctx, r: &dyn Runner, secs: u64) -> String {
+fn drive_at(c: &drover::Ctx, r: &dyn Runner, secs: u64) -> String {
     let (code, out) = run(&later(c, secs), r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     out
 }
 
 fn host(f: &mut Fake, prog: &str, stdout: &str) {
-    let o = herdsman::runner::Out {
+    let o = drover::runner::Out {
         code: 0,
         stdout: stdout.into(),
         stderr: String::new(),
@@ -2404,7 +2429,7 @@ fn an_auth_failure_marks_the_account_signed_out_alerts_once_and_respawns_on_the_
 fn a_skipped_fix_round_spawn_shows_its_refusal_in_waiting() {
     let (c, b, mut f, wt, _) = acp_lane("acp-held");
     let ev = |ts: u64, kind: &str, d: Value| {
-        herdsman::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
+        drover::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
     };
     let head = "b".repeat(40);
     ev(c.now + 10, "pushed", json!({"sha": head}));
@@ -2436,7 +2461,7 @@ fn an_acp_lane_silent_after_its_first_turn_is_a_failed_start_naming_its_account(
     let turn =
         json!({"seq": seq, "name": "sendmeter-impl-12", "labels": lane_labels(), "event": "turn", "prompt": "# Brief"});
     b.events.lock().unwrap().push(turn);
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
     let cli = Push(Cli(&f, b.terms.clone(), Shared::default()), wt.clone());
     let check = |secs| {

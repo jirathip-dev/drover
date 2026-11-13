@@ -2,8 +2,8 @@
 //! its session, and secrets that never leave the keychain.
 mod common;
 use common::*;
-use herdsman::events::{read, Event};
-use herdsman::serve::Server;
+use drover::events::{read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -27,7 +27,7 @@ fn chat(s: &Server, cookie: &str, now: u64) -> String {
     board_js(&[(&j, "chat.tab(d)")]).remove(0)
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -37,7 +37,7 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
 }
 
 /// A sendmeter conductor (`role_extra` added to its role, `extra` to fleet.toml) and thread t1.
-fn setup(name: &str, role_extra: &str, extra: &str) -> herdsman::Ctx {
+fn setup(name: &str, role_extra: &str, extra: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let cfg = format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{role_extra}\n{extra}");
     let c = ctx(&d, &cfg);
@@ -183,7 +183,7 @@ fn a_usage_limit_resumes_the_orchestrator_on_the_next_account_with_the_same_sess
     let r = herdr(&live()).reply("herdr pane read w9:p1", banner);
     let sh = Shell(&r, "CLAUDE_CONFIG_DIR|$CLAUDE_CODE_OAUTH_TOKEN", Shared::default());
     let (code, out) = run(
-        &herdsman::Ctx {
+        &drover::Ctx {
             now: T + 60,
             ..c.clone()
         },
@@ -209,7 +209,7 @@ fn a_usage_limit_resumes_the_orchestrator_on_the_next_account_with_the_same_sess
         "{start}"
     );
     // #683: B's own login folder, no token.
-    let b = herdsman::config::home().join(".config/herdsman/accounts/B");
+    let b = drover::config::home().join(".config/drover/accounts/B");
     assert_eq!(*sh.2.borrow(), [format!("{}|", b.display())], "on B: {calls:?}");
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
@@ -223,7 +223,7 @@ fn a_usage_limit_resumes_the_orchestrator_on_the_next_account_with_the_same_sess
 #[test]
 fn a_signed_out_orchestrator_gets_a_sign_in_card_for_its_own_login() {
     let signed_out = "Invalid API key · Please run /login";
-    let page = |c: &herdsman::Ctx| {
+    let page = |c: &drover::Ctx| {
         let r = herdr(NO_AGENTS);
         let s = Server::new(c, &r, Some(ADDR.into()));
         chat(&s, &pair(&s, c, "Mozilla/5.0 (iPhone)", T), T + 120)
@@ -231,7 +231,7 @@ fn a_signed_out_orchestrator_gets_a_sign_in_card_for_its_own_login() {
     // The default conductor (no account, no fallback): nothing to switch to, still a [sign in] for `claude`.
     let c = setup("cards-signin-plain", "", "");
     assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
-    let later = herdsman::Ctx {
+    let later = drover::Ctx {
         now: T + 60,
         ..c.clone()
     };
@@ -266,7 +266,7 @@ fn a_signed_out_orchestrator_gets_a_sign_in_card_for_its_own_login() {
     let c = setup("cards-signin-account", "fallback = [\"claude:A\", \"claude:B\"]", extra);
     assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
     let r = herdr(&live()).reply("herdr pane read w9:p1", signed_out);
-    let later = herdsman::Ctx {
+    let later = drover::Ctx {
         now: T + 60,
         ..c.clone()
     };
@@ -290,7 +290,7 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
     );
     let bad = format!("{CONFIG}\n[fleet.sendmeter.env]\nX = \"secret:x'; rm -rf ~\"\n");
     assert!(
-        herdsman::config::Config::parse(&bad).is_err(),
+        drover::config::Config::parse(&bad).is_err(),
         "a secret: reference is a name"
     );
     let (code, out) = run(
@@ -322,7 +322,7 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
     use std::os::unix::fs::PermissionsExt;
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     let calls = f.calls.borrow().join("\n");
-    let log = herdsman::events::jsonl(&c.state).unwrap();
+    let log = drover::events::jsonl(&c.state).unwrap();
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1", "--json"]);
     let page = chat(&s, &cookie, T + 20);
     for (what, text) in [("argv", &calls), ("events", &log), ("chat", &show), ("board", &page)] {
@@ -360,11 +360,11 @@ fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() 
             "--dir",
             "/srv/app",
         ];
-        run(&herdsman::Ctx { now: T, ..c.clone() }, &Fake::default(), &args).1
+        run(&drover::Ctx { now: T, ..c.clone() }, &Fake::default(), &args).1
     };
     let cmd = |n: &str| {
-        let d = json!({"thread": "t1", "cmd": format!("herdsman brief sendmeter {n}")});
-        herdsman::events::append(&c.state, &Event::new(T, "sendmeter", None, "thread-cmd", d)).unwrap();
+        let d = json!({"thread": "t1", "cmd": format!("drover brief sendmeter {n}")});
+        drover::events::append(&c.state, &Event::new(T, "sendmeter", None, "thread-cmd", d)).unwrap();
     };
     cmd("1");
     assert_eq!(card("git log -1 main"), "r1\n");
@@ -425,7 +425,7 @@ fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() 
         "{res}"
     );
     let ran = run(
-        &herdsman::Ctx {
+        &drover::Ctx {
             now: T + 125,
             ..c.clone()
         },
@@ -458,8 +458,8 @@ fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() 
 
 /// #702: thread t1 with a conductor reply, run card r1 (`uptime`), then another reply; its sha, the herdr fake (the
 /// run prints `load 0.42`), and a paired owner device's cookie.
-fn card_between_replies(c: &herdsman::Ctx) -> (String, Fake, String) {
-    let at = |n: u64| herdsman::Ctx {
+fn card_between_replies(c: &drover::Ctx) -> (String, Fake, String) {
+    let at = |n: u64| drover::Ctx {
         now: T + n,
         ..c.clone()
     };
@@ -545,7 +545,7 @@ fn a_settled_run_cards_result_renders_in_the_chat_tab() {
     let c = setup("cards-run-result", "", "");
     let (sha, r, cookie) = card_between_replies(&c);
     let out = run(
-        &herdsman::Ctx {
+        &drover::Ctx {
             now: T + 120,
             ..c.clone()
         },
@@ -557,7 +557,7 @@ fn a_settled_run_cards_result_renders_in_the_chat_tab() {
         "{out:?}"
     );
     let ran = run(
-        &herdsman::Ctx {
+        &drover::Ctx {
             now: T + 125,
             ..c.clone()
         },

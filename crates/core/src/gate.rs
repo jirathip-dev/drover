@@ -1,4 +1,4 @@
-//! `herdsman verdict` and `herdsman merge`: the review → merge gate.
+//! `drover verdict` and `drover merge`: the review → merge gate.
 use crate::config::{Check, Config, Fleet, Premerge};
 use crate::events::{emit, fold, read, Event, IssueState};
 use crate::overlap::git;
@@ -607,7 +607,7 @@ pub fn gate(f: &Fleet, pr: &Value, st: Option<&IssueState>, over: bool) -> Resul
     if verdicts.is_empty() {
         return Err(refuse(
             "NO_VERDICT",
-            "no review verdict recorded; run a reviewer and `herdsman verdict`",
+            "no review verdict recorded; run a reviewer and `drover verdict`",
         ));
     }
     let at = |x: &&(String, String, String)| x.0.eq_ignore_ascii_case(&head);
@@ -673,7 +673,7 @@ fn premerge(
 ) -> Result<Result<Option<u64>, Refusal>> {
     let f = cfg.fleet(fleet)?;
     let checks = premerge_checks(ctx, f);
-    let rules = std::fs::read_to_string(f.local_path().join(".herdsman/rules.md")).unwrap_or_default();
+    let rules = std::fs::read_to_string(crate::repo_path(&f.local_path().join(".drover/rules.md"))).unwrap_or_default();
     // #510: shadow lesson checks need the merged tree too, else they are never recorded and retire unrun.
     if checks.is_empty() && crate::lesson::checks(&rules).iter().all(|c| c.active) {
         return Ok(Ok(None));
@@ -1015,7 +1015,7 @@ fn merged(
     let why = log.iter().rfind(|e| e.is("why", fleet, issue));
     let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(
-        "Merged via `herdsman merge`: PR #{num} → `{}` @ `{merge_sha}`\nPinned PASS verdict sha: `{head}`{}{}",
+        "Merged via `drover merge`: PR #{num} → `{}` @ `{merge_sha}`\nPinned PASS verdict sha: `{head}`{}{}",
         f.integration,
         if over { "\nOwner override: ROUND_LIMIT" } else { "" },
         why.unwrap_or_default()
@@ -1044,24 +1044,25 @@ fn merged(
     if let Err(e) = crate::check::teardown(ctx, cfg, r, out, fleet, issue) {
         writeln!(out, "teardown: {e:#}")?;
     }
-    if f.repo.ends_with("/herdsman") {
+    if crate::update::ours(f) {
         // Dogfood fleet: say how to pick up the merged code; never run it.
         let exe = std::path::Path::new(&ctx.exe);
         let root = exe.parent().and_then(|b| b.parent()).unwrap_or(exe);
         let src = f.local_path();
         writeln!(
             out,
-            "cargo install --path {}/crates/cli --locked --root {} --force && sh {}/scripts/signing-identity.sh sign {}/bin/herdsman",
+            "cargo install --path {}/crates/cli --locked --root {} --force && sh {}/scripts/signing-identity.sh sign {}/bin/drover && ln -sf drover {}/bin/herdsman",
             src.display(),
             root.display(),
             src.display(),
+            root.display(),
             root.display()
         )?;
     }
     Ok(())
 }
 
-/// #130: a needs-human card's `override` / `extend` / `park`; #151: `herdsman extend|park` (`spawn: false` = `--no-spawn`).
+/// #130: a needs-human card's `override` / `extend` / `park`; #151: `drover extend|park` (`spawn: false` = `--no-spawn`).
 /// #712: `why` is `park --why`, stored on the `parked` event.
 pub fn needs_human(
     ctx: &Ctx,
@@ -1078,18 +1079,8 @@ pub fn needs_human(
         "override" => merge(ctx, cfg, r, out, fleet, n, true)?,
         "extend" => {
             // #217: the decision is logged first (the card goes at once); a failed spawn is drive's next due step.
-            // Under drive.lock: a pass meanwhile would start the same round; a running pass leaves it to the next.
-            let held = crate::drive::hold(ctx, r, fleet);
-            if state == "needs-human" {
-                let d = json!({"by": by, "spawn": spawn});
-                crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "round-extended", d))?;
-            }
+            extended(ctx, (fleet, n), (spawn, by), state)?;
             if spawn {
-                crate::pending::record(ctx, (fleet, n), "extend", "impl", None)?;
-            }
-            if spawn && held.is_none() {
-                writeln!(out, "#{n}: {}", crate::promise::Say::PassRunning.line())?;
-            } else if spawn {
                 let o = crate::spawn::Opts {
                     supersede: true,
                     ..Default::default()
@@ -1114,12 +1105,28 @@ pub fn needs_human(
     Ok(())
 }
 
-/// Issue `n`'s state if it waits on the owner's needs-human card, else `NOT_NEEDS_HUMAN`.
+/// #975: the owner's extend decided, once: `round-extended` off needs-human, then its pending start unless one waits.
+pub fn extended(ctx: &Ctx, (fleet, n): (&str, u64), (spawn, by): (bool, &str), state: &str) -> Result<()> {
+    if state == "needs-human" {
+        let d = json!({"by": by, "spawn": spawn});
+        crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "round-extended", d))?;
+    }
+    let waits =
+        crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.action == "extend" && !p.back(ctx.now));
+    if spawn && !waits {
+        crate::pending::record(ctx, (fleet, n), "extend", "impl", None)?;
+    }
+    Ok(())
+}
+
+/// Issue `n`'s state if it waits on the owner's needs-human card (or #975 its extend's start), else `NOT_NEEDS_HUMAN`.
 pub fn held(ctx: &Ctx, fleet: &str, n: u64) -> Result<String> {
     let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
     let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
-    let back = crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.back(ctx.now));
-    if state != "needs-human" && last != "extend-failed" && !back {
+    let events = read(&ctx.state)?;
+    let back = crate::pending::of(&events, fleet, n).is_some_and(|p| p.back(ctx.now));
+    let starting = !matches!(state, "merged" | "closed" | "parked") && crate::pending::extending(&events, fleet, n);
+    if state != "needs-human" && last != "extend-failed" && !back && !starting {
         return refused("NOT_NEEDS_HUMAN", format!("#{n} is {state}, not needs-human"));
     }
     Ok(state.into())
@@ -1146,7 +1153,7 @@ pub fn park(
     Ok(writeln!(out, "#{n}: park")?)
 }
 
-/// #712: `herdsman unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human
+/// #712: `drover unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human
 /// that the park closed (or, parked from a failed extend's card, the state it was parked in); `unparked` stores it as
 /// `repaired` does. Its queue place is kept; out of the queue, it goes to the end.
 pub fn unpark(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, (fleet, n): (&str, u64), by: &str) -> Result<()> {

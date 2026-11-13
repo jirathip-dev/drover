@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::events::{read, Event};
-use herdsman::serve::Server;
+use drover::events::{read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -36,7 +36,7 @@ fn mtime(s: &Server) -> String {
         .into()
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -140,7 +140,7 @@ fn setup_starts_a_configured_terminal_and_reads_its_screen() {
     let typed = json!({"setup": "w9:p1", "text": "sk-SECRET-4242"});
     assert_eq!(post(&s, "send", typed, &ck).1, "OK");
     assert!(r.called("herdr --machine bazzite pane send-text w9:p1 sk-SECRET-4242"));
-    assert!(!herdsman::events::jsonl(&c.state).unwrap().contains("SECRET"));
+    assert!(!drover::events::jsonl(&c.state).unwrap().contains("SECRET"));
 }
 
 #[test]
@@ -276,6 +276,6 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
         (e.issue, e.str("why"), e.str("via")),
         (Some(30), Some("backlog"), Some("web"))
     );
-    let st = herdsman::events::fold(&read(&c.state).unwrap());
+    let st = drover::events::fold(&read(&c.state).unwrap());
     assert_eq!(st[&("sendmeter".to_string(), 30)].state, "closed");
 }

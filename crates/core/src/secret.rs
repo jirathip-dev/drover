@@ -1,4 +1,4 @@
-//! #707: herdsman keeps no secret store. A secret is a file only its owner reads (0600, refused if looser): a lane's
+//! #707: drover keeps no secret store. A secret is a file only its owner reads (0600, refused if looser): a lane's
 //! `secret:<NAME>` env is `<config>/secrets/<NAME>`, the webhook secret, a provider key or an account's `token-file:`
 //! is the file its config line names. The owner places one by hand or from a thread's masked card (paired devices
 //! only); spawn delivers a lane's to its host (`spawn::deliver`). The value never reaches the event log, the chat, a
@@ -43,7 +43,7 @@ pub fn file(p: &Path) -> Result<Option<String>> {
     Ok(Some(v.trim().to_string()).filter(|v| !v.is_empty()))
 }
 
-/// `herdsman secret request <thread> <NAME> --why`: a masked-input card in the thread.
+/// `drover secret request <thread> <NAME> --why`: a masked-input card in the thread.
 pub fn request(ctx: &Ctx, cfg: &Config, thread: &str, name: &str, why: &str) -> Result<()> {
     if !name_ok(name) || why.trim().is_empty() {
         return refused(
@@ -101,7 +101,7 @@ pub fn settle(
     Ok(line.clone())
 }
 
-/// `herdsman secret ls` (owner only: the lane hook refuses it in a lane): `<fleet> <NAME>` of each secret set and not removed since.
+/// `drover secret ls` (owner only: the lane hook refuses it in a lane): `<fleet> <NAME>` of each secret set and not removed since.
 pub fn ls(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
     let mut set = std::collections::BTreeSet::new();
     for e in read(&ctx.state)?
@@ -119,7 +119,7 @@ pub fn ls(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
-/// `herdsman secret rm <fleet|all> <NAME>` (owner only): delete `<config>/secrets/<NAME>`; logs `secret-rm`.
+/// `drover secret rm <fleet|all> <NAME>` (owner only): delete `<config>/secrets/<NAME>`; logs `secret-rm`.
 pub fn rm(ctx: &Ctx, cfg: &Config, fleet: &str, name: &str) -> Result<()> {
     if !name_ok(name) {
         return refused("BAD_VALUE", "a secret's name is A-Z, 0-9 and _");
@@ -135,7 +135,7 @@ pub fn rm(ctx: &Ctx, cfg: &Config, fleet: &str, name: &str) -> Result<()> {
     )
 }
 
-/// #707 `herdsman migrate`: the old store's Keychain items are left alone; the commands that delete them (each
+/// #707 `drover migrate`: the old store's Keychain items are left alone; the commands that delete them (each
 /// `secret-set` the log `state` names, and a search for the rest), for the owner to run.
 pub fn retired(state: &Path, out: &mut dyn Write) -> Result<()> {
     let set = read(state).unwrap_or_default();
@@ -144,7 +144,7 @@ pub fn retired(state: &Path, out: &mut dyn Write) -> Result<()> {
         .collect();
     writeln!(
         out,
-        "herdsman keeps no secret store now (#707); delete its old Keychain items yourself:"
+        "drover keeps no secret store now (#707); delete its old Keychain items yourself:"
     )?;
     for s in svc {
         writeln!(out, "  security delete-generic-password -a herdsman -s {s}")?;

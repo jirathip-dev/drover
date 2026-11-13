@@ -4,9 +4,9 @@
 //! pane is created, updated, closed or exits, or its agent comes or goes) is the one every pass in this process reads.
 //! A dropped stream logs `lane-stream` down and the passes poll `herdr agent list` again until it is back.
 use crate::Service;
-use herdsman_core::config::Config;
-use herdsman_core::events::{append, read, Event};
-use herdsman_core::{herdr, shed, Ctx};
+use drover_core::config::Config;
+use drover_core::events::{append, read, Event};
+use drover_core::{herdr, shed, Ctx};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -63,7 +63,7 @@ impl Service {
             };
             let mut subs: Vec<Value> = PANES.iter().map(|t| json!({"type": t})).collect();
             subs.extend(panes(&first).map(|p| json!({"type": "pane.agent_status_changed", "pane_id": p})));
-            let req = json!({"id": "herdsman", "method": "events.subscribe", "params": {"subscriptions": subs}});
+            let req = json!({"id": "drover", "method": "events.subscribe", "params": {"subscriptions": subs}});
             let (rd, mut wr) = c.into_split();
             if let Err(e) = wr.write_all(format!("{req}\n").as_bytes()).await {
                 return format!("herdr subscribe: {e}");

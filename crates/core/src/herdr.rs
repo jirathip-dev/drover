@@ -128,6 +128,25 @@ impl Shed {
         let a = self.acp_argv(name, labels, cwd, cmd);
         shed::cli(r, &a.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
     }
+    /// #938: a throwaway terminal running the breaker's canary shows its output: shed starts sessions again.
+    pub fn canary(&self, r: &dyn Runner) -> bool {
+        let name = "drover-canary";
+        let _ = self.call(r, Method::Rm, Target { name: name.into() });
+        let mut p = Self::run_params(name, &[], "/");
+        p.cmd = argv(&["sh", "-c", crate::breaker::CANARY]);
+        let wait = WaitParams {
+            name: name.into(),
+            until: vec![],
+            output: Some(crate::breaker::CANARY_OUT.into()),
+            timeout: Some(20.0),
+        };
+        let ok = self.call(r, Method::Run, p).is_ok()
+            && self
+                .call(r, Method::Wait, wait)
+                .is_ok_and(|v| v["outcome"] == "matched");
+        let _ = self.call(r, Method::Rm, Target { name: name.into() });
+        ok
+    }
     /// The `shed run --acp` words that start ACP lane `name`.
     pub fn acp_argv(&self, name: &str, labels: &[(&str, String)], cwd: &str, cmd: &[String]) -> Vec<String> {
         let id = self.0.acp.as_deref().unwrap_or_default();
@@ -386,7 +405,7 @@ pub fn json(r: &dyn Runner, a: &[String]) -> Result<Value> {
     serde_json::from_str(&ok(r, a)?).with_context(|| format!("herdr {}: not JSON", a.join(" ")))
 }
 
-/// `herdr status`: client and server versions (`herdsman doctor`).
+/// `herdr status`: client and server versions (`drover doctor`).
 pub fn status(r: &dyn Runner) -> Result<String> {
     ok(r, &argv(&["status"]))
 }
@@ -552,7 +571,7 @@ pub fn run_argv(pane: &str, words: &[&str]) -> Vec<String> {
 /// #235: type `line` into a pane of a throwaway workspace at `cwd`, wait up to 20 s for `done`, read the screen,
 /// close the workspace; the screen (None: no pane).
 pub fn in_pane(r: &dyn Runner, cwd: &str, line: &str, done: &str) -> Option<String> {
-    let pane = workspace_create(r, cwd, "herdsman-health").ok()?;
+    let pane = workspace_create(r, cwd, "drover-health").ok()?;
     let _ = exec(r, &run_argv(&pane, &[line]));
     let _ = exec(r, &wait_output_argv(&pane, done, "20000"));
     let text = read(r, &pane).unwrap_or_default();

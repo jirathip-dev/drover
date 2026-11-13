@@ -1,7 +1,7 @@
 //! #5: per-role Anthropic accounts with cap fallback; per-role MCP allowlist.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -30,17 +30,17 @@ fn folders(d: &Path, role_extra: &str) -> String {
 }
 
 /// A real (faked herdr/gh/git) impl spawn of issue `n` in pane `w9:p<n>`; its pane's shell's `SIGN_IN`.
-fn spawn(c: &herdsman::Ctx, n: u64) -> (Fake, String) {
+fn spawn(c: &drover::Ctx, n: u64) -> (Fake, String) {
     spawn_var(c, n, SIGN_IN)
 }
 
 /// As `spawn`; `var` is what its pane's shell printed of `"$<var>"`.
-fn spawn_var(c: &herdsman::Ctx, n: u64, var: &'static str) -> (Fake, String) {
+fn spawn_var(c: &drover::Ctx, n: u64, var: &'static str) -> (Fake, String) {
     spawn_with(c, n, var, |r| r)
 }
 
 /// As `spawn_var`, its runner given more replies by `more`.
-fn spawn_with(c: &herdsman::Ctx, n: u64, var: &'static str, more: impl Fn(Fake) -> Fake) -> (Fake, String) {
+fn spawn_with(c: &drover::Ctx, n: u64, var: &'static str, more: impl Fn(Fake) -> Fake) -> (Fake, String) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     let pane = format!("w9:p{n}");
@@ -75,7 +75,7 @@ fn spawn_with(c: &herdsman::Ctx, n: u64, var: &'static str, more: impl Fn(Fake) 
     (r, token)
 }
 
-fn dry_account(c: &herdsman::Ctx, n: u64) -> Value {
+fn dry_account(c: &drover::Ctx, n: u64) -> Value {
     let (code, out) = run(
         c,
         &Fake::default(),
@@ -85,8 +85,8 @@ fn dry_account(c: &herdsman::Ctx, n: u64) -> Value {
     serde_json::from_str::<Value>(&out).unwrap()["account"].clone()
 }
 
-fn no_token_in_log(c: &herdsman::Ctx) {
-    let log = herdsman::events::jsonl(&c.state).unwrap_or_default();
+fn no_token_in_log(c: &drover::Ctx) {
+    let log = drover::events::jsonl(&c.state).unwrap_or_default();
     assert!(
         !log.contains(TOKEN_A) && !log.contains(TOKEN_B),
         "token in events: {log}"
@@ -114,7 +114,7 @@ fn role_account_b_signs_in_with_its_folder_and_no_token_with_no_helper() {
         &["spawn", "sendmeter", "13", "impl", "--dry-run", "--json"][..],
         &["accounts"],
     ] {
-        let o = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
+        let o = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
             .args(args)
             .env("FLEET_CONFIG", &c.config)
             .env("FLEET_STATE", &c.state)
@@ -179,7 +179,7 @@ fn capped_account_is_skipped_until_reset() {
     let d = json!({"account": "A", "agent": "sendmeter-impl-12", "until": c.now + 3600});
     append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "account-capped", d)).unwrap();
     let (_, got) = spawn(&c, 15);
-    let b = herdsman::config::home().join(".config/herdsman/accounts/B");
+    let b = drover::config::home().join(".config/drover/accounts/B");
     assert_eq!(got, format!("{}|", b.display()), "B's default folder, no token");
     no_token_in_log(&c);
 }
@@ -197,7 +197,7 @@ fn sign_in(dir: &Path) {
 fn the_profile_hook_still_refuses_a_guarded_command_on_the_accounts_folder() {
     let d = tmpdir("acct-hook");
     let mut c = ctx(&d, &folders(&d, "account = \"A\""));
-    c.exe = env!("CARGO_BIN_EXE_herdsman").into();
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let (r, got) = spawn_var(&c, 12, SIGN_IN);
     let a = d.join("accounts/A");
@@ -219,7 +219,7 @@ fn the_profile_hook_still_refuses_a_guarded_command_on_the_accounts_folder() {
         .args(["-c", hook])
         .env_clear()
         .env("PATH", std::env::var("PATH").unwrap())
-        .env("HERDSMAN_LANE", "sendmeter:12:impl")
+        .env("DROVER_LANE", "sendmeter:12:impl")
         .env("CLAUDE_CONFIG_DIR", &a)
         .env("FLEET_CONFIG", &c.config)
         .env("FLEET_STATE", &c.state)
@@ -316,7 +316,7 @@ fn doctor_shows_one_account_source_row_and_accounts_ask_each_folders_cli_never_t
         ),
     )
     .unwrap();
-    let h = herdsman::Ctx {
+    let h = drover::Ctx {
         config: helper,
         ..c.clone()
     };
@@ -364,8 +364,8 @@ fn cap_expires_after_cap_reset_minutes() {
     assert_eq!(dry_account(&c, 13), "A");
 }
 
-/// Caps lane `sendmeter-impl-12` (pane `w9:p12`) with `banner` via `herdsman check`.
-fn cap(c: &herdsman::Ctx, banner: &str) {
+/// Caps lane `sendmeter-impl-12` (pane `w9:p12`) with `banner` via `drover check`.
+fn cap(c: &drover::Ctx, banner: &str) {
     let wt = c.worktrees.join("sendmeter/issue-12");
     let r = Fake::default()
         .reply(
@@ -378,10 +378,10 @@ fn cap(c: &herdsman::Ctx, banner: &str) {
 
 #[test]
 fn cap_until_parses_the_banner_reset_in_local_time() {
-    let cfg = herdsman::config::Config::parse("").unwrap();
+    let cfg = drover::config::Config::parse("").unwrap();
     let bkk = Fake::default().reply("date -r", "+0700\n");
     let now = 1_793_502_000; // 2026-11-01 10:00 +07
-    let until = |s: &str| herdsman::access::cap_until(&cfg, &bkk, s, now);
+    let until = |s: &str| drover::access::cap_until(&cfg, &bkk, s, now);
     // The banner shapes `cap_pattern` matches.
     assert_eq!(
         until("  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)"),
@@ -444,14 +444,14 @@ fn capped_lane_waits_on_drive_to_respawn_on_a_free_account() {
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, 12);
     cap(&c, "You've hit your limit · resets 3pm");
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let agents = [serde_json::json!({"name": "sendmeter-impl-12", "agent_status": "idle"})];
     let ev = read(&c.state).unwrap();
-    let waits = herdsman::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false);
+    let waits = drover::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false);
     let w = &waits.iter().find(|(s, _)| s.issue == 12).unwrap().1;
     assert_eq!(w.who, "drive", "{w:?}");
     let cmd = w.next_cmd.clone().unwrap();
-    assert_eq!(cmd, "herdsman spawn sendmeter 12 impl --supersede");
+    assert_eq!(cmd, "drover spawn sendmeter 12 impl --supersede");
     // That respawn (as drive runs it) picks the free account.
     let mut args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
     args.extend(["--dry-run", "--json"]);
@@ -469,10 +469,10 @@ fn capped_ready_lane_is_not_told_to_respawn() {
     cap(&c, "You've hit your limit · resets 3pm");
     let pass = json!({"verdict": "PASS", "sha": "1".repeat(40)});
     append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "verdict", pass)).unwrap();
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let agents = [json!({"name": "sendmeter-impl-12", "agent_status": "idle"})];
     let ev = read(&c.state).unwrap();
-    let waits = herdsman::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false);
+    let waits = drover::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false);
     let w = &waits.iter().find(|(s, _)| s.issue == 12).unwrap().1;
     assert!(
         !w.next_cmd.as_deref().unwrap_or_default().contains("--supersede"),
@@ -553,8 +553,8 @@ fn hermes_profile_gets_only_the_listed_mcp_servers() {
     );
 }
 
-/// #640: lane `sendmeter-impl-12` on account A shows `screen`; `herdsman check`'s output.
-fn check_shows(c: &herdsman::Ctx, screen: &str) -> String {
+/// #640: lane `sendmeter-impl-12` on account A shows `screen`; `drover check`'s output.
+fn check_shows(c: &drover::Ctx, screen: &str) -> String {
     let wt = c.worktrees.join("sendmeter/issue-12");
     let r = Fake::default()
         .reply(
@@ -568,13 +568,13 @@ fn check_shows(c: &herdsman::Ctx, screen: &str) -> String {
 }
 
 /// #640: account A's latest status-line reading (`usage.jsonl`), read `ago` seconds before now.
-fn reading(c: &herdsman::Ctx, five: Value, seven: Value, ago: u64) {
+fn reading(c: &drover::Ctx, five: Value, seven: Value, ago: u64) {
     let row = json!({"ts": c.now - ago, "account": "A", "five_hour_pct": five, "five_hour_reset": null,
         "seven_day_pct": seven, "seven_day_reset": 1_200_000});
     std::fs::write(c.state.with_file_name("usage.jsonl"), format!("{row}\n")).unwrap();
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()

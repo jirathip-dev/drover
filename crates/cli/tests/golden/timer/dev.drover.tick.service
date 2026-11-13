@@ -1,9 +1,9 @@
 [Unit]
-Description=herdsman dev.herdsman.tick
+Description=drover dev.drover.tick
 
 [Service]
 Environment=PATH=/opt/hermes/bin:/usr/bin:/bin:/usr/sbin:/sbin
-ExecStart=/x/herdsman tick
+ExecStart=/x/drover tick
 StandardOutput=append:<dir>/state/tick.log
 StandardError=append:<dir>/state/tick.log
 Type=oneshot

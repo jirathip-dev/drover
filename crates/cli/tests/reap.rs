@@ -1,10 +1,10 @@
 //! #186: a closing lane's leftover processes (cwd inside its worktree) get TERM, 5 s, then KILL; nothing else does.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 
-fn setup(name: &str) -> (std::path::PathBuf, herdsman::Ctx, String, String) {
+fn setup(name: &str) -> (std::path::PathBuf, drover::Ctx, String, String) {
     let d = tmpdir(name);
     let c = ctx(&d, CONFIG);
     let wt = |n: &str| {
@@ -23,11 +23,11 @@ fn setup(name: &str) -> (std::path::PathBuf, herdsman::Ctx, String, String) {
 }
 
 /// `lsof -Fpcn` rows: two children in the lane's worktree, one in a sibling (prefix trap),
-/// one outside, and the board server (`herdsman serve`) started from inside it.
+/// one outside, and the board server (`drover serve`) started from inside it.
 fn lsof(mine: &str, sibling: &str) -> String {
     format!(
         "p101\ncnode\nfcwd\nn{mine}/web\np102\ncChrome Helper\nfcwd\nn{mine}\n\
-         p103\ncvite\nfcwd\nn{sibling}\np104\ncnode\nfcwd\nn/Users/someone\np105\ncherdsman\nfcwd\nn{mine}\n"
+         p103\ncvite\nfcwd\nn{sibling}\np104\ncnode\nfcwd\nn/Users/someone\np105\ncdrover\nfcwd\nn{mine}\n"
     )
 }
 
@@ -117,7 +117,7 @@ fn a_dry_run_and_a_live_lane_signal_nothing() {
 
 #[test]
 fn host_tab_shows_leftovers_and_reap_kills_them() {
-    use herdsman::serve::Server;
+    use drover::serve::Server;
     const ADDR: &str = "127.0.0.1:7777";
     let (_d, c, mine, sibling) = setup("reap-host");
     let rows = lsof(&mine, &sibling);
@@ -227,7 +227,7 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
             .reply("git -C", "")
             .reply("kill", "")
     };
-    let trimmed = |c: &herdsman::Ctx| {
+    let trimmed = |c: &drover::Ctx| {
         read(&c.state)
             .unwrap()
             .to_vec()
@@ -257,7 +257,7 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
     assert_eq!(ev[0].data["freed_mb"], 2148);
 
     let young = c.now - 60; // done, but its last event is under `idle_reap_minutes` old
-    let c2 = herdsman::Ctx {
+    let c2 = drover::Ctx {
         now: young + 120,
         ..ctx(&tmpdir("trim-young"), CONFIG)
     };
@@ -281,7 +281,7 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
 /// #223: the Host tab names the top memory users and their owner: a lane, the VM, or other.
 #[test]
 fn host_tab_shows_top_memory_users_with_their_owner() {
-    use herdsman::serve::Server;
+    use drover::serve::Server;
     let (_d, c, mine, _) = setup("top-host");
     let top = "Processes: 600 total\n\nPID    COMMAND          MEM \n18800  com.apple.Virtua 16G \n4242   node             2210M\n8138   python3.14       703M\n";
     let r = Fake::default()
@@ -302,7 +302,7 @@ fn host_tab_shows_top_memory_users_with_their_owner() {
 /// #248: the Host tab sums what the Claude lanes hold, working and done apart.
 #[test]
 fn host_tab_sums_claude_lane_memory_by_state() {
-    use herdsman::serve::Server;
+    use drover::serve::Server;
     let (_d, c, mine, sibling) = setup("claude-host");
     let mut list: serde_json::Value = serde_json::from_str(&agents(&[
         ("impl-12", "done", &mine, "wA:p1"),
@@ -365,7 +365,7 @@ fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
             .reply("git -C", "")
             .reply("kill", "")
     };
-    let trimmed = |c: &herdsman::Ctx| {
+    let trimmed = |c: &drover::Ctx| {
         let e = read(&c.state).unwrap().to_vec();
         e.into_iter().filter(|e| e.kind == "lane-trimmed").collect::<Vec<_>>()
     };

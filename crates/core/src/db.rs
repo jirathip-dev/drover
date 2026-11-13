@@ -1,4 +1,4 @@
-//! #344: herdsman's state in one SQLite file, `state.db` beside the log path (`FLEET_STATE`), in WAL mode: the event
+//! #344: drover's state in one SQLite file, `state.db` beside the log path (`FLEET_STATE`), in WAL mode: the event
 //! log, leases (every lock and marker), paired devices, push subscriptions and the snapshots (docs/architecture.md).
 use crate::events::{self, Event};
 use anyhow::{Context, Result};
@@ -40,7 +40,7 @@ impl Scratch {
     pub fn start() -> Scratch {
         static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let p = std::env::temp_dir().join(format!("herdsman-scratch-{}-{n}.db", std::process::id()));
+        let p = std::env::temp_dir().join(format!("drover-scratch-{}-{n}.db", std::process::id()));
         SCRATCH.set(Some(p.clone()));
         Scratch(p)
     }
@@ -74,7 +74,7 @@ fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection)
     let scratch = SCRATCH.with_borrow(Option::is_some);
     anyhow::ensure!(
         !old || scratch || !live(state) || LIVE.load(std::sync::atomic::Ordering::Relaxed),
-        "{} still has files from before #344: run `herdsman migrate --live` to import them",
+        "{} still has files from before #344: run `drover migrate --live` to import them",
         state.parent().unwrap_or(Path::new(".")).display()
     );
     let cached = OPEN.with_borrow_mut(|v| Some(v.swap_remove(v.iter().position(|x| x.0 == p)?)));
@@ -132,6 +132,40 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
 pub fn append(state: &Path, ev: &Event) -> Result<()> {
     crate::sim::point(&crate::sim::Point::Append(ev));
     with(state, true, (), |c| insert(c, ev, None, false))
+}
+
+/// #900, #906: `evs` in one transaction, each `needs-decision` under the highest `q<n>` logged plus 1; none if an ask keyed `once` is logged.
+pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Option<Vec<Event>>> {
+    for ev in &evs {
+        crate::sim::point(&crate::sim::Point::Append(ev));
+    }
+    with(state, true, None, |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let count = |w: &str, p: &[&str]| {
+            let q = format!("SELECT COUNT(*) FROM events WHERE type = 'needs-decision'{w}");
+            tx.query_row(&q, rusqlite::params_from_iter(p), |r| r.get::<_, u64>(0))
+        };
+        if let Some(k) = once {
+            if count(" AND json_extract(json, '$.once') = ?1", &[k])? > 0 {
+                return Ok(None);
+            }
+        }
+        let q = "SELECT COALESCE(MAX(CAST(SUBSTR(json_extract(json, '$.id'), 2) AS INTEGER)), 0) FROM events \
+            WHERE type = 'needs-decision' AND json_extract(json, '$.id') GLOB 'q[0-9]*'";
+        let mut n: u64 = tx.query_row(q, [], |r| r.get(0))?;
+        for ev in evs.iter_mut().filter(|e| e.kind == "needs-decision") {
+            n += 1;
+            ev.data.insert("id".into(), format!("q{n}").into());
+            if let Some(k) = once {
+                ev.data.insert("once".into(), k.into());
+            }
+        }
+        for ev in &evs {
+            insert(&tx, ev, None, false)?;
+        }
+        tx.commit()?;
+        Ok(Some(evs))
+    })
 }
 
 /// The events `filter` (an SQL condition over the columns, `?1` = `arg`) selects, by seq.
@@ -291,17 +325,29 @@ pub fn try_list<T: DeserializeOwned>(state: &Path, table: &str) -> Result<Vec<T>
 
 /// Replace every row of `table` with `all`, in one transaction.
 pub fn store<T: Serialize>(state: &Path, table: &str, all: &[T]) -> Result<()> {
+    with(state, true, (), |c| replace(c, table, all))
+}
+
+/// #893: `store`, failing at once while another connection holds the write lock (never waiting for it).
+pub fn store_now<T: Serialize>(state: &Path, table: &str, all: &[T]) -> Result<()> {
     with(state, true, (), |c| {
-        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(&format!("DELETE FROM {table}"), [])?;
-        for v in all {
-            tx.execute(
-                &format!("INSERT INTO {table} (json) VALUES (?1)"),
-                [serde_json::to_string(v)?],
-            )?;
-        }
-        Ok(tx.commit()?)
+        c.busy_timeout(std::time::Duration::ZERO)?;
+        let r = replace(c, table, all);
+        c.busy_timeout(std::time::Duration::from_secs(crate::config::limits().db_busy_secs))?;
+        r
     })
+}
+
+fn replace<T: Serialize>(c: &mut Connection, table: &str, all: &[T]) -> Result<()> {
+    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute(&format!("DELETE FROM {table}"), [])?;
+    for v in all {
+        tx.execute(
+            &format!("INSERT INTO {table} (json) VALUES (?1)"),
+            [serde_json::to_string(v)?],
+        )?;
+    }
+    Ok(tx.commit()?)
 }
 
 /// A lease: who holds `key` (pid on host), since `at`, until `expires_at`, with the holder's `data`.
@@ -438,19 +484,19 @@ fn legacy(state: &Path) -> (Vec<PathBuf>, [PathBuf; 2]) {
     (logs, [dir.join("serve/devices.json"), dir.join("webpush/subs.json")])
 }
 
-/// Set by `herdsman migrate --live`: the only way files in the owner's own state dir (`live`) are imported.
+/// Set by `drover migrate --live`: the only way files in the owner's own state dir (`live`) are imported.
 pub static LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// The owner's default state dir, `$HOME/.local/state/herdsman` (or its pre-rename `fleet`): never imported on its
+/// The owner's default state dir, `$HOME/.local/state/drover` (or its pre-rename `herdsman`): never imported on its
 /// own, so a test build run without `FLEET_STATE` cannot take the installed build's log away.
 pub fn live(state: &Path) -> bool {
     let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
     let dir = canon(state.parent().unwrap_or(Path::new(".")));
     let root = crate::config::home().join(".local/state");
-    ["herdsman", "fleet"].iter().any(|d| canon(&root.join(d)) == dir)
+    ["drover", "herdsman"].iter().any(|d| canon(&root.join(d)) == dir)
 }
 
-/// `herdsman migrate` and every first open: the log (and its archives), devices and push subscriptions into the
+/// `drover migrate` and every first open: the log (and its archives), devices and push subscriptions into the
 /// database, in one transaction, checked by a full fold before and after; then each file goes to `*.migrated`.
 /// Idempotent: a second run finds nothing left. Events keep their seq unless the database already has a later one.
 fn import(c: &mut Connection, state: &Path) -> Result<()> {
@@ -504,7 +550,7 @@ fn import(c: &mut Connection, state: &Path) -> Result<()> {
     tx.commit().context("import commit")
 }
 
-/// `herdsman migrate`'s #344 step: import what is left, say what the database holds.
+/// `drover migrate`'s #344 step: import what is left, say what the database holds.
 pub fn migrate(state: &Path, out: &mut dyn std::io::Write) -> Result<()> {
     let left = legacy(state).0.len();
     let n: u64 = with(state, true, 0, |c| {

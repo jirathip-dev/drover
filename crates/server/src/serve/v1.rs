@@ -277,11 +277,23 @@ impl Server<'_> {
             self.later(ctx, later);
             return res;
         };
-        if !lock(&self.running).insert(fleet.clone()) {
-            return refused("DRIVE_RUNNING", format!("{fleet} has a {op} running"));
+        let key = f.get("issue").map_or(fleet.clone(), |n| format!("{fleet}#{n}"));
+        if op == "extend" {
+            if f.get("mtime").map(String::as_str) != Some(&super::mtime(ctx)) {
+                return refused(
+                    "STALE",
+                    "fleet.toml changed since the page was rendered; reload and retry",
+                );
+            }
+            let n = f.get("issue").and_then(|n| n.parse().ok()).context("no issue")?;
+            let state = crate::gate::held(ctx, &fleet, n)?;
+            crate::gate::extended(ctx, (&fleet, n), (true, "owner"), &state)?;
         }
-        drop(tx.send((ctx.clone(), f, fleet.clone())));
-        Ok(format!("{op} started for {fleet}"))
+        if !lock(&self.running).insert(key.clone()) {
+            return refused("DRIVE_RUNNING", format!("{key} has a {op} running"));
+        }
+        drop(tx.send((ctx.clone(), f, key.clone())));
+        Ok(format!("{op} started for {key}"))
     }
 
     /// #576: the CLI's `lesson <fleet>`, logged `by` the paired device.
@@ -521,9 +533,9 @@ impl Server<'_> {
             (Some((route, p95)), false) => {
                 let why = format!("{route} p95 {p95} ms, over {limit} ms for {mins} min");
                 let d = json!({"route": route, "p95_ms": p95, "reason": why});
-                Event::new(now, "herdsman", None, "slo-api", d)
+                Event::new(now, "drover", None, "slo-api", d)
             }
-            (None, true) => Event::new(now, "herdsman", None, "slo-api-ok", json!({})),
+            (None, true) => Event::new(now, "drover", None, "slo-api-ok", json!({})),
             _ => return,
         };
         drop(crate::events::emit(&self.ctx.state, &cfg, e));

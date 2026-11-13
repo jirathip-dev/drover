@@ -3,11 +3,11 @@
 //! alerts on a line left there 5 min. One test: the lane's env vars and cwd are process-wide.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 
-const AIR_SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m air -- ";
+const AIR_SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m air -- ";
 
 /// The main host's runner: a shell line over ssh to `air` runs here (the lane's worktree is a local folder).
 struct Air(Fake);
@@ -36,8 +36,8 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     std::fs::create_dir_all(wt.join("src")).unwrap();
     std::fs::write(wt.join(".git"), "gitdir: elsewhere\n").unwrap();
     std::env::set_current_dir(wt.join("src")).unwrap();
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:12:impl");
-    std::env::set_var("HERDSMAN_OUTBOX", "1");
+    std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
+    std::env::set_var("DROVER_OUTBOX", "1");
     // The main host would answer over ssh: the lane never tries it.
     let r = Fake::default().reply("ssh", "q9\n");
     let (code, out) = run(
@@ -45,7 +45,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
         &r,
         &["ask", "sendmeter", "12", "Which way?", "--option", "a", "--option", "b"],
     );
-    assert_eq!((code, out.as_str()), (0, herdsman::outbox::QUEUED));
+    assert_eq!((code, out.as_str()), (0, drover::outbox::QUEUED));
     // A verdict queues too, its file as an absolute path (drive reads it over ssh on this host).
     let sha = "a".repeat(40);
     let verdict = [
@@ -63,7 +63,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     let (code, _) = run(&lane, &r, &["done", "sendmeter", "13", "--no-change", "nothing"]);
     assert_eq!(code, 0);
     assert!(
-        !herdsman::db::file(&lane.state).exists(),
+        !drover::db::file(&lane.state).exists(),
         "the lane host's log is never written"
     );
     assert!(
@@ -71,7 +71,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
         "no ssh, nothing run: {:?}",
         r.calls.borrow()
     );
-    let ob = wt.join(".herdsman/outbox.jsonl");
+    let ob = wt.join(".drover/outbox.jsonl");
     let mut lines = std::fs::read_to_string(&ob).unwrap();
     assert_eq!(lines.lines().count(), 3, "{lines}");
     let file = wt.canonicalize().unwrap().join("src/verdict.md").display().to_string();
@@ -82,8 +82,8 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     std::fs::write(&ob, &lines).unwrap();
 
     // The main host: the lane's spawn names its host and worktree.
-    std::env::remove_var("HERDSMAN_OUTBOX");
-    std::env::remove_var("HERDSMAN_LANE");
+    std::env::remove_var("DROVER_OUTBOX");
+    std::env::remove_var("DROVER_LANE");
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w9:p1", "workspace": "w9",
                    "worktree": wt, "branch": "issue-12", "host": "air", "machine": "air"});
     append(
@@ -127,7 +127,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
         ran.len() == 1 && ran[0].data.get("refused").is_none(),
         "its own verdict runs: {ran:?}"
     );
-    assert!(!ob.exists() && !wt.join(".herdsman/outbox.jsonl.draining").exists());
+    assert!(!ob.exists() && !wt.join(".drover/outbox.jsonl.draining").exists());
     let (_, board) = run(&main, &r, &["board", "sendmeter"]);
     let row = board.lines().find(|l| l.contains("#12")).unwrap_or_default();
     assert!(
@@ -138,18 +138,18 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     assert!(asked.contains("q1 #12") && asked.contains("Which way?"), "{asked}");
 
     // A drain cut short leaves its lines behind: the next one applies none of them again.
-    std::fs::write(wt.join(".herdsman/outbox.jsonl.draining"), &lines).unwrap();
+    std::fs::write(wt.join(".drover/outbox.jsonl.draining"), &lines).unwrap();
     run(&main, &r, &["drive", "--fast"]);
     let ev = read(&main.state).unwrap();
     assert_eq!(ev.iter().filter(|e| e.kind == "needs-decision").count(), 1);
     assert_eq!(ev.iter().filter(|e| e.kind == "outbox").count(), 4);
-    assert!(!wt.join(".herdsman/outbox.jsonl.draining").exists());
+    assert!(!wt.join(".drover/outbox.jsonl.draining").exists());
 
     // A line drive has not delivered: `check` alerts once it is 5 min old, and once only.
     let at = |s: u64| json!({"args": ["ask", "sendmeter", "12", "Late?"], "lane": "sendmeter:12:impl", "ts": s * 1000});
     std::fs::write(&ob, format!("{}\n", at(1_000_000 - 200))).unwrap();
     run(&main, &r, &["check"]);
-    let stale = |c: &herdsman::Ctx| {
+    let stale = |c: &drover::Ctx| {
         read(&c.state)
             .unwrap()
             .iter()
@@ -161,5 +161,5 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     run(&main, &r, &["check"]);
     run(&main, &r, &["check"]);
     assert_eq!(stale(&main), 1);
-    std::env::remove_var("HERDSMAN_LANE");
+    std::env::remove_var("DROVER_LANE");
 }

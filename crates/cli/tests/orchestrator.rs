@@ -1,7 +1,7 @@
 //! #355: conductor chat: a thread's lifecycle (start, sleep, resume with history) and an ask round-trip.
 mod common;
 use common::*;
-use herdsman::events::{read, Event};
+use drover::events::{read, Event};
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
@@ -18,7 +18,7 @@ fn config(harness: &str, dir: &std::path::Path) -> String {
     )
 }
 
-fn setup(name: &str, harness: &str) -> herdsman::Ctx {
+fn setup(name: &str, harness: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let c = ctx(&d, &config(harness, &d));
     let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
@@ -31,11 +31,11 @@ fn setup(name: &str, harness: &str) -> herdsman::Ctx {
     c
 }
 
-fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
-    herdsman::Ctx { now, ..c.clone() }
+fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
+    drover::Ctx { now, ..c.clone() }
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -118,7 +118,7 @@ fn a_thread_starts_sleeps_when_idle_and_resumes_its_session_with_history() {
     ] {
         assert!(brief.contains(want), "{want}: {brief}");
     }
-    assert!(r.called("herdr pane run w9:p1 export HERDSMAN_LANE='sendmeter:-:orchestrator'"));
+    assert!(r.called("herdr pane run w9:p1 export DROVER_LANE='sendmeter:-:orchestrator'"));
 
     let (code, out) = run(&c, &r, &["thread", "reply", "t1", "Scope and tests. Which first?"]);
     assert_eq!(code, 0, "{out}");
@@ -214,7 +214,7 @@ fn no_harness_starts_an_agent_with_a_control_character_in_its_argv() {
         assert_eq!(bad(&r), None, "{h}: resume");
     }
     let c = setup("orchestrator-argv-lanes", "claude");
-    for h in herdsman::providers::lane_names() {
+    for h in drover::providers::lane_names() {
         for role in ["impl", "rev"] {
             let set = ["set", "sendmeter", role, "--harness", h];
             assert_eq!(run(&c, &Fake::default(), &set).0, 0);

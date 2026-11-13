@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::events::{read, Event};
-use herdsman::serve::Server;
+use drover::events::{read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -17,7 +17,7 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> (u16, V
     (head[9..12].parse().unwrap(), serde_json::from_str(body).unwrap())
 }
 
-fn board(name: &str, extra: &str) -> (herdsman::Ctx, Fake, String) {
+fn board(name: &str, extra: &str) -> (drover::Ctx, Fake, String) {
     let (c, r) = v1_board(name);
     let text = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(
@@ -44,7 +44,7 @@ fn field<'a>(v: &'a Value, path: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("no {path}"))
 }
 
-fn edits(c: &herdsman::Ctx) -> Vec<Event> {
+fn edits(c: &drover::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -62,7 +62,7 @@ fn read_gives_every_setting_with_secrets_as_names_and_needs_a_paired_device() {
     assert_eq!(req(&s, "GET", "/api/v1/config", "", "").0, 401);
     let v = get(&s, &ck);
     let text = std::fs::read_to_string(&c.config).unwrap();
-    assert_eq!(v["hash"], json!(herdsman::devices::sha256(text.as_bytes())));
+    assert_eq!(v["hash"], json!(drover::devices::sha256(text.as_bytes())));
     assert_eq!(v["text"], json!(text));
     let env = field(&v, "fleet.sendmeter.env.STRIPE");
     assert_eq!((&env["secret"], &env["kind"]), (&json!("STRIPE_KEY"), &json!("string")));
@@ -77,7 +77,7 @@ fn read_gives_every_setting_with_secrets_as_names_and_needs_a_paired_device() {
     );
     assert_eq!(
         field(&v, "fleet.sendmeter.integration")["doc"],
-        json!("herdsman merge target; main is never a target")
+        json!("drover merge target; main is never a target")
     );
     assert_eq!(field(&v, "limits.review_rounds")["kind"], json!("integer"));
     let token = format!("ghp_{}", "a1".repeat(18));
@@ -172,7 +172,7 @@ fn a_fleet_is_added_removed_paused_and_resumed_with_each_logged() {
     let add = json!({"name": "web", "repo": "acme/web", "local": "/tmp/does-not-matter/web", "integration": "staging"});
     let (status, v) = post("config-edit", json!({"hash": get(&s, &ck)["hash"], "add": add}));
     assert_eq!(status, 200, "{v}");
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let web = cfg.fleet("web").unwrap();
     assert_eq!((web.repo.as_str(), web.integration.as_str()), ("acme/web", "staging"));
     assert_eq!(web.role("impl").unwrap().profile.as_deref(), Some("fleet-impl"));
@@ -200,7 +200,7 @@ fn a_fleet_is_added_removed_paused_and_resumed_with_each_logged() {
         let mtime = req(&s, "GET", "/api/v1/state", "", "").1["mtime"].clone();
         let (status, v) = post(op, json!({"fleet": "sendmeter", "mtime": mtime}));
         assert_eq!(status, 200, "{v}");
-        let paused = herdsman::config::Config::load(&c.config)
+        let paused = drover::config::Config::load(&c.config)
             .unwrap()
             .fleet("sendmeter")
             .unwrap()

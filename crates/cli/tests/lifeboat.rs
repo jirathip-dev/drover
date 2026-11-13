@@ -3,8 +3,8 @@
 //! (pause/resume, an answer, a card's approve/deny) log the CLI verb's own event `via: lifeboat`.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -12,7 +12,7 @@ const T: u64 = 1_000_000;
 const CMD: &str = "uptime";
 
 /// API v1's board (#12 impl working, #9 rev blocked) with #30 queued, ask q1 on #12 and run cards r1 and r2 open.
-fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
+fn fixture(name: &str) -> (drover::Ctx, Fake) {
     let (c, r) = v1_board(name);
     assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "30"]).0, 0);
     let ev = |issue, kind, d| append(&c.state, &Event::new(T - 50, "sendmeter", issue, kind, d)).unwrap();
@@ -20,7 +20,7 @@ fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
     ev(Some(12), "needs-decision", q);
     for id in ["r1", "r2"] {
         let d = json!({"thread": "t1", "id": id, "cmd": CMD, "why": "check load", "blast": "read-only",
-            "dir": "/srv", "host": "main", "timeout": 60, "sha": herdsman::devices::sha256(CMD.as_bytes())});
+            "dir": "/srv", "host": "main", "timeout": 60, "sha": drover::devices::sha256(CMD.as_bytes())});
         ev(None, "run-card", d);
     }
     (c, r)
@@ -37,7 +37,7 @@ fn req(s: &Server, method: &str, query: &str, body: &str, cookie: &str) -> (Stri
     (head.lines().next().unwrap().to_string(), body.to_string())
 }
 
-fn last(c: &herdsman::Ctx, kind: &str) -> Event {
+fn last(c: &drover::Ctx, kind: &str) -> Event {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -78,7 +78,7 @@ fn a_paired_device_sees_queue_lanes_asks_and_cards_and_a_load_runs_no_subprocess
         "a page load ran a subprocess"
     );
     assert_eq!(status, "HTTP/1.1 200 OK");
-    let sha = &herdsman::devices::sha256(CMD.as_bytes())[..12];
+    let sha = &drover::devices::sha256(CMD.as_bytes())[..12];
     for want in [
         "sendmeter · running <form method=post action=lifeboat><input type=hidden name=op value=\"pause\">",
         "sendmeter #30 ",
@@ -125,7 +125,7 @@ fn each_post_logs_the_cli_verbs_event_via_lifeboat() {
         (d.str("id"), d.str("choice"), d.str("by"), d.str("via")),
         (Some("q1"), Some("Postgres"), Some("owner"), Some("lifeboat"))
     );
-    let sha = &herdsman::devices::sha256(CMD.as_bytes())[..12];
+    let sha = &drover::devices::sha256(CMD.as_bytes())[..12];
     post(&format!("op=approve&id=r1&sha={sha}"));
     let e = last(&c, "run-settled");
     assert_eq!(

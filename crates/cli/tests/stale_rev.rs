@@ -1,15 +1,15 @@
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
 const HEAD: &str = "c000000000000000000000000000000000000000";
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -18,11 +18,11 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
         .collect()
 }
 
-fn at(c: &herdsman::Ctx, now: u64) -> herdsman::Ctx {
-    herdsman::Ctx { now, ..c.clone() }
+fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
+    drover::Ctx { now, ..c.clone() }
 }
 
-fn stuck(name: &str) -> herdsman::Ctx {
+fn stuck(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     let impl_ = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
     ev(&c, 10, "spawn", impl_.clone());
@@ -69,7 +69,7 @@ fn fake(screen: &str) -> Fake {
         .reply("herdr agent", "{}")
 }
 
-fn drive(c: &herdsman::Ctx, r: &Fake) -> String {
+fn drive(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     out
@@ -106,11 +106,11 @@ fn a_reviewer_whose_pane_changed_is_not_replaced() {
     let c = stuck("stale-rev-busy");
     let t0 = 1_000_000;
     drive(&at(&c, t0), &fake(QUIET));
-    let r = fake("Reading crates/core/src/drive.rs\nRunning cargo test -p herdsman\n> ");
+    let r = fake("Reading crates/core/src/drive.rs\nRunning cargo test -p drover\n> ");
     let out = drive(&at(&c, t0 + 121 * 60), &r);
     assert!(kinds(&c, "rev-stale-replaced").is_empty(), "{out}");
     assert!(!r.called("herdr agent start sendmeter-rev-12-r2"), "{out}");
-    let r = fake("Reading crates/core/src/drive.rs\nRunning cargo test -p herdsman\n> ");
+    let r = fake("Reading crates/core/src/drive.rs\nRunning cargo test -p drover\n> ");
     let out = drive(&at(&c, t0 + 200 * 60), &r);
     assert!(kinds(&c, "rev-stale-replaced").is_empty(), "{out}");
 }

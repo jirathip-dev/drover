@@ -1,4 +1,4 @@
-//! #92 `herdsman drive`: one pass of the fleet loop, no AI; each action logs a passive `driven` event.
+//! #92 `drover drive`: one pass of the fleet loop, no AI; each action logs a passive `driven` event.
 use crate::config::Config;
 use crate::events::{append, emit, fold, read, Event, IssueState};
 use crate::overlap::git;
@@ -12,6 +12,43 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
+/// #845: one pass's steps in order (`lap` names each, `pass-slow` the slowest) and the `[limits]` keys that time them.
+pub const STEPS: [(&str, &[&str]); 8] = [
+    ("read log, host sample", &[]),
+    (
+        "disk budget",
+        &["shed_read_millis", "worktree_budget_gb", "build_budget_gb"],
+    ),
+    ("roots, redeliver", &["host_offline_minutes"]),
+    (
+        "look, orphans",
+        &["ssh_quick_secs", "ssh_call_secs", "import_max_age_hours"],
+    ),
+    ("repair, outbox", &[]),
+    (
+        "PR reads, gates, steps",
+        &[
+            "webhook_poll_minutes",
+            "silent_minutes",
+            "ci_start_minutes",
+            "gate_check_minutes",
+            "review_rounds",
+            "update_rounds",
+        ],
+    ),
+    (
+        "spawns",
+        &[
+            "max_parallel_spawns",
+            "spawn_pending_max_secs",
+            "respawn_max",
+            "respawn_window_minutes",
+            "fallback_rest_minutes",
+            "overflow_after_minutes",
+        ],
+    ),
+    ("backlog, checkpoint", &["rotate_mb"]),
+];
 /// #677: drive's one prompt on a `done` whose why note was refused.
 pub const WHY_NUDGE: &str = "your `turn done` was refused: ";
 /// #168: a pass's lease outlives a hung pass by this much; #344: a dead holder's goes at once.
@@ -163,11 +200,6 @@ pub fn last_pass(ctx: &Ctx, fleet: &str) -> Option<u64> {
         .ok()
 }
 
-/// #217: `drive.lock` over an extend's spawn, so no pass starts the same round meanwhile; `None` while a pass runs.
-pub fn hold(ctx: &Ctx, r: &dyn Runner, fleet: &str) -> Option<impl Drop> {
-    take(ctx, r, "drive.lock", STALE_LOCK_SECS, fleet)
-}
-
 fn state_dir(ctx: &Ctx) -> &Path {
     ctx.state.parent().unwrap_or(&ctx.state)
 }
@@ -219,7 +251,7 @@ pub fn in_act() -> bool {
     IN_ACT.get()
 }
 
-/// #304: `herdsman kick`: drive `issue`'s due steps now in a detached `kick --now` (#389: none from a lane on
+/// #304: `drover kick`: drive `issue`'s due steps now in a detached `kick --now` (#389: none from a lane on
 /// another host), output to `kick.log`; a no-op inside a pass's own command. #333: the detached kick's pid; #340: in its
 /// own session.
 pub fn kick(ctx: &Ctx, r: &dyn Runner, fleet: &str, issue: u64, why: &str) -> Option<u32> {
@@ -342,16 +374,19 @@ fn launch(
         .iter()
         .filter(|p| p.fleet == fleet && !bound(p).is_some_and(low))
         .count();
-    if n_live >= max - usize::from(start && max > 1)
-        || live.iter().any(|e| e.fleet == fleet && e.issue == Some(n))
-        || (mine >= max.div_ceil(2) && waits_elsewhere(ctx, cfg, ev, fleet))
+    let extend = crate::pending::extending(ev, fleet, n);
+    if live.iter().any(|e| e.fleet == fleet && e.issue == Some(n))
+        || !extend
+            && (n_live >= max - usize::from(start && max > 1)
+                || (mine >= max.div_ceil(2) && waits_elsewhere(ctx, cfg, ev, fleet)))
     {
         let by = Some(held_by(ctx, cfg, r)).filter(|b| !b.is_empty());
         let by = by.map_or(String::new(), |b| format!(": {b}"));
         return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting{by}"));
     }
     crate::spawn::lane_admit(ctx, (cfg, r), ev, fleet, n, role)?;
-    if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && c.contains(&"--force"))) {
+    if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && (extend || c.contains(&"--force"))))
+    {
         return crate::gate::refused(code, why);
     }
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
@@ -669,7 +704,14 @@ pub fn drive(
 ) -> Result<()> {
     let t0 = std::time::Instant::now();
     let mut slow = (t0, String::new(), 0.0);
+    let i = usize::from(fast);
+    let lock = ["drive.lock", "drive-fast.lock"][i];
+    let mark = ctx.state.with_file_name(format!("{lock}.step"));
     let mut lap = |step: &str| {
+        debug_assert!(STEPS.iter().any(|(s, _)| step.ends_with(s)), "{step} is not in STEPS");
+        if KICK.get().is_none() {
+            let _ = std::fs::write(&mark, step);
+        }
         let secs = slow.0.elapsed().as_secs_f64();
         if secs > slow.2 {
             (slow.1, slow.2) = (step.to_string(), secs);
@@ -678,20 +720,38 @@ pub fn drive(
     };
     only.map(|f| cfg.fleet(f)).transpose()?;
     std::fs::create_dir_all(state_dir(ctx))?;
-    let i = usize::from(fast);
     gh::FORCE.set(fast || KICK.get().is_some());
     gh::CATCHUP.set(if fast { cfg.limits.webhook_poll_minutes * 60 } else { 0 });
     let stamp = ctx.state.with_file_name(["drive.at", "drive-fast.at"][i]);
     let _ = std::fs::write(&stamp, ctx.now.to_string());
-    let lock = ["drive.lock", "drive-fast.lock"][i];
+    let max = 3 * cfg.limits.pass_max_secs;
+    let stuck = (crate::db::leases(&ctx.state, lock).into_iter())
+        .find(|l| l.key == lock && l.expires_at <= ctx.now && !gone(r, l, ctx.now))
+        .filter(|_| KICK.get().is_none());
     // #318: a kick's lease is `kick-<fleet>-<n>.lock`
-    let mine = || take(ctx, r, lock, STALE_LOCK_SECS, only.unwrap_or_default()).map(Some);
+    let mine = || take(ctx, r, lock, max, only.unwrap_or_default()).map(Some);
     let Some(_held) = KICK.get().map_or_else(mine, |_| Some(None)) else {
         if manual {
             return wait(ctx, r, out, lock, only);
         }
         return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?);
     };
+    if let Some(l) = stuck {
+        let at = std::fs::read_to_string(&mark).unwrap_or_default();
+        let d = json!({"lock": lock, "pid": l.pid, "since": l.at, "step": format!("after {}", at.trim())});
+        writeln!(out, "! a pass held {lock} past {max} s, {}: taken over", d["step"])?;
+        let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-stuck", d));
+    }
+    if KICK.get().is_none() {
+        let _ = std::fs::write(&mark, "start");
+    }
+    if let Some((step, secs)) = crate::timer::stuck_step(ctx, cfg).filter(|_| fast) {
+        writeln!(
+            out,
+            "! tick stuck in {step} for {}: drover doctor",
+            crate::events::age(secs)
+        )?;
+    }
     // #234: the fast step samples every host into the 24 h history (the Host tab's sparklines).
     if fast {
         if let Err(e) = crate::hosts::sample(ctx, cfg, r, &crate::events::read(&ctx.state)?) {
@@ -768,6 +828,9 @@ pub fn drive(
             writeln!(out, "repair: {e:#}")?;
         }
     }
+    if !fast && KICK.get().is_none() && !fleets.is_empty() {
+        crate::breaker::probe(ctx, cfg, r, out).unwrap_or_else(|e| drop(writeln!(out, "runtime canary: {e:#}")));
+    }
     let grew = log();
     // #389: remote lanes' commands that found no route here, as the look read them.
     if fast {
@@ -824,19 +887,19 @@ pub fn drive(
     // #343: a slow pass folds the log into its checkpoint, and rotates a log over `rotate_mb`; #365: reads backlogs.
     if !fast && KICK.get().is_none() {
         for n in &fleets {
-            crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("herdsman: {n} backlog: {e:#}"));
+            crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("drover: {n} backlog: {e:#}"));
         }
-        crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("herdsman: stale panes: {e:#}"));
+        crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: stale panes: {e:#}"));
         let max = cfg.limits.rotate_mb << 20;
         let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
-        cp.unwrap_or_else(|e| eprintln!("herdsman: checkpoint: {e:#}"));
+        cp.unwrap_or_else(|e| eprintln!("drover: checkpoint: {e:#}"));
     }
     lap("backlog, checkpoint");
     let secs = t0.elapsed().as_secs_f64();
     if t0.elapsed().as_secs() > cfg.limits.pass_max_secs {
         let r1 = |x: f64| (x * 10.0).round() / 10.0;
         let d = json!({"fast": fast, "secs": r1(secs), "step": slow.1, "step_secs": r1(slow.2), "kick": KICK.get()});
-        let _ = append(&ctx.state, &Event::new(ctx.now, "herdsman", None, "pass-slow", d));
+        let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "pass-slow", d));
     }
     res
 }
@@ -1000,7 +1063,14 @@ fn save(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "lane-pushed", d))
 }
 
-fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: &[Value], fleet: &str) -> Result<()> {
+fn silent(
+    ctx: &Ctx,
+    cfg: &Config,
+    (r, seen): (&dyn Runner, &dyn Runner),
+    out: &mut dyn Write,
+    agents: &[Value],
+    fleet: &str,
+) -> Result<()> {
     let ev = read(&ctx.state)?;
     let found = stall::silent(ctx, cfg, &ev, agents, fleet);
     for (n, lane, a) in found.into_iter().filter(|x| KICK.get().is_none_or(|k| k == x.0)) {
@@ -1014,7 +1084,26 @@ fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: 
                     append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "respawned-silent", d))?;
                 }
             }
-            stall::Silent::Escalate(why) => escalate(ctx, cfg, out, (fleet, n), &lane, "LANE_SILENT", &why)?,
+            stall::Silent::Escalate(why) => escalate(ctx, cfg, out, (fleet, n), (&lane, None), "LANE_SILENT", &why)?,
+        }
+    }
+    let reviews = fold(&ev)
+        .into_values()
+        .filter(|s| s.fleet == fleet && s.state.starts_with("review"));
+    for s in reviews.filter(|s| KICK.get().is_none_or(|k| k == s.issue)) {
+        let Some((role, old)) = s.active_lane() else { continue };
+        if !agents
+            .iter()
+            .any(|a| a["name"] == old && a["agent_status"] == "working")
+        {
+            continue;
+        }
+        let Some(mins) = stall::stale_check(ctx, seen, &ev, agents, (fleet, s.issue), old) else {
+            continue;
+        };
+        let (n, step) = (s.issue.to_string(), (fleet, Some(s.issue), "review"));
+        if act(ctx, cfg, r, out, &ev, step, &["spawn", fleet, &n, role, "--supersede"])?.is_none() {
+            stale_replaced(ctx, cfg, out, (fleet, s.issue), role, old, mins)?;
         }
     }
     Ok(())
@@ -1051,12 +1140,12 @@ fn escalate(
     cfg: &Config,
     out: &mut dyn Write,
     (fleet, n): (&str, u64),
-    lane: &str,
+    (lane, on): (&str, Option<&str>),
     code: &str,
     why: &str,
 ) -> Result<()> {
     writeln!(out, "{fleet} #{n} needs-human: {why}")?;
-    let d = json!({"code": code, "reason": why, "agent": lane});
+    let d = json!({"code": code, "reason": why, "agent": lane, "failed_on": on});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "needs-human", d))
 }
 
@@ -1135,7 +1224,7 @@ fn pass(
     // #666: a lane the hook keeps refusing is ended and escalated at once, never left to stall.
     if !fast {
         crate::stall::refused(ctx, cfg, r, out, &read(&ctx.state)?, fleet)?;
-        silent(ctx, cfg, r, out, &agents, fleet)?;
+        silent(ctx, cfg, (r, seen), out, &agents, fleet)?;
     }
     let events = read(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
@@ -1164,14 +1253,10 @@ fn pass(
             .is_some_and(|r| f.family(r) == "rev")
     };
     // #207: every written verdict is recorded before any merge (and the auto-update after it) moves a head.
-    let verdict = |w: &Waiting| {
-        w.next_cmd
-            .as_deref()
-            .is_some_and(|c| c.starts_with("herdsman verdict "))
-    };
+    let verdict = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover verdict "));
     // #560: verdicts, then merges, then reviews of pushed heads, then fix and update rounds and respawns (new starts
     // follow every fleet's pass): a host short of room spends it in that order.
-    let merge = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("herdsman merge "));
+    let merge = |w: &Waiting| w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover merge "));
     waits.sort_by_key(|(s, w)| (!verdict(w), !merge(w), !rev(w), conflicts.contains_key(&s.issue)));
     let (mut go, mut updated) = (true, false);
     for (s, w) in waits
@@ -1220,13 +1305,13 @@ fn pass(
         } else if w.who == "drive" && matches!(w.what.as_str(), waiting::TURN_NUDGE | waiting::TURN_GO_ON) && !fast {
             // #511: a `done` with nothing new pushed is nudged once; a `working` lane gone idle is told to go on.
             let (state, text) = if w.what == waiting::TURN_NUDGE {
-                let text = "herdsman: you reported `done`, but nothing new is pushed at the PR head (or there is no \
-                    PR). Push and open the PR, then `herdsman turn done`; or `herdsman turn blocked --why <reason>`.";
+                let text = "drover: you reported `done`, but nothing new is pushed at the PR head (or there is no \
+                    PR). Push and open the PR, then `drover turn done`; or `drover turn blocked --why <reason>`.";
                 ("done", text)
             } else {
                 (
                     "working",
-                    "herdsman: continue the task; end the turn with `herdsman turn …`.",
+                    "drover: continue the task; end the turn with `drover turn …`.",
                 )
             };
             let sent = tell(r, &events, &w.lane, text);
@@ -1255,10 +1340,18 @@ fn pass(
         } else if w.who == "drive" {
             // #444: a gone lane with no push is respawned once due; past two respawns it needs a human.
             let gone = w.what.split_once(waiting::NO_PUSH);
+            let ends =
+                gone.filter(|g| (w.next_cmd.is_none() || g.1.starts_with("respawning")) && !waiting::resumed(g.0));
+            if let Some(g) = ends.filter(|_| !fast) {
+                if crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, g.0)? {
+                    continue;
+                }
+            }
             if gone.is_some() && w.next_cmd.is_none() && !fast {
                 let why = "lane keeps ending without a push";
                 writeln!(out, "{fleet} #{n} needs-human: {why}")?;
-                let d = json!({"code": "LANE_ENDS", "reason": why, "agent": w.lane});
+                let on = crate::breaker::blame(&events, &w.lane);
+                let d = json!({"code": "LANE_ENDS", "reason": why, "agent": w.lane, "failed_on": on});
                 emit(
                     &ctx.state,
                     cfg,
@@ -1339,7 +1432,8 @@ fn pass(
                 repro_refused(ctx, cfg, r, (&events, &agents), (fleet, s.issue, &w.lane), &args, &hash)?;
             }
             if let Some((why, _)) = gone.filter(|_| code.is_none()) {
-                let d = json!({"role": args.get(3), "agent": w.lane, "why": why});
+                let on = crate::breaker::blame(&events, &w.lane);
+                let d = json!({"role": args.get(3), "agent": w.lane, "why": why, "failed_on": on});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
             }
             go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
@@ -1385,17 +1479,28 @@ fn pass(
             .flatten()
         {
             // #666: a live lane stalled or never started: superseded once, then the owner's.
+            let start = matches!(
+                &a,
+                stall::Act::Respawn(_, "failed start") | stall::Act::Escalate("START_FAILED", _)
+            );
+            if start && crate::breaker::failed(ctx, cfg, out, fleet, &w.lane, "no output after its spawn")? {
+                continue;
+            }
             match a {
                 stall::Act::Respawn(role, why) => {
                     let args = ["spawn", fleet, &n, &role, "--supersede", "--force"];
                     let code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "respawn"), &args)?;
                     if code.is_none() {
-                        let d = json!({"role": role, "agent": w.lane, "why": why});
+                        let on = crate::breaker::blame(&events, &w.lane);
+                        let d = json!({"role": role, "agent": w.lane, "why": why, "failed_on": on});
                         append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
                     }
                     go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
                 }
-                stall::Act::Escalate(code, why) => escalate(ctx, cfg, out, (fleet, s.issue), &w.lane, code, &why)?,
+                stall::Act::Escalate(code, why) => {
+                    let on = crate::breaker::blame(&events, &w.lane);
+                    escalate(ctx, cfg, out, (fleet, s.issue), (&w.lane, on), code, &why)?;
+                }
             }
         } else if s.state == "blocked" && s.last_event != "no-action" {
             // #214: a block drive has no step for is logged once, never left silent.
@@ -1456,7 +1561,7 @@ fn no_proof(
     let told = mine.iter().any(|e| e.data["prompted"] == true);
     if !seen {
         act(ctx, cfg, r, out, ev, (fleet, Some(n), "verdict"), args)?;
-        let text = format!("herdsman verdict refused your verdict.md: REFUSED NO_PROOF: {why}. Add the Proof blocks.");
+        let text = format!("drover verdict refused your verdict.md: REFUSED NO_PROOF: {why}. Add the Proof blocks.");
         let tell =
             |p| crate::herdr::reply(&on, false, lane, p, &text).is_ok() && crate::herdr::landed(&on, lane, p, &text);
         let prompted = open.filter(|_| !told).is_some_and(tell);
@@ -1514,7 +1619,7 @@ fn repro_refused(
     let pane = sp
         .and_then(|e| e.str("pane"))
         .filter(|_| !told && agents.iter().any(|a| a["name"] == lane));
-    let text = format!("herdsman verdict refused your verdict.md: REFUSED NO_REPRO: {why}. Fix the Repro block.");
+    let text = format!("drover verdict refused your verdict.md: REFUSED NO_REPRO: {why}. Fix the Repro block.");
     let tell = |p| crate::herdr::reply(&on, false, lane, p, &text).is_ok() && crate::herdr::landed(&on, lane, p, &text);
     let prompted = pane.is_some_and(tell);
     let d = json!({"sha": args[5], "hash": hash, "agent": lane, "why": why, "prompted": prompted});
@@ -1719,7 +1824,7 @@ fn handoff(
             let told = |e: &&Event| e.is("why-nudged", fleet, s.issue) && e.str("agent") == Some(&w.lane) && e.ts >= sp;
             match ev.iter().rfind(told) {
                 None => {
-                    let text = format!("herdsman: {WHY_NUDGE}{}. Fix it, then `herdsman turn done`.", why.1);
+                    let text = format!("drover: {WHY_NUDGE}{}. Fix it, then `drover turn done`.", why.1);
                     let sent = tell(r, ev, &w.lane, &text);
                     writeln!(out, "{fleet} #{} why note refused: nudged", s.issue)?;
                     let d = json!({"agent": w.lane, "note": why.1, "sent": sent});
@@ -1739,7 +1844,7 @@ fn handoff(
 }
 
 /// #319: a settled fix lane left the head of the FAIL as it was. A CI-only FAIL (a gate's CI red, or every blocker tagged
-/// `[ci]`) with CI green there now is resolved: a PASS at that head, so it merges. Any other FAIL after `herdsman done
+/// `[ci]`) with CI green there now is resolved: a PASS at that head, so it merges. Any other FAIL after `drover done
 /// --no-change` is reviewed again at the same head (`waiting`). True if `fix-no-change` was logged.
 fn no_change(
     ctx: &Ctx,
@@ -1783,7 +1888,7 @@ fn no_change(
     Ok(true)
 }
 
-/// #285: a tracked issue whose PR (as last read) was merged or closed outside herdsman is logged once, no comment:
+/// #285: a tracked issue whose PR (as last read) was merged or closed outside drover is logged once, no comment:
 /// `merged`/`closed` `by: external`, or `blocked` while its issue is open; `clean` takes its lanes.
 fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let events = read(&ctx.state)?;
@@ -1806,12 +1911,12 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
             Some("CLOSED") if closed()? => ("closed", json!({})),
             Some("CLOSED") if !events.iter().any(seen) => (
                 "blocked",
-                json!({"code": "PR_CLOSED", "reason": "PR closed outside herdsman"}),
+                json!({"code": "PR_CLOSED", "reason": "PR closed outside drover"}),
             ),
             _ => continue,
         };
         (d["pr"], d["by"]) = (json!(num), json!("external"));
-        writeln!(out, "{fleet} #{} {kind} outside herdsman (PR #{num})", s.issue)?;
+        writeln!(out, "{fleet} #{} {kind} outside drover (PR #{num})", s.issue)?;
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(s.issue), kind, d))?;
     }
     Ok(())
@@ -2165,6 +2270,6 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
         return Ok(code);
     }
     writeln!(out, "{who} {step}: {result}")?;
-    let d = json!({"step": step, "cmd": format!("herdsman {}", c.join(" ")), "result": result, "code": code});
+    let d = json!({"step": step, "cmd": format!("drover {}", c.join(" ")), "result": result, "code": code});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, issue, "driven", d)).map(|()| code)
 }

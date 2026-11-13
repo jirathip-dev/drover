@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{BufRead, BufReader, Write};
@@ -25,7 +25,7 @@ fn req(s: &Server, now: u64, method: &str, path: &str, body: &str, extra: &str) 
     (head[9..12].parse().unwrap(), serde_json::from_str(body).unwrap())
 }
 
-fn recorded(name: &str) -> (herdsman::Ctx, Fake) {
+fn recorded(name: &str) -> (drover::Ctx, Fake) {
     let c = ctx(&tmpdir(name), &format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}"));
     for args in [
         &["queue", "sendmeter", "add", "17", "20"][..],
@@ -286,7 +286,7 @@ fn the_manifest_declares_cooees_places_and_permissions_and_each_screen_is_served
     assert_eq!(
         p["network"],
         json!(["api.github.com", ADDR]),
-        "GitHub and herdsman serve's own address"
+        "GitHub and drover serve's own address"
     );
     let kinds: BTreeSet<&str> = places
         .as_array()
@@ -495,7 +495,7 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
             ("sendmeter-rev-12-r2", "working", "/x", "w1:p3"),
             ("sendmeter-impl-17", "working", "/x", "w1:p4"),
         ]);
-        herdsman::serve::serve_on(&c2, &Fake::default().reply("herdr agent list", &list), l, false)
+        drover::serve::serve_on(&c2, &Fake::default().reply("herdr agent list", &list), l, false)
     });
     let mut s = std::net::TcpStream::connect(&addr).unwrap();
     s.set_read_timeout(Some(std::time::Duration::from_secs(20))).unwrap();
@@ -511,9 +511,8 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
         (41, &json!("screen"), &json!({"op": "badge", "count": 2}))
     );
     let mut screen = ops[0]["screen"].clone();
-    let ev = |n, kind: &str, d: Value| {
-        append(&c.state, &Event::new(herdsman::now(), "sendmeter", Some(n), kind, d)).unwrap()
-    };
+    let ev =
+        |n, kind: &str, d: Value| append(&c.state, &Event::new(drover::now(), "sendmeter", Some(n), kind, d)).unwrap();
 
     ev(
         12,
@@ -562,7 +561,7 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
     let r2 = Fake::default().reply("herdr agent list", &list);
     let fresh = req(
         &Server::new(&c, &r2, Some(ADDR.into())),
-        herdsman::now(),
+        drover::now(),
         "GET",
         "/screens/queue",
         "",
@@ -571,4 +570,50 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
     .1;
     screen.as_object_mut().unwrap().remove("badge");
     assert_eq!(screen, fresh, "the ops turned the first answer into today's");
+}
+
+#[test]
+fn the_workflow_screen_is_two_diagram_blocks_with_live_counts_and_limit_nodes() {
+    let (c, r) = recorded("cooee-workflow");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let (status, v) = req(&s, T, "GET", "/screens/workflow", "", "");
+    assert_eq!(status, 200, "{v}");
+    assert_eq!((&v["type"], &v["id"]), (&json!("screen"), &json!("workflow")));
+    let states = find(&v, "states");
+    assert_eq!(states["type"], "diagram");
+    assert!(
+        states["source"].as_str().unwrap().starts_with("stateDiagram-v2\n"),
+        "{states}"
+    );
+    assert!(
+        states["source"]
+            .as_str()
+            .unwrap()
+            .contains("state \"fix(n) · 1\" as fix"),
+        "{states}"
+    );
+    for (state, n) in [("merged", 1), ("fix(n)", 1), ("needs-human", 1)] {
+        assert_eq!(states["counts"][state], n, "{state}: {states}");
+    }
+    let pass = find(&v, "pass");
+    assert_eq!(pass["type"], "diagram");
+    let source = pass["source"].as_str().unwrap();
+    let nodes = pass["nodes"].as_array().unwrap();
+    for (id, limit) in [
+        ("k_slow_secs", "slow_secs"),
+        ("k_fast_secs", "fast_secs"),
+        ("k_stall_minutes", "stall_minutes"),
+    ] {
+        assert!(nodes.contains(&json!({"id": id, "limit": limit})), "{id}: {nodes:?}");
+    }
+    for n in nodes {
+        assert!(
+            source.contains(&format!(
+                "{}([\"{} = ",
+                n["id"].as_str().unwrap(),
+                n["limit"].as_str().unwrap()
+            )),
+            "{n}"
+        );
+    }
 }

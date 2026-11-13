@@ -1,6 +1,6 @@
 hermes chat
 
-󰀵  …/-Users-me--herdr-worktrees-herdsman-issue-105/b400c74c-4f66-4123-a7e9-0d889f8067b1/scratchpad
+󰀵  …/-Users-me--herdr-worktrees-drover-issue-105/b400c74c-4f66-4123-a7e9-0d889f8067b1/scratchpad
 ❯ hermes chat
 
 ██╗  ██╗███████╗██████╗ ███╗   ███╗███████╗███████╗       █████╗  ██████╗ ███████╗███╗   ██╗████████╗

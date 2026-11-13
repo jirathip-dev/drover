@@ -1,13 +1,13 @@
-//! #17: cached spec + PR/CI reads, `herdsman wait`, the queue, `herdsman next`, board, serve.
+//! #17: cached spec + PR/CI reads, `drover wait`, the queue, `drover next`, board, serve.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 use std::io::{Read, Write};
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
 
-fn ev(c: &herdsman::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(issue), kind, d)).unwrap();
 }
 
@@ -28,7 +28,7 @@ fn run_ci(status: &str, conclusion: &str) -> serde_json::Value {
 fn spec_is_refetched_only_when_updated_at_moves() {
     let d = tmpdir("spec");
     let c = ctx(&d, CONFIG);
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
     let f = cfg.fleet("sendmeter").unwrap();
     let full = r#"{"title":"Fix","body":"AC: works","updatedAt":"2026-10-30T01:00:00Z"}"#;
     let r = Fake::default()
@@ -40,9 +40,9 @@ fn spec_is_refetched_only_when_updated_at_moves() {
             "gh issue view 12 -R jirathip-dev/sendmeter --json title,body,updatedAt",
             full,
         );
-    herdsman::gh::spec(&c, &r, f, "sendmeter", 12, true).unwrap();
+    drover::gh::spec(&c, &r, f, "sendmeter", 12, true).unwrap();
     assert_eq!(r.count("gh issue view 12 -R jirathip-dev/sendmeter --json title"), 1);
-    let v = herdsman::gh::spec(&c, &r, f, "sendmeter", 12, true).unwrap();
+    let v = drover::gh::spec(&c, &r, f, "sendmeter", 12, true).unwrap();
     assert_eq!(v["body"], "AC: works");
     assert_eq!(
         r.count("gh issue view 12 -R jirathip-dev/sendmeter --json title"),
@@ -53,7 +53,7 @@ fn spec_is_refetched_only_when_updated_at_moves() {
         r.count("gh issue view 12 -R jirathip-dev/sendmeter --json updatedAt"),
         1
     );
-    // `herdsman brief` prints the cache without any call.
+    // `drover brief` prints the cache without any call.
     let quiet = Fake::default();
     let (code, out) = run(&c, &quiet, &["brief", "sendmeter", "12"]);
     assert_eq!(code, 0, "{out}");
@@ -70,7 +70,7 @@ fn spec_is_refetched_only_when_updated_at_moves() {
             r#"{"title":"Fix","body":"AC v2","updatedAt":"2026-10-30T02:00:00Z"}"#,
         );
     assert_eq!(
-        herdsman::gh::spec(&c, &r2, f, "sendmeter", 12, true).unwrap()["body"],
+        drover::gh::spec(&c, &r2, f, "sendmeter", 12, true).unwrap()["body"],
         "AC v2"
     );
     assert_eq!(
@@ -196,13 +196,13 @@ fn wait_exit_codes() {
 
 // --- queue ---
 
-fn q(c: &herdsman::Ctx, args: &[&str]) -> (i32, String) {
+fn q(c: &drover::Ctx, args: &[&str]) -> (i32, String) {
     let mut a = vec!["queue", "sendmeter"];
     a.extend(args);
     run(c, &Fake::default(), &a)
 }
 
-fn order(c: &herdsman::Ctx) -> Vec<u64> {
+fn order(c: &drover::Ctx) -> Vec<u64> {
     let (_, out) = q(c, &["ls", "--json"]);
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     v.as_array()
@@ -312,7 +312,7 @@ fn next_skips_blocked_and_live_lane_items() {
 
 // --- board + serve ---
 
-fn board_log(c: &herdsman::Ctx) {
+fn board_log(c: &drover::Ctx) {
     q(c, &["add", "17", "18", "12"]);
     q(c, &["block", "18", "--on", "17"]);
     ev(
@@ -373,7 +373,7 @@ fn serve_is_read_only_html() {
     let c = ctx(&d, CONFIG);
     board_log(&c);
     let r = Fake::default();
-    let srv = herdsman::serve::Server::new(&c, &r, None);
+    let srv = drover::serve::Server::new(&c, &r, None);
     let res = String::from_utf8(srv.respond("GET / HTTP/1.1\r\nHost: x\r\n\r\n", 1_000_000)).unwrap();
     assert!(
         res.starts_with("HTTP/1.1 200 OK\r\n") && res.contains("Content-Type: text/html"),
@@ -388,7 +388,7 @@ fn serve_is_read_only_html() {
         "PR link"
     );
     // #60: the Events tab body loads on tab open (#266: the board draws it from API v1).
-    let api = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let api = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     if let Some(res) = events_tab(&api, "127.0.0.1:7777", 1_000_000, "{ f: { k: 'all', fl: [] } }") {
         assert!(
             res.contains("https://github.com/jirathip-dev/sendmeter/issues/12"),
@@ -408,7 +408,7 @@ fn serve_is_read_only_html() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = ctx(&d, CONFIG);
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &Fake::default(), l, true));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, true));
     let get = |req: &str| {
         let mut s = std::net::TcpStream::connect(addr).unwrap();
         s.write_all(req.as_bytes()).unwrap();
@@ -437,18 +437,18 @@ fn agent_doc_and_roles_cover_m3() {
     let c = ctx(&d, CONFIG);
     let (_, out) = run(&c, &Fake::default(), &["help", "--agent"]);
     for w in [
-        "herdsman brief",
-        "herdsman pr",
-        "herdsman wait",
+        "drover brief",
+        "drover pr",
+        "drover wait",
         "--until",
-        "herdsman queue <FLEET> add",
-        "herdsman queue <FLEET> mv",
-        "herdsman queue <FLEET> rm",
-        "herdsman queue <FLEET> block",
-        "herdsman queue <FLEET> ls",
-        "herdsman next",
-        "herdsman board",
-        "herdsman serve",
+        "drover queue <FLEET> add",
+        "drover queue <FLEET> mv",
+        "drover queue <FLEET> rm",
+        "drover queue <FLEET> block",
+        "drover queue <FLEET> ls",
+        "drover next",
+        "drover board",
+        "drover serve",
         "MERGED",
         "124",
     ] {

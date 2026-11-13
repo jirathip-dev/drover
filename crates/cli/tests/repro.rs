@@ -3,13 +3,13 @@
 //! which forces the verify stage and a verify PASS before merge (`NO_REPRO`).
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
 const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
 const BRANCH: &str = "gh api repos/jirathip-dev/sendmeter/branches/issue-12";
 const PR_BODY: &str = "gh pr view issue-12 -R jirathip-dev/sendmeter --json body";
-const RECIPE: &str = "gh api repos/jirathip-dev/sendmeter/contents/.herdsman/verify.md";
+const RECIPE: &str = "gh api repos/jirathip-dev/sendmeter/contents/.drover/verify.md";
 const BASE_RUN: &str = "Repro: run\n\nBase plus commit 1:\n```\ncargo test meter_total\n```\n```\n\
 test meter_total ... FAILED\n```\n";
 const HEAD_RUN: &str = "Head:\n```\ncargo test meter_total\n```\n```\ntest meter_total ... ok\n```\n";
@@ -22,7 +22,7 @@ fn sha() -> String {
 }
 
 /// #12 built and under rev (`cfg`), queued `--repro` when `marked`.
-fn setup(name: &str, cfg: &str, marked: bool) -> (herdsman::Ctx, std::path::PathBuf) {
+fn setup(name: &str, cfg: &str, marked: bool) -> (drover::Ctx, std::path::PathBuf) {
     let d = tmpdir(name);
     let c = ctx(&d, cfg);
     if marked {
@@ -37,7 +37,7 @@ fn setup(name: &str, cfg: &str, marked: bool) -> (herdsman::Ctx, std::path::Path
     (c, d)
 }
 
-fn verdict(c: &herdsman::Ctx, d: &std::path::Path, r: &Fake, v: &str, body: &str) -> (i32, String) {
+fn verdict(c: &drover::Ctx, d: &std::path::Path, r: &Fake, v: &str, body: &str) -> (i32, String) {
     let file = d.join("verdict.md");
     std::fs::write(&file, body).unwrap();
     let f = file.to_string_lossy();
@@ -48,7 +48,7 @@ fn fake(pr_body: &str) -> Fake {
     Fake::default().reply(PR_BODY, pr_body).reply(BRANCH, &sha())
 }
 
-fn verdicts(c: &herdsman::Ctx) -> Vec<Event> {
+fn verdicts(c: &drover::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -57,7 +57,7 @@ fn verdicts(c: &herdsman::Ctx) -> Vec<Event> {
         .collect()
 }
 
-fn pass(c: &herdsman::Ctx, d: &std::path::Path, pr_body: &str, block: &str) -> (i32, String) {
+fn pass(c: &drover::Ctx, d: &std::path::Path, pr_body: &str, block: &str) -> (i32, String) {
     verdict(
         c,
         d,
@@ -89,7 +89,7 @@ fn a_full_run_block_is_recorded_and_a_missing_or_half_one_is_no_repro() {
 }
 
 /// #607: rev-601-r1's shape: the command fenced once, then the base plus commit 1 output, then the head output.
-const ONE_COMMAND: &str = "Repro: run\n```\ncargo test --locked -p herdsman --test shed a_remote_host\n```\n\
+const ONE_COMMAND: &str = "Repro: run\n```\ncargo test --locked -p drover --test shed a_remote_host\n```\n\
 At base + commit 1 (4c43ddc55), failing:\n```\nshed connect failed (1)\ntest result: FAILED. 0 passed; 1 failed\n```\n\
 Same command at head 5c77f77, passing:\n```\ntest a_remote_host ... ok\ntest result: ok. 1 passed; 0 failed\n```\n";
 
@@ -195,7 +195,7 @@ fn drive_fake() -> Fake {
         .reply("herdr agent", "{}")
 }
 
-fn state(c: &herdsman::Ctx) -> String {
+fn state(c: &drover::Ctx) -> String {
     fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].shown()
 }
 

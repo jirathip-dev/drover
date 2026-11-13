@@ -1,4 +1,4 @@
-//! `herdsman doctor`: read-only host check, a `✓|✗|! <check> — <detail> [→ <fix>]` row each. Never prints a secret.
+//! `drover doctor`: read-only host check, a `✓|✗|! <check> — <detail> [→ <fix>]` row each. Never prints a secret.
 use crate::config::Config;
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
@@ -109,7 +109,12 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let line = format!("board auth — 24 h: {n401} × 401, {n503} × 503 → see {}", log.display());
     row(rows, n503 == 0, '!', &line);
     let line = format!("worktrees — {0} → mkdir -p {0}", ctx.worktrees.display());
-    row(rows, ctx.worktrees.is_dir(), '✗', &line);
+    row(
+        rows,
+        crate::runner::answers(&ctx.worktrees) && ctx.worktrees.is_dir(),
+        '✗',
+        &line,
+    );
     for (name, fleet) in &cfg.fleet {
         let repo = &fleet.repo;
         let view = ok(r, "gh", &["repo", "view", repo, "--json", "name,isArchived"]);
@@ -207,14 +212,9 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     };
     row(rows, on, '!', &format!("webhook — {why}{bad} → {fix}"));
     if cfg!(target_os = "macos") {
-        let req = [
-            "-v",
-            "-R",
-            "=certificate leaf[subject.CN] = \"herdsman-local\"",
-            &ctx.exe,
-        ];
+        let req = ["-v", "-R", "=certificate leaf[subject.CN] = \"drover-local\"", &ctx.exe];
         let line = format!(
-            "signature — {} signed by \"herdsman-local\" → sh scripts/signing-identity.sh in the herdsman checkout (once), then sh scripts/signing-identity.sh sign {}",
+            "signature — {} signed by \"drover-local\" → sh scripts/signing-identity.sh in the drover checkout (once), then sh scripts/signing-identity.sh sign {}",
             ctx.exe, ctx.exe
         );
         row(rows, ok(r, "codesign", &req).is_ok(), '✗', &line);
@@ -243,13 +243,13 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         rows,
         stray.is_empty(),
         '✗',
-        &format!("profile hooks — {what} → herdsman profiles sync"),
+        &format!("profile hooks — {what} → drover profiles sync"),
     );
     let hosts = cfg.serve.allowed_hosts.join(", ");
     let line = format!("serve hosts — [{hosts}] → set [serve] allowed_hosts = [\"<name>.ts.net\"]");
     row(rows, !hosts.is_empty(), '✗', &line);
     let addr = "127.0.0.1:7777";
-    let line = format!("serve — listening on {addr} → herdsman serve --addr {addr}");
+    let line = format!("serve — listening on {addr} → drover serve --addr {addr}");
     let up = ok(r, "lsof", &["-nP", "-iTCP:7777", "-sTCP:LISTEN"]).is_ok();
     row(rows, up, '✗', &line);
     let tailscale = r.run("tailscale", &argv(&["serve", "status"]));
@@ -257,8 +257,8 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let bad = if tailscale.is_err() { '!' } else { '✗' }; // not installed is a warning
     let maps = tailscale.is_ok_and(|o| o.code == 0 && o.stdout.contains(addr));
     row(rows, maps, bad, &line);
-    // #708: the configured job, never another plist that mentions `herdsman serve`.
-    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.herdsman.serve");
+    // #708: the configured job, never another plist that mentions `drover serve`.
+    let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
     let plist = ctx.home.join(format!("Library/LaunchAgents/{label}.plist"));
     match plist.is_file() {
         _ if !cfg!(target_os = "macos") => {}
@@ -270,7 +270,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
                 .map_or(String::new(), |_| format!(" (found {})", names.join(", ")));
             let what = format!("{} missing{found}", plist.display());
             rows.push(format!(
-                "✗ launchd — no plist runs herdsman serve: {what} → see docs/setup.md"
+                "✗ launchd — no plist runs drover serve: {what} → see docs/setup.md"
             ));
         }
         true => {
@@ -287,11 +287,11 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     ));
     rows.extend(login_token(r, None));
     let paired = crate::devices::load(ctx).len();
-    let line = format!("phone — {paired} paired → open the page, then herdsman serve approve <code>");
+    let line = format!("phone — {paired} paired → open the page, then drover serve approve <code>");
     row(rows, paired > 0, '!', &line);
     let key = ctx.state.with_file_name("webpush/vapid.key");
     let perm = mode(&key);
-    let line = format!("vapid.key — {perm} → herdsman push test && chmod 600 {}", key.display());
+    let line = format!("vapid.key — {perm} → drover push test && chmod 600 {}", key.display());
     row(rows, perm == "mode 600", '✗', &line);
     let subs = crate::webpush::load(&ctx.state).len();
     let notifier = cfg.webpush_sub().is_some();
@@ -308,11 +308,17 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             Some(since) => format!("running for {}", crate::events::age(ctx.now.saturating_sub(since))),
             None => format!("ran {age}"),
         };
-        let line = format!("watchdog {what} — {ran} → herdsman timer install");
+        let line = format!("watchdog {what} — {ran} → drover timer install");
         row(rows, fresh || running.is_some(), '✗', &line);
     }
+    let stuck = crate::timer::stuck_step(ctx, cfg);
+    let line = stuck.as_ref().map_or("tick step — advancing".into(), |(step, secs)| {
+        let age = crate::events::age(*secs);
+        format!("tick step — stuck in {step} for {age} → stop the tick; what it waits on is not answering")
+    });
+    row(rows, stuck.is_none(), '✗', &line);
     for (label, state) in crate::timer::drift(ctx, cfg, r) {
-        let line = format!("timer — {label} {state} → herdsman timer install (the owner or an orchestrator)");
+        let line = format!("timer — {label} {state} → drover timer install (the owner or an orchestrator)");
         row(rows, state == "loaded", '✗', &line);
     }
     // #635: each cloud host's size, key and CLI; an ssh `Include` that reads a host-key file.
@@ -345,7 +351,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
         let v = crate::VERSION;
-        let ok = format!("✓ host {name} — herdr, session, git, gh, {logins}herdsman {v}");
+        let ok = format!("✓ host {name} — herdr, session, git, gh, {logins}drover {v}");
         rows.extend(bad.iter().map(|w| w.replacen(' ', &format!(" host {name} "), 1)));
         rows.extend(bad.is_empty().then_some(ok));
         rows.extend(login_token(&on, Some(name)));
@@ -392,7 +398,7 @@ fn login_token(r: &dyn Runner, host: Option<&str>) -> Option<String> {
     ))
 }
 
-/// The launchd job: a plist under ~/Library/LaunchAgents that runs `herdsman serve`.
+/// The launchd job: a plist under ~/Library/LaunchAgents that runs `drover serve`.
 pub fn serve_plist(ctx: &Ctx) -> Option<std::path::PathBuf> {
     serve_plists(ctx).into_iter().next()
 }
@@ -400,7 +406,9 @@ pub fn serve_plist(ctx: &Ctx) -> Option<std::path::PathBuf> {
 /// #708: every such plist, by name.
 fn serve_plists(ctx: &Ctx) -> Vec<std::path::PathBuf> {
     let agents = std::fs::read_dir(ctx.home.join("Library/LaunchAgents"));
-    let serves = |text: String| text.contains("herdsman") && text.contains("<string>serve</string>");
+    let serves = |text: String| {
+        (text.contains("drover") || text.contains("herdsman")) && text.contains("<string>serve</string>")
+    };
     let plists = agents.into_iter().flatten().flatten().map(|entry| entry.path());
     let mut found: Vec<_> = plists
         .filter(|plist| std::fs::read_to_string(plist).is_ok_and(serves))
@@ -414,7 +422,7 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let path = crate::timer::job_path(ctx, cfg, r);
     let find = |b: &str| path.split(':').map(|d| Path::new(d).join(b)).find(|p| p.is_file());
     rows.push(find("shed").map_or_else(
-        || "✗ shed — not on the timer's PATH → herdsman timer install from a shell where `which shed` finds it".into(),
+        || "✗ shed — not on the timer's PATH → drover timer install from a shell where `which shed` finds it".into(),
         |p| format!("✓ shed — {} on the timer's PATH", p.display()),
     ));
     let ids: BTreeSet<String> = cfg.fleet.keys().filter_map(|n| cfg.shed_for(n)?.acp).collect();

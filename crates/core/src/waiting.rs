@@ -69,7 +69,7 @@ pub fn unspawned(events: &[Event], s: &IssueState) -> bool {
         .iter()
         .rev()
         .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue));
-    crate::pending::of(events, &s.fleet, s.issue).is_some_and(|p| p.action == "extend" && !p.failed)
+    crate::pending::extending(events, &s.fleet, s.issue)
         || last.is_some_and(|e| e.kind == "round-extended" && e.data.get("spawn") == Some(&Value::Bool(true)))
 }
 
@@ -110,7 +110,7 @@ fn failed_start(events: &[Event], s: &IssueState) -> bool {
     events.iter().any(hit)
 }
 
-/// #511: the build lane's latest `herdsman turn` since its spawn and any extra round the owner gave.
+/// #511: the build lane's latest `drover turn` since its spawn and any extra round the owner gave.
 pub fn turn<'a>(events: &'a [Event], s: &IssueState) -> Option<&'a Event> {
     let sp = last_spawn(events, s.build.as_ref().and_then(|b| s.lanes.get(b))?)?;
     let extended = events.iter().rfind(|e| e.is("round-extended", &s.fleet, s.issue));
@@ -163,7 +163,14 @@ fn turned(events: &[Event], t: &Event, lane: &str, now: u64, stall: u64) -> (Who
 
 /// #444: the `respawn`s since the issue's last push, verdict or needs-human: (count, the last one's time).
 pub(crate) fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
-    let reset = ["pushed", "verdict", "needs-human", "round-extended", "repaired"];
+    let reset = [
+        "pushed",
+        "verdict",
+        "needs-human",
+        "round-extended",
+        "repaired",
+        "runtime-cleared",
+    ];
     let mine = events.iter().rev().filter(|e| e.fleet == fleet && e.issue == Some(n));
     let at: Vec<&Event> = mine
         .take_while(|e| !reset.contains(&e.kind.as_str()))
@@ -286,13 +293,13 @@ fn waits(
         reason: reason.into(),
         step: step.into(),
     };
-    let cmd = |verb: &str, tail: &str| Some(format!("herdsman {verb} {f} {n}{tail}"));
+    let cmd = |verb: &str, tail: &str| Some(format!("drover {verb} {f} {n}{tail}"));
     let mine =
         |a: &&Event| a.fleet == *f && (a.issue == Some(n) || s.lanes.values().any(|l| a.str("agent") == Some(l)));
     if let Some(a) = log.asks.iter().copied().find(mine) {
         let id = a.str("id").unwrap_or("?");
         // #412: a design's ask names its answers.
-        let next = crate::design::is_ask(a).then(|| format!("herdsman answer {f} {id} approve|revise|reject"));
+        let next = crate::design::is_ask(a).then(|| format!("drover answer {f} {id} approve|revise|reject"));
         return w("owner", &format!("waiting on your answer ({id})"), a.ts, next);
     }
     // #350: a reverted landing's issue is in a fix round while its old PR stays merged.
@@ -485,7 +492,7 @@ fn waits(
                 let at = head.is_some_and(|h| at_head(h.0));
                 let next = (matches!(v, "PASS" | "FAIL") && at).then(|| {
                     format!(
-                        "herdsman verdict {f} {n} {v} --sha {} --file {path}",
+                        "drover verdict {f} {n} {v} --sha {} --file {path}",
                         head.unwrap_or_default().0
                     )
                 });
@@ -602,6 +609,7 @@ pub fn scan(
 ) -> Vec<(IssueState, Waiting)> {
     let (mut out, log) = (vec![], Log::new(events));
     let busy = |l: &str| agents.iter().any(|a| a["name"] == l && a["agent_status"] == "working");
+    let hung = crate::roots::hung_now(events);
     for s in fold(events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
         // #43: after a `lane-killed`, the issue's surviving lane carries its reason (a killed rev: spawn rev again).
         let Some(lane) = s.lane.clone().or_else(|| {
@@ -629,6 +637,20 @@ pub fn scan(
             .collect();
         let mine = mine.as_slice();
         let sp = last_spawn(mine, &lane);
+        if let Some(root) = crate::roots::hung_under(&hung, sp).filter(|_| !s.done()) {
+            let w = Waiting {
+                fleet: s.fleet.clone(),
+                issue: s.issue,
+                lane: lane.clone(),
+                who: "none",
+                what: format!("root unreachable: {root}"),
+                since: s.last_ts,
+                next_cmd: None,
+                promise: None,
+            };
+            out.push((s, w));
+            continue;
+        }
         let rested = |e: &Event| {
             crate::access::rests(&e.kind) && sp.is_some_and(|p| e.ts >= p.ts && e.str("account") == p.str("account"))
         };
@@ -734,7 +756,7 @@ pub fn scan(
         // #285: behind integration under a non-strict rule is no catch-up: the PR merges as it is.
         if w.what.starts_with("PASS · behind ") && !gh::update_ready(ctx, None, f, &s.fleet) {
             let green = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr))) == "green";
-            let merge = format!("herdsman merge {} {}", s.fleet, s.issue);
+            let merge = format!("drover merge {} {}", s.fleet, s.issue);
             (w.who, w.next_cmd) = if green { ("drive", Some(merge)) } else { ("ci", None) };
             w.say(&Say::MergeOnGreen(format!(
                 "PASS · behind {} (not required)",
@@ -750,7 +772,7 @@ pub fn scan(
             let c = s.check.as_deref().unwrap_or("rev");
             w.who = "drive";
             w.what = "reviewer exited without a verdict: reviewing again".into();
-            w.next_cmd = Some(format!("herdsman spawn {} {} {c} --supersede", s.fleet, s.issue));
+            w.next_cmd = Some(format!("drover spawn {} {} {c} --supersede", s.fleet, s.issue));
         }
         // #444: an impl/fix lane gone from herdr, or whose prompt never landed, with no push: drive respawns it
         // `--supersede` at most every 30 min; after two respawns in a row without a push it needs a human.
@@ -803,7 +825,7 @@ pub fn scan(
             };
             let resume = waiting_turn.is_none() && resumed(&why);
             (w.who, w.lane, w.promise) = ("drive", built, None);
-            w.next_cmd = Some(format!("herdsman spawn {} {} {role} --supersede", s.fleet, s.issue));
+            w.next_cmd = Some(format!("drover spawn {} {} {role} --supersede", s.fleet, s.issue));
             w.what = if n >= 2 && !resume {
                 w.next_cmd = None;
                 format!("lane keeps ending{NO_PUSH}needs you")
@@ -819,6 +841,17 @@ pub fn scan(
         // #478: an active lane on a host the last look could not reach is not gone: nothing respawns it.
         if let Some(h) = crate::hosts::offline(ctx, sp).filter(|_| s.active_lane().is_some()) {
             (w.who, w.what, w.next_cmd, w.promise) = ("none", format!("host offline: {h}"), None, None);
+        }
+        let stuck = ["idle without pushing", "rev idle without", "reviewer exited"]
+            .iter()
+            .any(|p| w.what.starts_with(p));
+        let spawning = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover spawn "));
+        let hold = stuck || spawning || w.what.contains(NO_PUSH);
+        if let Some(t) = sp
+            .and_then(|e| crate::breaker::says(log.all, crate::breaker::host(e)))
+            .filter(|_| hold)
+        {
+            (w.who, w.what, w.next_cmd, w.promise) = ("none", t, None, None);
         }
         // #592: a live remote lane's rules, frozen at spawn, that fleet.toml now resolves otherwise: a respawn takes them.
         let sp = s.active_lane().and_then(|(_, a)| last_spawn(mine, a));
@@ -841,7 +874,7 @@ pub fn scan(
         }
         // #513: a due spawn drive's last try refused for want of a slot waits for one (the lane row says so, not parked).
         let tried = mine.iter().rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
-        let spawn = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("herdsman spawn "));
+        let spawn = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover spawn "));
         if spawn && tried.is_some_and(|e| e.str("code") == Some("SPAWN_PENDING")) {
             let by = crate::drive::held_by(ctx, cfg, r);
             w.say(&Say::SpawnSlot((!by.is_empty()).then_some(by)));
@@ -899,7 +932,7 @@ pub fn scan(
     }
     // #560: a review held for want of room names its place in drive's order: the reviews due before it go first.
     let review = |w: &Waiting| {
-        let role = w.next_cmd.as_deref().and_then(|c| c.strip_prefix("herdsman spawn "));
+        let role = w.next_cmd.as_deref().and_then(|c| c.strip_prefix("drover spawn "));
         let role = role.and_then(|c| c.split(' ').nth(2));
         role.is_some_and(|r| cfg.fleet[&w.fleet].flow().is_check(r))
     };
@@ -953,7 +986,7 @@ pub fn held(events: &[Event], (f, n): (&str, u64), cmd: Option<&str>) -> Option<
     let e = events.iter().rfind(mine)?;
     let wait = ["EXIT", "ERROR", "SPAWN_PENDING", "SPAWN_BACKOFF"];
     let code = e.str("code").filter(|c| !wait.contains(c))?;
-    let c = e.str("cmd").filter(|c| c.starts_with("herdsman spawn "))?;
+    let c = e.str("cmd").filter(|c| c.starts_with("drover spawn "))?;
     cmd.is_none_or(|x| c.starts_with(x)).then_some(())?;
     let why = e.str("result").unwrap_or_default();
     let why = why.split_once(": ").map_or(why, |p| p.1);

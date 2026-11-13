@@ -2,8 +2,8 @@
 //! path; an unpaired one is refused and nothing is kept. Gate 2: report mode at 390 px in WebKit against a real `serve`.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -33,7 +33,7 @@ fn post(s: &Server, body: &str, extra: &str) -> String {
 }
 
 /// The ctx with a `merged` notifier appending to `<dir>/heard.txt`: a report reaches it all the same.
-fn setup(name: &str) -> (herdsman::Ctx, std::path::PathBuf) {
+fn setup(name: &str) -> (drover::Ctx, std::path::PathBuf) {
     let d = tmpdir(name);
     let heard = d.join("heard.txt");
     let cfg = format!(
@@ -43,7 +43,7 @@ fn setup(name: &str) -> (herdsman::Ctx, std::path::PathBuf) {
     (ctx(&d, &cfg), heard)
 }
 
-fn reports(c: &herdsman::Ctx) -> Vec<std::path::PathBuf> {
+fn reports(c: &drover::Ctx) -> Vec<std::path::PathBuf> {
     let dir = c.state.parent().unwrap().join("reports");
     std::fs::read_dir(dir)
         .into_iter()
@@ -98,7 +98,7 @@ fn a_paired_report_is_kept_and_named_to_the_notifier() {
             &json!("row overlaps the badge")
         )
     );
-    assert_eq!(b["device"], json!(herdsman::devices::load(&c)[0].label));
+    assert_eq!(b["device"], json!(drover::devices::load(&c)[0].label));
     assert!(b["build"].as_str().unwrap().contains('('), "names the build sha");
     assert!(std::fs::read(dir.join("shot.png")).unwrap().starts_with(b"\x89PNG"));
     let e = read(&c.state).unwrap().to_vec().pop().unwrap();
@@ -120,7 +120,7 @@ fn a_paired_report_is_kept_and_named_to_the_notifier() {
 }
 
 /// A real `serve` with one lane; returns its URL and a paired cookie (`name=value`).
-fn board(c: &herdsman::Ctx) -> (String, String) {
+fn board(c: &drover::Ctx) -> (String, String) {
     let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "worktree": "/wt/x"});
     append(&c.state, &Event::new(900_000, "sendmeter", Some(12), "spawn", sp)).unwrap();
     let list = json!({"result": {"agents": [{"name": "sendmeter-impl-12", "agent_status": "working", "pane_id": "w1:p1", "cwd": "/x"}]}});
@@ -136,7 +136,7 @@ fn board(c: &herdsman::Ctx) -> (String, String) {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/", l.local_addr().unwrap());
     let c2 = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &r, l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
     (url, cookie.trim().trim_start_matches("Cookie: ").to_string())
 }
 
@@ -146,8 +146,8 @@ fn page(url: &str, cookie: &str, js: &str, png: &Path) -> Vec<f64> {
         "(function go() {{ const t = document.querySelector('#lanes .lane[data-agent]'); if (!t) return setTimeout(go, 20); {js} }})()"
     );
     let o = webview()
-        .env("HERDSMAN_COOKIE", cookie)
-        .env("HERDSMAN_WAIT", "1.5")
+        .env("DROVER_COOKIE", cookie)
+        .env("DROVER_WAIT", "1.5")
         .args([url, "390", "lanes", "scene", png.to_str().unwrap(), &js])
         .output()
         .unwrap();
@@ -163,7 +163,7 @@ fn report_mode_in_webkit_outlines_confirms_and_sends_a_bundle() {
     }
     let c = ctx(&tmpdir("report-wk"), CONFIG);
     let (url, cookie) = board(&c);
-    let shots = std::env::var("HERDSMAN_SNAPSHOTS").map_or_else(|_| tmpdir("report-png"), std::path::PathBuf::from);
+    let shots = std::env::var("DROVER_SNAPSHOTS").map_or_else(|_| tmpdir("report-png"), std::path::PathBuf::from);
     // `/report` from the reply box's menu, a tap (outline), a second tap (the note box), a note: the 390 px shot.
     // The taps come 400 ms on, once the sheet has slid away.
     let tap = |then: &str| {

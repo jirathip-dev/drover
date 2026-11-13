@@ -7,19 +7,19 @@ podman, `supabase start`, …); the lane hook refuses them, and so must the reci
 
 ## In order
 
-1. Read the repo's recipe, `.herdsman/verify.md` (Launch, Doctor, Drive, Evidence, Feature map, Known noise),
+1. Read the repo's recipe, `.drover/verify.md` (Launch, Doctor, Drive, Evidence, Feature map, Known noise),
    and the issue's acceptance criteria below. If the issue had a design stage, open the approved
    PNGs under `docs/design/<slug>/` on the branch.
-2. Launch the app at the head exactly as the recipe's Launch says, on `$HERDSMAN_PORT` (iOS:
+2. Launch the app at the head exactly as the recipe's Launch says, on `$DROVER_PORT` (iOS:
    through `sim-task`; the host's `hermes-sim-task` is the same tool). Wait for its ready signal.
    Run Doctor; if the instance is not worth driving, that is a FAIL with Doctor's output.
 3. Drive each acceptance criterion a user can observe, with the recipe's selectors and commands
    and its Feature map to reach each screen. Skip criteria no user can see (say which).
 4. Capture the Evidence the recipe names: screenshots at 1440 and 390 px wide, a transcript of
    what you ran, and each exit code. Save every file in your worktree (this lane's folder).
-   - **Browser** (#731): run `.verify-browser.mjs` (herdsman writes it into your worktree) on each screen you drive, a
+   - **Browser** (#731): run `.verify-browser.mjs` (drover writes it into your worktree) on each screen you drive, a
      Chrome DevTools session with no npm dependency (`CHROME` names the browser):
-     `node .verify-browser.mjs <url> shots --name <screen> --recipe .herdsman/verify.md`
+     `node .verify-browser.mjs <url> shots --name <screen> --recipe .drover/verify.md`
      (`--approved docs/design/<slug>` with a design, `--trace` for a criterion about speed). It writes
      `shots/<screen>-1440.png`, `-390.png`, `-console.log` (errors and warnings), `-network.log`
      (failed and 4xx/5xx requests), `-a11y.json` (controls with no accessible name), `-trace.json`

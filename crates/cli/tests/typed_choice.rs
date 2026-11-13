@@ -1,15 +1,15 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::{json, Value};
 
 const NOW: u64 = 1_000_000;
 
-fn log(c: &herdsman::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: Value) {
+fn log(c: &drover::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", issue, kind, d)).unwrap();
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -18,7 +18,7 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
         .collect()
 }
 
-fn design_ask(name: &str, line: &str) -> herdsman::Ctx {
+fn design_ask(name: &str, line: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     log(
         &c,

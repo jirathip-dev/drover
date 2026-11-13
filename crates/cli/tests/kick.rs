@@ -1,10 +1,10 @@
-//! #304 `herdsman kick`: one issue's due steps at once, debounced, beside the pass (#318); lane hooks and the board kick.
+//! #304 `drover kick`: one issue's due steps at once, debounced, beside the pass (#318); lane hooks and the board kick.
 mod common;
 use common::*;
-use herdsman::events::{read, Event};
+use drover::events::{read, Event};
 use serde_json::json;
 
-fn fan(name: &str) -> herdsman::Ctx {
+fn fan(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "1", "2", "3"]).0,
@@ -35,7 +35,7 @@ fn fake(live: usize) -> Fake {
     r
 }
 
-fn kicks(c: &herdsman::Ctx) -> Vec<Event> {
+fn kicks(c: &drover::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -44,7 +44,7 @@ fn kicks(c: &herdsman::Ctx) -> Vec<Event> {
         .collect()
 }
 
-fn kick(c: &herdsman::Ctx, r: &Fake, n: &str) {
+fn kick(c: &drover::Ctx, r: &Fake, n: &str) {
     let (code, out) = run(c, r, &["kick", "sendmeter", n, "--why", "push", "--now"]);
     assert_eq!(code, 0, "{out}");
 }
@@ -60,7 +60,7 @@ fn a_kick_runs_only_its_issue() {
     assert_eq!((k.len(), k[0].issue, k[0].str("why")), (1, Some(2), Some("push")));
     assert!(k[0].str("result").unwrap().contains("started #2"), "{:?}", k[0]);
     assert_eq!(
-        herdsman::drive::last_pass(&c, "sendmeter"),
+        drover::drive::last_pass(&c, "sendmeter"),
         None,
         "a kick is no fleet pass"
     );
@@ -107,7 +107,7 @@ fn the_hook_matches_a_successful_push_and_a_stop_only() {
     let push = |resp: serde_json::Value| {
         let i = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "cwd": "/w",
             "tool_input": {"command": "git push -u origin issue-24"}, "tool_response": resp});
-        herdsman::hook::kick_why(&i)
+        drover::hook::kick_why(&i)
     };
     let ok =
         json!({"stdout": "", "stderr": "To github.com:x/y.git\n   a..b  issue-24 -> issue-24", "interrupted": false});
@@ -116,43 +116,43 @@ fn the_hook_matches_a_successful_push_and_a_stop_only() {
     assert_eq!(push(rejected), None);
     assert_eq!(push(json!({"stderr": "fatal: unable to access"})), None);
     let ls = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": "ls"}});
-    assert_eq!(herdsman::hook::kick_why(&ls), None);
+    assert_eq!(drover::hook::kick_why(&ls), None);
     assert_eq!(
-        herdsman::hook::kick_why(&json!({"hook_event_name": "Stop"})),
+        drover::hook::kick_why(&json!({"hook_event_name": "Stop"})),
         Some("stop")
     );
     let pre = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": "git push"}});
-    assert_eq!(herdsman::hook::kick_why(&pre), None);
+    assert_eq!(drover::hook::kick_why(&pre), None);
 }
 
-/// One test mutates `HERDSMAN_LANE` (process-wide): the hook kicks in a lane only.
+/// One test mutates `DROVER_LANE` (process-wide): the hook kicks in a lane only.
 #[test]
 fn the_hook_kicks_its_lanes_issue_and_is_inert_outside_lanes() {
     let c = ctx(&tmpdir("kick-hook"), CONFIG);
     // #511: the lane reported its turn, so the stop hook asks for none (tests/turn.rs).
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    std::fs::write(herdsman::hook::turn_mark(&c.state, "sendmeter:24:impl"), "turn").unwrap();
+    std::fs::write(drover::hook::turn_mark(&c.state, "sendmeter:24:impl"), "turn").unwrap();
     let hook = |r: &Fake| {
         let stop = json!({"hook_event_name": "Stop", "session_id": "s"}).to_string();
-        let argv = ["herdsman", "hook", "--role", "impl"].map(String::from).to_vec();
+        let argv = ["drover", "hook", "--role", "impl"].map(String::from).to_vec();
         let mut out = vec![];
-        assert_eq!(herdsman::main_with(argv, &c, r, &mut out, &mut stop.as_bytes()), 0);
+        assert_eq!(drover::main_with(argv, &c, r, &mut out, &mut stop.as_bytes()), 0);
         assert!(out.is_empty());
     };
-    std::env::remove_var("HERDSMAN_OUTBOX");
-    std::env::remove_var("HERDSMAN_LANE");
+    std::env::remove_var("DROVER_OUTBOX");
+    std::env::remove_var("DROVER_LANE");
     let r = Fake::default();
     hook(&r);
     assert!(r.calls.borrow().is_empty(), "inert: {:?}", r.calls.borrow());
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:24:impl");
+    std::env::set_var("DROVER_LANE", "sendmeter:24:impl");
     let r = Fake::default();
     hook(&r);
-    std::env::remove_var("HERDSMAN_LANE");
+    std::env::remove_var("DROVER_LANE");
     let calls = r.calls.borrow();
     assert_eq!(calls.len(), 1, "{calls:?}");
     let log = c.state.with_file_name("kick.log");
     let want = format!(
-        "sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter 24 --why stop --now >> '{}' 2>&1 < /dev/null & echo $!",
+        "sh -c nohup '/opt/drover/bin/drover' kick sendmeter 24 --why stop --now >> '{}' 2>&1 < /dev/null & echo $!",
         log.display()
     );
     assert_eq!(calls[0], want);
@@ -161,7 +161,7 @@ fn the_hook_kicks_its_lanes_issue_and_is_inert_outside_lanes() {
 /// #340: a kick is its own session and process group, out of reach of launchd's group kill when the job exits.
 #[test]
 fn a_detached_kick_runs_in_its_own_process_group() {
-    use herdsman::runner::Runner;
+    use drover::runner::Runner;
     let log = tmpdir("kick-session").join("kick.log");
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     let pgid = |pid: u32| {
@@ -172,7 +172,7 @@ fn a_detached_kick_runs_in_its_own_process_group() {
         String::from_utf8_lossy(&o.stdout).trim().to_string()
     };
     let args = ["-c".to_string(), "ps -o pgid= -p $$".into()];
-    let pid = herdsman::runner::Real.detach("sh", &args, &log).unwrap();
+    let pid = drover::runner::Real.detach("sh", &args, &log).unwrap();
     let mut theirs = String::new();
     for _ in 0..100 {
         theirs = std::fs::read_to_string(&log).unwrap_or_default().trim().to_string();

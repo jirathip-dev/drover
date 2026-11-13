@@ -1,14 +1,14 @@
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, read, Event};
+use drover::config::Config;
+use drover::events::{append, read, Event};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
 const NOW: u64 = 1_000_000;
 static ENV: Mutex<()> = Mutex::new(());
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -17,7 +17,7 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
         .collect()
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", None, kind, d)).unwrap();
 }
 
@@ -116,19 +116,19 @@ fn the_old_names_load_and_act_the_same_with_one_doctor_line() {
     assert_eq!(kinds(&c, "ask-withdrawn")[0].str("by"), Some("orchestrator-t1"));
 }
 
-fn two(name: &str) -> herdsman::Ctx {
+fn two(name: &str) -> drover::Ctx {
     let cfg = format!(
         "{CONFIG}\n[orchestrator.ada]\nname = \"Ada\"\nfleets = [\"sendmeter\"]\n\n[orchestrator.bob]\nname = \"Bob\"\nfleets = [\"all\"]\n"
     );
     ctx(&tmpdir(name), &cfg)
 }
 
-fn as_orch(c: &herdsman::Ctx, r: &Fake, id: &str, args: &[&str]) -> (i32, String) {
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:-:orchestrator");
-    std::env::set_var("HERDSMAN_ORCHESTRATOR", id);
+fn as_orch(c: &drover::Ctx, r: &Fake, id: &str, args: &[&str]) -> (i32, String) {
+    std::env::set_var("DROVER_LANE", "sendmeter:-:orchestrator");
+    std::env::set_var("DROVER_ORCHESTRATOR", id);
     let out = run(c, r, args);
-    std::env::remove_var("HERDSMAN_LANE");
-    std::env::remove_var("HERDSMAN_ORCHESTRATOR");
+    std::env::remove_var("DROVER_LANE");
+    std::env::remove_var("DROVER_ORCHESTRATOR");
     out
 }
 
@@ -218,7 +218,7 @@ fn renaming_an_orchestrator_changes_every_label_and_no_other_config() {
     assert_eq!(run(&c, &r, &["thread", "reply", "t1", "Which scope?"]).0, 0);
     let ask = ["ask", "sendmeter", "-", "How fast?", "--option", "a", "--thread", "t1"];
     assert_eq!(run(&c, &r, &ask).1, "q1\n");
-    let labels = |c: &herdsman::Ctx| {
+    let labels = |c: &drover::Ctx| {
         let show = run(c, &r, &["thread", "show", "t1"]).1;
         let ls = run(c, &r, &["thread", "ls"]).1;
         format!("{show}{ls}")

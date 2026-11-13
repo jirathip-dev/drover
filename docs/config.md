@@ -16,18 +16,18 @@ max = 1
 ```
 
 The old form, `serial_paths` / `serial_max` / `serial_label`, still works: it is one group named `serial_label` (unset:
-`db`). Giving both forms in one fleet is a config error; `herdsman doctor` suggests the new form.
+`db`). Giving both forms in one fleet is a config error; `drover doctor` suggests the new form.
 
 ## Joining
 
 An issue is in a group when
 
-- it is **marked**: `herdsman queue add N --serial ci`, or `queue set N serial ci,db` (replaces its marks). A plain
+- it is **marked**: `drover queue add N --serial ci`, or `queue set N serial ci,db` (replaces its marks). A plain
   `--serial` means the fleet's first group, as before; or
 - its **pushed diff** touches one of the group's paths: drive checks each open PR and logs
   `serial-joined {group, by: "diff"}`.
 
-`herdsman merge` still refuses `SERIAL_UNMARKED ci: PR touches scripts/check-x.mjs` for a PR touching a group it never
+`drover merge` still refuses `SERIAL_UNMARKED ci: PR touches scripts/check-x.mjs` for a PR touching a group it never
 joined (belt and braces).
 
 ## Slots
@@ -65,28 +65,28 @@ full_first_paths = ["db/migrations/**", ".github/workflows/**"]
   - **Red:** a runner/infra red (cancelled, timed out, never started) is re-run once. Otherwise fast-first landings
     pause (`land-paused`), and the culprit is found:
     - one landing since the last green is the culprit;
-    - several are bisected: each landing commit's own run, else one dispatched on a `herdsman-bisect-<sha>` ref.
+    - several are bisected: each landing commit's own run, else one dispatched on a `drover-bisect-<sha>` ref.
   - **Revert.** A revert PR opens and lands once its fast checks are green (`reverted`). The issue reopens in a fix
     round, with the failed job's log as its finding.
   - **Full-first culprit.** It is never reverted: it gets the fix round only (`land-fix`).
 - **Alerts.** `land-paused` and `reverted` go to every notifier of the fleet, whatever its `on` says.
-- **Numbers.** `herdsman stats land <fleet>` prints both modes' landings, per day, median PASS → landed, reverts and check
+- **Numbers.** `drover stats land <fleet>` prints both modes' landings, per day, median PASS → landed, reverts and check
   time, plus the minutes integration sat red.
 - **Promotion.** `main` stays human-only; promote a staging commit only once its full suite is green.
 
 ## Hotspots (#889)
 
-`herdsman hotspots [FLEET]` (every fleet when none is named) lists the files 5 or more merged PRs touched in the
+`drover hotspots [FLEET]` (every fleet when none is named) lists the files 5 or more merged PRs touched in the
 last 14 days on the integration branch, any language, each with its `conflict-predicted` events and the update rounds of
-the issues that touched it (herdsman's log, every fleet on the same repo). It keeps the list in the state folder as
+the issues that touched it (drover's log, every fleet on the same repo). It keeps the list in the state folder as
 `hotspots-<fleet>.json`. With any hot file it opens `hotspots: <fleet> week of <monday>`, or updates that issue while it
-is open, and queues it `--architect`. `herdsman tick` runs it weekly per fleet; `hotspots = "off"` in `[fleet.<n>]` opts
+is open, and queues it `--architect`. `drover tick` runs it weekly per fleet; `hotspots = "off"` in `[fleet.<n>]` opts
 out.
 
 ## Limits (#844)
 
-Every timing and cap herdsman core uses is a `[limits]` key; a fleet.toml without one keeps the default below.
-`herdsman config show` prints each key with its current value and this doc line, and CI's timing check
+Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without one keeps the default below.
+`drover config show` prints each key with its current value and this doc line, and CI's timing check
 (`scripts/timing-check.sh`) fails a hard-coded `Duration` in `crates/core/src` outside `config.rs` and tests.
 
 | key | default | what it sets |
@@ -102,7 +102,7 @@ Every timing and cap herdsman core uses is a `[limits]` key; a fleet.toml withou
 | `worktree_budget_gb` | `25.0` | over this many GB of worktrees drive frees build folders, then spawn refuses DISK_BUDGET |
 | `build_budget_gb` | `20.0` | over this many GB of lane build folders drive trims their unlocked profiles |
 | `sweep_remote` | `true` | the scratch sweep runs on every enabled remote host too |
-| `stray_roots` | `["/tmp", "$TMPDIR"]` | where `herdsman clean` looks for stray build folders and temp dirs |
+| `stray_roots` | `["/tmp", "$TMPDIR"]` | where `drover clean` looks for stray build folders and temp dirs |
 | `min_free_mem_gb` | `2.0` | spawn refuses MEM_LOW under this many GB of free + inactive memory |
 | `effort` | `unset` | default reasoning effort for roles that set none |
 | `ask_default_minutes` | `30` | a routine ask unanswered this long takes its recommended option |
@@ -129,7 +129,9 @@ Every timing and cap herdsman core uses is a `[limits]` key; a fleet.toml withou
 | `reap_keychain_readers` | `false` | kill those stuck Keychain readers too |
 | `respawn_max` | `3` | failed starts of an issue's role in the window before spawn refuses RESPAWN_LOOP |
 | `respawn_window_minutes` | `60` | the window `respawn_max` counts failed starts in |
-| `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow` |
+| `runtime_down_failures` | `5` | lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there |
+| `runtime_down_minutes` | `30` | the window `runtime_down_failures` counts in |
+| `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow`; past 3 × it logs `pass-stuck` and frees its lock |
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout` |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
@@ -145,6 +147,7 @@ Every timing and cap herdsman core uses is a `[limits]` key; a fleet.toml withou
 | `disk_probe_secs` | `2` | a folder listing slower than this marks its disk as not answering |
 | `disk_sick_secs` | `300` | a disk that let a call run out of time stays hung this long |
 | `disk_trust_secs` | `60` | a folder that answered is trusted this long before it is probed again |
+| `lane_read_secs` | `5` | a lane worktree read slower than this skips the lane for the pass (`root-hung`) |
 | `poll_millis` | `20` | the pause between polls of a child process or disk probe |
 | `tick_beat_secs` | `60` | a running tick writes `tick.beat` this often |
 | `orchestrator_idle_minutes` | `30` | an orchestrator whose thread is quiet this long closes on the next `check` |
@@ -158,6 +161,7 @@ Every timing and cap herdsman core uses is a `[limits]` key; a fleet.toml withou
 | `serve_shed_secs` | `5` | serve re-reads shed's lanes in the background this often |
 | `serve_remote_secs` | `10` | serve re-reads the remote hosts (ssh) in the background this often |
 | `serve_host_secs` | `10` | serve re-samples this host's load in the background this often |
+| `serve_heartbeat_secs` | `15` | `/live` pings this often; a stream whose last 2 pings are still unsent is dropped |
 | `serve_handover_secs` | `300` | `self-update` waits this long for the running serve to hand over before restarting it |
 | `slo_api_p95_ms` | `1000` | `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once |
 | `slo_api_minutes` | `10` | how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api` |

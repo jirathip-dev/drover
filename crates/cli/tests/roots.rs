@@ -3,9 +3,9 @@
 //! idle `~/.herdr/worktrees` worktree into `<root>/<repo>/<lane>`. git is real; herdr, gh and the host probes are fakes.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Real, Runner};
+use drover::config::Config;
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Real, Runner};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
@@ -48,7 +48,7 @@ fn git(dir: &Path, a: &[&str]) -> String {
 
 /// An origin with `staging` and a pushed `issue-12`, its clone (the fleet's `local`), and the two roots.
 struct Repo {
-    c: herdsman::Ctx,
+    c: drover::Ctx,
     origin: PathBuf,
     local: PathBuf,
     nvme: PathBuf,
@@ -127,7 +127,7 @@ fn working_on_nvme(r: &Repo) -> PathBuf {
     wt
 }
 
-fn spawns(c: &herdsman::Ctx) -> Vec<Event> {
+fn spawns(c: &drover::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -140,7 +140,7 @@ fn spawns(c: &herdsman::Ctx) -> Vec<Event> {
 fn a_new_lane_lands_in_the_first_mounted_root_and_skips_a_missing_one() {
     let r = repo("roots-place");
     let f = fake(&r.internal);
-    let worktree = |c: &herdsman::Ctx| {
+    let worktree = |c: &drover::Ctx| {
         let (code, out) = run(c, &f, &["spawn", "sendmeter", "12", "impl", "--dry-run", "--json"]);
         assert_eq!(code, 0, "{out}");
         serde_json::from_str::<serde_json::Value>(&out).unwrap()["worktree"].clone()
@@ -196,7 +196,7 @@ fn a_pulled_root_is_noted_once_and_its_lane_restarts_on_the_next_root_from_its_p
     let cfg = Config::load(&r.c.config).unwrap();
     let watch = || {
         let mut out = vec![];
-        herdsman::roots::watch(&r.c, &cfg, &Git(&f), &mut out).unwrap();
+        drover::roots::watch(&r.c, &cfg, &Git(&f), &mut out).unwrap();
         String::from_utf8(out).unwrap()
     };
     let out = watch();
@@ -248,7 +248,7 @@ fn migrate_moves_an_idle_worktree_into_the_new_layout() {
             "staging",
         ],
     );
-    let cache = r.c.home.join(".cache/herdsman/target/sendmeter");
+    let cache = r.c.home.join(".cache/drover/target/sendmeter");
     std::fs::create_dir_all(&cache).unwrap();
     let f = Fake::default().reply(
         "herdr agent list",
@@ -282,8 +282,8 @@ fn migrate_moves_an_idle_worktree_into_the_new_layout() {
 }
 
 /// Amendment A: a new lane's build folder `<root>/.build/<agent>` is a clone of its fleet's newest one on that root
-/// (another fleet's never), the files `.herdsman/worktree-include` lists come from the main checkout, and the lane's
-/// unsaved work shows in `herdsman status` and the Lanes tab's rows.
+/// (another fleet's never), the files `.drover/worktree-include` lists come from the main checkout, and the lane's
+/// unsaved work shows in `drover status` and the Lanes tab's rows.
 #[test]
 fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_files() {
     let r = repo("roots-warm");
@@ -297,12 +297,12 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         std::fs::write(b.join(d).join("release").join(f), f).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(1100)); // mtimes in seconds: each newer
     }
-    std::fs::write(r.local.join(".herdsman-ignored.env"), "PORT=1\n").unwrap();
-    std::fs::write(r.local.join(".git/info/exclude"), ".herdsman-ignored.env\n").unwrap();
-    std::fs::create_dir_all(r.local.join(".herdsman")).unwrap();
+    std::fs::write(r.local.join(".drover-ignored.env"), "PORT=1\n").unwrap();
+    std::fs::write(r.local.join(".git/info/exclude"), ".drover-ignored.env\n").unwrap();
+    std::fs::create_dir_all(r.local.join(".drover")).unwrap();
     std::fs::write(
-        r.local.join(".herdsman/worktree-include"),
-        "# setup\n.herdsman-ignored.env\n../escape\nmissing\n",
+        r.local.join(".drover/worktree-include"),
+        "# setup\n.drover-ignored.env\n../escape\nmissing\n",
     )
     .unwrap();
     let f = spawnable(Fake::default().reply("herdr agent list", NO_AGENTS));
@@ -329,7 +329,7 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     drop(calls);
     let wt = r.nvme.join("sendmeter/issue-12");
     assert_eq!(
-        std::fs::read_to_string(wt.join(".herdsman-ignored.env")).unwrap(),
+        std::fs::read_to_string(wt.join(".drover-ignored.env")).unwrap(),
         "PORT=1\n"
     );
     // Unsaved work: one new file, one local commit.
@@ -342,8 +342,8 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     let cfg = Config::load(&r.c.config).unwrap();
     let a: serde_json::Value =
         serde_json::from_str(&agents(&[(AGENT, "working", &wt.to_string_lossy(), "w9:p1")])).unwrap();
-    let st = herdsman::events::states(&r.c.state).unwrap();
-    let ls = herdsman::lanes::join(
+    let st = drover::events::states(&r.c.state).unwrap();
+    let ls = drover::lanes::join(
         &cfg,
         &Git(&f),
         &r.c.worktrees,
@@ -355,7 +355,7 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     let l = ls.iter().find(|l| l.name == AGENT).unwrap();
     let u = l.unsaved(&Git(&f));
     assert_eq!(
-        (u, herdsman::spawn::unsaved_text(u).as_deref()),
+        (u, drover::spawn::unsaved_text(u).as_deref()),
         (Some((1, 1)), Some("+1 ⇡1"))
     );
 }
@@ -424,7 +424,7 @@ fn a_failed_restart_off_a_gone_root_is_retried_on_the_next_drive_pass() {
     let (code, out) = run(&r.c, &Git(&down), &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains(&format!("{AGENT}: restart failed")), "{out}");
-    let moved = |c: &herdsman::Ctx| {
+    let moved = |c: &drover::Ctx| {
         read(&c.state)
             .unwrap()
             .iter()

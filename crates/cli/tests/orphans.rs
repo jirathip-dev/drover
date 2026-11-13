@@ -1,9 +1,9 @@
-//! #376: lanes herdsman never logged: `spawn-started` before the harness starts, and each drive step adopts a
+//! #376: lanes drover never logged: `spawn-started` before the harness starts, and each drive step adopts a
 //! lane-shaped orphan pane of a tracked issue (its verdict then recorded as any lane's), closes a stale one, and leaves
 //! an unmatched one to `check`'s `orphan-lane` alert.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 use std::path::PathBuf;
 
@@ -13,7 +13,7 @@ fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
@@ -38,13 +38,13 @@ fn fake(agents: &str) -> Fake {
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
 }
 
-fn fast(c: &herdsman::Ctx, r: &Fake) -> String {
+fn fast(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["drive", "--fast"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     out
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     read(&c.state)
         .unwrap()
         .to_vec()
@@ -54,7 +54,7 @@ fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
 }
 
 /// #12's impl lane, logged, and a review worktree no spawn logged holding `verdict`.
-fn review(c: &herdsman::Ctx, verdict: &str) -> PathBuf {
+fn review(c: &drover::Ctx, verdict: &str) -> PathBuf {
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w9:p1", "workspace": "w9", "worktree": wt,
@@ -272,10 +272,10 @@ fn a_remote_orphan_is_adopted_on_its_host() {
 
 /// #393: a runner that, while drive lists the remote host's agents, logs `spawn-started` as a concurrent spawn does
 /// before it starts the harness (its `spawn` comes once the prompt is confirmed, after this pass).
-struct Racing<'a>(&'a Fake, &'a herdsman::Ctx, &'a str);
+struct Racing<'a>(&'a Fake, &'a drover::Ctx, &'a str);
 
-impl herdsman::runner::Runner for Racing<'_> {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for Racing<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let line = format!("{prog} {}", args.join(" "));
         if line.contains("bazzite") && line.contains("list") && kinds(self.1, "spawn-started").is_empty() {
             let d = json!({"agent": "sendmeter-impl-12", "role": "impl", "worktree": self.2, "pane": "w3:p1",

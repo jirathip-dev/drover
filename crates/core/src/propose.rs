@@ -1,4 +1,4 @@
-//! #387: `herdsman config propose`: a fleet.toml change (roles, models, gates, land mode, serial groups, hosts, accounts)
+//! #387: `drover config propose`: a fleet.toml change (roles, models, gates, land mode, serial groups, hosts, accounts)
 //! as a thread card with [apply] [discard]. Only the owner's tap (or `config apply`, which the lane hook refuses in a lane) applies it, with a
 //! backup, a `doctor` check and an event; settled, the card folds to the one line the thread records.
 use crate::config::{self, Config};
@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
-/// `herdsman config propose <thread> <file>`: `file` is the whole new fleet.toml; validated, its diff is the card.
+/// `drover config propose <thread> <file>`: `file` is the whole new fleet.toml; validated, its diff is the card.
 pub fn propose(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, thread: &str, file: &Path) -> Result<()> {
     let events = read(&ctx.state)?;
     let t = orchestrator::find(&events, thread)?;
@@ -146,7 +146,7 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
         }
         format!(
             "config {id} applied by owner, backup kept, doctor {}{kicked}",
-            ["✗ (run herdsman doctor)", "✓"][usize::from(ok)]
+            ["✗ (run drover doctor)", "✓"][usize::from(ok)]
         )
     } else {
         format!("config {id} discarded by owner")
@@ -385,6 +385,6 @@ pub fn edit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &ConfigChange, by: &str)
     emit(&ctx.state, &new, Event::new(ctx.now, fleet, None, "config-edit", d))?;
     Ok(format!(
         "fleet.toml edited by {by}, backup kept, doctor {}",
-        ["✗ (run herdsman doctor)", "✓"][usize::from(ok)]
+        ["✗ (run drover doctor)", "✓"][usize::from(ok)]
     ))
 }

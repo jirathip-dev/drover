@@ -1,12 +1,12 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::{json, Value};
 
 const WS: &str = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
 const PANES: &str = r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#;
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
@@ -31,11 +31,21 @@ fn fake(level: &str) -> Fake {
         .reply("kill -0", "")
 }
 
-fn spawns(c: &herdsman::Ctx) -> usize {
+fn low_mem(level: &str) -> Fake {
+    let vm = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 16384.\n\
+        Pages inactive: 16384.\nSwapouts: 100.\n";
+    let low = Fake::default().reply("vm_stat", vm);
+    Fake {
+        replies: [low.replies, fake(level).replies].concat(),
+        ..Default::default()
+    }
+}
+
+fn spawns(c: &drover::Ctx) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count()
 }
 
-fn stuck(name: &str) -> herdsman::Ctx {
+fn stuck(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let (code, out) = run(&c, &fake("4"), &["drive"]);
@@ -48,18 +58,18 @@ fn stuck(name: &str) -> herdsman::Ctx {
 #[test]
 fn a_granted_extend_on_a_never_started_lane_spawns_it_once_the_host_admits() {
     let c = stuck("never-started-extend");
-    let (code, out) = run(&c, &fake("4"), &["extend", "sendmeter", "12"]);
-    assert_eq!(code, 0, "{out}");
-    let (code, out) = run(&c, &fake("4"), &["drive"]);
-    assert_eq!((code, spawns(&c)), (0, 0), "still refused on load: {out}");
-    let calm = fake("1");
+    let (code, out) = run(&c, &low_mem("4"), &["extend", "sendmeter", "12"]);
+    assert!(code == 0 && out.contains("(MEM_LOW)"), "{out}");
+    let (code, out) = run(&c, &low_mem("1"), &["drive"]);
+    assert_eq!((code, spawns(&c)), (0, 0), "still refused on memory: {out}");
+    let calm = fake("4");
     let (code, out) = run(&c, &calm, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert!(calm.called("herdr agent start sendmeter-impl-12"), "{out}");
     assert_eq!(spawns(&c), 1, "{out}");
 }
 
-fn used(name: &str) -> herdsman::Ctx {
+fn used(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let d =
@@ -77,9 +87,9 @@ fn used(name: &str) -> herdsman::Ctx {
     c
 }
 
-fn card(c: &herdsman::Ctx) -> Value {
+fn card(c: &drover::Ctx) -> Value {
     let r = fake("1");
-    let s = herdsman::serve::Server::new(c, &r, Some("127.0.0.1:7777".into()));
+    let s = drover::serve::Server::new(c, &r, Some("127.0.0.1:7777".into()));
     let res = s.respond("GET /screens/cards HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now);
     let res = String::from_utf8_lossy(&res).into_owned();
     let cards: Value = serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap();
@@ -104,7 +114,7 @@ fn the_card_offers_start_lane_only_for_a_lane_that_never_ran() {
 
 #[test]
 fn waiting_names_the_card_or_the_load_never_a_question_mark() {
-    let waiting = |c: &herdsman::Ctx| {
+    let waiting = |c: &drover::Ctx| {
         let (code, w) = run(c, &fake("4"), &["waiting", "sendmeter"]);
         assert!(code == 0 && !w.contains("→ ?"), "{w}");
         w
@@ -112,16 +122,16 @@ fn waiting_names_the_card_or_the_load_never_a_question_mark() {
     let c = stuck("never-started-waiting");
     let w = waiting(&c);
     let card = "sendmeter #12 owner: needs-human: your card's [start lane]";
-    assert!(w.contains(card) && w.contains("→ herdsman extend sendmeter 12"), "{w}");
+    assert!(w.contains(card) && w.contains("→ drover extend sendmeter 12"), "{w}");
     let u = used("used-rounds-waiting");
     let w = waiting(&u);
     let card = "sendmeter #12 owner: needs-human: your card's [one more round]";
-    assert!(w.contains(card) && w.contains("→ herdsman extend sendmeter 12"), "{w}");
+    assert!(w.contains(card) && w.contains("→ drover extend sendmeter 12"), "{w}");
 
-    assert_eq!(run(&c, &fake("4"), &["extend", "sendmeter", "12"]).0, 0);
+    assert_eq!(run(&c, &low_mem("4"), &["extend", "sendmeter", "12"]).0, 0);
     let w = waiting(&c);
     assert!(
-        w.contains("sendmeter #12 drive: starting, waiting for host: HOST_BUSY"),
+        w.contains("sendmeter #12 drive: extended · starting, waiting for host: MEM_LOW"),
         "{w}"
     );
     let legacy = stuck("never-started-legacy");

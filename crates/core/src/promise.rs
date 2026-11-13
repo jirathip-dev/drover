@@ -30,7 +30,6 @@ pub enum Say {
     ReviewsAhead(usize),
     Pass(String),
     Starts(String),
-    PassRunning,
 }
 
 /// The spawn-slot wait phrase; the board matches on it.
@@ -64,7 +63,6 @@ impl Say {
             ),
             Say::Pass(r) => format!("drive's next pass{r}"),
             Say::Starts(r) => format!("{r}; starts next pass"),
-            Say::PassRunning => "a drive pass is running; the next pass starts the round".into(),
         }
     }
 }
@@ -238,7 +236,7 @@ mod tests {
             state: state.clone(),
             worktrees: dir.join("w"),
             homes: std::collections::BTreeMap::default(),
-            exe: "herdsman".into(),
+            exe: "drover".into(),
             now,
             home: dir.into(),
             hints: vec![],
@@ -250,7 +248,7 @@ mod tests {
     }
 
     fn tmp(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("herdsman-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("drover-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d

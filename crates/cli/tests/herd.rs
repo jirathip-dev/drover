@@ -2,15 +2,15 @@
 //! weather), its Host/Origin check, no pane text, `?weather=` on loopback only; 390 px snapshots.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const SCREEN: &str = "⏺ Bash(cargo test)\n  ⎿ PANE-SECRET-TEXT ok\n";
 
-fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
+fn fixture(name: &str) -> (drover::Ctx, Fake) {
     let cfg = format!("[serve]\nallowed_hosts = [\"mac.example\"]\n\n{CONFIG}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\n");
     let c = ctx(&tmpdir(name), &cfg);
     let spawn = |fleet: &str, issue: u64, ts: u64, agent: &str| {
@@ -82,7 +82,7 @@ fn body(res: &str) -> Value {
 fn herd_json_shape_on_a_fixture() {
     let (c, r) = fixture("shape");
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    *s.host.lock().unwrap() = herdsman::host::sample(&r);
+    *s.host.lock().unwrap() = drover::host::sample(&r);
     let v = body(&get(&s, "/herd.json", ADDR, ""));
     let names = |l: &Value| {
         l.as_array()
@@ -190,7 +190,7 @@ fn herd_json_refuses_a_foreign_host_or_origin() {
 fn weather_param_works_on_loopback_only() {
     let (c, r) = fixture("weather");
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    *s.host.lock().unwrap() = herdsman::host::sample(&r);
+    *s.host.lock().unwrap() = drover::host::sample(&r);
     let storm = body(&get(&s, "/herd.json?weather=storm", ADDR, ""));
     assert_eq!(
         (&storm["host"]["load"], &storm["host"]["pressure"]),
@@ -227,7 +227,7 @@ fn page_has_the_herd_button_and_horse_symbols() {
 }
 
 /// The PR's 390 px Herd snapshots (fixture data): calm, gusty, storm and fog; the queue at the gate,
-/// a swipe to the next repo, the sheet from a horse; no horizontal page scroll. PNGs go to `$HERDSMAN_SNAPSHOTS`.
+/// a swipe to the next repo, the sheet from a horse; no horizontal page scroll. PNGs go to `$DROVER_SNAPSHOTS`.
 #[test]
 fn herd_snapshots_fit_390px() {
     if no_webkit() {
@@ -272,7 +272,7 @@ fn herd_snapshots_fit_390px() {
         ),
     ];
     for (name, js) in scenes {
-        let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
+        let png = std::env::var("DROVER_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("{name}.png"))
         });
         let o = webview()
@@ -376,7 +376,7 @@ fn herd_horses_are_one_size_at_390px() {
     );
     for (name, json, bands, then) in scenes {
         let js = format!("window.fetch = async () => new Response('', {{status: 404}}); herd(true); herdData({json}); {measure}{then}");
-        let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
+        let png = std::env::var("DROVER_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("{name}.png"))
         });
         let o = webview()

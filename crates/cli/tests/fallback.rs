@@ -1,7 +1,7 @@
 //! #302: a role's `fallback` chain: an unavailable agent rests, the next `harness[:account]` carries on.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -21,7 +21,7 @@ fn config(d: &Path, role_extra: &str) -> String {
 const CHAIN: &str = "fallback = [\"claude:A\", \"claude:B\", \"dsh\"]";
 
 /// Faked herdr/gh/git for a real impl spawn of issue `n` in pane `w9:p<n>`.
-fn fake(c: &herdsman::Ctx, n: u64) -> Fake {
+fn fake(c: &drover::Ctx, n: u64) -> Fake {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     let pane = format!("w9:p{n}");
@@ -44,7 +44,7 @@ fn fake(c: &herdsman::Ctx, n: u64) -> Fake {
 }
 
 /// A real (faked) impl spawn of issue `n` that succeeds.
-fn spawn(c: &herdsman::Ctx, n: u64, extra: &[&str]) {
+fn spawn(c: &drover::Ctx, n: u64, extra: &[&str]) {
     let r = fake(c, n);
     let n = n.to_string();
     let (code, out) = run(c, &r, &[&["spawn", "sendmeter", &n, "impl"][..], extra].concat());
@@ -52,7 +52,7 @@ fn spawn(c: &herdsman::Ctx, n: u64, extra: &[&str]) {
 }
 
 /// The dry-run plan of an impl spawn of issue `n`: (harness, account).
-fn dry(c: &herdsman::Ctx, n: u64) -> (Value, Value) {
+fn dry(c: &drover::Ctx, n: u64) -> (Value, Value) {
     let args = ["spawn", "sendmeter", &n.to_string(), "impl", "--dry-run", "--json"];
     let (code, out) = run(c, &Fake::default(), &args);
     assert_eq!(code, 0, "{out}");
@@ -60,8 +60,8 @@ fn dry(c: &herdsman::Ctx, n: u64) -> (Value, Value) {
     (p["harness"].clone(), p["account"].clone())
 }
 
-/// `herdsman check` with lane `sendmeter-impl-12` (pane `w9:p12`) showing `screen`.
-fn check(c: &herdsman::Ctx, screen: &str) -> String {
+/// `drover check` with lane `sendmeter-impl-12` (pane `w9:p12`) showing `screen`.
+fn check(c: &drover::Ctx, screen: &str) -> String {
     let wt = c.worktrees.join("sendmeter/issue-12");
     let r = Fake::default()
         .reply(
@@ -74,7 +74,7 @@ fn check(c: &herdsman::Ctx, screen: &str) -> String {
     out
 }
 
-fn rest(c: &herdsman::Ctx, d: Value) {
+fn rest(c: &drover::Ctx, d: Value) {
     append(&c.state, &Event::new(c.now, "sendmeter", None, "agent-unavailable", d)).unwrap();
 }
 
@@ -198,18 +198,18 @@ fn default_config_is_unchanged() {
 const HONEST: &str = "Summary of the previous lane; its tool state and approvals are not carried over.";
 
 /// The brief of issue 12's lane.
-fn brief12(c: &herdsman::Ctx) -> String {
+fn brief12(c: &drover::Ctx) -> String {
     std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap()
 }
 
-/// Lane `sendmeter-impl-12` signed out (via `herdsman check`), then superseded by the next entry with `r` as the fake.
-fn sign_out_and_supersede(c: &herdsman::Ctx, r: &Fake) {
+/// Lane `sendmeter-impl-12` signed out (via `drover check`), then superseded by the next entry with `r` as the fake.
+fn sign_out_and_supersede(c: &drover::Ctx, r: &Fake) {
     assert!(check(c, "API Error: 401 · Please run /login").contains("signed out"));
     let (code, out) = run(c, r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert_eq!(code, 0, "{out}");
 }
 
-fn ask(c: &herdsman::Ctx, kind: &str, mut d: Value) {
+fn ask(c: &drover::Ctx, kind: &str, mut d: Value) {
     if kind == "needs-decision" {
         d["agent"] = json!("sendmeter-impl-12");
         d["recommend"] = json!(1);
@@ -287,7 +287,7 @@ fn without_a_transcript_the_handover_reads_the_pane_log() {
     let c = ctx(&d, &config(&d, CHAIN));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, 12, &[]);
-    let log = herdsman::lanes::log(&c.state, "sendmeter-impl-12").unwrap();
+    let log = drover::lanes::log(&c.state, "sendmeter-impl-12").unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(
         &log,

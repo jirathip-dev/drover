@@ -141,7 +141,7 @@ pub fn subscribe(log: &Path, f: &BTreeMap<String, String>, label: &str, now: u64
     let Some(sub) = sub else { return Ok(OFF.into()) };
     let ev = Event::new(
         now,
-        "herdsman",
+        "drover",
         None,
         "push-test",
         serde_json::json!({"reason": "alerts are on"}),
@@ -231,7 +231,7 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
     let first = n.and_then(|n| finding(&evs, &ev.fleet, n)).unwrap_or("");
     let (title, mut body) = match n {
         Some(n) => (format!("#{n} needs you: {why}"), format!("{why}\n{first}")),
-        None => ("herdsman".into(), plain(ev)),
+        None => ("drover".into(), plain(ev)),
     };
     // #386: `<repo> · <thread title>: <the reply's first line>`, or `… asks: <question>`; a tap opens the thread.
     if let Some(t) = thread.and_then(|t| crate::orchestrator::find(&evs, t).ok()) {

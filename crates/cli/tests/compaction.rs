@@ -1,7 +1,7 @@
 //! #343: the event log's folded checkpoint and its rotation out of the live log (#344: archived rows in `state.db`).
 mod common;
 use common::tmpdir;
-use herdsman::events::{append, checkpoint, fold, history, read, rotate, states, Event, States};
+use drover::events::{append, checkpoint, fold, history, read, rotate, states, Event, States};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -93,11 +93,11 @@ fn rotation_keeps_every_event_and_deleting_the_checkpoint_is_harmless() {
         write(&p, &recent.collect::<Vec<_>>());
         let before = read(&p).unwrap();
         let full = fold(&before);
-        let size = herdsman::db::live_bytes(&p).unwrap();
+        let size = drover::db::live_bytes(&p).unwrap();
         rotate(&p, size + 1, now).unwrap();
         assert_eq!(read(&p).unwrap().len(), before.len(), "under the limit nothing moves");
         rotate(&p, 1, now).unwrap();
-        assert!(herdsman::db::live_bytes(&p).unwrap() < size, "the live log shrank");
+        assert!(drover::db::live_bytes(&p).unwrap() < size, "the live log shrank");
         assert!(read(&p).unwrap().len() < before.len());
         let back = history(&p).unwrap();
         let rows = |v: &[Event]| {
@@ -127,7 +127,7 @@ fn rotation_keeps_every_event_and_deleting_the_checkpoint_is_harmless() {
         append(&p, &Event::new(now, "a", Some(1), "stall", json!({}))).unwrap();
         assert_eq!(read(&p).unwrap().last().unwrap().seq, before.len() as u64 + 1);
         let with = states(&p).unwrap();
-        herdsman::db::put(&p, "states", 0, &json!({})).unwrap(); // an unreadable checkpoint
+        drover::db::put(&p, "states", 0, &json!({})).unwrap(); // an unreadable checkpoint
         same(&states(&p).unwrap(), &with);
         checkpoint(&p).unwrap();
         same(&states(&p).unwrap(), &with);
@@ -141,14 +141,14 @@ fn the_shared_read_follows_appends_and_rotations() {
     let p = d.join("events.jsonl");
     let now = 90 * 86_400;
     let seqs = |v: &[Event]| v.iter().map(|e| e.seq).collect::<Vec<_>>();
-    let same = || assert_eq!(seqs(&herdsman::events::shared(&p).unwrap()), seqs(&read(&p).unwrap()));
+    let same = || assert_eq!(seqs(&drover::events::shared(&p).unwrap()), seqs(&read(&p).unwrap()));
     same(); // no database yet
     write(&p, &log(3, 400, 0));
     same();
-    let first = herdsman::events::shared(&p).unwrap();
+    let first = drover::events::shared(&p).unwrap();
     append(&p, &Event::new(now - 10, "a", Some(1), "stall", json!({}))).unwrap();
     same();
-    assert_eq!(herdsman::events::shared(&p).unwrap().len(), first.len() + 1);
+    assert_eq!(drover::events::shared(&p).unwrap().len(), first.len() + 1);
     rotate(&p, 1, now).unwrap();
     assert!(read(&p).unwrap().len() < first.len(), "the rotation archived some");
     same();
@@ -183,7 +183,7 @@ fn the_fold_of_a_50mb_log_takes_under_20ms() {
     let ms = t.elapsed().as_secs_f64() * 1e3;
     eprintln!(
         "#343: fold of a {} MB log from its checkpoint: {ms:.2} ms",
-        herdsman::db::live_bytes(&p).unwrap() >> 20
+        drover::db::live_bytes(&p).unwrap() >> 20
     );
     assert!(ms < 20.0, "{ms} ms");
     same(&st, &fold(&read(&p).unwrap()));
@@ -213,7 +213,7 @@ fn a_5mb_build_cloned_is_stored_in_16kb() {
     })
     .unwrap();
     assert!(stored.len() <= 16 << 10, "{} bytes", stored.len());
-    assert!(herdsman::db::live_bytes(&p).unwrap() <= 32 << 10);
+    assert!(drover::db::live_bytes(&p).unwrap() <= 32 << 10);
     let err = back[1].data["errors"][0].as_str().unwrap();
     assert!(
         err.starts_with("cp: xxx") && err.contains("bytes cut"),
@@ -286,10 +286,10 @@ fn rotation_of_a_young_log_archives_old_noise_and_keeps_the_folds() {
     same(&fold(&after), &fold(&before));
     same(&states(&p).unwrap(), &fold(&before));
     for f in ["a", "b"] {
-        let q = |v: &[Event]| herdsman::queue::replay(v, f);
+        let q = |v: &[Event]| drover::queue::replay(v, f);
         assert_eq!(q(&after), q(&before), "queue {f}");
     }
-    let asks = |v: &[Event]| herdsman::events::open_asks(v).iter().map(|a| a.seq).collect::<Vec<_>>();
+    let asks = |v: &[Event]| drover::events::open_asks(v).iter().map(|a| a.seq).collect::<Vec<_>>();
     assert_eq!(asks(&after), asks(&before));
     assert_eq!(asks(&before).len(), 5);
     let old_noise = |v: &[Event]| {

@@ -1,4 +1,4 @@
-//! `herdsman serve`, the phone page (docs/serve.md): std `TcpListener`, a thread per request (at most 16, then 503);
+//! `drover serve`, the phone page (docs/serve.md): std `TcpListener`, a thread per request (at most 16, then 503);
 //! `/live` SSE clients get a thread each, fed by the 1 s watcher thread.
 use crate::api::{
     body, Account, Backlog, BacklogIssue, Balance, Bar, Blocked, Cell, Chat, Conductor, ConfigSheet, Disk, DoneRow,
@@ -53,7 +53,7 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     // #265: the TypeScript board's build (web/dist, committed: `cargo install` needs no Node).
     ("board.js", "text/javascript", include_bytes!("../web/dist/board.js")),
     ("board.css", "text/css", include_bytes!("../web/dist/board.css")),
-    // #172: the built-in themes; `herdsman serve` serves the active one at `/theme/<file>` (`theme`).
+    // #172: the built-in themes; `drover serve` serves the active one at `/theme/<file>` (`theme`).
     th!("farm/sprites.svg", SVG),
     th!("farm/theme.json", JSON),
     th!("kitchen/sprites.svg", SVG),
@@ -140,7 +140,57 @@ type Auth = std::result::Result<devices::Device, String>;
 fn busy(a: &Auth) -> bool {
     a.as_ref().is_err_and(|w| w.starts_with("db error: "))
 }
-type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>)>>>;
+#[cfg(target_os = "macos")]
+fn queued(s: &TcpStream) -> i32 {
+    extern "C" {
+        fn getsockopt(fd: i32, level: i32, name: i32, value: *mut i32, len: *mut u32) -> i32;
+    }
+    let (mut n, mut len) = (0i32, 4u32);
+    // SAFETY: a live socket's fd and an int-sized out value with its length, as SO_NWRITE writes.
+    let rc = unsafe {
+        getsockopt(
+            std::os::fd::AsRawFd::as_raw_fd(s),
+            0xffff,
+            0x1024,
+            &raw mut n,
+            &raw mut len,
+        )
+    };
+    if rc == 0 {
+        n
+    } else {
+        0
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn queued(s: &TcpStream) -> i32 {
+    extern "C" {
+        fn ioctl(fd: i32, req: u64, ...) -> i32;
+    }
+    let mut n = 0i32;
+    // SAFETY: a live socket's fd and an int out value, as SIOCOUTQ writes.
+    let rc = unsafe { ioctl(std::os::fd::AsRawFd::as_raw_fd(s), 0x5411, &raw mut n) };
+    if rc == 0 {
+        n
+    } else {
+        0
+    }
+}
+
+fn sent(s: &mut TcpStream, mut b: &[u8], end: Instant) -> bool {
+    while !b.is_empty() {
+        let left = end.saturating_duration_since(Instant::now());
+        match s.set_write_timeout(Some(left)).and_then(|()| s.write(b)) {
+            Ok(n) if n > 0 => b = &b[n..],
+            _ => return false,
+        }
+    }
+    true
+}
+
+type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>, String)>>>;
+const PER_DEVICE: usize = 4;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
 /// A form op for `serve_on`'s job thread: (ctx, form, fleet).
 type Job = (Ctx, BTreeMap<String, String>, String);
@@ -787,7 +837,7 @@ impl<'a> Server<'a> {
         let (path, query) = target.split_once('?').unwrap_or((target, ""));
         let mut clients = lock(&self.clients);
         clients.retain(|c| c.0.send(String::new()).is_ok());
-        let live = req.starts_with("GET ") && path == "/live" && self.allowed(self.ctx, &req) && clients.len() < 8;
+        let live = req.starts_with("GET ") && path == "/live" && self.allowed(self.ctx, &req);
         let ctx = Ctx {
             now: crate::now(),
             ..self.ctx.clone()
@@ -795,10 +845,25 @@ impl<'a> Server<'a> {
         // #501: a database error is no unpaired stream: the reply below says 503 and the page reconnects.
         let dev = live.then(|| devices::check(&ctx, header(&req, "cookie").unwrap_or_default()));
         if let Some(dev) = dev.filter(|d| !busy(d)) {
-            s.set_write_timeout(Some(Duration::from_secs(10)))?;
+            let beat = Duration::from_secs(
+                Config::kept(self.ctx)
+                    .map_or(15, |c| c.limits.serve_heartbeat_secs)
+                    .max(1),
+            );
             s.set_read_timeout(Some(Duration::from_millis(1)))?;
             let (tx, rx) = channel::<String>();
-            clients.push((tx, dev.ok().map(|d| d.hash)));
+            let hash = dev.ok().map(|d| d.hash);
+            let who = hash
+                .clone()
+                .unwrap_or_else(|| s.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default());
+            if let Some(i) = clients
+                .iter()
+                .position(|c| c.2 == who)
+                .filter(|_| clients.iter().filter(|c| c.2 == who).count() >= PER_DEVICE)
+            {
+                clients.remove(i);
+            }
+            clients.push((tx, hash, who));
             let mut msg = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n: ping\n\nevent: build\ndata: {VER:08x}\n\n"
             );
@@ -824,7 +889,8 @@ impl<'a> Server<'a> {
             // Each second: a message (an `ev` the replay sent already: skipped), else a peek (the peer closed: free
             // the slot), else a ping every 15 s; #352: a `?tab=host` stream stamps `host-watch.at` (`hosts::sample`).
             std::thread::spawn(move || {
-                while s.write_all(msg.as_bytes()).is_ok() {
+                let mut missed = 0;
+                while sent(&mut s, msg.as_bytes(), Instant::now() + 2 * beat) {
                     let _ = host.then(|| std::fs::write(st.with_file_name("host-watch.at"), crate::now().to_string()));
                     let t = Instant::now();
                     msg = loop {
@@ -846,7 +912,13 @@ impl<'a> Server<'a> {
                             {
                                 return
                             }
-                            _ if t.elapsed() >= Duration::from_secs(15) => break ": ping\n\n".into(),
+                            _ if t.elapsed() >= beat => {
+                                missed = if queued(&s) > 0 { missed + 1 } else { 0 };
+                                if missed >= 2 {
+                                    return;
+                                }
+                                break ": ping\n\n".into();
+                            }
                             _ => {}
                         }
                     };
@@ -1077,7 +1149,6 @@ impl<'a> Server<'a> {
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),
             // #501: `/pair/status` asks whether this browser is paired (no secrets): the page asks it on a 401.
             ("GET", "/live" | "/pair/status") if busy(self.auth(ctx, head, &a)) => deny(""),
-            ("GET", "/live") => ("503 Service Unavailable", "text/plain", text("8 live clients already: the page polls instead\n")),
             ("GET", "/") => self.page(ctx, &form(query), dev().is_some())
                 .map_or_else(fail, |b| ("200 OK", HTML, b.into_bytes())),
             ("GET", "/frag") => Self::part(ctx, &form(query))
@@ -1146,7 +1217,7 @@ impl<'a> Server<'a> {
                     extra = format!("Set-Cookie: hd={t}; Path=/; Max-Age=600; HttpOnly; Secure; SameSite=Strict\r\n");
                     let hint = Config::kept(ctx).ok().and_then(|c| c.serve.approve_hint).unwrap_or_default();
                     let host = loopback && client(head).parse::<std::net::IpAddr>().is_ok_and(|p| p.is_loopback());
-                    let line = if host { format!("herdsman serve approve {code}\n") } else { String::new() };
+                    let line = if host { format!("drover serve approve {code}\n") } else { String::new() };
                     ("200 OK", "text/plain", format!("{code}\n{}\n{line}", hint.replace("{code}", &code)).into_bytes())
                 }
                 Ok(None) => ("429 Too Many Requests", "text/plain", text("4 pairing requests open (2 per address), or a code clash: approve one, tap Pair again or wait 10 min\n")),
@@ -1158,7 +1229,7 @@ impl<'a> Server<'a> {
             },
             ("POST", "/pair/claim") => match dev() {
                 Some(d) => (extra = format!("Set-Cookie: {}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Strict\r\n", header(head, "cookie").unwrap_or_default().split(';').map(str::trim).find(|c| c.starts_with("hd=")).unwrap_or_default()), ("200 OK", "text/plain", format!("paired as {}\n", d.label).into_bytes())).1,
-                None => ("403 Forbidden", "text/plain", text("not approved yet: `herdsman serve approve <code>` on the Mac\n")),
+                None => ("403 Forbidden", "text/plain", text("not approved yet: `drover serve approve <code>` on the Mac\n")),
             },
             ("POST", "/push/subscribe" | "/push/unsubscribe") if dev().is_none() => deny("pair this device first\n"),
             ("POST", "/push/subscribe") => {
@@ -1298,7 +1369,7 @@ impl<'a> Server<'a> {
             bail!("`{agent}` is not a live fleet lane")
         };
         if cfg.fleet.get(&fleet).is_some_and(|f| f.paused) {
-            return refused("PAUSED", format!("{fleet} is paused (`herdsman resume {fleet}`)"));
+            return refused("PAUSED", format!("{fleet} is paused (`drover resume {fleet}`)"));
         }
         Ok((l, fleet, pane))
     }
@@ -1371,7 +1442,7 @@ impl<'a> Server<'a> {
         Ok(format!("sent to {agent}"))
     }
 
-    /// A sheet action (`herdsman stop|kill|clean --lane`, or `close <pane>` for an Others agent; kill and clean dry-run without `confirm=1`); logs `act` unless a dry run.
+    /// A sheet action (`drover stop|kill|clean --lane`, or `close <pane>` for an Others agent; kill and clean dry-run without `confirm=1`); logs `act` unless a dry run.
     fn act(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Act) -> Result<String> {
         let (mut out, cfg) = (vec![], Config::kept(ctx)?);
         let (agent, yes, op) = (f.agent.as_str(), f.confirm == "1", f.op.as_str());
@@ -1634,7 +1705,7 @@ impl<'a> Server<'a> {
             msg
         };
         let msg = if demo {
-            "<p class=\"msg a\">Demo with fake data. Install herdsman to run your own.</p>".to_string()
+            "<p class=\"msg a\">Demo with fake data. Install drover to run your own.</p>".to_string()
         } else {
             msg
         };
@@ -1700,10 +1771,10 @@ impl<'a> Server<'a> {
              <meta name=viewport content=\"width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover\">\
              <meta name=theme-color content=\"#1f2a38\"><meta name=apple-mobile-web-app-capable content=yes>\
              <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png?v={VER:08x}><link rel=apple-touch-icon href={root}icon-180.png?v={VER:08x}>\
-             <title>herdsman</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
+             <title>drover</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
              <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','chat'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
              let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
-             <body data-ts={} data-mode=scene{ro}><header><b>herdsman</b>{badge}<i id=dot class=a></i>\
+             <body data-ts={} data-mode=scene{ro}><header><b>drover</b>{badge}<i id=dot class=a></i>\
              <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=strip><span id=ld class=tld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></span><span class=ldw>loading</span><span id=stale hidden></span></div>{msg}<div id=needs></div><main>\
              <section id=queue></section><section id=lanes></section><section id=chat></section></main>\
              <nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a><a href=#chat><span>chat</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script><script type=module src={root}a/{VER:08x}/board.js></script></body></html>\n",
@@ -2477,7 +2548,7 @@ impl<'a> Server<'a> {
         for (name, fc) in cfg.map(|c| &c.fleet).into_iter().flatten() {
             let last = events.iter().rfind(|e| e.kind == "driven" && e.fleet == *name);
             let (t, w, x) = match last {
-                _ if fc.paused => ("m", "paused", format!("`herdsman resume {name}` starts it again")),
+                _ if fc.paused => ("m", "paused", format!("`drover resume {name}` starts it again")),
                 Some(e) => in_words(e, fc.serial_label()),
                 None => ("m", "nothing yet", String::new()),
             };
@@ -2791,13 +2862,13 @@ fn gauge(x: f64) -> Bar {
 /// #141: a `driven` result as the Host tab says it, by code (`ok:<step>` when it ran): status, word, the plain rest with
 /// what clears it. `{why}`/`{then}`: the raw reason's first two `;` parts; `{busy}`: the issues in the way.
 const WORDS: &str = "HOST_BUSY|a|held|the host is busy: {why} · starts again when it drops
-DISK_LOW|a|held|{why} GB floor · `herdsman clean --yes`
+DISK_LOW|a|held|{why} GB floor · `drover clean --yes`
 ALL_CAPPED|a|waiting|{why} · {then}
 CAP|a|waiting|{why} · starts when a lane finishes
 NO_HOST HOST_OFFLINE|a|waiting|{why}
 SERIAL_BUSY|a|waiting|{slots} full ({busy} must merge first)
 ROUND_LIMIT UPDATE_LIMIT|r|needs you|#{n}: {why} · your call on its card
-WORKTREE_DIRTY|r|needs you|#{n}: {why} · `herdsman kill` it, or spawn `--supersede`
+WORKTREE_DIRTY|r|needs you|#{n}: {why} · `drover kill` it, or spawn `--supersede`
 CI_NOT_GREEN|a|waiting|#{n}'s CI is not green yet
 NO_VERDICT STALE_VERDICT VERDICT_FAIL|a|waiting|#{n} has no PASS for its head · a new round
 PAUSED|m|paused|{then}
@@ -3251,7 +3322,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     Ok(())
 }
 
-/// #268: an issue's PR line as data (web/src/queue.ts draws it), from the cached `herdsman pr` read only (never calls
+/// #268: an issue's PR line as data (web/src/queue.ts draws it), from the cached `drover pr` read only (never calls
 /// `gh`); #269: `fc` none, a lane's fleet not configured (no links, no required checks).
 fn pr_data(ctx: &Ctx, fc: Option<&crate::config::Fleet>, fleet: &str, issue: u64, s: Option<&IssueState>) -> PrLine {
     let pr = gh::cached_pr(ctx, fleet, issue);
@@ -3379,7 +3450,7 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
 type Words = (&'static str, &'static str, String, bool);
 
 /// #170: an event as the Events tab says it: (glyph, tone, plain words, shown under `[important]`). `blocked` and
-/// `driven` take #141's WORDS; the capacity holds stay out of `[important]` (herdsman waiting for room).
+/// `driven` take #141's WORDS; the capacity holds stay out of `[important]` (drover waiting for room).
 pub fn words(e: &Event, serial: &str) -> Words {
     let s = |k: &str| e.str(k).unwrap_or_default();
     let (r, round) = (

@@ -1,9 +1,9 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 
-fn board(name: &str) -> (herdsman::Ctx, String, String) {
+fn board(name: &str) -> (drover::Ctx, String, String) {
     let c = ctx(&tmpdir(name), CONFIG);
     let r = Fake::default()
         .reply("herdr agent list", NO_AGENTS)
@@ -38,12 +38,12 @@ fn board(name: &str) -> (herdsman::Ctx, String, String) {
         .unwrap()
         .as_secs();
     let fake = Fake::default();
-    let s = herdsman::serve::Server::new(&c, &fake, Some("127.0.0.1:7777".into()));
+    let s = drover::serve::Server::new(&c, &fake, Some("127.0.0.1:7777".into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/", l.local_addr().unwrap());
     let c2 = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &r, l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
     (c, url, cookie.trim().trim_start_matches("Cookie: ").to_string())
 }
 
@@ -71,14 +71,14 @@ fn folded_main_buttons_post_their_op_in_webkit() {
         return;
     }
     let _lock = ui_lock();
-    let shots = std::env::var("HERDSMAN_SNAPSHOTS").map_or_else(|_| tmpdir("needs871-png"), std::path::PathBuf::from);
+    let shots = std::env::var("DROVER_SNAPSHOTS").map_or_else(|_| tmpdir("needs871-png"), std::path::PathBuf::from);
     for w in ["390", "1440"] {
         let (c, url, cookie) = board(&format!("needs871-{w}"));
         let png = shots.join(format!("needs-fold-ops-{w}.png"));
         let o = webview()
-            .env("HERDSMAN_COOKIE", &cookie)
-            .env("HERDSMAN_WAIT", "9")
-            .env("HERDSMAN_PRE", PRE)
+            .env("DROVER_COOKIE", &cookie)
+            .env("DROVER_WAIT", "9")
+            .env("DROVER_PRE", PRE)
             .args([&url, w, "queue", "scene", png.to_str().unwrap(), TAPS])
             .output()
             .unwrap();
