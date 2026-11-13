@@ -1,6 +1,3 @@
-//! #972: a worktree root on a dead disk (its listing never returns) costs a pass one probe: drive and check go on,
-//! a new lane takes the next root, the stuck root's lanes show `root unreachable`, `root-hung` alerts once per
-//! episode; a tick stuck on one step past 3 × `slow_secs` shows in `doctor` and the next `drive --fast`.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -28,7 +25,6 @@ fn setup(name: &str) -> Roots {
         .replace("[limits]\n", "[limits]\ndisk_trust_secs = 0\n");
     let c = ctx(&d, &format!("{base}\n[hosts.mini]\n{roots}\n"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    // #11's lane works on the dead disk.
     let wt = dead.join("sendmeter/issue-11");
     let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "harness": "claude", "pane": "w8:p1",
                    "workspace": "w8", "worktree": wt, "root": dead, "branch": "issue-11", "host": "mini"});
@@ -66,7 +62,6 @@ fn host(r: &Roots) -> Fake {
         .reply("herdr agent wait", "{}")
 }
 
-/// The disk under `root` stops answering: its listing blocks until the sender drops.
 fn hang(root: &Path) -> std::sync::mpsc::Sender<()> {
     let (tx, rx) = std::sync::mpsc::channel::<()>();
     let dir = root.to_string_lossy().into_owned();
