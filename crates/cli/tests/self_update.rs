@@ -251,7 +251,11 @@ fn green_is_built_signed_gated_swapped_synced_and_restarted() {
     use std::os::unix::fs::MetadataExt;
     let ino = |p: &std::path::Path| std::fs::metadata(p).unwrap().ino();
     assert_ne!(ino(&live), ino(&old), "renamed over, never rewritten in place");
-    assert_eq!(std::fs::read_to_string(&old).unwrap(), "OLD", "a running serve keeps its file");
+    assert_eq!(
+        std::fs::read_to_string(&old).unwrap(),
+        "OLD",
+        "a running serve keeps its file"
+    );
     assert!(!PathBuf::from(&new).exists());
     let at = |p: &str| {
         r.index(p)

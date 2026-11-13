@@ -214,8 +214,8 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     if cfg!(target_os = "macos") {
         let req = ["-v", "-R", "=certificate leaf[subject.CN] = \"drover-local\"", &ctx.exe];
         let line = format!(
-            "signature — {} signed by \"drover-local\" → sh scripts/signing-identity.sh in the drover checkout (once), then sh scripts/signing-identity.sh sign {}",
-            ctx.exe, ctx.exe
+            "signature — {} signed by \"drover-local\" → sh scripts/signing-identity.sh in the drover checkout (once), then sh scripts/install-gate.sh {} {}",
+            ctx.exe, ctx.exe, ctx.exe
         );
         row(rows, ok(r, "codesign", &req).is_ok(), '✗', &line);
     }
