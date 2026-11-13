@@ -1,0 +1,7 @@
+Decided: merge origin/staging; keep events::emit_ask in ask, take staging's drover rename in the comment
+Because: "All six sites go through that one helper; none counts events itself anymore"
+Decided: ask_ids.rs imports drover:: after the crate rename
+Because: crates/cli/Cargo.toml:2
+Rejected: none
+Check: cargo test -p drover --test ask_ids passes 4/4 at the merge head
+Owner: The branch now sits on the latest staging with the rename; nothing about asks changed.
