@@ -1,4 +1,3 @@
-//! #909: shared heavy-check slots per host: a lane command matching `[fleet.<n>.heavy]` waits in line for one.
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

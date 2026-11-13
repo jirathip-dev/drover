@@ -552,8 +552,10 @@ enum Cmd {
     /// #275: log a lane's own event (`hook-denied`, `coauthor-trailer`), forwarded from a lane on another host
     #[command(hide = true)]
     LaneEvent { kind: String, data: String },
-    /// #909: run a lane's heavy check in one of the host's shared slots, waiting in line for it (the hook's wrapper)
-    #[command(hide = true)]
+    #[command(
+        hide = true,
+        about = "Run a lane's heavy check in a host slot, waiting in line for one (#909)"
+    )]
     Heavy {
         kind: String,
         #[arg(long)]

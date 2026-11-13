@@ -1,4 +1,3 @@
-//! #909: heavy checks wait in line for the host's shared slots; the lane hook wraps them, `drover heavy` runs them.
 mod common;
 use common::{tmpdir, CONFIG};
 use serde_json::{json, Value};
@@ -9,7 +8,6 @@ use std::time::{Duration, Instant};
 
 const JOB: &str = "echo \"start $1\" >> log; while [ ! -f \"go-$1\" ]; do sleep 0.05; done; echo \"end $1\" >> log\n";
 
-/// A lane folder: fleet.toml with `lint`/`test` heavy kinds on host `mini` (`host` its extra keys), the two job scripts.
 fn lane(host: &str) -> PathBuf {
     let d = tmpdir("heavy");
     let heavy = "\n[fleet.sendmeter.heavy]\nlint = [\"sh lint.sh*\"]\ntest = [\"*test.sh*\"]\n";
@@ -20,7 +18,6 @@ fn lane(host: &str) -> PathBuf {
     d
 }
 
-/// `prog` in lane `sendmeter:24:impl` on host `mini`, run in `d` with its fleet.toml and log.
 fn in_lane(prog: &str, d: &Path) -> Command {
     let mut c = Command::new(prog);
     for k in [
@@ -40,7 +37,6 @@ fn in_lane(prog: &str, d: &Path) -> Command {
     c
 }
 
-/// The lane hook's answer to a Bash call of `cmd`.
 fn hook(d: &Path, cmd: &str) -> String {
     let mut child = in_lane(env!("CARGO_BIN_EXE_drover"), d)
         .args(["hook", "--role", "impl"])
@@ -79,7 +75,6 @@ fn log(d: &Path) -> String {
     std::fs::read_to_string(d.join("log")).unwrap_or_default()
 }
 
-/// Run `cmd` as the lane's Bash tool would after the hook's rewrite; once it is in the host's line.
 fn start(d: &Path, cmd: &str) -> Child {
     let out: Value = serde_json::from_str(&hook(d, cmd)).unwrap();
     let wrapped = out["hookSpecificOutput"]["updatedInput"]["command"]
