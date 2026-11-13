@@ -32,7 +32,6 @@ pub trait Runner: Sync {
         let sh = format!("nohup '{exe}' {args} >> '{log}' 2>&1 < /dev/null & echo $!");
         Ok(self.run("sh", &argv(&["-c", &sh]))?.stdout.trim().parse()?)
     }
-    /// #909: `prog args` on this process's own stdio, with no time limit (a lane's heavy check); its exit code.
     fn attached(&self, prog: &str, args: &[String]) -> Result<i32> {
         use std::os::unix::process::ExitStatusExt;
         let st = Command::new(prog).args(args).status()?;
