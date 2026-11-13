@@ -1227,7 +1227,8 @@ pub fn spawn(
         let listed = host::agents(&old);
         // #478: its host unreachable: the pane it left is drive's to kill (and save) once that host is back (`check::stale`).
         let stale = was.filter(|_| listed.is_err() && old.machine.is_some());
-        let hung = was.is_some_and(|e| crate::roots::unreachable(ctx, cfg, e));
+        let hung =
+            was.is_some_and(|e| matches!(crate::roots::skip(ctx, cfg, e), Some("root unreachable" | "root-hung")));
         // #649: its dirty or unpushed work goes to `wip/` on its host before any pane closes; a failed save refuses.
         // #662: a lane resumed in its own worktree keeps it as it is (drive pushed its commits; staged stays staged).
         let cause = crate::shed::exit_cause(&events, &p.agent).filter(|c| crate::shed::RESUMABLE.contains(c));
