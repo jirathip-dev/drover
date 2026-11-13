@@ -8,7 +8,7 @@ use anyhow::Result;
 use serde_json::json;
 
 /// Refusals that only mean "not yet": the action stays pending.
-pub const SOFT: [&str; 8] = [
+pub const SOFT: [&str; 9] = [
     "HOST_BUSY",
     "MEM_LOW",
     "CAP",
@@ -16,6 +16,7 @@ pub const SOFT: [&str; 8] = [
     "SPAWN_PENDING",
     "SERIAL_BUSY",
     "PAUSED",
+    "RUNTIME_DOWN",
     "HOST_OFFLINE",
 ];
 /// Another pass is on the same spawn (#509), or did it: neither waits nor fails.

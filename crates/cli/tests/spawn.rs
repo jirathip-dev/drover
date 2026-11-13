@@ -46,6 +46,10 @@ fn export(p: &Value) -> Vec<String> {
     raw_export(p).into_iter().filter(|w| !w.contains("/.build/")).collect()
 }
 
+fn low() -> Vec<String> {
+    drover::spawn::LOW.split_whitespace().map(String::from).collect()
+}
+
 fn raw_export(p: &Value) -> Vec<String> {
     typed(p, "export ").split_whitespace().map(String::from).collect()
 }
@@ -93,7 +97,14 @@ fn claude_role_dry_run_uses_synced_profile() {
             // #708: no account, so a token the pane inherited from a login shell never picks one.
             "&&",
             "unset",
-            "CLAUDE_CODE_OAUTH_TOKEN"
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "&&",
+            "renice",
+            "-n",
+            "10",
+            "-p",
+            "$$",
+            ">/dev/null"
         ]
     );
     let start = launch(&p);
@@ -254,12 +265,16 @@ fn fleet_env_is_exported_into_the_lane() {
     assert_eq!(
         export(&p),
         [
-            "export".to_string(),
-            "DROVER_LANE='sendmeter:12:impl'".into(),
-            port12(),
-            format!("CARGO_TARGET_DIR='{home}/.cache/drover/target/sendmeter'"),
-            "npm_config_cache='/c/npm'".into(),
+            vec![
+                "export".to_string(),
+                "DROVER_LANE='sendmeter:12:impl'".into(),
+                port12(),
+                format!("CARGO_TARGET_DIR='{home}/.cache/drover/target/sendmeter'"),
+                "npm_config_cache='/c/npm'".into(),
+            ],
+            low()
         ]
+        .concat()
     );
 }
 
@@ -274,7 +289,7 @@ fn shared_cache_is_exported_into_the_lane() {
     let _sh = on_shed(&c);
     assert_eq!(
         export(&plan(&c, &shed_fake(), "impl"))[3..],
-        ["CARGO_TARGET_DIR='/c/cache/sendmeter/target'".to_string()]
+        [vec!["CARGO_TARGET_DIR='/c/cache/sendmeter/target'".to_string()], low()].concat()
     );
 }
 
@@ -391,7 +406,11 @@ fn fleet_env_expands_drover_port() {
     let p = lane_port(None, "sendmeter/issue-12", &[]);
     assert_eq!(
         export(&plan(&c, &shed_fake(), "impl"))[3..],
-        [format!("PORT='{p}'"), format!("VITE='http://127.0.0.1:{p}/'")]
+        [
+            vec![format!("PORT='{p}'"), format!("VITE='http://127.0.0.1:{p}/'")],
+            low()
+        ]
+        .concat()
     );
 }
 
@@ -589,10 +608,14 @@ fn hermes_role_dry_run_kicks_prompt_after_boot() {
     assert_eq!(
         export(&p),
         [
-            "export".to_string(),
-            "DROVER_LANE='sendmeter:12:rev'".into(),
-            format!("DROVER_PORT={}", lane_port(None, "sendmeter/rev-12-r1", &[]))
+            vec![
+                "export".to_string(),
+                "DROVER_LANE='sendmeter:12:rev'".into(),
+                format!("DROVER_PORT={}", lane_port(None, "sendmeter/rev-12-r1", &[])),
+            ],
+            low()
         ]
+        .concat()
     );
     let start = launch(&p);
     assert_eq!(
@@ -907,4 +930,18 @@ fn lane_title_strips_prefixes_and_cuts_at_words() {
     let thai = lane_title(h, &"ภาษาไทย".repeat(10));
     assert!(thai.ends_with('…') && thai.chars().count() <= 60, "{thai}");
     assert!(thai.starts_with("synergy · impl #2840 · ภาษาไทยภาษาไทย"));
+}
+
+#[test]
+fn a_spawned_lanes_build_command_runs_at_low_priority() {
+    let c = ctx(&tmpdir("spawn-nice"), CONFIG);
+    let _sh = on_shed(&c);
+    let line = typed(&plan(&c, &shed_fake(), "impl"), "export ");
+    let build = "sh -c 'ps -o nice= -p $$'";
+    let out = std::process::Command::new("sh")
+        .args(["-c", &format!("{line} && {build}")])
+        .output()
+        .unwrap();
+    let nice: i32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+    assert!(nice >= 10, "the build's nice: {nice}");
 }

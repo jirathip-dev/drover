@@ -174,6 +174,10 @@ fn a_blank_pane_after_the_start_window_is_retried_once_then_escalated() {
     assert_eq!(nh.len(), 1);
     assert_eq!(nh[0].str("code"), Some("START_FAILED"));
     assert!(nh[0].str("reason").unwrap().contains("sendmeter-impl-12"), "{nh:?}");
+    assert!(
+        kinds(&c, "runtime-down").is_empty(),
+        "one lane failing trips no breaker"
+    );
     drive(&at(&c, t0 + 4 * start), &r);
     assert_eq!((kinds(&c, "needs-human").len(), kinds(&c, "respawn").len()), (1, 1));
 }

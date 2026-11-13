@@ -149,6 +149,9 @@ pub struct Plan {
     pub token: Option<(String, PathBuf)>,
 }
 
+/// #893: the lane's shell, and so its agent and every build it starts, at low scheduling priority.
+pub const LOW: &str = "&& renice -n 10 -p $$ >/dev/null";
+
 impl Plan {
     /// Exports `DROVER_LANE`, `DROVER_PORT` and the fleet's `env`; #441: sources the secrets `deliver` wrote.
     pub fn lane_cmd(&self, pane: &str) -> Vec<String> {
@@ -178,6 +181,7 @@ impl Plan {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));
         }
+        c.push(LOW.into());
         c
     }
 
@@ -988,7 +992,11 @@ pub fn spawn(
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
     // #157: from here every call and file of the lane is on its host; #236: the dry run shows it placed.
-    let placed = crate::hosts::place(ctx, cfg, r, &read(&ctx.state)?, (fleet, issue, role), o.host.as_deref())?;
+    let ev = read(&ctx.state)?;
+    let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), o.host.as_deref())?;
+    if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
+        return refused("RUNTIME_DOWN", why);
+    }
     let placed = crate::hosts::wake(ctx, cfg, r, (f, o.dry_run), placed)?;
     let acp_host = placed.as_ref().is_some_and(|pl| cfg.host_acp(&pl.name).is_some());
     let on = crate::hosts::On::new(r, placed.as_ref().and_then(|pl| pl.machine.as_deref())).shed_only(acp_host);
@@ -1754,6 +1762,7 @@ fn starts<'a>(
                 ));
             }
             "pushed" => (v, asked) = (vec![], None),
+            "runtime-cleared" => v.clear(),
             "turn-end" if mine => (v, asked) = (vec![], None),
             "lane-dead" if agent.is_some_and(|a| e.str("key").is_some_and(|k| k.ends_with(&format!(":{a}")))) => {
                 fail(&mut v, "lane died");
