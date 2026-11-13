@@ -1,0 +1,10 @@
+Decided: reuse #776's per-folder probe (`runner::hung` on its own thread) as `runner::answers`; each local root is probed before any walk, stat or spawn pick touches it
+Because: "A root that doesn't answer in time is marked unreachable for that pass, its lanes show `root unreachable`, and the pass goes on."
+Rejected: running the whole walk in a child process with a deadline — a stuck child on a dead disk outlives SIGKILL; probing the root once is enough and costs one disk_probe_secs per process
+Decided: `check` fires `root-hung` / `root-answers` keyed on the previous event's ts, as host-offline does; waiting reads them, so a lane on a hung root gets no respawn
+Because: "`check` alerts once (`root-hung`) naming the root, the same as a host going offline."
+Decided: `tick.step` now carries `at` (when the step began); doctor and `drive --fast` flag a step older than 3 × slow_secs
+Because: "A tick whose `tick.step` hasn't advanced for longer than `[limits] slow_secs` × 3 is reported by `doctor` and by the next `drive --fast`."
+Check: crates/core/src/roots.rs `state` returns `unreachable` for a hung local root, so `pick` skips it and `watch` neither marks it gone nor restarts its lanes
+Check: the fake dead disk is the probe seeded via `runner::hung` with a closure that blocks until the test drops its sender
+Owner: a dead external disk now costs drive one 2 s probe and an alert instead of stalling every fleet for hours
