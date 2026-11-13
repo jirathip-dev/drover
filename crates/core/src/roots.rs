@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT: &str = "~/.local/share/herdsman/work";
+pub const DEFAULT: &str = "~/.local/share/drover/work";
 /// The folder under a root holding its lanes' build caches.
 pub const BUILD: &str = ".build";
 const KINDS: [&str; 3] = ["root-eject", "root-gone", "root-back"];
@@ -94,7 +94,7 @@ fn inside(e: &Event, root: &Path) -> bool {
         .map_or(wt.is_some_and(|w| w.starts_with(root)), |r| Path::new(r) == root)
 }
 
-/// `herdsman hosts eject <host> [<root>]` (default: its first root): no new lane goes there; each lane there is saved
+/// `drover hosts eject <host> [<root>]` (default: its first root): no new lane goes there; each lane there is saved
 /// and restarted on the next root; then `safe to unplug <root>` once no herdr agent works there (exit 0), else 1.
 pub fn eject(
     ctx: &Ctx,
@@ -124,7 +124,7 @@ pub fn eject(
         );
     }
     let d = json!({"host": name, "root": root});
-    emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, "root-eject", d))?;
+    emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "root-eject", d))?;
     restart(ctx, cfg, r, out, (name, &root), false)?;
     let open: Vec<String> = (crate::host::agents(&on)?.iter())
         .filter(|a| a["cwd"].as_str().is_some_and(|c| Path::new(c).starts_with(&root)))
@@ -166,7 +166,7 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     writeln!(out, "! root {s} gone")?;
                 }
                 let d = json!({"host": name, "root": root});
-                emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))?;
+                emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))?;
             }
             if gone {
                 restart(ctx, cfg, r, out, (name, &root), true)?;
@@ -267,8 +267,8 @@ fn restart(
     Ok(())
 }
 
-/// `herdsman migrate`: each worktree under `~/.herdr/worktrees` moves to `<root>/<repo>/<lane>` (`git worktree move`),
-/// a live lane's after it ends; once all have, the old build caches (`~/.cache/herdsman/target`) go.
+/// `drover migrate`: each worktree under `~/.herdr/worktrees` moves to `<root>/<repo>/<lane>` (`git worktree move`),
+/// a live lane's after it ends; once all have, the old build caches (`~/.cache/drover/target`) go.
 pub fn migrate(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let old = ctx.home.join(".herdr/worktrees");
     let ls = |p: &Path| std::fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path());
@@ -290,7 +290,7 @@ pub fn migrate(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
         let how = ["could not move", "live, left for later:", "moved"][usize::from(live) + 2 * usize::from(moved)];
         writeln!(out, "{how} {w} -> {}", to.display())?;
     }
-    let cache = ctx.home.join(".cache/herdsman/target");
+    let cache = ctx.home.join(".cache/drover/target");
     if left == 0 && cache.is_dir() {
         std::fs::remove_dir_all(&cache)?;
         writeln!(out, "dropped the old build caches {}", cache.display())?;

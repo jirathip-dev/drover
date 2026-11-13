@@ -14,14 +14,14 @@ fn a_read_that_blocks_times_out_within_the_limit() {
     let made = std::process::Command::new("mkfifo").arg(&fifo).status().unwrap();
     assert!(made.success());
     let t = Instant::now();
-    let e = herdsman::runner::read_file(&fifo).unwrap_err();
+    let e = drover::runner::read_file(&fifo).unwrap_err();
     let took = t.elapsed();
     assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
-    let limit = herdsman::runner::probe_wait();
+    let limit = drover::runner::probe_wait();
     assert!(took >= limit && took < limit + Duration::from_secs(1), "{took:?}");
     // The read still waits on its thread: a second one never starts and answers at once.
     let t = Instant::now();
-    let again = herdsman::runner::read_file(&fifo).unwrap_err();
+    let again = drover::runner::read_file(&fifo).unwrap_err();
     assert_eq!(again.kind(), std::io::ErrorKind::TimedOut);
     assert!(t.elapsed() < Duration::from_millis(200), "{:?}", t.elapsed());
     let _ = std::fs::OpenOptions::new().write(true).open(&fifo); // lets the stuck read end

@@ -41,7 +41,7 @@ fn collide(r: &dyn Runner, dir: &Path, a: &str, b: &str) -> Vec<String> {
 
 /// #320: a predicted conflict is information, not a hold.
 fn keep_going(o: u64) -> String {
-    format!("may conflict with #{o}; keep going, herdsman updates you after it merges")
+    format!("may conflict with #{o}; keep going, drover updates you after it merges")
 }
 
 /// Every pair of pushed, unmerged branches and each against integration, cached by head pair; logs one
@@ -148,7 +148,7 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
             == git(r, dir, &["rev-parse", &format!("{h}^{{tree}}")]).ok()
 }
 
-/// `herdsman cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config`;
+/// `drover cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config`;
 /// #429: under `warn_within` lines of headroom it warns and still passes. #270: `web/src/**/*.ts` lines are reported, never capped.
 pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
     let (cap, warn) = limits(&std::fs::read_to_string(config)?)
@@ -165,7 +165,7 @@ pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> R
     if (0..warn).contains(&left) {
         writeln!(out, "WARN: {left} lines of headroom (< {warn})")?;
     }
-    // #419: a repo's `.herdsman/rules.md` holds at most 30 rules; one that code enforces is deleted.
+    // #419: a repo's `.drover/rules.md` holds at most 30 rules; one that code enforces is deleted.
     let over = std::fs::read_to_string(rules).map_or(0, |t| t.lines().count());
     if over > 30 {
         writeln!(
@@ -299,7 +299,7 @@ fn script_caps(
         .ok_or_else(|| format!("printed `{}`", last.trim()))
 }
 
-/// #668: `herdsman cap <fleet>`: the queue-wide line-cap view, so one conductor-filed issue raises the cap for the
+/// #668: `drover cap <fleet>`: the queue-wide line-cap view, so one conductor-filed issue raises the cap for the
 /// whole queue: integration's total against the cap, every open PR's `src/ net` (its body's, else its measured diff),
 /// the queued issues with no PR, and the projected total with the ask a crossing lane files. #754: a fleet with its
 /// own cap script counts by it, at integration and on each open PR's merge, every cap it prints.
@@ -315,7 +315,7 @@ pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut 
         let warn = limits(&toml).map_or(500, |l| l.1);
         let caps = script_caps(ctx, r, f, s, &sha, None).map_err(|got| {
             let at = &f.integration;
-            anyhow::anyhow!("`{s}` at origin/{at} printed no `N / cap M` line herdsman can parse: {got}")
+            anyhow::anyhow!("`{s}` at origin/{at} printed no `N / cap M` line drover can parse: {got}")
         })?;
         (sha, caps, warn)
     } else {

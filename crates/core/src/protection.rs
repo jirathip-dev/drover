@@ -1,4 +1,4 @@
-//! `herdsman protection`: read-only `gh api …/protection` check; enabling it is the owner's job (docs/dsh.md).
+//! `drover protection`: read-only `gh api …/protection` check; enabling it is the owner's job (docs/dsh.md).
 use crate::config::Config;
 use crate::runner::{argv, Runner};
 use anyhow::Result;

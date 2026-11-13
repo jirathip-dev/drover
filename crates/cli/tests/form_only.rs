@@ -2,8 +2,8 @@
 //! toward `review_rounds`, at most `form_rounds` times per issue.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, fold, read, Event, IssueState};
+use drover::config::Config;
+use drover::events::{append, fold, read, Event, IssueState};
 use serde_json::json;
 
 // #418: each blocker carries a Proof block, spec (a quoted rule + file:line) or run (a fenced command + its output).
@@ -12,7 +12,7 @@ const FORM: &str = "FAIL (form-only)\n\n- blocking [pr-body] PR body: no `## For
 Proof: run\n  ```\n  cargo fmt --check\n  ```\n  ```\n  Diff in src/x.rs:3\n  ```\n- non-blocking src/y.rs:1: a nit\n";
 const SPEC: &str = "  Proof: spec\n  > AC 1: it works\n";
 
-fn fixture(name: &str, extra: &str) -> (herdsman::Ctx, std::path::PathBuf) {
+fn fixture(name: &str, extra: &str) -> (drover::Ctx, std::path::PathBuf) {
     let d = tmpdir(name);
     let c = ctx(&d, &format!("{CONFIG}{extra}"));
     let log = |ts, role: &str| {
@@ -24,7 +24,7 @@ fn fixture(name: &str, extra: &str) -> (herdsman::Ctx, std::path::PathBuf) {
     (c, d)
 }
 
-fn verdict(c: &herdsman::Ctx, d: &std::path::Path, sha: char, body: &str) -> String {
+fn verdict(c: &drover::Ctx, d: &std::path::Path, sha: char, body: &str) -> String {
     let (sha, file) = (sha.to_string().repeat(40), d.join("verdict.md"));
     std::fs::write(&file, body).unwrap();
     let r = Fake::default().reply("gh api", &sha);
@@ -46,13 +46,13 @@ fn verdict(c: &herdsman::Ctx, d: &std::path::Path, sha: char, body: &str) -> Str
     out
 }
 
-fn state(c: &herdsman::Ctx) -> IssueState {
+fn state(c: &drover::Ctx) -> IssueState {
     fold(&read(&c.state).unwrap())
         .remove(&("sendmeter".to_string(), 12))
         .unwrap()
 }
 
-fn logged(c: &herdsman::Ctx, kind: &str) -> usize {
+fn logged(c: &drover::Ctx, kind: &str) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == kind).count()
 }
 
@@ -172,7 +172,7 @@ fn a_fleet_overrides_the_form_categories() {
 #[test]
 fn form_only_parses_tags() {
     let cats = ["format".to_string(), "pr-body".to_string()];
-    let ok = |b: &str| herdsman::gate::form_only(b, &cats);
+    let ok = |b: &str| drover::gate::form_only(b, &cats);
     assert!(ok(
         "FAIL (form-only)\n- **blocking** [format] a.rs:1\n- non-blocking [code] b.rs:2\n"
     ));
@@ -210,7 +210,7 @@ fn the_card_says_not_counted_in_amber() {
     let r = Fake::default()
         .reply("herdr agent list", NO_AGENTS)
         .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#);
-    let s = herdsman::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let page = queue_tab(&s, "127.0.0.1:7777", c.now); // #268: the board's Queue tab
     assert!(
         page.contains("rev <span class=a>FAIL (form-only)</span> r1 · <span class=a>not counted · form 1/3</span>"),
@@ -222,7 +222,7 @@ fn the_card_says_not_counted_in_amber() {
 #[test]
 fn a_blocking_heading_is_ignored() {
     let cats = ["pr-body".to_string(), "docs-fresh".to_string()];
-    let ok = |b: &str| herdsman::gate::form_only(b, &cats);
+    let ok = |b: &str| drover::gate::form_only(b, &cats);
     let head = "FAIL (form-only)\n\n## Blocking\n- blocking [pr-body] body lags the head\n";
     assert!(ok(&format!("{head}- blocking [docs-fresh] README\n")));
     assert!(!ok(&format!("{head}- blocking README is stale\n")));

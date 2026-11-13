@@ -1,4 +1,4 @@
-//! The tool guard of `herdsman help --agent`, in each harness's hook dialect (`Harness::hook_dialect`).
+//! The tool guard of `drover help --agent`, in each harness's hook dialect (`Harness::hook_dialect`).
 use crate::config::{Config, Deny};
 use crate::providers::dialects;
 use serde::{Deserialize, Serialize};
@@ -13,13 +13,13 @@ pub struct Policy {
     pub reviewer: bool,
     /// #216: the fleet's `deny_commands`.
     pub deny: Vec<Deny>,
-    /// #410: an orchestrator lane (`HERDSMAN_LANE`'s role): it may spawn design lanes.
+    /// #410: an orchestrator lane (`DROVER_LANE`'s role): it may spawn design lanes.
     pub orchestrator: bool,
-    /// #410: the orchestrator's thread folder, writable but for herdsman's `.brief.md` and `.thread.md`.
+    /// #410: the orchestrator's thread folder, writable but for drover's `.brief.md` and `.thread.md`.
     pub own: Option<String>,
     /// #538: the capability groups an orchestrator has on (`[orchestrator] allow`).
     pub groups: Vec<String>,
-    /// #536: the lane's `HERDSMAN_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo builds only under its `build_root`.
+    /// #536: the lane's `DROVER_SCRATCH_TARGET` (`<build_root>/.scratch/<agent>`): Cargo builds only under its `build_root`.
     pub scratch: Option<String>,
     /// #668: an impl lane: `ci/cap.toml` is not its to write (but for the orchestrator-filed raise).
     pub cap: bool,
@@ -34,7 +34,7 @@ pub struct Design {
 }
 
 /// #592: a lane's hook rules as the main host resolves them from its fleet.toml. A remote lane's are frozen at spawn in
-/// its rules file (`HERDSMAN_RULES`); its host's own fleet.toml is never read. No notifier, token or env value.
+/// its rules file (`DROVER_RULES`); its host's own fleet.toml is never read. No notifier, token or env value.
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Rules {
     /// main, master, staging and every fleet's integration branch.
@@ -95,7 +95,7 @@ const WRITERS: &[&str] = &[
 /// #668: the repo's line cap file; one orchestrator-filed issue raises it for the whole queue.
 pub const CAP_FILE: &str = "ci/cap.toml";
 pub const NO_CAP_EDIT: &str = "REFUSED CAP_FILE: a lane never edits ci/cap.toml; when your PR would cross the cap, \
-                               run `herdsman cap <fleet>` and ask with its view (#668)";
+                               run `drover cap <fleet>` and ask with its view (#668)";
 
 /// #502: lanes share one user, so a pattern kill reaches every lane (BSD `pkill x -n` matched them all).
 pub const NO_BROAD_KILL: &str = "REFUSED NO_BROAD_KILL: lanes stop only their own processes: start with \
@@ -151,7 +151,7 @@ pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<Str
     }
     if let Some(pp) = protected_path(file, p).filter(|_| !own_file(file, p)) {
         return Some(format!(
-            "{file} is protected ({pp}); change it only through `herdsman` (e.g. `herdsman set`)"
+            "{file} is protected ({pp}); change it only through `drover` (e.g. `drover set`)"
         ));
     }
     if let Some(r) = design_write(file, p) {
@@ -195,7 +195,7 @@ fn protected_path<'a>(s: &str, p: &'a Policy) -> Option<&'a str> {
     p.paths.iter().map(String::as_str).find(|pp| s.contains(pp))
 }
 
-/// #410: `file` lies in the conductor's own thread folder and is not one herdsman writes there.
+/// #410: `file` lies in the conductor's own thread folder and is not one drover writes there.
 fn own_file(file: &str, p: &Policy) -> bool {
     use std::path::{Component, Path};
     let Some(own) = &p.own else { return false };
@@ -227,15 +227,15 @@ fn resolve(w: &str, cwd: &str) -> String {
     out.to_string_lossy().into_owned()
 }
 
-/// #677: only herdsman writes why notes: a lane's `git notes` write, or a push naming `refs/notes`, is refused.
+/// #677: only drover writes why notes: a lane's `git notes` write, or a push naming `refs/notes`, is refused.
 fn notes(t: &[&str]) -> Option<String> {
     let rest = &t[t.iter().position(|w| *w == "git")? + 1..];
     let writes = ["add", "append", "edit", "copy", "merge", "remove", "prune"];
     let write = (rest.iter().position(|w| *w == "notes")).is_some_and(|i| rest[i..].iter().any(|w| writes.contains(w)));
     let push = rest.contains(&"push") && rest.iter().any(|w| w.contains("refs/notes"));
     (write || push).then(|| {
-        "REFUSED NOTES_HERDSMAN_ONLY: only herdsman writes or pushes why notes: write why.md, then \
-        `herdsman turn done` (#677)"
+        "REFUSED NOTES_DROVER_ONLY: only drover writes or pushes why notes: write why.md, then \
+        `drover turn done` (#677)"
             .into()
     })
 }
@@ -288,11 +288,11 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             .collect();
         let bare = unquote(seg, true).replace(['"', '\''], " ");
         let w: Vec<&str> = bare.split_whitespace().collect();
-        let herdsman = (w
+        let drover = (w
             .iter()
             .find(|w| !w.contains('=') && !matches!(word(w), "command" | "time")))
-        .is_some_and(|w| matches!(word(w), "herdsman" | "fleet"));
-        let writer = !herdsman
+        .is_some_and(|w| matches!(word(w), "drover" | "herdsman" | "fleet"));
+        let writer = !drover
             && (w.iter().any(|w| WRITERS.contains(w))
                 || (w.iter().any(|w| *w == "sed" || *w == "perl") && w.iter().any(|w| w.starts_with("-i"))));
         // #668: the cap file as a writer's argument or a redirection's target.
@@ -338,7 +338,7 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         if let Some(pp) = hit.or(seg_hit) {
             if writer || !targets.is_empty() {
                 return Some(format!(
-                    "writing under {pp} is blocked; use `herdsman set` / `herdsman profiles sync`"
+                    "writing under {pp} is blocked; use `drover set` / `drover profiles sync`"
                 ));
             }
         }
@@ -398,6 +398,8 @@ fn target_dir(t: &[&str], p: &Policy) -> Option<String> {
         v.or_else(|| (*w == "--target-dir").then(|| t.get(i + 1).copied()).flatten())
     });
     let vars = [
+        "$DROVER_SCRATCH_TARGET",
+        "${DROVER_SCRATCH_TARGET}",
         "$HERDSMAN_SCRATCH_TARGET",
         "${HERDSMAN_SCRATCH_TARGET}",
         "$CARGO_TARGET_DIR",
@@ -410,12 +412,12 @@ fn target_dir(t: &[&str], p: &Policy) -> Option<String> {
     let bad = dirs.filter(|d| !d.is_empty()).find(|d| !ok(d))?;
     Some(format!(
         "REFUSED SCRATCH_TARGET: {bad} is outside {root}; build in your scratch dir: \
-         CARGO_TARGET_DIR=$HERDSMAN_SCRATCH_TARGET/target ({s}/target), never /tmp or $TMPDIR"
+         CARGO_TARGET_DIR=$DROVER_SCRATCH_TARGET/target ({s}/target), never /tmp or $TMPDIR"
     ))
 }
 
 /// #410: `cmd` without the text the shell never runs as a command, so quoting one never matches it: heredoc
-/// bodies fed to `cat` or `tee`, comments, and the quoted text of `herdsman thread reply|say` and `herdsman ask`
+/// bodies fed to `cat` or `tee`, comments, and the quoted text of `drover thread reply|say` and `drover ask`
 /// (the question, each `--option`). #537: with `args`, also any quoted argument of a command that runs no text of its
 /// own: none of its words a wrapper (`sh`, `eval`, …), `ssh`, `watch`, `parallel` or `-c` (`su -c`, `script -c`).
 fn unquote(cmd: &str, args: bool) -> String {
@@ -431,10 +433,10 @@ fn unquote(cmd: &str, args: bool) -> String {
         }
         match c {
             '\'' | '"' => {
-                // Only when `herdsman` is the command word: `eval` or `ssh h` before it re-parse the quoted text.
+                // Only when `drover` is the command word: `eval` or `ssh h` before it re-parse the quoted text.
                 let i = words
                     .iter()
-                    .position(|w| matches!(word(w), "herdsman" | "fleet" | "gh"));
+                    .position(|w| matches!(word(w), "drover" | "herdsman" | "fleet" | "gh"));
                 let i = i.filter(|&i| {
                     words[..i]
                         .iter()
@@ -580,9 +582,7 @@ fn gh(t: &[&str]) -> Option<String> {
     let merge = rest.windows(2).any(|w| w == ["pr", "merge"])
         || (rest.first() == Some(&"api") && rest.iter().any(|w| w.contains("/merge")));
     if merge {
-        return Some(
-            "merging is gated: run `herdsman merge <fleet> <issue>` (needs exact-head PASS + green CI)".into(),
-        );
+        return Some("merging is gated: run `drover merge <fleet> <issue>` (needs exact-head PASS + green CI)".into());
     }
     let api = rest.first() == Some(&"api");
     let comment = rest
@@ -594,7 +594,7 @@ fn gh(t: &[&str]) -> Option<String> {
     })
 }
 
-/// #538: the capability group of a `herdsman` verb (its words after `herdsman`), if it is in one.
+/// #538: the capability group of a `drover` verb (its words after `drover`), if it is in one.
 fn group(r: &[&str]) -> Option<&'static str> {
     let has = |w: &str| r.iter().any(|x| x.split('=').next() == Some(w));
     Some(match (*r.first()?, r.get(1).copied()) {
@@ -610,11 +610,13 @@ fn group(r: &[&str]) -> Option<&'static str> {
     })
 }
 
-/// #538: the capability group of the `herdsman` verb `cmd` runs, if any (its thread row names it).
+/// #538: the capability group of the `drover` verb `cmd` runs, if any (its thread row names it).
 pub fn group_of(cmd: &str) -> Option<&'static str> {
     cmd.split([';', '|', '&', '\n', '(', ')', '`']).find_map(|seg| {
         let t: Vec<&str> = seg.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
-        let i = t.iter().position(|w| matches!(word(w), "herdsman" | "fleet"))?;
+        let i = t
+            .iter()
+            .position(|w| matches!(word(w), "drover" | "herdsman" | "fleet"))?;
         group(&t[i + 1..])
     })
 }
@@ -626,7 +628,7 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     let orchestrator = p.orchestrator;
     let i = t
         .iter()
-        .position(|w| matches!(w.rsplit('/').next(), Some("herdsman" | "fleet")))?;
+        .position(|w| matches!(w.rsplit('/').next(), Some("drover" | "herdsman" | "fleet")))?;
     let r = &t[i + 1..];
     if r.first() == Some(&"serve") && ["approve", "unpair", "--revoke"].iter().any(|w| r.contains(w)) {
         return Some("REFUSED OWNER_ONLY: only the owner pairs or unpairs devices, never a lane (#288)".into());
@@ -645,7 +647,7 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
         );
     }
     // #425: a lane may hold its own issue (`queue <fleet> block --on N <issue>`), never another one.
-    let lane = std::env::var("HERDSMAN_LANE").unwrap_or_default();
+    let lane = std::env::var("DROVER_LANE").unwrap_or_default();
     let own = lane.split(':').nth(1).filter(|n| n.parse::<u64>().is_ok());
     let block = r.first() == Some(&"queue") && matches!(r.get(2), Some(&("block" | "unblock"))) && own.is_some();
     let other = |(i, w): (usize, &&str)| r[i - 1] != "--on" && w.parse::<u64>().is_ok() && Some(*w) != own;
@@ -655,27 +657,23 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     // #419: `lesson` files an issue and spawns a lane: a conductor's verb (the owner's too); its digest (and #510's
     // `apply`, a rules-file rewrite in the lane's own worktree) is open.
     if !orchestrator && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
-        return Some(
-            "REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `herdsman lesson` (#419)".into(),
-        );
+        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover lesson` (#419)".into());
     }
     // #574: `amend` edits the issue's spec: the owner's decision, written by a conductor or the owner.
     if !orchestrator && r.first() == Some(&"amend") {
-        return Some(
-            "REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `herdsman amend` (#574)".into(),
-        );
+        return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover amend` (#574)".into());
     }
     // #461: `timer install` (only that host verb) is a conductor's too; outside a lane it is the owner's.
     if !orchestrator && !lane.is_empty() && r.first() == Some(&"timer") && r.contains(&"install") {
         return Some(
-            "REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `herdsman timer install` (#461)".into(),
+            "REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover timer install` (#461)".into(),
         );
     }
     if r.first() == Some(&"wip") && !r.contains(&"--dry-run") {
         return Some("REFUSED OWNER_ONLY: only the owner prunes wip branches (a run card), never a lane (#646)".into());
     }
     if r.first() == Some(&"setup") {
-        return Some("REFUSED OWNER_ONLY: only the owner runs `herdsman setup`, never a lane (#303)".into());
+        return Some("REFUSED OWNER_ONLY: only the owner runs `drover setup`, never a lane (#303)".into());
     }
     if r.first() == Some(&"proxy") || r.first() == Some(&"hosts") && r.contains(&"revoke") {
         return Some(
@@ -688,20 +686,20 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     let g = group(r)?;
     if g == "design" && !orchestrator {
         return Some(
-            "design lanes are owner-only: the owner or an orchestrator thread runs `herdsman spawn … design`, never a lane"
+            "design lanes are owner-only: the owner or an orchestrator thread runs `drover spawn … design`, never a lane"
                 .into(),
         );
     }
     if !orchestrator {
         return Some(format!(
-            "REFUSED OWNER_ONLY: `herdsman {}` ({g} group) is the owner's or an orchestrator's, never a lane's (#538)",
+            "REFUSED OWNER_ONLY: `drover {}` ({g} group) is the owner's or an orchestrator's, never a lane's (#538)",
             r[0]
         ));
     }
     (!p.groups.iter().any(|x| x == g)).then(|| {
         format!(
             "REFUSED GROUP_OFF: the `{g}` group is off in [orchestrator] allow; propose turning it on with \
-             `herdsman config propose` (#538)"
+             `drover config propose` (#538)"
         )
     })
 }
@@ -759,7 +757,7 @@ fn git_push(t: &[&str], cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Opti
     }
     let deny = |b: &str| {
         Some(format!(
-            "pushing to `{b}` is blocked; integration branches change only via `herdsman merge`"
+            "pushing to `{b}` is blocked; integration branches change only via `drover merge`"
         ))
     };
     let mut pos = vec![];
@@ -814,14 +812,16 @@ pub fn push_dir(input: &Value) -> Option<String> {
         })
 }
 
-/// #386: a shell call's command when it runs `herdsman` or `gh` (but `herdsman thread reply`, which is the reply
+/// #386: a shell call's command when it runs `drover` or `gh` (but `drover thread reply`, which is the reply
 /// itself): a conductor's tool row in its thread.
 pub fn fleet_cmd(input: &Value) -> Option<&str> {
     let tool = input["tool_name"].as_str().unwrap_or_default();
     let cmd = tool_input(input)["command"].as_str()?.trim();
     let first = cmd.split_whitespace().next().map(word)?;
-    (dialects().any(|d| d.shell == tool) && ["herdsman", "gh"].contains(&first) && !cmd.contains("thread reply"))
-        .then_some(cmd)
+    (dialects().any(|d| d.shell == tool)
+        && ["drover", "herdsman", "gh"].contains(&first)
+        && !cmd.contains("thread reply"))
+    .then_some(cmd)
 }
 
 /// #413: a `gh issue create` that ran: its flow-back line (`filed #52: <title>`, number from the printed URL), if known.
@@ -884,18 +884,17 @@ pub fn reported(input: &Value) -> Option<&'static str> {
 }
 
 /// #511: what the stop hook tells an impl lane whose turn ended unreported.
-pub const TURN_ASK: &str =
-    "herdsman: end your turn with `herdsman turn done|blocked|need-input|working [--why <text>]` \
-(done: pushed and ready for review; blocked: --why names the blocker; need-input: after `herdsman ask`; working: \
+pub const TURN_ASK: &str = "drover: end your turn with `drover turn done|blocked|need-input|working [--why <text>]` \
+(done: pushed and ready for review; blocked: --why names the blocker; need-input: after `drover ask`; working: \
 stopped mid-task)";
 
-/// #511: the lane's turn marker on its own host: `prompt` once a prompt is submitted, `turn` once `herdsman turn`
+/// #511: the lane's turn marker on its own host: `prompt` once a prompt is submitted, `turn` once `drover turn`
 /// ran, `asked` once the stop hook told it.
 pub fn turn_mark(state: &Path, lane: &str) -> PathBuf {
     state.with_file_name(format!("turn-{}", lane.replace([':', '/'], "-")))
 }
 
-/// #511: an impl lane (`builds`) whose turn ends with no `herdsman turn` since its last prompt goes on once with
+/// #511: an impl lane (`builds`) whose turn ends with no `drover turn` since its last prompt goes on once with
 /// `TURN_ASK`; never twice (`asked`, or the harness's own `stop_hook_active`), so it never loops.
 pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Option<Value> {
     let ev = input["hook_event_name"].as_str().filter(|e| !e.is_empty())?;
@@ -918,5 +917,5 @@ pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Op
 /// The deny answer in the dialect that sent `input`, else the first harness's (`Dialect::deny`).
 pub fn deny_json(input: &Value, reason: &str) -> Value {
     let d = dialects().find(|d| (d.sent)(input)).or_else(|| dialects().next());
-    d.map_or(Value::Null, |d| (d.deny)(&format!("herdsman: {reason}")))
+    d.map_or(Value::Null, |d| (d.deny)(&format!("drover: {reason}")))
 }

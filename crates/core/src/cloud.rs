@@ -83,7 +83,7 @@ pub fn run(ctx: &Ctx, r: &dyn Runner, rc: &toml::Table, what: &str, line: &str, 
 
 fn log(ctx: &Ctx, cfg: &Config, kind: &str, name: &str, mut d: Value) -> Result<()> {
     d["host"] = json!(name);
-    emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))
+    emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))
 }
 
 fn last<'a>(events: &'a [Event], name: &str, kinds: &[&str]) -> Option<&'a Event> {
@@ -354,7 +354,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"$@\"; }; ";
 /// Bootstrap's steps after herdr and each harness's install, `name⇥read-back check⇥install` each (Rust with a C linker
 /// for `cargo install`).
 const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh";
-/// #637: a `shed-acp` host's own runtime instead of herdr: shed at herdsman's pin with its launchd or systemd job,
+/// #637: a `shed-acp` host's own runtime instead of herdr: shed at drover's pin with its launchd or systemd job,
 /// node for the ACP adapter (`{acp}`), and that adapter in shed's agent list.
 const SHED: &str =
     "shed job\tshed doctor >/dev/null 2>&1\tshed install --force && { { systemctl --user daemon-reload && \
@@ -384,7 +384,7 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let (tags, home) = crate::hosts::probe(&on).with_context(|| format!("can't reach {name}"))?;
     let mine = crate::config::home().to_string_lossy().into_owned();
     let [exe, conf] = [&ctx.exe, &ctx.config.display().to_string()].map(|p| p.replace(&mine, &home));
-    let (root, sha) = (exe.rsplitn(3, '/').last().unwrap_or(&home), env!("HERDSMAN_SHA"));
+    let (root, sha) = (exe.rsplitn(3, '/').last().unwrap_or(&home), env!("DROVER_SHA"));
     let v = if acp {
         String::new()
     } else {
@@ -441,7 +441,7 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         Ok(writeln!(out, "✓ {what} — installed")?)
     };
     let (repo, version) = (env!("CARGO_PKG_REPOSITORY"), crate::VERSION);
-    let build = format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force");
+    let build = format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force && ln -sf drover '{root}/bin/herdsman'");
     let herdr = format!("herdr\therdr --version | grep -qx 'herdr {v}'\t\n");
     let mut steps = format!("{}{TOOLS}\n", if acp { "" } else { &herdr });
     for (n, i) in crate::providers::lanes().filter_map(|h| Some((h.name, h.install()?))) {
@@ -454,7 +454,7 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         let adapter = SHED.replace("{acp}", crate::providers::default_acp().unwrap_or_default());
         steps += &format!("shed\t[ \"$(shed --version)\" = 'shed {sv}' ]\t{shed}\n{adapter}\n");
     }
-    steps += &format!("herdsman\t[ \"$('{exe}' --version)\" = 'herdsman {version}' ]\t{build}");
+    steps += &format!("drover\t[ \"$('{exe}' --version)\" = 'drover {version}' ]\t{build}");
     steps.lines().try_for_each(&mut step)?;
     // #637: a shed-acp host has no herdr panes and no harness login (its lanes sign in through the proxy): gh only.
     if acp && !pass("gh auth status") {

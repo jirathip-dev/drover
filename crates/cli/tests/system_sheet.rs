@@ -4,7 +4,7 @@
 //! page in WebKit (tests/support/webview.swift), the board's parts painted as main.ts paints them (`system_frags`).
 mod common;
 use common::*;
-use herdsman::serve::Server;
+use drover::serve::Server;
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -54,8 +54,8 @@ fn measure(file: &std::path::Path, pre: &str, stored: &str, js: &str) -> Vec<f64
     )
     .unwrap();
     let o = webview()
-        .env("HERDSMAN_TAB", stored)
-        .env("HERDSMAN_WAIT", "1")
+        .env("DROVER_TAB", stored)
+        .env("DROVER_WAIT", "1")
         .args([run.to_str().unwrap(), "390", "-", "horse", png.to_str().unwrap(), js])
         .output()
         .unwrap();

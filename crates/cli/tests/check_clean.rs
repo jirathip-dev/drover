@@ -1,19 +1,19 @@
-//! M2: `herdsman check` alerts (once per state), `herdsman clean`, plain-text notifications.
+//! M2: `drover check` alerts (once per state), `drover clean`, plain-text notifications.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, emit, plain, read, Event};
+use drover::config::Config;
+use drover::events::{append, emit, plain, read, Event};
 use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
 const NOW: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-12";
 
-fn ev(c: &herdsman::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(issue), kind, d)).unwrap();
 }
 
-fn spawn_ev(c: &herdsman::Ctx, ts: u64, issue: u64, agent: &str) {
+fn spawn_ev(c: &drover::Ctx, ts: u64, issue: u64, agent: &str) {
     ev(
         c,
         ts,
@@ -23,11 +23,11 @@ fn spawn_ev(c: &herdsman::Ctx, ts: u64, issue: u64, agent: &str) {
     );
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> usize {
+fn kinds(c: &drover::Ctx, kind: &str) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == kind).count()
 }
 
-fn check(c: &herdsman::Ctx, r: &Fake) -> String {
+fn check(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["check"]);
     assert_eq!(code, 0, "{out}");
     out
@@ -291,7 +291,7 @@ fn clean_removes_only_merged_clean_idle_lanes() {
         all.iter().all(|p| p.exists()) && !dry.contains("freed"),
         "a dry run frees nothing: {dry}"
     );
-    let freed = herdsman::check::du(&gone) + herdsman::check::du(&kept_wt); // #185: blocks used, not 2000 bytes
+    let freed = drover::check::du(&gone) + drover::check::du(&kept_wt); // #185: blocks used, not 2000 bytes
     let r1 = r();
     let (code, done) = run(&c, &r1, &["clean", "--yes"]);
     assert_eq!(code, 0, "{done}");
@@ -330,10 +330,10 @@ fn clean_removes_only_merged_clean_idle_lanes() {
 /// Real git; herdr is scripted (no agents, workspace already gone).
 struct GitHerdr(Fake);
 
-impl herdsman::runner::Runner for GitHerdr {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for GitHerdr {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog == "git" {
-            return herdsman::runner::Real.run(prog, args);
+            return drover::runner::Real.run(prog, args);
         }
         self.0.run(prog, args)
     }
@@ -582,7 +582,7 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
     );
 
     // #138: a removed lane's rolling transcript goes with it; a kept lane's stays.
-    let log = |a: &str| herdsman::lanes::log(&c.state, a).unwrap();
+    let log = |a: &str| drover::lanes::log(&c.state, a).unwrap();
     std::fs::create_dir_all(log("impl-21").parent().unwrap()).unwrap();
     for a in ["impl-21", "impl-22"] {
         std::fs::write(log(a), "⏺ hi\n").unwrap();
@@ -681,7 +681,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
                 format!("{w}: 1 uncommitted change(s)")
             }
         );
-        let st = &herdsman::events::fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
+        let st = &drover::events::fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
         assert_eq!(
             (st.state.as_str(), st.last_event.as_str()),
             ("fix(1)", "verdict"),
@@ -699,7 +699,7 @@ fn du_counts_blocks_used_not_apparent_size() {
         .set_len(1 << 30)
         .unwrap();
     std::fs::write(d.join("data"), vec![1u8; 64 << 10]).unwrap();
-    let n = herdsman::check::du(&d);
+    let n = drover::check::du(&d);
     assert!((64 << 10..1 << 20).contains(&n), "{n}");
 }
 

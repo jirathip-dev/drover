@@ -5,7 +5,7 @@
 //! stands in for the next tool that stops answering.
 mod common;
 use common::*;
-use herdsman::runner::{Out, Runner};
+use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::io::{Read, Write};
 use std::time::Duration;
@@ -46,7 +46,7 @@ impl Runner for Wedged {
         Ok(Self::cut(
             prog,
             args,
-            Option::<Duration>::from(herdsman::runner::limit(prog, args)),
+            Option::<Duration>::from(drover::runner::limit(prog, args)),
         ))
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, limit: Duration) -> anyhow::Result<Out> {
@@ -62,7 +62,7 @@ impl Runner for Wedged {
 
 /// A Claude fleet with a `secret:` env and account A's usage meter, and #12's
 /// impl lane on A (check confirms its usage-limit banner from the meter).
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let cfg = CONFIG.replace(
         "harness  =  \"hermes\"    # toggled in tests",
@@ -75,8 +75,8 @@ fn setup(name: &str) -> herdsman::Ctx {
     let wt = c.worktrees.join("sendmeter/issue-12");
     let d = json!({"role": "impl", "agent": IMPL, "pane": "w9:p12", "worktree": wt, "branch": "issue-12",
                    "harness": "claude", "account": "A"});
-    let ev = herdsman::events::Event::new(c.now - 900, "sendmeter", Some(12), "spawn", d);
-    herdsman::events::append(&c.state, &ev).unwrap();
+    let ev = drover::events::Event::new(c.now - 900, "sendmeter", Some(12), "spawn", d);
+    drover::events::append(&c.state, &ev).unwrap();
     c
 }
 
@@ -107,12 +107,10 @@ fn in_10_s<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static
     }
 }
 
-/// `herdsman <args>` against the wedged Keychain, within 10 s: (exit code, output).
+/// `drover <args>` against the wedged Keychain, within 10 s: (exit code, output).
 fn cli(name: &str, args: &'static [&'static str]) -> (i32, String) {
     let c = setup(name);
-    in_10_s(&format!("herdsman {}", args.join(" ")), move || {
-        run(&c, &wedged(), args)
-    })
+    in_10_s(&format!("drover {}", args.join(" ")), move || run(&c, &wedged(), args))
 }
 
 #[test]
@@ -133,12 +131,12 @@ fn tick_finishes_in_10_s() {
 
 #[test]
 fn serve_starts_and_serves_the_board_in_10_s() {
-    let c: &'static herdsman::Ctx = Box::leak(Box::new(setup("wedged-serve")));
+    let c: &'static drover::Ctx = Box::leak(Box::new(setup("wedged-serve")));
     let page = in_10_s("serve", move || {
         let r: &'static Wedged = Box::leak(Box::new(wedged()));
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = l.local_addr().unwrap();
-        std::thread::spawn(move || herdsman::serve::serve_on(c, r, l, false));
+        std::thread::spawn(move || drover::serve::serve_on(c, r, l, false));
         let get = |path: &str| {
             let mut s = std::net::TcpStream::connect(addr).unwrap();
             s.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())

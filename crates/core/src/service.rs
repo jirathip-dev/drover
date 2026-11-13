@@ -1,4 +1,4 @@
-//! #345: the client side of `herdsman service` (docs/service.md): a kick over its local socket, a remote lane's
+//! #345: the client side of `drover service` (docs/service.md): a kick over its local socket, a remote lane's
 //! commands over HTTP with its per-lane token, and the token check the service runs. With no service, `None`: the
 //! caller goes on in direct mode.
 use crate::config::Config;
@@ -45,7 +45,7 @@ pub fn kick(ctx: &Ctx, fleet: &str, issue: u64, why: &str, id: Option<&str>) -> 
     v["pid"].as_u64().and_then(|p| u32::try_from(p).ok())
 }
 
-/// A lane on another host: `args` run by the service at `url` (`HERDSMAN_SERVICE`) as the token's lane; a `--file`
+/// A lane on another host: `args` run by the service at `url` (`DROVER_SERVICE`) as the token's lane; a `--file`
 /// travels as its text. The token rides in the body, never in argv.
 pub fn post(r: &dyn Runner, url: &str, token: &str, args: &[String]) -> Result<Out> {
     let mut files = serde_json::Map::new();
@@ -59,7 +59,7 @@ pub fn post(r: &dyn Runner, url: &str, token: &str, args: &[String]) -> Result<O
     let o = r.run_in("curl", &a, &body.to_string())?;
     let v: Option<Value> = serde_json::from_str(&o.stdout).ok();
     let Some(v) = v.filter(|_| o.code == 0) else {
-        bail!("herdsman service at {url}: {}{}", o.stderr.trim(), o.stdout.trim())
+        bail!("drover service at {url}: {}{}", o.stderr.trim(), o.stdout.trim())
     };
     let text = |k: &str| v[k].as_str().unwrap_or_default().to_string();
     let code = v["code"].as_i64().and_then(|c| i32::try_from(c).ok()).unwrap_or(1);
@@ -70,7 +70,7 @@ pub fn post(r: &dyn Runner, url: &str, token: &str, args: &[String]) -> Result<O
     })
 }
 
-/// A lane's token scope: its fleet, issue, role, agent, `HERDSMAN_LANE` and its spawn's time.
+/// A lane's token scope: its fleet, issue, role, agent, `DROVER_LANE` and its spawn's time.
 #[derive(Serialize, Deserialize)]
 pub struct Grant {
     pub fleet: String,
@@ -92,7 +92,7 @@ pub fn grant(ctx: &Ctx, g: &Grant) -> Result<String> {
     Ok(t)
 }
 
-/// The `HERDSMAN_LANE` `args` run as, if the token may run them: its own lane's command (#389's `foreign`; a verdict
+/// The `DROVER_LANE` `args` run as, if the token may run them: its own lane's command (#389's `foreign`; a verdict
 /// only from a check role), while its spawn is the issue's latest for its role, not closed, and the issue is open.
 pub fn authorize(ctx: &Ctx, cfg: &Config, token: &str, args: &[String]) -> Result<String> {
     let Some((_, g)) = crate::db::get::<Grant>(&ctx.state, &key(token)) else {

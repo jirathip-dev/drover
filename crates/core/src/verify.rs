@@ -10,7 +10,7 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
 /// The repo's recipe the verifier follows.
-pub const RECIPE: &str = ".herdsman/verify.md";
+pub const RECIPE: &str = ".drover/verify.md";
 
 /// Why `fleet` #`n`'s verify stage runs (`None`: it doesn't): rev's `Repro: verify` PASS, its queue mark, else a
 /// design stage or a PR touching `ui_paths`.
@@ -55,8 +55,8 @@ pub fn due(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, s: &Iss
             "no design stage, no UI files, not queued --verify".to_string(),
         ),
         Some(w) => {
-            let api = format!("repos/{}/contents/{RECIPE}?ref={sha}", f.repo);
-            if ok(r, "gh", &["api", &api, "--silent"]).is_ok() {
+            let api = |p: &str| format!("repos/{}/contents/{p}?ref={sha}", f.repo);
+            if crate::repo_read("verify.md", |p| ok(r, "gh", &["api", &api(p), "--silent"]).ok()).is_some() {
                 return Ok(true);
             }
             ("verify-no-recipe", format!("{w}, but the repo has no {RECIPE}"))

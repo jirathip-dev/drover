@@ -1,6 +1,6 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
@@ -68,16 +68,16 @@ fn alive(pid: &str) -> bool {
 #[test]
 fn a_handover_fails_no_request_and_loses_no_live_event() {
     let c = ctx(&tmpdir("ho"), CONFIG);
-    append(&c.state, &Event::new(c.now, "herdsman", None, "note", json!({}))).unwrap();
-    let mut p = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
+    append(&c.state, &Event::new(c.now, "drover", None, "note", json!({}))).unwrap();
+    let mut p = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
         .args(["serve", "--addr", "127.0.0.1:0"])
         .env("FLEET_CONFIG", &c.config)
         .env("FLEET_STATE", &c.state)
         .env("FLEET_WORKTREES", &c.worktrees)
-        .env("HERDSMAN_HOME", &c.home)
+        .env("DROVER_HOME", &c.home)
         .env("PATH", "/usr/bin:/bin")
-        .env_remove("HERDSMAN_LANE")
-        .env_remove("HERDSMAN_SERVE_FDS")
+        .env_remove("DROVER_LANE")
+        .env_remove("DROVER_SERVE_FDS")
         .stderr(std::process::Stdio::piped())
         .spawn()
         .unwrap();
@@ -87,7 +87,7 @@ fn a_handover_fails_no_request_and_loses_no_live_event() {
     err.read_line(&mut first).unwrap();
     let addr = first
         .trim()
-        .strip_prefix("herdsman serve: phone page on http://")
+        .strip_prefix("drover serve: phone page on http://")
         .unwrap_or_else(|| panic!("{first}"))
         .trim_end_matches('/')
         .to_string();
@@ -126,7 +126,7 @@ fn a_handover_fails_no_request_and_loses_no_live_event() {
         let (writing, state) = (writing.clone(), c.state.clone());
         std::thread::spawn(move || {
             while writing.load(SeqCst) {
-                append(&state, &Event::new(1, "herdsman", None, "note", json!({}))).unwrap();
+                append(&state, &Event::new(1, "drover", None, "note", json!({}))).unwrap();
                 std::thread::sleep(Duration::from_millis(100));
             }
         })
@@ -134,7 +134,7 @@ fn a_handover_fails_no_request_and_loses_no_live_event() {
     std::thread::sleep(Duration::from_millis(500));
 
     let port = addr.rsplit_once(':').unwrap().1.parse().unwrap();
-    let mut ctl = UnixStream::connect(herdsman::update::serve_sock(&c, port)).unwrap();
+    let mut ctl = UnixStream::connect(drover::update::serve_sock(&c, port)).unwrap();
     ctl.set_read_timeout(Some(Duration::from_secs(60))).unwrap();
     ctl.write_all(b"handover\n").unwrap();
     let mut reply = String::new();
@@ -172,7 +172,7 @@ fn a_handover_fails_no_request_and_loses_no_live_event() {
     assert!(still.is_none(), "the supervised pid serves on (exec in place)");
     let log = log.lock().unwrap().clone();
     assert_eq!(
-        log.matches("herdsman serve: phone page on").count(),
+        log.matches("drover serve: phone page on").count(),
         2,
         "the bridge and the new serve: {log}"
     );

@@ -38,7 +38,7 @@ pub fn save(ctx: &Ctx, cfg: &Config, f: &BTreeMap<String, String>, device: &str)
     Ok(format!("report {id} sent: {path}"))
 }
 
-/// `herdsman report [ID]`: each report's id, note and bundle path, newest first; with an id, its bundle.
+/// `drover report [ID]`: each report's id, note and bundle path, newest first; with an id, its bundle.
 pub fn show(ctx: &Ctx, out: &mut dyn Write, id: Option<&str>) -> Result<()> {
     if let Some(id) = id {
         let p = root(ctx).join(id).join("bundle.json");

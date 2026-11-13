@@ -1,12 +1,12 @@
 //! #17: the README stays short, lists real commands, links resolve, leaks nothing, and its
-//! quick start runs as written in a temp HERDSMAN_HOME.
+//! quick start runs as written in a temp DROVER_HOME.
 mod common;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-const BIN: &str = env!("CARGO_BIN_EXE_herdsman");
+const BIN: &str = env!("CARGO_BIN_EXE_drover");
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..")
@@ -34,7 +34,7 @@ fn readme_is_short() {
     assert!(n <= 150, "README.md has {n} lines"); // #156: about 150 at most
 }
 
-/// #156: every command the README names (table and quick start) is in `herdsman help --agent`.
+/// #156: every command the README names (table and quick start) is in `drover help --agent`.
 #[test]
 fn readme_commands_are_in_help_agent() {
     let help = Command::new(BIN).args(["help", "--agent"]).output().unwrap();
@@ -47,7 +47,7 @@ fn readme_commands_are_in_help_agent() {
         .collect();
     cmds.extend(
         text.lines()
-            .filter_map(|l| l.strip_prefix("herdsman ")?.split_whitespace().next()),
+            .filter_map(|l| l.strip_prefix("drover ")?.split_whitespace().next()),
     );
     assert!(cmds.len() >= 20, "{cmds:?}");
     for cmd in cmds {
@@ -56,8 +56,8 @@ fn readme_commands_are_in_help_agent() {
                 .any(|w| w == cmd)
         };
         assert!(
-            help.lines().filter(|l| l.contains("herdsman ")).any(|l| named(&l)),
-            "README names `{cmd}`, not in herdsman help --agent"
+            help.lines().filter(|l| l.contains("drover ")).any(|l| named(&l)),
+            "README names `{cmd}`, not in drover help --agent"
         );
     }
 }
@@ -74,7 +74,7 @@ fn table_commands_exist() {
     for row in readme().lines().filter(|l| l.starts_with("| `")) {
         for cell in row[2..].split(" | ").next().unwrap().split(" / ") {
             let cmd = cell.trim_matches('`').split_whitespace().next().unwrap();
-            assert!(known.contains(&cmd), "README lists `{cmd}`, not in herdsman --help");
+            assert!(known.contains(&cmd), "README lists `{cmd}`, not in drover --help");
             n += 1;
         }
     }
@@ -130,13 +130,13 @@ fn quick_start_runs_as_written() {
     let path = format!("{}:{}", bindir.display(), std::env::var("PATH").unwrap());
     let cmd = |prog: &str| {
         let mut c = Command::new(prog);
-        c.env("HOME", &home).env("HERDSMAN_HOME", &home).env("PATH", &path);
+        c.env("HOME", &home).env("DROVER_HOME", &home).env("PATH", &path);
         for k in [
             "FLEET_CONFIG",
             "FLEET_STATE",
             "FLEET_WORKTREES",
             "FLEET_HERMES_PROFILES",
-            "HERDSMAN_LANE",
+            "DROVER_LANE",
             "FLEET_LANE",
         ] {
             c.env_remove(k);
@@ -147,8 +147,8 @@ fn quick_start_runs_as_written() {
     // real launchd/systemd job on this host.
     let script: String = block
         .lines()
-        .filter(|l| !l.starts_with("cargo install") && !l.starts_with("herdsman serve"))
-        .filter(|l| !l.starts_with("herdsman timer"))
+        .filter(|l| !l.starts_with("cargo install") && !l.starts_with("drover serve"))
+        .filter(|l| !l.starts_with("drover timer"))
         .map(|l| format!("{l}\n"))
         .collect();
     let out = cmd("sh").args(["-e", "-c", &script]).output().unwrap();
@@ -161,7 +161,7 @@ fn quick_start_runs_as_written() {
     assert!(all.contains("issue-12"), "spawn --dry-run printed no plan:\n{all}");
     assert!(all.contains("no tracked issues"), "{all}");
 
-    let serve = block.lines().find(|l| l.starts_with("herdsman serve")).unwrap();
+    let serve = block.lines().find(|l| l.starts_with("drover serve")).unwrap();
     let mut args: Vec<String> = serve
         .split('#')
         .next()
@@ -170,7 +170,7 @@ fn quick_start_runs_as_written() {
         .skip(1)
         .map(String::from)
         .collect();
-    // Same command on a free port, so a herdsman already serving 7777 on this host can't answer for it.
+    // Same command on a free port, so a drover already serving 7777 on this host can't answer for it.
     let i = args.iter().position(|a| a == "--addr").unwrap() + 1;
     let addr = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -224,19 +224,19 @@ fn setup_commands_exist() {
     let text = setup();
     let mut n = 0;
     for b in blocks(&text, "sh").into_iter().chain(blocks(&text, "ini")) {
-        for part in b.split("herdsman ").skip(1) {
+        for part in b.split("drover ").skip(1) {
             let cmd = part.split_whitespace().next().unwrap();
             if cmd.starts_with('-') || cmd.starts_with('#') {
-                continue; // `herdsman --version`, a comment
+                continue; // `drover --version`, a comment
             }
             assert!(
                 known.contains(&cmd),
-                "setup.md runs `herdsman {cmd}`, not in herdsman --help"
+                "setup.md runs `drover {cmd}`, not in drover --help"
             );
             n += 1;
         }
     }
-    assert!(n >= 5, "only {n} herdsman commands found");
+    assert!(n >= 5, "only {n} drover commands found");
 }
 
 #[test]
@@ -248,7 +248,7 @@ fn setup_toml_parses() {
     let mut file = String::new();
     for b in all {
         file.push_str(b);
-        herdsman::config::Config::parse(&file).unwrap_or_else(|e| panic!("{e:#}\n{file}"));
+        drover::config::Config::parse(&file).unwrap_or_else(|e| panic!("{e:#}\n{file}"));
     }
 }
 

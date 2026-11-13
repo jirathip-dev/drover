@@ -1,6 +1,6 @@
 // #731: the verify lane's browser evidence, for any repo's recipe. No deps: Chrome's --remote-debugging-pipe (fd 3 in,
 // fd 4 out, as ui-close.mjs) and a PNG codec over node:zlib.
-//   node verify-browser.mjs <url> <out dir> [--name home] [--recipe .herdsman/verify.md] [--approved <dir>]
+//   node verify-browser.mjs <url> <out dir> [--name home] [--recipe .drover/verify.md] [--approved <dir>]
 //                           [--threshold 0.1] [--trace] [--wait 1000]
 // drives <url> at 1440×900 and 390×844 and writes, in <out dir>: <name>-1440.png, <name>-390.png, <name>-console.log
 // (errors and warnings), <name>-network.log (failed and 4xx/5xx requests), <name>-a11y.json (the accessibility tree's

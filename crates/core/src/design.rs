@@ -24,13 +24,13 @@ pub fn scope(ctx: &Ctx, r: &dyn Runner, input: &Value, fleet: &str, n: Option<u6
         .and_then(|n| crate::gh::cached_spec(ctx, fleet, n))
         .unwrap_or_default();
     let root = top.map_or_else(|_| cwd.to_string(), |t| t.trim().to_string());
-    let text = std::fs::read_to_string(Path::new(&root).join(RECIPE)).unwrap_or_default();
+    let text = std::fs::read_to_string(crate::repo_path(&Path::new(&root).join(RECIPE))).unwrap_or_default();
     let allow = Recipe::of(&text, spec["body"].as_str().unwrap_or_default()).folders;
     crate::hook::Design { root, allow }
 }
 
 /// #873: a repo's design recipe.
-pub const RECIPE: &str = ".herdsman/design.md";
+pub const RECIPE: &str = ".drover/design.md";
 
 /// #873: what a design lane draws, where, how it renders and the host tags it needs.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -87,8 +87,8 @@ impl Recipe {
 
     /// The recipe at `rev` of the checkout `dir`, for an issue `body`.
     pub fn at(r: &dyn Runner, dir: &str, rev: &str, body: &str) -> Recipe {
-        let text = ok(r, "git", &["-C", dir, "show", &format!("{rev}:{RECIPE}")]);
-        Recipe::of(&text.unwrap_or_default(), body)
+        let show = |p: &str| ok(r, "git", &["-C", dir, "show", &format!("{rev}:{p}")]).ok();
+        Recipe::of(&crate::repo_read("design.md", show).unwrap_or_default(), body)
     }
 }
 

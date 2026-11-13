@@ -192,7 +192,7 @@ pub fn banner(pat: &str, screen: &str) -> bool {
     pat.split('|').any(|p| !p.is_empty() && screen.contains(p))
 }
 
-/// `herdsman accounts`: each account's state and the open lanes on it. Names only, never tokens.
+/// `drover accounts`: each account's state and the open lanes on it. Names only, never tokens.
 pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = read(&ctx.state)?;
     // #785: the lanes still running (`usage::lane_end`), with their accounts.
@@ -308,7 +308,7 @@ pub fn signed(
             *env = got?;
             break;
         };
-        let why = format!("{why}; sign it in, then `herdsman accounts reset {name}`");
+        let why = format!("{why}; sign it in, then `drover accounts reset {name}`");
         let d = json!({"account": name, "harness": role.harness, "meter": "sign-in check", "reason": why});
         let e = Event::new(ctx.now, fleet, None, "account-signed-out", d);
         emit(&ctx.state, cfg, e)?;
@@ -343,7 +343,7 @@ pub fn token_file(cfg: &Config, harness: &str, name: &str) -> Option<(String, st
         .then(|| (var.to_string(), crate::config::expand(f)))
 }
 
-/// #683: account `name`'s sign-in for `herdsman accounts`: whether it passes, and its line (` → ` its fix): its env's
+/// #683: account `name`'s sign-in for `drover accounts`: whether it passes, and its line (` → ` its fix): its env's
 /// config folder signed in as its CLI's status command says (#785; never the Keychain), or why its env failed.
 pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
     let Some(hn) = crate::providers::accounts().map(|p| p.name) else {
@@ -374,7 +374,7 @@ pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
     )
 }
 
-/// `herdsman accounts reset <name>`: spawns may use a capped account again.
+/// `drover accounts reset <name>`: spawns may use a capped account again.
 pub fn reset(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, name: &str) -> Result<()> {
     anyhow::ensure!(cfg.accounts.names.contains_key(name), "unknown account '{name}'");
     let events = read(&ctx.state)?;

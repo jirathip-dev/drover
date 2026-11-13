@@ -174,7 +174,7 @@ fn changed(ctx: &Ctx, lane: &str, screen: &str, busy: bool) -> u64 {
 }
 
 /// #792: the prompt a silent ACP lane gets once its turn is cancelled.
-pub const NUDGE: &str = "continue: your last step finished or failed; carry on, or end your turn with `herdsman turn`";
+pub const NUDGE: &str = "continue: your last step finished or failed; carry on, or end your turn with `drover turn`";
 
 /// #792: a lane's process tree at or over this much of one core runs its open tool call.
 pub const BUSY_CPU_PCT: u64 = 10;

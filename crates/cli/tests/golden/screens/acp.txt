@@ -1,4 +1,4 @@
-> # Brief — herdsman-impl-12 (acme/sendmeter#12)
+> # Brief — drover-impl-12 (acme/sendmeter#12)
 Implement #12: retry a failed send once.
 Run `cargo test` before you push.
 [tool] Read src/send.rs (completed)
