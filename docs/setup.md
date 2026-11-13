@@ -16,8 +16,8 @@ herdr --version
 cargo build --release --locked -p drover
 # macOS (#781): sign with one local identity, so a Keychain item's access list trusts every build, not one.
 sh scripts/signing-identity.sh   # once: creates "drover-local", lets codesign use it (asks the login password)
-# #968: sign a copy beside the installed file, then rename it over; a running drover keeps its old file.
-b=~/.local/share/drover/bin; mkdir -p "$b" && cp target/release/drover "$b/drover.new"
+# #968: sign a copy beside the installed file, then rename it over: a running serve keeps its old file.
+b=~/.local/share/drover/bin; mkdir -p "$b"; n=target/release/drover; cp "$n" "$b/drover.new"
 sh scripts/signing-identity.sh sign "$b/drover.new" && mv "$b/drover.new" "$b/drover"   # fails, never hangs
 echo 'export PATH="$HOME/.local/share/drover/bin:$PATH"' >> ~/.zshrc   # or ~/.bashrc
 ```
@@ -328,7 +328,7 @@ the main host first, from its checkout at the new code:
 launchctl bootout gui/$(id -u)/dev.herdsman.tick; launchctl bootout gui/$(id -u)/dev.herdsman.fast   # no pass mid-move
 cargo build --release --locked -p drover
 sh scripts/signing-identity.sh                                         # once: creates "drover-local"
-b=~/.local/share/herdsman/bin; cp target/release/drover "$b/drover.new"  # signed beside, renamed over (#968)
+b=~/.local/share/herdsman/bin; n=target/release/drover; cp "$n" "$b/drover.new"  # signed beside, renamed over (#968)
 sh scripts/signing-identity.sh sign "$b/drover.new" && mv "$b/drover.new" "$b/drover"
 ln -sf "$b/drover" "$b/herdsman"                                       # the old name, for one release
 ~/.local/share/herdsman/bin/drover migrate --live                      # config, state and share trees; old names become links
