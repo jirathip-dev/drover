@@ -133,6 +133,40 @@ pub fn append(state: &Path, ev: &Event) -> Result<()> {
     with(state, true, (), |c| insert(c, ev, None, false))
 }
 
+/// #900, #906: `evs` in one transaction, each `needs-decision` under the highest `q<n>` logged plus 1; none if an ask keyed `once` is logged.
+pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Option<Vec<Event>>> {
+    for ev in &evs {
+        crate::sim::point(&crate::sim::Point::Append(ev));
+    }
+    with(state, true, None, |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let count = |w: &str, p: &[&str]| {
+            let q = format!("SELECT COUNT(*) FROM events WHERE type = 'needs-decision'{w}");
+            tx.query_row(&q, rusqlite::params_from_iter(p), |r| r.get::<_, u64>(0))
+        };
+        if let Some(k) = once {
+            if count(" AND json_extract(json, '$.once') = ?1", &[k])? > 0 {
+                return Ok(None);
+            }
+        }
+        let q = "SELECT COALESCE(MAX(CAST(SUBSTR(json_extract(json, '$.id'), 2) AS INTEGER)), 0) FROM events \
+            WHERE type = 'needs-decision' AND json_extract(json, '$.id') GLOB 'q[0-9]*'";
+        let mut n: u64 = tx.query_row(q, [], |r| r.get(0))?;
+        for ev in evs.iter_mut().filter(|e| e.kind == "needs-decision") {
+            n += 1;
+            ev.data.insert("id".into(), format!("q{n}").into());
+            if let Some(k) = once {
+                ev.data.insert("once".into(), k.into());
+            }
+        }
+        for ev in &evs {
+            insert(&tx, ev, None, false)?;
+        }
+        tx.commit()?;
+        Ok(Some(evs))
+    })
+}
+
 /// The events `filter` (an SQL condition over the columns, `?1` = `arg`) selects, by seq.
 pub(crate) fn events(state: &Path, filter: &str, arg: u64) -> Result<Vec<Event>> {
     with(state, false, vec![], |c| rows(c, filter, arg))
@@ -270,17 +304,29 @@ pub fn try_list<T: DeserializeOwned>(state: &Path, table: &str) -> Result<Vec<T>
 
 /// Replace every row of `table` with `all`, in one transaction.
 pub fn store<T: Serialize>(state: &Path, table: &str, all: &[T]) -> Result<()> {
+    with(state, true, (), |c| replace(c, table, all))
+}
+
+/// #893: `store`, failing at once while another connection holds the write lock (never waiting for it).
+pub fn store_now<T: Serialize>(state: &Path, table: &str, all: &[T]) -> Result<()> {
     with(state, true, (), |c| {
-        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute(&format!("DELETE FROM {table}"), [])?;
-        for v in all {
-            tx.execute(
-                &format!("INSERT INTO {table} (json) VALUES (?1)"),
-                [serde_json::to_string(v)?],
-            )?;
-        }
-        Ok(tx.commit()?)
+        c.busy_timeout(std::time::Duration::ZERO)?;
+        let r = replace(c, table, all);
+        c.busy_timeout(std::time::Duration::from_secs(crate::config::limits().db_busy_secs))?;
+        r
     })
+}
+
+fn replace<T: Serialize>(c: &mut Connection, table: &str, all: &[T]) -> Result<()> {
+    let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    tx.execute(&format!("DELETE FROM {table}"), [])?;
+    for v in all {
+        tx.execute(
+            &format!("INSERT INTO {table} (json) VALUES (?1)"),
+            [serde_json::to_string(v)?],
+        )?;
+    }
+    Ok(tx.commit()?)
 }
 
 /// A lease: who holds `key` (pid on host), since `at`, until `expires_at`, with the holder's `data`.

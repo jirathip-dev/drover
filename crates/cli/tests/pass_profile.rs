@@ -34,12 +34,13 @@ fn pass_profile() {
         c.now = now;
         std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
         std::fs::copy(src.join("state.db"), c.state.with_file_name("state.db")).unwrap();
-        let f = Fake::default()
-            .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-            .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
-            .reply("sysctl -n hw.ncpu", "10\n")
-            .reply("vm_stat", "Pages free: 100000.\nSwapouts: 100.\n")
-            .reply("herdr agent list", NO_AGENTS);
+        let f = OnShed::new(
+            Fake::default()
+                .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+                .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
+                .reply("sysctl -n hw.ncpu", "10\n")
+                .reply("vm_stat", "Pages free: 100000.\nSwapouts: 100.\n"),
+        );
         let args: &[&str] = if fast { &["drive", "--fast"] } else { &["drive"] };
         let (r0, c0, t0) = (drover::db::ROWS.load(Relaxed), cpu(), Instant::now());
         let (code, _) = run(&c, &f, args);

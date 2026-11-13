@@ -19,9 +19,10 @@ fn page(name: &str, red: bool) -> std::path::PathBuf {
     } else {
         "F\n/dev/disk1 41943040 1 31457280\n"
     };
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("df -k /", df);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let f = Fake::default().reply("df -k /", df);
+    let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let res = String::from_utf8_lossy(&s.respond(
         &format!(

@@ -37,6 +37,10 @@ impl Runner for Slow {
     fn sleep(&self, _: u64) {}
 }
 
+fn shed() -> &'static FakeShed {
+    Box::leak(Box::new(FakeShed::new()))
+}
+
 /// 30 impl lanes, #1–#15 on mini and #16–#30 on bazzite, each idle with a pane and an unpushed worktree.
 fn fixture() -> (drover::Ctx, Slow) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
@@ -389,18 +393,19 @@ fn a_steady_state_live_change_is_one_part_under_5kb() {
 
 /// #447: a 30,000-event log and 200 idle lanes, each with an answered ask, a review round and the step's chatter;
 /// ten asks still open.
-fn big() -> (drover::Ctx, Fake) {
+fn big() -> (drover::Ctx, Fake, &'static FakeShed) {
     big_with(200)
 }
 
-/// `big` with `lanes` lanes (#560: 20, a busy fleet's).
-fn big_with(lanes: u64) -> (drover::Ctx, Fake) {
+fn big_with(lanes: u64) -> (drover::Ctx, Fake, &'static FakeShed) {
     let c = ctx(&tmpdir("perf-big"), CONFIG);
+    let sh = shed();
+    sh.attach(&c);
     let ev = |ts, n, kind, d| serde_json::to_string(&Event::new(ts, "sendmeter", Some(n), kind, d)).unwrap();
-    let (mut log, mut agents) = (vec![], vec![]);
+    let mut log = vec![];
     for n in 1..=lanes {
         let (agent, t) = (format!("sendmeter-impl-{n}"), NOW - 9_000 + n);
-        let d = json!({"role": "impl", "agent": agent, "pane": format!("w{n}:p1"), "worktree": format!("/wt/{agent}")});
+        let d = json!({"role": "impl", "agent": agent, "pane": agent, "runtime": "shed", "worktree": format!("/wt/{agent}")});
         log.push(ev(t, n, "spawn", d));
         let ask = json!({"id": format!("a{n}"), "agent": agent, "question": "?", "options": [], "recommend": null});
         log.push(ev(t + 1, n, "needs-decision", ask));
@@ -409,7 +414,7 @@ fn big_with(lanes: u64) -> (drover::Ctx, Fake) {
         }
         log.push(ev(t + 3, n, "pushed", json!({"sha": "a".repeat(40)})));
         let rev = format!("sendmeter-rev-{n}-r1");
-        let d = json!({"role": "rev", "agent": rev, "pane": format!("w{n}:p2"), "worktree": format!("/wt/{rev}"), "sha": "a".repeat(40)});
+        let d = json!({"role": "rev", "agent": rev, "pane": rev, "runtime": "shed", "worktree": format!("/wt/{rev}"), "sha": "a".repeat(40)});
         log.push(ev(t + 4, n, "spawn", d));
         log.push(ev(
             t + 5,
@@ -417,7 +422,8 @@ fn big_with(lanes: u64) -> (drover::Ctx, Fake) {
             "verdict",
             json!({"verdict": "FAIL", "sha": "a".repeat(40)}),
         ));
-        agents.push(json!({"name": agent, "agent_status": "idle", "pane_id": format!("w{n}:p1"), "cwd": format!("/wt/{agent}")}));
+        sh.lane(&agent, "idle", &format!("/wt/{agent}"));
+        sh.screen(&agent, "⏺ Working on it\n\n❯ \n");
     }
     for i in 0..30_000 - log.len() as u64 {
         log.push(ev(
@@ -429,12 +435,8 @@ fn big_with(lanes: u64) -> (drover::Ctx, Fake) {
     }
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(&c.state, log.join("\n") + "\n").unwrap();
-    let f = Fake::default()
-        .reply("herdr agent list", &json!({"result": {"agents": agents}}).to_string())
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
-        .reply("herdr pane read", "⏺ Working on it\n\n❯ \n")
-        .reply("git -C", &format!("{} {}\n", "a".repeat(40), NOW - 600));
-    (c, f)
+    let f = Fake::default().reply("git -C", &format!("{} {}\n", "a".repeat(40), NOW - 600));
+    (c, f, sh)
 }
 
 /// #447: the waits are linear in the log: `snapshot::waits` under 200 ms, and the Lanes tab's data
@@ -442,16 +444,17 @@ fn big_with(lanes: u64) -> (drover::Ctx, Fake) {
 /// reports only).
 #[test]
 fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
-    let (c, r) = big();
+    let (c, r, sh) = big();
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let events = drover::events::read(&c.state).unwrap();
     assert_eq!(events.len(), 30_000);
-    let list = drover::herdr::list(&r, "agent").unwrap();
+    let on = sh.on(&r);
+    let list = drover::herdr::list(&on, "agent").unwrap();
     let st = drover::events::fold(&events);
-    let all = drover::snapshot::lanes(&cfg, &r, &c, (&events, &st), &list);
+    let all = drover::snapshot::lanes(&cfg, &on, &c, (&events, &st), &list);
     assert_eq!(all.len(), 200);
     let t = Instant::now();
-    let w = drover::snapshot::waits(&c, &cfg, &r, &events, &all);
+    let w = drover::snapshot::waits(&c, &cfg, &on, &events, &all);
     let waits = ms(t);
     let owner: Vec<_> = w
         .iter()
@@ -503,7 +506,7 @@ fn cpu_ms() -> f64 {
 /// build (a debug build reports only): each request reads only the events appended since the last, never the whole log.
 #[test]
 fn a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget() {
-    let (c, r) = big_with(20);
+    let (c, r, _sh) = big_with(20);
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     let state = c.state.clone();
     let (_, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0)));
@@ -551,6 +554,7 @@ fn a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget() {
 const FLEETS: [&str; 5] = ["sendmeter", "alpha", "bravo", "charlie", "delta"];
 
 fn huge() -> (drover::Ctx, Fake) {
+    let sh = shed();
     let mut cfg = CONFIG.to_string();
     for f in &FLEETS[1..] {
         cfg += &format!(
@@ -559,7 +563,8 @@ fn huge() -> (drover::Ctx, Fake) {
         );
     }
     let c = ctx(&tmpdir("perf-huge"), &cfg);
-    let (mut log, mut agents) = (vec![], vec![]);
+    sh.attach(&c);
+    let mut log = vec![];
     let ev = |ts, f: &str, n: Option<u64>, kind, d| serde_json::to_string(&Event::new(ts, f, n, kind, d)).unwrap();
     for f in FLEETS {
         log.push(ev(
@@ -591,7 +596,7 @@ fn huge() -> (drover::Ctx, Fake) {
         }
         for n in 1..=40u64 {
             let (agent, t) = (format!("{f}-impl-{n}"), NOW - 9_000 + n);
-            let d = json!({"role": "impl", "agent": agent, "pane": format!("{f}{n}:p1"), "worktree": format!("/wt/{agent}")});
+            let d = json!({"role": "impl", "agent": agent, "pane": agent, "runtime": "shed", "worktree": format!("/wt/{agent}")});
             log.push(ev(t, f, Some(n), "spawn", d));
             let mut ask = json!({"id": format!("{f}-q{n}"), "agent": agent, "question": "?", "options": ["yes", "no"], "recommend": 1});
             if n % 4 == 0 {
@@ -609,7 +614,7 @@ fn huge() -> (drover::Ctx, Fake) {
             }
             log.push(ev(t + 3, f, Some(n), "pushed", json!({"sha": "a".repeat(40)})));
             let rev = format!("{f}-rev-{n}-r1");
-            let d = json!({"role": "rev", "agent": rev, "pane": format!("{f}{n}:p2"), "worktree": format!("/wt/{rev}"), "sha": "a".repeat(40)});
+            let d = json!({"role": "rev", "agent": rev, "pane": rev, "runtime": "shed", "worktree": format!("/wt/{rev}"), "sha": "a".repeat(40)});
             log.push(ev(t + 4, f, Some(n), "spawn", d));
             log.push(ev(
                 t + 5,
@@ -618,7 +623,8 @@ fn huge() -> (drover::Ctx, Fake) {
                 "verdict",
                 json!({"verdict": "FAIL", "sha": "a".repeat(40)}),
             ));
-            agents.push(json!({"name": agent, "agent_status": "idle", "pane_id": format!("{f}{n}:p1"), "cwd": format!("/wt/{agent}")}));
+            sh.lane(&agent, "idle", &format!("/wt/{agent}"));
+            sh.screen(&agent, "⏺ Working on it\n\n❯ \n");
         }
     }
     for i in 0..150_000 - log.len() as u64 {
@@ -628,11 +634,7 @@ fn huge() -> (drover::Ctx, Fake) {
     }
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(&c.state, log.join("\n") + "\n").unwrap();
-    let f = Fake::default()
-        .reply("herdr agent list", &json!({"result": {"agents": agents}}).to_string())
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
-        .reply("herdr pane read", "⏺ Working on it\n\n❯ \n")
-        .reply("git -C", &format!("{} {}\n", "a".repeat(40), NOW - 600));
+    let f = Fake::default().reply("git -C", &format!("{} {}\n", "a".repeat(40), NOW - 600));
     (c, f)
 }
 

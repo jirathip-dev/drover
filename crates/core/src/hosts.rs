@@ -259,7 +259,8 @@ pub struct Pass<'a> {
     probe: bool,
     up: std::sync::Mutex<BTreeMap<String, bool>>,
     mark: Option<(PathBuf, u64)>,
-    step: std::sync::Mutex<String>,
+    step: std::sync::Mutex<(String, u64)>,
+    t0: std::time::Instant,
     pub until: Option<std::time::Instant>,
     late: std::sync::Mutex<std::collections::BTreeSet<String>>,
     off: std::collections::BTreeSet<String>,
@@ -275,6 +276,7 @@ impl<'a> Pass<'a> {
             up,
             mark,
             step,
+            t0: std::time::Instant::now(),
             until: None,
             late: std::sync::Mutex::default(),
             off: std::collections::BTreeSet::new(),
@@ -301,16 +303,19 @@ impl<'a> Pass<'a> {
         }
     }
     pub fn step(&self, s: &str) {
-        *self.step.lock().unwrap() = s.into();
+        debug_assert!(
+            crate::timer::TICK_STEPS.iter().any(|t| t.0 == s),
+            "{s} is not in TICK_STEPS"
+        );
+        *self.step.lock().unwrap() = (s.into(), self.t0.elapsed().as_secs());
         self.note("");
     }
     fn note(&self, child: &str) {
         if let Some((p, since)) = &self.mark {
-            let step = self.step.lock().unwrap().clone();
-            let _ = std::fs::write(
-                p,
-                json!({"since": since, "step": step, "child": child, "pid": crate::sim::pid()}).to_string(),
-            );
+            let (step, at) = self.step.lock().unwrap().clone();
+            let at = since + at;
+            let m = json!({"since": since, "at": at, "step": step, "child": child, "pid": crate::sim::pid()});
+            let _ = std::fs::write(p, m.to_string());
         }
     }
     /// The remote host `prog args` runs on: `herdr --machine m …` or `ssh [-o…] m -- …`.
@@ -590,7 +595,6 @@ fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
     };
     let events = read(&ctx.state).unwrap_or_default();
     let (states, max_age) = (fold(&events), cfg.limits.import_max_age_hours * 3600);
-    let mut n = events.iter().filter(|e| e.kind == "needs-decision").count();
     let mark = |e: &&Event| e.kind == "asks-imported" && e.str("host") == Some(name);
     let upto = events.iter().rev().find(mark).and_then(|e| e.data["upto_ts"].as_u64());
     let remote: Vec<Event> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
@@ -605,14 +609,17 @@ fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
         }
         let lane = (events.iter().rev()).find(|s| s.kind == "spawn" && s.fleet == e.fleet && s.issue == e.issue);
         let mut d = Value::Object(e.data.clone());
-        n += 1;
-        (d["id"], d["from"]) = (json!(format!("q{n}")), json!(from));
+        d["from"] = json!(from);
         if d["agent"].is_null() {
             d["agent"] = json!(lane
                 .filter(|s| s.str("host") == Some(name))
                 .and_then(|s| s.str("agent")));
         }
-        let _ = append(&ctx.state, &Event::new(e.ts, &e.fleet, e.issue, "needs-decision", d));
+        let _ = crate::db::ask(
+            &ctx.state,
+            vec![Event::new(e.ts, &e.fleet, e.issue, "needs-decision", d)],
+            None,
+        );
     }
     if let Some(t) = remote.iter().filter(new).map(|e| e.ts).max() {
         let d = json!({"host": name, "upto_ts": t});
@@ -682,7 +689,9 @@ pub fn offline<'a>(ctx: &Ctx, sp: Option<&'a Event>) -> Option<&'a str> {
 /// #877: spawn `sp`'s lane is on a host that is `off` or failed its last probe: a pass never reaches into it.
 pub fn held(ctx: &Ctx, cfg: &Config, sp: &Event) -> bool {
     let off = |h: &str| cfg.hosts.get(h).is_some_and(|c| !c.enabled);
-    offline(ctx, Some(sp)).is_some() || sp.str("machine").is_some() && sp.str("host").is_some_and(off)
+    offline(ctx, Some(sp)).is_some()
+        || sp.str("machine").is_some() && sp.str("host").is_some_and(off)
+        || crate::roots::skip(ctx, cfg, sp).is_some()
 }
 
 /// This host's live agents, then the remote ones.

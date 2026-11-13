@@ -9,8 +9,7 @@ const NOW: u64 = 1_000_000;
 const SAFE: &str = "sendmeter-impl-12";
 const RISKY: &str = "sendmeter-impl-14";
 
-/// impl #12 (clean, pushed, PR #42 open) and impl #14 (dirty), both without a herdr pane.
-fn fixture(name: &str, paused: bool) -> (drover::Ctx, Fake) {
+fn fixture(name: &str, paused: bool) -> (drover::Ctx, OnShed) {
     let cfg = CONFIG.replace(
         "integration = \"staging\"   # never main",
         &format!("integration = \"staging\"\npaused = {paused}"),
@@ -29,8 +28,6 @@ fn fixture(name: &str, paused: bool) -> (drover::Ctx, Fake) {
     )
     .unwrap();
     let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
         .reply(&format!("git -C /wt/{SAFE} status"), "?? .brief.md\n")
         .reply(&format!("git -C /wt/{SAFE} rev-list"), "0\n")
         .reply(&format!("git -C /wt/{SAFE} rev-parse"), "6a258db\n")
@@ -39,7 +36,7 @@ fn fixture(name: &str, paused: bool) -> (drover::Ctx, Fake) {
             &format!("6a258db{} {}", "0".repeat(33), NOW - 7200),
         )
         .reply(&format!("git -C /wt/{RISKY} status"), " M src/a.rs\n");
-    (c, r)
+    (c, OnShed::new(r))
 }
 
 /// The body at `path`; the page (#269) with every tab as the board draws it.

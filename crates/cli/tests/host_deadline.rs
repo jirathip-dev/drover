@@ -13,7 +13,7 @@ struct Remote {
 }
 
 fn boat1(prog: &str, args: &[String]) -> bool {
-    matches!(prog, "ssh" | "herdr") && args.iter().any(|a| a == "boat1")
+    prog == "ssh" && args[0] != "-G" && args.iter().any(|a| a == "boat1")
 }
 
 impl Runner for Remote {
@@ -55,7 +55,7 @@ fn alive(pid: &str) -> bool {
         .is_ok_and(|s| s.success())
 }
 
-fn setup(name: &str) -> drover::Ctx {
+fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG
         .replace("harness  =  \"hermes\"", "harness = \"claude\"")
         .replace("[limits]\n", "[limits]\nssh_call_secs = 2\nssh_quick_secs = 2\n");
@@ -68,13 +68,14 @@ fn setup(name: &str) -> drover::Ctx {
         "boat1": {"tags": ["os:macos"], "home": "/Users/me", "probed": NOW, "seen": NOW, "up": true},
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "pane": "w8:p1", "workspace": "w8",
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "pane": "sendmeter-impl-11", "workspace": "",
                    "worktree": "/Users/me/.herdr/worktrees/sendmeter/issue-11", "branch": "issue-11", "host": "boat1",
                    "machine": "boat1"});
     append(&c.state, &Event::new(NOW - 600, "sendmeter", Some(11), "spawn", d)).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    c
+    let sh = FakeShed::attached(&c);
+    (c, sh)
 }
 
 fn local() -> Fake {
@@ -83,29 +84,22 @@ fn local() -> Fake {
             "herdr status",
             "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
         )
-        .reply("herdr agent list", NO_AGENTS)
         .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
         .reply("sysctl -n hw.ncpu", "4")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("git ", "")
         .reply("gh issue view", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(
-            "herdr worktree create",
-            r#"{"result":{"workspace":{"workspace_id":"w1"}}}"#,
+            "which shed",
+            "/opt/shed/bin/shed
+",
         )
-        .reply(
-            "herdr pane list --workspace w1",
-            r#"{"result":{"panes":[{"pane_id":"w1:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run w1:p1 export", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr agent wait", "{}")
 }
 
 #[test]
 fn an_ssh_that_never_returns_costs_one_deadline_and_drive_still_starts() {
     for (name, tail) in [("deadline-hang", "wait"), ("deadline-held-pipes", "exit 0")] {
-        let c = setup(name);
+        let (c, sh) = setup(name);
         let dir = c.state.parent().unwrap().to_path_buf();
         let r = Remote {
             f: local(),
@@ -117,15 +111,20 @@ fn an_ssh_that_never_returns_costs_one_deadline_and_drive_still_starts() {
         assert_eq!(code, 0, "{name}: {out}");
         assert!(took < Duration::from_secs(2 + 4), "{name}: {took:?}\n{out}");
         assert!(
-            r.f.called("herdr agent start sendmeter-impl-12"),
+            sh.called("run", "sendmeter-impl-12"),
             "{name}: drive still starts the main host's work: {out}"
         );
         let calls = r.f.calls.borrow();
         let sent: Vec<_> = calls
             .iter()
-            .filter(|l| l.contains(" boat1 ") && !l.ends_with("-- true"))
+            .filter(|l| l.starts_with("ssh ") && l.contains(" boat1 ") && !l.ends_with("-- true"))
             .collect();
-        assert_eq!(sent.len(), 1, "{name}: one call, then the host is skipped: {sent:#?}");
+        assert_eq!(
+            sent.len(),
+            2,
+            "{name}: one shed connect and its retry off the shared socket, then the host is skipped: {sent:#?}"
+        );
+        assert!(sent.iter().all(|l| l.contains("'shed' 'connect'")), "{name}: {sent:#?}");
         assert!(!drover::hosts::cached(&c)["boat1"].up, "{name}: boat1 shows offline");
         assert!(
             read(&c.state)

@@ -170,10 +170,8 @@ fn pr(head: &str) -> String {
     .to_string()
 }
 
-/// Drive's world: the host is calm, the PR at `sha()` changes only `src/a.rs`.
 fn drive_fake() -> Fake {
     fake(SECTION)
-        .reply("herdr agent list", NO_AGENTS)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -185,13 +183,7 @@ fn drive_fake() -> Fake {
         .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
         .reply("gh issue", "")
         .reply("git -C", "")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane", "{}")
-        .reply("herdr agent", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
 fn state(c: &drover::Ctx) -> String {
@@ -202,10 +194,12 @@ fn state(c: &drover::Ctx) -> String {
 fn a_repro_verify_pass_goes_to_verify_outside_ui_paths() {
     let (c, d) = setup("repro-to-verify", &(CONFIG.to_string() + VERIFY), true);
     assert_eq!(pass(&c, &d, SECTION, VERIFY_BLOCK).0, 0);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = drive_fake().reply(RECIPE, "");
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
-    assert!(r.called("herdr agent start sendmeter-verify-12-r1"), "{out}");
+    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{out}");
     assert_eq!(state(&c), "verify(1)");
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/verify-12-r1/.brief.md")).unwrap();
     assert!(brief.contains("bug on the PR base"), "{brief}");
@@ -216,6 +210,8 @@ fn a_repro_verify_pass_merges_only_after_a_verify_pass_at_the_head() {
     let (c, d) = setup("repro-merge", &(CONFIG.to_string() + VERIFY), true);
     assert_eq!(pass(&c, &d, SECTION, VERIFY_BLOCK).0, 0);
     // No recipe: the verify stage passes on as `verify-no-recipe`, but the merge needs a real verify PASS.
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = drive_fake();
     run(&c, &r, &["drive"]);
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "12"]);

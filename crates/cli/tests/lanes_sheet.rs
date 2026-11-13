@@ -21,8 +21,7 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str, now: u64) 
     String::from_utf8_lossy(&s.respond(&r, now)).into_owned()
 }
 
-/// Agents in every state across sendmeter, synergy and Others; sendmeter-impl-14 is dead (log only).
-fn fixture(name: &str) -> (drover::Ctx, Fake) {
+fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     let c = ctx(&tmpdir(name), &two());
     let spawn = |fleet: &str, issue: u64, ts: u64, role: &str, agent: &str| {
         let d = json!({"role": role, "agent": agent, "harness": if role == "rev" { "hermes" } else { "claude" }});
@@ -35,25 +34,30 @@ fn fixture(name: &str) -> (drover::Ctx, Fake) {
     spawn("synergy", 8, 900_500, "impl", "synergy-impl-8");
     spawn("synergy", 5, 900_600, "design", "synergy-design-5");
     spawn("synergy", 20, 900_700, "impl", "synergy-impl-20");
-    let a = |n: &str, st: &str, p: &str| json!({"name": n, "agent_status": st, "pane_id": p, "cwd": "/x"});
-    let list = json!({"result": {"agents": [
-        a("sendmeter-impl-12", "working", "w1:p2"),
-        a("sendmeter-rev-9-r1", "blocked", "w1:p3"),
-        a("synergy-impl-7", "working", "w2:p1"),
-        a("synergy-impl-8", "working", "w2:p2"),
-        a("synergy-design-5", "done", "w2:p3"),
-        a("synergy-impl-20", "unknown", "w2:p4"),
-        {"agent": "codex", "agent_status": "idle", "pane_id": "w4:p1", "cwd": "/home/me/side", "workspace_id": "w4"},
-        {"agent": "claude", "agent_status": "working", "pane_id": "w5:p1", "cwd": "/home/me/scratch", "workspace_id": "w5"},
-    ]}});
-    let ws = json!({"result": {"workspaces": [{"workspace_id": "w4", "label": "side-project"}, {"workspace_id": "w5", "label": "scratch"}]}});
     let screen = "⏺ Read(src/serve.rs)\n  ⎿ Read 120 lines\n> fix the test\n⏺ Bash(cargo test)\n  ⎿ ok\n";
-    let r = Fake::default()
-        .reply("herdr agent list", &list.to_string())
-        .reply("herdr workspace list", &ws.to_string())
-        .reply("herdr pane read", screen)
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send", "");
+    let r = OnShed::new(Fake::default());
+    for (n, st) in [
+        ("sendmeter-impl-12", "working"),
+        ("sendmeter-rev-9-r1", "blocked"),
+        ("synergy-impl-7", "working"),
+        ("synergy-impl-8", "working"),
+        ("synergy-design-5", "done"),
+        ("synergy-impl-20", "unknown"),
+    ] {
+        r.1.lane(n, st, "/x");
+        r.1.screen(n, screen);
+    }
+    for (n, harness, st, cwd) in [
+        ("side-project", "codex", "idle", "/home/me/side"),
+        ("scratch", "claude", "working", "/home/me/scratch"),
+    ] {
+        r.1.add(n, json!({"fleet": "-", "harness": harness}));
+        r.1.set(n, |t| {
+            t["cwd"] = json!(cwd);
+            t["reported"] = json!({"state": st});
+        });
+        r.1.screen(n, screen);
+    }
     (c, r)
 }
 
@@ -139,7 +143,7 @@ fn sheet_transcript_is_the_masked_pane_tail() {
     let cookie = paired(&s, &c);
     let origin = format!("Origin: https://evil.example\r\n{cookie}");
     assert!(req(&s, "GET", "/lane?agent=sendmeter-impl-12", "", &origin, T).starts_with("HTTP/1.1 403 "));
-    assert!(!r.called("herdr pane read"));
+    assert!(!r.1.called("read", "sendmeter-impl-12"));
     let res = req(&s, "GET", "/lane?agent=sendmeter-impl-12", "", &cookie, T);
     assert!(
         res.starts_with("HTTP/1.1 200 OK") && res.contains("application/json"),
@@ -159,7 +163,10 @@ fn sheet_transcript_is_the_masked_pane_tail() {
         (&v["lines"], &v["live"], &v["before"], &v["more"]),
         (&lines, &json!(2), &json!(5), &json!(false))
     );
-    assert!(r.called("herdr pane read w1:p2 --source recent --lines 200 --format ansi"));
+    assert_eq!(
+        r.1.last("read"),
+        json!({"name": "sendmeter-impl-12", "lines": 200, "history": true})
+    );
     assert!(req(&s, "GET", "/lane?agent=nobody", "", &cookie, T).starts_with("HTTP/1.1 404 "));
 }
 
@@ -167,7 +174,6 @@ fn sheet_transcript_is_the_masked_pane_tail() {
 #[test]
 fn others_sheet_offers_only_close_pane() {
     let (c, r) = fixture("others");
-    let r = r.reply("herdr pane close", "");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = paired(&s, &c);
     let sheet = |agent: &str| {
@@ -175,14 +181,17 @@ fn others_sheet_offers_only_close_pane() {
         serde_json::from_str::<serde_json::Value>(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap()
     };
     let (other, lane) = (sheet("side-project"), sheet("sendmeter-impl-12"));
-    assert_eq!((&other["acts"], &other["pane"]), (&json!(["close"]), &json!("w4:p1")));
+    assert_eq!(
+        (&other["acts"], &other["pane"]),
+        (&json!(["close"]), &json!("side-project"))
+    );
     assert_eq!(
         (&lane["acts"], &lane["pane"]),
         (&json!(["stop", "kill", "clean"]), &json!(null))
     );
-    let res = req(&s, "POST", "/act", "agent=w4:p1&op=close&confirm=1", &cookie, T);
+    let res = req(&s, "POST", "/act", "agent=side-project&op=close&confirm=1", &cookie, T);
     assert!(
-        res.starts_with("HTTP/1.1 200 OK") && r.called("herdr pane close w4:p1"),
+        res.starts_with("HTTP/1.1 200 OK") && r.1.called("kill", "side-project") && !r.1.has("side-project"),
         "{res}"
     );
     let res = req(
@@ -194,7 +203,7 @@ fn others_sheet_offers_only_close_pane() {
         T,
     );
     assert!(
-        res.contains("REFUSED IS_LANE") && !r.called("herdr pane close w1:p2"),
+        res.contains("REFUSED IS_LANE") && !r.1.called("kill", "sendmeter-impl-12"),
         "{res}"
     );
 }
@@ -458,8 +467,17 @@ fn pairing_codes_devices_and_prompt_events() {
         res.starts_with("HTTP/1.1 200 OK") && res.ends_with("sent to sendmeter-impl-12\n"),
         "{res}"
     );
-    assert!(r.called("herdr agent prompt sendmeter-impl-12 hello secret words"));
-    assert!(r.index("herdr agent prompt") < r.index("herdr pane send-keys w1:p2 Enter"));
+    assert_eq!(r.1.sent("sendmeter-impl-12"), ["hello secret words"]);
+    let seen = r.1.lock().seen.clone();
+    let at = |m: &str| {
+        seen.iter()
+            .position(|(k, p)| k == m && p["name"] == "sendmeter-impl-12")
+    };
+    assert!(at("send") < at("keys"), "{seen:?}");
+    assert_eq!(
+        r.1.last("keys"),
+        json!({"name": "sendmeter-impl-12", "keys": ["Enter"]})
+    );
     let e = read(&c.state).unwrap().pop().unwrap();
     let label = drover::devices::load(&c)[0].label.clone();
     assert!(label.starts_with("iPhone "), "{label}");
@@ -475,12 +493,11 @@ fn pairing_codes_devices_and_prompt_events() {
         !drover::events::jsonl(&c.state).unwrap().contains("secret"),
         "no message text in the log"
     );
-    // ESC, Ctrl-C, DEL, CR and tab are refused; a leading `-` goes through verbatim as herdr's text argument.
     for ctl in ["%1B%5B2J", "stop%03", "x%7F", "a%0Db", "a%09b"] {
         assert!(send(&cookie, ctl).contains("REFUSED BAD_VALUE: "), "{ctl}");
     }
     assert!(send(&cookie, "--wait%0Aline+two").starts_with("HTTP/1.1 200 OK"));
-    assert!(r.called("herdr agent prompt sendmeter-impl-12 --wait\nline two"));
+    assert_eq!(r.1.sent("sendmeter-impl-12")[1], "--wait\nline two");
     // The Host tab lists the device; Remove unpairs it and its next send is 401.
     let host = host_tab(&s, ADDR, T);
     assert!(
@@ -525,17 +542,13 @@ fn reply_refusals_rate_limit_and_read_only() {
     );
     assert_eq!(run(&c, &Fake::default(), &["pause", "sendmeter"]).0, 0);
     assert!(body(send("sendmeter-impl-12", "go")).starts_with("REFUSED PAUSED: "));
-    assert!(!r.called("herdr agent prompt") && !read(&c.state).unwrap().iter().any(|e| e.kind == "prompt"));
+    assert!(r.1.all("send").is_empty() && !read(&c.state).unwrap().iter().any(|e| e.kind == "prompt"));
     // 10 sends a minute per device.
     for _ in 0..6 {
         send("synergy-impl-8", "go");
     }
     assert!(send("synergy-impl-8", "go").starts_with("HTTP/1.1 429 "));
-    assert_eq!(
-        r.count("herdr agent prompt synergy-impl-8"),
-        6,
-        "10 attempts incl. the 4 refused"
-    );
+    assert_eq!(r.1.sent("synergy-impl-8").len(), 6, "10 attempts incl. the 4 refused");
     let ro = Server::new(&c, &r, None);
     assert!(req(&ro, "POST", "/send", "agent=synergy-impl-8&text=go", &cookie, T).starts_with("HTTP/1.1 405 "));
 }
@@ -772,7 +785,15 @@ fn chat_views_never_blank() {
     let d = json!({"role": "impl", "agent": "synergy-impl-7", "harness": "claude", "machine": "air", "host": "air"});
     append(&c.state, &Event::new(900_800, "synergy", Some(7), "spawn", d)).unwrap();
     let screen = "⏺ Bash(cargo test)\n  ⎿ ok\n> fix the test\n⏺ Fixed: the test passes.\n";
-    let r = r.reply("herdr --machine air pane read", screen);
+    let OnShed(f, sh) = r;
+    let air = FakeShed::new();
+    air.lane("synergy-impl-7", "working", "/x");
+    air.screen("synergy-impl-7", screen);
+    let over = OverSsh {
+        f: &f,
+        hosts: vec![("air", &air)],
+    };
+    let r = drover::shed::With(&over, sh.shed());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = paired(&s, &c);
     let sheet = |agent: &str| {
@@ -786,7 +807,10 @@ fn chat_views_never_blank() {
     let mut empty = local.clone();
     empty["said"] = json!([]);
     let remote = sheet("synergy-impl-7");
-    assert!(r.called("herdr --machine air pane read w2:p1 --source recent --lines 200 --format ansi"));
+    assert_eq!(
+        air.last("read"),
+        json!({"name": "synergy-impl-7", "lines": 200, "history": true})
+    );
     assert_eq!(
         (&remote["said"], remote["lines"].as_array().unwrap().len()),
         (&json!(null), 4),
