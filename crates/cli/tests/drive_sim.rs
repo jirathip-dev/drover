@@ -1,7 +1,7 @@
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, read, Event};
+use drover::runner::{Out, Runner};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex};
@@ -269,7 +269,7 @@ impl Runner for World {
 
 struct Sim {
     w: Arc<World>,
-    c: herdsman::Ctx,
+    c: drover::Ctx,
     tick: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -286,8 +286,8 @@ impl Sim {
         }
     }
 
-    fn at(&self) -> herdsman::Ctx {
-        herdsman::Ctx {
+    fn at(&self) -> drover::Ctx {
+        drover::Ctx {
             now: self.w.now(),
             ..self.c.clone()
         }
@@ -317,12 +317,12 @@ impl Sim {
         let (w, c) = (self.w.clone(), self.at());
         w.procs
             .borrow_mut()
-            .insert(pid, (format!("/opt/herdsman/bin/herdsman {}", args.join(" ")), c.now));
+            .insert(pid, (format!("/opt/drover/bin/drover {}", args.join(" ")), c.now));
         *w.hung.0.lock().unwrap() = None;
         let h = std::thread::spawn(move || {
             PID.set(pid);
             let now = c.now;
-            herdsman::sim::set(Some(herdsman::sim::Hooks {
+            drover::sim::set(Some(drover::sim::Hooks {
                 now: Box::new(move || now),
                 pid,
                 point: Box::new(|_| ()),
