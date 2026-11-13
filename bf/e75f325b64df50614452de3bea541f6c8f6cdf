@@ -1,0 +1,8 @@
+Decided: refuse an account-less ACP lane only when it runs on another host; the main host signs in with its own Claude login
+Because: "An ACP lane with no account on another host is still refused `ACP_UNGUARDED`."
+Because: crates/core/src/spawn.rs:593
+Decided: merged origin/staging again; the CI failure was staging's drive_sim.rs still naming herdsman, since fixed there
+Rejected: editing drive_sim.rs in this PR — staging already carries the fix
+Rejected: dropping the account check everywhere — a remote lane signs in through the main host's proxy with an account token
+Check: crates/cli/tests/remote_acp.rs last test fails when the `remote` condition in `unguarded` is removed
+Owner: Fleets with no accounts can start lanes and orchestrators on the main host again; other hosts still need an account.
