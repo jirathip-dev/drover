@@ -1,6 +1,3 @@
-//! #500: a finished design lane adopted as an orphan is adopted once and never hides the build round: no repeated
-//! `orphan-lane`, no `lane gone` respawn, no `LANE_ENDS`; a respawn is named after the build lane; an issue parked
-//! that way before the fix is put back.
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
@@ -35,7 +32,6 @@ fn state(c: &drover::Ctx, n: u64) -> String {
         .clone()
 }
 
-/// #n built, reviewed (the second review's prompt never confirmed, as #404's), FAILed at HEAD; its impl lane closed.
 fn failed(c: &drover::Ctx, n: u64) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("sendmeter-impl-{n}"), "worktree": wt,
@@ -73,7 +69,6 @@ fn waiting(c: &drover::Ctx, r: &Fake, n: u64) -> serde_json::Value {
     assert_eq!(code, 0, "{j}");
     let all: serde_json::Value = serde_json::from_str(&j).unwrap();
     let mine = |w: &&serde_json::Value| w["issue"] == n && w["lane"].as_str().is_some_and(|l| !l.contains("design"));
-    // The issue's own row comes after those its older lanes share.
     all.as_array()
         .unwrap()
         .iter()
@@ -83,7 +78,6 @@ fn waiting(c: &drover::Ctx, r: &Fake, n: u64) -> serde_json::Value {
         .unwrap_or_default()
 }
 
-/// The #404 sequence: a CI-only FAIL, then the owner's finished design pane, never logged, seen pass after pass.
 #[test]
 fn a_finished_design_lane_is_adopted_once_and_never_hides_the_fix_round() {
     let (mut c, sh) = sctx("design-orphan", &format!("{CONFIG}{DESIGN}"));
@@ -118,8 +112,6 @@ fn a_finished_design_lane_is_adopted_once_and_never_hides_the_fix_round() {
     );
 }
 
-/// A fix round the owner extended without a spawn, its build lane gone: the respawn names `sendmeter-impl-12`, the
-/// build lane, never the reviewer that ran last.
 #[test]
 fn a_respawn_is_named_after_the_build_lane() {
     let (c, _sh) = sctx("design-respawn", CONFIG);
@@ -133,7 +125,6 @@ fn a_respawn_is_named_after_the_build_lane() {
         (Some("sendmeter-impl-12"), Some("lane gone, no push: respawning impl")),
         "{w}"
     );
-    // Two respawns since: the park names the build lane too.
     ev(
         &c,
         12,
@@ -158,8 +149,6 @@ fn a_respawn_is_named_after_the_build_lane() {
     );
 }
 
-/// An issue parked `LANE_ENDS` before #500 because of a design adoption is put back in its fix round; one whose lane
-/// really kept ending stays parked.
 #[test]
 fn the_install_repair_unparks_a_lane_ends_a_design_adoption_caused() {
     let (c, _sh) = sctx("design-repair", &format!("{CONFIG}{DESIGN}"));
@@ -176,7 +165,6 @@ fn the_install_repair_unparks_a_lane_ends_a_design_adoption_caused() {
         "spawn-adopted",
         json!({"agent": "sendmeter-design-12", "pane": "sendmeter-design-12", "why": "orphan"}),
     );
-    // #13: its own lane-dead after the FAIL, no design lane at all.
     ev(
         &c,
         13,
@@ -191,7 +179,6 @@ fn the_install_repair_unparks_a_lane_ends_a_design_adoption_caused() {
         let d = json!({"code": "LANE_ENDS", "reason": "lane keeps ending without a push"});
         ev(&c, n, 5000, "needs-human", d);
     }
-    // The old fold: the adoption ended the verdict wait, so the park held.
     let r = fake("4\n");
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -206,12 +193,10 @@ fn the_install_repair_unparks_a_lane_ends_a_design_adoption_caused() {
         waiting(&c, &r, 12)["what"],
         "review FAIL, waiting for drive (next pass ≤ 5 min) to start fix round · held: HOST_BUSY memory pressure critical"
     );
-    // Once repaired, never again.
     run(&c, &r, &["drive"]);
     assert_eq!(kinds(&c, "repaired").len(), 1);
 }
 
-/// One adoption per pane, ever: a pane a `spawn-adopted` names is no orphan, even with its `spawn` missing.
 #[test]
 fn a_pane_adopted_once_is_never_adopted_again() {
     let (c, sh) = sctx("design-once", &format!("{CONFIG}{DESIGN}"));

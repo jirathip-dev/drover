@@ -1,5 +1,3 @@
-//! #344: drover's state in one SQLite file, `state.db` beside the log path (`FLEET_STATE`), in WAL mode: the event
-//! log, leases (every lock and marker), paired devices, push subscriptions and the snapshots (docs/architecture.md).
 use crate::events::{self, Event};
 use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -28,12 +26,10 @@ pub fn file(state: &Path) -> PathBuf {
 }
 
 thread_local! {
-    /// #344: `serve --export --demo`'s database, a temporary one its files are copied into, never moved (`Scratch`).
     static SCRATCH: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
 
-/// #344: until dropped, this thread's database is a new temporary one; the files beside the log are imported into it
-/// once and left where they are.
+/// #344: until dropped, this thread's database is a new temporary one; the files beside the log are imported into it once and left where they are.
 pub struct Scratch(PathBuf);
 
 impl Scratch {
@@ -57,12 +53,9 @@ impl Drop for Scratch {
 }
 
 thread_local! {
-    /// Each thread's open databases by file and inode, reused: opening one (WAL, schema) costs about a millisecond.
     static OPEN: RefCell<Vec<(PathBuf, u64, Connection)>> = const { RefCell::new(Vec::new()) };
 }
 
-/// Run `f` on the database (`create`: made on first use; else none yet, and nothing to import, is `empty`, and
-/// nothing is created). Files from before #344 left beside it are imported first (`import`).
 fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection) -> Result<T>) -> Result<T> {
     let (p, (logs, lists)) = (file(state), legacy(state));
     let ino = |p: &Path| std::fs::metadata(p).map(|m| m.ino()).ok();
@@ -70,7 +63,6 @@ fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection)
     if !create && ino(&p).is_none() && !old {
         return Ok(empty);
     }
-    // A scratch database imports once: its files stay.
     let scratch = SCRATCH.with_borrow(Option::is_some);
     anyhow::ensure!(
         !old || scratch || !live(state) || LIVE.load(std::sync::atomic::Ordering::Relaxed),
@@ -92,16 +84,13 @@ fn with<T>(state: &Path, create: bool, empty: T, f: impl FnOnce(&mut Connection)
     r
 }
 
-/// The database, created on first use, in WAL mode with its tables.
 fn open(state: &Path) -> Result<Connection> {
     std::fs::create_dir_all(state.parent().unwrap_or(Path::new(".")))?;
-    // Paired devices and push keys live here: owner-only, as their files were.
     let mut o = std::fs::OpenOptions::new();
     drop(std::os::unix::fs::OpenOptionsExt::mode(o.create(true).append(true), 0o600).open(file(state))?);
     let c = Connection::open(file(state)).with_context(|| format!("cannot open {}", file(state).display()))?;
     let l = crate::config::limits();
     c.busy_timeout(std::time::Duration::from_secs(l.db_busy_secs))?;
-    // Switching to WAL needs the file alone and SQLite does not wait for it: a new database's first openers retry.
     let mode = |c: &Connection| c.pragma_query_value(None, "journal_mode", |r| r.get::<_, String>(0));
     for _ in 0..6000 {
         if mode(&c)? == "wal" || c.pragma_update(None, "journal_mode", "WAL").is_ok() {
@@ -193,7 +182,6 @@ pub fn rename_fleet(
     })
 }
 
-/// The events `filter` (an SQL condition over the columns, `?1` = `arg`) selects, by seq.
 pub(crate) fn events(state: &Path, filter: &str, arg: u64) -> Result<Vec<Event>> {
     with(state, false, vec![], |c| rows(c, filter, arg))
 }
@@ -215,8 +203,7 @@ fn rows(c: &Connection, filter: &str, arg: u64) -> Result<Vec<Event>> {
     .collect()
 }
 
-/// #509: in one transaction, the latest `intent`/`done`/`failed` of `action_id` `id`; `evs` appended when `take`
-/// accepts it. Returns it and whether they were.
+/// #509: in one transaction, the latest `intent`/`done`/`failed` of `action_id` `id`; `evs` appended when `take` accepts it. Returns it and whether they were.
 pub fn claim(
     state: &Path,
     evs: &[Event],
@@ -289,7 +276,6 @@ fn update(state: &Path, rows: &[(u64, Option<String>)]) -> Result<()> {
                 Some(j) => tx.execute("UPDATE events SET json = ?2 WHERE seq = ?1", params![s, j])?,
             };
         }
-        // #560: a new `archived` row: `events::shared` reads the live log afresh.
         tx.execute(
             "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', 0, '{}')",
             [],
@@ -420,8 +406,7 @@ fn lease(r: &rusqlite::Row) -> rusqlite::Result<Lease> {
     })
 }
 
-/// Take `key` for `secs` from `now`, as this process: an atomic insert-if-free. Free: no lease, an expired one, or one
-/// `dead` says has lost its holder. `None` while another holds it.
+/// Take `key` for `secs` from `now`, as this process: an atomic insert-if-free. Free: no lease, an expired one, or one `dead` says has lost its holder. `None` while another holds it.
 pub fn take(state: &Path, key: &str, now: u64, secs: u64, data: &str, dead: &dyn Fn(&Lease) -> bool) -> Option<Lease> {
     crate::sim::point(&crate::sim::Point::Lease(key));
     let l = Lease {
@@ -478,8 +463,6 @@ pub fn release(state: &Path, key: &str, l: Option<&Lease>) -> bool {
     n.is_ok_and(|n| n > 0)
 }
 
-/// A file from before #344, renamed out of the way once imported (the kept backup): `<name>.migrated`, or
-/// `<name>.<k>.migrated` when an earlier one is there.
 fn retire(p: &Path) -> Result<()> {
     let name = p.file_name().unwrap_or_default().to_string_lossy();
     let free = (1..u32::MAX)
@@ -492,7 +475,6 @@ fn retire(p: &Path) -> Result<()> {
     Ok(std::fs::rename(p, free)?)
 }
 
-/// The files from before #344 still beside the database: the log, its archives, devices and push subscriptions.
 fn legacy(state: &Path) -> (Vec<PathBuf>, [PathBuf; 2]) {
     let dir = state.parent().unwrap_or(Path::new("."));
     let mut logs: Vec<PathBuf> = std::fs::read_dir(dir)
@@ -512,8 +494,7 @@ fn legacy(state: &Path) -> (Vec<PathBuf>, [PathBuf; 2]) {
 /// Set by `drover migrate --live`: the only way files in the owner's own state dir (`live`) are imported.
 pub static LIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// The owner's default state dir, `$HOME/.local/state/drover` (or its pre-rename `herdsman`): never imported on its
-/// own, so a test build run without `FLEET_STATE` cannot take the installed build's log away.
+/// The owner's default state dir, `$HOME/.local/state/drover` (or its pre-rename `herdsman`): never imported on its own, so a test build run without `FLEET_STATE` cannot take the installed build's log away.
 pub fn live(state: &Path) -> bool {
     let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
     let dir = canon(state.parent().unwrap_or(Path::new(".")));
@@ -521,22 +502,19 @@ pub fn live(state: &Path) -> bool {
     ["drover", "herdsman"].iter().any(|d| canon(&root.join(d)) == dir)
 }
 
-/// `drover migrate` and every first open: the log (and its archives), devices and push subscriptions into the
-/// database, in one transaction, checked by a full fold before and after; then each file goes to `*.migrated`.
-/// Idempotent: a second run finds nothing left. Events keep their seq unless the database already has a later one.
 fn import(c: &mut Connection, state: &Path) -> Result<()> {
     let (logs, lists) = legacy(state);
     if logs.is_empty() && !lists.iter().any(|p| p.exists()) {
         return Ok(());
     }
     let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-    let (logs, lists) = legacy(state); // another process may have imported them meanwhile
+    let (logs, lists) = legacy(state);
     let mut done = vec![];
     if !logs.is_empty() {
         let live = events::read_file(state)?;
         let mut all = [events::archives(state)?, live.clone()].concat();
         all.sort_by_key(|e| e.seq);
-        all.dedup_by_key(|e| e.seq); // a rotation that died between its archive and its rename
+        all.dedup_by_key(|e| e.seq);
         let mut seen = rows(&tx, "seq > ?1", 0)?;
         let mut max = seen.last().map_or(0, |e| e.seq);
         for e in &all {

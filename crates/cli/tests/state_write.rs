@@ -1,6 +1,3 @@
-//! #122: state writes are atomic (a failed rewrite keeps the old rows and logs `state-write-failed` once an
-//! hour), `vapid.key` is never rewritten, and a device's last-seen is written at most hourly. #344: devices live in
-//! `state.db`, each store one transaction.
 mod common;
 use common::*;
 use drover::devices;
@@ -12,7 +9,6 @@ fn chmod(p: &Path, mode: u32) {
     std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
 }
 
-/// #344: every device write fails (as a full disk would) until `fix`.
 fn break_writes(c: &drover::Ctx) -> impl Fn() {
     let file = drover::db::file(&c.state);
     let db = move || rusqlite::Connection::open(&file).unwrap();
@@ -52,7 +48,6 @@ fn a_failed_write_keeps_the_old_devices_and_logs_once_an_hour() {
         "no token hash in the log"
     );
     assert!(drover::events::plain(&failed[0]).starts_with(&format!("drover state-write-failed: {}: ", file.display())));
-    // A write that succeeds replaces them, the file still 0600.
     devices::store(&c, &[]).unwrap();
     assert!(devices::load(&c).is_empty());
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
@@ -64,7 +59,7 @@ fn an_existing_vapid_key_is_never_rewritten() {
     let k = drover::webpush::vapid(&c.state).unwrap();
     let file = c.state.parent().unwrap().join("webpush/vapid.key");
     let before = std::fs::read(&file).unwrap();
-    chmod(file.parent().unwrap(), 0o500); // any rewrite (temp + rename) would now fail
+    chmod(file.parent().unwrap(), 0o500);
     let again = drover::webpush::vapid(&c.state);
     chmod(file.parent().unwrap(), 0o700);
     assert_eq!(again.unwrap().to_bytes(), k.to_bytes());
@@ -85,7 +80,6 @@ fn last_seen_is_written_at_most_hourly() {
     c.now = t0 + 3600;
     assert!(devices::find(&c, &cookie).is_some());
     assert_eq!(used(&c), t0 + 3600);
-    // A failed last-seen write still lets the paired device in.
     let fix = break_writes(&c);
     c.now = t0 + 7200;
     let found = devices::find(&c, &cookie);
@@ -97,7 +91,6 @@ fn last_seen_is_written_at_most_hourly() {
 #[test]
 fn concurrent_device_updates_all_land_without_a_write_failure() {
     let c = ctx(&tmpdir("state-write-race"), CONFIG);
-    // Unlocked plain stores race: each is its own transaction.
     std::thread::scope(|s| {
         for _ in 0..16 {
             s.spawn(|| (0..20).for_each(|_| devices::store(&c, &[]).unwrap()));

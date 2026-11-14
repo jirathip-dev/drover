@@ -1,7 +1,3 @@
-//! #244: colour schemes. Every built-in has the whole token set and passes the gate (serve.js's pure scheme part,
-//! run under node); a crafted bad scheme is refused with the reason; a user file in `<config dir>/schemes/` is served
-//! and wins over a built-in of its name; each theme names its default (the picker's), and the first paint is the
-//! board theme's block; `github-dark` is today's colours.
 mod common;
 use common::*;
 use drover::serve::Server;
@@ -26,7 +22,6 @@ fn built(n: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(p).unwrap()).unwrap()
 }
 
-/// serve.js's pure scheme part plus `js`, run under node: its stdout as JSON. None where node is missing.
 fn node(js: &str) -> Option<Value> {
     if std::process::Command::new("node").arg("--version").output().is_err() {
         eprintln!("skipping: no node here");
@@ -41,7 +36,6 @@ fn node(js: &str) -> Option<Value> {
     Some(serde_json::from_slice(&o.stdout).unwrap())
 }
 
-/// The page of a board whose fleet.toml picks `theme`, with user scheme files `(name, body)`.
 fn page(theme: Option<&str>, own: &[(&str, &str)]) -> String {
     let d = tmpdir("scheme");
     let cfg = theme.map_or(CONFIG.to_string(), |t| format!("{CONFIG}\n[serve]\ntheme = \"{t}\"\n"));
@@ -56,7 +50,6 @@ fn page(theme: Option<&str>, own: &[(&str, &str)]) -> String {
     String::from_utf8(s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).unwrap()
 }
 
-/// The page's `SD`: `{"t": theme → default scheme, "s": name → scheme}`.
 fn sd(page: &str) -> Value {
     let at = page.find("let SD=").unwrap() + 7;
     serde_json::Deserializer::from_str(&page[at..])
@@ -114,7 +107,6 @@ fn a_bad_scheme_is_refused_with_the_reason() {
         (with("--mute", "#444c56"), "--mute on --bg 2.18 < 4.5"),
         (with("--fg", "#5b2a2a"), "--fg on --bg 1.63 < 4.5"),
         (with("--r", "#3a1d1d"), "--r on --bg 1.24 < 3"),
-        // Amber that reads as red, and a control that reads as a warning.
         (with("--a", "#f05a48"), "ΔE2000 --a ↔ --r 2.35 < 20"),
         (with("--l", "#d6a02a"), "ΔE2000 --l ↔ --a 2.06 < 20"),
         (light, "color-scheme is not \"dark\" or \"light\""),
@@ -127,14 +119,12 @@ fn a_bad_scheme_is_refused_with_the_reason() {
     for (i, (_, want)) in cases.iter().enumerate() {
         assert_eq!(got[i], json!(want), "case {i}");
     }
-    // The tinted surfaces: text that passes on --bg but not on the needs-you card's red tint.
     let tint = node(&format!(
         "fails({}).filter(f => f.includes('needs-you card'))",
         with("--mute", "#7d8590")
     ))
     .unwrap();
     assert_eq!(tint, json!(["--mute on the needs-you card 4.33 < 4.5"]));
-    // The design's crafted refusals (docs/design/schemes/refused).
     for f in ["missing-token", "solarized-canonical"] {
         let p = format!(
             "{}/../../docs/design/schemes/refused/{f}.json",
@@ -170,7 +160,6 @@ fn a_user_scheme_is_served_and_overrides_a_built_in() {
         BUILT.len() + 2,
         "{names:?}: a.b and notes.txt are not schemes"
     );
-    // The gate refuses the null one and keeps the rest; a refused pick falls back to the theme's default.
     let Some(got) = node(&format!("[fails({}).length > 0, choose({s}, 'bad', 'farm')]", s["bad"])) else {
         return;
     };
@@ -190,14 +179,12 @@ fn each_theme_names_its_default_and_the_first_paint_is_the_board_themes() {
         p.contains("<button id=sysb type=button") && !p.contains("id=look"),
         "#440: one [⚙], theme and colours in its Appearance"
     );
-    // The phone's last block wins before the first paint (serve.js keeps it).
     assert!(p.contains("try{sb=localStorage.sb}catch(e){}if(sb)document.getElementById('sch').textContent=sb"));
     let p = page(Some("terminal"), &[]);
     assert!(
         p.contains("<style id=sch>:root{--a:#d29922;--bg:#0d1117;"),
         "terminal: github-dark"
     );
-    // A theme without `scheme` gets github-dark.
     let d = tmpdir("scheme-space");
     let c = ctx(&d, &format!("{CONFIG}\n[serve]\ntheme = \"space\"\n"));
     std::fs::create_dir_all(c.config.with_file_name("themes/space")).unwrap();
@@ -206,7 +193,6 @@ fn each_theme_names_its_default_and_the_first_paint_is_the_board_themes() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let p = String::from_utf8(s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).unwrap();
     assert_eq!(sd(&p)["t"]["space"], json!("github-dark"));
-    // The picker: the pick, else the theme's default, else github-dark.
     let all = json!({"farm": built("farm"), "nord": built("nord"), "github-dark": built("github-dark")});
     let js = format!(
         "[choose({all}, null, 'farm'), choose({all}, 'nord', 'farm'), choose({all}, 'gone', 'nord'), choose({all}, null, 'gone')]"
@@ -215,7 +201,6 @@ fn each_theme_names_its_default_and_the_first_paint_is_the_board_themes() {
     assert_eq!(got, json!(["farm", "nord", "nord", "github-dark"]));
 }
 
-/// Gate 2's pixel identity: github-dark is the colours serve.css had before schemes (#244), token for token.
 #[test]
 fn github_dark_is_todays_board() {
     let t = &built("github-dark")["tokens"];
@@ -246,8 +231,6 @@ fn github_dark_is_todays_board() {
     assert_eq!(built("github-dark")["color-scheme"], json!("dark"));
 }
 
-/// #423 AC: a theme's `{light, dark}` scheme follows the phone's `prefers-color-scheme` (serve.js's `choose`, and the
-/// first paint's media query); a single name still works, and the phone's own pick still wins.
 #[test]
 fn a_light_dark_scheme_follows_the_phone_and_a_pick_still_wins() {
     let p = page(Some("garden"), &[]);
