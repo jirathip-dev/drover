@@ -22,7 +22,7 @@ pub struct Metrics {
     pub ci_wait: u64,
     /// Process-seconds in 1 s polls on drive.lock or a kick.
     pub lock_wait: u64,
-    /// Drive actions refused SERIAL_BUSY, by a busy host (HOST_BUSY, MEM_LOW, DISK_LOW), by a cap (CAP, ALL_CAPPED, SPAWN_PENDING: the parallel-spawn slots).
+    /// Drive actions refused SERIAL_BUSY, by a busy host (HOST_BUSY, MEM_LOW, DISK_LOW), by a cap (CAP, SPAWN_PENDING: the parallel-spawn slots).
     pub serial: u64,
     pub host_busy: u64,
     pub caps: u64,
@@ -71,7 +71,7 @@ pub fn log<'a>(evs: impl Iterator<Item = (u64, &'a Event)> + Clone, produced: im
                     match a["code"].as_str().unwrap_or("") {
                         "SERIAL_BUSY" => m.serial += 1,
                         "HOST_BUSY" | "MEM_LOW" | "DISK_LOW" => m.host_busy += 1,
-                        "CAP" | "ALL_CAPPED" | "SPAWN_PENDING" => m.caps += 1,
+                        "CAP" | "SPAWN_PENDING" => m.caps += 1,
                         _ => {}
                     }
                 }

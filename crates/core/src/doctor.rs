@@ -50,43 +50,6 @@ fn config_rows(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
 }
 
-fn account_rows(cfg: &Config, rows: &mut Vec<String>) {
-    if cfg.accounts.names.is_empty() {
-        return;
-    }
-    let src = cfg.accounts.account_env.as_ref().map_or_else(
-        || "each account's own folder (`/login` in it, docs/accounts.md)".into(),
-        |c| format!("the account_env helper `{c}`"),
-    );
-    rows.push(format!("✓ accounts — sign in from {src}"));
-    rows.push("✓ meter — `accounts` shows each reading's age; one past its reset reads 0%".into());
-    let hn = crate::providers::accounts().map_or("", |p| p.name);
-    for name in cfg.accounts.names.keys() {
-        let Some((_, f)) = crate::access::token_file(cfg, hn, name) else {
-            continue;
-        };
-        let at = std::fs::metadata(&f).and_then(|m| m.modified());
-        let days = at
-            .ok()
-            .and_then(|t| t.elapsed().ok())
-            .map_or(0, |a| a.as_secs() / 86_400);
-        let (ok, line) = match crate::secret::file(&f) {
-            Err(e) => (false, format!("{e:#}")),
-            Ok(None) => (false, format!("{} missing → place it, mode 600", f.display())),
-            Ok(Some(_)) => (
-                days < TOKEN_DAYS,
-                format!(
-                    "{} is {days} days old → renew it before it expires (a year)",
-                    f.display()
-                ),
-            ),
-        };
-        row(rows, ok, '!', &format!("account {name} token file — {line}"));
-    }
-}
-
-const TOKEN_DAYS: u64 = 300;
-
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, rows);
     if cfg.runtime.kind == crate::config::RuntimeKind::Berth {
@@ -190,7 +153,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
                 .map(|p| format!("  {} — {} (fleet.toml:{})", p.rule, p.msg, p.line)),
         );
     }
-    account_rows(cfg, rows);
     let n = crate::webhook::rejected(ctx);
     let bad = match n {
         0 => String::new(),
@@ -352,10 +314,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
 const STARTUP: [&str; 4] = [".zshenv", ".zprofile", ".zshrc", ".zlogin"];
 
 fn login_token(r: &dyn Runner, host: Option<&str>) -> Option<String> {
-    let crate::providers::Credential::Account(a) = crate::providers::accounts()?.credential() else {
-        return None;
-    };
-    let var = a.token_env?;
+    let var = crate::providers::lanes().find_map(|h| h.token_env())?;
     let probe = format!(
         "t=$(env -i HOME=\"$HOME\" zsh -ilc 'echo \"token:${{{var}:+set}}\"' </dev/null 2>/dev/null); \
          case \"$t\" in *token:set*) echo token:set; cd \"$HOME\" && \
@@ -377,7 +336,7 @@ fn login_token(r: &dyn Runner, host: Option<&str>) -> Option<String> {
     };
     let on = host.map_or(String::new(), |h| format!(" on host {h}"));
     Some(format!(
-        "! a login shell{on} exports {var} (it overrides each lane's account) → remove it from {files}"
+        "! a login shell{on} exports {var} (it overrides the host's own login in every lane) → remove it from {files}"
     ))
 }
 

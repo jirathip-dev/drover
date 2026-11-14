@@ -1,9 +1,10 @@
 // #440: the System sheet's own sections (serve.js opens it, indexes it and draws Hosts & health, Activity and
 // Appearance): Agent providers and Notifications & devices from API v1's `host`, Fleets and Conductor from its `queue`.
-// Until #441 the providers are today's accounts and DeepSeek balance, read-only; until #404 Conductor names no defaults.
-import type { Account, HostTab, QueueTab } from '../../assets/types/api';
+// #923: the providers are the DeepSeek balance, read-only (lanes sign in with the host's own login); until #404
+// Conductor names no defaults.
+import type { HostTab, QueueTab } from '../../assets/types/api';
 import { age, esc } from './events.ts';
-import { form, gauge, hidden } from './host.ts';
+import { form, hidden } from './host.ts';
 import { sheet } from './queue.ts';
 
 /** A section's head: its name and a muted summary (`t` turns it amber or red). */
@@ -12,29 +13,16 @@ const head = (name: string, meta: string, t = '') => `<h2 class=syh><span class=
 const group = (name: string, hint: string, body: string) => `<section class=cg><h3>${esc(name)}<span>${esc(hint)}</span></h3>${body}</section>`;
 const dl = (rows: [string, string][]) => `<dl class=kv2>${rows.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
 
-/** An account's row: its name, its cap line on the right in its tone, its 5h/7d gauges, then pace or why none. */
-function account(x: Account): string {
-  const t = x.capped ? 'a' : x.tone;
-  const use = x.meters.map(m => {
-    const p = Math.round(m.pct), b = p >= 100 ? 'r' : p >= 80 ? 'a' : 'g';
-    return `<span class=pm><span class=k>${esc(m.label)}</span>${gauge({ t: b, n: Math.min(12, Math.round(p / 100 * 12)), pct: '' })} <b class=${b}>${p}%</b></span>`;
-  }).join('');
-  const note = [x.pace && `<b class=a>${esc(x.pace)}</b>`, x.hint && `<span class=a>${esc(x.hint)}</span>`].filter(Boolean).join(' · ');
-  return `<div class=pvr data-t=${t}><p class=pvh><b class=pvn>${esc(x.name)}</b><span class="pvs ${t}">${esc(x.cap)}</span></p>`
-    + `${use ? `<p class=pvu>${use}</p>` : ''}<p class=pvm>${note ? `${note} · ` : ''}${esc(x.hours)}</p></div>`;
-}
-
-/** Agent providers: a card per provider (the host card's box), an account or key per row. */
+/** Agent providers: a card per provider (the host card's box), a key per row. */
 export function providers(d: HostTab): string {
   const ds = d.deepseek, cards: string[] = [];
-  if (d.accounts.length) cards.push(`<article class=pvc data-p=anthropic><div class=pvch><b>Anthropic</b><span class=m>Claude</span></div>${d.accounts.map(account).join('')}</article>`);
   if (ds) {
     const [t, s] = ds.balance == null ? ['a', ds.hint] : [ds.low ? 'a' : 'g', `✓ ${ds.balance}${ds.low ? ' · low' : ''}`];
     cards.push(`<article class=pvc data-p=deepseek><div class=pvch><b>DeepSeek</b><span class=m>API keys</span></div><div class=pvr data-t=${t}><p class=pvh><b class=pvn>balance</b><span class="pvs ${t}">${esc(s)}</span></p></div></article>`);
   }
-  const bad = d.accounts.filter(x => x.capped).length + +(ds != null && (ds.balance == null || ds.low));
+  const bad = +(ds != null && (ds.balance == null || ds.low));
   const meta = !cards.length ? 'none set' : `${cards.length} provider${cards.length > 1 ? 's' : ''}${bad ? ` · ${bad} need${bad > 1 ? '' : 's'} you` : ' · all ok'}`;
-  const body = cards.length ? `<div class=pvg>${cards.join('')}</div>` : '<p class=mt>none set: <code>[accounts]</code> and a DeepSeek key in fleet.toml</p>';
+  const body = cards.length ? `<div class=pvg>${cards.join('')}</div>` : '<p class=mt>none set: a DeepSeek key in fleet.toml</p>';
   return `${head('agent providers', meta, bad ? 'a' : '')}${body}<p class=pvf>secrets stay in the main host's keychain · remote lanes get theirs over ssh stdin · a conductor proposes, you tap</p>`;
 }
 
