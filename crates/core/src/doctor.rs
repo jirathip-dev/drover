@@ -284,15 +284,29 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     }
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
         let Some(m) = h.machine.as_deref() else { continue };
-        let on = crate::hosts::On::new(r, Some(m));
+        let acp = cfg.host_acp(name).is_some();
+        let on = crate::hosts::On::new(r, Some(m)).shed_only(acp);
         let Some((tags, home)) = crate::hosts::probe(&on) else {
             let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#})");
             let why = ok(&on, "true", &[] as &[&str]).map_or_else(ssh, |_| "probe: unreadable answer".into());
             rows.push(format!("✗ host {name} — {why} → ssh {m} true"));
             continue;
         };
-        if let Err(e) = crate::herdr::poll(&on) {
-            rows.push(format!("✗ host {name} — herdr agent list: {e} → herdr machine status"));
+        let (rt, listed) = if acp {
+            let fix = format!("ssh {m} shed doctor");
+            (
+                "shed",
+                crate::hosts::agents_of(cfg, name, &on).map_err(|e| format!("shed list: {e:#} → {fix}")),
+            )
+        } else {
+            let fix = "herdr machine status";
+            (
+                "herdr, session",
+                crate::herdr::poll(&on).map_err(|e| format!("herdr agent list: {e} → {fix}")),
+            )
+        };
+        if let Err(e) = listed {
+            rows.push(format!("✗ host {name} — {e}"));
             continue;
         }
         let tags = [tags, h.tags.clone()].concat();
@@ -300,7 +314,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
         let v = crate::VERSION;
-        let ok = format!("✓ host {name} — herdr, session, git, gh, {logins}drover {v}");
+        let ok = format!("✓ host {name} — {rt}, git, gh, {logins}drover {v}");
         rows.extend(bad.iter().map(|w| w.replacen(' ', &format!(" host {name} "), 1)));
         rows.extend(bad.is_empty().then_some(ok));
         rows.extend(login_token(&on, Some(name)));

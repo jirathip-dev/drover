@@ -30,11 +30,25 @@ pub fn key(ctx: &Ctx, var: &str) -> Result<Option<(String, String)>> {
 
 /// Recipe `c`: `<config>/recipes/<c>.toml`, else the built-in `boat`.
 pub fn load(ctx: &Ctx, c: &str) -> Result<toml::Table> {
-    let p = ctx.config.with_file_name(format!("recipes/{c}.toml"));
-    let boat = || (c == "boat").then(|| include_str!("../assets/recipes/boat.toml").into());
+    let p = user_recipe(ctx, c);
+    let boat = || builtin(c).map(String::from);
     let text = std::fs::read_to_string(&p).ok().or_else(boat);
     let text = text.with_context(|| format!("cloud recipe {}", p.display()))?;
     Ok(toml::from_str(&text)?)
+}
+
+fn user_recipe(ctx: &Ctx, c: &str) -> std::path::PathBuf {
+    ctx.config.with_file_name(format!("recipes/{c}.toml"))
+}
+
+fn builtin(c: &str) -> Option<&'static str> {
+    (c == "boat").then_some(include_str!("../assets/recipes/boat.toml"))
+}
+
+fn stale_override(ctx: &Ctx, c: &str) -> Option<std::path::PathBuf> {
+    let has = |t: &str| toml::from_str::<toml::Table>(t).is_ok_and(|t| t.contains_key("identity"));
+    let p = user_recipe(ctx, c);
+    (builtin(c).is_some_and(has) && std::fs::read_to_string(&p).is_ok_and(|t| !has(&t))).then_some(p)
 }
 
 fn cmd(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str) -> Result<String> {
@@ -358,7 +372,9 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         moved(ctx, cfg, r, name, true)?;
     }
     let on = crate::hosts::On::new(r, Some(m));
-    let (tags, home) = crate::hosts::probe(&on).with_context(|| format!("can't reach {name}"))?;
+    let over = h.cloud.as_deref().map(|c| user_recipe(ctx, c)).filter(|p| p.is_file());
+    let why = over.map_or(String::new(), |p| format!(" (recipe override {} in use)", p.display()));
+    let (tags, home) = crate::hosts::probe(&on).with_context(|| format!("can't reach {name}{why}"))?;
     let mine = crate::config::home().to_string_lossy().into_owned();
     let [exe, conf] = [&ctx.exe, &ctx.config.display().to_string()].map(|p| p.replace(&mine, &home));
     let (root, sha) = (exe.rsplitn(3, '/').last().unwrap_or(&home), env!("DROVER_SHA"));
@@ -514,6 +530,12 @@ pub fn doctor(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, rows: &mut Ve
             ][usize::from(there)]
             .clone(),
         );
+    }
+    if let Some(p) = stale_override(ctx, &c) {
+        let p = p.display();
+        rows.push(format!(
+            "✗ cloud {name} recipe — {p} has no identity, the built-in {c} has one → delete {p}, or add identity to it"
+        ));
     }
     let mut uses = vec![];
     for (verb, line) in rc
