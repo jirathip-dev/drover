@@ -1129,6 +1129,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "runners-low",
     "runners-ok",
     "runtime-down",
+    "heavy-timeout",
 ];
 
 impl Notify {
