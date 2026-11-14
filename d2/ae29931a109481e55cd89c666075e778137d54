@@ -1,0 +1,12 @@
+Decided: lanes carry shed's agent_status and its note untouched; only waiting-owner is drover's own, laid over done
+Because: "drover's `lane-state` takes shed's state and note as-is for every ACP lane"
+Decided: waiting-owner reads the issue's open asks and blocked/need-input turn-ends since the lane's spawn, not since its turn ended
+Because: crates/core/src/lanes.rs:260
+Rejected: anchoring on shed's turn end time — a lane files its ask during the turn, so the ask always predates the turn end and was missed
+Decided: one held() test in stall.rs gates the nudge, the stall check and drover check alike
+Because: "never fire on a lane that is `running`, `waiting-approval`, `waiting-owner` or `rate-limited`"
+Decided: [switch account] re-spawns the lane with --resume of its shed session on the next uncapped account; [wait] logs the reset and drive sends continue once at it
+Because: "drover takes neither by itself: the owner picks per lane"
+Rejected: a separate typed-relay check shared with answer --typed — its ask/thread matching does not fit a lane with no ask
+Check: a lane that is rate-limited gets no continue and no new spawn until a limit-picked event exists
+Owner: rate-limited lanes now wait for you to pick switch account or wait; drover never picks for you
