@@ -260,7 +260,7 @@ fn state<'a>(st: &'a States, fleet: &str, n: u64) -> &'a str {
 }
 
 /// #294: the serial groups issue `n` is in, by name: marked in queue `q` (`""` = the first group) or joined by its diff (`serial-joined`; #149's `serial-auto` = the first group), merged ones included.
-pub fn groups<'a>(q: &[Item], events: &[Event], f: &'a Fleet, fleet: &str, n: u64) -> Vec<&'a Serial> {
+pub fn groups(q: &[Item], events: &[Event], f: &Fleet, fleet: &str, n: u64) -> Vec<Serial> {
     let marks = q.iter().filter(|i| i.issue == n).flat_map(|i| &i.serial);
     let joined = events.iter().filter(|e| e.fleet == fleet && e.issue == Some(n));
     let joined = joined.filter_map(|e| match e.kind.as_str() {
@@ -269,13 +269,32 @@ pub fn groups<'a>(q: &[Item], events: &[Event], f: &'a Fleet, fleet: &str, n: u6
         _ => None,
     });
     let (all, first): (Vec<&str>, _) = (marks.map(String::as_str).chain(joined).collect(), f.serial.first());
-    let is = |g: &&Serial| {
+    let is = |g: &Serial| {
         all.iter()
             .any(|&a| a == g.name || a.is_empty() && first.is_some_and(|x| x.name == g.name))
     };
-    let mut gs: Vec<_> = f.serial.iter().filter(is).collect();
+    let mut gs: Vec<_> = serials(events, f, fleet).into_iter().filter(is).collect();
     gs.sort_by(|a, b| a.name.cmp(&b.name));
     gs
+}
+
+/// #891: the hot files of `fleet`'s last `hot-files` event (drive logs one when the list less converted files changes).
+pub fn hot_files(events: &[Event], fleet: &str) -> Vec<String> {
+    let last = events.iter().rfind(|e| e.kind == "hot-files" && e.fleet == fleet);
+    let files = last
+        .and_then(|e| e.data["files"].as_array().cloned())
+        .unwrap_or_default();
+    files.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+}
+
+/// #891: `fleet`'s serial groups: its configured ones, then one per hot file, `hot <file>` with one slot.
+pub fn serials(events: &[Event], f: &Fleet, fleet: &str) -> Vec<Serial> {
+    let hot = hot_files(events, fleet).into_iter().map(|p| Serial {
+        name: format!("hot {p}"),
+        paths: vec![p],
+        max: 1,
+    });
+    f.serial.iter().cloned().chain(hot).collect()
 }
 
 /// In flight: a live impl/fix lane, or at review/ready.
@@ -468,6 +487,9 @@ pub fn board(
         let stale = sp.zip(cfg).is_some_and(|(e, c)| crate::hook::rules_stale(c, fleet, e));
         let place = s.and_then(|s| at.get(s.active_lane()?.1)).filter(|p| !p.is_empty());
         let warn = place.map_or(String::new(), |p| format!("\n         on {p}")) + &warn;
+        let wait =
+            f.and_then(|f| (groups(&q, events, f, fleet, n).into_iter()).find(|g| held(events, fleet, n, &g.name)));
+        let warn = wait.map_or(String::new(), |g| format!("\n         serial: {}", g.name)) + &warn;
         let warn = if stale {
             "\n         rules stale: respawn to apply".into()
         } else {

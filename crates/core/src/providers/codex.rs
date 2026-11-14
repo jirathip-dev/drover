@@ -20,6 +20,7 @@ static DIALECT: Dialect = Dialect {
     deny: |reason| json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}),
     prompt: "UserPromptSubmit",
     again: Some(|reason| json!({"decision": "block", "reason": reason})),
+    rewrite: None,
 };
 
 /// The session config `codex-acp` merges in (`CODEX_CONFIG`): drover's hook on every tool call, turn end and prompt, run without Codex's interactive trust review (a lane has no one to answer it).

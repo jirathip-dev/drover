@@ -461,6 +461,31 @@ pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Opti
     })
 }
 
+/// #935: fleet `old`'s events moved to `new` and `ev` logged, after a copy to `bak`; committed only once `then` succeeds.
+pub fn rename_fleet(
+    state: &Path,
+    (old, new): (&str, &str),
+    ev: &Event,
+    bak: &Path,
+    then: impl FnOnce() -> Result<()>,
+) -> Result<usize> {
+    with(state, true, 0, |c| {
+        c.execute("VACUUM INTO ?1", [bak.to_string_lossy()])?;
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let q = "UPDATE events SET fleet = ?2, json = json_set(json, '$.fleet', ?2) WHERE fleet = ?1";
+        let n = tx.execute(q, params![old, new])?;
+        tx.execute("DELETE FROM snapshot WHERE key IN ('states', 'board')", [])?;
+        tx.execute(
+            "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', 0, '{}')",
+            [],
+        )?;
+        insert(&tx, ev, None, false)?;
+        then()?;
+        tx.commit()?;
+        Ok(n)
+    })
+}
+
 pub(crate) fn events(state: &Path, filter: &str, arg: u64) -> Result<Vec<Event>> {
     with(state, false, vec![], |c| rows(c, filter, arg))
 }
