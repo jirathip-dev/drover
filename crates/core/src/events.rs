@@ -802,7 +802,6 @@ type Gated = (Arc<Mutex<()>>, Arc<Log>);
 
 type Queues = Arc<Mutex<HashMap<String, (usize, Vec<crate::queue::Item>)>>>;
 
-/// #971: the cached log's replayed queues, by fleet: (`queue` events applied, the queue then).
 pub(crate) fn queues(events: &[Event]) -> Option<Queues> {
     cached(events).map(|l| l.queues.clone())
 }
