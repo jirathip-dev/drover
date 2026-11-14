@@ -320,7 +320,7 @@ fn the_stop_hook_leaves_check_lanes_alone() {
 
 #[test]
 fn a_working_lane_that_hibernated_and_died_is_respawned_after_a_false_failed_start() {
-    let (c, r) = lane("turn-hibernated", false, None);
+    let (c, r, _sh) = lane("turn-hibernated", false, None);
     ev(&c, 11, "lane-state", json!({"agent": LANE, "state": "working"}));
     let d =
         json!({"agent": LANE, "key": format!("{LANE}:11"), "reason": "failed start, no event 3m after its first turn"});
