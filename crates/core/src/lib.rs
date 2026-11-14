@@ -19,7 +19,6 @@ pub mod drive;
 pub mod events;
 pub mod gate;
 pub mod gh;
-pub mod herdr;
 pub mod hook;
 pub mod host;
 pub mod hosts;
@@ -51,6 +50,7 @@ pub mod slo;
 pub mod snapshot;
 pub mod spawn;
 pub mod stall;
+pub mod term;
 pub mod timer;
 pub mod update;
 pub mod usage;
@@ -831,11 +831,11 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, 
     let inside = crate::host::live_in(&all, "", std::path::Path::new(wt.unwrap_or_default()));
     let live = inside.into_iter().find(|a| a["name"] == agent);
     let pane = sp.and_then(|e| e.str("pane")).or_else(|| live?["pane_id"].as_str());
-    let typed = |p| herdr::prompt(on, agent, msg).and_then(|_| herdr::keys(on, p, "Enter"));
+    let typed = |p| term::prompt(on, agent, msg).and_then(|_| term::keys(on, p, "Enter"));
     let why = match pane.map(|p| (p, typed(p))) {
         None => "no open lane for this ask".into(),
         Some((_, Err(e))) => format!("{e:#}"),
-        Some((p, Ok(_))) if first && !herdr::landed(on, agent, p, msg) => "the agent did not pick it up".into(),
+        Some((p, Ok(_))) if first && !term::landed(on, agent, p, msg) => "the agent did not pick it up".into(),
         Some(_) => String::new(),
     };
     let kind = match (why.is_empty(), live) {

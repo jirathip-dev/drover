@@ -5,7 +5,7 @@ use crate::events::{self, emit, shared, Event};
 use crate::gate::refused;
 use crate::runner::Runner;
 use crate::spawn::Plan;
-use crate::{herdr, providers, Ctx};
+use crate::{providers, term, Ctx};
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
@@ -251,7 +251,7 @@ pub fn archive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, on: bool) -> R
     let t = t.map_or_else(|| find(&events, id), Ok)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     if let Some(s) = last.filter(|s| on && s.kind == "orchestrator-start") {
-        if herdr::agents(r)?.iter().any(|a| a["name"] == s.data["agent"]) {
+        if term::agents(r)?.iter().any(|a| a["name"] == s.data["agent"]) {
             close(r, s)?;
         }
         let d = json!({"thread": id, "agent": s.str("agent"), "why": "archived"});
@@ -746,7 +746,7 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     let id = t.str("thread").unwrap_or_default();
     let events = shared(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-    let agents = herdr::agents(r)?;
+    let agents = term::agents(r)?;
     let awake = last.filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| a["name"] == s.data["agent"]));
     // #404: a model/effort pick since the conductor started resumes it on them.
     let picked = awake.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
@@ -763,12 +763,12 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
         return start(ctx, cfg, r, t, &shared(&ctx.state)?, line);
     };
     let (agent, pane) = (s.str("agent").unwrap_or_default(), s.str("pane").unwrap_or_default());
-    // #608: an ACP conductor takes the line as one prompt, multi-line as it is (#397's one line is herdr's).
+    // #608: an ACP conductor takes the line as one prompt, multi-line as it is (#397: a terminal's is one line).
     if acp(s) {
         crate::shed::cli(r, &["send", agent, line])?;
         return Ok(agent.into());
     }
-    herdr::reply(
+    term::reply(
         r,
         s.str("harness") == Some("dsh"),
         agent,
@@ -783,12 +783,9 @@ fn acp(s: &Event) -> bool {
     s.str("runtime") == Some("shed-acp")
 }
 
-/// Close conductor `s`: its shed terminal (#608), else its herdr workspace.
+/// Close conductor `s`: its shed terminal.
 fn close(r: &dyn Runner, s: &Event) -> Result<()> {
-    if acp(s) {
-        return herdr::close(r, s.str("agent").unwrap_or_default()).map(drop);
-    }
-    herdr::workspace_close(r, s.str("workspace").unwrap_or_default()).map(drop)
+    term::close(r, s.str("agent").unwrap_or_default()).map(drop)
 }
 
 /// The conductor role: the thread fleet's `[fleet.<n>.role.conductor]` (#401: else its impl role on profile
@@ -1037,11 +1034,11 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     let resume = first.is_some() && h.resumes();
     let dir = dir(ctx, cfg, id);
     let brief = dir.join(".brief.md");
-    // #397: the kick is one line (herdr refuses a multi-line `agent start` argument); the thread is in a file.
+    // #397: the kick is one line (a terminal's shell line); the thread is in a file.
     let on = crate::hosts::On::new(r, None);
     let thread = dir.join(".thread.md");
     on.write(&thread, &render(&items(events, id), name(cfg, id_of(t))))?;
-    // #621: herdr types the start into a shell that takes lines of at most 1,024 bytes: a long line stays in the file.
+    // #621: the start is typed into a shell that takes lines of at most 1,024 bytes: a long line stays in the file.
     let kick = if resume && line.len() <= 400 {
         line.replace(char::is_control, " ")
     } else {
@@ -1085,10 +1082,10 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     // #683: the conductor runs on this host: its account's env is its sign-in.
     crate::access::signed(ctx, cfg, r, (fleet, &role, false), &mut p)?;
     // #608: a shed-acp fleet's conductor is an ACP session under the same guard as its lanes (#565), or none at all.
-    let shed = cfg.shed_for(fleet).filter(|b| b.acp.is_some());
-    let acp = match shed.map(|b| (b.acp.clone().unwrap_or_default(), herdr::Shed(b))) {
-        Some((aid, b)) => match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
-            Ok(cmd) => Some((b, cmd)),
+    let shed = cfg.shed_for(fleet);
+    let acp = match shed.acp.clone() {
+        Some(aid) => match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
+            Ok(cmd) => Some(cmd),
             Err(e) => {
                 if e.downcast_ref::<crate::gate::Refusal>().is_some() {
                     log(
@@ -1109,18 +1106,25 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     on.write(&brief, &text)?;
     h.prepare(ctx, &on, &p)?;
     let _secrets = crate::spawn::deliver(ctx, &on, cfg, &p)?;
-    if let Some((b, cmd)) = acp {
-        let labels = [
-            ("fleet", fleet),
-            ("issue", "-"),
-            ("role", "orchestrator"),
-            ("harness", &p.harness),
-            ("source", "drover"),
-            ("group", f.repo_name()),
-            ("thread", id),
-        ]
-        .map(|(k, v)| (k, v.to_string()));
-        b.start(r, &agent, &labels, &dir.to_string_lossy(), &cmd)?;
+    let labels = [
+        ("fleet", fleet),
+        ("issue", "-"),
+        ("role", "orchestrator"),
+        ("harness", &p.harness),
+        ("source", "drover"),
+        ("group", f.repo_name()),
+        ("thread", id),
+    ]
+    .map(|(k, v)| (k, v.to_string()));
+    let b = term::Shed(shed);
+    b.start(
+        r,
+        &agent,
+        &labels,
+        &dir.to_string_lossy(),
+        acp.as_deref().unwrap_or_default(),
+    )?;
+    if acp.is_some() {
         let kick = format!("The thread so far is in {}, the last message new.", thread.display());
         let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
         let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
@@ -1128,88 +1132,13 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
             "confirmed": kicked});
         return started(ctx, cfg, r, t, &p, d);
     }
-    let ws = |p: &str| p.split(':').next().unwrap_or(p).to_string();
-    let mine =
-        |a: &&Value| a["name"] == agent.as_str() && a["cwd"].as_str().map(std::path::Path::new) == Some(dir.as_path());
-    let find = |list: &[Value]| {
-        list.iter()
-            .find(mine)
-            .and_then(|a| a["pane_id"].as_str())
-            .map(String::from)
-    };
-    let (mut retried, mut answered, mut screen) = (false, false, String::new());
-    let (new, o, up) = loop {
-        let new = herdr::workspace_create(r, &dir.to_string_lossy(), &agent)?;
-        herdr::ok(r, &p.lane_cmd(&new))?;
-        let o = herdr::exec(r, &p.start_cmd(ctx, &new))?;
-        if o.code == 0 {
-            break (new, o, None);
-        }
-        // #477: a start that timed out (or found its name taken) whose agent is up in the thread's folder is adopted.
-        let has = |c: &str| herdr::failed_with(&o, c);
-        // #736: a first-start prompt (an account's config folder that never trusted this one) is answered as spawn's.
-        if has("agent_not_ready") {
-            let d = |prompt: &str| json!({"thread": id, "agent": agent, "pane": new, "prompt": prompt});
-            let ev = |prompt: &str| Event::new(ctx.now, &t.fleet, None, "startup-prompt", d(prompt));
-            (answered, screen) = crate::spawn::unblock(r, h, &new, |p| emit(&ctx.state, cfg, ev(p)))?;
-            if answered {
-                break (new.clone(), o, Some(new));
-            }
-        }
-        let lost = has("agent_name_not_found") || herdr::message(&o).contains("no longer owns the target terminal");
-        let seen = if has("timeout") || has("agent_name_taken") || lost {
-            herdr::agents(r)?
-        } else {
-            vec![]
-        };
-        let mut up = find(&seen);
-        // #623: on a loaded host the agent may still be coming up: poll for it (backoff) up to the bound.
-        if up.is_none() && has("timeout") {
-            let busy = crate::host::admit(&crate::host::sample(r), &cfg.limits).is_err();
-            let (bound, mut waited, mut step) = (START_SECS << u8::from(busy), 0, 1);
-            while up.is_none() && waited < bound {
-                r.sleep(step);
-                (waited, step) = (waited + step, (step * 2).min(10));
-                up = find(&herdr::agents(r).unwrap_or_default());
-            }
-        }
-        if up.as_deref().is_none_or(|p| ws(p) != ws(&new)) {
-            let _ = herdr::workspace_close(r, &ws(&new));
-        }
-        // #623: a name a dead terminal holds (no live agent has it): clear its last workspace and start once more.
-        let taken = has("agent_name_taken") && !seen.iter().any(|a| a["name"] == agent.as_str());
-        if up.is_none() && (lost || taken) && !retried {
-            let prev = of(events, id).rfind(|e| e.kind == "orchestrator-start");
-            if let Some(w) = prev.and_then(|e| e.str("workspace")).filter(|w| *w != ws(&new)) {
-                let _ = herdr::workspace_close(r, w);
-            }
-            retried = true;
-            continue;
-        }
-        break (new, o, up);
-    };
-    let why = format!("{} {screen}", herdr::message(&o));
-    let named = |m: &&str| o.code != 0 && up.is_none() && (why.contains("unrecognized_model") || why.contains(*m));
-    if let Some(m) = p.model.as_deref().filter(named) {
-        let text = format!("the orchestrator does not start on model {m}: {}", why.trim_end());
-        return log(ctx, cfg, t, "system", (&text, &[])).and_then(|()| refused("BAD_VALUE", text));
-    }
-    let pane = match (o.code, up) {
-        (0, _) => new.clone(),
-        (_, Some(p)) => p,
-        _ if screen.is_empty() => bail!("herdr agent start failed: {}", herdr::message(&o)),
-        _ => bail!("herdr agent start failed: {}\nscreen:\n{screen}", herdr::message(&o)),
-    };
-    // Its own new pane gets the kick; one elsewhere (the name taken) or a kick that didn't land gets the line.
-    let kicked = pane == new && h.kick(r, &p, &pane).unwrap_or(false);
-    if o.code != 0 && !kicked {
-        herdr::reply(r, p.harness == "dsh", &agent, &pane, &line.replace('\n', " "))?;
-    }
-    let mut d = json!({"thread": id, "agent": agent, "pane": pane, "workspace": ws(&pane), "harness": p.harness, "model": p.model, "effort": p.effort,
-        "account": p.account.as_ref().map(|a| &a.0), "session": session, "resumed": resume, "confirmed": kicked});
-    if o.code != 0 && !answered {
-        d["adopted"] = json!(true);
-    }
+    // #721: a shed terminal, its exports and harness typed into its shell, as a lane's.
+    term::ok(r, &p.lane_cmd(&agent))?;
+    term::ok(r, &term::typed(&agent, &p.start_cmd(ctx, &agent)))?;
+    let kicked = h.kick(r, &p, &agent).unwrap_or(false);
+    let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed", "harness": p.harness,
+        "model": p.model, "effort": p.effort, "account": p.account.as_ref().map(|a| &a.0), "session": session,
+        "resumed": resume, "confirmed": kicked});
     started(ctx, cfg, r, t, &p, d)
 }
 
@@ -1499,7 +1428,7 @@ fn switch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Resu
     // No account and no `fallback`: nothing to switch to, but a sign-out still gets its [sign in] line.
     let chain = account.is_some() || role(cfg, &t.fleet).is_ok_and(|r| !r.1.fallback.is_empty());
     let (screen, h) = (
-        herdr::read(r, s.str("pane").unwrap_or_default()).unwrap_or_default(),
+        term::read(r, s.str("pane").unwrap_or_default()).unwrap_or_default(),
         providers::get(hn),
     );
     // #640: an account's banner caps only when its usage reading agrees; a cap is never a sign-out.

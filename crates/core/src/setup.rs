@@ -1,5 +1,5 @@
 use crate::events::{append, read, Event};
-use crate::{config::Config, gate::refused, herdr, hosts::On, runner::argv, runner::Runner, Ctx};
+use crate::{config::Config, gate::refused, hosts::On, runner::Runner, term, Ctx};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
@@ -38,7 +38,7 @@ pub fn vendors(cfg: &Config) -> Vec<(String, String)> {
     all(cfg).into_iter().filter_map(of).collect()
 }
 
-/// Start setup `name` on `host` in a new workspace there; logs `setup` (no command line, no input); the pane id.
+/// Start setup `name` on `host` in a new shed terminal there; logs `setup` (no command line, no input); its name.
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, via: &str) -> Result<String> {
     let boot = ("gh-token".to_string(), GH_TOKEN.to_string()); // #255: bootstrap's, not on the host cards
     let Some((_, line)) = all(cfg).into_iter().chain([boot]).find(|s| s.0 == name) else {
@@ -49,13 +49,10 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
         return refused("NO_SUCH_HOST", format!("no [hosts.{host}]"));
     }
     let on = On::new(r, h.and_then(|h| h.machine.as_deref()));
-    if let Some(m) = on.machine {
-        crate::hosts::resolve(r, m, false)?; // #641: never a pane here for a host herdr can't pin down
-    }
-    let ws = "workspace create --cwd /tmp --label drover-setup --no-focus";
-    let ws = herdr::json(&on, &argv(&ws.split(' ').collect::<Vec<_>>()))?;
-    let pane = ws["result"]["root_pane"]["pane_id"].as_str().context("no pane")?;
-    herdr::ok(&on, &herdr::run_argv(pane, &[&format!("cd; {line}; exit")]))?;
+    let b = on.shed().context("no shed runtime")?;
+    let pane = &format!("drover-setup-{name}");
+    term::Shed(crate::shed::Shed { acp: None, ..b }).start(&on, pane, &[], "/tmp", &[])?;
+    term::ok(&on, &term::run_argv(pane, &[&format!("cd; {line}; exit")]))?;
     let d = json!({"host": host, "name": name, "pane": pane, "machine": on.machine, "via": via});
     append(&ctx.state, &Event::new(ctx.now, "", None, "setup", d))?;
     Ok(pane.into())
@@ -69,10 +66,10 @@ pub fn open<'e>(events: &'e [Event], pane: &str) -> Option<&'e Event> {
     Some(&events[i]).filter(|e| e.kind == "setup")
 }
 
-/// Close setup `e`'s workspace (its scrollback goes with it) and log `setup-closed`.
+/// Close setup `e`'s terminal (its scrollback goes with it) and log `setup-closed`.
 pub fn close(ctx: &Ctx, r: &dyn Runner, e: &Event, why: &str) -> Result<()> {
     let pane = e.str("pane").unwrap_or_default();
-    herdr::workspace_close(&On::of(r, Some(e)), pane.split(':').next().unwrap_or(pane))?;
+    term::close(&On::of(r, Some(e)), pane)?;
     let d = json!({"pane": pane, "why": why});
     append(&ctx.state, &Event::new(ctx.now, "", None, "setup-closed", d))
 }
@@ -92,8 +89,8 @@ pub fn screen(ctx: &Ctx, r: &dyn Runner, pane: &str) -> Result<Value> {
     let (events, shut) = (read(&ctx.state)?, json!({"closed": true, "lines": []}));
     let Some(e) = open(&events, pane) else { return Ok(shut) };
     let live = ctx.now < e.ts + TIMEOUT;
-    let o = herdr::exec(&On::of(r, Some(e)), &herdr::read_argv(pane))?;
-    if !live || herdr::failed_with(&o, "pane_not_found") {
+    let o = term::exec(&On::of(r, Some(e)), &term::read_argv(pane))?;
+    if !live || term::failed_with(&o, "pane_not_found") {
         return close(ctx, r, e, ["timeout", "exited"][usize::from(live)]).map(|()| shut);
     }
     anyhow::ensure!(o.code == 0, "could not read the sign-in pane; retrying");
@@ -122,8 +119,8 @@ pub fn send(ctx: &Ctx, r: &dyn Runner, pane: &str, text: &str) -> Result<String>
         return refused("BAD_VALUE", "up to 2000 chars, no control characters");
     }
     if !text.is_empty() {
-        let sent = herdr::ok(&on, &herdr::send_text_argv(pane, text));
+        let sent = term::ok(&on, &term::send_text_argv(pane, text));
         sent.map_err(|_| anyhow::anyhow!("could not type into the sign-in pane"))?;
     }
-    herdr::keys(&on, pane, "Enter").map(|_| "sent".into())
+    term::keys(&on, pane, "Enter").map(|_| "sent".into())
 }

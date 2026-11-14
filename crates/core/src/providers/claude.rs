@@ -3,7 +3,7 @@ mod meter;
 
 use super::{hook_command, Accounts, Credential, Dialect, Header, Provider, Proxy, Usage};
 use crate::config::Config;
-use crate::herdr;
+use crate::term;
 use crate::lanes::{chat, mask, strip};
 use crate::runner::Runner;
 use crate::spawn::{role_prompt, Plan};
@@ -139,7 +139,7 @@ impl Provider for Claude {
         if let Some(e) = p.effort.as_deref().filter(|e| *e != "none") {
             a.extend(["--effort".into(), e.into()]);
         }
-        // Display name = terminal title on the herdr board (else Claude titles it from the kick).
+        // Display name = the terminal title (else Claude titles it from the kick).
         a.extend(["--name".into(), p.title.clone()]);
         // `--mcp-config` is variadic: `--strict-mcp-config` ends it before the kick.
         a.extend([
@@ -151,7 +151,7 @@ impl Provider for Claude {
             a.extend([if *resume { "--resume" } else { "--session-id" }.into(), id.clone()]);
         }
         a.push(p.kick.clone());
-        herdr::start_argv(&p.agent, "claude", pane, a)
+        term::start_argv("claude", pane, &a)
     }
 
     fn resumes(&self) -> bool {
@@ -164,11 +164,11 @@ impl Provider for Claude {
 
     /// Claude gets the kick as argv, so it only waits.
     fn kick_cmds(&self, p: &Plan, _pane: &str) -> Vec<Vec<String>> {
-        vec![herdr::wait_working_argv(&p.agent, "20000")]
+        vec![term::wait_working_argv(&p.agent, "20000")]
     }
 
     fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
-        Ok(herdr::exec(r, &self.kick_cmds(p, pane)[0])?.code == 0)
+        Ok(term::exec(r, &self.kick_cmds(p, pane)[0])?.code == 0)
     }
 
     /// #248: no updater, telemetry or other background traffic (names as of Claude Code 2.1.311).
@@ -243,22 +243,6 @@ impl Provider for Claude {
     fn pending_menu(&self, screen: &str) -> Option<(String, Vec<String>)> {
         pending(screen)
     }
-    /// #463: a new folder's trust dialog or the bypass-permissions warning (Claude Code 2.x): its "Yes" option, by its
-    /// number or (#476: an unnumbered `❯` menu) by moving the cursor to it, then Enter.
-    fn startup_prompt(&self, screen: &str) -> Option<(&'static str, Vec<String>)> {
-        let (name, _) = FIRST_RUN.iter().find(|(_, t)| screen.contains(t))?;
-        let yes = |o: &Vec<String>| o.iter().position(|o| o.starts_with("Yes"));
-        if let Some(n) = pending(screen).and_then(|p| yes(&p.1)) {
-            return Some((name, vec![self.answer_keys(n + 1)]));
-        }
-        let (at, opts) = cursor_menu(screen)?;
-        let n = yes(&opts)?;
-        let key = if n > at { "Down" } else { "Up" };
-        let mut keys = vec![key.to_string(); n.abs_diff(at)];
-        keys.push("Enter".into());
-        Some((name, keys))
-    }
-
     /// #260: `<home>/.claude/projects/<worktree, non-alphanumerics as `-`>/*.jsonl`.
     fn transcript(&self, home: &Path, wt: &str) -> Option<PathBuf> {
         let d = home.join(".claude/projects");
@@ -270,34 +254,9 @@ impl Provider for Claude {
     fn health_check(&self) -> Option<(&'static str, &'static str, &'static str)> {
         Some(("claude", "claude auth status", "claude auth login in a pane there"))
     }
-    fn startup_title(&self) -> Option<&'static str> {
-        Some("✳")
-    }
     fn process_names(&self) -> &'static [&'static str] {
         &["claude"]
     }
-}
-
-/// #463: first-start screens by a line they show: `Do you trust the files in this folder?` (1.x), `Yes, I trust this
-/// folder` (2.x) and the `--dangerously-skip-permissions` warning, whose "No, exit" comes first.
-const FIRST_RUN: [(&str, &str); 3] = [
-    ("folder-trust", "trust the files in this folder"),
-    ("folder-trust", "trust this folder"),
-    ("bypass-permissions", "Bypass Permissions mode"),
-];
-
-/// #476: an unnumbered menu: the rows at the `❯` cursor's indent next to it, and the cursor's row among them.
-/// #484: the last `❯` on screen, not the shell prompt's (starship's `❯ claude …`) above the dialog.
-fn cursor_menu(screen: &str) -> Option<(usize, Vec<String>)> {
-    let lines: Vec<&str> = screen.lines().collect();
-    let c = lines.iter().rposition(|l| l.trim_start().starts_with('❯'))?;
-    let indent = |l: &str| l.chars().take_while(|c| c.is_whitespace()).count();
-    let col = indent(lines[c]) + 2;
-    let row = |l: &&&str| indent(l) == col && !l.trim().is_empty();
-    let top = c - lines[..c].iter().rev().take_while(row).count();
-    let end = c + 1 + lines[c + 1..].iter().take_while(row).count();
-    let text = |l: &str| l.trim_start().trim_start_matches('❯').trim().to_string();
-    Some((c - top, lines[top..end].iter().map(|l| text(l)).collect()))
 }
 
 /// A blocked pane's pending prompt: the question and a Claude menu's options (a `❯`-marked run

@@ -1,6 +1,6 @@
-use crate::herdr;
 use crate::runner::Runner;
 use crate::spawn::Plan;
+use crate::term;
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::Value;
@@ -249,9 +249,9 @@ pub trait Provider: Sync {
     fn prepare(&self, _ctx: &Ctx, _on: &crate::hosts::On, _p: &Plan) -> Result<()> {
         Ok(())
     }
-    /// herdr argv that launches the harness in `pane` (generic: its name typed into the lane's shell).
+    /// The pane words that launch the harness in `pane` (generic: its name typed into the lane's shell).
     fn start_cmd(&self, _ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
-        herdr::run_argv(pane, &[&p.harness])
+        term::run_argv(pane, &[&p.harness])
     }
     /// #355: `start_cmd` honours `Plan::session` (start it, or resume it with its conversation).
     fn resumes(&self) -> bool {
@@ -261,16 +261,16 @@ pub trait Provider: Sync {
     fn takes_model(&self) -> bool {
         false
     }
-    /// herdr commands that settle the harness, deliver the kick and confirm it landed.
+    /// The pane words that settle the harness, deliver the kick and confirm it landed.
     fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {
-        vec![herdr::send_text_argv(pane, &p.kick), herdr::keys_argv(pane, "enter")]
+        vec![term::send_text_argv(pane, &p.kick), term::keys_argv(pane, "enter")]
     }
     /// Run `kick_cmds`; true once the kick is confirmed landed.
     fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
         Ok(self
             .kick_cmds(p, pane)
             .iter()
-            .all(|c| herdr::exec(r, c).is_ok_and(|o| o.code == 0)))
+            .all(|c| term::exec(r, c).is_ok_and(|o| o.code == 0)))
     }
     /// `VAR=value` words the lane's shell exports before the launch.
     fn env(&self) -> &'static [&'static str] {
@@ -337,10 +337,6 @@ pub trait Provider: Sync {
     fn pending_menu(&self, _screen: &str) -> Option<(String, Vec<String>)> {
         None
     }
-    /// #463: a first-start prompt on a pane that would not start: its name and the keys that answer it, in order.
-    fn startup_prompt(&self, _screen: &str) -> Option<(&'static str, Vec<String>)> {
-        None
-    }
     /// The keys that pick menu option `n` (1-based).
     fn answer_keys(&self, n: usize) -> String {
         n.to_string()
@@ -349,15 +345,11 @@ pub trait Provider: Sync {
     fn transcript(&self, _home: &Path, _wt: &str) -> Option<PathBuf> {
         None
     }
-    /// The login a host's herdr pane checks: (tool, command, fix).
+    /// The login a host's health row checks: (tool, command, fix).
     fn health_check(&self) -> Option<(&'static str, &'static str, &'static str)> {
         None
     }
-    /// #359: what its startup terminal title (OSC 0) contains, confirming a lane came up (generic: none).
-    fn startup_title(&self) -> Option<&'static str> {
-        None
-    }
-    /// The herdr agent labels of its panes, for the Host tab's memory row (generic: an agent's own label is its row).
+    /// The agent labels of its panes, for the Host tab's memory row (generic: an agent's own label is its row).
     fn process_names(&self) -> &'static [&'static str] {
         &[]
     }

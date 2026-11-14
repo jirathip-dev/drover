@@ -924,7 +924,7 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         if !(matches!(s.state.as_str(), "needs-human" | "impl") || s.state.starts_with("fix")) {
             continue;
         }
-        // An impl only once its lane ended (no herdr agent, no spawn starting).
+        // An impl only once its lane ended (no live agent, no spawn starting).
         if s.state == "impl" {
             let live = match &mut agents {
                 Some(a) => a,
@@ -1209,7 +1209,7 @@ fn pass(
         let (dsh, n) = (sp.and_then(|e| e.str("harness")) == Some("dsh"), s.issue.to_string());
         let c = ["spawn", fleet, &n, role, "--supersede"];
         let woke = match pane {
-            Some(p) => crate::herdr::reply(&crate::hosts::On::of(r, sp), dsh, lane, p, &text).is_ok(),
+            Some(p) => crate::term::reply(&crate::hosts::On::of(r, sp), dsh, lane, p, &text).is_ok(),
             None => act(ctx, cfg, r, out, &ev, (fleet, None, "respawn"), &c)?.is_none(),
         };
         let d = json!({"agent": lane, "on": on, "respawn": !live});
@@ -1529,7 +1529,7 @@ fn pass(
 }
 
 /// #491: `None` for a FAIL with its Proof blocks (recorded as usual). A proofless one is refused once per head and
-/// file content (`proof-refused`); its reviewer, still in herdr, is prompted with the refusal once; an ended one
+/// file content (`proof-refused`); its reviewer, still live, is prompted with the refusal once; an ended one
 /// gets a fresh review of the same head, which no verdict makes a new round.
 #[allow(clippy::too_many_arguments)]
 fn no_proof(
@@ -1555,7 +1555,7 @@ fn no_proof(
     let seen = mine
         .iter()
         .any(|e| e.str("sha") == Some(args[5]) && e.str("hash") == Some(hash));
-    // `waiting` offers a verdict only once its reviewer stopped working: one still in herdr is told once; gone, or idle
+    // `waiting` offers a verdict only once its reviewer stopped working: one still live is told once; gone, or idle
     // again after that, it has ended.
     let pane = sp.and_then(|e| e.str("pane"));
     let open = pane.filter(|_| agents.iter().any(|a| a["name"] == lane));
@@ -1564,7 +1564,7 @@ fn no_proof(
         act(ctx, cfg, r, out, ev, (fleet, Some(n), "verdict"), args)?;
         let text = format!("drover verdict refused your verdict.md: REFUSED NO_PROOF: {why}. Add the Proof blocks.");
         let tell =
-            |p| crate::herdr::reply(&on, false, lane, p, &text).is_ok() && crate::herdr::landed(&on, lane, p, &text);
+            |p| crate::term::reply(&on, false, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
         let prompted = open.filter(|_| !told).is_some_and(tell);
         let d = json!({"sha": args[5], "hash": hash, "agent": lane, "prompted": prompted});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "proof-refused", d))?;
@@ -1600,7 +1600,7 @@ fn repro_seen(r: &dyn Runner, ev: &[Event], (fleet, n): (&str, u64), args: &[&st
     (hash, seen)
 }
 
-/// #607: log a `NO_REPRO` refusal (its why for `waiting`); a reviewer still in herdr is prompted with it once.
+/// #607: log a `NO_REPRO` refusal (its why for `waiting`); a reviewer still live is prompted with it once.
 fn repro_refused(
     ctx: &Ctx,
     cfg: &Config,
@@ -1621,7 +1621,7 @@ fn repro_refused(
         .and_then(|e| e.str("pane"))
         .filter(|_| !told && agents.iter().any(|a| a["name"] == lane));
     let text = format!("drover verdict refused your verdict.md: REFUSED NO_REPRO: {why}. Fix the Repro block.");
-    let tell = |p| crate::herdr::reply(&on, false, lane, p, &text).is_ok() && crate::herdr::landed(&on, lane, p, &text);
+    let tell = |p| crate::term::reply(&on, false, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
     let prompted = pane.is_some_and(tell);
     let d = json!({"sha": args[5], "hash": hash, "agent": lane, "why": why, "prompted": prompted});
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "repro-refused", d))
@@ -1632,7 +1632,7 @@ fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> bool {
     let sp = crate::events::last_spawn(events, lane);
     let dsh = sp.and_then(|e| e.str("harness")) == Some("dsh");
     let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
-    crate::herdr::reply(&crate::hosts::On::of(r, sp), dsh, lane, pane, text).is_ok()
+    crate::term::reply(&crate::hosts::On::of(r, sp), dsh, lane, pane, text).is_ok()
 }
 
 /// #534: the words of a `LANE_LIVE` on a finished lane.
@@ -1720,7 +1720,7 @@ fn serial(
         let sp = crate::events::last_spawn(&ev, lane);
         let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
         let dsh = sp.and_then(|e| e.str("harness")) == Some("dsh");
-        crate::herdr::reply(&crate::hosts::On::of(r, sp), dsh, lane, pane, &text).ok();
+        crate::term::reply(&crate::hosts::On::of(r, sp), dsh, lane, pane, &text).ok();
     }
     if !wait || fast || !new.is_empty() {
         return Ok(wait);
@@ -2103,7 +2103,7 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     let (wts, into) = (wt.to_string_lossy(), format!("origin/{}", f.integration));
     git(r, &dir, &["fetch", "-q", "origin"])?;
     let checks = crate::gate::premerge_checks(ctx, f);
-    // A scratch `git worktree`, not a herdr one: no pane, no lane.
+    // A scratch `git worktree`: no pane, no lane.
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     for (_, s) in prs {
         let (n, branch) = (s.issue.to_string(), crate::gate::branch_of(Some(&s), s.issue));

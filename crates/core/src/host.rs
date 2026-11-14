@@ -1,7 +1,7 @@
 //! Host-load gate for `drover spawn` (an unreadable signal admits) and the live-agent view.
 use crate::config::Limits;
-pub use crate::herdr::agents;
 use crate::runner::{ok, Runner};
+pub use crate::term::agents;
 use anyhow::Result;
 use serde_json::Value;
 use std::path::Path;
@@ -16,7 +16,7 @@ pub fn live_in<'a>(agents: &'a [Value], name: &str, dir: &Path) -> Vec<&'a Value
 }
 
 /// #186: never signalled, whatever their cwd.
-const SPARE: &[&str] = &[crate::herdr::BIN, "drover", "herdsman", "launchd"];
+const SPARE: &[&str] = &["shed", "drover", "herdsman", "launchd"];
 
 /// #186: `(pid, command, cwd)` of every process `lsof` sees, but `SPARE`, pid 1, this process and its parent.
 pub fn cwds(r: &dyn Runner) -> Vec<(String, String, String)> {

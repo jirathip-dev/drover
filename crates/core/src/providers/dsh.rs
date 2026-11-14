@@ -1,6 +1,6 @@
 //! dsh-TUI lanes (docs/dsh.md): a per-role patch layer, a pinned `dsh-tui` typed into the shell, a git pre-push hook.
 use super::{attempts, Credential, Provider};
-use crate::herdr;
+use crate::term;
 use crate::runner::{ok, Runner};
 use crate::spawn::Plan;
 use crate::Ctx;
@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 /// The dsh-TUI profile version lanes run; `drover spawn` refuses any other.
 pub const DSH_TUI_VERSION: &str = "0.17.0";
-/// The agent label dsh-TUI reports to herdr.
+/// The agent label dsh-TUI reports.
 const LABEL: &str = "dsh-tui";
 /// The first-run wizard's title (en, zh); it reports idle but eats the prompt.
 const WIZARD: &[&str] = &["Welcome to dsh-TUI", "欢迎使用 dsh-TUI"];
@@ -84,22 +84,21 @@ impl Provider for Dsh {
         install_pre_push(on, &ctx.exe, &p.worktree, p.family)
     }
 
-    /// herdr has no `dsh` kind: type the launch into the lane's shell.
+    /// Type the launch into the lane's shell.
     fn start_cmd(&self, ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
         let patch = format!("'{}'", patch_file(ctx, &p.profile).display());
-        herdr::run_argv(pane, &["dsh-tui", "--patch", &patch])
+        term::run_argv(pane, &["dsh-tui", "--patch", &patch])
     }
 
-    /// Settle idle (Esc skips the wizard), name the agent, type kick + Enter, confirm working/blocked/done.
+    /// Settle idle (Esc skips the wizard), type kick + Enter, confirm working/blocked/done.
     fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {
         vec![
-            herdr::pane_get_argv(pane),
-            herdr::read_argv(pane),
-            herdr::keys_argv(pane, "esc"),
-            herdr::rename_argv(pane, &p.agent),
-            herdr::send_text_argv(pane, &p.kick),
-            herdr::pane_get_argv(pane),
-            herdr::keys_argv(pane, "enter"),
+            term::pane_get_argv(pane),
+            term::read_argv(pane),
+            term::keys_argv(pane, "esc"),
+            term::send_text_argv(pane, &p.kick),
+            term::pane_get_argv(pane),
+            term::keys_argv(pane, "enter"),
         ]
     }
 
@@ -109,22 +108,21 @@ impl Provider for Dsh {
         if !poll(r, &c[0], &["idle"], 90) {
             return Ok(false);
         }
-        let screen = herdr::exec(r, &c[1])?.stdout;
+        let screen = term::exec(r, &c[1])?.stdout;
         if WIZARD.iter().any(|w| screen.contains(w)) {
-            herdr::exec(r, &c[2])?;
+            term::exec(r, &c[2])?;
             r.sleep(2);
             if !poll(r, &c[0], &["idle"], 30) {
                 return Ok(false);
             }
         }
-        herdr::exec(r, &c[3])?;
         let typed: String = p.kick.chars().take(20).collect();
         for attempt in attempts(r, 3, 5) {
-            if attempt == 0 || !herdr::exec(r, &c[1])?.stdout.contains(&typed) {
-                herdr::exec(r, &c[4])?;
+            if attempt == 0 || !term::exec(r, &c[1])?.stdout.contains(&typed) {
+                term::exec(r, &c[3])?;
             }
-            herdr::exec(r, &c[6])?;
-            if poll(r, &c[5], &["working", "blocked", "done"], 10) {
+            term::exec(r, &c[5])?;
+            if poll(r, &c[4], &["working", "blocked", "done"], 10) {
                 return Ok(true);
             }
         }
@@ -142,7 +140,7 @@ impl Provider for Dsh {
 /// Re-read the pane (1 s apart, `tries` times) until dsh-TUI reports one of `want`.
 fn poll(r: &dyn Runner, get: &[String], want: &[&str], tries: u32) -> bool {
     for _ in attempts(r, tries, 1) {
-        let pane = herdr::json(r, get)
+        let pane = term::json(r, get)
             .map(|v| v["result"]["pane"].clone())
             .unwrap_or_default();
         if pane["agent"] == LABEL && want.iter().any(|w| pane["agent_status"] == *w) {

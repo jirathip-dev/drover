@@ -24,7 +24,7 @@ type Service = fn(&Ctx, &str, Option<&str>) -> Result<()>;
 #[command(
     name = "drover",
     version = crate::VERSION,
-    about = "State, gates and harness toggle over herdr",
+    about = "State, gates and harness toggle over shed",
     disable_help_subcommand = true
 )]
 pub(crate) struct Cli {
@@ -54,7 +54,7 @@ enum Cmd {
     Pause { fleet: String },
     /// Resume a paused fleet
     Resume { fleet: String },
-    /// Create worktree + herdr pane, write .brief.md, launch the role's harness, verify the prompt landed
+    /// Create worktree + shed terminal, write .brief.md, launch the role's harness, verify the prompt landed
     Spawn {
         fleet: String,
         issue: String,
@@ -62,12 +62,12 @@ enum Cmd {
         #[command(flatten)]
         o: spawn::Opts,
     },
-    /// Record a lane already running in a herdr pane (repair a spawn that was never logged)
+    /// Record a lane already running in a shed terminal (repair a spawn that was never logged)
     Adopt {
         fleet: String,
         issue: u64,
         role: String,
-        /// The herdr pane the harness runs in
+        /// The shed terminal the harness runs in
         #[arg(long)]
         pane: String,
     },
@@ -336,7 +336,7 @@ enum Cmd {
         /// Write the page as static files into this dir instead of serving (docs/serve.md)
         #[arg(long)]
         export: Option<std::path::PathBuf>,
-        /// With --export: the inert demo, its herdr/gh/host reads canned in runner.json next to fleet.toml
+        /// With --export: the inert demo, its shed/gh/host reads canned in runner.json next to fleet.toml
         #[arg(long, requires = "export")]
         demo: bool,
     },
@@ -393,7 +393,7 @@ enum Cmd {
         rules: std::path::PathBuf,
     },
     /// Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun.
-    /// `setup <host> <name>` (#303): run that configured login in a herdr pane on the host instead
+    /// `setup <host> <name>` (#303): run that configured login in a shed terminal on the host instead
     Setup {
         #[arg(requires = "name")]
         host: Option<String>,
@@ -434,7 +434,7 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<AccountsCmd>,
     },
-    /// Read-only host check: herdr, gh, config, accounts, harnesses, serve, phone, watchdog; ✓/✗/! with the fix per line, exit 1 on any ✗
+    /// Read-only host check: shed, gh, config, accounts, harnesses, serve, phone, watchdog; ✓/✗/! with the fix per line, exit 1 on any ✗
     Doctor {
         #[arg(long)]
         json: bool,
@@ -456,7 +456,7 @@ enum Cmd {
         /// With --yes, remove the orphans too: folders under the worktree root no fleet owns
         #[arg(long)]
         orphans: bool,
-        /// The daily job (#557): merged/closed lanes idle 3+ days, at most 10, plus herdr workspaces whose folder is gone
+        /// The daily job (#557): merged/closed lanes idle 3+ days, at most 10
         #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans"])]
         scheduled: bool,
     },
@@ -489,7 +489,7 @@ enum Cmd {
     },
     /// Send Esc to an agent's pane (it pauses); logs `stop`
     Stop { agent: String },
-    /// Close the pane of a herdr agent that is not a drover lane (IS_LANE for lanes); files and worktrees stay
+    /// Close the terminal of a shed agent that is not a drover lane (IS_LANE for lanes); files and worktrees stay
     Close {
         agent: String,
         /// The agent on this `[hosts.<name>]` (when another host has one of the same name)
@@ -840,7 +840,7 @@ enum HostsCmd {
     Destroy { name: String },
     #[command(
         hide = true,
-        about = "Owner only: install herdr, drover, git, gh, the lane providers there over SSH, open its logins, clone its fleets"
+        about = "Owner only: install shed, drover, git, gh, the lane providers there over SSH, open its logins, clone its fleets"
     )]
     Bootstrap { name: String },
     /// Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`
@@ -1020,11 +1020,8 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
         }
     }
-    // #298: `[runtime] kind = "shed"`: lanes start, and are reached, on shed; #565: or one fleet's `runtime`.
-    let with = Config::load(&ctx.config)
-        .ok()
-        .and_then(|c| c.shed())
-        .map(|b| crate::shed::With(r, b));
+    // #298: lanes start, and are reached, on shed (`[runtime]`; #565: or one fleet's `runtime`).
+    let with = Config::load(&ctx.config).ok().map(|c| crate::shed::With(r, c.shed()));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
     let res = match lane_write.then(|| forward(r, &sent)).flatten() {
         Some(o) => o.map(|o| {
@@ -1111,7 +1108,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 _ => ctx.state.clone(),
             };
             crate::db::migrate(&state, out)?;
-            crate::roots::migrate(ctx, r, out)?; // #630
             crate::secret::retired(&state, out)?; // #707
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
@@ -1414,7 +1410,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let pane = crate::setup::start(ctx, &Config::load(&ctx.config)?, r, &h, &n, "cli")?;
             writeln!(
                 out,
-                "{n} on {h}: herdr pane {pane}; it closes when the login exits or in 10 min"
+                "{n} on {h}: shed terminal {pane}; it closes when the login exits or in 10 min"
             )?;
         }
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
@@ -2342,10 +2338,7 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
 
 /// #609: each lane's `where` (`lanes::Lane::place`) by agent, as runner `r` sees the lanes.
 fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> std::collections::BTreeMap<String, String> {
-    let (st, list) = (
-        crate::events::fold(events),
-        crate::herdr::list(r, "agent").unwrap_or_default(),
-    );
+    let (st, list) = (crate::events::fold(events), crate::term::list(r).unwrap_or_default());
     let ls = crate::snapshot::lanes(cfg, r, ctx, (events, &st), &list);
     ls.into_iter().map(|l| (l.name, l.place)).collect()
 }

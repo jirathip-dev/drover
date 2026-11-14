@@ -1,6 +1,6 @@
-//! #298: shed's wire (`[runtime] kind = "shed"`, docs/runtimes.md): shed-proto JSON-RPC lines over shed's Unix
+//! #298: shed's wire (`[runtime]`, docs/runtimes.md): shed-proto JSON-RPC lines over shed's Unix
 //! socket, or through `shed connect` (over ssh on a lane's other host); one connection per call, no async. The
-//! runtime itself (herdr's words as shed calls) is `crate::herdr::Shed`.
+//! runtime itself (pane words as shed calls) is `crate::term::Shed`.
 use crate::config::Config;
 use crate::events::{append, Event};
 use crate::runner::{argv, Out, Runner};
@@ -350,8 +350,5 @@ impl Runner for With<'_> {
     }
     fn shed(&self) -> Option<Shed> {
         Some(self.1.clone())
-    }
-    fn local(&self) -> bool {
-        self.0.local()
     }
 }

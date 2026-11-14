@@ -25,7 +25,7 @@ pub struct Config {
     pub hosts: BTreeMap<String, HostCfg>,
     /// #303: `[[setup]]` logins a host card's [sign in] runs (`crate::setup`).
     pub setup: Vec<SetupCfg>,
-    /// #298: `[runtime]`, the terminal runtime new lanes start in (docs/runtimes.md); herdr when unset.
+    /// #298: `[runtime]`, the shed runtime new lanes start in (docs/runtimes.md); a shed terminal when unset.
     pub runtime: Runtime,
     /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
     #[serde(alias = "conductor")]
@@ -183,18 +183,33 @@ impl OrchestratorCfg {
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(try_from = "String")]
 pub enum RuntimeKind {
     #[default]
-    Herdr,
     Shed,
-    #[serde(rename = "shed-acp")]
     ShedAcp,
     /// #455: shed's old name, accepted for one release with a warning (and a doctor row).
     Berth,
 }
 
-/// #298: `kind`, herdr or shed; shed's `socket` (default its per-user one), and an ACP agent id its lanes run
+/// #721: the load error for the retired runtime, with its migration.
+pub const RETIRED_RUNTIME: &str = "runtime \"herdr\" is retired (#721): set kind = \"shed-acp\" (each lane an ACP \
+     session) or \"shed\" (each lane a shed terminal); docs/runtimes.md has the migration";
+
+impl TryFrom<String> for RuntimeKind {
+    type Error = String;
+    fn try_from(k: String) -> std::result::Result<Self, String> {
+        match k.as_str() {
+            "shed" => Ok(Self::Shed),
+            "shed-acp" => Ok(Self::ShedAcp),
+            "berth" => Ok(Self::Berth),
+            "herdr" => Err(RETIRED_RUNTIME.into()),
+            _ => Err(format!("unknown runtime \"{k}\": \"shed-acp\" or \"shed\"")),
+        }
+    }
+}
+
+/// #298: `kind`, shed (default) or shed-acp; shed's `socket` (default its per-user one), and an ACP agent id its lanes run
 /// instead of the harness's terminal UI (`shed run --acp`), with shed's permission `acp_policy` (default `ask`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
@@ -206,10 +221,10 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// The shed runtime, when it is the kind.
-    pub fn shed(&self) -> Option<crate::shed::Shed> {
+    /// The shed runtime it names.
+    pub fn shed(&self) -> crate::shed::Shed {
         let acp = self.kind == RuntimeKind::ShedAcp;
-        (acp || matches!(self.kind, RuntimeKind::Shed | RuntimeKind::Berth)).then(|| crate::shed::Shed {
+        crate::shed::Shed {
             wire: crate::shed::Wire::Socket(self.socket.as_deref().map_or_else(crate::shed::default_socket, expand)),
             acp: self
                 .acp
@@ -219,7 +234,7 @@ impl Runtime {
                 .acp_policy
                 .clone()
                 .unwrap_or_else(|| if acp { "allow" } else { "ask" }.into()),
-        })
+        }
     }
 }
 
@@ -231,7 +246,7 @@ pub struct SetupCfg {
     pub env: BTreeMap<String, String>,
 }
 
-/// #157: one host: its herdr machine label (unset = this host), hand tags, workspace root, and whether new lanes go there.
+/// #157: one host: its ssh name (unset = this host), hand tags, workspace root, and whether new lanes go there.
 /// #630: or `roots`, in order: a new lane goes to the first mounted, writable one with room.
 #[derive(Debug, Deserialize)]
 pub struct HostCfg {
@@ -255,7 +270,7 @@ pub struct HostCfg {
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
     pub allow_commands: Option<Vec<String>>,
-    /// #637: `herdr` or `shed-acp`: the runtime its lanes start in (unset: the fleet's, as before).
+    /// #637: `shed-acp`: the runtime its lanes start in (unset: the fleet's, as before).
     pub runtime: Option<RuntimeKind>,
 }
 
@@ -647,7 +662,6 @@ pub struct Limits {
     pub outbox_stale_minutes: u64,
     pub host_offline_minutes: u64,
     pub promise_passes: std::collections::BTreeMap<crate::promise::Kind, u64>,
-    pub serve_herdr_secs: u64,
     pub serve_shed_secs: u64,
     pub serve_remote_secs: u64,
     pub serve_host_secs: u64,
@@ -768,7 +782,6 @@ impl Default for Limits {
             outbox_stale_minutes: 5,
             host_offline_minutes: 15,
             promise_passes: std::collections::BTreeMap::new(),
-            serve_herdr_secs: 2,
             serve_shed_secs: 5,
             serve_remote_secs: 10,
             serve_host_secs: 10,
@@ -1005,10 +1018,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "promise_passes",
         "drive passes a promise of each kind may stay open before `promise-missed` (default 2)",
-    ),
-    (
-        "serve_herdr_secs",
-        "serve re-reads herdr's agents in the background this often",
     ),
     (
         "serve_shed_secs",
@@ -1414,7 +1423,7 @@ impl Config {
         let (Some(i), Some(v)) = (f.role.get("impl"), f.role.get("rev")) else {
             return Ok(());
         };
-        let run = self.shed_for(name).and_then(|b| b.acp);
+        let run = self.shed_for(name).acp;
         let of = |r: &Role| r.agent.clone().or_else(|| run.clone());
         let p = (of(i), of(v));
         let p = (
@@ -1458,17 +1467,19 @@ impl Config {
     }
 
     /// #565: the shed runtime fleet `name`'s new lanes start on: its own `[fleet.<n>.runtime]`, else `[runtime]`'s.
-    pub fn shed_for(&self, name: &str) -> Option<crate::shed::Shed> {
+    pub fn shed_for(&self, name: &str) -> crate::shed::Shed {
         let own = self.fleet.get(name).and_then(|f| f.runtime.as_ref());
-        own.map_or_else(|| self.runtime.shed(), Runtime::shed)
+        own.unwrap_or(&self.runtime).shed()
     }
 
-    /// #565: the shed server lanes are reached on: `[runtime]`'s, else the first fleet runtime's; #637: else shed-acp's
-    /// defaults when a host runs it.
-    pub fn shed(&self) -> Option<crate::shed::Shed> {
-        let first = || self.fleet.values().find_map(|f| f.runtime.as_ref()?.shed());
-        let host = || self.hosts.keys().find_map(|h| self.host_acp(h));
-        self.runtime.shed().or_else(first).or_else(host)
+    /// #565: the shed server lanes are reached on: `[runtime]`'s when it names a socket, else the first fleet
+    /// runtime's, else `[runtime]`'s.
+    pub fn shed(&self) -> crate::shed::Shed {
+        let first = self.fleet.values().find_map(|f| f.runtime.as_ref());
+        first
+            .filter(|_| self.runtime.socket.is_none())
+            .unwrap_or(&self.runtime)
+            .shed()
     }
 
     /// #637: host `name`'s own `runtime = "shed-acp"`: the shed-acp runtime (shed's defaults), else None.
@@ -1476,20 +1487,19 @@ impl Config {
         self.hosts
             .get(name)
             .filter(|h| h.runtime == Some(RuntimeKind::ShedAcp))?;
-        Runtime {
-            kind: RuntimeKind::ShedAcp,
-            ..Runtime::default()
-        }
-        .shed()
+        Some(
+            Runtime {
+                kind: RuntimeKind::ShedAcp,
+                ..Runtime::default()
+            }
+            .shed(),
+        )
     }
 
     /// #637: the runtime fleet `fleet`'s new lanes start in on host `host`: the host's own, else the fleet's.
-    pub fn shed_on(&self, fleet: &str, host: Option<&str>) -> Option<crate::shed::Shed> {
-        match host.and_then(|h| self.hosts.get(h)?.runtime.as_ref()) {
-            Some(RuntimeKind::Herdr) => None,
-            Some(RuntimeKind::ShedAcp) => host.and_then(|h| self.host_acp(h)),
-            _ => self.shed_for(fleet),
-        }
+    pub fn shed_on(&self, fleet: &str, host: Option<&str>) -> crate::shed::Shed {
+        host.and_then(|h| self.host_acp(h))
+            .unwrap_or_else(|| self.shed_for(fleet))
     }
 
     /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (#173: that fleet stops, the others run).

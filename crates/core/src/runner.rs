@@ -1,4 +1,4 @@
-//! The one seam for external tools (herdr, gh, git). Tests swap in a fake.
+//! The one seam for external tools (shed, gh, git). Tests swap in a fake.
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use std::process::Command;
@@ -32,14 +32,9 @@ pub trait Runner: Sync {
         let sh = format!("nohup '{exe}' {args} >> '{log}' 2>&1 < /dev/null & echo $!");
         Ok(self.run("sh", &argv(&["-c", &sh]))?.stdout.trim().parse()?)
     }
-    /// #298: the shed runtime this runner's lanes use (`[runtime] kind = "shed"`); None: herdr only.
+    /// #298: the shed runtime this runner's lanes use (`[runtime]`); None: no lane runtime (a bare runner).
     fn shed(&self) -> Option<crate::shed::Shed> {
         None
-    }
-    /// #529: whether `herdr` runs on this host's own (the service's streamed agent list stands for its `agent list`);
-    /// fakes and other hosts: no.
-    fn local(&self) -> bool {
-        false
     }
     /// #637: `prog args` with `input` on stdin, its stdout as it arrives (the token proxy relays a streamed model call);
     /// the child is reaped when the reader drops. Fakes run the real child too: the proxy's tests use a local upstream.
@@ -135,9 +130,6 @@ pub fn inherited() -> Vec<std::net::TcpListener> {
 pub struct Real;
 
 impl Runner for Real {
-    fn local(&self) -> bool {
-        true
-    }
     fn run(&self, prog: &str, args: &[String]) -> Result<Out> {
         self.run_in(prog, args, "")
     }
@@ -267,28 +259,19 @@ impl Real {
 
 /// #713: every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is
 /// killed and exits 124.
-/// - `herdr --machine m … list`: 20 s; #478: another host's (its ssh has no timeout of its own) must not hold a tick.
 /// - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08).
-/// - `herdr … --timeout <ms>`: its own timeout and 30 s; `agent start` and the waits run up to it.
 /// - `git clone|fetch|pull|push`: 10 min; a large repo over the network.
 /// - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB.
 /// - `cargo`: 30 min; self-update's release build.
 /// - `ssh` through `hosts::On`: the limit of the command it carries; `hosts bootstrap`'s installs 30 min by `run_for`.
 /// - anything else: 60 s.
 pub fn limit(prog: &str, args: &[String]) -> Duration {
-    let a = |i: usize| args.get(i).map_or("", String::as_str);
     let net = |w: &String| ["clone", "fetch", "pull", "push"].contains(&w.as_str());
-    let wait = args
-        .iter()
-        .position(|w| w == "--timeout")
-        .and_then(|i| a(i + 1).parse::<u64>().ok());
     let name = std::path::Path::new(prog)
         .file_name()
         .map_or(prog.into(), |n| n.to_string_lossy());
     let secs = match &*name {
-        p if p == crate::herdr::BIN && a(0) == "--machine" && a(3) == "list" => 20,
         "security" | "codesign" => 10,
-        p if p == crate::herdr::BIN => wait.map_or(60, |ms| ms / 1000 + 30),
         "git" if args.iter().any(net) => 600,
         "cp" | "rm" => 600,
         "cargo" => 1800,

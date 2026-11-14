@@ -351,30 +351,27 @@ pub fn token(text: &str, now: u64) -> (String, Option<String>) {
 /// Before each bootstrap step there: the user's tool folders on PATH, and `apt_ <pkg>` installs a package.
 pub const SH: &str = "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; apt_() { sudo apt-get update -qq && \
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"$@\"; }; ";
-/// Bootstrap's steps after herdr and each harness's install, `name⇥read-back check⇥install` each (Rust with a C linker
+/// Bootstrap's steps before each harness's install, `name⇥read-back check⇥install` each (Rust with a C linker
 /// for `cargo install`).
 const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh";
-/// #637: a `shed-acp` host's own runtime instead of herdr: shed at drover's pin with its launchd or systemd job,
-/// node for the ACP adapter (`{acp}`), and that adapter in shed's agent list.
+/// #637: the host's shed server job (launchd or systemd); a `shed-acp` host's also node for the ACP adapter
+/// (`{acp}`, `ACP`), and that adapter in shed's agent list.
 const SHED: &str =
     "shed job\tshed doctor >/dev/null 2>&1\tshed install --force && { { systemctl --user daemon-reload && \
 systemctl --user enable --now shed.service && { sudo loginctl enable-linger \"$USER\" || true; }; } 2>/dev/null || \
-launchctl bootstrap gui/$(id -u) \"$HOME/Library/LaunchAgents/dev.shed.serve.plist\"; }
-node\tcommand -v node && command -v npx\tapt_ nodejs npm
+launchctl bootstrap gui/$(id -u) \"$HOME/Library/LaunchAgents/dev.shed.serve.plist\"; }";
+const ACP: &str = "node\tcommand -v node && command -v npx\tapt_ nodejs npm
 {acp}\tshed agents --json | grep -q '\"{acp}\"'\tshed agents add {acp}";
 const RUST: &str =
     "rust\tcommand -v cargo && command -v cc\tapt_ build-essential && curl -sSf https://sh.rustup.rs | sh -s -- -y";
 
 /// #255 `hosts bootstrap <name>`: over SSH, each missing tool installed and read back (a present one skipped, so it runs
-/// again safely); the logins opened in herdr panes there for the owner; then git over HTTPS with that token and the
+/// again safely); the logins opened in shed terminals there for the owner; then git over HTTPS with that token and the
 /// clones of the fleets it fits. #592: no fleet.toml there. Nothing is copied from this host's logins.
 pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut dyn Write) -> Result<()> {
     let h = cfg.hosts.get(name).context("no such host")?;
     let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
     let acp = cfg.host_acp(name).is_some();
-    if !acp {
-        crate::hosts::resolve(r, m, true)?; // #641: before any step; none yet is fine, the herdr step adds it
-    }
     if h.cloud.is_some() && state(&read(&ctx.state)?, name) != "running" {
         start(ctx, cfg, r, name)?;
     } else if h.cloud.is_some() {
@@ -385,11 +382,6 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let mine = crate::config::home().to_string_lossy().into_owned();
     let [exe, conf] = [&ctx.exe, &ctx.config.display().to_string()].map(|p| p.replace(&mine, &home));
     let (root, sha) = (exe.rsplitn(3, '/').last().unwrap_or(&home), env!("DROVER_SHA"));
-    let v = if acp {
-        String::new()
-    } else {
-        crate::timer::herdr_versions(r).context("no herdr server here")?.0
-    };
     let run = |s: &str, l: u64| {
         on.run_for(
             "sh",
@@ -413,50 +405,28 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         if pass(check) {
             return Ok(writeln!(out, "✓ {what} — there")?);
         }
-        // herdr's install is `herdr machine add` from here: this host's version there. #641: it replaces the label's
-        // old profile (a recreated box), never adds a second.
-        let add = || {
-            let old = crate::hosts::profiles(r, m)?;
-            for id in &old {
-                crate::runner::ok(r, crate::herdr::BIN, &["machine", "remove", id])?;
-            }
-            if !old.is_empty() {
-                log(
-                    ctx,
-                    cfg,
-                    "host-machine-replaced",
-                    name,
-                    json!({"machine": m, "old": old}),
-                )?;
-            }
-            r.run(crate::herdr::BIN, &argv(&["machine", "add", m, "--label", m]))
-        };
-        let o = if install.is_empty() {
-            add()?
-        } else {
-            run(install, 1800)?
-        };
+        let o = run(install, 1800)?;
         let (cmd, o) = if o.code == 0 { (check, sh(check)?) } else { (install, o) };
         ensure!(o.code == 0, "{}", fail(what, cmd, &o));
         Ok(writeln!(out, "✓ {what} — installed")?)
     };
     let (repo, version) = (env!("CARGO_PKG_REPOSITORY"), crate::VERSION);
     let build = format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force && ln -sf drover '{root}/bin/herdsman'");
-    let herdr = format!("herdr\therdr --version | grep -qx 'herdr {v}'\t\n");
-    let mut steps = format!("{}{TOOLS}\n", if acp { "" } else { &herdr });
+    let mut steps = format!("{TOOLS}\n");
     for (n, i) in crate::providers::lanes().filter_map(|h| Some((h.name, h.install()?))) {
         steps += &format!("{n}\tcommand -v {n}\t{i}\n");
     }
     steps += &format!("{RUST}\n");
+    let (git, rev, sv) = (crate::shed::git(), crate::shed::REV, crate::shed::proto::VERSION);
+    let shed = format!("cargo install --git {git} --rev {rev} --locked --force shed");
+    steps += &format!("shed\t[ \"$(shed --version)\" = 'shed {sv}' ]\t{shed}\n{SHED}\n");
     if acp {
-        let (git, rev, sv) = (crate::shed::git(), crate::shed::REV, crate::shed::proto::VERSION);
-        let shed = format!("cargo install --git {git} --rev {rev} --locked --force shed");
-        let adapter = SHED.replace("{acp}", crate::providers::default_acp().unwrap_or_default());
-        steps += &format!("shed\t[ \"$(shed --version)\" = 'shed {sv}' ]\t{shed}\n{adapter}\n");
+        steps += &ACP.replace("{acp}", crate::providers::default_acp().unwrap_or_default());
+        steps += "\n";
     }
     steps += &format!("drover\t[ \"$('{exe}' --version)\" = 'drover {version}' ]\t{build}");
     steps.lines().try_for_each(&mut step)?;
-    // #637: a shed-acp host has no herdr panes and no harness login (its lanes sign in through the proxy): gh only.
+    // #637: a shed-acp host has no harness login (its lanes sign in through the proxy): gh only.
     if acp && !pass("gh auth status") {
         bail!("{name}: log in with `ssh {m} gh auth login` there, then bootstrap again");
     }
@@ -468,8 +438,8 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         .map(|t| crate::setup::start(ctx, cfg, r, name, t.1, "bootstrap"))
         .collect::<Result<Vec<_>>>()?;
     let p = panes.join(" ");
-    let again = "there (herdr or the board), then bootstrap again";
-    ensure!(p.is_empty(), "{name}: log in in pane {p} {again}");
+    let again = "there (the board), then bootstrap again";
+    ensure!(p.is_empty(), "{name}: log in in terminal {p} {again}");
     step("git over https\tgit config --global --get credential.https://github.com.helper\tgh auth setup-git")?;
     let tags = [h.tags.clone(), tags].concat();
     for f in cfg.fleet.values().filter(|f| f.needs.iter().all(|t| tags.contains(t))) {

@@ -23,12 +23,6 @@ pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config
     let mut rows = vec![];
     // #539 `--config-only`, the pre-install gate: only whether this binary loads the live config (warnings are fine).
     if !config_only {
-        if let Some((client, server, older)) = crate::timer::herdr_versions(r) {
-            let line = format!("herdr — client {client}, server {server} → herdr update --handoff");
-            row(&mut rows, !older, '!', &line);
-        } else {
-            rows.push("✗ herdr — not on PATH, or no server → herdr".into());
-        }
         let sample = crate::host::sample(r);
         let host = sample.pressure.is_some() && sample.swapout.is_some() && sample.load_per_cpu.is_some();
         row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH");
@@ -328,9 +322,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         }
     }
     crate::cloud::includes(ctx, rows);
-    if cfg.shed().is_some() {
-        shed_rows(ctx, cfg, r, rows);
-    }
+    shed_rows(ctx, cfg, r, rows);
     // #235: each enabled remote host's health, its failures as rows `host <name> <check>`.
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
         let Some(m) = h.machine.as_deref() else { continue };
@@ -342,16 +334,12 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             rows.push(format!("✗ host {name} — {why} → ssh {m} true"));
             continue;
         };
-        if let Err(e) = crate::herdr::poll(&on) {
-            rows.push(format!("✗ host {name} — herdr agent list: {e} → herdr machine status"));
-            continue;
-        }
         let tags = [tags, h.tags.clone()].concat();
         let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
         let v = crate::VERSION;
-        let ok = format!("✓ host {name} — herdr, session, git, gh, {logins}drover {v}");
+        let ok = format!("✓ host {name} — git, gh, {logins}drover {v}, shed");
         rows.extend(bad.iter().map(|w| w.replacen(' ', &format!(" host {name} "), 1)));
         rows.extend(bad.is_empty().then_some(ok));
         rows.extend(login_token(&on, Some(name)));
@@ -425,7 +413,7 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         || "✗ shed — not on the timer's PATH → drover timer install from a shell where `which shed` finds it".into(),
         |p| format!("✓ shed — {} on the timer's PATH", p.display()),
     ));
-    let ids: BTreeSet<String> = cfg.fleet.keys().filter_map(|n| cfg.shed_for(n)?.acp).collect();
+    let ids: BTreeSet<String> = cfg.fleet.keys().filter_map(|n| cfg.shed_for(n).acp).collect();
     let agents = ids
         .first()
         .and_then(|_| crate::shed::cli(r, &["agents", "--json"]).ok());
