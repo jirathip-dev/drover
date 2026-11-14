@@ -1,0 +1,7 @@
+Decided: merged origin/staging again; web/dist/board.js rebuilt from the merged web/src rather than hand-merged
+Because: crates/core/src/check.rs:300
+Decided: the only conflict was the generated bundle; staging's #611 shed section and this branch's Accounts panel removal both live in web/src
+Because: q1661
+Rejected: keeping either side of web/dist/board.js — it is generated, so only a rebuild matches both sources
+Check: web npm run check and build give no drift; full cargo test, clippy, arch-check, diagram and cap-check pass at this head
+Owner: Brought the branch up to date with staging; no behaviour change from the last review.
