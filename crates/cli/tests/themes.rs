@@ -1,7 +1,3 @@
-//! #172/#241: themes. `/themes/<name>/<file>` from `<config dir>/themes/<name>/`, then the built-in theme, then farm's
-//! (an icon: the board's); theme.json checked against the contract (docs/themes.md) and served resolved; path
-//! traversal refused; an invalid theme.json falls back to farm with a Host warning naming the problem; the `[◐]`
-//! picker's default is `[serve] theme`; terminal draws no sprites.
 mod common;
 use common::*;
 use drover::serve::{act, resolve, validate, Server};
@@ -18,7 +14,6 @@ const ICON: &[u8] = include_bytes!("../../../assets/icon-180.png");
 const TERMINAL_ICON: &[u8] = include_bytes!("../../../assets/themes/terminal/icon-180.png");
 const ACTS: [&str; 7] = ["impl", "fix", "rev", "update", "idle", "done", "blocked"];
 
-/// A server whose fleet.toml picks `theme` (none: the default), with user themes `(name, file, body)`.
 fn server(theme: Option<&str>, own: &[(&str, &str, &str)]) -> (drover::Ctx, Fake) {
     let d = tmpdir("theme");
     let cfg = theme.map_or(CONFIG.to_string(), |t| format!("{CONFIG}\n[serve]\ntheme = \"{t}\"\n"));
@@ -36,7 +31,6 @@ fn raw(c: &drover::Ctx, r: &Fake, path: &str) -> Vec<u8> {
     s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)
 }
 
-/// #267: the Host tab as the board draws it.
 fn host(c: &drover::Ctx, r: &Fake) -> String {
     host_tab(&Server::new(c, r, Some(ADDR.into())), ADDR, 1_000_000)
 }
@@ -50,7 +44,6 @@ fn body(res: &str) -> &str {
     &res[res.find("\r\n\r\n").unwrap() + 4..]
 }
 
-/// The bytes after the head of a 200.
 fn bytes(c: &drover::Ctx, r: &Fake, path: &str) -> Vec<u8> {
     let res = raw(c, r, path);
     assert!(res.starts_with(b"HTTP/1.1 200 OK"), "{path}");
@@ -84,8 +77,6 @@ fn farm_fills_the_whole_contract() {
     ] {
         assert!(f.get(k).is_some(), "farm has {k}");
     }
-    // #242: farm fills every key itself, no fallback: an action, row sprite and ASCII art per action, both rail
-    // sprites, the three moments.
     for a in ACTS {
         assert!(f["row_sprites"][a].is_string() && f["ascii"][a].is_string(), "farm {a}");
         assert_eq!(
@@ -101,7 +92,6 @@ fn farm_fills_the_whole_contract() {
     for m in ["merged", "fail", "needs-you"] {
         assert!(f["moments"][m]["sprite"].is_string(), "farm moment {m}");
     }
-    // Every sprite farm names is in its sprites.svg.
     let r = resolve(&f, &f);
     for k in ["actions", "row_sprites", "rail", "moments", "ascii"] {
         assert_eq!(r[k], f[k], "farm's own {k}");
@@ -122,8 +112,6 @@ fn farm_fills_the_whole_contract() {
     }
 }
 
-/// #239: the kitchen fills the contract with its own sprites: an action per role (cook, chop, taste, carry), each
-/// state's, the rail, the moments, the 16 px rows and the held-heat fan, all in its sprites.svg; nothing falls to farm.
 #[test]
 fn kitchen_draws_every_action_itself() {
     let k = resolve(&validate(KITCHEN.as_bytes()).unwrap(), &farm());
@@ -144,7 +132,6 @@ fn kitchen_draws_every_action_itself() {
         (&json!("heat"), 8)
     );
     assert_eq!(k["ascii"]["fix"], "♨\nchop");
-    // #335: the ascii style's own figures (3 characters per row), heat words and loading frames, none of them farm's.
     for a in ACTS {
         assert_eq!(k["ascii_rows"][a].as_str().unwrap().chars().count(), 3, "{a}");
         assert_ne!(k["ascii_rows"][a], farm()["ascii_rows"][a], "{a}");
@@ -153,7 +140,6 @@ fn kitchen_draws_every_action_itself() {
         (&k["ascii_load"]["held"], &k["ascii_loading"]),
         (&json!("^^^^^"), &json!("c~@\nc~o"))
     );
-    // The scene's three heat layers.
     for l in ["h-calm", "h-busy", "h-held", "ksmoke", "kglow"] {
         assert!(KITCHEN_SCENE.contains(l), "{l}");
     }
@@ -172,9 +158,7 @@ fn default_theme_is_farm() {
         host(&c, &r).contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>farm</b></span></p>")
     );
     let page = get(&c, &r, "/?all=1");
-    // The picker: this phone's choice, else the board's default, set before the first paint.
     assert!(page.contains("m=m||localStorage.theme}catch(e){}") && page.contains("h.dataset.theme=m||\"farm\";"));
-    // #290: the look sheet's rows, no native select for theme or colours; #440: in System's Appearance, behind [⚙].
     assert!(page.contains(
         "<button id=sysb type=button aria-haspopup=dialog aria-label=system>⚙<i class=sd hidden></i></button>"
     ));
@@ -189,16 +173,13 @@ fn the_picker_default_is_serve_theme_and_lists_your_own() {
     let (c, r) = server(Some("space"), &[("space", "theme.json", "{}")]);
     let page = get(&c, &r, "/?all=1");
     assert!(page.contains("h.dataset.theme=m||\"space\";"));
-    // The look sheet lists SD.t's keys: the built-ins and your own.
     assert!(page.contains("\"kitchen\":\"kitchen\",\"space\":") && page.contains(",\"terminal\":\"github-dark\"}"));
-    // A name that would close the script stays a string.
     let (c, r) = server(Some("</script>"), &[]);
     assert!(get(&c, &r, "/?all=1").contains("h.dataset.theme=m||\"\\u003c/script>\";"));
 }
 
 #[test]
 fn lookup_is_user_then_built_in_then_farm() {
-    // Built-in kitchen: its own files, its theme.json resolved.
     let (c, r) = server(Some("kitchen"), &[]);
     let k: Value = serde_json::from_str(KITCHEN).unwrap();
     assert_eq!(json(&c, &r, "/themes/kitchen/theme.json"), resolve(&k, &farm()));
@@ -206,14 +187,11 @@ fn lookup_is_user_then_built_in_then_farm() {
     assert!(
         host(&c, &r).contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>kitchen</b></span></p>")
     );
-    // Any phone may pick another theme than the board's.
     assert_eq!(json(&c, &r, "/themes/farm/theme.json"), resolve(&farm(), &farm()));
-    // A user theme named like a built-in wins, file by file; what it lacks is the built-in's.
     let own = r#"{"poses":{"working":"w"}}"#;
     let (c, r) = server(Some("kitchen"), &[("kitchen", "theme.json", own)]);
     assert_eq!(json(&c, &r, "/themes/kitchen/theme.json")["actions"]["impl"], "w");
     assert_eq!(body(&get(&c, &r, "/themes/kitchen/scene.svg")), KITCHEN_SCENE);
-    // A user-only theme: its files, then farm's.
     let (c, r) = server(
         Some("space"),
         &[("space", "theme.json", own), ("space", "sprites.svg", "<g id=w/>")],
@@ -225,8 +203,6 @@ fn lookup_is_user_then_built_in_then_farm() {
     assert_eq!(body(&get(&c, &r, "/themes/space/sprites.svg")), FARM_SPRITES);
 }
 
-/// #241: each fallback step: an action is the theme's own, else its pose's sprite, else farm's; a row sprite its
-/// action's; the rail item its idle action, the needs variant the item; other maps key by key; `false` stays.
 #[test]
 fn every_fallback_step() {
     let own = json!({
@@ -271,7 +247,6 @@ fn every_fallback_step() {
     );
 }
 
-/// #241: the contract's rules, each with the error the Host tab shows.
 #[test]
 fn schema_validation_names_the_problem() {
     for (bad, err) in [
@@ -381,7 +356,6 @@ fn invalid_theme_json_falls_back_to_farm_with_a_host_warning() {
     }
 }
 
-/// #241: terminal is today's plain board: glyph mode only, no row sprites, no moments, the load as text.
 #[test]
 fn terminal_has_no_sprites() {
     let (c, r) = server(Some("terminal"), &[]);
@@ -390,7 +364,6 @@ fn terminal_has_no_sprites() {
         (&t["modes"], &t["row_sprites"], &t["moments"], &t["load_scene"]["kind"]),
         (&json!(["glyph"]), &json!(false), &json!(false), &json!("none"))
     );
-    // The page is the same for every theme: the sprites are the phone's (serve.js, only when `row_sprites`).
     let page = get(&c, &r, "/?all=1");
     assert!(
         !page.contains("rsp") && !page.contains("#hr-") && !page.contains("class=lsc"),
@@ -399,8 +372,6 @@ fn terminal_has_no_sprites() {
     assert!(page.contains("h.dataset.theme=m||\"terminal\";"));
 }
 
-/// #305: the busy `[↻]` is a theme's own `loading` sprite: farm's trotting horse and the kitchen's cooking chef, each in
-/// its sprites.svg; terminal and a theme without the key keep the spinning ↻ (never farm's horse).
 #[test]
 fn loading_is_the_themes_own_or_the_spinning_glyph() {
     let (c, r) = server(None, &[("plain", "theme.json", "{}")]);
@@ -425,7 +396,6 @@ fn the_theme_icon_route_and_its_fallback() {
     let (c, r) = server(None, &[("space", "theme.json", "{}"), ("space", "icon-192.png", "own")]);
     assert_eq!(bytes(&c, &r, "/themes/terminal/icon-180.png"), TERMINAL_ICON);
     assert!(get(&c, &r, "/themes/terminal/icon-512.png").contains("Content-Type: image/png"));
-    // #239: the kitchen's own icon; no icon of its own (or no such theme): the board's.
     assert_eq!(bytes(&c, &r, "/themes/kitchen/icon-180.png"), KITCHEN_ICON);
     assert_eq!(bytes(&c, &r, "/themes/space/icon-180.png"), ICON);
     assert_eq!(bytes(&c, &r, "/themes/nosuch/icon-180.png"), ICON);
@@ -436,7 +406,6 @@ fn the_theme_icon_route_and_its_fallback() {
     );
 }
 
-/// #241: a lane's sprite is its role's action while it works, else its state's; an issue's from the log's state.
 #[test]
 fn per_role_action_resolution() {
     for (role, state, want) in [
@@ -451,7 +420,6 @@ fn per_role_action_resolution() {
         ("impl", "done", "done"),
         ("rev", "blocked", "blocked"),
         ("impl", "dead", "blocked"),
-        // An issue's state from the log (`update`: the fix round updates the branch).
         ("", "impl", "impl"),
         ("", "review(2)", "rev"),
         ("", "fix(1)", "fix"),
@@ -472,7 +440,6 @@ fn per_role_action_resolution() {
 fn path_traversal_is_refused() {
     let (c, r) = server(Some(".."), &[]);
     std::fs::write(c.config.with_file_name("theme.json"), r#"{"leak":1}"#).unwrap();
-    // A theme name that leaves the themes dir is never read: farm.
     assert_eq!(json(&c, &r, "/themes/../theme.json"), resolve(&farm(), &farm()));
     assert_eq!(json(&c, &r, "/themes/%2e%2e/theme.json"), resolve(&farm(), &farm()));
     let (c, r) = server(None, &[]);
@@ -493,9 +460,6 @@ fn path_traversal_is_refused() {
     }
 }
 
-/// #370: the board's labels pair a theme's own words with the plain ones; a word the theme lacks is the plain word
-/// alone, never farm's (terminal: none, today's board). The Queue and Events rows by kind and the Host load minis
-/// are in each sheet, and `row_sprites` takes those kinds and no other.
 #[test]
 fn theme_words_are_the_themes_own_and_fall_back_to_plain() {
     let (c, r) = server(None, &[("plain", "theme.json", r#"{"words": {"merged": "shipped"}}"#)]);
@@ -545,7 +509,6 @@ const GARDEN: &str = include_str!("../../../assets/themes/garden/theme.json");
 const GARDEN_SPRITES: &str = include_str!("../../../assets/themes/garden/sprites.svg");
 const GARDEN_SCENE: &str = include_str!("../../../assets/themes/garden/scene.svg");
 
-/// serve.js's pure plants part (#423) plus `js`, run under node: its stdout as JSON. None where node is missing.
 fn plants(js: &str) -> Option<Value> {
     if std::process::Command::new("node").arg("--version").output().is_err() {
         eprintln!("skipping: no node here");
@@ -560,9 +523,6 @@ fn plants(js: &str) -> Option<Value> {
     Some(serde_json::from_slice(&o.stdout).unwrap())
 }
 
-/// #423: the garden fills the contract with its own sprites: the keeper's action per role (water, prune, inspect,
-/// repot), a plant per growth stage in each of the six species (lane and Queue row size), the window light, the counter's
-/// cuttings and the moments, all in its sprites.svg; it is served as a built-in, scene and icon too.
 #[test]
 fn garden_draws_every_stage_and_species_itself() {
     let g = resolve(&validate(GARDEN.as_bytes()).unwrap(), &farm());
@@ -621,8 +581,6 @@ fn garden_draws_every_stage_and_species_itself() {
     assert!(get(&c, &r, "/").contains("h.dataset.theme=m||\"garden\";"));
 }
 
-/// #423 AC: a lane's sprite is its role's action over its issue's plant at its stage; a theme without `stages` keeps
-/// the action alone (the role pose), so farm and kitchen draw as before. The species is the issue number's, every time.
 #[test]
 fn a_lane_draws_its_plant_only_with_stages_and_the_species_is_stable() {
     let farm = resolve(&farm(), &farm());
@@ -669,7 +627,6 @@ fn a_lane_draws_its_plant_only_with_stages_and_the_species_is_stable() {
     assert_eq!((&got[8], &got[9]), (&Value::Null, &Value::Null));
 }
 
-/// #423: an issue's growth stage from its state, and from its lane's action where the state says nothing.
 #[test]
 fn the_growth_stage_follows_the_issue() {
     use drover::serve::stage;
@@ -691,7 +648,6 @@ fn the_growth_stage_follows_the_issue() {
     }
 }
 
-/// #423: the new keys' shapes; a wrong one names itself and the theme is farm.
 #[test]
 fn stages_species_and_a_light_dark_scheme_are_checked() {
     for (bad, err) in [

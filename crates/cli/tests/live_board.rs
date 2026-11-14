@@ -1,4 +1,3 @@
-//! with no transcript; the ascii frames across a `/live` update.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -107,8 +106,6 @@ fn board(name: &str, home: &Path) -> (drover::Ctx, String, String, Sheds) {
     (c, url, cookie.trim().trim_start_matches("Cookie: ").to_string(), sheds)
 }
 
-/// The page at `url` in WebKit, `js` run after `tab(tab); mode(mode)`; `window.late` (numbers) read `wait` s later;
-/// `pre` runs at document start.
 #[allow(clippy::too_many_arguments)]
 fn page(url: &str, cookie: &str, tab: &str, mode: &str, pre: &str, js: &str, wait: &str, png: &Path) -> Vec<f64> {
     let o = webview()
@@ -123,7 +120,6 @@ fn page(url: &str, cookie: &str, tab: &str, mode: &str, pre: &str, js: &str, wai
     out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect()
 }
 
-/// `js` once the Lanes rows are in (#337: a tab the page left out loads after it, from `/frags`).
 fn rowed(js: &str) -> String {
     format!("(function go() {{ if (!document.querySelector('.lane[data-agent]')) return setTimeout(go, 20); {js} }})()")
 }
@@ -135,11 +131,9 @@ fn live_board_chat_and_ascii_in_webkit() {
     }
     let _lock = ui_lock();
     let home = tmpdir("home334");
-    // Lane::session() reads $HOME/.claude; no other test here reads it.
     std::env::set_var("HOME", &home);
     let (c, url, cookie, _sheds) = board("live334", &home);
     let shots = std::env::var("DROVER_SNAPSHOTS").map_or_else(|_| tmpdir("live334-png"), std::path::PathBuf::from);
-    // Bug 2: each sheet's default view shows ≥ 1 message, the full view ≥ 1 block, no page error, via the real /lane.
     for agent in ["sendmeter-impl-12", "sendmeter-impl-13", "sendmeter-impl-14"] {
         let js = format!(
             "open($('.lane[data-agent=\"{agent}\"]')); setTimeout(() => {{ const m = $$('.chat>.now .blk.me, .chat>.now .blk.ai').length; \
@@ -161,8 +155,6 @@ fn live_board_chat_and_ascii_in_webkit() {
             "{agent}: default msgs, full blocks, errors: {m:?}"
         );
     }
-    // Bugs 1 and 3: in ascii mode a working lane's frames change, one always shows (no blank sample: no flash), and no
-    // node under the Lanes rows is removed or inserted while a `/live` update (a new lane in the log) lands.
     for (i, theme) in ["farm", "kitchen"].into_iter().enumerate() {
         let js = format!(
             "window.lv = 0; (() => {{ const f0 = frag; frag = (id, h) => {{ if (id === 'lanes') lv++; f0(id, h); }}; \
@@ -176,7 +168,6 @@ fn live_board_chat_and_ascii_in_webkit() {
         let js = rowed(&js);
         let c2 = c.clone();
         let later = std::thread::spawn(move || {
-            // #269: after the board's first draw of Lanes (the page's own read, then the probe's start).
             std::thread::sleep(std::time::Duration::from_millis(2500));
             spawn(
                 &c2,
@@ -210,10 +201,6 @@ fn live_board_chat_and_ascii_in_webkit() {
     }
 }
 
-/// Amendment A.4: the Herd scene paints from the last data this phone saw, never waiting on `/herd.json` (held 3 s here,
-/// as a slow host's reads hold it): the first lane horse within 300 ms of the page arriving once that data is kept; the
-/// first visit (nothing kept) waits for it. Amendment B: `[↻]` is the plain ↻ in every state, spinning only while it
-/// loads (as before #305), no sprite in it, and no two header controls draw the same sprite.
 #[test]
 fn herd_paints_at_once_and_refresh_is_the_plain_spinner() {
     if no_webkit() {

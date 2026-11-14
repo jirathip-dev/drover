@@ -1,5 +1,3 @@
-//! #417: the optional verify stage: rev PASS → verify (by `ui_paths`, a design stage or `--verify`), skipped or
-//! passed on without a recipe, its FAILs in rev's rounds, and its screenshots on the board.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -13,7 +11,6 @@ const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\npro
 const RECIPE: &str = "gh api repos/jirathip-dev/sendmeter/contents/.drover/verify.md";
 const ADDR: &str = "127.0.0.1:7777";
 
-/// The test fleet with a verify role and `ui_paths = ["web/**"]`.
 fn config() -> String {
     CONFIG.replace(
         "integration = \"staging\"   # never main",
@@ -140,13 +137,11 @@ fn a_pr_touching_ui_paths_goes_from_rev_pass_to_a_verify_lane() {
         (sp.str("stage"), sp.data["check"].as_bool()),
         (Some("verify"), Some(true))
     );
-    // Its brief is the verify prompt, as a check.
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/verify-12-r1/.brief.md")).unwrap();
     assert!(
         brief.contains("# ROLE: VERIFIER") && brief.contains("verdict.md"),
         "{brief}"
     );
-    // #731: the browser evidence helper sits beside it, the repo's own script.
     let vb = std::fs::read_to_string(c.worktrees.join("sendmeter/verify-12-r1/.verify-browser.mjs")).unwrap();
     let ours = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/verify-browser.mjs");
     assert_eq!(vb, std::fs::read_to_string(ours).unwrap());
@@ -202,7 +197,6 @@ fn verify_off_skips_the_stage_and_verify_on_forces_it() {
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--verify"]).0,
         0
     );
-    // `queue set` flips it either way.
     assert_eq!(
         run(
             &c,
@@ -232,7 +226,6 @@ fn verify_off_skips_the_stage_and_verify_on_forces_it() {
 #[test]
 fn no_recipe_logs_verify_no_recipe_shows_it_and_goes_on_to_the_gates() {
     let (c, head, sh) = passed("verify-no-recipe", &config(), false);
-    // No `.drover/verify.md` at the head: the contents read fails.
     let r = fake(&head, "web/index.html\n");
     let out = drive(&c, &r);
     assert!(r.called(&format!("{RECIPE}?ref={head}")), "{:?}", r.calls.borrow());
@@ -248,7 +241,6 @@ fn no_recipe_logs_verify_no_recipe_shows_it_and_goes_on_to_the_gates() {
     assert_eq!(state(&c), "merged");
 }
 
-/// `waiting_on`'s next command and the merge gate's answer after `events`, for the PR at `head`.
 fn next(cfg: &Config, events: &[Event], head: &str) -> (Option<String>, Result<(), &'static str>) {
     let f = cfg.fleet("sendmeter").unwrap();
     let s = &fold(events)[&("sendmeter".to_string(), 12)];
@@ -312,7 +304,6 @@ fn a_verify_pass_at_an_older_sha_does_not_let_the_new_head_merge() {
         next(&cfg, &evs, &b),
         (Some("drover spawn sendmeter 12 verify".into()), Err("STALE_VERDICT"))
     );
-    // A FAIL goes to a fix round in impl.
     evs.extend([
         e(
             9,
@@ -330,8 +321,6 @@ fn a_verify_pass_at_an_older_sha_does_not_let_the_new_head_merge() {
     );
 }
 
-/// rev FAIL, then verify FAIL twice: verify's FAILs are in rev's rounds, and the third FAIL parks the issue. The
-/// needs-you card shows the verdict's screenshots inline.
 #[test]
 fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
     let d = tmpdir("verify-rounds");
@@ -380,7 +369,6 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
     let v = kinds(&c, "verdict").pop().unwrap();
     assert_eq!(v.str("stage"), Some("verify"));
     assert_eq!(v.data["files"][0]["name"], "shots/home-390.png");
-    // The board's needs-you card shows the screenshot inline, and serves it.
     let none = Fake::default();
     let s = Server::new(&c, &none, Some(ADDR.into()));
     let get = |p: &str| {
@@ -395,8 +383,6 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
     );
 }
 
-/// #547: only a verify verdict lists screenshots, and only real files inside its lane folder; #499's CI FAIL body
-/// (path strings in a test list) lists none, and the board neither shows nor serves a stored path outside the lanes.
 #[test]
 fn shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
     let d = tmpdir("verify-shots");
@@ -424,7 +410,6 @@ fn shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
         run(&c, &Fake::default().reply("gh api", &s), &args);
         kinds(&c, "verdict").pop().unwrap().data["files"].clone()
     };
-    // #499's FAIL body, recorded by rev: `a.png` even exists in the lane, but rev's verdict has no screenshots.
     let ci = "FAIL\n\n- non-blocking: evidence: cases `/a.png`, `a.png`, `/tmp/a.png`, `./a.png`, `/../t5/a.png`, \
               `../t5/a.png`, `/link/a.png`\n";
     spawn(1, "rev");
@@ -443,15 +428,12 @@ fn shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
         String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now)).into_owned()
     };
     assert!(get("/shot/sendmeter/12/0").ends_with("\u{fffd}PNG narrow"));
-    // An older event that stored a path outside the lane folders: no card shot, and the route answers 404.
     let old = json!({"verdict": "FAIL", "stage": "verify", "files": [{"name": "x.png", "path": x}]});
     ev(&c, 3, "verdict", old);
     assert!(drover::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12)).is_empty());
     assert!(get("/shot/sendmeter/12/0").starts_with("HTTP/1.1 404"));
 }
 
-/// #599: #12's impl lane and a gone rev lane whose verdict.md says PASS at `head`, the PR (CI green) changing
-/// `files`; `recipe`: the head has `.drover/verify.md`.
 fn rev_wrote_pass(name: &str, files: &str, recipe: bool) -> (drover::Ctx, Fake, String, FakeShed) {
     let (c, sh) = sctx(name, &config());
     let head = sha("abc");
@@ -477,7 +459,6 @@ fn rev_wrote_pass(name: &str, files: &str, recipe: bool) -> (drover::Ctx, Fake, 
     (c, r, head, sh)
 }
 
-/// #599: drive's passes after it records the PASS: no rev lane is ever spawned again at the PASSed head.
 fn after_pass(c: &drover::Ctx, r: &Fake, sh: &FakeShed, passes: usize) {
     for _ in 0..passes {
         drive(c, r);
@@ -517,8 +498,6 @@ fn a_pass_drive_records_outside_ui_paths_logs_verify_skipped_and_merges() {
     assert_eq!(state(&c), "merged");
 }
 
-/// #599: an issue a merge already refused for want of a verify PASS (logs from before the fix) waits on verify at
-/// its PASSed head, never "review again".
 #[test]
 fn a_rev_pass_refused_for_want_of_verify_waits_on_verify_not_review_again() {
     let cfg = Config::parse(&config()).unwrap();
@@ -548,8 +527,6 @@ fn a_rev_pass_refused_for_want_of_verify_waits_on_verify_not_review_again() {
     );
 }
 
-/// #650: a rev PASS at the head that a merge refused for want of verify, then `kind` (verify-skipped or
-/// verify-no-recipe) at that head and green CI: `waiting` says merge, never "review again", and one drive pass merges.
 fn skipped_after_a_refusal_merges_in_one_pass(name: &str, kind: &str, word: &str) {
     let (c, head, _sh) = passed(name, &config(), false);
     let why = format!("no verify PASS for head {head}");
@@ -592,8 +569,6 @@ fn a_rev_pass_and_verify_no_recipe_at_the_head_merge_in_one_drive_pass() {
     skipped_after_a_refusal_merges_in_one_pass("verify-650-no-recipe", "verify-no-recipe", "no recipe");
 }
 
-/// #650: a verified head (rev PASS, verify skipped) that a merge refused for another gate names that gate, never
-/// "review again".
 #[test]
 fn a_verified_head_a_gate_refused_names_the_gate_not_review_again() {
     let cfg = Config::parse(&config()).unwrap();
@@ -626,8 +601,6 @@ fn a_verified_head_a_gate_refused_names_the_gate_not_review_again() {
     assert_eq!(w.next_cmd, None);
 }
 
-/// #775 AC3: the screenshot's disk stops answering (its folder's listing hangs): `/shot/…` answers 504 within the
-/// read limit instead of holding a request thread, and `GET /` answers 200 before, during and after.
 #[test]
 fn a_shot_on_a_hung_disk_answers_504_and_the_board_stays_up() {
     let d = tmpdir("verify-shot-hung");
@@ -660,7 +633,6 @@ fn a_shot_on_a_hung_disk_answers_504_and_the_board_stays_up() {
         String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now)).into_owned()
     };
     assert!(get("/").starts_with("HTTP/1.1 200"));
-    // The disk stops answering: the folder's listing never ends.
     let dir = shots.canonicalize().unwrap().to_string_lossy().into_owned();
     assert!(drover::runner::hung(&dir, std::time::Duration::ZERO, |_| {
         std::thread::sleep(std::time::Duration::from_secs(30));

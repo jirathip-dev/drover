@@ -1,4 +1,3 @@
-//! The tool guard of `drover help --agent`, in each harness's hook dialect (`Harness::hook_dialect`).
 use crate::config::{Config, Deny};
 use crate::providers::dialects;
 use serde::{Deserialize, Serialize};
@@ -33,8 +32,7 @@ pub struct Design {
     pub allow: Vec<String>,
 }
 
-/// #592: a lane's hook rules as the main host resolves them from its fleet.toml. A remote lane's are frozen at spawn in
-/// its rules file (`DROVER_RULES`); its host's own fleet.toml is never read. No notifier, token or env value.
+/// #592: a lane's hook rules as the main host resolves them from its fleet.toml. A remote lane's are frozen at spawn in its rules file (`DROVER_RULES`); its host's own fleet.toml is never read. No notifier, token or env value.
 #[derive(Debug, Default, Serialize, Deserialize, PartialEq)]
 pub struct Rules {
     /// main, master, staging and every fleet's integration branch.
@@ -45,6 +43,9 @@ pub struct Rules {
     pub reviewer: bool,
     /// #511: an impl-family lane (not lesson): its unreported turn end goes on once.
     pub builds: bool,
+    /// #909: its fleet's heavy kinds under its host's slot limits (none: no heavy patterns).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heavy: Option<crate::heavy::Heavy>,
 }
 
 impl Rules {
@@ -55,12 +56,19 @@ impl Rules {
             Some(h) => h.deny(d),
             None => d,
         };
-        // #502: no fleet or host drops the broad-kill ban.
         deny.extend(broad_kill());
         let mut branches: Vec<String> = ["main", "master", "staging"].map(String::from).to_vec();
         branches.extend(cfg.fleet.values().map(|f| f.integration.clone()));
         let family = f.map(|f| f.family(role));
+        let h = cfg.hosts.get(host);
+        let heavy = f.filter(|f| !f.heavy.is_empty()).map(|f| crate::heavy::Heavy {
+            kinds: f.heavy.clone(),
+            max: h.and_then(|h| h.heavy_max).unwrap_or(3),
+            kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
+            wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),
+        });
         Rules {
+            heavy,
             branches,
             deny,
             groups: cfg.orchestrator.groups().into_iter().map(String::from).collect(),
@@ -77,7 +85,6 @@ pub fn rules_stale(cfg: &Config, fleet: &str, sp: &crate::events::Event) -> bool
     sp.data.get("rules").is_some_and(|r| now.as_ref() != Some(r))
 }
 
-/// git subcommands that make commits or move refs; denied to reviewers.
 const GIT_WRITES: &[&str] = &[
     "commit",
     "push",
@@ -111,7 +118,6 @@ pub fn broad_kill() -> Vec<Deny> {
         .into()
 }
 
-/// The call's tool input: the first of any dialect's input keys holding an object.
 fn tool_input(input: &Value) -> &Value {
     let mut keys = dialects().flat_map(|d| d.input.iter());
     keys.find_map(|k| input.get(k).filter(|v| v.is_object()))
@@ -195,7 +201,6 @@ fn protected_path<'a>(s: &str, p: &'a Policy) -> Option<&'a str> {
     p.paths.iter().map(String::as_str).find(|pp| s.contains(pp))
 }
 
-/// #410: `file` lies in the conductor's own thread folder and is not one drover writes there.
 fn own_file(file: &str, p: &Policy) -> bool {
     use std::path::{Component, Path};
     let Some(own) = &p.own else { return false };
@@ -204,7 +209,6 @@ fn own_file(file: &str, p: &Policy) -> bool {
         return false;
     };
     let normal = rel.components().all(|c| matches!(c, Component::Normal(_)));
-    // A symlink there could point anywhere: writing through it is not writing into the folder.
     let linked = Path::new(&file)
         .ancestors()
         .take_while(|a| *a != Path::new(own))
@@ -212,7 +216,6 @@ fn own_file(file: &str, p: &Policy) -> bool {
     normal && !linked && rel.as_os_str() != "" && ![".brief.md", ".thread.md"].iter().any(|f| rel == Path::new(f))
 }
 
-/// #499: `w` as an absolute path, resolved against `cwd` (`..` and `.` folded), past a redirection's `2>>`.
 fn resolve(w: &str, cwd: &str) -> String {
     use std::path::{Component, PathBuf};
     let w = expand_home(w.trim_start_matches(|c: char| c.is_ascii_digit() || c == '>'));
@@ -227,7 +230,6 @@ fn resolve(w: &str, cwd: &str) -> String {
     out.to_string_lossy().into_owned()
 }
 
-/// #677: only drover writes why notes: a lane's `git notes` write, or a push naming `refs/notes`, is refused.
 fn notes(t: &[&str]) -> Option<String> {
     let rest = &t[t.iter().position(|w| *w == "git")? + 1..];
     let writes = ["add", "append", "edit", "copy", "merge", "remove", "prune"];
@@ -241,19 +243,16 @@ fn notes(t: &[&str]) -> Option<String> {
 }
 
 fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
-    // #537: a quoted argument's text (`gh issue create --body "…docker…"`) is no command word.
     if let Some(d) = denied(&dups(&unquote(cmd, true)), &p.deny) {
         return Some(d.reason());
     }
     let cmd = &dups(&unquote(cmd, false));
     let mut cwd = cwd.to_string();
-    // #538: the hard nos no run card may run, from a conductor's own shell either.
     if let Some(w) = crate::card::forbidden(cmd).filter(|_| p.orchestrator) {
         return Some(format!(
             "REFUSED CARD_FORBIDDEN: this command {w}; an orchestrator never runs it (#538)"
         ));
     }
-    // #502: `pgrep x | xargs kill` and `kill $(pgrep x)` kill by pattern too.
     let runs = |c: &str| denied(cmd, &[Deny::Cmd(c.into())]).is_some();
     if runs("pgrep") && runs("kill") {
         return Some(NO_BROAD_KILL.into());
@@ -266,8 +265,6 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
             .filter(|t| !t.is_empty())
             .collect();
         let t: Vec<&str> = toks.iter().map(String::as_str).collect();
-        // #499: a `cd` moves the later segments' cwd, so their relative paths resolve where they run.
-        // Its options (`-P`, `--`) are skipped; `pushd` moves it the same way.
         if let ["cd" | "pushd", ref args @ ..] = t[..] {
             if let Some(dir) = args.iter().find(|a| !a.starts_with('-')) {
                 cwd = resolve(dir, &cwd);
@@ -281,7 +278,6 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         if let Some(r) = found.or_else(|| design_spawn(&t, p)) {
             return Some(r);
         }
-        // #570: a redirection's target; `/dev/null`, `/dev/stdout` and `/dev/stderr` write nothing.
         let targets: Vec<String> = redirects(seg)
             .into_iter()
             .filter(|w| !["/dev/null", "/dev/stdout", "/dev/stderr"].contains(&w.as_str()))
@@ -295,15 +291,10 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         let writer = !drover
             && (w.iter().any(|w| WRITERS.contains(w))
                 || (w.iter().any(|w| *w == "sed" || *w == "perl") && w.iter().any(|w| w.starts_with("-i"))));
-        // #668: the cap file as a writer's argument or a redirection's target.
         let cap = |w: &String| w.ends_with(CAP_FILE);
         if p.cap && (targets.iter().any(cap) || writer && toks.iter().any(cap)) {
             return Some(NO_CAP_EDIT.into());
         }
-        // #499: each path in a word (`--opt=`, `of=`, `a>b` split off; an option's `-t<dir>` as each suffix)
-        // resolved against the cwd; a conductor's write lands only in its own folder. The segment's own text,
-        // its own-folder words left out, is still checked. #570: a relative word only as a writer's argument
-        // or a redirection's target.
         let paths = |w: &str| -> Vec<String> {
             (w.split(['=', '>']))
                 .flat_map(|w| match w.strip_prefix('-') {
@@ -317,8 +308,6 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
                 .map(|w| resolve(w, &cwd))
                 .collect()
         };
-        // A link's target resolves against the link's folder, not the cwd: `ln` gets no own-folder pass.
-        // #504: the shell expands braces, globs, variables and escapes after this check sees the word.
         let copy = matches!(t.first(), Some(&("cp" | "mv" | "install" | "rsync" | "ditto")));
         let into = t.last().filter(|_| copy).map(|w| resolve(w, &cwd));
         let folder =
@@ -361,8 +350,6 @@ fn redirects(seg: &str) -> Vec<String> {
         .collect()
 }
 
-/// #570: `cmd` without file-descriptor duplications (`2>&1`, `>&2`, `<&3`, `>&-`) and with `&>` as `>`, so
-/// neither splits a segment at its `&` nor reads as a write to a file.
 fn dups(cmd: &str) -> String {
     let fd = |d: &char| d.is_ascii_digit() || *d == '-';
     let (mut out, mut it) = (String::new(), cmd.chars().peekable());
@@ -387,7 +374,6 @@ fn dups(cmd: &str) -> String {
     out
 }
 
-/// #536: a `CARGO_TARGET_DIR=` or `--target-dir` outside the lane's `build_root` (a `/tmp` one escapes every budget).
 fn target_dir(t: &[&str], p: &Policy) -> Option<String> {
     let s = p.scratch.as_deref()?;
     let root = std::path::Path::new(s).ancestors().nth(2)?.to_string_lossy();
@@ -416,15 +402,9 @@ fn target_dir(t: &[&str], p: &Policy) -> Option<String> {
     ))
 }
 
-/// #410: `cmd` without the text the shell never runs as a command, so quoting one never matches it: heredoc
-/// bodies fed to `cat` or `tee`, comments, and the quoted text of `drover thread reply|say` and `drover ask`
-/// (the question, each `--option`). #537: with `args`, also any quoted argument of a command that runs no text of its
-/// own: none of its words a wrapper (`sh`, `eval`, …), `ssh`, `watch`, `parallel` or `-c` (`su -c`, `script -c`).
 fn unquote(cmd: &str, args: bool) -> String {
     let (mut out, mut cur) = (String::new(), String::new());
-    // Pending heredocs: delimiter, quoted, body dropped.
     let mut docs = Vec::<(String, bool, bool)>::new();
-    // The current command's unquoted words so far.
     let mut words: Vec<String> = vec![];
     let mut cs = cmd.chars().peekable();
     while let Some(c) = cs.next() {
@@ -433,7 +413,6 @@ fn unquote(cmd: &str, args: bool) -> String {
         }
         match c {
             '\'' | '"' => {
-                // Only when `drover` is the command word: `eval` or `ssh h` before it re-parse the quoted text.
                 let i = words
                     .iter()
                     .position(|w| matches!(word(w), "drover" | "herdsman" | "fleet" | "gh"));
@@ -448,7 +427,6 @@ fn unquote(cmd: &str, args: bool) -> String {
                     |w: &String| WRAPPERS.contains(&word(w)) || ["ssh", "watch", "parallel", "-c"].contains(&word(w));
                 let data = args && words.iter().any(|w| !w.contains('=')) && !words.iter().any(runs);
                 let text = text || data;
-                // `$'…'` escapes its quote (`$'x\''`); its text is kept, like an unterminated quote's.
                 let ansi = c == '\'' && out.ends_with('$');
                 let target = out.trim_end().ends_with(['>', '<']);
                 out.push(c);
@@ -459,7 +437,6 @@ fn unquote(cmd: &str, args: bool) -> String {
                         break;
                     }
                     let esc = ((c == '"' || ansi) && q == '\\').then(|| cs.next()).flatten();
-                    // `$(…)` and backticks still run inside double quotes.
                     live |= c == '"' && esc.is_none() && (q == '`' || (q == '$' && cs.peek() == Some(&'(')));
                     span.extend(Some(q).into_iter().chain(esc));
                 }
@@ -487,7 +464,6 @@ fn unquote(cmd: &str, args: bool) -> String {
                     quoted |= matches!(n, '\'' | '"' | '\\');
                     delim.extend((!matches!(n, '\'' | '"' | '\\')).then_some(n));
                 }
-                // Only a text sink's body is never run: `bash <<EOF` and `eval $(cat <<EOF` run theirs.
                 let top = out.matches('(').count() == out.matches(')').count() && out.matches('`').count() % 2 == 0;
                 let sink = top && words.first().is_some_and(|w| matches!(word(w), "cat" | "tee"));
                 docs.push((delim, quoted, sink));
@@ -498,12 +474,9 @@ fn unquote(cmd: &str, args: bool) -> String {
             '\n' | ';' | '|' | '&' | '(' | ')' | '`' => {
                 out.push(c);
                 words.clear();
-                // `cat <<EOF | sh` and `cat <<EOF > >(sh)` run the body too.
                 for d in docs.iter_mut().filter(|_| matches!(c, '|' | '(')) {
                     d.2 = false;
                 }
-                // A heredoc's body starts on the next line and ends at its delimiter's line.
-                // An unquoted delimiter's body still runs `$(…)` and backticks, so those lines stay.
                 for (d, quoted, drop) in docs.drain(..).filter(|_| c == '\n') {
                     let mut line = String::new();
                     for n in cs.by_ref() {
@@ -532,18 +505,13 @@ fn unquote(cmd: &str, args: bool) -> String {
     out
 }
 
-/// Words that run the next word as a command (`sh -c`, `sudo`, `env`, `then`, …); `-flags`, `VAR=…` and numbers
-/// after them are skipped.
 const WRAPPERS: &[&str] = &[
     "env", "sudo", "exec", "command", "nohup", "time", "xargs", "sh", "bash", "zsh", "nice", "timeout", "eval",
     "export", "if", "then", "else", "do", "while", "until", "{", "!",
 ];
-/// Wrapper flags that may take a value (`sudo -u root`, `env -u X`, `xargs -n 1`); `sudo -n docker` still denies.
 const VALUE_FLAGS: &[&str] = &["-u", "-g", "-C", "-n", "-U", "-D", "-S", "-P", "-r", "-T"];
 
-/// #216: the first `deny` entry `cmd` runs as a command word, in any segment (pipe, `&&`, `;`, `$( )`), past
-/// wrappers and `VAR=…`, by full path too. An entry ending in `=` (`DOCKER_HOST=`) denies that assignment.
-/// Best-effort lexical matching: `D=docker; $D ps` or `ssh h docker ps` pass.
+/// #216: the first `deny` entry `cmd` runs as a command word, in any segment (pipe, `&&`, `;`, `$( )`), past wrappers and `VAR=…`, by full path too. An entry ending in `=` (`DOCKER_HOST=`) denies that assignment. Best-effort lexical matching: `D=docker; $D ps` or `ssh h docker ps` pass.
 pub fn denied<'a>(cmd: &str, deny: &'a [Deny]) -> Option<&'a Deny> {
     cmd.split([';', '|', '&', '\n', '(', ')', '`']).find_map(|seg| {
         let t: Vec<&str> = seg.split_whitespace().map(|w| w.trim_matches(['"', '\''])).collect();
@@ -564,14 +532,12 @@ pub fn denied<'a>(cmd: &str, deny: &'a [Deny]) -> Option<&'a Deny> {
         let first = Some(word(first));
         deny.iter().find(|d| {
             let mut e = d.cmd().split_whitespace();
-            // Subcommand words match in order, past flags (`supabase --debug start`); `Docker.app` is `Docker`.
             let mut r = rest.iter().map(|w| w.trim_end_matches(".app"));
             e.next() == first && e.all(|w| r.find(|x| *x == w || !x.starts_with('-')) == Some(w))
         })
     })
 }
 
-/// A command word's name: `\docker` and `/usr/local/bin/docker` are `docker`.
 fn word(w: &str) -> &str {
     w.trim_start_matches('\\').rsplit('/').next().unwrap_or(w)
 }
@@ -594,7 +560,6 @@ fn gh(t: &[&str]) -> Option<String> {
     })
 }
 
-/// #538: the capability group of a `drover` verb (its words after `drover`), if it is in one.
 fn group(r: &[&str]) -> Option<&'static str> {
     let has = |w: &str| r.iter().any(|x| x.split('=').next() == Some(w));
     Some(match (*r.first()?, r.get(1).copied()) {
@@ -621,9 +586,6 @@ pub fn group_of(cmd: &str) -> Option<&'static str> {
     })
 }
 
-/// `setup`, `serve approve|unpair|devices --revoke`, `config apply|discard`, `secret ls|rm`, `accounts import` and
-/// `card approve|deny`: owner-only (pre-rename `fleet` too). #538: a group verb (`clean --yes`, a design spawn, …)
-/// is a conductor's too while `[conductor] allow` has its group on, never another lane's.
 fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     let orchestrator = p.orchestrator;
     let i = t
@@ -639,14 +601,14 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
             | (Some(&"secret"), Some(&("ls" | "rm")))
             | (Some(&"accounts"), Some(&"import"))
             | (Some(&"card"), Some(&("approve" | "deny" | "run")))
+            | (Some(&"fleet"), Some(&"rename"))
     ) {
         return Some(
-            "REFUSED OWNER_ONLY: only the owner applies config, settles run cards or lists and removes secrets, never \
-             a lane (#387)"
+            "REFUSED OWNER_ONLY: only the owner applies config, settles run cards, lists and removes secrets or \
+             renames a fleet, never a lane (#387, #935)"
                 .into(),
         );
     }
-    // #425: a lane may hold its own issue (`queue <fleet> block --on N <issue>`), never another one.
     let lane = std::env::var("DROVER_LANE").unwrap_or_default();
     let own = lane.split(':').nth(1).filter(|n| n.parse::<u64>().is_ok());
     let block = r.first() == Some(&"queue") && matches!(r.get(2), Some(&("block" | "unblock"))) && own.is_some();
@@ -654,16 +616,12 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     if block && r.iter().enumerate().skip(3).any(other) {
         return Some("REFUSED OWN_ISSUE: a lane may `queue block`/`unblock` only its own issue (#425)".into());
     }
-    // #419: `lesson` files an issue and spawns a lane: a conductor's verb (the owner's too); its digest (and #510's
-    // `apply`, a rules-file rewrite in the lane's own worktree) is open.
     if !orchestrator && r.first() == Some(&"lesson") && !matches!(r.get(1), Some(&"digest" | &"apply")) {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover lesson` (#419)".into());
     }
-    // #574: `amend` edits the issue's spec: the owner's decision, written by a conductor or the owner.
     if !orchestrator && r.first() == Some(&"amend") {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover amend` (#574)".into());
     }
-    // #461: `timer install` (only that host verb) is a conductor's too; outside a lane it is the owner's.
     if !orchestrator && !lane.is_empty() && r.first() == Some(&"timer") && r.contains(&"install") {
         return Some(
             "REFUSED ORCHESTRATOR_ONLY: only an orchestrator or the owner runs `drover timer install` (#461)".into(),
@@ -710,7 +668,6 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     })
 }
 
-/// `gh api` sends a write: a non-GET method, or fields/input (which default to POST).
 fn api_writes(rest: &[&str]) -> bool {
     rest.iter().enumerate().any(|(i, w)| {
         let method = match *w {
@@ -728,7 +685,6 @@ fn api_writes(rest: &[&str]) -> bool {
     })
 }
 
-/// Index of the git subcommand and the repo dir, past global options (`-C <dir>`, `-c <k=v>`, `--git-dir=…`).
 fn git_sub(t: &[&str], cwd: &str) -> Option<(usize, String)> {
     let g = t.iter().position(|w| *w == "git")?;
     let mut dir = cwd.to_string();
@@ -818,8 +774,7 @@ pub fn push_dir(input: &Value) -> Option<String> {
         })
 }
 
-/// #386: a shell call's command when it runs `drover` or `gh` (but `drover thread reply`, which is the reply
-/// itself): a conductor's tool row in its thread.
+/// #386: a shell call's command when it runs `drover` or `gh` (but `drover thread reply`, which is the reply itself): a conductor's tool row in its thread.
 pub fn fleet_cmd(input: &Value) -> Option<&str> {
     let tool = input["tool_name"].as_str().unwrap_or_default();
     let cmd = tool_input(input)["command"].as_str()?.trim();
@@ -857,8 +812,7 @@ pub fn ai_coauthor(log: &str) -> Option<&str> {
     })
 }
 
-/// #304: a post-tool or stop hook's kick reason: `push` for a `git push` that went through (no `rejected`, `fatal:`
-/// or `error:` in its output), `stop` at a turn's end; `None` for anything else (a pre-tool guard call).
+/// #304: a post-tool or stop hook's kick reason: `push` for a `git push` that went through (no `rejected`, `fatal:` or `error:` in its output), `stop` at a turn's end; `None` for anything else (a pre-tool guard call).
 pub fn kick_why(input: &Value) -> Option<&'static str> {
     let ev = input["hook_event_name"].as_str()?;
     match dialects().find(|d| d.post == ev || d.stop == ev)? {
@@ -878,8 +832,7 @@ pub fn kick_why(input: &Value) -> Option<&'static str> {
     }
 }
 
-/// #298: the state a hook call reports to shed: `done` at a turn's end, `blocked` while the harness waits on a person,
-/// else `working`.
+/// #298: the state a hook call reports to shed: `done` at a turn's end, `blocked` while the harness waits on a person, else `working`.
 pub fn reported(input: &Value) -> Option<&'static str> {
     let ev = input["hook_event_name"].as_str().filter(|e| !e.is_empty())?;
     Some(match dialects().find(|d| d.stop == ev || d.blocked == ev) {
@@ -894,14 +847,12 @@ pub const TURN_ASK: &str = "drover: end your turn with `drover turn done|blocked
 (done: pushed and ready for review; blocked: --why names the blocker; need-input: after `drover ask`; working: \
 stopped mid-task)";
 
-/// #511: the lane's turn marker on its own host: `prompt` once a prompt is submitted, `turn` once `drover turn`
-/// ran, `asked` once the stop hook told it.
+/// #511: the lane's turn marker on its own host: `prompt` once a prompt is submitted, `turn` once `drover turn` ran, `asked` once the stop hook told it.
 pub fn turn_mark(state: &Path, lane: &str) -> PathBuf {
     state.with_file_name(format!("turn-{}", lane.replace([':', '/'], "-")))
 }
 
-/// #511: an impl lane (`builds`) whose turn ends with no `drover turn` since its last prompt goes on once with
-/// `TURN_ASK`; never twice (`asked`, or the harness's own `stop_hook_active`), so it never loops.
+/// #511: an impl lane (`builds`) whose turn ends with no `drover turn` since its last prompt goes on once with `TURN_ASK`; never twice (`asked`, or the harness's own `stop_hook_active`), so it never loops.
 pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Option<Value> {
     let ev = input["hook_event_name"].as_str().filter(|e| !e.is_empty())?;
     let d = dialects().find(|d| d.prompt == ev || d.stop == ev)?;
@@ -918,6 +869,17 @@ pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Op
     }
     let _ = std::fs::write(mark, "asked");
     Some(again(TURN_ASK))
+}
+
+/// #909: a shell call matching a heavy kind, rewritten (in a dialect that can) to run in a host slot under `exe heavy`.
+pub fn heavy(input: &Value, h: &crate::heavy::Heavy, exe: &str) -> Option<Value> {
+    let tool = input["tool_name"].as_str()?;
+    let rewrite = dialects().find(|d| (d.sent)(input) && d.shell == tool)?.rewrite?;
+    let mut ti = tool_input(input).clone();
+    let cmd = ti["command"].as_str()?;
+    let kind = h.kind(cmd)?;
+    ti["command"] = h.wrap(exe, kind, cmd).into();
+    Some(rewrite(ti))
 }
 
 /// The deny answer in the dialect that sent `input`, else the first harness's (`Dialect::deny`).

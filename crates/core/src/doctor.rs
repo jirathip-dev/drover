@@ -1,4 +1,3 @@
-//! `drover doctor`: read-only host check, a `✓|✗|! <check> — <detail> [→ <fix>]` row each. Never prints a secret.
 use crate::config::Config;
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
@@ -8,7 +7,6 @@ use std::io::Write;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
 
-/// Add `text`: ✓ without its ` → <fix>` when `pass`, else marked `bad` (✗, or ! for a warning).
 fn row(rows: &mut Vec<String>, pass: bool, bad: char, text: &str) {
     let cut = text.find(" → ").filter(|_| pass).unwrap_or(text.len());
     rows.push(format!("{} {}", if pass { '✓' } else { bad }, &text[..cut]));
@@ -21,7 +19,6 @@ fn mode(path: &Path) -> String {
 
 pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config_only: bool) -> Result<i32> {
     let mut rows = vec![];
-    // #539 `--config-only`, the pre-install gate: only whether this binary loads the live config (warnings are fine).
     if !config_only {
         if let Some((client, server, older)) = crate::timer::herdr_versions(r) {
             let line = format!("herdr — client {client}, server {server} → herdr update --handoff");
@@ -53,8 +50,6 @@ fn config_rows(ctx: &Ctx, cfg: &Config, rows: &mut Vec<String>) {
     rows.extend(cfg.warnings().iter().map(|(k, w)| format!("! config — {k} is {w}")));
 }
 
-/// #707 (q855): one row for where accounts sign in from (no Keychain read, no per-account rows); a `token-file:`
-/// account's file warns when loose, missing or older than `TOKEN_DAYS`.
 fn account_rows(cfg: &Config, rows: &mut Vec<String>) {
     if cfg.accounts.names.is_empty() {
         return;
@@ -64,7 +59,6 @@ fn account_rows(cfg: &Config, rows: &mut Vec<String>) {
         |c| format!("the account_env helper `{c}`"),
     );
     rows.push(format!("✓ accounts — sign in from {src}"));
-    // #785: ACP lanes write no meter reading; only an interactive status line does.
     rows.push("✓ meter — `accounts` shows each reading's age; one past its reset reads 0%".into());
     let hn = crate::providers::accounts().map_or("", |p| p.name);
     for name in cfg.accounts.names.keys() {
@@ -91,7 +85,6 @@ fn account_rows(cfg: &Config, rows: &mut Vec<String>) {
     }
 }
 
-/// #707: a hand-placed account token file older than this many days warns (they last about a year).
 const TOKEN_DAYS: u64 = 300;
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
@@ -103,8 +96,8 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         ));
     }
     let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::read(&ctx.state).unwrap_or_default());
-    row(rows, !line.contains(" · stale"), '!', &line); // #333
-    let (n401, n503) = crate::devices::denials(ctx); // #501: a 503 is the board's devices unread
+    row(rows, !line.contains(" · stale"), '!', &line);
+    let (n401, n503) = crate::devices::denials(ctx);
     let log = ctx.state.with_file_name("serve.log");
     let line = format!("board auth — 24 h: {n401} × 401, {n503} × 503 → see {}", log.display());
     row(rows, n503 == 0, '!', &line);
@@ -128,13 +121,17 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
                 "! gh {name} — {repo} is archived → remove [fleet.{name}] from fleet.toml"
             ));
         }
+        if let Some(l) = fleet.merge_label.as_deref() {
+            let has = crate::gh::label_exists(r, fleet, l).unwrap_or(false);
+            let fix = crate::gh::label_fix(fleet, l);
+            row(rows, has, '✗', &format!("label {name} — {l} in {repo} → {fix}"));
+        }
         let dir = fleet.local_path().display().to_string();
         let branch = &fleet.integration;
         let origin = format!("origin/{branch}");
         let git = ok(r, "git", &["-C", &dir, "rev-parse", "--verify", &origin]).is_ok();
         let fix = format!("git -C {dir} fetch origin {branch} || git clone https://github.com/{repo}.git {dir}");
         row(rows, git, '✗', &format!("local {name} — {dir} has {origin} → {fix}"));
-        // #350: an unknown `mode` silently means full-first.
         if let Some(m) = fleet
             .land
             .as_ref()
@@ -145,7 +142,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
                 "! land {name} — mode `{m}` is unknown, landing full-first → \"fast-first\" or \"full-first\""
             ));
         }
-        // #350: each `fast` check must be one the repo's PRs report.
         if let Some(l) = fleet.fast_first() {
             if l.fast.is_empty() {
                 rows.push(format!(
@@ -180,7 +176,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
                 g.name
             ));
         }
-        // #173: a broken pipeline stops only its fleet; each rule it breaks, with its fleet.toml line.
         let bad = match fleet.bad.len() {
             0 if fleet.flow().builtin => "valid (built-in)".to_string(),
             0 => "valid".into(),
@@ -196,7 +191,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         );
     }
     account_rows(cfg, rows);
-    // #626: GitHub webhooks need their secret; the refused deliveries are only counted.
     let n = crate::webhook::rejected(ctx);
     let bad = match n {
         0 => String::new(),
@@ -219,7 +213,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         );
         row(rows, ok(r, "codesign", &req).is_ok(), '✗', &line);
     }
-    // #710: the readers `check` counts for `keychain-jammed`.
     let jam = crate::host::keychain_jam(r);
     let line = format!("keychain readers — {}", crate::host::jam_line(&jam));
     row(rows, jam.0.len() <= cfg.limits.keychain_readers, '!', &line);
@@ -232,7 +225,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     for (pass, bad, line) in crate::providers::lanes().flat_map(|p| p.doctor(ctx, cfg, r)) {
         row(rows, pass, bad, &line);
     }
-    // #737: a profile's hook names another binary: lanes from this one are refused ACP_UNGUARDED.
     let stray = crate::spawn::stray_hooks(ctx, cfg);
     let what = if stray.is_empty() {
         "run this binary".into()
@@ -254,10 +246,9 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     row(rows, up, '✗', &line);
     let tailscale = r.run("tailscale", &argv(&["serve", "status"]));
     let line = format!("tailscale — serve maps to {addr} → tailscale serve --bg --https=8443 http://{addr}");
-    let bad = if tailscale.is_err() { '!' } else { '✗' }; // not installed is a warning
+    let bad = if tailscale.is_err() { '!' } else { '✗' };
     let maps = tailscale.is_ok_and(|o| o.code == 0 && o.stdout.contains(addr));
     row(rows, maps, bad, &line);
-    // #708: the configured job, never another plist that mentions `drover serve`.
     let label = cfg.serve.launchd_label.as_deref().unwrap_or("dev.drover.serve");
     let plist = ctx.home.join(format!("Library/LaunchAgents/{label}.plist"));
     match plist.is_file() {
@@ -297,7 +288,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let notifier = cfg.webpush_sub().is_some();
     let line = format!("push — {subs} subscriptions, notifier {notifier} → turn alerts on; add a webpush [[notify]]");
     row(rows, subs > 0 && notifier, '!', &line);
-    // `check` and `drive` stamp `<state>/<what>.at` each run: the cron's proof. #791: a tick still beating is running.
     let running = crate::timer::running(ctx, cfg);
     for what in ["check", "drive"] {
         let stamp = std::fs::read_to_string(ctx.state.with_file_name(format!("{what}.at")));
@@ -321,7 +311,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let line = format!("timer — {label} {state} → drover timer install (the owner or an orchestrator)");
         row(rows, state == "loaded", '✗', &line);
     }
-    // #635: each cloud host's size, key and CLI; an ssh `Include` that reads a host-key file.
     for name in cfg.hosts.iter().filter(|h| h.1.cloud.is_some()).map(|h| h.0) {
         if let Err(e) = crate::cloud::doctor(ctx, cfg, r, name, rows) {
             rows.push(format!("✗ cloud {name} — {e:#}"));
@@ -331,11 +320,9 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     if cfg.shed().is_some() {
         shed_rows(ctx, cfg, r, rows);
     }
-    // #235: each enabled remote host's health, its failures as rows `host <name> <check>`.
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
         let Some(m) = h.machine.as_deref() else { continue };
         let on = crate::hosts::On::new(r, Some(m));
-        // #647: `unreachable` only when ssh fails, else the failed check by name (shed's: a `!` health row).
         let Some((tags, home)) = crate::hosts::probe(&on) else {
             let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#})");
             let why = ok(&on, "true", &[] as &[&str]).map_or_else(ssh, |_| "probe: unreadable answer".into());
@@ -355,7 +342,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         rows.extend(bad.iter().map(|w| w.replacen(' ', &format!(" host {name} "), 1)));
         rows.extend(bad.is_empty().then_some(ok));
         rows.extend(login_token(&on, Some(name)));
-        // #592: lanes there read only their rules file; the owner removes an old copy (#647: bootstrap, one it wrote).
         let conf = crate::hosts::rehome(vec![ctx.config.display().to_string()], Some(&home)).remove(0);
         if on.exists(Path::new(&conf)) {
             rows.push(format!("! stale fleet.toml on {name}: no longer read → rm {conf}"));
@@ -363,11 +349,8 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     }
 }
 
-/// #708: the startup files a clean login shell reads; `login_token` names only these.
 const STARTUP: [&str; 4] = [".zshenv", ".zprofile", ".zshrc", ".zlogin"];
 
-/// #708: a clean login shell (`env -i HOME=$HOME zsh -ilc`) that exports the accounts harness's token var overrides
-/// each lane's account: the warning names the startup files that mention it, never the value or any other line.
 fn login_token(r: &dyn Runner, host: Option<&str>) -> Option<String> {
     let crate::providers::Credential::Account(a) = crate::providers::accounts()?.credential() else {
         return None;
@@ -403,7 +386,6 @@ pub fn serve_plist(ctx: &Ctx) -> Option<std::path::PathBuf> {
     serve_plists(ctx).into_iter().next()
 }
 
-/// #708: every such plist, by name.
 fn serve_plists(ctx: &Ctx) -> Vec<std::path::PathBuf> {
     let agents = std::fs::read_dir(ctx.home.join("Library/LaunchAgents"));
     let serves = |text: String| {
@@ -417,7 +399,6 @@ fn serve_plists(ctx: &Ctx) -> Vec<std::path::PathBuf> {
     found
 }
 
-/// #600: shed, and each ACP adapter's command (`shed agents --json`), on the PATH the timer's jobs run with.
 fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     let path = crate::timer::job_path(ctx, cfg, r);
     let find = |b: &str| path.split(':').map(|d| Path::new(d).join(b)).find(|p| p.is_file());

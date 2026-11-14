@@ -1,4 +1,3 @@
-//! #316: a harness core has never heard of runs on the generic fallbacks: spawn → chat → card → memory row.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -9,7 +8,6 @@ use serde_json::json;
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-12";
-/// A numbered menu: Claude's reader would offer its options; the generic one offers none.
 const MENU: &str = "⏺ Bash(cargo test)\nWhich database should the meter use?\n❯ 1. SQLite\n  2. Postgres\n";
 
 #[test]
@@ -60,7 +58,6 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
         let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{ck}\r\n"), T);
         String::from_utf8_lossy(&res).into_owned()
     };
-    // Chat: the pane's lines, no session transcript.
     let res = get(&format!("/lane?agent={LANE}"));
     let chat: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).expect(&res);
     assert_eq!(
@@ -72,8 +69,7 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
         chat["lines"].as_array().unwrap().iter().any(|l| l == "  2. Postgres"),
         "{chat}"
     );
-    // Card: the question and a reply box, never menu buttons.
-    let page = with_board(&get("/?all=1"), &s, ADDR, &ck, T); // #269: the needs cards as the board draws them
+    let page = with_board(&get("/?all=1"), &s, ADDR, &ck, T);
     let needs = &page[page.find("<div id=needs>").unwrap()..page.find("<main>").unwrap()];
     assert!(
         needs.contains("Which database should the meter use?") && !needs.contains("class=pick"),
@@ -89,7 +85,6 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
         res.contains("no menu on") && !sh.called("keys", LANE) && sh.sent(LANE).is_empty(),
         "{res}"
     );
-    // Memory: the gemini lane's pane tree in a row of its own, none under Claude.
     let page = host_tab(&s, ADDR, T);
     assert!(!page.contains("<span class=k>claude</span>"), "{page}");
     assert!(

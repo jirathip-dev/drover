@@ -1,5 +1,3 @@
-//! The fleet a run starts from, its timers and faults, and what each lane's agent does: seed 1 is the #370 incident
-//! written out by hand; any other seed draws its own.
 use crate::model::{Ev, Model, Pr, Script, FLEET, REPO};
 use crate::sched::{Rng, Sim, World};
 use drover::Ctx;
@@ -123,12 +121,10 @@ pub fn due(sim: &Arc<Sim>, w: &mut World) {
     }
 }
 
-/// The issue a lane is for (`<fleet>-<role>-<n>[-r<k>]`).
 fn issue_of(agent: &str) -> u64 {
     agent.split('-').nth(2).and_then(|n| n.parse().ok()).unwrap_or(0)
 }
 
-/// Pane `pane`'s agent takes step `step` of its script.
 fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
     let now = w.now;
     let Some(i) = w
@@ -211,15 +207,13 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
     }
 }
 
-/// The agent stops: `done`, and its Stop hook kicks its issue.
 fn stop(sim: &Arc<Sim>, w: &mut World, i: usize, n: u64) {
     w.model.panes[i].status = "done".into();
     let ns = n.to_string();
     sim.spawn(w, "hook", &["kick", FLEET, &ns, "--why", "stop"]);
 }
 
-/// Pane `id` was sent a prompt: it works on it. A reviewer told its FAIL lacks Proof adds it within 30 s if it
-/// `heeds`, else writes the same verdict again; any other prompt is answered and the agent stops.
+/// Pane `id` was sent a prompt: it works on it. A reviewer told its FAIL lacks Proof adds it within 30 s if it `heeds`, else writes the same verdict again; any other prompt is answered and the agent stops.
 pub fn told(m: &mut Model, id: &str, now: u64) {
     let Some(p) = m
         .panes
@@ -258,9 +252,7 @@ pub fn default_script(rng: &mut Rng, role: &str) -> Script {
     }
 }
 
-/// A seed's own fleet: 2–6 issues queued over the first hour (some blocked on another for a while), lanes drawn from
-/// `default_script`, CI green or red, load spikes, crashed passes, and the owner's `drive` and `merge` by hand. `Model` and
-/// `config`'s (max_spawns, rounds).
+/// A seed's own fleet: 2–6 issues queued over the first hour (some blocked on another for a while), lanes drawn from `default_script`, CI green or red, load spikes, crashed passes, and the owner's `drive` and `merge` by hand. `Model` and `config`'s (max_spawns, rounds).
 pub fn random(seed: u64) -> (Model, (u64, u64)) {
     let mut rng = Rng::new(seed ^ 0x5eed);
     let mut m = Model::default();
@@ -285,7 +277,6 @@ pub fn random(seed: u64) -> (Model, (u64, u64)) {
         m.at(t, Ev::Load(40));
         m.at(t + rng.range(120, 1200), Ev::Load(1));
     }
-    // The owner's own passes over the timers': a `drive` by hand, a `merge` of an issue once all are queued.
     for _ in 0..rng.below(4) {
         let t = T0 + rng.below(6 * 3600);
         m.at(t, Ev::Run(args(&["drive"])));
