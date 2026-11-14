@@ -14,7 +14,7 @@ const WORDS: [&str; 6] = [
 ];
 
 /// (file, exact text with whitespace collapsed, why it may stay). Each one is removed before the scan.
-const EXCEPTIONS: [(&str, &str, &str); 13] = [
+const EXCEPTIONS: [(&str, &str, &str); 11] = [
     (
         "assets/herd.js",
         "jirathip-dev/corral",
@@ -26,29 +26,19 @@ const EXCEPTIONS: [(&str, &str, &str); 13] = [
         "MIT notice of the ported Corral code",
     ),
     (
-        "assets/themes/farm/sprites.svg",
+        "assets/swag/farm/sprites.svg",
         "(c) 2026 jirathip-dev, MIT",
         "MIT notice of the ported Corral horses",
     ),
     (
-        "docs/design/farm-v2/make_sprites.py",
-        "(c) 2026 jirathip-dev, MIT",
-        "#242: MIT notice of the ported Corral horses in the sheet it writes",
+        "assets/swag/SOURCE",
+        "jirathip-dev/swag",
+        "#928: the shared theme repo the packs are pinned from",
     ),
     (
-        "docs/design/farm-v2/sprites.svg",
-        "(c) 2026 jirathip-dev, MIT",
-        "#242: MIT notice of the ported Corral horses",
-    ),
-    (
-        "docs/design/theme-370/proposed/farm/sprites.svg",
-        "(c) 2026 jirathip-dev, MIT",
-        "#370: MIT notice of the ported Corral horses",
-    ),
-    (
-        "docs/design/farm-v2/README.md",
-        "MIT © jirathip-dev",
-        "#242: MIT notice of the ported Corral horses",
+        "docs/themes.md",
+        "[jirathip-dev/swag](https://github.com/jirathip-dev/swag)",
+        "#928: the shared theme repo the packs come from",
     ),
     (
         "docs/serve.md",

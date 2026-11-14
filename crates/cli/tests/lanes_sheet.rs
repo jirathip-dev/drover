@@ -627,7 +627,7 @@ fn vector_horses_keep_a_coat_per_name() {
     );
     let horses = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../assets/themes/farm/sprites.svg"
+        "/../../assets/swag/farm/sprites.svg"
     ))
     .unwrap();
     assert!(

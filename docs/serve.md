@@ -6,7 +6,7 @@
 Frozen for features (#552): the board takes bug fixes only, until it retires once the parity list passes. New chat
 UI goes to cooee core, new workflow UI (Queue, Asks, Fleets tabs) to Drover's screens, which drover serves itself (#814);
 both read `/api/v1`, which stays open. CI's
-`board-freeze` fails a PR touching the board's UI files (`assets/serve.*`, `assets/herd.*`, `assets/themes/`, `web/`,
+`board-freeze` fails a PR touching the board's UI files (`assets/serve.*`, `assets/herd.*`, `assets/terminal/`, `web/`,
 `crates/server/src/serve.rs`, `serve/` but `v1.rs`) unless its issue has a line starting `board-fix`.
 
 The board is live: the page keeps one `GET /live` Server-Sent Events stream open (same
@@ -270,7 +270,7 @@ clouds at 0.055 opacity, and the cast light from the moon's side. Storm and fog 
 
 The page's look is data, no code: see [themes.md](themes.md) for the contract (per-role actions, looks, load scene,
 rail, moments, row sprites, icons, ASCII words, Lanes modes), the per-phone `[◐]` look sheet, `[serve] theme` (its
-default) and the built-in `farm`, `kitchen` and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
+default) and the built-in `farm`, `kitchen`, `garden` (pinned from the shared theme repo, #928) and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
 writes them to `themes/`. Colours are a separate per-phone pick in the same sheet: 8 built-in schemes plus your own
 `<config dir>/schemes/<name>.json`, each contrast-gated ([themes.md](themes.md#colour-schemes-244)).
 
@@ -414,7 +414,7 @@ response). A response whose shape (keys, each value's JSON type) or a type whose
 changes fails CI until the fixtures are updated in the same PR (`BLESS=1 cargo test --test api_v1_contract`).
 
 `web/` is TypeScript with no framework: `npm run check` (`tsc --strict --noEmit`) and `npm run build` (esbuild:
-`dist/board.js` and `dist/board.css`, the CSS from `assets/`; the themes stay in `assets/themes/`). The only dev
+`dist/board.js` and `dist/board.css`, the CSS from `assets/`; the themes stay in `assets/swag/` and `assets/terminal/`). The only dev
 dependencies are `typescript` and `esbuild`, at pinned versions. `web/dist` is committed and embedded in the binary
 (`/a/<hash>/board.js`), so `cargo install` needs no Node. CI's `web` job rebuilds it and fails on a diff, so run `npm run
 build` after a UI edit.
