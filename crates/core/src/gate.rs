@@ -733,18 +733,17 @@ pub(crate) fn premerge_failed(
     Ok(refuse(code, msg))
 }
 
-pub(crate) fn unjoined<'a>(
+pub(crate) fn unjoined(
     ctx: &Ctx,
     r: &dyn Runner,
-    f: &'a Fleet,
+    f: &Fleet,
     (fleet, n): (&str, u64),
     (num, head): (&str, &str),
-) -> Result<Vec<(&'a crate::config::Serial, String)>> {
+) -> Result<Vec<(crate::config::Serial, String)>> {
     let ev = read(&ctx.state)?;
     let mine = crate::queue::groups(&crate::queue::replay(&ev, fleet), &ev, f, fleet, n);
-    let mut new: Vec<_> = f
-        .serial
-        .iter()
+    let mut new: Vec<_> = crate::queue::serials(&ev, f, fleet)
+        .into_iter()
         .filter(|g| !mine.iter().any(|m| m.name == g.name))
         .collect();
     new.sort_by(|a, b| a.name.cmp(&b.name));
@@ -831,11 +830,25 @@ pub fn merge(
         gate(f, &pr, st.as_ref(), over)
     };
     let res = match res {
-        Ok(head) => match unjoined(ctx, r, f, (fleet, issue), (&num, &head))?.first() {
-            Some((g, p)) => Err(refuse(
-                "SERIAL_UNMARKED",
-                format!("{}: PR touches {p}; queue #{issue} with `--serial {0}` first", g.name),
-            )),
+        Ok(head) => match unjoined(ctx, r, f, (fleet, issue), (&num, &head))?
+            .iter()
+            .find_map(|(g, p)| {
+                if f.serial.iter().any(|c| c.name == g.name) {
+                    return Some((
+                        "SERIAL_UNMARKED",
+                        format!("{}: PR touches {p}; queue #{issue} with `--serial {0}` first", g.name),
+                    ));
+                }
+                let st = fold(&events);
+                let h = crate::queue::holders(&events, &st, f, fleet, &g.name);
+                (h.len() >= g.max).then(|| {
+                    (
+                        "SERIAL_BUSY",
+                        format!("{}; retry after they merge", crate::queue::holds(g, &h)),
+                    )
+                })
+            }) {
+            Some((code, why)) => Err(refuse(code, why)),
             None if unverified(&events, (fleet, issue), &head) => Err(refuse(
                 "NO_REPRO",
                 format!("rev's `Repro: verify` PASS has no verify PASS at {head:.7}"),

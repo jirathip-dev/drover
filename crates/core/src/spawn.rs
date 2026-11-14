@@ -1638,7 +1638,7 @@ pub(crate) fn lane_admit(
     for g in gs.into_iter().filter(|_| role == "impl") {
         let h = crate::queue::holders(events, &st, f, fleet, &g.name);
         if !h.iter().any(|s| s.issue == issue) && h.len() >= g.max {
-            let why = format!("{}; retry after they merge", crate::queue::holds(g, &h));
+            let why = format!("{}; retry after they merge", crate::queue::holds(&g, &h));
             return refused("SERIAL_BUSY", why);
         }
     }
