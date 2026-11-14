@@ -88,8 +88,8 @@ fn ask_answer_round_trip_prompts_the_asker_once() {
     assert_eq!(id, "q1");
     let a = &kinds(&c, "needs-decision")[0];
     assert_eq!((a.issue, a.str("agent")), (Some(36), Some(LANE)));
-    assert_eq!(a.data["options"], json!(["yes, to 5,200", "no, trim"]));
-    assert_eq!(a.data["recommend"], 2);
+    assert_eq!(*a.val("options"), json!(["yes, to 5,200", "no, trim"]));
+    assert_eq!(a.val("recommend"), 2);
     let (_, open) = run(&c, &Fake::default(), &["asks", "sendmeter"]);
     assert!(
         open.contains("q1 #36") && open.contains("Raise the src budget?"),

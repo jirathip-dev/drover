@@ -68,7 +68,7 @@ pub fn drain(ctx: &Ctx, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Wri
 fn apply(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, sp: &Event, lane: &str, raw: &str) -> Result<()> {
     let v: Value = serde_json::from_str(raw).unwrap_or_default();
     let (ts, events) = (v["ts"].as_u64(), working(&ctx.state)?);
-    let seen = |e: &Event| e.kind == "outbox" && e.str("lane") == Some(lane) && e.data["sent"].as_u64() == ts;
+    let seen = |e: &Event| e.kind == "outbox" && e.str("lane") == Some(lane) && e.val("sent").as_u64() == ts;
     if ts.is_some() && events.iter().any(seen) {
         return Ok(());
     }

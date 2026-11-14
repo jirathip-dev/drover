@@ -996,7 +996,7 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
             .any(|w| w[0].1.kind == "lane-trimmed" && exited(w[1].1));
         let again = mine
             .iter()
-            .any(|(_, e)| e.kind == "repaired" && e.data["trimmed"] == true);
+            .any(|(_, e)| e.kind == "repaired" && e.val("trimmed") == true);
         if mine[at].1.str("code") == Some("LANE_ENDS") && trimmed && !again {
             let Some(was) = fold(&events[..mine[at].0])
                 .remove(&(s.fleet.clone(), s.issue))
@@ -1544,7 +1544,7 @@ fn no_proof(
         .any(|e| e.str("sha") == Some(args[5]) && e.str("hash") == Some(hash));
     let pane = sp.and_then(|e| e.str("pane"));
     let open = pane.filter(|_| agents.iter().any(|a| a["name"] == lane));
-    let told = mine.iter().any(|e| e.data["prompted"] == true);
+    let told = mine.iter().any(|e| e.val("prompted") == true);
     if !seen {
         act(ctx, cfg, r, out, ev, (fleet, Some(n), "verdict"), args)?;
         let text = format!("drover verdict refused your verdict.md: REFUSED NO_PROOF: {why}. Add the Proof blocks.");
@@ -1599,7 +1599,7 @@ fn repro_refused(
     let why = why.unwrap_or_default();
     let told = ev
         .iter()
-        .any(|e| e.is("repro-refused", fleet, n) && sp.is_some_and(|p| e.ts >= p.ts) && e.data["prompted"] == true);
+        .any(|e| e.is("repro-refused", fleet, n) && sp.is_some_and(|p| e.ts >= p.ts) && e.val("prompted") == true);
     let pane = sp
         .and_then(|e| e.str("pane"))
         .filter(|_| !told && agents.iter().any(|a| a["name"] == lane));
@@ -1658,7 +1658,7 @@ fn serial(
         .iter()
         .rev()
         .find(|e| e.is("serial-held", fleet, n))
-        .and_then(|e| e.data["holder"].as_u64());
+        .and_then(|e| e.val("holder").as_u64());
     for (g, p) in &new {
         writeln!(out, "{fleet} #{n} serial-joined {}: {p}", g.name)?;
         let d = json!({"group": g.name, "by": "diff", "path": p});
@@ -1687,7 +1687,7 @@ fn serial(
                 .iter()
                 .rev()
                 .find(|e| e.is("serial-held", fleet, n) && e.str("group") == Some(&g.name));
-            blocker = Some(last.and_then(|e| e.data["holder"].as_u64()).unwrap_or(0));
+            blocker = Some(last.and_then(|e| e.val("holder").as_u64()).unwrap_or(0));
         }
     }
     if let (Some(text), Some(lane)) = (text, s.lane.as_deref()) {

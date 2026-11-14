@@ -262,7 +262,7 @@ fn a_basis_extend_posts_an_fyi_whose_change_parks_within_30_minutes_only() {
     );
     let up = kinds(&c, "ask-owner");
     assert_eq!(
-        (up.len(), up[0].str("thread"), up[0].data["recommend"].clone()),
+        (up.len(), up[0].str("thread"), up[0].val("recommend").clone()),
         (1, Some("t1"), json!(1))
     );
     let park = ["answer", "sendmeter", "q1", "2", "--basis", QUOTE];

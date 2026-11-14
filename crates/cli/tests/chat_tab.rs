@@ -1056,7 +1056,7 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
             .filter(|e| e.kind == "orchestrator-start")
             .collect();
         s.iter()
-            .map(|e| (e.str("runtime").unwrap().to_string(), e.data["resumed"] == true))
+            .map(|e| (e.str("runtime").unwrap().to_string(), e.val("resumed") == true))
             .collect::<Vec<_>>()
     };
     let res = req(&s, "POST", "/thread", "op=archive&t=t1", &cookie, T + 10);
@@ -1144,7 +1144,7 @@ fn a_restored_herdr_thread_resumes_its_orchestrators_session() {
         .unwrap()
         .iter()
         .filter(|e| e.kind == "orchestrator-start")
-        .map(|e| (e.str("session").unwrap().to_string(), e.data["resumed"] == true))
+        .map(|e| (e.str("session").unwrap().to_string(), e.val("resumed") == true))
         .collect();
     assert_eq!(st.len(), 2, "{st:?}");
     assert!(st[1].1 && st[1].0 == st[0].0, "the same session resumed: {st:?}");

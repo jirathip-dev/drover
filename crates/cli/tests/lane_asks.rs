@@ -246,7 +246,7 @@ fn an_owner_topic_is_refused_and_put_to_the_owner_in_the_thread() {
     let up = kinds(&c, "ask-owner");
     assert_eq!(
         up.iter()
-            .map(|e| (e.str("id"), e.str("thread"), e.data["recommend"].clone()))
+            .map(|e| (e.str("id"), e.str("thread"), e.val("recommend").clone()))
             .collect::<Vec<_>>(),
         [(Some("q1"), Some("t1"), json!(1)), (Some("q2"), Some("t1"), json!(1))]
     );

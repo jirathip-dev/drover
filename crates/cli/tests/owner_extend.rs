@@ -157,7 +157,7 @@ fn extends_already_pending_start_on_the_first_pass_past_load_and_full_spawn_slot
     let kick = |n: u64| format!("sh -c nohup '/opt/drover/bin/drover' kick sendmeter {n} --why drive --now");
     assert!((1..=10).all(|n| r.count(&kick(n)) == 1), "{:?}", r.calls.borrow());
     let pass = of_kind(&c, "drive-pass").pop().unwrap();
-    let acts = pass.data["actions"].as_array().unwrap();
+    let acts = pass.val("actions").as_array().unwrap();
     let code = |n: u64| acts.iter().find(|a| a["issue"] == n).map(|a| a["code"].clone());
     assert!((1..=10).all(|n| code(n) == Some(Value::Null)), "{acts:?}");
     assert_eq!(code(21), Some(json!("SPAWN_PENDING")), "{acts:?}");
