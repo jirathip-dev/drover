@@ -85,10 +85,29 @@ fn a_wait_that_times_out_answers_as_herdr() {
 }
 
 #[test]
-fn another_shed_version_is_refused() {
+fn another_build_of_the_same_protocol_is_accepted() {
     let b = FakeShed::start("9.9.9", vec![]);
-    let e = shed::call(&Fake::default(), &b.shed().wire, shed::proto::Method::Ls, json!({})).unwrap_err();
-    assert!(format!("{e:#}").starts_with("SHED_VERSION"), "{e:#}");
+    b.state.lock().unwrap().hello.as_mut().unwrap().build = "0000000".into();
+    shed::call(&Fake::default(), &b.shed().wire, shed::proto::Method::Ls, json!({})).unwrap();
+    assert_eq!(b.methods(), ["ls"]);
+}
+
+#[test]
+fn another_shed_protocol_is_refused_naming_both_sides() {
+    use shed::proto::{BUILD, PROTOCOL, VERSION};
+    for protocol in [PROTOCOL - 1, PROTOCOL + 1] {
+        let b = FakeShed::start("9.9.9", vec![]);
+        b.state.lock().unwrap().hello.as_mut().unwrap().build = "0000000".into();
+        b.state.lock().unwrap().hello.as_mut().unwrap().protocol = protocol;
+        let e = shed::call(&Fake::default(), &b.shed().wire, shed::proto::Method::Ls, json!({})).unwrap_err();
+        assert_eq!(
+            format!("{e:#}"),
+            format!(
+                "SHED_VERSION: drover speaks shed {VERSION} ({BUILD}) protocol {PROTOCOL}, \
+                 the server is 9.9.9 (0000000) protocol {protocol}"
+            )
+        );
+    }
 }
 
 #[test]
@@ -209,7 +228,7 @@ fn a_lane_spawns_on_shed() {
         (ev.str("runtime"), ev.str("pane"), ev.str("workspace")),
         (Some("shed"), Some("sendmeter-impl-12"), None)
     );
-    assert_eq!(ev.data["confirmed"], true);
+    assert_eq!(ev.val("confirmed"), true);
     assert!(std::fs::read_to_string(wt.join(".brief.md"))
         .unwrap()
         .contains("AC: it works"));
@@ -296,7 +315,7 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     let ev = drover::events::read(&c.state).unwrap();
     let sp = ev.iter().rfind(|e| e.kind == "spawn").unwrap();
     assert_eq!(
-        (sp.str("pane"), sp.data["confirmed"].as_bool(), sp.str("runtime")),
+        (sp.str("pane"), sp.val("confirmed").as_bool(), sp.str("runtime")),
         (Some("sendmeter-impl-12"), Some(true), Some("shed-acp"))
     );
     assert!(!drover::events::jsonl(&c.state).unwrap().contains(TOKEN_C));
@@ -1168,7 +1187,7 @@ fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_
         (st.str("runtime"), st.str("pane")),
         (Some("shed-acp"), Some("orchestrator-t1"))
     );
-    assert_eq!(st.data["confirmed"], json!(true));
+    assert_eq!(*st.val("confirmed"), json!(true));
 
     let f = acp_fake(&["echo"]);
     let cli = b.cli(&f);
@@ -1225,7 +1244,7 @@ fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_
         "{history}"
     );
     let st = thread_events(&c, "orchestrator-start");
-    assert_eq!((st.len(), st[1].data["resumed"].clone()), (2, json!(false)));
+    assert_eq!((st.len(), st[1].val("resumed").clone()), (2, json!(false)));
 
     b.lock().terms.remove("orchestrator-t1");
     assert_eq!(run(&at(&c, quiet.now + 120), &cli, &["check"]).0, 0);
@@ -1561,7 +1580,7 @@ fn a_fix_round_moves_a_clean_herdr_era_worktree_to_the_new_root() {
     let moved = logged(&c, "worktree-moved");
     assert_eq!(moved.len(), 1, "{out}");
     assert_eq!(moved[0].str("old"), old.to_str());
-    assert_eq!(moved[0].data["wip"], Value::Null);
+    assert_eq!(*moved[0].val("wip"), Value::Null);
 }
 
 #[test]
@@ -2356,7 +2375,7 @@ fn thread_say_restarts_a_hung_acp_orchestrator_and_delivers_to_the_fresh_one() {
     let sl = thread_events(&c, "orchestrator-sleep");
     assert_eq!(sl.len(), 1);
     assert_eq!(
-        (sl[0].str("why"), sl[0].data["quiet_secs"].as_u64()),
+        (sl[0].str("why"), sl[0].val("quiet_secs").as_u64()),
         (Some("hung"), Some(31 * 60))
     );
     assert_eq!(thread_events(&c, "orchestrator-start").len(), 2);

@@ -2256,8 +2256,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             .map_or_else(|| crate::shed::Wire::Socket(crate::shed::default_socket()), |b| b.wire);
         let report = shed_proto::Reported {
             state: state.into(),
-            note: None,
-            state_source: None,
+            ..Default::default()
         };
         if let Err(e) = crate::shed::call(
             r,

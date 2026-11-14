@@ -159,7 +159,7 @@ fn add_creates_within_the_cap_refuses_past_it_and_only_an_owner_yes_lets_it_on()
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("vm3: created (large), 3 runners starting"), "{out}");
     let add = &kinds(&c, "runners-add")[0];
-    assert_eq!((add.str("vm"), add.data["usd_day"].as_f64()), (Some("vm3"), Some(12.0)));
+    assert_eq!((add.str("vm"), add.val("usd_day").as_f64()), (Some("vm3"), Some(12.0)));
     assert!(r.called(&on("vm3", true, "revive {rt} ci-runner")));
     no_token(&c, &r, &out);
     let made = r.count(&rc(false, "fakeboat create"));
@@ -248,7 +248,7 @@ fn retire_local_stops_and_deregisters_the_idle_local_runners_only_with_the_vms_u
         !r.called("gh api -X DELETE repos/o/app/actions/runners/31"),
         "busy: left to finish"
     );
-    assert_eq!(kinds(&c, "runners-retire-local")[0].data["deregistered"], 1);
+    assert_eq!(kinds(&c, "runners-retire-local")[0].val("deregistered"), 1);
 }
 
 #[test]

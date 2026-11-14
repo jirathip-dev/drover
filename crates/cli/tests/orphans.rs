@@ -124,7 +124,7 @@ fn a_crash_after_spawn_started_is_adopted_by_the_next_step() {
     assert!(out.contains("adopted sendmeter-impl-12 as sendmeter-impl-12"), "{out}");
     let sp = &kinds(&c, "spawn")[0];
     assert_eq!(
-        (sp.str("pane"), sp.str("why"), sp.data["since"].as_u64()),
+        (sp.str("pane"), sp.str("why"), sp.val("since").as_u64()),
         (Some("sendmeter-impl-12"), Some("orphan"), Some(50))
     );
     assert_eq!(kinds(&c, "spawn-adopted")[0].str("why"), Some("orphan"));

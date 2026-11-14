@@ -176,6 +176,8 @@ pub struct NeedIssue {
     pub mergeable: String,
     pub merge: bool,
     pub shots: Vec<String>,
+    /// #969: the sha of the verdict `shots` are from, the round `/shot/<fleet>/<n>/<i>/<sha>` names.
+    pub shots_at: Option<String>,
 }
 
 #[allow(clippy::struct_excessive_bools)]

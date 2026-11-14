@@ -414,7 +414,7 @@ pub const CHANGE: u64 = config::ORCHESTRATOR_CHANGE_MINUTES * 60;
 
 fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
     let n = choice.parse::<usize>().ok();
-    n.and_then(|n| ask.data["options"].get(n.checked_sub(1)?)?.as_str())
+    n.and_then(|n| ask.val("options").get(n.checked_sub(1)?)?.as_str())
         .unwrap_or(choice)
 }
 
@@ -458,7 +458,7 @@ pub fn orchestrator_answer(
         "--basis is neither a verbatim quote of the issue's spec nor an answered decision id"
     };
     if !why.is_empty() {
-        let opts = ask.data["options"].as_array().into_iter().flatten();
+        let opts = ask.val("options").as_array().into_iter().flatten();
         let rec = (opts.zip(1..)).find(|o| o.0 == text).map(|o| o.1);
         orchestrator::to_owner(ctx, cfg, t, ask, rec, why)?;
         return gate::refused("OWNER_ASK", format!("{why}; ask the owner"));
@@ -715,7 +715,7 @@ pub(crate) fn answer_with(
     if let Some(n) = extend.filter(|_| text == "park") {
         gate::park(ctx, cfg, r, out, (fleet, n), by, None)?;
     } else if let Some(n) = extend.filter(|_| last.is_none()) {
-        let spawn = ask.data["spawn"] != json!(false);
+        let spawn = *ask.val("spawn") != json!(false);
         gate::needs_human(ctx, cfg, r, out, (fleet, n), "extend", (spawn, by, None))?;
     }
     let mut d =

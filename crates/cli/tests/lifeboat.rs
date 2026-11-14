@@ -128,14 +128,14 @@ fn each_post_logs_the_cli_verbs_event_via_lifeboat() {
     post(&format!("op=approve&id=r1&sha={sha}"));
     let e = last(&c, "run-settled");
     assert_eq!(
-        (e.str("id"), e.data["approved"].clone(), e.str("via")),
+        (e.str("id"), e.val("approved").clone(), e.str("via")),
         (Some("r1"), json!(true), Some("lifeboat"))
     );
     assert!(r.called("sh -c"), "approve ran the card's command");
     post("op=deny&id=r2");
     let e = last(&c, "run-settled");
     assert_eq!(
-        (e.str("id"), e.data["approved"].clone(), e.str("via")),
+        (e.str("id"), e.val("approved").clone(), e.str("via")),
         (Some("r2"), json!(false), Some("lifeboat"))
     );
     let page = req(&s, "GET", "", "", &ck).1;

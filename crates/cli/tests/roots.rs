@@ -239,7 +239,7 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         assert!(!mine.join("old").exists() && !mine.join("theirs").exists());
     } else {
         assert!(!mine.join("warm").exists(), "{out}");
-        assert_eq!(cl.data["errors"].as_array().map(Vec::len), Some(1), "{out}");
+        assert_eq!(cl.val("errors").as_array().map(Vec::len), Some(1), "{out}");
     }
     let target = format!("{}'", b.join(AGENT).display());
     let sent = r.sh.sent(AGENT);
@@ -388,7 +388,7 @@ fn a_second_rev_round_reuses_the_first_rounds_build_folder_and_only_the_first_cl
         .find(|e| e.kind == "build-reused")
         .expect("build-reused logged");
     assert_eq!(e.str("from"), Some("sendmeter-rev-12-r1"));
-    assert_eq!(e.data["dirs"], json!([r2.display().to_string()]));
+    assert_eq!(*e.val("dirs"), json!([r2.display().to_string()]));
     assert_eq!(ev.iter().filter(|e| e.kind == "build-cloned").count(), 1);
 }
 

@@ -120,7 +120,7 @@ fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
     );
     let st = &kinds(&c, "orchestrator-start")[0];
     assert_eq!(
-        (st.str("runtime"), st.data["resumed"].clone()),
+        (st.str("runtime"), st.val("resumed").clone()),
         (Some("shed-acp"), json!(false))
     );
     let thread = dir.join(".thread.md");
@@ -182,7 +182,7 @@ fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
     let calls = shed_calls(&f);
     assert!(calls[0].starts_with(&head), "{calls:?}");
     assert!(calls[1].ends_with("[t1] owner: tests first"), "{calls:?}");
-    assert_eq!(kinds(&c, "orchestrator-start")[1].data["resumed"], json!(false));
+    assert_eq!(*kinds(&c, "orchestrator-start")[1].val("resumed"), json!(false));
     assert_eq!(
         std::fs::read_to_string(&thread).unwrap(),
         "owner: what should #12 cover?\nOrchestrator: Scope and tests. Which first?\nowner: scope\nowner: tests first\n"
@@ -211,7 +211,7 @@ fn a_shed_orchestrator_resumes_its_session() {
     );
     let st = &kinds(&c, "orchestrator-start")[0];
     let session = st.str("session").unwrap().to_string();
-    assert_eq!((session.len(), st.data["resumed"].clone()), (36, json!(false)));
+    assert_eq!((session.len(), st.val("resumed").clone()), (36, json!(false)));
     assert_eq!(
         (st.str("pane"), st.str("runtime")),
         (Some("orchestrator-t1"), Some("shed"))
@@ -256,7 +256,7 @@ fn a_shed_orchestrator_resumes_its_session() {
     assert!(resumed.contains(&format!("'--resume' '{session}'")), "{resumed}");
     assert!(!resumed.contains("--session-id"), "{resumed}");
     assert!(resumed.contains("'[t1] owner: tests first'"), "{resumed}");
-    assert_eq!(kinds(&c, "orchestrator-start")[1].data["resumed"], json!(true));
+    assert_eq!(*kinds(&c, "orchestrator-start")[1].val("resumed"), json!(true));
 }
 
 #[test]

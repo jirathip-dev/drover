@@ -61,7 +61,7 @@ fn to_new(c: &drover::Ctx, r: &dyn drover::runner::Runner, repo: &str, title: &s
     let (code, out) = run(c, r, &["thread", "handoff", "t1", repo, title, text]);
     assert_eq!(code, 0, "{out}");
     let card = kinds(c, "needs-decision").pop().unwrap();
-    let targets = card.data["handoff"]["targets"].as_array().unwrap().clone();
+    let targets = card.val("handoff")["targets"].as_array().unwrap().clone();
     let n = targets.iter().position(|t| t == "new").unwrap() + 1;
     let (code, out) = run(c, r, &["answer", &card.fleet, card.str("id").unwrap(), &n.to_string()]);
     assert_eq!(code, 0, "{out}");
@@ -291,7 +291,7 @@ fn a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_b
         "{card:?}"
     );
     assert_eq!(
-        card.data["options"],
+        *card.val("options"),
         json!([
             "Docs · t7 — topic 7 (9m ago)",
             "Rate limits · t6 — topic 6 (10m ago)",
@@ -303,7 +303,7 @@ fn a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_b
         ])
     );
     assert_eq!(
-        card.data["handoff"]["targets"],
+        card.val("handoff")["targets"],
         json!(["t7", "t6", "t5", "t4", "new", "t3", "t2"])
     );
     assert_eq!(
@@ -733,7 +733,7 @@ fn card(name: &str, text: &str, b: &FakeShed) -> drover::Ctx {
     let hand = ["thread", "handoff", "t1", "sendmeter", "Facets", text];
     assert_eq!(run(&c, &Fake::default(), &hand).0, 0);
     let card = kinds(&c, "needs-decision").pop().unwrap();
-    assert_eq!(card.data["handoff"]["targets"], json!(["t2", "new"]));
+    assert_eq!(card.val("handoff")["targets"], json!(["t2", "new"]));
     c
 }
 

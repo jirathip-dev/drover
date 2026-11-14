@@ -49,7 +49,7 @@ fn a_board_ui_change_needs_board_fix_in_the_issue() {
         "assets/herd.js",
         "web/dist/app.js",
         "crates/server/src/serve.rs",
-        "assets/themes/a.css",
+        "assets/terminal/a.css",
     ] {
         assert_eq!(freeze("", &format!("{f}\n")).0, Some(1), "{f} is frozen");
     }

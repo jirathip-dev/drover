@@ -113,7 +113,7 @@ fn a_signed_out_lane_rests_and_its_successor_gets_the_carry_over() {
         (u.str("account"), u.str("agent")),
         (Some("A"), Some("sendmeter-impl-12"))
     );
-    assert!(u.data["until"].is_null());
+    assert!(u.val("until").is_null());
 
     spawn(&c, 12, &["--supersede"]);
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
@@ -149,7 +149,7 @@ fn default_config_is_unchanged() {
     assert!(!ev
         .iter()
         .any(|e| matches!(e.kind.as_str(), "fallback" | "agent-unavailable")));
-    assert!(ev.iter().rfind(|e| e.kind == "spawn").unwrap().data["resting"].is_null());
+    assert!(ev.iter().rfind(|e| e.kind == "spawn").unwrap().val("resting").is_null());
 }
 
 const HONEST: &str = "Summary of the previous lane; its tool state and approvals are not carried over.";

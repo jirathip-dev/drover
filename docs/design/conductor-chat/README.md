@@ -21,7 +21,7 @@ writes 844 px slices.
 
 **Data:** illustrative, in the demo's fleets (`acme-api`, `acme-web`, `docs`), so nothing private is shown. The story
 is the AC's live readback: a grill (3 choices, one answered from Telegram), a filed issue (#52) queued after #21, a
-mockup sent back, then a config proposal and a secret request. `IMG_2041.PNG` is `../farm-v2/board-events-390.png`
+mockup sent back, then a config proposal and a secret request. `IMG_2041.PNG` is `board-events-390.png`
 (a real board screenshot). `rate-limits-docs-390.png` is the conductor's "mockup", made from
 `fixtures/rate-limits-docs.html`. The account names, times and ids (`q31`, `c8`) are made up. The working directory
 `~/.local/state/drover/conductor/t3` is the decided one (Q6, #386: the state folder, per thread).

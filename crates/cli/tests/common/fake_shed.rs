@@ -1,6 +1,6 @@
 use super::{Fake, Shared};
 use drover::runner::{Out, Runner};
-use drover::shed::proto::{ErrorCode, Request, Response, RpcError, VERSION};
+use drover::shed::proto::{ErrorCode, Hello, Request, Response, RpcError, VERSION};
 use drover::shed::{Shed, Wire};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -21,7 +21,8 @@ pub struct State {
     pub events: Vec<Value>,
     /// A `wait`'s outcome per terminal (default `matched`).
     pub waits: BTreeMap<String, String>,
-    version: String,
+    /// What it answers `hello` with.
+    pub hello: Option<Hello>,
 }
 
 pub struct FakeShed {
@@ -52,7 +53,10 @@ impl FakeShed {
         let l = UnixListener::bind(&sock).unwrap();
         let state = Arc::new(Mutex::new(State {
             events,
-            version: version.into(),
+            hello: Some(Hello {
+                version: version.into(),
+                ..Hello::ours()
+            }),
             ..State::default()
         }));
         let s = state.clone();
@@ -186,7 +190,7 @@ fn answer(st: &Mutex<State>, q: &Request) -> String {
         st.seen.push((q.method.clone(), q.params.clone()));
     }
     let res = match q.method.as_str() {
-        "hello" => Ok(json!({"product": "shed", "version": st.version})),
+        "hello" => Ok(json!(st.hello)),
         m => handle(m, &q.params, &mut st),
     };
     let id = q.id.clone().unwrap();

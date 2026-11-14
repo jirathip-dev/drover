@@ -36,11 +36,11 @@ mod v1;
 
 const SW: &str = include_str!("../assets/sw.js");
 macro_rules! th {
-    ($f:literal, $t:expr) => {
+    ($d:literal, $f:literal, $t:expr) => {
         (
             concat!("themes/", $f),
             $t,
-            include_bytes!(concat!("../assets/themes/", $f)),
+            include_bytes!(concat!("../assets/", $d, $f)),
         )
     };
 }
@@ -53,26 +53,24 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     // #265: the TypeScript board's build (web/dist, committed: `cargo install` needs no Node).
     ("board.js", "text/javascript", include_bytes!("../web/dist/board.js")),
     ("board.css", "text/css", include_bytes!("../web/dist/board.css")),
-    // #172: the built-in themes; `drover serve` serves the active one at `/theme/<file>` (`theme`).
-    th!("farm/sprites.svg", SVG),
-    th!("farm/theme.json", JSON),
-    th!("kitchen/sprites.svg", SVG),
-    th!("kitchen/theme.json", JSON),
-    th!("kitchen/scene.svg", SVG),
-    th!("kitchen/icon-180.png", PNG),
-    th!("kitchen/icon-192.png", PNG),
-    th!("kitchen/icon-512.png", PNG),
-    // #423: the houseplant shop (docs/design/garden/build.mjs writes it).
-    th!("garden/sprites.svg", SVG),
-    th!("garden/theme.json", JSON),
-    th!("garden/scene.svg", SVG),
-    th!("garden/icon-180.png", PNG),
-    th!("garden/icon-192.png", PNG),
-    th!("garden/icon-512.png", PNG),
-    th!("terminal/theme.json", JSON),
-    th!("terminal/icon-180.png", PNG),
-    th!("terminal/icon-192.png", PNG),
-    th!("terminal/icon-512.png", PNG),
+    th!("swag/", "farm/sprites.svg", SVG),
+    th!("swag/", "farm/theme.json", JSON),
+    th!("swag/", "kitchen/sprites.svg", SVG),
+    th!("swag/", "kitchen/theme.json", JSON),
+    th!("swag/", "kitchen/scene.svg", SVG),
+    th!("swag/", "kitchen/icon-180.png", PNG),
+    th!("swag/", "kitchen/icon-192.png", PNG),
+    th!("swag/", "kitchen/icon-512.png", PNG),
+    th!("swag/", "garden/sprites.svg", SVG),
+    th!("swag/", "garden/theme.json", JSON),
+    th!("swag/", "garden/scene.svg", SVG),
+    th!("swag/", "garden/icon-180.png", PNG),
+    th!("swag/", "garden/icon-192.png", PNG),
+    th!("swag/", "garden/icon-512.png", PNG),
+    th!("", "terminal/theme.json", JSON),
+    th!("", "terminal/icon-180.png", PNG),
+    th!("", "terminal/icon-192.png", PNG),
+    th!("", "terminal/icon-512.png", PNG),
 ];
 /// #244: the built-in colour schemes, `assets/schemes/<name>.json` (docs/themes.md).
 macro_rules! sc {
@@ -564,6 +562,42 @@ fn disk_file<P: AsRef<std::path::Path>>(
     }
 }
 
+impl Server<'_> {
+    fn round_file(
+        &self,
+        sha: Option<&str>,
+        path: Option<String>,
+        missing: &str,
+    ) -> (&'static str, &'static str, Vec<u8>) {
+        let p = path.as_deref().map(std::path::Path::new);
+        let show = |(sha, dir, name): (&str, &std::path::Path, &std::ffi::OsStr)| {
+            let args = crate::runner::argv(&["-C", &dir.to_string_lossy(), "cat-file", "--batch"]);
+            let spec = format!("{sha}:./{}\n", name.to_string_lossy());
+            let mut b = vec![];
+            std::io::Read::read_to_end(&mut self.r.r.stream("git", &args, &spec).ok()?, &mut b).ok()?;
+            let (head, body) = b.split_at(b.iter().position(|&c| c == b'\n')? + 1);
+            let size = String::from_utf8_lossy(head)
+                .trim_end()
+                .rsplit(' ')
+                .next()?
+                .parse()
+                .ok()?;
+            body.get(..size).map(<[u8]>::to_vec)
+        };
+        let (dir, name) = (
+            p.and_then(std::path::Path::parent),
+            p.and_then(std::path::Path::file_name),
+        );
+        let git = sha
+            .zip(dir)
+            .zip(name)
+            .map(|((s, d), n)| (s, d, n))
+            .filter(|g| crate::runner::answers(g.1));
+        git.and_then(show)
+            .map_or_else(|| disk_file(path, PNG, missing), |b| ("200 OK", PNG, b))
+    }
+}
+
 /// #386: a thread file's type by its extension.
 fn ctype(name: &str) -> &'static str {
     match chat::ext(name).as_str() {
@@ -640,7 +674,7 @@ fn join(parts: &[&str]) -> String {
 /// asked in.
 fn need_ask(now: u64, mins: u64, ev: &[Event], a: &Event) -> NeedAsk {
     let s = |k| a.str(k).unwrap_or_default();
-    let rec = a.data["recommend"].as_u64().filter(|_| s("kind") == "routine");
+    let rec = a.val("recommend").as_u64().filter(|_| s("kind") == "routine");
     let left = age((a.ts + 60 * mins).saturating_sub(now));
     let issue = a.issue.map_or(String::new(), |n| format!("#{n}"));
     NeedAsk {
@@ -1177,23 +1211,26 @@ impl<'a> Server<'a> {
             }
             // #412: a PNG of the design waiting for the owner's decision.
             ("GET", p) if p.starts_with("/design/") => {
-                let mut it = p[8..].splitn(3, '/');
-                let (f, n, i) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default());
+                let mut it = p[8..].splitn(4, '/');
+                let (f, n, i, q) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));
                 let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
-                let ask = |e: &&Event| crate::design::is_ask(e) && e.fleet == f && e.issue.map(|n| n.to_string()).as_deref() == Some(n);
+                let n = n.parse().unwrap_or(0);
+                let ask = |e: &Event| crate::design::is_ask(e) && e.fleet == f && e.issue == Some(n) && q.is_none_or(|q| e.str("id") == Some(q));
                 let ev = shared(&ctx.state).unwrap_or_default();
-                let at = ev.iter().rfind(ask).and_then(|a| chat::files_of(a).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
-                disk_file(at, PNG, "no such design file\n")
+                let k = ev.iter().rposition(ask);
+                let at = k.and_then(|k| chat::files_of(&ev[k]).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
+                let sha = k.filter(|_| q.is_some()).and_then(|k| ev[..k].iter().rfind(|e| e.is("design-review", &f, n))?.str("sha"));
+                self.round_file(sha, at, "no such design file\n")
             }
             // #417: a screenshot the issue's last verdict lists.
             ("GET", p) if p.starts_with("/shot/") => {
-                let mut it = p[6..].splitn(3, '/');
-                let (f, n, i) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default());
+                let mut it = p[6..].splitn(4, '/');
+                let (f, n, i, sha) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));
                 let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
                 let ev = shared(&ctx.state).unwrap_or_default();
-                let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n))).unwrap_or_default();
+                let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n), sha)).unwrap_or_default();
                 let at = i.parse().ok().and_then(|i: usize| shots.into_iter().nth(i));
-                disk_file(at.map(|(_, p)| p), PNG, "no such screenshot\n")
+                self.round_file(sha, at.map(|(_, p)| p.display().to_string()), "no such screenshot\n")
             }
             ("GET", "/sw.js") => ("200 OK", "text/javascript", text(&SW.replace("@V", &format!("{VER:08x}")))),
             ("GET", p) => {
@@ -1841,7 +1878,15 @@ impl<'a> Server<'a> {
                 mergeable: m.to_lowercase(),
                 merge: fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE",
                 // #417: the last verdict's screenshots (a verify FAIL's), as `/shot/<fleet>/<n>/<i>` serves them.
-                shots: crate::verify::served(events, (f, n)).into_iter().map(|x| x.0).collect(),
+                shots: crate::verify::served(events, (f, n), None)
+                    .into_iter()
+                    .map(|x| x.0)
+                    .collect(),
+                shots_at: events
+                    .iter()
+                    .rfind(|e| e.is("verdict", f, n))
+                    .and_then(|e| e.str("sha"))
+                    .map(String::from),
             }
         };
         // #217: a failed extend's card is back; a recorded one with no lane yet is one muted line, no buttons.
@@ -2918,7 +2963,7 @@ impl Runner for Canned {
         })
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<crate::runner::Out> {
-        use crate::shed::proto::{ErrorCode, Request, Response, RpcError, VERSION};
+        use crate::shed::proto::{ErrorCode, Hello, Request, Response, RpcError};
         if prog != "shed" {
             return self.run(prog, args);
         }
@@ -2927,7 +2972,7 @@ impl Runner for Canned {
             let id = q.id.clone().unwrap_or_default();
             let key = format!("shed {} {}", q.method, q.params["name"].as_str().unwrap_or_default());
             let got = match q.method.as_str() {
-                "hello" => Some(serde_json::json!({"product": "shed", "version": VERSION})),
+                "hello" => serde_json::to_value(Hello::ours()).ok(),
                 _ => self.0.get(key.trim_end()).and_then(|v| serde_json::from_str(v).ok()),
             };
             let none = || RpcError::new(ErrorCode::NoSuchTerminal, &key);
@@ -3502,7 +3547,7 @@ pub fn words(e: &Event, serial: &str) -> Words {
         "hook-denied" => ("!", "a", format!("hook denied · {}", s("rule")), false),
         "blocked" | "driven" => {
             let mut b = e.clone();
-            b.data.entry("result").or_insert_with(|| e.data["reason"].clone());
+            b.data.entry("result").or_insert_with(|| e.val("reason").clone());
             let (t, w, x) = in_words(&b, serial);
             let txt = format!("{w} · {x}");
             let hold = matches!(
@@ -3518,12 +3563,13 @@ pub fn words(e: &Event, serial: &str) -> Words {
             }
         }
         "spawn" => ("▸", "l", format!("{} started{round}", s("role")), false),
-        "push-sent" => ("↗", "m", format!("alert sent to {} phone(s)", e.data["devices"]), false),
+        "push-sent" => ("↗", "m", format!("alert sent to {} phone(s)", e.val("devices")), false),
         "clean" => ("·", "m", format!("lane cleaned ({})", s("why")), false),
         "decision" => ("✓", "m", format!("you answered {} · {}", s("id"), s("choice")), false),
         "override" => ("⊘", "m", format!("override{r}"), false),
         "queue" => {
-            let n: Vec<String> = e.data["issues"]
+            let n: Vec<String> = e
+                .val("issues")
                 .as_array()
                 .into_iter()
                 .flatten()

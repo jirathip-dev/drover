@@ -219,7 +219,7 @@ fn spawn_waits_for_dsh_tui_idle_then_kicks_and_confirms_working() {
         let ev = read(&c.state).unwrap();
         let last = ev.last().unwrap();
         assert_eq!(
-            (last.kind.as_str(), &last.data["harness"], &last.data["confirmed"]),
+            (last.kind.as_str(), last.val("harness"), last.val("confirmed")),
             ("spawn", &"dsh".into(), &true.into())
         );
     });
@@ -239,7 +239,7 @@ fn never_idle_sends_no_prompt_and_exits_4() {
     let code = spawn_rev("dsh-never", &[], |c, l| {
         assert_eq!(l.count("send", "Read "), 0);
         assert_eq!(l.polls(), 90);
-        assert_eq!(read(&c.state).unwrap().last().unwrap().data["confirmed"], false);
+        assert_eq!(*read(&c.state).unwrap().last().unwrap().val("confirmed"), false);
     });
     assert_eq!(code, 4);
 }

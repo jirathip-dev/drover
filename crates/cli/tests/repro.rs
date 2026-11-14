@@ -145,7 +145,7 @@ fn an_unmarked_issues_pass_is_never_parsed_for_a_repro_block() {
     let (code, out) = verdict(&c, &d, &r, "PASS", "PASS\n\nRepro: maybe\n");
     assert_eq!(code, 0, "{out}");
     assert!(!r.called(PR_BODY), "{:?}", r.calls.borrow());
-    assert!(verdicts(&c)[0].data["repro"].is_null());
+    assert!(verdicts(&c)[0].val("repro").is_null());
 }
 
 #[test]

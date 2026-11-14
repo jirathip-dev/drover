@@ -313,7 +313,7 @@ fn an_idle_cloud_host_saves_each_lane_to_wip_then_stops() {
     );
     let events = read(&c.state).unwrap();
     let stop = events.iter().rfind(|e| e.kind == "cloud-stop").unwrap();
-    assert_eq!(stop.data["wip"], json!(["wip/cloud1-sendmeter-impl-12"]));
+    assert_eq!(*stop.val("wip"), json!(["wip/cloud1-sendmeter-impl-12"]));
     assert_eq!(drover::cloud::state(&events, "cloud1"), "stopped");
     let (c, cfg) = running("cloud-busy");
     let live = BTreeMap::from([("cloud1".to_string(), Some(vec![json!({"name": "x"})]))]);

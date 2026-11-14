@@ -277,7 +277,7 @@ fn an_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once() {
         .into_iter()
         .filter(|e| e.kind == "pending-action");
     assert!(
-        failed.into_iter().all(|e| e.data["failed"] == false),
+        failed.into_iter().all(|e| e.val("failed") == false),
         "the skip failed nothing"
     );
 }

@@ -276,7 +276,7 @@ fn supersede_kills_old_agent_then_spawns() {
     );
     let ev = read(&c.state).unwrap();
     let s = ev.iter().find(|e| e.kind == "supersede").expect("supersede logged");
-    assert_eq!(s.data["killed"], json!(["sendmeter-impl-12"]));
+    assert_eq!(*s.val("killed"), json!(["sendmeter-impl-12"]));
     assert_eq!(ev.last().unwrap().kind, "spawn");
 }
 
@@ -321,7 +321,7 @@ fn hermes_kick_retries_after_dropped_first_prompt() {
         .filter(|p| p["name"] == IMPL && p["keys"] == json!(["Enter"]));
     assert_eq!(enters.count(), 2, "explicit Enter each attempt");
     assert_eq!(f.count("sleep 10"), 1);
-    assert_eq!(read(&c.state).unwrap().last().unwrap().data["confirmed"], true);
+    assert_eq!(read(&c.state).unwrap().last().unwrap().val("confirmed"), true);
 }
 
 #[test]
@@ -396,7 +396,7 @@ fn adopt_records_running_lane() {
         (s.str("agent"), s.str("pane")),
         (Some("sendmeter-impl-12"), Some("stray"))
     );
-    assert_eq!(s.data["adopted"], true);
+    assert_eq!(s.val("adopted"), true);
     let (_, st) = run(&c, &Fake::default(), &["status"]);
     assert!(st.contains("sendmeter-impl-12"), "{st}");
     sh.exit("stray");
@@ -430,7 +430,7 @@ fn kick_failure_after_start_still_logs_unconfirmed_spawn() {
     let ev = read(&c.state).unwrap();
     let s = ev.iter().find(|e| e.kind == "spawn").expect("spawn logged");
     assert_eq!(
-        (s.str("agent"), s.data["confirmed"].clone()),
+        (s.str("agent"), s.val("confirmed").clone()),
         (Some("sendmeter-impl-12"), json!(false))
     );
     assert_eq!(r.count("sleep 10"), 2, "three attempts");
@@ -447,7 +447,7 @@ fn named_orphan_in_worktree_is_adopted_not_lane_live() {
     assert!(sh.all("run").is_empty(), "nothing started: {:?}", sh.methods());
     let ev = read(&c.state).unwrap();
     assert_eq!(ev.iter().filter(|e| e.kind == "spawn").count(), 1);
-    assert_eq!((ev[0].str("pane"), &ev[0].data["adopted"]), (Some(IMPL), &json!(true)));
+    assert_eq!((ev[0].str("pane"), ev[0].val("adopted")), (Some(IMPL), &json!(true)));
 }
 
 #[test]

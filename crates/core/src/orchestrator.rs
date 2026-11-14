@@ -243,7 +243,7 @@ pub fn archive(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, on: bool) -> R
     let t = t.map_or_else(|| find(&events, id), Ok)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     if let Some(s) = last.filter(|s| on && s.kind == "orchestrator-start") {
-        if term::agents(r)?.iter().any(|a| a["name"] == s.data["agent"]) {
+        if term::agents(r)?.iter().any(|a| a["name"] == *s.val("agent")) {
             close(r, s)?;
         }
         let d = json!({"thread": id, "agent": s.str("agent"), "why": "archived"});
@@ -351,7 +351,7 @@ pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]:
 
 /// #492: the owner's tap on a handoff card (`choice`: an option number or its text, or a thread id): delivered there (`new`: a new thread in the card's repo); the target, and whether this tap delivered it. #621: once per card: a tap waits for one in flight and gets the delivered one's target; after a failed delivery it retries that one.
 pub fn land(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) -> Result<(String, bool)> {
-    let (h, from) = (&ask.data["handoff"], ask.str("thread").unwrap_or_default());
+    let (h, from) = (&ask.val("handoff"), ask.str("thread").unwrap_or_default());
     let id = ask.str("id").unwrap_or_default();
     let dir = dir(ctx, cfg, from);
     std::fs::create_dir_all(&dir)?;
@@ -379,7 +379,7 @@ pub fn land(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) 
             )
         }
         None => {
-            let opts = ask.data["options"].as_array().cloned().unwrap_or_default();
+            let opts = ask.val("options").as_array().cloned().unwrap_or_default();
             let n = choice
                 .parse::<usize>()
                 .ok()
@@ -490,8 +490,8 @@ pub fn route<'a>(cfg: &Config, events: &'a [Event], fleet: &str) -> Option<&'a s
 /// #541: lane ask `a` typed into thread `id`'s orchestrator (started or resumed) as a system line the board hides.
 pub fn lane_ask(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, a: &Event) -> Result<String> {
     let s = |k| a.str(k).unwrap_or_default();
-    let rec = a.data["recommend"].as_u64();
-    let opts = a.data["options"].as_array().into_iter().flatten().zip(1..);
+    let rec = a.val("recommend").as_u64();
+    let opts = a.val("options").as_array().into_iter().flatten().zip(1..);
     let opts: String = opts
         .map(|(o, n)| {
             let r = if rec == Some(n) { " (recommended)" } else { "" };
@@ -522,8 +522,8 @@ pub fn to_owner(ctx: &Ctx, cfg: &Config, id: &str, a: &Event, rec: Option<u64>, 
     if of(&events, id).any(|e| e.kind == "ask-owner" && e.str("id") == a.str("id")) {
         return Ok(());
     }
-    let rec = rec.or_else(|| a.data["recommend"].as_u64());
-    let d = json!({"thread": id, "id": a.str("id"), "question": a.str("question"), "options": a.data["options"],
+    let rec = rec.or_else(|| a.val("recommend").as_u64());
+    let d = json!({"thread": id, "id": a.str("id"), "question": a.str("question"), "options": a.val("options"),
         "recommend": rec, "agent": a.str("agent"), "why": why});
     emit(&ctx.state, cfg, Event::new(ctx.now, &a.fleet, a.issue, "ask-owner", d))
 }
@@ -714,7 +714,7 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     let events = working(&ctx.state)?;
     let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     let agents = term::agents(r)?;
-    let awake = last.filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| a["name"] == s.data["agent"]));
+    let awake = last.filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| a["name"] == *s.val("agent")));
     let picked = awake.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
     let stuck = awake.and(hung(ctx, cfg, &events, &agents, id));
     let Some(s) = awake.filter(|_| !picked && stuck.is_none()) else {
@@ -756,7 +756,7 @@ fn acp(s: &Event) -> bool {
 pub fn hung<'a>(ctx: &Ctx, cfg: &Config, events: &'a [Event], agents: &[Value], id: &str) -> Option<(&'a Event, u64)> {
     let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
     let s = last.filter(|e| e.kind == "orchestrator-start" && acp(e))?;
-    let a = agents.iter().find(|a| a["name"] == s.data["agent"])?;
+    let a = agents.iter().find(|a| a["name"] == *s.val("agent"))?;
     let out = crate::shed::session(ctx, s.str("agent")?)["at"].as_u64().unwrap_or(0);
     let quiet = ctx.now.saturating_sub(out.max(s.ts));
     let idle = a["cpu"].as_u64().is_some_and(|c| c < crate::stall::BUSY_CPU_PCT);
@@ -1217,7 +1217,7 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
         "thread-model" => Some(json!({"ts": e.ts, "from": "system", "text": picked(e)})),
         "run-card" => Some(json!({"ts": e.ts, "from": "orchestrator", "text": crate::card::text(e)})),
         "timer-install" => {
-            let (by, w, l) = (e.str("by").unwrap_or("?"), &e.data["written"], &e.data["reloaded"]);
+            let (by, w, l) = (e.str("by").unwrap_or("?"), &e.val("written"), &e.val("reloaded"));
             let text = format!("{by} ran `drover timer install`: wrote {w}, reloaded {l}");
             Some(json!({"ts": e.ts, "from": "system", "text": text}))
         }
@@ -1225,19 +1225,19 @@ pub fn items(events: &[Event], id: &str) -> Vec<Value> {
             json!({"ts": e.ts, "from": "system", "text": handoff_text(e), "link": format!("continued in {}", e.str("to").unwrap_or_default())}),
         ),
         "needs-decision" | "ask-owner" => {
-            let all = e.data["options"].as_array().cloned().unwrap_or_default();
+            let all = e.val("options").as_array().cloned().unwrap_or_default();
             let mut opts: Vec<Value> = all
                 .into_iter()
                 .zip(1..)
                 .map(|(t, n)| json!({"n": n, "text": t}))
                 .collect();
-            let rec = e.data["recommend"].as_u64().unwrap_or(0);
+            let rec = e.val("recommend").as_u64().unwrap_or(0);
             opts.sort_by_key(|o| o["n"] != rec);
             let lane = if e.kind == "ask-owner" { lane_of(events, e)? } else { e };
             let open = events::closed(events, lane).is_none();
             Some(
                 json!({"ts": e.ts, "from": "orchestrator", "ask": e.str("id"), "question": e.str("question"),
-                "options": opts, "recommend": e.data["recommend"], "open": open}),
+                "options": opts, "recommend": e.val("recommend"), "open": open}),
             )
         }
         _ => None,
@@ -1376,7 +1376,7 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         };
         let quiet =
             of(events, id).map(|e| e.ts).max().unwrap_or(0) + cfg.limits.orchestrator_idle_minutes * 60 <= ctx.now;
-        let a = agents.iter().find(|a| a["name"] == s.data["agent"]);
+        let a = agents.iter().find(|a| a["name"] == *s.val("agent"));
         if a.is_some() && switch(ctx, cfg, r, t, s)? {
             continue;
         }

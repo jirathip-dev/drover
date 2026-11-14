@@ -11,7 +11,7 @@ impl Runner for Fake {
         self.run_in(prog, args, "")
     }
     fn run_in(&self, _: &str, _: &[String], input: &str) -> Result<Out> {
-        use drover::shed::proto::{Request, Response, VERSION};
+        use drover::shed::proto::{Hello, Request, Response};
         let mut calls = self.0.lock().unwrap();
         let mut stdout = String::new();
         for q in input.lines().filter_map(|l| serde_json::from_str::<Request>(l).ok()) {
@@ -23,7 +23,7 @@ impl Runner for Fake {
             let status = if gets == 1 { "idle" } else { "working" };
             let name = q.params["name"].clone();
             let v = match q.method.as_str() {
-                "hello" => serde_json::json!({"product": "shed", "version": VERSION}),
+                "hello" => serde_json::json!(Hello::ours()),
                 "get" => serde_json::json!({"name": name, "labels": {"harness": "dsh-tui"}, "cwd": "/w", "cmd": ["sh"],
                     "keep": true, "state": "running", "exit": null, "pid": 7, "reported": {"state": status}}),
                 "read" => serde_json::json!({"text": ""}),

@@ -383,7 +383,7 @@ impl Runner for SimRunner {
         Ok(self.sim.call(self.me, prog, args))
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
-        use drover::shed::proto::{ErrorCode, Response, RpcError, VERSION};
+        use drover::shed::proto::{ErrorCode, Hello, Response, RpcError};
         if prog != "shed" {
             return self.run(prog, args);
         }
@@ -395,7 +395,7 @@ impl Runner for SimRunner {
             let (id, m) = (q["id"].clone(), q["method"].as_str().unwrap_or_default().to_string());
             let o = match m.as_str() {
                 "hello" => Out {
-                    stdout: serde_json::json!({"product": "shed", "version": VERSION}).to_string(),
+                    stdout: serde_json::json!(Hello::ours()).to_string(),
                     ..Out::default()
                 },
                 _ => self.sim.call(self.me, "shed", &[m, q["params"].to_string()]),

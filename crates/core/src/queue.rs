@@ -282,7 +282,7 @@ pub fn groups(q: &[Item], events: &[Event], f: &Fleet, fleet: &str, n: u64) -> V
 pub fn hot_files(events: &[Event], fleet: &str) -> Vec<String> {
     let last = events.iter().rfind(|e| e.kind == "hot-files" && e.fleet == fleet);
     let files = last
-        .and_then(|e| e.data["files"].as_array().cloned())
+        .and_then(|e| e.val("files").as_array().cloned())
         .unwrap_or_default();
     files.iter().filter_map(|v| v.as_str().map(String::from)).collect()
 }

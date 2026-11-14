@@ -84,7 +84,7 @@ fn a_blocker_in_another_repo_is_released_once_it_reads_closed() {
         .into_iter()
         .filter(|e| e.kind == "blocker-closed");
     assert_eq!(
-        closed.map(|e| e.data["ref"].clone()).collect::<Vec<_>>(),
+        closed.map(|e| e.val("ref").clone()).collect::<Vec<_>>(),
         [json!("jirathip-dev/cooee#87")]
     );
 }

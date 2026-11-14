@@ -602,7 +602,7 @@ fn qset(ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
 
 fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
     let ev = shared(&ctx.state).unwrap_or_default();
-    let mut shots: Vec<String> = crate::verify::served(&ev, (fleet, n))
+    let mut shots: Vec<String> = crate::verify::served(&ev, (fleet, n), None)
         .into_iter()
         .map(|x| x.0)
         .collect();
@@ -778,8 +778,8 @@ pub(super) fn ask(a: &Event) -> Ask {
         fleet: a.fleet.clone(),
         issue: a.issue,
         question: a.str("question").unwrap_or_default().into(),
-        options: serde_json::from_value(a.data["options"].clone()).unwrap_or_default(),
-        recommend: a.data["recommend"].as_u64(),
+        options: serde_json::from_value(a.val("options").clone()).unwrap_or_default(),
+        recommend: a.val("recommend").as_u64(),
         ts: a.ts,
     }
 }

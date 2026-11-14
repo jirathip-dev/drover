@@ -95,7 +95,8 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     );
     assert_eq!(state(&c, 12), "design-review");
     let ask = &kinds(&c, "needs-decision")[0];
-    let files: Vec<&str> = ask.data["files"]
+    let files: Vec<&str> = ask
+        .val("files")
         .as_array()
         .unwrap()
         .iter()
@@ -191,7 +192,7 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     assert_eq!((ask.issue, ask.str("thread")), (Some(12), Some("t1")));
     let (needs, chat) = needs_and_chat(&s, &cookie, c.now + 5);
     assert!(
-        needs.contains("<details class=ask>") && needs.contains("<img src=\"design/sendmeter/12/0\""),
+        needs.contains("<details class=ask>") && needs.contains("<img src=\"design/sendmeter/12/0/q1\""),
         "{needs}"
     );
     assert!(chat.contains("data-id=\"q1\""), "{chat}");
@@ -651,7 +652,8 @@ fn a_design_pushed_under_the_issues_named_path_raises_the_ask_and_one_elsewhere_
         assert_eq!(state(&c, 12), "design-review");
         let review = &kinds(&c, "design-review")[0];
         for e in [review, &asks[0]] {
-            let mut got: Vec<&str> = e.data["files"]
+            let mut got: Vec<&str> = e
+                .val("files")
                 .as_array()
                 .unwrap()
                 .iter()
@@ -744,7 +746,8 @@ fn a_recipe_with_a_clip_hands_off_the_images_and_the_clip() {
     drive(&c, &r);
     assert_eq!(state(&c, 12), "design-review");
     for e in [&kinds(&c, "design-review")[0], &kinds(&c, "needs-decision")[0]] {
-        let mut got: Vec<&str> = e.data["files"]
+        let mut got: Vec<&str> = e
+            .val("files")
             .as_array()
             .unwrap()
             .iter()

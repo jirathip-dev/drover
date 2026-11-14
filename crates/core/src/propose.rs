@@ -106,7 +106,7 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
         return refused("NO_SUCH_PROPOSAL", format!("no config proposal {id}"));
     };
     if let Some(s) = settled(&events, id) {
-        let how = if s.data["applied"] == true {
+        let how = if s.val("applied") == true {
             "applied"
         } else {
             "discarded"

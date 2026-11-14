@@ -1415,9 +1415,9 @@ fn every_pass_manual_or_automatic_writes_a_drive_pass_with_each_action_a_silent_
     assert_eq!((p[0].str("by"), p[1].str("by")), (Some("auto"), Some("manual")));
     for e in &p {
         assert_eq!(e.fleet, "sendmeter");
-        assert_eq!(e.data["started"], c.now);
-        assert!(e.data["ended"].as_u64().unwrap() >= c.now);
-        let a = &e.data["actions"][0];
+        assert_eq!(e.val("started"), c.now);
+        assert!(e.val("ended").as_u64().unwrap() >= c.now);
+        let a = &e.val("actions")[0];
         assert_eq!((a["issue"].as_u64(), a["step"].as_str()), (Some(12), Some("start")));
         assert_eq!(
             (a["outcome"].as_str(), a["code"].as_str()),
@@ -2239,7 +2239,7 @@ fn a_held_lane_is_prompted_once_when_its_blocker_merges() {
     assert_eq!(woken(), 1, "{out} {:?}", sh().methods());
     let rel = &kinds(&c, "released")[0];
     assert_eq!(
-        (&rel.data["on"], rel.data["respawn"].as_bool()),
+        (rel.val("on"), rel.val("respawn").as_bool()),
         (&json!([11]), Some(false))
     );
     drive(&c, &r);
@@ -2256,7 +2256,7 @@ fn a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges() {
     assert!(!started("sendmeter-impl-12").is_empty(), "{out} {:?}", r.calls.borrow());
     assert_eq!(typed("sendmeter-impl-12", "#11"), 0);
     let rel = &kinds(&c, "released")[0];
-    assert_eq!(rel.data["respawn"].as_bool(), Some(true));
+    assert_eq!(rel.val("respawn").as_bool(), Some(true));
     assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count(), 2);
 }
 
@@ -2306,7 +2306,7 @@ fn a_lane_held_on_two_blockers_waits_for_both() {
     drive(&c, &r);
     let woken = typed("sendmeter-impl-12", "#11, #13 merged; rebase on staging and continue");
     assert_eq!(woken, 1, "{:?}", sh().methods());
-    assert_eq!(kinds(&c, "released")[0].data["on"], json!([11, 13]));
+    assert_eq!(*kinds(&c, "released")[0].val("on"), json!([11, 13]));
 }
 
 fn ended(name: &str) -> (drover::Ctx, Fake) {
@@ -2509,7 +2509,7 @@ fn a_no_repro_pass_tells_a_live_reviewer_once_and_waiting_names_the_refusal() {
     assert!(out.contains("REFUSED NO_REPRO"), "{out}");
     assert_eq!(told(), 1, "{:?}", r.calls.borrow());
     let refused = kinds(&c, "repro-refused");
-    assert_eq!((refused.len(), refused[0].data["prompted"].as_bool()), (1, Some(true)));
+    assert_eq!((refused.len(), refused[0].val("prompted").as_bool()), (1, Some(true)));
     c.now += 7200;
     let (out, _) = drive(&c, &r);
     assert_eq!(
@@ -2739,7 +2739,7 @@ fn a_hold_outliving_a_pass_past_its_blockers_merge_is_logged_hold_stale_once() {
     drive(&c, &r);
     let stale = kinds(&c, "hold-stale");
     assert_eq!(stale.len(), 1, "logged once");
-    assert_eq!((stale[0].issue, &stale[0].data["on"]), (Some(12), &json!([11])));
+    assert_eq!((stale[0].issue, stale[0].val("on")), (Some(12), &json!([11])));
 }
 
 #[test]
