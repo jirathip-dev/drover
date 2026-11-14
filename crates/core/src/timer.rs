@@ -478,10 +478,10 @@ pub fn service_unit(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, api: &str, b
 /// The phone alerts state (#87): on/off, devices and last sent, unless a webpush failure is newer.
 pub fn phone(ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> (&'static str, String) {
     let subs = crate::webpush::load(&ctx.state).len();
-    let sent = events.iter().rfind(|e| e.kind == "push-sent");
-    let webpush = |e: &&Event| e.kind == "notify-failed" && e.str("cmd") == Some("webpush");
-    let failed = events
-        .iter()
+    let sent = crate::events::of_kind(events, &["push-sent"]).pop();
+    let webpush = |e: &&Event| e.str("cmd") == Some("webpush");
+    let failed = crate::events::of_kind(events, &["notify-failed"])
+        .into_iter()
         .rfind(webpush)
         .filter(|f| sent.is_none_or(|e| f.ts >= e.ts));
     let when = sent.map_or("never sent".into(), |e| {
@@ -525,8 +525,10 @@ fn ago(now: u64, t: Option<u64>) -> String {
 fn tick_row(ctx: &Ctx, events: &[Event]) -> (&'static str, String) {
     let stamp = std::fs::read_to_string(ctx.state.with_file_name("check.at")).unwrap_or_default();
     let ran = stamp.trim().parse::<u64>().ok();
-    let newer = |e: &&Event| e.kind == "tick-failed" && ran.is_none_or(|t| e.ts >= t);
-    let failed = events.iter().rfind(newer);
+    let newer = |e: &&Event| ran.is_none_or(|t| e.ts >= t);
+    let failed = crate::events::of_kind(events, &["tick-failed"])
+        .into_iter()
+        .rfind(newer);
     match failed.and_then(|e| e.str("reason")) {
         Some(why) => ("r", format!("failed: {why}")),
         None => (tone(ctx.now, ran), format!("ran {}", ago(ctx.now, ran))),

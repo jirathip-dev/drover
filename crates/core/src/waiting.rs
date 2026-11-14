@@ -193,12 +193,15 @@ pub struct Log<'a> {
 
 impl<'a> Log<'a> {
     pub fn new(all: &'a [Event]) -> Self {
-        let st = fold(all);
-        let fleets: std::collections::BTreeSet<&str> = (all.iter().filter(|e| e.kind == "queue"))
+        let fleets: std::collections::BTreeSet<&str> = (crate::events::of_kind(all, &["queue"]).into_iter())
             .map(|e| e.fleet.as_str())
             .collect();
         let blocked = (fleets.into_iter())
-            .flat_map(|f| crate::queue::view(all, &st, f).into_iter().map(move |i| (f, i)))
+            .flat_map(|f| {
+                crate::events::with_states(all, |st| crate::queue::view(all, st, f))
+                    .into_iter()
+                    .map(move |i| (f, i))
+            })
             .map(|(f, i)| (f, i.issue, crate::queue::labels(&i)))
             .filter(|i| !i.2.is_empty())
             .collect();
@@ -293,7 +296,11 @@ fn waits(
         return w("none", "nothing to do (closed): clean me", s.last_ts, None);
     }
     let mut on = crate::events::held_on(events, s);
-    on.retain(|b| !log.all.iter().any(|e| e.is("merged", f, *b)));
+    on.retain(|b| {
+        !crate::events::of_issue(log.all, f, *b)
+            .iter()
+            .any(|e| e.kind == "merged")
+    });
     if !on.is_empty() {
         return w(
             "drive",
@@ -316,9 +323,14 @@ fn waits(
         .filter(|g| crate::queue::held(events, f, n, &g.name))
         .min_by(|a, b| a.name.cmp(&b.name))
     {
-        let st = crate::events::fold(log.all);
-        let h = crate::queue::holders(log.all, &st, fc, f, &g.name);
-        let who: Vec<_> = h.iter().map(|s| format!("#{}", s.issue)).collect();
+        let serial_holders = |st: &crate::events::States| {
+            crate::queue::holders(log.all, st, fc, f, &g.name)
+                .iter()
+                .map(|s| s.issue)
+                .collect()
+        };
+        let h: Vec<u64> = crate::events::with_states(log.all, serial_holders);
+        let who: Vec<_> = h.iter().map(|n| format!("#{n}")).collect();
         let by = if who.is_empty() {
             "for a slot".into()
         } else {
@@ -561,10 +573,29 @@ pub fn scan(
     agents: &[Value],
     live: bool,
 ) -> Vec<(IssueState, Waiting)> {
+    scan_where(ctx, cfg, r, (events, agents), live, |_| true)
+}
+
+/// #971: `scan` of the issues `keep` passes (the board's: open ones, and done ones whose lane it shows).
+pub fn scan_where(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    (events, agents): (&[Event], &[Value]),
+    live: bool,
+    keep: impl Fn(&IssueState) -> bool,
+) -> Vec<(IssueState, Waiting)> {
     let (mut out, log) = (vec![], Log::new(events));
     let busy = |l: &str| agents.iter().any(|a| a["name"] == l && a["agent_status"] == "working");
     let hung = crate::roots::hung_now(events);
-    for s in fold(events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
+    let mine = |st: &crate::events::States| {
+        st.values()
+            .filter(|s| cfg.fleet.contains_key(&s.fleet) && keep(s))
+            .cloned()
+            .collect()
+    };
+    let states: Vec<IssueState> = crate::events::with_states(events, mine);
+    for s in states {
         let Some(lane) = s.lane.clone().or_else(|| {
             s.build
                 .as_ref()
@@ -583,11 +614,8 @@ pub fn scan(
         if live && !matches!(s.state.as_str(), "merged" | "closed") && gh::cached_pr(ctx, &s.fleet, s.issue).is_null() {
             gh::run(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now);
         }
-        let mine: Vec<Event> = crate::events::of_issue(events, &s.fleet, s.issue)
-            .into_iter()
-            .cloned()
-            .collect();
-        let mine = mine.as_slice();
+        let mine = crate::events::issue_log(events, &s.fleet, s.issue);
+        let mine: &[Event] = &mine;
         let sp = last_spawn(mine, &lane);
         if let Some(root) = crate::roots::hung_under(&hung, sp).filter(|_| !s.done()) {
             let w = Waiting {
@@ -822,8 +850,9 @@ pub fn scan(
                 None => format!("{} · {h}", w.what),
             };
         }
-        let at = gh::cached_at(ctx, &s.fleet, s.issue).filter(|t| ctx.now > t + 120);
-        if let Some(t) = at.filter(|_| w.what.starts_with("PASS · ")) {
+        let pass = w.what.starts_with("PASS · ");
+        let at = pass.then(|| gh::cached_at(ctx, &s.fleet, s.issue)).flatten();
+        if let Some(t) = at.filter(|t| ctx.now > t + 120) {
             w.what += &format!(" · checked {} ago", age(ctx.now - t));
         }
         let safe = || wt.is_some_and(|wt| crate::spawn::dirty(&on, std::path::Path::new(wt)).is_none());

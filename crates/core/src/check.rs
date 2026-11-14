@@ -1072,8 +1072,8 @@ pub fn leftovers(
         std::collections::BTreeSet::new(),
         vec![],
     );
-    let st = fold(&events);
-    for e in events.iter().rev().filter(|e| e.kind == "spawn") {
+    let st = &events.states;
+    for e in crate::events::of_kind(&events, &["spawn"]).into_iter().rev() {
         let (Some(wt), Some(n), agent, None) = (e.str("worktree"), e.issue, e.str("agent"), e.str("machine")) else {
             continue;
         };

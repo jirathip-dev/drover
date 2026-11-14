@@ -516,6 +516,10 @@ fn a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget() {
 const FLEETS: [&str; 5] = ["sendmeter", "alpha", "bravo", "charlie", "delta"];
 
 fn huge() -> (drover::Ctx, Fake) {
+    huge_with(150_000, 0)
+}
+
+fn huge_with(total: u64, old: u64) -> (drover::Ctx, Fake) {
     let sh = shed();
     let mut cfg = CONFIG.to_string();
     for f in &FLEETS[1..] {
@@ -528,6 +532,24 @@ fn huge() -> (drover::Ctx, Fake) {
     sh.attach(&c);
     let mut log = vec![];
     let ev = |ts, f: &str, n: Option<u64>, kind, d| serde_json::to_string(&Event::new(ts, f, n, kind, d)).unwrap();
+    for i in 0..old {
+        let (f, n, ts) = (FLEETS[(i / 50) as usize % 5], 1_000 + i / 50, NOW - 500_000 + i);
+        let agent = format!("{f}-impl-{n}");
+        let (kind, d) = match i % 50 {
+            0 => (
+                "spawn",
+                json!({"role": "impl", "agent": agent, "pane": agent, "runtime": "shed"}),
+            ),
+            1 => ("pushed", json!({"sha": "b".repeat(40)})),
+            2 => ("verdict", json!({"verdict": "PASS", "sha": "b".repeat(40)})),
+            49 => ("merged", json!({"pr": n})),
+            _ => (
+                "driven",
+                json!({"step": "review", "code": "EXIT", "result": "exit 1: boom"}),
+            ),
+        };
+        log.push(ev(ts, f, Some(n), kind, d));
+    }
     for f in FLEETS {
         log.push(ev(
             NOW - 9_500,
@@ -589,7 +611,7 @@ fn huge() -> (drover::Ctx, Fake) {
             sh.screen(&agent, "⏺ Working on it\n\n❯ \n");
         }
     }
-    for i in 0..150_000 - log.len() as u64 {
+    for i in 0..total - log.len() as u64 {
         let f = FLEETS[i as usize % 5];
         let d = json!({"step": "review", "code": "EXIT", "result": "exit 1: boom"});
         log.push(ev(NOW - 5_000 + i / 30, f, Some(1 + i % 40), "driven", d));
@@ -812,4 +834,115 @@ fn a_big_fold_holds_up_no_other_logs_read() {
         waited < 500,
         "a small log's read waited {waited} ms on another log's fold"
     );
+}
+
+fn live_cpu(c: drover::Ctx, secs: u64, feed: impl Fn(&drover::Ctx, u64)) -> f64 {
+    let (c, _, addr) = serve(c, Slow(Fake::default(), Mutex::default(), AtomicUsize::new(0)));
+    let cookie = pair_on(addr, c);
+    let mut streams: Vec<_> = ["", cookie.as_str()]
+        .iter()
+        .map(|h| {
+            let mut s = std::net::TcpStream::connect(addr).unwrap();
+            s.write_all(format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n{h}\r\n").as_bytes())
+                .unwrap();
+            s.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
+            s
+        })
+        .collect();
+    feed(c, 0);
+    streams.iter_mut().for_each(|s| drop(drain(s, 5_000)));
+    let t = cpu_ms();
+    for i in 1..=secs {
+        feed(c, i);
+        let end = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < end {
+            streams.iter_mut().for_each(|s| drop(drain(s, 50)));
+        }
+    }
+    cpu_ms() - t
+}
+
+fn serve_cpu_in_a_child(spec: &str) -> f64 {
+    let o = std::process::Command::new(std::env::current_exe().unwrap())
+        .args(["serve_cpu_child", "--exact", "--nocapture"])
+        .env("DROVER_PERF_971", spec)
+        .output()
+        .unwrap();
+    let err = String::from_utf8_lossy(&o.stderr);
+    let cpu = err.lines().find_map(|l| l.strip_prefix("#971 cpu "));
+    cpu.and_then(|v| v.parse().ok()).unwrap_or_else(|| panic!("{err}"))
+}
+
+#[test]
+fn serve_cpu_child() {
+    let Ok(spec) = std::env::var("DROVER_PERF_971") else {
+        return;
+    };
+    let v: Vec<u64> = spec.split(',').map(|x| x.parse().unwrap()).collect();
+    let c = huge_with(v[0], v[1]).0;
+    let cpu = if v[2] == 0 {
+        live_cpu(c, 10, |_, _| {})
+    } else {
+        live_cpu(c, 10, |c, i| {
+            let d =
+                json!({"role": "impl", "agent": format!("alpha-impl-{}", 1 + i % 40), "pane": "p", "runtime": "shed"});
+            append(&c.state, &Event::new(NOW + i, "alpha", Some(1 + i % 40), "spawn", d)).unwrap();
+        })
+    };
+    eprintln!("#971 cpu {cpu}");
+}
+
+#[test]
+fn a_new_event_costs_the_same_on_a_log_twice_as_long() {
+    if cfg!(debug_assertions) {
+        return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
+    }
+    let idle = serve_cpu_in_a_child("150000,0,0");
+    let mut cpu = [f64::MAX; 2];
+    for _ in 0..3 {
+        for (k, spec) in ["150000,0,1", "300000,150000,1"].into_iter().enumerate() {
+            cpu[k] = cpu[k].min(serve_cpu_in_a_child(spec));
+        }
+    }
+    report(&format!(
+        "#971 perf: 10 s idle {idle:.0} ms CPU; 10 events at 150k {:.0} ms, at 300k {:.0} ms (best of 3, own process each)",
+        cpu[0], cpu[1]
+    ));
+    assert!(
+        idle < 200.0,
+        "an idle serve spent {idle:.0} ms of CPU in 10 s (target < 2%)"
+    );
+    assert!(
+        cpu[1] < cpu[0] * 1.5,
+        "per-event work grew with the log: {:.0} ms at 150k, {:.0} ms at 300k",
+        cpu[0],
+        cpu[1]
+    );
+}
+
+#[test]
+fn idle_serve_on_the_live_log_with_its_trickle_replayed() {
+    let Ok(db) = std::env::var("DROVER_PERF_DB") else {
+        return;
+    };
+    let cfg = std::env::var("DROVER_PERF_CONFIG").map_or(CONFIG.into(), |p| std::fs::read_to_string(p).unwrap());
+    let c = ctx(&tmpdir("perf-idle"), &cfg);
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    std::fs::copy(db, c.state.with_file_name("state.db")).unwrap();
+    let secs: u64 = std::env::var("DROVER_PERF_SECS").map_or(600, |s| s.parse().unwrap());
+    let all = drover::events::read(&c.state).unwrap();
+    let end = all.last().map_or(0, |e| e.ts);
+    let trickle: Vec<Event> = all.iter().filter(|e| e.ts + secs > end).cloned().collect();
+    let n = all.len();
+    drop(all);
+    let cpu = live_cpu(c, secs, |c, i| {
+        for e in trickle.iter().filter(|e| e.ts + secs - end == i) {
+            append(&c.state, e).unwrap();
+        }
+    });
+    report(&format!(
+        "#971 perf ({n} events, {} replayed over {secs} s): serve {cpu:.0} ms of CPU, {:.2}% average",
+        trickle.len(),
+        cpu / (secs as f64 * 10.0)
+    ));
 }

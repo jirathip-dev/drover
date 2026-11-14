@@ -245,12 +245,25 @@ pub fn playbook(events: &[Event], fleet: &str, n: u64) -> Option<String> {
 
 /// Replay the fleet's `queue` events; invalid ones (never logged by fleet) are skipped.
 pub fn replay(events: &[Event], fleet: &str) -> Vec<Item> {
-    let mut q = vec![];
-    for e in events.iter().filter(|e| e.kind == "queue" && e.fleet == fleet) {
+    let all = crate::events::of_kind(events, &["queue"]);
+    let mine: Vec<&Event> = all.into_iter().filter(|e| e.fleet == fleet).collect();
+    let memo = crate::events::queues(events);
+    let mut memo = memo
+        .as_ref()
+        .map(|m| m.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+    let kept = memo
+        .as_ref()
+        .and_then(|m| m.get(fleet))
+        .filter(|(n, _)| *n <= mine.len());
+    let (done, mut q) = kept.cloned().unwrap_or_default();
+    for e in &mine[done..] {
         let mut next = q.clone();
         if apply(&mut next, &Value::Object(e.data.clone())).is_ok() {
             q = next;
         }
+    }
+    if let Some(m) = memo.as_mut() {
+        m.insert(fleet.into(), (mine.len(), q.clone()));
     }
     q
 }
@@ -262,7 +275,7 @@ fn state<'a>(st: &'a States, fleet: &str, n: u64) -> &'a str {
 /// #294: the serial groups issue `n` is in, by name: marked in queue `q` (`""` = the first group) or joined by its diff (`serial-joined`; #149's `serial-auto` = the first group), merged ones included.
 pub fn groups(q: &[Item], events: &[Event], f: &Fleet, fleet: &str, n: u64) -> Vec<Serial> {
     let marks = q.iter().filter(|i| i.issue == n).flat_map(|i| &i.serial);
-    let joined = events.iter().filter(|e| e.fleet == fleet && e.issue == Some(n));
+    let joined = crate::events::of_issue(events, fleet, n).into_iter();
     let joined = joined.filter_map(|e| match e.kind.as_str() {
         "serial-joined" => e.str("group"),
         "serial-auto" => Some(""),
@@ -423,8 +436,13 @@ pub fn skipped(
 
 /// #712: a parked issue's `park --why`.
 pub fn park_why<'a>(events: &'a [Event], st: &States, fleet: &str, n: u64) -> Option<&'a str> {
-    let parked = |e: &&Event| e.is("parked", fleet, n);
-    (state(st, fleet, n) == "parked").then(|| events.iter().rfind(parked)?.str("why"))?
+    let parked = |e: &&Event| e.kind == "parked";
+    (state(st, fleet, n) == "parked").then(|| {
+        crate::events::of_issue(events, fleet, n)
+            .into_iter()
+            .rfind(parked)?
+            .str("why")
+    })?
 }
 
 pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {

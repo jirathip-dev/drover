@@ -443,8 +443,8 @@ impl Server<'_> {
 
     pub(super) fn state(&self, ctx: &Ctx) -> Result<State> {
         let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
-        let (st, r) = (events.states.clone(), &self.cached(ctx.now, 60));
-        let lanes = self.lane_list(ctx, &cfg, &events, &st);
+        let (st, r) = (&events.states, &self.cached(ctx.now, 60));
+        let lanes = self.lane_list(ctx, &cfg, &events, st);
         let queued = |(f, i): (&String, crate::queue::Item)| Queued {
             fleet: f.clone(),
             issue: i.issue,
@@ -495,7 +495,7 @@ impl Server<'_> {
         let queue = cfg
             .fleet
             .keys()
-            .flat_map(|f| crate::queue::view(&events, &st, f).into_iter().map(move |i| (f, i)));
+            .flat_map(|f| crate::queue::view(&events, st, f).into_iter().map(move |i| (f, i)));
         Ok(State {
             seq: events.last().map_or(0, |e| e.seq),
             now: ctx.now,
@@ -658,8 +658,14 @@ fn pending_cards(ctx: &Ctx, mut tab: NeedsTab) -> NeedsTab {
     let back = |f: &str, n| crate::pending::of(&ev, f, n).filter(|p| p.back(ctx.now));
     tab.issues
         .retain(|i| crate::pending::of(&ev, &i.fleet, i.issue).is_none() || back(&i.fleet, i.issue).is_some());
-    let mut st = ev.states.clone();
-    st.retain(|(f, n), _| back(f, *n).is_some() && !tab.issues.iter().any(|i| i.fleet == *f && i.issue == *n));
+    let asked = crate::events::of_kind(&ev, &["pending-action"]);
+    let keys: std::collections::BTreeSet<(String, u64)> =
+        asked.iter().filter_map(|e| Some((e.fleet.clone(), e.issue?))).collect();
+    let card =
+        |(f, n): &&(String, u64)| back(f, *n).is_some() && !tab.issues.iter().any(|i| i.fleet == *f && i.issue == *n);
+    let mut st: crate::events::States = (keys.iter().filter(card))
+        .filter_map(|k| ev.states.get_key_value(k).map(|(k, v)| (k.clone(), v.clone())))
+        .collect();
     for s in st.values_mut() {
         s.last_event = "extend-failed".into();
     }
