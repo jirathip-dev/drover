@@ -851,7 +851,7 @@ fn a_failed_install_is_logged_alerted_once_and_retried_each_tick() {
     let sha = env!("DROVER_SHA");
     let failed = format!("drover 0.1.0 (0ld)\ndone 101 {sha} drover 0.1.0 (0ld)\n");
     for _ in 0..2 {
-        let r = herdr_lists(synced(&failed));
+        let r = synced(&failed);
         run(&c, &two(&r, &bazzite), &["check"]);
         assert_eq!(r.count(&format!("{SSH}{START}")), 1, "retried");
     }

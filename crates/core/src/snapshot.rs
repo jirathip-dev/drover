@@ -2,7 +2,7 @@
 //! by the fast step and each kick, every remote host's reads in one ssh call; a request replays it, never a remote read.
 use crate::config::Config;
 use crate::events::{Event, States};
-use crate::hosts::On;
+use crate::hosts::{quote, On};
 use crate::lanes::{self, Lane};
 use crate::runner::{argv, Out, Runner};
 use crate::waiting::Waiting;
@@ -154,8 +154,11 @@ impl Runner for Snap<'_> {
         }
         let k = key_in(prog, args, input);
         if let ([.., m, _, line], Miss::Collect) = (args, self.miss) {
-            let q = format!("'{}'", input.replace('\'', "'\\''"));
-            lock(&self.want).insert(k.clone(), (m.clone(), format!("(printf '%s' {q} | {line})")));
+            let words: Vec<String> = std::iter::once("%s\\n".into())
+                .chain(input.lines().map(String::from))
+                .collect();
+            let piped = format!("({} | {line})", quote("printf", &words));
+            lock(&self.want).insert(k.clone(), (m.clone(), piped));
             return Ok(out(self.prev.get(&k).cloned().flatten()));
         }
         if let Some(v) = lock(&self.reads).get(&k) {
