@@ -1,5 +1,3 @@
-//! #386: the [chat] tab: the thread list and a thread from the event log (the demo's), a choice round-trip from the
-//! tap to `DECISION` typed into the conductor, an image in and out, and a read-only thread on a device that is not paired.
 mod common;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use common::*;
@@ -20,13 +18,11 @@ fn body(res: &str) -> &str {
     &res[res.find("\r\n\r\n").unwrap() + 4..]
 }
 
-/// The chat part and the needs-you part, as the board draws them (#269) from API v1's `chat` and `needs`.
 fn frags(s: &Server, cookie: &str, now: u64) -> (String, String) {
     let [needs, _, chat] = parts(s, ADDR, cookie, now);
     (chat, needs)
 }
 
-/// The demo's fleets and log, in a temp dir; its thread files' paths are relative to the repo root.
 fn demo() -> drover::Ctx {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     std::env::set_current_dir(&root).unwrap();
@@ -50,7 +46,6 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
         "[chat] is the last of three tabs (#440)"
     );
     let (chat, needs) = frags(&s, &cookie, now);
-    // The list: all repos first, then the fleets by name; newest thread first, the state and the last message.
     let at = |s: &str| chat.find(s).unwrap_or_else(|| panic!("{s} not in {chat}"));
     assert!(at("<b>all repos</b>") < at("<b>acme-api</b>") && at("<b>acme-api</b>") < at("<b>acme-web</b>"));
     assert!(chat.contains(
@@ -63,7 +58,6 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
     );
     assert!(at("data-t=\"t4\"><i") < at("data-t=\"t2\"><i"), "newest first");
     assert!(chat.contains("<span class=btns><button type=button class=ntb data-repo=\"all\">+ thread</button></span>"));
-    // The thread: you, a tool row (closed), the conductor, an answered choice, an image, a file, a system line, the open choice.
     let t4 = &chat[at("<div class=cvp data-t=\"t4\">")..];
     let t4 = &t4[..t4.find("</form></div>").unwrap()];
     for want in [
@@ -94,8 +88,6 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
         "{chat}"
     );
     assert!(!t4.contains("disabled"), "a paired owner device writes");
-    // The needs-you stack keeps lane asks, and (#517) a thread's ask tied to an issue with where it was asked;
-    // `[chat·N]` counts the threads that wait on a choice (t4, t5).
     assert!(needs.contains("Rate-limit the public search endpoint") && needs.contains("X-RateLimit"));
     assert!(
         needs.contains("asked in <a href=#chat class=ath data-go=\"t4\">Rate limits for /v1/search · t4</a>"),
@@ -104,7 +96,6 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
     assert!(needs.contains("<i id=chn hidden data-n=2></i>"), "{needs}");
 }
 
-/// The conductor's tool rows come from the lane hook; a conductor's thread with `fleet` and conductor role.
 fn setup(name: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let c = ctx(
@@ -153,7 +144,6 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    // #405: the first message from [+ thread]'s empty thread starts the thread, then its conductor.
     let res = req(
         &s,
         "POST",
@@ -188,7 +178,6 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
         chat.contains("<form class=chq data-id=\"q1\" data-fleet=\"sendmeter\"><button type=button name=choice value=2><span>2. full <small>(recommended)</small></span></button><button type=button name=choice value=1><span>1. small</span></button>"),
         "{chat}"
     );
-    // The tap: the choice row's `answer` POST.
     let res = req(
         &s,
         "POST",
@@ -209,7 +198,6 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
         chat.contains("<p class=ans>✓ 1. small <span class=m>· you · "),
         "{chat}"
     );
-    // The "other" box, on a second ask.
     let ask2 = ["ask", "sendmeter", "-", "How fast?", "--option", "a", "--thread", "t1"];
     assert_eq!(run(&c, &r, &ask2).1, "q2\n");
     let res = req(
@@ -276,7 +264,6 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     assert!(String::from_utf8_lossy(&got[..at]).contains("Content-Type: image/png"));
     assert_eq!(&got[at..], &png[..]);
 
-    // Out: the conductor's reply with a mockup PNG.
     let folder = c.state.with_file_name("orchestrator").join("t1");
     let mock = folder.join("mockup-390.png");
     std::fs::write(&mock, b"\x89PNG mock").unwrap();
@@ -291,12 +278,10 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     assert!(chat.contains("<img src=\"thread/t1/mockup%2D390%2Epng\""), "{chat}");
     let got = req(&s, "GET", "/thread/t1/mockup-390.png", "", "", T + 5);
     assert!(got.ends_with("\r\n\r\n\u{FFFD}PNG mock"), "{got}");
-    // Only files a thread's message carries are served.
     let res = req(&s, "GET", "/thread/t1/fleet.toml", "", "", T + 5);
     assert!(res.starts_with("HTTP/1.1 404"), "{res}");
     let (code, out) = run(&c, &r, &["thread", "reply", "t1", "x", "--file", "/no/such.png"]);
     assert_ne!(code, 0, "{out}");
-    // A file outside the thread's folder is never attached, nor served when a log line names it.
     let toml = c.config.to_str().unwrap();
     let (code, out) = run(&c, &r, &["thread", "reply", "t1", "x", "--file", toml]);
     assert_ne!(code, 0, "{out}");
@@ -415,7 +400,6 @@ fn a_device_that_is_not_paired_reads_the_thread_but_cannot_write() {
     );
 }
 
-/// A screenshot is far past the 32 KB other posts get: over the socket, `POST /thread` reads its whole body.
 #[test]
 fn a_large_attachment_arrives_whole_over_the_socket() {
     use std::io::{Read, Write};
@@ -459,8 +443,6 @@ fn a_large_attachment_arrives_whole_over_the_socket() {
     assert_eq!(std::fs::read(saved).unwrap(), png);
 }
 
-/// #406: sw.js under node: a navigation to a thread's file gets the file (the cache, then the network), never the
-/// page; another navigation off the page (`/lane`, #67) still gets the page.
 #[test]
 fn the_service_worker_answers_a_thread_file_navigation_with_the_file() {
     if std::process::Command::new("node").arg("--version").output().is_err() {
@@ -510,10 +492,6 @@ const nav = async url => {{
     assert_eq!(got[1], serde_json::json!(["body of /", "cache /", "net /"]), "the page");
 }
 
-/// #406 in WebKit against a real `Server` that also answers `/deep/…` with the page (as the SW once did at a file's
-/// URL): the page moves to `/` and loads the thread (from `frags`) with both images; a tap on one opens the viewer
-/// (the URL stays), a swipe left shows the second, a double tap zooms, [×] and a swipe down close it, and the
-/// thread's images are all still loaded.
 #[test]
 fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_images() {
     if no_webkit() {
@@ -589,8 +567,6 @@ fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_ima
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
     let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    // images, loaded, at `/`; open, same URL, first, `1 / 2`; second, `2 / 2`; zoomed; [×] closed; swipe closed,
-    // still loaded, same URL, page errors.
     assert_eq!(m, [2., 2., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 2., 1., 0.], "{out}");
 }
 
@@ -617,7 +593,6 @@ impl drover::runner::Runner for Held<'_> {
     }
 }
 
-/// #403: `say` answers as soon as the message is logged; typing it into the conductor runs after the reply.
 #[test]
 fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
     use std::io::{Read, Write};
@@ -660,7 +635,6 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
         body.len()
     )
     .unwrap();
-    // Before #403 the reply waited for the typing, which waits for `go`: no reply.
     s.set_read_timeout(Some(std::time::Duration::from_secs(10))).unwrap();
     let mut res = String::new();
     s.read_to_string(&mut res).unwrap();
@@ -683,7 +657,6 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
     assert_eq!(line, "shed send orchestrator-t1 [t1] owner: a long message");
 }
 
-/// #403: a delivery that fails is a red system line with [retry]; [retry] types the same line, logging no copy.
 #[test]
 fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     let b = FakeShed::new();
@@ -722,8 +695,6 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     assert_eq!(log.matches("\"from\":\"owner\",\"text\":\"hello\"").count(), 1, "{log}");
     let res = req(&s, "POST", "/thread", "op=retry&t=t1&n=1", &cookie, T + 20);
     assert!(body(&res).contains("nothing to retry"), "{res}");
-    // Mid-turn, the live line is the inline mark serve.js fills with the theme's loading art; #407: serve.js floats it
-    // as the pill, timed from the turn's start (the owner's last message).
     b.set("orchestrator-t1", |t| {
         t["reported"] = serde_json::json!({"state": "working"})
     });
@@ -736,7 +707,6 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     );
 }
 
-/// #408: thread t1 with `n` conductor messages `m1`…; a paired cookie at `now`.
 fn long(name: &str, n: u64, now: u64) -> (drover::Ctx, String) {
     fill(setup(name), n, now)
 }
@@ -760,9 +730,6 @@ fn fill(c: drover::Ctx, n: u64, now: u64) -> (drover::Ctx, String) {
     (c, cookie)
 }
 
-/// #408: a thread of 100 messages carries its last 30 under the older-messages marker; `thread/t1?before=` (#269: API
-/// v1's) sends the
-/// 30 before them in order, and the last page stops at the thread's start.
 #[test]
 fn a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time() {
     let (c, cookie) = long("chat-window", 100, T);
@@ -785,7 +752,6 @@ fn a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time()
     assert_eq!(msgs(view), want(71, 100));
     assert!(!view.contains("thread started"), "{view}");
     assert!(view.contains(" data-n="), "each block names its event");
-    // #269: API v1 `thread/t1?before=`, drawn by the board.
     let page = |b: &str| {
         let j = api(&s, ADDR, &cookie, T + 200, &format!("thread/t1?before={b}&n=30"));
         board_js(&[(&j, &format!("chat.page({}, 't1', d, true)", T + 200))]).remove(0)
@@ -804,10 +770,6 @@ fn a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time()
     assert!(no.starts_with("HTTP/1.1 404"), "{no}");
 }
 
-/// #408 in WebKit on a real server: the thread opens with 30 messages; scrolled to the top it loads 30 more each time
-/// (the message on screen stays put) until the start; scrolled mid-way the header stays pinned under the page header
-/// (#443: on a phone only the messages scroll, never the page);
-/// a message sent (the live update) keeps every page loaded.
 #[test]
 fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
     if no_webkit() {
@@ -854,8 +816,6 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
     let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    // 30 open; 60, 90, 100 loaded, each with no jump; no marker, the start line; the header right under the page's,
-    // on top, the messages scrolled (the page not); after the send: m1 still first under the start line, the new message in, no errors.
     assert_eq!(
         m,
         [30., 60., 0., 90., 0., 100., 0., 0., 1., 0., 1., 1., 1., 1., 1., 0.],
@@ -863,8 +823,6 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
     );
 }
 
-/// #409: a reply's fenced blocks: each one box with its exact text (escaped, indentation and blank lines kept) and
-/// [copy]; the text around them prose; an unclosed fence runs to the end.
 const CODE: &str = "Run this:\n\n```sh\n  if [ 1 < 2 ] && true; then\n\n    echo \"b & c\"\nfi\n```\nThen check `x`.\n\n```\nunclosed <tail>\n  more";
 
 fn coded(name: &str) -> drover::Ctx {
@@ -884,7 +842,6 @@ fn a_fenced_block_renders_as_one_box_with_its_exact_text_and_copy() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let (chat, _) = frags(&s, &cookie, T);
-    // #407: the source, escaped, for the message menu's [copy as markdown].
     let md = CODE
         .replace('&', "&amp;")
         .replace('<', "&lt;")
@@ -918,7 +875,6 @@ fn copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_
             let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), T));
         }
     });
-    // The clipboard records what it is given; the 1.5 s flash runs on a held timer, fired by hand.
     let pre = "window.copied = []; Object.defineProperty(navigator, 'clipboard', { configurable: true, \
         value: { writeText: t => (copied.push(t), Promise.resolve()) } })";
     let (first, second) = (
@@ -955,8 +911,6 @@ fn copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
     let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    // 2 boxes; one write, the first block exactly; `copied`, back to `copy` when the 1.5 s timer fires; no clipboard:
-    // the second block selected exactly; no page errors.
     assert_eq!(m, [2., 1., 1., 1., 1., 1., 1., 0.], "{out}");
 }
 
@@ -964,8 +918,6 @@ fn log(c: &drover::Ctx) -> String {
     drover::events::jsonl(&c.state).unwrap_or_default()
 }
 
-/// #405: [+ thread] opens an empty thread that logs nothing; its first message starts the thread, titled with the
-/// message's first line, and only the message reaches the conductor. `thread title` retitles it, logged.
 #[test]
 fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_retitles_it() {
     let b = FakeShed::new();
@@ -1010,7 +962,6 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
         "the conductor gets the message only"
     );
     assert!(f.called(START_T1), "{:?}", f.calls.borrow());
-    // The conductor's summary title, after its first reply.
     let (code, out) = run(&c, &r, &["thread", "title", "t1", "Land mode for #12"]);
     assert_eq!(code, 0, "{out}");
     let t = drover::events::read(&c.state)
@@ -1038,7 +989,6 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     for bad in ["two\nlines", " "] {
         assert_ne!(run(&c, &r, &["thread", "title", "t1", bad]).0, 0, "{bad:?}");
     }
-    // A long first line is cut to one row.
     let long = "word ".repeat(30);
     let res = req(
         &s,
@@ -1150,7 +1100,6 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     assert_eq!(st.len(), 2, "{st:?}");
     assert_eq!(st[1], ("shed-acp".to_string(), false), "{st:?}");
     assert_eq!(f.count(START_T1), 2, "{:?}", f.calls.borrow());
-    // The CLI does the same, logged; nothing was removed from the folder.
     assert_eq!(run(&c, &cli, &["thread", "archive", "t1"]).0, 0);
     assert_eq!(b.all("kill").len(), 2, "{:?}", b.methods());
     assert_eq!(run(&c, &cli, &["thread", "restore", "t1"]).0, 0);
@@ -1201,8 +1150,6 @@ fn a_restored_herdr_thread_resumes_its_orchestrators_session() {
     assert!(st[1].1 && st[1].0 == st[0].0, "the same session resumed: {st:?}");
 }
 
-/// #405: a message carries several files: all of them saved and named in the line the conductor gets; 11 are
-/// refused at 10, and a refused first message starts no thread.
 #[test]
 fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
     let b = FakeShed::new();
@@ -1275,7 +1222,6 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
             "{chat}"
         );
     }
-    // `thread say --file`, repeatable: copied into uploads/, a name repeated in one message kept apart.
     let a = c.state.with_file_name("a.png");
     std::fs::write(&a, b"A").unwrap();
     let a = a.to_str().unwrap();
@@ -1294,10 +1240,6 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
     );
 }
 
-/// #443: WebKit at 390 × 844, a long thread on a paired phone; the keyboard (a 336 px `visualViewport` shrink, as
-/// iOS reports it; #488: `innerHeight` shrinks with it, and as a Home Screen app the first open and the close come
-/// after the focus change with no `resize` event) opens with the box focused: the composer's bottom is the visual viewport's, the page never scrolls,
-/// and the message just above the box stays just above it; likewise once the box grows and the keyboard closes.
 #[test]
 fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place() {
     if no_webkit() {
@@ -1323,10 +1265,6 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
         let f = acp();
         drover::serve::serve_on(&c, &b.cli(&f), l, false)
     });
-    // (A frame is two animation frames or 300 ms: a busy host throttles an offscreen view's animation frames. Each state
-    // is read once it holds, or as it is after 2 s.)
-    // Per state: |composer bottom − visual viewport bottom (the tab bar's top, keyboard down)|, the page's scrollTop, the same block just above the box
-    // (1/0) and how far its top moved against the box's top.
     let js = "(async () => { try { const st = window.setTimeout, v = () => $('#chat .cvp[data-t=\"t1\"]'); \
           while (!(v() && v().querySelectorAll('.tc .blk').length > 20)) await new Promise(r => st(r, 50)); \
           chatOpen('t1'); \
@@ -1411,7 +1349,6 @@ impl drover::runner::Runner for Typing<'_> {
     }
 }
 
-/// A POST over the socket (the live server runs its watcher there); its reply's body.
 fn post_to(addr: &std::net::SocketAddr, cookie: &str, body: &str) -> String {
     use std::io::{Read, Write};
     let mut s = std::net::TcpStream::connect(addr).unwrap();
@@ -1428,7 +1365,6 @@ fn body_of(res: &str) -> String {
     res[res.find("\r\n\r\n").unwrap() + 4..].into()
 }
 
-/// The thread's queued messages' ids by text, as the log has them.
 fn queued_ids(c: &drover::Ctx) -> Vec<(u64, String)> {
     let ev = drover::events::read(&c.state).unwrap();
     let q = ev
@@ -1438,15 +1374,10 @@ fn queued_ids(c: &drover::Ctx) -> Vec<(u64, String)> {
         .collect()
 }
 
-/// Waits (≤ 10 s) until `f`.
 fn until(f: impl Fn() -> bool) -> bool {
     (0..100).any(|_| f() || (std::thread::sleep(std::time::Duration::from_millis(100)), false).1)
 }
 
-/// #407: mid-turn, `queue` keeps a message on the server (the thread shows it above the box with [send now], edit and
-/// [remove]); an edit replaces it in place, [remove] drops it. Nothing is typed while the turn runs; when it ends the
-/// watcher types the queued ones in, oldest first, each logged as the owner's. `steer` sends Esc (the turn stops), then
-/// the message; [send now] steers a queued one in and unqueues it.
 #[test]
 fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now() {
     let b = leaked();
@@ -1508,7 +1439,6 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
     );
     std::thread::sleep(std::time::Duration::from_secs(3));
     assert!(!typed("one") && !typed("two"), "typed mid-turn: {:?}", f.calls.borrow());
-    // The turn ends: both go in, in order; the removed one never.
     working(b, false);
     assert!(until(|| typed("two")), "{:?}", f.calls.borrow());
     let calls = f.calls.borrow().clone();
@@ -1531,7 +1461,6 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
     let seen = r.2.lock().unwrap().clone();
     let esc = seen.iter().find(|(l, _)| l.ends_with("owner: stop that")).map(|s| s.1);
     assert_eq!(esc, Some(1), "Esc before the message: {seen:?}");
-    // [send now]: a queued message steered in, out of the queue.
     assert_eq!(post_to(&addr, &cookie, "op=queue&t=t1&text=four"), "queued\n");
     let four = queued_ids(&c).last().unwrap().0;
     assert_eq!(post_to(&addr, &cookie, &format!("op=steer&t=t1&q={four}")), "sent\n");
@@ -1542,8 +1471,6 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
     assert_eq!(r.esc(), 3, "[stop] is Esc alone");
 }
 
-/// #407: a finished turn's commands fold into one `N commands` row (closed); the live turn's stay rows; once that
-/// turn ends they fold too. The pill's turn start is the owner's last message.
 #[test]
 fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
     let b = FakeShed::new();
@@ -1612,8 +1539,6 @@ fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
     );
 }
 
-/// #407: a live stream naming the open thread (`/live?thread=t1`) stamps `watch-t1.at` every second while it is
-/// connected (`events::emit` pushes nothing for it); one without a thread stamps nothing.
 #[test]
 fn a_stream_with_a_thread_open_stamps_its_watch_file() {
     use std::io::{Read, Write};
@@ -1656,7 +1581,7 @@ fn a_stream_with_a_thread_open_stamps_its_watch_file() {
             .ok()
             .and_then(|t| t.trim().parse::<u64>().ok())
             .unwrap_or(0)
-    }; // (0: mid-write)
+    };
     assert!(until(|| at() > 0), "no stamp");
     let first = at();
     assert!(first >= now, "{first} < {now}");
@@ -1678,11 +1603,6 @@ fn a_stream_with_a_thread_open_stamps_its_watch_file() {
     );
 }
 
-/// #407 in WebKit against a real `Server`: a push's `?thread=t1#chat` opens that thread, and the page's stream names
-/// it (`thread=t1`; hidden, a stream without it). The thread follows its end on a live update until your own drag
-/// leaves the end (a programmatic scroll does not), a live update then leaves you where you read, back at the end it
-/// follows again, and a send turns it on. A thread's draft and picked file survive a reload (an iframe of the same
-/// page), and a failed send keeps the draft. (#443: at 390 px the thread's messages scroll, never the page.)
 #[test]
 fn the_thread_follows_its_end_until_you_drag_and_drafts_survive_a_reload() {
     if no_webkit() {
@@ -1701,7 +1621,6 @@ fn the_thread_follows_its_end_until_you_drag_and_drafts_survive_a_reload() {
             let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), T));
         }
     });
-    // Every stream's URL; POSTs fail (409).
     let pre = "(() => { window.urls = []; const E = window.EventSource; window.EventSource = function (u) { urls.push(String(u)); return new E(u); }; \
         const F = window.fetch; window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response('error: down', { status: 409 })) : F(u, o); })()";
     let js = "(async () => { try { \
@@ -1750,10 +1669,6 @@ fn the_thread_follows_its_end_until_you_drag_and_drafts_survive_a_reload() {
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
     let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    // the push's thread open, chat, its stream names it; hidden, one without; following: at the end; a programmatic
-    // scroll: still follows; your drag: left where you read, follow off; back at the end: follows; the reloaded page
-    // has the draft and its file; the send clears the box and follows; failed, the draft back (and kept) with its
-    // file; no page errors.
     assert_eq!(
         m,
         [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0.],

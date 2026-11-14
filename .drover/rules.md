@@ -1,2 +1,3 @@
 - don't edit the old board's files (crates/server/src/serve.rs, serve/ but v1.rs, web/, assets/serve.*) unless the issue has a `board-fix` line (enforced by: CI board-freeze)
-- don't add a comment beyond `// SAFETY:` and one `///` line on a public item, or name a provider outside crates/core/src/providers/ (enforced by: CI arch-check)
+- don't write a comment beyond `// SAFETY:` over unsafe, `// TODO(#N)` and one `///` line on a public item, in any Rust or TypeScript file, tests included (enforced by: CI arch-check, `[comments] policy = "strict"`)
+- don't name a provider outside crates/core/src/providers/ (enforced by: CI arch-check)

@@ -1,4 +1,3 @@
-//! #483: the Queue and Chat tabs show why they cannot read, config or log, in the error's own words.
 mod common;
 use common::*;
 use drover::events::Event;
@@ -20,7 +19,6 @@ fn error(s: &Server, tab: &str) -> String {
 
 #[test]
 fn a_tab_names_the_real_read_error() {
-    // The owner's own state dir (`$HOME/.local/state/drover`) with a log from before #344: reads refuse it.
     let h = tmpdir("board-errors");
     std::env::set_var("HOME", &h);
     let mut c = ctx(&h, CFG);
@@ -33,7 +31,6 @@ fn a_tab_names_the_real_read_error() {
         let e = error(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), tab);
         assert!(e.contains("migrate --live"), "{tab}: {e}");
     }
-    // A broken fleet.toml: the error names it and the parse error.
     let c = ctx(&tmpdir("board-errors-cfg"), "[fleet.acme\n");
     for tab in ["queue", "chat"] {
         let e = error(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), tab);

@@ -1,13 +1,8 @@
-//! #63 gate 1, the style lint: raw px lengths live only in `assets/serve.css`'s first `:root` block (the
-//! tokens, docs/ui.md). Outside it, a sizing property with a px value, a font size that is not a token, a
-//! control height that is not `--ctl`, or an inline `style=` with px in the rendered page fails, listing `file:line value`. Each exception is
-//! named below with its reason; adding one needs the owner's OK.
 mod common;
 use common::*;
 use drover::Ctx;
 use std::path::PathBuf;
 
-/// (file, selector, property, reason).
 const EXCEPTIONS: &[(&str, &str, &str, &str)] = &[
     (
         "serve.css",
@@ -75,7 +70,6 @@ const SIZED: &[&str] = &[
     "inset",
 ];
 
-/// The px lengths in a value, e.g. `12px` (a token var never matches: `--s3` has no px).
 fn px(v: &str) -> Vec<String> {
     let b = v.as_bytes();
     let mut out = vec![];
@@ -90,7 +84,6 @@ fn px(v: &str) -> Vec<String> {
     out
 }
 
-/// Every declaration as (line, selector, property, value), skipping the token `:root` block.
 fn decls(css: &str) -> Vec<(usize, String, String, String)> {
     let mut src = css.to_string();
     while let Some(a) = src.find("/*") {
@@ -158,13 +151,11 @@ fn css_uses_only_the_tokens() {
             for n in px(&v).into_iter().filter(|_| sized) {
                 bad.push(format!("assets/{file}:{line} {sel} {{{p}:{v}}} raw {n}"));
             }
-            // A control is `--ctl` tall.
             if p == "height" && (sel.contains("button") || sel.contains(".pk")) && v != "var(--ctl)" {
                 bad.push(format!(
                     "assets/{file}:{line} {sel} {{{p}:{v}}} a control is var(--ctl) tall"
                 ));
             }
-            // `font:inherit` keeps the parent's token; any other font size names one.
             if (p == "font-size" || (p == "font" && v != "inherit")) && !v.starts_with("var(--fs") {
                 bad.push(format!(
                     "assets/{file}:{line} {sel} {{{p}:{v}}} font size is not a --fs token"
@@ -180,8 +171,6 @@ fn css_uses_only_the_tokens() {
     );
 }
 
-/// #244: no raw colour in serve.css (`#rgb…`, `rgb(`, `hsl(`): every colour is a scheme token (assets/schemes/).
-/// herd.css is the Herd's theme art and keeps its own (docs/design/schemes).
 #[test]
 fn serve_css_has_no_raw_colour() {
     let css = include_str!("../../../assets/serve.css");

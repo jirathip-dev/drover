@@ -1,5 +1,3 @@
-//! #685: one run's fleet metrics, from the events as they were appended (true time) and the model's ground truth;
-//! `summary` aggregates runs, `table` prints them beside the last staging baseline.
 use crate::sched::World;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
@@ -23,8 +21,7 @@ pub struct Metrics {
     pub ci_wait: u64,
     /// Process-seconds in 1 s polls on drive.lock or a kick.
     pub lock_wait: u64,
-    /// Drive actions refused SERIAL_BUSY, by a busy host (HOST_BUSY, MEM_LOW, DISK_LOW), by a cap (CAP, ALL_CAPPED,
-    /// SPAWN_PENDING: the parallel-spawn slots).
+    /// Drive actions refused SERIAL_BUSY, by a busy host (HOST_BUSY, MEM_LOW, DISK_LOW), by a cap (CAP, ALL_CAPPED, SPAWN_PENDING: the parallel-spawn slots).
     pub serial: u64,
     pub host_busy: u64,
     pub caps: u64,
@@ -62,7 +59,6 @@ pub fn of(w: &World) -> Metrics {
                     m.to_merge.push(x.at - q);
                 }
             }
-            // A pass logged again with its kick's outcome (#604, `updated`) repeats its kick's refusal.
             "drive-pass" if !e.data.contains_key("updated") => {
                 for a in e.data.get("actions").and_then(Value::as_array).into_iter().flatten() {
                     match a["code"].as_str().unwrap_or("") {
@@ -76,7 +72,6 @@ pub fn of(w: &World) -> Metrics {
             _ => {}
         }
     }
-    // A verdict can be logged twice (a drive pass and a kick read the same verdict.md): a round is a reviewed head.
     let rounds: BTreeSet<_> = (w.wrote.iter())
         .filter(|x| x.ev.kind == "verdict" && merged.contains(&x.ev.issue.unwrap_or(0)))
         .map(|x| (x.ev.issue, x.ev.str("sha")))
@@ -87,15 +82,13 @@ pub fn of(w: &World) -> Metrics {
     m
 }
 
-/// The `q` quantile (nearest rank) of `v`, 0 when empty.
 fn quantile(v: &mut [u64], q: f64) -> u64 {
     v.sort_unstable();
     let k = (q * v.len() as f64).ceil() as usize;
     v.get(k.saturating_sub(1)).copied().unwrap_or(0)
 }
 
-/// The metrics over `runs`: queue→merge quantiles over every merged issue, the rest a mean per run (minutes where
-/// the name says so), review rounds per merge.
+/// The metrics over `runs`: queue→merge quantiles over every merged issue, the rest a mean per run (minutes where the name says so), review rounds per merge.
 pub fn summary(runs: &[Metrics]) -> BTreeMap<&'static str, f64> {
     let k = runs.len().max(1) as f64;
     let sum = |f: fn(&Metrics) -> u64| runs.iter().map(f).sum::<u64>() as f64;

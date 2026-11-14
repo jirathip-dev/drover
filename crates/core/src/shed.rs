@@ -1,6 +1,3 @@
-//! #298: shed's wire (`[runtime] kind = "shed"`, docs/runtimes.md): shed-proto JSON-RPC lines over shed's Unix
-//! socket, or through `shed connect` (over ssh on a lane's other host); one connection per call, no async. The
-//! runtime itself (herdr's words as shed calls) is `crate::herdr::Shed`.
 use crate::config::Config;
 use crate::events::{append, Event};
 use crate::runner::{argv, Out, Runner};
@@ -15,8 +12,7 @@ use std::time::Duration;
 
 pub use shed_proto as proto;
 
-/// #637: the shed a `shed-acp` host's bootstrap installs: the build proven with drover on the main host.
-/// shed's repo, beside drover's own.
+/// #637: the shed a `shed-acp` host's bootstrap installs: the build proven with drover on the main host. shed's repo, beside drover's own.
 pub fn git() -> String {
     env!("CARGO_PKG_REPOSITORY").replace("/herdsman", "/shed")
 }
@@ -25,9 +21,7 @@ pub const REV: &str = "9b88eb5be5bc9ba8c5c75480483b9861ddc6e993";
 /// Where a host's shed server answers.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Wire {
-    /// This host's socket.
     Socket(PathBuf),
-    /// `shed connect` through the runner: a lane's other host (`hosts::On` sends it over ssh).
     Connect,
 }
 
@@ -39,8 +33,7 @@ pub struct Shed {
     pub policy: String,
 }
 
-/// shed's per-user socket (as `shed_server::Paths::user`): macOS `~/Library/Caches/shed/shed.sock`, elsewhere
-/// `$XDG_RUNTIME_DIR/shed.sock`.
+/// shed's per-user socket (as `shed_server::Paths::user`): macOS `~/Library/Caches/shed/shed.sock`, elsewhere `$XDG_RUNTIME_DIR/shed.sock`.
 pub fn default_socket() -> PathBuf {
     if cfg!(target_os = "macos") {
         return crate::config::home().join("Library/Caches/shed/shed.sock");
@@ -48,14 +41,12 @@ pub fn default_socket() -> PathBuf {
     PathBuf::from(std::env::var("XDG_RUNTIME_DIR").unwrap_or_default()).join("shed.sock")
 }
 
-/// The `hello` line, then the request.
 fn lines(m: Method, params: Value) -> String {
     let hello = json!(Hello::ours());
     let [a, b] = [Request::new(0, Method::Hello, hello), Request::new(1, m, params)].map(|q| json!(q).to_string());
     format!("{a}\n{b}\n")
 }
 
-/// The request's result from the server's two answer lines, or shed's `NAME: detail`.
 fn answer(text: &str) -> Result<Value> {
     let mut it = text.lines().map(serde_json::from_str::<Response>);
     let mut next = || -> Result<Response> { Ok(it.next().context("shed: connection closed")??) };
@@ -124,8 +115,7 @@ pub fn events(w: &Wire, since: u64, quiet: Duration) -> Result<Vec<shed_proto::E
     Ok(out)
 }
 
-/// #529: `events` kept open: `f(None)` once the server took it, then `f(Some(event))` for each kept event after
-/// `since` and each new one, until the stream ends (or is quiet for `quiet`).
+/// #529: `events` kept open: `f(None)` once the server took it, then `f(Some(event))` for each kept event after `since` and each new one, until the stream ends (or is quiet for `quiet`).
 pub fn follow(
     w: &Wire,
     since: u64,
@@ -160,7 +150,6 @@ pub fn follow(
 
 /// The last shed `seq` taken in (`shed.seq` beside the log).
 pub fn seen(ctx: &Ctx) -> u64 {
-    // #455: berth's name, read once if shed's is missing; the next write is shed's.
     std::fs::read_to_string(ctx.state.with_file_name("shed.seq"))
         .or_else(|_| std::fs::read_to_string(ctx.state.with_file_name("berth.seq")))
         .ok()
@@ -180,7 +169,6 @@ pub fn exit_cause<'a>(events: &'a [Event], agent: &str) -> Option<&'a str> {
     events[at..].iter().rev().find(gone)?.str("cause")
 }
 
-/// #662: each ACP lane's last output and whether a turn is open (`shed-out.json` beside the log), for its exit cause.
 fn last_out(ctx: &Ctx, agent: &str, f: impl FnOnce(&mut Value)) -> Result<Value> {
     let path = ctx.state.with_file_name("shed-out.json");
     let mut all: Value = std::fs::read_to_string(&path)
@@ -213,8 +201,7 @@ pub fn silent(ctx: &Ctx, mins: u64) -> Vec<(String, u64)> {
     all.filter(|s| ctx.now >= s.1 + mins * 60).collect()
 }
 
-/// One shed event as its lane's passive `lane-state` (#529: an exit or kill is `gone`; #662: with its `cause`, and an
-/// account limit caps the lane's account); whether it was a lane's.
+/// One shed event as its lane's passive `lane-state` (#529: an exit or kill is `gone`; #662: with its `cause`, and an account limit caps the lane's account); whether it was a lane's.
 pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
     let issue = e.labels.get("issue").and_then(|i| i.parse().ok());
     let Some(fleet) = e.labels.get("fleet").filter(|f| cfg.fleet.contains_key(*f)) else {
@@ -223,7 +210,6 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
     if issue.is_none() && !e.labels.contains_key("thread") {
         return Ok(false);
     }
-    // #662: an ACP lane's last output (its tail) and whether a turn is open, kept for its exit cause.
     let more = match &e.kind {
         EventKind::Turn { .. } => Some(("", true, false)),
         EventKind::Text { text } => Some((text.as_str(), true, true)),
@@ -256,7 +242,6 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
     }
     if let Some((t, turn, add)) = more {
         last_out(ctx, &e.name, |v| {
-            // #785: when its first turn went in, kept until anything comes back.
             let start = (turn && !add).then(|| v.get("start").map_or(ctx.now.into(), Value::clone));
             let all = [v["text"].as_str().filter(|_| add).unwrap_or_default(), t].concat();
             let tail: String = all
@@ -317,9 +302,7 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
     Ok(true)
 }
 
-/// #298: drive's intake of shed's state changes since the last pass (`shed.seq` beside the log): each lane's
-/// reported state, exit or kill as a passive `lane-state` event. Only this host's server; the agent list every pass
-/// polls still sees every lane, here and elsewhere. #529: a running service follows the stream and keeps `shed.seq`.
+/// #298: drive's intake of shed's state changes since the last pass (`shed.seq` beside the log): each lane's reported state, exit or kill as a passive `lane-state` event. Only this host's server; the agent list every pass polls still sees every lane, here and elsewhere. #529: a running service follows the stream and keeps `shed.seq`.
 pub fn intake(ctx: &Ctx, cfg: &Config, w: &Wire) -> Result<usize> {
     let got = events(w, seen(ctx), Duration::from_millis(cfg.limits.shed_read_millis))?;
     let mut n = 0;

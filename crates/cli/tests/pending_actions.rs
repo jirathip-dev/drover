@@ -1,6 +1,3 @@
-//! #778: a card tap that starts a lane stays answered while the lane waits to start: its card leaves `/api/v1` at once,
-//! the issue's row says `starting, waiting for host: <reason>`, and drive starts the lane with no second tap. A hard
-//! refusal brings the card back at once with its code; 30 min unstarted brings it back naming the wait.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -48,7 +45,6 @@ fn started(sh: &FakeShed) -> usize {
     sh.all("run").iter().filter(|p| p["name"] == IMPL).count()
 }
 
-/// Spawns succeed; memory pressure `level` (4: the host is busy, HOST_BUSY).
 fn fake(level: &str) -> Fake {
     let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": sha("3"),
         "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]});
@@ -82,7 +78,6 @@ fn get(c: &drover::Ctx, r: &Fake, path: &str, now: u64) -> Value {
     serde_json::from_str(&api(&s, ADDR, "", now, path)).unwrap()
 }
 
-/// `/api/v1/needs`: the needs-human cards' (issue, why).
 fn cards(c: &drover::Ctx, r: &Fake, now: u64) -> Vec<(u64, String)> {
     let n = get(c, r, "needs", now);
     let i = n["issues"].as_array().unwrap().iter();
@@ -90,7 +85,6 @@ fn cards(c: &drover::Ctx, r: &Fake, now: u64) -> Vec<(u64, String)> {
         .collect()
 }
 
-/// `/api/v1/state`'s queue row for #12.
 fn row(c: &drover::Ctx, r: &Fake) -> Value {
     let s = get(c, r, "state", c.now);
     s["queue"]
@@ -144,7 +138,6 @@ fn a_held_back_extend_stays_answered_and_drive_starts_it_with_no_second_tap() {
     assert_eq!(row(&c, &calm)["status"], Value::Null);
 }
 
-/// AC3: still unstarted at 30 min, one card comes back naming the reason and the wait; a tap on it starts the round.
 #[test]
 fn a_start_pending_for_30_minutes_brings_its_card_back_once() {
     let (mut c, sh) = setup("pending-late");
@@ -173,8 +166,6 @@ fn a_start_pending_for_30_minutes_brings_its_card_back_once() {
     assert_eq!(rounds, 1, "the second tap grants no second round");
 }
 
-/// AC3, AC5: soft refusals keep the start pending, a hard one (here the spawn's own error) ends it and its card is
-/// back at once with the code, until a lane starts after all (#724's retry of a failed spawn).
 #[test]
 fn soft_refusals_keep_it_pending_and_a_hard_one_brings_the_card_back_at_once() {
     let (c, sh) = setup("pending-hard");
@@ -224,7 +215,6 @@ fn soft_refusals_keep_it_pending_and_a_hard_one_brings_the_card_back_at_once() {
     assert_eq!((pending(&c), cards(&c, &calm, c.now)), (None, vec![]));
 }
 
-/// The Fake; on the first call starting with `at`, `hook` runs before it (a second pass racing this one).
 struct Hooked<'a> {
     fake: &'a Fake,
     at: &'a str,
@@ -243,8 +233,6 @@ impl Runner for Hooked<'_> {
     }
 }
 
-/// AC2, AC5: an answer whose lane is gone is pending until the issue's next lane spawns; two passes racing that spawn
-/// start it once (#509's action id), and the skipped one neither fails it nor spawns again.
 #[test]
 fn an_answer_for_a_gone_lane_is_pending_and_two_racing_passes_start_it_once() {
     let c = ctx(&tmpdir("pending-answer"), CONFIG);

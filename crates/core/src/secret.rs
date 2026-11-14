@@ -1,8 +1,3 @@
-//! #707: drover keeps no secret store. A secret is a file only its owner reads (0600, refused if looser): a lane's
-//! `secret:<NAME>` env is `<config>/secrets/<NAME>`, the webhook secret, a provider key or an account's `token-file:`
-//! is the file its config line names. The owner places one by hand or from a thread's masked card (paired devices
-//! only); spawn delivers a lane's to its host (`spawn::deliver`). The value never reaches the event log, the chat, a
-//! command line or a lane's output.
 use crate::config::Config;
 use crate::events::{emit, read, Event};
 use crate::gate::refused;
@@ -68,8 +63,7 @@ pub fn open<'a>(events: &'a [Event], id: &str, name: &str) -> Option<&'a Event> 
         .filter(|e| e.kind == "secret-request")
 }
 
-/// A card's [save] (`value`, from a paired owner device: written 0600 to `path`) or [dismiss] (None); the line the
-/// thread records.
+/// A card's [save] (`value`, from a paired owner device: written 0600 to `path`) or [dismiss] (None); the line the thread records.
 pub fn settle(
     ctx: &Ctx,
     cfg: &Config,
@@ -135,8 +129,7 @@ pub fn rm(ctx: &Ctx, cfg: &Config, fleet: &str, name: &str) -> Result<()> {
     )
 }
 
-/// #707 `drover migrate`: the old store's Keychain items are left alone; the commands that delete them (each
-/// `secret-set` the log `state` names, and a search for the rest), for the owner to run.
+/// #707 `drover migrate`: the old store's Keychain items are left alone; the commands that delete them (each `secret-set` the log `state` names, and a search for the rest), for the owner to run.
 pub fn retired(state: &Path, out: &mut dyn Write) -> Result<()> {
     let set = read(state).unwrap_or_default();
     let svc: std::collections::BTreeSet<String> = (set.iter().filter(|e| e.kind == "secret-set"))
