@@ -565,7 +565,10 @@ fn failed_clone_is_logged_and_the_spawn_succeeds() {
         .expect("build-cloned logged");
     assert_eq!(*e.val("dirs"), json!([]));
     assert!(
-        e.val("errors")[0].as_str().unwrap().contains("clonefile failed"),
+        e.val("errors").is_null()
+            && std::fs::read_to_string(drover::events::path_in(&c.state, e.str("errors_ref").unwrap()))
+                .unwrap()
+                .contains("clonefile failed"),
         "{e:?}"
     );
     assert_eq!(fold(&ev)[&("sendmeter".to_string(), 12)].state, "impl");

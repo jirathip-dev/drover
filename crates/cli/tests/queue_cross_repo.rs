@@ -88,3 +88,34 @@ fn a_blocker_in_another_repo_is_released_once_it_reads_closed() {
         [json!("jirathip-dev/cooee#87")]
     );
 }
+
+#[test]
+fn a_blocker_closed_not_planned_no_longer_holds_its_dependant() {
+    let view = "gh issue view 720 -R jirathip-dev/sendmeter --json state";
+    let fake = Fake::default().reply(view, r#"{"state":"CLOSED"}"#);
+    let (c, r, _sh) = setup("closed-blocker", fake);
+    ok(&c, &r, &["queue", "sendmeter", "add", "12"]);
+    ok(&c, &r, &["queue", "sendmeter", "block", "12", "--on", "720"]);
+    assert_eq!(run(&c, &r, &["next", "sendmeter"]).0, 2, "held while open");
+    assert_eq!(drive(&c, &r, 0), ["start"], "reads CLOSED: starts this pass");
+    let closed = read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == "blocker-closed");
+    assert_eq!(
+        closed.map(|e| e.val("ref").clone()).collect::<Vec<_>>(),
+        [json!("sendmeter#720")]
+    );
+}
+
+#[test]
+fn queue_add_refuses_a_pull_request_number() {
+    let pr = json!({"title": "t", "body": "Closes #817", "url": "https://github.com/jirathip-dev/sendmeter/pull/828"});
+    let (c, r, _sh) = setup("queue-pr", Fake::default().reply("gh issue view 828", &pr.to_string()));
+    let (code, out) = run(&c, &r, &["queue", "sendmeter", "add", "828"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("REFUSED IS_PR"), "{out}");
+    let ls = ok(&c, &r, &["queue", "sendmeter", "ls"]);
+    assert!(!ls.contains("#828"), "{ls}");
+}
