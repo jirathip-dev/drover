@@ -450,7 +450,7 @@ device work too. Beside `/api/v1`, never in the board's pages, it answers JSON m
   cards as chat cards); q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
   and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
   shows until a tap opens the full card; a second tap folds it again;
-- #926: `GET /screens/lanes`, the Lanes chip: each live lane by state (`blocked`, `working`, `idle`, …) with its figure
+- #926: `GET /screens/lanes`, the Lanes chip: each live lane grouped waiting (blocked), working, asleep (idle), done, parked, dead, with its figure
   (`coat`, `state`), fleet and issue, role, host, now-line and age, and for a paired device the read-only `other in
   shed` section; a lane row (and a Queue row's live lane) opens `GET /screens/lanes/<agent>` (a paired device or the
   plugin token only), the lane sheet: its facts (issue, role, state, host, branch, port, PR), Stop/Kill/Clean (Close pane

@@ -284,6 +284,8 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
 #[test]
 fn the_lanes_screen_and_a_lanes_sheet_are_cooees_blocks() {
     let (c, r) = recorded("cooee-lanes");
+    r.1.lane("sendmeter-impl-20", "idle", "/x");
+    r.1.lane("sendmeter-impl-5", "blocked", "/x");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let (status, v) = req(&s, T, "GET", "/screens/lanes", "", "");
     assert_eq!(status, 200, "{v}");
@@ -298,6 +300,8 @@ fn the_lanes_screen_and_a_lanes_sheet_are_cooees_blocks() {
     assert!(row["figure"]["coat"].is_string(), "{row}");
     assert_eq!(row["tap"], json!({"sheet": "/screens/lanes/sendmeter-impl-12"}));
     assert_eq!(find(&v, "lanes-working")["header"], "working (1)");
+    assert_eq!(find(&v, "lanes-blocked")["header"], "waiting (1)");
+    assert_eq!(find(&v, "lanes-idle")["header"], "asleep (1)");
 
     let sheet = "/screens/lanes/sendmeter-impl-12";
     assert_eq!(

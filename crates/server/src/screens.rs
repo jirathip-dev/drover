@@ -466,6 +466,14 @@ fn lane_row(fleet: &str, l: &LaneRow) -> Value {
         "subtitle": sub.join(" · "), "value": l.ago, "tap": {"sheet": format!("/screens/lanes/{}", l.name)}})
 }
 
+fn section_word(state: &str) -> &str {
+    match state {
+        "blocked" => "waiting",
+        "idle" => "asleep",
+        s => s,
+    }
+}
+
 fn lanes_screen(t: &LanesTab) -> Value {
     let mut blocks: Vec<Value> = t
         .sections
@@ -476,7 +484,7 @@ fn lanes_screen(t: &LanesTab) -> Value {
                 .iter()
                 .flat_map(|r| r.lanes.iter().map(move |l| lane_row(&r.name, l)))
                 .collect();
-            json!({"type": "section", "id": format!("lanes-{}", sec.name), "header": format!("{} ({})", sec.name, rows.len()),
+            json!({"type": "section", "id": format!("lanes-{}", sec.name), "header": format!("{} ({})", section_word(&sec.name), rows.len()),
                 "blocks": [{"type": "list", "id": format!("lanes-list-{}", sec.name), "rows": rows}]})
         })
         .collect();
