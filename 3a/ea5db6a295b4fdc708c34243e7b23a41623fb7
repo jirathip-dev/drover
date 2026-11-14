@@ -1,0 +1,13 @@
+Decided: the hook refuses HOST_STRESS in code for every lane (like the pgrep-kill check), not as a deny_commands entry a fleet could drop
+Because: crates/core/src/hook.rs:125
+Decided: a capped run (cpulimit, or nice plus timeout) passes for yes/stress; a loop that backgrounds its body is refused even capped
+Because: "a capped run (for example `cpulimit`, `nice -n 20` plus a time bound)"
+Decided: a lane's share is its CPU over the host's CPU count (capacity), so one busy build on an idle host is not 100%
+Decided: lane folders come from the log's spawns of open issues: worktree, .build/<agent> and .build/.scratch/<agent>; a process with no cwd there counts through its parent chain
+Because: "from the process tree under each lane's worktree, scratch and target dirs"
+Decided: lane-hog counts only while the fast step's last local load row (10 min) is over load_per_cpu, streak in state/lane-hogs, full tick pass only
+Decided: the [kill its processes] tap reaps by cwd in the lane's folders, sparing the worktree's shell and agent (host::reap)
+Rejected: killing by the attributed pid tree — a second kill path beside reap; a burn started from the lane runs in its folders
+Rejected: building a per-lane view for #910 — none landed yet; lane_cpu is the one to reuse
+Check: the host check, admission and drive tests named in the PR body fail without this change
+Owner: a lane can no longer burn the shared Mac's CPU, a busy-host refusal names the lane behind the load, and a runaway lane is paused until you choose
