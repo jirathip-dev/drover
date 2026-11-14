@@ -1,0 +1,5 @@
+Decided: merged origin/staging twice; the four drive.rs hunks keep this branch's per-fleet pass code and take staging's events::working in place of events::read
+Because: crates/core/src/drive.rs:2
+Rejected: none
+Check: no events::read call is left in drive.rs; the second merge (#1013, #993, #928) applied cleanly
+Owner: The branch is brought up to date with staging; nothing about the change itself is different.
