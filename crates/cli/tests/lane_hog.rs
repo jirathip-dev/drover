@@ -10,9 +10,8 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
     all.into_iter().filter(|e| e.kind == kind).collect()
 }
 
-#[test]
-fn a_lane_over_half_the_cpu_three_passes_running_is_paused_once_and_killed_only_on_the_owners_tap() {
-    let c = ctx(&tmpdir("lane-hog"), CONFIG);
+fn hog(name: &str, load: &str) -> (drover::Ctx, Fake) {
+    let c = ctx(&tmpdir(name), CONFIG);
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
     let d = json!({"role": "impl", "agent": LANE, "pane": "w1:p1", "worktree": wt, "branch": "issue-12"});
@@ -28,19 +27,40 @@ fn a_lane_over_half_the_cpu_three_passes_running_is_paused_once_and_killed_only_
     }
     let r = Fake::default()
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-        .reply("sysctl -n vm.loadavg", "{ 25.0 20.0 10.0 }\n")
+        .reply("sysctl -n vm.loadavg", &format!("{{ {load} 20.0 10.0 }}\n"))
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("ps -Ao", &ps)
         .reply("lsof", &lsof)
         .reply("herdr", "")
         .reply("kill", "");
+    (c, r)
+}
+
+fn pass(c: &drover::Ctx, r: &Fake, secs: u64) {
+    let at = drover::Ctx {
+        now: c.now + secs,
+        ..c.clone()
+    };
+    run(&at, r, &["drive", "--fast"]);
+    run(&at, r, &["drive"]);
+}
+
+#[test]
+fn a_busy_lane_on_a_host_under_its_load_limit_is_left_alone() {
+    let (c, r) = hog("lane-hog-calm", "10.0");
+    for p in 0..5 {
+        pass(&c, &r, p * 300);
+    }
+    assert!(kinds(&c, "lane-hog").is_empty());
+    assert_eq!(r.count("herdr pane send-keys w1:p1 Escape"), 0);
+}
+
+#[test]
+fn a_lane_over_half_the_cpu_three_passes_running_is_paused_once_and_killed_only_on_the_owners_tap() {
+    let (c, r) = hog("lane-hog", "30.0");
     let pass = |secs: u64| {
-        let at = drover::Ctx {
-            now: c.now + secs,
-            ..c.clone()
-        };
-        run(&at, &r, &["drive"]).1
+        pass(&c, &r, secs);
     };
     for p in 0..2 {
         pass(p * 300);

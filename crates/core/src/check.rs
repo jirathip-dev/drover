@@ -2117,7 +2117,7 @@ pub fn dedup(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     Ok(())
 }
 
-/// #966: a lane over half the host's CPUs 3 slow passes running: one `lane-hog`, its pane paused, an owner ask.
+/// #966: on a host over its load limit, a lane over half its CPUs 3 passes running: one `lane-hog`, paused, an ask.
 pub fn hogs(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let (events, file) = (crate::events::read(&ctx.state)?, ctx.state.with_file_name("lane-hogs"));
     let old = std::fs::read_to_string(&file).unwrap_or_default();
@@ -2125,7 +2125,22 @@ pub fn hogs(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
         old.lines()
             .find_map(|l| l.strip_prefix(a)?.strip_prefix(' ')?.parse::<u32>().ok())
     };
-    let hot: Vec<_> = (host::lane_cpu(r, &crate::hosts::lane_dirs(&events, None)).into_iter())
+    let remote = |h: &str| cfg.hosts.get(h).is_some_and(|c| c.machine.is_some());
+    let rows = crate::hosts::history(ctx);
+    let last = rows
+        .iter()
+        .rev()
+        .find(|w| !remote(&w.host))
+        .filter(|w| w.ts + 600 >= ctx.now);
+    let busy = last
+        .and_then(|w| w.load_cpu)
+        .is_some_and(|l| l > cfg.limits.load_per_cpu);
+    let lanes = if busy {
+        host::lane_cpu(r, &crate::hosts::lane_dirs(&events, None))
+    } else {
+        vec![]
+    };
+    let hot: Vec<_> = (lanes.into_iter())
         .filter(|l| l.1 >= 50.0)
         .map(|(a, share, top)| (runs(&a).unwrap_or(0) + 1, a, share, top))
         .collect();
