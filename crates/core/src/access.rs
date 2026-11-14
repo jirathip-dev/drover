@@ -1,4 +1,3 @@
-//! What a lane may use: its MCP servers.
 use crate::config::{Config, Fleet, Role};
 use crate::gate::refused;
 use anyhow::{anyhow, Context, Result};
@@ -20,7 +19,6 @@ pub fn civil_year(days: u64) -> u64 {
     z / 146_097 * 400 + (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365 + u64::from(m <= 2)
 }
 
-/// `*`-wildcard match on lowercased bytes (callers lowercase both sides).
 fn glob(g: &[u8], s: &[u8]) -> bool {
     match g {
         [] => s.is_empty(),

@@ -1,4 +1,3 @@
-//! #31: the DeepSeek balance and SECRET_IN_CONFIG (#923: the account meter and lane-hours are gone).
 mod common;
 use common::*;
 use drover::events::read;
@@ -9,7 +8,6 @@ use std::path::Path;
 
 const DS_KEY: &str = concat!("sk", "-deepseekfixturekey0123456789");
 
-/// `Fake` that also records what each `run_in` sent on stdin.
 struct Stdin(Fake, Shared<Vec<String>>);
 
 impl Runner for Stdin {
@@ -57,7 +55,6 @@ fn secret_in_config_is_refused() {
             "{out}"
         );
     }
-    // Long env-var names, paths and model ids are not secrets.
     let legit = format!(
         "{CONFIG}\nmodels = [\"deepseek-ai/DeepSeek-V3.2-Exp-instruct-20261031-preview\"]\n[providers.deepseek]\nkey_env = \"DEEPSEEK_API_KEY\"\nenv_file = \"/Users/someone/.config/claude-accounts/a1b2c3d4e5f6/tokens-for-personal-account.env\"\n"
     );
@@ -66,12 +63,11 @@ fn secret_in_config_is_refused() {
     assert_eq!(code, 0, "{out}");
 }
 
-/// A config with the DeepSeek key in an `env_file`.
 fn config(d: &Path) -> String {
     let env = d.join("tokens.env");
     std::fs::write(&env, format!("export DEEPSEEK_API_KEY=\"{DS_KEY}\"\n")).unwrap();
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&env, std::fs::Permissions::from_mode(0o600)).unwrap(); // #707: a secret file
+    std::fs::set_permissions(&env, std::fs::Permissions::from_mode(0o600)).unwrap();
     CONFIG.to_string()
         + &format!(
             "\n[providers.deepseek]\nkey_env = \"DEEPSEEK_API_KEY\"\nenv_file = \"{}\"\n",
@@ -83,8 +79,6 @@ fn no_secret(what: &str, text: &str) {
     assert!(!text.contains(DS_KEY), "{what} leaks a secret: {text}");
 }
 
-/// Every secret went to stdin only: never argv, CLI output, the event log, a cache file or the page; #707: no
-/// Keychain call at all.
 fn assert_no_leaks(c: &drover::Ctx, r: &Stdin, outs: &[&str], page: &str) {
     let calls = r.0.calls.borrow().join("\n");
     no_secret("argv", &calls);
@@ -120,7 +114,6 @@ fn balance_shows_without_leaking_secrets() {
     let sent = r.1.borrow().join("\n");
     assert!(sent.contains(&format!("Bearer {DS_KEY}")), "keys go on stdin: {sent}");
 
-    // Cached for 10 min: `check` re-reads nothing, and alerts once per crossing below warn_below.
     let n = r.0.count("curl");
     let (_, out) = run(&c, &r, &["check"]);
     assert_eq!(r.0.count("curl"), n);

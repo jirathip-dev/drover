@@ -41,7 +41,8 @@ drover clean --orphans --yes        # also remove folders under the worktree roo
 
 - `HOST_BUSY`: memory pressure warn or worse, load per CPU over `[limits]`, or a sustained
   swap-out rate (the median of the last 5 samples) over `[limits]` while pressure is warn or worse;
-  one spike admits. `--force` overrides and logs an `override` event.
+  one spike admits. `--force` overrides and logs an `override` event with `by` (`owner` or `orchestrator-<id>`);
+  only the owner and orchestrators pass it, the lane hook refuses it in any other lane (#908).
 - `MEM_LOW`: free + inactive memory under `[limits] min_free_mem_gb` (default 2 GB); a lane needs about 0.5–1.5 GB.
 - `DISK_LOW`: free disk on `/` under `[limits] min_free_gb` (default 10 GB). `drover clean --yes`
   frees the build folders (`target/`, `node_modules/`, `.next/`, `dist/`) of merged or closed lanes,
@@ -185,6 +186,16 @@ entries. A cloud host (`cloud = …`) defaults to allowing `docker`, `docker com
 machine; `allow_commands = []` keeps the ban); a Mac keeps the ban. `hosts bootstrap` writes that host's rules, its
 cloud default spelled out, into the config it leaves there, since the lane's hook reads that host's fleet.toml.
 
+Heavy checks (#909): `[fleet.<n>.heavy]` maps a kind to command patterns (`*` matches any text), e.g.
+`swiftlint = ["swiftlint analyze*"]`, `vitest = ["*vitest*"]`, `cargo = ["cargo test*", "cargo check*"]`. A lane's
+Bash call with a command matching one (claude only: its hook can rewrite the call) runs under `drover heavy`, which
+takes one of the host's slots first and frees it when the command exits or its holder dies, even by SIGKILL.
+`[hosts.<n>] heavy_max` (default 3) is the slots every lane on the host shares, whatever its fleet;
+`heavy_kind_max = { swiftlint = 1 }` caps a kind lower. A full host keeps the command waiting in line, first come
+first served (a kind at its own cap lets later kinds by); after `heavy_wait_minutes` (default 30) it runs anyway
+and logs `heavy-timeout`. Each command in line is a file in `<state>/heavy/` naming its `lane`, `kind`, `cmd`,
+`since` and `running`. Other commands are unchanged.
+
 Enforcement by harness: **claude** (PreToolUse) and **hermes** (`pre_tool_call`, the same
 `drover hook`) refuse the command mechanically. **dsh** has no pre-tool hook: its role prompt states
 the rule, and its `pre-push` hook refuses a push whose new commits add a script line (`*.sh`, `*.bash`,
@@ -212,9 +223,10 @@ Every fleet is driven by drover itself. `drover drive [fleet]` does one pass, fr
 | a lane killed | `spawn impl` (respawn) |
 | a live lane idle `stall_minutes` with no push, verdict or turn (#666) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with its last screen lines |
 | a live lane whose pane or session shows no output 10 min after its spawn | an ACP session gets its brief again once; then `spawn <role> --supersede` once (respawn `failed start`); then `needs-human START_FAILED` |
-| an ACP lane (build, check or design stage) mid-turn with no session event `silent_minutes` (10) and no tool call still running (#792) | `shed cancel` and one `continue` prompt (`nudged`); still silent 10 min later: `spawn <role> --supersede --force` once (`respawned-silent`); silent again within the hour: `needs-human LANE_SILENT` |
+| an ACP lane (build, check or design stage) mid-turn with no session event `silent_minutes` (10) and no tool call still running (#792) | `shed cancel` and one `continue` prompt (`nudged`); still silent 10 min later: `spawn <role> --supersede` once (`respawned-silent`); silent again within the hour: `needs-human LANE_SILENT` |
 | a design or architect lane in `error` or gone with no commit of its own (past its spawn, not on integration) under its stage's folders (#915) | `needs-human LANE_FAILED` naming the error; no `design-review`, no ask; a respawn is the owner's `spawn`, under `RESPAWN_LOOP` |
-| a dead or silent lane's respawn on a busy host (#792) | `--force` skips `HOST_BUSY` (logged `override`); `MEM_LOW` and `DISK_LOW` still hold it, and `waiting` names the hold (`held: <code> <why>`) |
+| a dead, stalled, silent or released lane's respawn (#908) | admitted like any spawn: `HOST_BUSY`, `MEM_LOW` and `DISK_LOW` hold it to a later pass, and `waiting` names the hold (`held: <code> <why>`); at most `[limits] respawn_per_pass` (default 2; `respawn_per_pass` in `[fleet.<n>]` overrides it) start a pass, the rest wait `RESPAWN_PACED`, still ahead of new starts |
+| a prompt drive or check sends a lane shed has asleep (`hibernated`: nudge, DECISION, turn, release, heads-up) (#908) | waking it starts a whole agent, so the host is admitted first; busy, the prompt is held and sent on a later pass |
 | a lane the hook refused twice (`hook-failed-closed`) since its spawn | its pane closed, `needs-human HOOK_REFUSED` with the refusal |
 | merged lanes left | `clean --yes` |
 

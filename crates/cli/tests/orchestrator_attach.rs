@@ -1,6 +1,3 @@
-//! #633: a cooee thread attached as a repo's conductor (`POST /api/v1/conductor-attach`): its `guarded`, its asks in
-//! `/api/v1/events`, lane asks routed to it, and the link ended by detach or archive. Its own test binary:
-//! `DROVER_LANE` is process-wide.
 mod common;
 use common::*;
 use drover::events::read;
@@ -19,7 +16,6 @@ fn call(s: &Server, ck: &str, (method, path): (&str, &str), body: &str) -> Value
     serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap()
 }
 
-/// `ask --thread <t>` on sendmeter: exit code and output.
 fn ask(c: &drover::Ctx, r: &Fake, thread: Option<&str>) -> (i32, String) {
     let mut a = vec![
         "ask",
@@ -37,8 +33,6 @@ fn ask(c: &drover::Ctx, r: &Fake, thread: Option<&str>) -> (i32, String) {
 
 #[test]
 fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
-    // The impl role (the conductor's fallback, profile `lane-conductor`) on Claude: the guard's other checks hold, so
-    // `guarded` turns on the synced hook alone.
     let cfg = CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"");
     let c = ctx(&tmpdir("orchestrator-attach"), &cfg);
     let b = FakeShed::new();
@@ -50,13 +44,11 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     let post = |op: &str, v: Value| call(&s, &ck, ("POST", &format!("/api/v1/{op}")), &v.to_string());
     let attach = json!({"fleet": "sendmeter", "thread": COOEE});
 
-    // Unpaired: refused. An unattached id is still NO_SUCH_THREAD.
     let anon = call(&s, "", ("POST", "/api/v1/orchestrator-attach"), &attach.to_string());
     assert_eq!(anon["code"], "UNPAIRED", "{anon}");
     let (code, out) = ask(&c, &r, Some(COOEE));
     assert!(code == 3 && out.contains("REFUSED NO_SUCH_THREAD"), "{out}");
 
-    // No settings synced: attached, but not guarded, and why.
     let a = post("orchestrator-attach", attach.clone());
     assert_eq!(
         (a["ok"].clone(), a["guarded"].clone()),
@@ -71,7 +63,6 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     assert_eq!(a["settings"], settings.to_string_lossy().as_ref());
     assert_eq!(a["env"]["DROVER_LANE"], "sendmeter:-:orchestrator");
     assert_eq!(a["env"]["DROVER_THREAD"], COOEE);
-    // #923: the host's own login: no config folder, no token.
     assert!(a["env"].get("CLAUDE_CONFIG_DIR").is_none(), "{a}");
     assert!(a["env"].get("CLAUDE_CODE_OAUTH_TOKEN").is_none(), "{a}");
     assert!(a["env"]["DROVER_PORT"].as_str().unwrap().parse::<u16>().is_ok(), "{a}");
@@ -80,7 +71,6 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
         brief.contains("# ROLE: ORCHESTRATOR") && brief.contains("Fleet for asks: sendmeter"),
         "{brief}"
     );
-    // `profiles sync` writes the hook: guarded.
     assert_eq!(run(&c, &r, &["profiles", "sync"]).0, 0);
     let a = post("orchestrator-attach", attach.clone());
     assert_eq!(
@@ -123,7 +113,6 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     assert_eq!(e["data"]["thread"], COOEE);
     assert_eq!(e["data"]["options"], json!(["small", "full"]));
     assert_eq!(e["data"]["recommend"], 2);
-    // The card's answer comes back through /api/v1/answer: decided, no drover conductor started for it.
     let m = call(&s, &ck, ("GET", "/api/v1/state"), "")["mtime"].clone();
     let calls = r.calls.borrow().len();
     let ans = post(
@@ -170,16 +159,13 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
         b.methods()
     );
 
-    // Detach ends the link: NO_SUCH_THREAD again, and a second detach is refused.
     assert_eq!(post("orchestrator-detach", attach.clone())["ok"], true);
     assert!(ask(&c, &r, Some(COOEE)).1.contains("REFUSED NO_SUCH_THREAD"));
     assert_eq!(post("orchestrator-detach", attach.clone())["code"], "NO_SUCH_THREAD");
-    // So does archiving it.
     post("orchestrator-attach", attach.clone());
     assert_eq!(ask(&c, &r, Some(COOEE)).0, 0);
     assert_eq!(run(&c, &r, &["thread", "archive", COOEE]).0, 0);
     assert!(ask(&c, &r, Some(COOEE)).1.contains("REFUSED NO_SUCH_THREAD"));
-    // Attached again after the archive: the link holds again.
     post("orchestrator-attach", attach);
     assert_eq!(ask(&c, &r, Some(COOEE)).0, 0);
 }

@@ -1,6 +1,3 @@
-//! #387: `drover config propose`: a fleet.toml change (roles, models, gates, land mode, serial groups, hosts)
-//! as a thread card with [apply] [discard]. Only the owner's tap (or `config apply`, which the lane hook refuses in a lane) applies it, with a
-//! backup, a `doctor` check and an event; settled, the card folds to the one line the thread records.
 use crate::config::{self, Config};
 use crate::devices::sha256;
 use crate::events::{emit, read, Event};
@@ -132,7 +129,6 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
         d.as_object_mut()
             .unwrap()
             .extend([("backup".into(), json!(backup)), ("doctor".into(), json!(ok))]);
-        // #558: each fleet it adds has its first queued issue kicked now, not at the next pass.
         let mut kicked = String::new();
         for (f, _) in new
             .fleet

@@ -53,8 +53,7 @@ pub fn new_key() -> Result<String> {
     ))
 }
 
-/// Record `key` for lane `agent` of `fleet#issue` on `host`; the agent's older keys are revoked (a new spawn
-/// supersedes them). Its id.
+/// Record `key` for lane `agent` of `fleet#issue` on `host`; the agent's older keys are revoked (a new spawn supersedes them). Its id.
 pub fn mint(
     ctx: &Ctx,
     cfg: &Config,
@@ -84,8 +83,7 @@ pub fn mint(
     Ok(id)
 }
 
-/// `live`, or why the key no longer signs: `revoked`, `expired`, or `ended` (its issue merged or closed, its lane
-/// closed, dead or spawned again).
+/// `live`, or why the key no longer signs: `revoked`, `expired`, or `ended` (its issue merged or closed, its lane closed, dead or spawned again).
 pub fn state(now: u64, events: &[Event], k: &Key) -> &'static str {
     let mine = |e: &&Event| e.kind == "spawn" && e.str("agent") == Some(&k.agent) && e.ts >= k.created;
     let spawns: Vec<&Event> = events.iter().filter(mine).collect();
@@ -139,14 +137,14 @@ pub fn revoke(ctx: &Ctx, cfg: &Config, id: &str, out: &mut dyn Write) -> Result<
 
 /// #923: the token the proxy signs with, `[proxy] token-file` (0600), or why there is none and how to make it.
 pub fn token(cfg: &Config) -> std::result::Result<String, String> {
-    let setup = "run `claude setup-token` on this host, save the token 0600 and set `[proxy] token-file` to its path";
+    let cmd = crate::providers::proxied().map_or("", |p| p.setup);
+    let setup = format!("run `{cmd}` on this host, save the token 0600 and set `[proxy] token-file` to its path");
     let f = cfg.proxy.token_file.as_deref().map(crate::config::expand);
     let f = f.ok_or_else(|| format!("no [proxy] token-file: {setup}"))?;
     let v = crate::secret::file(&f).map_err(|e| format!("{e:#}"))?;
     v.ok_or_else(|| format!("[proxy] token-file {} is missing or empty: {setup}", f.display()))
 }
 
-/// The token a request with lane key `key` signs with, or why it is refused.
 fn authorize(ctx: &Ctx, cfg: &Config, (key, now): (&str, u64)) -> std::result::Result<String, String> {
     let (all, h) = (keys(ctx), sha(key));
     let k = all.iter().find(|k| k.sha == h).ok_or("unknown lane key")?;
@@ -156,7 +154,6 @@ fn authorize(ctx: &Ctx, cfg: &Config, (key, now): (&str, u64)) -> std::result::R
     }
 }
 
-/// Headers never forwarded: hop-by-hop ones, the lane's own credentials, compression (curl passes bytes through).
 const DROP: [&str; 9] = [
     "host",
     "connection",
@@ -211,8 +208,6 @@ fn reply(c: &mut TcpStream, code: u16, msg: &str) -> Result<()> {
     Ok(c.write_all((head + &body).as_bytes())?)
 }
 
-/// One request: its lane key checked, then forwarded by curl (the token in its config on stdin, never argv); the
-/// answer streamed back as it comes.
 fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -> Result<()> {
     let mut rd = BufReader::new(c.try_clone()?);
     let mut line = String::new();
@@ -235,8 +230,6 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
     let get = |k: &str| heads.iter().find(|h| h.0 == k).map(|h| h.1.as_str());
     let mut body = vec![0; get("content-length").and_then(|v| v.parse().ok()).unwrap_or(0)];
     rd.read_exact(&mut body)?;
-    // The path is appended to `upstream`: only an origin-form path, so it can never move the host (`@evil/`).
-    // Checked once the request is fully read: an earlier reply leaves unread data and the client sees a reset.
     if !path.starts_with('/') || path.chars().any(|ch| "@\\#\"".contains(ch) || ch.is_control()) {
         return reply(&mut c, 400, "bad request path");
     }
@@ -291,8 +284,6 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
     Ok(())
 }
 
-/// curl's answer as the client's: its last status block (a `100 Continue` skipped) as HTTP/1.1 with `connection:
-/// close`, then the body until curl ends.
 fn relay(up: &mut impl BufRead, c: &mut TcpStream) -> Result<()> {
     let (mut status, mut heads) = (String::new(), vec![]);
     loop {
@@ -336,8 +327,7 @@ fn write_private(p: &std::path::Path, b: &[u8]) -> Result<()> {
     Ok(f.write_all(b)?)
 }
 
-/// Before a remote ACP lane starts (and each survey of a `shed-acp` host): the proxy answering here (else started
-/// detached) and host `name`'s tunnel (`ssh -R`, the proxy's port there to here) alive (else started, its pid kept).
+/// Before a remote ACP lane starts (and each survey of a `shed-acp` host): the proxy answering here (else started detached) and host `name`'s tunnel (`ssh -R`, the proxy's port there to here) alive (else started, its pid kept).
 pub fn ensure(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, machine): (&str, &str)) -> Result<()> {
     let port = cfg.proxy.port;
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));

@@ -1,5 +1,3 @@
-//! #42: the live board: `/live` SSE frags, the client cap, the blocked-prompt parser and
-//! answering a blocked Claude menu from the needs-you card.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -81,7 +79,6 @@ fn subscribe(addr: std::net::SocketAddr, host: &str) -> TcpStream {
     s
 }
 
-/// What the stream sends within `ms`.
 fn drain(s: &mut TcpStream, ms: u64) -> String {
     let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], [0u8; 65_536]);
     while Instant::now() < end {
@@ -114,8 +111,6 @@ fn live_pushes_one_frag_per_changed_section() {
         quiet.lines().all(|l| l.is_empty() || l == ": ping"),
         "no change: pings only: {quiet}"
     );
-    // #266: a queued issue changes the Queue tab only (the Events tab is the board's, read on the event's `ev`); #268:
-    // the Queue tab is the board's too: its data arrives as `queue`, once, and no frag.
     let q = json!({"op": "add", "issues": [99]});
     append(&c.state, &Event::new(T + 5, "sendmeter", None, "queue", q)).unwrap();
     let t0 = Instant::now();
@@ -141,7 +136,6 @@ fn live_pushes_one_frag_per_changed_section() {
         got.contains("event: ev\ndata: {\"f\":\"sendmeter\",\"k\":null,\"n\":null,\"seq\":2,"),
         "{got}"
     );
-    // #267: a drive pass's result changes the Host tab's FLEETS row: its data arrives as `host`, once.
     let d = json!({"step": "start", "result": "REFUSED HOST_BUSY: load 9", "code": "HOST_BUSY"});
     append(&c.state, &Event::new(T + 6, "sendmeter", Some(7), "driven", d)).unwrap();
     let got = drain(&mut s, 2_500);
@@ -153,7 +147,6 @@ fn live_pushes_one_frag_per_changed_section() {
     let v: serde_json::Value = serde_json::from_str(&line[6..]).unwrap();
     assert_eq!(v["fleets"][0]["word"], "held", "{v}");
     assert_eq!(v["now"].as_u64().map(|n| n > 0), Some(true), "{v}");
-    // #269: an ask changes the needs cards: their data (as this unpaired device sees it) arrives as `needs`, once.
     let a = json!({"id": "q1", "question": "Ship it?", "options": ["yes", "no"], "recommend": null, "kind": "owner"});
     append(&c.state, &Event::new(T + 7, "sendmeter", Some(7), "needs-decision", a)).unwrap();
     let got = drain(&mut s, 2_500);
@@ -186,7 +179,6 @@ fn live_caps_clients_and_checks_host() {
         drain(&mut again, 300).starts_with("HTTP/1.1 200 OK"),
         "closed clients free their slots"
     );
-    // #269: the server sends no HTML part (`/frags` is gone): the needs cards, Lanes and [chat] are API v1 data.
     let get = |path: &str| {
         let mut s = TcpStream::connect(addr).unwrap();
         s.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
@@ -234,7 +226,6 @@ fn prompt_parser_fixtures() {
         None,
         "dsh pane"
     );
-    // A numbered list in Claude's own reply (no `❯` cursor) is not a menu.
     assert_eq!(pending("Plan:\n1. Read the spec\n2. Write the code\n"), None);
     for junk in [
         "",
@@ -256,7 +247,6 @@ fn prompt_parser_fixtures() {
     );
 }
 
-/// #127: the real screen (paths masked) of a prompt Claude auto-denies after 15 s.
 const COUNTDOWN: &str = include_str!("golden/screens/claude-permission-countdown.txt");
 
 #[test]
@@ -273,7 +263,6 @@ fn prompt_card_golden_from_the_auto_deny_screen() {
             "push": false
         })
     );
-    // No countdown: it waits for the owner, so it pushes; a countdown that ran out pushes too.
     let c = prompt(PERMISSION).unwrap();
     assert_eq!(
         (c["title"].as_str(), c["countdown"].as_u64(), c["push"].as_bool()),
@@ -306,7 +295,6 @@ fn countdown_card_shows_reason_command_and_clears_when_the_prompt_goes() {
         assert!(needs.contains(want), "{want}: {needs}");
     }
     assert!(!needs.contains("data-push=1"), "{needs}");
-    // Auto-denied: the next read shows Claude working again, so the card goes.
     let working = "⏺ Bash(cargo test)\n  ⎿ Error: denied\n\n✶ Pontificating… (12m 0s · ↓ 3.1k tokens)\n";
     let r2 = Lanes::new(Fake::default());
     r2.blocked("sendmeter-impl-12", working);
@@ -340,7 +328,6 @@ fn blocked(name: &str, imp: &str, rev: &str) -> (drover::Ctx, Lanes) {
     (c, r)
 }
 
-/// #269: the page at `path` as the board draws it for the request's device (`extra`: its cookie).
 fn page(s: &Server, path: &str, extra: &str) -> String {
     with_board(&req(s, "GET", path, "", extra), s, ADDR, extra, T)
 }
@@ -353,13 +340,11 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> String 
     String::from_utf8_lossy(&s.respond(&r, T)).into_owned()
 }
 
-/// The `data-h` the needs-you card's menu buttons carry (the menu as the card shows it).
 fn shown_h(page: &str) -> String {
     let i = page.find("data-h=").expect("menu buttons") + 7;
     page[i..].chars().take_while(char::is_ascii_digit).collect()
 }
 
-/// Paired at the real clock (#288: a pairing lasts a year after last use), as `serve_on` reads it.
 fn cookie(s: &Server, c: &drover::Ctx) -> String {
     pair(
         s,
@@ -433,7 +418,6 @@ fn answer_sends_the_digit_and_logs_no_question() {
         !drover::events::jsonl(&c.state).unwrap().contains("proceed"),
         "never the question text"
     );
-    // The prompt is still there after the key: "still waiting". A reviewer may answer a permission prompt.
     let res = req(
         &s,
         "POST",
@@ -445,8 +429,6 @@ fn answer_sends_the_digit_and_logs_no_question() {
     assert_eq!(r.keys()[1], json!({"name": "sendmeter-rev-9-r1", "keys": ["1"]}));
 }
 
-/// The card showed menu A; the pane (read afresh, past every cache) now shows menu B: no key, and
-/// "menu changed". After a send, the next render reads the pane again (no cached stale menu).
 #[test]
 fn answer_refuses_a_changed_menu_and_rerenders_fresh() {
     let (c, r) = blocked("stale-menu", PERMISSION, PERMISSION);
@@ -481,7 +463,6 @@ fn answer_refuses_a_changed_menu_and_rerenders_fresh() {
         res.contains("sent to sendmeter-impl-12") && r.keys() == [json!({"name": "sendmeter-impl-12", "keys": ["2"]})],
         "same menu: the digit: {res}"
     );
-    // Same second (cache TTLs not expired): the page still reads the pane afresh and drops the old buttons.
     let page = page(&s, "/", &ck);
     assert!(r.reads() > reads + 2, "a fresh read after the send");
     let card = &page
@@ -525,10 +506,6 @@ fn unparsed_blocked_pane_shows_masked_tail_and_reply() {
     );
 }
 
-/// The PR's 390 px screenshots (fixture config): the sync dot's three states, a pull in
-/// progress, a blocked agent's permission menu on the needs-you card and in its sheet, and
-/// the card after an answer; each with no horizontal scroll. Runs where WebKit is at hand;
-/// PNGs go to `$DROVER_SNAPSHOTS` when set.
 #[test]
 fn live_board_fits_390px() {
     if no_webkit() {
@@ -573,7 +550,6 @@ fn live_board_fits_390px() {
     }
 }
 
-/// #259: `/live` from `Last-Event-ID` / `?since=`: the events after it, once each, as `ev` with its seq.
 fn reconnect(addr: std::net::SocketAddr, since: &str) -> String {
     let mut s = TcpStream::connect(addr).unwrap();
     s.write_all(format!("GET /live{since} HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
@@ -599,7 +575,6 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
         !got.contains("\"id\":\"events\""),
         "#266: no Events frag, the board reads the API: {got}"
     );
-    // Gate 2: the phone drops at seq 2; three events land; it comes back with Last-Event-ID: 2.
     drop(s);
     for i in 0..3 {
         append(
@@ -634,7 +609,6 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
         1,
         "the build alone (#391)"
     );
-    // Every missed Events row is on the tab once (#266: the board's, from `/api/v1/events`).
     let tab = events_tab(
         &Server::new(&c, &Fake::default(), Some(addr.to_string())),
         &addr.to_string(),
@@ -645,7 +619,6 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
         let Some(tab) = &tab else { break };
         assert_eq!(tab.matches(&format!(">note · missed-{i}<")).count(), 1, "{tab}");
     }
-    // Past the 500-event bound: one `refresh`, no replay.
     for i in 0..501 {
         append(&c.state, &Event::new(T + 30 + i, "sendmeter", None, "note", json!({}))).unwrap();
     }
@@ -657,7 +630,6 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
     assert!(reconnect(addr, "?since=6").matches("event: ev").count() == 500);
 }
 
-/// #259: the board plays a moment once per seq, never for a replayed event older than 2 minutes.
 #[test]
 fn the_board_dedupes_by_seq_and_skips_stale_moments() {
     if std::process::Command::new("node").arg("--version").output().is_err() {
@@ -676,15 +648,12 @@ fn the_board_dedupes_by_seq_and_skips_stale_moments() {
     std::fs::write(d.join("t.js"), js).unwrap();
     let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    // #266: and tells the board (its Events tab) once per new seq.
     assert_eq!(
         String::from_utf8_lossy(&o.stdout).trim(),
         "merged,needs-you 4 herd-ev,herd-ev,herd-ev,herd-ev"
     );
 }
 
-/// Pane text (the question, its options, the tail) only reaches a paired device: GET /, API v1's needs cards and
-/// Lanes (#269) and `/live` show an unpaired viewer who is blocked, the activity and a pairing hint.
 #[test]
 fn unpaired_viewers_see_no_pane_text() {
     let (c, r) = blocked("unpaired", PERMISSION, PERMISSION);
@@ -698,7 +667,6 @@ fn unpaired_viewers_see_no_pane_text() {
         "don&#39;t ask",
         "don't ask",
     ];
-    // #269: what the server sends (the page, API v1's needs cards and Lanes), then as the board draws it.
     for path in ["/", "/api/v1/needs", "/api/v1/lanes"] {
         let res = req(&s, "GET", path, "", "");
         assert!(pane.iter().all(|p| !res.contains(p)), "{path}: {res}");
@@ -713,7 +681,6 @@ fn unpaired_viewers_see_no_pane_text() {
         "{res}"
     );
     assert!(page(&s, "/", &ck).contains("Do you want to proceed?"), "paired");
-    // /live: the blocked lane appears after the watcher's first look; each audience gets its own render.
     let live = FakeShed::new();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
@@ -743,7 +710,6 @@ fn unpaired_viewers_see_no_pane_text() {
         d.contains("Do you want to proceed?") && d.contains("\"menu\":{"),
         "paired stream: {d}"
     );
-    // The device is removed: its stream closes before the next push, so no more pane text reaches it.
     drover::devices::store(&c, &[]).unwrap();
     append(&c.state, &Event::new(T + 5, "sendmeter", None, "note", json!({}))).unwrap();
     let after = drain(&mut dev, 2_500);
@@ -751,7 +717,6 @@ fn unpaired_viewers_see_no_pane_text() {
     assert!(matches!(dev.read(&mut [0; 1]), Ok(0)), "revoked device: stream closed");
 }
 
-/// #57: serve's sampler thread fills the host (`/herd.json`) without a request sampling it.
 #[test]
 fn the_sampler_thread_fills_the_host() {
     let c = ctx(&tmpdir("sampler"), CONFIG);

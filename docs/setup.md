@@ -64,7 +64,7 @@ repo = "<owner>/<repo>"
 local = "~/src/<repo>"
 integration = "staging"                      # merge target; main never is
 required_checks = ["test"]                   # gate on these checks only; unset = all
-# merge_label = "merge-ready"                # PR label the full CI needs: added on a PASS at the head
+merge_label = "merge-ready"                  # the full CI runs only with this label; drover adds it on a PASS at the head
 
 [[fleet.app.serial]]                         # one-at-a-time paths (docs/config.md); any number of groups
 name = "db"                                  # its Queue mark, 🔒db; ≤ 8 characters
@@ -94,6 +94,9 @@ Check it worked: `drover status` prints no error. Every other key is in
 [fleet.example.toml](../fleet.example.toml). Lanes run on the host's own CLI login (`claude /login`), and secrets live in
 0600 files, never in fleet.toml: see [accounts.md](accounts.md) and [providers.md](providers.md).
 
+`merge_label` goes with the affected-only CI recipe in [ci.md](ci.md): pull requests run only the checks the change
+can affect, and the full run starts when drover adds the label. `drover setup` creates the label in the repo.
+
 ## 3. First lane
 
 ```sh
@@ -110,7 +113,8 @@ runs it every 5 minutes. Check it worked:
 
 One command, safe to run again: `drover setup`. It writes and loads the tick job and the board
 job ([6](#6-board-on-the-phone-tailscale)), sets up `tailscale serve`, runs `drover profiles sync`,
-plus the self-update and daily clean jobs ([below](#self-update-and-the-daily-clean-557)), then runs
+plus the self-update and daily clean jobs ([below](#self-update-and-the-daily-clean-557)), makes sure each fleet's
+`merge_label` exists in its repo ([ci.md](ci.md)), then runs
 `drover doctor` and exits with its code. Each step prints `✓ done`, `= already` or
 `✗ <error> → <fix>`; `--no-load` writes the jobs without loading them.
 

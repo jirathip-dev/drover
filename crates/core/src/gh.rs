@@ -1,5 +1,3 @@
-//! Cached GitHub reads: the issue spec (re-fetched when `updatedAt` moved) and PR/CI views fresh for 60 s, all of a
-//! fleet's open PRs read in one GraphQL call (#246).
 use crate::config::{Config, Fleet};
 use crate::events::Event;
 use crate::runner::{json, ok, Runner};
@@ -23,12 +21,9 @@ pub fn cache_path(ctx: &Ctx, kind: &str, fleet: &str, issue: u64) -> PathBuf {
         .join(format!("{kind}-{fleet}-{issue}.json"))
 }
 
-// #212: the fast step reads every PR afresh, so a minute's launchd jitter never leaves a card 2 min old.
 thread_local!(pub static FORCE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
-// #626: the fast step's catch-up interval (secs, 0: off): a fleet with webhooks on is re-read only this often.
 thread_local!(pub static CATCHUP: std::cell::Cell<u64> = const { std::cell::Cell::new(0) });
 
-/// A `{"ts": …}` cache entry younger than `PR_TTL` at `now` (#246: while `FORCE` is set, only one of this step).
 fn fresh(c: &Value, now: u64) -> bool {
     let ts = c["ts"].as_u64().unwrap_or(0);
     now >= ts && now - ts < PR_TTL && (!FORCE.get() || ts == now)
@@ -55,7 +50,6 @@ pub fn cached_title(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
     Some(cached_spec(ctx, fleet, issue).or_else(b)?["title"].as_str()?.into())
 }
 
-/// `(url, text)` of a `**Amendment` comment by an OWNER, MEMBER or COLLABORATOR; strangers can't steer a lane.
 fn amendment(c: &Value) -> Option<(String, String)> {
     let s = |k: &str| c.pointer(k).and_then(Value::as_str).unwrap_or_default().trim();
     let body = s("/body");
@@ -93,7 +87,6 @@ pub fn spec(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, issue: u64, refre
     Ok(v)
 }
 
-/// #246: every open PR of the repo, flattened to `gh pr view`'s shape, in one paginated GraphQL call.
 const PRS_QUERY: &str = "query($owner:String!,$name:String!,$endCursor:String){repository(owner:$owner,name:$name){\
 pullRequests(states:OPEN,first:100,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{number title body state \
 baseRefName headRefName headRefOid isDraft mergeable mergeStateStatus labels(first:50){nodes{name}} commits(last:1){nodes{\
@@ -102,8 +95,6 @@ completedAt detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}}}}";
 const PRS_JQ: &str = ".data.repository.pullRequests.nodes[] | .labels = .labels.nodes | .statusCheckRollup = \
 [.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?] | del(.commits)";
 
-/// #530: conditional REST reads that change whenever the snapshot can: the open PRs latest-updated first (heads,
-/// labels, titles), the Actions runs (checks) and integration's head (mergeability).
 fn probes(f: &Fleet) -> [String; 3] {
     let r = &f.repo;
     [
@@ -113,8 +104,6 @@ fn probes(f: &Fleet) -> [String; 3] {
     ]
 }
 
-/// #530: each probe sent with its last `ETag` as `If-None-Match`, `etags` updated; true when none moved (a 304),
-/// which costs no rate limit.
 fn unchanged(r: &dyn Runner, f: &Fleet, etags: &mut Vec<Value>) -> bool {
     let tag = |l: &str| {
         Some(json!(l
@@ -154,11 +143,9 @@ fn unchanged(r: &dyn Runner, f: &Fleet, etags: &mut Vec<Value>) -> bool {
     same
 }
 
-/// #530: past this, or while a PR's mergeability is still UNKNOWN, the fast step queries even when every probe is 304.
 const PROBE_MAX: u64 = 300;
 
-/// #246: the fleet's open PRs by head branch: one `gh api graphql` per fleet per step (fresh as `fresh` says). #530:
-/// the fast step skips it while `unchanged` says nothing moved since the last query.
+/// #246: the fleet's open PRs by head branch: one `gh api graphql` per fleet per step (fresh as `fresh` says). #530: the fast step skips it while `unchanged` says nothing moved since the last query.
 pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Result<Value> {
     let p = cache_path(ctx, "prs", fleet, 0);
     let old = load::<Value>(&p).unwrap_or_default();
@@ -215,8 +202,7 @@ const ISSUES_JQ: &str =
 labels: [.labels.nodes[].name], ac: (.body | test(\"acceptance criteria|(^|\\\\n)#+ *ac *(\\\\n|$)\"; \"i\")), \
 pr: any(.timelineItems.nodes[].source.state?; . == \"MERGED\" or . == \"CLOSED\")}";
 
-/// #365: the repo's open issues (the backlog) in `backlog-<fleet>-0.json`, one GraphQL read: all open ones, then those
-/// updated since (a closed one drops out); `ac`: has acceptance criteria, `pr`: a merged/closed PR mentions it.
+/// #365: the repo's open issues (the backlog) in `backlog-<fleet>-0.json`, one GraphQL read: all open ones, then those updated since (a closed one drops out); `ac`: has acceptance criteria, `pr`: a merged/closed PR mentions it.
 pub fn backlog(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str) -> Result<()> {
     let p = cache_path(ctx, "backlog", fleet, 0);
     let mut c = load::<Value>(&p).unwrap_or_else(|| json!({"issues": {}}));
@@ -240,8 +226,7 @@ pub fn backlog(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str) -> Result<()> 
     store(&p, &c)
 }
 
-/// The PR for `branch` as of `now`, from the fleet's snapshot; Null when there is none. #246: a PR that left the open
-/// set, or one fleet just changed (`forget_pr`), is read alone (`gh pr view`).
+/// The PR for `branch` as of `now`, from the fleet's snapshot; Null when there is none. #246: a PR that left the open set, or one fleet just changed (`forget_pr`), is read alone (`gh pr view`).
 pub fn pr(ctx: &Ctx, r: &dyn Runner, f: &Fleet, (fleet, issue): (&str, u64), branch: &str, now: u64) -> Result<Value> {
     let p = cache_path(ctx, "pr", fleet, issue);
     let c = load::<Value>(&p).filter(|c| c["branch"] == branch);
@@ -252,7 +237,6 @@ pub fn pr(ctx: &Ctx, r: &dyn Runner, f: &Fleet, (fleet, issue): (&str, u64), bra
     let open = (!forgot).then(|| snapshot(ctx, r, f, fleet, now)).transpose()?;
     let pr = match open.as_ref().and_then(|o| o.get(branch)) {
         Some(v) => v.clone(),
-        // Outside a step (`pr`, `wait`) a branch never seen open is read too: it may be merged already.
         None if forgot || old["state"] == "OPEN" || old.is_null() && !FORCE.get() => {
             json(r, "gh", &["pr", "view", branch, "-R", &f.repo, "--json", PR_FIELDS]).unwrap_or_default()
         }
@@ -313,8 +297,7 @@ pub fn closed(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Re
     Ok(closed)
 }
 
-/// Files PR `num` changes at `head`, a rename's old name too, cached per head sha. #490: the paginated files API (the
-/// diff stops at 300 files); at its 3,000 cap, the fetched checkout's `git diff <base>...<head>`.
+/// Files PR `num` changes at `head`, a rename's old name too, cached per head sha. #490: the paginated files API (the diff stops at 300 files); at its 3,000 cap, the fetched checkout's `git diff <base>...<head>`.
 pub fn diff_names(
     ctx: &Ctx,
     r: &dyn Runner,
@@ -366,8 +349,7 @@ pub fn forget_pr(ctx: &Ctx, fleet: &str, issue: u64) {
     }
 }
 
-/// #285: a ready PR is caught up with integration only when the fleet says `update_ready = "always"` or integration's
-/// rule is `strict`: its ruleset's, else its classic protection's (read once an hour). `r` None: the cached read only.
+/// #285: a ready PR is caught up with integration only when the fleet says `update_ready = "always"` or integration's rule is `strict`: its ruleset's, else its classic protection's (read once an hour). `r` None: the cached read only.
 pub fn update_ready(ctx: &Ctx, r: Option<&dyn Runner>, f: &Fleet, fleet: &str) -> bool {
     let p = cache_path(ctx, "strict", fleet, 0);
     let c = load::<Value>(&p).filter(|c| r.is_none() || ctx.now < c["ts"].as_u64().unwrap_or(0) + 3600);
@@ -388,6 +370,32 @@ pub fn update_ready(ctx: &Ctx, r: Option<&dyn Runner>, f: &Fleet, fleet: &str) -
 /// The PR view carries label `name`.
 pub fn has_label(pr: &Value, name: &str) -> bool {
     pr["labels"].as_array().into_iter().flatten().any(|l| l["name"] == name)
+}
+
+/// #947: the command that makes label `label` in fleet `f`'s repo.
+pub fn label_fix(f: &Fleet, label: &str) -> String {
+    format!("gh label create {label} --repo {} --force", f.repo)
+}
+
+/// #947: whether label `label` exists in fleet `f`'s repo (GitHub label names ignore case).
+pub fn label_exists(r: &dyn Runner, f: &Fleet, label: &str) -> Result<bool> {
+    let args = [
+        "label", "list", "--repo", &f.repo, "--search", label, "--json", "name", "--limit", "100",
+    ];
+    let v = json(r, "gh", &args)?;
+    let same = |l: &Value| l["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(label));
+    Ok(v.as_array().into_iter().flatten().any(same))
+}
+
+/// #947 `setup`'s row for fleet `f`'s `merge_label`: `= already` when it exists, else made (`✓`) or `✗ … → fix`.
+pub fn ensure_label(r: &dyn Runner, f: &Fleet, label: &str) -> String {
+    let (what, fix) = (format!("label {label} in {}", f.repo), label_fix(f, label));
+    let create = ["label", "create", label, "--repo", &f.repo, "--force"];
+    match label_exists(r, f, label) {
+        Ok(true) => format!("= already {what}"),
+        Ok(false) => ok(r, "gh", &create).map_or_else(|e| format!("✗ {what}: {e:#} → {fix}"), |_| format!("✓ {what}")),
+        Err(e) => format!("✗ {what}: {e:#} → {fix}"),
+    }
 }
 
 /// One check of a statusCheckRollup: green | pending | failed | missing.
@@ -455,14 +463,15 @@ pub fn summary(pr: &Value, branch: &str, req: &[String]) -> String {
         return format!("no PR for branch {branch}");
     }
     let head: String = pr["headRefOid"].as_str().unwrap_or("?").chars().take(7).collect();
-    let n = pr["statusCheckRollup"].as_array().map_or(0, Vec::len);
+    let checks = required(&pr["statusCheckRollup"], req);
+    let n = checks.as_array().map_or(0, Vec::len);
     format!(
         "PR #{} {} → {} head {head} mergeable {} ci {} ({n} checks)",
         pr["number"],
         pr["state"].as_str().unwrap_or("?"),
         pr["baseRefName"].as_str().unwrap_or("?"),
         pr["mergeable"].as_str().unwrap_or("?"),
-        ci(&required(&pr["statusCheckRollup"], req))
+        ci(&checks)
     )
 }
 
@@ -473,7 +482,6 @@ pub enum Until {
     Merged,
 }
 
-/// Exit code once `until` is decided: 0 reached, 1 can no longer be reached.
 fn decided(pr: &Value, until: Until, req: &[String]) -> Option<i32> {
     if pr.is_null() {
         return None;
@@ -501,7 +509,7 @@ fn decided(pr: &Value, until: Until, req: &[String]) -> Option<i32> {
 }
 
 /// `drover wait`: poll the cached read, 30 s doubling to 5 min; 0 reached, 1 failed/closed, 124 timed out.
-#[allow(clippy::too_many_arguments)] // the CLI's wait arguments, one each
+#[allow(clippy::too_many_arguments)]
 pub fn wait(
     ctx: &Ctx,
     r: &dyn Runner,

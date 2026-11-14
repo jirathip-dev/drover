@@ -1,5 +1,3 @@
-//! What providers have used (docs/providers.md): the `DeepSeek` balance. Secrets reach `curl` on stdin only: never
-//! argv, the log, a cache or the page.
 use crate::config::{expand, Config};
 use crate::devices::save;
 
@@ -11,7 +9,6 @@ use serde_json::Value;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Poll and cache period of the meter and the balance.
 const POLL: u64 = 600;
 
 /// Local `date -r ts <fmt>` (UTC hh:mm when `date` cannot tell).
@@ -30,12 +27,10 @@ pub fn load<T: DeserializeOwned>(p: &Path) -> Option<T> {
     serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()
 }
 
-/// A string inside a double-quoted curl config value.
 pub(crate) fn q(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-/// `curl` with its config (headers, body) on stdin: (status, lowercased headers, body).
 pub(crate) fn curl(r: &dyn Runner, url: &str, conf: &str) -> Option<(u32, String, String)> {
     let o = r
         .run_in("curl", &argv(&["-sS", "-m", "15", "-D", "-", "-K", "-", url]), conf)
@@ -67,7 +62,6 @@ pub fn parse_balance(body: &str, ts: u64) -> Option<Balance> {
     })
 }
 
-/// `var`'s value in an env file (`VAR=value` / `export VAR="value"` lines).
 pub(crate) fn env_value(text: &str, var: &str) -> Option<String> {
     let kv = text
         .lines()
@@ -77,11 +71,9 @@ pub(crate) fn env_value(text: &str, var: &str) -> Option<String> {
         .map(|(_, v)| v.trim().trim_matches(['"', '\'']).to_string())
 }
 
-/// The `DeepSeek` balance and whether it is under `warn_below`, read at most every 10 min; None without a key,
-/// Err(`key not found in <file>`) when the configured env file is unreadable or lacks it.
+/// The `DeepSeek` balance and whether it is under `warn_below`, read at most every 10 min; None without a key, Err(`key not found in <file>`) when the configured env file is unreadable or lacks it.
 pub fn deepseek(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Result<(Balance, bool), String>> {
     let p = cfg.providers.deepseek.as_ref()?;
-    // #707: the env file is a secret file (0600, refused if looser); no store.
     let key = match p.env_file.as_deref() {
         Some(f) => match crate::secret::file(&expand(f)) {
             Err(e) => return Some(Err(format!("{e:#}"))),

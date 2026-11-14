@@ -1,11 +1,9 @@
-//! #5: per-role MCP allowlist; #923: lanes run on the host's own login, a usage limit or sign-out holds the host.
 mod common;
 use common::*;
 use drover::events::{read, Event};
 use serde_json::Value;
 use std::path::Path;
 
-/// Claude impl role with `role_extra` lines, local repo `<dir>/repo`.
 fn config(d: &Path, role_extra: &str) -> String {
     let repo = d.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -19,7 +17,6 @@ fn config(d: &Path, role_extra: &str) -> String {
         .replace("/tmp/does-not-matter/sendmeter", repo.to_str().unwrap())
 }
 
-/// The lane's shell, as its typed export line leaves it, printing `$var` (a clean env, so only the lane sets it).
 fn shell(sh: &FakeShed, lane: &str, var: &str) -> String {
     let typed = sh.sent(lane);
     let line = typed.iter().find(|t| t.starts_with("export ")).expect("no export line");
@@ -184,7 +181,6 @@ fn mcp_allowlist_is_the_only_mcp_and_prod_is_refused() {
     assert_eq!(names, ["supabase-dev"]);
     assert_eq!(lane["mcpServers"]["supabase-dev"]["args"][0], "dev");
 
-    // Default: no MCP at all, still strict.
     let d2 = tmpdir("mcp-none");
     let c2 = ctx(&d2, &config(&d2, ""));
     let sh2 = FakeShed::attached(&c2);

@@ -1,5 +1,3 @@
-//! #509: retry-safe side effects. A spawn two passes race starts once; a merge a crash left unlogged is recovered from
-//! the PR, never merged twice; the same kick id is driven once.
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
@@ -18,10 +16,9 @@ fn fake() -> Fake {
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
         .reply("git -C", "")
-        .reply("kill -0", "") // the intent's process (this test) still runs
+        .reply("kill -0", "")
 }
 
-/// The Fake, with `hook` run once, on the first call starting with `at`: after the call (`after`) or before it.
 struct Hooked<'a> {
     fake: &'a Fake,
     at: &'a str,
@@ -62,7 +59,6 @@ fn two_passes_racing_the_same_spawn_start_it_once_and_the_other_skips() {
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let r = fake();
     let second = Shared::<Vec<String>>::default();
-    // While the first pass creates the lane (its intent logged, nothing made yet), a kick's pass drives the same issue.
     let race = || {
         std::thread::scope(|s| {
             let b = s.spawn(|| run(&c, &r, &["kick", "sendmeter", "12", "--now"]));
@@ -135,7 +131,6 @@ fn merge_fake(state: &str) -> Fake {
 fn a_crash_between_merge_and_its_log_is_recovered_from_the_merged_pr_without_merging_again() {
     let mut c = ready("crash-merge");
     let r = merge_fake("MERGED");
-    // The crash: the process dies right after `gh pr merge` went through, before anything after it is logged.
     let crash = || panic!("crash injected after gh pr merge");
     let a = Hooked {
         fake: &r,
@@ -154,11 +149,9 @@ fn a_crash_between_merge_and_its_log_is_recovered_from_the_merged_pr_without_mer
     assert_eq!(intent[0].str("action_id"), Some(&*format!("sendmeter#12:merge@{HEAD}")));
     assert!(kinds(&c, "done").is_empty() && kinds(&c, "failed").is_empty() && kinds(&c, "merged").is_empty());
 
-    // Within the timeout the next pass leaves it alone: the merge may still be running.
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED IN_FLIGHT"), "{out}");
-    // Past it, the next pass reads the PR: merged, so `done`, then the `merged` log; never a second merge.
     c.now += 601;
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(code, 0, "{out}");
