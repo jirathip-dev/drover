@@ -111,6 +111,7 @@ fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
     }
     let pulls = "gh api -i repos/jirathip-dev/sendmeter/pulls?";
     let r = calm()
+        .reply("gh issue list", "[]")
         .reply("gh api graphql", &open_prs(&ns))
         .reply(pulls, &probe("200 OK", "W/\"p1\""))
         .reply(

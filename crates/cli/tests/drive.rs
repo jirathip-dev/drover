@@ -619,6 +619,7 @@ fn a_pr_merged_outside_drover_is_logged_merged_and_its_lanes_cleaned() {
 fn a_pr_closed_outside_drover_closes_or_blocks_the_issue_once() {
     for (issues, want) in [(r#"[{"number":12}]"#, "closed"), ("[]", "blocked")] {
         let c = setup(&format!("drive-external-{want}"));
+        let kind = if want == "closed" { "closed-other" } else { want };
         lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
         ev(
             &c,
@@ -631,16 +632,17 @@ fn a_pr_closed_outside_drover_closes_or_blocks_the_issue_once() {
             .reply("gh issue list", issues)
             .reply("git -C", "");
         let (out, _) = drive(&c, &r);
-        assert!(
-            out.contains(&format!("sendmeter #12 {want} outside drover (PR #100)")),
-            "{out}"
-        );
+        let line = match want {
+            "closed" => "sendmeter #12 closed on GitHub".into(),
+            _ => format!("sendmeter #12 {want} outside drover (PR #100)"),
+        };
+        assert!(out.contains(&line), "{out}");
         assert_eq!(state(&c), want);
         let e = read(&c.state)
             .unwrap()
             .to_vec()
             .into_iter()
-            .rfind(|e| e.is(want, "sendmeter", 12))
+            .rfind(|e| e.is(kind, "sendmeter", 12))
             .unwrap();
         if want == "blocked" {
             assert_eq!(
@@ -651,7 +653,7 @@ fn a_pr_closed_outside_drover_closes_or_blocks_the_issue_once() {
             assert_eq!(e.str("by"), Some("external"));
         }
         drive(&c, &r);
-        assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == want).count(), 1);
+        assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == kind).count(), 1);
         assert!(!r.called("gh issue comment"));
     }
 }

@@ -272,7 +272,7 @@ pub fn cached_run(ctx: &Ctx, fleet: &str, issue: u64) -> Option<String> {
 /// Numbers of the fleet's closed issues: one `gh issue list` per fleet, fresh for 60 s.
 pub fn closed(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> Result<Vec<u64>> {
     let p = cache_path(ctx, "closed", fleet, 0);
-    if let Some(c) = load(&p).filter(|c| fresh(c, now)) {
+    if let Some(c) = load::<Value>(&p).filter(|c| c["ts"].as_u64().is_some_and(|t| now >= t && now - t < PR_TTL)) {
         return Ok(c["closed"]
             .as_array()
             .into_iter()
