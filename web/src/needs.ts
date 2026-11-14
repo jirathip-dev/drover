@@ -42,7 +42,7 @@ function issue(d: NeedsTab, s: NeedIssue): string {
   const merge = s.merge ? `<button name=op value=override data-confirm="Merge #${n} past the round limit?">merge anyway</button>` : '';
   const f = rw ? `${form(d, ` id="${id}"`)}${hidden('', s.fleet, d.mtime)}<input type=hidden name=issue value=${n}>${merge}<button name=op value=extend>one more round</button><button name=op value=park>park</button></form>` : '';
   // #417: the verdict's screenshots, inline, as `/shot/<fleet>/<n>/<i>` serves them.
-  const shots = s.shots.map((x, i) => `<figure class=im><img src="shot/${enc(s.fleet)}/${n}/${i}" alt="${esc(x)}" loading=lazy><figcaption>${esc(x)}</figcaption></figure>`).join('');
+  const shots = s.shots.map((x, i) => `<figure class=im><img src="shot/${enc(s.fleet)}/${n}/${i}/${s.shots_at ?? ''}" alt="${esc(x)}" loading=lazy><figcaption>${esc(x)}</figcaption></figure>`).join('');
   const main = rw ? `<button form="${id}" name=op value=extend><span>one more round</span></button>` : '';
   const head = folded([`#${n}`, 'needs-human', s.title, s.why], /^\d+[smhd]$/.test(ago) ? ago : '', main);
   return `<details class=ask data-n=${n}>${head}<p><b>needs you</b> <span class=m>${esc(s.who)}</span></p><p>#${n} ${esc(s.title)} · ${esc(s.why)}</p><p class=m>${v}</p>${shots}${f}</details>`;
@@ -59,7 +59,7 @@ export function tab(d: NeedsTab): string {
     const main = d.rw && o != null ? `<button form="${id}" name=choice value=${m}><span>${esc(o)}</span></button>` : '';
     const head = folded([k.issue == null ? '' : `#${k.issue}`, design ? 'design' : a.kind.split(' · ')[0], k.question], age(Math.max(0, d.now - k.ts)), main);
     // #412: a design's PNGs, inline, as `/design/<fleet>/<n>/<i>` serves them.
-    const pngs = a.pngs.map((n, i) => `<figure class=im><img src="design/${enc(a.ask.fleet)}/${a.ask.issue ?? 0}/${i}" alt="${esc(n)}" loading=lazy><figcaption>${esc(n)}</figcaption></figure>`);
+    const pngs = a.pngs.map((n, i) => `<figure class=im><img src="design/${enc(a.ask.fleet)}/${a.ask.issue ?? 0}/${i}/${enc(a.ask.id)}" alt="${esc(n)}" loading=lazy><figcaption>${esc(n)}</figcaption></figure>`);
     return `<details class=ask>${head}<p><b>needs you</b> <span class=m>${esc(a.who)}</span> <span class=m>· ${a.kind}${from}</span></p><p>${asked(a)}</p>${pngs.join('')}${f}</details>`;
   });
   return top + asks.join('') + d.blocked.map(b => blocked(d, b, true)).join('') + d.issues.map(s => issue(d, s)).join('') + `<i id=chn hidden data-n=${d.choosing}></i>`;

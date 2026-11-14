@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::devices::sha256;
-use crate::events::{emit, read, Event};
+use crate::events::{emit, working, Event};
 use crate::gate::refused;
 use crate::runner::{argv, Runner};
 use crate::{orchestrator, Ctx};
@@ -80,7 +80,7 @@ pub fn post(ctx: &Ctx, cfg: &Config, thread: &str, c: &Card) -> Result<String> {
             "a run card needs --cmd, --why, --blast, --dir and a timeout",
         );
     }
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let t = orchestrator::find(&events, thread)?;
     let id = format!("r{}", events.iter().filter(|e| e.kind == "run-card").count() + 1);
     let dir = std::path::absolute(c.dir)?.display().to_string();
@@ -112,12 +112,12 @@ pub fn settle_via(
     sha: Option<&str>,
     via: Option<&str>,
 ) -> Result<String> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let Some(c) = events.iter().find(|e| e.kind == "run-card" && e.str("id") == Some(id)) else {
         return refused("NO_SUCH_CARD", format!("no run card {id}"));
     };
     if let Some(s) = settled(&events, id) {
-        let how = ["was denied", "ran already"][usize::from(s.data["approved"] == true)];
+        let how = ["was denied", "ran already"][usize::from(s.val("approved") == true)];
         return refused("ALREADY_SETTLED", format!("{id} {how}; a new run needs a new card"));
     }
     let [thread, cmd, dir, sum] = ["thread", "cmd", "dir", "sha"].map(|k| c.str(k).unwrap_or_default());
@@ -154,11 +154,11 @@ pub fn settle_via(
 
 /// #821: run approved card `id` once, detached, up to its --timeout; log and post its exit code and output tail.
 pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let Some(c) = events.iter().find(|e| e.kind == "run-card" && e.str("id") == Some(id)) else {
         return refused("NO_SUCH_CARD", format!("no run card {id}"));
     };
-    if settled(&events, id).is_none_or(|s| s.data["approved"] != true) {
+    if settled(&events, id).is_none_or(|s| s.val("approved") != true) {
         return refused("NOT_APPROVED", format!("{id} is not approved; nothing ran"));
     }
     let ran = |e: &Event| matches!(e.kind.as_str(), "run-started" | "run-done") && e.str("id") == Some(id);
@@ -167,7 +167,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> 
     }
     let [thread, cmd, dir, sum] = ["thread", "cmd", "dir", "sha"].map(|k| c.str(k).unwrap_or_default());
     let (pid, start) = (std::process::id(), crate::now());
-    let secs = c.data["timeout"].as_u64().unwrap_or(600);
+    let secs = c.val("timeout").as_u64().unwrap_or(600);
     let d = json!({"thread": thread, "id": id, "sha": sum, "pid": pid});
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-started", d))?;
     let out = ctx.state.with_file_name(format!("run-{id}.out"));

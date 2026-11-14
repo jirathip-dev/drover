@@ -871,7 +871,7 @@ fn a_failed_install_is_logged_alerted_once_and_retried_each_tick() {
     }
     let ev = syncs(&c);
     assert_eq!(ev.len(), 2, "{ev:?}");
-    assert!(ev.iter().all(|e| e.data["ok"] == false && e.str("from") == Some("0ld")));
+    assert!(ev.iter().all(|e| e.val("ok") == false && e.str("from") == Some("0ld")));
     let alerts = read(&c.state)
         .unwrap()
         .iter()
@@ -1233,7 +1233,7 @@ fn asks_stranded_on_a_remote_host_are_imported_once() {
     );
     let marks: Vec<_> = all.iter().filter(|e| e.kind == "asks-imported").collect();
     assert_eq!(marks.len(), 1);
-    assert_eq!(marks[0].data["upto_ts"], json!(NOW - 600));
+    assert_eq!(*marks[0].val("upto_ts"), json!(NOW - 600));
     assert!(
         !all.iter().any(|e| e.kind == "ask-waiting"),
         "an imported ask never pushes"

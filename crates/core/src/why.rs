@@ -1,5 +1,5 @@
 use crate::config::{Config, Fleet};
-use crate::events::{emit, fold, last_spawn, read, Event};
+use crate::events::{emit, fold, last_spawn, working, Event};
 use crate::runner::{argv, json, ok, Runner};
 use crate::{gh, hosts::On, Ctx};
 use anyhow::{bail, Context, Result};
@@ -111,7 +111,7 @@ pub fn turn(
     role: &str,
 ) -> Result<Option<(&'static str, String)>> {
     let f = cfg.fleet(fleet)?;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let Some(s) = fold(&events).remove(&(fleet.to_string(), n)) else {
         return Ok(None);
     };
@@ -416,7 +416,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
         .lines()
         .find_map(|l| l.strip_prefix("summary "))
         .unwrap_or_default();
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let url = git(&["remote", "get-url", "origin"]).unwrap_or_default();
     let (fleet, f) = (cfg.fleet.iter().find(|(_, f)| url.contains(&f.repo)))
         .or_else(|| cfg.fleet.iter().next())
@@ -492,7 +492,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
     let st = issue.and_then(|n| fold(&events).remove(&(fleet.clone(), n)));
     let issue = issue.map(|n| {
         let title = gh::spec(ctx, r, f, fleet, n, false).ok().map(|v| v["title"].clone());
-        let m = |k: &str| merged.map_or(Value::Null, |e| e.data[k].clone());
+        let m = |k: &str| merged.map_or(Value::Null, |e| e.val(k).clone());
         let rounds = st.as_ref().map(|s| s.rounds);
         json!({"fleet": fleet, "number": n, "title": title, "pr": m("pr"), "merge_sha": m("merge_sha"), "into": m("into"), "rounds": rounds})
     });

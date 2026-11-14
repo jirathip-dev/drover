@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS devices (n INTEGER PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS push (n INTEGER PRIMARY KEY, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS snapshot (n INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT UNIQUE NOT NULL, ts INTEGER NOT NULL,
     json TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS processed (id TEXT PRIMARY KEY, at INTEGER NOT NULL);";
+CREATE TABLE IF NOT EXISTS processed (id TEXT PRIMARY KEY, at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS states (fleet TEXT NOT NULL, issue INTEGER NOT NULL, done INTEGER NOT NULL, json TEXT NOT NULL,
+    PRIMARY KEY (fleet, issue));";
 
 pub fn file(state: &Path) -> PathBuf {
     SCRATCH
@@ -114,13 +116,63 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
         "INSERT INTO events (seq, ts, fleet, issue, type, json, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![seq, ev.ts, ev.fleet, ev.issue, ev.kind, json, archived],
     )?;
+    let new = c.last_insert_rowid().cast_unsigned();
+    if seq.is_none() && folded(c)? + 1 == new {
+        fold(c, &[events::aliased(Event { seq: new, ..ev })])?;
+    }
     Ok(())
 }
 
-/// One event, numbered next: a single insert, its own transaction.
+fn folded(c: &Connection) -> Result<u64> {
+    let q = "SELECT ts FROM snapshot WHERE key = 'fold'";
+    Ok(c.query_row(q, [], |r| r.get(0)).optional()?.unwrap_or(0))
+}
+
+fn fold(c: &Connection, evs: &[Event]) -> Result<()> {
+    let mut m = events::States::new();
+    for k in evs.iter().filter_map(|e| Some((e.fleet.clone(), e.issue?))) {
+        let q = "SELECT json FROM states WHERE fleet = ?1 AND issue = ?2";
+        let row: Option<String> = c.query_row(q, params![k.0, k.1], |r| r.get(0)).optional()?;
+        if let Some(s) = row.filter(|_| !m.contains_key(&k)) {
+            m.insert(k, serde_json::from_str(&s)?);
+        }
+    }
+    for s in events::fold_into(m, evs).values() {
+        let q = "INSERT OR REPLACE INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
+        c.execute(q, params![s.fleet, s.issue, s.done(), serde_json::to_string(s)?])?;
+    }
+    let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('fold', ?1, '{}')";
+    Ok(c.execute(q, [evs.last().map_or(0, |e| e.seq)]).map(drop)?)
+}
+
+/// #948: the saved per-issue fold (each append updates it) and the seq it covers, caught up to the newest event.
+pub fn states(state: &Path) -> Result<(u64, events::States)> {
+    with(state, false, (0, events::States::new()), |c| {
+        while folded(c)? < last(c)? {
+            let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+            fold(&tx, &rows(&tx, events::CHUNK, folded(&tx)?)?)?;
+            tx.commit()?;
+        }
+        let mut q = c.prepare("SELECT json FROM states")?;
+        let all = q.query_map([], |r| r.get::<_, String>(0))?;
+        let all = all.map(|j| Ok(serde_json::from_str::<events::IssueState>(&j?)?));
+        let m = all.map(|s| s.map(|s: events::IssueState| ((s.fleet.clone(), s.issue), s)));
+        Ok((folded(c)?, m.collect::<Result<_>>()?))
+    })
+}
+
+fn last(c: &Connection) -> Result<u64> {
+    Ok(c.query_row("SELECT COALESCE(MAX(seq), 0) FROM events", [], |r| r.get(0))?)
+}
+
+/// One event, numbered next, in its own transaction with the saved fold's update.
 pub fn append(state: &Path, ev: &Event) -> Result<()> {
     crate::sim::point(&crate::sim::Point::Append(ev));
-    with(state, true, (), |c| insert(c, ev, None, false))
+    with(state, true, (), |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        insert(&tx, ev, None, false)?;
+        Ok(tx.commit()?)
+    })
 }
 
 /// #900, #906: `evs` in one transaction, each `needs-decision` under the highest `q<n>` logged plus 1; none if an ask keyed `once` is logged.
@@ -170,7 +222,8 @@ pub fn rename_fleet(
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let q = "UPDATE events SET fleet = ?2, json = json_set(json, '$.fleet', ?2) WHERE fleet = ?1";
         let n = tx.execute(q, params![old, new])?;
-        tx.execute("DELETE FROM snapshot WHERE key IN ('states', 'board')", [])?;
+        tx.execute("DELETE FROM snapshot WHERE key IN ('states', 'board', 'fold')", [])?;
+        tx.execute("DELETE FROM states", [])?;
         tx.execute(
             "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', 0, '{}')",
             [],
@@ -182,14 +235,14 @@ pub fn rename_fleet(
     })
 }
 
-pub(crate) fn events(state: &Path, filter: &str, arg: u64) -> Result<Vec<Event>> {
+pub(crate) fn events(state: &Path, filter: &str, arg: impl rusqlite::ToSql) -> Result<Vec<Event>> {
     with(state, false, vec![], |c| rows(c, filter, arg))
 }
 
 /// #701: event rows read from the database (a full read's cost is the log's length).
 pub static ROWS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-fn rows(c: &Connection, filter: &str, arg: u64) -> Result<Vec<Event>> {
+fn rows(c: &Connection, filter: &str, arg: impl rusqlite::ToSql) -> Result<Vec<Event>> {
     let mut q = c.prepare(&format!("SELECT seq, json FROM events WHERE {filter} ORDER BY seq"))?;
     let rows = q.query_map([arg], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?;
     rows.map(|r| {
@@ -309,8 +362,7 @@ pub fn version(state: &Path) -> (Option<u64>, Option<u64>) {
 
 /// The newest event's seq (0: none): the page's change check.
 pub fn last_seq(state: &Path) -> u64 {
-    let q = "SELECT COALESCE(MAX(seq), 0) FROM events";
-    with(state, false, 0, |c| Ok(c.query_row(q, [], |r| r.get(0))?)).unwrap_or(0)
+    with(state, false, 0, |c| last(c)).unwrap_or(0)
 }
 
 pub fn put(state: &Path, key: &str, ts: u64, v: &impl Serialize) -> Result<()> {

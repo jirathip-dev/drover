@@ -1,5 +1,5 @@
 use crate::config::{home, Config};
-use crate::events::{emit, read, status_line, Event};
+use crate::events::{emit, status_line, working, Event};
 use crate::hosts::all_agents;
 use crate::runner::{self, Runner};
 use crate::{
@@ -1315,7 +1315,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Status(Scope { fleet, json }) => {
             let fleet = fleet.map(|f| crate::rename::current(&ctx.state, &f));
-            let (events, all) = (read(&ctx.state)?, crate::events::states(&ctx.state)?);
+            let (events, all) = (working(&ctx.state)?, crate::events::states(&ctx.state)?);
             let rows: Vec<_> = all
                 .values()
                 .filter(|s| fleet.as_ref().is_none_or(|f| *f == s.fleet))
@@ -1444,12 +1444,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 writeln!(out, "{fleet}: paused")?;
                 return Ok(1);
             }
-            let (code, line) = queue::next(&read(&ctx.state)?, &fleet);
+            let (code, line) = queue::next(&working(&ctx.state)?, &fleet);
             writeln!(out, "{line}")?;
             return Ok(code);
         }
         Cmd::Board { fleet } => {
-            let events = read(&ctx.state)?;
+            let events = working(&ctx.state)?;
             let all = fleet.map_or_else(
                 || queue::fleets(&events),
                 |f| vec![crate::rename::current(&ctx.state, &f)],
@@ -1527,7 +1527,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             cmd: QueueCmd::Ls { json },
         } => {
             let fleet = crate::rename::current(&ctx.state, &fleet);
-            let rows = queue::ls_json(&read(&ctx.state)?, &crate::events::states(&ctx.state)?, &fleet);
+            let rows = queue::ls_json(&working(&ctx.state)?, &crate::events::states(&ctx.state)?, &fleet);
             if json {
                 writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
             }
@@ -1617,7 +1617,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 crate::hosts::Pass::new(r, None)
             };
             let off = match cmd {
-                Cmd::Check | Cmd::Drive { .. } => crate::hosts::idle_off(&cfg, &read(&ctx.state)?),
+                Cmd::Check | Cmd::Drive { .. } => crate::hosts::idle_off(&cfg, &working(&ctx.state)?),
                 _ => std::collections::BTreeSet::new(),
             };
             let pass = pass.sparing(off, Some((ctx, &cfg)));
@@ -1752,7 +1752,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         let load =
                             |p: &PathBuf| Ok((name(p), std::fs::read(p).with_context(|| p.display().to_string())?));
                         let files = file.iter().map(load).collect::<Result<Vec<_>>>()?;
-                        crate::orchestrator::find(&read(&ctx.state)?, &id)?;
+                        crate::orchestrator::find(&working(&ctx.state)?, &id)?;
                         let files = crate::orchestrator::upload(ctx, &cfg, &id, &files)?;
                         let agent = crate::orchestrator::say(ctx, &cfg, r, (&id, &text, &files), (&by, false))?;
                         writeln!(out, "{id}: -> {agent}")?;
@@ -1852,7 +1852,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now, id.as_deref()))?;
                 }
                 Cmd::Waiting(Scope { fleet, json }) => {
-                    let (events, agents) = (read(&ctx.state)?, all_agents(&cfg, r).unwrap_or_default());
+                    let (events, agents) = (working(&ctx.state)?, all_agents(&cfg, r).unwrap_or_default());
                     let at = places(ctx, &cfg, r, &events);
                     let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true);
                     let mut rows: Vec<_> = all
@@ -2261,8 +2261,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             .map_or_else(|| crate::shed::Wire::Socket(crate::shed::default_socket()), |b| b.wire);
         let report = shed_proto::Reported {
             state: state.into(),
-            note: None,
-            state_source: None,
+            ..Default::default()
         };
         if let Err(e) = crate::shed::call(
             r,
@@ -2428,7 +2427,7 @@ fn lane_event(ctx: &Ctx, kind: &str, mut d: serde_json::Value) {
     d["lane"] = json!(lane);
     let ev = Event::new(ctx.now, fleet, issue, kind, d);
     let again = |e: &Event| e.kind == ev.kind && e.str("cause") == ev.str("cause") && e.ts + 3600 > ev.ts;
-    let quiet = kind == "hook-failed-closed" && crate::events::read(&ctx.state).is_ok_and(|l| l.iter().any(again));
+    let quiet = kind == "hook-failed-closed" && crate::events::working(&ctx.state).is_ok_and(|l| l.iter().any(again));
     let _ = match Config::load(&ctx.config) {
         Ok(cfg) if !quiet => emit(&ctx.state, &cfg, ev),
         _ => crate::events::append(&ctx.state, &ev),

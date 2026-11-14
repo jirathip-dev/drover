@@ -33,7 +33,7 @@ pub fn pass(
     out: &mut dyn Write,
     fleets: &[&str],
 ) -> Result<()> {
-    let events = crate::events::read(&ctx.state)?;
+    let events = crate::events::working(&ctx.state)?;
     let agents = crate::hosts::all_agents(cfg, seen)?;
     let mut now: Vec<Breach> = tick(ctx, cfg, r).into_iter().collect();
     for f in fleets {

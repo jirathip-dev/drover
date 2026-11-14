@@ -75,7 +75,7 @@ fn six_lanes_failing_to_start_on_one_host_trip_the_breaker_once_and_park_no_issu
     let down = kinds(&c, "runtime-down");
     assert_eq!(down.len(), 1, "{out}");
     assert_eq!(
-        (down[0].str("host"), down[0].data["failures"].as_u64()),
+        (down[0].str("host"), down[0].val("failures").as_u64()),
         (Some("local"), Some(5))
     );
     assert_eq!(down[0].str("sample"), Some("no output after its spawn"));

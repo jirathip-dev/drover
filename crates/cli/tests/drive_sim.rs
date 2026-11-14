@@ -461,7 +461,7 @@ fn a_silent_reviewer_is_superseded_and_the_review_completes() {
     });
     let replaced = s.events("rev-stale-replaced");
     assert_eq!(replaced.len(), 1, "{}", s.story());
-    assert_eq!(replaced[0].data["idle_minutes"].as_u64(), Some(120), "{}", s.story());
+    assert_eq!(replaced[0].val("idle_minutes").as_u64(), Some(120), "{}", s.story());
     let v = s.events("verdict");
     assert_eq!(v.len(), 1, "{}", s.story());
     assert_eq!((v[0].str("verdict"), v[0].str("sha")), (Some("PASS"), Some(HEAD)));

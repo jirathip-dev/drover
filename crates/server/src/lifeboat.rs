@@ -109,7 +109,7 @@ pub fn page(ctx: &Ctx, lanes: &[Lane], msg: &str) -> String {
         let at = a.issue.map_or(String::new(), |n| format!(" #{n}"));
         let q = esc(a.str("question").unwrap_or_default());
         let _ = write!(b, "<p>{} {}{at}: {q}<br>", esc(fleet), esc(id));
-        let opts = a.data["options"].as_array().cloned().unwrap_or_default();
+        let opts = a.val("options").as_array().cloned().unwrap_or_default();
         for (n, o) in opts.iter().enumerate() {
             let (n, o) = ((n + 1).to_string(), o.as_str().unwrap_or_default());
             b += &button(
