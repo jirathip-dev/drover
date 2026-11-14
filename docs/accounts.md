@@ -32,7 +32,9 @@ The token lasts a year. A remote spawn without that file is refused `NO_PROXY_TO
 ## Retired keys
 
 A fleet.toml that still has a role's `account` / `accounts` / `fallback`, `[chat] account(s)` or the `[accounts]`
-tables loads, and `check` warns once (`config-warning`) naming the keys to delete. They do nothing.
+tables loads, and `check` warns once (`config-warning`) naming the keys to delete. They do nothing; that covers
+`[accounts.usage]`'s `cap_pattern` too. The old board's Accounts panel is gone with them, and with it the account
+API fields `tone`, `meters`, `hint` and each meter's `label` and `pct`.
 
 ## The old store
 
