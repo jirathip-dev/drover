@@ -176,6 +176,8 @@ pub struct NeedIssue {
     pub mergeable: String,
     pub merge: bool,
     pub shots: Vec<String>,
+    /// #969: the sha of the verdict `shots` are from, the round `/shot/<fleet>/<n>/<i>/<sha>` names.
+    pub shots_at: Option<String>,
 }
 
 /// #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
