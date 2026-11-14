@@ -148,7 +148,7 @@ fn live_pushes_one_frag_per_changed_section() {
     assert_eq!(got.matches("event: host").count(), 1, "{got}");
     let line = got
         .lines()
-        .find(|l| l.starts_with("data: {\"accounts\""))
+        .find(|l| l.starts_with("data: {\"deepseek\""))
         .expect("the host data");
     let v: serde_json::Value = serde_json::from_str(&line[6..]).unwrap();
     assert_eq!(v["fleets"][0]["word"], "held", "{v}");

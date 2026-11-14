@@ -48,17 +48,14 @@ fn kick_with_non_ascii_path_does_not_panic() {
         brief: wt.join(".brief.md"),
         kick: "Read /Users/日本語/wt/.brief.md and execute it fully.".into(),
         lane: s(),
-        account: None,
         env: Default::default(),
         port: 41000,
         mcp: Default::default(),
         mcp_file: wt.join(".mcp.lane.json"),
         head: s(),
         title: s(),
-        resting: None,
         session: None,
         lane_key: None,
-        token: None,
     };
     assert!(!p.kick.is_char_boundary(20));
     let r = Fake(Default::default());

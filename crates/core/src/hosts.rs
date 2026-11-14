@@ -538,6 +538,15 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         s.busy = if live { ctx.now } else { s.busy };
         if s.up {
             s.seen = ctx.now;
+            // #637: a `shed-acp` host's lanes reach the proxy through their tunnel, kept up from here.
+            if let Some(Err(e)) = h
+                .machine
+                .as_deref()
+                .filter(|_| cfg.host_acp(name).is_some())
+                .map(|m| crate::proxy::ensure(ctx, cfg, r, (name, m)))
+            {
+                eprintln!("proxy {name}: {e:#}");
+            }
             if refresh || s.probed + 3600 <= ctx.now {
                 if let Some((tags, home)) = probe(&on) {
                     (s.tags, s.home, s.probed) = (tags, home, ctx.now);
@@ -698,13 +707,27 @@ pub fn held_since(events: &[Event], machine: Option<&str>) -> u64 {
 
 /// #923: the alert holding new lanes off the host on `machine`: a lane's usage limit or sign-out since its last `host-on`.
 pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>) -> Option<&'a str> {
-    let since = held_since(events, machine);
-    let hold = |e: &&Event| matches!(e.kind.as_str(), "usage-limit" | "signed-out") && e.str("machine") == machine;
-    events
-        .iter()
-        .rfind(hold)
-        .filter(|e| e.ts >= since)
-        .and_then(|e| e.str("reason"))
+    let at = |kinds: &[&str]| {
+        events
+            .iter()
+            .rposition(|e| kinds.contains(&e.kind.as_str()) && e.str("machine") == machine)
+    };
+    let i = at(&["usage-limit", "signed-out"])?;
+    (at(&["host-on"]) < Some(i)).then(|| events[i].str("reason")).flatten()
+}
+
+/// #923: the data of the alert that holds new lanes off spawn `sp`'s host because its lane `what` (keyed once per hold).
+pub fn hold_alert(events: &[Event], sp: &Event, what: &str) -> Value {
+    let (host, m, lane) = (sp.str("host").unwrap_or("main"), sp.str("machine"), sp.str("agent"));
+    let key = format!("{host}:{}", held_since(events, m));
+    let login = crate::providers::get(sp.str("harness").unwrap_or_default()).login();
+    let login = login.unwrap_or("its CLI login");
+    let why = format!(
+        "{} lane {} {what} on {host}; new lanes there wait: run `{login}` there, then `drover hosts on {host}`",
+        sp.str("role").unwrap_or_default(),
+        lane.unwrap_or_default()
+    );
+    json!({"key": key, "agent": lane, "host": host, "machine": m, "reason": why})
 }
 
 /// Admission on one host, in order `LOGIN_NEEDED`, `DISK_LOW`, `MEM_LOW`, `HOST_BUSY`: its sample and the first refusal.

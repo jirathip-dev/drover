@@ -59,6 +59,7 @@ mod tests {
             head: s(),
             title: s(),
             session: None,
+            lane_key: None,
         }
     }
 

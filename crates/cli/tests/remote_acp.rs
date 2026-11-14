@@ -206,15 +206,20 @@ impl Runner for Boat<'_> {
     fn sleep(&self, _: u64) {}
 }
 
-/// sendmeter on Claude (account C), herdr runtime; `hosts`: each a `shed-acp` remote host; mini (this one) off.
+/// sendmeter on Claude, herdr runtime, the proxy signing with `<config>/tokens/proxy` (#923: `claude setup-token`'s,
+/// 0600); `hosts`: each a `shed-acp` remote host; mini (this one) off.
 fn setup(name: &str, hosts: &[&str]) -> (drover::Ctx, PathBuf) {
-    let base = CONFIG.replace(
-        "harness  =  \"hermes\"    # toggled in tests",
-        "harness = \"claude\"\naccount = \"C\"",
-    );
+    let base = CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"");
     let home = tmpdir(&format!("{name}-remote"));
+    let d = tmpdir(name);
+    let tf = d.join("config/tokens/proxy");
+    std::fs::create_dir_all(tf.parent().unwrap()).unwrap();
+    std::fs::write(&tf, TOKEN_C).unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&tf, std::fs::Permissions::from_mode(0o600)).unwrap();
     let mut toml = format!(
-        "{base}\n[accounts]\nC = \"CLAUDE_CODE_OAUTH_TOKEN_C\"\n\n[proxy]\nport = 9\n\n[hosts.mini]\nenabled = false\n"
+        "{base}\n[proxy]\nport = 9\ntoken-file = \"{}\"\n\n[hosts.mini]\nenabled = false\n",
+        tf.display()
     );
     let mut cache =
         json!({"mini": {"tags": ["os:macos"], "home": "/Users/me", "probed": 999_000, "seen": 999_000, "up": true}});
@@ -223,7 +228,7 @@ fn setup(name: &str, hosts: &[&str]) -> (drover::Ctx, PathBuf) {
         cache[h] = json!({"tags": ["os:linux"], "home": home, "probed": 999_000, "seen": 999_000, "up": true,
             "load": 0.1, "mem": 12.0, "disk": 200.0});
     }
-    let mut c = ctx(&tmpdir(name), &toml);
+    let mut c = ctx(&d, &toml);
     c.exe = EXE.into();
     let st = c.state.parent().unwrap();
     std::fs::create_dir_all(st).unwrap();
@@ -540,16 +545,10 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
         .replace("port = 9", &format!("port = 9\nupstream = \"http://127.0.0.1:{port}\""));
     std::fs::write(&c.config, toml).unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    // #707: account C's hand-placed 0600 token file is what the proxy signs with.
-    let tf = c.config.with_file_name("tokens/C");
-    std::fs::create_dir_all(tf.parent().unwrap()).unwrap();
-    std::fs::write(&tf, TOKEN_C).unwrap();
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&tf, std::fs::Permissions::from_mode(0o600)).unwrap();
-    let acct = format!("token-file:{}", tf.display());
+    // #923: the one `[proxy] token-file` (setup's 0600 file) is what the proxy signs with.
     let mint = |agent: &str| {
         let k = drover::proxy::new_key().unwrap();
-        let id = drover::proxy::mint(&c, &cfg, &k, ("sendmeter", 12, agent), ("boat1", acct.as_str())).unwrap();
+        let id = drover::proxy::mint(&c, &cfg, &k, ("sendmeter", 12, agent), "boat1").unwrap();
         (k, id)
     };
     let ((live, _), (gone, gone_id), (late, _)) = (
@@ -621,15 +620,14 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
 }
 
 #[test]
-fn a_remote_acp_lane_whose_role_has_no_account_is_refused_acp_unguarded() {
+fn a_remote_acp_lane_without_the_proxy_token_file_is_refused_with_the_setup_command() {
     let (c, _) = setup("racp-noacct", &["boat1"]);
-    let toml = std::fs::read_to_string(&c.config).unwrap();
-    std::fs::write(&c.config, toml.replacen("account = \"C\"", "", 1)).unwrap();
+    std::fs::remove_file(c.config.with_file_name("tokens/proxy")).unwrap();
     let f = spawn_fake();
     let b = Boat::new(&c, &f, &[("boat1", true, true)]);
     let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl", "--host", "boat1"]);
     assert!(
-        code == 3 && o.contains("REFUSED ACP_UNGUARDED") && o.contains("[accounts] account"),
+        code == 3 && o.contains("REFUSED NO_PROXY_TOKEN") && o.contains("claude setup-token"),
         "{o}"
     );
     assert!(spawned(&c).is_empty() && drover::proxy::keys(&c).is_empty());

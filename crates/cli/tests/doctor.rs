@@ -21,12 +21,6 @@ integration = "staging"
 harness = "{harness}"
 profile = "fleet-impl"
 
-[accounts]
-main = "TOKEN_MAIN"
-
-[accounts.usage]
-main = "{accounts}/main"
-
 [serve]
 allowed_hosts = ["mac.tail.ts.net"]
 webhook_secret_file = "{hook}"
@@ -36,7 +30,6 @@ type = "webpush"
 sub = "mailto:a@b.c"
 "#,
         local = d.join("local").display(),
-        accounts = d.join("accounts").display(),
         hook = d.join("config/secrets/GITHUB_WEBHOOK_SECRET").display(),
     )
 }
@@ -53,8 +46,6 @@ fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
     let c = ctx(&d, &config(&d, harness));
     std::fs::create_dir_all(d.join("local")).unwrap();
     std::fs::create_dir_all(&c.worktrees).unwrap();
-    // #683: account main's own login folder, signed in.
-    write(&d.join("accounts/main/.claude.json"), r#"{"oauthAccount": {}}"#, 0o600);
     // #707: the webhook secret's 0600 file.
     write(&d.join("config/secrets/GITHUB_WEBHOOK_SECRET"), "hook", 0o600);
     write(
@@ -118,7 +109,6 @@ fn all_good_exits_zero_and_never_writes() {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
     for check in [
-        "accounts",
         "harness",
         "serve hosts",
         "serve",
@@ -138,10 +128,9 @@ fn all_good_exits_zero_and_never_writes() {
         assert!(line(&out, check).starts_with('✓'), "{out}");
     }
     assert!(
-        line(&out, "accounts").contains("sign in from each account's own folder") && !out.contains("TOKEN_MAIN"),
-        "{out}"
+        !out.contains(" accounts — ") && !out.contains(" account main — "),
+        "#923: no account rows: {out}"
     );
-    assert!(!out.contains(" account main — "), "{out}");
     assert!(
         !r.calls.borrow().iter().any(|c| c.starts_with("security ")),
         "{:?}",
@@ -406,25 +395,23 @@ fn bad_config_and_hermes_profiles() {
     assert_eq!(code, 0, "{out}");
 }
 
-/// #539: a config still naming the retired `accounts_env` loads; doctor warns (exit 0) until the line is dropped
-/// (#683: the account signs in with its own folder either way).
+/// #923: a config still naming the retired account keys loads; doctor warns (exit 0) until they are dropped.
 #[test]
-fn retired_accounts_env_warns_until_the_line_is_dropped() {
-    let (c, d) = setup("doc-retired", "claude");
-    let env = d.join("tokens.env");
-    write(&env, &format!("TOKEN_MAIN={TOKEN}\n"), 0o600);
+fn retired_account_keys_warn_until_they_are_dropped() {
+    let (c, _) = setup("doc-retired", "claude");
     let text = std::fs::read_to_string(&c.config).unwrap();
-    let line_ = format!("accounts_env = \"{}\"\n", env.display());
-    let old = text.replace("[accounts]\n", &format!("[accounts]\n{line_}"));
+    let old = text.replace(
+        "profile = \"fleet-impl\"\n",
+        "profile = \"fleet-impl\"\naccount = \"main\"\n",
+    ) + "\n[accounts]\nmain = \"TOKEN_MAIN\"\naccounts_env = \"/x/tokens.env\"\n";
     std::fs::write(&c.config, &old).unwrap();
-    let warn = "! config — [accounts].accounts_env is retired (#441): drop the line (#683: accounts sign in with their own login)";
+    let warn = "! config — [accounts] is removed (#923): lanes run on the host's own CLI login; delete [accounts], fleet.demo.role.impl.account";
 
     let r = good();
     let (code, out) = run(&c, &r, &["doctor"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.lines().any(|l| l == warn), "{out}");
-    assert!(line(&out, "accounts").starts_with('✓'), "{out}");
-    assert!(!out.contains(TOKEN), "{out}");
+    assert!(!out.contains("TOKEN_MAIN") && !out.contains(" accounts — "), "{out}");
 
     std::fs::write(&c.config, &text).unwrap();
     let (code, out) = run(&c, &good(), &["doctor"]);
@@ -541,7 +528,7 @@ fn a_paused_self_update_shows_in_doctor_and_the_board() {
 #[test]
 fn a_login_shell_exporting_the_token_warns() {
     let (c, _) = setup("doc-login", "claude");
-    let warn = "! a login shell exports CLAUDE_CODE_OAUTH_TOKEN (it overrides each lane's account) → remove it from";
+    let warn = "! a login shell exports CLAUDE_CODE_OAUTH_TOKEN (it overrides the host's own login in every lane) → remove it from";
     let (_, out) = run(&c, &good(), &["doctor"]);
     assert!(!out.contains("login shell"), "{out}");
     let shell = format!("Welcome {TOKEN}\ntoken:set\nfile:.zshrc\nfile:{TOKEN}\n");

@@ -138,6 +138,8 @@ pub struct Plan {
     pub title: String,
     /// #355: an orchestrator's harness session id, and whether to resume it (`Harness::resumes`).
     pub session: Option<(String, bool)>,
+    /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `Proxy::auth_token_env`).
+    pub lane_key: Option<String>,
 }
 
 /// #979: a build or check lane's shell and all it starts under macOS background `QoS`, else `nice 10` and idle I/O.
@@ -163,7 +165,10 @@ impl Plan {
         let plain = self.env.iter().filter(|(_, x)| !x.starts_with("secret:"));
         c.extend(plain.map(|(k, x)| format!("{k}='{}'", v(x))));
         c.extend(providers::get(&self.harness).env().iter().map(|v| String::from(*v)));
-        if !self.secrets().is_empty() {
+        if let Some(v) = providers::get(&self.harness).token_env() {
+            c.push(format!("&& unset {v}"));
+        }
+        if !self.secrets().is_empty() || self.lane_key.is_some() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));
         }
@@ -225,6 +230,11 @@ pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<
         let v = crate::secret::file(&f)?.with_context(why)?;
         text += &format!("export {var}='{}'\n", v.replace('\'', r"'\''"));
     }
+    // #637: a remote ACP lane holds no token, only its proxy key.
+    text += &p.lane_key.as_ref().map_or_else(String::new, |k| {
+        let var = crate::providers::proxied().map_or("", |px| px.auth_token_env);
+        format!("export {var}='{k}'\n")
+    });
     let file = (!text.is_empty()).then(|| p.secrets_file());
     if let Some(f) = &file {
         on.write_private(f, &text)?;
@@ -381,6 +391,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         head,
         title,
         session: None,
+        lane_key: None,
     })
 }
 
@@ -594,11 +605,12 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
 
 /// #637: an ACP lane on another host: its profile synced there by name (#592; not on a dry run), then the guard proven
 /// there (`hosts::acp_guard`). Unguarded, the host gets a `✗ acp guard` row (the next placement goes elsewhere) and
-/// spawn refuses `ACP_UNGUARDED`; guarded, the lane signs in with that host's own login (#923).
+/// spawn refuses `ACP_UNGUARDED`; guarded, the lane gets a fresh proxy key and the proxy's URL, never a token.
 fn remote_acp(
     ctx: &Ctx,
+    cfg: &Config,
     on: &crate::hosts::On,
-    p: &Plan,
+    p: &mut Plan,
     (pl, id): (&crate::hosts::Placed, &str),
     dry: bool,
 ) -> Result<()> {
@@ -621,6 +633,13 @@ fn remote_acp(
             ),
         );
     }
+    if let Err(why) = crate::proxy::token(cfg) {
+        return refused("NO_PROXY_TOKEN", why);
+    }
+    if let Some(px) = crate::providers::proxied() {
+        p.env.insert(px.base_url_env.into(), crate::proxy::url(cfg));
+    }
+    p.lane_key = Some(crate::proxy::new_key()?);
     Ok(())
 }
 
@@ -992,7 +1011,7 @@ pub fn spawn(
     let n = round(&read(&ctx.state)?, fleet, issue, &p);
     let labels = labels(&p, acp_id.as_ref().map(|_| (f, n)));
     if let (Some(id), Some(pl)) = (&acp_id, placed.as_ref().filter(|pl| pl.machine.is_some())) {
-        remote_acp(ctx, &on, &p, (pl, id), o.dry_run)?;
+        remote_acp(ctx, cfg, &on, &mut p, (pl, id), o.dry_run)?;
     }
     let acp = match &acp_id {
         Some(id) => acp_cmd(ctx, r, &p, id, hm.filter(|_| on.machine.is_some()))?,
@@ -1364,7 +1383,7 @@ pub fn spawn(
         copy_included(&f.local_path(), &p.worktree)?;
     }
     h.prepare(ctx, &on, &p)?;
-    if on.machine.is_some() && acp.is_empty() {
+    if on.machine.is_some() && p.lane_key.is_none() {
         // #592: its host keeps no fleet.toml, so this lane's profile is synced there by name.
         let exe = home(vec![ctx.exe.clone()]).remove(0);
         ok(
@@ -1372,6 +1391,11 @@ pub fn spawn(
             &exe,
             &["profiles", "sync", "--profile", &p.profile, "--role", p.family],
         )?;
+    }
+    if let (Some(k), Some(pl)) = (&p.lane_key, &placed) {
+        // #637: its proxy key recorded, the proxy and the host's tunnel up.
+        crate::proxy::mint(ctx, cfg, k, (fleet, issue, &p.agent), &pl.name)?;
+        crate::proxy::ensure(ctx, cfg, base, (&pl.name, pl.machine.as_deref().unwrap_or_default()))?;
     }
     let _secrets = deliver(ctx, &on, &p)?;
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());

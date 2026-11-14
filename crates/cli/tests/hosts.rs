@@ -234,7 +234,7 @@ fn admission_runs_per_host() {
     assert!(e.starts_with("HOST_BUSY: mini: load/cpu 3.00 > 2.5"), "{e}");
 }
 
-/// The impl role gets account A (its token, in `fake`'s store, returned); its profiles synced.
+/// The impl role still names retired account A (#923: ignored; its token returned to check none leaks); profiles synced.
 fn with_account(c: &drover::Ctx) -> &'static str {
     let toml = std::fs::read_to_string(&c.config).unwrap().replacen(
         "harness = \"claude\"",
@@ -306,7 +306,7 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         !calls.iter().any(|c| c.contains("OAUTH_TOKEN") || c.contains(token)),
         "token in argv: {calls:?}"
     );
-    // #683: a remote lane gets no account env and no token (its host signs in through the main host's proxy, #637).
+    // #923: a remote lane gets no account env and no token.
     assert!(
         !r.inputs
             .borrow()
@@ -322,7 +322,7 @@ fn a_remote_lane_runs_every_command_on_its_host() {
     );
     let export = sent.iter().find(|t| t.starts_with("export ")).unwrap();
     assert!(
-        export.contains("DROVER_ACCOUNT='A'") && !export.contains("CLAUDE_CONFIG_DIR") && !export.contains("&& . '"),
+        !export.contains("DROVER_ACCOUNT") && !export.contains("CLAUDE_CONFIG_DIR") && !export.contains("&& . '"),
         "{export}"
     );
     let start = sent.iter().find(|t| t.starts_with("exec ")).unwrap();
@@ -336,7 +336,7 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         .unwrap();
     assert_eq!(
         (e.str("host"), e.str("machine"), e.str("worktree"), e.str("account")),
-        (Some("bazzite"), Some("bazzite"), Some(WT), Some("A"))
+        (Some("bazzite"), Some("bazzite"), Some(WT), None)
     );
     // Its review round goes to the same host (the worktree lives there).
     assert_eq!(
@@ -908,7 +908,7 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
         .collect();
     let all = cmds.join("\n");
     assert!(!all.contains("OAUTH_TOKEN") && !all.contains(token), "{all}");
-    assert!(pj["account"] == "A" && pj["machine"] == "bazzite", "{pj}");
+    assert!(pj.get("account").is_none() && pj["machine"] == "bazzite", "{pj}");
     assert!(!all.contains(&format!("{mine}/")), "main host's home: {all}");
     assert!(
         all.contains("'git' '-C' '/home/me/src/sendmeter' 'worktree' 'add' '-b' 'issue-12'"),

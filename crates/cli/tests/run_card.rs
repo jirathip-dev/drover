@@ -85,7 +85,7 @@ fn groups_default_to_all_but_pause_and_set_and_name_only_known_groups() {
     let cfg = Config::parse(CONFIG).unwrap();
     assert_eq!(
         cfg.orchestrator.groups(),
-        ["design", "clean", "hosts", "reclaim", "accounts", "runners"]
+        ["design", "clean", "hosts", "reclaim", "runners"]
     );
     let set = Config::parse(&format!("{CONFIG}\n[orchestrator]\nallow = [\"set\"]\n")).unwrap();
     assert_eq!(set.orchestrator.groups(), ["set"]);

@@ -1,5 +1,5 @@
 //! Claude Code: per-role settings.json (`PreToolUse` hook) + role.md; the kick goes in as argv.
-use super::{banner, hook_command, Dialect, Provider};
+use super::{banner, hook_command, Dialect, Header, Provider, Proxy};
 use crate::herdr;
 use crate::lanes::{chat, mask, strip};
 use crate::runner::Runner;
@@ -15,9 +15,29 @@ const SETTINGS: &str = include_str!("../../hooks/claude-settings.json");
 pub struct Claude;
 pub static PROVIDER: Claude = Claude;
 
+const BETA_HEADER: &str = "anthropic-beta";
+const OAUTH_BETA: &str = "oauth-2025-04-20";
 /// #770: what `acp_profile` copies into a worktree (the lane's own files, never its work) and the folder it makes.
 pub const LOCAL_FILES: [&str; 2] = ["CLAUDE.local.md", ".claude/settings.local.json"];
 pub const LOCAL_DIR: &str = ".claude/";
+
+static PROXY: Proxy = Proxy {
+    upstream: "https://api.anthropic.com",
+    base_url_env: "ANTHROPIC_BASE_URL",
+    auth_token_env: "ANTHROPIC_AUTH_TOKEN",
+    headers,
+};
+
+fn headers(kept: &[Header]) -> Vec<Header> {
+    let sent = kept.iter().find(|h| h.0 == BETA_HEADER).map_or("", |h| h.1.as_str());
+    let mut beta: Vec<&str> = sent.split(',').map(str::trim).filter(|b| !b.is_empty()).collect();
+    if !beta.contains(&OAUTH_BETA) {
+        beta.push(OAUTH_BETA);
+    }
+    let head = (BETA_HEADER.to_string(), beta.join(","));
+    let rest = kept.iter().filter(|h| h.0 != BETA_HEADER).cloned();
+    std::iter::once(head).chain(rest).collect()
+}
 
 const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
 
@@ -64,6 +84,9 @@ impl Provider for Claude {
     }
     fn brands(&self) -> &'static [&'static str] {
         &["claude", "anthropic"]
+    }
+    fn proxy(&self) -> Option<&'static Proxy> {
+        Some(&PROXY)
     }
     fn sync(&self, ctx: &Ctx, role: &str, prompt: &str, profile: &str, usage: &str, out: &mut dyn Write) -> Result<()> {
         let dir = root(ctx).join(profile);

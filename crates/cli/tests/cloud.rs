@@ -753,15 +753,15 @@ impl Runner for Remote<'_> {
     }
 }
 
-/// #647: the fleet.toml a pre-#592 bootstrap wrote there: the `[fleet.*]` tables (a role's account pin, no
-/// `[accounts]`) and this host's command rules.
+/// #647: the fleet.toml a pre-#592 bootstrap wrote there: the `[fleet.*]` tables (a role's value this build rejects)
+/// and this host's command rules.
 const OLD_CONF: &str = r#"[fleet.sendmeter]
 integration = "staging"
 local = "/tmp/does-not-matter/sendmeter"
 repo = "jirathip-dev/sendmeter"
 
 [fleet.sendmeter.role.impl]
-account = "C"
+effort = "bogus"
 harness = "claude"
 profile = "fleet-impl"
 
@@ -788,7 +788,7 @@ fn bootstrap_repairs_an_old_bootstrap_fleet_toml_so_profiles_sync_passes_there()
     let sync = format!("test ! -e '{conf}' || '{}' profiles sync", c.exe);
     // The old file fails to load there, as on boat1.
     let o = r.run("ssh", &["cloud1".into(), sync.clone()]).unwrap();
-    assert!(o.stderr.contains("account 'C' is not in [accounts]"), "{o:?}");
+    assert!(o.stderr.contains("effort \"bogus\""), "{o:?}");
     let mut out = vec![];
     let res = drover::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out);
     let out = String::from_utf8(out).unwrap();

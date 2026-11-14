@@ -18,7 +18,7 @@ A move is copy, regenerate, then `drover doctor` until every line is ✓. Paths 
 | Config | `~/.config/drover/fleet.toml` | fleets, roles, notifiers, `[serve]` |
 | State database (#344) | `~/.local/state/drover/state.db` (copy it with drover stopped, or `sqlite3 state.db .backup`) | the event log (queue, lanes, verdicts, asks), paired phones (hashes only), push subscriptions |
 | VAPID key | `~/.local/state/drover/webpush/vapid.key` | keep it and paired phones keep getting push |
-| Secrets (#441) | the main host's OS store, `drover/<fleet>/<NAME>` | not a file: on the new host re-save secrets by request; accounts sign in with their own login (#683) |
+| Secrets (#441) | the main host's OS store, `drover/<fleet>/<NAME>` | not a file: on the new host re-save secrets by request; lanes sign in with the host's own login (#923) |
 
 Copy the secret files with their mode (`scp -p` or `rsync -a`), never through chat or a repo, then
 `chmod 600` `vapid.key`, `subs.json` and `devices.json` on the new host.

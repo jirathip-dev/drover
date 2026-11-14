@@ -36,7 +36,7 @@ fn a_fleet_toml_from_before_each_retired_key_change_loads() {
     }
     let c = ctx(&tmpdir("upgrade-441"), RETIRED);
     let (_, out) = run(&c, &Fake::default(), &["doctor", "--config-only"]);
-    let warn = "! config — [accounts].accounts_env is retired (#441): drop the line (#683: accounts sign in with their own login)";
+    let warn = "! config — [accounts] is removed (#923): lanes run on the host's own CLI login; delete [accounts], fleet.drover.role.impl.account";
     assert!(out.lines().any(|l| l == warn), "{out}");
 }
 
@@ -57,15 +57,15 @@ fn check_alerts_a_retired_key_once_and_the_board_shows_it() {
     let r = Fake::default();
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("[accounts].accounts_env is retired (#441)"), "{out}");
+    assert!(out.contains("[accounts] is removed (#923): lanes run on the host's own CLI login; delete [accounts], fleet.drover.role.impl.account"), "{out}");
     let log = drover::events::read(&c.state).unwrap();
     assert_eq!(log.iter().filter(|e| e.kind == "config-warning").count(), 1);
     let (_, out) = run(&c, &r, &["check"]);
-    assert!(!out.contains("accounts_env"), "once per key: {out}");
+    assert!(!out.contains("[accounts]"), "once per key: {out}");
     let (code, out) = run(&c, &r, &["board"]);
     assert_eq!(code, 0, "{out}");
     let first = out.lines().next().unwrap_or_default();
-    assert_eq!(first, "! [accounts].accounts_env is retired → drover doctor");
+    assert_eq!(first, "! [accounts] is retired → drover doctor");
     assert!(first.chars().count() <= 60);
 }
 

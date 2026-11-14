@@ -1061,6 +1061,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         title: crate::spawn::lane_title(&head, t.str("title").unwrap_or_default()),
         head,
         session: Some((session.clone(), resume)),
+        lane_key: None,
     };
     p.env.insert("DROVER_THREAD".into(), id.into());
     p.env.insert("DROVER_ORCHESTRATOR".into(), id_of(t).into());

@@ -91,7 +91,7 @@ drover profiles sync
 ```
 
 Check it worked: `drover status` prints no error. Every other key is in
-[fleet.example.toml](../fleet.example.toml). Claude accounts sign in with their own login folders, and secrets live in
+[fleet.example.toml](../fleet.example.toml). Lanes run on the host's own CLI login (`claude /login`), and secrets live in
 0600 files, never in fleet.toml: see [accounts.md](accounts.md) and [providers.md](providers.md).
 
 ## 3. First lane

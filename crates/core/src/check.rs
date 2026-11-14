@@ -298,7 +298,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     format!("{role} lane {lane} is gone ({}){why}", s.state),
                 ));
             }
-            // #923: a usage-limit banner or sign-in prompt alerts once and holds new lanes on the host (`hosts::login_hold`).
             if let (Some(p), Some(sp), Some(_)) = (pane, spawned, status) {
                 let screen = herdr::read(r, p).unwrap_or_default();
                 let h = crate::providers::get(sp.str("harness").unwrap_or_default());
@@ -307,12 +306,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     .into_iter()
                     .chain([(h.signed_out(&screen), "signed-out", "is signed out")]);
                 if let Some((_, kind, what)) = seen.into_iter().find(|s| s.0) {
-                    let (host, m) = (sp.str("host").unwrap_or("main"), sp.str("machine"));
-                    let key = format!("{host}:{}", crate::hosts::held_since(&events, m));
-                    let login = h.login().unwrap_or("its CLI login");
-                    let why = format!("{role} lane {lane} {what} on {host}; new lanes there wait: run `{login}` there, then `drover hosts on {host}`");
-                    let d = json!({"key": key, "agent": lane, "host": host, "machine": m, "reason": why});
-                    if held.insert(key) {
+                    let d = crate::hosts::hold_alert(&events, sp, what);
+                    if held.insert(d["key"].to_string()) {
                         fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
                     }
                 }

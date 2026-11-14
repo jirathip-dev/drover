@@ -29,7 +29,7 @@ pub struct Config {
     /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
     #[serde(alias = "conductor")]
     pub orchestrator: OrchestratorCfg,
-    /// #923: the retired account and proxy keys still set (`Config::warnings`).
+    /// #923: the retired account keys still set (`Config::warnings`).
     #[serde(skip)]
     pub retired: Vec<String>,
     /// #780: fleet.toml still names `[conductor]` or a `role.conductor` (doctor's deprecation line).
@@ -43,6 +43,8 @@ pub struct Config {
     pub chat: Chat,
     /// #537: `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
     pub ci_runners: Option<CiRunners>,
+    /// #637: `[proxy]`, the token proxy remote ACP lanes' model calls go through (`crate::proxy`, docs/hosts.md).
+    pub proxy: ProxyCfg,
     /// #894: `[self_update]`, the release branch the live install follows and the optional staging serve.
     pub self_update: SelfUpdate,
 }
@@ -62,6 +64,29 @@ impl Default for SelfUpdate {
             branch: "main".into(),
             staging_serve: false,
             staging_addr: "127.0.0.1:7787".into(),
+        }
+    }
+}
+
+/// #637: the proxy's port (on this host, and on each `shed-acp` host through an ssh tunnel), where it forwards, how
+/// long a lane key lives; #923: `token-file`, the one 0600 token it signs with (`claude setup-token`).
+#[derive(Debug, Deserialize)]
+#[serde(default)]
+pub struct ProxyCfg {
+    pub port: u16,
+    pub upstream: String,
+    pub key_hours: u64,
+    #[serde(rename = "token-file")]
+    pub token_file: Option<String>,
+}
+
+impl Default for ProxyCfg {
+    fn default() -> Self {
+        ProxyCfg {
+            port: 41990,
+            upstream: crate::providers::proxied().map_or("", |p| p.upstream).into(),
+            key_hours: 12,
+            token_file: None,
         }
     }
 }
@@ -547,6 +572,7 @@ pub struct Limits {
     pub notify_secs: u64,
     pub gate_check_minutes: u64,
     pub shed_read_millis: u64,
+    pub proxy_connect_secs: u64,
     pub service_call_secs: u64,
     pub disk_probe_secs: u64,
     pub disk_sick_secs: u64,
@@ -665,6 +691,7 @@ impl Default for Limits {
             notify_secs: 15,
             gate_check_minutes: 30,
             shed_read_millis: 300,
+            proxy_connect_secs: 1,
             service_call_secs: 2,
             disk_probe_secs: 2,
             disk_sick_secs: 300,
@@ -855,6 +882,7 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "shed_read_millis",
         "how long drive's intake waits for shed's state changes",
     ),
+    ("proxy_connect_secs", "the token proxy's liveness connect timeout"),
     (
         "service_call_secs",
         "a call to the running service's socket times out after this long",
@@ -1044,7 +1072,7 @@ impl Config {
     /// `config-warning`; never a load error.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
         let gone = "removed (#923): lanes run on the host's own CLI login; delete";
-        let acct = (!self.retired.is_empty()).then(|| ("accounts", format!("{gone} {}", self.retired.join(", "))));
+        let acct = (!self.retired.is_empty()).then(|| ("[accounts]", format!("{gone} {}", self.retired.join(", "))));
         let tg = "removed (#557): drover has no Telegram bridge now; drop the table".to_string();
         let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));
         let old =
@@ -1454,12 +1482,12 @@ impl Fleet {
     }
 }
 
-/// #923: the retired account, rotation and proxy keys `raw` still sets, as their fleet.toml paths.
+/// #923: the retired account and rotation keys `raw` still sets, as their fleet.toml paths.
 fn retired(raw: &toml::Table) -> Vec<String> {
-    let mut out: Vec<String> = ["accounts", "proxy"]
-        .iter()
-        .filter(|k| raw.contains_key(**k))
-        .map(|k| format!("[{k}]"))
+    let mut out: Vec<String> = raw
+        .contains_key("accounts")
+        .then(|| "[accounts]".into())
+        .into_iter()
         .collect();
     let keys = ["account", "accounts", "fallback"];
     let has = |t: Option<&toml::Value>, at: &str, out: &mut Vec<String>| {

@@ -1,54 +1,38 @@
 # Accounts
 
-## Lanes sign in with the account's own login (#683)
+## Sign in once per host with the CLI's own login (#923)
 
-drover keeps no Claude token and reads no Keychain item (#707). A lane on account `A` gets the env that account signs
-in with:
+drover has no account layer. Lanes run on the host's own login: sign in once per host with the CLI's own command
+(`claude /login`, `codex login`), in its default folder. drover sets no config folder, token or account name in a
+lane. Choosing between accounts is cooee's job (its per-thread account picker and sign-in sheet).
 
-- `[accounts] account_env = "cooee accounts env {provider} {name}"` (q846): drover runs that command (its words,
-  `{provider}` and `{name}` filled in, 30 s at most) and exports exactly the JSON object of env vars it prints, e.g.
-  `{"CLAUDE_CONFIG_DIR": "…"}`. A failing or non-JSON answer refuses the spawn `ACCOUNT_ENV` with its stderr.
-  drover never reads cooee's folder layout. When it is set, cooee's account list wins.
-- With no `account_env`, the account's folder: its `[accounts.usage]` folder, else `~/.config/drover/accounts/<name>`,
-  as the provider's config folder (claude: `CLAUDE_CONFIG_DIR`, codex: `CODEX_HOME`; each provider's `Accounts::config_env`).
+A login shell that exports `CLAUDE_CODE_OAUTH_TOKEN` overrides that login in every lane; `drover doctor` flags it.
+Remove the export.
 
-Standalone, sign each account in once with `CLAUDE_CONFIG_DIR=<folder> claude /login` (or with cooee, Settings ›
-Providers). Claude Code keeps that login itself; drover only points the lane at the folder. The lane's profile goes on
-top of that login (`--settings`, `--append-system-prompt-file`; an ACP lane's worktree-local settings), so its hook
-still guards it. `drover accounts` shows each account's sign-in as its CLI's own status command says
-(`claude auth status` / `codex login status` in the folder, the shell's token unset), never a Keychain read.
-`drover doctor` shows one row for where accounts sign in from (the folders or the `account_env` helper), no row per
-account (q855). Rotation, caps and `accounts reset` work per account as before. Remote hosts get no account env: their
-lanes sign in through the main host's token proxy (#637).
+## A usage limit or a sign-out holds the host
 
-## A signed-out account is skipped (#785)
+A lane that shows its CLI's usage-limit banner or a sign-in prompt raises one alert (`usage-limit` or `signed-out`)
+naming the lane, the host and the login command. Drive then starts no new lane on that host (spawn refuses
+`LOGIN_NEEDED`) until the owner signs in there and runs `drover hosts on <host>` (`main` for this host). There are
+no rest timers and no reset verb.
 
-Before a lane starts on an account, drover checks its sign-in: with cooee, `account_env = "cooee accounts env
-{provider} {name} --require-signed-in"` exits 3 for a signed-out account; standalone, the folder's status command says
-`loggedIn: false`. Either way the account rests like a capped one (`account-signed-out`, one owner alert naming the
-sign-in), the lane goes on the role's next account, and the account stays out until it is signed in and `drover
-accounts reset <name>` is run. A dry run asks nothing. An ACP lane with no event back `[limits] acp_start_minutes`
-(default 3) after its first turn alerts `lane-failed-start` naming its account, and `waiting` calls it a failed start,
-not idle.
+## Remote hosts: the token proxy
 
-The meter (`usage.jsonl`) is written only by an interactive Claude status line; ACP lanes write none, so a reading can be
-days old. `drover accounts` shows each reading's age, a window past its reset reads `0% (reset)`, `doctor` warns on a
-reading over 5 h old, and the pick never counts a window past its reset. `drover accounts` lists only lanes still
-running.
-
-## A token file, for a host with no login Keychain (#707)
-
-A headless Mac that must work with its login Keychain locked can give an account a hand-placed token instead:
+A `shed-acp` host's lanes sign in through the main host's token proxy (#637, [hosts](hosts.md)). The proxy signs
+every call with one token: run `claude setup-token` on the main host, save the token in a file only you can read
+(0600), and name it in fleet.toml:
 
 ```toml
-[accounts]
-A = "token-file:~/.config/drover/tokens/A"   # a `claude setup-token` token, mode 0600
+[proxy]
+token-file = "~/.config/drover/tokens/proxy"
 ```
 
-With no `account_env`, a lane on `A` gets the file's token as `CLAUDE_CODE_OAUTH_TOKEN`, in its own process only (the
-0600 secrets file its pane sources, never argv or the log); the token proxy signs that account's remote ACP lanes with
-it. A file group or others can read is refused `SECRET_FILE_OPEN`, and `doctor` warns when it is missing, loose or more
-than 300 days old (these tokens last a year). Folder logins stay the default: they refresh and can be revoked.
+The token lasts a year. A remote spawn without that file is refused `NO_PROXY_TOKEN` with the setup command.
+
+## Retired keys
+
+A fleet.toml that still has a role's `account` / `accounts` / `fallback`, `[chat] account(s)` or the `[accounts]`
+tables loads, and `check` warns once (`config-warning`) naming the keys to delete. They do nothing.
 
 ## The old store
 
@@ -57,6 +41,4 @@ none: `drover migrate` prints the `security delete-generic-password` lines for t
 other secrets are files: see [providers](providers.md).
 
 On macOS, Claude Code's own login lives in the login Keychain (the `Claude Code-credentials` item), so a headless Mac
-on folder logins keeps that keychain unlocked with no timeout and stays awake: see [troubleshooting](troubleshooting.md)
-§7 (or give its accounts a `token-file:`). On Linux it is said to be a plain file in the config folder
-(`.credentials.json`): unverified.
+keeps that keychain unlocked with no timeout and stays awake: see [troubleshooting](troubleshooting.md) §7.

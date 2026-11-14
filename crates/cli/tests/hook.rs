@@ -1362,7 +1362,6 @@ fn capability_groups_gate_a_orchestrators_owner_verbs() {
         "drover hosts off mini",
         "drover hosts refresh",
         "drover reclaim --apply",
-        "drover accounts reset A",
         "drover runners add x",
     ];
     let off = [

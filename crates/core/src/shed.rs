@@ -292,7 +292,22 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
         _ => return Ok(false),
     };
     (d["agent"], d["shed_seq"]) = (json!(e.name), json!(e.seq));
+    let limit = d["cause"] == RESUMABLE[0];
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(issue), "lane-state", d))?;
+    let events = if limit {
+        crate::events::read(&ctx.state)?.to_vec()
+    } else {
+        vec![]
+    };
+    if let Some(sp) = crate::events::last_spawn(&events, &e.name) {
+        let d = crate::hosts::hold_alert(&events, sp, "hit the usage limit");
+        if !events
+            .iter()
+            .any(|x| x.kind == "usage-limit" && x.data.get("key") == d.get("key"))
+        {
+            crate::events::emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "usage-limit", d))?;
+        }
+    }
     Ok(true)
 }
 

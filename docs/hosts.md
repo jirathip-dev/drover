@@ -24,8 +24,8 @@ fleet.toml nothing changes: every lane runs on the main host, as before.
    - drover itself. The lane's tool-guard hook calls `drover hook`, and the Claude profile lives under that host's
      own home: each spawn there syncs its lane's profile (`profiles sync --profile <p> --role <r>`, #592).
 
-   drover never copies credentials to another host: a role's `account` token is only exported to lanes on the
-   main host; a lane on another host runs on that host's own Claude login.
+   drover never copies credentials to another host: a lane on another host runs on that host's own Claude login
+   (a `shed-acp` host's, through the main host's token proxy).
 3. Add the host to fleet.toml:
 
 ```toml
@@ -108,7 +108,7 @@ The `spawn` event records the lane's `host` and `machine`. From then on, every h
 `git worktree`, the brief and MCP files, the reviewer's `verdict.md`, the dirty and unpushed checks, and `clean`.
 
 `spawn --dry-run` places the lane first and prints the commands exactly as they are sent: `--machine`, that host's
-paths and home, and no account token. If the agent fails to start on another host, its new workspace is closed.
+paths and home, and no token. If the agent fails to start on another host, its new workspace is closed.
 
 ## A remote lane's hook rules (#592)
 
@@ -363,10 +363,10 @@ asked there.
   per-lane key as `ANTHROPIC_AUTH_TOKEN`. The key reaches it only through the 0600 secrets file over ssh stdin, which
   is removed once the shell has read it. Port `<port>` there is an ssh reverse tunnel (`ssh -N -R`, started detached
   by spawn and each survey, its pid in `<state>/tunnel-<host>.pid`) to `drover proxy` here, which spawn starts when
-  it does not answer. The proxy checks the key, then forwards the call to `upstream` with the role's `[accounts]`
-  token (#707: the account's hand-placed `[accounts]` `token-file:<path>`, 0600, [accounts](accounts.md); only the
-  proxy reads it) and the `oauth-2025-04-20` beta added. curl sends it, with the token in its config on stdin and never in
-  argv, and the answer streams back as it comes. The account token never leaves the main host.
+  it does not answer. The proxy checks the key, then forwards the call to `upstream` with the one
+  `[proxy] token-file` token (#923: `claude setup-token`'s, 0600, [accounts](accounts.md); only the proxy reads it;
+  a remote ACP spawn without it is refused `NO_PROXY_TOKEN` with that step) and the `oauth-2025-04-20` beta added. curl sends it, with the token in its config on stdin and never in
+  argv, and the answer streams back as it comes. The token never leaves the main host.
 - **Lane keys.** They are kept in `<state>/proxy-keys.json` as sha256 only. A key signs while it is `live`: it is not
   `revoked`, not `expired` (`key_hours`), and not `ended` (its issue merged or closed, its lane closed, dead or
   spawned again, the last of which revokes the older key at once). `drover hosts keys` lists them with their state.

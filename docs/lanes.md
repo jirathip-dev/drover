@@ -307,11 +307,10 @@ once the issue moves or the SLO recovers, and the card clears.
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no
 checks `[limits] ci_start_minutes` (10) after its push: `CI broken: <workflow> did not start` when a failed run has
 no jobs, else `CI missing`; once per head, and drive sends the lane a fix round as for red CI) and
-`account-capped`. #640: a limit banner counts only on the harness's own lines (the pane's last block, unless a `⏺`
-reply or tool call heads it; prompt lines never), and caps only when the account's usage reading agrees: none
-fresh (10 min), or a window the plan has at 100%; otherwise it logs `cap-banner-ignored` with both numbers.
-`claude is signed out` (or a 401 usage reading) is `account-signed-out`, an owner card with no reset time: sign
-in or replace the token, then `drover accounts reset <name>`. `drover accounts` shows each state's evidence. It is idempotent and exits 0, so it can run from cron:
+`usage-limit` / `signed-out` (#923). A limit banner counts only on the harness's own lines (the pane's last block,
+unless a `⏺` reply or tool call heads it; prompt lines never); a sign-in prompt is `signed-out`. Either alerts once,
+naming the lane, its host and the login command, and holds new lanes on that host (`LOGIN_NEEDED`) until the owner
+signs in there and turns the host back on ([accounts](accounts.md)). It is idempotent and exits 0, so it can run from cron:
 
 ```cron
 */5 * * * * drover check >/dev/null 2>>"$HOME/Library/Logs/drover-check.log"
