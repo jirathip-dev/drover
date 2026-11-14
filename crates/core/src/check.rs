@@ -598,13 +598,13 @@ fn overload(
     events: &[Event],
     agents: &[Value],
 ) -> Result<()> {
-    let Some((main, _)) = crate::hosts::cards(cfg, r).into_iter().next() else {
-        return Ok(());
-    };
     let rows = crate::hosts::history(ctx);
-    let over = (rows.iter().rev().filter(|w| w.host == main))
+    let remote = |h: &str| cfg.hosts.get(h).is_some_and(|c| c.machine.is_some());
+    let over = (rows.iter().rev().filter(|w| !remote(&w.host)))
         .take_while(|w| w.load_cpu.is_some_and(|l| l > cfg.limits.load_per_cpu));
-    let (Some(since), Some(load)) = over.fold((None, None), |(_, l), w| (Some(w.ts), l.or(w.load_cpu))) else {
+    let (Some(since), Some((load, main))) = over.fold((None, None), |(_, l), w| {
+        (Some(w.ts), l.or(w.load_cpu.map(|x| (x, w.host.clone()))))
+    }) else {
         return Ok(());
     };
     if ctx.now < since + cfg.limits.overload_minutes * 60 {
