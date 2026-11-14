@@ -1,0 +1,11 @@
+Decided: sw.js lets design/ and shot/ go to the network, never caches.match or caches.put them
+Because: assets/sw.js:16
+Decided: card srcs end in the ask id (design) or the verify verdict's sha (shot); a URL without one still serves the latest round from disk
+Because: "Old-style URLs (no round) still resolve to the latest ask's file"
+Decided: a round URL reads the file at that round's commit with `git cat-file --batch` (spec on stdin), falling back to the disk file
+Because: crates/server/src/serve.rs:565
+Rejected: `git show` in argv — it prints "path does not exist" to serve's stderr on every shot (screenshots are untracked) and puts a URL segment in argv
+Decided: fix round: docs/serve.md's `GET needs` row names `shots_at`, the arch-check stale-doc finding
+Because: docs/serve.md:380
+Check: cargo test -p drover --test round_images fails on base 46f49a8^ + test only, passes at head
+Owner: design and verify pictures on cards now always show the round the card is about, never an older cached one
