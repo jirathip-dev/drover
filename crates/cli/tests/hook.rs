@@ -991,6 +991,34 @@ fn broad_kills_are_denied_and_pid_kills_allowed() {
     assert_eq!(hook_in(None, "impl", input), "", "the owner's shell");
 }
 
+/// #966: a lane never burns the shared host's CPU; ordinary test runs and capped or piped `yes` pass.
+#[test]
+fn host_stress_is_refused_and_test_runs_allowed() {
+    for cmd in [
+        "yes > /dev/null &",
+        "for i in $(seq 24); do yes >/dev/null & done",
+        "stress-ng --cpu 8",
+        "nice -n 5 stress --cpu 4 --timeout 60",
+        "while true; do :; done &",
+        "for i in 1 2 3; do cargo test & done",
+    ] {
+        let r = bash(cmd).unwrap_or_default();
+        assert!(r.contains("REFUSED HOST_STRESS"), "{cmd}: {r}");
+        assert!(r.contains("cpulimit") && r.contains("in CI"), "{r}");
+    }
+    for cmd in [
+        "cargo test",
+        "npx playwright test",
+        "xcodebuild test -scheme App",
+        "yes | head -n 3",
+        "cpulimit -l 50 -- yes > /dev/null",
+        "for f in a b; do cargo test -p $f && echo ok; done",
+        "git commit -m \"stress-ng --cpu 8\"",
+    ] {
+        assert_eq!(bash(cmd), None, "{cmd} allowed");
+    }
+}
+
 /// #256: per-host rules from `DROVER_HOST`: a cloud host allows docker and `supabase start` by default, a Mac keeps
 /// the ban; a host's `allow_commands` and `deny_commands_add` override that.
 #[test]

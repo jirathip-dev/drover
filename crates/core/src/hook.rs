@@ -111,6 +111,23 @@ pub fn broad_kill() -> Vec<Deny> {
         .into()
 }
 
+/// #966: lanes share the host's CPU: one lane's burn holds every lane's spawn `HOST_BUSY`.
+pub const HOST_STRESS: &str = "REFUSED HOST_STRESS: lanes share this host's CPU, so never stress it from a lane: \
+                               cap the run (cpulimit, or nice -n 20 under a timeout) or reproduce under load in CI";
+
+fn stress(cmd: &str) -> bool {
+    let runs = |s: &str, c: &str| denied(s, &[Deny::Cmd(c.into())]).is_some();
+    let words: Vec<&str> = cmd.split(|c: char| c.is_whitespace() || ";|&()`".contains(c)).collect();
+    let has = |w: &str| words.contains(&w);
+    let looped = has("do") && has("done");
+    let alone = |(i, c): (usize, char)| c == '&' && !cmd[..i].ends_with('&') && !cmd[i + 1..].starts_with('&');
+    let capped = has("cpulimit") || has("nice") && (has("timeout") || has("gtimeout"));
+    let yes = cmd
+        .split(['|', ';', '&', '\n'])
+        .any(|s| runs(s, "yes") && (s.contains('>') || looped));
+    looped && cmd.char_indices().any(alone) || !capped && (yes || runs(cmd, "stress") || runs(cmd, "stress-ng"))
+}
+
 /// The call's tool input: the first of any dialect's input keys holding an object.
 fn tool_input(input: &Value) -> &Value {
     let mut keys = dialects().flat_map(|d| d.input.iter());
@@ -242,8 +259,12 @@ fn notes(t: &[&str]) -> Option<String> {
 
 fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
     // #537: a quoted argument's text (`gh issue create --body "…docker…"`) is no command word.
-    if let Some(d) = denied(&dups(&unquote(cmd, true)), &p.deny) {
+    let bare = dups(&unquote(cmd, true));
+    if let Some(d) = denied(&bare, &p.deny) {
         return Some(d.reason());
+    }
+    if stress(&bare) {
+        return Some(HOST_STRESS.into());
     }
     let cmd = &dups(&unquote(cmd, false));
     let mut cwd = cwd.to_string();

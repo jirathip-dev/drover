@@ -2226,6 +2226,66 @@ pub fn dedup(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     Ok(())
 }
 
+/// #966: a lane over half the host's CPUs 3 slow passes running: one `lane-hog`, its pane paused, an owner ask.
+pub fn hogs(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
+    let (events, file) = (read(&ctx.state)?, ctx.state.with_file_name("lane-hogs"));
+    let old = std::fs::read_to_string(&file).unwrap_or_default();
+    let runs = |a: &str| {
+        old.lines()
+            .find_map(|l| l.strip_prefix(a)?.strip_prefix(' ')?.parse::<u32>().ok())
+    };
+    let hot: Vec<_> = (host::lane_cpu(r, &crate::hosts::lane_dirs(&events, None)).into_iter())
+        .filter(|l| l.1 >= 50.0)
+        .map(|(a, share, top)| (runs(&a).unwrap_or(0) + 1, a, share, top))
+        .collect();
+    std::fs::write(
+        &file,
+        hot.iter().map(|h| format!("{} {}\n", h.1, h.0)).collect::<String>(),
+    )?;
+    for (_, agent, share, top) in hot.iter().filter(|h| h.0 >= 3) {
+        let Ok(sp) = spawned(&events, agent, None) else {
+            continue;
+        };
+        let key = format!("{agent}:{}", sp.seq);
+        if events
+            .iter()
+            .any(|e| e.kind == "lane-hog" && e.str("key") == Some(&key))
+        {
+            continue;
+        }
+        let why = format!("{agent} held {share:.0}% of the host's CPU ({top}) 3 passes running: paused");
+        let d = json!({"key": key, "agent": agent, "reason": why});
+        fire(ctx, cfg, out, &events, (&sp.fleet, sp.issue), "lane-hog", d)?;
+        stop(ctx, cfg, r, out, agent)?;
+        let d = json!({"question": format!("{why}; kill its processes or let it run?"), "recommend": null,
+            "options": ["kill its processes", "let it run"], "agent": null, "kind": "owner", "lane_hog": agent});
+        crate::events::ask(
+            &ctx.state,
+            cfg,
+            vec![Event::new(ctx.now, &sp.fleet, sp.issue, "needs-decision", d)],
+            None,
+        )?;
+    }
+    Ok(())
+}
+
+/// #966: a `lane-hog` ask's [kill its processes]: those in the lane's folders, but its worktree's shell and agent.
+pub fn unhog(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, agent: &str) -> Result<()> {
+    let events = read(&ctx.state)?;
+    let sp = spawned(&events, agent, None)?;
+    let (on, wt) = (On::of(r, Some(sp)), sp.str("worktree").map(Path::new));
+    let mut gone = vec![];
+    for d in crate::hosts::lane_dirs(std::slice::from_ref(sp), sp.str("machine")).keys() {
+        gone.extend(host::reap(&on, d, Some(d.as_path()) == wt, None).0);
+    }
+    Ok(writeln!(
+        out,
+        "{agent}: killed {} process(es): {}",
+        gone.len(),
+        gone.join(", ")
+    )?)
+}
+
 /// #649: `wt`'s dirty files and unpushed commits, read on the lane's own host.
 fn pending(on: &On, wt: &str) -> Result<(usize, usize)> {
     let git = |a: &[&str]| ok(on, "git", &[&["-C", wt][..], a].concat());

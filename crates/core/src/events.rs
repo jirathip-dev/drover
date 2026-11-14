@@ -514,6 +514,7 @@ pub const PASSIVE: &[&str] = &[
     // #662: a gone ACP lane's local commits drive pushed before resuming it.
     "lane-pushed",
     "stall",
+    "lane-hog",
     "orphan-lane",
     "lane-dup",
     "orphan-issue",
