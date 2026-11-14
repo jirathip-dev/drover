@@ -1,0 +1,12 @@
+Decided: an open ask's Events row taps a /screens/ask sheet (by event seq) whose blocks are the Needs-you ask card's own blocks, built by ask_card
+Because: crates/server/src/screens.rs:464
+Rejected: a choice block inside the row — cooee rows only open, sheet or link (#1029's hot chip went the same way)
+Decided: ask_card lists the recommended option first, so the Needs-you card and the Events sheet stay one block
+Because: crates/server/src/screens.rs:234
+Decided: a closed ask's row shows its ending as the subtitle (answered · <choice>, withdrawn, closed: merged…) and gets no sheet; its thread or PR tap stays
+Because: crates/server/src/screens.rs:275
+Decided: an answer posted from any screen but cards closes the sheet; the Events stream then redraws the row as answered
+Because: crates/server/src/screens.rs:829
+Check: events_tab's new test answers a --thread ask through POST /action and sees its row turn to answered · full with no sheet
+Check: AC6 (answering on the TestFlight build) is a phone check this lane cannot run
+Owner: In the app's Events list, tap an ask to see its options (recommended first) and answer it; answered asks show what was picked.
