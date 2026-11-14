@@ -1,0 +1,5 @@
+Decided: `heavy-timeout` joins the default alert set, so a phone notifier with no `on` list pushes it.
+Because: "it runs anyway and logs a `heavy-timeout` event, which alerts"
+Check: crates/cli/tests/heavy.rs asserts a default webpush notifier wants `heavy-timeout`; it fails without the config.rs line.
+Rejected: keeping the codex/hermes and `cd`-persistence notes as fixes — reviewer marked them non-blocking and outside the AC.
+Owner: A heavy check that waits past its limit now alerts your phone.
