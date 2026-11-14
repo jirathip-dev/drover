@@ -38,7 +38,7 @@ review or ready).
 - A marked issue starts only with a free slot: `SERIAL_BUSY ci: #2968 holds 1/1`.
 - An issue whose diff joins a full group **holds** (`serial-held {group, holder}`): its lane is told
   `stop: ci is held by #2968; you'll get an update round when it merges`, its worktree stays and no review is spawned.
-  Its card reads `waits: ci held by #2968 (1/1)`.
+  Its card reads `serial: ci held by #2968 (1/1)`.
 - When a slot frees, the first held issue in queue order takes it (`serial-slot {group}`) and gets an update round
   (merge `origin/<integration>`), then carries on.
 - An issue in two or more groups takes their slots in name order and needs all of them before it continues, so two
@@ -46,6 +46,11 @@ review or ready).
 - Issues already in flight over a limit when a group is added keep going (grandfathered); new joins wait.
 
 Board, status and the Host tab show each group's use: `serial: db 3/10 · ci 1/1`.
+
+Hot files (#891): each file the last `drover hotspots` run stored is its own one-slot group, `hot <file>`, joined
+only by a PR's diff (never a `--serial` mark). Drive drops a file from it on its next pass once
+`.drover/arch.toml` on the integration branch lists it `frozen` or `generated` (`hot-files {files}` logs each
+change). A held issue's board row and card read `serial: hot <file>`.
 
 ## Fast-first landing (#350)
 
@@ -73,6 +78,17 @@ full_first_paths = ["db/migrations/**", ".github/workflows/**"]
 - **Numbers.** `drover stats land <fleet>` prints both modes' landings, per day, median PASS → landed, reverts and check
   time, plus the minutes integration sat red.
 - **Promotion.** `main` stays human-only; promote a staging commit only once its full suite is green.
+
+## Renaming a fleet (#935)
+
+`drover fleet rename <old> <new>` is a dry run that prints every change it would make. With `--yes` it applies them.
+It is owner only: the lane hook refuses it, so it runs as a run card's `--cmd`. It refuses `NOT_PAUSED` unless `<old>`
+is paused, `LANE_LIVE` while a lane of an open issue in `<old>` is running, and `BAD_NAME` when `<new>` is taken or
+not a valid name. First it backs up state.db, fleet.toml and the per-fleet state files. Then, in one transaction, it
+moves the queue, events, asks, verdicts and secrets (their `secret-set` events) to `<new>`, renames the state files
+and thread repo bindings, and renames the `[fleet.<old>*]` tables with every value unchanged. Any failure restores
+the backup. It logs one `fleet-renamed` event, and old names keep resolving in `status`, `asks`, `board` and
+`queue ls`. The fleet stays paused until the owner resumes it.
 
 ## Merge label (#947)
 

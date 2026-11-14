@@ -184,6 +184,16 @@ entries. A cloud host (`cloud = …`) defaults to allowing `docker`, `docker com
 machine; `allow_commands = []` keeps the ban); a Mac keeps the ban. `hosts bootstrap` writes that host's rules, its
 cloud default spelled out, into the config it leaves there, since the lane's hook reads that host's fleet.toml.
 
+Heavy checks (#909): `[fleet.<n>.heavy]` maps a kind to command patterns (`*` matches any text), e.g.
+`swiftlint = ["swiftlint analyze*"]`, `vitest = ["*vitest*"]`, `cargo = ["cargo test*", "cargo check*"]`. A lane's
+Bash call with a command matching one (claude only: its hook can rewrite the call) runs under `drover heavy`, which
+takes one of the host's slots first and frees it when the command exits or its holder dies, even by SIGKILL.
+`[hosts.<n>] heavy_max` (default 3) is the slots every lane on the host shares, whatever its fleet;
+`heavy_kind_max = { swiftlint = 1 }` caps a kind lower. A full host keeps the command waiting in line, first come
+first served (a kind at its own cap lets later kinds by); after `heavy_wait_minutes` (default 30) it runs anyway
+and logs `heavy-timeout`. Each command in line is a file in `<state>/heavy/` naming its `lane`, `kind`, `cmd`,
+`since` and `running`. Other commands are unchanged.
+
 Enforcement by harness: **claude** (PreToolUse) and **hermes** (`pre_tool_call`, the same
 `drover hook`) refuse the command mechanically. **dsh** has no pre-tool hook: its role prompt states
 the rule, and its `pre-push` hook refuses a push whose new commits add a script line (`*.sh`, `*.bash`,

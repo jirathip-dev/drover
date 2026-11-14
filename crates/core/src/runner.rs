@@ -26,6 +26,11 @@ pub trait Runner: Sync {
         let sh = format!("nohup '{exe}' {args} >> '{log}' 2>&1 < /dev/null & echo $!");
         Ok(self.run("sh", &argv(&["-c", &sh]))?.stdout.trim().parse()?)
     }
+    fn attached(&self, prog: &str, args: &[String]) -> Result<i32> {
+        use std::os::unix::process::ExitStatusExt;
+        let st = Command::new(prog).args(args).status()?;
+        Ok(st.code().or(st.signal().map(|s| 128 + s)).unwrap_or(1))
+    }
     fn shed(&self) -> Option<crate::shed::Shed> {
         None
     }
