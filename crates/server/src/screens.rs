@@ -150,7 +150,7 @@ fn hot_row(f: &str, r: &QueueRow) -> Option<Value> {
     })
 }
 
-fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
+fn fleet_card(ev: &[Event], c: &QueueCard, late: Option<&String>) -> Value {
     let f = &c.name;
     let (queued, busy): (Vec<&QueueRow>, Vec<&QueueRow>) = c.rows.iter().partition(|r| r.state == "queued");
     let rows = |rs: &[&QueueRow], q: bool| -> Vec<Value> {
@@ -172,8 +172,9 @@ fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
     ];
     let done =
         json!({"type": "row", "id": format!("done-today-{f}"), "title": "done today", "value": c.done_n.to_string()});
+    let drive = late.map_or_else(|| json!(c.drive.line), |l| json!({"text": l, "tone": "warn"}));
     json!({"type": "card", "id": format!("fleet-{f}"), "tone": "accent", "title": f,
-        "subtitle": c.paused.clone().unwrap_or_else(|| c.drive.line.clone()), "badge": badge[usize::from(paused)],
+        "subtitle": c.paused.as_ref().map_or(drive, |p| json!(p)), "badge": badge[usize::from(paused)],
         "buttons": [
             {"type": "button", "id": format!("drive-{f}"), "label": "Drive now", "style": "primary", "action": "drive", "values": {"fleet": f}},
             {"type": "button", "id": format!("pause-{f}"), "label": if paused { "Resume" } else { "Pause" }, "action": "pause", "values": {"fleet": f, "on": !paused}}],
@@ -566,6 +567,7 @@ impl Server<'_> {
 
     fn queue_screen(&self, ctx: &Ctx, q: &Q) -> Value {
         let (tab, ev) = (self.queue_tab(ctx), shared(&ctx.state).unwrap_or_default());
+        let late = Config::kept(ctx).ok().and_then(|c| crate::timer::unfinished(ctx, &c));
         let sel = q
             .get("repo")
             .filter(|r| tab.fleets.iter().any(|f| &f.name == *r))
@@ -583,7 +585,7 @@ impl Server<'_> {
             tab.fleets
                 .iter()
                 .filter(|f| sel.is_none_or(|s| f.name == s))
-                .map(|c| fleet_card(&ev, c)),
+                .map(|c| fleet_card(&ev, c, late.as_ref())),
         );
         let stream = sel.map_or("/screens/queue/stream".into(), |s| {
             format!("/screens/queue/stream?repo={s}")

@@ -693,6 +693,10 @@ pub fn drive(
     if KICK.get().is_none() {
         let _ = std::fs::write(&mark, "start");
     }
+    let closed = || working(&ctx.state).and_then(|ev| crate::check::closed_on_github(ctx, cfg, r, out, ev));
+    if let Some(Err(e)) = KICK.get().is_none().then(closed) {
+        writeln!(out, "closed issues: {e:#}")?;
+    }
     if let Some((step, secs)) = crate::timer::stuck_step(ctx, cfg).filter(|_| fast) {
         writeln!(
             out,

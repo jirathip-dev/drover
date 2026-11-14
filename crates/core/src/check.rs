@@ -1794,7 +1794,14 @@ fn clone_id(_: &Path) -> Option<u64> {
     None
 }
 
-fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: Arc<Log>) -> Result<Arc<Log>> {
+/// #1025: log `closed-other` for each open or queued issue closed on GitHub: check's and every drive pass's first step.
+pub(crate) fn closed_on_github(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    ev: Arc<Log>,
+) -> Result<Arc<Log>> {
     let st = fold(&ev);
     let mut any = false;
     for (name, f) in &cfg.fleet {
