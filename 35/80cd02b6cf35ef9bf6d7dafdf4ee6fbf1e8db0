@@ -1,0 +1,12 @@
+Decided: an issue in a hot group holds all its serial groups or none: once held on one it is held on all (`by: order`), and its slots are granted together only when every held group has room
+Because: "One that is waiting for another hot lock, or whose lane is dead, takes none, or takes all its locks at once."
+Decided: hot groups drop the review/ready grandfathering; configured groups keep #294's
+Because: "A lock never has more holders than its max."
+Decided: a joiner of a hot group waits behind an earlier in-flight waiter (queue order, then issue number), so A runs before C
+Because: crates/core/src/drive.rs:1572
+Decided: a serial wait row is never replaced by a stale missed-promise line, and an issue held for a slot is never `nothing drives this`
+Because: crates/core/src/waiting.rs:845
+Rejected: releasing a non-waiting dead lane's locks — drive respawns it with its slots; dropping them lets another take them and overcommits its review
+Rejected: making configured groups all-or-nothing too — the issue is about hot locks, and #294's tests fix name-order partial slots for them
+Check: cargo test --test serial_groups — the three new tests fail on commit 1 and pass at head; the #294 tests are unchanged
+Owner: Hot files no longer stay locked by a PR that is stuck waiting on another file, never get two holders at once, and `drover waiting` names the file and who holds it.
