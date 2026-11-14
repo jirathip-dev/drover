@@ -16,6 +16,8 @@ struct Machine {
     terms: BTreeMap<String, Value>,
     agents: Value,
     hook: bool,
+    bare: bool,
+    sudo: bool,
 }
 
 struct Boat<'a> {
@@ -61,6 +63,8 @@ impl Boat<'_> {
                 Machine {
                     agents,
                     hook: *h,
+                    bare: true,
+                    sudo: true,
                     ..Machine::default()
                 },
             )
@@ -101,7 +105,21 @@ impl Boat<'_> {
         }
         let w = &w[..];
         let s: Vec<&str> = w.iter().map(String::as_str).collect();
+        let (bare, sudo) = (self.machines.borrow()[m].bare, self.machines.borrow()[m].sudo);
+        let seen = "/home/user/.ascii:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin";
         match s[..] {
+            ["shed", ..] if !bare => Ok(Out {
+                code: 127,
+                stdout: String::new(),
+                stderr: "sh: 1: shed: not found".into(),
+            }),
+            ["sh", "-c", script] if !script.starts_with("export PATH") && script.contains("command -v shed") => {
+                Ok([out(1, &format!("shed not on PATH {seen}\n")), out(0, "")][usize::from(bare)].clone())
+            }
+            ["sh", "-c", script] if script.starts_with("export PATH") && script.contains("sudo ln -sf") => {
+                self.machines.borrow_mut().get_mut(m).unwrap().bare |= sudo;
+                Ok(out(i32::from(!sudo), ""))
+            }
             ["shed", "connect", ..] => {
                 let lines = input
                     .lines()
@@ -448,6 +466,37 @@ fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     assert!(
         has("shed install --force") && has("shed agents add claude-acp"),
         "{calls:?}"
+    );
+}
+
+#[test]
+fn bootstrap_puts_shed_and_drover_on_a_hosts_non_login_ssh_path_so_the_survey_finds_it_up() {
+    let (c, _) = setup("racp-path", &["boat1", "boat2"]);
+    let f = Fake::default()
+        .reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n")
+        .reply("@boat2 sh -c uname", "Linux\nx86_64\n/home/me\n")
+        .reply("@boat1 sh -c", "")
+        .reply("@boat2 sh -c", "")
+        .reply("sh -c nohup", "4242\n");
+    let b = Boat::new(&c, &f, &[("boat1", true, true), ("boat2", true, true)]);
+    for (m, sudo) in [("boat1", true), ("boat2", false)] {
+        let mut all = b.machines.borrow_mut();
+        let h = all.get_mut(m).unwrap();
+        (h.bare, h.sudo) = (false, sudo);
+    }
+    let (code, o) = run(&c, &b, &["hosts", "bootstrap", "boat1"]);
+    assert_eq!(code, 0, "{o}");
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let live = drover::hosts::survey(&c, &cfg, &shed_runner(&b, &cfg), false);
+    assert_eq!(live.get("boat1"), Some(&Some(vec![])), "{o}");
+
+    let (code, o) = run(&c, &b, &["hosts", "bootstrap", "boat2"]);
+    assert_ne!(code, 0, "{o}");
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    let failed = ev.iter().rev().find(|e| e.kind == "host-bootstrap").unwrap();
+    assert_eq!(
+        failed.data["tail"], "shed not on PATH /home/user/.ascii:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin",
+        "{o}"
     );
 }
 
