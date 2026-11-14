@@ -1,0 +1,15 @@
+Decided: lanes run on the host's own login; account pick, rotation, rests, sign-in check, fallback chain, 5h/7d meter and `accounts` CLI are gone
+Because: q1657
+Decided: the token proxy stays and signs every remote ACP call with the one `[proxy] token-file`; a remote ACP spawn without it refuses NO_PROXY_TOKEN naming `claude setup-token`
+Because: q1661
+Decided: a usage-limit banner or sign-in prompt (pane, or an ACP exit on the banner) logs one `usage-limit`/`signed-out` alert keyed per host hold; spawn refuses LOGIN_NEEDED there until `hosts on <host>`
+Because: "drive stops starting lanes on that host until the owner acts"
+Decided: retired `account`/`accounts`/`fallback` keys and `[accounts]` load and give one config-warning naming each path
+Because: "loads with one `config-warning` naming the keys to delete"
+Decided: the old board's Accounts panel and meter type go (HostTab.accounts, Account, Meter, system.ts); cooee-facing fields (HerdLane.account, RoleRow.accounts, Vendors.accounts) stay, always empty, so cooee's decoders keep working
+Because: q1661
+Decided: the banner check reads the pane text the lane-log roll already fetches, so check makes no extra herdr call and the sim metrics match staging
+Because: crates/core/src/check.rs:300
+Rejected: each remote host on its own `claude /login` — the owner kept the proxy for shed-acp hosts (q1661)
+Check: crates/cli/tests/access.rs drives check→alert→LOGIN_NEEDED→hosts on; remote_acp.rs covers the proxy token file and the NO_PROXY_TOKEN refusal
+Owner: Lanes now use each host's own Claude login; a usage limit or sign-out sends one alert and pauses new lanes on that host until you sign in and turn it back on.
