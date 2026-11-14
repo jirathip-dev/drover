@@ -392,6 +392,7 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
         ["api", "graphql", "--paginate", "--jq", jq, ..] if jq.contains("issues") => ok(""),
         ["api", "-i", ..] => ok(format!("HTTP/2.0 200 OK\netag: \"v{}\"\n\n[]", m.version)),
         ["api", path, "--jq", _] if path.contains("/rules/branches/") => ok("true\n"),
+        ["api", path, "--paginate", ..] if path.ends_with("/files") => ok(""),
         ["api", path, "--jq", ".commit.sha"] => {
             let b = path.rsplit('/').next().unwrap_or_default();
             match m.origin.get(b) {
