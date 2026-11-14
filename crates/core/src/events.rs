@@ -12,6 +12,8 @@ use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
+mod passive;
+
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
@@ -25,6 +27,10 @@ pub struct Event {
     pub issue: Option<u64>,
     #[serde(rename = "type")]
     pub kind: String,
+    /// #973: not activity (an alert, a note, a prompt): the fold and the idle-pane reader skip it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
+    pub passive: bool,
     #[serde(flatten)]
     pub data: Map<String, Value>,
 }
@@ -41,8 +47,19 @@ impl Event {
             fleet: fleet.into(),
             issue,
             kind: kind.into(),
+            passive: false,
             data,
         }
+    }
+    /// #973: this event is not activity.
+    #[must_use]
+    pub fn passive(mut self) -> Event {
+        self.passive = true;
+        self
+    }
+    /// #973: flagged passive, or a kind logged passive before the flag.
+    pub fn is_passive(&self) -> bool {
+        self.passive || passive::LEGACY.contains(&self.kind.as_str())
     }
     pub fn str(&self, k: &str) -> Option<&str> {
         self.data.get(k).and_then(Value::as_str)
@@ -254,7 +271,10 @@ fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
             let cmd = if n.webpush() { "webpush" } else { &n.cmd };
             eprintln!("drover: notifier `{cmd}` failed: {e:#}");
             let d = serde_json::json!({"cmd": cmd, "event": ev.kind, "error": format!("{e:#}")});
-            let _ = append(state, &Event::new(ev.ts, &ev.fleet, ev.issue, "notify-failed", d));
+            let _ = append(
+                state,
+                &Event::new(ev.ts, &ev.fleet, ev.issue, "notify-failed", d).passive(),
+            );
         }
     }
     Ok(())
@@ -410,95 +430,6 @@ pub fn checks(e: &Event) -> bool {
         .and_then(Value::as_bool)
         .unwrap_or(e.str("role") == Some("rev"))
 }
-
-/// Events `drover check` and notifiers write about an issue; they are not activity.
-pub const PASSIVE: &[&str] = &[
-    // #778: a tapped start still waiting; the decision before it moved the issue.
-    "pending-action",
-    "lane-state",
-    "lesson-prompted",
-    // #511: a lane's typed turn end and drive's prompt on it; neither moves the issue.
-    "turn-end",
-    "turn-prompted",
-    "promise",
-    "promise-missed",
-    "self-heal",
-    "stuck",
-    "slo-ok",
-    // #677: a why note put on a round head, one that failed to push, and drive's one nudge on a refused note.
-    "why",
-    "why-failed",
-    "why-nudged",
-    // #666: an ACP lane's first prompt sent again.
-    "start-resent",
-    "nudged",
-    "respawned-silent",
-    "rev-stale-replaced",
-    "budget-freed",
-    // #798: a finished lane's build folder or scratch removed.
-    "build-freed",
-    "wip-saved",
-    "wip-blocked",
-    // #662: a gone ACP lane's local commits drive pushed before resuming it.
-    "lane-pushed",
-    "stall",
-    "orphan-lane",
-    "orphan-issue",
-    "outbox-stale",
-    "lane-dead",
-    "ready-unmerged",
-    "ci-missing",
-    "notify-failed",
-    "push-sent",
-    "account-capped",
-    "agent-unavailable",
-    "account-signed-out",
-    "lane-failed-start",
-    "cap-banner-ignored",
-    "spawn-failed",
-    // #724: a failed spawn drive retries after a backoff, and the alert on a third identical one.
-    "spawn-error",
-    "spawn-failing",
-    "spawn-started",
-    // #500: an adoption is logged with its `spawn`; a design lane's alone must not end the issue's verdict wait.
-    "spawn-adopted",
-    "fallback",
-    "ask-waiting",
-    "driven",
-    "respawn",
-    "drive-pass",
-    "kick",
-    "amended",
-    "conflict-predicted",
-    "heads-up",
-    "lane-closed",
-    "lane-kept",
-    "lane-kept-dirty",
-    "lane-reaped",
-    "lane-trimmed",
-    "stale-pane-killed",
-    "decision-redelivered",
-    "labelled",
-    "build-cloned",
-    "build-reused",
-    "unlabelled",
-    "form-only-rejected",
-    "form-rounds-exhausted",
-    "stale-marker",
-    "spawn-held",
-    "host-busy",
-    "outbox",
-    // #584: an ask's other endings, and the one-time sweep.
-    "ask-withdrawn",
-    "ask-delivered",
-    "ask-failed",
-    "ask-expired",
-    "asks-swept",
-    // #509: a side effect's log around it; the step's own event (spawn, merged) is the activity.
-    "intent",
-    "done",
-    "failed",
-];
 
 /// #584: an ask's endings, the first that applies naming why it closed.
 const ORDER: [&str; 9] = [
@@ -908,10 +839,7 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
         // A merged issue never leaves `merged`, whatever is logged after it (#350: but for its landing reverted or
         // fixed forward); a closed one only for a new spawn.
         let back = matches!(e.kind.as_str(), "reverted" | "land-fix");
-        if PASSIVE.contains(&e.kind.as_str())
-            || s.state == "merged" && !back
-            || s.state == "closed" && e.kind != "spawn"
-        {
+        if e.is_passive() || s.state == "merged" && !back || s.state == "closed" && e.kind != "spawn" {
             continue;
         }
         // Design lanes are the owner's: they never move the issue through review or merge; #412: one on the issue

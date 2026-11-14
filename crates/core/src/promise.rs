@@ -168,7 +168,10 @@ pub fn pass(
         if let Some(kind) = w.promise.filter(|_| fresh) {
             let deadline = ctx.now + cfg.limits.promise_secs(kind);
             let d = json!({"kind": kind, "reason": w.what, "deadline": deadline, "state": s.state, "head": head});
-            crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "promise", d))?;
+            crate::events::append(
+                &ctx.state,
+                &Event::new(ctx.now, fleet, Some(s.issue), "promise", d).passive(),
+            )?;
             continue;
         }
         let Some((p, None)) = was else { continue };

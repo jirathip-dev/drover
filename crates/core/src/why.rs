@@ -200,7 +200,7 @@ pub fn turn(
     let files = ok(r, "git", &["-C", &local, "diff", "--name-only", &range]).unwrap_or_default();
     let files: Vec<&str> = files.lines().collect();
     let d = json!({"sha": head, "round": round, "branch": branch, "agent": agent, "owner": owner, "files": files});
-    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "why", d))?;
+    emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "why", d).passive())?;
     on.remove(&path)?;
     writeln!(out, "why note on {head:.7} (round {round}) pushed to refs/notes/why")?;
     Ok(None)

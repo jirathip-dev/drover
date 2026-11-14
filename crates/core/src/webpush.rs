@@ -277,7 +277,7 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
     }
     if sent > 0 {
         let d = serde_json::json!({"devices": sent});
-        crate::events::append(log, &Event::new(ev.ts, &ev.fleet, None, "push-sent", d))?;
+        crate::events::append(log, &Event::new(ev.ts, &ev.fleet, None, "push-sent", d).passive())?;
     }
     if !errs.is_empty() {
         bail!("webpush: {}", errs.join("; "));
