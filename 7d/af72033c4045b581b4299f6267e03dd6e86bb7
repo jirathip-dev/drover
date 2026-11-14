@@ -1,0 +1,6 @@
+Decided: merge origin/staging (#926 lane sheet, #978 issues table); #926's new lane_sheet reads events::working like the other board readers
+Because: q1686
+Because: crates/server/src/screens.rs:659
+Rejected: none
+Check: rg 'shared\(' crates/server still finds nothing after the merge
+Owner: Brought the branch up to date with staging; the board still reads only what it shows.
