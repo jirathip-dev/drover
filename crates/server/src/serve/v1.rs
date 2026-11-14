@@ -59,7 +59,9 @@ impl Server<'_> {
             _ if !self.allowed(ctx, head) => reply("403 Forbidden", "FORBIDDEN", "foreign Host or Origin"),
             (_, Some(x))
                 if busy(auth)
-                    && (lane.or(setup).is_some() || ["needs", "lanes", "chat"].contains(&x) || paired_op(x)) =>
+                    && (lane.or(setup).is_some()
+                        || ["needs", "lanes", "chat", "shed"].contains(&x)
+                        || paired_op(x)) =>
             {
                 reply("503 Service Unavailable", "BUSY", "board busy, retrying")
             }
@@ -93,7 +95,16 @@ impl Server<'_> {
                     },
                 )
             }
-            ("GET", Some("config")) if !paired => reply("401 Unauthorized", "UNPAIRED", "pair this device first"),
+            ("GET", Some("config" | "shed")) if !paired => {
+                reply("401 Unauthorized", "UNPAIRED", "pair this device first")
+            }
+            ("GET", Some("shed")) => {
+                let (cfg, ev) = (Config::kept(ctx), shared(&ctx.state));
+                match cfg.and_then(|c| Ok((c, ev?))) {
+                    Ok((c, ev)) => out("200 OK", &self.shed_rows(ctx, &c, &ev)),
+                    Err(e) => reply("500 Internal Server Error", "ERROR", format!("{e:#}")),
+                }
+            }
             ("GET", Some("config")) => crate::propose::view(ctx).map_or_else(|e| done(Err(e)), |v| out("200 OK", &v)),
             ("GET", Some("host")) => out("200 OK", &vendors(ctx, roots(ctx, self.host_tab(ctx)))),
             ("GET", Some("queue")) => out("200 OK", &marked(ctx, self.queue_tab(ctx))),
@@ -377,6 +388,32 @@ impl Server<'_> {
             chat,
             blocks: acp_blocks(&ev),
         }
+    }
+
+    pub(super) fn shed_rows(&self, ctx: &Ctx, cfg: &Config, events: &[Event]) -> Vec<crate::api::ShedRow> {
+        let key = "shed others".to_string();
+        let kept = lock(&self.cache).get(&key).cloned().unwrap_or_default();
+        let mut rows: Vec<Value> = serde_json::from_str(kept.1.as_deref().unwrap_or("[]")).unwrap_or_default();
+        if kept.1.is_none() || ctx.now >= kept.0 + 10 {
+            let same = |a: &Value, b: &Value| ["host", "name", "state"].iter().all(|k| a[k] == b[k]);
+            let mut now = crate::shed::others(cfg, &self.r, events);
+            for r in now.iter_mut().filter(|r| r.get("error").is_none()) {
+                let was = rows.iter().find(|p| same(p, r)).and_then(|p| p["since"].as_u64());
+                r["since"] = json!(was.unwrap_or(ctx.now));
+            }
+            rows = now;
+            lock(&self.cache).insert(key, (ctx.now, Some(json!(rows).to_string())));
+        }
+        let row = |r: Value| {
+            let age = r["since"]
+                .as_u64()
+                .map(|t| crate::events::age(ctx.now.saturating_sub(t)));
+            crate::api::ShedRow {
+                age,
+                ..serde_json::from_value(r).unwrap_or_default()
+            }
+        };
+        rows.into_iter().map(row).collect()
     }
 
     pub(crate) fn lane_list(&self, ctx: &Ctx, cfg: &Config, events: &[Event], st: &States) -> Vec<Lane> {
