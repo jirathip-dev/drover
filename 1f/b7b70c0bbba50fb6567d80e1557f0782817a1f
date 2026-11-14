@@ -1,0 +1,7 @@
+Decided: no gate change; #967 already reduces the rollup to the latest run per name when no required list is set
+Because: crates/core/src/gh.rs:413
+Decided: the PR summary counts the reduced rollup it already judges, so a rerun check counts once
+Because: "The summary's check count is the number of distinct checks, not the number of runs."
+Rejected: a second reduction inside ci() or not_green() — every caller already passes required()'s output
+Check: m3 pr_judges_and_counts_the_latest_run_of_each_check fails on staging (3 checks) and passes at the head
+Owner: A check that failed and then passed on rerun no longer shows a PR as red, and the status line counts each check once.
