@@ -1,0 +1,8 @@
+Decided: fill the PR body evidence at the new head and run the doubled-log check best of 3 instead of best of 2
+Because: q1659
+Because: crates/cli/tests/perf.rs:902
+Rejected: a wider bound than 1.5x — q1659 fixed the bound at 1.5x; more repeats cut the noise without loosening it
+Decided: merge origin/staging and keep both sides of the serve.rs conflict: staging's shed rows block, then this branch's lanes call
+Because: crates/server/src/serve.rs:2306
+Check: the PR body evidence names the head sha and holds no placeholders
+Owner: Form fix plus a steadier timing check; no product code changed in this round.
