@@ -1,0 +1,157 @@
+# Affected-only CI (drover docs/ci.md). Copy to .github/workflows/ci.yml in your repo, then:
+#   - replace `staging` under `on:` with your fleet's integration branch;
+#   - set the repo variable MERGE_LABEL if your fleet's merge_label is not "merge-ready";
+#   - fill in the `leg` job's commands and, if you want, the scope rule in `changes`;
+#   - in fleet.toml: required_checks = ["ci"], merge_label = "merge-ready".
+# A ready PR runs only the legs its change can affect; the same pull_request run goes FULL when the PR carries the
+# merge label (drover adds it on a PASS at the head). `ci` is the one check to require.
+name: ci
+run-name: >-
+  ${{ github.event_name == 'pull_request' && (github.event.pull_request.draft || github.event.action == 'labeled' && github.event.label.name != (vars.MERGE_LABEL || 'merge-ready')) && 'no-op'
+  || (github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, vars.MERGE_LABEL || 'merge-ready')) && 'full'
+  || 'affected' }} · ${{ github.event.pull_request.title || github.ref_name }}
+
+on:
+  pull_request:
+    branches: [staging]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+  push:
+    branches: [staging]
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: The ref to check out (nightly-red.yml passes the integration branch)
+        type: string
+        default: ""
+
+# One group per PR, so a new push or the merge label cancels the older run of that PR. A `labeled` event for any
+# other label (and a draft) is a no-op in a run-unique group, so it never cancels a full run; so are schedule,
+# workflow_dispatch and workflow_call runs. Pushes to the integration branch queue per ref. Table: docs/ci.md.
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{ github.event_name == 'pull_request' && !github.event.pull_request.draft
+    && (github.event.action != 'labeled' || github.event.label.name == (vars.MERGE_LABEL || 'merge-ready'))
+    && format('pr-{0}', github.event.pull_request.number)
+    || github.event_name == 'push' && github.ref
+    || format('run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  LEGS: '["lint","test","build"]'
+
+jobs:
+  # Staging reuse: a push whose tree a green full labelled PR run already tested skips the legs and names that run.
+  # Any error leaves `run` empty, which means the full run (fail closed).
+  reuse:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.find.outputs.run }}
+    steps:
+      - id: find
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tree=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA" --jq .commit.tree.sha)
+          id=$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=ci-full-$tree" \
+            --jq '[.artifacts[] | select(.expired | not) | .workflow_run.id][0] // empty')
+          test -n "$id"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq .conclusion)" = success
+          echo "run=$id" >> "$GITHUB_OUTPUT"
+
+  # The scope decision: its outputs are the contract. `legs` is a JSON list, a subset of $LEGS (`[]` = nothing to
+  # run); `tree` is the tested tree. Replace the case rule with your build graph (Nx affected, cargo, …).
+  changes:
+    needs: reuse
+    if: >-
+      always() && needs.reuse.outputs.run == ''
+      && !(github.event_name == 'pull_request' && (github.event.pull_request.draft || github.event.action == 'labeled' && github.event.label.name != (vars.MERGE_LABEL || 'merge-ready')))
+    runs-on: ubuntu-latest
+    outputs:
+      legs: ${{ steps.scope.outputs.legs }}
+      tree: ${{ steps.scope.outputs.tree }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 2
+      - id: scope
+        env:
+          FULL: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, vars.MERGE_LABEL || 'merge-ready') }}
+        run: |
+          set -euo pipefail
+          echo "tree=$(git rev-parse 'HEAD^{tree}')" >> "$GITHUB_OUTPUT"
+          full=$FULL code=false
+          if [ "$full" = false ]; then
+            while read -r f; do
+              case "$f" in
+                *.md | docs/*) ;;
+                .github/* | *.lock | *-lock.* | go.sum | */go.sum | rust-toolchain* | .tool-versions | mise.toml | .nvmrc | .node-version) full=true ;;
+                */*) code=true ;;
+                *) full=true ;;
+              esac
+            done < <(git diff --name-only HEAD^1 HEAD)
+          fi
+          if [ "$full" = true ] || [ "$code" = true ]; then legs=$LEGS; else legs='[]'; fi
+          echo "full=$full legs=$legs"
+          echo "legs=$legs" >> "$GITHUB_OUTPUT"
+
+  leg:
+    needs: changes
+    if: always() && needs.changes.result == 'success' && needs.changes.outputs.legs != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        leg: ${{ fromJSON(needs.changes.outputs.legs) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - run: |
+          case "${{ matrix.leg }}" in
+            lint) echo "replace with your lint command"; exit 1 ;;
+            test) echo "replace with your test command"; exit 1 ;;
+            build) echo "replace with your build command"; exit 1 ;;
+          esac
+
+  # The one required check: red unless every leg passed or was scoped out. A no-op run names it `no-op`, so it
+  # never reports a `ci` result for the head. A green full PR run leaves a `ci-full-<tree>` artifact for reuse.
+  ci:
+    name: >-
+      ${{ github.event_name == 'pull_request' && (github.event.pull_request.draft || github.event.action == 'labeled' && github.event.label.name != (vars.MERGE_LABEL || 'merge-ready')) && 'no-op' || 'ci' }}
+    needs: [reuse, changes, leg]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - id: verdict
+        env:
+          NOOP: ${{ github.event_name == 'pull_request' && (github.event.pull_request.draft || github.event.action == 'labeled' && github.event.label.name != (vars.MERGE_LABEL || 'merge-ready')) }}
+          REUSED: ${{ needs.reuse.outputs.run }}
+          CHANGES: ${{ needs.changes.result }}
+          LEG: ${{ needs.leg.result }}
+          PICKED: ${{ needs.changes.outputs.legs }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$NOOP" = true ]; then echo "no-op: a draft or another label"; exit 0; fi
+          if [ -n "$REUSED" ]; then echo "staging reuse: this tree passed in $REPO_URL/actions/runs/$REUSED"; exit 0; fi
+          test "$CHANGES" = success || { echo "scope step: $CHANGES"; exit 1; }
+          if [ "$PICKED" = '[]' ]; then want=skipped; else want=success; fi
+          test "$LEG" = "$want" || { echo "legs $PICKED: $LEG"; exit 1; }
+          echo "legs $PICKED: $LEG"
+      - if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, vars.MERGE_LABEL || 'merge-ready')
+        run: echo "${{ needs.changes.outputs.tree }}" > tree.txt
+      - if: github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, vars.MERGE_LABEL || 'merge-ready')
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-full-${{ needs.changes.outputs.tree }}
+          path: tree.txt
+          retention-days: 14

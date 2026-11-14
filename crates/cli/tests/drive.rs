@@ -1367,6 +1367,41 @@ fn a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it() {
 }
 
 #[test]
+fn no_merge_label_parses_to_none_and_a_pass_adds_no_label() {
+    let c = ctx(&tmpdir("drive-no-label"), CONFIG);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    assert_eq!(cfg.fleet["sendmeter"].merge_label, None);
+    lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
+    std::fs::remove_dir_all(c.worktrees.join("sendmeter/gone-12")).unwrap();
+    let head = sha("abc");
+    let file = c.state.with_file_name("verdict.md");
+    std::fs::write(&file, "PASS\nall good\n").unwrap();
+    let r = fake(NONE)
+        .reply("gh pr view issue-12", &labelled_pr(&head, &[]))
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
+            &format!("{head}\n"),
+        )
+        .reply("gh pr edit", "")
+        .reply("git -C", "");
+    let f = file.to_string_lossy();
+    let (code, out) = run(
+        &c,
+        &r,
+        &["verdict", "sendmeter", "12", "PASS", "--sha", &head, "--file", &f],
+    );
+    assert_eq!(code, 0, "{out}");
+    idle(&c, &r);
+    assert!(
+        !r.called("gh pr edit") && !r.called("gh label"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    let (_, out) = run(&c, &r, &["status", "sendmeter"]);
+    assert!(!out.contains("lacks label"), "{out}");
+}
+
+#[test]
 fn status_says_a_ready_pr_lacks_the_merge_label() {
     let c = ctx(
         &tmpdir("drive-label-status"),
