@@ -1,0 +1,11 @@
+Decided: one predicate, orchestrator::hung, decides "hung" for both thread say and check, so the two can never disagree.
+Because: "has reported \"working\" with ~0% CPU and no output for longer than the stall threshold"
+Decided: "~0% CPU" reuses #792's BUSY_CPU_PCT (10% of one core), the line under which a lane counts as not running a tool.
+Because: crates/core/src/stall.rs:180
+Decided: an orchestrator's ACP output time comes from drive's shed intake (shed-out.json), which now also tracks terminals labelled `thread`; the quiet time counts from the later of the last output and the session's start.
+Because: crates/core/src/shed.rs:221
+Decided: stop accepts the thread id or the orchestrator-<id> agent name, but only after the lane lookup fails, so lane stops behave as before.
+Because: "`herdsman stop <thread>` (or a thread-level equivalent) ends a thread's orchestrator session whatever its runtime"
+Rejected: changing close() to cancel+kill for every ACP sleep — idle sleeps already work through kill+rm, and existing tests pin that.
+Check: hung ACP sessions get `shed cancel` then `shed kill` (CLI), orchestrator-sleep why hung/stopped, and a fresh start before delivery.
+Owner: a stuck chat assistant can now be stopped from the board, restarts itself on your next message, and raises a stall alert.
