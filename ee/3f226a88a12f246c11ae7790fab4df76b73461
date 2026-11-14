@@ -1,0 +1,12 @@
+Decided: `drover fleet rename <old> <new> [--yes]` re-keys every event row of the old fleet inside one SQLite transaction that commits only after the state files and fleet.toml have moved.
+Because: "It applies all the moves above in one transaction: a failure leaves nothing half-renamed, with the backup restored."
+Decided: secrets move with their `secret-set` events; drover keeps no Keychain store since #707, and secret files are not per fleet.
+Because: crates/core/src/secret.rs:1
+Decided: old names resolve by following the logged `fleet-renamed` events in order, so berth→shed→berth still resolves correctly.
+Because: "old-name lookups in `status`, `asks`, `board` and `queue ls` resolve to the new fleet"
+Decided: the verb is documented in docs/config.md "Renaming a fleet", which names every new CLI field arch-check flagged.
+Because: crates/core/src/arch.rs:615
+Rejected: renaming worktree folders (premerge-<fleet>, update-<fleet>) — they are git worktrees, so only regular state files move.
+Rejected: trimming to fit the cap — the 160-line gap would drop acceptance criteria; the owner decides in Q1669.
+Check: a live lane means a running agent named as a lane of an open issue in the old fleet; a pane from a finished lane does not block.
+Owner: Pause berth, then run `drover fleet rename berth shed --yes` from a run card; resume shed by hand afterwards.
