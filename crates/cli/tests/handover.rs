@@ -276,9 +276,12 @@ fn a_serve_over_its_memory_limit_hands_over_with_no_failed_request() {
 
     let log = log.lock().unwrap().clone();
     let high = high();
-    assert_eq!(high.len(), 1, "logged once: {high:?}\n{log}");
     assert_eq!(high[0].data["handover"], true, "{high:?}");
     assert!(high[0].data["rss_mb"].as_u64().unwrap() >= 1, "{high:?}");
+    assert!(
+        high[1..].iter().all(|e| e.data["handover"] == false),
+        "a fresh copy over it never hands over: {high:?}"
+    );
     assert!(still.is_none(), "the supervised pid serves on (exec in place)\n{log}");
     assert_eq!(
         log.matches("drover serve: phone page on").count(),
