@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{emit, read, Event};
+use crate::events::{emit, working, Event};
 use crate::runner::{json, ok, Runner};
 use crate::Ctx;
 use crate::{gate, gh};
@@ -20,7 +20,7 @@ pub fn amend(
     text: &str,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let is = |e: &&Event, k: &str| e.kind == k && e.fleet == fleet && e.str("id") == Some(basis);
     let asked = events.iter().find(|e| is(e, "needs-decision")).and_then(|a| a.issue);
     let by = events.iter().rev().find(|e| is(e, "decision"));
