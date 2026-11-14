@@ -2431,3 +2431,124 @@ fn clean_removes_exited_shed_terminals_of_merged_lanes_only() {
     let left: Vec<String> = b.lock().terms.keys().cloned().collect();
     assert_eq!(left, ["sendmeter-impl-13"], "an open issue's exited terminal stays");
 }
+
+/// #946: a shed-acp thread whose orchestrator session hangs: running, reporting `working`, no CPU and no output.
+fn hung_orchestrator(name: &str) -> (drover::Ctx, FakeShed) {
+    let b = FakeShed::new();
+    let c = acp_ctx(name, &acp_config(&b.sock, "claude", true));
+    run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
+    assert_eq!(
+        run(&c, &b.cli(&acp_fake(&["echo"])), &["thread", "say", "t1", "hi"]).0,
+        0
+    );
+    b.set("orchestrator-t1", |t| {
+        (t["reported"], t["resources"]) = (json!({"state": "working"}), json!({"rss_mb": 90, "cpu_pct": 0}));
+    });
+    (c, b)
+}
+
+fn hang_fake() -> Fake {
+    acp_fake(&["echo"]).reply("shed kill", "")
+}
+
+fn shed_calls(f: &Fake) -> Vec<String> {
+    let calls = f.calls.borrow();
+    let words = |c: &&String| c.split(' ').take(2).collect::<Vec<_>>().join(" ");
+    calls
+        .iter()
+        .filter(|c| c.starts_with("shed "))
+        .map(|c| words(&c))
+        .collect()
+}
+
+#[test]
+fn check_alerts_stall_once_for_a_hung_acp_orchestrator() {
+    let (c, b) = hung_orchestrator("acp-orchestrator-stall");
+    let f = hang_fake();
+    assert_eq!(run(&at(&c, c.now + 29 * 60), &b.cli(&f), &["check"]).0, 0);
+    assert!(thread_events(&c, "stall").is_empty(), "within stall_minutes");
+    let late = at(&c, c.now + 31 * 60);
+    let (code, out) = run(&late, &b.cli(&f), &["check"]);
+    assert_eq!(code, 0, "{out}");
+    let st = thread_events(&c, "stall");
+    assert_eq!(st.len(), 1, "{out}");
+    assert_eq!(
+        (st[0].str("thread"), st[0].str("agent")),
+        (Some("t1"), Some("orchestrator-t1"))
+    );
+    assert!(
+        st[0].str("reason").unwrap().contains("no CPU or output for 31m"),
+        "{st:?}"
+    );
+    run(&at(&c, c.now + 40 * 60), &b.cli(&f), &["check"]);
+    assert_eq!(thread_events(&c, "stall").len(), 1, "once per session");
+    assert!(
+        thread_events(&c, "orchestrator-sleep").is_empty(),
+        "a working session is never put to sleep"
+    );
+}
+
+#[test]
+fn thread_say_restarts_a_hung_acp_orchestrator_and_delivers_to_the_fresh_one() {
+    let (c, b) = hung_orchestrator("acp-orchestrator-hung-say");
+    // Output 20 min in: quiet for 11 min only at 31, so the message goes to the live session.
+    let labels = json!({"fleet": "sendmeter", "issue": "-", "role": "orchestrator", "thread": "t1"});
+    let text = json!({"seq": 1, "name": "orchestrator-t1", "labels": labels, "event": "text", "text": "thinking"});
+    b.lock().events.push(text);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    shed::intake(&at(&c, c.now + 20 * 60), &cfg, &cfg.shed().unwrap().wire).unwrap();
+    let f = hang_fake();
+    assert_eq!(
+        run(
+            &at(&c, c.now + 31 * 60),
+            &b.cli(&f),
+            &["thread", "say", "t1", "still there?"]
+        )
+        .0,
+        0
+    );
+    assert_eq!(shed_calls(&f), ["shed send"]);
+    // 31 min after that output, still working with no CPU: ended (cancel, kill), started afresh, then told.
+    let f = hang_fake();
+    let (code, out) = run(&at(&c, c.now + 51 * 60), &b.cli(&f), &["thread", "say", "t1", "hello?"]);
+    assert_eq!((code, out.as_str()), (0, "t1: -> orchestrator-t1\n"));
+    assert_eq!(
+        shed_calls(&f),
+        ["shed cancel", "shed kill", "shed agents", "shed run", "shed send"]
+    );
+    let sends = f
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| c.starts_with("shed send"))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(sends[0].ends_with("[t1] owner: hello?"), "{sends:?}");
+    let sl = thread_events(&c, "orchestrator-sleep");
+    assert_eq!(sl.len(), 1);
+    assert_eq!(
+        (sl[0].str("why"), sl[0].data["quiet_secs"].as_u64()),
+        (Some("hung"), Some(31 * 60))
+    );
+    assert_eq!(thread_events(&c, "orchestrator-start").len(), 2);
+}
+
+#[test]
+fn stop_ends_a_hung_acp_orchestrator_by_its_thread() {
+    let (c, b) = hung_orchestrator("acp-orchestrator-stop");
+    let f = hang_fake();
+    let (code, out) = run(&at(&c, c.now + 60), &b.cli(&f), &["stop", "t1"]);
+    assert_eq!((code, out.as_str()), (0, "stopped orchestrator-t1\n"));
+    assert_eq!(shed_calls(&f), ["shed cancel", "shed kill"]);
+    let st = thread_events(&c, "stop");
+    assert_eq!(
+        (st[0].str("thread"), st[0].str("agent")),
+        (Some("t1"), Some("orchestrator-t1"))
+    );
+    let sl = thread_events(&c, "orchestrator-sleep");
+    assert_eq!(sl.iter().map(|e| e.str("why")).collect::<Vec<_>>(), [Some("stopped")]);
+    // Ended: its agent name finds the thread, now asleep.
+    let (code, out) = run(&at(&c, c.now + 120), &b.cli(&hang_fake()), &["stop", "orchestrator-t1"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("NO_SUCH_AGENT") && out.contains("asleep"), "{out}");
+}

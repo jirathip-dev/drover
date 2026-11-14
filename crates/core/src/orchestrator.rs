@@ -750,15 +750,20 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     let awake = last.filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| a["name"] == s.data["agent"]));
     // #404: a model/effort pick since the conductor started resumes it on them.
     let picked = awake.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
-    let Some(s) = awake.filter(|_| !picked) else {
-        if let Some(s) = awake {
-            close(r, s)?;
-            let d = json!({"thread": id, "agent": s.str("agent"), "why": "model"});
-            emit(
-                &ctx.state,
-                cfg,
-                Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
-            )?;
+    let stuck = awake.and(hung(ctx, cfg, &events, &agents, id));
+    let Some(s) = awake.filter(|_| !picked && stuck.is_none()) else {
+        match (awake, stuck) {
+            (Some(s), Some((_, quiet))) => end(ctx, cfg, r, (t, s), json!({"why": "hung", "quiet_secs": quiet}))?,
+            (Some(s), None) => {
+                close(r, s)?;
+                let d = json!({"thread": id, "agent": s.str("agent"), "why": "model"});
+                emit(
+                    &ctx.state,
+                    cfg,
+                    Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
+                )?;
+            }
+            _ => {}
         }
         return start(ctx, cfg, r, t, &shared(&ctx.state)?, line);
     };
@@ -781,6 +786,49 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
 /// #608: a conductor that runs as an ACP session in shed.
 fn acp(s: &Event) -> bool {
     s.str("runtime") == Some("shed-acp")
+}
+
+/// #946: thread `id`'s awake ACP conductor reporting `working` with no CPU and no output for `stall_minutes`: its start and quiet seconds.
+pub fn hung<'a>(ctx: &Ctx, cfg: &Config, events: &'a [Event], agents: &[Value], id: &str) -> Option<(&'a Event, u64)> {
+    let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
+    let s = last.filter(|e| e.kind == "orchestrator-start" && acp(e))?;
+    let a = agents.iter().find(|a| a["name"] == s.data["agent"])?;
+    let out = crate::shed::session(ctx, s.str("agent")?)["at"].as_u64().unwrap_or(0);
+    let quiet = ctx.now.saturating_sub(out.max(s.ts));
+    let idle = a["cpu"].as_u64().unwrap_or(0) < crate::stall::BUSY_CPU_PCT;
+    (a["agent_status"] == "working" && idle && quiet >= cfg.limits.stall_minutes * 60).then_some((s, quiet))
+}
+
+/// #946: end ACP conductor `s` of thread `t` (`shed cancel`, then `shed kill`); logs `orchestrator-sleep` with `d`.
+fn end(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (t, s): (&Event, &Event), mut d: Value) -> Result<()> {
+    let agent = s.str("agent").unwrap_or_default();
+    let _ = crate::shed::cli(r, &["cancel", agent]);
+    crate::shed::cli(r, &["kill", agent])?;
+    (d["thread"], d["agent"]) = (json!(t.str("thread")), json!(agent));
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
+    )
+}
+
+/// #946: `drover stop <thread>`: end its conductor (an ACP session cancelled and killed, a pane sent Esc); logs `stop`.
+pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> {
+    let events = shared(&ctx.state)?;
+    let t = find(&events, id)?;
+    let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
+    let Some(s) = last.filter(|e| e.kind == "orchestrator-start") else {
+        return refused("NO_SUCH_AGENT", format!("thread {id}'s orchestrator is asleep"));
+    };
+    let agent = s.str("agent").unwrap_or_default();
+    if acp(s) {
+        end(ctx, cfg, r, (t, s), json!({"why": "stopped"}))?;
+    } else {
+        herdr::keys(r, s.str("pane").unwrap_or_default(), "Escape")?;
+    }
+    let d = json!({"agent": agent, "thread": id});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "stop", d))?;
+    Ok(agent.into())
 }
 
 /// Close conductor `s`: its shed terminal (#608), else its herdr workspace.
