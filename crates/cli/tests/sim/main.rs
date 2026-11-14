@@ -425,3 +425,18 @@ fn a_metric_over_20_percent_worse_is_a_warning() {
     let back: serde_json::Value = serde_json::from_str(&metrics::to_json(1, &s).to_string()).unwrap();
     assert!(metrics::regressions(&s, &back).is_empty());
 }
+
+#[test]
+fn zz_tmp_hunt() {
+    let s = Some(Sabotage::Planted);
+    let tripped = |f: &str| f.starts_with("I1 ");
+    for rng in [23u64, 1, 2, 3, 5, 7] {
+        let h = hunt::hunt(&[2, 3, 4, 5], rng, s, |r, f| r < 80 && !f.iter().any(|x| tripped(&x.failure)));
+        let r = h.found.iter().find(|x| tripped(&x.failure)).map(|f| f.round);
+        eprintln!("ZZ rng {rng}: found at {r:?}");
+    }
+    for n in 2..40u64 {
+        let o = run(n, s);
+        if tripped(&o.failure.clone().unwrap_or_default()) { eprintln!("ZZ random seed {n} trips"); }
+    }
+}
