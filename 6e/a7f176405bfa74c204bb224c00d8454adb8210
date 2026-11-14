@@ -1,0 +1,12 @@
+Decided: drive builds no `--force` anywhere; respawns, stall supersedes and silent-lane respawns are admitted like any spawn
+Because: "Drive never adds `--force` to any command it builds."
+Decided: pacing lives in `act`: a pass's respawn steps that ran (code null) count against the fleet's respawn_per_pass; the rest are refused RESPAWN_PACED and also stop new starts that pass
+Because: "Respawns stay ahead of new work in queue order but go through admission"
+Decided: `[limits] respawn_per_pass` default 2, `[fleet.<n>] respawn_per_pass` overrides it, filled in at parse like form_rounds
+Because: crates/core/src/config.rs:1331
+Decided: a lane's `spawn --force` is refused by the lane hook (OWNER_ONLY) unless it is an orchestrator; spawn logs `by` owner or orchestrator-<id>
+Rejected: refusing in spawn itself by DROVER_LANE — drive kicks run inside a lane's hook process, and every other owner-only verb is the hook's job
+Decided: herdr::awake holds drover's own prompts (DECISION, nudge, turn, release, heads-up) while shed reports the lane hibernated and the host fails admission; they retry next pass
+Rejected: gating inside the shed runtime's send — the owner's own typing from the board would be held too
+Check: crates/cli/tests/respawn_pace.rs counts impl spawns only; a respawned lane may then go to review, which is ordinary drive work
+Owner: After an outage, dead lanes now come back two per pass and only while the host has room; sleeping lanes are not woken on a busy host.
