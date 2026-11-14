@@ -1,5 +1,5 @@
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
-use crate::events::{age, append, emit, fold, last_spawn, open_asks, read, Event, IssueState};
+use crate::events::{age, append, emit, fold, last_spawn, open_asks, working, Event, IssueState};
 use crate::gate::refused;
 use crate::host::{self, Host};
 use crate::providers;
@@ -349,7 +349,7 @@ impl<'a> Pass<'a> {
             .iter()
             .find(|h| h.1.machine.as_deref() == Some(m))
             .map_or(m, |h| h.0.as_str());
-        let events = read(&ctx.state).unwrap_or_default();
+        let events = working(&ctx.state).unwrap_or_default();
         let kinds = ["host-key-changed", "host-online"];
         let last = events
             .iter()
@@ -455,7 +455,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
     if cfg.hosts.is_empty() {
         return agents;
     }
-    let events = read(&ctx.state).unwrap_or_default();
+    let events = working(&ctx.state).unwrap_or_default();
     let off = idle_off(cfg, &events);
     for (name, h) in &cfg.hosts {
         if h.machine.as_ref().is_some_and(|m| off.contains(m)) {
@@ -522,7 +522,7 @@ fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
     let Some(text) = text.or_else(|| on.read(&Path::new(home).join(".local/state/drover/events.jsonl"))) else {
         return;
     };
-    let events = read(&ctx.state).unwrap_or_default();
+    let events = working(&ctx.state).unwrap_or_default();
     let (states, max_age) = (fold(&events), cfg.limits.import_max_age_hours * 3600);
     let mark = |e: &&Event| e.kind == "asks-imported" && e.str("host") == Some(name);
     let upto = events.iter().rev().find(mark).and_then(|e| e.data["upto_ts"].as_u64());
@@ -619,7 +619,7 @@ pub fn slot_before(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], me: La
         let agents = host::agents(&On::new(r, h.machine.as_deref())).unwrap_or_default();
         let held = held_slots(
             cfg,
-            &crate::events::read(&ctx.state).unwrap_or_default(),
+            &crate::events::working(&ctx.state).unwrap_or_default(),
             &agents,
             Some((me.0, me.1)),
         );
@@ -709,7 +709,7 @@ pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, St
 
 /// #416: the host under `min_free_gb`: its free GB and what `clean --yes` would free there, else `reclaim`.
 pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
-    let (min, events) = (cfg.limits.min_free_gb, read(&ctx.state).unwrap_or_default());
+    let (min, events) = (cfg.limits.min_free_gb, working(&ctx.state).unwrap_or_default());
     let low = || host::free_gb(on).filter(|g| *g < min);
     let mut gb = low()?;
     let live = match on.machine {
@@ -1135,7 +1135,7 @@ pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
 pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let seen = cached(ctx);
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.machine.is_some()) {
-        let events = read(&ctx.state)?;
+        let events = working(&ctx.state)?;
         let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
         if stopped
             || !seen
@@ -1161,7 +1161,7 @@ pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) ->
                 writeln!(out, "{agent}: restart off {name} failed: {e:#}")?;
                 continue;
             }
-            let now = read(&ctx.state)?;
+            let now = working(&ctx.state)?;
             let Some(to) = last_spawn(&now, agent).filter(|e| e.str("host") != Some(name)) else {
                 continue;
             };
@@ -1216,7 +1216,7 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
     if refresh || cfg.hosts.keys().any(|h| !cached(ctx).contains_key(h)) {
         survey(ctx, cfg, r, refresh);
     }
-    let (seen, events) = (cached(ctx), read(&ctx.state)?);
+    let (seen, events) = (cached(ctx), working(&ctx.state)?);
     let n = |x: Option<f64>, p: usize| x.map_or("?".into(), |x| format!("{x:.p$}"));
     for (name, h) in &cfg.hosts {
         let s = seen.get(name).cloned().unwrap_or_default();

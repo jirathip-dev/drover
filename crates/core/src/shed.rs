@@ -284,7 +284,7 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
     let cause = d["cause"].as_str().map(String::from);
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(issue), "lane-state", d))?;
     let sp = (cause.as_deref() == Some(RESUMABLE[0]))
-        .then(|| crate::events::read(&ctx.state))
+        .then(|| crate::events::working(&ctx.state))
         .transpose()?;
     let sp = sp.as_deref().and_then(|ev| crate::events::last_spawn(ev, &e.name));
     if let Some((sp, a)) = sp.and_then(|sp| Some((sp, sp.str("account")?))) {

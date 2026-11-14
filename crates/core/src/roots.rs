@@ -1,5 +1,5 @@
 use crate::config::{Config, HostCfg};
-use crate::events::{emit, fold, read, Event};
+use crate::events::{emit, fold, working, Event};
 use crate::hosts::{under, On};
 use crate::runner::{ok, Runner};
 use crate::Ctx;
@@ -123,7 +123,7 @@ pub fn skip(ctx: &Ctx, cfg: &Config, sp: &Event) -> Option<&'static str> {
     let mut open = HANGS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let open = open.entry(ctx.state.clone()).or_insert_with(|| {
         let mut set = std::collections::BTreeSet::new();
-        for e in crate::events::shared(&ctx.state).iter().flat_map(|l| l.iter()) {
+        for e in crate::events::working(&ctx.state).iter().flat_map(|l| l.iter()) {
             match (e.kind.as_str(), e.str("worktree")) {
                 ("root-hung", Some(w)) => set.insert(w.to_string()),
                 ("root-answers", Some(w)) => set.remove(w),
@@ -214,7 +214,7 @@ pub fn eject(
 
 /// #630: drive's look at each host's roots: one that vanished under a lane is noted once (`! root <path> gone`); #790: each pass, a lane still there restarts on the next root; one mounted again is logged back (new lanes use it).
 pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let cache = crate::hosts::cached(ctx);
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled && !h.1.roots().is_empty()) {
         let home = cache.get(name).map(|s| s.home.as_str()).filter(|_| h.machine.is_some());
@@ -257,7 +257,7 @@ fn restart(
     (name, root): (&str, &Path),
     gone: bool,
 ) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let log = |s: &crate::events::IssueState, kind: &str, d| {
         emit(&ctx.state, cfg, Event::new(ctx.now, &s.fleet, Some(s.issue), kind, d))
     };
@@ -338,7 +338,7 @@ fn restart(
         if let Err(e) = crate::spawn::spawn(ctx, cfg, r, out, (&s.fleet, s.issue, role), &o) {
             writeln!(out, "{agent}: restart failed: {e:#}")?;
         }
-        if let Some(to) = latest(&read(&ctx.state)?).filter(|e| !here(&e)) {
+        if let Some(to) = latest(&working(&ctx.state)?).filter(|e| !here(&e)) {
             let lost = lost.join("; ");
             let d = json!({"agent": agent, "host": name, "root": root, "to": to.str("root"), "to_host": to.str("host"), "lost": lost});
             log(s, "root-moved", d)?;

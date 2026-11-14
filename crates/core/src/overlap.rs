@@ -395,7 +395,7 @@ pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut 
             )?,
         }
     }
-    let (events, st) = (crate::events::read(&ctx.state)?, crate::events::states(&ctx.state)?);
+    let (events, st) = (crate::events::working(&ctx.state)?, crate::events::states(&ctx.state)?);
     let queued: Vec<u64> = (crate::queue::view(&events, &st, fleet).into_iter().map(|i| i.issue))
         .filter(|n| !has.contains(n))
         .collect();

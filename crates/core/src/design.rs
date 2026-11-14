@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{self, emit, last_spawn, read, Event, IssueState};
+use crate::events::{self, emit, last_spawn, working, Event, IssueState};
 use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
@@ -144,7 +144,7 @@ pub fn handoff(
     agents: &[Value],
     s: &IssueState,
 ) -> Result<()> {
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let Some(sp) = s
         .lane
         .as_deref()
@@ -322,7 +322,7 @@ fn summary(r: &dyn Runner, wt: &str, head: &str, dir: &str) -> Option<String> {
 /// The owner's answer `text` to design ask `ask`: approve, reject, or (anything else) revise with it as the note. Approve and reject end the design lane (its pane closes); reject pushes one commit back to the pre-design tree.
 pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, by: &str) -> Result<()> {
     let (f, n) = (ask.fleet.as_str(), ask.issue.context("a design ask names its issue")?);
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let review = ev.iter().rfind(|e| e.is("design-review", f, n));
     let sp = review.and_then(|e| last_spawn(&ev, e.str("agent")?));
     let (kind, mut d) = match text {

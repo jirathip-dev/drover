@@ -180,7 +180,7 @@ pub fn lanes(cfg: &Config, r: &dyn Runner, ctx: &Ctx, (events, st): (&[Event], &
 pub fn wait_key(events: &[Event], all: &[Lane]) -> String {
     let last = events.last().map_or(0, |e| e.seq);
     let lanes: Vec<_> = all.iter().map(|l| format!("{}={}", l.name, l.state)).collect();
-    format!("{} {last} {}", events.len(), lanes.join(" "))
+    format!("{last} {}", lanes.join(" "))
 }
 
 /// The step's waits while its snapshot saw this log and these lanes; else worked out now.
@@ -209,7 +209,7 @@ pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[L
 /// The step's look: the reads the board makes (lanes, waits, now-lines, Host rows), remote ones batched; saved, and returned for the step's own scan (a read it lacks runs live).
 pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     let s = Snap::new(r, Miss::Collect, load(ctx).map(|s| s.reads), Some(ctx.now));
-    let events = crate::events::read(&ctx.state).unwrap_or_default();
+    let events = crate::events::working(&ctx.state).unwrap_or_default();
     if let Ok(list) = term::list(&s) {
         let all = lanes(cfg, &s, ctx, (&events, &crate::events::fold(&events)), &list);
         waits(ctx, cfg, &s, &events, &all);
