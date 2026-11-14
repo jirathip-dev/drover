@@ -1,0 +1,7 @@
+Decided: merged origin/staging; each conflict keeps this branch's removal, and the kept code moves to staging's working() reads and Event::val
+Because: crates/core/src/shed.rs:294
+Decided: the retired account-capped, account-signed-out, account-reset and agent-unavailable kinds leave staging's working-set filter
+Because: crates/core/src/events.rs:832
+Rejected: keeping them in the filter — nothing emits or reads them now, and they would break the account grep AC
+Check: rg -n -i account crates/core/src hits only the retired-key warning; the full suite passes (four load or in-lane failures pass on rerun, see PR body)
+Owner: Brought the branch up to date with staging again; no behaviour change from the last review.
