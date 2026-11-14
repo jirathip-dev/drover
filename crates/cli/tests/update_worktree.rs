@@ -134,10 +134,7 @@ fn a_missing_but_locked_update_worktree_no_longer_stops_the_auto_update() {
     );
     let pushed = git(&r.origin, &["rev-parse", "issue-12"]);
     assert_ne!(pushed, r.head, "{out}");
-    assert_eq!(
-        git(&r.origin, &["rev-parse", &format!("{pushed}^2")]),
-        git(&r.origin, &["rev-parse", "staging"])
-    );
+    assert_eq!(pushed, git(&r.origin, &["rev-parse", "staging"]), "{out}");
 }
 
 #[test]
