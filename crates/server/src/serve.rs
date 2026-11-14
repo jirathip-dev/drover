@@ -29,6 +29,7 @@ use std::time::{Duration, Instant};
 
 mod chat;
 mod fresh;
+mod jobs;
 #[path = "screens.rs"]
 mod screens;
 mod slo;
@@ -190,8 +191,6 @@ fn sent(s: &mut TcpStream, mut b: &[u8], end: Instant) -> bool {
 type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>, String)>>>;
 const PER_DEVICE: usize = 4;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
-/// A form op for `serve_on`'s job thread: (ctx, form, fleet).
-type Job = (Ctx, BTreeMap<String, String>, String);
 /// When this board started (the Services board row's uptime).
 static STARTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
@@ -258,13 +257,10 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             w.tick();
             std::thread::sleep(Duration::from_secs(1));
         });
-        // #140: drive and the needs-human ops run here, one at a time; the board toasts the result.
+        // #977: each tap's job on its own thread, never waiting on another job or a drive pass.
         sc.spawn(move || {
-            for (c, f, fleet) in rx {
-                let msg = json!(s.write(&c, &f).unwrap_or_else(|e| shown(&e)));
-                s.kick.store(lock(&s.running).remove(&fleet), Relaxed);
-                let id = lock(&s.watch).seen.unwrap_or(0);
-                lock(&s.clients).retain(|c| c.0.send(format!("id: {id}\nevent: toast\ndata: {msg}\n\n")).is_ok());
+            for t in rx {
+                sc.spawn(move || s.run_job(t));
             }
         });
         let sock = ho.and_then(Handover::ready);
@@ -290,7 +286,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
                 lock(&s.clients)
                     .drain(..)
                     .for_each(|c| drop(c.0.send("retry: 250\n\n".into())));
-                h.finish(|| open.load(Relaxed) == 0 && lock(&s.running).is_empty());
+                h.finish(|| open.load(Relaxed) == 0 && !lock(&s.tapped).busy());
             }
         }
     });
@@ -427,9 +423,9 @@ pub struct Server<'a> {
     clients: Clients,
     kick: Arc<AtomicBool>,
     watch: Mutex<Watch>,
-    /// `serve_on`'s background queue for ops that can spawn or merge, and the fleets with one in flight.
-    jobs: Option<Sender<Job>>,
-    running: Mutex<BTreeSet<String>>,
+    /// #977: `serve_on`'s job runner for taps, and the jobs by id.
+    jobs: Option<Sender<jobs::Tap>>,
+    tapped: Mutex<jobs::Jobs>,
     /// `serve --export` (#39): Some(demo), static files with relative URLs; `true` is the inert demo.
     export: Option<bool>,
     /// #337: the step's snapshot as last loaded, by the file's mtime.
@@ -809,7 +805,7 @@ impl<'a> Server<'a> {
             kick: Arc::default(),
             watch: Mutex::default(),
             jobs: None,
-            running: Mutex::default(),
+            tapped: Mutex::default(),
             export: None,
             snap: Mutex::default(),
             later: Mutex::default(),
@@ -1241,7 +1237,7 @@ impl<'a> Server<'a> {
             }
             ("POST", "/") if paired_op && dev().is_none() => deny("only a paired device may unpair, answer or drive\n"),
             ("POST", "/") => {
-                let msg = self.op(ctx, form(body.trim())).unwrap_or_else(|e| shown(&e));
+                let msg = self.op(ctx, &form(body.trim())).unwrap_or_else(|e| shown(&e));
                 return see(&format!("/?msg={}", enc(&msg)));
             }
             // #59: the request's `hd=` token (10 min) works once `serve approve` clears its code; `/pair/claim` then keeps it a year.
@@ -1363,7 +1359,11 @@ impl<'a> Server<'a> {
             times.push(ctx.now);
         }
         let (pick, act) = (path == "/answer", path == "/act");
-        let res = if path == "/thread" {
+        let op = f.get("op").map_or("", String::as_str);
+        let res = if path == "/thread" && ["answer", "card", "config"].contains(&op) {
+            let mtime = ("mtime".to_string(), mtime(ctx));
+            self.op(ctx, &f.clone().into_iter().chain([mtime]).collect())
+        } else if path == "/thread" {
             let mut later = vec![];
             // #715: an answer's or a card's conductor wake is delivered after the reply too.
             let (res, more) = crate::conductor::deferred(|| chat::post(ctx, &self.r, f, &mut later));
@@ -1587,12 +1587,6 @@ impl<'a> Server<'a> {
     /// Run one form write; the line shown on the page (CLI output, or `REFUSED <CODE>: …` via `shown`).
     fn write(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
         let g = |k: &str| f.get(k).map_or("", String::as_str);
-        if g("mtime") != mtime(ctx) {
-            return refused(
-                "STALE",
-                "fleet.toml changed since the page was rendered; reload and retry",
-            );
-        }
         // #66: a short line for the toast, not the CLI's stdout (a queue move prints the whole queue).
         let (fleet, mut out) = (g("fleet"), vec![]);
         Ok(match g("op") {

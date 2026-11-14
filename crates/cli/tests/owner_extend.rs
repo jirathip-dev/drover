@@ -197,104 +197,150 @@ fn http(addr: &str, req: &str) -> String {
     res
 }
 
-#[test]
-fn board_extends_are_never_refused_while_another_extend_or_a_drive_runs() {
-    let (c, _sh) = setup("owner-extend-board", 2);
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let fake = Fake::default();
-    let s = drover::serve::Server::new(&c, &fake, Some("127.0.0.1:7777".into()));
-    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = l.local_addr().unwrap().to_string();
-    let c2 = c.clone();
-    std::thread::spawn(move || drover::serve::serve_on(&c2, &Slow(loaded(), AtomicBool::new(false)), l, false));
-    let post = |op: &str, body: &str| {
+struct Board {
+    addr: String,
+    cookie: String,
+}
+
+impl Board {
+    fn start(c: &drover::Ctx, r: Slow) -> Board {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let fake = Fake::default();
+        let s = drover::serve::Server::new(c, &fake, Some("127.0.0.1:7777".into()));
+        let cookie = pair(&s, c, "Mozilla/5.0 (iPhone)", now);
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap().to_string();
+        let c2 = c.clone();
+        std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        Board { addr, cookie }
+    }
+
+    fn post(&self, op: &str, body: &str) -> (u128, Value) {
+        let (addr, cookie) = (&self.addr, &self.cookie);
         let req = format!(
             "POST /api/v1/{op} HTTP/1.1\r\nHost: {addr}\r\n{cookie}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
-        http(&addr, &req)
-    };
-    let get = |path: &str| {
+        let t = std::time::Instant::now();
+        let res = http(addr, &req);
+        let ms = t.elapsed().as_millis();
+        (ms, serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap())
+    }
+
+    fn get(&self, path: &str) -> Value {
+        let (addr, cookie) = (&self.addr, &self.cookie);
         let res = http(
-            &addr,
+            addr,
             &format!("GET /api/v1/{path} HTTP/1.1\r\nHost: {addr}\r\n{cookie}Connection: close\r\n\r\n"),
         );
         serde_json::from_str::<Value>(res.split_once("\r\n\r\n").unwrap().1).unwrap()
-    };
-    let toasts = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-    let (t2, a2, k2) = (toasts.clone(), addr.clone(), cookie.clone());
-    std::thread::spawn(move || {
-        let mut s = std::net::TcpStream::connect(&a2).unwrap();
-        s.write_all(format!("GET /live HTTP/1.1\r\nHost: {a2}\r\n{k2}\r\n").as_bytes())
-            .unwrap();
-        let mut buf = [0u8; 4096];
-        while let Ok(n) = s.read(&mut buf) {
-            if n == 0 {
-                break;
-            }
-            t2.lock().unwrap().push_str(&String::from_utf8_lossy(&buf[..n]));
-        }
-    });
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    let mt = get("needs")["mtime"].as_str().unwrap().to_string();
-    let stale = post("extend", "fleet=sendmeter&issue=2&mtime=1");
-    assert!(stale.contains("STALE"), "{stale}");
-    assert_eq!(of_kind(&c, "round-extended").len(), 0, "a stale page decides nothing");
-    let first = post("extend", &format!("fleet=sendmeter&issue=1&mtime={mt}"));
-    assert!(first.contains("extend started for sendmeter#1"), "{first}");
-    std::thread::sleep(std::time::Duration::from_millis(300));
-    let drive = post("drive", &format!("fleet=sendmeter&mtime={mt}"));
-    assert!(drive.contains("drive started for sendmeter"), "{drive}");
-    let second = post("extend", &format!("fleet=sendmeter&issue=2&mtime={mt}"));
-    assert!(second.contains("extend started for sendmeter#2"), "{second}");
-    let needs = get("needs");
-    let cards: Vec<&Value> = needs["issues"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|i| &i["issue"])
-        .collect();
-    assert!(!cards.contains(&&json!(2)), "#2 left needs-human at the tap: {needs}");
-    let st = get("state");
-    let row = st["queue"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|q| q["issue"] == 2)
-        .unwrap();
-    assert!(
-        row["status"].as_str().unwrap().starts_with("extended · starting"),
-        "{row}"
-    );
-    let started = || {
-        ["#1: extend", "#2: extend"]
-            .iter()
-            .all(|t| toasts.lock().unwrap().contains(t))
-            && (1..=2).all(|n| {
-                read(&c.state)
-                    .unwrap()
-                    .iter()
-                    .any(|e| e.is("spawn", "sendmeter", n) && e.ts > 10)
-            })
-    };
-    let t0 = std::time::Instant::now();
-    while !started() && t0.elapsed().as_secs() < 30 {
-        std::thread::sleep(std::time::Duration::from_millis(100));
     }
-    let tail: Vec<String> = read(&c.state)
-        .unwrap()
-        .iter()
-        .filter(|e| e.ts > 14)
-        .map(|e| format!("{e:?}"))
-        .collect();
-    assert!(
-        started(),
-        "both extends toasted and spawned: {tail:#?} {}",
-        toasts.lock().unwrap()
+
+    fn until(&self, id: &str, done: impl Fn(&Value) -> bool) -> Value {
+        let t0 = std::time::Instant::now();
+        loop {
+            let j = self.get(&format!("job/{id}"));
+            if done(&j) || t0.elapsed().as_secs() >= 30 {
+                return j;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+}
+
+#[test]
+fn ten_taps_under_load_and_a_held_drive_pass_are_each_accepted_at_once_and_end_on_their_own() {
+    let (c, _sh) = setup("owner-extend-board", 9);
+    lease_as(&c, "drive.lock", 4242, c.now, 3600);
+    let b = Board::start(&c, Slow(loaded(), AtomicBool::new(false)));
+    let mt = b.get("needs")["mtime"].as_str().unwrap().to_string();
+    let (_, stale) = b.post("extend", "fleet=sendmeter&issue=2&mtime=1");
+    assert_eq!(stale["code"], "STALE", "{stale}");
+    assert_eq!(of_kind(&c, "round-extended").len(), 0, "a stale page decides nothing");
+    let mut jobs = vec![];
+    for n in 1..=9 {
+        let (ms, r) = b.post("extend", &format!("fleet=sendmeter&issue={n}&mtime={mt}"));
+        assert!(r["code"] == "ACCEPTED" && r["job"].is_string(), "#{n}: {r}");
+        assert!(ms < 200, "#{n}'s tap took {ms} ms");
+        jobs.push((n, r["job"].as_str().unwrap().to_string()));
+    }
+    let (ms, drive) = b.post("drive", &format!("fleet=sendmeter&mtime={mt}"));
+    assert!(drive["code"] == "ACCEPTED" && ms < 200, "{ms} ms: {drive}");
+    let (ms, again) = b.post("extend", &format!("fleet=sendmeter&issue=1&mtime={mt}"));
+    assert_eq!(
+        again["job"].as_str(),
+        Some(jobs[0].1.as_str()),
+        "a re-tap is its first job"
     );
-    assert_eq!(of_kind(&c, "round-extended").len(), 2);
+    assert!(ms < 200, "the re-tap took {ms} ms");
+    let mut ids: Vec<&str> = jobs.iter().map(|j| j.1.as_str()).collect();
+    ids.push(drive["job"].as_str().unwrap());
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), 10, "each tap its own job: {ids:?}");
+    for (n, id) in &jobs {
+        let j = b.until(id, |j| j["state"] == "done");
+        assert_eq!(
+            (&j["state"], &j["code"], &j["message"]),
+            (&json!("done"), &json!("OK"), &json!(format!("#{n}: extend"))),
+            "#{n}: {j}"
+        );
+        assert!(
+            read(&c.state)
+                .unwrap()
+                .iter()
+                .any(|e| e.is("spawn", "sendmeter", *n) && e.ts > 10),
+            "#{n} spawned"
+        );
+    }
+    assert_eq!(of_kind(&c, "round-extended").len(), 9, "the re-tap ran nothing twice");
+    let logged = of_kind(&c, "job");
+    assert!(
+        jobs.iter().all(|(_, id)| logged
+            .iter()
+            .any(|e| e.str("id") == Some(id) && e.str("state") == Some("done"))),
+        "{logged:?}"
+    );
+    assert!(lease_on(&c, "drive.lock").is_some(), "the held pass is left alone");
+}
+
+#[test]
+fn an_extend_held_for_memory_shows_waiting_for_host_then_done_once_it_starts() {
+    let (c, sh) = setup("owner-extend-wait", 1);
+    let cfg = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, cfg.replace("[limits]", "[limits]\nserve_host_secs = 1")).unwrap();
+    let vm = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 16384.\n\
+        Pages inactive: 16384.\nSwapouts: 100.\n";
+    let low = Fake::default().reply("vm_stat", vm);
+    let low = Fake {
+        replies: [low.replies, loaded().replies].concat(),
+        ..Default::default()
+    };
+    let b = Board::start(&c, Slow(low, AtomicBool::new(true)));
+    let mt = b.get("needs")["mtime"].as_str().unwrap().to_string();
+    let (ms, r) = b.post("extend", &format!("fleet=sendmeter&issue=1&mtime={mt}"));
+    assert!(r["code"] == "ACCEPTED" && ms < 200, "{ms} ms: {r}");
+    let id = r["job"].as_str().unwrap();
+    let j = b.until(id, |j| j["state"] != "running");
+    assert_eq!(
+        (&j["state"], &j["code"]),
+        (&json!("waiting"), &json!("HOST_WAIT")),
+        "{j}"
+    );
+    assert!(
+        j["message"].as_str().unwrap().contains("waiting for host: MEM_LOW"),
+        "{j}"
+    );
+    assert!(sh.all("run").is_empty(), "nothing started yet");
+    ev(&c, 1, 30, "spawn", json!({"role": "impl", "agent": "sendmeter-impl-1"}));
+    let j = b.until(id, |j| j["state"] == "done");
+    assert_eq!(
+        (&j["state"], &j["message"]),
+        (&json!("done"), &json!("#1: extend")),
+        "{j}"
+    );
 }

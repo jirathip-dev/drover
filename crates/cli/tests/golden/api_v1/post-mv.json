@@ -1,12 +1,14 @@
 {
   "response": {
     "code": "ERROR",
+    "job": null,
     "message": "no issue",
     "ok": false
   },
   "route": "POST /api/v1/mv",
   "schema": {
     "code": "string",
+    "job": "null",
     "message": "string",
     "ok": "boolean"
   },

@@ -35,8 +35,8 @@ per host for 10 minutes (`ControlMaster=auto`, `ControlPersist=10m`, whatever `~
 something is read: a verdict file only until its verdict is recorded, `git log` only for an impl/fix not seen pushed
 (or a review with no spawn sha), never a merged or closed lane. A request (`/`, `/api/v1/…`, `/herd.json`, `/live`) and
 `status`/`hosts` replay the snapshot: a remote read it lacks fails, it never runs on a request; only a lane's chat
-(`/lane`) reads that one pane live (5 s cache). Its age shows in the strip under the header once it is over 2 minutes old (#450: `as of
-5m ago`), and `status` ends with it. With no snapshot saved (a new install), reads run live as before; the
+(`/lane`) reads that one pane live (5 s cache). Its age always shows in the strip under the header (#450: `as of
+5m ago`; #977: amber past 10 min), and `status` ends with it. With no snapshot saved (a new install), reads run live as before; the
 watcher pushes on each new snapshot instead of polling herdr. `tests/perf.rs` is the gate (budgets: [performance.md](performance.md)): 30 lanes on 2 hosts, +300 ms
 per remote call, at most one remote call per host per step, `GET /` < 150 ms (< 40 KB), `/herd.json` < 100 ms,
 `status` < 300 ms, first paint in WebKit < 300 ms (warm); a miss fails CI and the numbers go to the job summary.
@@ -385,7 +385,8 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `GET repo/<fleet>/threads` | #681: the repo's orchestrator threads, newest-active first: `id`, `title`, `last` (`line`, `ts`), `unread`, `awake` (its orchestrator not asleep), `archived`, and `newest: true` on the ongoing one (the first not archived), so cooee shows it as the agent's chat and the rest as side threads; `all` for the all-repos threads; 404 `NOT_FOUND` for no such fleet |
 | `GET events?since=N` | #259's contract: the events after `N` (#266: `&until=M`, up to `M`) in `list`; over 500, `refresh: true` and none (read `state` again). Each as the Events tab says it: `glyph`, `tone`, `text`, `imp`, the row sprite's `act` and `coat`, `plain`, and its issue's `pr` or checks `run` |
 | `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) plus #749's `blocks`: an ACP lane's transcript from shed's events (`prompt`, `reply`, `tool`, `plan`, `approval`; `?before=<seq>&n=N` pages back), a PTY lane's one `screen` block (its `lines`) |
-| `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `cond`, `bqueue`, `answer`, `drive`, `override`, `extend`, `park`, `unpark`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`, as the form or a JSON object (#555: a list joins with `,`, `true` is `1`); answers `{ok, code, message}` |
+| `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `cond`, `bqueue`, `answer`, `drive`, `override`, `extend`, `park`, `unpark`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`, as the form or a JSON object (#555: a list joins with `,`, `true` is `1`); answers `{ok, code, message}`. #977: a tap (`answer`, `drive`, `override`, `extend`, `park`, `unpark`, `card` `{id, act, sha}`, `config` `{id, act}`) is a job: 202 `ACCEPTED` with its `job` id at once, run on its own thread, never refused for another job or a running drive; the same button tapped again while its job runs or within 15 min of it ending returns that job (a refused one may be tapped again); each logs `job` events |
+| `GET job/<id>` | #977 (paired): a tap's `Job`: `state` `running`, `waiting` (`HOST_WAIT`: its issue's start waits for host; re-checked every `serve_host_secs`), `done`, `refused` (`code`) or `error`, and `message` (its toast) |
 | `GET herd` | #555: Herd mode's data, the same as `/herd.json` |
 | `GET roles?fleet=F` | #555: the fleet's [config] sheet (`config`: its roles with the model/effort pickers, the orchestrator) and `chat`, `[chat]`'s new-thread defaults with the harnesses it may name |
 | `GET setup/<pane>` | #555: a setup terminal's screen (`lines`, `urls`, `closed`), the old board's `/lane?setup=` |
@@ -402,7 +403,7 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `POST orchestrator-detach` | #633 (paired): `{fleet, thread}`, the link ends (`orchestrator-detached`; archiving the thread ends it too); `NO_SUCH_THREAD` unless attached |
 
 Every answer is JSON, a refusal too: `{ok: false, code, message}` with 401 `UNPAIRED`, 503 `BUSY` (#501), 403 `FORBIDDEN`, 405
-`READ_ONLY`, 409 and the `REFUSED` code (`STALE`, `DRIVE_RUNNING`, …), 404 `NOT_FOUND`. The theme is the phone's own
+`READ_ONLY`, 409 and the `REFUSED` code (`STALE`, …), 404 `NOT_FOUND`. The theme is the phone's own
 choice (localStorage): `state.theme` is the board's default, and no route writes it. The service worker
 never caches `api/`. A breaking change is `/api/v2/`.
 
@@ -447,7 +448,8 @@ device work too. Beside `/api/v1`, never in the board's pages, it answers JSON m
 
 - `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `?before=<unix time>`),
   `/screens/fleets` (the Fleets sheet) and `/screens/cards` (the open asks, design reviews, needs-human issues and run
-  cards as chat cards); q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
+  cards as chat cards); #977: each screen shows the step's snapshot age, `as of 3m ago` (`as of: not yet known` before
+  one), `warn` past 10 min, as a `snapshot` item of its `stat` block, else an `age-list` row; q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
   and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
   shows until a tap opens the full card; a second tap folds it again;
 - `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,

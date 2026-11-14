@@ -501,11 +501,11 @@ function sync(s) {
   $$('form button, form select:not([data-off]), .ask button:not(.lat)').forEach(b => b.disabled = s === 'r' || DEMO);
   if (DEMO) $$('input:not(.bl *), textarea, .acts button').forEach(b => b.disabled = true); // #365: the backlog's search and ticks write nothing
 }
-// #450: the shown data's age in the strip, once it is over 2 min old: the last paint, or the step's look if older.
+// #450: the shown data's age in the strip: the last paint, or the step's look if older; #977: always, amber past 10 min.
 function age() {
   const t = Math.min(last, DEMO ? Infinity : (+$('#sts')?.dataset.ts || Infinity) * 1000), s = (Date.now() - t) / 1000 | 0;
   const a = s < 7200 ? (s / 60 | 0) + 'm' : s < 172800 ? (s / 3600 | 0) + 'h' : (s / 86400 | 0) + 'd';
-  Object.assign($('#stale'), { hidden: s < 120, textContent: `as of ${a} ago`, title: 'last update ' + new Date(t).toTimeString().slice(0, 5) });
+  Object.assign($('#stale'), { hidden: false, className: s > 600 ? 'a' : 'm', textContent: `as of ${a} ago`, title: 'last update ' + new Date(t).toTimeString().slice(0, 5) });
 }
 setInterval(age, 30000);
 function pulse() { dot.classList.remove('p'); void dot.offsetWidth; dot.classList.add('p'); }

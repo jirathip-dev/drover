@@ -710,7 +710,11 @@ fn the_state_read_stays_under_300ms_on_a_150k_event_log() {
     };
     assert!(asks(&fetch(addr, "/api/v1/state").1).contains(&"alpha-q1".to_string()));
     let msg = op(addr, &cookie, "op=answer&fleet=alpha&id=alpha-q1&choice=yes");
-    assert!(msg.contains("answered"), "{msg}");
+    assert!(msg.contains("answer%20accepted"), "{msg}");
+    let t0 = std::time::Instant::now();
+    while asks(&fetch(addr, "/api/v1/state").1).contains(&"alpha-q1".to_string()) && t0.elapsed().as_secs() < 30 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     let (after, body) = fetch(addr, "/api/v1/state");
     assert!(
         !asks(&body).contains(&"alpha-q1".to_string()),
