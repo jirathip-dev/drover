@@ -128,7 +128,7 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
     let freed = events(&c, "budget-freed");
     assert_eq!(freed.len(), 1);
     assert_eq!(
-        (freed[0].data["lanes"].clone(), freed[0].data["bytes"].as_u64()),
+        (freed[0].val("lanes").clone(), freed[0].val("bytes").as_u64()),
         (json!(["sendmeter-impl-8"]), Some(4096))
     );
     let stamp = || {

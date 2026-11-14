@@ -4,14 +4,14 @@ use drover::serve::{act, resolve, validate, Server};
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
-const FARM: &str = include_str!("../../../assets/themes/farm/theme.json");
-const FARM_SPRITES: &str = include_str!("../../../assets/themes/farm/sprites.svg");
-const KITCHEN: &str = include_str!("../../../assets/themes/kitchen/theme.json");
-const KITCHEN_SCENE: &str = include_str!("../../../assets/themes/kitchen/scene.svg");
-const KITCHEN_SPRITES: &str = include_str!("../../../assets/themes/kitchen/sprites.svg");
-const KITCHEN_ICON: &[u8] = include_bytes!("../../../assets/themes/kitchen/icon-180.png");
+const FARM: &str = include_str!("../../../assets/swag/farm/theme.json");
+const FARM_SPRITES: &str = include_str!("../../../assets/swag/farm/sprites.svg");
+const KITCHEN: &str = include_str!("../../../assets/swag/kitchen/theme.json");
+const KITCHEN_SCENE: &str = include_str!("../../../assets/swag/kitchen/scene.svg");
+const KITCHEN_SPRITES: &str = include_str!("../../../assets/swag/kitchen/sprites.svg");
+const KITCHEN_ICON: &[u8] = include_bytes!("../../../assets/swag/kitchen/icon-180.png");
 const ICON: &[u8] = include_bytes!("../../../assets/icon-180.png");
-const TERMINAL_ICON: &[u8] = include_bytes!("../../../assets/themes/terminal/icon-180.png");
+const TERMINAL_ICON: &[u8] = include_bytes!("../../../assets/terminal/icon-180.png");
 const ACTS: [&str; 7] = ["impl", "fix", "rev", "update", "idle", "done", "blocked"];
 
 fn server(theme: Option<&str>, own: &[(&str, &str, &str)]) -> (drover::Ctx, Fake) {
@@ -107,7 +107,7 @@ fn farm_fills_the_whole_contract() {
     }
     assert_eq!(r["modes"], json!(["scene", "ascii"]));
     assert_eq!(r["load_scene"]["kind"], "weather");
-    for t in [KITCHEN, include_str!("../../../assets/themes/terminal/theme.json")] {
+    for t in [KITCHEN, include_str!("../../../assets/terminal/theme.json")] {
         validate(t.as_bytes()).unwrap();
     }
 }
@@ -505,9 +505,9 @@ fn theme_words_are_the_themes_own_and_fall_back_to_plain() {
     );
 }
 
-const GARDEN: &str = include_str!("../../../assets/themes/garden/theme.json");
-const GARDEN_SPRITES: &str = include_str!("../../../assets/themes/garden/sprites.svg");
-const GARDEN_SCENE: &str = include_str!("../../../assets/themes/garden/scene.svg");
+const GARDEN: &str = include_str!("../../../assets/swag/garden/theme.json");
+const GARDEN_SPRITES: &str = include_str!("../../../assets/swag/garden/sprites.svg");
+const GARDEN_SCENE: &str = include_str!("../../../assets/swag/garden/scene.svg");
 
 fn plants(js: &str) -> Option<Value> {
     if std::process::Command::new("node").arg("--version").output().is_err() {
@@ -576,7 +576,7 @@ fn garden_draws_every_stage_and_species_itself() {
     assert_eq!(body(&get(&c, &r, "/themes/garden/scene.svg")), GARDEN_SCENE);
     assert_eq!(
         bytes(&c, &r, "/themes/garden/icon-180.png"),
-        include_bytes!("../../../assets/themes/garden/icon-180.png")
+        include_bytes!("../../../assets/swag/garden/icon-180.png")
     );
     assert!(get(&c, &r, "/").contains("h.dataset.theme=m||\"garden\";"));
 }
@@ -676,4 +676,53 @@ fn stages_species_and_a_light_dark_scheme_are_checked() {
         "load_scene": {"kind": "light", "levels": {"calm": "sun"}}}"##;
     validate(ok.as_bytes()).unwrap();
     validate(br#"{"scheme": {"light": "paper", "dark": "nord"}}"#).unwrap();
+}
+
+#[test]
+fn pinned_packs_load_and_a_custom_theme_overrides_them() {
+    use sha2::Digest;
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/swag");
+    let source = std::fs::read_to_string(dir.join("SOURCE")).unwrap();
+    let pin = source
+        .trim()
+        .strip_prefix("jirathip-dev/swag legacy-board at ")
+        .unwrap();
+    assert!(
+        pin.len() == 40 && pin.bytes().all(|b| b.is_ascii_hexdigit()),
+        "{source}"
+    );
+    let hex = |b: &[u8]| -> String { sha2::Sha256::digest(b).iter().map(|x| format!("{x:02x}")).collect() };
+    let sums = std::fs::read_to_string(dir.join("SHA256SUMS")).unwrap();
+    let pinned: Vec<(&str, &str)> = sums.lines().map(|l| l.split_once("  ").unwrap()).collect();
+    let mut on_disk = vec![];
+    for t in ["farm", "kitchen", "garden"] {
+        for e in std::fs::read_dir(dir.join(t)).unwrap() {
+            on_disk.push(format!("{t}/{}", e.unwrap().file_name().to_string_lossy()));
+        }
+    }
+    on_disk.sort();
+    assert_eq!(
+        on_disk,
+        pinned.iter().map(|p| p.1).collect::<Vec<_>>(),
+        "every pack file is pinned"
+    );
+    let (c, r) = server(None, &[]);
+    for (sum, path) in &pinned {
+        let file = std::fs::read(dir.join(path)).unwrap();
+        assert_eq!(&hex(&file), sum, "{path} is the pinned commit's");
+        let served = bytes(&c, &r, &format!("/themes/{path}"));
+        if path.ends_with("theme.json") {
+            let own = validate(&file).unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&served).unwrap(),
+                resolve(&own, &farm()),
+                "{path}"
+            );
+        } else {
+            assert_eq!(&hex(&served), sum, "{path} served as pinned");
+        }
+    }
+    let (c, r) = server(Some("garden"), &[("garden", "sprites.svg", "<g id=\"mine\"/>")]);
+    assert_eq!(body(&get(&c, &r, "/themes/garden/sprites.svg")), "<g id=\"mine\"/>");
+    assert_eq!(body(&get(&c, &r, "/themes/garden/scene.svg")), GARDEN_SCENE);
 }

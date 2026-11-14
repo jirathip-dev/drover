@@ -71,7 +71,7 @@ fn an_all_form_fail_is_not_counted() {
         ("fix(1·f)", 1, 0)
     );
     let ev = read(&c.state).unwrap();
-    assert_eq!(ev.last().unwrap().data["form_only"], true);
+    assert_eq!(ev.last().unwrap().val("form_only"), true);
     let out = verdict(
         &c,
         &d,
@@ -103,7 +103,7 @@ fn one_substantive_or_untagged_blocker_counts() {
     assert!(out.contains("(round 2/3)"), "{out}");
     let s = state(&c);
     assert_eq!((s.form, logged(&c, "form-only-rejected")), (0, 2));
-    assert_eq!(read(&c.state).unwrap().last().unwrap().data["form_only"], false);
+    assert_eq!(read(&c.state).unwrap().last().unwrap().val("form_only"), false);
 }
 
 #[test]

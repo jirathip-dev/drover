@@ -159,7 +159,7 @@ fn a_finished_lanes_build_folder_goes_at_once_even_with_its_session_open() {
             (
                 e.str("agent").unwrap(),
                 e.str("why").unwrap(),
-                e.data["bytes"].as_u64().unwrap() > 0,
+                e.val("bytes").as_u64().unwrap() > 0,
             )
         })
         .collect();

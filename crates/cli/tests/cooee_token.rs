@@ -27,9 +27,9 @@ fn cooees_plugin_token_reads_screens_and_posts_actions_without_a_paired_device()
     let drop = r#"{"screen": "queue", "block": "q-sendmeter-17", "action": "drop", "values": {"fleet": "sendmeter", "issue": 17}}"#;
     let local = "Host: 127.0.0.1:7777\r\nAuthorization: Bearer nope\r\n";
     assert_eq!(status(&s, "POST", "/action", drop, local), "401");
-    assert_eq!(read(&c.state).unwrap().last().unwrap().data["op"], "add");
+    assert_eq!(read(&c.state).unwrap().last().unwrap().val("op"), "add");
     assert_eq!(status(&s, "POST", "/action", drop, cooee), "200");
-    assert_eq!(read(&c.state).unwrap().last().unwrap().data["op"], "rm");
+    assert_eq!(read(&c.state).unwrap().last().unwrap().val("op"), "rm");
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn serve_makes_the_cooee_token_file_once_and_accepts_it_on_action_and_screens() 
     let drop = r#"{"screen": "queue", "block": "q-sendmeter-17", "action": "drop", "values": {"fleet": "sendmeter", "issue": 17}}"#;
     let local = format!("Host: {first}\r\n");
     assert_eq!(ask(first, "POST", "/action", drop, &local), "401");
-    assert_eq!(read(&c.state).unwrap().last().unwrap().data["op"], "add");
+    assert_eq!(read(&c.state).unwrap().last().unwrap().val("op"), "add");
 
     let second = start(c);
     assert_eq!(
@@ -90,5 +90,5 @@ fn serve_makes_the_cooee_token_file_once_and_accepts_it_on_action_and_screens() 
     assert_eq!(std::fs::read_to_string(&file).unwrap(), token);
     assert_eq!(ask(second, "GET", "/screens/queue", "", &bearer), "200");
     assert_eq!(ask(second, "POST", "/action", drop, &bearer), "200");
-    assert_eq!(read(&c.state).unwrap().last().unwrap().data["op"], "rm");
+    assert_eq!(read(&c.state).unwrap().last().unwrap().val("op"), "rm");
 }

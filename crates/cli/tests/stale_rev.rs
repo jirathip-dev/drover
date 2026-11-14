@@ -93,7 +93,7 @@ fn a_live_reviewer_quiet_two_hours_without_a_verdict_is_replaced_in_the_same_rou
     assert_eq!(st.len(), 1, "{out}");
     assert_eq!(st[0].str("agent"), Some("sendmeter-rev-12-r2"));
     assert_eq!(st[0].str("new"), Some("sendmeter-rev-12-r2"));
-    assert_eq!(st[0].data["idle_minutes"].as_u64(), Some(121));
+    assert_eq!(st[0].val("idle_minutes").as_u64(), Some(121));
     assert_eq!(starts(&sh), 1, "{out}");
     let s = fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].clone();
     assert_eq!(s.state, "review(2)", "no round burned");

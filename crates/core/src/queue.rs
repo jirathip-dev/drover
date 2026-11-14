@@ -296,7 +296,7 @@ pub fn hot_files(events: &[Event], fleet: &str) -> Vec<String> {
     let hot = crate::events::of_kind(events, &["hot-files"]);
     let last = hot.into_iter().rfind(|e| e.fleet == fleet);
     let files = last
-        .and_then(|e| e.data["files"].as_array().cloned())
+        .and_then(|e| e.val("files").as_array().cloned())
         .unwrap_or_default();
     files.iter().filter_map(|v| v.as_str().map(String::from)).collect()
 }

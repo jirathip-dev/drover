@@ -163,7 +163,7 @@ fn two_orchestrators_on_one_fleet_both_act_each_named_in_the_log_and_the_gates_s
     }
     let queued: Vec<_> = kinds(&c, "queue")
         .iter()
-        .map(|e| (e.data["issues"].clone(), e.data["orchestrator"].clone()))
+        .map(|e| (e.val("issues").clone(), e.val("orchestrator").clone()))
         .collect();
     assert_eq!(queued, [(json!([12]), json!("ada")), (json!([13]), json!("bob"))]);
 
@@ -178,7 +178,7 @@ fn two_orchestrators_on_one_fleet_both_act_each_named_in_the_log_and_the_gates_s
     assert_eq!(code, 0, "{out}");
     let spawns: Vec<_> = kinds(&c, "spawn")
         .iter()
-        .map(|e| (e.issue, e.data["orchestrator"].clone()))
+        .map(|e| (e.issue, e.val("orchestrator").clone()))
         .collect();
     assert_eq!(spawns, [(Some(12), json!("ada")), (Some(13), json!("bob"))]);
     assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "14"]).0, 0);

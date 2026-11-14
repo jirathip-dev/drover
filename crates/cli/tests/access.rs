@@ -424,7 +424,7 @@ fn capped_account_is_used_again_after_its_banner_reset() {
     spawn(&c, &sh, 12);
     cap(&c, &sh, "You've hit your limit · resets 3pm (Asia/Bangkok)");
     let ev = read(&c.state).unwrap();
-    assert_eq!(ev.last().unwrap().data["until"], 1_004_400);
+    assert_eq!(ev.last().unwrap().val("until"), 1_004_400);
     assert_eq!(dry_account(&c, 13), "B");
     c.now = 1_004_399;
     assert_eq!(dry_account(&c, 13), "B");
@@ -635,7 +635,7 @@ fn a_banner_with_the_week_at_100_caps_until_the_reset() {
         "{out}"
     );
     let capped = kinds(&c, "account-capped");
-    assert_eq!(capped[0].data["until"], 1_200_000, "the week's reset");
+    assert_eq!(capped[0].val("until"), 1_200_000, "the week's reset");
     assert!(kinds(&c, "account-signed-out").is_empty());
     assert_eq!(dry_account(&c, 13), "B");
     let (_, list) = run(&c, &Fake::default(), &["accounts"]);

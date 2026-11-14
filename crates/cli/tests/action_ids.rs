@@ -159,7 +159,7 @@ fn a_crash_between_merge_and_its_log_is_recovered_from_the_merged_pr_without_mer
     let done = kinds(&c, "done");
     assert_eq!(done.len(), 1);
     assert_eq!(done[0].str("action_id"), intent[0].str("action_id"));
-    assert_eq!(done[0].data["recovered"], true);
+    assert_eq!(done[0].val("recovered"), true);
     let merged = kinds(&c, "merged");
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].str("merge_sha"), Some("m3rg3"));

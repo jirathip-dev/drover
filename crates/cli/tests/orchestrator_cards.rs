@@ -170,10 +170,10 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
     assert!(r.called("gh auth status"), "doctor ran: {:?}", r.calls.borrow());
     let st = &kinds(&c, "config-settled")[0];
     assert_eq!(
-        (st.data["applied"].clone(), st.str("backup")),
+        (st.val("applied").clone(), st.str("backup")),
         (json!(true), Some(backup.as_str()))
     );
-    assert!(st.data["doctor"].is_boolean());
+    assert!(st.val("doctor").is_boolean());
     let page = chat(&s, &cookie, T + 20);
     assert!(
         !page.contains("class=chc")
@@ -234,7 +234,7 @@ fn a_usage_limit_resumes_the_orchestrator_on_the_next_account_with_the_same_sess
         (next.str("account"), next.str("session")),
         (Some("B"), Some(session.as_str()))
     );
-    assert_eq!(next.data["resumed"], json!(true));
+    assert_eq!(*next.val("resumed"), json!(true));
     let calls = r.calls.borrow();
     let start = calls
         .iter()
@@ -292,7 +292,7 @@ fn a_usage_limit_restarts_the_orchestrator_on_the_next_account() {
         (next.str("account"), next.str("runtime")),
         (Some("B"), Some("shed-acp"))
     );
-    assert_eq!(next.data["resumed"], json!(false));
+    assert_eq!(*next.val("resumed"), json!(false));
     assert_eq!(r.count("shed run --acp claude-acp"), 1, "{:?}", r.calls.borrow());
     let b = drover::config::home().join(".config/drover/accounts/B");
     let env = cli.out.borrow().concat();

@@ -99,7 +99,7 @@ pub fn served(events: &[Event], (fleet, n): (&str, u64)) -> Vec<(String, PathBuf
     let last = mine.iter().rfind(|e| e.kind == "verdict");
     let files = last
         .filter(|e| e.str("stage") == Some("verify"))
-        .and_then(|e| e.data["files"].as_array());
+        .and_then(|e| e.val("files").as_array());
     let shot = |v: &Value| {
         let (name, path) = (v["name"].as_str()?, Path::new(v["path"].as_str()?));
         let p = lanes.iter().find_map(|l| inside(path, Path::new(l)))?;

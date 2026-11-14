@@ -76,7 +76,7 @@ fn a_pass_lands_once_its_fast_checks_are_green() {
     assert!(r.called(&format!("gh pr merge 34 -R {REPO} --merge --match-head-commit {HEAD}")));
     let l = event(&c, "landed").expect("landed");
     assert_eq!((l.str("mode"), l.str("sha")), (Some("fast-first"), Some("m3rg3")));
-    assert_eq!(l.data["checks_secs"], 180);
+    assert_eq!(l.val("checks_secs"), 180);
     assert_eq!(state(&c, 12), "merged");
 }
 

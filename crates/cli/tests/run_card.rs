@@ -215,12 +215,12 @@ fn approve_runs_the_exact_command_once_and_posts_its_masked_output() {
     assert!(text.contains("token •••") && !text.contains("ghp_"), "masked: {text}");
     let s = &kinds(&c, "run-settled")[0];
     assert_eq!(
-        (s.str("by"), s.str("id"), s.str("sha"), s.data["approved"].clone()),
+        (s.str("by"), s.str("id"), s.str("sha"), s.val("approved").clone()),
         (Some("owner"), Some("r1"), Some(sha.as_str()), json!(true))
     );
     let done = &kinds(&c, "run-done")[0];
     assert_eq!(
-        (done.str("by"), done.str("id"), done.data["code"].clone()),
+        (done.str("by"), done.str("id"), done.val("code").clone()),
         (Some("owner"), Some("r1"), json!(0))
     );
 
@@ -248,7 +248,7 @@ fn a_changed_or_expired_card_is_refused_and_deny_runs_nothing() {
     assert_eq!((code, out.as_str()), (0, "run r2 denied by owner; nothing ran\n"));
     let s = &kinds(&c, "run-settled")[0];
     assert_eq!(
-        (s.str("by"), s.str("id"), s.data["approved"].clone()),
+        (s.str("by"), s.str("id"), s.val("approved").clone()),
         (Some("owner"), Some("r2"), json!(false))
     );
     assert_eq!(
@@ -404,7 +404,7 @@ fn a_card_sleeping_90s_with_timeout_300_runs_in_the_background_and_reports_exit_
         r.0.calls.borrow()
     );
     let done = &kinds(&c, "run-done")[0];
-    assert_eq!((done.str("id"), done.data["code"].clone()), (Some("r1"), json!(0)));
+    assert_eq!((done.str("id"), done.val("code").clone()), (Some("r1"), json!(0)));
     let text = last_msg(&c);
     assert!(
         text.starts_with("run r1 approved by owner, ran in /srv/app: exit 0"),
@@ -427,7 +427,7 @@ fn a_run_past_its_timeout_is_killed_and_reported_with_its_tail() {
     let (code, out) = run(&at(&c, T + 400), &r, &["card", "run", "r1"]);
     assert_eq!(code, 0, "{out}");
     let done = &kinds(&c, "run-done")[0];
-    assert_eq!(done.data["code"], json!(124));
+    assert_eq!(*done.val("code"), json!(124));
     let text = last_msg(&c);
     assert!(
         text.starts_with("run r1 approved by owner, ran in /srv/app: exit 124"),
