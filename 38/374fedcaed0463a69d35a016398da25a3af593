@@ -1,0 +1,5 @@
+Decided: merged origin/staging again and refreshed the PR body's Evidence to name the new head; the evidence check failed only because the body named the old head.
+Because: crates/cli/tests/sim/replay.rs:1
+Rejected: re-running the live-week replay — this round only merges staging's own sim edits; the fixture replay test re-ran green at this head.
+Check: the PR body's Evidence names head 38374fedc and the evidence check is green there.
+Owner: The branch is on the latest staging and its PR evidence matches the pushed head.
