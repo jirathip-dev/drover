@@ -1,0 +1,9 @@
+Decided: doctor lists a shed-acp host's agents with hosts::agents_of, the same call survey makes, on an On that refuses herdr
+Because: crates/core/src/doctor.rs:299
+Decided: a herdr host keeps herdr::poll and its exact row text, so its check is unchanged
+Because: "A herdr host's check is unchanged."
+Decided: the stale-override row sits with the other cloud rows in cloud::doctor; bootstrap's can't-reach names any override file in use
+Because: crates/core/src/cloud.rs:377
+Rejected: switching herdr hosts to agents_of too — it also polls shed there and could change that host's row
+Check: remote_acp doctor_checks_a_shed_acp_host... fails on base with "herdr agent list: unscripted"; boat's two override tests fail on base
+Owner: doctor now checks shed-only hosts through shed, and points at an old recipe file that has no ssh identity.
