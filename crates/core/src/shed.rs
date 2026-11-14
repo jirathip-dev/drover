@@ -232,7 +232,7 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
         last_out(ctx, &e.name, |v| {
             v["at"] = json!(ctx.now);
             match &e.kind {
-                EventKind::Turn { .. } => v["turn_at"] = json!(ctx.now),
+                EventKind::Turn { .. } => {}
                 EventKind::ToolCall { id, status, .. } if matches!(status.as_str(), "pending" | "in_progress") => {
                     (v["said"], v["tools"][id]) = (json!(ctx.now), json!(status));
                 }

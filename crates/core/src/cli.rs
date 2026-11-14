@@ -144,9 +144,7 @@ enum Cmd {
         #[arg(long, default_value = "owner")]
         by: String,
     },
-    #[command(
-        about = "Owner only: a rate-limited lane's [switch account] (its session on the role's next uncapped account) or [wait] (`continue` at its reset)"
-    )]
+    #[command(about = "Owner only: a rate-limited lane's [switch account] (resume on the next one) or [wait]")]
     Limit {
         fleet: String,
         issue: u64,
@@ -154,10 +152,7 @@ enum Cmd {
         pick: String,
         #[arg(long, default_value = "owner", help = "Who picked it, as the log shows it")]
         by: String,
-        #[arg(
-            long,
-            help = "An orchestrator's: the owner's exact line in its thread, since the lane hit its limit"
-        )]
+        #[arg(long, help = "An orchestrator's: the owner's exact line in its thread")]
         typed: Option<String>,
     },
     /// Owner only: a parked issue back to the state it had, in its queue place (else last); logs `unparked`
@@ -1954,12 +1949,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     by,
                     typed,
                 } => {
-                    let by = match std::env::var("DROVER_THREAD").ok().filter(|t| !t.is_empty()) {
-                        Some(t) => {
-                            crate::limit::typed(ctx, &t, typed.as_deref(), (&fleet, issue)).map(|()| crate::TYPED)?
-                        }
-                        None => by.as_str(),
-                    };
+                    let by = crate::limit::by(ctx, typed.as_deref(), &by, (&fleet, issue))?;
                     crate::limit::pick(ctx, &cfg, r, out, (&fleet, issue), &pick, by)?;
                 }
                 Cmd::Unpark { fleet, issue, by } => gate::unpark(ctx, &cfg, out, (&fleet, issue), &by)?,

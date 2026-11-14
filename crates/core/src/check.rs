@@ -391,7 +391,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             }
             // #425: a held lane waits by design. #666: an unheld one alerts once until it changes (drive acts on it).
             // #679: a live shed lane whose last turn is `working` is idle between turns, never stalled.
-            let between = shed && working || agent.is_some_and(|a| crate::stall::held(ctx, &events, a));
+            let between = shed && working || agent.is_some_and(|a| crate::stall::held(&events, a));
             if idle > stall && status != Some("working") && !between && !parked && held_on(&events, s).is_empty() {
                 let st = status.unwrap_or("gone");
                 // #319: a settled fix lane at the FAILed head says what it is missing.

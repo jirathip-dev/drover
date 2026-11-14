@@ -22,6 +22,12 @@
       "ts": 900200
     }
   ],
+  "counts": {
+    "busy": 1,
+    "rate_limited": 0,
+    "waiting_approval": 0,
+    "waiting_owner": 0
+  },
   "fleets": [
     {
       "color": "g",
@@ -40,12 +46,14 @@
   ],
   "lanes": [
     {
+      "account": null,
       "fleet": "sendmeter",
       "harness": "claude",
       "host": "local",
       "issue": 12,
       "model": null,
       "name": "sendmeter-impl-12",
+      "note": null,
       "role": "impl",
       "runtime": "herdr",
       "shown": "working",

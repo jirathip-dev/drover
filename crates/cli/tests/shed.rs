@@ -2631,11 +2631,11 @@ fn each_shed_state_reaches_api_v1_and_the_plugin_unchanged() {
 #[test]
 fn a_lane_ending_its_turn_on_an_ask_waits_on_the_owner_until_it_is_answered() {
     let (c, b, f, wt, _) = acp_lane("acp-waiting-owner");
-    session(&b, &[turn()]);
     let cli = Push(b.cli(&f), wt.clone());
-    drive_at(&c, &cli, 60);
-    let (code, out) = run(&later(&c, 70), &cli, &["ask", "sendmeter", "12", "Which way?"]);
+    let (code, out) = run(&later(&c, 30), &cli, &["ask", "sendmeter", "12", "Which way?"]);
     assert_eq!(code, 0, "{out}");
+    session(&b, &[turn()]);
+    drive_at(&c, &cli, 60);
     b.set("sendmeter-impl-12", |t| {
         t["reported"] = json!({"state": "done", "note": "end_turn"})
     });

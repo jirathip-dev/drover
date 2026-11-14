@@ -1,5 +1,3 @@
-//! #983: a `rate-limited` ACP lane waits on the owner's pick: [switch account] resumes its session on the role's next
-//! uncapped account, [wait] sends `continue` at shed's reset time. drover takes neither by itself.
 use crate::config::Config;
 use crate::events::{append, emit, fold, last_spawn, read, Event};
 use crate::hosts::On;
@@ -64,22 +62,24 @@ pub fn pick(
     crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, role), &o).map(drop)
 }
 
-/// An orchestrator's relay: `line` is the owner's own message in thread `t` since `fleet` #`n`'s lane went rate-limited.
-pub fn typed(ctx: &Ctx, t: &str, line: Option<&str>, (fleet, n): (&str, u64)) -> Result<()> {
+/// Who picked: `by`, or in an orchestrator's thread the owner's `line` there since the lane went rate-limited.
+pub fn by<'a>(ctx: &Ctx, line: Option<&str>, by: &'a str, (fleet, n): (&str, u64)) -> Result<&'a str> {
+    let Some(t) = std::env::var("DROVER_THREAD").ok().filter(|t| !t.is_empty()) else {
+        return Ok(by);
+    };
     let events = read(&ctx.state)?;
     let limited = |e: &&Event| e.is("lane-state", fleet, n) && e.str("state") == Some("rate-limited");
     let since = events.iter().rfind(limited).map_or(u64::MAX, |e| e.seq);
-    let said = |m: &Event| m.kind == "thread-msg" && m.str("thread") == Some(t) && m.str("from") == Some("owner");
-    if line.is_some_and(|l| {
-        events
-            .iter()
-            .any(|m| said(m) && m.seq > since && m.str("text") == Some(l))
-    }) {
-        return Ok(());
+    let said = |m: &Event| m.kind == "thread-msg" && m.seq > since && m.str("from") == Some("owner");
+    if events
+        .iter()
+        .any(|m| said(m) && m.str("thread") == Some(&t) && m.str("text") == line)
+    {
+        return Ok(crate::TYPED);
     }
     gate::refused(
         "NOT_TYPED",
-        format!("no owner message in {t} says that line since #{n}'s lane hit its limit"),
+        format!("no owner line in {t} like that since #{n}'s lane hit its limit"),
     )
 }
 

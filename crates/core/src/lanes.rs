@@ -256,27 +256,23 @@ pub const BUSY: [&str; 2] = ["working", "running"];
 /// #983: the states a lane waits or works in by design: never nudged, stalled or dead.
 pub const HELD: [&str; 4] = ["running", "waiting-approval", "waiting-owner", "rate-limited"];
 
-/// #983: agent `a`'s state: shed's, or `waiting-owner` over a `done` turn that ended on an open ask or turn-end.
-pub fn state(ctx: &crate::Ctx, events: &[Event], a: &Value) -> String {
+/// #983: agent `a`'s state: shed's, or `waiting-owner` over `done` while its issue has an open ask or blocked turn-end.
+pub fn state(events: &[Event], a: &Value) -> String {
     let raw = a["agent_status"].as_str().unwrap_or("unknown");
-    let name = a["name"].as_str().unwrap_or_default();
-    let turn = crate::shed::session(ctx, name)["turn_at"].as_u64();
-    let sp = turn
-        .and(crate::events::last_spawn(events, name))
-        .filter(|_| raw == "done");
-    let Some((sp, at)) = sp.zip(turn) else {
+    let sp = crate::events::last_spawn(events, a["name"].as_str().unwrap_or_default());
+    let Some(sp) = sp.filter(|_| raw == "done") else {
         return raw.into();
     };
-    let (f, n) = (sp.fleet.as_str(), sp.issue.unwrap_or_default());
-    let asked = crate::events::open_asks(events)
-        .iter()
-        .any(|e| e.fleet == f && e.issue == Some(n) && e.ts >= at);
-    let mine = |e: &&Event| e.ts >= at && e.is("turn-end", f, n);
-    let ended = events
-        .iter()
-        .rfind(mine)
-        .filter(|t| matches!(t.str("state"), Some("blocked" | "need-input")));
-    let answered = |t: &Event| events.iter().any(|e| e.is("decision", f, n) && e.seq > t.seq);
+    let mine = |e: &&Event| e.seq > sp.seq && e.fleet == sp.fleet && e.issue == sp.issue;
+    let asked = crate::events::open_asks(events).iter().any(mine);
+    let ended = events.iter().filter(mine).rfind(|e| e.kind == "turn-end");
+    let ended = ended.filter(|t| matches!(t.str("state"), Some("blocked" | "need-input")));
+    let answered = |t: &Event| {
+        events
+            .iter()
+            .filter(mine)
+            .any(|e| e.kind == "decision" && e.seq > t.seq)
+    };
     let owner = asked || ended.is_some_and(|t| !answered(t));
     if owner { "waiting-owner" } else { raw }.into()
 }

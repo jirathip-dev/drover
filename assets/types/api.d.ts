@@ -264,6 +264,8 @@ counts: LaneCounts, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, a
  */
 sources: { [key in string]: number }, };
 
+export type LaneCounts = { busy: number, waiting_approval: number, waiting_owner: number, rate_limited: number, };
+
 export type Fleet = { name: string, repo: string, color: string, paused: boolean, };
 
 export type Queued = { fleet: string, issue: number, title?: string | null, state: string, blocked_by?: number | null, 

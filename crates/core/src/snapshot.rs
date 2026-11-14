@@ -174,7 +174,7 @@ pub fn lanes(cfg: &Config, r: &dyn Runner, ctx: &Ctx, (events, st): (&[Event], &
     let mut agents = list["result"]["agents"].as_array().cloned().unwrap_or_default();
     agents.extend(crate::hosts::remote_agents(cfg, r));
     for a in &mut agents {
-        a["agent_status"] = json!(lanes::state(ctx, events, a));
+        a["agent_status"] = json!(lanes::state(events, a));
     }
     let wsl = herdr::list(r, "workspace").unwrap_or_default();
     let ws: BTreeMap<String, String> = wsl["result"]["workspaces"]

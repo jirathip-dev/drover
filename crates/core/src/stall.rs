@@ -69,7 +69,7 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], agents: &[
     }
     let (lane, sp) = (&w.lane, last_spawn(ev, &w.lane)?);
     let a = agents.iter().find(|a| a["name"] == lane.as_str())?;
-    if held(ctx, ev, a) {
+    if held(ev, a) {
         return None;
     }
     let (role, pane, on) = (sp.str("role")?, sp.str("pane")?, On::of(r, Some(sp)));
@@ -133,8 +133,8 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], agents: &[
 }
 
 /// #983: agent `a` waits or works by design (`lanes::HELD`).
-pub fn held(ctx: &Ctx, ev: &[Event], a: &Value) -> bool {
-    crate::lanes::HELD.contains(&crate::lanes::state(ctx, ev, a).as_str())
+pub fn held(ev: &[Event], a: &Value) -> bool {
+    crate::lanes::HELD.contains(&crate::lanes::state(ev, a).as_str())
 }
 
 /// #819: a check lane with no verdict since its spawn and no new pane output this long is replaced.
@@ -211,7 +211,7 @@ pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Value], fleet: &s
         let Some(a) = agents.iter().find(|a| a["name"] == lane) else {
             continue;
         };
-        if o["turn"] != true || open || held(ctx, ev, a) {
+        if o["turn"] != true || open || held(ev, a) {
             continue;
         }
         let mine = |k: &'static str| move |e: &&Event| e.kind == k && e.str("agent") == Some(lane);
