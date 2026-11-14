@@ -343,7 +343,7 @@ pub fn view(events: &[Event], st: &States, fleet: &str) -> Vec<Item> {
         .into_iter()
         .filter(|i| !matches!(state(st, fleet, i.issue), "merged" | "closed"));
     open.map(|mut i| {
-        i.blockers.retain(|&b| state(st, fleet, b) != "merged");
+        i.blockers.retain(|&b| !released(events, st, &format!("{fleet}#{b}")));
         i.ext.retain(|b| !released(events, st, b));
         i.blocked_by = i.blockers.first().copied();
         i
