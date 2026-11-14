@@ -1027,3 +1027,98 @@ fn a_hotspots_issues_architect_brief_carries_the_hot_files_playbook_and_profiles
     drive(&c, &Both(adr(&c, HEAD), &base));
     assert!(!brief(&c).contains("This is a hotspots issue"), "{}", brief(&c));
 }
+
+fn beacon(c: &drover::Ctx, sh: &FakeShed, role: &str) -> String {
+    let agent = kinds(c, "spawn").last().unwrap().str("agent").unwrap().to_string();
+    let labels = serde_json::json!({"fleet": "sendmeter", "issue": "12", "role": role});
+    let ev = |seq: u64, state: &str, note: Option<&str>| serde_json::json!({"seq": seq, "name": agent, "labels": labels, "event": "state", "state": state, "note": note});
+    sh.lock()
+        .events
+        .extend([ev(1, "error", Some("no response")), ev(2, "hibernated", None)]);
+    sh.set(&agent, |t| t["reported"] = serde_json::json!({"state": "hibernated"}));
+    agent
+}
+
+fn lane_states(c: &drover::Ctx, agent: &str) -> Vec<(String, Option<String>)> {
+    let mine = kinds(c, "lane-state")
+        .into_iter()
+        .filter(|e| e.str("agent") == Some(agent));
+    mine.map(|e| (e.str("state").unwrap().to_string(), e.str("note").map(String::from)))
+        .collect()
+}
+
+#[test]
+fn a_design_stage_lane_that_errors_then_hibernates_without_a_push_is_respawned_by_drive() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for (flag, role) in [("--architect", "architect"), ("--design", "design")] {
+        let (mut c, _w, r, sh) = staged(&format!("{role}-beacon"), flag);
+        assert_eq!(spawned(&c, role), 1, "{role}");
+        let agent = beacon(&c, &sh, role);
+        c.now += 300;
+        let (code, w) = run(&c, &r, &["waiting", "sendmeter"]);
+        assert_eq!(code, 0, "{w}");
+        assert!(w.contains(&format!("no push: respawning {role}")), "{w}");
+        assert!(
+            w.contains(&format!("drover spawn sendmeter 12 {role} --supersede")),
+            "{w}"
+        );
+        assert!(!w.contains("check the pane"), "{w}");
+        drive(&c, &r);
+        let states = lane_states(&c, &agent);
+        assert!(
+            states.contains(&("error".into(), Some("no response".into())))
+                && states.iter().any(|s| s.0 == "hibernated"),
+            "{role}: {states:?}"
+        );
+        assert_eq!(spawned(&c, role), 2, "{role}: drive respawned it");
+        assert_eq!(kinds(&c, "respawn")[0].str("role"), Some(role), "{role}");
+        assert!(kinds(&c, "needs-human").is_empty(), "{role}");
+    }
+}
+
+#[test]
+fn a_refused_design_stage_respawn_is_one_owner_ask_and_one_check_alert() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut c, _w, r, sh) = staged("architect-loop", "--architect");
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, toml.replacen("[limits]\n", "[limits]\nrespawn_max = 1\n", 1)).unwrap();
+    let agent = beacon(&c, &sh, "architect");
+    let d = serde_json::json!({"key": format!("sendmeter:12:{agent}"), "reason": "gone"});
+    drover::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "lane-dead", d)).unwrap();
+    c.now += 300;
+    let loops = |c: &drover::Ctx| {
+        let asks = kinds(c, "needs-decision");
+        asks.iter()
+            .filter(|e| e.str("respawn_loop") == Some("architect"))
+            .count()
+    };
+    let alerts = |c: &drover::Ctx| kinds(c, "respawn-refused").len();
+    drive(&c, &r);
+    assert_eq!(spawned(&c, "architect"), 1, "RESPAWN_LOOP refused it");
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!((loops(&c), alerts(&c)), (1, 1), "{out}");
+    assert!(alerts(&c) == 1 && out.contains("RESPAWN_LOOP"), "{out}");
+    c.now += 300;
+    drive(&c, &r);
+    assert_eq!(run(&c, &r, &["check"]).0, 0);
+    assert_eq!((loops(&c), alerts(&c), spawned(&c, "architect")), (1, 1, 1));
+}
+
+#[test]
+fn a_design_lane_that_pushed_its_artifact_and_asked_is_not_respawned() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut c, w, r, sh) = staged("architect-asked", "--architect");
+    push(&w, &[("docs/architecture/meter/adr.md", "# ADR\n")]);
+    drive(&c, &r);
+    assert_eq!(
+        (state(&c, 12).as_str(), kinds(&c, "needs-decision").len()),
+        ("design-review", 1)
+    );
+    beacon(&c, &sh, "architect");
+    c.now += 300;
+    drive(&c, &r);
+    let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert_eq!(spawned(&c, "architect"), 1, "{w}");
+    assert!(kinds(&c, "respawn").is_empty() && !w.contains("respawning"), "{w}");
+}
