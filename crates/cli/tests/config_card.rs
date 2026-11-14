@@ -291,3 +291,23 @@ fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
     let settings = drover::providers::profiles_root(&c).join("fleet-verify/settings.json");
     assert!(std::fs::read_to_string(settings).unwrap().contains("hook --role rev"));
 }
+
+#[test]
+fn a_proposal_over_16_kb_applies_byte_for_byte() {
+    let c = setup("cfg-big");
+    let old = std::fs::read_to_string(&c.config).unwrap();
+    let pad: String = (0..400)
+        .map(|i| format!("# padding line {i:04} of a long fleet.toml\n"))
+        .collect();
+    let new = format!("{}{pad}", old.replacen("model = \"opus\"", "model = \"sonnet\"", 1));
+    assert!(new.len() > 16 << 10, "{}", new.len());
+    let file = c.config.with_file_name("proposed.toml");
+    std::fs::write(&file, &new).unwrap();
+    let r = Fake::default();
+    let (code, out) = run(&c, &r, &["config", "propose", "t1", file.to_str().unwrap()]);
+    assert_eq!((code, out.as_str()), (0, "c1\n"));
+    let (code, out) = run(&c, &r, &["config", "apply", "c1"]);
+    assert_eq!(code, 0, "{out}");
+    let got = std::fs::read_to_string(&c.config).unwrap();
+    assert!(got == new, "applied {} bytes of {}", got.len(), new.len());
+}
