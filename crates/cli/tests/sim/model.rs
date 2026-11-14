@@ -178,7 +178,7 @@ pub fn answer(sim: &Arc<Sim>, w: &mut World, me: usize, prog: &str, args: &[Stri
                 w.procs[me].starting = Some((*pane).into());
                 let agent = Some(a[2].to_string());
                 let starts = w.model.panes.iter().filter(|p| p.agent == agent).count();
-                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 4;
+                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 3;
                 if planted || w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
                     crate::invariants::double(w, pane);
                 }
