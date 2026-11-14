@@ -1,0 +1,6 @@
+Decided: deleted the 33 comment lines arch-check flagged in crates/cli/tests/sim; multi-line pub docs became one `///` line.
+Because: crates/cli/tests/sim/replay.rs:1
+Rejected: keeping the why text as comments — CI's arch-check (#735) refuses any comment but one `///` on a pub item.
+Rejected: re-running the live-week replay — this round removes comments only, no code.
+Check: drover arch-check --base on the merge-base reports 0 violations and CI's rust job is green at this head.
+Owner: The replay sim code is unchanged; only comments the CI style check refuses are gone.
