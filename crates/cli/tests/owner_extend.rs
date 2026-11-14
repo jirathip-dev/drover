@@ -189,69 +189,6 @@ impl Runner for Slow {
     }
 }
 
-fn http(addr: &str, req: &str) -> String {
-    let mut s = std::net::TcpStream::connect(addr).unwrap();
-    s.write_all(req.as_bytes()).unwrap();
-    let mut res = String::new();
-    s.read_to_string(&mut res).unwrap();
-    res
-}
-
-struct Board {
-    addr: String,
-    cookie: String,
-}
-
-impl Board {
-    fn start(c: &drover::Ctx, r: Slow) -> Board {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        let fake = Fake::default();
-        let s = drover::serve::Server::new(c, &fake, Some("127.0.0.1:7777".into()));
-        let cookie = pair(&s, c, "Mozilla/5.0 (iPhone)", now);
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = l.local_addr().unwrap().to_string();
-        let c2 = c.clone();
-        std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
-        std::thread::sleep(std::time::Duration::from_millis(300));
-        Board { addr, cookie }
-    }
-
-    fn post(&self, op: &str, body: &str) -> (u128, Value) {
-        let (addr, cookie) = (&self.addr, &self.cookie);
-        let req = format!(
-            "POST /api/v1/{op} HTTP/1.1\r\nHost: {addr}\r\n{cookie}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        let t = std::time::Instant::now();
-        let res = http(addr, &req);
-        let ms = t.elapsed().as_millis();
-        (ms, serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap())
-    }
-
-    fn get(&self, path: &str) -> Value {
-        let (addr, cookie) = (&self.addr, &self.cookie);
-        let res = http(
-            addr,
-            &format!("GET /api/v1/{path} HTTP/1.1\r\nHost: {addr}\r\n{cookie}Connection: close\r\n\r\n"),
-        );
-        serde_json::from_str::<Value>(res.split_once("\r\n\r\n").unwrap().1).unwrap()
-    }
-
-    fn until(&self, id: &str, done: impl Fn(&Value) -> bool) -> Value {
-        let t0 = std::time::Instant::now();
-        loop {
-            let j = self.get(&format!("job/{id}"));
-            if done(&j) || t0.elapsed().as_secs() >= 30 {
-                return j;
-            }
-            std::thread::sleep(std::time::Duration::from_millis(100));
-        }
-    }
-}
-
 #[test]
 fn ten_taps_under_load_and_a_held_drive_pass_are_each_accepted_at_once_and_end_on_their_own() {
     let (c, _sh) = setup("owner-extend-board", 9);

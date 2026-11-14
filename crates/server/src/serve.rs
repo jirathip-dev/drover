@@ -651,6 +651,7 @@ pub fn tone(state: &str) -> &'static str {
 /// Form ops only a paired device may POST.
 const PAIRED_OPS: &[&str] = &[
     "unpair", "answer", "drive", "override", "extend", "park", "unpark", "orphans", "reap", "host", "bqueue", "cond",
+    "card", "config",
 ];
 
 /// The non-empty fields, ` · `-joined (no `-` placeholders).

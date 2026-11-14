@@ -440,3 +440,47 @@ fn a_run_past_its_timeout_is_killed_and_reported_with_its_tail() {
     let kill = format!("kill -KILL -- -{}", std::process::id());
     assert!(r.0.called(&kill), "{:?}", r.0.calls.borrow());
 }
+
+#[test]
+fn a_card_tapped_twice_on_the_board_is_one_job_and_runs_once() {
+    let c = setup("card-board-twice", "");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    assert_eq!(post(&at(&c, now), "git log -1 main"), (0, "r1\n".into()));
+    let sha = kinds(&c, "run-card")[0].str("sha").unwrap().to_string();
+    let r = Fake::default()
+        .reply("sh -c nohup", "4242\n")
+        .reply("sh -c", "commit 1a2b\n");
+    let b = Board::start(&c, r);
+    let tap = format!("id=r1&act=approve&sha={}", &sha[..12]);
+    let (ms, first) = b.post("card", &tap);
+    assert!(first["code"] == "ACCEPTED" && ms < 200, "{ms} ms: {first}");
+    let (_, second) = b.post("card", &tap);
+    assert_eq!(
+        second["job"], first["job"],
+        "the second tap is the first's job: {second}"
+    );
+    let j = b.until(first["job"].as_str().unwrap(), |j| j["state"] != "running");
+    assert_eq!(
+        (&j["state"], &j["message"]),
+        (&json!("done"), &json!("run r1 approved by owner, running in /srv/app…")),
+        "{j}"
+    );
+    let (_, late) = b.post("card", &tap);
+    assert_eq!(
+        late["job"], first["job"],
+        "a tap after it ended is still that job: {late}"
+    );
+    assert_eq!(kinds(&c, "run-settled").len(), 1, "settled once");
+    let unpaired = http(
+        &b.addr,
+        &format!(
+            "POST /api/v1/card HTTP/1.1\r\nHost: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{tap}",
+            b.addr,
+            tap.len()
+        ),
+    );
+    assert!(unpaired.starts_with("HTTP/1.1 401"), "{unpaired}");
+}

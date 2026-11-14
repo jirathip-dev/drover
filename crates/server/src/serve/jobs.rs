@@ -20,8 +20,15 @@ impl Jobs {
 }
 
 fn key(f: &BTreeMap<String, String>) -> String {
-    ["op", "fleet", "issue", "id"]
-        .map(|k| f.get(k).map_or("", String::as_str))
+    let card = ["card", "config"].contains(&f.get("op").map_or("", String::as_str));
+    let keys: &[&str] = if card {
+        &["op", "id"]
+    } else {
+        &["op", "fleet", "issue", "id"]
+    };
+    keys.iter()
+        .map(|k| f.get(*k).map_or("", String::as_str))
+        .collect::<Vec<_>>()
         .join(" ")
 }
 
