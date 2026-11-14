@@ -199,48 +199,37 @@ fn project_ask(c: &Connection, e: &Event) -> Result<()> {
         let q = "INSERT INTO asks (seq, fleet, id, issue, agent, twin, json, rank, closed, at) \
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?1)";
         let (rank, why) = (repeat.then_some(events::ORDER.len() - 1), repeat.then_some("repeat"));
-        let json = serde_json::to_string(e)?;
-        c.execute(
-            q,
-            params![
-                e.seq,
-                e.fleet,
-                text("id"),
-                e.issue,
-                text("agent"),
-                twin,
-                json,
-                rank,
-                why
-            ],
-        )?;
+        let row = (
+            e.seq,
+            &e.fleet,
+            text("id"),
+            e.issue,
+            text("agent"),
+            twin,
+            serde_json::to_string(e)?,
+            rank,
+            why,
+        );
+        c.execute(q, row)?;
         return Ok(());
     }
     if !events::ends_asks(&e.kind) {
         return Ok(());
     }
+    let issue = e.issue.and_then(|n| i64::try_from(n).ok()).map(Sql::Integer);
     let (col, key, floor) = match e.kind.as_str() {
         "decision" | "ask-withdrawn" | "ask-delivered" | "ask-failed" | "ask-expired" => ("id", text("id"), 0),
-        "merged" | "closed" | "closed-other" | "clean" if e.issue.is_some() => (
-            "issue",
-            e.issue
-                .map_or(Sql::Null, |n| Sql::Integer(n.try_into().unwrap_or(i64::MAX))),
-            5,
-        ),
+        "merged" | "closed" | "closed-other" | "clean" if issue.is_some() => ("issue", issue.unwrap_or(Sql::Null), 5),
         "spawn" | "lane-killed" => ("agent", text("agent"), 7),
         _ => return Ok(()),
     };
     let q = format!("SELECT seq, json, rank FROM asks WHERE fleet = ?1 AND {col} IS ?2 AND (rank IS NULL OR rank BETWEEN ?3 AND ?4)");
-    let found = {
+    let found: Vec<(u64, String, Option<usize>)> = {
         let mut q = c.prepare(&q)?;
         let all = q.query_map(params![e.fleet, key, floor + 1, events::ORDER.len() - 2], |r| {
-            Ok((
-                r.get::<_, u64>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, Option<usize>>(2)?,
-            ))
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
         })?;
-        all.collect::<rusqlite::Result<Vec<_>>>()?
+        all.collect::<rusqlite::Result<_>>()?
     };
     let q = "SELECT MIN(seq) FROM events WHERE type = 'spawn-started' AND json_extract(json, '$.agent') IS ?1 \
         AND json_extract(json, '$.pane') IS ?2 AND seq < ?3";
@@ -250,23 +239,25 @@ fn project_ask(c: &Connection, e: &Event) -> Result<()> {
         })
     };
     for (seq, json, rank) in found {
-        let a = Event {
-            seq,
-            ..serde_json::from_str(&json)?
-        };
+        let a = numbered(seq, &json)?;
         let w = events::closes(&a, e, || first().ok().flatten().is_some_and(|f| f < seq));
         let Some(r) = events::ORDER.iter().position(|o| Some(*o) == w) else {
             continue;
         };
         if r < rank.unwrap_or(events::ORDER.len()) {
             let row = events::ending_row(events::ORDER[r], e);
-            c.execute(
-                "UPDATE asks SET rank = ?2, closed = ?3, at = ?4 WHERE seq = ?1",
-                params![seq, r, row, e.seq],
-            )?;
+            let set = "UPDATE asks SET rank = ?2, closed = ?3, at = ?4 WHERE seq = ?1";
+            c.execute(set, params![seq, r, row, e.seq])?;
         }
     }
     Ok(())
+}
+
+fn numbered(seq: u64, json: &str) -> Result<Event> {
+    Ok(Event {
+        seq,
+        ..serde_json::from_str(json)?
+    })
 }
 
 fn projected(evs: &[Event]) -> Result<Connection> {
@@ -322,44 +313,21 @@ pub fn rebuild(state: &Path) -> Result<()> {
     })
 }
 
-/// #978: the current-state tables' rows, in order: what `rebuild` must give again.
-pub fn projection(state: &Path) -> Result<Vec<String>> {
-    with(state, false, vec![], |c| {
-        let mut out = vec![];
-        for t in PROJECTIONS {
-            let mut q = c.prepare(&format!("SELECT json FROM {t} ORDER BY json"))?;
-            let rows = q.query_map([], |r| r.get::<_, String>(0))?;
-            out.extend(
-                rows.map(|r| r.map(|j| format!("{t} {j}")))
-                    .collect::<rusqlite::Result<Vec<_>>>()?,
-            );
-        }
-        Ok(out)
-    })
-}
-
 /// #978: the current per-issue state, the `issues` rows.
 pub fn issues(state: &Path) -> Result<events::States> {
-    with(state, false, events::States::new(), |c| {
-        let mut q = c.prepare("SELECT json FROM issues ORDER BY fleet, issue")?;
-        let rows = q.query_map([], |r| r.get::<_, String>(0))?;
-        rows.map(|j| {
-            let s: events::IssueState = serde_json::from_str(&j?)?;
-            Ok(((s.fleet.clone(), s.issue), s))
-        })
-        .collect()
-    })
+    since(state, i64::MAX as u64, true).map(|t| t.1)
 }
 
 /// #978: an ask's ending as its `asks` row holds it: (`ORDER` rank, `drover asks`' text); `None` while open.
 pub type Ending = Option<(usize, String)>;
+pub type Endings = std::collections::BTreeMap<u64, Ending>;
 
-pub fn endings(evs: &[Event]) -> Result<std::collections::BTreeMap<u64, Ending>> {
+pub fn endings(evs: &[Event]) -> Result<Endings> {
     let evs: Vec<Event> = evs.iter().zip(1..).map(|(e, seq)| Event { seq, ..e.clone() }).collect();
     asks_since(&projected(&evs)?, 0)
 }
 
-fn asks_since(c: &Connection, at: u64) -> Result<std::collections::BTreeMap<u64, Ending>> {
+fn asks_since(c: &Connection, at: u64) -> Result<Endings> {
     let mut q = c.prepare("SELECT seq, rank, closed FROM asks WHERE at > ?1")?;
     let rows = q.query_map([at], |r| {
         let (rank, why) = (r.get::<_, Option<usize>>(1)?, r.get::<_, Option<String>>(2)?);
@@ -368,11 +336,7 @@ fn asks_since(c: &Connection, at: u64) -> Result<std::collections::BTreeMap<u64,
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-pub(crate) fn since(
-    state: &Path,
-    seq: u64,
-    fresh: bool,
-) -> Result<(Vec<Event>, events::States, std::collections::BTreeMap<u64, Ending>)> {
+pub(crate) fn since(state: &Path, seq: u64, fresh: bool) -> Result<(Vec<Event>, events::States, Endings)> {
     with(state, false, Default::default(), |c| {
         let tx = c.transaction()?;
         let evs = rows(&tx, "archived = 0 AND seq > ?1", seq)?;
@@ -404,14 +368,8 @@ pub fn asks(state: &Path, fleet: Option<&str>) -> Result<Vec<(Event, Ending)>> {
             Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?, end))
         })?;
         rows.map(|r| {
-            let (seq, j, end) = r?;
-            Ok((
-                Event {
-                    seq,
-                    ..serde_json::from_str(&j)?
-                },
-                end,
-            ))
+            r.map_err(Into::into)
+                .and_then(|(seq, j, end)| Ok((numbered(seq, &j)?, end)))
         })
         .collect()
     })
@@ -440,10 +398,8 @@ pub fn compact(state: &Path, now: u64) -> Result<(usize, usize)> {
             zstd_append(&dir.join(format!("events-{m}.jsonl.zst")), &text)?;
         }
         tx.execute(&format!("DELETE FROM events WHERE {done}"), [cut])?;
-        tx.execute(
-            "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', ?1, '{}')",
-            [now],
-        )?;
+        let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', ?1, '{}')";
+        tx.execute(q, [now])?;
         tx.commit()?;
         if gone + old.len() > 0 {
             c.execute_batch("VACUUM")?;
@@ -456,16 +412,13 @@ pub fn compact(state: &Path, now: u64) -> Result<(usize, usize)> {
 
 fn zstd_append(file: &Path, text: &str) -> Result<()> {
     use std::io::Write as _;
-    let f = std::fs::OpenOptions::new().create(true).append(true).open(file)?;
-    let mut z = std::process::Command::new("zstd")
-        .args(["-q", "-c"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(f)
-        .spawn()
-        .context("zstd is not on PATH")?;
-    z.stdin.take().context("zstd stdin")?.write_all(text.as_bytes())?;
-    anyhow::ensure!(z.wait()?.success(), "zstd failed writing {}", file.display());
-    Ok(())
+    let (src, part) = (file.with_extension("new"), file.with_extension("part"));
+    std::fs::write(&src, text)?;
+    let (s, p) = (src.to_string_lossy(), part.to_string_lossy());
+    crate::runner::ok(&crate::runner::Real, "zstd", &["-qf", "--rm", &s, "-o", &p])?;
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(file)?;
+    f.write_all(&std::fs::read(&part)?)?;
+    Ok(std::fs::remove_file(part)?)
 }
 
 /// #978: every event `compact` moved to `archive/`, by seq.
@@ -541,10 +494,7 @@ fn rows(c: &Connection, filter: &str, arg: u64) -> Result<Vec<Event>> {
     rows.map(|r| {
         let (seq, json) = r?;
         ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Ok(crate::events::aliased(Event {
-            seq,
-            ..serde_json::from_str(&json)?
-        }))
+        Ok(crate::events::aliased(numbered(seq, &json)?))
     })
     .collect()
 }

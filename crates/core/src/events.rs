@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
-use crate::db::Ending;
+use crate::db::Endings;
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,12 +197,9 @@ pub fn offload(state: &Path, mut d: Map<String, Value>) -> Result<Map<String, Va
     let Some(errs) = d.get("errors").and_then(Value::as_array).filter(|a| !a.is_empty()) else {
         return Ok(d);
     };
-    let text: Vec<&str> = errs.iter().filter_map(Value::as_str).collect();
-    let text = text.join("\n");
-    let rel = format!(
-        "cache/build-cloned/{}.txt",
-        &crate::devices::sha256(text.as_bytes())[..32]
-    );
+    let text = errs.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n");
+    let hash = crate::devices::sha256(text.as_bytes());
+    let rel = format!("cache/build-cloned/{}.txt", &hash[..32]);
     let file = path_in(state, &rel);
     std::fs::create_dir_all(file.parent().unwrap_or(Path::new(".")))?;
     std::fs::write(file, text)?;
@@ -615,7 +612,7 @@ pub(crate) fn twin(e: &Event) -> Option<String> {
 /// #859: ask endings projected from a slice that is no cached `Log` (`index`'s fallback): serve's reads build none.
 pub static REBUILDS: AtomicUsize = AtomicUsize::new(0);
 
-fn index<T>(events: &[Event], f: impl FnOnce(&BTreeMap<u64, Ending>, &dyn Fn(usize) -> u64) -> T) -> T {
+fn index<T>(events: &[Event], f: impl FnOnce(&Endings, &dyn Fn(usize) -> u64) -> T) -> T {
     if let Some(l) = cached(events) {
         return f(&l.asks, &|i| events[i].seq);
     }
@@ -629,7 +626,7 @@ fn index<T>(events: &[Event], f: impl FnOnce(&BTreeMap<u64, Ending>, &dyn Fn(usi
 #[derive(Default, Clone)]
 pub struct Log {
     pub events: Events,
-    pub asks: BTreeMap<u64, Ending>,
+    pub asks: Endings,
     pub threads: Threads,
     pub states: States,
     issues: HashMap<(String, u64), Vec<usize>>,
@@ -836,14 +833,9 @@ pub fn finding<'a>(events: &'a [Event], fleet: &str, issue: u64) -> Option<&'a s
 
 /// `needs-decision` events not yet closed, oldest first (#978: the `asks` table's, for a cached log).
 pub fn open_asks(events: &[Event]) -> Vec<&Event> {
-    let asked = |i: &usize| events[*i].kind == "needs-decision";
     index(events, |x, key| {
-        let open = |i: &usize| x.get(&key(*i)).is_some_and(Option::is_none);
-        (0..events.len())
-            .filter(asked)
-            .filter(open)
-            .map(|i| &events[i])
-            .collect()
+        let open = |i: &usize| events[*i].kind == "needs-decision" && x.get(&key(*i)).is_some_and(Option::is_none);
+        (0..events.len()).filter(open).map(|i| &events[i]).collect()
     })
 }
 

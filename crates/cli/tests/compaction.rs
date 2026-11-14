@@ -70,6 +70,23 @@ fn write(p: &Path, ev: &[Event]) {
 
 const DAY: u64 = 86_400;
 
+/// The issue, lane and ask tables' rows, read straight from the database file.
+fn tables(p: &Path) -> Vec<String> {
+    let c = rusqlite::Connection::open(drover::db::file(p)).unwrap();
+    let mut out = vec![];
+    for t in ["issues", "lanes", "asks"] {
+        let mut q = c.prepare(&format!("SELECT * FROM {t} ORDER BY 1, 2")).unwrap();
+        let n = q.column_count();
+        let rows = q.query_map([], |r| {
+            (0..n)
+                .map(|i| r.get::<_, rusqlite::types::Value>(i))
+                .collect::<Result<Vec<_>, _>>()
+        });
+        out.extend(rows.unwrap().map(|r| format!("{t} {:?}", r.unwrap())));
+    }
+    out
+}
+
 #[test]
 fn the_tables_match_the_events_and_a_rebuild_gives_identical_rows() {
     for seed in 1..=20u64 {
@@ -95,11 +112,11 @@ fn the_tables_match_the_events_and_a_rebuild_gives_identical_rows() {
         };
         assert_eq!(ends(&live), ends(&copy), "seed {seed}");
         assert!(ends(&copy).iter().any(Option::is_some), "seed {seed}: some ask closed");
-        let rows = drover::db::projection(&p).unwrap();
+        let rows = tables(&p);
         assert!(rows.iter().any(|r| r.starts_with("asks ")) && rows.iter().any(|r| r.starts_with("lanes ")));
         let (code, out) = run(&c, &Fake::default(), &["compact", "--rebuild"]);
         assert_eq!(code, 0, "{out}");
-        assert_eq!(drover::db::projection(&p).unwrap(), rows, "seed {seed}: rebuild");
+        assert_eq!(tables(&p), rows, "seed {seed}: rebuild");
         c.now = 1_000 + 300 * 600 + 30 * DAY;
         let (code, out) = run(&c, &Fake::default(), &["compact"]);
         assert_eq!(code, 0, "{out}");
@@ -109,11 +126,7 @@ fn the_tables_match_the_events_and_a_rebuild_gives_identical_rows() {
         );
         let (code, out) = run(&c, &Fake::default(), &["compact", "--rebuild"]);
         assert_eq!(code, 0, "{out}");
-        assert_eq!(
-            drover::db::projection(&p).unwrap(),
-            rows,
-            "seed {seed}: rebuild from the archive"
-        );
+        assert_eq!(tables(&p), rows, "seed {seed}: rebuild from the archive");
     }
 }
 

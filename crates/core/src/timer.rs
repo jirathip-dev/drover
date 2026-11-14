@@ -275,9 +275,6 @@ fn alert(ctx: &Ctx, cfg: &Config, events: &[Event], kind: &str, item: &str, reas
     emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))
 }
 
-/// `drover tick`: `check`, then `drive` (under #92's lock), the hourly clean, remote build trims, then an hourly alert per
-/// red Services row. A refusal exits 0; a real error (config, herdr) logs `tick-failed`, alerted at most hourly, and
-/// exits 1. #561: one probe per remote host, 15 s per remote call; `tick.step` names the step for `tick-stuck`.
 fn compact_daily(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
     let at = ctx.state.with_file_name("compact.at");
     let last = std::fs::read_to_string(&at)
@@ -294,6 +291,9 @@ fn compact_daily(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
     Ok(())
 }
 
+/// `drover tick`: `check`, then `drive` (under #92's lock), the hourly clean, remote build trims, then an hourly alert per
+/// red Services row. A refusal exits 0; a real error (config, herdr) logs `tick-failed`, alerted at most hourly, and
+/// exits 1. #561: one probe per remote host, 15 s per remote call; `tick.step` names the step for `tick-stuck`.
 pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let log = ctx.state.with_file_name("tick.log");
     if log.metadata().is_ok_and(|m| m.len() > 1 << 20) {
