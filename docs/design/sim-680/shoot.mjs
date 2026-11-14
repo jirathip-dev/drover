@@ -1,6 +1,6 @@
 // #680: the design page at 1440 and 390 (DPR 2), whole page. Usage: node shoot.mjs <chrome-headless-shell>
 import { writeFileSync } from 'node:fs';
-import { chrome, serve } from '../theme-370/cdp.mjs';
+import { chrome, serve } from './cdp.mjs';
 
 const here = new URL('.', import.meta.url).pathname;
 const c = chrome(process.argv[2]);

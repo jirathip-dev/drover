@@ -9,7 +9,7 @@ frozen=()
 while IFS= read -r f; do
   case $f in
     crates/server/src/serve/v1.rs) ;;
-    assets/serve.js | assets/serve.css | assets/herd.* | web/src/* | web/dist/* | assets/themes/* | \
+    assets/serve.js | assets/serve.css | assets/herd.* | web/src/* | web/dist/* | assets/terminal/* | \
       crates/server/src/serve.rs | crates/server/src/serve/*) frozen+=("$f") ;;
   esac
 done
