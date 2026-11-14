@@ -160,8 +160,8 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     let q = kinds(&c, "queue");
     assert_eq!(
         (
-            q.last().unwrap().data["issues"].clone(),
-            q.last().unwrap().data["check"].clone()
+            q.last().unwrap().val("issues").clone(),
+            q.last().unwrap().val("check").clone()
         ),
         (json!([31, 30]), json!(true))
     );

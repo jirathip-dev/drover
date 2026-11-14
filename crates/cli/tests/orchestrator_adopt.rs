@@ -103,7 +103,7 @@ fn a_start_that_times_out_with_its_agent_up_is_adopted_and_its_workspace_kept() 
     assert!(!r.called("herdr workspace close"), "{:?}", r.calls.borrow());
     let s = &starts(&c)[0];
     assert_eq!(
-        (s.str("pane"), s.str("workspace"), &s.data["adopted"]),
+        (s.str("pane"), s.str("workspace"), s.val("adopted")),
         (Some("w9:p1"), Some("w9"), &serde_json::json!(true))
     );
 }
@@ -122,7 +122,7 @@ fn a_name_taken_by_the_threads_own_live_agent_is_adopted_and_the_line_typed_in()
     );
     let s = &starts(&c)[0];
     assert_eq!(
-        (s.str("pane"), s.str("workspace"), &s.data["adopted"]),
+        (s.str("pane"), s.str("workspace"), s.val("adopted")),
         (Some("w16:p1"), Some("w16"), &serde_json::json!(true))
     );
 }
@@ -283,7 +283,7 @@ fn a_start_that_times_out_and_whose_agent_comes_up_20_s_later_is_adopted_with_no
     assert!(!r.f.called("herdr workspace close"), "{:?}", r.f.calls.borrow());
     let s = &starts(&c)[0];
     assert_eq!(
-        (s.str("pane"), s.str("workspace"), &s.data["adopted"]),
+        (s.str("pane"), s.str("workspace"), s.val("adopted")),
         (Some("w9:p1"), Some("w9"), &serde_json::json!(true))
     );
 }
@@ -370,7 +370,7 @@ fn a_orchestrator_start_blocked_by_a_known_first_start_prompt_answers_it_and_del
         assert_eq!((sp.str("prompt"), sp.str("pane")), (Some(prompt), Some("w9:p1")));
         let s = &starts(&c)[0];
         assert_eq!(
-            (s.str("pane"), &s.data["confirmed"]),
+            (s.str("pane"), s.val("confirmed")),
             (Some("w9:p1"), &serde_json::json!(true))
         );
         let thread = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t1/.thread.md")).unwrap();

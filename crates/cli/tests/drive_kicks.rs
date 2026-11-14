@@ -214,7 +214,7 @@ fn a_marker_carries_its_kicks_pid_and_goes_when_that_pid_dies() {
     assert_eq!(launched(&r, 1), 1);
     let s = stale(&c);
     assert_eq!(
-        (s.len(), s[0].issue, &s[0].data["pid"]),
+        (s.len(), s[0].issue, s[0].val("pid")),
         (1, Some(1), &serde_json::json!(4242)),
         "{s:?}"
     );

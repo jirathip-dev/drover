@@ -64,8 +64,8 @@ fn a_done_pushed_lane_closes_after_the_delay() {
     assert!(sh.called("kill", LANE) && !sh.has(LANE), "{:?}", sh.methods());
     let closed = kinds(&c, "lane-closed");
     assert_eq!(closed.len(), 1);
-    assert_eq!(closed[0].data["agent"], LANE);
-    assert_eq!(closed[0].data["freed_mb"], 270);
+    assert_eq!(closed[0].val("agent"), LANE);
+    assert_eq!(closed[0].val("freed_mb"), 270);
     assert!(std::path::Path::new(&wt).is_dir(), "the worktree stays");
     let r = with(&wt, "", "0\n");
     let (code, out) = run(&c, &r, &["check"]);
@@ -88,7 +88,7 @@ fn a_dirty_or_unpushed_lane_stays_open_with_an_event() {
         }
         let kept = kinds(&c, "lane-kept-dirty");
         assert_eq!(kept.len(), 1, "once per handoff: {why}");
-        assert_eq!(kept[0].data["why"], why);
+        assert_eq!(kept[0].val("why"), why);
         assert!(kinds(&c, "lane-closed").is_empty());
         let f = fake(&sh, &wt, status, ahead);
         let r = sh.on(&f);
