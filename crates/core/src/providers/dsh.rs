@@ -1,4 +1,3 @@
-//! dsh-TUI lanes (docs/dsh.md): a per-role patch layer, a pinned `dsh-tui` typed into the shell, a git pre-push hook.
 use super::{attempts, Credential, Provider};
 use crate::herdr;
 use crate::runner::{ok, Runner};
@@ -11,20 +10,16 @@ use std::path::{Path, PathBuf};
 
 /// The dsh-TUI profile version lanes run; `drover spawn` refuses any other.
 pub const DSH_TUI_VERSION: &str = "0.17.0";
-/// The agent label dsh-TUI reports to herdr.
 const LABEL: &str = "dsh-tui";
-/// The first-run wizard's title (en, zh); it reports idle but eats the prompt.
 const WIZARD: &[&str] = &["Welcome to dsh-TUI", "欢迎使用 dsh-TUI"];
 
 pub struct Dsh;
 pub static PROVIDER: Dsh = Dsh;
 
-/// `<config dir>/dsh/<profile>.patch.yml`, the lane's `--patch` overlay.
 fn patch_file(ctx: &Ctx, profile: &str) -> PathBuf {
     ctx.config.with_file_name("dsh").join(format!("{profile}.patch.yml"))
 }
 
-/// Reviewers get the workspace-write sandbox; escalations are never asked (nobody answers them).
 fn patch(role: &str) -> String {
     let mode = if role == "rev" {
         "workspace-write"
@@ -77,20 +72,17 @@ impl Provider for Dsh {
     }
 
     fn prepare(&self, ctx: &Ctx, on: &crate::hosts::On, p: &Plan) -> Result<()> {
-        // #404: a conductor has no branch (its folder is no worktree): nothing to push.
         if p.branch.is_empty() {
             return Ok(());
         }
         install_pre_push(on, &ctx.exe, &p.worktree, p.family)
     }
 
-    /// herdr has no `dsh` kind: type the launch into the lane's shell.
     fn start_cmd(&self, ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
         let patch = format!("'{}'", patch_file(ctx, &p.profile).display());
         herdr::run_argv(pane, &["dsh-tui", "--patch", &patch])
     }
 
-    /// Settle idle (Esc skips the wizard), name the agent, type kick + Enter, confirm working/blocked/done.
     fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {
         vec![
             herdr::pane_get_argv(pane),
@@ -103,7 +95,6 @@ impl Provider for Dsh {
         ]
     }
 
-    /// Up to 3 tries 5 s apart; a kick left typed in the input only gets Enter.
     fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
         let c = self.kick_cmds(p, pane);
         if !poll(r, &c[0], &["idle"], 90) {
@@ -139,7 +130,6 @@ impl Provider for Dsh {
     }
 }
 
-/// Re-read the pane (1 s apart, `tries` times) until dsh-TUI reports one of `want`.
 fn poll(r: &dyn Runner, get: &[String], want: &[&str], tries: u32) -> bool {
     for _ in attempts(r, tries, 1) {
         let pane = herdr::json(r, get)
