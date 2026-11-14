@@ -1367,6 +1367,41 @@ fn a_pass_at_the_head_gets_the_merge_label_once_and_a_moved_head_loses_it() {
 }
 
 #[test]
+fn no_merge_label_parses_to_none_and_a_pass_adds_no_label() {
+    let c = ctx(&tmpdir("drive-no-label"), CONFIG);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    assert_eq!(cfg.fleet["sendmeter"].merge_label, None);
+    lane(&c, 10, "impl", "sendmeter-impl-12", "gone-12");
+    std::fs::remove_dir_all(c.worktrees.join("sendmeter/gone-12")).unwrap();
+    let head = sha("abc");
+    let file = c.state.with_file_name("verdict.md");
+    std::fs::write(&file, "PASS\nall good\n").unwrap();
+    let r = fake(NONE)
+        .reply("gh pr view issue-12", &labelled_pr(&head, &[]))
+        .reply(
+            "gh api repos/jirathip-dev/sendmeter/branches/issue-12",
+            &format!("{head}\n"),
+        )
+        .reply("gh pr edit", "")
+        .reply("git -C", "");
+    let f = file.to_string_lossy();
+    let (code, out) = run(
+        &c,
+        &r,
+        &["verdict", "sendmeter", "12", "PASS", "--sha", &head, "--file", &f],
+    );
+    assert_eq!(code, 0, "{out}");
+    idle(&c, &r);
+    assert!(
+        !r.called("gh pr edit") && !r.called("gh label"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    let (_, out) = run(&c, &r, &["status", "sendmeter"]);
+    assert!(!out.contains("lacks label"), "{out}");
+}
+
+#[test]
 fn status_says_a_ready_pr_lacks_the_merge_label() {
     let c = ctx(
         &tmpdir("drive-label-status"),
@@ -2301,6 +2336,35 @@ fn a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges() {
     let rel = &kinds(&c, "released")[0];
     assert_eq!(rel.data["respawn"].as_bool(), Some(true));
     assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count(), 2);
+}
+
+fn busy(mut f: Fake) -> Fake {
+    let o = drover::runner::Out {
+        code: 0,
+        stdout: "{ 50.00 40.00 30.00 }\n".into(),
+        stderr: String::new(),
+    };
+    f.replies.insert(0, ("sysctl -n vm.loadavg".into(), o));
+    f
+}
+
+#[test]
+fn a_released_lanes_respawn_waits_for_room() {
+    let (c, r) = held("drive-held-busy", NONE);
+    let spawns = || kinds(&c, "spawn").len();
+    let (out, _) = drive(&c, &busy(r.reply("git -C", "")));
+    assert_eq!(spawns(), 1, "{out}");
+    assert!(kinds(&c, "released").is_empty(), "{out}");
+    assert!(out.contains("REFUSED HOST_BUSY"), "{out}");
+    let (out, steps) = drive(&c, &fake(NONE).reply("git -C", ""));
+    assert_eq!(steps, ["respawn"], "{out}");
+    assert_eq!((spawns(), kinds(&c, "released").len()), (2, 1), "{out}");
+    let cmds = kinds(&c, "driven");
+    assert!(
+        cmds.iter().all(|e| !e.str("cmd").unwrap().contains("--force")),
+        "{cmds:?}"
+    );
+    assert!(kinds(&c, "override").is_empty());
 }
 
 /// #505: a lane held on two issues is woken only once both have merged.

@@ -128,6 +128,11 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
                 "! gh {name} — {repo} is archived → remove [fleet.{name}] from fleet.toml"
             ));
         }
+        if let Some(l) = fleet.merge_label.as_deref() {
+            let has = crate::gh::label_exists(r, fleet, l).unwrap_or(false);
+            let fix = crate::gh::label_fix(fleet, l);
+            row(rows, has, '✗', &format!("label {name} — {l} in {repo} → {fix}"));
+        }
         let dir = fleet.local_path().display().to_string();
         let branch = &fleet.integration;
         let origin = format!("origin/{branch}");

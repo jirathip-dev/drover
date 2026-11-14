@@ -214,13 +214,11 @@ pub fn silent(ctx: &Ctx, mins: u64) -> Vec<(String, u64)> {
 /// One shed event as its lane's passive `lane-state` (#529: an exit or kill is `gone`; #662: with its `cause`, and an
 /// account limit caps the lane's account); whether it was a lane's.
 pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
-    let (Some(fleet), Some(issue)) = (
-        e.labels.get("fleet"),
-        e.labels.get("issue").and_then(|i| i.parse().ok()),
-    ) else {
+    let issue = e.labels.get("issue").and_then(|i| i.parse().ok());
+    let Some(fleet) = e.labels.get("fleet").filter(|f| cfg.fleet.contains_key(*f)) else {
         return Ok(false);
     };
-    if !cfg.fleet.contains_key(fleet) {
+    if issue.is_none() && !e.labels.contains_key("thread") {
         return Ok(false);
     }
     // #662: an ACP lane's last output (its tail) and whether a turn is open, kept for its exit cause.
@@ -271,6 +269,9 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
         })?;
         return Ok(false);
     }
+    let Some(issue) = issue else {
+        return Ok(false);
+    };
     let mut d = match &e.kind {
         EventKind::State(s) => json!({"state": s.state, "note": s.note}),
         EventKind::Exited { code } => {

@@ -440,8 +440,7 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         ensure!(o.code == 0, "{}", fail(what, cmd, &o));
         Ok(writeln!(out, "✓ {what} — installed")?)
     };
-    let (repo, version) = (env!("CARGO_PKG_REPOSITORY"), crate::VERSION);
-    let build = format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force && ln -sf drover '{root}/bin/herdsman'");
+    let (version, build) = (crate::VERSION, crate::hosts::install_line(root, sha));
     let herdr = format!("herdr\therdr --version | grep -qx 'herdr {v}'\t\n");
     let mut steps = format!("{}{TOOLS}\n", if acp { "" } else { &herdr });
     for (n, i) in crate::providers::lanes().filter_map(|h| Some((h.name, h.install()?))) {
@@ -487,6 +486,17 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let o = sh(&sync)?;
     ensure!(o.code == 0, "{}", fail("profiles sync", &sync, &o));
     writeln!(out, "✓ profiles sync — there")?;
+    if acp {
+        let check = "command -v shed >/dev/null || { echo \"shed not on PATH $PATH\"; exit 1; }; \
+command -v drover >/dev/null || { echo \"drover not on PATH $PATH\"; exit 1; }";
+        let bare = || on.run_in("sh", &argv(&["-c", check]), "");
+        if bare()?.code != 0 {
+            sh(&format!("sudo ln -sf \"$(command -v shed)\" '{exe}' /usr/local/bin/"))?;
+        }
+        let o = bare()?;
+        ensure!(o.code == 0, "{}", fail("shed and drover on ssh's PATH", check, &o));
+        writeln!(out, "✓ shed and drover — on ssh's PATH")?;
+    }
     log(ctx, cfg, "host-bootstrap", name, json!({"sha": sha}))?;
     crate::hosts::survey(ctx, cfg, r, true);
     Ok(writeln!(out, "{name}: bootstrapped (next: doctor, snapshot)")?)
