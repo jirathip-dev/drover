@@ -520,8 +520,10 @@ fn bootstrap_puts_shed_and_drover_on_a_hosts_non_login_ssh_path_so_the_survey_fi
 
     let (code, o) = run(&c, &b, &["hosts", "bootstrap", "boat2"]);
     assert_ne!(code, 0, "{o}");
-    assert!(
-        o.contains("shed not on PATH /home/user/.ascii:/usr/local/cargo/bin:/usr/local/bin"),
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    let failed = ev.iter().rev().find(|e| e.kind == "host-bootstrap").unwrap();
+    assert_eq!(
+        failed.data["tail"], "shed not on PATH /home/user/.ascii:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin",
         "{o}"
     );
 }
