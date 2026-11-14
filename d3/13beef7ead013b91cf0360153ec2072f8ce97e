@@ -1,0 +1,5 @@
+Decided: merged origin/staging; web/dist/board.js rebuilt from the merged web/src rather than hand-merged
+Because: crates/core/src/config.rs:1489
+Rejected: keeping either side of web/dist/board.js — it is generated, so only a rebuild matches both sources
+Check: npm run build/check, fmt, clippy, full cargo test (one load flake passes on rerun), arch-check, cap-check, diagram at this head
+Owner: Brought the branch up to date with staging again; no behaviour change from the last review.
