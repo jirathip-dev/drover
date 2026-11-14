@@ -538,7 +538,8 @@ impl Server<'_> {
         };
         let snap = Some(self.snapshot().1.ts).filter(|t| *t > 0);
         let age = snap.map(|t| ctx.now.saturating_sub(t));
-        if let Some(b) = v.get_mut("blocks").and_then(Value::as_array_mut) {
+        let page = v["type"] == "screen";
+        if let Some(b) = v.get_mut("blocks").and_then(Value::as_array_mut).filter(|_| page) {
             let line = age.map_or("as of: not yet known".into(), |a| {
                 format!("as of {} ago", crate::events::age(a))
             });

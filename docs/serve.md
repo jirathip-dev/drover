@@ -448,7 +448,7 @@ device work too. Beside `/api/v1`, never in the board's pages, it answers JSON m
 
 - `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `?before=<unix time>`),
   `/screens/fleets` (the Fleets sheet) and `/screens/cards` (the open asks, design reviews, needs-human issues and run
-  cards as chat cards); #977: each screen shows the step's snapshot age, `as of 3m ago` (`as of: not yet known` before
+  cards as chat cards); #977: each full screen (not a sheet) shows the step's snapshot age, `as of 3m ago` (`as of: not yet known` before
   one), `warn` past 10 min, as a `snapshot` item of its `stat` block, else an `age-list` row; q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
   and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
   shows until a tap opens the full card; a second tap folds it again;
