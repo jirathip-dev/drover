@@ -191,6 +191,27 @@ pub struct LanesTab {
     pub unsaved: Vec<LaneUnsaved>,
     /// #712: fleet.toml's mtime, for a row's [unpark] form.
     pub mtime: String,
+    /// #611: a paired device's folded `Other in shed` rows (API v1's `shed`).
+    pub shed: Vec<ShedRow>,
+}
+
+/// #611: API v1's `shed` entry: a session no lane or conductor names, or (`error` alone) its host's shed failing.
+pub struct ShedRow {
+    pub host: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub labels: Option<BTreeMap<String, String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub age: Option<String>,
 }
 
 /// #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.

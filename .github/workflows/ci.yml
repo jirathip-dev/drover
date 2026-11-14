@@ -236,6 +236,11 @@ jobs:
         run: |
           DROVER_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test chat_tab the_keyboard_keeps_the_composer_on_it -- --nocapture
           test -f ui-webkit/chat-kb.png
+      - name: the Lanes tab's folded Other in shed section in WebKit (#611, folded and opened at 390)
+        if: ${{ !cancelled() }}
+        run: |
+          DROVER_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test shed_others the_lanes_tab_ends_with_the_folded_section_and_fits_390px -- --nocapture
+          test -f ui-webkit/shed-folded.png && test -f ui-webkit/shed-open.png
       - uses: actions/upload-artifact@v4
         if: always()
         with:
