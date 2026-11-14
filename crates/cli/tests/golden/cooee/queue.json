@@ -17,6 +17,12 @@
     {
      "label": "Drive all now",
      "action": "drive-all"
+    },
+    {
+     "label": "Legend [?]",
+     "tap": {
+      "sheet": "/screens/legend"
+     }
     }
    ]
   }
