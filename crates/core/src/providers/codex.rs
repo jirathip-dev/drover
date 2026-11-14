@@ -1,5 +1,3 @@
-//! #732: Codex, as its ACP adapter `codex-acp` runs it (shed-acp lanes only): its login is the account folder's own
-//! (`CODEX_HOME`), its guard drover's hook in the session config (`codex-config.json`), its role `AGENTS.override.md`.
 use super::{hook_command, Accounts, Credential, Dialect, Provider, Surface};
 use crate::Ctx;
 use anyhow::Result;
@@ -10,7 +8,6 @@ use std::path::Path;
 pub struct Codex;
 pub static PROVIDER: Codex = Codex;
 
-/// Codex's hooks speak Claude Code's protocol; its file edits are `apply_patch`, the patch in `command`.
 static DIALECT: Dialect = Dialect {
     sent: |_| false,
     input: &["tool_input"],
@@ -23,10 +20,10 @@ static DIALECT: Dialect = Dialect {
     deny: |reason| json!({"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}}),
     prompt: "UserPromptSubmit",
     again: Some(|reason| json!({"decision": "block", "reason": reason})),
+    rewrite: None,
 };
 
-/// The session config `codex-acp` merges in (`CODEX_CONFIG`): drover's hook on every tool call, turn end and
-/// prompt, run without Codex's interactive trust review (a lane has no one to answer it).
+/// The session config `codex-acp` merges in (`CODEX_CONFIG`): drover's hook on every tool call, turn end and prompt, run without Codex's interactive trust review (a lane has no one to answer it).
 pub fn config(hook: &str) -> serde_json::Value {
     let h = json!([{"hooks": [{"type": "command", "command": hook}]}]);
     json!({"bypass_hook_trust": true, "hooks": {"PreToolUse": h, "PostToolUse": h, "Stop": h, "UserPromptSubmit": h}})
@@ -63,7 +60,6 @@ impl Provider for Codex {
     fn acp(&self) -> Option<&'static str> {
         Some("codex-acp")
     }
-    /// The model and effort as the head of the session config `acp_profile` exports; no approvals asked.
     fn acp_env(&self, model: Option<&str>, effort: Option<&str>) -> Vec<(&'static str, String)> {
         let mut head = String::new();
         if let Some(m) = model {
@@ -77,7 +73,6 @@ impl Provider for Codex {
             ("INITIAL_AGENT_MODE", "agent-full-access".into()),
         ]
     }
-    /// #785: `codex login status` in the folder: `Logged in …` or `Not logged in`.
     fn signed_in(&self, r: &dyn crate::runner::Runner, dir: &Path) -> Option<bool> {
         let home = format!("CODEX_HOME={}", dir.display());
         let a = crate::runner::argv(&[&home, "codex", "login", "status"]);
@@ -85,8 +80,6 @@ impl Provider for Codex {
         let said = o.stdout + &o.stderr;
         said.contains("ogged in").then(|| !said.contains("Not logged in"))
     }
-    /// The session config (model head + the profile's hooks) as `CODEX_CONFIG`; the role ahead of the repo's own
-    /// `AGENTS.md` in `AGENTS.override.md`, which Codex reads in its place.
     fn acp_profile(&self, settings: &str, role: &str) -> String {
         let cfg = settings.replace("settings.json'", "codex-config.json'");
         format!(

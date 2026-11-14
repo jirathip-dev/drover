@@ -1,6 +1,3 @@
-//! #350: fast-first landing: which checks a passed PR lands on, and the watch on integration after it lands: a red
-//! full suite pauses fast-first landings, finds the culprit (a bisect when several landed), reverts it and sends its
-//! issue back to a fix round; green again resumes. `drover stats land` counts how it goes.
 use crate::config::{glob, Config, Fleet};
 use crate::events::{emit, Event};
 use crate::overlap::git;
@@ -18,8 +15,7 @@ pub fn paused<'a>(events: &'a [Event], fleet: &str) -> Option<&'a Event> {
         .filter(|e| e.kind == "land-paused")
 }
 
-/// Mark `pr` `landing: fast-first` when its fleet lands fast-first, landings are not paused and its diff at the head
-/// (read with `r`, else the cached one) touches no `full_first_paths`.
+/// Mark `pr` `landing: fast-first` when its fleet lands fast-first, landings are not paused and its diff at the head (read with `r`, else the cached one) touches no `full_first_paths`.
 pub fn mark(ctx: &Ctx, r: Option<&dyn Runner>, f: &Fleet, (fleet, n): (&str, u64), ev: &[Event], pr: &mut Value) {
     let Some(l) = f.fast_first() else { return };
     let head = pr["headRefOid"].as_str().unwrap_or_default().to_string();
@@ -38,8 +34,7 @@ pub fn mark(ctx: &Ctx, r: Option<&dyn Runner>, f: &Fleet, (fleet, n): (&str, u64
     }
 }
 
-/// The board's word on #`n`'s landing: `landed (fast) · full suite running` until integration is green after it,
-/// `reverted: <job> red` once reverted.
+/// The board's word on #`n`'s landing: `landed (fast) · full suite running` until integration is green after it, `reverted: <job> red` once reverted.
 pub fn note(events: &[Event], fleet: &str, n: u64) -> Option<String> {
     let at = |e: &&Event| matches!(e.kind.as_str(), "landed" | "reverted");
     let e = crate::events::of_issue(events, fleet, n).into_iter().rfind(at)?;
@@ -53,16 +48,13 @@ pub fn note(events: &[Event], fleet: &str, n: u64) -> Option<String> {
     (e.str("mode") == Some("fast-first") && !green).then(|| "landed (fast) · full suite running".into())
 }
 
-/// Swap-if-unchanged: integration's tip is in `head`, so the fast checks ran against what it lands on. Only the head
-/// is pinned (`--match-head-commit`): integration moving between this check and the merge is a small window left open.
+/// Swap-if-unchanged: integration's tip is in `head`, so the fast checks ran against what it lands on. Only the head is pinned (`--match-head-commit`): integration moving between this check and the merge is a small window left open.
 pub fn based(r: &dyn Runner, f: &Fleet, head: &str) -> bool {
     let (dir, tip) = (f.local_path(), format!("origin/{}", f.integration));
     git(r, &dir, &["fetch", "-q", "origin"]).is_ok()
         && git(r, &dir, &["merge-base", "--is-ancestor", &tip, head]).is_ok()
 }
 
-/// Commit `sha`'s full suite (integration's required checks, else every check run there): green | pending | failed
-/// (`none`: no run at all), and the checks.
 pub(crate) fn suite(r: &dyn Runner, f: &Fleet, sha: &str) -> (&'static str, Value) {
     let jq = "[.check_runs[] | {__typename: \"CheckRun\", name, status: (.status | ascii_upcase), conclusion: \
         ((.conclusion // \"\") | ascii_upcase), databaseId: .id, startedAt: .started_at, completedAt: .completed_at, \
@@ -74,8 +66,6 @@ pub(crate) fn suite(r: &dyn Runner, f: &Fleet, sha: &str) -> (&'static str, Valu
     ([gh::ci(&c), "none"][usize::from(none)], c)
 }
 
-/// The first failed check: (name, its Actions run id, whether every failed one is runner/infra: cancelled, timed out
-/// or never started, not a test `FAILURE`).
 fn red(checks: &Value) -> (String, String, bool) {
     let failed: Vec<&Value> = (checks.as_array().into_iter().flatten())
         .filter(|c| gh::check_state(c) == "failed")
@@ -87,9 +77,7 @@ fn red(checks: &Value) -> (String, String, bool) {
     (gh::check_name(first).into(), run.unwrap_or_default().into(), infra)
 }
 
-/// One watch over a fast-first fleet's integration branch (each drive step): an open revert lands once its fast
-/// checks are green; then the tip's full suite: green logs `land-green` (and resumes), red pauses and goes after its
-/// culprit once.
+/// One watch over a fast-first fleet's integration branch (each drive step): an open revert lands once its fast checks are green; then the tip's full suite: green logs `land-green` (and resumes), red pauses and goes after its culprit once.
 pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let f = cfg.fleet(fleet)?;
     let Some(l) = f.fast_first() else { return Ok(()) };
@@ -108,7 +96,6 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         let head = pr["headRefOid"].as_str().unwrap_or_default();
         let st = gh::ci(&gh::required(&pr["statusCheckRollup"], &l.fast));
         if pr["state"] != "OPEN" || st != "green" {
-            // A revert whose fast checks went red is said once, left to a human.
             let told = |e: &Event| mine("revert-failed")(&e) && e.str("pr") == Some(num);
             if pr["state"] == "OPEN" && st == "failed" && !ev.iter().any(told) {
                 writeln!(out, "{fleet} revert PR #{num}: fast checks red")?;
@@ -145,7 +132,6 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     }
     let (job, run, infra) = red(&checks);
     if pause.is_none() {
-        // A runner/infra red is re-run once; only a red that repeats counts.
         let again = |e: &Event| mine("land-rerun")(&e) && e.str("sha") == Some(&tip);
         if infra && !ev.iter().any(again) {
             let _ = ok(r, "gh", &["run", "rerun", &run, "-R", &f.repo, "--failed"]);
@@ -174,7 +160,6 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
         return Ok(());
     }
     let mut d = json!({"culprit": sha, "landed_pr": c.str("pr"), "red_sha": tip, "red_job": job, "run": run});
-    // A full-first change is never reverted: its issue gets a fix round only.
     if c.str("mode") != Some("fast-first") {
         let how = "It landed full-first, so it was not reverted: fix it forward.";
         let o = Event::new(ctx.now, fleet, c.issue, "land-fix", d);
@@ -196,7 +181,6 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     });
     let _ = tree(&["remove", "--force", &wts]);
     if let Err(e) = pushed {
-        // A conflicting revert (later landings on top) or a culprit that is no merge commit: said once, left to a human.
         writeln!(out, "{fleet} #{n} revert of {sha:.7} failed: {e:#}")?;
         (d["reason"], d["error"]) = (json!(format!("revert of {sha:.7} failed")), json!(format!("{e:#}")));
         return log(Some(n), "revert-failed", d);
@@ -222,10 +206,6 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet
     log(Some(n), "revert-opened", d)
 }
 
-/// The landing that turned integration red: the only fast-first one (or the only one) since the last green, else the
-/// first of them whose own full suite is red. A landing with no run yet, or only a runner/infra red (a run a newer push
-/// cancelled), gets its own run (a temp ref, its workflow dispatched there; only checks started since count); None
-/// meanwhile. A dispatch that fails is retried each pass and alerted once (`revert-failed`).
 fn culprit<'a>(
     ctx: &Ctx,
     cfg: &Config,
@@ -290,8 +270,6 @@ fn culprit<'a>(
     Ok(since.last().copied())
 }
 
-/// Log `kind` (`reverted`/`land-fix`, from `o`'s data) and send the culprit's issue back to a fix round: its issue
-/// reopened, a FAIL verdict with the failing job's log as the finding.
 fn reopen(
     ctx: &Ctx,
     cfg: &Config,
@@ -327,8 +305,7 @@ fn reopen(
     Ok(())
 }
 
-/// `drover stats land <fleet>`: per mode, the median PASS → landed time, landings per day, reverts (fixes for
-/// full-first) and the median time the gating checks took; then the minutes integration sat red (paused).
+/// `drover stats land <fleet>`: per mode, the median PASS → landed time, landings per day, reverts (fixes for full-first) and the median time the gating checks took; then the minutes integration sat red (paused).
 pub fn stats(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Result<()> {
     cfg.fleet(fleet)?;
     let ev = crate::events::history(&ctx.state)?;
@@ -349,7 +326,6 @@ pub fn stats(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Resul
                 .find(|e| e.ts <= l.ts && e.issue == l.issue && e.str("verdict") == Some("PASS"));
             v.map(|v| l.ts - v.ts)
         };
-        // Tenths of a landing per day, over at least a day.
         let span = lands.first().map_or(1, |l| ctx.now.saturating_sub(l.ts).max(86_400));
         let day = lands.len() as u64 * 864_000 / span;
         let secs = lands

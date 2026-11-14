@@ -1,5 +1,3 @@
-//! #337: the board's one snapshot (#344: the `board` row in `state.db`): every read the board, `status` and `hosts` make, taken
-//! by the fast step and each kick, every remote host's reads in one ssh call; a request replays it, never a remote read.
 use crate::config::Config;
 use crate::events::{Event, IssueState, States};
 use crate::hosts::{quote, On};
@@ -23,7 +21,6 @@ pub struct Snapshot {
     pub key: String,
 }
 
-/// herdr where a host installs it (docs/hosts.md), for a non-login ssh shell.
 const HERDR: &str = "PATH=\"$HOME/.local/bin:$PATH\"";
 
 pub fn key(prog: &str, args: &[String]) -> String {
@@ -49,8 +46,7 @@ pub fn out(v: Option<String>) -> Out {
     }
 }
 
-/// What a read the snapshot lacks does: `Collect` (the step's look: ssh is batched, answered from the last snapshot
-/// meanwhile; the rest runs and is kept), `Live` (runs), `Local` (a remote one fails, the rest runs).
+/// What a read the snapshot lacks does: `Collect` (the step's look: ssh is batched, answered from the last snapshot meanwhile; the rest runs and is kept), `Live` (runs), `Local` (a remote one fails, the rest runs).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Miss {
     Collect,
@@ -94,7 +90,6 @@ impl<'a> Snap<'a> {
             ts,
         }
     }
-    /// One ssh call per host: its wanted reads as one script, each output and exit code after a `\x1e`.
     fn fetch(&self) {
         let mut by: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
         for (k, (m, line)) in std::mem::take(&mut *lock(&self.want)) {
@@ -110,7 +105,6 @@ impl<'a> Snap<'a> {
             for (k, _) in cmds {
                 let (o, code) = (parts.next(), parts.next());
                 let mut o = o.filter(|_| code == Some("0")).map(String::from);
-                // The host's agents decide what drive does: a failed batch read is asked through herdr itself.
                 if o.is_none() && k.ends_with(" agent list") && k.starts_with(herdr::BIN) {
                     let a = argv(&["--machine", &m, "agent", "list"]);
                     o = self
@@ -129,7 +123,6 @@ impl<'a> Snap<'a> {
 impl Runner for Snap<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         let k = key(prog, args);
-        // A herdr read on another host runs there too, through the host's own herdr.
         let there = match args {
             [.., m, _, line] if prog == "ssh" => Some((m.clone(), line.clone())),
             [_, m, rest @ ..] if remote(prog, args) => Some((m.clone(), format!("{HERDR} {}", quote(prog, rest)))),
@@ -154,7 +147,6 @@ impl Runner for Snap<'_> {
     fn sleep(&self, secs: u64) {
         self.r.sleep(secs);
     }
-    /// #298: a call with stdin (`shed connect`, a file write) is never a cached read.
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
         if input.is_empty() {
             return self.run(prog, args);
@@ -216,8 +208,7 @@ pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[L
     w.into_iter().map(|x| x.1).collect()
 }
 
-/// The step's look: the reads the board makes (lanes, waits, now-lines, Host rows), remote ones batched; saved, and
-/// returned for the step's own scan (a read it lacks runs live).
+/// The step's look: the reads the board makes (lanes, waits, now-lines, Host rows), remote ones batched; saved, and returned for the step's own scan (a read it lacks runs live).
 pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     let s = Snap::new(r, Miss::Collect, load(ctx).map(|s| s.reads), Some(ctx.now));
     let events = crate::events::read(&ctx.state).unwrap_or_default();
@@ -233,7 +224,6 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     crate::outbox::look(&s, &events);
     s.fetch();
     let s = Snap { miss: Miss::Live, ..s };
-    // #447: the waits a request would work out, from this look's reads: the board reads them, never the log again.
     let (mut key, mut ws) = (String::new(), vec![]);
     if let Ok(list) = herdr::list(&s, "agent") {
         let all = lanes(cfg, &s, ctx, (&events, &crate::events::fold(&events)), &list);

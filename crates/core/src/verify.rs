@@ -1,5 +1,3 @@
-//! #417: the optional verify stage: whether it runs for an issue's head, the skip logged when it doesn't, and the
-//! screenshots a verdict lists.
 use crate::config::Config;
 use crate::events::{emit, read, Event, IssueState};
 use crate::runner::{ok, Runner};
@@ -13,8 +11,7 @@ use std::path::{Component, Path, PathBuf};
 /// The repo's recipe the verifier follows.
 pub const RECIPE: &str = ".drover/verify.md";
 
-/// Why `fleet` #`n`'s verify stage runs (`None`: it doesn't): rev's `Repro: verify` PASS, its queue mark, else a
-/// design stage or a PR touching `ui_paths`.
+/// Why `fleet` #`n`'s verify stage runs (`None`: it doesn't): rev's `Repro: verify` PASS, its queue mark, else a design stage or a PR touching `ui_paths`.
 pub fn why(events: &[Event], ui_paths: &[String], (fleet, n): (&str, u64), files: &[String]) -> Option<String> {
     let mark = crate::queue::replay(events, fleet)
         .into_iter()
@@ -24,7 +21,6 @@ pub fn why(events: &[Event], ui_paths: &[String], (fleet, n): (&str, u64), files
         let hit = |p: &&String| ui_paths.iter().any(|g| crate::config::glob(g.as_bytes(), p.as_bytes()));
         files.iter().find(hit).map(|p| format!("touches {p}"))
     };
-    // #420: a `--repro` fix with no cheap test proves itself here.
     let repro = |e: &Event| e.is("verdict", fleet, n) && e.str("repro") == Some("verify");
     match mark {
         _ if events.iter().any(repro) => Some("Repro: verify".into()),
@@ -39,8 +35,7 @@ pub fn why(events: &[Event], ui_paths: &[String], (fleet, n): (&str, u64), files
     }
 }
 
-/// Drive's step before spawning the verify lane at a PASS: true if it runs; else `verify-skipped` (not needed) or
-/// `verify-no-recipe` (needed, but the head has no recipe) is logged at that sha, which passes the stage there.
+/// Drive's step before spawning the verify lane at a PASS: true if it runs; else `verify-skipped` (not needed) or `verify-no-recipe` (needed, but the head has no recipe) is logged at that sha, which passes the stage there.
 pub fn due(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, s: &IssueState, pr: &Value) -> Result<bool> {
     let (fleet, n, f) = (s.fleet.as_str(), s.issue, cfg.fleet(&s.fleet)?);
     let Some((sha, _, from)) = s.verdicts.last().filter(|v| v.1 == "PASS") else {
@@ -69,8 +64,7 @@ pub fn due(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, s: &Iss
     Ok(false)
 }
 
-/// The PNGs (#731: and `.log`, `.json`, `.txt` evidence) verify's verdict.md (at `file`) lists, as `{name, path}`:
-/// #547: only a relative word with no `..` that is a regular file inside the verify lane's folder `lane` (none: none).
+/// The PNGs (#731: and `.log`, `.json`, `.txt` evidence) verify's verdict.md (at `file`) lists, as `{name, path}`: #547: only a relative word with no `..` that is a regular file inside the verify lane's folder `lane` (none: none).
 pub fn shots(body: &str, file: &Path, lane: Option<&str>) -> Vec<Value> {
     let dir = file.parent().unwrap_or(Path::new(""));
     let words = body.split(|c: char| c.is_whitespace() || "`()[]<>\"'".contains(c));
@@ -91,14 +85,12 @@ pub fn shots(body: &str, file: &Path, lane: Option<&str>) -> Vec<Value> {
     out
 }
 
-/// `path`, canonical, if it is a regular file inside `dir`.
 fn inside(path: &Path, dir: &Path) -> Option<PathBuf> {
     let (p, d) = (path.canonicalize().ok()?, dir.canonicalize().ok()?);
     (p.starts_with(d) && p.is_file()).then_some(p)
 }
 
-/// #547: the shots of `fleet` #`n`'s last verdict the board shows and serves: a verify verdict's, each still a file
-/// inside one of the issue's lane folders (older events kept any `.png` word).
+/// #547: the shots of `fleet` #`n`'s last verdict the board shows and serves: a verify verdict's, each still a file inside one of the issue's lane folders (older events kept any `.png` word).
 pub fn served(events: &[Event], (fleet, n): (&str, u64)) -> Vec<(String, PathBuf)> {
     let mine = crate::events::of_issue(events, fleet, n);
     let lanes: BTreeSet<&str> = (mine.iter().filter(|e| e.kind == "spawn"))
