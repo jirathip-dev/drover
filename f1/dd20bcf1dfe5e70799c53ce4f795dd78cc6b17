@@ -1,0 +1,9 @@
+Decided: the cooee Queue row title is the cached issue title only, cut to 48 chars with …; the board's combined title (issue · PR #n · PR title) is no longer read
+Because: "the PR's title is never added to it"
+Decided: the subtitle carries PR #n and CI before the lane, so a long lane name is what the 48-char cut drops
+Because: crates/server/src/screens.rs:120
+Decided: one cut helper and LINE constant shared with the ask fold line, which already cut at 48
+Because: crates/server/src/screens.rs:96
+Rejected: changing the board's titles() helper — serve.rs is frozen and the web board still wants both titles
+Check: a_queue_row_is_one_short_title_line_without_the_pr_title fails on base (title holds the PR title) and passes at head; after merging #926 its tap check expects the lane sheet like the existing queue test
+Owner: On the phone each Queue issue is one short title line; the PR shows only as its number in the line under it.
