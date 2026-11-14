@@ -361,6 +361,9 @@ fn launch(
         return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting{by}"));
     }
     crate::spawn::lane_admit(ctx, (cfg, r), ev, fleet, n, role)?;
+    if let Some(why) = crate::hosts::slot_before(ctx, cfg, r, ev, (fleet, n, role), &live) {
+        return crate::gate::refused("HOST_FULL", why);
+    }
     if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && extend)) {
         return crate::gate::refused(code, why);
     }
@@ -568,7 +571,7 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
             Some((_, by)) => crate::promise::Say::SpawnSlot(Some(by.into())).line(),
             None => crate::promise::Say::SpawnSlot(None).line(),
         },
-        Some("SPAWN_BACKOFF") => why.into(),
+        Some("SPAWN_BACKOFF" | "HOST_FULL") => why.into(),
         Some("SERIAL_BUSY") => "another one-at-a-time issue is in flight".into(),
         Some("IN_FLIGHT" | "ALREADY_DONE") => "skipped: another pass is on it or did it".into(),
         Some("LANE_LIVE") if why.starts_with("stale pane") => why.into(),
@@ -2089,9 +2092,12 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     let paced = (c[0] == "spawn" && step == "respawn" && KICK.get().is_none())
         .then(|| paced(cfg, fleet))
         .flatten();
+    let full = (spawn.filter(|_| KICK.get().is_none() && !kicks).zip(c.get(3)))
+        .and_then(|(n, role)| crate::hosts::slot_before(ctx, cfg, r, ev, (fleet, n, role), &[]));
     let res = match (back, paced, issue.filter(|_| kicks)) {
         (Some(why), _, _) => crate::gate::refused("SPAWN_BACKOFF", why),
         (None, Some(why), _) => crate::gate::refused("RESPAWN_PACED", why),
+        (None, None, None) if full.is_some() => crate::gate::refused("HOST_FULL", full.unwrap_or_default()),
         (None, None, Some(n)) => launch(ctx, cfg, r, ev, (fleet, n), c, step == "start"),
         (None, None, None) => crate::cli::run(c, ctx, r, &mut buf),
     };
