@@ -58,7 +58,11 @@ fn pr(n: u64) -> String {
 
 /// Spawns succeed, the host is calm, and issue `n`'s open PR changes `files`.
 fn fake(prs: &[(u64, &str)]) -> Fake {
-    let mut f = Fake::default()
+    fake_on(Fake::default(), prs)
+}
+
+fn fake_on(base: Fake, prs: &[(u64, &str)]) -> Fake {
+    let mut f = base
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -219,7 +223,7 @@ fn a_second_ci_push_holds_until_the_holder_merges_then_updates() {
     assert!(steps.is_empty(), "no review while held: {steps:?}");
     assert!(!sh.called("run", "sendmeter-rev-12-r1"));
     let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
-    assert!(w.contains("waits: ci held by #9 (1/1)"), "{w}");
+    assert!(w.contains("serial: ci held by #9 (1/1)"), "{w}");
     // Still held next pass, and told once.
     let (_, steps) = drive(&c, &r);
     assert!(steps.is_empty(), "{steps:?}");
@@ -305,7 +309,7 @@ fn a_held_issue_waits_on_its_second_group_with_its_first_slot_taken() {
     assert!(steps.is_empty(), "aa taken, bb still held: {steps:?}");
     assert_eq!(logged(&c, 12, "serial-slot"), ["aa"]);
     let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
-    assert!(w.contains("waits: bb held by #9 (1/1)"), "{w}");
+    assert!(w.contains("serial: bb held by #9 (1/1)"), "{w}");
     ev(&c, 9, "merged", json!({}));
     let (_, steps) = drive(&c, &r);
     assert_eq!(steps, ["conflict"]);
@@ -429,4 +433,83 @@ fn a_marked_issue_logs_its_join_by_mark() {
         .map(|e| (e.str("group"), e.str("by")))
         .collect();
     assert_eq!(by, [(Some("ci"), Some("mark"))], "logged once");
+}
+
+const HOT: &str = "crates/core/src/drive.rs";
+
+fn hot_ctx(name: &str) -> (drover::Ctx, FakeShed) {
+    let (c, sh) = sctx(name, &config("", ""));
+    let hot = json!([{"file": HOT, "prs": 6, "conflicts": 0, "updates": 0}]);
+    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
+    std::fs::write(c.state.with_file_name("hotspots-sendmeter.json"), hot.to_string()).unwrap();
+    (c, sh)
+}
+
+#[test]
+fn a_second_pr_on_a_hot_file_waits_until_arch_toml_freezes_it() {
+    let (c, sh) = hot_ctx("sg-hot");
+    lane(&c, 9);
+    let (out, _) = drive(&c, &fake(&[(9, &format!("{HOT}\n"))]));
+    assert_eq!(logged(&c, 9, "serial-joined"), [format!("hot {HOT}")], "{out}");
+    assert!(logged(&c, 9, "serial-held").is_empty(), "a free slot: {out}");
+    lane(&c, 12);
+    sh.lane("sendmeter-impl-12", "done", "/x");
+    let both = [
+        (9, "src/a.rs\ncrates/core/src/drive.rs\n"),
+        (12, "crates/core/src/drive.rs\n"),
+    ];
+    let (out, steps) = drive(&c, &fake(&both));
+    assert_eq!(logged(&c, 12, "serial-held"), [format!("hot {HOT} (9)")], "{out}");
+    assert!(steps.is_empty(), "no review while held: {steps:?}");
+    let (exit, out) = run(&c, &fake(&both), &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    let busy = format!("REFUSED SERIAL_BUSY: hot {HOT}: #9 holds 1/1; retry after they merge");
+    assert!(exit == 3 && out.contains(&busy), "{out}");
+    let (_, w) = run(&c, &fake(&both), &["waiting", "sendmeter"]);
+    assert!(w.contains(&format!("serial: hot {HOT} held by #9 (1/1)")), "{w}");
+    let (_, board) = run(&c, &Fake::default(), &["board", "sendmeter"]);
+    assert!(board.contains(&format!("\n         serial: hot {HOT}\n")), "{board}");
+    let arch = format!("frozen = [\"{HOT}\"]\n");
+    let show = "git -C /tmp/does-not-matter/sendmeter show origin/staging:.drover/arch.toml";
+    let r = fake_on(Fake::default().reply(show, &arch), &both);
+    drive(&c, &r);
+    assert!(drover::queue::hot_files(&read(&c.state).unwrap(), "sendmeter").is_empty());
+    let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert!(!w.contains("serial: hot"), "{w}");
+    let (_, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
+    assert!(!out.contains("SERIAL_BUSY"), "{out}");
+}
+
+#[test]
+fn a_pr_touching_no_hot_file_is_never_held() {
+    let (c, _sh) = hot_ctx("sg-cold");
+    lane(&c, 9);
+    lane(&c, 13);
+    let r = fake(&[(9, &format!("{HOT}\n")), (13, "src/a.rs\ncrates/core/src/gate.rs\n")]);
+    drive(&c, &r);
+    drive(&c, &r);
+    assert_eq!(logged(&c, 9, "serial-joined"), [format!("hot {HOT}")]);
+    assert!(logged(&c, 13, "serial-joined").is_empty());
+    assert!(logged(&c, 13, "serial-held").is_empty());
+    let (_, out) = run(&c, &r, &["spawn", "sendmeter", "13", "impl", "--supersede"]);
+    assert!(!out.contains("SERIAL_BUSY"), "{out}");
+}
+
+#[test]
+fn landing_a_pr_on_a_hot_file_another_issue_holds_is_refused() {
+    let (c, _sh) = hot_ctx("sg-hot-land");
+    lane(&c, 9);
+    drive(&c, &fake(&[(9, &format!("{HOT}\n"))]));
+    lane(&c, 12);
+    let head = sha("12a");
+    ev(&c, 12, "verdict", json!({"verdict": "PASS", "sha": head}));
+    let checks = json!([{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
+    let view = json!({"number": 112, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": checks});
+    let r = Fake::default().reply("gh pr view issue-12", &view.to_string()).reply(
+        "gh api repos/jirathip-dev/sendmeter/pulls/112/files",
+        &format!("{HOT}\n"),
+    );
+    let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
+    let busy = format!("REFUSED SERIAL_BUSY: hot {HOT}: #9 holds 1/1");
+    assert!(exit == 3 && out.contains(&busy), "{out}");
+    assert!(!r.called("gh pr merge"));
 }

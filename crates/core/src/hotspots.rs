@@ -48,16 +48,7 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
             None => touched.entry(l.to_string()).or_default().push(sha.to_string()),
         }
     }
-    let show = |p: &str| {
-        let o = r
-            .run("git", &argv(&["-C", &local, "show", &format!("{range}:{p}")]))
-            .ok()?;
-        (o.code == 0).then_some(o.stdout)
-    };
-    let converted = match crate::repo_read("arch.toml", show) {
-        Some(text) => crate::arch::converted(&text)?,
-        None => vec![],
-    };
+    let converted = converted(r, f)?;
     touched.retain(|f, _| !crate::arch::any(&converted, f));
     let events = read(&ctx.state)?;
     let same = |e: &&crate::events::Event| cfg.fleet(&e.fleet).is_ok_and(|g| g.repo == f.repo);
@@ -95,6 +86,37 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
         .collect();
     hot.sort_by(|a, b| b.prs.cmp(&a.prs).then_with(|| a.file.cmp(&b.file)));
     Ok(hot)
+}
+
+fn converted(r: &dyn Runner, f: &crate::config::Fleet) -> Result<Vec<String>> {
+    let local = f.local_path().to_string_lossy().into_owned();
+    let show = |p: &str| {
+        let at = format!("origin/{}:{p}", f.integration);
+        let o = r.run("git", &argv(&["-C", &local, "show", &at])).ok()?;
+        (o.code == 0).then_some(o.stdout)
+    };
+    crate::repo_read("arch.toml", show).map_or(Ok(vec![]), |t| crate::arch::converted(&t))
+}
+
+/// #891: log `hot-files` when the stored hot files less those arch.toml now marks converted differ from the last one.
+pub fn sync(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<()> {
+    let Ok(text) = std::fs::read_to_string(path(ctx, fleet)) else {
+        return Ok(());
+    };
+    let hot: Vec<Hot> = serde_json::from_str(&text)?;
+    let last = crate::queue::hot_files(&read(&ctx.state)?, fleet);
+    if hot.is_empty() && last.is_empty() {
+        return Ok(());
+    }
+    let converted = converted(r, cfg.fleet(fleet)?)?;
+    let files: Vec<String> = (hot.into_iter().map(|h| h.file))
+        .filter(|p| !crate::arch::any(&converted, p))
+        .collect();
+    if files != last {
+        let e = crate::events::Event::new(ctx.now, fleet, None, "hot-files", json!({"files": files}));
+        crate::events::emit(&ctx.state, cfg, e)?;
+    }
+    Ok(())
 }
 
 /// #889: the report `drover hotspots` prints and its issue's body.

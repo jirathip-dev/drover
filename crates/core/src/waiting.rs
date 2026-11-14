@@ -332,11 +332,10 @@ fn waits(
         return w("drive", &what, s.last_ts, None);
     }
     // #294: a lane held for a serial slot waits for drive's update round once the holder merges.
-    if let Some(g) = fc
-        .serial
-        .iter()
+    if let Some(g) = crate::queue::serials(log.all, fc, f)
+        .into_iter()
         .filter(|g| crate::queue::held(events, f, n, &g.name))
-        .min_by_key(|g| &g.name)
+        .min_by(|a, b| a.name.cmp(&b.name))
     {
         let st = crate::events::fold(log.all);
         let h = crate::queue::holders(log.all, &st, fc, f, &g.name);
@@ -346,7 +345,7 @@ fn waits(
         } else {
             format!("held by {}", who.join(" "))
         };
-        let what = format!("waits: {} {by} ({}/{})", g.name, h.len(), g.max);
+        let what = format!("serial: {} {by} ({}/{})", g.name, h.len(), g.max);
         return w("drive", &what, s.last_ts, None);
     }
     // #104: an impl/fix/review lane whose account capped since its spawn respawns on a free one (`kill` pushes `wip/`).

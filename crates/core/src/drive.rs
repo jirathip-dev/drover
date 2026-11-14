@@ -1225,6 +1225,9 @@ fn pass(
     if !fast {
         crate::stall::refused(ctx, cfg, r, out, &read(&ctx.state)?, fleet)?;
         silent(ctx, cfg, (r, seen), out, &agents, fleet)?;
+        if let Err(e) = crate::hotspots::sync(ctx, cfg, r, fleet) {
+            writeln!(out, "{fleet} hotspots: {e:#}")?;
+        }
     }
     let events = read(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
@@ -1275,7 +1278,10 @@ fn pass(
         let gone = gh::missing(ctx, None, cfg, (fleet, s.issue), &events, &pr).filter(|m| w.what.contains(m));
         let n = s.issue.to_string();
         // #294: a PR's diff joins its serial groups; an issue waiting for a slot does nothing else this pass.
-        if pr["state"] == "OPEN" && !f.serial.is_empty() && serial(ctx, cfg, r, out, (fleet, s), &pr, fast)? {
+        if pr["state"] == "OPEN"
+            && !queue::serials(&events, f, fleet).is_empty()
+            && serial(ctx, cfg, r, out, (fleet, s), &pr, fast)?
+        {
             continue;
         }
         if let Err(e) = crate::gate::sync_label(ctx, cfg, r, out, s, &pr) {
