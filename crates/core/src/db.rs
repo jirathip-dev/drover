@@ -366,12 +366,12 @@ pub(crate) fn since(
     })
 }
 
-/// #978: `drover asks`' rows: every ask (`fleet`'s) with its ending, oldest first.
-pub fn asks(state: &Path, fleet: Option<&str>) -> Result<Vec<(Event, Ending)>> {
+/// #978: `drover asks`' rows: the open asks (`all`: every ask), `fleet`'s, with their endings, oldest first.
+pub fn asks(state: &Path, fleet: Option<&str>, all: bool) -> Result<Vec<(Event, Ending)>> {
     with(state, false, vec![], |c| {
-        let q = "SELECT seq, json, rank, closed FROM asks WHERE ?1 IS NULL OR fleet = ?1 ORDER BY seq";
+        let q = "SELECT seq, json, rank, closed FROM asks WHERE (?1 IS NULL OR fleet = ?1) AND (?2 OR rank IS NULL) ORDER BY seq";
         let mut q = c.prepare(q)?;
-        let rows = q.query_map([fleet], |r| {
+        let rows = q.query_map(params![fleet, all], |r| {
             let end = r.get::<_, Option<usize>>(2)?.zip(r.get::<_, Option<String>>(3)?);
             Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?, end))
         })?;
