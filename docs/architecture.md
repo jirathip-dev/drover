@@ -18,8 +18,16 @@ import or a device change is all or nothing) and **leases** (a lock can no longe
 | `events` | the log: `seq`, `ts`, `fleet`, `issue`, `type`, the event's JSON, `archived`; indexed by (fleet, issue) and type |
 | `leases` | every lock and marker: `drive.lock`, `drive-fast.lock`, `drive-<fleet>-<n>.lock`, `kick-<fleet>-<n>.lock` and `.again`, `spawn-<fleet>-<n>.pending` |
 | `devices`, `push` | paired phones and web push subscriptions (were `serve/devices.json`, `webpush/subs.json`) |
-| `snapshot` | `board`: #337's reads; `states`: #343's fold checkpoint |
+| `snapshot` | `board`: #337's reads; `archived`: the last compaction's stamp |
 | `processed` | #509: the trigger ids (`kick --id`: a verdict's sha, a decision) already driven, each driven once |
+| `issues`, `lanes`, `asks` | #978: the current state, one row per issue, lane (its latest `spawn`) and ask (with its ending), updated in the transaction that appends each event; `drover compact --rebuild` makes them again from every event |
+
+**Hot database and archive (#978):** `tick` runs `drover compact` once a day, after drive: `drive-pass`, `driven`
+and `kick` rows over 48 h are deleted; a merged or closed issue's events over 14 days old are appended to
+`archive/events-YYYY-MM.jsonl.zst` (by their month) and deleted; the file is vacuumed and its WAL truncated. An open
+issue's events and the last 14 days stay. `history` (`drover why`, `drover lesson digest`) reads the archive and
+the database together. A `build-cloned` event keeps its `cp` errors in `cache/build-cloned/<sha256>.txt` and names
+that file in `errors_ref`.
 
 **Retry-safe side effects (#509, `crates/core/src/action.rs`):** spawn, supersede and merge log an `intent` with a
 stable `action_id` (`<fleet>#<issue>:<step>@<key>`; key: the head sha for a merge, the role and the issue's last

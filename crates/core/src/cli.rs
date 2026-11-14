@@ -592,6 +592,14 @@ enum Cmd {
         #[arg(long)]
         live: bool,
     },
+    #[command(
+        hide = true,
+        about = "Archive old events of done issues, delete old heartbeats (daily by tick)"
+    )]
+    Compact {
+        #[arg(long, help = "Rebuild the issue, lane and ask tables from every event instead")]
+        rebuild: bool,
+    },
     #[command(about = "The event log in its JSONL format (one event a line, with its seq), for external readers")]
     #[command(hide = true)]
     Events {
@@ -1461,6 +1469,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             }
             write!(out, "{}", boards.join("\n"))?;
         }
+        Cmd::Compact { rebuild: true } => {
+            crate::db::rebuild(&ctx.state)?;
+            writeln!(out, "rebuilt the issue, lane and ask tables")?;
+        }
+        Cmd::Compact { rebuild: false } => {
+            let (gone, moved) = crate::db::compact(&ctx.state, ctx.now)?;
+            writeln!(out, "{gone} heartbeats deleted, {moved} events archived")?;
+        }
         Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
         Cmd::Asks {
             scope: Scope { fleet, json },
@@ -2155,7 +2171,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             );
                             let mut d = queue::op("add", &issues, top, None, after, None);
                             for &i in &issues {
-                                let _ = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, i, false);
+                                if gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, i, false).is_ok_and(|v| gh::is_pr(&v)) {
+                                    return gate::refused("IS_PR", format!("#{i} is a pull request, not an issue"));
+                                }
                             }
                             if let Some(g) = g {
                                 d["serial"] = if g.is_empty() { json!(true) } else { json!(g) };
