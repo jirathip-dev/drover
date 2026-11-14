@@ -103,7 +103,7 @@ fn link(e: &Event) -> Option<Link> {
 fn ask(events: &[Event], a: &Event, m: Msg) -> Msg {
     let answer = ask_event(events, "decision", &a.fleet, a.str("id").unwrap_or_default()).map(|d| {
         let c = d.str("choice").unwrap_or_default();
-        let opts = a.data["options"].as_array().into_iter().flatten();
+        let opts = a.val("options").as_array().into_iter().flatten();
         Answered {
             n: (opts.filter_map(Value::as_str).zip(1..))
                 .find(|o| o.0 == c)
@@ -130,7 +130,7 @@ fn run_card(ctx: &Ctx, events: &[Event], e: &Event) -> RunCard {
     let done = events.iter().find(|d| d.kind == "run-done" && d.str("id") == Some(&id));
     let exp = e.ts + crate::card::TTL;
     let state = match set {
-        Some(x) if x.data["approved"] != true => "denied",
+        Some(x) if x.val("approved") != true => "denied",
         Some(_) if done.is_none() => "running",
         Some(_) => "approved",
         None if ctx.now > exp => "expired",
@@ -147,7 +147,7 @@ fn run_card(ctx: &Ctx, events: &[Event], e: &Event) -> RunCard {
         exp,
         state: state.into(),
         by: set.and_then(|x| x.str("by")).map(Into::into),
-        code: done.and_then(|d| d.data["code"].as_i64()),
+        code: done.and_then(|d| d.val("code").as_i64()),
         tail: done.map(|d| s(d, "tail")).unwrap_or_default(),
     }
 }
@@ -217,7 +217,7 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
                 let Some(mut a) = conductor::lane_of(events, e).cloned() else {
                     continue;
                 };
-                a.data["recommend"] = e.data["recommend"].clone();
+                a.data.insert("recommend".into(), e.val("recommend").clone());
                 ask(events, &a, m("ask", s("question")))
             }
             ("config-propose", _) if crate::propose::settled(events, &s("id")).is_none() => Msg {

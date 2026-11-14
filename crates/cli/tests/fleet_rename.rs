@@ -96,8 +96,8 @@ fn rename_moves_everything_and_the_old_name_resolves() {
     assert!(!rows.is_empty() && rows.iter().all(|(k, s)| k.0 == "meter" && s.fleet == "meter"));
     let renamed: Vec<_> = evs.iter().filter(|e| e.kind == "fleet-renamed").collect();
     assert_eq!(renamed.len(), 1);
-    assert_eq!(renamed[0].data["old"], "sendmeter");
-    assert_eq!(renamed[0].data["by"], "owner");
+    assert_eq!(renamed[0].val("old"), "sendmeter");
+    assert_eq!(renamed[0].val("by"), "owner");
     for f in FILES {
         let moved = c.state.with_file_name(f.replace("sendmeter", "meter"));
         assert_eq!(std::fs::read_to_string(moved).unwrap(), f);

@@ -219,11 +219,11 @@ fn why_note_written_on_origin_pr_body_and_log() {
     assert!(edit.contains("## Why (round 1)\n\nDecided: count a retry"), "{edit}");
     let w = &kinds(&c, "why")[0];
     assert_eq!(
-        (w.issue, w.str("sha"), w.data["round"].as_u64()),
+        (w.issue, w.str("sha"), w.val("round").as_u64()),
         (Some(12), Some(repo.head.as_str()), Some(1))
     );
     assert_eq!(w.str("owner"), Some("retries no longer double the meter"));
-    assert_eq!(w.data["files"], json!(["a.rs"]));
+    assert_eq!(*w.val("files"), json!(["a.rs"]));
     assert!(kinds(&c, "turn-end")[0].data.get("note").is_none());
     assert!(!repo.wt.join("why.md").exists());
 }

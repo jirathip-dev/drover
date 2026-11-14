@@ -112,7 +112,7 @@ fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     );
     let ran: Vec<_> = ev
         .iter()
-        .filter(|e| e.kind == "outbox" && e.data["args"][0] == "verdict")
+        .filter(|e| e.kind == "outbox" && e.val("args")[0] == "verdict")
         .collect();
     assert!(
         ran.len() == 1 && ran[0].data.get("refused").is_none(),

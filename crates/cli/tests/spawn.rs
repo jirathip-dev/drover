@@ -563,9 +563,9 @@ fn failed_clone_is_logged_and_the_spawn_succeeds() {
         .iter()
         .find(|e| e.kind == "build-cloned")
         .expect("build-cloned logged");
-    assert_eq!(e.data["dirs"], json!([]));
+    assert_eq!(*e.val("dirs"), json!([]));
     assert!(
-        e.data.get("errors").is_none()
+        e.val("errors").is_null()
             && std::fs::read_to_string(drover::events::path_in(&c.state, e.str("errors_ref").unwrap()))
                 .unwrap()
                 .contains("clonefile failed"),
@@ -658,8 +658,8 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
         .into_iter()
         .rfind(|e| e.kind == "spawn")
         .unwrap();
-    assert_eq!(ev.data["port"], lane_port(None, "sendmeter/issue-12", &[]));
-    assert_eq!(ev.data["confirmed"], true);
+    assert_eq!(ev.val("port"), lane_port(None, "sendmeter/issue-12", &[]));
+    assert_eq!(ev.val("confirmed"), true);
 }
 
 #[test]
@@ -721,7 +721,7 @@ fn unconfirmed_hermes_kick_presses_enter_then_exits_4() {
     assert_eq!(enters.count(), 3);
     assert_eq!(r.count("sleep 10"), 2, "attempts spaced ≥10 s apart");
     let ev = read(&c.state).unwrap();
-    assert_eq!(ev.last().unwrap().data["confirmed"], false);
+    assert_eq!(ev.last().unwrap().val("confirmed"), false);
 }
 
 #[test]

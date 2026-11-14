@@ -268,14 +268,14 @@ fn a_5mb_build_cloned_is_stored_in_16kb() {
     })
     .unwrap();
     assert!(stored.len() <= 16 << 10, "{} bytes", stored.len());
-    let err = back[1].data["errors"][0].as_str().unwrap();
+    let err = back[1].val("errors")[0].as_str().unwrap();
     assert!(
         err.starts_with("cp: xxx") && err.contains("bytes cut"),
         "{}",
         &err[..80]
     );
     assert_eq!(
-        (back[1].data["dirs"].clone(), back[1].data["secs"].clone()),
+        (back[1].val("dirs").clone(), back[1].val("secs").clone()),
         (json!(["target"]), json!(7))
     );
     assert_eq!(serde_json::to_value(&back[0]).unwrap()["agent"], "a-impl-1");

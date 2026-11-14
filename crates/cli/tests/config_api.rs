@@ -152,7 +152,7 @@ fn a_field_edit_keeps_comments_backs_up_and_logs_the_owner() {
     }
     let e = edits(&c).pop().unwrap();
     assert_eq!(
-        (e.str("by"), e.data["doctor"].is_boolean()),
+        (e.str("by"), e.val("doctor").is_boolean()),
         (Some("owner (cooee)"), true)
     );
     assert_eq!(std::fs::read_to_string(e.str("backup").unwrap()).unwrap(), before);

@@ -271,7 +271,7 @@ mod tests {
         assert_eq!((count(&ev, "promise-missed"), count(&ev2, "promise-missed")), (1, 1));
         let m = ev2.iter().find(|e| e.kind == "promise-missed").unwrap();
         assert_eq!(m.str("why"), Some("now: PASS · CI green · PR is a draft"));
-        assert_eq!(m.data["age"], 600);
+        assert_eq!(m.val("age"), 600);
         assert_eq!(
             missed(&ev2, &ready, "", None, 1900).as_deref(),
             Some("⚠ missed 15m: now: PASS · CI green · PR is a draft")

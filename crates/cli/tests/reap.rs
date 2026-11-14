@@ -77,8 +77,8 @@ fn closing_a_lane_terms_then_kills_only_its_worktree_pids() {
         .find(|e| e.kind == "lane-reaped")
         .unwrap();
     assert_eq!(ev.issue, Some(12));
-    assert_eq!(ev.data["killed"], 2);
-    assert_eq!(ev.data["names"], json!(["node", "Chrome Helper"]));
+    assert_eq!(ev.val("killed"), 2);
+    assert_eq!(*ev.val("names"), json!(["node", "Chrome Helper"]));
 }
 
 #[test]
@@ -202,7 +202,7 @@ fn check_reaps_closed_lanes_but_spares_active_and_live_ones() {
         .filter(|e| e.kind == "lane-reaped")
         .collect();
     assert_eq!(reaped.len(), 1);
-    assert_eq!(reaped[0].data["names"], json!(["Google Chrome Helper"]));
+    assert_eq!(*reaped[0].val("names"), json!(["Google Chrome Helper"]));
 }
 
 #[test]
@@ -258,9 +258,9 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
     );
     let ev = trimmed(&c);
     assert_eq!(ev.len(), 1);
-    assert_eq!(ev[0].data["agent"], "impl-12");
-    assert_eq!(ev[0].data["killed"], json!(["node", "node"]));
-    assert_eq!(ev[0].data["freed_mb"], 2148);
+    assert_eq!(ev[0].val("agent"), "impl-12");
+    assert_eq!(*ev[0].val("killed"), json!(["node", "node"]));
+    assert_eq!(ev[0].val("freed_mb"), 2148);
 
     let young = c.now - 60;
     let c2 = drover::Ctx {
@@ -389,7 +389,7 @@ fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
     );
     let ev = trimmed(&c);
     assert_eq!(ev.len(), 1);
-    assert_eq!(ev[0].data["killed"], json!(["vite"]), "no lane-trimmed names the agent");
+    assert_eq!(*ev[0].val("killed"), json!(["vite"]), "no lane-trimmed names the agent");
 }
 
 #[test]

@@ -437,7 +437,7 @@ fn a_second_rev_round_reuses_the_first_rounds_build_folder_and_only_the_first_cl
         .find(|e| e.kind == "build-reused")
         .expect("build-reused logged");
     assert_eq!(e.str("from"), Some("sendmeter-rev-12-r1"));
-    assert_eq!(e.data["dirs"], json!([r2.display().to_string()]));
+    assert_eq!(*e.val("dirs"), json!([r2.display().to_string()]));
     assert_eq!(ev.iter().filter(|e| e.kind == "build-cloned").count(), 1);
 }
 

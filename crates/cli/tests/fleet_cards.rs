@@ -191,8 +191,8 @@ fn the_config_sheet_shows_every_group_and_its_pickers_post_through_set() {
         .filter(|e| e.kind == "set")
         .collect();
     assert_eq!(sets.len(), 2, "harness and effort changed, model kept");
-    assert_eq!(sets[0].data["key"], "harness");
-    assert_eq!(sets[0].data["via"], "web");
+    assert_eq!(sets[0].val("key"), "harness");
+    assert_eq!(sets[0].val("via"), "web");
     let d = tmpdir("fc-config-nomodels");
     let c = ctx(&d, &config("").replace("models = [\"opus\", \"sonnet\"]\n", ""));
     let res = sheet(&Server::new(&c, &Fake::default(), Some(ADDR.into())), "alpha");

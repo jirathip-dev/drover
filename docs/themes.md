@@ -1,13 +1,15 @@
-# Themes (#172, #241, #244)
+# Themes (#172, #241, #244, #928)
 
 A theme is one folder `themes/<name>/` that every tab of the phone page draws from: the Lanes avatars, a 24 px
 sprite on each Queue and Events row, a load scene on each Host group, the Herd, the moments, the icon. It is data
 only: `theme.json`, `sprites.svg`, and optionally `scene.svg` and its icons. No theme ships CSS or JS.
 
-Built in: `farm` (horses, the ranch herd.js draws), `kitchen` (#239: pixel chefs by role at each fleet's station, the
-load as heat), `garden` (#423: a houseplant shop, each issue a plant that grows leaf by leaf with its state, the keeper
-tending it by role, the load as the shop window's light) and `terminal` (today's plain board). Your own go in `<config dir>/themes/<name>/` next to fleet.toml; one named like a built-in wins,
-file by file.
+Built in: `farm`, `kitchen` and `garden`, the packs drover shares with cooee, and `terminal` (today's plain board,
+drover's own). The packs' art, build scripts and theme gate (contrast, required sprites) live in the shared repo
+[jirathip-dev/swag](https://github.com/jirathip-dev/swag): change a sprite there. Drover embeds its `legacy-board/`
+folder at the commit `assets/swag/SOURCE` pins, each file checked against `assets/swag/SHA256SUMS` by the themes test;
+`scripts/swag.sh <commit>` moves the pin (#928). Your own go in `<config dir>/themes/<name>/` next to fleet.toml; one
+named like a built-in wins, file by file.
 
 ## Picking one
 
@@ -56,8 +58,6 @@ the whole theme is then farm.
   `--b`; a `.leg` group swings with the trot, `var(--m)` fills skew in a storm. A sprite id the sheet lacks is farm's.
   `var(--fk)` is the fleet's colour, `.kf1` / `.kf2` groups are a two-frame loop (swapped every 0.6 s under `heat`, frame 1
   under reduced motion), `var(--f1)` / `var(--f2)` the flame colours by heat level, `.ksteam` shows from busy.
-- The kitchen's files are generated: `node docs/design/kitchen/build.mjs` (from `art.mjs`, the approved mockup's pixels);
-  the garden's too: `node docs/design/garden/build.mjs`.
 - `scene.svg` (optional): the Herd strip's background, `viewBox="0 0 390 320"`.
 - `icon-180.png`, `icon-192.png`, `icon-512.png` (optional).
 

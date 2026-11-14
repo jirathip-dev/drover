@@ -62,7 +62,7 @@ fn fourth_start_after_three_failed_is_refused_with_one_owner_ask() {
     assert_eq!(wips(&r), 2, "no wip snapshot while refused");
     let a = asks(&c);
     assert_eq!(a.len(), 1, "{a:?}");
-    assert_eq!(a[0].data["options"], json!(["try again", "park"]));
+    assert_eq!(*a[0].val("options"), json!(["try again", "park"]));
     assert_eq!(a[0].str("kind"), Some("owner"));
     assert_eq!(a[0].issue, Some(12));
     assert_eq!(respawn(&c, &r, 20).0, 3);
