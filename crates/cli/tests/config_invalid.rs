@@ -7,10 +7,10 @@ use serde_json::Value;
 const HOST: &str = "127.0.0.1:7777";
 const GOOD: &str =
     "[fleet.acme]\nrepo = \"acme/app\"\nlocal = \"/tmp/does-not-matter/app\"\nintegration = \"staging\"\n";
-const WANT: &str = "config invalid: fleet.acme.role.impl: effort \"bogus\" must be one of [\"none\", \"low\", \"medium\", \"high\", \"xhigh\"] (fleet.toml:8)";
+const WANT: &str = "config invalid: invalid value: integer `-1`, expected usize (fleet.toml:5)";
 
 fn bad() -> String {
-    format!("{GOOD}\n[fleet.acme.role.impl]\nharness = \"claude\"\neffort = \"bogus\"\n")
+    format!("{GOOD}max_impl = -1\n")
 }
 
 fn health(s: &Server, now: u64) -> Value {
