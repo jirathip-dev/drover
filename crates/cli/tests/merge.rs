@@ -705,7 +705,7 @@ fn premerge_passing_merges_and_logs_its_time() {
     assert!(r.index("sh -c").unwrap() < r.index("gh pr merge").unwrap());
     let ev = read(&c.state).unwrap();
     let m = ev.iter().find(|e| e.kind == "merged").unwrap();
-    assert!(m.data["premerge_secs"].is_u64(), "{:?}", m.data);
+    assert!(m.val("premerge_secs").is_u64(), "{:?}", m.data);
 }
 
 #[test]

@@ -101,10 +101,10 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let synced = read(&ctx.state)?;
     for name in cfg.hosts.keys() {
         let mut tries = (synced.iter().rev()).filter(|e| e.kind == "host-sync" && e.str("host") == Some(name));
-        let Some(e) = tries.next().filter(|e| e.data["ok"] == false) else {
+        let Some(e) = tries.next().filter(|e| e.val("ok") == false) else {
             continue;
         };
-        let since = tries.find(|e| e.data["ok"] == true).map_or(0, |e| e.ts);
+        let since = tries.find(|e| e.val("ok") == true).map_or(0, |e| e.ts);
         let (from, to) = (e.str("from").unwrap_or("?"), e.str("to").unwrap_or("?"));
         let why =
             format!("{name}: drover install {from} → {to} failed (~/.drover-sync.log there); the next tick retries");
@@ -526,7 +526,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let routine = |a: &&&Event| a.str("kind") == Some("routine");
     let due = |a: &&&Event| ctx.now.saturating_sub(a.ts) >= cfg.limits.ask_default_minutes * 60;
     for a in open.iter().filter(routine).filter(due) {
-        let rec = a.data["recommend"].to_string();
+        let rec = a.val("recommend").to_string();
         crate::answer_with(ctx, cfg, r, out, a, &rec, ("default", None), (None, None))?;
     }
     let waiting = |a: &&&Event| {

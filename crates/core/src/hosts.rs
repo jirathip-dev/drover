@@ -577,7 +577,7 @@ fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
     let events = read(&ctx.state).unwrap_or_default();
     let (states, max_age) = (fold(&events), cfg.limits.import_max_age_hours * 3600);
     let mark = |e: &&Event| e.kind == "asks-imported" && e.str("host") == Some(name);
-    let upto = events.iter().rev().find(mark).and_then(|e| e.data["upto_ts"].as_u64());
+    let upto = events.iter().rev().find(mark).and_then(|e| e.val("upto_ts").as_u64());
     let remote: Vec<Event> = text.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
     let new = |e: &&Event| e.kind == "needs-decision" && Some(e.ts) > upto;
     let open = open_asks(&remote);

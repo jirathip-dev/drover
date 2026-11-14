@@ -637,7 +637,7 @@ fn join(parts: &[&str]) -> String {
 /// asked in.
 fn need_ask(now: u64, mins: u64, ev: &[Event], a: &Event) -> NeedAsk {
     let s = |k| a.str(k).unwrap_or_default();
-    let rec = a.data["recommend"].as_u64().filter(|_| s("kind") == "routine");
+    let rec = a.val("recommend").as_u64().filter(|_| s("kind") == "routine");
     let left = age((a.ts + 60 * mins).saturating_sub(now));
     let issue = a.issue.map_or(String::new(), |n| format!("#{n}"));
     NeedAsk {
@@ -3476,7 +3476,7 @@ pub fn words(e: &Event, serial: &str) -> Words {
         "hook-denied" => ("!", "a", format!("hook denied · {}", s("rule")), false),
         "blocked" | "driven" => {
             let mut b = e.clone();
-            b.data.entry("result").or_insert_with(|| e.data["reason"].clone());
+            b.data.entry("result").or_insert_with(|| e.val("reason").clone());
             let (t, w, x) = in_words(&b, serial);
             let txt = format!("{w} · {x}");
             let hold = matches!(
@@ -3492,12 +3492,13 @@ pub fn words(e: &Event, serial: &str) -> Words {
             }
         }
         "spawn" => ("▸", "l", format!("{} started{round}", s("role")), false),
-        "push-sent" => ("↗", "m", format!("alert sent to {} phone(s)", e.data["devices"]), false),
+        "push-sent" => ("↗", "m", format!("alert sent to {} phone(s)", e.val("devices")), false),
         "clean" => ("·", "m", format!("lane cleaned ({})", s("why")), false),
         "decision" => ("✓", "m", format!("you answered {} · {}", s("id"), s("choice")), false),
         "override" => ("⊘", "m", format!("override{r}"), false),
         "queue" => {
-            let n: Vec<String> = e.data["issues"]
+            let n: Vec<String> = e
+                .val("issues")
                 .as_array()
                 .into_iter()
                 .flatten()

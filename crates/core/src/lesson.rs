@@ -46,8 +46,10 @@ pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -
         let ask = events
             .iter()
             .find(|a| a.kind == "needs-decision" && a.fleet == fleet && a.str("id") == e.str("id"));
-        let rec = ask
-            .and_then(|a| a.data["options"].get(usize::try_from(a.data["recommend"].as_u64()?.checked_sub(1)?).ok()?));
+        let rec = ask.and_then(|a| {
+            a.val("options")
+                .get(usize::try_from(a.val("recommend").as_u64()?.checked_sub(1)?).ok()?)
+        });
         rec.and_then(|o| o.as_str()).is_some_and(|o| Some(o) != e.str("choice"))
     };
     let owner = |e: &&&Event| match e.kind.as_str() {
@@ -337,12 +339,12 @@ pub fn review(
     let decide = |c: LessonCheck| {
         let mine = |e: &&Event| e.fleet == fleet && ymd(e.ts / 86400) >= c.since;
         let shadow = |e: &&Event| {
-            e.kind == "lesson-shadow" && e.data["ran"].as_array().is_some_and(|a| a.contains(&json!(c.name)))
+            e.kind == "lesson-shadow" && e.val("ran").as_array().is_some_and(|a| a.contains(&json!(c.name)))
         };
         let prs: Vec<&Event> = events.iter().filter(mine).filter(shadow).collect();
         let caught = prs
             .iter()
-            .filter(|e| e.data["hits"].as_array().is_some_and(|a| a.contains(&json!(c.name))))
+            .filter(|e| e.val("hits").as_array().is_some_and(|a| a.contains(&json!(c.name))))
             .count();
         let fp = format!("false positive: {}", c.name);
         let said = |e: &Event| {

@@ -127,7 +127,7 @@ fn approved(events: &[Event], id: Option<&str>, verb: &str) -> bool {
         a.str("question")
             .is_some_and(|q| q.contains(&format!("runners {verb}")))
     });
-    let yes = ask.and_then(|a| a.data["options"].get(0)?.as_str());
+    let yes = ask.and_then(|a| a.val("options").get(0)?.as_str());
     let by = |e: &&Event| {
         e.str("by")
             .is_some_and(|b| b != "default" && !b.starts_with("orchestrator-"))

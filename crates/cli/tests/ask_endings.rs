@@ -283,7 +283,7 @@ fn the_sweep_closes_a_logs_stale_asks_once() {
     assert_eq!(open(&c), ["q3"], "the lane's ask still waits");
     let swept = kinds(&c, "asks-swept");
     assert_eq!(swept.len(), 1);
-    assert_eq!(swept[0].data["count"], 2);
+    assert_eq!(swept[0].val("count"), 2);
     assert!(row(&c, "q1").ends_with("[delivered to t2]"), "{}", row(&c, "q1"));
     assert!(row(&c, "q2").ends_with("[expired]"), "{}", row(&c, "q2"));
     let n = read(&c.state).unwrap().len();

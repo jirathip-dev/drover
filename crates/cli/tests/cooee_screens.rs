@@ -348,7 +348,7 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
     assert_eq!(status, 200, "{v}");
     let last = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!(
-        (last.kind.as_str(), &last.data["op"], &last.data["issues"]),
+        (last.kind.as_str(), last.val("op"), last.val("issues")),
         ("queue", &json!("rm"), &json!([17]))
     );
 
@@ -388,7 +388,7 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
         .rfind(|e| e.kind == "run-settled")
         .unwrap();
     assert_eq!(
-        (settled.str("via"), &settled.data["approved"]),
+        (settled.str("via"), settled.val("approved")),
         (Some("cooee"), &json!(false))
     );
 }

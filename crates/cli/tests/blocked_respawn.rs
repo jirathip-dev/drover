@@ -221,7 +221,7 @@ fn a_lane_ends_after_an_idle_trim_gets_one_respawn() {
     assert!(out.contains("sendmeter #12 repaired: back to impl"), "{out}");
     assert_eq!(steps, ["respawn"], "{out}");
     let fixed = kinds(&c, "repaired");
-    assert_eq!((fixed.len(), fixed[0].data["trimmed"].as_bool()), (1, Some(true)));
+    assert_eq!((fixed.len(), fixed[0].val("trimmed").as_bool()), (1, Some(true)));
     let sp = kinds(&c, "spawn");
     let wt = c.worktrees.join("sendmeter/issue-12");
     assert_eq!(
