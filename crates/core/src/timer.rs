@@ -14,6 +14,30 @@ pub const FAST: &str = "dev.drover.fast";
 /// #345: `drover service`, kept alive; it runs the fast step itself (and the board with `--board`).
 pub const SERVICE: &str = "dev.drover.service";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
+/// #845: the tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
+pub const TICK_STEPS: [(&str, &[&str]); 7] = [
+    ("herdr status", &[]),
+    (
+        "check",
+        &[
+            "stall_minutes",
+            "ask_default_minutes",
+            "ask_waiting_minutes",
+            "ask_expire_hours",
+            "outbox_stale_minutes",
+            "acp_start_minutes",
+            "idle_reap_minutes",
+            "done_close_minutes",
+            "idle_merged_minutes",
+            "token_refresh_minutes",
+        ],
+    ),
+    ("drive", &["pass_max_secs"]),
+    ("clean", &[]),
+    ("trim", &[]),
+    ("lesson", &[]),
+    ("hotspots", &[]),
+];
 /// #557: drover's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
 pub const UPDATE: &str = "dev.drover.update";
 pub const CLEAN: &str = "dev.drover.clean";
@@ -37,7 +61,8 @@ pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: u64, mac:
     let log = log.to_string_lossy();
     let (cmd, when, template, dest) = if mac {
         let strings = argv.iter().map(|a| format!("<string>{a}</string>")).collect();
-        let when = ["KeepAlive</key><true/>", "StartInterval</key><integer>{secs}</integer>"][i];
+        let serve = "KeepAlive</key><true/>\n<key>ProcessType</key><string>Interactive</string>";
+        let when = [serve, "StartInterval</key><integer>{secs}</integer>"][i];
         let at = "StartCalendarInterval</key><dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>30</integer></dict>";
         let when = if every == DAILY { at } else { when };
         let dest = format!("Library/LaunchAgents/{label}.plist");
@@ -354,6 +379,15 @@ pub fn running(ctx: &Ctx, cfg: &Config) -> Option<u64> {
     let mut w = text.split_whitespace().map(|x| x.parse::<u64>().ok());
     let (since, beat) = (w.next()??, w.next()??);
     (ctx.now <= beat + stuck_secs(cfg)).then_some(since)
+}
+
+/// #972: the running tick's `tick.step` and its age, when that step began over 3 × `slow_secs` ago.
+pub fn stuck_step(ctx: &Ctx, cfg: &Config) -> Option<(String, u64)> {
+    let m: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(ctx.state.with_file_name("tick.step")).ok()?).ok()?;
+    let at = m["at"].as_u64().or_else(|| m["since"].as_u64())?;
+    let secs = ctx.now.saturating_sub(at);
+    (secs > 3 * cfg.limits.slow_secs).then(|| (m["step"].as_str().unwrap_or("?").to_string(), secs))
 }
 
 /// #791: 2 tick intervals: no pass started and no heartbeat for longer reads stuck.

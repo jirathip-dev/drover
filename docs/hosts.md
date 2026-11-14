@@ -178,6 +178,13 @@ logs `host-key-changed <host>` once (again only after the host was back online) 
   close the old pane there logs it (`stale_host`, `stale_pane`); drive kills it once the host answers (wip first, as
   `kill` does) and logs `stale-pane-killed`. `drover kill|close --host <name> <agent>` picks that host's agent when
   another host has a lane of the same name.
+- #938: a runtime breaker per host. `[limits] runtime_down_failures` (5) lanes there failing to start or ending
+  without a push within `runtime_down_minutes` (30) make drive log one `runtime-down` (host, count, a sample reason;
+  one alert). While it is open a spawn there is refused `RUNTIME_DOWN`, those lanes show `runtime down on <host> since
+  <HH:MM> UTC` in `status` and `waiting`, and drive neither respawns them nor parks them needs-human. Each slow pass
+  runs one canary there (shed: a throwaway session echoing a computed word; herdr: the same line in a throwaway pane);
+  once it passes drive logs `runtime-up`, the held issues' earlier respawns stop counting, and spawns resume paced by
+  `max_parallel_spawns`.
 - History (#234): `<state dir>/host-history.jsonl` keeps 24 h of `{ts, host, load_cpu, pressure, swap_out, mem_free_gb,
   disk_free_gb, lanes}`: the main host a row a minute (`drive --fast`), a remote host a row every 5 minutes (`check`'s
   survey, no extra SSH). Rows past 24 h are dropped when it is rewritten (at most hourly), and it stays under
@@ -216,12 +223,15 @@ with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
 
 ## Auto-update
 
-When `check` sees an older drover on a remote host, and fleet.toml has the drover fleet, it rebuilds the main
-host's sha there in the background: `git fetch`, `git checkout --detach <sha>` and
-`cargo install --path crates/cli --locked --root <root> --force` in that fleet's checkout on the host, then
-`drover profiles sync` if an old fleet.toml is left there (#592). Output goes to `~/.drover-update.log` on the host. Each host and sha is tried once, and
-logged as `host-update` (with the error when the ssh call failed). Ten minutes later `check` reads the version back.
-A host still on the old version stays amber. A failed update never blocks the main host.
+Each `check` (every tick) reads `drover --version` on every enabled, reachable remote host. When it differs from the
+main host's, and no install already runs there, it installs the main host's sha the way `hosts bootstrap` does:
+`cargo install --git <repo> --rev <sha> --locked --root <root> --force`, then `drover profiles sync` if a fleet.toml
+is there. The install runs in the background (output in `~/.drover-sync.log` on the host), so the tick never waits
+on it. An offline or switched-off host gets no ssh for it.
+
+The next tick logs the result as `host-sync` (host, from, to, ok). A failure alerts `host-sync-failed` once until an
+install there succeeds, and the tick after retries it. Until the versions match, a shed-acp host takes no lanes
+(`acp guard`). `drover hosts` shows each remote host's drover sha, with `✓` when it matches the main host's.
 
 ## When the main host is down
 

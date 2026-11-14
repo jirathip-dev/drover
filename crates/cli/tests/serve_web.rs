@@ -56,7 +56,7 @@ fn location(res: &str) -> String {
 
 /// The last event, minus `via`, and its `via`.
 fn last(c: &drover::Ctx) -> (serde_json::Value, Option<String>) {
-    let mut e = read(&c.state).unwrap().pop().unwrap();
+    let mut e = read(&c.state).unwrap().to_vec().pop().unwrap();
     let via = e.data.remove("via").and_then(|v| v.as_str().map(String::from));
     (json!({"type": e.kind, "fleet": e.fleet, "data": e.data}), via)
 }
@@ -225,6 +225,7 @@ fn role_dropdowns_set_like_drover_set() {
     let sets = |c: &drover::Ctx| {
         read(&c.state)
             .unwrap()
+            .to_vec()
             .into_iter()
             .filter(|e| e.kind == "set")
             .collect::<Vec<_>>()
@@ -683,12 +684,13 @@ fn page_fits_390px_without_horizontal_scroll() {
         ),
     )
     .unwrap();
-    let list =
-        json!({"result": {"agents": [{"name": long, "agent_status": "working", "pane_id": "w1:p1"}]}}).to_string();
     let screen = format!("⏺ Bash({})\n{}\n", "y".repeat(200), "z".repeat(400));
-    let r = Fake::default()
-        .reply("herdr agent list", &list)
-        .reply("herdr pane read", &screen);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane(long, "working", "/x");
+    sh.screen(long, &screen);
+    let f = Fake::default();
+    let r = sh.on(&f);
     let page = get(&Server::new(&c, &r, Some(ADDR.into())), "/");
     let html = &page[page.find("<!doctype").unwrap()..];
     assert!(!html.contains("<table") && !html.contains("<pre"), "no wide blocks");
@@ -795,10 +797,11 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
             json!({"why": "merged"}),
         );
     }
-    let list =
-        json!({"result": {"agents": [{"name": "sendmeter-impl-17", "agent_status": "working", "pane_id": "w1:p1"}]}})
-            .to_string();
-    let r = Fake::default().reply("herdr agent list", &list);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane("sendmeter-impl-17", "working", "/x");
+    let f = Fake::default();
+    let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page = get(&s, "/");
     let section = |id: &str| {

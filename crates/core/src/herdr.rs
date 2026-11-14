@@ -128,6 +128,35 @@ impl Shed {
         let a = self.acp_argv(name, labels, cwd, cmd);
         shed::cli(r, &a.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
     }
+    /// #899: its exited lane terminals (a `fleet` label), kept until removed.
+    pub fn exited(&self, r: &dyn Runner) -> Result<Vec<TerminalInfo>> {
+        let all: Vec<TerminalInfo> = serde_json::from_value(self.call(r, Method::Ls, LsParams::default())?)?;
+        let gone = |t: &TerminalInfo| t.state == shed_proto::State::Exited && t.labels.contains_key("fleet");
+        Ok(all.into_iter().filter(gone).collect())
+    }
+    /// #899: remove terminal `name`.
+    pub fn rm(&self, r: &dyn Runner, name: &str) -> Result<()> {
+        self.call(r, Method::Rm, Target { name: name.into() }).map(drop)
+    }
+    /// #938: a throwaway terminal running the breaker's canary shows its output: shed starts sessions again.
+    pub fn canary(&self, r: &dyn Runner) -> bool {
+        let name = "drover-canary";
+        let _ = self.rm(r, name);
+        let mut p = Self::run_params(name, &[], "/");
+        p.cmd = argv(&["sh", "-c", crate::breaker::CANARY]);
+        let wait = WaitParams {
+            name: name.into(),
+            until: vec![],
+            output: Some(crate::breaker::CANARY_OUT.into()),
+            timeout: Some(20.0),
+        };
+        let ok = self.call(r, Method::Run, p).is_ok()
+            && self
+                .call(r, Method::Wait, wait)
+                .is_ok_and(|v| v["outcome"] == "matched");
+        let _ = self.rm(r, name);
+        ok
+    }
     /// The `shed run --acp` words that start ACP lane `name`.
     pub fn acp_argv(&self, name: &str, labels: &[(&str, String)], cwd: &str, cmd: &[String]) -> Vec<String> {
         let id = self.0.acp.as_deref().unwrap_or_default();
@@ -177,7 +206,8 @@ impl Shed {
 fn agent_of(t: &TerminalInfo) -> Value {
     let up = t.state == shed_proto::State::Running;
     json!({"name": t.name, "pane_id": t.name, "cwd": t.cwd, "agent": t.labels.get("harness").filter(|_| up),
-        "agent_status": t.reported.as_ref().map_or("unknown", |s| s.state.as_str()), "terminal_title": "", "runtime": "shed", "pid": t.pid})
+        "agent_status": t.reported.as_ref().map_or("unknown", |s| s.state.as_str()), "terminal_title": "", "runtime": "shed", "pid": t.pid,
+        "cpu": t.resources.map(|u| u.cpu_pct)})
 }
 
 /// The shed call that does what herdr argv `a` does; None: herdr only (workspaces, worktrees, `agent start`).

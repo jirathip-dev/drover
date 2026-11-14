@@ -44,11 +44,14 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
         "harness = \"claude\"\naccount = \"C\"",
     ) + "\n[accounts]\naccount_env = \"fake-cooee accounts env {provider} {name}\"\nC = \"C\"\n";
     let c = ctx(&tmpdir("orchestrator-attach"), &cfg);
-    let r = Fake::default().reply("herdr", "{}").reply("gh", "").reply(
+    let b = FakeShed::new();
+    b.attach(&c);
+    let r = Fake::default().reply("gh", "").reply(
         "fake-cooee accounts env claude C",
         r#"{"CLAUDE_CONFIG_DIR": "/accounts/claude/C"}"#,
     );
-    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let on = b.on(&r);
+    let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let post = |op: &str, v: Value| call(&s, &ck, ("POST", &format!("/api/v1/{op}")), &v.to_string());
     let attach = json!({"fleet": "sendmeter", "thread": COOEE});
@@ -93,12 +96,11 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     );
     let attached = read(&c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "orchestrator-attached")
         .count();
     assert_eq!(attached, 2);
 
-    // Its ask is accepted and in the events with its thread, options and recommend; nothing typed into herdr.
     let seq = call(&s, &ck, ("GET", "/api/v1/events?since=0"), "")["seq"]
         .as_u64()
         .unwrap();
@@ -137,28 +139,41 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     assert_eq!(ans["ok"], true, "{ans}");
     let d = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "decision")
         .unwrap();
     assert_eq!((d.str("id"), d.str("choice")), (Some("q1"), Some("full")));
-    let started = r.calls.borrow()[calls..].iter().any(|c| c.contains("agent start"));
-    assert!(!started, "{:?}", r.calls.borrow());
+    let started = r.calls.borrow()[calls..].iter().any(|c| c.starts_with("shed run"));
+    assert!(
+        !started && !b.methods().iter().any(|m| m == "run"),
+        "{:?} {:?}",
+        r.calls.borrow(),
+        b.methods()
+    );
+    let starts = read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| e.kind == "orchestrator-start")
+        .count();
+    assert_eq!(starts, 0);
 
-    // #541: a lane's ask is routed to it (the event carries `routed`; cooee posts it), not typed into herdr.
     std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
     let (code, _) = ask(&c, &r, None);
     std::env::remove_var("DROVER_LANE");
     assert_eq!(code, 0);
     let q = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "needs-decision")
         .unwrap();
     assert_eq!(q.str("routed"), Some(COOEE), "{:?}", q.data);
     assert!(
-        !r.calls.borrow().iter().any(|c| c.contains("agent prompt")),
-        "{:?}",
-        r.calls.borrow()
+        !r.calls.borrow().iter().any(|c| c.starts_with("shed send")) && !b.methods().iter().any(|m| m == "send"),
+        "{:?} {:?}",
+        r.calls.borrow(),
+        b.methods()
     );
 
     // Detach ends the link: NO_SUCH_THREAD again, and a second detach is refused.

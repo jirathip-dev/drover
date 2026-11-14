@@ -14,12 +14,14 @@ const ADDR: &str = "127.0.0.1:7777";
 const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
 const HEAD: &str = "dddddddddddddddddddddddddddddddddddddddd";
 
-fn setup(name: &str, extra: &str) -> drover::Ctx {
+fn setup(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), &format!("{CONFIG}{DESIGN}{extra}"));
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
-    c
+    (c, sh)
 }
 
 fn wt(c: &drover::Ctx, n: u64) -> String {
@@ -30,10 +32,6 @@ fn wt(c: &drover::Ctx, n: u64) -> String {
 fn fake(c: &drover::Ctx, head: &str) -> Fake {
     let w = wt(c, 12);
     Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[("orchestrator-t1", "idle", "/x", "w9:c1")]),
-        )
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -46,17 +44,8 @@ fn fake(c: &drover::Ctx, head: &str) -> Fake {
             "docs/design/meter/index.html\ndocs/design/meter/1440.png\ndocs/design/meter/390.png\n",
         )
         .reply("git -C", "")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:c1"}}}"#,
-        )
-        .reply("herdr pane", "{}")
-        .reply("herdr agent", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
+        .reply("shed send orchestrator-t1", "")
 }
 
 fn drive(c: &drover::Ctx, r: &dyn Runner) -> String {
@@ -72,7 +61,12 @@ fn state(c: &drover::Ctx, n: u64) -> String {
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 fn spawned(c: &drover::Ctx, role: &str) -> usize {
@@ -82,7 +76,7 @@ fn spawned(c: &drover::Ctx, role: &str) -> usize {
 #[test]
 fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_to_impl() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("design-flow", "");
+    let (c, sh) = setup("design-flow", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -90,12 +84,13 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "13"]).0, 0);
     let r = fake(&c, HEAD);
     drive(&c, &r);
-    assert!(r.called("herdr agent start sendmeter-design-12") && !r.called("herdr agent start sendmeter-impl-12"));
-    assert!(
-        r.called("herdr agent start sendmeter-impl-13"),
-        "unmarked: impl at once"
+    assert!(sh.called("run", "sendmeter-design-12") && !sh.called("run", "sendmeter-impl-12"));
+    assert!(sh.called("run", "sendmeter-impl-13"), "unmarked: impl at once");
+    let wt12 = format!(
+        "git -C /tmp/does-not-matter/sendmeter worktree add {} issue-12",
+        wt(&c, 12)
     );
-    assert!(r.called("herdr worktree create --cwd /tmp/does-not-matter/sendmeter --branch issue-12"));
+    assert!(r.called(&wt12), "{:?}", r.calls.borrow());
     assert_eq!((state(&c, 12).as_str(), state(&c, 13).as_str()), ("design", "impl"));
     // The lane's turn ended with a pushed commit: the owner gets it, with both PNGs.
     let out = drive(&c, &r);
@@ -120,7 +115,7 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!(spawned(&c, "impl"), 1, "never impl before the approval");
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "approve"]).0, 0);
     assert_eq!(kinds(&c, "design-approved").len(), 1);
-    assert!(r.called("herdr pane close w9:p1"), "the design pane goes");
+    assert!(sh.called("kill", "sendmeter-design-12"), "the design pane goes");
     // #778: approved on a busy host: impl's start stays pending with the reason, then starts once load drops.
     let busy = fake(&c, HEAD).once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n");
     drive(&c, &busy);
@@ -128,7 +123,7 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!((p.action.as_str(), p.reason.as_deref()), ("approve", Some("HOST_BUSY")));
     assert_eq!(spawned(&c, "impl"), 1, "only #13's");
     drive(&c, &r);
-    assert!(r.called("herdr agent start sendmeter-impl-12"));
+    assert!(sh.called("run", "sendmeter-impl-12"));
     assert_eq!((state(&c, 12).as_str(), spawned(&c, "design")), ("impl", 1));
     assert_eq!(drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
 }
@@ -136,7 +131,7 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
 #[test]
 fn a_design_lane_whose_only_untracked_file_is_its_claude_local_md_hands_off() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("design-claude-local", "");
+    let (c, _sh) = setup("design-claude-local", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -179,7 +174,7 @@ fn needs_and_chat(s: &Server, cookie: &str, now: u64) -> (String, String) {
 #[test]
 fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup(
+    let (c, _sh) = setup(
         "design-surfaces",
         "\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n",
     );
@@ -288,7 +283,7 @@ impl Runner for Both<'_> {
 #[test]
 fn revise_redoes_the_design_with_the_note_in_its_brief_five_times_in_a_row() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut c = setup("design-revise", "");
+    let (mut c, _sh) = setup("design-revise", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -339,7 +334,7 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&o.stdout).trim().to_string()
 }
 
-fn repo(d: &Path) -> (drover::Ctx, std::path::PathBuf) {
+fn repo(d: &Path) -> (drover::Ctx, std::path::PathBuf, FakeShed) {
     let (origin, local) = (d.join("origin.git"), d.join("local"));
     git(d, &["init", "-q", "--bare", "-b", "staging", origin.to_str().unwrap()]);
     git(d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
@@ -351,7 +346,7 @@ fn repo(d: &Path) -> (drover::Ctx, std::path::PathBuf) {
     git(&local, &["push", "-q", "origin", "HEAD:staging"]);
     let cfg = format!("{CONFIG}{DESIGN}").replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
     let c = ctx(d, &cfg);
-    // The lane's worktree on the issue branch (herdr makes it in a real spawn).
+    let sh = FakeShed::attached(&c);
     let w = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(w.parent().unwrap()).unwrap();
     git(
@@ -366,14 +361,14 @@ fn repo(d: &Path) -> (drover::Ctx, std::path::PathBuf) {
             "origin/staging",
         ],
     );
-    (c, w)
+    (c, w, sh)
 }
 
 #[test]
 fn reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let d = tmpdir("design-reject");
-    let (c, w) = repo(&d);
+    let (c, w, _sh) = repo(&d);
     let origin = d.join("origin.git");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
@@ -419,7 +414,7 @@ fn reject_pushes_one_commit_back_to_the_exact_pre_design_tree_and_needs_a_human(
 #[test]
 fn design_off_on_a_queued_issue_lets_impl_spawn_directly() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("design-off", "");
+    let (c, sh) = setup("design-off", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -441,14 +436,14 @@ fn design_off_on_a_queued_issue_lets_impl_spawn_directly() {
     );
     let r = fake(&c, HEAD);
     drive(&c, &r);
-    assert!(r.called("herdr agent start sendmeter-impl-12") && !r.called("herdr agent start sendmeter-design-12"));
+    assert!(sh.called("run", "sendmeter-impl-12") && !sh.called("run", "sendmeter-design-12"));
     assert_eq!(state(&c, 12), "impl");
 }
 
 #[test]
 fn a_paused_fleet_auto_spawns_no_design_but_the_orchestrator_still_can() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("design-paused", "");
+    let (c, sh) = setup("design-paused", "");
     let toml = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(
         &c.config,
@@ -461,10 +456,10 @@ fn a_paused_fleet_auto_spawns_no_design_but_the_orchestrator_still_can() {
     );
     let r = fake(&c, HEAD);
     drive(&c, &r);
-    assert!(!r.called("herdr agent start"), "{:?}", r.calls.borrow());
+    assert!(sh.all("run").is_empty(), "{:?}", sh.methods());
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design"]);
     assert_eq!(code, 0, "{out}");
-    assert!(r.called("herdr agent start sendmeter-design-12"));
+    assert!(sh.called("run", "sendmeter-design-12"));
     assert_eq!(state(&c, 12), "design");
 }
 
@@ -486,16 +481,13 @@ fn brief(c: &drover::Ctx) -> String {
 #[test]
 fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("architect-flow", ARCHITECT);
+    let (c, sh) = setup("architect-flow", ARCHITECT);
     let q = ["queue", "sendmeter", "add", "12", "--design", "--architect"];
     assert_eq!(run(&c, &Fake::default(), &q).0, 0);
     let base = fake(&c, HEAD);
     let r = Both(adr(&c, HEAD), &base);
     drive(&c, &r);
-    assert!(
-        base.called("herdr agent start sendmeter-architect-12")
-            && !base.called("herdr agent start sendmeter-design-12")
-    );
+    assert!(sh.called("run", "sendmeter-architect-12") && !sh.called("run", "sendmeter-design-12"));
     assert!(brief(&c).contains("# ROLE: ARCHITECT") && brief(&c).contains("docs/architecture/<slug>/"));
     assert_eq!(state(&c, 12), "design");
     drive(&c, &r);
@@ -518,17 +510,14 @@ fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr(
         (Some("architect"), Some("docs/architecture/meter"))
     );
     drive(&c, &r);
-    assert!(
-        base.called("herdr agent start sendmeter-design-12"),
-        "the design comes next"
-    );
+    assert!(sh.called("run", "sendmeter-design-12"), "the design comes next");
     assert_eq!((state(&c, 12).as_str(), spawned(&c, "impl")), ("design", 0));
     // The design lane pushes its own head on top of the approved ADR.
     let r = fake(&c, &"e".repeat(40));
     drive(&c, &r);
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q2", "approve"]).0, 0);
     drive(&c, &r);
-    assert!(r.called("herdr agent start sendmeter-impl-12"));
+    assert!(sh.called("run", "sendmeter-impl-12"));
     assert_eq!(state(&c, 12), "impl");
     let b = brief(&c);
     assert!(
@@ -540,7 +529,7 @@ fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr(
 #[test]
 fn architect_revise_reruns_it_with_the_note_and_reject_needs_a_human() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut c = setup("architect-revise", ARCHITECT);
+    let (mut c, _sh) = setup("architect-revise", ARCHITECT);
     assert_eq!(
         run(
             &c,
@@ -575,18 +564,15 @@ fn architect_revise_reruns_it_with_the_note_and_reject_needs_a_human() {
 #[test]
 fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let mut c = setup("design-supersede", "");
+    let (mut c, sh) = setup("design-supersede", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
     );
     // Lane 1 pushes its design while it is still at it, so no hand-off yet.
-    let working = Fake::default().reply(
-        "herdr agent list",
-        &agents(&[("sendmeter-design-12", "working", &wt(&c, 12), "w9:c1")]),
-    );
     drive(&c, &fake(&c, HEAD));
-    drive(&c, &Both(working, &fake(&c, HEAD)));
+    sh.lane("sendmeter-design-12", "working", &wt(&c, 12));
+    drive(&c, &fake(&c, HEAD));
     assert_eq!(state(&c, 12), "design");
     // Lane 2 replaces it with nothing new to push: the design on the branch is still handed off, once.
     c.now += 1000;
@@ -619,7 +605,7 @@ fn a_superseded_design_lane_over_a_pushed_design_hands_it_off_once() {
 #[test]
 fn a_design_brief_takes_the_medium_and_path_the_issue_names() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("design-medium", "");
+    let (c, _sh) = setup("design-medium", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -639,7 +625,7 @@ fn a_design_brief_takes_the_medium_and_path_the_issue_names() {
         "git -C {w} log --format= --name-only {HEAD}..{HEAD} ^origin/staging -- docs/design apple/design/x"
     )));
     assert_eq!(state(&c, 12), "design-review");
-    let c = setup("design-medium-html", "");
+    let (c, _sh) = setup("design-medium-html", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -656,7 +642,7 @@ fn a_design_pushed_under_the_issues_named_path_raises_the_ask_and_one_elsewhere_
         ("design-named", ["apple/design/x/iphone.png", "apple/design/x/Mac.png"]),
         ("design-elsewhere", ["apple/Sources/A.swift", "apple/Sources/a.png"]),
     ] {
-        let (c, w) = repo(&tmpdir(name));
+        let (c, w, _sh) = repo(&tmpdir(name));
         assert_eq!(
             run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
             0
@@ -720,7 +706,7 @@ fn a_design_brief_takes_the_repos_recipe_unless_the_issue_names_its_own_path() {
             "- Medium: UIKit. You write only under `docs/design/`, `ios/design/y/`;",
         ),
     ] {
-        let c = setup(name, "");
+        let (c, _sh) = setup(name, "");
         assert_eq!(
             run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
             0
@@ -735,7 +721,7 @@ fn a_design_brief_takes_the_repos_recipe_unless_the_issue_names_its_own_path() {
         let shots = "- Images: run `just design-shots` at iPhone 393x852, Mac 1440x900.";
         assert_eq!(b.contains(shots), name == "design-recipe", "{b}");
     }
-    let c = setup("design-no-recipe", "");
+    let (c, _sh) = setup("design-no-recipe", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -755,7 +741,7 @@ fn a_design_brief_takes_the_repos_recipe_unless_the_issue_names_its_own_path() {
 #[test]
 fn a_recipe_with_a_clip_hands_off_the_images_and_the_clip() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (c, w) = repo(&tmpdir("design-clip"));
+    let (c, w, _sh) = repo(&tmpdir("design-clip"));
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -800,7 +786,7 @@ fn a_recipe_with_a_clip_hands_off_the_images_and_the_clip() {
 #[test]
 fn a_recipe_tool_the_main_host_lacks_ends_the_design_turn_blocked_before_it_starts() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let c = setup("design-tool", "");
+    let (c, sh) = setup("design-tool", "");
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -821,13 +807,13 @@ fn a_recipe_tool_the_main_host_lacks_ends_the_design_turn_blocked_before_it_star
     let card = &kinds(&c, "needs-human")[0];
     assert_eq!(card.str("code"), Some("LANE_BLOCKED"));
     assert!(card.str("reason").unwrap().contains("missing tool blender"));
-    assert!(!base.called("herdr agent start sendmeter-design-12") && spawned(&c, "design") == 0);
+    assert!(!sh.called("run", "sendmeter-design-12") && spawned(&c, "design") == 0);
     assert!(!Path::new(&wt(&c, 12)).join(".brief.md").exists(), "nothing drawn");
     assert_eq!(state(&c, 12), "needs-human");
 }
 
-fn staged(name: &str, flag: &str) -> (drover::Ctx, std::path::PathBuf, RealGit) {
-    let (c, w) = repo(&tmpdir(name));
+fn staged(name: &str, flag: &str) -> (drover::Ctx, std::path::PathBuf, RealGit, FakeShed) {
+    let (c, w, sh) = repo(&tmpdir(name));
     let toml = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, format!("{toml}{ARCHITECT}")).unwrap();
     let t = run(&c, &Fake::default(), &["thread", "new", "sendmeter", "meter"]);
@@ -836,9 +822,19 @@ fn staged(name: &str, flag: &str) -> (drover::Ctx, std::path::PathBuf, RealGit) 
     let q = run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", flag]);
     std::env::remove_var("DROVER_THREAD");
     assert_eq!(q.0, 0, "{}", q.1);
+    sh.add(
+        "orchestrator-t1",
+        serde_json::json!({"fleet": "sendmeter", "role": "orchestrator", "thread": "t1"}),
+    );
+    let st = serde_json::json!({"thread": "t1", "agent": "orchestrator-t1", "pane": "orchestrator-t1", "runtime": "shed-acp", "harness": "claude"});
+    drover::events::append(
+        &c.state,
+        &Event::new(c.now, "sendmeter", None, "orchestrator-start", st),
+    )
+    .unwrap();
     let r = RealGit(fake(&c, HEAD));
     drive(&c, &r);
-    (c, w, r)
+    (c, w, r, sh)
 }
 
 fn push(w: &Path, files: &[(&str, &str)]) -> String {
@@ -859,7 +855,7 @@ fn tree(head: &str, dir: &str) -> String {
 #[test]
 fn an_architect_ask_quotes_the_summary_and_links_the_adr_folder_at_the_sha_and_a_revise_the_new_one() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (mut c, w, r) = staged("architect-summary", "--architect");
+    let (mut c, w, r, _sh) = staged("architect-summary", "--architect");
     let sum = "Decision: one store, synced nightly\nSlices: store, sync, board\nOpen questions: none";
     let readme = format!("# Meter\n\n## Summary\n\n{sum}\n\n## Shapes\n\n`struct Meter`\n");
     let head = push(
@@ -902,7 +898,7 @@ fn an_architect_ask_quotes_the_summary_and_links_the_adr_folder_at_the_sha_and_a
 #[test]
 fn a_design_ask_links_the_design_folder_the_issue_names_at_the_sha() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (c, w) = repo(&tmpdir("design-link"));
+    let (c, w, _sh) = repo(&tmpdir("design-link"));
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--design"]).0,
         0
@@ -945,7 +941,7 @@ fn without_a_summary_the_ask_quotes_the_adrs_decision_and_without_either_it_read
         ),
         ("architect-bare", "# ADR\n\nwe store it once\n", ""),
     ] {
-        let (c, w, r) = staged(name, "--architect");
+        let (c, w, r, _sh) = staged(name, "--architect");
         let head = push(&w, &[("docs/architecture/meter/adr.md", file)]);
         drive(&c, &r);
         let ask = &kinds(&c, "needs-decision")[0];
@@ -964,7 +960,7 @@ fn without_a_summary_the_ask_quotes_the_adrs_decision_and_without_either_it_read
 #[test]
 fn a_long_summary_is_cut_at_a_line_end_near_600_characters() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (c, w, r) = staged("architect-cap", "--architect");
+    let (c, w, r, _sh) = staged("architect-cap", "--architect");
     let lines: Vec<String> = (0..20).map(|i| format!("{i:02} {}", "x".repeat(46))).collect();
     let readme = format!("## Summary\n{}\n", lines.join("\n"));
     push(&w, &[("docs/architecture/meter/README.md", &readme)]);
@@ -976,7 +972,7 @@ fn a_long_summary_is_cut_at_a_line_end_near_600_characters() {
 #[test]
 fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_raises_no_ask_but_a_card() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (c, w, r) = staged("architect-error", "--architect");
+    let (c, w, r, _sh) = staged("architect-error", "--architect");
     let local = w.parent().unwrap().parent().unwrap().parent().unwrap().join("local");
     let routines = local.join("docs/architecture/routines");
     std::fs::create_dir_all(&routines).unwrap();

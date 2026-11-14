@@ -40,8 +40,7 @@ fn golden(name: &str, mut v: Value) {
     );
 }
 
-/// sendmeter: #12 in work (a lane), #17 queued behind #12, #9 asking; herdr shows the impl lane working.
-fn fixture(name: &str) -> (drover::Ctx, Fake) {
+fn logged(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "17"]).0,
@@ -70,16 +69,29 @@ fn fixture(name: &str) -> (drover::Ctx, Fake) {
         json!({"id": "q7", "question": "Which DB?", "options": ["sqlite", "postgres"], "recommend": 1}),
     );
     ev(900_300, 12, "merged", json!({"pr": 40, "into": "staging"}));
+    c
+}
+
+const SCREEN: &str = "⏺ Bash(cargo test)\n  ⎿ ok\n";
+
+fn herdr_fixture(name: &str) -> (drover::Ctx, Fake) {
     let list = agents(&[("sendmeter-impl-12", "working", "/x", "w1:p2")]);
     let r = Fake::default()
         .reply("herdr agent list", &list)
-        .reply("herdr pane read", "⏺ Bash(cargo test)\n  ⎿ ok\n");
-    (c, r)
+        .reply("herdr pane read", SCREEN);
+    (logged(name), r)
+}
+
+fn fixture(name: &str) -> (drover::Ctx, OnShed) {
+    let r = OnShed::new(Fake::default());
+    r.1.lane("sendmeter-impl-12", "working", "/x");
+    r.1.screen("sendmeter-impl-12", SCREEN);
+    (logged(name), r)
 }
 
 #[test]
 fn state_events_and_lane_json_match_the_goldens() {
-    let (c, r) = fixture("api-get");
+    let (c, r) = herdr_fixture("api-get");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let (status, state) = req(&s, "GET", "/api/v1/state", "", "");
     assert_eq!(status, "HTTP/1.1 200 OK");
@@ -147,7 +159,7 @@ fn refusals_are_json_with_a_code() {
         code("POST", "/api/v1/pause", "fleet=sendmeter", evil),
         want("403 Forbidden", "FORBIDDEN")
     );
-    assert!(!r.called("herdr pane read"));
+    assert!(!r.called("herdr pane read") && !r.1.called("read", "sendmeter-impl-12"));
     // A stale page's mtime is REFUSED STALE, as on the HTML board; an unknown path is 404.
     assert_eq!(
         code("POST", "/api/v1/pause", "fleet=sendmeter&mtime=1", ""),

@@ -39,6 +39,7 @@ fn a_failed_write_keeps_the_old_devices_and_logs_once_an_hour() {
     );
     let failed: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "state-write-failed")
         .collect();
@@ -121,9 +122,7 @@ fn concurrent_device_updates_all_land_without_a_write_failure() {
     let mut want: Vec<_> = (0..16).map(|i| format!("h{i}")).collect();
     want.sort();
     assert_eq!(hashes, want, "all 16 updates present");
-    let failed = read(&c.state)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|e| e.kind == "state-write-failed");
+    let log = read(&c.state).unwrap_or_default();
+    let failed = log.iter().filter(|e| e.kind == "state-write-failed");
     assert_eq!(failed.count(), 0);
 }

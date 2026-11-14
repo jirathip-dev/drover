@@ -25,7 +25,7 @@ fn req(s: &Server, now: u64, method: &str, path: &str, body: &str, extra: &str) 
     (head[9..12].parse().unwrap(), serde_json::from_str(body).unwrap())
 }
 
-fn recorded(name: &str) -> (drover::Ctx, Fake) {
+fn recorded(name: &str) -> (drover::Ctx, OnShed) {
     let c = ctx(&tmpdir(name), &format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}"));
     for args in [
         &["queue", "sendmeter", "add", "17", "20"][..],
@@ -73,8 +73,17 @@ fn recorded(name: &str) -> (drover::Ctx, Fake) {
     let card = json!({"thread": "t1", "id": "r1", "cmd": "git push origin --delete wip/x", "why": "Delete #9's wip snapshot",
         "blast": "origin: 1 wip/ branch", "dir": "/tmp/sendmeter", "host": "main", "timeout": 60, "sha": "3b7e0c55a1d9".repeat(5)});
     ev(T - 120, None, "run-card", card);
-    let list = agents(&[("sendmeter-impl-12", "working", "/x", "w1:p2")]);
-    (c, Fake::default().reply("herdr agent list", &list))
+    let r = OnShed::new(Fake::default());
+    r.1.lane("sendmeter-impl-12", "working", "/x");
+    (c, r)
+}
+
+fn working() -> OnShed {
+    let r = OnShed::new(Fake::default());
+    for name in ["sendmeter-impl-12", "sendmeter-rev-12-r2", "sendmeter-impl-17"] {
+        r.1.lane(name, "working", "/x");
+    }
+    r
 }
 
 fn skeleton(v: &Value, at: &str, out: &mut BTreeSet<String>) {
@@ -337,7 +346,7 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
 
     let (status, v) = post(drop17, &ck);
     assert_eq!(status, 200, "{v}");
-    let last = read(&c.state).unwrap().pop().unwrap();
+    let last = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!(
         (last.kind.as_str(), &last.data["op"], &last.data["issues"]),
         ("queue", &json!("rm"), &json!([17]))
@@ -355,6 +364,7 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
     assert!(!state["asks"].to_string().contains("\"q7\""), "{state}");
     let d = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "decision")
         .unwrap();
@@ -373,6 +383,7 @@ fn an_action_outside_the_manifest_is_refused_and_a_listed_one_runs() {
     assert_eq!(status, 200, "{v}");
     let settled = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "run-settled")
         .unwrap();
@@ -394,6 +405,7 @@ fn a_folded_cards_main_button_answers_its_ask() {
     assert_eq!(status, 200, "{v}");
     let d = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "decision")
         .unwrap();
@@ -486,14 +498,7 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap().to_string();
     let c2 = c.clone();
-    std::thread::spawn(move || {
-        let list = agents(&[
-            ("sendmeter-impl-12", "working", "/x", "w1:p2"),
-            ("sendmeter-rev-12-r2", "working", "/x", "w1:p3"),
-            ("sendmeter-impl-17", "working", "/x", "w1:p4"),
-        ]);
-        drover::serve::serve_on(&c2, &Fake::default().reply("herdr agent list", &list), l, false)
-    });
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &working(), l, false));
     let mut s = std::net::TcpStream::connect(&addr).unwrap();
     s.set_read_timeout(Some(std::time::Duration::from_secs(20))).unwrap();
     write!(
@@ -550,12 +555,7 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
     );
     apply(&mut screen, &ops);
 
-    let list = agents(&[
-        ("sendmeter-impl-12", "working", "/x", "w1:p2"),
-        ("sendmeter-rev-12-r2", "working", "/x", "w1:p3"),
-        ("sendmeter-impl-17", "working", "/x", "w1:p4"),
-    ]);
-    let r2 = Fake::default().reply("herdr agent list", &list);
+    let r2 = working();
     let fresh = req(
         &Server::new(&c, &r2, Some(ADDR.into())),
         drover::now(),
@@ -567,4 +567,50 @@ fn the_queue_stream_updates_rows_in_place_and_the_strip_count() {
     .1;
     screen.as_object_mut().unwrap().remove("badge");
     assert_eq!(screen, fresh, "the ops turned the first answer into today's");
+}
+
+#[test]
+fn the_workflow_screen_is_two_diagram_blocks_with_live_counts_and_limit_nodes() {
+    let (c, r) = recorded("cooee-workflow");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let (status, v) = req(&s, T, "GET", "/screens/workflow", "", "");
+    assert_eq!(status, 200, "{v}");
+    assert_eq!((&v["type"], &v["id"]), (&json!("screen"), &json!("workflow")));
+    let states = find(&v, "states");
+    assert_eq!(states["type"], "diagram");
+    assert!(
+        states["source"].as_str().unwrap().starts_with("stateDiagram-v2\n"),
+        "{states}"
+    );
+    assert!(
+        states["source"]
+            .as_str()
+            .unwrap()
+            .contains("state \"fix(n) · 1\" as fix"),
+        "{states}"
+    );
+    for (state, n) in [("merged", 1), ("fix(n)", 1), ("needs-human", 1)] {
+        assert_eq!(states["counts"][state], n, "{state}: {states}");
+    }
+    let pass = find(&v, "pass");
+    assert_eq!(pass["type"], "diagram");
+    let source = pass["source"].as_str().unwrap();
+    let nodes = pass["nodes"].as_array().unwrap();
+    for (id, limit) in [
+        ("k_slow_secs", "slow_secs"),
+        ("k_fast_secs", "fast_secs"),
+        ("k_stall_minutes", "stall_minutes"),
+    ] {
+        assert!(nodes.contains(&json!({"id": id, "limit": limit})), "{id}: {nodes:?}");
+    }
+    for n in nodes {
+        assert!(
+            source.contains(&format!(
+                "{}([\"{} = ",
+                n["id"].as_str().unwrap(),
+                n["limit"].as_str().unwrap()
+            )),
+            "{n}"
+        );
+    }
 }

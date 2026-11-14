@@ -45,10 +45,8 @@ fn fixture(name: &str, last: &str) -> drover::Ctx {
     c
 }
 
-fn runner() -> Fake {
-    Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
+fn runner() -> OnShed {
+    OnShed::new(Fake::default())
 }
 
 /// The response at `path`; the page (#269) with its needs cards as the board draws them.
@@ -203,12 +201,15 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
         !get(&s, "/", &cookie).contains("<details class=ask data-n=12>"),
         "the card stays answered"
     );
-    assert!(post("extend").contains("not%20needs"), "a second tap");
+    assert!(
+        post("extend").contains("msg=%2312%3A%20extend"),
+        "a second tap retries the start"
+    );
     assert_eq!(extended(), 1, "the decision is logged once, before the spawn");
     assert_eq!(fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].extra, 1);
     let failed = read(&c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "extend-failed")
         .count();
     assert_eq!(failed, 0);

@@ -1011,7 +1011,8 @@ fn merged(
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "landed", d))?;
     }
     // The one GitHub comment fleet writes: ≤ 5 lines, merge sha + verdict sha; #677: the latest why note's Owner line.
-    let why = read(&ctx.state)?.into_iter().rfind(|e| e.is("why", fleet, issue));
+    let log = read(&ctx.state)?;
+    let why = log.iter().rfind(|e| e.is("why", fleet, issue));
     let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(
         "Merged via `drover merge`: PR #{num} → `{}` @ `{merge_sha}`\nPinned PASS verdict sha: `{head}`{}{}",
@@ -1050,12 +1051,9 @@ fn merged(
         let src = f.local_path();
         writeln!(
             out,
-            "cargo install --path {}/crates/cli --locked --root {} --force && sh {}/scripts/signing-identity.sh sign {}/bin/drover && ln -sf drover {}/bin/herdsman",
-            src.display(),
-            root.display(),
-            src.display(),
-            root.display(),
-            root.display()
+            "cargo build --release --locked -p drover --manifest-path {s}/Cargo.toml && sh {s}/scripts/install-gate.sh {s}/target/release/drover {r}/bin/drover && ln -sf drover {r}/bin/herdsman",
+            s = src.display(),
+            r = root.display()
         )?;
     }
     Ok(())
@@ -1078,18 +1076,8 @@ pub fn needs_human(
         "override" => merge(ctx, cfg, r, out, fleet, n, true)?,
         "extend" => {
             // #217: the decision is logged first (the card goes at once); a failed spawn is drive's next due step.
-            // Under drive.lock: a pass meanwhile would start the same round; a running pass leaves it to the next.
-            let held = crate::drive::hold(ctx, r, fleet);
-            if state == "needs-human" {
-                let d = json!({"by": by, "spawn": spawn});
-                crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "round-extended", d))?;
-            }
+            extended(ctx, (fleet, n), (spawn, by), state)?;
             if spawn {
-                crate::pending::record(ctx, (fleet, n), "extend", "impl", None)?;
-            }
-            if spawn && held.is_none() {
-                writeln!(out, "#{n}: {}", crate::promise::Say::PassRunning.line())?;
-            } else if spawn {
                 let o = crate::spawn::Opts {
                     supersede: true,
                     ..Default::default()
@@ -1114,12 +1102,28 @@ pub fn needs_human(
     Ok(())
 }
 
-/// Issue `n`'s state if it waits on the owner's needs-human card, else `NOT_NEEDS_HUMAN`.
+/// #975: the owner's extend decided, once: `round-extended` off needs-human, then its pending start unless one waits.
+pub fn extended(ctx: &Ctx, (fleet, n): (&str, u64), (spawn, by): (bool, &str), state: &str) -> Result<()> {
+    if state == "needs-human" {
+        let d = json!({"by": by, "spawn": spawn});
+        crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "round-extended", d))?;
+    }
+    let waits =
+        crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.action == "extend" && !p.back(ctx.now));
+    if spawn && !waits {
+        crate::pending::record(ctx, (fleet, n), "extend", "impl", None)?;
+    }
+    Ok(())
+}
+
+/// Issue `n`'s state if it waits on the owner's needs-human card (or #975 its extend's start), else `NOT_NEEDS_HUMAN`.
 pub fn held(ctx: &Ctx, fleet: &str, n: u64) -> Result<String> {
     let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
     let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
-    let back = crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.back(ctx.now));
-    if state != "needs-human" && last != "extend-failed" && !back {
+    let events = read(&ctx.state)?;
+    let back = crate::pending::of(&events, fleet, n).is_some_and(|p| p.back(ctx.now));
+    let starting = !matches!(state, "merged" | "closed" | "parked") && crate::pending::extending(&events, fleet, n);
+    if state != "needs-human" && last != "extend-failed" && !back && !starting {
         return refused("NOT_NEEDS_HUMAN", format!("#{n} is {state}, not needs-human"));
     }
     Ok(state.into())

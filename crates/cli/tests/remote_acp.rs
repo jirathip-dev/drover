@@ -245,7 +245,7 @@ fn spawn_fake() -> Fake {
 }
 
 fn spawned(c: &drover::Ctx) -> Vec<drover::events::Event> {
-    let ev = drover::events::read(&c.state).unwrap();
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
     ev.into_iter().filter(|e| e.kind == "spawn").collect()
 }
 
@@ -298,7 +298,7 @@ fn hook_there(env: &BTreeMap<String, String>, dir: &Path, cmd: &str) -> String {
 #[test]
 fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_with_no_token_there() {
     let (c, home) = setup("racp-spawn", &["boat1"]);
-    let f = spawn_fake().reply("herdr --machine boat1 agent list", NO_AGENTS);
+    let f = spawn_fake();
     let b = Boat::new(&c, &f, &[("boat1", true, true)]);
     let cfg = drover::config::Config::load(&c.config).unwrap();
     // Up from its shed alone: herdr there is never asked.
@@ -618,4 +618,20 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
         assert!(status.contains("401") && body.contains("expired"), "{status} {body}");
         assert_eq!(seen.lock().unwrap().len(), 1, "refused calls never reach upstream");
     }
+}
+
+#[test]
+fn a_remote_acp_lane_whose_role_has_no_account_is_refused_acp_unguarded() {
+    let (c, _) = setup("racp-noacct", &["boat1"]);
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, toml.replacen("account = \"C\"", "", 1)).unwrap();
+    let f = spawn_fake();
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl", "--host", "boat1"]);
+    assert!(
+        code == 3 && o.contains("REFUSED ACP_UNGUARDED") && o.contains("[accounts] account"),
+        "{o}"
+    );
+    assert!(spawned(&c).is_empty() && drover::proxy::keys(&c).is_empty());
+    assert!(b.runs.borrow().is_empty(), "nothing started");
 }

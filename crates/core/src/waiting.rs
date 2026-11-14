@@ -69,7 +69,7 @@ pub fn unspawned(events: &[Event], s: &IssueState) -> bool {
         .iter()
         .rev()
         .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue));
-    crate::pending::of(events, &s.fleet, s.issue).is_some_and(|p| p.action == "extend" && !p.failed)
+    crate::pending::extending(events, &s.fleet, s.issue)
         || last.is_some_and(|e| e.kind == "round-extended" && e.data.get("spawn") == Some(&Value::Bool(true)))
 }
 
@@ -163,7 +163,14 @@ fn turned(events: &[Event], t: &Event, lane: &str, now: u64, stall: u64) -> (Who
 
 /// #444: the `respawn`s since the issue's last push, verdict or needs-human: (count, the last one's time).
 pub(crate) fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
-    let reset = ["pushed", "verdict", "needs-human", "round-extended", "repaired"];
+    let reset = [
+        "pushed",
+        "verdict",
+        "needs-human",
+        "round-extended",
+        "repaired",
+        "runtime-cleared",
+    ];
     let mine = events.iter().rev().filter(|e| e.fleet == fleet && e.issue == Some(n));
     let at: Vec<&Event> = mine
         .take_while(|e| !reset.contains(&e.kind.as_str()))
@@ -601,14 +608,8 @@ pub fn scan(
     live: bool,
 ) -> Vec<(IssueState, Waiting)> {
     let (mut out, log) = (vec![], Log::new(events));
-    // #447: each issue's events, in one pass: a wait reads its own, never the whole log again.
-    let mut of: std::collections::HashMap<_, Vec<Event>> = std::collections::HashMap::new();
-    for e in events {
-        if let Some(n) = e.issue {
-            of.entry((e.fleet.as_str(), n)).or_default().push(e.clone());
-        }
-    }
     let busy = |l: &str| agents.iter().any(|a| a["name"] == l && a["agent_status"] == "working");
+    let hung = crate::roots::hung_now(events);
     for s in fold(events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
         // #43: after a `lane-killed`, the issue's surviving lane carries its reason (a killed rev: spawn rev again).
         let Some(lane) = s.lane.clone().or_else(|| {
@@ -630,8 +631,26 @@ pub fn scan(
         if live && !matches!(s.state.as_str(), "merged" | "closed") && gh::cached_pr(ctx, &s.fleet, s.issue).is_null() {
             gh::run(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now);
         }
-        let mine = of.get(&(s.fleet.as_str(), s.issue)).map_or(&[][..], Vec::as_slice);
+        let mine: Vec<Event> = crate::events::of_issue(events, &s.fleet, s.issue)
+            .into_iter()
+            .cloned()
+            .collect();
+        let mine = mine.as_slice();
         let sp = last_spawn(mine, &lane);
+        if let Some(root) = crate::roots::hung_under(&hung, sp).filter(|_| !s.done()) {
+            let w = Waiting {
+                fleet: s.fleet.clone(),
+                issue: s.issue,
+                lane: lane.clone(),
+                who: "none",
+                what: format!("root hung: {root}"),
+                since: s.last_ts,
+                next_cmd: None,
+                promise: None,
+            };
+            out.push((s, w));
+            continue;
+        }
         let rested = |e: &Event| {
             crate::access::rests(&e.kind) && sp.is_some_and(|p| e.ts >= p.ts && e.str("account") == p.str("account"))
         };
@@ -823,6 +842,17 @@ pub fn scan(
         if let Some(h) = crate::hosts::offline(ctx, sp).filter(|_| s.active_lane().is_some()) {
             (w.who, w.what, w.next_cmd, w.promise) = ("none", format!("host offline: {h}"), None, None);
         }
+        let stuck = ["idle without pushing", "rev idle without", "reviewer exited"]
+            .iter()
+            .any(|p| w.what.starts_with(p));
+        let spawning = w.next_cmd.as_deref().is_some_and(|c| c.starts_with("drover spawn "));
+        let hold = stuck || spawning || w.what.contains(NO_PUSH);
+        if let Some(t) = sp
+            .and_then(|e| crate::breaker::says(log.all, crate::breaker::host(e)))
+            .filter(|_| hold)
+        {
+            (w.who, w.what, w.next_cmd, w.promise) = ("none", t, None, None);
+        }
         // #592: a live remote lane's rules, frozen at spawn, that fleet.toml now resolves otherwise: a respawn takes them.
         let sp = s.active_lane().and_then(|(_, a)| last_spawn(mine, a));
         if sp.is_some_and(|e| crate::hook::rules_stale(cfg, &s.fleet, e)) {
@@ -907,8 +937,10 @@ pub fn scan(
         role.is_some_and(|r| cfg.fleet[&w.fleet].flow().is_check(r))
     };
     let held = |w: &Waiting| {
-        let mine = of.get(&(w.fleet.as_str(), w.issue)).map_or(&[][..], Vec::as_slice);
-        let tried = mine.iter().rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
+        let mine = crate::events::of_issue(events, &w.fleet, w.issue);
+        let tried = mine
+            .into_iter()
+            .rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
         tried
             .and_then(|e| e.str("code"))
             .is_some_and(|c| c == "SPAWN_PENDING" || HOST_WAIT.contains(&c))

@@ -30,6 +30,7 @@ pub fn of<'a>(events: &'a [Event], id: &str) -> impl DoubleEndedIterator<Item = 
     });
     let at = at.into_iter().flatten().map(move |i| &events[i]);
     at.chain(all.into_iter().flatten())
+        .filter(move |e| !events::repeat(events, e))
 }
 
 /// #701: every thread's `thread-new`, oldest first.
@@ -349,15 +350,12 @@ pub fn handoff(ctx: &Ctx, cfg: &Config, r: &dyn Runner, [from, to, title, text]:
     // The newest 4, then the new thread; the rest after it, behind the board's `more` row.
     opts.insert(opts.len().min(4), format!("new thread: {title}"));
     targets.insert(targets.len().min(4), "new");
-    let q = format!("q{}", events.iter().filter(|e| e.kind == "needs-decision").count() + 1);
     let question = format!("Hand off \"{title}\" to which {to} thread? Nothing is delivered until you tap one.");
-    let d = json!({"id": q, "question": question, "options": opts, "recommend": null, "kind": "owner", "thread": from,
+    let d = json!({"question": question, "options": opts, "recommend": null, "kind": "owner", "thread": from,
         "handoff": {"repo": to, "title": title, "text": text, "targets": targets}, "forwards": fwd});
-    emit(
-        &ctx.state,
-        cfg,
-        Event::new(ctx.now, &t.fleet, None, "needs-decision", d),
-    )?;
+    let ev = Event::new(ctx.now, &t.fleet, None, "needs-decision", d);
+    let ev = events::ask(&ctx.state, cfg, vec![ev], None)?.pop();
+    let q = ev.as_ref().and_then(|e| e.str("id")).unwrap_or_default();
     Ok(format!(
         "{q}: the owner picks the thread; nothing is delivered until then"
     ))
@@ -421,7 +419,7 @@ pub fn land(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, choice: &str) 
     };
     // #584: a handoff that fails to go out closes its card as failed; #621: its full error is a row in the source.
     if let Err(e) = &sent {
-        let d = json!({"id": id, "to": to, "reason": format!("{e:#}")});
+        let d = json!({"id": id, "ask_seq": ask.seq, "to": to, "reason": format!("{e:#}")});
         emit(&ctx.state, cfg, Event::new(ctx.now, &ask.fleet, None, "ask-failed", d))?;
         let text = format!("✗ {id} not delivered to {to}: {e:#}");
         log(ctx, cfg, find(&events, from)?, "system", (&text, &[]))?;
@@ -752,15 +750,20 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
     let awake = last.filter(|s| s.kind == "orchestrator-start" && agents.iter().any(|a| a["name"] == s.data["agent"]));
     // #404: a model/effort pick since the conductor started resumes it on them.
     let picked = awake.is_some_and(|s| of(&events, id).any(|e| e.kind == "thread-model" && e.seq > s.seq));
-    let Some(s) = awake.filter(|_| !picked) else {
-        if let Some(s) = awake {
-            close(r, s)?;
-            let d = json!({"thread": id, "agent": s.str("agent"), "why": "model"});
-            emit(
-                &ctx.state,
-                cfg,
-                Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
-            )?;
+    let stuck = awake.and(hung(ctx, cfg, &events, &agents, id));
+    let Some(s) = awake.filter(|_| !picked && stuck.is_none()) else {
+        match (awake, stuck) {
+            (Some(s), Some((_, quiet))) => end(ctx, cfg, r, (t, s), json!({"why": "hung", "quiet_secs": quiet}))?,
+            (Some(s), None) => {
+                close(r, s)?;
+                let d = json!({"thread": id, "agent": s.str("agent"), "why": "model"});
+                emit(
+                    &ctx.state,
+                    cfg,
+                    Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
+                )?;
+            }
+            _ => {}
         }
         return start(ctx, cfg, r, t, &shared(&ctx.state)?, line);
     };
@@ -783,6 +786,48 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
 /// #608: a conductor that runs as an ACP session in shed.
 fn acp(s: &Event) -> bool {
     s.str("runtime") == Some("shed-acp")
+}
+
+/// #946: thread `id`'s awake ACP conductor reporting `working` with no CPU and no output for `stall_minutes`: its start and quiet seconds.
+pub fn hung<'a>(ctx: &Ctx, cfg: &Config, events: &'a [Event], agents: &[Value], id: &str) -> Option<(&'a Event, u64)> {
+    let last = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
+    let s = last.filter(|e| e.kind == "orchestrator-start" && acp(e))?;
+    let a = agents.iter().find(|a| a["name"] == s.data["agent"])?;
+    let out = crate::shed::session(ctx, s.str("agent")?)["at"].as_u64().unwrap_or(0);
+    let quiet = ctx.now.saturating_sub(out.max(s.ts));
+    let idle = a["cpu"].as_u64().is_some_and(|c| c < crate::stall::BUSY_CPU_PCT);
+    (a["agent_status"] == "working" && idle && quiet >= cfg.limits.stall_minutes * 60).then_some((s, quiet))
+}
+
+fn end(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (t, s): (&Event, &Event), mut d: Value) -> Result<()> {
+    let agent = s.str("agent").unwrap_or_default();
+    let _ = crate::shed::cli(r, &["cancel", agent]);
+    crate::shed::cli(r, &["kill", agent])?;
+    (d["thread"], d["agent"]) = (json!(t.str("thread")), json!(agent));
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
+    )
+}
+
+/// #946: `drover stop <thread>`: end its conductor (an ACP session cancelled and killed, a pane sent Esc); logs `stop`.
+pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> {
+    let events = shared(&ctx.state)?;
+    let t = find(&events, id)?;
+    let last = of(&events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
+    let Some(s) = last.filter(|e| e.kind == "orchestrator-start") else {
+        return refused("NO_SUCH_AGENT", format!("thread {id}'s orchestrator is asleep"));
+    };
+    let agent = s.str("agent").unwrap_or_default();
+    if acp(s) {
+        end(ctx, cfg, r, (t, s), json!({"why": "stopped"}))?;
+    } else {
+        herdr::keys(r, s.str("pane").unwrap_or_default(), "Escape")?;
+    }
+    let d = json!({"agent": agent, "thread": id});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "stop", d))?;
+    Ok(agent.into())
 }
 
 /// Close conductor `s`: its shed terminal (#608), else its herdr workspace.

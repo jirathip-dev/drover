@@ -5,28 +5,18 @@ use common::*;
 use drover::events::{append, read, Event};
 use serde_json::json;
 
-/// A Fake on which `spawn sendmeter 12 impl` starts a lane whose prompt never lands (exit 4); after the first start its
-/// worktree holds one unpushed commit, so each `--supersede` of it saves a `wip/` branch first.
-fn dying(c: &drover::Ctx) -> Fake {
+fn dying(c: &drover::Ctx) -> (FakeShed, Fake) {
+    let sh = FakeShed::attached(c);
+    sh.wait_ends("sendmeter-impl-12", "timeout");
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
-    Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
+    let f = Fake::default()
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .once(&format!("git -C {} rev-list", wt.display()), 0, "0\n")
         .reply(&format!("git -C {} rev-list", wt.display()), "1\n")
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
-        .reply("git -C", "")
-        .reply(
-            "herdr worktree open",
-            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
-        )
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr pane send-keys", "{}")
+        .reply("git -C", "");
+    (sh, f)
 }
 
 fn at(c: &drover::Ctx, mins: u64) -> drover::Ctx {
@@ -50,7 +40,7 @@ fn wips(r: &Fake) -> usize {
 }
 
 fn asks(c: &drover::Ctx) -> Vec<Event> {
-    let ev = read(&c.state).unwrap();
+    let ev = read(&c.state).unwrap().to_vec();
     ev.into_iter().filter(|e| e.kind == "needs-decision").collect()
 }
 
@@ -58,7 +48,7 @@ fn asks(c: &drover::Ctx) -> Vec<Event> {
 #[test]
 fn fourth_start_after_three_failed_is_refused_with_one_owner_ask() {
     let c = ctx(&tmpdir("respawn-loop"), CONFIG);
-    let r = dying(&c);
+    let (_sh, r) = dying(&c);
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 4, "{out}");
     for m in [5, 10] {
@@ -90,7 +80,7 @@ fn fourth_start_after_three_failed_is_refused_with_one_owner_ask() {
 #[test]
 fn try_again_lets_a_start_through_and_a_push_resets_the_count() {
     let c = ctx(&tmpdir("respawn-again"), CONFIG);
-    let r = dying(&c);
+    let (_sh, r) = dying(&c);
     assert_eq!(run(&c, &r, &["spawn", "sendmeter", "12", "impl"]).0, 4);
     respawn(&c, &r, 5);
     respawn(&c, &r, 10);
@@ -101,7 +91,7 @@ fn try_again_lets_a_start_through_and_a_push_resets_the_count() {
     assert_eq!(respawn(&c, &r, 17).0, 4, "try again: one more start");
 
     let c = ctx(&tmpdir("respawn-reset"), CONFIG);
-    let r = dying(&c);
+    let (_sh, r) = dying(&c);
     assert_eq!(run(&c, &r, &["spawn", "sendmeter", "12", "impl"]).0, 4);
     respawn(&c, &r, 5);
     respawn(&c, &r, 10);

@@ -4,9 +4,11 @@ use common::*;
 use drover::events::{append, read, Event};
 use serde_json::json;
 
-fn setup(name: &str) -> (std::path::PathBuf, drover::Ctx, String, String) {
+fn setup(name: &str) -> (std::path::PathBuf, drover::Ctx, String, String, FakeShed) {
     let d = tmpdir(name);
     let c = ctx(&d, CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let wt = |n: &str| {
         let p = c.worktrees.join("sendmeter").join(n);
         std::fs::create_dir_all(&p).unwrap();
@@ -16,10 +18,10 @@ fn setup(name: &str) -> (std::path::PathBuf, drover::Ctx, String, String) {
     let ev = |kind: &str, d| append(&c.state, &Event::new(10, "sendmeter", Some(12), kind, d)).unwrap();
     ev(
         "spawn",
-        json!({"role": "impl", "agent": "impl-12", "worktree": mine, "pane": "wA:p1", "workspace": "wA"}),
+        json!({"role": "impl", "agent": "impl-12", "worktree": mine, "pane": "impl-12", "runtime": "shed"}),
     );
     ev("merged", json!({"pr": "1", "merge_sha": "m", "into": "staging"}));
-    (d, c, mine, sibling)
+    (d, c, mine, sibling, sh)
 }
 
 /// `lsof -Fpcn` rows: two children in the lane's worktree, one in a sibling (prefix trap),
@@ -31,15 +33,16 @@ fn lsof(mine: &str, sibling: &str) -> String {
     )
 }
 
-fn fake(lsof: &str) -> Fake {
+fn fake(lsof: &str, wt: &str) -> Fake {
     Fake::default()
         .once("lsof", 0, lsof)
-        .reply("herdr agent list", &agents(&[]))
+        .reply(&format!("git -C {wt} rev-list --count"), "0\n")
         .reply("git -C", "")
-        .once("git -C", 0, "") // status: clean
-        .once("git -C", 0, "0\n") // rev-list: pushed
-        .reply("herdr", "{}")
         .reply("kill", "")
+}
+
+fn at(r: &Fake, what: &str) -> Option<usize> {
+    r.calls.borrow().iter().position(|c| c.contains(what))
 }
 
 fn kills(r: &Fake) -> Vec<String> {
@@ -53,9 +56,9 @@ fn kills(r: &Fake) -> Vec<String> {
 
 #[test]
 fn closing_a_lane_terms_then_kills_only_its_worktree_pids() {
-    let (_d, c, mine, sibling) = setup("reap-kill");
+    let (_d, c, mine, sibling, _sh) = setup("reap-kill");
     let rows = lsof(&mine, &sibling);
-    let r = fake(&rows).reply("lsof", &rows); // nothing dies on TERM
+    let r = fake(&rows, &mine).reply("lsof", &rows);
     let (code, out) = run(&c, &r, &["clean", "sendmeter", "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(kills(&r), ["kill -TERM 101 102", "kill -KILL 101 102"]);
@@ -66,12 +69,13 @@ fn closing_a_lane_terms_then_kills_only_its_worktree_pids() {
         r.calls.borrow()
     );
     assert!(
-        r.index("kill") < r.index("herdr worktree remove"),
+        at(&r, "worktree remove").is_some() && r.index("kill") < at(&r, "worktree remove"),
         "reaped before the worktree goes: {:?}",
         r.calls.borrow()
     );
     let ev = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .find(|e| e.kind == "lane-reaped")
         .unwrap();
@@ -82,14 +86,14 @@ fn closing_a_lane_terms_then_kills_only_its_worktree_pids() {
 
 #[test]
 fn what_dies_on_term_gets_no_kill_and_an_empty_tree_is_not_logged() {
-    let (_d, c, mine, sibling) = setup("reap-term");
-    let r = fake(&lsof(&mine, &sibling)).reply("lsof", &lsof("/gone", &sibling));
+    let (_d, c, mine, sibling, _sh) = setup("reap-term");
+    let r = fake(&lsof(&mine, &sibling), &mine).reply("lsof", &lsof("/gone", &sibling));
     let (code, out) = run(&c, &r, &["clean", "sendmeter", "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(kills(&r), ["kill -TERM 101 102"]);
 
-    let (_d, c, _, sibling) = setup("reap-none");
-    let r = fake(&lsof("/elsewhere", &sibling));
+    let (_d, c, mine, sibling, _sh) = setup("reap-none");
+    let r = fake(&lsof("/elsewhere", &sibling), &mine);
     let (code, out) = run(&c, &r, &["clean", "sendmeter", "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(kills(&r).is_empty() && !r.called("sleep 5"), "{:?}", r.calls.borrow());
@@ -98,15 +102,15 @@ fn what_dies_on_term_gets_no_kill_and_an_empty_tree_is_not_logged() {
 
 #[test]
 fn a_dry_run_and_a_live_lane_signal_nothing() {
-    let (_d, c, mine, sibling) = setup("reap-dry");
-    let r = fake(&lsof(&mine, &sibling));
+    let (_d, c, mine, sibling, sh) = setup("reap-dry");
+    let r = fake(&lsof(&mine, &sibling), &mine);
     let (code, out) = run(&c, &r, &["clean", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
     assert!(kills(&r).is_empty(), "dry run");
 
+    sh.lane("impl-12", "idle", &mine);
     let r = Fake::default()
         .reply("lsof", &lsof(&mine, &sibling))
-        .reply("herdr agent list", &agents(&[("impl-12", "idle", &mine, "wA:p1")]))
         .reply("git -C", "")
         .reply("kill", "");
     let (code, out) = run(&c, &r, &["clean", "sendmeter", "--yes"]);
@@ -118,14 +122,14 @@ fn a_dry_run_and_a_live_lane_signal_nothing() {
 fn host_tab_shows_leftovers_and_reap_kills_them() {
     use drover::serve::Server;
     const ADDR: &str = "127.0.0.1:7777";
-    let (_d, c, mine, sibling) = setup("reap-host");
+    let (_d, c, mine, sibling, sh) = setup("reap-host");
     let rows = lsof(&mine, &sibling);
     let r = Fake::default()
         .reply("lsof", &rows)
-        .reply("herdr agent list", &agents(&[]))
         .reply("ps -o rss= -p 101,102", "  204800\n  102400\n")
         .reply("kill", "");
-    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let on = sh.on(&r);
+    let s = Server::new(&c, &on, Some(ADDR.into()));
     let page = host_tab(&s, ADDR, 1_000_000);
     assert!(page.contains("<span class=k>leftovers</span>"), "no leftovers row");
     assert!(
@@ -162,6 +166,8 @@ fn host_tab_shows_leftovers_and_reap_kills_them() {
 fn check_reaps_closed_lanes_but_spares_active_and_live_ones() {
     let d = tmpdir("reap-check");
     let c = ctx(&d, CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let lane = |issue: u64, merged: bool| {
         let wt = c.worktrees.join("sendmeter").join(format!("issue-{issue}"));
         std::fs::create_dir_all(&wt).unwrap();
@@ -169,7 +175,7 @@ fn check_reaps_closed_lanes_but_spares_active_and_live_ones() {
         let ev = |kind: &str, d| append(&c.state, &Event::new(10, "sendmeter", Some(issue), kind, d)).unwrap();
         ev(
             "spawn",
-            json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": wt}),
+            json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": wt, "pane": format!("impl-{issue}"), "runtime": "shed"}),
         );
         if merged {
             ev("merged", json!({"pr": "1", "merge_sha": "m", "into": "staging"}));
@@ -180,12 +186,11 @@ fn check_reaps_closed_lanes_but_spares_active_and_live_ones() {
     let rows = format!(
         "p101\ncGoogle Chrome Helper\nfcwd\nn{closed}\np505\ncnode\nfcwd\nn{active}\np606\ncvite\nfcwd\nn{live}\n"
     );
+    sh.lane("impl-16", "idle", &live);
     let r = Fake::default()
-        .reply("herdr agent list", &agents(&[("impl-16", "idle", &live, "w16:p1")]))
         .once("lsof", 0, &rows)
         .once("lsof", 0, &rows)
-        .reply("lsof", "")
-        .reply("herdr", "{}");
+        .reply("lsof", "");
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(
@@ -195,6 +200,7 @@ fn check_reaps_closed_lanes_but_spares_active_and_live_ones() {
     );
     let reaped: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "lane-reaped")
         .collect();
@@ -202,49 +208,55 @@ fn check_reaps_closed_lanes_but_spares_active_and_live_ones() {
     assert_eq!(reaped[0].data["names"], json!(["Google Chrome Helper"]));
 }
 
-/// #223: a `done` lane past `idle_reap_minutes` loses the processes its agent started, never its shell or agent.
 #[test]
 fn check_trims_a_done_lanes_children_but_not_its_agent() {
     let d = tmpdir("trim-check");
     let c = ctx(&d, CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let wt = c.worktrees.join("sendmeter").join("issue-12");
     std::fs::create_dir_all(&wt).unwrap();
     let wt = wt.to_string_lossy().into_owned();
-    let spawn = json!({"role": "impl", "agent": "impl-12", "worktree": wt, "pane": "wA:p1"});
+    let spawn = json!({"role": "impl", "agent": "impl-12", "worktree": wt, "pane": "impl-12", "runtime": "shed"});
     append(&c.state, &Event::new(10, "sendmeter", Some(12), "spawn", spawn)).unwrap();
-    // pane shell 200 (parent: herdr) → agent 201 → tsserver 202 → its helper 203; 300 sits outside the worktree.
-    let rows = format!("p200\nczsh\nfcwd\nn{wt}\np201\nc2.1.309\nfcwd\nn{wt}\np202\ncnode\nfcwd\nn{wt}/web\np203\ncnode\nfcwd\nn{wt}\np300\ncnode\nfcwd\nn/elsewhere\n");
-    let ps = "  199     1   9000\n  200   199   4000\n  201   200 300000\n  202   201 2097152\n  203   202 102400\n  300   201   5000\n";
-    let fake = |status: &str| {
+    let rows = format!(
+        "p200\nczsh\nfcwd\nn{wt}\np201\nc2.1.309\nfcwd\nn{wt}\np202\ncnode\nfcwd\nn{wt}/web\np203\ncnode\nfcwd\nn{wt}\n\
+         p300\ncnode\nfcwd\nn/elsewhere\np400\nczsh\nfcwd\nn{wt}\np401\nczsh\nfcwd\nn{wt}\np402\ncnode\nfcwd\nn{wt}/web\n\
+         p403\ncnode\nfcwd\nn{wt}\n"
+    );
+    let ps = "  199     1   9000\n  200   199   4000\n  201   200 300000\n  202   201 2097152\n  203   202 102400\n  \
+              300   201   5000\n  400     1   1000\n  401   400   1000\n  402   401 2097152\n  403   402 102400\n";
+    let fake = |sh: &FakeShed, status: &str| {
+        sh.lane("impl-12", status, &wt);
+        sh.set("impl-12", |t| t["pid"] = json!(200));
         Fake::default()
-            .reply("herdr agent list", &agents(&[("impl-12", status, &wt, "wA:p1")]))
             .once("lsof", 0, &rows)
             .reply("lsof", "")
             .reply("ps -axo", ps)
-            .reply("herdr", "{}")
             .reply("git -C", "")
             .reply("kill", "")
     };
     let trimmed = |c: &drover::Ctx| {
         read(&c.state)
             .unwrap()
+            .to_vec()
             .into_iter()
             .filter(|e| e.kind == "lane-trimmed")
             .collect::<Vec<_>>()
     };
 
-    let r = fake("working");
+    let r = fake(&sh, "working");
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     assert!(kills(&r).is_empty(), "a working lane keeps its children");
 
-    let r = fake("done");
+    let r = fake(&sh, "done");
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(
         kills(&r),
-        ["kill -TERM 202 203"],
-        "only the agent's children: {:?}",
+        ["kill -TERM 402 403"],
+        "only the leftovers, never the agent's tree: {:?}",
         r.calls.borrow()
     );
     let ev = trimmed(&c);
@@ -258,6 +270,8 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
         now: young + 120,
         ..ctx(&tmpdir("trim-young"), CONFIG)
     };
+    let sh2 = FakeShed::new();
+    sh2.attach(&c2);
     append(
         &c2.state,
         &Event::new(
@@ -265,11 +279,11 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
             "sendmeter",
             Some(12),
             "spawn",
-            json!({"role": "impl", "agent": "impl-12", "worktree": wt}),
+            json!({"role": "impl", "agent": "impl-12", "worktree": wt, "pane": "impl-12", "runtime": "shed"}),
         ),
     )
     .unwrap();
-    let r = fake("done");
+    let r = fake(&sh2, "done");
     let (code, out) = run(&c2, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     assert!(kills(&r).is_empty() && trimmed(&c2).is_empty(), "too soon to trim");
@@ -279,13 +293,14 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
 #[test]
 fn host_tab_shows_top_memory_users_with_their_owner() {
     use drover::serve::Server;
-    let (_d, c, mine, _) = setup("top-host");
+    let (_d, c, mine, _, sh) = setup("top-host");
+    sh.lane("impl-12", "done", &mine);
     let top = "Processes: 600 total\n\nPID    COMMAND          MEM \n18800  com.apple.Virtua 16G \n4242   node             2210M\n8138   python3.14       703M\n";
     let r = Fake::default()
         .reply("lsof", &format!("p4242\ncnode\nfcwd\nn{mine}\n"))
-        .reply("herdr agent list", &agents(&[("impl-12", "done", &mine, "wA:p1")]))
         .reply("top -l 1 -o mem", top);
-    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let on = sh.on(&r);
+    let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
     let page = host_tab(&s, "127.0.0.1:7777", 1_000_000);
     assert!(page.contains("<span class=k>top memory</span>"), "no top memory row");
     assert!(page.contains("16G VM (colima) · "), "the VM is classified");
@@ -300,23 +315,17 @@ fn host_tab_shows_top_memory_users_with_their_owner() {
 #[test]
 fn host_tab_sums_claude_lane_memory_by_state() {
     use drover::serve::Server;
-    let (_d, c, mine, sibling) = setup("claude-host");
-    let mut list: serde_json::Value = serde_json::from_str(&agents(&[
-        ("impl-12", "done", &mine, "wA:p1"),
-        ("impl-120", "working", &sibling, "wA:p2"),
-    ]))
-    .unwrap();
-    for a in list["result"]["agents"].as_array_mut().unwrap() {
-        a["agent"] = json!("claude");
-    }
+    let (_d, c, mine, sibling, sh) = setup("claude-host");
+    sh.lane("impl-12", "done", &mine);
+    sh.lane("impl-120", "working", &sibling);
     let r = Fake::default()
         .reply(
             "lsof",
             &format!("p201\nc2.1.311\nfcwd\nn{mine}\np202\nc2.1.311\nfcwd\nn{sibling}\n"),
         )
-        .reply("ps -axo pid=,rss=", "  201 2097152\n  202 1048576\n")
-        .reply("herdr agent list", &list.to_string());
-    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+        .reply("ps -axo pid=,rss=", "  201 2097152\n  202 1048576\n");
+    let on = sh.on(&r);
+    let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
     let page = host_tab(&s, "127.0.0.1:7777", 1_000_000);
     assert!(page.contains("<span class=k>claude</span>"), "no claude row");
     assert!(
@@ -331,6 +340,8 @@ fn host_tab_sums_claude_lane_memory_by_state() {
 fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
     let d = tmpdir("trim-acp");
     let c = ctx(&d, CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let wt = c.worktrees.join("sendmeter").join("issue-12");
     std::fs::create_dir_all(&wt).unwrap();
     let wt = wt.to_string_lossy().into_owned();
@@ -350,20 +361,18 @@ fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
     );
     let ps = "  199     1   9000\n  200   199   1000\n  201   200   2000\n  202   201 300000\n  203   202 400000\n  \
               204   203   3000\n  205   204 900000\n  300     1   1000\n  301   300   1000\n  302   301 102400\n";
-    let list = json!({"result": {"agents": [{"name": "impl-12", "agent_status": "done", "cwd": wt, "pane_id": "impl-12",
-        "agent": "claude", "runtime": "shed", "pid": 200}]}});
+    sh.lane("impl-12", "done", &wt);
+    sh.set("impl-12", |t| t["pid"] = json!(200));
     let fake = || {
         Fake::default()
-            .reply("herdr agent list", &list.to_string())
             .once("lsof", 0, &rows)
             .reply("lsof", "")
             .reply("ps -axo", ps)
-            .reply("herdr", "{}")
             .reply("git -C", "")
             .reply("kill", "")
     };
     let trimmed = |c: &drover::Ctx| {
-        let e = read(&c.state).unwrap();
+        let e = read(&c.state).unwrap().to_vec();
         e.into_iter().filter(|e| e.kind == "lane-trimmed").collect::<Vec<_>>()
     };
 
@@ -392,31 +401,27 @@ fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
     assert_eq!(ev[0].data["killed"], json!(["vite"]), "no lane-trimmed names the agent");
 }
 
-/// #679: a live shed lane whose last turn is `working` is idle between turns: `check` alerts no stall; a herdr lane
-/// still does.
 #[test]
 fn check_alerts_no_stall_for_an_acp_lane_between_turns() {
-    for (runtime, stalls) in [("shed", false), ("herdr", true)] {
-        let c = ctx(&tmpdir(&format!("stall-acp-{runtime}")), CONFIG);
+    for (turn, stalls) in [("working", false), ("done", true)] {
+        let c = ctx(&tmpdir(&format!("stall-acp-{turn}")), CONFIG);
+        let sh = FakeShed::new();
+        sh.attach(&c);
         let wt = c.worktrees.join("sendmeter").join("issue-12");
         std::fs::create_dir_all(&wt).unwrap();
         let wt = wt.to_string_lossy().into_owned();
         let ev = |kind: &str, d| append(&c.state, &Event::new(10, "sendmeter", Some(12), kind, d)).unwrap();
         ev(
             "spawn",
-            json!({"role": "impl", "agent": "impl-12", "worktree": wt, "pane": "impl-12", "runtime": runtime}),
+            json!({"role": "impl", "agent": "impl-12", "worktree": wt, "pane": "impl-12", "runtime": "shed"}),
         );
-        ev("turn-end", json!({"state": "working", "role": "impl"}));
-        let list = json!({"result": {"agents": [{"name": "impl-12", "agent_status": "done", "cwd": wt,
-            "pane_id": "impl-12", "runtime": runtime, "pid": 200}]}});
-        let r = Fake::default()
-            .reply("herdr agent list", &list.to_string())
-            .reply("lsof", "")
-            .reply("herdr", "{}")
-            .reply("git -C", "");
+        ev("turn-end", json!({"state": turn, "role": "impl"}));
+        sh.lane("impl-12", "done", &wt);
+        sh.set("impl-12", |t| t["pid"] = json!(200));
+        let r = Fake::default().reply("lsof", "").reply("git -C", "");
         let (code, out) = run(&c, &r, &["check"]);
         assert_eq!(code, 0, "{out}");
         let stalled = read(&c.state).unwrap().iter().any(|e| e.kind == "stall");
-        assert_eq!(stalled, stalls, "{runtime}: {out}");
+        assert_eq!(stalled, stalls, "{turn}: {out}");
     }
 }

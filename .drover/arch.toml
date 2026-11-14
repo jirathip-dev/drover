@@ -1,5 +1,5 @@
 [comments]
-policy = "on" # #456 renames comment lines; the follow-up PR sets "off" again
+policy = "off"
 except = ["assets/types/**", "web/dist/**"]
 
 [docs]

@@ -369,14 +369,13 @@ fn idle_lanes_render_their_reason() {
         "sendmeter-impl-7",
         "sendmeter-impl-8",
     ];
-    let list: Vec<_> = names
-        .iter()
-        .map(|n| json!({"name": n, "agent_status": "idle", "pane_id": format!("w1:{n}"), "cwd": "/x"}))
-        .collect();
-    let r = r
-        .reply("herdr agent list", &json!({"result": {"agents": list}}).to_string())
-        .reply("herdr workspace list", "{}")
-        .reply("herdr pane read", "");
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    for n in names {
+        sh.lane(n, "idle", "/x");
+        sh.screen(n, "");
+    }
+    let r = sh.on(&r);
     let s = Server::new(&c, &r, None);
     let page = parts(&s, "", "", NOW)[1].clone(); // #269: the Lanes tab as the board draws it
     for (tone, label) in [
@@ -495,14 +494,14 @@ fn a_long_reason_never_squeezes_the_name() {
         "needs-decision",
         json!({"id": id, "agent": "synergy-impl-2859", "question": "?", "options": [], "recommend": null}),
     );
-    let list: Vec<_> = ["synergy-rev-2859-r2", "synergy-impl-2859"]
-        .iter()
-        .map(|n| json!({"name": n, "agent_status": "idle", "pane_id": format!("w1:{n}"), "cwd": "/x"}))
-        .collect();
-    let r = Fake::default()
-        .reply("herdr agent list", &json!({"result": {"agents": list}}).to_string())
-        .reply("herdr workspace list", "{}")
-        .reply("herdr pane read", "");
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    for n in ["synergy-rev-2859-r2", "synergy-impl-2859"] {
+        sh.lane(n, "idle", "/x");
+        sh.screen(n, "");
+    }
+    let f = Fake::default();
+    let r = sh.on(&f);
     let page = parts(&Server::new(&c, &r, None), "", "", NOW)[1].clone(); // #269: the Lanes tab as the board draws it
     let reason = format!("waiting on your answer ({id})");
     assert_eq!(reason.len(), 120);
@@ -600,6 +599,7 @@ fn a_pass_left_unmerged_for_three_passes_shows_the_missed_promise_with_the_real_
     }
     let missed: Vec<Event> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "promise-missed" && e.issue == Some(4))
         .collect();

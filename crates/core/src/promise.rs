@@ -30,7 +30,6 @@ pub enum Say {
     ReviewsAhead(usize),
     Pass(String),
     Starts(String),
-    PassRunning,
 }
 
 /// The spawn-slot wait phrase; the board matches on it.
@@ -64,7 +63,6 @@ impl Say {
             ),
             Say::Pass(r) => format!("drive's next pass{r}"),
             Say::Starts(r) => format!("{r}; starts next pass"),
-            Say::PassRunning => "a drive pass is running; the next pass starts the round".into(),
         }
     }
 }
@@ -246,7 +244,7 @@ mod tests {
         let cfg = crate::config::Config::default();
         let ev = crate::events::read(&state).unwrap_or_default();
         pass(&ctx, &cfg, "f", &ev, rows).unwrap();
-        crate::events::read(&state).unwrap()
+        crate::events::read(&state).unwrap().to_vec()
     }
 
     fn tmp(name: &str) -> std::path::PathBuf {
