@@ -1,5 +1,5 @@
 use crate::config::{Check, Config, Fleet, Premerge};
-use crate::events::{emit, fold, read, Event, IssueState};
+use crate::events::{emit, fold, working, Event, IssueState};
 use crate::overlap::git;
 use crate::runner::{argv, json, ok, Runner};
 use crate::Ctx;
@@ -36,7 +36,7 @@ fn is_main(b: &str) -> bool {
 }
 
 pub fn issue_state(ctx: &Ctx, fleet: &str, issue: u64) -> Result<Option<IssueState>> {
-    Ok(fold(&read(&ctx.state)?).remove(&(fleet.to_string(), issue)))
+    Ok(fold(&working(&ctx.state)?).remove(&(fleet.to_string(), issue)))
 }
 
 pub fn branch_of(st: Option<&IssueState>, issue: u64) -> String {
@@ -65,7 +65,7 @@ pub fn verdict(
     if sha.len() != 40 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
         return refused("BAD_SHA", format!("--sha {sha} must be a full 40-hex commit sha"));
     }
-    let evs = read(&ctx.state)?;
+    let evs = working(&ctx.state)?;
     let reviewer = |e: &&Event| e.is("spawn", fleet, issue) && crate::events::checks(e);
     let at = evs
         .iter()
@@ -208,7 +208,7 @@ pub fn verdict(
             }
         }
     }
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let is_impl = |e: &&Event| pass && e.is("spawn", fleet, issue) && !crate::events::checks(e);
     if let Some(b) = events.iter().rfind(is_impl) {
         let wt = Path::new(b.str("worktree").unwrap_or_default());
@@ -282,7 +282,7 @@ pub fn sync_label(
     }
     let carried = || s.verdicts.iter().any(|v| v.1 == "PASS") && crate::overlap::pure(r, f, s, head);
     let (flag, kind) = match (
-        passed(&read(&ctx.state)?, s, head) || carried(),
+        passed(&working(&ctx.state)?, s, head) || carried(),
         gh::has_label(pr, label),
     ) {
         (true, false) => ("--add-label", "labelled"),
@@ -311,7 +311,7 @@ pub fn ready_draft(
     let Some(num) = pr["number"].as_u64() else {
         return Ok(false);
     };
-    if pr["isDraft"] != true || pr["state"] != "OPEN" || s.done() || !passed(&read(&ctx.state)?, s, head) {
+    if pr["isDraft"] != true || pr["state"] != "OPEN" || s.done() || !passed(&working(&ctx.state)?, s, head) {
         return Ok(false);
     }
     let n = num.to_string();
@@ -739,7 +739,7 @@ pub(crate) fn unjoined(
     (fleet, n): (&str, u64),
     (num, head): (&str, &str),
 ) -> Result<Vec<(crate::config::Serial, String)>> {
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let mine = crate::queue::groups(&crate::queue::replay(&ev, fleet), &ev, f, fleet, n);
     let mut new: Vec<_> = crate::queue::serials(&ev, f, fleet)
         .into_iter()
@@ -768,7 +768,7 @@ pub fn merge(
     over: bool,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let st = fold(&events).remove(&(fleet.to_string(), issue));
     if st.as_ref().is_some_and(|s| s.state == "merged") {
         let m = events.iter().find(|e| e.is("merged", fleet, issue));
@@ -967,7 +967,7 @@ fn merged(
         let d = json!({"mode": mode, "sha": merge_sha, "pr": num, "checks_secs": secs});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "landed", d))?;
     }
-    let log = read(&ctx.state)?;
+    let log = working(&ctx.state)?;
     let why = log.iter().rfind(|e| e.is("why", fleet, issue));
     let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(
@@ -1059,7 +1059,7 @@ pub fn extended(ctx: &Ctx, (fleet, n): (&str, u64), (spawn, by): (bool, &str), s
         crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "round-extended", d))?;
     }
     let waits =
-        crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.action == "extend" && !p.back(ctx.now));
+        crate::pending::of(&working(&ctx.state)?, fleet, n).is_some_and(|p| p.action == "extend" && !p.back(ctx.now));
     if spawn && !waits {
         crate::pending::record(ctx, (fleet, n), "extend", "impl", None)?;
     }
@@ -1070,7 +1070,7 @@ pub fn extended(ctx: &Ctx, (fleet, n): (&str, u64), (spawn, by): (bool, &str), s
 pub fn held(ctx: &Ctx, fleet: &str, n: u64) -> Result<String> {
     let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
     let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let back = crate::pending::of(&events, fleet, n).is_some_and(|p| p.back(ctx.now));
     let starting = !matches!(state, "merged" | "closed" | "parked") && crate::pending::extending(&events, fleet, n);
     if state != "needs-human" && last != "extend-failed" && !back && !starting {
@@ -1102,7 +1102,7 @@ pub fn park(
 
 /// #712: `drover unpark` / a row's [unpark]: a parked issue goes back to the state it had before the needs-human that the park closed (or, parked from a failed extend's card, the state it was parked in); `unparked` stores it as `repaired` does. Its queue place is kept; out of the queue, it goes to the end.
 pub fn unpark(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, (fleet, n): (&str, u64), by: &str) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let mine = |e: &&Event| e.fleet == fleet && e.issue == Some(n);
     let state = fold(&events).remove(&(fleet.to_string(), n)).map(|s| s.state);
     let Some(at) = events
