@@ -36,11 +36,11 @@ mod v1;
 
 const SW: &str = include_str!("../assets/sw.js");
 macro_rules! th {
-    ($f:literal, $t:expr) => {
+    ($d:literal, $f:literal, $t:expr) => {
         (
             concat!("themes/", $f),
             $t,
-            include_bytes!(concat!("../assets/themes/", $f)),
+            include_bytes!(concat!("../assets/", $d, $f)),
         )
     };
 }
@@ -53,26 +53,24 @@ const ASSETS: &[(&str, &str, &[u8])] = &[
     // #265: the TypeScript board's build (web/dist, committed: `cargo install` needs no Node).
     ("board.js", "text/javascript", include_bytes!("../web/dist/board.js")),
     ("board.css", "text/css", include_bytes!("../web/dist/board.css")),
-    // #172: the built-in themes; `drover serve` serves the active one at `/theme/<file>` (`theme`).
-    th!("farm/sprites.svg", SVG),
-    th!("farm/theme.json", JSON),
-    th!("kitchen/sprites.svg", SVG),
-    th!("kitchen/theme.json", JSON),
-    th!("kitchen/scene.svg", SVG),
-    th!("kitchen/icon-180.png", PNG),
-    th!("kitchen/icon-192.png", PNG),
-    th!("kitchen/icon-512.png", PNG),
-    // #423: the houseplant shop (docs/design/garden/build.mjs writes it).
-    th!("garden/sprites.svg", SVG),
-    th!("garden/theme.json", JSON),
-    th!("garden/scene.svg", SVG),
-    th!("garden/icon-180.png", PNG),
-    th!("garden/icon-192.png", PNG),
-    th!("garden/icon-512.png", PNG),
-    th!("terminal/theme.json", JSON),
-    th!("terminal/icon-180.png", PNG),
-    th!("terminal/icon-192.png", PNG),
-    th!("terminal/icon-512.png", PNG),
+    th!("swag/", "farm/sprites.svg", SVG),
+    th!("swag/", "farm/theme.json", JSON),
+    th!("swag/", "kitchen/sprites.svg", SVG),
+    th!("swag/", "kitchen/theme.json", JSON),
+    th!("swag/", "kitchen/scene.svg", SVG),
+    th!("swag/", "kitchen/icon-180.png", PNG),
+    th!("swag/", "kitchen/icon-192.png", PNG),
+    th!("swag/", "kitchen/icon-512.png", PNG),
+    th!("swag/", "garden/sprites.svg", SVG),
+    th!("swag/", "garden/theme.json", JSON),
+    th!("swag/", "garden/scene.svg", SVG),
+    th!("swag/", "garden/icon-180.png", PNG),
+    th!("swag/", "garden/icon-192.png", PNG),
+    th!("swag/", "garden/icon-512.png", PNG),
+    th!("", "terminal/theme.json", JSON),
+    th!("", "terminal/icon-180.png", PNG),
+    th!("", "terminal/icon-192.png", PNG),
+    th!("", "terminal/icon-512.png", PNG),
 ];
 /// #244: the built-in colour schemes, `assets/schemes/<name>.json` (docs/themes.md).
 macro_rules! sc {
@@ -637,7 +635,7 @@ fn join(parts: &[&str]) -> String {
 /// asked in.
 fn need_ask(now: u64, mins: u64, ev: &[Event], a: &Event) -> NeedAsk {
     let s = |k| a.str(k).unwrap_or_default();
-    let rec = a.data["recommend"].as_u64().filter(|_| s("kind") == "routine");
+    let rec = a.val("recommend").as_u64().filter(|_| s("kind") == "routine");
     let left = age((a.ts + 60 * mins).saturating_sub(now));
     let issue = a.issue.map_or(String::new(), |n| format!("#{n}"));
     NeedAsk {
@@ -3449,7 +3447,7 @@ pub fn words(e: &Event, serial: &str) -> Words {
         "hook-denied" => ("!", "a", format!("hook denied · {}", s("rule")), false),
         "blocked" | "driven" => {
             let mut b = e.clone();
-            b.data.entry("result").or_insert_with(|| e.data["reason"].clone());
+            b.data.entry("result").or_insert_with(|| e.val("reason").clone());
             let (t, w, x) = in_words(&b, serial);
             let txt = format!("{w} · {x}");
             let hold = matches!(
@@ -3465,12 +3463,13 @@ pub fn words(e: &Event, serial: &str) -> Words {
             }
         }
         "spawn" => ("▸", "l", format!("{} started{round}", s("role")), false),
-        "push-sent" => ("↗", "m", format!("alert sent to {} phone(s)", e.data["devices"]), false),
+        "push-sent" => ("↗", "m", format!("alert sent to {} phone(s)", e.val("devices")), false),
         "clean" => ("·", "m", format!("lane cleaned ({})", s("why")), false),
         "decision" => ("✓", "m", format!("you answered {} · {}", s("id"), s("choice")), false),
         "override" => ("⊘", "m", format!("override{r}"), false),
         "queue" => {
-            let n: Vec<String> = e.data["issues"]
+            let n: Vec<String> = e
+                .val("issues")
                 .as_array()
                 .into_iter()
                 .flatten()

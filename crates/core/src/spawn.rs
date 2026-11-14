@@ -1,6 +1,6 @@
 use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
-use crate::events::{emit, fold, last_spawn, plain, read, Event};
+use crate::events::{emit, fold, last_spawn, plain, working, Event};
 use crate::gate::refused;
 use crate::herdr;
 use crate::host;
@@ -291,7 +291,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
     let f = cfg.fleet(fleet)?;
     let r = f.role(role)?;
     let (agent, branch, base, worktree, brief, head) = {
-        let ev = read(&ctx.state)?;
+        let ev = working(&ctx.state)?;
         let st = fold(&ev).remove(&(fleet.to_string(), issue));
         if st.as_ref().is_some_and(|s| s.state == "merged") {
             return refused(
@@ -339,7 +339,7 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
     let kick = format!("Read {} and execute it fully.", brief.display());
     let lane = format!("{fleet}:{issue}:{role}");
     let mcp_file = worktree.join(".mcp.lane.json");
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let st = fold(&events);
     let open = st.values().filter(|s| !s.done()).flat_map(|s| s.lanes.values());
     let taken: Vec<u16> = open
@@ -920,7 +920,7 @@ pub fn spawn(
         return refused("BAD_VALUE", "--update is an impl fix round");
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), o.host.as_deref())?;
     if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
         return refused("RUNTIME_DOWN", why);
@@ -961,7 +961,7 @@ pub fn spawn(
         return refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
     }
     let acp_id = bt.as_ref().and_then(|b| b.0.acp.clone());
-    let n = round(&read(&ctx.state)?, fleet, issue, &p);
+    let n = round(&working(&ctx.state)?, fleet, issue, &p);
     let labels = labels(&p, acp_id.as_ref().map(|_| (f, n)));
     if let (Some(id), Some(pl)) = (&acp_id, placed.as_ref().filter(|pl| pl.machine.is_some())) {
         remote_acp(ctx, cfg, &on, &mut p, (pl, id), o.dry_run)?;
@@ -994,7 +994,7 @@ pub fn spawn(
     h.ready(ctx, r, &p)?;
     let event = |kind: &str, d: Value| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d));
 
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let agents = host::agents(r).context("cannot list herdr agents for the duplicate guard")?;
     let live = host::live_in(&agents, &p.agent, &p.worktree);
     let names: Vec<&str> = live
@@ -1108,7 +1108,7 @@ pub fn spawn(
         .rfind(|e| e.is("spawn", fleet, issue))
         .map_or(0, |e| e.seq);
     let probe = |i: &Event| -> Result<Option<Value>> {
-        let logged = read(&ctx.state)?
+        let logged = working(&ctx.state)?
             .iter()
             .any(|e| e.seq > i.seq && e.is("spawn", fleet, issue));
         let up = (step == "spawn").then(|| host::agents(r).ok()).flatten();
@@ -1863,7 +1863,7 @@ pub fn shaped<'a>(cfg: &'a Config, a: &Value) -> Option<(&'a str, u64, Option<St
 /// #376: each lane-shaped herdr agent (`shaped`, any host) of a tracked issue that no `spawn` logged: an open issue's is adopted (`spawn-adopted`, why `orphan`), so its verdict is recorded as any lane's; a done issue's, or a review whose verdict is for an old head, is closed once its unpushed work is on `wip/` (`lane-closed`, why `stale-orphan`). True when it logged any.
 pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<bool> {
     let agents = crate::hosts::all_agents(cfg, seen)?;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let (st, mut any) = (fold(&events), false);
     for a in agents {
         let (Some(pane), m, name) = (a["pane_id"].as_str(), a["machine"].as_str(), a["name"].as_str()) else {

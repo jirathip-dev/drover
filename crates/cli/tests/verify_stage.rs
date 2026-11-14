@@ -134,7 +134,7 @@ fn a_pr_touching_ui_paths_goes_from_rev_pass_to_a_verify_lane() {
     assert!(kinds(&c, "verify-skipped").is_empty());
     let sp = kinds(&c, "spawn").pop().unwrap();
     assert_eq!(
-        (sp.str("stage"), sp.data["check"].as_bool()),
+        (sp.str("stage"), sp.val("check").as_bool()),
         (Some("verify"), Some(true))
     );
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/verify-12-r1/.brief.md")).unwrap();
@@ -368,7 +368,7 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
     assert_eq!((s.state.as_str(), s.stage_rounds["rev"]), ("needs-human", 3));
     let v = kinds(&c, "verdict").pop().unwrap();
     assert_eq!(v.str("stage"), Some("verify"));
-    assert_eq!(v.data["files"][0]["name"], "shots/home-390.png");
+    assert_eq!(v.val("files")[0]["name"], "shots/home-390.png");
     let none = Fake::default();
     let s = Server::new(&c, &none, Some(ADDR.into()));
     let get = |p: &str| {
@@ -408,7 +408,7 @@ fn shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
         let s = sha("a");
         let args = ["verdict", "sendmeter", "12", "FAIL", "--sha", &s, "--file", &file];
         run(&c, &Fake::default().reply("gh api", &s), &args);
-        kinds(&c, "verdict").pop().unwrap().data["files"].clone()
+        kinds(&c, "verdict").pop().unwrap().val("files").clone()
     };
     let ci = "FAIL\n\n- non-blocking: evidence: cases `/a.png`, `a.png`, `/tmp/a.png`, `./a.png`, `/../t5/a.png`, \
               `../t5/a.png`, `/link/a.png`\n";

@@ -77,7 +77,7 @@ fn retired_account_keys_load_warn_once_and_the_lane_runs_on_the_hosts_login() {
     assert_eq!(shell(&sh, lane, "CLAUDE_CONFIG_DIR"), "", "the CLI's default folder");
     assert_eq!(shell(&sh, lane, "DROVER_ACCOUNT"), "");
     let sp = kinds(&c, "spawn");
-    assert!(sp[0].data.get("account").is_none(), "{sp:?}");
+    assert!(sp[0].val("account").is_null(), "{sp:?}");
 }
 
 #[test]

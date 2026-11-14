@@ -285,7 +285,7 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
     let next = &kind(&c, "orchestrator-start")[1];
     assert_eq!((next.str("model"), next.str("effort")), (Some("sonnet"), Some("low")));
     assert_eq!(
-        (next.str("session"), next.data["resumed"].as_bool()),
+        (next.str("session"), next.val("resumed").as_bool()),
         (first.str("session"), Some(true))
     );
     let start = calls
@@ -349,7 +349,7 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it() {
     assert_eq!(sleep[0].str("why"), Some("model"));
     let next = &kind(&c, "orchestrator-start")[1];
     assert_eq!((next.str("model"), next.str("effort")), (Some("sonnet"), Some("low")));
-    assert_eq!(next.data["resumed"].as_bool(), Some(false));
+    assert_eq!(next.val("resumed").as_bool(), Some(false));
     let calls = f2.calls.borrow().join("\n");
     let start = calls.lines().find(|l| l.starts_with("shed run --acp")).unwrap();
     assert!(start.contains("ANTHROPIC_MODEL='sonnet'"), "{start}");

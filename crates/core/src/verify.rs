@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{emit, read, Event, IssueState};
+use crate::events::{emit, working, Event, IssueState};
 use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::Result;
@@ -43,7 +43,7 @@ pub fn due(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, s: &Iss
     let stage = f.flow().next(from, "PASS").map_or("verify", |t| t.0);
     let num = pr["number"].to_string();
     let files = crate::gh::diff_names(ctx, r, f, (fleet, n), &num, sha).unwrap_or_default();
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let (kind, why) = match why(&events, &f.ui_paths, (fleet, n), &files) {
         None => (
             "verify-skipped",
@@ -97,7 +97,7 @@ pub fn served(events: &[Event], (fleet, n): (&str, u64)) -> Vec<(String, PathBuf
     let last = events.iter().rfind(|e| e.is("verdict", fleet, n));
     let files = last
         .filter(|e| e.str("stage") == Some("verify"))
-        .and_then(|e| e.data["files"].as_array());
+        .and_then(|e| e.val("files").as_array());
     let shot = |v: &Value| {
         let (name, path) = (v["name"].as_str()?, Path::new(v["path"].as_str()?));
         let p = lanes.iter().find_map(|l| inside(path, Path::new(l)))?;

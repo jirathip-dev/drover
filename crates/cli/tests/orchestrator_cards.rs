@@ -160,10 +160,10 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
     assert!(r.called("gh auth status"), "doctor ran: {:?}", r.calls.borrow());
     let st = &kinds(&c, "config-settled")[0];
     assert_eq!(
-        (st.data["applied"].clone(), st.str("backup")),
+        (st.val("applied").clone(), st.str("backup")),
         (json!(true), Some(backup.as_str()))
     );
-    assert!(st.data["doctor"].is_boolean());
+    assert!(st.val("doctor").is_boolean());
     let page = chat(&s, &cookie, T + 20);
     assert!(
         !page.contains("class=chc")

@@ -1,5 +1,5 @@
 use crate::config::{CiRunners, Config};
-use crate::events::{age, emit, read, Event};
+use crate::events::{age, emit, working, Event};
 use crate::gate::refused;
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
@@ -127,7 +127,7 @@ fn approved(events: &[Event], id: Option<&str>, verb: &str) -> bool {
         a.str("question")
             .is_some_and(|q| q.contains(&format!("runners {verb}")))
     });
-    let yes = ask.and_then(|a| a.data["options"].get(0)?.as_str());
+    let yes = ask.and_then(|a| a.val("options").get(0)?.as_str());
     let by = |e: &&Event| {
         e.str("by")
             .is_some_and(|b| b != "default" && !b.starts_with("orchestrator-"))
@@ -159,7 +159,7 @@ pub fn health(r: &dyn Runner, c: &CiRunners, events: &[Event]) -> Result<(u64, u
 }
 
 fn push_tokens(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &CiRunners) -> Result<usize> {
-    let (t, all) = (token(r, c)?, vms(c, &read(&ctx.state)?));
+    let (t, all) = (token(r, c)?, vms(c, &working(&ctx.state)?));
     let failed: Vec<_> = all
         .iter()
         .filter(|vm| rc(ctx, r, c, "runner_token", vm, Some(&t)).is_err())
@@ -199,7 +199,7 @@ pub fn run(
     ok_id: Option<&str>,
 ) -> Result<()> {
     let c = conf(cfg)?;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let all = vms(c, &events);
     match verb {
         Verb::Status => {

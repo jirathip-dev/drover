@@ -4,7 +4,7 @@ use crate::runner::{argv, Out, Runner};
 use crate::Ctx;
 use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
-use shed_proto::{EventKind, EventsParams, Hello, Method, Request, Response, VERSION};
+use shed_proto::{EventKind, EventsParams, Hello, Method, Request, Response};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
@@ -16,7 +16,7 @@ pub use shed_proto as proto;
 pub fn git() -> String {
     env!("CARGO_PKG_REPOSITORY").replace("/herdsman", "/shed")
 }
-pub const REV: &str = "56de739060d99e54e2ded43ab9702ff1c5270c37";
+pub const REV: &str = "9b88eb5be5bc9ba8c5c75480483b9861ddc6e993";
 
 /// Where a host's shed server answers.
 #[derive(Clone, Debug, PartialEq)]
@@ -55,10 +55,12 @@ fn answer(text: &str) -> Result<Value> {
         bail!("{}", e.message);
     }
     let theirs = hello.result.and_then(|v| serde_json::from_value::<Hello>(v).ok());
+    let side = |h: &Hello| format!("{} ({}) protocol {}", h.version, h.label(), h.protocol);
     ensure!(
-        theirs.as_ref() == Some(&Hello::ours()),
-        "SHED_VERSION: drover speaks shed {VERSION}, the server is {}",
-        theirs.map_or("?".into(), |h| h.label())
+        theirs.as_ref().is_some_and(Hello::compatible),
+        "SHED_VERSION: drover speaks shed {}, the server is {}",
+        side(&Hello::ours()),
+        theirs.as_ref().map_or("?".into(), side)
     );
     match next()? {
         Response { error: Some(e), .. } => bail!("{}", e.message),
@@ -281,7 +283,7 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
     let limit = d["cause"] == RESUMABLE[0];
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(issue), "lane-state", d))?;
     let events = if limit {
-        crate::events::read(&ctx.state)?.to_vec()
+        crate::events::working(&ctx.state)?.to_vec()
     } else {
         vec![]
     };
@@ -289,7 +291,7 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
         let d = crate::hosts::hold_alert(&events, sp, "hit the usage limit");
         if !events
             .iter()
-            .any(|x| x.kind == "usage-limit" && x.data.get("key") == d.get("key"))
+            .any(|x| x.kind == "usage-limit" && x.val("key") == &d["key"])
         {
             crate::events::emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "usage-limit", d))?;
         }

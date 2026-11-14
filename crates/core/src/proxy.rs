@@ -1,5 +1,5 @@
 use crate::config::{write_atomic, Config};
-use crate::events::{ends, fold, read, Event};
+use crate::events::{ends, fold, working, Event};
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
@@ -107,7 +107,7 @@ pub fn state(now: u64, events: &[Event], k: &Key) -> &'static str {
 
 /// `hosts keys`: every lane key, newest first, with its state.
 pub fn list(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
-    let events = read(&ctx.state).unwrap_or_default();
+    let events = working(&ctx.state).unwrap_or_default();
     for k in keys(ctx).iter().rev() {
         let st = state(ctx.now, &events, k);
         let left = k.expires.saturating_sub(ctx.now) / 60;
@@ -148,7 +148,7 @@ pub fn token(cfg: &Config) -> std::result::Result<String, String> {
 fn authorize(ctx: &Ctx, cfg: &Config, (key, now): (&str, u64)) -> std::result::Result<String, String> {
     let (all, h) = (keys(ctx), sha(key));
     let k = all.iter().find(|k| k.sha == h).ok_or("unknown lane key")?;
-    match state(now, &read(&ctx.state).unwrap_or_default(), k) {
+    match state(now, &working(&ctx.state).unwrap_or_default(), k) {
         "live" => token(cfg),
         st => Err(format!("lane key {} {st}", k.id)),
     }

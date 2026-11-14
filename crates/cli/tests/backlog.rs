@@ -235,7 +235,7 @@ fn queue_n_follows_tick_order_and_marks_needs_check() {
         .filter(|e| e.kind == "queue")
         .collect();
     assert_eq!(
-        (qs[1].data["check"].clone(), qs[1].data["via"].clone()),
+        (qs[1].val("check").clone(), qs[1].val("via").clone()),
         (json!(true), json!("web"))
     );
 }
