@@ -1,11 +1,9 @@
-//! AC5: spawn launches the right harness with the synced profile.
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
 use drover::spawn::lane_port;
 use serde_json::{json, Value};
 
-/// #187: issue 12's impl lane port with nothing taken.
 fn port12() -> String {
     format!("DROVER_PORT={}", lane_port(None, "sendmeter/issue-12", &[]))
 }
@@ -91,10 +89,8 @@ fn claude_role_dry_run_uses_synced_profile() {
             "export",
             "DROVER_LANE='sendmeter:12:impl'",
             &port12(),
-            // #248: no updater, telemetry or other background traffic in a Claude lane.
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1",
             "DISABLE_AUTOUPDATER=1",
-            // #708: no account, so a token the pane inherited from a login shell never picks one.
             "&&",
             "unset",
             "CLAUDE_CODE_OAUTH_TOKEN",
@@ -136,7 +132,6 @@ fn claude_role_dry_run_uses_synced_profile() {
     assert!(read(&c.state).unwrap().is_empty(), "dry-run logs nothing");
 }
 
-/// #155: `profiles sync` removes a generated Claude profile no role names (the retired `fleet-orch`), nothing else.
 #[test]
 fn profiles_sync_removes_a_stale_generated_profile() {
     let c = ctx(&tmpdir("spawn-stale"), CONFIG);
@@ -155,7 +150,6 @@ fn profiles_sync_removes_a_stale_generated_profile() {
     assert!(dir.join("fleet-impl/role.md").exists() && dir.join("fleet-rev/role.md").exists());
 }
 
-/// #577: a verify role's own profile gets verify's prompt, still with the read-only check hook.
 #[test]
 fn profiles_sync_gives_a_verify_profile_its_own_prompt() {
     let verify = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
@@ -170,7 +164,6 @@ fn profiles_sync_gives_a_verify_profile_its_own_prompt() {
     assert!(s.contains("hook --role rev"), "{s}");
 }
 
-/// #198: lanes add no AI co-author: Claude's attribution is off, and every lane's role text says so.
 #[test]
 fn profiles_turn_attribution_off_and_role_md_has_the_rule() {
     let c = ctx(&tmpdir("spawn-attr"), CONFIG);
@@ -181,9 +174,7 @@ fn profiles_turn_attribution_off_and_role_md_has_the_rule() {
         serde_json::from_str(&std::fs::read_to_string(dir.join("fleet-impl/settings.json")).unwrap()).unwrap();
     assert_eq!(s["attribution"], serde_json::json!({"commit": "", "pr": ""}));
     assert_eq!(s["includeCoAuthoredBy"], false);
-    // #248: lane transcripts are kept `[limits] transcript_days` (30, Claude's default: lanes share ~/.claude, so no lower).
     assert_eq!(s["cleanupPeriodDays"], 30);
-    // #223: lanes don't inherit the user's IDE/LSP plugins (tsserver ~2 GB per lane).
     for p in ["typescript-lsp", "pyright-lsp", "swift-lsp", "vercel"] {
         assert_eq!(
             s["enabledPlugins"][format!("{p}@claude-plugins-official")],
@@ -197,7 +188,6 @@ fn profiles_turn_attribution_off_and_role_md_has_the_rule() {
     assert!(drover::spawn::role_prompt("rev").contains("## For humans"));
 }
 
-/// #226: a reviewer never FAILs on an older commit's trailer; the fix would be a forbidden force-push.
 #[test]
 fn rev_role_flags_new_commit_trailers_only() {
     let rev = drover::spawn::role_prompt("rev");
@@ -205,8 +195,6 @@ fn rev_role_flags_new_commit_trailers_only() {
     assert!(drover::spawn::role_prompt("impl").contains("never rewrite history or force-push"));
 }
 
-/// #320: a predicted conflict is information, not a hold; no generated prompt tells a lane to wait for a merge.
-/// #429: the cap is a repo total; a lane asks only when its own PR would cross it.
 #[test]
 fn cap_asks_only_when_your_own_pr_crosses() {
     let d = tmpdir("help-429");
@@ -218,7 +206,6 @@ fn cap_asks_only_when_your_own_pr_crosses() {
             "ask only when your own PR, merged onto current integration, would put the total over `line_cap`; trim first, then ask `--kind owner`.",
             "Being near the cap, or another PR's growth, is never a reason to ask.",
             "A `STAGING_WOULD_BREAK` from the cap after another merge is a fix round: trim, or ask under the same rule.",
-            // #668: one conductor-filed raise for the queue, never a lane's own edit.
             "Never edit `ci/cap.toml` (the hook refuses it",
             "`drover cap <fleet>`'s queue-wide view",
             "in one orchestrator-filed issue (recommended), or trim.",
@@ -247,7 +234,6 @@ fn conflict_predicted_is_not_a_hold() {
     }
 }
 
-/// #103: `[fleet.<n>] env` is exported into the lane's shell after DROVER_LANE, `~/` expanded.
 #[test]
 fn fleet_env_is_exported_into_the_lane() {
     let d = tmpdir("spawn-env");
@@ -275,7 +261,6 @@ fn fleet_env_is_exported_into_the_lane() {
     );
 }
 
-/// #361: `shared_cache` is exported like `env`.
 #[test]
 fn shared_cache_is_exported_into_the_lane() {
     let cfg = CONFIG.replace(
@@ -290,7 +275,6 @@ fn shared_cache_is_exported_into_the_lane() {
     );
 }
 
-/// #630: each lane gets its own Cargo build folder, `<root>/.build/<agent>` (cloned at spawn from its fleet's warmest).
 #[test]
 fn each_lane_gets_its_own_cargo_target_under_its_root() {
     let other = "[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/x/other\"\nintegration = \"staging\"\n\n\
@@ -316,8 +300,6 @@ fn each_lane_gets_its_own_cargo_target_under_its_root() {
     assert_eq!(target("other", "12").as_deref(), Some("'/c/.build/other-impl-12'"));
 }
 
-/// #536: each lane gets its own scratch dir, named for its agent; a reviewer's per round. #630: under its root's
-/// `.build`; with no `[hosts]`, the worktree root's.
 #[test]
 fn each_lane_gets_a_private_scratch_dir_under_its_roots_build_folder() {
     let c = ctx(
@@ -347,7 +329,6 @@ fn each_lane_gets_a_private_scratch_dir_under_its_roots_build_folder() {
     );
 }
 
-/// #187: the same fleet and branch always hash to the same port, inside the range; the dry run shows it.
 #[test]
 fn lane_port_is_stable_per_fleet_and_branch() {
     let p = lane_port(None, "sendmeter/issue-12", &[]);
@@ -363,7 +344,6 @@ fn lane_port_is_stable_per_fleet_and_branch() {
     assert_eq!(plan(&c, &shed_fake(), "impl")["port"], p);
 }
 
-/// #187: a port a live lane holds moves to the next free one (wrapping); the lane's own earlier spawn is no collision.
 #[test]
 fn lane_port_collision_takes_the_next_free_one() {
     let p = lane_port(Some("7000-7001"), "f/b", &[]);
@@ -391,7 +371,6 @@ fn lane_port_collision_takes_the_next_free_one() {
     assert_eq!(plan(&c, &shed_fake(), "impl")["port"], 14001 - mine);
 }
 
-/// #187: `$DROVER_PORT` in a fleet's env expands to the lane's port.
 #[test]
 fn fleet_env_expands_drover_port() {
     let cfg = CONFIG.replace(
@@ -411,7 +390,6 @@ fn fleet_env_expands_drover_port() {
     );
 }
 
-/// #103: `clone_node_modules` needs some lockfile, and every lockfile identical in both checkouts.
 #[test]
 fn lockfiles_match_needs_an_identical_lockfile() {
     let d = tmpdir("lockfiles");
@@ -430,7 +408,6 @@ fn lockfiles_match_needs_an_identical_lockfile() {
     assert!(!m(), "differing lockfiles");
 }
 
-/// #185: `clone_build` clones `target` on a matching `Cargo.lock` only; a failed clone is logged, never retried as a copy.
 #[test]
 fn clone_build_clones_on_a_lockfile_match_and_logs_failures() {
     let d = tmpdir("clone-build");
@@ -445,7 +422,7 @@ fn clone_build_clones_on_a_lockfile_match_and_logs_failures() {
     assert_eq!(clone(&r), None, "mismatch: no clone");
     assert!(!r.called("cp "));
     std::fs::write(wt.join("Cargo.lock"), "a").unwrap();
-    std::fs::create_dir(wt.join(".target.clone")).unwrap(); // what the faked `cp` would have made
+    std::fs::create_dir(wt.join(".target.clone")).unwrap();
     let d = clone(&r).unwrap();
     assert_eq!((d["dirs"].clone(), d["errors"].clone()), (json!(["target"]), json!([])));
     assert!(wt.join("target").is_dir() && !wt.join(".target.clone").exists());
@@ -469,7 +446,6 @@ fn clone_build_clones_on_a_lockfile_match_and_logs_failures() {
     assert_eq!(r.count("cp "), 1);
 }
 
-/// #185: a reopened worktree keeps its own build folders.
 #[test]
 fn reopen_spawn_clones_no_build_folder() {
     let d = tmpdir("clone-reopen");
@@ -545,7 +521,6 @@ impl drover::runner::Runner for Checkout<'_> {
     }
 }
 
-/// #185: a fresh lane whose clone fails: the lane started first, the failure is logged, the spawn exits 0.
 #[test]
 fn failed_clone_is_logged_and_the_spawn_succeeds() {
     let d = tmpdir("clone-fail");
@@ -641,7 +616,6 @@ fn real_claude_spawn_writes_brief_and_logs_event() {
     let sh = on_shed(&c);
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
-    // Without a synced profile a claude spawn is refused.
     let (code, _) = run(&c, &shed_fake(), &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 1);
     assert!(!sh.called("run", LANE));
@@ -797,7 +771,6 @@ fn help_agent_doc_is_short_and_complete() {
     assert!(!out.contains("drover hook"));
 }
 
-/// #2 AC1: a role's effort (or the `[limits]` default) is mapped per harness in the launch argv.
 #[test]
 fn effort_maps_to_each_harness_flag() {
     let d = tmpdir("effort-claude");
@@ -814,11 +787,9 @@ fn effort_maps_to_each_harness_flag() {
     let at = start.iter().position(|w| w == "--effort").expect("--effort");
     assert_eq!(start[at + 1], "high");
     assert_eq!(p["effort"], "high");
-    // rev sets none: the [limits] default applies, as Hermes `--reasoning`.
     let start = launch(&plan(&c, &shed_fake(), "rev"));
     assert_eq!(start[start.len() - 2..], ["--reasoning", "xhigh"].map(String::from));
 
-    // Claude `none` omits the flag; Hermes passes it through.
     let d = tmpdir("effort-none");
     let c = ctx(
         &d,
@@ -830,7 +801,6 @@ fn effort_maps_to_each_harness_flag() {
     let start = launch(&plan(&c, &shed_fake(), "rev"));
     assert_eq!(start[start.len() - 2..], ["--reasoning", "none"].map(String::from));
 
-    // No effort anywhere: no flag at all.
     let d = tmpdir("effort-unset");
     let c = ctx(&d, CONFIG);
     let _sh = on_shed(&c);
@@ -838,7 +808,6 @@ fn effort_maps_to_each_harness_flag() {
     assert!(!start.contains(&"--reasoning".to_string()), "{start:?}");
 }
 
-/// #2 AC1: an unknown level, or one the role's harness lacks, is refused at config load.
 #[test]
 fn invalid_effort_is_refused_at_config_load() {
     for (cfg, want) in [
@@ -868,7 +837,6 @@ fn invalid_effort_is_refused_at_config_load() {
     }
 }
 
-/// #19: Claude lanes get `--name "<fleet> · <role> #<issue> · <short title>"`.
 #[test]
 fn claude_dry_run_names_every_role() {
     let d = tmpdir("spawn-name");
@@ -898,7 +866,6 @@ fn claude_dry_run_names_every_role() {
     assert_eq!(dry("12", "impl"), "sendmeter · impl #12 · fix the meter");
     assert_eq!(dry("12", "rev"), "sendmeter · rev #12 r1 · fix the meter");
     assert_eq!(dry("12", "design"), "sendmeter · design #12 · fix the meter");
-    // No cached spec (a dry run never calls GitHub): the head alone.
     assert_eq!(dry("13", "impl"), "sendmeter · impl #13");
 }
 
@@ -926,7 +893,6 @@ fn lane_title_strips_prefixes_and_cuts_at_words() {
     );
     assert_eq!(long, "synergy · impl #2840 · informative lane titles instead of…");
     assert!(long.chars().count() <= 60);
-    // Thai: kept whole when it fits; cut by chars (never bytes) when it does not.
     assert_eq!(lane_title(h, "แก้ไขปุ่มชำระเงิน"), "synergy · impl #2840 · แก้ไขปุ่มชำระเงิน");
     let thai = lane_title(h, &"ภาษาไทย".repeat(10));
     assert!(thai.ends_with('…') && thai.chars().count() <= 60, "{thai}");

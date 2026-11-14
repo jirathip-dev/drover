@@ -1,5 +1,3 @@
-//! #677: why notes (docs/design/why-notes): a lane's `why.md`, checked at `turn done` and put on the pushed head under
-//! `refs/notes/why` by drover alone; read back by briefs, the merge comment, `/api/v1` and `drover why <file:line>`.
 use crate::config::{Config, Fleet};
 use crate::events::{emit, fold, last_spawn, read, Event};
 use crate::runner::{argv, json, ok, Runner};
@@ -13,8 +11,7 @@ pub const MISSING: &str = "why.md missing: write it (Decided/Because/Rejected/Ch
 const KEYS: [&str; 5] = ["Decided", "Because", "Rejected", "Check", "Owner"];
 const NOTES: &str = "+refs/notes/why:refs/notes/why";
 
-/// The note's `Owner:` line, or why `text` is no valid note. `short`: an update round's (q817: no `Rejected:` or
-/// `Check:` needed). A `Because:` cites a quote of `spec` (q816), an `answered` ask or a `file:line` within `len(file)`.
+/// The note's `Owner:` line, or why `text` is no valid note. `short`: an update round's (q817: no `Rejected:` or `Check:` needed). A `Because:` cites a quote of `spec` (q816), an `answered` ask or a `file:line` within `len(file)`.
 pub fn check(
     text: &str,
     short: bool,
@@ -63,7 +60,6 @@ pub fn check(
     Ok(owner)
 }
 
-/// One valid citation on a `Because:` line, or why there is none.
 fn cite(
     v: &str,
     spec: &str,
@@ -105,8 +101,7 @@ fn cite(
     ))
 }
 
-/// `turn done`'s note for `role`'s lane: None when none is due (no PR, nothing new pushed) or it is on origin; else the
-/// `WHY_INVALID` reason (nothing written or pushed).
+/// `turn done`'s note for `role`'s lane: None when none is due (no PR, nothing new pushed) or it is on origin; else the `WHY_INVALID` reason (nothing written or pushed).
 pub fn turn(
     ctx: &Ctx,
     cfg: &Config,
@@ -253,9 +248,7 @@ pub fn body(
     Ok(())
 }
 
-/// Put `text` on `head` under `refs/notes/why` on origin, from the fleet's local clone (the `why-notes:<fleet>` lease
-/// held while free): origin's notes fetched into this write's own ref, the note added, pushed (never forced); a rejected
-/// push (another writer first) starts over, 3 tries. The local `refs/notes/why` follows origin's after.
+/// Put `text` on `head` under `refs/notes/why` on origin, from the fleet's local clone (the `why-notes:<fleet>` lease held while free): origin's notes fetched into this write's own ref, the note added, pushed (never forced); a rejected push (another writer first) starts over, 3 tries. The local `refs/notes/why` follows origin's after.
 pub fn attach(
     ctx: &Ctx,
     r: &dyn Runner,
@@ -306,7 +299,6 @@ pub fn attach(
     res
 }
 
-/// `body` with its `## Why (round n)` section (up to the next `## `) replaced by `text`, else appended.
 fn section(body: &str, round: u32, text: &str, head: &str) -> String {
     let h = format!("## Why (round {round})");
     let new = format!(
@@ -322,7 +314,6 @@ fn section(body: &str, round: u32, text: &str, head: &str) -> String {
     }
 }
 
-/// The note on `sha` in the fleet's local clone.
 fn note(r: &dyn Runner, local: &Path, sha: &str) -> Option<String> {
     let local = local.to_string_lossy();
     ok(r, "git", &["-C", &local, "notes", "--ref", "why", "show", sha])
@@ -330,8 +321,7 @@ fn note(r: &dyn Runner, local: &Path, sha: &str) -> Option<String> {
         .map(|t| t.trim().to_string())
 }
 
-/// A brief's why-notes section: `rev`'s, the head under review's note (else why there is none); an impl lane's, every
-/// note on its branch, else (a new impl) the latest 1–3 notes on each file its `spec` names (5 files, 60 lines).
+/// A brief's why-notes section: `rev`'s, the head under review's note (else why there is none); an impl lane's, every note on its branch, else (a new impl) the latest 1–3 notes on each file its `spec` names (5 files, 60 lines).
 pub fn brief(
     r: &dyn Runner,
     f: &Fleet,
@@ -402,8 +392,7 @@ pub fn brief(
     (!files.is_empty()).then(|| s.lines().take(60).collect::<Vec<_>>().join("\n"))
 }
 
-/// `drover why <file:line>`: blame's commit, the issue that merged it, the note on it (else on the round head that
-/// pushed it) and the issue's asks with their answers; plain text, or `json`.
+/// `drover why <file:line>`: blame's commit, the issue that merged it, the note on it (else on the round head that pushed it) and the issue's asks with their answers; plain text, or `json`.
 pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &str, as_json: bool) -> Result<()> {
     let (file, line) = (at.rsplit_once(':'))
         .and_then(|(f, l)| Some((f, l.parse::<u64>().ok()?)))
@@ -446,7 +435,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
             .iter()
             .find(|e| e.kind == "merged" && e.fleet == *fleet && e.str("merge_sha") == Some(m))
     };
-    let merged = since.lines().rev().find_map(by_sha); // the oldest merge since with a `merged` event
+    let merged = since.lines().rev().find_map(by_sha);
     let head = |e: &&Event| e.kind == "why" && e.fleet == *fleet && e.str("sha").is_some_and(|h| under(&sha, h));
     let issue = (merged.and_then(|e| e.issue))
         .or_else(|| {

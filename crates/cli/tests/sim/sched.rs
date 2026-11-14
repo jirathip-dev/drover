@@ -1,6 +1,3 @@
-//! The seeded scheduler: each simulated process is an OS thread running the real `main_with`; one baton (a mutex and
-//! a condvar) lets one run at a time. Every Runner call and state.db write is a yield point; the driver checks the
-//! invariants between steps and moves the clock (discrete events) when nothing is runnable.
 use crate::model::Model;
 use drover::runner::{Out, Runner};
 use std::panic::AssertUnwindSafe;
@@ -33,7 +30,6 @@ impl Rng {
     }
 }
 
-/// The payload a process thread unwinds with once the run is over (never a failure).
 struct Abort;
 
 pub struct Proc {
@@ -88,7 +84,6 @@ pub struct Sim {
     threads: Mutex<Vec<std::thread::JoinHandle<()>>>,
 }
 
-/// A call's virtual cost in seconds (herdr's agent start is slow, gh a round trip, local tools free).
 fn cost(prog: &str, args: &[String]) -> u64 {
     match (prog, args.first().map(String::as_str), args.get(1).map(String::as_str)) {
         ("herdr", Some("agent"), Some("start")) => 3,
@@ -97,7 +92,6 @@ fn cost(prog: &str, args: &[String]) -> u64 {
     }
 }
 
-/// Calls answered without a switch: `kill -0` and `ps` run inside a lease's transaction (`db::take`'s `dead`).
 fn atomic(prog: &str) -> bool {
     matches!(prog, "kill" | "ps")
 }
@@ -216,7 +210,6 @@ impl Sim {
         self.cv.notify_all();
     }
 
-    /// Block until it is `me`'s turn; `Err` once the run is over (the thread then unwinds or returns).
     fn wait_turn(&self, me: usize) -> Result<(), ()> {
         let mut w = self.lock();
         loop {
@@ -230,7 +223,6 @@ impl Sim {
         }
     }
 
-    /// Hand the baton back: `me` may run again `secs` from now.
     fn yield_now(&self, me: usize, secs: u64) {
         {
             let mut w = self.lock();
@@ -326,7 +318,6 @@ impl Sim {
                 let next = [wake, crate::scenario::next(&w)].into_iter().flatten().min();
                 match next {
                     Some(t) if t <= until => {
-                        // #685: a live lane not working is idle while the clock moves.
                         let dt = t.saturating_sub(w.now);
                         let idle = w.model.live().filter(|p| p.status != "working").count() as u64;
                         w.model.idle += idle * dt;

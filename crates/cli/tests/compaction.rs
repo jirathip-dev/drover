@@ -4,7 +4,6 @@ use drover::events::{append, closed_row, fold, history, read, states, Event, Sta
 use serde_json::{json, Value};
 use std::path::Path;
 
-/// A deterministic xorshift, so a failing case replays.
 struct Rng(u64);
 impl Rng {
     fn n(&mut self, k: u64) -> u64 {
@@ -15,7 +14,6 @@ impl Rng {
     }
 }
 
-/// `n` events over 12 issues of two fleets: spawns, verdicts, merges, closes, kills, extensions, passive and queue rows.
 fn log(seed: u64, n: u64, t0: u64) -> Vec<Event> {
     let mut r = Rng(seed);
     (0..n)
@@ -58,7 +56,6 @@ fn same(a: &States, b: &States) {
     );
 }
 
-/// Bulk rows numbered on from the log's last, as an old JSONL log the next read imports (#344).
 fn write(p: &Path, ev: &[Event]) {
     let n = read(p).unwrap().last().map_or(0, |e| e.seq);
     let rows: String = (ev.iter().zip(n + 1..))
@@ -196,7 +193,7 @@ fn the_shared_read_follows_appends_and_compaction() {
     let now = 90 * DAY;
     let seqs = |v: &[Event]| v.iter().map(|e| e.seq).collect::<Vec<_>>();
     let same = || assert_eq!(seqs(&drover::events::shared(&p).unwrap()), seqs(&read(&p).unwrap()));
-    same(); // no database yet
+    same();
     write(&p, &log(3, 400, 0));
     same();
     let first = drover::events::shared(&p).unwrap();
