@@ -38,6 +38,7 @@ pub mod protection;
 pub mod providers;
 pub mod proxy;
 pub mod queue;
+pub mod rename;
 pub mod report;
 pub mod roots;
 pub mod runner;

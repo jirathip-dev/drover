@@ -601,10 +601,11 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
             | (Some(&"secret"), Some(&("ls" | "rm")))
             | (Some(&"accounts"), Some(&"import"))
             | (Some(&"card"), Some(&("approve" | "deny" | "run")))
+            | (Some(&"fleet"), Some(&"rename"))
     ) {
         return Some(
-            "REFUSED OWNER_ONLY: only the owner applies config, settles run cards or lists and removes secrets, never \
-             a lane (#387)"
+            "REFUSED OWNER_ONLY: only the owner applies config, settles run cards, lists and removes secrets or \
+             renames a fleet, never a lane (#387, #935)"
                 .into(),
         );
     }
