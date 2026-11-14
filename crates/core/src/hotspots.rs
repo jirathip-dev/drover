@@ -11,6 +11,8 @@ use std::io::Write;
 
 const DAYS: u64 = 14;
 const HOT: usize = 5;
+/// #892: how a hotspots issue's title starts.
+pub const TITLE: &str = "hotspots: ";
 
 /// #889: a file `HOT` or more merged PRs touched in `DAYS` days, its `conflict-predicted` events and its PRs' update rounds.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -48,16 +50,7 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
             None => touched.entry(l.to_string()).or_default().push(sha.to_string()),
         }
     }
-    let show = |p: &str| {
-        let o = r
-            .run("git", &argv(&["-C", &local, "show", &format!("{range}:{p}")]))
-            .ok()?;
-        (o.code == 0).then_some(o.stdout)
-    };
-    let converted = match crate::repo_read("arch.toml", show) {
-        Some(text) => crate::arch::converted(&text)?,
-        None => vec![],
-    };
+    let converted = converted(r, f)?;
     touched.retain(|f, _| !crate::arch::any(&converted, f));
     let (events, predicted) = (
         working(&ctx.state)?,
@@ -99,6 +92,37 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
     Ok(hot)
 }
 
+fn converted(r: &dyn Runner, f: &crate::config::Fleet) -> Result<Vec<String>> {
+    let local = f.local_path().to_string_lossy().into_owned();
+    let show = |p: &str| {
+        let at = format!("origin/{}:{p}", f.integration);
+        let o = r.run("git", &argv(&["-C", &local, "show", &at])).ok()?;
+        (o.code == 0).then_some(o.stdout)
+    };
+    crate::repo_read("arch.toml", show).map_or(Ok(vec![]), |t| crate::arch::converted(&t))
+}
+
+/// #891: log `hot-files` when the stored hot files less those arch.toml now marks converted differ from the last one.
+pub fn sync(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<()> {
+    let Ok(text) = std::fs::read_to_string(path(ctx, fleet)) else {
+        return Ok(());
+    };
+    let hot: Vec<Hot> = serde_json::from_str(&text)?;
+    let last = crate::queue::hot_files(&working(&ctx.state)?, fleet);
+    if hot.is_empty() && last.is_empty() {
+        return Ok(());
+    }
+    let converted = converted(r, cfg.fleet(fleet)?)?;
+    let files: Vec<String> = (hot.into_iter().map(|h| h.file))
+        .filter(|p| !crate::arch::any(&converted, p))
+        .collect();
+    if files != last {
+        let e = crate::events::Event::new(ctx.now, fleet, None, "hot-files", json!({"files": files}));
+        crate::events::emit(&ctx.state, cfg, e)?;
+    }
+    Ok(())
+}
+
 /// #889: the report `drover hotspots` prints and its issue's body.
 pub fn report(fleet: &str, hot: &[Hot]) -> String {
     let mut s = format!("Hot files in {fleet}: {HOT} or more merged PRs in the last {DAYS} days\n\n");
@@ -128,7 +152,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         return Ok(());
     }
     let day = ctx.now / 86400;
-    let title = format!("hotspots: {fleet} week of {}", ymd(day - (day + 3) % 7));
+    let title = format!("{TITLE}{fleet} week of {}", ymd(day - (day + 3) % 7));
     let search = format!("\"{title}\" in:title");
     let list = [
         "issue",

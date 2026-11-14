@@ -1,5 +1,3 @@
-//! #404: `[chat]` sets new threads' conductor defaults (else the fleet's `role.conductor`); a thread keeps the harness
-//! it started on (`thread new --harness`, the board's harness chip); its model/effort chip applies from the next turn.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -10,7 +8,6 @@ use serde_json::json;
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// `CONFIG` with a claude conductor on opus (rev on claude sonnet: the claude models are opus and sonnet).
 fn config(extra: &str) -> String {
     let c = CONFIG.replace(
         "[fleet.sendmeter.role.rev]\nharness = \"hermes\"",
@@ -52,13 +49,11 @@ fn req(s: &Server, path: &str, body: &str, extra: &str) -> String {
     String::from_utf8_lossy(&s.respond(&r, T)).into_owned()
 }
 
-/// The [chat] tab as the board draws it (#269: web/src/chat.ts from API v1's `chat`).
 fn chat(s: &Server, cookie: &str) -> String {
     let [_, _, chat] = parts(s, ADDR, cookie, T);
     chat
 }
 
-/// herdr ready to start conductors (`agents`: its agent list), dsh-tui at the pinned profile.
 fn host(agents: &str) -> Fake {
     let dsh = format!("profile: {}  /x\n", drover::providers::DSH_TUI_VERSION);
     Fake::default()
@@ -98,13 +93,11 @@ fn chat_defaults_come_from_the_chat_table_else_the_conductor_role() {
         (r.harness.as_str(), r.model.as_deref(), r.effort.as_deref()),
         ("claude", Some("sonnet"), Some("low"))
     );
-    // `[chat]`'s model is a pick on the harness its fleets' conductors default to.
     let m = Config::parse(&config("[chat]\nmodel = \"haiku\"\n")).unwrap();
     assert_eq!(
         drover::orchestrator::harness_models(&m, "claude"),
         ["haiku", "opus", "sonnet"]
     );
-    // Another harness drops the role's model; its profile stays the conductor's.
     let h = Config::parse(&config("[chat]\nharness = \"hermes\"\n")).unwrap();
     let (_, r) = drover::orchestrator::defaults(&h, "sendmeter").unwrap();
     assert_eq!(
@@ -140,7 +133,6 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
         &["thread", "new", "sendmeter", "X", "--harness", "codex"],
     );
     assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");
-    // A later [chat] change leaves the recorded harness alone.
     std::fs::write(&c.config, acp_config("[chat]\nharness = \"dsh\"\n", &b)).unwrap();
     let f = acp();
     let cli = b.cli(&f);
@@ -151,7 +143,6 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
         (Some("claude"), Some("opus"), Some("shed-acp"))
     );
     assert_eq!(f.count("shed run --acp claude-acp"), 1, "{:?}", f.calls.borrow());
-    // The board's first message records the harness chip's pick; the header names it.
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
@@ -220,7 +211,6 @@ fn the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread() {
             brief.contains("# Orchestrator brief: thread") && brief.contains("Always grill scope first."),
             "{brief}"
         );
-        // Each harness's own channel carries the kick that reads the brief.
         let calls = r.calls.borrow().join("\n");
         let kick = format!("Read {} and act on it.", dir.join(".brief.md").display());
         let channel = match *h {
@@ -261,7 +251,6 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
         ),
         "{page}"
     );
-    // Only the thread harness's models and efforts.
     let res = req(&s, "/thread", "op=model&t=t1&model=gpt-9", &cookie);
     assert!(res.contains("REFUSED BAD_VALUE"), "{res}");
     let res = req(&s, "/thread", "op=model&t=t1&model=sonnet&effort=low", &cookie);
@@ -282,7 +271,6 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
         show.ends_with("system: model sonnet · effort low from the next turn\n"),
         "{show}"
     );
-    // The conductor is awake: the next message closes it and resumes the same session on the pick.
     let first = kind(&c, "orchestrator-start")[0].clone();
     let awake = r#"{"result":{"agents":[{"name":"orchestrator-t1","agent_status":"idle","pane_id":"w9:p1"}]}}"#;
     let r2 = host(awake);
@@ -306,7 +294,6 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
         start.contains(&format!("--resume {}", first.str("session").unwrap())),
         "{start}"
     );
-    // Awake on the pick already: the message after is typed in, no restart.
     let r3 = host(awake);
     assert_eq!(run(&c, &r3, &["thread", "say", "t1", "again"]).0, 0);
     assert_eq!(kind(&c, "orchestrator-start").len(), 2);

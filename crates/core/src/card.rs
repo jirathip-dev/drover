@@ -1,8 +1,3 @@
-//! #538: run cards. A conductor posts an ad-hoc owner-level command in its thread (`drover card post`): the exact
-//! command, why, its blast radius and its folder. The owner's [approve] (within 15 min of the post) has drover run
-//! that exact text once on the main host, its exit code and output tail (secrets masked) posted back into the thread;
-//! [deny] runs nothing. Both are logged `by: owner` with the card id and the command's sha. `CARD_FORBIDDEN` refuses
-//! the hard-nos at posting, and the hook refuses them from a conductor's own shell.
 use crate::config::Config;
 use crate::devices::sha256;
 use crate::events::{emit, working, Event};
@@ -102,8 +97,7 @@ pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
         .find(|e| e.kind == "run-settled" && e.str("id") == Some(id))
 }
 
-/// The owner's [approve] (`sha`: the prefix of the command's sha the owner saw, if the tap carries it) or [deny] on
-/// card `id`; the line the thread records.
+/// The owner's [approve] (`sha`: the prefix of the command's sha the owner saw, if the tap carries it) or [deny] on card `id`; the line the thread records.
 pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, approve: bool, sha: Option<&str>) -> Result<String> {
     settle_via(ctx, cfg, r, id, approve, sha, None)
 }

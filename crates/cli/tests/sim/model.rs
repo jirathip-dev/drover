@@ -1,5 +1,3 @@
-//! The in-process world drover's calls land in: herdr panes and agents, gh PRs and checks, git heads, pids and the
-//! host's load. Each argv is matched by its leading words; one it does not know fails the run ("unmodelled call").
 use crate::sched::{Sim, World};
 use drover::runner::Out;
 use serde_json::{json, Value};
@@ -12,35 +10,29 @@ pub const REPO: &str = "jirathip-dev/herdsman";
 /// What a lane's agent does once its prompt lands.
 #[derive(Clone, Debug)]
 pub enum Script {
-    /// Works `secs`, pushes a new head (CI then goes green or red), stops.
-    Push { secs: u64, green: bool },
-    /// Works `secs`, writes verdict.md (`PASS`, or `FAIL` with or without its Proof blocks), stops. Told its FAIL was
-    /// refused NO_PROOF, it adds them if it `heeds`, else writes the same file again.
+    Push {
+        secs: u64,
+        green: bool,
+    },
     Review {
         secs: u64,
         pass: bool,
         proof: bool,
         heeds: bool,
     },
-    /// Its pane dies after `secs`.
-    Die { secs: u64 },
-    /// Works forever.
+    Die {
+        secs: u64,
+    },
     Hang,
 }
 
 #[derive(Clone, Debug)]
 pub enum Ev {
-    /// A timer's pass (`drive`, `drive --fast`, `check`): started, then again `every` secs later (± jitter).
     Timer { args: Vec<String>, every: u64 },
-    /// A one-off process: an owner verb, a lane's hook.
     Run(Vec<String>),
-    /// Pane `pane`'s agent reaches the next step of its script.
     Lane { pane: String, step: u8 },
-    /// A head's CI ends.
     Ci { sha: String, green: bool },
-    /// The host's 1-minute load (10 cores: ≥ 25 is busy).
     Load(u64),
-    /// A running pass of this kind (`drive`, `kick`, …) is killed where it stands (its leases left behind).
     Crash(String),
 }
 
@@ -102,9 +94,7 @@ pub struct Model {
     pub sabotage: Option<crate::invariants::Sabotage>,
     /// #685: every head's CI takes this long (else 1–15 min, drawn).
     pub ci_secs: Option<u64>,
-    /// #685 ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live
-    /// lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed
-    /// a head or wrote a verdict drover takes.
+    /// #685 ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed a head or wrote a verdict drover takes.
     pub ci_since: BTreeMap<String, u64>,
     pub ci_wait: u64,
     pub idle: u64,
@@ -188,7 +178,7 @@ pub fn answer(sim: &Arc<Sim>, w: &mut World, me: usize, prog: &str, args: &[Stri
                 w.procs[me].starting = Some((*pane).into());
                 let agent = Some(a[2].to_string());
                 let starts = w.model.panes.iter().filter(|p| p.agent == agent).count();
-                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 4;
+                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 3;
                 if planted || w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
                     crate::invariants::double(w, pane);
                 }
@@ -461,6 +451,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             Some(h) => ok(format!("{h}\n")),
             None => err(128, "fatal: not a git repository"),
         },
+        ["rev-parse", "--short=7", "HEAD"] => ok(m.heads.get(dir).map_or(String::new(), |h| format!("{:.7}\n", h))),
         ["rev-parse", "--verify", "--quiet", b] | ["rev-parse", b] => {
             match m.origin.get(b.trim_start_matches("origin/")) {
                 Some(h) => ok(format!("{h}\n")),
@@ -472,7 +463,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             None => err(128, "fatal"),
         },
         ["status", "--porcelain", ..] => ok(""),
-        ["rev-list", "--objects", "--disk-usage", ..] => ok("0\n"),
+        ["rev-list", "--objects", "--disk-usage", ..] | ["rev-list", "--count", ..] => ok("0\n"),
         ["rev-list", ..] | ["log", ..] | ["diff", ..] | ["branch", ..] | ["ls-files", ..] => ok(""),
         ["reset", "--hard", b] => {
             if let Some(h) = m.origin.get(b.trim_start_matches("origin/")).cloned() {
@@ -484,7 +475,6 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             Some(h) => ok(format!("{h}\t{r}\n")),
             None => ok(""),
         },
-        // #779 `wip prune` (from `clean`): origin's wip branches.
         ["for-each-ref", _, "refs/remotes/origin/wip/"] => ok(m
             .origin
             .keys()

@@ -1,15 +1,12 @@
-//! #778: a card tap that starts a lane ([one more round], an answer whose lane is gone, a design approve or revise)
-//! stays answered while the lane waits to start. After its decision the tap logs a `pending-action`; drive retries
-//! the spawn every pass, and each refusal it meets is logged again on the record (`reason`). A soft refusal (a busy
-//! host, no slot) keeps it pending; a hard one ends it `failed`. Its card is back once failed or 30 min unstarted.
 use crate::events::{age, append, Event};
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::json;
 
 /// Refusals that only mean "not yet": the action stays pending.
-pub const SOFT: [&str; 9] = [
+pub const SOFT: [&str; 10] = [
     "HOST_BUSY",
+    "HOST_FULL",
     "MEM_LOW",
     "CAP",
     "ALL_CAPPED",
@@ -19,7 +16,6 @@ pub const SOFT: [&str; 9] = [
     "RUNTIME_DOWN",
     "HOST_OFFLINE",
 ];
-/// Another pass is on the same spawn (#509), or did it: neither waits nor fails.
 const SKIP: [&str; 2] = ["IN_FLIGHT", "ALREADY_DONE"];
 /// A pending action unstarted this long brings its card back.
 pub const BACK_SECS: u64 = 1800;
@@ -65,8 +61,7 @@ impl Pending {
     }
 }
 
-/// `fleet` #`n`'s pending action, if any: no spawn of the issue after it, nor after its tap's `after` seq (the kick
-/// a decision fires may spawn before the record is logged).
+/// `fleet` #`n`'s pending action, if any: no spawn of the issue after it, nor after its tap's `after` seq (the kick a decision fires may spawn before the record is logged).
 pub fn of(events: &[Event], fleet: &str, n: u64) -> Option<Pending> {
     let all = crate::events::of_issue(events, fleet, n);
     let mine = || all.iter().copied().enumerate();
@@ -89,8 +84,7 @@ pub fn extending(events: &[Event], fleet: &str, n: u64) -> bool {
     of(events, fleet, n).is_some_and(|p| p.action == "extend" && !p.failed)
 }
 
-/// Log a tap's pending action, after its decision: a new one, its start not tried yet; a spawn logged past seq `after`
-/// (`None`: past this record) started it.
+/// Log a tap's pending action, after its decision: a new one, its start not tried yet; a spawn logged past seq `after` (`None`: past this record) started it.
 pub fn record(ctx: &Ctx, (fleet, n): (&str, u64), action: &str, role: &str, after: Option<u64>) -> Result<()> {
     let d = json!({"action": action, "role": role, "since": ctx.now, "after": after, "reason": null, "failed": false});
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "pending-action", d))

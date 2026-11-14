@@ -1,6 +1,3 @@
-//! #345: the client side of `drover service` (docs/service.md): a kick over its local socket, a remote lane's
-//! commands over HTTP with its per-lane token, and the token check the service runs. With no service, `None`: the
-//! caller goes on in direct mode.
 use crate::config::Config;
 use crate::events::{ends, working, Event};
 use crate::gate::refused;
@@ -45,8 +42,7 @@ pub fn kick(ctx: &Ctx, fleet: &str, issue: u64, why: &str, id: Option<&str>) -> 
     v["pid"].as_u64().and_then(|p| u32::try_from(p).ok())
 }
 
-/// A lane on another host: `args` run by the service at `url` (`DROVER_SERVICE`) as the token's lane; a `--file`
-/// travels as its text. The token rides in the body, never in argv.
+/// A lane on another host: `args` run by the service at `url` (`DROVER_SERVICE`) as the token's lane; a `--file` travels as its text. The token rides in the body, never in argv.
 pub fn post(r: &dyn Runner, url: &str, token: &str, args: &[String]) -> Result<Out> {
     let mut files = serde_json::Map::new();
     for w in args.windows(2).filter(|w| w[0] == "--file") {
@@ -92,8 +88,7 @@ pub fn grant(ctx: &Ctx, g: &Grant) -> Result<String> {
     Ok(t)
 }
 
-/// The `DROVER_LANE` `args` run as, if the token may run them: its own lane's command (#389's `foreign`; a verdict
-/// only from a check role), while its spawn is the issue's latest for its role, not closed, and the issue is open.
+/// The `DROVER_LANE` `args` run as, if the token may run them: its own lane's command (#389's `foreign`; a verdict only from a check role), while its spawn is the issue's latest for its role, not closed, and the issue is open.
 pub fn authorize(ctx: &Ctx, cfg: &Config, token: &str, args: &[String]) -> Result<String> {
     let Some((_, g)) = crate::db::get::<Grant>(&ctx.state, &key(token)) else {
         return refused("TOKEN", "unknown token");

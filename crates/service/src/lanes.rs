@@ -1,8 +1,3 @@
-//! #529: lane state from the runtimes' event streams (docs/service.md): herdr's socket API, and shed's `events` with
-//! `[runtime] kind = "shed"`. Each lane's change is logged as a passive `lane-state` (working, idle, done, blocked;
-//! gone once its process exits) as it happens. While herdr's stream is up, its agent list (read again only when a
-//! pane is created, updated, closed or exits, or its agent comes or goes) is the one every pass in this process reads.
-//! A dropped stream logs `lane-stream` down and the passes poll `herdr agent list` again until it is back.
 use crate::Service;
 use drover_core::config::Config;
 use drover_core::events::{append, working, Event};
@@ -15,7 +10,6 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UnixStream;
 
-/// herdr's events after which its agent list is read again (and the per-pane status subscriptions renewed).
 const PANES: [&str; 5] = [
     "pane.created",
     "pane.updated",
@@ -25,11 +19,9 @@ const PANES: [&str; 5] = [
 ];
 const RETRY_SECS: u64 = 5;
 
-/// Each lane's last logged state, by agent name.
 type Known = BTreeMap<String, String>;
 
 impl Service {
-    /// herdr's stream on `sock`, followed for good: down, polling; again in 5 s.
     pub(crate) async fn herdr(self: Arc<Self>, sock: PathBuf) {
         let mut known = Known::new();
         loop {
@@ -42,8 +34,6 @@ impl Service {
         }
     }
 
-    /// Subscribes (the pane events and each listed pane's status), then keeps the list from the events; renews on
-    /// a pane event. Returns why the stream went down.
     async fn follow_herdr(&self, sock: &std::path::Path, known: &mut Known) -> String {
         let r = self.r;
         let list = || async move {
@@ -74,7 +64,6 @@ impl Service {
             if v["result"]["type"] != "subscription_started" {
                 return format!("herdr subscribe: {}", started.trim());
             }
-            // Read again once subscribed: a change between the two reads is in this one; a new pane renews.
             let mut list = match list().await {
                 Ok(v) => v,
                 Err(e) => return e,
@@ -111,7 +100,6 @@ impl Service {
         }
     }
 
-    /// The list for this process's passes, and each lane's change since the last one as its `lane-state`.
     fn publish(&self, list: &[Value], known: &mut Known) {
         *herdr::STREAMED
             .lock()
@@ -148,7 +136,6 @@ impl Service {
         *known = now;
     }
 
-    /// shed's `events` on `w`, followed for good on this thread: each lane's state logged, `shed.seq` kept.
     pub(crate) fn shed(self: Arc<Self>, w: &shed::Wire) {
         loop {
             let ctx = Ctx {
@@ -176,7 +163,6 @@ impl Service {
         }
     }
 
-    /// `lane-stream` once per change of a runtime's stream: live, or down (`why`) while the passes poll.
     fn stream_is(&self, runtime: &'static str, down: Option<String>) {
         let mut s = self.streams.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if s.insert(runtime, down.is_none()) == Some(down.is_none()) {

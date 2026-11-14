@@ -1,6 +1,3 @@
-//! #537 `drover runners`: the owner's `[ci_runners]` VMs and their GitHub runners (docs/hosts.md). Each verb is
-//! logged `runners-<verb>`. The registration token goes to a VM on stdin (`cloud::run`), never into argv, the log or
-//! the output; the provider key stays on this host.
 use crate::config::{CiRunners, Config};
 use crate::events::{age, emit, working, Event};
 use crate::gate::refused;
@@ -19,7 +16,6 @@ pub enum Verb {
     RetireLocal,
 }
 
-/// A GitHub runner: id, name, online, busy.
 type Gh = (u64, String, bool, bool);
 
 fn conf(cfg: &Config) -> Result<&CiRunners> {
@@ -43,7 +39,6 @@ pub fn vms(c: &CiRunners, events: &[Event]) -> Vec<String> {
     v
 }
 
-/// The repo's GitHub runners labelled `label`.
 fn github(r: &dyn Runner, c: &CiRunners, label: &str) -> Result<Vec<Gh>> {
     let v: Value = serde_json::from_str(&ok(
         r,
@@ -83,7 +78,6 @@ fn deregister(r: &dyn Runner, c: &CiRunners, g: &Gh) -> Result<()> {
     .map(drop)
 }
 
-/// A fresh registration token (held in memory only).
 fn token(r: &dyn Runner, c: &CiRunners) -> Result<String> {
     let url = format!("repos/{}/actions/runners/registration-token", c.repo);
     let t = ok(r, "gh", &["api", "-X", "POST", &url, "--jq", ".token"])?
@@ -93,8 +87,6 @@ fn token(r: &dyn Runner, c: &CiRunners) -> Result<String> {
     Ok(t)
 }
 
-/// Recipe command `key` for VM `vm`: `runner_create|state|delete` run on the provider, the others (`runner_revive`,
-/// `runner_token`, `runner_drain`, `runner_names`) on the VM through `runner_exec` (as `$C`, `{rt}` the token).
 fn rc(ctx: &Ctx, r: &dyn Runner, c: &CiRunners, key: &str, vm: &str, token: Option<&str>) -> Result<String> {
     let rc = crate::cloud::load(ctx, &c.provider)?;
     let s = |k: &str| {
@@ -119,15 +111,12 @@ fn rc(ctx: &Ctx, r: &dyn Runner, c: &CiRunners, key: &str, vm: &str, token: Opti
     crate::cloud::run(ctx, r, &rc, &format!("{vm} {key}"), &line, token)
 }
 
-/// One VM's cost a day: the recipe's `rate_usd_hour` for `size`, × 24.
 fn per_day(ctx: &Ctx, c: &CiRunners) -> Result<f64> {
     let rc = crate::cloud::load(ctx, &c.provider)?;
     let rate = rc.get("rate_usd_hour").and_then(|t| t.get(&c.size)?.as_float());
     Ok(rate.with_context(|| format!("no rate_usd_hour for size {}", c.size))? * 24.0)
 }
 
-/// The owner said yes to ask `id` about `runners <verb>`: an owner ask whose first option the owner (not a conductor, not
-/// the default) chose, used by no verb yet (one yes lets one run on).
 fn approved(events: &[Event], id: Option<&str>, verb: &str) -> bool {
     let Some(id) = id else { return false };
     let ask = events
@@ -169,7 +158,6 @@ pub fn health(r: &dyn Runner, c: &CiRunners, events: &[Event]) -> Result<(u64, u
     Ok((on as u64, c.slots * vms(c, events).len() as u64))
 }
 
-/// Push a fresh token to every VM; the VMs it reached.
 fn push_tokens(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &CiRunners) -> Result<usize> {
     let (t, all) = (token(r, c)?, vms(c, &working(&ctx.state)?));
     let failed: Vec<_> = all

@@ -1,4 +1,3 @@
-//! fleet: agents act only through this CLI; it owns state and refuses rule breaks.
 pub mod access;
 pub mod action;
 pub mod amend;
@@ -6,7 +5,7 @@ pub mod arch;
 pub mod breaker;
 pub mod card;
 pub mod check;
-#[allow(clippy::doc_markdown)] // its doc comments are clap help text, printed verbatim
+#[allow(clippy::doc_markdown)]
 mod cli;
 pub mod cloud;
 pub mod config;
@@ -19,6 +18,7 @@ pub mod drive;
 pub mod events;
 pub mod gate;
 pub mod gh;
+pub mod heavy;
 pub mod herdr;
 pub mod hook;
 pub mod host;
@@ -38,6 +38,7 @@ pub mod protection;
 pub mod providers;
 pub mod proxy;
 pub mod queue;
+pub mod rename;
 pub mod report;
 pub mod roots;
 pub mod runner;
@@ -100,7 +101,6 @@ impl Ctx {
         let env = |k: &str, d: PathBuf| var(k).map_or(d, PathBuf::from);
         let root = var("DROVER_HOME").map_or_else(home, PathBuf::from);
         let mut old = vec![];
-        // Read the pre-rename dir, never move it, while the new one is missing.
         let mut path = |k: &str, d: &str, file: &str| {
             if let Some(p) = var(k) {
                 return PathBuf::from(p);
@@ -133,7 +133,6 @@ impl Ctx {
     }
 }
 
-/// A path variable, with set-but-empty treated as unset (an empty path would mean the cwd).
 fn var(k: &str) -> Option<std::ffi::OsString> {
     std::env::var_os(k).filter(|v| !v.is_empty())
 }
@@ -208,7 +207,7 @@ pub fn repo_read<T>(name: &str, read: impl Fn(&str) -> Option<T>) -> Option<T> {
 /// Seconds since the epoch.
 pub fn now() -> u64 {
     if let Some(t) = sim::now() {
-        return t; // #680: a simulated process's clock
+        return t;
     }
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -221,14 +220,12 @@ pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<
     let events = working(&ctx.state)?;
     let mut q = queue::replay(&events, fleet);
     queue::apply(&mut q, &d)?;
-    // #667: `x#N` names another fleet unless `x` is `owner/repo`.
     for b in queue::refs(&d["on"])
         .iter()
         .filter(|b| d["op"] == "block" && !b.contains('/'))
     {
         cfg.fleet(b.split('#').next().unwrap_or_default())?;
     }
-    // #425: blocking an issue with a lane holds that lane until its blockers merge (#505: all of them).
     let n = d["issues"][0]
         .as_u64()
         .filter(|_| d["op"] == "block" || d["op"] == "unblock");
@@ -267,7 +264,6 @@ pub fn set(
     if wanted.is_empty() {
         bail!("nothing to set: pass --harness, --model, --profile or --effort");
     }
-    // Values become TOML strings: a quote, backslash or control char could inject lines (e.g. `[[notify]]`).
     if let Some((k, v)) = wanted
         .iter()
         .find(|(_, v)| v.is_empty() || v.chars().any(|c| c == '"' || c == '\\' || c.is_control()))
@@ -306,7 +302,6 @@ pub fn set(
     Ok(())
 }
 
-/// Event data `d`, plus `"via"` for the page's writes.
 fn with_via(mut d: Value, via: Option<&str>) -> Value {
     if let Some(v) = via {
         d["via"] = json!(v);
@@ -341,20 +336,16 @@ pub fn pause(ctx: &Ctx, out: &mut dyn Write, fleet: &str, paused: bool, via: Opt
     Ok(())
 }
 
-/// #99: owner words a routine ask may not use (`OWNER_TOPIC`); a backstop, not the definition (roles/usage-tail.md).
 const OWNER_WORDS: &str = "main production prod prods secret secrets token tokens delete deleted deletes deleting \
     deletion spend spends spending spent cost costs costly dependency dependencies scope scopes";
 
-/// `text` names an owner topic: one of `OWNER_WORDS`, or `$`.
 fn owner_topic(text: &str) -> bool {
     let text = text.to_lowercase();
     let mut words = text.split(|c: char| !c.is_alphanumeric());
     text.contains('$') || words.any(|w| OWNER_WORDS.split_whitespace().any(|o| o == w))
 }
 
-/// `drover ask`: log a `needs-decision` for the asking lane (`DROVER_LANE`, else none), notify, print its id.
-/// #541: a lane's ask (not a conductor's) goes to its repo's conductor thread first (`routed`, no push); with none,
-/// or the conductor not reached, to the owner.
+/// `drover ask`: log a `needs-decision` for the asking lane (`DROVER_LANE`, else none), notify, print its id. #541: a lane's ask (not a conductor's) goes to its repo's conductor thread first (`routed`, no push); with none, or the conductor not reached, to the owner.
 pub fn ask(
     ctx: &Ctx,
     cfg: &Config,
@@ -381,7 +372,6 @@ pub fn ask(
     if let Some(t) = thread {
         orchestrator::fleet_of(&events, t)?;
     }
-    // `<fleet>:<issue|->:<role>` names the newest spawn of that lane.
     let lane = std::env::var("DROVER_LANE").unwrap_or_default();
     let at = |e: &Event| {
         format!(
@@ -391,10 +381,9 @@ pub fn ask(
             e.str("role").unwrap_or_default()
         )
     };
-    // #446: a lane asking during its startup is already its `spawn-started`, not the lane before it.
     let starts = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "spawn-started");
     let spawned = events.iter().rev().filter(starts).find(|e| at(e) == lane);
-    let (a, h) = spawned.map_or((None, None), |e| (e.str("agent"), e.str("host"))); // #325: and its host
+    let (a, h) = spawned.map_or((None, None), |e| (e.str("agent"), e.str("host")));
     let mut d = json!({"question": q, "options": opts, "recommend": rec, "agent": a, "host": h, "kind": kind});
     if let Some(t) = thread {
         d["thread"] = json!(t);
@@ -412,7 +401,6 @@ pub fn ask(
         .pop()
         .context("ask not logged")?;
     let id = ev.str("id").unwrap_or_default();
-    // #633: an attached cooee thread reads the ask from `/api/v1/events`; no drover conductor to type it into.
     if let Some(t) = routed.filter(|t| orchestrator::attached(&events, t).is_none()) {
         if let Err(e) = orchestrator::lane_ask(ctx, cfg, r, t, &ev) {
             orchestrator::to_owner(ctx, cfg, t, &ev, None, &format!("orchestrator not reached: {e:#}"))?;
@@ -424,16 +412,13 @@ pub fn ask(
 /// #541: how long the owner may change a conductor's answer, in seconds (the board reads it).
 pub const CHANGE: u64 = config::ORCHESTRATOR_CHANGE_MINUTES * 60;
 
-/// A choice as its ask has it: option `n`'s text, else the text given.
 fn chosen<'a>(ask: &'a Event, choice: &'a str) -> &'a str {
     let n = choice.parse::<usize>().ok();
     n.and_then(|n| ask.data["options"].get(n.checked_sub(1)?)?.as_str())
         .unwrap_or(choice)
 }
 
-/// #541: `drover answer --basis`, run by thread `t`'s conductor: answered `by: conductor-<t>` only if the ask is a
-/// lane ask on its repo, names no owner topic, and `basis` quotes the issue's spec (3 words or more, verbatim) or
-/// names an answered decision; else `OWNER_ASK`, and a lane ask on its repo is put to the owner in the thread.
+/// #541: `drover answer --basis`, run by thread `t`'s conductor: answered `by: conductor-<t>` only if the ask is a lane ask on its repo, names no owner topic, and `basis` quotes the issue's spec (3 words or more, verbatim) or names an answered decision; else `OWNER_ASK`, and a lane ask on its repo is put to the owner in the thread.
 pub fn orchestrator_answer(
     ctx: &Ctx,
     cfg: &Config,
@@ -531,11 +516,9 @@ pub fn orchestrator_extend(
     orchestrator_answer(ctx, cfg, r, out, (fleet, id), "1", (t, basis.unwrap_or_default()))
 }
 
-/// #584: who a typed answer is by.
 pub(crate) const TYPED: &str = "owner (typed)";
 
-/// #584: `drover answer --typed <line>`: the owner's words, accepted only when `line` is the owner's message in the
-/// ask's thread (its own, or the one its lane ask was put to the owner in) after the ask; else `NOT_TYPED`.
+/// #584: `drover answer --typed <line>`: the owner's words, accepted only when `line` is the owner's message in the ask's thread (its own, or the one its lane ask was put to the owner in) after the ask; else `NOT_TYPED`.
 pub fn answer_typed(
     ctx: &Ctx,
     cfg: &Config,
@@ -548,7 +531,6 @@ pub fn answer_typed(
     let events = working(&ctx.state)?;
     let is = |e: &&Event, k: &str| e.kind == k && e.fleet == fleet && e.str("id") == Some(id);
     let on = on.filter(|t| orchestrator::fleet_of(&events, t).ok() == Some(fleet));
-    // Where the ask waits: its `needs-decision` in its thread, or (#541) its `ask-owner` row.
     let asked: Vec<(&str, u64)> = (events.iter())
         .filter(|e| is(e, "needs-decision") || is(e, "ask-owner"))
         .flat_map(|e| {
@@ -559,7 +541,6 @@ pub fn answer_typed(
     let said: Vec<&Event> = (events.iter())
         .filter(|e| e.kind == "thread-msg" && e.str("from") == Some("owner") && e.str("text") == Some(line))
         .collect();
-    // The ask's first row in `m`'s thread.
     let at = |m: &Event| {
         (asked.iter())
             .filter(|a| Some(a.0) == m.str("thread"))
@@ -675,7 +656,6 @@ fn in_thread(e: &Event, by: &str) -> bool {
         .is_some_and(|t| e.str("thread") == Some(t))
 }
 
-/// `answer`; #541: a conductor's (`basis`) also posts its FYI line, and the owner may change one for `CHANGE`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn answer_with(
     ctx: &Ctx,
@@ -696,7 +676,6 @@ pub(crate) fn answer_with(
             && !orchestrator(by)
             && ctx.now < d.ts + cfg.limits.orchestrator_change_minutes * 60
     };
-    // #621: a handoff card answers every tap with its one delivery (`conductor::land`).
     let handoff = ask.data.get("handoff").is_some();
     if let Some(d) = last.filter(|d| !handoff && d.str("by") != Some("default") && !change(d)) {
         return gate::refused(
@@ -713,7 +692,6 @@ pub(crate) fn answer_with(
         let why = "an answer is an option number or one line of text, at most 2,000 chars";
         return gate::refused("BAD_VALUE", why);
     }
-    // #492: a handoff card's tap delivers the handoff there; nothing goes back into the thread's conductor.
     if handoff {
         let (to, fresh) = orchestrator::land(ctx, cfg, r, ask, choice)?;
         let text = match last.and_then(|d| d.str("choice")) {
@@ -729,7 +707,6 @@ pub(crate) fn answer_with(
         }
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {to}")?);
     }
-    // #412: a design's decision acts first (a failed revert leaves the ask open), and before the kick.
     let design = crate::design::is_ask(ask);
     if design {
         crate::design::decide(ctx, cfg, r, ask, text, by)?;
@@ -745,7 +722,6 @@ pub(crate) fn answer_with(
         json!({"id": id, "ask_seq": ask.seq, "choice": text, "by": by, "basis": basis, "note": note, "via": via});
     d.as_object_mut().iter_mut().for_each(|m| m.retain(|_, v| !v.is_null()));
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, ask.issue, "decision", d))?;
-    // #779: a `RESPAWN_LOOP` ask's [park] parks the issue ([try again] is the decision spawn reads).
     if ask.data.get("respawn_loop").is_some() && text == "park" {
         emit(
             &ctx.state,
@@ -764,20 +740,18 @@ pub(crate) fn answer_with(
     }
     let why = via.map_or("answer", |_| "board");
     if let Some(n) = ask.issue {
-        let id = format!("{id}-{by}"); // #509: a default changed once is a new trigger
-        let _ = crate::drive::kick_once(ctx, r, (fleet, n), why, Some(&id)); // #304: after the decision is logged
+        let id = format!("{id}-{by}");
+        let _ = crate::drive::kick_once(ctx, r, (fleet, n), why, Some(&id));
     }
     let mins = cfg.limits.ask_default_minutes;
     let note = (by == "default").then(|| format!(" (default after {mins} min, nobody replied)"));
     let msg = format!("DECISION {id}: {text}{}", note.unwrap_or_default());
-    // #633: an attached cooee thread reads the decision from `/api/v1/events`.
     if let Some(t) = ask
         .str("thread")
         .filter(|t| orchestrator::attached(&events, t).is_some())
     {
         return Ok(writeln!(out, "{fleet} {id}: {text} -> {t}")?);
     }
-    // #584: a typed answer's conductor ran it, the owner's line already in its conversation.
     if let Some(t) = ask.str("thread").filter(|_| by != TYPED) {
         let agent = orchestrator::say(ctx, cfg, r, (t, &msg, &[]), (by, true))?;
         let q = ask.str("question").unwrap_or_default();
@@ -790,7 +764,6 @@ pub(crate) fn answer_with(
     let Some(agent) = deliver(ctx, cfg, r, ask, &msg, true)? else {
         let merged = events::closed(&events, ask) == Some("closed: merged");
         let open = ask.issue.filter(|_| !merged);
-        // #778: the issue's next lane takes the answer: its start is pending until that lane spawns.
         if let Some(n) = open {
             let st = events::fold(&events).remove(&(fleet.to_string(), n));
             let role = st
@@ -805,7 +778,6 @@ pub(crate) fn answer_with(
     Ok(writeln!(out, "{fleet} {id}: {text} -> {agent}")?)
 }
 
-/// #325: the lane an answer to `ask` goes to: the asking agent's, else (unknown or closed) the issue's current one.
 fn answer_lane<'a>(events: &'a [Event], ask: &Event) -> Option<&'a Event> {
     let open = |sp: &&Event| {
         let lane = ["lane-closed", "lane-killed", "lane-reaped"];
@@ -822,7 +794,6 @@ fn answer_lane<'a>(events: &'a [Event], ask: &Event) -> Option<&'a Event> {
 pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, first: bool) -> Result<Option<String>> {
     let events = working(&ctx.state)?;
     let sp = answer_lane(&events, ask);
-    // #424: no open lane, but the asking agent still runs in its lane's worktree: typed into that pane.
     let was = ask.str("agent").and_then(|a| events::last_spawn(&events, a));
     let agent = sp.or(was).and_then(|e| e.str("agent")).unwrap_or_default();
     let on = &crate::hosts::On::of(r, sp.or(was));
@@ -872,7 +843,6 @@ pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, 
         .filter(shown)
         .collect();
     if as_json {
-        // #446: and why each closed (`closed`, null while open).
         let mut rows = Vec::new();
         for e in &open {
             let mut v = serde_json::to_value(e)?;

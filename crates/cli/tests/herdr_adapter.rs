@@ -1,4 +1,3 @@
-//! #60 (amendment C): src/herdr.rs is the one herdr adapter; no other src file builds a `herdr` argv.
 use std::path::{Path, PathBuf};
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -20,7 +19,6 @@ fn only_herdr_rs_runs_herdr() {
         rust_files(&crates.join(c).join("src"), &mut files);
     }
     assert!(files.iter().any(|f| f.ends_with("herdr.rs")), "src/herdr.rs exists");
-    // The program name, or the head of a herdr argv (`"pane", "read"`, `"agent", "prompt"`, …).
     let heads = [
         "\"herdr\"",
         "[\"pane\", \"",
