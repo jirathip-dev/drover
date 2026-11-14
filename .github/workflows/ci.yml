@@ -22,8 +22,11 @@ jobs:
         run: cargo build --release --locked
       - name: fmt
         run: cargo fmt --check
-      - name: clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: "clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/)"
+        run: |
+          cargo clippy --all-targets --locked -- -D warnings
+          n=$(grep -rE '#!?\[allow\(' crates | wc -l)
+          test "$n" -le 10 || { echo "::error::$n #[allow] attributes in crates/, at most 10"; exit 1; }
       - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary)"
         run: cargo test --locked
       - name: "no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)"
@@ -49,7 +52,9 @@ jobs:
         run: "! cargo tree --locked -p drover -e normal --prefix none | grep -E '^ts-rs(-macros)? v'"
       - uses: taiki-e/install-action@v2
         with:
-          tool: just
+          tool: just,cargo-deny
+      - name: "deny (#808: licences, advisories, duplicate versions, sources; deny.toml)"
+        run: cargo deny --locked check
       - name: "TS types (#375): regenerate, no drift from assets/types/, serde's JSON type-checks with tsc, no hand-written copies"
         run: |
           npm install -g typescript@7.0.2
@@ -83,6 +88,16 @@ jobs:
           n=$(cat assets/*.js assets/*.css | wc -l)
           echo "assets JS/CSS lines: $n"
           test "$n" -le 1500 || echo "::warning::assets JS/CSS is $n lines, over the 1500 soft budget"
+
+  # #808: a workflow file GitHub can't parse fails here, on the PR.
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint (.github/workflows/**)
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+          ./actionlint -color
 
   # #265: the TypeScript board (web/): strict typecheck, the esbuild bundle, and the committed dist must match it.
   # Node is CI's and developers' only: the binary embeds the committed web/dist, so `cargo install` needs no Node.

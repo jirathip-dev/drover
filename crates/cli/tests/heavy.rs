@@ -126,7 +126,9 @@ fn extra_commands_wait_first_come_first_served_and_all_finish() {
     until("c's start", || log(&d).contains("start c"));
     std::thread::sleep(Duration::from_millis(600));
     assert!(!log(&d).contains("start e"), "{}", log(&d));
-    ["b", "c", "e"].iter().for_each(|j| go(&d, j));
+    for j in ["b", "c", "e"] {
+        go(&d, j);
+    }
     finish(kids);
     let l = log(&d);
     assert!(
@@ -134,7 +136,7 @@ fn extra_commands_wait_first_come_first_served_and_all_finish() {
         "{l}"
     );
     assert_eq!(l.matches("end ").count(), 4);
-    assert!(tickets(&d).is_empty());
+    assert_eq!(tickets(&d), [] as [drover::heavy::Ticket; 0]);
 }
 
 #[test]
@@ -145,7 +147,9 @@ fn a_kind_limit_holds_its_kind_while_others_run() {
     let c = start(&d, "sh test.sh c");
     until("c's start", || log(&d).contains("start c"));
     assert!(!log(&d).contains("start b"), "{}", log(&d));
-    ["a", "b", "c"].iter().for_each(|j| go(&d, j));
+    for j in ["a", "b", "c"] {
+        go(&d, j);
+    }
     finish(vec![a, b, c]);
     assert!(log(&d).contains("end b"));
 }
@@ -160,7 +164,9 @@ fn a_killed_holder_frees_its_slot() {
     a.kill().unwrap();
     a.wait().unwrap();
     until("c's start", || log(&d).contains("start c"));
-    ["a", "b", "c"].iter().for_each(|j| go(&d, j));
+    for j in ["a", "b", "c"] {
+        go(&d, j);
+    }
     finish(holders);
     finish(vec![c]);
 }
@@ -170,7 +176,9 @@ fn a_wait_past_the_limit_runs_and_logs_heavy_timeout_once() {
     let d = lane("heavy_wait_minutes = 0");
     let kids = ["a", "b", "c"].map(|j| start(&d, &format!("sh test.sh {j}")));
     until("three running", || log(&d).lines().count() == 3);
-    ["a", "b", "c"].iter().for_each(|j| go(&d, j));
+    for j in ["a", "b", "c"] {
+        go(&d, j);
+    }
     finish(kids.into());
     let state = d.join("state/events.jsonl");
     let ev = drover::events::read(&state).unwrap();

@@ -26,7 +26,7 @@ fn forms(html: &str) -> Vec<Form> {
             let tags = |t: &str| {
                 f.split(&format!("<{t} "))
                     .skip(1)
-                    .map(|x| format!(" {}", &x[..x.find('>').unwrap() + 1]))
+                    .map(|x| format!(" {}", &x[..=x.find('>').unwrap()]))
                     .collect::<Vec<_>>()
             };
             let hidden = tags("input")

@@ -159,7 +159,7 @@ impl Plan {
             let faults: Vec<usize> = (0..p.items.len())
                 .filter(|&i| !matches!(p.items[i].1, Ev::Timer { .. }))
                 .collect();
-            let pick = |rng: &mut Rng, v: &[usize]| v.get(rng.below(v.len() as u64) as usize).copied();
+            let pick = |rng: &mut Rng, v: &[usize]| v.get(usize::try_from(rng.below(v.len() as u64)).unwrap()).copied();
             match rng.below(6) {
                 0 => {
                     if let Some(i) = pick(rng, &faults) {
@@ -173,7 +173,7 @@ impl Plan {
                         p.items.push((t, Ev::Load(40)));
                         p.items.push((t + rng.range(120, 1200), Ev::Load(1)));
                     } else {
-                        let kind = ["drive", "kick", "check"][rng.below(3) as usize];
+                        let kind = ["drive", "kick", "check"][usize::try_from(rng.below(3)).unwrap()];
                         p.items.push((t, Ev::Crash(kind.into())));
                     }
                 }
@@ -183,9 +183,9 @@ impl Plan {
                     }
                 }
                 3 | 4 => {
-                    let role = ["impl", "rev"][rng.below(2) as usize];
+                    let role = ["impl", "rev"][usize::try_from(rng.below(2)).unwrap()];
                     let s = (role.to_string(), default_script(rng, role));
-                    let at = rng.below(p.scripts.len() as u64 + 1) as usize;
+                    let at = usize::try_from(rng.below(p.scripts.len() as u64 + 1)).unwrap();
                     if rng.chance(50) && at < p.scripts.len() {
                         p.scripts[at] = s;
                     } else {
@@ -317,8 +317,8 @@ pub fn hunt(start: &[u64], rng: u64, sabotage: Option<Sabotage>, more: impl Fn(u
                 continue;
             }
             let new = o.cov.difference(&seen).count();
-            let worse = o.peaks.iter().zip(&worst).any(|(m, w)| m > w);
-            if new > 0 || worse {
+            let regressed = o.peaks.iter().zip(&worst).any(|(m, w)| m > w);
+            if new > 0 || regressed {
                 seen.extend(o.cov);
                 worst = worst.iter().zip(&o.peaks).map(|(a, b)| *a.max(b)).collect();
                 h.corpus.push(p.clone());
@@ -329,7 +329,7 @@ pub fn hunt(start: &[u64], rng: u64, sabotage: Option<Sabotage>, more: impl Fn(u
         }
         next = (0..8)
             .map(|_| {
-                let i = rng.below(h.corpus.len() as u64) as usize;
+                let i = usize::try_from(rng.below(h.corpus.len() as u64)).unwrap();
                 h.corpus[i].mutate(&mut rng)
             })
             .collect();

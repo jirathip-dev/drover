@@ -392,7 +392,10 @@ fn herd_horses_are_one_size_at_390px() {
         let [sw, vw, ranch, n, working, idle, done, blocked, queued] = v[..] else {
             unreachable!()
         };
-        assert!(sw <= 390.0 && vw == 390.0, "{name}: scrollWidth {sw} at {vw}");
+        assert!(
+            sw <= 390.0 && (vw - 390.0).abs() < f64::EPSILON,
+            "{name}: scrollWidth {sw} at {vw}"
+        );
         assert!((ranch - 0.22 * 844.0).abs() <= 1.0, "{name}: ranch {ranch}px");
         assert_eq!(n, bands, "{name}: bands drawn");
         let lane: Vec<f64> = [working, idle, done, blocked]

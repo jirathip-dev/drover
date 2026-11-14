@@ -107,7 +107,7 @@ fn truncation_rotation_or_a_changed_prefix_reads_the_whole_file() {
 fn a_1_mb_transcript_plus_a_400_byte_append_reads_under_2_kb() {
     let d = tmpdir("tail");
     let p = d.join("s.jsonl");
-    let big: String = (0..(1 << 20) / line(0).len() + 1).map(line).collect();
+    let big: String = (0..=((1 << 20) / line(0).len())).map(line).collect();
     assert!(big.len() >= 1 << 20);
     std::fs::write(&p, &big).unwrap();
     let mut t = Tail::default();

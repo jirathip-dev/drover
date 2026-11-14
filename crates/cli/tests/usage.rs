@@ -5,6 +5,7 @@ use drover::runner::{Out, Runner};
 use drover::serve::Server;
 use drover::usage::{epoch, lane_secs, parse_balance};
 use serde_json::json;
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 const DS_KEY: &str = concat!("sk", "-deepseekfixturekey0123456789");
@@ -120,7 +121,6 @@ fn config(d: &Path) -> String {
         format!("CLAUDE_CODE_OAUTH_TOKEN_A=a\nCLAUDE_CODE_OAUTH_TOKEN_B=b\nexport DEEPSEEK_API_KEY=\"{DS_KEY}\"\n"),
     )
     .unwrap();
-    use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&env, std::fs::Permissions::from_mode(0o600)).unwrap();
     CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"\naccounts = [\"A\", \"B\"]")
         + &format!(
@@ -239,7 +239,6 @@ fn deepseek_hints_when_the_env_file_lacks_the_key() {
 fn a_deepseek_env_file_others_can_read_is_refused() {
     let d = tmpdir("usage-0644");
     let c = ctx(&d, &config(&d));
-    use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(d.join("tokens.env"), std::fs::Permissions::from_mode(0o644)).unwrap();
     let r = stdin(Fake::default());
     let (code, out) = run(&c, &r, &["accounts"]);

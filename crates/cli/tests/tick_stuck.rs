@@ -352,7 +352,7 @@ fn a_drover_tick_over_its_limit_is_stopped_by_the_next_fast_step_and_logged_self
         .to_vec()
         .into_iter()
         .map(|e| e.kind)
-        .filter(|k| k.starts_with("s"))
+        .filter(|k| k.starts_with('s'))
         .collect();
     assert!(
         kinds.ends_with(&["slo-tick".into(), "self-heal".into(), "slo-ok".into()]),

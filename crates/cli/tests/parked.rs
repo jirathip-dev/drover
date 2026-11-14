@@ -196,8 +196,8 @@ fn a_fix_round_held_for_a_spawn_slot_is_not_parked() {
     );
     let s = Server::new(&c, &r, None);
     let shown = |s: &Server| {
-        let herd: serde_json::Value = serde_json::from_str(&get(s, "/herd.json")).unwrap();
-        let lanes = herd["fleets"][0]["lanes"].as_array().unwrap().clone();
+        let herd_json: serde_json::Value = serde_json::from_str(&get(s, "/herd.json")).unwrap();
+        let lanes = herd_json["fleets"][0]["lanes"].as_array().unwrap().clone();
         lanes.into_iter().find(|l| l["name"] == SAFE).unwrap()["shown"].clone()
     };
     assert_eq!(shown(&s), json!("parked · work on PR #42"), "not yet tried");

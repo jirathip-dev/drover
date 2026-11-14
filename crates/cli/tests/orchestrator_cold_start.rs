@@ -108,7 +108,7 @@ fn a_blocked_orchestrator_start_holds_no_request() {
             "/thread",
             &a,
             "op=answer&fleet=sendmeter&id=q1&choice=2",
-        )))
+        )));
     });
     let t = Instant::now();
     while !r.1.load(SeqCst) && t.elapsed() < Duration::from_secs(5) {

@@ -1676,7 +1676,6 @@ fn touched(r: &dyn Runner, wt: &Path) -> Option<u64> {
     Some(t)
 }
 
-#[allow(clippy::cast_precision_loss)]
 fn gb(bytes: u64) -> f64 {
     bytes as f64 / 1_073_741_824.0
 }

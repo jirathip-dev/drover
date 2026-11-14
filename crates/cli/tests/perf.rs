@@ -111,7 +111,7 @@ fn fetch(addr: std::net::SocketAddr, path: &str) -> (u128, String) {
 }
 
 fn drain(s: &mut std::net::TcpStream, ms: u64) -> String {
-    let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], [0u8; 65_536]);
+    let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], vec![0u8; 65_536]);
     while Instant::now() < end {
         match s.read(&mut b) {
             Ok(0) => break,
@@ -462,8 +462,8 @@ extern "C" {
 
 fn cpu_ms() -> f64 {
     let mut u = [0i64; 18];
-    assert_eq!(unsafe { getrusage(0, &mut u) }, 0);
-    let tv = |s: i64, us: i64| s as f64 * 1e3 + (us as u32) as f64 / 1e3;
+    assert_eq!(unsafe { getrusage(0, &raw mut u) }, 0);
+    let tv = |s: i64, us: i64| s as f64 * 1e3 + f64::from(u32::try_from(us).unwrap()) / 1e3;
     tv(u[0], u[1]) + tv(u[2], u[3])
 }
 
@@ -485,7 +485,9 @@ fn a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget() {
         "/",
         "/api/v1/queue",
     ];
-    paths.iter().for_each(|p| drop(fetch(addr, p)));
+    for p in &paths {
+        drop(fetch(addr, p));
+    }
     let t = cpu_ms();
     for i in 0..100 {
         if i % 10 == 0 {
@@ -590,7 +592,7 @@ fn huge() -> (drover::Ctx, Fake) {
         }
     }
     for i in 0..150_000 - log.len() as u64 {
-        let f = FLEETS[i as usize % 5];
+        let f = FLEETS[usize::try_from(i % 5).unwrap()];
         let d = json!({"step": "review", "code": "EXIT", "result": "exit 1: boom"});
         log.push(ev(NOW - 5_000 + i / 30, f, Some(1 + i % 40), "driven", d));
     }

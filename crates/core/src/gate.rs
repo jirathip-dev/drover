@@ -51,7 +51,6 @@ pub fn no_proof(body: &str) -> Option<String> {
     (!bad.is_empty()).then(|| bad.join("; "))
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn verdict(
     ctx: &Ctx,
     cfg: &Config,

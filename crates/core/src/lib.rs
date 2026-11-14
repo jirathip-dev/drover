@@ -466,7 +466,6 @@ pub fn orchestrator_answer(
 }
 
 /// #817: `drover extend` by thread `t`'s orchestrator: the owner's `typed` line, else its extend ask answered on `basis`.
-#[allow(clippy::too_many_arguments)]
 pub fn orchestrator_extend(
     ctx: &Ctx,
     cfg: &Config,
@@ -655,7 +654,6 @@ fn in_thread(e: &Event, by: &str) -> bool {
         .is_some_and(|t| e.str("thread") == Some(t))
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn answer_with(
     ctx: &Ctx,
     cfg: &Config,

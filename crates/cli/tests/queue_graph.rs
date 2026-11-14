@@ -183,7 +183,7 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
             String::from_utf8_lossy(&o.stderr)
         );
         assert!(
-            v[0] <= 390.0 && v[1] == 390.0,
+            v[0] <= 390.0 && (v[1] - 390.0).abs() < f64::EPSILON,
             "{name}: scrollWidth {} at {}",
             v[0],
             v[1]

@@ -106,7 +106,7 @@ fn a_waiting_card_stays_on_the_first_page_and_a_stale_one_cannot_apply() {
 }
 
 fn drain(s: &mut TcpStream, ms: u64) -> String {
-    let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], [0u8; 65_536]);
+    let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], vec![0u8; 65_536]);
     while Instant::now() < end {
         match s.read(&mut b) {
             Ok(0) => break,

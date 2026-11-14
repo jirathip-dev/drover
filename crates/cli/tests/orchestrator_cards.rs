@@ -3,6 +3,7 @@ use common::*;
 use drover::events::{read, Event};
 use drover::serve::Server;
 use serde_json::json;
+use std::os::unix::fs::PermissionsExt;
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -433,7 +434,6 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
     let res = req(&s, "/thread", &form, &cookie, T + 10);
     assert_eq!(body(&res), "secret API_KEY set ✓ (by owner)\n", "{res}");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), value);
-    use std::os::unix::fs::PermissionsExt;
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     let calls = f.calls.borrow().join("\n");
     let log = drover::events::jsonl(&c.state).unwrap();

@@ -323,9 +323,9 @@ fn an_idle_cloud_host_saves_each_lane_to_wip_then_stops() {
     assert_eq!(drover::cloud::state(&events, "cloud1"), "stopped");
     let (c, cfg) = running("cloud-busy");
     let live = BTreeMap::from([("cloud1".to_string(), Some(vec![json!({"name": "x"})]))]);
-    assert!(tick(&c, &cfg, &lane_fake(), &live).is_empty());
+    assert_eq!(tick(&c, &cfg, &lane_fake(), &live), [] as [std::string::String; 0]);
     let soon = drover::Ctx { now: NOW - 1000, ..c };
-    assert!(tick(&soon, &cfg, &lane_fake(), &idle()).is_empty());
+    assert_eq!(tick(&soon, &cfg, &lane_fake(), &idle()), [] as [std::string::String; 0]);
 }
 
 #[test]

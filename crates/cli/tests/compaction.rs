@@ -18,8 +18,8 @@ fn log(seed: u64, n: u64, t0: u64) -> Vec<Event> {
     let mut r = Rng(seed);
     (0..n)
         .map(|i| {
-            let (fleet, issue) = (["a", "b"][r.n(2) as usize], 1 + r.n(6));
-            let role = ["impl", "rev"][r.n(2) as usize];
+            let (fleet, issue) = (["a", "b"][usize::try_from(r.n(2)).unwrap()], 1 + r.n(6));
+            let role = ["impl", "rev"][usize::try_from(r.n(2)).unwrap()];
             let agent = format!("{fleet}-{role}-{issue}-{}", r.n(3));
             let sha = format!("{:040}", r.n(4));
             let (kind, d) = match r.n(11) {
@@ -29,10 +29,16 @@ fn log(seed: u64, n: u64, t0: u64) -> Vec<Event> {
                 ),
                 3..=4 => (
                     "verdict",
-                    json!({"sha": sha, "verdict": (["PASS", "FAIL"][r.n(2) as usize])}),
+                    json!({"sha": sha, "verdict": (["PASS", "FAIL"][usize::try_from(r.n(2)).unwrap()])}),
                 ),
-                5 => (["merged", "closed", "needs-human"][r.n(3) as usize], json!({})),
-                6 => ("clean", json!({"why": (["merged", "closed"][r.n(2) as usize])})),
+                5 => (
+                    ["merged", "closed", "needs-human"][usize::try_from(r.n(3)).unwrap()],
+                    json!({}),
+                ),
+                6 => (
+                    "clean",
+                    json!({"why": (["merged", "closed"][usize::try_from(r.n(2)).unwrap()])}),
+                ),
                 7 => ("lane-killed", json!({"role": role, "agent": agent})),
                 8 => ("round-extended", json!({})),
                 9 => ("stall", json!({"reason": "quiet"})),
@@ -166,7 +172,9 @@ fn the_fold_of_a_50mb_log_takes_under_20ms() {
     }
     std::fs::write(&p, text).unwrap();
     checkpoint(&p).unwrap();
-    log(7, 50, seq * 600).iter().for_each(|e| append(&p, e).unwrap());
+    for e in &log(7, 50, seq * 600) {
+        append(&p, e).unwrap();
+    }
     let t = std::time::Instant::now();
     let st = states(&p).unwrap();
     let ms = t.elapsed().as_secs_f64() * 1e3;
@@ -194,7 +202,9 @@ fn a_5mb_build_cloned_is_stored_in_16kb() {
             json!({"dirs": ["target"], "secs": 7, "errors": [big]}),
         ),
     ];
-    ev.iter().for_each(|e| append(&p, e).unwrap());
+    for e in &ev {
+        append(&p, e).unwrap();
+    }
     let back = read(&p).unwrap();
     let stored = serde_json::to_string(&Event {
         seq: 0,

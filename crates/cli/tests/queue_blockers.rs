@@ -42,7 +42,7 @@ fn several_blockers_add_up_and_the_issue_starts_once_all_merged() {
     merged(&c, 110, 13);
     assert_eq!(blockers(&c, 40), json!([12]), "merged blockers drop out");
     assert_eq!(next(), (2, "#40 is blocked by #12\n".into()));
-    assert!(start().is_empty());
+    assert_eq!(start(), [] as [std::string::String; 0]);
     merged(&c, 120, 12);
     assert_eq!(start(), ["40"]);
     assert_eq!(next(), (0, "40\n".into()));

@@ -41,11 +41,11 @@ fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
     let mut order: Vec<&str> = names.to_vec();
     order.reverse();
     assert!(order.windows(2).all(|w| at(w[0]) < at(w[1])), "newest first: {card}");
-    let older = card
+    let prior = card
         .find("<details class=qm><summary>+2 older</summary>")
         .expect("+2 older");
     assert!(
-        at("impl-3-f1") < older && older < at("rev-3-r1"),
+        at("impl-3-f1") < prior && prior < at("rev-3-r1"),
         "the 2 oldest under +2 older: {card}"
     );
     assert!(card.starts_with(

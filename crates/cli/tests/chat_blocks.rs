@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 fn lines(s: &[&str]) -> Vec<String> {
-    s.iter().map(|l| l.to_string()).collect()
+    s.iter().map(std::string::ToString::to_string).collect()
 }
 
 fn file(p: &Path) -> Vec<String> {
@@ -110,8 +110,8 @@ fn sgr_maps_to_the_nearest_board_token() {
 
 #[test]
 fn markdown_is_escaped_text_plus_spans() {
-    let js = r#"console.log(prose(['⏺ # Plan <script>alert(1)</script>', '  Fix **the bug** in `src/a.rs` & <b>x</b>,', '  wrapped.',
-      '', '  - one', '  - two `<i>`', '', '  1. first', '  2. second', '', '  then \x1b[38;2;177;185;249mcargo test\x1b[0m runs']))"#;
+    let js = r"console.log(prose(['⏺ # Plan <script>alert(1)</script>', '  Fix **the bug** in `src/a.rs` & <b>x</b>,', '  wrapped.',
+      '', '  - one', '  - two `<i>`', '', '  1. first', '  2. second', '', '  then \x1b[38;2;177;185;249mcargo test\x1b[0m runs']))";
     let Some(out) = node(js) else { return };
     assert_eq!(
         out.trim(),
@@ -181,14 +181,14 @@ fn an_acp_transcript_keeps_its_line_breaks_and_one_line_per_tool() {
 
 #[test]
 fn tool_runs_tag_cap_and_keep_the_failure() {
-    let js = r#"
+    let js = r"
 const out = n => Array.from({ length: n }, (_, i) => (i ? '     ' : '  ⎿  ') + 'line ' + i);
 const ok = blocks(['⏺ Bash(cargo test)', ...out(29)], 'claude', false)[0].html;
 const bad = blocks(['\x1b[38;2;255;107;128m⏺\x1b[0m Bash(cargo test)', '  ⎿  Error: Exit code 101', ...out(28).map(l => l.replace('⎿', ' '))], 'claude', false)[0].html;
 const run = blocks(['⏺ Read(src/a.rs)'], 'claude', true)[0].html;
 const diff = blocks(['⏺ Update(src/a.rs)', '  ⎿  Updated src/a.rs', '      52 \x1b[48;2;61;1;0m-        .filter(|s| s.state)\x1b[0m'], 'claude', false)[0].html;
 console.log(JSON.stringify([ok, bad, run, diff]));
-"#;
+";
     let Some(out) = node(js) else { return };
     let [ok, bad, run, diff]: [String; 4] = serde_json::from_str(&out).unwrap();
     assert!(
@@ -303,7 +303,7 @@ fn a_claude_spinner_is_its_word_and_elapsed_time() {
 
 #[test]
 fn the_default_view_keeps_prompts_final_replies_and_asks() {
-    let js = r#"
+    let js = r"
 const lines = ['> fix it', '⏺ Looking.', '⏺ Bash(cargo test)', '  ⎿  ok', '⏺ Fixed and tested.', '> ship it', '⏺ Read(a.rs)', '⏺ Shipped.'];
 const notes = [{ at: 1, text: 'spawned w-impl-9' }, { at: 1793700600, text: 'ask: merge now?' }];
 const pane = matters(lines, null, notes, 'claude').map(b => b.k + ' ' + b.key.split(':')[1]);
@@ -312,7 +312,7 @@ const ts = matters([], said, notes, 'claude');
 const k = (l, s, h) => matters(l, s, [], h).map(b => b.k).join(' ');
 const other = [k(lines, [], 'claude'), k(lines, null, 'hermes'), k(['⏺ Bash(cargo test)', '  ⎿  ok'], null, 'hermes')];
 console.log(JSON.stringify([pane, ts.map(b => b.k), ts[3].html, other]));
-"#;
+";
     let Some(out) = node(js) else { return };
     let (pane, ts, html, other): (Vec<String>, Vec<String>, String, Vec<String>) = serde_json::from_str(&out).unwrap();
     assert_eq!(

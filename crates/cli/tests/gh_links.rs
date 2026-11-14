@@ -103,8 +103,8 @@ fn an_issue_with_no_pr_links_the_ticks_latest_run_or_nothing() {
         "{q}"
     );
     let url = format!("{GH}/actions/runs/99");
-    let _sh = FakeShed::new();
-    _sh.attach(&c);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = Fake::default().reply("gh pr view", "").reply(
         "gh run list -R jirathip-dev/sendmeter --branch issue-17",
         &format!("[{{\"url\":\"{url}\"}}]"),

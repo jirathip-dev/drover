@@ -3,6 +3,7 @@ use common::*;
 use drover::events::{append, read, Event};
 use drover::serve::Server;
 use serde_json::json;
+use std::os::unix::fs::PermissionsExt;
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -427,7 +428,6 @@ fn pairing_codes_devices_and_prompt_events() {
     let cookie = paired(&s, &c);
     let file = drover::db::file(&c.state);
     let stored = serde_json::to_string(&drover::devices::load(&c)).unwrap();
-    use std::os::unix::fs::PermissionsExt;
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     let tok = &cookie[11..cookie.len() - 2];
     assert!(
@@ -494,7 +494,7 @@ fn pairing_codes_devices_and_prompt_events() {
         res.starts_with("HTTP/1.1 303 ") && res.contains("device%20removed"),
         "{res}"
     );
-    assert!(drover::devices::load(&c).is_empty());
+    assert_eq!(drover::devices::load(&c), [] as [drover::devices::Device; 0]);
     assert!(send(&cookie, "again").starts_with("HTTP/1.1 401 "));
 }
 
@@ -810,7 +810,7 @@ fn chat_views_never_blank() {
             String::from_utf8_lossy(&o.stderr)
         );
         assert!(
-            m[0] >= 1.0 && m[1] >= 1.0 && m[2] == 1.0 && m[3] == 0.0,
+            m[0] >= 1.0 && m[1] >= 1.0 && (m[2] - 1.0).abs() < f64::EPSILON && m[3] == 0.0,
             "{agent}: default msgs, full blocks, toggled, errors: {m:?}"
         );
     }
@@ -857,7 +857,7 @@ fn one_401_never_latches_unpaired() {
         assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
         out.split_whitespace()
             .skip(2)
-            .map(|n| n.parse::<f64>().unwrap() as u8)
+            .map(|n| n.trim_end_matches(".0").parse::<u8>().unwrap())
             .collect::<Vec<_>>()
     };
     assert_eq!(

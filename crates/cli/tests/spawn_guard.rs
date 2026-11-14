@@ -319,7 +319,7 @@ impl Runner for Hermes<'_> {
             self.sh.lock().waits.clear();
             self.sh.screen(IMPL, "fleet-impl ❯  ctx 52K");
         }
-        self.fake.sleep(secs)
+        self.fake.sleep(secs);
     }
 }
 
@@ -365,7 +365,7 @@ fn an_orch_spawn_is_refused_and_every_lane_takes_an_issue() {
     assert!(read(&c.state).unwrap_or_default().is_empty());
     assert_eq!(run(&c, &r, &["spawn", "sendmeter", "-", "impl"]).0, 1);
     assert_eq!(run(&c, &r, &["spawn", "sendmeter", "12", "boss"]).0, 1);
-    assert!(sh.all("run").is_empty());
+    assert_eq!(sh.all("run"), [] as [serde_json::Value; 0]);
 }
 
 #[test]

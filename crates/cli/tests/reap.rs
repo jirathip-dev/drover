@@ -147,7 +147,7 @@ fn host_tab_shows_leftovers_and_reap_kills_them() {
     );
     let res = String::from_utf8_lossy(&s.respond(&unpaired, 1_000_000)).into_owned();
     assert!(res.starts_with("HTTP/1.1 401"), "only a paired device reaps: {res}");
-    assert!(kills(&r).is_empty());
+    assert_eq!(kills(&r), [] as [std::string::String; 0]);
     let cookie = pair(&s, &c, "", 1_000_000);
     let req = format!(
         "POST / HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",

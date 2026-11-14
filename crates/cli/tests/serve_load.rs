@@ -40,7 +40,7 @@ fn get(addr: SocketAddr, path: &str, cookie: &str, want: usize) -> (String, Dura
     let mut s = TcpStream::connect(addr).unwrap();
     s.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
     let _ = s.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n").as_bytes());
-    let (mut out, mut b) = (vec![], [0u8; 65_536]);
+    let (mut out, mut b) = (vec![], vec![0u8; 65_536]);
     while let Ok(n @ 1..) = s.read(&mut b) {
         out.extend_from_slice(&b[..n]);
         if want > 0 && out.len() >= want {
@@ -76,10 +76,10 @@ fn api_v1_reads_and_live_answer_within_200ms_with_the_db_write_locked_and_gh_slo
     for round in 0..4 {
         for p in paths.iter().map(|p| format!("/api/v1/{p}")).chain(["/live".into()]) {
             let (r, d) = get(addr, &p, &cookie, 15);
-            let line = r.lines().next().unwrap_or("(no answer)").to_string();
-            eprintln!("round {round} {p} first bytes: {d:?} {line}");
+            let first_line = r.lines().next().unwrap_or("(no answer)").to_string();
+            eprintln!("round {round} {p} first bytes: {d:?} {first_line}");
             [&mut api, &mut live][usize::from(p == "/live")].push(d);
-            status.push(line);
+            status.push(first_line);
         }
     }
     db.execute_batch("COMMIT").unwrap();

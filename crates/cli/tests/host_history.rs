@@ -93,7 +93,7 @@ fn the_file_stays_under_the_size_bound() {
         record(&c, &[row(c.now, "mini", 1.23), row(c.now, "bazzite", 0.45)], 2).unwrap();
     }
     let p = c.state.with_file_name("host-history.jsonl");
-    let size = std::fs::metadata(&p).unwrap().len() as usize;
+    let size = usize::try_from(std::fs::metadata(&p).unwrap().len()).unwrap();
     assert!(size <= 2 * BOUND, "{size} B over {} B", 2 * BOUND);
     let rows = history(&c);
     assert!(
@@ -117,7 +117,7 @@ fn one_host_keeps_24h_and_rewrites_rarely() {
         rewrites += usize::from(ino != 0 && now != ino);
         ino = now;
     }
-    let size = std::fs::metadata(&p).unwrap().len() as usize;
+    let size = usize::try_from(std::fs::metadata(&p).unwrap().len()).unwrap();
     assert!(size <= BOUND, "{size} B over {BOUND} B");
     assert!(rewrites <= 1, "{rewrites} rewrites");
     let rows = history(&c);
@@ -140,7 +140,10 @@ fn downsampling_keeps_the_worst_per_bucket() {
         Some((3.71, NOW - 3_600 + 60 + 17 * 60)),
         "the peak and its own minute"
     );
-    assert!(load.iter().enumerate().all(|(i, v)| i == 1 || v.unwrap().0 == 0.5));
+    assert!(load
+        .iter()
+        .enumerate()
+        .all(|(i, v)| i == 1 || (v.unwrap().0 - 0.5).abs() < f64::EPSILON));
     let disk = spark(&rows, "mini", "disk", (NOW, 3_600, 6));
     assert_eq!(disk[4].unwrap().0, 9.0, "free space keeps the minimum");
     assert_eq!(spark(&rows, "bazzite", "load", (NOW, 3_600, 6)), vec![None; 6]);
@@ -256,9 +259,12 @@ fn the_byte_bound_holds_with_long_command_lines() {
         std::fs::write(c.state.with_file_name("host-watch.at"), c.now.to_string()).unwrap();
         drover::hosts::sample(&c, &cfg, &r, &[]).unwrap();
     }
-    let size = std::fs::metadata(c.state.with_file_name("host-history.jsonl"))
-        .unwrap()
-        .len() as usize;
+    let size = usize::try_from(
+        std::fs::metadata(c.state.with_file_name("host-history.jsonl"))
+            .unwrap()
+            .len(),
+    )
+    .unwrap();
     assert!(size <= 2 * BOUND, "{size} B over {} B", 2 * BOUND);
     let rows = history(&c);
     assert!(rows.len() <= 2 * 1_600 && rows.len() >= 1_440, "{} rows", rows.len());

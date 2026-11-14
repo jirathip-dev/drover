@@ -11,7 +11,7 @@ fn setup(name: &str) -> (drover::Ctx, FakeShed) {
         format!("{CONFIG}\n[fleet.drover]\nrepo = \"o/drover\"\nlocal = \"/p/drover\"\nintegration = \"staging\"\n");
     let c = ctx(&tmpdir(name), &cfg);
     let ev = |ts: u64, fleet: &str, issue: Option<u64>, kind: &str, d: Value| {
-        append(&c.state, &Event::new(ts, fleet, issue, kind, d)).unwrap()
+        append(&c.state, &Event::new(ts, fleet, issue, kind, d)).unwrap();
     };
     let spawn = json!({"role": "impl", "agent": "drover-impl-5", "harness": "claude", "model": "sonnet"});
     ev(900_500, "drover", Some(5), "spawn", spawn);
@@ -71,7 +71,7 @@ fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_clos
         &events,
         &st,
         &agents,
-        &Default::default(),
+        &std::collections::BTreeMap::default(),
     );
     let row = |l: &drover::lanes::Lane| {
         let s = |v: &Option<String>| v.clone().unwrap_or_default();

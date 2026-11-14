@@ -318,9 +318,12 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "→ drover timer install",
         ),
         (
-            |_, _, r| match cfg!(target_os = "macos") {
-                true => r.once("launchctl print", 0, "").once("launchctl print", 1, ""),
-                false => r.once("systemctl --user is-active", 3, ""),
+            |_, _, r| {
+                if cfg!(target_os = "macos") {
+                    r.once("launchctl print", 0, "").once("launchctl print", 1, "")
+                } else {
+                    r.once("systemctl --user is-active", 3, "")
+                }
             },
             "timer",
             "dev.drover.tick missing → drover timer install",

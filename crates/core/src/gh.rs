@@ -509,7 +509,6 @@ fn decided(pr: &Value, until: Until, req: &[String]) -> Option<i32> {
 }
 
 /// `drover wait`: poll the cached read, 30 s doubling to 5 min; 0 reached, 1 failed/closed, 124 timed out.
-#[allow(clippy::too_many_arguments)]
 pub fn wait(
     ctx: &Ctx,
     r: &dyn Runner,

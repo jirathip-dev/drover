@@ -47,7 +47,7 @@ pub struct Pane {
     pub born: u64,
     pub closed: bool,
     pub script: Option<Script>,
-    /// Prompts it was sent (a NO_PROOF refusal among them).
+    /// Prompts it was sent (a `NO_PROOF` refusal among them).
     pub told: Vec<String>,
 }
 
@@ -115,7 +115,7 @@ impl Model {
     }
     pub fn sha(&mut self) -> String {
         self.shas += 1;
-        format!("{:040x}", 0xc0ffee_u64 * 1_000_003 + self.shas)
+        format!("{:040x}", 0x00c0_ffee_u64 * 1_000_003 + self.shas)
     }
     pub fn live(&self) -> impl Iterator<Item = &Pane> {
         self.panes.iter().filter(|p| !p.closed && p.agent.is_some())
@@ -273,7 +273,7 @@ fn herdr(sim: &Arc<Sim>, w: &mut World, a: &[&str]) -> Out {
                     .to_string(),
             )
         }
-        ["workspace", "rename", ..] | ["agent", "rename", ..] => ok("{}"),
+        ["workspace" | "agent", "rename", ..] => ok("{}"),
         ["workspace", "close", ws] => {
             for p in m.panes.iter_mut().filter(|p| p.ws == *ws) {
                 p.closed = true;
@@ -298,15 +298,11 @@ fn herdr(sim: &Arc<Sim>, w: &mut World, a: &[&str]) -> Out {
             }
             ok(json!({"result": {"panes": list}}).to_string())
         }
-        ["pane", "run", pane, ..] => match m.pane(pane) {
-            Some(_) => ok("{}"),
-            None => err(1, "pane_not_found"),
-        },
         ["agent", "start", agent, "--kind", _, "--pane", pane, ..] => {
             let role = agent.split('-').nth(1).unwrap_or("impl").to_string();
             let queued = m.scripts.get_mut(&role).filter(|v| !v.is_empty()).map(|v| v.remove(0));
             let script = queued.unwrap_or_else(|| crate::scenario::default_script(&mut w.rng, &role));
-            w.log(format!("model: {agent} runs {script:?}"));
+            w.log(&format!("model: {agent} runs {script:?}"));
             let m = &mut w.model;
             let Some(p) = m.pane(pane) else {
                 return err(1, "pane_not_found");
@@ -362,7 +358,7 @@ fn herdr(sim: &Arc<Sim>, w: &mut World, a: &[&str]) -> Out {
             }
             None => err(1, "pane_not_found"),
         },
-        ["pane", "send-keys", pane, _] => match m.pane(pane) {
+        ["pane", "run", pane, ..] | ["pane", "send-keys", pane, _] => match m.pane(pane) {
             Some(_) => ok("{}"),
             None => err(1, "pane_not_found"),
         },
@@ -433,8 +429,7 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
             ok("")
         }
         ["issue", "comment", ..] | ["pr", "edit", ..] | ["label", "create", ..] => ok(""),
-        ["run", "list", ..] => ok("[]"),
-        ["issue", "list", ..] => ok("[]"),
+        ["run" | "issue", "list", ..] => ok("[]"),
         _ => unmodelled(),
     }
 }
@@ -446,7 +441,6 @@ fn git(w: &mut World, a: &[&str]) -> Out {
         rest => ("", rest),
     };
     match rest {
-        ["fetch", ..] => ok(""),
         ["rev-parse", "HEAD"] => match m.heads.get(dir) {
             Some(h) => ok(format!("{h}\n")),
             None => err(128, "fatal: not a git repository"),
@@ -461,9 +455,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             Some(h) => ok(format!("{h} {}\n", w.now)),
             None => err(128, "fatal"),
         },
-        ["status", "--porcelain", ..] => ok(""),
         ["rev-list", "--objects", "--disk-usage", ..] => ok("0\n"),
-        ["rev-list", ..] | ["log", ..] | ["diff", ..] | ["branch", ..] | ["ls-files", ..] => ok(""),
         ["reset", "--hard", b] => {
             if let Some(h) = m.origin.get(b.trim_start_matches("origin/")).cloned() {
                 m.heads.insert(dir.into(), h);
@@ -487,7 +479,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             };
             m.origin.insert(branch.into(), head.clone());
             if let Some(p) = m.prs.get_mut(branch) {
-                p.head = head.clone();
+                p.head.clone_from(&head);
             }
             m.version += 1;
             let t = w.model.ci_start(&head, w.now, &mut w.rng);
@@ -510,7 +502,6 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             m.heads.insert(dir.into(), n);
             ok("")
         }
-        ["add", ..] | ["reset", "-q", ..] | ["ls-tree", ..] | ["commit", ..] | ["push", ..] | ["stash", ..] => ok(""),
         ["merge-tree", ..] => ok(format!("{:040x}\n", 7)),
         ["show", _] => err(128, "fatal: path does not exist"),
         ["worktree", "add", .., path, sha] => {
@@ -523,7 +514,11 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             m.heads.remove(*path);
             ok("")
         }
-        ["worktree", "prune"] | ["remote", ..] | ["config", ..] => ok(""),
+        ["fetch" | "rev-list" | "log" | "diff" | "branch" | "ls-files" | "add" | "ls-tree" | "commit" | "push"
+        | "stash" | "remote" | "config", ..]
+        | ["status", "--porcelain", ..]
+        | ["reset", "-q", ..]
+        | ["worktree", "prune"] => ok(""),
         _ => unmodelled(),
     }
 }

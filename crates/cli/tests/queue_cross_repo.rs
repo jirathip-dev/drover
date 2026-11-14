@@ -49,7 +49,7 @@ fn another_fleets_blocker_holds_the_start_until_its_merged_event() {
     assert_ne!(code, 0, "an unknown fleet is refused: {out}");
     let ls = ok(&c, &r, &["queue", "sendmeter", "ls"]);
     assert!(ls.contains("#12    queued  blocked by drover#633"), "{ls}");
-    assert!(drive(&c, &r, 0).is_empty());
+    assert_eq!(drive(&c, &r, 0), [] as [std::string::String; 0]);
     assert!(drive(&c, &r, 3600).is_empty(), "never while it is open");
     assert!(sh.all("run").is_empty(), "no lane started");
     let d = json!({"pr": "640", "merge_sha": "abc", "into": "staging"});
@@ -74,7 +74,7 @@ fn a_blocker_in_another_repo_is_released_once_it_reads_closed() {
     assert_eq!(r.count(view), 1);
     let next = run(&c, &r, &["next", "sendmeter"]);
     assert_eq!(next, (2, "#12 is blocked by cooee#87\n".into()));
-    assert!(drive(&c, &r, 200).is_empty());
+    assert_eq!(drive(&c, &r, 200), [] as [std::string::String; 0]);
     assert_eq!(r.count(view), 1, "one read per 5 min");
     assert_eq!(drive(&c, &r, 400), ["start"], "reads CLOSED: starts this pass");
     assert_eq!(r.count(view), 2);
