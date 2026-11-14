@@ -1,0 +1,12 @@
+Decided: every board reader (serve.rs, chat.rs, v1.rs, screens.rs, lifeboat.rs) reads events::working; pages showing old history read their own kinds or range by SQL
+Because: q1686
+Because: "no longer load the whole event log; they use #948's fold and SQL reads"
+Decided: the event feed reads its exact seq range, at most cap+1 rows, through one new core read
+Because: crates/core/src/events.rs:849
+Decided: pending cards use the working set, as core's gate::held does since #948
+Because: crates/core/src/gate.rs:1074
+Rejected: a per-type read for pending cards — it walked every issue's events without the index (perf REBUILDS check)
+Rejected: moving only serve.rs and chat.rs — v1.rs then indexed the full log beside the working set: double memory, ask_scale failed
+Check: serve_working_set fails on base (12004 of 12004 rows read) and with /shot/ on the plain working set (404)
+Check: rg 'shared\(' crates/server finds nothing; serve --export still reads every event once by design
+Owner: The board no longer holds the whole event history in memory; its pages show the same data as before.
