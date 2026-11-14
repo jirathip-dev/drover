@@ -6,13 +6,13 @@ use crate::Ctx;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write;
 
 const DAYS: u64 = 14;
 const HOT: usize = 5;
 
-/// #889: a file `HOT` or more merged PRs touched in `DAYS` days, its `conflict-predicted` events and its PRs' update rounds.
+/// #889: a file `HOT` or more merged PRs touched in `DAYS` days, the distinct PR pairs it was predicted to conflict in (#973) and its PRs' update rounds.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct Hot {
     pub file: String,
@@ -58,7 +58,9 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
         Some(text) => crate::arch::converted(&text)?,
         None => vec![],
     };
-    touched.retain(|f, _| !crate::arch::any(&converted, f));
+    let tip = ok(r, "git", &["-C", &local, "ls-tree", "-r", "--name-only", &range])?;
+    let tip: BTreeSet<&str> = tip.lines().collect();
+    touched.retain(|f, _| tip.contains(f.as_str()) && !crate::arch::any(&converted, f));
     let events = read(&ctx.state)?;
     let same = |e: &&crate::events::Event| cfg.fleet(&e.fleet).is_ok_and(|g| g.repo == f.repo);
     let updates = |sha: &String| {
@@ -83,7 +85,9 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
                 .is_some_and(|a| a.contains(&json!(file)))
         };
         let recent = |e: &&crate::events::Event| e.kind == "conflict-predicted" && e.ts >= since;
-        events.iter().filter(same).filter(recent).filter(on).count()
+        let pair = |e: &crate::events::Event| (e.fleet.clone(), e.issue, e.data.get("other").map(Value::to_string));
+        let pairs: BTreeSet<_> = events.iter().filter(same).filter(recent).filter(on).map(pair).collect();
+        pairs.len()
     };
     let mut hot: Vec<Hot> = (touched.into_iter().filter(|(_, s)| s.len() >= HOT))
         .map(|(file, shas)| Hot {

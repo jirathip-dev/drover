@@ -77,8 +77,10 @@ full_first_paths = ["db/migrations/**", ".github/workflows/**"]
 ## Hotspots (#889)
 
 `drover hotspots [FLEET]` (every fleet when none is named) lists the files 5 or more merged PRs touched in the
-last 14 days on the integration branch, any language, each with its `conflict-predicted` events and the update rounds of
-the issues that touched it (drover's log, every fleet on the same repo). It keeps the list in the state folder as
+last 14 days on the integration branch, any language, each with the distinct PR pairs it was predicted to conflict in
+(#973: pairs, not one per push) and the update rounds of the issues that touched it (drover's log, every fleet on the
+same repo). A file no longer at the integration tip, or one `.drover/arch.toml` lists frozen or generated, is left
+out. It keeps the list in the state folder as
 `hotspots-<fleet>.json`. With any hot file it opens `hotspots: <fleet> week of <monday>`, or updates that issue while it
 is open, and queues it `--architect`. `drover tick` runs it weekly per fleet; `hotspots = "off"` in `[fleet.<n>]` opts
 out.

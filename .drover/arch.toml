@@ -1,3 +1,6 @@
+generated = ["assets/types/api.d.ts"]
+generate = "just types"
+
 [comments]
 policy = "off"
 except = ["assets/types/**", "web/dist/**"]
