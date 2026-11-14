@@ -59,7 +59,10 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
         None => vec![],
     };
     touched.retain(|f, _| !crate::arch::any(&converted, f));
-    let events = working(&ctx.state)?;
+    let (events, predicted) = (
+        working(&ctx.state)?,
+        crate::events::since(&ctx.state, &["conflict-predicted"], since)?,
+    );
     let same = |e: &&crate::events::Event| cfg.fleet(&e.fleet).is_ok_and(|g| g.repo == f.repo);
     let updates = |sha: &String| {
         let merged = events
@@ -82,8 +85,7 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
                 .and_then(Value::as_array)
                 .is_some_and(|a| a.contains(&json!(file)))
         };
-        let recent = |e: &&crate::events::Event| e.kind == "conflict-predicted" && e.ts >= since;
-        events.iter().filter(same).filter(recent).filter(on).count()
+        predicted.iter().filter(same).filter(on).count()
     };
     let mut hot: Vec<Hot> = (touched.into_iter().filter(|(_, s)| s.len() >= HOT))
         .map(|(file, shas)| Hot {

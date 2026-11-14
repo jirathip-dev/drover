@@ -187,7 +187,7 @@ pub fn lanes(cfg: &Config, r: &dyn Runner, ctx: &Ctx, (events, st): (&[Event], &
 pub fn wait_key(events: &[Event], all: &[Lane]) -> String {
     let last = events.last().map_or(0, |e| e.seq);
     let lanes: Vec<_> = all.iter().map(|l| format!("{}={}", l.name, l.state)).collect();
-    format!("{} {last} {}", events.len(), lanes.join(" "))
+    format!("{last} {}", lanes.join(" "))
 }
 
 /// The step's waits while its snapshot saw this log and these lanes; else worked out now.

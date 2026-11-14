@@ -257,15 +257,14 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
         None => old(e),
     };
     let mut seqs = vec![];
-    each(path, |e| seqs.extend(Some(e.seq).filter(|_| moved(e))))?;
+    each(path, |e| seqs.extend(moved(e).then_some(e.seq)))?;
     crate::db::archive(path, &seqs)
 }
 
-/// #948: `f` on each live event in order, read 5,000 at a time.
 fn each(path: &Path, mut f: impl FnMut(&Event)) -> Result<()> {
     let mut last = 0;
     loop {
-        let chunk = crate::db::events(path, "archived = 0 AND seq > ?1 ORDER BY seq LIMIT 5000", last)?;
+        let chunk = crate::db::events(path, &CHUNK.replace("WHERE", "WHERE archived = 0 AND"), last)?;
         let Some(e) = chunk.last() else { return Ok(()) };
         last = e.seq;
         chunk.iter().for_each(&mut f);
@@ -842,15 +841,16 @@ pub fn shared(path: &Path) -> Result<Arc<Log>> {
     log(path, false)
 }
 
-/// #948: the events of `WORKING` (open and recently active issues, the recent window, the kinds read over all history)
-/// with the saved fold, cached like `shared`: what every command but the old board and `events --jsonl` reads.
+/// #948: the `WORKING` events and the saved fold, cached like `shared` (whose log a process holding it reads instead).
 pub fn working(path: &Path) -> Result<Arc<Log>> {
-    log(path, true)
+    let full = (LOGS.lock().unwrap_or_else(PoisonError::into_inner))
+        .get(&(crate::db::file(path), false))
+        .is_some_and(|l| l.1.seq > 0);
+    log(path, !full)
 }
 
-/// #948: the working set's rows as of seq `?1`: the last 10,000 events, an open issue's, the newest of each noise kind
-/// per fleet, issue, agent and step (`rotate`'s key), a lane's lost lane; of the rest, an issue's active in those
-/// 10,000, those of no issue and the kinds read over every issue's history (lanes, accounts, roots, landings, asks).
+pub(crate) const CHUNK: &str = "seq IN (SELECT seq FROM events WHERE seq > ?1 ORDER BY seq LIMIT 5000)";
+
 const WORKING: &str = concat!(
     "archived = 0 AND seq <= ?1 AND type NOT IN ('build-cloned', 'build-reused') AND (seq > ?1 - 10000",
     " OR (fleet, issue) IN (SELECT fleet, issue FROM states WHERE done = 0)",
@@ -867,6 +867,16 @@ const WORKING: &str = concat!(
     "'revert-failed', 'reverted', 'land-fix', 'land-bisect', 'lesson-skipped'",
     ")))"
 );
+
+/// #948: the live events of `kinds` logged at `ts` or later, by seq: a reader over more history than `working` holds.
+pub fn since(path: &Path, kinds: &[&str], ts: u64) -> Result<Vec<Event>> {
+    let kinds: Vec<String> = kinds.iter().map(|k| format!("'{k}'")).collect();
+    crate::db::events(
+        path,
+        &format!("archived = 0 AND ts >= ?1 AND type IN ({})", kinds.join(", ")),
+        ts,
+    )
+}
 
 fn log(path: &Path, live: bool) -> Result<Arc<Log>> {
     let (file, logs) = ((crate::db::file(path), live), || {

@@ -139,7 +139,6 @@ fn folded(c: &Connection) -> Result<u64> {
     Ok(c.query_row(q, [], |r| r.get(0)).optional()?.unwrap_or(0))
 }
 
-/// #948: `evs` (the events after the saved fold, in order) folded into their issues' rows; the fold then covers them.
 fn fold(c: &Connection, evs: &[Event]) -> Result<()> {
     let mut m = events::States::new();
     for k in evs.iter().filter_map(|e| Some((e.fleet.clone(), e.issue?))) {
@@ -153,27 +152,16 @@ fn fold(c: &Connection, evs: &[Event]) -> Result<()> {
         let q = "INSERT OR REPLACE INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
         c.execute(q, params![s.fleet, s.issue, s.done(), serde_json::to_string(s)?])?;
     }
-    let seq = evs.last().map_or(0, |e| e.seq);
-    c.execute(
-        "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('fold', ?1, '{}')",
-        [seq],
-    )?;
-    Ok(())
+    let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('fold', ?1, '{}')";
+    Ok(c.execute(q, [evs.last().map_or(0, |e| e.seq)]).map(drop)?)
 }
 
-/// #948: the saved per-issue fold and the seq it covers, first brought up to the newest event (each append keeps it
-/// there: `insert`).
+/// #948: the saved per-issue fold (each append updates it) and the seq it covers, caught up to the newest event.
 pub fn states(state: &Path) -> Result<(u64, events::States)> {
     with(state, false, (0, events::States::new()), |c| {
-        if folded(c)? < last(c)? {
+        while folded(c)? < last(c)? {
             let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            loop {
-                let new = rows(&tx, "seq > ?1 ORDER BY seq LIMIT 5000", folded(&tx)?)?;
-                if new.is_empty() {
-                    break;
-                }
-                fold(&tx, &new)?;
-            }
+            fold(&tx, &rows(&tx, events::CHUNK, folded(&tx)?)?)?;
             tx.commit()?;
         }
         let mut q = c.prepare("SELECT json FROM states")?;
@@ -233,20 +221,15 @@ pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Opti
 }
 
 /// The events `filter` (an SQL condition over the columns, `?1` = `arg`) selects, by seq.
-pub(crate) fn events(state: &Path, filter: &str, arg: u64) -> Result<Vec<Event>> {
+pub(crate) fn events(state: &Path, filter: &str, arg: impl rusqlite::ToSql) -> Result<Vec<Event>> {
     with(state, false, vec![], |c| rows(c, filter, arg))
 }
 
 /// #701: event rows read from the database (a full read's cost is the log's length).
 pub static ROWS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
-fn rows(c: &Connection, filter: &str, arg: u64) -> Result<Vec<Event>> {
-    let order = if filter.contains("ORDER BY") {
-        ""
-    } else {
-        " ORDER BY seq"
-    };
-    let mut q = c.prepare(&format!("SELECT seq, json FROM events WHERE {filter}{order}"))?;
+fn rows(c: &Connection, filter: &str, arg: impl rusqlite::ToSql) -> Result<Vec<Event>> {
+    let mut q = c.prepare(&format!("SELECT seq, json FROM events WHERE {filter} ORDER BY seq"))?;
     let rows = q.query_map([arg], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?;
     rows.map(|r| {
         let (seq, json) = r?;

@@ -190,8 +190,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     // #333: a crashed kick's marker or lock goes on the next check; an issue SPAWN_PENDING has held back in every
     // pass for 15 min alerts once per episode (its fleet's earliest hold is the key).
     crate::drive::markers(ctx, cfg, r, true);
+    let passes = crate::events::since(&ctx.state, &["drive-pass"], ctx.now.saturating_sub(2 * 86_400))?;
     let mut held = BTreeMap::<(&str, u64), (u64, u64)>::new();
-    for e in events.iter().filter(|e| e.kind == "drive-pass") {
+    for e in &passes {
         let acts = e.data.get("actions").and_then(serde_json::Value::as_array);
         for a in acts.into_iter().flatten() {
             let Some(n) = a["issue"].as_u64() else { continue };
@@ -239,7 +240,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     // #604: every start a pass logged refused by one host gate (code and host) for 30 min alerts once per episode (its
     // first such pass is the key); a start that ran, or another refusal, ends it. A kick still pending says nothing.
     let mut busy: Option<(u64, u64, Gate)> = None;
-    for e in events.iter().filter(|e| e.kind == "drive-pass") {
+    for e in &passes {
         let acts = e.data.get("actions").and_then(serde_json::Value::as_array);
         let mut starts = acts
             .into_iter()
