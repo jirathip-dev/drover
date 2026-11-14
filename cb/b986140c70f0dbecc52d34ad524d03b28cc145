@@ -1,0 +1,7 @@
+Decided: merged origin/staging; drive_sim.rs takes staging's version, which already names the drover crate.
+Because: crates/cli/tests/drive_sim.rs:1
+Decided: the review's placeholder finding needs no code change; the PR body already held the live-week invariants and table, now pinned to the new head.
+Because: "the PR shows the invariant results and the real-vs-sim metrics table"
+Rejected: re-running the live-week replay — this round changes no sim or replay code.
+Check: the PR body's Evidence names head cbb986140 and has no PLACEHOLDER text.
+Owner: The branch is on the latest staging again and its PR shows the live-week replay results.
