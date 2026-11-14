@@ -94,7 +94,6 @@ fn a_blocker_in_another_repo_is_released_once_it_reads_closed() {
     );
 }
 
-/// #886: a blocker of this fleet closed unmerged (not planned) holds nothing once read closed, and says so.
 #[test]
 fn a_blocker_closed_not_planned_no_longer_holds_its_dependant() {
     let view = "gh issue view 720 -R jirathip-dev/sendmeter --json state";
@@ -114,7 +113,6 @@ fn a_blocker_closed_not_planned_no_longer_holds_its_dependant() {
     );
 }
 
-/// #886: `queue add` of a pull request's number is refused with a code; nothing is queued.
 #[test]
 fn queue_add_refuses_a_pull_request_number() {
     let pr = json!({"title": "t", "body": "Closes #817", "url": "https://github.com/jirathip-dev/sendmeter/pull/828"});

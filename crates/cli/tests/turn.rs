@@ -325,7 +325,6 @@ fn the_stop_hook_leaves_check_lanes_alone() {
     assert!(herdsman::hook::turn_end(&input, &mark, || true).is_some());
 }
 
-/// #886: #854's log: a false failed start, `turn working`, hibernated, then gone: the next pass respawns it.
 #[test]
 fn a_working_lane_that_hibernated_and_died_is_respawned_after_a_false_failed_start() {
     let (c, r) = lane("turn-hibernated", false, None);

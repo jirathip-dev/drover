@@ -217,7 +217,6 @@ fn a_fix_round_held_for_a_spawn_slot_is_not_parked() {
     assert_eq!(shown(&s), json!("idle · waiting for a spawn slot (10m)"));
 }
 
-/// #886: a gone lane held by its blocker reads held by it, never dead; a parked PR number is no in-progress row.
 #[test]
 fn a_held_lane_reads_held_by_its_blocker_and_a_parked_pr_number_drops_off() {
     let (c, r) = fixture("held-not-dead", false);
