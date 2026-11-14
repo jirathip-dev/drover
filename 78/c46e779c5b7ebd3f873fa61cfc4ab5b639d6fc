@@ -1,0 +1,11 @@
+Decided: one accessor Event::val(k) returns Null for a missing key, and every Event::data["k"] read in crates/ goes through it
+Because: "Sweep `crates/` for other `.data[\"…\"]` indexing on `Event::data` and make each a non-panicking read."
+Because: crates/core/src/events.rs:50
+Decided: the two writes by index (aliased in events.rs, the lane ask in serve/chat.rs) became Map::insert, since IndexMut on a Map panics on a missing key too
+Because: crates/server/src/serve/chat.rs:220
+Rejected: a newtype over the Map with a Null-returning Index — the call sites would still read .data["k"], so the AC grep could not show none
+Decided: the regression test got a respawn after the queued repair in commit 2; without it the issue was rightly repaired back to queued, not impl
+Because: crates/cli/tests/blocked_respawn.rs:262
+Check: commit 1 plus commit 2 panic at drive.rs:899 "no entry found for key" on base; the head passes
+Check: rg -n '\.data\[' crates/ prints nothing
+Owner: drive no longer crashes on an issue whose history holds an ordinary repair, so the other issues get their steps again
