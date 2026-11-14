@@ -309,7 +309,7 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
     assert_eq!(code, 0, "{o} {:?}", f.calls.borrow());
     let sp = spawned(&c);
     assert_eq!(
-        (sp[0].str("host"), sp[0].data["confirmed"].as_bool()),
+        (sp[0].str("host"), sp[0].val("confirmed").as_bool()),
         (Some("boat1"), Some(true))
     );
     let calls = f.calls.borrow().clone();
@@ -495,7 +495,8 @@ fn bootstrap_puts_shed_and_drover_on_a_hosts_non_login_ssh_path_so_the_survey_fi
     let ev = drover::events::read(&c.state).unwrap().to_vec();
     let failed = ev.iter().rev().find(|e| e.kind == "host-bootstrap").unwrap();
     assert_eq!(
-        failed.data["tail"], "shed not on PATH /home/user/.ascii:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin",
+        failed.val("tail"),
+        "shed not on PATH /home/user/.ascii:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin",
         "{o}"
     );
 }

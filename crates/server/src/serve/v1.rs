@@ -781,8 +781,8 @@ pub(super) fn ask(a: &Event) -> Ask {
         fleet: a.fleet.clone(),
         issue: a.issue,
         question: a.str("question").unwrap_or_default().into(),
-        options: serde_json::from_value(a.data["options"].clone()).unwrap_or_default(),
-        recommend: a.data["recommend"].as_u64(),
+        options: serde_json::from_value(a.val("options").clone()).unwrap_or_default(),
+        recommend: a.val("recommend").as_u64(),
         ts: a.ts,
     }
 }

@@ -20,7 +20,7 @@ pub fn lane_end(events: &[Event], i: usize) -> Option<u64> {
         "lane-dead" => e.fleet == s.fleet && e.str("key").is_some_and(|k| k.ends_with(&format!(":{a}"))),
         "lane-state" => e.str("agent") == Some(a) && e.str("state") == Some("gone"),
         "supersede" => {
-            e.str("agent") == Some(a) || e.data["killed"].as_array().is_some_and(|k| k.iter().any(|n| n == a))
+            e.str("agent") == Some(a) || e.val("killed").as_array().is_some_and(|k| k.iter().any(|n| n == a))
         }
         "spawn" => e.str("agent") == Some(a),
         _ => false,

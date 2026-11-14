@@ -106,7 +106,7 @@ fn kicked_starts_count_against_the_cap_before_any_lane_is_up() {
     assert_eq!((kick(1), kick(2), kick(3)), (1, 1, 0), "{out}");
     let ev = read(&c.state).unwrap();
     let pass = ev.iter().rfind(|e| e.kind == "drive-pass").unwrap();
-    let acts = pass.data["actions"].as_array().unwrap();
+    let acts = pass.val("actions").as_array().unwrap();
     let three = acts.iter().find(|a| a["issue"] == 3).unwrap();
     assert_eq!(three["code"], "HOST_FULL", "{pass:?}");
 }

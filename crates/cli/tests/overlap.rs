@@ -312,7 +312,7 @@ fn merge_tree_finds_the_pair_and_its_files_once() {
     assert!(!got.contains_key(&3), "{got:?}");
     let ev = read(&c.state).unwrap();
     let p: Vec<_> = ev.iter().filter(|e| e.kind == "conflict-predicted").collect();
-    assert_eq!((p.len(), p[0].issue, &p[0].data["other"]), (1, Some(2), &json!(1)));
+    assert_eq!((p.len(), p[0].issue, p[0].val("other")), (1, Some(2), &json!(1)));
     let card = "may conflict with #1; keep going, drover updates you after it merges";
     assert_eq!(p[0].str("reason"), Some(card), "#320");
     let trees = r.0.count("git -C");
