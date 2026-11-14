@@ -135,10 +135,11 @@ fn like(v: &Value, fixture: &str, exact: bool) {
                 let known = vocab
                     .get(&kind)
                     .unwrap_or_else(|| panic!("{kind} is in no fixture: {v}"));
-                let spec = ["under swipe", "under options"].contains(&kind.as_str());
-                let odd = m
-                    .keys()
-                    .find(|k| !known.contains(*k) && *k != "id" && !(spec && *k == "values"));
+                let spec = ["under swipe", "under options", "under done"].contains(&kind.as_str());
+                let coat = kind == "under figure";
+                let odd = m.keys().find(|k| {
+                    !known.contains(*k) && *k != "id" && !(spec && *k == "values") && !(coat && *k == "coat")
+                });
                 assert!(
                     odd.is_none(),
                     "{kind}.{} is in no fixture: {v}",
@@ -197,7 +198,7 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     assert_eq!(row["badge"], json!({"text": "fix 1", "tone": "working"}));
     assert_eq!(row["figure"], json!({"state": "working", "tool": "edit"}));
     assert_eq!(row["subtitle"], "impl ✓ · review 1 ✗ · fix 1 ▸ sendmeter-impl-12");
-    assert_eq!(row["tap"], json!({"thread": "sendmeter-impl-12"}));
+    assert_eq!(row["tap"], json!({"sheet": "/screens/lanes/sendmeter-impl-12"}));
     assert_eq!(row["swipe"][0]["action"], "stop");
     assert_eq!(find(&q, "q-sendmeter-5")["figure"], json!({"state": "needs"}));
     assert_eq!(
@@ -278,6 +279,53 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     assert_eq!(req(&s, T, "GET", "/screens/nope", "", "").0, 404);
     let foreign = req(&s, T, "GET", "/screens/queue", "", "Origin: https://evil.example\r\n");
     assert_eq!(foreign.0, 403);
+}
+
+#[test]
+fn the_lanes_screen_and_a_lanes_sheet_are_cooees_blocks() {
+    let (c, r) = recorded("cooee-lanes");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let (status, v) = req(&s, T, "GET", "/screens/lanes", "", "");
+    assert_eq!(status, 200, "{v}");
+    like(&v, "lanes", true);
+    assert_eq!(
+        (&v["id"], &v["stream"]),
+        (&json!("lanes"), &json!("/screens/lanes/stream"))
+    );
+    let row = find(&v, "l-sendmeter-impl-12");
+    assert_eq!(row["title"], "sendmeter #12");
+    assert_eq!(row["figure"]["state"], "working");
+    assert!(row["figure"]["coat"].is_string(), "{row}");
+    assert_eq!(row["tap"], json!({"sheet": "/screens/lanes/sendmeter-impl-12"}));
+    assert_eq!(find(&v, "lanes-working")["header"], "working (1)");
+
+    let sheet = "/screens/lanes/sendmeter-impl-12";
+    assert_eq!(
+        req(&s, T, "GET", sheet, "", "").0,
+        401,
+        "a transcript needs a paired device"
+    );
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let (status, v) = req(&s, T, "GET", sheet, "", &ck);
+    assert_eq!(status, 200, "{v}");
+    like(&v, "lane-sheet", true);
+    assert_eq!(
+        (&v["type"], &v["title"]),
+        (&json!("sheet"), &json!("sendmeter-impl-12"))
+    );
+    assert_eq!(find(&v, "f-issue")["value"], "sendmeter #12");
+    assert_eq!(find(&v, "f-role")["value"], "fix");
+    let acts: Vec<&Value> = ["act-stop", "act-kill", "act-clean"]
+        .iter()
+        .map(|a| &find(&v, a)["action"])
+        .collect();
+    assert_eq!(acts, [&json!("stop"), &json!("kill"), &json!("clean")]);
+    assert_eq!(
+        v["done"],
+        json!({"label": "Send", "action": "send", "values": {"agent": "sendmeter-impl-12"}})
+    );
+    assert_eq!(find(&v, "transcript")["blocks"][0]["type"], "text");
+    assert_eq!(req(&s, T, "GET", "/screens/lanes/nobody", "", &ck).0, 404);
 }
 
 #[test]
