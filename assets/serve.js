@@ -901,6 +901,14 @@ function tree(p, rows, end) {
     tip(st);
     const tag = (cls, text, title = '') => { const t = el('span', cls, text); if (title) { t.title = title; t.setAttribute('aria-label', title); } w.append(' ', t); };
     for (const g of (d.dataset.s || '').split(' ').filter(Boolean)) tag('tag m', '🔒' + g, 'serial: one lane at a time');
+    const hot = (d.dataset.h || '').split(' | ').filter(Boolean);
+    if (hot.length) {
+      tag('tag m hot', `🔒 hot ×${hot.length}`, `${hot.length} hot files, one lane at a time: tap to show them`);
+      const hp = el('span', 'hp');
+      hp.hidden = true;
+      hot.forEach(p => hp.append(el('span', 'tag m', p)));
+      d.querySelector('summary').append(hp);
+    }
     if (d.dataset.b && !par(d)) tag('tag r', '! #' + d.dataset.b);
     if (d.dataset.w) tag('tag m', d.dataset.w); // #609: where its lane runs
     if (deep) tag('m', 'after #' + d.dataset.b);
@@ -1080,6 +1088,13 @@ function qshow(q) {
 function qpick(name) { QR = name; put('queue:repo', name); if ($('#queue')) qshow($('#queue')); }
 const qstep = k => { const ns = [...$$('.qch [data-qr]')].map(b => b.dataset.qr), i = ns.indexOf($('.qch [aria-pressed=true]')?.dataset.qr); if (ns.length) qpick(ns[((i + k) % ns.length + ns.length) % ns.length]); };
 document.addEventListener('click', e => { const b = e.target.closest('.qch [data-qr]'); if (b) qpick(b.dataset.qr); });
+document.addEventListener('click', e => {
+  const t = e.target.closest('#queue .tag.hot'), hp = t?.closest('summary').querySelector('.hp');
+  if (!hp) return;
+  e.preventDefault();
+  hp.hidden = !hp.hidden;
+  t.setAttribute('aria-expanded', !hp.hidden);
+});
 document.addEventListener('keydown', e => {
   if (document.documentElement.dataset.tab !== 'queue' || $('#herd')?.hidden === false || shown() || e.altKey || e.ctrlKey || e.metaKey || e.target.closest?.('input, textarea, select')) return;
   const k = { ArrowLeft: -1, ArrowRight: 1 }[e.key];

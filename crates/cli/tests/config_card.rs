@@ -291,3 +291,40 @@ fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
     let settings = drover::providers::profiles_root(&c).join("fleet-verify/settings.json");
     assert!(std::fs::read_to_string(settings).unwrap().contains("hook --role rev"));
 }
+
+#[test]
+fn a_proposal_over_16_kb_applies_byte_for_byte() {
+    let c = setup("cfg-big");
+    let old = std::fs::read_to_string(&c.config).unwrap();
+    let pad: String = (0..400)
+        .map(|i| format!("# padding line {i:04} of a long fleet.toml\n"))
+        .collect();
+    let new = format!("{}{pad}", old.replacen("model = \"opus\"", "model = \"sonnet\"", 1));
+    assert!(new.len() > 16 << 10, "{}", new.len());
+    let file = c.config.with_file_name("proposed.toml");
+    std::fs::write(&file, &new).unwrap();
+    let r = Fake::default();
+    let (code, out) = run(&c, &r, &["config", "propose", "t1", file.to_str().unwrap()]);
+    assert_eq!((code, out.as_str()), (0, "c1\n"));
+    let (code, out) = run(&c, &r, &["config", "apply", "c1"]);
+    assert_eq!(code, 0, "{out}");
+    let got = std::fs::read_to_string(&c.config).unwrap();
+    assert!(got == new, "applied {} bytes of {}", got.len(), new.len());
+}
+
+#[test]
+fn a_proposal_stored_truncated_refuses_to_apply_and_asks_for_a_new_one() {
+    let c = setup("cfg-cut");
+    let old = std::fs::read_to_string(&c.config).unwrap();
+    let base = drover::devices::sha256(old.as_bytes());
+    let d =
+        json!({"thread": "t1", "id": "c1", "diff": "+ x\n", "text": "[fleet… 6973 bytes cut …en A\"", "base": base});
+    append(&c.state, &Event::new(T, "sendmeter", None, "config-propose", d)).unwrap();
+    let (code, out) = run(&c, &Fake::default(), &["config", "apply", "c1"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED PROPOSAL_TRUNCATED") && out.contains("propose"),
+        "{out}"
+    );
+    assert_eq!(std::fs::read_to_string(&c.config).unwrap(), old);
+}
