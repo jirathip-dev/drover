@@ -164,7 +164,6 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     assert!(sh.sent(LANE).is_empty(), "{:?}", sh.methods());
 }
 
-/// #908: waking a lane shed has put to sleep starts a whole agent: its answer waits while the host is busy, then lands.
 #[test]
 fn a_sleeping_lanes_answer_waits_for_room_then_lands() {
     let c = ctx(&tmpdir("deliver-asleep"), CONFIG);

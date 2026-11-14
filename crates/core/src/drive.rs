@@ -1625,7 +1625,6 @@ fn repro_refused(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "repro-refused", d))
 }
 
-/// #517 #511: type `text` into `lane`'s pane (its last spawn's); whether sent, None while #908 holds it.
 fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> Option<bool> {
     let sp = crate::events::last_spawn(events, lane);
     let dsh = sp.and_then(|e| e.str("harness")) == Some("dsh");
@@ -2181,7 +2180,6 @@ fn ci_findings(r: &dyn Runner, f: &crate::config::Fleet, pr: &serde_json::Value,
     )
 }
 
-/// #908: `fleet`'s respawns this pass already reached its `respawn_per_pass`: the refusal's words.
 fn paced(cfg: &Config, fleet: &str) -> Option<String> {
     let max = cfg
         .fleet
@@ -2190,7 +2188,7 @@ fn paced(cfg: &Config, fleet: &str) -> Option<String> {
         .unwrap_or(cfg.limits.respawn_per_pass);
     let ran = |a: &Value| a["step"] == "respawn" && a["code"].is_null();
     let n = ACTS.with_borrow(|m| m.get(fleet).map_or(0, |v| v.iter().filter(|a| ran(a)).count()));
-    (n >= max).then(|| format!("{n} respawns this pass (respawn_per_pass {max}); the rest go next pass"))
+    (n >= max).then(|| format!("{n} respawns this pass (respawn_per_pass {max}); the rest wait their turn"))
 }
 
 /// (fleet, issue, step) of one action.

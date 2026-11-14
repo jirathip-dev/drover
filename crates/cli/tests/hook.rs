@@ -437,7 +437,6 @@ fn only_a_orchestrator_runs_amend() {
     }
 }
 
-/// #908: `spawn --force` passes HOST_BUSY: the owner's and an orchestrator's, never another lane's.
 #[test]
 fn only_the_owner_or_an_orchestrator_forces_a_spawn() {
     let run = |lane: Option<&str>, cmd: &str| {

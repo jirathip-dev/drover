@@ -1,4 +1,3 @@
-//! #908: `spawn --force` logs who overrode HOST_BUSY. One test: `DROVER_LANE` is process-wide (its own binary).
 mod common;
 use common::*;
 use drover::events::read;

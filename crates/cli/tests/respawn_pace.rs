@@ -1,4 +1,3 @@
-//! #908: drive's respawns go through admission (no `--force`) and at most `respawn_per_pass` of them run a pass.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -14,7 +13,6 @@ fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
 
-/// Issues 1..=`k` each in a fix round whose impl lane was killed: drive owes each a respawn.
 fn killed(c: &drover::Ctx, k: u64) {
     for n in 1..=k {
         let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
@@ -61,7 +59,6 @@ fn spawns(c: &drover::Ctx) -> Vec<u64> {
     late.filter_map(|e| e.issue).collect()
 }
 
-/// One `drive` pass at `now`: the issues whose impl lane it respawned (a respawned lane may then go to review).
 fn pass(c: &drover::Ctx, r: &Fake, now: u64) -> Vec<u64> {
     let before = spawns(c).len();
     let (code, out) = run(&drover::Ctx { now, ..c.clone() }, r, &["drive"]);
@@ -124,7 +121,6 @@ fn respawn_per_pass_is_read_from_limits_and_a_fleet_overrides_it() {
     assert_eq!(pass(&c, &host("1.50"), T).len(), 3);
 }
 
-/// #666's stall supersede (a lane that never started): under HOST_BUSY it waits, then respawns once there is room.
 #[test]
 fn a_failed_start_waits_for_room_and_is_never_forced() {
     let c = ctx(&tmpdir("pace-stall"), CONFIG);

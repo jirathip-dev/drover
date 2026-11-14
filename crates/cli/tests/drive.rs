@@ -2303,7 +2303,6 @@ fn a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges() {
     assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count(), 2);
 }
 
-/// `f` sampling a host at load/cpu 5 (HOST_BUSY).
 fn busy(mut f: Fake) -> Fake {
     let o = drover::runner::Out {
         code: 0,
@@ -2314,7 +2313,6 @@ fn busy(mut f: Fake) -> Fake {
     f
 }
 
-/// #908: the held lane's pane is gone on a busy host: its respawn waits for room and is never forced.
 #[test]
 fn a_released_lanes_respawn_waits_for_room() {
     let (c, r) = held("drive-held-busy", NONE);
