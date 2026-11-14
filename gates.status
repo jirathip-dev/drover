@@ -1,0 +1,2 @@
+fmt=0 clippy=0 rerun=0 release=0 diagram=0 cap=0 arch=0 timing=0
+test-all=0 perf=0
