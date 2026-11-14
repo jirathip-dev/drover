@@ -1109,7 +1109,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
             ("thread", id),
         ]
         .map(|(k, v)| (k, v.to_string()));
-        b.start(r, &agent, &labels, &dir.to_string_lossy(), &cmd)?;
+        b.start(r, &agent, &labels, &dir.to_string_lossy(), &cmd, None)?;
         let kick = format!("The thread so far is in {}, the last message new.", thread.display());
         let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
         let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,

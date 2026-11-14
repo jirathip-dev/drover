@@ -155,6 +155,17 @@ enum Cmd {
         #[arg(long, default_value = "owner")]
         by: String,
     },
+    #[command(about = "Owner only: a rate-limited lane's [switch account] (resume on the next one) or [wait]")]
+    Limit {
+        fleet: String,
+        issue: u64,
+        #[arg(value_parser = ["switch", "wait"])]
+        pick: String,
+        #[arg(long, default_value = "owner", help = "Who picked it, as the log shows it")]
+        by: String,
+        #[arg(long, help = "An orchestrator's: the owner's exact line in its thread")]
+        typed: Option<String>,
+    },
     #[command(
         about = "Owner only: a parked issue back to the state it had, in its queue place (else last); logs `unparked`"
     )]
@@ -1069,8 +1080,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's orchestrator `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`, +6 for #712's `unpark` and `park --why`/`--by`, +1 for #780's `thread new --orchestrator`, +2 for #817's `extend --typed`/`--basis`, +1 for #838's `answer --note`, +3 for #844's `config show`, +3 for #889's `hotspots`, +4 for #845's `diagram`).
-pub const HELP_AGENT_MAX: usize = 366;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's orchestrator `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`, +6 for #712's `unpark` and `park --why`/`--by`, +1 for #780's `thread new --orchestrator`, +2 for #817's `extend --typed`/`--basis`, +1 for #838's `answer --note`, +3 for #844's `config show`, +3 for #889's `hotspots`, +4 for #845's `diagram`, +5 for #983's `limit`).
+pub const HELP_AGENT_MAX: usize = 371;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -2087,6 +2098,16 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 Cmd::Park { fleet, issue, why, by } => {
                     gate::needs_human(ctx, &cfg, r, out, (&fleet, issue), "park", (false, &by, why.as_deref()))?;
+                }
+                Cmd::Limit {
+                    fleet,
+                    issue,
+                    pick,
+                    by,
+                    typed,
+                } => {
+                    let by = crate::limit::by(ctx, typed.as_deref(), &by, (&fleet, issue))?;
+                    crate::limit::pick(ctx, &cfg, r, out, (&fleet, issue), &pick, by)?;
                 }
                 Cmd::Unpark { fleet, issue, by } => gate::unpark(ctx, &cfg, out, (&fleet, issue), &by)?,
                 Cmd::Brief { fleet, issue } => {

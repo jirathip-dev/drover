@@ -68,6 +68,9 @@ a repeat visit downloads the page HTML only, the assets come from the service wo
 `serve --export` inlines both, so the static demo needs no `/frag`; it writes `api/v1/state`, `api/v1/events` (every
 event), `api/v1/host` (#267), `api/v1/queue` (#268) and `api/v1/needs`, `lanes` and `chat` (#269) as files for the board.
 
+#983: `/api/v1/state` has `counts`: `busy` (lanes `working` or `running`), `waiting_approval`, `waiting_owner` and
+`rate_limited`; each lane carries its `account` and shed's `note` on its state (a `rate-limited` lane's reset time).
+
 Queue tab (#115): each fleet's rows are a `git log --graph` tree in queue order. A row blocked by another row in
 view hangs off it (`│ ├─ └─`; past depth 3 it clamps to `┆─` and an `on #b` tag), a blocker out of view is a red
 `! #b` tag. A dot per row: `●` a lane works on it, `○` waiting, `✓` ready, `!` needs you. An issue in a serial group shows

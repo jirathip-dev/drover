@@ -644,6 +644,9 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
                 .into(),
         );
     }
+    if !orchestrator && r.first() == Some(&"limit") {
+        return Some("REFUSED OWNER_ONLY: only the owner picks for a rate-limited lane, never a lane (#983)".into());
+    }
     if !orchestrator && r.first() == Some(&"card") {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator posts run cards (#538)".into());
     }

@@ -33,6 +33,6 @@ screen = "/screens/fleets"
 [permissions]
 places = ["header-strip", "chat-cards", "menu-row"]
 push = true
-actions = ["filter", "drive", "pause", "drive-all", "top", "answer", "run-card", "needs-human", "save-fleets", "stop", "drop", "remove-fleet"]
+actions = ["filter", "drive", "pause", "drive-all", "top", "limit", "answer", "run-card", "needs-human", "save-fleets", "stop", "drop", "remove-fleet"]
 destructive = ["stop", "drop", "remove-fleet", "run-card", "needs-human"]
 network = ["api.github.com", "127.0.0.1:7777"]

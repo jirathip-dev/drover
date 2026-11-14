@@ -487,6 +487,8 @@ pub const PASSIVE: &[&str] = &[
     "why-nudged",
     "start-resent",
     "nudged",
+    "limit-picked",
+    "limit-continued",
     "respawned-silent",
     "rev-stale-replaced",
     "budget-freed",

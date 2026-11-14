@@ -1,6 +1,7 @@
 use super::{devices, form, header, mtime, shared, shown, Auth, BTreeMap, Config, Ctx, Event, Refusal, Result, Server};
 use super::{NeedAsk, NeedIssue, QueueCard, QueueRow, JSON};
 use crate::access::{civil_month_day, civil_year};
+use crate::api::Lane;
 use anyhow::Context;
 use serde_json::{json, Map, Value};
 use std::io::Write;
@@ -92,7 +93,7 @@ fn rounds(events: &[Event], f: &str, n: u64) -> String {
     shown.collect::<Vec<_>>().join(" · ")
 }
 
-fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Value {
+fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>, lane: Option<&Lane>) -> Value {
     let fig = figure(&r.act, &r.state);
     let title = format!("#{} {}", r.issue, r.title.clone().unwrap_or_default());
     let state = r.state.replace('(', " ").replace(')', "").replace("⏸ waiting: ", "");
@@ -103,8 +104,21 @@ fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Val
     let mut v = json!({"type": "row", "id": format!("q-{f}-{}", r.issue), "figure": fig, "title": title.trim_end(), "badge": badge});
     let mut sub = rounds(ev, f, r.issue);
     let live = r.live && !r.dead && !r.lane.is_empty();
+    let said = lane.filter(|_| live).map(|l| {
+        let limited = l.state == "rate-limited";
+        let acct = l.account.as_deref().filter(|_| limited);
+        let note = l
+            .note
+            .as_deref()
+            .map(|n| if limited { format!("resets {n}") } else { n.into() });
+        [Some(l.state.clone()), acct.map(String::from), note]
+            .into_iter()
+            .flatten()
+            .collect::<Vec<_>>()
+            .join(" · ")
+    });
     if live {
-        let at = [r.lane.as_str(), r.place.as_str()];
+        let at = [r.lane.as_str(), r.place.as_str(), said.as_deref().unwrap_or_default()];
         sub = format!(
             "{sub} ▸ {}",
             at.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")
@@ -127,6 +141,10 @@ fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Val
         v["tap"] = json!({ "thread": r.lane });
         let confirm = json!({"title": format!("Stop #{}'s lane {}?", r.issue, r.lane), "ok": "Stop lane"});
         v["swipe"] = json!([{"label": "Stop", "tone": "bad", "action": "stop", "values": vals, "confirm": confirm}]);
+        if lane.is_some_and(|l| l.state == "rate-limited") {
+            let pick = |p: &str, label: &str| json!({"label": label, "action": "limit", "values": {"fleet": f, "issue": r.issue, "pick": p}});
+            v["swipe"] = json!([pick("switch", "Switch account"), pick("wait", "Wait"), v["swipe"][0]]);
+        }
     } else if let Some(pr) = r.pr.pr {
         v["tap"] = json!({ "url": format!("https://github.com/{repo}/pull/{pr}") });
     }
@@ -138,14 +156,14 @@ fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Val
     v
 }
 
-fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
+fn fleet_card(ev: &[Event], c: &QueueCard, lanes: &[Lane]) -> Value {
     let f = &c.name;
     let (queued, busy): (Vec<&QueueRow>, Vec<&QueueRow>) = c.rows.iter().partition(|r| r.state == "queued");
     let rows = |rs: &[&QueueRow], q: bool| -> Vec<Value> {
         let k = |i| q.then_some(i);
         rs.iter()
             .enumerate()
-            .map(|(i, r)| row(ev, &c.config.repo, f, r, k(i)))
+            .map(|(i, r)| row(ev, &c.config.repo, f, r, k(i), lanes.iter().find(|l| l.name == r.lane)))
             .collect()
     };
     let section = |id: &str, word: &str, rs: Vec<Value>| {
@@ -168,7 +186,7 @@ fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
             {"type": "list", "id": format!("done-{f}"), "rows": [done]}]})
 }
 
-fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&str>) -> Value {
+fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&str>, lanes: &[Lane]) -> Value {
     let day = |e: &Event| (now.saturating_sub(e.ts) / 86_400) as usize;
     let merged: Vec<&Event> = ev
         .iter()
@@ -190,13 +208,13 @@ fn stats(now: u64, ev: &[Event], states: &crate::events::States, only: Option<&s
         }
     };
     let (n, r) = per.iter().fold((0, 0), |a, p| (a.0 + p.0, a.1 + p.1));
-    let lanes = states.values().filter(|s| only.is_none_or(|f| s.fleet == f));
-    let lanes = lanes
-        .filter(|s| s.lane.is_some() && !s.done() && s.state != "queued")
-        .count();
+    let c = super::v1::counts(lanes, only);
     json!({"type": "stat", "id": "stats", "items": [
         {"label": "merged · 7d", "value": n.to_string(), "spark": per.map(|p| p.0)},
-        {"label": "lanes", "value": lanes.to_string()},
+        {"label": "busy", "value": c.busy.to_string()},
+        {"label": "approval", "value": c.waiting_approval.to_string()},
+        {"label": "owner", "value": c.waiting_owner.to_string()},
+        {"label": "rate-limited", "value": c.rate_limited.to_string()},
         {"label": "rounds / issue", "value": format!("{:.1}", avg(n, r)), "spark": per.map(|p| avg(p.0, p.1))}]})
 }
 
@@ -533,6 +551,7 @@ impl Server<'_> {
 
     fn queue_screen(&self, ctx: &Ctx, q: &Q) -> Value {
         let (tab, ev) = (self.queue_tab(ctx), shared(&ctx.state).unwrap_or_default());
+        let lanes = Config::kept(ctx).map_or(vec![], |cfg| self.lane_list(ctx, &cfg, &ev, &ev.states));
         let sel = q
             .get("repo")
             .filter(|r| tab.fleets.iter().any(|f| &f.name == *r))
@@ -541,7 +560,7 @@ impl Server<'_> {
         opts.extend(tab.fleets.iter().map(|f| json!({"value": f.name, "label": f.name})));
         let mut blocks = vec![
             json!({"type": "chips", "id": "repo", "name": "repo", "selected": [sel.unwrap_or("all")], "action": "filter", "options": opts}),
-            stats(ctx.now, &ev, &ev.states, sel),
+            stats(ctx.now, &ev, &ev.states, sel, &lanes),
         ];
         if let Some(e) = &tab.error {
             blocks.push(json!({"type": "text", "id": "error", "markdown": e}));
@@ -550,7 +569,7 @@ impl Server<'_> {
             tab.fleets
                 .iter()
                 .filter(|f| sel.is_none_or(|s| f.name == s))
-                .map(|c| fleet_card(&ev, c)),
+                .map(|c| fleet_card(&ev, c, &lanes)),
         );
         let stream = sel.map_or("/screens/queue/stream".into(), |s| {
             format!("/screens/queue/stream?repo={s}")
@@ -681,6 +700,15 @@ impl Server<'_> {
                     None,
                 );
                 crate::queue_change(ctx, &cfg, &fleet, d, Some("cooee"))?
+            }
+            "limit" => {
+                let mut buf = vec![];
+                crate::limit::pick(ctx, &cfg, &self.r, &mut buf, (&fleet, n()?), &s("pick"), "owner")?;
+                String::from_utf8_lossy(&buf)
+                    .lines()
+                    .next()
+                    .unwrap_or("picked")
+                    .to_string()
             }
             "stop" => {
                 crate::check::stop(ctx, &cfg, &self.r, &mut vec![], &s("agent"))?;

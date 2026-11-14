@@ -681,7 +681,7 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
     )];
     if let Some(b) = bt.filter(|b| b.0.acp.is_some()) {
         cmds.extend((!reopen).then(|| sent("git", worktree_add(local, p, false))));
-        let run = b.acp_argv(&p.agent, labels, &p.worktree.to_string_lossy(), acp);
+        let run = b.acp_argv(&p.agent, labels, &p.worktree.to_string_lossy(), acp, None);
         cmds.push(sent("shed", run));
         cmds.push(sent("shed", argv(&["send", &p.agent, "<the brief>"])));
     } else if bt.is_some() {
@@ -939,6 +939,9 @@ pub struct Opts {
     /// Fix round that merges the integration branch into a conflicting or behind PR
     #[arg(long)]
     pub update: bool,
+    /// #983: the ACP session id the lane resumes (the owner's [switch account]).
+    #[arg(skip)]
+    pub resume: Option<String>,
 }
 
 pub fn spawn(
@@ -1176,7 +1179,7 @@ pub fn spawn(
         let hung =
             was.is_some_and(|e| matches!(crate::roots::skip(ctx, cfg, e), Some("root unreachable" | "root-hung")));
         let cause = crate::shed::exit_cause(&events, &p.agent).filter(|c| crate::shed::RESUMABLE.contains(c));
-        let here = cause.is_some() && owt == wt && old.machine == on.machine;
+        let here = (cause.is_some() || o.resume.is_some()) && owt == wt && old.machine == on.machine;
         if stale.is_none() && !here && !hung {
             wip = crate::check::save_lane(ctx, &old, &p.agent, owt)?;
         }
@@ -1399,7 +1402,7 @@ pub fn spawn(
     event("spawn-started", d)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, bt.as_ref(), &labels, &acp));
     if let Some(b) = &bt {
-        b.start(r, &pane, &labels, &wt, &acp)?;
+        b.start(r, &pane, &labels, &wt, &acp, o.resume.as_deref())?;
         if b.0.acp.is_none() {
             herdr::ok(r, &home(p.lane_cmd(&pane)))?;
             herdr::ok(r, &herdr::typed(&pane, &home(p.start_cmd(ctx, &pane))))?;
@@ -1501,7 +1504,13 @@ pub fn spawn(
         });
         let res = (|| -> Result<bool> {
             let kicked = match bt.as_ref().filter(|b| b.0.acp.is_some()) {
-                Some(b) => b.kick_acp(r, &pane, &brief_text),
+                Some(b) => b.kick_acp(
+                    r,
+                    &pane,
+                    o.resume
+                        .as_ref()
+                        .map_or(brief_text.as_str(), |_| crate::limit::CONTINUE),
+                ),
                 None => h.kick(r, &p, &pane),
             };
             let mut d = lane_data(&p, &pane, &ws);

@@ -62,7 +62,10 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], agents: &[
         return None;
     }
     let (lane, sp) = (&w.lane, last_spawn(ev, &w.lane)?);
-    agents.iter().find(|a| a["name"] == lane.as_str())?;
+    let a = agents.iter().find(|a| a["name"] == lane.as_str())?;
+    if held(ev, a) {
+        return None;
+    }
     let (role, pane, on) = (sp.str("role")?, sp.str("pane")?, On::of(r, Some(sp)));
     let resent = |e: &&Event| e.kind == "start-resent" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
     let resent = ev.iter().rfind(resent);
@@ -120,6 +123,11 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], agents: &[
         hook.unwrap_or_default()
     );
     Some(Act::Escalate("LANE_STALLED", why))
+}
+
+/// #983: agent `a` waits or works by design (`lanes::HELD`).
+pub fn held(ev: &[Event], a: &Value) -> bool {
+    crate::lanes::HELD.contains(&crate::lanes::state(ev, a).as_str())
 }
 
 /// #819: a check lane with no verdict since its spawn and no new pane output this long is replaced.
@@ -193,7 +201,10 @@ pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Value], fleet: &s
             continue;
         };
         let open = o["tools"].as_object().is_some_and(|m| !m.is_empty()) && o["cpu"].as_u64() >= Some(BUSY_CPU_PCT);
-        if o["turn"] != true || open || !agents.iter().any(|a| a["name"] == lane) {
+        let Some(a) = agents.iter().find(|a| a["name"] == lane) else {
+            continue;
+        };
+        if o["turn"] != true || open || held(ev, a) {
             continue;
         }
         let mine = |k: &'static str| move |e: &&Event| e.kind == k && e.str("agent") == Some(lane);

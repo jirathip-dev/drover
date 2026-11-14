@@ -10,6 +10,12 @@
       }
     ],
     "asks": [],
+    "counts": {
+      "busy": 1,
+      "rate_limited": 0,
+      "waiting_approval": 0,
+      "waiting_owner": 0
+    },
     "fleets": [
       {
         "color": "g",
@@ -28,12 +34,14 @@
     ],
     "lanes": [
       {
+        "account": null,
         "fleet": "sendmeter",
         "harness": "claude",
         "host": "local",
         "issue": 12,
         "model": null,
         "name": "sendmeter-impl-12",
+        "note": null,
         "role": "impl",
         "runtime": "herdr",
         "shown": "working",
@@ -44,12 +52,14 @@
         "where": ""
       },
       {
+        "account": null,
         "fleet": "sendmeter",
         "harness": "claude",
         "host": "local",
         "issue": 9,
         "model": null,
         "name": "sendmeter-rev-9-r1",
+        "note": null,
         "role": "rev",
         "runtime": "herdr",
         "shown": "blocked",
@@ -60,13 +70,15 @@
         "where": ""
       },
       {
+        "account": null,
         "fleet": "sendmeter",
         "harness": "hermes",
         "host": "local",
         "issue": null,
         "model": "opus",
         "name": "Let's talk about #30 · t1",
-        "role": "conductor",
+        "note": null,
+        "role": "orchestrator",
         "runtime": "herdr",
         "shown": "asleep",
         "since": 1000000,
@@ -76,7 +88,7 @@
         "where": ""
       }
     ],
-    "mtime": "1794098378090929508",
+    "mtime": "1794636571958254494",
     "now": 1000000,
     "queue": [],
     "seq": 8,
@@ -139,6 +151,12 @@
     "age": "null",
     "alerts": [],
     "asks": [],
+    "counts": {
+      "busy": "number",
+      "rate_limited": "number",
+      "waiting_approval": "number",
+      "waiting_owner": "number"
+    },
     "fleets": [],
     "hosts": [],
     "lanes": [],

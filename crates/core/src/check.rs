@@ -360,7 +360,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 let e = Event::new(ctx.now, &s.fleet, Some(s.issue), "lane-trimmed", d);
                 emit(&ctx.state, cfg, e)?;
             }
-            let between = shed && working;
+            let between = shed && working || agent.is_some_and(|a| crate::stall::held(&events, a));
             if idle > stall && status != Some("working") && !between && !parked && held_on(&events, s).is_empty() {
                 let st = status.unwrap_or("gone");
                 let pr = gh::cached_pr(ctx, &s.fleet, s.issue);
