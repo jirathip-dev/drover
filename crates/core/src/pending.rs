@@ -92,7 +92,7 @@ pub fn record(ctx: &Ctx, (fleet, n): (&str, u64), action: &str, role: &str, afte
 
 /// A start of `fleet` #`n` refused `code` (`why`): a pending action logs it, failed unless soft; whether it stays pending.
 pub fn refused(ctx: &Ctx, (fleet, n): (&str, u64), code: &str, why: &str) -> Result<bool> {
-    let Some(p) = of(&crate::events::read(&ctx.state)?, fleet, n).filter(|p| !p.failed) else {
+    let Some(p) = of(&crate::events::working(&ctx.state)?, fleet, n).filter(|p| !p.failed) else {
         return Ok(false);
     };
     let soft = SOFT.contains(&code);

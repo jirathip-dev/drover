@@ -1,5 +1,5 @@
 use crate::config::{Config, Limits, LIMIT_DOCS};
-use crate::events::{read, IssueState, STATES};
+use crate::events::{working, IssueState, STATES};
 use crate::{drive, timer, Ctx};
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -129,7 +129,7 @@ pub fn run(ctx: &Ctx, live: bool, fleet: Option<&str>, out: &mut dyn Write) -> R
     }
     let cfg = Config::load(&ctx.config)?;
     fleet.map(|f| cfg.fleet(f)).transpose()?;
-    let st = crate::events::fold(&read(&ctx.state)?);
+    let st = crate::events::fold(&working(&ctx.state)?);
     let n = counts(st.values().filter(|s| fleet.is_none_or(|f| s.fleet == f)));
     let at = format!("live: {} issues", fleet.unwrap_or("all fleets'"));
     Ok(write!(out, "{}", markdown(&charts(&cfg.limits, Some(&n)), &at))?)
