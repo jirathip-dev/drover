@@ -11,6 +11,8 @@ use std::io::Write;
 
 const DAYS: u64 = 14;
 const HOT: usize = 5;
+/// #892: how a hotspots issue's title starts.
+pub const TITLE: &str = "hotspots: ";
 
 /// #889: a file `HOT` or more merged PRs touched in `DAYS` days, its `conflict-predicted` events and its PRs' update rounds.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -126,7 +128,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         return Ok(());
     }
     let day = ctx.now / 86400;
-    let title = format!("hotspots: {fleet} week of {}", ymd(day - (day + 3) % 7));
+    let title = format!("{TITLE}{fleet} week of {}", ymd(day - (day + 3) % 7));
     let search = format!("\"{title}\" in:title");
     let list = [
         "issue",

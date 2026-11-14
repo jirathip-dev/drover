@@ -206,7 +206,8 @@ impl Shed {
 fn agent_of(t: &TerminalInfo) -> Value {
     let up = t.state == shed_proto::State::Running;
     json!({"name": t.name, "pane_id": t.name, "cwd": t.cwd, "agent": t.labels.get("harness").filter(|_| up),
-        "agent_status": t.reported.as_ref().map_or("unknown", |s| s.state.as_str()), "terminal_title": "", "runtime": "shed", "pid": t.pid})
+        "agent_status": t.reported.as_ref().map_or("unknown", |s| s.state.as_str()), "terminal_title": "", "runtime": "shed", "pid": t.pid,
+        "cpu": t.resources.map(|u| u.cpu_pct)})
 }
 
 /// The shed call that does what herdr argv `a` does; None: herdr only (workspaces, worktrees, `agent start`).
@@ -511,6 +512,26 @@ pub fn reply(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> 
         }
     }
     Ok(())
+}
+
+/// #908: Err `HOST_BUSY` (the prompt held to a later pass) while shed has `agent` asleep and the host has no room to wake it.
+pub fn awake(r: &dyn Runner, agent: &str) -> Result<()> {
+    let t = r.shed().map(Shed).and_then(|s| s.get(r, agent).ok());
+    if t.and_then(|t| t.reported).is_none_or(|s| s.state != "hibernated") {
+        return Ok(());
+    }
+    let (l, h) = (crate::config::limits(), crate::host::sample(r));
+    let low = (h.free_mem_gb.filter(|g| *g < l.min_free_mem_gb)).map(|g| format!("only {g:.1} GB of memory free"));
+    match low.or_else(|| crate::host::admit(&h, &l).err()) {
+        Some(why) => bail!("REFUSED HOST_BUSY: {agent} is asleep and waking it starts its agent: {why}; held"),
+        None => Ok(()),
+    }
+}
+
+/// #908: `reply` once `awake` lets drover's prompt through.
+pub fn tell(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> Result<()> {
+    awake(r, agent)?;
+    reply(r, dsh, agent, pane, text)
 }
 
 /// #143: whether a prompt the caller just entered moved the agent off idle within 20 s, typing it once more if not.
