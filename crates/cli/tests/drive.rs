@@ -2303,6 +2303,35 @@ fn a_held_lane_whose_pane_is_gone_is_respawned_when_its_blocker_merges() {
     assert_eq!(read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count(), 2);
 }
 
+fn busy(mut f: Fake) -> Fake {
+    let o = drover::runner::Out {
+        code: 0,
+        stdout: "{ 50.00 40.00 30.00 }\n".into(),
+        stderr: String::new(),
+    };
+    f.replies.insert(0, ("sysctl -n vm.loadavg".into(), o));
+    f
+}
+
+#[test]
+fn a_released_lanes_respawn_waits_for_room() {
+    let (c, r) = held("drive-held-busy", NONE);
+    let spawns = || kinds(&c, "spawn").len();
+    let (out, _) = drive(&c, &busy(r.reply("git -C", "")));
+    assert_eq!(spawns(), 1, "{out}");
+    assert!(kinds(&c, "released").is_empty(), "{out}");
+    assert!(out.contains("REFUSED HOST_BUSY"), "{out}");
+    let (out, steps) = drive(&c, &fake(NONE).reply("git -C", ""));
+    assert_eq!(steps, ["respawn"], "{out}");
+    assert_eq!((spawns(), kinds(&c, "released").len()), (2, 1), "{out}");
+    let cmds = kinds(&c, "driven");
+    assert!(
+        cmds.iter().all(|e| !e.str("cmd").unwrap().contains("--force")),
+        "{cmds:?}"
+    );
+    assert!(kinds(&c, "override").is_empty());
+}
+
 /// #505: a lane held on two issues is woken only once both have merged.
 #[test]
 fn a_lane_held_on_two_blockers_waits_for_both() {

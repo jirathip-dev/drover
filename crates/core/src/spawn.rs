@@ -970,7 +970,7 @@ pub struct Opts {
     /// Machine-readable output
     #[arg(long)]
     pub json: bool,
-    /// Spawn although the host is busy (logs an `override` event)
+    /// Spawn although the host is busy: the owner or an orchestrator (logs an `override` event with `by`)
     #[arg(long)]
     pub force: bool,
     /// Kill the live agent / unfinished lane in the way, then spawn (logged)
@@ -1199,7 +1199,8 @@ pub fn spawn(
     let extend = crate::pending::extending(&events, fleet, issue);
     match refusal {
         Some(("HOST_BUSY", why)) if o.force || extend => {
-            let mut d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent});
+            let by = crate::orchestrator::acting().map_or_else(|| "owner".into(), |id| format!("orchestrator-{id}"));
+            let mut d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": by});
             if extend {
                 d["why"] = "owner-extend".into();
             }

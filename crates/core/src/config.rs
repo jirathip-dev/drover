@@ -457,6 +457,8 @@ pub struct Fleet {
     /// #228: this fleet's form categories and form rounds; `Config::parse` fills in `[limits]`'s when absent.
     pub form_categories: Option<Vec<String>>,
     pub form_rounds: Option<u32>,
+    /// #908: this fleet's `respawn_per_pass`; `Config::parse` fills in `[limits]`'s when absent.
+    pub respawn_per_pass: Option<usize>,
     /// #216: replaces `[limits] deny_commands` (empty = off); `deny_commands_add` adds to whichever applies.
     pub deny_commands: Option<Vec<Deny>>,
     #[serde(default)]
@@ -623,6 +625,7 @@ pub struct Limits {
     pub reap_keychain_readers: bool,
     pub respawn_max: u32,
     pub respawn_window_minutes: u64,
+    pub respawn_per_pass: usize,
     pub runtime_down_failures: u64,
     pub runtime_down_minutes: u64,
     pub pass_max_secs: u64,
@@ -744,6 +747,7 @@ impl Default for Limits {
             reap_keychain_readers: false,
             respawn_max: 3,
             respawn_window_minutes: 60,
+            respawn_per_pass: 2,
             runtime_down_failures: 5,
             runtime_down_minutes: 30,
             pass_max_secs: 120,
@@ -912,6 +916,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "respawn_window_minutes",
         "the window `respawn_max` counts failed starts in",
+    ),
+    (
+        "respawn_per_pass",
+        "respawns a drive pass starts, each through admission (a fleet may set its own)",
     ),
     (
         "runtime_down_failures",
@@ -1325,6 +1333,7 @@ impl Config {
             f.form_categories
                 .get_or_insert_with(|| c.limits.form_categories.clone());
             f.form_rounds.get_or_insert(c.limits.form_rounds);
+            f.respawn_per_pass.get_or_insert(c.limits.respawn_per_pass);
             f.bad = p.validate(name, &f.role);
             f.pipeline = Some(p);
         }
