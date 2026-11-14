@@ -1,0 +1,5 @@
+Decided: remote_acp.rs resolved to staging's code, its new test kept; the doc line on the private upstream() fn dropped
+Because: "Strip every comment that breaks it: plain comments, and doc comments on non-public items."
+Rejected: none
+Check: with comments and whitespace stripped, crates/cli/tests/remote_acp.rs equals origin/staging's
+Owner: Brought the branch up to date with staging again; no behaviour change, comment rule still clean.
