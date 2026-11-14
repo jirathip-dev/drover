@@ -226,7 +226,7 @@ fn shed_oversize(path: &Path) -> Result<()> {
         "archived = 0 AND LENGTH(CAST(json AS BLOB)) > ?1",
         EVENT_MAX as u64,
     )?;
-    let (passive, read): (Vec<Event>, Vec<Event>) = big.into_iter().partition(|e| PASSIVE.contains(&e.kind.as_str()));
+    let (passive, read): (Vec<Event>, Vec<Event>) = big.into_iter().partition(Event::is_passive);
     crate::db::rewrite(path, &read.iter().map(capped).collect::<Vec<_>>())?;
     crate::db::archive(path, &passive.iter().map(|e| e.seq).collect::<Vec<_>>())
 }
