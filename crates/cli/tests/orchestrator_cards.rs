@@ -72,23 +72,10 @@ fn acp(adapter: &[&str]) -> Fake {
         .reply("shed send", "")
 }
 
-fn herdr(agents: &str) -> Fake {
-    Fake::default()
-        .reply("herdr agent list", agents)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
-        )
-        .reply("herdr workspace close", "")
-        .reply("herdr pane run", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr agent start", "")
-        .reply("herdr agent wait", "")
-        .reply("herdr agent prompt", "")
-}
-
-fn live() -> String {
-    agents(&[("orchestrator-t1", "idle", "/x", "w9:p1")])
+fn shed_setup(name: &str, role_extra: &str, extra: &str) -> (drover::Ctx, FakeShed) {
+    let c = setup(name, role_extra, extra);
+    let b = FakeShed::attached(&c);
+    (c, b)
 }
 
 #[test]
@@ -199,19 +186,19 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
 fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness_login() {
     let signed_out = "Invalid API key · Please run /login";
     let page = |c: &drover::Ctx| {
-        let r = herdr(NO_AGENTS);
+        let r = Fake::default();
         let s = Server::new(c, &r, Some(ADDR.into()));
         chat(&s, &pair(&s, c, "Mozilla/5.0 (iPhone)", T), T + 120)
     };
-    let c = setup("cards-signin-plain", "", "");
-    assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
+    let (c, b) = shed_setup("cards-signin-plain", "", "");
+    assert_eq!(run(&c, &Fake::default(), &["thread", "say", "t1", "scope #12"]).0, 0);
     let later = drover::Ctx {
         now: T + 60,
         ..c.clone()
     };
-    let r = herdr(&live()).reply("herdr pane read w9:p1", signed_out);
-    assert_eq!(run(&later, &r, &["check"]).0, 0);
-    assert!(r.called("herdr workspace close w9"));
+    b.screen("orchestrator-t1", signed_out);
+    assert_eq!(run(&later, &Fake::default(), &["check"]).0, 0);
+    assert!(b.called("kill", "orchestrator-t1"), "{:?}", b.methods());
     assert_eq!(kinds(&c, "orchestrator-start").len(), 1, "nothing to resume on");
     assert!(kinds(&c, "agent-unavailable").is_empty(), "the harness is not rested");
     let lines: Vec<_> = kinds(&c, "thread-msg")
@@ -221,11 +208,9 @@ fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].str("signin"), Some("claude"));
     assert!(page(&c).contains("claude is signed out: sign in <button type=button data-su=\"claude\""));
-    run(
-        &later,
-        &herdr(&live()).reply("herdr pane read w9:p1", signed_out),
-        &["check"],
-    );
+    b.add("orchestrator-t1", json!({"fleet": "sendmeter", "harness": "claude"}));
+    b.screen("orchestrator-t1", signed_out);
+    run(&later, &Fake::default(), &["check"]);
     assert_eq!(
         kinds(&c, "thread-msg")
             .iter()
