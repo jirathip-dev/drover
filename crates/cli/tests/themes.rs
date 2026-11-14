@@ -722,8 +722,6 @@ fn stages_species_and_a_light_dark_scheme_are_checked() {
     validate(br#"{"scheme": {"light": "paper", "dark": "nord"}}"#).unwrap();
 }
 
-/// #928: farm, kitchen and garden are the pinned shared-repo commit's files, each served as its SHA256SUMS line says;
-/// a custom theme of the same name still wins over the pack.
 #[test]
 fn pinned_packs_load_and_a_custom_theme_overrides_them() {
     use sha2::Digest;
