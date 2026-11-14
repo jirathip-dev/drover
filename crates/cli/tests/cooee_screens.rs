@@ -196,7 +196,10 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
     assert_eq!(row["title"], "#12");
     assert_eq!(row["badge"], json!({"text": "fix 1", "tone": "working"}));
     assert_eq!(row["figure"], json!({"state": "working", "tool": "edit"}));
-    assert_eq!(row["subtitle"], "impl ✓ · review 1 ✗ · fix 1 ▸ sendmeter-impl-12 · working");
+    assert_eq!(
+        row["subtitle"],
+        "impl ✓ · review 1 ✗ · fix 1 ▸ sendmeter-impl-12 · working"
+    );
     assert_eq!(row["tap"], json!({"thread": "sendmeter-impl-12"}));
     assert_eq!(row["swipe"][0]["action"], "stop");
     assert_eq!(find(&q, "q-sendmeter-5")["figure"], json!({"state": "needs"}));
