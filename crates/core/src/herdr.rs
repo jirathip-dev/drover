@@ -4,7 +4,7 @@ use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
 use shed_proto::{KeysParams, Logged, LsParams, Method, ReadParams, ReadResult, RunParams, SendParams, Target};
 use shed_proto::{TerminalInfo, WaitParams};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// The program name, for PATH lookups and the Services row.
 pub const BIN: &str = "herdr";
@@ -41,6 +41,14 @@ pub fn poll(r: &dyn Runner) -> Result<Vec<Value>> {
     let v: Value =
         serde_json::from_str(&ok_on(&Herdr, r, &argv(&["agent", "list"]))?).context("herdr agent list: not JSON")?;
     Ok(v["result"]["agents"].as_array().cloned().unwrap_or_default())
+}
+
+/// #941: an ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`) and the provider's session options (`--meta`).
+#[derive(Clone, Debug, Default)]
+pub struct Acp {
+    pub cmd: Vec<String>,
+    pub mcp: Option<PathBuf>,
+    pub meta: Option<Value>,
 }
 
 /// #298: shed's lanes: terminals named as their agents, labelled `fleet`, `issue`, `role` and `harness`.
@@ -106,21 +114,14 @@ impl Shed {
         }
     }
     /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), #565: its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
-    pub fn start(
-        &self,
-        r: &dyn Runner,
-        name: &str,
-        labels: &[(&str, String)],
-        cwd: &str,
-        cmd: &[String],
-    ) -> Result<()> {
+    pub fn start(&self, r: &dyn Runner, name: &str, labels: &[(&str, String)], cwd: &str, acp: &Acp) -> Result<()> {
         if self.get(r, name).is_ok_and(|t| t.state == shed_proto::State::Exited) {
             self.call(r, Method::Rm, Target { name: name.into() })?;
         }
         if self.0.acp.is_none() {
             return self.call(r, Method::Run, Self::run_params(name, labels, cwd)).map(drop);
         }
-        let a = self.acp_argv(name, labels, cwd, cmd);
+        let a = self.acp_argv(name, labels, cwd, acp);
         shed::cli(r, &a.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
     }
     /// #899: its exited lane terminals (a `fleet` label), kept until removed.
@@ -155,7 +156,7 @@ impl Shed {
         ok
     }
     /// The `shed run --acp` words that start ACP lane `name`.
-    pub fn acp_argv(&self, name: &str, labels: &[(&str, String)], cwd: &str, cmd: &[String]) -> Vec<String> {
+    pub fn acp_argv(&self, name: &str, labels: &[(&str, String)], cwd: &str, acp: &Acp) -> Vec<String> {
         let id = self.0.acp.as_deref().unwrap_or_default();
         let mut a = argv(&[
             "run",
@@ -168,12 +169,18 @@ impl Shed {
             "--cwd",
             cwd,
         ]);
+        a.extend(
+            acp.mcp
+                .iter()
+                .flat_map(|f| ["--mcp".into(), f.to_string_lossy().into_owned()]),
+        );
+        a.extend(acp.meta.iter().flat_map(|m| ["--meta".into(), m.to_string()]));
         a.extend(labels.iter().flat_map(|(k, v)| ["--label".into(), format!("{k}={v}")]));
         a.extend(
-            (!cmd.is_empty())
+            (!acp.cmd.is_empty())
                 .then(|| "--".to_string())
                 .into_iter()
-                .chain(cmd.iter().cloned()),
+                .chain(acp.cmd.iter().cloned()),
         );
         a
     }

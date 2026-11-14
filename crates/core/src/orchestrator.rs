@@ -1079,6 +1079,9 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     let text = profile(cfg, t, fleet);
     on.write(&brief, &text)?;
     h.prepare(ctx, &on, &p)?;
+    if let Some((_, acp)) = &acp {
+        crate::spawn::write_acp_mcp(&on, &p, acp)?;
+    }
     let _secrets = crate::spawn::deliver(ctx, &on, &p)?;
     if let Some((b, cmd)) = acp {
         let labels = [

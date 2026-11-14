@@ -366,6 +366,18 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         |p| format!("✓ shed — {} on the timer's PATH", p.display()),
     ));
     let ids: BTreeSet<String> = cfg.fleet.keys().filter_map(|n| cfg.shed_for(n)?.acp).collect();
+    if !ids.is_empty() {
+        let fix = format!(
+            "cargo install --git {} --rev {} --locked --force shed",
+            crate::shed::git(),
+            crate::shed::REV
+        );
+        rows.push(if crate::spawn::shed_meta(r) {
+            "✓ shed run --meta — ACP lanes get their provider's session options".into()
+        } else {
+            format!("✗ shed run --meta — {} → {fix}", crate::spawn::SHED_OLD)
+        });
+    }
     let agents = ids
         .first()
         .and_then(|_| crate::shed::cli(r, &["agents", "--json"]).ok());

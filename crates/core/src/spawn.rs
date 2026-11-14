@@ -552,12 +552,15 @@ pub fn unguarded(ctx: &Ctx, (profile, family, h): (&str, &str, &str), id: &str, 
 }
 
 /// file, signed in with the host's own login, its profile's settings and role as the
-pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&str>) -> Result<Vec<String>> {
+pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&str>) -> Result<herdr::Acp> {
     let dir = providers::profiles_root(ctx).join(&p.profile);
     let home = |a: Vec<String>| crate::hosts::rehome(a, remote);
     let why = unguarded(ctx, (&p.profile, p.family, &p.harness), id, remote.is_some());
     if !why.is_empty() {
         return refused("ACP_UNGUARDED", format!("{why}; the lane does not start"));
+    }
+    if !shed_meta(r) {
+        return refused("SHED_OLD", format!("{SHED_OLD}; the lane does not start"));
     }
     let agents: Value = serde_json::from_str(&crate::shed::cli(r, &["agents", "--json"])?.stdout)?;
     let agent = agents.as_array().into_iter().flatten().find(|a| a["id"] == id);
@@ -575,7 +578,39 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     let (set, role) = (q(&set.to_string_lossy()), q(&role.to_string_lossy()));
     let profile = providers::get(&p.harness).acp_profile(&set, &role);
     let line = words.join(" ") + &profile + " && unset SHED BERTH && exec \"$@\"";
-    Ok([argv(&["sh", "-c", &line, "sh"]), cmd].concat())
+    let meta = providers::get(&p.harness).acp_meta();
+    Ok(herdr::Acp {
+        cmd: [argv(&["sh", "-c", &line, "sh"]), cmd].concat(),
+        mcp: (meta.is_some() || !p.mcp.is_empty()).then(|| p.mcp_file.clone()),
+        meta,
+    })
+}
+
+/// #941: what `shed_meta` lacking means, for doctor's row and spawn's refusal.
+pub const SHED_OLD: &str =
+    "this host's shed predates shed#94 (no `shed run --meta`): an ACP lane would load the owner's own setup";
+
+/// #941: the host's shed takes `run --meta`.
+pub fn shed_meta(r: &dyn Runner) -> bool {
+    crate::shed::cli(r, &["help", "run"]).is_ok_and(|o| o.stdout.contains("--meta"))
+}
+
+/// #941: an ACP lane's `--mcp` file: the role's servers as ACP's list (stdio, `http`, `sse`).
+pub fn write_acp_mcp(on: &crate::hosts::On, p: &Plan, acp: &herdr::Acp) -> Result<()> {
+    let Some(file) = &acp.mcp else { return Ok(()) };
+    let pairs = |v: &Value| -> Vec<Value> {
+        let kv = v.as_object().into_iter().flatten();
+        kv.map(|(k, v)| json!({"name": k, "value": v})).collect()
+    };
+    let list: Vec<Value> = p
+        .mcp
+        .iter()
+        .map(|(name, s)| match s["type"].as_str() {
+            Some(t @ ("http" | "sse")) => json!({"type": t, "name": name, "url": s["url"], "headers": pairs(&s["headers"])}),
+            _ => json!({"name": name, "command": s["command"], "args": s.get("args").unwrap_or(&json!([])), "env": pairs(&s["env"])}),
+        })
+        .collect();
+    on.write(file, &serde_json::to_string_pretty(&list)?)
 }
 
 fn remote_acp(
@@ -685,7 +720,7 @@ type Runtime<'a> = (
     Option<&'a str>,
     Option<&'a herdr::Shed>,
     &'a [(&'static str, String)],
-    &'a [String],
+    &'a herdr::Acp,
 );
 
 /// Lane scratch: untracked files fleet itself writes into a worktree (some gitignored). Never dirty work.
@@ -968,7 +1003,7 @@ pub fn spawn(
     }
     let acp = match &acp_id {
         Some(id) => acp_cmd(ctx, r, &p, id, hm.filter(|_| on.machine.is_some()))?,
-        None => vec![],
+        None => herdr::Acp::default(),
     };
     let mut pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, bt.as_ref(), &labels, &acp));
     if o.dry_run {
@@ -1314,6 +1349,7 @@ pub fn spawn(
         copy_included(&f.local_path(), &p.worktree)?;
     }
     h.prepare(ctx, &on, &p)?;
+    write_acp_mcp(&on, &p, &acp)?;
     if on.machine.is_some() && p.lane_key.is_none() {
         let exe = home(vec![ctx.exe.clone()]).remove(0);
         ok(

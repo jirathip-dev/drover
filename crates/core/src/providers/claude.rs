@@ -175,6 +175,10 @@ impl Provider for Claude {
         let [md, json] = LOCAL_FILES;
         format!(" && mkdir -p .claude && cp {settings} {json} && cp {role} {md}")
     }
+    fn acp_meta(&self) -> Option<serde_json::Value> {
+        let options = serde_json::json!({"settingSources": ["project", "local"], "strictMcpConfig": true});
+        Some(serde_json::json!({"claudeCode": {"options": options}}))
+    }
     fn login(&self) -> Option<&'static str> {
         Some("claude /login")
     }
