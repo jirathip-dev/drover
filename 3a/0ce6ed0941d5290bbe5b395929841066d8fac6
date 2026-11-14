@@ -1,0 +1,10 @@
+Decided: clear the update worktree with remove --force --force before add; it drops a locked entry, and only the update-<fleet> path
+Because: "unlocks and prunes its own `update-<fleet>` entry when the folder is missing (that entry only, never other worktrees)"
+Rejected: worktree prune — it prunes every stale entry in the repo, not just drive's own
+Decided: both auto-update call sites go through catch_up, which emits auto-update-failed unless the fleet's newest failed/updated event is the same failure
+Because: "A failing auto-update raises one alert per state (`auto-update-failed`, naming the error)"
+Because: crates/core/src/drive.rs:1946
+Decided: the alert's reason is the error on one line so a notifier still gets one plain line
+Check: cargo test -p drover --test update_worktree fails at commit 1 with the production error and passes at head
+Check: commit 2 corrects one test assertion: the update fast-forwards, so the pushed head equals staging
+Owner: Drive clears its own stuck update folder, and a failing auto-update now alerts once instead of failing silently
