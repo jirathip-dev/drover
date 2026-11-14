@@ -1,6 +1,6 @@
 // #269: the Lanes tab, drawn from API v1's `lanes` (pure: tests run it under node): state sections, repo groups
 // inside, a row per lane (its avatar in each mode, name, state, why, activity) with its hidden sheet card (serve.js).
-import type { LaneRow, LanesTab } from '../../assets/types/api';
+import type { LaneRow, LanesTab, ShedRow } from '../../assets/types/api';
 import { esc } from './events.ts'; // node runs this file as is: the extension
 import { blocked } from './needs.ts';
 import { form, hidden, prLine } from './queue.ts';
@@ -35,11 +35,24 @@ function row(d: LanesTab, l: LaneRow): string {
   return `<div class=lane data-agent="${esc(l.name)}" data-role=${esc(l.role)}${l.gone ? ' data-gone' : ''}${th}><button type=button class=lr>${avatar(l)}<span class="nw el">${esc(l.name)}${whereChip(l.where)}</span><span class="nw ${l.tone}">${esc(l.state)} ${l.ago}</span>${why}${act}</button><div class=card hidden>${ps}</div></div>`;
 }
 
+function shedRow(r: ShedRow): string {
+  if (r.error != null) return `<div class=lane><p class="r nw el">! shed ${esc(r.host)}: ${esc(r.error)}</p></div>`;
+  const labels = Object.entries(r.labels ?? {}).map(([k, v]) => `${k}=${v}`).join(' ');
+  return `<div class=lane><p class="nw el">${esc(r.name ?? '')} <span class="tag m">${esc(r.host)}</span> <span class="tag m">${esc(r.runtime ?? '')}</span></p>`
+    + `<p class="nw el">${esc(r.state ?? '')} <span class=m>${esc(r.age ?? '')}</span></p><p class="act nw el">${esc(r.last ?? '')}</p>`
+    + (labels ? `<p class="m nw el"><small>${esc(labels)}</small></p>` : '') + '</div>';
+}
+
+function shed(rows: ShedRow[]): string {
+  if (!rows.length) return '';
+  return `<details class=qm><summary><span>Other in shed</span> (${rows.filter(r => r.error == null).length})</summary>${rows.map(shedRow).join('')}</details>`;
+}
+
 export function tab(d: LanesTab): string {
   if (d.error != null) return `<p class=m>${esc(d.error)}</p>`;
   if (d.failed) return '<p class=r>herdr agent list failed</p>';
   const count = (n: number) => `(${n})`;
   const h = d.sections.map(s => `<h2><span class=${s.tone}>${s.name} ${count(s.repos.reduce((n, r) => n + r.lanes.length, 0))}</span></h2>`
     + s.repos.map(r => `<h3>${esc(r.name)} ${count(r.lanes.length)}</h3>${r.lanes.map(l => row(d, l)).join('')}`).join(''));
-  return h.join('') || '<p class=m>no agents</p>';
+  return (h.join('') || '<p class=m>no agents</p>') + shed(d.shed);
 }
