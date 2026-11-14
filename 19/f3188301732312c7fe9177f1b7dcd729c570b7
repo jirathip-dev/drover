@@ -1,0 +1,5 @@
+Decided: regenerate assets/types/api.d.ts from the one-line ShedRow doc that ts-rs emits, rather than restoring the two-line Rust comment.
+Because: crates/server/src/api.rs:216
+Rejected: a two-line `///` doc on ShedRow — arch-check allows one `///` line on a public item.
+Check: the rust job's TS types step shows no drift at 19f3188; the full cargo test ran in CI only, because the local disk was full.
+Owner: Fixes the stale generated types file that turned CI red; nothing changes for users.
