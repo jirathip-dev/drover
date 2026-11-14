@@ -259,6 +259,7 @@ fn a_needs_human_issue_with_an_untrimmed_repair_in_its_history_drives_on() {
         "repaired",
         json!({"state": "queued", "reason": "blocked by #7"}),
     );
+    spawn(&c, 16);
     ev(
         &c,
         20,
