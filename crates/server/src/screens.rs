@@ -1,4 +1,6 @@
-use super::{devices, form, header, mtime, shared, shown, Auth, BTreeMap, Config, Ctx, Event, Refusal, Result, Server};
+use super::{
+    devices, form, header, mtime, shown, working, Auth, BTreeMap, Config, Ctx, Event, Refusal, Result, Server,
+};
 use super::{NeedAsk, NeedIssue, QueueCard, QueueRow, JSON};
 use crate::access::{civil_month_day, civil_year};
 use anyhow::Context;
@@ -327,7 +329,7 @@ fn fleets(cfg: &Config) -> Value {
 
 fn workflow(ctx: &Ctx) -> Value {
     let limits = Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
-    let ev = shared(&ctx.state).unwrap_or_default();
+    let ev = working(&ctx.state).unwrap_or_default();
     let counts = crate::diagram::counts(ev.states.values());
     let blocks = crate::diagram::charts(&limits, Some(&counts)).map(|c| {
         let nodes: Vec<Value> = c.nodes.iter().map(|(id, k)| json!({"id": id, "limit": k})).collect();
@@ -358,15 +360,12 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
     let before = q.get("before").and_then(|b| b.parse().ok()).unwrap_or(ctx.now);
     let picked: Vec<&str> = q.get("kind").map_or("all", String::as_str).split(',').collect();
     let all = picked.contains(&"all") || picked.iter().all(|k| !KINDS.iter().any(|(v, _)| v == k));
-    let log = shared(&ctx.state).unwrap_or_default();
-    let since = log
-        .iter()
-        .find(|e| e.ts + 86_400 >= before)
-        .map_or(u64::MAX, |e| e.seq.saturating_sub(1));
+    let kinds = ["merged", "verdict", "needs-human", "spawn", "needs-decision"];
+    let window = crate::events::since(&ctx.state, &kinds, before.saturating_sub(86_400)).unwrap_or_default();
     let repos: BTreeMap<String, String> = Config::kept(ctx)
         .map(|c| c.fleet.into_iter().map(|(f, fc)| (f, fc.repo)).collect())
         .unwrap_or_default();
-    let list = super::v1::events(ctx, since, u64::MAX, usize::MAX).list;
+    let list = super::v1::feed(ctx, &window, usize::MAX).list;
     let mut rows = vec![];
     for e in list.iter().rev().filter(|e| e.ts < before) {
         let Some(k) = kind_of(&e.kind).filter(|k| all || picked.contains(k)) else {
@@ -532,7 +531,7 @@ impl Server<'_> {
     }
 
     fn queue_screen(&self, ctx: &Ctx, q: &Q) -> Value {
-        let (tab, ev) = (self.queue_tab(ctx), shared(&ctx.state).unwrap_or_default());
+        let (tab, ev) = (self.queue_tab(ctx), working(&ctx.state).unwrap_or_default());
         let sel = q
             .get("repo")
             .filter(|r| tab.fleets.iter().any(|f| &f.name == *r))
@@ -568,7 +567,7 @@ impl Server<'_> {
         let mins = Config::kept(ctx).map_or(crate::config::Limits::default().ask_default_minutes, |c| {
             c.limits.ask_default_minutes
         });
-        let ev = shared(&ctx.state).unwrap_or_default();
+        let ev = working(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
         cards.extend(super::v1::slo_open(&ev).map(|e| {
             json!({"type": "card", "id": format!("slo-{}", e.seq), "kind": "alert", "tone": "warn",
@@ -687,7 +686,7 @@ impl Server<'_> {
                 format!("stopped {}", s("agent"))
             }
             "answer" => {
-                let open = crate::events::open_asks(&shared(&ctx.state)?)
+                let open = crate::events::open_asks(&working(&ctx.state)?)
                     .into_iter()
                     .find(|e| e.str("id") == Some(block))
                     .cloned();

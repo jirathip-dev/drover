@@ -1,5 +1,5 @@
 use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, States, HTML, JSON, PAIRED_OPS};
-use super::{form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusal, Result, Server};
+use super::{form, lanes, lock, refused, shown, view, working, Config, Ctx, Refusal, Result, Server};
 use crate::api::{
     ApprovalChoice, Ask, Block, Chat, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, Health,
     IssueView, Lane, LaneChat, LessonFleet, LessonRun,
@@ -67,7 +67,7 @@ impl Server<'_> {
             }
             ("GET", Some("lifeboat")) if !paired => ("401 Unauthorized", HTML, crate::lifeboat::hint().into_bytes()),
             ("GET", Some("lifeboat")) => {
-                let lanes = Config::kept(ctx).ok().zip(shared(&ctx.state).ok());
+                let lanes = Config::kept(ctx).ok().zip(working(&ctx.state).ok());
                 let lanes = lanes.map_or_else(Vec::new, |(c, e)| self.lane_list(ctx, &c, &e, &e.states));
                 let msg = f.get("msg").map_or("", String::as_str);
                 ("200 OK", HTML, crate::lifeboat::page(ctx, &lanes, msg).into_bytes())
@@ -99,7 +99,7 @@ impl Server<'_> {
                 reply("401 Unauthorized", "UNPAIRED", "pair this device first")
             }
             ("GET", Some("shed")) => {
-                let (cfg, ev) = (Config::kept(ctx), shared(&ctx.state));
+                let (cfg, ev) = (Config::kept(ctx), working(&ctx.state));
                 match cfg.and_then(|c| Ok((c, ev?))) {
                     Ok((c, ev)) => out("200 OK", &self.shed_rows(ctx, &c, &ev)),
                     Err(e) => reply("500 Internal Server Error", "ERROR", format!("{e:#}")),
@@ -141,7 +141,7 @@ impl Server<'_> {
             ("GET", Some("chat")) => {
                 let (mut c, ev) = (
                     self.chat_tab(ctx, paired && self.addr.is_some()),
-                    shared(&ctx.state).unwrap_or_default(),
+                    working(&ctx.state).unwrap_or_default(),
                 );
                 c["threads"]
                     .as_array_mut()
@@ -154,14 +154,14 @@ impl Server<'_> {
                 let fleet = x[5..].strip_suffix("/threads").unwrap_or_default();
                 match Config::kept(ctx) {
                     Ok(c) if fleet == "all" || c.fleet.contains_key(fleet) => {
-                        let ev = shared(&ctx.state).unwrap_or_default();
+                        let ev = working(&ctx.state).unwrap_or_default();
                         out("200 OK", &repo(&ev, fleet))
                     }
                     _ => reply("404 Not Found", "NOT_FOUND", "no such repo"),
                 }
             }
             ("GET", Some(t)) if t.starts_with("thread/") => {
-                let ev = shared(&ctx.state).unwrap_or_default();
+                let ev = working(&ctx.state).unwrap_or_default();
                 super::chat::older(ctx, &ev, &t[7..], &f).map_or_else(
                     || reply("404 Not Found", "NOT_FOUND", "no such thread"),
                     |p| {
@@ -325,7 +325,7 @@ impl Server<'_> {
     }
 
     fn close(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
-        let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
+        let (cfg, events) = (Config::kept(ctx)?, working(&ctx.state)?);
         let fleet = f.get("fleet").map_or("", String::as_str);
         let Some(fc) = cfg.fleet.get(fleet) else {
             return refused("BAD_VALUE", format!("no fleet `{fleet}`"));
@@ -358,7 +358,7 @@ impl Server<'_> {
     fn blocks(&self, ctx: &Ctx, q: &BTreeMap<String, String>, chat: Chat) -> LaneChat {
         let num = |k: &str| q.get(k).and_then(|v| v.parse().ok());
         let acp = || {
-            let (cfg, ev) = (Config::load(&ctx.config).ok()?, shared(&ctx.state).ok()?);
+            let (cfg, ev) = (Config::load(&ctx.config).ok()?, working(&ctx.state).ok()?);
             let all = self.lanes(ctx.now, &cfg, &ev, &ev.states)?;
             let l = all.into_iter().find(|l| q.get("agent") == Some(&l.name))?;
             let (on, pane) = (l.on(&self.r), l.pane.as_deref()?);
@@ -442,7 +442,7 @@ impl Server<'_> {
     }
 
     pub(super) fn state(&self, ctx: &Ctx) -> Result<State> {
-        let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
+        let (cfg, events) = (Config::kept(ctx)?, working(&ctx.state)?);
         let (st, r) = (events.states.clone(), &self.cached(ctx.now, 60));
         let lanes = self.lane_list(ctx, &cfg, &events, &st);
         let queued = |(f, i): (&String, crate::queue::Item)| Queued {
@@ -539,7 +539,7 @@ impl Server<'_> {
 
     /// #859: `/api/v1` p95 over `slo_api_p95_ms` for `slo_api_minutes`: one `slo-api`; held again, `slo-api-ok`.
     pub fn slo(&self, now: u64) {
-        let (Ok(cfg), Ok(ev)) = (Config::kept(self.ctx), shared(&self.ctx.state)) else {
+        let (Ok(cfg), Ok(ev)) = (Config::kept(self.ctx), working(&self.ctx.state)) else {
             return;
         };
         let (limit, mins) = (cfg.limits.slo_api_p95_ms, cfg.limits.slo_api_minutes);
@@ -563,7 +563,7 @@ pub(super) fn slo_open(events: &[Event]) -> Option<&Event> {
 }
 
 fn marked(ctx: &Ctx, mut d: QueueTab) -> QueueTab {
-    let ev = shared(&ctx.state).unwrap_or_default();
+    let ev = working(&ctx.state).unwrap_or_default();
     for c in &mut d.fleets {
         let q = crate::queue::replay(&ev, &c.name);
         for r in &c.rows {
@@ -601,7 +601,7 @@ fn qset(ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
 }
 
 fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
-    let ev = shared(&ctx.state).unwrap_or_default();
+    let ev = crate::events::since(&ctx.state, &["spawn", "verdict", "why", "pending-action"], 0).unwrap_or_default();
     let mut shots: Vec<String> = crate::verify::served(&ev, (fleet, n), None)
         .into_iter()
         .map(|x| x.0)
@@ -654,7 +654,7 @@ fn start(p: crate::pending::Pending) -> PendingStart {
 }
 
 fn pending_cards(ctx: &Ctx, mut tab: NeedsTab) -> NeedsTab {
-    let ev = shared(&ctx.state).unwrap_or_default();
+    let ev = working(&ctx.state).unwrap_or_default();
     let back = |f: &str, n| crate::pending::of(&ev, f, n).filter(|p| p.back(ctx.now));
     tab.issues
         .retain(|i| crate::pending::of(&ev, &i.fleet, i.issue).is_none() || back(&i.fleet, i.issue).is_some());
@@ -678,7 +678,7 @@ fn pending_cards(ctx: &Ctx, mut tab: NeedsTab) -> NeedsTab {
 fn lessons(ctx: &Ctx) -> Lessons {
     let (cfg, ev) = (
         Config::kept(ctx).unwrap_or_default(),
-        shared(&ctx.state).unwrap_or_default(),
+        working(&ctx.state).unwrap_or_default(),
     );
     let st = ev.states.clone();
     let fleet = |(name, fc): (&String, &crate::config::Fleet)| {
@@ -749,7 +749,7 @@ fn about(ctx: &Ctx, f: &BTreeMap<String, String>) -> BTreeMap<String, String> {
 }
 
 fn roles(ctx: &Ctx, fleet: &str) -> Result<Roles> {
-    let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
+    let (cfg, events) = (Config::kept(ctx)?, working(&ctx.state)?);
     let fc = cfg.fleet(fleet)?;
     let c = &cfg.chat;
     let harness = |h: &&str| Harness {
@@ -785,11 +785,15 @@ pub(super) fn ask(a: &Event) -> Ask {
 }
 
 pub(super) fn events(ctx: &Ctx, since: u64, until: u64, cap: usize) -> Events {
-    let (ev, cfg) = (shared(&ctx.state).unwrap_or_default(), Config::kept(ctx).ok());
-    let after: Vec<_> = ev.iter().filter(|e| e.seq > since && e.seq <= until).collect();
-    let (seq, refresh) = (ev.last().map_or(0, |e| e.seq), after.len() > cap);
+    let after = crate::events::between(&ctx.state, (since, until), cap.saturating_add(1));
+    feed(ctx, &after.unwrap_or_default(), cap)
+}
+
+pub(super) fn feed(ctx: &Ctx, after: &[Event], cap: usize) -> Events {
+    let cfg = Config::kept(ctx).ok();
+    let (seq, refresh) = (crate::db::last_seq(&ctx.state), after.len() > cap);
     let mut prs = BTreeMap::new();
-    let list = (after.into_iter().filter(|_| !refresh))
+    let list = (after.iter().filter(|_| !refresh))
         .map(|e| {
             let fc = cfg.as_ref().and_then(|c| c.fleet.get(&e.fleet));
             let (glyph, tone, text, imp) = words(e, fc.map_or("serial", |f| f.serial_label()));
@@ -861,7 +865,7 @@ fn vendors(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
 
 impl Server<'_> {
     fn unsaved(&self, ctx: &Ctx, mut tab: crate::api::LanesTab) -> crate::api::LanesTab {
-        let events = shared(&ctx.state).unwrap_or_default();
+        let events = working(&ctx.state).unwrap_or_default();
         let Ok(cfg) = Config::kept(ctx) else { return tab };
         let all = self.lanes(ctx.now, &cfg, &events, &events.states).unwrap_or_default();
         let r = self.cached(ctx.now, 30);
