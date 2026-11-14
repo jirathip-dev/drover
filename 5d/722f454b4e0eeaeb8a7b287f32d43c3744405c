@@ -1,0 +1,12 @@
+Decided: example config and setup.md turn merge_label on; FleetCfg.merge_label stays Option<String> with no default
+Because: q1573
+Decided: label rows go through gh.rs (label_exists, label_fix, ensure_label); setup prints = already / ✓ / ✗ → fix, doctor a ✗ row with the create command
+Because: "Both go through `crates/core/src/gh.rs`"
+Decided: one aggregate check `ci`; a no-op run (other label, draft) names its aggregate `no-op` so it never overwrites a full run's `ci` on that head
+Because: "A `labeled` event for any other label is a no-op with a run-unique group, so it never cancels a full run"
+Decided: staging reuse looks up a `ci-full-<tree>` artifact of the tested merge tree, needs the run's conclusion success, else full
+Because: "The decision fails closed: any error means the full run."
+Rejected: comparing the PR head's tree — a pull_request run tests the merge commit, whose tree can differ from the head's
+Rejected: actionlint — not installed on this host; ruby's stdlib YAML parses the templates in crates/cli/tests/ci_templates.rs without a new crate
+Check: the concurrency group table in docs/ci.md matches the expression in templates/ci/ci.yml
+Owner: New fleets get affected-only CI with a merge-ready label that setup creates and doctor checks; existing fleets are unchanged.
