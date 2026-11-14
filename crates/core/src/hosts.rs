@@ -1,5 +1,5 @@
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
-use crate::events::{age, append, emit, fold, last_spawn, open_asks, read, Event, IssueState};
+use crate::events::{age, append, emit, fold, last_spawn, open_asks, working, Event, IssueState};
 use crate::gate::refused;
 use crate::host::{self, Host};
 use crate::providers;
@@ -398,7 +398,7 @@ impl<'a> Pass<'a> {
             .iter()
             .find(|h| h.1.machine.as_deref() == Some(m))
             .map_or(m, |h| h.0.as_str());
-        let events = read(&ctx.state).unwrap_or_default();
+        let events = working(&ctx.state).unwrap_or_default();
         let kinds = ["host-key-changed", "host-online"];
         let last = events
             .iter()
@@ -507,7 +507,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
     if cfg.hosts.is_empty() {
         return agents;
     }
-    let events = read(&ctx.state).unwrap_or_default();
+    let events = working(&ctx.state).unwrap_or_default();
     let off = idle_off(cfg, &events);
     for (name, h) in &cfg.hosts {
         if h.machine.as_ref().is_some_and(|m| off.contains(m)) {
@@ -574,7 +574,7 @@ fn import(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) {
     let Some(text) = text.or_else(|| on.read(&Path::new(home).join(".local/state/drover/events.jsonl"))) else {
         return;
     };
-    let events = read(&ctx.state).unwrap_or_default();
+    let events = working(&ctx.state).unwrap_or_default();
     let (states, max_age) = (fold(&events), cfg.limits.import_max_age_hours * 3600);
     let mark = |e: &&Event| e.kind == "asks-imported" && e.str("host") == Some(name);
     let upto = events.iter().rev().find(mark).and_then(|e| e.val("upto_ts").as_u64());
@@ -628,6 +628,76 @@ pub fn needs(f: &Fleet, role: &str, events: &[Event], (fleet, issue): (&str, u64
     n.sort();
     n.dedup();
     n
+}
+
+const IDLE: [&str; 6] = ["ready", "needs-human", "parked", "blocked", "merged", "closed"];
+const SLOTS: [&str; 2] = ["working", "simulators"];
+
+fn sim(cfg: &Config, events: &[Event], e: &Event) -> bool {
+    let (role, n) = (e.str("role").unwrap_or_default(), e.issue.unwrap_or_default());
+    let need = |f| needs(f, role, events, (&e.fleet, n));
+    cfg.fleet(&e.fleet).is_ok_and(|f| need(f).iter().any(|t| t == "sim"))
+}
+
+/// #984: a host's live lanes (`agents`) but `skip`'s: those running a turn, and those holding a simulator.
+pub fn held_slots(cfg: &Config, events: &[Event], agents: &[Value], skip: Option<(&str, u64)>) -> [usize; 2] {
+    let st = fold(events);
+    let mut n = [0; 2];
+    for a in agents {
+        let sp = a["name"].as_str().and_then(|x| crate::events::last_spawn(events, x));
+        let Some((sp, i)) = sp.and_then(|e| Some((e, e.issue?))) else {
+            continue;
+        };
+        let s = st.get(&(sp.fleet.clone(), i));
+        if s.is_some_and(|s| !IDLE.contains(&s.state.as_str())) && skip != Some((sp.fleet.as_str(), i)) {
+            n[0] += usize::from(!matches!(a["agent_status"].as_str(), Some("idle" | "done" | "blocked")));
+            n[1] += usize::from(sim(cfg, events, sp));
+        }
+    }
+    n
+}
+
+/// #984: drive's check before a start: `waiting for a slot` while every enabled host the lane fits is full.
+pub fn slot_before(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], me: Lane, start: &[Event]) -> Option<String> {
+    let need = needs(cfg.fleet(me.0).ok()?, me.2, ev, (me.0, me.1));
+    let (seen, sims) = (cached(ctx), need.iter().any(|t| t == "sim"));
+    let others = || start.iter().filter(|e| e.fleet != me.0 || e.issue != Some(me.1));
+    let start = [others().count(), others().filter(|e| sim(cfg, ev, e)).count()];
+    let fit = |(n, h): &(&String, &HostCfg)| h.enabled && need.iter().all(|t| tags(h, seen.get(*n)).contains(t));
+    let mut full = None;
+    for (name, h) in cfg.hosts.iter().filter(fit) {
+        let caps = [h.max_working, h.max_simulators.filter(|_| sims)];
+        (caps != [None; 2]).then_some(())?;
+        let agents = agents_of(cfg, name, &On::new(r, h.machine.as_deref())).unwrap_or_default();
+        let held = held_slots(
+            cfg,
+            &crate::events::working(&ctx.state).unwrap_or_default(),
+            &agents,
+            Some((me.0, me.1)),
+        );
+        let used = [held[0] + start[0], held[1] + start[1]];
+        let (k, c) = (0..2).find_map(|k| caps[k].filter(|&c| used[k] >= c).map(|c| (k, c)))?;
+        full.get_or_insert(format!("waiting for a slot: {}/{c} {} on {name}", used[k], SLOTS[k]));
+    }
+    full
+}
+
+/// #984: each capped host's `name: working N/cap · simulators N/cap` line, from its live `agents` (`host`-tagged remote).
+pub fn slots_line(cfg: &Config, events: &[Event], agents: &[Value]) -> String {
+    let mut out = String::new();
+    for (name, h) in &cfg.hosts {
+        let on = |a: &&Value| a["host"].as_str().map_or(h.machine.is_none(), |x| x == name);
+        let mine: Vec<Value> = agents.iter().filter(on).cloned().collect();
+        let held = held_slots(cfg, events, &mine, None);
+        let caps = [h.max_working, h.max_simulators];
+        let v: Vec<String> = (0..2)
+            .filter_map(|k| Some(format!("{} {}/{}", SLOTS[k], held[k], caps[k]?)))
+            .collect();
+        if !v.is_empty() {
+            out += &format!("{name}: {}\n", v.join(" · "));
+        }
+    }
+    out
 }
 
 /// Every remote host's live agents, each tagged `host`; an unreachable host adds none.
@@ -699,7 +769,7 @@ pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, St
 
 /// #416: the host under `min_free_gb`: its free GB and what `clean --yes` would free there, else `reclaim`.
 pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
-    let (min, events) = (cfg.limits.min_free_gb, read(&ctx.state).unwrap_or_default());
+    let (min, events) = (cfg.limits.min_free_gb, working(&ctx.state).unwrap_or_default());
     let low = || host::free_gb(on).filter(|g| *g < min);
     let mut gb = low()?;
     let live = match on.machine {
@@ -751,6 +821,9 @@ pub struct Placed {
 }
 
 type Pre<'a> = (&'a [Event], Option<&'a str>);
+
+/// #984: a lane by fleet, issue and role.
+pub type Lane<'a> = (&'a str, u64, &'a str);
 
 fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str, Option<&str>), pre: Pre) -> Placed {
     let on = On::new(r, machine);
@@ -1138,7 +1211,7 @@ pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
 pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let seen = cached(ctx);
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.machine.is_some()) {
-        let events = read(&ctx.state)?;
+        let events = working(&ctx.state)?;
         let stopped = h.cloud.is_some() && crate::cloud::state(&events, name) == "stopped";
         if stopped
             || !seen
@@ -1164,7 +1237,7 @@ pub fn evacuate(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) ->
                 writeln!(out, "{agent}: restart off {name} failed: {e:#}")?;
                 continue;
             }
-            let now = read(&ctx.state)?;
+            let now = working(&ctx.state)?;
             let Some(to) = last_spawn(&now, agent).filter(|e| e.str("host") != Some(name)) else {
                 continue;
             };
@@ -1219,7 +1292,7 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
     if refresh || cfg.hosts.keys().any(|h| !cached(ctx).contains_key(h)) {
         survey(ctx, cfg, r, refresh);
     }
-    let (seen, events) = (cached(ctx), read(&ctx.state)?);
+    let (seen, events) = (cached(ctx), working(&ctx.state)?);
     let n = |x: Option<f64>, p: usize| x.map_or("?".into(), |x| format!("{x:.p$}"));
     for (name, h) in &cfg.hosts {
         let s = seen.get(name).cloned().unwrap_or_default();

@@ -1,5 +1,5 @@
 use crate::config::{Config, Fleet};
-use crate::events::{age, emit, fold, held_on, last_spawn, open_asks, plain, read, Event, IssueState, Log};
+use crate::events::{age, checks, emit, fold, held_on, last_spawn, open_asks, plain, working, Event, IssueState, Log};
 use crate::gate::gate;
 use crate::host;
 use crate::hosts::On;
@@ -34,7 +34,7 @@ fn amendment(ctx: &Ctx, on: &On, cfg: &Config, s: &IssueState, wt: &str) -> Opti
 
 /// #709: the config for `check` and `tick`; failing to load, `config-invalid` alerts once per distinct error (to the last good config's notifiers) and the error stands; loading again after one logs `config-ok`.
 pub fn config(ctx: &Ctx) -> Result<Config> {
-    let (loaded, events) = (Config::loaded(ctx), read(&ctx.state)?);
+    let (loaded, events) = (Config::loaded(ctx), working(&ctx.state)?);
     let kinds = ["config-invalid", "config-ok"];
     let last = events.iter().rev().find(|e| kinds.contains(&e.kind.as_str()));
     let was = last.filter(|e| e.kind == kinds[0]).and_then(|e| e.str("key"));
@@ -58,7 +58,7 @@ pub fn config(ctx: &Ctx) -> Result<Config> {
 
 /// Each alert's dedup key is built from the issue's last activity: once per state, again after a change.
 pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     PUSHES.set((0, 0));
     let _ = std::fs::write(ctx.state.with_file_name("check.at"), ctx.now.to_string());
     let agents = host::agents(r)
@@ -98,7 +98,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
         }
     }
-    let synced = read(&ctx.state)?;
+    let synced = working(&ctx.state)?;
     for name in cfg.hosts.keys() {
         let mut tries = (synced.iter().rev()).filter(|e| e.kind == "host-sync" && e.str("host") == Some(name));
         let Some(e) = tries.next().filter(|e| e.val("ok") == false) else {
@@ -175,8 +175,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     }
     let events = closed_on_github(ctx, cfg, r, out, events)?;
     crate::drive::markers(ctx, cfg, r, true);
+    let passes = crate::events::since(&ctx.state, &["drive-pass"], ctx.now.saturating_sub(2 * 86_400))?;
     let mut held = BTreeMap::<(&str, u64), (u64, u64)>::new();
-    for e in events.iter().filter(|e| e.kind == "drive-pass") {
+    for e in &passes {
         let acts = e.data.get("actions").and_then(serde_json::Value::as_array);
         for a in acts.into_iter().flatten() {
             let Some(n) = a["issue"].as_u64() else { continue };
@@ -221,7 +222,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
     }
     let mut busy: Option<(u64, u64, Gate)> = None;
-    for e in events.iter().filter(|e| e.kind == "drive-pass") {
+    for e in &passes {
         let acts = e.data.get("actions").and_then(serde_json::Value::as_array);
         let mut starts = acts
             .into_iter()
@@ -498,7 +499,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     }
     let events = expire(ctx, cfg, out, events, agents.as_deref(), &remote)?;
     let open = open_asks(&events);
-    for a in agents.iter().flatten().filter(|a| a["agent_status"] == "done") {
+    let st = fold(&events);
+    let ended = |a: &&Value| matches!(a["agent_status"].as_str(), Some("done" | "idle"));
+    for a in agents.iter().flatten().filter(ended) {
         let e = a["name"].as_str().and_then(|n| last_spawn(&events, n));
         let (Some(name), Some(pane), Some(e)) = (a["name"].as_str(), a["pane_id"].as_str(), e) else {
             continue;
@@ -506,8 +509,16 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let (Some(n), Some(wt), None) = (e.issue, e.str("worktree"), On::of(r, Some(e)).machine) else {
             continue;
         };
+        let next = ["spawn", "verdict"][usize::from(checks(e))];
+        let live = (st.get(&(e.fleet.clone(), n)).and_then(IssueState::active_lane)).is_some_and(|l| l.1 == name);
+        let new = |x: &Event| x.ts >= e.ts && x.is(next, &e.fleet, n) && (next == "verdict" || checks(x));
+        let acted = !live && events.iter().any(new);
+        if a["agent_status"] == "idle" && !acted {
+            continue;
+        }
+        let wait = [cfg.limits.done_close_minutes * 60, 0][usize::from(acted)];
         let asking = open.iter().any(|q| q.str("agent") == Some(name));
-        let due = handoff(r, &events, e, (n, wt)).filter(|t| ctx.now >= t + cfg.limits.done_close_minutes * 60);
+        let due = handoff(r, &events, e, (n, wt)).filter(|t| ctx.now >= t + wait);
         let landed = e.data.get("confirmed") != Some(&json!(false));
         let Some(at) = due.filter(|_| !asking && landed) else {
             continue;
@@ -692,12 +703,12 @@ fn expire(
         }
         crate::events::append(&ctx.state, &ev)?;
     }
-    Ok(if n > 0 { read(&ctx.state)? } else { events })
+    Ok(if n > 0 { working(&ctx.state)? } else { events })
 }
 
 /// After `drover merge`: close the issue's clean lane panes, then `drover clean --yes` them.
 pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, issue: u64) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let mut seen = std::collections::BTreeSet::new();
     for e in events.iter().rev().filter(|e| e.is("spawn", fleet, issue)) {
         let (Some(wt), Some(pane), on) = (e.str("worktree"), e.str("pane"), On::of(r, Some(e))) else {
@@ -743,7 +754,7 @@ pub fn clean_all(
     (issue, lane, sched, all): (Option<u64>, Option<&str>, bool, bool),
     yes: bool,
 ) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let states = fold(&events);
     let agents = crate::hosts::all_agents(cfg, r).context("cannot list herdr agents; refusing to clean blind")?;
     let off = if all { disabled(cfg, r) } else { vec![] };
@@ -1057,7 +1068,7 @@ pub fn leftovers(
     yes: bool,
 ) -> Result<Vec<(String, String, String)>> {
     let (events, ps, mut seen, mut found) = (
-        crate::events::shared(&ctx.state)?,
+        crate::events::working(&ctx.state)?,
         host::cwds(r),
         std::collections::BTreeSet::new(),
         vec![],
@@ -1154,7 +1165,7 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         Live::new()
     };
     if over(total) {
-        let (events, agents, ps) = (read(&ctx.state)?, host::agents(r)?, host::cwds(r));
+        let (events, agents, ps) = (working(&ctx.state)?, host::agents(r)?, host::cwds(r));
         let states = fold(&events);
         let since = ctx.now.saturating_sub(cfg.limits.stall_minutes * 60);
         let working = |a: &str| (agents.iter()).any(|x| x["name"] == a && x["agent_status"] == "working");
@@ -1340,7 +1351,7 @@ fn sweep_off(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, off: 
 /// #634: lanes no trim touches: a live herdr or shed agent (a running shed terminal or ACP session) of that name, or one spawned in the last `stall_minutes`.
 pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
     let since = ctx.now.saturating_sub(cfg.limits.stall_minutes * 60);
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let spawned = (events.iter().filter(|e| e.kind == "spawn" && e.ts >= since)).filter_map(|e| e.str("agent"));
     let agents = host::agents(r)?;
     let names = agents.iter().filter_map(|a| a["name"].as_str());
@@ -1382,7 +1393,7 @@ fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, host: &str, b: &str, out: &mut dyn
         return Ok(());
     }
     let scr = b.ends_with(crate::spawn::SCRATCH);
-    let (agents, events) = (host::agents(on)?, read(&ctx.state)?);
+    let (agents, events) = (host::agents(on)?, working(&ctx.state)?);
     let states = fold(&events);
     let agent = |n: &str| agents.iter().find(|a| a["name"] == n);
     let spawn = |n: &str| (events.iter()).rposition(|e| e.kind == "spawn" && e.str("agent") == Some(n));
@@ -1628,7 +1639,7 @@ fn trim_remote(on: &On, root: &str, budget: f64, out: &mut dyn Write) -> Result<
 const NOTE: &str = "(logical sizes; APFS clones may free less)";
 /// #361: build folders of worktrees idle 7 days, previewed; removed with `yes`, or on a `y` (rechecked, then removed).
 pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &mut dyn Read, yes: bool) -> Result<()> {
-    let (events, agents, ps) = (read(&ctx.state)?, host::agents(r)?, host::cwds(r));
+    let (events, agents, ps) = (working(&ctx.state)?, host::agents(r)?, host::cwds(r));
     let live = live_lanes(ctx, cfg, r)?;
     let (mut seen, mut total) = (std::collections::BTreeSet::new(), 0);
     for e in events.iter().rev().filter(|e| e.kind == "spawn") {
@@ -1830,7 +1841,7 @@ fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write
         }
     }
     if any {
-        return read(&ctx.state);
+        return working(&ctx.state);
     }
     Ok(ev)
 }
@@ -1904,7 +1915,7 @@ fn spawned<'a>(events: &'a [Event], agent: &str, host: Option<&str>) -> Result<&
 
 /// `drover stop`: Esc to the agent's pane (it pauses), or #946: a thread's orchestrator ended; logs `stop`.
 pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent: &str) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let thread = agent.strip_prefix("orchestrator-").unwrap_or(agent);
     let e = match spawned(&events, agent, None) {
         Err(_) if crate::orchestrator::find(&events, thread).is_ok() => {
@@ -1935,7 +1946,7 @@ pub fn close(
         return crate::gate::refused("BAD_VALUE", format!("--host {h}: no [hosts.{h}]"));
     }
     let on = On::new(r, host.and_then(|h| cfg.hosts[h].machine.as_deref()));
-    let (events, agents) = (read(&ctx.state)?, herdr::agents(&on)?);
+    let (events, agents) = (working(&ctx.state)?, herdr::agents(&on)?);
     let a = agents.iter().find(|a| a["name"] == agent || a["pane_id"] == agent);
     let name = a.and_then(|a| a["name"].as_str()).unwrap_or(agent);
     let here = |e: &Event| host.is_none_or(|h| e.str("host") == Some(h));
@@ -1973,7 +1984,7 @@ fn kill_as(
     yes: bool,
     why: Option<&str>,
 ) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let e = spawned(&events, agent, host)?;
     let stale = !last_spawn(&events, agent).is_some_and(|l| std::ptr::eq(l, e));
     let role = e.str("role").unwrap_or_default();
@@ -2031,7 +2042,7 @@ fn kill_as(
 
 /// #478: each pane a supersede left on a host it could not reach (`stale_host`), killed as `kill --host` does once that host answers; a pane already gone there is only logged.
 pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     for s in events.iter().filter(|e| e.kind == "supersede") {
         let (Some(h), Some(agent), pane) = (s.str("stale_host"), s.str("agent"), s.str("stale_pane")) else {
             continue;
@@ -2087,7 +2098,7 @@ pub fn stop_rounds(
     (fleet, issue, role): (&str, u64, &str),
     keep: &str,
 ) -> Result<Vec<String>> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let (mut lists, mut seen, mut stopped) = (BTreeMap::new(), vec![keep], vec![]);
     let olds = (events.iter().rev()).filter(|e| e.is("spawn", fleet, issue) && e.str("role") == Some(role));
     for sp in olds {
@@ -2111,7 +2122,7 @@ pub fn stop_rounds(
 
 /// #899: drive's pass: each lane key two or more live agents carry keeps only its newest.
 pub fn dedup(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let (events, mut by) = (read(&ctx.state)?, BTreeMap::new());
+    let (events, mut by) = (working(&ctx.state)?, BTreeMap::new());
     let on = |f: &str| cfg.fleet.get(f).is_some_and(|f| !f.paused);
     let spawns = (events.iter()).filter(|e| e.kind == "spawn" && on(&e.fleet));
     let keys = spawns.filter_map(|e| Some(((e.fleet.as_str(), e.issue?, e.str("role")?), e.str("agent")?)));
@@ -2230,7 +2241,7 @@ fn build(p: &str) -> bool {
 
 /// #646 `wip prune`: origin's `wip/*` branches of `fleet`'s repo, each with the size it adds over the integration branch, its issue's state and whether it carries build output, after the counts per issue. Unless `dry`, deleted on origin (a branch delete: never a history rewrite or force-push): #779 those of a merged or closed issue but its newest per role, and that one too if it carries build output. An open issue's are kept.
 pub fn prune(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str, dry: bool) -> Result<()> {
-    let (f, states) = (cfg.fleet(fleet)?, fold(&read(&ctx.state)?));
+    let (f, states) = (cfg.fleet(fleet)?, fold(&working(&ctx.state)?));
     let dir = f.local_path().to_string_lossy().into_owned();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &dir][..], a].concat());
     git(&["fetch", "-q", "--prune", "origin"])?;

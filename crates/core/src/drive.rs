@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{append, emit, fold, read, Event, IssueState};
+use crate::events::{append, emit, fold, working, Event, IssueState};
 use crate::overlap::git;
 use crate::runner::{ok, Runner};
 use crate::waiting::Waiting;
@@ -356,6 +356,9 @@ fn launch(
         return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting{by}"));
     }
     crate::spawn::lane_admit(ctx, (cfg, r), ev, fleet, n, role)?;
+    if let Some(why) = crate::hosts::slot_before(ctx, cfg, r, ev, (fleet, n, role), &live) {
+        return crate::gate::refused("HOST_FULL", why);
+    }
     if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && extend)) {
         return crate::gate::refused(code, why);
     }
@@ -464,7 +467,7 @@ fn settle(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
         }
         r.sleep(1);
     }
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     ACTS.with_borrow_mut(|m| {
         for (f, acts) in m.iter_mut() {
             for a in acts.iter_mut().filter(|a| a["outcome"] == "pending") {
@@ -509,7 +512,7 @@ fn update(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, fleet: &str, n: u64) -
         }
         r.sleep(1);
     }
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let theirs =
         |e: &&Event| e.kind == "drive-pass" && e.fleet == fleet && e.data.get("kick").is_none_or(Value::is_null);
     let Some(e) = ev.iter().rfind(theirs) else {
@@ -545,7 +548,7 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
             Some((_, by)) => crate::promise::Say::SpawnSlot(Some(by.into())).line(),
             None => crate::promise::Say::SpawnSlot(None).line(),
         },
-        Some("SPAWN_BACKOFF") => why.into(),
+        Some("SPAWN_BACKOFF" | "HOST_FULL") => why.into(),
         Some("SERIAL_BUSY") => "another one-at-a-time issue is in flight".into(),
         Some("IN_FLIGHT" | "ALREADY_DONE") => "skipped: another pass is on it or did it".into(),
         Some("LANE_LIVE") if why.starts_with("stale pane") => why.into(),
@@ -622,7 +625,7 @@ fn wait(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, lock: &str, only: Option
     if held(ctx, lock).is_some() {
         return Ok(writeln!(out, "drive: still driving · result will appear here")?);
     }
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let done = |e: &&Event| e.kind == "drive-pass" && only.is_none_or(|f| e.fleet == f);
     let ended = |e: &&Event| e.data.get("ended").and_then(Value::as_u64) >= Some(ctx.now);
     let Some(e) = events.iter().rev().filter(done).find(ended) else {
@@ -698,7 +701,7 @@ pub fn drive(
         )?;
     }
     if fast {
-        if let Err(e) = crate::hosts::sample(ctx, cfg, r, &crate::events::read(&ctx.state)?) {
+        if let Err(e) = crate::hosts::sample(ctx, cfg, r, &crate::events::working(&ctx.state)?) {
             writeln!(out, "host history: {e:#}")?;
         }
     }
@@ -727,7 +730,7 @@ pub fn drive(
         .collect();
     let fleets: Vec<&str> = live.iter().copied().filter(|n| !cfg.fleet[*n].paused).collect();
     let events = fast
-        .then(|| crate::events::read(&ctx.state).ok())
+        .then(|| crate::events::working(&ctx.state).ok())
         .flatten()
         .unwrap_or_default();
     for u in live.iter().flat_map(|f| crate::undelivered(&events, f)) {
@@ -836,7 +839,7 @@ pub fn drive(
 }
 
 fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let log = crate::waiting::Log::new(&events);
     let mut agents: Option<Vec<Value>> = None;
     for s in fold(&events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
@@ -872,7 +875,7 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
             Event::new(ctx.now, &s.fleet, Some(s.issue), "repaired", d),
         )?;
     }
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let reset = ["pushed", "verdict", "needs-human", "round-extended"];
     for s in fold(&events)
         .into_values()
@@ -990,7 +993,7 @@ fn silent(
     agents: &[Value],
     fleet: &str,
 ) -> Result<()> {
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let found = stall::silent(ctx, cfg, &ev, agents, fleet);
     for (n, lane, a) in found.into_iter().filter(|x| KICK.get().is_none_or(|k| k == x.0)) {
         match a {
@@ -1037,7 +1040,7 @@ fn stale_replaced(
     old: &str,
     mins: u64,
 ) -> Result<()> {
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let new = |e: &&Event| e.is("spawn", fleet, n) && e.str("role") == Some(role) && e.ts >= ctx.now;
     let new = ev
         .iter()
@@ -1078,7 +1081,7 @@ fn pass(
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
     let agents = crate::hosts::all_agents(cfg, seen)?;
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let st = fold(&ev);
     for s in st.values().filter(|s| s.fleet == fleet) {
         let on = crate::events::held_on(&ev, s);
@@ -1136,13 +1139,13 @@ fn pass(
         crate::design::handoff(ctx, cfg, r, out, &agents, s)?;
     }
     if !fast {
-        crate::stall::refused(ctx, cfg, r, out, &read(&ctx.state)?, fleet)?;
+        crate::stall::refused(ctx, cfg, r, out, &working(&ctx.state)?, fleet)?;
         silent(ctx, cfg, (r, seen), out, &agents, fleet)?;
         if let Err(e) = crate::hotspots::sync(ctx, cfg, r, fleet) {
             writeln!(out, "{fleet} hotspots: {e:#}")?;
         }
     }
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
     waits.retain(one);
@@ -1155,7 +1158,7 @@ fn pass(
         }
     }
     if !fast && handoff(ctx, cfg, r, out, fleet, &events, &waits)? {
-        waits = waiting::scan(ctx, cfg, seen, &read(&ctx.state)?, &agents, false);
+        waits = waiting::scan(ctx, cfg, seen, &working(&ctx.state)?, &agents, false);
         waits.retain(one);
     }
     let preview = || crate::overlap::preview(ctx, cfg, r, fleet, &events).ok();
@@ -1196,7 +1199,7 @@ fn pass(
             continue;
         }
         let now = |e: &Event| e.is("auto-updated", fleet, s.issue) && e.ts == ctx.now;
-        if let Some(e) = crate::events::shared(&ctx.state)?.iter().rfind(|e| now(e)).cloned() {
+        if let Some(e) = crate::events::working(&ctx.state)?.iter().rfind(|e| now(e)).cloned() {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
@@ -1341,7 +1344,7 @@ fn pass(
             let green =
                 ci == "green" && pr["isDraft"] != true && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
             let verified = || -> Result<bool> {
-                let st = fold(&read(&ctx.state)?).remove(&(fleet.to_string(), s.issue));
+                let st = fold(&working(&ctx.state)?).remove(&(fleet.to_string(), s.issue));
                 Ok(crate::gate::verified(f, st.as_ref(), args[5], false).is_ok())
             };
             if step == "verdict" && code.is_none() && args[3] == "PASS" && green && verified()? {
@@ -1540,7 +1543,7 @@ fn serial(
     pr: &Value,
     fast: bool,
 ) -> Result<bool> {
-    let (f, n, ev) = (cfg.fleet(fleet)?, s.issue, read(&ctx.state)?);
+    let (f, n, ev) = (cfg.fleet(fleet)?, s.issue, working(&ctx.state)?);
     let (st, q) = (fold(&ev), queue::replay(&ev, fleet));
     let mine = queue::groups(&q, &ev, f, fleet, n);
     let (mut wait, mut text) = (mine.iter().any(|g| queue::held(&ev, fleet, n, &g.name)), None);
@@ -1576,7 +1579,7 @@ fn serial(
             (wait, text) = (true, text.or(Some(stop)));
         }
     }
-    let (now, mut blocker) = (read(&ctx.state)?, None);
+    let (now, mut blocker) = (working(&ctx.state)?, None);
     for g in queue::groups(&q, &now, f, fleet, n) {
         let h = queue::held(&now, fleet, n, &g.name);
         if let (false, Some(b)) = (h, blocker) {
@@ -1757,7 +1760,7 @@ fn no_change(
 }
 
 fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     for s in fold(&events)
         .into_values()
         .filter(|s| s.fleet == fleet && !s.done() && s.state != "parked" && KICK.get().is_none_or(|k| k == s.issue))
@@ -1788,7 +1791,7 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
 }
 
 fn ext_closed(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let refs: std::collections::BTreeSet<String> = queue::view(&events, &fold(&events), fleet)
         .into_iter()
         .flat_map(|i| i.ext)
@@ -1839,7 +1842,7 @@ fn starts<'a>(
     mut go: bool,
 ) -> Vec<(&'a str, anyhow::Error)> {
     let mut errs = vec![];
-    let events = match read(&ctx.state) {
+    let events = match working(&ctx.state) {
         Ok(e) => e,
         Err(e) => return vec![(fleets.first().copied().unwrap_or_default(), e)],
     };
@@ -1935,7 +1938,7 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     }
     let (f, events, ag) = (
         cfg.fleet(fleet)?,
-        read(&ctx.state)?,
+        working(&ctx.state)?,
         crate::hosts::all_agents(cfg, r).unwrap_or_default(),
     );
     let busy = |l: &str| ag.iter().any(|a| a["name"] == l && a["agent_status"] == "working");
@@ -2052,9 +2055,12 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     let paced = (c[0] == "spawn" && step == "respawn" && KICK.get().is_none())
         .then(|| paced(cfg, fleet))
         .flatten();
+    let full = (spawn.filter(|_| KICK.get().is_none() && !kicks).zip(c.get(3)))
+        .and_then(|(n, role)| crate::hosts::slot_before(ctx, cfg, r, ev, (fleet, n, role), &[]));
     let res = match (back, paced, issue.filter(|_| kicks)) {
         (Some(why), _, _) => crate::gate::refused("SPAWN_BACKOFF", why),
         (None, Some(why), _) => crate::gate::refused("RESPAWN_PACED", why),
+        (None, None, None) if full.is_some() => crate::gate::refused("HOST_FULL", full.unwrap_or_default()),
         (None, None, Some(n)) => launch(ctx, cfg, r, ev, (fleet, n), c, step == "start"),
         (None, None, None) => crate::cli::run(c, ctx, r, &mut buf),
     };

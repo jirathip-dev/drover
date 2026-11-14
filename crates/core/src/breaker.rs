@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{append, emit, last_spawn, read, Event};
+use crate::events::{append, emit, last_spawn, working, Event};
 use crate::hosts::On;
 use crate::runner::Runner;
 use crate::Ctx;
@@ -45,7 +45,7 @@ fn failure_on(e: &Event, h: &str) -> bool {
 
 /// Lane `lane` failed to start or ended with no push: true while its host's breaker is open (trips it at the limit).
 pub fn failed(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str, lane: &str, why: &str) -> Result<bool> {
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let Some(sp) = last_spawn(&ev, lane) else {
         return Ok(false);
     };
@@ -77,7 +77,7 @@ pub fn failed(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str, lane: &
 
 /// Each host whose breaker is open runs one canary; a pass closes it (`runtime-up`).
 pub fn probe(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let open = |e: &&Event| {
         e.kind == "runtime-down"
             && e.str("host")
