@@ -1,0 +1,11 @@
+Decided: slices 1-4 of the approved ADR ship here (report, cap raises in ci/cap.d, help budget retired, passive flag); slices 5-7 follow as their own issues
+Because: q1633
+Decided: pushed before the local full suite finished; CI's cargo test is the evidence
+Because: q1663
+Decided: staging merge: staging's new wip-skipped kind marks itself passive at emission; lane-dup is passive via check's fire
+Because: crates/core/src/roots.rs:302
+Decided: staging's oversize shed partitions on Event::is_passive instead of the removed PASSIVE list
+Because: crates/core/src/events.rs:229
+Rejected: adding wip-skipped and lane-dup to the frozen LEGACY list — it is frozen in .drover/arch.toml by this change
+Check: no PASSIVE reference is left outside crates/core/src/events/passive.rs
+Owner: The hot shared lists (line cap, passive events, help budget) stop colliding between PRs, and the weekly hotspot report drops deleted files and double counts.
