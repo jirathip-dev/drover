@@ -144,9 +144,9 @@ TS: it imports them from `assets/types/api.d.ts`.
 
 - **Format:** rustfmt with `max_width = 120` (`rustfmt.toml`); CI runs `cargo fmt --check`. The formatter decides
   layout, not the lane: no golf, no joined or packed lines to fit the cap. Run `cargo fmt` before committing.
-- **Lints:** clippy `pedantic` as warnings: `[workspace.lints]` in `Cargo.toml` for core and server (#264), `#![warn(clippy::pedantic)]` in the binary's `main.rs`; CI's `-D warnings` makes it an error. Other
-  exceptions sit inline at the narrowest scope as `#[allow(clippy::<lint>)] // reason`. The crate-level allows, all
-  style noise for a CLI:
+- **Lints:** clippy `pedantic` as warnings: `[workspace.lints]` in `Cargo.toml` for every crate and its tests (#264, #808);
+  CI's `-D warnings` makes it an error. Other exceptions sit inline at the narrowest scope as `#[allow(clippy::<lint>)]`,
+  at most 10 in `crates/` (CI counts them, #808). The workspace allows, all style noise for a CLI:
   - `must_use_candidate`: return values here are read or deliberately dropped; `#[must_use]` everywhere is noise.
   - `missing_errors_doc`: nearly every fn returns `anyhow::Result`, and the error is the message it prints.
   - `missing_panics_doc`: the few `unwrap`s are on invariants, not inputs.
@@ -154,6 +154,9 @@ TS: it imports them from `assets/types/api.d.ts`.
   - `format_push_string`: the HTML page is built with `+= &format!(..)`; one extra allocation per row is nothing.
   - `format_collect`: `.map(|x| format!(..)).collect()` reads better than a `fold` with `write!`.
   - `many_single_char_names`: short names in small math and parsing closures (dates, hex, crypto).
+  - `struct_excessive_bools`: API rows and CLI flags are flat bool fields by design (serde, clap).
+  - `too_many_arguments`: gate and drive steps take the context, config, runner and the step's own values.
+  - `cast_precision_loss`: `u64` to `f64` only for shown hours, GB and percents.
 - **Size cap:** at most `line_cap` (in `ci/cap.toml`) formatted lines of non-test Rust under `src/` and `crates/*/src/` (tests
   live in `crates/cli/tests/`), counted after `cargo fmt`. CI runs `drover cap-check --config ci/cap.toml`; a fleet can set its own
   `line_cap` under `[fleet.<name>]`. Raising the cap needs the owner's OK in an issue.
