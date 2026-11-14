@@ -521,7 +521,7 @@ fn design_and_architect_run_architect_then_design_then_impl_which_links_the_adr(
     assert_eq!(state(&c, 12), "impl");
     let b = brief(&c);
     assert!(
-        b.contains("the owner approved the ADR in `docs/architecture/meter/`"),
+        b.contains("the owner approved the ADR in `docs/architecture/meter/` on this branch; build to it, and add any `.drover/arch.toml` lines it ends with in this PR."),
         "{b}"
     );
 }
@@ -989,4 +989,59 @@ fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_rai
     let card = &kinds(&c, "needs-human")[0];
     assert!(card.str("reason").unwrap().contains("no response"), "{card:?}");
     assert_eq!(state(&c, 12), "needs-human");
+}
+
+#[test]
+fn a_hotspots_issues_architect_brief_carries_the_hot_files_playbook_and_profiles_sync_writes_it() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let claude = "\n[fleet.sendmeter.role.architect]\nharness = \"claude\"\nprofile = \"fleet-architect\"\n";
+    let (c, _sh) = setup("architect-hotspots", claude);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let role = c.config.with_file_name("claude").join("fleet-architect/role.md");
+    let synced = std::fs::read_to_string(role).unwrap();
+    let classes = [
+        "## Hot files",
+        "**Central lists become folders:**",
+        "**Generated files are regenerated, never hand-merged:**",
+        "**Docs and CI are split per area:**",
+        "The ADR ends with the exact `.drover/arch.toml` lines the impl lane adds in the same PR",
+    ];
+    for want in classes {
+        assert!(synced.contains(want), "role.md lacks {want:?}");
+    }
+    let (c, _sh) = setup("architect-hotspots-brief", ARCHITECT);
+    assert_eq!(
+        run(
+            &c,
+            &Fake::default(),
+            &["queue", "sendmeter", "add", "12", "--architect"]
+        )
+        .0,
+        0
+    );
+    let title = r#"{"title":"hotspots: sendmeter week of 2026-11-09","body":"b"}"#;
+    let base = fake(&c, HEAD);
+    let r = Both(adr(&c, HEAD).reply("gh issue view", title), &base);
+    drive(&c, &r);
+    let b = brief(&c);
+    for want in classes {
+        assert!(b.contains(want), "brief lacks {want:?}\n{b}");
+    }
+    assert!(
+        b.contains("- This is a hotspots issue: convert each file it lists"),
+        "{b}"
+    );
+    let (c, _sh) = setup("architect-plain-brief", ARCHITECT);
+    assert_eq!(
+        run(
+            &c,
+            &Fake::default(),
+            &["queue", "sendmeter", "add", "12", "--architect"]
+        )
+        .0,
+        0
+    );
+    let base = fake(&c, HEAD);
+    drive(&c, &Both(adr(&c, HEAD), &base));
+    assert!(!brief(&c).contains("This is a hotspots issue"), "{}", brief(&c));
 }

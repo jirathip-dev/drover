@@ -467,3 +467,35 @@ fn agent_doc_and_roles_cover_m3() {
         );
     }
 }
+
+#[test]
+fn pr_judges_and_counts_the_latest_run_of_each_check() {
+    let ev = |status: &str, conclusion: &str, at: &str| {
+        json!({"__typename": "CheckRun", "name": "evidence", "status": status, "conclusion": conclusion,
+            "startedAt": at})
+    };
+    let build = json!({"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS",
+        "startedAt": "2026-11-12T20:00:00Z"});
+    let cases = [
+        (("COMPLETED", "FAILURE"), ("COMPLETED", "SUCCESS"), "green"),
+        (("COMPLETED", "SUCCESS"), ("COMPLETED", "FAILURE"), "failed"),
+        (("COMPLETED", "FAILURE"), ("IN_PROGRESS", ""), "pending"),
+    ];
+    for (old, new, want) in cases {
+        let d = tmpdir("pr-latest");
+        let c = ctx(&d, CONFIG);
+        let rollup = json!([
+            ev(old.0, old.1, "2026-11-12T20:00:00Z"),
+            build.clone(),
+            ev(new.0, new.1, "2026-11-12T20:01:00Z")
+        ]);
+        assert_eq!(drover::gate::ci_green(&rollup, &[]).is_ok(), want == "green");
+        let r = Fake::default().reply("gh pr view issue-12", &pr_json("OPEN", rollup));
+        let (code, out) = run(&c, &r, &["pr", "sendmeter", "12"]);
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(
+            out,
+            format!("PR #34 OPEN → staging head 1111111 mergeable MERGEABLE ci {want} (2 checks)\n")
+        );
+    }
+}
