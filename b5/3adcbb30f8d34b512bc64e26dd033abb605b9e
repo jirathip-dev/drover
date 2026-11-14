@@ -1,0 +1,14 @@
+Decided: each fleet's full and fast pass takes its own lease (drive-<fleet>.lock, drive-fast-<fleet>.lock) and runs on its own scoped thread; the shared prelude and tail keep the global lock only while they run
+Because: "The full and fast passes take a lock per fleet"
+Decided: admission is the admit.lock lease, taken once per spawn and refused SPAWN_PENDING at once when another process holds it; fleet threads of one process wait their turn on a condvar keyed by state path and pid
+Because: "Anything that must stay global stays behind its own short lock, never held across a `gh`/git/ssh call"
+Rejected: one static mutex — the sim runs many drover processes as threads of one OS process, so a holder that yields its sim turn deadlocks the rest (the hunt test hung)
+Rejected: waiting across processes with r.sleep — the waiting pass's events trip the sim's 60 s clock-lag invariant
+Decided: serve's job queue is a map from (fleet, issue) or fleet to a queue; one worker drains each key, so different keys run at once and one key runs in order
+Because: "writes to different issues run at once, and writes to the same issue run in order"
+Decided: request slots raised to 256, with writes held to 16 of them, so writes can never take every slot
+Because: "keep a separate small bound for writes, so a burst of writes can never starve reads"
+Decided: the sim hunt starts from seeds 13-16 with its random baseline from 13; plain seed 5 now trips the planted bug, so no rng keeps the 2-5 window
+Because: crates/cli/tests/sim/main.rs:260
+Check: drive_kicks.rs covers the hung-gh fleet and the admission limit; serve_workers.rs covers per-issue order and 200 reads with 4 writes
+Owner: Fleets now drive at the same time, and board actions on different issues no longer wait for each other; the board stops showing reconnecting under load.
