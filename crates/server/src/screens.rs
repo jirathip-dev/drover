@@ -228,11 +228,14 @@ fn fold(n: Option<u64>, kind: &str, q: &str, age: &str, main: &Value) -> Value {
 
 fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
     let q = &a.ask;
-    let opts: Vec<Value> = q.options.iter().map(|o| json!({"value": o, "label": o})).collect();
-    let mut c = choice(&q.id, "answer", &opts);
     let rec = q
         .recommend
         .and_then(|n| q.options.get(usize::try_from(n).ok()?.checked_sub(1)?));
+    let (first, rest): (Vec<&String>, Vec<&String>) = q.options.iter().partition(|o| Some(*o) == rec);
+    let opts: Vec<Value> = (first.into_iter().chain(rest))
+        .map(|o| json!({"value": o, "label": o}))
+        .collect();
+    let mut c = choice(&q.id, "answer", &opts);
     if let Some(r) = rec {
         c["recommended"] = json!(r);
     }
@@ -267,6 +270,52 @@ fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
     json!({"type": "card", "id": format!("ask-{}", q.id), "kind": "ask", "tone": "warn",
         "title": format!("{}{issue}{design}", q.fleet), "meta": format!("{kind} · {age}"),
         "fold": fold(q.issue, kind, &q.question, &age, &main.unwrap_or_default()), "blocks": blocks})
+}
+
+fn ask_outcome(log: &[Event], a: &Event) -> Option<String> {
+    let why = crate::events::closed_row(log, a)?;
+    let pick = (log.iter().rev())
+        .find(|d| d.kind == "decision" && crate::events::names(d, a))
+        .and_then(|d| d.str("choice"));
+    Some(match pick.filter(|_| why == "answered") {
+        Some(c) => format!("answered · {c}"),
+        None => why,
+    })
+}
+
+fn ask_minutes(ctx: &Ctx) -> u64 {
+    Config::kept(ctx).map_or(crate::config::Limits::default().ask_default_minutes, |c| {
+        c.limits.ask_default_minutes
+    })
+}
+
+fn ask_sheet(ctx: &Ctx, q: &Q) -> Option<Value> {
+    let seq = q.get("seq")?.parse::<u64>().ok()?;
+    let log = shared(&ctx.state).ok()?;
+    let a = log.get(log.binary_search_by_key(&seq, |e| e.seq).ok()?)?;
+    let a = (a.kind == "needs-decision").then_some(a)?;
+    let ask = super::v1::ask(a);
+    let blocks = if let Some(o) = ask_outcome(&log, a) {
+        json!([{"type": "text", "markdown": format!("**{}**\n\n{o}", ask.question)}])
+    } else {
+        let routine = a.str("kind") == Some("routine") && ask.recommend.is_some();
+        let need = NeedAsk {
+            ask,
+            who: String::new(),
+            kind: (if routine { "routine" } else { "owner" }).into(),
+            from: None,
+            pngs: super::chat::files_of(a)
+                .map(|f| f["name"].as_str().unwrap_or_default().into())
+                .collect(),
+            thread: None,
+            title: None,
+        };
+        ask_card(ctx.now, ask_minutes(ctx), &need)["blocks"].clone()
+    };
+    let id = a.str("id").unwrap_or_default();
+    Some(
+        json!({"type": "sheet", "id": format!("asks-{seq}"), "title": format!("{} · {id}", a.fleet), "cancel": "Done", "blocks": blocks}),
+    )
 }
 
 fn needs_card(i: &NeedIssue, ev: &crate::events::Log) -> Value {
@@ -405,6 +454,16 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
             (_, Some((pr, repo))) => json!({ "url": format!("https://github.com/{repo}/pull/{pr}") }),
             _ => Value::Null,
         };
+        if let Some(a) = (e.kind == "needs-decision")
+            .then(|| log.binary_search_by_key(&e.seq, |x| x.seq).ok())
+            .flatten()
+            .map(|i| &log[i])
+        {
+            match ask_outcome(&log, a) {
+                Some(o) => r["subtitle"] = json!(o),
+                None => r["tap"] = json!({ "sheet": format!("/screens/ask?seq={}", e.seq) }),
+            }
+        }
         if r["tap"].is_null() {
             r.as_object_mut().map(|o| o.remove("tap"));
         }
@@ -534,6 +593,7 @@ impl Server<'_> {
             "/screens/cards" => self.chat_cards(ctx),
             "/screens/workflow" => workflow(ctx),
             "/screens/hot" => self.hot_sheet(ctx, q)?,
+            "/screens/ask" => ask_sheet(ctx, q)?,
             _ => return None,
         };
         let oldest = self.r.refreshed().into_values().min();
@@ -598,9 +658,6 @@ impl Server<'_> {
 
     fn chat_cards(&self, ctx: &Ctx) -> Value {
         let tab = self.needs_tab(ctx, true);
-        let mins = Config::kept(ctx).map_or(crate::config::Limits::default().ask_default_minutes, |c| {
-            c.limits.ask_default_minutes
-        });
         let ev = shared(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
         cards.extend(super::v1::slo_open(&ev).map(|e| {
@@ -611,7 +668,7 @@ impl Server<'_> {
             json!({"type": "card", "id": format!("stuck-{}", e.seq), "kind": "alert", "tone": "warn",
                 "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": crate::events::plain(e)}]})
         }));
-        cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, mins, a)));
+        cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, ask_minutes(ctx), a)));
         cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
         Value::Array(cards)
     }
@@ -769,7 +826,7 @@ impl Server<'_> {
             }
             other => anyhow::bail!("no handler for `{other}`"),
         };
-        let close = ["save-fleets", "remove-fleet"].contains(&name);
+        let close = ["save-fleets", "remove-fleet"].contains(&name) || name == "answer" && a["screen"] != "cards";
         let ops: Vec<Value> = (name == "answer")
             .then(|| json!({"op": "remove", "id": format!("ask-{block}")}))
             .into_iter()
