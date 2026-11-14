@@ -97,6 +97,12 @@ impl Shed {
             resume: None,
             mcp_servers: vec![],
             no_hibernate: false,
+            policy: None,
+            meta: None,
+            machine: None,
+            parent: None,
+            rows: None,
+            cols: None,
         }
     }
     /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), #565: its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
@@ -135,6 +141,8 @@ impl Shed {
         let mut p = Self::run_params(name, &[], "/");
         p.cmd = argv(&["sh", "-c", crate::breaker::CANARY]);
         let wait = WaitParams {
+            children: None,
+            kind: None,
             name: name.into(),
             until: vec![],
             output: Some(crate::breaker::CANARY_OUT.into()),
@@ -181,6 +189,8 @@ impl Shed {
     /// The ACP lane's kick: once its session is ready, the prompt (framed by shed's CLI), confirmed by its state.
     pub fn kick_acp(&self, r: &dyn Runner, name: &str, text: &str) -> Result<bool> {
         let ready = WaitParams {
+            children: None,
+            kind: None,
             name: name.into(),
             until: vec![],
             output: Some("ACP session ready".into()),
@@ -191,6 +201,8 @@ impl Shed {
         }
         shed::cli(r, &["send", name, text])?;
         let up = WaitParams {
+            children: None,
+            kind: None,
             name: name.into(),
             until: argv(&["working", "blocked", "done"]),
             output: None,
@@ -243,14 +255,16 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
             Method::Send,
             json!(SendParams {
                 name: t.into(),
-                text: text.into()
+                text: text.into(),
+                ..Default::default()
             }),
         ),
         ["pane", "run", t, ref line @ ..] => (
             Method::Send,
             json!(SendParams {
                 name: t.into(),
-                text: line.join(" ") + "\r"
+                text: line.join(" ") + "\r",
+                ..Default::default()
             }),
         ),
         ["agent", "wait", t, ..] => {
@@ -262,6 +276,8 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
             (
                 Method::Wait,
                 json!(WaitParams {
+                    children: None,
+                    kind: None,
                     name: t.into(),
                     until,
                     output: None,
@@ -274,6 +290,8 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
             (
                 Method::Wait,
                 json!(WaitParams {
+                    children: None,
+                    kind: None,
                     name: t.into(),
                     until: vec![],
                     output,
