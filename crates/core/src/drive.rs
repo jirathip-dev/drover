@@ -884,7 +884,6 @@ pub fn drive(
             "spawns_launched": launched(&acts), "actions": acts, "kick": KICK.get()});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
-    // #365: a slow pass reads backlogs.
     if !fast && KICK.get().is_none() {
         for n in &fleets {
             crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("drover: {n} backlog: {e:#}"));

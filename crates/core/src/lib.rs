@@ -860,7 +860,6 @@ pub fn undelivered<'a>(events: &'a [Event], fleet: &str) -> Vec<&'a Event> {
 
 /// `drover asks`: the open asks (`all`: closed ones too, with why), oldest first, with age.
 pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, all: bool) -> Result<()> {
-    // #978: the `asks` table, one row per ask with its ending.
     let mut open = crate::db::asks(&ctx.state, fleet)?;
     open.retain(|a| all || a.1.is_none());
     if as_json {

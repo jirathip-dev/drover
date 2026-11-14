@@ -132,7 +132,6 @@ fn open(state: &Path) -> Result<Connection> {
     Ok(c)
 }
 
-/// #978: the `build-cloned` rows logged before #978, their `errors` moved to `cache/` (`events::offload`).
 fn offload_all(c: &Connection, state: &Path) -> Result<()> {
     let big = rows(
         c,
@@ -147,7 +146,7 @@ fn offload_all(c: &Connection, state: &Path) -> Result<()> {
     Ok(())
 }
 
-fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Result<()> {
+fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Result<Event> {
     let mut ev = Event { seq: 0, ..ev.clone() };
     if let Some(id) = crate::orchestrator::acting() {
         ev.data.entry("orchestrator").or_insert(id.into());
@@ -158,16 +157,16 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
         "INSERT INTO events (seq, ts, fleet, issue, type, json, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![seq, ev.ts, ev.fleet, ev.issue, ev.kind, json, archived],
     )?;
-    project(
-        c,
-        &Event {
-            seq: c.last_insert_rowid().try_into()?,
-            ..crate::events::aliased(ev)
-        },
-    )
+    Ok(Event {
+        seq: c.last_insert_rowid().try_into()?,
+        ..crate::events::aliased(ev)
+    })
 }
 
-/// #978: the current-state rows (`issues`, `lanes`, `asks`) event `ev` changes, in the transaction that logs it.
+fn log(c: &Connection, ev: &Event) -> Result<()> {
+    project(c, &insert(c, ev, None, false)?)
+}
+
 fn project(c: &Connection, ev: &Event) -> Result<()> {
     if let Some(n) = ev.issue {
         let q = "SELECT json FROM issues WHERE fleet = ?1 AND issue = ?2";
@@ -190,7 +189,6 @@ fn project(c: &Connection, ev: &Event) -> Result<()> {
     project_ask(c, ev)
 }
 
-/// #978: `events::closes` and `ORDER` over the `asks` rows: a new ask's row, or the endings `e` improves.
 fn project_ask(c: &Connection, e: &Event) -> Result<()> {
     use rusqlite::types::Value as Sql;
     let text = |k: &str| e.str(k).map_or(Sql::Null, |v| Sql::Text(v.into()));
@@ -216,6 +214,9 @@ fn project_ask(c: &Connection, e: &Event) -> Result<()> {
                 why
             ],
         )?;
+        return Ok(());
+    }
+    if !events::ends_asks(&e.kind) {
         return Ok(());
     }
     let (col, key, floor) = match e.kind.as_str() {
@@ -268,13 +269,15 @@ fn project_ask(c: &Connection, e: &Event) -> Result<()> {
     Ok(())
 }
 
-/// #978: `issues`, `lanes` and `asks` rows made afresh from `evs` (by seq) in a new in-memory database.
 fn projected(evs: &[Event]) -> Result<Connection> {
     let c = Connection::open_in_memory()?;
     c.execute_batch(SCHEMA)?;
     let tx = c.unchecked_transaction()?;
-    for e in evs {
-        insert(&tx, e, Some(e.seq), false)?;
+    for e in evs
+        .iter()
+        .filter(|e| e.kind == "spawn-started" || events::ends_asks(&e.kind))
+    {
+        project_ask(&tx, &insert(&tx, e, Some(e.seq), false)?)?;
     }
     tx.commit()?;
     Ok(c)
@@ -282,25 +285,30 @@ fn projected(evs: &[Event]) -> Result<Connection> {
 
 const PROJECTIONS: [&str; 3] = ["issues", "lanes", "asks"];
 
-/// #978: replace `c`'s current-state rows with those every event, the archive's too, projects.
 fn rebuild_in(c: &Connection, state: &Path) -> Result<()> {
     let mut all = [archived(state)?, rows(c, "seq > ?1", 0)?].concat();
     all.sort_by_key(|e| e.seq);
     all.dedup_by_key(|e| e.seq);
-    let m = projected(&all)?;
-    for t in PROJECTIONS {
-        c.execute(&format!("DELETE FROM {t}"), [])?;
-        let cols = m.prepare(&format!("SELECT * FROM {t}"))?.column_count();
-        let mut q = m.prepare(&format!("SELECT * FROM {t}"))?;
-        let marks = vec!["?"; cols].join(", ");
-        let mut ins = c.prepare(&format!("INSERT INTO {t} VALUES ({marks})"))?;
-        let mut rs = q.query([])?;
-        while let Some(r) = rs.next()? {
-            let v = (0..cols)
-                .map(|i| r.get::<_, rusqlite::types::Value>(i))
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            ins.execute(rusqlite::params_from_iter(v))?;
+    PROJECTIONS
+        .iter()
+        .try_for_each(|t| c.execute(&format!("DELETE FROM {t}"), []).map(drop))?;
+    let q = "INSERT INTO issues (fleet, issue, json) VALUES (?1, ?2, ?3)";
+    for s in events::fold_into(events::States::new(), &all).into_values() {
+        c.execute(q, params![s.fleet, s.issue, serde_json::to_string(&s)?])?;
+    }
+    let q = "INSERT OR REPLACE INTO lanes (agent, seq, json) VALUES (?1, ?2, ?3)";
+    for e in all.iter().filter(|e| e.kind == "spawn") {
+        if let Some(a) = e.str("agent") {
+            c.execute(q, params![a, e.seq, serde_json::to_string(e)?])?;
         }
+    }
+    let m = projected(&all)?;
+    let mut q = m.prepare("SELECT * FROM asks")?;
+    let mut ins = c.prepare("INSERT INTO asks VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)")?;
+    let mut rs = q.query([])?;
+    while let Some(r) = rs.next()? {
+        let v = (0..10).map(|i| r.get::<_, rusqlite::types::Value>(i));
+        ins.execute(rusqlite::params_from_iter(v.collect::<rusqlite::Result<Vec<_>>>()?))?;
     }
     Ok(())
 }
@@ -346,8 +354,6 @@ pub fn issues(state: &Path) -> Result<events::States> {
 /// #978: an ask's ending as its `asks` row holds it: (`ORDER` rank, `drover asks`' text); `None` while open.
 pub type Ending = Option<(usize, String)>;
 
-/// #978: each ask's ending, by seq, that `evs` (a slice that is no cached log) gives: their rows projected afresh,
-/// numbered by position from 1.
 pub fn endings(evs: &[Event]) -> Result<std::collections::BTreeMap<u64, Ending>> {
     let evs: Vec<Event> = evs.iter().zip(1..).map(|(e, seq)| Event { seq, ..e.clone() }).collect();
     asks_since(&projected(&evs)?, 0)
@@ -362,8 +368,6 @@ fn asks_since(c: &Connection, at: u64) -> Result<std::collections::BTreeMap<u64,
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
-/// #978: one read of the live log after `seq`, the `issues` rows its events touch (`fresh`: every row) and the `asks`
-/// rows changed since: `events::shared`'s catch-up, from one snapshot of the database.
 pub(crate) fn since(
     state: &Path,
     seq: u64,
@@ -413,14 +417,9 @@ pub fn asks(state: &Path, fleet: Option<&str>) -> Result<Vec<(Event, Ending)>> {
     })
 }
 
-/// #978: heartbeats (`drive-pass`, `driven`, `kick`) kept this long, then deleted, never archived.
 const HEARTBEAT_SECS: u64 = 2 * 86_400;
-/// #978: a merged or closed issue's events stay in the database this long, then move to the archive.
 const HOT_SECS: u64 = 14 * 86_400;
 
-/// #978: `drover compact` (daily, `tick`'s): heartbeats over 48 h deleted; a merged or closed issue's events over 14
-/// days old appended to `archive/events-YYYY-MM.jsonl.zst` (by their month), then deleted; the file vacuumed and its
-/// WAL truncated. Returns (deleted, archived).
 pub fn compact(state: &Path, now: u64) -> Result<(usize, usize)> {
     let dir = state.with_file_name("archive");
     std::fs::create_dir_all(&dir)?;
@@ -455,7 +454,6 @@ pub fn compact(state: &Path, now: u64) -> Result<(usize, usize)> {
     Ok(n)
 }
 
-/// `text` as one more zstd frame at the end of `file` (a reader decodes the frames as one stream).
 fn zstd_append(file: &Path, text: &str) -> Result<()> {
     use std::io::Write as _;
     let f = std::fs::OpenOptions::new().create(true).append(true).open(file)?;
@@ -490,7 +488,7 @@ pub fn append(state: &Path, ev: &Event) -> Result<()> {
     crate::sim::point(&crate::sim::Point::Append(ev));
     with(state, true, (), |c| {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert(&tx, ev, None, false)?;
+        log(&tx, ev)?;
         Ok(tx.commit()?)
     })
 }
@@ -522,7 +520,7 @@ pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Opti
             }
         }
         for ev in &evs {
-            insert(&tx, ev, None, false)?;
+            log(&tx, ev)?;
         }
         tx.commit()?;
         Ok(Some(evs))
@@ -580,7 +578,7 @@ pub fn claim(
             .transpose()?;
         let took = take(last.as_ref());
         for ev in evs.iter().filter(|_| took) {
-            insert(&tx, ev, None, false)?;
+            log(&tx, ev)?;
         }
         tx.commit()?;
         Ok((last, took))
@@ -867,6 +865,7 @@ fn import(c: &mut Connection, state: &Path) -> Result<()> {
     for p in done.iter().filter(|_| SCRATCH.with_borrow(Option::is_none)) {
         retire(p)?;
     }
+    rebuild_in(&tx, state)?;
     tx.commit().context("import commit")
 }
 

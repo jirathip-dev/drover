@@ -193,8 +193,6 @@ fn cut(v: &mut Value, keep: usize) {
     }
 }
 
-/// #978: a `build-cloned` event's `errors` (cp's output, up to MBs) written to `cache/build-cloned/<sha256>.txt`; the
-/// event keeps that path, under the state dir, as `errors_ref`.
 pub fn offload(state: &Path, mut d: Map<String, Value>) -> Result<Map<String, Value>> {
     let Some(errs) = d.get("errors").and_then(Value::as_array).filter(|a| !a.is_empty()) else {
         return Ok(d);
@@ -600,6 +598,14 @@ pub fn repeat(events: &[Event], e: &Event) -> bool {
     closed(events, e) == Some("repeat")
 }
 
+/// #978: an event kind that logs an ask or may end one (`closes`).
+pub fn ends_asks(kind: &str) -> bool {
+    matches!(
+        kind,
+        "needs-decision" | "decision" | "merged" | "closed" | "closed-other" | "clean" | "spawn" | "lane-killed"
+    ) || kind.starts_with("ask-")
+}
+
 pub(crate) fn twin(e: &Event) -> Option<String> {
     let k = (&e.fleet, e.issue, e.str("thread"), e.str("question"));
     e.str("id").map(|id| format!("{id} {k:?}"))
@@ -608,8 +614,6 @@ pub(crate) fn twin(e: &Event) -> Option<String> {
 /// #859: ask endings projected from a slice that is no cached `Log` (`index`'s fallback): serve's reads build none.
 pub static REBUILDS: AtomicUsize = AtomicUsize::new(0);
 
-/// #978: `f` on `events`' ask endings and the key of `events[i]` in them: the cached `log`'s (the `asks` table's,
-/// by seq) when `events` is it, else projected from the slice (by position from 1).
 fn index<T>(events: &[Event], f: impl FnOnce(&BTreeMap<u64, Ending>, &dyn Fn(usize) -> u64) -> T) -> T {
     if let Some(l) = cached(events) {
         return f(&l.asks, &|i| events[i].seq);
@@ -767,7 +771,6 @@ pub fn closed(events: &[Event], a: &Event) -> Option<&'static str> {
     ending(events, a).map(|e| e.0)
 }
 
-/// `closed`'s rank and `closed_row`'s text for ask `a` of `events`.
 fn ending(events: &[Event], a: &Event) -> Option<(&'static str, String)> {
     let at = (std::ptr::from_ref(a) as usize).wrapping_sub(events.as_ptr() as usize) / size_of::<Event>();
     let at = events.get(at).filter(|e| std::ptr::eq(*e, a)).map(|_| at)?;
@@ -780,7 +783,6 @@ pub fn closed_row(events: &[Event], a: &Event) -> Option<String> {
     ending(events, a).map(|e| e.1)
 }
 
-/// #584: the text of an ask's ending `why` by event `e`.
 pub(crate) fn ending_row(why: &str, e: &Event) -> String {
     match (why, e.str("for"), e.str("to")) {
         ("withdrawn", Some(q), _) => format!("withdrawn → {q}"),

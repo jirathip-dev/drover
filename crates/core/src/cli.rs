@@ -517,10 +517,14 @@ enum Cmd {
         #[arg(long)]
         live: bool,
     },
-    /// #978: move old events of merged or closed issues to monthly archives and delete old heartbeats (daily by tick)
+    #[command(
+        about = "Move old events of merged or closed issues to monthly archives, delete old heartbeats (daily by tick)"
+    )]
     Compact {
-        /// Rebuild the issue, lane and ask tables from every event (the archive's too) instead
-        #[arg(long)]
+        #[arg(
+            long,
+            help = "Rebuild the issue, lane and ask tables from every event (the archive's too) instead"
+        )]
         rebuild: bool,
     },
     /// The event log in its JSONL format (one event a line, with its seq), for external readers

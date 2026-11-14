@@ -1,5 +1,3 @@
-//! #978: the current-state tables kept with each append, their rebuild, and the daily compaction into
-//! `archive/events-YYYY-MM.jsonl.zst` (heartbeats over 48 h deleted).
 mod common;
 use common::{ctx, run, tmpdir, Fake};
 use drover::events::{append, closed_row, fold, history, read, states, Event, States};
@@ -36,7 +34,6 @@ fn log(seed: u64, n: u64, t0: u64) -> Vec<Event> {
                     json!({"sha": sha, "verdict": (["PASS", "FAIL"][r.n(2) as usize])}),
                 ),
                 5 => (["merged", "closed", "needs-human"][r.n(3) as usize], json!({})),
-                // #978: asks and what ends them, so the `asks` rows are exercised.
                 11 => ("needs-decision", json!({"id": format!("q{}", r.n(5)), "agent": agent})),
                 6 => ("clean", json!({"why": (["merged", "closed"][r.n(2) as usize])})),
                 7 => ("lane-killed", json!({"role": role, "agent": agent})),
@@ -73,9 +70,6 @@ fn write(p: &Path, ev: &[Event]) {
 
 const DAY: u64 = 86_400;
 
-/// #978 AC1: after appends (and a log imported from before #344), the `issues` rows are the fold of every event, a
-/// cached log's ask endings (the `asks` rows) are those a plain copy projects afresh, and `compact --rebuild` gives
-/// identical rows, before and after a compaction moved events to the archive.
 #[test]
 fn the_tables_match_the_events_and_a_rebuild_gives_identical_rows() {
     for seed in 1..=20u64 {
@@ -123,8 +117,6 @@ fn the_tables_match_the_events_and_a_rebuild_gives_identical_rows() {
     }
 }
 
-/// #978 AC2, AC3: a merged or closed issue's events over 14 days old move to their month's archive; an open issue's,
-/// the issue-less and the last 14 days' stay; heartbeats over 48 h are deleted. A second run moves nothing.
 #[test]
 fn compaction_archives_old_done_issues_and_deletes_old_heartbeats() {
     let d = tmpdir("compact");
@@ -185,7 +177,6 @@ fn compaction_archives_old_done_issues_and_deletes_old_heartbeats() {
     assert_eq!(rows(&history(&p).unwrap()), rows(&kept));
 }
 
-/// #560: `shared` (serve's read) is `read` at every point: rows appended, a compaction, a new log.
 #[test]
 fn the_shared_read_follows_appends_and_compaction() {
     let d = tmpdir("shared");
@@ -211,8 +202,6 @@ fn the_shared_read_follows_appends_and_compaction() {
     same();
 }
 
-/// #978 AC4: a `build-cloned` row logged before #978 has its `errors` moved to `cache/` on the first open, and the
-/// current-state tables are built from the events then.
 #[test]
 fn build_cloned_rows_from_before_978_move_their_errors_to_cache() {
     let d = tmpdir("offload");
