@@ -1,0 +1,13 @@
+Decided: pedantic on every crate: the drover binary crate (crates/cli) never opted into [workspace.lints]; fixed, no allow added
+Decided: "at most 10 allows" counts #[allow] attributes in crates/ as cooee's justfile does; CI fails over 10 (26 before, 9 now)
+Because: "clippy pedantic, with at most 10 allows (as cooee)"
+Decided: struct_excessive_bools, too_many_arguments, cast_precision_loss moved to the workspace table (12 inline sites, one place)
+Rejected: splitting serde API rows into enums or argument structs to drop the bools/args allows — a behaviour and API change the issue rules out
+Decided: serve.rs keeps its 3 allows: the frozen board takes no edit without a board-fix line
+Decided: deny.toml from cooee's, trimmed to this graph: Zlib (foldhash via rusqlite) allowed, syn 2 skipped (ts-rs only), publish = false so path deps pass
+Decided: the rules list is .drover/rules.md (the repo's rename of .herdsman/), the 3 hand-written lines kept byte for byte
+Because: "Behaviour unchanged; tests pass."
+Check: test fixes are lint-only: by-ref helper args, try_from casts, merged identical sim match arms (order kept)
+Decided: CI's temp-dir step uses find, not ls | grep: actionlint's shellcheck (SC2010) failed it; same pass/fail
+Decided: round 3 merged staging (#1019) cleanly; self_update's pause test fails only when DROVER_LANE is set (a lane pane); CI sets none
+Owner: CI now runs pedantic clippy on all code with an allow budget, cargo deny and actionlint, and .drover/rules.md lists every rule with its check
