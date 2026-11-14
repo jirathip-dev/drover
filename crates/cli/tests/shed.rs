@@ -2605,7 +2605,7 @@ fn wait_sends_continue_at_the_reset_only_on_the_owners_pick() {
         (p.str("pick"), p.str("by"), p.str("reset")),
         (Some("wait"), Some("owner"), Some("5pm"))
     );
-    let at = p.data["at"].as_u64().unwrap();
+    let at = p.val("at").as_u64().unwrap();
     assert!(at > c.now + 2 * 86_400, "{p:?}");
     drive_at(&c, &cli, at - c.now - 1);
     assert_eq!(
