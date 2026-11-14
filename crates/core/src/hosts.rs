@@ -1148,9 +1148,10 @@ pub fn rehome(a: Vec<String>, home: Option<&str>) -> Vec<String> {
 pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
     let here = cfg.hosts.get(name).is_none_or(|h| h.machine.is_none());
     let on = |l: &&str| last_spawn(events, l).is_some_and(|e| e.str("host").map_or(here, |h| h == name));
-    let st = fold(events);
-    let open = st.values().filter(|s| !s.done()).filter_map(|s| s.active_lane());
-    open.map(|l| l.1).filter(on).map(String::from).collect()
+    crate::events::with_states(events, |st| {
+        let open = st.values().filter(|s| !s.done()).filter_map(|s| s.active_lane());
+        open.map(|l| l.1).filter(on).map(String::from).collect()
+    })
 }
 
 /// #840: a remote host unreachable 15 min straight: its open lanes restart on the main host from their pushed branch.

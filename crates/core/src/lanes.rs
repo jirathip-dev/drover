@@ -59,26 +59,28 @@ pub fn join(
     agents: &[Value],
     ws: &BTreeMap<String, String>,
 ) -> Vec<Lane> {
-    // #632: each agent's and pane's newest spawn, indexed once.
-    let (mut by_name, mut by_pane) = (BTreeMap::new(), BTreeMap::new());
-    for e in events.iter().filter(|e| e.kind == "spawn") {
-        by_name.insert(e.str("agent"), e);
+    let nameless = agents.iter().any(|a| a["name"].as_str().is_none_or(str::is_empty));
+    let mut by_pane = BTreeMap::new();
+    for e in crate::events::of_kind(events, &["spawn"])
+        .into_iter()
+        .filter(|_| nameless)
+    {
         by_pane.insert(e.str("pane"), e);
     }
+    let by_name = |n: &str| crate::events::last_spawn(events, n);
     let (mut out, mut seen) = (vec![], BTreeSet::new());
     // #422: each thread's last `conductor-start`, by its agent (`conductor-<thread>`).
-    let starts = events.iter().filter(|e| e.kind == "orchestrator-start");
+    let starts = crate::events::of_kind(events, &["orchestrator-start"]).into_iter();
     let mut cs: BTreeMap<&str, &Event> = starts.filter_map(|e| Some((e.str("agent")?, e))).collect();
     for a in agents {
         let s = |k: &str| a[k].as_str().filter(|v| !v.is_empty());
         let (name, pane) = (s("name"), s("pane_id"));
         // Agents that report their own state (dsh-TUI) can lose the name: match the lane's pane.
         let sp = match (name, pane) {
-            (Some(_), _) => by_name.get(&name),
-            (None, Some(_)) => by_pane.get(&pane),
+            (Some(n), _) => by_name(n),
+            (None, Some(_)) => by_pane.get(&pane).copied(),
             _ => None,
-        }
-        .copied();
+        };
         let mut l = Lane {
             state: s("agent_status").unwrap_or("unknown").into(),
             pane: pane.map(String::from),
@@ -128,7 +130,7 @@ pub fn join(
         let Some((_, agent)) = s.active_lane().filter(|(_, a)| !seen.contains(*a)) else {
             continue;
         };
-        if let Some(e) = by_name.get(&Some(agent)) {
+        if let Some(e) = by_name(agent) {
             let r = &crate::hosts::On::of(r, Some(e));
             let wt = e
                 .str("worktree")
@@ -151,7 +153,7 @@ pub fn join(
     out.extend(cs.into_values().map(|e| orchestrator(events, e, Lane::default())));
     for l in &mut out {
         let mark = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "lane-closed" | "lane-kept-dirty");
-        let last = events.iter().rev().find(|e| mark(e) && e.str("agent") == Some(&l.name));
+        let last = crate::events::of_agent(events, &l.name).into_iter().rfind(mark);
         let why = last.filter(|e| e.kind == "lane-kept-dirty").and_then(|e| e.str("why"));
         l.kept = why.filter(|_| l.state == "done").map(String::from);
     }
@@ -226,7 +228,9 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
 /// #422: the conductor `e` started: role `conductor`, named `<thread title> · <thread>`, `asleep` with no pane.
 fn orchestrator(events: &[Event], e: &Event, l: Lane) -> Lane {
     let (id, mut l) = (e.str("thread").unwrap_or_default(), from_spawn(e, l));
-    let t = (events.iter()).find(|t| t.kind == "thread-new" && t.str("thread") == Some(id));
+    let t = crate::events::of_kind(events, &["thread-new"])
+        .into_iter()
+        .find(|t| t.str("thread") == Some(id));
     l.name = format!("{} · {id}", t.and_then(|t| t.str("title")).unwrap_or_default());
     (l.role, l.thread) = ("orchestrator".into(), Some(id.into()));
     l.state = l.pane.as_ref().map_or("asleep".into(), |_| l.state);

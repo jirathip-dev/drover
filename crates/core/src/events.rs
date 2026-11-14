@@ -442,10 +442,7 @@ pub type States = BTreeMap<(String, u64), IssueState>;
 
 /// The newest `spawn` of `agent`.
 pub fn last_spawn<'a>(events: &'a [Event], agent: &str) -> Option<&'a Event> {
-    events
-        .iter()
-        .rev()
-        .find(|e| e.kind == "spawn" && e.str("agent") == Some(agent))
+    of_agent(events, agent).into_iter().rfind(|e| e.kind == "spawn")
 }
 
 /// #425: the issue `s`'s lane is held on (`held`, no `released` or `spawn` since).
@@ -752,6 +749,10 @@ pub struct Log {
     pub threads: Threads,
     pub states: States,
     issues: HashMap<(String, u64), Vec<usize>>,
+    kinds: HashMap<String, Vec<usize>>,
+    agents: HashMap<String, Vec<usize>>,
+    copies: Arc<Mutex<HashMap<(String, u64), Events>>>,
+    queues: Queues,
     seq: u64,
     key: (Option<u64>, Option<u64>),
 }
@@ -835,6 +836,13 @@ impl Events {
 
 type Gated = (Arc<Mutex<()>>, Arc<Log>);
 
+type Queues = Arc<Mutex<HashMap<String, (usize, Vec<crate::queue::Item>)>>>;
+
+/// #971: the cached log's replayed queues, by fleet: (`queue` events applied, the queue then).
+pub(crate) fn queues(events: &[Event]) -> Option<Queues> {
+    cached(events).map(|l| l.queues.clone())
+}
+
 static LOGS: Mutex<BTreeMap<PathBuf, Gated>> = Mutex::new(BTreeMap::new());
 
 static LIVE: Mutex<Vec<Weak<Log>>> = Mutex::new(Vec::new());
@@ -876,6 +884,10 @@ fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<
     for e in new {
         if let Some(n) = e.issue {
             m.issues.entry((e.fleet.clone(), n)).or_default().push(m.events.len());
+        }
+        m.kinds.entry(e.kind.clone()).or_default().push(m.events.len());
+        if let Some(a) = e.str("agent") {
+            m.agents.entry(a.into()).or_default().push(m.events.len());
         }
         m.events.push(e);
         m.asks.add(&m.events);
@@ -968,12 +980,61 @@ pub fn of_issue<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> 
     at.map_or_else(Vec::new, |v| v.iter().map(|i| &events[*i]).collect())
 }
 
+/// #971: the events of any of `kinds`, in order: the index's when `events` is a cached log, else one pass.
+pub fn of_kind<'a>(events: &'a [Event], kinds: &[&str]) -> Vec<&'a Event> {
+    let Some(l) = cached(events) else {
+        return events.iter().filter(|e| kinds.contains(&e.kind.as_str())).collect();
+    };
+    let mut at: Vec<usize> = kinds
+        .iter()
+        .filter_map(|k| l.kinds.get(*k))
+        .flatten()
+        .copied()
+        .collect();
+    at.sort_unstable();
+    at.into_iter().map(|i| &events[i]).collect()
+}
+
+/// #971: `fleet` #`n`'s events as one slice: the cached log's copy, extended by the events since (else copied now).
+pub fn issue_log(events: &[Event], fleet: &str, n: u64) -> Events {
+    let mut out = Events::default();
+    let Some(l) = cached(events) else {
+        (events.iter().filter(|e| e.fleet == fleet && e.issue == Some(n))).for_each(|e| out.push(e.clone()));
+        return out;
+    };
+    let at = l.issues.get(&(fleet.to_string(), n)).map_or(&[][..], Vec::as_slice);
+    let mut copies = l.copies.lock().unwrap_or_else(PoisonError::into_inner);
+    let c = copies.entry((fleet.to_string(), n)).or_default();
+    at.iter().skip(c.len).for_each(|i| c.push(events[*i].clone()));
+    Events {
+        buf: c.buf.clone(),
+        len: at.len(),
+    }
+}
+
+/// #971: the events naming `agent`, in order: the index's when `events` is a cached log, else one pass.
+pub fn of_agent<'a>(events: &'a [Event], agent: &str) -> Vec<&'a Event> {
+    let Some(l) = cached(events) else {
+        return events.iter().filter(|e| e.str("agent") == Some(agent)).collect();
+    };
+    let at = l.agents.get(agent);
+    at.map_or_else(Vec::new, |v| v.iter().map(|i| &events[*i]).collect())
+}
+
 /// Current per-issue state (the states in `roles/usage-tail.md`); #859: the cached log's fold when `events` is it.
 pub fn fold(events: &[Event]) -> States {
     if let Some(l) = cached(events) {
         return l.states.clone();
     }
     fold_into(States::new(), events)
+}
+
+/// #971: `f` on the per-issue states: the cached log's, never copied, when `events` is it; else folded now.
+pub fn with_states<T>(events: &[Event], f: impl FnOnce(&States) -> T) -> T {
+    match cached(events) {
+        Some(l) => f(&l.states),
+        None => f(&fold_into(States::new(), events)),
+    }
 }
 
 /// #343: `fold` on from the states `m` (a checkpoint's).

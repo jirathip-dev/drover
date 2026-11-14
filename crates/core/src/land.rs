@@ -12,8 +12,10 @@ use std::io::Write;
 
 /// The fleet's open pause: its `land-paused` when no `land-resumed` came after it.
 pub fn paused<'a>(events: &'a [Event], fleet: &str) -> Option<&'a Event> {
-    let mine = |e: &&Event| e.fleet == fleet && matches!(e.kind.as_str(), "land-paused" | "land-resumed");
-    events.iter().rfind(mine).filter(|e| e.kind == "land-paused")
+    let on = crate::events::of_kind(events, &["land-paused", "land-resumed"]);
+    on.into_iter()
+        .rfind(|e| e.fleet == fleet)
+        .filter(|e| e.kind == "land-paused")
 }
 
 /// Mark `pr` `landing: fast-first` when its fleet lands fast-first, landings are not paused and its diff at the head
@@ -39,13 +41,15 @@ pub fn mark(ctx: &Ctx, r: Option<&dyn Runner>, f: &Fleet, (fleet, n): (&str, u64
 /// The board's word on #`n`'s landing: `landed (fast) · full suite running` until integration is green after it,
 /// `reverted: <job> red` once reverted.
 pub fn note(events: &[Event], fleet: &str, n: u64) -> Option<String> {
-    let at = |e: &Event| e.fleet == fleet && e.issue == Some(n) && matches!(e.kind.as_str(), "landed" | "reverted");
-    let i = events.iter().rposition(at)?;
-    let e = &events[i];
+    let at = |e: &&Event| matches!(e.kind.as_str(), "landed" | "reverted");
+    let e = crate::events::of_issue(events, fleet, n).into_iter().rfind(at)?;
     if e.kind == "reverted" {
         return Some(format!("reverted: {} red", e.str("red_job").unwrap_or("?")));
     }
-    let green = events[i..].iter().any(|x| x.fleet == fleet && x.kind == "land-green");
+    let green = crate::events::of_kind(events, &["land-green"]).into_iter().rev();
+    let green = green
+        .take_while(|x| std::ptr::from_ref(*x) > std::ptr::from_ref(e))
+        .any(|x| x.fleet == fleet);
     (e.str("mode") == Some("fast-first") && !green).then(|| "landed (fast) · full suite running".into())
 }
 

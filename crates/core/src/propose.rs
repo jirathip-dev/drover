@@ -71,9 +71,8 @@ pub fn diff(a: &str, b: &str) -> String {
 
 /// Proposal `id`'s `config-settled`, if any.
 pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
-    events
-        .iter()
-        .find(|e| e.kind == "config-settled" && e.str("id") == Some(id))
+    let settled = crate::events::of_kind(events, &["config-settled"]);
+    settled.into_iter().find(|e| e.str("id") == Some(id))
 }
 
 /// #460: proposal `p` was made over a fleet.toml that has changed since: it can no longer apply.

@@ -852,9 +852,13 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, 
 
 /// #325: answers whose last delivery failed, newest first (one per ask).
 pub fn undelivered<'a>(events: &'a [Event], fleet: &str) -> Vec<&'a Event> {
-    let tries = |e: &&Event| e.fleet == fleet && e.kind.starts_with("answer-");
+    let kinds = ["answer-undelivered", "answer-delivered", "answer-delivered-live"];
     let mut seen = std::collections::BTreeSet::new();
-    let last = events.iter().rev().filter(tries).filter(|e| seen.insert(e.str("id")));
+    let tries = events::of_kind(events, &kinds)
+        .into_iter()
+        .rev()
+        .filter(|e| e.fleet == fleet);
+    let last = tries.filter(|e| seen.insert(e.str("id")));
     last.filter(|e| e.kind == "answer-undelivered").collect()
 }
 

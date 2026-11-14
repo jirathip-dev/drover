@@ -6,6 +6,7 @@ use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::{json, Value};
+use std::collections::BTreeSet;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 
@@ -99,10 +100,11 @@ fn inside(path: &Path, dir: &Path) -> Option<PathBuf> {
 /// #547: the shots of `fleet` #`n`'s last verdict the board shows and serves: a verify verdict's, each still a file
 /// inside one of the issue's lane folders (older events kept any `.png` word).
 pub fn served(events: &[Event], (fleet, n): (&str, u64)) -> Vec<(String, PathBuf)> {
-    let lanes: Vec<&str> = (events.iter().filter(|e| e.is("spawn", fleet, n)))
+    let mine = crate::events::of_issue(events, fleet, n);
+    let lanes: BTreeSet<&str> = (mine.iter().filter(|e| e.kind == "spawn"))
         .filter_map(|e| e.str("worktree"))
         .collect();
-    let last = events.iter().rfind(|e| e.is("verdict", fleet, n));
+    let last = mine.iter().rfind(|e| e.kind == "verdict");
     let files = last
         .filter(|e| e.str("stage") == Some("verify"))
         .and_then(|e| e.data["files"].as_array());

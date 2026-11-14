@@ -1,7 +1,7 @@
 //! #337: the board's one snapshot (#344: the `board` row in `state.db`): every read the board, `status` and `hosts` make, taken
 //! by the fast step and each kick, every remote host's reads in one ssh call; a request replays it, never a remote read.
 use crate::config::Config;
-use crate::events::{Event, States};
+use crate::events::{Event, IssueState, States};
 use crate::hosts::{quote, On};
 use crate::lanes::{self, Lane};
 use crate::runner::{argv, Out, Runner};
@@ -209,7 +209,10 @@ pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[L
     let live: Vec<_> = (all.iter())
         .map(|l| json!({"name": l.name, "agent_status": l.state}))
         .collect();
-    let w = crate::waiting::scan(ctx, cfg, r, events, &live, false);
+    let names: std::collections::HashSet<&str> = all.iter().map(|x| x.name.as_str()).collect();
+    let shown = |l: &String| names.contains(l.as_str());
+    let keep = |s: &IssueState| !s.done() || s.lane.iter().chain(s.lanes.values()).any(shown);
+    let w = crate::waiting::scan_where(ctx, cfg, r, (events, &live), false, keep);
     w.into_iter().map(|x| x.1).collect()
 }
 

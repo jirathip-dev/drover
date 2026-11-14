@@ -151,10 +151,7 @@ static HANGS: std::sync::Mutex<std::collections::BTreeMap<PathBuf, std::collecti
 /// #972: the roots whose last `root-hung` / `root-answers` is `root-hung`.
 pub fn hung_now(events: &[Event]) -> Vec<&str> {
     let mut last = std::collections::BTreeMap::new();
-    for e in events
-        .iter()
-        .filter(|e| matches!(e.kind.as_str(), "root-hung" | "root-answers"))
-    {
+    for e in crate::events::of_kind(events, &["root-hung", "root-answers"]) {
         if let Some(r) = e.str("root") {
             last.insert(r, e.kind == "root-hung");
         }

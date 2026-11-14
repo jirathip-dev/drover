@@ -363,7 +363,6 @@ fn seen(q: &str, opts: &[String]) -> u64 {
 struct Watch {
     log: Option<(u64, Option<std::time::SystemTime>)>,
     herdr: (u64, u64),
-    rendered: u64,
     /// The last `herd` push: (time, hash of the body).
     herd: (u64, u64),
     frags: BTreeMap<(bool, &'static str), u64>,
@@ -968,7 +967,7 @@ impl<'a> Server<'a> {
             }
             w.seen = Some(top);
         }
-        let mut changed = kicked || log != w.log || driving != w.driving || now >= w.rendered + 15;
+        let mut changed = kicked || log != w.log || driving != w.driving;
         (w.log, w.driving) = (log, driving);
         // #337: a new snapshot is the change to show; none saved, herdr's agent list every 2 s as before.
         let at = self.snapshot().0;
@@ -1008,10 +1007,11 @@ impl<'a> Server<'a> {
         // #560: the parts are rendered only for an audience listening (a client that connects reads them afresh).
         let heard = |p: bool| lock(&self.clients).iter().any(|c| c.1.is_some() == p);
         let (anon, owner) = (heard(false), heard(true));
+        let unseen = |p: bool| !w.frags.keys().any(|k| k.0 == p);
+        changed |= (anon && unseen(false)) || (owner && unseen(true));
         if !changed || !(anon || owner) {
             return;
         }
-        w.rendered = now;
         // #267: the Host tab is the TypeScript board's: a change (like a frag's, never the first render) sends its
         // data (`host`), the same to every device.
         let mut h = self.host_tab(at);
@@ -1787,7 +1787,7 @@ impl<'a> Server<'a> {
     /// lane's pending prompt, then the `needs-human` issues.
     fn needs_tab(&self, ctx: &Ctx, paired: bool) -> NeedsTab {
         let events = shared(&ctx.state).unwrap_or_default();
-        let (cfg, st) = (Config::kept(ctx).ok(), events.states.clone());
+        let (cfg, st) = (Config::kept(ctx).ok(), &events.states);
         let (cfg, ev, st) = (cfg.as_ref(), &events, &st);
         let all = cfg.and_then(|c| self.lanes(ctx.now, c, ev, st)).unwrap_or_default();
         let mins = cfg.map_or(Limits::default().ask_default_minutes, |c| c.limits.ask_default_minutes);
@@ -1947,6 +1947,7 @@ impl<'a> Server<'a> {
                 .chain(rest.iter().map(|&n| (n, None, None)))
                 .collect();
             let mut rows = vec![];
+            let undelivered = crate::undelivered(events, f);
             for &(n, blocked_by, k) in &items {
                 let s = st.get(&(f.clone(), n));
                 let waiting = asks.iter().any(|e| e.fleet == *f && e.issue == Some(n));
@@ -1966,7 +1967,8 @@ impl<'a> Server<'a> {
                 let pr = gh::cached_pr(ctx, f, n);
                 let head = pr["headRefOid"].as_str().unwrap_or_default();
                 let mut seen = BTreeSet::new();
-                let spawns = events.iter().rev().filter(|e| e.is("spawn", f, n));
+                let of = crate::events::of_issue(events, f, n);
+                let spawns = of.iter().rev().filter(|e| e.kind == "spawn");
                 let qls = spawns
                     .filter_map(|e| e.str("agent").filter(|a| seen.insert(*a)).map(|a| (a, e.ts)))
                     .map(|(a, ts)| {
@@ -1984,25 +1986,24 @@ impl<'a> Server<'a> {
                 // #712: why it was parked (`park --why`).
                 notes.extend(queue::park_why(events, st, f, n).map(|w| format!("parked: {w}")));
                 // #417: a verify stage passed on at this head for want of the repo's recipe.
-                let bare = |e: &&Event| e.is("verify-no-recipe", f, n) && e.str("sha") == Some(head);
+                let bare = |e: &&&Event| e.kind == "verify-no-recipe" && e.str("sha") == Some(head);
                 notes.extend(
-                    events
-                        .iter()
+                    of.iter()
                         .rfind(bare)
                         .map(|_| format!("verify skipped: no {}", crate::verify::RECIPE)),
                 );
                 // #325: an answer that never reached the lane stays red until drive types it in.
-                for u in crate::undelivered(events, f).into_iter().filter(|u| u.issue == Some(n)) {
+                for u in undelivered.iter().filter(|u| u.issue == Some(n)) {
                     let (id, why) = (u.str("id").unwrap_or("?"), u.str("reason").unwrap_or("?"));
                     notes.push(format!("answer {id} not delivered: {why}"));
                 }
                 // #99: a decision taken by default, with [change]: a new decision on the same ask.
-                let last = events.iter().rev().find(|e| e.is("decision", f, n));
+                let last = of.iter().rev().find(|e| e.kind == "decision").copied();
                 let decided = last.filter(|d| d.str("by") == Some("default"));
                 let asked = |d: &Event| {
-                    events
-                        .iter()
-                        .find(|e| e.is("needs-decision", f, n) && e.str("id") == d.str("id"))
+                    of.iter()
+                        .find(|e| e.kind == "needs-decision" && e.str("id") == d.str("id"))
+                        .copied()
                 };
                 let ask = decided.filter(|_| rw).and_then(asked);
                 let open = (asks.iter().rfind(|e| e.fleet == *f && e.issue == Some(n)))
@@ -2063,10 +2064,9 @@ impl<'a> Server<'a> {
                 issue: s.issue,
                 note: crate::land::note(events, f, s.issue).unwrap_or_else(|| s.state.clone()),
                 age: age(now.saturating_sub(s.last_ts)),
-                pr: events
-                    .iter()
-                    .rev()
-                    .find(|e| e.is("merged", f, s.issue))
+                pr: crate::events::of_issue(events, f, s.issue)
+                    .into_iter()
+                    .rfind(|e| e.kind == "merged")
                     .and_then(|e| e.str("pr"))
                     .map(Into::into),
             };
@@ -2187,8 +2187,8 @@ impl<'a> Server<'a> {
     /// `weather` (loopback only) forces the host values.
     fn herd(&self, ctx: &Ctx, weather: Option<&str>) -> Result<Herd> {
         let events = shared(&ctx.state)?;
-        let (cfg, st) = (Config::kept(ctx)?, events.states.clone());
-        let all = self.lanes(ctx.now, &cfg, &events, &st).unwrap_or_default();
+        let (cfg, st) = (Config::kept(ctx)?, &events.states);
+        let all = self.lanes(ctx.now, &cfg, &events, st).unwrap_or_default();
         let waits = self.waits(ctx, &cfg, &events, &all);
         let lanes = |f: Option<&String>| -> Vec<_> {
             all.iter()
@@ -2228,7 +2228,7 @@ impl<'a> Server<'a> {
         };
         let queued = |f: &String| -> Vec<_> {
             let open = |s: &IssueState| s.state == "queued" || s.state == "needs-human";
-            let waiting = queue::view(&events, &st, f)
+            let waiting = queue::view(&events, st, f)
                 .into_iter()
                 .filter(|i| st.get(&(f.clone(), i.issue)).is_none_or(open));
             waiting
@@ -2299,11 +2299,11 @@ impl<'a> Server<'a> {
             ..LanesTab::default()
         };
         let events = shared(&ctx.state).unwrap_or_default();
-        let (Ok(cfg), st) = (Config::kept(ctx), events.states.clone()) else {
+        let (Ok(cfg), st) = (Config::kept(ctx), &events.states) else {
             t.error = Some("no fleet.toml".into());
             return t;
         };
-        let Some(all) = self.lanes(ctx.now, &cfg, &events, &st) else {
+        let Some(all) = self.lanes(ctx.now, &cfg, &events, st) else {
             t.failed = true;
             return t;
         };
@@ -3304,9 +3304,9 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
             }
         }
     }
-    let (cfg, st) = (Config::kept(ctx)?, events.states.clone());
+    let (cfg, st) = (Config::kept(ctx)?, &events.states);
     for l in s
-        .lanes(ctx.now, &cfg, &events, &st)
+        .lanes(ctx.now, &cfg, &events, st)
         .unwrap_or_default()
         .into_iter()
         .filter(|_| demo)
