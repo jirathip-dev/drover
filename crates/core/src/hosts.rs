@@ -486,6 +486,8 @@ pub struct Seen {
     pub github: String,
     /// #630: its set workspace roots.
     pub roots: Vec<crate::roots::Root>,
+    /// #917: a remote host's `drover --version` at the last look.
+    pub drover: String,
 }
 
 fn file(ctx: &Ctx) -> PathBuf {
@@ -558,10 +560,10 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
                         let (card, warn) = crate::cloud::github(&on, ctx.now);
                         (s.github, ()) = (card, s.health.extend(warn));
                     }
-                    if s.health.iter().any(|w| w.starts_with("! drover")) && update(ctx, cfg, &on, name, &s.home) {
-                        s.probed = ctx.now.saturating_sub(3000); // read its version back in 10 minutes
-                    }
                 }
+            }
+            if h.machine.is_some() && h.enabled && !s.home.is_empty() {
+                s.drover = sync(ctx, &on, name, &s.home);
             }
             let hs = host::sample(&on);
             (s.load, s.mem, s.mem_total) = (hs.load_per_cpu, hs.free_mem_gb, hs.mem_total_gb);
@@ -973,32 +975,54 @@ fn real_exe(ctx: &Ctx, home: &str) -> String {
     rehome(vec![exe], Some(home)).remove(0)
 }
 
-/// #235: build this drover's sha on the host in the background (log: `~/.drover-update.log` there), then
-/// `profiles sync` there; logged `host-update` once per host and sha. Whether it started.
-pub fn update(ctx: &Ctx, cfg: &Config, on: &On, name: &str, home: &str) -> bool {
-    let (sha, events) = (env!("DROVER_SHA"), read(&ctx.state).unwrap_or_default());
-    let f = cfg.fleet.values().find(|f| crate::update::ours(f));
-    let done = |e: &Event| e.kind == "host-update" && e.str("host") == Some(name) && e.str("sha") == Some(sha);
-    let Some(f) = f.filter(|_| !sha.is_empty() && !events.iter().any(done)) else {
-        return false;
+/// #917: `cargo install` of drover at `sha` into `root`, with its `herdsman` link: `hosts bootstrap`'s and `sync`'s.
+pub fn install_line(root: &str, sha: &str) -> String {
+    let repo = env!("CARGO_PKG_REPOSITORY");
+    format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force && ln -sf drover '{root}/bin/herdsman'")
+}
+
+const SYNC_STATUS: &str = "\"$1\" --version 2>/dev/null || echo missing; d=\"$HOME/.drover-sync\"; \
+if [ -f \"$d.done\" ]; then echo \"done $(cat \"$d.done\")\"; rm -f \"$d.done\"; fi; \
+[ -f \"$d.pid\" ] && kill -0 \"$(cat \"$d.pid\")\" 2>/dev/null && echo busy; true";
+const SYNC_START: &str =
+    "V=\"$2\" nohup sh -c \"$1\" </dev/null >\"$HOME/.drover-sync.log\" 2>&1 & echo $! >\"$HOME/.drover-sync.pid\"";
+
+fn sha_of(v: &str) -> &str {
+    v.rsplit_once('(').and_then(|p| p.1.strip_suffix(')')).unwrap_or(v)
+}
+
+/// #917: host `name`'s drover `--version`, its last install logged `host-sync`, a mismatch's install started there.
+pub fn sync(ctx: &Ctx, on: &On, name: &str, home: &str) -> String {
+    let (exe, sha) = (real_exe(ctx, home), env!("DROVER_SHA"));
+    let Ok(o) = ok(on, "sh", &["-c", SYNC_STATUS, "sh", &exe]) else {
+        return String::new();
     };
-    let exe = real_exe(ctx, home);
+    let mut lines = o.lines().map(str::trim);
+    let theirs = lines.next().unwrap_or_default().to_string();
+    let mut busy = false;
+    for l in lines {
+        busy |= l == "busy";
+        if let Some((code, rest)) = l.strip_prefix("done ").and_then(|l| l.split_once(' ')) {
+            let (to, from) = rest.split_once(' ').unwrap_or((rest, ""));
+            let d = json!({"host": name, "from": sha_of(from), "to": to, "ok": code == "0"});
+            let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d));
+        }
+    }
+    if busy || theirs == format!("drover {}", crate::VERSION) {
+        return theirs;
+    }
     let conf = rehome(vec![ctx.config.display().to_string()], Some(home)).remove(0);
-    let root = Path::new(&exe)
-        .parent()
-        .and_then(Path::parent)
-        .unwrap_or(Path::new(&exe));
-    let script = format!(
-        "cd '{0}' && git fetch -q origin && git checkout -q --detach {sha} && PATH=\"$HOME/.cargo/bin:$PATH\" \
-cargo install --path crates/cli --locked --root '{1}' --force && ln -sf drover '{1}/bin/herdsman' && {{ test ! -e '{conf}' || '{exe}' profiles sync; }}",
-        under(&f.local, Some(home)).display(),
-        root.display()
+    let root = Path::new(&exe).parent().and_then(Path::parent).map(Path::display);
+    let install = install_line(&root.map_or(exe.clone(), |r| r.to_string()), sha);
+    let job = format!(
+        "{}{{ {install} && {{ test ! -e '{conf}' || '{exe}' profiles sync; }}; }}; echo \"$? {sha} $V\" >\"$HOME/.drover-sync.done\"",
+        crate::cloud::SH
     );
-    let bg = "nohup sh -c \"$1\" </dev/null >\"$HOME/.drover-update.log\" 2>&1 &";
-    let res = ok(on, "sh", &["-c", bg, "sh", &script]);
-    let d = json!({"host": name, "sha": sha, "error": res.as_ref().err().map(|e| format!("{e:#}"))});
-    let _ = emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "host-update", d));
-    res.is_ok()
+    if let Err(e) = ok(on, "sh", &["-c", SYNC_START, "sh", &job, &theirs]) {
+        let d = json!({"host": name, "from": sha_of(&theirs), "to": sha, "ok": false, "error": format!("{e:#}")});
+        let _ = append(&ctx.state, &Event::new(ctx.now, "drover", None, "host-sync", d));
+    }
+    theirs
 }
 
 /// #157: the host a new lane runs on (None without `[hosts]`): `--host`, else the host of the issue's last lane while it
@@ -1249,9 +1273,14 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
             tags(h, Some(&s)).join(","),
         );
         let (l, m, d, k, ls) = (n(s.load, 2), n(s.mem, 1), n(s.disk, 0), lanes.len(), lanes.join(" "));
+        let v = match sha_of(&s.drover) {
+            "" => String::new(),
+            x if x == env!("DROVER_SHA") => format!(" · drover {x} ✓"),
+            x => format!(" · drover {x} ≠ {}", env!("DROVER_SHA")),
+        };
         writeln!(
             out,
-            "{name} · {words} · tags {t} · load/cpu {l} · mem {m} GB · disk {d} GB free · {k} lane(s) {ls} · seen {} ago",
+            "{name} · {words} · tags {t}{v} · load/cpu {l} · mem {m} GB · disk {d} GB free · {k} lane(s) {ls} · seen {} ago",
             age(ctx.now.saturating_sub(s.seen))
         )?;
     }
