@@ -1,0 +1,13 @@
+Decided: drover vendors swag's legacy-board/{farm,kitchen,garden} into assets/swag/ at the commit assets/swag/SOURCE pins, with SHA256SUMS; scripts/swag.sh <commit> moves the pin
+Because: "loads packs fetched from the shared repo at a pinned commit, with a checksum, the way cooee vendors them today"
+Rejected: fetching packs at runtime from GitHub — farm is the default and every theme's fallback, so an offline host would lose its page, and cargo install would no longer carry the art
+Decided: terminal moves to assets/terminal/ and stays embedded; board-freeze now watches assets/terminal/ instead of assets/themes/
+Because: "`terminal` (the plain look) stays built in."
+Decided: the swag side is jirathip-dev/swag#1 (sources synced from drover staging, build scripts write swag's folders, gate.mjs in CI); the pin is its head 68c01f0
+Because: q1662
+Decided: docs/design/{garden,kitchen,farm-v2,theme-370} leave; cdp.mjs moves to sim-680 and the chat demo image to conductor-chat, which still use them
+Because: "the theme build scripts under `docs/design/` leave this repo"
+Decided: docs/themes.md keeps the theme.json contract, because drover's server is what validates and resolves it (serve.rs validate/resolve)
+Check: the pinned files are byte-identical to the old assets/themes (diff -r showed no change), so the page looks the same
+Check: crates/cli/tests/themes.rs pinned_packs_load_and_a_custom_theme_overrides_them checks SOURCE, every file against SHA256SUMS, the served bytes, and a custom garden overriding the pack
+Owner: merge swag#1 with a merge commit (not squash) so the pinned commit stays on swag's main
