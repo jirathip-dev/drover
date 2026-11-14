@@ -1822,7 +1822,7 @@ fn ext_closed(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, flee
     let events = read(&ctx.state)?;
     let refs: std::collections::BTreeSet<String> = queue::view(&events, &fold(&events), fleet)
         .into_iter()
-        .flat_map(|i| i.ext)
+        .flat_map(|i| i.blockers.into_iter().map(move |b| format!("{fleet}#{b}")).chain(i.ext))
         .collect();
     for b in refs {
         let Some((repo, n)) = b.rsplit_once('#') else { continue };

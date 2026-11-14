@@ -107,7 +107,10 @@ fn failed_start(events: &[Event], s: &IssueState) -> bool {
         return false;
     };
     let hit = |e: &Event| e.kind == "lane-failed-start" && e.ts >= sp.ts && e.str("agent") == sp.str("agent");
-    events.iter().any(hit)
+    let Some(at) = events.iter().position(hit) else {
+        return false;
+    };
+    !events[at..].iter().any(|e| e.is("turn-end", &s.fleet, s.issue))
 }
 
 /// #511: the build lane's latest `herdsman turn` since its spawn and any extra round the owner gave.

@@ -1964,7 +1964,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             );
                             let mut d = queue::op("add", &issues, top, None, after, None);
                             for &i in &issues {
-                                let _ = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, i, false);
+                                if gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, i, false).is_ok_and(|v| gh::is_pr(&v)) {
+                                    return gate::refused("IS_PR", format!("#{i} is a pull request, not an issue"));
+                                }
                             }
                             if let Some(g) = g {
                                 d["serial"] = if g.is_empty() { json!(true) } else { json!(g) };

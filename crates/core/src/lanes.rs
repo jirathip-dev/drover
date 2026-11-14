@@ -22,7 +22,7 @@ pub struct Lane {
     pub effort: Option<String>,
     pub account: Option<String>,
     pub port: Option<String>,
-    /// herdr's live state (idle | working | done | blocked | unknown), or `dead` | `parked` (log only, no pane).
+    /// herdr's live state (idle | working | done | blocked | unknown), or `dead` | `parked` | `held by #N` (log only).
     pub state: String,
     /// When herdsman spawned it (0: unknown).
     pub since: u64,
@@ -134,14 +134,19 @@ pub fn join(
                 .str("worktree")
                 .filter(|wt| crate::spawn::dirty(r, Path::new(wt)).is_none());
             let head = wt.map(|wt| ok(r, "git", &["-C", wt, "rev-parse", "--short=7", "HEAD"]).unwrap_or_default());
-            let state = if head.is_some() { "parked" } else { "dead" }.into();
+            let on = crate::events::held_on(events, s);
+            let state = match head {
+                _ if !on.is_empty() => format!("held by {}", crate::queue::hashes(&on)),
+                Some(_) => "parked".into(),
+                None => "dead".into(),
+            };
             out.push(Lane {
                 name: agent.into(),
                 ..from_spawn(
                     e,
                     Lane {
                         state,
-                        parked: head,
+                        parked: head.filter(|_| on.is_empty()),
                         ..Lane::default()
                     },
                 )
