@@ -1,0 +1,8 @@
+Decided: the board row's hot groups leave data-s (space-split, so "hot <path>" became a 🔒hot chip plus a path chip) for data-h; serve.js draws one 🔒 hot ×N chip whose tap shows the paths in the summary under the row and folds them again
+Because: web/src/queue.ts:80
+Decided: the native Queue gets an indented link row 🔒 hot ×N under the issue row; its tap opens a sheet listing the paths (/screens/hot)
+Because: crates/server/src/screens.rs:145
+Rejected: expanding the paths in place on the native screen — cooee's row vocabulary (tests/golden/cooee) has no chips or in-place fold; tap only opens, sheets or links
+Rejected: a cooee schema change — out of this repo and this issue
+Check: queue_graph's hot-chip tests: board HTML, screen JSON and sheet; the WebKit tap/fold test runs in CI ui-webkit
+Owner: A row holding hot files now shows one "🔒 hot ×N" chip; tap it to see the files, on the board and in the app.
