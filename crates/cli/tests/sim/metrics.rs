@@ -1,4 +1,5 @@
 use crate::sched::World;
+use drover::events::Event;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -31,27 +32,39 @@ pub struct Metrics {
 }
 
 pub fn of(w: &World) -> Metrics {
+    let mut seen = BTreeMap::new();
+    let produced = |e: &Event| {
+        let pane = e.str("pane").unwrap_or_default().to_string();
+        let k = seen.entry(pane.clone()).or_insert(0);
+        *k += 1;
+        w.model.produced.contains(&format!("{pane}#{k}"))
+    };
+    let mut m = log(w.wrote.iter().map(|x| (x.at, &x.ev)), produced);
+    (m.idle, m.ci_wait, m.lock_wait) = (w.model.idle, w.model.ci_wait, w.model.polled);
+    m
+}
+
+/// The metrics a log alone gives, for the sim's run and a real one alike.
+pub fn log<'a>(
+    evs: impl Iterator<Item = (u64, &'a Event)> + Clone,
+    mut produced: impl FnMut(&Event) -> bool,
+) -> Metrics {
     let mut m = Metrics::default();
     let mut queued: BTreeMap<u64, u64> = BTreeMap::new();
     let mut lanes = BTreeSet::new();
     let mut merged = BTreeSet::new();
-    let mut seen = std::collections::BTreeMap::new();
-    for x in &w.wrote {
-        let e = &x.ev;
+    for (at, e) in evs.clone() {
         let n = e.issue.unwrap_or(0);
         match e.kind.as_str() {
             "queue" if e.str("op") == Some("add") => {
                 for i in e.data.get("issues").and_then(Value::as_array).into_iter().flatten() {
-                    queued.entry(i.as_u64().unwrap_or(0)).or_insert(x.at);
+                    queued.entry(i.as_u64().unwrap_or(0)).or_insert(at);
                 }
             }
             "spawn" => {
                 m.spawns += 1;
                 lanes.insert(e.str("agent").unwrap_or_default().to_string());
-                let pane = e.str("pane").unwrap_or_default();
-                let k = seen.entry(pane).or_insert(0);
-                *k += 1;
-                if !w.model.produced.contains(&format!("{pane}#{k}")) {
+                if !produced(e) {
                     m.wasted += 1;
                 }
             }
@@ -59,7 +72,7 @@ pub fn of(w: &World) -> Metrics {
             "merged" if merged.insert(n) => {
                 m.merges += 1;
                 if let Some(q) = queued.get(&n) {
-                    m.to_merge.push(x.at - q);
+                    m.to_merge.push(at - q);
                 }
             }
             "drive-pass" if !e.data.contains_key("updated") => {
@@ -75,13 +88,12 @@ pub fn of(w: &World) -> Metrics {
             _ => {}
         }
     }
-    let rounds: BTreeSet<_> = (w.wrote.iter())
-        .filter(|x| x.ev.kind == "verdict" && merged.contains(&x.ev.issue.unwrap_or(0)))
-        .map(|x| (x.ev.issue, x.ev.str("sha")))
+    let rounds: BTreeSet<_> = evs
+        .filter(|(_, e)| e.kind == "verdict" && merged.contains(&e.issue.unwrap_or(0)))
+        .map(|(_, e)| (e.issue, e.str("sha")))
         .collect();
     m.rounds = rounds.len() as u64;
     m.lanes = lanes.len() as u64;
-    (m.idle, m.ci_wait, m.lock_wait) = (w.model.idle, w.model.ci_wait, w.model.polled);
     m
 }
 

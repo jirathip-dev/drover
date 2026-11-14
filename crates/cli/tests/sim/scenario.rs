@@ -162,7 +162,7 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
             let a = w.model.panes[i].agent.clone().unwrap_or_default();
             w.model.died.push(a);
         }
-        (Some(Script::Push { green, .. }), 1) => {
+        (Some(Script::Push { green, ci, .. }), 1) => {
             let sha = w.model.sha();
             let branch = cwd.rsplit('/').next().unwrap_or_default().to_string();
             w.model.heads.insert(cwd.clone(), sha.clone());
@@ -178,7 +178,7 @@ fn lane(sim: &Arc<Sim>, w: &mut World, id: &str, step: u8) {
             });
             pr.head = sha.clone();
             w.model.version += 1;
-            let ci = w.model.ci_start(&sha, now, &mut w.rng);
+            let ci = w.model.ci_start(&sha, now, ci, &mut w.rng);
             let made = w.model.incarnation(i);
             w.model.produced.push(made);
             w.model.at(ci, Ev::Ci { sha, green });
@@ -253,6 +253,7 @@ pub fn default_script(rng: &mut Rng, role: &str) -> Script {
         _ => Script::Push {
             secs: rng.range(120, 2400),
             green: rng.chance(80),
+            ci: None,
         },
     }
 }
