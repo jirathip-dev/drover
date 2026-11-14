@@ -21,7 +21,6 @@ struct Machine {
     terms: BTreeMap<String, Value>,
     agents: Value,
     hook: bool,
-    /// #996: shed and drover on its non-login ssh PATH; `sudo`: a `sudo ln` there puts them on it.
     bare: bool,
     sudo: bool,
 }
