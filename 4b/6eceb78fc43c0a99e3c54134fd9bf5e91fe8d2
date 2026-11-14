@@ -1,0 +1,13 @@
+Decided: `[hosts.<name>] max_working` / `max_simulators` caps, unset = no cap, checked by drive before every start (inline spawn in `act`, kicked spawn in `launch` counting spawns still starting)
+Because: "A per-host cap on **working** lanes across all fleets, set in config"
+Because: q1621
+Decided: a lane holds a working slot only while herdr reports its agent busy and its issue is not ready, needs-human, parked, blocked or done
+Because: "A lane idle at its prompt, waiting on CI, waiting on an owner ask, at `ready`, `needs-human` or `parked` does not count."
+Decided: a full host is the soft refusal `HOST_FULL` (pending SOFT, waiting HOST_WAIT), so drive retries it in queue order and status shows `waiting for a slot: N/cap working on <host>`
+Because: "it is never refused or dropped, and starts in queue order when a slot frees"
+Decided: an idle rev/verify pane closes once its verdict is logged; an idle impl/fix pane closes once a review spawn followed it; worktrees stay
+Because: "a rev/verify lane's pane closes once its verdict is recorded"
+Rejected: a second slot check in spawn placement (`hosts::at`) — it duplicated drive's check and put the branch 68 lines over ci/cap.toml; a hand-typed `drover spawn` is the owner's explicit start (docs/hosts.md says so)
+Check: crates/cli/tests/host_slots.rs drives the real `drover drive` / `check` / `status` entry points for all four acceptance tests
+Check: crates/cli/tests/sim goldens (idle 1004, planted bug on the 3rd start, hunt seed 11) move because finished panes now close
+Owner: Hosts can now cap how many lanes work at once and how many simulators run; extra starts wait their turn instead of overloading the machine.
