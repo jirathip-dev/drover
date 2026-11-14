@@ -440,8 +440,7 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         ensure!(o.code == 0, "{}", fail(what, cmd, &o));
         Ok(writeln!(out, "✓ {what} — installed")?)
     };
-    let (repo, version) = (env!("CARGO_PKG_REPOSITORY"), crate::VERSION);
-    let build = format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force && ln -sf drover '{root}/bin/herdsman'");
+    let (version, build) = (crate::VERSION, crate::hosts::install_line(root, sha));
     let herdr = format!("herdr\therdr --version | grep -qx 'herdr {v}'\t\n");
     let mut steps = format!("{}{TOOLS}\n", if acp { "" } else { &herdr });
     for (n, i) in crate::providers::lanes().filter_map(|h| Some((h.name, h.install()?))) {

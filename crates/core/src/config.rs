@@ -1109,6 +1109,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "keychain-locked",
     "keychain-jammed",
     "self-update-failed",
+    "host-sync-failed",
     "clean-failed",
     "runners-low",
     "runners-ok",
