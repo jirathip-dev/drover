@@ -397,18 +397,34 @@ fn waits_elsewhere(ctx: &Ctx, cfg: &Config, ev: &[Event], fleet: &str) -> usize 
         .sum()
 }
 
-static ADMIT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+type Admitter = (std::path::PathBuf, u32);
+static ADMITTING: std::sync::Mutex<std::collections::BTreeSet<Admitter>> =
+    std::sync::Mutex::new(std::collections::BTreeSet::new());
+static ADMITTED: std::sync::Condvar = std::sync::Condvar::new();
 
-fn admit(ctx: &Ctx, r: &dyn Runner) -> Result<(Lock, std::sync::MutexGuard<'static, ()>)> {
-    let mine = ADMIT.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    for _ in 0..30 {
-        let now = crate::now();
-        if let Some(l) = crate::db::take(&ctx.state, "admit.lock", now, 60, "", &|l| gone(r, l, now)) {
-            return Ok((Lock(ctx.state.clone(), l), mine));
-        }
-        r.sleep(1);
+struct Admitting(Admitter);
+impl Drop for Admitting {
+    fn drop(&mut self) {
+        ADMITTING
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.0);
+        ADMITTED.notify_all();
     }
-    crate::gate::refused("SPAWN_PENDING", "another pass is admitting a spawn")
+}
+
+fn admit(ctx: &Ctx, r: &dyn Runner) -> Result<(Lock, Admitting)> {
+    let me = (ctx.state.clone(), crate::sim::pid());
+    let held = ADMITTING.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut held = (ADMITTED.wait_while(held, |h| h.contains(&me))).unwrap_or_else(std::sync::PoisonError::into_inner);
+    held.insert(me.clone());
+    drop(held);
+    let me = Admitting(me);
+    let now = crate::now();
+    match crate::db::take(&ctx.state, "admit.lock", now, 60, "", &|l| gone(r, l, now)) {
+        Some(l) => Ok((Lock(ctx.state.clone(), l), me)),
+        None => crate::gate::refused("SPAWN_PENDING", "another pass is admitting a spawn"),
+    }
 }
 
 pub(crate) fn failures<'a>(ev: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> {
