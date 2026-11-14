@@ -1,0 +1,5 @@
+Decided: name cap_pattern and the old board's tone, meters, hint, label and pct in a changed docs/accounts.md line rather than a `no doc:` excuse
+Because: docs/accounts.md:38
+Rejected: a `no doc: <why>` line in the PR body — the retired-keys section is the natural place a reader looks for them
+Check: drover arch-check --base origin/staging --pr-body <body file> exits 0 at this head (binary built from this branch)
+Owner: The accounts doc now lists the old settings and board fields that were removed; nothing else changed.
