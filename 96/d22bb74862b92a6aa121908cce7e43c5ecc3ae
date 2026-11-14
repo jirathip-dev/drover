@@ -1,0 +1,7 @@
+Decided: merged origin/staging; each conflict keeps the herdr removal and takes #1013's Event::data[..] to Event::val(..) change
+Because: crates/core/src/orchestrator.rs:246
+Decided: the demo's canned shed runner and the dsh_unit and sim fakes answer hello with Hello::ours(); #993's check needs the protocol number
+Because: crates/server/src/serve.rs:2975
+Rejected: none
+Check: demo_export, dsh_unit and sim pass; rg '\.data\[' crates finds nothing
+Owner: Staging's latest changes are merged in; the demo board shows its lanes again under the newer shed handshake.
