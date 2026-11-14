@@ -166,6 +166,33 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     assert_eq!(sh.sent(LANE).len(), tries, "{:?}", sh.methods());
 }
 
+#[test]
+fn a_sleeping_lanes_answer_waits_for_room_then_lands() {
+    let c = ctx(&tmpdir("deliver-asleep"), CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane(LANE, "hibernated", "/x");
+    spawn(&c, json!({}));
+    lane_ask(&c);
+    let host = |load: &str| {
+        Fake::default()
+            .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+            .reply("sysctl -n vm.loadavg", &format!("{{ {load} 1.20 1.00 }}\n"))
+            .reply("sysctl -n hw.ncpu", "10\n")
+            .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
+    };
+    assert_eq!(run(&c, &host("50.00"), &["answer", "sendmeter", "q1", "1"]).0, 0);
+    assert!(sh.sent(LANE).is_empty(), "{:?}", sh.methods());
+    let u = kinds(&c, "answer-undelivered");
+    assert_eq!(u.len(), 1);
+    assert!(u[0].str("reason").unwrap().contains("HOST_BUSY"), "{u:?}");
+    run(&c, &host("50.00"), &["drive", "--fast"]);
+    assert!(sh.sent(LANE).is_empty(), "held while busy: {:?}", sh.methods());
+    run(&c, &host("1.50"), &["drive", "--fast"]);
+    assert!(typed(&sh, LANE, "DECISION q1: yes"), "{:?}", sh.methods());
+    assert_eq!(kinds(&c, "answer-delivered").len(), 1);
+}
+
 /// #424: a supersede logs the old lane's close before the new spawn, naming its pane; the new lane's ask is answered.
 #[test]
 fn a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane() {
