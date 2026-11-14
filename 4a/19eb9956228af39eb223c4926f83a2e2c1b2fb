@@ -1,0 +1,10 @@
+Decided: option (b): keep the old drover and alert once, via the new binary's own `doctor --config-only` gate that says hello to the local shed serve
+Because: "the install either (a) installs the matching shed and restarts `shed serve` first, or (b) keeps the old drover and alerts once"
+Rejected: (a) installing shed and restarting shed serve from the install job — a serve restart drops every live lane's terminal and builds a second repo unattended
+Decided: the new binary checks, not the running one: only it knows the shed protocol it speaks, and scripts/install-gate.sh gets the same check for free
+Because: crates/core/src/update.rs:243
+Decided: a shed-mismatch alert is keyed on the `✗ shed` line, so later heads with the same shed do not alert again
+Decided: drive's intake routes a SHED_VERSION refusal to a `shed-version` alert (once per distinct refusal, `shed-version-ok` on recovery) instead of a kick.log line
+Because: "A `SHED_VERSION` refusal raises one alert per state through the notifiers"
+Check: crates/cli/tests/shed_version.rs drives doctor, self-update and drive against a protocol-0 fake shed server
+Owner: an auto-install that would leave drover and shed on different protocols now stays on the old drover and tells you once which shed to install
