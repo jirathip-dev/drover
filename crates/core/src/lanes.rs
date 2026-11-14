@@ -22,6 +22,8 @@ pub struct Lane {
     pub port: Option<String>,
     /// herdr's live state (idle | working | done | blocked | unknown), or `dead` | `parked` (log only, no pane).
     pub state: String,
+    /// #1033: shed's note on its reported state (`running: cargo test (8m)`), the row's subtitle while it works.
+    pub note: Option<String>,
     /// When drover spawned it (0: unknown).
     pub since: u64,
     pub pane: Option<String>,
@@ -73,6 +75,7 @@ pub fn join(
         .copied();
         let mut l = Lane {
             state: s("agent_status").unwrap_or("unknown").into(),
+            note: s("note").map(String::from),
             pane: pane.map(String::from),
             host: s("host").map(String::from),
             machine: s("machine").map(String::from),
@@ -595,6 +598,9 @@ pub fn read_tail(p: &Path, n: u64) -> Option<String> {
 
 /// #260: a lane row's `now:` line: its session transcript's current tool call (in its last 256 KB), else the pane's.
 pub fn now_of(l: &Lane, screen: &str) -> Option<String> {
+    if let Some(n) = l.note.clone().filter(|_| l.state == "working") {
+        return Some(n);
+    }
     let tail = l.session().and_then(|p| read_tail(&p, 1 << 18));
     tail.map_or_else(|| now(screen), |t| said(&t).1)
 }
