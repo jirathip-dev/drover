@@ -195,6 +195,30 @@ fn all_good_exits_zero_and_never_writes() {
 }
 
 #[test]
+fn a_missing_merge_label_is_red_with_its_create_command_then_green() {
+    let (c, _) = setup("doc-label", "claude");
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    let text = text.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nmerge_label = \"merge-ready\"",
+    );
+    std::fs::write(&c.config, text).unwrap();
+    let list = "gh label list --repo o/demo --search merge-ready";
+    let r = good().once(list, 0, "[]");
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    assert_eq!(
+        line(&out, "label demo"),
+        "✗ label demo — merge-ready in o/demo → gh label create merge-ready --repo o/demo --force"
+    );
+    assert!(!r.called("gh label create"));
+    let r = good().reply(list, r#"[{"name":"merge-ready"}]"#);
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(line(&out, "label demo"), "✓ label demo — merge-ready in o/demo");
+}
+
+#[test]
 fn secrets_never_echo() {
     // #707: the webhook secret and VAPID key are files; doctor checks them, never shows them.
     let (c, _) = setup("doc-secret", "claude");
