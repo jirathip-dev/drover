@@ -1,0 +1,10 @@
+Decided: round 3 is an update round: origin/staging (#886, #1032, #1033, #1029, #1028) merged with no conflicts; no #978 logic changed
+Decided: the previous lane's logs-978 snapshot is dropped from the tree and ignored locally
+Decided: one per-issue table: #948's states is written by the append projection; the lazy fold cursor stays deleted
+Because: "The same transaction that appends each event updates them."
+Decided: issue state and ask endings come from the tables, queue order, holds and waiting reasons read the 14-day hot DB
+Because: q1651
+Rejected: keeping both issues and states tables — two tables of the same fold would drift
+Check: arch-check and the diagram diff pass only with this branch's binary; the installed drover predates the compact command
+Check: AC6 numbers were measured at 988bab6, before the #948 merge
+Owner: The state database keeps one current row per issue, lane and ask and moves finished work to monthly archives; today's copy went from 225 MB to 89.5 MB.
