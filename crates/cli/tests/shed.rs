@@ -2206,9 +2206,9 @@ fn a_pending_tool_call_whose_process_died_is_silent() {
 }
 
 #[test]
-fn a_silent_lanes_respawn_goes_ahead_under_host_busy_but_not_under_mem_low() {
+fn a_silent_lanes_respawn_waits_under_host_busy_and_mem_low() {
     for (name, prog, sample, spawns) in [
-        ("acp-busy", "sysctl -n vm.loadavg", "{ 90.00 80.00 70.00 }\n", 2),
+        ("acp-busy", "sysctl -n vm.loadavg", "{ 90.00 80.00 70.00 }\n", 1),
         (
             "acp-memlow",
             "vm_stat",
@@ -2227,6 +2227,13 @@ fn a_silent_lanes_respawn_goes_ahead_under_host_busy_but_not_under_mem_low() {
         let out = drive_at(&c, &cli, 60 + 2 * SILENT + 1);
         assert_eq!(logged(&c, "spawn").len(), spawns, "{name}: {out}");
         assert_eq!(logged(&c, "respawned-silent").len(), spawns - 1, "{name}: {out}");
+        assert!(logged(&c, "override").is_empty(), "{name}: {out}");
+        let cmds = logged(&c, "driven");
+        assert!(
+            cmds.iter()
+                .all(|e| !e.str("cmd").unwrap_or_default().contains("--force")),
+            "{name}: {cmds:?}"
+        );
     }
 }
 
