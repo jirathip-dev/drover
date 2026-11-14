@@ -1,0 +1,13 @@
+Decided: /screens/lanes is a header-strip place beside Queue and Events, and a live Queue row taps into the same lane sheet; the title/body conflict went to the owner as q1684 with this as the recommendation
+Because: "A `/screens/lanes` screen, listed in `cooee-plugin.toml` beside Queue and Events"
+Decided: the sheet's transcript maps /api/v1/lane's blocks onto text and row blocks; cooee has no prompt, reply or tool block type
+Because: "Only block types cooee's renderer already has."
+Decided: stop, kill, clean and close run the board's act (the CLI verbs with confirm=1) and send runs its prompt, with device cooee; no second copy of either
+Because: crates/server/src/screens.rs:858
+Rejected: a screens-side copy of act/prompt logging via cooee — serve.rs is frozen, so it would be a second way to do one thing
+Decided: the lane sheet needs the plugin token or a paired device (401 otherwise) like /api/v1/lane; the stream serves the shed rows only to those
+Because: crates/server/src/screens.rs:783
+Decided: no account fact: #923 removed account rotation, so lanes run on the host's own login
+Check: lanes.json and lane-sheet.json skeletons match exactly; the key check takes only cooee fixture keys, plus figure.coat and done.values, which cooee's Figure and BlockAction read
+Check: #553's parity rows are a GitHub issue this lane may not edit; the orchestrator updates them (Lanes rows to #926, Host rows dropped)
+Owner: cooee gets a Lanes chip and a lane sheet (facts, transcript, Stop/Kill/Clean, Send), also opened from a Queue row; the Host tab is not ported.
