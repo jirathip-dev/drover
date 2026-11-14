@@ -720,6 +720,10 @@ pub fn scan(
                     .any(|p| p.fleet == s.fleet && p.issue == Some(s.issue))
         };
         let idle = w.what.starts_with("idle without pushing");
+        let status = agents.iter().find(|a| a["name"] == built.as_str());
+        let ended = status
+            .and_then(|a| a["agent_status"].as_str())
+            .filter(|st| s.state == "design" && matches!(*st, "error" | "hibernated" | "idle" | "done"));
         let waiting_turn = turn(mine, &s);
         if idle && s.build.as_deref() == Some("lesson") && settled() {
             let asked = mine
@@ -741,13 +745,18 @@ pub fn scan(
         {
             (w.who, w.what) = turned(mine, t, &built, ctx.now, cfg.limits.stall_minutes * 60);
             (w.lane, w.since) = (built, t.ts);
-        } else if idle && (gone || unconfirmed) && settled() {
+        } else if (idle && (gone || unconfirmed) || s.state == "design" && gone || ended.is_some()) && settled() {
             let (n, last) = respawns(mine, &s.fleet, s.issue);
-            let role = s.build.as_deref().unwrap_or(f.flow().start());
+            let stage = sp.and_then(|e| e.str("role")).filter(|_| s.state == "design");
+            let role = stage.or(s.build.as_deref()).unwrap_or(f.flow().start());
             let cause = crate::shed::exit_cause(mine, &built).filter(|_| gone);
-            let why = match cause {
-                Some(c) => format!("lane gone ({c})"),
-                None => ["prompt never landed", "lane gone"][usize::from(gone)].into(),
+            let note = status
+                .and_then(|a| a["note"].as_str())
+                .map_or(String::new(), |n| format!(" ({n})"));
+            let why = match (cause, ended) {
+                (Some(c), _) => format!("lane gone ({c})"),
+                (None, Some(st)) => format!("lane {st}{note}"),
+                _ => ["prompt never landed", "lane gone"][usize::from(gone)].into(),
             };
             let resume = waiting_turn.is_none() && resumed(&why);
             (w.who, w.lane, w.promise) = ("drive", built, None);

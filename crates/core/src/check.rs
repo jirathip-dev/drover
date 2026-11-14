@@ -378,6 +378,19 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 hits.push(("ready-unmerged", format!("{}:{head}", s.last_ts), why));
             }
         }
+        let mine = crate::events::of_issue(&events, &s.fleet, s.issue);
+        let from = mine.iter().rposition(|e| e.kind == "spawn").unwrap_or_default();
+        let refused = mine[from..].iter().rev().find(|e| {
+            e.kind == "driven"
+                && e.str("step") == Some("respawn")
+                && e.str("code").is_some_and(crate::drive::owner_refusal)
+        });
+        if let Some(e) = refused {
+            let at = mine.get(from).map_or(0, |sp| sp.ts);
+            let code = e.str("code").unwrap_or_default();
+            let why = format!("#{} respawn refused: {}", s.issue, e.str("result").unwrap_or(code));
+            hits.push(("respawn-refused", format!("{at}:{code}"), why));
+        }
         for (kind, key, reason) in hits {
             let mut d = json!({"key": key, "reason": reason});
             if let Some(c) = cause.filter(|_| kind == "lane-dead") {

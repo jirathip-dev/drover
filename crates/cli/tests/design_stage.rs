@@ -952,9 +952,9 @@ fn a_long_summary_is_cut_at_a_line_end_near_600_characters() {
 }
 
 #[test]
-fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_raises_no_ask_but_a_card() {
+fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_raises_no_ask_and_is_respawned() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (c, w, r, _sh) = staged("architect-error", "--architect");
+    let (mut c, w, r, sh) = staged("architect-error", "--architect");
     let local = w.parent().unwrap().parent().unwrap().parent().unwrap().join("local");
     let routines = local.join("docs/architecture/routines");
     std::fs::create_dir_all(&routines).unwrap();
@@ -964,13 +964,15 @@ fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_rai
     git(&local, &["push", "-q", "origin", "HEAD:staging"]);
     git(&w, &["reset", "-q", "--hard", "origin/staging"]);
     let agent = kinds(&c, "spawn")[0].str("agent").unwrap().to_string();
-    let d = serde_json::json!({"agent": agent, "state": "error", "note": "no response"});
-    drover::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "lane-state", d)).unwrap();
+    sh.set(&agent, |t| {
+        t["reported"] = serde_json::json!({"state": "error", "note": "no response"})
+    });
+    c.now += 300;
     drive(&c, &r);
     assert!(kinds(&c, "design-review").is_empty() && kinds(&c, "needs-decision").is_empty());
-    let card = &kinds(&c, "needs-human")[0];
-    assert!(card.str("reason").unwrap().contains("no response"), "{card:?}");
-    assert_eq!(state(&c, 12), "needs-human");
+    let respawn = &kinds(&c, "respawn")[0];
+    assert_eq!(respawn.str("why"), Some("lane error (no response)"), "{respawn:?}");
+    assert_eq!((spawned(&c, "architect"), state(&c, 12).as_str()), (2, "design"));
 }
 
 #[test]

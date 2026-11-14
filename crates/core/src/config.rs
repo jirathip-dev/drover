@@ -1035,6 +1035,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "usage-limit",
     "signed-out",
     "lane-failed-start",
+    "respawn-refused",
     "rev-stale-replaced",
     "ready-unmerged",
     "ci-missing",
