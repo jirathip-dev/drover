@@ -596,7 +596,7 @@ pub fn scan(
                 issue: s.issue,
                 lane: lane.clone(),
                 who: "none",
-                what: format!("root unreachable: {root}"),
+                what: format!("root hung: {root}"),
                 since: s.last_ts,
                 next_cmd: None,
                 promise: None,

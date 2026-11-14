@@ -794,51 +794,108 @@ fn a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only() {
     );
 }
 
+const STATUS: &str = "'sh' '-c' '\"$1\" --version";
+const START: &str = "'sh' '-c' 'V=";
+
+fn synced(status: &str) -> Fake {
+    healthy(fake(0.1, 0.1))
+        .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
+        .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n")
+        .reply(&format!("{SSH}{STATUS}"), status)
+        .reply(&format!("{SSH}{START}"), "")
+}
+
+fn syncs(c: &drover::Ctx) -> Vec<Event> {
+    read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| e.kind == "host-sync")
+        .cloned()
+        .collect()
+}
+
 #[test]
-fn an_older_drover_there_warns_and_is_rebuilt_at_this_sha_once() {
-    let extra =
-        "\n[fleet.drover]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"~/src/drover\"\nintegration = \"staging\"\n";
-    let c = setup("hosts-update", "", true, 0);
-    std::fs::write(&c.config, config("") + extra).unwrap();
-    let (_sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
-    let old = healthy(fake(0.1, 0.1))
-        .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
-        .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n")
-        .reply(&format!("{SSH}'sh' '-c' 'nohup"), "")
-        .once(
-            &format!("{SSH}'/opt/drover/bin/drover' '--version'"),
-            0,
-            "drover 0.1.0 (0ld)\n",
-        );
-    let (code, out) = run(&c, &two(&old, &bazzite), &["hosts", "refresh"]);
+fn a_mismatched_host_gets_one_install_at_this_sha_then_profiles_sync_and_a_matching_one_none() {
+    let c = setup("hosts-sync", "", true, 0);
+    let _sh = FakeShed::attached(&c);
+    let bazzite = FakeShed::new();
+    let (sha, old) = (env!("DROVER_SHA"), "drover 0.1.0 (0ld)\n");
+    let r = synced(old);
+    let (code, out) = run(&c, &two(&r, &bazzite), &["hosts", "refresh"]);
     assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("· drover 0ld ≠ {sha} ·")), "{out}");
+    let repo = "https://github.com/jirathip-dev/herdsman";
+    let install = format!("cargo install --git {repo} --rev {sha} --locked --root '\\''/opt/drover'\\'' --force");
+    let sync = "|| '\\''/opt/drover/bin/drover'\\'' profiles sync; }; }; echo \"$? ";
+    let starts: Vec<String> = r.calls.borrow().iter().filter(|l| l.contains(START)).cloned().collect();
+    assert_eq!(starts.len(), 1, "{starts:#?}");
     assert!(
-        out.contains("bazzite · up · drover — drover 0.1.0 (0ld) there"),
-        "amber, not red: {out}"
+        starts[0].contains(&install) && starts[0].contains(sync),
+        "{}",
+        starts[0]
     );
+    assert!(
+        starts[0].ends_with("'drover 0.1.0 (0ld)'"),
+        "the from version: {}",
+        starts[0]
+    );
+    let busy = synced(&format!("{old}busy\n"));
+    run(&c, &two(&busy, &bazzite), &["hosts", "refresh"]);
+    assert!(busy.called(&format!("{SSH}{STATUS}")) && !busy.called(&format!("{SSH}{START}")));
+    let landed = synced(&format!(
+        "drover {}\ndone 0 {sha} drover 0.1.0 (0ld)\n",
+        drover::VERSION
+    ));
+    let (_, out) = run(&c, &two(&landed, &bazzite), &["hosts", "refresh"]);
+    assert!(out.contains(&format!("· drover {sha} ✓ ·")), "{out}");
+    assert!(!landed.called(&format!("{SSH}{START}")));
+    let ev = syncs(&c);
+    assert_eq!(ev.len(), 1, "{ev:?}");
+    assert_eq!(
+        json!(ev[0].data),
+        json!({"host": "bazzite", "from": "0ld", "to": sha, "ok": true})
+    );
+}
+
+#[test]
+fn a_failed_install_is_logged_alerted_once_and_retried_each_tick() {
+    let c = setup("hosts-sync-fail", "", true, 0);
+    let _sh = FakeShed::attached(&c);
+    let bazzite = FakeShed::new();
     let sha = env!("DROVER_SHA");
-    let conf = c.config.display();
-    let script = format!(
-        "{SSH}'sh' '-c' 'nohup sh -c \"$1\" </dev/null >\"$HOME/.drover-update.log\" 2>&1 &' 'sh' 'cd '\\''/home/me/src/drover'\\'' && git fetch -q origin && git checkout -q --detach {sha} && PATH=\"$HOME/.cargo/bin:$PATH\" cargo install --path crates/cli --locked --root '\\''/opt/drover'\\'' --force && ln -sf drover '\\''/opt/drover/bin/herdsman'\\'' && {{ test ! -e '\\''{conf}'\\'' || '\\''/opt/drover/bin/drover'\\'' profiles sync; }}'"
-    );
-    assert!(old.called(&script), "{:#?}", old.calls.borrow());
-    let ev = read(&c.state).unwrap();
-    let up = ev.iter().find(|e| e.kind == "host-update").unwrap();
-    assert_eq!((up.str("host"), up.str("sha")), (Some("bazzite"), Some(sha)));
-    assert!(cached(&c)["bazzite"].health[0].starts_with("! drover"));
-    let again = healthy(fake(0.1, 0.1))
-        .reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n")
-        .reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n")
-        .once(
-            &format!("{SSH}'/opt/drover/bin/drover' '--version'"),
-            0,
-            "drover 0.1.0 (0ld)\n",
-        );
-    run(&c, &two(&again, &bazzite), &["hosts", "refresh"]);
-    assert!(!again.called(&format!("{SSH}'sh' '-c' 'nohup")));
-    let landed = healthy(fake(0.1, 0.1)).reply(&format!("{SSH}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\ndocker\n");
-    run(&c, &two(&landed, &bazzite), &["hosts", "refresh"]);
-    assert!(cached(&c)["bazzite"].health.is_empty());
+    let failed = format!("drover 0.1.0 (0ld)\ndone 101 {sha} drover 0.1.0 (0ld)\n");
+    for _ in 0..2 {
+        let r = herdr_lists(synced(&failed));
+        run(&c, &two(&r, &bazzite), &["check"]);
+        assert_eq!(r.count(&format!("{SSH}{START}")), 1, "retried");
+    }
+    let ev = syncs(&c);
+    assert_eq!(ev.len(), 2, "{ev:?}");
+    assert!(ev.iter().all(|e| e.data["ok"] == false && e.str("from") == Some("0ld")));
+    let alerts = read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| e.kind == "host-sync-failed")
+        .count();
+    assert_eq!(alerts, 1, "once per state");
+}
+
+#[test]
+fn an_unreachable_or_switched_off_host_costs_no_sync_ssh() {
+    let c = setup("hosts-sync-off", "", true, 0);
+    let r = fake(0.1, 0.1).reply("sh -c uname -s", "Darwin\narm64\n/Users/me\n");
+    run(&c, &r, &["hosts", "refresh"]);
+    assert!(!cached(&c)["bazzite"].up);
+    assert!(!r
+        .calls
+        .borrow()
+        .iter()
+        .any(|l| l.contains(".drover-sync") || l.contains(STATUS)));
+    let c = setup("hosts-sync-disabled", "enabled = false\n", true, 0);
+    let _sh = FakeShed::attached(&c);
+    let (bazzite, r) = (FakeShed::new(), synced("drover 0.1.0 (0ld)\n"));
+    run(&c, &two(&r, &bazzite), &["hosts", "refresh"]);
+    assert!(!r.called(&format!("{SSH}{STATUS}")) && syncs(&c).is_empty());
 }
 
 #[test]
@@ -1476,10 +1533,7 @@ fn the_tick_drives_before_it_trims_remote_hosts() {
 
 #[test]
 fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
-    let extra =
-        "\n[fleet.drover]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"~/src/drover\"\nintegration = \"staging\"\n";
     let mut c = setup("hosts-symlink", "", true, 0);
-    std::fs::write(&c.config, config("") + extra).unwrap();
     let dir = c.state.parent().unwrap().parent().unwrap().canonicalize().unwrap();
     let root = dir.join("share/drover");
     std::fs::create_dir_all(root.join("bin")).unwrap();
@@ -1490,7 +1544,8 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     let (real, link) = (root.join("bin/drover").display().to_string(), c.exe.clone());
     let cfg = Config::load(&c.config).unwrap();
     let r = healthy(fake(0.1, 0.1))
-        .reply(&format!("{SSH}'sh' '-c' 'nohup"), "")
+        .reply(&format!("{SSH}{STATUS}"), "drover 0.1.0 (0ld)\n")
+        .reply(&format!("{SSH}{START}"), "")
         .reply(
             &format!("{SSH}'{link}' '--version'"),
             &format!("drover {}\n", drover::VERSION),
@@ -1501,12 +1556,17 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     let rows = drover::hosts::health(&c, &cfg, &on, &[], home);
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert!(rows[0].starts_with("! drover — drover 0.1.0 (0ld) there"), "{rows:?}");
-    assert!(drover::hosts::update(&c, &cfg, &on, "bazzite", home));
+    assert_eq!(drover::hosts::sync(&c, &on, "bazzite", home), "drover 0.1.0 (0ld)");
     let root = format!("--root '\\''{}'\\'' --force", root.display());
     let sync = format!("|| '\\''{real}'\\'' profiles sync");
     let calls = r.calls.borrow();
     assert!(
         calls.iter().any(|c| c.contains(&root) && c.contains(&sync)),
+        "{calls:#?}"
+    );
+    let asked = format!("'sh' '{real}'");
+    assert!(
+        calls.iter().any(|c| c.contains(STATUS) && c.ends_with(&asked)),
         "{calls:#?}"
     );
 }

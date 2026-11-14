@@ -418,6 +418,22 @@ fn only_a_orchestrator_runs_amend() {
 }
 
 #[test]
+fn only_the_owner_or_an_orchestrator_forces_a_spawn() {
+    let run = |lane: Option<&str>, cmd: &str| {
+        let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
+        hook_in(lane, "impl", input)
+    };
+    let force = "drover spawn synergy 12 impl --supersede --force";
+    assert_eq!(run(Some("synergy:-:orchestrator"), force), "", "an orchestrator may");
+    assert_eq!(run(None, force), "", "the owner may");
+    for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:12:lesson"] {
+        assert!(run(Some(lane), force).contains("REFUSED OWNER_ONLY"), "{lane}");
+        let plain = run(Some(lane), "drover spawn synergy 12 impl --supersede");
+        assert!(!plain.contains("--force"), "{lane}: {plain}");
+    }
+}
+
+#[test]
 fn only_a_orchestrator_runs_timer_install() {
     let run = |lane: Option<&str>, cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});

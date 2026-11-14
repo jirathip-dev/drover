@@ -286,6 +286,7 @@ fn restart(
             .map(|h| h.home)
             .filter(|_| on.machine.is_some());
         let local = under(&f.local, home.as_deref()).display().to_string();
+        let hung = on.machine.is_none() && !crate::runner::answers(root);
         let mut lost = vec![];
         for e in &mine {
             let (wt, agent) = (
@@ -293,6 +294,14 @@ fn restart(
                 e.str("agent").unwrap_or_default(),
             );
             let git = |a: &[&str]| ok(&on, "git", &[&["-C", wt][..], a].concat());
+            if hung {
+                let _ = crate::herdr::close(&on, e.str("pane").unwrap_or_default());
+                forget(Path::new(&local), Path::new(wt), e.str("branch").unwrap_or_default())?;
+                writeln!(out, "not saved {wt}: root hung, unsaved work stays on the disk")?;
+                lost.push(format!("{agent}: not saved, root hung"));
+                log(s, "wip-skipped", json!({"agent": agent, "worktree": wt, "root": root}))?;
+                continue;
+            }
             if gone || !on.exists(Path::new(wt)) {
                 let b = e.str("branch").unwrap_or_default();
                 let n = ok(
@@ -320,7 +329,9 @@ fn restart(
             }
             ok(&on, "git", &["-C", &local, "worktree", "remove", "--force", wt])?;
         }
-        let _ = ok(&on, "git", &["-C", &local, "worktree", "prune"]);
+        if !hung {
+            let _ = ok(&on, "git", &["-C", &local, "worktree", "prune"]);
+        }
         let o = crate::spawn::Opts {
             supersede: true,
             ..Default::default()
@@ -332,6 +343,21 @@ fn restart(
             let lost = lost.join("; ");
             let d = json!({"agent": agent, "host": name, "root": root, "to": to.str("root"), "to_host": to.str("host"), "lost": lost});
             log(s, "root-moved", d)?;
+        }
+    }
+    Ok(())
+}
+
+fn forget(local: &Path, wt: &Path, branch: &str) -> Result<()> {
+    let head = format!("ref: refs/heads/{branch}");
+    for d in std::fs::read_dir(local.join(".git/worktrees"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let read = |f: &str| std::fs::read_to_string(d.path().join(f)).unwrap_or_default();
+        if Path::new(read("gitdir").trim()).starts_with(wt) || !branch.is_empty() && read("HEAD").trim() == head {
+            std::fs::remove_dir_all(d.path())?;
         }
     }
     Ok(())

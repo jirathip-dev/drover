@@ -489,6 +489,7 @@ pub const PASSIVE: &[&str] = &[
     "budget-freed",
     "build-freed",
     "wip-saved",
+    "wip-skipped",
     "wip-blocked",
     "lane-pushed",
     "stall",
