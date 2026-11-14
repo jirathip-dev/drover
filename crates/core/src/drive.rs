@@ -1154,7 +1154,7 @@ fn pass(
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
     waits.retain(one);
     crate::promise::pass(ctx, cfg, fleet, &events, &waits)?;
-    external(ctx, cfg, r, out, fleet)?;
+    external(ctx, cfg, out, fleet)?;
     ext_closed(ctx, cfg, r, out, fleet)?;
     if KICK.get().is_none() {
         if let Err(e) = crate::land::watch(ctx, cfg, r, out, fleet) {
@@ -1763,7 +1763,7 @@ fn no_change(
     Ok(true)
 }
 
-fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+fn external(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let events = working(&ctx.state)?;
     for s in fold(&events)
         .into_values()
