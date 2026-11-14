@@ -1,7 +1,3 @@
-//! #709: an invalid fleet.toml is a visible state, not a page with no data: serve keeps the last good config for its
-//! reads and shows `config invalid: <error> (fleet.toml:<line>)` above every tab, `/api/v1/health` names it, `check`
-//! alerts `config-invalid` once per distinct error, `tick` stays refused with the same message; fixing the file clears
-//! the banner and the alert, no restart.
 mod common;
 use common::*;
 use drover::events::read;
@@ -34,7 +30,6 @@ fn an_invalid_config_shows_a_banner_and_alerts_once_until_it_is_fixed() {
     assert!(api(&s, HOST, "", c.now, "queue").contains("acme/app"));
 
     std::fs::write(&c.config, bad()).unwrap();
-    // The board still reads, from the last good config; the needs strip above every tab carries the banner.
     assert!(
         api(&s, HOST, "", c.now, "queue").contains("acme/app"),
         "the queue tab keeps its data"
@@ -49,7 +44,6 @@ fn an_invalid_config_shows_a_banner_and_alerts_once_until_it_is_fixed() {
     );
     assert_eq!(h["error"], WANT);
 
-    // `check` alerts once per distinct error; `tick` is refused with the same message.
     for _ in 0..2 {
         let (code, out) = run(&c, &r, &["check"]);
         assert_ne!(code, 0, "{out}");
@@ -60,7 +54,6 @@ fn an_invalid_config_shows_a_banner_and_alerts_once_until_it_is_fixed() {
     assert!(out.contains(WANT), "{out}");
     assert_eq!(alerts(&c, "config-invalid"), 1, "the same error alerts once");
 
-    // Fixed: the banner goes, health is ok, the next check logs `config-ok`; serve was never restarted.
     std::fs::write(&c.config, GOOD).unwrap();
     let [needs, ..] = parts(&s, HOST, "", c.now);
     assert!(!needs.contains("config invalid"), "{needs}");

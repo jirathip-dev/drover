@@ -1,5 +1,3 @@
-//! #363: the board's report mode. A paired phone's bundle (an element's markup, key styles, the board's context, a
-//! cropped PNG and a one-line note) is kept under `state/reports/<id>/`; a `report` event names its path.
 use crate::config::Config;
 use crate::events::{emit, Event};
 use crate::Ctx;

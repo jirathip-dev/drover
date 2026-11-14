@@ -1,4 +1,3 @@
-//! AC4: pipe PreToolUse (Claude) and pre_tool_call (Hermes) JSON into `drover hook`.
 mod common;
 use common::{tmpdir, CONFIG};
 use serde_json::{json, Value};
@@ -6,30 +5,25 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-/// `drover hook` as `role`, inside a fleet lane (`DROVER_LANE` set) or outside one.
 fn hook_in(lane: Option<&str>, role: &str, input: Value) -> String {
     hook_env(&[("DROVER_LANE", lane)], role, input)
 }
 
-/// #508: the test config plus the other fleets these lanes name (an unknown fleet fails closed).
 fn config() -> String {
     let fleet = |n: &str| format!("\n[fleet.{n}]\nrepo = \"o/{n}\"\nlocal = \"/tmp/{n}\"\nintegration = \"staging\"\n");
     CONFIG.to_string() + &["synergy", "x", "fleet"].map(fleet).concat()
 }
 
-/// `drover hook` as `role` with each lane var set (`Some`) or unset (`None`).
 fn hook_env(vars: &[(&str, Option<&str>)], role: &str, input: Value) -> String {
     hook_cfg(&config(), vars, role, input).0
 }
 
-/// `drover hook` under fleet.toml `cfg`: its stdout and the temp dir (`state/events.jsonl`).
 fn hook_cfg(cfg: &str, vars: &[(&str, Option<&str>)], role: &str, input: Value) -> (String, std::path::PathBuf) {
     let d = tmpdir("hook");
     std::fs::write(d.join("fleet.toml"), cfg).unwrap();
     (hook_at(&d, &d, vars, role, &input.to_string()), d)
 }
 
-/// `drover hook` fed `raw`, run in `cwd`, with `d`'s fleet.toml and log: its stdout.
 fn hook_at(d: &Path, cwd: &Path, vars: &[(&str, Option<&str>)], role: &str, raw: &str) -> String {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_drover"));
     cmd.env_remove("DROVER_LANE")
@@ -59,8 +53,6 @@ fn hook_as(role: &str, input: Value) -> String {
     hook_in(Some(&format!("sendmeter:24:{role}")), role, input)
 }
 
-/// The same tool call in Claude's shape and in both Hermes shapes (stdin wire
-/// `tool_input`, raw `args`). Claude tool names map to Hermes ones.
 fn shapes(tool: &str, ti: Value) -> [Value; 3] {
     let htool = match tool {
         "Bash" => "terminal",
@@ -80,8 +72,6 @@ fn shapes(tool: &str, ti: Value) -> [Value; 3] {
     ]
 }
 
-/// Runs the call in every shape as `role`. Some(message) when all deny (each in its
-/// own dialect), None when all allow (empty stdout); panics when the shapes disagree.
 fn call(role: &str, tool: &str, ti: Value) -> Option<String> {
     let outs: Vec<String> = shapes(tool, ti).into_iter().map(|i| hook_as(role, i)).collect();
     if outs.iter().all(String::is_empty) {
@@ -108,8 +98,6 @@ fn bash(cmd: &str) -> Option<String> {
     bash_as("impl", cmd)
 }
 
-/// #24 AC4: the hook is inert outside a fleet lane (shared Hermes profiles serve
-/// non-fleet lanes too) and enforces its rules inside one.
 #[test]
 fn hook_is_inert_unless_fleet_lane_is_set() {
     for cmd in ["gh pr merge 5", "git push origin HEAD:staging"] {
@@ -140,8 +128,6 @@ fn hook_is_inert_unless_fleet_lane_is_set() {
     }
 }
 
-/// #27: `FLEET_LANE` still arms the hook for one release; `DROVER_LANE` is
-/// authoritative when both are set, so an empty `DROVER_LANE` keeps it inert.
 #[test]
 fn legacy_fleet_lane_arms_the_hook_and_drover_lane_wins() {
     for input in shapes("Bash", json!({"command": "gh pr merge 5"})) {
@@ -215,7 +201,6 @@ fn push_to_staging_is_denied() {
 
 #[test]
 fn hermes_terminal_workdir_resolves_bare_push() {
-    // A bare `git push` pushes HEAD of the terminal's workdir.
     let d = tmpdir("hook-wd");
     let git = |a: &[&str]| {
         assert!(Command::new("git")
@@ -298,7 +283,6 @@ fn reviewers_are_read_only() {
         None
     );
     assert_eq!(call("rev", "Write", json!({"file_path": "verdict.md"})), None);
-    // A V4A patch carries no `path`.
     let v4a = json!({"tool_name": "patch", "args": {"mode": "patch", "patch": "*** Update File: src/a.rs\n"}});
     assert_eq!(
         serde_json::from_str::<Value>(&hook_as("rev", v4a)).unwrap()["action"],
@@ -370,7 +354,6 @@ fn design_spawn_is_owner_only() {
     assert_eq!(bash_as("impl", "drover board x # design"), None);
 }
 
-/// #410: a conductor thread spawns design lanes; impl, rev, orch and other lanes still may not.
 #[test]
 fn a_orchestrator_may_spawn_design_lanes() {
     let run = |lane: &str, cmd: &str| {
@@ -396,7 +379,6 @@ fn a_orchestrator_may_spawn_design_lanes() {
     }
 }
 
-/// #419: a conductor (and the owner) runs `drover lesson`; impl, rev and orch lanes may not, but any reads its digest.
 #[test]
 fn only_a_orchestrator_runs_lesson() {
     let run = |lane: &str, cmd: &str| {
@@ -419,11 +401,9 @@ fn only_a_orchestrator_runs_lesson() {
             "{lane} reads the digest"
         );
     }
-    // #510: the lesson lane promotes and retires its checks in its own worktree.
     assert_eq!(run("synergy:12:lesson", "drover lesson apply synergy"), "");
 }
 
-/// #574: only a conductor (and the owner) runs `drover amend`; impl, rev and design lanes are refused.
 #[test]
 fn only_a_orchestrator_runs_amend() {
     let run = |lane: &str| {
@@ -453,8 +433,6 @@ fn only_the_owner_or_an_orchestrator_forces_a_spawn() {
     }
 }
 
-/// #461: a conductor (and the owner, outside any lane) runs `drover timer install`; impl, rev and design lanes
-/// may not; no other `timer` verb changes for a conductor.
 #[test]
 fn only_a_orchestrator_runs_timer_install() {
     let run = |lane: Option<&str>, cmd: &str| {
@@ -473,7 +451,6 @@ fn only_a_orchestrator_runs_timer_install() {
         assert!(!run(Some(lane), "drover timer status").contains("REFUSED"), "{lane}");
     }
     assert!(run(Some("synergy:-:orchestrator"), "drover setup").contains("REFUSED OWNER_ONLY"));
-    // #646: a lane or conductor lists wip branches; deleting them is the owner's run card.
     for lane in ["synergy:12:impl", "synergy:-:orchestrator"] {
         assert_eq!(run(Some(lane), "drover wip prune synergy --dry-run"), "", "{lane}");
         let out = run(Some(lane), "drover wip prune synergy");
@@ -481,7 +458,6 @@ fn only_a_orchestrator_runs_timer_install() {
     }
 }
 
-/// #410: text a `thread reply|say` or `ask` quotes, or a heredoc's body, is not a command; a real one after it is.
 #[test]
 fn quoted_text_is_not_a_command() {
     let run = |lane: &str, cmd: &str| {
@@ -508,23 +484,19 @@ fn quoted_text_is_not_a_command() {
         "cat > f.md <<'EOF'\nx\nEOF\ndrover spawn x 1 design",
         "sh -c 'drover spawn x 1 design'",
         "echo \"drover spawn x 1 design\" | drover spawn x 1 design",
-        // Substitutions still run inside double quotes and unquoted-delimiter heredocs.
         "drover ask q \"$(drover spawn x 1 design)\"",
         "drover thread reply t1 \"see `drover spawn x 1 design`\"",
         "drover ask q --option \"a $(drover spawn x 1 \"design\")\"",
         "cat > f.md <<EOF\n$(drover spawn x 1 design)\nEOF",
-        // A heredoc fed to a shell runs its body; a comment's quote does not swallow the next line.
         "bash <<'EOF'\ndrover spawn x 1 design\nEOF",
         "cat <<'EOF' | sh\ndrover spawn x 1 design\nEOF",
         "eval \"x\" $(cat <<'EOF'\ndrover spawn x 1 design\nEOF\n)",
         "bash <<<\"drover spawn x 1 design\"",
         "drover ask q \"a\" # '\ndrover spawn x 1 design",
-        // `$'x\''` is the word `x'`: the command after it still runs; so does a split-quoted word.
         "drover ask q $'x\\'' ; drover spawn x 1 design",
         "drover thread reply t1 $'x\\'' ; drover spawn x 1 design",
         "drover thread reply t1 'x ; drover spawn x 1 design",
         "drover spawn x 1 'des'ign",
-        // `eval` and `ssh` re-parse the quoted text, so it is a command there.
         "eval drover ask q '; drover spawn s 1 design'",
         "ssh h drover ask q '; drover spawn s 1 design'",
         "drover spawn x 1 \"des\"ign",
@@ -547,7 +519,6 @@ fn quoted_text_is_not_a_command() {
     assert!(run("synergy:-:orch", "drover thread reply t1 x && docker ps").contains("NO_CONTAINERS"));
 }
 
-/// #410: a conductor writes in its own thread folder, but not drover's files there, another thread's or the log.
 #[test]
 fn a_orchestrator_writes_its_own_thread_folder() {
     let d = tmpdir("hook-own");
@@ -572,8 +543,6 @@ fn a_orchestrator_writes_its_own_thread_folder() {
     }
 }
 
-/// #499: from the shell too, a conductor copies into its own thread folder, but not drover's files there, another
-/// thread's or the log; relative targets resolve against the cwd (and its `cd`s) for every lane.
 #[test]
 fn a_orchestrator_copies_into_its_own_thread_folder() {
     let d = tmpdir("hook-own-sh");
@@ -603,7 +572,6 @@ fn a_orchestrator_copies_into_its_own_thread_folder() {
     };
     let (own, other) = (c.join("t6").display().to_string(), c.join("t5").display().to_string());
     let cond = "synergy:-:orchestrator";
-    // A symlink already in the folder (pointing at the state dir) is no way out of it.
     std::fs::create_dir_all(c.join("t6")).unwrap();
     std::os::unix::fs::symlink("../..", c.join("t6/link")).unwrap();
     for cmd in [
@@ -650,8 +618,6 @@ fn a_orchestrator_copies_into_its_own_thread_folder() {
     }
 }
 
-/// #570: from a cwd in the state folder, `2>&1` and a redirection to `/dev/null` write no file there; a real
-/// relative target outside the conductor's own folder still does.
 #[test]
 fn fd_duplications_write_no_file() {
     let d = tmpdir("hook-dups");
@@ -686,7 +652,6 @@ fn fd_duplications_write_no_file() {
     }
 }
 
-/// #504: the shell check makes the same exception: `cp`/`mkdir` into its own folder, nothing else under the state dir.
 #[test]
 fn a_orchestrators_shell_writes_its_own_thread_folder() {
     let d = tmpdir("hook-own-sh");
@@ -713,7 +678,6 @@ fn a_orchestrators_shell_writes_its_own_thread_folder() {
         format!("cp x {c}/t5/"),
         format!("cp x {s}/events.jsonl"),
         format!("rm -rf {c}/t6"),
-        // The shell expands these after the check: another thread's folder, drover's `.thread.md`.
         format!("cp x {c}/t6/{{a.png,../t5/x}}"),
         format!("cp x {c}/t6/{{.thread,x}}.md"),
         format!("rm -f {c}/t6/.thread.m?"),
@@ -805,7 +769,6 @@ fn drover_verbs_and_quoted_text_write_nothing() {
     }
 }
 
-/// The hook's stdout for `call` (a pre-tool event) run as the conductor of thread t6, state under `d`.
 fn orchestrator_hook(d: &std::path::Path, mut call: serde_json::Value) -> String {
     call["hook_event_name"] = json!("PreToolUse");
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_drover"));
@@ -829,7 +792,6 @@ fn orchestrator_hook(d: &std::path::Path, mut call: serde_json::Value) -> String
     String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
 }
 
-/// #198: the push guard spots an AI `Co-Authored-By:` (warn only) and finds the pushed repo.
 #[test]
 fn ai_coauthor_trailer_is_spotted() {
     use drover::hook::{ai_coauthor, push_dir};
@@ -848,8 +810,6 @@ fn ai_coauthor_trailer_is_spotted() {
 const NO_CONTAINERS: &str = "drover: REFUSED NO_CONTAINERS: lanes never start containers (owner rule). Use the \
                              repo's non-container test path, or ask the orchestrator.";
 
-/// #216: every default entry is denied as a command word: plain, `sh -c`, `env`, `sudo`, a full path, a pipeline,
-/// `&&`, `$( )`; the same words as arguments, and other `supabase` subcommands, are allowed.
 #[test]
 fn container_commands_are_denied_as_command_words() {
     for c in [
@@ -919,8 +879,6 @@ fn container_commands_are_allowed_outside_a_lane() {
     }
 }
 
-/// #216: `[fleet.<n>] deny_commands` replaces the list (empty = off), `deny_commands_add` extends it, `why` is the
-/// message; each denial is logged `hook-denied`.
 #[test]
 fn deny_commands_override_per_fleet_and_log_denials() {
     let run = |fleet_toml: &str, cmd: &str| {
@@ -976,8 +934,6 @@ fn deny_commands_override_per_fleet_and_log_denials() {
 const NO_BROAD_KILL: &str = "drover: REFUSED NO_BROAD_KILL: lanes stop only their own processes: start with '& \
                              echo $! > f', stop with kill \"$(cat f)\"";
 
-/// #502: pattern kills are refused in every lane, even when its fleet empties `deny_commands`; pid kills pass,
-/// and outside a lane the hook stays inert.
 #[test]
 fn broad_kills_are_denied_and_pid_kills_allowed() {
     for cmd in [
@@ -1007,8 +963,6 @@ fn broad_kills_are_denied_and_pid_kills_allowed() {
     assert_eq!(hook_in(None, "impl", input), "", "the owner's shell");
 }
 
-/// #256: per-host rules from `DROVER_HOST`: a cloud host allows docker and `supabase start` by default, a Mac keeps
-/// the ban; a host's `allow_commands` and `deny_commands_add` override that.
 #[test]
 fn docker_is_allowed_on_a_cloud_host_and_denied_on_a_mac() {
     let run = |hosts: &str, host: &str, cmd: &str| {
@@ -1035,7 +989,6 @@ fn docker_is_allowed_on_a_cloud_host_and_denied_on_a_mac() {
     assert!(run(mac, "mini2", "docker ps").is_empty(), "a Mac may opt in");
 }
 
-/// #288: lanes run on the host too, so pairing is the owner's: `serve approve|unpair|devices --revoke` deny in a lane.
 #[test]
 fn serve_approve_is_owner_only() {
     for cmd in [
@@ -1052,7 +1005,6 @@ fn serve_approve_is_owner_only() {
     assert_eq!(bash("drover serve devices"), None);
 }
 
-/// #303: setup terminals (and the jobs `setup`) are the owner's: `drover setup …` denies in a lane.
 #[test]
 fn setup_is_owner_only() {
     for cmd in ["drover setup mini claude", "~/.local/bin/drover setup --no-load"] {
@@ -1063,7 +1015,6 @@ fn setup_is_owner_only() {
     }
 }
 
-/// #387: a lane (the conductor too) proposes config and requests secrets, but never applies, lists or removes them.
 #[test]
 fn config_apply_and_secret_ls_rm_are_owner_only() {
     for cmd in [
@@ -1081,8 +1032,6 @@ fn config_apply_and_secret_ls_rm_are_owner_only() {
     assert_eq!(bash("drover secret request t1 API_KEY --why x"), None);
 }
 
-/// #386: a conductor's allowed `drover`/`gh` command is logged for its thread's tool rows (`thread-cmd`); its
-/// `thread reply`, other commands, denied ones and calls outside a thread are not.
 #[test]
 fn a_orchestrator_command_is_logged_for_its_thread() {
     let cmds = |vars: &[(&str, Option<&str>)], cmd: &str| {
@@ -1122,7 +1071,6 @@ fn a_orchestrator_command_is_logged_for_its_thread() {
     assert!(cmds(&lane[..1], "gh issue list").1.is_empty(), "no thread");
 }
 
-/// #425: a lane may `queue block` its own issue (to hold itself), never another issue.
 #[test]
 fn a_lane_may_queue_block_only_its_own_issue() {
     let input =
@@ -1150,7 +1098,6 @@ fn a_lane_may_queue_block_only_its_own_issue() {
     }
 }
 
-/// #536: with a scratch dir, a Cargo build folder outside `build_root` (a `/tmp` one) is refused, naming the scratch.
 #[test]
 fn a_cargo_target_dir_outside_build_root_is_refused() {
     let scratch = "/c/builds/.scratch/sendmeter-rev-24-r1";
@@ -1191,13 +1138,10 @@ fn a_cargo_target_dir_outside_build_root_is_refused() {
     );
 }
 
-/// A pre-tool Bash call of `cmd` from `/`.
 fn pre_bash(cmd: &str) -> Value {
     json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "cwd": "/", "tool_input": {"command": cmd}})
 }
 
-/// #508: in a lane, input the hook can't read, a fleet.toml that doesn't load or a fleet it doesn't know denies the
-/// call (closed, saying why); outside a lane the hook stays inert.
 #[test]
 fn a_lane_hook_fails_closed() {
     let d = tmpdir("hook-closed");
@@ -1221,7 +1165,6 @@ fn a_lane_hook_fails_closed() {
         assert!(closed(&out, what), "{raw}: {out}");
         assert_eq!(hook_at(&d, &d, &[], "impl", &raw), "", "outside a lane: {raw}");
     }
-    // A prompt or notification names no tool and is no call to judge.
     for ev in ["UserPromptSubmit", "Notification"] {
         assert_eq!(
             hook_at(&d, &d, &lane, "impl", &json!({"hook_event_name": ev}).to_string()),
@@ -1251,13 +1194,11 @@ fn a_lane_hook_fails_closed() {
     let stranger = [("DROVER_LANE", Some("nofleet:7:impl"))];
     let out = hook_cfg(&config(), &stranger, "impl", pre_bash("git status")).0;
     assert!(closed(&out, "fleet `nofleet` is not in fleet.toml"), "{out}");
-    // Hermes hears it in its own dialect.
     let hermes = json!({"hook_event_name": "pre_tool_call", "tool_name": "terminal", "tool_input": {"command": "ls"}});
     let out = hook_cfg(&broken, &lane, "impl", hermes).0;
     assert!(out.contains("\"block\"") && out.contains("HOOK_FAILED_CLOSED"), "{out}");
 }
 
-/// #508: each closed deny logs one `hook-failed-closed` (lane and cause, never the command); a cause alerts once an hour.
 #[test]
 fn a_closed_deny_logs_one_event_and_alerts_once_per_cause_an_hour() {
     let d = tmpdir("hook-closed-ev");
@@ -1274,7 +1215,6 @@ fn a_closed_deny_logs_one_event_and_alerts_once_per_cause_an_hour() {
         .unwrap()
         .as_secs();
     let stranger = "fleet `nofleet` is not in fleet.toml";
-    // The same cause an hour ago alerted already; that one no longer quiets a new one.
     let old = json!({"cause": stranger, "lane": "nofleet:7:impl"});
     drover::events::append(
         &state,
@@ -1311,7 +1251,6 @@ fn a_closed_deny_logs_one_event_and_alerts_once_per_cause_an_hour() {
             "no command text: {e:?}"
         );
     }
-    // A fleet.toml that doesn't load still logs it (with no notifiers to alert).
     std::fs::write(d.join("fleet.toml"), "[fleet.x\n").unwrap();
     run(&pre_bash("ls").to_string());
     let last = drover::events::read(&state).unwrap().to_vec().pop().unwrap();
@@ -1322,8 +1261,6 @@ fn a_closed_deny_logs_one_event_and_alerts_once_per_cause_an_hour() {
     assert_eq!(alerts(), 2);
 }
 
-/// #508: the hook's rules come from the binary and the loaded fleet.toml only: a lane loosening any file in its
-/// worktree (`roles/`, `hooks/`, its own fleet.toml or rules) changes nothing it allows.
 #[test]
 fn files_a_lane_edits_never_change_the_hook_rules() {
     let d = tmpdir("hook-snapshot");
@@ -1365,8 +1302,6 @@ fn files_a_lane_edits_never_change_the_hook_rules() {
     assert_eq!(calls.map(decide).to_vec(), before);
 }
 
-/// #538: a group verb runs from a conductor while its group is on (the default: all but `pause` and `set`), never from
-/// another lane; a switched-off group's verb is refused `GROUP_OFF`.
 #[test]
 fn capability_groups_gate_a_orchestrators_owner_verbs() {
     let input =
@@ -1400,7 +1335,6 @@ fn capability_groups_gate_a_orchestrators_owner_verbs() {
             "default off: {cmd}: {out}"
         );
     }
-    // Plain reads stay open to every lane.
     for cmd in ["drover clean synergy", "drover hosts", "drover accounts"] {
         assert_eq!(run(&config(), "synergy:12:impl", cmd), "", "{cmd}");
     }
@@ -1414,8 +1348,6 @@ fn capability_groups_gate_a_orchestrators_owner_verbs() {
     }
 }
 
-/// #538: only a conductor posts run cards and only the owner settles them; a hard-no command is refused from a
-/// conductor's own shell too, but quoted reply text naming one is not run.
 #[test]
 fn run_cards_post_from_a_orchestrator_settle_by_the_owner_and_hard_nos_never_run() {
     let input =
@@ -1451,8 +1383,6 @@ fn run_cards_post_from_a_orchestrator_settle_by_the_owner_and_hard_nos_never_run
     );
 }
 
-/// #537: a conductor runs the `drover runners` verbs, impl and rev lanes never; raw container commands stay refused
-/// for everyone, while a message or argument that only names docker is not a command.
 #[test]
 fn runners_verbs_are_a_orchestrators_and_docker_in_message_text_is_not_a_command() {
     let input =
@@ -1493,7 +1423,6 @@ fn runners_verbs_are_a_orchestrators_and_docker_in_message_text_is_not_a_command
     }
 }
 
-/// #677: only drover writes or pushes why notes; reading them stays open.
 #[test]
 fn a_lanes_git_notes_write_or_notes_push_is_refused() {
     for cmd in [
@@ -1515,8 +1444,6 @@ fn a_lanes_git_notes_write_or_notes_push_is_refused() {
     }
 }
 
-/// #668: an impl lane never writes `ci/cap.toml` (an edit, a writer's argument, a redirection's target); reading it,
-/// or a check that names it, passes. The conductor-filed raise (its issue titled `cap: …`) may edit it.
 #[test]
 fn impl_lane_never_edits_the_cap_file() {
     let d = tmpdir("hook-cap");
@@ -1541,7 +1468,6 @@ fn impl_lane_never_edits_the_cap_file() {
         assert_eq!(bash("24", ok), "", "{ok}");
     }
     assert_eq!(call("24", "Edit", json!({"file_path": "/w/src/a.rs"})), "");
-    // The raise: its cached issue title starts `cap:`.
     let cache = d.join("state/cache");
     std::fs::create_dir_all(&cache).unwrap();
     let spec = json!({"title": "cap: raise the src/ line cap to 36,000", "body": ""});

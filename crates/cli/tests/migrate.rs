@@ -1,5 +1,3 @@
-//! #456: only `drover migrate` moves the pre-rename herdsman config, state and share trees; until then the hook reads
-//! them in place and every other command refuses, under a fake HOME.
 mod common;
 use common::tmpdir;
 use drover::events::Event;
@@ -9,8 +7,6 @@ use std::process::{Command, Stdio};
 
 const CONFIG: &str = "[fleet.s]\nrepo = \"a/s\"\nlocal = \"/tmp/x\"\nintegration = \"staging\"\n";
 
-/// `drover <args>` with HOME = DROVER_HOME = `home`, no path overrides, `stdin` piped:
-/// (exit, stdout, stderr).
 fn run_in(home: &Path, args: &[&str], envs: &[(&str, &str)], stdin: &str) -> (i32, String, String) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_drover"))
         .args(args)
@@ -39,7 +35,6 @@ fn run(home: &Path, args: &[&str]) -> (i32, String, String) {
     run_in(home, args, &[], "")
 }
 
-/// The pre-rename layout: config + a log holding one merged issue.
 fn seed(home: &Path, name: &str) {
     let (cfg, state) = (home.join(".config").join(name), home.join(".local/state").join(name));
     std::fs::create_dir_all(&cfg).unwrap();
@@ -49,14 +44,12 @@ fn seed(home: &Path, name: &str) {
     std::fs::write(state.join("events.jsonl"), serde_json::to_string(&ev).unwrap() + "\n").unwrap();
 }
 
-/// `seed`, then its log imported into `state.db` as a build after #344 left it (this test's own HOME is not `h`).
 fn seed_db(home: &Path, name: &str) {
     seed(home, name);
     let state = home.join(".local/state").join(name).join("events.jsonl");
     drover::db::migrate(&state, &mut std::io::sink()).unwrap();
 }
 
-/// Every path under `dir` with its mtime and (for files) contents.
 fn snapshot(dir: &Path) -> Vec<(PathBuf, std::time::SystemTime, Vec<u8>)> {
     let md = std::fs::symlink_metadata(dir).unwrap();
     let body = if md.is_file() {
@@ -156,10 +149,8 @@ fn migrate_moves_both_once() {
         std::fs::read_to_string(h.join(".config/drover/fleet.toml")).unwrap(),
         CONFIG
     );
-    // #344: and its log imported into the database there.
     let st = h.join(".local/state/drover");
     assert!(st.join("state.db").exists() && st.join("events.jsonl.migrated").exists());
-    // Second run: a no-op (#344: nothing left to import either; the database's own files may be touched).
     let before = snapshot(&h.join(".config"));
     let (code, again, err) = run(&h, &["migrate", "--live"]);
     assert_eq!(code, 0, "{err}");
@@ -169,7 +160,6 @@ fn migrate_moves_both_once() {
         "{again}"
     );
     assert_eq!(snapshot(&h.join(".config")), before);
-    // And status reads the new paths, no hint.
     let (code, out, err) = run(&h, &["status"]);
     assert_eq!((code, err.as_str()), (0, ""));
     assert!(out.contains("merged"), "{out}");
@@ -233,7 +223,6 @@ fn symlinked_old_dir_migrates_as_a_link() {
 
 #[test]
 fn hook_with_pre_rename_home_prints_only_its_json_decision() {
-    // A denied call; spelled in pieces so this file's own lane hook lets it be written.
     let cmd = ["gh", "pr", "merge", "5"].join(" ");
     let input = serde_json::json!({"hook_event_name": "PreToolUse", "tool_name": "Bash",
         "cwd": std::env::temp_dir(), "tool_input": {"command": cmd}});
@@ -296,7 +285,6 @@ fn run_as_herdsman_it_works_and_prints_the_rename_notice() {
     assert_eq!(err, "herdsman is now drover: the old name works for one more release\n");
 }
 
-/// #9: a set-but-empty path variable is unset, never the empty (cwd-relative) path.
 const EMPTY: [(&str, &str); 4] = [
     ("FLEET_CONFIG", ""),
     ("FLEET_STATE", ""),
@@ -317,7 +305,6 @@ fn empty_path_vars_resolve_to_the_defaults() {
             "real history, not an empty board: {out}"
         );
     }
-    // Empty DROVER_HOME falls back to $HOME, where the pre-rename trees refuse.
     let old = tmpdir("migrate-empty-vars-old");
     seed_db(&old, "herdsman");
     let envs: Vec<_> = EMPTY.iter().copied().chain([("DROVER_HOME", "")]).collect();
@@ -353,8 +340,6 @@ fn migrate_refuses_an_empty_drover_home_and_leaves_the_cwd_alone() {
     );
 }
 
-/// #344: a build run on the owner's default state dir never imports its log on its own: the installed build still
-/// reads `events.jsonl`. Only `migrate --live` does.
 #[test]
 fn the_live_state_dir_is_migrated_only_with_live() {
     let h = tmpdir("migrate-live");
