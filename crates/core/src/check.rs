@@ -516,6 +516,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let events = expire(ctx, cfg, out, events, agents.as_deref(), &remote)?;
     let open = open_asks(&events);
     // #248: a done lane whose handoff is logged closes its session after `done_close_minutes`; its worktree stays.
+    let st = fold(&events);
     for a in agents
         .iter()
         .flatten()
@@ -535,7 +536,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 x.is("verdict", &e.fleet, n),
             ]
         };
-        let acted = events.iter().any(|x| x.ts >= e.ts && next(x)[usize::from(check)]);
+        let live = (st.get(&(e.fleet.clone(), n)).and_then(IssueState::active_lane)).is_some_and(|l| l.1 == name);
+        let acted = !live && events.iter().any(|x| x.ts >= e.ts && next(x)[usize::from(check)]);
         if a["agent_status"] == "idle" && !acted {
             continue;
         }
