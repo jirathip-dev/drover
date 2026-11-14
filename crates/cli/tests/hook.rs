@@ -456,6 +456,12 @@ fn only_a_orchestrator_runs_timer_install() {
         let out = run(Some(lane), "drover wip prune synergy");
         assert!(out.contains("REFUSED OWNER_ONLY"), "{lane}: {out}");
     }
+    for lane in ["synergy:12:impl", "synergy:-:orchestrator"] {
+        for cmd in ["drover fleet rename berth shed", "drover fleet rename berth shed --yes"] {
+            assert!(run(Some(lane), cmd).contains("REFUSED OWNER_ONLY"), "{lane}: {cmd}");
+        }
+    }
+    assert_eq!(run(None, "drover fleet rename berth shed --yes"), "", "the owner may");
 }
 
 #[test]
