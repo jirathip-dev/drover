@@ -1,0 +1,5 @@
+Decided: conflicts resolved to staging's code; the comments it brought in are stripped under the strict rule, roots::migrate's two-line pub doc joined into one
+Because: "Strip every comment that breaks it: plain comments, and doc comments on non-public items."
+Rejected: none
+Check: stripping comments and whitespace, the nine resolved files equal origin/staging's except spawn.rs's collapsed if from round 1
+Owner: Brought the branch up to date with staging; no behaviour change, comment rule still clean.
