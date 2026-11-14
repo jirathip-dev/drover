@@ -213,55 +213,6 @@ fn a_pulled_root_is_noted_once_and_its_lane_restarts_on_the_next_root_from_its_p
     assert_eq!(gone, 1);
 }
 
-#[test]
-fn migrate_moves_an_idle_worktree_into_the_new_layout() {
-    let r = repo("roots-migrate");
-    let old = r.c.home.join(".herdr/worktrees/sendmeter");
-    let (idle, live) = (old.join("issue-12"), old.join("issue-13"));
-    git(
-        &r.local,
-        &["worktree", "add", "-q", &idle.to_string_lossy(), "issue-12"],
-    );
-    git(
-        &r.local,
-        &[
-            "worktree",
-            "add",
-            "-q",
-            "-b",
-            "issue-13",
-            &live.to_string_lossy(),
-            "staging",
-        ],
-    );
-    let cache = r.c.home.join(".cache/drover/target/sendmeter");
-    std::fs::create_dir_all(&cache).unwrap();
-    r.sh.lane("sendmeter-impl-13", "working", &live.to_string_lossy());
-    let f = Fake::default();
-    let (code, out) = run(&r.c, &Git(&f), &["migrate"]);
-    assert_eq!(code, 0, "{out}");
-    let to = r.c.worktrees.join("sendmeter/issue-12");
-    assert!(to.join("README").is_file() && !idle.exists(), "{out}");
-    let list = git(&r.local, &["worktree", "list"]);
-    assert!(
-        list.contains(&*to.to_string_lossy()) && !list.contains(&*idle.to_string_lossy()),
-        "{list}"
-    );
-    assert!(live.exists() && out.contains("live, left for later"), "{out}");
-    assert!(
-        cache.exists(),
-        "the old build caches stay while a worktree is left: {out}"
-    );
-    // Once that lane has ended, the next migrate moves it and drops the old caches.
-    r.sh.exit("sendmeter-impl-13");
-    let (code, out) = run(&r.c, &Git(&Fake::default()), &["migrate"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(
-        r.c.worktrees.join("sendmeter/issue-13/README").is_file() && !cache.exists(),
-        "{out}"
-    );
-}
-
 /// Amendment A: a new lane's build folder `<root>/.build/<agent>` is a clone of its fleet's newest one on that root
 /// (another fleet's never), the files `.drover/worktree-include` lists come from the main checkout, and the lane's
 /// unsaved work shows in `drover status` and the Lanes tab's rows.

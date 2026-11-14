@@ -329,6 +329,10 @@ impl Runner for Memo<'_> {
         if input.is_empty() {
             return self.run(prog, args);
         }
+        if self.4.ts > 0 && crate::snapshot::remote(prog) {
+            let read = self.4.reads.get(&crate::snapshot::key_in(prog, args, input));
+            return Ok(crate::snapshot::out(read.cloned().flatten()));
+        }
         self.0.run_in(prog, args, input)
     }
     fn shed(&self) -> Option<crate::shed::Shed> {

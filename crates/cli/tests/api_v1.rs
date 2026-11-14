@@ -74,14 +74,6 @@ fn logged(name: &str) -> drover::Ctx {
 
 const SCREEN: &str = "⏺ Bash(cargo test)\n  ⎿ ok\n";
 
-fn herdr_fixture(name: &str) -> (drover::Ctx, Fake) {
-    let list = agents(&[("sendmeter-impl-12", "working", "/x", "w1:p2")]);
-    let r = Fake::default()
-        .reply("herdr agent list", &list)
-        .reply("herdr pane read", SCREEN);
-    (logged(name), r)
-}
-
 fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     let r = OnShed::new(Fake::default());
     r.1.lane("sendmeter-impl-12", "working", "/x");
@@ -91,7 +83,7 @@ fn fixture(name: &str) -> (drover::Ctx, OnShed) {
 
 #[test]
 fn state_events_and_lane_json_match_the_goldens() {
-    let (c, r) = herdr_fixture("api-get");
+    let (c, r) = fixture("api-get");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let (status, state) = req(&s, "GET", "/api/v1/state", "", "");
     assert_eq!(status, "HTTP/1.1 200 OK");
@@ -159,7 +151,7 @@ fn refusals_are_json_with_a_code() {
         code("POST", "/api/v1/pause", "fleet=sendmeter", evil),
         want("403 Forbidden", "FORBIDDEN")
     );
-    assert!(!r.called("herdr pane read") && !r.1.called("read", "sendmeter-impl-12"));
+    assert!(!r.1.called("read", "sendmeter-impl-12"));
     // A stale page's mtime is REFUSED STALE, as on the HTML board; an unknown path is 404.
     assert_eq!(
         code("POST", "/api/v1/pause", "fleet=sendmeter&mtime=1", ""),

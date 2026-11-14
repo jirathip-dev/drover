@@ -53,26 +53,6 @@ fn local() -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-fn local_herdr() -> Fake {
-    local()
-        .reply(
-            "herdr status",
-            "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
-        )
-        .reply("herdr agent list", NO_AGENTS)
-        .reply(
-            "herdr worktree create",
-            r#"{"result":{"workspace":{"workspace_id":"w1"}}}"#,
-        )
-        .reply(
-            "herdr pane list --workspace w1",
-            r#"{"result":{"panes":[{"pane_id":"w1:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run w1:p1 export", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr agent wait", "{}")
-}
-
 /// A fake whose every call to the Air never returns: a call without a hard limit panics (it would hang the tick); one
 /// with a limit is killed at it (exit 124, as `Real` does), the limit added to a virtual clock. Each such call also
 /// records the tick's `tick.step` as it stood then.
@@ -85,7 +65,7 @@ struct Hang {
 }
 
 fn air(prog: &str, args: &[String]) -> bool {
-    matches!(prog, "ssh" | "herdr") && args.iter().any(|a| a == "air")
+    prog == "ssh" && args.iter().any(|a| a == "air")
 }
 
 impl Runner for Hang {
@@ -122,7 +102,7 @@ impl Runner for Hang {
 
 #[test]
 fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
-    let (c, _sh) = setup_on("stuck-air", "");
+    let (c, sh) = setup("stuck-air", "");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     // #11's lane is live on the Air.
     let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "pane": "w8:p1", "workspace": "w8",
@@ -130,7 +110,7 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
                    "host": "air", "machine": "air"});
     append(&c.state, &Event::new(NOW - 600, "sendmeter", Some(11), "spawn", d)).unwrap();
     let r = Hang {
-        f: local_herdr(),
+        f: local(),
         mark: c.state.with_file_name("tick.step"),
         spent: Shared::new(0),
         seen: Shared::default(),
@@ -138,10 +118,7 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
     };
     let (code, out) = run(&c, &r, &["tick"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        r.f.called("herdr agent start sendmeter-impl-12"),
-        "drive still starts: {out}"
-    );
+    assert!(sh.called("run", "sendmeter-impl-12"), "drive still starts: {out}");
     let calls = r.f.calls.borrow();
     let to_air: Vec<_> = calls.iter().filter(|l| l.contains(" air ")).collect();
     assert_eq!(
@@ -208,9 +185,9 @@ fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
 /// nothing else sent there.
 #[test]
 fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
-    let (c, _sh) = setup_on("stuck-disabled-silent", "enabled = false");
+    let (c, _sh) = setup("stuck-disabled-silent", "enabled = false");
     let r = Hang {
-        f: local_herdr(),
+        f: local(),
         mark: c.state.with_file_name("tick.step"),
         spent: Shared::new(0),
         seen: Shared::default(),

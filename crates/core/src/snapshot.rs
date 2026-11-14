@@ -27,6 +27,11 @@ pub fn key(prog: &str, args: &[String]) -> String {
     format!("{prog} {}", args.join(" "))
 }
 
+/// A remote read with stdin (`shed connect`) by its command line and its requests.
+pub fn key_in(prog: &str, args: &[String], input: &str) -> String {
+    format!("{}\n{input}", key(prog, args))
+}
+
 /// A read through another host (ssh).
 pub fn remote(prog: &str) -> bool {
     prog == "ssh"
@@ -144,7 +149,21 @@ impl Runner for Snap<'_> {
         if input.is_empty() {
             return self.run(prog, args);
         }
-        self.r.run_in(prog, args, input)
+        if !remote(prog) {
+            return self.r.run_in(prog, args, input);
+        }
+        let k = key_in(prog, args, input);
+        if let Some(v) = lock(&self.reads).get(&k) {
+            return Ok(out(v.clone()));
+        }
+        if self.miss == Miss::Local {
+            return Ok(out(None));
+        }
+        let o = self.r.run_in(prog, args, input)?;
+        if self.miss == Miss::Collect {
+            lock(&self.reads).insert(k, (o.code == 0).then(|| o.stdout.clone()));
+        }
+        Ok(o)
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.r.shed()

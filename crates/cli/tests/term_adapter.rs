@@ -22,7 +22,10 @@ fn src_files() -> Vec<PathBuf> {
             rust_files(&src, &mut files);
         }
     }
-    assert!(files.iter().any(|f| f.ends_with("core/src/term.rs")), "src/term.rs exists");
+    assert!(
+        files.iter().any(|f| f.ends_with("core/src/term.rs")),
+        "src/term.rs exists"
+    );
     files
 }
 
@@ -51,7 +54,10 @@ fn only_term_rs_builds_pane_words() {
 #[test]
 fn no_src_line_names_herdr_but_its_load_error() {
     let config = std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../core/src/config.rs")).unwrap();
-    assert!(config.contains("pub const RETIRED_RUNTIME"), "the load error is in config.rs");
+    assert!(
+        config.contains("pub const RETIRED_RUNTIME"),
+        "the load error is in config.rs"
+    );
     let bad = lines(&src_files(), |f, l| {
         let mine = f.ends_with("core/src/config.rs") && (l.contains("RETIRED_RUNTIME") || l.contains("\"herdr\" =>"));
         l.to_lowercase().contains("herdr") && !mine

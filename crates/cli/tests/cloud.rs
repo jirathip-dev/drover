@@ -623,7 +623,10 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_ter
     let mut out = vec![];
     let there = on_cloud(&r, &cloud);
     let e = drover::cloud::bootstrap(&c, &cfg, &here.on(&there), "cloud1", &mut out).unwrap_err();
-    assert!(format!("{e:#}").contains("log in in terminal drover-setup-gh-token"), "{e:#}");
+    assert!(
+        format!("{e:#}").contains("log in in terminal drover-setup-gh-token"),
+        "{e:#}"
+    );
     let out = String::from_utf8(out).unwrap();
     assert!(
         out.contains("✓ git — there") && out.contains("✓ gh — installed"),
@@ -648,7 +651,11 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_ter
     assert!(r.called(&step(&build)), "{:?}", r.calls.borrow());
     // claude is logged in: only gh's terminal there, the token read without echo, never on a command line.
     assert!(here.methods().is_empty(), "nothing on this host: {:?}", here.methods());
-    let runs: Vec<String> = cloud.all("send").iter().map(|p| p["text"].as_str().unwrap().into()).collect();
+    let runs: Vec<String> = cloud
+        .all("send")
+        .iter()
+        .map(|p| p["text"].as_str().unwrap().into())
+        .collect();
     assert_eq!(runs.len(), 1, "{runs:?}");
     assert!(
         runs[0].contains("read -rs T; printf %s \"$T\" | gh auth login --with-token"),

@@ -6,13 +6,14 @@ keeps terminals alive, reads their screens and reports their state. shed is the 
 
 ```toml
 [runtime]
-kind = "shed"               # "shed" (default: a shed terminal per lane) or "shed-acp" (ACP lanes, below)
+kind = "shed"               # "shed" (a shed terminal per lane) or "shed-acp" (ACP lanes, below)
 # socket = "~/x/shed.sock"    # default: shed's per-user socket
 # acp = "claude-acp"          # ACP mode: run this installed ACP agent instead of the harness's terminal UI
 # acp_policy = "ask"          # ACP permission requests: ask (default), allow or deny
 ```
 
-The kind decides where **new** lanes start.
+The kind decides where **new** lanes start. With no `[runtime]` (and no fleet or host runtime) there is none: spawn
+and the orchestrator refuse with "no shed runtime".
 
 **Migrating from herdr (#721).** `kind = "herdr"` (in `[runtime]`, a `[fleet.<n>.runtime]` or a host's `runtime`)
 no longer loads: fleet.toml fails with a message naming `shed-acp`. Set `kind = "shed-acp"` (or `"shed"`) there, or

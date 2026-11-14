@@ -31,9 +31,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - lesson: a weekly lane turns repeated review findings into checks, shadow first (#449, #586, #756).
 
 **Lane runtime**
-- shed terminals (the default) or shed-acp ACP sessions (#390, #480, #590, #721); see
-  [runtimes](docs/runtimes.md).
-- Lane state comes from shed's event stream (#585).
+- shed terminals or shed-acp ACP sessions, set in `[runtime]` (#390, #480, #590, #721); lane state from shed's events (#585); see [runtimes](docs/runtimes.md).
 - Every external call is time-limited by one runner (#763).
 
 **Orchestrator threads, asks and run cards**
@@ -68,7 +66,6 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - The GitHub repo takes the name `drover` too, after #456 is live on every host.
 
 **Runtime**
-- Retire herdr: shed is the only lane runtime ([#721](https://github.com/jirathip-dev/herdsman/issues/721)); one fake shed server for tests ([#771](https://github.com/jirathip-dev/herdsman/issues/771)).
 - Sandbox every lane with srt, go/no-go ([#782](https://github.com/jirathip-dev/herdsman/issues/782)).
 
 **Design recipes**
@@ -121,6 +118,9 @@ profile = "lane-impl"
 [fleet.app.role.rev]
 harness = "claude"
 profile = "lane-rev"
+
+[runtime]
+kind = "shed"
 EOF
 drover profiles sync                # per-role profiles and the lane hook
 drover spawn app 12 impl --dry-run  # print the plan; drop --dry-run to launch it

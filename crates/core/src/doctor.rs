@@ -326,7 +326,9 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         }
     }
     crate::cloud::includes(ctx, rows);
-    shed_rows(ctx, cfg, r, rows);
+    if cfg.shed().is_some() {
+        shed_rows(ctx, cfg, r, rows);
+    }
     // #235: each enabled remote host's health, its failures as rows `host <name> <check>`.
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled) {
         let Some(m) = h.machine.as_deref() else { continue };

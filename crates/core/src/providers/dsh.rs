@@ -140,7 +140,7 @@ fn poll(r: &dyn Runner, get: &[String], want: &[&str], tries: u32) -> bool {
         let pane = term::json(r, get)
             .map(|v| v["result"]["pane"].clone())
             .unwrap_or_default();
-        if pane["agent"] == LABEL && want.iter().any(|w| pane["agent_status"] == *w) {
+        if pane["agent"].is_string() && want.iter().any(|w| pane["agent_status"] == *w) {
             return true;
         }
     }

@@ -68,14 +68,7 @@ fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_clos
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let events = read(&c.state).unwrap();
     let st = drover::events::fold(&events);
-    let lanes = drover::lanes::join(
-        &cfg,
-        &Fake::default(),
-        &c.worktrees,
-        &events,
-        &st,
-        &agents,
-    );
+    let lanes = drover::lanes::join(&cfg, &Fake::default(), &c.worktrees, &events, &st, &agents);
     let row = |l: &drover::lanes::Lane| {
         let s = |v: &Option<String>| v.clone().unwrap_or_default();
         (
