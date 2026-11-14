@@ -74,6 +74,12 @@ full_first_paths = ["db/migrations/**", ".github/workflows/**"]
   time, plus the minutes integration sat red.
 - **Promotion.** `main` stays human-only; promote a staging commit only once its full suite is green.
 
+## Merge label (#947)
+
+`merge_label` (unset by default) is the PR label the full CI needs. drover adds it on a PASS at the head and removes it
+when the head moves past that PASS. `drover setup` creates it in the repo, and `drover doctor` checks that it exists.
+New fleets set `merge_label = "merge-ready"` with the affected-only CI recipe in [ci.md](ci.md).
+
 ## Hotspots (#889)
 
 `drover hotspots [FLEET]` (every fleet when none is named) lists the files 5 or more merged PRs touched in the
@@ -129,6 +135,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `reap_keychain_readers` | `false` | kill those stuck Keychain readers too |
 | `respawn_max` | `3` | failed starts of an issue's role in the window before spawn refuses RESPAWN_LOOP |
 | `respawn_window_minutes` | `60` | the window `respawn_max` counts failed starts in |
+| `respawn_per_pass` | `2` | respawns a drive pass starts, each through admission (a fleet may set its own) |
 | `runtime_down_failures` | `5` | lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there |
 | `runtime_down_minutes` | `30` | the window `runtime_down_failures` counts in |
 | `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow`; past 3 × it logs `pass-stuck` and frees its lock |

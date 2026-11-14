@@ -1,6 +1,3 @@
-//! The invariants (design §2), checked against the model's ground truth (panes, PRs, true time) and the events as
-//! the yield hook saw each one appended: never against drover's own view. I1, I3, I4, I7, I9 and I10 hold after
-//! every step; I2 at each supersede; I5 at quiet points; I6 per full drive pass; I8 when a process exits.
 use crate::sched::World;
 use drover::events::Event;
 use std::collections::BTreeMap;
@@ -8,11 +5,8 @@ use std::collections::BTreeMap;
 /// Test-only break switches (AC 3): each makes the model break one invariant on purpose.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Sabotage {
-    /// I1: a second pane comes up for a live lane.
     DoubleLane,
-    /// I4: the head's CI turns red just before a merge lands.
     RedMerge,
-    /// #688's planted bug, deep where random seeds rarely go: I1, a second pane, only at a lane's fourth start.
     Planted,
 }
 
@@ -39,7 +33,6 @@ pub fn on_append(w: &mut World, me: usize) {
     let i = w.wrote.len() - 1;
     let (at, ev) = (w.wrote[i].at, w.wrote[i].ev.clone());
     let who = w.procs[me].name.clone();
-    // I7: no event stamped ahead of true time, or more than LAG behind it.
     if ev.ts > at || at - ev.ts > LAG {
         let lag = at as i64 - ev.ts as i64;
         return w.fail(format!(
@@ -55,11 +48,9 @@ pub fn on_append(w: &mut World, me: usize) {
     match ev.kind.as_str() {
         "supersede" => {
             let a = agent(&ev).unwrap_or_default();
-            // I2: one supersede per lane per pass (a pass: one process at one `Ctx.now`).
             let again = before
                 .iter()
                 .any(|x| x.proc == me && x.ev.kind == "supersede" && agent(&x.ev) == Some(a) && x.ev.ts == ev.ts);
-            // I2: never by a pass that started before the lane it supersedes spawned.
             let spawned = before
                 .iter()
                 .rfind(|x| x.ev.kind == "spawn" && agent(&x.ev) == Some(a))
@@ -80,7 +71,6 @@ pub fn on_append(w: &mut World, me: usize) {
             }
         }
         "done" => {
-            // I3: no action_id is acted on twice.
             let id = ev.str("action_id").unwrap_or_default();
             if before
                 .iter()
@@ -90,7 +80,6 @@ pub fn on_append(w: &mut World, me: usize) {
             }
         }
         "spawn" => {
-            // I9: churn bound.
             let a = agent(&ev).unwrap_or_default();
             let reason = |x: &Event| {
                 x.issue == ev.issue
@@ -112,7 +101,6 @@ pub fn on_append(w: &mut World, me: usize) {
         }
         _ => {}
     }
-    // I10: nothing acts on a merged issue.
     let acts = ["spawn", "spawn-started", "supersede", "respawn"];
     if n != 0
         && acts.contains(&ev.kind.as_str())
@@ -122,8 +110,7 @@ pub fn on_append(w: &mut World, me: usize) {
     }
 }
 
-/// I4, as the model's `gh pr merge` is accepted: the base is integration, the latest verdict at the exact head is
-/// PASS, and the head's CI is green.
+/// I4, as the model's `gh pr merge` is accepted: the base is integration, the latest verdict at the exact head is PASS, and the head's CI is green.
 pub fn on_merge(w: &mut World, issue: u64, head: &str, base: &str) {
     if w.model.sabotage == Some(Sabotage::RedMerge) {
         w.model.ci.insert(head.into(), Some(false));
@@ -144,7 +131,6 @@ pub fn after_step(w: &mut World) {
     if w.failure.is_some() {
         return;
     }
-    // I1: at most one live lane per (fleet, issue, role).
     let mut by: BTreeMap<(u64, String), Vec<String>> = BTreeMap::new();
     for p in w.model.live().filter(|p| !matches!(p.status.as_str(), "dead" | "done")) {
         if let Some(k) = p.agent.as_deref().and_then(lane_key) {
@@ -176,7 +162,6 @@ pub fn after_step(w: &mut World) {
     for why in bad {
         w.fail(why);
     }
-    // I5, at a quiet point (no process between a pane's agent start and its spawn event): every live pane is a logged lane.
     if w.procs.iter().all(|p| !p.live() || p.starting.is_none()) {
         let orphan =
             (w.model.live()).find(|p| !w.spawned.contains(&(p.agent.clone().unwrap_or_default(), p.id.clone())));
@@ -196,9 +181,6 @@ pub fn after_step(w: &mut World) {
     }
 }
 
-/// I6: a queued issue, unblocked, on a fleet with room, gets a lane within `PASSES` full drive passes. A pass that
-/// refused it (the #513 last-slot rule's SPAWN_PENDING, a cap), met a busy host or full disk, or spent its start on
-/// another issue does not count.
 fn liveness(w: &mut World) {
     let mut queued: BTreeMap<u64, usize> = BTreeMap::new();
     for (i, x) in w.wrote.iter().enumerate() {
@@ -252,8 +234,7 @@ fn liveness(w: &mut World) {
     }
 }
 
-/// I8, as process `me` exits: it holds no lease (each guard released it; markers it handed on carry another pid). A
-/// `.again` flag is a message to the busy kick, not a hold.
+/// I8, as process `me` exits: it holds no lease (each guard released it; markers it handed on carry another pid). A `.again` flag is a message to the busy kick, not a hold.
 pub fn on_exit(w: &mut World, me: usize, pid: u32) {
     let state = crate::scenario::ctx(&w.root, 0).state;
     let held: Vec<String> = (drover::db::leases(&state, "").into_iter())

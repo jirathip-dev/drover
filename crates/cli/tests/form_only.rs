@@ -1,12 +1,9 @@
-//! #228: a `FAIL (form-only)` verdict whose blockers are all form categories starts a fix round that doesn't count
-//! toward `review_rounds`, at most `form_rounds` times per issue.
 mod common;
 use common::*;
 use drover::config::Config;
 use drover::events::{append, fold, read, Event, IssueState};
 use serde_json::json;
 
-// #418: each blocker carries a Proof block, spec (a quoted rule + file:line) or run (a fenced command + its output).
 const FORM: &str = "FAIL (form-only)\n\n- blocking [pr-body] PR body: no `## For humans`\n  Proof: spec\n  \
 > The PR body has a `## For humans` section\n  PR#34:1 has none\n- blocking [format] src/x.rs:3: cargo fmt\n  \
 Proof: run\n  ```\n  cargo fmt --check\n  ```\n  ```\n  Diff in src/x.rs:3\n  ```\n- non-blocking src/y.rs:1: a nit\n";
@@ -75,7 +72,6 @@ fn an_all_form_fail_is_not_counted() {
     );
     let ev = read(&c.state).unwrap();
     assert_eq!(ev.last().unwrap().data["form_only"], true);
-    // The next review is still round 1 of 3, and a plain FAIL there counts.
     let out = verdict(
         &c,
         &d,
@@ -178,12 +174,10 @@ fn form_only_parses_tags() {
     ));
     assert!(!ok("FAIL (form-only)\n- non-blocking [format] a.rs:1\n"), "no blocker");
     assert!(!ok("FAIL (form-only)\n- blocking [code] a.rs:1\n"));
-    // #360: the verdict's anti-patterns line is no finding.
     let line = "Tests checked against anti-patterns: yes\n";
     assert!(ok(&format!("FAIL (form-only)\n{line}- blocking [format] a.rs:1\n")));
 }
 
-/// #360: a verdict.md carrying `Tests checked against anti-patterns: yes` records as usual.
 #[test]
 fn the_antipatterns_line_is_accepted() {
     let (c, d) = fixture("form-antipatterns", "");
@@ -209,14 +203,13 @@ fn the_card_says_not_counted_in_amber() {
     c.now = 1_000_000;
     let r = OnShed::new(Fake::default());
     let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let page = queue_tab(&s, "127.0.0.1:7777", c.now); // #268: the board's Queue tab
+    let page = queue_tab(&s, "127.0.0.1:7777", c.now);
     assert!(
         page.contains("rev <span class=a>FAIL (form-only)</span> r1 · <span class=a>not counted · form 1/3</span>"),
         "{page}"
     );
 }
 
-/// #249: a `## Blocking` heading is no finding; tagged items under it are form-only, an untagged one is not.
 #[test]
 fn a_blocking_heading_is_ignored() {
     let cats = ["pr-body".to_string(), "docs-fresh".to_string()];

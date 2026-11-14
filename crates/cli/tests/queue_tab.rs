@@ -1,7 +1,3 @@
-//! #367: the Queue tab one repo at a time. serve.js's pure queue part, run under node: the group order (needs you, in
-//! progress, queued) for every state word a row shows, the time `in impl 1h 47m`, and a collapsed chain's third line; the
-//! server gives each row its age in seconds for it. (Chips, chain and `+ N more` in a browser: gate 2's `queue-repos`
-//! and `queue-chain` views, docs/ui.md.)
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -11,7 +7,6 @@ use serde_json::{json, Value};
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// serve.js's pure queue part plus `js`, run under node: its stdout as JSON. None where node is missing.
 fn node(js: &str) -> Option<Value> {
     if std::process::Command::new("node").arg("--version").output().is_err() {
         eprintln!("skipping: no node here");
@@ -28,8 +23,6 @@ fn node(js: &str) -> Option<Value> {
 
 #[test]
 fn rows_group_needs_you_then_in_progress_then_queued() {
-    // The state words serve.rs writes in a row's state cell, in a mixed order; grouped in QG's order, each group keeps
-    // the rows' own order.
     let js = "(() => { const rows = ['queued', 'impl', 'needs-human', 'review(2)', 'blocked', '⏸ waiting: decision', 'fix(1)', \
               'ready', 'dead', 'parked', 'update', 'queued']; \
               return Object.keys(QG).map(g => [QG[g], rows.filter(s => qgroup(s) === g)]); })()";
@@ -64,7 +57,6 @@ fn time_is_one_unit_style_naming_its_phase() {
     );
 }
 
-/// #391: the chain row's third line names its first and last step and the one it waits on next, with that one's state.
 #[test]
 fn a_chain_names_first_to_last_and_the_next_steps_state() {
     let steps = "[{n: '267', b: '266'}, {n: '268', b: '267'}, {n: '344', b: '268'}, {n: '270', b: '267'}, \
@@ -97,7 +89,7 @@ fn a_row_carries_the_time_its_age_counts_from() {
     append(&c.state, &Event::new(T - 6420, "acme", Some(1), "spawn", spawn)).unwrap();
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page = queue_tab(&s, ADDR, T); // #268: the board draws the rows from API v1's `queue`
+    let page = queue_tab(&s, ADDR, T);
     let row = |n: u64| {
         let at = page.find(&format!("/issues/{n}\">#{n}</a>")).unwrap();
         page[at..].split("</summary>").next().unwrap().to_string()
@@ -107,6 +99,5 @@ fn a_row_carries_the_time_its_age_counts_from() {
         "{}",
         row(1)
     );
-    // #2 has no state of its own yet: it counts from now.
     assert!(row(2).contains(&format!("<span class=m data-t={T}>")), "{}", row(2));
 }

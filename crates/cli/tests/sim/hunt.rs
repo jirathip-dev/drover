@@ -1,7 +1,3 @@
-//! #688: coverage-guided search. A `Plan` is a run's whole input (the scheduler's seed, the fleet's limits, the
-//! agenda of passes and faults, the lanes' queued scripts), written as one line of text. `hunt` keeps a corpus of
-//! plans, mutates one per round and keeps the mutant when its trace reaches a (pass kind, refusal code, event type,
-//! step) combination no earlier run did or makes a metric worse; a failure is minimised and printed for seeds.rs.
 use crate::invariants::Sabotage;
 use crate::model::{Ev, Model, Script};
 use crate::scenario::{default_script, T0};
@@ -208,8 +204,7 @@ impl Plan {
     }
 }
 
-/// What a run reached: one `pass code kind step` per event (and per drive-pass action), and its peaks (supersedes,
-/// most spawns of one lane, the worst clock lag), each worse the higher.
+/// What a run reached: one `pass code kind step` per event (and per drive-pass action), and its peaks (supersedes, most spawns of one lane, the worst clock lag), each worse the higher.
 pub fn coverage(w: &World) -> (BTreeSet<String>, Vec<u64>) {
     let s = |v: Option<&Value>| v.and_then(Value::as_str).unwrap_or("-").to_string();
     let (mut cov, mut spawns) = (BTreeSet::new(), BTreeMap::new());
@@ -258,12 +253,10 @@ impl Found {
     }
 }
 
-/// The invariant a failure names (`I1`, `panic`, `unmodelled`): minimising keeps it.
 fn code(f: &str) -> &str {
     f.split_whitespace().next().unwrap_or_default()
 }
 
-/// Runs `plans` side by side.
 fn batch(plans: &[Plan], sabotage: Option<Sabotage>) -> Vec<Outcome> {
     let hs: Vec<_> = (plans.iter().cloned())
         .map(|p| std::thread::spawn(move || run_plan(&p, sabotage)))
@@ -271,8 +264,7 @@ fn batch(plans: &[Plan], sabotage: Option<Sabotage>) -> Vec<Outcome> {
     hs.into_iter().map(|h| h.join().expect("a run")).collect()
 }
 
-/// Drop faults and scripts one at a time while the plan still fails the same invariant, then bound its steps to the
-/// failing step.
+/// Drop faults and scripts one at a time while the plan still fails the same invariant, then bound its steps to the failing step.
 pub fn minimise(plan: &Plan, failure: &str, steps: u64, sabotage: Option<Sabotage>) -> Plan {
     let mut p = Plan { steps, ..plan.clone() };
     let fails = |c: &Plan| {
@@ -301,8 +293,7 @@ pub struct Hunt {
     pub rounds: usize,
 }
 
-/// Hunt from the seeds `start` (each counts as a round) with mutations drawn from `rng`, 8 rounds at a time, until
-/// `more(rounds, found)` says stop. Each invariant's first failure is minimised; a failing plan never joins the corpus.
+/// Hunt from the seeds `start` (each counts as a round) with mutations drawn from `rng`, 8 rounds at a time, until `more(rounds, found)` says stop. Each invariant's first failure is minimised; a failing plan never joins the corpus.
 pub fn hunt(start: &[u64], rng: u64, sabotage: Option<Sabotage>, more: impl Fn(usize, &[Found]) -> bool) -> Hunt {
     let mut rng = Rng::new(rng);
     let (mut seen, mut worst) = (BTreeSet::new(), vec![0; 3]);
