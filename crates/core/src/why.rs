@@ -1,5 +1,5 @@
 use crate::config::{Config, Fleet};
-use crate::events::{emit, fold, last_spawn, read, Event};
+use crate::events::{emit, fold, last_spawn, working, Event};
 use crate::runner::{argv, json, ok, Runner};
 use crate::{gh, hosts::On, Ctx};
 use anyhow::{bail, Context, Result};
@@ -111,7 +111,7 @@ pub fn turn(
     role: &str,
 ) -> Result<Option<(&'static str, String)>> {
     let f = cfg.fleet(fleet)?;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let Some(s) = fold(&events).remove(&(fleet.to_string(), n)) else {
         return Ok(None);
     };

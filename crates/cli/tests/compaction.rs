@@ -70,7 +70,7 @@ const DAY: u64 = 86_400;
 fn tables(p: &Path) -> Vec<String> {
     let c = rusqlite::Connection::open(drover::db::file(p)).unwrap();
     let mut out = vec![];
-    for t in ["issues", "lanes", "asks"] {
+    for t in ["states", "lanes", "asks"] {
         let mut q = c.prepare(&format!("SELECT * FROM {t} ORDER BY 1, 2")).unwrap();
         let n = q.column_count();
         let rows = q.query_map([], |r| {
@@ -225,7 +225,7 @@ fn build_cloned_rows_from_before_978_move_their_errors_to_cache() {
         let db = d.join("state.db");
         move || {
             let c = rusqlite::Connection::open(db).unwrap();
-            c.execute_batch("DELETE FROM issues; DELETE FROM lanes; DELETE FROM asks; PRAGMA user_version = 0;")
+            c.execute_batch("DELETE FROM states; DELETE FROM lanes; DELETE FROM asks; PRAGMA user_version = 0;")
                 .unwrap();
         }
     })

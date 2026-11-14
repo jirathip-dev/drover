@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{age, emit, read, Event};
+use crate::events::{age, emit, working, Event};
 use crate::runner::{ok, Runner};
 use crate::{drive, herdr, host, Ctx};
 use anyhow::Result;
@@ -233,7 +233,7 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
             .join("\n"),
         _ => {
             let on = ["not loaded", "loaded"][usize::from(exec(r, &ctl(ctx, label, true)[0]).is_ok())];
-            let (_, detail) = tick_row(ctx, &read(&ctx.state)?);
+            let (_, detail) = tick_row(ctx, &working(&ctx.state)?);
             format!("{label}: {on} · tick {detail}")
         }
     };
@@ -307,7 +307,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         }
     });
     let budget = loaded.as_ref().map_or(u64::MAX, |c| c.limits.slow_secs);
-    let events = read(&ctx.state).unwrap_or_default();
+    let events = working(&ctx.state).unwrap_or_default();
     let spared = loaded
         .as_ref()
         .ok()
@@ -357,7 +357,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     drop(stop);
     let _ = beating.join();
     let _ = std::fs::remove_file(&beat);
-    let (cfg, events) = (loaded.unwrap_or_default(), read(&ctx.state).unwrap_or_default());
+    let (cfg, events) = (loaded.unwrap_or_default(), working(&ctx.state).unwrap_or_default());
     match res {
         Err(e) if e.downcast_ref::<crate::gate::Refusal>().is_some() => writeln!(out, "tick: {e}")?,
         Err(e) => {
@@ -554,7 +554,7 @@ fn tick_row(ctx: &Ctx, events: &[Event]) -> (&'static str, String) {
 
 /// The Host tab's Services rows from the event log, `herdr`, the host and the stamps; `board`: the serving page's own detail, else the board is up when its address listens.
 pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) -> Vec<Row> {
-    let events = crate::events::shared(&ctx.state).unwrap_or_default();
+    let events = crate::events::working(&ctx.state).unwrap_or_default();
     let row = |item: &str, t, d: String, fix: &str| (item.to_string(), t, d, fix.to_string());
     let addr = cfg.serve.addr();
     let port = format!("-iTCP:{}", addr.rsplit(':').next().unwrap_or_default());

@@ -687,13 +687,52 @@ impl Events {
 
 type Gated = (Arc<Mutex<()>>, Arc<Log>);
 
-static LOGS: Mutex<BTreeMap<PathBuf, Gated>> = Mutex::new(BTreeMap::new());
+static LOGS: Mutex<BTreeMap<(PathBuf, bool), Gated>> = Mutex::new(BTreeMap::new());
 
 static LIVE: Mutex<Vec<Weak<Log>>> = Mutex::new(Vec::new());
 
 /// #560, #632: the cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq: each call reads only the events appended since (serve's requests and watcher).
 pub fn shared(path: &Path) -> Result<Arc<Log>> {
-    let (file, logs) = (crate::db::file(path), || {
+    log(path, false)
+}
+
+/// #948: the `WORKING` events and the saved fold, cached like `shared` (whose log a process holding it reads instead).
+pub fn working(path: &Path) -> Result<Arc<Log>> {
+    let full = (LOGS.lock().unwrap_or_else(PoisonError::into_inner))
+        .get(&(crate::db::file(path), false))
+        .is_some_and(|l| l.1.seq > 0);
+    log(path, !full)
+}
+
+const WORKING: &str = concat!(
+    "archived = 0 AND seq <= ?1 AND type NOT IN ('build-cloned', 'build-reused') AND (seq > ?1 - 10000",
+    " OR (fleet, issue) IN (SELECT fleet, issue FROM states WHERE done = 0)",
+    " OR seq IN (SELECT MAX(seq) FROM events WHERE seq <= ?1 AND type IN ('driven', 'kick', 'drive-pass', 'lane-state', 'conflict-predicted', 'intent', 'push-sent', 'pass-slow')",
+    " GROUP BY type, fleet, issue, json_extract(json, '$.agent'), json_extract(json, '$.step'))",
+    " OR type = 'lane-state' AND json_extract(json, '$.state') = 'gone'",
+    " OR type NOT IN ('driven', 'kick', 'drive-pass', 'lane-state', 'conflict-predicted', 'intent', 'push-sent', 'pass-slow') AND (issue IS NULL",
+    " OR (fleet, issue) IN (SELECT fleet, issue FROM events WHERE seq > ?1 - 10000) OR type GLOB 'ask-*' OR type IN (",
+    "'needs-decision', 'decision', 'queue', 'merged', 'closed', 'closed-other', 'clean', ",
+    "'spawn', 'spawn-started', 'spawn-adopted', 'lane-killed', 'lane-closed', 'lane-dead', ",
+    "'stale-pane-killed', 'lane-kept-dirty', 'wip-blocked', 'supersede', 'account-capped', ",
+    "'agent-unavailable', 'account-signed-out', 'account-reset', 'stale-marker', 'why', ",
+    "'root-hung', 'root-answers', 'premerge-failed', 'landed', 'revert-opened', ",
+    "'revert-failed', 'reverted', 'land-fix', 'land-bisect', 'lesson-skipped'",
+    ")))"
+);
+
+/// #948: the live events of `kinds` logged at `ts` or later, by seq: a reader over more history than `working` holds.
+pub fn since(path: &Path, kinds: &[&str], ts: u64) -> Result<Vec<Event>> {
+    let kinds: Vec<String> = kinds.iter().map(|k| format!("'{k}'")).collect();
+    crate::db::events(
+        path,
+        &format!("archived = 0 AND ts >= ?1 AND type IN ({})", kinds.join(", ")),
+        ts,
+    )
+}
+
+fn log(path: &Path, live: bool) -> Result<Arc<Log>> {
+    let (file, logs) = ((crate::db::file(path), live), || {
         LOGS.lock().unwrap_or_else(PoisonError::into_inner)
     });
     let gate = logs().entry(file.clone()).or_default().0.clone();
@@ -707,7 +746,7 @@ pub fn shared(path: &Path) -> Result<Arc<Log>> {
         }
         std::mem::take(l)
     };
-    let got = catch_up(path, &mut l, last, key);
+    let got = catch_up(path, &mut l, last, key, live);
     logs().get_mut(&file).expect("added above").1 = l.clone();
     let mut live = LIVE.lock().unwrap_or_else(PoisonError::into_inner);
     live.retain(|w| w.strong_count() > 0 && !std::ptr::eq(w.as_ptr(), Arc::as_ptr(&l)));
@@ -715,12 +754,12 @@ pub fn shared(path: &Path) -> Result<Arc<Log>> {
     got.map(|()| l)
 }
 
-fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<u64>)) -> Result<()> {
+fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<u64>), live: bool) -> Result<()> {
     if key != l.key {
         *l = Arc::new(Log { key, ..Log::default() });
     }
     let fresh = l.seq == 0 && l.events.is_empty();
-    let (new, states, asks) = crate::db::since(path, l.seq, fresh)?;
+    let (new, states, asks) = crate::db::since(path, l.seq, fresh, (live && fresh).then_some(WORKING))?;
     let m = Arc::make_mut(l);
     m.seq = new.last().map_or(last, |e| e.seq.max(last));
     m.states.extend(states);
