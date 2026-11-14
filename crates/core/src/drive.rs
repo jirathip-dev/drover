@@ -385,8 +385,7 @@ fn launch(
         return crate::gate::refused("SPAWN_PENDING", format!("{n_live} spawns starting{by}"));
     }
     crate::spawn::lane_admit(ctx, (cfg, r), ev, fleet, n, role)?;
-    if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && (extend || c.contains(&"--force"))))
-    {
+    if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && extend)) {
         return crate::gate::refused(code, why);
     }
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
@@ -1075,7 +1074,7 @@ fn silent(
             stall::Silent::Nudge(why) => stall::nudge(ctx, r, out, &ev, (fleet, n), &lane, &why)?,
             stall::Silent::Respawn(role, why) => {
                 let num = n.to_string();
-                let args = ["spawn", fleet, &num, &role, "--supersede", "--force"];
+                let args = ["spawn", fleet, &num, &role, "--supersede"];
                 if act(ctx, cfg, r, out, &ev, (fleet, Some(n), "respawn"), &args)?.is_none() {
                     let d = json!({"role": role, "agent": lane, "why": why});
                     append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "respawned-silent", d))?;
@@ -1205,7 +1204,7 @@ fn pass(
         let (dsh, n) = (sp.and_then(|e| e.str("harness")) == Some("dsh"), s.issue.to_string());
         let c = ["spawn", fleet, &n, role, "--supersede"];
         let woke = match pane {
-            Some(p) => crate::herdr::reply(&crate::hosts::On::of(r, sp), dsh, lane, p, &text).is_ok(),
+            Some(p) => crate::herdr::tell(&crate::hosts::On::of(r, sp), dsh, lane, p, &text).is_ok(),
             None => act(ctx, cfg, r, out, &ev, (fleet, None, "respawn"), &c)?.is_none(),
         };
         let d = json!({"agent": lane, "on": on, "respawn": !live});
@@ -1288,7 +1287,9 @@ fn pass(
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
             // #517: a lesson lane's one prompt to end with `done --no-change`.
-            let sent = tell(r, &events, &w.lane, &crate::lesson::prompt(fleet, s.issue));
+            let Some(sent) = tell(r, &events, &w.lane, &crate::lesson::prompt(fleet, s.issue)) else {
+                continue;
+            };
             writeln!(
                 out,
                 "{fleet} #{n} lesson lane prompted: {}",
@@ -1311,7 +1312,9 @@ fn pass(
                     "drover: continue the task; end the turn with `drover turn …`.",
                 )
             };
-            let sent = tell(r, &events, &w.lane, text);
+            let Some(sent) = tell(r, &events, &w.lane, text) else {
+                continue;
+            };
             writeln!(
                 out,
                 "{fleet} #{n} turn {state}: {}",
@@ -1372,11 +1375,6 @@ fn pass(
             if fast && !matches!(step, "verdict" | "merge") {
                 continue;
             }
-            let args = if step == "respawn" {
-                [&args[..], &["--force"]].concat()
-            } else {
-                args
-            };
             // #417: a verify stage the issue doesn't need (or has no recipe for) is logged passed instead.
             if step == "review" && args[3] == "verify" && !crate::verify::due(ctx, cfg, r, out, s, &pr)? {
                 continue;
@@ -1433,7 +1431,7 @@ fn pass(
                 let d = json!({"role": args.get(3), "agent": w.lane, "why": why, "failed_on": on});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
             }
-            go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
+            go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "RESPAWN_PACED"));
             // #182: a PASS recorded this pass merges in it once CI is green at that head (a merge label's full run
             // starts only now, so that one waits for the next pass).
             let mut merge = step == "merge";
@@ -1485,14 +1483,14 @@ fn pass(
             }
             match a {
                 stall::Act::Respawn(role, why) => {
-                    let args = ["spawn", fleet, &n, &role, "--supersede", "--force"];
+                    let args = ["spawn", fleet, &n, &role, "--supersede"];
                     let code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), "respawn"), &args)?;
                     if code.is_none() {
                         let on = crate::breaker::blame(&events, &w.lane);
                         let d = json!({"role": role, "agent": w.lane, "why": why, "failed_on": on});
                         append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
                     }
-                    go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
+                    go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "RESPAWN_PACED"));
                 }
                 stall::Act::Escalate(code, why) => {
                     let on = crate::breaker::blame(&events, &w.lane);
@@ -1623,12 +1621,13 @@ fn repro_refused(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "repro-refused", d))
 }
 
-/// #517 #511: type `text` into `lane`'s pane (its last spawn's); true if sent.
-fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> bool {
+fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> Option<bool> {
     let sp = crate::events::last_spawn(events, lane);
     let dsh = sp.and_then(|e| e.str("harness")) == Some("dsh");
     let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
-    crate::herdr::reply(&crate::hosts::On::of(r, sp), dsh, lane, pane, text).is_ok()
+    let on = crate::hosts::On::of(r, sp);
+    crate::herdr::awake(&on, lane).ok()?;
+    Some(crate::herdr::reply(&on, dsh, lane, pane, text).is_ok())
 }
 
 /// #534: the words of a `LANE_LIVE` on a finished lane.
@@ -1716,7 +1715,7 @@ fn serial(
         let sp = crate::events::last_spawn(&ev, lane);
         let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
         let dsh = sp.and_then(|e| e.str("harness")) == Some("dsh");
-        crate::herdr::reply(&crate::hosts::On::of(r, sp), dsh, lane, pane, &text).ok();
+        crate::herdr::tell(&crate::hosts::On::of(r, sp), dsh, lane, pane, &text).ok();
     }
     if !wait || fast || !new.is_empty() {
         return Ok(wait);
@@ -1822,7 +1821,9 @@ fn handoff(
             match ev.iter().rfind(told) {
                 None => {
                     let text = format!("drover: {WHY_NUDGE}{}. Fix it, then `drover turn done`.", why.1);
-                    let sent = tell(r, ev, &w.lane, &text);
+                    let Some(sent) = tell(r, ev, &w.lane, &text) else {
+                        continue;
+                    };
                     writeln!(out, "{fleet} #{} why note refused: nudged", s.issue)?;
                     let d = json!({"agent": w.lane, "note": why.1, "sent": sent});
                     append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "why-nudged", d))?;
@@ -2175,6 +2176,17 @@ fn ci_findings(r: &dyn Runner, f: &crate::config::Fleet, pr: &serde_json::Value,
     )
 }
 
+fn paced(cfg: &Config, fleet: &str) -> Option<String> {
+    let max = cfg
+        .fleet
+        .get(fleet)
+        .and_then(|f| f.respawn_per_pass)
+        .unwrap_or(cfg.limits.respawn_per_pass);
+    let ran = |a: &Value| a["step"] == "respawn" && a["code"].is_null();
+    let n = ACTS.with_borrow(|m| m.get(fleet).map_or(0, |v| v.iter().filter(|a| ran(a)).count()));
+    (n >= max).then(|| format!("{n} respawns this pass (respawn_per_pass {max}); the rest wait their turn"))
+}
+
 /// (fleet, issue, step) of one action.
 type At<'a> = (&'a str, Option<u64>, &'a str);
 /// A refused or failed action's code (`REFUSED <code>`, `EXIT`, `ERROR`); `None` when it ran.
@@ -2192,10 +2204,14 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     let back = spawn
         .filter(|_| KICK.get().is_none())
         .and_then(|n| retrying(ctx, ev, fleet, n));
-    let res = match (back, issue.filter(|_| kicks)) {
-        (Some(why), _) => crate::gate::refused("SPAWN_BACKOFF", why),
-        (None, Some(n)) => launch(ctx, cfg, r, ev, (fleet, n), c, step == "start"),
-        (None, None) => crate::cli::run(c, ctx, r, &mut buf),
+    let paced = (c[0] == "spawn" && step == "respawn" && KICK.get().is_none())
+        .then(|| paced(cfg, fleet))
+        .flatten();
+    let res = match (back, paced, issue.filter(|_| kicks)) {
+        (Some(why), _, _) => crate::gate::refused("SPAWN_BACKOFF", why),
+        (None, Some(why), _) => crate::gate::refused("RESPAWN_PACED", why),
+        (None, None, Some(n)) => launch(ctx, cfg, r, ev, (fleet, n), c, step == "start"),
+        (None, None, None) => crate::cli::run(c, ctx, r, &mut buf),
     };
     IN_ACT.set(false);
     let text = String::from_utf8_lossy(&buf);
