@@ -237,7 +237,8 @@ fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
     let mut blocks = vec![json!({"type": "text", "markdown": format!("**{}**", q.question)})];
     if !a.pngs.is_empty() {
         let n = q.issue.unwrap_or(0);
-        let items = (0..a.pngs.len()).map(|i| json!({"src": format!("/design/{}/{n}/{i}", q.fleet), "alt": a.pngs[i]}));
+        let items = (0..a.pngs.len())
+            .map(|i| json!({"src": format!("/design/{}/{n}/{i}/{}", q.fleet, q.id), "alt": a.pngs[i]}));
         blocks.push(json!({"type": "images", "id": format!("pngs-{}", q.id), "items": items.collect::<Vec<_>>()}));
     }
     blocks.push(c);

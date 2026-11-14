@@ -559,6 +559,42 @@ fn disk_file<P: AsRef<std::path::Path>>(
     }
 }
 
+impl Server<'_> {
+    fn round_file(
+        &self,
+        sha: Option<&str>,
+        path: Option<String>,
+        missing: &str,
+    ) -> (&'static str, &'static str, Vec<u8>) {
+        let p = path.as_deref().map(std::path::Path::new);
+        let show = |(sha, dir, name): (&str, &std::path::Path, &std::ffi::OsStr)| {
+            let args = crate::runner::argv(&["-C", &dir.to_string_lossy(), "cat-file", "--batch"]);
+            let spec = format!("{sha}:./{}\n", name.to_string_lossy());
+            let mut b = vec![];
+            std::io::Read::read_to_end(&mut self.r.r.stream("git", &args, &spec).ok()?, &mut b).ok()?;
+            let (head, body) = b.split_at(b.iter().position(|&c| c == b'\n')? + 1);
+            let size = String::from_utf8_lossy(head)
+                .trim_end()
+                .rsplit(' ')
+                .next()?
+                .parse()
+                .ok()?;
+            body.get(..size).map(<[u8]>::to_vec)
+        };
+        let (dir, name) = (
+            p.and_then(std::path::Path::parent),
+            p.and_then(std::path::Path::file_name),
+        );
+        let git = sha
+            .zip(dir)
+            .zip(name)
+            .map(|((s, d), n)| (s, d, n))
+            .filter(|g| crate::runner::answers(g.1));
+        git.and_then(show)
+            .map_or_else(|| disk_file(path, PNG, missing), |b| ("200 OK", PNG, b))
+    }
+}
+
 /// #386: a thread file's type by its extension.
 fn ctype(name: &str) -> &'static str {
     match chat::ext(name).as_str() {
@@ -1177,23 +1213,26 @@ impl<'a> Server<'a> {
             }
             // #412: a PNG of the design waiting for the owner's decision.
             ("GET", p) if p.starts_with("/design/") => {
-                let mut it = p[8..].splitn(3, '/');
-                let (f, n, i) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default());
+                let mut it = p[8..].splitn(4, '/');
+                let (f, n, i, q) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));
                 let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
-                let ask = |e: &&Event| crate::design::is_ask(e) && e.fleet == f && e.issue.map(|n| n.to_string()).as_deref() == Some(n);
+                let n = n.parse().unwrap_or(0);
+                let ask = |e: &Event| crate::design::is_ask(e) && e.fleet == f && e.issue == Some(n) && q.is_none_or(|q| e.str("id") == Some(q));
                 let ev = shared(&ctx.state).unwrap_or_default();
-                let at = ev.iter().rfind(ask).and_then(|a| chat::files_of(a).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
-                disk_file(at, PNG, "no such design file\n")
+                let k = ev.iter().rposition(ask);
+                let at = k.and_then(|k| chat::files_of(&ev[k]).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
+                let sha = k.filter(|_| q.is_some()).and_then(|k| ev[..k].iter().rfind(|e| e.is("design-review", &f, n))?.str("sha"));
+                self.round_file(sha, at, "no such design file\n")
             }
             // #417: a screenshot the issue's last verdict lists.
             ("GET", p) if p.starts_with("/shot/") => {
-                let mut it = p[6..].splitn(3, '/');
-                let (f, n, i) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default());
+                let mut it = p[6..].splitn(4, '/');
+                let (f, n, i, sha) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));
                 let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
                 let ev = shared(&ctx.state).unwrap_or_default();
-                let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n))).unwrap_or_default();
+                let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n), sha)).unwrap_or_default();
                 let at = i.parse().ok().and_then(|i: usize| shots.into_iter().nth(i));
-                disk_file(at.map(|(_, p)| p), PNG, "no such screenshot\n")
+                self.round_file(sha, at.map(|(_, p)| p.display().to_string()), "no such screenshot\n")
             }
             ("GET", "/sw.js") => ("200 OK", "text/javascript", text(&SW.replace("@V", &format!("{VER:08x}")))),
             ("GET", p) => {
@@ -1842,7 +1881,15 @@ impl<'a> Server<'a> {
                 mergeable: m.to_lowercase(),
                 merge: fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE",
                 // #417: the last verdict's screenshots (a verify FAIL's), as `/shot/<fleet>/<n>/<i>` serves them.
-                shots: crate::verify::served(events, (f, n)).into_iter().map(|x| x.0).collect(),
+                shots: crate::verify::served(events, (f, n), None)
+                    .into_iter()
+                    .map(|x| x.0)
+                    .collect(),
+                shots_at: events
+                    .iter()
+                    .rfind(|e| e.is("verdict", f, n))
+                    .and_then(|e| e.str("sha"))
+                    .map(String::from),
             }
         };
         // #217: a failed extend's card is back; a recorded one with no lane yet is one muted line, no buttons.
