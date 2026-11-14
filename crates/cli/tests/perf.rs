@@ -899,13 +899,13 @@ fn a_new_event_costs_the_same_on_a_log_twice_as_long() {
     }
     let idle = serve_cpu_in_a_child("150000,0,0");
     let mut cpu = [f64::MAX; 2];
-    for _ in 0..2 {
+    for _ in 0..3 {
         for (k, spec) in ["150000,0,1", "300000,150000,1"].into_iter().enumerate() {
             cpu[k] = cpu[k].min(serve_cpu_in_a_child(spec));
         }
     }
     report(&format!(
-        "#971 perf: 10 s idle {idle:.0} ms CPU; 10 events at 150k {:.0} ms, at 300k {:.0} ms (best of 2, own process each)",
+        "#971 perf: 10 s idle {idle:.0} ms CPU; 10 events at 150k {:.0} ms, at 300k {:.0} ms (best of 3, own process each)",
         cpu[0], cpu[1]
     ));
     assert!(
