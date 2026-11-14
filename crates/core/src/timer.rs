@@ -14,7 +14,7 @@ pub const FAST: &str = "dev.drover.fast";
 pub const SERVICE: &str = "dev.drover.service";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
 /// #845: the tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
-pub const TICK_STEPS: [(&str, &[&str]); 7] = [
+pub const TICK_STEPS: [(&str, &[&str]); 8] = [
     ("herdr status", &[]),
     (
         "check",
@@ -36,6 +36,7 @@ pub const TICK_STEPS: [(&str, &[&str]); 7] = [
     ("trim", &[]),
     ("lesson", &[]),
     ("hotspots", &[]),
+    ("compact", &[]),
 ];
 /// #557: drover's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
 pub const UPDATE: &str = "dev.drover.update";
@@ -263,6 +264,22 @@ fn alert(ctx: &Ctx, cfg: &Config, events: &[Event], kind: &str, item: &str, reas
     emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))
 }
 
+fn compact_daily(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
+    let at = ctx.state.with_file_name("compact.at");
+    let last = std::fs::read_to_string(&at)
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok());
+    if last.is_some_and(|t| ctx.now < t + 86_400) {
+        return Ok(());
+    }
+    std::fs::write(&at, ctx.now.to_string())?;
+    match crate::db::compact(&ctx.state, ctx.now) {
+        Ok((gone, moved)) => writeln!(out, "compact: {gone} heartbeats deleted, {moved} events archived")?,
+        Err(e) => writeln!(out, "compact: {e:#}")?,
+    }
+    Ok(())
+}
+
 /// `drover tick`: `check`, then `drive` (under #92's lock), the hourly clean, remote build trims, then an hourly alert per red Services row. A refusal exits 0; a real error (config, herdr) logs `tick-failed`, alerted at most hourly, and exits 1. #561: one probe per remote host, 15 s per remote call; `tick.step` names the step for `tick-stuck`.
 pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let log = ctx.state.with_file_name("tick.log");
@@ -308,7 +325,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         if pass.over() {
             writeln!(
                 out,
-                "tick: past its {budget} s budget; skipped: clean, trim, lesson, hotspots"
+                "tick: past its {budget} s budget; skipped: clean, trim, lesson, hotspots, compact"
             )?;
             return driven;
         }
@@ -329,6 +346,8 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         crate::lesson::weekly(ctx, cfg, &pass, out)?;
         pass.step("hotspots");
         crate::hotspots::weekly(ctx, cfg, &pass, out)?;
+        pass.step("compact");
+        compact_daily(ctx, out)?;
         driven
     });
     for m in pass.late() {

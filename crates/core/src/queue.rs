@@ -297,6 +297,11 @@ pub fn serials(events: &[Event], f: &Fleet, fleet: &str) -> Vec<Serial> {
     f.serial.iter().cloned().chain(hot).collect()
 }
 
+/// #1032: a hot-file group: its issues take all their groups at once or none.
+pub fn hot(g: &Serial) -> bool {
+    g.name.starts_with("hot ")
+}
+
 /// In flight: a live impl/fix lane, or at review/ready.
 pub fn in_flight(state: &str) -> bool {
     state == "impl" || state.starts_with("fix") || state.starts_with("review") || state == "ready"
@@ -338,7 +343,7 @@ pub fn view(events: &[Event], st: &States, fleet: &str) -> Vec<Item> {
         .into_iter()
         .filter(|i| !matches!(state(st, fleet, i.issue), "merged" | "closed"));
     open.map(|mut i| {
-        i.blockers.retain(|&b| state(st, fleet, b) != "merged");
+        i.blockers.retain(|&b| !released(events, st, &format!("{fleet}#{b}")));
         i.ext.retain(|b| !released(events, st, b));
         i.blocked_by = i.blockers.first().copied();
         i

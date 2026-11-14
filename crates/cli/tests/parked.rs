@@ -206,3 +206,34 @@ fn a_fix_round_held_for_a_spawn_slot_is_not_parked() {
     let s = Server::new(&c, &r, None);
     assert_eq!(shown(&s), json!("idle · waiting for a spawn slot (10m)"));
 }
+
+#[test]
+fn a_held_lane_reads_held_by_its_blocker_and_a_parked_pr_number_drops_off() {
+    let (c, r) = fixture("held-not-dead", false);
+    let held = Event::new(NOW - 3000, "sendmeter", Some(14), "held", json!({"on": [456]}));
+    append(&c.state, &held).unwrap();
+    let q = json!({"op": "add", "issues": [828]});
+    append(&c.state, &Event::new(NOW - 2000, "sendmeter", None, "queue", q)).unwrap();
+    let parked = json!({"why": "a PR number", "by": "owner"});
+    append(
+        &c.state,
+        &Event::new(NOW - 1000, "sendmeter", Some(828), "parked", parked),
+    )
+    .unwrap();
+    let spec =
+        json!({"title": "t", "body": "Closes #817", "url": "https://github.com/jirathip-dev/sendmeter/pull/828"});
+    let cache = c.state.parent().unwrap().join("cache");
+    std::fs::write(cache.join("issue-sendmeter-828.json"), spec.to_string()).unwrap();
+    let page = get(&Server::new(&c, &r, None), "/?all=1");
+    let risky = lane(&page, RISKY);
+    assert!(risky.contains("held by #456") && !risky.contains("dead"), "{risky}");
+    assert!(!page.contains("<h2><span class=r>dead"), "no dead section: {page}");
+    assert!(
+        page.contains("issues/14\">#14</a></span><span class=a>held by #456</span>"),
+        "queue row: {page}"
+    );
+    assert!(
+        !page.contains("issues/828\">#828</a>"),
+        "no row for a PR number: {page}"
+    );
+}
