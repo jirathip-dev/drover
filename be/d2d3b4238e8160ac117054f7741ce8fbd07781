@@ -1,0 +1,8 @@
+Decided: merged origin/staging; the one conflict, the action's close line, keeps #926's kill/clean/close beside this branch's answer-from-a-sheet case
+Because: crates/server/src/screens.rs:1023
+Rejected: rebasing onto staging — form fixes are new commits, never a history rewrite
+Decided: an open ask's Events row still taps the /screens/ask sheet, next to #926's /screens/lanes sheet
+Because: crates/server/src/screens.rs:465
+Check: events_tab, cooee_screens and lane_actions pass at the merge head
+Check: the full workspace run could not finish on the lane host (build folder reclaimed mid-run); CI runs it
+Owner: The branch now includes the Lanes screen from staging; answering asks from Events works as before.
