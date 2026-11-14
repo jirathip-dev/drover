@@ -1,0 +1,14 @@
+Decided: shed-proto and REV pin shed main 9b88eb5, so serde_json preserve_order and schemars leave drover's build (Cargo.lock only swaps the source line)
+Because: q1660
+Decided: the server's hello is accepted by product and protocol only (Hello::compatible), any build or version of protocol 1 passes
+Because: "Check the server's hello by product and `protocol` only, as shed#100 does"
+Decided: SHED_VERSION names both sides as `version (build) protocol N`
+Because: "naming both sides' version, build and protocol"
+Decided: new drover does NOT work against the 56de739 serve: it ignores the extra hello fields but answers without protocol, which counts as 0 and is refused
+Because: "If it does not, say so in the PR and the upgrade order becomes"
+Decided: arch-check's stale-doc hit on Reported's note/state_source is excused with a `no doc:` PR body line; they are struct fields now filled by ..Default::default(), not removed API
+Because: crates/core/src/arch.rs:257
+Rejected: a protocol-0 fallback for the old serve — the spec refuses protocol 0, and it would be a second way to handshake
+Check: cargo test -p drover --test shed: another_build_of_the_same_protocol_is_accepted and another_shed_protocol_is_refused_naming_both_sides
+Check: the Mini's live shed answers hello without protocol; install shed 9b88eb5, restart shed serve, then reinstall drover in one step
+Owner: drover now talks to the new shed (any build of the same protocol); upgrade shed and drover together, the old shed is refused.
