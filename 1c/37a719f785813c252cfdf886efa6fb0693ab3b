@@ -1,0 +1,11 @@
+Decided: a lane-failed-start is void once the lane logs a turn-end after it, so a gone lane that reported working takes the existing respawn path
+Because: "A `lane-dead` (or a hibernated lane gone) on an impl/fix lane in `working` makes drive respawn it in the next pass"
+Rejected: a new respawn branch for hibernated lanes — the existing gone-lane respawn already covers it; only the stale failed start hid it
+Decided: this fleet's own queue blockers are read on GitHub like other repos' ones; a closed one logs blocker-closed and drops out of the queue view
+Because: "A blocker closed not-planned no longer holds its dependants, and an event says so (test)."
+Decided: queue add refuses IS_PR when the issue view's url is a /pull/ one
+Because: "`queue add <n>` where `<n>` is a PR is refused with a clear code (test)."
+Decided: fix round only merges staging and moves the #886 tests onto its 3-tuple setup and Log API; no product change
+Because: crates/cli/tests/queue_cross_repo.rs:6
+Check: self_update pause test fails only inside a lane (DROVER_LANE set); it passes with that var unset, as in CI
+Owner: A lane that said it was still working and then vanished is now restarted automatically, and the board stops calling held lanes dead.
