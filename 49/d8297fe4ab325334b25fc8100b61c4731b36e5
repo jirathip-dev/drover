@@ -1,0 +1,4 @@
+Decided: merged origin/staging; outbox.rs keeps staging's working() with this branch's e.val("sent"), and staging's new .data["k"] test reads use val
+Because: "No `Event::data` map indexing remains in `crates/`"
+Rejected: none
+Owner: the branch is up to date with staging and still has no crash-prone event reads
