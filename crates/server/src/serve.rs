@@ -2921,7 +2921,34 @@ impl Runner for Canned {
             stderr: String::new(),
         })
     }
+    /// #721: a `shed connect` call: each request answered from `shed <method> <name>`'s JSON.
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<crate::runner::Out> {
+        use crate::shed::proto::{ErrorCode, Request, Response, RpcError, VERSION};
+        if prog != "shed" {
+            return self.run(prog, args);
+        }
+        let mut stdout = String::new();
+        for q in input.lines().filter_map(|l| serde_json::from_str::<Request>(l).ok()) {
+            let id = q.id.clone().unwrap_or_default();
+            let key = format!("shed {} {}", q.method, q.params["name"].as_str().unwrap_or_default());
+            let got = match q.method.as_str() {
+                "hello" => Some(serde_json::json!({"product": "shed", "version": VERSION})),
+                _ => self.0.get(key.trim_end()).and_then(|v| serde_json::from_str(v).ok()),
+            };
+            let none = || RpcError::new(ErrorCode::NoSuchTerminal, &key);
+            let r = got.map_or_else(|| Response::err(id.clone(), none()), |v| Response::ok(id.clone(), v));
+            stdout += &(serde_json::to_string(&r)? + "\n");
+        }
+        Ok(crate::runner::Out {
+            stdout,
+            ..Default::default()
+        })
+    }
     fn sleep(&self, _: u64) {}
+    fn shed(&self) -> Option<crate::shed::Shed> {
+        let wire = crate::shed::Wire::Connect;
+        Some(crate::shed::Shed { wire, acp: None, policy: "ask".into() })
+    }
 }
 
 /// #172: the files a theme folder may hold; `/themes/<name>/<file>` serves nothing else (#241: and its icons).

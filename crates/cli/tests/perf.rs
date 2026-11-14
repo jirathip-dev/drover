@@ -449,7 +449,7 @@ fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
     let events = drover::events::read(&c.state).unwrap();
     assert_eq!(events.len(), 30_000);
     let on = sh.on(&r);
-    let list = drover::herdr::list(&on, "agent").unwrap();
+    let list = drover::term::list(&on).unwrap();
     let st = drover::events::fold(&events);
     let all = drover::snapshot::lanes(&cfg, &on, &c, (&events, &st), &list);
     assert_eq!(all.len(), 200);

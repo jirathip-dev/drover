@@ -492,7 +492,6 @@ fn lanes_group_by_fleet_with_others() {
         {"agent": "codex", "agent_status": "idle", "pane_id": "w4:p1", "cwd": "/Users/me/Projects/side", "workspace_id": "w4"},
         {"agent": "dsh-tui", "agent_status": "blocked", "pane_id": "w5:p1", "cwd": "/p/synergy-apps", "workspace_id": "w5"},
     ]);
-    let ws = [("w4".to_string(), "side-project".to_string())].into();
     let lanes = drover::lanes::join(
         &cfg,
         &Fake::default(),
@@ -500,7 +499,6 @@ fn lanes_group_by_fleet_with_others() {
         &events,
         &st,
         agents.as_array().unwrap(),
-        &ws,
     );
     let got: Vec<(Option<&str>, &str, &str, &str, bool)> = lanes
         .iter()
@@ -579,8 +577,8 @@ fn one_lane_per_agent_name() {
         {"name": "sendmeter-impl-3061", "agent_status": "idle", "pane_id": "w9:p1", "cwd": "/x", "host": "mini"},
     ]);
     let st = drover::events::fold(&events);
-    let (fake, ws) = (Fake::default(), Default::default());
-    let lanes = drover::lanes::join(&cfg, &fake, &c.worktrees, &events, &st, agents.as_array().unwrap(), &ws);
+    let fake = Fake::default();
+    let lanes = drover::lanes::join(&cfg, &fake, &c.worktrees, &events, &st, agents.as_array().unwrap());
     let got: Vec<_> = lanes
         .iter()
         .map(|l| (l.name.as_str(), l.state.as_str(), l.pane.as_deref()))

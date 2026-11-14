@@ -3,7 +3,7 @@
 mod common;
 use common::*;
 use drover::events::Event;
-use drover::herdr;
+use drover::term;
 use drover::hosts::On;
 use drover::runner::Runner;
 use drover::shed::proto::Response;
@@ -29,54 +29,53 @@ fn every_adapter_call_is_a_shed_request() {
     let r = shed::With(&f, b.shed());
     let lane = "sendmeter-impl-12";
 
-    assert_eq!(herdr::read(&r, lane).unwrap(), "screen of sendmeter-impl-12");
+    assert_eq!(term::read(&r, lane).unwrap(), "screen of sendmeter-impl-12");
     assert_eq!(b.last("read"), json!({"name": lane, "history": false}));
-    herdr::recent(&r, lane, "200").unwrap();
+    term::recent(&r, lane, "200").unwrap();
     assert_eq!(b.last("read"), json!({"name": lane, "lines": 200, "history": true}));
-    herdr::keys(&r, lane, "Escape").unwrap();
+    term::keys(&r, lane, "Escape").unwrap();
     assert_eq!(b.last("keys"), json!({"name": lane, "keys": ["esc"]}));
     // The page's reply: the text, then Enter (dsh types it, others prompt the agent by name).
-    herdr::reply(&r, false, lane, lane, "go on").unwrap();
+    term::reply(&r, false, lane, lane, "go on").unwrap();
     assert_eq!(b.last("send"), json!({"name": lane, "text": "go on"}));
     assert_eq!(b.last("keys"), json!({"name": lane, "keys": ["Enter"]}));
-    herdr::reply(&r, true, lane, lane, "typed").unwrap();
+    term::reply(&r, true, lane, lane, "typed").unwrap();
     assert_eq!(b.last("send"), json!({"name": lane, "text": "typed"}));
-    assert!(herdr::landed(&r, lane, lane, "x"));
+    assert!(term::landed(&r, lane, lane, "x"));
     assert_eq!(
         b.last("wait"),
         json!({"name": lane, "until": ["working", "blocked"], "timeout": 20.0})
     );
-    let pane = herdr::harness_in(&r, lane).unwrap();
+    let pane = term::harness_in(&r, lane).unwrap();
     assert_eq!(
         (pane["agent"].as_str(), pane["pane_id"].as_str()),
         (Some("claude"), Some(lane))
     );
-    herdr::rename(&r, lane, lane).unwrap();
-    let o = herdr::exec(&r, &herdr::wait_output_argv(lane, "❯", "60000")).unwrap();
+    let o = term::exec(&r, &term::wait_output_argv(lane, "❯", "60000")).unwrap();
     assert_eq!(o.code, 0);
     assert_eq!(
         b.last("wait"),
         json!({"name": lane, "until": [], "output": "❯", "timeout": 60.0})
     );
-    herdr::ok(&r, &herdr::run_argv(lane, &["exec", "'dsh-tui'"])).unwrap();
+    term::ok(&r, &term::run_argv(lane, &["exec", "'dsh-tui'"])).unwrap();
     assert_eq!(b.last("send"), json!({"name": lane, "text": "exec 'dsh-tui'\r"}));
-    // list: shed's lanes (running, `fleet`-labelled) beside herdr's, which is absent here.
-    let a = herdr::agents(&r).unwrap();
+    // list: shed's lanes (running, `fleet`-labelled).
+    let a = term::agents(&r).unwrap();
     assert_eq!(a.len(), 1, "{a:?}");
     assert_eq!(
         (a[0]["name"].as_str(), a[0]["agent_status"].as_str()),
         (Some(lane), Some("working"))
     );
-    assert_eq!(herdr::list(&r, "agent").unwrap()["result"]["agents"], json!(a));
+    assert_eq!(term::list(&r).unwrap()["result"]["agents"], json!(a));
     // close: kill, then rm (so the next lane may take the name); a gone terminal is closed already.
-    herdr::close(&r, lane).unwrap();
+    term::close(&r, lane).unwrap();
     assert_eq!(b.methods().iter().rev().take(2).collect::<Vec<_>>(), ["rm", "kill"]);
-    assert!(herdr::agents(&r).unwrap().is_empty());
-    herdr::close(&r, lane).unwrap();
-    let o = herdr::exec(&r, &herdr::read_argv(lane)).unwrap();
-    assert!(herdr::failed_with(&o, "pane_not_found"), "{o:?}");
+    assert!(term::agents(&r).unwrap().is_empty());
+    term::close(&r, lane).unwrap();
+    let o = term::exec(&r, &term::read_argv(lane)).unwrap();
+    assert!(term::failed_with(&o, "pane_not_found"), "{o:?}");
     // herdr's own panes (`ws:pane`) and workspaces never go to shed.
-    assert!(herdr::read(&r, "w1:p1").is_err());
+    assert!(term::read(&r, "w1:p1").is_err());
     assert!(f.called("herdr pane read w1:p1"));
     assert!(f.called("herdr agent list"));
 }
@@ -88,8 +87,8 @@ fn a_wait_that_times_out_answers_as_herdr() {
     b.wait_ends("slow", "timeout");
     let f = Fake::default();
     let r = shed::With(&f, b.shed());
-    let o = herdr::exec(&r, &herdr::wait_working_argv("slow", "20000")).unwrap();
-    assert!(o.code != 0 && herdr::failed_with(&o, "timeout"), "{o:?}");
+    let o = term::exec(&r, &term::wait_working_argv("slow", "20000")).unwrap();
+    assert!(o.code != 0 && term::failed_with(&o, "timeout"), "{o:?}");
 }
 
 #[test]
@@ -107,7 +106,7 @@ fn another_host_is_reached_through_shed_connect_over_ssh() {
     let f = Fake::default().reply("ssh", &format!("{hello}\n{read}\n"));
     let base = shed::With(&f, b.shed());
     let on = On::new(&base, Some("box"));
-    assert_eq!(herdr::read(&on, "sendmeter-impl-12").unwrap(), "remote screen");
+    assert_eq!(term::read(&on, "sendmeter-impl-12").unwrap(), "remote screen");
     let calls = f.calls.borrow();
     assert!(
         calls
@@ -323,14 +322,14 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     let (none, s) = (Fake::default(), b.shed());
     let none = shed::With(&none, s);
     assert!(
-        herdr::agents(&On::new(&none, Some("bazzite"))).is_err(),
+        term::agents(&On::new(&none, Some("bazzite"))).is_err(),
         "neither answers: unreachable"
     );
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let d = json!({"id": "q1", "agent": "sendmeter-impl-12"});
     let ask = Event::new(c.now, "sendmeter", Some(12), "needs-decision", d);
     drover::events::append(&c.state, &ask).unwrap();
-    let r = shed::With(&f, cfg.shed().unwrap());
+    let r = shed::With(&f, cfg.shed());
     let to = drover::deliver(&c, &cfg, &r, &ask, "DECISION q1: go on", false).unwrap();
     assert_eq!(to.as_deref(), Some("sendmeter-impl-12"));
     assert!(f.called("shed send sendmeter-impl-12 DECISION q1: go on"));
@@ -544,10 +543,10 @@ fn an_acp_lanes_state_follows_its_turn_events() {
     let c = ctx(&tmpdir("acp-state"), &acp_config(&b.sock, "claude", true));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    assert!(cfg.runtime.shed().is_none(), "no global runtime: the fleet's own");
-    let sh = cfg.shed_for("sendmeter").unwrap();
+    assert!(cfg.runtime.shed().acp.is_none(), "no global runtime: the fleet's own");
+    let sh = cfg.shed_for("sendmeter");
     assert_eq!((sh.acp.as_deref(), sh.policy.as_str()), (Some("claude-acp"), "allow"));
-    assert_eq!(shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap(), 4);
+    assert_eq!(shed::intake(&c, &cfg, &cfg.shed().wire).unwrap(), 4);
     let states: Vec<_> = drover::events::read(&c.state)
         .unwrap()
         .iter()
@@ -681,12 +680,20 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
 }
 
 #[test]
-fn the_default_runtime_is_herdr() {
+fn the_default_runtime_is_a_shed_terminal_and_herdr_fails_to_load() {
     let cfg = drover::config::Config::parse(CONFIG).unwrap();
-    assert!(cfg.runtime.shed().is_none());
+    assert!(cfg.runtime.shed().acp.is_none());
     assert!(Fake::default().shed().is_none());
     let bad = format!("{CONFIG}\n[runtime]\nkind = \"tmux\"\n");
     assert!(drover::config::Config::parse(&bad).is_err());
+    for herdr in [
+        format!("{CONFIG}\n[runtime]\nkind = \"herdr\"\n"),
+        format!("{CONFIG}\n[fleet.sendmeter.runtime]\nkind = \"herdr\"\n"),
+        format!("{CONFIG}\n[hosts.air]\nmachine = \"air\"\nruntime = \"herdr\"\n"),
+    ] {
+        let e = format!("{:#}", drover::config::Config::parse(&herdr).unwrap_err());
+        assert!(e.contains(drover::config::RETIRED_RUNTIME), "{e}");
+    }
 }
 
 #[test]
@@ -763,7 +770,7 @@ fn the_service_follows_sheds_events_and_says_when_the_stream_drops() {
     let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let r: &'static Fake = Box::leak(Box::new(Fake::default().reply("herdr", "{}")));
     let sc = c.clone();
-    std::thread::spawn(move || drover_service::run(sc, r, || 1_000_000, api, None));
+    std::thread::spawn(move || drover_service::run(sc, r, || 1_000_000, api));
     let logged = |kind: &str| -> Vec<drover::events::Event> {
         let all = drover::events::read(&c.state).unwrap_or_default();
         all.iter().filter(|e| e.kind == kind).cloned().collect()
@@ -888,7 +895,7 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     let base = shed::With(&f, b.shed());
     let on = On::new(&base, Some("bazzite"));
     assert!(on.shed().is_some(), "shed runtime on");
-    let listed = herdr::agents(&on).expect("herdr answers there: the host is up");
+    let listed = term::agents(&on).expect("herdr answers there: the host is up");
     assert_eq!(listed[0]["name"], "sendmeter-impl-12", "{listed:?}");
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let remote = drover::hosts::remote_agents(&cfg, &base);
@@ -1228,7 +1235,7 @@ fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
     exits(&b, &[json!({"event": "exited", "code": 139})]);
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let c = later(&c, 300);
-    shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
+    shed::intake(&c, &cfg, &cfg.shed().wire).unwrap();
     let cli = Push(b.cli(&f), wt.clone());
     let (code, out) = run(&c, &cli, &["check"]);
     assert_eq!(code, 0, "{out}");
@@ -1627,8 +1634,8 @@ fn a_lane_keeps_its_spawn_runtime_after_the_config_changes() {
     .unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
     assert!(
-        cfg.shed_for("sendmeter").is_none(),
-        "the fleet's new lanes start in herdr"
+        cfg.shed_for("sendmeter").acp.is_none(),
+        "the fleet's new lanes start in a shed terminal"
     );
     let got = wheres(&c, r);
     assert_eq!(got["sendmeter-impl-12"].0, "shed-acp", "{got:?}");
@@ -2289,7 +2296,7 @@ fn an_acp_lane_silent_after_its_first_turn_is_a_failed_start_naming_its_account(
         json!({"seq": seq, "name": "sendmeter-impl-12", "labels": lane_labels(), "event": "turn", "prompt": "# Brief"});
     b.lock().events.push(turn);
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
+    shed::intake(&c, &cfg, &cfg.shed().wire).unwrap();
     let cli = Push(b.cli(&f), wt.clone());
     let check = |secs| {
         let (code, out) = run(&later(&c, secs), &cli, &["check"]);

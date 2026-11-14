@@ -31,9 +31,9 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - lesson: a weekly lane turns repeated review findings into checks, shadow first (#449, #586, #756).
 
 **Lane runtime**
-- herdr panes (the default), shed terminals, or shed-acp ACP sessions (#390, #480, #590); see
+- shed terminals (the default) or shed-acp ACP sessions (#390, #480, #590, #721); see
   [runtimes](docs/runtimes.md).
-- Lane state comes from herdr's and shed's event streams (#585).
+- Lane state comes from shed's event stream (#585).
 - Every external call is time-limited by one runner (#763).
 
 **Orchestrator threads, asks and run cards**
@@ -44,7 +44,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 
 **Hosts and CI runners**
 - Lanes on many machines, placed by tags and load (#211, #564); workspace roots (#645).
-- Cloud hosts with idle stop and a spend budget (#280); shed-acp hosts with no herdr (#705).
+- Cloud hosts with idle stop and a spend budget (#280); shed-acp hosts (#705).
 - A host offline 15 min gets its lanes restarted on the main host (#847).
 - A never-started needs-human lane gets [start lane] (#858).
 - Owner-approved CI runner VMs for orchestrators (#596).

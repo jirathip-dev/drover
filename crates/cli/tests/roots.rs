@@ -320,10 +320,10 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     let (_, st) = run(&r.c, &Git(&f), &["status"]);
     assert!(st.contains(" · +1 ⇡1"), "{st}");
     let cfg = Config::load(&r.c.config).unwrap();
-    let a = drover::herdr::agents(&r.sh.on(&Git(&f))).unwrap();
+    let a = drover::term::agents(&r.sh.on(&Git(&f))).unwrap();
     assert_eq!(a[0]["cwd"], json!(wt), "{a:?}");
     let st = drover::events::states(&r.c.state).unwrap();
-    let ls = drover::lanes::join(&cfg, &Git(&f), &r.c.worktrees, &ev, &st, &a, &Default::default());
+    let ls = drover::lanes::join(&cfg, &Git(&f), &r.c.worktrees, &ev, &st, &a);
     let l = ls.iter().find(|l| l.name == AGENT).unwrap();
     let u = l.unsaved(&Git(&f));
     assert_eq!(
