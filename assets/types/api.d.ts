@@ -132,8 +132,7 @@ export type LaneUnsaved = { name: string, root?: string | null, dirty?: number |
 export type LaneNow = { title: string, w?: string | null, n?: string | null, t?: string | null, };
 
 /**
- * #611: a session on an enabled host's shed no lane or conductor names (`runtime` `shed` or `acp`, `state` shed's,
- * `last` its last line, `age` since the board first saw that state), or that host's shed failing (`error` alone).
+ * #611: API v1's `shed` entry: a session no lane or conductor names, or (`error` alone) its host's shed failing.
  */
 export type ShedRow = { host: string, error?: string | null, name?: string | null, runtime?: string | null, labels?: { [key in string]: string } | null, state?: string | null, last?: string | null, age?: string | null, };
 
