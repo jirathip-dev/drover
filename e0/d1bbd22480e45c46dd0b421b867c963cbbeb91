@@ -1,0 +1,15 @@
+Decided: herdr.rs becomes term.rs, the one lane-terminal adapter on shed; herdr's runtime, workspaces, worktrees, agent start, machine profiles and event stream go
+Because: "Remove the herdr runtime: `herdr.rs`, the herdr branches in spawn, confirm, adopt, snapshot, kill/stop/close, clean, check"
+Decided: `kind = "herdr"` (global, fleet or host) fails to load with config::RETIRED_RUNTIME, which names shed-acp and docs/runtimes.md
+Because: "fails to load with a clear message"
+Decided: an unset runtime is no shed (spawn and the orchestrator bail NO_RUNTIME), not a default socket, so a test fake never reaches the user's shed server
+Because: crates/core/src/config.rs:195
+Decided: the orchestrator starts as a shed terminal (or ACP session) on its runner's wire, like spawn
+Because: "The conductor start uses shed like the lanes (not a herdr pane)."
+Decided: adopt stays: a crash between spawn-started and spawn leaves a shed terminal no spawn logged
+Because: "Keep `adopt` only if shed needs it."
+Decided: the board reads a remote host's `shed connect` only from the step's snapshot (key_in), never live on a request
+Because: crates/core/src/snapshot.rs:31
+Rejected: rewriting every caller onto typed shed calls — the pane-word layer is already the one way in; a bigger diff for no behaviour change
+Check: tests/term_adapter.rs greps crates/*/src for herdr; tests/shed.rs no_runtime_is_no_shed_and_herdr_fails_to_load loads all three herdr forms
+Owner: Lanes run only on shed now; a fleet.toml still naming herdr refuses to load and says how to switch.
