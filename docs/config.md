@@ -38,7 +38,7 @@ review or ready).
 - A marked issue starts only with a free slot: `SERIAL_BUSY ci: #2968 holds 1/1`.
 - An issue whose diff joins a full group **holds** (`serial-held {group, holder}`): its lane is told
   `stop: ci is held by #2968; you'll get an update round when it merges`, its worktree stays and no review is spawned.
-  Its card reads `waits: ci held by #2968 (1/1)`.
+  Its card reads `serial: ci held by #2968 (1/1)`.
 - When a slot frees, the first held issue in queue order takes it (`serial-slot {group}`) and gets an update round
   (merge `origin/<integration>`), then carries on.
 - An issue in two or more groups takes their slots in name order and needs all of them before it continues, so two
@@ -46,6 +46,11 @@ review or ready).
 - Issues already in flight over a limit when a group is added keep going (grandfathered); new joins wait.
 
 Board, status and the Host tab show each group's use: `serial: db 3/10 · ci 1/1`.
+
+Hot files (#891): each file the last `drover hotspots` run stored is its own one-slot group, `hot <file>`, joined
+only by a PR's diff (never a `--serial` mark). Drive drops a file from it on its next pass once
+`.drover/arch.toml` on the integration branch lists it `frozen` or `generated` (`hot-files {files}` logs each
+change). A held issue's board row and card read `serial: hot <file>`.
 
 ## Fast-first landing (#350)
 
