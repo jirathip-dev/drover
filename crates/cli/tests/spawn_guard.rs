@@ -1,4 +1,3 @@
-//! M2 spawn gates: host load (HOST_BUSY), duplicate guard (LANE_LIVE,
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -13,8 +12,6 @@ fn wt(c: &drover::Ctx) -> PathBuf {
     c.worktrees.join("sendmeter/issue-12")
 }
 
-/// A Fake on which `drover spawn sendmeter 12 impl` (hermes) succeeds end to end.
-/// Prepend `once` replies or pass `agent_list` to steer it.
 fn happy(c: &drover::Ctx, agent_list: &str) -> Fake {
     let w = wt(c);
     std::fs::create_dir_all(&w).unwrap();
@@ -77,8 +74,6 @@ fn assert_refused(c: &drover::Ctx, sh: &FakeShed, r: &Fake, extra: &[&str], code
     out
 }
 
-// --- host-load gate ---
-
 #[test]
 fn host_busy_on_memory_pressure() {
     for level in ["2", "4"] {
@@ -91,7 +86,6 @@ fn host_busy_on_memory_pressure() {
     }
 }
 
-/// #168: one swap spike with normal pressure admits; a sustained median with warn pressure refuses.
 #[test]
 fn swap_refuses_on_sustained_median_with_pressure_not_one_spike() {
     let swap = |prev: &str, level: &str| {
@@ -120,7 +114,6 @@ fn swap_refuses_on_sustained_median_with_pressure_not_one_spike() {
     assert_eq!(w, "4000 5000 6000 3000 5000", "the window keeps the last 5");
 }
 
-/// #168: free + inactive memory under `[limits] min_free_mem_gb` (default 2) refuses MEM_LOW.
 #[test]
 fn mem_low_under_the_floor() {
     let d = tmpdir("mem-low");
@@ -138,7 +131,6 @@ fn mem_low_under_the_floor() {
     assert_eq!(sh.all("run").len(), 1);
 }
 
-/// #103: a fake `df` under `[limits] min_free_gb` (default 10) refuses DISK_LOW; at or over it admits.
 #[test]
 fn disk_low_under_min_free_gb() {
     let d = tmpdir("disk-low");
@@ -247,8 +239,6 @@ fn force_admits_busy_host_and_logs_override() {
     assert!(ev.iter().any(|e| e.kind == "spawn"));
 }
 
-// --- duplicate guard ---
-
 #[test]
 fn live_agent_in_worktree_is_lane_live() {
     let d = tmpdir("dup-live");
@@ -285,7 +275,6 @@ fn dirty_unknown_worktree_is_worktree_dirty() {
     let r = r.once(&format!("git -C {} rev-list", w.display()), 0, "3\n");
     let out = assert_refused(&c, &sh, &r, &[], "WORKTREE_DIRTY");
     assert!(out.contains("3 unpushed"), "{out}");
-    // fleet's own brief does not make a worktree dirty.
     let (sh, r) = shed_happy(&c);
     let r = r.once(&format!("git -C {} status", w.display()), 0, "?? .brief.md\n");
     assert_eq!(spawn(&c, &r, &[]).0, 0);
@@ -315,8 +304,6 @@ fn supersede_kills_old_agent_then_spawns() {
     assert_eq!(s.data["killed"], json!(["sendmeter-impl-12"]));
     assert_eq!(ev.last().unwrap().kind, "spawn");
 }
-
-// --- #9: Hermes kick ---
 
 struct Hermes<'a> {
     fake: Fake,
@@ -361,8 +348,6 @@ fn hermes_kick_retries_after_dropped_first_prompt() {
     assert_eq!(f.count("sleep 10"), 1);
     assert_eq!(read(&c.state).unwrap().last().unwrap().data["confirmed"], true);
 }
-
-// --- #155: no orch lane ---
 
 #[test]
 fn an_orch_spawn_is_refused_and_every_lane_takes_an_issue() {
@@ -418,8 +403,6 @@ fn a_new_lane_brief_carries_the_issue_decisions() {
     );
 }
 
-// --- #13: herdr start timeout under load ---
-
 const TIMEOUT: &str = r#"{"error":{"code":"timeout","message":"timed out waiting for agent startup"}}"#;
 const PANE_HERMES: &str =
     r#"{"result":{"pane":{"pane_id":"w9:p1","workspace_id":"w9","agent":"hermes","agent_status":"idle"}}}"#;
@@ -451,8 +434,6 @@ fn start_timeout_with_running_harness_registers_lane() {
     assert!(st.contains("sendmeter-impl-12"), "{st}");
 }
 
-/// #359: a pane that never confirms within the window is closed and started once more on a fresh pane; a second
-/// failure closes that one too: no stale pane, nothing logged.
 #[test]
 fn start_timeout_without_harness_closes_pane_and_retries_once() {
     let d = tmpdir("timeout-none");
@@ -476,13 +457,11 @@ fn start_timeout_without_harness_closes_pane_and_retries_once() {
         read(&c.state)
             .unwrap()
             .iter()
-            .all(|e| matches!(e.kind.as_str(), "spawn-started" | "intent" | "failed")), // #509: its try
+            .all(|e| matches!(e.kind.as_str(), "spawn-started" | "intent" | "failed")),
         "nothing but the intent (#376) logged"
     );
 }
 
-/// #718: a pane whose title changes on every read (a busy spinner) but never confirms still gives up at 120 s: a
-/// title change never extends confirm's window.
 #[test]
 fn a_title_that_changes_every_read_never_extends_the_confirm_window() {
     let d = tmpdir("timeout-spinner");
@@ -506,7 +485,6 @@ fn a_title_that_changes_every_read_never_extends_the_confirm_window() {
     assert!(r.called("herdr pane close w9:p1") && r.called("herdr pane close w9:p2"));
 }
 
-/// #359: the retried start succeeds: the lane runs on the fresh pane.
 #[test]
 fn a_never_confirming_pane_is_replaced_by_one_more_start() {
     let d = tmpdir("timeout-retry");
@@ -526,7 +504,6 @@ fn a_never_confirming_pane_is_replaced_by_one_more_start() {
     );
 }
 
-/// #359: Claude's startup title arrives 40 s after its start gave up: the pane is confirmed, named and adopted.
 #[test]
 fn a_late_startup_title_confirms_and_adopts_the_lane() {
     let d = tmpdir("late-title");
@@ -568,7 +545,6 @@ fn a_late_startup_title_confirms_and_adopts_the_lane() {
     );
 }
 
-/// #359: `agent_launch_pending` on the rename waits and retries; it is never a failure.
 #[test]
 fn agent_launch_pending_on_rename_is_retried_then_succeeds() {
     let d = tmpdir("launch-pending");
@@ -643,8 +619,6 @@ fn adopt_records_running_lane() {
     assert!(read(&c.state).unwrap().iter().all(|e| e.issue != Some(13)));
 }
 
-// --- #107: no orphan lanes ---
-
 #[test]
 fn host_busy_creates_no_worktree_dir() {
     let d = tmpdir("host-busy-nothing");
@@ -677,7 +651,6 @@ fn kick_failure_after_start_still_logs_unconfirmed_spawn() {
 const TAKEN: &str = r#"{"error":{"code":"agent_name_taken","message":"agent name already in use"}}"#;
 const PANE_P7: &str = r#"{"result":{"pane":{"pane_id":"w9:p7","workspace_id":"w9","agent":"hermes"}}}"#;
 
-/// The guard's `agent list` sees nothing; after `agent_name_taken` the next one shows the orphan in `cwd`.
 fn name_taken(c: &drover::Ctx, cwd: &str) -> Fake {
     let list = agents(&[("sendmeter-impl-12", "working", cwd, "w9:p7")]);
     happy(c, &list)
@@ -715,7 +688,7 @@ fn agent_name_taken_elsewhere_is_refused_as_before() {
         read(&c.state)
             .unwrap()
             .iter()
-            .all(|e| matches!(e.kind.as_str(), "spawn-started" | "intent" | "failed")), // #509: its try
+            .all(|e| matches!(e.kind.as_str(), "spawn-started" | "intent" | "failed")),
         "nothing but the intent (#376) logged"
     );
 }
@@ -734,7 +707,6 @@ fn named_orphan_in_worktree_is_adopted_not_lane_live() {
     assert_eq!((ev[0].str("pane"), &ev[0].data["adopted"]), (Some(IMPL), &json!(true)));
 }
 
-/// #128: a supersede closes the old lane's pane once the new one is confirmed; a working old lane is untouched.
 #[test]
 fn supersede_closes_old_pane_after_confirm_unless_working() {
     for working in [false, true] {
@@ -767,8 +739,6 @@ fn supersede_closes_old_pane_after_confirm_unless_working() {
     }
 }
 
-// --- #182: a failed spawn leaves no zombie pane ---
-
 #[test]
 fn a_failed_rename_closes_the_pane_so_the_next_spawn_is_not_lane_live() {
     let d = tmpdir("rename-fail");
@@ -784,10 +754,9 @@ fn a_failed_rename_closes_the_pane_so_the_next_spawn_is_not_lane_live() {
         read(&c.state)
             .unwrap()
             .iter()
-            .all(|e| matches!(e.kind.as_str(), "spawn-started" | "intent" | "failed")), // #509: its try
+            .all(|e| matches!(e.kind.as_str(), "spawn-started" | "intent" | "failed")),
         "nothing but the intent (#376) logged"
     );
-    // The pane is gone: the next pass spawns, no LANE_LIVE.
     let (exit, out) = spawn(&c, &happy(&c, NO_AGENTS), &[]);
     assert_eq!(exit, 0, "{out}");
 }
@@ -811,7 +780,6 @@ fn lane_live_on_an_idle_unlogged_pane_names_its_age_and_the_way_out() {
     );
 }
 
-/// #168: `agent_pane_busy` closes a finished lane's pane and retries once on a fresh one; no error.
 #[test]
 fn agent_pane_busy_closes_a_finished_lane_pane_and_retries_once() {
     let d = tmpdir("pane-busy");
@@ -837,11 +805,8 @@ fn agent_pane_busy_closes_a_finished_lane_pane_and_retries_once() {
     assert_eq!(s.str("pane"), Some("w9:p2"));
 }
 
-// --- #463: a start that fails shows its screen; a known first-start prompt is answered ---
-
 const NOT_READY: &str = r#"{"error":{"code":"agent_not_ready","message":"agent sendmeter-impl-12 is blocked during startup and is not ready for prompts"}}"#;
 
-/// A one-entry fallback chain, so a failed start logs `spawn-failed` (its `error` the printed one).
 fn chain(harness: &str) -> String {
     let cfg = CONFIG.replace("harness  =  \"hermes\"", &format!("harness = \"{harness}\""));
     cfg.replace(
@@ -850,7 +815,6 @@ fn chain(harness: &str) -> String {
     )
 }
 
-/// The error a failed start logged.
 fn failed(c: &drover::Ctx) -> String {
     let ev = read(&c.state).unwrap();
     let f = ev
@@ -860,7 +824,6 @@ fn failed(c: &drover::Ctx) -> String {
     f.str("error").unwrap().to_string()
 }
 
-/// A start that fails: the pane's last 40 lines (secrets redacted) are in the error and the `spawn-failed` event.
 #[test]
 fn a_start_failure_records_the_pane_screen() {
     let d = tmpdir("not-ready-screen");
@@ -892,7 +855,6 @@ fn claude_ctx(name: &str) -> (PathBuf, drover::Ctx) {
 }
 
 const TRUST: &str = " Accessing workspace:\n\n /tmp/cooee/design-1\n\n Quick safety check: Is this a project you created or one you trust?\n\n ❯ 1. Yes, I trust this folder\n   2. No, exit\n\n Enter to confirm · Esc to cancel\n";
-/// #476: Claude Code's unnumbered trust menu, as cooee #10's pane showed it.
 const TRUST_CURSOR: &str = " Accessing workspace:
 
  /Users/jkmacmini/.herdr/worktrees/cooee/issue-10
@@ -909,12 +871,10 @@ const TRUST_CURSOR: &str = " Accessing workspace:
 
  Enter to confirm · Esc to cancel
 ";
-/// #484: the raw `herdr pane read --source visible` of a failed start: the shell's own `❯` prompts above the menu.
 const TRUST_LIVE: &str = include_str!("golden/spawn/trust-live.txt");
 const TRUST_1X: &str = "╭──────────────────────────────────────────╮\n│ Do you trust the files in this folder?   │\n│                                          │\n│ /tmp/cooee/design-1                      │\n│                                          │\n│ ❯ 1. Yes, proceed                        │\n│   2. No, exit                            │\n╰──────────────────────────────────────────╯\n   Enter to confirm · Esc to exit\n";
 const BYPASS: &str = " WARNING: Claude Code running in Bypass Permissions mode\n\n By proceeding, you accept all responsibility?\n\n ❯ 1. No, exit\n   2. Yes, I accept\n\n Enter to confirm · Esc to cancel\n";
 
-/// A new folder's trust dialog (and the bypass warning, "Yes" second) is answered, then the lane confirms and runs.
 #[test]
 fn a_known_first_start_prompt_is_answered_and_the_spawn_confirms() {
     for (screen, prompt, keys) in [
@@ -961,7 +921,6 @@ fn a_known_first_start_prompt_is_answered_and_the_spawn_confirms() {
     }
 }
 
-/// A prompt drover does not know is never answered: the spawn fails with that screen in its error.
 #[test]
 fn an_unknown_first_start_prompt_fails_with_its_screen() {
     let (_d, c) = claude_ctx("first-start-unknown");

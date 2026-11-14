@@ -1,10 +1,7 @@
-//! #707: drover keeps no secret store: `serve` starts with none, a `secret:` env comes from its 0600 file,
-//! `secret rm` deletes that file, and `migrate` prints the commands that delete the old Keychain items.
 mod common;
 use common::*;
 use std::io::{Read, Write};
 
-/// CONFIG with a `secret:` env and `[accounts]` A and B, the configs that once made serve probe the store.
 fn setup(name: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let cfg = CONFIG.replace(
@@ -17,14 +14,11 @@ fn setup(name: &str) -> drover::Ctx {
 #[test]
 fn serve_starts_with_no_secret_store() {
     let c = setup("no-store");
-    // The runner has no store (`Runner::secret` refuses): serve gets past its old probe to the server itself.
     let r = Fake::default();
     assert!(drover::runner::Runner::secret(&r, "drover/all/X").is_err());
-    // Exit 1 is the test binary's missing server ("no serve", on stderr); the old probe refused 3 `NO_STORE`.
     let (code, out) = run(&c, &r, &["serve"]);
     assert_eq!(code, 1, "{out}");
     assert!(!out.contains("REFUSED"), "{out}");
-    // And the board answers over a real socket with that config.
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();

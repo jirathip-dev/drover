@@ -1,5 +1,3 @@
-//! #412: an issue's optional design stage: the design lane's hand-off for review, and the owner's decision on it.
-//! #730: an architect stage works the same way; its events name `role: architect` (none: `design`).
 use crate::config::Config;
 use crate::events::{self, emit, last_spawn, read, Event, IssueState};
 use crate::runner::{ok, Runner};
@@ -92,7 +90,6 @@ impl Recipe {
     }
 }
 
-/// #868: the folders a design lane writes: `docs/design` and each backquoted `…/design/…` path its issue `body` names.
 fn paths(body: &str) -> Vec<String> {
     let mut out = vec!["docs/design".to_string()];
     for span in body.split('`').skip(1).step_by(2) {
@@ -115,7 +112,6 @@ fn paths(body: &str) -> Vec<String> {
     out
 }
 
-/// #868: the medium a design issue asks for: a native one it names along with a design path of its own, else HTML.
 fn medium(body: &str) -> &'static str {
     let native = ["SwiftUI", "UIKit", "AppKit", "Jetpack Compose"];
     let own = paths(body).len() > 1;
@@ -127,7 +123,6 @@ pub fn is_ask(e: &Event) -> bool {
     e.kind == "needs-decision" && e.data.get("design") == Some(&Value::Bool(true))
 }
 
-/// The head the issue's `role` stage started from: its first spawn's since the last reject.
 fn pre<'a>(ev: &'a [Event], f: &str, n: u64, role: &str) -> Option<&'a str> {
     let from = ev
         .iter()
@@ -140,8 +135,7 @@ fn pre<'a>(ev: &'a [Event], f: &str, n: u64, role: &str) -> Option<&'a str> {
         .find_map(|e| e.str("sha").filter(|s| !s.is_empty()))
 }
 
-/// A design lane that ended its turn (not working) on a head that carries its stage's files and was never handed off:
-/// `design-review`, then one ask that the board card and the conductor thread which queued it (if any) both answer.
+/// A design lane that ended its turn (not working) on a head that carries its stage's files and was never handed off: `design-review`, then one ask that the board card and the conductor thread which queued it (if any) both answer.
 pub fn handoff(
     ctx: &Ctx,
     cfg: &Config,
@@ -168,7 +162,6 @@ pub fn handoff(
     let log = ok(r, "git", &["-C", wt, "log", "-1", "--format=%H"]).unwrap_or_default();
     let head = log.trim();
     let (f, n) = (s.fleet.as_str(), s.issue);
-    // #789: the head's design is handed off once, whichever lane pushed it (a `--supersede` one pushes nothing new).
     let handed = ev
         .iter()
         .any(|e| e.is("design-review", f, n) && e.str("sha") == Some(head));
@@ -202,7 +195,6 @@ pub fn handoff(
     if names.is_empty() {
         return failed(ctx, cfg, out, &ev, sp, (f, n, role));
     }
-    // #730: the ADR's folder, `docs/architecture/<slug>`, which the impl and rev briefs link once approved.
     let dir = folder(names[0], &dirs);
     let adr = (role == "architect").then(|| dir.clone());
     let png = |l: &&str| {
@@ -327,8 +319,7 @@ fn summary(r: &dyn Runner, wt: &str, head: &str, dir: &str) -> Option<String> {
     Some(out.trim_end().to_string())
 }
 
-/// The owner's answer `text` to design ask `ask`: approve, reject, or (anything else) revise with it as the note.
-/// Approve and reject end the design lane (its pane closes); reject pushes one commit back to the pre-design tree.
+/// The owner's answer `text` to design ask `ask`: approve, reject, or (anything else) revise with it as the note. Approve and reject end the design lane (its pane closes); reject pushes one commit back to the pre-design tree.
 pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, by: &str) -> Result<()> {
     let (f, n) = (ask.fleet.as_str(), ask.issue.context("a design ask names its issue")?);
     let ev = read(&ctx.state)?;
@@ -368,7 +359,6 @@ pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, 
         review.map_or(Value::Null, |e| e.data["adr"].clone()),
     );
     emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), kind, d))?;
-    // #778: approve starts impl, revise the design lane again: pending until it spawns.
     let (action, role) = match kind {
         "design-approved" => ("approve", cfg.fleet(f)?.flow().start()),
         "design-revise" => ("revise", ask.str("role").unwrap_or("design")),

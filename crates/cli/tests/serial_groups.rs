@@ -1,5 +1,3 @@
-//! #294: named serial groups: both config forms, joining by mark or by the pushed diff, a full group holds the lane
-//! until the holder merges (then an update round), fixed-order slots over two groups, grandfathering and the wording.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -16,7 +14,6 @@ name = "ci"
 paths = [".github/workflows/ci.yml", "scripts/lib/ci*", "scripts/check-*"]
 "#;
 
-/// CONFIG with `extra` in `[fleet.sendmeter]` (keys) or after it (tables).
 fn config(keys: &str, tables: &str) -> String {
     CONFIG.replace(
         "integration = \"staging\"   # never main",
@@ -39,7 +36,6 @@ fn ev(c: &drover::Ctx, n: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(10, "sendmeter", Some(n), kind, d)).unwrap();
 }
 
-/// An impl lane of `n` logged as spawned, in a real worktree dir.
 fn lane(c: &drover::Ctx, n: u64) {
     let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
@@ -56,7 +52,6 @@ fn pr(n: u64) -> String {
     .to_string()
 }
 
-/// Spawns succeed, the host is calm, and issue `n`'s open PR changes `files`.
 fn fake(prs: &[(u64, &str)]) -> Fake {
     let mut f = Fake::default()
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
@@ -87,7 +82,6 @@ fn drive(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     (out, steps.collect())
 }
 
-/// `kind` events of `n`, as `group` (`holder`).
 fn logged(c: &drover::Ctx, n: u64, kind: &str) -> Vec<String> {
     let all = read(&c.state).unwrap();
     let mine = all.iter().filter(|e| e.kind == kind && e.issue == Some(n));
@@ -106,15 +100,12 @@ fn queue_groups(c: &drover::Ctx, n: u64) -> Vec<String> {
     gs.iter().map(|g| g.name.clone()).collect()
 }
 
-// --- config ---
-
 #[test]
 fn both_forms_parse_and_together_are_an_error() {
     let c = Config::parse(&config("", DB_CI)).unwrap();
     let g = &c.fleet["sendmeter"].serial;
     let got: Vec<_> = g.iter().map(|g| (g.name.as_str(), g.paths.len(), g.max)).collect();
     assert_eq!(got, [("db", 1, 10), ("ci", 3, 1)]);
-    // The old form is one group named `serial_label`, `db` when unset.
     let old = "serial_paths = [\"supabase/migrations/**\"]\nserial_max = 3";
     let c = Config::parse(&config(old, "")).unwrap();
     let g = &c.fleet["sendmeter"].serial;
@@ -142,8 +133,6 @@ fn doctor_suggests_the_new_form() {
     let (c, _sh) = sctx("sg-doctor-new", &config("", DB_CI));
     assert!(!run(&c, &Fake::default(), &["doctor"]).1.contains("old form"));
 }
-
-// --- joining ---
 
 #[test]
 fn a_mark_joins_its_group_plain_serial_the_first() {
@@ -188,8 +177,6 @@ fn a_pushed_diff_joins_a_free_group_and_carries_on() {
     assert!(status.contains("sendmeter: serial: db 0/10 · ci 1/1\n"), "{status}");
 }
 
-// --- holding ---
-
 #[test]
 fn a_second_ci_push_holds_until_the_holder_merges_then_updates() {
     let (c, sh) = sctx("sg-hold", &config("", DB_CI));
@@ -220,17 +207,14 @@ fn a_second_ci_push_holds_until_the_holder_merges_then_updates() {
     assert!(!sh.called("run", "sendmeter-rev-12-r1"));
     let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
     assert!(w.contains("waits: ci held by #9 (1/1)"), "{w}");
-    // Still held next pass, and told once.
     let (_, steps) = drive(&c, &r);
     assert!(steps.is_empty(), "{steps:?}");
     assert_eq!(stops().len(), 1);
-    // A manual spawn says who holds the slot.
     let (exit, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert!(
         exit == 3 && out.contains("REFUSED SERIAL_BUSY: ci: #9 holds 1/1; retry after they merge"),
         "{out}"
     );
-    // The holder merges: #12 takes the slot and gets its update round.
     ev(&c, 9, "merged", json!({}));
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["conflict"], "{out}");
@@ -271,7 +255,6 @@ fn two_groups_take_slots_in_name_order_so_two_issues_never_deadlock() {
     let (c, _sh) = sctx("sg-ab", &config("", groups));
     lane(&c, 12);
     lane(&c, 13);
-    // Both touch aa and bb at once (listed b first): #12 takes both, #13 holds on aa and so never takes bb.
     let r = fake(&[(12, "b/x\na/x\n"), (13, "b/y\na/y\n")]);
     drive(&c, &r);
     assert_eq!(logged(&c, 12, "serial-joined"), ["aa", "bb"]);
@@ -279,7 +262,6 @@ fn two_groups_take_slots_in_name_order_so_two_issues_never_deadlock() {
     assert_eq!(logged(&c, 13, "serial-held"), ["aa (12)", "bb (12)"]);
     let (_, status) = run(&c, &Fake::default(), &["status", "sendmeter"]);
     assert!(status.contains("serial: bb 1/1 · aa 1/1"), "{status}");
-    // #12 merges: #13 takes aa, then bb, then updates.
     ev(&c, 12, "merged", json!({}));
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["conflict"], "{out}");
@@ -311,12 +293,9 @@ fn a_held_issue_waits_on_its_second_group_with_its_first_slot_taken() {
     assert_eq!(steps, ["conflict"]);
 }
 
-// --- grandfathering and wording ---
-
 #[test]
 fn work_over_the_limit_when_a_group_lands_keeps_going_and_new_joins_wait() {
     let (c, _sh) = sctx("sg-grand", &config("", DB_CI));
-    // #8 and #9 already touch ci.yml and are in review when the group lands: no join events yet.
     for n in [8, 9] {
         lane(&c, n);
         let d = json!({"role": "rev", "agent": format!("sendmeter-rev-{n}-r1"), "pane": format!("sendmeter-rev-{n}-r1"), "workspace": "", "runtime": "shed"});
@@ -396,13 +375,11 @@ fn crossed_joins_over_two_groups_never_deadlock() {
     ok(&["queue", "sendmeter", "add", "13", "12"]);
     lane(&c, 12);
     lane(&c, 13);
-    // #12 holds aa, #13 holds bb; then each one's push touches the other's group.
     ev(&c, 12, "serial-joined", json!({"group": "aa", "by": "diff"}));
     ev(&c, 13, "serial-joined", json!({"group": "bb", "by": "diff"}));
     let r = fake(&[(12, "a/x\nb/x\n"), (13, "b/y\na/y\n")]);
     drive(&c, &r);
     assert_eq!(logged(&c, 12, "serial-held"), ["bb (13)"]);
-    // #13 waits on aa, the earlier group, so it lets go of bb: #12 takes it and updates, though #13 is first in queue.
     assert_eq!(logged(&c, 13, "serial-held"), ["aa (12)", "bb (12)"]);
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["conflict"], "{out}");
