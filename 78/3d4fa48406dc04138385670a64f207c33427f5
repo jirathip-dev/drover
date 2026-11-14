@@ -1,0 +1,7 @@
+Decided: the README quick-start test puts an empty stub `shed` on its PATH; spawn --dry-run only checks `which shed` and never runs it
+Because: "`cargo build --release`, `clippy -D warnings`, `cargo test` exit 0"
+Decided: host fixtures drop the herdr version skew and list the queue fixture's two running lanes via `shed ls`
+Because: "Remove the herdr runtime: `herdr.rs`, the herdr branches in spawn, confirm, adopt, snapshot, kill/stop/close, clean, check"
+Rejected: letting spawn --dry-run skip the shed check — a src change to fix a test, and a dry run should name a missing shed too
+Check: board-freeze needs the q1656 board-fix line in the issue's Amendments; only an orchestrator or the owner can write it
+Owner: CI's quick-start and board-fixture checks no longer depend on herdr or a shed install; the board-fix amendment still has to be written for board-freeze to pass.
