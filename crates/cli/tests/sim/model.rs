@@ -12,7 +12,6 @@ pub const REPO: &str = "jirathip-dev/herdsman";
 /// What a lane's agent does once its prompt lands.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Script {
-    /// Works `secs`, pushes a new head (CI then goes green or red, `ci` secs later, else 1–15 min), stops.
     Push {
         secs: u64,
         green: bool,
@@ -96,8 +95,7 @@ pub struct Model {
     pub agenda: BTreeMap<(u64, u64), Ev>,
     seq: u64,
     shas: u64,
-    /// Scripts queued per role: the next lane of that role takes the first (else `default`). #686: a `<role>#<issue>`
-    /// list goes first, its last script kept for every later lane.
+    /// Scripts queued per role (or `<role>#<issue>`): the next lane takes the first, the last is kept.
     pub scripts: BTreeMap<String, Vec<Script>>,
     pub merges: Vec<Merge>,
     pub closed: Vec<u64>,
@@ -123,8 +121,7 @@ impl Model {
         self.seq += 1;
         self.agenda.insert((t, self.seq), e);
     }
-    /// A new head's CI starts at `now`; its end is drawn from `rng` unless `secs` (#686: a replayed push's) or
-    /// `ci_secs` fixes it.
+    /// A new head's CI starts at `now`; its end is `secs`, `ci_secs` or drawn from `rng`.
     pub fn ci_start(&mut self, sha: &str, now: u64, secs: Option<u64>, rng: &mut crate::sched::Rng) -> u64 {
         self.ci.insert(sha.into(), None);
         self.ci_since.insert(sha.into(), now);

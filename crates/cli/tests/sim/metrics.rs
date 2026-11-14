@@ -41,8 +41,7 @@ pub fn of(w: &World) -> Metrics {
     m
 }
 
-/// #686: the metrics a log alone gives (each event with the true time it was appended at; `produced`: a spawn whose
-/// lane pushed a head or wrote a verdict drover takes), for the sim's run and a real one alike.
+/// The metrics a log alone gives, for the sim's run and a real one alike.
 pub fn log<'a>(evs: impl Iterator<Item = (u64, &'a Event)> + Clone, produced: impl Fn(&Event) -> bool) -> Metrics {
     let mut m = Metrics::default();
     let mut queued: BTreeMap<u64, u64> = BTreeMap::new();

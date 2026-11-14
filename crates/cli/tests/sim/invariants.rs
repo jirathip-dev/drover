@@ -161,7 +161,6 @@ pub fn after_step(w: &mut World) {
             v.len()
         ));
     }
-    // I4: each merged event names the head that was merged (I6 below also reads only the log).
     let now = (w.wrote.len(), w.model.merges.len());
     let fresh = std::mem::replace(&mut w.checked, now) != now;
     let bad: Vec<String> = (w.wrote.iter())

@@ -1,8 +1,3 @@
-//! #686: a real stretch of one fleet's state.db as a scenario: when issues were queued (and blocked, unblocked,
-//! removed), what each lane's agent did and how long it took (push, verdict, death, usage cap), each push's CI time and
-//! colour, and the host's busy and offline windows. Today's drover then drives it in the sim; its invariants hold or
-//! fail as for any seed, and its #685 metrics are set beside the real ones. Only ids, timings and outcomes enter the
-//! scenario: no issue text, verdict body, path or secret.
 use crate::model::{Ev, Model, Script, FLEET};
 use crate::scenario::{args, config, timers, T0};
 use crate::sched::Rng;
@@ -30,8 +25,7 @@ pub struct Scenario {
     pub real: Run,
 }
 
-/// A run's outcome beside the other's: the merge order, lane deaths, verdicts logged and #685's metrics (those its
-/// log carries: a real log has no idle, CI or lock wait times).
+/// A run's outcome: the merge order, lane deaths, verdicts logged and #685's metrics.
 #[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq)]
 pub struct Run {
     pub merged: Vec<u64>,
@@ -66,7 +60,6 @@ fn role(e: &Event) -> String {
         .unwrap_or_default()
 }
 
-/// Merge overlapping `(start, end)` windows.
 fn merge(mut w: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
     w.sort_unstable();
     let mut out: Vec<(u64, u64)> = vec![];
@@ -104,14 +97,13 @@ pub fn build(evs: &[Event], fleet: &str, from: u64, to: u64) -> Scenario {
                 Some(on) => (ns.iter())
                     .map(|n| args(&["block", "--on", &on.to_string(), &n.to_string()]))
                     .collect(),
-                None => vec![], // a blocker in another fleet or repo: outside the sim
+                None => vec![],
             },
             Some(op @ ("unblock" | "rm")) => ns.iter().map(|n| args(&[op, &n.to_string()])).collect(),
             _ => vec![],
         };
         s.queue.extend(words.into_iter().map(|w| (at(e), w)));
     }
-    // An issue already in flight when the window opens is queued at its start.
     let mut late = vec![];
     for e in evs
         .iter()
@@ -136,8 +128,6 @@ pub fn build(evs: &[Event], fleet: &str, from: u64, to: u64) -> Scenario {
         }
         let secs = |e: &Event| e.ts.saturating_sub(sp.ts).max(1);
         let mine = |e: &Event| e.str("agent") == Some(agent) || e.str("key").is_some_and(|k| k.ends_with(agent));
-        // An impl lane's push shows as its `turn-end done` or `pushed`, else as the next drive step that needed a new
-        // head (a review, a red CI, a merge): its CI then counts as ended there.
         let end = evs[i + 1..].iter().enumerate().find_map(|(j, e)| {
             let same = e.issue == Some(n);
             let step = e.str("step").unwrap_or_default();
@@ -204,7 +194,6 @@ pub fn build(evs: &[Event], fleet: &str, from: u64, to: u64) -> Scenario {
     s
 }
 
-/// The lane's push of `n` (`evs[0]`): its CI's time and colour, as the next drive step that needed it saw them.
 fn push(evs: &[Event], n: u64, secs: u64) -> Script {
     let ci = (evs[1..].iter())
         .take_while(|e| !(e.kind == "pushed" && e.issue == Some(n)))
@@ -220,9 +209,7 @@ fn push(evs: &[Event], n: u64, secs: u64) -> Script {
     }
 }
 
-/// What the log `evs` (from `from` on) says happened. A spawn produced if its lane handed something on before the
-/// next lane of its role: a push, `turn-end done` or a reviewer after it (impl), a verdict (rev). An issue already in
-/// flight at `from` counts as queued then, as the replay queues it.
+/// What the log `evs` (from `from` on) says happened.
 pub fn real(evs: &[Event], from: u64) -> Run {
     let mut produced = BTreeSet::new();
     let mut last: BTreeMap<(u64, String), *const Event> = BTreeMap::new();
@@ -269,7 +256,6 @@ pub fn real(evs: &[Event], from: u64) -> Run {
     }
 }
 
-/// The issues in the order `evs` merged them.
 fn merged(evs: &[Event]) -> Vec<u64> {
     let mut out = vec![];
     for n in evs.iter().filter(|e| e.kind == "merged").filter_map(|e| e.issue) {
@@ -287,7 +273,6 @@ pub fn model(s: &Scenario) -> (Model, String) {
     let sha = m.sha();
     m.origin.insert("staging".into(), sha);
     timers(&mut m, &mut rng, T0 + 1);
-    // The owner's verbs one after another, as typed: one 5 s after the last at the earliest.
     let mut last = 0;
     for (t, w) in &s.queue {
         let mut a = args(&["queue", FLEET]);

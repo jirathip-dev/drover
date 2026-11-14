@@ -83,8 +83,7 @@ pub fn run_world(seed: u64, (mut m, cfg): (model::Model, String), steps: u64, sa
     )
 }
 
-/// Drive `m` from `T0` to `end` (or `run_steps`), then a 30-minute settle with no new faults (I6) up to `steps` in
-/// all; `keep_going` records each violation and runs on.
+/// Drive `m` from `T0` to `end`, then a 30-minute settle with no new faults (I6).
 pub fn play(seed: u64, m: model::Model, cfg: &str, end: u64, run_steps: u64, steps: u64, keep_going: bool) -> Outcome {
     // A lane's own environment must not reach the simulated processes (they share this one).
     for k in [
@@ -446,8 +445,6 @@ fn a_metric_over_20_percent_worse_is_a_warning() {
     assert!(metrics::regressions(&s, &back).is_empty());
 }
 
-/// #686 AC 2: a small db (one issue straight through, one FAIL then fixed, one blocked on it, one whose lane dies)
-/// replays to the same merge order and counts.
 #[test]
 fn a_fixture_db_replays_to_its_merge_order_and_counts() {
     let dir = common::tmpdir("replay-fixture");
@@ -552,13 +549,10 @@ fn a_fixture_db_replays_to_its_merge_order_and_counts() {
         o.report()
     );
     assert_eq!(rounds(&s.real), Some(1.33));
-    // The scenario carries no issue text or verdict body: only ids, timings and outcomes.
     let saved = serde_json::to_string(&s).unwrap();
     assert!(!saved.contains("all good") && !saved.contains("blocking"), "{saved}");
 }
 
-/// #686: `just sim --replay <state.db> [--days 7] [--fleet herdsman] [--save scenario.json]`: replay a real window of
-/// the db (or a saved scenario), print the invariant result and the real-vs-sim table.
 #[test]
 #[ignore = "long: `just sim --replay`"]
 fn replay_db() {
