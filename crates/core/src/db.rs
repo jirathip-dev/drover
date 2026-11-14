@@ -431,7 +431,7 @@ pub fn compact(state: &Path, now: u64) -> Result<(usize, usize)> {
         let gone = tx.execute(q, [now.saturating_sub(HEARTBEAT_SECS)])?;
         let cut = now.saturating_sub(HOT_SECS);
         let old = rows(&tx, done, cut)?;
-        let mut months: std::collections::BTreeMap<String, String> = Default::default();
+        let mut months = std::collections::BTreeMap::<String, String>::new();
         for e in &old {
             let m = crate::lesson::ymd(e.ts / 86_400)[..7].to_string();
             *months.entry(m).or_default() += &(serde_json::to_string(e)? + "\n");
