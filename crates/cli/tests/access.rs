@@ -1,4 +1,3 @@
-//! #5: per-role Anthropic accounts with cap fallback; per-role MCP allowlist.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -8,7 +7,6 @@ use std::path::Path;
 const TOKEN_A: &str = concat!("sk", "-ant-oat01-AAAA-secret");
 const TOKEN_B: &str = concat!("sk", "-ant-oat01-BBBB-secret");
 
-/// Claude impl role with `role_extra` lines, `[accounts]` A/B/C, local repo `<dir>/repo`.
 fn config(d: &Path, role_extra: &str) -> String {
     let repo = d.join("repo");
     std::fs::create_dir_all(&repo).unwrap();
@@ -20,7 +18,6 @@ fn config(d: &Path, role_extra: &str) -> String {
         + "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\nC = \"CLAUDE_CODE_OAUTH_TOKEN_C\"\n"
 }
 
-/// #683: `config` with the accounts' folders `<dir>/accounts/<name>` as `[accounts.usage]`.
 fn folders(d: &Path, role_extra: &str) -> String {
     let dirs = format!(
         "A = \"{0}/A\"\nB = \"{0}/B\"\nC = \"{0}/C\"\n",
@@ -55,7 +52,6 @@ fn spawn_var(c: &drover::Ctx, sh: &FakeShed, n: u64, var: &'static str) -> (Fake
     spawn_with(c, sh, n, var, |r| r)
 }
 
-/// As `spawn_var`, its runner given more replies by `more`.
 fn spawn_with(
     c: &drover::Ctx,
     sh: &FakeShed,
@@ -122,7 +118,6 @@ fn role_account_b_signs_in_with_its_folder_and_no_token_with_no_helper() {
     let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let (r, got) = spawn(&c, &sh, 12);
-    // #683: with no `account_env`, B's folder as CLAUDE_CONFIG_DIR; no token, no secrets file.
     let calls = lines(&sh, &r, 12);
     assert!(
         !calls.iter().any(|l| l.contains(TOKEN_B)),
@@ -137,7 +132,6 @@ fn role_account_b_signs_in_with_its_folder_and_no_token_with_no_helper() {
     assert_eq!(ev.last().unwrap().str("account"), Some("B"));
     no_token_in_log(&c);
 
-    // The binary's stdout and stderr (dry run, `accounts`) never show a token either.
     for args in [
         &["spawn", "sendmeter", "13", "impl", "--dry-run", "--json"][..],
         &["accounts"],
@@ -199,10 +193,8 @@ fn capped_account_is_skipped_until_reset() {
     let (code, out) = run(&c, &Fake::default(), &["accounts", "reset", "A"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(dry_account(&c, 14), "A");
-    // The capped lane still shows the banner, but its cap was already reported: no re-cap.
     assert_eq!(run(&c, &r, &["check"]).1, "");
     assert_eq!(dry_account(&c, 14), "A");
-    // #683: A capped again, a real spawn signs in with B's (default) folder, never a token.
     let d = json!({"account": "A", "agent": "sendmeter-impl-12", "until": c.now + 3600});
     append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "account-capped", d)).unwrap();
     let (_, got) = spawn(&c, &sh, 15);
@@ -211,10 +203,8 @@ fn capped_account_is_skipped_until_reset() {
     no_token_in_log(&c);
 }
 
-/// #683: what the pane's shell printed of the account env: `$CLAUDE_CONFIG_DIR|$CLAUDE_CODE_OAUTH_TOKEN`.
 const SIGN_IN: &str = "CLAUDE_CONFIG_DIR|$CLAUDE_CODE_OAUTH_TOKEN";
 
-/// #683: Claude Code's own login in folder `dir` (`.claude.json`'s `oauthAccount`).
 fn sign_in(dir: &Path) {
     std::fs::create_dir_all(dir).unwrap();
     std::fs::write(dir.join(".claude.json"), r#"{"oauthAccount": {"emailAddress": "a@x"}}"#).unwrap();
@@ -230,7 +220,6 @@ fn the_profile_hook_still_refuses_a_guarded_command_on_the_accounts_folder() {
     let (_, got) = spawn_var(&c, &sh, 12, SIGN_IN);
     let a = d.join("accounts/A");
     assert_eq!(got, format!("{}|", a.display()));
-    // The profile goes on top of the account's login.
     let profile = c.config.with_file_name("claude").join("fleet-impl");
     let typed = sh.sent("sendmeter-impl-12");
     let start = typed.iter().find(|l| l.starts_with("exec 'claude'")).unwrap();
@@ -238,7 +227,6 @@ fn the_profile_hook_still_refuses_a_guarded_command_on_the_accounts_folder() {
         start.contains(&format!("'--settings' '{}'", profile.join("settings.json").display())),
         "{start}"
     );
-    // That profile's `PreToolUse` hook, run as Claude Code runs it in the lane's env, refuses a guarded command.
     let s: Value = serde_json::from_str(&std::fs::read_to_string(profile.join("settings.json")).unwrap()).unwrap();
     let hook = s["hooks"]["PreToolUse"][0]["hooks"][0]["command"].as_str().unwrap();
     let wt = c.worktrees.join("sendmeter/issue-12");
@@ -262,7 +250,6 @@ fn the_profile_hook_still_refuses_a_guarded_command_on_the_accounts_folder() {
     assert_eq!(v["hookSpecificOutput"]["permissionDecision"], "deny", "{o}");
 }
 
-/// `config` with `account_env` set to a fake helper (`fake-cooee`, answered by the test's runner).
 fn helper_config(d: &Path) -> String {
     config(d, "account = \"A\"").replace(
         "[accounts]\n",
@@ -330,13 +317,11 @@ fn doctor_shows_one_account_source_row_and_accounts_ask_each_folders_cli_never_t
     let c = ctx(&d, &folders(&d, "account = \"A\""));
     let (a, b) = (d.join("accounts/A"), d.join("accounts/B"));
     sign_in(&a);
-    std::fs::create_dir_all(&b).unwrap(); // B's folder, signed out
-                                          // #707: no secret store at all; #785: each folder's own CLI says whether it is signed in.
+    std::fs::create_dir_all(&b).unwrap();
     let r = Fake::default()
         .reply(&auth_status(&d, "A"), r#"{"loggedIn": true}"#)
         .reply(&auth_status(&d, "B"), r#"{"loggedIn": false}"#);
     let out = run(&c, &r, &["doctor"]).1;
-    // #707 (q855): one account-source row; the per-account rows are retired.
     let src: Vec<&str> = out.lines().filter(|l| l.contains(" account")).collect();
     assert_eq!(
         src,
@@ -407,9 +392,8 @@ fn cap(c: &drover::Ctx, sh: &FakeShed, banner: &str) {
 fn cap_until_parses_the_banner_reset_in_local_time() {
     let cfg = drover::config::Config::parse("").unwrap();
     let bkk = Fake::default().reply("date -r", "+0700\n");
-    let now = 1_793_502_000; // 2026-11-01 10:00 +07
+    let now = 1_793_502_000;
     let until = |s: &str| drover::access::cap_until(&cfg, &bkk, s, now);
-    // The banner shapes `cap_pattern` matches.
     assert_eq!(
         until("  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)"),
         1_793_520_000
@@ -427,7 +411,6 @@ fn cap_until_parses_the_banner_reset_in_local_time() {
         until("Claude usage limit reached. Your limit will reset at 3:30pm."),
         1_793_521_800
     );
-    // Unparseable: cap_reset_minutes (300) for a session limit, a day for a weekly one.
     assert_eq!(until("Claude usage limit reached."), now + 300 * 60);
     assert_eq!(until("Weekly limit reached"), now + 86400);
 }
@@ -439,7 +422,6 @@ fn capped_account_is_used_again_after_its_banner_reset() {
     let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
-    // now = 1_000_000 (1970-01-12 13:46:40; `date` unscripted: UTC): 3pm is 1_004_400.
     cap(&c, &sh, "You've hit your limit · resets 3pm (Asia/Bangkok)");
     let ev = read(&c.state).unwrap();
     assert_eq!(ev.last().unwrap().data["until"], 1_004_400);
@@ -483,7 +465,6 @@ fn capped_lane_waits_on_drive_to_respawn_on_a_free_account() {
     assert_eq!(w.who, "drive", "{w:?}");
     let cmd = w.next_cmd.clone().unwrap();
     assert_eq!(cmd, "drover spawn sendmeter 12 impl --supersede");
-    // That respawn (as drive runs it) picks the free account.
     let mut args: Vec<&str> = cmd.split_whitespace().skip(1).collect();
     args.extend(["--dry-run", "--json"]);
     let (code, out) = run(&c, &Fake::default().reply("which shed", "/opt/shed/bin/shed\n"), &args);
@@ -547,7 +528,6 @@ fn mcp_allowlist_is_the_only_mcp_and_prod_is_refused() {
     assert_eq!(names, ["supabase-dev"]);
     assert_eq!(lane["mcpServers"]["supabase-dev"]["args"][0], "dev");
 
-    // Default: no MCP at all, still strict.
     let d2 = tmpdir("mcp-none");
     let c2 = ctx(&d2, &config(&d2, ""));
     let sh2 = FakeShed::attached(&c2);
@@ -601,7 +581,6 @@ fn check_shows(c: &drover::Ctx, sh: &FakeShed, screen: &str) -> String {
     out
 }
 
-/// #640: account A's latest status-line reading (`usage.jsonl`), read `ago` seconds before now.
 fn reading(c: &drover::Ctx, five: Value, seven: Value, ago: u64) {
     let row = json!({"ts": c.now - ago, "account": "A", "five_hour_pct": five, "five_hour_reset": null,
         "seven_day_pct": seven, "seven_day_reset": 1_200_000});
@@ -722,7 +701,6 @@ fn signed_out_is_its_own_state_never_a_cap() {
     assert_eq!(dry_account(&c, 13), "A");
 }
 
-/// #707: `config` with account A's hand-placed `token-file:` at `<dir>/tokens/A` (mode `mode`).
 fn token_file(d: &Path, mode: u32) -> (String, std::path::PathBuf) {
     use std::os::unix::fs::PermissionsExt;
     let f = d.join("tokens/A");
@@ -795,7 +773,6 @@ fn a_token_file_others_can_read_refuses_the_spawn() {
     );
 }
 
-/// #785: Claude Code's own answer for folder `<d>/accounts/<name>`: `claude auth status` there, the env's token unset.
 fn auth_status(d: &Path, name: &str) -> String {
     let dir = d.join("accounts").join(name);
     format!(
@@ -809,7 +786,6 @@ fn a_signed_out_folder_account_is_skipped_with_one_alert_in_standalone() {
     let d = tmpdir("acct-785-folder");
     let c = ctx(&d, &folders(&d, "accounts = [\"A\", \"B\"]"));
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    // A's folder holds a stale login file, but its CLI says it is signed out; B's says signed in.
     sign_in(&d.join("accounts/A"));
     let sh = FakeShed::attached(&c);
     let status = |r: Fake| {
@@ -827,7 +803,6 @@ fn a_signed_out_folder_account_is_skipped_with_one_alert_in_standalone() {
         out[0].str("reason").unwrap().contains("claude /login"),
         "names the sign-in: {out:?}"
     );
-    // The next spawn skips A without asking again: still one alert.
     let (r, got) = spawn_with(&c, &sh, 13, SIGN_IN, status);
     assert_eq!(got, format!("{}/accounts/B|", d.display()));
     assert!(!r.called(&auth_status(&d, "A")));
@@ -881,7 +856,6 @@ fn accounts_lists_live_lanes_only() {
         "spawn",
         json!({"agent": "conductor-t1", "role": "conductor", "account": "A"}),
     );
-    // 13's lane died, 14's ACP session is gone, the conductor's was superseded: only 12 still runs.
     ev(
         Some(13),
         "lane-dead",

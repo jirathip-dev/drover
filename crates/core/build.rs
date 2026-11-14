@@ -1,4 +1,3 @@
-//! #235: the git sha this binary is built from, for `drover --version` and the remote hosts' version check.
 use std::process::Command;
 
 fn git(args: &[&str]) -> String {

@@ -1,5 +1,3 @@
-//! #37: Herd mode's `/herd.json` (2 fleets + Others, queue at the gate with a blocked item, host
-//! weather), its Host/Origin check, no pane text, `?weather=` on loopback only; 390 px snapshots.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -124,7 +122,6 @@ fn herd_json_shape_on_a_fixture() {
     );
     assert_eq!(l["age"], "27h");
     assert!(l["coat"].as_str().unwrap().starts_with("--c:#"));
-    // The queue at the gate: queued issues only, in order, the blocked one with its blocker.
     let q = &fleets[0]["queue"];
     assert_eq!(
         q.as_array()
@@ -136,7 +133,6 @@ fn herd_json_shape_on_a_fixture() {
     );
     assert_eq!(q[0]["title"], "Herd mode");
     assert_eq!(fleets[1]["queue"], json!([]));
-    // Host: load/cpu 0.39, limit 2.5, memory pressure warn (the gate refuses), swap-out 0.
     let h = &v["host"];
     assert_eq!(
         (&h["limit"], &h["pressure"], &h["swapouts"], &h["gate"]),
@@ -145,8 +141,6 @@ fn herd_json_shape_on_a_fixture() {
     assert!((h["load"].as_f64().unwrap() - 0.39).abs() < 1e-9, "{h}");
 }
 
-/// #239: each fleet's colour (a station's), and each lane's theme action: its role's while it works, a fix round's
-/// `fix` though its lane's role is impl, else its state's.
 #[test]
 fn herd_json_carries_the_action_and_fleet_colour() {
     let (c, r) = fixture("act");
@@ -176,7 +170,6 @@ fn herd_json_has_no_pane_text() {
         !res.contains("PANE-SECRET-TEXT") && !res.contains("cargo test") && !res.contains("turns"),
         "{res}"
     );
-    // Even for a blocked lane (whose Lanes card shows pane text to paired devices).
     assert_eq!(body(&res)["fleets"][1]["lanes"][0]["state"], "blocked");
 }
 
@@ -212,7 +205,6 @@ fn weather_param_works_on_loopback_only() {
         (&calm["host"]["gate"], &calm["host"]["pressure"]),
         (&Value::Null, &json!("normal"))
     );
-    // The tailnet name: the param is ignored, the real sample is served.
     let real = body(&get(&s, "/herd.json?weather=calm", "mac.example", ""));
     assert_eq!(
         (&real["host"]["pressure"], &real["host"]["gate"]),
@@ -233,8 +225,6 @@ fn page_has_the_herd_button_and_horse_symbols() {
     );
 }
 
-/// The PR's 390 px Herd snapshots (fixture data): calm, gusty, storm and fog; the queue at the gate,
-/// a swipe to the next repo, the sheet from a horse; no horizontal page scroll. PNGs go to `$DROVER_SNAPSHOTS`.
 #[test]
 fn herd_snapshots_fit_390px() {
     if no_webkit() {
@@ -304,9 +294,6 @@ fn herd_snapshots_fit_390px() {
     }
 }
 
-/// #58: the ranch is a ~22% strip, empty bands are not drawn, every lane horse is one size in every
-/// band (#65: Corral's fixed 132 px) and queued ones are 53 px (40 %) in their own row above working. 390 px, `?weather=calm`:
-/// (a) 0 blocked · 1 working · 13 queued · 7 idle · 11 done, (b) only 1 done, (c) every band.
 #[test]
 fn herd_horses_are_one_size_at_390px() {
     if no_webkit() {
@@ -317,7 +304,6 @@ fn herd_horses_are_one_size_at_390px() {
     let page = get(&s, "/", ADDR, "");
     let mut calm = body(&get(&s, "/herd.json?weather=calm", ADDR, ""));
     let fleet = calm["fleets"][0].clone();
-    // One fleet with `n` lanes per state (cloned from the fixture's lane) and `q` queued issues.
     let mut herd = |states: &[(&str, &str, usize)], q: u64| {
         let mut lanes = vec![];
         for &(state, tone, n) in states {
@@ -363,7 +349,6 @@ fn herd_horses_are_one_size_at_390px() {
             String::new(),
         ),
     ];
-    // The lower bands of (a) and (c): scrolled to a band's header, clear of the sticky strip.
     let to = |band: &str| {
         format!("; document.querySelector('.b-{band}').scrollIntoView({{behavior: 'instant'}}); here().scrollTop -= 64")
     };
@@ -408,10 +393,8 @@ fn herd_horses_are_one_size_at_390px() {
             unreachable!()
         };
         assert!(sw <= 390.0 && vw == 390.0, "{name}: scrollWidth {sw} at {vw}");
-        // 22svh of the 844 px window (≥ 120 px), not 45%.
         assert!((ranch - 0.22 * 844.0).abs() <= 1.0, "{name}: ranch {ranch}px");
         assert_eq!(n, bands, "{name}: bands drawn");
-        // #65: Corral's 132 px in every band present; queued 53 px.
         let lane: Vec<f64> = [working, idle, done, blocked]
             .into_iter()
             .filter(|&x| x >= 0.0)

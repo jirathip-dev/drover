@@ -1,7 +1,3 @@
-//! #440: the tab bar is queue · lanes · chat; [⚙] on every tab opens the System sheet, its dot red while a host card is
-//! red; every former Host, Events, [config] and [◐] control renders inside its section; the old links (`#host`,
-//! `#events`, `#config/<fleet>`, a stored `host` tab, a Queue card's [config]) land on `#system/<section>`. The real
-//! page in WebKit (tests/support/webview.swift), the board's parts painted as main.ts paints them (`system_frags`).
 mod common;
 use common::*;
 use drover::serve::Server;
@@ -9,7 +5,6 @@ use drover::serve::Server;
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// The live, paired page with its Queue tab and System's parts; `red`: the main host's disk under its floor.
 fn page(name: &str, red: bool) -> std::path::PathBuf {
     let cfg = format!("{CONFIG}\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\n");
     let c = ctx(&tmpdir(name), &cfg);
@@ -40,8 +35,6 @@ fn page(name: &str, red: bool) -> std::path::PathBuf {
     file
 }
 
-/// `js`'s `window.measure` (or `window.late`, read 1 s on) on `file` at 390 px; `pre` runs before the page's own head
-/// script, `stored` is the stored tab.
 fn measure(file: &std::path::Path, pre: &str, stored: &str, js: &str) -> Vec<f64> {
     let (png, run) = (file.with_extension("png"), file.with_extension("run.html"));
     let html = std::fs::read_to_string(file).unwrap();
@@ -70,7 +63,6 @@ fn three_tabs_and_the_gear_on_each_with_the_dot_only_for_a_red_host() {
     if no_webkit() {
         return;
     }
-    // The nav's links, then per tab: [⚙] shown, its dot shown; then no [◐], no host or events tab, and the dot's label.
     let js = "const nav = [...document.querySelectorAll('nav a')].map(a => a.hash).join(); \
         window.measure = [+(nav === '#queue,#lanes,#chat'), ...['queue', 'lanes', 'chat'].flatMap(t => { tab(t); \
           const b = document.querySelector('#sysb'); return [+b.checkVisibility(), +b.querySelector('.sd').checkVisibility()]; }), \
@@ -137,9 +129,7 @@ fn the_old_links_land_on_their_system_section() {
         [1., 1., 2., 1., 2.],
         "#config/<fleet>"
     );
-    // A stored `host` tab: Queue, the sheet closed.
     assert_eq!(measure(&file, "", "host", js), [1., 0., -1., 0., 3.], "stored host tab");
-    // A Queue card's [config], and a later `#events` link (hashchange) on an open page.
     let tap = format!("document.querySelector('#queue .cfg').click(); {js}");
     assert_eq!(measure(&file, "", "queue", &tap), [1., 1., 2., 1., 2.], "[config]");
     let later = js.replace(

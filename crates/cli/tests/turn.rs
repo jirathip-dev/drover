@@ -1,5 +1,3 @@
-//! #511: an impl lane's typed turn end (`drover turn`), drive's action on each state, the stop hook's one prompt.
-//! Every test here runs inside the same lane (`DROVER_LANE` is process-wide: its own test binary).
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
@@ -69,14 +67,12 @@ fn pr(head: &str, ci: &str) -> String {
         .to_string()
 }
 
-/// `drover turn <args>` as the lane: its exit code.
 fn turn(c: &drover::Ctx, r: &Fake, args: &[&str]) -> String {
     let (code, out) = run(c, r, &[&["turn"], args].concat());
     assert_eq!(code, 0, "{out}");
     out
 }
 
-/// `drover drive`: (output, `driven` steps logged by this pass).
 fn drive(c: &drover::Ctx, r: &Fake) -> (String, Vec<String>) {
     let before = read(&c.state).unwrap().len();
     let (code, out) = run(c, r, &["drive"]);
@@ -101,7 +97,6 @@ fn state(c: &drover::Ctx) -> String {
         .clone()
 }
 
-/// The `waiting` and `status` lines of #12.
 fn texts(c: &drover::Ctx, r: &Fake) -> (String, String) {
     (
         run(c, r, &["waiting", "sendmeter"]).1,
@@ -135,7 +130,6 @@ fn the_verb_logs_turn_end_with_the_lanes_role_and_is_no_issue_activity() {
         fold(&read(&c.state).unwrap())[&("sendmeter".into(), 12)].last_event,
         "spawn"
     );
-    // `blocked` needs its reason.
     let (code, _) = run(&c, &r, &["turn", "blocked"]);
     assert_eq!(code, 2);
     assert_eq!(kinds(&c, "turn-end").len(), 1);
@@ -151,12 +145,10 @@ fn no_state_reads_idle_without_pushing_as_before() {
 
 #[test]
 fn done_at_a_pushed_head_spawns_review_at_once_without_waiting_for_ci() {
-    // The PR head moved (the worktree is elsewhere), CI still running: no handoff before `done`.
     let head = sha("abc");
     let (c, r, sh) = lane_at("turn-done-pushed", true, Some(&pr(&head, "pending")), Some(&sha("def")));
     let (w, _) = texts(&c, &r);
     assert!(w.contains("idle without pushing"), "{w}");
-    // #677: with its why note (git and gh writes are the Fake's).
     ev(&c, 11, "decision", json!({"id": "q1", "choice": "yes", "by": "owner"}));
     let note = "Decided: d\nBecause: q1\nRejected: r — x\nCheck: c\nOwner: o\n";
     std::fs::write(c.worktrees.join("sendmeter/issue-12/why.md"), note).unwrap();
@@ -187,12 +179,10 @@ fn done_with_nothing_pushed_is_nudged_once_then_blocked() {
         "{out}"
     );
     assert_eq!(typed(&sh, NUDGE), 1, "{:?}", sh.methods());
-    // Nudged: the next pass waits, the nudge is never sent twice.
     let (w, _) = texts(&at(&c, 60), &r);
     assert!(w.contains("reported done, nothing pushed: nudged 60s ago"), "{w}");
     drive(&at(&c, 60), &r);
     assert_eq!(typed(&sh, NUDGE), 1);
-    // `done` again with still nothing pushed: an evidence mismatch, now blocked on the owner.
     turn(&at(&c, 120), &r, &["done"]);
     let (out, _) = drive(&at(&c, 120), &r);
     assert!(
@@ -274,7 +264,6 @@ fn need_input_without_an_ask_says_so() {
     let (w, st) = texts(&c, &r);
     assert!(w.contains("reported need-input (which port) with no open ask"), "{w}");
     assert!(st.contains("reported need-input (which port)"), "{st}");
-    // An open ask waits on the owner as before.
     let (code, out) = run(&c, &r, &["ask", "sendmeter", "12", "which port?"]);
     assert_eq!(code, 0, "{out}");
     let (w, _) = texts(&c, &r);
@@ -290,7 +279,6 @@ fn a_reported_lane_whose_pane_is_gone_takes_the_respawn_path() {
     assert_eq!(sh.last("run")["name"], LANE, "{:?}", sh.methods());
 }
 
-/// `drover hook` fed Claude's `event` JSON (`active`: its `stop_hook_active`): its stdout.
 fn hook(c: &drover::Ctx, event: &str, active: bool) -> String {
     let input = json!({"hook_event_name": event, "stop_hook_active": active, "session_id": "s"}).to_string();
     let mut out = Vec::new();
@@ -310,14 +298,11 @@ fn the_stop_hook_asks_for_the_turn_once_per_prompt_and_never_loops() {
     assert_eq!(hook(&c, "UserPromptSubmit", false), "");
     let out = hook(&c, "Stop", false);
     assert!(asked(&out), "{out}");
-    // Ended again unreported: the turn ends, no second prompt.
     assert_eq!(hook(&c, "Stop", false), "");
-    // A new prompt: asked again, but never while Claude already goes on from a stop hook.
     hook(&c, "UserPromptSubmit", false);
     assert_eq!(hook(&c, "Stop", true), "");
     hook(&c, "UserPromptSubmit", false);
     assert!(asked(&hook(&c, "Stop", false)));
-    // Reported: the turn ends.
     hook(&c, "UserPromptSubmit", false);
     turn(&c, &r, &["working"]);
     assert_eq!(hook(&c, "Stop", false), "");
