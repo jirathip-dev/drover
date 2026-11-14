@@ -795,7 +795,7 @@ pub fn hung<'a>(ctx: &Ctx, cfg: &Config, events: &'a [Event], agents: &[Value], 
     let a = agents.iter().find(|a| a["name"] == s.data["agent"])?;
     let out = crate::shed::session(ctx, s.str("agent")?)["at"].as_u64().unwrap_or(0);
     let quiet = ctx.now.saturating_sub(out.max(s.ts));
-    let idle = a["cpu"].as_u64().unwrap_or(0) < crate::stall::BUSY_CPU_PCT;
+    let idle = a["cpu"].as_u64().is_some_and(|c| c < crate::stall::BUSY_CPU_PCT);
     (a["agent_status"] == "working" && idle && quiet >= cfg.limits.stall_minutes * 60).then_some((s, quiet))
 }
 
