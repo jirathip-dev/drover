@@ -489,7 +489,7 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     if acp {
         let check = "command -v shed >/dev/null || { echo \"shed not on PATH $PATH\"; exit 1; }; \
 command -v drover >/dev/null || { echo \"drover not on PATH $PATH\"; exit 1; }";
-        let bare = || on.run_for("sh", &argv(&["-c", check]), "", std::time::Duration::from_secs(60));
+        let bare = || on.run_in("sh", &argv(&["-c", check]), "");
         if bare()?.code != 0 {
             sh(&format!("sudo ln -sf \"$(command -v shed)\" '{exe}' /usr/local/bin/"))?;
         }
