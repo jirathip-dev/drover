@@ -55,11 +55,13 @@ fn no_pr(load: &str) -> Fake {
 
 fn spawns(c: &drover::Ctx) -> Vec<u64> {
     let all = read(&c.state).unwrap();
-    let late = all.iter().filter(|e| e.kind == "spawn" && e.ts >= T);
+    let late = all
+        .iter()
+        .filter(|e| e.kind == "spawn" && e.ts >= T && e.str("role") == Some("impl"));
     late.filter_map(|e| e.issue).collect()
 }
 
-/// One `drive` pass at `now`: the issues it respawned.
+/// One `drive` pass at `now`: the issues whose impl lane it respawned (a respawned lane may then go to review).
 fn pass(c: &drover::Ctx, r: &Fake, now: u64) -> Vec<u64> {
     let before = spawns(c).len();
     let (code, out) = run(&drover::Ctx { now, ..c.clone() }, r, &["drive"]);

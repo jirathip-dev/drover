@@ -239,6 +239,9 @@ pub fn nudge(
     why: &str,
 ) -> Result<()> {
     let on = On::of(r, last_spawn(ev, lane));
+    if let Err(e) = herdr::awake(&on, lane) {
+        return Ok(writeln!(out, "{fleet} #{n} nudge of {lane} waits: {e:#}")?);
+    }
     let cancelled = crate::shed::cli(&on, &["cancel", lane]).is_ok();
     let sent = herdr::prompt(&on, lane, NUDGE).is_ok();
     writeln!(out, "{fleet} #{n} nudged {lane}: {why}")?;
