@@ -30,7 +30,7 @@ jobs:
       - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary)"
         run: cargo test --locked
       - name: "no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)"
-        run: "! ls -a \"${TMPDIR:-/tmp}\" | grep '^fleet-test-'"
+        run: test -z "$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'fleet-test-*' -print -quit)"
       - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events)"
         run: cargo test --release --locked --test perf -- waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log a_hundred_board_requests the_state_read_stays_under_300ms --nocapture --test-threads=1
       - name: demo export (#39, synthetic data in demo/)
