@@ -1,11 +1,6 @@
-//! #538: run cards. A conductor posts an ad-hoc owner-level command in its thread (`drover card post`): the exact
-//! command, why, its blast radius and its folder. The owner's [approve] (within 15 min of the post) has drover run
-//! that exact text once on the main host, its exit code and output tail (secrets masked) posted back into the thread;
-//! [deny] runs nothing. Both are logged `by: owner` with the card id and the command's sha. `CARD_FORBIDDEN` refuses
-//! the hard-nos at posting, and the hook refuses them from a conductor's own shell.
 use crate::config::Config;
 use crate::devices::sha256;
-use crate::events::{emit, read, Event};
+use crate::events::{emit, working, Event};
 use crate::gate::refused;
 use crate::runner::{argv, Runner};
 use crate::{orchestrator, Ctx};
@@ -85,7 +80,7 @@ pub fn post(ctx: &Ctx, cfg: &Config, thread: &str, c: &Card) -> Result<String> {
             "a run card needs --cmd, --why, --blast, --dir and a timeout",
         );
     }
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let t = orchestrator::find(&events, thread)?;
     let id = format!("r{}", events.iter().filter(|e| e.kind == "run-card").count() + 1);
     let dir = std::path::absolute(c.dir)?.display().to_string();
@@ -102,8 +97,7 @@ pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
         .find(|e| e.kind == "run-settled" && e.str("id") == Some(id))
 }
 
-/// The owner's [approve] (`sha`: the prefix of the command's sha the owner saw, if the tap carries it) or [deny] on
-/// card `id`; the line the thread records.
+/// The owner's [approve] (`sha`: the prefix of the command's sha the owner saw, if the tap carries it) or [deny] on card `id`; the line the thread records.
 pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, approve: bool, sha: Option<&str>) -> Result<String> {
     settle_via(ctx, cfg, r, id, approve, sha, None)
 }
@@ -118,12 +112,12 @@ pub fn settle_via(
     sha: Option<&str>,
     via: Option<&str>,
 ) -> Result<String> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let Some(c) = events.iter().find(|e| e.kind == "run-card" && e.str("id") == Some(id)) else {
         return refused("NO_SUCH_CARD", format!("no run card {id}"));
     };
     if let Some(s) = settled(&events, id) {
-        let how = ["was denied", "ran already"][usize::from(s.data["approved"] == true)];
+        let how = ["was denied", "ran already"][usize::from(s.val("approved") == true)];
         return refused("ALREADY_SETTLED", format!("{id} {how}; a new run needs a new card"));
     }
     let [thread, cmd, dir, sum] = ["thread", "cmd", "dir", "sha"].map(|k| c.str(k).unwrap_or_default());
@@ -160,11 +154,11 @@ pub fn settle_via(
 
 /// #821: run approved card `id` once, detached, up to its --timeout; log and post its exit code and output tail.
 pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let Some(c) = events.iter().find(|e| e.kind == "run-card" && e.str("id") == Some(id)) else {
         return refused("NO_SUCH_CARD", format!("no run card {id}"));
     };
-    if settled(&events, id).is_none_or(|s| s.data["approved"] != true) {
+    if settled(&events, id).is_none_or(|s| s.val("approved") != true) {
         return refused("NOT_APPROVED", format!("{id} is not approved; nothing ran"));
     }
     let ran = |e: &Event| matches!(e.kind.as_str(), "run-started" | "run-done") && e.str("id") == Some(id);
@@ -173,7 +167,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> 
     }
     let [thread, cmd, dir, sum] = ["thread", "cmd", "dir", "sha"].map(|k| c.str(k).unwrap_or_default());
     let (pid, start) = (std::process::id(), crate::now());
-    let secs = c.data["timeout"].as_u64().unwrap_or(600);
+    let secs = c.val("timeout").as_u64().unwrap_or(600);
     let d = json!({"thread": thread, "id": id, "sha": sum, "pid": pid});
     emit(&ctx.state, cfg, Event::new(ctx.now, &c.fleet, None, "run-started", d))?;
     let out = ctx.state.with_file_name(format!("run-{id}.out"));

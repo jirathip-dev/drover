@@ -1,6 +1,3 @@
-//! #632: on a 60,000-event log with 800 asks, the needs and chat views visit each event a bounded number of times
-//! (`events::VISITS`: events indexed and (ask, event) pairs checked), never once per ask; one new event updates the
-//! cached index alone, and a rotation since the last read reads the log again.
 mod common;
 use common::*;
 use drover::events::{append, shared, Event, VISITS};
@@ -35,8 +32,6 @@ fn the_needs_and_chat_views_are_linear_in_the_log_and_one_event_updates_the_inde
     };
     let mut log_rows =
         vec![json!({"ts": NOW, "fleet": "sendmeter", "type": "thread-new", "thread": "t1", "title": "t1"})];
-    // Ask j comes from agent j % 40 on its issue, each from a fresh spawn of its agent (closing that agent's earlier
-    // ask: lane gone); every even ask is answered. Every 40th rides thread t1 (a chat ask row).
     for j in 0..ASKS {
         let (k, pane) = (j % AGENTS, format!("w1:p{j}"));
         let agent = format!("sendmeter-impl-{k}");
@@ -69,7 +64,6 @@ fn the_needs_and_chat_views_are_linear_in_the_log_and_one_event_updates_the_inde
     let open = needs(&s);
     let chat: Value = serde_json::from_str(&api(&s, ADDR, "", NOW + 500, "chat")).unwrap();
     let visits = VISITS.load(Relaxed) - before;
-    // The last ask of each agent is open unless answered: the odd ones of the last 40.
     let want: Vec<String> = (ASKS - AGENTS..ASKS)
         .filter(|j| j % 2 == 1)
         .map(|j| format!("q{j}"))
@@ -84,7 +78,6 @@ fn the_needs_and_chat_views_are_linear_in_the_log_and_one_event_updates_the_inde
         "{visits} event visits for a {EVENTS}-event log with {ASKS} asks"
     );
 
-    // One new event (q799 answered): only it is read and indexed, and the views see it.
     let d = json!({"id": "q799", "choice": "yes", "by": "owner"});
     append(&c.state, &Event::new(NOW, "sendmeter", Some(AGENTS), "decision", d)).unwrap();
     let before = VISITS.load(Relaxed);

@@ -1,5 +1,3 @@
-//! #966: a lane over half the host's CPUs for 3 drive passes running gets one `lane-hog` alert and a `stop`;
-//! its processes die only on the owner's [kill its processes].
 mod common;
 use common::*;
 use drover::events::{append, read, Event};

@@ -1,5 +1,3 @@
-//! #363: the board's report mode. A paired phone's bundle lands under `state/reports/<id>/` and the notifier hears its
-//! path; an unpaired one is refused and nothing is kept. Gate 2: report mode at 390 px in WebKit against a real `serve`.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -9,7 +7,6 @@ use std::path::Path;
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
-/// A 1×1 PNG.
 const PNG: &str = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 
 fn enc(s: &str) -> String {
@@ -32,7 +29,6 @@ fn post(s: &Server, body: &str, extra: &str) -> String {
     String::from_utf8_lossy(&s.respond(&r, T)).into_owned()
 }
 
-/// The ctx with a `merged` notifier appending to `<dir>/heard.txt`: a report reaches it all the same.
 fn setup(name: &str) -> (drover::Ctx, std::path::PathBuf) {
     let d = tmpdir(name);
     let heard = d.join("heard.txt");
@@ -67,11 +63,9 @@ fn a_paired_report_is_kept_and_named_to_the_notifier() {
         enc("row overlaps the badge\nsecond line dropped"),
         enc(&format!("data:image/png;base64,{PNG}"))
     );
-    // Unpaired: refused, nothing kept, nothing heard.
     assert!(post(&s, &body, "").starts_with("HTTP/1.1 401 "));
     assert!(reports(&c).is_empty() && !heard.exists());
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    // Not a PNG: refused, nothing kept.
     let res = post(&s, &body.replace("iVBOR", "AAAA"), &cookie);
     assert!(res.starts_with("HTTP/1.1 409 ") && reports(&c).is_empty(), "{res}");
     let res = post(&s, &body, &cookie);
@@ -108,7 +102,6 @@ fn a_paired_report_is_kept_and_named_to_the_notifier() {
         std::fs::read_to_string(&heard).unwrap().contains(&path),
         "the notifier hears the path"
     );
-    // The conductor reads it back.
     let id = b["id"].as_str().unwrap();
     let (code, out) = run(&c, &Fake::default(), &["report"]);
     assert!(code == 0 && out.contains(id) && out.contains(&path), "{out}");
@@ -139,7 +132,6 @@ fn board(c: &drover::Ctx) -> (String, String, FakeShed) {
     (url, cookie.trim().trim_start_matches("Cookie: ").to_string(), sh)
 }
 
-/// The page in WebKit at 390 px: `js` once the lane row is in, `window.late` read 1.5 s later.
 fn page(url: &str, cookie: &str, js: &str, png: &Path) -> Vec<f64> {
     let js = format!(
         "(function go() {{ const t = document.querySelector('#lanes .lane[data-agent]'); if (!t) return setTimeout(go, 20); {js} }})()"
@@ -163,8 +155,6 @@ fn report_mode_in_webkit_outlines_confirms_and_sends_a_bundle() {
     let c = ctx(&tmpdir("report-wk"), CONFIG);
     let (url, cookie, _sh) = board(&c);
     let shots = std::env::var("DROVER_SNAPSHOTS").map_or_else(|_| tmpdir("report-png"), std::path::PathBuf::from);
-    // `/report` from the reply box's menu, a tap (outline), a second tap (the note box), a note: the 390 px shot.
-    // The taps come 400 ms on, once the sheet has slid away.
     let tap = |then: &str| {
         format!(
             "open(t); ta.value = '/re'; ta.oninput(); cmds.querySelector('li').click(); setTimeout(() => {{ t.click(); \
@@ -183,7 +173,6 @@ fn report_mode_in_webkit_outlines_confirms_and_sends_a_bundle() {
         "outlined, no box after one tap, the box after two, at the bottom, 16 px"
     );
     assert!(reports(&c).is_empty(), "nothing sent before Send");
-    // The toast is the way out: a fake clock fires the 4 s fade at once; the toast stays and a tap on it ends the mode.
     let stays = "const T = setTimeout; window.setTimeout = (f, d) => (d >= 4000 ? (f(), 0) : T(f, d)); \
          open(t); ta.value = '/re'; ta.oninput(); cmds.querySelector('li').click(); window.setTimeout = T; \
          T(() => { const m = document.querySelector('.msg.g'), on = +document.body.classList.contains('rep'); \
@@ -194,7 +183,6 @@ fn report_mode_in_webkit_outlines_confirms_and_sends_a_bundle() {
         [1.0, 1.0, 0.0],
         "the toast outlives its fade; a tap on it stops report mode"
     );
-    // Send: the bundle lands; its PNG is the row plus 24 px at the device's ratio.
     let send = tap(
         "const r = t.getBoundingClientRect(); f.requestSubmit(); \
          window.late = [Math.ceil((Math.min(innerWidth, r.right + 24) - Math.max(0, r.left - 24)) * devicePixelRatio), \
@@ -227,7 +215,6 @@ fn report_mode_in_webkit_outlines_confirms_and_sends_a_bundle() {
         [v[0], v[1], 0.0],
         "the crop's size; report mode ends"
     );
-    // Unpaired: the same taps send nothing.
     let n = reports(&c).len();
     page(&url, "x=1", &send, &shots.join("ui-report-unpaired.png"));
     assert_eq!(reports(&c).len(), n, "nothing kept from an unpaired device");

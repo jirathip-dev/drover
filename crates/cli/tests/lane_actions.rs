@@ -1,4 +1,3 @@
-//! #43: lane actions (`drover stop|kill|clean --lane`, the page's `/act`) and the per-turn transcript.
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
@@ -78,13 +77,11 @@ fn kill_dry_run_lists_what_is_lost() {
 #[test]
 fn kill_pushes_wip_then_closes_and_logs() {
     let (c, wt, sh) = lane("kill-yes");
-    // #646: a commit only when something is staged.
     sh.lane(LANE, "idle", &wt);
     let f = git(&wt, " M src/a.rs\n", "2\n", "+fn x() {}\n")
         .once(&format!("git -C {wt} diff --cached --name-only"), 0, "")
         .once(&format!("git -C {wt} diff --cached"), 0, "+fn x() {}\n");
     let r = AtPush(f, &sh, Shared::default());
-    // #138: the lane's rolling transcript goes with it.
     let log = drover::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, "⏺ hi\n").unwrap();
@@ -106,7 +103,6 @@ fn kill_pushes_wip_then_closes_and_logs() {
     );
     assert!(at("commit") < at(&format!("push origin HEAD:refs/heads/wip/{LANE}-20261031-120000-")));
     assert!(closed(&sh) && !sh.has(LANE), "{:?}", sh.methods());
-    // Never main/staging, never force: the one push names the wip ref.
     let pushes: Vec<String> = r
         .calls
         .borrow()
@@ -120,7 +116,6 @@ fn kill_pushes_wip_then_closes_and_logs() {
     let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!((e.kind.as_str(), e.str("role")), ("lane-killed", Some("impl")));
     assert_eq!(e.str("wip"), pushes[0].rsplit("refs/heads/").next());
-    // The impl goes back to queued (re-spawnable); a second kill finds no lane.
     let s = fold(&read(&c.state).unwrap())
         .remove(&("sendmeter".into(), 12))
         .unwrap();
@@ -151,7 +146,6 @@ fn kill_refuses_a_secret_in_the_wip_diff() {
     assert_eq!(kinds(&c, "lane-killed"), 0);
 }
 
-/// Hash-shaped lockfile checksums, headers and removed lines are not secrets; a token anywhere else is, even on a lockfile line.
 #[test]
 fn kill_skips_lockfile_checksums_but_not_secrets() {
     let head = "diff --git a/Cargo.lock b/Cargo.lock\n--- a/Cargo.lock\n+++ b/Cargo.lock\n@@ -1,3 +1,3 @@\n";
@@ -192,7 +186,6 @@ fn kill_skips_lockfile_checksums_but_not_secrets() {
     }
 }
 
-/// Real git for the lane's worktree (a clone of a bare origin, `.brief.md` gitignored, the lane
 struct RealGit(Fake, &'static str);
 
 impl drover::runner::Runner for RealGit {
@@ -354,7 +347,6 @@ fn clean_lane_refuses_unsafe_lanes() {
         code == 3 && out.contains("REFUSED UNSAFE_CLEAN: sendmeter-impl-12: only after merge"),
         "{out}"
     );
-    // #83: an open PR is named, so the sheet's disabled [clean] says why without a tap.
     let cache = c.state.parent().unwrap().join("cache");
     std::fs::create_dir_all(&cache).unwrap();
     std::fs::write(
@@ -417,7 +409,6 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
         (e.kind.as_str(), e.str("via"), e.str("device"), e.str("op")),
         ("act", Some("web"), Some(&*label), Some("stop"))
     );
-    // Kill without confirm is the dry-run line; nothing closes, nothing logged.
     let res = req(&s, "/act", &format!("agent={LANE}&op=kill"), &cookie);
     assert!(
         res.contains("pane closes, worktree kept") && !sh.called("kill", LANE),
@@ -426,13 +417,10 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
     assert_eq!(kinds(&c, "act"), 1);
 }
 
-/// A screen of 5 settled lines and a live block.
 fn screen() -> String {
     "> fix it\n⏺ Bash(cargo test)\n  ⎿ ok\n⏺ Done.\n  All green.\n⏺ Bash(cargo fmt)\n".into()
 }
 
-/// #138: `/lane` pages back through the rolling transcript (450 older lines on file, a gap line as this read does not
-/// overlap them, then its settled lines), `more` while older lines exist; the live block is sent, never written.
 #[test]
 fn lane_pages_back_through_the_rolling_transcript() {
     let (c, _, sh) = lane("more");
@@ -511,7 +499,6 @@ fn a_gone_lane_reads_its_stored_transcript() {
     );
 }
 
-/// iOS zooms on focus under 16 px; the fix is the font size. #114: the page is app-like, so no pinch or double-tap zoom.
 #[test]
 fn inputs_are_16px_and_zoom_is_off() {
     let css = include_str!("../../../assets/serve.css");
@@ -524,13 +511,10 @@ fn inputs_are_16px_and_zoom_is_off() {
     let page = String::from_utf8_lossy(&Server::new(&c, &Fake::default(), None).respond("GET / HTTP/1.1\r\n\r\n", T))
         .into_owned();
     assert!(page.contains("initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"));
-    // #166/#200: no root style toggles with the sheet (a position:fixed body, then overflow, repainted iOS on close).
     assert!(!css.contains(".lock") && !css.contains("body{position:fixed"));
     assert!(include_str!("../../../assets/serve.js").contains("visualViewport"));
 }
 
-/// #96: the push guard flags real secret shapes only, never code, test names or words like `key`/`token`.
-/// Token-shaped fixtures here and in other tests are split with `concat!` so no source literal reads as a live secret.
 #[test]
 fn secret_flags_real_shapes_only() {
     use drover::lanes::secret;
@@ -655,7 +639,6 @@ fn secret_flags_real_shapes_only() {
     }
 }
 
-/// #96: #89's diff (a long snake_case test name) saves; a secret's refusal names file:line with the value masked.
 #[test]
 fn kill_saves_code_and_names_the_secret_line() {
     let ok = "diff --git a/src/check.rs b/src/check.rs\n+++ b/src/check.rs\n@@ -10,2 +10,3 @@\n \
@@ -679,8 +662,6 @@ fn kill_saves_code_and_names_the_secret_line() {
     assert!(!r.called(&format!("git -C {wt} push")));
 }
 
-/// #248: a lane drover closed reads back Claude's saved session for its worktree (the newest) over the rolling
-/// transcript; prompts `❯`, replies and tool calls `⏺`, masked.
 #[test]
 fn a_closed_lane_reads_claudes_saved_session() {
     let (c, wt, sh) = lane("closed-session");
@@ -727,8 +708,6 @@ fn a_closed_lane_reads_claudes_saved_session() {
     assert_eq!(j["live"], 0);
 }
 
-/// #646: build output never rides a wip snapshot: a 60 MB file under `target-lane/` stays out of the pushed branch
-/// (whatever `.gitignore` says) and is named as skipped, on the kill output and in the wip commit message.
 #[test]
 fn kill_skips_build_output_and_names_it() {
     let (c, wt, _sh) = lane("kill-build");
@@ -759,7 +738,6 @@ fn kill_skips_build_output_and_names_it() {
     assert!(msg.contains("skipped") && msg.contains("target-lane/"), "{msg}");
 }
 
-/// #646: a file over the 5 MB per-file cap stays out of the snapshot and is named, next to the source kept.
 #[test]
 fn kill_skips_a_file_over_the_size_cap() {
     let (c, wt, _sh) = lane("kill-cap");
@@ -786,8 +764,6 @@ fn kill_skips_a_file_over_the_size_cap() {
     assert_eq!(String::from_utf8(o.stdout).unwrap().trim(), "real.rs");
 }
 
-/// #646: `wip prune --dry-run` lists origin's wip branches (size, issue state, build output) and deletes nothing;
-/// without it, only a merged issue's branch that carries build output goes.
 #[test]
 fn wip_prune_dry_run_lists_and_deletes_nothing() {
     let d = tmpdir("wip-prune");
@@ -811,7 +787,6 @@ fn wip_prune_dry_run_lists_and_deletes_nothing() {
     let wip = |name: &str, file: &str| {
         git(&["-C", &l, "checkout", "-q", "--detach", "origin/staging"]);
         std::fs::create_dir_all(local.join(file).parent().unwrap()).unwrap();
-        // Incompressible: the size listed is what the branch costs a clone.
         let mut x = file.len() as u64;
         let bytes: Vec<u8> = (0..2 << 20)
             .map(|_| (x = x.wrapping_mul(6364136223846793005).wrapping_add(1), (x >> 56) as u8).1)
@@ -854,8 +829,6 @@ fn sh_git(a: &[&str]) -> String {
     String::from_utf8(s.stdout).unwrap()
 }
 
-/// #779: a closed issue's 5 wip branches of one role → its newest is left, whatever they hold; an open issue's are
-/// untouched. The run lists the counts per issue first.
 #[test]
 fn wip_prune_keeps_only_the_newest_of_a_closed_issue() {
     let d = tmpdir("wip-prune-newest");

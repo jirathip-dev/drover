@@ -135,7 +135,6 @@
         "act": "idle",
         "coat": "--c:#a05c2c;--d:#7d4520;--m:#5d3317;--b:#efe7dc",
         "data": {
-          "account": null,
           "agent": "conductor-t1",
           "confirmed": true,
           "effort": null,

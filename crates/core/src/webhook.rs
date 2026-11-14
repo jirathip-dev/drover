@@ -1,9 +1,5 @@
-//! #626: GitHub webhooks, `POST /hooks/github` on serve's Funnel listener (docs/serve.md). The `X-Hub-Signature-256`
-//! HMAC-SHA256 of the raw body, checked in constant time against `GITHUB_WEBHOOK_SECRET`; a PR or CI event on a fleet
-//! repo re-reads that issue's PR into the cache `drover pr` reads and kicks drive for it. The fast step's slow
-//! catch-up read (`[limits] webhook_poll_minutes`) covers what a sleeping Mac or a down Funnel missed.
 use crate::config::Config;
-use crate::events::{fold, read};
+use crate::events::{fold, working};
 use crate::runner::Runner;
 use crate::{gate, gh, Ctx};
 use anyhow::Result;
@@ -45,7 +41,6 @@ pub fn signed(secret: &str, body: &[u8], sig: &str) -> bool {
     want.is_some_and(|w| !w.is_empty() && mac.verify_slice(&w).is_ok())
 }
 
-/// The count of refused deliveries (a bad or missing signature): all that is kept of them.
 fn counter(ctx: &Ctx) -> PathBuf {
     ctx.state.with_file_name("webhook.rejected")
 }
@@ -55,7 +50,6 @@ pub fn rejected(ctx: &Ctx) -> u64 {
     n.trim().parse().unwrap_or(0)
 }
 
-/// The branches and PR numbers an event names (a push to integration: the merge commit's trailing `(#N)`).
 fn names(v: &Value) -> (Vec<&str>, Vec<u64>) {
     let s = |p: &str| v.pointer(p).and_then(Value::as_str);
     let all = |p: &str| v.pointer(p).and_then(Value::as_array).into_iter().flatten();
@@ -75,9 +69,7 @@ fn names(v: &Value) -> (Vec<&str>, Vec<u64>) {
     (branches, nums)
 }
 
-/// One delivery as `(status, text)`: 503 with no secret; 401 on a bad or missing signature (counted, nothing else
-/// read); 200 for `ping`; 202 for an event no open fleet issue matches; else 200 once each matched issue's PR is re-read
-/// and drive kicked for it.
+/// One delivery as `(status, text)`: 503 with no secret; 401 on a bad or missing signature (counted, nothing else read); 200 for `ping`; 202 for an event no open fleet issue matches; else 200 once each matched issue's PR is re-read and drive kicked for it.
 pub fn deliver(ctx: &Ctx, r: &dyn Runner, event: &str, sig: Option<&str>, body: &[u8]) -> (u16, String) {
     let Ok(cfg) = Config::load(&ctx.config) else {
         return (503, "no fleet.toml".into());
@@ -102,7 +94,7 @@ pub fn deliver(ctx: &Ctx, r: &dyn Runner, event: &str, sig: Option<&str>, body: 
     let v: Value = serde_json::from_slice(body).unwrap_or_default();
     let repo = v["repository"]["full_name"].as_str().unwrap_or_default();
     let (branches, nums) = names(&v);
-    let states = fold(&read(&ctx.state).unwrap_or_default());
+    let states = fold(&working(&ctx.state).unwrap_or_default());
     let mut hit = vec![];
     for s in states
         .values()
@@ -130,7 +122,6 @@ pub fn deliver(ctx: &Ctx, r: &dyn Runner, event: &str, sig: Option<&str>, body: 
         let _ = gh::pr(ctx, r, f, (&s.fleet, s.issue), branch, ctx.now);
         crate::drive::kick(ctx, r, &s.fleet, s.issue, "webhook");
     }
-    // The board's snapshot gets a new version: serve re-renders now, not at its 15 s refresh.
     if let Some((ts, snap)) = crate::db::get::<crate::snapshot::Snapshot>(&ctx.state, "board") {
         let _ = crate::db::put(&ctx.state, "board", ts, &snap);
     }

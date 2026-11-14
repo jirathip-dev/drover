@@ -1,0 +1,11 @@
+{
+  "response": [
+    {
+      "error": "shed connect failed (1): unscripted: ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- 'shed' 'connect' '--autostart'",
+      "host": "bazzite"
+    }
+  ],
+  "route": "GET /api/v1/shed",
+  "schema": [],
+  "type": "Vec<ShedRow>"
+}

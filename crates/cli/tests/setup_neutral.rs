@@ -1,9 +1,5 @@
-//! #82: shipped code and docs stay setup-neutral: no install's own names (people, repos, paths,
-//! hosts). The person in charge is "the owner"; examples use `acme/*` and `<owner>/<repo>`.
 use std::path::{Path, PathBuf};
 
-/// Matched case-insensitively anywhere in a shipped file.
-/// #355 made `conductor` a drover role, so it is no longer an install's own name.
 const WORDS: [&str; 6] = [
     "jirathip",
     "synergy",
@@ -13,8 +9,7 @@ const WORDS: [&str; 6] = [
     "hermes-brain",
 ];
 
-/// (file, exact text with whitespace collapsed, why it may stay). Each one is removed before the scan.
-const EXCEPTIONS: [(&str, &str, &str); 13] = [
+const EXCEPTIONS: [(&str, &str, &str); 11] = [
     (
         "assets/herd.js",
         "jirathip-dev/corral",
@@ -26,29 +21,19 @@ const EXCEPTIONS: [(&str, &str, &str); 13] = [
         "MIT notice of the ported Corral code",
     ),
     (
-        "assets/themes/farm/sprites.svg",
+        "assets/swag/farm/sprites.svg",
         "(c) 2026 jirathip-dev, MIT",
         "MIT notice of the ported Corral horses",
     ),
     (
-        "docs/design/farm-v2/make_sprites.py",
-        "(c) 2026 jirathip-dev, MIT",
-        "#242: MIT notice of the ported Corral horses in the sheet it writes",
+        "assets/swag/SOURCE",
+        "jirathip-dev/swag",
+        "#928: the shared theme repo the packs are pinned from",
     ),
     (
-        "docs/design/farm-v2/sprites.svg",
-        "(c) 2026 jirathip-dev, MIT",
-        "#242: MIT notice of the ported Corral horses",
-    ),
-    (
-        "docs/design/theme-370/proposed/farm/sprites.svg",
-        "(c) 2026 jirathip-dev, MIT",
-        "#370: MIT notice of the ported Corral horses",
-    ),
-    (
-        "docs/design/farm-v2/README.md",
-        "MIT © jirathip-dev",
-        "#242: MIT notice of the ported Corral horses",
+        "docs/themes.md",
+        "[jirathip-dev/swag](https://github.com/jirathip-dev/swag)",
+        "#928: the shared theme repo the packs come from",
     ),
     (
         "docs/serve.md",
@@ -111,7 +96,6 @@ fn shipped_files_name_no_install() {
     let (mut bad, mut used) = (vec![], [false; EXCEPTIONS.len()]);
     for f in all {
         let rel = f.strip_prefix(root).unwrap().to_string_lossy().into_owned();
-        // Images and other binaries hold no text to check.
         let Ok(text) = std::fs::read_to_string(&f) else {
             continue;
         };
@@ -130,7 +114,6 @@ fn shipped_files_name_no_install() {
                 .map(|w| format!("{rel}: {w}")),
         );
     }
-    // A stale exception goes too, so the list never outgrows what ships.
     bad.extend(
         EXCEPTIONS
             .iter()
@@ -145,8 +128,6 @@ fn shipped_files_name_no_install() {
     );
 }
 
-/// #732 (q911): role texts speak of "the lane" and "the agent": no harness or provider's name in a line's behaviour
-/// (a `code` span, a file or command's name, may carry one).
 #[test]
 fn role_texts_name_no_harness() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../roles");

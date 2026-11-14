@@ -6,7 +6,7 @@
 Frozen for features (#552): the board takes bug fixes only, until it retires once the parity list passes. New chat
 UI goes to cooee core, new workflow UI (Queue, Asks, Fleets tabs) to Drover's screens, which drover serves itself (#814);
 both read `/api/v1`, which stays open. CI's
-`board-freeze` fails a PR touching the board's UI files (`assets/serve.*`, `assets/herd.*`, `assets/themes/`, `web/`,
+`board-freeze` fails a PR touching the board's UI files (`assets/serve.*`, `assets/herd.*`, `assets/terminal/`, `web/`,
 `crates/server/src/serve.rs`, `serve/` but `v1.rs`) unless its issue has a line starting `board-fix`.
 
 The board is live: the page keeps one `GET /live` Server-Sent Events stream open (same
@@ -270,7 +270,7 @@ clouds at 0.055 opacity, and the cast light from the moon's side. Storm and fog 
 
 The page's look is data, no code: see [themes.md](themes.md) for the contract (per-role actions, looks, load scene,
 rail, moments, row sprites, icons, ASCII words, Lanes modes), the per-phone `[◐]` look sheet, `[serve] theme` (its
-default) and the built-in `farm`, `kitchen` and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
+default) and the built-in `farm`, `kitchen`, `garden` (pinned from the shared theme repo, #928) and `terminal`. `serve` serves `/themes/<name>/<file>`; `--export`
 writes them to `themes/`. Colours are a separate per-phone pick in the same sheet: 8 built-in schemes plus your own
 `<config dir>/schemes/<name>.json`, each contrast-gated ([themes.md](themes.md#colour-schemes-244)).
 
@@ -372,13 +372,14 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 |---|---|
 | `GET state` | the board in one read: `seq` (newest event), `now` and `tz` (the server's clock and UTC offset, s), `age` (the step's snapshot, null when none), `mtime`, `theme`, `fleets` (with `repo`), `queue`, `lanes`, `asks`, `hosts`, `services`, `alerts` |
 | `GET health` | #709: `ok`, `config` (`ok`, or `invalid` with its `error`, `config invalid: <error> (fleet.toml:<line>)`); no answer: the process is dead. An invalid fleet.toml leaves the board reading the last good one (kept as `fleet.good.toml` beside the log), with that line as a red banner above every tab (`needs`' `config`); `check` alerts `config-invalid` once per distinct error, `config-ok` once it loads again |
-| `GET host` | #267: the Host tab: `hosts` (each card's dot, words, rows with their gauge, value, sparkline series and, in an export, chart), `disk`, `orphans`, `leftovers`, `spawns`, `services`, `theme`, `accounts`, `deepseek`, `fleets`, `push`, `vendors` (#830: `accounts` and `setups`, each account's and each provider login's `{name, vendor}`, from the providers), and on a live board `key`, `subs`, `devices`; `rw` and `live` say which forms show and whether they post |
+| `GET host` | #267: the Host tab: `hosts` (each card's dot, words, rows with their gauge, value, sparkline series and, in an export, chart), `disk`, `orphans`, `leftovers`, `spawns`, `services`, `theme`, `deepseek`, `fleets`, `push`, `vendors` (#830: `setups`, each provider login's `{name, vendor}`, from the providers; #923: `accounts` stays empty), and on a live board `key`, `subs`, `devices`; `rw` and `live` say which forms show and whether they post |
 | `GET queue` | #268: the Queue tab: a card per fleet (needing you first) with its `k` colour, serial groups, `need`, `paused` line or `drive` line and red `notes`, its `rows` (state, age and `t`, stage chips, lane, PR line, notes, a defaulted decision and its `ask`, ▲/▼ targets, the `lanes` list), #576 their `marks` by issue (`design`, `verify` `on`/`off`/null, `repro`, `serial`, `needs`, the verify `note`), `done` today, the `backlog` and the `config` sheet's data; `rw` and `live` say which forms show and whether they post |
 | `GET issue/<fleet>/<n>` | #576: the issue's recorded verdicts, newest first: `role` (the stage: `rev`, `verify`), `round`, `sha`, `verdict`, `findings` (verdict.md after its first line), the newest one's screenshot `shots` (`/shot/<fleet>/<n>/<i>` serves the `i`th) and a `--repro` PASS's `repro` block (`kind` `run` or `verify`, its `text`) |
 | `GET lessons` | #576: per fleet its `lessons` (`weekly`, `off`), the `last` lesson lane (`issue`, its spawn `ts`, the issue's `state`) and `next`, when tick runs the next (null: `off`) |
 | `GET lessons/<fleet>/digest?days=N` | #576: the CLI's `lesson digest` (default 7 days) as `text` |
-| `GET needs` | #269: the needs-you cards for this device: `snap` (#450: the step's look's time, 0 for none; the strip under the header shows its age once over 2 min), the open `asks` (`who`, `kind`, imported `from`), each `blocked` lane's card (unpaired: its `activity`; paired: the harness `menu` or the pane's `tail`), the `needs-human` `issues` (one more round `pending`, the last verdict, the PR line, `merge`), `choosing` (`[chat·N]`); `rw`, `live`, `paired` and `pair` say which forms and buttons show |
-| `GET lanes` | #269: the Lanes tab for this device: state `sections` with their repo groups and each lane's row (avatar `state`, `act`, `atone`, `coat`; `state` in `tone` for `ago`, `why`, the `activity` or `now` line) and hidden card (`head`, `shown`, `facts`, the PR line, `dead`, the `blocked` card); `error` (no fleet.toml) or `failed` (herdr unread) |
+| `GET needs` | #269: the needs-you cards for this device: `snap` (#450: the step's look's time, 0 for none; the strip under the header shows its age once over 2 min), the open `asks` (`who`, `kind`, imported `from`), each `blocked` lane's card (unpaired: its `activity`; paired: the harness `menu` or the pane's `tail`), the `needs-human` `issues` (one more round `pending`, the last verdict, its screenshot `shots` and #969 `shots_at`, the verdict's sha that `/shot/<fleet>/<n>/<i>/<sha>` names, the PR line, `merge`), `choosing` (`[chat·N]`); `rw`, `live`, `paired` and `pair` say which forms and buttons show |
+| `GET lanes` | #269: the Lanes tab for this device: state `sections` with their repo groups and each lane's row (avatar `state`, `act`, `atone`, `coat`; `state` in `tone` for `ago`, `why`, the `activity` or `now` line) and hidden card (`head`, `shown`, `facts`, the PR line, `dead`, the `blocked` card); `error` (no fleet.toml) or `failed` (herdr unread); #611: for a paired device, `shed`, the folded read-only `Other in shed (N)` section's rows (`GET shed`'s) |
+| `GET shed` | #611 (paired only, else 401): every enabled host's shed sessions no lane or conductor in the log names and no `fleet` label marks, each `{name, host, runtime (shed or acp), labels, state (shed's), last (an ACP session's last reply, a terminal's last non-empty screen line), age (since the board first saw that state)}`; a host whose shed fails is one `{host, error}` entry, and stays up. One `ls` per host, cached 10 s like the herdr agent list |
 | `GET chat` | #269: the [chat] tab: per repo (`all` first) its thread `rows` and `archived` ones, then each thread's view (`ds`, `state`, its last 30 messages by `kind`, `older` or the `started` line); `rw`: a paired device on the live board writes; #620: serve keeps the folded tab by the log's last seq, fleet.toml's mtime, the agents and the minute, and a request in between reuses it without reading the log |
 | `GET thread/<t>?before=N&n=30` | #408, #269: a thread's messages before seq `N`, as `chat`'s pages. #681: a handoff's message carries one `handoff` item (cooee's agent→agent message): `kind: "handoff"`, `id` (its seq; a repo handoff's is its card's), `from` (`{agent: "orchestrator", thread, repo}`), `to` (the thread id once delivered, else `{repo, pending: true}`), `title`, `summary` (the first line), `text`, `state` (`pending`, `delivered`, `failed` with its `error`, `forwarded`), `folded` (the sender's thread; the receiver's is the message form) and, while pending, `choices`: the card's rows (`n`, `text`, the `thread` it goes to, `new` for a new thread), each picked by `POST <op>` (`answer`) with its `fleet`, `id`, `choice` = `n` and `State.mtime`; the outcome shows in both threads' items. A repo handoff's own `kind: "handoff"` row after the pick has no item (its card's is the one) |
 | `GET repo/<fleet>/threads` | #681: the repo's orchestrator threads, newest-active first: `id`, `title`, `last` (`line`, `ts`), `unread`, `awake` (its orchestrator not asleep), `archived`, and `newest: true` on the ongoing one (the first not archived), so cooee shows it as the agent's chat and the rest as side threads; `all` for the all-repos threads; 404 `NOT_FOUND` for no such fleet |
@@ -414,7 +415,7 @@ response). A response whose shape (keys, each value's JSON type) or a type whose
 changes fails CI until the fixtures are updated in the same PR (`BLESS=1 cargo test --test api_v1_contract`).
 
 `web/` is TypeScript with no framework: `npm run check` (`tsc --strict --noEmit`) and `npm run build` (esbuild:
-`dist/board.js` and `dist/board.css`, the CSS from `assets/`; the themes stay in `assets/themes/`). The only dev
+`dist/board.js` and `dist/board.css`, the CSS from `assets/`; the themes stay in `assets/swag/` and `assets/terminal/`). The only dev
 dependencies are `typescript` and `esbuild`, at pinned versions. `web/dist` is committed and embedded in the binary
 (`/a/<hash>/board.js`), so `cargo install` needs no Node. CI's `web` job rebuilds it and fails on a diff, so run `npm run
 build` after a UI edit.
@@ -460,7 +461,7 @@ Tests: `crates/cli/tests/cooee_screens.rs` against cooee's fixtures in `crates/c
 
 Five groups in a fixed order (#234): HOSTS (a card per host, main first, then A→Z: load/cpu, swap-out, memory, disk,
 top memory, lanes, tags, each with a 24 h sparkline that opens a 1 h / 6 h / 24 h chart; docs/hosts.md), FLEET DISK
-(the worktree budget, orphan folders, processes left in closed lanes), SERVICES (board, tick, herdr, accounts,
+(the worktree budget, orphan folders, processes left in closed lanes), SERVICES (board, tick, herdr,
 deepseek), FLEETS (each fleet's last `drover drive` result in plain words, the raw line on tap) and ALERTS (push,
 alert devices, paired devices). A group takes its worst row's status, red over amber over green (a paused fleet is
 grey and counts as none); problem groups open, green ones collapse to one summary line. A tap's

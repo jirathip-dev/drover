@@ -1,6 +1,3 @@
-//! #39: `drover serve --export <dir> --demo` from the committed `demo/`: the file set, an inert page
-//! (no POST form, no absolute URL, no live endpoint, no pairing or alerts), canned transcripts, and no
-//! call to the passed runner (herdr/gh/host are all canned in `demo/runner.json`).
 mod common;
 use common::*;
 use drover::Ctx;
@@ -57,8 +54,6 @@ fn demo_export_writes_the_file_set_without_running_anything() {
     let dsh: Value =
         serde_json::from_str(&std::fs::read_to_string(site.join("lane/acme-api-impl-17.json")).unwrap()).unwrap();
     assert_eq!(dsh["harness"], "dsh");
-    // #105 gate 2: the sheet's lane has a titled input divider and a spinner on screen; neither is chat.
-    // #138: the spinner is the sheet's live status line, sent beside the lines.
     let j: Value = serde_json::from_str(
         &std::fs::read_to_string(site.join("lane/acme-web-impl-48-contrast-audit-for-every-settings-pane-abxx.json"))
             .unwrap(),
@@ -76,7 +71,6 @@ fn demo_export_writes_the_file_set_without_running_anything() {
         assert!(!sheet.contains(gone), "`{gone}` in the sheet: {sheet}");
     }
     assert!(sheet.contains("raising it one step."), "{sheet}");
-    // Herd: 4 repos (#162: acme-ios is paused, no lanes) plus Others, every lane state (#83: parked too), a 6-item queue with one blocked.
     let h: Value = serde_json::from_str(&std::fs::read_to_string(site.join("herd.json")).unwrap()).unwrap();
     let fleets = h["fleets"].as_array().unwrap();
     assert_eq!(
@@ -104,7 +98,6 @@ fn demo_export_writes_the_file_set_without_running_anything() {
 fn demo_page_is_inert_and_relative() {
     let (site, _) = export();
     let html = std::fs::read_to_string(site.join("index.html")).unwrap();
-    // #57: the scripts and styles sit under a/<hash>/, linked relatively; checked with the page.
     let v = std::fs::read_dir(site.join("a"))
         .unwrap()
         .next()
@@ -120,13 +113,11 @@ fn demo_page_is_inert_and_relative() {
     ]
     .iter()
     .fold(html.clone(), |p, f| p + &std::fs::read_to_string(v.join(f)).unwrap());
-    // #268: the Queue tab is the TypeScript board's, from the export's `api/v1/queue` (its forms inert too).
     assert!(
         html.contains("<section id=queue></section>"),
         "the page has no Queue HTML"
     );
     let page = page + &queue_html(&std::fs::read_to_string(site.join("api/v1/queue")).unwrap(), "tab(d)");
-    // #269: likewise the needs cards, Lanes and [chat], from `api/v1/needs`, `lanes` and `chat`.
     assert!(
         html.contains("<div id=needs></div>")
             && html.contains("<section id=lanes></section><section id=chat></section>"),
@@ -151,8 +142,6 @@ fn demo_page_is_inert_and_relative() {
     );
     assert!(page.contains("Demo with fake data. Install drover to run your own."));
     assert_eq!(page.matches("<span class=g>merged</span>").count(), 4, "4 merges today");
-    // #81: #39 merged with q1 unanswered; its ask is closed. #99: #21's owner ask waits, #44's routine one counts down;
-    // #517: #21's thread ask (t4's q33) is tied to an issue, so it is here too.
     assert_eq!(cards.matches("<details class=ask>").count(), 3, "three needs-you cards");
     let card = &cards[cards.find("<details class=ask>").unwrap()..];
     assert!(
@@ -189,7 +178,6 @@ fn demo_page_is_inert_and_relative() {
     assert!(
         page.contains("rel=manifest href=manifest.webmanifest") && page.contains("serviceWorker.register(R + 'sw.js')")
     );
-    // No pairing list, no "Enable alerts", no live stream, no POST, the transcript from lane/<agent>.json.
     assert!(!page.contains("Paired devices") && !page.contains("id=push"));
     for guard in [
         "function connect() {\n  if (DEMO) return;",

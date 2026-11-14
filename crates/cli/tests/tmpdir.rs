@@ -1,4 +1,3 @@
-//! #535: a test's `tmpdir` dirs are removed when it ends, pass or fail; none pile up in $TMPDIR.
 mod common;
 use common::*;
 

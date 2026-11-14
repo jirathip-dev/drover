@@ -1,5 +1,3 @@
-//! #234: the Host tab's 24 h history: a row per host (the fast step for this host, the 5-minute survey for a remote
-//! one), rows past 24 h dropped, the size bound, worst-per-bucket downsampling, and the cards and chart series served.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -59,7 +57,6 @@ fn rows_are_appended_per_host_per_step() {
         f: &r,
         hosts: vec![("bazzite", &bazzite)],
     };
-    // The fast step: this host, sampled now.
     let (code, out) = run(&c, &over, &["drive", "--fast"]);
     assert_eq!(code, 0, "{out}");
     survey(&c, &cfg, &sh.on(&over), false);
@@ -179,7 +176,6 @@ fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
     for k in ["load", "swap", "mem", "disk", "lanes"] {
         assert_eq!(page.matches(&format!("data-k={k} ")).count(), 2, "{k} on both cards");
     }
-    // Load 1.5 is under 2.5, but the history keeps the 3.1 peak in the last 12-minute bucket.
     let s24 = &page[page.find("data-k=load data-s=\"").unwrap() + 20..];
     assert!(
         s24.starts_with(&",".repeat(119)) && s24[119..].starts_with("3.10\""),
@@ -202,7 +198,6 @@ fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
     );
 }
 
-/// #352: `ps` lines with every group, the claude one's command line `len` bytes long.
 fn watched_fake(len: usize) -> Fake {
     let ps = format!(
         "204800 /usr/local/bin/claude --settings {}\n102400 /opt/homebrew/bin/qemu-system-aarch64\n51200 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n10240 drover drive --fast\n20480 /bin/zsh\n",
@@ -220,7 +215,6 @@ fn no_process_table_walk_while_nobody_watches() {
     assert_eq!(r.count("ps -axo rss=,command="), 0, "{:?}", r.calls.borrow());
     let rows = history(&c);
     assert!(rows.len() == 1 && rows[0].procs.is_none(), "{rows:?}");
-    // A Host tab seen 3 min ago no longer counts.
     std::fs::write(c.state.with_file_name("host-watch.at"), (NOW - 180).to_string()).unwrap();
     run(&c, &r, &["drive", "--fast"]);
     assert_eq!(r.count("ps -axo rss=,command="), 0);
@@ -245,7 +239,6 @@ fn sampling_resumes_once_the_host_tab_is_open() {
     assert!(!watch.exists(), "another tab is not watching the host");
     let _host = live("?tab=host");
     let at: u64 = std::fs::read_to_string(&watch).unwrap().parse().unwrap();
-    // The next fast step (each minute) walks `ps` once and keeps the groups, not the PIDs.
     c.now = at + 60;
     let r = watched_fake(10);
     let (code, out) = run(&c, &r, &["drive", "--fast"]);

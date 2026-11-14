@@ -1,6 +1,3 @@
-//! #422: the Lanes tab shows each thread's conductor as a known lane of the thread's repo (role `conductor`), first in
-//! its subgroup, named by the thread, `asleep` (dimmed) once its pane closed; an `all` thread's in `all repos`; a tap
-//! opens the thread; Others keeps only agents drover did not start.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -9,7 +6,6 @@ use serde_json::{json, Value};
 
 const T: u64 = 1_000_000;
 
-/// The log: impl #5 (newer than the conductors), threads t6 (awake), t7 (`all`, awake) and t8 (asleep), plus t9
 fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let cfg =
         format!("{CONFIG}\n[fleet.drover]\nrepo = \"o/drover\"\nlocal = \"/p/drover\"\nintegration = \"staging\"\n");
@@ -107,13 +103,11 @@ fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_clos
                 None
             ),
             r("all", "Every repo · t7", "orchestrator", "working", "opus", "t7", None),
-            // A `conductor-<id>` name with no such thread in the log is no lane of drover's.
             r("", "orchestrator-t99", "other", "idle", "", "", None),
             r("", "side", "other", "idle", "", "", None),
             r("drover", "Old chat · t8", "orchestrator", "asleep", "opus", "t8", None),
         ]
     );
-    // Grouped: the drover subgroup opens with its conductors (newest first), then the impl that changed later.
     let groups = drover::lanes::group(&lanes, |l| l.since);
     let names = |sec: &str, f: &str| -> Vec<String> {
         let subs = &groups.iter().find(|g| g.0 == sec).unwrap().1;
@@ -142,7 +136,6 @@ fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_clos
     assert_eq!(names("idle", "Others"), ["orchestrator-t99", "side"]);
 }
 
-/// The Lanes tab's HTML: each conductor row carries its thread (the tap target), an asleep one is gone (dimmed).
 #[test]
 fn the_lanes_tab_renders_orchestrator_rows_with_their_thread() {
     let (c, b) = setup("orchestrator-lanes-page");
@@ -179,7 +172,6 @@ fn the_lanes_tab_renders_orchestrator_rows_with_their_thread() {
     assert!(css.contains(".lane[data-thread][data-gone]>.lr{opacity:.55}"));
 }
 
-/// In WebKit at 390 px: a tap on the asleep conductor's row opens its thread in the chat tab (no lane sheet).
 #[test]
 fn a_tap_on_a_orchestrator_row_opens_its_thread_in_the_chat_tab() {
     if no_webkit() {
@@ -219,6 +211,5 @@ fn a_tap_on_a_orchestrator_row_opens_its_thread_in_the_chat_tab() {
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
     let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    // chat tab, shown, t8's thread, visible, open, a history entry, no lane sheet, page errors.
     assert_eq!(m, [1., 1., 1., 1., 1., 1., 1., 0.], "{out}");
 }

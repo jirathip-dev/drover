@@ -1,5 +1,3 @@
-//! #680: the seams the deterministic simulation (crates/cli/tests/sim) sets on each of its process threads: the clock,
-//! the pid leases carry, and a yield hook at each state.db write. Unset (every real process), each is a no-op.
 use crate::events::Event;
 use std::cell::RefCell;
 

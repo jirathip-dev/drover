@@ -65,10 +65,17 @@ fn six_lanes_failing_to_start_on_one_host_trip_the_breaker_once_and_park_no_issu
     sh.wait_ends("drover-canary", "timeout");
     let r = fake();
     let out = drive(&at(&c, t0 + START + 1), &r);
+    assert_eq!(
+        kinds(&c, "respawn").len(),
+        2,
+        "#908: respawn_per_pass (2) a pass: {out}"
+    );
+    assert!(kinds(&c, "runtime-down").is_empty(), "{out}");
+    let out = drive(&at(&c, t0 + START + 2), &r);
     let down = kinds(&c, "runtime-down");
     assert_eq!(down.len(), 1, "{out}");
     assert_eq!(
-        (down[0].str("host"), down[0].data["failures"].as_u64()),
+        (down[0].str("host"), down[0].val("failures").as_u64()),
         (Some("local"), Some(5))
     );
     assert_eq!(down[0].str("sample"), Some("no output after its spawn"));

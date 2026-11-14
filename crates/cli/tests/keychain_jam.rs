@@ -1,13 +1,8 @@
-//! #710: `check` counts `security find-generic-password` readers waiting over 60 s and a SecurityAgent up over 10 min;
-//! more than `[limits] keychain_readers` (3) alerts `keychain-jammed` once per episode, with no argument values;
-//! `reap_keychain_readers = true` kills those readers, then that SecurityAgent (never securityd); doctor shows the count.
 mod common;
 use common::*;
 
 const PS: &str = "ps -axo pid=,ppid=,etime=,command=";
 
-/// launchd, securityd and a 31 h SecurityAgent; readers 400, 401, 402 (and 405 when `jam`) over 60 s, 403 young, 404
-/// another `security` verb. Arguments carry values that must never reach an alert.
 fn ps(jam: bool) -> String {
     let mut s = String::from(
         "    1     0 30-00:00:00 /sbin/launchd
@@ -90,7 +85,6 @@ fn a_jam_alerts_once_per_episode_with_pids_ages_parents_and_the_fix_but_no_secre
         !e.contains("403") && !e.contains("404"),
         "young or other verbs are no readers: {e}"
     );
-    // The jam clears, then comes back: a new episode, a new alert.
     let r = fake(false);
     run(&c, &r, &["check"]);
     assert_eq!(jammed(&c), 1);

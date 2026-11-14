@@ -1,4 +1,3 @@
-//! `gate::ci_green`, moved out of `src/gate.rs`.
 use drover::gate::ci_green;
 use serde_json::{json, Value};
 

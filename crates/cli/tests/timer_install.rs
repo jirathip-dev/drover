@@ -1,5 +1,3 @@
-//! #461: every `timer install` logs `timer-install` with its `by`; a conductor's shows in its thread.
-//! Its own test binary: `DROVER_LANE` and `DROVER_THREAD` are process-wide.
 mod common;
 use common::*;
 use drover::events::{read, Event};
@@ -31,7 +29,7 @@ fn timer_install_logs_who_ran_it() {
         "dev.drover.update",
         "dev.drover.clean"
     ]);
-    assert_eq!((&e.data["written"], &e.data["reloaded"]), (&jobs, &json!([])));
+    assert_eq!((e.val("written"), e.val("reloaded")), (&jobs, &json!([])));
     assert!(e.str("thread").is_none());
 
     std::env::set_var("DROVER_LANE", "sendmeter:-:orchestrator");
@@ -42,7 +40,7 @@ fn timer_install_logs_who_ran_it() {
         (e.str("by"), e.str("thread")),
         (Some("sendmeter:-:orchestrator"), Some("t1"))
     );
-    assert_eq!(e.data["written"], json!([]), "already written");
+    assert_eq!(*e.val("written"), json!([]), "already written");
     std::env::remove_var("DROVER_LANE");
     std::env::remove_var("DROVER_THREAD");
     let (_, show) = run(&c, &r, &["thread", "show", "t1"]);

@@ -1,11 +1,9 @@
-//! The dsh harness's kick, moved out of `src/harness/dsh.rs`.
 use anyhow::Result;
 use drover::providers;
 use drover::runner::{Out, Runner};
 use drover::spawn::Plan;
 use std::path::PathBuf;
 
-/// Answers `pane get` idle, then working; records every herdr call.
 struct Fake(std::sync::Mutex<Vec<String>>);
 
 impl Runner for Fake {
@@ -28,7 +26,6 @@ impl Runner for Fake {
     fn sleep(&self, _: u64) {}
 }
 
-/// Byte 20 of this kick falls inside `語`: the typed-kick check must not panic.
 #[test]
 fn kick_with_non_ascii_path_does_not_panic() {
     let wt = PathBuf::from("/Users/日本語/wt");
@@ -48,17 +45,14 @@ fn kick_with_non_ascii_path_does_not_panic() {
         brief: wt.join(".brief.md"),
         kick: "Read /Users/日本語/wt/.brief.md and execute it fully.".into(),
         lane: s(),
-        account: None,
         env: Default::default(),
         port: 41000,
         mcp: Default::default(),
         mcp_file: wt.join(".mcp.lane.json"),
         head: s(),
         title: s(),
-        resting: None,
         session: None,
         lane_key: None,
-        token: None,
     };
     assert!(!p.kick.is_char_boundary(20));
     let r = Fake(Default::default());

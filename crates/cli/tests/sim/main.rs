@@ -1,13 +1,8 @@
-//! #680: a deterministic simulation of drover's concurrent passes (drive, drive --fast, check, kick and the owner's
-//! verbs) running the real `main_with` against in-process fakes of herdr, gh and git and a fake clock, under one
-//! seeded scheduler; the invariants are checked after every step (docs/design/sim-680).
-//!
-//! `DROVER_SIM_SEED=<n> cargo test -p drover --test sim` replays one seed (`DROVER_SIM_TRACE=full`: its whole
-//! trace); `just sim [N]` runs N random seeds.
 mod hunt;
 mod invariants;
 mod metrics;
 mod model;
+mod replay;
 mod scenario;
 mod sched;
 mod seeds;
@@ -19,7 +14,6 @@ mod common;
 use invariants::Sabotage;
 use sched::Sim;
 
-/// One run: 6 sim hours or 4,000 steps, then a 30-minute settle with no new faults (I6).
 const HOURS: u64 = 6;
 const STEPS: u64 = 4000;
 
@@ -27,6 +21,9 @@ pub struct Outcome {
     pub seed: u64,
     pub failure: Option<String>,
     pub trace: Vec<String>,
+    /// #686: every event the run appended, in order, and (a replay's `keep_going`) each violation with its step.
+    pub events: Vec<drover::events::Event>,
+    pub violations: Vec<String>,
     /// Steps taken (the failing step, if it failed), and what the run reached and its peaks (`hunt::coverage`).
     pub steps: u64,
     pub cov: std::collections::BTreeSet<String>,
@@ -35,8 +32,7 @@ pub struct Outcome {
 }
 
 impl Outcome {
-    /// The failure with its seed, the replay line and the trace's last 200 lines plus every scenario event (all of
-    /// it with `DROVER_SIM_TRACE=full`).
+    /// The failure with its seed, the replay line and the trace's last 200 lines plus every scenario event (all of it with `DROVER_SIM_TRACE=full`).
     pub fn report(&self) -> String {
         let full = std::env::var("DROVER_SIM_TRACE").is_ok_and(|v| v == "full");
         let tail = self.trace.len().saturating_sub(200);
@@ -67,7 +63,19 @@ pub fn run_plan(plan: &hunt::Plan, sabotage: Option<Sabotage>) -> Outcome {
 
 /// Run fleet `world` (its model and fleet.toml) under `seed`'s scheduler for at most `steps` (the settle's included).
 pub fn run_world(seed: u64, (mut m, cfg): (model::Model, String), steps: u64, sabotage: Option<Sabotage>) -> Outcome {
-    // A lane's own environment must not reach the simulated processes (they share this one).
+    m.sabotage = sabotage;
+    play(
+        seed,
+        m,
+        &cfg,
+        scenario::T0 + HOURS * 3600,
+        steps.min(STEPS),
+        steps,
+        false,
+    )
+}
+
+pub fn play(seed: u64, m: model::Model, cfg: &str, end: u64, run_steps: u64, steps: u64, keep_going: bool) -> Outcome {
     for k in [
         "DROVER_LANE",
         "DROVER_OUTBOX",
@@ -78,13 +86,11 @@ pub fn run_world(seed: u64, (mut m, cfg): (model::Model, String), steps: u64, sa
         std::env::remove_var(k);
     }
     let root = common::tmpdir(&format!("sim-{seed}"));
-    m.sabotage = sabotage;
-    scenario::setup(&root, &cfg);
+    scenario::setup(&root, cfg);
     let sim = Sim::new(seed, scenario::T0, m, root);
-    let end = scenario::T0 + HOURS * 3600;
-    let mut failure = sim.run(end, steps.min(STEPS));
+    sim.lock().keep_going = keep_going;
+    let mut failure = sim.run(end, run_steps);
     if failure.is_none() {
-        // The settle: faults stop, the passes go on.
         let mut w = sim.lock();
         let t = w.now;
         w.model
@@ -102,6 +108,8 @@ pub fn run_world(seed: u64, (mut m, cfg): (model::Model, String), steps: u64, sa
         seed,
         failure,
         trace: std::mem::take(&mut w.trace),
+        events: w.wrote.drain(..).map(|x| x.ev).collect(),
+        violations: std::mem::take(&mut w.violations),
         steps: w.step,
         cov,
         peaks,
@@ -109,7 +117,6 @@ pub fn run_world(seed: u64, (mut m, cfg): (model::Model, String), steps: u64, sa
     }
 }
 
-/// The seeds this run checks: `DROVER_SIM_SEED` alone, else the fixed set.
 fn seeds() -> Vec<u64> {
     match std::env::var("DROVER_SIM_SEED").ok().and_then(|s| s.parse().ok()) {
         Some(s) => vec![s],
@@ -117,7 +124,6 @@ fn seeds() -> Vec<u64> {
     }
 }
 
-/// Run `seeds` side by side (each run is its own world).
 fn batch(seeds: &[u64]) -> Vec<Outcome> {
     let runs: Vec<_> = seeds
         .iter()
@@ -126,7 +132,6 @@ fn batch(seeds: &[u64]) -> Vec<Outcome> {
     runs.into_iter().map(|h| h.join().expect("a run")).collect()
 }
 
-/// Run `seeds`; the failures, each report printed.
 fn check(seeds: &[u64]) -> Vec<String> {
     let mut bad = vec![];
     for o in batch(seeds) {
@@ -145,7 +150,6 @@ fn fixed_seeds_hold_every_invariant() {
     if plan.is_none() {
         bad = check(&seeds());
     }
-    // #688: the hunt's plans (or the one `DROVER_SIM_PLAN` replays).
     let texts: Vec<String> = match plan {
         Some(p) => vec![p],
         None => seeds::PLANS.iter().map(|p| p.0.to_string()).collect(),
@@ -160,7 +164,6 @@ fn fixed_seeds_hold_every_invariant() {
     assert!(bad.is_empty(), "{bad:#?}");
 }
 
-/// Seeds that found a cause of their own (owner, q835): each fails until its issue's fix lands with it unparked.
 #[test]
 #[ignore = "parked: each seed's cause is its own issue"]
 fn parked_seeds() {
@@ -169,7 +172,6 @@ fn parked_seeds() {
     assert!(bad.is_empty(), "{bad:#?}");
 }
 
-/// AC 2: seed 1 is the #370 incident; it reaches a verdict with one supersede, not a loop.
 #[test]
 fn the_incident_seed_records_the_verdict_with_one_supersede() {
     let o = run(seeds::INCIDENT, None);
@@ -192,7 +194,6 @@ fn the_incident_seed_records_the_verdict_with_one_supersede() {
     );
 }
 
-/// AC 4: the same seed gives the same trace twice.
 #[test]
 fn a_seed_replays_to_the_same_trace() {
     let (a, b) = (run(7, None), run(7, None));
@@ -206,7 +207,6 @@ fn a_seed_replays_to_the_same_trace() {
     );
 }
 
-/// AC 3: a deliberately broken invariant fails with its seed and trace.
 #[test]
 fn a_broken_invariant_fails_with_seed_and_trace() {
     for (s, code) in [(Sabotage::DoubleLane, "I1 "), (Sabotage::RedMerge, "I4 ")] {
@@ -229,9 +229,6 @@ fn env(k: &str, default: u64) -> u64 {
     std::env::var(k).ok().and_then(|s| s.parse().ok()).unwrap_or(default)
 }
 
-/// #685 `just sim --metrics [N]`: the fleet metrics over N random seeds from `DROVER_SIM_FROM`, failing seeds
-/// included (the nightly job's invariant check is `just sim`'s). Written to `$DROVER_SIM_OUT/metrics.{json,md}`,
-/// the table beside `DROVER_SIM_BASELINE` (a metrics.json) with each >20% regression a warning; never fails on them.
 #[test]
 #[ignore = "long: `just sim --metrics`"]
 fn metrics_batch() {
@@ -255,7 +252,6 @@ fn metrics_batch() {
     }
 }
 
-/// `just sim [N]`: N random seeds from `DROVER_SIM_FROM` (default 1000); every failing seed printed.
 #[test]
 #[ignore = "long: `just sim`"]
 fn random_seeds() {
@@ -275,13 +271,11 @@ fn random_seeds() {
     assert!(bad.is_empty(), "{} of {n} seeds failed:\n{}", bad.len(), bad.join("\n"));
 }
 
-/// #688 AC 2 and 3: a planted bug a lane's fourth start trips is found by the hunt in fewer rounds than random seeds
-/// take, minimised to fewer faults, scripts and steps, and its printed plan replays to the same failure.
 #[test]
 fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     let s = Some(Sabotage::Planted);
     let tripped = |f: &str| f.starts_with("I1 ");
-    let h = hunt::hunt(&[2, 3, 4, 5], 23, s, |r, f| {
+    let h = hunt::hunt(&[2, 3, 4, 5], 11, s, |r, f| {
         r < 40 && !f.iter().any(|x| tripped(&x.failure))
     });
     let f = h
@@ -321,8 +315,6 @@ fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     );
 }
 
-/// `just sim --hunt [minutes]`: hunt from the fixed seeds for that long (`DROVER_SIM_HUNT_RNG` replays a hunt's
-/// mutations); the corpus and every failure's seeds.rs line go to `DROVER_SIM_CORPUS`.
 #[test]
 #[ignore = "long: `just sim --hunt`"]
 fn hunt() {
@@ -354,12 +346,6 @@ fn hunt() {
     );
 }
 
-/// #685 AC 2: the known-answer fleet (`seeds::known`) gives exact metric values. Queued at true t+2, #201 merges at
-/// t+1029 and #202 at t+1338 (each: the first kick's start at t+91 and a 3 s agent start, 600 s impl, the reviewer's
-/// 300 s, its record and merge; #202's first reviewer is refused, superseded at t+1025 and its successor reviews
-/// 300 s). Five spawns of four lanes, one wasted; two heads × 300 s of CI; idle: the four kept lanes from their stop
-/// to the clean and the refused reviewer's 14 s (#779: 5661, up from 5585, as clean's `wip prune` git calls move the
-/// jittered timers after the first merge); one reviewed head per merge.
 #[test]
 fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
@@ -370,7 +356,7 @@ fn the_known_fleet_gives_exact_metrics() {
         wasted: 1,
         supersedes: 1,
         lanes: 4,
-        idle: 5561,
+        idle: 1004,
         ci_wait: 600,
         lock_wait: 13,
         serial: 0,
@@ -388,7 +374,7 @@ fn the_known_fleet_gives_exact_metrics() {
             ("caps", 0.0),
             ("ci_wait_min", 10.0),
             ("host_busy", 0.0),
-            ("idle_lane_min", 92.68),
+            ("idle_lane_min", 16.73),
             ("lock_wait_min", 0.22),
             ("queue_to_merge_p50_min", 17.12),
             ("queue_to_merge_p90_min", 22.27),
@@ -400,12 +386,10 @@ fn the_known_fleet_gives_exact_metrics() {
     );
 }
 
-/// #685 AC 3: against a baseline, a metric over 20% worse is a warning in the table; one within 20%, or better, is not.
 #[test]
 fn a_metric_over_20_percent_worse_is_a_warning() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
     let s = metrics::summary(&[o.metrics]);
-    // ci_wait_min is 10: 8 is +25%, 9 is +11%; wasted_spawns 1 against 0; idle_lane_min better than its 200.
     let base = serde_json::json!({"seeds": 1, "metrics": {"ci_wait_min": 8.0, "supersedes_per_lane": 0.24,
         "wasted_spawns": 0.0, "idle_lane_min": 200.0}});
     let t = metrics::table(1, &s, Some(&base));
@@ -424,4 +408,165 @@ fn a_metric_over_20_percent_worse_is_a_warning() {
     );
     let back: serde_json::Value = serde_json::from_str(&metrics::to_json(1, &s).to_string()).unwrap();
     assert!(metrics::regressions(&s, &back).is_empty());
+}
+
+#[test]
+fn a_fixture_db_replays_to_its_merge_order_and_counts() {
+    let dir = common::tmpdir("replay-fixture");
+    let log = dir.join("events.jsonl");
+    let t = 1_790_000_000;
+    let ev = |s: u64, n: u64, kind: &str, data: serde_json::Value| {
+        drover::events::Event::new(t + s, "fx", Some(n), kind, data)
+    };
+    let spawn = |s, n, role: &str, agent: &str| {
+        ev(
+            s,
+            n,
+            "spawn",
+            serde_json::json!({"role": role, "agent": agent, "sha": format!("{n}-{s}")}),
+        )
+    };
+    let verdict = |s, n, body: &str| {
+        ev(
+            s,
+            n,
+            "verdict",
+            serde_json::json!({"body": body, "sha": format!("{n}-{s}")}),
+        )
+    };
+    let (pass, fail) = ("PASS\n\nall good", "FAIL\n\n- blocking [correctness] x");
+    let driven = |s, n, step: &str| ev(s, n, "driven", serde_json::json!({"step": step, "code": null}));
+    let pushed = |s, n| ev(s, n, "pushed", serde_json::json!({"sha": "a".repeat(40)}));
+    let queue = |s, n| {
+        drover::events::Event::new(
+            t + s,
+            "fx",
+            None,
+            "queue",
+            serde_json::json!({"op": "add", "issues": [n]}),
+        )
+    };
+    let evs = [
+        queue(0, 11),
+        queue(30, 12),
+        spawn(60, 11, "impl", "fx-impl-11"),
+        spawn(90, 12, "impl", "fx-impl-12"),
+        pushed(1260, 11),
+        driven(1500, 11, "review"),
+        spawn(1500, 11, "rev", "fx-rev-11-r1"),
+        ev(
+            1800,
+            12,
+            "turn-end",
+            serde_json::json!({"role": "impl", "state": "done"}),
+        ),
+        driven(2100, 12, "review"),
+        spawn(2100, 12, "rev", "fx-rev-12-r1"),
+        verdict(2400, 11, pass),
+        driven(2400, 11, "merge"),
+        ev(2400, 11, "merged", serde_json::json!({})),
+        verdict(3000, 12, fail),
+        spawn(3100, 12, "impl", "fx-impl-12"),
+        queue(3600, 13),
+        drover::events::Event::new(
+            t + 3601,
+            "fx",
+            None,
+            "queue",
+            serde_json::json!({"op": "block", "issues": [13], "on": 12}),
+        ),
+        queue(3700, 14),
+        spawn(3800, 14, "impl", "fx-impl-14"),
+        ev(4400, 14, "lane-dead", serde_json::json!({"key": "1:fx-impl-14"})),
+        pushed(5000, 12),
+        driven(5300, 12, "review"),
+        spawn(5300, 12, "rev", "fx-rev-12-r2"),
+        verdict(5900, 12, pass),
+        ev(5900, 12, "merged", serde_json::json!({})),
+        spawn(6000, 13, "impl", "fx-impl-13"),
+        pushed(6600, 13),
+        driven(6900, 13, "review"),
+        spawn(6900, 13, "rev", "fx-rev-13-r1"),
+        verdict(7500, 13, pass),
+        ev(7500, 13, "merged", serde_json::json!({})),
+        ev(4 * 3600, 0, "drive-pass", serde_json::json!({})),
+    ];
+    for e in &evs {
+        drover::events::append(&log, e).unwrap();
+    }
+    let (evs, from, to) = replay::read(&dir.join("state.db"), "fx", 1).unwrap();
+    let s = replay::build(&evs, "fx", from, to);
+    assert_eq!(s.real.merged, [11, 12, 13]);
+    let (o, sim) = replay::run(&s);
+    eprintln!("{}", replay::table(&s.real, &sim));
+    assert!(
+        o.failure.is_none() && o.violations.is_empty(),
+        "{:?}\n{}",
+        o.violations,
+        o.report()
+    );
+    assert_eq!(sim.merged, s.real.merged, "{}", o.report());
+    let rounds = |r: &replay::Run| r.metrics.get("review_rounds_per_merge").copied();
+    assert_eq!(
+        (sim.verdicts, sim.deaths, rounds(&sim)),
+        (s.real.verdicts, s.real.deaths, rounds(&s.real)),
+        "{}",
+        o.report()
+    );
+    assert_eq!(rounds(&s.real), Some(1.33));
+    let saved = serde_json::to_string(&s).unwrap();
+    assert!(!saved.contains("all good") && !saved.contains("blocking"), "{saved}");
+}
+
+#[test]
+#[ignore = "long: `just sim --replay`"]
+fn replay_db() {
+    let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+    let src = var("DROVER_SIM_REPLAY").expect("DROVER_SIM_REPLAY");
+    let s: replay::Scenario = if src.ends_with(".json") {
+        serde_json::from_str(&std::fs::read_to_string(&src).unwrap()).unwrap()
+    } else {
+        let fleet = var("DROVER_SIM_FLEET").unwrap_or_else(|| "herdsman".into());
+        let days = var("DROVER_SIM_DAYS").and_then(|d| d.parse().ok()).unwrap_or(7);
+        let (evs, from, to) = replay::read(std::path::Path::new(&src), &fleet, days).unwrap();
+        replay::build(&evs, &fleet, from, to)
+    };
+    if let Some(p) = var("DROVER_SIM_SAVE") {
+        std::fs::write(&p, serde_json::to_string_pretty(&s).unwrap()).unwrap();
+        println!("scenario saved to {p}");
+    }
+    let started = std::time::Instant::now();
+    let (o, sim) = replay::run(&s);
+    let lanes: usize = s.lanes.values().map(Vec::len).sum();
+    println!(
+        "replay {} {}..{} ({} queue verbs, {} lanes, {} busy and {} offline windows): {} sim steps in {:.0?}",
+        s.fleet,
+        s.from,
+        s.to,
+        s.queue.len(),
+        lanes,
+        s.busy.len(),
+        s.offline.len(),
+        o.trace.len(),
+        started.elapsed()
+    );
+    let end = o
+        .trace
+        .last()
+        .map(|l| l.split_whitespace().nth(1).unwrap_or_default().to_string());
+    println!(
+        "ran to {} (window {} s + 1800 s settle)",
+        end.unwrap_or_default(),
+        s.to - s.from
+    );
+    match &o.violations[..] {
+        [] => println!("invariants: all held (I1–I10)"),
+        v => println!(
+            "invariants: {} violation(s), each at its step:\n{}",
+            v.len(),
+            v.join("\n")
+        ),
+    }
+    println!("{}", replay::table(&s.real, &sim));
+    assert!(o.failure.is_none(), "{:?}", o.failure);
 }

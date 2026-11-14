@@ -1,7 +1,3 @@
-//! #666: a lane that stops making progress is acted on, not left to `stall` alerts. A live lane idle past
-//! `stall_minutes` with no push, verdict or turn is superseded once by a fresh lane of its role; one that shows no output
-//! `START_SECS` after its spawn never started (an ACP session gets its first prompt again first) and is retried once; a
-//! lane the hook keeps refusing is ended. Each then goes to the owner as one needs-human card with its evidence.
 use crate::config::Config;
 use crate::events::{append, emit, fold, last_spawn, Event};
 use crate::hosts::On;
@@ -21,8 +17,7 @@ pub enum Act {
     Escalate(&'static str, String),
 }
 
-/// #666: each of `fleet`'s active lanes the hook refused twice since its spawn: its pane closed, one needs-human card
-/// carrying the refusal (a respawn would only be refused again).
+/// #666: each of `fleet`'s active lanes the hook refused twice since its spawn: its pane closed, one needs-human card carrying the refusal (a respawn would only be refused again).
 pub fn refused(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event], fleet: &str) -> Result<()> {
     for s in fold(ev).values().filter(|s| s.fleet == fleet) {
         let Some((role, lane)) = s.active_lane() else { continue };
@@ -52,7 +47,6 @@ pub fn refused(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev:
     Ok(())
 }
 
-/// The `hook-failed-closed` refusals of spawn `sp`'s lane (`<fleet>:<issue>:<role>`) since it started.
 fn refusals<'a>(ev: &'a [Event], sp: &Event, role: &str) -> Vec<&'a Event> {
     let (f, n) = (&sp.fleet, sp.issue.unwrap_or_default());
     let lane = format!("{f}:{n}:{role}");
@@ -84,7 +78,6 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], agents: &[
         if ctx.now < start {
             return None;
         }
-        // Amendment A: an ACP session whose brief never landed as its first prompt gets it again, once.
         let acp = sp.str("runtime") == Some("shed") && cfg.shed_for(&w.fleet).is_some_and(|b| b.acp.is_some());
         let brief = sp
             .str("worktree")
@@ -239,6 +232,9 @@ pub fn nudge(
     why: &str,
 ) -> Result<()> {
     let on = On::of(r, last_spawn(ev, lane));
+    if let Err(e) = herdr::awake(&on, lane) {
+        return Ok(writeln!(out, "{fleet} #{n} nudge of {lane} waits: {e:#}")?);
+    }
     let cancelled = crate::shed::cli(&on, &["cancel", lane]).is_ok();
     let sent = herdr::prompt(&on, lane, NUDGE).is_ok();
     writeln!(out, "{fleet} #{n} nudged {lane}: {why}")?;

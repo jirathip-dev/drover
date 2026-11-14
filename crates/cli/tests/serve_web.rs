@@ -1,5 +1,3 @@
-//! #16: the phone page: POST writes run the CLI's own paths (+ `via:web`), STALE, Host/Origin,
-//! read-only, pause, the Lanes join/grouping, masking, PWA assets, 390 px layout.
 mod common;
 use common::*;
 use drover::devices;
@@ -13,14 +11,12 @@ fn config() -> String {
     format!("models = [\"opus\", \"sonnet\"]\n\n[serve]\nallowed_hosts = [\"mac.tail1.ts.net\"]\n\n{CONFIG}")
 }
 
-/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn get(s: &Server, path: &str) -> String {
     let res = String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000))
         .into_owned();
     with_queue(&res, s, ADDR, 1_000_000)
 }
 
-/// The hidden mtime the page renders into every form.
 fn mtime(s: &Server) -> String {
     let page = get(s, "/");
     let i = page.find("name=mtime value=").expect("no mtime field") + 17;
@@ -54,7 +50,6 @@ fn location(res: &str) -> String {
     String::from_utf8(out).unwrap()
 }
 
-/// The last event, minus `via`, and its `via`.
 fn last(c: &drover::Ctx) -> (serde_json::Value, Option<String>) {
     let mut e = read(&c.state).unwrap().to_vec().pop().unwrap();
     let via = e.data.remove("via").and_then(|v| v.as_str().map(String::from));
@@ -108,7 +103,6 @@ fn queue_buttons_move_like_queue_mv() {
         );
         let res = post(&s, &format!("{body}&mtime={}", mtime(&s)), "");
         assert!(res.starts_with("HTTP/1.1 303 See Other\r\n"), "{res}");
-        // #66: a short toast line (≤ 60 chars), not the CLI's queue dump.
         assert_eq!(location(&res), format!("/?msg={msg}"), "{res}");
         assert!(msg.len() <= 60);
         assert_eq!(order(&cli), order(&web));
@@ -116,7 +110,6 @@ fn queue_buttons_move_like_queue_mv() {
         assert_eq!(last(&web).1.as_deref(), Some("web"));
     }
     assert_eq!(order(&web), [12, 18, 17]);
-    // A refusal from the shared path is shown, not hidden.
     let res = post(
         &s,
         &format!("op=mv&fleet=sendmeter&issue=99&before=12&mtime={}", mtime(&s)),
@@ -156,7 +149,6 @@ fn pause_button_matches_cli_and_blocks_next_and_spawn() {
         )
     );
     assert!(get(&s, "/").contains("> paused · ") && get(&s, "/").contains(">Resume</button>"));
-    // Paused: next offers nothing, impl/rev spawns refuse.
     for c in [&cli, &web] {
         assert_eq!(
             run(c, &Fake::default(), &["next", "sendmeter"]),
@@ -188,8 +180,6 @@ fn role_dropdowns_set_like_drover_set() {
     let (cli, web) = pair("set");
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
-    // #162: a fleet's role forms are in its [config] sheet, opened when [config] is tapped (#268: the board draws it
-    // from API v1's `queue`).
     assert!(get(&s, "/").contains("<button type=button class=cfg data-f=\"sendmeter\">Config</button>"));
     let page = queue_js(&s, ADDR, 1_000_000, "sheet(d, 'sendmeter')");
     assert!(
@@ -236,7 +226,6 @@ fn role_dropdowns_set_like_drover_set() {
         assert_eq!(b.data.remove("via"), Some(json!("web")));
         assert_eq!(a.data, b.data);
     }
-    // Same validation as the CLI: a model outside `models`, an effort the harness lacks.
     let before = text(&web);
     let res = post(
         &s,
@@ -267,7 +256,6 @@ fn set_refuses_toml_injection_on_web_and_cli() {
     let s = Server::new(&web, &r, Some(ADDR.into()));
     let text = |c: &drover::Ctx| std::fs::read_to_string(&c.config).unwrap();
     let (before, log) = (text(&web), drover::events::jsonl(&web.state).unwrap());
-    // `opus"\n[[notify]]\ncmd = "touch /tmp/pwned"\n#`, form-encoded, as model and as effort.
     let evil = "opus%22%0A%5B%5Bnotify%5D%5D%0Acmd+%3D+%22touch+%2Ftmp%2Fpwned%22%0A%23";
     for field in ["model", "effort"] {
         let res = post(
@@ -341,7 +329,6 @@ fn foreign_host_or_origin_is_403_and_read_only_is_405() {
     );
     assert!(String::from_utf8_lossy(&s.respond(&wrong, 1_000_000)).starts_with("HTTP/1.1 403 "));
     assert_eq!(drover::events::jsonl(&web.state).unwrap(), log, "nothing written");
-    // `tailscale serve`: the ts.net name from [serve].allowed_hosts, over https.
     let ts = format!(
         "POST / HTTP/1.1\r\nHost: mac.tail1.ts.net:7443\r\nOrigin: https://mac.tail1.ts.net:7443\r\nContent-Length: {}\r\n\r\n{body}",
         body.len()
@@ -353,7 +340,6 @@ fn foreign_host_or_origin_is_403_and_read_only_is_405() {
         &format!("Origin: http://{ADDR}\r\n")
     )
     .starts_with("HTTP/1.1 303 "));
-    // --read-only: today's behaviour, no buttons.
     let ro = Server::new(&web, &r, None);
     assert!(post(&ro, &body, "").starts_with("HTTP/1.1 405 "));
     let page = get(&ro, "/");
@@ -418,7 +404,6 @@ fn page_reads_only_cached_pr_data_and_serves_pwa_assets() {
             "icon-{n}.png dimensions"
         );
     }
-    // #195: the root icons Safari probes are the board's icon bytes, and the page's icon links carry the hash.
     let body = |p: &str| {
         let res = s.respond(&format!("GET {p} HTTP/1.1\r\n\r\n"), 1);
         let at = res.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
@@ -452,7 +437,6 @@ fn page_reads_only_cached_pr_data_and_serves_pwa_assets() {
     assert!(page.contains("data-ts=1000000"), "render time for the stale badge");
 }
 
-/// Two registered fleets plus one unregistered dir; design/impl/rev/other placed.
 #[test]
 fn lanes_group_by_fleet_with_others() {
     let d = tmpdir("lanes");
@@ -521,9 +505,7 @@ fn lanes_group_by_fleet_with_others() {
             (Some("synergy"), "synergy-design-5", "design", "done", false),
             (Some("synergy"), "w3", "other", "working", false),
             (None, "side-project", "other", "idle", false),
-            // Unnamed dsh-TUI agent: matched to its lane by pane.
             (Some("synergy"), "synergy-impl-7", "impl", "blocked", false),
-            // The log has rev #9 open; herdr has no pane for it, and no clean worktree: dead, not parked.
             (Some("sendmeter"), "sendmeter-rev-9-r1", "rev", "dead", false),
         ]
     );
@@ -531,7 +513,6 @@ fn lanes_group_by_fleet_with_others() {
         (lanes[0].model.as_deref(), lanes[0].effort.as_deref(), lanes[0].issue),
         (Some("opus"), Some("high"), Some(12))
     );
-    // Rendered: state sections, fleet subgroups (Others last), the mismatch flagged.
     let list = json!({"result": {"agents": agents}}).to_string();
     let r = Fake::default().reply("herdr agent list", &list).reply(
         "herdr pane read w1:p2",
@@ -552,7 +533,6 @@ fn lanes_group_by_fleet_with_others() {
                 "<span class=el>✻ Herding…</span><i> · </i><span class=el>running cargo test</span><i> · </i><span class=t>4m</span></span>"
             ))
     );
-    // One herdr agent list per 10 s, one pane read per 30 s (#269: API v1's Lanes, the board's read).
     let s = Server::new(&c, &r, None);
     for t in [0, 5, 29] {
         assert!(
@@ -564,7 +544,6 @@ fn lanes_group_by_fleet_with_others() {
     assert_eq!(r.count("herdr pane read w1:p2"), 1 + 1);
 }
 
-/// #516: a superseded lane spawned twice, herdr listing its agent twice (once idle): one lane, the live working one.
 #[test]
 fn one_lane_per_agent_name() {
     let c = ctx(&tmpdir("lanes-dup"), CONFIG);
@@ -651,14 +630,11 @@ fn activity_lines_per_harness_are_masked_and_cut() {
     assert_eq!((t.len(), t[0].as_str(), t[9].as_str()), (10, "line 6", "ghp_•••"));
 }
 
-/// AC3 + amendment A.2: no table, every queue row a <details>, and (where WebKit is at hand)
-/// `body.scrollWidth` ≤ 390 at 390 px with every row open, in all three lane modes.
 #[test]
 fn page_fits_390px_without_horizontal_scroll() {
     let d = tmpdir("phone");
     let c = ctx(&d, &config());
     run(&c, &Fake::default(), &["queue", "sendmeter", "add", "17", "18", "12"]);
-    // #36: the Queue rows' title line (issue + differing PR title) stays one line at 390 px.
     let cache = d.join("state/cache");
     std::fs::create_dir_all(&cache).unwrap();
     std::fs::write(
@@ -717,7 +693,6 @@ fn page_fits_390px_without_horizontal_scroll() {
             "{t} tab"
         );
     }
-    // #440: Host and Events are System's sections (tests/system_sheet.rs measures them at 390 px).
     if no_webkit() {
         return;
     }
@@ -746,7 +721,6 @@ fn page_fits_390px_without_horizontal_scroll() {
     }
 }
 
-/// Amendment C: a retired fleet in the log, 30 merged issues, a paused fleet with a dead lane.
 #[test]
 fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     let d = tmpdir("short");
@@ -755,7 +729,6 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     let ev = |fleet: &str, issue: u64, ts: u64, kind: &str, d: serde_json::Value| {
         append(&c.state, &Event::new(ts, fleet, Some(issue), kind, d)).unwrap()
     };
-    // The retired `fleet` key: log only.
     append(
         &c.state,
         &Event::new(1, "fleet", None, "queue", json!({"op": "add", "issues": [3]})),
@@ -820,7 +793,6 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     let done = &done[..done.find("</details>").unwrap()];
     assert_eq!(done.matches("<p>#").count(), 5, "at most 5: {done}");
     assert!(done.starts_with("done today: 30</span></summary><p>#129 ") && done.contains("pull/1129\">PR #1129</a>"));
-    // Paused fleet: one collapsed line, its dead lane red with no buttons.
     assert!(
         queue.contains(
             "<summary><i class=cv></i><span class=fn><b>synergy</b> <i class=m>●</i> paused · 1 lane (dead)</span>"
@@ -849,13 +821,10 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
         queue.contains("stall check: #17 in"),
         "paused fleet's lane is not counted"
     );
-    // Events: noise folded into one count, `?all=1` unfolds it.
     assert!(
         !page.contains("id=events"),
         "#60: Events loads when opened; #440: in System (serve.js makes its section)"
     );
-    // #170: a fold holds one kind, so the alternating run stays one row per event and each failure is red (#266: the
-    // board's tab, from API v1).
     if let Some(ev) = events_tab(&s, ADDR, 1_000_000, "{ f: { k: 'all', fl: [] } }") {
         let rows: Vec<&str> = ev.split("<details class=\"er").skip(1).collect();
         assert!(rows
@@ -871,8 +840,6 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     }
 }
 
-/// #57: a request never samples the host (serve's 10 s thread does); the page links its scripts,
-/// styles and horses under `/a/<hash8>/` (immutable, the SW's precache list) and stays `no-store`.
 #[test]
 fn page_never_samples_the_host_and_links_immutable_assets() {
     let c = ctx(&tmpdir("assets"), &config());
@@ -886,7 +853,7 @@ fn page_never_samples_the_host_and_links_immutable_assets() {
         !r.called("sysctl")
             && page.contains("Cache-Control: no-store")
             && !page.contains("<style>")
-            && page.matches("<script>").count() == 1 // #206: the head's tab pick, before the first paint
+            && page.matches("<script>").count() == 1
             && page.contains("<script>let h=document.documentElement,t=location.hash")
     );
     let i = page.find("<script src=/a/").unwrap() + 15;
@@ -928,8 +895,6 @@ fn page_never_samples_the_host_and_links_immutable_assets() {
     assert_eq!(r.count("vm_stat"), 0);
 }
 
-/// #67: the fetch-only reads answer `fetch()` (no Sec-Fetch headers) with UTF-8 JSON; a navigation to any of
-/// them is sent to the board, so a restored or typed fetch URL never becomes the page.
 #[test]
 fn fetch_only_reads_redirect_navigations_to_the_board() {
     let (c, r) = (ctx(&tmpdir("frags-nav"), &config()), Fake::default());
@@ -950,7 +915,6 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
         let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
         assert!(j.is_object(), "{path}");
     }
-    // #269: `/frags` (HTML parts) is gone; the board reads API v1.
     assert!(send("/frags", "").starts_with("HTTP/1.1 404"), "no HTML parts");
     for path in ["/herd.json", "/lane?agent=sendmeter-impl-12"] {
         for nav in [
@@ -973,8 +937,6 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
         send("/", "Sec-Fetch-Mode: navigate\r\n").starts_with("HTTP/1.1 200 OK"),
         "the board itself"
     );
-    // The SW answers a navigation off the page with the page (#406: but a thread's file, chat_tab.rs), and never
-    // caches the API (#269: the board's every read); serve.js reads no `frags`.
     let sw = send("/sw.js", "");
     assert!(sw.contains("e.request.mode === 'navigate' && u.pathname !== P && !u.pathname.startsWith(P + 'thread/')) return e.respondWith(caches.match(P).then(m => m || fetch(P)))"), "{sw}");
     assert!(sw.contains("u.pathname.startsWith(P + 'api/')") && !sw.contains("frags"));
@@ -983,8 +945,6 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
     assert!(!send(&format!("{v}/serve.js"), "").contains("frags"));
 }
 
-/// #60: `/frag` parts are fetch-only like `frags` (a navigation goes to the board); an unknown id or fleet is 404. #268:
-/// a [config] sheet is the TypeScript board's (API v1's `queue`), no part.
 #[test]
 fn frag_parts_redirect_navigations_and_404_unknown_ids() {
     let (c, r) = (ctx(&tmpdir("frag-part"), &config()), Fake::default());
@@ -1025,7 +985,6 @@ fn frag_parts_redirect_navigations_and_404_unknown_ids() {
     }
 }
 
-/// #82: the pairing panel's Mac line, plus `[serve] approve_hint` (`{code}` substituted) when set.
 #[test]
 fn pair_request_carries_the_optional_approve_hint() {
     let js = include_str!("../../../assets/serve.js");
@@ -1061,8 +1020,6 @@ fn pair_request_carries_the_optional_approve_hint() {
     );
 }
 
-/// #288: opened on the host itself (loopback peer naming localhost, no `tailscale serve` headers) the pairing card
-/// carries the exact approve line with `[copy]`; the page polls claim, and pairing lasts a year after last use.
 #[test]
 fn host_local_pairing_shows_the_approve_line_and_lasts_a_year() {
     let js = include_str!("../../../assets/serve.js");

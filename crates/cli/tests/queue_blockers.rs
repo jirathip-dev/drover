@@ -1,4 +1,3 @@
-//! #505: an issue waits on a set of blockers: `--on` adds, `unblock` drops, it starts once all merged.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -28,7 +27,6 @@ fn several_blockers_add_up_and_the_issue_starts_once_all_merged() {
     q(&c, &["add", "40", "11", "12", "13"]);
     assert_eq!(q(&c, &["block", "40", "--on", "11", "--on", "12"]).0, 0);
     assert_eq!(blockers(&c, 40), json!([11, 12]));
-    // A second call adds to the set; a repeat is no new blocker.
     assert_eq!(q(&c, &["block", "40", "--on", "13", "--on", "11"]).0, 0);
     assert_eq!(blockers(&c, 40), json!([11, 12, 13]));
     let (_, ls) = q(&c, &["ls"]);
@@ -70,7 +68,6 @@ fn a_self_block_or_a_cycle_is_refused_and_logs_nothing() {
     q(&c, &["block", "13", "--on", "12"]);
     let n = read(&c.state).unwrap().len();
     assert_eq!(q(&c, &["block", "11", "--on", "11"]).0, 1);
-    // #11 ← #12 ← #13: #11 waiting on #13 closes the loop.
     assert_eq!(q(&c, &["block", "11", "--on", "13"]).0, 1);
     assert_eq!(read(&c.state).unwrap().len(), n);
     let mut queue = drover::queue::replay(&read(&c.state).unwrap(), "sendmeter");

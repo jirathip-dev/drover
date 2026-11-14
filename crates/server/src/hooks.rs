@@ -1,5 +1,3 @@
-//! #626: serve's Funnel listener (`[serve] hooks_addr`): `POST /hooks/github` and nothing else; every other path is a
-//! bare 404, so the board stays tailnet-only whatever Funnel maps here (docs/serve.md).
 use crate::config::Config;
 use crate::handover::Handover;
 use crate::runner::Runner;
@@ -71,8 +69,7 @@ pub fn listen(ctx: &Ctx, r: &dyn Runner, l: &TcpListener, ho: Option<&Handover>)
     ho.map(Handover::left);
 }
 
-/// The response to the one request read from `s`. A body over GitHub's 25 MB is refused from its `Content-Length`
-/// before any of it is read.
+/// The response to the one request read from `s`. A body over GitHub's 25 MB is refused from its `Content-Length` before any of it is read.
 pub fn reply(ctx: &Ctx, r: &dyn Runner, s: &mut dyn Read) -> Vec<u8> {
     let (mut buf, mut chunk) = (vec![], [0u8; 8192]);
     let end = loop {

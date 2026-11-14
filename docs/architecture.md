@@ -121,7 +121,7 @@ herdr argv) and `gh` (cached GitHub reads).
 | `check` | `check` alerts, `clean`, `stop`, `kill`, `close`, the worktree budget |
 | `waiting` | what an idle lane waits on (`waiting`) |
 | `host`, `hosts` | host-load admission and live agents; multi-host placement ([hosts.md](hosts.md)) |
-| `access`, `usage` | a lane's account and MCP servers; account and provider usage (`accounts`) |
+| `access`, `usage` | a lane's MCP servers; the DeepSeek balance and the lanes' status line |
 | `hook` | the lanes' pre-tool hook |
 | `overlap` | conflict preview between open branches, `cap-check` |
 | `serve`, `lanes`, `devices`, `webpush` | the phone page, its Lanes tab, paired devices, web push |

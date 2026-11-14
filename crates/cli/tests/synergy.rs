@@ -1,5 +1,3 @@
-//! #6 synergy cutover: serial_paths (SERIAL_BUSY, SERIAL_UNMARKED), optional caps (CAP)
-//! and the conductor-only design role.
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
@@ -7,7 +5,6 @@ use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
 
-/// CONFIG plus `extra` lines in `[fleet.sendmeter]` and a design role.
 fn config(extra: &str) -> String {
     CONFIG
         .replace(
@@ -54,8 +51,6 @@ fn refused(c: &drover::Ctx, n: u64, role: &str, code: &str) {
     assert_eq!(read(&c.state).unwrap().len(), before, "nothing logged");
 }
 
-// --- SERIAL_BUSY ---
-
 #[test]
 fn second_serial_impl_waits_until_first_merges() {
     let d = tmpdir("serial-busy");
@@ -75,9 +70,7 @@ fn second_serial_impl_waits_until_first_merges() {
     let (exit, out) = spawn(&c, 1, "impl");
     assert_eq!(exit, 0, "{out}");
     refused(&c, 2, "impl", "SERIAL_BUSY");
-    // Non-serial issues are unaffected.
     assert_eq!(spawn(&c, 3, "impl").0, 0);
-    // Still busy while #1 sits at review and at ready.
     spawned(&c, 1, "rev");
     refused(&c, 2, "impl", "SERIAL_BUSY");
     log(&c, 1, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
@@ -120,13 +113,11 @@ fn serial_max_two_admits_a_second_serial_and_refuses_a_third() {
         out.contains("REFUSED SERIAL_BUSY") && out.contains("db: #1 #2 hold 2/2"),
         "names both: {out}"
     );
-    // A merged one frees a slot.
     log(&c, 1, "merged", json!({}));
     let (exit, out) = spawn(&c, 3, "impl");
     assert_eq!(exit, 0, "allowed once #1 merged: {out}");
 }
 
-/// #232: an issue already holding a serial slot is never refused SERIAL_BUSY for its own lanes, even over-full.
 #[test]
 fn in_flight_serial_issue_keeps_its_lanes_when_over_full() {
     let d = tmpdir("serial-over");
@@ -137,7 +128,6 @@ fn in_flight_serial_issue_keeps_its_lanes_when_over_full() {
     assert_eq!(run(&c, &Fake::default(), &add).0, 0);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "2"]).0, 0);
     assert_eq!(spawn(&c, 1, "impl").0, 0);
-    // #2 was already in flight when drive marked it serial: 2/1.
     spawned(&c, 2, "impl");
     log(&c, 2, "serial-auto", json!({"path": "supabase/migrations/x.sql"}));
     let (_, status) = run(&c, &Fake::default(), &["status", "sendmeter"]);
@@ -151,8 +141,6 @@ fn in_flight_serial_issue_keeps_its_lanes_when_over_full() {
     }
     refused(&c, 3, "impl", "SERIAL_BUSY");
 }
-
-// --- SERIAL_UNMARKED ---
 
 fn merge_fake(files: &str) -> Fake {
     let checks = json!([{"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
@@ -187,7 +175,6 @@ fn merge_on(serial: bool, r: Fake) -> (drover::Ctx, FakeShed, (i32, String, Fake
 
 const FILES: &str = "gh api repos/jirathip-dev/sendmeter/pulls/34/files --paginate";
 
-/// #490: `n` generated files (more than the diff's 300), then `last`, as the paginated files API lists them.
 fn many(n: usize, last: &str) -> String {
     (0..n)
         .map(|i| format!("supabase/schemas/t{i}.sql\n"))
@@ -252,7 +239,6 @@ fn unmarked_pr_touching_serial_path_is_refused() {
     assert!(!r.called("gh pr merge"));
 }
 
-/// #130: `--owner-override` lifts only ROUND_LIMIT, never the serial gate.
 #[test]
 fn owner_override_still_refuses_an_unmarked_serial_pr() {
     let c = ctx(&tmpdir("serial-override"), &config(SERIAL));
@@ -295,8 +281,6 @@ fn serial_globs() {
     assert!(g("**/schema.prisma", "apps/web/schema.prisma"));
 }
 
-// --- CAP ---
-
 #[test]
 fn no_cap_by_default_even_with_50_lanes() {
     let d = tmpdir("cap-unset");
@@ -326,17 +310,13 @@ fn max_impl_refuses_the_third_impl() {
     assert_eq!(spawn(&c, 1, "impl").0, 0);
     assert_eq!(spawn(&c, 2, "impl").0, 0);
     refused(&c, 3, "impl", "CAP");
-    // A fix round of an open issue is not a new lane.
     assert_eq!(
         run(&c, &happy(), &["spawn", "sendmeter", "2", "impl", "--supersede"]).0,
         0
     );
-    // max_rev = 1: #1 under review fills it; #2's reviewer waits.
     spawned(&c, 1, "rev");
     refused(&c, 2, "rev", "CAP");
 }
-
-// --- design ---
 
 #[test]
 fn design_lane_spawns_but_never_moves_the_issue() {
@@ -374,6 +354,5 @@ fn design_lane_spawns_but_never_moves_the_issue() {
         out.contains("REFUSED LANE_LIVE") && out.contains("sendmeter-design-12"),
         "{out}"
     );
-    // The issue's impl lane is unaffected by the design lane.
     assert_eq!(spawn(&c, 12, "impl").0, 0);
 }

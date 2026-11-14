@@ -1,7 +1,3 @@
-//! #725: the lifeboat, a small plain page at `/api/v1/lifeboat` for when cooee is down (docs/lifeboat.md): each fleet
-//! with [pause] / [resume], the queue, the live lanes, the open asks with their options and a free-text answer, and the
-//! open run cards with [approve] / [deny]. Server-rendered, no script: each form posts back and is sent back here.
-//! Its actions are the CLI verbs' own code (`answer`, `card approve|deny`, `pause|resume`), logged `via: lifeboat`.
 use crate::api::Lane;
 use crate::config::Config;
 use crate::events::{age, open_asks, shared};
@@ -33,7 +29,6 @@ fn shell(body: &str) -> String {
     )
 }
 
-/// A form posting `fields` back to the lifeboat as one button.
 fn button(label: &str, fields: &[(&str, &str)]) -> String {
     let mut s = String::from("<form method=post action=lifeboat>");
     for (k, v) in fields {
@@ -114,7 +109,7 @@ pub fn page(ctx: &Ctx, lanes: &[Lane], msg: &str) -> String {
         let at = a.issue.map_or(String::new(), |n| format!(" #{n}"));
         let q = esc(a.str("question").unwrap_or_default());
         let _ = write!(b, "<p>{} {}{at}: {q}<br>", esc(fleet), esc(id));
-        let opts = a.data["options"].as_array().cloned().unwrap_or_default();
+        let opts = a.val("options").as_array().cloned().unwrap_or_default();
         for (n, o) in opts.iter().enumerate() {
             let (n, o) = ((n + 1).to_string(), o.as_str().unwrap_or_default());
             b += &button(

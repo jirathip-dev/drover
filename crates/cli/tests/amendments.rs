@@ -1,4 +1,3 @@
-//! #101: briefs carry `**Amendment` comments by owners/members/collaborators; a new one prompts the live lane once.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -86,7 +85,6 @@ fn new_amendment_prompts_the_open_lane_exactly_once() {
     assert_eq!(sh.sent(LANE).len(), 1);
     let evs = read(&c.state).unwrap();
     assert_eq!(evs.iter().filter(|e| e.kind == "amended").count(), 1);
-    // A lane whose brief already carries the amendment (spawned after it) is not prompted.
     std::fs::write(
         wt.join(".brief.md"),
         "AC\n\n## Amendments\n\n… (https://github.com/c/1)\n",

@@ -1,4 +1,3 @@
-//! #141: each `driven` result as the Host tab's FLEETS row says it: (status, word, plain words + what clears it).
 use drover::events::Event;
 use drover::serve::in_words;
 use serde_json::json;
@@ -9,7 +8,6 @@ fn said(code: Option<&str>, step: &str, issue: u64, result: &str, serial: &str) 
     (t.into(), w.into(), x)
 }
 
-/// (code, step, issue, raw result, serial label, [status, word, plain words]).
 type Case<'a> = (Option<&'a str>, &'a str, u64, &'a str, &'a str, [&'a str; 3]);
 
 #[test]
@@ -60,16 +58,12 @@ fn every_refusal_and_outcome_has_its_plain_words() {
             ["a", "held", "8.0 GB free < 10 GB floor · `drover clean --yes`"],
         ),
         (
-            Some("ALL_CAPPED"),
+            Some("LOGIN_NEEDED"),
             "start",
             12,
-            r#"REFUSED ALL_CAPPED: every account ["A", "B"] is capped; the first resets in 3h"#,
+            "REFUSED LOGIN_NEEDED: impl lane synergy-impl-3 hit the usage limit on main",
             "serial",
-            [
-                "a",
-                "waiting",
-                r#"every account ["A", "B"] is capped · the first resets in 3h"#,
-            ],
+            ["a", "held", "impl lane synergy-impl-3 hit the usage limit on main"],
         ),
         (
             Some("CAP"),

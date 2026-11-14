@@ -1,5 +1,3 @@
-//! #17 6(a): a merged issue never leaves `merged`; spawn/adopt on it is refused.
-//! #17 6(b): notifiers run without the lane's HERMES_* environment.
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
@@ -27,7 +25,6 @@ fn merged_issue_never_leaves_merged() {
     let d = tmpdir("sticky-merged");
     let c = ctx(&d, CONFIG);
     merged_13(&c);
-    // What the #13 self-test logged: an adopt `spawn` after the merge.
     let late = json!({"role": "impl", "agent": "sendmeter-impl-13", "branch": "issue-13", "adopted": true});
     append(&c.state, &Event::new(50, "sendmeter", Some(13), "spawn", late)).unwrap();
     append(
@@ -103,8 +100,6 @@ fn notifier_runs_without_lane_hermes_env() {
     );
 }
 
-/// #16: `clean` reaches a worktree whose only record is an adopted lane, and the
-/// pane of an adopt logged after the merge (pre-#17 log) without a state flip.
 #[test]
 fn clean_reaches_adopted_lanes_of_merged_issues() {
     let d = tmpdir("clean-adopted");
@@ -120,7 +115,6 @@ fn clean_reaches_adopted_lanes_of_merged_issues() {
             "worktree": w, "pane": format!("{ws}:p1"), "workspace": ws, "adopted": true})
     };
     let e = |ts, n, kind: &str, d| append(&c.state, &Event::new(ts, "sendmeter", Some(n), kind, d)).unwrap();
-    // #13: spawn, review PASS, merged, then a late adopt in a new pane.
     let mut first = lane(13, "wOld", &w13);
     first["adopted"] = json!(false);
     e(10, 13, "spawn", first);
@@ -132,7 +126,6 @@ fn clean_reaches_adopted_lanes_of_merged_issues() {
         json!({"pr": "15", "merge_sha": "08c9338", "into": "staging"}),
     );
     e(40, 13, "spawn", lane(13, "w644", &w13));
-    // #14: the adopt is the lane's only record.
     e(10, 14, "spawn", lane(14, "w7", &w14));
     e(20, 14, "verdict", json!({"verdict": "PASS", "sha": "3".repeat(40)}));
     e(

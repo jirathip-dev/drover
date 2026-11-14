@@ -1,4 +1,3 @@
-//! #361: `drover reclaim`: preview by default; only rebuildable folders, only in worktrees idle 7 days.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -9,7 +8,6 @@ use std::time::{Duration, UNIX_EPOCH};
 const NOW: u64 = 1_800_000_000;
 const DAY: u64 = 86_400;
 
-/// A lane's spawn event and its worktree, with `target/`, `node_modules/`, `.cache/`, `build/` and `src/` in it.
 fn lane(c: &drover::Ctx, issue: u64) -> PathBuf {
     let w = c.worktrees.join("sendmeter").join(format!("issue-{issue}"));
     for d in ["target", "node_modules", ".cache", "build", "src"] {
@@ -27,7 +25,6 @@ fn touch(p: &Path, at: u64) {
     f.set_modified(UNIX_EPOCH + Duration::from_secs(at)).unwrap();
 }
 
-/// HEAD last moved `head_at`; `status` is git's porcelain -z output.
 fn git(r: Fake, w: &Path, head_at: u64, status: &str) -> Fake {
     let w = w.display();
     r.reply(&format!("git -C {w} log -g"), &format!("HEAD@{{{head_at}}}\n"))
@@ -57,7 +54,7 @@ fn preview_changes_nothing_and_apply_removes_only_build_folders() {
     let old = NOW - 8 * DAY;
     std::fs::write(w.join("notes.md"), "x").unwrap();
     touch(&w.join("notes.md"), old);
-    touch(&w, NOW); // the worktree folder's own mtime is no edit: the tests hold whatever the real clock says
+    touch(&w, NOW);
     let sh = FakeShed::new();
     sh.attach(&c);
     let r = || {
@@ -78,7 +75,6 @@ fn preview_changes_nothing_and_apply_removes_only_build_folders() {
     assert!(w.join("notes.md").exists(), "untracked work stays");
 }
 
-/// A `y` on stdin applies the preview.
 #[test]
 fn a_y_answer_applies() {
     let c = setup("reclaim-y");
@@ -96,7 +92,6 @@ fn a_y_answer_applies() {
     assert_eq!(gone(&w), [true, true, true, true, false]);
 }
 
-/// A worktree with a process in it, a live lane, a recent edit or deletion or a recent HEAD move keeps its build folders.
 #[test]
 fn busy_or_recent_worktrees_are_skipped() {
     let c = setup("reclaim-skip");
@@ -105,7 +100,7 @@ fn busy_or_recent_worktrees_are_skipped() {
     let old = NOW - 8 * DAY;
     std::fs::write(edited.join("src/lib.rs"), "x").unwrap();
     touch(&edited.join("src/lib.rs"), NOW - DAY);
-    touch(&deleted.join("src"), NOW - DAY); // the folder a deletion bumps
+    touch(&deleted.join("src"), NOW - DAY);
     let lsof = format!("p42\ncnode\nn{}/src\n", proc_wt.display());
     let r = git(Fake::default(), &proc_wt, old, "");
     let r = git(r, &live, old, "");
@@ -132,11 +127,10 @@ fn busy_or_recent_worktrees_are_skipped() {
     assert!(out.contains("0.00 GB freed"), "{out}");
 }
 
-/// #438: over `build_budget_gb` the shared build folder's profiles go, but never one cargo holds locked.
 #[test]
 fn the_shared_build_folder_is_trimmed_past_its_budget_except_a_building_profile() {
     let d = tmpdir("reclaim-shared");
-    let root = d.join("worktrees/.build"); // #630: the root's build folder
+    let root = d.join("worktrees/.build");
     let cfg = CONFIG.replace("build_root = \"\"", "build_budget_gb = 0");
     let c = ctx(&d, &cfg);
     let profile = |p: &str| {
@@ -148,7 +142,7 @@ fn the_shared_build_folder_is_trimmed_past_its_budget_except_a_building_profile(
     };
     let (building, idle) = (profile("sendmeter/debug"), profile("other/debug"));
     let held = std::fs::File::open(building.join(".cargo-lock")).unwrap();
-    held.lock().unwrap(); // a cargo build running there
+    held.lock().unwrap();
     let sh = FakeShed::new();
     sh.attach(&c);
     let r = || Fake::default().reply("lsof", "");

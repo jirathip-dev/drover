@@ -1,7 +1,3 @@
-//! #138: the lane sheet's chat. The rolling per-lane transcript (append past the overlap, once; a gap line where reads
-//! do not meet; the last 5,000 lines; mode 0600), and serve.js's pure chat part under node: SGR to the board's tokens,
-//! markdown escaping, role runs from a captured Claude (ANSI) and dsh screen, capped tool output. `BLESS=1` rewrites
-//! the `.blocks.json` goldens.
 mod common;
 use common::*;
 use drover::lanes::{body, now, roll, said, short, spin, strip, GAP};
@@ -19,16 +15,13 @@ fn file(p: &Path) -> Vec<String> {
 #[test]
 fn overlapping_reads_append_once_and_a_miss_writes_a_gap() {
     let f = tmpdir("roll").join("transcripts/a.log");
-    // The last block (`⏺ b`) is live: sent, not written.
     let (all, live) = roll(&f, &lines(&["> p", "⏺ a", "  x", "⏺ b"]));
     assert_eq!((all.len(), live), (4, 1));
     assert_eq!(file(&f), ["> p", "⏺ a", "  x"]);
     assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600);
-    // The same read again, then one that overlaps by a line (in other colours: compared as text).
     roll(&f, &lines(&["> p", "⏺ a", "  x", "⏺ b"]));
     roll(&f, &lines(&["\x1b[2m  x\x1b[0m", "⏺ b", "  y", "⏺ c"]));
     assert_eq!(file(&f), ["> p", "⏺ a", "  x", "⏺ b", "  y"]);
-    // No overlap: the lane scrolled past between reads.
     let (all, _) = roll(&f, &lines(&["⏺ z", "  q", "⏺ w"]));
     assert_eq!(file(&f)[5..], [GAP, "⏺ z", "  q"]);
     assert_eq!(all.last().unwrap(), "⏺ w");
@@ -57,7 +50,6 @@ fn ansi_lines_mask_run_by_run_and_strip_to_text() {
     assert_eq!(strip(&b[0]), "⏺ token ghp_••• bold");
 }
 
-/// serve.js's pure chat part plus `js`, run under node: its stdout. None where node is missing.
 fn node(js: &str) -> Option<String> {
     if std::process::Command::new("node").arg("--version").output().is_err() {
         eprintln!("skipping: no node here");
@@ -72,7 +64,6 @@ fn node(js: &str) -> Option<String> {
     Some(String::from_utf8(o.stdout).unwrap())
 }
 
-/// The SGRs measured on two lanes (docs/design/chat-blocks/README.md) to token classes: never a terminal hex.
 #[test]
 fn sgr_maps_to_the_nearest_board_token() {
     let cases = [
@@ -117,7 +108,6 @@ fn sgr_maps_to_the_nearest_board_token() {
     assert!(!out.contains('#'), "{out}");
 }
 
-/// Assistant prose: escaped text plus spans only; `<script>` stays text. Bold, `code`, lists, headings.
 #[test]
 fn markdown_is_escaped_text_plus_spans() {
     let js = r#"console.log(prose(['⏺ # Plan <script>alert(1)</script>', '  Fix **the bug** in `src/a.rs` & <b>x</b>,', '  wrapped.',
@@ -131,7 +121,6 @@ fn markdown_is_escaped_text_plus_spans() {
     );
 }
 
-/// Role runs and their blocks from real screens: Claude Code in ANSI (#139's lane) and dsh-TUI.
 #[test]
 fn screens_group_into_role_blocks() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/screens");
@@ -158,8 +147,6 @@ fn screens_group_into_role_blocks() {
     }
 }
 
-/// #750: an ACP session's transcript (shed's `> prompt`, `[tool] title (status)`, reply) is no parsed screen: its text
-/// keeps its line breaks, each `[tool] ` entry is one collapsed line, a multi-line title's rest behind its tap.
 #[test]
 fn an_acp_transcript_keeps_its_line_breaks_and_one_line_per_tool() {
     let screen =
@@ -192,8 +179,6 @@ fn an_acp_transcript_keeps_its_line_breaks_and_one_line_per_tool() {
     assert!(full[5].1.contains("500 ms backoff.\nTests pass;"), "{}", full[5].1);
 }
 
-/// A tool run's header is its call; a red `⏺` with `Exit code N` tags `exit N`; over 20 lines the output keeps its
-/// head (success) or its head and tail around `⋯ N lines` (failure); a last run with no output while busy is `running`.
 #[test]
 fn tool_runs_tag_cap_and_keep_the_failure() {
     let js = r#"
@@ -229,8 +214,6 @@ console.log(JSON.stringify([ok, bad, run, diff]));
     assert!(diff.contains("<span class=\"ol bg-r\" style=\"--i:13\">"), "{diff}");
 }
 
-/// #260: Claude's session transcript keeps the prompts and each turn's final reply (no thinking, tool calls or
-/// results, meta lines or `<command-name>` wrappers), masked; its last tool call is the `now:` line.
 #[test]
 fn a_session_transcript_keeps_prompts_and_final_replies() {
     let jsonl =
@@ -251,12 +234,10 @@ fn a_session_transcript_keeps_prompts_and_final_replies() {
     );
     assert_eq!(said[1]["at"], "2026-11-03T10:05:00.000Z");
     assert_eq!(now.as_deref(), Some("now: running cargo test 2>&1 | tee t.log"));
-    // The turn's final reply after it: nothing is running now.
     let done = r#"{"type": "assistant", "message": {"content": [{"type": "text", "text": "Tests pass."}]}}"#;
     assert_eq!(drover::lanes::said(&format!("{jsonl}{done}\n")).1, None);
 }
 
-/// #260: the pane's `now:` line is its last tool line (prose `⏺` lines and status bars skipped), Claude and Hermes.
 #[test]
 fn now_is_the_panes_last_tool_line() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/screens");
@@ -275,8 +256,6 @@ fn now_is_the_panes_last_tool_line() {
     assert_eq!(now("⏺ Done (all tests pass).\n"), None);
 }
 
-/// #276: a `now:` shell command reads as its first real command and target, `+N` for the rest of a chain; paths under
-/// $HOME read `~`.
 #[test]
 fn a_now_command_is_summarised_to_its_first_command() {
     for (cmd, want) in [
@@ -304,8 +283,6 @@ fn a_now_command_is_summarised_to_its_first_command() {
     );
 }
 
-/// #276 Amendment A: Claude's live spinner as its word as shown and, past a minute, its elapsed time (tokens dropped); no
-/// word when idle or for a harness without a spinner line (dsh, Hermes).
 #[test]
 fn a_claude_spinner_is_its_word_and_elapsed_time() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/screens");
@@ -324,9 +301,6 @@ fn a_claude_spinner_is_its_word_and_elapsed_time() {
     assert_eq!(spin("hermes", short_run), None);
 }
 
-/// #260: the chat's default view from pane lines: you, the last assistant run before each prompt and the notices; no
-/// tool runs or status. From a session transcript: its messages and the notices in time order. #315: screen-first: a
-/// Claude lane without transcript messages (none, or an empty tail) says so in a line; no role run: every block.
 #[test]
 fn the_default_view_keeps_prompts_final_replies_and_asks() {
     let js = r#"

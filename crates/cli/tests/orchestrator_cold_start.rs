@@ -1,6 +1,3 @@
-//! #715: a conductor cold start never freezes the board: while a start blocks (30 s here), the request that caused it
-//! has its reply, and `GET /` and a second device's send answer at once; a failed background start shows its error in
-//! the thread, the message that triggered it still logged (#717).
 mod common;
 use common::fake_shed::Cli;
 use common::*;
@@ -75,7 +72,6 @@ impl Runner for Slow {
     }
 }
 
-/// One request over the socket, given 2 s: (ms, response text; empty when it timed out).
 fn call(addr: SocketAddr, method: &str, path: &str, cookie: &str, body: &str) -> (u128, String) {
     let t = Instant::now();
     let mut s = TcpStream::connect(addr).unwrap();
@@ -104,7 +100,6 @@ fn a_blocked_orchestrator_start_holds_no_request() {
     let addr = l.local_addr().unwrap();
     std::thread::spawn(move || drover::serve::serve_on(c, r, l, false));
 
-    // Device A answers t1's ask: its conductor is asleep, so the answer wakes it (the start blocks).
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         drop(tx.send(call(
@@ -130,7 +125,6 @@ fn a_blocked_orchestrator_start_holds_no_request() {
         "device B's send during the start: {res:.300}"
     );
     assert!(ms < 1000, "device B's send took {ms} ms during the start");
-    // The answer itself was replied to, not held until the conductor is up.
     let (ms, res) = rx
         .recv_timeout(Duration::from_secs(1))
         .expect("the answer's reply waits on the start");
@@ -140,7 +134,6 @@ fn a_blocked_orchestrator_start_holds_no_request() {
     );
     assert!(ms < 1000, "the answer took {ms} ms");
     r.2.store(true, SeqCst);
-    // The released start writes its events after this thread's tmpdir sweep: let it finish so the dir stays gone.
     let (t, mut last) = (Instant::now(), String::new());
     while t.elapsed() < Duration::from_secs(10) {
         std::thread::sleep(Duration::from_millis(300));

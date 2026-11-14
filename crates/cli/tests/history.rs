@@ -1,6 +1,3 @@
-//! #351: bounded history on first open: a lane's chat carries its last 10 turns within ~64 KB (10 more a scroll),
-//! the Events tab its last 100 rows a view, then 100 a page (#266: the TypeScript board's `shown`, from API v1's
-//! `events?since=&until=` windows).
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -21,12 +18,9 @@ fn get(s: &Server, path: &str, extra: &str) -> String {
     res[res.find("\r\n\r\n").unwrap() + 4..].to_string()
 }
 
-/// A Claude lane with 40 turns of 2 KB in its session transcript and 600 pane lines of 300 bytes: the sheet's first
-/// read is its last 10 turns and the lines that fit in 32 KB (≤ 64 KB in all); `turns=20` and `before=` page back.
 #[test]
 fn a_chat_opens_with_its_last_10_turns_within_64kb() {
     let dir = tmpdir("chat-window");
-    // `Lane::session` reads `$HOME/.claude/projects`; this binary's only test that reads HOME.
     std::env::set_var("HOME", dir.join("home"));
     let c = ctx(&dir, CONFIG);
     let wt = dir.join("wt/issue-12").to_string_lossy().into_owned();
@@ -66,7 +60,6 @@ fn a_chat_opens_with_its_last_10_turns_within_64kb() {
         "first open is {} bytes (budget 64 KB)",
         first.len()
     );
-    // Scrolling up: 10 more turns (their budget grows with them), the lines before the ones seen.
     let j: Value = serde_json::from_str(&get(
         &s,
         &format!("/lane?agent=sendmeter-impl-12&turns=20&before={lines}"),
@@ -78,8 +71,6 @@ fn a_chat_opens_with_its_last_10_turns_within_64kb() {
     assert!(!older.is_empty() && j["before"].as_u64() > Some(lines as u64), "{j}");
 }
 
-/// 250 events: each view opens with its last 100 rows and an [older] button; 200 shown is the next 100, then the last
-/// 50 with no [older]. The board reads the log back in windows: `since=&until=` is the events between.
 #[test]
 fn events_open_with_100_rows_then_page() {
     let c = ctx(&tmpdir("events-pages"), CONFIG);
@@ -111,6 +102,5 @@ fn events_open_with_100_rows_then_page() {
     let (n, last) = view(300).unwrap();
     assert_eq!(n, 250);
     assert!(last.contains("n-0<") && !last.contains("class=eo"));
-    // The page carries no Events rows: the board draws them (#269: no `/frags`, the server sends no HTML parts).
     assert!(!get(&s, "/", "").contains("details class=\"er"));
 }

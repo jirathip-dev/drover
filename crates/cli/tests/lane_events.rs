@@ -1,7 +1,3 @@
-//! #529: the service keeps lane state from herdr's event stream (a fixture herdr socket): a status event is logged
-//! and served to the passes with no `herdr agent list`, a lane whose process is killed (`kill -9`) is gone within
-//! 2 s with no drive pass, and a dropped stream falls back to polling and says so on the Host tab. Its own test binary:
-//! the streamed list is the process's.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -15,7 +11,6 @@ use std::time::{Duration, Instant};
 
 const NOW: u64 = 1_000_000;
 
-/// The host: `herdr agent list` shows the lane while its process lives, and counts its calls.
 struct Host {
     alive: Arc<AtomicBool>,
     lists: AtomicUsize,
@@ -34,7 +29,7 @@ impl Runner for Host {
             let agents: Vec<Value> = self.alive.load(SeqCst).then_some(lane).into_iter().collect();
             stdout = json!({"result": {"agents": agents}}).to_string();
         } else if prog == "herdr" && args.ends_with(&["agent".into(), "list".into()]) {
-            stdout = NO_AGENTS.into(); // another host's: `herdr --machine <m> agent list`
+            stdout = NO_AGENTS.into();
         }
         Ok(Out {
             code: 0,
@@ -65,7 +60,6 @@ fn the_service_keeps_lane_state_from_herdrs_events_and_polls_when_the_stream_dro
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w1:p1"});
     append(&c.state, &Event::new(NOW - 9, "sendmeter", Some(12), "spawn", d)).unwrap();
 
-    // The lane's process, and the fixture herdr: the subscribed statuses, then the pane's exit once the process dies.
     let mut lane = std::process::Command::new("sleep").arg("60").spawn().unwrap();
     let pid = lane.id().to_string();
     let alive = Arc::new(AtomicBool::new(true));
@@ -116,7 +110,6 @@ fn the_service_keeps_lane_state_from_herdrs_events_and_polls_when_the_stream_dro
             .collect()
     };
 
-    // Subscribed to the pane events and the lane's status; the fixture's events drive its logged state.
     let s = subs.recv_timeout(Duration::from_secs(5)).unwrap();
     assert_eq!(s["method"], "events.subscribe");
     let types: Vec<&str> = s["params"]["subscriptions"]
@@ -135,16 +128,13 @@ fn the_service_keeps_lane_state_from_herdrs_events_and_polls_when_the_stream_dro
     );
     until("idle, working, done", 2.0, || states() == ["idle", "working", "done"]);
 
-    // The passes read the streamed list, not `herdr agent list`.
     let n = host.lists.load(SeqCst);
     let agents = drover::herdr::agents(host).unwrap();
     assert_eq!((agents.len(), agents[0]["agent_status"].as_str()), (1, Some("done")));
     assert_eq!(host.lists.load(SeqCst), n, "no herdr agent list while the stream is up");
-    // Another host's agents are never this host's streamed list: its own `herdr agent list` runs there.
     let there = drover::hosts::On::new(host, Some("mini2"));
     assert!(drover::herdr::agents(&there).unwrap().is_empty());
 
-    // kill -9: gone within 2 s, no drive pass.
     assert!(std::process::Command::new("kill")
         .args(["-9", &pid])
         .status()
@@ -160,7 +150,6 @@ fn the_service_keeps_lane_state_from_herdrs_events_and_polls_when_the_stream_dro
         "the gone pane is no longer subscribed: {s}"
     );
 
-    // The stream drops: logged down, the passes poll again, and the Host tab says so.
     drop_tx.send(()).unwrap();
     let down = |e: &Event| e.kind == "lane-stream" && e.str("state") == Some("down");
     until("stream down", 2.0, || read(&c.state).unwrap().iter().any(down));

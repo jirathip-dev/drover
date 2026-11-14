@@ -1,6 +1,3 @@
-//! #115: the Queue tab as a git-log style graph. `serial_label` config, the rows' graph data, and (WebKit, 390 px) the
-//! drawn graph on a fixture with chains, a fork, a clamped chain and a blocker out of view, the [?] legend sheet and
-//! the control audit on both. Screenshots go to `$DROVER_SNAPSHOTS`.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -11,7 +8,6 @@ use serde_json::json;
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// `acme` names its serial mark, `beta` keeps the default (`db`, #294).
 fn config(label: &str) -> String {
     format!(
         r#"[fleet.acme]
@@ -38,7 +34,6 @@ fn load(label: &str) -> anyhow::Result<Config> {
 
 #[test]
 fn serial_label_defaults_to_db_and_takes_an_override() {
-    // #294: the old form is one group named `serial_label`, `db` when unset.
     let c = load("").unwrap();
     assert_eq!(c.fleet["acme"].serial_label(), "db");
     let c = load("serial_label = \"schema\"").unwrap();
@@ -53,15 +48,12 @@ fn serial_label_defaults_to_db_and_takes_an_override() {
     }
 }
 
-/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn req(s: &Server, path: &str, extra: &str) -> String {
     let res = String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{extra}\r\n"), T))
         .into_owned();
     with_board(&res, s, ADDR, extra, T)
 }
 
-/// acme: 1 → 2 → 3 → 4 → 5 (5 clamps at depth 4), 6 also on 1 (a fork), 7 on #99 (not queued), 8 serial.
-/// beta: 22 on 21, both serial. #1 has an impl lane.
 fn fixture() -> (drover::Ctx, Fake) {
     let c = ctx(&tmpdir("queue-graph"), &config("serial_label = \"db\""));
     let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
@@ -72,7 +64,6 @@ fn fixture() -> (drover::Ctx, Fake) {
     }
     ok(&["queue", "beta", "add", "--serial", "21", "22"]);
     ok(&["queue", "beta", "block", "--on", "21", "22"]);
-    // #331: every row's title (the deep ones too) is long enough to be cut at the card edge.
     let cache = c.state.parent().unwrap().join("cache");
     std::fs::create_dir_all(&cache).unwrap();
     for (f, n) in (1..=8).map(|n| ("acme", n)).chain([("beta", 21), ("beta", 22)]) {
@@ -98,7 +89,6 @@ fn rows_carry_the_graph_data_and_the_fleet_its_serial_paths() {
     assert!(page.contains(
         "<div class=\"fc k-a\" data-s=\"db\" data-sp=\"schema/**\"><div class=fh><span class=fn><b>beta</b>"
     ));
-    // #242: a row with a lane carries its coat for the row sprite.
     let at = page
         .find("<details class=\"q\" data-q data-act=impl data-grow=impl data-i=1 style=\"--rc:#")
         .unwrap();
@@ -110,7 +100,6 @@ fn rows_carry_the_graph_data_and_the_fleet_its_serial_paths() {
     assert!(page.contains("<details class=\"q\" data-q data-b=99 data-act=idle data-grow=queued data-i=7><summary><span><a href=\"https://github.com/acme/app/issues/7\">#7</a></span>"));
     assert!(page.contains("<details class=\"q\" data-q data-s=\"db\" data-act=idle data-grow=queued data-i=8><summary><span><a href=\"https://github.com/acme/app/issues/8\">#8</a></span>"));
     assert!(page.contains("<details class=\"q\" data-q data-b=21 data-s=\"db\" data-act=idle data-grow=queued data-i=22><summary><span><a href=\"https://github.com/acme/beta/issues/22\">#22</a></span>"));
-    // Change 1 of the approval: the card no longer repeats `#n state · age`; the lane stays.
     assert!(!page.contains("<p>#1 impl"), "{page}");
     assert!(page.contains("<p>acme-impl-1</p>"));
 }
@@ -125,14 +114,10 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
     let page = req(&s, "/", &pair(&s, &c, "Mozilla/5.0 (iPhone)", T));
     let d = tmpdir("queue-graph-png");
     let file = d.join("page.html");
-    // #268: the Queue tab drawn in (`req`), without the board (it would read this file's base server).
     let html = &page[page.find("<!doctype").unwrap()..page.find("<script type=module").unwrap()];
-    // #440: in terminal (no theme words), so the rows read their plain states once the theme has loaded.
     let html = html.replace("dataset.theme=m||\"farm\"", "dataset.theme=\"terminal\"");
     assert!(html.contains("dataset.theme=\"terminal\""));
     std::fs::write(&file, format!("{html}</body></html>\n")).unwrap();
-    // Per row in page order: #n, its gutter (#241: a row sprite's glyph), its state cell with the tags, its moves.
-    // #367: each group draws its own trees, so the running #1 stands alone and its queued followers carry `! #1`.
     let want = [
         "#1 ● impl",
         "#2 ○ queued ! #1 ▼after6",
@@ -146,7 +131,6 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
         "#22 └─○ queued 🔒db",
     ]
     .join("|");
-    // #367: every repo's card shown and the chain opened, so every row is measured.
     let graph = format!(
         "document.querySelectorAll('#queue .fc').forEach(c => {{ c.hidden = false; }}); \
          document.querySelectorAll('#queue details.qc').forEach(d => {{ d.open = true; }}); \
@@ -180,7 +164,7 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
             std::path::Path::new(&p).join(format!("{name}.png"))
         });
         let o = webview()
-            .env("DROVER_TAB", "queue") // #440: its own localStorage: no earlier run's Herd mode on this origin
+            .env("DROVER_TAB", "queue")
             .args([
                 file.to_str().unwrap(),
                 "390",
@@ -204,7 +188,6 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
             v[0],
             v[1]
         );
-        // The legend sheet has no controls of its own (the lane parts are hidden); [?] is audited on the queue.
         assert!(v[2] > 0.0 || name == "ui-queue-legend", "{name}: no controls audited");
     }
 }

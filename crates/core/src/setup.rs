@@ -1,10 +1,9 @@
-use crate::events::{append, read, Event};
+use crate::events::{append, working, Event};
 use crate::{config::Config, gate::refused, herdr, hosts::On, runner::argv, runner::Runner, Ctx};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 pub const TIMEOUT: u64 = 600;
-/// #255: a cloud host's gh login: the token read without echo, piped by a shell builtin (never in argv), then HTTPS git.
 const GH_TOKEN: &str =
     "printf 'Fine-grained GitHub token: '; read -rs T; printf %s \"$T\" | gh auth login --with-token";
 
@@ -40,7 +39,7 @@ pub fn vendors(cfg: &Config) -> Vec<(String, String)> {
 
 /// Start setup `name` on `host` in a new workspace there; logs `setup` (no command line, no input); the pane id.
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, via: &str) -> Result<String> {
-    let boot = ("gh-token".to_string(), GH_TOKEN.to_string()); // #255: bootstrap's, not on the host cards
+    let boot = ("gh-token".to_string(), GH_TOKEN.to_string());
     let Some((_, line)) = all(cfg).into_iter().chain([boot]).find(|s| s.0 == name) else {
         return refused("NO_SUCH_SETUP", format!("no setup `{name}`"));
     };
@@ -50,7 +49,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
     }
     let on = On::new(r, h.and_then(|h| h.machine.as_deref()));
     if let Some(m) = on.machine {
-        crate::hosts::resolve(r, m, false)?; // #641: never a pane here for a host herdr can't pin down
+        crate::hosts::resolve(r, m, false)?;
     }
     let ws = "workspace create --cwd /tmp --label drover-setup --no-focus";
     let ws = herdr::json(&on, &argv(&ws.split(' ').collect::<Vec<_>>()))?;
@@ -89,7 +88,7 @@ pub fn reap(ctx: &Ctx, r: &dyn Runner, events: &[Event]) -> Result<()> {
 
 /// The sheet's read of setup `pane`: its masked screen and every `https://` URL (a wrapped one joined), or closed.
 pub fn screen(ctx: &Ctx, r: &dyn Runner, pane: &str) -> Result<Value> {
-    let (events, shut) = (read(&ctx.state)?, json!({"closed": true, "lines": []}));
+    let (events, shut) = (working(&ctx.state)?, json!({"closed": true, "lines": []}));
     let Some(e) = open(&events, pane) else { return Ok(shut) };
     let live = ctx.now < e.ts + TIMEOUT;
     let o = herdr::exec(&On::of(r, Some(e)), &herdr::read_argv(pane))?;
@@ -116,7 +115,7 @@ pub fn screen(ctx: &Ctx, r: &dyn Runner, pane: &str) -> Result<Value> {
 
 /// The sheet's reply into setup `pane`: its text (keys and text only: no control characters), then Enter; never logged.
 pub fn send(ctx: &Ctx, r: &dyn Runner, pane: &str, text: &str) -> Result<String> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let on = On::of(r, Some(open(&events, pane).context("that sign-in has closed")?));
     if text.chars().any(char::is_control) || text.chars().count() > 2000 {
         return refused("BAD_VALUE", "up to 2000 chars, no control characters");

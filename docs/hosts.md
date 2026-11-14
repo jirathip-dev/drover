@@ -24,8 +24,8 @@ fleet.toml nothing changes: every lane runs on the main host, as before.
    - drover itself. The lane's tool-guard hook calls `drover hook`, and the Claude profile lives under that host's
      own home: each spawn there syncs its lane's profile (`profiles sync --profile <p> --role <r>`, #592).
 
-   drover never copies credentials to another host: a role's `account` token is only exported to lanes on the
-   main host; a lane on another host runs on that host's own Claude login.
+   drover never copies credentials to another host: a lane on another host runs on that host's own Claude login
+   (a `shed-acp` host's, through the main host's token proxy).
 3. Add the host to fleet.toml:
 
 ```toml
@@ -103,12 +103,23 @@ all (or only a cloud host over its budget fits), it is refused with `REFUSED NO_
 ` (cloud host stopped or over budget)` when fleet.toml has a cloud host; the Host tab reads it as `waiting`. drive
 retries on its next pass.
 
+### Working-lane and simulator slots (#984)
+
+`[hosts.<name>] max_working = 12` caps the lanes running a turn on that host, across all fleets; `max_simulators = 1`
+caps the live lanes that need the `sim` tag (by fleet, role or `queue add --needs sim`). Unset means no cap. A lane
+idle at its prompt, or whose issue is `ready`, `needs-human`, `parked`, `blocked` or done, holds no working slot; a
+`sim` lane holds its simulator slot while its pane lives (unless its issue is in one of those states). Over a cap a
+start is not refused for good: drive skips it with `HOST_FULL` (`waiting for a slot: 12/12 working on mini`), counting
+spawns still starting, and starts it in queue order once a slot frees; a hand-typed `drover spawn` is not held. `drover status` prints `mini: working N/12 ·
+simulators N/1` for each capped host. Once its verdict is in, a reviewer's idle pane closes on the next `check`.
+Likewise, a builder's idle pane closes once a review started after it. Their worktrees stay until merge.
+
 The `spawn` event records the lane's `host` and `machine`. From then on, every herdr call for that lane carries
 `--machine` (pane reads, prompts, stop, kill, close), and its worktree work runs over ssh on that host:
 `git worktree`, the brief and MCP files, the reviewer's `verdict.md`, the dirty and unpushed checks, and `clean`.
 
 `spawn --dry-run` places the lane first and prints the commands exactly as they are sent: `--machine`, that host's
-paths and home, and no account token. If the agent fails to start on another host, its new workspace is closed.
+paths and home, and no token. If the agent fails to start on another host, its new workspace is closed.
 
 ## A remote lane's hook rules (#592)
 
@@ -223,12 +234,15 @@ with `NO_HOST: <host>: unhealthy: <reason>`. The checks, each with its fix:
 
 ## Auto-update
 
-When `check` sees an older drover on a remote host, and fleet.toml has the drover fleet, it rebuilds the main
-host's sha there in the background: `git fetch`, `git checkout --detach <sha>` and
-`cargo install --path crates/cli --locked --root <root> --force` in that fleet's checkout on the host, then
-`drover profiles sync` if an old fleet.toml is left there (#592). Output goes to `~/.drover-update.log` on the host. Each host and sha is tried once, and
-logged as `host-update` (with the error when the ssh call failed). Ten minutes later `check` reads the version back.
-A host still on the old version stays amber. A failed update never blocks the main host.
+Each `check` (every tick) reads `drover --version` on every enabled, reachable remote host. When it differs from the
+main host's, and no install already runs there, it installs the main host's sha the way `hosts bootstrap` does:
+`cargo install --git <repo> --rev <sha> --locked --root <root> --force`, then `drover profiles sync` if a fleet.toml
+is there. The install runs in the background (output in `~/.drover-sync.log` on the host), so the tick never waits
+on it. An offline or switched-off host gets no ssh for it.
+
+The next tick logs the result as `host-sync` (host, from, to, ok). A failure alerts `host-sync-failed` once until an
+install there succeeds, and the tick after retries it. Until the versions match, a shed-acp host takes no lanes
+(`acp guard`). `drover hosts` shows each remote host's drover sha, with `✓` when it matches the main host's.
 
 ## When the main host is down
 
@@ -363,10 +377,10 @@ asked there.
   per-lane key as `ANTHROPIC_AUTH_TOKEN`. The key reaches it only through the 0600 secrets file over ssh stdin, which
   is removed once the shell has read it. Port `<port>` there is an ssh reverse tunnel (`ssh -N -R`, started detached
   by spawn and each survey, its pid in `<state>/tunnel-<host>.pid`) to `drover proxy` here, which spawn starts when
-  it does not answer. The proxy checks the key, then forwards the call to `upstream` with the role's `[accounts]`
-  token (#707: the account's hand-placed `[accounts]` `token-file:<path>`, 0600, [accounts](accounts.md); only the
-  proxy reads it) and the `oauth-2025-04-20` beta added. curl sends it, with the token in its config on stdin and never in
-  argv, and the answer streams back as it comes. The account token never leaves the main host.
+  it does not answer. The proxy checks the key, then forwards the call to `upstream` with the one
+  `[proxy] token-file` token (#923: `claude setup-token`'s, 0600, [accounts](accounts.md); only the proxy reads it;
+  a remote ACP spawn without it is refused `NO_PROXY_TOKEN` with that step) and the `oauth-2025-04-20` beta added. curl sends it, with the token in its config on stdin and never in
+  argv, and the answer streams back as it comes. The token never leaves the main host.
 - **Lane keys.** They are kept in `<state>/proxy-keys.json` as sha256 only. A key signs while it is `live`: it is not
   `revoked`, not `expired` (`key_hours`), and not `ended` (its issue merged or closed, its lane closed, dead or
   spawned again, the last of which revokes the older key at once). `drover hosts keys` lists them with their state.

@@ -1,5 +1,3 @@
-//! `HOST_OFFLINE`; its lanes show `host offline` (never `lane-dead`), `check` alerts its drop and return once each, a
-//! supersede's pane left there is killed once it is back, and `kill`/`close --host` pick one host's agent of a name.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -71,7 +69,6 @@ fn an_unreachable_host_refuses_only_its_own_spawns() {
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "14", "impl", "--host", "mini"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     assert!(sh.called("run", "sendmeter-impl-14"), "{:?}", sh.methods());
-    // #676: a lane whose issue last ran on bazzite leaves it while it is unreachable: the main host takes it.
     remote_spawn(&c);
     ev(&c, NOW - 100, "verdict", json!({"verdict": "FAIL", "sha": "abc"}));
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
@@ -116,7 +113,6 @@ fn its_lanes_show_host_offline_alert_once_and_recover() {
         "drive does nothing"
     );
 
-    // Back: one `host-online`, and the lane shows its real state again.
     let (f, bazzite) = (mini_only(), FakeShed::new());
     bazzite.lane(IMPL, "working", WT);
     let up = with_bazzite(&f, &bazzite);
@@ -128,7 +124,6 @@ fn its_lanes_show_host_offline_alert_once_and_recover() {
     assert!(!status.contains("host offline"), "{status}");
     let (_, board) = run(&c, &up, &["board", "sendmeter"]);
     assert!(!board.contains("host offline"), "{board}");
-    // It drops again: a second `host-offline`.
     assert_eq!(run(&c, &down, &["check"]).0, 0);
     assert_eq!(kinds(&c, "host-offline").len(), 2);
 }
@@ -147,10 +142,8 @@ fn a_pane_a_supersede_left_on_a_down_host_is_killed_once_it_is_back() {
         (Some("bazzite"), Some(IMPL))
     );
     let cfg = Config::load(&c.config).unwrap();
-    // Still down: nothing happens.
     drover::check::stale(&c, &cfg, &sh.on(&r), &mut Vec::new()).unwrap();
     assert!(kinds(&c, "stale-pane-killed").is_empty());
-    // Back, with the old pane there and the new lane of the same name on mini.
     sh.lane(IMPL, "working", "/x");
     let (f, bazzite) = (Fake::default(), FakeShed::new());
     bazzite.lane(IMPL, "idle", WT);
@@ -174,7 +167,6 @@ fn a_pane_a_supersede_left_on_a_down_host_is_killed_once_it_is_back() {
     );
 }
 
-/// Mini's live lane and bazzite's stale pane share the name: `--host` picks bazzite's.
 #[test]
 fn kill_and_close_take_a_host_when_names_collide() {
     let (c, sh) = setup("offline-kill");
