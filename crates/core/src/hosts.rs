@@ -958,12 +958,8 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     let mine = format!("drover {}", crate::VERSION);
     let line = format!("! drover — {theirs} there, {mine} here → the next `check` updates it (docs/hosts.md)");
     fail(theirs == mine, line);
-    if let Some(Err(e)) = on
-        .shed()
-        .map(|b| crate::herdr::Runtime::agents(&crate::herdr::Shed(b), on))
-    {
-        bad.push(format!("! shed: {e:#}"));
-    }
+    let shed = on.shed().map(|b| crate::shed::line(on, &b.wire));
+    bad.extend(shed.filter(|l| !l.starts_with('✓')));
     bad
 }
 

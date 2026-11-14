@@ -47,7 +47,11 @@ fn lines(m: Method, params: Value) -> String {
     format!("{a}\n{b}\n")
 }
 
-fn answer(text: &str) -> Result<Value> {
+fn side(h: &Hello) -> String {
+    format!("{} ({}) protocol {}", h.version, h.label(), h.protocol)
+}
+
+fn answer(text: &str) -> Result<(Hello, Value)> {
     let mut it = text.lines().map(serde_json::from_str::<Response>);
     let mut next = || -> Result<Response> { Ok(it.next().context("shed: connection closed")??) };
     let hello = next()?;
@@ -55,7 +59,6 @@ fn answer(text: &str) -> Result<Value> {
         bail!("{}", e.message);
     }
     let theirs = hello.result.and_then(|v| serde_json::from_value::<Hello>(v).ok());
-    let side = |h: &Hello| format!("{} ({}) protocol {}", h.version, h.label(), h.protocol);
     ensure!(
         theirs.as_ref().is_some_and(Hello::compatible),
         "SHED_VERSION: drover speaks shed {}, the server is {}",
@@ -64,14 +67,50 @@ fn answer(text: &str) -> Result<Value> {
     );
     match next()? {
         Response { error: Some(e), .. } => bail!("{}", e.message),
-        Response { result: Some(v), .. } => Ok(v),
+        Response { result: Some(v), .. } => Ok((theirs.unwrap_or_else(Hello::ours), v)),
         _ => bail!("shed: neither result nor error"),
     }
 }
 
+/// #1031: doctor's `shed` line for the server on `w`: its version and protocol against drover's, `✗` on a mismatch, `!` when it does not answer.
+pub fn line(r: &dyn Runner, w: &Wire) -> String {
+    let theirs = exchange(r, w, Method::Ls, json!(proto::LsParams::default())).and_then(|t| answer(&t));
+    match theirs {
+        Ok((h, _)) => format!("✓ shed — server {}, drover speaks {}", side(&h), side(&Hello::ours())),
+        Err(e) if format!("{e:#}").starts_with("SHED_VERSION") => format!(
+            "✗ shed — {e:#} → cargo install --git {} --rev {REV} --locked --force shed, then restart shed serve",
+            git()
+        ),
+        Err(e) => format!("! shed: {e:#}"),
+    }
+}
+
+/// #1031: a `SHED_VERSION` refusal in `res` alerts `shed-version` once per distinct refusal, and `shed-version-ok` once a call gets through again; whether `res` was one.
+pub fn version_alert<T>(ctx: &Ctx, cfg: &Config, res: &Result<T>) -> Result<bool> {
+    let refused = res.as_ref().err().map(|e| format!("{e:#}"));
+    let refused = refused.filter(|e| e.starts_with("SHED_VERSION"));
+    let kinds = ["shed-version", "shed-version-ok"];
+    let events = crate::events::working(&ctx.state)?;
+    let last = events.iter().rev().find(|e| kinds.contains(&e.kind.as_str()));
+    let was = last.filter(|e| e.kind == kinds[0]).and_then(|e| e.str("key"));
+    let d = match (&refused, was) {
+        (Some(why), _) if was != Some(why.as_str()) => Some((kinds[0], json!({"key": why, "reason": why}))),
+        (None, Some(_)) if res.is_ok() => Some((kinds[1], json!({}))),
+        _ => None,
+    };
+    if let Some((kind, d)) = d {
+        crate::events::emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))?;
+    }
+    Ok(refused.is_some())
+}
+
 /// One call on a fresh connection (`hello`, then `m`): its result.
 pub fn call(r: &dyn Runner, w: &Wire, m: Method, params: Value) -> Result<Value> {
-    let text = match w {
+    answer(&exchange(r, w, m, params)?).map(|x| x.1)
+}
+
+fn exchange(r: &dyn Runner, w: &Wire, m: Method, params: Value) -> Result<String> {
+    Ok(match w {
         Wire::Socket(p) => {
             let mut s = UnixStream::connect(p).with_context(|| format!("no shed server on {}", p.display()))?;
             s.write_all(lines(m, params).as_bytes())?;
@@ -91,8 +130,7 @@ pub fn call(r: &dyn Runner, w: &Wire, m: Method, params: Value) -> Result<Value>
             );
             o.stdout
         }
-    };
-    answer(&text)
+    })
 }
 
 /// The `shed` CLI (ACP mode only: its bridge and prompt framing are shed's own); fails on a non-zero exit.
