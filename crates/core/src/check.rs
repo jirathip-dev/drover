@@ -1794,7 +1794,6 @@ fn clone_id(_: &Path) -> Option<u64> {
     None
 }
 
-/// #1025: log `closed-other` for each open or queued issue closed on GitHub: check's and every drive pass's first step.
 pub(crate) fn closed_on_github(
     ctx: &Ctx,
     cfg: &Config,
