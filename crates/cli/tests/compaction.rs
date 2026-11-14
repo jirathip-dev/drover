@@ -203,14 +203,14 @@ fn a_5mb_build_cloned_is_stored_in_16kb() {
     .unwrap();
     assert!(stored.len() <= 16 << 10, "{} bytes", stored.len());
     assert!(drover::db::live_bytes(&p).unwrap() <= 32 << 10);
-    let err = back[1].data["errors"][0].as_str().unwrap();
+    let err = back[1].val("errors")[0].as_str().unwrap();
     assert!(
         err.starts_with("cp: xxx") && err.contains("bytes cut"),
         "{}",
         &err[..80]
     );
     assert_eq!(
-        (back[1].data["dirs"].clone(), back[1].data["secs"].clone()),
+        (back[1].val("dirs").clone(), back[1].val("secs").clone()),
         (json!(["target"]), json!(7))
     );
     assert_eq!(serde_json::to_value(&back[0]).unwrap()["agent"], "a-impl-1");
@@ -322,7 +322,7 @@ fn rotation_of_a_young_log_archives_old_noise_and_keeps_the_folds() {
     assert_eq!(all.len(), before.len(), "nothing deleted");
     let cloned = all.iter().find(|e| e.kind == "build-cloned").unwrap();
     assert_eq!(
-        cloned.data["errors"][0].as_str().unwrap().len(),
+        cloned.val("errors")[0].as_str().unwrap().len(),
         1 << 20,
         "history keeps it whole"
     );

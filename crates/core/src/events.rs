@@ -46,6 +46,10 @@ impl Event {
     pub fn str(&self, k: &str) -> Option<&str> {
         self.data.get(k).and_then(Value::as_str)
     }
+    /// The value at `k`, `Null` when the event has none.
+    pub fn val(&self, k: &str) -> &Value {
+        self.data.get(k).unwrap_or(&Value::Null)
+    }
     /// A `kind` event about `fleet` #`issue`.
     pub fn is(&self, kind: &str, fleet: &str, issue: u64) -> bool {
         self.kind == kind && self.fleet == fleet && self.issue == Some(issue)
@@ -57,10 +61,10 @@ pub(crate) fn aliased(mut ev: Event) -> Event {
         ev.kind = format!("orchestrator-{k}");
     }
     if ev.str("from") == Some("conductor") {
-        ev.data["from"] = "orchestrator".into();
+        ev.data.insert("from".into(), "orchestrator".into());
     }
     if let Some(b) = ev.str("by").filter(|b| b.starts_with("conductor-")) {
-        ev.data["by"] = crate::orchestrator::by(b).into();
+        ev.data.insert("by".into(), crate::orchestrator::by(b).into());
     }
     ev
 }
@@ -327,8 +331,9 @@ pub fn plain(ev: &Event) -> String {
         }
         "blocked" => format!("{who} blocked {}: {}", s("code"), s("reason")),
         "needs-decision" | "ask-owner" => {
-            let rec = ev.data["recommend"].as_u64();
-            let opts: String = ev.data["options"]
+            let rec = ev.val("recommend").as_u64();
+            let opts: String = ev
+                .val("options")
                 .as_array()
                 .into_iter()
                 .flatten()
@@ -354,7 +359,8 @@ pub fn plain(ev: &Event) -> String {
         "spawn-failing" => format!("spawn-failing {}#{}: {}", ev.fleet, ev.issue.unwrap_or(0), s("error")),
         "decision" => format!("{who} decision {} by {}: {}", s("id"), s("by"), s("choice")),
         "queue" => {
-            let n: Vec<String> = ev.data["issues"]
+            let n: Vec<String> = ev
+                .val("issues")
                 .as_array()
                 .into_iter()
                 .flatten()
@@ -439,7 +445,7 @@ pub fn held_on(events: &[Event], s: &IssueState) -> Vec<u64> {
         .rev()
         .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue) && kinds.contains(&&*e.kind) && !design(e));
     e.filter(|e| e.kind == "held")
-        .map_or(vec![], |e| crate::queue::nums(&e.data["on"]))
+        .map_or(vec![], |e| crate::queue::nums(e.val("on")))
 }
 
 /// #500: a design (#730: or architect) lane's spawn: never the issue's build or check lane.

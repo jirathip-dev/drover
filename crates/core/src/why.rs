@@ -492,7 +492,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
     let st = issue.and_then(|n| fold(&events).remove(&(fleet.clone(), n)));
     let issue = issue.map(|n| {
         let title = gh::spec(ctx, r, f, fleet, n, false).ok().map(|v| v["title"].clone());
-        let m = |k: &str| merged.map_or(Value::Null, |e| e.data[k].clone());
+        let m = |k: &str| merged.map_or(Value::Null, |e| e.val(k).clone());
         let rounds = st.as_ref().map(|s| s.rounds);
         json!({"fleet": fleet, "number": n, "title": title, "pr": m("pr"), "merge_sha": m("merge_sha"), "into": m("into"), "rounds": rounds})
     });

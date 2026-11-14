@@ -214,7 +214,7 @@ pub fn handoff(
         e.kind == "queue"
             && e.fleet == f
             && (e.data.get("design").is_some() || e.data.get("architect").is_some())
-            && e.data["issues"].as_array().is_some_and(|a| a.contains(&json!(n)))
+            && e.val("issues").as_array().is_some_and(|a| a.contains(&json!(n)))
     };
     let thread = ev
         .iter()
@@ -353,10 +353,10 @@ pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, 
         git(&["push", "origin", &format!("{c}:refs/heads/{branch}")])?;
         (d["pre"], d["sha"]) = (json!(pre), json!(c));
     }
-    (d["id"], d["by"]) = (ask.data["id"].clone(), json!(by));
+    (d["id"], d["by"]) = (ask.val("id").clone(), json!(by));
     (d["role"], d["adr"]) = (
-        ask.data["role"].clone(),
-        review.map_or(Value::Null, |e| e.data["adr"].clone()),
+        ask.val("role").clone(),
+        review.map_or(Value::Null, |e| e.val("adr").clone()),
     );
     emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), kind, d))?;
     let (action, role) = match kind {
