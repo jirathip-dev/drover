@@ -1,0 +1,13 @@
+Decided: one per-issue table: #948's `states` (fleet, issue, done, json) is written by #978's projection in the append transaction; #948's lazy fold cursor (snapshot 'fold', fold/folded, CHUNK) is deleted
+Because: "The same transaction that appends each event updates them."
+Rejected: keeping both `issues` and `states` — two tables of the same fold would drift and break "never leave two ways to do one thing"
+Decided: the working log (#948 WORKING subset) loads through db::since in one read snapshot with the states and asks rows, so asks come from the table, not Log::add's ask index
+Because: q1651
+Decided: compact archives events whose issue row is done = 1, the column WORKING already reads
+Decided: fleet rename moves the states, asks and lanes rows with the events
+Because: crates/core/src/db.rs:488
+Decided: pass_budget's fixture builds the tables with db::rebuild (its rows bypass append) and now asserts the pass reads less than the log
+Because: "never a replay of the event log"
+Check: drover lesson digest's verdict round count reads history() (hot DB + archive), not #948's hot-only query
+Check: AC6 numbers were measured at 988bab6, before the #948 merge
+Owner: The state database keeps one current row per issue, lane and ask and moves finished work to monthly archives; today's copy went from 225 MB to 89.5 MB.
