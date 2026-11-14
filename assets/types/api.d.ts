@@ -24,9 +24,7 @@ export type Chat = { said?: Array<JsonValue> | null, older: boolean, notices: Ar
 export type Notice = { at: number, text: string, };
 
 /**
- * #749: API v1's `lane/<agent>`: the sheet's chat plus `blocks`, its transcript as blocks: an ACP lane's from shed's
- * events (no `lines`; `before` is the oldest event's `seq`, the next page's `before`), else one `screen` block (the
- * screen is `lines`).
+ * #749: API v1's `lane/<agent>`: the sheet's chat plus `blocks`, its transcript as blocks: an ACP lane's from shed's events (no `lines`; `before` is the oldest event's `seq`, the next page's `before`), else one `screen` block (the screen is `lines`).
  */
 export type LaneChat = { blocks: Array<Block>, said?: Array<JsonValue> | null, older: boolean, notices: Array<Notice>, harness: string, acts: Array<string>, pane?: string | null, lines: Array<string>, live: number, status?: string | null, before: number, more: boolean, };
 
@@ -36,9 +34,7 @@ export type LaneChat = { blocks: Array<Block>, said?: Array<JsonValue> | null, o
 export type ApprovalChoice = { id: string, name: string, kind: string, };
 
 /**
- * #749: one block of a lane's transcript, tagged `k`, built from ACP's own fields only (never an agent's wording): a
- * prompt, a reply's markdown (its text chunks joined), a tool call (its updates folded into one; `title_line`, the
- * title's first line, cut), the plan, an approval (`answered`: the option taken); a PTY lane's screen is one `screen`, its `lines`.
+ * #749: one block of a lane's transcript, tagged `k`, built from ACP's own fields only (never an agent's wording): a prompt, a reply's markdown (its text chunks joined), a tool call (its updates folded into one; `title_line`, the title's first line, cut), the plan, an approval (`answered`: the option taken); a PTY lane's screen is one `screen`, its `lines`.
  */
 export type Block = { "k": "prompt", text: string, } | { "k": "reply", markdown: string, } | { "k": "tool", id: string, kind?: string | null, title_line: string, title: string, status: string, } | { "k": "plan", entries: Array<JsonValue>, } | { "k": "approval", tool: string, options: Array<ApprovalChoice>, answered?: string | null, } | { "k": "screen" };
 
@@ -48,10 +44,7 @@ export type Block = { "k": "prompt", text: string, } | { "k": "reply", markdown:
 export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?: number | null, };
 
 /**
- * #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none;
- * #450: the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card, the
- * `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no
- * export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
+ * #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none; #450: the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card, the `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
  */
 export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, snap: number, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, 
 /**
@@ -60,33 +53,27 @@ export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolea
 config?: string | null, };
 
 /**
- * An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
- * design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th); #517: the `thread` it was asked in, its `title`.
+ * An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th); #517: the `thread` it was asked in, its `title`.
  */
 export type NeedAsk = { ask: Ask, who: string, kind: string, from?: string | null, pngs: Array<string>, thread?: string | null, title?: string | null, };
 
 /**
- * A blocked lane's card (`who`: fleet · #issue · lane; `push` 0 while a countdown runs): unpaired, its `activity`;
- * else a harness `menu`, or the pane's last lines (`tail`).
+ * A blocked lane's card (`who`: fleet · #issue · lane; `push` 0 while a countdown runs): unpaired, its `activity`; else a harness `menu`, or the pane's last lines (`tail`).
  */
 export type Blocked = { name: string, who: string, push: boolean, activity?: string | null, menu?: Menu | null, tail?: string | null, };
 
 /**
- * A harness menu: its title, reason and command, the `countdown` (s) before it auto-denies, the masked question and
- * options, `h` the hash of the menu the card shows (`POST /answer`).
+ * A harness menu: its title, reason and command, the `countdown` (s) before it auto-denies, the masked question and options, `h` the hash of the menu the card shows (`POST /answer`).
  */
 export type Menu = { title: string, reason: string, command: string, countdown?: number | null, question: string, options: Array<string>, h: string, };
 
 /**
- * #130: a `needs-human` issue's card (`pending`: one more round recorded, no lane yet): `who`, title, `why`, the last
- * verdict (`pass`: its sha, `stale` not the head; else `fail`'s finding), the PR line (`repo`: none, the fleet is
- * not configured), `mergeable` and `merge` (merge anyway is offered); #417: the verdict's screenshot `shots`.
+ * #130: a `needs-human` issue's card (`pending`: one more round recorded, no lane yet): `who`, title, `why`, the last verdict (`pass`: its sha, `stale` not the head; else `fail`'s finding), the PR line (`repo`: none, the fleet is not configured), `mergeable` and `merge` (merge anyway is offered); #417: the verdict's screenshot `shots`.
  */
 export type NeedIssue = { fleet: string, issue: number, pending: boolean, who: string, title: string, why: string, pass?: string | null, stale: boolean, fail: string, pr: PrLine, repo?: string | null, mergeable: string, merge: boolean, shots: Array<string>, };
 
 /**
- * #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no
- * fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
+ * #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
  */
 export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, error?: string | null, failed: boolean, sections: Array<LaneSection>, 
 /**
@@ -106,10 +93,7 @@ export type LaneSection = { name: string, tone: string, repos: Array<LaneRepo>, 
 export type LaneRepo = { name: string, lanes: Array<LaneRow>, };
 
 /**
- * A Lanes row: its avatar (`avatar`, herdr's `state` with `act`, #423 `grow`, `atone` and `coat`), name, `state` in
- * `tone` for `ago`, the `why` line (`why_tone`), the activity (`activity`, or the `now` parts), `gone` (no pane), the
- * conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its
- * fleet is not configured), `dead` and the blocked card.
+ * A Lanes row: its avatar (`avatar`, herdr's `state` with `act`, #423 `grow`, `atone` and `coat`), name, `state` in `tone` for `ago`, the `why` line (`why_tone`), the activity (`activity`, or the `now` parts), `gone` (no pane), the conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its fleet is not configured), `dead` and the blocked card.
  */
 export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, 
 /**
@@ -128,14 +112,12 @@ export type LaneUnsaved = { name: string, root?: string | null, dirty?: number |
 export type LaneNow = { title: string, w?: string | null, n?: string | null, t?: string | null, };
 
 /**
- * #269: API v1's `chat`, the [chat] tab (#386): a card per repo (`all` first) with its threads, then every thread's
- * view (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
+ * #269: API v1's `chat`, the [chat] tab (#386): a card per repo (`all` first) with its threads, then every thread's view (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
  */
 export type ChatTab = { now: number, rw: boolean, error?: string | null, repos: Array<ChatRepo>, threads: Array<ThreadView>, };
 
 /**
- * A repo's card in colour `k`: its threads newest first, the archived ones apart; #404: its empty thread's
- * `harness` chip.
+ * A repo's card in colour `k`: its threads newest first, the archived ones apart; #404: its empty thread's `harness` chip.
  */
 export type ChatRepo = { repo: string, k: string, rows: Array<ThreadRow>, archived: Array<ThreadRow>, harness: Chip, };
 
@@ -145,8 +127,7 @@ export type ChatRepo = { repo: string, k: string, rows: Array<ThreadRow>, archiv
 export type Chip = { name: string, cur?: string | null, all: Array<string>, };
 
 /**
- * A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line;
- * #460: the ids of the config proposals `waiting` for the owner.
+ * A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line; #460: the ids of the config proposals `waiting` for the owner.
  */
 export type ThreadRow = { id: string, title: string, age: string, unread: boolean, state: string, waiting: Array<string>, links: Array<Link>, line: string, };
 
@@ -156,9 +137,7 @@ export type ThreadRow = { id: string, title: string, age: string, unread: boolea
 export type Link = { w: string, t: string, };
 
 /**
- * One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407:
- * working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`; #404:
- * its model and effort `chips`.
+ * One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407: working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`; #404: its model and effort `chips`.
  */
 export type ThreadView = { id: string, title: string, ds: string, state: string, waiting: Array<string>, since?: number | null, queued: Array<QueuedMsg>, chips: Array<Chip>, page: ThreadPage, };
 
@@ -168,17 +147,12 @@ export type ThreadView = { id: string, title: string, ds: string, state: string,
 export type QueuedMsg = { q: number, text: string, };
 
 /**
- * #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time
- * and conductor folder `dir`; #618: the thread's `id`, and whether it is `archived` (opened read-only, [restore]).
+ * #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time and conductor folder `dir`; #618: the thread's `id`, and whether it is `archived` (opened read-only, [restore]).
  */
 export type ThreadPage = { id: string, archived: boolean, msgs: Array<Msg>, older?: number | null, started: number, dir: string, };
 
 /**
- * A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,
- * `signin` on `host`; #541: a conductor's answer, its `ask` and `open` while the owner may [change] it), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
- * `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `open` unless stale), `secret` (why, `from` its name),
- * `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
- * links to; #669 `run` (a run card, `from` its id).
+ * A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`, `signin` on `host`; #541: a conductor's answer, its `ask` and `open` while the owner may [change] it), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question; `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `open` unless stale), `secret` (why, `from` its name), `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it links to; #669 `run` (a run card, `from` its id).
  */
 export type Msg = { seq: number, ts: number, kind: string, text: string, link?: Link | null, from: string, files: Array<FileRef>, retry: boolean, signin?: string | null, host: string, ask?: Ask | null, routine: boolean, answer?: Answered | null, open: boolean, cmds: Array<string>, handoff?: Handoff | null, run?: RunCard | null, };
 
@@ -190,18 +164,14 @@ export type FileRef = { name: string, size: number, };
 export type Answered = { n?: number | null, choice: string, by?: string | null, ts: number, };
 
 /**
- * #681: a handoff as one agent→agent item (cooee): `id` its seq (a repo handoff's: its card's), `from` the sending
- * conductor, `to` the thread id once delivered, else `{repo, pending: true}`; `summary` the text's first line;
- * `state` pending, delivered, failed (`error`) or forwarded; `folded` in the sender's thread, the message form in the
- * receiver's; while pending, the card's `choices`.
+ * #681: a handoff as one agent→agent item (cooee): `id` its seq (a repo handoff's: its card's), `from` the sending conductor, `to` the thread id once delivered, else `{repo, pending: true}`; `summary` the text's first line; `state` pending, delivered, failed (`error`) or forwarded; `folded` in the sender's thread, the message form in the receiver's; while pending, the card's `choices`.
  */
 export type Handoff = { kind: string, id: number, from: HandoffFrom, to: JsonValue, title: string, summary: string, text: string, state: string, error?: string | null, folded: boolean, choices: Array<HandoffChoice>, };
 
 export type HandoffFrom = { agent: string, thread: string, repo: string, };
 
 /**
- * #681: a pending handoff's row as the board's card shows it: option `n`, its `text`, the `thread` it delivers to
- * (`new`: a new thread); picked by the paired `POST /api/v1/<op>` with `fleet`, `id`, `choice` = `n` and `mtime`.
+ * #681: a pending handoff's row as the board's card shows it: option `n`, its `text`, the `thread` it delivers to (`new`: a new thread); picked by the paired `POST /api/v1/<op>` with `fleet`, `id`, `choice` = `n` and `mtime`.
  */
 export type HandoffChoice = { n: number, text: string, thread: string, op: string, fleet: string, id: string, };
 
@@ -211,16 +181,14 @@ export type HandoffChoice = { n: number, text: string, thread: string, op: strin
 export type RepoThreads = { repo: string, threads: Array<RepoThread>, };
 
 /**
- * #681: a conductor thread: its `last` line and time, `awake` (its conductor not asleep), `newest` on the ongoing
- * one (the first not archived).
+ * #681: a conductor thread: its `last` line and time, `awake` (its conductor not asleep), `newest` on the ongoing one (the first not archived).
  */
 export type RepoThread = { id: string, title: string, last: LastLine, unread: boolean, awake: boolean, archived: boolean, newest: boolean, };
 
 export type LastLine = { line: string, ts: number, };
 
 /**
- * #669: a run card as its thread shows it: what it runs, why, what it touches, where, its sha; open until `exp`, then
- * `state` (`open`, `running`, `approved`, `denied`, `expired`) with `by`, the exit `code` and the output `tail`.
+ * #669: a run card as its thread shows it: what it runs, why, what it touches, where, its sha; open until `exp`, then `state` (`open`, `running`, `approved`, `denied`, `expired`) with `by`, the exit `code` and the output `tail`.
  */
 export type RunCard = { id: string, cmd: string, why: string, blast: string, host: string, dir: string, sha: string, exp: number, state: string, by?: string | null, code?: number | null, tail: string, };
 
@@ -250,9 +218,7 @@ export type Act = { agent: string, op: string, confirm: string, };
 export type Setup = { host: string, name: string, };
 
 /**
- * #265: API v1's `state`, the board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the
- * `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s),
- * the Events tab's time groups.
+ * #265: API v1's `state`, the board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s), the Events tab's time groups.
  */
 export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, 
 /**
@@ -279,8 +245,7 @@ blocked_on: Array<string>,
 pending?: PendingStart | null, status?: string | null, };
 
 /**
- * #778: a card tap's lane start not begun yet: its `action` (extend, answer, approve, revise), since when, the last
- * refusal `reason` (a code; a hard one with its words).
+ * #778: a card tap's lane start not begun yet: its `action` (extend, answer, approve, revise), since when, the last refusal `reason` (a code; a hard one with its words).
  */
 export type PendingStart = { action: string, since: number, reason?: string | null, };
 
@@ -301,23 +266,17 @@ export type Ask = { id: string, fleet: string, issue?: number | null, question: 
 export type Row = { name: string, tone: string, detail: string, fix: string, };
 
 /**
- * #267: API v1's `host`, the Host tab at `now`: HOSTS (`hosts`), FLEET DISK (`disk`, `orphans`, `leftovers`, `spawns`),
- * SERVICES (`services`, `theme`: `detail` its error, `accounts`, `deepseek`), FLEETS and ALERTS (`push`, and on a live
- * board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's
- * forms are inert); `mtime` the forms send back.
+ * #267: API v1's `host`, the Host tab at `now`: HOSTS (`hosts`), FLEET DISK (`disk`, `orphans`, `leftovers`, `spawns`), SERVICES (`services`, `theme`: `detail` its error, `accounts`, `deepseek`), FLEETS and ALERTS (`push`, and on a live board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` the forms send back.
  */
 export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, vendors: Vendors, };
 
 /**
- * #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on]
- * its head offers (with the `lanes` running on it), and the logins its [sign in ▾] lists.
+ * #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on] its head offers (with the `lanes` running on it), and the logins its [sign in ▾] lists.
  */
 export type HostCard = { name: string, main: boolean, dot: string, tone: string, words: string, n: string, rows: Array<Cell>, to?: string | null, lanes: number, setups: Array<string>, };
 
 /**
- * #234: a host card's row, status `t`: a gauge's `bar` then its value `b` (bold, in `bt`), `text`, the limit `of` and
- * muted `notes`. `key`: a metric with history: its 24 h sparkline `s` (memory: pressure's `p`), its limit `l` and, in an
- * export, its chart `x` inline.
+ * #234: a host card's row, status `t`: a gauge's `bar` then its value `b` (bold, in `bt`), `text`, the limit `of` and muted `notes`. `key`: a metric with history: its 24 h sparkline `s` (memory: pressure's `p`), its limit `l` and, in an export, its chart `x` inline.
  */
 export type Cell = { k: string, t: string, key: string, bar?: Bar | null, b?: string | null, bt: string, text: string, of: string, notes: Array<string>, s: string, p: string, l?: number | null, x: string, };
 
@@ -379,27 +338,22 @@ export type Vendors = { accounts: Array<Vendor>, setups: Array<Vendor>, };
 export type Vendor = { name: string, vendor: string, };
 
 /**
- * #268: API v1's `queue`, the Queue tab at `now`: a card per fleet, the ones needing you first (`error`: fleet.toml
- * unread). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` they send back.
+ * #268: API v1's `queue`, the Queue tab at `now`: a card per fleet, the ones needing you first (`error`: fleet.toml unread). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` they send back.
  */
 export type QueueTab = { now: number, rw: boolean, live: boolean, mtime: string, error?: string | null, fleets: Array<QueueCard>, };
 
 /**
- * #162: a fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's
- * line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done` today (the newest 5 of
- * `done_n`), the backlog and the [config] sheet.
+ * #162: a fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done` today (the newest 5 of `done_n`), the backlog and the [config] sheet.
  */
 export type QueueCard = { name: string, k: string, serial: Array<string>, paths: Array<string>, need: number, paused?: string | null, drive: Drive, notes: Array<string>, rows: Array<QueueRow>, done: Array<DoneRow>, done_n: number, backlog?: Backlog | null, config: ConfigSheet, marks: { [key in string]: Marks }, };
 
 /**
- * #576: a queued row's marks by its issue (`QueueCard.marks`): `design`, `verify` (`on`, `off`, none: by `ui_paths`),
- * `repro`, its serial groups and `needs` tags, and the stage `note` its row shows (`verify(n)`, `verify skipped: …`).
+ * #576: a queued row's marks by its issue (`QueueCard.marks`): `design`, `verify` (`on`, `off`, none: by `ui_paths`), `repro`, its serial groups and `needs` tags, and the stage `note` its row shows (`verify(n)`, `verify skipped: …`).
  */
 export type Marks = { design: boolean, verify?: string | null, repro: boolean, serial: Array<string>, needs: Array<string>, note?: string | null, };
 
 /**
- * #166: a fleet's drive line in `tone`: its words, a tap's `meta` lines then the last pass's actions (`pass`: one
- * ran, so none is `nothing was due`).
+ * #166: a fleet's drive line in `tone`: its words, a tap's `meta` lines then the last pass's actions (`pass`: one ran, so none is `nothing was due`).
  */
 export type Drive = { tone: string, line: string, meta: Array<string>, pass: boolean, acts: Array<DriveAct>, };
 
@@ -409,29 +363,22 @@ export type Drive = { tone: string, line: string, meta: Array<string>, pass: boo
 export type DriveAct = { who: string, words: string, code: string, };
 
 /**
- * A Queue row: `#issue` in its shown `state` (`tone`) for `age`, counting from `t`; its row sprite's `act`, #423 `grow`
- * (the growth stage) and `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the
- * pipeline `stage`, the current `lane` (`live`: herdr lists it), the PR line, `dead`, red `notes` (a land note, an
- * answer not delivered), the decision taken by default
- * (and its ask to change it), #517 its `open` ask (answerable here), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
+ * A Queue row: `#issue` in its shown `state` (`tone`) for `age`, counting from `t`; its row sprite's `act`, #423 `grow` (the growth stage) and `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the pipeline `stage`, the current `lane` (`live`: herdr lists it), the PR line, `dead`, red `notes` (a land note, an answer not delivered), the decision taken by default (and its ask to change it), #517 its `open` ask (answerable here), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
  */
 export type QueueRow = { issue: number, state: string, tone: string, age: string, t: number, act: string, grow: string, coat: string, queued: boolean, check: boolean, groups: Array<string>, blocked_by?: number | null, title?: string | null, stage: Array<Stage>, lane: string, live: boolean, pr: PrLine, dead: boolean, notes: Array<string>, decided?: string | null, ask?: Ask | null, open?: NeedAsk | null, mv: boolean, up?: number | null, down?: number | null, lanes: Array<QueueLane>, runtime: string, host: string, where: string, };
 
 /**
- * #173: a pipeline chip: its kind's glyph `g` and class `k`, `at` before (`-1`), on (`0`) or after (`1`) where the
- * issue is, a check's PASS at the PR head `ok`.
+ * #173: a pipeline chip: its kind's glyph `g` and class `k`, `at` before (`-1`), on (`0`) or after (`1`) where the issue is, a check's PASS at the PR head `ok`.
  */
 export type Stage = { name: string, k: string, g: string, at: number, ok: boolean, };
 
 /**
- * #169: `[issue] [PR #M] [checks]` and CI (`green`, `failed`, else pending; none: no PR read yet), then the last
- * verdict in `vtone` and its round, `form` the form-only rounds used.
+ * #169: `[issue] [PR #M] [checks]` and CI (`green`, `failed`, else pending; none: no PR read yet), then the last verdict in `vtone` and its round, `form` the form-only rounds used.
  */
 export type PrLine = { pr?: number | null, run?: string | null, ci?: string | null, verdict?: string | null, vtone: string, rounds: number, form?: string | null, };
 
 /**
- * #205: a lane the issue had, newest first: herdr's `state` (`gone`) in `tone`, its spawn's age; `link`: `live`
- * opens its Lanes sheet, `gone` its stored transcript, empty none.
+ * #205: a lane the issue had, newest first: herdr's `state` (`gone`) in `tone`, its spawn's age; `link`: `live` opens its Lanes sheet, `gone` its stored transcript, empty none.
  */
 export type QueueLane = { name: string, state: string, tone: string, ago: string, link: string, };
 
@@ -446,16 +393,14 @@ export type DoneRow = { issue: number, note: string, age: string, pr?: string | 
 export type Backlog = { issues: { [key in string]: BacklogIssue }, ago: string, };
 
 /**
- * #162: a fleet's [config] sheet: the config file (`path`, `file`), GENERAL, the Pipeline group's data (`pipe`),
- * LIMITS, ROLES (with `rw`, pickers from `models`, `harnesses` and their efforts), the Conductor, ALERTS.
+ * #162: a fleet's [config] sheet: the config file (`path`, `file`), GENERAL, the Pipeline group's data (`pipe`), LIMITS, ROLES (with `rw`, pickers from `models`, `harnesses` and their efforts), the Conductor, ALERTS.
  */
 export type ConfigSheet = { path: string, file: string, repo: string, local: string, integration: string, effort?: string | null, color_set: boolean, env: Array<string>, node_modules: boolean, builtin: boolean, review_rounds: number, update_rounds: number, stall_minutes: number, ask_minutes: number, max_impl?: number | null, max_rev?: number | null, line_cap?: number | null, serial: Array<string>, deny: Array<string>, required: Array<string>, merge_label?: string | null, notify: Array<string>, global: Array<string>, pipe: JsonValue, models: Array<string>, harnesses: Array<Harness>, roles: Array<RoleRow>, conductor?: Conductor | null, };
 
 export type Harness = { name: string, efforts: Array<string>, };
 
 /**
- * A role as set: harness (taking `efforts`), model and effort (unset: what the lane gets, `model_default`,
- * `effort_default`).
+ * A role as set: harness (taking `efforts`), model and effort (unset: what the lane gets, `model_default`, `effort_default`).
  */
 export type RoleRow = { name: string, profile: string, harness: string, model?: string | null, effort?: string | null, efforts: Array<string>, model_default: string, effort_default: string, accounts: Array<string>, mcp: Array<string>, };
 
@@ -470,9 +415,7 @@ export type Conductor = { default: boolean, profile: string, harness: string, mo
 export type Events = { seq: number, refresh: boolean, list: Array<Ev>, };
 
 /**
- * One logged event; `k` is the theme moment it plays (merged, fail, needs-you). #266: as the Events tab says it
- * (`serve::words`): `glyph`, `tone`, `text`, shown under [important] (`imp`), its row sprite's `act` and `coat` (its
- * agent's), `plain` (a fold's line), and its issue's `pr` (else the branch's checks `run`).
+ * One logged event; `k` is the theme moment it plays (merged, fail, needs-you). #266: as the Events tab says it (`serve::words`): `glyph`, `tone`, `text`, shown under [important] (`imp`), its row sprite's `act` and `coat` (its agent's), `plain` (a fold's line), and its issue's `pr` (else the branch's checks `run`).
  */
 export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null, type: string, data: { [key in string]: JsonValue }, k?: string | null, glyph: string, tone: string, text: string, imp: boolean, act: string, coat: string, plain: string, pr?: number | null, run?: string | null, };
 
@@ -487,9 +430,7 @@ export type IssueView = { fleet: string, issue: number, verdicts: Array<Verdict>
 export type WhyNote = { sha: string, round: number, owner: string, };
 
 /**
- * A verdict: its `role` (the stage: `rev`, `verify`, or the gate's), round, sha, `verdict` (PASS or FAIL), `findings`
- * (verdict.md after its first line); the newest one's screenshot `shots` by name (`/shot/<fleet>/<n>/<i>` serves the
- * `i`th); a `--repro` PASS's `Repro:` block.
+ * A verdict: its `role` (the stage: `rev`, `verify`, or the gate's), round, sha, `verdict` (PASS or FAIL), `findings` (verdict.md after its first line); the newest one's screenshot `shots` by name (`/shot/<fleet>/<n>/<i>` serves the `i`th); a `--repro` PASS's `Repro:` block.
  */
 export type Verdict = { role: string, round: number, sha: string, verdict: string, ts: number, findings: string, shots: Array<string>, repro?: Repro | null, };
 
@@ -499,8 +440,7 @@ export type Verdict = { role: string, round: number, sha: string, verdict: strin
 export type Repro = { kind: string, text: string, };
 
 /**
- * #576: API v1's `lessons`: per fleet, its `lessons` setting (`weekly`, `off`), the `last` lesson run and when `tick`
- * runs the `next` (none: `off`).
+ * #576: API v1's `lessons`: per fleet, its `lessons` setting (`weekly`, `off`), the `last` lesson run and when `tick` runs the `next` (none: `off`).
  */
 export type Lessons = { fleets: Array<LessonFleet>, };
 
@@ -517,14 +457,12 @@ export type LessonRun = { issue: number, ts: number, state: string, };
 export type Digest = { fleet: string, days: number, text: string, };
 
 /**
- * #555: API v1's `setup/<pane>` (the old board's `/lane?setup=`): the setup pane's masked `lines` and every
- * `https://` URL in it (a wrapped one joined), or `closed`.
+ * #555: API v1's `setup/<pane>` (the old board's `/lane?setup=`): the setup pane's masked `lines` and every `https://` URL in it (a wrapped one joined), or `closed`.
  */
 export type SetupScreen = { lines: Array<string>, urls: Array<string>, closed: boolean, };
 
 /**
- * #555: API v1's `roles?fleet=`: the fleet's [config] sheet (its roles, pickers and conductor) and `[chat]`'s
- * new-thread defaults (`POST chat` writes them).
+ * #555: API v1's `roles?fleet=`: the fleet's [config] sheet (its roles, pickers and conductor) and `[chat]`'s new-thread defaults (`POST chat` writes them).
  */
 export type Roles = { fleet: string, config: ConfigSheet, chat: ChatDefaults, };
 
@@ -639,8 +577,7 @@ lane: string,
 who: string, what: string, since: number, next_cmd?: string | null, };
 
 /**
- * What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability,
- * load/cpu, free memory and disk in GB.
+ * What the last look at a host saw (`<state dir>/hosts.json`): detected tags and `$HOME` (probed hourly), reachability, load/cpu, free memory and disk in GB.
  */
 export type HostSeen = { tags: Array<string>, home: string, probed: number, seen: number, up: boolean, load?: number | null, mem?: number | null, disk?: number | null, 
 /**

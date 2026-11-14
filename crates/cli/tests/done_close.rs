@@ -1,4 +1,3 @@
-//! #248: `drover check` closes a done lane's session once its handoff is logged; dirty or unpushed lanes stay.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -91,7 +90,6 @@ fn a_dirty_or_unpushed_lane_stays_open_with_an_event() {
         assert_eq!(kept.len(), 1, "once per handoff: {why}");
         assert_eq!(kept[0].data["why"], why);
         assert!(kinds(&c, "lane-closed").is_empty());
-        // The card says why it stays open.
         let f = fake(&sh, &wt, status, ahead);
         let r = sh.on(&f);
         let s = drover::serve::Server::new(&c, &r, None);
@@ -108,7 +106,6 @@ fn a_dirty_or_unpushed_lane_stays_open_with_an_event() {
 #[test]
 fn a_lane_without_a_logged_handoff_stays_open() {
     let (c, wt, sh) = lane("close-nohandoff", 400);
-    // A newer spawn of the lane: the push was the previous round's.
     let sp = json!({"role": "impl", "agent": LANE, "pane": LANE, "worktree": wt});
     append(&c.state, &Event::new(T - 300 + 1, "sendmeter", Some(12), "spawn", sp)).unwrap();
     let r = fake(&sh, &wt, "", "0\n");
@@ -119,7 +116,6 @@ fn a_lane_without_a_logged_handoff_stays_open() {
 
 #[test]
 fn a_spawn_whose_prompt_never_landed_is_not_closed_as_done() {
-    // #444 (#363): the spawn exited 4, logged in the same second as the handoff it then seemed to follow.
     let c = ctx(&tmpdir("close-unconfirmed"), CONFIG);
     let sh = FakeShed::new();
     sh.attach(&c);

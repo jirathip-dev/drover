@@ -1,10 +1,8 @@
-//! #775 AC1, alone in its binary so no other call reaps (polls) the abandoned child during the check.
 use drover::runner::{settle, Ended, Proc};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// A child that never ends and ignores SIGKILL (one stuck in disk I/O); counts its kills and polls.
 struct Unkillable(Arc<AtomicUsize>, Arc<AtomicUsize>);
 
 impl Proc for Unkillable {
@@ -18,8 +16,6 @@ impl Proc for Unkillable {
     }
 }
 
-/// #775 AC1: a child that ignores SIGKILL is killed at the limit and abandoned: the caller gets its timeout within the
-/// limit plus 1 s, and afterwards nothing polls or waits on it.
 #[test]
 fn a_child_that_ignores_sigkill_times_out_at_the_limit_and_is_left_alone() {
     let (kills, polls) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicUsize::new(0)));

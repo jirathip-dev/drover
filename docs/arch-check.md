@@ -71,9 +71,10 @@ later line at its indent starting with `}`, so the source must be formatted.
 
 ```toml
 # A comment line added since --base fails (Rust and TypeScript `//`, `/* */`), but `// SAFETY:` right above an
-# `unsafe` line and one `///` or one-line `/** */` on a `pub`/`export` item. Old lines are never judged.
+# `unsafe` line, `// TODO(#N)` and one `///` or one-line `/** */` on a `pub`/`export` item. Old lines are never judged.
+# #807: "strict" judges every line of every file the same way, with or without --base.
 [comments]
-policy = "off" # "on": no check
+policy = "off" # "on": no check; "strict": every line
 except = ["assets/types/**"] # generated files
 
 # Every repo path, `path:line`, link and (with cli = true) `drover …` command and flag in these docs must exist.

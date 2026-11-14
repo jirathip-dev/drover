@@ -1,5 +1,3 @@
-//! #779: a lane that dies at start is started at most `[limits] respawn_max` (3) times in `respawn_window_minutes`
-//! (60); the next spawn is refused `RESPAWN_LOOP` with one owner ask ([try again] / [park]) and takes no wip snapshot.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -26,7 +24,6 @@ fn at(c: &drover::Ctx, mins: u64) -> drover::Ctx {
     }
 }
 
-/// `spawn sendmeter 12 impl --supersede` at `mins` past the first start: (exit, output).
 fn respawn(c: &drover::Ctx, r: &Fake, mins: u64) -> (i32, String) {
     run(&at(c, mins), r, &["spawn", "sendmeter", "12", "impl", "--supersede"])
 }
@@ -44,7 +41,6 @@ fn asks(c: &drover::Ctx) -> Vec<Event> {
     ev.into_iter().filter(|e| e.kind == "needs-decision").collect()
 }
 
-/// Three failed starts in the hour: the fourth is refused with one owner ask, and no fourth wip branch is made.
 #[test]
 fn fourth_start_after_three_failed_is_refused_with_one_owner_ask() {
     let c = ctx(&tmpdir("respawn-loop"), CONFIG);
@@ -69,14 +65,12 @@ fn fourth_start_after_three_failed_is_refused_with_one_owner_ask() {
     assert_eq!(a[0].data["options"], json!(["try again", "park"]));
     assert_eq!(a[0].str("kind"), Some("owner"));
     assert_eq!(a[0].issue, Some(12));
-    // Drive's next pass is refused again: still the one ask, still no snapshot.
     assert_eq!(respawn(&c, &r, 20).0, 3);
     assert_eq!((asks(&c).len(), wips(&r)), (1, 2));
     let spawns = read(&c.state).unwrap().iter().filter(|e| e.kind == "spawn").count();
     assert_eq!(spawns, 3);
 }
 
-/// [try again] lets the next start through; a start that pushed resets the count.
 #[test]
 fn try_again_lets_a_start_through_and_a_push_resets_the_count() {
     let c = ctx(&tmpdir("respawn-again"), CONFIG);

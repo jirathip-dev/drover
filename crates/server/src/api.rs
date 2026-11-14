@@ -1,10 +1,7 @@
-//! #375: the JSON shapes the page reads and posts: the one definition of each, `assets/types/api.d.ts` is made from these
-//! (`just types`), API v1's (#265) too, with the core rows the board shows (`Event`, `IssueState`, `Waiting`, `hosts::Seen`, `hosts::Row`).
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-/// Every shape: serde's JSON both ways (a missing field is its default), and `ts-rs`'s type for it under `--features ts`.
 macro_rules! shapes {
     ($($s:item)*) => {$(
         #[derive(Serialize, Deserialize, Default)]
@@ -43,8 +40,6 @@ pub struct HerdLane {
     pub effort: Option<String>,
     pub account: Option<String>,
     pub host: Option<String>,
-    // #609: the runtime the lane was spawned in (`herdr`, `shed`, `shed-acp`), its host, and `where`, the one label
-    // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
     pub runtime: String,
     #[serde(rename = "where")]
     pub place: String,
@@ -92,9 +87,7 @@ pub struct Notice {
     pub text: String,
 }
 
-/// #749: API v1's `lane/<agent>`: the sheet's chat plus `blocks`, its transcript as blocks: an ACP lane's from shed's
-/// events (no `lines`; `before` is the oldest event's `seq`, the next page's `before`), else one `screen` block (the
-/// screen is `lines`).
+/// #749: API v1's `lane/<agent>`: the sheet's chat plus `blocks`, its transcript as blocks: an ACP lane's from shed's events (no `lines`; `before` is the oldest event's `seq`, the next page's `before`), else one `screen` block (the screen is `lines`).
 pub struct LaneChat {
     #[serde(flatten)]
     pub chat: Chat,
@@ -117,11 +110,8 @@ pub struct Moment {
     pub n: Option<u64>,
 }
 
-/// #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none;
-/// #450: the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card, the
-/// `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no
-/// export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
-#[allow(clippy::struct_excessive_bools)] // flags the cards' markup reads, one each
+/// #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none; #450: the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card, the `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
+#[allow(clippy::struct_excessive_bools)]
 pub struct NeedsTab {
     pub now: u64,
     pub rw: bool,
@@ -138,8 +128,7 @@ pub struct NeedsTab {
     pub config: Option<String>,
 }
 
-/// An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
-/// design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th); #517: the `thread` it was asked in, its `title`.
+/// An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a design's PNGs by name (`/design/<fleet>/<n>/<i>` serves the `i`th); #517: the `thread` it was asked in, its `title`.
 pub struct NeedAsk {
     pub ask: Ask,
     pub who: String,
@@ -150,8 +139,7 @@ pub struct NeedAsk {
     pub title: Option<String>,
 }
 
-/// A blocked lane's card (`who`: fleet · #issue · lane; `push` 0 while a countdown runs): unpaired, its `activity`;
-/// else a harness `menu`, or the pane's last lines (`tail`).
+/// A blocked lane's card (`who`: fleet · #issue · lane; `push` 0 while a countdown runs): unpaired, its `activity`; else a harness `menu`, or the pane's last lines (`tail`).
 pub struct Blocked {
     pub name: String,
     pub who: String,
@@ -161,8 +149,7 @@ pub struct Blocked {
     pub tail: Option<String>,
 }
 
-/// A harness menu: its title, reason and command, the `countdown` (s) before it auto-denies, the masked question and
-/// options, `h` the hash of the menu the card shows (`POST /answer`).
+/// A harness menu: its title, reason and command, the `countdown` (s) before it auto-denies, the masked question and options, `h` the hash of the menu the card shows (`POST /answer`).
 pub struct Menu {
     pub title: String,
     pub reason: String,
@@ -173,9 +160,7 @@ pub struct Menu {
     pub h: String,
 }
 
-/// #130: a `needs-human` issue's card (`pending`: one more round recorded, no lane yet): `who`, title, `why`, the last
-/// verdict (`pass`: its sha, `stale` not the head; else `fail`'s finding), the PR line (`repo`: none, the fleet is
-/// not configured), `mergeable` and `merge` (merge anyway is offered); #417: the verdict's screenshot `shots`.
+/// #130: a `needs-human` issue's card (`pending`: one more round recorded, no lane yet): `who`, title, `why`, the last verdict (`pass`: its sha, `stale` not the head; else `fail`'s finding), the PR line (`repo`: none, the fleet is not configured), `mergeable` and `merge` (merge anyway is offered); #417: the verdict's screenshot `shots`.
 pub struct NeedIssue {
     pub fleet: String,
     pub issue: u64,
@@ -193,9 +178,8 @@ pub struct NeedIssue {
     pub shots: Vec<String>,
 }
 
-/// #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no
-/// fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
-#[allow(clippy::struct_excessive_bools)] // flags the rows' markup reads, one each
+/// #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
+#[allow(clippy::struct_excessive_bools)]
 pub struct LanesTab {
     pub now: u64,
     pub rw: bool,
@@ -231,10 +215,7 @@ pub struct LaneRepo {
     pub lanes: Vec<LaneRow>,
 }
 
-/// A Lanes row: its avatar (`avatar`, herdr's `state` with `act`, #423 `grow`, `atone` and `coat`), name, `state` in
-/// `tone` for `ago`, the `why` line (`why_tone`), the activity (`activity`, or the `now` parts), `gone` (no pane), the
-/// conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its
-/// fleet is not configured), `dead` and the blocked card.
+/// A Lanes row: its avatar (`avatar`, herdr's `state` with `act`, #423 `grow`, `atone` and `coat`), name, `state` in `tone` for `ago`, the `why` line (`why_tone`), the activity (`activity`, or the `now` parts), `gone` (no pane), the conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its fleet is not configured), `dead` and the blocked card.
 pub struct LaneRow {
     pub name: String,
     pub role: String,
@@ -261,8 +242,6 @@ pub struct LaneRow {
     pub blocked: Option<Blocked>,
     /// #712: its issue is parked: the fleet its [unpark] posts to.
     pub unpark: Option<String>,
-    // #609: the runtime the lane was spawned in (`herdr`, `shed`, `shed-acp`), its host, and `where`, the one label
-    // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
     pub runtime: String,
     pub host: String,
     #[serde(rename = "where")]
@@ -277,8 +256,7 @@ pub struct LaneNow {
     pub t: Option<String>,
 }
 
-/// #269: API v1's `chat`, the [chat] tab (#386): a card per repo (`all` first) with its threads, then every thread's
-/// view (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
+/// #269: API v1's `chat`, the [chat] tab (#386): a card per repo (`all` first) with its threads, then every thread's view (`error`: fleet.toml unread). `rw`: a paired device on the live board writes.
 pub struct ChatTab {
     pub now: u64,
     pub rw: bool,
@@ -287,8 +265,7 @@ pub struct ChatTab {
     pub threads: Vec<ThreadView>,
 }
 
-/// A repo's card in colour `k`: its threads newest first, the archived ones apart; #404: its empty thread's
-/// `harness` chip.
+/// A repo's card in colour `k`: its threads newest first, the archived ones apart; #404: its empty thread's `harness` chip.
 pub struct ChatRepo {
     pub repo: String,
     pub k: String,
@@ -304,8 +281,7 @@ pub struct Chip {
     pub all: Vec<String>,
 }
 
-/// A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line;
-/// #460: the ids of the config proposals `waiting` for the owner.
+/// A thread's row: unread, title, age, its `state` (choose, working, asleep, …), the threads it links to, the last line; #460: the ids of the config proposals `waiting` for the owner.
 pub struct ThreadRow {
     pub id: String,
     pub title: String,
@@ -323,9 +299,7 @@ pub struct Link {
     pub t: String,
 }
 
-/// One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407:
-/// working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`; #404:
-/// its model and effort `chips`.
+/// One thread: its bar (`ds`: fleet · harness · model · state), its last messages, the live line's `state`; #407: working, the turn's start `since`, and the `queued` messages above the box; #460: the config proposals `waiting`; #404: its model and effort `chips`.
 pub struct ThreadView {
     pub id: String,
     pub title: String,
@@ -344,8 +318,7 @@ pub struct QueuedMsg {
     pub text: String,
 }
 
-/// #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time
-/// and conductor folder `dir`; #618: the thread's `id`, and whether it is `archived` (opened read-only, [restore]).
+/// #408: a page of a thread's messages; `older`: the seq to load the messages before, else the `started` line's time and conductor folder `dir`; #618: the thread's `id`, and whether it is `archived` (opened read-only, [restore]).
 pub struct ThreadPage {
     pub id: String,
     pub archived: bool,
@@ -355,11 +328,7 @@ pub struct ThreadPage {
     pub dir: String,
 }
 
-/// A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`,
-/// `signin` on `host`; #541: a conductor's answer, its `ask` and `open` while the owner may [change] it), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question;
-/// `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `open` unless stale), `secret` (why, `from` its name),
-/// `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it
-/// links to; #669 `run` (a run card, `from` its id).
+/// A thread's message (its event's `seq` and `ts`) by `kind`, `text` its words: `note` (a system line: `retry`, `signin` on `host`; #541: a conductor's answer, its `ask` and `open` while the owner may [change] it), `handoff` (the title), `msg` (`from` who wrote it, its `files`), `cmd`, `ask` (the question; `answer` once decided, else `open`), `config` (the diff, `from` the proposal's id; #460: `open` unless stale), `secret` (why, `from` its name), `resumed` (the session), `sleep`, #407 `fold` (a finished turn's run of commands, `cmds`); `link` the thread it links to; #669 `run` (a run card, `from` its id).
 pub struct Msg {
     pub seq: u64,
     pub ts: u64,
@@ -380,8 +349,7 @@ pub struct Msg {
     pub run: Option<RunCard>,
 }
 
-/// #669: a run card as its thread shows it: what it runs, why, what it touches, where, its sha; open until `exp`, then
-/// `state` (`open`, `running`, `approved`, `denied`, `expired`) with `by`, the exit `code` and the output `tail`.
+/// #669: a run card as its thread shows it: what it runs, why, what it touches, where, its sha; open until `exp`, then `state` (`open`, `running`, `approved`, `denied`, `expired`) with `by`, the exit `code` and the output `tail`.
 pub struct RunCard {
     pub id: String,
     pub cmd: String,
@@ -398,10 +366,7 @@ pub struct RunCard {
 }
 
 
-/// #681: a handoff as one agent→agent item (cooee): `id` its seq (a repo handoff's: its card's), `from` the sending
-/// conductor, `to` the thread id once delivered, else `{repo, pending: true}`; `summary` the text's first line;
-/// `state` pending, delivered, failed (`error`) or forwarded; `folded` in the sender's thread, the message form in the
-/// receiver's; while pending, the card's `choices`.
+/// #681: a handoff as one agent→agent item (cooee): `id` its seq (a repo handoff's: its card's), `from` the sending conductor, `to` the thread id once delivered, else `{repo, pending: true}`; `summary` the text's first line; `state` pending, delivered, failed (`error`) or forwarded; `folded` in the sender's thread, the message form in the receiver's; while pending, the card's `choices`.
 pub struct Handoff {
     pub kind: String,
     pub id: u64,
@@ -422,8 +387,7 @@ pub struct HandoffFrom {
     pub repo: String,
 }
 
-/// #681: a pending handoff's row as the board's card shows it: option `n`, its `text`, the `thread` it delivers to
-/// (`new`: a new thread); picked by the paired `POST /api/v1/<op>` with `fleet`, `id`, `choice` = `n` and `mtime`.
+/// #681: a pending handoff's row as the board's card shows it: option `n`, its `text`, the `thread` it delivers to (`new`: a new thread); picked by the paired `POST /api/v1/<op>` with `fleet`, `id`, `choice` = `n` and `mtime`.
 pub struct HandoffChoice {
     pub n: u64,
     pub text: String,
@@ -439,9 +403,8 @@ pub struct RepoThreads {
     pub threads: Vec<RepoThread>,
 }
 
-/// #681: a conductor thread: its `last` line and time, `awake` (its conductor not asleep), `newest` on the ongoing
-/// one (the first not archived).
-#[allow(clippy::struct_excessive_bools)] // the four flags #681's cooee contract names
+/// #681: a conductor thread: its `last` line and time, `awake` (its conductor not asleep), `newest` on the ongoing one (the first not archived).
+#[allow(clippy::struct_excessive_bools)]
 pub struct RepoThread {
     pub id: String,
     pub title: String,
@@ -509,9 +472,7 @@ pub struct Setup {
     pub name: String,
 }
 
-/// #265: API v1's `state`, the board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the
-/// `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s),
-/// the Events tab's time groups.
+/// #265: API v1's `state`, the board in one read: the newest event's `seq`, the step's snapshot age (none saved: null) and the `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s), the Events tab's time groups.
 pub struct State {
     pub seq: u64,
     pub now: u64,
@@ -559,8 +520,7 @@ pub struct Queued {
     pub status: Option<String>,
 }
 
-/// #778: a card tap's lane start not begun yet: its `action` (extend, answer, approve, revise), since when, the last
-/// refusal `reason` (a code; a hard one with its words).
+/// #778: a card tap's lane start not begun yet: its `action` (extend, answer, approve, revise), since when, the last refusal `reason` (a code; a hard one with its words).
 pub struct PendingStart {
     pub action: String,
     pub since: u64,
@@ -583,8 +543,6 @@ pub struct Lane {
     pub shown: String,
     pub tone: String,
     pub since: u64,
-    // #609: the runtime the lane was spawned in (`herdr`, `shed`, `shed-acp`), its host, and `where`, the one label
-    // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
     pub runtime: String,
     pub host: String,
     #[serde(rename = "where")]
@@ -609,10 +567,7 @@ pub struct Row {
     pub fix: String,
 }
 
-/// #267: API v1's `host`, the Host tab at `now`: HOSTS (`hosts`), FLEET DISK (`disk`, `orphans`, `leftovers`, `spawns`),
-/// SERVICES (`services`, `theme`: `detail` its error, `accounts`, `deepseek`), FLEETS and ALERTS (`push`, and on a live
-/// board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's
-/// forms are inert); `mtime` the forms send back.
+/// #267: API v1's `host`, the Host tab at `now`: HOSTS (`hosts`), FLEET DISK (`disk`, `orphans`, `leftovers`, `spawns`), SERVICES (`services`, `theme`: `detail` its error, `accounts`, `deepseek`), FLEETS and ALERTS (`push`, and on a live board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` the forms send back.
 pub struct HostTab {
     pub now: u64,
     pub rw: bool,
@@ -654,8 +609,7 @@ pub struct Notifier {
     pub on: String,
 }
 
-/// #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on]
-/// its head offers (with the `lanes` running on it), and the logins its [sign in ▾] lists.
+/// #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on] its head offers (with the `lanes` running on it), and the logins its [sign in ▾] lists.
 pub struct HostCard {
     pub name: String,
     pub main: bool,
@@ -669,9 +623,7 @@ pub struct HostCard {
     pub setups: Vec<String>,
 }
 
-/// #234: a host card's row, status `t`: a gauge's `bar` then its value `b` (bold, in `bt`), `text`, the limit `of` and
-/// muted `notes`. `key`: a metric with history: its 24 h sparkline `s` (memory: pressure's `p`), its limit `l` and, in an
-/// export, its chart `x` inline.
+/// #234: a host card's row, status `t`: a gauge's `bar` then its value `b` (bold, in `bt`), `text`, the limit `of` and muted `notes`. `key`: a metric with history: its 24 h sparkline `s` (memory: pressure's `p`), its limit `l` and, in an export, its chart `x` inline.
 pub struct Cell {
     pub k: String,
     pub t: String,
@@ -758,8 +710,7 @@ pub struct Paired {
     pub used: u64,
 }
 
-/// #268: API v1's `queue`, the Queue tab at `now`: a card per fleet, the ones needing you first (`error`: fleet.toml
-/// unread). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` they send back.
+/// #268: API v1's `queue`, the Queue tab at `now`: a card per fleet, the ones needing you first (`error`: fleet.toml unread). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` they send back.
 pub struct QueueTab {
     pub now: u64,
     pub rw: bool,
@@ -769,9 +720,7 @@ pub struct QueueTab {
     pub fleets: Vec<QueueCard>,
 }
 
-/// #162: a fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's
-/// line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done` today (the newest 5 of
-/// `done_n`), the backlog and the [config] sheet.
+/// #162: a fleet's card in its colour `k`: its serial groups' names and paths, `need` rows needing you, a paused one's line (`paused`: since and lanes), else its drive line and red `notes`; its rows, `done` today (the newest 5 of `done_n`), the backlog and the [config] sheet.
 pub struct QueueCard {
     pub name: String,
     pub k: String,
@@ -789,8 +738,7 @@ pub struct QueueCard {
     pub marks: BTreeMap<String, Marks>,
 }
 
-/// #576: a queued row's marks by its issue (`QueueCard.marks`): `design`, `verify` (`on`, `off`, none: by `ui_paths`),
-/// `repro`, its serial groups and `needs` tags, and the stage `note` its row shows (`verify(n)`, `verify skipped: …`).
+/// #576: a queued row's marks by its issue (`QueueCard.marks`): `design`, `verify` (`on`, `off`, none: by `ui_paths`), `repro`, its serial groups and `needs` tags, and the stage `note` its row shows (`verify(n)`, `verify skipped: …`).
 pub struct Marks {
     pub design: bool,
     pub verify: Option<String>,
@@ -800,8 +748,7 @@ pub struct Marks {
     pub note: Option<String>,
 }
 
-/// #166: a fleet's drive line in `tone`: its words, a tap's `meta` lines then the last pass's actions (`pass`: one
-/// ran, so none is `nothing was due`).
+/// #166: a fleet's drive line in `tone`: its words, a tap's `meta` lines then the last pass's actions (`pass`: one ran, so none is `nothing was due`).
 pub struct Drive {
     pub tone: String,
     pub line: String,
@@ -817,12 +764,8 @@ pub struct DriveAct {
     pub code: String,
 }
 
-/// A Queue row: `#issue` in its shown `state` (`tone`) for `age`, counting from `t`; its row sprite's `act`, #423 `grow`
-/// (the growth stage) and `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the
-/// pipeline `stage`, the current `lane` (`live`: herdr lists it), the PR line, `dead`, red `notes` (a land note, an
-/// answer not delivered), the decision taken by default
-/// (and its ask to change it), #517 its `open` ask (answerable here), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
-#[allow(clippy::struct_excessive_bools)] // flags the row's markup reads, one each
+/// A Queue row: `#issue` in its shown `state` (`tone`) for `age`, counting from `t`; its row sprite's `act`, #423 `grow` (the growth stage) and `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the pipeline `stage`, the current `lane` (`live`: herdr lists it), the PR line, `dead`, red `notes` (a land note, an answer not delivered), the decision taken by default (and its ask to change it), #517 its `open` ask (answerable here), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
+#[allow(clippy::struct_excessive_bools)]
 pub struct QueueRow {
     pub issue: u64,
     pub state: String,
@@ -850,15 +793,13 @@ pub struct QueueRow {
     pub up: Option<u64>,
     pub down: Option<u64>,
     pub lanes: Vec<QueueLane>,
-    // #609: its active lane's (`Lane`'s), empty with none.
     pub runtime: String,
     pub host: String,
     #[serde(rename = "where")]
     pub place: String,
 }
 
-/// #173: a pipeline chip: its kind's glyph `g` and class `k`, `at` before (`-1`), on (`0`) or after (`1`) where the
-/// issue is, a check's PASS at the PR head `ok`.
+/// #173: a pipeline chip: its kind's glyph `g` and class `k`, `at` before (`-1`), on (`0`) or after (`1`) where the issue is, a check's PASS at the PR head `ok`.
 pub struct Stage {
     pub name: String,
     pub k: String,
@@ -867,8 +808,7 @@ pub struct Stage {
     pub ok: bool,
 }
 
-/// #169: `[issue] [PR #M] [checks]` and CI (`green`, `failed`, else pending; none: no PR read yet), then the last
-/// verdict in `vtone` and its round, `form` the form-only rounds used.
+/// #169: `[issue] [PR #M] [checks]` and CI (`green`, `failed`, else pending; none: no PR read yet), then the last verdict in `vtone` and its round, `form` the form-only rounds used.
 pub struct PrLine {
     pub pr: Option<u64>,
     pub run: Option<String>,
@@ -879,8 +819,7 @@ pub struct PrLine {
     pub form: Option<String>,
 }
 
-/// #205: a lane the issue had, newest first: herdr's `state` (`gone`) in `tone`, its spawn's age; `link`: `live`
-/// opens its Lanes sheet, `gone` its stored transcript, empty none.
+/// #205: a lane the issue had, newest first: herdr's `state` (`gone`) in `tone`, its spawn's age; `link`: `live` opens its Lanes sheet, `gone` its stored transcript, empty none.
 pub struct QueueLane {
     pub name: String,
     pub state: String,
@@ -903,8 +842,7 @@ pub struct Backlog {
     pub ago: String,
 }
 
-/// #162: a fleet's [config] sheet: the config file (`path`, `file`), GENERAL, the Pipeline group's data (`pipe`),
-/// LIMITS, ROLES (with `rw`, pickers from `models`, `harnesses` and their efforts), the Conductor, ALERTS.
+/// #162: a fleet's [config] sheet: the config file (`path`, `file`), GENERAL, the Pipeline group's data (`pipe`), LIMITS, ROLES (with `rw`, pickers from `models`, `harnesses` and their efforts), the Conductor, ALERTS.
 pub struct ConfigSheet {
     pub path: String,
     pub file: String,
@@ -941,8 +879,7 @@ pub struct Harness {
     pub efforts: Vec<String>,
 }
 
-/// A role as set: harness (taking `efforts`), model and effort (unset: what the lane gets, `model_default`,
-/// `effort_default`).
+/// A role as set: harness (taking `efforts`), model and effort (unset: what the lane gets, `model_default`, `effort_default`).
 pub struct RoleRow {
     pub name: String,
     pub profile: String,
@@ -974,9 +911,7 @@ pub struct Events {
     pub list: Vec<Ev>,
 }
 
-/// One logged event; `k` is the theme moment it plays (merged, fail, needs-you). #266: as the Events tab says it
-/// (`serve::words`): `glyph`, `tone`, `text`, shown under [important] (`imp`), its row sprite's `act` and `coat` (its
-/// agent's), `plain` (a fold's line), and its issue's `pr` (else the branch's checks `run`).
+/// One logged event; `k` is the theme moment it plays (merged, fail, needs-you). #266: as the Events tab says it (`serve::words`): `glyph`, `tone`, `text`, shown under [important] (`imp`), its row sprite's `act` and `coat` (its agent's), `plain` (a fold's line), and its issue's `pr` (else the branch's checks `run`).
 pub struct Ev {
     pub seq: u64,
     pub ts: u64,
@@ -1013,9 +948,7 @@ pub struct WhyNote {
     pub owner: String,
 }
 
-/// A verdict: its `role` (the stage: `rev`, `verify`, or the gate's), round, sha, `verdict` (PASS or FAIL), `findings`
-/// (verdict.md after its first line); the newest one's screenshot `shots` by name (`/shot/<fleet>/<n>/<i>` serves the
-/// `i`th); a `--repro` PASS's `Repro:` block.
+/// A verdict: its `role` (the stage: `rev`, `verify`, or the gate's), round, sha, `verdict` (PASS or FAIL), `findings` (verdict.md after its first line); the newest one's screenshot `shots` by name (`/shot/<fleet>/<n>/<i>` serves the `i`th); a `--repro` PASS's `Repro:` block.
 pub struct Verdict {
     pub role: String,
     pub round: u64,
@@ -1033,8 +966,7 @@ pub struct Repro {
     pub text: String,
 }
 
-/// #576: API v1's `lessons`: per fleet, its `lessons` setting (`weekly`, `off`), the `last` lesson run and when `tick`
-/// runs the `next` (none: `off`).
+/// #576: API v1's `lessons`: per fleet, its `lessons` setting (`weekly`, `off`), the `last` lesson run and when `tick` runs the `next` (none: `off`).
 pub struct Lessons {
     pub fleets: Vec<LessonFleet>,
 }
@@ -1060,16 +992,14 @@ pub struct Digest {
     pub text: String,
 }
 
-/// #555: API v1's `setup/<pane>` (the old board's `/lane?setup=`): the setup pane's masked `lines` and every
-/// `https://` URL in it (a wrapped one joined), or `closed`.
+/// #555: API v1's `setup/<pane>` (the old board's `/lane?setup=`): the setup pane's masked `lines` and every `https://` URL in it (a wrapped one joined), or `closed`.
 pub struct SetupScreen {
     pub lines: Vec<String>,
     pub urls: Vec<String>,
     pub closed: bool,
 }
 
-/// #555: API v1's `roles?fleet=`: the fleet's [config] sheet (its roles, pickers and conductor) and `[chat]`'s
-/// new-thread defaults (`POST chat` writes them).
+/// #555: API v1's `roles?fleet=`: the fleet's [config] sheet (its roles, pickers and conductor) and `[chat]`'s new-thread defaults (`POST chat` writes them).
 pub struct Roles {
     pub fleet: String,
     pub config: ConfigSheet,
@@ -1084,8 +1014,7 @@ pub struct ChatDefaults {
     pub harnesses: Vec<Harness>,
 }
 
-/// #709: `/api/v1/health`: `ok` unless fleet.toml fails to load (`config` `invalid`, its `error`); a dead process
-/// answers nothing.
+/// #709: `/api/v1/health`: `ok` unless fleet.toml fails to load (`config` `invalid`, its `error`); a dead process answers nothing.
 pub struct Health {
     pub ok: bool,
     pub config: String,
@@ -1139,9 +1068,7 @@ pub struct AttachEnv {
 
 }
 
-/// #749: one block of a lane's transcript, tagged `k`, built from ACP's own fields only (never an agent's wording): a
-/// prompt, a reply's markdown (its text chunks joined), a tool call (its updates folded into one; `title_line`, the
-/// title's first line, cut), the plan, an approval (`answered`: the option taken); a PTY lane's screen is one `screen`, its `lines`.
+/// #749: one block of a lane's transcript, tagged `k`, built from ACP's own fields only (never an agent's wording): a prompt, a reply's markdown (its text chunks joined), a tool call (its updates folded into one; `title_line`, the title's first line, cut), the plan, an approval (`answered`: the option taken); a PTY lane's screen is one `screen`, its `lines`.
 #[derive(Serialize, Deserialize)]
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[serde(tag = "k", rename_all = "lowercase")]
@@ -1167,7 +1094,6 @@ pub enum Block {
         options: Vec<ApprovalChoice>,
         answered: Option<String>,
     },
-    /// A PTY lane's screen: the response's `lines` (sent once, within the chat's 64 KB budget).
     Screen,
 }
 

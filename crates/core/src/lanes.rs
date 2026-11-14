@@ -1,4 +1,3 @@
-//! The page's Lanes tab (docs/serve.md): herdr agents joined with the log, grouped, plus masked pane text.
 use crate::config::Config;
 use crate::events::{Event, States};
 use crate::providers;
@@ -46,8 +45,7 @@ pub struct Lane {
     pub thread: Option<String>,
     /// #609: the runtime it was spawned in (`herdr` | `shed` | `shed-acp`), from its spawn: never the config's now.
     pub runtime: String,
-    /// #609: where it runs, as every surface shows it: its host while 2+ hosts are enabled, then `herdr` or `shed`
-    /// while live lanes span both, joined with ` · ` (`mini · shed`, `air`, `shed`, or empty).
+    /// #609: where it runs, as every surface shows it: its host while 2+ hosts are enabled, then `herdr` or `shed` while live lanes span both, joined with ` · ` (`mini · shed`, `air`, `shed`, or empty).
     pub place: String,
 }
 
@@ -61,20 +59,17 @@ pub fn join(
     agents: &[Value],
     ws: &BTreeMap<String, String>,
 ) -> Vec<Lane> {
-    // #632: each agent's and pane's newest spawn, indexed once.
     let (mut by_name, mut by_pane) = (BTreeMap::new(), BTreeMap::new());
     for e in events.iter().filter(|e| e.kind == "spawn") {
         by_name.insert(e.str("agent"), e);
         by_pane.insert(e.str("pane"), e);
     }
     let (mut out, mut seen) = (vec![], BTreeSet::new());
-    // #422: each thread's last `conductor-start`, by its agent (`conductor-<thread>`).
     let starts = events.iter().filter(|e| e.kind == "orchestrator-start");
     let mut cs: BTreeMap<&str, &Event> = starts.filter_map(|e| Some((e.str("agent")?, e))).collect();
     for a in agents {
         let s = |k: &str| a[k].as_str().filter(|v| !v.is_empty());
         let (name, pane) = (s("name"), s("pane_id"));
-        // Agents that report their own state (dsh-TUI) can lose the name: match the lane's pane.
         let sp = match (name, pane) {
             (Some(_), _) => by_name.get(&name),
             (None, Some(_)) => by_pane.get(&pane),
@@ -96,8 +91,6 @@ pub fn join(
                 name: name.into(),
                 ..from_spawn(e, l)
             };
-            // #516: one lane per agent: a second live row for it (herdr's and shed's, a remote host's) folds into
-            // the first, the busier state (blocked, then working) kept.
             if !seen.insert(name.to_string()) {
                 let rank = |s: &str| SECTIONS.iter().position(|x| *x == s).unwrap_or(IDLE);
                 if let Some(o) = out.iter_mut().find(|o: &&mut Lane| o.name == name) {
@@ -162,7 +155,6 @@ pub fn join(
     out
 }
 
-/// #609: each lane's `place` and, with `[hosts]`, its host (none: the main host's).
 fn place(cfg: &Config, all: &mut [Lane]) {
     let herdr = crate::herdr::BIN;
     let word = |l: &Lane| if l.runtime == herdr { herdr } else { "shed" };
@@ -226,7 +218,6 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
     }
 }
 
-/// #422: the conductor `e` started: role `conductor`, named `<thread title> · <thread>`, `asleep` with no pane.
 fn orchestrator(events: &[Event], e: &Event, l: Lane) -> Lane {
     let (id, mut l) = (e.str("thread").unwrap_or_default(), from_spawn(e, l));
     let t = (events.iter()).find(|t| t.kind == "thread-new" && t.str("thread") == Some(id));
@@ -294,7 +285,7 @@ pub fn group(all: &[Lane], changed: impl Fn(&Lane) -> u64) -> Groups<'_> {
     });
     let mut out: Groups = vec![];
     for l in v {
-        let f = (l.fleet.as_deref()).map_or("Others", |f| if f == "all" { "all repos" } else { f }); // #422
+        let f = (l.fleet.as_deref()).map_or("Others", |f| if f == "all" { "all repos" } else { f });
         let (s, f) = (SECTIONS[section(l)], f.to_string());
         if out.last().is_none_or(|x| x.0 != s) {
             out.push((s, vec![]));
@@ -320,9 +311,8 @@ pub fn redact(l: &str) -> String {
     m
 }
 
-/// The push guards' check (stricter than [`mask`]): the secret on line `l`, if any — a `PREFIXES`/AWS/Google token,
-/// a JWT, a PEM private key, or a high-entropy non-code value assigned to a `*KEY|TOKEN|SECRET|PASSWORD` name.
-#[allow(clippy::cast_precision_loss)] // char counts of one line
+/// The push guards' check (stricter than [`mask`]): the secret on line `l`, if any — a `PREFIXES`/AWS/Google token, a JWT, a PEM private key, or a high-entropy non-code value assigned to a `*KEY|TOKEN|SECRET|PASSWORD` name.
+#[allow(clippy::cast_precision_loss)]
 pub fn secret(l: &str) -> Option<&str> {
     let has = |s: &str, f: fn(&u8) -> bool| s.as_bytes().iter().any(f);
     let pre = |w: &str, p: &str| w.starts_with(p) && w.len() >= p.len() + 16 && has(&w[p.len()..], u8::is_ascii_digit);
@@ -331,20 +321,17 @@ pub fn secret(l: &str) -> Option<&str> {
     let mut words = l.split(|c: char| !c.is_ascii_alphanumeric() && !"-_.".contains(c));
     let pem = l.contains("-----BEGIN") && l.contains("PRIVATE KEY-----");
     let tok = words.find(|w| jwt(w) || PREFIXES.iter().chain(&["AKIA", "ASIA", "AIza"]).any(|p| pre(w, p)));
-    // A Telegram bot token (bare, `bot<id>:` or in an API URL): the 8+ digit id right before `:AA`, then 28+ chars.
     let tg = l.split([' ', '"', '\'', '=', ',', '`', '/']).find_map(|w| {
         let (d, t) = w.split_once(":AA")?;
         let id = d.bytes().rev().take_while(u8::is_ascii_digit).count();
         (id > 7 && t.len() > 27).then(|| &w[d.len() - id..])
     });
-    // The name is the word before this `=`/`:` or before the line's first one (`const API_KEY: &str = "…"`).
     let named = |s: &str| {
         let up = s.split_whitespace().last().unwrap_or("").to_uppercase();
         ["KEY", "TOKEN", "SECRET", "PASSWORD"].iter().any(|k| up.contains(k))
     };
     let first = &l[..l.find(['=', ':']).unwrap_or(0)];
     tok.or(tg).or(pem.then_some(l.trim())).or_else(|| {
-        // `NAME = value` or `NAME: value` (JSON/YAML): the quoted value, else the first whitespace-delimited token.
         l.match_indices(['=', ':']).find_map(|(i, _)| {
             let r = l[i + 1..].trim_start().trim_start_matches(['"', '\'']);
             let bearer = r.starts_with("Bearer ");
@@ -355,7 +342,6 @@ pub fn secret(l: &str) -> Option<&str> {
                 .trim_end_matches([';', ',']);
             let n = v.chars().count() as f64;
             let bits: f64 = v.chars().map(|c| -(v.matches(c).count() as f64 / n).log2() / n).sum();
-            // Words, `snake_case`/`camelCase` identifiers, code and paths are never secrets.
             let word = !has(v, u8::is_ascii_digit) || v.contains('_') && v == v.to_ascii_lowercase();
             let code = v.contains(['(', '{', ' ']) || v.contains("::") || v.starts_with(['/', '~', '.', '$']);
             ((named(&l[..i]) || named(first) || bearer) && n >= 20.0 && bits >= 3.5 && !word && !code).then_some(v)
@@ -377,14 +363,12 @@ pub fn mask(s: &str) -> String {
             word(w)
         };
         out += &word;
-        // `TOKEN="value"`: the value is the next run.
         hide_next = after_eq && rest[i + n..].starts_with(['"', '\'']);
         rest = &rest[i + n..];
     }
     out + rest
 }
 
-/// One run of token chars, masked; true when it ends in a secret-named `KEY=`.
 fn word(w: &str) -> (String, bool) {
     if let Some((k, v)) = w.split_once('=') {
         let up = k.to_ascii_uppercase();
@@ -409,7 +393,6 @@ fn word(w: &str) -> (String, bool) {
     (w.into(), false)
 }
 
-/// #105, one set for every harness: ≥ 20 rule glyphs in a row make a divider; detail glyphs open a status's lines.
 const GLYPHS: &[&str] = &["─━═╌┄▔▁", "⎿┊│"];
 
 /// Box-drawing rules, prompts and status bars: no activity there.
@@ -417,9 +400,7 @@ pub fn chrome(l: &str) -> bool {
     l.chars().all(|c| "─━│┃╭╮╰╯┌┐└┘═╌┄▔▁ ".contains(c)) || l.starts_with(['❯', '⏵', '>', '›'])
 }
 
-/// A screen's transcript and live status. Not transcript: the frame from the second-last divider down, and the line
-/// above it opening with a glyph and holding a timer (`(25m 52s`: a spinner, a status bar) plus blank/detail lines.
-/// #138: an ANSI screen parses on its text (SGR codes dropped) and keeps its codes.
+/// A screen's transcript and live status. Not transcript: the frame from the second-last divider down, and the line above it opening with a glyph and holding a timer (`(25m 52s`: a spinner, a status bar) plus blank/detail lines. #138: an ANSI screen parses on its text (SGR codes dropped) and keeps its codes.
 pub fn chat(screen: &str) -> (Vec<&str>, Option<&str>) {
     let lines: Vec<&str> = screen.lines().collect();
     let text: Vec<String> = lines.iter().map(|l| strip(l)).collect();
@@ -440,7 +421,6 @@ pub fn chat(screen: &str) -> (Vec<&str>, Option<&str>) {
     (body.collect(), status.map(|i| lines[i].trim()))
 }
 
-/// `f(code, text)` per run of an ANSI line: the first run has no code, every later one its ESC-led CSI code.
 fn sgr(l: &str, f: impl Fn(&str, &str) -> String) -> String {
     let mut parts = l.split('\x1b');
     let first = f("", parts.next().unwrap_or_default());
@@ -470,8 +450,7 @@ pub fn log(state: &Path, agent: &str) -> Option<std::path::PathBuf> {
     plain.then(|| state.with_file_name("transcripts").join(format!("{agent}.log")))
 }
 
-/// #248: a closed lane's saved session (its last 2 MB), the newest `.jsonl` for worktree `wt` (`session_file`),
-/// as sheet lines: `❯` prompts, `⏺` replies and tool calls (`Bash(cargo test)`), masked.
+/// #248: a closed lane's saved session (its last 2 MB), the newest `.jsonl` for worktree `wt` (`session_file`), as sheet lines: `❯` prompts, `⏺` replies and tool calls (`Bash(cargo test)`), masked.
 pub fn session(home: &Path, wt: &str) -> Option<Vec<String>> {
     let file = session_file(home, wt)?;
     let part = |p: &Value| match p["type"].as_str()? {
@@ -500,9 +479,7 @@ pub fn session(home: &Path, wt: &str) -> Option<Vec<String>> {
 /// The line where two reads had no overlap: the lane scrolled past between them.
 pub const GAP: &str = "┄ not captured: scrolled past between reads ┄";
 
-/// #138: append a read's settled lines (above its last block head, which a re-render still changes) to `file` past
-/// their longest overlap with its tail (compared as text), else after a `GAP` line; the last 5,000 lines, mode 0600.
-/// The file's lines plus the live block, and the live block's length.
+/// #138: append a read's settled lines (above its last block head, which a re-render still changes) to `file` past their longest overlap with its tail (compared as text), else after a `GAP` line; the last 5,000 lines, mode 0600. The file's lines plus the live block, and the live block's length.
 pub fn roll(file: &Path, body: &[String]) -> (Vec<String>, usize) {
     let head = |l: &String| strip(l).trim_start().starts_with(|c| "⏺❯›>$•┊💻".contains(c));
     let (new, live) = body.split_at(body.iter().rposition(head).unwrap_or(0));
@@ -535,19 +512,17 @@ pub fn activity(harness: &str, screen: &str) -> String {
     }
 }
 
-/// #260: a tool call as a masked `now:` line (the row ellipsises it): `running <cmd>`, `editing <file>`, …, else the tool.
 fn doing(tool: &str, arg: &str) -> String {
     let rows = "running Bash Shell $|editing Edit Write Update MultiEdit|reading Read".split('|');
     let row = rows.into_iter().find(|r| r.split(' ').skip(1).any(|w| w == tool));
     let mut first = arg.lines().next().unwrap_or_default().to_string();
     if let Some(h) = std::env::var("HOME").ok().filter(|h| h.len() > 1) {
-        first = first.replace(&h, "~"); // #276
+        first = first.replace(&h, "~");
     }
     mask(&format!("now: {} {}", row.map_or(tool, |r| &r[..7]), first.trim()))
 }
 
-/// #276: a shell command as its first real command and target (`git merge origin/staging`, `sed src/usage.rs`): `cd`,
-/// `VAR=…`, redirections and piped parts dropped, `+N` for the rest of a chain, a heredoc as `python3 (script)`.
+/// #276: a shell command as its first real command and target (`git merge origin/staging`, `sed src/usage.rs`): `cd`, `VAR=…`, redirections and piped parts dropped, `+N` for the rest of a chain, a heredoc as `python3 (script)`.
 pub fn short(cmd: &str) -> String {
     let (mut segs, mut seg, mut tok, mut q, mut d, mut piped) = (vec![], vec![], String::new(), None, 0, false);
     let mut cs = cmd.chars().chain([';']).peekable();
@@ -611,8 +586,7 @@ pub fn pending(screen: &str) -> Option<(String, Vec<String>)> {
     providers::lanes().find_map(|h| h.pending_menu(screen))
 }
 
-/// #362: a transcript's cached tail: its inode, the offset read up to (past its last full line), the 64 bytes before
-/// it, and the text read (whole lines, its last 2 MB).
+/// #362: a transcript's cached tail: its inode, the offset read up to (past its last full line), the 64 bytes before it, and the text read (whole lines, its last 2 MB).
 #[derive(Default)]
 pub struct Tail {
     ino: u64,
@@ -622,9 +596,7 @@ pub struct Tail {
 }
 
 impl Tail {
-    /// #362: bring the tail up to a file of inode `ino` and `len` bytes, reading only `[offset, len)` while the inode
-    /// holds, the file did not shrink and its 64 bytes before `offset` are unchanged; else its last 2 MB. Returns the
-    /// unfinished last line, read again next time.
+    /// #362: bring the tail up to a file of inode `ino` and `len` bytes, reading only `[offset, len)` while the inode holds, the file did not shrink and its 64 bytes before `offset` are unchanged; else its last 2 MB. Returns the unfinished last line, read again next time.
     pub fn read(&mut self, f: &mut (impl Read + Seek), ino: u64, len: u64) -> std::io::Result<String> {
         let mut seen = vec![0; self.last.len()];
         let at = SeekFrom::Start(self.offset - seen.len() as u64);
@@ -645,7 +617,6 @@ impl Tail {
     }
 }
 
-/// Where the last `n` bytes of `s` start, moved up to a line start.
 fn line_from(s: &str, n: usize) -> usize {
     match s.len().saturating_sub(n) {
         0 => 0,
@@ -653,8 +624,7 @@ fn line_from(s: &str, n: usize) -> usize {
     }
 }
 
-/// #260: a file's last `n` (≤ 2 MB) bytes as text, whole lines (a session transcript is tens of MB). #362: read
-/// incrementally through a `Tail` per file, the 32 most recently read kept.
+/// #260: a file's last `n` (≤ 2 MB) bytes as text, whole lines (a session transcript is tens of MB). #362: read incrementally through a `Tail` per file, the 32 most recently read kept.
 pub fn read_tail(p: &Path, n: u64) -> Option<String> {
     use std::os::unix::fs::MetadataExt;
     static CACHE: std::sync::Mutex<Vec<(std::path::PathBuf, Tail)>> = std::sync::Mutex::new(vec![]);
@@ -709,8 +679,7 @@ pub fn tail(screen: &str, n: usize) -> Vec<String> {
         .collect()
 }
 
-/// #127: menu (`Harness::pending_menu`)'s card from its block (after the last divider above the question): `title` its first line, `command`
-/// the `│` lines but those opening with a word (`Dangerous rm …`), `countdown` from `in M:SS`, the rest `reason`.
+/// #127: menu (`Harness::pending_menu`)'s card from its block (after the last divider above the question): `title` its first line, `command` the `│` lines but those opening with a word (`Dangerous rm …`), `countdown` from `in M:SS`, the rest `reason`.
 pub fn prompt(screen: &str) -> Option<Value> {
     let (question, options) = pending(screen).filter(|p| !p.1.is_empty())?;
     let lines: Vec<&str> = screen.lines().map(str::trim).collect();

@@ -1,6 +1,3 @@
-//! #325: a lane's ask stores its agent; the answer is typed into that lane (else the issue's current one), logged
-//! `answer-delivered` / `answer-undelivered`, and drive's fast step retries an undelivered one.
-//! Every test here runs inside the same lane (`DROVER_LANE` is process-wide: its own test binary).
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -25,7 +22,6 @@ fn spawn(c: &drover::Ctx, extra: Value) {
     append(&c.state, &Event::new(NOW - 60, "sendmeter", Some(36), "spawn", d)).unwrap();
 }
 
-/// `drover ask` run inside the lane `sendmeter:36:impl`.
 fn lane_ask(c: &drover::Ctx) {
     std::env::set_var("DROVER_LANE", "sendmeter:36:impl");
     let args = [
@@ -80,7 +76,6 @@ fn a_lane_ask_stores_its_agent_and_the_answer_is_typed_into_its_pane() {
     );
 }
 
-/// q159: the ask logged before its lane's `spawn` (no agent): the answer goes to the issue's current lane.
 #[test]
 fn an_ask_without_an_agent_is_answered_into_the_issues_current_lane() {
     let c = ctx(&tmpdir("deliver-null"), CONFIG);
@@ -131,7 +126,7 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
         let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
         let page =
             String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
-        with_queue(&page, &s, "127.0.0.1:7777", NOW) // #268: the Queue tab as the board draws it
+        with_queue(&page, &s, "127.0.0.1:7777", NOW)
     };
     assert!(page(&Fake::default()).contains("<span class=r>answer q1 not delivered: "));
 
@@ -141,7 +136,6 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     assert!(asked() > before, "{:?}", sh.methods());
     assert_eq!(kinds(&c, "answer-undelivered").len(), 1);
 
-    // Reachable: typed with Enter, delivered, the red line gone, and no more tries.
     sh.lane(LANE, "idle", "/x");
     run(&c, &Fake::default(), &["drive", "--fast"]);
     assert!(typed(&sh, LANE, "DECISION q1: yes"), "{:?}", sh.methods());
@@ -150,7 +144,6 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     run(&c, &Fake::default(), &["drive", "--fast"]);
     assert_eq!(sh.sent(LANE).len(), 1, "typed once: {:?}", sh.sent(LANE));
 
-    // A lane gone (closed) is not retried.
     let c = ctx(&tmpdir("deliver-gone"), CONFIG);
     let sh = FakeShed::new();
     sh.attach(&c);
@@ -191,7 +184,6 @@ fn a_sleeping_lanes_answer_waits_for_room_then_lands() {
     assert_eq!(kinds(&c, "answer-delivered").len(), 1);
 }
 
-/// #424: a supersede logs the old lane's close before the new spawn, naming its pane; the new lane's ask is answered.
 #[test]
 fn a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane() {
     let c = ctx(&tmpdir("deliver-supersede"), CONFIG);
@@ -235,7 +227,6 @@ fn a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane() {
     assert_eq!(kinds(&c, "answer-delivered").len(), 1);
 }
 
-/// #424: the #410 log (new spawn, then the old lane's pane-less `superseded` close) leaves the new lane open.
 #[test]
 fn a_supersede_close_logged_after_the_new_spawn_does_not_close_it() {
     let c = ctx(&tmpdir("deliver-410"), CONFIG);
@@ -252,7 +243,6 @@ fn a_supersede_close_logged_after_the_new_spawn_does_not_close_it() {
     assert!(!sh.called("keys", "old-36"), "{:?}", sh.methods());
 }
 
-/// #424: no open lane, but the asking agent is live in the issue's worktree: typed there, `answer-delivered-live`.
 #[test]
 fn a_closed_lane_whose_agent_still_runs_in_its_worktree_gets_the_answer() {
     let c = ctx(&tmpdir("deliver-live"), CONFIG);
@@ -275,7 +265,6 @@ fn a_closed_lane_whose_agent_still_runs_in_its_worktree_gets_the_answer() {
     assert!(kinds(&c, "answer-undelivered").is_empty());
 }
 
-/// #424: an answer whose lane really is gone is logged `answer-undelivered`; `check` alerts it once, not again.
 #[test]
 fn an_answer_with_no_lane_alerts_once_from_check() {
     let c = ctx(&tmpdir("deliver-alert"), CONFIG);
