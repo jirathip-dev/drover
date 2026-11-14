@@ -205,7 +205,6 @@ pub fn paused_line(r: &dyn Runner, events: &[Event]) -> Option<String> {
     ))
 }
 
-/// Check `sha` out in drover's own worktree (`<home>/src`), build it there and copy the binary to `new`.
 fn stage(r: &dyn Runner, local: &Path, home: &Path, sha: &str, new: &Path) -> Result<()> {
     let (src, target) = (home.join("src"), home.join("target"));
     let (s, t) = (src.to_string_lossy(), target.to_string_lossy());

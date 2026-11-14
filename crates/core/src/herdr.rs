@@ -1,7 +1,3 @@
-//! The one herdr adapter (herdr ≥ 0.9.0, docs/setup.md): every `herdr` argv is built here. A `*_argv`
-//! builder is for a command shown in a dry-run plan as well as run; the other functions run one operation.
-//! #298: herdr's words are the lane runtime's interface (`Runtime`); shed (`[runtime] kind = "shed"`) answers them
-//! too, for the lanes it runs (a pane without herdr's `:`), over `crate::shed`'s wire.
 use crate::runner::{argv, Out, Runner};
 use crate::shed;
 use anyhow::{bail, Context, Result};
@@ -13,12 +9,9 @@ use std::path::Path;
 /// The program name, for PATH lookups and the Services row.
 pub const BIN: &str = "herdr";
 
-/// #298: a terminal runtime, spoken to in herdr's words (`*_argv`) and answered as herdr answers (its JSON, its
-/// `{"error": {"code"}}`s).
+/// #298: a terminal runtime, spoken to in herdr's words (`*_argv`) and answered as herdr answers (its JSON, its `{"error": {"code"}}`s).
 pub trait Runtime {
-    /// Run one herdr argv; the caller reads the exit code.
     fn exec(&self, r: &dyn Runner, a: &[String]) -> Result<Out>;
-    /// Its live agents, as `herdr agent list` shows them.
     fn agents(&self, r: &dyn Runner) -> Result<Vec<Value>>;
 }
 
@@ -57,7 +50,6 @@ impl Shed {
     fn call(&self, r: &dyn Runner, m: Method, params: impl serde::Serialize) -> Result<Value> {
         shed::call(r, &self.0.wire, m, json!(params))
     }
-    /// shed's terminal `name`.
     fn get(&self, r: &dyn Runner, name: &str) -> Result<TerminalInfo> {
         Ok(serde_json::from_value(self.call(
             r,
@@ -65,8 +57,7 @@ impl Shed {
             Target { name: name.into() },
         )?)?)
     }
-    /// #749: ACP terminal `name`'s transcript events (`read events`), the last `n` before `seq` `before`; None when
-    /// it is no ACP terminal (a PTY's screen is read as herdr's).
+    /// #749: ACP terminal `name`'s transcript events (`read events`), the last `n` before `seq` `before`; None when it is no ACP terminal (a PTY's screen is read as herdr's).
     pub fn transcript(&self, r: &dyn Runner, name: &str, before: Option<u64>, n: usize) -> Result<Option<Vec<Logged>>> {
         if self.get(r, name)?.acp.is_none() {
             return Ok(None);
@@ -83,7 +74,6 @@ impl Shed {
             serde_json::from_value::<ReadResult>(self.call(r, Method::Read, p)?)?.events,
         ))
     }
-    /// Whether herdr argv `a` is for one of shed's terminals: a pane without herdr's `ws:pane` colon, an agent shed runs.
     fn mine(&self, r: &dyn Runner, a: &[String]) -> bool {
         let t = a.get(2).map_or("", String::as_str);
         match (a[0].as_str(), request(a)) {
@@ -109,8 +99,7 @@ impl Shed {
             no_hibernate: false,
         }
     }
-    /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), #565:
-    /// its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
+    /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), #565: its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
     pub fn start(
         &self,
         r: &dyn Runner,
@@ -202,7 +191,6 @@ impl Shed {
     }
 }
 
-/// herdr's agent (`agent list`) or pane (`pane get`) object for shed terminal `t`.
 fn agent_of(t: &TerminalInfo) -> Value {
     let up = t.state == shed_proto::State::Running;
     json!({"name": t.name, "pane_id": t.name, "cwd": t.cwd, "agent": t.labels.get("harness").filter(|_| up),
@@ -210,7 +198,6 @@ fn agent_of(t: &TerminalInfo) -> Value {
         "cpu": t.resources.map(|u| u.cpu_pct)})
 }
 
-/// The shed call that does what herdr argv `a` does; None: herdr only (workspaces, worktrees, `agent start`).
 fn request(a: &[String]) -> Option<(Method, Value)> {
     let w: Vec<&str> = a.iter().map(String::as_str).collect();
     let flag = |f: &str| w.windows(2).find(|p| p[0] == f).map(|p| p[1]);
@@ -290,7 +277,6 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
     })
 }
 
-/// herdr's failure answer: exit 1, `{"error": {"code", "message"}}` on stderr.
 fn failed(code: &str, message: &str) -> Out {
     let stderr = json!({"error": {"code": code, "message": message}}).to_string();
     Out {
@@ -306,10 +292,8 @@ impl Runtime for Shed {
             return Ok(failed("unsupported", &format!("shed runs no `herdr {}`", a.join(" "))));
         };
         let name = params["name"].as_str().unwrap_or_default().to_string();
-        // #565: an ACP terminal by its own `acp` (one fleet's lanes may be ACP sessions, another's shells).
         let acp = matches!(m, Method::Send | Method::Keys) && self.get(r, &name).is_ok_and(|t| t.acp.is_some());
         let got = match m {
-            // ACP: a prompt is framed by shed's CLI, and it needs no Enter.
             Method::Send if acp => {
                 shed::cli(r, &["send", &name, params["text"].as_str().unwrap_or_default()]).map(|_| json!({}))
             }
@@ -359,8 +343,7 @@ impl Runtime for Shed {
     }
 }
 
-/// #298: a harness launch (`start_cmd`) as the line a shed lane's shell runs (`pane run`): `agent start … --kind <k>
-/// … -- <args>` as `exec <k> <args>`, a typed line as `exec <line>`.
+/// #298: a harness launch (`start_cmd`) as the line a shed lane's shell runs (`pane run`): `agent start … --kind <k> … -- <args>` as `exec <k> <args>`, a typed line as `exec <line>`.
 pub fn typed(pane: &str, start: &[String]) -> Vec<String> {
     let w: Vec<&str> = start.iter().map(String::as_str).collect();
     let line = match w[..] {
@@ -379,7 +362,6 @@ pub fn shed_line(a: &[String]) -> Vec<String> {
     request(a).map_or_else(|| line(a.to_vec()), |(m, v)| argv(&["shed", m.name(), &v.to_string()]))
 }
 
-/// The runtime herdr argv `a` goes to on `r`: shed for its lanes, else herdr.
 fn runtime(r: &dyn Runner, a: &[String]) -> Box<dyn Runtime> {
     match r.shed().map(Shed).filter(|b| b.mine(r, a)) {
         Some(b) => Box::new(b),
@@ -397,7 +379,6 @@ pub fn line(a: Vec<String>) -> Vec<String> {
     std::iter::once("herdr".to_string()).chain(a).collect()
 }
 
-/// `rt.exec`, failing on a non-zero exit; returns stdout.
 fn ok_on(rt: &dyn Runtime, r: &dyn Runner, a: &[String]) -> Result<String> {
     let o = rt.exec(r, a)?;
     if o.code != 0 {
@@ -429,9 +410,7 @@ pub fn list(r: &dyn Runner, what: &str) -> Result<Value> {
     json(r, &argv(&[what, "list"]))
 }
 
-/// Live agents (`herdr agent list`); #298: with shed, herdr's (if it answers; a cached list's shed rows dropped) and
-/// shed's lanes. #601: on another host (shed over ssh) herdr's answer alone proves it up; shed failing there is its
-/// `! shed:` health row (`hosts::health`), never offline.
+/// Live agents (`herdr agent list`); #298: with shed, herdr's (if it answers; a cached list's shed rows dropped) and shed's lanes. #601: on another host (shed over ssh) herdr's answer alone proves it up; shed failing there is its `! shed:` health row (`hosts::health`), never offline.
 pub fn agents(r: &dyn Runner) -> Result<Vec<Value>> {
     let Some(b) = r.shed() else {
         return Herdr.agents(r);
@@ -499,7 +478,6 @@ pub fn send_text_argv(pane: &str, text: &str) -> Vec<String> {
 
 /// The page's reply: the text (dsh: `pane send-text`, else `agent prompt`), then Enter.
 pub fn reply(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> Result<()> {
-    // No `--`: herdr 0.9 reads the 2nd positional as literal text (even `-x`), and a `--` there would be sent as text.
     let first = if dsh {
         send_text_argv(pane, text)
     } else {
@@ -512,6 +490,26 @@ pub fn reply(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> 
         }
     }
     Ok(())
+}
+
+/// #908: Err `HOST_BUSY` (the prompt held to a later pass) while shed has `agent` asleep and the host has no room to wake it.
+pub fn awake(r: &dyn Runner, agent: &str) -> Result<()> {
+    let t = r.shed().map(Shed).and_then(|s| s.get(r, agent).ok());
+    if t.and_then(|t| t.reported).is_none_or(|s| s.state != "hibernated") {
+        return Ok(());
+    }
+    let (l, h) = (crate::config::limits(), crate::host::sample(r));
+    let low = (h.free_mem_gb.filter(|g| *g < l.min_free_mem_gb)).map(|g| format!("only {g:.1} GB of memory free"));
+    match low.or_else(|| crate::host::admit(&h, &l).err()) {
+        Some(why) => bail!("REFUSED HOST_BUSY: {agent} is asleep and waking it starts its agent: {why}; held"),
+        None => Ok(()),
+    }
+}
+
+/// #908: `reply` once `awake` lets drover's prompt through.
+pub fn tell(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> Result<()> {
+    awake(r, agent)?;
+    reply(r, dsh, agent, pane, text)
 }
 
 /// #143: whether a prompt the caller just entered moved the agent off idle within 20 s, typing it once more if not.
@@ -579,8 +577,7 @@ pub fn run_argv(pane: &str, words: &[&str]) -> Vec<String> {
     argv(&[&["pane", "run", pane][..], words].concat())
 }
 
-/// #235: type `line` into a pane of a throwaway workspace at `cwd`, wait up to 20 s for `done`, read the screen,
-/// close the workspace; the screen (None: no pane).
+/// #235: type `line` into a pane of a throwaway workspace at `cwd`, wait up to 20 s for `done`, read the screen, close the workspace; the screen (None: no pane).
 pub fn in_pane(r: &dyn Runner, cwd: &str, line: &str, done: &str) -> Option<String> {
     let pane = workspace_create(r, cwd, "drover-health").ok()?;
     let _ = exec(r, &run_argv(&pane, &[line]));

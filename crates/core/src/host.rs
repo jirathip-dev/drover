@@ -1,4 +1,3 @@
-//! Host-load gate for `drover spawn` (an unreadable signal admits) and the live-agent view.
 use crate::config::Limits;
 pub use crate::herdr::agents;
 use crate::runner::{ok, Runner};
@@ -15,7 +14,6 @@ pub fn live_in<'a>(agents: &'a [Value], name: &str, dir: &Path) -> Vec<&'a Value
         .collect()
 }
 
-/// #186: never signalled, whatever their cwd.
 const SPARE: &[&str] = &[crate::herdr::BIN, "drover", "herdsman", "launchd"];
 
 /// #186: `(pid, command, cwd)` of every process `lsof` sees, but `SPARE`, pid 1, this process and its parent.
@@ -47,9 +45,7 @@ pub fn inside(ps: &[(String, String, String)], dir: &Path) -> Vec<(String, Strin
         .collect()
 }
 
-/// #186: TERM every process inside `dir` (#223: with `trim`, all but the pane's shell and the agent, the top two
-/// levels there; #679: and never `spare`'s tree, a shed lane's agent), wait 5 s, KILL those still there; the commands
-/// signalled and the MB they held.
+/// #186: TERM every process inside `dir` (#223: with `trim`, all but the pane's shell and the agent, the top two levels there; #679: and never `spare`'s tree, a shed lane's agent), wait 5 s, KILL those still there; the commands signalled and the MB they held.
 pub fn reap(r: &dyn Runner, dir: &Path, trim: bool, spare: Option<&str>) -> (Vec<String>, u64) {
     let (mut first, ps) = (inside(&cwds(r), dir), stdout(r, "ps", &["-axo", "pid=,ppid=,rss="]));
     let ps = ps.filter(|_| trim).unwrap_or_default();
@@ -86,8 +82,7 @@ pub fn reap(r: &dyn Runner, dir: &Path, trim: bool, spare: Option<&str>) -> (Vec
 /// #710: a process stuck on the Keychain: pid, seconds up, its parent's name (never an argument).
 pub type Stuck = (String, u64, String);
 
-/// #710: `security find-generic-password` readers up over 60 s and a `SecurityAgent` up over 10 min (troubleshooting §2);
-/// securityd and every other `security` verb never match.
+/// #710: `security find-generic-password` readers up over 60 s and a `SecurityAgent` up over 10 min (troubleshooting §2); securityd and every other `security` verb never match.
 pub fn keychain_jam(r: &dyn Runner) -> (Vec<Stuck>, Option<Stuck>) {
     let ps = stdout(r, "ps", &["-axo", "pid=,ppid=,etime=,command="]).unwrap_or_default();
     let rows: Vec<Vec<&str>> = ps.lines().map(|l| l.split_whitespace().collect()).collect();
@@ -136,8 +131,7 @@ pub fn held(r: &dyn Runner, agents: &[&Value]) -> Vec<u64> {
     agents.iter().map(mb).collect()
 }
 
-/// #223: the top 3 memory users by footprint (`top`) as `mem command (owner)`: `lane <agent>` when inside a live
-/// agent's cwd, else `other`; a virtual machine is `mem VM (colima)` (#234: no nested brackets).
+/// #223: the top 3 memory users by footprint (`top`) as `mem command (owner)`: `lane <agent>` when inside a live agent's cwd, else `other`; a virtual machine is `mem VM (colima)` (#234: no nested brackets).
 pub fn top(r: &dyn Runner, agents: &[Value]) -> Vec<String> {
     let (ps, out) = (cwds(r), stdout(r, "top", &TOP).unwrap_or_default());
     let row = |l: &str| {
@@ -214,13 +208,11 @@ fn stdout(r: &dyn Runner, prog: &str, args: &[&str]) -> Option<String> {
     ok(r, prog, args).ok()
 }
 
-/// A `vm_stat` counter (`Swapouts:`, `Pages free:`).
 fn field(s: &str, name: &str) -> Option<f64> {
     let line = s.lines().find(|l| l.trim_start().starts_with(name))?;
     line.split(':').nth(1)?.trim().trim_end_matches('.').parse().ok()
 }
 
-/// Free + inactive memory in GB, from `vm_stat`'s `(page size of N bytes)` header.
 fn mem_gb(s: &str) -> Option<f64> {
     let page: f64 = s
         .split("page size of ")
@@ -255,7 +247,6 @@ pub fn sample(r: &dyn Runner) -> Host {
     let load = stdout(r, "sysctl", &["-n", "vm.loadavg"])
         .and_then(|s| s.split_whitespace().find_map(|w| w.parse::<f64>().ok()));
     let ncpu = stdout(r, "sysctl", &["-n", "hw.ncpu"]).and_then(|s| s.trim().parse::<f64>().ok());
-    // #157: a Linux host has no `vm_stat`: `/proc/loadavg`, `nproc` and `MemAvailable` (kB) instead.
     let linux = |p: &str, a: &[&str]| b.is_empty().then(|| stdout(r, p, a)).flatten().unwrap_or_default();
     let word = |s: String, n: usize| s.split_whitespace().nth(n)?.parse::<f64>().ok();
     let load = load.or_else(|| word(linux("cat", &["/proc/loadavg"]), 0));
@@ -277,7 +268,6 @@ pub fn sample(r: &dyn Runner) -> Host {
     }
 }
 
-/// #168: swap-out samples kept in `<state dir>/swapouts` (≈ 10 s of serve's samples, or the last spawns').
 const WINDOW: usize = 5;
 
 /// Add `h`'s swap-out to the rolling window and set `h.swap_median` from it.
@@ -313,7 +303,6 @@ pub fn admit(h: &Host, l: &Limits) -> Result<(), String> {
     if let Some(p) = pressed {
         why.push(format!("memory pressure {p}"));
     }
-    // #168: swap refuses only when sustained (the window's median) and memory pressure is up; one spike admits.
     let median = h
         .swap_median
         .or(h.swapout)
