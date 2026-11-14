@@ -623,6 +623,21 @@ enum Cmd {
     )]
     #[command(hide = true)]
     LaneEvent { kind: String, data: String },
+    #[command(
+        hide = true,
+        about = "Run a lane's heavy check in a host slot, waiting in line for one (#909)"
+    )]
+    Heavy {
+        kind: String,
+        #[arg(long)]
+        max: usize,
+        #[arg(long)]
+        kind_max: Option<usize>,
+        #[arg(long)]
+        wait: u64,
+        #[arg(last = true)]
+        cmd: String,
+    },
 }
 
 #[derive(clap::Args)]
@@ -1103,7 +1118,12 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
     };
     let quiet = matches!(
         cli.cmd,
-        Cmd::Hook { .. } | Cmd::LaneEvent { .. } | Cmd::Statusline | Cmd::Migrate { .. } | Cmd::Help { .. }
+        Cmd::Hook { .. }
+            | Cmd::LaneEvent { .. }
+            | Cmd::Heavy { .. }
+            | Cmd::Statusline
+            | Cmd::Migrate { .. }
+            | Cmd::Help { .. }
     ) || matches!(
         cli.cmd,
         Cmd::CapCheck { .. } | Cmd::ArchCheck { .. } | Cmd::LessonCheck { .. }
@@ -1250,6 +1270,30 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             crate::usage::statusline(ctx, &env("DROVER_ACCOUNT"), &env("DROVER_LANE"), &buf, out);
         }
         Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
+        Cmd::Heavy {
+            kind,
+            max,
+            kind_max,
+            wait,
+            cmd,
+        } => {
+            let me = crate::heavy::Ticket {
+                lane: std::env::var("DROVER_LANE").unwrap_or_default(),
+                kind,
+                cmd,
+                since: crate::now(),
+                running: false,
+                kind_max,
+            };
+            let timeout = |t: &crate::heavy::Ticket| {
+                lane_event(
+                    ctx,
+                    "heavy-timeout",
+                    json!({"kind": t.kind, "cmd": t.cmd, "since": t.since}),
+                );
+            };
+            return crate::heavy::run(r, &ctx.state.with_file_name("heavy"), me, max, wait, timeout);
+        }
         Cmd::Status(Scope { fleet, json }) => {
             let (events, all) = (read(&ctx.state)?, crate::events::states(&ctx.state)?);
             let rows: Vec<_> = all
@@ -2257,6 +2301,7 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             .to_string_lossy()
             .into_owned()
     });
+    let heavy = rules.heavy;
     let policy = hook::Policy {
         branches: rules.branches,
         paths,
@@ -2279,6 +2324,10 @@ fn run_hook(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
             lane_event(ctx, "hook-denied", json!({"rule": reason}));
         }
         writeln!(out, "{}", hook::deny_json(&input, &reason))?;
+        return Ok(());
+    }
+    if let Some(v) = heavy.and_then(|h| hook::heavy(&input, &h, &ctx.exe)) {
+        writeln!(out, "{v}")?;
         return Ok(());
     }
     if let Some(dir) = hook::push_dir(&input) {
