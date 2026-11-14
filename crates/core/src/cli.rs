@@ -1358,7 +1358,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 });
                 let cfg = Config::load(&ctx.config).ok();
                 let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
-                let hosts = cfg.is_some_and(|c| !c.hosts.is_empty()) || at.values().any(|p| !p.is_empty());
+                let hosts = cfg.as_ref().is_some_and(|c| !c.hosts.is_empty()) || at.values().any(|p| !p.is_empty());
                 let pad = [5, 63][usize::from(hosts)];
                 let c = |h: &str| format!(" {h:<14}").repeat(usize::from(hosts));
                 let head = c("HOST");
@@ -1401,6 +1401,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     writeln!(out, "{:<pad$}{} {w}{}", status_line(s, ctx.now), host(s), root(s))?;
                 }
                 write!(out, "{}", serial.concat())?;
+                if let Some(c) = &cfg {
+                    let agents = all_agents(c, &look).unwrap_or_default();
+                    write!(out, "{}", crate::hosts::slots_line(c, &events, &agents))?;
+                }
                 if let Some(t) = look.ts {
                     writeln!(
                         out,
