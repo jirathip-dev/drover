@@ -1,0 +1,7 @@
+Decided: docs/lanes.md names the slot record's `cmd` and `running` fields, the doc line arch-check asked for.
+Because: crates/core/src/cli.rs:639
+Decided: the runner.rs merge keeps staging's version and adds `attached` back; nothing else in it changed.
+Because: crates/core/src/runner.rs:29
+Rejected: `no doc: <why>` in the PR body — the fields are what `herdsman top` reads, so the doc should name them.
+Check: cap-check is under the cap after #807's merge, so the Q1668 cap ask needs no answer.
+Owner: The heavy-check slots PR is green on the docs check and back under the line cap.
