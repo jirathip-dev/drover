@@ -311,3 +311,20 @@ fn a_proposal_over_16_kb_applies_byte_for_byte() {
     let got = std::fs::read_to_string(&c.config).unwrap();
     assert!(got == new, "applied {} bytes of {}", got.len(), new.len());
 }
+
+#[test]
+fn a_proposal_stored_truncated_refuses_to_apply_and_asks_for_a_new_one() {
+    let c = setup("cfg-cut");
+    let old = std::fs::read_to_string(&c.config).unwrap();
+    let base = drover::devices::sha256(old.as_bytes());
+    let d =
+        json!({"thread": "t1", "id": "c1", "diff": "+ x\n", "text": "[fleet… 6973 bytes cut …en A\"", "base": base});
+    append(&c.state, &Event::new(T, "sendmeter", None, "config-propose", d)).unwrap();
+    let (code, out) = run(&c, &Fake::default(), &["config", "apply", "c1"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED PROPOSAL_TRUNCATED") && out.contains("propose"),
+        "{out}"
+    );
+    assert_eq!(std::fs::read_to_string(&c.config).unwrap(), old);
+}

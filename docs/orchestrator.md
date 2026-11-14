@@ -200,7 +200,8 @@ owner applies it: a tap on a paired device, or `drover config apply|discard <id>
 refuses both inside one, `OWNER_ONLY`). Applying keeps the old file as `fleet.toml.bak-<time>`, writes the
 new one and runs `doctor`. A failing `doctor` does not roll back: the line says `doctor ✗` and the backup is there
 to restore. If fleet.toml changed since the proposal, it refuses `STALE`, and the card shows `stale: fleet.toml
-changed since` instead of its buttons (#460). Settled, the card folds to the thread's system line, e.g. `config c1
+changed since` instead of its buttons (#460). #1028: the proposed file is kept whole beside the event log
+(`proposals/<id>.toml`, its sha256 in the event); a proposal not stored whole refuses `PROPOSAL_TRUNCATED`: propose it again. Settled, the card folds to the thread's system line, e.g. `config c1
 applied by owner, backup kept, doctor ✓` (the orchestrator gets it too). #460: while a card waits, the thread's bar and
 its row in the list say `config c1 waiting` (a tap on the bar's scrolls to the card), and the thread's first page
 always carries it: past the last 30 messages it stays right under the older-messages marker.
