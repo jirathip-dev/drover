@@ -1,6 +1,5 @@
-//! What a lane may use: its account (first uncapped of an ordered list; tokens never read out) and MCP servers.
 use crate::config::{Config, Fleet, Role};
-use crate::events::{emit, read, Event};
+use crate::events::{emit, working, Event};
 use crate::gate::refused;
 use crate::providers::Credential;
 use crate::runner::Runner;
@@ -12,8 +11,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::Path;
 
-/// When the account's (#302: or account-less harness's) latest cap or rest, since any reset, ends: its logged
-/// `until`, else `cap_reset_minutes` after it (#640: a sign-out, until `accounts reset`).
+/// When the account's (#302: or account-less harness's) latest cap or rest, since any reset, ends: its logged `until`, else `cap_reset_minutes` after it (#640: a sign-out, until `accounts reset`).
 pub fn capped_until(cfg: &Config, events: &[Event], name: &str, now: u64) -> Option<u64> {
     let last = latest(events, name)?;
     let out = (last.kind == "account-signed-out").then_some(u64::MAX);
@@ -27,15 +25,13 @@ pub fn rests(kind: &str) -> bool {
     ["account-capped", "agent-unavailable", "account-signed-out"].contains(&kind)
 }
 
-/// The account's (else harness's) latest rest or reset.
 fn latest<'a>(events: &'a [Event], name: &str) -> Option<&'a Event> {
     let who = |e: &Event| e.str("account").or(e.str("harness")) == Some(name);
     let mine = |e: &&Event| (rests(&e.kind) || e.kind == "account-reset") && who(e);
     events.iter().rev().find(mine)
 }
 
-/// #640: a limit banner on account `a` caps it only when its usage reading agrees: none fresh (10 min) or a
-/// window it has at 100% (until the later reset). (kind, until, the reading) for `check`.
+/// #640: a limit banner on account `a` caps it only when its usage reading agrees: none fresh (10 min) or a window it has at 100% (until the later reset). (kind, until, the reading) for `check`.
 pub fn confirm(ctx: &Ctx, a: Option<&str>, until: u64) -> Seen {
     let stale = ["agent-unavailable", "account-capped"][usize::from(a.is_some())];
     let m = a.and_then(|n| usage::row(ctx, n));
@@ -52,14 +48,12 @@ pub fn confirm(ctx: &Ctx, a: Option<&str>, until: u64) -> Seen {
 
 pub type Seen = (&'static str, Option<u64>, String);
 
-/// `5h —, 7d 23%`: a window the plan lacks is `—`, one past its reset 0% (#785).
 fn pcts(m: &usage::Meter, now: u64) -> String {
     let p = |w: usage::Window| w.map_or("—".into(), |w| format!("{:.0}%", if w.1 > now { w.0 } else { 0.0 }));
     format!("5h {}, 7d {}", p(m.session), p(m.week))
 }
 
-/// #302: role `r` on the first of its `fallback` entries (`harness[:account]`) whose harness and account both are not
-/// resting (the earlier ones that are, for the card); `r` itself when it has none.
+/// #302: role `r` on the first of its `fallback` entries (`harness[:account]`) whose harness and account both are not resting (the earlier ones that are, for the card); `r` itself when it has none.
 pub fn fallback(cfg: &Config, events: &[Event], r: &Role, now: u64) -> Result<(Role, Option<(String, u64)>)> {
     let rest = |e: &&String| e.split(':').filter_map(|k| capped_until(cfg, events, k, now)).max();
     if r.fallback.is_empty() {
@@ -82,8 +76,7 @@ pub fn fallback(cfg: &Config, events: &[Event], r: &Role, now: u64) -> Result<(R
 /// #683: an account's name and the env its lane signs in with (`account_env`, filled in where the lane starts).
 pub type Account = (String, BTreeMap<String, String>);
 
-/// The role's first uncapped account (the lowest weekly usage when every one was read in the last 30 min), its env
-/// still empty; None unless the role's harness runs on `[accounts]` (`Credential::Account`).
+/// The role's first uncapped account (the lowest weekly usage when every one was read in the last 30 min), its env still empty; None unless the role's harness runs on `[accounts]` (`Credential::Account`).
 pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Option<Account>> {
     let now = ctx.now;
     let mut names = role.account_list();
@@ -103,7 +96,6 @@ pub fn pick(ctx: &Ctx, cfg: &Config, events: &[Event], role: &Role) -> Result<Op
         .iter()
         .filter(|n| capped_until(cfg, events, n, now).is_none())
         .collect();
-    // Headroom: the lowest live 5h/7d use first; an account never read goes last.
     let used = |n: &String| {
         let m = usage::row(ctx, n);
         let live = m.map(|m| [m.session, m.week].into_iter().flatten().filter(|w| w.1 > now));
@@ -149,7 +141,6 @@ pub fn cap_until(cfg: &Config, r: &dyn Runner, screen: &str, now: u64) -> u64 {
     secs.and_then(at).unwrap_or(now + fallback)
 }
 
-/// Seconds past midnight of `3pm` / `3:30pm`.
 fn clock(word: &str) -> Option<u64> {
     let hm = word.strip_suffix("am").or(word.strip_suffix("pm"))?;
     let (h, m) = hm.split_once(':').unwrap_or((hm, "0"));
@@ -157,7 +148,6 @@ fn clock(word: &str) -> Option<u64> {
     Some((h.parse::<u64>().ok()? % 12 + pm) * 3600 + m.parse::<u64>().ok()? * 60)
 }
 
-/// `(month 1-12, day)` of `nov 4`.
 fn month_day(month: &str, day: &str) -> Option<(u64, u64)> {
     let months = "jan feb mar apr may jun jul aug sep oct nov dec".split(' ');
     let (_, m) = months.zip(1..).find(|(name, _)| month.starts_with(name))?;
@@ -180,7 +170,6 @@ pub fn civil_year(days: u64) -> u64 {
     z / 146_097 * 400 + (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365 + u64::from(m <= 2)
 }
 
-/// The host's UTC offset in seconds (`date +%z`; UTC if unreadable).
 fn local_offset(r: &dyn Runner, now: u64) -> i64 {
     let z = usage::date(r, now, "+%z").parse::<i64>().unwrap_or(0);
     z / 100 * 3600 + z % 100 * 60
@@ -194,8 +183,7 @@ pub fn banner(pat: &str, screen: &str) -> bool {
 
 /// `drover accounts`: each account's state and the open lanes on it. Names only, never tokens.
 pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let events = read(&ctx.state)?;
-    // #785: the lanes still running (`usage::lane_end`), with their accounts.
+    let events = working(&ctx.state)?;
     let running = (0..events.len()).filter(|&i| events[i].kind == "spawn" && usage::lane_end(&events, i).is_none());
     let on: Vec<(&str, &str)> = running
         .filter_map(|i| Some((events[i].str("agent")?, events[i].str("account")?)))
@@ -238,16 +226,14 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Res
     Ok(())
 }
 
-/// #683 (q846): the env account `name` signs a lane of `harness` in with, exactly: `[accounts] account_env`'s JSON
-/// object of env vars (else refused `ACCOUNT_ENV` with its stderr), or with none set its folder (`Accounts::folder`)
-/// as its provider's config folder. Never a token; empty for a harness on no `[accounts]`.
+/// #683 (q846): the env account `name` signs a lane of `harness` in with, exactly: `[accounts] account_env`'s JSON object of env vars (else refused `ACCOUNT_ENV` with its stderr), or with none set its folder (`Accounts::folder`) as its provider's config folder. Never a token; empty for a harness on no `[accounts]`.
 pub fn account_env(cfg: &Config, r: &dyn Runner, harness: &str, name: &str) -> Result<BTreeMap<String, String>> {
     let Credential::Account(acct) = crate::providers::get(harness).credential() else {
         return Ok(BTreeMap::new());
     };
     let Some(cmd) = &cfg.accounts.account_env else {
         if token_file(cfg, harness, name).is_some() {
-            return Ok(BTreeMap::new()); // #707: its token goes in the lane's secrets file (`spawn::deliver`)
+            return Ok(BTreeMap::new());
         }
         let var = acct.config_env.to_string();
         return Ok(BTreeMap::from([(var, cfg.accounts.folder(name).display().to_string())]));
@@ -283,8 +269,7 @@ pub fn account_env(cfg: &Config, r: &dyn Runner, harness: &str, name: &str) -> R
     }
 }
 
-/// #785: `p`'s account with its env and token, signed in: one signed out (`account_env` exit 3, else its CLI's status
-/// command) rests `account-signed-out` (one owner alert) for the role's next. A dry run asks no CLI, logs nothing.
+/// #785: `p`'s account with its env and token, signed in: one signed out (`account_env` exit 3, else its CLI's status command) rests `account-signed-out` (one owner alert) for the role's next. A dry run asks no CLI, logs nothing.
 pub fn signed(
     ctx: &Ctx,
     cfg: &Config,
@@ -312,14 +297,13 @@ pub fn signed(
         let d = json!({"account": name, "harness": role.harness, "meter": "sign-in check", "reason": why});
         let e = Event::new(ctx.now, fleet, None, "account-signed-out", d);
         emit(&ctx.state, cfg, e)?;
-        a = pick(ctx, cfg, &read(&ctx.state)?, role)?;
+        a = pick(ctx, cfg, &working(&ctx.state)?, role)?;
     }
     p.token = a.as_ref().and_then(|a| token_file(cfg, &p.harness, &a.0));
     p.account = a;
     Ok(())
 }
 
-/// #683: the provider's config-folder env var (`CONFIG_ENV`) and its value in `env`.
 fn folder<'a>(harness: &str, env: &'a BTreeMap<String, String>) -> Option<(&'static str, &'a str)> {
     let Credential::Account(acct) = crate::providers::get(harness).credential() else {
         return None;
@@ -328,8 +312,7 @@ fn folder<'a>(harness: &str, env: &'a BTreeMap<String, String>) -> Option<(&'sta
     Some((var, env.get(var)?))
 }
 
-/// #707: with no `account_env`, account `name`'s `[accounts]` value `token-file:<path>` (hand-placed, 0600): the env var
-/// its lane gets the token as (`Harness::token_env`) and the file.
+/// #707: with no `account_env`, account `name`'s `[accounts]` value `token-file:<path>` (hand-placed, 0600): the env var its lane gets the token as (`Harness::token_env`) and the file.
 pub fn token_file(cfg: &Config, harness: &str, name: &str) -> Option<(String, std::path::PathBuf)> {
     let h = crate::providers::get(harness);
     let Credential::Account(acct) = h.credential() else {
@@ -343,8 +326,7 @@ pub fn token_file(cfg: &Config, harness: &str, name: &str) -> Option<(String, st
         .then(|| (var.to_string(), crate::config::expand(f)))
 }
 
-/// #683: account `name`'s sign-in for `drover accounts`: whether it passes, and its line (` → ` its fix): its env's
-/// config folder signed in as its CLI's status command says (#785; never the Keychain), or why its env failed.
+/// #683: account `name`'s sign-in for `drover accounts`: whether it passes, and its line (` → ` its fix): its env's config folder signed in as its CLI's status command says (#785; never the Keychain), or why its env failed.
 pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
     let Some(hn) = crate::providers::accounts().map(|p| p.name) else {
         return (false, "no harness runs on [accounts]".into());
@@ -377,7 +359,7 @@ pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
 /// `drover accounts reset <name>`: spawns may use a capped account again.
 pub fn reset(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, name: &str) -> Result<()> {
     anyhow::ensure!(cfg.accounts.names.contains_key(name), "unknown account '{name}'");
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     if capped_until(cfg, &events, name, ctx.now).is_none() {
         writeln!(out, "{name} is not capped")?;
         return Ok(());
@@ -405,7 +387,6 @@ pub fn cap_line(cfg: &Config, r: &dyn Runner, events: &[Event], name: &str, now:
     format!("capped until {until}: banner {at} + {why}")
 }
 
-/// `*`-wildcard match on lowercased bytes (callers lowercase both sides).
 fn glob(g: &[u8], s: &[u8]) -> bool {
     match g {
         [] => s.is_empty(),

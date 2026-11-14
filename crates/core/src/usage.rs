@@ -1,6 +1,3 @@
-//! What accounts and providers have used (docs/providers.md): drover lane-hours from the log, each account's
-//! usage meter (`Harness::usage_meter`, read through the account's own login), and the `DeepSeek` balance. Secrets
-//! reach `curl` on stdin only: never argv, the log, a cache or the page.
 use crate::config::{expand, Config};
 use crate::devices::save;
 use crate::events::{age, Event};
@@ -12,11 +9,9 @@ use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Poll and cache period of the meter and the balance.
 const POLL: u64 = 600;
 
-/// When spawn `events[i]`'s lane ended (None: it runs): its issue merged, closed or cleaned, its lane-dead, its ACP
-/// session gone (#785), a supersede of it, or its next spawn.
+/// When spawn `events[i]`'s lane ended (None: it runs): its issue merged, closed or cleaned, its lane-dead, its ACP session gone (#785), a supersede of it, or its next spawn.
 pub fn lane_end(events: &[Event], i: usize) -> Option<u64> {
     let s = &events[i];
     let a = s.str("agent").unwrap_or_default();
@@ -25,7 +20,7 @@ pub fn lane_end(events: &[Event], i: usize) -> Option<u64> {
         "lane-dead" => e.fleet == s.fleet && e.str("key").is_some_and(|k| k.ends_with(&format!(":{a}"))),
         "lane-state" => e.str("agent") == Some(a) && e.str("state") == Some("gone"),
         "supersede" => {
-            e.str("agent") == Some(a) || e.data["killed"].as_array().is_some_and(|k| k.iter().any(|n| n == a))
+            e.str("agent") == Some(a) || e.val("killed").as_array().is_some_and(|k| k.iter().any(|n| n == a))
         }
         "spawn" => e.str("agent") == Some(a),
         _ => false,
@@ -45,7 +40,7 @@ pub fn lane_secs(events: &[Event], account: &str, now: u64, window: u64) -> u64 
 }
 
 /// `5h 1.5 · 7d 12.0 drover lane-hours`: what drover ran, not the provider's quota.
-#[allow(clippy::cast_precision_loss)] // hours to one decimal; f64 is exact far past any lane's run time
+#[allow(clippy::cast_precision_loss)]
 pub fn lane_hours(events: &[Event], account: &str, now: u64) -> String {
     let h = |w: u64| lane_secs(events, account, now, w) as f64 / 3600.0;
     format!("5h {:.1} · 7d {:.1} drover lane-hours", h(5 * 3600), h(7 * 86400))
@@ -67,12 +62,10 @@ pub fn load<T: DeserializeOwned>(p: &Path) -> Option<T> {
     serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()
 }
 
-/// A string inside a double-quoted curl config value.
 pub(crate) fn q(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
 }
 
-/// `curl` with its config (headers, body) on stdin: (status, lowercased headers, body).
 pub(crate) fn curl(r: &dyn Runner, url: &str, conf: &str) -> Option<(u32, String, String)> {
     let o = r
         .run_in("curl", &argv(&["-sS", "-m", "15", "-D", "-", "-K", "-", url]), conf)
@@ -104,7 +97,6 @@ pub fn parse_balance(body: &str, ts: u64) -> Option<Balance> {
     })
 }
 
-/// `var`'s value in an env file (`VAR=value` / `export VAR="value"` lines).
 pub(crate) fn env_value(text: &str, var: &str) -> Option<String> {
     let kv = text
         .lines()
@@ -114,11 +106,9 @@ pub(crate) fn env_value(text: &str, var: &str) -> Option<String> {
         .map(|(_, v)| v.trim().trim_matches(['"', '\'']).to_string())
 }
 
-/// The `DeepSeek` balance and whether it is under `warn_below`, read at most every 10 min; None without a key,
-/// Err(`key not found in <file>`) when the configured env file is unreadable or lacks it.
+/// The `DeepSeek` balance and whether it is under `warn_below`, read at most every 10 min; None without a key, Err(`key not found in <file>`) when the configured env file is unreadable or lacks it.
 pub fn deepseek(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Result<(Balance, bool), String>> {
     let p = cfg.providers.deepseek.as_ref()?;
-    // #707: the env file is a secret file (0600, refused if looser); no store.
     let key = match p.env_file.as_deref() {
         Some(f) => match crate::secret::file(&expand(f)) {
             Err(e) => return Some(Err(format!("{e:#}"))),
@@ -155,8 +145,7 @@ pub fn deepseek(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Result<(Balan
 /// (utilization %, reset epoch) of one usage window, if read.
 pub type Window = Option<(f64, u64)>;
 
-/// One account's usage reading: when it was read, and the (utilization %, reset epoch) of the 5-hour session and
-/// the 7-day week.
+/// One account's usage reading: when it was read, and the (utilization %, reset epoch) of the 5-hour session and the 7-day week.
 #[derive(Debug, Default, Clone)]
 pub struct Meter {
     pub ts: u64,
@@ -183,12 +172,11 @@ pub fn epoch(s: &str) -> Option<u64> {
     u64::try_from(days * 86400 + h * 3600 + mi * 60 + se - off).ok()
 }
 
-/// When the week runs out at its rate so far, if that is before its reset.
 #[allow(
     clippy::cast_precision_loss,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
-)] // seconds since the week began, non-negative and far under 2^52
+)]
 pub fn out_at((pct, reset): (f64, u64), now: u64) -> Option<u64> {
     let start = reset.checked_sub(7 * 86400)?;
     let out = start + (now.checked_sub(start)? as f64 * 100.0 / pct.max(0.01)) as u64;
@@ -198,14 +186,12 @@ pub fn out_at((pct, reset): (f64, u64), now: u64) -> Option<u64> {
 /// The meter's (text, percent) parts and the pace warning.
 pub type Shown = (Vec<(String, f64)>, Option<String>);
 
-/// The meter's (text, percent) parts and the pace warning (#707: never Err now the login poll is gone; `_login` and
-/// the Result stay for the frozen board's call).
+/// The meter's (text, percent) parts and the pace warning (#707: never Err now the login poll is gone; `_login` and the Result stay for the frozen board's call).
 #[allow(clippy::unnecessary_wraps)]
 pub fn shown(r: &dyn Runner, m: &Meter, _login: &str, now: u64) -> Result<Shown, String> {
     let mut parts = vec![];
     let read = Some(now.saturating_sub(m.ts)).filter(|s| *s >= 60);
     let read = read.map_or(String::new(), |s| format!(", read {} ago", age(s)));
-    // #785: a window past its reset reads as reset (0%).
     let live = |(p, t): (f64, u64), when: String| (t > now).then(|| (p, format!("resets {when}")));
     let live = |w, when| live(w, when).unwrap_or((0.0, "reset".into()));
     if let Some((p, s)) = m.session.map(|w| live(w, age(w.1.saturating_sub(now)))) {
@@ -271,8 +257,7 @@ pub fn reading(ctx: &Ctx, name: &str, old: impl FnOnce() -> Option<Meter>) -> Op
     row(ctx, name).or_else(old)
 }
 
-/// #707: the account's newest status-line reading (`drover statusline`), fresh or stale; no `/api/oauth/usage`
-/// poll, so an account with no live lane keeps its last row.
+/// #707: the account's newest status-line reading (`drover statusline`), fresh or stale; no `/api/oauth/usage` poll, so an account with no live lane keeps its last row.
 pub fn row(ctx: &Ctx, name: &str) -> Option<Meter> {
     rows(ctx).remove(name).map(|w| Meter {
         ts: w.ts,
@@ -281,8 +266,7 @@ pub fn row(ctx: &Ctx, name: &str) -> Option<Meter> {
     })
 }
 
-/// `drover statusline`: the accounts harness's status-line JSON on stdin (`UsageMeter::status`); appends at most one
-/// row per account per minute and prints `myapp #12 · 5h 41% · 7d 63%`. Never fails the session: errors are swallowed.
+/// `drover statusline`: the accounts harness's status-line JSON on stdin (`UsageMeter::status`); appends at most one row per account per minute and prints `myapp #12 · 5h 41% · 7d 63%`. Never fails the session: errors are swallowed.
 pub fn statusline(ctx: &Ctx, account: &str, lane: &str, input: &str, out: &mut dyn Write) {
     let v: Value = serde_json::from_str(input).unwrap_or_default();
     let how = crate::providers::accounts().and_then(|p| p.usage());
@@ -303,7 +287,6 @@ pub fn statusline(ctx: &Ctx, account: &str, lane: &str, input: &str, out: &mut d
             seven_day_reset: seven.resets,
         };
         let p = ctx.state.with_file_name("usage.jsonl");
-        // Over 1 MB, keep only each account's newest row.
         if std::fs::metadata(&p).is_ok_and(|m| m.len() > 1 << 20) {
             all.insert(account.into(), row);
             let _ = std::fs::write(&p, all.values().map(|r| format!("{}\n", json!(r))).collect::<String>());

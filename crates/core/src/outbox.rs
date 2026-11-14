@@ -1,6 +1,4 @@
-//! #389: a remote lane's command never reaches the main host itself: it waits in its worktree's outbox, which drive
-//! pulls over main → host ssh (#249) and runs.
-use crate::events::{append, fold, last_spawn, read, Event};
+use crate::events::{append, fold, last_spawn, working, Event};
 use crate::{hosts::On, runner::Runner, Ctx};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -26,7 +24,6 @@ pub fn queue(lane: &str, args: &[String]) -> Result<PathBuf> {
     Ok(p)
 }
 
-/// Each remote lane of a live issue: its spawn, `DROVER_LANE` and outbox path.
 fn boxes(events: &[Event]) -> Vec<(&Event, String, String)> {
     let live = fold(events).into_values().filter(|s| !s.done());
     let spawns = live.flat_map(|s| s.lanes.into_values());
@@ -38,7 +35,6 @@ fn boxes(events: &[Event]) -> Vec<(&Event, String, String)> {
         .collect()
 }
 
-/// The outbox moved aside (a leftover one first), then read; it is removed once every line was applied.
 fn take(r: &dyn Runner, sp: &Event, p: &str) -> Result<String> {
     let sh = "d=\"$1.draining\"; [ -s \"$d\" ] || mv -f \"$1\" \"$d\" 2>/dev/null; cat \"$d\" 2>/dev/null; exit 0";
     crate::runner::ok(&On::of(r, Some(sp)), "sh", &crate::runner::argv(&["-c", sh, "sh", p]))
@@ -53,7 +49,7 @@ pub fn look(r: &dyn Runner, events: &[Event]) {
 
 /// drive's side: each live remote lane's outbox of `fleets` (as the look `seen` read it), line by line, then cleared.
 pub fn drain(ctx: &Ctx, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write, fleets: &[&str]) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     for (sp, lane, p) in boxes(&events) {
         let text = fleets.contains(&sp.fleet.as_str()).then(|| take(seen, sp, &p));
         let Some(Ok(text)) = text.map(|t| t.inspect_err(|e| drop(writeln!(out, "outbox {lane}: {e:#}")))) else {
@@ -69,11 +65,10 @@ pub fn drain(ctx: &Ctx, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Wri
     Ok(())
 }
 
-/// One line, once per lane + ts: run as `lane` (from its spawn, never the line), or refused; logged `outbox` either way.
 fn apply(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, sp: &Event, lane: &str, raw: &str) -> Result<()> {
     let v: Value = serde_json::from_str(raw).unwrap_or_default();
-    let (ts, events) = (v["ts"].as_u64(), read(&ctx.state)?);
-    let seen = |e: &Event| e.kind == "outbox" && e.str("lane") == Some(lane) && e.data["sent"].as_u64() == ts;
+    let (ts, events) = (v["ts"].as_u64(), working(&ctx.state)?);
+    let seen = |e: &Event| e.kind == "outbox" && e.str("lane") == Some(lane) && e.val("sent").as_u64() == ts;
     if ts.is_some() && events.iter().any(seen) {
         return Ok(());
     }
@@ -89,7 +84,7 @@ fn apply(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, sp: &Event, lane: &str,
         writeln!(out, "outbox {lane}: refused: {w}")?;
     } else {
         writeln!(out, "outbox {lane}: {}", args[0])?;
-        std::env::set_var("DROVER_LANE", lane); // drive runs with no `DROVER_LANE` of its own
+        std::env::set_var("DROVER_LANE", lane);
         let res = crate::cli::run(&args.iter().map(String::as_str).collect::<Vec<_>>(), ctx, r, out);
         std::env::remove_var("DROVER_LANE");
         d["code"] = json!(res.as_ref().ok());

@@ -223,10 +223,10 @@ fn a_file_the_arch_toml_lists_frozen_or_generated_is_converted_and_never_hot() {
 #[test]
 fn tick_skips_a_fleet_with_hotspots_off() {
     let c = fixture("hotspots-off");
+    let _sh = FakeShed::attached(&c);
     let r = RealGit(
         gh("[]")
             .reply("herdr status", "server:\n  status: running\n")
-            .reply("herdr agent list", NO_AGENTS)
             .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n"),
     );
     let (code, out) = run(&c, &r, &["tick"]);

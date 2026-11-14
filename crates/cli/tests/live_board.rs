@@ -1,13 +1,9 @@
-//! #334 gate 2: the live board in WebKit against a real `serve` on a socket (fake herdr with a Claude Code screen as
-//! herdr prints it: ANSI, CRLF, rules): the chat sheet of a local Claude lane with a session, an Air lane and a lane
-//! with no transcript; the ascii frames across a `/live` update.
 mod common;
 use common::*;
 use drover::events::{append, Event};
 use serde_json::json;
 use std::path::Path;
 
-/// A Claude Code pane as `herdr pane read --format ansi` gives it.
 fn screen(prompt: &str, reply: &str) -> String {
     let rule = "─".repeat(100);
     [
@@ -41,9 +37,15 @@ fn spawn(c: &drover::Ctx, ts: u64, issue: u64, agent: &str, machine: Option<&str
     append(&c.state, &Event::new(ts, "sendmeter", Some(issue), "spawn", d)).unwrap();
 }
 
-/// A real `serve` with three working Claude lanes: 12 (local, a session transcript under `home`), 13 (on the Air)
-/// and 14 (local, no transcript); returns its URL and a paired cookie (`name=value`).
-fn board(name: &str, home: &Path) -> (drover::Ctx, String, String) {
+struct Sheds(Vec<std::path::PathBuf>);
+
+impl Drop for Sheds {
+    fn drop(&mut self) {
+        self.0.iter().for_each(|p| drop(std::fs::remove_file(p)));
+    }
+}
+
+fn board(name: &str, home: &Path) -> (drover::Ctx, String, String, Sheds) {
     let c = ctx(&tmpdir(name), CONFIG);
     spawn(&c, 900_100, 12, "sendmeter-impl-12", None);
     spawn(&c, 900_200, 13, "sendmeter-impl-13", Some("air"));
@@ -55,23 +57,38 @@ fn board(name: &str, home: &Path) -> (drover::Ctx, String, String) {
         json!({"type": "assistant", "timestamp": "2026-11-04T03:01:00Z", "message": {"content": [{"type": "text", "text": "Fixed: the test **passes** now."}]}}),
     ];
     std::fs::write(proj.join("s.jsonl"), said.map(|v| v.to_string()).join("\n") + "\n").unwrap();
-    let a = |n: &str, p: &str| json!({"name": n, "agent_status": "working", "pane_id": p, "cwd": "/x"});
-    let list = json!({"result": {"agents": [a("sendmeter-impl-12", "w1:p1"), a("sendmeter-impl-13", "w2:p1"), a("sendmeter-impl-14", "w3:p1")]}});
-    let r = Fake::default()
-        .reply("herdr agent list", &list.to_string())
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
-        .reply(
-            "herdr pane read w1:p1",
-            &screen("fix the flaky test", "Fixed: the test passes now."),
-        )
-        .reply(
-            "herdr pane read w3:p1",
-            &screen("add the ascii frames", "Done: two frames per lane."),
-        )
-        .reply(
-            "herdr --machine air pane read",
-            &screen("port the sheet", "Ported: the sheet reads the Air."),
-        );
+    let (sh, air): (&'static FakeShed, &'static FakeShed) = (
+        Box::leak(Box::new(FakeShed::new())),
+        Box::leak(Box::new(FakeShed::new())),
+    );
+    let sheds = Sheds(vec![sh.sock.clone(), air.sock.clone()]);
+    for (on, n, (prompt, reply)) in [
+        (
+            sh,
+            "sendmeter-impl-12",
+            ("fix the flaky test", "Fixed: the test passes now."),
+        ),
+        (sh, "sendmeter-impl-13", ("", "")),
+        (
+            sh,
+            "sendmeter-impl-14",
+            ("add the ascii frames", "Done: two frames per lane."),
+        ),
+        (
+            air,
+            "sendmeter-impl-13",
+            ("port the sheet", "Ported: the sheet reads the Air."),
+        ),
+    ] {
+        on.lane(n, "working", "/x");
+        on.screen(n, &screen(prompt, reply));
+    }
+    let f: &'static Fake = Box::leak(Box::default());
+    let over: &'static OverSsh = Box::leak(Box::new(OverSsh {
+        f,
+        hosts: vec![("air", air)],
+    }));
+    let r = drover::shed::With(over, sh.shed());
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
@@ -86,11 +103,9 @@ fn board(name: &str, home: &Path) -> (drover::Ctx, String, String) {
     let url = format!("http://{}/", l.local_addr().unwrap());
     let c2 = c.clone();
     std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
-    (c, url, cookie.trim().trim_start_matches("Cookie: ").to_string())
+    (c, url, cookie.trim().trim_start_matches("Cookie: ").to_string(), sheds)
 }
 
-/// The page at `url` in WebKit, `js` run after `tab(tab); mode(mode)`; `window.late` (numbers) read `wait` s later;
-/// `pre` runs at document start.
 #[allow(clippy::too_many_arguments)]
 fn page(url: &str, cookie: &str, tab: &str, mode: &str, pre: &str, js: &str, wait: &str, png: &Path) -> Vec<f64> {
     let o = webview()
@@ -105,7 +120,6 @@ fn page(url: &str, cookie: &str, tab: &str, mode: &str, pre: &str, js: &str, wai
     out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect()
 }
 
-/// `js` once the Lanes rows are in (#337: a tab the page left out loads after it, from `/frags`).
 fn rowed(js: &str) -> String {
     format!("(function go() {{ if (!document.querySelector('.lane[data-agent]')) return setTimeout(go, 20); {js} }})()")
 }
@@ -117,11 +131,9 @@ fn live_board_chat_and_ascii_in_webkit() {
     }
     let _lock = ui_lock();
     let home = tmpdir("home334");
-    // Lane::session() reads $HOME/.claude; no other test here reads it.
     std::env::set_var("HOME", &home);
-    let (c, url, cookie) = board("live334", &home);
+    let (c, url, cookie, _sheds) = board("live334", &home);
     let shots = std::env::var("DROVER_SNAPSHOTS").map_or_else(|_| tmpdir("live334-png"), std::path::PathBuf::from);
-    // Bug 2: each sheet's default view shows ≥ 1 message, the full view ≥ 1 block, no page error, via the real /lane.
     for agent in ["sendmeter-impl-12", "sendmeter-impl-13", "sendmeter-impl-14"] {
         let js = format!(
             "open($('.lane[data-agent=\"{agent}\"]')); setTimeout(() => {{ const m = $$('.chat>.now .blk.me, .chat>.now .blk.ai').length; \
@@ -143,8 +155,6 @@ fn live_board_chat_and_ascii_in_webkit() {
             "{agent}: default msgs, full blocks, errors: {m:?}"
         );
     }
-    // Bugs 1 and 3: in ascii mode a working lane's frames change, one always shows (no blank sample: no flash), and no
-    // node under the Lanes rows is removed or inserted while a `/live` update (a new lane in the log) lands.
     for (i, theme) in ["farm", "kitchen"].into_iter().enumerate() {
         let js = format!(
             "window.lv = 0; (() => {{ const f0 = frag; frag = (id, h) => {{ if (id === 'lanes') lv++; f0(id, h); }}; \
@@ -158,7 +168,6 @@ fn live_board_chat_and_ascii_in_webkit() {
         let js = rowed(&js);
         let c2 = c.clone();
         let later = std::thread::spawn(move || {
-            // #269: after the board's first draw of Lanes (the page's own read, then the probe's start).
             std::thread::sleep(std::time::Duration::from_millis(2500));
             spawn(
                 &c2,
@@ -192,17 +201,13 @@ fn live_board_chat_and_ascii_in_webkit() {
     }
 }
 
-/// Amendment A.4: the Herd scene paints from the last data this phone saw, never waiting on `/herd.json` (held 3 s here,
-/// as a slow host's reads hold it): the first lane horse within 300 ms of the page arriving once that data is kept; the
-/// first visit (nothing kept) waits for it. Amendment B: `[↻]` is the plain ↻ in every state, spinning only while it
-/// loads (as before #305), no sprite in it, and no two header controls draw the same sprite.
 #[test]
 fn herd_paints_at_once_and_refresh_is_the_plain_spinner() {
     if no_webkit() {
         return;
     }
     let _lock = ui_lock();
-    let (_c, url, cookie) = board("herd334", &tmpdir("home-herd334"));
+    let (_c, url, cookie, _sheds) = board("herd334", &tmpdir("home-herd334"));
     let shots = std::env::var("DROVER_SNAPSHOTS").map_or_else(|_| tmpdir("herd334-png"), std::path::PathBuf::from);
     let pre = "localStorage.herd = '1'; const f = fetch; window.fetch = (u, o) => String(u).includes('herd.json') ? \
                new Promise(r => setTimeout(r, 3000)).then(() => f(u, o)) : f(u, o); \

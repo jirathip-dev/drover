@@ -1,4 +1,3 @@
-//! #83: a lane whose pane is gone but whose work is safe (clean tree, nothing unpushed) is `parked`, not `dead`.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -9,8 +8,7 @@ const NOW: u64 = 1_000_000;
 const SAFE: &str = "sendmeter-impl-12";
 const RISKY: &str = "sendmeter-impl-14";
 
-/// impl #12 (clean, pushed, PR #42 open) and impl #14 (dirty), both without a herdr pane.
-fn fixture(name: &str, paused: bool) -> (drover::Ctx, Fake) {
+fn fixture(name: &str, paused: bool) -> (drover::Ctx, OnShed) {
     let cfg = CONFIG.replace(
         "integration = \"staging\"   # never main",
         &format!("integration = \"staging\"\npaused = {paused}"),
@@ -29,8 +27,6 @@ fn fixture(name: &str, paused: bool) -> (drover::Ctx, Fake) {
     )
     .unwrap();
     let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
         .reply(&format!("git -C /wt/{SAFE} status"), "?? .brief.md\n")
         .reply(&format!("git -C /wt/{SAFE} rev-list"), "0\n")
         .reply(&format!("git -C /wt/{SAFE} rev-parse"), "6a258db\n")
@@ -39,10 +35,9 @@ fn fixture(name: &str, paused: bool) -> (drover::Ctx, Fake) {
             &format!("6a258db{} {}", "0".repeat(33), NOW - 7200),
         )
         .reply(&format!("git -C /wt/{RISKY} status"), " M src/a.rs\n");
-    (c, r)
+    (c, OnShed::new(r))
 }
 
-/// The body at `path`; the page (#269) with every tab as the board draws it.
 fn get(s: &Server, path: &str) -> String {
     let res = String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\n\r\n"), NOW)).into_owned();
     let res = if path.starts_with("/?") {
@@ -53,7 +48,6 @@ fn get(s: &Server, path: &str) -> String {
     res[res.find("\r\n\r\n").unwrap() + 4..].to_string()
 }
 
-/// The lane's row in the Lanes tab (its button line plus the hidden sheet card).
 fn lane<'a>(page: &'a str, agent: &str) -> &'a str {
     let a = page
         .find(&format!("<div class=lane data-agent=\"{agent}\""))
@@ -65,7 +59,7 @@ fn lane<'a>(page: &'a str, agent: &str) -> &'a str {
 fn gone_pane_with_safe_work_is_parked_dirty_is_dead() {
     let (c, r) = fixture("parked-sheet", true);
     let s = Server::new(&c, &r, None);
-    let page = get(&s, "/?all=1"); // #268, #269: the board's tabs
+    let page = get(&s, "/?all=1");
     let safe = lane(&page, SAFE);
     assert!(
         safe.contains("data-role=impl data-gone>"),
@@ -89,7 +83,6 @@ fn gone_pane_with_safe_work_is_parked_dirty_is_dead() {
         page.contains("<h2><span class=m>parked (1)</span></h2>")
             && page.contains("<h2><span class=r>dead (1)</span></h2>")
     );
-    // The Queue tab's rows: parked in neutral, dead in red.
     assert!(
         page.contains("<span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/12\">#12</a></span><span class=m>parked</span>")
             && page.contains("<span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/14\">#14</a></span><span class=r>dead</span>"),
@@ -106,7 +99,6 @@ fn gone_pane_with_safe_work_is_parked_dirty_is_dead() {
     };
     assert_eq!(state(SAFE), Some((json!("parked"), json!("parked · work on PR #42"))));
     assert_eq!(state(RISKY).map(|s| s.0), Some(json!("dead")));
-    // `status`: the paused fleet's reason.
     let (code, out) = run(&c, &r, &["status", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
     let row = out
@@ -160,7 +152,6 @@ fn unpaused_fleet_resumes_a_parked_impl_to_review() {
     assert_eq!(w.next_cmd.as_deref(), Some("drover spawn sendmeter 12 rev"));
 }
 
-/// #128 amendment A: a lane `clean` removed (issue closed on GitHub) is never dead; a truly vanished lane still is.
 #[test]
 fn cleaned_lane_of_a_closed_issue_is_not_dead() {
     let (c, r) = fixture("closed-not-dead", false);
@@ -193,7 +184,6 @@ fn cleaned_lane_of_a_closed_issue_is_not_dead() {
     assert!(code == 0 && !waiting.contains("#14"), "{waiting}");
 }
 
-/// #513: a due fix round held only by spawn slots shows that wait, not parked.
 #[test]
 fn a_fix_round_held_for_a_spawn_slot_is_not_parked() {
     let (c, r) = fixture("parked-slot", false);

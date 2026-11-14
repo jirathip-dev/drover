@@ -1,35 +1,24 @@
-//! #509: retry-safe side effects. A spawn two passes race starts once; a merge a crash left unlogged is recovered from
-//! the PR, never merged twice; the same kick id is driven once.
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
 use drover::runner::{Out, Runner};
 use serde_json::json;
 
-const WS: &str = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
-const PANES: &str = r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#;
 const HEAD: &str = "1111111111111111111111111111111111111111";
 
 fn fake() -> Fake {
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
+        .once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "")
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view 12", r#"{"title":"t","body":"b"}"#)
         .reply("git -C", "")
-        .reply("herdr worktree", WS)
-        .reply("herdr pane list", PANES)
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr pane", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr agent wait", "{}")
-        .reply("kill -0", "") // the intent's process (this test) still runs
+        .reply("kill -0", "")
 }
 
-/// The Fake, with `hook` run once, on the first call starting with `at`: after the call (`after`) or before it.
 struct Hooked<'a> {
     fake: &'a Fake,
     at: &'a str,
@@ -54,16 +43,22 @@ impl Runner for Hooked<'_> {
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 #[test]
 fn two_passes_racing_the_same_spawn_start_it_once_and_the_other_skips() {
     let c = ctx(&tmpdir("race-spawn"), CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
     let r = fake();
     let second = Shared::<Vec<String>>::default();
-    // While the first pass creates the lane (its intent logged, nothing made yet), a kick's pass drives the same issue.
     let race = || {
         std::thread::scope(|s| {
             let b = s.spawn(|| run(&c, &r, &["kick", "sendmeter", "12", "--now"]));
@@ -72,7 +67,7 @@ fn two_passes_racing_the_same_spawn_start_it_once_and_the_other_skips() {
     };
     let a = Hooked {
         fake: &r,
-        at: "herdr worktree",
+        at: "git -C /tmp/does-not-matter/sendmeter worktree add",
         after: false,
         hook: &race,
         fired: Shared::new(false),
@@ -85,12 +80,10 @@ fn two_passes_racing_the_same_spawn_start_it_once_and_the_other_skips() {
         b.contains("REFUSED IN_FLIGHT: skipped: sendmeter#12:spawn@impl@0 in flight"),
         "{b}"
     );
-    assert_eq!(
-        r.count("herdr agent start sendmeter-impl-12"),
-        1,
-        "{:?}",
-        r.calls.borrow()
-    );
+    let runs = sh.all("run");
+    assert_eq!(runs.len(), 1, "{:?}", r.calls.borrow());
+    assert_eq!(runs[0]["name"], "sendmeter-impl-12");
+    assert_eq!(r.count("git -C /tmp/does-not-matter/sendmeter worktree add"), 1);
     assert_eq!(kinds(&c, "spawn").len(), 1);
     let id = |e: &Event| e.str("action_id").map(String::from);
     assert_eq!(
@@ -138,7 +131,6 @@ fn merge_fake(state: &str) -> Fake {
 fn a_crash_between_merge_and_its_log_is_recovered_from_the_merged_pr_without_merging_again() {
     let mut c = ready("crash-merge");
     let r = merge_fake("MERGED");
-    // The crash: the process dies right after `gh pr merge` went through, before anything after it is logged.
     let crash = || panic!("crash injected after gh pr merge");
     let a = Hooked {
         fake: &r,
@@ -157,11 +149,9 @@ fn a_crash_between_merge_and_its_log_is_recovered_from_the_merged_pr_without_mer
     assert_eq!(intent[0].str("action_id"), Some(&*format!("sendmeter#12:merge@{HEAD}")));
     assert!(kinds(&c, "done").is_empty() && kinds(&c, "failed").is_empty() && kinds(&c, "merged").is_empty());
 
-    // Within the timeout the next pass leaves it alone: the merge may still be running.
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED IN_FLIGHT"), "{out}");
-    // Past it, the next pass reads the PR: merged, so `done`, then the `merged` log; never a second merge.
     c.now += 601;
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(code, 0, "{out}");
@@ -169,7 +159,7 @@ fn a_crash_between_merge_and_its_log_is_recovered_from_the_merged_pr_without_mer
     let done = kinds(&c, "done");
     assert_eq!(done.len(), 1);
     assert_eq!(done[0].str("action_id"), intent[0].str("action_id"));
-    assert_eq!(done[0].data["recovered"], true);
+    assert_eq!(done[0].val("recovered"), true);
     let merged = kinds(&c, "merged");
     assert_eq!(merged.len(), 1);
     assert_eq!(merged[0].str("merge_sha"), Some("m3rg3"));
@@ -199,6 +189,8 @@ fn a_timed_out_merge_intent_whose_pr_never_merged_fails_and_merges_once() {
 #[test]
 fn the_same_kick_id_is_driven_once() {
     let c = ctx(&tmpdir("kick-once"), CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = fake();
     let kick = |id: &str| {
         run(

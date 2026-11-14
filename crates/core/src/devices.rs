@@ -1,6 +1,5 @@
-//! Paired phones for the page's reply box (docs/serve.md): only each token's SHA-256 is kept.
 use crate::config::Config;
-use crate::events::{append, emit, read, Event};
+use crate::events::{append, emit, working, Event};
 use crate::gate::refused;
 use crate::Ctx;
 use anyhow::Result;
@@ -24,12 +23,10 @@ pub struct Device {
     pub ip: String,
 }
 
-/// Write `v` as JSON, mode 0600.
 pub(crate) fn save(p: &Path, v: &impl Serialize) -> Result<()> {
     write0600(p, serde_json::to_string_pretty(v)?.as_bytes())
 }
 
-/// Replace `p` with `b`, mode 0600, atomically (#122): a temp file renamed over `p`; on any error `p` is left intact.
 pub(crate) fn write0600(p: &Path, b: &[u8]) -> Result<()> {
     std::fs::create_dir_all(p.parent().unwrap_or(p))?;
     let tmp = tmp_name(p);
@@ -45,7 +42,6 @@ pub(crate) fn write0600(p: &Path, b: &[u8]) -> Result<()> {
     Ok(r.inspect_err(|_| drop(std::fs::remove_file(&tmp)))?)
 }
 
-/// #342: a temp name unique per call (pid + a process-wide counter): serve's threads write concurrently.
 pub(crate) fn tmp_name(p: &Path) -> PathBuf {
     static N: AtomicU64 = AtomicU64::new(0);
     PathBuf::from(format!(
@@ -78,7 +74,7 @@ pub fn store(ctx: &Ctx, d: &[Device]) -> Result<()> {
     let fresh = |e: &Event| e.kind == "state-write-failed" && e.ts + 3600 > ctx.now;
     let p = crate::db::file(&ctx.state);
     let r = crate::db::store(&ctx.state, "devices", d);
-    let seen = || read(&ctx.state).unwrap_or_default().iter().any(fresh);
+    let seen = || working(&ctx.state).unwrap_or_default().iter().any(fresh);
     if let Some(e) = r.as_ref().err().filter(|_| !seen()) {
         let kind = e.downcast_ref().map_or(io::ErrorKind::Other, io::Error::kind);
         let d = json!({"path": p, "error": kind.to_string(), "reason": format!("{}: {kind}", p.display())});
@@ -152,7 +148,6 @@ pub fn approve(ctx: &Ctx, code: &str) -> Result<String> {
         (d.code, d.created, d.used) = (None, ctx.now, ctx.now);
         (d.label.clone(), d.hash.clone(), d.ip.clone())
     };
-    // #501: a browser pairing again replaces its older row (same label but the hash suffix, same address).
     let kind = |l: &str| l.rsplit_once(' ').map_or(l, |p| p.0).to_string();
     all.retain(|o| o.hash == hash || o.code.is_some() || o.ip != ip || kind(&o.label) != kind(&label));
     store(ctx, &all)?;
@@ -163,12 +158,10 @@ pub fn approve(ctx: &Ctx, code: &str) -> Result<String> {
     Ok(label)
 }
 
-/// Constant-time string equality (codes, token hashes).
 fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0, |d, (x, y)| d | (x ^ y)) == 0
 }
 
-/// The `hd=` token's hash in a `Cookie` header.
 fn token(cookie: &str) -> Option<String> {
     Some(sha256(
         cookie.split(';').find_map(|c| c.trim().strip_prefix("hd="))?.as_bytes(),
@@ -209,12 +202,11 @@ pub fn check(ctx: &Ctx, cookie: &str) -> Result<Device, String> {
         return Err("expired".into());
     }
     let stale = std::mem::replace(&mut all[i].used, ctx.now) + 3600 <= ctx.now;
-    let _ = stale.then(|| store(ctx, &all));
+    let _ = stale.then(|| crate::db::store_now(&ctx.state, "devices", &all));
     Ok(all.swap_remove(i))
 }
 
-/// #501: one `serve.log` line per 401 or 503 the board answers: `auth <unix secs> <status> <method> <route>: <reason>`
-/// (the route without its query; never a token).
+/// #501: one `serve.log` line per 401 or 503 the board answers: `auth <unix secs> <status> <method> <route>: <reason>` (the route without its query; never a token).
 pub fn denied(ctx: &Ctx, status: &str, method: &str, route: &str, why: &str) {
     let line = format!("auth {} {status} {method} {route}: {why}\n", ctx.now);
     let mut o = std::fs::OpenOptions::new();
@@ -240,7 +232,6 @@ pub fn denials(ctx: &Ctx) -> (usize, usize) {
     (n("401"), n("503"))
 }
 
-/// A database error's kind: SQLite's code (`DatabaseBusy`, `NotADatabase`), else the I/O error's.
 fn kind(e: &anyhow::Error) -> String {
     match e.downcast_ref::<rusqlite::Error>() {
         Some(rusqlite::Error::SqliteFailure(f, _)) => format!("{:?}", f.code),

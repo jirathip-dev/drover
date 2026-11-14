@@ -1,5 +1,3 @@
-//! #164: build folders freed when a lane finishes, the worktree budget (DISK_BUDGET), the hourly clean, leftovers
-//! auto-saved to wip/, orphan folders.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -15,10 +13,14 @@ fn ev(c: &drover::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
 }
 
 fn events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
-/// `<wt>/<dir>/deep/blob` of `bytes`; the build folder.
 fn build(wt: &Path, dir: &str, bytes: usize) -> PathBuf {
     let p = wt.join(dir).join("deep");
     std::fs::create_dir_all(&p).unwrap();
@@ -26,12 +28,11 @@ fn build(wt: &Path, dir: &str, bytes: usize) -> PathBuf {
     wt.join(dir)
 }
 
-/// A lane's spawn event and its worktree dir under the root.
 fn lane(c: &drover::Ctx, ts: u64, issue: u64, role: &str, name: &str) -> PathBuf {
     let w = c.worktrees.join("sendmeter").join(name);
     std::fs::create_dir_all(&w).unwrap();
     let agent = format!("sendmeter-{role}-{issue}");
-    let d = json!({"role": role, "agent": agent, "worktree": w, "pane": format!("{name}:p1"), "workspace": name});
+    let d = json!({"role": role, "agent": agent, "worktree": w, "pane": agent, "workspace": ""});
     ev(c, ts, issue, "spawn", d);
     w
 }
@@ -55,19 +56,17 @@ fn verdict(c: &drover::Ctx, r: &Fake, v: &str) -> String {
     out
 }
 
-/// The reviewer's build folders go at its verdict, even when its dirty worktree stays.
 #[test]
 fn a_reviewer_verdict_frees_its_build_folders() {
     let c = ctx(&tmpdir("disk-rev"), CONFIG);
+    let _sh = FakeShed::attached(&c);
     let imp = lane(&c, 10, 12, "impl", "issue-12");
     let rev = lane(&c, 20, 12, "rev", "rev-12-r1");
     let (rt, it) = (build(&rev, "target", 100), build(&imp, "target", 100));
     let r = Fake::default()
         .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)
         .reply(&format!("git -C {} status", rev.display()), " M src/x.rs\n")
-        .reply("git -C", "")
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr", "{}");
+        .reply("git -C", "");
     verdict(&c, &r, "FAIL");
     assert!(
         !rt.exists() && rev.exists(),
@@ -77,51 +76,47 @@ fn a_reviewer_verdict_frees_its_build_folders() {
     assert_eq!(events(&c, "lane-kept").len(), 1);
 }
 
-/// A PASS at the head frees the builder's build folders; never while it is working; a tracked one stays.
 #[test]
 fn a_builder_with_a_pass_frees_its_build_folders() {
     for (status, freed) in [("idle", true), ("working", false)] {
         let c = ctx(&tmpdir("disk-impl"), CONFIG);
+        let sh = FakeShed::attached(&c);
         let imp = lane(&c, 10, 12, "impl", "issue-12");
         let (nm, dist) = (build(&imp, "node_modules", 100), build(&imp, "dist", 100));
-        let list = agents(&[("sendmeter-impl-12", status, "/x", "issue-12:p1")]);
+        sh.lane("sendmeter-impl-12", status, "/x");
         let r = Fake::default()
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)
             .once(&format!("git -C {} check-ignore -q dist", imp.display()), 1, "")
-            .reply("git -C", "")
-            .reply("herdr agent list", &list);
+            .reply("git -C", "");
         verdict(&c, &r, "PASS");
         assert_eq!(!nm.exists(), freed, "{status}");
         assert!(dist.exists(), "not git-ignored: stays");
     }
 }
 
-/// Over `worktree_budget_gb`: the idlest lane's build folders go first, a working one's never; still over → the
-/// stamp makes spawn refuse DISK_BUDGET, and drive's pass stops starting.
 #[test]
 fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
-    // 2.5 blocks of budget (`du` counts 4096-byte blocks).
     let cfg = |gb: f64| format!("{CONFIG}worktree_budget_gb = {gb}\n");
     let d = tmpdir("disk-budget");
     let c = ctx(&d, &cfg(10240.0 / 1_073_741_824.0));
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let (old, new, busy) = (
         lane(&c, 10, 7, "impl", "issue-7"),
         lane(&c, 20, 8, "impl", "issue-8"),
         lane(&c, 5, 9, "impl", "issue-9"),
     );
-    ev(&c, 30, 7, "verdict", json!({"verdict": "PASS", "sha": HEAD})); // #7's last activity: 30
+    ev(&c, 30, 7, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
     let (o, n, b) = (
         build(&old, "target", 4096),
         build(&new, "target", 4096),
         build(&busy, "target", 4096),
     );
-    let r = Fake::default().reply("git -C", "").reply(
-        "herdr agent list",
-        &agents(&[("sendmeter-impl-9", "working", "/x", "p")]),
-    );
+    sh.lane("sendmeter-impl-9", "working", "/x");
+    let r = Fake::default().reply("git -C", "");
     let run_budget = |c: &drover::Ctx| {
         let mut out = vec![];
-        drover::check::budget(c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+        drover::check::budget(c, &Config::load(&c.config).unwrap(), &sh.on(&r), &mut out).unwrap();
         String::from_utf8(out).unwrap()
     };
     let out = run_budget(&c);
@@ -133,7 +128,7 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
     let freed = events(&c, "budget-freed");
     assert_eq!(freed.len(), 1);
     assert_eq!(
-        (freed[0].data["lanes"].clone(), freed[0].data["bytes"].as_u64()),
+        (freed[0].val("lanes").clone(), freed[0].val("bytes").as_u64()),
         (json!(["sendmeter-impl-8"]), Some(4096))
     );
     let stamp = || {
@@ -142,12 +137,15 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
     };
     assert_eq!(stamp(), format!("8192 {}", c.now));
 
-    // Half a block: #7 goes too, the working #9 keeps 4096 → still over.
     let c = ctx(&d, &cfg(2048.0 / 1_073_741_824.0));
+    sh.attach(&c);
     run_budget(&c);
     assert!(!o.exists() && b.exists());
     assert_eq!(stamp(), format!("4096 {}", c.now));
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS).reply("git -C", "");
+    sh.exit("sendmeter-impl-9");
+    let r = Fake::default()
+        .reply("git -C", "")
+        .reply("which shed", "/opt/shed/bin/shed\n");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "1", "impl"]);
     assert_eq!(code, 3, "{out}");
     assert!(
@@ -160,7 +158,8 @@ fn over_budget_frees_the_idlest_lane_first_then_disk_budget() {
         busy.display()
     );
     assert!(out.contains(&why), "{out}");
-    assert!(!r.called("herdr worktree"), "nothing created");
+    let made = r.calls.borrow().iter().any(|c| c.contains("worktree add"));
+    assert!(!made && sh.all("run").is_empty(), "nothing created");
 }
 
 #[test]
@@ -176,9 +175,12 @@ fn a_missing_root_counts_zero() {
     let c = ctx(&d, &cfg);
     let wt = lane(&c, 10, 7, "impl", "issue-7");
     build(&wt, "src", 4096);
-    let r = Fake::default().reply("git -C", "").reply("herdr agent list", NO_AGENTS);
+    let sh = FakeShed::attached(&c);
+    let r = Fake::default()
+        .reply("git -C", "")
+        .reply("which shed", "/opt/shed/bin/shed\n");
     let mut out = vec![];
-    drover::check::budget(&c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+    drover::check::budget(&c, &Config::load(&c.config).unwrap(), &sh.on(&r), &mut out).unwrap();
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "1", "impl"]);
     assert_eq!(code, 3, "{out}");
     let why = format!(
@@ -193,7 +195,6 @@ fn a_missing_root_counts_zero() {
     );
 }
 
-/// drive walks the worktrees first: over budget with nothing to free, the start is refused and the pass stops.
 #[test]
 fn drive_refuses_starts_over_budget() {
     let c = ctx(
@@ -208,8 +209,9 @@ fn drive_refuses_starts_over_budget() {
     );
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "1", "2"]).0, 0);
     build(&c.worktrees.join("old"), "x", 5000);
+    let _sh = FakeShed::attached(&c);
     let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "")
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#);
     let (code, out) = run(&c, &r, &["drive"]);
@@ -221,12 +223,11 @@ fn drive_refuses_starts_over_budget() {
     assert!(!out.contains("#2 start"), "the pass stops: {out}");
 }
 
-/// The tick's `clean --yes` sweep runs once an hour (a merged lane's worktree goes), not only after a merge.
 #[test]
 fn the_hourly_sweep_runs_once_per_hour() {
-    // Paused: drive's own after-merge `clean` (#155: every unpaused fleet gets a pass) would sweep too.
     let cfg = CONFIG.replace("integration = \"staging\"", "integration = \"staging\"\npaused = true");
     let mut c = ctx(&tmpdir("disk-hourly"), &cfg);
+    let _sh = FakeShed::attached(&c);
     let merged = |c: &drover::Ctx, n: u64| {
         ev(
             c,
@@ -242,21 +243,26 @@ fn the_hourly_sweep_runs_once_per_hour() {
     let r = || {
         Fake::default()
             .reply("herdr status", "version: 1\nversion: 1\n")
-            .reply("herdr agent list", NO_AGENTS)
             .reply(&ahead("issue-12"), "0\n")
             .reply(&ahead("issue-13"), "0\n")
             .reply("git -C", "")
-            .reply("herdr", "{}")
+    };
+    let removes = |r: &Fake| {
+        let calls = r.calls.borrow();
+        calls
+            .iter()
+            .filter(|l| l.starts_with("git -C") && l.contains(" worktree remove "))
+            .count()
     };
     let tick = |c: &drover::Ctx| {
         let r = r();
         let (code, out) = run(c, &r, &["tick"]);
         assert_eq!(code, 0, "{out}");
-        (r.count("herdr worktree remove"), out)
+        (removes(&r), out)
     };
     let (n, out) = tick(&c);
     assert_eq!(n, 1, "{out}");
-    std::fs::remove_dir_all(first).unwrap(); // what herdr's removal does
+    std::fs::remove_dir_all(first).unwrap();
     lane(&c, 60, 13, "impl", "issue-13");
     merged(&c, 13);
     c.now = NOW + 3599;
@@ -281,7 +287,6 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-/// Real git; herdr and `date` are scripted (no agents, workspace already gone).
 struct GitHerdr(Fake);
 
 impl drover::runner::Runner for GitHerdr {
@@ -293,8 +298,6 @@ impl drover::runner::Runner for GitHerdr {
     }
 }
 
-/// A merged lane's unsaved work: a clean scan → committed, pushed to `wip/`, the remote sha read back, removed;
-/// a secret → kept, `wip-blocked` once, and it goes to the phone.
 #[test]
 fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
     let d = tmpdir("disk-wip");
@@ -307,6 +310,7 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
         &d,
         &CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap()),
     );
+    let _sh = FakeShed::attached(&c);
     let wt = |n: u64, file: &str, body: &str| {
         let p = c.worktrees.join("sendmeter").join(format!("issue-{n}"));
         git(
@@ -322,7 +326,7 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
         );
         std::fs::write(p.join(".brief.md"), "brief").unwrap();
         std::fs::write(p.join(file), body).unwrap();
-        let d = json!({"role": "impl", "agent": format!("impl-{n}"), "worktree": p, "pane": format!("w{n}:p1"), "workspace": format!("w{n}")});
+        let d = json!({"role": "impl", "agent": format!("impl-{n}"), "worktree": p, "pane": format!("impl-{n}"), "workspace": ""});
         ev(&c, 10, n, "spawn", d);
         ev(
             &c,
@@ -336,13 +340,7 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
     let saved = wt(12, "notes.txt", "work\n");
     git(&saved, &["commit", "-q", "--allow-empty", "-m", "unpushed"]);
     let secret = wt(13, "env.txt", concat!("TOKEN=gh", "p_abcdefghijklmnopqrstu1234\n"));
-    let r = || {
-        GitHerdr(
-            Fake::default()
-                .reply("herdr agent list", NO_AGENTS)
-                .reply("date -r", "20261102-072000\n"),
-        )
-    };
+    let r = || GitHerdr(Fake::default().reply("date -r", "20261102-072000\n"));
     let (code, dry) = run(&c, &r(), &["clean"]);
     assert_eq!(code, 0, "{dry}");
     assert!(
@@ -406,7 +404,6 @@ fn leftovers_are_saved_to_wip_or_kept_on_a_secret() {
     );
 }
 
-/// Folders under the worktree root of no fleet are listed by `clean`, removed only with `--orphans --yes`.
 #[test]
 fn orphans_are_listed_and_removed_only_with_the_flag() {
     let c = ctx(&tmpdir("disk-orphans"), CONFIG);
@@ -416,7 +413,8 @@ fn orphans_are_listed_and_removed_only_with_the_flag() {
         std::fs::create_dir_all(p).unwrap();
     }
     build(&old, "issue-3", 10);
-    let r = || Fake::default().reply("herdr agent list", NO_AGENTS);
+    let _sh = FakeShed::attached(&c);
+    let r = Fake::default;
     for args in [&["clean"][..], &["clean", "--yes"], &["clean", "--orphans"]] {
         let (code, out) = run(&c, &r(), args);
         assert_eq!(code, 0, "{out}");
@@ -440,15 +438,16 @@ fn orphans_are_listed_and_removed_only_with_the_flag() {
     assert!(out.contains(&format!("removed orphan {}", old.display())), "{out}");
 }
 
-/// The Host tab's [remove orphans]: shown with a confirm when there are orphans; only a paired device may POST it.
 #[test]
 fn the_host_tab_removes_orphans_for_a_paired_device_only() {
     const ADDR: &str = "127.0.0.1:7777";
     let c = ctx(&tmpdir("disk-orphans-page"), CONFIG);
     let old = c.worktrees.join("oldproj");
     std::fs::create_dir_all(&old).unwrap();
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
-    let s = drover::serve::Server::new(&c, &r, Some(ADDR.into()));
+    let sh = FakeShed::attached(&c);
+    let r = Fake::default();
+    let w = sh.on(&r);
+    let s = drover::serve::Server::new(&c, &w, Some(ADDR.into()));
     let page = host_tab(&s, ADDR, NOW);
     assert!(
         page.contains(
@@ -476,10 +475,9 @@ fn the_host_tab_removes_orphans_for_a_paired_device_only() {
     assert!(!old.exists() && !host_tab(&s, ADDR, NOW).contains("remove orphans"));
 }
 
-/// Real git; a `ssh <host> -- <line>` runs `<line>` here (the Air shares this disk); `date` and herdr are scripted.
-struct TwoHosts(Fake);
+struct TwoHosts<'a>(Fake, &'a FakeShed);
 
-impl drover::runner::Runner for TwoHosts {
+impl drover::runner::Runner for TwoHosts<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         let line = args.last().map_or("", String::as_str);
         match prog {
@@ -491,6 +489,14 @@ impl drover::runner::Runner for TwoHosts {
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
         let line = args.last().map_or("", String::as_str);
+        if prog == "ssh" && line.starts_with("'shed' 'connect'") {
+            self.0.calls.borrow_mut().push(format!("ssh {}", args.join(" ")));
+            let stdout = self.1.connect(input);
+            return Ok(drover::runner::Out {
+                stdout,
+                ..Default::default()
+            });
+        }
         match prog {
             "ssh" if !line.starts_with("'date' ") => {
                 drover::runner::Real.run_in("sh", &["-c".into(), line.into()], input)
@@ -500,8 +506,6 @@ impl drover::runner::Runner for TwoHosts {
     }
 }
 
-/// #716: lane `impl-48` left dirty work on this host and on the Air; one `clean --yes` saves each to its own wip/
-/// branch (no push rejected), removes both worktrees though a skipped build file stays, and the next clean is silent.
 #[test]
 fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
     let d = tmpdir("disk-wip-716");
@@ -512,12 +516,13 @@ fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
     git(&local, &["push", "-q", "origin", "HEAD"]);
     let cfg = CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
     let c = ctx(&d, &format!("{cfg}\n[hosts.air]\nmachine = \"air\"\n"));
+    let (_sh, air_shed) = (FakeShed::attached(&c), FakeShed::new());
     let wt = |dir: &str, host: Option<&str>| {
         let p = c.worktrees.join(dir).join("issue-48");
         git(&local, &["worktree", "add", "-q", "--detach", p.to_str().unwrap()]);
         std::fs::write(p.join("notes.txt"), format!("{dir}\n")).unwrap();
-        build(&p, "target", 10); // skipped by the save, left in the folder
-        let mut e = json!({"role": "impl", "agent": "impl-48", "worktree": p, "pane": "w48:p1", "workspace": "w48"});
+        build(&p, "target", 10);
+        let mut e = json!({"role": "impl", "agent": "impl-48", "worktree": p, "pane": "impl-48", "workspace": ""});
         if let Some(h) = host {
             e["host"] = json!(h);
             e["machine"] = json!(h);
@@ -533,14 +538,7 @@ fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
         "merged",
         json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
     );
-    let r = || {
-        TwoHosts(
-            Fake::default()
-                .reply("herdr agent list", NO_AGENTS)
-                .reply("herdr --machine air agent list", NO_AGENTS)
-                .reply("date", "20261102-072000\n"),
-        )
-    };
+    let r = || TwoHosts(Fake::default().reply("date", "20261102-072000\n"), &air_shed);
     let (code, out) = run(&c, &r(), &["clean", "--yes"]);
     assert_eq!(code, 0, "{out}");
     let saved: Vec<String> = (events(&c, "wip-saved").iter())
@@ -559,6 +557,10 @@ fn two_hosts_saving_one_lane_in_the_same_second_get_two_branches() {
         );
     }
     assert!(!mini.exists() && !air.exists(), "both removed on this tick: {out}");
+    assert!(
+        air_shed.methods().contains(&"ls".to_string()),
+        "the Air's lanes were looked at"
+    );
     let (code, again) = run(&c, &r(), &["clean", "--yes"]);
     assert_eq!(code, 0, "{again}");
     assert!(!again.contains("issue-48"), "{again}");
@@ -586,17 +588,14 @@ fn over_budget_frees_waiting_lanes_longest_waiting_first() {
         cache("sendmeter-impl-8"),
         cache("sendmeter-impl-9"),
     );
-    let r = Fake::default().reply("git -C", "").reply(
-        "herdr agent list",
-        &agents(&[
-            ("sendmeter-impl-7", "blocked", "/x", "p7"),
-            ("sendmeter-impl-8", "idle", "/x", "p8"),
-            ("sendmeter-impl-9", "working", "/x", "p9"),
-        ]),
-    );
+    let sh = FakeShed::attached(&c);
+    sh.lane("sendmeter-impl-7", "blocked", "/x");
+    sh.lane("sendmeter-impl-8", "idle", "/x");
+    sh.lane("sendmeter-impl-9", "working", "/x");
+    let r = Fake::default().reply("git -C", "");
     let run_budget = |c: &drover::Ctx| {
         let mut out = vec![];
-        drover::check::budget(c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+        drover::check::budget(c, &Config::load(&c.config).unwrap(), &sh.on(&r), &mut out).unwrap();
         String::from_utf8(out).unwrap()
     };
     let out = run_budget(&c);
@@ -612,6 +611,7 @@ fn over_budget_frees_waiting_lanes_longest_waiting_first() {
     );
 
     let c = ctx(&d, &cfg(2048.0 / 1_073_741_824.0));
+    sh.attach(&c);
     run_budget(&c);
     assert!(!a.exists() && !ca.exists() && b.exists() && cb.exists());
     let freed = events(&c, "budget-freed");
@@ -640,9 +640,10 @@ fn the_budget_counts_a_hard_link_and_a_clone_once() {
         let _ = std::fs::remove_file(wt.join("c"));
     }
     let size = std::fs::metadata(&a).unwrap().blocks() * 512;
-    let r = Fake::default().reply("git -C", "").reply("herdr agent list", NO_AGENTS);
+    let sh = FakeShed::attached(&c);
+    let r = Fake::default().reply("git -C", "");
     let mut out = vec![];
-    drover::check::budget(&c, &Config::load(&c.config).unwrap(), &r, &mut out).unwrap();
+    drover::check::budget(&c, &Config::load(&c.config).unwrap(), &sh.on(&r), &mut out).unwrap();
     let stamp = std::fs::read_to_string(c.state.with_file_name("worktrees.du")).unwrap();
     let total = stamp.split_whitespace().next();
     assert_eq!(total, Some(size.to_string().as_str()), "cloned: {cloned}");

@@ -1,9 +1,7 @@
-//! #22: the dsh harness — pinned dsh-tui launch, settle on herdr's `dsh-tui` label,
-//! and the git pre-push hook that stands in for a pre-tool hook.
 mod common;
 use common::*;
 use drover::events::read;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Command;
 
@@ -19,12 +17,10 @@ fn pane(agent: &str, status: &str) -> String {
     serde_json::json!({"result": {"pane": {"pane_id": "w9:p1", "agent": agent, "agent_status": status}}}).to_string()
 }
 
-/// A dsh rev spawn up to the kick; `states` are the successive `herdr pane get` answers.
 fn spawn_rev(name: &str, states: &[(&str, &str)]) -> (drover::Ctx, Fake, i32, String) {
     spawn_rev_with(name, states, "  ⌸ ❯\n")
 }
 
-/// As `spawn_rev`, with `screen` as the lane's visible screen once idle.
 fn spawn_rev_with(name: &str, states: &[(&str, &str)], screen: &str) -> (drover::Ctx, Fake, i32, String) {
     let d = tmpdir(name);
     let c = ctx(&d, &dsh_config());
@@ -70,39 +66,45 @@ fn spawn_rev_with(name: &str, states: &[(&str, &str)], screen: &str) -> (drover:
 fn dry_run_launches_pinned_dsh_tui_with_role_patch() {
     let d = tmpdir("dsh-plan");
     let c = ctx(&d, &dsh_config());
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let (code, out) = run(
         &c,
-        &Fake::default(),
+        &Fake::default().reply("which shed", "/opt/shed/bin/shed\n"),
         &["spawn", "sendmeter", "12", "rev", "--dry-run", "--json"],
     );
     assert_eq!(code, 0, "{out}");
     let p: Value = serde_json::from_str(&out).unwrap();
-    let cmd = |i: usize| -> Vec<String> {
-        p["commands"][i]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|w| w.as_str().unwrap().to_string())
-            .collect()
+    let cmd = |i: usize| -> (String, Value) {
+        let w = p["commands"][i].as_array().unwrap();
+        assert_eq!(w[0], "shed", "{w:?}");
+        let params = serde_json::from_str(w[2].as_str().unwrap()).unwrap();
+        (w[1].as_str().unwrap().to_string(), params)
     };
-    let patch = c.config.parent().unwrap().join("dsh/fleet-rev.patch.yml");
-    assert_eq!(
-        cmd(3),
-        [
-            "herdr",
-            "pane",
-            "run",
-            "<pane>",
-            "dsh-tui",
-            "--patch",
-            &format!("'{}'", patch.display())
-        ]
+    let (lane, patch) = (
+        "sendmeter-rev-12-r1",
+        c.config.parent().unwrap().join("dsh/fleet-rev.patch.yml"),
     );
-    assert_eq!(cmd(4), ["herdr", "pane", "get", "<pane>"]);
-    assert_eq!(cmd(5), ["herdr", "pane", "read", "<pane>", "--source", "visible"]);
-    assert_eq!(cmd(6), ["herdr", "pane", "send-keys", "<pane>", "esc"]);
-    assert_eq!(cmd(7), ["herdr", "agent", "rename", "<pane>", "sendmeter-rev-12-r1"]);
-    assert_eq!(cmd(8)[..4], ["herdr", "pane", "send-text", "<pane>"].map(String::from));
+    let at = |m: &str, v: Value| (m.to_string(), v);
+    assert_eq!(cmd(2).0, "run");
+    assert_eq!(cmd(2).1["labels"]["harness"], "dsh");
+    let launch = format!("exec dsh-tui --patch '{}'\r", patch.display());
+    assert_eq!(cmd(4), at("send", json!({"name": lane, "text": launch})));
+    assert_eq!(cmd(5), at("get", json!({"name": lane})));
+    assert_eq!(cmd(6), at("read", json!({"name": lane, "history": false})));
+    assert_eq!(cmd(7), at("keys", json!({"name": lane, "keys": ["esc"]})));
+    assert_eq!(
+        cmd(8),
+        at("get", json!({"name": lane})),
+        "the rename: shed names it already"
+    );
+    let (m, kick) = cmd(9);
+    assert!(
+        m == "send" && kick["text"].as_str().unwrap().starts_with("Read "),
+        "{kick}"
+    );
+    assert_eq!(cmd(11), at("keys", json!({"name": lane, "keys": ["enter"]})));
+    assert!(sh.methods().is_empty(), "a dry run calls nothing");
 }
 
 #[test]
@@ -121,7 +123,6 @@ fn sync_writes_per_role_dsh_patch() {
     assert!(imp.contains("mode: danger-full-access"), "{imp}");
 }
 
-/// AC3 (Amendment A): the `dsh-tui` label going idle -> working drives settle and confirmation.
 #[test]
 fn spawn_waits_for_dsh_tui_idle_then_kicks_and_confirms_working() {
     let (c, r, code, out) = spawn_rev(
@@ -145,7 +146,6 @@ fn spawn_waits_for_dsh_tui_idle_then_kicks_and_confirms_working() {
     );
     assert!(start < idle && idle < rename && rename < prompt, "{calls:?}");
     assert!(calls[start - 1].starts_with("herdr pane run w9:p1 export DROVER_LANE='sendmeter:12:rev'"));
-    // The pre-push hook is installed in this worktree only, before the harness starts.
     let wt_cfg = calls
         .iter()
         .position(|c| c.contains("config --worktree core.hooksPath"))
@@ -160,7 +160,7 @@ fn spawn_waits_for_dsh_tui_idle_then_kicks_and_confirms_working() {
     let ev = read(&c.state).unwrap();
     let last = ev.last().unwrap();
     assert_eq!(
-        (last.kind.as_str(), &last.data["harness"], &last.data["confirmed"]),
+        (last.kind.as_str(), last.val("harness"), last.val("confirmed")),
         ("spawn", &"dsh".into(), &true.into())
     );
 }
@@ -172,7 +172,6 @@ fn quick_turn_that_lands_on_done_confirms() {
         &[("dsh-tui", "idle"), ("dsh-tui", "idle"), ("dsh-tui", "done")],
     );
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
-    // Still idle right after the prompt: polled again (1 s apart) until done.
     assert_eq!(r.count("sleep 1"), 1);
 }
 
@@ -182,11 +181,9 @@ fn never_idle_sends_no_prompt_and_exits_4() {
     assert_eq!(code, 4);
     assert!(!r.called("herdr pane send-text"));
     assert_eq!(r.count("herdr pane get w9:p1"), 90);
-    assert_eq!(read(&c.state).unwrap().last().unwrap().data["confirmed"], false);
+    assert_eq!(read(&c.state).unwrap().last().unwrap().val("confirmed"), false);
 }
 
-/// Live pilot finding: on a machine that never finished it, dsh-TUI opens a first-run
-/// wizard that reports idle but swallows input; Esc skips it before the prompt.
 #[test]
 fn first_run_wizard_is_skipped_before_the_prompt() {
     let wizard =
@@ -204,8 +201,6 @@ fn first_run_wizard_is_skipped_before_the_prompt() {
     assert!(!r.called("herdr pane send-keys w9:p1 esc"), "no wizard, no Esc");
 }
 
-/// Live pilot finding: a prompt sent while dsh-TUI redraws is lost. Retry 5 s later;
-/// a kick left typed in the input box only gets Enter, never a second copy.
 #[test]
 fn unconfirmed_prompt_is_retried_and_a_typed_kick_gets_enter() {
     let mut states = vec![("dsh-tui", "idle")];
@@ -223,8 +218,6 @@ fn unconfirmed_prompt_is_retried_and_a_typed_kick_gets_enter() {
     assert_eq!(r.count("sleep 5"), 1);
 }
 
-/// dsh-TUI's own state reports drop the herdr agent name: `drover check` still finds
-/// the lane by its spawn pane instead of calling it dead.
 #[test]
 fn check_finds_unnamed_dsh_lane_by_its_pane() {
     let (c, _, code, _) = spawn_rev("dsh-check", &[("dsh-tui", "idle"), ("dsh-tui", "working")]);
@@ -241,11 +234,21 @@ fn check_finds_unnamed_dsh_lane_by_its_pane() {
 fn spawn_refuses_unpinned_dsh_tui() {
     let d = tmpdir("dsh-pin");
     let c = ctx(&d, &dsh_config());
+    let sh = FakeShed::new();
+    sh.attach(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let r = Fake::default().reply("dsh-tui version", "profile: 0.18.0  /x\n");
-    let (code, _) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
-    assert_eq!(code, 1);
-    assert!(!r.called("herdr"), "{:?}", r.calls.borrow());
+    let r = Fake::default()
+        .reply("which shed", "/opt/shed/bin/shed\n")
+        .reply("dsh-tui version", "profile: 0.18.0  /x\n");
+    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "rev"]);
+    assert_eq!(code, 1, "{out}");
+    let started = |m: &String| ["run", "send", "keys"].contains(&m.as_str());
+    assert!(!sh.methods().iter().any(started), "no lane started: {:?}", sh.methods());
+    assert!(
+        !r.called("git -C /tmp/does-not-matter/sendmeter worktree add"),
+        "{:?}",
+        r.calls.borrow()
+    );
 }
 
 fn pre_push(c: &drover::Ctx, role: &str, lines: &str) -> (i32, String) {
@@ -274,8 +277,6 @@ fn pre_push_refuses_protected_branches_and_reviewer_pushes() {
     assert!(out.contains("reviewers are read-only"), "{out}");
 }
 
-/// #216: dsh has no pre-tool hook, so the pre-push guard refuses a push that adds a script line running a
-/// `deny_commands` entry; `.github/workflows` are not scanned (CI may use Docker).
 #[test]
 fn pre_push_refuses_scripts_that_start_containers() {
     let d = tmpdir("dsh-prepush-deny");
@@ -336,8 +337,6 @@ fn git(dir: &Path, args: &[&str]) -> std::process::Output {
         .unwrap()
 }
 
-/// AC5: a real `git push origin HEAD:staging` from a lane worktree is refused by the
-/// installed hook; the repo's other checkouts are untouched.
 #[test]
 fn installed_hook_refuses_real_push_to_staging_from_lane_worktree_only() {
     let d = tmpdir("dsh-gitpush");

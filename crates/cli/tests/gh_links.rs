@@ -1,5 +1,3 @@
-//! #169: one link builder wherever an issue shows: `[issue] [PR #M] [checks]`, `checks` the PR's checks page
-//! (a reviewer's event too), else the issue branch's latest run read by the tick; never a query-string Actions URL.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -8,7 +6,6 @@ use serde_json::json;
 
 const GH: &str = "https://github.com/jirathip-dev/sendmeter";
 
-/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn get(s: &Server, path: &str) -> String {
     let res = String::from_utf8_lossy(&s.respond(
         &format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"),
@@ -47,10 +44,11 @@ fn spawned(name: &str) -> drover::Ctx {
 #[test]
 fn queue_row_links_the_issue_and_its_card_shows_three_links() {
     let c = spawned("links-queue");
-    let r = Fake::default().reply(
-        "herdr agent list",
-        &agents(&[("sendmeter-impl-12", "idle", "/x", "w1:p1")]),
-    );
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane("sendmeter-impl-12", "idle", "/x");
+    let f = Fake::default();
+    let r = sh.on(&f);
     let page = get(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), "/?all=1");
     let q = section(&page, "queue");
     assert!(
@@ -66,7 +64,7 @@ fn queue_row_links_the_issue_and_its_card_shows_three_links() {
         "Lanes cards share the builder: {page}"
     );
     assert!(!page.contains("actions?query"), "{page}");
-    assert_eq!(r.count("gh"), 0, "no gh call on render: {:?}", r.calls.borrow());
+    assert_eq!(f.count("gh"), 0, "no gh call on render: {:?}", f.calls.borrow());
 }
 
 #[test]
@@ -75,11 +73,9 @@ fn a_reviewer_event_links_the_prs_checks_not_its_own_branch() {
     let f = Fake::default();
     let s = Server::new(&c, &f, Some("127.0.0.1:7777".into()));
     let page = get(&s, "/?all=1");
-    // #266: the board's Events tab, from API v1.
     let Some(ev) = events_tab(&s, "127.0.0.1:7777", 1_000_000, "{ f: { k: 'all', fl: [] } }") else {
         return;
     };
-    // #170: the reviewer's spawn (branch rev-12-r1) is the `rev started` row of the `[all]` view.
     let rev = ev
         .split("<details class=\"er")
         .find(|l| l.contains(">#12</a>") && l.contains("rev started"));
@@ -106,15 +102,13 @@ fn an_issue_with_no_pr_links_the_ticks_latest_run_or_nothing() {
         q.contains(&format!("[<a href=\"{GH}/issues/17\">issue</a>] · no PR read yet")),
         "{q}"
     );
-    // The tick (its `drive` pass, #155) reads the issue branch's latest run; a render only reads that cache.
     let url = format!("{GH}/actions/runs/99");
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("gh pr view", "")
-        .reply(
-            "gh run list -R jirathip-dev/sendmeter --branch issue-17",
-            &format!("[{{\"url\":\"{url}\"}}]"),
-        );
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
+    let r = Fake::default().reply("gh pr view", "").reply(
+        "gh run list -R jirathip-dev/sendmeter --branch issue-17",
+        &format!("[{{\"url\":\"{url}\"}}]"),
+    );
     run(&c, &r, &["drive"]);
     assert!(
         r.called("gh run list -R jirathip-dev/sendmeter --branch issue-17 --limit 1 --json url"),

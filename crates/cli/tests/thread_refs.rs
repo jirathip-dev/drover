@@ -1,6 +1,3 @@
-//! #618: a thread's id after its title (the bar, the rows); each whole-word `t<n>` naming a thread in a message, a
-//! handoff row, a system line or an ask is a ref that opens it in place (back returns, scrolled where it was); an
-//! archived thread opens read-only with [restore]. API v1 gives each thread page its `id` and `archived`.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -10,8 +7,6 @@ use serde_json::{json, Value};
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// Threads t1…t27 on sendmeter (t27 archived); in t1 `extra` conductor lines, then a message naming t27, t999 (no
-/// such thread) and `t27` in inline code, a handoff to t27, a system line and an ask whose option names t27.
 fn setup(name: &str, extra: u64) -> drover::Ctx {
     let d = tmpdir(name);
     let c = ctx(
@@ -78,17 +73,13 @@ fn a_known_thread_id_is_a_ref_and_an_unknown_or_coded_one_stays_text() {
     let [_, _, chat] = parts(&s, ADDR, &cookie, T + 5);
     let tl = "<span class=tl data-go=\"t27\">t27</span>";
     for want in [
-        // A message: t27 a ref, t999 (no such thread) and the inline code one plain.
         format!("<p>see {tl}, t999 and <code>t27</code></p>"),
-        // The handoff row, the system line, the ask's question and option.
         format!("class=qs>· Grill → {tl}</p>"),
         format!("class=\"qs note\">{tl} is asleep</p>"),
         format!("<p>Go on in {tl}?</p>"),
         format!("<span>1. move to {tl}</span>"),
-        // The bar and the rows: the id after the title.
         "<div class=tn><b>Thread 1</b><small class=tid>· t1</small></div>".into(),
         "<span class=tt><span>Thread 1</span><small class=tid>· t1</small></span>".into(),
-        // The archived thread: read-only, [restore], its composer off.
         "<p class=tlv>archived · read-only <button type=button class=rst data-t=\"t27\">restore</button></p>".into(),
     ] {
         assert!(chat.contains(&want), "{want}\n{chat}");
@@ -106,7 +97,6 @@ fn a_known_thread_id_is_a_ref_and_an_unknown_or_coded_one_stays_text() {
         "{one}"
     );
 
-    // API v1: each thread page's id and archived flag, in `chat` and `thread/<t>`.
     let tab: Value = serde_json::from_str(&api(&s, ADDR, &cookie, T + 5, "chat")).unwrap();
     let pages: Vec<(String, bool)> = tab["threads"]
         .as_array()
@@ -124,8 +114,6 @@ fn a_known_thread_id_is_a_ref_and_an_unknown_or_coded_one_stays_text() {
     );
 }
 
-/// In WebKit at 390: the bar shows `· t1`; a tap on t1's ref opens archived t27 in place, read-only with [restore];
-/// the bar's back returns to t1 scrolled where it was, the browser's back likewise; [restore] turns t27's composer on.
 #[test]
 fn a_tapped_ref_opens_that_thread_and_back_returns_scrolled_where_you_were() {
     if no_webkit() {
@@ -142,9 +130,11 @@ fn a_tapped_ref_opens_that_thread_and_back_returns_scrolled_where_you_were() {
         "Mozilla/5.0 (iPhone)",
         now,
     );
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || drover::serve::serve_on(&c, &Fake::default().reply("herdr", ""), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c, &Fake::default(), l, false));
     let js = "const v = t => $(`#chat .cvp[data-t=\"${t}\"]`), vis = t => !!v(t) && v(t).getBoundingClientRect().height > 0; \
         const until = f => new Promise(r => { const t0 = Date.now(); (function go() { f() || Date.now() - t0 > 3000 ? r() : setTimeout(go, 50); })(); }); \
         const tap = e => e.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })); \
@@ -179,7 +169,5 @@ fn a_tapped_ref_opens_that_thread_and_back_returns_scrolled_where_you_were() {
     let out = String::from_utf8_lossy(&o.stdout);
     assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
     let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    // The bar's id; t1 scrolled mid-way; the tap: t27 open alone, [restore], composer off; the bar's back: t1 at the
-    // same scroll; the browser's back likewise; [restore]: the composer on, no [restore]; no errors.
     assert_eq!(m, [1., 1., 1., 1., 1., 1., 1., 1., 0., 1., 0., 1., 1., 0.], "{out}");
 }

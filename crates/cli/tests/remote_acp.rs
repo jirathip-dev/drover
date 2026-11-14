@@ -1,7 +1,3 @@
-//! #637: remote hosts run lanes as shed-acp sessions with no herdr. A fake remote host behind ssh (`Boat`): its shed
-//! answers `shed connect` lines and `shed run --acp`, its files are real files (written over ssh stdin), and its
-//! drover is this build. Covers the survey, a remote ACP spawn through the token proxy, the guard there, placement
-//! past an unguarded host, a shed-only bootstrap, and the proxy's lane keys.
 mod common;
 use common::*;
 use drover::runner::{Out, Runner};
@@ -15,26 +11,22 @@ use std::process::{Command, Stdio};
 const TOKEN_C: &str = concat!("sk", "-ant-oat01-CCCC-secret");
 const EXE: &str = env!("CARGO_BIN_EXE_drover");
 
-/// One remote host: its shed's terminals, its `shed agents --json` and whether its `profiles sync` writes the hook.
 #[derive(Default)]
 struct Machine {
     terms: BTreeMap<String, Value>,
     agents: Value,
     hook: bool,
+    bare: bool,
+    sudo: bool,
 }
 
-/// Remote hosts behind ssh (`machines`), the rest scripted by `f`. A remote command not handled here goes to `f` as
-/// `@<machine> <argv>`.
 struct Boat<'a> {
     f: &'a Fake,
     machines: Shared<BTreeMap<String, Machine>>,
-    /// Each `shed run --acp`'s argv and the env its adapter ran in (the adapter is `env`).
     runs: Shared<Vec<(Vec<String>, String)>>,
-    /// Where `profiles sync` there writes (this test's profiles folder: no `$HOME` in it, so the same path).
     profiles: PathBuf,
 }
 
-/// `hosts::quote`'s words back.
 fn words(line: &str) -> Vec<String> {
     let (mut out, mut cur, mut q, mut any) = (vec![], String::new(), false, false);
     let mut it = line.chars();
@@ -62,7 +54,6 @@ fn out(code: i32, stdout: &str) -> Out {
 }
 
 impl Boat<'_> {
-    /// `hosts`: (machine, lists claude-acp, its `profiles sync` writes the hook).
     fn new<'a>(c: &drover::Ctx, f: &'a Fake, hosts: &[(&str, bool, bool)]) -> Boat<'a> {
         let acp = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["env"]}]);
         let m = hosts.iter().map(|(n, a, h)| {
@@ -72,6 +63,8 @@ impl Boat<'_> {
                 Machine {
                     agents,
                     hook: *h,
+                    bare: true,
+                    sudo: true,
                     ..Machine::default()
                 },
             )
@@ -85,7 +78,6 @@ impl Boat<'_> {
         *b.machines.borrow_mut() = m.collect();
         b
     }
-    /// The answer line to one shed request on `m`.
     fn rpc(&self, m: &str, q: &Request) -> Value {
         let mut all = self.machines.borrow_mut();
         let t = &mut all.get_mut(m).unwrap().terms;
@@ -107,14 +99,27 @@ impl Boat<'_> {
         json!(Response::ok(id, res))
     }
     fn remote(&self, m: &str, w: &[String], input: &str) -> anyhow::Result<Out> {
-        // Its drover (this build, at its `$HOME`'s copy of the path) is this build.
         let mut w = w.to_vec();
         if w[0].ends_with("/drover") {
             w[0] = EXE.into();
         }
         let w = &w[..];
         let s: Vec<&str> = w.iter().map(String::as_str).collect();
+        let (bare, sudo) = (self.machines.borrow()[m].bare, self.machines.borrow()[m].sudo);
+        let seen = "/home/user/.ascii:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin";
         match s[..] {
+            ["shed", ..] if !bare => Ok(Out {
+                code: 127,
+                stdout: String::new(),
+                stderr: "sh: 1: shed: not found".into(),
+            }),
+            ["sh", "-c", script] if !script.starts_with("export PATH") && script.contains("command -v shed") => {
+                Ok([out(1, &format!("shed not on PATH {seen}\n")), out(0, "")][usize::from(bare)].clone())
+            }
+            ["sh", "-c", script] if script.starts_with("export PATH") && script.contains("sudo ln -sf") => {
+                self.machines.borrow_mut().get_mut(m).unwrap().bare |= sudo;
+                Ok(out(i32::from(!sudo), ""))
+            }
             ["shed", "connect", ..] => {
                 let lines = input
                     .lines()
@@ -159,7 +164,6 @@ impl Boat<'_> {
                 std::fs::write(dir.join("role.md"), "role").unwrap();
                 Ok(out(0, ""))
             }
-            // Its files and its drover are real (paths under the test's own dirs).
             ["sh", "-c", script, "sh", _] if script.contains("cat >") || script.starts_with("test -e") => {
                 real(w, input)
             }
@@ -206,7 +210,6 @@ impl Runner for Boat<'_> {
     fn sleep(&self, _: u64) {}
 }
 
-/// sendmeter on Claude (account C), herdr runtime; `hosts`: each a `shed-acp` remote host; mini (this one) off.
 fn setup(name: &str, hosts: &[&str]) -> (drover::Ctx, PathBuf) {
     let base = CONFIG.replace(
         "harness  =  \"hermes\"    # toggled in tests",
@@ -231,7 +234,6 @@ fn setup(name: &str, hosts: &[&str]) -> (drover::Ctx, PathBuf) {
     (c, home)
 }
 
-/// A remote lane's spawn: the issue, its worktree's git there, the proxy started and the tunnel's ssh detached.
 fn spawn_fake() -> Fake {
     Fake::default()
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
@@ -245,11 +247,10 @@ fn spawn_fake() -> Fake {
 }
 
 fn spawned(c: &drover::Ctx) -> Vec<drover::events::Event> {
-    let ev = drover::events::read(&c.state).unwrap();
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
     ev.into_iter().filter(|e| e.kind == "spawn").collect()
 }
 
-/// The lane's env as its adapter saw it (the fake adapter is `env`).
 fn adapter_env(b: &Boat) -> BTreeMap<String, String> {
     let dump = b.runs.borrow().last().unwrap().1.clone();
     dump.lines()
@@ -258,7 +259,6 @@ fn adapter_env(b: &Boat) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// The lane hook as the remote lane runs it: its env, its shipped rules file, no fleet.toml there.
 fn hook_there(env: &BTreeMap<String, String>, dir: &Path, cmd: &str) -> String {
     let mut ch = Command::new(EXE);
     for k in [
@@ -298,10 +298,9 @@ fn hook_there(env: &BTreeMap<String, String>, dir: &Path, cmd: &str) -> String {
 #[test]
 fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_with_no_token_there() {
     let (c, home) = setup("racp-spawn", &["boat1"]);
-    let f = spawn_fake().reply("herdr --machine boat1 agent list", NO_AGENTS);
+    let f = spawn_fake();
     let b = Boat::new(&c, &f, &[("boat1", true, true)]);
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    // Up from its shed alone: herdr there is never asked.
     let live = drover::hosts::survey(&c, &cfg, &shed_runner(&b, &cfg), false);
     assert_eq!(live.get("boat1"), Some(&Some(vec![])), "{:?}", f.calls.borrow());
     assert!(!f.called("herdr --machine boat1"), "{:?}", f.calls.borrow());
@@ -310,7 +309,7 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
     assert_eq!(code, 0, "{o} {:?}", f.calls.borrow());
     let sp = spawned(&c);
     assert_eq!(
-        (sp[0].str("host"), sp[0].data["confirmed"].as_bool()),
+        (sp[0].str("host"), sp[0].val("confirmed").as_bool()),
         (Some("boat1"), Some(true))
     );
     let calls = f.calls.borrow().clone();
@@ -318,7 +317,6 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
         !calls.iter().any(|l| l.starts_with("herdr --machine boat1")),
         "no herdr there: {calls:?}"
     );
-    // An ACP session there: `shed run --acp` over ssh, then the brief as its first prompt.
     let run_at = calls
         .iter()
         .position(|l| l.starts_with("ssh boat1 'shed' 'run' '--acp' 'claude-acp'"))
@@ -332,7 +330,6 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
         .position(|l| l.starts_with("ssh boat1 'shed' 'send' 'sendmeter-impl-12'"))
         .unwrap();
     assert!(send > run_at && calls[send].contains("AC: it works"), "{}", calls[send]);
-    // The adapter signs in through the proxy with its lane key: no token in its env, argv, files or the log.
     let env = adapter_env(&b);
     assert_eq!(
         env.get("ANTHROPIC_BASE_URL").map(String::as_str),
@@ -357,7 +354,6 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
         "secrets file removed"
     );
     assert!(!drover::events::jsonl(&c.state).unwrap().contains(TOKEN_C));
-    // The proxy and the host's tunnel were started from here.
     assert!(
         calls.iter().any(|l| l.contains("nohup") && l.contains("proxy")),
         "{calls:?}"
@@ -369,7 +365,6 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
         "{calls:?}"
     );
 
-    // A guarded command is refused inside that lane, by its hook there.
     let rules = env.get("DROVER_RULES").unwrap();
     assert!(Path::new(rules).exists(), "{rules}");
     let kill = ["p", "kill x"].concat();
@@ -380,7 +375,6 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
     assert_eq!(hook_there(&env, &home, "cargo test"), "");
 }
 
-/// The runner the CLI gives a fleet whose host runs shed (`shed::With`), for calls made outside `run`.
 fn shed_runner<'a>(b: &'a Boat, cfg: &drover::config::Config) -> drover::shed::With<'a> {
     drover::shed::With(b, cfg.shed().unwrap())
 }
@@ -406,7 +400,6 @@ fn a_host_whose_herdr_answers_but_whose_shed_does_not_is_offline() {
 fn a_host_missing_the_adapter_or_the_hook_refuses_acp_unguarded_and_the_lane_goes_elsewhere() {
     let (c, _) = setup("racp-place", &["boat1", "boat2"]);
     let f = spawn_fake();
-    // boat1 (first by rank) lists no claude-acp; boat2 is whole.
     let b = Boat::new(&c, &f, &[("boat1", false, true), ("boat2", true, true)]);
     let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 3, "{o}");
@@ -420,7 +413,6 @@ fn a_host_missing_the_adapter_or_the_hook_refuses_acp_unguarded_and_the_lane_goe
     assert_eq!(code, 0, "{o}");
     assert_eq!(spawned(&c)[0].str("host"), Some("boat2"));
 
-    // A host whose profile there has no drover hook refuses too.
     let (c, _) = setup("racp-nohook", &["boat1"]);
     let b = Boat::new(&c, &f, &[("boat1", true, false)]);
     let (code, o) = run(&c, &b, &["spawn", "sendmeter", "12", "impl", "--host", "boat1"]);
@@ -434,7 +426,6 @@ fn a_host_missing_the_adapter_or_the_hook_refuses_acp_unguarded_and_the_lane_goe
 #[test]
 fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     let (c, _) = setup("racp-boot", &["boat1"]);
-    // Nothing there yet: every check fails once, then passes after its install.
     let f = Fake::default()
         .reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n")
         .reply("@boat1 sh -c", "")
@@ -478,7 +469,38 @@ fn bootstrap_of_a_shed_acp_host_installs_shed_and_its_adapter_and_no_herdr() {
     );
 }
 
-/// A fake Anthropic: each request's headers and body, answered `200` with a two-event stream.
+#[test]
+fn bootstrap_puts_shed_and_drover_on_a_hosts_non_login_ssh_path_so_the_survey_finds_it_up() {
+    let (c, _) = setup("racp-path", &["boat1", "boat2"]);
+    let f = Fake::default()
+        .reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n")
+        .reply("@boat2 sh -c uname", "Linux\nx86_64\n/home/me\n")
+        .reply("@boat1 sh -c", "")
+        .reply("@boat2 sh -c", "")
+        .reply("sh -c nohup", "4242\n");
+    let b = Boat::new(&c, &f, &[("boat1", true, true), ("boat2", true, true)]);
+    for (m, sudo) in [("boat1", true), ("boat2", false)] {
+        let mut all = b.machines.borrow_mut();
+        let h = all.get_mut(m).unwrap();
+        (h.bare, h.sudo) = (false, sudo);
+    }
+    let (code, o) = run(&c, &b, &["hosts", "bootstrap", "boat1"]);
+    assert_eq!(code, 0, "{o}");
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let live = drover::hosts::survey(&c, &cfg, &shed_runner(&b, &cfg), false);
+    assert_eq!(live.get("boat1"), Some(&Some(vec![])), "{o}");
+
+    let (code, o) = run(&c, &b, &["hosts", "bootstrap", "boat2"]);
+    assert_ne!(code, 0, "{o}");
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
+    let failed = ev.iter().rev().find(|e| e.kind == "host-bootstrap").unwrap();
+    assert_eq!(
+        failed.val("tail"),
+        "shed not on PATH /home/user/.ascii:/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin",
+        "{o}"
+    );
+}
+
 fn upstream() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let (port, seen) = (
@@ -515,12 +537,10 @@ fn upstream() -> (u16, std::sync::Arc<std::sync::Mutex<Vec<String>>>) {
     (port, seen)
 }
 
-/// One model call to the proxy at `port` with lane key `key`: the status line and body.
 fn call(port: u16, key: &str) -> (String, String) {
     call_at(port, key, "/v1/messages?beta=true")
 }
 
-/// The same call to request path `path`.
 fn call_at(port: u16, key: &str, path: &str) -> (String, String) {
     let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
     let body = r#"{"model":"opus","messages":[]}"#;
@@ -540,7 +560,6 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
         .replace("port = 9", &format!("port = 9\nupstream = \"http://127.0.0.1:{port}\""));
     std::fs::write(&c.config, toml).unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    // #707: account C's hand-placed 0600 token file is what the proxy signs with.
     let tf = c.config.with_file_name("tokens/C");
     std::fs::create_dir_all(tf.parent().unwrap()).unwrap();
     std::fs::write(&tf, TOKEN_C).unwrap();
@@ -560,7 +579,6 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
     let f = Fake::default();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let pport = l.local_addr().unwrap().port();
-    // The proxy runs until the test binary ends: its state leaked for its thread.
     let now: &'static Shared<u64> = Box::leak(Box::new(Shared::new(c.now)));
     let dir = c.config.parent().unwrap().parent().unwrap();
     let pc: &'static drover::Ctx = Box::leak(Box::new(ctx(dir, &std::fs::read_to_string(&c.config).unwrap())));
@@ -587,7 +605,6 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
             !h.contains(&live) && up[0].ends_with(r#"{"model":"opus","messages":[]}"#),
             "{h}"
         );
-        // A live key with a path that would move curl's host off `upstream` (`@host/`, no leading `/`, ...): refused.
         for p in [
             "@127.0.0.1:9/v1",
             "/v1@127.0.0.1:9",
@@ -602,7 +619,6 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
             );
         }
         assert_eq!(seen.lock().unwrap().len(), 1, "a hostile path never reaches upstream");
-        // Revoked by the owner, unknown, and (past `key_hours`) expired: refused here, nothing goes upstream.
         assert_eq!(run(&c, f, &["hosts", "keys", "revoke", &gone_id]).0, 0);
         let (code, list) = run(&c, f, &["hosts", "keys"]);
         assert!(

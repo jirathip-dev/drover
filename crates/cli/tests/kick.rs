@@ -1,33 +1,33 @@
-//! #304 `drover kick`: one issue's due steps at once, debounced, beside the pass (#318); lane hooks and the board kick.
 mod common;
 use common::*;
 use drover::events::{read, Event};
 use serde_json::json;
 
-fn fan(name: &str) -> drover::Ctx {
+fn fan(name: &str) -> (drover::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "1", "2", "3"]).0,
         0
     );
-    c
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    (c, sh)
 }
 
-/// Spawns succeed, the host is calm; `kill -0 4242` answers `live` times as a live pid, then dead.
+fn started(sh: &FakeShed) -> Vec<String> {
+    let runs = sh.all("run").into_iter();
+    runs.map(|p| p["name"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
 fn fake(live: usize) -> Fake {
     let mut r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr", "{}")
         .reply("git -C", "");
     for _ in 0..live {
         r = r.once("kill -0 4242", 0, "");
@@ -38,6 +38,7 @@ fn fake(live: usize) -> Fake {
 fn kicks(c: &drover::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "kick")
         .collect()
@@ -50,11 +51,10 @@ fn kick(c: &drover::Ctx, r: &Fake, n: &str) {
 
 #[test]
 fn a_kick_runs_only_its_issue() {
-    let c = fan("kick-one");
+    let (c, sh) = fan("kick-one");
     let r = fake(0);
     kick(&c, &r, "2");
-    assert!(r.called("herdr agent start sendmeter-impl-2"), "{:?}", r.calls.borrow());
-    assert!(!r.called("herdr agent start sendmeter-impl-1") && !r.called("herdr agent start sendmeter-impl-3"));
+    assert_eq!(started(&sh), ["sendmeter-impl-2"], "{:?}", r.calls.borrow());
     let k = kicks(&c);
     assert_eq!((k.len(), k[0].issue, k[0].str("why")), (1, Some(2), Some("push")));
     assert!(k[0].str("result").unwrap().contains("started #2"), "{:?}", k[0]);
@@ -67,36 +67,29 @@ fn a_kick_runs_only_its_issue() {
 
 #[test]
 fn three_kicks_coalesce_into_one_run_and_one_follow_up() {
-    let c = fan("kick-debounce");
+    let (c, sh) = fan("kick-debounce");
     lease_as(&c, "kick-sendmeter-2.lock", 4242, c.now, 300);
-    // Two kicks while one runs: coalesced, nothing driven.
     let r = fake(2);
     kick(&c, &r, "2");
     kick(&c, &r, "2");
-    assert!(kicks(&c).is_empty() && !r.called("herdr agent start"));
+    assert!(kicks(&c).is_empty() && started(&sh).is_empty());
     assert!(lease_on(&c, "kick-sendmeter-2.again").is_some());
-    // The running kick's turn: its run, then the one follow-up, then none.
     let r = fake(0);
     kick(&c, &r, "2");
     assert_eq!(kicks(&c).len(), 2);
     assert_eq!(r.count("sleep 10"), 2);
-    assert_eq!(
-        r.count("herdr agent start sendmeter-impl-2"),
-        1,
-        "the follow-up finds it started"
-    );
+    assert_eq!(started(&sh), ["sendmeter-impl-2"], "the follow-up finds it started");
     assert!(lease_on(&c, "kick-sendmeter-2.again").is_none() && lease_on(&c, "kick-sendmeter-2.lock").is_none());
 }
 
-/// #318: a kick holds its issue's locks only, so a pass holding `drive.lock` never delays it.
 #[test]
 fn a_held_drive_lock_does_not_delay_a_kick() {
-    let c = fan("kick-busy");
+    let (c, sh) = fan("kick-busy");
     lease_as(&c, "drive.lock", 4242, c.now, 3600);
     let r = fake(1);
     kick(&c, &r, "2");
     assert_eq!(kicks(&c).len(), 1);
-    assert_eq!(r.count("herdr agent start"), 1);
+    assert_eq!(started(&sh).len(), 1);
     assert_eq!(r.count("sleep 10"), 1, "no follow-up");
     assert!(lease_on(&c, "drive.lock").is_some(), "the pass's lock is left alone");
 }
@@ -124,11 +117,9 @@ fn the_hook_matches_a_successful_push_and_a_stop_only() {
     assert_eq!(drover::hook::kick_why(&pre), None);
 }
 
-/// One test mutates `DROVER_LANE` (process-wide): the hook kicks in a lane only.
 #[test]
 fn the_hook_kicks_its_lanes_issue_and_is_inert_outside_lanes() {
     let c = ctx(&tmpdir("kick-hook"), CONFIG);
-    // #511: the lane reported its turn, so the stop hook asks for none (tests/turn.rs).
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(drover::hook::turn_mark(&c.state, "sendmeter:24:impl"), "turn").unwrap();
     let hook = |r: &Fake| {
@@ -157,7 +148,6 @@ fn the_hook_kicks_its_lanes_issue_and_is_inert_outside_lanes() {
     assert_eq!(calls[0], want);
 }
 
-/// #340: a kick is its own session and process group, out of reach of launchd's group kill when the job exits.
 #[test]
 fn a_detached_kick_runs_in_its_own_process_group() {
     use drover::runner::Runner;

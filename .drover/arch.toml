@@ -7,8 +7,16 @@ dir = "ci/cap.d"
 glob = "*.toml"
 
 [comments]
-policy = "off"
-except = ["assets/types/**", "web/dist/**"]
+policy = "strict"
+except = [
+    "assets/types/**",
+    "web/dist/**",
+    "web/src/**",
+    "crates/server/src/serve.rs",
+    "crates/server/src/serve/chat.rs",
+    "crates/server/src/serve/fresh.rs",
+    "crates/server/src/serve/slo.rs",
+]
 
 [docs]
 paths = ["docs/**/*.md", "README.md"]

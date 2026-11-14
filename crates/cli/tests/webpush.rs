@@ -1,7 +1,3 @@
-//! #18: web push: RFC 8291 aes128gcm (its Appendix A vector, and a decrypt round trip), the ES256
-//! VAPID JWT, subscribe/unsubscribe on the page (Host/Origin + paired cookie), and delivery by a
-//! fake `curl`: 201 sent, 410 pruned, 500 `notify-failed`. #87: a subscribe with no webpush notifier says
-//! alerts are off, with one it pushes once to that device; the Host row; `check` warns once.
 mod common;
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::Aes128Gcm;
@@ -29,7 +25,6 @@ fn d(s: &str) -> Vec<u8> {
     B64.decode(s).unwrap()
 }
 
-/// The user agent's side of RFC 8291: the plaintext, or None when the body does not decrypt.
 fn decrypt(body: &[u8], ua: &SecretKey, auth: &[u8]) -> Option<Vec<u8>> {
     let (salt, idlen) = (&body[..16], body[20] as usize);
     let as_pub = PublicKey::from_sec1_bytes(&body[21..21 + idlen]).ok()?;
@@ -120,7 +115,7 @@ fn post(s: &Server, path: &str, body: &str, extra: &str) -> String {
 fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     let dir = tmpdir("wp-sub");
     let c = ctx(&dir, CONFIG);
-    let r = Fake::default().reply("herdr", NO_AGENTS);
+    let r = OnShed::new(Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
     let form = sub_form(&ua, "https://web.push.apple.com/secret-endpoint");
@@ -141,7 +136,7 @@ fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     );
     let subs = webpush::load(&c.state);
     assert_eq!((subs.len(), subs[0].label.as_str()), (1, "iPhone"));
-    let file = dir.join("state/state.db"); // #344: the subscriptions' home
+    let file = dir.join("state/state.db");
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     let page = host_tab(&s, ADDR, 1_000_000);
     assert!(
@@ -165,8 +160,6 @@ fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     assert!(webpush::load(&c.state).is_empty());
 }
 
-/// A fake `curl` on PATH: saves its stdin (also as `body-<n>`, the n-th call's), logs its args to `<dir>/calls`, answers the status in `<dir>/code`.
-/// Held for the test: PATH is process-wide.
 fn fake_curl(dir: &Path) -> std::sync::MutexGuard<'static, ()> {
     static PATH: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let held = PATH.lock().unwrap_or_else(|e| e.into_inner());
@@ -251,6 +244,7 @@ fn delivery_201_sent_410_pruned_500_notify_failed() {
     );
     let ev = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "notify-failed")
         .unwrap();
@@ -269,8 +263,6 @@ fn delivery_201_sent_410_pruned_500_notify_failed() {
     );
 }
 
-/// #99: the phone hears of an owner ask and of a default taken, never of a routine ask merely waiting
-/// nor of an owner's own answer; a cmd notifier still hears every ask.
 #[test]
 fn phones_hear_owner_asks_and_defaults_never_a_waiting_routine_ask() {
     let dir = tmpdir("wp-asks");
@@ -322,7 +314,6 @@ fn phones_hear_owner_asks_and_defaults_never_a_waiting_routine_ask() {
     );
 }
 
-/// #130: `needs-human` pushes with the default `on`: who and why in the title, the last verdict's first finding below.
 #[test]
 fn needs_human_push_names_the_issue_the_reason_and_the_finding() {
     let dir = tmpdir("wp-nh");
@@ -362,7 +353,6 @@ fn webpush_notifier_needs_sub() {
 
 const PUSH: &str = "[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n";
 
-/// System's Notifications push row at `now` (#440: the Host tab's ALERTS row before).
 fn host(s: &Server, now: u64) -> String {
     let page = host_tab(s, ADDR, now);
     let row = page
@@ -378,7 +368,7 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
     let _path = fake_curl(&dir);
     std::fs::write(dir.join("code"), "201").unwrap();
     let c = ctx(&dir, &format!("{CONFIG}\n{PUSH}"));
-    let r = Fake::default().reply("herdr", NO_AGENTS);
+    let r = OnShed::new(Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
     let cookie = pair(&s, &c, "Mozilla (iPhone)", c.now) + "User-Agent: Mozilla (iPhone)\r\n";
@@ -405,10 +395,12 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
         "one push each, to the new device only"
     );
     let json: serde_json::Value =
-        serde_json::from_slice(&decrypt(&std::fs::read(dir.join("body")).unwrap(), &ua, &d(AUTH)).unwrap()).unwrap();
+        serde_json::from_slice(&decrypt(&std::fs::read(dir.join("body")).unwrap().to_vec(), &ua, &d(AUTH)).unwrap())
+            .unwrap();
     assert!(json["body"].as_str().unwrap().ends_with("alerts are on"), "{json}");
     let sent: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "push-sent")
         .collect();
@@ -461,7 +453,7 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
 fn check_warns_once_when_devices_are_subscribed_but_no_notifier_is() {
     let dir = tmpdir("wp-check");
     let c = ctx(&dir, CONFIG);
-    let r = Fake::default().reply("herdr", NO_AGENTS);
+    let r = OnShed::new(Fake::default());
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
     let f = |ep: &str| {
         sub_form(&ua, ep)
@@ -491,8 +483,6 @@ fn check_warns_once_when_devices_are_subscribed_but_no_notifier_is() {
     assert_eq!(check(), (0, String::new()), "a notifier: no warning");
 }
 
-/// #370: each device's push title is its own theme's words (`Order up: #7 merged`, `The bell: sendmeter #7 needs
-/// you`); a device that sent none (terminal) keeps today's title; a quiet subscribe updates the words without a push.
 #[test]
 fn push_titles_use_each_devices_theme_words() {
     let dir = tmpdir("wp-words");
@@ -510,7 +500,6 @@ fn push_titles_use_each_devices_theme_words() {
     webpush::subscribe(&c.state, &form("https://push.example/plain", ""), "Mac", 1, None).unwrap();
     let words = r#"&words={"merged":"Over the fence","needs":"At the gate"}"#;
     webpush::subscribe(&c.state, &form("https://push.example/phone", words), "iPhone", 1, None).unwrap();
-    // The phone switches to the kitchen: its words are replaced quietly, nothing is pushed.
     let kitchen = form(
         "https://push.example/phone",
         r#"&words={"merged":"Order up","needs":"The bell"}&quiet=1"#,
@@ -566,8 +555,6 @@ fn push_titles_use_each_devices_theme_words() {
     );
 }
 
-/// #386: a conductor's reply pushes `<repo> · <thread title>: <first line>`, a thread ask `… asks: <question>`, both
-/// opening the thread; the owner's own message and a system line never push.
 #[test]
 fn a_orchestrator_reply_and_a_thread_choice_push_with_the_thread_named() {
     let dir = tmpdir("wp-thread");
@@ -615,8 +602,6 @@ fn a_orchestrator_reply_and_a_thread_choice_push_with_the_thread_named() {
     assert_eq!(j["url"], "/?thread=t1#chat");
 }
 
-/// #407: no push for a thread a board has open: its stream stamped `watch-<thread>.at` within 5 s of the event (a
-/// reply or a thread ask); a stamp older than that, or another thread's, pushes as before.
 #[test]
 fn no_push_for_the_thread_open_on_a_board() {
     let dir = tmpdir("wp-watch");

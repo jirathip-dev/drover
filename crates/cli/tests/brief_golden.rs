@@ -1,6 +1,3 @@
-//! #34: the lane briefs (impl, impl fix round, #102 impl update round, rev, design) are byte-identical to staging's.
-//! Goldens in tests/golden/briefs/ were written by staging's build; `BLESS=1` rewrites them.
-//! #82: the fixture fleet is renamed `api` (`acme/api`), so the goldens carry neutral names.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -11,29 +8,14 @@ const DESIGN: &str = "\n[fleet.api.role.design]\nharness = \"hermes\"\nprofile =
 
 fn fake() -> Fake {
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
         .reply(
             "gh issue view 12",
             r#"{"title":"Fix the meter","body":"AC: it {works} \\ `ok`"}"#,
         )
         .reply("git -C", "0\n")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
-        )
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr pane wait-output", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr pane read", "Read the brief")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// Spawn one lane and return its brief, with the temp dir replaced by `<TMP>`.
 fn brief(name: &str, issue: &str, role: &str, fail: bool, update: bool) -> String {
     let d = tmpdir(&format!("brief-{name}"));
     let c = ctx(
@@ -43,12 +25,13 @@ fn brief(name: &str, issue: &str, role: &str, fail: bool, update: bool) -> Strin
             .replace("sendmeter", "api")
             + DESIGN),
     );
+    let sh = FakeShed::new();
+    sh.attach(&c);
     if fail {
         let body = "FAIL\n\n1. **blocking**: src/x.rs:3 off by {one}.";
         let data = json!({"verdict": "FAIL", "sha": "a".repeat(40), "body": body});
         append(&c.state, &Event::new(10, "api", Some(12), "verdict", data)).unwrap();
     }
-    // #420: a `-repro` case's issue is queued `--repro`.
     if name.ends_with("repro") {
         assert_eq!(run(&c, &fake(), &["queue", "api", "add", issue, "--repro"]).0, 0);
     }
@@ -92,7 +75,6 @@ fn lane_briefs_match_staging() {
     }
 }
 
-/// #360: the rev and impl briefs carry the test anti-patterns list; rev asks for the verdict's anti-patterns line.
 #[test]
 fn briefs_carry_the_test_antipatterns() {
     let (rev, imp) = (
@@ -120,7 +102,6 @@ fn briefs_carry_the_test_antipatterns() {
     assert!(rev.contains("`Tests checked against anti-patterns: yes`"), "{rev}");
 }
 
-/// #420: a `--repro` issue's impl and rev briefs carry the repro steps; an unmarked issue's don't.
 #[test]
 fn only_a_repro_issues_briefs_carry_the_repro_steps() {
     let (imp, rev) = (

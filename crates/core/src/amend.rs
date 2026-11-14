@@ -1,7 +1,5 @@
-//! #574: `drover amend`: an owner-decided amendment written into the issue body itself (a body edit, never a
-//! comment), so checks that read the spec (board-freeze) see it, and their failed runs on the open PR go again.
 use crate::config::Config;
-use crate::events::{emit, read, Event};
+use crate::events::{emit, working, Event};
 use crate::runner::{json, ok, Runner};
 use crate::Ctx;
 use crate::{gate, gh};
@@ -9,12 +7,9 @@ use anyhow::Result;
 use serde_json::json;
 use std::io::Write;
 
-/// The PR checks that read the issue's spec: a failed run of one re-runs after an amendment.
 const SPEC_CHECKS: &[&str] = &["board-freeze"];
 
-/// Append `- **Amendment (<basis>)**: <text>` under the body's `## Amendments` (made once), log `amend`, then
-/// re-run the open PR's failed spec checks. `basis` must be an ask on this issue answered by the owner (or by
-/// default); else `NO_DECISION`, before any `gh` call.
+/// Append `- **Amendment (<basis>)**: <text>` under the body's `## Amendments` (made once), log `amend`, then re-run the open PR's failed spec checks. `basis` must be an ask on this issue answered by the owner (or by default); else `NO_DECISION`, before any `gh` call.
 pub fn amend(
     ctx: &Ctx,
     cfg: &Config,
@@ -25,7 +20,7 @@ pub fn amend(
     text: &str,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let is = |e: &&Event, k: &str| e.kind == k && e.fleet == fleet && e.str("id") == Some(basis);
     let asked = events.iter().find(|e| is(e, "needs-decision")).and_then(|a| a.issue);
     let by = events.iter().rev().find(|e| is(e, "decision"));

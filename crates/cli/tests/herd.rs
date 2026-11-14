@@ -1,5 +1,3 @@
-//! #37: Herd mode's `/herd.json` (2 fleets + Others, queue at the gate with a blocked item, host
-//! weather), its Host/Origin check, no pane text, `?weather=` on loopback only; 390 px snapshots.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -10,7 +8,7 @@ const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const SCREEN: &str = "⏺ Bash(cargo test)\n  ⎿ PANE-SECRET-TEXT ok\n";
 
-fn fixture(name: &str) -> (drover::Ctx, Fake) {
+fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     let cfg = format!("[serve]\nallowed_hosts = [\"mac.example\"]\n\n{CONFIG}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\n");
     let c = ctx(&tmpdir(name), &cfg);
     let spawn = |fleet: &str, issue: u64, ts: u64, agent: &str| {
@@ -47,22 +45,26 @@ fn fixture(name: &str) -> (drover::Ctx, Fake) {
         json!({"title": "Herd mode"}).to_string(),
     )
     .unwrap();
-    let a = |n: &str, st: &str, p: &str| json!({"name": n, "agent_status": st, "pane_id": p, "cwd": "/x"});
-    let list = json!({"result": {"agents": [
-        a("sendmeter-impl-12", "working", "w1:p2"),
-        a("synergy-impl-7", "blocked", "w2:p1"),
-        a("synergy-impl-8", "done", "w2:p2"),
-        {"agent": "codex", "agent_status": "idle", "pane_id": "w4:p1", "cwd": "/home/me/side", "workspace_id": "w4"},
-    ]}});
-    let ws = json!({"result": {"workspaces": [{"workspace_id": "w4", "label": "side-project"}]}});
-    let r = Fake::default()
-        .reply("herdr agent list", &list.to_string())
-        .reply("herdr workspace list", &ws.to_string())
-        .reply("herdr pane read", SCREEN)
-        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "2\n")
-        .reply("sysctl -n vm.loadavg", "{ 3.90 1.20 1.00 }\n")
-        .reply("sysctl -n hw.ncpu", "10\n")
-        .reply("vm_stat", "Swapouts: 100.\n");
+    let r = OnShed::new(
+        Fake::default()
+            .reply("sysctl -n kern.memorystatus_vm_pressure_level", "2\n")
+            .reply("sysctl -n vm.loadavg", "{ 3.90 1.20 1.00 }\n")
+            .reply("sysctl -n hw.ncpu", "10\n")
+            .reply("vm_stat", "Swapouts: 100.\n"),
+    );
+    for (n, st) in [
+        ("sendmeter-impl-12", "working"),
+        ("synergy-impl-7", "blocked"),
+        ("synergy-impl-8", "done"),
+    ] {
+        r.1.lane(n, st, "/x");
+        r.1.screen(n, SCREEN);
+    }
+    r.1.add("side-project", json!({"fleet": "-", "harness": "codex"}));
+    r.1.set("side-project", |t| {
+        t["cwd"] = json!("/home/me/side");
+        t["reported"] = json!({"state": "idle"});
+    });
     (c, r)
 }
 
@@ -120,7 +122,6 @@ fn herd_json_shape_on_a_fixture() {
     );
     assert_eq!(l["age"], "27h");
     assert!(l["coat"].as_str().unwrap().starts_with("--c:#"));
-    // The queue at the gate: queued issues only, in order, the blocked one with its blocker.
     let q = &fleets[0]["queue"];
     assert_eq!(
         q.as_array()
@@ -132,7 +133,6 @@ fn herd_json_shape_on_a_fixture() {
     );
     assert_eq!(q[0]["title"], "Herd mode");
     assert_eq!(fleets[1]["queue"], json!([]));
-    // Host: load/cpu 0.39, limit 2.5, memory pressure warn (the gate refuses), swap-out 0.
     let h = &v["host"];
     assert_eq!(
         (&h["limit"], &h["pressure"], &h["swapouts"], &h["gate"]),
@@ -141,8 +141,6 @@ fn herd_json_shape_on_a_fixture() {
     assert!((h["load"].as_f64().unwrap() - 0.39).abs() < 1e-9, "{h}");
 }
 
-/// #239: each fleet's colour (a station's), and each lane's theme action: its role's while it works, a fix round's
-/// `fix` though its lane's role is impl, else its state's.
 #[test]
 fn herd_json_carries_the_action_and_fleet_colour() {
     let (c, r) = fixture("act");
@@ -172,7 +170,6 @@ fn herd_json_has_no_pane_text() {
         !res.contains("PANE-SECRET-TEXT") && !res.contains("cargo test") && !res.contains("turns"),
         "{res}"
     );
-    // Even for a blocked lane (whose Lanes card shows pane text to paired devices).
     assert_eq!(body(&res)["fleets"][1]["lanes"][0]["state"], "blocked");
 }
 
@@ -182,7 +179,10 @@ fn herd_json_refuses_a_foreign_host_or_origin() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     assert!(get(&s, "/herd.json", "evil.example", "").starts_with("HTTP/1.1 403 "));
     assert!(get(&s, "/herd.json", ADDR, "Origin: https://evil.example\r\n").starts_with("HTTP/1.1 403 "));
-    assert!(!r.called("herdr agent list"), "refused before any read");
+    assert!(
+        !r.called("herdr agent list") && r.1.methods().is_empty(),
+        "refused before any read"
+    );
     body(&get(&s, "/herd.json", "mac.example", "Origin: https://mac.example\r\n"));
 }
 
@@ -205,7 +205,6 @@ fn weather_param_works_on_loopback_only() {
         (&calm["host"]["gate"], &calm["host"]["pressure"]),
         (&Value::Null, &json!("normal"))
     );
-    // The tailnet name: the param is ignored, the real sample is served.
     let real = body(&get(&s, "/herd.json?weather=calm", "mac.example", ""));
     assert_eq!(
         (&real["host"]["pressure"], &real["host"]["gate"]),
@@ -226,8 +225,6 @@ fn page_has_the_herd_button_and_horse_symbols() {
     );
 }
 
-/// The PR's 390 px Herd snapshots (fixture data): calm, gusty, storm and fog; the queue at the gate,
-/// a swipe to the next repo, the sheet from a horse; no horizontal page scroll. PNGs go to `$DROVER_SNAPSHOTS`.
 #[test]
 fn herd_snapshots_fit_390px() {
     if no_webkit() {
@@ -297,9 +294,6 @@ fn herd_snapshots_fit_390px() {
     }
 }
 
-/// #58: the ranch is a ~22% strip, empty bands are not drawn, every lane horse is one size in every
-/// band (#65: Corral's fixed 132 px) and queued ones are 53 px (40 %) in their own row above working. 390 px, `?weather=calm`:
-/// (a) 0 blocked · 1 working · 13 queued · 7 idle · 11 done, (b) only 1 done, (c) every band.
 #[test]
 fn herd_horses_are_one_size_at_390px() {
     if no_webkit() {
@@ -310,7 +304,6 @@ fn herd_horses_are_one_size_at_390px() {
     let page = get(&s, "/", ADDR, "");
     let mut calm = body(&get(&s, "/herd.json?weather=calm", ADDR, ""));
     let fleet = calm["fleets"][0].clone();
-    // One fleet with `n` lanes per state (cloned from the fixture's lane) and `q` queued issues.
     let mut herd = |states: &[(&str, &str, usize)], q: u64| {
         let mut lanes = vec![];
         for &(state, tone, n) in states {
@@ -356,7 +349,6 @@ fn herd_horses_are_one_size_at_390px() {
             String::new(),
         ),
     ];
-    // The lower bands of (a) and (c): scrolled to a band's header, clear of the sticky strip.
     let to = |band: &str| {
         format!("; document.querySelector('.b-{band}').scrollIntoView({{behavior: 'instant'}}); here().scrollTop -= 64")
     };
@@ -401,10 +393,8 @@ fn herd_horses_are_one_size_at_390px() {
             unreachable!()
         };
         assert!(sw <= 390.0 && vw == 390.0, "{name}: scrollWidth {sw} at {vw}");
-        // 22svh of the 844 px window (≥ 120 px), not 45%.
         assert!((ranch - 0.22 * 844.0).abs() <= 1.0, "{name}: ranch {ranch}px");
         assert_eq!(n, bands, "{name}: bands drawn");
-        // #65: Corral's 132 px in every band present; queued 53 px.
         let lane: Vec<f64> = [working, idle, done, blocked]
             .into_iter()
             .filter(|&x| x >= 0.0)

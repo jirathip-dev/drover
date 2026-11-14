@@ -1,5 +1,3 @@
-//! #129: fewer merge conflicts, with git alone: `git merge-tree` previews which open branches collide, a merge of
-//! integration that adds nothing keeps a PASS, and `cap-check` reads the line cap from config.
 use crate::config::{Config, Fleet};
 use crate::events::{emit, fold, Event, IssueState};
 use crate::runner::{argv, ok, Runner};
@@ -23,7 +21,6 @@ pub fn cached(ctx: &Ctx, fleet: &str) -> Conflicts {
     serde_json::from_value(v["conflicts"].clone()).unwrap_or_default()
 }
 
-/// The files `a` and `b` conflict on (`git merge-tree` exits 1, no worktree); empty when they merge cleanly.
 fn collide(r: &dyn Runner, dir: &Path, a: &str, b: &str) -> Vec<String> {
     let d = dir.to_string_lossy();
     let o = r.run(
@@ -39,13 +36,11 @@ fn collide(r: &dyn Runner, dir: &Path, a: &str, b: &str) -> Vec<String> {
         .collect()
 }
 
-/// #320: a predicted conflict is information, not a hold.
 fn keep_going(o: u64) -> String {
     format!("may conflict with #{o}; keep going, drover updates you after it merges")
 }
 
-/// Every pair of pushed, unmerged branches and each against integration, cached by head pair; logs one
-/// `conflict-predicted` per new pair and prompts an impl/fix lane once per head about a ready PR or integration.
+/// Every pair of pushed, unmerged branches and each against integration, cached by head pair; logs one `conflict-predicted` per new pair and prompts an impl/fix lane once per head about a ready PR or integration.
 pub fn preview(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, events: &[Event]) -> Result<Conflicts> {
     let (f, p) = (cfg.fleet(fleet)?, gh::cache_path(ctx, "conflicts", fleet, 0));
     let dir = f.local_path();
@@ -109,15 +104,14 @@ pub fn preview(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, events: &[E
         let sp = crate::events::last_spawn(events, lane);
         let pane = sp.and_then(|e| e.str("pane")).unwrap_or_default();
         let on = crate::hosts::On::of(r, sp);
-        if crate::herdr::reply(&on, sp.and_then(|e| e.str("harness")) == Some("dsh"), lane, pane, &text).is_ok() {
+        if crate::herdr::tell(&on, sp.and_then(|e| e.str("harness")) == Some("dsh"), lane, pane, &text).is_ok() {
             ev(s.issue, "heads-up", json!({"key": key, "reason": text}))?;
         }
     }
     Ok(out)
 }
 
-/// #129: `h` merges a passed head (or an earlier pure update of one) with integration and adds nothing: its first parent
-/// carries the PASS, its second is on integration, and its tree is the one `git merge-tree` makes of the two.
+/// #129: `h` merges a passed head (or an earlier pure update of one) with integration and adds nothing: its first parent carries the PASS, its second is on integration, and its tree is the one `git merge-tree` makes of the two.
 pub fn pure(r: &dyn Runner, f: &Fleet, s: &IssueState, h: &str) -> bool {
     let dir = f.local_path();
     git(r, &dir, &["fetch", "-q", "origin"]).is_ok() && pure_at(r, &dir, &format!("origin/{}", f.integration), s, h)
@@ -148,8 +142,7 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
             == git(r, dir, &["rev-parse", &format!("{h}^{{tree}}")]).ok()
 }
 
-/// `drover cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config`;
-/// #429: under `warn_within` lines of headroom it warns and still passes. #270: `web/src/**/*.ts` lines are reported, never capped.
+/// `drover cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config`; #429: under `warn_within` lines of headroom it warns and still passes. #270: `web/src/**/*.ts` lines are reported, never capped.
 pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
     let dir = std::fs::read_dir(config.with_file_name("cap.d"));
     let mut files: Vec<PathBuf> = (dir.into_iter().flatten().flatten())
@@ -185,7 +178,6 @@ pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> R
     if (0..warn).contains(&left) {
         writeln!(out, "WARN: {left} lines of headroom (< {warn})")?;
     }
-    // #419: a repo's `.drover/rules.md` holds at most 30 rules; one that code enforces is deleted.
     let over = std::fs::read_to_string(rules).map_or(0, |t| t.lines().count());
     if over > 30 {
         writeln!(
@@ -234,7 +226,6 @@ pub fn cap_at_sha(r: &dyn Runner, dir: &Path, sha: &str) -> Option<Cap> {
     highest("ci/cap.toml", &show("ci/cap.toml")?, raises.collect())
 }
 
-/// The first `[fleet.<n>]` with a `line_cap`: (cap, `warn_within`, default 500).
 fn limits(text: &str) -> Option<(i64, i64)> {
     let v: toml::Value = toml::from_str(text).ok()?;
     let t = v
@@ -246,8 +237,7 @@ fn limits(text: &str) -> Option<(i64, i64)> {
     Some((t["line_cap"].as_integer()?, warn))
 }
 
-/// #429: `(sha, lines, cap, warn_within)` at the fleet's fetched integration head with a `ci/cap.toml`, by git alone;
-/// cached per sha (`serve`'s banner reads the cache).
+/// #429: `(sha, lines, cap, warn_within)` at the fleet's fetched integration head with a `ci/cap.toml`, by git alone; cached per sha (`serve`'s banner reads the cache).
 pub fn cap_at(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Option<(String, i64, i64, i64)> {
     let (f, p) = (cfg.fleet(fleet).ok()?, gh::cache_path(ctx, "cap", fleet, 0));
     let dir = f.local_path();
@@ -282,22 +272,18 @@ fn lines(p: &Path, ext: &str) -> usize {
     each.map(n).sum()
 }
 
-/// #668: the `src/ net +N` a PR body states (`+1,234`, `-20`), if any.
 fn stated_net(body: &str) -> Option<i64> {
     let rest = body.split("src/ net ").nth(1)?.trim_start();
     let n: String = rest.chars().take_while(|c| "+-,0123456789".contains(*c)).collect();
     n.replace([',', '+'], "").parse().ok()
 }
 
-/// #754: one cap a count reports: its label (empty: the built-in Rust count), lines and cap.
 struct Count {
     label: String,
     lines: i64,
     limit: i64,
 }
 
-/// #754: the fleet's own line-cap script: `cap_script`, else the first `premerge` check naming a cap; #788: else the
-/// repo's `scripts/line-cap.sh` at `sha`.
 fn cap_script(r: &dyn Runner, f: &Fleet, sha: &str) -> Option<String> {
     let run = |p: &crate::config::Premerge| match p {
         crate::config::Premerge::Cmd(c) => c.clone(),
@@ -316,8 +302,6 @@ fn cap_script(r: &dyn Runner, f: &Fleet, sha: &str) -> Option<String> {
         .or_else(|| own().map(|_| "sh scripts/line-cap.sh".to_string()))
 }
 
-/// #754: every `<label> N / cap M` (#788: or `<label> N / M`) line `script` prints in a scratch worktree at `base`
-/// (with `branch` merged in); else why not: the merge conflicts, or the last line it printed.
 fn script_caps(
     ctx: &Ctx,
     r: &dyn Runner,
@@ -360,10 +344,7 @@ fn script_caps(
         .ok_or_else(|| format!("printed `{}`", last.trim()))
 }
 
-/// #668: `drover cap <fleet>`: the queue-wide line-cap view, so one conductor-filed issue raises the cap for the
-/// whole queue: integration's total against the cap, every open PR's `src/ net` (its body's, else its measured diff),
-/// the queued issues with no PR, and the projected total with the ask a crossing lane files. #754: a fleet with its
-/// own cap script counts by it, at integration and on each open PR's merge, every cap it prints.
+/// #668: `drover cap <fleet>`: the queue-wide line-cap view, so one conductor-filed issue raises the cap for the whole queue: integration's total against the cap, every open PR's `src/ net` (its body's, else its measured diff), the queued issues with no PR, and the projected total with the ask a crossing lane files. #754: a fleet with its own cap script counts by it, at integration and on each open PR's merge, every cap it prints.
 pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut dyn std::io::Write) -> Result<i32> {
     let f = cfg.fleet(fleet)?;
     let dir = f.local_path();
@@ -474,7 +455,7 @@ pub fn cap_view(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, out: &mut 
             )?,
         }
     }
-    let (events, st) = (crate::events::read(&ctx.state)?, crate::events::states(&ctx.state)?);
+    let (events, st) = (crate::events::working(&ctx.state)?, crate::events::states(&ctx.state)?);
     let queued: Vec<u64> = (crate::queue::view(&events, &st, fleet).into_iter().map(|i| i.issue))
         .filter(|n| !has.contains(n))
         .collect();

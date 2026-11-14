@@ -1,5 +1,3 @@
-//! #401: a fleet without `[fleet.<n>.role.conductor]` runs its conductor on its impl role (profile `lane-conductor`),
-//! and the [config] sheet's Conductor choices write that table in place (backup first, refused unless doctor passes).
 mod common;
 use common::*;
 use drover::events::{read, Event};
@@ -16,8 +14,6 @@ fn req(s: &Server, path: &str, body: &str, extra: &str) -> String {
     String::from_utf8_lossy(&s.respond(&r, T)).into_owned()
 }
 
-/// `CONFIG` (impl: hermes, opus; no conductor role) with rev on sonnet: the fleet's roles use opus and sonnet.
-/// #268: sendmeter's [config] sheet as the board draws it from API v1's `queue`.
 fn config_sheet(s: &Server) -> String {
     queue_js(s, ADDR, T, "sheet(d, 'sendmeter')")
 }
@@ -30,48 +26,64 @@ fn setup(name: &str) -> drover::Ctx {
     ctx(&tmpdir(name), &text)
 }
 
-/// herdr ready to start a conductor in a new workspace; `which hermes` finds it (doctor's harness row).
-fn host() -> Fake {
-    Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
+fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
+    let text = CONFIG
+        .replace(
+            "profile = \"fleet-rev\"\n",
+            "profile = \"fleet-rev\"\nmodel = \"sonnet\"\n",
         )
-        .reply("herdr pane", "")
-        .reply("herdr agent start", "")
-        .reply("herdr agent wait", "")
-        .reply("herdr agent prompt", "")
-        .reply("which hermes", "/usr/local/bin/hermes\n")
+        .replace(
+            "harness  =  \"hermes\"    # toggled in tests",
+            "harness = \"claude\"\naccount = \"C\"",
+        );
+    let text = format!(
+        "{text}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        b.sock.display()
+    );
+    let mut c = ctx(&tmpdir(name), &text);
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    c
+}
+
+fn host() -> Fake {
+    let agents =
+        serde_json::json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
+    Fake::default()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed run", "")
+        .reply("shed send", "")
+        .reply("which claude", "/usr/local/bin/claude\n")
 }
 
 fn starts(c: &drover::Ctx) -> Vec<Event> {
-    let all = read(&c.state).unwrap().into_iter();
+    let all = read(&c.state).unwrap().to_vec().into_iter();
     all.filter(|e| e.kind == "orchestrator-start").collect()
 }
 
 fn start_line(r: &Fake) -> String {
     let calls = r.calls.borrow();
-    let start = calls.iter().find(|c| c.starts_with("herdr agent start orchestrator-"));
+    let start = calls.iter().find(|c| c.starts_with("shed run --acp claude-acp"));
     start.cloned().unwrap_or_default()
 }
 
 #[test]
 fn a_fleet_without_a_orchestrator_role_starts_one_on_its_impl_role_from_the_board() {
-    let c = setup("cdef-start");
-    // `profiles sync` always writes the default conductor's profile.
+    let b = FakeShed::new();
+    let c = acp_setup("cdef-start", &b);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let profile = c.config.with_file_name("claude").join("lane-orchestrator");
     assert!(profile.join("settings.json").exists());
-    let r = host();
+    let f = host();
+    let cli = b.cli(&f);
+    let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Grill+%2312", &cookie);
     assert!(res.ends_with("\r\n\r\nt1 started\n"), "{res}");
     let st = &starts(&c)[0];
-    assert_eq!((st.str("harness"), st.str("model")), (Some("hermes"), Some("opus")));
-    assert!(start_line(&r).contains("-p lane-orchestrator"), "{}", start_line(&r));
-    // The conductor answers with `thread reply`; `thread show` reads it back.
+    assert_eq!((st.str("harness"), st.str("model")), (Some("claude"), Some("opus")));
+    let lane = profile.join("settings.json");
+    assert!(start_line(&f).contains(&*lane.to_string_lossy()), "{}", start_line(&f));
     let (code, out) = run(&c, &Fake::default(), &["thread", "reply", "t1", "Scope first."]);
     assert_eq!(code, 0, "{out}");
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
@@ -83,16 +95,19 @@ fn a_fleet_without_a_orchestrator_role_starts_one_on_its_impl_role_from_the_boar
 
 #[test]
 fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_start_uses_it() {
-    let c = setup("cdef-set");
+    let b = FakeShed::new();
+    let c = acp_setup("cdef-set", &b);
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let orig = std::fs::read_to_string(&c.config).unwrap();
-    let r = host();
+    let f = host();
+    let cli = b.cli(&f);
+    let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let sheet = config_sheet(&s);
     assert!(!sheet.contains("<h3>Conductor<span>"), "{sheet}");
     let i = sheet.find("name=mtime value=").unwrap() + 17;
     let mt: String = sheet[i..].chars().take_while(char::is_ascii_digit).collect();
     let tap = format!("op=cond&fleet=sendmeter&model=sonnet&mtime={mt}");
-    // Only a paired device saves.
     let res = req(&s, "/", &tap, "");
     assert!(res.starts_with("HTTP/1.1 401"), "{res}");
     assert_eq!(std::fs::read_to_string(&c.config).unwrap(), orig);
@@ -103,7 +118,7 @@ fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_
         "{res}"
     );
     let want = format!(
-        "{orig}\n[fleet.sendmeter.role.orchestrator]\nharness = \"hermes\"\nmodel = \"sonnet\"\nprofile = \"lane-orchestrator\"\n"
+        "{orig}\n[fleet.sendmeter.role.orchestrator]\naccount = \"C\"\nharness = \"claude\"\nmodel = \"sonnet\"\nprofile = \"lane-orchestrator\"\n"
     );
     assert_eq!(
         std::fs::read_to_string(&c.config).unwrap(),
@@ -114,29 +129,38 @@ fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_
         std::fs::read_to_string(c.config.with_extension("toml.bak")).unwrap(),
         orig
     );
-    let set = read(&c.state).unwrap().into_iter().rfind(|e| e.kind == "set").unwrap();
+    let set = read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .rfind(|e| e.kind == "set")
+        .unwrap();
     assert_eq!(
         (set.str("role"), set.str("key"), set.str("new")),
         (Some("orchestrator"), Some("model"), Some("sonnet"))
     );
-    // The next conductor start runs on the new model.
     let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Next", &cookie);
     assert!(res.ends_with("t1 started\n"), "{res}");
     assert_eq!(starts(&c)[0].str("model"), Some("sonnet"));
-    assert!(start_line(&r).contains("-p lane-orchestrator"));
+    let lane = c
+        .config
+        .with_file_name("claude")
+        .join("lane-orchestrator/settings.json");
+    let start = start_line(&f);
+    assert!(start.contains(&*lane.to_string_lossy()), "{start}");
+    assert!(start.contains("ANTHROPIC_MODEL='sonnet'"), "{start}");
 }
 
 #[test]
 fn a_orchestrator_choice_that_fails_doctor_is_refused_and_leaves_fleet_toml_alone() {
     let c = setup("cdef-doctor");
     let orig = std::fs::read(&c.config).unwrap();
-    let r = host();
+    let r = Fake::default().reply("which hermes", "/usr/local/bin/hermes\n");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let sheet = config_sheet(&s);
     let i = sheet.find("name=mtime value=").unwrap() + 17;
     let mt: String = sheet[i..].chars().take_while(char::is_ascii_digit).collect();
-    // claude is not on this host's PATH: doctor gains `✗ harness — claude on PATH`.
     let res = req(
         &s,
         "/",
@@ -149,7 +173,6 @@ fn a_orchestrator_choice_that_fails_doctor_is_refused_and_leaves_fleet_toml_alon
     );
     assert_eq!(std::fs::read(&c.config).unwrap(), orig, "byte-identical");
     assert!(!c.config.with_extension("toml.bak").exists());
-    // A model none of the fleet's roles use is not a choice.
     let res = req(
         &s,
         "/",

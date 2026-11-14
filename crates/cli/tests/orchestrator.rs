@@ -1,4 +1,3 @@
-//! #355: conductor chat: a thread's lifecycle (start, sleep, resume with history) and an ask round-trip.
 mod common;
 use common::*;
 use drover::events::{read, Event};
@@ -31,15 +30,53 @@ fn setup(name: &str, harness: &str) -> drover::Ctx {
     c
 }
 
+fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
+    let d = tmpdir(name);
+    let cfg = config("claude", &d).replace(
+        "[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"",
+        "[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\naccount = \"C\"",
+    );
+    let cfg = format!(
+        "{cfg}\n[fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        b.sock.display()
+    );
+    let mut c = ctx(&d, &cfg);
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
+        "t1\n"
+    );
+    c
+}
+
+fn acp(adapter: &[&str]) -> Fake {
+    let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
+    Fake::default()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed run", "")
+        .reply("shed send", "")
+}
+
+fn shed_calls(f: &Fake) -> Vec<String> {
+    let calls = f.calls.borrow();
+    let ours = |c: &&String| c.starts_with("shed run") || c.starts_with("shed send");
+    calls.iter().filter(ours).cloned().collect()
+}
+
 fn at(c: &drover::Ctx, now: u64) -> drover::Ctx {
     drover::Ctx { now, ..c.clone() }
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
-/// herdr with `agents` live, ready to start a conductor in a new workspace or type into one.
 fn herdr(agents: &str) -> Fake {
     Fake::default()
         .reply("herdr agent list", agents)
@@ -71,39 +108,46 @@ fn start_line(r: &Fake) -> String {
 }
 
 #[test]
-fn a_thread_starts_sleeps_when_idle_and_resumes_its_session_with_history() {
-    let c = setup("orchestrator-life", "claude");
-    let r = herdr(NO_AGENTS);
-    let (code, out) = run(&c, &r, &["thread", "say", "t1", "what should #12 cover?"]);
-    assert_eq!((code, out.as_str()), (0, "t1: -> orchestrator-t1\n"));
+fn a_thread_starts_sleeps_when_idle_and_restarts_with_its_history() {
+    let b = FakeShed::new();
+    let c = acp_setup("orchestrator-life", &b);
+    let f = acp(&["env"]);
+    let cli = b.cli(&f);
+    let (code, out) = run(&c, &cli, &["thread", "say", "t1", "what should #12 cover?"]);
+    assert_eq!(
+        (code, out.as_str()),
+        (0, "t1: -> orchestrator-t1\n"),
+        "{:?}",
+        f.calls.borrow()
+    );
     let dir = c.state.with_file_name("orchestrator").join("t1");
-    assert!(r.called(&format!(
-        "herdr workspace create --cwd {} --label orchestrator-t1",
+    let calls = shed_calls(&f);
+    let head = format!(
+        "shed run --acp claude-acp --policy allow --name orchestrator-t1 --cwd {} ",
         dir.display()
-    )));
-    let st = &kinds(&c, "orchestrator-start")[0];
-    let session = st.str("session").unwrap().to_string();
-    assert_eq!((session.len(), st.data["resumed"].clone()), (36, json!(false)));
-    let first = start_line(&r);
-    assert!(first.contains(&format!("--session-id {session}")), "{first}");
+    );
+    assert!(calls[0].starts_with(&head), "{calls:?}");
     assert!(
-        first.contains("--append-system-prompt-file") && !first.contains("--resume"),
-        "{first}"
+        !calls[0].contains("taskpolicy") && !calls[0].contains("renice"),
+        "{calls:?}"
+    );
+    let st = &kinds(&c, "orchestrator-start")[0];
+    assert_eq!(
+        (st.str("runtime"), st.val("resumed").clone()),
+        (Some("shed-acp"), json!(false))
     );
     let thread = dir.join(".thread.md");
-    assert!(
-        first.ends_with(&format!(
-            "Read {} and act on it. The thread so far is in {}, the last message new.",
-            dir.join(".brief.md").display(),
-            thread.display()
-        )),
-        "{first}"
+    let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
+    let first = format!(
+        "shed send orchestrator-t1 {}\n\nThe thread so far is in {}, the last message new.\n\n[t1] owner: what should #12 cover?",
+        brief.trim_end(),
+        thread.display()
     );
+    assert_eq!(calls[1..], [first]);
     assert_eq!(
         std::fs::read_to_string(&thread).unwrap(),
         "owner: what should #12 cover?\n"
     );
-    let brief = std::fs::read_to_string(dir.join(".brief.md")).unwrap();
     for want in [
         "# ROLE: ORCHESTRATOR",
         "Thread: t1, Grill #12",
@@ -113,44 +157,49 @@ fn a_thread_starts_sleeps_when_idle_and_resumes_its_session_with_history() {
     ] {
         assert!(brief.contains(want), "{want}: {brief}");
     }
-    assert!(r.called("herdr pane run w9:p1 export DROVER_LANE='sendmeter:-:orchestrator'"));
-
-    let (code, out) = run(&c, &r, &["thread", "reply", "t1", "Scope and tests. Which first?"]);
-    assert_eq!(code, 0, "{out}");
-
-    // Awake: the next message is typed into the same agent.
-    let r = herdr(&live("idle"));
-    let c2 = at(&c, NOW + 60);
-    assert_eq!(run(&c2, &r, &["thread", "say", "t1", "scope"]).0, 0);
+    let env = cli.out.borrow().concat();
     assert!(
-        r.called("herdr agent prompt orchestrator-t1 [t1] owner: scope"),
-        "{:?}",
-        r.calls.borrow()
+        env.lines().any(|l| l == "DROVER_LANE=sendmeter:-:orchestrator"),
+        "{env}"
     );
-    assert!(r.called("herdr pane send-keys w9:p1 Enter") && !r.called("herdr agent start"));
 
-    // Quiet under 30 min, or working: it stays up.
-    let (code, out) = run(&at(&c, NOW + 60 + 29 * 60), &herdr(&live("idle")), &["check"]);
+    let (code, out) = run(
+        &c,
+        &Fake::default(),
+        &["thread", "reply", "t1", "Scope and tests. Which first?"],
+    );
     assert_eq!(code, 0, "{out}");
-    let (code, out) = run(&at(&c, NOW + 60 * 60), &herdr(&live("working")), &["check"]);
+
+    let f = acp(&["echo"]);
+    let c2 = at(&c, NOW + 60);
+    assert_eq!(run(&c2, &b.cli(&f), &["thread", "say", "t1", "scope"]).0, 0);
+    assert_eq!(shed_calls(&f), ["shed send orchestrator-t1 [t1] owner: scope"]);
+
+    let (code, out) = run(&at(&c, NOW + 60 + 29 * 60), &b.cli(&f), &["check"]);
+    assert_eq!(code, 0, "{out}");
+    b.set("orchestrator-t1", |t| t["reported"] = json!({"state": "working"}));
+    let (code, out) = run(&at(&c, NOW + 60 * 60), &b.cli(&f), &["check"]);
     assert_eq!(code, 0, "{out}");
     assert!(kinds(&c, "orchestrator-sleep").is_empty());
-    let r = herdr(&live("idle"));
-    assert_eq!(run(&at(&c, NOW + 60 + 31 * 60), &r, &["check"]).0, 0);
-    assert!(r.called("herdr workspace close w9"), "{:?}", r.calls.borrow());
+    assert!(!b.called("kill", "orchestrator-t1"), "{:?}", b.methods());
+    b.set("orchestrator-t1", |t| t["reported"] = json!({"state": "idle"}));
+    assert_eq!(run(&at(&c, NOW + 60 + 31 * 60), &b.cli(&f), &["check"]).0, 0);
+    assert!(b.called("kill", "orchestrator-t1"), "{:?}", b.methods());
     assert_eq!(kinds(&c, "orchestrator-sleep")[0].str("why"), Some("idle"));
 
-    // Asleep: the next message resumes the same session, the message itself the kick.
-    let r = herdr(NO_AGENTS);
+    let f = acp(&["echo"]);
     assert_eq!(
-        run(&at(&c, NOW + 3600), &r, &["thread", "say", "t1", "tests first"]).0,
+        run(&at(&c, NOW + 3600), &b.cli(&f), &["thread", "say", "t1", "tests first"]).0,
         0
     );
-    let resumed = start_line(&r);
-    assert!(resumed.contains(&format!("--resume {session}")), "{resumed}");
-    assert!(!resumed.contains("--session-id"), "{resumed}");
-    assert!(resumed.ends_with(" [t1] owner: tests first"), "{resumed}");
-    assert_eq!(kinds(&c, "orchestrator-start")[1].data["resumed"], json!(true));
+    let calls = shed_calls(&f);
+    assert!(calls[0].starts_with(&head), "{calls:?}");
+    assert!(calls[1].ends_with("[t1] owner: tests first"), "{calls:?}");
+    assert_eq!(*kinds(&c, "orchestrator-start")[1].val("resumed"), json!(false));
+    assert_eq!(
+        std::fs::read_to_string(&thread).unwrap(),
+        "owner: what should #12 cover?\nOrchestrator: Scope and tests. Which first?\nowner: scope\nowner: tests first\n"
+    );
 
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert_eq!(
@@ -160,7 +209,53 @@ fn a_thread_starts_sleeps_when_idle_and_resumes_its_session_with_history() {
     );
 }
 
-/// A harness that can't resume its session is pointed at the whole conversation instead.
+#[test]
+fn a_herdr_orchestrator_resumes_its_session() {
+    let c = setup("orchestrator-resume", "claude");
+    let r = herdr(NO_AGENTS);
+    assert_eq!(run(&c, &r, &["thread", "say", "t1", "what should #12 cover?"]).0, 0);
+    let dir = c.state.with_file_name("orchestrator").join("t1");
+    assert!(r.called(&format!(
+        "herdr workspace create --cwd {} --label orchestrator-t1",
+        dir.display()
+    )));
+    let st = &kinds(&c, "orchestrator-start")[0];
+    let session = st.str("session").unwrap().to_string();
+    assert_eq!((session.len(), st.val("resumed").clone()), (36, json!(false)));
+    let first = start_line(&r);
+    assert!(first.contains(&format!("--session-id {session}")), "{first}");
+    assert!(
+        first.contains("--append-system-prompt-file") && !first.contains("--resume"),
+        "{first}"
+    );
+    assert!(
+        first.ends_with(&format!(
+            "Read {} and act on it. The thread so far is in {}, the last message new.",
+            dir.join(".brief.md").display(),
+            dir.join(".thread.md").display()
+        )),
+        "{first}"
+    );
+    assert!(r.called("herdr pane run w9:p1 export DROVER_LANE='sendmeter:-:orchestrator'"));
+    let r = herdr(&live("idle"));
+    assert_eq!(run(&at(&c, NOW + 60), &r, &["thread", "say", "t1", "scope"]).0, 0);
+    assert!(r.called("herdr agent prompt orchestrator-t1 [t1] owner: scope"));
+    assert!(r.called("herdr pane send-keys w9:p1 Enter") && !r.called("herdr agent start"));
+    let r = herdr(&live("idle"));
+    assert_eq!(run(&at(&c, NOW + 60 + 31 * 60), &r, &["check"]).0, 0);
+    assert!(r.called("herdr workspace close w9"), "{:?}", r.calls.borrow());
+    let r = herdr(NO_AGENTS);
+    assert_eq!(
+        run(&at(&c, NOW + 3600), &r, &["thread", "say", "t1", "tests first"]).0,
+        0
+    );
+    let resumed = start_line(&r);
+    assert!(resumed.contains(&format!("--resume {session}")), "{resumed}");
+    assert!(!resumed.contains("--session-id"), "{resumed}");
+    assert!(resumed.ends_with(" [t1] owner: tests first"), "{resumed}");
+    assert_eq!(*kinds(&c, "orchestrator-start")[1].val("resumed"), json!(true));
+}
+
 #[test]
 fn a_harness_without_resume_gets_the_history_in_its_kick() {
     let c = setup("orchestrator-generic", "hermes");
@@ -186,8 +281,6 @@ fn a_harness_without_resume_gets_the_history_in_its_kick() {
     );
 }
 
-/// #397: herdr refuses an `agent start` argument with a control character (`invalid_agent_argument`): no conductor
-/// start or resume, nor any lane spawn, sends one, however many lines the thread has. (dsh's launch carries no kick.)
 #[test]
 fn no_harness_starts_an_agent_with_a_control_character_in_its_argv() {
     let bad = |r: &Fake| {
@@ -232,8 +325,12 @@ fn no_harness_starts_an_agent_with_a_control_character_in_its_argv() {
 
 #[test]
 fn a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_into_the_thread() {
-    let c = setup("orchestrator-ask", "claude");
-    assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "grill me"]).0, 0);
+    let b = FakeShed::new();
+    let c = acp_setup("orchestrator-ask", &b);
+    assert_eq!(
+        run(&c, &b.cli(&acp(&["echo"])), &["thread", "say", "t1", "grill me"]).0,
+        0
+    );
     let ask = [
         "ask",
         "sendmeter",
@@ -270,15 +367,10 @@ fn a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_int
         "read now: {ls}"
     );
 
-    // The tap (`answer`) types the DECISION into the thread's conductor and logs it in the thread.
-    let r = herdr(&live("idle"));
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    let f = acp(&["echo"]);
+    let (code, out) = run(&c, &b.cli(&f), &["answer", "sendmeter", "q1", "1"]);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: small -> orchestrator-t1\n"));
-    assert!(
-        r.called("herdr agent prompt orchestrator-t1 DECISION q1: small"),
-        "{:?}",
-        r.calls.borrow()
-    );
+    assert_eq!(shed_calls(&f), ["shed send orchestrator-t1 DECISION q1: small"]);
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.ends_with(
@@ -298,8 +390,10 @@ fn a_thread_ask_shows_its_options_recommended_first_and_its_answer_goes_back_int
 fn a_thread_needs_a_orchestrator_or_impl_role_and_spawn_never_starts_one() {
     let no_impl = CONFIG.replace("[fleet.sendmeter.role.impl]", "[fleet.sendmeter.role.build]");
     let c = ctx(&tmpdir("orchestrator-none"), &no_impl);
+    let b = FakeShed::new();
+    b.attach(&c);
     assert_eq!(run(&c, &Fake::default(), &["thread", "new", "all", "Cross-repo"]).0, 0);
-    let (code, out) = run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "hi"]);
+    let (code, out) = run(&c, &Fake::default(), &["thread", "say", "t1", "hi"]);
     assert!(code == 3 && out.contains("REFUSED NO_ORCHESTRATOR"), "{out}");
     let (code, out) = run(&c, &Fake::default(), &["spawn", "sendmeter", "12", "orchestrator"]);
     assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");

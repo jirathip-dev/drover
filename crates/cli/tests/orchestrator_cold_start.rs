@@ -1,7 +1,5 @@
-//! #715: a conductor cold start never freezes the board: while a start blocks (30 s here), the request that caused it
-//! has its reply, and `GET /` and a second device's send answer at once; a failed background start shows its error in
-//! the thread, the message that triggered it still logged (#717).
 mod common;
+use common::fake_shed::Cli;
 use common::*;
 use drover::runner::{Out, Runner};
 use drover::serve::Server;
@@ -11,18 +9,17 @@ use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use std::time::{Duration, Instant};
 
 const ADDR: &str = "127.0.0.1:7777";
-const TIMEOUT: &str = r#"{"error":{"code":"timeout","message":"timed out waiting for agent startup"}}"#;
-
-/// Thread t1 (conductor asleep: never started) with ask q1 from it.
-fn setup(name: &str) -> drover::Ctx {
-    let c = ctx(
-        &tmpdir(name),
-        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+const TIMEOUT: &str = "timed out waiting for agent startup";
+fn setup(name: &str, b: &FakeShed) -> drover::Ctx {
+    let cfg = format!(
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        b.sock.display()
     );
-    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
-    std::fs::create_dir_all(&profile).unwrap();
-    std::fs::write(profile.join("settings.json"), "{}").unwrap();
+    let mut c = ctx(&tmpdir(name), &cfg);
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
     let f = Fake::default();
+    assert_eq!(run(&c, &f, &["profiles", "sync"]).0, 0);
     assert_eq!(run(&c, &f, &["thread", "new", "sendmeter", "Look"]).1, "t1\n");
     let ask = [
         "ask",
@@ -40,25 +37,19 @@ fn setup(name: &str) -> drover::Ctx {
     c
 }
 
-fn herdr() -> Fake {
+fn acp() -> Fake {
+    let agents =
+        serde_json::json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
-        )
-        .reply("herdr workspace close", "")
-        .reply("herdr pane run", "")
-        .reply("herdr agent start", "")
-        .reply("herdr agent wait", "")
-        .reply("herdr agent prompt", "")
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed run", "")
+        .reply("shed send", "")
 }
 
-/// `.0`, with `herdr agent start` blocking for 30 s (or until `.2`); `.1` once a start is under way.
-struct Slow(Fake, AtomicBool, AtomicBool);
+struct Slow(Cli<'static>, AtomicBool, AtomicBool);
 impl Slow {
     fn block(&self, prog: &str, args: &[String]) {
-        if prog == "herdr" && args.starts_with(&["agent".into(), "start".into()]) {
+        if prog == "shed" && args[0] == "run" {
             self.1.store(true, SeqCst);
             let t = Instant::now();
             while !self.2.load(SeqCst) && t.elapsed() < Duration::from_secs(30) {
@@ -81,7 +72,6 @@ impl Runner for Slow {
     }
 }
 
-/// One request over the socket, given 2 s: (ms, response text; empty when it timed out).
 fn call(addr: SocketAddr, method: &str, path: &str, cookie: &str, body: &str) -> (u128, String) {
     let t = Instant::now();
     let mut s = TcpStream::connect(addr).unwrap();
@@ -98,8 +88,10 @@ fn call(addr: SocketAddr, method: &str, path: &str, cookie: &str, body: &str) ->
 
 #[test]
 fn a_blocked_orchestrator_start_holds_no_request() {
-    let c = setup("cold-start");
-    let r = Slow(herdr(), AtomicBool::new(false), AtomicBool::new(false));
+    let sh: &'static FakeShed = Box::leak(Box::new(FakeShed::new()));
+    let c = setup("cold-start", sh);
+    let f: &'static Fake = Box::leak(Box::new(acp()));
+    let r = Slow(sh.cli(f), AtomicBool::new(false), AtomicBool::new(false));
     let (c, r): (&'static drover::Ctx, &'static Slow) = (Box::leak(Box::new(c)), Box::leak(Box::new(r)));
     let pairing = Server::new(c, r, Some(ADDR.into()));
     let a = pair(&pairing, c, "Mozilla/5.0 (iPhone)", drover::now());
@@ -108,7 +100,6 @@ fn a_blocked_orchestrator_start_holds_no_request() {
     let addr = l.local_addr().unwrap();
     std::thread::spawn(move || drover::serve::serve_on(c, r, l, false));
 
-    // Device A answers t1's ask: its conductor is asleep, so the answer wakes it (the start blocks).
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         drop(tx.send(call(
@@ -134,7 +125,6 @@ fn a_blocked_orchestrator_start_holds_no_request() {
         "device B's send during the start: {res:.300}"
     );
     assert!(ms < 1000, "device B's send took {ms} ms during the start");
-    // The answer itself was replied to, not held until the conductor is up.
     let (ms, res) = rx
         .recv_timeout(Duration::from_secs(1))
         .expect("the answer's reply waits on the start");
@@ -144,7 +134,6 @@ fn a_blocked_orchestrator_start_holds_no_request() {
     );
     assert!(ms < 1000, "the answer took {ms} ms");
     r.2.store(true, SeqCst);
-    // The released start writes its events after this thread's tmpdir sweep: let it finish so the dir stays gone.
     let (t, mut last) = (Instant::now(), String::new());
     while t.elapsed() < Duration::from_secs(10) {
         std::thread::sleep(Duration::from_millis(300));
@@ -158,10 +147,11 @@ fn a_blocked_orchestrator_start_holds_no_request() {
 
 #[test]
 fn a_failed_background_start_shows_in_the_thread_its_message_kept() {
-    let c = setup("cold-start-fail");
-    let r = herdr()
-        .once_err("herdr agent start", 1, TIMEOUT)
-        .once_err("herdr agent start", 1, TIMEOUT);
+    let sh = FakeShed::new();
+    let c = setup("cold-start-fail", &sh);
+    let f = acp().once_err("shed run", 1, TIMEOUT).once_err("shed run", 1, TIMEOUT);
+    let cli = sh.cli(&f);
+    let r = sh.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", 1_000_000);
     let body = "op=answer&fleet=sendmeter&id=q1&choice=2";
@@ -180,7 +170,8 @@ fn a_failed_background_start_shows_in_the_thread_its_message_kept() {
         "the message stays logged: {log}"
     );
     assert!(
-        log.contains(r#""text":"✗ not delivered: herdr agent start failed: timed out waiting for agent startup""#),
+        log.contains(r#""text":"✗ not delivered: shed run --acp claude-acp"#) && log.contains(&format!("{TIMEOUT}\"")),
         "{log}"
     );
+    assert_eq!(log.matches("✗ not delivered").count(), 1, "{log}");
 }

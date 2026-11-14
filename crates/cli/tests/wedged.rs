@@ -1,8 +1,3 @@
-//! #713: the 11-08 outage as a test. The login Keychain stops answering: `security` and `codesign` never return.
-//! `doctor`, `serve` (startup through its first page render), `tick` and `check` each still finish within 10 s of
-//! wall-clock time, and serve still serves the board. #707 retired the store and the signing step, so `lsof`, which
-//! all four still call (doctor's port probe, the host's cwd scan) and which hangs the same way on a stuck mount,
-//! stands in for the next tool that stops answering.
 mod common;
 use common::*;
 use drover::runner::{Out, Runner};
@@ -10,7 +5,6 @@ use serde_json::json;
 use std::io::{Read, Write};
 use std::time::Duration;
 
-/// The tools that hang with the Keychain, and `lsof`, the one of the next kind that all four commands call.
 const WEDGED: [&str; 3] = ["security", "codesign", "lsof"];
 
 fn hang() -> ! {
@@ -19,8 +13,6 @@ fn hang() -> ! {
     }
 }
 
-/// `.0`, except that a `WEDGED` program never answers. As `Real`, a call is cut at its limit (`run_for`'s, else
-/// `runner::limit`'s): exit 124 at once (the limit is virtual time); a call with no limit blocks for good.
 struct Wedged(Fake);
 
 impl Wedged {
@@ -60,9 +52,7 @@ impl Runner for Wedged {
     }
 }
 
-/// A Claude fleet with a `secret:` env and account A's usage meter, and #12's
-/// impl lane on A (check confirms its usage-limit banner from the meter).
-fn setup(name: &str) -> drover::Ctx {
+fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let d = tmpdir(name);
     let cfg = CONFIG.replace(
         "harness  =  \"hermes\"    # toggled in tests",
@@ -73,11 +63,14 @@ fn setup(name: &str) -> drover::Ctx {
     );
     let c = ctx(&d, &cfg);
     let wt = c.worktrees.join("sendmeter/issue-12");
-    let d = json!({"role": "impl", "agent": IMPL, "pane": "w9:p12", "worktree": wt, "branch": "issue-12",
+    let d = json!({"role": "impl", "agent": IMPL, "pane": IMPL, "worktree": wt, "branch": "issue-12",
                    "harness": "claude", "account": "A"});
     let ev = drover::events::Event::new(c.now - 900, "sendmeter", Some(12), "spawn", d);
     drover::events::append(&c.state, &ev).unwrap();
-    c
+    let sh = FakeShed::attached(&c);
+    sh.lane(IMPL, "idle", "/x");
+    sh.screen(IMPL, "Claude usage limit reached.");
+    (c, sh)
 }
 
 fn wedged() -> Wedged {
@@ -88,15 +81,12 @@ fn wedged() -> Wedged {
                 "herdr status",
                 "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n",
             )
-            .reply("herdr agent list", &agents(&[(IMPL, "idle", "/x", "w9:p12")]))
-            .reply("herdr pane read w9:p12", "Claude usage limit reached.")
             .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
             .reply("sysctl -n hw.ncpu", "4")
             .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n"),
     )
 }
 
-/// `f` on its own thread; its result, or a failure once 10 s of wall-clock time have passed.
 fn in_10_s<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || tx.send(f()));
@@ -107,10 +97,13 @@ fn in_10_s<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static
     }
 }
 
-/// `drover <args>` against the wedged Keychain, within 10 s: (exit code, output).
 fn cli(name: &str, args: &'static [&'static str]) -> (i32, String) {
-    let c = setup(name);
-    in_10_s(&format!("drover {}", args.join(" ")), move || run(&c, &wedged(), args))
+    let (c, sh) = setup(name);
+    in_10_s(&format!("drover {}", args.join(" ")), move || {
+        let r = run(&c, &wedged(), args);
+        drop(sh);
+        r
+    })
 }
 
 #[test]
@@ -131,7 +124,8 @@ fn tick_finishes_in_10_s() {
 
 #[test]
 fn serve_starts_and_serves_the_board_in_10_s() {
-    let c: &'static drover::Ctx = Box::leak(Box::new(setup("wedged-serve")));
+    let (c, sh) = setup("wedged-serve");
+    let (c, _sh): (&'static drover::Ctx, &'static FakeShed) = (Box::leak(Box::new(c)), Box::leak(Box::new(sh)));
     let page = in_10_s("serve", move || {
         let r: &'static Wedged = Box::leak(Box::new(wedged()));
         let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

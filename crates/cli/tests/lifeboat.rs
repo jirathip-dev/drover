@@ -1,6 +1,3 @@
-//! #725: the lifeboat at `/api/v1/lifeboat`: an unpaired device gets the pair hint only; a paired one sees each fleet,
-//! the queue, the live lanes, the open asks and the open run cards, with no subprocess on a load (#337); its posts
-//! (pause/resume, an answer, a card's approve/deny) log the CLI verb's own event `via: lifeboat`.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -11,10 +8,34 @@ const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const CMD: &str = "uptime";
 
-/// API v1's board (#12 impl working, #9 rev blocked) with #30 queued, ask q1 on #12 and run cards r1 and r2 open.
-fn fixture(name: &str) -> (drover::Ctx, Fake) {
+fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     let (c, r) = v1_board(name);
-    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "30"]).0, 0);
+    seed(&c, &r);
+    (c, r)
+}
+
+fn herdr_fixture(name: &str) -> (drover::Ctx, Fake) {
+    let (c, _) = v1_board(name);
+    let list = agents(&[(IMPL, "working", "/x", "w1:p2"), (REV, "blocked", "/x", "w1:p3")]);
+    let r = Fake::default()
+        .reply("herdr agent list", &list)
+        .reply("herdr pane read", V1_PERMISSION)
+        .reply("gh issue close", "");
+    std::fs::write(
+        &c.config,
+        std::fs::read_to_string(&c.config)
+            .unwrap()
+            .split("\n[runtime]\n")
+            .next()
+            .unwrap(),
+    )
+    .unwrap();
+    seed(&c, &r);
+    (c, r)
+}
+
+fn seed(c: &drover::Ctx, r: &Fake) {
+    assert_eq!(run(c, r, &["queue", "sendmeter", "add", "30"]).0, 0);
     let ev = |issue, kind, d| append(&c.state, &Event::new(T - 50, "sendmeter", issue, kind, d)).unwrap();
     let q = json!({"id": "q1", "agent": IMPL, "question": "Which database?", "options": ["SQLite", "Postgres"]});
     ev(Some(12), "needs-decision", q);
@@ -23,10 +44,8 @@ fn fixture(name: &str) -> (drover::Ctx, Fake) {
             "dir": "/srv", "host": "main", "timeout": 60, "sha": drover::devices::sha256(CMD.as_bytes())});
         ev(None, "run-card", d);
     }
-    (c, r)
 }
 
-/// `method /api/v1/lifeboat[query]` with `body` (a form) as `cookie`'s device: (status line, body).
 fn req(s: &Server, method: &str, query: &str, body: &str, cookie: &str) -> (String, String) {
     let r = format!(
         "{method} /api/v1/lifeboat{query} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
@@ -38,7 +57,12 @@ fn req(s: &Server, method: &str, query: &str, body: &str, cookie: &str) -> (Stri
 }
 
 fn last(c: &drover::Ctx, kind: &str) -> Event {
-    read(&c.state).unwrap().into_iter().rfind(|e| e.kind == kind).unwrap()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .rfind(|e| e.kind == kind)
+        .unwrap()
 }
 
 #[test]
@@ -61,8 +85,8 @@ fn an_unpaired_device_sees_the_pair_hint_and_nothing_else() {
 
 #[test]
 fn a_paired_device_sees_queue_lanes_asks_and_cards_and_a_load_runs_no_subprocess() {
-    let (c, r) = fixture("lifeboat-paired");
-    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0); // the step's snapshot, as on a live host
+    let (c, r) = herdr_fixture("lifeboat-paired");
+    assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let before = r.calls.borrow().len();
@@ -124,17 +148,16 @@ fn each_post_logs_the_cli_verbs_event_via_lifeboat() {
     post(&format!("op=approve&id=r1&sha={sha}"));
     let e = last(&c, "run-settled");
     assert_eq!(
-        (e.str("id"), e.data["approved"].clone(), e.str("via")),
+        (e.str("id"), e.val("approved").clone(), e.str("via")),
         (Some("r1"), json!(true), Some("lifeboat"))
     );
     assert!(r.called("sh -c"), "approve ran the card's command");
     post("op=deny&id=r2");
     let e = last(&c, "run-settled");
     assert_eq!(
-        (e.str("id"), e.data["approved"].clone(), e.str("via")),
+        (e.str("id"), e.val("approved").clone(), e.str("via")),
         (Some("r2"), json!(false), Some("lifeboat"))
     );
-    // A settled card is gone from the page; a second tap is the CLI's refusal, shown back.
     let page = req(&s, "GET", "", "", &ck).1;
     assert!(
         !page.contains("<button>approve</button>") && !page.contains("Which database?"),
@@ -144,8 +167,6 @@ fn each_post_logs_the_cli_verbs_event_via_lifeboat() {
     assert!(back.contains("REFUSED%20ALREADY%5FSETTLED"), "{back}");
 }
 
-/// The `ui` job's 390 px audit (scripts/ui-audit.sh's `lifeboat/page`): with `LIFEBOAT_SITE` set, the paired page goes
-/// to `<site>/lifeboat/index.html` with an audit that fails on sideways scroll or a control under 44 px.
 #[test]
 fn the_page_for_the_ui_audit() {
     let Some(site) = std::env::var_os("LIFEBOAT_SITE") else {

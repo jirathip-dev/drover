@@ -51,9 +51,7 @@ fn drover_shows_the_data_age_once_the_background_read_is_over_10s_old() {
 struct Slow(Fake, AtomicU64);
 impl Runner for Slow {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
-        if prog == "herdr" {
-            std::thread::sleep(std::time::Duration::from_millis(self.1.load(Relaxed)));
-        }
+        std::thread::sleep(std::time::Duration::from_millis(self.1.load(Relaxed)));
         self.0.run(prog, args)
     }
     fn sleep(&self, _: u64) {}
@@ -69,7 +67,8 @@ fn a_slow_api_for_10_minutes_alerts_once_and_never_after_it_recovers() {
     );
     let c = ctx(&dir, &cfg);
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    let r = Slow(fake(), AtomicU64::new(40));
+    let _sh = FakeShed::attached(&c);
+    let r = Slow(Fake::default(), AtomicU64::new(40));
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let pushes = || std::fs::read_to_string(&sink).unwrap_or_default();
     let card = |now| {
@@ -106,7 +105,7 @@ fn a_slow_api_for_10_minutes_alerts_once_and_never_after_it_recovers() {
     let lines: Vec<String> = pushes().lines().map(String::from).collect();
     assert_eq!(lines.len(), 1, "{lines:?}");
     assert!(lines[0].contains("/api/v1/state"), "{lines:?}");
-    let alerts: Vec<_> = (read(&c.state).unwrap().into_iter())
+    let alerts: Vec<_> = (read(&c.state).unwrap().to_vec().into_iter())
         .filter(|e| e.kind.starts_with("slo-api"))
         .collect();
     assert_eq!(alerts.len(), 1);
@@ -118,7 +117,7 @@ fn a_slow_api_for_10_minutes_alerts_once_and_never_after_it_recovers() {
         get(&s, NOW + 60 * m, "/api/v1/state");
         s.slo(NOW + 60 * m);
     }
-    let kinds: Vec<String> = (read(&c.state).unwrap().into_iter())
+    let kinds: Vec<String> = (read(&c.state).unwrap().to_vec().into_iter())
         .filter(|e| e.kind.starts_with("slo-api"))
         .map(|e| e.kind)
         .collect();

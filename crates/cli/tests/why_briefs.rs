@@ -1,6 +1,3 @@
-//! #677: each brief kind carries its why notes, read with real `git notes` from the fleet's local clone: a fix, update
-//! or respawned lane every note on its branch; a new impl the latest notes on the files its spec names; rev the round
-//! head's note, or why there is none.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -9,7 +6,6 @@ use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Command;
 
-/// Real `git` for `git notes` (the clone's real notes); the Fake for every other call.
 struct Notes<'a>(&'a Fake);
 
 impl Runner for Notes<'_> {
@@ -47,7 +43,6 @@ fn g(dir: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&o.stdout).trim().to_string()
 }
 
-/// A local clone with two noted commits: #12's round 1 head and #7's (which changed src/meter.rs).
 fn setup(name: &str) -> (drover::Ctx, String, String) {
     let d = tmpdir(name);
     let local = d.join("local");
@@ -76,7 +71,6 @@ fn setup(name: &str) -> (drover::Ctx, String, String) {
 
 fn fake(rev_head: &str, wt: &Path) -> Fake {
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
         .reply(
             "gh issue view 12",
             r#"{"title":"Meter retries","body":"Retries double the count in `src/meter.rs`."}"#,
@@ -86,20 +80,12 @@ fn fake(rev_head: &str, wt: &Path) -> Fake {
             &format!("{rev_head}\n"),
         )
         .reply("git -C", "0\n")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr pane wait-output", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr pane read", "Read the brief")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// Spawn `args` (after `spawn sendmeter 12`) and read the lane's brief.
 fn brief(c: &drover::Ctx, head: &str, args: &[&str]) -> String {
+    let sh = FakeShed::new();
+    sh.attach(c);
     let dir = if args[0] == "rev" { "rev-12-r1" } else { "issue-12" };
     let wt = c.worktrees.join("sendmeter").join(dir);
     let f = fake(head, &wt);
@@ -189,7 +175,6 @@ fn a_rev_brief_carries_the_rounds_note_or_why_there_is_none() {
         b.contains("a why note that contradicts the diff is a blocking finding"),
         "{b}"
     );
-    // Another head, its `done` refused: the brief says so.
     let (c, seven, _) = setup("why-brief-rev-none");
     let d = json!({"state": "done", "role": "impl", "note": "WHY_INVALID: why.md missing"});
     append(&c.state, &Event::new(30, "sendmeter", Some(12), "turn-end", d)).unwrap();

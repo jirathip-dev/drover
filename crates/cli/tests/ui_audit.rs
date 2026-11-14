@@ -1,6 +1,3 @@
-//! #58 amendment B: one terminal-style control system. The `tests/ui/audit.js` console audit on every
-//! screen (Queue with rows open, a fleet's [config] in System, Lanes, System's Hosts & health and Activity, the sheet,
-//! Herd): zero outliers. 390 px screenshots go to `$DROVER_SNAPSHOTS`.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -22,7 +19,6 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> String 
     .into_owned()
 }
 
-/// The audited page (two lanes, one blocked on a menu, a queue, the fleet's config, Events and Host spliced in) and the Herd's data.
 fn fixture() -> (String, String) {
     let cfg = format!("models = [\"opus\", \"sonnet\", \"claude-haiku-4-5-20251001\"]\n\n{CONFIG}");
     let c = ctx(&tmpdir("ui-audit"), &cfg);
@@ -43,18 +39,17 @@ fn fixture() -> (String, String) {
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "18", "19", "20"]).0,
         0
     );
-    let a = |n: &str, st: &str, p: &str| json!({"name": n, "agent_status": st, "pane_id": p, "cwd": "/x"});
-    let list = json!({"result": {"agents": [a("sendmeter-impl-12", "working", "w1:p1"), a("sendmeter-impl-13", "blocked", "w1:p2")]}});
-    let r = Fake::default()
-        .reply("herdr agent list", &list.to_string())
-        .reply("herdr pane read", MENU);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    for (n, st) in [("sendmeter-impl-12", "working"), ("sendmeter-impl-13", "blocked")] {
+        sh.lane(n, st, "/x");
+        sh.screen(n, MENU);
+    }
+    let f = Fake::default();
+    let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let page = req(&s, "GET", "/?all=1", "", &ck);
-    // #60: the parts the live page loads on demand, spliced in as the page shows them once loaded. #268: the board's
-    // Queue tab; #269: the needs cards, Lanes and [chat] as the board draws them for this paired phone; #266, #267,
-    // #440: its Events, Host and System parts (a fleet's [config] in Fleets), without the board (it would read this
-    // file's base server).
     let html = with_board(&page[page.find("<!doctype").unwrap()..], &s, ADDR, &ck, T);
     let parts = system_frags(&s, ADDR, T, &events_tab(&s, ADDR, T, "{}").unwrap_or_default());
     let html = html[..html.find("<script type=module").unwrap()].to_string() + &parts + "</body></html>\n";
@@ -78,7 +73,6 @@ fn every_control_passes_the_audit_at_390px() {
     let stub = "window.fetch = async () => new Response('no pane output', {status: 404})";
     let config = "config(document.querySelector('.cfg[data-f=\"sendmeter\"]'))";
     let scenes = [
-        // The header (`[↻]` and the horse) is in every tab's frame and audit.
         ("ui-queue", "queue", "body", String::new()),
         ("ui-config", "queue", "#sys", config.to_string()),
         ("ui-lanes", "lanes", "body", String::new()),
@@ -110,8 +104,6 @@ fn every_control_passes_the_audit_at_390px() {
     ];
     let audit = include_str!("ui/audit.js");
     for (name, tab, root, then) in scenes {
-        // The audit scrolls and opens rows, so the scene is set up again for the screenshot.
-        // #138 (the chat scenes): no sideways scroll inside the chat or a panel, no chat text but 11 or 13 px; the blocks drawn.
         let fit = "const c = document.querySelector('.chat'); window.measure.push(c.scrollWidth - c.clientWidth \
             + [...c.querySelectorAll('pre, .blk')].filter(e => e.scrollWidth > e.clientWidth).length, \
             [...c.querySelectorAll('*')].filter(e => e.childNodes.length && [...e.childNodes].some(n => n.nodeType === 3 && n.textContent.trim()) && !['11px', '13px'].includes(getComputedStyle(e).fontSize)).length, c.querySelectorAll('.blk, .qs').length, c.querySelectorAll('.blk[open]').length)";
@@ -148,18 +140,13 @@ fn every_control_passes_the_audit_at_390px() {
     }
 }
 
-/// #200: WebKit (the engine of iOS Safari) closing each sheet: the page above it is only ever the page as it was,
-/// dimmed evenly by the fading backdrop, never another colour (iOS flashed it grey: `.out`, the chat blocks' box, on #sheet).
 #[test]
 fn closing_a_sheet_never_repaints_the_page() {
     if no_webkit() {
         return;
     }
     let (html, _) = fixture();
-    // #244: `judge` reads the backdrop as the page times k, a black scrim: github-dark's (farm's is tinted).
     let mut html = html.replace("\"farm\":\"farm\"", "\"farm\":\"github-dark\"");
-    // #450: the page's clock is now, as a live page's is: the fixture's 1970 one shows the strip's `as of …d ago`
-    // until the first paint, and its going would move the page mid-close.
     let i = html.find("<body data-ts=").unwrap() + 14;
     let j = i + html[i..].find(' ').unwrap();
     let now = std::time::SystemTime::now()
@@ -177,7 +164,6 @@ fn closing_a_sheet_never_repaints_the_page() {
             "open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]'))",
             "close()",
         ),
-        // #440: a fleet's [config] is System's Fleets row; System covers the page and its close uncovers it.
         (
             "config",
             "queue",
@@ -224,9 +210,6 @@ fn closing_a_sheet_never_repaints_the_page() {
     assert!(bad.is_empty(), "{bad:?}");
 }
 
-/// #206: a reload on Events painted the Queue tab (and `[?]`) with squished rows until serve.js ran `tab()`. WebKit with
-/// `localStorage.tab` set: the first painted frame (the page with its scripts cut, as it paints before they run) shows
-/// that tab's section alone, and the Queue rows (row height, `#n` column width) lay out as they settle.
 #[test]
 fn the_first_paint_is_the_stored_tab_and_the_settled_layout() {
     if no_webkit() {
@@ -241,7 +224,6 @@ fn the_first_paint_is_the_stored_tab_and_the_settled_layout() {
         format!("{}</body></html>", &html[..html.find("<script src=").unwrap()]),
     )
     .unwrap();
-    // Shown or not: Queue, Lanes, Chat, [?]; then each Queue row's height and `#n` width.
     let measure = "window.measure = [...['#queue', '#lanes', '#chat', 'header .qhelp'].map(s => getComputedStyle(document.querySelector(s)).display === 'none' ? 0 : 1), \
         ...[...document.querySelectorAll('details.q')].flatMap(d => [d.querySelector('summary').getBoundingClientRect().height, d.querySelector('summary>span').getBoundingClientRect().width])]";
     let shot = |tab: &str, frame: &str, file: &std::path::Path| {
@@ -269,7 +251,6 @@ fn the_first_paint_is_the_stored_tab_and_the_settled_layout() {
         );
         v[2..].to_vec()
     };
-    // #440: a stored `events` (or `host`) tab, gone to System, paints Queue from the first frame on.
     for (tab, shown) in [
         ("lanes", [0.0, 1.0, 0.0, 0.0]),
         ("events", [1.0, 0.0, 0.0, 1.0]),

@@ -1,5 +1,3 @@
-//! #552: the old board takes bug fixes only. `scripts/board-freeze.sh` fails a PR whose changed files touch the
-//! board's UI unless its issue's spec has a `board-fix` line; /api/v1 (api.rs, serve/v1.rs) stays open.
 mod common;
 use common::*;
 use std::io::Write;
@@ -51,7 +49,7 @@ fn a_board_ui_change_needs_board_fix_in_the_issue() {
         "assets/herd.js",
         "web/dist/app.js",
         "crates/server/src/serve.rs",
-        "assets/themes/a.css",
+        "assets/terminal/a.css",
     ] {
         assert_eq!(freeze("", &format!("{f}\n")).0, Some(1), "{f} is frozen");
     }
@@ -75,7 +73,6 @@ fn ci_runs_the_freeze_on_every_staging_pr() {
     assert!(wf.contains("| scripts/board-freeze.sh spec.md"), "{wf}");
 }
 
-/// #574: the body `drover amend` sent with `gh issue edit` (the call's `--body` value).
 fn edited(r: &Fake) -> String {
     let calls = r.calls.borrow();
     let edit = calls
@@ -85,8 +82,6 @@ fn edited(r: &Fake) -> String {
     edit.split_once(" --body ").unwrap().1.to_string()
 }
 
-/// #574: `drover amend` appends an owner's decision under the body's `## Amendments` (made once), logs `amend`,
-/// re-runs the open PR's failed board-freeze (not other checks), and its `board-fix` line passes board-freeze.
 #[test]
 fn amend_writes_an_owner_decision_into_the_spec_and_reruns_board_freeze() {
     use drover::events::{append, read, Event};
@@ -138,6 +133,7 @@ fn amend_writes_an_owner_decision_into_the_spec_and_reruns_board_freeze() {
     assert!(!r.called("gh run rerun 88"), "only spec-reading checks re-run");
     let amends: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "amend")
         .collect();

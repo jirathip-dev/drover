@@ -1,4 +1,3 @@
-//! #141: each `driven` result as the Host tab's FLEETS row says it: (status, word, plain words + what clears it).
 use drover::events::Event;
 use drover::serve::in_words;
 use serde_json::json;
@@ -9,7 +8,6 @@ fn said(code: Option<&str>, step: &str, issue: u64, result: &str, serial: &str) 
     (t.into(), w.into(), x)
 }
 
-/// (code, step, issue, raw result, serial label, [status, word, plain words]).
 type Case<'a> = (Option<&'a str>, &'a str, u64, &'a str, &'a str, [&'a str; 3]);
 
 #[test]

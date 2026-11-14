@@ -21,8 +21,8 @@ fn fixture() -> drover::Ctx {
     };
     for n in 1..=ISSUES {
         let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
-        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("w{n}:p1"),
-            "workspace": format!("w{n}"), "worktree": wt, "branch": format!("issue-{n}")});
+        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("sendmeter-impl-{n}"),
+            "workspace": "", "worktree": wt, "branch": format!("issue-{n}")});
         add(Event::new(10 + n, "sendmeter", Some(n), "spawn", d));
     }
     for i in 0..EVENTS {
@@ -51,20 +51,18 @@ fn fixture() -> drover::Ctx {
     c
 }
 
-fn lanes() -> Fake {
-    let rows: Vec<_> = (1..=ISSUES)
-        .map(|n| (format!("sendmeter-impl-{n}"), format!("w{n}:p1")))
-        .collect();
-    let list: Vec<_> = rows
-        .iter()
-        .map(|(a, p)| (a.as_str(), "idle", "/elsewhere", p.as_str()))
-        .collect();
-    Fake::default()
-        .reply("herdr agent list", &agents(&list))
-        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-        .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
-        .reply("sysctl -n hw.ncpu", "10\n")
-        .reply("vm_stat", "Pages free: 100000.\nSwapouts: 100.\n")
+fn lanes() -> OnShed {
+    let r = OnShed::new(
+        Fake::default()
+            .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+            .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
+            .reply("sysctl -n hw.ncpu", "10\n")
+            .reply("vm_stat", "Pages free: 100000.\nSwapouts: 100.\n"),
+    );
+    for n in 1..=ISSUES {
+        r.1.lane(&format!("sendmeter-impl-{n}"), "idle", "/elsewhere");
+    }
+    r
 }
 
 #[test]

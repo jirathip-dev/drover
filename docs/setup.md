@@ -13,14 +13,18 @@ adapter: a herdr CLI change touches that file only.
 ```sh
 gh auth status
 herdr --version
-cargo install --path crates/cli --locked --root ~/.local/share/drover
+cargo build --release --locked -p drover
 # macOS (#781): sign with one local identity, so a Keychain item's access list trusts every build, not one.
 sh scripts/signing-identity.sh   # once: creates "drover-local", lets codesign use it (asks the login password)
-sh scripts/signing-identity.sh sign ~/.local/share/drover/bin/drover   # by hash; fails, never hangs, on a dialog
+# #968: sign a copy beside the installed file, then rename it over: a running serve keeps its old file.
+b=~/.local/share/drover/bin; mkdir -p "$b"; n=target/release/drover; cp "$n" "$b/drover.new"
+sh scripts/signing-identity.sh sign "$b/drover.new" && mv "$b/drover.new" "$b/drover"   # fails, never hangs
 echo 'export PATH="$HOME/.local/share/drover/bin:$PATH"' >> ~/.zshrc   # or ~/.bashrc
 ```
 
-Check it worked: open a new shell and run `drover --version`.
+Check it worked: open a new shell and run `drover --version`. Once the config exists (step 2 on), reinstall with
+`sh scripts/install-gate.sh target/release/drover ~/.local/share/drover/bin/drover`: it also refuses a build that
+can't load the live config.
 
 ### Signed builds (#781)
 
@@ -60,7 +64,7 @@ repo = "<owner>/<repo>"
 local = "~/src/<repo>"
 integration = "staging"                      # merge target; main never is
 required_checks = ["test"]                   # gate on these checks only; unset = all
-# merge_label = "merge-ready"                # PR label the full CI needs: added on a PASS at the head
+merge_label = "merge-ready"                  # the full CI runs only with this label; drover adds it on a PASS at the head
 
 [[fleet.app.serial]]                         # one-at-a-time paths (docs/config.md); any number of groups
 name = "db"                                  # its Queue mark, 🔒db; ≤ 8 characters
@@ -90,6 +94,9 @@ Check it worked: `drover status` prints no error. Every other key is in
 [fleet.example.toml](../fleet.example.toml). Claude accounts sign in with their own login folders, and secrets live in
 0600 files, never in fleet.toml: see [accounts.md](accounts.md) and [providers.md](providers.md).
 
+`merge_label` goes with the affected-only CI recipe in [ci.md](ci.md): pull requests run only the checks the change
+can affect, and the full run starts when drover adds the label. `drover setup` creates the label in the repo.
+
 ## 3. First lane
 
 ```sh
@@ -106,7 +113,8 @@ runs it every 5 minutes. Check it worked:
 
 One command, safe to run again: `drover setup`. It writes and loads the tick job and the board
 job ([6](#6-board-on-the-phone-tailscale)), sets up `tailscale serve`, runs `drover profiles sync`,
-plus the self-update and daily clean jobs ([below](#self-update-and-the-daily-clean-557)), then runs
+plus the self-update and daily clean jobs ([below](#self-update-and-the-daily-clean-557)), makes sure each fleet's
+`merge_label` exists in its repo ([ci.md](ci.md)), then runs
 `drover doctor` and exits with its code. Each step prints `✓ done`, `= already` or
 `✗ <error> → <fix>`; `--no-load` writes the jobs without loading them.
 
@@ -195,7 +203,7 @@ Check it worked: `echo hello | notify-telegram <chat>` arrives on your phone.
 ## 6. Board on the phone (Tailscale)
 
 `drover setup` writes and loads this job for you: label `[serve] launchd_label` (default
-`dev.drover.serve`), address `[serve] addr` (default `127.0.0.1:7777`), `KeepAlive`, the tick's PATH,
+`dev.drover.serve`), address `[serve] addr` (default `127.0.0.1:7777`), `KeepAlive`, `ProcessType Interactive` (#893), the tick's PATH,
 logs to `~/.local/state/drover/serve.log`. If a job under another label already runs
 `drover serve`, setup adopts it (`= adopted <plist>`) and never makes a second one. Re-labelling is
 manual: `launchctl bootout gui/$(id -u)/<old label>`, delete its plist, run `drover setup` again.
@@ -226,6 +234,7 @@ macOS, `~/Library/LaunchAgents/dev.drover.serve.plist`:
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Interactive</string>
 </dict>
 </plist>
 ```
@@ -322,10 +331,11 @@ the main host first, from its checkout at the new code:
 
 ```sh
 launchctl bootout gui/$(id -u)/dev.herdsman.tick; launchctl bootout gui/$(id -u)/dev.herdsman.fast   # no pass mid-move
-cargo install --path crates/cli --locked --root ~/.local/share/herdsman --force
+cargo build --release --locked -p drover
 sh scripts/signing-identity.sh                                         # once: creates "drover-local"
-sh scripts/signing-identity.sh sign ~/.local/share/herdsman/bin/drover
-b=~/.local/share/herdsman/bin; ln -sf "$b/drover" "$b/herdsman"         # the old name, for one release
+b=~/.local/share/herdsman/bin; n=target/release/drover; cp "$n" "$b/drover.new"  # signed beside, renamed over (#968)
+sh scripts/signing-identity.sh sign "$b/drover.new" && mv "$b/drover.new" "$b/drover"
+ln -sf "$b/drover" "$b/herdsman"                                       # the old name, for one release
 ~/.local/share/herdsman/bin/drover migrate --live                      # config, state and share trees; old names become links
 drover timer install        # writes dev.drover.*; prints the unload, rm and load line of each old job: run them
 drover profiles sync

@@ -17,15 +17,6 @@ enum Reach {
     Hang,
 }
 
-struct Pane {
-    agent: String,
-    status: &'static str,
-    pane: String,
-    cwd: String,
-    screen: String,
-    born: u64,
-}
-
 struct Pr {
     head: &'static str,
     draft: bool,
@@ -37,10 +28,8 @@ struct World {
     base: Fake,
     now: Shared<u64>,
     pr: Shared<Option<Pr>>,
-    panes: Shared<Vec<Pane>>,
     hosts: Shared<BTreeMap<String, Reach>>,
     procs: Shared<BTreeMap<u32, (String, u64)>>,
-    ws: Shared<u32>,
     trace: Shared<Vec<String>>,
     ticks: Shared<Vec<(u64, i32)>>,
     hung: (Mutex<Option<u32>>, Condvar),
@@ -70,17 +59,14 @@ impl World {
             .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
             .reply("gh issue", "")
             .reply("git ", "")
-            .reply("herdr pane", "{}")
-            .reply("herdr agent", "{}")
+            .reply("which shed", "/opt/shed/bin/shed\n")
             .reply("sh -c nohup", "4321");
         Arc::new(World {
             base,
             now: Shared::new(T0),
             pr: Shared::default(),
-            panes: Shared::default(),
             hosts: Shared::default(),
             procs: Shared::default(),
-            ws: Shared::new(0),
             trace: Shared::default(),
             ticks: Shared::default(),
             hung: (Mutex::new(None), Condvar::new()),
@@ -140,7 +126,6 @@ impl World {
     fn call(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         let a: Vec<&str> = args.iter().map(String::as_str).collect();
         let host = match (prog, &a[..]) {
-            ("herdr", ["--machine", m, ..]) => Some(*m),
             ("ssh", _) => a.iter().position(|x| *x == "--").and_then(|i| a[..i].last().copied()),
             _ => None,
         };
@@ -150,50 +135,6 @@ impl World {
         }
         let now = self.now();
         let o = match (prog, &a[..]) {
-            ("herdr", ["agent", "list"]) => {
-                let rows: Vec<Value> = (self.panes.borrow().iter())
-                    .map(|p| json!({"name": p.agent, "agent_status": p.status, "cwd": p.cwd, "pane_id": p.pane}))
-                    .collect();
-                out(0, json!({"result": {"agents": rows}}).to_string())
-            }
-            ("herdr", ["worktree", "create" | "open", ..]) => {
-                let n = self.ws.get() + 1;
-                self.ws.set(n);
-                out(
-                    0,
-                    json!({"result": {"workspace": {"workspace_id": format!("w{n}")}}}).to_string(),
-                )
-            }
-            ("herdr", ["pane", "list", "--workspace", ws]) => out(
-                0,
-                json!({"result": {"panes": [{"pane_id": format!("{ws}:p1"), "agent": null}]}}).to_string(),
-            ),
-            ("herdr", ["agent", "start", agent, "--kind", _, "--pane", pane, ..]) => {
-                let cwd = format!("/w/{agent}");
-                let p = Pane {
-                    agent: agent.to_string(),
-                    status: "working",
-                    pane: pane.to_string(),
-                    cwd,
-                    screen: "Reading the brief\n> ".into(),
-                    born: now,
-                };
-                self.panes.borrow_mut().push(p);
-                out(0, "{}")
-            }
-            ("herdr", ["pane", "read", pane, ..]) => match self.panes.borrow().iter().find(|p| p.pane == *pane) {
-                Some(p) => out(0, p.screen.clone()),
-                None => out(1, ""),
-            },
-            ("herdr", ["pane", "close", pane]) => {
-                self.panes.borrow_mut().retain(|p| p.pane != *pane);
-                out(0, "{}")
-            }
-            ("herdr", ["workspace", "close", ws]) => {
-                let pre = format!("{ws}:");
-                self.panes.borrow_mut().retain(|p| !p.pane.starts_with(&pre));
-                out(0, "{}")
-            }
             ("gh", ["api", "graphql", ..]) => {
                 let open = self.pr_json().filter(|p| p["state"] == "OPEN");
                 out(0, open.map(|p| format!("{p}\n")).unwrap_or_default())
@@ -270,6 +211,8 @@ impl Runner for World {
 struct Sim {
     w: Arc<World>,
     c: drover::Ctx,
+    sh: FakeShed,
+    born: Shared<Vec<(String, u64)>>,
     tick: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -279,9 +222,12 @@ impl Sim {
         let c = ctx(&tmpdir(name), &format!("{base}{extra}"));
         std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
         assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+        let sh = FakeShed::attached(&c);
         Sim {
             w: World::new(),
             c,
+            sh,
+            born: Shared::default(),
             tick: None,
         }
     }
@@ -308,8 +254,9 @@ impl Sim {
     fn events(&self, kind: &str) -> Vec<Event> {
         read(&self.c.state)
             .unwrap()
-            .into_iter()
+            .iter()
             .filter(|e| e.kind == kind)
+            .cloned()
             .collect()
     }
 
@@ -343,6 +290,18 @@ impl Sim {
         self.tick = Some(h);
     }
 
+    fn started(&self) {
+        let (runs, seen) = (self.sh.all("run"), self.born.borrow().len());
+        for p in runs.iter().skip(seen) {
+            let n = p["name"].as_str().unwrap().to_string();
+            self.born.borrow_mut().push((n.clone(), self.w.now()));
+            self.sh.set(&n, |t| {
+                t["reported"] = json!({"state": "working"});
+                t["text"] = json!("Reading the brief\n> ");
+            });
+        }
+    }
+
     fn minutes(&mut self, mins: u64, mut lane: impl FnMut(&Sim)) {
         for _ in 0..mins {
             self.w.now.set(self.w.now() + 60);
@@ -356,6 +315,7 @@ impl Sim {
             let (code, o) = run(&self.at(), &*self.w, &["drive", "--fast"]);
             assert_eq!(code, 0, "{o}");
             self.w.trace.borrow_mut().push(format!("{} fast: {o}", self.w.now()));
+            self.started();
             lane(self);
         }
     }
@@ -421,8 +381,9 @@ fn worktrees_sharing_files_count_once_and_hold_no_spawn() {
     );
     let held: Vec<Event> = read(&s.c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.str("code") == Some("DISK_BUDGET"))
+        .cloned()
         .collect();
     assert!(held.is_empty(), "{held:?} {}", s.story());
     assert!(
@@ -465,16 +426,10 @@ fn a_passed_draft_pr_is_marked_ready_and_merged() {
 #[test]
 fn a_silent_reviewer_is_superseded_and_the_review_completes() {
     let mut s = Sim::new("sim-silent-rev", "");
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12", "pane": "w0:p1"});
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12", "pane": "sendmeter-impl-12"});
     s.log("spawn", d);
-    s.w.panes.borrow_mut().push(Pane {
-        agent: "sendmeter-impl-12".into(),
-        status: "idle",
-        pane: "w0:p1".into(),
-        cwd: "/w/sendmeter-impl-12".into(),
-        screen: "pushed\n> ".into(),
-        born: T0,
-    });
+    s.sh.lane("sendmeter-impl-12", "idle", "/w/sendmeter-impl-12");
+    s.sh.screen("sendmeter-impl-12", "pushed\n> ");
     s.log("pushed", json!({"sha": HEAD}));
     *s.w.pr.borrow_mut() = Some(Pr {
         head: HEAD,
@@ -486,11 +441,11 @@ fn a_silent_reviewer_is_superseded_and_the_review_completes() {
         let Some(at) = s.events("rev-stale-replaced").first().map(|e| e.ts) else {
             return;
         };
-        let panes = s.w.panes.borrow();
-        let fresh = (panes.iter())
-            .filter(|p| p.agent.starts_with("sendmeter-rev-12") && p.born >= at)
-            .any(|p| s.w.now() == p.born + 600);
-        drop(panes);
+        let born = s.born.borrow();
+        let fresh = (born.iter())
+            .filter(|(a, t)| a.starts_with("sendmeter-rev-12") && *t >= at)
+            .any(|(_, t)| s.w.now() == t + 600);
+        drop(born);
         if !fresh {
             return;
         }
@@ -506,7 +461,7 @@ fn a_silent_reviewer_is_superseded_and_the_review_completes() {
     });
     let replaced = s.events("rev-stale-replaced");
     assert_eq!(replaced.len(), 1, "{}", s.story());
-    assert_eq!(replaced[0].data["idle_minutes"].as_u64(), Some(120), "{}", s.story());
+    assert_eq!(replaced[0].val("idle_minutes").as_u64(), Some(120), "{}", s.story());
     let v = s.events("verdict");
     assert_eq!(v.len(), 1, "{}", s.story());
     assert_eq!((v[0].str("verdict"), v[0].str("sha")), (Some("PASS"), Some(HEAD)));
@@ -516,8 +471,8 @@ fn a_silent_reviewer_is_superseded_and_the_review_completes() {
 fn an_offline_hosts_lanes_restart_on_the_main_host_after_15_minutes() {
     let mut s = Sim::new("sim-offline", AIR);
     hosts_seen(&s);
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w0:p1",
-        "workspace": "w0", "worktree": "/Users/me/.herdr/worktrees/sendmeter/issue-12", "branch": "issue-12",
+    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "sendmeter-impl-12",
+        "workspace": "", "worktree": "/Users/me/.herdr/worktrees/sendmeter/issue-12", "branch": "issue-12",
         "host": "air", "machine": "air"});
     s.log("spawn", d);
     s.w.hosts.borrow_mut().insert("air".into(), Reach::Down);

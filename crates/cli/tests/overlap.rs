@@ -1,5 +1,3 @@
-//! #129: auto-update after a merge, the pure-update gate, the `git merge-tree` preview, merge order, heads-up, cap-check.
-//! Real temp git repos (origin, a seed clone that pushes, the fleet's `local` clone); everything else is the fake.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -8,7 +6,6 @@ use drover::runner::{Out, Real, Runner};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 
-/// git runs for real, the rest (gh, herdr) is scripted; every call is recorded.
 struct Mixed(Fake);
 
 impl Runner for Mixed {
@@ -47,8 +44,6 @@ fn commit(seed: &Path, file: &str, text: &str, push: &str) -> String {
 
 const A: &str = "1\n2\n3\n4\n5\n";
 
-/// origin with `staging` and `issue-1` (a.txt line 1), `issue-2` (a.txt line 1 too: conflicts with 1),
-/// `issue-3` (b.txt: clean); returns (dir, seed, ctx, fleet config).
 fn repos(name: &str) -> (PathBuf, PathBuf, drover::Ctx, Config) {
     let d = tmpdir(name);
     let (origin, seed, local) = (d.join("origin.git"), d.join("seed"), d.join("local"));
@@ -80,9 +75,8 @@ fn head(seed: &Path, branch: &str) -> String {
     git(seed, &["rev-parse", &format!("origin/{branch}")])
 }
 
-/// An impl lane for `n`, a PASS at its pushed head when `pass`, and its open PR #(10 + n) in the PR cache.
 fn lane(c: &drover::Ctx, seed: &Path, n: u64, pass: bool) {
-    let spawn = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "branch": format!("issue-{n}"), "pane": format!("p{n}")});
+    let spawn = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "branch": format!("issue-{n}"), "pane": format!("sendmeter-impl-{n}")});
     append(&c.state, &Event::new(10, "sendmeter", Some(n), "spawn", spawn)).unwrap();
     if pass {
         let v = json!({"verdict": "PASS", "sha": head(seed, &format!("issue-{n}"))});
@@ -94,7 +88,6 @@ fn lane(c: &drover::Ctx, seed: &Path, n: u64, pass: bool) {
     std::fs::write(cache.join(format!("pr-sendmeter-{n}.json")), pr.to_string()).unwrap();
 }
 
-/// #285: integration's protection read (cached) as strict, so a behind ready PR is caught up.
 fn strict(c: &drover::Ctx) {
     let p = c.state.with_file_name("cache").join("strict-sendmeter-0.json");
     std::fs::write(p, json!({"ts": c.now, "strict": true}).to_string()).unwrap();
@@ -112,23 +105,23 @@ fn merger(n: u64, head: &str) -> Mixed {
             .reply(&format!("gh pr view issue-{n} "), &green_pr(n, head))
             .reply("gh pr merge", "")
             .reply("gh pr view 1", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
-            .reply("gh issue", "")
-            .reply("herdr", NO_AGENTS),
+            .reply("gh issue", ""),
     )
 }
 
 #[test]
 fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     let (_d, seed, c, cfg) = repos("au-clean");
+    let sh = FakeShed::attached(&c);
     lane(&c, &seed, 3, true);
     strict(&c);
     let from = head(&seed, "issue-3");
     commit(&seed, "c.txt", "c\n", "staging");
-    let r = Mixed(Fake::default().reply("herdr", NO_AGENTS));
+    let r = Mixed(Fake::default());
     let mut out = vec![];
-    drover::drive::auto_update(&c, &cfg, &r, &mut out, "sendmeter").unwrap();
+    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
     let to = head(&seed, "issue-3");
-    let ev = read(&c.state).unwrap();
+    let ev = read(&c.state).unwrap().to_vec();
     let up = ev.iter().find(|e| e.kind == "auto-updated").expect("auto-updated");
     assert_eq!((up.str("from"), up.str("to")), (Some(from.as_str()), Some(to.as_str())));
     assert!(ev.iter().all(|e| e.kind != "spawn" || e.ts == 10), "no lane: {ev:?}");
@@ -140,7 +133,11 @@ fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
         "{:?}",
         r.0.calls.borrow()
     );
-    // The gate takes the PASS of the head it updated: merged, no review round.
+    assert!(
+        sh.methods().iter().all(|m| m == "ls"),
+        "no lane touched: {:?}",
+        sh.methods()
+    );
     let r = merger(3, &to);
     let (code, out) = run(&c, &r, &["merge", "sendmeter", "3"]);
     assert_eq!(code, 0, "{out}");
@@ -151,7 +148,6 @@ fn clean_auto_update_keeps_the_pass_and_spawns_no_lane() {
     assert_eq!((st.state.as_str(), st.rounds), ("merged", 1));
 }
 
-/// Merge staging into origin's `issue-3` in a fresh clone, `extra` folded into b.txt (None: a pure merge); pushed.
 fn merge_staging(d: &Path, extra: Option<&str>) {
     let w = d.join("w");
     git(
@@ -200,9 +196,9 @@ fn merge_staging(d: &Path, extra: Option<&str>) {
 #[test]
 fn gate_refuses_a_merge_head_that_adds_its_own_change() {
     let (d, seed, c, _) = repos("au-impure");
+    let sh = FakeShed::attached(&c);
     lane(&c, &seed, 3, true);
     commit(&seed, "c.txt", "c\n", "staging");
-    // A merge of integration with an extra edit folded in: not a pure update.
     merge_staging(&d, Some("sneaky\n"));
     let h = head(&seed, "issue-3");
     let r = merger(3, &h);
@@ -210,7 +206,6 @@ fn gate_refuses_a_merge_head_that_adds_its_own_change() {
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED STALE_VERDICT"), "{out}");
     assert!(!r.0.called("gh pr merge"));
-    // #165: the next drive pass starts a review of the new head, not a dead block.
     let r = Mixed(
         Fake::default()
             .reply("gh pr view issue-3 ", &green_pr(3, &h))
@@ -219,13 +214,7 @@ fn gate_refuses_a_merge_head_that_adds_its_own_change() {
             .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
             .reply("sysctl -n hw.ncpu", "10\n")
             .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
-            .reply("herdr agent list", NO_AGENTS)
-            .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-            .reply(
-                "herdr pane list",
-                r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-            )
-            .reply("herdr", "{}"),
+            .reply("which shed", "/opt/shed/bin/shed\n"),
     );
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -234,9 +223,10 @@ fn gate_refuses_a_merge_head_that_adds_its_own_change() {
     assert!(
         calls
             .iter()
-            .any(|l| l.contains("--branch rev-3-r2 --base origin/issue-3")),
+            .any(|l| l.contains(" worktree add -b rev-3-r2 ") && l.ends_with(" origin/issue-3")),
         "{calls:?}"
     );
+    assert_eq!(sh.last("run")["name"], "sendmeter-rev-3-r2", "{:?}", sh.methods());
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)];
     assert_eq!(st.state, "review(2)");
     assert!(!st.reviewed(&h), "B has no verdict yet");
@@ -245,11 +235,12 @@ fn gate_refuses_a_merge_head_that_adds_its_own_change() {
 #[test]
 fn an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass() {
     let (_d, seed, mut c, _) = repos("au-ci-pending");
+    let _sh = FakeShed::attached(&c);
     lane(&c, &seed, 1, true);
     lane(&c, &seed, 3, true);
     strict(&c);
     let (h1, from) = (head(&seed, "issue-1"), head(&seed, "issue-3"));
-    commit(&seed, "c.txt", "c\n", "staging"); // #1's merge lands on staging
+    commit(&seed, "c.txt", "c\n", "staging");
     let st = |c: &drover::Ctx| {
         fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)]
             .state
@@ -262,14 +253,12 @@ fn an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass() {
                 .reply("gh pr view issue-3 ", pr3)
                 .reply("gh pr merge", "")
                 .reply("gh pr view 1", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
-                .reply("gh issue", "")
-                .reply("herdr", NO_AGENTS),
+                .reply("gh issue", ""),
         );
         let (code, out) = run(c, &r, &["drive"]);
         assert_eq!(code, 0, "{out}");
         (r, out)
     };
-    // #1 merges and #3 is auto-updated; #3's merge waits for the CI of its new head.
     let (r, out) = pass(&c, &green_pr(3, &from));
     let to = head(&seed, "issue-3");
     assert!(
@@ -278,7 +267,6 @@ fn an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass() {
     );
     assert_eq!(r.0.count("gh pr merge"), 1, "{:?}", r.0.calls.borrow());
     assert_eq!(st(&c), "ready");
-    // No checks reported at the new head: still ready, a manual merge refused but not blocked.
     c.now += 120;
     let none =
         json!({"number": 13, "state": "OPEN", "baseRefName": "staging", "headRefOid": to, "statusCheckRollup": []});
@@ -288,7 +276,6 @@ fn an_auto_updated_head_waits_for_ci_then_merges_on_a_later_pass() {
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED CI_NOT_GREEN"), "{out}");
     assert_eq!(st(&c), "ready");
-    // Green on the next pass: merged.
     c.now += 120;
     let (r, out) = pass(&c, &green_pr(3, &to));
     let merge = format!("gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {to}");
@@ -301,7 +288,6 @@ fn conflicting_auto_update_spawns_an_update_lane() {
     let (_d, seed, c, cfg) = repos("au-conflict");
     lane(&c, &seed, 1, true);
     let before = head(&seed, "issue-1");
-    // #2's change lands on staging: #1 now conflicts on a.txt.
     git(&seed, &["merge", "-q", "--ff-only", "origin/issue-2"]);
     git(&seed, &["push", "-q", "origin", "HEAD:staging"]);
     let r = Mixed(Fake::default());
@@ -326,10 +312,9 @@ fn merge_tree_finds_the_pair_and_its_files_once() {
     assert!(!got.contains_key(&3), "{got:?}");
     let ev = read(&c.state).unwrap();
     let p: Vec<_> = ev.iter().filter(|e| e.kind == "conflict-predicted").collect();
-    assert_eq!((p.len(), p[0].issue, &p[0].data["other"]), (1, Some(2), &json!(1)));
+    assert_eq!((p.len(), p[0].issue, p[0].val("other")), (1, Some(2), &json!(1)));
     let card = "may conflict with #1; keep going, drover updates you after it merges";
     assert_eq!(p[0].str("reason"), Some(card), "#320");
-    // Same heads: cached, no merge-tree run and no second event.
     let trees = r.0.count("git -C");
     let r2 = Mixed(Fake::default());
     let again = drover::overlap::preview(&c, &cfg, &r2, "sendmeter", &read(&c.state).unwrap()).unwrap();
@@ -354,14 +339,14 @@ fn merge_tree_finds_the_pair_and_its_files_once() {
 #[test]
 fn drive_merges_the_ready_pr_that_conflicts_with_nothing_first() {
     let (_d, seed, c, _) = repos("order");
+    let _sh = FakeShed::attached(&c);
     for n in 1..=3 {
         lane(&c, &seed, n, true);
     }
     let mut f = Fake::default()
         .reply("gh pr merge", "")
         .reply("gh pr view 1", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
-        .reply("gh issue", "")
-        .reply("herdr", NO_AGENTS);
+        .reply("gh issue", "");
     for n in 1..=3 {
         f = f.reply(
             &format!("gh pr view issue-{n} "),
@@ -379,21 +364,19 @@ fn drive_merges_the_ready_pr_that_conflicts_with_nothing_first() {
 #[test]
 fn heads_up_reaches_a_working_lane_once() {
     let (_d, seed, c, cfg) = repos("heads-up");
+    let sh = FakeShed::attached(&c);
     lane(&c, &seed, 1, false);
     lane(&c, &seed, 2, true);
-    let r = Mixed(Fake::default().reply("herdr", ""));
+    sh.lane("sendmeter-impl-1", "working", "/w/issue-1");
+    sh.lane("sendmeter-impl-2", "idle", "/w/issue-2");
+    let r = Mixed(Fake::default());
     for _ in 0..2 {
-        drover::overlap::preview(&c, &cfg, &r, "sendmeter", &read(&c.state).unwrap()).unwrap();
+        drover::overlap::preview(&c, &cfg, &sh.on(&r), "sendmeter", &read(&c.state).unwrap()).unwrap();
     }
-    let want =
-        "herdr agent prompt sendmeter-impl-1 HEADS-UP: #2 is ready to merge and touches a.txt: your branch may conflict \
+    let want = "HEADS-UP: #2 is ready to merge and touches a.txt: your branch may conflict \
                 with #2; keep going, drover updates you after it merges.";
-    assert_eq!(r.0.count(want), 1, "{:?}", r.0.calls.borrow());
-    assert_eq!(
-        r.0.count("herdr agent prompt sendmeter-impl-2"),
-        0,
-        "a ready PR's lane is done"
-    );
+    assert_eq!(sh.sent("sendmeter-impl-1"), [want], "{:?}", sh.methods());
+    assert!(sh.sent("sendmeter-impl-2").is_empty(), "a ready PR's lane is done");
     assert_eq!(
         read(&c.state).unwrap().iter().filter(|e| e.kind == "heads-up").count(),
         1
@@ -426,17 +409,15 @@ fn cap_check_reads_the_limit_from_config() {
     );
 }
 
-/// #207: `n` in review, its reviewer spawned at `sha` and done (`PASS` in verdict.md, not recorded yet).
 fn reviewed(c: &drover::Ctx, n: u64, sha: &str) -> String {
     reviewed_with(c, n, sha, "PASS\nall good\n")
 }
 
-/// #293: the same with verdict.md's `body` (a `Reviewed head:` line names the sha the reviewer checked out).
 fn reviewed_with(c: &drover::Ctx, n: u64, sha: &str, body: &str) -> String {
     let wt = c.worktrees.join(format!("rev-{n}"));
     std::fs::create_dir_all(&wt).unwrap();
     std::fs::write(wt.join("verdict.md"), body).unwrap();
-    let d = json!({"role": "rev", "agent": format!("sendmeter-rev-{n}-r1"), "pane": "p9", "worktree": wt, "sha": sha});
+    let d = json!({"role": "rev", "agent": format!("sendmeter-rev-{n}-r1"), "pane": format!("sendmeter-rev-{n}-r1"), "worktree": wt, "sha": sha});
     append(&c.state, &Event::new(30, "sendmeter", Some(n), "spawn", d)).unwrap();
     wt.join("verdict.md").display().to_string()
 }
@@ -450,12 +431,13 @@ fn pending_pr(n: u64, head: &str) -> String {
 #[test]
 fn a_written_verdict_is_recorded_before_the_update_in_the_same_pass() {
     let (_d, seed, c, _) = repos("au-order");
+    let _sh = FakeShed::attached(&c);
     lane(&c, &seed, 1, true);
     lane(&c, &seed, 3, false);
     strict(&c);
     let (h1, from) = (head(&seed, "issue-1"), head(&seed, "issue-3"));
     reviewed(&c, 3, &from);
-    commit(&seed, "c.txt", "c\n", "staging"); // #1's merge lands on staging
+    commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(
         Fake::default()
             .reply("gh pr view issue-1 ", &green_pr(1, &h1))
@@ -463,8 +445,7 @@ fn a_written_verdict_is_recorded_before_the_update_in_the_same_pass() {
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &from)
             .reply("gh pr merge", "")
             .reply("gh pr view 1", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
-            .reply("gh issue", "")
-            .reply("herdr", NO_AGENTS),
+            .reply("gh issue", ""),
     );
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -486,11 +467,14 @@ fn a_branch_in_review_is_not_updated() {
     let from = head(&seed, "issue-3");
     reviewed(&c, 3, &from);
     commit(&seed, "c.txt", "c\n", "staging");
-    // A reviewer still working, then one done whose verdict is not recorded yet.
-    let live = agents(&[("sendmeter-rev-3-r1", "working", "/wt", "p9")]);
-    for list in [live.as_str(), NO_AGENTS] {
-        let r = Mixed(Fake::default().reply("herdr", list));
-        drover::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
+    let sh = FakeShed::attached(&c);
+    sh.lane("sendmeter-rev-3-r1", "working", "/wt");
+    for live in [true, false] {
+        if !live {
+            sh.remove("sendmeter-rev-3-r1");
+        }
+        let r = Mixed(Fake::default());
+        drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
         assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
     }
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "auto-updated"));
@@ -499,25 +483,23 @@ fn a_branch_in_review_is_not_updated() {
 #[test]
 fn a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges() {
     let (d, seed, c, _) = repos("au-carry");
+    let _sh = FakeShed::attached(&c);
     lane(&c, &seed, 3, false);
     let x = head(&seed, "issue-3");
     let file = reviewed(&c, 3, &x);
     commit(&seed, "c.txt", "c\n", "staging");
     merge_staging(&d, None);
     let m = head(&seed, "issue-3");
-    // Drive records it at the reviewed sha (no auto-updated event: the merge was the lane's own).
     let r = Mixed(
         Fake::default()
             .reply("gh pr view issue-3 ", &green_pr(3, &m))
-            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m)
-            .reply("herdr", NO_AGENTS),
+            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m),
     );
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 3)];
     let last = st.verdicts.last().map(|v| v.0.as_str());
     assert_eq!((st.state.as_str(), last), ("ready", Some(x.as_str())), "{out}");
-    // The CLI takes it too, and the merge carries the PASS to the head: no re-review.
     let (code, out) = run(
         &c,
         &r,
@@ -537,6 +519,7 @@ fn a_verdict_at_the_head_a_pure_merge_moved_from_records_and_merges() {
 #[test]
 fn a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses() {
     let (d, seed, c, _) = repos("au-no-carry");
+    let _sh = FakeShed::attached(&c);
     lane(&c, &seed, 3, false);
     let x = head(&seed, "issue-3");
     let file = reviewed(&c, 3, &x);
@@ -546,8 +529,7 @@ fn a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses() {
     let r = Mixed(
         Fake::default()
             .reply("gh pr view issue-3 ", &pending_pr(3, &m))
-            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m)
-            .reply("herdr", NO_AGENTS),
+            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m),
     );
     let (code, out) = run(
         &c,
@@ -561,7 +543,6 @@ fn a_verdict_at_a_head_an_impure_merge_moved_from_still_refuses() {
     assert!(out.contains(&want), "{out}");
 }
 
-/// #285: the fleet config with `merge_label = "merge-ready"` for the `repos` in `d`.
 fn labelled(d: &Path) -> Config {
     let config = CONFIG.replace("/tmp/does-not-matter/sendmeter", d.join("local").to_str().unwrap());
     Config::parse(&config.replace(
@@ -582,32 +563,27 @@ const RULES: &str = "gh api repos/jirathip-dev/sendmeter/rules/branches/staging"
 #[test]
 fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     let (_d, seed, mut c, cfg) = repos("au-non-strict");
+    let sh = FakeShed::attached(&c);
     lane(&c, &seed, 3, true);
     let from = head(&seed, "issue-3");
     commit(&seed, "c.txt", "c\n", "staging");
     let r = Mixed(merger(3, &from).0.reply(PROTECTION, "false\n"));
-    drover::drive::auto_update(&c, &cfg, &r, &mut vec![], "sendmeter").unwrap();
+    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut vec![], "sendmeter").unwrap();
     assert_eq!(head(&seed, "issue-3"), from, "nothing pushed");
-    let ev = read(&c.state).unwrap();
+    let ev = read(&c.state).unwrap().to_vec();
     assert!(
         ev.iter().all(|e| e.kind != "auto-updated" && e.kind != "driven"),
         "{ev:?}"
     );
-    // The status says so, never a silent catch-up loop.
     let behind = json!({"number": 13, "state": "OPEN", "baseRefName": "staging", "headRefOid": from,
         "mergeable": "MERGEABLE", "mergeStateStatus": "BEHIND", "statusCheckRollup": []});
-    let w = Mixed(
-        Fake::default()
-            .reply("gh pr view issue-3 ", &behind.to_string())
-            .reply("herdr", NO_AGENTS),
-    );
-    let ws = drover::waiting::scan(&c, &cfg, &w, &read(&c.state).unwrap(), &[], true);
+    let w = Mixed(Fake::default().reply("gh pr view issue-3 ", &behind.to_string()));
+    let ws = drover::waiting::scan(&c, &cfg, &sh.on(&w), &read(&c.state).unwrap(), &[], true);
     let what = &ws.iter().find(|(s, _)| s.issue == 3).expect("#3").1.what;
     assert!(
         what.starts_with("PASS · behind staging (not required) · merging when CI green"),
         "{what}"
     );
-    // Green while still behind: merged as it is.
     c.now += 120;
     let mut green: serde_json::Value = serde_json::from_str(&green_pr(3, &from)).unwrap();
     (green["mergeable"], green["mergeStateStatus"]) = (json!("MERGEABLE"), json!("BEHIND"));
@@ -616,7 +592,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
             .reply("gh pr view issue-3 ", &green.to_string())
             .reply("gh pr view 1", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string()),
     );
-    let r = Mixed(r.0.reply("gh pr ", "").reply("gh issue", "").reply("herdr", NO_AGENTS));
+    let r = Mixed(r.0.reply("gh pr ", "").reply("gh issue", ""));
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let merge = format!("gh pr merge 13 -R jirathip-dev/sendmeter --merge --match-head-commit {from}");
@@ -627,17 +603,13 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
 #[test]
 fn strict_rule_auto_updates_and_puts_the_merge_label_back() {
     let (d, seed, c, _) = repos("au-strict");
+    let sh = FakeShed::attached(&c);
     let cfg = labelled(&d);
     lane(&c, &seed, 3, true);
     commit(&seed, "c.txt", "c\n", "staging");
-    let r = Mixed(
-        Fake::default()
-            .reply(RULES, "true\n")
-            .reply("gh pr edit", "")
-            .reply("herdr", NO_AGENTS),
-    );
+    let r = Mixed(Fake::default().reply(RULES, "true\n").reply("gh pr edit", ""));
     let mut out = vec![];
-    drover::drive::auto_update(&c, &cfg, &r, &mut out, "sendmeter").unwrap();
+    drover::drive::auto_update(&c, &cfg, &sh.on(&r), &mut out, "sendmeter").unwrap();
     let out = String::from_utf8_lossy(&out);
     let to = head(&seed, "issue-3");
     assert!(out.contains("auto-updated"), "{out}");
@@ -645,14 +617,13 @@ fn strict_rule_auto_updates_and_puts_the_merge_label_back() {
         r.0.called("gh pr edit 13 -R jirathip-dev/sendmeter --add-label merge-ready"),
         "{out}"
     );
-    let ev = read(&c.state).unwrap();
+    let ev = read(&c.state).unwrap().to_vec();
     assert!(
         ev.iter()
             .any(|e| e.kind == "labelled" && e.str("sha") == Some(to.as_str())),
         "{ev:?}"
     );
     assert!(ev.iter().all(|e| e.kind != "unlabelled"));
-    // The ruleset decides (synergy has no classic protection), read once.
     assert_eq!((r.0.count(RULES), r.0.count(PROTECTION)), (1, 0));
 }
 
@@ -672,7 +643,6 @@ fn a_pure_merge_head_keeps_the_label_and_a_new_change_loses_it() {
     assert!(r
         .0
         .called("gh pr edit 13 -R jirathip-dev/sendmeter --add-label merge-ready"));
-    // A merge that folds in its own change is new work: the label comes off.
     commit(&seed, "d.txt", "d\n", "staging");
     std::fs::remove_dir_all(d.join("w")).unwrap();
     merge_staging(&d, Some("sneaky\n"));
@@ -684,7 +654,6 @@ fn a_pure_merge_head_keeps_the_label_and_a_new_change_loses_it() {
     assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "unlabelled"));
 }
 
-/// #293: issue-3's head moved past the rev spawn head by a commit of its own; returns (spawn head, new head).
 fn moved(seed: &Path) -> (String, String) {
     let a = head(seed, "issue-3");
     git(seed, &["checkout", "-q", "issue-3"]);
@@ -696,6 +665,7 @@ fn moved(seed: &Path) -> (String, String) {
 #[test]
 fn a_verdict_naming_the_current_head_records_there_whatever_the_spawn_head() {
     let (_d, seed, c, _) = repos("named-head");
+    let _sh = FakeShed::attached(&c);
     let cfg = std::fs::read_to_string(&c.config).unwrap();
     let label = "integration = \"staging\"\nmerge_label = \"merge-ready\"";
     let cfg = cfg.replacen("integration = \"staging\"", label, 1);
@@ -707,8 +677,7 @@ fn a_verdict_naming_the_current_head_records_there_whatever_the_spawn_head() {
         Fake::default()
             .reply("gh pr view issue-3 ", &green_pr(3, &b))
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &b)
-            .reply("gh pr edit", "")
-            .reply("herdr", NO_AGENTS),
+            .reply("gh pr edit", ""),
     );
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -731,14 +700,14 @@ fn a_verdict_naming_a_head_a_commit_moved_from_is_stale_and_none_means_the_spawn
         .enumerate()
     {
         let (_d, seed, c, _) = repos(&format!("named-stale-{i}"));
+        let _sh = FakeShed::attached(&c);
         lane(&c, &seed, 3, false);
         let (a, b) = moved(&seed);
         reviewed_with(&c, 3, &a, &body.replace("{a}", &a));
         let r = Mixed(
             Fake::default()
                 .reply("gh pr view issue-3 ", &pending_pr(3, &b))
-                .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &b)
-                .reply("herdr", NO_AGENTS),
+                .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &b),
         );
         let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
         let want = format!("review was for {a:.7}, head moved to {b:.7} (not a clean merge): review again");
@@ -750,6 +719,7 @@ fn a_verdict_naming_a_head_a_commit_moved_from_is_stale_and_none_means_the_spawn
 #[test]
 fn a_verdict_naming_the_head_a_pure_merge_moved_from_is_carried() {
     let (d, seed, c, _) = repos("named-carry");
+    let _sh = FakeShed::attached(&c);
     lane(&c, &seed, 3, false);
     let x = head(&seed, "issue-3");
     reviewed_with(&c, 3, &x, &format!("PASS\nReviewed head: {x}\n"));
@@ -759,8 +729,7 @@ fn a_verdict_naming_the_head_a_pure_merge_moved_from_is_carried() {
     let r = Mixed(
         Fake::default()
             .reply("gh pr view issue-3 ", &green_pr(3, &m))
-            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m)
-            .reply("herdr", NO_AGENTS),
+            .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-3", &m),
     );
     let (code, out) = run(&c, &r, &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -769,7 +738,6 @@ fn a_verdict_naming_the_head_a_pure_merge_moved_from_is_carried() {
     assert_eq!((st.state.as_str(), last), ("ready", Some(x.as_str())), "{out}");
 }
 
-/// #429: under `warn_within` (default 500) lines of headroom cap-check warns and passes; over the cap it fails.
 #[test]
 fn cap_check_warns_within_reach_of_the_cap() {
     let d = tmpdir("cap-warn");
@@ -789,7 +757,6 @@ fn cap_check_warns_within_reach_of_the_cap() {
         .unwrap()
         .parse()
         .unwrap();
-    // As 24,100 and 24,500 lines against a cap of 24,500, then 24,600.
     for (left, code, warn) in [(400, 0, true), (0, 0, true), (-100, 1, false)] {
         let (got, out) = cap(&format!("[fleet.x]\nline_cap = {}\nwarn_within = 500\n", n + left));
         assert_eq!(got, code, "{out}");
@@ -807,11 +774,10 @@ fn cap_check_warns_within_reach_of_the_cap() {
     assert!(got == 0 && !out.contains("WARN"), "warn_within read: {out}");
 }
 
-/// #429: `check` measures integration's head by git and emits `cap-near` once per integration sha, only under
-/// `warn_within`.
 #[test]
 fn check_emits_cap_near_once_per_integration_sha() {
     let (_d, seed, c, cfg) = repos("cap-near");
+    let sh = FakeShed::attached(&c);
     let put = |files: &[(&str, &str)]| {
         for (f, t) in files {
             let p = seed.join(f);
@@ -829,13 +795,13 @@ fn check_emits_cap_near_once_per_integration_sha() {
         ("crates/x/src/m/b.rs", "1\n2"),
         ("crates/x/tests/t.rs", "not\nsrc\n"),
     ]);
-    let r = Mixed(Fake::default().reply("herdr", NO_AGENTS));
+    let r = Mixed(Fake::default());
     let near = || {
-        let ev = read(&c.state).unwrap();
+        let ev = read(&c.state).unwrap().to_vec();
         ev.into_iter().filter(|e| e.kind == "cap-near").collect::<Vec<_>>()
     };
     for _ in 0..2 {
-        drover::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
+        drover::check::check(&c, &cfg, &sh.on(&r), &mut vec![]).unwrap();
     }
     let got = near();
     assert_eq!(got.len(), 1, "once per sha, not per pass: {got:?}");
@@ -848,7 +814,7 @@ fn check_emits_cap_near_once_per_integration_sha() {
     let page = || {
         let f = Fake::default();
         let s = drover::serve::Server::new(&c, &f, Some("127.0.0.1:7777".into()));
-        queue_tab(&s, "127.0.0.1:7777", c.now) // #268: the board's Queue tab
+        queue_tab(&s, "127.0.0.1:7777", c.now)
     };
     assert!(
         page().contains("<p class=r>cap-near: 499 lines of headroom on staging</p>"),
@@ -902,7 +868,6 @@ fn cap_check_takes_the_highest_raise_in_cap_d() {
     assert!(out.contains(&format!("cap raised by {}", raise.display())), "{out}");
 }
 
-/// #270: cap-check reports the web/src TypeScript lines as a soft budget: printed, never failing the check.
 #[test]
 fn cap_check_reports_web_lines_without_capping_them() {
     let d = tmpdir("cap-web");
@@ -935,8 +900,6 @@ fn cap_check_reports_web_lines_without_capping_them() {
     }
 }
 
-/// #668: `drover cap <fleet>` sums every open PR's `src/ net` (its body's, else its measured diff) onto integration's
-/// total, lists the queued issues with no PR and proposes one raise to the projected total plus margin.
 #[test]
 fn cap_prints_the_queue_wide_view() {
     let (_d, seed, c, _) = repos("cap-view");
@@ -985,7 +948,6 @@ fn cap_prints_the_queue_wide_view() {
     }
 }
 
-/// git and `sh` run for real (a fleet's cap script), the rest is scripted.
 struct Shell(Mixed);
 
 impl Runner for Shell {
@@ -998,8 +960,6 @@ impl Runner for Shell {
     fn sleep(&self, _: u64) {}
 }
 
-/// #754: `repos` with `key` (a `premerge` or `cap_script` line) in the fleet, `script` as `scripts/line-cap.sh`,
-/// `src/a.rs` (10 lines) and `web/ts/b.ts` (5) on staging, and `issue-4` adding `web/ts/c.ts` (3) as open PR #14.
 fn script_repos(name: &str, key: &str, script: &str) -> (drover::Ctx, Shell) {
     let (d, seed, _, _) = repos(name);
     for dir in ["src", "web/ts", "scripts"] {
@@ -1025,8 +985,6 @@ fn script_repos(name: &str, key: &str, script: &str) -> (drover::Ctx, Shell) {
     (c, r)
 }
 
-/// #754: a repo whose `premerge` cap script also counts TypeScript: `drover cap` shows the script's total, each
-/// open PR's net by the script on its merge, and projects and raises from that count, not the built-in Rust one.
 #[test]
 fn cap_uses_the_fleets_own_cap_script() {
     let script = "n=$(cat src/*.rs web/ts/*.ts | grep -c .)\necho \"line cap: $n / cap 100\"\n[ \"$n\" -le 100 ]\n";
@@ -1044,7 +1002,6 @@ fn cap_uses_the_fleets_own_cap_script() {
     }
 }
 
-/// #754: a `cap_script` that prints two caps: each is shown, projected and raised with its own headroom.
 #[test]
 fn cap_shows_each_cap_a_script_prints() {
     let script = "echo \"src: $(cat src/*.rs | grep -c .) / cap 100\"\necho \"apple_cap: $(cat web/ts/*.ts | grep -c .) / cap 6\"\n";
@@ -1095,8 +1052,6 @@ fn cap_runs_the_repos_line_cap_script_when_the_fleet_names_none() {
     }
 }
 
-/// #788: no `premerge` or `cap_script`, but the repo has `scripts/line-cap.sh` printing cooee's `label: N / M` lines
-/// (no `cap` word) for two caps: `drover cap` counts by that script, extra paths included, each cap on its own.
 #[test]
 fn cap_finds_the_repos_own_line_cap_script() {
     let script =
@@ -1114,7 +1069,6 @@ fn cap_finds_the_repos_own_line_cap_script() {
     }
 }
 
-/// #788: a cap script whose output has no `N / cap M` line is reported as that, with the line it printed.
 #[test]
 fn cap_reports_a_script_it_cannot_parse() {
     let script = "echo 'counting...'\necho 'total: 15 lines, limit 100'\n";

@@ -1,4 +1,3 @@
-//! #626: `POST /hooks/github` on serve's Funnel listener: signed GitHub events refresh the PR cache and kick drive.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -10,7 +9,6 @@ use std::io::{Read, Write};
 const SECRET: &str = "s3cret-hook";
 const KICK: &str = "sh -c nohup '/opt/drover/bin/drover' kick sendmeter 7 --why webhook --now";
 
-/// A sendmeter fleet with an impl lane on `issue-7`; #707: its webhook secret in the 0600 file `[serve]` names.
 fn setup(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     let f = secret_file(&c, "GITHUB_WEBHOOK_SECRET", SECRET, 0o600);
@@ -55,7 +53,6 @@ fn pr(status: &str, conclusion: Option<&str>) -> String {
 #[test]
 fn a_signed_check_suite_completed_refreshes_the_pr_cache_and_kicks_drive() {
     let c = setup("hook-suite");
-    // The cache holds the PR read while CI ran.
     let before = Fake::default()
         .reply("gh api graphql", "")
         .reply("gh pr view issue-7", &pr("IN_PROGRESS", None));
@@ -75,7 +72,6 @@ fn a_signed_check_suite_completed_refreshes_the_pr_cache_and_kicks_drive() {
     assert_eq!(cached["statusCheckRollup"][0]["conclusion"], "SUCCESS", "{cached}");
     assert_ne!(drover::db::stamp(&c.state, "board"), board, "the board re-renders now");
 
-    // `drover pr` right after reads the refreshed cache: green, and no poll of its own.
     let now = drover::Ctx {
         now: drover::now(),
         ..c.clone()
@@ -94,7 +90,7 @@ fn a_bad_missing_or_wrong_secret_signature_is_401_and_changes_nothing() {
     let sigs = [
         None,
         Some(sign("wrong secret", &body)),
-        Some(sign(SECRET, &other)), // a valid signature of another body
+        Some(sign(SECRET, &other)),
         Some("sha256=".to_string() + &"0".repeat(64)),
         Some("sha1=abc".into()),
         Some(String::new()),
@@ -177,7 +173,6 @@ fn a_webhook_secret_inline_in_fleet_toml_is_still_refused() {
 
 #[test]
 fn the_signature_check_matches_githubs_documented_example() {
-    // docs.github.com "Validating webhook deliveries": secret, payload and the header GitHub sends.
     let sig = "sha256=757107ea0eb2509fc211221cce984b8a37570b6d7586c22c46f4379c8b043e17";
     assert!(drover::webhook::signed(
         "It's a Secret to Everybody",
@@ -196,7 +191,6 @@ fn the_signature_check_matches_githubs_documented_example() {
     ));
 }
 
-/// One request over TCP to the listener at `addr`: the whole response.
 fn http(addr: std::net::SocketAddr, req: &[u8]) -> String {
     let mut s = std::net::TcpStream::connect(addr).unwrap();
     s.write_all(req).unwrap();
@@ -231,7 +225,6 @@ fn the_funnel_listener_answers_no_path_but_hooks_github() {
     }
     let res = http(addr, b"GET /hooks/github HTTP/1.1\r\nHost: x\r\n\r\n");
     assert!(res.starts_with("HTTP/1.1 405"), "{res}");
-    // Over GitHub's 25 MB: refused from the header alone, nothing of the body sent or read.
     let res = http(
         addr,
         b"POST /hooks/github HTTP/1.1\r\nHost: x\r\nContent-Length: 26214401\r\n\r\n",
@@ -241,7 +234,6 @@ fn the_funnel_listener_answers_no_path_but_hooks_github() {
     let res = http(addr, &request("ping", Some(&sign(SECRET, &body)), &body));
     assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
 
-    // The documented Funnel line maps only that path, to the listener's default address.
     let docs = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../docs/serve.md")).unwrap();
     let funnel: Vec<&str> = docs.lines().filter(|l| l.starts_with("tailscale funnel")).collect();
     assert_eq!(
@@ -252,7 +244,6 @@ fn the_funnel_listener_answers_no_path_but_hooks_github() {
     assert_eq!(cfg.serve.hooks_addr(), "127.0.0.1:7778");
 }
 
-/// `gh api graphql … --jq` output: #7's open PR, settled.
 fn open_pr() -> String {
     let check = json!({"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"});
     let pr = json!({"number": 107, "state": "OPEN", "baseRefName": "staging", "headRefName": "issue-7",
@@ -263,8 +254,9 @@ fn open_pr() -> String {
 #[test]
 fn with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_after_a_delivery() {
     let c = setup("hook-catchup");
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = Fake::default()
-        .reply("herdr agent list", r#"{"result":{"agents":[]}}"#)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -279,22 +271,18 @@ fn with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_a
     step(0);
     let reads = r.count("gh ");
     assert!(reads > 0 && r.count("gh api graphql") == 1);
-    // Minutes later, with no delivery: no read at all (not even the ETag probes).
     for t in [60, 120, 540] {
         step(t);
     }
     assert_eq!(r.count("gh "), reads, "{:?}", r.calls.borrow());
-    // The catch-up read once `webhook_poll_minutes` (10) passed.
     step(600);
     assert_eq!(r.count("gh api graphql"), 2, "{:?}", r.calls.borrow());
-    // A delivery makes the next step read afresh.
     let body = suite("jirathip-dev/sendmeter", "issue-7");
     let res = send(&at(660), &r, request("check_suite", Some(&sign(SECRET, &body)), &body));
     assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
     step(661);
     assert_eq!(r.count("gh api graphql"), 3, "{:?}", r.calls.borrow());
 
-    // Without the secret, the fast step probes each minute as before.
     std::fs::remove_file(c.config.with_file_name("secrets/GITHUB_WEBHOOK_SECRET")).unwrap();
     step(720);
     assert!(r.count("gh api -i") > 0, "{:?}", r.calls.borrow());

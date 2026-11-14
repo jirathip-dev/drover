@@ -1,5 +1,3 @@
-//! #130: `needs-human` is never silent: it pushes by default, and every such issue gets a needs-you
-//! card (Queue + Herd strip) with [merge anyway] only when the PR could merge but for the round limit.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -11,7 +9,6 @@ const NOW: u64 = 1_000_000;
 const ADDR: &str = "127.0.0.1:7777";
 const HEAD: &str = "1111111111111111111111111111111111111111";
 
-/// #12: four review rounds (the last `last` at HEAD), then `needs-human`; the PR cache says open, green, mergeable.
 fn fixture(name: &str, last: &str) -> drover::Ctx {
     let mut c = ctx(&tmpdir(name), CONFIG);
     c.now = NOW;
@@ -45,13 +42,10 @@ fn fixture(name: &str, last: &str) -> drover::Ctx {
     c
 }
 
-fn runner() -> Fake {
-    Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
+fn runner() -> OnShed {
+    OnShed::new(Fake::default())
 }
 
-/// The response at `path`; the page (#269) with its needs cards as the board draws them.
 fn get(s: &Server, path: &str, cookie: &str) -> String {
     let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n"), NOW);
     let res = String::from_utf8_lossy(&res).into_owned();
@@ -62,7 +56,6 @@ fn get(s: &Server, path: &str, cookie: &str) -> String {
     }
 }
 
-/// The `#needs` strip's card for #12.
 fn card(page: &str) -> &str {
     let a = page.find("<details class=ask data-n=12>").expect("no needs-human card");
     &page[a..a + page[a..].find("</details>").unwrap()]
@@ -144,7 +137,7 @@ fn herd_marks_the_issue_and_park_clears_the_card() {
     assert_eq!(j["fleets"][0]["needs"], json!([12]));
     assert_eq!(j["fleets"][0]["queue"][0]["issue"], 12, "no lane: a gate horse");
 
-    let page = get(&s, "/api/v1/state", ""); // #268: the forms send `State.mtime`
+    let page = get(&s, "/api/v1/state", "");
     let i = page.find("\"mtime\":\"").unwrap() + 9;
     let mt: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
     let body = format!("op=park&fleet=sendmeter&mtime={mt}&issue=12");
@@ -163,9 +156,6 @@ fn herd_marks_the_issue_and_park_clears_the_card() {
     assert!(!get(&s, "/", &cookie).contains("data-n=12"), "parked: no card");
 }
 
-/// Finding 1/2 of the first review: the card ops act only on a needs-human issue. #217: `[one more round]` logs
-/// `round-extended` first; #778: a spawn held back (PAUSED) keeps it pending, its card answered, and a second tap grants
-/// no more.
 #[test]
 fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     let c = fixture("nh-guard", "FAIL");
@@ -203,12 +193,15 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
         !get(&s, "/", &cookie).contains("<details class=ask data-n=12>"),
         "the card stays answered"
     );
-    assert!(post("extend").contains("not%20needs"), "a second tap");
+    assert!(
+        post("extend").contains("msg=%2312%3A%20extend"),
+        "a second tap retries the start"
+    );
     assert_eq!(extended(), 1, "the decision is logged once, before the spawn");
     assert_eq!(fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].extra, 1);
     let failed = read(&c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "extend-failed")
         .count();
     assert_eq!(failed, 0);
@@ -224,7 +217,6 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     );
 }
 
-/// #217: a recorded extension with no lane yet is one muted pending line: no form, no buttons.
 #[test]
 fn a_recorded_extension_is_a_pending_line_without_buttons() {
     let c = fixture("nh-pending", "FAIL");
@@ -249,7 +241,6 @@ fn a_recorded_extension_is_a_pending_line_without_buttons() {
     assert!(p.contains("⟳ one more round · starting a lane…"), "{p}");
     assert!(!p.contains("<form") && !p.contains("<button"), "{p}");
 
-    // Logs before #217 wrote `round-extended` right after its spawn: that lane exists, nothing is pending.
     let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
     append(&c.state, &Event::new(41, "sendmeter", Some(12), "spawn", spawn)).unwrap();
     append(

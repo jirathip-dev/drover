@@ -56,7 +56,7 @@ integration = "staging"
 # required_checks = ["quality"]   # gate/check/wait look only at these (latest run each); unset = all checks
 # premerge = ["drover cap-check --config ci/cap.toml", "cargo check --locked"]   # merge runs these on the PR merged with current integration (STAGING_WOULD_BREAK); unset = the cap check if ci/cap.toml
 # cap_script = "scripts/line-cap.sh"   # #754: `drover cap` runs it and reads its `N / cap M` lines; unset = the first premerge check naming a cap, else the built-in Rust count
-# merge_label = "merge-ready"      # added to the PR after a PASS at its head (full CI), removed if the head moves past it (a pure merge of integration keeps it)
+merge_label = "merge-ready"   # the full CI runs only with this label; drover adds it on a PASS at the head (docs/ci.md)
 # update_ready = "always"   # catch every behind PASSed PR up with integration; default "needed": only on a conflict or a strict branch rule
 # line_cap = 10000   # `drover cap-check --config <this file>`: formatted src/**/*.rs lines, exit 1 over it
 # hotspots = "off"   # #889: `drover tick` runs `drover hotspots` weekly per fleet (default "weekly"); "off" opts out
@@ -185,6 +185,7 @@ spawn_pending_max_secs = 300   # a spawn marker or kick lock older than this (or
 # serve_shed_secs = 5    # shed's sessions
 # serve_remote_secs = 10   # the remote hosts' agents (ssh)
 # serve_host_secs = 10   # the host sample
+# serve_heartbeat_secs = 15   # #893: /live pings this often; a stream whose last 2 pings are still unsent is dropped
 # slo_api_p95_ms = 1000   # #859: /api/v1 p95 over this for `slo_api_minutes` pushes `slo-api` and shows a card
 # slo_api_minutes = 10
 # slo_idle_minutes = 20   # #855: no lane working this long with spawnable work queued: `slo-idle`, a heal, then `stuck`

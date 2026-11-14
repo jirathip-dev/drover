@@ -1,4 +1,3 @@
-//! The append-only event log (#344: in `state.db`, `db`), the state fold over it, and notifiers.
 use crate::config::Config;
 use crate::runner::{Real, Runner};
 use anyhow::Result;
@@ -64,6 +63,10 @@ impl Event {
     pub fn str(&self, k: &str) -> Option<&str> {
         self.data.get(k).and_then(Value::as_str)
     }
+    /// The value at `k`, `Null` when the event has none.
+    pub fn val(&self, k: &str) -> &Value {
+        self.data.get(k).unwrap_or(&Value::Null)
+    }
     /// A `kind` event about `fleet` #`issue`.
     pub fn is(&self, kind: &str, fleet: &str, issue: u64) -> bool {
         self.kind == kind && self.fleet == fleet && self.issue == Some(issue)
@@ -75,15 +78,15 @@ pub(crate) fn aliased(mut ev: Event) -> Event {
         ev.kind = format!("orchestrator-{k}");
     }
     if ev.str("from") == Some("conductor") {
-        ev.data["from"] = "orchestrator".into();
+        ev.data.insert("from".into(), "orchestrator".into());
     }
     if let Some(b) = ev.str("by").filter(|b| b.starts_with("conductor-")) {
-        ev.data["by"] = crate::orchestrator::by(b).into();
+        ev.data.insert("by".into(), crate::orchestrator::by(b).into());
     }
     ev
 }
 
-#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if hands a reference
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_zero(n: &u64) -> bool {
     *n == 0
 }
@@ -94,8 +97,8 @@ pub fn append(path: &Path, ev: &Event) -> Result<()> {
 }
 
 /// The live log (#343: without the events a rotation archived), by seq.
-pub fn read(path: &Path) -> Result<Vec<Event>> {
-    Ok(shared(path)?.to_vec())
+pub fn read(path: &Path) -> Result<Arc<Log>> {
+    shared(path)
 }
 
 /// #344: the log in the JSONL format before #344, one event a line with its seq (`drover events --jsonl`).
@@ -106,8 +109,6 @@ pub fn jsonl(path: &Path) -> Result<String> {
         .collect()
 }
 
-/// A JSONL log from before #344 (`db::import`): every complete record; a torn last line is skipped silently, any other
-/// bad line with a warning.
 pub(crate) fn read_file(path: &Path) -> Result<Vec<Event>> {
     match std::fs::read_to_string(path) {
         Ok(t) => Ok(parse(&t, path)),
@@ -137,14 +138,6 @@ fn parse(text: &str, path: &Path) -> Vec<Event> {
     out
 }
 
-/// #343: the fold up to `seq` (the `states` snapshot row): a cache, the log rebuilds it.
-#[derive(Serialize, Deserialize, Default)]
-struct Checkpoint {
-    seq: u64,
-    states: Vec<IssueState>,
-}
-
-/// #343: the rotated archives (`events-YYYYMM.jsonl.gz`) of a log from before #344 (`db::import`).
 pub(crate) fn archives(path: &Path) -> Result<Vec<Event>> {
     let dir = std::fs::read_dir(path.parent().unwrap_or(Path::new(".")));
     let mut gz: Vec<PathBuf> = dir.into_iter().flatten().filter_map(|e| Some(e.ok()?.path())).collect();
@@ -166,63 +159,134 @@ pub fn history(path: &Path) -> Result<Vec<Event>> {
     crate::db::events(path, "seq > ?1", 0)
 }
 
-/// #343: the checkpoint's states and seq, and the events after it (no checkpoint: every event), read by seq.
-fn load(path: &Path) -> Result<(States, u64, Vec<Event>)> {
-    let cp = crate::db::get::<Checkpoint>(path, "states")
-        .map(|c| c.1)
-        .unwrap_or_default();
-    let m = cp.states.into_iter().map(|s| ((s.fleet.clone(), s.issue), s)).collect();
-    Ok((m, cp.seq, crate::db::events(path, "seq > ?1", cp.seq)?))
-}
-
-/// #343: the current per-issue state, from the checkpoint and the events after it: `fold` of every event.
+/// #948: the current per-issue state: the saved fold (`db::states`), never a read of the log.
 pub fn states(path: &Path) -> Result<States> {
-    let (m, _, ev) = load(path)?;
-    Ok(fold_into(m, &ev))
+    crate::db::states(path).map(|x| x.1)
 }
 
-/// #343: save the checkpoint (each slow pass); returns its seq.
+/// #343: the seq the saved fold covers, brought up to the newest event.
 pub fn checkpoint(path: &Path) -> Result<u64> {
-    let (m, seq, ev) = load(path)?;
-    let seq = ev.last().map_or(seq, |e| e.seq);
-    let states = fold_into(m, &ev).into_values().collect();
-    crate::db::put(path, "states", seq, &Checkpoint { seq, states })?;
-    Ok(seq)
+    crate::db::states(path).map(|x| x.0)
 }
 
-/// #343: over `max` bytes of live log, the events up to the checkpoint and older than 30 days are archived (#344: kept
-/// in the database for `history`, out of `read`). The live log keeps what its readers need: queue changes, every event
-/// of an issue still open or active in the 30 days, and a done issue's merge or close.
+/// #943: the most bytes of JSON one event is stored in.
+pub const EVENT_MAX: usize = 16 << 10;
+
+const NOISE: [&str; 6] = [
+    "driven",
+    "kick",
+    "drive-pass",
+    "lane-state",
+    "conflict-predicted",
+    "intent",
+];
+const NOISE_SECS: u64 = 2 * 86_400;
+
+/// #943: `ev` in at most `EVENT_MAX` bytes: long strings keep a head and a tail, long arrays their first items.
+pub fn capped(ev: &Event) -> Event {
+    let size = |e: &Event| serde_json::to_string(e).map_or(0, |s| s.len());
+    let mut keep = EVENT_MAX / 2;
+    let mut out = ev.clone();
+    while size(&out) > EVENT_MAX && keep >= 64 {
+        out.data.clone_from(&ev.data);
+        out.data.values_mut().for_each(|v| cut(v, keep));
+        keep /= 2;
+    }
+    out
+}
+
+fn cut(v: &mut Value, keep: usize) {
+    match v {
+        Value::String(s) if s.len() > keep => {
+            let (h, t) = (
+                s.floor_char_boundary(keep / 2),
+                s.ceil_char_boundary(s.len() - keep / 2),
+            );
+            *s = format!("{}… {} bytes cut …{}", &s[..h], t - h, &s[t..]);
+        }
+        Value::Array(a) => {
+            let n = (keep / 256).max(1);
+            if a.len() > n {
+                let more = a.len() - n;
+                a.truncate(n);
+                a.push(format!("… {more} more").into());
+            }
+            for x in a.iter_mut() {
+                cut(x, keep);
+            }
+        }
+        Value::Object(m) => m.values_mut().for_each(|x| cut(x, keep)),
+        _ => {}
+    }
+}
+
+fn shed_oversize(path: &Path) -> Result<()> {
+    let big = crate::db::events(
+        path,
+        "archived = 0 AND LENGTH(CAST(json AS BLOB)) > ?1",
+        EVENT_MAX as u64,
+    )?;
+    let (passive, read): (Vec<Event>, Vec<Event>) = big.into_iter().partition(|e| PASSIVE.contains(&e.kind.as_str()));
+    crate::db::rewrite(path, &read.iter().map(capped).collect::<Vec<_>>())?;
+    crate::db::archive(path, &passive.iter().map(|e| e.seq).collect::<Vec<_>>())
+}
+
+/// #343: over `max` bytes of live log, the events up to the checkpoint and older than 30 days are archived (#344: kept in the database for `history`, out of `read`). The live log keeps what its readers need: queue changes, every event of an issue still open or active in the 30 days, and a done issue's merge or close.
 pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
+    shed_oversize(path)?;
     if crate::db::live_bytes(path)? <= max {
         return Ok(());
     }
-    let (cut, st, all) = (checkpoint(path)?, states(path)?, read(path)?);
+    let (cut, st) = (checkpoint(path)?, states(path)?);
+    let key = |e: &Event| {
+        let s = |k| e.str(k).map(String::from);
+        (e.kind.clone(), e.fleet.clone(), e.issue, s("agent"), s("step"))
+    };
     let old = |e: &Event| e.seq <= cut && e.ts + 30 * 86_400 < now && e.kind != "queue";
-    let mut live_issue: BTreeMap<(&str, u64), bool> = BTreeMap::new();
-    for e in &all {
+    let (mut newest, mut live_issue) = (HashMap::new(), HashMap::<_, bool>::new());
+    each(path, |e| {
+        if NOISE.contains(&e.kind.as_str()) {
+            newest.insert(key(e), e.seq);
+        }
         if let Some(n) = e.issue {
             let done = st.get(&(e.fleet.clone(), n)).is_some_and(IssueState::done);
-            *live_issue.entry((&e.fleet, n)).or_default() |= !done || !old(e);
+            *live_issue.entry((e.fleet.clone(), n)).or_default() |= !done || !old(e);
         }
-    }
-    // A merged issue keeps its merge; a closed one (it never merged) what closed it.
+    })?;
+    let noise = |e: &Event| {
+        NOISE.contains(&e.kind.as_str()) && e.seq <= cut && e.ts + NOISE_SECS < now && newest[&key(e)] != e.seq
+    };
     let ends = |e: &Event, s: &IssueState| match s.state.as_str() {
         "merged" => e.kind == "merged",
         _ => {
             matches!(e.kind.as_str(), "closed" | "closed-other") || e.kind == "clean" && e.str("why") != Some("merged")
         }
     };
-    let moved = |e: &&Event| match e.issue {
-        Some(n) => !live_issue[&(e.fleet.as_str(), n)] && !ends(e, &st[&(e.fleet.clone(), n)]),
+    let moved = |e: &Event| match e.issue {
+        _ if noise(e) => true,
+        Some(n) => {
+            let k = (e.fleet.clone(), n);
+            !live_issue[&k] && !ends(e, &st[&k])
+        }
         None => old(e),
     };
-    let seqs: Vec<u64> = all.iter().filter(moved).map(|e| e.seq).collect();
+    let mut seqs = vec![];
+    each(path, |e| seqs.extend(moved(e).then_some(e.seq)))?;
     crate::db::archive(path, &seqs)
 }
 
+fn each(path: &Path, mut f: impl FnMut(&Event)) -> Result<()> {
+    let mut last = 0;
+    loop {
+        let chunk = crate::db::events(path, &CHUNK.replace("WHERE", "WHERE archived = 0 AND"), last)?;
+        let Some(e) = chunk.last() else { return Ok(()) };
+        last = e.seq;
+        chunk.iter().for_each(&mut f);
+    }
+}
+
 /// Append, then run notifiers. Notifier failures never fail the caller.
-#[allow(clippy::needless_pass_by_value)] // public API: callers and tests hand the event over
+#[allow(clippy::needless_pass_by_value)]
 pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     append(state, &ev)?;
     notify(state, cfg, &ev)
@@ -236,8 +300,6 @@ pub fn ask(state: &Path, cfg: &Config, evs: Vec<Event>, once: Option<&str>) -> R
 }
 
 fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
-    // #99: phones hear of owner asks and of each default taken, never of a routine ask merely waiting.
-    // #407: a thread open on a board (its stream stamped `watch-<thread>.at` in the last 5 s) pushes nothing.
     let at = |t: &str| std::fs::read_to_string(state.with_file_name(format!("watch-{t}.at"))).ok();
     let watched = ev
         .str("thread")
@@ -248,10 +310,8 @@ fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
         _ if watched => "",
         "needs-decision" if ev.str("kind") == Some("routine") || ev.str("routed").is_some() => "",
         "decision" if ev.str("by") == Some("default") => "needs-decision",
-        // #541: a lane ask put to the owner pushes as an ask; a conductor's answer to one never pushes.
         "ask-owner" => "needs-decision",
         "decision" if ev.str("by").is_some_and(|b| b.starts_with("orchestrator-")) => "",
-        // #386: a conductor's reply pushes; the owner's own words and system lines never do.
         "thread-msg" if ev.str("from") != Some("orchestrator") => "",
         k => k,
     };
@@ -291,8 +351,9 @@ pub fn plain(ev: &Event) -> String {
         }
         "blocked" => format!("{who} blocked {}: {}", s("code"), s("reason")),
         "needs-decision" | "ask-owner" => {
-            let rec = ev.data["recommend"].as_u64();
-            let opts: String = ev.data["options"]
+            let rec = ev.val("recommend").as_u64();
+            let opts: String = ev
+                .val("options")
                 .as_array()
                 .into_iter()
                 .flatten()
@@ -318,7 +379,8 @@ pub fn plain(ev: &Event) -> String {
         "spawn-failing" => format!("spawn-failing {}#{}: {}", ev.fleet, ev.issue.unwrap_or(0), s("error")),
         "decision" => format!("{who} decision {} by {}: {}", s("id"), s("by"), s("choice")),
         "queue" => {
-            let n: Vec<String> = ev.data["issues"]
+            let n: Vec<String> = ev
+                .val("issues")
                 .as_array()
                 .into_iter()
                 .flatten()
@@ -339,7 +401,6 @@ fn run_notifier(cmd: &str, payload: &str) -> Result<()> {
         .filter(|k| crate::providers::all().any(|p| p.scrubs_env(k)))
         .flat_map(|k| ["-u".into(), k])
         .collect();
-    // Both streams go nowhere, as before: a sink that backgrounds a child must not hold the reply open.
     args.extend(crate::runner::argv(&[
         "sh",
         "-c",
@@ -396,8 +457,7 @@ pub fn last_spawn<'a>(events: &'a [Event], agent: &str) -> Option<&'a Event> {
         .find(|e| e.kind == "spawn" && e.str("agent") == Some(agent))
 }
 
-/// #425: the issue `s`'s lane is held on (`held`, no `released` or `spawn` since).
-/// #505: the issues it waits on (`on`: one number before #505, a list since); empty when not held.
+/// #425: the issue `s`'s lane is held on (`held`, no `released` or `spawn` since). #505: the issues it waits on (`on`: one number before #505, a list since); empty when not held.
 pub fn held_on(events: &[Event], s: &IssueState) -> Vec<u64> {
     let kinds = ["held", "released", "spawn"];
     let e = events
@@ -405,7 +465,7 @@ pub fn held_on(events: &[Event], s: &IssueState) -> Vec<u64> {
         .rev()
         .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue) && kinds.contains(&&*e.kind) && !design(e));
     e.filter(|e| e.kind == "held")
-        .map_or(vec![], |e| crate::queue::nums(&e.data["on"]))
+        .map_or(vec![], |e| crate::queue::nums(e.val("on")))
 }
 
 /// #500: a design (#730: or architect) lane's spawn: never the issue's build or check lane.
@@ -416,8 +476,7 @@ pub fn design(e: &Event) -> bool {
 /// #730: the owner-reviewed pre-impl roles, in the order they run.
 pub const STAGES: [&str; 2] = ["architect", "design"];
 
-/// #424: lane end `e` ends spawn `sp` of its agent: only that pane's when `e` names one; a supersede logged
-/// without a pane (before #424, after the new spawn) ends none.
+/// #424: lane end `e` ends spawn `sp` of its agent: only that pane's when `e` names one; a supersede logged without a pane (before #424, after the new spawn) ends none.
 pub fn ends(e: &Event, sp: &Event) -> bool {
     let pane = e.str("pane").map(|p| sp.str("pane") == Some(p));
     e.str("agent") == sp.str("agent") && pane.unwrap_or(e.str("reason") != Some("superseded"))
@@ -431,7 +490,6 @@ pub fn checks(e: &Event) -> bool {
         .unwrap_or(e.str("role") == Some("rev"))
 }
 
-/// #584: an ask's endings, the first that applies naming why it closed.
 const ORDER: [&str; 9] = [
     "answered",
     "withdrawn",
@@ -450,13 +508,10 @@ pub static VISITS: AtomicUsize = AtomicUsize::new(0);
 /// #632: every ask's ending (`closes`' rules, `ORDER`'s choice), one pass over the log, one event at a time (`add`).
 #[derive(Default, Clone)]
 pub struct Asks {
-    /// By the ask's position: its ending (rank in `ORDER`, the closing event's position); `None` while open.
     ends: BTreeMap<usize, Option<(usize, usize)>>,
-    /// The asks an event naming (0 id | 1 issue | 2 agent, fleet, value) can still end better.
     by: HashMap<(u8, String, Option<String>), Vec<usize>>,
-    /// The first `spawn-started` of each (agent, pane).
     started: HashMap<(Option<String>, Option<String>), usize>,
-    ids: std::collections::HashSet<(String, String)>,
+    ids: std::collections::HashSet<String>,
 }
 
 impl Asks {
@@ -471,7 +526,7 @@ impl Asks {
         let issue = e.issue.map(|n| n.to_string());
         if e.kind == "spawn-started" {
             self.started.entry((s("agent"), s("pane"))).or_insert(i);
-        } else if e.kind == "needs-decision" && s("id").is_some_and(|id| !self.ids.insert((e.fleet.clone(), id))) {
+        } else if e.kind == "needs-decision" && twin(e).is_some_and(|k| !self.ids.insert(k)) {
             self.ends.insert(i, Some((ORDER.len() - 1, i)));
         } else if e.kind == "needs-decision" {
             self.ends.insert(i, None);
@@ -498,12 +553,10 @@ impl Asks {
                 *end = Some((r, i));
             }
         }
-        // An id can still answer, an issue still merge (over a lane gone), an agent only end an open ask.
         let floor = [0, 5, 7][usize::from(t)];
         list.retain(|a| self.ends[a].is_none_or(|x| x.0 > floor));
     }
 
-    /// The asks of `events` (this index's) still open, oldest first.
     fn open<'a>(&self, events: &'a [Event]) -> Vec<&'a Event> {
         self.ends
             .iter()
@@ -513,8 +566,7 @@ impl Asks {
     }
 }
 
-/// #701: the chat's index, one event at a time (`add`, beside `Asks`): the threads, each thread's events, the first
-/// ask and the last decision of each (fleet, id), and the handoff rows sent on (`conductor::forwarded`); by position.
+/// #701: the chat's index, one event at a time (`add`, beside `Asks`): the threads, each thread's events, the first ask and the last decision of each (fleet, id), and the handoff rows sent on (`conductor::forwarded`); by position.
 #[derive(Default, Clone)]
 pub struct Threads {
     pub new: Vec<usize>,
@@ -525,7 +577,6 @@ pub struct Threads {
 }
 
 impl Threads {
-    /// Index `events`' last event.
     fn add(&mut self, events: &[Event]) {
         let Some((e, i)) = events.last().map(|e| (e, events.len() - 1)) else {
             return;
@@ -561,8 +612,7 @@ pub fn cached(events: &[Event]) -> Option<Arc<Log>> {
         .find(|l| std::ptr::eq(&raw const *l.events, events))
 }
 
-/// #701: the first `needs-decision` (`ask`) or the last `decision` of `fleet`'s ask `id`: the index's when `events` is
-/// a cached log, else one pass.
+/// #701: the first `needs-decision` (`ask`) or the last `decision` of `fleet`'s ask `id`: the index's when `events` is a cached log, else one pass.
 pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> Option<&'a Event> {
     let is = |e: &&Event| e.kind == kind && e.fleet == fleet && e.str("id").unwrap_or_default() == id;
     let Some(l) = cached(events) else {
@@ -577,16 +627,19 @@ pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> 
     map.get(&(fleet.into(), id.into())).map(|i| &events[*i])
 }
 
-/// #900: `e` repeats an ask id logged before it (two passes raced to post it): every view shows the first alone.
+/// #900: `e` repeats an ask logged before it (two passes raced to post it): every view shows the first alone.
 pub fn repeat(events: &[Event], e: &Event) -> bool {
-    let first = |id| ask_event(events, "needs-decision", &e.fleet, id);
-    e.kind == "needs-decision" && e.str("id").and_then(first).is_some_and(|a| !std::ptr::eq(a, e))
+    closed(events, e) == Some("repeat")
+}
+
+fn twin(e: &Event) -> Option<String> {
+    let k = (&e.fleet, e.issue, e.str("thread"), e.str("question"));
+    e.str("id").map(|id| format!("{id} {k:?}"))
 }
 
 /// #859: ask indexes built from a slice that is no cached `Log` (`index`'s one-pass fallback): serve's reads build none.
 pub static REBUILDS: AtomicUsize = AtomicUsize::new(0);
 
-/// #632: `f` on `events`' ask index: the cached `log`'s when `events` is it, else built in one pass.
 fn index<T>(events: &[Event], f: impl FnOnce(&Asks) -> T) -> T {
     if let Some(l) = cached(events) {
         return f(&l.asks);
@@ -597,8 +650,7 @@ fn index<T>(events: &[Event], f: impl FnOnce(&Asks) -> T) -> T {
     f(&x)
 }
 
-/// #632: the live log (`read`), its ask index and fold, cached per log by its last seq: a new event is read and
-/// folded alone (a rotation or another database file since: all again).
+/// #632: the live log (`read`), its ask index and fold, cached per log by its last seq: a new event is read and folded alone (a rotation or another database file since: all again).
 #[derive(Default, Clone)]
 pub struct Log {
     pub events: Events,
@@ -689,15 +741,54 @@ impl Events {
 
 type Gated = (Arc<Mutex<()>>, Arc<Log>);
 
-static LOGS: Mutex<BTreeMap<PathBuf, Gated>> = Mutex::new(BTreeMap::new());
+static LOGS: Mutex<BTreeMap<(PathBuf, bool), Gated>> = Mutex::new(BTreeMap::new());
 
-/// #944: each `Log` `shared` has made, while a reader holds it (`cached` finds them).
 static LIVE: Mutex<Vec<Weak<Log>>> = Mutex::new(Vec::new());
 
-/// #560, #632: the cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq:
-/// each call reads only the events appended since (serve's requests and watcher).
+/// #560, #632: the cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq: each call reads only the events appended since (serve's requests and watcher).
 pub fn shared(path: &Path) -> Result<Arc<Log>> {
-    let (file, logs) = (crate::db::file(path), || {
+    log(path, false)
+}
+
+/// #948: the `WORKING` events and the saved fold, cached like `shared` (whose log a process holding it reads instead).
+pub fn working(path: &Path) -> Result<Arc<Log>> {
+    let full = (LOGS.lock().unwrap_or_else(PoisonError::into_inner))
+        .get(&(crate::db::file(path), false))
+        .is_some_and(|l| l.1.seq > 0);
+    log(path, !full)
+}
+
+pub(crate) const CHUNK: &str = "seq IN (SELECT seq FROM events WHERE seq > ?1 ORDER BY seq LIMIT 5000)";
+
+const WORKING: &str = concat!(
+    "archived = 0 AND seq <= ?1 AND type NOT IN ('build-cloned', 'build-reused') AND (seq > ?1 - 10000",
+    " OR (fleet, issue) IN (SELECT fleet, issue FROM states WHERE done = 0)",
+    " OR seq IN (SELECT MAX(seq) FROM events WHERE seq <= ?1 AND type IN ('driven', 'kick', 'drive-pass', 'lane-state', 'conflict-predicted', 'intent', 'push-sent', 'pass-slow')",
+    " GROUP BY type, fleet, issue, json_extract(json, '$.agent'), json_extract(json, '$.step'))",
+    " OR type = 'lane-state' AND json_extract(json, '$.state') = 'gone'",
+    " OR type NOT IN ('driven', 'kick', 'drive-pass', 'lane-state', 'conflict-predicted', 'intent', 'push-sent', 'pass-slow') AND (issue IS NULL",
+    " OR (fleet, issue) IN (SELECT fleet, issue FROM events WHERE seq > ?1 - 10000) OR type GLOB 'ask-*' OR type IN (",
+    "'needs-decision', 'decision', 'queue', 'merged', 'closed', 'closed-other', 'clean', ",
+    "'spawn', 'spawn-started', 'spawn-adopted', 'lane-killed', 'lane-closed', 'lane-dead', ",
+    "'stale-pane-killed', 'lane-kept-dirty', 'wip-blocked', 'supersede', 'account-capped', ",
+    "'agent-unavailable', 'account-signed-out', 'account-reset', 'stale-marker', 'why', ",
+    "'root-hung', 'root-answers', 'premerge-failed', 'landed', 'revert-opened', ",
+    "'revert-failed', 'reverted', 'land-fix', 'land-bisect', 'lesson-skipped'",
+    ")))"
+);
+
+/// #948: the live events of `kinds` logged at `ts` or later, by seq: a reader over more history than `working` holds.
+pub fn since(path: &Path, kinds: &[&str], ts: u64) -> Result<Vec<Event>> {
+    let kinds: Vec<String> = kinds.iter().map(|k| format!("'{k}'")).collect();
+    crate::db::events(
+        path,
+        &format!("archived = 0 AND ts >= ?1 AND type IN ({})", kinds.join(", ")),
+        ts,
+    )
+}
+
+fn log(path: &Path, live: bool) -> Result<Arc<Log>> {
+    let (file, logs) = ((crate::db::file(path), live), || {
         LOGS.lock().unwrap_or_else(PoisonError::into_inner)
     });
     let gate = logs().entry(file.clone()).or_default().0.clone();
@@ -711,7 +802,7 @@ pub fn shared(path: &Path) -> Result<Arc<Log>> {
         }
         std::mem::take(l)
     };
-    let got = catch_up(path, &mut l, last, key);
+    let got = catch_up(path, &mut l, last, key, live);
     logs().get_mut(&file).expect("added above").1 = l.clone();
     let mut live = LIVE.lock().unwrap_or_else(PoisonError::into_inner);
     live.retain(|w| w.strong_count() > 0 && !std::ptr::eq(w.as_ptr(), Arc::as_ptr(&l)));
@@ -719,33 +810,46 @@ pub fn shared(path: &Path) -> Result<Arc<Log>> {
     got.map(|()| l)
 }
 
-fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<u64>)) -> Result<()> {
+fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<u64>), live: bool) -> Result<()> {
     if key != l.key {
         *l = Arc::new(Log { key, ..Log::default() });
+    }
+    if live && l.seq == 0 {
+        let (seq, states) = crate::db::states(path)?;
+        let m = Arc::make_mut(l);
+        (m.seq, m.states) = (seq, states);
+        m.add(crate::db::events(path, WORKING, seq)?);
     }
     let new = crate::db::events(path, "archived = 0 AND seq > ?1", l.seq)?;
     let m = Arc::make_mut(l);
     m.seq = new.last().map_or(last, |e| e.seq.max(last));
     m.states = fold_into(std::mem::take(&mut m.states), &new);
-    m.events.reserve(new.len());
-    for e in new {
-        if let Some(n) = e.issue {
-            m.issues.entry((e.fleet.clone(), n)).or_default().push(m.events.len());
-        }
-        m.events.push(e);
-        m.asks.add(&m.events);
-        m.threads.add(&m.events);
-    }
+    m.add(new);
     Ok(())
 }
 
-/// Why ask `a` closed (#584: every ending): answered, withdrawn, delivered or failed (a handoff card), expired, its
-/// issue merged, or its lane killed, cleaned or respawned; `None` while open. The one place that decides "open".
+impl Log {
+    fn add(&mut self, new: Vec<Event>) {
+        self.events.reserve(new.len());
+        for e in new {
+            if let Some(n) = e.issue {
+                self.issues
+                    .entry((e.fleet.clone(), n))
+                    .or_default()
+                    .push(self.events.len());
+            }
+            self.events.push(e);
+            self.asks.add(&self.events);
+            self.threads.add(&self.events);
+        }
+    }
+}
+
+/// Why ask `a` closed (#584: every ending): answered, withdrawn, delivered or failed (a handoff card), expired, its issue merged, or its lane killed, cleaned or respawned; `None` while open. The one place that decides "open".
 pub fn closed(events: &[Event], a: &Event) -> Option<&'static str> {
     ending(events, a).map(|e| e.0)
 }
 
-/// `closed`, and the event that closed it.
 fn ending<'a>(events: &'a [Event], a: &Event) -> Option<(&'static str, &'a Event)> {
     let at = (std::ptr::from_ref(a) as usize).wrapping_sub(events.as_ptr() as usize) / size_of::<Event>();
     let at = events.get(at).filter(|e| std::ptr::eq(*e, a)).map(|_| at)?;
@@ -763,13 +867,17 @@ pub fn closed_row(events: &[Event], a: &Event) -> Option<String> {
     })
 }
 
-/// #447: what later event `e` does to ask `a` (`closed`'s reasons, one event at a time). `own`: `e`'s
-/// `spawn-started` came before the ask, so a `spawn` `e` is the asking lane itself (#446).
+/// #906: decision or `ask-*` ending `e` is about ask `a` (by `ask_seq`, else by id on its issue).
+pub fn names(e: &Event, a: &Event) -> bool {
+    let seq = e.data.get("ask_seq").and_then(Value::as_u64);
+    e.str("id") == a.str("id") && seq.map_or(e.issue.is_none() || e.issue == a.issue, |s| s == a.seq)
+}
+
 fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option<&'static str> {
     VISITS.fetch_add(1, Relaxed);
     let on = |k: &str| e.kind == k && a.issue.is_some() && e.issue == a.issue;
     let mine = matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
-    let id = e.str("id") == a.str("id");
+    let id = names(e, a);
     if e.fleet != a.fleet {
         None
     } else if e.kind == "decision" && id {
@@ -825,7 +933,6 @@ pub fn fold(events: &[Event]) -> States {
     fold_into(States::new(), events)
 }
 
-/// #343: `fold` on from the states `m` (a checkpoint's).
 pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
     for e in events {
         let Some(n) = e.issue else { continue };
@@ -836,14 +943,10 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
             ..Default::default()
         };
         let s = m.entry((e.fleet.clone(), n)).or_insert_with(new);
-        // A merged issue never leaves `merged`, whatever is logged after it (#350: but for its landing reverted or
-        // fixed forward); a closed one only for a new spawn.
         let back = matches!(e.kind.as_str(), "reverted" | "land-fix");
         if e.is_passive() || s.state == "merged" && !back || s.state == "closed" && e.kind != "spawn" {
             continue;
         }
-        // Design lanes are the owner's: they never move the issue through review or merge; #412: one on the issue
-        // branch (a `--design` issue's, before impl) is the issue's design stage.
         if design(e) {
             if let (Some(r), Some(a)) = (e.str("role"), e.str("agent")) {
                 s.lanes.insert(r.into(), a.into());
@@ -866,7 +969,6 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
                 if let (Some(r), Some(a)) = (e.str("role"), e.str("agent")) {
                     s.lanes.insert(r.into(), a.into());
                 }
-                // #173: a check stage's spawn says so; before, only `rev` reviewed.
                 let role = e.str("role").unwrap_or_default();
                 let rev = checks(e);
                 s.stage = e.str("stage").unwrap_or(role).into();
@@ -891,14 +993,10 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
                 let sha = e.str("sha").unwrap_or_default();
                 let form = e.data.get("form_only") == Some(&Value::Bool(true));
                 let v = e.str("verdict").unwrap_or_default().to_string() + if form { FORM } else { "" };
-                // A round is a distinct reviewed sha; re-recording one does not burn another.
-                // #123: a PASSed update round is an update; a FAILed merge-only check is a normal round.
                 let new = u32::from(!s.reviewed(sha));
-                // #173: a check stage counts its own reviews; a gate's (CI red) those of the check its fix goes to.
                 let lp = e.str("loop").or(e.str("stage")).unwrap_or("rev").to_string();
                 let mine = |x: &(String, String, String)| x.0.eq_ignore_ascii_case(sha) && x.2 == lp;
                 let new_here = u32::from(!s.verdicts.iter().any(mine));
-                // #228: a form-only FAIL starts a fix round but does not count toward the stage's rounds.
                 if !(form || s.updating && v == "PASS") {
                     *s.stage_rounds.entry(lp.clone()).or_default() += new_here;
                 }
@@ -916,33 +1014,25 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
                     format!("fix({}{})", s.rounds, s.form_mark())
                 };
             }
-            // #417: a verify stage that doesn't run at a head passes it there, in no round.
             "verify-skipped" | "verify-no-recipe" => {
                 let (sha, stage) = (e.str("sha").unwrap_or_default(), e.str("stage").unwrap_or("verify"));
                 s.verdicts.push((sha.into(), "PASS".into(), stage.into()));
             }
             "merged" | "closed" | "blocked" | "needs-human" | "parked" => s.state.clone_from(&e.kind),
-            // #639: an issue closed on GitHub by any other route (`check`).
             "closed-other" => s.state = "closed".into(),
-            // #412: the owner's decision on the design: impl (or the design again) starts from the queue.
             "design-review" => s.state = "design-review".into(),
             "design-approved" | "design-revise" => (s.state, s.lane) = ("queued".into(), None),
             "design-rejected" => (s.state, s.lane) = ("needs-human".into(), None),
-            // #500: a false `LANE_ENDS` park undone: the state before it. #639: back in the queue, its build lane ends.
-            // #712: the owner's `unpark`: the state before the park, the same way.
             "repaired" | "unparked" => {
                 s.state = e.str("state").map_or(s.state.clone(), String::from);
                 if let Some(b) = s.build.take().filter(|_| s.state == "queued") {
                     s.lanes.remove(&b);
                 }
             }
-            // #350: the FAIL verdict logged right after it starts the fix round.
             "reverted" | "land-fix" => s.state = format!("fix({})", s.rounds),
             "round-extended" if s.state == "needs-human" && s.card() == "start lane" => s.state = "queued".into(),
             "round-extended" => {
                 (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
-                // #151: `extend --no-spawn` spawns nothing, so the extra round itself leaves needs-human. #639: a build
-                // lane never reviewed goes back to impl, not to a fix round of a FAIL that never was.
                 if s.state == "needs-human" {
                     s.state = if s.verdicts.is_empty() {
                         "impl".into()
@@ -951,9 +1041,7 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
                     };
                 }
             }
-            // #128: `clean` removes only merged or GitHub-closed lanes (logs before #128 carry no `why`).
             "clean" if e.str("why") != Some("merged") => s.state = "closed".into(),
-            // Back to the state before the killed lane: queued / fix(n) for an impl, impl / fix(n) for a review.
             "lane-killed" if e.str("role").and_then(|r| s.lanes.get(r)).map(String::as_str) == e.str("agent") => {
                 let role = e.str("role").unwrap_or_default();
                 let chk = s.check.as_deref() == Some(role);
@@ -972,7 +1060,87 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
             _ => {}
         }
     }
+    debug_assert!(m.values().all(|s| state(&s.state).is_some()), "a state not in STATES");
     m
+}
+
+/// #845: every state `fold` gives an issue (a round's `(n)`, `·f` and `+uN` aside), each with its ways out.
+pub const STATES: &[(&str, &[(&str, &str)])] = &[
+    (
+        "queued",
+        &[
+            ("design", "queued with an architect or design mark, that lane first"),
+            (
+                "impl",
+                "impl spawned, refused while SERIAL_BUSY, HOST_BUSY, DISK_BUDGET, LANE_LIVE or CAP",
+            ),
+            ("closed", "issue closed on GitHub"),
+        ],
+    ),
+    ("design", &[("design-review", "design pushed, the owner's ask")]),
+    (
+        "design-review",
+        &[("queued", "approve or revise"), ("needs-human", "reject")],
+    ),
+    (
+        "impl",
+        &[
+            ("review(n)", "turn done with a push, review spawned"),
+            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+            ("queued", "lane killed, or repaired while blocked"),
+        ],
+    ),
+    (
+        "review(n)",
+        &[
+            ("ready", "PASS at head"),
+            ("fix(n)", "FAIL at head"),
+            ("needs-human", "ROUND_LIMIT after review_rounds"),
+        ],
+    ),
+    (
+        "fix(n)",
+        &[
+            ("review(n)", "fix pushed, next review round"),
+            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+        ],
+    ),
+    (
+        "ready",
+        &[
+            ("review(n)", "verify stage at head for ui_paths, a verify or repro mark"),
+            (
+                "fix(n)",
+                "update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds",
+            ),
+            ("merged", "merge with PASS at head and CI green, no STAGING_WOULD_BREAK"),
+            ("blocked", "merge refused, or PR closed outside drover"),
+        ],
+    ),
+    (
+        "blocked",
+        &[
+            ("fix(n)", "fix round spawned"),
+            ("review(n)", "review spawned at a new head"),
+        ],
+    ),
+    (
+        "needs-human",
+        &[
+            ("queued", "extend with no lane yet, start lane"),
+            ("fix(n)", "extend, one more round"),
+            ("parked", "park"),
+        ],
+    ),
+    ("parked", &[("needs-human", "unpark, the state before it")]),
+    ("merged", &[]),
+    ("closed", &[]),
+];
+
+/// #845: `state`'s `STATES` entry, matched on its name before any `(` or `+`.
+pub fn state(state: &str) -> Option<&'static (&'static str, &'static [(&'static str, &'static str)])> {
+    let base = state.split(['(', '+']).next();
+    STATES.iter().find(|(name, _)| name.split('(').next() == base)
 }
 
 /// #412: the states a design spawn moves into `design` (before impl).
@@ -982,7 +1150,6 @@ pub const DESIGN: &[&str] = &["queued", "design", "design-review"];
 pub const FORM: &str = " (form-only)";
 
 impl IssueState {
-    /// #228: `·f` while the latest verdict is a form-only FAIL (`fix(2·f)`).
     fn form_mark(&self) -> &'static str {
         if self.verdicts.last().is_some_and(|v| v.1.ends_with(FORM)) {
             "·f"

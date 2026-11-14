@@ -1,9 +1,7 @@
-//! #477: a conductor start that times out (or finds its name taken) but whose agent is up is adopted, not failed;
-//! deliveries to one thread wait for its start; a failure row shows herdr's message, not its JSON.
 mod common;
+use common::fake_shed::Cli;
 use common::*;
 use drover::serve::Server;
-use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -29,12 +27,36 @@ fn setup(name: &str) -> drover::Ctx {
     c
 }
 
-/// The thread's conductor folder, as herdr reports an agent's cwd.
+fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
+    let d = tmpdir(name);
+    let cfg = format!(
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        b.sock.display()
+    );
+    let mut c = ctx(&d, &cfg);
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
+        "t1\n"
+    );
+    c
+}
+
+fn acp() -> Fake {
+    let agents =
+        serde_json::json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
+    Fake::default()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed run", "")
+        .reply("shed send", "")
+}
+
 fn folder(c: &drover::Ctx) -> String {
     c.state.with_file_name("orchestrator").join("t1").display().to_string()
 }
 
-/// herdr with `list` as its agents, ready to start a conductor in workspace w9 or type into one.
 fn herdr(list: &str) -> Fake {
     Fake::default()
         .reply("herdr agent list", list)
@@ -50,7 +72,6 @@ fn herdr(list: &str) -> Fake {
         .reply("herdr agent prompt", "")
 }
 
-/// Post `text` to t1 from a paired phone (its delivery runs before `respond` returns); the event log after.
 fn say(c: &drover::Ctx, r: &dyn drover::runner::Runner, text: &str) -> String {
     let s = Server::new(c, r, Some(ADDR.into()));
     let cookie = pair(&s, c, "Mozilla/5.0 (iPhone)", T);
@@ -65,7 +86,7 @@ fn say(c: &drover::Ctx, r: &dyn drover::runner::Runner, text: &str) -> String {
 }
 
 fn starts(c: &drover::Ctx) -> Vec<drover::events::Event> {
-    let all = drover::events::read(&c.state).unwrap();
+    let all = drover::events::read(&c.state).unwrap().to_vec();
     all.into_iter().filter(|e| e.kind == "orchestrator-start").collect()
 }
 
@@ -82,7 +103,7 @@ fn a_start_that_times_out_with_its_agent_up_is_adopted_and_its_workspace_kept() 
     assert!(!r.called("herdr workspace close"), "{:?}", r.calls.borrow());
     let s = &starts(&c)[0];
     assert_eq!(
-        (s.str("pane"), s.str("workspace"), &s.data["adopted"]),
+        (s.str("pane"), s.str("workspace"), s.val("adopted")),
         (Some("w9:p1"), Some("w9"), &serde_json::json!(true))
     );
 }
@@ -101,7 +122,7 @@ fn a_name_taken_by_the_threads_own_live_agent_is_adopted_and_the_line_typed_in()
     );
     let s = &starts(&c)[0];
     assert_eq!(
-        (s.str("pane"), s.str("workspace"), &s.data["adopted"]),
+        (s.str("pane"), s.str("workspace"), s.val("adopted")),
         (Some("w16:p1"), Some("w16"), &serde_json::json!(true))
     );
 }
@@ -121,7 +142,6 @@ fn a_name_taken_by_an_agent_in_another_folder_is_still_not_delivered() {
 #[test]
 fn a_failed_start_shows_herdrs_message_not_its_json() {
     let c = setup("adopt-message");
-    // #623: it is tried twice (an automatic retry), each waiting 120 s for its agent; one row.
     let r = herdr(NO_AGENTS)
         .once_err("herdr agent start", 1, TIMEOUT)
         .once_err("herdr agent start", 1, TIMEOUT);
@@ -135,73 +155,74 @@ fn a_failed_start_shows_herdrs_message_not_its_json() {
     assert!(r.called("herdr workspace close w9"), "{:?}", r.calls.borrow());
 }
 
-/// herdr whose `agent start` holds until the test's go (telling it it began), its agent listed only once started;
-/// each `agent list` while the start is held is reported.
-struct Slow {
-    f: Fake,
-    up: AtomicBool,
-    list: String,
+struct Slow<'a> {
+    cli: Cli<'a>,
     began: Mutex<Sender<()>>,
-    listed: Mutex<Sender<()>>,
     go: Mutex<Receiver<()>>,
 }
-impl drover::runner::Runner for Slow {
+impl drover::runner::Runner for Slow<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
-        let mut out = self.f.run(prog, args)?;
-        let is = |a: &str, b: &str| prog == "herdr" && args.starts_with(&[a.into(), b.into()]);
-        if is("agent", "list") {
-            if self.up.load(SeqCst) {
-                out.stdout = self.list.clone();
-            } else {
-                let _ = self.listed.lock().unwrap().send(());
-            }
-        }
-        if is("agent", "start") {
+        if prog == "shed" && args[0] == "run" {
             self.began.lock().unwrap().send(()).unwrap();
             self.go.lock().unwrap().recv().unwrap();
-            self.up.store(true, SeqCst);
         }
-        Ok(out)
+        self.cli.run(prog, args)
     }
 }
 
 #[test]
 fn two_messages_while_a_start_is_in_flight_start_one_orchestrator_and_reach_it_in_order() {
-    let c = setup("adopt-serial");
+    let b = FakeShed::new();
+    let c = acp_setup("adopt-serial", &b);
     let (began, began_rx) = channel();
-    let (listed, listed_rx) = channel();
     let (go, go_rx) = channel();
+    let f = acp();
     let r = Slow {
-        f: herdr(NO_AGENTS),
-        up: AtomicBool::new(false),
-        list: agents(&[("orchestrator-t1", "idle", &folder(&c), "w9:p1")]),
+        cli: b.cli(&f),
         began: Mutex::new(began),
-        listed: Mutex::new(listed),
         go: Mutex::new(go_rx),
     };
+    let lists = || b.methods().iter().filter(|m| *m == "ls").count();
     std::thread::scope(|s| {
         let a = s.spawn(|| run(&c, &r, &["thread", "say", "t1", "one"]));
         began_rx.recv_timeout(Duration::from_secs(10)).unwrap();
-        while listed_rx.try_recv().is_ok() {}
-        let b = s.spawn(|| run(&c, &r, &["thread", "say", "t1", "two"]));
-        // Unserialized, the second delivery reads herdr's agents at once (none yet) and starts a second conductor.
-        let raced = listed_rx.recv_timeout(Duration::from_millis(500)).is_ok();
+        let before = lists();
+        let second = s.spawn(|| run(&c, &r, &["thread", "say", "t1", "two"]));
+        std::thread::sleep(Duration::from_millis(500));
+        let raced = lists() > before;
         go.send(()).unwrap();
         go.send(()).unwrap();
-        let (a, b) = (a.join().unwrap(), b.join().unwrap());
-        assert_eq!((a.0, b.0), (0, 0), "{a:?} {b:?}");
-        assert!(!raced, "the second delivery did not wait: {:?}", r.f.calls.borrow());
+        let (a, second) = (a.join().unwrap(), second.join().unwrap());
+        assert_eq!((a.0, second.0), (0, 0), "{a:?} {second:?}");
+        assert!(!raced, "the second delivery did not wait: {:?}", f.calls.borrow());
     });
-    assert_eq!(r.f.count("herdr agent start"), 1, "{:?}", r.f.calls.borrow());
+    assert_eq!(f.count("shed run"), 1, "{:?}", f.calls.borrow());
     let dir = c.state.with_file_name("orchestrator").join("t1");
     assert_eq!(std::fs::read_to_string(dir.join(".thread.md")).unwrap(), "owner: one\n");
-    let typed = r.f.index("herdr agent prompt orchestrator-t1 [t1] owner: two");
-    assert!(typed > r.f.index("herdr agent start"), "{:?}", r.f.calls.borrow());
+    let typed = f.index("shed send orchestrator-t1 [t1] owner: two");
+    assert!(typed > f.index("shed run"), "{:?}", f.calls.borrow());
 }
 
-/// #623: herdr on a loaded host: `agent start` times out once, and the conductor shows in the list only after the
-/// starting thread has slept `after` s (a fake clock). Another thread's `sleep` (a message behind the start) holds
-/// until the test says the first delivery is done.
+#[test]
+fn a_failed_start_is_tried_once_more_and_shows_one_row() {
+    let b = FakeShed::new();
+    let c = acp_setup("adopt-retry", &b);
+    let f = acp()
+        .once_err("shed run", 1, "bridge down")
+        .once_err("shed run", 1, "bridge down");
+    let log = say(&c, &b.on(&b.cli(&f)), "hello");
+    assert_eq!(log.matches("✗ not delivered").count(), 1, "{log}");
+    assert!(log.contains("bridge down"), "{log}");
+    assert_eq!(f.count("shed run"), 2, "{:?}", f.calls.borrow());
+    assert!(starts(&c).is_empty());
+    let c = acp_setup("adopt-retry-once", &b);
+    let f = acp().once_err("shed run", 1, "bridge down");
+    let log = say(&c, &b.on(&b.cli(&f)), "hello");
+    assert!(!log.contains("not delivered"), "{log}");
+    assert_eq!(f.count("shed run"), 2, "{:?}", f.calls.borrow());
+    assert_eq!(starts(&c)[0].str("runtime"), Some("shed-acp"));
+}
+
 struct Late {
     f: Fake,
     after: u64,
@@ -262,7 +283,7 @@ fn a_start_that_times_out_and_whose_agent_comes_up_20_s_later_is_adopted_with_no
     assert!(!r.f.called("herdr workspace close"), "{:?}", r.f.calls.borrow());
     let s = &starts(&c)[0];
     assert_eq!(
-        (s.str("pane"), s.str("workspace"), &s.data["adopted"]),
+        (s.str("pane"), s.str("workspace"), s.val("adopted")),
         (Some("w9:p1"), Some("w9"), &serde_json::json!(true))
     );
 }
@@ -295,7 +316,6 @@ const LOST: &str = r#"{"error":{"code":"agent_name_not_found","message":"named a
 #[test]
 fn a_stale_name_is_cleared_and_the_start_succeeds_on_its_second_try() {
     let c = setup("stale-name");
-    // Its earlier conductor ran in w9 and is gone now; herdr still holds the name.
     say(&c, &herdr(NO_AGENTS), "hello");
     let r = herdr(NO_AGENTS).once_err("herdr agent start", 1, LOST);
     let log = say(&c, &r, "again");
@@ -315,10 +335,7 @@ fn a_stale_name_is_cleared_and_the_start_succeeds_on_its_second_try() {
     assert!(s[1].data.get("adopted").is_none(), "{:?}", s[1].data);
 }
 
-// --- #736: a conductor start blocked by a first-start prompt answers it as spawn does ---
-
 const NOT_READY: &str = r#"{"error":{"code":"agent_not_ready","message":"agent orchestrator-t1 is blocked during startup and is not ready for prompts"}}"#;
-/// #484: a real failed start's screen: the unnumbered trust menu under the shell's own `❯` prompts.
 const TRUST_LIVE: &str = include_str!("golden/spawn/trust-live.txt");
 const BYPASS: &str = " WARNING: Claude Code running in Bypass Permissions mode\n\n By proceeding, you accept all responsibility?\n\n ❯ 1. No, exit\n   2. Yes, I accept\n\n Enter to confirm · Esc to cancel\n";
 
@@ -353,10 +370,9 @@ fn a_orchestrator_start_blocked_by_a_known_first_start_prompt_answers_it_and_del
         assert_eq!((sp.str("prompt"), sp.str("pane")), (Some(prompt), Some("w9:p1")));
         let s = &starts(&c)[0];
         assert_eq!(
-            (s.str("pane"), &s.data["confirmed"]),
+            (s.str("pane"), s.val("confirmed")),
             (Some("w9:p1"), &serde_json::json!(true))
         );
-        // The first start's line is in its thread file, which the start's kick points it at.
         let thread = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t1/.thread.md")).unwrap();
         assert!(thread.contains("hello"), "{thread}");
     }

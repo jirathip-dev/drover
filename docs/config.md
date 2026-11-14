@@ -38,7 +38,7 @@ review or ready).
 - A marked issue starts only with a free slot: `SERIAL_BUSY ci: #2968 holds 1/1`.
 - An issue whose diff joins a full group **holds** (`serial-held {group, holder}`): its lane is told
   `stop: ci is held by #2968; you'll get an update round when it merges`, its worktree stays and no review is spawned.
-  Its card reads `waits: ci held by #2968 (1/1)`.
+  Its card reads `serial: ci held by #2968 (1/1)`.
 - When a slot frees, the first held issue in queue order takes it (`serial-slot {group}`) and gets an update round
   (merge `origin/<integration>`), then carries on.
 - An issue in two or more groups takes their slots in name order and needs all of them before it continues, so two
@@ -46,6 +46,11 @@ review or ready).
 - Issues already in flight over a limit when a group is added keep going (grandfathered); new joins wait.
 
 Board, status and the Host tab show each group's use: `serial: db 3/10 · ci 1/1`.
+
+Hot files (#891): each file the last `drover hotspots` run stored is its own one-slot group, `hot <file>`, joined
+only by a PR's diff (never a `--serial` mark). Drive drops a file from it on its next pass once
+`.drover/arch.toml` on the integration branch lists it `frozen` or `generated` (`hot-files {files}` logs each
+change). A held issue's board row and card read `serial: hot <file>`.
 
 ## Fast-first landing (#350)
 
@@ -73,6 +78,23 @@ full_first_paths = ["db/migrations/**", ".github/workflows/**"]
 - **Numbers.** `drover stats land <fleet>` prints both modes' landings, per day, median PASS → landed, reverts and check
   time, plus the minutes integration sat red.
 - **Promotion.** `main` stays human-only; promote a staging commit only once its full suite is green.
+
+## Renaming a fleet (#935)
+
+`drover fleet rename <old> <new>` is a dry run that prints every change it would make. With `--yes` it applies them.
+It is owner only: the lane hook refuses it, so it runs as a run card's `--cmd`. It refuses `NOT_PAUSED` unless `<old>`
+is paused, `LANE_LIVE` while a lane of an open issue in `<old>` is running, and `BAD_NAME` when `<new>` is taken or
+not a valid name. First it backs up state.db, fleet.toml and the per-fleet state files. Then, in one transaction, it
+moves the queue, events, asks, verdicts and secrets (their `secret-set` events) to `<new>`, renames the state files
+and thread repo bindings, and renames the `[fleet.<old>*]` tables with every value unchanged. Any failure restores
+the backup. It logs one `fleet-renamed` event, and old names keep resolving in `status`, `asks`, `board` and
+`queue ls`. The fleet stays paused until the owner resumes it.
+
+## Merge label (#947)
+
+`merge_label` (unset by default) is the PR label the full CI needs. drover adds it on a PASS at the head and removes it
+when the head moves past that PASS. `drover setup` creates it in the repo, and `drover doctor` checks that it exists.
+New fleets set `merge_label = "merge-ready"` with the affected-only CI recipe in [ci.md](ci.md).
 
 ## Hotspots (#889)
 
@@ -131,7 +153,10 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `reap_keychain_readers` | `false` | kill those stuck Keychain readers too |
 | `respawn_max` | `3` | failed starts of an issue's role in the window before spawn refuses RESPAWN_LOOP |
 | `respawn_window_minutes` | `60` | the window `respawn_max` counts failed starts in |
-| `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow` |
+| `respawn_per_pass` | `2` | respawns a drive pass starts, each through admission (a fleet may set its own) |
+| `runtime_down_failures` | `5` | lanes on one host failing to start or ending without a push in the window before drive trips `runtime-down` there |
+| `runtime_down_minutes` | `30` | the window `runtime_down_failures` counts in |
+| `pass_max_secs` | `120` | a drive pass longer than this logs `pass-slow`; past 3 × it logs `pass-stuck` and frees its lock |
 | `ssh_connect_secs` | `10` | every host ssh's `-oConnectTimeout` |
 | `ssh_quick_secs` | `5` | a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe |
 | `ssh_call_secs` | `20` | a remote call in a pass is killed after this long |
@@ -147,6 +172,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `disk_probe_secs` | `2` | a folder listing slower than this marks its disk as not answering |
 | `disk_sick_secs` | `300` | a disk that let a call run out of time stays hung this long |
 | `disk_trust_secs` | `60` | a folder that answered is trusted this long before it is probed again |
+| `lane_read_secs` | `5` | a lane worktree read slower than this skips the lane for the pass (`root-hung`) |
 | `poll_millis` | `20` | the pause between polls of a child process or disk probe |
 | `tick_beat_secs` | `60` | a running tick writes `tick.beat` this often |
 | `orchestrator_idle_minutes` | `30` | an orchestrator whose thread is quiet this long closes on the next `check` |
@@ -160,6 +186,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `serve_shed_secs` | `5` | serve re-reads shed's lanes in the background this often |
 | `serve_remote_secs` | `10` | serve re-reads the remote hosts (ssh) in the background this often |
 | `serve_host_secs` | `10` | serve re-samples this host's load in the background this often |
+| `serve_heartbeat_secs` | `15` | `/live` pings this often; a stream whose last 2 pings are still unsent is dropped |
 | `serve_handover_secs` | `300` | `self-update` waits this long for the running serve to hand over before restarting it |
 | `slo_api_p95_ms` | `1000` | `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once |
 | `slo_api_minutes` | `10` | how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api` |

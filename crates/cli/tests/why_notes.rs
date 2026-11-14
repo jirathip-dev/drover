@@ -1,6 +1,3 @@
-//! #677: why notes. `turn done` checks the lane's why.md and puts it on the pushed head under `refs/notes/why` on a
-//! real (bare) origin, the PR body and the log; refusals push nothing; concurrent writers lose no note; `drover why`
-//! reads a merged line back; every brief kind carries its notes. Every test runs as #12's impl lane (process-wide env).
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -9,8 +6,6 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-/// Real `git` (each call logged in the Fake too); everything else is the Fake's. `before_push` runs once, right
-/// before the first push of a notes ref: another writer getting in between this one's fetch and push.
 struct Git<'a> {
     fake: &'a Fake,
     before_push: std::sync::Mutex<Option<Box<dyn FnOnce() + Send + 'a>>>,
@@ -59,7 +54,6 @@ impl Runner for Git<'_> {
     }
 }
 
-/// `git -C dir args` in a fixture, its stdout; it must succeed.
 fn g(dir: &Path, args: &[&str]) -> String {
     let o = Command::new("git")
         .args([
@@ -93,8 +87,6 @@ struct Repo {
     head: String,
 }
 
-/// A bare origin with `a.rs` (3 lines) on staging and #12's branch one commit on; the fleet's local clone; the lane's
-/// worktree on the branch.
 fn repo(name: &str) -> Repo {
     let dir = tmpdir(name);
     let (origin, seed) = (dir.join("origin.git"), dir.join("seed"));
@@ -135,8 +127,7 @@ fn repo(name: &str) -> Repo {
     }
 }
 
-/// #12's impl lane in `repo`'s worktree (spawned at ts 10, `update` for an update round), and q5 answered by the owner.
-fn lane(repo: &Repo, update: bool) -> drover::Ctx {
+fn lane(repo: &Repo, update: bool) -> (drover::Ctx, FakeShed) {
     std::env::set_var("DROVER_LANE", "sendmeter:12:impl");
     let c = ctx(
         &repo.dir,
@@ -146,7 +137,7 @@ fn lane(repo: &Repo, update: bool) -> drover::Ctx {
     ev(
         10,
         "spawn",
-        json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "w9:p1", "worktree": repo.wt, "branch": "issue-12", "update": update}),
+        json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "worktree": repo.wt, "branch": "issue-12", "update": update}),
     );
     ev(
         11,
@@ -158,10 +149,11 @@ fn lane(repo: &Repo, update: bool) -> drover::Ctx {
         "decision",
         json!({"id": "q5", "choice": "yes, each once", "by": "owner", "via": "web"}),
     );
-    c
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    (c, sh)
 }
 
-/// The Fake around git: #12's open PR at `head`, its spec, and the writes it allows.
 fn body(head: &str) -> String {
     format!("Closes #12\n\n## For humans\n\nx\n\n## Evidence (head {head})")
 }
@@ -179,7 +171,6 @@ fn fake_body(head: &str, body: &str) -> Fake {
             &json!({"title": "Meter sends", "body": SPEC}).to_string(),
         )
         .reply("gh pr edit", "")
-        .reply("herdr", "{}")
 }
 
 const NOTE: &str = "Decided: count a retry as the same send\n\
@@ -202,20 +193,23 @@ fn origin_note(repo: &Repo, sha: &str) -> Option<String> {
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 #[test]
 fn why_note_written_on_origin_pr_body_and_log() {
     let repo = repo("why-written");
-    let c = lane(&repo, false);
+    let (c, _sh) = lane(&repo, false);
     std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
     let r = fake(&repo.head);
     let (code, out) = run(&c, &Git::new(&r), &["turn", "done"]);
     assert_eq!(code, 0, "{out}");
-    // 1. the note on the head, on origin.
     assert_eq!(origin_note(&repo, &repo.head).as_deref(), Some(NOTE));
-    // 2. the PR body keeps its own text and gains the round's section.
     let calls = r.calls.borrow();
     let edit = calls
         .iter()
@@ -223,15 +217,13 @@ fn why_note_written_on_origin_pr_body_and_log() {
         .unwrap();
     assert!(edit.contains("Closes #12") && edit.contains("## For humans"), "{edit}");
     assert!(edit.contains("## Why (round 1)\n\nDecided: count a retry"), "{edit}");
-    // 3. the `why` event: sha, round, the Owner line, the files since the base.
     let w = &kinds(&c, "why")[0];
     assert_eq!(
-        (w.issue, w.str("sha"), w.data["round"].as_u64()),
+        (w.issue, w.str("sha"), w.val("round").as_u64()),
         (Some(12), Some(repo.head.as_str()), Some(1))
     );
     assert_eq!(w.str("owner"), Some("retries no longer double the meter"));
-    assert_eq!(w.data["files"], json!(["a.rs"]));
-    // 4. the turn is logged without a refusal and why.md is consumed.
+    assert_eq!(*w.val("files"), json!(["a.rs"]));
     assert!(kinds(&c, "turn-end")[0].data.get("note").is_none());
     assert!(!repo.wt.join("why.md").exists());
 }
@@ -239,7 +231,7 @@ fn why_note_written_on_origin_pr_body_and_log() {
 #[test]
 fn an_update_rounds_short_note_is_accepted() {
     let repo = repo("why-short");
-    let c = lane(&repo, true);
+    let (c, _sh) = lane(&repo, true);
     let short = "Decided: merged staging, no conflicts\nBecause: q5\nRejected: none\nOwner: brought up to date\n";
     std::fs::write(repo.wt.join("why.md"), short).unwrap();
     let (code, out) = run(&c, &Git::new(&fake(&repo.head)), &["turn", "done"]);
@@ -278,7 +270,7 @@ fn an_invalid_note_is_refused_with_its_reason_and_nothing_is_pushed() {
     ];
     for (i, (note, why)) in cases.into_iter().enumerate() {
         let repo = repo(&format!("why-refused-{i}"));
-        let c = lane(&repo, false);
+        let (c, _sh) = lane(&repo, false);
         if let Some(n) = &note {
             std::fs::write(repo.wt.join("why.md"), n).unwrap();
         }
@@ -301,12 +293,10 @@ fn an_invalid_note_is_refused_with_its_reason_and_nothing_is_pushed() {
     }
 }
 
-/// Another writer's note lands on origin between this write's fetch and push: the rejected push starts over and
-/// both notes stay.
 #[test]
 fn a_note_pushed_between_fetch_and_push_is_kept() {
     let repo = repo("why-race-between");
-    let c = lane(&repo, false);
+    let (c, _sh) = lane(&repo, false);
     std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
     let base = g(&repo.local, &["rev-parse", "origin/staging"]);
     let other = repo.dir.join("other");
@@ -338,11 +328,10 @@ fn a_note_pushed_between_fetch_and_push_is_kept() {
     assert_eq!(pushes, 2, "rejected once, then pushed");
 }
 
-/// Two lanes' notes written at once from one local clone onto one origin: both end up there.
 #[test]
 fn two_lanes_finishing_at_once_both_keep_their_notes() {
     let repo = repo("why-race-two");
-    let c = lane(&repo, false);
+    let (c, _sh) = lane(&repo, false);
     let seed = repo.dir.join("seed");
     g(&seed, &["checkout", "-qb", "issue-13", "staging"]);
     std::fs::write(seed.join("b.rs"), "b\n").unwrap();
@@ -364,14 +353,11 @@ fn two_lanes_finishing_at_once_both_keep_their_notes() {
     assert_eq!(origin_note(&repo, &other).as_deref(), Some("Owner: thirteen\n"));
 }
 
-/// A line from a merged PR: blame lands on a branch commit without a note; its round head's note, the issue and its
-/// asks with answers come back, as text and `--json`.
 #[test]
 fn why_reads_a_merged_line_back() {
     let repo = repo("why-cmd");
-    let c = lane(&repo, false);
+    let (c, _sh) = lane(&repo, false);
     let seed = repo.dir.join("seed");
-    // The round head: one more commit on the branch, noted by `turn done`.
     std::fs::write(seed.join("c.rs"), "c\n").unwrap();
     g(&seed, &["add", "."]);
     g(&seed, &["commit", "-qm", "meter: test it"]);
@@ -380,7 +366,6 @@ fn why_reads_a_merged_line_back() {
     g(&repo.wt, &["pull", "-q", "origin", "issue-12"]);
     std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
     assert_eq!(run(&c, &Git::new(&fake(&head)), &["turn", "done"]).0, 0);
-    // Merged with `--merge`.
     g(&seed, &["checkout", "-q", "staging"]);
     g(
         &seed,
@@ -422,23 +407,18 @@ fn why_reads_a_merged_line_back() {
     assert_eq!(v["asks"][0]["answer"]["choice"], json!("yes, each once"));
 }
 
-/// drive tells a refused note's lane once before its review; its next `done` goes to review without a note.
 #[test]
 fn a_refused_note_is_nudged_once_then_review_goes_ahead() {
     let repo = repo("why-nudge");
-    let c = lane(&repo, false);
+    let (c, sh) = lane(&repo, false);
     let wt = repo.wt.to_string_lossy().into_owned();
-    let list = agents(&[("sendmeter-impl-12", "idle", &wt, "w9:p1")]);
+    sh.lane("sendmeter-impl-12", "idle", &wt);
     let ci = json!([{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
     let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": repo.head, "statusCheckRollup": ci, "body": body(&repo.head)});
-    let r = Fake::default()
-        .reply("herdr agent list", &list)
-        .reply("gh pr view issue-12", &pr.to_string())
-        .reply(
-            "gh issue view 12",
-            &json!({"title": "Meter sends", "body": SPEC}).to_string(),
-        )
-        .reply("herdr", "{}");
+    let r = Fake::default().reply("gh pr view issue-12", &pr.to_string()).reply(
+        "gh issue view 12",
+        &json!({"title": "Meter sends", "body": SPEC}).to_string(),
+    );
     assert_eq!(run(&c, &Git::new(&r), &["turn", "done"]).0, 3);
     let later = |s| drover::Ctx {
         now: c.now + s,
@@ -446,14 +426,18 @@ fn a_refused_note_is_nudged_once_then_review_goes_ahead() {
     };
     let (code, out) = run(&later(200), &Git::new(&r), &["drive"]);
     assert_eq!(code, 0, "{out}");
-    let nudge =
-        "herdr agent prompt sendmeter-impl-12 drover: your `turn done` was refused: WHY_INVALID: why.md missing";
-    assert_eq!(r.count(nudge), 1, "{:?}", r.calls.borrow());
+    let nudge = "drover: your `turn done` was refused: WHY_INVALID: why.md missing";
+    let nudges = || {
+        sh.sent("sendmeter-impl-12")
+            .iter()
+            .filter(|t| t.starts_with(nudge))
+            .count()
+    };
+    assert_eq!(nudges(), 1, "{:?}", sh.all("send"));
     assert!(kinds(&c, "pushed").is_empty(), "no review before the nudge is answered");
-    // The lane answers with another `done`, still without a note: the review goes ahead, the nudge is not repeated.
     assert_eq!(run(&later(300), &Git::new(&r), &["turn", "done"]).0, 3);
     run(&later(400), &Git::new(&r), &["drive"]);
-    assert_eq!(r.count(nudge), 1);
+    assert_eq!(nudges(), 1);
     assert_eq!(kinds(&c, "pushed").len(), 1, "{:?}", r.calls.borrow());
 }
 
@@ -480,7 +464,7 @@ fn a_pr_body_without_the_heads_evidence_is_refused_before_review() {
             "carries `🤖 Generated with [Claude Code]",
         ),
     ];
-    let c = lane(&repo, false);
+    let (c, _sh) = lane(&repo, false);
     std::fs::write(repo.wt.join("why.md"), NOTE).unwrap();
     for (b, why) in cases {
         let r = fake_body(&repo.head, &b);

@@ -1,6 +1,3 @@
-//! #635: the built-in boat recipe, run for real by `sh` against a fake `boat` with the current CLI's subcommands
-//! (`new`, `list`, `resume`, `stop`, `delete`, `snapshot`); its rates and the old `medium` size; the cloud key under the
-//! host's fleet; the ssh files it writes; doctor's boat rows.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -13,8 +10,6 @@ use std::path::PathBuf;
 const NOW: u64 = 1_000_000;
 const KEY: &str = "boat-key-635";
 
-/// A fake `boat`: sandboxes in `<bin>/sandboxes` (`id name state type`), each call in `<bin>/calls`; an unknown
-/// subcommand fails as clap does. `ssh-keyscan` answers for the endpoint it gives.
 const BOAT: &str = r#"#!/bin/sh
 d=$(dirname "$0"); s="$d/sandboxes"; touch "$s"; echo "$*" >> "$d/calls"
 # As boat does, an empty id is the current sandbox (the one boat runs in): recorded, never an error.
@@ -47,7 +42,6 @@ esac
 const KEYSCAN: &str =
     "#!/bin/sh\necho \"[x]:1 ssh-ed25519 $(cat \"$(dirname \"$0\")/hostkey\" 2>/dev/null || echo AAAAboatkey)\"\n";
 
-/// A recipe's `sh -c` runs for real with the fake `boat` first on PATH; everything else goes to the fake runner.
 struct Boat(Fake, PathBuf);
 
 impl Runner for Boat {
@@ -80,7 +74,6 @@ impl Runner for Boat {
     }
 }
 
-/// One fleet (sendmeter) and boat1 on the built-in recipe at `size`; the fake boat CLI in `<dir>/bin`.
 fn setup(name: &str, size: &str) -> (drover::Ctx, PathBuf) {
     let dir = tmpdir(name);
     let host =
@@ -113,7 +106,6 @@ fn bootstrap_boat1_creates_it_with_the_current_boat_cli_and_gets_past_start() {
     let mut out = vec![];
     let e = drover::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut out).unwrap_err();
     let e = format!("{e:#}");
-    // Past start: the ssh probe of the new host is the next step (the fake runner has no ssh there).
     assert!(
         !e.contains("start failed") && e.contains("can't reach boat1"),
         "{e}\n{}",
@@ -121,14 +113,13 @@ fn bootstrap_boat1_creates_it_with_the_current_boat_cli_and_gets_past_start() {
     );
     let made = calls(&bin);
     assert!(made.contains("new --type default --name boat1"), "{made}");
-    let kinds: Vec<_> = read(&c.state).unwrap().into_iter().map(|e| e.kind).collect();
+    let kinds: Vec<_> = read(&c.state).unwrap().to_vec().into_iter().map(|e| e.kind).collect();
     assert_eq!(kinds, ["cloud-start", "cloud-up"]);
     let conf = std::fs::read_to_string(c.home.join(".ssh/config.d/herdsman")).unwrap();
     assert!(
         conf.contains("Host boat1\n  HostName 10.0.0.7\n  User user\n  Port 2222\n"),
         "{conf}"
     );
-    // Stopped, it resumes the same sandbox (no second `new`).
     drover::cloud::stop(&c, &cfg, &r, "boat1", "stop", "test").unwrap();
     drover::cloud::start(&c, &cfg, &r, "boat1").unwrap();
     let made = calls(&bin);
@@ -147,7 +138,6 @@ fn the_ssh_files_are_all_valid_config_and_the_host_key_stays_pinned() {
     std::fs::create_dir_all(old.parent().unwrap()).unwrap();
     std::fs::write(&old, "[10.0.0.7]:2222 ssh-ed25519 OLD\n").unwrap();
     drover::cloud::start(&c, &cfg, &r, "boat1").unwrap();
-    // `Include config.d/*` reads every file there as ssh config: each line a comment or a directive.
     for f in std::fs::read_dir(c.home.join(".ssh/config.d")).unwrap() {
         let text = std::fs::read_to_string(f.unwrap().path()).unwrap();
         for l in text.lines() {
@@ -175,12 +165,10 @@ fn the_ssh_files_are_all_valid_config_and_the_host_key_stays_pinned() {
         conf.contains(&format!("UserKnownHostsFile {}", pin.display())),
         "{conf}"
     );
-    // Amendment D: a fresh boat sandbox authorizes only boat's own key.
     assert!(
         conf.contains("  IdentityFile ~/.ssh/ascii_box_ed25519\n  IdentitiesOnly yes\n"),
         "{conf}"
     );
-    // A changed host key on a later start fails closed; the pin is kept.
     std::fs::write(
         bin.join("ssh-keyscan"),
         "#!/bin/sh\necho '[10.0.0.7]:2222 ssh-ed25519 EVIL'\n",
@@ -210,7 +198,6 @@ fn boat_runs_on_its_own_login_with_no_key_and_doctor_finds_a_key_file() {
         out.contains("✓ cloud boat1 identity — ~/.ssh/ascii_box_ed25519"),
         "{out}"
     );
-    // #707: the API key `[ci_runners]` calls need, in its 0600 file: found, and handed to the command.
     let f = secret_file(&c, "BOAT_API_KEY", KEY, 0o600);
     let (_, out) = run(&c, &r, &["doctor"]);
     assert!(out.contains(&format!("✓ cloud boat1 key — {}", f.display())), "{out}");
@@ -287,10 +274,8 @@ fn a_sandbox_the_default_list_omits_or_that_is_gone_is_never_acted_on_by_an_empt
     let cfg = Config::load(&c.config).unwrap();
     let r = Boat(Fake::default(), bin.clone());
     drover::cloud::start(&c, &cfg, &r, "boat1").unwrap();
-    // Stopped, boat's default list omits it: `--all` still finds it, by its id.
     drover::cloud::stop(&c, &cfg, &r, "boat1", "stop", "test").unwrap();
     drover::cloud::start(&c, &cfg, &r, "boat1").unwrap();
-    // Gone (deleted outside drover): stop and destroy are refused, boat never called with an empty id.
     std::fs::write(bin.join("sandboxes"), "").unwrap();
     for verb in ["stop", "destroy"] {
         let e = drover::cloud::stop(&c, &cfg, &r, "boat1", verb, "test").unwrap_err();
@@ -299,7 +284,6 @@ fn a_sandbox_the_default_list_omits_or_that_is_gone_is_never_acted_on_by_an_empt
     let made = calls(&bin);
     assert!(made.contains("stop bx_0") && made.contains("resume bx_0"), "{made}");
     assert!(!made.contains("CURRENT"), "{made}");
-    // An override recipe whose own lines have no guard: drover refuses on the recipe's empty `id` itself.
     let recipe = c.config.with_file_name("recipes/boat.toml");
     std::fs::create_dir_all(recipe.parent().unwrap()).unwrap();
     let id = r#"boat list --all --json | jq -r 'first(.sandboxes[]|select(.name=="{name}"))|.id'"#;
@@ -324,7 +308,6 @@ fn bootstrap_and_survey_of_a_running_host_rewrite_a_moved_address() {
     drover::cloud::start(&c, &cfg, &r, "boat1").unwrap();
     let conf = || std::fs::read_to_string(c.home.join(".ssh/config.d/herdsman")).unwrap();
     let pin = c.home.join(".ssh/herdsman/boat1.known");
-    // Moved while running: bootstrap re-reads `address` before it reaches the host.
     std::fs::write(bin.join("endpoint"), "10.0.0.8:2200").unwrap();
     let _ = drover::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut Vec::new());
     assert!(
@@ -336,7 +319,6 @@ fn bootstrap_and_survey_of_a_running_host_rewrite_a_moved_address() {
         std::fs::read_to_string(&pin).unwrap(),
         "[10.0.0.8]:2200 ssh-ed25519 AAAAboatkey\n"
     );
-    // A survey that finds it running and moved again rewrites it too.
     std::fs::write(bin.join("endpoint"), "10.0.0.9:2201").unwrap();
     drover::hosts::survey(&c, &cfg, &r, true);
     assert!(
@@ -344,7 +326,6 @@ fn bootstrap_and_survey_of_a_running_host_rewrite_a_moved_address() {
         "{}",
         conf()
     );
-    // Recreated (a new host key): a survey never accepts it; bootstrap re-pins it, logged.
     std::fs::write(bin.join("endpoint"), "10.0.0.10:22").unwrap();
     std::fs::write(bin.join("hostkey"), "AAAAnewkey").unwrap();
     drover::hosts::survey(&c, &cfg, &r, true);

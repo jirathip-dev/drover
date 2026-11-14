@@ -17,7 +17,7 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> (u16, V
     (head[9..12].parse().unwrap(), serde_json::from_str(body).unwrap())
 }
 
-fn board(name: &str, extra: &str) -> (drover::Ctx, Fake, String) {
+fn board(name: &str, extra: &str) -> (drover::Ctx, OnShed, String) {
     let (c, r) = v1_board(name);
     let text = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(
@@ -47,6 +47,7 @@ fn field<'a>(v: &'a Value, path: &str) -> &'a Value {
 fn edits(c: &drover::Ctx) -> Vec<Event> {
     read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "config-edit")
         .collect()
@@ -151,7 +152,7 @@ fn a_field_edit_keeps_comments_backs_up_and_logs_the_owner() {
     }
     let e = edits(&c).pop().unwrap();
     assert_eq!(
-        (e.str("by"), e.data["doctor"].is_boolean()),
+        (e.str("by"), e.val("doctor").is_boolean()),
         (Some("owner (cooee)"), true)
     );
     assert_eq!(std::fs::read_to_string(e.str("backup").unwrap()).unwrap(), before);
@@ -205,7 +206,12 @@ fn a_fleet_is_added_removed_paused_and_resumed_with_each_logged() {
             .unwrap()
             .paused;
         assert_eq!(paused, op == "pause");
-        let e = read(&c.state).unwrap().into_iter().rfind(|e| e.kind == op).unwrap();
+        let e = read(&c.state)
+            .unwrap()
+            .to_vec()
+            .into_iter()
+            .rfind(|e| e.kind == op)
+            .unwrap();
         assert_eq!((e.fleet.as_str(), e.str("via")), ("sendmeter", Some("web")));
     }
 }

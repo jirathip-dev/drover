@@ -1,8 +1,3 @@
-//! #365 step 1: the Queue tab's backlog. The tick's pass (and [Drive now]) reads a repo's open issues in one GraphQL
-//! call, then only those updated since; the board renders it from that read with no GitHub call; [queue N] queues the
-//! ticked issues in tick order, each row marked `needs-check`. The read's `--jq` runs under jq on a raw GraphQL page;
-//! serve.js's pure backlog part (rows, search, quick filters, tick order) under node; the 390 px view with 100 issues
-//! is gate 2's `queue/queue-backlog` (docs/ui.md).
 mod common;
 use common::*;
 use drover::events::read;
@@ -13,7 +8,6 @@ const ADDR: &str = "127.0.0.1:7777";
 const NOW: u64 = 10_000_000;
 const READ: &str = "gh api graphql --paginate --jq .data.repository.issues";
 
-/// One issue as the read's `--jq` prints it.
 fn issue(n: u64, state: &str, updated: &str, labels: &[&str], ac: bool, pr: bool) -> String {
     let i = json!({"number": n, "title": format!("issue {n} title"), "state": state, "created": updated,
         "updated": updated, "labels": labels, "ac": ac, "pr": pr});
@@ -31,7 +25,6 @@ fn first_read() -> String {
     .concat()
 }
 
-/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn get(s: &Server, path: &str, cookie: &str) -> String {
     let req = format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n");
     with_board(&String::from_utf8_lossy(&s.respond(&req, NOW)), s, ADDR, cookie, NOW)
@@ -59,17 +52,12 @@ fn keys(v: &Value) -> Vec<String> {
     v.as_object().unwrap().keys().cloned().collect()
 }
 
-fn agents() -> Fake {
-    Fake::default().reply("herdr agent list", r#"{"result":{"agents":[]}}"#)
-}
-
-/// The tick's pass reads every open issue once; a fast step never does. The next read asks only for issues updated
-/// since the newest one seen, open or closed: a closed one leaves, a changed one is replaced, a new one joins. A failed
-/// read keeps the last one and the pass goes on.
 #[test]
 fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
     let c = ctx(&tmpdir("backlog-tick"), CONFIG);
-    let r = agents().once(READ, 0, &first_read());
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
+    let r = Fake::default().once(READ, 0, &first_read());
     run(&c, &r, &["drive", "--fast"]);
     assert_eq!(r.count(READ), 0, "a fast step reads no backlog");
     assert_eq!(run(&c, &r, &["drive"]).0, 0);
@@ -96,7 +84,7 @@ fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
         issue(15, "OPEN", "1970-04-26T01:00:00Z", &["ui"], false, false),
         issue(30, "OPEN", "1970-04-26T02:00:00Z", &[], false, false),
     ];
-    let r = agents().once(READ, 0, &next.concat());
+    let r = Fake::default().once(READ, 0, &next.concat());
     assert_eq!(run(&c, &r, &["drive"]).0, 0);
     let call = r.calls.borrow().iter().find(|l| l.starts_with(READ)).cloned().unwrap();
     assert!(
@@ -111,21 +99,21 @@ fn the_tick_reads_all_open_issues_then_only_those_updated_since() {
     );
     assert_eq!(b["since"], "1970-04-26T02:00:00Z");
 
-    let r = agents().once_err(READ, 1, "HTTP 502");
+    let r = Fake::default().once_err(READ, 1, "HTTP 502");
     assert_eq!(run(&c, &r, &["drive"]).0, 0, "a failed read never fails the pass");
     assert_eq!(r.count(READ), 1);
     assert_eq!(cache(&c)["issues"], b["issues"], "the last read kept");
 }
 
-/// The read's `--jq` (taken from the call the pass made) on a raw GraphQL page, under jq: each issue flattened, `ac`
-/// when the body has acceptance criteria (the words or an `AC` heading), `pr` when a merged or closed PR mentions it.
 #[test]
 fn the_reads_jq_flattens_each_issue() {
     if std::process::Command::new("jq").arg("--version").output().is_err() {
         return eprintln!("skipping: no jq here");
     }
     let c = ctx(&tmpdir("backlog-jq"), CONFIG);
-    let r = agents();
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
+    let r = Fake::default();
     run(&c, &r, &["drive"]);
     let call = r.calls.borrow().iter().find(|l| l.starts_with(READ)).cloned().unwrap();
     let jq = &call[call.find("--jq ").unwrap() + 5..call.find(" -f owner=").unwrap()];
@@ -161,11 +149,11 @@ fn the_reads_jq_flattens_each_issue() {
     );
 }
 
-/// The page and every live fragment carry the backlog from the last read alone (no `gh` call per view), leaving out
-/// queued issues and those with a lane; before any read there is no backlog section.
 #[test]
 fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
     let c = ctx(&tmpdir("backlog-board"), CONFIG);
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "20"]).0, 0);
     let ev = drover::events::Event::new(
         1,
@@ -182,8 +170,7 @@ fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
         !get(&s, "/", &cookie).contains("class=bl"),
         "never read: no backlog section"
     );
-    assert_eq!(run(&c, &agents().once(READ, 0, &first_read()), &["drive"]).0, 0);
-    // #268: the Queue tab (the backlog in it) is the TypeScript board's, from API v1's `queue`: paired or not.
+    assert_eq!(run(&c, &Fake::default().once(READ, 0, &first_read()), &["drive"]).0, 0);
     for out in [get(&s, "/", &cookie), get(&s, "/", "")] {
         let out = out.replace("\\\"", "\"");
         let at = out
@@ -202,8 +189,6 @@ fn the_board_renders_the_backlog_from_the_last_read_with_no_github_call() {
     assert_eq!(r.count("gh"), 0, "no GitHub call per view: {:?}", r.calls.borrow());
 }
 
-/// [queue N] queues the ticked issues in the order they were ticked (serve.js sends `issues` so), behind the queue;
-/// each row says `needs-check`, which a later move keeps. Unpaired, it is refused.
 #[test]
 fn queue_n_follows_tick_order_and_marks_needs_check() {
     let c = ctx(&tmpdir("backlog-queue"), CONFIG);
@@ -245,16 +230,16 @@ fn queue_n_follows_tick_order_and_marks_needs_check() {
     assert!(!row(20).contains("needs-check"), "queued by hand: no mark");
     let qs: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "queue")
         .collect();
     assert_eq!(
-        (qs[1].data["check"].clone(), qs[1].data["via"].clone()),
+        (qs[1].val("check").clone(), qs[1].val("via").clone()),
         (json!(true), json!("web"))
     );
 }
 
-/// serve.js's pure backlog part plus `js`, under node: its stdout as JSON. None where node is missing.
 fn node(js: &str) -> Option<Value> {
     if std::process::Command::new("node").arg("--version").output().is_err() {
         eprintln!("skipping: no node here");
@@ -269,8 +254,6 @@ fn node(js: &str) -> Option<Value> {
     Some(serde_json::from_slice(&o.stdout).unwrap())
 }
 
-/// The server's read as rows: newest first, ages from `created`, `stale` past 90 days untouched. Then search (number,
-/// title, label; every word, any case), each quick filter, a label, and ticks kept in tick order.
 #[test]
 fn rows_search_filters_and_ticks_in_serve_js() {
     let js = "(() => { const now = Date.parse('2026-06-01T00:00:00Z') / 1000;
@@ -309,11 +292,6 @@ fn rows_search_filters_and_ticks_in_serve_js() {
     );
 }
 
-/// #391 in headless Chrome (`CHROME`, the ui job's chrome-headless-shell; skipped without it): the real server
-/// (`serve_on`), a backlog and a 3-step chain. The backlog draws its count, rows, search and quick filters on a fresh
-/// load, after a `/live` change (#268: each a `queue`, drawn by the TypeScript board), and on a page that carried the
-/// Lanes tab only, with no uncaught error. A `build` of
-/// another build reloads the page once; its own build none. The stream's first event names the server's build.
 #[test]
 fn the_backlog_draws_on_a_fresh_load_and_after_a_live_patch() {
     let Some(chrome) = std::env::var_os("CHROME") else {
@@ -321,17 +299,19 @@ fn the_backlog_draws_on_a_fresh_load_and_after_a_live_patch() {
         return;
     };
     let c = ctx(&tmpdir("backlog-live"), CONFIG);
-    let r = agents().reply("gh issue view", r#"{"title": "a title", "body": ""}"#);
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
+    let r = Fake::default().reply("gh issue view", r#"{"title": "a title", "body": ""}"#);
     assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "30", "31", "32", "33"]).0, 0);
     for (n, on) in [(31, 30), (32, 31)] {
         let (n, on) = (n.to_string(), on.to_string());
         assert_eq!(run(&c, &r, &["queue", "sendmeter", "block", "--on", &on, &n]).0, 0);
     }
-    assert_eq!(run(&c, &agents().once(READ, 0, &first_read()), &["drive"]).0, 0);
+    assert_eq!(run(&c, &Fake::default().once(READ, 0, &first_read()), &["drive"]).0, 0);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || drover::serve::serve_on(&c2, &agents(), l, false));
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, false));
     let mut s = std::net::TcpStream::connect(addr).unwrap();
     std::io::Write::write_all(&mut s, format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes()).unwrap();
     let mut head = [0; 160];

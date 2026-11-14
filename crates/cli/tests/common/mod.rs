@@ -5,6 +5,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+/// #771: the shared fake shed server lane tests run on.
+pub mod fake_shed;
+#[allow(unused_imports)]
+pub use fake_shed::{FakeShed, OnShed, OverSsh};
+
 pub const CONFIG: &str = r#"# fleet config (test)
 [fleet.sendmeter]
 repo = "jirathip-dev/sendmeter"
@@ -53,9 +58,7 @@ impl<T> Shared<T> {
     }
 }
 
-/// Scripted fake: one-shot replies (`once`) are consumed first, in order; then the
-/// first reply whose prefix matches the command line wins; unscripted commands
-/// fail with exit 1. `sleep` is recorded as a `sleep <secs>` call and returns at once.
+/// Scripted fake: one-shot replies (`once`) are consumed first, in order; then the first reply whose prefix matches the command line wins; unscripted commands fail with exit 1. `sleep` is recorded as a `sleep <secs>` call and returns at once.
 #[derive(Default)]
 pub struct Fake {
     pub calls: Shared<Vec<String>>,
@@ -63,8 +66,6 @@ pub struct Fake {
     pub onces: Shared<Vec<(String, Out)>>,
     /// Each `run_in`'s command line and its stdin.
     pub inputs: Shared<Vec<(String, String)>>,
-    /// #664: `closing()`: the panes a `herdr … pane close` closed, left out of every later `agent list`.
-    pub closed: Option<Shared<Vec<String>>>,
 }
 
 impl Fake {
@@ -101,11 +102,6 @@ impl Fake {
         ));
         self
     }
-    /// #664: a closed pane leaves herdr's agent list, as on a real host.
-    pub fn closing(mut self) -> Self {
-        self.closed = Some(Shared::default());
-        self
-    }
     pub fn called(&self, prefix: &str) -> bool {
         self.calls.borrow().iter().any(|c| c.starts_with(prefix))
     }
@@ -122,25 +118,7 @@ pub const BATCH: &str = " </dev/null 2>/dev/null; printf '\\036%s\\036' \"$?\"";
 
 impl Runner for Fake {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
-        let mut o = self.answer(prog, args)?;
-        let Some(closed) = &self.closed else {
-            return Ok(o);
-        };
-        match args {
-            [.., a, b, p] if prog == "herdr" && a == "pane" && b == "close" && o.code == 0 => {
-                closed.borrow_mut().push(p.clone())
-            }
-            [.., a, b] if prog == "herdr" && a == "agent" && b == "list" => {
-                if let Ok(mut v) = serde_json::from_str::<serde_json::Value>(&o.stdout) {
-                    if let Some(l) = v["result"]["agents"].as_array_mut() {
-                        l.retain(|a| !closed.borrow().iter().any(|p| a["pane_id"] == p.as_str()));
-                        o.stdout = v.to_string();
-                    }
-                }
-            }
-            _ => {}
-        }
-        Ok(o)
+        self.answer(prog, args)
     }
     fn sleep(&self, secs: u64) {
         self.calls.borrow_mut().push(format!("sleep {secs}"));
@@ -170,11 +148,9 @@ impl Runner for Fake {
 }
 
 impl Fake {
-    /// The scripted answer to one command line.
     fn answer(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         let line = format!("{prog} {}", args.join(" "));
         self.calls.borrow_mut().push(line.clone());
-        // #337: a batched ssh script answers each of its reads as the one call it stands for (also logged).
         let script = args
             .last()
             .and_then(|a| a.strip_prefix("'sh' '-c' '")?.strip_suffix('\''));
@@ -182,7 +158,6 @@ impl Fake {
             let mut out = String::new();
             for l in script.replace("'\\''", "'").lines() {
                 let l = l.trim_end_matches(BATCH);
-                // A herdr read there stands for `herdr --machine <host> …`.
                 let o = match l.strip_prefix("PATH=\"$HOME/.local/bin:$PATH\" 'herdr' '") {
                     Some(h) => {
                         let m = &args[args.len() - 3];
@@ -222,8 +197,6 @@ impl Fake {
     }
 }
 
-/// #246: the batched open-PR read, built from the `gh pr view <branch>` stubs (a `once` is spent, as one read was):
-/// one JSON line per PR, `headRefName` the stub's branch.
 fn open_prs(onces: &mut Vec<(String, Out)>, replies: &[(String, Out)]) -> Out {
     fn branch(p: &str) -> Option<&str> {
         p.strip_prefix("gh pr view ")
@@ -266,8 +239,6 @@ pub fn agents(rows: &[(&str, &str, &str, &str)]) -> String {
 
 pub const NO_AGENTS: &str = r#"{"result":{"agents":[]}}"#;
 
-/// #535: the dirs `tmpdir` made on this thread; removed when it ends. libtest runs each test
-/// on its own thread, so a test's dirs go when it ends, pass or fail.
 struct Made(std::cell::RefCell<Vec<PathBuf>>);
 
 impl Drop for Made {
@@ -280,8 +251,6 @@ impl Drop for Made {
 
 thread_local!(static MADE: Made = const { Made(std::cell::RefCell::new(Vec::new())) });
 
-/// Every dir `tmpdir` made in this process, swept again at exit: a test's background
-/// threads (a server's sampler, drive's workers) can write one back after its test ends.
 static ALL: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 extern "C" fn sweep() {
@@ -364,7 +333,6 @@ pub fn webview() -> std::process::Command {
         base
     });
     let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.mjs");
-    // #560: WebKit under the user's home, never a test's temporary `$HOME` (live_board's, deleted when it ends).
     let mut c = if HELD.load(Ordering::SeqCst) {
         std::process::Command::new("node")
     } else {
@@ -391,7 +359,6 @@ pub fn no_webkit() -> bool {
     no
 }
 
-/// The user's home from the password database, as scripts/ui-lock.sh finds it (a test may point `$HOME` elsewhere).
 fn user_home() -> PathBuf {
     let sh = ["-c", "eval echo ~$(id -un)"];
     let home = std::process::Command::new("sh").args(sh).output().unwrap();
@@ -400,9 +367,7 @@ fn user_home() -> PathBuf {
 
 static HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// #560: scripts/ui-lock.sh's host lock held for a whole WebKit test whose steps are timed (a `/live` update 2.5 s
-/// in), so its clock starts once WebKit is its own; `swift()` meanwhile runs without the wrapper. Every WebKit test
-/// of a binary that takes it must take it.
+/// #560: scripts/ui-lock.sh's host lock held for a whole WebKit test whose steps are timed (a `/live` update 2.5 s in), so its clock starts once WebKit is its own; `swift()` meanwhile runs without the wrapper. Every WebKit test of a binary that takes it must take it.
 pub struct UiLock(std::fs::File, std::sync::MutexGuard<'static, ()>);
 
 pub fn ui_lock() -> UiLock {
@@ -461,8 +426,7 @@ pub fn pair(s: &drover::serve::Server, c: &Ctx, ua: &str, now: u64) -> String {
     cookie
 }
 
-/// #138 gate 2: a sheet with every block type: you, assistant prose with markdown, a status line, a passing and a
-/// failing tool run (capped, with its tail), a diff with long lines, the gap line, a running call and the live line.
+/// #138 gate 2: a sheet with every block type: you, assistant prose with markdown, a status line, a passing and a failing tool run (capped, with its tail), a diff with long lines, the gap line, a running call and the live line.
 pub fn chat_fixture() -> serde_json::Value {
     let g = |s: &str| format!("\x1b[38;2;153;153;153m{s}\x1b[0m");
     let mut l = vec![
@@ -497,9 +461,7 @@ pub fn chat_fixture() -> serde_json::Value {
         "status": "✽ Gusting… (2m 47s · ↓ 1.8k tokens)", "before": l.len(), "more": true})
 }
 
-/// #138: page JS that opens sendmeter-impl-12's sheet full and draws `chat_fixture()` at once (the poll answers the
-/// same) in the full view (#315: not the one WebKit's stored `chat:full` says), every block open with [show all]
-/// pressed, or all collapsed.
+/// #138: page JS that opens sendmeter-impl-12's sheet full and draws `chat_fixture()` at once (the poll answers the same) in the full view (#315: not the one WebKit's stored `chat:full` says), every block open with [show all] pressed, or all collapsed.
 pub fn chat_scene(open: bool) -> String {
     let fx = chat_fixture();
     format!(
@@ -514,8 +476,7 @@ pub fn chat_scene(open: bool) -> String {
     )
 }
 
-/// #266: the Events tab as the TypeScript board draws it: web/src/events.ts under node, from `s`'s `/api/v1/state` and
-/// `/api/v1/events` at `now`; `opts` (a JS object) overrides the draw's `all`, `shown` or `f`. None where node is missing.
+/// #266: the Events tab as the TypeScript board draws it: web/src/events.ts under node, from `s`'s `/api/v1/state` and `/api/v1/events` at `now`; `opts` (a JS object) overrides the draw's `all`, `shown` or `f`. None where node is missing.
 pub fn events_tab(s: &drover::serve::Server, host: &str, now: u64, opts: &str) -> Option<String> {
     if std::process::Command::new("node").arg("--version").output().is_err() {
         eprintln!("skipping: no node here");
@@ -548,8 +509,7 @@ pub fn events_tab(s: &drover::serve::Server, host: &str, now: u64, opts: &str) -
     Some(String::from_utf8(o.stdout).unwrap())
 }
 
-/// #267: the Host tab as the TypeScript board draws it: web/src/host.ts under node, from `s`'s `/api/v1/host` at `now`
-/// (`host` the request's Host: a read-only server takes an empty one).
+/// #267: the Host tab as the TypeScript board draws it: web/src/host.ts under node, from `s`'s `/api/v1/host` at `now` (`host` the request's Host: a read-only server takes an empty one).
 pub fn host_tab(s: &drover::serve::Server, host: &str, now: u64) -> String {
     let r = s.respond(&format!("GET /api/v1/host HTTP/1.1\r\nHost: {host}\r\n\r\n"), now);
     let r = String::from_utf8_lossy(&r).into_owned();
@@ -557,8 +517,7 @@ pub fn host_tab(s: &drover::serve::Server, host: &str, now: u64) -> String {
     host_html(&r[r.find("\r\n\r\n").unwrap() + 4..])
 }
 
-/// #267: web/src/host.ts's drawing of API v1 `host` data `json`, under node; #440: then what System draws from the same
-/// data (web/src/system.ts): Agent providers and Notifications & devices.
+/// #267: web/src/host.ts's drawing of API v1 `host` data `json`, under node; #440: then what System draws from the same data (web/src/system.ts): Agent providers and Notifications & devices.
 pub fn host_html(json: &str) -> String {
     let d = tmpdir("host-ts");
     std::fs::write(d.join("host.json"), json).unwrap();
@@ -578,8 +537,7 @@ pub fn host_html(json: &str) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-/// #268: `expr` (JS, over API v1 `queue` data `d`: `tab(d)`, `sheet(d, fleet)`) from web/src/queue.ts under node, from
-/// `s`'s `/api/v1/queue` at `now` (`host` the request's Host: a read-only server takes an empty one).
+/// #268: `expr` (JS, over API v1 `queue` data `d`: `tab(d)`, `sheet(d, fleet)`) from web/src/queue.ts under node, from `s`'s `/api/v1/queue` at `now` (`host` the request's Host: a read-only server takes an empty one).
 pub fn queue_js(s: &drover::serve::Server, host: &str, now: u64, expr: &str) -> String {
     let r = s.respond(&format!("GET /api/v1/queue HTTP/1.1\r\nHost: {host}\r\n\r\n"), now);
     let r = String::from_utf8_lossy(&r).into_owned();
@@ -611,9 +569,7 @@ pub fn queue_html(json: &str, expr: &str) -> String {
     String::from_utf8(o.stdout).unwrap()
 }
 
-/// #440: a `<script>` painting what the TypeScript board draws into the System sheet (main.ts), for a page cut before
-/// board.js: Hosts & health from `s`'s `/api/v1/host`, Agent providers and Notifications from the same, Fleets and
-/// Conductor from `/api/v1/queue`, Activity from its events (`events`, `events_tab`'s HTML).
+/// #440: a `<script>` painting what the TypeScript board draws into the System sheet (main.ts), for a page cut before board.js: Hosts & health from `s`'s `/api/v1/host`, Agent providers and Notifications from the same, Fleets and Conductor from `/api/v1/queue`, Activity from its events (`events`, `events_tab`'s HTML).
 pub fn system_frags(s: &drover::serve::Server, host: &str, now: u64, events: &str) -> String {
     let get = |p: &str| {
         let r =
@@ -647,15 +603,12 @@ pub fn system_frags(s: &drover::serve::Server, host: &str, now: u64, events: &st
     format!("<script>{{ const p = {parts}; for (const id in p) frag(id, p[id]); }}</script>")
 }
 
-/// #268: a page response `res` with its Queue tab as the board draws it (`queue_tab`) in `<section id=queue>` (`host`
-/// the request's Host, else an empty one: a read-only server's); #269: and every other part the board draws
-/// (`with_board`, for an unpaired request).
+/// #268: a page response `res` with its Queue tab as the board draws it (`queue_tab`) in `<section id=queue>` (`host` the request's Host, else an empty one: a read-only server's); #269: and every other part the board draws (`with_board`, for an unpaired request).
 pub fn with_queue(res: &str, s: &drover::serve::Server, host: &str, now: u64) -> String {
     with_board(res, s, host, "", now)
 }
 
-/// #269: `exprs` (JS over `d`, `lanes`, `needs` and `chat`: web/src/{lanes,needs,chat}.ts's exports) each over API v1
-/// data `json` (the first `d`, …), under node: their strings.
+/// #269: `exprs` (JS over `d`, `lanes`, `needs` and `chat`: web/src/{lanes,needs,chat}.ts's exports) each over API v1 data `json` (the first `d`, …), under node: their strings.
 pub fn board_js(parts: &[(&str, &str)]) -> Vec<String> {
     let d = tmpdir("board-ts");
     let src = |f: &str| Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../web/src/{f}.ts"));
@@ -682,8 +635,7 @@ pub fn board_js(parts: &[(&str, &str)]) -> Vec<String> {
     serde_json::from_slice(&o.stdout).unwrap()
 }
 
-/// #269: API v1 `path` from `s` for a request with Host `host` (none taken: an empty one, a read-only server's) and
-/// `extra` header lines (a `Cookie: …\r\n`) at `now`: the body.
+/// #269: API v1 `path` from `s` for a request with Host `host` (none taken: an empty one, a read-only server's) and `extra` header lines (a `Cookie: …\r\n`) at `now`: the body.
 pub fn api(s: &drover::serve::Server, host: &str, extra: &str, now: u64, path: &str) -> String {
     let req = |h: &str| format!("GET /api/v1/{path} HTTP/1.1\r\nHost: {h}\r\n{extra}\r\n");
     let mut r = String::from_utf8_lossy(&s.respond(&req(host), now)).into_owned();
@@ -707,8 +659,7 @@ pub fn frags(s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> se
     serde_json::json!({ "needs": needs, "lanes": lanes, "chat": chat })
 }
 
-/// #269: a page response `res` with every tab the board draws in it (the Queue tab's as `with_queue`), as the page shows
-/// them once drawn, for the request with Host `host` and `extra` header lines.
+/// #269: a page response `res` with every tab the board draws in it (the Queue tab's as `with_queue`), as the page shows them once drawn, for the request with Host `host` and `extra` header lines.
 pub fn with_board(res: &str, s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> String {
     let req = |h: &str| format!("GET /api/v1/queue HTTP/1.1\r\nHost: {h}\r\n\r\n");
     let ok = String::from_utf8_lossy(&s.respond(&req(host), now)).starts_with("HTTP/1.1 200");
@@ -744,8 +695,7 @@ pub fn avatars(of: &[(&str, &str, &str)]) -> Vec<String> {
     board_js(&j.iter().map(|j| (j.as_str(), "lanes.avatar(d)")).collect::<Vec<_>>())
 }
 
-/// #269: a page response `res` as the board leaves it drawn (`with_board`), for a static copy (the WebKit tests' page
-/// file): without the board's module, which would read the API of the server the copy's assets come from.
+/// #269: a page response `res` as the board leaves it drawn (`with_board`), for a static copy (the WebKit tests' page file): without the board's module, which would read the API of the server the copy's assets come from.
 pub fn drawn(res: &str, s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> String {
     let page = with_board(res, s, host, extra, now);
     let at = page.find("<script type=module").expect("the board's module");
@@ -753,8 +703,7 @@ pub fn drawn(res: &str, s: &drover::serve::Server, host: &str, extra: &str, now:
     format!("{}{}", &page[..at], &page[end..])
 }
 
-/// #344: replace the whole event log with JSONL `text` (as a test edits a log): the database goes, the next read
-/// imports `text`. Leases, devices and snapshots go with it.
+/// #344: replace the whole event log with JSONL `text` (as a test edits a log): the database goes, the next read imports `text`. Leases, devices and snapshots go with it.
 pub fn rewrite_log(state: &Path, text: &str) {
     for f in ["state.db", "state.db-wal", "state.db-shm"] {
         let _ = std::fs::remove_file(state.with_file_name(f));
@@ -774,15 +723,13 @@ pub fn lease_on(c: &Ctx, key: &str) -> Option<drover::db::Lease> {
     drover::db::leases(&c.state, key).into_iter().find(|l| l.key == key)
 }
 
-/// #441: `.0`, except that a `pane run <pane> export …` line also runs in a real `sh`, as the pane's shell would
-/// (spawn's secrets file exists only meanwhile); `.2` gets each run's `$<.1>`.
+/// #441: `.0`, except that a `pane run <pane> export …` line also runs in a real `sh`, as the pane's shell would (spawn's secrets file exists only meanwhile); `.2` gets each run's `$<.1>`.
 pub struct Shell<'a>(pub &'a Fake, pub &'static str, pub Shared<Vec<String>>);
 
 impl Runner for Shell<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         if let Some(i) = args.iter().position(|a| a == "export").filter(|_| prog == "herdr") {
             let line = format!("{}; printf %s \"${}\"", args[i..].join(" "), self.1);
-            // #683: the pane's shell starts with neither credential var of the test's own env.
             let mut sh = std::process::Command::new("sh");
             sh.env_remove("CLAUDE_CODE_OAUTH_TOKEN").env_remove("CLAUDE_CONFIG_DIR");
             let o = sh.arg("-c").arg(line).output()?;
@@ -803,29 +750,34 @@ pub const REV: &str = "sendmeter-rev-9-r1";
 const V1_WS: &str = r#"{"result": {"root_pane": {"pane_id": "w9:p1"}}}"#;
 pub const V1_PERMISSION: &str = "╭──────────────────────────────────────────╮\n│ Bash command                             │\n│   cargo test --all                       │\n│ Do you want to proceed?                  │\n│ ❯ 1. Yes                                 │\n│   2. Yes, and don't ask again for cargo  │\n│      commands in /p/sendmeter            │\n│   3. No, and tell Claude what to do      │\n│      differently (esc)                   │\n╰──────────────────────────────────────────╯\n";
 
-/// #555: API v1's board: sendmeter: #12's impl lane working on w1:p2, #9's rev lane blocked on a permission menu on w1:p3, a setup
-/// terminal `claude B` on host bazzite; gh and herdr's writes succeed.
 /// #641: herdr's one saved machine profile for bazzite (`herdr machine list --json`).
 pub const BAZZITE: &str = r#"[{"id": "b1", "label": "bazzite"}]"#;
 
-pub fn v1_board(name: &str) -> (drover::Ctx, Fake) {
+pub fn v1_board_on(name: &str, f: Fake) -> (drover::Ctx, OnShed) {
     let cfg = format!("models = [\"opus\", \"sonnet\"]\n{CONFIG}\n[hosts.bazzite]\nmachine = \"bazzite\"\n\n[[setup]]\nname = \"claude B\"\ncmd = \"claude /login\"\n");
     let c = ctx(&tmpdir(name), &cfg);
-    for (issue, role, agent, pane) in [(12, "impl", IMPL, "w1:p2"), (9, "rev", REV, "w1:p3")] {
-        let d = serde_json::json!({"role": role, "agent": agent, "harness": "claude", "pane": pane});
+    let r = OnShed::new(f.reply("gh issue close", ""));
+    r.1.attach(&c);
+    for (issue, role, agent, state) in [(12, "impl", IMPL, "working"), (9, "rev", REV, "blocked")] {
+        let d = serde_json::json!({"role": role, "agent": agent, "harness": "claude", "pane": agent});
         drover::events::append(
             &c.state,
             &drover::events::Event::new(1_000_000 - 100, "sendmeter", Some(issue), "spawn", d),
         )
         .unwrap();
+        r.1.lane(agent, state, "/x");
+        r.1.screen(agent, V1_PERMISSION);
     }
-    let list = agents(&[(IMPL, "working", "/x", "w1:p2"), (REV, "blocked", "/x", "w1:p3")]);
-    let r = Fake::default()
-        .reply("herdr agent list", &list)
-        .reply("herdr pane read", V1_PERMISSION)
-        .reply("herdr --machine bazzite pane read", "Paste code here >\n")
+    (c, r)
+}
+
+/// `v1_board_on` an empty Fake.
+pub fn v1_board(name: &str) -> (drover::Ctx, OnShed) {
+    v1_board_on(name, Fake::default())
+}
+
+pub fn herdr_setup(f: Fake) -> Fake {
+    f.reply("herdr --machine bazzite pane read", "Paste code here >\n")
         .reply("herdr machine list --json", BAZZITE)
         .reply("herdr", V1_WS)
-        .reply("gh issue close", "");
-    (c, r)
 }

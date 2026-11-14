@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::read;
+use crate::events::working;
 use crate::lesson::ymd;
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
@@ -11,6 +11,8 @@ use std::io::Write;
 
 const DAYS: u64 = 14;
 const HOT: usize = 5;
+/// #892: how a hotspots issue's title starts.
+pub const TITLE: &str = "hotspots: ";
 
 /// #889: a file `HOT` or more merged PRs touched in `DAYS` days, the distinct PR pairs it was predicted to conflict in (#973) and its PRs' update rounds.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -48,20 +50,14 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
             None => touched.entry(l.to_string()).or_default().push(sha.to_string()),
         }
     }
-    let show = |p: &str| {
-        let o = r
-            .run("git", &argv(&["-C", &local, "show", &format!("{range}:{p}")]))
-            .ok()?;
-        (o.code == 0).then_some(o.stdout)
-    };
-    let converted = match crate::repo_read("arch.toml", show) {
-        Some(text) => crate::arch::converted(&text)?,
-        None => vec![],
-    };
+    let converted = converted(r, f)?;
     let tip = ok(r, "git", &["-C", &local, "ls-tree", "-r", "--name-only", &range])?;
     let tip: BTreeSet<&str> = tip.lines().collect();
     touched.retain(|f, _| tip.contains(f.as_str()) && !crate::arch::any(&converted, f));
-    let events = read(&ctx.state)?;
+    let (events, predicted) = (
+        working(&ctx.state)?,
+        crate::events::since(&ctx.state, &["conflict-predicted"], since)?,
+    );
     let same = |e: &&crate::events::Event| cfg.fleet(&e.fleet).is_ok_and(|g| g.repo == f.repo);
     let updates = |sha: &String| {
         let merged = events
@@ -84,9 +80,8 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
                 .and_then(Value::as_array)
                 .is_some_and(|a| a.contains(&json!(file)))
         };
-        let recent = |e: &&crate::events::Event| e.kind == "conflict-predicted" && e.ts >= since;
         let pair = |e: &crate::events::Event| (e.fleet.clone(), e.issue, e.data.get("other").map(Value::to_string));
-        let pairs: BTreeSet<_> = events.iter().filter(same).filter(recent).filter(on).map(pair).collect();
+        let pairs: BTreeSet<_> = predicted.iter().filter(same).filter(on).map(pair).collect();
         pairs.len()
     };
     let mut hot: Vec<Hot> = (touched.into_iter().filter(|(_, s)| s.len() >= HOT))
@@ -99,6 +94,37 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
         .collect();
     hot.sort_by(|a, b| b.prs.cmp(&a.prs).then_with(|| a.file.cmp(&b.file)));
     Ok(hot)
+}
+
+fn converted(r: &dyn Runner, f: &crate::config::Fleet) -> Result<Vec<String>> {
+    let local = f.local_path().to_string_lossy().into_owned();
+    let show = |p: &str| {
+        let at = format!("origin/{}:{p}", f.integration);
+        let o = r.run("git", &argv(&["-C", &local, "show", &at])).ok()?;
+        (o.code == 0).then_some(o.stdout)
+    };
+    crate::repo_read("arch.toml", show).map_or(Ok(vec![]), |t| crate::arch::converted(&t))
+}
+
+/// #891: log `hot-files` when the stored hot files less those arch.toml now marks converted differ from the last one.
+pub fn sync(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<()> {
+    let Ok(text) = std::fs::read_to_string(path(ctx, fleet)) else {
+        return Ok(());
+    };
+    let hot: Vec<Hot> = serde_json::from_str(&text)?;
+    let last = crate::queue::hot_files(&working(&ctx.state)?, fleet);
+    if hot.is_empty() && last.is_empty() {
+        return Ok(());
+    }
+    let converted = converted(r, cfg.fleet(fleet)?)?;
+    let files: Vec<String> = (hot.into_iter().map(|h| h.file))
+        .filter(|p| !crate::arch::any(&converted, p))
+        .collect();
+    if files != last {
+        let e = crate::events::Event::new(ctx.now, fleet, None, "hot-files", json!({"files": files}));
+        crate::events::emit(&ctx.state, cfg, e)?;
+    }
+    Ok(())
 }
 
 /// #889: the report `drover hotspots` prints and its issue's body.
@@ -130,7 +156,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         return Ok(());
     }
     let day = ctx.now / 86400;
-    let title = format!("hotspots: {fleet} week of {}", ymd(day - (day + 3) % 7));
+    let title = format!("{TITLE}{fleet} week of {}", ymd(day - (day + 3) % 7));
     let search = format!("\"{title}\" in:title");
     let list = [
         "issue",
@@ -164,7 +190,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         writeln!(out, "filed {fleet}#{n}: {title}")?;
         n
     };
-    if crate::queue::replay(&read(&ctx.state)?, fleet)
+    if crate::queue::replay(&working(&ctx.state)?, fleet)
         .iter()
         .all(|i| i.issue != n)
     {

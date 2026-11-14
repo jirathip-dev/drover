@@ -1,4 +1,3 @@
-//! The one seam for external tools (herdr, gh, git). Tests swap in a fake.
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use std::process::Command;
@@ -13,45 +12,37 @@ pub struct Out {
 
 pub trait Runner: Sync {
     fn run(&self, prog: &str, args: &[String]) -> Result<Out>;
-    /// `run` with `input` on stdin (secrets go here, never in argv); fakes ignore it.
     fn run_in(&self, prog: &str, args: &[String], _input: &str) -> Result<Out> {
         self.run(prog, args)
     }
-    /// #561: `run_in`, its child killed (exit 124) once `limit` has passed; fakes answer at once.
     fn run_for(&self, prog: &str, args: &[String], input: &str, _limit: Duration) -> Result<Out> {
         self.run_in(prog, args, input)
     }
-    /// Pause between polls/retries; fakes skip it.
     fn sleep(&self, secs: u64) {
         std::thread::sleep(std::time::Duration::from_secs(secs));
     }
-    /// #340: start `exe args` detached, stdin null, both streams appended to `log`; its pid. `Real` gives it its own
-    /// session, out of reach of launchd's group kill when the tick/fast job exits; fakes see this `sh -c nohup` line.
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
         let (args, log) = (args.join(" "), log.display());
         let sh = format!("nohup '{exe}' {args} >> '{log}' 2>&1 < /dev/null & echo $!");
         Ok(self.run("sh", &argv(&["-c", &sh]))?.stdout.trim().parse()?)
     }
-    /// #298: the shed runtime this runner's lanes use (`[runtime] kind = "shed"`); None: herdr only.
+    fn attached(&self, prog: &str, args: &[String]) -> Result<i32> {
+        use std::os::unix::process::ExitStatusExt;
+        let st = Command::new(prog).args(args).status()?;
+        Ok(st.code().or(st.signal().map(|s| 128 + s)).unwrap_or(1))
+    }
     fn shed(&self) -> Option<crate::shed::Shed> {
         None
     }
-    /// #529: whether `herdr` runs on this host's own (the service's streamed agent list stands for its `agent list`);
-    /// fakes and other hosts: no.
     fn local(&self) -> bool {
         false
     }
-    /// #637: `prog args` with `input` on stdin, its stdout as it arrives (the token proxy relays a streamed model call);
-    /// the child is reaped when the reader drops. Fakes run the real child too: the proxy's tests use a local upstream.
     fn stream(&self, prog: &str, args: &[String], input: &str) -> Result<Box<dyn std::io::Read + Send>> {
         Real::stream(prog, args, input)
     }
-    /// #707: drover keeps no secret store (`crate::secret` reads 0600 files); always refused. Kept only while the
-    /// frozen board (#552) still forwards it.
     fn secret(&self, svc: &str) -> Result<Option<String>> {
         bail!("drover keeps no secret store (wanted {svc})")
     }
-    /// #707: as `secret`.
     fn set_secret(&self, svc: &str, _value: Option<&str>) -> Result<()> {
         bail!("drover keeps no secret store (wanted {svc})")
     }
@@ -167,12 +158,11 @@ impl Runner for Real {
         }
         let mut child = c.spawn().with_context(|| format!("cannot run {exe}"))?;
         let pid = child.id();
-        std::thread::spawn(move || child.wait()); // a long-lived parent (serve) reaps it
+        std::thread::spawn(move || child.wait());
         Ok(pid)
     }
 }
 
-/// #637: a streamed child's stdout; dropping it waits for the child.
 struct Streamed(std::process::Child, std::process::ChildStdout);
 
 impl std::io::Read for Streamed {
@@ -215,7 +205,6 @@ impl Real {
                 ..Out::default()
             })
         };
-        // #776: a `-C <dir>` on a disk that stopped answering fails at once; its child would never exit.
         if let Some(dir) = dir.filter(|d| hung(d, probe_wait(), list)) {
             return fail(format!("{dir} is on a disk that is not answering"));
         }
@@ -253,9 +242,6 @@ impl Real {
                     _ => fail(format!("it ended, but its output stayed open past {limit:?}")),
                 }
             }
-            // #776: a `-C <dir>` call that ran out of time marks its whole disk: a folder macOS still lists from
-            // memory passes the probe while its files hang. Its readers may outlive it while a grandchild (ssh) holds
-            // the pipes.
             Ended::TimedOut => {
                 dir.inspect(|d| sicken(d));
                 fail(format!("no answer in {limit:?}"))
@@ -265,16 +251,7 @@ impl Real {
     }
 }
 
-/// #713: every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is
-/// killed and exits 124.
-/// - `herdr --machine m … list`: 20 s; #478: another host's (its ssh has no timeout of its own) must not hold a tick.
-/// - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08).
-/// - `herdr … --timeout <ms>`: its own timeout and 30 s; `agent start` and the waits run up to it.
-/// - `git clone|fetch|pull|push`: 10 min; a large repo over the network.
-/// - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB.
-/// - `cargo`: 30 min; self-update's release build.
-/// - `ssh` through `hosts::On`: the limit of the command it carries; `hosts bootstrap`'s installs 30 min by `run_for`.
-/// - anything else: 60 s.
+/// #713: every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is killed and exits 124. - `herdr --machine m … list`: 20 s; #478: another host's (its ssh has no timeout of its own) must not hold a tick. - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08). - `herdr … --timeout <ms>`: its own timeout and 30 s; `agent start` and the waits run up to it. - `git clone|fetch|pull|push`: 10 min; a large repo over the network. - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB. - `cargo`: 30 min; self-update's release build. - `ssh` through `hosts::On`: the limit of the command it carries; `hosts bootstrap`'s installs 30 min by `run_for`. - anything else: 60 s.
 pub fn limit(prog: &str, args: &[String]) -> Duration {
     let a = |i: usize| args.get(i).map_or("", String::as_str);
     let net = |w: &String| ["clone", "fetch", "pull", "push"].contains(&w.as_str());
@@ -315,7 +292,6 @@ fn poll() -> Duration {
     Duration::from_millis(crate::config::limits().poll_millis)
 }
 
-/// #776: the probe `Real` uses: `dir`'s disk (its `st_dev`) and the first entry of its listing.
 fn list(dir: &str) -> Option<u64> {
     use std::os::unix::fs::MetadataExt;
     let dev = std::fs::metadata(dir).ok()?.dev();
@@ -323,11 +299,11 @@ fn list(dir: &str) -> Option<u64> {
     Some(dev)
 }
 
-/// A folder's last probe: whether it ended, the disk it named (0: none) and when it started.
 struct Probe {
     done: std::sync::Arc<std::sync::atomic::AtomicBool>,
     dev: std::sync::Arc<std::sync::atomic::AtomicU64>,
     at: Instant,
+    end: Instant,
 }
 
 fn probes() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, Probe>> {
@@ -344,9 +320,6 @@ fn sick() -> std::sync::MutexGuard<'static, std::collections::HashMap<u64, Insta
     m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// #776: a hung disk's mark, shared by every drover process (drive and tick start fresh each run, so a mark kept
-/// only in memory costs each run one timed-out call and one stuck child): `~/.cache/drover/sick-disks/<dev>`,
-/// fresh for `SICK` after its last write.
 fn mark(dev: u64) -> Option<std::path::PathBuf> {
     let home = std::env::var_os("HOME")?;
     Some(
@@ -378,15 +351,18 @@ pub fn sicken(dir: &str) {
     }
 }
 
-/// #776: whether `dir`'s disk has stopped answering: `probe(dir)` (its disk and a listing) runs on its own thread and
-/// must finish within `wait`. A probe still running is never repeated: the folder stays hung, with no new thread,
-/// until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
+/// #776: whether `dir`'s disk has stopped answering: `probe(dir)` (its disk and a listing) runs on its own thread and must finish within `wait`. A probe still running is never repeated: the folder stays hung, with no new thread, until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
 pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> + Send + 'static) -> bool {
     use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
     use std::sync::Arc;
-    let (done, dev) = {
+    let (done, dev, end) = {
         let mut m = probes();
         if let Some(p) = m.get(dir) {
+            if !p.done.load(Relaxed) && Instant::now() < p.end {
+                let (done, dev, end) = (p.done.clone(), p.dev.clone(), p.end);
+                drop(m);
+                return hangs_past(&done, &dev, end);
+            }
             if !p.done.load(Relaxed) || is_sick(p.dev.load(Relaxed)) {
                 return true;
             }
@@ -395,22 +371,28 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
             }
         }
         let (done, dev) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicU64::new(0)));
+        let end = Instant::now() + wait;
         m.insert(
             dir.into(),
             Probe {
                 done: done.clone(),
                 dev: dev.clone(),
                 at: Instant::now(),
+                end,
             },
         );
-        (done, dev)
+        (done, dev, end)
     };
     let (d, v, owned) = (done.clone(), dev.clone(), dir.to_string());
     std::thread::spawn(move || {
         v.store(probe(&owned).unwrap_or(0), Relaxed);
         d.store(true, Relaxed);
     });
-    let end = Instant::now() + wait;
+    hangs_past(&done, &dev, end)
+}
+
+fn hangs_past(done: &std::sync::atomic::AtomicBool, dev: &std::sync::atomic::AtomicU64, end: Instant) -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
     while Instant::now() < end {
         if done.load(Relaxed) {
             return is_sick(dev.load(Relaxed));
@@ -420,9 +402,7 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
     !done.load(Relaxed)
 }
 
-/// #775: `path`'s bytes for a request thread (serve's screenshots, designs, thread files), within `PROBE`: a
-/// `TimedOut` error when its folder is hung (#776), an earlier read of it has not ended, or this one takes too long,
-/// which marks the folder's disk. The stuck read keeps its own thread, and holds the path until it ends.
+/// #775: `path`'s bytes for a request thread (serve's screenshots, designs, thread files), within `PROBE`: a `TimedOut` error when its folder is hung (#776), an earlier read of it has not ended, or this one takes too long, which marks the folder's disk. The stuck read keeps its own thread, and holds the path until it ends.
 pub fn read_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> {
     let path = path.as_ref().to_path_buf();
     let late = || std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{}: no answer", path.display()));
@@ -450,8 +430,7 @@ pub fn read_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> 
         })
 }
 
-/// #775: a started child as `settle` sees it. It has no blocking wait: one stuck in disk I/O outlives SIGKILL, so
-/// nothing may wait on it. Tests use one that never ends.
+/// #775: a started child as `settle` sees it. It has no blocking wait: one stuck in disk I/O outlives SIGKILL, so nothing may wait on it. Tests use one that never ends.
 pub trait Proc: Send + 'static {
     fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>>;
     fn kill(&mut self) -> std::io::Result<()>;
@@ -476,15 +455,12 @@ impl Proc for std::process::Child {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Ended {
     Exited(std::process::ExitStatus),
-    /// It ran out of time: killed and abandoned, never waited on.
     TimedOut,
-    /// An earlier call on its path was abandoned and has not ended, or still ran at the limit: none was started.
     Busy,
 }
 
 type Calls = std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>;
 
-/// #775: the call in flight per path (a `-C` folder, a file serve reads), its flag set once it was abandoned.
 fn calls() -> std::sync::MutexGuard<'static, Calls> {
     static CALLS: std::sync::OnceLock<std::sync::Mutex<Calls>> = std::sync::OnceLock::new();
     let m = CALLS.get_or_init(std::sync::Mutex::default);
@@ -495,20 +471,17 @@ static FREED: std::sync::Condvar = std::sync::Condvar::new();
 
 type Abandoned = (Box<dyn Proc>, Option<Claim>);
 
-/// #775: the children abandoned at their limit, with their path's claim; each `settle` reaps those that ended.
 fn gone() -> std::sync::MutexGuard<'static, Vec<Abandoned>> {
     static GONE: std::sync::Mutex<Vec<Abandoned>> = std::sync::Mutex::new(Vec::new());
     GONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// #775: the one call on a path in flight; dropping it frees the path.
 struct Claim {
     key: String,
     gone: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl Claim {
-    /// Waits while another call on `key` runs, up to `until`; None at `until`, or when that call was abandoned.
     fn take(key: &str, until: Instant) -> Option<Claim> {
         use std::sync::atomic::Ordering::Relaxed;
         let mut m = calls();
@@ -543,10 +516,7 @@ impl Drop for Claim {
     }
 }
 
-/// #775: `start` a call on `key` (None: no path) and watch it up to `limit`. At the limit its child is killed and
-/// abandoned, never waited on, and the caller gets `TimedOut` even when the child cannot die. No second call on
-/// `key` starts while one is in flight: it waits for it (within its own limit), or is `Busy` at once while an
-/// abandoned one lives.
+/// #775: `start` a call on `key` (None: no path) and watch it up to `limit`. At the limit its child is killed and abandoned, never waited on, and the caller gets `TimedOut` even when the child cannot die. No second call on `key` starts while one is in flight: it waits for it (within its own limit), or is `Busy` at once while an abandoned one lives.
 pub fn settle<P: Proc>(key: Option<&str>, limit: Duration, start: impl FnOnce() -> Result<P>) -> Result<Ended> {
     let end = Instant::now() + limit;
     gone().retain_mut(|(c, _)| matches!(c.try_wait(), Ok(None)));

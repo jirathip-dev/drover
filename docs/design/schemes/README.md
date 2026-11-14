@@ -125,10 +125,10 @@ to pass:
   Dracula orange `#ffb86c`, because its yellow reads as lime. The accent is purple and links are cyan.
 - **`paper`** (light): warm paper `#fbf8f1`, ink `#24292f`, and GitHub-light-style status colours darkened for the
   cream card. The scrim is a translucent brown.
-- **`farm`:** **#242's values** (`docs/design/farm-v2`, on branch `design-242`): night-green `#0f1a13`, soil cards
+- **`farm`:** **#242's values** (the shared theme repo's design/farm-v2, on branch `design-242`): night-green `#0f1a13`, soil cards
   `#1d1a12`, cream text, **wheat-gold controls** `#e2bf5e`, **sky-blue links** `#7cc4f0`. Amber is moved to orange
   `#f29b4b` so a working row never reads as a wheat control.
-- **`kitchen`:** **#239's values** (`docs/design/kitchen/art.mjs`, on branch `design-239`): charcoal `#1a1816`, tile
+- **`kitchen`:** **#239's values** (the shared theme repo's design/kitchen/art.mjs, on branch `design-239`): charcoal `#1a1816`, tile
   cards `#24201c`, warm cream text, **copper controls** `#e89a62`, a brass-dark `--edge`, a yellow amber `#f4d24e` and a
   pink-red `#ff5c84`, each clear of copper. **Brass `#c9a55a` is the link colour here** (see Q2).
 

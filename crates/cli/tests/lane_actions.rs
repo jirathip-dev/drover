@@ -1,4 +1,3 @@
-//! #43: lane actions (`drover stop|kill|clean --lane`, the page's `/act`) and the per-turn transcript.
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
@@ -9,15 +8,35 @@ const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-12";
 
-/// sendmeter #12's impl lane in a real (empty) worktree dir, pane w1:p2; git answers per test.
-fn lane(name: &str) -> (drover::Ctx, String) {
+fn lane(name: &str) -> (drover::Ctx, String, FakeShed) {
     let d = tmpdir(name);
     let c = ctx(&d, CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let wt = d.join("wt").to_string_lossy().into_owned();
     std::fs::create_dir_all(&wt).unwrap();
-    let sp = json!({"role": "impl", "agent": LANE, "pane": "w1:p2", "worktree": wt, "branch": "issue-12"});
+    let sp =
+        json!({"role": "impl", "agent": LANE, "pane": LANE, "worktree": wt, "branch": "issue-12", "runtime": "shed"});
     append(&c.state, &Event::new(T - 60, "sendmeter", Some(12), "spawn", sp)).unwrap();
-    (c, wt)
+    (c, wt, sh)
+}
+
+fn closed(sh: &FakeShed) -> bool {
+    sh.called("kill", LANE) && sh.called("rm", LANE)
+}
+
+struct AtPush<'a>(Fake, &'a FakeShed, Shared<Vec<bool>>);
+
+impl drover::runner::Runner for AtPush<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        if prog == "git" && args.iter().any(|a| a == "push") {
+            self.2.borrow_mut().push(self.1.called("kill", LANE));
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
 }
 
 fn git(wt: &str, status: &str, ahead: &str, log: &str) -> Fake {
@@ -27,7 +46,6 @@ fn git(wt: &str, status: &str, ahead: &str, log: &str) -> Fake {
         .reply(&format!("git -C {wt} log -p"), log)
         .reply(&format!("git -C {wt} "), "")
         .reply("date -r", "20261031-120000\n")
-        .reply("herdr pane", "")
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> usize {
@@ -36,7 +54,7 @@ fn kinds(c: &drover::Ctx, kind: &str) -> usize {
 
 #[test]
 fn kill_dry_run_lists_what_is_lost() {
-    let (c, wt) = lane("kill-dry");
+    let (c, wt, sh) = lane("kill-dry");
     let r = git(&wt, "?? .brief.md\n M src/a.rs\n?? new.rs\n", "3\n", "");
     let (code, out) = run(&c, &r, &["kill", LANE]);
     assert_eq!(code, 0, "{out}");
@@ -47,9 +65,7 @@ fn kill_dry_run_lists_what_is_lost() {
     );
     assert!(out.contains("dry run"), "{out}");
     assert!(
-        !r.called("herdr pane close")
-            && !r.called(&format!("git -C {wt} push"))
-            && !r.called(&format!("git -C {wt} add"))
+        !sh.called("kill", LANE) && !r.called(&format!("git -C {wt} push")) && !r.called(&format!("git -C {wt} add"))
     );
     assert_eq!(kinds(&c, "lane-killed"), 0);
     let r = git(&wt, "?? .brief.md\n", "0\n", "");
@@ -60,19 +76,19 @@ fn kill_dry_run_lists_what_is_lost() {
 
 #[test]
 fn kill_pushes_wip_then_closes_and_logs() {
-    let (c, wt) = lane("kill-yes");
-    // #646: a commit only when something is staged.
-    let r = git(&wt, " M src/a.rs\n", "2\n", "+fn x() {}\n")
-        .reply("herdr agent list", NO_AGENTS)
+    let (c, wt, sh) = lane("kill-yes");
+    sh.lane(LANE, "idle", &wt);
+    let f = git(&wt, " M src/a.rs\n", "2\n", "+fn x() {}\n")
         .once(&format!("git -C {wt} diff --cached --name-only"), 0, "")
         .once(&format!("git -C {wt} diff --cached"), 0, "+fn x() {}\n");
-    // #138: the lane's rolling transcript goes with it.
+    let r = AtPush(f, &sh, Shared::default());
     let log = drover::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, "⏺ hi\n").unwrap();
     let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(!log.exists());
+    let (r, at_push) = (&r.0, &r.2);
     assert!(
         out.contains(&format!("killed {LANE}: work pushed to wip/{LANE}-20261031-120000-")),
         "{out}"
@@ -86,8 +102,7 @@ fn kill_pushes_wip_then_closes_and_logs() {
             && at("reset -q -- .brief.md") < at("commit -q --no-verify -m wip: kill snapshot")
     );
     assert!(at("commit") < at(&format!("push origin HEAD:refs/heads/wip/{LANE}-20261031-120000-")));
-    assert!(at("push") < r.index("herdr pane close w1:p2").unwrap());
-    // Never main/staging, never force: the one push names the wip ref.
+    assert!(closed(&sh) && !sh.has(LANE), "{:?}", sh.methods());
     let pushes: Vec<String> = r
         .calls
         .borrow()
@@ -97,20 +112,21 @@ fn kill_pushes_wip_then_closes_and_logs() {
         .collect();
     let ref_ = format!("git -C {wt} push origin HEAD:refs/heads/wip/{LANE}-20261031-120000-");
     assert!(pushes.len() == 1 && pushes[0].starts_with(&ref_), "{pushes:?}");
-    let e = read(&c.state).unwrap().pop().unwrap();
+    assert_eq!(*at_push.borrow(), [false], "pushed before the pane closed");
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!((e.kind.as_str(), e.str("role")), ("lane-killed", Some("impl")));
     assert_eq!(e.str("wip"), pushes[0].rsplit("refs/heads/").next());
-    // The impl goes back to queued (re-spawnable); a second kill finds no lane.
     let s = fold(&read(&c.state).unwrap())
         .remove(&("sendmeter".into(), 12))
         .unwrap();
     assert_eq!((s.state.as_str(), s.unfinished("impl", false)), ("queued", false));
-    assert!(run(&c, &r, &["kill", LANE]).1.starts_with("REFUSED NO_SUCH_AGENT"));
+    assert!(run(&c, r, &["kill", LANE]).1.starts_with("REFUSED NO_SUCH_AGENT"));
 }
 
 #[test]
 fn kill_refuses_a_secret_in_the_wip_diff() {
-    let (c, wt) = lane("kill-secret");
+    let (c, wt, sh) = lane("kill-secret");
+    sh.lane(LANE, "idle", &wt);
     let r = git(
         &wt,
         "",
@@ -123,14 +139,13 @@ fn kill_refuses_a_secret_in_the_wip_diff() {
     assert!(!out.contains("ghp_abc"), "the secret is never printed");
     assert!(
         !r.called(&format!("git -C {wt} push"))
-            && !r.called("herdr pane close")
+            && !sh.called("kill", LANE)
             && !r.called(&format!("git -C {wt} commit"))
     );
     assert!(r.called(&format!("git -C {wt} reset -q")), "unstaged again");
     assert_eq!(kinds(&c, "lane-killed"), 0);
 }
 
-/// Hash-shaped lockfile checksums, headers and removed lines are not secrets; a token anywhere else is, even on a lockfile line.
 #[test]
 fn kill_skips_lockfile_checksums_but_not_secrets() {
     let head = "diff --git a/Cargo.lock b/Cargo.lock\n--- a/Cargo.lock\n+++ b/Cargo.lock\n@@ -1,3 +1,3 @@\n";
@@ -140,8 +155,8 @@ fn kill_skips_lockfile_checksums_but_not_secrets() {
         "Qx".repeat(43),
         concat!("gh", "p_abcdefghijklmnopqrstu1234")
     );
-    let (c, wt) = lane("kill-lock");
-    let r = git(&wt, "", "1\n", &lock).reply("herdr agent list", NO_AGENTS);
+    let (c, wt, _sh) = lane("kill-lock");
+    let r = git(&wt, "", "1\n", &lock);
     assert_eq!(run(&c, &r, &["kill", LANE, "--yes"]).0, 0);
     assert!(r.called(&format!("git -C {wt} push origin HEAD:refs/heads/wip/")));
     let jwt = concat!("ey", "JhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc");
@@ -159,19 +174,18 @@ fn kill_skips_lockfile_checksums_but_not_secrets() {
     .iter()
     .enumerate()
     {
-        let (c, wt) = lane(&format!("kill-lock-secret-{i}"));
-        let r = git(&wt, "", "1\n", &format!("{lock}{bad}\n")).reply("herdr agent list", NO_AGENTS);
+        let (c, wt, sh) = lane(&format!("kill-lock-secret-{i}"));
+        sh.lane(LANE, "idle", &wt);
+        let r = git(&wt, "", "1\n", &format!("{lock}{bad}\n"));
         let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
         assert!(code == 3 && out.contains("REFUSED SECRET_IN_WIP"), "{bad}: {out}");
         assert!(
-            !r.called(&format!("git -C {wt} push")) && !r.called("herdr pane close"),
+            !r.called(&format!("git -C {wt} push")) && !sh.called("kill", LANE),
             "{bad}"
         );
     }
 }
 
-/// Real git for the lane's worktree (a clone of a bare origin, `.brief.md` gitignored, the lane
-/// scratch written), failing any git call containing `fail`; herdr and date are faked.
 struct RealGit(Fake, &'static str);
 
 impl drover::runner::Runner for RealGit {
@@ -216,13 +230,7 @@ fn repo(wt: &str, fail: &'static str) -> RealGit {
     for f in [".brief.md", ".addendum.md", ".mcp.lane.json", "verdict.md"] {
         std::fs::write(format!("{wt}/{f}"), "scratch").unwrap();
     }
-    RealGit(
-        Fake::default()
-            .reply("date -r", "20261031-120000\n")
-            .reply("herdr pane", "")
-            .reply("herdr agent list", NO_AGENTS),
-        fail,
-    )
+    RealGit(Fake::default().reply("date -r", "20261031-120000\n"), fail)
 }
 
 fn status(wt: &str) -> String {
@@ -235,7 +243,8 @@ fn status(wt: &str) -> String {
 
 #[test]
 fn kill_counts_lane_scratch_as_clean_and_never_pushes_it() {
-    let (c, wt) = lane("kill-scratch");
+    let (c, wt, sh) = lane("kill-scratch");
+    sh.lane(LANE, "idle", &wt);
     let r = repo(&wt, "");
     let before = status(&wt);
     assert!(run(&c, &r, &["kill", LANE])
@@ -249,17 +258,14 @@ fn kill_counts_lane_scratch_as_clean_and_never_pushes_it() {
             &*format!("{LANE} · impl · nothing unpushed · pane closes, worktree kept\nkilled {LANE}")
         )
     );
-    assert!(
-        r.0.called("herdr pane close w1:p2")
-            && !r.0.called(&format!("git -C {wt} push"))
-            && !r.0.called(&format!("git -C {wt} add"))
-    );
+    assert!(closed(&sh) && !r.0.called(&format!("git -C {wt} push")) && !r.0.called(&format!("git -C {wt} add")));
     assert_eq!(status(&wt), before);
 }
 
 #[test]
 fn kill_snapshots_only_the_real_dirty_file() {
-    let (c, wt) = lane("kill-real");
+    let (c, wt, sh) = lane("kill-real");
+    sh.lane(LANE, "idle", &wt);
     let r = repo(&wt, "");
     std::fs::write(format!("{wt}/real.rs"), "fn x() {}\n").unwrap();
     assert!(run(&c, &r, &["kill", LANE])
@@ -273,12 +279,13 @@ fn kill_snapshots_only_the_real_dirty_file() {
         .output()
         .unwrap();
     assert_eq!(String::from_utf8(o.stdout).unwrap().trim(), "real.rs");
-    assert!(r.0.called("herdr pane close w1:p2"));
+    assert!(closed(&sh), "{:?}", sh.methods());
 }
 
 #[test]
 fn kill_restores_the_index_when_the_snapshot_fails() {
-    let (c, wt) = lane("kill-snapfail");
+    let (c, wt, sh) = lane("kill-snapfail");
+    sh.lane(LANE, "idle", &wt);
     let r = repo(&wt, "diff --cached");
     std::fs::write(format!("{wt}/real.rs"), "fn x() {}\n").unwrap();
     let before = status(&wt);
@@ -288,7 +295,7 @@ fn kill_restores_the_index_when_the_snapshot_fails() {
     assert!(
         r.0.called(&format!("git -C {wt} add -A"))
             && !r.0.called(&format!("git -C {wt} push"))
-            && !r.0.called("herdr pane close")
+            && !sh.called("kill", LANE)
     );
     assert_eq!(status(&wt), before);
     assert_eq!(kinds(&c, "lane-killed"), 0);
@@ -296,11 +303,12 @@ fn kill_restores_the_index_when_the_snapshot_fails() {
 
 #[test]
 fn stop_sends_escape() {
-    let (c, wt) = lane("stop");
+    let (c, wt, sh) = lane("stop");
+    sh.lane(LANE, "idle", &wt);
     let r = git(&wt, "", "0\n", "");
     let (code, out) = run(&c, &r, &["stop", LANE]);
     assert_eq!((code, out.as_str()), (0, "sent Esc to sendmeter-impl-12\n"));
-    assert!(r.called("herdr pane send-keys w1:p2 Escape"));
+    assert_eq!(sh.last("keys"), json!({"name": LANE, "keys": ["esc"]}));
     assert_eq!(kinds(&c, "stop"), 1);
     let (code, out) = run(&c, &r, &["stop", "nobody"]);
     assert!(code == 3 && out.starts_with("REFUSED NO_SUCH_AGENT"), "{out}");
@@ -308,42 +316,37 @@ fn stop_sends_escape() {
 
 #[test]
 fn close_shuts_an_others_pane_and_refuses_lanes() {
-    let (c, _) = lane("close");
-    let list = agents(&[(LANE, "idle", "/x", "w1:p2"), ("dsh-tui-test", "idle", "/tmp", "w9:p1")]);
-    let r = Fake::default()
-        .reply("herdr agent list", &list)
-        .reply("herdr pane close", "");
+    let (c, _, sh) = lane("close");
+    sh.lane(LANE, "idle", "/x");
+    sh.lane("dsh-tui-test", "idle", "/tmp");
+    let r = Fake::default();
     let (code, out) = run(&c, &r, &["close", "dsh-tui-test"]);
     assert_eq!(
         (code, out.as_str()),
         (0, "closed dsh-tui-test's pane; its worktree and files stay\n")
     );
-    assert!(r.called("herdr pane close w9:p1") && !r.called("git"));
-    let e = read(&c.state).unwrap().pop().unwrap();
+    assert!(sh.called("kill", "dsh-tui-test") && !sh.has("dsh-tui-test") && !r.called("git"));
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     assert_eq!(
         (e.kind.as_str(), e.str("agent")),
         ("closed-other", Some("dsh-tui-test"))
     );
-    // A lane, by name or by its pane id: IS_LANE, nothing closes.
-    for who in [LANE, "w1:p2"] {
-        let (code, out) = run(&c, &r, &["close", who]);
-        assert!(code == 3 && out.starts_with("REFUSED IS_LANE"), "{out}");
-    }
-    assert!(!r.called("herdr pane close w1:p2"));
+    let (code, out) = run(&c, &r, &["close", LANE]);
+    assert!(code == 3 && out.starts_with("REFUSED IS_LANE"), "{out}");
+    assert!(!sh.called("kill", LANE) && sh.has(LANE));
     assert_eq!(kinds(&c, "closed-other"), 1);
 }
 
 #[test]
 fn clean_lane_refuses_unsafe_lanes() {
-    let (c, wt) = lane("clean-lane");
-    let r = git(&wt, "", "0\n", "").reply("herdr agent list", NO_AGENTS);
+    let (c, wt, sh) = lane("clean-lane");
+    let r = git(&wt, "", "0\n", "");
     let clean = |r: &Fake| run(&c, r, &["clean", "sendmeter", "--lane", LANE]);
     let (code, out) = clean(&r);
     assert!(
         code == 3 && out.contains("REFUSED UNSAFE_CLEAN: sendmeter-impl-12: only after merge"),
         "{out}"
     );
-    // #83: an open PR is named, so the sheet's disabled [clean] says why without a tap.
     let cache = c.state.parent().unwrap().join("cache");
     std::fs::create_dir_all(&cache).unwrap();
     std::fs::write(
@@ -355,9 +358,10 @@ fn clean_lane_refuses_unsafe_lanes() {
         .1
         .contains("UNSAFE_CLEAN: sendmeter-impl-12: only after merge (PR #42 open)"));
     append(&c.state, &Event::new(T, "sendmeter", Some(12), "merged", json!({}))).unwrap();
-    let live = git(&wt, "", "0\n", "").reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p2")]));
-    assert!(clean(&live).1.contains("UNSAFE_CLEAN: sendmeter-impl-12: live agent"));
-    let dirty = git(&wt, " M a.rs\n", "0\n", "").reply("herdr agent list", NO_AGENTS);
+    sh.lane(LANE, "idle", "/x");
+    assert!(clean(&r).1.contains("UNSAFE_CLEAN: sendmeter-impl-12: live agent"));
+    sh.remove(LANE);
+    let dirty = git(&wt, " M a.rs\n", "0\n", "");
     assert!(clean(&dirty)
         .1
         .contains("UNSAFE_CLEAN: sendmeter-impl-12: 1 uncommitted change(s)"));
@@ -378,8 +382,10 @@ fn req(s: &Server, path: &str, body: &str, extra: &str) -> String {
 
 #[test]
 fn act_needs_a_paired_cookie_and_logs_via_web() {
-    let (c, wt) = lane("act");
-    let r = git(&wt, "", "0\n", "");
+    let (c, wt, sh) = lane("act");
+    sh.lane(LANE, "idle", &wt);
+    let f = git(&wt, "", "0\n", "");
+    let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     assert!(req(&s, "/act", &format!("agent={LANE}&op=stop"), "").starts_with("HTTP/1.1 401 "));
     assert!(req(
@@ -389,46 +395,42 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
         "Origin: https://evil.example\r\n"
     )
     .starts_with("HTTP/1.1 403 "));
-    assert!(!r.called("herdr pane send-keys"));
+    assert!(sh.all("keys").is_empty(), "{:?}", sh.methods());
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let res = req(&s, "/act", &format!("agent={LANE}&op=stop"), &cookie);
     assert!(
         res.starts_with("HTTP/1.1 200 OK") && res.ends_with("sent Esc to sendmeter-impl-12\n"),
         "{res}"
     );
-    let e = read(&c.state).unwrap().pop().unwrap();
+    assert_eq!(sh.last("keys"), json!({"name": LANE, "keys": ["esc"]}));
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
     let label = drover::devices::load(&c)[0].label.clone();
     assert_eq!(
         (e.kind.as_str(), e.str("via"), e.str("device"), e.str("op")),
         ("act", Some("web"), Some(&*label), Some("stop"))
     );
-    // Kill without confirm is the dry-run line; nothing closes, nothing logged.
     let res = req(&s, "/act", &format!("agent={LANE}&op=kill"), &cookie);
     assert!(
-        res.contains("pane closes, worktree kept") && !r.called("herdr pane close"),
+        res.contains("pane closes, worktree kept") && !sh.called("kill", LANE),
         "{res}"
     );
     assert_eq!(kinds(&c, "act"), 1);
 }
 
-/// A screen of 5 settled lines and a live block.
 fn screen() -> String {
     "> fix it\n⏺ Bash(cargo test)\n  ⎿ ok\n⏺ Done.\n  All green.\n⏺ Bash(cargo fmt)\n".into()
 }
 
-/// #138: `/lane` pages back through the rolling transcript (450 older lines on file, a gap line as this read does not
-/// overlap them, then its settled lines), `more` while older lines exist; the live block is sent, never written.
 #[test]
 fn lane_pages_back_through_the_rolling_transcript() {
-    let (c, _) = lane("more");
+    let (c, _, sh) = lane("more");
     let log = drover::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, (0..450).map(|i| format!("  out {i}\n")).collect::<String>()).unwrap();
-    let list = agents(&[(LANE, "working", "/x", "w1:p2")]);
-    let r = Fake::default()
-        .reply("herdr agent list", &list)
-        .reply("herdr workspace list", "{}")
-        .reply("herdr pane read", &screen());
+    sh.lane(LANE, "working", "/x");
+    sh.screen(LANE, &screen());
+    let f = Fake::default();
+    let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "", T);
     let get = |q: &str| {
@@ -465,14 +467,15 @@ fn lane_pages_back_through_the_rolling_transcript() {
     assert_eq!(oldest["lines"][0], "  out 0");
     let file = std::fs::read_to_string(&log).unwrap();
     assert!(file.ends_with("  out 449\n┄ not captured: scrolled past between reads ┄\n> fix it\n⏺ Bash(cargo test)\n  ⎿ ok\n⏺ Done.\n  All green.\n"), "{file}");
-    assert!(r.called("herdr pane read w1:p2 --source recent --lines 200 --format ansi"));
+    let recent = json!({"name": LANE, "lines": 200, "history": true});
+    assert!(sh.all("read").contains(&recent), "{:?}", sh.all("read"));
 }
 
-/// #218: a lane herdr no longer lists reads back its stored transcript (the last page, no live block); none stored: 404.
 #[test]
 fn a_gone_lane_reads_its_stored_transcript() {
-    let (c, _) = lane("gone-transcript");
-    let r = Fake::default().reply("herdr agent list", &agents(&[]));
+    let (c, _, sh) = lane("gone-transcript");
+    let f = Fake::default();
+    let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "", T);
     let get = || {
@@ -496,7 +499,6 @@ fn a_gone_lane_reads_its_stored_transcript() {
     );
 }
 
-/// iOS zooms on focus under 16 px; the fix is the font size. #114: the page is app-like, so no pinch or double-tap zoom.
 #[test]
 fn inputs_are_16px_and_zoom_is_off() {
     let css = include_str!("../../../assets/serve.css");
@@ -505,17 +507,14 @@ fn inputs_are_16px_and_zoom_is_off() {
         rule.ends_with("font-size:var(--fs-input)}") && css.contains("--fs-input:16px"),
         "{rule}"
     );
-    let (c, _) = lane("zoom");
+    let (c, _, _sh) = lane("zoom");
     let page = String::from_utf8_lossy(&Server::new(&c, &Fake::default(), None).respond("GET / HTTP/1.1\r\n\r\n", T))
         .into_owned();
     assert!(page.contains("initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"));
-    // #166/#200: no root style toggles with the sheet (a position:fixed body, then overflow, repainted iOS on close).
     assert!(!css.contains(".lock") && !css.contains("body{position:fixed"));
     assert!(include_str!("../../../assets/serve.js").contains("visualViewport"));
 }
 
-/// #96: the push guard flags real secret shapes only, never code, test names or words like `key`/`token`.
-/// Token-shaped fixtures here and in other tests are split with `concat!` so no source literal reads as a live secret.
 #[test]
 fn secret_flags_real_shapes_only() {
     use drover::lanes::secret;
@@ -640,21 +639,20 @@ fn secret_flags_real_shapes_only() {
     }
 }
 
-/// #96: #89's diff (a long snake_case test name) saves; a secret's refusal names file:line with the value masked.
 #[test]
 fn kill_saves_code_and_names_the_secret_line() {
     let ok = "diff --git a/src/check.rs b/src/check.rs\n+++ b/src/check.rs\n@@ -10,2 +10,3 @@\n \
               fn a() {}\n+fn check_prompts_an_idle_orch_after_5_min_then_alerts_after_15() {}\n";
-    let (c, wt) = lane("kill-96-ok");
-    let r = git(&wt, "", "2\n", ok).reply("herdr agent list", NO_AGENTS);
+    let (c, wt, _sh) = lane("kill-96-ok");
+    let r = git(&wt, "", "2\n", ok);
     assert_eq!(run(&c, &r, &["kill", LANE, "--yes"]).0, 0);
     assert!(r.called(&format!("git -C {wt} push origin HEAD:refs/heads/wip/")));
     let bad = format!(
         "{ok}diff --git a/.env b/.env\n+++ b/.env\n@@ -3,1 +3,2 @@\n A=1\n-B=2\n+SECRET=\"h7Gk2pQ9xLm4vB8nR3tZ\" ghp_{}\n",
         "aB3".repeat(12)
     );
-    let (c, wt) = lane("kill-96-bad");
-    let r = git(&wt, "", "2\n", &bad).reply("herdr agent list", NO_AGENTS);
+    let (c, wt, _sh) = lane("kill-96-bad");
+    let r = git(&wt, "", "2\n", &bad);
     let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
     assert_eq!(code, 3, "{out}");
     assert!(
@@ -664,11 +662,9 @@ fn kill_saves_code_and_names_the_secret_line() {
     assert!(!r.called(&format!("git -C {wt} push")));
 }
 
-/// #248: a lane drover closed reads back Claude's saved session for its worktree (the newest) over the rolling
-/// transcript; prompts `❯`, replies and tool calls `⏺`, masked.
 #[test]
 fn a_closed_lane_reads_claudes_saved_session() {
-    let (c, wt) = lane("closed-session");
+    let (c, wt, sh) = lane("closed-session");
     let ev = json!({"agent": LANE, "reason": "done", "freed_mb": 270});
     append(&c.state, &Event::new(T - 10, "sendmeter", Some(12), "lane-closed", ev)).unwrap();
     let dir = c
@@ -689,7 +685,8 @@ fn a_closed_lane_reads_claudes_saved_session() {
     let log = drover::lanes::log(&c.state, LANE).unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, "  rolled\n").unwrap();
-    let r = Fake::default().reply("herdr agent list", &agents(&[]));
+    let f = Fake::default();
+    let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "", T);
     let res = String::from_utf8_lossy(&s.respond(
@@ -711,11 +708,9 @@ fn a_closed_lane_reads_claudes_saved_session() {
     assert_eq!(j["live"], 0);
 }
 
-/// #646: build output never rides a wip snapshot: a 60 MB file under `target-lane/` stays out of the pushed branch
-/// (whatever `.gitignore` says) and is named as skipped, on the kill output and in the wip commit message.
 #[test]
 fn kill_skips_build_output_and_names_it() {
-    let (c, wt) = lane("kill-build");
+    let (c, wt, _sh) = lane("kill-build");
     let r = repo(&wt, "");
     std::fs::write(format!("{wt}/real.rs"), "fn x() {}\n").unwrap();
     std::fs::create_dir_all(format!("{wt}/target-lane/release/deps")).unwrap();
@@ -743,10 +738,9 @@ fn kill_skips_build_output_and_names_it() {
     assert!(msg.contains("skipped") && msg.contains("target-lane/"), "{msg}");
 }
 
-/// #646: a file over the 5 MB per-file cap stays out of the snapshot and is named, next to the source kept.
 #[test]
 fn kill_skips_a_file_over_the_size_cap() {
-    let (c, wt) = lane("kill-cap");
+    let (c, wt, _sh) = lane("kill-cap");
     let r = repo(&wt, "");
     std::fs::write(format!("{wt}/real.rs"), "fn x() {}\n").unwrap();
     std::fs::write(format!("{wt}/dump.bin"), vec![7u8; 6 << 20]).unwrap();
@@ -770,8 +764,6 @@ fn kill_skips_a_file_over_the_size_cap() {
     assert_eq!(String::from_utf8(o.stdout).unwrap().trim(), "real.rs");
 }
 
-/// #646: `wip prune --dry-run` lists origin's wip branches (size, issue state, build output) and deletes nothing;
-/// without it, only a merged issue's branch that carries build output goes.
 #[test]
 fn wip_prune_dry_run_lists_and_deletes_nothing() {
     let d = tmpdir("wip-prune");
@@ -795,7 +787,6 @@ fn wip_prune_dry_run_lists_and_deletes_nothing() {
     let wip = |name: &str, file: &str| {
         git(&["-C", &l, "checkout", "-q", "--detach", "origin/staging"]);
         std::fs::create_dir_all(local.join(file).parent().unwrap()).unwrap();
-        // Incompressible: the size listed is what the branch costs a clone.
         let mut x = file.len() as u64;
         let bytes: Vec<u8> = (0..2 << 20)
             .map(|_| (x = x.wrapping_mul(6364136223846793005).wrapping_add(1), (x >> 56) as u8).1)
@@ -838,8 +829,6 @@ fn sh_git(a: &[&str]) -> String {
     String::from_utf8(s.stdout).unwrap()
 }
 
-/// #779: a closed issue's 5 wip branches of one role → its newest is left, whatever they hold; an open issue's are
-/// untouched. The run lists the counts per issue first.
 #[test]
 fn wip_prune_keeps_only_the_newest_of_a_closed_issue() {
     let d = tmpdir("wip-prune-newest");
@@ -875,7 +864,8 @@ fn wip_prune_keeps_only_the_newest_of_a_closed_issue() {
         &Event::new(T, "sendmeter", Some(49), "spawn", json!({"role": "impl"})),
     )
     .unwrap();
-    let r = RealGit(Fake::default().reply("herdr agent list", NO_AGENTS), "");
+    let _sh = FakeShed::attached(&c);
+    let r = RealGit(Fake::default(), "");
     let remote = || sh_git(&["ls-remote", "--heads", &o, "wip/*"]);
     let (code, out) = run(&c, &r, &["wip", "prune", "sendmeter", "--dry-run"]);
     assert_eq!(code, 0, "{out}");
