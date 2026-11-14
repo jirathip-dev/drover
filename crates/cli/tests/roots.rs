@@ -287,7 +287,8 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         assert!(!mine.join("old").exists() && !mine.join("theirs").exists());
     } else {
         assert!(!mine.join("warm").exists(), "{out}");
-        assert_eq!(cl.data["errors"].as_array().map(Vec::len), Some(1), "{out}");
+        let rel = cl.str("errors_ref").expect("the clone's error in cache/");
+        assert!(drover::events::path_in(&r.c.state, rel).is_file(), "{out}");
     }
     let target = format!("{}'", b.join(AGENT).display());
     let sent = r.sh.sent(AGENT);

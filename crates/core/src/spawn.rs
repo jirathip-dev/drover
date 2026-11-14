@@ -1550,7 +1550,8 @@ pub fn spawn(
         (res, c.join().ok())
     });
     for d in cloned.into_iter().flatten().flatten() {
-        event("build-cloned", d)?;
+        let d = crate::events::offload(&ctx.state, serde_json::from_value(d)?)?;
+        event("build-cloned", Value::Object(d))?;
     }
     res
 }

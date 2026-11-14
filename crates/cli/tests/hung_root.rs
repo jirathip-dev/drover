@@ -212,7 +212,7 @@ fn a_pass_stuck_past_three_pass_max_secs_is_logged_and_the_next_pass_takes_its_l
     let events = read(&r.c.state).unwrap();
     let stuck: Vec<&Event> = events.iter().filter(|e| e.kind == "pass-stuck").collect();
     assert_eq!(stuck.len(), 1, "{stuck:#?}");
-    assert_eq!(stuck[0].str("step"), Some("after backlog, checkpoint"), "{stuck:#?}");
+    assert_eq!(stuck[0].str("step"), Some("after backlog"), "{stuck:#?}");
 }
 
 #[test]

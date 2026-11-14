@@ -1,6 +1,6 @@
 use crate::access::{civil_month_day, civil_year};
 use crate::config::Config;
-use crate::events::{emit, plain, working, Event};
+use crate::events::{emit, plain, Event};
 use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
@@ -11,10 +11,8 @@ use std::io::Write;
 pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -> Result<String> {
     let f = cfg.fleet(fleet)?;
     let since = ctx.now.saturating_sub(days * 86400);
-    let events = working(&ctx.state)?;
-    let read = "archived = 0 AND ts >= ?1 AND (type IN ('verdict', 'thread-msg', 'decision') OR json_extract(json, '$.by') = 'owner')";
-    let window = crate::db::events(&ctx.state, read, since)?;
-    let recent: Vec<&Event> = window.iter().filter(|e| e.fleet == fleet).collect();
+    let events = crate::events::history(&ctx.state)?;
+    let recent: Vec<&Event> = events.iter().filter(|e| e.fleet == fleet && e.ts >= since).collect();
     let mut s =
         format!("# Lessons digest: {fleet}, last {days} days\n\n## Review FAIL findings (blocking, with proof)\n");
     for e in recent
@@ -22,8 +20,10 @@ pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -
         .filter(|e| e.kind == "verdict" && e.str("verdict") == Some("FAIL"))
     {
         let n = e.issue.unwrap_or_default();
-        let verdicts = crate::db::events(&ctx.state, "archived = 0 AND type = 'verdict' AND issue = ?1", n)?;
-        let round = verdicts.iter().filter(|v| v.fleet == fleet && v.ts <= e.ts).count();
+        let round = events
+            .iter()
+            .filter(|v| v.is("verdict", fleet, n) && v.ts <= e.ts)
+            .count();
         for (_, ls) in crate::gate::findings(e.str("body").unwrap_or_default())
             .into_iter()
             .filter(|f| f.0)
