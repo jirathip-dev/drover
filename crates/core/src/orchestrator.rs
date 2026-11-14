@@ -799,7 +799,6 @@ pub fn hung<'a>(ctx: &Ctx, cfg: &Config, events: &'a [Event], agents: &[Value], 
     (a["agent_status"] == "working" && idle && quiet >= cfg.limits.stall_minutes * 60).then_some((s, quiet))
 }
 
-/// #946: end ACP conductor `s` of thread `t` (`shed cancel`, then `shed kill`); logs `orchestrator-sleep` with `d`.
 fn end(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (t, s): (&Event, &Event), mut d: Value) -> Result<()> {
     let agent = s.str("agent").unwrap_or_default();
     let _ = crate::shed::cli(r, &["cancel", agent]);
