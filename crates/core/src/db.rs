@@ -474,12 +474,18 @@ pub fn rename_fleet(
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let q = "UPDATE events SET fleet = ?2, json = json_set(json, '$.fleet', ?2) WHERE fleet = ?1";
         let n = tx.execute(q, params![old, new])?;
+        for t in ["issues", "asks"] {
+            let q = format!("UPDATE {t} SET fleet = ?2, json = json_set(json, '$.fleet', ?2) WHERE fleet = ?1");
+            tx.execute(&q, params![old, new])?;
+        }
+        let q = "UPDATE lanes SET json = json_set(json, '$.fleet', ?2) WHERE json_extract(json, '$.fleet') = ?1";
+        tx.execute(q, params![old, new])?;
         tx.execute("DELETE FROM snapshot WHERE key IN ('states', 'board')", [])?;
         tx.execute(
             "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', 0, '{}')",
             [],
         )?;
-        insert(&tx, ev, None, false)?;
+        log(&tx, ev)?;
         then()?;
         tx.commit()?;
         Ok(n)

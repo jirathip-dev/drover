@@ -92,6 +92,8 @@ fn rename_moves_everything_and_the_old_name_resolves() {
     );
     let evs = history(&c.state).unwrap();
     assert!(evs.iter().all(|e| e.fleet == "meter"));
+    let rows = drover::db::issues(&c.state).unwrap();
+    assert!(!rows.is_empty() && rows.iter().all(|(k, s)| k.0 == "meter" && s.fleet == "meter"));
     let renamed: Vec<_> = evs.iter().filter(|e| e.kind == "fleet-renamed").collect();
     assert_eq!(renamed.len(), 1);
     assert_eq!(renamed[0].data["old"], "sendmeter");
