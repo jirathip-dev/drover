@@ -1,0 +1,7 @@
+Decided: merged origin/staging; the one conflict in screens.rs keeps #1029's hot_sheet beside this branch's lane_sheet, both new functions at the same spot
+Because: crates/server/src/screens.rs:639
+Decided: stop, kill, clean and close still run the board's act and send its prompt, unchanged by the merge
+Because: crates/server/src/screens.rs:891
+Rejected: rebasing onto staging — form fixes are new commits, never a history rewrite
+Check: /screens/hot and /screens/lanes/<agent> both resolve; cooee_screens and lane_actions pass at the merge head
+Owner: The branch is up to date with staging again, including #1029's hot-paths sheet; no behaviour change to the Lanes screen.
