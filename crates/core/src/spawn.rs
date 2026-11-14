@@ -1047,7 +1047,7 @@ pub fn spawn(
     if stale {
         let last = events
             .iter()
-            .rfind(|e| e.fleet == fleet && e.issue == Some(issue) && !crate::events::PASSIVE.contains(&e.kind.as_str()))
+            .rfind(|e| e.fleet == fleet && e.issue == Some(issue) && !e.is_passive())
             .map_or(0, |e| e.ts);
         let idle = crate::events::age(ctx.now.saturating_sub(last));
         dup.push((

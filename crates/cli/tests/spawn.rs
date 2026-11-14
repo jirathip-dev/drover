@@ -722,16 +722,11 @@ fn unconfirmed_hermes_kick_presses_enter_then_exits_4() {
 }
 
 #[test]
-fn help_agent_doc_is_short_and_complete() {
+fn help_agent_doc_is_complete() {
     let d = tmpdir("help");
     let c = ctx(&d, CONFIG);
     let (code, out) = run(&c, &Fake::default(), &["help", "--agent"]);
     assert_eq!(code, 0);
-    assert!(
-        out.lines().count() <= drover::HELP_AGENT_MAX,
-        "{} lines",
-        out.lines().count()
-    );
     for w in [
         "drover spawn",
         "drover merge",

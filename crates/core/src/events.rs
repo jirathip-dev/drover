@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::Duration;
 
+mod passive;
+
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Event {
@@ -24,6 +26,10 @@ pub struct Event {
     pub issue: Option<u64>,
     #[serde(rename = "type")]
     pub kind: String,
+    /// #973: not activity (an alert, a note, a prompt): the fold and the idle-pane reader skip it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[cfg_attr(feature = "ts", ts(as = "Option<bool>", optional))]
+    pub passive: bool,
     #[serde(flatten)]
     pub data: Map<String, Value>,
 }
@@ -40,8 +46,19 @@ impl Event {
             fleet: fleet.into(),
             issue,
             kind: kind.into(),
+            passive: false,
             data,
         }
+    }
+    /// #973: this event is not activity.
+    #[must_use]
+    pub fn passive(mut self) -> Event {
+        self.passive = true;
+        self
+    }
+    /// #973: flagged passive, or a kind logged passive before the flag.
+    pub fn is_passive(&self) -> bool {
+        self.passive || passive::LEGACY.contains(&self.kind.as_str())
     }
     pub fn str(&self, k: &str) -> Option<&str> {
         self.data.get(k).and_then(Value::as_str)
@@ -209,7 +226,7 @@ fn shed_oversize(path: &Path) -> Result<()> {
         "archived = 0 AND LENGTH(CAST(json AS BLOB)) > ?1",
         EVENT_MAX as u64,
     )?;
-    let (passive, read): (Vec<Event>, Vec<Event>) = big.into_iter().partition(|e| PASSIVE.contains(&e.kind.as_str()));
+    let (passive, read): (Vec<Event>, Vec<Event>) = big.into_iter().partition(Event::is_passive);
     crate::db::rewrite(path, &read.iter().map(capped).collect::<Vec<_>>())?;
     crate::db::archive(path, &passive.iter().map(|e| e.seq).collect::<Vec<_>>())
 }
@@ -314,7 +331,10 @@ fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
             let cmd = if n.webpush() { "webpush" } else { &n.cmd };
             eprintln!("drover: notifier `{cmd}` failed: {e:#}");
             let d = serde_json::json!({"cmd": cmd, "event": ev.kind, "error": format!("{e:#}")});
-            let _ = append(state, &Event::new(ev.ts, &ev.fleet, ev.issue, "notify-failed", d));
+            let _ = append(
+                state,
+                &Event::new(ev.ts, &ev.fleet, ev.issue, "notify-failed", d).passive(),
+            );
         }
     }
     Ok(())
@@ -469,87 +489,6 @@ pub fn checks(e: &Event) -> bool {
         .and_then(Value::as_bool)
         .unwrap_or(e.str("role") == Some("rev"))
 }
-
-/// Events `drover check` and notifiers write about an issue; they are not activity.
-pub const PASSIVE: &[&str] = &[
-    "pending-action",
-    "lane-state",
-    "lesson-prompted",
-    "turn-end",
-    "turn-prompted",
-    "promise",
-    "promise-missed",
-    "self-heal",
-    "stuck",
-    "slo-ok",
-    "why",
-    "why-failed",
-    "why-nudged",
-    "start-resent",
-    "nudged",
-    "respawned-silent",
-    "rev-stale-replaced",
-    "budget-freed",
-    "build-freed",
-    "wip-saved",
-    "wip-skipped",
-    "wip-blocked",
-    "lane-pushed",
-    "stall",
-    "orphan-lane",
-    "lane-dup",
-    "orphan-issue",
-    "outbox-stale",
-    "lane-dead",
-    "ready-unmerged",
-    "ci-missing",
-    "notify-failed",
-    "push-sent",
-    "account-capped",
-    "agent-unavailable",
-    "account-signed-out",
-    "lane-failed-start",
-    "cap-banner-ignored",
-    "spawn-failed",
-    "spawn-error",
-    "spawn-failing",
-    "spawn-started",
-    "spawn-adopted",
-    "fallback",
-    "ask-waiting",
-    "driven",
-    "respawn",
-    "drive-pass",
-    "kick",
-    "amended",
-    "conflict-predicted",
-    "heads-up",
-    "lane-closed",
-    "lane-kept",
-    "lane-kept-dirty",
-    "lane-reaped",
-    "lane-trimmed",
-    "stale-pane-killed",
-    "decision-redelivered",
-    "labelled",
-    "build-cloned",
-    "build-reused",
-    "unlabelled",
-    "form-only-rejected",
-    "form-rounds-exhausted",
-    "stale-marker",
-    "spawn-held",
-    "host-busy",
-    "outbox",
-    "ask-withdrawn",
-    "ask-delivered",
-    "ask-failed",
-    "ask-expired",
-    "asks-swept",
-    "intent",
-    "done",
-    "failed",
-];
 
 const ORDER: [&str; 9] = [
     "answered",
@@ -1005,10 +944,7 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
         };
         let s = m.entry((e.fleet.clone(), n)).or_insert_with(new);
         let back = matches!(e.kind.as_str(), "reverted" | "land-fix");
-        if PASSIVE.contains(&e.kind.as_str())
-            || s.state == "merged" && !back
-            || s.state == "closed" && e.kind != "spawn"
-        {
+        if e.is_passive() || s.state == "merged" && !back || s.state == "closed" && e.kind != "spawn" {
             continue;
         }
         if design(e) {

@@ -299,7 +299,12 @@ fn restart(
                 forget(Path::new(&local), Path::new(wt), e.str("branch").unwrap_or_default())?;
                 writeln!(out, "not saved {wt}: root hung, unsaved work stays on the disk")?;
                 lost.push(format!("{agent}: not saved, root hung"));
-                log(s, "wip-skipped", json!({"agent": agent, "worktree": wt, "root": root}))?;
+                let d = json!({"agent": agent, "worktree": wt, "root": root});
+                emit(
+                    &ctx.state,
+                    cfg,
+                    Event::new(ctx.now, &s.fleet, Some(s.issue), "wip-skipped", d).passive(),
+                )?;
                 continue;
             }
             if gone || !on.exists(Path::new(wt)) {

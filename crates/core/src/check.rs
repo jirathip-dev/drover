@@ -629,7 +629,7 @@ fn fire(
     {
         return Ok(());
     }
-    let ev = Event::new(ctx.now, fleet, issue, kind, d);
+    let ev = Event::new(ctx.now, fleet, issue, kind, d).passive();
     writeln!(out, "{}", plain(&ev))?;
     let ((sent, held), push) = (PUSHES.get(), crate::config::WEBPUSH_ON.contains(&kind));
     if push && sent >= cfg.limits.max_pushes_per_pass {

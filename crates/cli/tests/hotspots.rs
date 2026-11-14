@@ -238,3 +238,33 @@ fn tick_skips_a_fleet_with_hotspots_off() {
         "{out}"
     );
 }
+
+#[test]
+fn a_file_gone_from_the_integration_tip_is_never_hot() {
+    let c = fixture("hotspots-gone");
+    let local = c.state.parent().unwrap().parent().unwrap().join("local");
+    git(&local, NOW, &["rm", "-q", "a.rs"]);
+    git(&local, NOW, &["commit", "-qm", "move a.rs away"]);
+    git(&local, NOW, &["update-ref", "refs/remotes/origin/staging", "HEAD"]);
+    let (code, out) = run(&c, &RealGit(gh("[]")), &["hotspots", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!out.contains("a.rs") && out.contains("none"), "{out}");
+}
+
+#[test]
+fn conflicts_count_distinct_pr_pairs_not_every_push() {
+    let c = fixture("hotspots-pairs");
+    for k in 1..=3 {
+        ev(
+            &c,
+            "sendmeter",
+            NOW - HOUR + k,
+            Some(12),
+            "conflict-predicted",
+            json!({"other": 13, "files": ["a.rs"], "heads": format!("h{k} g{k}")}),
+        );
+    }
+    let (code, out) = run(&c, &RealGit(gh("[]")), &["hotspots", "sendmeter"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("| `a.rs` | 5 | 2 | 2 |"), "{out}");
+}

@@ -68,7 +68,7 @@ Production code added only for tests counts against the change too.
   in the PR body with one line on why. The cap in `ci/cap.toml` is a total for the repo and the only
   hard limit: ask only when your own PR, merged onto current integration, would put the total over
   `line_cap`; trim first, then ask `--kind owner`.
-- Never edit `ci/cap.toml` (the hook refuses it): one orchestrator-filed issue raises it for the whole queue.
+- Never edit `ci/cap.toml` or add a raise in `ci/cap.d/` (the hook refuses both): one orchestrator-filed issue raises it for the whole queue.
   Your cap ask carries `drover cap <fleet>`'s queue-wide view, with its two options: raise to the
   projected total plus margin in one orchestrator-filed issue (recommended), or trim. A `DECISION` to wait
   for that issue: `drover queue <fleet> block --on N <issue>` and end the turn.

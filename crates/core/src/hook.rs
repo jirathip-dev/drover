@@ -99,10 +99,15 @@ const WRITERS: &[&str] = &[
     "rm", "mv", "cp", "tee", "truncate", "chmod", "ln", "install", "dd", "sips",
 ];
 
-/// #668: the repo's line cap file; one orchestrator-filed issue raises it for the whole queue.
-pub const CAP_FILE: &str = "ci/cap.toml";
-pub const NO_CAP_EDIT: &str = "REFUSED CAP_FILE: a lane never edits ci/cap.toml; when your PR would cross the cap, \
-                               run `drover cap <fleet>` and ask with its view (#668)";
+/// #668: the repo's line cap file and (#973) its folder of raises; one orchestrator-filed issue raises it for the queue.
+pub const CAP_PATHS: &[&str] = &["ci/cap.toml", "ci/cap.d/"];
+pub const NO_CAP_EDIT: &str =
+    "REFUSED CAP_FILE: a lane never edits ci/cap.toml or ci/cap.d/; when your PR would cross \
+                               the cap, run `drover cap <fleet>` and ask with its view (#668)";
+
+fn cap_path(w: &str) -> bool {
+    w.ends_with(CAP_PATHS[0]) || w.contains(CAP_PATHS[1])
+}
 
 /// #502: lanes share one user, so a pattern kill reaches every lane (BSD `pkill x -n` matched them all).
 pub const NO_BROAD_KILL: &str = "REFUSED NO_BROAD_KILL: lanes stop only their own processes: start with \
@@ -152,7 +157,7 @@ pub fn decide(input: &Value, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<Str
         .iter()
         .find_map(|k| ti[k].as_str())
         .unwrap_or_default();
-    if p.cap && file.contains(CAP_FILE) {
+    if p.cap && CAP_PATHS.iter().any(|c| file.contains(c)) {
         return Some(NO_CAP_EDIT.into());
     }
     if let Some(pp) = protected_path(file, p).filter(|_| !own_file(file, p)) {
@@ -291,7 +296,7 @@ fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<St
         let writer = !drover
             && (w.iter().any(|w| WRITERS.contains(w))
                 || (w.iter().any(|w| *w == "sed" || *w == "perl") && w.iter().any(|w| w.starts_with("-i"))));
-        let cap = |w: &String| w.ends_with(CAP_FILE);
+        let cap = |w: &String| cap_path(w);
         if p.cap && (targets.iter().any(cap) || writer && toks.iter().any(cap)) {
             return Some(NO_CAP_EDIT.into());
         }

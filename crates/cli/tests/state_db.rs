@@ -131,3 +131,29 @@ fn the_database_is_owner_only() {
     let mode = std::fs::metadata(d.join("state.db")).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
 }
+
+#[test]
+fn a_kind_flagged_passive_where_it_is_emitted_is_not_activity() {
+    let d = tmpdir("passive-flag");
+    let c = ctx(&d, CONFIG);
+    let spawn = Event::new(
+        10,
+        "app",
+        Some(1),
+        "spawn",
+        json!({"role": "impl", "agent": "app-impl-1"}),
+    );
+    drover::events::append(&c.state, &spawn).unwrap();
+    let note = Event::new(20, "app", Some(1), "brand-new-note", json!({})).passive();
+    drover::events::append(&c.state, &note).unwrap();
+    let ev = read(&c.state).unwrap();
+    assert!(ev[1].passive, "{:?}", ev[1]);
+    assert!(jsonl(&c.state).unwrap().contains(r#""passive":true"#));
+    let s = &fold(&ev)[&("app".to_string(), 1)];
+    assert_eq!((s.last_event.as_str(), s.last_ts), ("spawn", 10));
+    let loud = Event::new(30, "app", Some(1), "brand-new-note", json!({}));
+    assert!(!serde_json::to_string(&loud).unwrap().contains("passive"));
+    drover::events::append(&c.state, &loud).unwrap();
+    let s = &fold(&read(&c.state).unwrap())[&("app".to_string(), 1)];
+    assert_eq!((s.last_event.as_str(), s.last_ts), ("brand-new-note", 30));
+}

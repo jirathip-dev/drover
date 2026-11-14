@@ -393,7 +393,11 @@ pub fn tools(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (f, n, agent): (&str, u64,
         lacks.join(", ")
     );
     let d = json!({"state": "blocked", "why": why, "role": "design", "agent": agent});
-    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, f, Some(n), "turn-end", d).passive(),
+    )?;
     let d = json!({"code": "LANE_BLOCKED", "reason": format!("lane blocked: {why}"), "agent": agent});
     emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "needs-human", d))?;
     crate::gate::refused("MISSING_TOOL", why)
