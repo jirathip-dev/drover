@@ -254,7 +254,11 @@ export type Setup = { host: string, name: string, };
  * `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s),
  * the Events tab's time groups.
  */
-export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, 
+export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, 
+/**
+ * #983: the lanes `working` or `running` (`busy`), and those waiting on approval, the owner or a rate limit.
+ */
+counts: LaneCounts, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, 
 /**
  * #859: when the background last read each source the lanes come from (herdr, shed, remote, host).
  */
@@ -281,7 +285,11 @@ export type PendingStart = { action: string, since: number, reason?: string | nu
 /**
  * `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
  */
-export type Lane = { name: string, fleet?: string | null, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, state: string, shown: string, tone: string, since: number, runtime: string, host: string, where: string, };
+export type Lane = { name: string, fleet?: string | null, issue?: number | null, title?: string | null, role: string, harness: string, model?: string | null, account?: string | null, state: string, 
+/**
+ * #983: shed's note on `state` as shed gave it (a `rate-limited` lane's reset time).
+ */
+note?: string | null, shown: string, tone: string, since: number, runtime: string, host: string, where: string, };
 
 export type Ask = { id: string, fleet: string, issue?: number | null, question: string, options: Array<string>, recommend?: number | null, ts: number, };
 

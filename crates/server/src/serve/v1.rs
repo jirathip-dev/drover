@@ -2,7 +2,7 @@ use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, St
 use super::{form, lanes, lock, refused, shared, shown, view, Config, Ctx, Refusal, Result, Server};
 use crate::api::{
     ApprovalChoice, Ask, Block, Chat, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, Health,
-    IssueView, Lane, LaneChat, LessonFleet, LessonRun,
+    IssueView, Lane, LaneChat, LaneCounts, LessonFleet, LessonRun,
 };
 use crate::api::{Handoff, HandoffChoice, HandoffFrom, LastLine, RepoThread, RepoThreads};
 use crate::api::{
@@ -400,7 +400,7 @@ impl Server<'_> {
     }
 
     /// API v1's live lanes from the step's snapshot (#337: no subprocess on a request); `state`'s and the lifeboat's.
-    fn lane_list(&self, ctx: &Ctx, cfg: &Config, events: &[Event], st: &States) -> Vec<Lane> {
+    pub(crate) fn lane_list(&self, ctx: &Ctx, cfg: &Config, events: &[Event], st: &States) -> Vec<Lane> {
         let all = self.lanes(ctx.now, cfg, events, st).unwrap_or_default();
         let waits = self.waits(ctx, cfg, events, &all);
         let lane = |l: &lanes::Lane| {
@@ -413,7 +413,9 @@ impl Server<'_> {
                 role: l.role.clone(),
                 harness: l.harness.clone(),
                 model: l.model.clone(),
+                account: l.account.clone(),
                 state: l.state.clone(),
+                note: l.note.clone(),
                 shown,
                 tone: tone.into(),
                 since: l.since,
@@ -492,6 +494,7 @@ impl Server<'_> {
             theme: super::active(ctx),
             fleets: cfg.fleet.iter().map(fleet).collect(),
             queue: queue.map(queued).collect(),
+            counts: counts(&lanes, None),
             lanes,
             asks: crate::events::open_asks(&events).into_iter().map(ask).collect(),
             hosts: crate::hosts::cards(&cfg, r).into_iter().map(host).collect(),
@@ -1161,3 +1164,20 @@ fn acp_blocks(events: &[crate::shed::proto::Logged]) -> Vec<Block> {
 
 /// #749: a tool block's `title_line` keeps this many characters of the title's first line.
 const TITLE_LINE: usize = 120;
+
+pub(crate) fn counts(lanes: &[Lane], only: Option<&str>) -> LaneCounts {
+    let mine = |l: &&Lane| only.is_none_or(|f| l.fleet.as_deref() == Some(f));
+    let n = |s: &[&str]| {
+        lanes
+            .iter()
+            .filter(mine)
+            .filter(|l| s.contains(&l.state.as_str()))
+            .count()
+    };
+    LaneCounts {
+        busy: n(&lanes::BUSY),
+        waiting_approval: n(&["waiting-approval"]),
+        waiting_owner: n(&["waiting-owner"]),
+        rate_limited: n(&["rate-limited"]),
+    }
+}

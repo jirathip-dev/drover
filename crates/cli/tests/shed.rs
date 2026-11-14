@@ -2555,3 +2555,176 @@ fn stop_ends_a_hung_acp_orchestrator_by_its_thread() {
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("NO_SUCH_AGENT") && out.contains("asleep"), "{out}");
 }
+
+fn board_json(c: &drover::Ctx, r: &'static dyn Runner, path: &str) -> Value {
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let sc = c.clone();
+    std::thread::spawn(move || drover::serve::serve_on(&sc, r, l, false));
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    write!(s, "GET {path} HTTP/1.1\r\nHost: {addr}\r\n\r\n").unwrap();
+    let mut body = String::new();
+    std::io::Read::read_to_string(&mut s, &mut body).unwrap();
+    serde_json::from_str(body.split_once("\r\n\r\n").expect(&body).1).expect(&body)
+}
+
+fn api_lane(v: &Value, name: &str) -> Value {
+    let all = v["lanes"].as_array().unwrap_or_else(|| panic!("{v}"));
+    all.iter()
+        .find(|l| l["name"] == name)
+        .cloned()
+        .unwrap_or_else(|| panic!("{v}"))
+}
+
+#[test]
+fn each_shed_state_reaches_api_v1_and_the_plugin_unchanged() {
+    let b = FakeShed::new();
+    let c = ctx(&tmpdir("acp-states"), &acp_config(&b.sock, "claude", true));
+    let states = [
+        "working",
+        "running",
+        "waiting-approval",
+        "rate-limited",
+        "done",
+        "error",
+        "hibernated",
+    ];
+    for (i, s) in (1u64..).zip(states) {
+        let name = format!("sendmeter-impl-{i}");
+        b.add(
+            &name,
+            json!({"fleet": "sendmeter", "issue": i.to_string(), "role": "impl", "harness": "claude"}),
+        );
+        b.set(&name, |t| {
+            t["reported"] = json!({"state": s, "note": format!("note {s}")})
+        });
+        let d = json!({"role": "impl", "agent": name, "harness": "claude", "runtime": "shed", "pane": name,
+            "worktree": format!("/w/issue-{i}"), "account": "C"});
+        drover::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(i), "spawn", d)).unwrap();
+    }
+    let r: &'static Fake = Box::leak(Box::new(Fake::default().reply("herdr agent list", NO_AGENTS)));
+    let v = board_json(&c, r, "/api/v1/state");
+    for (i, s) in (1u64..).zip(states) {
+        let l = api_lane(&v, &format!("sendmeter-impl-{i}"));
+        assert_eq!(
+            (l["state"].as_str(), l["note"].as_str()),
+            (Some(s), Some(&*format!("note {s}"))),
+            "{v}"
+        );
+    }
+    let counts = json!({"busy": 2, "waiting_approval": 1, "waiting_owner": 0, "rate_limited": 1});
+    assert_eq!(v["counts"], counts, "{v}");
+    let q = board_json(&c, r, "/screens/queue").to_string();
+    for s in states {
+        assert!(q.contains(&format!("{s} · ")), "{s} on the queue screen: {q}");
+    }
+    assert!(q.contains("rate-limited · C · resets note rate-limited"), "{q}");
+    for (label, n) in [("busy", 2), ("approval", 1), ("owner", 0), ("rate-limited", 1)] {
+        assert!(
+            q.contains(&format!(r#"{{"label":"{label}","value":"{n}"}}"#)),
+            "{label}: {q}"
+        );
+    }
+    assert!(q.contains(r#""action":"limit""#), "the rate-limited row's picks: {q}");
+}
+
+#[test]
+fn a_lane_ending_its_turn_on_an_ask_waits_on_the_owner_until_it_is_answered() {
+    let (c, b, f, wt, _) = acp_lane("acp-waiting-owner");
+    session(&b, &[turn()]);
+    let cli = Push(b.cli(&f), wt.clone());
+    drive_at(&c, &cli, 60);
+    let (code, out) = run(&later(&c, 70), &cli, &["ask", "sendmeter", "12", "Which way?"]);
+    assert_eq!(code, 0, "{out}");
+    b.set("sendmeter-impl-12", |t| {
+        t["reported"] = json!({"state": "done", "note": "end_turn"})
+    });
+    let r: &'static Fake = Box::leak(Box::new(Fake::default().reply("herdr agent list", NO_AGENTS)));
+    let state = |c: &drover::Ctx| api_lane(&board_json(c, r, "/api/v1/state"), "sendmeter-impl-12")["state"].clone();
+    assert_eq!(state(&later(&c, 80)), "waiting-owner");
+    let id = logged(&c, "needs-decision")[0].str("id").unwrap().to_string();
+    assert_eq!(run(&later(&c, 90), &cli, &["answer", "sendmeter", &id, "1"]).0, 0);
+    assert_eq!(state(&later(&c, 100)), "done");
+}
+
+#[test]
+fn a_running_lane_is_never_nudged() {
+    let (c, b, f, wt, _) = acp_lane("acp-running");
+    b.set("sendmeter-impl-12", |t| {
+        t["reported"] = json!({"state": "running", "note": "cargo test"})
+    });
+    session(&b, &[turn(), tool("in_progress"), cpu(0)]);
+    let cli = Push(b.cli(&f), wt.clone());
+    drive_at(&c, &cli, 60);
+    let out = drive_at(&c, &cli, 60 + 3 * SILENT);
+    assert!(!f.called("shed cancel"), "{out}");
+    assert!(logged(&c, "nudged").is_empty(), "{out}");
+    assert!(logged(&c, "respawned-silent").is_empty(), "{out}");
+}
+
+fn rate_limited(b: &FakeShed) {
+    b.set("sendmeter-impl-12", |t| {
+        t["reported"] = json!({"state": "rate-limited", "note": "5pm"});
+        t["session"] = json!({"id": "s-1"});
+    });
+}
+
+#[test]
+fn wait_sends_continue_at_the_reset_only_on_the_owners_pick() {
+    let (c, b, f, wt, _) = acp_lane("acp-limit-wait");
+    rate_limited(&b);
+    let cli = Push(b.cli(&f), wt.clone());
+    let out = drive_at(&c, &cli, 2 * 86_400);
+    assert_eq!(
+        f.count("shed send sendmeter-impl-12 continue"),
+        0,
+        "no pick, no continue: {out}"
+    );
+    assert_eq!(logged(&c, "spawn").len(), 1, "no pick, no switch: {out}");
+    let (code, out) = run(&later(&c, 2 * 86_400), &cli, &["limit", "sendmeter", "12", "wait"]);
+    assert_eq!(code, 0, "{out}");
+    let p = &logged(&c, "limit-picked")[0];
+    assert_eq!(
+        (p.str("pick"), p.str("by"), p.str("reset")),
+        (Some("wait"), Some("owner"), Some("5pm"))
+    );
+    let at = p.data["at"].as_u64().unwrap();
+    assert!(at > c.now + 2 * 86_400, "{p:?}");
+    drive_at(&c, &cli, at - c.now - 1);
+    assert_eq!(
+        f.count("shed send sendmeter-impl-12 continue"),
+        0,
+        "not before the reset"
+    );
+    drive_at(&c, &cli, at - c.now);
+    drive_at(&c, &cli, at - c.now + 60);
+    assert_eq!(f.count("shed send sendmeter-impl-12 continue"), 1, "once at the reset");
+    assert_eq!(logged(&c, "spawn").len(), 1);
+}
+
+#[test]
+fn switch_resumes_the_session_on_the_next_account_only_on_the_owners_pick() {
+    let (c, b, f, wt, _) = acp_lane("acp-limit-switch");
+    let cli = Push(b.cli(&f), wt.clone());
+    let (code, out) = run(&later(&c, 60), &cli, &["limit", "sendmeter", "12", "switch"]);
+    assert_eq!(code, 3, "a working lane has no limit to pick for: {out}");
+    assert!(out.contains("NOT_RATE_LIMITED"), "{out}");
+    rate_limited(&b);
+    drive_at(&c, &cli, 120);
+    assert_eq!(logged(&c, "spawn").len(), 1, "drover never switches by itself");
+    let (code, out) = run(&later(&c, 180), &cli, &["limit", "sendmeter", "12", "switch"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(logged(&c, "limit-picked")[0].str("by"), Some("owner"));
+    let spawns = logged(&c, "spawn");
+    assert_eq!(spawns.len(), 2, "{out}");
+    assert_eq!(spawns[1].str("account"), Some("D"), "{out}");
+    assert!(f.called("shed run --acp"), "{out}");
+    let runs: Vec<String> = f
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| c.starts_with("shed run --acp"))
+        .cloned()
+        .collect();
+    assert!(runs.last().unwrap().contains("--resume s-1"), "{runs:?}");
+}

@@ -1087,6 +1087,7 @@ fn silent(
             stall::Silent::Escalate(why) => escalate(ctx, cfg, out, (fleet, n), (&lane, None), "LANE_SILENT", &why)?,
         }
     }
+    crate::limit::due(ctx, r, out, &ev, agents, fleet)?;
     let reviews = fold(&ev)
         .into_values()
         .filter(|s| s.fleet == fleet && s.state.starts_with("review"));

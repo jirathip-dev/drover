@@ -24,6 +24,8 @@ pub struct Lane {
     pub port: Option<String>,
     /// herdr's live state (idle | working | done | blocked | unknown), or `dead` | `parked` (log only, no pane).
     pub state: String,
+    /// #983: shed's note on that state (a tool, a command, a reset time), as shed gave it.
+    pub note: Option<String>,
     /// When drover spawned it (0: unknown).
     pub since: u64,
     pub pane: Option<String>,
@@ -81,6 +83,7 @@ pub fn join(
         .copied();
         let mut l = Lane {
             state: s("agent_status").unwrap_or("unknown").into(),
+            note: s("agent_note").map(String::from),
             pane: pane.map(String::from),
             host: s("host").map(String::from),
             machine: s("machine").map(String::from),
@@ -96,7 +99,7 @@ pub fn join(
             // #516: one lane per agent: a second live row for it (herdr's and shed's, a remote host's) folds into
             // the first, the busier state (blocked, then working) kept.
             if !seen.insert(name.to_string()) {
-                let rank = |s: &str| SECTIONS.iter().position(|x| *x == s).unwrap_or(2);
+                let rank = |s: &str| SECTIONS.iter().position(|x| *x == s).unwrap_or(IDLE);
                 if let Some(o) = out.iter_mut().find(|o: &&mut Lane| o.name == name) {
                     if rank(&l.state) < rank(&o.state) {
                         *o = l;
@@ -234,13 +237,55 @@ fn orchestrator(events: &[Event], e: &Event, l: Lane) -> Lane {
 }
 
 /// Section order on the page; any other herdr state (unknown) counts as idle.
-pub const SECTIONS: &[&str] = &["blocked", "working", "idle", "done", "parked", "dead"];
+pub const SECTIONS: &[&str] = &[
+    "blocked",
+    "waiting-approval",
+    "waiting-owner",
+    "rate-limited",
+    "working",
+    "running",
+    "idle",
+    "done",
+    "parked",
+    "dead",
+];
+const IDLE: usize = 6;
+
+/// #983: the states the busy count counts.
+pub const BUSY: [&str; 2] = ["working", "running"];
+/// #983: the states a lane waits or works in by design: never nudged, stalled or dead.
+pub const HELD: [&str; 4] = ["running", "waiting-approval", "waiting-owner", "rate-limited"];
+
+/// #983: agent `a`'s state: shed's, or `waiting-owner` over a `done` turn that ended on an open ask or turn-end.
+pub fn state(ctx: &crate::Ctx, events: &[Event], a: &Value) -> String {
+    let raw = a["agent_status"].as_str().unwrap_or("unknown");
+    let name = a["name"].as_str().unwrap_or_default();
+    let turn = crate::shed::session(ctx, name)["turn_at"].as_u64();
+    let sp = turn
+        .and(crate::events::last_spawn(events, name))
+        .filter(|_| raw == "done");
+    let Some((sp, at)) = sp.zip(turn) else {
+        return raw.into();
+    };
+    let (f, n) = (sp.fleet.as_str(), sp.issue.unwrap_or_default());
+    let asked = crate::events::open_asks(events)
+        .iter()
+        .any(|e| e.fleet == f && e.issue == Some(n) && e.ts >= at);
+    let mine = |e: &&Event| e.ts >= at && e.is("turn-end", f, n);
+    let ended = events
+        .iter()
+        .rfind(mine)
+        .filter(|t| matches!(t.str("state"), Some("blocked" | "need-input")));
+    let answered = |t: &Event| events.iter().any(|e| e.is("decision", f, n) && e.seq > t.seq);
+    let owner = asked || ended.is_some_and(|t| !answered(t));
+    if owner { "waiting-owner" } else { raw }.into()
+}
 
 pub type Groups<'a> = Vec<(&'static str, Vec<(String, Vec<&'a Lane>)>)>;
 
 /// Non-empty [`SECTIONS`], each split by fleet (alphabetical, Others last), newest `changed` first.
 pub fn group(all: &[Lane], changed: impl Fn(&Lane) -> u64) -> Groups<'_> {
-    let section = |l: &Lane| SECTIONS.iter().position(|s| *s == l.state).unwrap_or(2);
+    let section = |l: &Lane| SECTIONS.iter().position(|s| *s == l.state).unwrap_or(IDLE);
     let mut v: Vec<&Lane> = all.iter().collect();
     v.sort_by_key(|l| {
         (

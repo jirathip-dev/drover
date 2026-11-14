@@ -118,6 +118,7 @@ impl Shed {
         labels: &[(&str, String)],
         cwd: &str,
         cmd: &[String],
+        resume: Option<&str>,
     ) -> Result<()> {
         if self.get(r, name).is_ok_and(|t| t.state == shed_proto::State::Exited) {
             self.call(r, Method::Rm, Target { name: name.into() })?;
@@ -125,7 +126,7 @@ impl Shed {
         if self.0.acp.is_none() {
             return self.call(r, Method::Run, Self::run_params(name, labels, cwd)).map(drop);
         }
-        let a = self.acp_argv(name, labels, cwd, cmd);
+        let a = self.acp_argv(name, labels, cwd, cmd, resume);
         shed::cli(r, &a.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
     }
     /// #899: its exited lane terminals (a `fleet` label), kept until removed.
@@ -158,7 +159,14 @@ impl Shed {
         ok
     }
     /// The `shed run --acp` words that start ACP lane `name`.
-    pub fn acp_argv(&self, name: &str, labels: &[(&str, String)], cwd: &str, cmd: &[String]) -> Vec<String> {
+    pub fn acp_argv(
+        &self,
+        name: &str,
+        labels: &[(&str, String)],
+        cwd: &str,
+        cmd: &[String],
+        resume: Option<&str>,
+    ) -> Vec<String> {
         let id = self.0.acp.as_deref().unwrap_or_default();
         let mut a = argv(&[
             "run",
@@ -172,6 +180,7 @@ impl Shed {
             cwd,
         ]);
         a.extend(labels.iter().flat_map(|(k, v)| ["--label".into(), format!("{k}={v}")]));
+        a.extend(resume.into_iter().flat_map(|id| ["--resume".into(), id.to_string()]));
         a.extend(
             (!cmd.is_empty())
                 .then(|| "--".to_string())
@@ -206,7 +215,8 @@ impl Shed {
 fn agent_of(t: &TerminalInfo) -> Value {
     let up = t.state == shed_proto::State::Running;
     json!({"name": t.name, "pane_id": t.name, "cwd": t.cwd, "agent": t.labels.get("harness").filter(|_| up),
-        "agent_status": t.reported.as_ref().map_or("unknown", |s| s.state.as_str()), "terminal_title": "", "runtime": "shed", "pid": t.pid,
+        "agent_status": t.reported.as_ref().map_or("unknown", |s| s.state.as_str()),
+        "agent_note": t.reported.as_ref().and_then(|s| s.note.as_deref()), "terminal_title": "", "runtime": "shed", "pid": t.pid,
         "cpu": t.resources.map(|u| u.cpu_pct)})
 }
 
@@ -512,6 +522,11 @@ pub fn reply(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> 
         }
     }
     Ok(())
+}
+
+/// #983: ACP lane `agent`'s session id, for `run --acp … --resume`.
+pub fn session_id(r: &dyn Runner, agent: &str) -> Option<String> {
+    Some(r.shed().map(Shed)?.get(r, agent).ok()?.session?.id)
 }
 
 /// #908: Err `HOST_BUSY` (the prompt held to a later pass) while shed has `agent` asleep and the host has no room to wake it.

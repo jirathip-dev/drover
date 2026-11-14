@@ -504,6 +504,8 @@ pub const PASSIVE: &[&str] = &[
     // #666: an ACP lane's first prompt sent again.
     "start-resent",
     "nudged",
+    "limit-picked",
+    "limit-continued",
     "respawned-silent",
     "rev-stale-replaced",
     "budget-freed",
