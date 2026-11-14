@@ -119,7 +119,6 @@ fn act_stops_a_lane_dry_runs_a_kill_and_refuses_unknowns() {
     assert_eq!(kinds(&c, "act").len(), 1);
 }
 
-/// `OnShed` with host bazzite's shed (`ssh bazzite -- shed connect`) on its own fake server.
 struct Bazzite(OnShed, FakeShed);
 
 impl drover::runner::Runner for Bazzite {
@@ -150,7 +149,6 @@ fn setup_starts_a_configured_terminal_and_reads_its_screen() {
     let r = Bazzite(r, FakeShed::new());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let start = json!({"host": "bazzite", "name": "claude B"});
-    // A terminal name a URL path and a shell word carry as is.
     let pane = "drover-setup-claude-B";
     let screen_of = format!("/api/v1/setup/{pane}");
     assert_eq!(post(&s, "setup", start.clone(), "").1, "UNPAIRED");
@@ -170,7 +168,6 @@ fn setup_starts_a_configured_terminal_and_reads_its_screen() {
         (status.as_str(), &screen["lines"][0]),
         ("200 OK", &json!("Paste code here >"))
     );
-    // Typed into the setup terminal through `send`, never logged.
     let typed = json!({"setup": pane, "text": "sk-SECRET-4242"});
     assert_eq!(post(&s, "send", typed, &ck).1, "OK");
     assert!(

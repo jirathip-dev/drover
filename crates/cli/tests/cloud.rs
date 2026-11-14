@@ -584,8 +584,6 @@ fn step(cmd: &str) -> String {
     format!("{SSH}'sh' '-c' '{s}")
 }
 
-/// cloud1 running and reachable; every tool there but gh (installed once) and drover (built once); claude logged in
-/// and gh `gh_in` (logged in or not).
 fn boot_fake(gh_in: bool) -> Fake {
     let mine = format!(
         "[ \"$('/opt/drover/bin/drover' --version)\" = 'drover {}' ]",
@@ -649,7 +647,6 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_ter
         "cargo install --git https://github.com/jirathip-dev/herdsman --rev {sha} --locked --root '/opt/drover'"
     );
     assert!(r.called(&step(&build)), "{:?}", r.calls.borrow());
-    // claude is logged in: only gh's terminal there, the token read without echo, never on a command line.
     assert!(here.methods().is_empty(), "nothing on this host: {:?}", here.methods());
     let runs: Vec<String> = cloud
         .all("send")

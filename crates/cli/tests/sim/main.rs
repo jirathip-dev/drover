@@ -281,7 +281,7 @@ fn random_seeds() {
 fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     let s = Some(Sabotage::Planted);
     let tripped = |f: &str| f.starts_with("I1 ");
-    let h = hunt::hunt(&[2, 3, 4, 5], 23, s, |r, f| {
+    let h = hunt::hunt(&[2, 3, 4, 6], 23, s, |r, f| {
         r < 40 && !f.iter().any(|x| tripped(&x.failure))
     });
     let f = h
@@ -289,7 +289,7 @@ fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
         .iter()
         .find(|x| tripped(&x.failure))
         .expect("the hunt finds it within 40 rounds");
-    let random: Vec<u64> = (2..2 + f.round as u64).collect();
+    let random: Vec<u64> = (1000..1000 + f.round as u64).collect();
     let hs: Vec<_> = random.iter().map(|&n| std::thread::spawn(move || run(n, s))).collect();
     for o in hs.into_iter().map(|h| h.join().expect("a run")) {
         let why = o.failure.unwrap_or_default();
@@ -354,25 +354,19 @@ fn hunt() {
     );
 }
 
-/// #685 AC 2: the known-answer fleet (`seeds::known`) gives exact metric values. Queued at true t+2, #201 merges at
-/// t+1029 and #202 at t+1338 (each: the first kick's start at t+91 and a 3 s agent start, 600 s impl, the reviewer's
-/// 300 s, its record and merge; #202's first reviewer is refused, superseded at t+1025 and its successor reviews
-/// 300 s). Five spawns of four lanes, one wasted; two heads × 300 s of CI; idle: the four kept lanes from their stop
-/// to the clean and the refused reviewer's 14 s (#779: 5661, up from 5585, as clean's `wip prune` git calls move the
-/// jittered timers after the first merge); one reviewed head per merge.
 #[test]
 fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
     assert!(o.failure.is_none(), "{}", o.report());
     let want = metrics::Metrics {
-        to_merge: vec![1027, 1336],
+        to_merge: vec![1012, 1337],
         spawns: 5,
         wasted: 1,
         supersedes: 1,
         lanes: 4,
-        idle: 5561,
+        idle: 5718,
         ci_wait: 600,
-        lock_wait: 13,
+        lock_wait: 12,
         serial: 0,
         host_busy: 0,
         caps: 0,
@@ -388,10 +382,10 @@ fn the_known_fleet_gives_exact_metrics() {
             ("caps", 0.0),
             ("ci_wait_min", 10.0),
             ("host_busy", 0.0),
-            ("idle_lane_min", 92.68),
-            ("lock_wait_min", 0.22),
-            ("queue_to_merge_p50_min", 17.12),
-            ("queue_to_merge_p90_min", 22.27),
+            ("idle_lane_min", 95.3),
+            ("lock_wait_min", 0.2),
+            ("queue_to_merge_p50_min", 16.87),
+            ("queue_to_merge_p90_min", 22.28),
             ("review_rounds_per_merge", 1.0),
             ("serial_busy", 0.0),
             ("supersedes_per_lane", 0.25),

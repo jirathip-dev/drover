@@ -1,5 +1,3 @@
-//! #60 (amendment C): src/term.rs is the one lane-terminal adapter; no other src file builds a pane argv.
-//! #721: herdr is retired: no src file names it but config.rs's load error for `runtime = "herdr"`.
 use std::path::{Path, PathBuf};
 
 fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
@@ -29,7 +27,6 @@ fn src_files() -> Vec<PathBuf> {
     files
 }
 
-/// `(file:line: text)` of each src line matching `hit`.
 fn lines(files: &[PathBuf], hit: impl Fn(&Path, &str) -> bool) -> Vec<String> {
     let each = |f: &PathBuf| {
         let text = std::fs::read_to_string(f).unwrap();

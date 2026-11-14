@@ -153,17 +153,18 @@ impl Runner for Snap<'_> {
             return self.r.run_in(prog, args, input);
         }
         let k = key_in(prog, args, input);
+        if let ([.., m, _, line], Miss::Collect) = (args, self.miss) {
+            let q = format!("'{}'", input.replace('\'', "'\\''"));
+            lock(&self.want).insert(k.clone(), (m.clone(), format!("(printf '%s' {q} | {line})")));
+            return Ok(out(self.prev.get(&k).cloned().flatten()));
+        }
         if let Some(v) = lock(&self.reads).get(&k) {
             return Ok(out(v.clone()));
         }
         if self.miss == Miss::Local {
             return Ok(out(None));
         }
-        let o = self.r.run_in(prog, args, input)?;
-        if self.miss == Miss::Collect {
-            lock(&self.reads).insert(k, (o.code == 0).then(|| o.stdout.clone()));
-        }
-        Ok(o)
+        self.r.run_in(prog, args, input)
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.r.shed()

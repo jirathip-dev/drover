@@ -542,7 +542,9 @@ fn lanes_group_by_fleet_with_others() {
         ("side-project", "codex", "/Users/me/Projects/side", "idle"),
     ] {
         sh.add(name, json!({"fleet": "", "harness": harness}));
-        sh.set(name, |t| (t["cwd"], t["reported"]) = (json!(cwd), json!({"state": state})));
+        sh.set(name, |t| {
+            (t["cwd"], t["reported"]) = (json!(cwd), json!({"state": state}))
+        });
     }
     sh.lane("synergy-impl-7", "blocked", "/p/synergy-apps");
     let f = Fake::default();

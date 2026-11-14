@@ -59,7 +59,6 @@ fn every_adapter_call_is_a_shed_request() {
     );
     term::ok(&r, &term::run_argv(lane, &["exec", "'dsh-tui'"])).unwrap();
     assert_eq!(b.last("send"), json!({"name": lane, "text": "exec 'dsh-tui'\r"}));
-    // list: shed's lanes (running, `fleet`-labelled).
     let a = term::agents(&r).unwrap();
     assert_eq!(a.len(), 1, "{a:?}");
     assert_eq!(
@@ -1504,10 +1503,7 @@ fn every_lane_says_where_it_runs() {
     std::fs::write(&c.config, acp_config(&b.sock, "claude", true) + &hosts(true)).unwrap();
     for cmd in ["status", "board", "waiting"] {
         let (code, out) = run(&c, &both(), &[cmd, "sendmeter"]);
-        assert!(
-            code == 0 && out.contains("mini") && out.contains("air"),
-            "{cmd}: {out}"
-        );
+        assert!(code == 0 && out.contains("mini") && out.contains("air"), "{cmd}: {out}");
     }
 
     let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/api_v1/where.json");

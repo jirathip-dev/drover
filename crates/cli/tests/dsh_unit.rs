@@ -5,7 +5,6 @@ use drover::runner::{Out, Runner};
 use drover::spawn::Plan;
 use std::path::PathBuf;
 
-/// A shed (over `shed connect`) whose terminal reports idle at the first `get`, then working; records each request.
 struct Fake(std::sync::Mutex<Vec<String>>);
 
 impl Runner for Fake {

@@ -78,20 +78,17 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
         .collect()
 }
 
-/// `setup` with the thread's lanes on a fake shed (`[runtime] kind = "shed"`: a conductor is a shed terminal).
 fn shed_setup(name: &str, harness: &str) -> (drover::Ctx, FakeShed) {
     let c = setup(name, harness);
     let b = FakeShed::attached(&c);
     (c, b)
 }
 
-/// The conductor's harness launches typed into its terminal (`exec <harness> …`), in order.
 fn start_lines(b: &FakeShed) -> Vec<String> {
     let sent = b.sent("orchestrator-t1");
     sent.into_iter().filter(|t| t.starts_with("exec ")).collect()
 }
 
-/// The conductor went idle: `check` past the idle sleep puts it to sleep (its terminal killed and removed).
 fn sleep_idle(c: &drover::Ctx, b: &FakeShed, now: u64) {
     b.set("orchestrator-t1", |t| t["reported"] = json!({"state": "idle"}));
     assert_eq!(run(&at(c, now), &Fake::default(), &["check"]).0, 0);
@@ -295,7 +292,6 @@ fn a_harness_without_resume_gets_the_history_in_its_kick() {
 /// start or resume, nor any lane spawn, sends one, however many lines the thread has. (dsh's launch carries no kick.)
 #[test]
 fn no_harness_starts_an_agent_with_a_control_character_in_its_argv() {
-    // The typed line's one `\r` is its Enter, not part of the harness's argv.
     let bad = |b: &FakeShed| {
         let start = start_lines(b).pop();
         assert!(start.is_some(), "{:?}", b.sent("orchestrator-t1"));

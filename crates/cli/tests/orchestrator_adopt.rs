@@ -1,5 +1,3 @@
-//! #477: deliveries to one thread wait for its start: two messages start one orchestrator and reach it in order; a
-//! failed start is tried once more and shows one row.
 mod common;
 use common::fake_shed::Cli;
 use common::*;

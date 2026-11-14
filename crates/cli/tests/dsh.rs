@@ -6,10 +6,10 @@ use drover::events::read;
 use drover::runner::{Out, Runner};
 use drover::shed::{Shed, Wire};
 use serde_json::{json, Value};
-use std::sync::Mutex;
 use std::collections::VecDeque;
 use std::path::Path;
 use std::process::Command;
+use std::sync::Mutex;
 
 fn dsh_config() -> String {
     CONFIG.replace(
@@ -71,7 +71,11 @@ impl Runner for Lane<'_> {
             ("run", Some(LANE)) => seen.push(("run".into(), String::new())),
             ("get", Some(LANE)) if started => {
                 let state = self.states.lock().unwrap().pop_front().unwrap_or_default();
-                res["reported"] = if state.is_empty() { Value::Null } else { json!({"state": state}) };
+                res["reported"] = if state.is_empty() {
+                    Value::Null
+                } else {
+                    json!({"state": state})
+                };
                 seen.push(("poll".into(), state));
             }
             ("read", Some(LANE)) => {
@@ -201,7 +205,10 @@ fn spawn_waits_for_dsh_tui_idle_then_kicks_and_confirms_working() {
         let seen = l.seen.lock().unwrap();
         let idle = seen.iter().position(|s| s.0 == "poll" && s.1 == "idle").unwrap();
         assert!(start < idle && idle < prompt, "{seen:?}");
-        assert!(seen[start - 1].1.starts_with("export DROVER_LANE='sendmeter:12:rev'"), "{seen:?}");
+        assert!(
+            seen[start - 1].1.starts_with("export DROVER_LANE='sendmeter:12:rev'"),
+            "{seen:?}"
+        );
         assert_eq!(seen[start - 2].0, "run", "{seen:?}");
         let calls = l.f.calls.borrow();
         assert!(calls.iter().any(|c| c.contains("config --worktree core.hooksPath")));
