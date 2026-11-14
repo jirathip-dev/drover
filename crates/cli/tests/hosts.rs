@@ -1040,7 +1040,7 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
     let (sh, bazzite) = (FakeShed::attached(&c), FakeShed::new());
     let r = two(&r, &bazzite);
     let cfg = Config::load(&c.config).unwrap();
-    let w = drover::waiting::scan(&c, &cfg, &sh.on(&r), &read(&c.state).unwrap(), &[], true);
+    let w = drover::waiting::scan(&c, &cfg, &sh.on(&r), &read(&c.state).unwrap(), &[], true, None);
     let w = w.iter().find(|(s, _)| s.issue == 12).unwrap();
     assert_eq!(w.1.what, "review done on bazzite · recording within 1 min");
     let (code, out) = run(&c, &r, &["drive", "--fast"]);

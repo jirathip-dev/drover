@@ -600,7 +600,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     let behind = json!({"number": 13, "state": "OPEN", "baseRefName": "staging", "headRefOid": from,
         "mergeable": "MERGEABLE", "mergeStateStatus": "BEHIND", "statusCheckRollup": []});
     let w = Mixed(Fake::default().reply("gh pr view issue-3 ", &behind.to_string()));
-    let ws = drover::waiting::scan(&c, &cfg, &sh.on(&w), &read(&c.state).unwrap(), &[], true);
+    let ws = drover::waiting::scan(&c, &cfg, &sh.on(&w), &read(&c.state).unwrap(), &[], true, None);
     let what = &ws.iter().find(|(s, _)| s.issue == 3).expect("#3").1.what;
     assert!(
         what.starts_with("PASS · behind staging (not required) · merging when CI green"),

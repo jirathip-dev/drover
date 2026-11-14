@@ -209,7 +209,7 @@ pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[L
     let live: Vec<_> = (all.iter())
         .map(|l| json!({"name": l.name, "agent_status": l.state}))
         .collect();
-    let w = crate::waiting::scan(ctx, cfg, r, events, &live, false);
+    let w = crate::waiting::scan(ctx, cfg, r, events, &live, false, None);
     w.into_iter().map(|x| x.1).collect()
 }
 

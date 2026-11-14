@@ -1305,7 +1305,7 @@ fn pass(
     }
     let events = read(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
-    let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
+    let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true, Some(fleet));
     waits.retain(one);
     crate::promise::pass(ctx, cfg, fleet, &events, &waits)?;
     external(ctx, cfg, r, out, fleet)?;
@@ -1316,7 +1316,7 @@ fn pass(
         }
     }
     if !fast && handoff(ctx, cfg, r, out, fleet, &events, &waits)? {
-        waits = waiting::scan(ctx, cfg, seen, &read(&ctx.state)?, &agents, false);
+        waits = waiting::scan(ctx, cfg, seen, &read(&ctx.state)?, &agents, false, Some(fleet));
         waits.retain(one);
     }
     // #129: ready PRs that conflict with nothing merge first; of a conflicting pair the older, the other is updated.

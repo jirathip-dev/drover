@@ -1697,7 +1697,7 @@ fn the_fast_step_refreshes_the_card_cache_and_the_wording_reads_it() {
             .to_string()
     };
     let card = || {
-        let ws = drover::waiting::scan(&c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false);
+        let ws = drover::waiting::scan(&c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false, None);
         ws.into_iter().find(|w| w.1.issue == 12).unwrap().1
     };
     // Cached ten minutes ago: three of five green.
@@ -2212,7 +2212,7 @@ fn no_checks_after_the_grace_is_ci_missing_not_running() {
             .to_string()
     };
     let card = |c: &drover::Ctx| {
-        let ws = drover::waiting::scan(c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false);
+        let ws = drover::waiting::scan(c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false, None);
         ws.into_iter().find(|w| w.1.issue == 12).unwrap().1
     };
     let empty = Fake::default().reply("gh pr view issue-12", &view(json!([])));

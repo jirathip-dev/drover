@@ -145,7 +145,7 @@ fn unpaused_fleet_resumes_a_parked_impl_to_review() {
     let (c, r) = fixture("parked-resume", false);
     let events = read(&c.state).unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    let waits = drover::waiting::scan(&c, &cfg, &r, &events, &[], false);
+    let waits = drover::waiting::scan(&c, &cfg, &r, &events, &[], false, None);
     let w = &waits.iter().find(|(s, _)| s.issue == 12).unwrap().1;
     assert_eq!(
         (w.who, w.what.as_str()),

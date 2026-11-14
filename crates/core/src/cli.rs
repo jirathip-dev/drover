@@ -1192,6 +1192,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         &events,
                         &all_agents(&c, &look).unwrap_or_default(),
                         false,
+                        None,
                     )
                 });
                 // #157: a HOST column once fleet.toml has `[hosts]`; #609: or a lane's `where` says more.
@@ -1687,7 +1688,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let (events, agents) = (read(&ctx.state)?, all_agents(&cfg, r).unwrap_or_default());
                     let at = places(ctx, &cfg, r, &events);
-                    let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true);
+                    let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true, None);
                     let mut rows: Vec<_> = all
                         .into_iter()
                         // #445: every open issue, with the reason, nothing-due ones too.
