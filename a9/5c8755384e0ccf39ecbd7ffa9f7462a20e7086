@@ -1,0 +1,11 @@
+Decided: keep the proposed fleet.toml whole in proposals/<id>.toml beside the state db; the event carries its sha256
+Because: "keeps the proposed fleet.toml in the `config-propose` event's `text` field, but the event log cuts long fields"
+Because: crates/core/src/events.rs:156
+Rejected: raise EVENT_MAX — every event grows and a bigger file still truncates
+Rejected: refuse proposals that do not fit the event — the spec wants any size to round-trip
+Decided: one reader, stored(), verifies the sha for both propose (after writing) and apply; a mismatch refuses PROPOSAL_TRUNCATED
+Because: "`config propose` validates what it stored (re-reads it), and refuses instead of saving a proposal it can't apply"
+Decided: legacy events (text in the event, no sha) refuse PROPOSAL_TRUNCATED too: re-propose
+Check: crates/cli/tests/config_card.rs a_proposal_over_16_kb_applies_byte_for_byte fails on commit 1, passes at head
+Check: self_update pause test fails only inside a lane (DROVER_LANE set); passes with it unset
+Owner: big config proposals now apply exactly; an old cut one says to propose again
