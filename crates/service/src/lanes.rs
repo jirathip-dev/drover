@@ -1,5 +1,3 @@
-//! #529: lane state from shed's `events` stream (docs/service.md). Each lane's change is logged as a passive
-//! `lane-state` as it happens. A dropped stream logs `lane-stream` down and the passes poll until it is back.
 use crate::Service;
 use drover_core::config::Config;
 use drover_core::events::append;

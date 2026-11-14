@@ -241,7 +241,6 @@ pub fn verdict(
         return Ok(());
     };
     let (agent, pane) = (e.str("agent"), e.str("pane").unwrap_or_default());
-    // A reviewer shed still shows `working` (or an unreadable agent list) is left alone.
     let busy = term::agents(r).map_or(true, |a| {
         a.iter()
             .any(|a| a["name"].as_str() == agent && a["agent_status"] == "working")

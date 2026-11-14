@@ -382,7 +382,7 @@ fn a_shed_acp_host_with_no_herdr_is_up_and_runs_an_acp_lane_through_the_proxy_wi
 
 /// The runner the CLI gives a fleet whose host runs shed (`shed::With`), for calls made outside `run`.
 fn shed_runner<'a>(b: &'a Boat, cfg: &drover::config::Config) -> drover::shed::With<'a> {
-    drover::shed::With(b, cfg.shed())
+    drover::shed::With(b, cfg.shed().unwrap())
 }
 
 fn grep(dir: &Path, needle: &str) -> bool {
@@ -398,7 +398,7 @@ fn a_host_whose_herdr_answers_but_whose_shed_does_not_is_offline() {
     let (c, _) = setup("racp-down", &["boat3"]);
     let f = Fake::default().reply("herdr --machine boat3 agent list", NO_AGENTS);
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    let r = drover::shed::With(&f, cfg.shed());
+    let r = drover::shed::With(&f, cfg.shed().unwrap());
     assert_eq!(drover::hosts::survey(&c, &cfg, &r, false).get("boat3"), Some(&None));
 }
 

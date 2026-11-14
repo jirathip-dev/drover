@@ -139,7 +139,6 @@ impl Provider for Claude {
         if let Some(e) = p.effort.as_deref().filter(|e| *e != "none") {
             a.extend(["--effort".into(), e.into()]);
         }
-        // Display name = the terminal title (else Claude titles it from the kick).
         a.extend(["--name".into(), p.title.clone()]);
         // `--mcp-config` is variadic: `--strict-mcp-config` ends it before the kick.
         a.extend([

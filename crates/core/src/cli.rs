@@ -54,7 +54,9 @@ enum Cmd {
     Pause { fleet: String },
     /// Resume a paused fleet
     Resume { fleet: String },
-    /// Create worktree + shed terminal, write .brief.md, launch the role's harness, verify the prompt landed
+    #[command(
+        about = "Create worktree + shed terminal, write .brief.md, launch the role's harness, verify the prompt landed"
+    )]
     Spawn {
         fleet: String,
         issue: String,
@@ -62,12 +64,12 @@ enum Cmd {
         #[command(flatten)]
         o: spawn::Opts,
     },
-    /// Record a lane already running in a shed terminal (repair a spawn that was never logged)
+    #[command(about = "Record a lane already running in a shed terminal (repair a spawn that was never logged)")]
     Adopt {
         fleet: String,
         issue: u64,
         role: String,
-        /// The shed terminal the harness runs in
+        #[arg(help = "The shed terminal the harness runs in")]
         #[arg(long)]
         pane: String,
     },
@@ -336,7 +338,7 @@ enum Cmd {
         /// Write the page as static files into this dir instead of serving (docs/serve.md)
         #[arg(long)]
         export: Option<std::path::PathBuf>,
-        /// With --export: the inert demo, its shed/gh/host reads canned in runner.json next to fleet.toml
+        #[arg(help = "With --export: the inert demo, its shed/gh/host reads canned in runner.json next to fleet.toml")]
         #[arg(long, requires = "export")]
         demo: bool,
     },
@@ -392,8 +394,9 @@ enum Cmd {
         #[arg(long, default_value = ".drover/rules.md")]
         rules: std::path::PathBuf,
     },
-    /// Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun.
-    /// `setup <host> <name>` (#303): run that configured login in a shed terminal on the host instead
+    #[command(
+        about = "Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun. `setup <host> <name>` (#303): run that configured login in a shed terminal on the host instead"
+    )]
     Setup {
         #[arg(requires = "name")]
         host: Option<String>,
@@ -434,7 +437,9 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<AccountsCmd>,
     },
-    /// Read-only host check: shed, gh, config, accounts, harnesses, serve, phone, watchdog; ✓/✗/! with the fix per line, exit 1 on any ✗
+    #[command(
+        about = "Read-only host check: shed, gh, config, accounts, harnesses, serve, phone, watchdog; ✓/✗/! with the fix per line, exit 1 on any ✗"
+    )]
     Doctor {
         #[arg(long)]
         json: bool,
@@ -456,7 +461,7 @@ enum Cmd {
         /// With --yes, remove the orphans too: folders under the worktree root no fleet owns
         #[arg(long)]
         orphans: bool,
-        /// The daily job (#557): merged/closed lanes idle 3+ days, at most 10
+        #[arg(help = "The daily job (#557): merged/closed lanes idle 3+ days, at most 10")]
         #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans"])]
         scheduled: bool,
     },
@@ -489,7 +494,9 @@ enum Cmd {
     },
     /// Send Esc to an agent's pane (it pauses); logs `stop`
     Stop { agent: String },
-    /// Close the terminal of a shed agent that is not a drover lane (IS_LANE for lanes); files and worktrees stay
+    #[command(
+        about = "Close the terminal of a shed agent that is not a drover lane (IS_LANE for lanes); files and worktrees stay"
+    )]
     Close {
         agent: String,
         /// The agent on this `[hosts.<name>]` (when another host has one of the same name)
@@ -1020,8 +1027,10 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
         }
     }
-    // #298: lanes start, and are reached, on shed (`[runtime]`; #565: or one fleet's `runtime`).
-    let with = Config::load(&ctx.config).ok().map(|c| crate::shed::With(r, c.shed()));
+    let with = (r.shed().is_none())
+        .then(|| Config::load(&ctx.config).ok()?.shed())
+        .flatten()
+        .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
     let res = match lane_write.then(|| forward(r, &sent)).flatten() {
         Some(o) => o.map(|o| {

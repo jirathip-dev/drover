@@ -175,8 +175,6 @@ fn inside(e: &Event, root: &Path) -> bool {
         .map_or(wt.is_some_and(|w| w.starts_with(root)), |r| Path::new(r) == root)
 }
 
-/// `drover hosts eject <host> [<root>]` (default: its first root): no new lane goes there; each lane there is saved
-/// and restarted on the next root; then `safe to unplug <root>` once no live agent works there (exit 0), else 1.
 pub fn eject(
     ctx: &Ctx,
     cfg: &Config,

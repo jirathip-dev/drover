@@ -681,7 +681,6 @@ fn checked_out(r: &dyn Runner, local: &str, branch: &str) -> Option<String> {
     held.lines().next()?.strip_prefix("worktree ").map(String::from)
 }
 
-/// #298: `git worktree add` for a lane: its branch checked out if it exists (`have`), else made at the base.
 fn worktree_add(local: &str, p: &Plan, have: bool) -> Vec<String> {
     let wt = p.worktree.to_string_lossy();
     if have {
@@ -710,7 +709,6 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
         cmds.push(sent("shed", run));
         cmds.push(sent("shed", argv(&["send", &p.agent, "<the brief>"])));
     } else {
-        // #298: the lane is shed terminal `<agent>`, its shell typed into.
         let pane = p.agent.as_str();
         let run = term::Shed::run_params(pane, labels, &p.worktree.to_string_lossy());
         cmds.push(sent("shed", argv(&["run", &json!(run).to_string()])));
@@ -1020,7 +1018,8 @@ pub fn spawn(
     let reopen = on.exists(&p.worktree);
     // #565: the fleet's own runtime over the global one, on the lane host's wire (`On`); an ACP lane's labels and adapter.
     let bt = {
-        let b = cfg.shed_on(fleet, placed.as_ref().map(|pl| pl.name.as_str()));
+        let pl = placed.as_ref().map(|pl| pl.name.as_str());
+        let b = cfg.shed_on(fleet, pl).context(crate::config::NO_RUNTIME)?;
         let wire = on.shed().map_or(b.wire.clone(), |w| w.wire);
         // #732: an ACP lane runs its role's own agent over the runtime's.
         let acp = b
@@ -1288,8 +1287,6 @@ pub fn spawn(
             }
             Ok(())
         };
-        // #722: it failed with the branch still checked out in another worktree (an older root): that worktree's
-        // work is saved to `wip/`, it is removed and the lane's made again; a live agent there refuses.
         match make() {
             Err(e) if !reopen => {
                 let Some(held) = checked_out(r, &local, &p.branch) else {
@@ -1437,7 +1434,6 @@ pub fn spawn(
         "worktree": p.worktree, "pane": pane});
     event("spawn-started", d)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
-    // #298: the lane's terminal, then its exports and harness typed into its shell.
     bt.start(r, &pane, &labels, &wt, &acp)?;
     if bt.0.acp.is_none() {
         term::ok(r, &home(p.lane_cmd(&pane)))?;
@@ -1468,7 +1464,7 @@ pub fn spawn(
                 None => h.kick(r, &p, &pane),
             };
             let mut d = lane_data(&p, &pane);
-            d["runtime"] = json!(["shed", "shed-acp"][usize::from(bt.0.acp.is_some())]); // #609
+            d["runtime"] = json!(["shed", "shed-acp"][usize::from(bt.0.acp.is_some())]);
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d["confirmed"] = json!(confirmed);
             d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
@@ -1805,8 +1801,6 @@ fn lane_data(p: &Plan, pane: &str) -> Value {
         "pane": pane, "worktree": p.worktree, "branch": p.branch, "account": p.account.as_ref().map(|a| &a.0), "port": p.port, "qos": p.qos()})
 }
 
-/// `drover adopt`: log the lane running in `pane`; nothing is started. `extra` joins the
-/// `spawn` data (#376: an orphan's host, machine, worktree, `since`).
 pub fn adopt(
     ctx: &Ctx,
     cfg: &Config,
@@ -1829,8 +1823,6 @@ pub fn adopt(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "spawn", d))
 }
 
-/// #376: the lane a live agent looks like, `(fleet, issue, role, worktree)`: named `<fleet>-<role>-<issue>[-rN]`, or
-/// working under `work/<repo>/issue-N` (#630; or `worktrees/`; role: none) or `work/<repo>/<check role>-N-rK`.
 pub fn shaped<'a>(cfg: &'a Config, a: &Value) -> Option<(&'a str, u64, Option<String>, Option<String>)> {
     let name = a["name"].as_str().unwrap_or_default();
     let cwd = Path::new(a["cwd"].as_str().or(a["foreground_cwd"].as_str()).unwrap_or_default());
@@ -1864,10 +1856,6 @@ pub fn shaped<'a>(cfg: &'a Config, a: &Value) -> Option<(&'a str, u64, Option<St
     })
 }
 
-/// #376: each lane-shaped live agent (`shaped`, any host) of a tracked issue that no `spawn` logged: an open issue's is
-/// adopted (`spawn-adopted`, why `orphan`), so its verdict is recorded as any lane's; a done issue's, or a review whose
-/// verdict is for an old head, is closed once its unpushed work is on `wip/` (`lane-closed`, why `stale-orphan`).
-/// True when it logged any.
 pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<bool> {
     // #393: the log is read after the (slow, remote) listing, so a lane spawned meanwhile is logged.
     let agents = crate::hosts::all_agents(cfg, seen)?;

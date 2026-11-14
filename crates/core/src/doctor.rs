@@ -90,7 +90,11 @@ const TOKEN_DAYS: u64 = 300;
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, rows);
-    if cfg.runtime.kind == crate::config::RuntimeKind::Berth {
+    if cfg
+        .runtime
+        .as_ref()
+        .is_some_and(|r| r.kind == crate::config::RuntimeKind::Berth)
+    {
         let fix = format!("set kind = \"shed\" in {}", ctx.config.display());
         rows.push(format!(
             "! runtime — kind = \"berth\" is deprecated, berth is now shed → {fix}"
@@ -413,7 +417,7 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         || "✗ shed — not on the timer's PATH → drover timer install from a shell where `which shed` finds it".into(),
         |p| format!("✓ shed — {} on the timer's PATH", p.display()),
     ));
-    let ids: BTreeSet<String> = cfg.fleet.keys().filter_map(|n| cfg.shed_for(n).acp).collect();
+    let ids: BTreeSet<String> = cfg.fleet.keys().filter_map(|n| cfg.shed_for(n)?.acp).collect();
     let agents = ids
         .first()
         .and_then(|_| crate::shed::cli(r, &["agents", "--json"]).ok());

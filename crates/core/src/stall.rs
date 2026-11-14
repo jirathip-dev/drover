@@ -85,7 +85,7 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], agents: &[
             return None;
         }
         // Amendment A: an ACP session whose brief never landed as its first prompt gets it again, once.
-        let acp = sp.str("runtime") == Some("shed") && cfg.shed_for(&w.fleet).acp.is_some();
+        let acp = sp.str("runtime") == Some("shed") && cfg.shed_for(&w.fleet).is_some_and(|b| b.acp.is_some());
         let brief = sp
             .str("worktree")
             .and_then(|wt| on.read(&std::path::Path::new(wt).join(".brief.md")));

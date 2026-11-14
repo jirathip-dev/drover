@@ -1,8 +1,3 @@
-//! #345 `drover service` (docs/service.md): one supervised tokio process. A kick (a lane's push, stop or ask, a
-//! verdict, an answer, a board tap) arrives on the local socket and is driven in process at once; the fast step
-//! polls GitHub every 15 s; API v1 takes a remote lane's commands with its token and streams the event log; with
-//! `--board` the board runs in it; #529: lane state comes from shed's event stream (`lanes`). Every job has a timeout and a bounded slot; a watchdog exits the process when the
-//! loop stalls 30 s, and launchd/systemd start it again.
 use anyhow::{bail, Result};
 use drover_core::config::Config;
 use drover_core::events::{append, emit, Event};
@@ -88,7 +83,7 @@ pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::
         tokio::spawn(s.clone().watch_log());
         tokio::spawn(s.clone().poll());
         tokio::spawn(s.clone().local(local));
-        if let Some(w) = Config::load(&s.ctx.config).ok().map(|c| c.shed()) {
+        if let Some(w) = Config::load(&s.ctx.config).ok().and_then(|c| c.shed()) {
             let me = s.clone();
             std::thread::spawn(move || me.shed(&w.wire));
         }

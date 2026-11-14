@@ -448,8 +448,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             fire(ctx, cfg, out, &events, (&s.fleet, Some(s.issue)), "orphan-issue", d)?;
         }
     }
-    // #107: a live agent named like a lane (`<fleet>-<role>-<n>…`) that no `spawn` event logged; once per agent.
-    // #376: only one of no tracked issue: drive adopts (or closes) the rest.
     let tracked = fold(&events);
     for name in agents.iter().flatten().filter_map(|a| a["name"].as_str()) {
         let lane = crate::spawn::shaped(cfg, &json!({"name": name}));
@@ -684,7 +682,6 @@ fn expire(
 ) -> Result<Arc<Log>> {
     let sweep = !events.iter().any(|e| e.kind == "asks-swept") && events.iter().any(|e| e.kind == "needs-decision");
     let lists = || agents.into_iter().flatten().chain(remote.values().flatten().flatten());
-    // Unknown (shed not answering, its host offline) counts as live.
     let live = |q: &Event, a: &str| {
         let down = q
             .str("host")
@@ -1050,9 +1047,6 @@ pub fn clean_all(
 /// #605: the `snapshot` row of merged lanes' idle-since times.
 const IDLE: &str = "idle-merged";
 
-/// #557 `clean --scheduled`, the daily `dev.drover.clean` job: `clean --yes` held to lanes idle 3 days (10 a run),
-/// A refusal or failure alerts `clean-failed`
-/// once (until a run passes); a clean no-op is silent.
 pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let res = clean(ctx, cfg, r, out, None, (None, None, true), true);
     let mark = ctx.state.with_file_name("clean.failed");
@@ -1079,8 +1073,6 @@ pub fn reap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, issue): (&str, Opti
     Ok(names.len())
 }
 
-/// #186: the processes in worktrees of closed lanes (newest spawn not its issue's active lane, no live agent
-/// there) as `(pid, command, cwd)`; with `yes` each such worktree is reaped.
 pub fn leftovers(
     ctx: &Ctx,
     cfg: &Config,
@@ -1377,8 +1369,6 @@ fn sweep_off(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, off: 
     Ok(freed)
 }
 
-/// #634: lanes no trim touches: a live shed agent (a running shed terminal or ACP session) of that name, or
-/// one spawned in the last `stall_minutes`.
 pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
     let since = ctx.now.saturating_sub(cfg.limits.stall_minutes * 60);
     let events = read(&ctx.state)?;
@@ -1929,8 +1919,6 @@ fn closed_issues<'a>(
     &memo[fleet]
 }
 
-/// `git worktree remove` (never `--force`) of the re-checked tree minus `OWN_FILES` and `SHOT_DIRS`.
-/// `saved`: its work is on `wip/` (#716), so what is left goes too (`--force`).
 pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, saved: bool) -> Result<()> {
     if let Some(why) = dirty(r, Path::new(wt)).filter(|_| !saved) {
         anyhow::bail!("{why}");
@@ -1987,8 +1975,6 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
     Ok(writeln!(out, "sent Esc to {agent}")?)
 }
 
-/// `drover close`: close a non-lane shed agent's terminal (by name or pane id); files stay. Logs `closed-other`.
-/// #478: `host` picks that machine's agent when names collide (a lane is only the one its newest spawn there).
 pub fn close(
     ctx: &Ctx,
     cfg: &Config,
@@ -2214,8 +2200,6 @@ pub fn unsaved(on: &On, wt: &Path) -> bool {
     on.exists(wt) && pending(on, &wt.to_string_lossy()).is_ok_and(|p| p != (0, 0))
 }
 
-/// #664: close `pane` on the lane's host, then any pane shed there still shows for `agent` or inside `wt` (a stale id
-/// in the log, a shell its harness left); fails, naming it, unless the host confirms none is left.
 fn close_gone(on: &On, agent: &str, wt: &str, pane: &str) -> Result<()> {
     term::close(on, pane)?;
     for again in [true, false] {

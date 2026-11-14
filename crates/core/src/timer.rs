@@ -159,13 +159,11 @@ pub fn job_path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     got.unwrap_or_else(|| path(ctx, cfg, r))
 }
 
-/// The jobs' PATH: the dirs of the harness binaries, `gh`, `shed` (#600) and drover, then the system dirs
-/// (`/usr/sbin:/sbin` for `sysctl` and `vm_stat`, the #30 lesson).
 fn path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     let roles = cfg.fleet.values().flat_map(|f| f.role.values());
     let found = roles
         .map(|role| role.harness.as_str())
-        .chain(["gh", "shed", "cargo"]) // #557: `self-update` builds with cargo
+        .chain(["gh", "shed", "cargo"])
         .filter_map(|b| ok(r, "which", &[b]).ok());
     let dir = |p: String| Some(Path::new(p.trim()).parent()?.to_string_lossy().into_owned());
     let mut dirs: Vec<String> = found.chain([ctx.exe.clone()]).filter_map(dir).collect();
@@ -272,9 +270,6 @@ fn alert(ctx: &Ctx, cfg: &Config, events: &[Event], kind: &str, item: &str, reas
     emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))
 }
 
-/// `drover tick`: `check`, then `drive` (under #92's lock), the hourly clean, remote build trims, then an hourly alert per
-/// red Services row. A refusal exits 0; a real error (config, shed) logs `tick-failed`, alerted at most hourly, and
-/// exits 1. #561: one probe per remote host, 15 s per remote call; `tick.step` names the step for `tick-stuck`.
 pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let log = ctx.state.with_file_name("tick.log");
     if log.metadata().is_ok_and(|m| m.len() > 1 << 20) {
@@ -534,8 +529,6 @@ fn tick_row(ctx: &Ctx, events: &[Event]) -> (&'static str, String) {
     }
 }
 
-/// The Host tab's Services rows from the event log, the host and the stamps; `board`: the serving
-/// page's own detail, else the board is up when its address listens.
 pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) -> Vec<Row> {
     let events = crate::events::shared(&ctx.state).unwrap_or_default();
     let row = |item: &str, t, d: String, fix: &str| (item.to_string(), t, d, fix.to_string());

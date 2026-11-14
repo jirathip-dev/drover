@@ -209,7 +209,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
         .transpose()?;
     // #603: shed's lanes (#565: or one fleet's) as the CLI reaches them; `service --board` hands over a bare runner.
     let with = (r.shed().is_none())
-        .then(|| Config::kept(ctx).ok().map(|c| c.shed()))
+        .then(|| Config::kept(ctx).ok()?.shed())
         .flatten()
         .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
@@ -358,7 +358,6 @@ fn seen(q: &str, opts: &[String]) -> u64 {
     hash(&(lanes::mask(q), opts.iter().map(|o| lanes::mask(o)).collect::<Vec<_>>()))
 }
 
-/// The watcher's last look: the log's (size, mtime), the agent list read (secs, hash), last render, per-(paired, fragment) hashes.
 #[derive(Default)]
 struct Watch {
     log: Option<(u64, Option<std::time::SystemTime>)>,
@@ -723,14 +722,11 @@ fn view(ctx: &Ctx, l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> View {
     (title, tone, shown, ago(ctx.now, l.since))
 }
 
-/// The lane's wait reason while shed shows it idle, done or unknown.
 fn wait_of(l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> Option<crate::waiting::Waiting> {
     let w = waits.iter().find(|w| w.lane == l.name).cloned();
     w.filter(|_| matches!(l.state.as_str(), "idle" | "done" | "unknown" | "parked"))
 }
 
-/// #241: the theme action (docs/themes.md) a lane, issue or event shows: its role (`impl`, `fix`, `rev`, `update`)
-/// while it works, else `idle`, `done` or `blocked`. `state` is a lane's (shed) or an issue's (the log).
 pub fn act(role: &str, state: &str) -> &'static str {
     let busy = |r: &str| match r {
         "fix" => "fix",
@@ -970,7 +966,6 @@ impl<'a> Server<'a> {
         }
         let mut changed = kicked || log != w.log || driving != w.driving || now >= w.rendered + 15;
         (w.log, w.driving) = (log, driving);
-        // #337: a new snapshot is the change to show; none saved, the agent list every 2 s as before.
         let at = self.snapshot().0;
         if at.is_some() {
             changed |= hash(&at) != w.agents.1;
@@ -995,7 +990,6 @@ impl<'a> Server<'a> {
             }
             w.herd = (now, hash(&j));
         }
-        // #407: a turn that ended (the log or the agents changed) gets its thread's queued messages.
         let agents = (changed && self.addr.is_some())
             .then(|| self.agents_json(now))
             .flatten();
@@ -1418,7 +1412,6 @@ impl<'a> Server<'a> {
         })
     }
 
-    /// `agent prompt` (dsh: `pane send-text`) + Enter; logs a `prompt` event without the text.
     fn prompt(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Send) -> Result<String> {
         let (agent, text) = (f.agent.as_str(), f.text.as_str());
         let (l, fleet, pane) = self.lane(ctx, agent)?;
@@ -1893,7 +1886,6 @@ impl<'a> Server<'a> {
         })
     }
 
-    /// The agent list JSON (None when shed cannot be read).
     fn agents_json(&self, now: u64) -> Option<serde_json::Value> {
         term::list(&self.cached(now, 10)).ok()
     }
@@ -1918,13 +1910,11 @@ impl<'a> Server<'a> {
             }
         };
         let (cfg, events, st) = (&cfg, &events, &events.states);
-        // The state of an open lane shed shows no pane for: `dead`, or `parked` (#83).
         let ls = self.lanes(now, cfg, events, st).unwrap_or_default();
         let gone = |s: &IssueState| {
             s.active_lane()
                 .and_then(|x| ls.iter().find(|l| l.name == x.1 && l.pane.is_none()))
         };
-        // #205: a lane shed still lists opens its Lanes sheet; #218: a gone one its stored transcript, else none.
         let link = |a: &str| match ls.iter().any(|l| l.name == a) {
             true => "live",
             false if lanes::log(&ctx.state, a).is_some_and(|f| f.is_file()) => "gone",
@@ -2156,7 +2146,6 @@ impl<'a> Server<'a> {
         d
     }
 
-    /// The live agents joined with the log (None when shed cannot be read).
     fn lanes(&self, now: u64, cfg: &Config, events: &[Event], st: &States) -> Option<Vec<lanes::Lane>> {
         let list = self.agents_json(now)?;
         Some(crate::snapshot::lanes(
@@ -2921,7 +2910,6 @@ impl Runner for Canned {
             stderr: String::new(),
         })
     }
-    /// #721: a `shed connect` call: each request answered from `shed <method> <name>`'s JSON.
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<crate::runner::Out> {
         use crate::shed::proto::{ErrorCode, Request, Response, RpcError, VERSION};
         if prog != "shed" {
@@ -2947,7 +2935,11 @@ impl Runner for Canned {
     fn sleep(&self, _: u64) {}
     fn shed(&self) -> Option<crate::shed::Shed> {
         let wire = crate::shed::Wire::Connect;
-        Some(crate::shed::Shed { wire, acp: None, policy: "ask".into() })
+        Some(crate::shed::Shed {
+            wire,
+            acp: None,
+            policy: "ask".into(),
+        })
     }
 }
 

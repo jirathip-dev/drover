@@ -351,11 +351,7 @@ pub fn token(text: &str, now: u64) -> (String, Option<String>) {
 /// Before each bootstrap step there: the user's tool folders on PATH, and `apt_ <pkg>` installs a package.
 pub const SH: &str = "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; apt_() { sudo apt-get update -qq && \
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"$@\"; }; ";
-/// Bootstrap's steps before each harness's install, `name⇥read-back check⇥install` each (Rust with a C linker
-/// for `cargo install`).
 const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh";
-/// #637: the host's shed server job (launchd or systemd); a `shed-acp` host's also node for the ACP adapter
-/// (`{acp}`, `ACP`), and that adapter in shed's agent list.
 const SHED: &str =
     "shed job\tshed doctor >/dev/null 2>&1\tshed install --force && { { systemctl --user daemon-reload && \
 systemctl --user enable --now shed.service && { sudo loginctl enable-linger \"$USER\" || true; }; } 2>/dev/null || \
@@ -365,9 +361,6 @@ const ACP: &str = "node\tcommand -v node && command -v npx\tapt_ nodejs npm
 const RUST: &str =
     "rust\tcommand -v cargo && command -v cc\tapt_ build-essential && curl -sSf https://sh.rustup.rs | sh -s -- -y";
 
-/// #255 `hosts bootstrap <name>`: over SSH, each missing tool installed and read back (a present one skipped, so it runs
-/// again safely); the logins opened in shed terminals there for the owner; then git over HTTPS with that token and the
-/// clones of the fleets it fits. #592: no fleet.toml there. Nothing is copied from this host's logins.
 pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut dyn Write) -> Result<()> {
     let h = cfg.hosts.get(name).context("no such host")?;
     let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
@@ -426,7 +419,6 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     }
     steps += &format!("drover\t[ \"$('{exe}' --version)\" = 'drover {version}' ]\t{build}");
     steps.lines().try_for_each(&mut step)?;
-    // #637: a shed-acp host has no harness login (its lanes sign in through the proxy): gh only.
     if acp && !pass("gh auth status") {
         bail!("{name}: log in with `ssh {m} gh auth login` there, then bootstrap again");
     }

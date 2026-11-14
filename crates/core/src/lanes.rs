@@ -1,4 +1,3 @@
-//! The page's Lanes tab (docs/serve.md): live agents joined with the log, grouped, plus masked pane text.
 use crate::config::Config;
 use crate::events::{Event, States};
 use crate::providers;
@@ -91,8 +90,6 @@ pub fn join(
                 name: name.into(),
                 ..from_spawn(e, l)
             };
-            // #516: one lane per agent: a second live row for it (a remote host's) folds into
-            // the first, the busier state (blocked, then working) kept.
             if !seen.insert(name.to_string()) {
                 let rank = |s: &str| SECTIONS.iter().position(|x| *x == s).unwrap_or(2);
                 if let Some(o) = out.iter_mut().find(|o: &&mut Lane| o.name == name) {
@@ -117,7 +114,7 @@ pub fn join(
             l.fleet = fleet.map(|f| f.0.clone());
             l.role = "other".into();
             l.harness = s("agent").unwrap_or("shell").trim_end_matches("-tui").into();
-            l.name = name.map(String::from).unwrap_or_else(|| "?".into());
+            l.name = name.map_or_else(|| "?".into(), String::from);
         }
         out.push(l);
     }

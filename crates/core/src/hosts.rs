@@ -1,5 +1,3 @@
-//! #157 multi-host lanes (docs/hosts.md): `[hosts.<name>]`, their detected tags, where a new lane goes, and a lane's host
-//! as a Runner: every tool runs over `ssh`. No `[hosts]` = this host only, as before.
 use crate::config::{expand, set_in, write_atomic, Config, Fleet, HostCfg};
 use crate::events::{age, append, emit, fold, last_spawn, open_asks, read, Event, IssueState};
 use crate::gate::refused;
@@ -270,7 +268,6 @@ impl<'a> Pass<'a> {
             let _ = std::fs::write(p, m.to_string());
         }
     }
-    /// The remote host `prog args` runs on: `ssh [-o…] m -- …`.
     fn host<'b>(prog: &str, args: &'b [String]) -> Option<&'b str> {
         let end = args.iter().position(|a| a == "--").filter(|_| prog == "ssh")?;
         args[..end].last().filter(|m| !m.starts_with('-')).map(String::as_str)
@@ -765,9 +762,6 @@ pub fn under(p: &str, home: Option<&str>) -> PathBuf {
     }
 }
 
-/// #235: what is wrong with a reachable remote host, a `✗|! <check> — <detail> → <fix>` row each (none: healthy):
-/// git over SSH for each fleet its `tags` fit, gh and each harness's login (`Harness::health_check`) in a login
-/// shell, its drover's version against this one's and its shed.
 pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> Vec<String> {
     let at = |h: &(&String, &HostCfg)| h.1.machine.is_some() && h.1.machine.as_deref() == on.machine;
     if let Some(name) = cfg
@@ -792,7 +786,6 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     let gh = format!("ssh {} gh auth login", on.machine.unwrap_or_default());
     let mut logins = vec![("gh", "gh auth status", gh.as_str())];
     logins.extend(providers::lanes().filter_map(|h| h.health_check()));
-    // #235: in a login shell, as a lane's sees them.
     for (tool, c, fix) in logins {
         fail(
             ok(on, "sh", &["-lc", c]).is_ok(),
@@ -804,7 +797,6 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     let mine = format!("drover {}", crate::VERSION);
     let line = format!("! drover — {theirs} there, {mine} here → the next `check` updates it (docs/hosts.md)");
     fail(theirs == mine, line);
-    // #601: shed failing there warns; it never makes the host offline.
     if let Err(e) = host::agents(on) {
         bad.push(format!("! shed: {e:#}"));
     }
@@ -941,7 +933,6 @@ pub fn place(
     let f = cfg.fleet(fleet)?;
     let last = events.iter().rev().find(|e| e.is("spawn", fleet, issue));
     let pre = (events, last.and_then(|e| e.str("root")));
-    // #236: `--host`, else the role's `host` pin; a design lane runs on the main host only.
     let design = crate::events::STAGES.contains(&f.family(role));
     let pin = f.role.get(f.role_key(role)).and_then(|r| r.host.as_deref());
     if let Some(h) = force.or(pin).or(design.then_some("main")) {

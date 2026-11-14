@@ -1,5 +1,3 @@
-//! #721: a lane's terminal, on shed (the one lane runtime): every pane word (`*_argv`) is built here and answered by
-//! shed over `crate::shed`'s wire. A `*_argv` builder is for a command shown in a dry-run plan as well as run.
 use crate::runner::{argv, Out, Runner};
 use crate::shed;
 use anyhow::{bail, Context, Result};
@@ -22,8 +20,6 @@ impl Shed {
             Target { name: name.into() },
         )?)?)
     }
-    /// #749: ACP terminal `name`'s transcript events (`read events`), the last `n` before `seq` `before`; None when
-    /// it is no ACP terminal (a PTY's screen is read as text).
     pub fn transcript(&self, r: &dyn Runner, name: &str, before: Option<u64>, n: usize) -> Result<Option<Vec<Logged>>> {
         if self.get(r, name)?.acp.is_none() {
             return Ok(None);
@@ -150,14 +146,12 @@ impl Shed {
     }
 }
 
-/// The agent row (`agents`) or pane (`pane get`) object for shed terminal `t`.
 fn agent_of(t: &TerminalInfo) -> Value {
     let up = t.state == shed_proto::State::Running;
     json!({"name": t.name, "pane_id": t.name, "cwd": t.cwd, "agent": t.labels.get("harness").filter(|_| up),
         "agent_status": t.reported.as_ref().map_or("unknown", |s| s.state.as_str()), "terminal_title": "", "runtime": "shed", "pid": t.pid})
 }
 
-/// The shed call that does what pane word `a` does; None: no such word.
 fn request(a: &[String]) -> Option<(Method, Value)> {
     let w: Vec<&str> = a.iter().map(String::as_str).collect();
     let flag = |f: &str| w.windows(2).find(|p| p[0] == f).map(|p| p[1]);
@@ -237,7 +231,6 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
     })
 }
 
-/// A failure answer: exit 1, `{"error": {"code", "message"}}` on stderr.
 fn failed(code: &str, message: &str) -> Out {
     let stderr = json!({"error": {"code": code, "message": message}}).to_string();
     Out {
@@ -318,7 +311,6 @@ pub fn shed_line(a: &[String]) -> Vec<String> {
     request(a).map_or_else(|| a.to_vec(), |(m, v)| argv(&["shed", m.name(), &v.to_string()]))
 }
 
-/// The lane runtime `r` speaks to: its shed, else an error naming the fix.
 fn shed(r: &dyn Runner) -> Result<Shed> {
     r.shed()
         .map(Shed)

@@ -50,7 +50,10 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
     }
     let on = On::new(r, h.and_then(|h| h.machine.as_deref()));
     let b = on.shed().context("no shed runtime")?;
-    let pane = &format!("drover-setup-{name}");
+    let pane = &format!(
+        "drover-setup-{}",
+        name.replace(|c: char| !c.is_ascii_alphanumeric(), "-")
+    );
     term::Shed(crate::shed::Shed { acp: None, ..b }).start(&on, pane, &[], "/tmp", &[])?;
     term::ok(&on, &term::run_argv(pane, &[&format!("cd; {line}; exit")]))?;
     let d = json!({"host": host, "name": name, "pane": pane, "machine": on.machine, "via": via});

@@ -1,4 +1,3 @@
-//! The one seam for external tools (shed, gh, git). Tests swap in a fake.
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 use std::process::Command;
@@ -32,7 +31,6 @@ pub trait Runner: Sync {
         let sh = format!("nohup '{exe}' {args} >> '{log}' 2>&1 < /dev/null & echo $!");
         Ok(self.run("sh", &argv(&["-c", &sh]))?.stdout.trim().parse()?)
     }
-    /// #298: the shed runtime this runner's lanes use (`[runtime]`); None: no lane runtime (a bare runner).
     fn shed(&self) -> Option<crate::shed::Shed> {
         None
     }

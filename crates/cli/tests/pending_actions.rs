@@ -76,7 +76,7 @@ fn low_mem(level: &str) -> Fake {
 }
 
 fn get(c: &drover::Ctx, r: &Fake, path: &str, now: u64) -> Value {
-    let sh = drover::config::Config::load(&c.config).unwrap().shed();
+    let sh = drover::config::Config::load(&c.config).unwrap().shed().unwrap();
     let r = drover::shed::With(r, sh);
     let s = Server::new(c, &r, Some(ADDR.into()));
     serde_json::from_str(&api(&s, ADDR, "", now, path)).unwrap()

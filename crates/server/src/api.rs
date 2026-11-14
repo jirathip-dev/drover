@@ -43,8 +43,6 @@ pub struct HerdLane {
     pub effort: Option<String>,
     pub account: Option<String>,
     pub host: Option<String>,
-    // #609: the runtime the lane was spawned in (`shed`, `shed-acp`), its host, and `where`, the one label
-    // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
     pub runtime: String,
     #[serde(rename = "where")]
     pub place: String,
@@ -193,8 +191,6 @@ pub struct NeedIssue {
     pub shots: Vec<String>,
 }
 
-/// #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no
-/// fleet.toml, `failed`: shed unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
 #[allow(clippy::struct_excessive_bools)] // flags the rows' markup reads, one each
 pub struct LanesTab {
     pub now: u64,
@@ -231,10 +227,6 @@ pub struct LaneRepo {
     pub lanes: Vec<LaneRow>,
 }
 
-/// A Lanes row: its avatar (`avatar`, the runtime's `state` with `act`, #423 `grow`, `atone` and `coat`), name, `state` in
-/// `tone` for `ago`, the `why` line (`why_tone`), the activity (`activity`, or the `now` parts), `gone` (no pane), the
-/// conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its
-/// fleet is not configured), `dead` and the blocked card.
 pub struct LaneRow {
     pub name: String,
     pub role: String,
@@ -261,8 +253,6 @@ pub struct LaneRow {
     pub blocked: Option<Blocked>,
     /// #712: its issue is parked: the fleet its [unpark] posts to.
     pub unpark: Option<String>,
-    // #609: the runtime the lane was spawned in (`shed`, `shed-acp`), its host, and `where`, the one label
-    // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
     pub runtime: String,
     pub host: String,
     #[serde(rename = "where")]
@@ -571,8 +561,6 @@ pub struct Lane {
     pub shown: String,
     pub tone: String,
     pub since: u64,
-    // #609: the runtime the lane was spawned in (`shed`, `shed-acp`), its host, and `where`, the one label
-    // every surface shows (`lanes::Lane::place`: `mini · shed`, `air`, `shed`, or empty when nothing varies).
     pub runtime: String,
     pub host: String,
     #[serde(rename = "where")]
@@ -805,11 +793,6 @@ pub struct DriveAct {
     pub code: String,
 }
 
-/// A Queue row: `#issue` in its shown `state` (`tone`) for `age`, counting from `t`; its row sprite's `act`, #423 `grow`
-/// (the growth stage) and `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the
-/// pipeline `stage`, the current `lane` (`live`: shed lists it), the PR line, `dead`, red `notes` (a land note, an
-/// answer not delivered), the decision taken by default
-/// (and its ask to change it), #517 its `open` ask (answerable here), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
 #[allow(clippy::struct_excessive_bools)] // flags the row's markup reads, one each
 pub struct QueueRow {
     pub issue: u64,
@@ -867,8 +850,6 @@ pub struct PrLine {
     pub form: Option<String>,
 }
 
-/// #205: a lane the issue had, newest first: the runtime's `state` (`gone`) in `tone`, its spawn's age; `link`: `live`
-/// opens its Lanes sheet, `gone` its stored transcript, empty none.
 pub struct QueueLane {
     pub name: String,
     pub state: String,

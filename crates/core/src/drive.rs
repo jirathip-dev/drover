@@ -924,7 +924,6 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         if !(matches!(s.state.as_str(), "needs-human" | "impl") || s.state.starts_with("fix")) {
             continue;
         }
-        // An impl only once its lane ended (no live agent, no spawn starting).
         if s.state == "impl" {
             let live = match &mut agents {
                 Some(a) => a,
@@ -1528,9 +1527,6 @@ fn pass(
     Ok(go)
 }
 
-/// #491: `None` for a FAIL with its Proof blocks (recorded as usual). A proofless one is refused once per head and
-/// file content (`proof-refused`); its reviewer, still live, is prompted with the refusal once; an ended one
-/// gets a fresh review of the same head, which no verdict makes a new round.
 #[allow(clippy::too_many_arguments)]
 fn no_proof(
     ctx: &Ctx,
@@ -1555,8 +1551,6 @@ fn no_proof(
     let seen = mine
         .iter()
         .any(|e| e.str("sha") == Some(args[5]) && e.str("hash") == Some(hash));
-    // `waiting` offers a verdict only once its reviewer stopped working: one still live is told once; gone, or idle
-    // again after that, it has ended.
     let pane = sp.and_then(|e| e.str("pane"));
     let open = pane.filter(|_| agents.iter().any(|a| a["name"] == lane));
     let told = mine.iter().any(|e| e.data["prompted"] == true);
@@ -1600,7 +1594,6 @@ fn repro_seen(r: &dyn Runner, ev: &[Event], (fleet, n): (&str, u64), args: &[&st
     (hash, seen)
 }
 
-/// #607: log a `NO_REPRO` refusal (its why for `waiting`); a reviewer still live is prompted with it once.
 fn repro_refused(
     ctx: &Ctx,
     cfg: &Config,
@@ -2103,7 +2096,6 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     let (wts, into) = (wt.to_string_lossy(), format!("origin/{}", f.integration));
     git(r, &dir, &["fetch", "-q", "origin"])?;
     let checks = crate::gate::premerge_checks(ctx, f);
-    // A scratch `git worktree`: no pane, no lane.
     let tree = |a: &[&str]| git(r, &dir, &[&["worktree"][..], a].concat());
     for (_, s) in prs {
         let (n, branch) = (s.issue.to_string(), crate::gate::branch_of(Some(&s), s.issue));

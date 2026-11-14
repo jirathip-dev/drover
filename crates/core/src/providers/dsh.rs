@@ -11,7 +11,6 @@ use std::path::{Path, PathBuf};
 
 /// The dsh-TUI profile version lanes run; `drover spawn` refuses any other.
 pub const DSH_TUI_VERSION: &str = "0.17.0";
-/// The agent label dsh-TUI reports.
 const LABEL: &str = "dsh-tui";
 /// The first-run wizard's title (en, zh); it reports idle but eats the prompt.
 const WIZARD: &[&str] = &["Welcome to dsh-TUI", "欢迎使用 dsh-TUI"];
@@ -84,13 +83,11 @@ impl Provider for Dsh {
         install_pre_push(on, &ctx.exe, &p.worktree, p.family)
     }
 
-    /// Type the launch into the lane's shell.
     fn start_cmd(&self, ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
         let patch = format!("'{}'", patch_file(ctx, &p.profile).display());
         term::run_argv(pane, &["dsh-tui", "--patch", &patch])
     }
 
-    /// Settle idle (Esc skips the wizard), type kick + Enter, confirm working/blocked/done.
     fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {
         vec![
             term::pane_get_argv(pane),

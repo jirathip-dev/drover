@@ -763,7 +763,6 @@ fn once(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, line: &str) -> Resul
         return start(ctx, cfg, r, t, &shared(&ctx.state)?, line);
     };
     let (agent, pane) = (s.str("agent").unwrap_or_default(), s.str("pane").unwrap_or_default());
-    // #608: an ACP conductor takes the line as one prompt, multi-line as it is (#397: a terminal's is one line).
     if acp(s) {
         crate::shed::cli(r, &["send", agent, line])?;
         return Ok(agent.into());
@@ -783,7 +782,6 @@ fn acp(s: &Event) -> bool {
     s.str("runtime") == Some("shed-acp")
 }
 
-/// Close conductor `s`: its shed terminal.
 fn close(r: &dyn Runner, s: &Event) -> Result<()> {
     term::close(r, s.str("agent").unwrap_or_default()).map(drop)
 }
@@ -1034,11 +1032,9 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     let resume = first.is_some() && h.resumes();
     let dir = dir(ctx, cfg, id);
     let brief = dir.join(".brief.md");
-    // #397: the kick is one line (a terminal's shell line); the thread is in a file.
     let on = crate::hosts::On::new(r, None);
     let thread = dir.join(".thread.md");
     on.write(&thread, &render(&items(events, id), name(cfg, id_of(t))))?;
-    // #621: the start is typed into a shell that takes lines of at most 1,024 bytes: a long line stays in the file.
     let kick = if resume && line.len() <= 400 {
         line.replace(char::is_control, " ")
     } else {
@@ -1082,7 +1078,8 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     // #683: the conductor runs on this host: its account's env is its sign-in.
     crate::access::signed(ctx, cfg, r, (fleet, &role, false), &mut p)?;
     // #608: a shed-acp fleet's conductor is an ACP session under the same guard as its lanes (#565), or none at all.
-    let shed = cfg.shed_for(fleet);
+    let shed = cfg.shed_for(fleet).context(crate::config::NO_RUNTIME)?;
+    let wire = r.shed().map_or(shed.wire.clone(), |w| w.wire);
     let acp = match shed.acp.clone() {
         Some(aid) => match crate::spawn::acp_cmd(ctx, r, &p, &aid, None) {
             Ok(cmd) => Some(cmd),
@@ -1116,7 +1113,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         ("thread", id),
     ]
     .map(|(k, v)| (k, v.to_string()));
-    let b = term::Shed(shed);
+    let b = term::Shed(crate::shed::Shed { wire, ..shed });
     b.start(
         r,
         &agent,
@@ -1132,7 +1129,6 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
             "confirmed": kicked});
         return started(ctx, cfg, r, t, &p, d);
     }
-    // #721: a shed terminal, its exports and harness typed into its shell, as a lane's.
     term::ok(r, &p.lane_cmd(&agent))?;
     term::ok(r, &term::typed(&agent, &p.start_cmd(ctx, &agent)))?;
     let kicked = h.kick(r, &p, &agent).unwrap_or(false);

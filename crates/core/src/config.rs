@@ -25,8 +25,7 @@ pub struct Config {
     pub hosts: BTreeMap<String, HostCfg>,
     /// #303: `[[setup]]` logins a host card's [sign in] runs (`crate::setup`).
     pub setup: Vec<SetupCfg>,
-    /// #298: `[runtime]`, the shed runtime new lanes start in (docs/runtimes.md); a shed terminal when unset.
-    pub runtime: Runtime,
+    pub runtime: Option<Runtime>,
     /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
     #[serde(alias = "conductor")]
     pub orchestrator: OrchestratorCfg,
@@ -193,6 +192,8 @@ pub enum RuntimeKind {
 }
 
 /// #721: the load error for the retired runtime, with its migration.
+pub const NO_RUNTIME: &str = "no shed runtime: set [runtime] kind = \"shed-acp\" or \"shed\" (docs/runtimes.md)";
+
 pub const RETIRED_RUNTIME: &str = "runtime \"herdr\" is retired (#721): set kind = \"shed-acp\" (each lane an ACP \
      session) or \"shed\" (each lane a shed terminal); docs/runtimes.md has the migration";
 
@@ -209,8 +210,6 @@ impl TryFrom<String> for RuntimeKind {
     }
 }
 
-/// #298: `kind`, shed (default) or shed-acp; shed's `socket` (default its per-user one), and an ACP agent id its lanes run
-/// instead of the harness's terminal UI (`shed run --acp`), with shed's permission `acp_policy` (default `ask`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Runtime {
@@ -246,8 +245,6 @@ pub struct SetupCfg {
     pub env: BTreeMap<String, String>,
 }
 
-/// #157: one host: its ssh name (unset = this host), hand tags, workspace root, and whether new lanes go there.
-/// #630: or `roots`, in order: a new lane goes to the first mounted, writable one with room.
 #[derive(Debug, Deserialize)]
 pub struct HostCfg {
     pub machine: Option<String>,
@@ -1248,7 +1245,7 @@ impl Config {
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
             eprintln!("drover: [limits].max_agents is no longer used; ignoring it");
         }
-        if c.runtime.kind == RuntimeKind::Berth {
+        if c.runtime.as_ref().is_some_and(|r| r.kind == RuntimeKind::Berth) {
             eprintln!("drover: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
         }
         let levels = crate::providers::EFFORTS;
@@ -1423,7 +1420,7 @@ impl Config {
         let (Some(i), Some(v)) = (f.role.get("impl"), f.role.get("rev")) else {
             return Ok(());
         };
-        let run = self.shed_for(name).acp;
+        let run = self.shed_for(name).and_then(|b| b.acp);
         let of = |r: &Role| r.agent.clone().or_else(|| run.clone());
         let p = (of(i), of(v));
         let p = (
@@ -1467,19 +1464,15 @@ impl Config {
     }
 
     /// #565: the shed runtime fleet `name`'s new lanes start on: its own `[fleet.<n>.runtime]`, else `[runtime]`'s.
-    pub fn shed_for(&self, name: &str) -> crate::shed::Shed {
+    pub fn shed_for(&self, name: &str) -> Option<crate::shed::Shed> {
         let own = self.fleet.get(name).and_then(|f| f.runtime.as_ref());
-        own.unwrap_or(&self.runtime).shed()
+        own.or(self.runtime.as_ref()).map(Runtime::shed)
     }
 
-    /// #565: the shed server lanes are reached on: `[runtime]`'s when it names a socket, else the first fleet
-    /// runtime's, else `[runtime]`'s.
-    pub fn shed(&self) -> crate::shed::Shed {
-        let first = self.fleet.values().find_map(|f| f.runtime.as_ref());
-        first
-            .filter(|_| self.runtime.socket.is_none())
-            .unwrap_or(&self.runtime)
-            .shed()
+    pub fn shed(&self) -> Option<crate::shed::Shed> {
+        let first = || self.fleet.values().find_map(|f| f.runtime.as_ref());
+        let host = || self.hosts.keys().find_map(|h| self.host_acp(h));
+        self.runtime.as_ref().or_else(first).map(Runtime::shed).or_else(host)
     }
 
     /// #637: host `name`'s own `runtime = "shed-acp"`: the shed-acp runtime (shed's defaults), else None.
@@ -1497,9 +1490,8 @@ impl Config {
     }
 
     /// #637: the runtime fleet `fleet`'s new lanes start in on host `host`: the host's own, else the fleet's.
-    pub fn shed_on(&self, fleet: &str, host: Option<&str>) -> crate::shed::Shed {
-        host.and_then(|h| self.host_acp(h))
-            .unwrap_or_else(|| self.shed_for(fleet))
+    pub fn shed_on(&self, fleet: &str, host: Option<&str>) -> Option<crate::shed::Shed> {
+        host.and_then(|h| self.host_acp(h)).or_else(|| self.shed_for(fleet))
     }
 
     /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (#173: that fleet stops, the others run).

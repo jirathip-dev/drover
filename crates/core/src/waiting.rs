@@ -597,8 +597,6 @@ fn waits(
     }
 }
 
-/// One row per lane shed does not show `working`: the latest lane's reason (`s.lane == w.lane`), shared by the
-/// issue's older lanes, which wait on the latest one while it works. `live` refreshes the PR read, else the cache only.
 pub fn scan(
     ctx: &Ctx,
     cfg: &Config,
@@ -767,16 +765,12 @@ pub fn scan(
         if let Some(h) = spawn.filter(|_| there.machine.is_some()).and_then(|e| e.str("host")) {
             w.what = w.what.replace("review done", &format!("review done on {h}"));
         }
-        // #214: a reviewer whose lane exited (no live agent) without a verdict gets a new review round.
         if w.what.starts_with("rev idle without") && !agents.iter().any(|a| a["name"] == lane.as_str()) {
             let c = s.check.as_deref().unwrap_or("rev");
             w.who = "drive";
             w.what = "reviewer exited without a verdict: reviewing again".into();
             w.next_cmd = Some(format!("drover spawn {} {} {c} --supersede", s.fleet, s.issue));
         }
-        // #444: an impl/fix lane gone from shed, or whose prompt never landed, with no push: drive respawns it
-        // `--supersede` at most every 30 min; after two respawns in a row without a push it needs a human.
-        // #500: the build role's own lane, never the check lane that ran last.
         let built = s.build.as_ref().and_then(|b| s.lanes.get(b)).unwrap_or(&lane).clone();
         let sp = last_spawn(mine, &built);
         let unconfirmed = sp.and_then(|e| e.data.get("confirmed")) == Some(&Value::Bool(false));

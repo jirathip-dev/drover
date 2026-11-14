@@ -249,7 +249,6 @@ pub trait Provider: Sync {
     fn prepare(&self, _ctx: &Ctx, _on: &crate::hosts::On, _p: &Plan) -> Result<()> {
         Ok(())
     }
-    /// The pane words that launch the harness in `pane` (generic: its name typed into the lane's shell).
     fn start_cmd(&self, _ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
         term::run_argv(pane, &[&p.harness])
     }
@@ -261,7 +260,6 @@ pub trait Provider: Sync {
     fn takes_model(&self) -> bool {
         false
     }
-    /// The pane words that settle the harness, deliver the kick and confirm it landed.
     fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {
         vec![term::send_text_argv(pane, &p.kick), term::keys_argv(pane, "enter")]
     }
@@ -345,11 +343,9 @@ pub trait Provider: Sync {
     fn transcript(&self, _home: &Path, _wt: &str) -> Option<PathBuf> {
         None
     }
-    /// The login a host's health row checks: (tool, command, fix).
     fn health_check(&self) -> Option<(&'static str, &'static str, &'static str)> {
         None
     }
-    /// The agent labels of its panes, for the Host tab's memory row (generic: an agent's own label is its row).
     fn process_names(&self) -> &'static [&'static str] {
         &[]
     }
