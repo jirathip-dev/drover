@@ -1,0 +1,6 @@
+Decided: Lanes section headers read waiting for blocked lanes and asleep for idle ones; ids stay lanes-<state> so stream ops address them as before
+Because: q1684
+Because: crates/server/src/screens.rs:469
+Rejected: renaming the states themselves — lanes::SECTIONS feeds the old board and drive's waits; only the screen's words change
+Check: cooee_screens asserts waiting (1) and asleep (1) beside working (1); lanes.json's skeleton is unchanged
+Owner: The Lanes screen now groups lanes as working, waiting and asleep, as decided in q1684.
