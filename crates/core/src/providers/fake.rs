@@ -1,4 +1,4 @@
-use super::{Accounts, Credential, Provider};
+use super::Provider;
 use crate::herdr;
 use crate::spawn::Plan;
 use crate::Ctx;
@@ -16,13 +16,6 @@ impl Provider for Fake {
     fn env(&self) -> &'static [&'static str] {
         &["FAKE_QUIET=1"]
     }
-    fn credential(&self) -> Credential {
-        Credential::Account(Accounts {
-            provider: "fake",
-            config_env: "FAKE_HOME",
-            token_env: Some("FAKE_TOKEN"),
-        })
-    }
     fn login(&self) -> Option<&'static str> {
         Some("fake login")
     }
@@ -36,7 +29,7 @@ mod tests {
     use std::path::PathBuf;
 
     const FLEET: &str = "[fleet.app]\nrepo = \"o/app\"\nlocal = \"/x/app\"\nintegration = \"staging\"\n\
-                         [fleet.app.role.impl]\nharness = \"{h}\"\n[accounts]\nA = \"A\"\n";
+                         [fleet.app.role.impl]\nharness = \"{h}\"\n";
 
     fn config(harness: &str) -> anyhow::Result<Config> {
         Config::parse(&FLEET.replace("{h}", harness))
@@ -59,17 +52,14 @@ mod tests {
             brief: wt.join(".brief.md"),
             kick: "go".into(),
             lane: "app:1:impl".into(),
-            account: None,
             env: std::collections::BTreeMap::default(),
             port: 41000,
             mcp: serde_json::Map::default(),
             mcp_file: wt.join(".mcp.lane.json"),
             head: s(),
             title: s(),
-            resting: None,
             session: None,
             lane_key: None,
-            token: None,
         }
     }
 
@@ -104,18 +94,10 @@ mod tests {
     }
 
     #[test]
-    fn an_account_signs_in_through_its_config_folder_env() {
-        let cfg = config("fake").unwrap();
-        let env = crate::access::account_env(&cfg, &crate::runner::Real, "fake", "A").unwrap();
-        let folder = cfg.accounts.folder("A").display().to_string();
-        assert_eq!(env, [("FAKE_HOME".to_string(), folder)].into());
-    }
-
-    #[test]
     fn a_lane_launches_with_its_command_and_env() {
         let p = plan();
         assert_eq!(p.start_cmd(&ctx(), "w1:p1"), crate::herdr::run_argv("w1:p1", &["fake-cli", "--go"]));
         let shell = p.lane_cmd("w1:p1").join(" ");
-        assert!(shell.contains("FAKE_QUIET=1") && shell.contains("&& unset FAKE_TOKEN"), "{shell}");
+        assert!(shell.contains("FAKE_QUIET=1"), "{shell}");
     }
 }

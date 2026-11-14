@@ -104,10 +104,8 @@ Workflow list reads: `source=drover`, `group=<repo name>`, `item=#<issue>`, `rol
 `drover.round`. No token is ever in a label, an event, the brief or the adapter's command line.
 
 **The guard.** The adapter after `--` is the installed agent's command (`shed agents --json`), run by `sh` after the
-lane's exports (`DROVER_LANE`, `DROVER_PORT`, the fleet's `env`, `DROVER_ACCOUNT`, and #683 the role's
-account env, `account_env`'s or its folder as `CLAUDE_CONFIG_DIR`, so the adapter signs in with that login and gets no
-token; a role with no account signs in with the host's own login, an inherited token unset, and only a lane on another
-host still needs an account). It
+lane's exports (`DROVER_LANE`, `DROVER_PORT`, the fleet's `env`; #923: the adapter signs in with the host's own
+login and gets no token, and a lane on another host signs in through the main host's token proxy). It
 sets the role's model as `ANTHROPIC_MODEL`, copies the lane's synced profile (`~/.config/drover/claude/<profile>`)
 into the worktree as `.claude/settings.local.json` and `CLAUDE.local.md`, and unsets `$SHED`. The claude-acp adapter
 runs Claude Code with its user, project and local settings, so the profile's `settings.json` applies:
@@ -126,8 +124,7 @@ ACP event history (prompts, tool calls with their status, replies), not a screen
 **Fail closed (#508).** A lane that drover's hook would not guard does not start: spawn, and its dry run, refuse
 `ACP_UNGUARDED` before anything is made. That happens when the harness and adapter pair is not one known to run the
 hook (today only `claude` with `claude-acp`), when the profile's `settings.json` has no drover `PreToolUse` hook
-(run `drover profiles sync`), or when the role has no `[accounts]` token (its config folder is the profile, which
-holds no login). #637: on another host an ACP lane runs only on a `runtime = "shed-acp"` host, where its guard is
+(run `drover profiles sync`). #637: on another host an ACP lane runs only on a `runtime = "shed-acp"` host, where its guard is
 proven, and it signs in through the token proxy, never with a token there (docs/hosts.md). shed's
 `--policy` has no per-command rules, so a hook-less adapter has no fallback guard. Not carried over from a pane
 yet: the role's `effort` and its `mcp` servers (the bridge's `session/new` passes none).
@@ -138,7 +135,6 @@ and `effort`; `harness` then follows from the agent (`claude-acp` is `claude`, `
 ```toml
 [fleet.drover.role.rev]
 agent = "codex-acp"
-account = "X"        # an [accounts] folder holding Codex's own login (`CODEX_HOME`)
 model = "gpt-5.5"
 effort = "high"
 ```
@@ -149,8 +145,7 @@ provider (a role without `agent` counts as the runtime's), unless the fleet sets
 the reason comment on that line is required. The verify role may share either. A fleet naming no `agent` loads as
 before.
 
-A codex lane signs in with its account's env (`account_env`'s with `{provider}` = `codex`, else its folder as
-`CODEX_HOME`). Its guard is the same `drover hook`, given to codex-acp in its session config (`CODEX_CONFIG`, from
+A codex lane signs in with the host's own Codex login (`codex login`). Its guard is the same `drover hook`, given to codex-acp in its session config (`CODEX_CONFIG`, from
 the profile's `codex-config.json`) with Codex's hook-trust review bypassed, since a lane has no one to answer it;
 Codex hooks speak Claude Code's protocol, and an `apply_patch` edit is judged on its patch text. The role prompt goes
 first in `AGENTS.override.md`, ahead of the repo's own `AGENTS.md`. `drover config apply` runs `profiles sync`

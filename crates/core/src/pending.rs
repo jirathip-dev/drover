@@ -9,7 +9,7 @@ pub const SOFT: [&str; 10] = [
     "HOST_FULL",
     "MEM_LOW",
     "CAP",
-    "ALL_CAPPED",
+    "LOGIN_NEEDED",
     "SPAWN_PENDING",
     "SERIAL_BUSY",
     "PAUSED",
