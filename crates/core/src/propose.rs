@@ -1,4 +1,4 @@
-//! #387: `drover config propose`: a fleet.toml change (roles, models, gates, land mode, serial groups, hosts, accounts)
+//! #387: `drover config propose`: a fleet.toml change (roles, models, gates, land mode, serial groups, hosts)
 //! as a thread card with [apply] [discard]. Only the owner's tap (or `config apply`, which the lane hook refuses in a lane) applies it, with a
 //! backup, a `doctor` check and an event; settled, the card folds to the one line the thread records.
 use crate::config::{self, Config};

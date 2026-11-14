@@ -43,7 +43,6 @@ pub const STEPS: [(&str, &[&str]); 8] = [
             "spawn_pending_max_secs",
             "respawn_max",
             "respawn_window_minutes",
-            "fallback_rest_minutes",
             "overflow_after_minutes",
         ],
     ),
@@ -1411,7 +1410,7 @@ fn pass(
                 let d = json!({"role": args.get(3), "why": "exited without a verdict"});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
             }
-            // #662: a lane that exited on an account limit or adapter crash has its local commits pushed first.
+            // #662: a lane that exited on a usage limit or adapter crash has its local commits pushed first.
             let cause = crate::shed::exit_cause(&events, &w.lane).filter(|c| crate::shed::RESUMABLE.contains(c));
             if let Some(why) = cause.filter(|_| args[0] == "spawn") {
                 save(ctx, cfg, r, out, f, (&events, s.issue, &w.lane), why)?;

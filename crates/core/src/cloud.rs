@@ -456,9 +456,14 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     }
     steps += &format!("drover\t[ \"$('{exe}' --version)\" = 'drover {version}' ]\t{build}");
     steps.lines().try_for_each(&mut step)?;
-    // #637: a shed-acp host has no herdr panes and no harness login (its lanes sign in through the proxy): gh only.
-    if acp && !pass("gh auth status") {
-        bail!("{name}: log in with `ssh {m} gh auth login` there, then bootstrap again");
+    // #923: a shed-acp host has no herdr panes; its lanes sign in with its own logins, made over ssh.
+    let own = crate::providers::lanes().filter_map(|h| Some((h.health_check()?.1, h.login()?)));
+    if let Some((_, login)) = own
+        .chain([("gh auth status", "gh auth login")])
+        .filter(|_| acp)
+        .find(|t| !pass(t.0))
+    {
+        bail!("{name}: log in with `{login}` over `ssh -t {m}`, then bootstrap again");
     }
     let harness = crate::providers::lanes()
         .filter(|_| !acp)

@@ -36,7 +36,6 @@ pub mod promise;
 pub mod propose;
 pub mod protection;
 pub mod providers;
-pub mod proxy;
 pub mod queue;
 pub mod report;
 pub mod roots;

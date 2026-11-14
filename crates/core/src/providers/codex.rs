@@ -1,11 +1,10 @@
-//! #732: Codex, as its ACP adapter `codex-acp` runs it (shed-acp lanes only): its login is the account folder's own
+//! #732: Codex, as its ACP adapter `codex-acp` runs it (shed-acp lanes only): its login is the host's own
 //! (`CODEX_HOME`), its guard drover's hook in the session config (`codex-config.json`), its role `AGENTS.override.md`.
-use super::{hook_command, Accounts, Credential, Dialect, Provider, Surface};
+use super::{hook_command, Dialect, Provider, Surface};
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::json;
 use std::io::Write;
-use std::path::Path;
 
 pub struct Codex;
 pub static PROVIDER: Codex = Codex;
@@ -77,14 +76,6 @@ impl Provider for Codex {
             ("INITIAL_AGENT_MODE", "agent-full-access".into()),
         ]
     }
-    /// #785: `codex login status` in the folder: `Logged in …` or `Not logged in`.
-    fn signed_in(&self, r: &dyn crate::runner::Runner, dir: &Path) -> Option<bool> {
-        let home = format!("CODEX_HOME={}", dir.display());
-        let a = crate::runner::argv(&[&home, "codex", "login", "status"]);
-        let o = r.run("env", &a).ok()?;
-        let said = o.stdout + &o.stderr;
-        said.contains("ogged in").then(|| !said.contains("Not logged in"))
-    }
     /// The session config (model head + the profile's hooks) as `CODEX_CONFIG`; the role ahead of the repo's own
     /// `AGENTS.md` in `AGENTS.override.md`, which Codex reads in its place.
     fn acp_profile(&self, settings: &str, role: &str) -> String {
@@ -92,13 +83,6 @@ impl Provider for Codex {
         format!(
             " && export CODEX_CONFIG=\"{{$DROVER_CODEX$(tail -c +2 {cfg})\" && {{ cat {role}; cat AGENTS.md 2>/dev/null || true; }} > AGENTS.override.md"
         )
-    }
-    fn credential(&self) -> Credential {
-        Credential::Account(Accounts {
-            provider: "codex",
-            config_env: "CODEX_HOME",
-            token_env: None,
-        })
     }
     fn login(&self) -> Option<&'static str> {
         Some("codex login")

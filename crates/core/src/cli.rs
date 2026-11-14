@@ -4,7 +4,7 @@ use crate::events::{emit, read, status_line, Event};
 use crate::hosts::all_agents;
 use crate::runner::{self, Runner};
 use crate::{
-    access, check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx,
+    check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx,
 };
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -320,9 +320,6 @@ enum Cmd {
         #[command(subcommand)]
         cmd: Option<HostsCmd>,
     },
-    /// Owner only: the token proxy remote ACP lanes' model calls go through, on `[proxy] port` (#637, docs/hosts.md)
-    #[command(hide = true)]
-    Proxy,
     /// Phone page (PWA): queue, lanes, host, events; buttons for queue order, pause/resume, role model/effort
     Serve {
         #[command(subcommand)]
@@ -429,12 +426,7 @@ enum Cmd {
     },
     /// Alert once per state on stall, lane-dead, ready-unmerged, ci-missing, ask-waiting, orphan-lane, outbox-stale; idempotent, safe from cron
     Check,
-    /// Each `[accounts]` account: ok / capped until hh:mm, and the lanes on it (names only, never tokens)
-    Accounts {
-        #[command(subcommand)]
-        cmd: Option<AccountsCmd>,
-    },
-    /// Read-only host check: herdr, gh, config, accounts, harnesses, serve, phone, watchdog; ✓/✗/! with the fix per line, exit 1 on any ✗
+    /// Read-only host check: herdr, gh, config, harnesses, serve, phone, watchdog; ✓/✗/! with the fix per line, exit 1 on any ✗
     Doctor {
         #[arg(long)]
         json: bool,
@@ -544,10 +536,7 @@ enum Cmd {
         #[arg(long)]
         git_pre_push: bool,
     },
-    #[command(
-        hide = true,
-        about = "A provider's status line: records the lane account's 5h/7d limits (reads status JSON on stdin)"
-    )]
+    #[command(hide = true, about = "A provider's status line: the lane's fleet and issue")]
     Statusline,
     /// #275: log a lane's own event (`hook-denied`, `coauthor-trailer`), forwarded from a lane on another host
     #[command(hide = true)]
@@ -820,16 +809,10 @@ enum StatsCmd {
 }
 
 #[derive(Subcommand)]
-enum AccountsCmd {
-    /// Let spawns use a capped account again
-    Reset { name: String },
-}
-
-#[derive(Subcommand)]
 enum HostsCmd {
     /// Probe every host's tags again (else hourly, by `check`)
     Refresh,
-    /// Let new lanes go to this host again; logs `host-on`
+    /// Let new lanes go to this host again (#923: also ends a login hold); logs `host-on`
     On { name: String },
     /// No new lanes on this host (its lanes finish there); still monitored; logs `host-off`
     Off { name: String },
@@ -846,17 +829,6 @@ enum HostsCmd {
     /// Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`
     #[command(hide = true)]
     Snapshot { name: String },
-    /// The token proxy's per-lane keys (#637): id, state, lane, host; `revoke <id>` (owner only) ends one at once
-    Keys {
-        #[command(subcommand)]
-        cmd: Option<KeysCmd>,
-    },
-}
-
-#[derive(Subcommand)]
-enum KeysCmd {
-    /// Owner only: this key stops signing at once; logs `proxy-key-revoked`
-    Revoke { id: String },
 }
 
 #[derive(Subcommand)]
@@ -936,7 +908,6 @@ pub fn usage_doc() -> String {
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     // The owner's commands; the sections below name them.
     let owner = [
-        "accounts",
         "doctor",
         "drive",
         "kick",
@@ -1143,12 +1114,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             role,
             git_pre_push: false,
         } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
-        Cmd::Statusline => {
-            let mut buf = String::new();
-            let _ = stdin.read_to_string(&mut buf);
-            let env = |k: &str| std::env::var(k).unwrap_or_default();
-            crate::usage::statusline(ctx, &env("DROVER_ACCOUNT"), &env("DROVER_LANE"), &buf, out);
-        }
+        Cmd::Statusline => crate::usage::statusline(&std::env::var("DROVER_LANE").unwrap_or_default(), out),
         Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
         Cmd::Status(Scope { fleet, json }) => {
             let (events, all) = (read(&ctx.state)?, crate::events::states(&ctx.state)?);
@@ -1662,12 +1628,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                     Some(HostsCmd::Bootstrap { name }) => crate::cloud::bootstrap(ctx, &cfg, r, &name, out)?,
                     Some(HostsCmd::Snapshot { name }) => crate::cloud::snapshot(ctx, &cfg, r, &name)?,
-                    Some(HostsCmd::Keys { cmd: None }) => crate::proxy::list(ctx, out)?,
-                    Some(HostsCmd::Keys {
-                        cmd: Some(KeysCmd::Revoke { id }),
-                    }) => crate::proxy::revoke(ctx, &cfg, &id, out)?,
                 },
-                Cmd::Proxy => crate::proxy::serve(ctx, &cfg, r)?,
                 Cmd::SelfUpdate { dry_run, pause, resume } => {
                     return crate::update::self_update(ctx, &cfg, r, out, (dry_run, pause, resume));
                 }
@@ -1792,10 +1753,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         )?;
                     }
                 }
-                Cmd::Accounts { cmd: None } => access::list(ctx, &cfg, r, out)?,
-                Cmd::Accounts {
-                    cmd: Some(AccountsCmd::Reset { name }),
-                } => access::reset(ctx, &cfg, out, &name)?,
                 Cmd::Protection => return protection::protection(&cfg, r, out),
                 Cmd::Stats {
                     cmd: StatsCmd::Land { fleet },

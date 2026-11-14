@@ -523,11 +523,9 @@ pub const PASSIVE: &[&str] = &[
     "ci-missing",
     "notify-failed",
     "push-sent",
-    "account-capped",
-    "agent-unavailable",
-    "account-signed-out",
+    "usage-limit",
+    "signed-out",
     "lane-failed-start",
-    "cap-banner-ignored",
     "spawn-failed",
     // #724: a failed spawn drive retries after a backoff, and the alert on a third identical one.
     "spawn-error",
@@ -535,7 +533,6 @@ pub const PASSIVE: &[&str] = &[
     "spawn-started",
     // #500: an adoption is logged with its `spawn`; a design lane's alone must not end the issue's verdict wait.
     "spawn-adopted",
-    "fallback",
     "ask-waiting",
     "driven",
     "respawn",

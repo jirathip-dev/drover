@@ -166,8 +166,8 @@ pub fn seen(ctx: &Ctx) -> u64 {
         .unwrap_or(0)
 }
 
-/// #662: an ACP lane's exit causes drover resumes it from (same worktree, next account, never `LANE_ENDS`).
-pub const RESUMABLE: [&str; 2] = ["account limit", "adapter crash"];
+/// #662: an ACP lane's exit causes drover resumes it from (same worktree, never `LANE_ENDS`).
+pub const RESUMABLE: [&str; 2] = ["usage limit", "adapter crash"];
 
 /// #662: why lane `agent`'s latest session ended, as the `gone` lane-state after its last spawn logged it.
 pub fn exit_cause<'a>(events: &'a [Event], agent: &str) -> Option<&'a str> {
@@ -211,8 +211,8 @@ pub fn silent(ctx: &Ctx, mins: u64) -> Vec<(String, u64)> {
     all.filter(|s| ctx.now >= s.1 + mins * 60).collect()
 }
 
-/// One shed event as its lane's passive `lane-state` (#529: an exit or kill is `gone`; #662: with its `cause`, and an
-/// account limit caps the lane's account); whether it was a lane's.
+/// One shed event as its lane's passive `lane-state` (#529: an exit or kill is `gone`; #662: with its `cause`); whether
+/// it was a lane's.
 pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
     let (Some(fleet), Some(issue)) = (
         e.labels.get("fleet"),
@@ -275,11 +275,8 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
         EventKind::State(s) => json!({"state": s.state, "note": s.note}),
         EventKind::Exited { code } => {
             let out = last_out(ctx, &e.name, |v| *v = Value::Null)?;
-            let banner = crate::providers::accounts()
-                .and_then(|p| p.usage())
-                .map(crate::providers::Usage::cap_banner);
-            let pat = cfg.accounts.cap_pattern.as_deref().or(banner).unwrap_or_default();
-            let cause = if crate::access::banner(pat, out["text"].as_str().unwrap_or_default()) {
+            let text = out["text"].as_str().unwrap_or_default();
+            let cause = if crate::providers::lanes().any(|h| crate::providers::banner(h.cap_banner(), text)) {
                 RESUMABLE[0]
             } else if *code != Some(0) || out["turn"] == true {
                 RESUMABLE[1]
@@ -295,22 +292,7 @@ pub fn log(ctx: &Ctx, cfg: &Config, e: &shed_proto::Event) -> Result<bool> {
         _ => return Ok(false),
     };
     (d["agent"], d["shed_seq"]) = (json!(e.name), json!(e.seq));
-    let cause = d["cause"].as_str().map(String::from);
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(issue), "lane-state", d))?;
-    let sp = (cause.as_deref() == Some(RESUMABLE[0]))
-        .then(|| crate::events::read(&ctx.state))
-        .transpose()?;
-    let sp = sp.as_deref().and_then(|ev| crate::events::last_spawn(ev, &e.name));
-    if let Some((sp, a)) = sp.and_then(|sp| Some((sp, sp.str("account")?))) {
-        let why = format!("{a}: lane {} hit the usage limit; spawns skip {a} for now", e.name);
-        let d = json!({"key": format!("{}:{a}", e.name), "reason": why, "agent": e.name, "account": a,
-            "harness": sp.str("harness"), "host": sp.str("host")});
-        crate::events::emit(
-            &ctx.state,
-            cfg,
-            Event::new(ctx.now, fleet, Some(issue), "account-capped", d),
-        )?;
-    }
     Ok(true)
 }
 

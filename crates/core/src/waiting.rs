@@ -176,7 +176,7 @@ pub(crate) fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
         .take_while(|e| !reset.contains(&e.kind.as_str()))
         .filter(|e| e.kind == "respawn")
         .collect();
-    // #662: a resume after an account limit or adapter crash is no lane ending without a push.
+    // #662: a resume after a usage limit or adapter crash is no lane ending without a push.
     let resumed = |e: &&&Event| e.str("why").is_some_and(resumed);
     let n = at.iter().filter(|e| !resumed(e)).count();
     (n, at.first().map_or(0, |e| e.ts))
@@ -348,16 +348,6 @@ fn waits(
         };
         let what = format!("waits: {} {by} ({}/{})", g.name, h.len(), g.max);
         return w("drive", &what, s.last_ts, None);
-    }
-    // #104: an impl/fix/review lane whose account capped since its spawn respawns on a free one (`kill` pushes `wip/`).
-    let active = matches!(s.state.split('(').next(), Some("impl" | "fix" | "review"));
-    let spawned = last_spawn(events, &lane).filter(|_| active);
-    let since_spawn = |e: &&Event| spawned.is_some_and(|sp| e.ts >= sp.ts && e.str("account") == sp.str("account"));
-    let rest = |e: &&Event| crate::access::rests(&e.kind) && e.is(&e.kind, f, n); // #302, #640
-    if let Some(c) = events.iter().filter(since_spawn).find(rest) {
-        let role = spawned.and_then(|sp| sp.str("role")).unwrap_or_default();
-        let what = drive("account capped", "respawn on a free one");
-        return said(what, c.ts, cmd("spawn", &format!(" {role} --supersede")));
     }
     let pushed = pr["headRefOid"].as_str().unwrap_or_default();
     // #129: an auto-update moves the head without new work, so a review of the head it updated still stands.
@@ -651,10 +641,7 @@ pub fn scan(
             out.push((s, w));
             continue;
         }
-        let rested = |e: &Event| {
-            crate::access::rests(&e.kind) && sp.is_some_and(|p| e.ts >= p.ts && e.str("account") == p.str("account"))
-        };
-        if busy(&lane) && !(sp.is_some_and(|p| p.str("account").is_some()) && mine.iter().any(rested)) {
+        if busy(&lane) {
             let who = if s.check_lane() == Some(&lane) {
                 "reviewer"
             } else {
@@ -817,7 +804,7 @@ pub fn scan(
         } else if idle && (gone || unconfirmed) && settled() {
             let (n, last) = respawns(mine, &s.fleet, s.issue);
             let role = s.build.as_deref().unwrap_or(f.flow().start());
-            // #662: an ACP lane's exit cause; an account limit or adapter crash with no turn end resumes it.
+            // #662: an ACP lane's exit cause; a usage limit or adapter crash with no turn end resumes it.
             let cause = crate::shed::exit_cause(mine, &built).filter(|_| gone);
             let why = match cause {
                 Some(c) => format!("lane gone ({c})"),

@@ -71,7 +71,7 @@ pub fn fleet_of<'a>(events: &'a [Event], id: &str) -> Result<&'a str> {
 
 /// #633: `POST /api/v1/conductor-attach`: cooee thread `id` becomes `fleet`'s conductor thread (`conductor-attached`);
 /// what its profile needs: the brief, the synced settings, the env, and whether #565's ACP guard holds (`why` not).
-pub fn attach(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, id: &str) -> Result<Value> {
+pub fn attach(ctx: &Ctx, cfg: &Config, fleet: &str, id: &str) -> Result<Value> {
     let f = cfg.fleet(fleet)?;
     let (_, role) = defaults(cfg, fleet)?;
     let ok = |c: char| c.is_ascii_alphanumeric() || "-_.:".contains(c);
@@ -86,20 +86,11 @@ pub fn attach(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, id: &str) ->
     emit(&ctx.state, cfg, t.clone())?;
     let p = role.profile_or("orchestrator");
     let acp = providers::get(&role.harness).acp().unwrap_or(&role.harness);
-    // #683: the account's env is the thread's sign-in (its own login); the profile's settings go on top.
-    let acct = crate::access::pick(ctx, cfg, &events, &role).ok().flatten();
-    let acct = acct
-        .map(|a| crate::access::account_env(cfg, r, &role.harness, &a.0))
-        .transpose()?;
-    let acct = acct.unwrap_or_default();
-    let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, (!acct.is_empty(), false));
+    let why = crate::spawn::unguarded(ctx, (&p, "orchestrator", &role.harness), acp, false);
     let port = crate::spawn::lane_port(f.port_range.as_deref(), &format!("{fleet}/orchestrator-{id}"), &[]);
     let settings = providers::profiles_root(ctx).join(&p).join("settings.json");
-    let mut env = json!({"DROVER_LANE": format!("{fleet}:-:orchestrator"), "DROVER_THREAD": id,
+    let env = json!({"DROVER_LANE": format!("{fleet}:-:orchestrator"), "DROVER_THREAD": id,
         "DROVER_PORT": port.to_string()});
-    for (k, v) in acct {
-        env[k] = json!(v);
-    }
     let message = format!("{id} is {fleet}'s orchestrator thread");
     Ok(
         json!({"ok": true, "code": "OK", "message": message, "brief": profile(cfg, &t, fleet),
@@ -808,28 +799,23 @@ pub fn role<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, &'a Role)> {
     }
 }
 
-/// #404: a new thread's conductor: the role, with `[chat]`'s harness (another harness drops the role's model and
-/// accounts), model, effort and account(s) over it.
+/// #404: a new thread's conductor: the role, with `[chat]`'s harness (another harness drops the role's model),
+/// model and effort over it.
 pub fn defaults<'a>(cfg: &'a Config, repo: &str) -> Result<(&'a str, Role)> {
     let (fleet, base) = role(cfg, repo)?;
     let c = &cfg.chat;
     let mut r = on(base, c.harness.as_deref());
     r.model = c.model.clone().or(r.model);
     r.effort = c.effort.clone().or(r.effort);
-    if c.account.is_some() || !c.accounts.is_empty() {
-        (r.account, r.accounts) = (c.account.clone(), c.accounts.clone());
-    }
     Ok((fleet, r))
 }
 
-/// `r` on harness `h`: unchanged on its own, else without its model and accounts.
+/// `r` on harness `h`: unchanged on its own, else without its model.
 fn on(r: &Role, h: Option<&str>) -> Role {
     match h.filter(|h| *h != r.harness) {
         Some(h) => Role {
             harness: h.into(),
             model: None,
-            account: None,
-            accounts: vec![],
             ..r.clone()
         },
         None => r.clone(),
@@ -1025,9 +1011,9 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     let id = t.str("thread").unwrap_or_default();
     let (fleet, base) = thread_role(cfg, events, t)?;
     let f = cfg.fleet(fleet)?;
-    let (role, resting) = crate::access::fallback(cfg, events, &base, ctx.now)?;
+    let role = base;
     let h = providers::get(&role.harness);
-    // Only a session this harness started resumes (a fallback to another harness starts its own).
+    // Only a session this harness started resumes (another harness starts its own).
     // #608: an ACP session is never resumed (shed's bridge loads none): it starts fresh with the thread file.
     let first =
         of(events, id).find(|e| e.kind == "orchestrator-start" && e.str("harness") == Some(&role.harness) && !acp(e));
@@ -1068,22 +1054,16 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         brief: brief.clone(),
         kick,
         lane: format!("{fleet}:-:orchestrator"),
-        account: crate::access::pick(ctx, cfg, events, &role)?,
         env: f.env.clone(),
         port: crate::spawn::lane_port(f.port_range.as_deref(), &format!("{fleet}/{agent}"), &[]),
         mcp: crate::access::mcp_servers(cfg, f, &role)?,
         mcp_file: dir.join(".mcp.lane.json"),
         title: crate::spawn::lane_title(&head, t.str("title").unwrap_or_default()),
         head,
-        resting,
         session: Some((session.clone(), resume)),
-        lane_key: None,
-        token: None,
     };
     p.env.insert("DROVER_THREAD".into(), id.into());
     p.env.insert("DROVER_ORCHESTRATOR".into(), id_of(t).into());
-    // #683: the conductor runs on this host: its account's env is its sign-in.
-    crate::access::signed(ctx, cfg, r, (fleet, &role, false), &mut p)?;
     // #608: a shed-acp fleet's conductor is an ACP session under the same guard as its lanes (#565), or none at all.
     let shed = cfg.shed_for(fleet).filter(|b| b.acp.is_some());
     let acp = match shed.map(|b| (b.acp.clone().unwrap_or_default(), herdr::Shed(b))) {
@@ -1108,7 +1088,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     let text = profile(cfg, t, fleet);
     on.write(&brief, &text)?;
     h.prepare(ctx, &on, &p)?;
-    let _secrets = crate::spawn::deliver(ctx, &on, cfg, &p)?;
+    let _secrets = crate::spawn::deliver(ctx, &on, &p)?;
     if let Some((b, cmd)) = acp {
         let labels = [
             ("fleet", fleet),
@@ -1124,9 +1104,9 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         let kick = format!("The thread so far is in {}, the last message new.", thread.display());
         let kicked = b.kick_acp(r, &agent, &format!("{}\n\n{kick}\n\n{line}", text.trim_end()))?;
         let d = json!({"thread": id, "agent": agent, "pane": agent, "runtime": "shed-acp", "harness": p.harness,
-            "model": p.model, "effort": p.effort, "account": p.account.as_ref().map(|a| &a.0), "resumed": false,
+            "model": p.model, "effort": p.effort, "resumed": false,
             "confirmed": kicked});
-        return started(ctx, cfg, r, t, &p, d);
+        return started(ctx, cfg, t, d);
     }
     let ws = |p: &str| p.split(':').next().unwrap_or(p).to_string();
     let mine =
@@ -1147,7 +1127,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         }
         // #477: a start that timed out (or found its name taken) whose agent is up in the thread's folder is adopted.
         let has = |c: &str| herdr::failed_with(&o, c);
-        // #736: a first-start prompt (an account's config folder that never trusted this one) is answered as spawn's.
+        // #736: a first-start prompt (a config folder that never trusted this one) is answered as spawn's.
         if has("agent_not_ready") {
             let d = |prompt: &str| json!({"thread": id, "agent": agent, "pane": new, "prompt": prompt});
             let ev = |prompt: &str| Event::new(ctx.now, &t.fleet, None, "startup-prompt", d(prompt));
@@ -1206,33 +1186,21 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         herdr::reply(r, p.harness == "dsh", &agent, &pane, &line.replace('\n', " "))?;
     }
     let mut d = json!({"thread": id, "agent": agent, "pane": pane, "workspace": ws(&pane), "harness": p.harness, "model": p.model, "effort": p.effort,
-        "account": p.account.as_ref().map(|a| &a.0), "session": session, "resumed": resume, "confirmed": kicked});
+        "session": session, "resumed": resume, "confirmed": kicked});
     if o.code != 0 && !answered {
         d["adopted"] = json!(true);
     }
-    started(ctx, cfg, r, t, &p, d)
+    started(ctx, cfg, t, d)
 }
 
-/// Log conductor start `d` (and a fallback's `switched to` line); the agent.
-fn started(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, p: &Plan, d: Value) -> Result<String> {
+/// Log conductor start `d`; the agent.
+fn started(ctx: &Ctx, cfg: &Config, t: &Event, d: Value) -> Result<String> {
     let agent = d["agent"].as_str().unwrap_or_default().to_string();
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, &t.fleet, None, "orchestrator-start", d),
     )?;
-    if let Some((on, until)) = &p.resting {
-        log(
-            ctx,
-            cfg,
-            t,
-            "system",
-            (
-                &format!("switched to {} {})", &on[3..], crate::usage::date(r, *until, "+%H:%M")),
-                &[],
-            ),
-        )?;
-    }
     Ok(agent)
 }
 
@@ -1467,7 +1435,7 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
         let quiet =
             of(events, id).map(|e| e.ts).max().unwrap_or(0) + cfg.limits.orchestrator_idle_minutes * 60 <= ctx.now;
         let a = agents.iter().find(|a| a["name"] == s.data["agent"]);
-        if a.is_some() && switch(ctx, cfg, r, t, s)? {
+        if a.is_some() && signed_out(ctx, cfg, r, t, s)? {
             continue;
         }
         // #608: an ACP conductor shed no longer runs is asleep at once (the board's dot is shed's state).
@@ -1488,66 +1456,24 @@ pub fn sleep_idle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], age
     Ok(())
 }
 
-/// #387: an awake conductor showing a usage limit (or signed out) rests its account (else its harness) and resumes
-/// the same session on the role's next account or `fallback` entry; signed out, the thread gets a [sign in] line.
-fn switch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Result<bool> {
-    let (id, account, hn) = (
+/// #387: an awake conductor showing a sign-in prompt sleeps, and its thread gets a [sign in] line.
+fn signed_out(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, s: &Event) -> Result<bool> {
+    let (id, hn) = (
         t.str("thread").unwrap_or_default(),
-        s.str("account"),
         s.str("harness").unwrap_or_default(),
     );
-    // No account and no `fallback`: nothing to switch to, but a sign-out still gets its [sign in] line.
-    let chain = account.is_some() || role(cfg, &t.fleet).is_ok_and(|r| !r.1.fallback.is_empty());
-    let (screen, h) = (
-        herdr::read(r, s.str("pane").unwrap_or_default()).unwrap_or_default(),
-        providers::get(hn),
-    );
-    // #640: an account's banner caps only when its usage reading agrees; a cap is never a sign-out.
-    let limit = chain.then(|| h.usage_limited(cfg, r, &screen, ctx.now)).flatten();
-    let seen = limit.map(|u| crate::access::confirm(ctx, account, u));
-    let (seen, limit) = seen.map_or((None, None), |s| (Some(s.0), s.1));
-    let out = seen.map_or(h.signed_out(&screen), |k| k == "account-signed-out");
-    let rest = out.then(|| ctx.now + cfg.limits.fallback_rest_minutes * 60);
-    let Some(until) = limit.or(rest) else {
+    let screen = herdr::read(r, s.str("pane").unwrap_or_default()).unwrap_or_default();
+    if !providers::get(hn).signed_out(&screen) {
         return Ok(false);
-    };
-    if chain {
-        let kind = ["account-capped", "account-signed-out"][usize::from(out)];
-        let kind = account.map_or("agent-unavailable", |_| kind);
-        let until = (!out || account.is_none()).then_some(until);
-        let d = json!({"agent": s.str("agent"), "harness": hn, "account": account, "until": until});
-        emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, kind, d))?;
     }
     close(r, s)?;
-    let why = if out { "signed out" } else { "usage limit" };
-    let d = json!({"thread": id, "agent": s.str("agent"), "why": why});
+    let d = json!({"thread": id, "agent": s.str("agent"), "why": "signed out"});
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, &t.fleet, None, "orchestrator-sleep", d),
     )?;
-    if out {
-        let text = format!(
-            "{hn} is signed out{}: sign in",
-            account.map_or(String::new(), |a| format!(" (account {a})"))
-        );
-        let named = account.map(|a| format!("{hn} {a}"));
-        let su = named.filter(|n| crate::setup::all(cfg).iter().any(|s| &s.0 == n));
-        let d = json!({"thread": id, "from": "system", "text": text, "signin": su.as_deref().unwrap_or(hn)});
-        emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
-    }
-    if !chain {
-        return Ok(true);
-    }
-    let line = format!("[{id}] system: {why}; you resumed on the next account. Carry on where you left off.");
-    if let Err(e) = start(ctx, cfg, r, t, &shared(&ctx.state)?, &line) {
-        log(
-            ctx,
-            cfg,
-            t,
-            "system",
-            (&format!("the orchestrator stays asleep: {e:#}"), &[]),
-        )?;
-    }
+    let d = json!({"thread": id, "from": "system", "text": format!("{hn} is signed out: sign in"), "signin": hn});
+    emit(&ctx.state, cfg, Event::new(ctx.now, &t.fleet, None, "thread-msg", d))?;
     Ok(true)
 }

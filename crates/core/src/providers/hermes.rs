@@ -1,5 +1,5 @@
 //! Hermes: the `hooks:` key + its consent in the role's existing profile; the kick is typed at the `❯` prompt.
-use super::{attempts, hook_command, Credential, Dialect, Home, Provider, Row};
+use super::{attempts, hook_command, Dialect, Home, Provider, Row};
 use crate::config::Config;
 use crate::herdr;
 use crate::runner::{argv, Runner};
@@ -160,9 +160,6 @@ impl Provider for Hermes {
         Ok(false)
     }
 
-    fn credential(&self) -> Credential {
-        Credential::Own
-    }
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         Some(&DIALECT)
     }

@@ -246,7 +246,7 @@ impl Server<'_> {
                 if op.ends_with("-detach") {
                     return done(cfg.and_then(|c| crate::orchestrator::detach(ctx, &c, fleet, t)));
                 }
-                let a = cfg.and_then(|c| crate::orchestrator::attach(ctx, &c, &self.r, fleet, t));
+                let a = cfg.and_then(|c| crate::orchestrator::attach(ctx, &c, fleet, t));
                 match a.and_then(|v| Ok(serde_json::from_value::<ConductorAttach>(v)?)) {
                     Ok(a) => out("200 OK", &a),
                     Err(e) => done(Err(e)),
@@ -853,9 +853,6 @@ fn roots(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
 
 fn vendors(ctx: &Ctx, mut tab: crate::api::HostTab) -> crate::api::HostTab {
     let row = |(name, vendor)| crate::api::Vendor { name, vendor };
-    let v = crate::providers::accounts().and_then(|p| p.vendor());
-    let accounts = tab.accounts.iter().filter_map(|a| Some((a.name.clone(), v?.into())));
-    tab.vendors.accounts = accounts.map(row).collect();
     let setups = Config::kept(ctx).map(|c| crate::setup::vendors(&c)).unwrap_or_default();
     tab.vendors.setups = setups.into_iter().map(row).collect();
     tab

@@ -13,7 +13,6 @@ pub struct Config {
     pub fleet: BTreeMap<String, Fleet>,
     pub limits: Limits,
     pub notify: Vec<Notify>,
-    pub accounts: Accounts,
     /// MCP server names no lane is given (`*` wildcards, case-insensitive).
     #[serde(default = "mcp_deny")]
     pub mcp_deny: Vec<String>,
@@ -30,6 +29,9 @@ pub struct Config {
     /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
     #[serde(alias = "conductor")]
     pub orchestrator: OrchestratorCfg,
+    /// #923: the retired account and proxy keys still set (`Config::warnings`).
+    #[serde(skip)]
+    pub retired: Vec<String>,
     /// #780: fleet.toml still names `[conductor]` or a `role.conductor` (doctor's deprecation line).
     #[serde(skip)]
     pub old_names: bool,
@@ -41,8 +43,6 @@ pub struct Config {
     pub chat: Chat,
     /// #537: `[ci_runners]`, the owner's CI runner VMs (`crate::runners`, docs/hosts.md).
     pub ci_runners: Option<CiRunners>,
-    /// #637: `[proxy]`, the token proxy remote ACP lanes' model calls go through (`crate::proxy`, docs/hosts.md).
-    pub proxy: ProxyCfg,
     /// #894: `[self_update]`, the release branch the live install follows and the optional staging serve.
     pub self_update: SelfUpdate,
 }
@@ -62,26 +62,6 @@ impl Default for SelfUpdate {
             branch: "main".into(),
             staging_serve: false,
             staging_addr: "127.0.0.1:7787".into(),
-        }
-    }
-}
-
-/// #637: the proxy's port (on this host, and on each `shed-acp` host through an ssh tunnel), where it forwards, and how
-/// long a lane key lives.
-#[derive(Debug, Deserialize)]
-#[serde(default)]
-pub struct ProxyCfg {
-    pub port: u16,
-    pub upstream: String,
-    pub key_hours: u64,
-}
-
-impl Default for ProxyCfg {
-    fn default() -> Self {
-        ProxyCfg {
-            port: 41990,
-            upstream: crate::providers::proxied().map_or("", |p| p.upstream).into(),
-            key_hours: 12,
         }
     }
 }
@@ -119,15 +99,12 @@ pub struct ServiceCfg {
     pub url: Option<String>,
 }
 
-/// #404: the harness, model, effort and account(s) a new thread's orchestrator starts on; each unset one is the role's.
+/// #404: the harness, model and effort a new thread's orchestrator starts on; each unset one is the role's.
 #[derive(Debug, Default, Deserialize)]
 pub struct Chat {
     pub harness: Option<String>,
     pub model: Option<String>,
     pub effort: Option<String>,
-    pub account: Option<String>,
-    #[serde(default)]
-    pub accounts: Vec<String>,
 }
 
 /// #355: the conductor's instructions file, skills folder and memory notes folder (`~/` expands); #386: `dir`, the
@@ -160,7 +137,6 @@ pub const GROUPS: &[(&str, &str)] = &[
     ("clean", "`clean --yes`, `--orphans`, `--lane`"),
     ("hosts", "`hosts on|off|refresh`"),
     ("reclaim", "`reclaim`"),
-    ("accounts", "`accounts reset`"),
     ("runners", "`runners …`"),
     ("pause", "`pause`, `resume`"),
     ("set", "`set` a role's harness, model or effort"),
@@ -343,51 +319,6 @@ impl Serve {
     }
 }
 
-/// `[accounts]`: the account names (#683: each value is unused, once its token's name in the store; a lane signs in
-/// with `account_env`'s env, else its folder, `Accounts::folder`), plus the settings below.
-#[derive(Debug, Deserialize)]
-#[serde(default)]
-pub struct Accounts {
-    /// #539: retired by #441, a warning (`Config::warnings`), never a load error; its tokens still back the store's
-    /// missing ones, read-only, until the import and the line's removal.
-    pub accounts_env: Option<String>,
-    /// #683 (q846): the command (words; `{provider}` and `{name}` filled in) that prints an account's lane env as a JSON
-    /// object, e.g. `cooee accounts env {provider} {name}`; unset: `Accounts::folder` as the provider's config folder.
-    pub account_env: Option<String>,
-    /// Usage-limit banner, `|`-separated substrings (default: the harness's own, `Harness::usage_limited`).
-    pub cap_pattern: Option<String>,
-    pub cap_reset_minutes: u64,
-    /// `[accounts.usage]`: account name -> the config dir of its own harness login (`Harness::usage_meter`), read only for the usage meter.
-    pub usage: BTreeMap<String, String>,
-    /// `headroom`: spawns take the uncapped account with the most 5h/7d headroom; `order` (default): as before.
-    pub pick: Option<String>,
-    #[serde(flatten)]
-    pub names: BTreeMap<String, String>,
-}
-
-impl Accounts {
-    /// #683: account `name`'s own CLI login folder with no `account_env`: its `[accounts.usage]` one, else
-    /// `~/.config/drover/accounts/<name>`.
-    pub fn folder(&self, name: &str) -> PathBuf {
-        let d = self.usage.get(name).cloned();
-        expand(&d.unwrap_or_else(|| format!("~/.config/drover/accounts/{name}")))
-    }
-}
-
-impl Default for Accounts {
-    fn default() -> Self {
-        Accounts {
-            accounts_env: None,
-            account_env: None,
-            cap_pattern: None,
-            cap_reset_minutes: 300,
-            usage: BTreeMap::new(),
-            pick: None,
-            names: BTreeMap::new(),
-        }
-    }
-}
-
 #[derive(Debug, Deserialize)]
 pub struct Fleet {
     pub repo: String,
@@ -539,13 +470,6 @@ pub struct Role {
     pub model: Option<String>,
     /// Reasoning effort, mapped per harness (`harness::effort_ok`); `[limits].effort` when unset.
     pub effort: Option<String>,
-    /// Lanes on `[accounts]`: the account (`[accounts]` name) to run on, or an ordered fallback list.
-    pub account: Option<String>,
-    #[serde(default)]
-    pub accounts: Vec<String>,
-    /// #302: ordered `harness[:account]` entries a lane carries on with when its agent is unavailable; empty = off.
-    #[serde(default)]
-    pub fallback: Vec<String>,
     /// MCP servers (by `.mcp.json` name) the lane gets; none by default.
     #[serde(default)]
     pub mcp: Vec<String>,
@@ -562,13 +486,6 @@ pub struct Role {
 }
 
 impl Role {
-    pub fn account_list(&self) -> Vec<String> {
-        if self.accounts.is_empty() {
-            self.account.iter().cloned().collect()
-        } else {
-            self.accounts.clone()
-        }
-    }
     pub fn profile_or(&self, role: &str) -> String {
         self.profile.clone().unwrap_or_else(|| format!("fleet-{role}"))
     }
@@ -611,7 +528,6 @@ pub struct Limits {
     pub max_pushes_per_pass: usize,
     pub max_parallel_spawns: usize,
     pub spawn_pending_max_secs: u64,
-    pub fallback_rest_minutes: u64,
     pub acp_start_minutes: u64,
     pub rotate_mb: u64,
     pub webhook_poll_minutes: u64,
@@ -625,14 +541,12 @@ pub struct Limits {
     pub ssh_connect_secs: u64,
     pub ssh_quick_secs: u64,
     pub ssh_call_secs: u64,
-    pub access_probe_secs: u64,
     pub db_busy_secs: u64,
     pub db_retry_millis: u64,
     pub cloud_idle_stop_minutes: u64,
     pub notify_secs: u64,
     pub gate_check_minutes: u64,
     pub shed_read_millis: u64,
-    pub proxy_connect_secs: u64,
     pub service_call_secs: u64,
     pub disk_probe_secs: u64,
     pub disk_sick_secs: u64,
@@ -732,7 +646,6 @@ impl Default for Limits {
             max_pushes_per_pass: 3,
             max_parallel_spawns: 6,
             spawn_pending_max_secs: 300,
-            fallback_rest_minutes: 60,
             acp_start_minutes: 3,
             rotate_mb: 20,
             webhook_poll_minutes: 10,
@@ -746,14 +659,12 @@ impl Default for Limits {
             ssh_connect_secs: 10,
             ssh_quick_secs: 5,
             ssh_call_secs: 20,
-            access_probe_secs: 30,
             db_busy_secs: 60,
             db_retry_millis: 10,
             cloud_idle_stop_minutes: 20,
             notify_secs: 15,
             gate_check_minutes: 30,
             shed_read_millis: 300,
-            proxy_connect_secs: 1,
             service_call_secs: 2,
             disk_probe_secs: 2,
             disk_sick_secs: 300,
@@ -881,10 +792,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a spawn marker or kick lock older than this is stale",
     ),
     (
-        "fallback_rest_minutes",
-        "how long an unavailable agent rests when its message names no reset",
-    ),
-    (
         "acp_start_minutes",
         "an ACP lane with no event back this long after its first turn is a failed start",
     ),
@@ -927,10 +834,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a maintenance ssh's connect timeout and each pass's `ssh <host> true` probe",
     ),
     ("ssh_call_secs", "a remote call in a pass is killed after this long"),
-    (
-        "access_probe_secs",
-        "an account probe (`account_env`) is killed after this long",
-    ),
     ("db_busy_secs", "the SQLite busy timeout"),
     (
         "db_retry_millis",
@@ -952,7 +855,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "shed_read_millis",
         "how long drive's intake waits for shed's state changes",
     ),
-    ("proxy_connect_secs", "the token proxy's liveness connect timeout"),
     (
         "service_call_secs",
         "a call to the running service's socket times out after this long",
@@ -1093,7 +995,8 @@ pub const WEBPUSH_ON: &[&str] = &[
     "blocked",
     "stall",
     "lane-dead",
-    "account-signed-out",
+    "usage-limit",
+    "signed-out",
     "lane-failed-start",
     "rev-stale-replaced",
     "ready-unmerged",
@@ -1140,24 +1043,14 @@ impl Config {
     /// #539: each retired key still set, as `(key, what to do)`: doctor's `!` rows, the board's line, `check`'s
     /// `config-warning`; never a load error.
     pub fn warnings(&self) -> Vec<(&'static str, String)> {
-        let run = |_| "retired (#441): drop the line (#683: accounts sign in with their own login)".to_string();
-        let f = self.accounts.accounts_env.as_deref();
+        let gone = "removed (#923): lanes run on the host's own CLI login; delete";
+        let acct = (!self.retired.is_empty()).then(|| ("accounts", format!("{gone} {}", self.retired.join(", "))));
         let tg = "removed (#557): drover has no Telegram bridge now; drop the table".to_string();
         let tg = self.telegram.as_ref().map(|_| ("[telegram]", tg));
         let old =
             "renamed (#780): call it [orchestrator] and role.orchestrator; the old names are read for one release";
         let old = self.old_names.then(|| ("[conductor]", old.to_string()));
-        f.map(|f| ("[accounts].accounts_env", run(f)))
-            .into_iter()
-            .chain(tg)
-            .chain(old)
-            .collect()
-    }
-
-    /// #539: secret `name` from the retired `accounts_env` file, for one the store lacks; None without it.
-    pub fn legacy_secret(&self, name: &str) -> Option<String> {
-        let text = std::fs::read_to_string(expand(self.accounts.accounts_env.as_deref()?)).ok()?;
-        crate::usage::env_value(&text, name).filter(|v| !v.is_empty())
+        acct.into_iter().chain(tg).chain(old).collect()
     }
 
     pub fn load(path: &Path) -> Result<Config> {
@@ -1183,7 +1076,7 @@ impl Config {
             (_, Some(r)) => (r.msg.clone(), None),
             _ => (format!("{e:#}"), None),
         };
-        // A check's error quotes the value it rejects (`account 'C'`): its first line in the file.
+        // A check's error quotes the value it rejects (`fallback "x"`): its first line in the file.
         let quoted = msg.split(['\'', '"']).nth(1).filter(|q| !q.is_empty());
         let at = at.or_else(|| text.find(&format!("\"{}\"", quoted?)));
         let file = path.file_name().map_or("fleet.toml".into(), |f| f.to_string_lossy());
@@ -1285,15 +1178,8 @@ impl Config {
                 bail!("chat.effort: harness {h} does not support effort \"{e}\"");
             }
         }
-        if let Some(a) = ch
-            .account
-            .iter()
-            .chain(&ch.accounts)
-            .find(|a| !c.accounts.names.contains_key(*a))
-        {
-            bail!("chat: account '{a}' is not in [accounts]");
-        }
         let mut c = c;
+        c.retired = retired(&raw);
         c.old_names = raw.contains_key("conductor");
         for (name, f) in &mut c.fleet {
             if let Some(r) = f.role.remove("conductor") {
@@ -1375,16 +1261,6 @@ impl Config {
                         "fleet.{name}.role.{role}: harness must be one of {:?}",
                         crate::providers::lane_names()
                     );
-                }
-                if let Some(a) = r.account_list().iter().find(|a| !c.accounts.names.contains_key(*a)) {
-                    bail!("fleet.{name}.role.{role}: account '{a}' is not in [accounts]");
-                }
-                let bad = |e: &&String| {
-                    let (h, a) = e.split_once(':').unwrap_or((e, ""));
-                    !crate::providers::lane_names().contains(&h) || !a.is_empty() && !c.accounts.names.contains_key(a)
-                };
-                if let Some(e) = r.fallback.iter().find(bad) {
-                    bail!("fleet.{name}.role.{role}: fallback '{e}' is not harness[:account] ([accounts])");
                 }
                 if let Some(e) = r.effort_or(&c.limits) {
                     let ok = crate::providers::get(&r.harness).efforts();
@@ -1576,6 +1452,31 @@ impl Fleet {
     pub fn repo_name(&self) -> &str {
         self.repo.rsplit('/').next().unwrap_or(&self.repo)
     }
+}
+
+/// #923: the retired account, rotation and proxy keys `raw` still sets, as their fleet.toml paths.
+fn retired(raw: &toml::Table) -> Vec<String> {
+    let mut out: Vec<String> = ["accounts", "proxy"]
+        .iter()
+        .filter(|k| raw.contains_key(**k))
+        .map(|k| format!("[{k}]"))
+        .collect();
+    let keys = ["account", "accounts", "fallback"];
+    let has = |t: Option<&toml::Value>, at: &str, out: &mut Vec<String>| {
+        let t = t.and_then(toml::Value::as_table);
+        out.extend(
+            keys.iter()
+                .filter(|k| t.is_some_and(|t| t.contains_key(**k)))
+                .map(|k| format!("{at}.{k}")),
+        );
+    };
+    has(raw.get("chat"), "chat", &mut out);
+    for (f, v) in raw.get("fleet").and_then(toml::Value::as_table).into_iter().flatten() {
+        for (r, rv) in v.get("role").and_then(toml::Value::as_table).into_iter().flatten() {
+            has(Some(rv), &format!("fleet.{f}.role.{r}"), &mut out);
+        }
+    }
+    out
 }
 
 /// A value shaped like a secret: a known token prefix, a JWT, or a 32+ char letter-and-digit run between `.`/`/`/`-`/`_`

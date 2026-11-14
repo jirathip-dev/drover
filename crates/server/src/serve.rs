@@ -1,10 +1,10 @@
 //! `drover serve`, the phone page (docs/serve.md): std `TcpListener`, a thread per request (at most 16, then 503);
 //! `/live` SSE clients get a thread each, fed by the 1 s watcher thread.
 use crate::api::{
-    body, Account, Backlog, BacklogIssue, Balance, Bar, Blocked, Cell, Chat, Conductor, ConfigSheet, Disk, DoneRow,
-    Drive, DriveAct, FleetRow, Harness, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, HostCard, HostTab, LaneNow,
-    LaneRepo, LaneRow, LaneSection, LanesTab, Leftovers, Menu, Meter, Moment, NeedAsk, NeedIssue, NeedsTab, Notice,
-    Paired, PrLine, QueueCard, QueueLane, QueueRow, QueueTab, RoleRow, Row, Stage, Sub,
+    body, Backlog, BacklogIssue, Balance, Bar, Blocked, Cell, Chat, Conductor, ConfigSheet, Disk, DoneRow, Drive,
+    DriveAct, FleetRow, Harness, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, HostCard, HostTab, LaneNow, LaneRepo,
+    LaneRow, LaneSection, LanesTab, Leftovers, Menu, Moment, NeedAsk, NeedIssue, NeedsTab, Notice, Paired, PrLine,
+    QueueCard, QueueLane, QueueRow, QueueTab, RoleRow, Row, Stage, Sub,
 };
 use crate::config::{Config, Limits, Role};
 use crate::events::{age, append, shared, Event, IssueState, States};
@@ -2212,7 +2212,7 @@ impl<'a> Server<'a> {
                         harness: l.harness.clone(),
                         model: l.model.clone(),
                         effort: l.effort.clone(),
-                        account: l.account.clone(),
+                        account: None,
                         host: l.host.clone(),
                         runtime: l.runtime.clone(),
                         place: l.place.clone(),
@@ -2357,8 +2357,6 @@ impl<'a> Server<'a> {
             l.harness.clone(),
             o(&l.model),
             o(&l.effort),
-            o(&l.account),
-            o(&l.resting),
             o(&l.port),
             a,
         ];
@@ -2503,34 +2501,6 @@ impl<'a> Server<'a> {
             name,
             ..Row::default()
         };
-        for (c, name) in cfg
-            .into_iter()
-            .flat_map(|c| c.accounts.names.keys().map(move |n| (c, n)))
-        {
-            let cap = crate::access::cap_line(c, &self.r, events, name, ctx.now);
-            let login = c.accounts.usage.get(name).map_or("", String::as_str);
-            let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, &self.r, name))
-                .map(|m| crate::usage::shown(&self.r, &m, login, ctx.now));
-            let (meters, pace, hint) = match usage {
-                Some(Ok((parts, pace))) => (
-                    parts.into_iter().map(|(label, pct)| Meter { label, pct }).collect(),
-                    pace,
-                    None,
-                ),
-                Some(Err(hint)) => (vec![], None, Some(hint)),
-                None => (vec![], None, None),
-            };
-            d.accounts.push(Account {
-                name: name.clone(),
-                capped: crate::access::capped_until(c, events, name, ctx.now).is_some(),
-                tone: tone(cap.split(' ').next().unwrap_or_default()).into(),
-                hours: crate::usage::lane_hours(events, name, ctx.now),
-                cap,
-                meters,
-                pace,
-                hint,
-            });
-        }
         d.deepseek = cfg
             .and_then(|c| crate::usage::deepseek(ctx, c, &self.r))
             .map(|b| match b {
@@ -3393,7 +3363,7 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
             .unwrap_or(&r.harness)
             .into(),
         effort_default: l.effort.clone().unwrap_or_else(|| "none".into()),
-        accounts: r.account_list(),
+        accounts: vec![],
         mcp: r.mcp.clone(),
     };
     let conductor = fc.role.get("conductor").map(|r| Conductor {

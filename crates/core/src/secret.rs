@@ -1,5 +1,5 @@
 //! #707: drover keeps no secret store. A secret is a file only its owner reads (0600, refused if looser): a lane's
-//! `secret:<NAME>` env is `<config>/secrets/<NAME>`, the webhook secret, a provider key or an account's `token-file:`
+//! `secret:<NAME>` env is `<config>/secrets/<NAME>`, the webhook secret or a provider key
 //! is the file its config line names. The owner places one by hand or from a thread's masked card (paired devices
 //! only); spawn delivers a lane's to its host (`spawn::deliver`). The value never reaches the event log, the chat, a
 //! command line or a lane's output.

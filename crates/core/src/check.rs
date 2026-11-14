@@ -245,21 +245,21 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let to = (u.fleet.as_str(), u.issue);
         fire(ctx, cfg, out, &events, to, "answer-undelivered", d.into())?;
     }
-    // #785: an ACP lane silent after its first turn is a failed start, not idle: once per start, naming its account.
+    // #785: an ACP lane silent after its first turn is a failed start, not idle: once per start.
     let silent = crate::shed::silent(ctx, cfg.limits.acp_start_minutes).into_iter();
     for (sp, agent, at) in silent.filter_map(|(a, at)| Some((last_spawn(&events, &a)?, a, at))) {
-        let on = sp.str("account").map_or("its login".into(), |a| format!("account {a}"));
         let why = format!(
-            "{agent}: failed start on {on}, no event {} after its first turn",
+            "{agent}: failed start, no event {} after its first turn",
             age(ctx.now - at)
         );
-        let d = json!({"key": format!("{agent}:{at}"), "agent": agent, "account": sp.str("account"), "reason": why});
+        let d = json!({"key": format!("{agent}:{at}"), "agent": agent, "reason": why});
         fire(ctx, cfg, out, &events, (&sp.fleet, sp.issue), "lane-failed-start", d)?;
     }
+    let mut held = std::collections::BTreeSet::new();
     for s in fold(&events).values().filter(|s| !s.done()) {
         let idle = ctx.now.saturating_sub(s.last_ts);
         let mut hits = vec![];
-        let (mut capped, mut cause) = (None, None);
+        let mut cause = None;
         if let (Some(agents), Some((role, lane))) = (&agents, s.active_lane()) {
             // Agents that report their own state (dsh-TUI) can lose the name: match the lane's pane.
             let spawned = last_spawn(&events, lane);
@@ -298,42 +298,23 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     format!("{role} lane {lane} is gone ({}){why}", s.state),
                 ));
             }
-            // A lane on a named account that shows its harness's usage-limit banner caps that account.
-            // #302: with a `fallback` chain, any lane's limit or sign-out rests its account (else its harness).
-            let account = spawned.and_then(|e| e.str("account"));
-            let chain = cfg
-                .fleet(&s.fleet)
-                .is_ok_and(|f| f.role.get(role).is_some_and(|r| !r.fallback.is_empty()));
-            if let (Some(p), Some(sp), true) = (pane, spawned, status.is_some() && (account.is_some() || chain)) {
+            // #923: a usage-limit banner or sign-in prompt alerts once and holds new lanes on the host (`hosts::login_hold`).
+            if let (Some(p), Some(sp), Some(_)) = (pane, spawned, status) {
                 let screen = herdr::read(r, p).unwrap_or_default();
-                let name = account.or(sp.str("harness")).unwrap_or_default();
-                let (harness, host) = (sp.str("harness"), sp.str("host"));
-                let h = crate::providers::get(harness.unwrap_or_default());
-                // #640: an account's banner caps only when its usage reading agrees; a sign-out is never a cap.
-                let seen = match h.usage_limited(cfg, r, &screen, ctx.now) {
-                    Some(u) => Some((crate::access::confirm(ctx, account, u), "")),
-                    None if h.signed_out(&screen) => {
-                        let (rest, none) = (ctx.now + cfg.limits.fallback_rest_minutes * 60, account.is_none());
-                        let kind = ["account-signed-out", "agent-unavailable"][usize::from(none)];
-                        Some(((kind, none.then_some(rest), "sign-in prompt".into()), ":auth"))
+                let h = crate::providers::get(sp.str("harness").unwrap_or_default());
+                let seen = [(h.usage_limited(&screen), "usage-limit", "hit the usage limit")];
+                let seen = seen
+                    .into_iter()
+                    .chain([(h.signed_out(&screen), "signed-out", "is signed out")]);
+                if let Some((_, kind, what)) = seen.into_iter().find(|s| s.0) {
+                    let (host, m) = (sp.str("host").unwrap_or("main"), sp.str("machine"));
+                    let key = format!("{host}:{}", crate::hosts::held_since(&events, m));
+                    let login = h.login().unwrap_or("its CLI login");
+                    let why = format!("{role} lane {lane} {what} on {host}; new lanes there wait: run `{login}` there, then `drover hosts on {host}`");
+                    let d = json!({"key": key, "agent": lane, "host": host, "machine": m, "reason": why});
+                    if held.insert(key) {
+                        fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
                     }
-                    None => None,
-                };
-                if let Some(((kind, until, meter), auth)) = seen {
-                    let why = match kind {
-                        "cap-banner-ignored" => format!("{name}: {role} lane {lane} shows a limit banner but usage reads {meter}; {name} stays in rotation"),
-                        "account-capped" | "agent-unavailable" if auth.is_empty() => format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now"),
-                        _ => {
-                            let fix = account.map(|a| crate::access::sign_in(cfg, r, a).1);
-                            let cmd = fix.and_then(|f| Some(f.split_once(" → ")?.1.rsplit(", or ").next()?.to_string()));
-                            let fix = cmd.map_or("sign in".into(), |c| format!("sign in (`{c}`)"));
-                            let fix = format!("{fix} or replace its token");
-                            format!("{name}: {role} lane {lane} is signed out; spawns skip {name} until you {fix} (an account: then `drover accounts reset {name}`)")
-                        }
-                    };
-                    hits.push((kind, format!("{lane}:{name}{auth}"), why));
-                    let d = json!({"agent": lane, "harness": harness, "account": account, "host": host, "until": until, "meter": meter});
-                    capped = Some((kind, d));
                 }
             }
             if let Some(p) = pane.filter(|_| status.is_some()) {
@@ -411,9 +392,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
         for (kind, key, reason) in hits {
             let mut d = json!({"key": key, "reason": reason});
-            if let Some((_, serde_json::Value::Object(c))) = capped.as_ref().filter(|c| c.0 == kind) {
-                c.iter().for_each(|(k, v)| d[k] = v.clone());
-            }
             if let Some(c) = cause.filter(|_| kind == "lane-dead") {
                 d["cause"] = json!(c);
             }

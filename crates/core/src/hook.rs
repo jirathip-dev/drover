@@ -602,7 +602,6 @@ fn group(r: &[&str]) -> Option<&'static str> {
         ("clean", _) if has("--yes") || has("--orphans") || has("--lane") => "clean",
         ("hosts" | "host", Some("on" | "off" | "refresh")) => "hosts",
         ("reclaim", _) => "reclaim",
-        ("accounts", Some("reset")) => "accounts",
         ("runners", Some(_)) => "runners",
         ("pause" | "resume", _) => "pause",
         ("set", _) => "set",
@@ -621,7 +620,7 @@ pub fn group_of(cmd: &str) -> Option<&'static str> {
     })
 }
 
-/// `setup`, `serve approve|unpair|devices --revoke`, `config apply|discard`, `secret ls|rm`, `accounts import` and
+/// `setup`, `serve approve|unpair|devices --revoke`, `config apply|discard`, `secret ls|rm` and
 /// `card approve|deny`: owner-only (pre-rename `fleet` too). #538: a group verb (`clean --yes`, a design spawn, …)
 /// is a conductor's too while `[conductor] allow` has its group on, never another lane's.
 fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
@@ -637,7 +636,6 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
         (r.first(), r.get(1)),
         (Some(&"config"), Some(&("apply" | "discard")))
             | (Some(&"secret"), Some(&("ls" | "rm")))
-            | (Some(&"accounts"), Some(&"import"))
             | (Some(&"card"), Some(&("approve" | "deny" | "run")))
     ) {
         return Some(
@@ -674,11 +672,6 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
     }
     if r.first() == Some(&"setup") {
         return Some("REFUSED OWNER_ONLY: only the owner runs `drover setup`, never a lane (#303)".into());
-    }
-    if r.first() == Some(&"proxy") || r.first() == Some(&"hosts") && r.contains(&"revoke") {
-        return Some(
-            "REFUSED OWNER_ONLY: only the owner runs the token proxy or revokes its keys, never a lane (#637)".into(),
-        );
     }
     if !orchestrator && r.first() == Some(&"card") {
         return Some("REFUSED ORCHESTRATOR_ONLY: only an orchestrator posts run cards (#538)".into());

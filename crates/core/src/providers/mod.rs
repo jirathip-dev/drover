@@ -84,41 +84,14 @@ pub fn brands() -> impl Iterator<Item = &'static str> {
     all().flat_map(|p| p.brands().iter().copied())
 }
 
-/// #637: the token proxy's provider: the first that has one.
-pub fn proxied() -> Option<&'static Proxy> {
-    all().find_map(|p| p.proxy())
+/// The screen holds one of `pat`'s `|`-separated, case-insensitive substrings (a banner).
+pub fn banner(pat: &str, screen: &str) -> bool {
+    let (screen, pat) = (screen.to_lowercase(), pat.to_lowercase());
+    pat.split('|').any(|p| !p.is_empty() && screen.contains(p))
 }
 
 /// Effort levels a role may set (`effort = "…"`).
 pub const EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
-
-/// How a harness's lanes sign in: unknown, an `[accounts]` account of this provider (`access::pick`; #683: its env from
-/// `access::account_env`), or the harness's own login on the host.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Credential {
-    None,
-    Account(Accounts),
-    Own,
-}
-
-/// What an `[accounts]` account is to its provider.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Accounts {
-    pub provider: &'static str,
-    pub config_env: &'static str,
-    pub token_env: Option<&'static str>,
-}
-
-/// #637: what the token proxy needs from the provider it fronts.
-pub struct Proxy {
-    pub upstream: &'static str,
-    pub base_url_env: &'static str,
-    pub auth_token_env: &'static str,
-    pub headers: fn(&[Header]) -> Vec<Header>,
-}
-
-/// A forwarded HTTP header: its lowercase name and its value.
-pub type Header = (String, String);
 
 /// A provider's own folder under `~`, its env var overriding it.
 pub struct Home {
@@ -164,31 +137,6 @@ pub fn dialects() -> impl Iterator<Item = &'static Dialect> {
     known().filter_map(|h| get(h).hook_dialect())
 }
 
-/// A usage window: used %, reset epoch, either unread.
-#[derive(Clone, Copy, Default, PartialEq, Debug)]
-pub struct Window {
-    pub used: Option<f64>,
-    pub resets: Option<u64>,
-}
-
-/// An account's limits: its session and its weekly window.
-#[derive(Clone, Copy, Default, PartialEq, Debug)]
-pub struct Limits {
-    pub session: Window,
-    pub week: Window,
-}
-
-/// A provider's usage meter for an `[accounts]` login (#258; #707: its status line only, no poll).
-pub trait Usage: Sync {
-    fn reading(&self, status_line: &Value) -> Limits;
-    fn cap_banner(&self) -> &'static str;
-}
-
-/// The provider `[accounts]` are for: the first lane provider that runs on one.
-pub fn accounts() -> Option<Entry> {
-    lanes().find(|h| matches!(h.credential(), Credential::Account(_)))
-}
-
 pub trait Provider: Sync {
     fn surface(&self) -> Surface {
         Surface::Terminal
@@ -198,9 +146,6 @@ pub trait Provider: Sync {
     }
     fn brands(&self) -> &'static [&'static str] {
         &[]
-    }
-    fn proxy(&self) -> Option<&'static Proxy> {
-        None
     }
     fn efforts(&self) -> &'static [&'static str] {
         EFFORTS
@@ -280,22 +225,14 @@ pub trait Provider: Sync {
     fn acp(&self) -> Option<&'static str> {
         None
     }
-    /// #565: the env its ACP adapter reads its model (#732: and effort) from (#683: its config folder is the account's, `Plan::lane_cmd`).
+    /// #565: the env its ACP adapter reads its model (#732: and effort) from.
     fn acp_env(&self, _model: Option<&str>, _effort: Option<&str>) -> Vec<(&'static str, String)> {
         Vec::new()
-    }
-    /// #785: whether config folder `dir` is signed in, as its CLI's own status command says (None: no answer).
-    fn signed_in(&self, _r: &dyn Runner, _dir: &Path) -> Option<bool> {
-        None
     }
     /// #565: the shell words that put a lane's profile (`settings.json`, `role.md`, both quoted) where its ACP
     /// adapter reads them in the worktree (generic: none).
     fn acp_profile(&self, _settings: &str, _role: &str) -> String {
         String::new()
-    }
-    /// How its lanes sign in (generic: unknown).
-    fn credential(&self) -> Credential {
-        Credential::None
     }
     /// The interactive login a person runs for it (setup panes, login hints).
     fn login(&self) -> Option<&'static str> {
@@ -309,13 +246,17 @@ pub trait Provider: Sync {
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         None
     }
-    /// Its accounts' usage meter (generic: none).
-    fn usage(&self) -> Option<&'static dyn Usage> {
+    /// #708: the env var a login shell's token would override its own login with (generic: none).
+    fn token_env(&self) -> Option<&'static str> {
         None
     }
-    /// The pane shows a usage-limit banner: until when.
-    fn usage_limited(&self, _cfg: &crate::config::Config, _r: &dyn Runner, _screen: &str, _now: u64) -> Option<u64> {
-        None
+    /// Its usage-limit banner, `|`-separated substrings (generic: none).
+    fn cap_banner(&self) -> &'static str {
+        ""
+    }
+    /// The pane shows a usage-limit banner.
+    fn usage_limited(&self, _screen: &str) -> bool {
+        false
     }
     /// The pane shows a signed-out error (#302).
     fn signed_out(&self, _screen: &str) -> bool {

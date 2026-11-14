@@ -1,8 +1,5 @@
 //! Claude Code: per-role settings.json (`PreToolUse` hook) + role.md; the kick goes in as argv.
-mod meter;
-
-use super::{hook_command, Accounts, Credential, Dialect, Header, Provider, Proxy, Usage};
-use crate::config::Config;
+use super::{banner, hook_command, Dialect, Provider};
 use crate::herdr;
 use crate::lanes::{chat, mask, strip};
 use crate::runner::Runner;
@@ -18,29 +15,9 @@ const SETTINGS: &str = include_str!("../../hooks/claude-settings.json");
 pub struct Claude;
 pub static PROVIDER: Claude = Claude;
 
-const BETA_HEADER: &str = "anthropic-beta";
-const OAUTH_BETA: &str = "oauth-2025-04-20";
 /// #770: what `acp_profile` copies into a worktree (the lane's own files, never its work) and the folder it makes.
 pub const LOCAL_FILES: [&str; 2] = ["CLAUDE.local.md", ".claude/settings.local.json"];
 pub const LOCAL_DIR: &str = ".claude/";
-
-static PROXY: Proxy = Proxy {
-    upstream: "https://api.anthropic.com",
-    base_url_env: "ANTHROPIC_BASE_URL",
-    auth_token_env: "ANTHROPIC_AUTH_TOKEN",
-    headers,
-};
-
-fn headers(kept: &[Header]) -> Vec<Header> {
-    let sent = kept.iter().find(|h| h.0 == BETA_HEADER).map_or("", |h| h.1.as_str());
-    let mut beta: Vec<&str> = sent.split(',').map(str::trim).filter(|b| !b.is_empty()).collect();
-    if !beta.contains(&OAUTH_BETA) {
-        beta.push(OAUTH_BETA);
-    }
-    let head = (BETA_HEADER.to_string(), beta.join(","));
-    let rest = kept.iter().filter(|h| h.0 != BETA_HEADER).cloned();
-    std::iter::once(head).chain(rest).collect()
-}
 
 const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
 
@@ -87,9 +64,6 @@ impl Provider for Claude {
     }
     fn brands(&self) -> &'static [&'static str] {
         &["claude", "anthropic"]
-    }
-    fn proxy(&self) -> Option<&'static Proxy> {
-        Some(&PROXY)
     }
     fn sync(&self, ctx: &Ctx, role: &str, prompt: &str, profile: &str, usage: &str, out: &mut dyn Write) -> Result<()> {
         let dir = root(ctx).join(profile);
@@ -183,24 +157,10 @@ impl Provider for Claude {
     fn acp_env(&self, model: Option<&str>, _effort: Option<&str>) -> Vec<(&'static str, String)> {
         model.map(|m| ("ANTHROPIC_MODEL", m.to_string())).into_iter().collect()
     }
-    /// #785: `claude auth status` in the folder, the shell's token unset (a stale login file is no sign-in).
-    fn signed_in(&self, r: &dyn Runner, dir: &Path) -> Option<bool> {
-        let dir = format!("CLAUDE_CONFIG_DIR={}", dir.display());
-        let a = ["-u", "CLAUDE_CODE_OAUTH_TOKEN", &dir, "claude", "auth", "status"];
-        let o = r.run("env", &crate::runner::argv(&a)).ok()?;
-        serde_json::from_str::<serde_json::Value>(&o.stdout).ok()?["loggedIn"].as_bool()
-    }
     /// claude-agent-acp reads Claude Code's local project settings and `CLAUDE.local.md`.
     fn acp_profile(&self, settings: &str, role: &str) -> String {
         let [md, json] = LOCAL_FILES;
         format!(" && mkdir -p .claude && cp {settings} {json} && cp {role} {md}")
-    }
-    fn credential(&self) -> Credential {
-        Credential::Account(Accounts {
-            provider: "claude",
-            config_env: "CLAUDE_CONFIG_DIR",
-            token_env: Some("CLAUDE_CODE_OAUTH_TOKEN"),
-        })
     }
     fn login(&self) -> Option<&'static str> {
         Some("claude /login")
@@ -211,16 +171,17 @@ impl Provider for Claude {
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         Some(&DIALECT)
     }
-    fn usage(&self) -> Option<&'static dyn Usage> {
-        Some(&meter::Meter)
+    fn token_env(&self) -> Option<&'static str> {
+        Some("CLAUDE_CODE_OAUTH_TOKEN")
     }
-    fn usage_limited(&self, cfg: &Config, r: &dyn Runner, screen: &str, now: u64) -> Option<u64> {
-        let pat = cfg.accounts.cap_pattern.as_deref().unwrap_or(CAP_PATTERN);
-        let s = own_lines(screen);
-        crate::access::banner(pat, &s).then(|| crate::access::cap_until(cfg, r, &s, now))
+    fn cap_banner(&self) -> &'static str {
+        CAP_PATTERN
+    }
+    fn usage_limited(&self, screen: &str) -> bool {
+        banner(CAP_PATTERN, &own_lines(screen))
     }
     fn signed_out(&self, screen: &str) -> bool {
-        crate::access::banner(AUTH_PATTERN, &own_lines(screen))
+        banner(AUTH_PATTERN, &own_lines(screen))
     }
 
     /// #276: `✻ Herding… (4m 12s · ↓ 3k tokens)` is (`✻ Herding…`, `4m`).
