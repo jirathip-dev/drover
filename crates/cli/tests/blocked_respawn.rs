@@ -248,3 +248,33 @@ fn a_lane_ends_after_an_idle_trim_gets_one_respawn() {
     assert!(kinds(&c, "repaired").is_empty(), "{out}");
     assert_eq!(state(&c), "needs-human");
 }
+
+#[test]
+fn a_needs_human_issue_with_an_untrimmed_repair_in_its_history_drives_on() {
+    let (c, r, _sh) = lane("untrimmed-repair", "t");
+    ev(
+        &c,
+        15,
+        12,
+        "repaired",
+        json!({"state": "queued", "reason": "blocked by #7"}),
+    );
+    ev(
+        &c,
+        20,
+        12,
+        "lane-trimmed",
+        json!({"agent": LANE, "killed": ["claude"], "freed_mb": 9}),
+    );
+    ev(
+        &c,
+        21,
+        12,
+        "lane-state",
+        json!({"agent": LANE, "state": "gone", "why": "exited", "code": 0}),
+    );
+    lane_ends(&c, 24);
+    let (out, steps) = drive(&c, &r);
+    assert!(out.contains("sendmeter #12 repaired: back to impl"), "{out}");
+    assert_eq!(steps, ["respawn"], "{out}");
+}
