@@ -749,8 +749,42 @@ pub fn all_agents(cfg: &Config, r: &dyn Runner) -> Result<Vec<Value>> {
     Ok([host::agents(r)?, remote_agents(cfg, r)].concat())
 }
 
-/// Admission on one host, in order `DISK_LOW`, `MEM_LOW`, `HOST_BUSY`: its sample and the first refusal.
+/// #923: when the host on `machine` (None: the main one) last had new lanes let back on (`host-on`), else 0.
+pub fn held_since(events: &[Event], machine: Option<&str>) -> u64 {
+    let on = |e: &&Event| e.kind == "host-on" && e.str("machine") == machine;
+    events.iter().rfind(on).map_or(0, |e| e.ts)
+}
+
+/// #923: the alert holding new lanes off the host on `machine`: a lane's usage limit or sign-out since its last `host-on`.
+pub fn login_hold<'a>(events: &'a [Event], machine: Option<&str>) -> Option<&'a str> {
+    let at = |kinds: &[&str]| {
+        events
+            .iter()
+            .rposition(|e| kinds.contains(&e.kind.as_str()) && e.str("machine") == machine)
+    };
+    let i = at(&["usage-limit", "signed-out"])?;
+    (at(&["host-on"]) < Some(i)).then(|| events[i].str("reason")).flatten()
+}
+
+/// #923: the data of the alert that holds new lanes off spawn `sp`'s host because its lane `what` (keyed once per hold).
+pub fn hold_alert(events: &[Event], sp: &Event, what: &str) -> Value {
+    let (host, m, lane) = (sp.str("host").unwrap_or("main"), sp.str("machine"), sp.str("agent"));
+    let key = format!("{host}:{}", held_since(events, m));
+    let login = crate::providers::get(sp.str("harness").unwrap_or_default()).login();
+    let login = login.unwrap_or("its CLI login");
+    let why = format!(
+        "{} lane {} {what} on {host}; new lanes there wait: run `{login}` there, then `drover hosts on {host}`",
+        sp.str("role").unwrap_or_default(),
+        lane.unwrap_or_default()
+    );
+    json!({"key": key, "agent": lane, "host": host, "machine": m, "reason": why})
+}
+
+/// Admission on one host, in order `LOGIN_NEEDED`, `DISK_LOW`, `MEM_LOW`, `HOST_BUSY`: its sample and the first refusal.
 pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, String)>) {
+    if let Some(why) = login_hold(&working(&ctx.state).unwrap_or_default(), on.machine) {
+        return (Host::default(), Some(("LOGIN_NEEDED", why.to_string())));
+    }
     if let Some(why) = disk_low(ctx, cfg, on) {
         return (Host::default(), Some(("DISK_LOW", why)));
     }
@@ -1320,15 +1354,22 @@ pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, refres
 pub fn toggle(ctx: &Ctx, out: &mut dyn Write, name: &str, on: bool, by: &str) -> Result<()> {
     let text = std::fs::read_to_string(&ctx.config)?;
     let cfg = Config::parse(&text)?;
-    match cfg.hosts.get(name) {
+    let events = working(&ctx.state)?;
+    let machine = match cfg.hosts.get(name) {
+        None if on && name == "main" && login_hold(&events, None).is_some() => None,
         None => bail!("no [hosts.{name}] in fleet.toml"),
         Some(h) if !on && h.machine.is_none() => return refused("MAIN_HOST", "main host: edit fleet.toml by hand"),
-        _ => {}
-    }
-    let new = set_in(&text, &format!("[hosts.{name}]"), "enabled", &on.to_string())?;
-    write_atomic(&ctx.config, &new)?;
+        Some(h) => {
+            let new = set_in(&text, &format!("[hosts.{name}]"), "enabled", &on.to_string())?;
+            write_atomic(&ctx.config, &new)?;
+            h.machine.as_deref()
+        }
+    };
     let word = if on { "on" } else { "off" };
-    let (kind, d) = (format!("host-{word}"), json!({"host": name, "by": by}));
+    let (kind, d) = (
+        format!("host-{word}"),
+        json!({"host": name, "machine": machine, "by": by}),
+    );
     emit(&ctx.state, &cfg, Event::new(ctx.now, "drover", None, &kind, d))?;
     Ok(writeln!(out, "{name}: {word} for new lanes")?)
 }

@@ -42,11 +42,10 @@ pub const STEPS: [(&str, &[&str]); 8] = [
             "spawn_pending_max_secs",
             "respawn_max",
             "respawn_window_minutes",
-            "fallback_rest_minutes",
             "overflow_after_minutes",
         ],
     ),
-    ("backlog, checkpoint", &["rotate_mb"]),
+    ("backlog", &[]),
 ];
 /// #677: drive's one prompt on a `done` whose why note was refused.
 pub const WHY_NUDGE: &str = "your `turn done` was refused: ";
@@ -542,7 +541,8 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
         None => PAST.iter().find(|d| d.starts_with(step)).map_or(step, |d| d).into(),
         Some("HOST_BUSY") => format!("Mac busy ({why})"),
         Some("DISK_LOW") => format!("disk nearly full ({why})"),
-        Some("CAP" | "ALL_CAPPED") => "lane limit or usage cap reached".into(),
+        Some("CAP") => "lane limit reached".into(),
+        Some("LOGIN_NEEDED") => format!("login needed ({why})"),
         Some("CI_NOT_GREEN") => "waiting for CI".into(),
         Some("SPAWN_PENDING") => match why.split_once(": ") {
             Some((_, by)) => crate::promise::Say::SpawnSlot(Some(by.into())).line(),
@@ -824,11 +824,8 @@ pub fn drive(
         }
         crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: stale panes: {e:#}"));
         crate::check::dedup(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: lane-dup: {e:#}"));
-        let max = cfg.limits.rotate_mb << 20;
-        let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
-        cp.unwrap_or_else(|e| eprintln!("drover: checkpoint: {e:#}"));
     }
-    lap("backlog, checkpoint");
+    lap("backlog");
     let secs = t0.elapsed().as_secs_f64();
     if t0.elapsed().as_secs() > cfg.limits.pass_max_secs {
         let r1 = |x: f64| (x * 10.0).round() / 10.0;
@@ -1562,13 +1559,21 @@ fn serial(
         .rev()
         .find(|e| e.is("serial-held", fleet, n))
         .and_then(|e| e.val("holder").as_u64());
+    let pos = |i: u64| (q.iter().position(|x| x.issue == i).unwrap_or(usize::MAX), i);
     for (g, p) in &new {
         writeln!(out, "{fleet} #{n} serial-joined {}: {p}", g.name)?;
         let d = json!({"group": g.name, "by": "diff", "path": p});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-joined", d))?;
         let h = queue::holders(&ev, &st, f, fleet, &g.name);
-        if !old && (wait || h.len() >= g.max) {
-            let h = h.first().map(|h| h.issue).or(by).unwrap_or(0);
+        let hot = queue::hot(g);
+        let ahead = st.values().find(|x| {
+            hot && x.fleet == fleet
+                && queue::in_flight(&x.state)
+                && queue::held(&ev, fleet, x.issue, &g.name)
+                && pos(x.issue) < pos(n)
+        });
+        if (!old || hot) && (wait || h.len() >= g.max || ahead.is_some()) {
+            let h = h.first().or(ahead.as_ref()).map(|h| h.issue).or(by).unwrap_or(0);
             by = Some(h);
             let d = json!({"group": g.name, "holder": h});
             emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-held", d))?;
@@ -1579,18 +1584,17 @@ fn serial(
             (wait, text) = (true, text.or(Some(stop)));
         }
     }
-    let (now, mut blocker) = (working(&ctx.state)?, None);
-    for g in queue::groups(&q, &now, f, fleet, n) {
-        let h = queue::held(&now, fleet, n, &g.name);
-        if let (false, Some(b)) = (h, blocker) {
+    let now = working(&ctx.state)?;
+    let gs = queue::groups(&q, &now, f, fleet, n);
+    let atomic = |i: u64| queue::groups(&q, &now, f, fleet, i).iter().any(queue::hot);
+    if let Some(at) = gs.iter().position(|g| queue::held(&now, fleet, n, &g.name)) {
+        let last = (now.iter().rev()).find(|e| e.is("serial-held", fleet, n) && e.str("group") == Some(&gs[at].name));
+        let b = last.and_then(|e| e.val("holder").as_u64()).unwrap_or(0);
+        let all = atomic(n);
+        for (_, g) in (gs.iter().enumerate()).filter(|(i, g)| (all || *i > at) && !queue::held(&now, fleet, n, &g.name))
+        {
             let d = json!({"group": g.name, "holder": b, "by": "order"});
             emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-held", d))?;
-        } else if h && blocker.is_none() {
-            let last = now
-                .iter()
-                .rev()
-                .find(|e| e.is("serial-held", fleet, n) && e.str("group") == Some(&g.name));
-            blocker = Some(last.and_then(|e| e.val("holder").as_u64()).unwrap_or(0));
         }
     }
     if let (Some(text), Some(lane)) = (text, s.lane.as_deref()) {
@@ -1603,8 +1607,13 @@ fn serial(
     if !wait || fast || !new.is_empty() {
         return Ok(wait);
     }
-    let pos = |i: u64| q.iter().position(|x| x.issue == i).unwrap_or(usize::MAX);
-    for g in mine.into_iter().filter(|g| queue::held(&ev, fleet, n, &g.name)) {
+    let ev = working(&ctx.state)?;
+    let atomic = |i: u64| queue::groups(&q, &ev, f, fleet, i).iter().any(queue::hot);
+    let mut slots = vec![];
+    for g in queue::groups(&q, &ev, f, fleet, n)
+        .into_iter()
+        .filter(|g| queue::held(&ev, fleet, n, &g.name))
+    {
         let first_held = |i: u64| {
             queue::groups(&q, &ev, f, fleet, i)
                 .into_iter()
@@ -1614,13 +1623,20 @@ fn serial(
             x.fleet == fleet
                 && queue::in_flight(&x.state)
                 && queue::held(&ev, fleet, x.issue, &g.name)
-                && (x.issue == n || first_held(x.issue).is_some_and(|y| y.name == g.name))
+                && (x.issue == n || atomic(x.issue) || first_held(x.issue).is_some_and(|y| y.name == g.name))
         };
-        let first = st.values().filter(waits).min_by_key(|x| (pos(x.issue), x.issue));
+        let first = st.values().filter(waits).min_by_key(|x| pos(x.issue));
         if queue::holders(&ev, &st, f, fleet, &g.name).len() >= g.max || first.map(|x| x.issue) != Some(n) {
             return Ok(true);
         }
         let e = Event::new(ctx.now, fleet, Some(n), "serial-slot", json!({"group": g.name}));
+        if atomic(n) {
+            slots.push(e);
+        } else {
+            emit(&ctx.state, cfg, e)?;
+        }
+    }
+    for e in slots {
         emit(&ctx.state, cfg, e)?;
     }
     update_lane(ctx, cfg, r, out, &ev, fleet, n)?;
@@ -1794,7 +1810,7 @@ fn ext_closed(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, flee
     let events = working(&ctx.state)?;
     let refs: std::collections::BTreeSet<String> = queue::view(&events, &fold(&events), fleet)
         .into_iter()
-        .flat_map(|i| i.ext)
+        .flat_map(|i| i.blockers.into_iter().map(move |b| format!("{fleet}#{b}")).chain(i.ext))
         .collect();
     for b in refs {
         let Some((repo, n)) = b.rsplit_once('#') else { continue };
@@ -1888,7 +1904,7 @@ fn starts<'a>(
         first = first.or(code.is_none().then_some(fleet));
         go &= !matches!(
             code,
-            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED")
+            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "LOGIN_NEEDED")
         );
         if matches!(code, Some("CAP")) {
             todo.remove(i);

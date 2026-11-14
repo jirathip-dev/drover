@@ -19,7 +19,13 @@ CREATE TABLE IF NOT EXISTS snapshot (n INTEGER PRIMARY KEY AUTOINCREMENT, key TE
     json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS processed (id TEXT PRIMARY KEY, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS states (fleet TEXT NOT NULL, issue INTEGER NOT NULL, done INTEGER NOT NULL, json TEXT NOT NULL,
-    PRIMARY KEY (fleet, issue));";
+    PRIMARY KEY (fleet, issue));
+CREATE TABLE IF NOT EXISTS lanes (agent TEXT PRIMARY KEY, seq INTEGER NOT NULL, json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS asks (seq INTEGER PRIMARY KEY, fleet TEXT NOT NULL, id TEXT, issue INTEGER, agent TEXT,
+    twin TEXT, json TEXT NOT NULL, rank INTEGER, closed TEXT, at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS asks_twin ON asks (twin);
+CREATE INDEX IF NOT EXISTS events_started ON events (json_extract(json, '$.agent'), json_extract(json, '$.pane'))
+    WHERE type = 'spawn-started';";
 
 pub fn file(state: &Path) -> PathBuf {
     SCRATCH
@@ -102,10 +108,34 @@ fn open(state: &Path) -> Result<Connection> {
     }
     anyhow::ensure!(mode(&c)? == "wal", "{} is not in WAL mode", file(state).display());
     c.execute_batch(SCHEMA)?;
+    let mut c = c;
+    if c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))? < 1 {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if tx.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))? < 1 {
+            offload_all(&tx, state)?;
+            rebuild_in(&tx, state)?;
+            tx.pragma_update(None, "user_version", 1)?;
+        }
+        tx.commit()?;
+    }
     Ok(c)
 }
 
-fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Result<()> {
+fn offload_all(c: &Connection, state: &Path) -> Result<()> {
+    let big = rows(
+        c,
+        "type = 'build-cloned' AND json_extract(json, '$.errors[0]') IS NOT NULL AND seq > ?1",
+        0,
+    )?;
+    for e in big {
+        let data = events::offload(state, e.data)?;
+        let json = serde_json::to_string(&Event { seq: 0, data, ..e })?;
+        c.execute("UPDATE events SET json = ?2 WHERE seq = ?1", params![e.seq, json])?;
+    }
+    Ok(())
+}
+
+fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Result<Event> {
     let mut ev = Event { seq: 0, ..ev.clone() };
     if let Some(id) = crate::orchestrator::acting() {
         ev.data.entry("orchestrator").or_insert(id.into());
@@ -116,61 +146,294 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
         "INSERT INTO events (seq, ts, fleet, issue, type, json, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![seq, ev.ts, ev.fleet, ev.issue, ev.kind, json, archived],
     )?;
-    let new = c.last_insert_rowid().cast_unsigned();
-    if seq.is_none() && folded(c)? + 1 == new {
-        fold(c, &[events::aliased(Event { seq: new, ..ev })])?;
+    Ok(Event {
+        seq: c.last_insert_rowid().try_into()?,
+        ..crate::events::aliased(ev)
+    })
+}
+
+fn log(c: &Connection, ev: &Event) -> Result<()> {
+    project(c, &insert(c, ev, None, false)?)
+}
+
+fn project(c: &Connection, ev: &Event) -> Result<()> {
+    if let Some(n) = ev.issue {
+        let q = "SELECT json FROM states WHERE fleet = ?1 AND issue = ?2";
+        let old: Option<String> = c.query_row(q, params![ev.fleet, n], |r| r.get(0)).optional()?;
+        if old.is_none() || !events::PASSIVE.contains(&ev.kind.as_str()) {
+            let key = (ev.fleet.clone(), n);
+            let mut m = events::States::new();
+            if let Some(j) = old {
+                m.insert(key.clone(), serde_json::from_str(&j)?);
+            }
+            let s = &events::fold_into(m, std::slice::from_ref(ev))[&key];
+            let q = "INSERT OR REPLACE INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
+            c.execute(q, params![ev.fleet, n, s.done(), serde_json::to_string(s)?])?;
+        }
+    }
+    if let (true, Some(a)) = (ev.kind == "spawn", ev.str("agent")) {
+        let q = "INSERT OR REPLACE INTO lanes (agent, seq, json) VALUES (?1, ?2, ?3)";
+        c.execute(q, params![a, ev.seq, serde_json::to_string(ev)?])?;
+    }
+    project_ask(c, ev)
+}
+
+fn project_ask(c: &Connection, e: &Event) -> Result<()> {
+    use rusqlite::types::Value as Sql;
+    let text = |k: &str| e.str(k).map_or(Sql::Null, |v| Sql::Text(v.into()));
+    if e.kind == "needs-decision" {
+        let twin = events::twin(e);
+        let q = "SELECT COUNT(*) FROM asks WHERE twin = ?1";
+        let repeat = twin.is_some() && c.query_row(q, [&twin], |r| r.get::<_, u64>(0))? > 0;
+        let q = "INSERT INTO asks (seq, fleet, id, issue, agent, twin, json, rank, closed, at) \
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?1)";
+        let (rank, why) = (repeat.then_some(events::ORDER.len() - 1), repeat.then_some("repeat"));
+        let row = (
+            e.seq,
+            &e.fleet,
+            text("id"),
+            e.issue,
+            text("agent"),
+            twin,
+            serde_json::to_string(e)?,
+            rank,
+            why,
+        );
+        c.execute(q, row)?;
+        return Ok(());
+    }
+    if !events::ends_asks(&e.kind) {
+        return Ok(());
+    }
+    let issue = e.issue.and_then(|n| i64::try_from(n).ok()).map(Sql::Integer);
+    let (col, key, floor) = match e.kind.as_str() {
+        "decision" | "ask-withdrawn" | "ask-delivered" | "ask-failed" | "ask-expired" => ("id", text("id"), 0),
+        "merged" | "closed" | "closed-other" | "clean" if issue.is_some() => ("issue", issue.unwrap_or(Sql::Null), 5),
+        "spawn" | "lane-killed" => ("agent", text("agent"), 7),
+        _ => return Ok(()),
+    };
+    let q = format!("SELECT seq, json, rank FROM asks WHERE fleet = ?1 AND {col} IS ?2 AND (rank IS NULL OR rank BETWEEN ?3 AND ?4)");
+    let found: Vec<(u64, String, Option<usize>)> = {
+        let mut q = c.prepare(&q)?;
+        let all = q.query_map(params![e.fleet, key, floor + 1, events::ORDER.len() - 2], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?;
+        all.collect::<rusqlite::Result<_>>()?
+    };
+    let q = "SELECT MIN(seq) FROM events WHERE type = 'spawn-started' AND json_extract(json, '$.agent') IS ?1 \
+        AND json_extract(json, '$.pane') IS ?2 AND seq < ?3";
+    let first = || {
+        c.query_row(q, params![text("agent"), text("pane"), e.seq], |r| {
+            r.get::<_, Option<u64>>(0)
+        })
+    };
+    for (seq, json, rank) in found {
+        let a = numbered(seq, &json)?;
+        let w = events::closes(&a, e, || first().ok().flatten().is_some_and(|f| f < seq));
+        let Some(r) = events::ORDER.iter().position(|o| Some(*o) == w) else {
+            continue;
+        };
+        if r < rank.unwrap_or(events::ORDER.len()) {
+            let row = events::ending_row(events::ORDER[r], e);
+            let set = "UPDATE asks SET rank = ?2, closed = ?3, at = ?4 WHERE seq = ?1";
+            c.execute(set, params![seq, r, row, e.seq])?;
+        }
     }
     Ok(())
 }
 
-fn folded(c: &Connection) -> Result<u64> {
-    let q = "SELECT ts FROM snapshot WHERE key = 'fold'";
-    Ok(c.query_row(q, [], |r| r.get(0)).optional()?.unwrap_or(0))
-}
-
-fn fold(c: &Connection, evs: &[Event]) -> Result<()> {
-    let mut m = events::States::new();
-    for k in evs.iter().filter_map(|e| Some((e.fleet.clone(), e.issue?))) {
-        let q = "SELECT json FROM states WHERE fleet = ?1 AND issue = ?2";
-        let row: Option<String> = c.query_row(q, params![k.0, k.1], |r| r.get(0)).optional()?;
-        if let Some(s) = row.filter(|_| !m.contains_key(&k)) {
-            m.insert(k, serde_json::from_str(&s)?);
-        }
-    }
-    for s in events::fold_into(m, evs).values() {
-        let q = "INSERT OR REPLACE INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
-        c.execute(q, params![s.fleet, s.issue, s.done(), serde_json::to_string(s)?])?;
-    }
-    let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('fold', ?1, '{}')";
-    Ok(c.execute(q, [evs.last().map_or(0, |e| e.seq)]).map(drop)?)
-}
-
-/// #948: the saved per-issue fold (each append updates it) and the seq it covers, caught up to the newest event.
-pub fn states(state: &Path) -> Result<(u64, events::States)> {
-    with(state, false, (0, events::States::new()), |c| {
-        while folded(c)? < last(c)? {
-            let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            fold(&tx, &rows(&tx, events::CHUNK, folded(&tx)?)?)?;
-            tx.commit()?;
-        }
-        let mut q = c.prepare("SELECT json FROM states")?;
-        let all = q.query_map([], |r| r.get::<_, String>(0))?;
-        let all = all.map(|j| Ok(serde_json::from_str::<events::IssueState>(&j?)?));
-        let m = all.map(|s| s.map(|s: events::IssueState| ((s.fleet.clone(), s.issue), s)));
-        Ok((folded(c)?, m.collect::<Result<_>>()?))
+fn numbered(seq: u64, json: &str) -> Result<Event> {
+    Ok(Event {
+        seq,
+        ..serde_json::from_str(json)?
     })
+}
+
+fn projected(evs: &[Event]) -> Result<Connection> {
+    let c = Connection::open_in_memory()?;
+    c.execute_batch(SCHEMA)?;
+    let tx = c.unchecked_transaction()?;
+    for e in evs
+        .iter()
+        .filter(|e| e.kind == "spawn-started" || events::ends_asks(&e.kind))
+    {
+        project_ask(&tx, &insert(&tx, e, Some(e.seq), false)?)?;
+    }
+    tx.commit()?;
+    Ok(c)
+}
+
+fn rebuild_in(c: &Connection, state: &Path) -> Result<()> {
+    let mut all = [archived(state)?, rows(c, "seq > ?1", 0)?].concat();
+    all.sort_by_key(|e| e.seq);
+    all.dedup_by_key(|e| e.seq);
+    c.execute_batch("DELETE FROM states; DELETE FROM lanes; DELETE FROM asks;")?;
+    let q = "INSERT INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
+    for s in events::fold_into(events::States::new(), &all).into_values() {
+        c.execute(q, params![s.fleet, s.issue, s.done(), serde_json::to_string(&s)?])?;
+    }
+    let q = "INSERT OR REPLACE INTO lanes (agent, seq, json) VALUES (?1, ?2, ?3)";
+    for e in all.iter().filter(|e| e.kind == "spawn") {
+        if let Some(a) = e.str("agent") {
+            c.execute(q, params![a, e.seq, serde_json::to_string(e)?])?;
+        }
+    }
+    let m = projected(&all)?;
+    let mut q = m.prepare("SELECT * FROM asks")?;
+    let mut ins = c.prepare("INSERT INTO asks VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)")?;
+    let mut rs = q.query([])?;
+    while let Some(r) = rs.next()? {
+        let v = (0..10).map(|i| r.get::<_, rusqlite::types::Value>(i));
+        ins.execute(rusqlite::params_from_iter(v.collect::<rusqlite::Result<Vec<_>>>()?))?;
+    }
+    Ok(())
+}
+
+/// #978: `drover compact --rebuild`: the current-state rows made again from every event, in one transaction.
+pub fn rebuild(state: &Path) -> Result<()> {
+    with(state, true, (), |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        rebuild_in(&tx, state)?;
+        Ok(tx.commit()?)
+    })
+}
+
+/// #978: the current per-issue state, the `states` rows.
+pub fn issues(state: &Path) -> Result<events::States> {
+    since(state, i64::MAX as u64, true, None).map(|t| t.1)
+}
+
+/// #978: an ask's ending as its `asks` row holds it: (`ORDER` rank, `drover asks`' text); `None` while open.
+pub type Ending = Option<(usize, String)>;
+pub type Endings = std::collections::BTreeMap<u64, Ending>;
+
+pub fn endings(evs: &[Event]) -> Result<Endings> {
+    let evs: Vec<Event> = evs.iter().zip(1..).map(|(e, seq)| Event { seq, ..e.clone() }).collect();
+    asks_since(&projected(&evs)?, 0)
+}
+
+fn asks_since(c: &Connection, at: u64) -> Result<Endings> {
+    let mut q = c.prepare("SELECT seq, rank, closed FROM asks WHERE at > ?1")?;
+    let rows = q.query_map([at], |r| {
+        let (rank, why) = (r.get::<_, Option<usize>>(1)?, r.get::<_, Option<String>>(2)?);
+        Ok((r.get::<_, u64>(0)?, rank.zip(why)))
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+pub(crate) fn since(
+    state: &Path,
+    seq: u64,
+    fresh: bool,
+    working: Option<&str>,
+) -> Result<(Vec<Event>, events::States, Endings)> {
+    with(state, false, Default::default(), |c| {
+        let tx = c.transaction()?;
+        let evs = match working {
+            Some(w) => rows(&tx, w, last(&tx)?)?,
+            None => rows(&tx, "archived = 0 AND seq > ?1", seq)?,
+        };
+        let q =
+            "SELECT json FROM states WHERE ?1 OR (fleet, issue) IN (SELECT fleet, issue FROM events WHERE seq > ?2)";
+        let mut q = tx.prepare(q)?;
+        let st = q.query_map(params![fresh, seq], |r| r.get::<_, String>(0))?.map(|j| {
+            let s: events::IssueState = serde_json::from_str(&j?)?;
+            Ok(((s.fleet.clone(), s.issue), s))
+        });
+        let st = st.collect::<Result<events::States>>()?;
+        drop(q);
+        let asks = asks_since(&tx, if fresh { 0 } else { seq })?;
+        Ok((evs, st, asks))
+    })
+}
+
+/// #978: `drover asks`' rows: every ask (`fleet`'s) with its ending, oldest first.
+pub fn asks(state: &Path, fleet: Option<&str>) -> Result<Vec<(Event, Ending)>> {
+    with(state, false, vec![], |c| {
+        let q = "SELECT seq, json, rank, closed FROM asks WHERE ?1 IS NULL OR fleet = ?1 ORDER BY seq";
+        let mut q = c.prepare(q)?;
+        let rows = q.query_map([fleet], |r| {
+            let end = r.get::<_, Option<usize>>(2)?.zip(r.get::<_, Option<String>>(3)?);
+            Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?, end))
+        })?;
+        rows.map(|r| {
+            r.map_err(Into::into)
+                .and_then(|(seq, j, end)| Ok((numbered(seq, &j)?, end)))
+        })
+        .collect()
+    })
+}
+
+const HEARTBEAT_SECS: u64 = 2 * 86_400;
+const HOT_SECS: u64 = 14 * 86_400;
+
+pub fn compact(state: &Path, now: u64) -> Result<(usize, usize)> {
+    let dir = state.with_file_name("archive");
+    std::fs::create_dir_all(&dir)?;
+    let done = "ts < ?1 AND (fleet, issue) IN (SELECT fleet, issue FROM states WHERE done = 1)";
+    let n = with(state, true, (0, 0), |c| {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let q = "DELETE FROM events WHERE type IN ('drive-pass', 'driven', 'kick') AND ts < ?1";
+        let gone = tx.execute(q, [now.saturating_sub(HEARTBEAT_SECS)])?;
+        let cut = now.saturating_sub(HOT_SECS);
+        let old = rows(&tx, done, cut)?;
+        let mut months = std::collections::BTreeMap::<String, String>::new();
+        for e in &old {
+            let m = crate::lesson::ymd(e.ts / 86_400)[..7].to_string();
+            *months.entry(m).or_default() += &(serde_json::to_string(e)? + "\n");
+        }
+        for (m, text) in months {
+            zstd_append(&dir.join(format!("events-{m}.jsonl.zst")), &text)?;
+        }
+        tx.execute(&format!("DELETE FROM events WHERE {done}"), [cut])?;
+        let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', ?1, '{}')";
+        tx.execute(q, [now])?;
+        tx.commit()?;
+        if gone + old.len() > 0 {
+            c.execute_batch("VACUUM")?;
+        }
+        c.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |_| Ok(()))?;
+        Ok((gone, old.len()))
+    })?;
+    Ok(n)
+}
+
+fn zstd_append(file: &Path, text: &str) -> Result<()> {
+    use std::io::Write as _;
+    let (src, part) = (file.with_extension("new"), file.with_extension("part"));
+    std::fs::write(&src, text)?;
+    let (s, p) = (src.to_string_lossy(), part.to_string_lossy());
+    crate::runner::ok(&crate::runner::Real, "zstd", &["-qf", "--rm", &s, "-o", &p])?;
+    let mut f = std::fs::OpenOptions::new().create(true).append(true).open(file)?;
+    f.write_all(&std::fs::read(&part)?)?;
+    Ok(std::fs::remove_file(part)?)
+}
+
+/// #978: every event `compact` moved to `archive/`, by seq.
+pub fn archived(state: &Path) -> Result<Vec<Event>> {
+    let dir = std::fs::read_dir(state.with_file_name("archive"));
+    let mut files: Vec<PathBuf> = dir.into_iter().flatten().filter_map(|e| Some(e.ok()?.path())).collect();
+    files.retain(|p| p.extension().is_some_and(|x| x == "zst"));
+    files.sort();
+    let mut all = vec![];
+    for f in files {
+        let text = crate::runner::ok(&crate::runner::Real, "zstd", &["-dcq", &f.to_string_lossy()])?;
+        all.extend(events::parse(&text, &f));
+    }
+    all.sort_by_key(|e| e.seq);
+    Ok(all)
 }
 
 fn last(c: &Connection) -> Result<u64> {
     Ok(c.query_row("SELECT COALESCE(MAX(seq), 0) FROM events", [], |r| r.get(0))?)
 }
 
-/// One event, numbered next, in its own transaction with the saved fold's update.
+/// One event, numbered next, with the rows it changes: one transaction.
 pub fn append(state: &Path, ev: &Event) -> Result<()> {
     crate::sim::point(&crate::sim::Point::Append(ev));
     with(state, true, (), |c| {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        insert(&tx, ev, None, false)?;
+        log(&tx, ev)?;
         Ok(tx.commit()?)
     })
 }
@@ -202,7 +465,7 @@ pub fn ask(state: &Path, mut evs: Vec<Event>, once: Option<&str>) -> Result<Opti
             }
         }
         for ev in &evs {
-            insert(&tx, ev, None, false)?;
+            log(&tx, ev)?;
         }
         tx.commit()?;
         Ok(Some(evs))
@@ -222,13 +485,18 @@ pub fn rename_fleet(
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let q = "UPDATE events SET fleet = ?2, json = json_set(json, '$.fleet', ?2) WHERE fleet = ?1";
         let n = tx.execute(q, params![old, new])?;
+        for t in ["states", "asks"] {
+            let q = format!("UPDATE {t} SET fleet = ?2, json = json_set(json, '$.fleet', ?2) WHERE fleet = ?1");
+            tx.execute(&q, params![old, new])?;
+        }
+        let q = "UPDATE lanes SET json = json_set(json, '$.fleet', ?2) WHERE json_extract(json, '$.fleet') = ?1";
+        tx.execute(q, params![old, new])?;
         tx.execute("DELETE FROM snapshot WHERE key IN ('states', 'board', 'fold')", [])?;
-        tx.execute("DELETE FROM states", [])?;
         tx.execute(
             "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', 0, '{}')",
             [],
         )?;
-        insert(&tx, ev, None, false)?;
+        log(&tx, ev)?;
         then()?;
         tx.commit()?;
         Ok(n)
@@ -248,10 +516,7 @@ fn rows(c: &Connection, filter: &str, arg: impl rusqlite::ToSql) -> Result<Vec<E
     rows.map(|r| {
         let (seq, json) = r?;
         ROWS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Ok(crate::events::aliased(Event {
-            seq,
-            ..serde_json::from_str(&json)?
-        }))
+        Ok(crate::events::aliased(numbered(seq, &json)?))
     })
     .collect()
 }
@@ -284,7 +549,7 @@ pub fn claim(
             .transpose()?;
         let took = take(last.as_ref());
         for ev in evs.iter().filter(|_| took) {
-            insert(&tx, ev, None, false)?;
+            log(&tx, ev)?;
         }
         tx.commit()?;
         Ok((last, took))
@@ -297,47 +562,7 @@ pub fn processed(state: &Path, id: &str, now: u64) -> Result<bool> {
     with(state, true, 0, |c| Ok(c.execute(q, params![id, now])?)).map(|n| n > 0)
 }
 
-/// #343: the live log's size, and the rotation that moves events out of `read` (kept for `history`).
-pub fn live_bytes(state: &Path) -> Result<u64> {
-    let q = "SELECT COALESCE(SUM(LENGTH(json)), 0) FROM events WHERE archived = 0";
-    with(state, false, 0, |c| Ok(c.query_row(q, [], |r| r.get(0))?))
-}
-
-pub(crate) fn archive(state: &Path, seqs: &[u64]) -> Result<()> {
-    let rows: Vec<(u64, Option<String>)> = seqs.iter().map(|s| (*s, None)).collect();
-    update(state, &rows)
-}
-
-pub(crate) fn rewrite(state: &Path, evs: &[Event]) -> Result<()> {
-    let json = |e: &Event| serde_json::to_string(&Event { seq: 0, ..e.clone() });
-    let rows = evs
-        .iter()
-        .map(|e| Ok((e.seq, Some(json(e)?))))
-        .collect::<Result<Vec<_>>>()?;
-    update(state, &rows)
-}
-
-fn update(state: &Path, rows: &[(u64, Option<String>)]) -> Result<()> {
-    if rows.is_empty() {
-        return Ok(());
-    }
-    with(state, true, (), |c| {
-        let tx = c.transaction()?;
-        for (s, json) in rows {
-            match json {
-                None => tx.execute("UPDATE events SET archived = 1 WHERE seq = ?1", [s])?,
-                Some(j) => tx.execute("UPDATE events SET json = ?2 WHERE seq = ?1", params![s, j])?,
-            };
-        }
-        tx.execute(
-            "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', 0, '{}')",
-            [],
-        )?;
-        Ok(tx.commit()?)
-    })
-}
-
-/// A snapshot row (`board`: #337's reads; `states`: the fold's checkpoint).
+/// A snapshot row (`board`: #337's reads).
 pub fn get<T: DeserializeOwned>(state: &Path, key: &str) -> Option<(u64, T)> {
     let q = "SELECT ts, json FROM snapshot WHERE key = ?1";
     let row = |r: &rusqlite::Row| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?));
@@ -354,7 +579,7 @@ pub fn stamp(state: &Path, key: &str) -> Option<u64> {
     .ok()?
 }
 
-/// #560: the database file's inode and its last rotation's stamp: a change makes `events::shared` read afresh.
+/// #560: the database file's inode and its last compaction's stamp: a change makes `events::shared` read afresh.
 pub fn version(state: &Path) -> (Option<u64>, Option<u64>) {
     let ino = std::fs::metadata(file(state)).map(|m| m.ino()).ok();
     (ino, ino.and_then(|_| stamp(state, "archived")))
@@ -602,6 +827,7 @@ fn import(c: &mut Connection, state: &Path) -> Result<()> {
     for p in done.iter().filter(|_| SCRATCH.with_borrow(Option::is_none)) {
         retire(p)?;
     }
+    rebuild_in(&tx, state)?;
     tx.commit().context("import commit")
 }
 

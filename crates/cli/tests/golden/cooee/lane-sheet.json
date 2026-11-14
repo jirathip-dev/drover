@@ -1,0 +1,119 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "facts-list",
+          "rows": [
+            {
+              "id": "f-issue",
+              "title": "issue",
+              "type": "row",
+              "value": "sendmeter #12"
+            },
+            {
+              "id": "f-role",
+              "title": "role",
+              "type": "row",
+              "value": "fix"
+            },
+            {
+              "id": "f-state",
+              "title": "state",
+              "type": "row",
+              "value": "working"
+            },
+            {
+              "id": "f-host",
+              "title": "host",
+              "type": "row",
+              "value": "local"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "lane",
+      "id": "facts",
+      "type": "section"
+    },
+    {
+      "action": "stop",
+      "confirm": {
+        "ok": "Stop",
+        "title": "Stop sendmeter-impl-12?"
+      },
+      "id": "act-stop",
+      "label": "Stop",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "sendmeter-impl-12"
+      }
+    },
+    {
+      "action": "kill",
+      "confirm": {
+        "ok": "Kill",
+        "title": "Kill sendmeter-impl-12?"
+      },
+      "id": "act-kill",
+      "label": "Kill",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "sendmeter-impl-12"
+      }
+    },
+    {
+      "action": "clean",
+      "confirm": {
+        "ok": "Clean",
+        "title": "Clean sendmeter-impl-12?"
+      },
+      "id": "act-clean",
+      "label": "Clean",
+      "style": "destructive",
+      "type": "button",
+      "values": {
+        "agent": "sendmeter-impl-12"
+      }
+    },
+    {
+      "fields": [
+        {
+          "label": "Say",
+          "name": "text",
+          "placeholder": "a line to the lane",
+          "type": "text",
+          "value": ""
+        }
+      ],
+      "id": "say",
+      "type": "form"
+    },
+    {
+      "blocks": [
+        {
+          "id": "t-0",
+          "markdown": "```\nscreen of sendmeter-impl-12\n```",
+          "type": "text"
+        }
+      ],
+      "header": "transcript",
+      "id": "transcript",
+      "type": "section"
+    }
+  ],
+  "cancel": "Close",
+  "done": {
+    "action": "send",
+    "label": "Send",
+    "values": {
+      "agent": "sendmeter-impl-12"
+    }
+  },
+  "id": "lane-sendmeter-impl-12",
+  "title": "sendmeter-impl-12",
+  "type": "sheet"
+}

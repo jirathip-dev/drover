@@ -317,3 +317,35 @@ fn the_stop_hook_leaves_check_lanes_alone() {
     assert!(drover::hook::turn_end(&input, &mark, || false).is_none());
     assert!(drover::hook::turn_end(&input, &mark, || true).is_some());
 }
+
+#[test]
+fn a_working_lane_that_hibernated_and_died_is_respawned_after_a_false_failed_start() {
+    let (c, r, _sh) = lane("turn-hibernated", false, None);
+    ev(&c, 11, "lane-state", json!({"agent": LANE, "state": "working"}));
+    let d =
+        json!({"agent": LANE, "key": format!("{LANE}:11"), "reason": "failed start, no event 3m after its first turn"});
+    ev(&c, 12, "lane-failed-start", d);
+    turn(&c, &r, &["working", "--why", "full cargo test suite running"]);
+    let t = c.now;
+    ev(
+        &c,
+        t,
+        "lane-state",
+        json!({"agent": LANE, "state": "done", "note": "end_turn"}),
+    );
+    ev(&c, t, "lane-state", json!({"agent": LANE, "state": "hibernated"}));
+    ev(&c, t, "orphan-issue", json!({"key": 10, "reason": "nothing drives it"}));
+    let key = format!("10:{LANE}");
+    ev(
+        &c,
+        t,
+        "lane-dead",
+        json!({"key": key, "reason": "impl lane is gone (impl)"}),
+    );
+    ev(&c, t, "stall", json!({"key": key, "reason": "no event for 5h in impl"}));
+    let c = at(&c, 5 * 3600);
+    let (w, _) = texts(&c, &r);
+    assert!(w.contains("lane gone, no push: respawning impl"), "{w}");
+    let (out, steps) = drive(&c, &r);
+    assert_eq!(steps, ["respawn"], "{out}");
+}

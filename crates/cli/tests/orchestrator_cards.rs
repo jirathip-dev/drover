@@ -49,19 +49,9 @@ fn setup(name: &str, role_extra: &str, extra: &str) -> drover::Ctx {
 
 fn acp_setup(name: &str, role_extra: &str, extra: &str, b: &FakeShed) -> drover::Ctx {
     let d = tmpdir(name);
-    let role = if role_extra.is_empty() {
-        "account = \"C\""
-    } else {
-        role_extra
-    };
-    let accounts = if extra.contains("[accounts]") {
-        ""
-    } else {
-        "[accounts]\nC = \"C\"\n"
-    };
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{role}\n\n\
-         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n{accounts}{extra}",
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{role_extra}\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n{extra}",
         b.sock.display()
     );
     let mut c = ctx(&d, &cfg);
@@ -206,111 +196,6 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
 }
 
 #[test]
-fn a_usage_limit_resumes_the_orchestrator_on_the_next_account_with_the_same_session() {
-    let accounts = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n";
-    let c = setup("cards-switch", "fallback = [\"claude:A\", \"claude:B\"]", accounts);
-    assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
-    run(&c, &Fake::default(), &["thread", "reply", "t1", "Small or full?"]);
-    let first = kinds(&c, "orchestrator-start")[0].clone();
-    assert_eq!(first.str("account"), Some("A"));
-    let session = first.str("session").unwrap().to_string();
-
-    let banner = "You've hit your limit · resets 6:40pm";
-    let r = herdr(&live()).reply("herdr pane read w9:p1", banner);
-    let sh = Shell(&r, "CLAUDE_CONFIG_DIR|$CLAUDE_CODE_OAUTH_TOKEN", Shared::default());
-    let (code, out) = run(
-        &drover::Ctx {
-            now: T + 60,
-            ..c.clone()
-        },
-        &sh,
-        &["check"],
-    );
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(kinds(&c, "account-capped")[0].str("account"), Some("A"));
-    assert!(r.called("herdr workspace close w9"));
-    let next = &kinds(&c, "orchestrator-start")[1];
-    assert_eq!(
-        (next.str("account"), next.str("session")),
-        (Some("B"), Some(session.as_str()))
-    );
-    assert_eq!(*next.val("resumed"), json!(true));
-    let calls = r.calls.borrow();
-    let start = calls
-        .iter()
-        .find(|c| c.starts_with("herdr agent start orchestrator-t1"))
-        .unwrap();
-    assert!(
-        start.contains(&format!("--resume {session}")) && !start.contains("--session-id"),
-        "{start}"
-    );
-    let b = drover::config::home().join(".config/drover/accounts/B");
-    assert_eq!(*sh.2.borrow(), [format!("{}|", b.display())], "on B: {calls:?}");
-    let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
-    assert!(
-        show.contains(
-            "owner: scope #12\nOrchestrator: Small or full?\nsystem: switched to claude:B (claude:A resting until "
-        ),
-        "{show}"
-    );
-}
-
-#[test]
-fn a_usage_limit_restarts_the_orchestrator_on_the_next_account() {
-    let accounts = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n";
-    let sh = FakeShed::new();
-    let c = acp_setup(
-        "cards-switch-acp",
-        "fallback = [\"claude:A\", \"claude:B\"]",
-        accounts,
-        &sh,
-    );
-    assert_eq!(
-        run(&c, &sh.cli(&acp(&["echo"])), &["thread", "say", "t1", "scope #12"]).0,
-        0
-    );
-    run(&c, &Fake::default(), &["thread", "reply", "t1", "Small or full?"]);
-    let first = kinds(&c, "orchestrator-start")[0].clone();
-    assert_eq!(first.str("account"), Some("A"));
-
-    sh.screen("orchestrator-t1", "You've hit your limit · resets 6:40pm");
-    let r = acp(&["env"]);
-    let cli = sh.cli(&r);
-    let (code, out) = run(
-        &drover::Ctx {
-            now: T + 60,
-            ..c.clone()
-        },
-        &cli,
-        &["check"],
-    );
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(kinds(&c, "account-capped")[0].str("account"), Some("A"));
-    assert!(sh.called("kill", "orchestrator-t1"), "{:?}", sh.methods());
-    let next = &kinds(&c, "orchestrator-start")[1];
-    assert_eq!(
-        (next.str("account"), next.str("runtime")),
-        (Some("B"), Some("shed-acp"))
-    );
-    assert_eq!(*next.val("resumed"), json!(false));
-    assert_eq!(r.count("shed run --acp claude-acp"), 1, "{:?}", r.calls.borrow());
-    let b = drover::config::home().join(".config/drover/accounts/B");
-    let env = cli.out.borrow().concat();
-    assert!(
-        env.lines().any(|l| l == format!("CLAUDE_CONFIG_DIR={}", b.display())),
-        "on B: {env}"
-    );
-    assert!(!env.contains("CLAUDE_CODE_OAUTH_TOKEN"), "{env}");
-    let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
-    assert!(
-        show.contains(
-            "owner: scope #12\nOrchestrator: Small or full?\nsystem: switched to claude:B (claude:A resting until "
-        ),
-        "{show}"
-    );
-}
-
-#[test]
 fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness_login() {
     let signed_out = "Invalid API key · Please run /login";
     let page = |c: &drover::Ctx| {
@@ -327,7 +212,7 @@ fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness
     let r = herdr(&live()).reply("herdr pane read w9:p1", signed_out);
     assert_eq!(run(&later, &r, &["check"]).0, 0);
     assert!(r.called("herdr workspace close w9"));
-    assert_eq!(kinds(&c, "orchestrator-start").len(), 1, "no account to resume on");
+    assert_eq!(kinds(&c, "orchestrator-start").len(), 1, "nothing to resume on");
     assert!(kinds(&c, "agent-unavailable").is_empty(), "the harness is not rested");
     let lines: Vec<_> = kinds(&c, "thread-msg")
         .into_iter()
@@ -349,48 +234,6 @@ fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness
         1,
         "once"
     );
-}
-
-#[test]
-fn a_signed_out_orchestrator_gets_a_sign_in_card_for_its_own_login() {
-    let signed_out = "Invalid API key · Please run /login";
-    let sh = FakeShed::new();
-    let page = |c: &drover::Ctx| {
-        let f = Fake::default();
-        let r = sh.on(&f);
-        let s = Server::new(c, &r, Some(ADDR.into()));
-        chat(&s, &pair(&s, c, "Mozilla/5.0 (iPhone)", T), T + 120)
-    };
-    let extra = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n\n[[setup]]\nname = \"claude A\"\ncmd = \"claude /login\"\nenv = {CLAUDE_CONFIG_DIR = \"~/accounts/A\"}\n";
-    let c = acp_setup(
-        "cards-signin-account",
-        "fallback = [\"claude:A\", \"claude:B\"]",
-        extra,
-        &sh,
-    );
-    assert_eq!(
-        run(&c, &sh.cli(&acp(&["echo"])), &["thread", "say", "t1", "scope #12"]).0,
-        0
-    );
-    sh.screen("orchestrator-t1", signed_out);
-    let later = drover::Ctx {
-        now: T + 60,
-        ..c.clone()
-    };
-    assert_eq!(run(&later, &sh.cli(&acp(&["echo"])), &["check"]).0, 0);
-    assert!(sh.called("kill", "orchestrator-t1"), "{:?}", sh.methods());
-    let line = kinds(&c, "thread-msg")
-        .into_iter()
-        .find(|e| e.str("signin").is_some())
-        .unwrap();
-    assert_eq!(line.str("signin"), Some("claude A"));
-    assert!(page(&c).contains("claude is signed out (account A): sign in <button type=button data-su=\"claude A\""));
-    let next = &kinds(&c, "orchestrator-start")[1];
-    assert_eq!(
-        (next.str("account"), next.str("runtime")),
-        (Some("B"), Some("shed-acp"))
-    );
-    assert_eq!(kinds(&c, "account-signed-out")[0].str("account"), Some("A"));
 }
 
 #[test]

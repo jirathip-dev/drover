@@ -899,3 +899,70 @@ fn wip_prune_keeps_only_the_newest_of_a_closed_issue() {
         ]
     );
 }
+
+#[test]
+fn the_lanes_sheets_stop_and_kill_run_the_verbs_and_log_via_the_screen() {
+    let (c, wt, sh) = lane("cooee-stop-kill");
+    sh.lane(LANE, "working", &wt);
+    let r = OnShed(git(&wt, "", "0\n", ""), sh);
+    let (s, sh) = (Server::new(&c, &r, Some(ADDR.into())), &r.1);
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let sheet = String::from_utf8_lossy(&s.respond(
+        &format!("GET /screens/lanes/{LANE} HTTP/1.1\r\nHost: {ADDR}\r\n{ck}\r\n"),
+        T,
+    ))
+    .into_owned();
+    let sheet: serde_json::Value = serde_json::from_str(sheet.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let button = |id: &str| {
+        let b = sheet["blocks"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{sheet}"))
+            .iter()
+            .find(|b| b["id"] == id)
+            .cloned();
+        b.unwrap_or_else(|| panic!("no {id} in {sheet}"))
+    };
+    let post = |b: serde_json::Value| {
+        let body =
+            json!({"screen": sheet["id"], "block": "", "action": b["action"], "values": b["values"]}).to_string();
+        let res = s.respond(
+            &format!(
+                "POST /action HTTP/1.1\r\nHost: {ADDR}\r\n{ck}Content-Length: {}\r\n\r\n{body}",
+                body.len()
+            ),
+            T,
+        );
+        let res = String::from_utf8_lossy(&res).into_owned();
+        let (head, body) = res.split_once("\r\n\r\n").unwrap();
+        (
+            head[9..12].to_string(),
+            serde_json::from_str::<serde_json::Value>(body).unwrap(),
+        )
+    };
+    let last_act = || {
+        read(&c.state)
+            .unwrap()
+            .iter()
+            .rfind(|e| e.kind == "act")
+            .cloned()
+            .unwrap()
+    };
+
+    let (status, v) = post(button("act-stop"));
+    assert_eq!(status, "200", "{v}");
+    assert_eq!(sh.last("keys"), json!({"name": LANE, "keys": ["esc"]}));
+    assert_eq!(kinds(&c, "stop"), 1);
+    let e = last_act();
+    assert_eq!(
+        (e.str("op"), e.str("agent"), e.str("device")),
+        (Some("stop"), Some(LANE), Some("cooee"))
+    );
+
+    let (status, v) = post(button("act-kill"));
+    assert_eq!(status, "200", "{v}");
+    assert_eq!(v["close"], true, "{v}");
+    assert!(closed(sh), "{:?}", sh.methods());
+    assert_eq!(kinds(&c, "lane-killed"), 1);
+    let e = last_act();
+    assert_eq!((e.str("op"), e.str("device")), (Some("kill"), Some("cooee")));
+}

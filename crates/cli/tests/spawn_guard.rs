@@ -808,20 +808,14 @@ fn agent_pane_busy_closes_a_finished_lane_pane_and_retries_once() {
 const NOT_READY: &str = r#"{"error":{"code":"agent_not_ready","message":"agent sendmeter-impl-12 is blocked during startup and is not ready for prompts"}}"#;
 
 fn chain(harness: &str) -> String {
-    let cfg = CONFIG.replace("harness  =  \"hermes\"", &format!("harness = \"{harness}\""));
-    cfg.replace(
-        "model = \"opus\"",
-        &format!("model = \"opus\"\nfallback = [\"{harness}\"]"),
-    )
+    CONFIG.replace("harness  =  \"hermes\"", &format!("harness = \"{harness}\""))
 }
 
-fn failed(c: &drover::Ctx) -> String {
-    let ev = read(&c.state).unwrap();
-    let f = ev
-        .iter()
-        .find(|e| e.kind == "spawn-failed")
-        .expect("spawn-failed logged");
-    f.str("error").unwrap().to_string()
+fn failed(c: &drover::Ctx, r: &dyn Runner) -> String {
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let o = drover::spawn::Opts::default();
+    let e = drover::spawn::spawn(c, &cfg, r, &mut Vec::new(), ("sendmeter", 12, "impl"), &o).unwrap_err();
+    format!("{e:#}")
 }
 
 #[test]
@@ -834,10 +828,8 @@ fn a_start_failure_records_the_pane_screen() {
     let r = happy(&c, NO_AGENTS)
         .once_err("herdr agent start", 1, NOT_READY)
         .once("herdr pane read w9:p1", 0, &screen);
-    let (exit, out) = spawn(&c, &r, &[]);
-    assert_eq!(exit, 1, "{out}");
+    let err = failed(&c, &r);
     assert!(r.called("herdr pane close w9:p1"));
-    let err = failed(&c);
     assert!(err.contains("agent_not_ready"), "{err}");
     assert!(err.contains("Hermes setup: paste your key"), "{err}");
     assert!(!err.contains(token) && err.contains("key: •••"), "redacted: {err}");
@@ -928,9 +920,7 @@ fn an_unknown_first_start_prompt_fails_with_its_screen() {
     let r = happy(&c, NO_AGENTS)
         .once_err("herdr agent start", 1, NOT_READY)
         .once("herdr pane read w9:p1", 0, screen);
-    let (exit, out) = spawn(&c, &r, &[]);
-    assert_eq!(exit, 1, "{out}");
-    let err = failed(&c);
+    let err = failed(&c, &r);
     assert!(
         err.contains("agent_not_ready") && err.contains("❯ 1. Dark mode"),
         "{err}"

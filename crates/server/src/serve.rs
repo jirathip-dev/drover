@@ -1,10 +1,10 @@
 //! `drover serve`, the phone page (docs/serve.md): std `TcpListener`, a thread per request (at most 16, then 503);
 //! `/live` SSE clients get a thread each, fed by the 1 s watcher thread.
 use crate::api::{
-    body, Account, Backlog, BacklogIssue, Balance, Bar, Blocked, Cell, Chat, Conductor, ConfigSheet, Disk, DoneRow,
-    Drive, DriveAct, FleetRow, Harness, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, HostCard, HostTab, LaneNow,
-    LaneRepo, LaneRow, LaneSection, LanesTab, Leftovers, Menu, Meter, Moment, NeedAsk, NeedIssue, NeedsTab, Notice,
-    Paired, PrLine, QueueCard, QueueLane, QueueRow, QueueTab, RoleRow, Row, Stage, Sub,
+    body, Backlog, BacklogIssue, Balance, Bar, Blocked, Cell, Chat, Conductor, ConfigSheet, Disk, DoneRow, Drive,
+    DriveAct, FleetRow, Harness, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, HostCard, HostTab, LaneNow, LaneRepo,
+    LaneRow, LaneSection, LanesTab, Leftovers, Menu, Moment, NeedAsk, NeedIssue, NeedsTab, Notice, Paired, PrLine,
+    QueueCard, QueueLane, QueueRow, QueueTab, RoleRow, Row, Stage, Sub,
 };
 use crate::config::{Config, Limits, Role};
 use crate::events::{age, append, shared, Event, IssueState, States};
@@ -556,6 +556,42 @@ fn disk_file<P: AsRef<std::path::Path>>(
             b"its disk is not answering\n".to_vec(),
         ),
         _ => ("404 Not Found", "text/plain", missing.as_bytes().to_vec()),
+    }
+}
+
+impl Server<'_> {
+    fn round_file(
+        &self,
+        sha: Option<&str>,
+        path: Option<String>,
+        missing: &str,
+    ) -> (&'static str, &'static str, Vec<u8>) {
+        let p = path.as_deref().map(std::path::Path::new);
+        let show = |(sha, dir, name): (&str, &std::path::Path, &std::ffi::OsStr)| {
+            let args = crate::runner::argv(&["-C", &dir.to_string_lossy(), "cat-file", "--batch"]);
+            let spec = format!("{sha}:./{}\n", name.to_string_lossy());
+            let mut b = vec![];
+            std::io::Read::read_to_end(&mut self.r.r.stream("git", &args, &spec).ok()?, &mut b).ok()?;
+            let (head, body) = b.split_at(b.iter().position(|&c| c == b'\n')? + 1);
+            let size = String::from_utf8_lossy(head)
+                .trim_end()
+                .rsplit(' ')
+                .next()?
+                .parse()
+                .ok()?;
+            body.get(..size).map(<[u8]>::to_vec)
+        };
+        let (dir, name) = (
+            p.and_then(std::path::Path::parent),
+            p.and_then(std::path::Path::file_name),
+        );
+        let git = sha
+            .zip(dir)
+            .zip(name)
+            .map(|((s, d), n)| (s, d, n))
+            .filter(|g| crate::runner::answers(g.1));
+        git.and_then(show)
+            .map_or_else(|| disk_file(path, PNG, missing), |b| ("200 OK", PNG, b))
     }
 }
 
@@ -1177,23 +1213,26 @@ impl<'a> Server<'a> {
             }
             // #412: a PNG of the design waiting for the owner's decision.
             ("GET", p) if p.starts_with("/design/") => {
-                let mut it = p[8..].splitn(3, '/');
-                let (f, n, i) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default());
+                let mut it = p[8..].splitn(4, '/');
+                let (f, n, i, q) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));
                 let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
-                let ask = |e: &&Event| crate::design::is_ask(e) && e.fleet == f && e.issue.map(|n| n.to_string()).as_deref() == Some(n);
+                let n = n.parse().unwrap_or(0);
+                let ask = |e: &Event| crate::design::is_ask(e) && e.fleet == f && e.issue == Some(n) && q.is_none_or(|q| e.str("id") == Some(q));
                 let ev = shared(&ctx.state).unwrap_or_default();
-                let at = ev.iter().rfind(ask).and_then(|a| chat::files_of(a).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
-                disk_file(at, PNG, "no such design file\n")
+                let k = ev.iter().rposition(ask);
+                let at = k.and_then(|k| chat::files_of(&ev[k]).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
+                let sha = k.filter(|_| q.is_some()).and_then(|k| ev[..k].iter().rfind(|e| e.is("design-review", &f, n))?.str("sha"));
+                self.round_file(sha, at, "no such design file\n")
             }
             // #417: a screenshot the issue's last verdict lists.
             ("GET", p) if p.starts_with("/shot/") => {
-                let mut it = p[6..].splitn(3, '/');
-                let (f, n, i) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default());
+                let mut it = p[6..].splitn(4, '/');
+                let (f, n, i, sha) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));
                 let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
                 let ev = shared(&ctx.state).unwrap_or_default();
-                let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n))).unwrap_or_default();
+                let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n), sha)).unwrap_or_default();
                 let at = i.parse().ok().and_then(|i: usize| shots.into_iter().nth(i));
-                disk_file(at.map(|(_, p)| p), PNG, "no such screenshot\n")
+                self.round_file(sha, at.map(|(_, p)| p.display().to_string()), "no such screenshot\n")
             }
             ("GET", "/sw.js") => ("200 OK", "text/javascript", text(&SW.replace("@V", &format!("{VER:08x}")))),
             ("GET", p) => {
@@ -1842,7 +1881,15 @@ impl<'a> Server<'a> {
                 mergeable: m.to_lowercase(),
                 merge: fc.is_some_and(|c| gate(c, &pr, Some(s), true).is_ok()) && m == "MERGEABLE",
                 // #417: the last verdict's screenshots (a verify FAIL's), as `/shot/<fleet>/<n>/<i>` serves them.
-                shots: crate::verify::served(events, (f, n)).into_iter().map(|x| x.0).collect(),
+                shots: crate::verify::served(events, (f, n), None)
+                    .into_iter()
+                    .map(|x| x.0)
+                    .collect(),
+                shots_at: events
+                    .iter()
+                    .rfind(|e| e.is("verdict", f, n))
+                    .and_then(|e| e.str("sha"))
+                    .map(String::from),
             }
         };
         // #217: a failed extend's card is back; a recorded one with no lane yet is one muted line, no buttons.
@@ -1946,6 +1993,9 @@ impl<'a> Server<'a> {
                 .collect();
             let mut rows = vec![];
             for &(n, blocked_by, k) in &items {
+                if gh::cached_spec(ctx, f, n).is_some_and(|v| gh::is_pr(&v)) {
+                    continue;
+                }
                 let s = st.get(&(f.clone(), n));
                 let waiting = asks.iter().any(|e| e.fleet == *f && e.issue == Some(n));
                 let logged = s.map_or("queued", |s| s.state.as_str());
@@ -2210,7 +2260,7 @@ impl<'a> Server<'a> {
                         harness: l.harness.clone(),
                         model: l.model.clone(),
                         effort: l.effort.clone(),
-                        account: l.account.clone(),
+                        account: None,
                         host: l.host.clone(),
                         runtime: l.runtime.clone(),
                         place: l.place.clone(),
@@ -2358,8 +2408,6 @@ impl<'a> Server<'a> {
             l.harness.clone(),
             o(&l.model),
             o(&l.effort),
-            o(&l.account),
-            o(&l.resting),
             o(&l.port),
             a,
         ];
@@ -2504,34 +2552,6 @@ impl<'a> Server<'a> {
             name,
             ..Row::default()
         };
-        for (c, name) in cfg
-            .into_iter()
-            .flat_map(|c| c.accounts.names.keys().map(move |n| (c, n)))
-        {
-            let cap = crate::access::cap_line(c, &self.r, events, name, ctx.now);
-            let login = c.accounts.usage.get(name).map_or("", String::as_str);
-            let usage = crate::usage::reading(ctx, name, || crate::usage::meter(ctx, c, &self.r, name))
-                .map(|m| crate::usage::shown(&self.r, &m, login, ctx.now));
-            let (meters, pace, hint) = match usage {
-                Some(Ok((parts, pace))) => (
-                    parts.into_iter().map(|(label, pct)| Meter { label, pct }).collect(),
-                    pace,
-                    None,
-                ),
-                Some(Err(hint)) => (vec![], None, Some(hint)),
-                None => (vec![], None, None),
-            };
-            d.accounts.push(Account {
-                name: name.clone(),
-                capped: crate::access::capped_until(c, events, name, ctx.now).is_some(),
-                tone: tone(cap.split(' ').next().unwrap_or_default()).into(),
-                hours: crate::usage::lane_hours(events, name, ctx.now),
-                cap,
-                meters,
-                pace,
-                hint,
-            });
-        }
         d.deepseek = cfg
             .and_then(|c| crate::usage::deepseek(ctx, c, &self.r))
             .map(|b| match b {
@@ -2864,7 +2884,7 @@ fn gauge(x: f64) -> Bar {
 /// what clears it. `{why}`/`{then}`: the raw reason's first two `;` parts; `{busy}`: the issues in the way.
 const WORDS: &str = "HOST_BUSY|a|held|the host is busy: {why} · starts again when it drops
 DISK_LOW|a|held|{why} GB floor · `drover clean --yes`
-ALL_CAPPED|a|waiting|{why} · {then}
+LOGIN_NEEDED|a|held|{why}
 CAP|a|waiting|{why} · starts when a lane finishes
 NO_HOST HOST_OFFLINE|a|waiting|{why}
 SERIAL_BUSY|a|waiting|{slots} full ({busy} must merge first)
@@ -3394,7 +3414,7 @@ fn config_sheet(ctx: &Ctx, cfg: &Config, fleet: &str, fc: &crate::config::Fleet,
             .unwrap_or(&r.harness)
             .into(),
         effort_default: l.effort.clone().unwrap_or_else(|| "none".into()),
-        accounts: r.account_list(),
+        accounts: vec![],
         mcp: r.mcp.clone(),
     };
     let conductor = fc.role.get("conductor").map(|r| Conductor {
@@ -3482,7 +3502,7 @@ pub fn words(e: &Event, serial: &str) -> Words {
             let txt = format!("{w} · {x}");
             let hold = matches!(
                 e.str("code"),
-                Some("HOST_BUSY" | "SERIAL_BUSY" | "CAP" | "ALL_CAPPED" | "PAUSED")
+                Some("HOST_BUSY" | "SERIAL_BUSY" | "CAP" | "LOGIN_NEEDED" | "PAUSED")
             );
             match (e.str("code"), t) {
                 (None, _) => ("·", "m", format!("drive · {txt}"), false),

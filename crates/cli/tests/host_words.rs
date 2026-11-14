@@ -58,16 +58,12 @@ fn every_refusal_and_outcome_has_its_plain_words() {
             ["a", "held", "8.0 GB free < 10 GB floor · `drover clean --yes`"],
         ),
         (
-            Some("ALL_CAPPED"),
+            Some("LOGIN_NEEDED"),
             "start",
             12,
-            r#"REFUSED ALL_CAPPED: every account ["A", "B"] is capped; the first resets in 3h"#,
+            "REFUSED LOGIN_NEEDED: impl lane synergy-impl-3 hit the usage limit on main",
             "serial",
-            [
-                "a",
-                "waiting",
-                r#"every account ["A", "B"] is capped · the first resets in 3h"#,
-            ],
+            ["a", "held", "impl lane synergy-impl-3 hit the usage limit on main"],
         ),
         (
             Some("CAP"),

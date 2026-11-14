@@ -70,7 +70,11 @@ export type Menu = { title: string, reason: string, command: string, countdown?:
 /**
  * #130: a `needs-human` issue's card (`pending`: one more round recorded, no lane yet): `who`, title, `why`, the last verdict (`pass`: its sha, `stale` not the head; else `fail`'s finding), the PR line (`repo`: none, the fleet is not configured), `mergeable` and `merge` (merge anyway is offered); #417: the verdict's screenshot `shots`.
  */
-export type NeedIssue = { fleet: string, issue: number, pending: boolean, who: string, title: string, why: string, pass?: string | null, stale: boolean, fail: string, pr: PrLine, repo?: string | null, mergeable: string, merge: boolean, shots: Array<string>, };
+export type NeedIssue = { fleet: string, issue: number, pending: boolean, who: string, title: string, why: string, pass?: string | null, stale: boolean, fail: string, pr: PrLine, repo?: string | null, mergeable: string, merge: boolean, shots: Array<string>, 
+/**
+ * #969: the sha of the verdict `shots` are from, the round `/shot/<fleet>/<n>/<i>/<sha>` names.
+ */
+shots_at?: string | null, };
 
 /**
  * #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
@@ -265,9 +269,9 @@ export type Ask = { id: string, fleet: string, issue?: number | null, question: 
 export type Row = { name: string, tone: string, detail: string, fix: string, };
 
 /**
- * #267: API v1's `host`, the Host tab at `now`: HOSTS (`hosts`), FLEET DISK (`disk`, `orphans`, `leftovers`, `spawns`), SERVICES (`services`, `theme`: `detail` its error, `accounts`, `deepseek`), FLEETS and ALERTS (`push`, and on a live board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` the forms send back.
+ * SERVICES (`services`, `theme`: `detail` its error, `deepseek`), FLEETS and ALERTS (`push`, and on a live
  */
-export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, vendors: Vendors, };
+export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, vendors: Vendors, };
 
 /**
  * #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on] its head offers (with the `lanes` running on it), and the logins its [sign in ▾] lists.
@@ -293,13 +297,6 @@ export type Disk = { bar: Bar, gb: string, budget: number, ago?: string | null, 
  * #186: processes still running in closed lanes' worktrees, and the memory they hold.
  */
 export type Leftovers = { n: number, mb: string, };
-
-/**
- * An account: `capped`, its cap line in `tone`, its usage `meters` and `pace` (or the `hint` why none), its lane hours.
- */
-export type Account = { name: string, capped: boolean, tone: string, cap: string, meters: Array<Meter>, pace?: string | null, hint?: string | null, hours: string, };
-
-export type Meter = { label: string, pct: number, };
 
 /**
  * The `DeepSeek` balance (currency and amount) and whether it is `low`, else the `hint` why none was read.
@@ -492,7 +489,7 @@ settings: string, env: AttachEnv,
  */
 guarded: boolean, why: string, };
 
-export type AttachEnv = { DROVER_LANE: string, DROVER_THREAD: string, DROVER_PORT: string, } & ({ [key in string]: string });
+export type AttachEnv = { DROVER_LANE: string, DROVER_THREAD: string, DROVER_PORT: string, };
 
 /**
  * #786: `GET /api/v1/config`: fleet.toml as cooee's config screens read it.
