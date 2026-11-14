@@ -70,7 +70,6 @@ fn write(p: &Path, ev: &[Event]) {
 
 const DAY: u64 = 86_400;
 
-/// The issue, lane and ask tables' rows, read straight from the database file.
 fn tables(p: &Path) -> Vec<String> {
     let c = rusqlite::Connection::open(drover::db::file(p)).unwrap();
     let mut out = vec![];

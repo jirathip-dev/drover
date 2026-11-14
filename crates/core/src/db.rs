@@ -274,15 +274,11 @@ fn projected(evs: &[Event]) -> Result<Connection> {
     Ok(c)
 }
 
-const PROJECTIONS: [&str; 3] = ["issues", "lanes", "asks"];
-
 fn rebuild_in(c: &Connection, state: &Path) -> Result<()> {
     let mut all = [archived(state)?, rows(c, "seq > ?1", 0)?].concat();
     all.sort_by_key(|e| e.seq);
     all.dedup_by_key(|e| e.seq);
-    PROJECTIONS
-        .iter()
-        .try_for_each(|t| c.execute(&format!("DELETE FROM {t}"), []).map(drop))?;
+    c.execute_batch("DELETE FROM issues; DELETE FROM lanes; DELETE FROM asks;")?;
     let q = "INSERT INTO issues (fleet, issue, json) VALUES (?1, ?2, ?3)";
     for s in events::fold_into(events::States::new(), &all).into_values() {
         c.execute(q, params![s.fleet, s.issue, serde_json::to_string(&s)?])?;
@@ -340,18 +336,14 @@ pub(crate) fn since(state: &Path, seq: u64, fresh: bool) -> Result<(Vec<Event>, 
     with(state, false, Default::default(), |c| {
         let tx = c.transaction()?;
         let evs = rows(&tx, "archived = 0 AND seq > ?1", seq)?;
-        let mut st = events::States::new();
-        let mut q = tx.prepare("SELECT json FROM issues WHERE ?1 OR (fleet = ?2 AND issue = ?3)")?;
-        let mut keys: Vec<(&str, u64)> = evs.iter().filter_map(|e| Some((e.fleet.as_str(), e.issue?))).collect();
-        keys.sort_unstable();
-        keys.dedup();
-        let keys = if fresh { vec![("", 0)] } else { keys };
-        for (f, n) in keys {
-            for j in q.query_map(params![fresh, f, n], |r| r.get::<_, String>(0))? {
-                let s: events::IssueState = serde_json::from_str(&j?)?;
-                st.insert((s.fleet.clone(), s.issue), s);
-            }
-        }
+        let q =
+            "SELECT json FROM issues WHERE ?1 OR (fleet, issue) IN (SELECT fleet, issue FROM events WHERE seq > ?2)";
+        let mut q = tx.prepare(q)?;
+        let st = q.query_map(params![fresh, seq], |r| r.get::<_, String>(0))?.map(|j| {
+            let s: events::IssueState = serde_json::from_str(&j?)?;
+            Ok(((s.fleet.clone(), s.issue), s))
+        });
+        let st = st.collect::<Result<events::States>>()?;
         drop(q);
         let asks = asks_since(&tx, if fresh { 0 } else { seq })?;
         Ok((evs, st, asks))
