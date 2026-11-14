@@ -1,0 +1,5 @@
+Decided: merge origin/staging (10d67e327, then 37b118782) into issue-910; both merges clean, no conflict in this PR's files
+Because: crates/core/src/top.rs:1
+Rejected: none
+Check: `drover top`, `top --json` and the host-overloaded alert still pass in crates/cli/tests/top.rs after the merge
+Owner: brought the drover top branch up to date with staging; nothing in it changed
