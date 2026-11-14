@@ -1,0 +1,13 @@
+Decided: one serial group per hot file, named `hot <file>` with one slot, so PRs on different hot files still run in parallel
+Because: "with a group per file (or one group for all hot files; impl decides and says why in the PR body)"
+Decided: drive logs `hot-files {files}` each slow pass the stored list less arch.toml's frozen/generated globs changes; queue::serials reads it from the log
+Because: crates/core/src/hotspots.rs:104
+Decided: every serial read (queue::groups, holders, spawn's SERIAL_BUSY, merge's belt, waiting) goes through queue::serials, so the auto groups reuse the #294 machinery
+Because: "It is the same mechanism as `serial_paths` / `SERIAL_BUSY`"
+Decided: merge refuses SERIAL_BUSY, never SERIAL_UNMARKED, on a hot group the PR never joined while another issue holds it
+Because: "without requiring the issue to have been queued `--serial`, because the PR's diff decides"
+Decided: waiting's held text reads `serial: <group> held by #n (h/max)` for every group; the board row adds a `serial: <group>` line
+Because: "show `serial: hot <file>` on an issue that is waiting for this reason"
+Rejected: injecting hot groups into Fleet.serial at config load — Config::load has no state path and 179 call sites
+Check: crates/cli/tests/serial_groups.rs's three hot-file tests: hold with SERIAL_BUSY naming the file, release once arch.toml freezes it, a cold PR never held
+Owner: PRs that touch a hot file now take turns automatically, and a file stops counting as soon as arch.toml marks it converted.
