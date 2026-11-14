@@ -1,0 +1,13 @@
+Decided: every write tap (answer, drive, override, extend, park, unpark, card, config) goes through one Server::tap, which logs a job and answers ACCEPTED with its id at once
+Because: "Every write tap (approve, answer, extend, park, card, config apply) is logged as a job and returns `accepted`"
+Decided: each job runs on its own scoped thread; the per-fleet running set and DRIVE_RUNNING are deleted
+Because: "none is refused or blocked by another job or by a running drive (`DRIVE_RUNNING` is gone)"
+Decided: a job whose issue's start is held by host load (pending action HOST_BUSY or MEM_LOW) shows waiting/HOST_WAIT and re-checks every serve_host_secs until it starts
+Because: q1597
+Decided: the same button (op, fleet, issue, id; a card or config by id alone) returns its running or done job for 15 min after the first tap; a refused one may be tapped again
+Because: "never runs it twice. Card r138 (2026-11-13) ran its command twice"
+Rejected: a persistent job table in the DB — the in-memory map plus `job` events covers the tap window without a schema change
+Rejected: rewriting the read side — GETs already run only under runner::request, where Fresh answers from the background read and never starts gh, git or herdr
+Check: crates/server/src/serve/jobs.rs:65 is the only tap entry; /api/v1, /screens/action run-card and /thread card/config/answer all reach it
+Check: card and config joined PAIRED_OPS, so an unpaired device cannot approve a card over /api/v1
+Owner: Board taps now answer instantly and finish in the background, each with its own result; pages always show how old their data is.
