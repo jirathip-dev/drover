@@ -1,0 +1,14 @@
+Decided: issues, lanes and asks tables updated by the same transaction that appends each event; queue order, holds and waiting reasons still read the hot DB
+Because: q1651
+Decided: issue state and ask endings come from the tables; the cached log loads them in one read snapshot with its events, never folding or indexing the whole log
+Because: q1651
+Decided: drover compact runs once a day in tick after drive (compact.at); the old checkpoint, rotation and rotate_mb are deleted
+Because: "It never runs inside a drive pass's critical path."
+Decided: zstd is the host binary (frames appended per month), not a new crate dependency
+Rejected: the zstd crate — a new dependency needs an owner ask; the binary is on the timer's PATH beside gh
+Decided: a slice that is no cached log gets its ask endings from the same projection run in an in-memory database, so closes() has one implementation
+Decided: build-cloned errors go to cache/build-cloned/<sha256>.txt as errors_ref; rows from before #978 are moved on the first open (user_version 1), which also builds the tables
+Because: "The event carries a reference: a path under `cache/` or a hash. Existing rows are migrated."
+Check: drover compact --rebuild gives the same rows before and after a compaction (crates/cli/tests/compaction.rs)
+Check: 20 MB target missed: on a copy of today's 225 MB DB compact leaves 89.5 MB, 133k events inside the 14-day window (the log spans 16 days)
+Owner: The state database keeps current-state tables and moves old finished work to monthly archives; today's copy went from 225 MB to 89.5 MB and keeps shrinking as history ages past 14 days.
