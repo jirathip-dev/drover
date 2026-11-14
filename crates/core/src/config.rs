@@ -253,6 +253,13 @@ pub struct HostCfg {
     pub max_working: Option<usize>,
     /// #984: live lanes that need `sim` on this host at once (unset: no cap).
     pub max_simulators: Option<usize>,
+    /// #909: heavy checks its lanes run at once, of every fleet (unset: 3).
+    pub heavy_max: Option<usize>,
+    /// #909: a smaller limit per heavy kind, e.g. `{ swiftlint = 1 }`.
+    #[serde(default)]
+    pub heavy_kind_max: BTreeMap<String, usize>,
+    /// #909: minutes a heavy check waits for a slot before it runs anyway, logged `heavy-timeout` (unset: 30).
+    pub heavy_wait_minutes: Option<u64>,
 }
 
 /// #256: a cloud host is a disposable machine: its lanes may start containers.
@@ -459,6 +466,9 @@ pub struct Fleet {
     pub lessons: Option<String>,
     /// #889: `weekly` (unset) has `tick` run `drover hotspots` every 7 days; `off` opts out.
     pub hotspots: Option<String>,
+    /// #909: `[fleet.<n>.heavy]`: kind → command patterns (`*` any text) its lanes run in a host's heavy slots.
+    #[serde(default)]
+    pub heavy: BTreeMap<String, Vec<String>>,
     /// #417: globs of UI files: a PR touching one goes through the verify stage.
     #[serde(default)]
     pub ui_paths: Vec<String>,
@@ -1115,6 +1125,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "runners-low",
     "runners-ok",
     "runtime-down",
+    "heavy-timeout",
 ];
 
 impl Notify {

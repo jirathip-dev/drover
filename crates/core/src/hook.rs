@@ -43,6 +43,9 @@ pub struct Rules {
     pub reviewer: bool,
     /// #511: an impl-family lane (not lesson): its unreported turn end goes on once.
     pub builds: bool,
+    /// #909: its fleet's heavy kinds under its host's slot limits (none: no heavy patterns).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heavy: Option<crate::heavy::Heavy>,
 }
 
 impl Rules {
@@ -57,7 +60,15 @@ impl Rules {
         let mut branches: Vec<String> = ["main", "master", "staging"].map(String::from).to_vec();
         branches.extend(cfg.fleet.values().map(|f| f.integration.clone()));
         let family = f.map(|f| f.family(role));
+        let h = cfg.hosts.get(host);
+        let heavy = f.filter(|f| !f.heavy.is_empty()).map(|f| crate::heavy::Heavy {
+            kinds: f.heavy.clone(),
+            max: h.and_then(|h| h.heavy_max).unwrap_or(3),
+            kind_max: h.map(|h| h.heavy_kind_max.clone()).unwrap_or_default(),
+            wait_minutes: h.and_then(|h| h.heavy_wait_minutes).unwrap_or(30),
+        });
         Rules {
+            heavy,
             branches,
             deny,
             groups: cfg.orchestrator.groups().into_iter().map(String::from).collect(),
@@ -857,6 +868,17 @@ pub fn turn_end(input: &Value, mark: &Path, builds: impl FnOnce() -> bool) -> Op
     }
     let _ = std::fs::write(mark, "asked");
     Some(again(TURN_ASK))
+}
+
+/// #909: a shell call matching a heavy kind, rewritten (in a dialect that can) to run in a host slot under `exe heavy`.
+pub fn heavy(input: &Value, h: &crate::heavy::Heavy, exe: &str) -> Option<Value> {
+    let tool = input["tool_name"].as_str()?;
+    let rewrite = dialects().find(|d| (d.sent)(input) && d.shell == tool)?.rewrite?;
+    let mut ti = tool_input(input).clone();
+    let cmd = ti["command"].as_str()?;
+    let kind = h.kind(cmd)?;
+    ti["command"] = h.wrap(exe, kind, cmd).into();
+    Some(rewrite(ti))
 }
 
 /// The deny answer in the dialect that sent `input`, else the first harness's (`Dialect::deny`).
