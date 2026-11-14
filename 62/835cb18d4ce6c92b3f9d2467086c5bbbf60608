@@ -1,0 +1,7 @@
+Decided: fix the red `evidence` check with a new push (a staging merge) rather than a re-run, since a re-run replays the old event's stale PR body.
+Because: scripts/evidence-check.sh:14
+Decided: in the v1.rs conflict, drop the `lane_list` doc line that had slid onto shed_rows, as staging removed it; regenerate api.d.ts from the merged Rust.
+Because: crates/server/src/serve/v1.rs:393
+Rejected: `gh run rerun` of the failed evidence run — it replays the original event with the old PR body and failed again.
+Check: api.d.ts differs from staging only by ShedRow and lanes.shed; the local test run unset DROVER_LANE/FLEET_LANE because self_update reads the lane's name.
+Owner: Brings the branch up to date with staging and clears a stale red CI check; nothing changes for users.
