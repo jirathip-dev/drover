@@ -138,6 +138,18 @@ fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Val
     v
 }
 
+fn hot(r: &QueueRow) -> Vec<&str> {
+    r.groups.iter().filter_map(|g| g.strip_prefix("hot ")).collect()
+}
+
+fn hot_row(f: &str, r: &QueueRow) -> Option<Value> {
+    let (n, i) = (hot(r).len(), r.issue);
+    (n > 0).then(|| {
+        json!({"type": "row", "id": format!("hot-{f}-{i}"), "indent": 1, "title": format!("🔒 hot ×{n}"), "style": "link",
+            "tap": {"sheet": format!("/screens/hot?repo={f}&issue={i}")}})
+    })
+}
+
 fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
     let f = &c.name;
     let (queued, busy): (Vec<&QueueRow>, Vec<&QueueRow>) = c.rows.iter().partition(|r| r.state == "queued");
@@ -145,7 +157,8 @@ fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
         let k = |i| q.then_some(i);
         rs.iter()
             .enumerate()
-            .map(|(i, r)| row(ev, &c.config.repo, f, r, k(i)))
+            .flat_map(|(i, r)| [Some(row(ev, &c.config.repo, f, r, k(i))), hot_row(f, r)])
+            .flatten()
             .collect()
     };
     let section = |id: &str, word: &str, rs: Vec<Value>| {
@@ -520,6 +533,7 @@ impl Server<'_> {
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
             "/screens/cards" => self.chat_cards(ctx),
             "/screens/workflow" => workflow(ctx),
+            "/screens/hot" => self.hot_sheet(ctx, q)?,
             _ => return None,
         };
         let oldest = self.r.refreshed().into_values().min();
@@ -529,6 +543,25 @@ impl Server<'_> {
             b.insert(0, json!({"type": "text", "id": "age", "markdown": line}));
         }
         Some(v)
+    }
+
+    fn hot_sheet(&self, ctx: &Ctx, q: &Q) -> Option<Value> {
+        let (f, n) = (q.get("repo")?, q.get("issue")?.parse::<u64>().ok()?);
+        let tab = self.queue_tab(ctx);
+        let r = tab
+            .fleets
+            .iter()
+            .find(|c| &c.name == f)?
+            .rows
+            .iter()
+            .find(|r| r.issue == n)?;
+        let rows: Vec<Value> = (hot(r).iter().enumerate())
+            .map(|(i, p)| json!({"type": "row", "id": format!("hot-{i}"), "title": p}))
+            .collect();
+        Some(
+            json!({"type": "sheet", "id": format!("hot-{f}-{n}"), "title": format!("#{n} · 🔒 hot ×{}", rows.len()),
+            "cancel": "Done", "blocks": [{"type": "list", "id": "hot-paths", "rows": rows}]}),
+        )
     }
 
     fn queue_screen(&self, ctx: &Ctx, q: &Q) -> Value {

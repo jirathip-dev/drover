@@ -289,7 +289,9 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
 :is(details.q,.qc)>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto;align-content:start;padding:var(--s1) 0}
 /* #367: titles start in one column at every depth: past the depth-2 gutter (--gm), so no graph line crosses one. */
 :is(details.q,.qc){--gm:5ch}:is(details.q,.qc):has(>summary .gt>.rsg){--gm:calc(4ch + var(--s4) + var(--s3))}
-:is(details.q,.qc) :is(.tl,.cst){grid-column:1/-1;padding-left:calc(var(--gm) + var(--s2))}
+:is(details.q,.qc) :is(.tl,.cst,.hp){grid-column:1/-1;padding-left:calc(var(--gm) + var(--s2))}
+:is(details.q,.qc) .hp:not([hidden]){display:flex;flex-wrap:wrap;gap:var(--s1);min-width:0}.hp>.tag{overflow-wrap:anywhere}
+#queue .tag.hot{cursor:pointer}
 :is(details.q,.qc)>summary>span:first-of-type{grid-column:2} /* #206: the #n column before graph() adds the gutter, too */
 details.q[open]{padding-bottom:var(--s2)}
 /* #423: beside an issue's plant (a theme with `stages`), a long theme + plain state pair (`inspect · review(1)`)
