@@ -602,7 +602,7 @@ fn qset(ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
 
 fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
     let ev = shared(&ctx.state).unwrap_or_default();
-    let mut shots: Vec<String> = crate::verify::served(&ev, (fleet, n))
+    let mut shots: Vec<String> = crate::verify::served(&ev, (fleet, n), None)
         .into_iter()
         .map(|x| x.0)
         .collect();

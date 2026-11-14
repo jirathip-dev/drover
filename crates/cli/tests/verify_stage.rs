@@ -375,7 +375,10 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
         String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now)).into_owned()
     };
     let [needs, ..] = parts(&s, ADDR, "", c.now);
-    assert!(needs.contains("<img src=\"shot/sendmeter/12/0\""), "{needs}");
+    assert!(
+        needs.contains(&format!("<img src=\"shot/sendmeter/12/0/{h}\"")),
+        "{needs}"
+    );
     let png = get("/shot/sendmeter/12/0");
     assert!(
         png.starts_with("HTTP/1.1 200") && png.ends_with("\u{fffd}PNG narrow"),
@@ -430,7 +433,7 @@ fn shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
     assert!(get("/shot/sendmeter/12/0").ends_with("\u{fffd}PNG narrow"));
     let old = json!({"verdict": "FAIL", "stage": "verify", "files": [{"name": "x.png", "path": x}]});
     ev(&c, 3, "verdict", old);
-    assert!(drover::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12)).is_empty());
+    assert!(drover::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12), None).is_empty());
     assert!(get("/shot/sendmeter/12/0").starts_with("HTTP/1.1 404"));
 }
 
