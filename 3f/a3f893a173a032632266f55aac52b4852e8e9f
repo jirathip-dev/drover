@@ -1,0 +1,7 @@
+Decided: merged origin/staging twice (#923, #686); each conflict keeps the herdr removal and takes staging's account removal and sim replay
+Because: crates/core/src/orchestrator.rs:1116
+Decided: the sim counts pane incarnations through an FnMut passed to #686's metrics::log, and the shed send path picks per-issue scripts
+Because: crates/cli/tests/sim/metrics.rs:34
+Rejected: none
+Check: rg -il herdr crates/*/src lists only config.rs; sim and orchestrator_cards pass
+Owner: Staging's account and simulator changes are merged in; lanes still run only on shed.
