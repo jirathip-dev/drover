@@ -469,11 +469,15 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
     let tick = install(ctx, &cfg, r, TICK, &["tick"], load);
     let fast = install(ctx, &cfg, r, FAST, &["drive", "--fast"], load);
     let [update, clean] = MORE.map(|(l, args)| install(ctx, &cfg, r, l, args, load));
-    writeln!(
-        out,
-        "{}",
-        [tick, fast, board, tailscale, sync, update, clean].join("\n")
-    )?;
+    let labels = cfg
+        .fleet
+        .values()
+        .filter_map(|f| Some(crate::gh::ensure_label(r, f, f.merge_label.as_deref()?)));
+    let rows: Vec<_> = [tick, fast, board, tailscale, sync, update, clean]
+        .into_iter()
+        .chain(labels)
+        .collect();
+    writeln!(out, "{}", rows.join("\n"))?;
     crate::doctor::doctor(ctx, r, out, false, false)
 }
 

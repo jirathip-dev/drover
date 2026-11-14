@@ -390,6 +390,32 @@ pub fn has_label(pr: &Value, name: &str) -> bool {
     pr["labels"].as_array().into_iter().flatten().any(|l| l["name"] == name)
 }
 
+/// #947: the command that makes label `label` in fleet `f`'s repo.
+pub fn label_fix(f: &Fleet, label: &str) -> String {
+    format!("gh label create {label} --repo {} --force", f.repo)
+}
+
+/// #947: whether label `label` exists in fleet `f`'s repo (GitHub label names ignore case).
+pub fn label_exists(r: &dyn Runner, f: &Fleet, label: &str) -> Result<bool> {
+    let args = [
+        "label", "list", "--repo", &f.repo, "--search", label, "--json", "name", "--limit", "100",
+    ];
+    let v = json(r, "gh", &args)?;
+    let same = |l: &Value| l["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(label));
+    Ok(v.as_array().into_iter().flatten().any(same))
+}
+
+/// #947 `setup`'s row for fleet `f`'s `merge_label`: `= already` when it exists, else made (`✓`) or `✗ … → fix`.
+pub fn ensure_label(r: &dyn Runner, f: &Fleet, label: &str) -> String {
+    let (what, fix) = (format!("label {label} in {}", f.repo), label_fix(f, label));
+    let create = ["label", "create", label, "--repo", &f.repo, "--force"];
+    match label_exists(r, f, label) {
+        Ok(true) => format!("= already {what}"),
+        Ok(false) => ok(r, "gh", &create).map_or_else(|e| format!("✗ {what}: {e:#} → {fix}"), |_| format!("✓ {what}")),
+        Err(e) => format!("✗ {what}: {e:#} → {fix}"),
+    }
+}
+
 /// One check of a statusCheckRollup: green | pending | failed | missing.
 pub fn check_state(c: &Value) -> &'static str {
     match c["__typename"].as_str() {
