@@ -1,4 +1,3 @@
-//! #31: drover lane-hours, the usage meter (#707: the status line's rows only), the DeepSeek balance, SECRET_IN_CONFIG.
 mod common;
 use common::*;
 use drover::events::{read, Event};
@@ -10,7 +9,6 @@ use std::path::Path;
 
 const DS_KEY: &str = concat!("sk", "-deepseekfixturekey0123456789");
 
-/// `Fake` that also records what each `run_in` sent on stdin.
 struct Stdin(Fake, Shared<Vec<String>>);
 
 impl Runner for Stdin {
@@ -49,10 +47,8 @@ fn lane_hours_clip_overlap_and_count_running_lanes() {
     let h = 3600;
     let now = 100 * h;
     let events = vec![
-        // Ran 10 h, ended 20 h ago: outside 5 h, inside 7 d.
         spawn_ev(now - 30 * h, 1, "sendmeter-impl-1", "A"),
         ev(now - 20 * h, Some(1), "merged", json!({})),
-        // Overlapping lanes on A: 6 h before the 5 h window opened until 1 h ago (clipped to 4 h), and one still running (2 h).
         spawn_ev(now - 11 * h, 2, "sendmeter-impl-2", "A"),
         spawn_ev(now - 2 * h, 3, "sendmeter-impl-3", "A"),
         ev(
@@ -61,7 +57,6 @@ fn lane_hours_clip_overlap_and_count_running_lanes() {
             "lane-dead",
             json!({"key": format!("{}:sendmeter-impl-2", now - 11 * h)}),
         ),
-        // B's lane is superseded after 1 h; a spawn starting before the 7 d window is clipped to it.
         spawn_ev(now - 3 * h, 4, "sendmeter-impl-4", "B"),
         ev(
             now - 2 * h,
@@ -110,7 +105,6 @@ fn secret_in_config_is_refused() {
             "{out}"
         );
     }
-    // Long env-var names, paths and model ids are not secrets.
     let legit = format!(
         "{CONFIG}\nmodels = [\"deepseek-ai/DeepSeek-V3.2-Exp-instruct-20261031-preview\"]\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_ACCOUNT_A1_PERSONAL\"\n[providers.deepseek]\nkey_env = \"DEEPSEEK_API_KEY\"\nenv_file = \"/Users/someone/.config/claude-accounts/a1b2c3d4e5f6/tokens-for-personal-account.env\"\n"
     );
@@ -119,7 +113,6 @@ fn secret_in_config_is_refused() {
     assert_eq!(code, 0, "{out}");
 }
 
-/// A config with accounts A/B, A's usage login, and the DeepSeek key in an `env_file`.
 fn config(d: &Path) -> String {
     let env = d.join("tokens.env");
     std::fs::write(
@@ -128,7 +121,7 @@ fn config(d: &Path) -> String {
     )
     .unwrap();
     use std::os::unix::fs::PermissionsExt;
-    std::fs::set_permissions(&env, std::fs::Permissions::from_mode(0o600)).unwrap(); // #707: a secret file
+    std::fs::set_permissions(&env, std::fs::Permissions::from_mode(0o600)).unwrap();
     CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"\naccounts = [\"A\", \"B\"]")
         + &format!(
             "\n[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n\n[accounts.usage]\nA = \"{}\"\n\n[providers.deepseek]\nkey_env = \"DEEPSEEK_API_KEY\"\nenv_file = \"{}\"\n",
@@ -141,8 +134,6 @@ fn no_secret(what: &str, text: &str) {
     assert!(!text.contains(DS_KEY), "{what} leaks a secret: {text}");
 }
 
-/// Every secret went to stdin only: never argv, CLI output, the event log, a cache file or the page; #707: no
-/// Keychain call at all.
 fn assert_no_leaks(c: &drover::Ctx, r: &Stdin, outs: &[&str], page: &str) {
     let calls = r.0.calls.borrow().join("\n");
     no_secret("argv", &calls);
@@ -164,7 +155,7 @@ fn assert_no_leaks(c: &drover::Ctx, r: &Stdin, outs: &[&str], page: &str) {
 fn meter_balance_and_lane_hours_show_without_leaking_secrets() {
     let d = tmpdir("usage-show");
     let c = ctx(&d, &config(&d));
-    row(&c, "A", c.now, 9.0, 50.0); // #707: A's status line, the meter's only source
+    row(&c, "A", c.now, 9.0, 50.0);
     let r = stdin(
         Fake::default()
             .reply(
@@ -191,19 +182,16 @@ fn meter_balance_and_lane_hours_show_without_leaking_secrets() {
         "keys go on stdin: {sent}"
     );
 
-    // Cached for 10 min: the page re-reads nothing, and shows the bars.
     let n = r.0.count("curl");
     let page = host_tab(&Server::new(&c, &r, None), "", c.now);
     assert_eq!(r.0.count("curl"), n);
     assert!(
-        // #440: System's Agent providers, the account's gauges and lane-hours.
         page.contains("▏</span> <b class=g>50%</b></span>") && page.contains("drover lane-hours"),
         "{page}"
     );
     assert!(page.contains("<span class=\"pvs a\">✓ USD 2.28 · low</span>"), "{page}");
     assert_no_leaks(&c, &r, &[&out], &page);
 
-    // `check` alerts once per crossing below warn_below.
     let (_, out) = run(&c, &r, &["check"]);
     assert!(
         out.contains("deepseek provider-low: balance USD 2.28 (warn below 5)"),
@@ -274,7 +262,6 @@ fn spawn_prefers_the_lowest_fresh_weekly_usage() {
         assert_eq!(code, 0, "{out}");
         serde_json::from_str::<serde_json::Value>(&out).unwrap()["account"].clone()
     };
-    // #707: the readings are the accounts' status-line rows.
     let rows = d.join("state/usage.jsonl");
     row(&c, "A", c.now - 60, 0.0, 80.0);
     row(&c, "B", c.now - 60, 0.0, 20.0);
@@ -285,7 +272,6 @@ fn spawn_prefers_the_lowest_fresh_weekly_usage() {
     assert_eq!(dry(), "A", "B's reading is over 30 min old: configured order");
 }
 
-/// Claude Code's status-line JSON with these 5h/7d percentages (resets as epoch seconds).
 fn status(five: f64, week: f64, now: u64) -> String {
     json!({"model": {"display_name": "Opus"}, "rate_limits": {
         "five_hour": {"used_percentage": five, "resets_at": now + 3600},
@@ -343,7 +329,6 @@ fn meter_is_the_newest_status_line_row_fresh_or_stale() {
         out
     };
     row(&c, "A", c.now - 60, 41.0, 63.0);
-    // B has no /login dir: its row is shown, with its age.
     row(&c, "B", c.now - 3600, 12.0, 30.0);
     let out = accounts();
     assert!(
@@ -351,7 +336,6 @@ fn meter_is_the_newest_status_line_row_fresh_or_stale() {
         "{out}"
     );
     assert!(out.contains("session 0% (reset, read 60m ago) · week 30%"), "{out}");
-    // #707: A's newest row is 700 s old and there is no poll: it is still the reading, with its age.
     std::fs::remove_file(d.join("state/usage.jsonl")).unwrap();
     row(&c, "A", c.now - 700, 41.0, 63.0);
     let out = accounts();
@@ -374,12 +358,10 @@ fn headroom_picking_takes_the_most_headroom() {
     };
     let headroom = order.replace("[accounts]\n", "[accounts]\npick = \"headroom\"\n");
     let c = ctx(&d, &order);
-    // A: 5h nearly spent; B: more headroom on both windows.
     row(&c, "A", c.now, 90.0, 10.0);
     row(&c, "B", c.now, 20.0, 30.0);
     assert_eq!(dry(&order), "A", "default `order`: unchanged");
     assert_eq!(dry(&headroom), "B");
-    // A's 5h window has reset since its reading: A's live use is its week, 10%.
     std::fs::remove_file(d.join("state/usage.jsonl")).unwrap();
     row(&c, "A", c.now - 4000, 90.0, 10.0);
     row(&c, "B", c.now, 20.0, 30.0);
@@ -390,7 +372,6 @@ fn headroom_picking_takes_the_most_headroom() {
 fn a_reading_past_its_reset_reads_as_reset_with_its_age() {
     let d = tmpdir("usage-785-reset");
     let c = ctx(&d, &config(&d));
-    // #785: A's last reading is 4 days old: both windows reset since (88%, 88%).
     row(&c, "A", c.now - 4 * 86400, 88.0, 88.0);
     let (code, out) = run(&c, &Fake::default().reply("date -r", "Mon 19\n"), &["accounts"]);
     assert_eq!(code, 0, "{out}");

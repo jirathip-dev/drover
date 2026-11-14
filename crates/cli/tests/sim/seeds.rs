@@ -1,12 +1,8 @@
-//! The fixed seed set CI runs on every PR, one note each; a failing seed `just sim` finds joins it with its fix.
 use crate::model::{Ev, Model, Script, FLEET};
 use crate::scenario::{args, config, timers, T0};
 use crate::sched::Rng;
 
-/// Seed 1 (#370, 2026-11-04 22:11:25): a reviewer's FAIL without Proof blocks, refused NO_PROOF while one kick runs
-/// pass after pass on its start's `Ctx.now`. The reviewer ignores the prompt; every reviewer after it writes the same
-/// FAIL within seconds (and adds the Proof once told). Before #680's fix the kick superseded each new reviewer at once:
-/// 25 supersedes stamped with one second.
+/// Seed 1 (#370, 2026-11-04 22:11:25): a reviewer's FAIL without Proof blocks, refused NO_PROOF while one kick runs pass after pass on its start's `Ctx.now`. The reviewer ignores the prompt; every reviewer after it writes the same FAIL within seconds (and adds the Proof once told). Before #680's fix the kick superseded each new reviewer at once: 25 supersedes stamped with one second.
 pub const INCIDENT: u64 = 1;
 
 /// Seeds that found a cause of their own, parked `#[ignore]` (`parked_seeds`) until its issue's fix unparks them.
@@ -56,8 +52,7 @@ pub const FIXED: &[(u64, &str)] = &[
     ),
 ];
 
-/// Seed 1's fleet: #370 queued, its impl pushes, its first reviewer writes a FAIL without Proof and ignores the
-/// refusal; each reviewer after it writes the same FAIL 5 s in.
+/// Seed 1's fleet: #370 queued, its impl pushes, its first reviewer writes a FAIL without Proof and ignores the refusal; each reviewer after it writes the same FAIL 5 s in.
 pub fn incident() -> (Model, (u64, u64)) {
     let mut rng = Rng::new(INCIDENT);
     let mut m = Model::default();
@@ -85,9 +80,7 @@ pub fn incident() -> (Model, (u64, u64)) {
     (m, (4, 3))
 }
 
-/// #685's known-answer fleet: #201 and #202 queued together at t+0; every impl works 600 s and pushes a green head,
-/// every head's CI takes 300 s, the host never busy. The first reviewer writes a FAIL without Proof 300 s in and
-/// ignores the refusal (a wasted spawn, superseded once); every reviewer after it writes PASS 300 s in.
+/// #685's known-answer fleet: #201 and #202 queued together at t+0; every impl works 600 s and pushes a green head, every head's CI takes 300 s, the host never busy. The first reviewer writes a FAIL without Proof 300 s in and ignores the refusal (a wasted spawn, superseded once); every reviewer after it writes PASS 300 s in.
 pub fn known() -> (Model, String) {
     let mut rng = Rng::new(KNOWN);
     let mut m = Model::default();

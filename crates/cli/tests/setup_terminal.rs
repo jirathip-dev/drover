@@ -1,5 +1,3 @@
-//! #303: setup terminals: only configured names run, a remote host's pane goes over `--machine`, typed text never
-//! reaches the event log, and a setup closes on its 10-minute timeout (lanes are hook-blocked: tests/hook.rs).
 mod common;
 use common::*;
 use drover::events::read;

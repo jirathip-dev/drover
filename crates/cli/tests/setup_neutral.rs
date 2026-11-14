@@ -1,9 +1,5 @@
-//! #82: shipped code and docs stay setup-neutral: no install's own names (people, repos, paths,
-//! hosts). The person in charge is "the owner"; examples use `acme/*` and `<owner>/<repo>`.
 use std::path::{Path, PathBuf};
 
-/// Matched case-insensitively anywhere in a shipped file.
-/// #355 made `conductor` a drover role, so it is no longer an install's own name.
 const WORDS: [&str; 6] = [
     "jirathip",
     "synergy",
@@ -13,7 +9,6 @@ const WORDS: [&str; 6] = [
     "hermes-brain",
 ];
 
-/// (file, exact text with whitespace collapsed, why it may stay). Each one is removed before the scan.
 const EXCEPTIONS: [(&str, &str, &str); 13] = [
     (
         "assets/herd.js",
@@ -111,7 +106,6 @@ fn shipped_files_name_no_install() {
     let (mut bad, mut used) = (vec![], [false; EXCEPTIONS.len()]);
     for f in all {
         let rel = f.strip_prefix(root).unwrap().to_string_lossy().into_owned();
-        // Images and other binaries hold no text to check.
         let Ok(text) = std::fs::read_to_string(&f) else {
             continue;
         };
@@ -130,7 +124,6 @@ fn shipped_files_name_no_install() {
                 .map(|w| format!("{rel}: {w}")),
         );
     }
-    // A stale exception goes too, so the list never outgrows what ships.
     bad.extend(
         EXCEPTIONS
             .iter()
@@ -145,8 +138,6 @@ fn shipped_files_name_no_install() {
     );
 }
 
-/// #732 (q911): role texts speak of "the lane" and "the agent": no harness or provider's name in a line's behaviour
-/// (a `code` span, a file or command's name, may carry one).
 #[test]
 fn role_texts_name_no_harness() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../roles");

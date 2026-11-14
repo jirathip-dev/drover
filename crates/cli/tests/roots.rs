@@ -1,5 +1,3 @@
-//! #630: workspace roots (temp folders here): a new lane takes the first mounted root, `hosts eject` saves and
-//! restarts a lane on the next one, a pulled root's lane restarts once from its pushed head, and `migrate` moves an
 mod common;
 use common::*;
 use drover::config::Config;
@@ -100,7 +98,6 @@ fn spawnable() -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// Issue 12's impl lane working in the first root (its worktree made there, a file left uncommitted).
 fn working_on_nvme(r: &Repo) -> PathBuf {
     let wt = r.nvme.join("sendmeter/issue-12");
     git(&r.local, &["worktree", "add", "-q", &wt.to_string_lossy(), "issue-12"]);
@@ -130,7 +127,7 @@ fn a_new_lane_lands_in_the_first_mounted_root_and_skips_a_missing_one() {
         serde_json::from_str::<serde_json::Value>(&out).unwrap()["worktree"].clone()
     };
     assert_eq!(worktree(&r.c), json!(r.nvme.join("sendmeter/issue-12")));
-    std::fs::remove_dir(&r.nvme).unwrap(); // the drive is not plugged in
+    std::fs::remove_dir(&r.nvme).unwrap();
     assert_eq!(worktree(&r.c), json!(r.internal.join("sendmeter/issue-12")));
 }
 
@@ -142,7 +139,6 @@ fn eject_saves_and_restarts_a_live_lane_on_the_next_root_then_reports_safe() {
     let (code, out) = run(&r.c, &Git(&f), &["hosts", "eject", "mini"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
     assert!(out.contains(&format!("safe to unplug {}", r.nvme.display())), "{out}");
-    // Saved: the uncommitted file is on `wip/<agent>-<stamp>` at origin, and the worktree is off the drive.
     let saved = out.lines().find_map(|l| l.strip_prefix("saved "));
     let wip = saved.and_then(|l| l.rsplit(" to ").next()).unwrap();
     assert!(wip.starts_with(&format!("wip/{AGENT}-1000000-")), "{out}");
@@ -154,7 +150,6 @@ fn eject_saves_and_restarts_a_live_lane_on_the_next_root_then_reports_safe() {
                 .unwrap()
                 .all(|e| e.unwrap().file_name() == "sendmeter")
     );
-    // Restarted from that save on the next root.
     let new = r.internal.join("sendmeter/issue-12");
     assert!(r.sh.called("kill", AGENT), "the live lane stopped first");
     assert_eq!(r.sh.last("run")["cwd"], json!(new), "and ran again there");
@@ -168,7 +163,6 @@ fn eject_saves_and_restarts_a_live_lane_on_the_next_root_then_reports_safe() {
         list.contains(&*new.to_string_lossy()) && !list.contains(&*old.to_string_lossy()),
         "{list}"
     );
-    // The ejected root takes no new lane while it stays mounted.
     let (_, dry) = run(&r.c, &f, &["spawn", "sendmeter", "12", "impl", "--dry-run", "--json"]);
     assert!(dry.contains(&*new.to_string_lossy()), "{dry}");
 }
@@ -177,7 +171,7 @@ fn eject_saves_and_restarts_a_live_lane_on_the_next_root_then_reports_safe() {
 fn a_pulled_root_is_noted_once_and_its_lane_restarts_on_the_next_root_from_its_pushed_head() {
     let r = repo("roots-pulled");
     working_on_nvme(&r);
-    std::fs::remove_dir_all(&r.nvme).unwrap(); // pulled without eject
+    std::fs::remove_dir_all(&r.nvme).unwrap();
     let f = fake(&r, &r.nvme);
     let cfg = Config::load(&r.c.config).unwrap();
     let watch = || {
@@ -202,7 +196,6 @@ fn a_pulled_root_is_noted_once_and_its_lane_restarts_on_the_next_root_from_its_p
             .contains("uncommitted work, 0 commit(s) not pushed"),
         "{moved:?}"
     );
-    // The next look: nothing new, no loop.
     assert_eq!(watch(), "");
     assert_eq!(spawns(&r.c).len(), 2);
     let gone = read(&r.c.state)
@@ -252,7 +245,6 @@ fn migrate_moves_an_idle_worktree_into_the_new_layout() {
         cache.exists(),
         "the old build caches stay while a worktree is left: {out}"
     );
-    // Once that lane has ended, the next migrate moves it and drops the old caches.
     r.sh.exit("sendmeter-impl-13");
     let (code, out) = run(&r.c, &Git(&Fake::default()), &["migrate"]);
     assert_eq!(code, 0, "{out}");
@@ -262,9 +254,6 @@ fn migrate_moves_an_idle_worktree_into_the_new_layout() {
     );
 }
 
-/// Amendment A: a new lane's build folder `<root>/.build/<agent>` is a clone of its fleet's newest one on that root
-/// (another fleet's never), the files `.drover/worktree-include` lists come from the main checkout, and the lane's
-/// unsaved work shows in `drover status` and the Lanes tab's rows.
 #[test]
 fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_files() {
     let r = repo("roots-warm");
@@ -276,7 +265,7 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     ] {
         std::fs::create_dir_all(b.join(d).join("release")).unwrap();
         std::fs::write(b.join(d).join("release").join(f), f).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(1100)); // mtimes in seconds: each newer
+        std::thread::sleep(std::time::Duration::from_millis(1100));
     }
     std::fs::write(r.local.join(".drover-ignored.env"), "PORT=1\n").unwrap();
     std::fs::write(r.local.join(".git/info/exclude"), ".drover-ignored.env\n").unwrap();
@@ -297,7 +286,6 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         assert!(mine.join("warm").is_file(), "{out}");
         assert!(!mine.join("old").exists() && !mine.join("theirs").exists());
     } else {
-        // A volume without copy-on-write (CI's ext4): the clone fails and nothing is fully copied instead.
         assert!(!mine.join("warm").exists(), "{out}");
         assert_eq!(cl.data["errors"].as_array().map(Vec::len), Some(1), "{out}");
     }
@@ -312,7 +300,6 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         std::fs::read_to_string(wt.join(".drover-ignored.env")).unwrap(),
         "PORT=1\n"
     );
-    // Unsaved work: one new file, one local commit.
     std::fs::write(wt.join("new.txt"), "x").unwrap();
     std::fs::write(wt.join("README"), "y\n").unwrap();
     let id = ["-c", "user.name=t", "-c", "user.email=t@t"];
@@ -332,7 +319,6 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     );
 }
 
-/// Whether folder `d`'s volume clones copy-on-write, by the same `cp` flags the spawn uses.
 fn reflinks(d: &std::path::Path) -> bool {
     let (src, dst) = (d.join(".probe"), d.join(".probe-clone"));
     std::fs::write(&src, "p").unwrap();
@@ -351,13 +337,11 @@ fn reflinks(d: &std::path::Path) -> bool {
     ok
 }
 
-/// #790: a root gone under a live lane: the next drive pass restarts the lane on the other root at its pushed head,
-/// once, with one `root-moved` naming both roots; `waiting` no longer says "root gone".
 #[test]
 fn a_drive_pass_restarts_a_lane_whose_root_went_away_on_the_next_root_once() {
     let r = repo("roots-drive");
     working_on_nvme(&r);
-    std::fs::remove_dir_all(&r.nvme).unwrap(); // force-unmounted
+    std::fs::remove_dir_all(&r.nvme).unwrap();
     let f = fake(&r, &r.internal);
     let (code, out) = run(&r.c, &Git(&f), &["drive"]);
     assert_eq!(code, 0, "{out}");
@@ -372,7 +356,6 @@ fn a_drive_pass_restarts_a_lane_whose_root_went_away_on_the_next_root_once() {
         git(&new, &["rev-parse", "HEAD"]),
         git(&r.origin, &["rev-parse", "issue-12"])
     );
-    // The next pass: nothing new.
     let (code, out) = run(&r.c, &Git(&f), &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(spawns(&r.c).len(), 2, "{out}");

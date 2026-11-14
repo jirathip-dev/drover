@@ -1,4 +1,3 @@
-//! The per-fleet work queue (`queue` events): `drover queue`, `next` and `board`.
 use crate::config::{Fleet, Serial};
 use crate::events::{age, fold, last_spawn, Event, IssueState, States};
 use crate::overlap::Conflicts;
@@ -6,15 +5,14 @@ use anyhow::{anyhow, ensure, Result};
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Default)]
-#[allow(clippy::struct_excessive_bools)] // independent queue marks (`--design`, `--architect`, `--repro`, …)
+#[allow(clippy::struct_excessive_bools)]
 pub struct Item {
     pub issue: u64,
     /// #505: every issue it waits on (`queue block --on A --on B`); a merged one drops out in `view`.
     pub blockers: Vec<u64>,
     /// The first of `blockers` still open, set by `view`: the frozen board (#552) and /api/v1 rows show one.
     pub blocked_by: Option<u64>,
-    /// #667: blockers in another fleet or repo (`fleet#n`, `owner/repo#n`); one drops out in `view` once merged in its
-    /// fleet or read closed on GitHub (`blocker-closed`).
+    /// #667: blockers in another fleet or repo (`fleet#n`, `owner/repo#n`); one drops out in `view` once merged in its fleet or read closed on GitHub (`blocker-closed`).
     pub ext: Vec<String>,
     /// #294: the serial groups it is marked for (`queue add --serial [G]`, `queue set <n> serial G`; `""` = the first).
     pub serial: Vec<String>,
@@ -112,7 +110,6 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
         "rm" => {
             q.remove(pos(q, issues[0])?);
         }
-        // #505: `on` is a list (one number before #505); block adds to the set, unblock drops some or all.
         op @ ("block" | "unblock") => {
             let n = issues[0];
             let (on, ext) = (nums(&d["on"]), refs(&d["on"]));
@@ -166,7 +163,6 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
     Ok(())
 }
 
-/// #157: a change's `needs` tags; #294: its `serial` marks (#115's `true`: `[""]`, the first group).
 fn strs(v: &Value) -> Vec<String> {
     match v {
         Value::Bool(b) => vec![String::new(); usize::from(*b)],
@@ -210,7 +206,6 @@ pub fn labels(i: &Item) -> String {
     all.join(", ")
 }
 
-/// #417: `on`/`off` (or `["on"]`, as `queue set` logs it) as a forced verify stage.
 fn onoff(v: &Value) -> Option<bool> {
     strs(v)
         .first()
@@ -224,8 +219,7 @@ pub fn needs_of(events: &[Event], fleet: &str, issue: u64) -> Vec<String> {
     q.map(|i| i.needs).unwrap_or_default()
 }
 
-/// #412: the pre-impl stage issue `n` is queued for that the owner has not approved yet: #730's `architect` first, then
-/// `design` (an approval names its stage's `role`; none before #730: `design`).
+/// #412: the pre-impl stage issue `n` is queued for that the owner has not approved yet: #730's `architect` first, then `design` (an approval names its stage's `role`; none before #730: `design`).
 pub fn wants_design(events: &[Event], fleet: &str, n: u64) -> Option<&'static str> {
     let q = replay(events, fleet).into_iter().find(|i| i.issue == n)?;
     let approved = |r| {
@@ -265,8 +259,7 @@ fn state<'a>(st: &'a States, fleet: &str, n: u64) -> &'a str {
     st.get(&(fleet.to_string(), n)).map_or("queued", |s| s.state.as_str())
 }
 
-/// #294: the serial groups issue `n` is in, by name: marked in queue `q` (`""` = the first group) or joined by its diff
-/// (`serial-joined`; #149's `serial-auto` = the first group), merged ones included.
+/// #294: the serial groups issue `n` is in, by name: marked in queue `q` (`""` = the first group) or joined by its diff (`serial-joined`; #149's `serial-auto` = the first group), merged ones included.
 pub fn groups(q: &[Item], events: &[Event], f: &Fleet, fleet: &str, n: u64) -> Vec<Serial> {
     let marks = q.iter().filter(|i| i.issue == n).flat_map(|i| &i.serial);
     let joined = events.iter().filter(|e| e.fleet == fleet && e.issue == Some(n));
@@ -382,9 +375,7 @@ pub fn startable(events: &[Event], fleet: &str) -> Vec<String> {
     q.into_iter().filter(free).map(|i| i.issue.to_string()).collect()
 }
 
-/// Drive's refused start of queued issue `n` in the last hour as (board, status) text, `skipped this pass`; #572: not
-/// once older than its last state change, or (other codes) than a merge in its serial groups. `SERIAL_BUSY` shows the
-/// group's holders now, or its free slot.
+/// Drive's refused start of queued issue `n` in the last hour as (board, status) text, `skipped this pass`; #572: not once older than its last state change, or (other codes) than a merge in its serial groups. `SERIAL_BUSY` shows the group's holders now, or its free slot.
 pub fn skipped(
     events: &[Event],
     st: &States,
@@ -481,23 +472,19 @@ pub fn board(
         } else {
             age(now.saturating_sub(ts))
         };
-        // #129: its own line, the row is full: `⚠ conflicts with #98 (serve.rs)`.
         let warn = c.get(&n).and_then(|c| c.first()).map_or(String::new(), |(o, files)| {
             let o = if *o == 0 { "integration".into() } else { format!("#{o}") };
             let names: Vec<_> = files.iter().map(|p| p.rsplit('/').next().unwrap_or_default()).collect();
             format!("\n         ⚠ conflicts with {o} ({})", names.join(", "))
         });
-        // #373: its own line too, until a PASS: `✗ migration-order failed: rename needed`.
         let pass = |e: &&Event| e.is("verdict", fleet, n) && e.str("verdict") == Some("PASS");
         let hit = |e: &&Event| e.is("premerge-failed", fleet, n) || pass(e);
         let note = events.iter().rev().find(hit).and_then(|e| e.str("note"));
         let warn = note.map_or(String::new(), |t| format!("\n         ✗ {t}")) + &warn;
-        // #478: its own line too: an active lane on a host the last look could not reach.
         let away = s.and_then(|s| crate::hosts::offline(ctx, last_spawn(events, s.active_lane()?.1)));
         let warn = away.map_or(String::new(), |h| format!("\n         host offline: {h}")) + &warn;
         let sp = s.and_then(|s| last_spawn(events, s.active_lane()?.1));
         let stale = sp.zip(cfg).is_some_and(|(e, c)| crate::hook::rules_stale(c, fleet, e));
-        // #609: its own line too, the row is full: where the active lane runs (`on mini · shed`).
         let place = s.and_then(|s| at.get(s.active_lane()?.1)).filter(|p| !p.is_empty());
         let warn = place.map_or(String::new(), |p| format!("\n         on {p}")) + &warn;
         let wait =
@@ -515,7 +502,6 @@ pub fn board(
         )
     };
     for (k, i) in q.iter().enumerate() {
-        // #505: several blockers get their own line, the row is full.
         let on = match (&i.blockers[..], i.ext.len()) {
             ([], 0) => None,
             ([b], 0) => Some(format!("on #{b}")),

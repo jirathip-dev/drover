@@ -1,4 +1,3 @@
-//! #254 cloud hosts (docs/hosts.md): recipe commands start, stop and price a `[hosts.<n>] cloud` host; logs `cloud-*`.
 use crate::config::{write_atomic, Config};
 use crate::events::{age, emit, read, Event};
 use crate::runner::{argv, ok, Runner};
@@ -8,8 +7,7 @@ use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
 
-/// Host `name`'s recipe (`<config>/recipes/<cloud>.toml`, else the built-in `boat`) and size: #635's old `medium` is
-/// `default` where the recipe prices no `medium`.
+/// Host `name`'s recipe (`<config>/recipes/<cloud>.toml`, else the built-in `boat`) and size: #635's old `medium` is `default` where the recipe prices no `medium`.
 pub fn recipe(ctx: &Ctx, cfg: &Config, name: &str) -> Result<(toml::Table, String)> {
     let (c, size) = (&cfg.hosts[name].cloud, cfg.hosts[name].size.clone().unwrap_or_default());
     let rc = load(ctx, c.as_deref().unwrap_or(""))?;
@@ -18,8 +16,7 @@ pub fn recipe(ctx: &Ctx, cfg: &Config, name: &str) -> Result<(toml::Table, Strin
     Ok((rc, if old { "default".into() } else { size }))
 }
 
-/// #707: the recipe's provider key `var` (`key_env`) and where it was found: the environment, else the 0600 file
-/// `<config>/secrets/<var>`. None: the provider's own CLI holds its login (boat's does).
+/// #707: the recipe's provider key `var` (`key_env`) and where it was found: the environment, else the 0600 file `<config>/secrets/<var>`. None: the provider's own CLI holds its login (boat's does).
 pub fn key(ctx: &Ctx, var: &str) -> Result<Option<(String, String)>> {
     if var.is_empty() {
         return Ok(None);
@@ -40,7 +37,6 @@ pub fn load(ctx: &Ctx, c: &str) -> Result<toml::Table> {
     Ok(toml::from_str(&text)?)
 }
 
-/// Run host `name`'s recipe command `verb`, the provider key exported from stdin (never in argv or a log); its stdout.
 fn cmd(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str) -> Result<String> {
     let (rc, size) = recipe(ctx, cfg, name)?;
     let get = |k: &str| {
@@ -49,7 +45,6 @@ fn cmd(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str) -> Resul
             .unwrap_or_default()
             .replace("{name}", name)
     };
-    // #635 C: an empty id is boat's current sandbox: no stop or destroy when the recipe's `id` finds none.
     if ["stop", "destroy"].contains(&verb) && rc.contains_key("id") {
         let id = run(ctx, r, &rc, &format!("{name} id"), &get("id"), None)?;
         ensure!(!id.trim().is_empty(), "no sandbox named {name}: {verb} refused");
@@ -58,8 +53,7 @@ fn cmd(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str) -> Resul
     run(ctx, r, &rc, &format!("{name} {verb}"), &line, None)
 }
 
-/// Run recipe `rc`'s filled-in `line`: its provider key (#707: when it has `key_env` and the key is set), then #537's
-/// `token` (as `RT`), exported from stdin.
+/// Run recipe `rc`'s filled-in `line`: its provider key (#707: when it has `key_env` and the key is set), then #537's `token` (as `RT`), exported from stdin.
 pub fn run(ctx: &Ctx, r: &dyn Runner, rc: &toml::Table, what: &str, line: &str, token: Option<&str>) -> Result<String> {
     let var = rc.get("key_env").and_then(|v| v.as_str()).unwrap_or_default();
     let key = key(ctx, var)?.map(|k| k.0);
@@ -105,7 +99,6 @@ pub fn spend(ctx: &Ctx, cfg: &Config, events: &[Event], name: &str) -> Result<(f
     let (rc, size) = recipe(ctx, cfg, name)?;
     let rate = rc.get("rate_usd_hour").and_then(|t| t.get(&size)?.as_float());
     let rate = rate.with_context(|| format!("no rate_usd_hour for size {size}"))?;
-    // The 0-based day of the month, from the civil calendar of the days since 1970 (H. Hinnant).
     let doe = (ctx.now / 86_400 + 719_468) % 146_097;
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
     let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
@@ -147,7 +140,6 @@ pub fn held(ctx: &Ctx, cfg: &Config, name: &str) -> Option<(&'static str, String
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> {
     log(ctx, cfg, "cloud-start", name, json!({}))?;
     let made = |v: &str| {
-        // #635: a new sandbox has a new host key: its old pin goes.
         let _ = std::fs::remove_file(pin(ctx, name));
         cmd(ctx, cfg, r, name, v)
     };
@@ -168,7 +160,6 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
         bail!("{name} not running after 5 min")
     });
     if let Err(e) = &up {
-        // Logged stopped only once `stop` worked: else it stays `starting`, its VM maybe still billing.
         cmd(ctx, cfg, r, name, "stop").with_context(|| format!("start failed ({e:#}), then stop failed"))?;
         let d = json!({"why": format!("start failed: {e:#}")});
         log(ctx, cfg, "cloud-stop", name, d)?;
@@ -176,7 +167,6 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
     up
 }
 
-/// #635: host `name`'s pinned host key, outside `config.d` (an `Include config.d/*` would read it as config).
 fn pin(ctx: &Ctx, name: &str) -> std::path::PathBuf {
     ctx.home.join(format!(".ssh/herdsman/{name}.known"))
 }
@@ -189,15 +179,12 @@ pub fn moved(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, repin: bool) -
     refresh(ctx, cfg, r, name, (false, repin))
 }
 
-/// Rewrite host `name`'s block in `~/.ssh/config.d/herdsman` and its `known_hosts` from `address` (a key other than
-/// the pinned one fails closed; `repin` replaces it, logged `cloud-repin`); logs `cloud-up` on a change, or `up`.
 fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, (up, repin): (bool, bool)) -> Result<()> {
     let out = cmd(ctx, cfg, r, name, "address")?;
     let bad = || format!("{name} address: not `user@host port` + key");
     let mut l = out.lines().map(str::trim);
     let (dest, port) = l.next().and_then(|a| a.split_once(' ')).with_context(bad)?;
     let ((user, host), key) = (dest.split_once('@').with_context(bad)?, l.next().with_context(bad)?);
-    // The reply goes into ssh config verbatim: a numeric port and no whitespace, so it can't add a directive.
     ensure!(
         port.parse::<u16>().is_ok() && !dest.contains(char::is_whitespace),
         bad()
@@ -211,7 +198,6 @@ fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, (up, repin): (bo
         was.is_empty() || was == key || repin,
         "{name}: host key changed from the one pinned in {k} (rm it to trust the new one; hosts bootstrap re-pins a running host)"
     );
-    // #635 D: the recipe's `identity` (boat's own key is the only one a new sandbox takes).
     let id = recipe(ctx, cfg, name)?
         .0
         .get("identity")
@@ -236,9 +222,8 @@ fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, (up, repin): (bo
         log(ctx, cfg, "cloud-repin", name, json!({"was": was, "key": key}))?;
     }
     write_atomic(&known, &pinned)?;
-    let _ = std::fs::remove_file(dir.join(format!("herdsman-{name}.known"))); // the pre-#635 place
+    let _ = std::fs::remove_file(dir.join(format!("herdsman-{name}.known")));
     let (keep, tail) = old.split_once(&a).unwrap_or((&old, ""));
-    // A block whose end marker is lost ends at the next block, never swallowing it.
     let next = || tail.find("# herdsman ").map_or("", |i| &tail[i..]);
     let rest = keep.to_string() + tail.split_once(&b).map_or_else(next, |x| x.1);
     write_atomic(&p, &(rest + &s))?;
@@ -317,8 +302,7 @@ pub fn card(ctx: &Ctx, cfg: &Config, ev: &[Event], (name, n): (&str, usize)) -> 
     Some([head, tone, format!("{text} · last stop {t}{}", gh.unwrap_or_default())])
 }
 
-/// #255: host `on`'s gh token as its card says it (`github: token · 2 repos · expires in 80d`) and a health row from 14
-/// days before it expires, from one `gh api -i` there (the expiry header and the repos it reaches, never the token).
+/// #255: host `on`'s gh token as its card says it (`github: token · 2 repos · expires in 80d`) and a health row from 14 days before it expires, from one `gh api -i` there (the expiry header and the repos it reaches, never the token).
 pub fn github(on: &dyn Runner, now: u64) -> (String, Option<String>) {
     let o = ok(on, "gh", &["api", "-i", "user/repos?per_page=100"]);
     token(&o.unwrap_or_default(), now)
@@ -339,7 +323,6 @@ pub fn token(text: &str, now: u64) -> (String, Option<String>) {
         ][usize::from(text.is_empty())]
         .clone();
     };
-    // The days since 1970 of that civil date (H. Hinnant's days_from_civil).
     let (y, mp) = (y - i64::from(m <= 2), (m + 9) % 12);
     let (era, yoe) = (y.div_euclid(400), y.rem_euclid(400));
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + (153 * mp + 2) / 5 + d - 1;
@@ -351,11 +334,7 @@ pub fn token(text: &str, now: u64) -> (String, Option<String>) {
 /// Before each bootstrap step there: the user's tool folders on PATH, and `apt_ <pkg>` installs a package.
 pub const SH: &str = "export PATH=\"$HOME/.local/bin:$HOME/.cargo/bin:$PATH\"; apt_() { sudo apt-get update -qq && \
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"$@\"; }; ";
-/// Bootstrap's steps after herdr and each harness's install, `name⇥read-back check⇥install` each (Rust with a C linker
-/// for `cargo install`).
 const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh";
-/// #637: a `shed-acp` host's own runtime instead of herdr: shed at drover's pin with its launchd or systemd job,
-/// node for the ACP adapter (`{acp}`), and that adapter in shed's agent list.
 const SHED: &str =
     "shed job\tshed doctor >/dev/null 2>&1\tshed install --force && { { systemctl --user daemon-reload && \
 systemctl --user enable --now shed.service && { sudo loginctl enable-linger \"$USER\" || true; }; } 2>/dev/null || \
@@ -365,15 +344,13 @@ node\tcommand -v node && command -v npx\tapt_ nodejs npm
 const RUST: &str =
     "rust\tcommand -v cargo && command -v cc\tapt_ build-essential && curl -sSf https://sh.rustup.rs | sh -s -- -y";
 
-/// #255 `hosts bootstrap <name>`: over SSH, each missing tool installed and read back (a present one skipped, so it runs
-/// again safely); the logins opened in herdr panes there for the owner; then git over HTTPS with that token and the
-/// clones of the fleets it fits. #592: no fleet.toml there. Nothing is copied from this host's logins.
+/// #255 `hosts bootstrap <name>`: over SSH, each missing tool installed and read back (a present one skipped, so it runs again safely); the logins opened in herdr panes there for the owner; then git over HTTPS with that token and the clones of the fleets it fits. #592: no fleet.toml there. Nothing is copied from this host's logins.
 pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut dyn Write) -> Result<()> {
     let h = cfg.hosts.get(name).context("no such host")?;
     let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
     let acp = cfg.host_acp(name).is_some();
     if !acp {
-        crate::hosts::resolve(r, m, true)?; // #641: before any step; none yet is fine, the herdr step adds it
+        crate::hosts::resolve(r, m, true)?;
     }
     if h.cloud.is_some() && state(&read(&ctx.state)?, name) != "running" {
         start(ctx, cfg, r, name)?;
@@ -400,7 +377,6 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     };
     let sh = |s: &str| run(s, 60);
     let pass = |s: &str| sh(s).is_ok_and(|o| o.code == 0);
-    // #647: a failed step's command, exit code and last 20 lines of output, shown and logged.
     let fail = |what: &str, cmd: &str, o: &crate::runner::Out| {
         let tail = crate::lanes::tail(&format!("{}{}", o.stdout, o.stderr), 20).join("\n");
         let d = json!({"step": what, "cmd": cmd, "code": o.code, "tail": tail});
@@ -413,8 +389,6 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         if pass(check) {
             return Ok(writeln!(out, "✓ {what} — there")?);
         }
-        // herdr's install is `herdr machine add` from here: this host's version there. #641: it replaces the label's
-        // old profile (a recreated box), never adds a second.
         let add = || {
             let old = crate::hosts::profiles(r, m)?;
             for id in &old {
@@ -455,7 +429,6 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     }
     steps += &format!("drover\t[ \"$('{exe}' --version)\" = 'drover {version}' ]\t{build}");
     steps.lines().try_for_each(&mut step)?;
-    // #637: a shed-acp host has no herdr panes and no harness login (its lanes sign in through the proxy): gh only.
     if acp && !pass("gh auth status") {
         bail!("{name}: log in with `ssh {m} gh auth login` there, then bootstrap again");
     }
@@ -476,7 +449,6 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         let clone = crate::spawn::clone_sh(&f.repo, &f.integration, &l);
         step(&format!("clone {}\ttest -d '{l}/.git'\t{clone}", f.repo))?;
     }
-    // #592: no fleet.toml there; #647: an old bootstrap's (`[fleet.*]`, `[hosts.<it>]`) removed, another synced.
     let mine = |t: &toml::Table| Some(t.len() == 2 && t.contains_key("fleet") && t.get("hosts")?.get(name).is_some());
     let p = std::path::Path::new(&conf);
     if on.read(p).and_then(|t| mine(&t.parse().ok()?)) == Some(true) {
@@ -486,6 +458,17 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     let o = sh(&sync)?;
     ensure!(o.code == 0, "{}", fail("profiles sync", &sync, &o));
     writeln!(out, "✓ profiles sync — there")?;
+    if acp {
+        let check = "command -v shed >/dev/null || { echo \"shed not on PATH $PATH\"; exit 1; }; \
+command -v drover >/dev/null || { echo \"drover not on PATH $PATH\"; exit 1; }";
+        let bare = || on.run_in("sh", &argv(&["-c", check]), "");
+        if bare()?.code != 0 {
+            sh(&format!("sudo ln -sf \"$(command -v shed)\" '{exe}' /usr/local/bin/"))?;
+        }
+        let o = bare()?;
+        ensure!(o.code == 0, "{}", fail("shed and drover on ssh's PATH", check, &o));
+        writeln!(out, "✓ shed and drover — on ssh's PATH")?;
+    }
     log(ctx, cfg, "host-bootstrap", name, json!({"sha": sha}))?;
     crate::hosts::survey(ctx, cfg, r, true);
     Ok(writeln!(out, "{name}: bootstrapped (next: doctor, snapshot)")?)
@@ -501,8 +484,7 @@ pub fn snapshot(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<(
     log(ctx, cfg, "cloud-snapshot", name, json!({}))
 }
 
-/// #635 doctor rows for cloud host `name`: an old size, where its provider key is, and each recipe subcommand of its
-/// CLI (the recipe's name, e.g. `boat`) in that CLI's `--help`.
+/// #635 doctor rows for cloud host `name`: an old size, where its provider key is, and each recipe subcommand of its CLI (the recipe's name, e.g. `boat`) in that CLI's `--help`.
 pub fn doctor(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, rows: &mut Vec<String>) -> Result<()> {
     let (rc, size) = recipe(ctx, cfg, name)?;
     let c = cfg.hosts[name].cloud.clone().unwrap_or_default();
@@ -585,7 +567,6 @@ pub fn includes(ctx: &Ctx, rows: &mut Vec<String>) {
         .map(|f| f.file_name().to_string_lossy().into_owned())
         .filter(|f| std::path::Path::new(f).extension().is_some_and(|e| e == "known"))
         .collect();
-    // `*` only: the text before the first and after the last.
     let glob = |p: &str, s: &str| {
         let ends = p.split_once('*').zip(p.rsplit_once('*'));
         ends.map_or(p == s, |((a, _), (_, b))| s.starts_with(a) && s.ends_with(b))
