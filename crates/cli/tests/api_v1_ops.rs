@@ -6,7 +6,6 @@ use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
-/// `method path` with `body` as `extra`'s device: (status line, JSON).
 fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> (String, Value) {
     let r = format!(
         "{method} {path} HTTP/1.1\r\nHost: {ADDR}\r\n{extra}Content-Length: {}\r\n\r\n{body}",
@@ -21,7 +20,6 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> (String
     )
 }
 
-/// POST `v` (JSON) to `/api/v1/<op>`: (status code, `Reply.code`, `Reply.message`).
 fn post(s: &Server, op: &str, v: Value, cookie: &str) -> (u16, String, String) {
     let (status, r) = req(s, "POST", &format!("/api/v1/{op}"), &v.to_string(), cookie);
     assert_eq!(r["ok"], json!(r["code"] == "OK"), "{r}");
@@ -69,7 +67,6 @@ fn send_prompts_a_lane_with_the_boards_refusals_and_rate_limit() {
     assert_eq!(code, "REV_READONLY", "{why}");
     let (status, code, _) = post(&s, "send", json!({"agent": "nobody", "text": "hi"}), &ck);
     assert_eq!((status, code.as_str()), (400, "ERROR"));
-    // The board's 10 a minute per device, counted across its routes.
     for _ in 0..6 {
         post(&s, "send", msg.clone(), &ck);
     }
@@ -218,7 +215,6 @@ fn herd_and_roles_read_as_the_old_board_draws_them() {
 fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
     let (c, r) = v1_board("v1-chat");
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    // A form op takes a JSON body too (the role picker's `set`).
     let set = json!({"fleet": "sendmeter", "role": "rev", "model": "sonnet", "mtime": mtime(&s)});
     assert_eq!(post(&s, "set", set, "").1, "OK");
     let roles = |s: &Server| req(s, "GET", "/api/v1/roles?fleet=sendmeter", "", "").1;
@@ -265,7 +261,6 @@ fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
         (e.str("role"), e.str("key"), e.str("new")),
         (Some("chat"), Some("model"), Some("opus"))
     );
-    // A second write edits the table in place.
     let m = mtime(&s);
     assert_eq!(post(&s, "chat", chat(&m, json!({"effort": "high"})), &ck).1, "OK");
     let toml = std::fs::read_to_string(&c.config).unwrap();
@@ -315,7 +310,6 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
         post(&s, "chat-about", json!({"fleet": "nope", "issue": 30}), &ck).1,
         "NO_ORCHESTRATOR"
     );
-    // [close]: a backlog issue only; #12 has a lane.
     assert_eq!(
         post(&s, "close", json!({"fleet": "sendmeter", "issue": 12}), &ck).1,
         "NOT_BACKLOG"

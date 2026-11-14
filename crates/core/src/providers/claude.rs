@@ -1,4 +1,3 @@
-//! Claude Code: per-role settings.json (`PreToolUse` hook) + role.md; the kick goes in as argv.
 mod meter;
 
 use super::{hook_command, Accounts, Credential, Dialect, Header, Provider, Proxy, Usage};
@@ -44,11 +43,9 @@ fn headers(kept: &[Header]) -> Vec<Header> {
 
 const CAP_PATTERN: &str = "usage limit reached|hit your limit|limit reached ∙ resets|limit reached · resets";
 
-/// Claude Code's signed-out errors (#302), as `CAP_PATTERN`.
 const AUTH_PATTERN: &str = "please run /login|invalid api key|oauth token has expired|not logged in|api error: 401|\
     authentication_error|token has been revoked";
 
-/// #640: Claude Code's own lines: the last transcript block unless a `⏺` reply/tool call heads it, minus prompts.
 fn own_lines(screen: &str) -> String {
     let body: Vec<String> = chat(screen).0.into_iter().map(strip).collect();
     let head = body.iter().rposition(|l| l.starts_with(|c: char| !c.is_whitespace()));
@@ -58,7 +55,6 @@ fn own_lines(screen: &str) -> String {
     own.map(String::as_str).collect::<Vec<_>>().join("\n")
 }
 
-/// Claude Code's `PreToolUse` / `PostToolUse` / `Stop` hooks.
 static DIALECT: Dialect = Dialect {
     sent: |v| {
         let ev = v["hook_event_name"].as_str().unwrap_or_default();
@@ -116,7 +112,6 @@ impl Provider for Claude {
         Ok(())
     }
 
-    /// The lane's MCP file: only the role's servers.
     fn prepare(&self, _ctx: &Ctx, on: &crate::hosts::On, p: &Plan) -> Result<()> {
         on.write(
             &p.mcp_file,
@@ -140,7 +135,6 @@ impl Provider for Claude {
             a.extend(["--effort".into(), e.into()]);
         }
         a.extend(["--name".into(), p.title.clone()]);
-        // `--mcp-config` is variadic: `--strict-mcp-config` ends it before the kick.
         a.extend([
             "--mcp-config".into(),
             p.mcp_file.to_string_lossy().into(),
@@ -161,7 +155,6 @@ impl Provider for Claude {
         true
     }
 
-    /// Claude gets the kick as argv, so it only waits.
     fn kick_cmds(&self, p: &Plan, _pane: &str) -> Vec<Vec<String>> {
         vec![term::wait_working_argv(&p.agent, "20000")]
     }
@@ -170,26 +163,21 @@ impl Provider for Claude {
         Ok(term::exec(r, &self.kick_cmds(p, pane)[0])?.code == 0)
     }
 
-    /// #248: no updater, telemetry or other background traffic (names as of Claude Code 2.1.311).
     fn env(&self) -> &'static [&'static str] {
         &["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "DISABLE_AUTOUPDATER=1"]
     }
-    /// #565: claude-agent-acp loads Claude Code's local project settings, so a lane whose worktree holds its profile's
-    /// (`spawn::acp_cmd`) runs that profile's `PreToolUse` guard.
     fn acp(&self) -> Option<&'static str> {
         Some("claude-acp")
     }
     fn acp_env(&self, model: Option<&str>, _effort: Option<&str>) -> Vec<(&'static str, String)> {
         model.map(|m| ("ANTHROPIC_MODEL", m.to_string())).into_iter().collect()
     }
-    /// #785: `claude auth status` in the folder, the shell's token unset (a stale login file is no sign-in).
     fn signed_in(&self, r: &dyn Runner, dir: &Path) -> Option<bool> {
         let dir = format!("CLAUDE_CONFIG_DIR={}", dir.display());
         let a = ["-u", "CLAUDE_CODE_OAUTH_TOKEN", &dir, "claude", "auth", "status"];
         let o = r.run("env", &crate::runner::argv(&a)).ok()?;
         serde_json::from_str::<serde_json::Value>(&o.stdout).ok()?["loggedIn"].as_bool()
     }
-    /// claude-agent-acp reads Claude Code's local project settings and `CLAUDE.local.md`.
     fn acp_profile(&self, settings: &str, role: &str) -> String {
         let [md, json] = LOCAL_FILES;
         format!(" && mkdir -p .claude && cp {settings} {json} && cp {role} {md}")
@@ -222,7 +210,6 @@ impl Provider for Claude {
         crate::access::banner(AUTH_PATTERN, &own_lines(screen))
     }
 
-    /// #276: `✻ Herding… (4m 12s · ↓ 3k tokens)` is (`✻ Herding…`, `4m`).
     fn status_word(&self, screen: &str) -> Option<(String, Option<String>)> {
         let s = strip(chat(screen).1?);
         let (w, rest) = s.split_once(" (")?;
@@ -233,7 +220,6 @@ impl Provider for Claude {
     fn now_line(&self, line: &str) -> bool {
         line.starts_with('⏺')
     }
-    /// `⏺ Bash(cargo test)` (or `•`).
     fn tool_line(&self, line: &str) -> Option<(String, String)> {
         let (n, a) = line.strip_prefix(['⏺', '•'])?.trim_start().split_once('(')?;
         let word = !n.is_empty() && n.chars().all(char::is_alphanumeric);
@@ -242,7 +228,6 @@ impl Provider for Claude {
     fn pending_menu(&self, screen: &str) -> Option<(String, Vec<String>)> {
         pending(screen)
     }
-    /// #260: `<home>/.claude/projects/<worktree, non-alphanumerics as `-`>/*.jsonl`.
     fn transcript(&self, home: &Path, wt: &str) -> Option<PathBuf> {
         let d = home.join(".claude/projects");
         let all = std::fs::read_dir(d.join(wt.replace(|c: char| !c.is_ascii_alphanumeric(), "-"))).ok()?;
@@ -258,8 +243,6 @@ impl Provider for Claude {
     }
 }
 
-/// A blocked pane's pending prompt: the question and a Claude menu's options (a `❯`-marked run
-/// numbered 1, 2, …; wrapped lines skipped), or no options for a free-text question. None: no prompt seen.
 fn pending(screen: &str) -> Option<(String, Vec<String>)> {
     let lines: Vec<&str> = screen
         .lines()

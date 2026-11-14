@@ -1,4 +1,3 @@
-//! M2 spawn gates: host load (HOST_BUSY), duplicate guard (LANE_LIVE,
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -50,8 +49,6 @@ fn assert_refused(c: &drover::Ctx, sh: &FakeShed, r: &Fake, extra: &[&str], code
     out
 }
 
-// --- host-load gate ---
-
 #[test]
 fn host_busy_on_memory_pressure() {
     for level in ["2", "4"] {
@@ -64,7 +61,6 @@ fn host_busy_on_memory_pressure() {
     }
 }
 
-/// #168: one swap spike with normal pressure admits; a sustained median with warn pressure refuses.
 #[test]
 fn swap_refuses_on_sustained_median_with_pressure_not_one_spike() {
     let swap = |prev: &str, level: &str| {
@@ -93,7 +89,6 @@ fn swap_refuses_on_sustained_median_with_pressure_not_one_spike() {
     assert_eq!(w, "4000 5000 6000 3000 5000", "the window keeps the last 5");
 }
 
-/// #168: free + inactive memory under `[limits] min_free_mem_gb` (default 2) refuses MEM_LOW.
 #[test]
 fn mem_low_under_the_floor() {
     let d = tmpdir("mem-low");
@@ -111,7 +106,6 @@ fn mem_low_under_the_floor() {
     assert_eq!(sh.all("run").len(), 1);
 }
 
-/// #103: a fake `df` under `[limits] min_free_gb` (default 10) refuses DISK_LOW; at or over it admits.
 #[test]
 fn disk_low_under_min_free_gb() {
     let d = tmpdir("disk-low");
@@ -220,8 +214,6 @@ fn force_admits_busy_host_and_logs_override() {
     assert!(ev.iter().any(|e| e.kind == "spawn"));
 }
 
-// --- duplicate guard ---
-
 #[test]
 fn live_agent_in_worktree_is_lane_live() {
     let d = tmpdir("dup-live");
@@ -258,7 +250,6 @@ fn dirty_unknown_worktree_is_worktree_dirty() {
     let r = r.once(&format!("git -C {} rev-list", w.display()), 0, "3\n");
     let out = assert_refused(&c, &sh, &r, &[], "WORKTREE_DIRTY");
     assert!(out.contains("3 unpushed"), "{out}");
-    // fleet's own brief does not make a worktree dirty.
     let (sh, r) = shed_happy(&c);
     let r = r.once(&format!("git -C {} status", w.display()), 0, "?? .brief.md\n");
     assert_eq!(spawn(&c, &r, &[]).0, 0);
@@ -288,8 +279,6 @@ fn supersede_kills_old_agent_then_spawns() {
     assert_eq!(s.data["killed"], json!(["sendmeter-impl-12"]));
     assert_eq!(ev.last().unwrap().kind, "spawn");
 }
-
-// --- #9: Hermes kick ---
 
 struct Hermes<'a> {
     fake: Fake,
@@ -334,8 +323,6 @@ fn hermes_kick_retries_after_dropped_first_prompt() {
     assert_eq!(f.count("sleep 10"), 1);
     assert_eq!(read(&c.state).unwrap().last().unwrap().data["confirmed"], true);
 }
-
-// --- #155: no orch lane ---
 
 #[test]
 fn an_orch_spawn_is_refused_and_every_lane_takes_an_issue() {
@@ -420,8 +407,6 @@ fn adopt_records_running_lane() {
     assert!(read(&c.state).unwrap().iter().all(|e| e.issue != Some(13)));
 }
 
-// --- #107: no orphan lanes ---
-
 #[test]
 fn host_busy_creates_no_worktree_dir() {
     let d = tmpdir("host-busy-nothing");
@@ -465,7 +450,6 @@ fn named_orphan_in_worktree_is_adopted_not_lane_live() {
     assert_eq!((ev[0].str("pane"), &ev[0].data["adopted"]), (Some(IMPL), &json!(true)));
 }
 
-/// #128: a supersede closes the old lane's pane once the new one is confirmed; a working old lane is untouched.
 #[test]
 fn supersede_closes_old_pane_after_confirm_unless_working() {
     for working in [false, true] {

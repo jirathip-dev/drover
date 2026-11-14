@@ -15,7 +15,6 @@ use tokio::time::{interval, timeout};
 
 mod lanes;
 
-/// Its bounds: job and connection slots, a request's size, the events a stream replays, the timeouts (seconds).
 const JOBS: usize = 16;
 const CONNS: usize = 64;
 const BODY: usize = 4 << 20;
@@ -28,14 +27,12 @@ const STALL_SECS: u64 = 30;
 pub struct Service {
     ctx: Ctx,
     r: &'static dyn Runner,
-    /// The jobs' clock (tests pin it); the watchdog keeps the wall clock.
     clock: fn() -> u64,
     beat: AtomicU64,
     jobs: Semaphore,
     conns: Arc<Semaphore>,
     polling: AtomicBool,
     seq: watch::Sender<u64>,
-    /// #529: each runtime's lane event stream, live or not.
     streams: std::sync::Mutex<std::collections::BTreeMap<&'static str, bool>>,
 }
 
@@ -63,7 +60,7 @@ pub fn run(ctx: Ctx, r: &'static dyn Runner, clock: fn() -> u64, api: std::net::
         api.set_nonblocking(true)?;
         let api = TcpListener::from_std(api)?;
         let path = service::sock(&ctx);
-        let _ = std::fs::remove_file(&path); // a dead service's
+        let _ = std::fs::remove_file(&path);
         let local = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
         let s = Arc::new(Service {
@@ -100,8 +97,6 @@ impl Service {
         Event::new((self.clock)(), "drover", None, kind, d)
     }
 
-    /// `drover <args>` in process on a blocking thread, in a job slot, within `secs`; a timeout is logged and its
-    /// slot freed, so a stuck job never holds the others.
     async fn job(&self, args: Vec<String>, secs: u64) -> Option<i32> {
         let _slot = self.jobs.acquire().await.ok()?;
         let c = Ctx {
@@ -119,7 +114,6 @@ impl Service {
         None
     }
 
-    /// The heartbeat a tokio task stamps each second, and the thread that exits the process when it stops.
     fn watchdog(self: &Arc<Self>) {
         let me = self.clone();
         tokio::spawn(async move {
@@ -141,7 +135,6 @@ impl Service {
         });
     }
 
-    /// The log's newest seq, for the event streams: one reader for all of them.
     async fn watch_log(self: Arc<Self>) {
         let mut t = interval(Duration::from_millis(250));
         loop {
@@ -154,7 +147,6 @@ impl Service {
         }
     }
 
-    /// The fast step every 15 s (verdicts recorded, PASS + green merged), one at a time.
     async fn poll(self: Arc<Self>) {
         let mut t = interval(Duration::from_secs(POLL_SECS));
         loop {
@@ -169,7 +161,6 @@ impl Service {
         }
     }
 
-    /// The local socket: one JSON line in (`ping`, `kick`), the pid back at once; a kick is then driven.
     async fn local(self: Arc<Self>, l: UnixListener) {
         loop {
             if let Ok((c, _)) = l.accept().await {
@@ -196,15 +187,12 @@ impl Service {
             let id = k["id"].as_str().map(|i| ["--id".to_string(), i.into()]);
             let mut k = argv(&["kick", f, &n.to_string(), "--why", why, "--now"]);
             k.extend(id.into_iter().flatten());
-            // A timed-out kick frees its spawn slot: the marker's pid (this process) outlives it.
             if self.job(k, KICK_SECS).await.is_none() {
                 drover_core::db::release(&self.ctx.state, &format!("spawn-{f}-{n}.pending"), None);
             }
         }
     }
 
-    /// API v1: `GET /api/v1/health`, `GET /api/v1/events?after=<seq>` (a paired device or this host),
-    /// `POST /api/v1/cmd` (a lane's token).
     async fn api(self: Arc<Self>, mut c: TcpStream, peer: SocketAddr) {
         let Ok(_slot) = self.conns.clone().try_acquire_owned() else {
             let _ = c.write_all(&reply(503, &json!({"error": "busy"}))).await;
@@ -242,7 +230,6 @@ impl Service {
         devices::find(&self.ctx, cookie.unwrap_or_default()).is_some()
     }
 
-    /// The events after `after` (the last `REPLAY` of them), then each new one as it is logged; a comment every 15 s.
     async fn stream(self: Arc<Self>, mut c: TcpStream, mut after: u64) {
         let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n";
         if c.write_all(head.as_bytes()).await.is_err() {
@@ -276,7 +263,6 @@ impl Service {
         }
     }
 
-    /// A remote lane's command: its token checked, its `--file`s written here, then `drover <args>` as that lane.
     async fn cmd(self: &Arc<Self>, body: &[u8]) -> Vec<u8> {
         let v: Value = serde_json::from_slice(body).unwrap_or_default();
         let token = v["token"].as_str().unwrap_or_default().to_string();
@@ -300,7 +286,6 @@ impl Service {
             let dir = ctx.state.with_file_name("service-files");
             for i in 1..args.len() {
                 if args[i - 1] == "--file" {
-                    // Only the text the lane sent: never a path on this host.
                     let Some(text) = files[&args[i]].as_str() else {
                         let e = format!("drover: --file {} came without its text\n", args[i]);
                         return Ok((400, json!({"code": 2, "stdout": "", "stderr": e})));
@@ -332,7 +317,6 @@ impl Service {
     }
 }
 
-/// One request: its head (request line and headers) and a body of `Content-Length` bytes; `None` over the bounds.
 async fn request(c: &mut TcpStream) -> std::io::Result<Option<(String, Vec<u8>)>> {
     let (mut buf, mut chunk) = (vec![], [0u8; 8192]);
     loop {

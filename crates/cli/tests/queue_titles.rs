@@ -1,11 +1,8 @@
-//! #36: Queue rows carry the issue + PR titles from the caches only (#268: API v1's `queue`);
-//! no lane display mode button (#335: the look sheet's style); sw.js never caches a non-200 page.
 mod common;
 use common::*;
 use drover::serve::Server;
 use serde_json::json;
 
-/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn get(s: &Server, path: &str) -> String {
     let res = String::from_utf8_lossy(&s.respond(
         &format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"),
@@ -46,7 +43,6 @@ fn cached_spec_and_pr_titles_show_in_the_queue_row() {
     .unwrap();
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    // #268: the Queue tab the board draws from API v1's `queue`.
     let out = get(&s, "/");
     assert!(out.contains("Queue titles · PR #33 · Lanes like Corral"), "{out}");
     assert!(
@@ -70,7 +66,6 @@ fn uncached_rows_have_no_title_and_make_no_gh_call() {
     assert_eq!(r.count("gh"), 0, "{:?}", r.calls.borrow());
 }
 
-/// #331: a queued issue never spawned (a blocked chain's nested row) gets its title: `check` caches its spec once.
 #[test]
 fn check_caches_a_queued_issues_spec_once_and_its_row_shows_the_title() {
     let c = queued("check-titles");
@@ -94,7 +89,6 @@ fn check_caches_a_queued_issues_spec_once_and_its_row_shows_the_title() {
     );
 }
 
-/// #335: the look sheet's style picks the Lanes mode; no mode button on any tab or in the header.
 #[test]
 fn no_lanes_mode_button() {
     let c = queued("mode");
@@ -106,9 +100,6 @@ fn no_lanes_mode_button() {
     );
 }
 
-/// sw.js `/` (#57: stale-while-revalidate): no copy yet, the network answer as is (a non-200 is never
-/// cached); with a copy, the copy at once while the refresh replaces it only on a 200; the assets precached.
-/// Runs where node is at hand.
 #[test]
 fn sw_never_serves_the_cache_over_a_non_200() {
     if std::process::Command::new("node").arg("--version").output().is_err() {
@@ -149,9 +140,6 @@ const page = (status, body) => async () => ({ ok: status === 200, status, body, 
     );
 }
 
-/// #73 gate 2 for #67, deterministic: sw.js's own `fetch` listener under node with a synthetic navigate
-/// Request (no browser, no SW timing). A navigation to a JSON read (or any non-page URL) gets the page:
-/// the cached copy, else the network's `/`; the same URLs fetched (not navigated) pass through untouched.
 #[test]
 fn sw_answers_a_navigation_to_a_json_read_with_the_page() {
     if std::process::Command::new("node").arg("--version").output().is_err() {
@@ -197,8 +185,6 @@ const go = async (path, mode) => {
     );
 }
 
-/// #391: `queue add` reads an added issue's title when no spec is cached (its row shows it at once, not at the next
-/// check); a cached one is not read again. A row queued from the backlog shows the backlog read's title until then.
 #[test]
 fn queue_add_reads_an_uncached_title_and_a_backlog_row_has_the_reads() {
     let c = queued("add-titles");

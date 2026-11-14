@@ -1,5 +1,3 @@
-//! #17: the README stays short, lists real commands, links resolve, leaks nothing, and its
-//! quick start runs as written in a temp DROVER_HOME.
 mod common;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -16,7 +14,6 @@ fn readme() -> String {
     std::fs::read_to_string(root().join("README.md")).unwrap()
 }
 
-/// README.md plus every docs/*.md.
 fn doc_files() -> Vec<PathBuf> {
     let mut v = vec![root().join("README.md")];
     for e in std::fs::read_dir(root().join("docs")).unwrap() {
@@ -31,10 +28,9 @@ fn doc_files() -> Vec<PathBuf> {
 #[test]
 fn readme_is_short() {
     let n = readme().lines().count();
-    assert!(n <= 150, "README.md has {n} lines"); // #156: about 150 at most
+    assert!(n <= 150, "README.md has {n} lines");
 }
 
-/// #156: every command the README names (table and quick start) is in `drover help --agent`.
 #[test]
 fn readme_commands_are_in_help_agent() {
     let help = Command::new(BIN).args(["help", "--agent"]).output().unwrap();
@@ -103,7 +99,6 @@ fn docs_leak_no_ids_tokens_or_personal_paths() {
         for bad in ["/Users/", "/home/", "telegram:-", "ghp_", "github_pat_", "sk-ant-"] {
             assert!(!text.contains(bad), "{}: contains {bad}", f.display());
         }
-        // Epoch seconds in an example event are fine; any other long number is suspect.
         let text: String = text
             .split("\"ts\":")
             .map(|p| p.trim_start_matches(|c: char| c.is_ascii_digit()))
@@ -153,8 +148,6 @@ fn quick_start_runs_as_written() {
         }
         c
     };
-    // `cargo install` is what built BIN; `serve` blocks, so it runs on its own below; `timer install` would load a
-    // real launchd/systemd job on this host.
     let script: String = block
         .lines()
         .filter(|l| !l.starts_with("cargo install") && !l.starts_with("drover serve"))
@@ -180,7 +173,6 @@ fn quick_start_runs_as_written() {
         .skip(1)
         .map(String::from)
         .collect();
-    // Same command on a free port, so a drover already serving 7777 on this host can't answer for it.
     let i = args.iter().position(|a| a == "--addr").unwrap() + 1;
     let addr = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
@@ -209,7 +201,6 @@ fn setup() -> String {
     std::fs::read_to_string(root().join("docs/setup.md")).unwrap()
 }
 
-/// The bodies of every fenced block of `lang` in `text`.
 fn blocks<'a>(text: &'a str, lang: &str) -> Vec<&'a str> {
     let fence = format!("```{lang}\n");
     text.split(fence.as_str())
@@ -237,7 +228,7 @@ fn setup_commands_exist() {
         for part in b.split("drover ").skip(1) {
             let cmd = part.split_whitespace().next().unwrap();
             if cmd.starts_with('-') || cmd.starts_with('#') {
-                continue; // `drover --version`, a comment
+                continue;
             }
             assert!(
                 known.contains(&cmd),
@@ -254,7 +245,6 @@ fn setup_toml_parses() {
     let text = setup();
     let all = blocks(&text, "toml");
     assert!(all.len() >= 3, "toml blocks not found");
-    // Each snippet adds to the same fleet.toml: parse the file as it grows.
     let mut file = String::new();
     for b in all {
         file.push_str(b);

@@ -1,4 +1,3 @@
-//! #418: `drover verdict FAIL` refuses `NO_PROOF` unless each blocking finding carries a well-formed Proof block.
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};

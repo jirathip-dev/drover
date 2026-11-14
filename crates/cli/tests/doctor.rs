@@ -1,4 +1,3 @@
-//! #97: `drover doctor` is read-only, prints ✓/✗/! with a fix per line, exits 1 on any ✗, never echoes a secret.
 mod common;
 use common::*;
 use std::os::unix::fs::PermissionsExt;
@@ -46,15 +45,12 @@ fn write(p: &Path, text: &str, mode: u32) {
     std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap();
 }
 
-/// A host where every check passes.
 fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
     let d = tmpdir(name);
     let c = ctx(&d, &config(&d, harness));
     std::fs::create_dir_all(d.join("local")).unwrap();
     std::fs::create_dir_all(&c.worktrees).unwrap();
-    // #683: account main's own login folder, signed in.
     write(&d.join("accounts/main/.claude.json"), r#"{"oauthAccount": {}}"#, 0o600);
-    // #707: the webhook secret's 0600 file.
     write(&d.join("config/secrets/GITHUB_WEBHOOK_SECRET"), "hook", 0o600);
     write(
         &c.home.join("Library/LaunchAgents/dev.drover.serve.plist"),
@@ -76,7 +72,6 @@ fn setup(name: &str, harness: &str) -> (drover::Ctx, PathBuf) {
     for w in ["check", "drive"] {
         write(&st.join(format!("{w}.at")), &(c.now - 60).to_string(), 0o644);
     }
-    // #237: the tick and fast jobs as this build writes them.
     assert_eq!(run(&c, &good(), &["timer", "install", "--no-load"]).0, 0);
     (c, d)
 }
@@ -177,7 +172,6 @@ fn all_good_exits_zero_and_never_writes() {
     let rows: Vec<String> = serde_json::from_str(&json).unwrap();
     assert_eq!(rows.join("\n") + "\n", out);
 
-    // #155/#156: a leftover `driver` key still parses and is ignored; doctor no longer notes it.
     let text = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(
         &c.config,
@@ -193,8 +187,31 @@ fn all_good_exits_zero_and_never_writes() {
 }
 
 #[test]
+fn a_missing_merge_label_is_red_with_its_create_command_then_green() {
+    let (c, _) = setup("doc-label", "claude");
+    let text = std::fs::read_to_string(&c.config).unwrap();
+    let text = text.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nmerge_label = \"merge-ready\"",
+    );
+    std::fs::write(&c.config, text).unwrap();
+    let list = "gh label list --repo o/demo --search merge-ready";
+    let r = good().once(list, 0, "[]");
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 1, "{out}");
+    assert_eq!(
+        line(&out, "label demo"),
+        "✗ label demo — merge-ready in o/demo → gh label create merge-ready --repo o/demo --force"
+    );
+    assert!(!r.called("gh label create"));
+    let r = good().reply(list, r#"[{"name":"merge-ready"}]"#);
+    let (code, out) = run(&c, &r, &["doctor"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(line(&out, "label demo"), "✓ label demo — merge-ready in o/demo");
+}
+
+#[test]
 fn secrets_never_echo() {
-    // #707: the webhook secret and VAPID key are files; doctor checks them, never shows them.
     let (c, _) = setup("doc-secret", "claude");
     for args in [&["doctor"][..], &["doctor", "--json"]] {
         let (code, out) = run(&c, &good(), args);
@@ -211,7 +228,6 @@ fn secrets_never_echo() {
     );
 }
 
-/// Each failure: (what breaks, the check, its fix).
 #[test]
 fn each_check_fails_with_its_fix_and_exit_one() {
     type Break = fn(&drover::Ctx, &Path, Fake) -> Fake;
@@ -299,7 +315,6 @@ fn each_check_fails_with_its_fix_and_exit_one() {
             "→ drover timer install",
         ),
         (
-            // macOS: the serve job's probe passes, the tick job's fails; Linux probes systemd.
             |_, _, r| match cfg!(target_os = "macos") {
                 true => r.once("launchctl print", 0, "").once("launchctl print", 1, ""),
                 false => r.once("systemctl --user is-active", 3, ""),
@@ -325,7 +340,6 @@ fn each_check_fails_with_its_fix_and_exit_one() {
 #[test]
 fn warnings_do_not_fail() {
     let (c, _) = setup("doc-warn", "claude");
-    // #344: no paired phone, no push subscription (setup's files were imported into state.db).
     for t in ["devices", "push"] {
         drover::db::store::<serde_json::Value>(&c.state, t, &[]).unwrap();
     }
@@ -376,7 +390,6 @@ fn bad_config_and_hermes_profiles() {
         "no profile, nothing to check: {out}"
     );
 
-    // #401: the default conductor (the impl role on `lane-conductor`) needs its Hermes profile too.
     assert!(line(&out, "hermes lane-orchestrator").starts_with('✗'), "{out}");
     for p in ["fleet-impl", "lane-orchestrator"] {
         write(&c.homes["hermes"].join(p).join("config.yaml"), "", 0o644);
@@ -397,8 +410,6 @@ fn bad_config_and_hermes_profiles() {
     assert_eq!(code, 0, "{out}");
 }
 
-/// #539: a config still naming the retired `accounts_env` loads; doctor warns (exit 0) until the line is dropped
-/// (#683: the account signs in with its own folder either way).
 #[test]
 fn retired_accounts_env_warns_until_the_line_is_dropped() {
     let (c, d) = setup("doc-retired", "claude");
@@ -423,7 +434,6 @@ fn retired_accounts_env_warns_until_the_line_is_dropped() {
     assert!(!out.contains('!'), "{out}");
 }
 
-/// #737: a profile hook naming another binary fails doctor and `profiles sync --check`, both naming it.
 #[test]
 fn a_hook_naming_another_binary_is_named() {
     let (mut c, d) = setup("doc-stray-hook", "claude");
@@ -446,8 +456,6 @@ fn a_hook_naming_another_binary_is_named() {
     assert!(code == 0 && line(&out, "profile hooks").starts_with('✓'), "{out}");
 }
 
-/// #708: the launchd row follows `[serve] launchd_label` (default `dev.drover.serve`), never another plist that
-/// mentions `drover serve`; a missing one lists what it found.
 #[test]
 fn launchd_row_follows_the_configured_label() {
     if !cfg!(target_os = "macos") {
@@ -477,7 +485,6 @@ fn launchd_row_follows_the_configured_label() {
     assert!(line(&out, "launchd").ends_with("/dev.mine.serve loaded"), "{out}");
 }
 
-/// #708: the stale spawn markers removed in 24 h are listed once each, with a count, capped at `+N more`.
 #[test]
 fn spawns_row_dedupes_stale_names() {
     let (c, _) = setup("doc-spawns", "claude");
@@ -503,7 +510,6 @@ fn spawns_row_dedupes_stale_names() {
     assert!(l.len() < 300, "{} chars: {l}", l.len());
 }
 
-/// #708: `self-update --pause` shows in doctor and on the board until `--resume`.
 #[test]
 fn a_paused_self_update_shows_in_doctor_and_the_board() {
     let (c, _) = setup("doc-paused", "claude");
@@ -527,8 +533,6 @@ fn a_paused_self_update_shows_in_doctor_and_the_board() {
     assert!(!board.contains("self-update"), "{board}");
 }
 
-/// #708: a clean login shell that exports `CLAUDE_CODE_OAUTH_TOKEN` warns with the file to fix; neither the value nor
-/// anything else the shell printed is shown.
 #[test]
 fn a_login_shell_exporting_the_token_warns() {
     let (c, _) = setup("doc-login", "claude");
@@ -547,8 +551,6 @@ fn a_login_shell_exporting_the_token_warns() {
     assert!(!out.contains("FAKEtoken") && !out.contains("Welcome"), "{out}");
 }
 
-/// #791: a tick still running with a fresh heartbeat reads `running for Nm`, never stuck; with no heartbeat for 2
-/// intervals (slow_secs 300) the stale stamp reads stuck again.
 #[test]
 fn a_long_tick_with_a_fresh_heartbeat_is_running_not_stuck() {
     let (c, _) = setup("doc-beat", "claude");

@@ -1,5 +1,3 @@
-//! #22: the dsh harness — pinned dsh-tui launch, settle on herdr's `dsh-tui` label,
-//! and the git pre-push hook that stands in for a pre-tool hook.
 mod common;
 use common::*;
 use drover::events::read;
@@ -321,8 +319,6 @@ fn pre_push_refuses_protected_branches_and_reviewer_pushes() {
     assert!(out.contains("reviewers are read-only"), "{out}");
 }
 
-/// #216: dsh has no pre-tool hook, so the pre-push guard refuses a push that adds a script line running a
-/// `deny_commands` entry; `.github/workflows` are not scanned (CI may use Docker).
 #[test]
 fn pre_push_refuses_scripts_that_start_containers() {
     let d = tmpdir("dsh-prepush-deny");
@@ -383,8 +379,6 @@ fn git(dir: &Path, args: &[&str]) -> std::process::Output {
         .unwrap()
 }
 
-/// AC5: a real `git push origin HEAD:staging` from a lane worktree is refused by the
-/// installed hook; the repo's other checkouts are untouched.
 #[test]
 fn installed_hook_refuses_real_push_to_staging_from_lane_worktree_only() {
     let d = tmpdir("dsh-gitpush");

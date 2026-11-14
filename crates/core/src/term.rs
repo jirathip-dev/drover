@@ -12,7 +12,6 @@ impl Shed {
     fn call(&self, r: &dyn Runner, m: Method, params: impl serde::Serialize) -> Result<Value> {
         shed::call(r, &self.0.wire, m, json!(params))
     }
-    /// shed's terminal `name`.
     fn get(&self, r: &dyn Runner, name: &str) -> Result<TerminalInfo> {
         Ok(serde_json::from_value(self.call(
             r,
@@ -53,8 +52,7 @@ impl Shed {
             no_hibernate: false,
         }
     }
-    /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), #565:
-    /// its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
+    /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), #565: its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
     pub fn start(
         &self,
         r: &dyn Runner,
@@ -248,10 +246,8 @@ impl Shed {
             return Ok(failed("unsupported", &format!("shed runs no `{}`", a.join(" "))));
         };
         let name = params["name"].as_str().unwrap_or_default().to_string();
-        // #565: an ACP terminal by its own `acp` (one fleet's lanes may be ACP sessions, another's shells).
         let acp = matches!(m, Method::Send | Method::Keys) && self.get(r, &name).is_ok_and(|t| t.acp.is_some());
         let got = match m {
-            // ACP: a prompt is framed by shed's CLI, and it needs no Enter.
             Method::Send if acp => {
                 shed::cli(r, &["send", &name, params["text"].as_str().unwrap_or_default()]).map(|_| json!({}))
             }

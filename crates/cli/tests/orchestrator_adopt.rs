@@ -35,7 +35,6 @@ fn acp() -> Fake {
         .reply("shed send", "")
 }
 
-/// The thread's conductor folder, as herdr reports an agent's cwd.
 fn say(c: &drover::Ctx, r: &dyn drover::runner::Runner, text: &str) -> String {
     let s = Server::new(c, r, Some(ADDR.into()));
     let cookie = pair(&s, c, "Mozilla/5.0 (iPhone)", T);

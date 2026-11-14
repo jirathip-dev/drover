@@ -1,5 +1,3 @@
-//! #265: the JSON API v1 (`/api/v1/…`, docs/serve.md): each endpoint's JSON golden-tested (`BLESS=1` rewrites
-//! tests/golden/api/), the same Host/Origin and pairing refusals as the HTML board, and the HTML board unchanged.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -23,7 +21,6 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> (String
     )
 }
 
-/// `v` against tests/golden/api/<name>.json (`mtime` masked: the fixture's file time).
 fn golden(name: &str, mut v: Value) {
     if v.get("mtime").is_some() {
         v["mtime"] = json!("<mtime>");
@@ -133,7 +130,6 @@ fn refusals_are_json_with_a_code() {
         (status, v["code"].as_str().unwrap().to_string())
     };
     let want = |s: &str, c: &str| (format!("HTTP/1.1 {s}"), c.to_string());
-    // Unpaired: no transcript, no paired op; a foreign Host or Origin: nothing at all.
     assert_eq!(
         code("GET", "/api/v1/lane/sendmeter-impl-12", "", ""),
         want("401 Unauthorized", "UNPAIRED")
@@ -152,13 +148,11 @@ fn refusals_are_json_with_a_code() {
         want("403 Forbidden", "FORBIDDEN")
     );
     assert!(!r.1.called("read", "sendmeter-impl-12"));
-    // A stale page's mtime is REFUSED STALE, as on the HTML board; an unknown path is 404.
     assert_eq!(
         code("POST", "/api/v1/pause", "fleet=sendmeter&mtime=1", ""),
         want("409 Conflict", "STALE")
     );
     assert_eq!(code("GET", "/api/v2/state", "", ""), want("404 Not Found", "NOT_FOUND"));
-    // Read-only (`serve --read-only`): GET only.
     let ro = Server::new(&c, &r, None);
     let (status, v) = req(&ro, "POST", "/api/v1/pause", "fleet=sendmeter", "");
     assert_eq!(
@@ -188,17 +182,14 @@ fn a_post_runs_the_boards_op_and_answers_json() {
         req(&s, "GET", "/api/v1/state", "", "").1["fleets"][0]["paused"],
         json!(true)
     );
-    // The paired ops (answer) need a paired device, then run the CLI's own path.
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone) Safari/604.1", T);
-    let mtime = req(&s, "GET", "/api/v1/state", "", "").1["mtime"].clone(); // the pause rewrote fleet.toml
+    let mtime = req(&s, "GET", "/api/v1/state", "", "").1["mtime"].clone();
     let body = format!("fleet=sendmeter&id=q7&choice=1&mtime={}", mtime.as_str().unwrap());
     let (status, v) = req(&s, "POST", "/api/v1/answer", &body, &cookie);
     assert_eq!((status.as_str(), &v["ok"]), ("HTTP/1.1 200 OK", &json!(true)), "{v}");
     assert_eq!(req(&s, "GET", "/api/v1/state", "", "").1["asks"], json!([]));
 }
 
-/// #576: a queued `--verify --repro` row carries both marks; `qset` needs a paired device, then sets a mark as
-/// `queue set` does (read back from `queue ls`).
 #[test]
 fn queue_rows_carry_their_marks_and_qset_sets_one() {
     let (c, r) = fixture("api-marks");
@@ -243,7 +234,6 @@ fn queue_rows_carry_their_marks_and_qset_sets_one() {
     );
 }
 
-/// #677: `issue/<fleet>/<n>` carries the latest why note's sha, round and Owner line; none before a note.
 #[test]
 fn an_issue_carries_its_latest_why_owner_line() {
     let (c, none) = (ctx(&tmpdir("api-why"), CONFIG), Fake::default());
@@ -261,8 +251,6 @@ fn an_issue_carries_its_latest_why_owner_line() {
     assert_eq!(v["why"], want, "{v}");
 }
 
-/// #576: `issue/<fleet>/<n>` lists the verdicts `drover verdict` recorded, newest first: a verify PASS with its two
-/// screenshots (as `/shot/` serves them), a rev PASS with its `Repro: run` block, a rev FAIL with its findings.
 #[test]
 fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
     let d = tmpdir("api-issue");
@@ -323,12 +311,10 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
     assert_eq!(row(2), (json!("rev"), json!("FAIL"), json!(a)));
     assert_eq!(vs[2]["findings"], json!("- non-blocking: the test is flaky"));
     assert_eq!((&vs[1]["shots"], &vs[2]["repro"]), (&json!([]), &json!(null)));
-    // The second shot's index is the one `/shot/` serves.
     let r =
         String::from_utf8_lossy(&s.respond(&format!("GET /shot/sendmeter/12/1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T))
             .into_owned();
     assert!(r.starts_with("HTTP/1.1 200") && r.ends_with("PNG wide"), "{r}");
-    // #731: a listed console log is listed and served too.
     let r =
         String::from_utf8_lossy(&s.respond(&format!("GET /shot/sendmeter/12/2 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T))
             .into_owned();
@@ -338,12 +324,9 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
     );
 }
 
-/// #576: `lessons` shows a fleet's last lesson lane and when tick runs the next; the digest is the CLI's; `POST
-/// lesson` needs a paired device.
 #[test]
 fn lessons_show_the_last_run_and_the_next_due_date() {
     let (c, r) = fixture("api-lessons");
-    // tick's weekly step: the fleet is under a week old, so it skips and the next is due a week on.
     let cfg = drover::config::Config::load(&c.config).unwrap();
     drover::lesson::weekly(&c, &cfg, &Fake::default(), &mut vec![]).unwrap();
     let d = json!({"role": "lesson", "stage": "impl", "agent": "sendmeter-lesson-30", "harness": "claude"});

@@ -1,6 +1,3 @@
-//! #561: a remote host that never answers (the Air, offline) costs a tick one 5 s probe: the tick stays in budget,
-//! drive still starts work, the host shows offline; a disabled host's worktrees are never probed by the tick's clean; a call
-//! through a dead shared ssh connection drops its socket and runs once more; a tick 10 min old raises `tick-stuck` once.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -30,7 +27,6 @@ fn setup_on(name: &str, extra: &str) -> (drover::Ctx, FakeShed) {
         "air": {"tags": ["os:macos"], "home": "/Users/me", "probed": NOW, "seen": NOW, "up": true},
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
-    // #9's lane ran on the Air and is merged: clean's to remove.
     let d = json!({"role": "impl", "agent": "sendmeter-impl-9", "pane": "sendmeter-impl-9", "workspace": "",
                    "runtime": "shed", "worktree": WT, "branch": "issue-9", "host": "air", "machine": "air"});
     append(&c.state, &Event::new(NOW - 900, "sendmeter", Some(9), "spawn", d)).unwrap();
@@ -53,9 +49,6 @@ fn local() -> Fake {
         .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// A fake whose every call to the Air never returns: a call without a hard limit panics (it would hang the tick); one
-/// with a limit is killed at it (exit 124, as `Real` does), the limit added to a virtual clock. Each such call also
-/// records the tick's `tick.step` as it stood then.
 struct Hang {
     f: Fake,
     mark: std::path::PathBuf,
@@ -104,7 +97,6 @@ impl Runner for Hang {
 fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
     let (c, sh) = setup("stuck-air", "");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    // #11's lane is live on the Air.
     let d = json!({"role": "impl", "agent": "sendmeter-impl-11", "pane": "w8:p1", "workspace": "w8",
                    "worktree": "/Users/me/.local/share/drover/work/sendmeter/issue-11", "branch": "issue-11",
                    "host": "air", "machine": "air"});
@@ -130,7 +122,6 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
     let mark = r.seen.borrow()[0].clone();
     assert!(mark.contains(r#""step":"check""#) && mark.contains("air"), "{mark}");
     assert!(!r.mark.exists(), "the tick's step marker goes when it ends");
-    // #791: a running tick's heartbeat (`<started> <beat>`), gone when it ends.
     assert_eq!(r.beats.borrow()[0], format!("{NOW} {NOW}"));
     assert!(
         !r.mark.with_file_name("tick.beat").exists(),
@@ -146,7 +137,6 @@ fn a_host_that_never_answers_costs_one_probe_and_drive_still_starts() {
     assert!(status.contains("host offline: air"), "{status}");
 }
 
-/// #678: drive's hourly clean and trim still leave a disabled host alone: listed, never removed or swept.
 #[test]
 fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
     let (c, _sh) = setup("stuck-disabled", "enabled = false");
@@ -169,7 +159,6 @@ fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
     assert_eq!(removes.count(), 0, "{calls:?}");
     drop(calls);
     assert!(!out.contains("scratch: air:"), "no scratch sweep there: {out}");
-    // Enabled again: probed and removed as before.
     let (c2, _sh2) = setup("stuck-enabled", "");
     let r = local().reply(&format!("{SSH}'sh' '-c' 'test -e"), "");
     let on = OverSsh {
@@ -181,8 +170,6 @@ fn the_ticks_clean_never_probes_a_disabled_hosts_worktrees() {
     assert!(!out.contains("not cleaned"), "{out}");
 }
 
-/// #678: an explicit `clean --yes` on a disabled host that never answers: one bounded probe, `offline (not cleaned)`,
-/// nothing else sent there.
 #[test]
 fn clean_reports_a_silent_disabled_host_offline_after_one_probe() {
     let (c, _sh) = setup("stuck-disabled-silent", "enabled = false");

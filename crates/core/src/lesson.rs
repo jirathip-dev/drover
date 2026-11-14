@@ -1,5 +1,3 @@
-//! #419: the lesson role: `drover lesson digest` (a fleet's recent mistakes) and `drover lesson` (its issue and
-//! lane), run weekly by `tick` and on demand by a conductor.
 use crate::access::{civil_month_day, civil_year};
 use crate::config::Config;
 use crate::events::{emit, plain, read, Event};
@@ -9,8 +7,7 @@ use anyhow::{Context, Result};
 use serde_json::json;
 use std::io::Write;
 
-/// `drover lesson digest`: the last `days` of rev FAIL findings, the owner's lines in the fleet's conductor threads,
-/// `by: owner` events and reverts on integration, secret-looking values redacted.
+/// `drover lesson digest`: the last `days` of rev FAIL findings, the owner's lines in the fleet's conductor threads, `by: owner` events and reverts on integration, secret-looking values redacted.
 pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -> Result<String> {
     let f = cfg.fleet(fleet)?;
     let since = ctx.now.saturating_sub(days * 86400);
@@ -75,7 +72,6 @@ pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -
             s += &format!("- {c}\n");
         }
     }
-    // #510: the lesson checks on integration, each with what this run does with it.
     let show = |p: &str| ok(r, "git", &["-C", local.as_str(), "show", &format!("{integration}:{p}")]).ok();
     let rules = crate::repo_read("rules.md", show).unwrap_or_default();
     let checks = review(ctx, cfg, r, fleet, &rules)?;
@@ -88,8 +84,7 @@ pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -
     Ok(s.lines().map(crate::lanes::redact).collect::<Vec<_>>().join("\n") + "\n")
 }
 
-/// `drover lesson`: file this week's lessons issue, queue it on top and spawn its `lesson` lane; false when the
-/// lane's prompt was not confirmed (exit 4, as `spawn`). #576: the board's run logs the paired device it came from (`by`).
+/// `drover lesson`: file this week's lessons issue, queue it on top and spawn its `lesson` lane; false when the lane's prompt was not confirmed (exit 4, as `spawn`). #576: the board's run logs the paired device it came from (`by`).
 pub fn run(
     ctx: &Ctx,
     cfg: &Config,
@@ -123,7 +118,6 @@ pub fn run(
     crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, "lesson"), &crate::spawn::Opts::default())
 }
 
-/// #419: `tick`'s file of `fleet`'s last weekly lesson run (or skip), the time it ran.
 fn at(ctx: &Ctx, fleet: &str) -> std::path::PathBuf {
     ctx.state.with_file_name(format!("lesson-{fleet}.at"))
 }
@@ -145,7 +139,6 @@ pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
             continue;
         }
         std::fs::write(at(ctx, name), ctx.now.to_string())?;
-        // #517: a fleet under a week old, or with under 2 FAIL verdicts this week, has no repeated class to find.
         let (week, events) = (ctx.now.saturating_sub(7 * 86400), read(&ctx.state)?);
         let young = events.iter().find(|e| e.fleet == *name).is_none_or(|e| e.ts > week);
         let fails = (events.iter())
@@ -175,8 +168,7 @@ pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
     Ok(())
 }
 
-/// #419: a lesson lane's `done --no-change` before any review: no class repeated, so drover closes its issue with
-/// that line.
+/// #419: a lesson lane's `done --no-change` before any review: no class repeated, so drover closes its issue with that line.
 pub fn done(
     ctx: &Ctx,
     cfg: &Config,
@@ -185,7 +177,6 @@ pub fn done(
     (fleet, n): (&str, u64),
     why: &str,
 ) -> Result<()> {
-    // #639: a lessons issue drive's queue started as `impl` is one too (its title says so), while it has no PR.
     let st = crate::gate::issue_state(ctx, fleet, n)?;
     let filed = || crate::gh::cached_title(ctx, fleet, n).is_some_and(|t| t.starts_with("lessons: "));
     let no_pr = || crate::gh::cached_pr(ctx, fleet, n)["number"].is_null();
@@ -206,7 +197,6 @@ pub fn done(
     Ok(writeln!(out, "closed {fleet}#{n}: {why}")?)
 }
 
-/// #733: rev's rule for a lesson PR, the finding a prose-only one's PASS is recorded as a FAIL with.
 const RULES: [&str; 2] = [".drover/rules.md", ".herdsman/rules.md"];
 pub const PROSE_ONLY: &str = "- blocking [lesson] .drover/rules.md:1: this lesson PR adds or changes no enforcer \
 (a CI step, a test, a type, a lint rule, a lesson check) and retires no rules line\n  Proof: spec\n  > A PR that only \
@@ -218,8 +208,7 @@ pub fn is_lesson(ctx: &Ctx, st: Option<&crate::events::IssueState>, (fleet, n): 
         || crate::gh::cached_title(ctx, fleet, n).is_some_and(|t| t.starts_with("lessons: "))
 }
 
-/// #733: whether a PR's unified `diff` only edits prose: every file Markdown, no `.drover/rules.md` line removed or
-/// changed (a retirement or promotion), no lesson check added.
+/// #733: whether a PR's unified `diff` only edits prose: every file Markdown, no `.drover/rules.md` line removed or changed (a retirement or promotion), no lesson check added.
 pub fn prose_only(diff: &str) -> bool {
     let (mut file, mut added) = ("", String::new());
     for l in diff.lines() {
@@ -248,8 +237,7 @@ pub fn prompt(fleet: &str, n: u64) -> String {
     format!("no repeated class? end with `drover done --no-change \"no repeated class\" {fleet} {n}`")
 }
 
-/// #510: a check a lesson PR added: a `.drover/rules.md` line `- don't X (enforced by: <name> `<cmd>`, shadow since
-/// <date>)` (or `active since`). A line without that mark is hand-written: the lesson role never runs or changes it.
+/// #510: a check a lesson PR added: a `.drover/rules.md` line `- don't X (enforced by: <name> `<cmd>`, shadow since <date>)` (or `active since`). A line without that mark is hand-written: the lesson role never runs or changes it.
 pub struct LessonCheck {
     pub line: usize,
     pub name: String,
@@ -276,7 +264,6 @@ pub fn checks(rules: &str) -> Vec<LessonCheck> {
     rules.lines().enumerate().filter_map(parse).collect()
 }
 
-/// Each of `cs` that fails run in `dir`, with its output.
 fn failing(r: &dyn Runner, dir: &std::path::Path, cs: Vec<LessonCheck>) -> Vec<(LessonCheck, String)> {
     let run = |c: LessonCheck| {
         let sh = crate::runner::argv(&["-c", &format!("cd \"$0\" && {}", c.cmd), &dir.to_string_lossy()]);
@@ -286,8 +273,7 @@ fn failing(r: &dyn Runner, dir: &std::path::Path, cs: Vec<LessonCheck>) -> Vec<(
     cs.into_iter().filter_map(run).collect()
 }
 
-/// #510: `drover lesson-check` (CI, at the repo root): a shadow check that fails is reported as would-fail (stdout and
-/// `$GITHUB_STEP_SUMMARY`) and never fails the build; an active one that fails exits 1.
+/// #510: `drover lesson-check` (CI, at the repo root): a shadow check that fails is reported as would-fail (stdout and `$GITHUB_STEP_SUMMARY`) and never fails the build; an active one that fails exits 1.
 pub fn ci(r: &dyn Runner, rules: &std::path::Path, out: &mut dyn Write) -> Result<i32> {
     let text = std::fs::read_to_string(rules).unwrap_or_default();
     let (mut code, mut s) = (0, String::new());
@@ -304,8 +290,7 @@ pub fn ci(r: &dyn Runner, rules: &std::path::Path, out: &mut dyn Write) -> Resul
     Ok(code)
 }
 
-/// #510: at a merge's premerge (`wt`: the PR merged with integration) each shadow check runs; one `lesson-shadow`
-/// event (the checks run, those that would fail) is the history the next lesson run promotes or retires by.
+/// #510: at a merge's premerge (`wt`: the PR merged with integration) each shadow check runs; one `lesson-shadow` event (the checks run, those that would fail) is the history the next lesson run promotes or retires by.
 pub fn record(ctx: &Ctx, r: &dyn Runner, wt: &std::path::Path, (fleet, n): (&str, u64)) -> Result<()> {
     let text = std::fs::read_to_string(crate::repo_path(&wt.join(".drover/rules.md"))).unwrap_or_default();
     let shadow: Vec<LessonCheck> = checks(&text).into_iter().filter(|c| !c.active).collect();
@@ -324,10 +309,7 @@ pub fn ymd(day: u64) -> String {
     format!("{}-{m:02}-{d:02}", civil_year(day))
 }
 
-/// #510: each lesson check in `rules` with its history and what the next lesson run does with it. The owner's
-/// `promote <name>` / `retire <name>` line in a lesson PR's body comes first; else a shadow check with a false positive
-/// (a `false positive: <name>` line from rev or the owner) is fixed or removed; one that caught a real instance over at
-/// least 7 days or 10 PRs is promoted; one that ran and caught nothing in 30 days is retired.
+/// #510: each lesson check in `rules` with its history and what the next lesson run does with it. The owner's `promote <name>` / `retire <name>` line in a lesson PR's body comes first; else a shadow check with a false positive (a `false positive: <name>` line from rev or the owner) is fixed or removed; one that caught a real instance over at least 7 days or 10 PRs is promoted; one that ran and caught nothing in 30 days is retired.
 pub fn review(
     ctx: &Ctx,
     cfg: &Config,
@@ -396,9 +378,7 @@ pub fn review(
     Ok(cs.into_iter().map(decide).collect())
 }
 
-/// #510: `drover lesson apply`: the lesson run rewrites `rules` (its worktree's `.drover/rules.md`) by `review`: a
-/// promoted check becomes `active since <today>`, a retired one is deleted (the commit is its history); fix-or-remove
-/// ones are listed for the lane. Hand-written lines stay byte for byte.
+/// #510: `drover lesson apply`: the lesson run rewrites `rules` (its worktree's `.drover/rules.md`) by `review`: a promoted check becomes `active since <today>`, a retired one is deleted (the commit is its history); fix-or-remove ones are listed for the lane. Hand-written lines stay byte for byte.
 pub fn apply(
     ctx: &Ctx,
     cfg: &Config,

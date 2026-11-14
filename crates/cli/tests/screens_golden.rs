@@ -1,11 +1,6 @@
-//! #105: harness-neutral screen parsing, golden-tested on real captured screens (paths masked) from Claude Code,
-//! dsh-TUI and Hermes: no divider, input line, status bar, spinner or tip in the transcript lines; the spinner (or
-//! status bar) is the status line; the messages and tool rows are kept. `BLESS=1` rewrites the `.lines.json` files
-//! (#138: the sheet groups these lines into blocks, tests/chat_blocks.rs).
 use drover::lanes::{activity, chat, tail};
 use std::path::Path;
 
-/// (fixture, harness, status line, text that must not be chat, text that must stay).
 type Screen = (
     &'static str,
     &'static str,

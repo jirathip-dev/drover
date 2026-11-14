@@ -1,5 +1,3 @@
-//! #337: the board's one snapshot (#344: the `board` row in `state.db`): every read the board, `status` and `hosts` make, taken
-//! by the fast step and each kick, every remote host's reads in one ssh call; a request replays it, never a remote read.
 use crate::config::Config;
 use crate::events::{Event, States};
 use crate::hosts::{quote, On};
@@ -51,8 +49,7 @@ pub fn out(v: Option<String>) -> Out {
     }
 }
 
-/// What a read the snapshot lacks does: `Collect` (the step's look: ssh is batched, answered from the last snapshot
-/// meanwhile; the rest runs and is kept), `Live` (runs), `Local` (a remote one fails, the rest runs).
+/// What a read the snapshot lacks does: `Collect` (the step's look: ssh is batched, answered from the last snapshot meanwhile; the rest runs and is kept), `Live` (runs), `Local` (a remote one fails, the rest runs).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Miss {
     Collect,
@@ -96,7 +93,6 @@ impl<'a> Snap<'a> {
             ts,
         }
     }
-    /// One ssh call per host: its wanted reads as one script, each output and exit code after a `\x1e`.
     fn fetch(&self) {
         let mut by: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
         for (k, (m, line)) in std::mem::take(&mut *lock(&self.want)) {
@@ -144,7 +140,6 @@ impl Runner for Snap<'_> {
     fn sleep(&self, secs: u64) {
         self.r.sleep(secs);
     }
-    /// #298: a call with stdin (`shed connect`, a file write) is never a cached read.
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
         if input.is_empty() {
             return self.run(prog, args);
@@ -211,8 +206,7 @@ pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[L
     w.into_iter().map(|x| x.1).collect()
 }
 
-/// The step's look: the reads the board makes (lanes, waits, now-lines, Host rows), remote ones batched; saved, and
-/// returned for the step's own scan (a read it lacks runs live).
+/// The step's look: the reads the board makes (lanes, waits, now-lines, Host rows), remote ones batched; saved, and returned for the step's own scan (a read it lacks runs live).
 pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     let s = Snap::new(r, Miss::Collect, load(ctx).map(|s| s.reads), Some(ctx.now));
     let events = crate::events::read(&ctx.state).unwrap_or_default();
@@ -228,7 +222,6 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     crate::outbox::look(&s, &events);
     s.fetch();
     let s = Snap { miss: Miss::Live, ..s };
-    // #447: the waits a request would work out, from this look's reads: the board reads them, never the log again.
     let (mut key, mut ws) = (String::new(), vec![]);
     if let Ok(list) = term::list(&s) {
         let all = lanes(cfg, &s, ctx, (&events, &crate::events::fold(&events)), &list);

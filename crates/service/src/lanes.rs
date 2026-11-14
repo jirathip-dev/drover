@@ -9,7 +9,6 @@ use std::time::Duration;
 const RETRY_SECS: u64 = 5;
 
 impl Service {
-    /// shed's `events` on `w`, followed for good on this thread: each lane's state logged, `shed.seq` kept.
     pub(crate) fn shed(self: Arc<Self>, w: &shed::Wire) {
         loop {
             let ctx = Ctx {
@@ -37,7 +36,6 @@ impl Service {
         }
     }
 
-    /// `lane-stream` once per change of a runtime's stream: live, or down (`why`) while the passes poll.
     fn stream_is(&self, runtime: &'static str, down: Option<String>) {
         let mut s = self.streams.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if s.insert(runtime, down.is_none()) == Some(down.is_none()) {

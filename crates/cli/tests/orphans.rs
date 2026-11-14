@@ -1,5 +1,3 @@
-//! #376: lanes drover never logged: `spawn-started` before the harness starts, and each drive step adopts a
-//! lane-shaped orphan pane of a tracked issue (its verdict then recorded as any lane's), closes a stale one, and leaves
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
@@ -55,7 +53,6 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
         .collect()
 }
 
-/// #12's impl lane, logged, and a review worktree no spawn logged holding `verdict`.
 fn review(c: &drover::Ctx, verdict: &str) -> PathBuf {
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
@@ -104,7 +101,6 @@ fn spawn_logs_spawn_started_before_the_harness_starts() {
         c.worktrees.join("sendmeter/issue-12")
     );
     assert!(kinds(&c, "spawn").is_empty(), "the start failed: no spawn");
-    // Passive: the issue's state is untouched.
     assert_eq!(
         fold(&read(&c.state).unwrap())[&("sendmeter".into(), 12)].state,
         "queued"
@@ -133,7 +129,6 @@ fn a_crash_after_spawn_started_is_adopted_by_the_next_step() {
     );
     assert_eq!(kinds(&c, "spawn-adopted")[0].str("why"), Some("orphan"));
     assert_eq!(fold(&read(&c.state).unwrap())[&("sendmeter".into(), 12)].state, "impl");
-    // Known now: the next step adopts nothing again.
     fast(&c, &r);
     assert_eq!(kinds(&c, "spawn").len(), 1);
 }
@@ -283,7 +278,6 @@ fn a_remote_orphan_is_adopted_on_its_host() {
     assert!(!sh.called("get", "sendmeter-impl-12"), "never adopted on this host");
 }
 
-/// before it starts the harness (its `spawn` comes once the prompt is confirmed, after this pass).
 struct Racing<'a>(&'a OverSsh<'a>, &'a drover::Ctx, &'a str);
 
 impl Racing<'_> {
@@ -311,7 +305,6 @@ impl drover::runner::Runner for Racing<'_> {
     }
 }
 
-/// #393: a remote lane whose spawn is still running when the sweep lists it is not adopted; an unlogged one is.
 #[test]
 fn a_lane_spawned_during_the_remote_listing_is_not_adopted() {
     let (c, _sh) = shed_ctx("orphan-race", HOSTS);

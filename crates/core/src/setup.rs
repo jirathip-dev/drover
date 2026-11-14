@@ -4,7 +4,6 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 pub const TIMEOUT: u64 = 600;
-/// #255: a cloud host's gh login: the token read without echo, piped by a shell builtin (never in argv), then HTTPS git.
 const GH_TOKEN: &str =
     "printf 'Fine-grained GitHub token: '; read -rs T; printf %s \"$T\" | gh auth login --with-token";
 
@@ -40,7 +39,7 @@ pub fn vendors(cfg: &Config) -> Vec<(String, String)> {
 
 /// Start setup `name` on `host` in a new shed terminal there; logs `setup` (no command line, no input); its name.
 pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, via: &str) -> Result<String> {
-    let boot = ("gh-token".to_string(), GH_TOKEN.to_string()); // #255: bootstrap's, not on the host cards
+    let boot = ("gh-token".to_string(), GH_TOKEN.to_string());
     let Some((_, line)) = all(cfg).into_iter().chain([boot]).find(|s| s.0 == name) else {
         return refused("NO_SUCH_SETUP", format!("no setup `{name}`"));
     };

@@ -8,17 +8,15 @@ use serde_json::json;
 
 const NOW: u64 = 1_000_000;
 const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
-const WT: &str = "/home/me/.local/share/drover/work/sendmeter/issue-12"; // #630
+const WT: &str = "/home/me/.local/share/drover/work/sendmeter/issue-12";
 const ADDR: &str = "127.0.0.1:7777";
 const TOKEN: &str = concat!("sk", "-ant-oat01-AAAA-secret");
 
-/// CONFIG on Claude with two hosts; `extra` lands in `[hosts.bazzite]`.
 fn config(extra: &str) -> String {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     format!("{base}\n[hosts.mini]\ntags = [\"fast\"]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n{extra}")
 }
 
-/// A probed cache: mini (macOS, xcode) and bazzite (Linux, docker), bazzite last seen `seen` s ago.
 fn setup(name: &str, extra: &str, bazzite_up: bool, seen: u64) -> drover::Ctx {
     let c = ctx(&tmpdir(name), &config(extra));
     let st = c.state.parent().unwrap();
@@ -161,11 +159,9 @@ fn needs_pick_the_host_whose_tags_cover_them_else_no_host() {
     assert_eq!(run(&c, &r, &["queue", "sendmeter", "set", "12", "needs", "gpu"]).0, 0);
     let e = placed(&c, &r, 12, "impl", None).unwrap_err();
     assert_eq!(e, "REFUSED NO_HOST: no host with gpu");
-    // A hand tag in fleet.toml covers it.
     let c2 = setup("hosts-needs-hand", "tags = [\"gpu\"]", true, 0);
     run(&c2, &r, &["queue", "sendmeter", "add", "12", "--needs", "gpu"]);
     assert_eq!(placed(&c2, &r, 12, "impl", None).as_deref(), Ok("bazzite"));
-    // The fleet's needs add to the item's: nothing has both.
     let text = config("").replace(
         "integration = \"staging\"",
         "integration = \"staging\"\nneeds = [\"xcode\"]",
@@ -181,7 +177,6 @@ fn the_least_busy_host_wins() {
     let c = setup("hosts-busy", "", true, 0);
     assert_eq!(placed(&c, &fake(2.0, 0.2), 12, "impl", None).as_deref(), Ok("bazzite"));
     assert_eq!(placed(&c, &fake(0.2, 2.0), 12, "impl", None).as_deref(), Ok("mini"));
-    // `--host` forces one.
     assert_eq!(
         placed(&c, &fake(0.2, 2.0), 12, "impl", Some("bazzite")).as_deref(),
         Ok("bazzite")
@@ -191,9 +186,7 @@ fn the_least_busy_host_wins() {
 #[test]
 fn admission_runs_per_host() {
     let c = setup("hosts-admit", "", true, 0);
-    // mini is over load/cpu 2.5: HOST_BUSY there, so bazzite takes the lane.
     assert_eq!(placed(&c, &fake(3.0, 2.0), 12, "impl", None).as_deref(), Ok("bazzite"));
-    // bazzite has 1 GB of disk: DISK_LOW there, so mini takes it although bazzite is idle.
     let df = "Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda 9 8 1048576 90% /\n";
     let low = || fake(1.0, 0.1).reply(&format!("{SSH}'df' '-k' '/'"), df);
     assert_eq!(placed(&c, &low(), 12, "impl", None).as_deref(), Ok("mini"));
@@ -209,12 +202,10 @@ fn admission_runs_per_host() {
     );
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("DISK_LOW"), "{out}");
-    // Every host busy: the least busy one's refusal.
     let e = placed(&c, &fake(3.0, 4.0), 12, "impl", None).unwrap_err();
     assert!(e.starts_with("HOST_BUSY: mini: load/cpu 3.00 > 2.5"), "{e}");
 }
 
-/// The impl role gets account A (its token, in `fake`'s store, returned); its profiles synced.
 fn with_account(c: &drover::Ctx) -> &'static str {
     let toml = std::fs::read_to_string(&c.config).unwrap().replacen(
         "harness = \"claude\"",
@@ -239,7 +230,6 @@ fn remote_fake() -> Fake {
 #[test]
 fn a_remote_lane_runs_every_command_on_its_host() {
     let c = setup("hosts-spawn", "", true, 0);
-    // The impl role has an account: no token of it (still in the store) reaches bazzite (#683).
     let token = with_account(&c);
     run(
         &c,
@@ -273,7 +263,6 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         !calls.iter().any(|c| c.contains("OAUTH_TOKEN") || c.contains(token)),
         "token in argv: {calls:?}"
     );
-    // #683: a remote lane gets no account env and no token (its host signs in through the main host's proxy, #637).
     assert!(
         !r.inputs
             .borrow()
@@ -305,7 +294,6 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         (e.str("host"), e.str("machine"), e.str("worktree"), e.str("account")),
         (Some("bazzite"), Some("bazzite"), Some(WT), Some("A"))
     );
-    // Its review round goes to the same host (the worktree lives there).
     assert_eq!(
         placed(&c, &fake(0.1, 3.0), 12, "rev", None).unwrap_err(),
         "HOST_BUSY: bazzite: load/cpu 3.00 > 2.5"
@@ -343,13 +331,9 @@ fn clean_removes_a_remote_worktree_over_its_host() {
         bazzite.called("kill", IMPL) && !sh.called("kill", IMPL),
         "its pane closes on bazzite"
     );
-    // #779: the remote worktree is never touched by local git (clean's wip prune reads the fleet's local clone).
     assert!(!r.calls.borrow().iter().any(|c| c.starts_with("git ") && c.contains(WT)));
 }
 
-/// #416: a merged lane on bazzite that only `spawn-started` logged (its spawn failed after the worktree was made) and an
-/// orphan folder there: listed with the host, the lane removed by `--yes`, the orphan by `--orphans --yes`; a full
-/// bazzite's `DISK_LOW` names what `clean --yes` frees there.
 #[test]
 fn clean_lists_and_removes_a_second_hosts_lane_and_orphan() {
     let c = setup("hosts-clean-416", "", true, 0);
@@ -416,7 +400,6 @@ fn clean_lists_and_removes_a_second_hosts_lane_and_orphan() {
 fn an_offline_host_never_pages_and_shows_grey() {
     let c = setup("hosts-offline", "", false, 1980);
     remote_spawn(&c, NOW - 4000);
-    // A lane on this host in the same state does page.
     ev(
         &c,
         NOW - 4000,
@@ -468,7 +451,6 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
         placed(&c, &r, 14, "impl", None).unwrap_err(),
         "REFUSED NO_HOST: no host with docker"
     );
-    // Its running lane drains there; #676: the issue's next lanes go to an enabled host.
     remote_spawn(&c, NOW - 60);
     let sh = FakeShed::attached(&c);
     let w = sh.on(&r);
@@ -478,7 +460,6 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
         page.contains("<span class=\"hw m\">off · draining 1 lane</span>"),
         "draining shown"
     );
-    // Every host off: nothing new starts.
     let text = std::fs::read_to_string(&c.config)
         .unwrap()
         .replace("tags = [\"fast\"]", "tags = [\"fast\"]\nenabled = false");
@@ -489,7 +470,6 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
     );
 }
 
-/// #676: an issue whose last lane ran on bazzite leaves it once bazzite is off: its next lanes go to the main host.
 #[test]
 fn after_hosts_off_the_issue_leaves_its_last_host() {
     let c = setup("hosts-off-sticky", "", true, 0);
@@ -505,8 +485,6 @@ fn after_hosts_off_the_issue_leaves_its_last_host() {
     assert_eq!(placed(&c, &r, 12, "rev", None).as_deref(), Ok("mini"));
 }
 
-/// #676: the sticky host refusing DISK_LOW sends the lane to another enabled host in the same pass; a worktree there
-/// with unpushed work keeps it, and the refusal says why.
 #[test]
 fn a_sticky_host_refusing_disk_low_yields_unless_its_worktree_has_unpushed_work() {
     let c = setup("hosts-sticky-disk", "", true, 0);
@@ -524,7 +502,6 @@ fn a_sticky_host_refusing_disk_low_yields_unless_its_worktree_has_unpushed_work(
         e.ends_with("; stays on bazzite: its worktree there has unpushed work"),
         "{e}"
     );
-    // A pin holds it there too.
     let e = placed(&c, &low(), 12, "impl", Some("bazzite")).unwrap_err();
     assert!(e.starts_with("DISK_LOW: bazzite"), "{e}");
 }
@@ -549,7 +526,6 @@ fn cli_and_board_toggles_both_log() {
         ("host-off", Some("bazzite"), Some("cli"))
     );
     assert_eq!(run(&c, &r, &["hosts", "off", "nope"]).0, 1);
-    // The board's [on] button: paired devices only.
     let s = Server::new(&c, &w, Some(ADDR.into()));
     let get = || host_tab(&s, ADDR, NOW);
     let page = get();
@@ -557,7 +533,6 @@ fn cli_and_board_toggles_both_log() {
         page.contains("<span class=\"hw m\">off · not used for lanes</span>")
             && page.contains("name=to value=on><button data-confirm=\"turn bazzite on?\">on</button>")
     );
-    // #286: the main host has no [off]; the CLI refuses it.
     let mini = &page[page.find("data-h=\"mini\"").unwrap()..page.find("data-h=\"bazzite\"").unwrap()];
     assert!(!mini.contains("name=to value="), "{mini}");
     let (code, out) = run(&c, &r, &["hosts", "off", "mini"]);
@@ -585,7 +560,6 @@ fn cli_and_board_toggles_both_log() {
         ("host-on", Some("bazzite"), Some("web"))
     );
     assert!(std::fs::read_to_string(&c.config).unwrap().contains("enabled = true"));
-    // #286: [off] asks first and says what happens.
     let off = "data-confirm=\"turn bazzite off? no new lanes; 0 running lanes finish\">off</button>";
     assert!(get().contains(off));
 }
@@ -601,7 +575,7 @@ fn lane_cards_and_the_herd_name_the_host() {
     let s = Server::new(&c, &w, Some(ADDR.into()));
     let page =
         String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
-    let page = with_queue(&page, &s, ADDR, NOW); // #269: Lanes as the board draws it
+    let page = with_queue(&page, &s, ADDR, NOW);
     let card = &page[page.find("data-agent=\"sendmeter-impl-12\"").expect("lane row")..];
     assert!(
         card[..card.find("</div></div>").unwrap()].contains("impl · bazzite · round 0 · claude"),
@@ -667,7 +641,6 @@ fn each_health_check_says_what_failed_and_how_to_fix_it() {
     );
 }
 
-/// #592: a remote host's old fleet.toml is flagged, never removed; none there, no row.
 #[test]
 fn doctor_flags_a_stale_remote_fleet_toml_and_leaves_it() {
     let c = setup("hosts-stale-conf", "", true, 0);
@@ -682,7 +655,6 @@ fn doctor_flags_a_stale_remote_fleet_toml_and_leaves_it() {
     assert!(!r.calls.borrow().iter().any(|l| l.contains("'rm'") && l.contains(&conf)));
 }
 
-/// #647 amendment A: doctor names the check that failed on a host; `unreachable` only when ssh itself fails.
 #[test]
 fn doctor_names_the_failed_host_check_and_says_unreachable_only_for_ssh() {
     let c = setup("hosts-doctor-why", "", true, 0);
@@ -733,7 +705,6 @@ fn an_unhealthy_host_takes_no_lanes_and_shows_red() {
     );
 }
 
-/// #307: a host whose `git ls-remote` of one fleet's repo fails is skipped for that fleet only, with the reason.
 #[test]
 fn a_host_that_cannot_reach_a_repo_is_skipped_for_that_fleet_only() {
     let c = setup("hosts-reach", "", true, 0);
@@ -884,7 +855,6 @@ fn an_unreachable_or_switched_off_host_costs_no_sync_ssh() {
     assert!(!r.called(&format!("{SSH}{STATUS}")) && syncs(&c).is_empty());
 }
 
-/// #236: a dry run places the lane first and prints the argvs exactly as a real spawn sends them: bazzite's home in
 #[test]
 fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
     let c = setup("hosts-dry", "", true, 0);
@@ -957,8 +927,6 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
     }
 }
 
-/// #236: a design lane runs on the main host whatever the issue's history or the load says; another host is refused.
-/// A role pin (`host = "<name>"` or `"main"`) beats least-busy placement.
 #[test]
 fn design_runs_on_the_main_host_only_and_a_role_pin_holds() {
     let c = setup("hosts-design", "", true, 0);
@@ -999,8 +967,6 @@ fn design_runs_on_the_main_host_only_and_a_role_pin_holds() {
     assert_eq!(placed(&c, &r, 13, "design", None).as_deref(), Ok("mini"));
 }
 
-/// #249: a review on the remote host: its verdict.md is read over ssh and recorded, its pane closed with `--machine`
-/// (one a worktree remove already closed counts), and the board names the host.
 #[test]
 fn a_remote_review_is_read_over_ssh_and_recorded() {
     let c = setup("hosts-verdict", "", true, 0);
@@ -1047,8 +1013,6 @@ fn a_remote_review_is_read_over_ssh_and_recorded() {
     assert!(all.iter().any(|e| e.kind == "lane-closed"), "{out}");
 }
 
-/// #389: a remote lane gets an outbox, never a route to the main host (`DROVER_MAIN`), and an answer to it lands
-/// with `--machine`: the prompt, then Enter, then the wait that confirms it.
 #[test]
 fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     let c = setup("hosts-answer", "", true, 0);
@@ -1100,8 +1064,6 @@ fn a_remote_lane_knows_the_main_host_and_answers_reach_it() {
     assert!(f.called("sh -c nohup '/opt/drover/bin/drover' kick sendmeter 12 --why answer --now"));
 }
 
-/// #345: with `[service] url` a remote lane reports over HTTP: it gets the url and its own token, never an
-/// outbox; the token is in no plan output or event, and it is scoped to its issue.
 #[test]
 fn a_remote_lane_gets_the_service_url_and_its_own_token() {
     let c = setup(
@@ -1142,8 +1104,6 @@ fn a_remote_lane_gets_the_service_url_and_its_own_token() {
     assert!(other.unwrap_err().to_string().starts_with("REFUSED TOKEN"));
 }
 
-/// #275: asks a lane logged on its own host before forwarding are imported into the main log once, under a new id.
-/// #283: only the ones unanswered there and under a day old; `asks-imported` marks the host once.
 #[test]
 fn asks_stranded_on_a_remote_host_are_imported_once() {
     let c = setup("hosts-import", "", true, 0);
@@ -1247,7 +1207,6 @@ fn a_remote_supersede_stays_on_its_host() {
     assert_eq!((e.str("host"), e.str("pane")), (Some("bazzite"), Some(IMPL)));
 }
 
-/// #327: a supersede that moves the lane (`--host mini`) still closes the old lane's pane on bazzite.
 #[test]
 fn a_supersede_onto_another_host_closes_the_old_lane_on_its_own() {
     let c = setup("hosts-supersede-move", "", true, 0);
@@ -1263,7 +1222,6 @@ fn a_supersede_onto_another_host_closes_the_old_lane_on_its_own() {
     assert!(!sh.called("kill", IMPL), "never on the main host's shed");
 }
 
-/// #676: a lane moved off its last host (now off) starts from the pushed branch, with that host's unpushed work on `wip/`.
 #[test]
 fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
     let c = setup("hosts-move-wip", "enabled = false", true, 0);
@@ -1310,7 +1268,6 @@ fn a_lane_moved_off_its_last_host_starts_from_the_pushed_branch_and_its_wip() {
     assert!(brief.contains("work is on `origin/wip/sendmeter-impl-12-"), "{brief}");
 }
 
-/// #438: short of disk on a remote host, its shared build folder is trimmed over ssh first; then its disk is read again.
 #[test]
 fn disk_low_on_a_remote_host_trims_its_shared_build_folder_first() {
     let c = setup("hosts-trim", "", true, 0);
@@ -1332,13 +1289,10 @@ fn disk_low_on_a_remote_host_trims_its_shared_build_folder_first() {
         call.ends_with("'sh' '~/.local/share/drover/work/.build' '0'"),
         "every idle profile goes: {call}"
     );
-    // Nothing freed: the first reading stands.
     let e = placed(&c, &low("freed 0"), 12, "impl", Some("bazzite")).unwrap_err();
     assert!(e.starts_with("DISK_LOW: bazzite: 1.0 GB free < 10;"), "{e}");
 }
 
-/// #438/#485: remote shared build folders are trimmed to `build_budget_gb` by `trim_hosts`, one quick ssh per host;
-/// drive's budget pass no longer ssh's. The build root is absent here, so the local trim never touches this host.
 const QUICK: &str = "ssh -oBatchMode=yes -oConnectTimeout=5 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' 'r=$1;";
 
 fn trim_setup(name: &str, extra: &str) -> drover::Ctx {
@@ -1375,7 +1329,6 @@ fn remote_shared_build_folders_are_trimmed_with_a_quick_ssh_not_in_the_budget_pa
     );
 }
 
-/// #485: a host turned off gets no trim call at all.
 #[test]
 fn a_disabled_host_gets_no_trim_call() {
     let c = trim_setup("hosts-trim-off", "enabled = false");
@@ -1390,7 +1343,6 @@ fn a_disabled_host_gets_no_trim_call() {
     );
 }
 
-/// #485: an unreachable enabled host costs one 5 s attempt per pass, its failure printed, nothing retried.
 #[test]
 fn an_unreachable_host_costs_one_short_attempt_per_pass() {
     let c = trim_setup("hosts-trim-down", "");
@@ -1410,7 +1362,6 @@ fn an_unreachable_host_costs_one_short_attempt_per_pass() {
     assert!(ssh[0].starts_with(QUICK));
 }
 
-/// #485: the tick drives first; the remote trim runs after drive's pass.
 #[test]
 fn the_tick_drives_before_it_trims_remote_hosts() {
     let c = trim_setup("hosts-tick-trim", "");
@@ -1430,8 +1381,6 @@ fn the_tick_drives_before_it_trims_remote_hosts() {
     assert!(driven.is_some() && trimmed.is_some() && driven < trimmed, "{out}");
 }
 
-/// #573: the main host runs drover through a symlink (`~/.local/bin/drover` → `<root>/bin/drover`): the update
-/// installs into the real root, and the readback asks the real binary, so a stale one shows though the symlink is current.
 #[test]
 fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     let mut c = setup("hosts-symlink", "", true, 0);
@@ -1456,7 +1405,7 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     let over = two(&r, &there);
     let base = here.on(&over);
     let (on, home) = (drover::hosts::On::new(&base, Some("bazzite")), drover::config::home());
-    let home = home.to_str().unwrap(); // the same home there: paths unchanged
+    let home = home.to_str().unwrap();
     let rows = drover::hosts::health(&c, &cfg, &on, &[], home);
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert!(rows[0].starts_with("! drover — drover 0.1.0 (0ld) there"), "{rows:?}");
@@ -1475,7 +1424,6 @@ fn a_symlinked_drover_updates_and_reads_back_its_real_install_root() {
     );
 }
 
-/// #649: bazzite's lane `sendmeter-impl-12`, its worktree there with one dirty file; `push` answers the wip push.
 fn dirty_remote(f: Fake, push: Option<i32>) -> (Fake, String) {
     let g = format!("{SSH}'git' '-C' '{WT}' ");
     let f = match push {
@@ -1490,7 +1438,6 @@ fn dirty_remote(f: Fake, push: Option<i32>) -> (Fake, String) {
         .reply(&format!("{SSH}'sh' '-c' 'test -e"), "")
         .reply(&format!("{g}'status' '--porcelain'"), " M src/a.rs\n")
         .reply(&format!("{g}'rev-list' '--count'"), "0\n")
-        // #646: a commit only when something is staged.
         .reply(&format!("{g}'diff' '--cached' '--name-only'"), "")
         .reply(&format!("{g}'diff' '--cached'"), "+fn a() {}\n")
         .reply(&format!("{SSH}'git' '-C'"), "")
@@ -1498,7 +1445,6 @@ fn dirty_remote(f: Fake, push: Option<i32>) -> (Fake, String) {
     (f, g)
 }
 
-/// #649: `kill --yes` of a lane on bazzite saves its work there: status, commit and push over ssh, never local git.
 #[test]
 fn kill_saves_a_remote_lanes_work_on_its_own_host() {
     let c = setup("hosts-kill-wip", "", true, 0);
@@ -1517,8 +1463,6 @@ fn kill_saves_a_remote_lanes_work_on_its_own_host() {
     assert!(!r.called("git "), "never local git: {calls:?}");
 }
 
-/// #649: `spawn --supersede` of bazzite's lane with dirty work pushes it to `wip/` there before any pane closes, and the
-/// new lane's brief names that branch; a failed save refuses and closes nothing.
 #[test]
 fn a_supersede_saves_a_remote_lanes_dirty_work_first() {
     for fail in [false, true] {
@@ -1607,8 +1551,6 @@ fn kill_closes_a_remote_lanes_live_pane_and_clean_then_removes_it() {
     assert!(f.called(&format!("{SSH}'git' '-C' '{WT}' 'worktree' 'remove'")));
 }
 
-/// #664: a wip push rejected because a ref of that name exists (`fetch first`) retries once under a new name, never
-/// forced, and the kill succeeds naming that branch.
 #[test]
 fn a_wip_push_whose_ref_exists_retries_under_a_new_name() {
     let c = setup("hosts-wip-664", "", true, 0);
@@ -1638,8 +1580,6 @@ fn a_wip_push_whose_ref_exists_retries_under_a_new_name() {
     assert!(bazzite.called("kill", IMPL), "{:?}", bazzite.methods());
 }
 
-/// #664: a merged lane's worktree on bazzite whose gitfile points at another host's path is reported
-/// `orphan (wrong host)` with the fix, and nothing there is touched.
 #[test]
 fn a_worktree_whose_gitfile_points_at_another_host_is_reported_not_removed() {
     let c = setup("hosts-wronghost-664", "", true, 0);
@@ -1724,8 +1664,6 @@ fn clean_closes_a_killed_lanes_leftover_shell_pane_then_removes_the_worktree() {
     );
 }
 
-/// #664: clean resolves a lane's host from its spawn: mini's merged `sendmeter-impl-12` worktree is not kept live by
-/// bazzite's agent of the same name.
 #[test]
 fn a_lane_of_the_same_name_on_another_host_keeps_no_worktree_live() {
     let c = setup("hosts-samename-664", "", true, 0);

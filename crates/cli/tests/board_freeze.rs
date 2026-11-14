@@ -1,5 +1,3 @@
-//! #552: the old board takes bug fixes only. `scripts/board-freeze.sh` fails a PR whose changed files touch the
-//! board's UI unless its issue's spec has a `board-fix` line; /api/v1 (api.rs, serve/v1.rs) stays open.
 mod common;
 use common::*;
 use std::io::Write;
@@ -75,7 +73,6 @@ fn ci_runs_the_freeze_on_every_staging_pr() {
     assert!(wf.contains("| scripts/board-freeze.sh spec.md"), "{wf}");
 }
 
-/// #574: the body `drover amend` sent with `gh issue edit` (the call's `--body` value).
 fn edited(r: &Fake) -> String {
     let calls = r.calls.borrow();
     let edit = calls
@@ -85,8 +82,6 @@ fn edited(r: &Fake) -> String {
     edit.split_once(" --body ").unwrap().1.to_string()
 }
 
-/// #574: `drover amend` appends an owner's decision under the body's `## Amendments` (made once), logs `amend`,
-/// re-runs the open PR's failed board-freeze (not other checks), and its `board-fix` line passes board-freeze.
 #[test]
 fn amend_writes_an_owner_decision_into_the_spec_and_reruns_board_freeze() {
     use drover::events::{append, read, Event};
