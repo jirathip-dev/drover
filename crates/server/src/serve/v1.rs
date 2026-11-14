@@ -355,7 +355,7 @@ impl Server<'_> {
         Ok(format!("closed #{n}"))
     }
 
-    fn blocks(&self, ctx: &Ctx, q: &BTreeMap<String, String>, chat: Chat) -> LaneChat {
+    pub(super) fn blocks(&self, ctx: &Ctx, q: &BTreeMap<String, String>, chat: Chat) -> LaneChat {
         let num = |k: &str| q.get(k).and_then(|v| v.parse().ok());
         let acp = || {
             let (cfg, ev) = (Config::load(&ctx.config).ok()?, shared(&ctx.state).ok()?);

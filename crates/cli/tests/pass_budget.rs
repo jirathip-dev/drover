@@ -47,6 +47,7 @@ fn fixture() -> drover::Ctx {
         });
     }
     tx.commit().unwrap();
+    drover::db::rebuild(&c.state).unwrap();
     c.now = 100 + EVENTS + 60;
     c
 }
@@ -74,10 +75,9 @@ fn a_fast_pass_over_a_100k_event_log_reads_it_once_and_stays_under_its_bound() {
     let (secs, rows) = (t0.elapsed().as_secs_f64(), drover::db::ROWS.load(Relaxed) - r0);
     assert_eq!(code, 0, "{out}");
     let len = EVENTS + ISSUES + 1;
-    assert!(rows >= len as usize, "the pass read the log: {rows}");
     assert!(
-        rows < 2 * len as usize,
-        "one full-log read, then only new rows: {rows} rows of a {len}-event log"
+        rows < len as usize,
+        "the working set, never the whole log: {rows} rows of a {len}-event log"
     );
     assert!(secs < 10.0, "a fast pass took {secs:.1}s");
 }
