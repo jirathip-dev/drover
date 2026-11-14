@@ -709,7 +709,7 @@ local = "/tmp/does-not-matter/sendmeter"
 repo = "jirathip-dev/sendmeter"
 
 [fleet.sendmeter.role.impl]
-account = "C"
+effort = "bogus"
 harness = "claude"
 profile = "fleet-impl"
 
@@ -734,7 +734,7 @@ fn bootstrap_repairs_an_old_bootstrap_fleet_toml_so_profiles_sync_passes_there()
     let r = Remote(&f, conf.clone(), there.clone());
     let sync = format!("test ! -e '{conf}' || '{}' profiles sync", c.exe);
     let o = r.run("ssh", &["cloud1".into(), sync.clone()]).unwrap();
-    assert!(o.stderr.contains("account 'C' is not in [accounts]"), "{o:?}");
+    assert!(o.stderr.contains("effort \"bogus\""), "{o:?}");
     let mut out = vec![];
     let res = drover::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out);
     let out = String::from_utf8(out).unwrap();

@@ -255,7 +255,7 @@ never passes `--force`, and never bypasses a refusal: `REFUSED` (e.g. `HOST_BUSY
 next pass. Starts fan out: a pass tries every startable item in queue order, each spawn sampling the host
 afresh. An item-specific refusal (`SERIAL_BUSY`, `MCP_FORBIDDEN`, …) skips that item for the pass; it keeps
 its queue place and status reads `skipped this pass: <CODE> (<why>)` (board lane `skip <CODE>`). `CAP` ends
-the fleet's starts; `HOST_BUSY` and `ALL_CAPPED` end starting for every later fleet in the pass too (same Mac). Every action logs a passive `driven` event (step, command, result). A pass holds
+the fleet's starts; `HOST_BUSY` and `LOGIN_NEEDED` end starting for every later fleet in the pass too (same Mac). Every action logs a passive `driven` event (step, command, result). A pass holds
 the `drive.lock` lease (#344: taken over once its pid is gone, or after an hour), so cron and the button never overlap; the
 board shows `driver: drover · last pass <age> ago`.
 
@@ -317,11 +317,10 @@ once the issue moves or the SLO recovers, and the card clears.
 pane, gets one `lane-dead` and never a `stall`), `ready-unmerged`, `ci-missing` (a PASSed PR head with no
 checks `[limits] ci_start_minutes` (10) after its push: `CI broken: <workflow> did not start` when a failed run has
 no jobs, else `CI missing`; once per head, and drive sends the lane a fix round as for red CI) and
-`account-capped`. #640: a limit banner counts only on the harness's own lines (the pane's last block, unless a `⏺`
-reply or tool call heads it; prompt lines never), and caps only when the account's usage reading agrees: none
-fresh (10 min), or a window the plan has at 100%; otherwise it logs `cap-banner-ignored` with both numbers.
-`claude is signed out` (or a 401 usage reading) is `account-signed-out`, an owner card with no reset time: sign
-in or replace the token, then `drover accounts reset <name>`. `drover accounts` shows each state's evidence. It is idempotent and exits 0, so it can run from cron:
+`usage-limit` / `signed-out` (#923). A limit banner counts only on the harness's own lines (the pane's last block,
+unless a `⏺` reply or tool call heads it; prompt lines never); a sign-in prompt is `signed-out`. Either alerts once,
+naming the lane, its host and the login command, and holds new lanes on that host (`LOGIN_NEEDED`) until the owner
+signs in there and turns the host back on ([accounts](accounts.md)). It is idempotent and exits 0, so it can run from cron:
 
 ```cron
 */5 * * * * drover check >/dev/null 2>>"$HOME/Library/Logs/drover-check.log"

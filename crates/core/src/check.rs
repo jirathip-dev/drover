@@ -251,18 +251,18 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     }
     let silent = crate::shed::silent(ctx, cfg.limits.acp_start_minutes).into_iter();
     for (sp, agent, at) in silent.filter_map(|(a, at)| Some((last_spawn(&events, &a)?, a, at))) {
-        let on = sp.str("account").map_or("its login".into(), |a| format!("account {a}"));
         let why = format!(
-            "{agent}: failed start on {on}, no event {} after its first turn",
+            "{agent}: failed start, no event {} after its first turn",
             age(ctx.now - at)
         );
-        let d = json!({"key": format!("{agent}:{at}"), "agent": agent, "account": sp.str("account"), "reason": why});
+        let d = json!({"key": format!("{agent}:{at}"), "agent": agent, "reason": why});
         fire(ctx, cfg, out, &events, (&sp.fleet, sp.issue), "lane-failed-start", d)?;
     }
+    let mut held = std::collections::BTreeSet::new();
     for s in fold(&events).values().filter(|s| !s.done()) {
         let idle = ctx.now.saturating_sub(s.last_ts);
         let mut hits = vec![];
-        let (mut capped, mut cause) = (None, None);
+        let mut cause = None;
         if let (Some(agents), Some((role, lane))) = (&agents, s.active_lane()) {
             let spawned = last_spawn(&events, lane);
             let r = &On::of(r, spawned);
@@ -297,44 +297,24 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     format!("{role} lane {lane} is gone ({}){why}", s.state),
                 ));
             }
-            let account = spawned.and_then(|e| e.str("account"));
-            let chain = cfg
-                .fleet(&s.fleet)
-                .is_ok_and(|f| f.role.get(role).is_some_and(|r| !r.fallback.is_empty()));
-            if let (Some(p), Some(sp), true) = (pane, spawned, status.is_some() && (account.is_some() || chain)) {
-                let screen = term::read(r, p).unwrap_or_default();
-                let name = account.or(sp.str("harness")).unwrap_or_default();
-                let (harness, host) = (sp.str("harness"), sp.str("host"));
-                let h = crate::providers::get(harness.unwrap_or_default());
-                let seen = match h.usage_limited(cfg, r, &screen, ctx.now) {
-                    Some(u) => Some((crate::access::confirm(ctx, account, u), "")),
-                    None if h.signed_out(&screen) => {
-                        let (rest, none) = (ctx.now + cfg.limits.fallback_rest_minutes * 60, account.is_none());
-                        let kind = ["account-signed-out", "agent-unavailable"][usize::from(none)];
-                        Some(((kind, none.then_some(rest), "sign-in prompt".into()), ":auth"))
-                    }
-                    None => None,
-                };
-                if let Some(((kind, until, meter), auth)) = seen {
-                    let why = match kind {
-                        "cap-banner-ignored" => format!("{name}: {role} lane {lane} shows a limit banner but usage reads {meter}; {name} stays in rotation"),
-                        "account-capped" | "agent-unavailable" if auth.is_empty() => format!("{name}: {role} lane {lane} hit the usage limit; spawns skip {name} for now"),
-                        _ => {
-                            let fix = account.map(|a| crate::access::sign_in(cfg, r, a).1);
-                            let cmd = fix.and_then(|f| Some(f.split_once(" → ")?.1.rsplit(", or ").next()?.to_string()));
-                            let fix = cmd.map_or("sign in".into(), |c| format!("sign in (`{c}`)"));
-                            let fix = format!("{fix} or replace its token");
-                            format!("{name}: {role} lane {lane} is signed out; spawns skip {name} until you {fix} (an account: then `drover accounts reset {name}`)")
-                        }
-                    };
-                    hits.push((kind, format!("{lane}:{name}{auth}"), why));
-                    let d = json!({"agent": lane, "harness": harness, "account": account, "host": host, "until": until, "meter": meter});
-                    capped = Some((kind, d));
-                }
-            }
             if let Some(p) = pane.filter(|_| status.is_some()) {
+                let recent = term::recent(r, p, "200").unwrap_or_default();
+                if let Some(sp) = spawned {
+                    let screen = crate::lanes::strip(&recent);
+                    let h = crate::providers::get(sp.str("harness").unwrap_or_default());
+                    let seen = [(h.usage_limited(&screen), "usage-limit", "hit the usage limit")];
+                    let seen = seen
+                        .into_iter()
+                        .chain([(h.signed_out(&screen), "signed-out", "is signed out")]);
+                    if let Some((_, kind, what)) = seen.into_iter().find(|s| s.0) {
+                        let d = crate::hosts::hold_alert(&events, sp, what);
+                        if held.insert(d["key"].to_string()) {
+                            fire(ctx, cfg, out, &events, ("drover", None), kind, d)?;
+                        }
+                    }
+                }
                 if let Some(f) = crate::lanes::log(&ctx.state, lane) {
-                    crate::lanes::roll(&f, &crate::lanes::body(&term::recent(r, p, "200").unwrap_or_default()));
+                    crate::lanes::roll(&f, &crate::lanes::body(&recent));
                 }
                 if let Some((url, line)) = wt.and_then(|wt| amendment(ctx, r, cfg, s, wt)) {
                     let key = format!("{lane}:{url}");
@@ -400,9 +380,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         }
         for (kind, key, reason) in hits {
             let mut d = json!({"key": key, "reason": reason});
-            if let Some((_, serde_json::Value::Object(c))) = capped.as_ref().filter(|c| c.0 == kind) {
-                c.iter().for_each(|(k, v)| d[k] = v.clone());
-            }
             if let Some(c) = cause.filter(|_| kind == "lane-dead") {
                 d["cause"] = json!(c);
             }

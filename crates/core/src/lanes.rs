@@ -19,7 +19,6 @@ pub struct Lane {
     pub harness: String,
     pub model: Option<String>,
     pub effort: Option<String>,
-    pub account: Option<String>,
     pub port: Option<String>,
     /// The runtime's live state (idle | working | done | blocked | unknown), or `dead` | `parked` (log only, no pane).
     pub state: String,
@@ -37,8 +36,6 @@ pub struct Lane {
     pub worktree: Option<String>,
     /// #630: its workspace root, from the spawn.
     pub root: Option<String>,
-    /// #302: `on <entry> (<entries> resting until 18:40)` when a `fallback` entry carries on.
-    pub resting: Option<String>,
     /// #422: an orchestrator's chat thread (`t6`); with no pane it is `asleep`.
     pub thread: Option<String>,
     /// #609: the runtime it was spawned in (`shed` | `shed-acp`), from its spawn: never the config's now.
@@ -194,14 +191,12 @@ fn from_spawn(e: &Event, l: Lane) -> Lane {
         harness: s("harness").unwrap_or_default(),
         model: s("model"),
         effort: s("effort"),
-        account: s("account"),
         port: e.data.get("port").and_then(Value::as_u64).map(|p| format!(":{p}")),
         since: e.ts,
         host: s("host").or(l.host),
         machine: s("machine").or(l.machine),
         worktree: s("worktree"),
         root: s("root"),
-        resting: s("resting"),
         runtime: s("runtime").unwrap_or_else(|| "shed".into()),
         ..l
     }

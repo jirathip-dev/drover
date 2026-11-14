@@ -327,15 +327,6 @@ fn waits(
         let what = format!("serial: {} {by} ({}/{})", g.name, h.len(), g.max);
         return w("drive", &what, s.last_ts, None);
     }
-    let active = matches!(s.state.split('(').next(), Some("impl" | "fix" | "review"));
-    let spawned = last_spawn(events, &lane).filter(|_| active);
-    let since_spawn = |e: &&Event| spawned.is_some_and(|sp| e.ts >= sp.ts && e.str("account") == sp.str("account"));
-    let rest = |e: &&Event| crate::access::rests(&e.kind) && e.is(&e.kind, f, n);
-    if let Some(c) = events.iter().filter(since_spawn).find(rest) {
-        let role = spawned.and_then(|sp| sp.str("role")).unwrap_or_default();
-        let what = drive("account capped", "respawn on a free one");
-        return said(what, c.ts, cmd("spawn", &format!(" {role} --supersede")));
-    }
     let pushed = pr["headRefOid"].as_str().unwrap_or_default();
     let mut base = pushed;
     let update = |to: &str| {
@@ -602,10 +593,7 @@ pub fn scan(
             out.push((s, w));
             continue;
         }
-        let rested = |e: &Event| {
-            crate::access::rests(&e.kind) && sp.is_some_and(|p| e.ts >= p.ts && e.str("account") == p.str("account"))
-        };
-        if busy(&lane) && !(sp.is_some_and(|p| p.str("account").is_some()) && mine.iter().any(rested)) {
+        if busy(&lane) {
             let who = if s.check_lane() == Some(&lane) {
                 "reviewer"
             } else {
@@ -936,7 +924,7 @@ pub fn recovered(events: &[Event], lane: &str, now: u64) -> String {
     })
 }
 
-const HOST_WAIT: [&str; 5] = ["HOST_BUSY", "DISK_LOW", "DISK_BUDGET", "MEM_LOW", "ALL_CAPPED"];
+const HOST_WAIT: [&str; 5] = ["HOST_BUSY", "DISK_LOW", "DISK_BUDGET", "MEM_LOW", "LOGIN_NEEDED"];
 pub const ORPHAN_SECS: u64 = 1800;
 
 /// #493: since when nothing has driven guarded issue `s`, once that is 30 min: no working lane, no drive action on it (a due step, or a refused one drive retries) and no named wait (an open ask, a hold, a paused fleet, CI after PASS).

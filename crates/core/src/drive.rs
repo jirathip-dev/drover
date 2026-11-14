@@ -42,7 +42,6 @@ pub const STEPS: [(&str, &[&str]); 8] = [
             "spawn_pending_max_secs",
             "respawn_max",
             "respawn_window_minutes",
-            "fallback_rest_minutes",
             "overflow_after_minutes",
         ],
     ),
@@ -542,7 +541,8 @@ pub(crate) fn words(code: Option<&str>, step: &str, result: &str) -> String {
         None => PAST.iter().find(|d| d.starts_with(step)).map_or(step, |d| d).into(),
         Some("HOST_BUSY") => format!("Mac busy ({why})"),
         Some("DISK_LOW") => format!("disk nearly full ({why})"),
-        Some("CAP" | "ALL_CAPPED") => "lane limit or usage cap reached".into(),
+        Some("CAP") => "lane limit reached".into(),
+        Some("LOGIN_NEEDED") => format!("login needed ({why})"),
         Some("CI_NOT_GREEN") => "waiting for CI".into(),
         Some("SPAWN_PENDING") => match why.split_once(": ") {
             Some((_, by)) => crate::promise::Say::SpawnSlot(Some(by.into())).line(),
@@ -1888,7 +1888,7 @@ fn starts<'a>(
         first = first.or(code.is_none().then_some(fleet));
         go &= !matches!(
             code,
-            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "ALL_CAPPED")
+            Some("HOST_BUSY" | "DISK_LOW" | "DISK_BUDGET" | "MEM_LOW" | "LOGIN_NEEDED")
         );
         if matches!(code, Some("CAP")) {
             todo.remove(i);

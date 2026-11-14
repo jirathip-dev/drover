@@ -101,8 +101,11 @@ fn chat_defaults_come_from_the_chat_table_else_the_conductor_role() {
     );
     let bad = Config::parse(&config("[chat]\nharness = \"codex\"\n")).unwrap_err();
     assert!(format!("{bad:#}").contains("chat.harness"), "{bad:#}");
-    let bad = Config::parse(&config("[chat]\naccount = \"nobody\"\n")).unwrap_err();
-    assert!(format!("{bad:#}").contains("not in [accounts]"), "{bad:#}");
+    let old = Config::parse(&config("[chat]\naccount = \"nobody\"\n")).unwrap();
+    assert!(
+        old.warnings().iter().any(|w| w.1.contains("chat.account")),
+        "#923: a warning, never an error"
+    );
 }
 
 #[test]

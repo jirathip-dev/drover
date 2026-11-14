@@ -567,7 +567,6 @@ fn group(r: &[&str]) -> Option<&'static str> {
         ("clean", _) if has("--yes") || has("--orphans") || has("--lane") => "clean",
         ("hosts" | "host", Some("on" | "off" | "refresh")) => "hosts",
         ("reclaim", _) => "reclaim",
-        ("accounts", Some("reset")) => "accounts",
         ("runners", Some(_)) => "runners",
         ("pause" | "resume", _) => "pause",
         ("set", _) => "set",
@@ -599,7 +598,6 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
         (r.first(), r.get(1)),
         (Some(&"config"), Some(&("apply" | "discard")))
             | (Some(&"secret"), Some(&("ls" | "rm")))
-            | (Some(&"accounts"), Some(&"import"))
             | (Some(&"card"), Some(&("approve" | "deny" | "run")))
             | (Some(&"fleet"), Some(&"rename"))
     ) {

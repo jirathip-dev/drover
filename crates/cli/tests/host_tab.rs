@@ -107,7 +107,7 @@ fn the_host_api_shows_each_root_with_its_state_and_free_space() {
 }
 
 #[test]
-fn the_host_api_gives_each_account_and_provider_login_its_vendor() {
+fn the_host_api_gives_each_provider_login_its_vendor_and_no_account() {
     let c = ctx(
         &tmpdir("host-vendors"),
         &(CONFIG.to_string() + "[accounts]\nA = \"A\"\n"),
@@ -127,7 +127,7 @@ fn the_host_api_gives_each_account_and_provider_login_its_vendor() {
     assert_eq!(
         v["vendors"],
         serde_json::json!({
-            "accounts": [{"name": "A", "vendor": "anthropic"}],
+            "accounts": [],
             "setups": [{"name": "claude", "vendor": "anthropic"}, {"name": "codex", "vendor": "openai"}],
         }),
         "gh is no provider's login: {v}"

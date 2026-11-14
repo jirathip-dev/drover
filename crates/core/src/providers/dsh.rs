@@ -1,4 +1,4 @@
-use super::{attempts, Credential, Provider};
+use super::{attempts, Provider};
 use crate::term;
 use crate::runner::{ok, Runner};
 use crate::spawn::Plan;
@@ -120,9 +120,6 @@ impl Provider for Dsh {
         Ok(false)
     }
 
-    fn credential(&self) -> Credential {
-        Credential::Own
-    }
     fn process_names(&self) -> &'static [&'static str] {
         &[LABEL]
     }

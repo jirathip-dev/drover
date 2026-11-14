@@ -47,9 +47,8 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - A never-started needs-human lane gets [start lane] (#858).
 - Owner-approved CI runner VMs for orchestrators (#596).
 
-**Accounts, providers and secrets**
-- Lanes sign in per account through config folders; drover keeps no tokens (#698, #795).
-- Fallback to the next harness or account on a usage limit (#311).
+**Sign-in, providers and secrets**
+- Lanes run on the host's own CLI login; drover keeps no tokens, and a usage limit holds that host's new lanes (#923).
 - Providers: Claude Code, Codex, Gemini, Hermes, dsh, each one module (#836, `crates/core/src/providers/`).
 - Secrets are 0600 files on the main host; no secret store, no Keychain read (#767).
 
@@ -140,7 +139,7 @@ Self-update installs the green head of `[self_update] branch` (default `main`); 
 | `status` / `board` / `waiting` / `serve` | per-issue state; compact board; who waits on whom; the server |
 | `ask` / `answer` / `asks` / `thread` / `card` | decisions; orchestrator threads; run cards |
 | `check` / `clean` / `reclaim` / `kill` | alerts; reclaim done lanes and build folders; stop a lane, work saved |
-| `profiles` / `accounts` / `hosts` / `secret` | per-role folders and hooks; accounts; hosts; secret files |
+| `profiles` / `hosts` / `secret` | per-role folders and hooks; hosts; secret files |
 | `setup` / `doctor` / `why` / `lesson` | install the jobs; host check; a line's reasoning; lesson checks |
 
 Detail: [setup](docs/setup.md), [config](docs/config.md), [pipeline](docs/pipeline.md), [lanes and hooks](docs/lanes.md), [hosts](docs/hosts.md), [accounts](docs/accounts.md), [orchestrator](docs/orchestrator.md), [serve and /api/v1](docs/serve.md), [architecture](docs/architecture.md). Agents read `drover help --agent`.

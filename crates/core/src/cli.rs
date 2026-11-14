@@ -3,7 +3,7 @@ use crate::events::{emit, status_line, working, Event};
 use crate::hosts::all_agents;
 use crate::runner::{self, Runner};
 use crate::{
-    access, check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx,
+    check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx,
 };
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -482,14 +482,7 @@ enum Cmd {
     )]
     Check,
     #[command(
-        about = "Each `[accounts]` account: ok / capped until hh:mm, and the lanes on it (names only, never tokens)"
-    )]
-    Accounts {
-        #[command(subcommand)]
-        cmd: Option<AccountsCmd>,
-    },
-    #[command(
-        about = "Read-only host check: shed, gh, config, accounts, harnesses, serve, phone, watchdog; ✓/✗/! with the fix per line, exit 1 on any ✗"
+        about = "Read-only host check: shed, gh, config, harnesses, serve, phone, watchdog; ✓/✗/! with the fix per line, exit 1 on any ✗"
     )]
     Doctor {
         #[arg(long)]
@@ -614,10 +607,7 @@ enum Cmd {
         #[arg(long)]
         git_pre_push: bool,
     },
-    #[command(
-        hide = true,
-        about = "A provider's status line: records the lane account's 5h/7d limits (reads status JSON on stdin)"
-    )]
+    #[command(hide = true, about = "A provider's status line: the lane's fleet and issue")]
     Statusline,
     #[command(
         about = "#275: log a lane's own event (`hook-denied`, `coauthor-trailer`), forwarded from a lane on another host"
@@ -943,12 +933,6 @@ enum StatsCmd {
 }
 
 #[derive(Subcommand)]
-enum AccountsCmd {
-    #[command(about = "Let spawns use a capped account again")]
-    Reset { name: String },
-}
-
-#[derive(Subcommand)]
 enum HostsCmd {
     #[command(about = "Probe every host's tags again (else hourly, by `check`)")]
     Refresh,
@@ -1074,7 +1058,6 @@ pub fn usage_doc() -> String {
     cmd.build();
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     let owner = [
-        "accounts",
         "doctor",
         "drive",
         "fleet",
@@ -1277,12 +1260,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             role,
             git_pre_push: false,
         } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
-        Cmd::Statusline => {
-            let mut buf = String::new();
-            let _ = stdin.read_to_string(&mut buf);
-            let env = |k: &str| std::env::var(k).unwrap_or_default();
-            crate::usage::statusline(ctx, &env("DROVER_ACCOUNT"), &env("DROVER_LANE"), &buf, out);
-        }
+        Cmd::Statusline => crate::usage::statusline(&std::env::var("DROVER_LANE").unwrap_or_default(), out),
         Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
         Cmd::Heavy {
             kind,
@@ -1946,10 +1924,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         )?;
                     }
                 }
-                Cmd::Accounts { cmd: None } => access::list(ctx, &cfg, r, out)?,
-                Cmd::Accounts {
-                    cmd: Some(AccountsCmd::Reset { name }),
-                } => access::reset(ctx, &cfg, out, &name)?,
                 Cmd::Protection => return protection::protection(&cfg, r, out),
                 Cmd::Stats {
                     cmd: StatsCmd::Land { fleet },

@@ -33,17 +33,11 @@ fn ask(c: &drover::Ctx, r: &Fake, thread: Option<&str>) -> (i32, String) {
 
 #[test]
 fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
-    let cfg = CONFIG.replace(
-        "harness  =  \"hermes\"    # toggled in tests",
-        "harness = \"claude\"\naccount = \"C\"",
-    ) + "\n[accounts]\naccount_env = \"fake-cooee accounts env {provider} {name}\"\nC = \"C\"\n";
+    let cfg = CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"");
     let c = ctx(&tmpdir("orchestrator-attach"), &cfg);
     let b = FakeShed::new();
     b.attach(&c);
-    let r = Fake::default().reply("gh", "").reply(
-        "fake-cooee accounts env claude C",
-        r#"{"CLAUDE_CONFIG_DIR": "/accounts/claude/C"}"#,
-    );
+    let r = Fake::default().reply("gh", "");
     let on = b.on(&r);
     let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
@@ -69,7 +63,7 @@ fn an_attached_cooee_thread_is_the_repos_orchestrator_until_detached() {
     assert_eq!(a["settings"], settings.to_string_lossy().as_ref());
     assert_eq!(a["env"]["DROVER_LANE"], "sendmeter:-:orchestrator");
     assert_eq!(a["env"]["DROVER_THREAD"], COOEE);
-    assert_eq!(a["env"]["CLAUDE_CONFIG_DIR"], "/accounts/claude/C");
+    assert!(a["env"].get("CLAUDE_CONFIG_DIR").is_none(), "{a}");
     assert!(a["env"].get("CLAUDE_CODE_OAUTH_TOKEN").is_none(), "{a}");
     assert!(a["env"]["DROVER_PORT"].as_str().unwrap().parse::<u16>().is_ok(), "{a}");
     let brief = a["brief"].as_str().unwrap();

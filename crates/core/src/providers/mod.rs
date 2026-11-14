@@ -89,30 +89,21 @@ pub fn proxied() -> Option<&'static Proxy> {
     all().find_map(|p| p.proxy())
 }
 
+/// The screen holds one of `pat`'s `|`-separated, case-insensitive substrings (a banner).
+pub fn banner(pat: &str, screen: &str) -> bool {
+    let (screen, pat) = (screen.to_lowercase(), pat.to_lowercase());
+    pat.split('|').any(|p| !p.is_empty() && screen.contains(p))
+}
+
 /// Effort levels a role may set (`effort = "…"`).
 pub const EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
-
-/// How a harness's lanes sign in: unknown, an `[accounts]` account of this provider (`access::pick`; #683: its env from `access::account_env`), or the harness's own login on the host.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Credential {
-    None,
-    Account(Accounts),
-    Own,
-}
-
-/// What an `[accounts]` account is to its provider.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Accounts {
-    pub provider: &'static str,
-    pub config_env: &'static str,
-    pub token_env: Option<&'static str>,
-}
 
 /// #637: what the token proxy needs from the provider it fronts.
 pub struct Proxy {
     pub upstream: &'static str,
     pub base_url_env: &'static str,
     pub auth_token_env: &'static str,
+    pub setup: &'static str,
     pub headers: fn(&[Header]) -> Vec<Header>,
 }
 
@@ -160,31 +151,6 @@ pub struct Dialect {
 /// The hook dialects of every harness that has one, in `known` order.
 pub fn dialects() -> impl Iterator<Item = &'static Dialect> {
     known().filter_map(|h| get(h).hook_dialect())
-}
-
-/// A usage window: used %, reset epoch, either unread.
-#[derive(Clone, Copy, Default, PartialEq, Debug)]
-pub struct Window {
-    pub used: Option<f64>,
-    pub resets: Option<u64>,
-}
-
-/// An account's limits: its session and its weekly window.
-#[derive(Clone, Copy, Default, PartialEq, Debug)]
-pub struct Limits {
-    pub session: Window,
-    pub week: Window,
-}
-
-/// A provider's usage meter for an `[accounts]` login (#258; #707: its status line only, no poll).
-pub trait Usage: Sync {
-    fn reading(&self, status_line: &Value) -> Limits;
-    fn cap_banner(&self) -> &'static str;
-}
-
-/// The provider `[accounts]` are for: the first lane provider that runs on one.
-pub fn accounts() -> Option<Entry> {
-    lanes().find(|h| matches!(h.credential(), Credential::Account(_)))
 }
 
 pub trait Provider: Sync {
@@ -271,14 +237,8 @@ pub trait Provider: Sync {
     fn acp_env(&self, _model: Option<&str>, _effort: Option<&str>) -> Vec<(&'static str, String)> {
         Vec::new()
     }
-    fn signed_in(&self, _r: &dyn Runner, _dir: &Path) -> Option<bool> {
-        None
-    }
     fn acp_profile(&self, _settings: &str, _role: &str) -> String {
         String::new()
-    }
-    fn credential(&self) -> Credential {
-        Credential::None
     }
     fn login(&self) -> Option<&'static str> {
         None
@@ -289,11 +249,14 @@ pub trait Provider: Sync {
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         None
     }
-    fn usage(&self) -> Option<&'static dyn Usage> {
+    fn token_env(&self) -> Option<&'static str> {
         None
     }
-    fn usage_limited(&self, _cfg: &crate::config::Config, _r: &dyn Runner, _screen: &str, _now: u64) -> Option<u64> {
-        None
+    fn cap_banner(&self) -> &'static str {
+        ""
+    }
+    fn usage_limited(&self, _screen: &str) -> bool {
+        false
     }
     fn signed_out(&self, _screen: &str) -> bool {
         false

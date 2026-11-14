@@ -576,7 +576,7 @@ pub struct Row {
     pub fix: String,
 }
 
-/// #267: API v1's `host`, the Host tab at `now`: HOSTS (`hosts`), FLEET DISK (`disk`, `orphans`, `leftovers`, `spawns`), SERVICES (`services`, `theme`: `detail` its error, `accounts`, `deepseek`), FLEETS and ALERTS (`push`, and on a live board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` the forms send back.
+/// SERVICES (`services`, `theme`: `detail` its error, `deepseek`), FLEETS and ALERTS (`push`, and on a live
 pub struct HostTab {
     pub now: u64,
     pub rw: bool,
@@ -589,7 +589,6 @@ pub struct HostTab {
     pub spawns: Option<Row>,
     pub services: Vec<Row>,
     pub theme: Row,
-    pub accounts: Vec<Account>,
     pub deepseek: Option<Balance>,
     pub fleets: Vec<FleetRow>,
     pub push: Row,
@@ -668,23 +667,6 @@ pub struct Disk {
 pub struct Leftovers {
     pub n: usize,
     pub mb: String,
-}
-
-/// An account: `capped`, its cap line in `tone`, its usage `meters` and `pace` (or the `hint` why none), its lane hours.
-pub struct Account {
-    pub name: String,
-    pub capped: bool,
-    pub tone: String,
-    pub cap: String,
-    pub meters: Vec<Meter>,
-    pub pace: Option<String>,
-    pub hint: Option<String>,
-    pub hours: String,
-}
-
-pub struct Meter {
-    pub label: String,
-    pub pct: f64,
 }
 
 /// The `DeepSeek` balance (currency and amount) and whether it is `low`, else the `hint` why none was read.
@@ -1068,9 +1050,6 @@ pub struct AttachEnv {
     pub thread: String,
     #[serde(rename = "DROVER_PORT")]
     pub port: String,
-    /// #683: the role's account env (`access::account_env`), the thread's own login (empty: no account).
-    #[serde(flatten)]
-    pub account: BTreeMap<String, String>,
 }
 
 }

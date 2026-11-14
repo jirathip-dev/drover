@@ -1,7 +1,4 @@
-mod meter;
-
-use super::{hook_command, Accounts, Credential, Dialect, Header, Provider, Proxy, Usage};
-use crate::config::Config;
+use super::{banner, hook_command, Dialect, Header, Provider, Proxy};
 use crate::term;
 use crate::lanes::{chat, mask, strip};
 use crate::runner::Runner;
@@ -27,6 +24,7 @@ static PROXY: Proxy = Proxy {
     upstream: "https://api.anthropic.com",
     base_url_env: "ANTHROPIC_BASE_URL",
     auth_token_env: "ANTHROPIC_AUTH_TOKEN",
+    setup: "claude setup-token",
     headers,
 };
 
@@ -173,22 +171,9 @@ impl Provider for Claude {
     fn acp_env(&self, model: Option<&str>, _effort: Option<&str>) -> Vec<(&'static str, String)> {
         model.map(|m| ("ANTHROPIC_MODEL", m.to_string())).into_iter().collect()
     }
-    fn signed_in(&self, r: &dyn Runner, dir: &Path) -> Option<bool> {
-        let dir = format!("CLAUDE_CONFIG_DIR={}", dir.display());
-        let a = ["-u", "CLAUDE_CODE_OAUTH_TOKEN", &dir, "claude", "auth", "status"];
-        let o = r.run("env", &crate::runner::argv(&a)).ok()?;
-        serde_json::from_str::<serde_json::Value>(&o.stdout).ok()?["loggedIn"].as_bool()
-    }
     fn acp_profile(&self, settings: &str, role: &str) -> String {
         let [md, json] = LOCAL_FILES;
         format!(" && mkdir -p .claude && cp {settings} {json} && cp {role} {md}")
-    }
-    fn credential(&self) -> Credential {
-        Credential::Account(Accounts {
-            provider: "claude",
-            config_env: "CLAUDE_CONFIG_DIR",
-            token_env: Some("CLAUDE_CODE_OAUTH_TOKEN"),
-        })
     }
     fn login(&self) -> Option<&'static str> {
         Some("claude /login")
@@ -199,16 +184,17 @@ impl Provider for Claude {
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         Some(&DIALECT)
     }
-    fn usage(&self) -> Option<&'static dyn Usage> {
-        Some(&meter::Meter)
+    fn token_env(&self) -> Option<&'static str> {
+        Some("CLAUDE_CODE_OAUTH_TOKEN")
     }
-    fn usage_limited(&self, cfg: &Config, r: &dyn Runner, screen: &str, now: u64) -> Option<u64> {
-        let pat = cfg.accounts.cap_pattern.as_deref().unwrap_or(CAP_PATTERN);
-        let s = own_lines(screen);
-        crate::access::banner(pat, &s).then(|| crate::access::cap_until(cfg, r, &s, now))
+    fn cap_banner(&self) -> &'static str {
+        CAP_PATTERN
+    }
+    fn usage_limited(&self, screen: &str) -> bool {
+        banner(CAP_PATTERN, &own_lines(screen))
     }
     fn signed_out(&self, screen: &str) -> bool {
-        crate::access::banner(AUTH_PATTERN, &own_lines(screen))
+        banner(AUTH_PATTERN, &own_lines(screen))
     }
 
     fn status_word(&self, screen: &str) -> Option<(String, Option<String>)> {
