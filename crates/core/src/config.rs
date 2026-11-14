@@ -533,6 +533,7 @@ pub struct Limits {
     pub silent_minutes: u64,
     pub ci_start_minutes: u64,
     pub load_per_cpu: f64,
+    pub overload_minutes: u64,
     pub swapout_rate: f64,
     pub min_free_gb: f64,
     pub worktree_budget_gb: f64,
@@ -639,6 +640,7 @@ impl Default for Limits {
             silent_minutes: 10,
             ci_start_minutes: 10,
             load_per_cpu: 2.5,
+            overload_minutes: 10,
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
             worktree_budget_gb: 25.0,
@@ -745,6 +747,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a PR head with no checks this long after its push alerts `ci-missing`",
     ),
     ("load_per_cpu", "spawn refuses HOST_BUSY over this load per CPU"),
+    (
+        "overload_minutes",
+        "load per CPU over `load_per_cpu` this long alerts `host-overloaded` once, with the 5 busiest processes",
+    ),
     (
         "swapout_rate",
         "pages swapped out per 2 s sample that count as swapping",
@@ -1061,6 +1067,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "runners-ok",
     "runtime-down",
     "heavy-timeout",
+    "host-overloaded",
 ];
 
 impl Notify {

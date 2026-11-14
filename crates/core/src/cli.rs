@@ -339,6 +339,14 @@ enum Cmd {
     #[command(about = "Compact board (≤ 60 cols): queue order, state, lane, age, last event")]
     Board { fleet: Option<String> },
     #[command(
+        about = "#910: every live lane's processes (CPU %, run time, heavy kind) and heavy-slot waits, under the host's load, heavy slots and held respawns"
+    )]
+    Top {
+        #[arg(help = "Machine-readable output")]
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
         about = "File this week's lessons issue, queue it on top and spawn its `lesson` lane (orchestrators and the owner only)"
     )]
     #[command(args_conflicts_with_subcommands = true)]
@@ -1425,6 +1433,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let (code, line) = queue::next(&working(&ctx.state)?, &fleet);
             writeln!(out, "{line}")?;
             return Ok(code);
+        }
+        Cmd::Top { json } => {
+            let t = crate::top::top(ctx, &Config::load(&ctx.config)?, r)?;
+            if json {
+                writeln!(out, "{}", serde_json::to_string_pretty(&t)?)?;
+            } else {
+                crate::top::print(&t, out)?;
+            }
         }
         Cmd::Board { fleet } => {
             let events = working(&ctx.state)?;

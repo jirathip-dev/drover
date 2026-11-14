@@ -90,8 +90,7 @@ pub fn keychain_jam(r: &dyn Runner) -> (Vec<Stuck>, Option<Stuck>) {
     let parent = |ppid: &str| name(rows.iter().find(|w| w.first() == Some(&ppid)).and_then(|w| w.get(3)));
     let (mut readers, mut agent) = (vec![], None);
     for w in rows.iter().filter(|w| w.len() > 3) {
-        let up = w[2].split(['-', ':']).rev().zip([1, 60, 3600, 86_400]);
-        let up: u64 = up.map(|(n, k)| n.parse::<u64>().unwrap_or(0) * k).sum();
+        let up = etime_secs(w[2]);
         let stuck = (w[0].to_string(), up, parent(w[1]));
         match (name(w.get(3)).as_str(), w.get(4)) {
             ("security", Some(&"find-generic-password")) if up > 60 => readers.push(stuck),
@@ -100,6 +99,12 @@ pub fn keychain_jam(r: &dyn Runner) -> (Vec<Stuck>, Option<Stuck>) {
         }
     }
     (readers, agent)
+}
+
+/// `ps`'s `etime` (`[[dd-]hh:]mm:ss`) in seconds.
+pub fn etime_secs(etime: &str) -> u64 {
+    let up = etime.split(['-', ':']).rev().zip([1, 60, 3600, 86_400]);
+    up.map(|(n, k)| n.parse::<u64>().unwrap_or(0) * k).sum()
 }
 
 /// #710: `keychain_jam`'s readers and agent as one line, with troubleshooting §2's fix for those pids.
