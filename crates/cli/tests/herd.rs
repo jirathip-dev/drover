@@ -408,3 +408,42 @@ fn herd_horses_are_one_size_at_390px() {
         }
     }
 }
+
+#[test]
+fn a_shed_lane_reported_running_is_working_with_its_note() {
+    let (c, r) = fixture("running");
+    let note = "running: cargo test (8m)";
+    r.1.set("sendmeter-impl-12", |t| {
+        t["reported"] = json!({"state": "running", "note": note});
+        t["text"] = json!("");
+    });
+    r.1.set("synergy-impl-8", |t| t["reported"] = json!({"state": "idle"}));
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let herd = body(&get(&s, "/api/v1/herd", ADDR, ""));
+    let l = &herd["fleets"][0]["lanes"][0];
+    assert_eq!(
+        (&l["name"], &l["state"], &l["act"]),
+        (&json!("sendmeter-impl-12"), &json!("working"), &json!("impl")),
+        "{l}"
+    );
+    assert_eq!(herd["fleets"][1]["lanes"][1]["act"], "idle", "{herd}");
+    let lanes = body(&get(&s, "/api/v1/lanes", ADDR, ""));
+    let section = |name: &str| -> Vec<Value> {
+        let s = lanes["sections"].as_array().unwrap().iter().find(|s| s["name"] == name);
+        s.map_or(vec![], |s| {
+            s["repos"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|r| r["lanes"].as_array().unwrap().clone())
+                .collect()
+        })
+    };
+    let working = section("working");
+    let row = working
+        .iter()
+        .find(|l| l["name"] == "sendmeter-impl-12")
+        .unwrap_or_else(|| panic!("{lanes}"));
+    assert_eq!((&row["act"], &row["now"]["n"]), (&json!("impl"), &json!(note)), "{row}");
+    assert!(section("idle").iter().any(|l| l["name"] == "synergy-impl-8"), "{lanes}");
+}
