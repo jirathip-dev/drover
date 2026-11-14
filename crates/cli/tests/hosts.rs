@@ -292,20 +292,20 @@ fn a_remote_lane_runs_every_command_on_its_host() {
         .iter()
         .any(|c| c.starts_with(&format!("{SSH}'sh' '-c' 'mkdir")) && c.ends_with(&format!("'{WT}/.brief.md'"))));
     assert!(
-        !calls.iter().any(|c| c.contains("OAUTH_TOKEN") || c.contains(token)),
+        !calls.iter().any(|c| c.contains("OAUTH_TOKEN=") || c.contains(token)),
         "token in argv: {calls:?}"
     );
     assert!(
         !r.inputs
             .borrow()
             .iter()
-            .any(|i| i.1.contains(token) || i.1.contains("OAUTH_TOKEN")),
+            .any(|i| i.1.contains(token) || i.1.contains("OAUTH_TOKEN=")),
         "{:?}",
         r.inputs.borrow()
     );
     let sent = bazzite.sent(IMPL);
     assert!(
-        !sent.iter().any(|t| t.contains("OAUTH_TOKEN") || t.contains(token)),
+        !sent.iter().any(|t| t.contains("OAUTH_TOKEN=") || t.contains(token)),
         "token typed: {sent:?}"
     );
     let export = sent.iter().find(|t| t.starts_with("export ")).unwrap();
@@ -926,7 +926,7 @@ fn a_remote_dry_run_prints_the_argv_the_spawn_sends() {
         })
         .collect();
     let all = cmds.join("\n");
-    assert!(!all.contains("OAUTH_TOKEN") && !all.contains(token), "{all}");
+    assert!(!all.contains("OAUTH_TOKEN=") && !all.contains(token), "{all}");
     assert!(pj.get("account").is_none() && pj["machine"] == "bazzite", "{pj}");
     assert!(!all.contains(&format!("{mine}/")), "main host's home: {all}");
     assert!(

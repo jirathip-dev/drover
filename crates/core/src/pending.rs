@@ -8,7 +8,7 @@ pub const SOFT: [&str; 9] = [
     "HOST_BUSY",
     "MEM_LOW",
     "CAP",
-    "ALL_CAPPED",
+    "LOGIN_NEEDED",
     "SPAWN_PENDING",
     "SERIAL_BUSY",
     "PAUSED",

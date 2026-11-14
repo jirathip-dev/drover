@@ -2833,7 +2833,7 @@ fn gauge(x: f64) -> Bar {
 /// what clears it. `{why}`/`{then}`: the raw reason's first two `;` parts; `{busy}`: the issues in the way.
 const WORDS: &str = "HOST_BUSY|a|held|the host is busy: {why} · starts again when it drops
 DISK_LOW|a|held|{why} GB floor · `drover clean --yes`
-ALL_CAPPED|a|waiting|{why} · {then}
+LOGIN_NEEDED|a|held|{why}
 CAP|a|waiting|{why} · starts when a lane finishes
 NO_HOST HOST_OFFLINE|a|waiting|{why}
 SERIAL_BUSY|a|waiting|{slots} full ({busy} must merge first)
@@ -3451,7 +3451,7 @@ pub fn words(e: &Event, serial: &str) -> Words {
             let txt = format!("{w} · {x}");
             let hold = matches!(
                 e.str("code"),
-                Some("HOST_BUSY" | "SERIAL_BUSY" | "CAP" | "ALL_CAPPED" | "PAUSED")
+                Some("HOST_BUSY" | "SERIAL_BUSY" | "CAP" | "LOGIN_NEEDED" | "PAUSED")
             );
             match (e.str("code"), t) {
                 (None, _) => ("·", "m", format!("drive · {txt}"), false),

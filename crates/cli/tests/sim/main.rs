@@ -257,7 +257,7 @@ fn random_seeds() {
 fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     let s = Some(Sabotage::Planted);
     let tripped = |f: &str| f.starts_with("I1 ");
-    let h = hunt::hunt(&[2, 3, 4, 5], 23, s, |r, f| {
+    let h = hunt::hunt(&[2, 3, 4, 5], 3, s, |r, f| {
         r < 40 && !f.iter().any(|x| tripped(&x.failure))
     });
     let f = h
