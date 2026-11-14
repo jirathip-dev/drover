@@ -211,6 +211,7 @@ fn a_lane_spawns_on_shed() {
     assert_eq!(b.last("wait")["until"], json!(["working", "blocked"]));
     let ev = drover::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "spawn")
         .unwrap();
@@ -222,6 +223,9 @@ fn a_lane_spawns_on_shed() {
     assert!(std::fs::read_to_string(wt.join(".brief.md"))
         .unwrap()
         .contains("AC: it works"));
+    assert_eq!(ev.str("qos"), Some("background"));
+    let (_, st) = run(&c, &spawn_fake(), &["status", "sendmeter"]);
+    assert!(st.contains(" · qos background"), "{st}");
 
     // The live lane is seen: a second spawn is refused LANE_LIVE.
     let (code, out) = run(&c, &spawn_fake(), &["spawn", "sendmeter", "12", "impl"]);
@@ -546,7 +550,7 @@ fn an_acp_lanes_state_follows_its_turn_events() {
     assert_eq!(shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap(), 4);
     let states: Vec<_> = drover::events::read(&c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "lane-state")
         .map(|e| (e.str("state").map(String::from), e.str("note").map(String::from)))
         .collect();
@@ -646,6 +650,7 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
     assert_eq!(b.last("events"), json!({"labels": {}, "since": 0}));
     let logged: Vec<_> = drover::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "lane-state")
         .collect();
@@ -761,7 +766,7 @@ fn the_service_follows_sheds_events_and_says_when_the_stream_drops() {
     std::thread::spawn(move || drover_service::run(sc, r, || 1_000_000, api, None));
     let logged = |kind: &str| -> Vec<drover::events::Event> {
         let all = drover::events::read(&c.state).unwrap_or_default();
-        all.into_iter().filter(|e| e.kind == kind).collect()
+        all.iter().filter(|e| e.kind == kind).cloned().collect()
     };
     let t0 = std::time::Instant::now();
     while logged("lane-state").len() < 2 {
@@ -913,7 +918,7 @@ fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
     for _ in 0..2 {
         assert_eq!(run(&c, &f, &["check"]).0, 0);
     }
-    let evs = drover::events::read(&c.state).unwrap();
+    let evs = drover::events::read(&c.state).unwrap().to_vec();
     assert!(!evs.iter().any(|e| e.kind == "host-offline"), "{evs:?}");
     let (_, status) = run(&c, &f, &["status"]);
     assert!(!status.contains("host offline"), "{status}");
@@ -1008,7 +1013,7 @@ fn an_acp_lane_whose_first_prompt_was_dropped_gets_its_brief_again_once() {
     // It landed this time: the session works on; nothing is sent again, superseded or escalated.
     drive(&at(t0 + 1202));
     assert_eq!(sends(), 1);
-    let ev = drover::events::read(&c.state).unwrap();
+    let ev = drover::events::read(&c.state).unwrap().to_vec();
     assert!(
         !ev.iter().any(|e| matches!(e.kind.as_str(), "respawn" | "needs-human")),
         "{ev:?}"
@@ -1165,7 +1170,7 @@ fn later(c: &drover::Ctx, secs: u64) -> drover::Ctx {
 }
 
 fn logged(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    let all = drover::events::read(&c.state).unwrap();
+    let all = drover::events::read(&c.state).unwrap().to_vec();
     all.into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -1237,7 +1242,7 @@ fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
 
 /// #608: a shed-acp fleet's thread, its conductor's events of `kind`.
 fn thread_events(c: &drover::Ctx, kind: &str) -> Vec<Event> {
-    let all = drover::events::read(&c.state).unwrap();
+    let all = drover::events::read(&c.state).unwrap().to_vec();
     all.into_iter().filter(|e| e.kind == kind).collect()
 }
 
@@ -2425,4 +2430,121 @@ fn clean_removes_exited_shed_terminals_of_merged_lanes_only() {
     );
     let left: Vec<String> = b.lock().terms.keys().cloned().collect();
     assert_eq!(left, ["sendmeter-impl-13"], "an open issue's exited terminal stays");
+}
+
+fn hung_orchestrator(name: &str) -> (drover::Ctx, FakeShed) {
+    let b = FakeShed::new();
+    let c = acp_ctx(name, &acp_config(&b.sock, "claude", true));
+    run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]);
+    assert_eq!(
+        run(&c, &b.cli(&acp_fake(&["echo"])), &["thread", "say", "t1", "hi"]).0,
+        0
+    );
+    b.set("orchestrator-t1", |t| {
+        (t["reported"], t["resources"]) = (json!({"state": "working"}), json!({"rss_mb": 90, "cpu_pct": 0}));
+    });
+    (c, b)
+}
+
+fn hang_fake() -> Fake {
+    acp_fake(&["echo"]).reply("shed kill", "")
+}
+
+fn shed_calls(f: &Fake) -> Vec<String> {
+    let calls = f.calls.borrow();
+    let words = |c: &&String| c.split(' ').take(2).collect::<Vec<_>>().join(" ");
+    calls
+        .iter()
+        .filter(|c| c.starts_with("shed "))
+        .map(|c| words(&c))
+        .collect()
+}
+
+#[test]
+fn check_alerts_stall_once_for_a_hung_acp_orchestrator() {
+    let (c, b) = hung_orchestrator("acp-orchestrator-stall");
+    let f = hang_fake();
+    assert_eq!(run(&at(&c, c.now + 29 * 60), &b.cli(&f), &["check"]).0, 0);
+    assert!(thread_events(&c, "stall").is_empty(), "within stall_minutes");
+    let late = at(&c, c.now + 31 * 60);
+    let (code, out) = run(&late, &b.cli(&f), &["check"]);
+    assert_eq!(code, 0, "{out}");
+    let st = thread_events(&c, "stall");
+    assert_eq!(st.len(), 1, "{out}");
+    assert_eq!(
+        (st[0].str("thread"), st[0].str("agent")),
+        (Some("t1"), Some("orchestrator-t1"))
+    );
+    assert!(
+        st[0].str("reason").unwrap().contains("no CPU or output for 31m"),
+        "{st:?}"
+    );
+    run(&at(&c, c.now + 40 * 60), &b.cli(&f), &["check"]);
+    assert_eq!(thread_events(&c, "stall").len(), 1, "once per session");
+    assert!(
+        thread_events(&c, "orchestrator-sleep").is_empty(),
+        "a working session is never put to sleep"
+    );
+}
+
+#[test]
+fn thread_say_restarts_a_hung_acp_orchestrator_and_delivers_to_the_fresh_one() {
+    let (c, b) = hung_orchestrator("acp-orchestrator-hung-say");
+    let labels = json!({"fleet": "sendmeter", "issue": "-", "role": "orchestrator", "thread": "t1"});
+    let text = json!({"seq": 1, "name": "orchestrator-t1", "labels": labels, "event": "text", "text": "thinking"});
+    b.lock().events.push(text);
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    shed::intake(&at(&c, c.now + 20 * 60), &cfg, &cfg.shed().unwrap().wire).unwrap();
+    let f = hang_fake();
+    assert_eq!(
+        run(
+            &at(&c, c.now + 31 * 60),
+            &b.cli(&f),
+            &["thread", "say", "t1", "still there?"]
+        )
+        .0,
+        0
+    );
+    assert_eq!(shed_calls(&f), ["shed send"]);
+    let f = hang_fake();
+    let (code, out) = run(&at(&c, c.now + 51 * 60), &b.cli(&f), &["thread", "say", "t1", "hello?"]);
+    assert_eq!((code, out.as_str()), (0, "t1: -> orchestrator-t1\n"));
+    assert_eq!(
+        shed_calls(&f),
+        ["shed cancel", "shed kill", "shed agents", "shed run", "shed send"]
+    );
+    let sends = f
+        .calls
+        .borrow()
+        .iter()
+        .filter(|c| c.starts_with("shed send"))
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(sends[0].ends_with("[t1] owner: hello?"), "{sends:?}");
+    let sl = thread_events(&c, "orchestrator-sleep");
+    assert_eq!(sl.len(), 1);
+    assert_eq!(
+        (sl[0].str("why"), sl[0].data["quiet_secs"].as_u64()),
+        (Some("hung"), Some(31 * 60))
+    );
+    assert_eq!(thread_events(&c, "orchestrator-start").len(), 2);
+}
+
+#[test]
+fn stop_ends_a_hung_acp_orchestrator_by_its_thread() {
+    let (c, b) = hung_orchestrator("acp-orchestrator-stop");
+    let f = hang_fake();
+    let (code, out) = run(&at(&c, c.now + 60), &b.cli(&f), &["stop", "t1"]);
+    assert_eq!((code, out.as_str()), (0, "stopped orchestrator-t1\n"));
+    assert_eq!(shed_calls(&f), ["shed cancel", "shed kill"]);
+    let st = thread_events(&c, "stop");
+    assert_eq!(
+        (st[0].str("thread"), st[0].str("agent")),
+        (Some("t1"), Some("orchestrator-t1"))
+    );
+    let sl = thread_events(&c, "orchestrator-sleep");
+    assert_eq!(sl.iter().map(|e| e.str("why")).collect::<Vec<_>>(), [Some("stopped")]);
+    let (code, out) = run(&at(&c, c.now + 120), &b.cli(&hang_fake()), &["stop", "orchestrator-t1"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("NO_SUCH_AGENT") && out.contains("asleep"), "{out}");
 }

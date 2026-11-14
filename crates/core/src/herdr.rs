@@ -206,7 +206,8 @@ impl Shed {
 fn agent_of(t: &TerminalInfo) -> Value {
     let up = t.state == shed_proto::State::Running;
     json!({"name": t.name, "pane_id": t.name, "cwd": t.cwd, "agent": t.labels.get("harness").filter(|_| up),
-        "agent_status": t.reported.as_ref().map_or("unknown", |s| s.state.as_str()), "terminal_title": "", "runtime": "shed", "pid": t.pid})
+        "agent_status": t.reported.as_ref().map_or("unknown", |s| s.state.as_str()), "terminal_title": "", "runtime": "shed", "pid": t.pid,
+        "cpu": t.resources.map(|u| u.cpu_pct)})
 }
 
 /// The shed call that does what herdr argv `a` does; None: herdr only (workspaces, worktrees, `agent start`).

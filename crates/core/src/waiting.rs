@@ -608,13 +608,6 @@ pub fn scan(
     live: bool,
 ) -> Vec<(IssueState, Waiting)> {
     let (mut out, log) = (vec![], Log::new(events));
-    // #447: each issue's events, in one pass: a wait reads its own, never the whole log again.
-    let mut of: std::collections::HashMap<_, Vec<Event>> = std::collections::HashMap::new();
-    for e in events {
-        if let Some(n) = e.issue {
-            of.entry((e.fleet.as_str(), n)).or_default().push(e.clone());
-        }
-    }
     let busy = |l: &str| agents.iter().any(|a| a["name"] == l && a["agent_status"] == "working");
     let hung = crate::roots::hung_now(events);
     for s in fold(events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
@@ -638,7 +631,11 @@ pub fn scan(
         if live && !matches!(s.state.as_str(), "merged" | "closed") && gh::cached_pr(ctx, &s.fleet, s.issue).is_null() {
             gh::run(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now);
         }
-        let mine = of.get(&(s.fleet.as_str(), s.issue)).map_or(&[][..], Vec::as_slice);
+        let mine: Vec<Event> = crate::events::of_issue(events, &s.fleet, s.issue)
+            .into_iter()
+            .cloned()
+            .collect();
+        let mine = mine.as_slice();
         let sp = last_spawn(mine, &lane);
         if let Some(root) = crate::roots::hung_under(&hung, sp).filter(|_| !s.done()) {
             let w = Waiting {
@@ -646,7 +643,7 @@ pub fn scan(
                 issue: s.issue,
                 lane: lane.clone(),
                 who: "none",
-                what: format!("root unreachable: {root}"),
+                what: format!("root hung: {root}"),
                 since: s.last_ts,
                 next_cmd: None,
                 promise: None,
@@ -940,8 +937,10 @@ pub fn scan(
         role.is_some_and(|r| cfg.fleet[&w.fleet].flow().is_check(r))
     };
     let held = |w: &Waiting| {
-        let mine = of.get(&(w.fleet.as_str(), w.issue)).map_or(&[][..], Vec::as_slice);
-        let tried = mine.iter().rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
+        let mine = crate::events::of_issue(events, &w.fleet, w.issue);
+        let tried = mine
+            .into_iter()
+            .rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
         tried
             .and_then(|e| e.str("code"))
             .is_some_and(|c| c == "SPAWN_PENDING" || HOST_WAIT.contains(&c))

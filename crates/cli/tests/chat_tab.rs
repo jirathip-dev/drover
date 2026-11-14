@@ -1015,6 +1015,7 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     assert_eq!(code, 0, "{out}");
     let t = drover::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "thread-title")
         .unwrap();
@@ -1050,6 +1051,7 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     assert_eq!(body(&res), "t2 started\n", "{res}");
     let t2 = drover::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "thread-new")
         .unwrap();
@@ -1099,6 +1101,7 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     let starts = |c: &drover::Ctx| {
         let s: Vec<_> = drover::events::read(&c.state)
             .unwrap()
+            .to_vec()
             .into_iter()
             .filter(|e| e.kind == "orchestrator-start")
             .collect();
@@ -1115,6 +1118,7 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     );
     let sleep = drover::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "orchestrator-sleep")
         .unwrap();
@@ -1189,7 +1193,7 @@ fn a_restored_herdr_thread_resumes_its_orchestrators_session() {
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "back again"]).0, 0);
     let st: Vec<_> = drover::events::read(&c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "orchestrator-start")
         .map(|e| (e.str("session").unwrap().to_string(), e.data["resumed"] == true))
         .collect();

@@ -78,7 +78,7 @@ fn a_paused_fleets_live_remote_lane_still_gets_its_outbox_drained_and_its_answer
     let f = Fake::default();
     let r = Air::new(&f, &air);
     run(&main, &r, &["drive", "--fast"]);
-    let ev = read(&main.state).unwrap();
+    let ev = read(&main.state).unwrap().to_vec();
     let asks: Vec<_> = ev.iter().filter(|e| e.kind == "needs-decision").collect();
     assert_eq!(asks.len(), 1, "{ev:?}");
     assert_eq!(asks[0].str("agent"), Some("sendmeter-impl-12"));
