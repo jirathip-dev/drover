@@ -1,0 +1,9 @@
+Decided: a design-state lane gone or in error/hibernated/idle/done takes the impl gone-lane respawn row, with its role from the lane's spawn
+Because: "Reuse #886's respawn path for impl lanes rather than a second one."
+Decided: design::failed (LANE_FAILED card) removed; it read only the latest lane-state, so error then hibernated raised nothing
+Because: "is respawned by drive in the next pass, under the same `respawn_max` / `respawn_window_minutes` bound as impl lanes"
+Decided: a respawn refused with an owner code raises needs-human RESPAWN_REFUSED; RESPAWN_LOOP keeps spawn's own ask as the card; check alerts respawn-refused once per spawn and code
+Because: "drive raises an owner card and `herdsman check` emits an alert once per state"
+Rejected: carding every hard refusal — SHED_MISSING and similar are holds an existing test (design_orphan.rs) expects to wait
+Check: the beacon test feeds shed error then hibernated through intake; both lane-states are logged and drive respawns architect and design lanes
+Owner: Design and architect lanes that crash or stall without pushing are now restarted automatically, and a refused restart reaches you as a card.
