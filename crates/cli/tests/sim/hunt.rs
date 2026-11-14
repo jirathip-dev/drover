@@ -210,7 +210,8 @@ pub fn coverage(w: &World) -> (BTreeSet<String>, Vec<u64>) {
     let s = |v: Option<&Value>| v.and_then(Value::as_str).unwrap_or("-").to_string();
     let (mut cov, mut spawns) = (BTreeSet::new(), BTreeMap::new());
     let (mut sup, mut lag) = (0, 0);
-    for x in &w.wrote {
+    let book = ["promise", "slo-idle", "slo-tick", "self-heal", "stuck", "slo-ok"];
+    for x in w.wrote.iter().filter(|x| !book.contains(&x.ev.kind.as_str())) {
         let a = &w.procs[x.proc].args;
         let pass = a[..a.len().min(2)].join("-");
         let pass = if pass.ends_with("--fast") { pass } else { a[0].clone() };
@@ -241,7 +242,7 @@ impl Found {
     pub fn report(&self) -> String {
         let t = self.small.text();
         format!(
-            "FAIL hunt round {}: {}\nminimised from {} to {} faults and scripts, {} to {} steps; for seeds.rs PLANS:\n    (\"{t}\", \"hunt: {}\"),\nreplay: HERDSMAN_SIM_PLAN='{t}' cargo test -p herdsman --test sim\n",
+            "FAIL hunt round {}: {}\nminimised from {} to {} faults and scripts, {} to {} steps; for seeds.rs PLANS:\n    (\"{t}\", \"hunt: {}\"),\nreplay: DROVER_SIM_PLAN='{t}' cargo test -p drover --test sim\n",
             self.round,
             self.failure,
             self.plan.size(),

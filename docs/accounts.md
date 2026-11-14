@@ -1,57 +1,62 @@
-# Accounts and the Keychain
+# Accounts
 
 ## Lanes sign in with the account's own login (#683)
 
-herdsman keeps no Claude token. A lane on account `A` gets the env that account signs in with, and no
-`CLAUDE_CODE_OAUTH_TOKEN`:
+drover keeps no Claude token and reads no Keychain item (#707). A lane on account `A` gets the env that account signs
+in with:
 
-- `[accounts] account_env = "cooee accounts env {provider} {name}"` (q846): herdsman runs that command (its words,
+- `[accounts] account_env = "cooee accounts env {provider} {name}"` (q846): drover runs that command (its words,
   `{provider}` and `{name}` filled in, 30 s at most) and exports exactly the JSON object of env vars it prints, e.g.
   `{"CLAUDE_CONFIG_DIR": "…"}`. A failing or non-JSON answer refuses the spawn `ACCOUNT_ENV` with its stderr.
-  herdsman never reads cooee's folder layout.
-- With no `account_env`, the account's folder: its `[accounts.usage]` folder, else `~/.config/herdsman/accounts/<name>`,
-  as the provider's config folder (claude: `CLAUDE_CONFIG_DIR`, codex: `CODEX_HOME`; one table, `access::CONFIG_ENV`).
+  drover never reads cooee's folder layout. When it is set, cooee's account list wins.
+- With no `account_env`, the account's folder: its `[accounts.usage]` folder, else `~/.config/drover/accounts/<name>`,
+  as the provider's config folder (claude: `CLAUDE_CONFIG_DIR`, codex: `CODEX_HOME`; each provider's `Accounts::config_env`).
 
-Sign in with cooee (Settings › Providers) or `CLAUDE_CONFIG_DIR=<folder> claude /login`. Claude Code keeps the login
-in its own signed Keychain item, so no herdsman rebuild prompts. The lane's profile goes on top of that login
-(`--settings`, `--append-system-prompt-file`; an ACP lane's worktree-local settings), so its hook still guards it.
-`herdsman accounts` and `doctor` (and the install gate, `doctor --tokens`) show each account's sign-in from its folder's
-`.claude.json`, never a Keychain read or a `claude` call. Rotation, caps and `accounts reset` work per account as
-before. The `[accounts]` values (once each token's name) are unused. Remote hosts get no account env: their lanes sign
-in through the main host's token proxy (#637).
+Standalone, sign each account in once with `CLAUDE_CONFIG_DIR=<folder> claude /login` (or with cooee, Settings ›
+Providers). Claude Code keeps that login itself; drover only points the lane at the folder. The lane's profile goes on
+top of that login (`--settings`, `--append-system-prompt-file`; an ACP lane's worktree-local settings), so its hook
+still guards it. `drover accounts` shows each account's sign-in as its CLI's own status command says
+(`claude auth status` / `codex login status` in the folder, the shell's token unset), never a Keychain read.
+`drover doctor` shows one row for where accounts sign in from (the folders or the `account_env` helper), no row per
+account (q855). Rotation, caps and `accounts reset` work per account as before. Remote hosts get no account env: their
+lanes sign in through the main host's token proxy (#637).
 
-`accounts import` is retired (q854). The old `herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_*` items go only with the owner's OK, on
-a run card (`herdsman secret rm all CLAUDE_CODE_OAUTH_TOKEN_A`, …), once every lane runs on its account env. The rest of
-this page is about the store's other secrets: `secret:` env values live in the main host's OS store as
-`herdsman/<fleet>/<NAME>` (#441); on macOS that is the login Keychain.
+## A signed-out account is skipped (#785)
 
-## Why a rebuild prompts (#548)
+Before a lane starts on an account, drover checks its sign-in: with cooee, `account_env = "cooee accounts env
+{provider} {name} --require-signed-in"` exits 3 for a signed-out account; standalone, the folder's status command says
+`loggedIn: false`. Either way the account rests like a capped one (`account-signed-out`, one owner alert naming the
+sign-in), the lane goes on the role's next account, and the account stays out until it is signed in and `drover
+accounts reset <name>` is run. A dry run asks nothing. An ACP lane with no event back `[limits] acp_start_minutes`
+(default 3) after its first turn alerts `lane-failed-start` naming its account, and `waiting` calls it a failed start,
+not idle.
 
-`cargo install` signs the binary ad hoc: its code signature is a hash of the binary itself, so every rebuild is a new
-app to the Keychain. An item herdsman saved (or was allowed to read) by an older build is not open to the new one, and
-macOS shows a "herdsman wants to use your confidential information" dialog on the host's screen. Until someone clicks
-it, the read waits.
+The meter (`usage.jsonl`) is written only by an interactive Claude status line; ACP lanes write none, so a reading can be
+days old. `drover accounts` shows each reading's age, a window past its reset reads `0% (reset)`, `doctor` warns on a
+reading over 5 h old, and the pick never counts a window past its reset. `drover accounts` lists only lanes still
+running.
 
-herdsman never waits on it: a keychain read or write gets 5 s, then fails with
-`REFUSED KEYCHAIN_LOCKED: approve herdsman in the Keychain dialog on <host>: Always Allow for <item>, once (…)`. A thread shows it as a
-`not delivered` row, a lane's spawn as its refusal, and `herdsman check` alerts `keychain-locked` once.
+## A token file, for a host with no login Keychain (#707)
 
-## The one-time fix
+A headless Mac that must work with its login Keychain locked can give an account a hand-placed token instead:
 
-An item admits the app that wrote it and every app the owner allowed; the Keychain knows an app by its designated
-requirement. An ad-hoc signed herdsman has a new one each build, so every reinstall asked again. Since #556 the install
-signs herdsman with one local identity, "herdsman-local" (`scripts/signing-identity.sh` creates it once; see
-[setup](setup.md)), so its designated requirement stays the same across builds. Click **Always Allow** once per item
-and it lasts.
+```toml
+[accounts]
+A = "token-file:~/.config/drover/tokens/A"   # a `claude setup-token` token, mode 0600
+```
 
-`doctor`'s `signature` row is red while the installed binary is not signed by "herdsman-local", with the setup command.
+With no `account_env`, a lane on `A` gets the file's token as `CLAUDE_CODE_OAUTH_TOKEN`, in its own process only (the
+0600 secrets file its pane sources, never argv or the log); the token proxy signs that account's remote ACP lanes with
+it. A file group or others can read is refused `SECRET_FILE_OPEN`, and `doctor` warns when it is missing, loose or more
+than 300 days old (these tokens last a year). Folder logins stay the default: they refresh and can be revoked.
 
-A message to a thread whose delivery is stuck waits at most 30 s behind it, then shows `not delivered` instead of
-hanging.
+## The old store
 
-On macOS, Claude Code's login lives in the login Keychain (the `Claude Code-credentials` item), so a headless Mac
-keeps that keychain unlocked with no timeout and stays awake: see [troubleshooting](troubleshooting.md) §8. On Linux
-it is said to be a plain file in the config folder (`.credentials.json`): unverified.
+drover ≤ #683 kept secrets in the login Keychain as `drover/<fleet>/<NAME>`. It reads none of them now and deletes
+none: `drover migrate` prints the `security delete-generic-password` lines for the owner to run. `secret:` env and the
+other secrets are files: see [providers](providers.md).
 
-Keychain over ssh, a jammed SecurityAgent, a new build's cdhash and a wedged securityd: see
-[troubleshooting](troubleshooting.md).
+On macOS, Claude Code's own login lives in the login Keychain (the `Claude Code-credentials` item), so a headless Mac
+on folder logins keeps that keychain unlocked with no timeout and stays awake: see [troubleshooting](troubleshooting.md)
+§7 (or give its accounts a `token-file:`). On Linux it is said to be a plain file in the config folder
+(`.credentials.json`): unverified.

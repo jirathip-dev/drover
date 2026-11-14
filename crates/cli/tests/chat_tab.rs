@@ -3,7 +3,7 @@
 mod common;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use common::*;
-use herdsman::serve::Server;
+use drover::serve::Server;
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -27,7 +27,7 @@ fn frags(s: &Server, cookie: &str, now: u64) -> (String, String) {
 }
 
 /// The demo's fleets and log, in a temp dir; its thread files' paths are relative to the repo root.
-fn demo() -> herdsman::Ctx {
+fn demo() -> drover::Ctx {
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     std::env::set_current_dir(&root).unwrap();
     let d = tmpdir("chat-demo");
@@ -70,10 +70,11 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
         "<span class=ds><i class=dt></i>acme-api · claude · opus · awake</span>",
         "conductor in ",
         " class=\"blk me\" open><summary><span class=k>you</span>",
+        " class=\"blk ai\" open><summary><span class=k>conductor</span><span class=pv>I see it:",
         "<code>/v1/search</code>",
         "<figure class=im><img src=\"thread/t4/IMG%5F2041%2EPNG\"",
         "<figcaption>IMG_2041.PNG · 218 KB</figcaption>",
-        " class=\"blk run\"><summary><span class=k>$</span><span class=cmd>herdsman brief acme-api 19</span>",
+        " class=\"blk run\"><summary><span class=k>$</span><span class=cmd>drover brief acme-api 19</span>",
         "<p class=ans>✓ 1. per API key <span class=m>· you · ",
         "<p class=ans>✓ other: \"600 a minute, burst 100\" <span class=m>· you · ",
         "<a class=tf href=\"thread/t4/429%2Dbody%2Ejson\"><span>▤ 429-body.json</span><span class=m>87 B</span></a>",
@@ -88,6 +89,10 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
         assert!(t4.contains(want), "{want} not in {t4}");
     }
     assert!(!t4.contains("DECISION q31"), "a DECISION line shows as the ✓ line only");
+    assert!(
+        chat.contains("<span class=ds>all · claude · opus · asleep</span>"),
+        "{chat}"
+    );
     assert!(!t4.contains("disabled"), "a paired owner device writes");
     // The needs-you stack keeps lane asks, and (#517) a thread's ask tied to an issue with where it was asked;
     // `[chat·N]` counts the threads that wait on a choice (t4, t5).
@@ -100,37 +105,52 @@ fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
 }
 
 /// The conductor's tool rows come from the lane hook; a conductor's thread with `fleet` and conductor role.
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     c
 }
 
-/// herdr with the thread's conductor `conductor-t1` live (idle) in pane w9:p1.
-fn live() -> Fake {
+fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
+    let cfg = format!(
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        b.sock.display()
+    );
+    let mut c = ctx(&tmpdir(name), &cfg);
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    c
+}
+
+fn acp() -> Fake {
+    let agents =
+        serde_json::json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
     Fake::default()
-        .reply("herdr agent list", &agents(&[("conductor-t1", "idle", "/x", "w9:p1")]))
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr pane run", "")
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
-        )
-        .reply("herdr agent start", "")
-        .reply("herdr agent wait", "")
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed run", "")
+        .reply("shed send", "")
+}
+
+const START_T1: &str = "shed run --acp claude-acp --policy allow --name orchestrator-t1";
+
+fn leaked() -> &'static FakeShed {
+    Box::leak(Box::new(FakeShed::new()))
 }
 
 #[test]
 fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_the_conductor() {
-    let c = setup("chat-ask");
-    let r = live();
+    let b = FakeShed::new();
+    let c = acp_setup("chat-ask", &b);
+    let f = acp();
+    let cli = b.cli(&f);
+    let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     // #405: the first message from [+ thread]'s empty thread starts the thread, then its conductor.
@@ -146,12 +166,8 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
         res.starts_with("HTTP/1.1 200 OK") && body(&res) == "t1 started\n",
         "{res}"
     );
-    assert!(r.called("herdr workspace create"), "{:?}", r.calls.borrow());
-    assert!(r
-        .calls
-        .borrow()
-        .iter()
-        .any(|c| c.starts_with("herdr agent start conductor-t1")));
+    assert!(f.called(START_T1), "{:?}", f.calls.borrow());
+    assert!(b.has("orchestrator-t1"));
     let ask = [
         "ask",
         "sendmeter",
@@ -183,9 +199,9 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
     );
     assert_eq!(body(&res), "answered q1\n", "{res}");
     assert!(
-        r.called("herdr agent prompt conductor-t1 DECISION q1: small"),
+        f.called("shed send orchestrator-t1 DECISION q1: small"),
         "{:?}",
-        r.calls.borrow()
+        f.calls.borrow()
     );
     let (chat, _) = frags(&s, &cookie, T + 20);
     assert!(!chat.contains("data-id=\"q1\""), "the rows fold");
@@ -205,19 +221,26 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
         T + 30,
     );
     assert_eq!(body(&res), "answered q2\n", "{res}");
-    assert!(r.called("herdr agent prompt conductor-t1 DECISION q2: 600 a minute"));
+    assert!(f.called("shed send orchestrator-t1 DECISION q2: 600 a minute"));
     assert!(frags(&s, &cookie, T + 40).0.contains("✓ other: \"600 a minute\""));
 }
 
 #[test]
 fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
-    let c = setup("chat-img");
+    let b = FakeShed::new();
+    let c = acp_setup("chat-img", &b);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
         "t1\n"
     );
-    let r = live();
-    assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0, "its conductor is up");
+    let f = acp();
+    let cli = b.cli(&f);
+    assert_eq!(
+        run(&c, &cli, &["thread", "say", "t1", "hi"]).0,
+        0,
+        "its conductor is up"
+    );
+    let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let png: Vec<u8> = (0..40_000u32).map(|i| (i % 251) as u8).collect();
@@ -233,17 +256,17 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
     let saved = c
         .state
-        .with_file_name("conductor")
+        .with_file_name("orchestrator")
         .join("t1/uploads")
         .join(format!("{T}-IMG_1.PNG"));
     assert_eq!(std::fs::read(&saved).unwrap(), png, "in the conductor's folder");
     assert!(
-        r.called(&format!(
-            "herdr agent prompt conductor-t1 [t1] owner: see this (attached: {})",
+        f.called(&format!(
+            "shed send orchestrator-t1 [t1] owner: see this (attached: {})",
             saved.display()
         )),
         "the conductor gets its path: {:?}",
-        r.calls.borrow()
+        f.calls.borrow()
     );
     let got = s.respond(
         &format!("GET /thread/t1/IMG%5F1%2EPNG HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"),
@@ -254,7 +277,7 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     assert_eq!(&got[at..], &png[..]);
 
     // Out: the conductor's reply with a mockup PNG.
-    let folder = c.state.with_file_name("conductor").join("t1");
+    let folder = c.state.with_file_name("orchestrator").join("t1");
     let mock = folder.join("mockup-390.png");
     std::fs::write(&mock, b"\x89PNG mock").unwrap();
     let (code, out) = run(
@@ -277,15 +300,12 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     let toml = c.config.to_str().unwrap();
     let (code, out) = run(&c, &r, &["thread", "reply", "t1", "x", "--file", toml]);
     assert_ne!(code, 0, "{out}");
-    assert!(
-        !herdsman::events::jsonl(&c.state).unwrap().contains(toml),
-        "never logged"
-    );
+    assert!(!drover::events::jsonl(&c.state).unwrap().contains(toml), "never logged");
     std::os::unix::fs::symlink(&c.config, folder.join("link.toml")).unwrap();
     let line = |n: &str, p: &str| {
         format!("{{\"ts\":{T},\"fleet\":\"sendmeter\",\"type\":\"thread-msg\",\"thread\":\"t1\",\"from\":\"conductor\",\"text\":\"x\",\"files\":[{{\"name\":\"{n}\",\"path\":\"{p}\",\"size\":1}}]}}\n")
     };
-    let mut log = herdsman::events::jsonl(&c.state).unwrap();
+    let mut log = drover::events::jsonl(&c.state).unwrap();
     log += &line("keys.toml", toml);
     log += &line("link.toml", folder.join("link.toml").to_str().unwrap());
     rewrite_log(&c.state, &log);
@@ -295,13 +315,54 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
     }
 }
 
+#[test]
+fn a_reply_file_from_a_lane_worktree_is_copied_into_the_thread_folder() {
+    let c = setup("chat-wt-file");
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
+        "t1\n"
+    );
+    let design = c.worktrees.join("sendmeter/issue-12/docs/design/inbox");
+    std::fs::create_dir_all(&design).unwrap();
+    let png = design.join("inbox-390.png");
+    std::fs::write(&png, b"\x89PNG design").unwrap();
+    let r = Fake::default();
+    let (code, out) = run(
+        &c,
+        &r,
+        &["thread", "reply", "t1", "The mockup.", "--file", png.to_str().unwrap()],
+    );
+    assert_eq!(code, 0, "{out}");
+    let folder = c.state.with_file_name("orchestrator").join("t1");
+    let log = drover::events::jsonl(&c.state).unwrap();
+    let msg = log.lines().rfind(|l| l.contains("The mockup.")).unwrap();
+    let e: serde_json::Value = serde_json::from_str(msg).unwrap();
+    let f = &e["files"][0];
+    assert_eq!(f["name"], "inbox-390.png", "{msg}");
+    let copy = std::path::PathBuf::from(f["path"].as_str().unwrap());
+    assert!(copy.starts_with(folder.canonicalize().unwrap()), "{msg}");
+    assert_eq!(std::fs::read(&copy).unwrap(), b"\x89PNG design");
+
+    let away = c.worktrees.parent().unwrap().join("elsewhere");
+    for p in [away.join("x.png"), c.worktrees.join("other/issue-1/x.png")] {
+        if let Some(d) = p.parent() {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(&p, b"x").unwrap();
+        let (code, out) = run(&c, &r, &["thread", "reply", "t1", "x", "--file", p.to_str().unwrap()]);
+        assert_ne!(code, 0, "{}: {out}", p.display());
+        assert!(!drover::events::jsonl(&c.state).unwrap().contains(p.to_str().unwrap()));
+    }
+}
+
 fn url_enc(s: &str) -> String {
     s.replace('+', "%2B").replace('/', "%2F").replace('=', "%3D")
 }
 
 #[test]
 fn a_device_that_is_not_paired_reads_the_thread_but_cannot_write() {
-    let c = setup("chat-guest");
+    let b = FakeShed::new();
+    let c = acp_setup("chat-guest", &b);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).1,
         "t1\n"
@@ -319,7 +380,9 @@ fn a_device_that_is_not_paired_reads_the_thread_but_cannot_write() {
         "t1",
     ];
     assert_eq!(run(&c, &Fake::default(), &ask).1, "q1\n");
-    let r = live();
+    let f = acp();
+    let cli = b.cli(&f);
+    let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let (chat, _) = frags(&s, "", T);
     assert!(
@@ -345,14 +408,19 @@ fn a_device_that_is_not_paired_reads_the_thread_but_cannot_write() {
         let res = req(&s, "POST", "/thread", b, "", T);
         assert!(res.starts_with("HTTP/1.1 401"), "{b}: {res}");
     }
-    assert!(!r.called("herdr agent prompt"), "{:?}", r.calls.borrow());
+    assert!(
+        !f.called("shed send") && !f.called("shed run"),
+        "{:?}",
+        f.calls.borrow()
+    );
 }
 
 /// A screenshot is far past the 32 KB other posts get: over the socket, `POST /thread` reads its whole body.
 #[test]
 fn a_large_attachment_arrives_whole_over_the_socket() {
     use std::io::{Read, Write};
-    let c = setup("chat-big");
+    let b = leaked();
+    let c = acp_setup("chat-big", b);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
         "t1\n"
@@ -370,7 +438,10 @@ fn a_large_attachment_arrives_whole_over_the_socket() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &live(), l, false));
+    std::thread::spawn(move || {
+        let f = acp();
+        drover::serve::serve_on(&c2, &b.cli(&f), l, false)
+    });
     let png: Vec<u8> = (0..600_000u32).map(|i| (i % 253) as u8).collect();
     let body = format!("op=say&t=t1&text=big&name=big.png&data={}", url_enc(&B64.encode(&png)));
     let mut s = std::net::TcpStream::connect(addr).unwrap();
@@ -383,7 +454,7 @@ fn a_large_attachment_arrives_whole_over_the_socket() {
     let mut res = String::new();
     s.read_to_string(&mut res).unwrap();
     assert!(res.starts_with("HTTP/1.1 200 OK"), "{res}");
-    let up = c.state.with_file_name("conductor").join("t1/uploads");
+    let up = c.state.with_file_name("orchestrator").join("t1/uploads");
     let saved = std::fs::read_dir(&up).unwrap().next().unwrap().unwrap().path();
     assert_eq!(std::fs::read(saved).unwrap(), png);
 }
@@ -445,12 +516,11 @@ const nav = async url => {{
 /// thread's images are all still loaded.
 #[test]
 fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_images() {
-    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let c = setup("chat-viewer");
-    let folder = c.state.with_file_name("conductor").join("t1");
+    let folder = c.state.with_file_name("orchestrator").join("t1");
     std::fs::create_dir_all(&folder).unwrap();
     let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
     for f in ["icon-180.png", "icon-192.png"] {
@@ -504,10 +574,9 @@ fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_ima
           at.push(+IV.hidden, ok(), +(location.href === href), errs.length); \
           window.late = at; })()";
     let png = tmpdir("chat-viewer-png").join("thread.png");
-    let o = swift()
-        .env("HERDSMAN_WAIT", "3")
+    let o = webview()
+        .env("DROVER_WAIT", "3")
         .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
             &format!("http://{addr}/deep/thread/t1/icon-180.png"),
             "390",
             "chat",
@@ -525,15 +594,14 @@ fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_ima
     assert_eq!(m, [2., 2., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 2., 1., 0.], "{out}");
 }
 
-/// #403: a runner whose typing into an agent (`herdr agent prompt`) waits for the test's go, then reports the line.
-struct Held(
-    Fake,
+struct Held<'a>(
+    common::fake_shed::Cli<'a>,
     std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
     std::sync::Mutex<std::sync::mpsc::Sender<String>>,
 );
-impl herdsman::runner::Runner for Held {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
-        let typing = prog == "herdr" && args.starts_with(&["agent".into(), "prompt".into()]);
+impl drover::runner::Runner for Held<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        let typing = prog == "shed" && args[0] == "send";
         if typing {
             self.1.lock().unwrap().recv().unwrap();
         }
@@ -553,13 +621,14 @@ impl herdsman::runner::Runner for Held {
 #[test]
 fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
     use std::io::{Read, Write};
-    let c = setup("chat-async");
+    let b = leaked();
+    let c = acp_setup("chat-async", b);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
         "t1\n"
     );
     assert_eq!(
-        run(&c, &live(), &["thread", "say", "t1", "hi"]).0,
+        run(&c, &b.cli(&acp()), &["thread", "say", "t1", "hi"]).0,
         0,
         "its conductor is up"
     );
@@ -579,8 +648,9 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
     std::thread::spawn(move || {
-        let r = Held(live(), held.into(), typed.into());
-        herdsman::serve::serve_on(&c2, &r, l, false)
+        let f = acp();
+        let r = Held(b.cli(&f), held.into(), typed.into());
+        drover::serve::serve_on(&c2, &r, l, false)
     });
     let body = "op=say&t=t1&text=a+long+message";
     let mut s = std::net::TcpStream::connect(addr).unwrap();
@@ -599,7 +669,7 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
         "{res}"
     );
     assert!(
-        herdsman::events::jsonl(&c.state)
+        drover::events::jsonl(&c.state)
             .unwrap()
             .contains("\"from\":\"owner\",\"text\":\"a long message\""),
         "logged"
@@ -610,19 +680,21 @@ fn a_message_is_answered_once_logged_and_typed_into_the_conductor_after() {
     );
     go.send(()).unwrap();
     let line = seen.recv_timeout(std::time::Duration::from_secs(10)).unwrap();
-    assert_eq!(line, "herdr agent prompt conductor-t1 [t1] owner: a long message");
+    assert_eq!(line, "shed send orchestrator-t1 [t1] owner: a long message");
 }
 
 /// #403: a delivery that fails is a red system line with [retry]; [retry] types the same line, logging no copy.
 #[test]
 fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
-    let c = setup("chat-retry");
+    let b = FakeShed::new();
+    let c = acp_setup("chat-retry", &b);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
         "t1\n"
     );
     let down = Fake::default();
-    let s = Server::new(&c, &down, Some(ADDR.into()));
+    let on = b.on(&down);
+    let s = Server::new(&c, &on, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let res = req(&s, "POST", "/thread", "op=say&t=t1&text=hello", &cookie, T);
     assert_eq!(body(&res), "sent\n", "{res}");
@@ -636,21 +708,27 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
         line.ends_with(&format!(" <button type=button class=rty data-n={n}>retry</button>")),
         "{line}"
     );
-    let r = live();
+    let f = acp();
+    let cli = b.cli(&f);
+    let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let res = req(&s, "POST", "/thread", &format!("op=retry&t=t1&n={n}"), &cookie, T + 10);
     assert_eq!(body(&res), "retrying\n", "{res}");
-    assert!(r.called("herdr agent start conductor-t1"), "{:?}", r.calls.borrow());
-    let log = herdsman::events::jsonl(&c.state).unwrap();
+    assert!(f.called(START_T1), "{:?}", f.calls.borrow());
+    assert!(
+        f.called("shed send orchestrator-t1 ") && f.calls.borrow().iter().any(|l| l.ends_with("[t1] owner: hello"))
+    );
+    let log = drover::events::jsonl(&c.state).unwrap();
     assert_eq!(log.matches("\"from\":\"owner\",\"text\":\"hello\"").count(), 1, "{log}");
     let res = req(&s, "POST", "/thread", "op=retry&t=t1&n=1", &cookie, T + 20);
     assert!(body(&res).contains("nothing to retry"), "{res}");
     // Mid-turn, the live line is the inline mark serve.js fills with the theme's loading art; #407: serve.js floats it
     // as the pill, timed from the turn's start (the owner's last message).
-    let busy = Fake::default().reply(
-        "herdr agent list",
-        &agents(&[("conductor-t1", "working", "/x", "w9:p1")]),
-    );
+    b.set("orchestrator-t1", |t| {
+        t["reported"] = serde_json::json!({"state": "working"})
+    });
+    let none = Fake::default();
+    let busy = b.on(&none);
     let (chat, _) = frags(&Server::new(&c, &busy, Some(ADDR.into())), &cookie, T + 30);
     assert!(
         chat.contains("<p class=\"tlv wk\" data-since=1000000><i class=tld aria-hidden=true></i> working</p>"),
@@ -659,16 +737,19 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
 }
 
 /// #408: thread t1 with `n` conductor messages `m1`…; a paired cookie at `now`.
-fn long(name: &str, n: u64, now: u64) -> (herdsman::Ctx, String) {
-    let c = setup(name);
+fn long(name: &str, n: u64, now: u64) -> (drover::Ctx, String) {
+    fill(setup(name), n, now)
+}
+
+fn fill(c: drover::Ctx, n: u64, now: u64) -> (drover::Ctx, String) {
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Long"]).1,
         "t1\n"
     );
     for i in 1..=n {
         let d = serde_json::json!({"thread": "t1", "from": "conductor", "text": format!("m{i}")});
-        let e = herdsman::events::Event::new(T + i, "sendmeter", None, "thread-msg", d);
-        herdsman::events::append(&c.state, &e).unwrap();
+        let e = drover::events::Event::new(T + i, "sendmeter", None, "thread-msg", d);
+        drover::events::append(&c.state, &e).unwrap();
     }
     let cookie = pair(
         &Server::new(&c, &Fake::default(), Some(ADDR.into())),
@@ -729,18 +810,21 @@ fn a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time()
 /// a message sent (the live update) keeps every page loaded.
 #[test]
 fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let (c, cookie) = long("chat-window-webkit", 100, now);
+    let b = leaked();
+    let (c, cookie) = fill(acp_setup("chat-window-webkit", b), 100, now);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c, &live(), l, false));
+    std::thread::spawn(move || {
+        let f = acp();
+        drover::serve::serve_on(&c, &b.cli(&f), l, false)
+    });
     let js = "const tc = () => $('#chat .cvp[data-t=\"t1\"] .tc'), n = () => tc() ? tc().querySelectorAll(':scope>[data-n]').length : 0; \
         const until = f => new Promise(r => (function go() { f() ? r() : setTimeout(go, 50); })()); \
         (async () => { const at = window.late = []; await until(() => n()); at.push(n()); \
@@ -754,11 +838,10 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
           await until(() => [...tc().querySelectorAll(':scope>.blk.me:not(.snt) .pv')].some(p => p.textContent === 'a new one')); \
           at.push(+(tc().querySelector(':scope>[data-n] .pv').textContent === 'm1'), +tc().firstElementChild.textContent.startsWith('thread started'), +(n() > 100), errs.length); })()";
     let png = tmpdir("chat-window-png").join("thread.png");
-    let o = swift()
-        .env("HERDSMAN_WAIT", "12")
-        .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
+    let o = webview()
+        .env("DROVER_WAIT", "12")
+        .env("DROVER_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
         .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
             &format!("http://{addr}/"),
             "390",
             "chat",
@@ -784,7 +867,7 @@ fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
 /// [copy]; the text around them prose; an unclosed fence runs to the end.
 const CODE: &str = "Run this:\n\n```sh\n  if [ 1 < 2 ] && true; then\n\n    echo \"b & c\"\nfi\n```\nThen check `x`.\n\n```\nunclosed <tail>\n  more";
 
-fn coded(name: &str) -> herdsman::Ctx {
+fn coded(name: &str) -> drover::Ctx {
     let c = setup(name);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Code"]).1,
@@ -819,8 +902,7 @@ fn a_fenced_block_renders_as_one_box_with_its_exact_text_and_copy() {
 
 #[test]
 fn copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_one() {
-    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let c = coded("chat-copy");
@@ -857,11 +939,10 @@ fn copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_
         serde_json::json!(first),
         serde_json::json!(second)
     );
-    let o = swift()
-        .env("HERDSMAN_WAIT", "3")
-        .env("HERDSMAN_PRE", pre)
+    let o = webview()
+        .env("DROVER_WAIT", "3")
+        .env("DROVER_PRE", pre)
         .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
             &format!("http://{addr}/"),
             "390",
             "chat",
@@ -879,16 +960,19 @@ fn copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_
     assert_eq!(m, [2., 1., 1., 1., 1., 1., 1., 0.], "{out}");
 }
 
-fn log(c: &herdsman::Ctx) -> String {
-    herdsman::events::jsonl(&c.state).unwrap_or_default()
+fn log(c: &drover::Ctx) -> String {
+    drover::events::jsonl(&c.state).unwrap_or_default()
 }
 
 /// #405: [+ thread] opens an empty thread that logs nothing; its first message starts the thread, titled with the
 /// message's first line, and only the message reaches the conductor. `thread title` retitles it, logged.
 #[test]
 fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_retitles_it() {
-    let c = setup("chat-first");
-    let r = live();
+    let b = FakeShed::new();
+    let c = acp_setup("chat-first", &b);
+    let f = acp();
+    let cli = b.cli(&f);
+    let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let (chat, _) = frags(&s, &cookie, T);
@@ -913,24 +997,25 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
         T,
     );
     assert_eq!(body(&res), "t1 started\n", "{res}");
-    let events = herdsman::events::read(&c.state).unwrap();
+    let events = drover::events::read(&c.state).unwrap();
     let new = events.iter().find(|e| e.kind == "thread-new").unwrap();
     assert_eq!(new.str("title"), Some("Grill me on #12"));
     let msgs: Vec<_> = events.iter().filter(|e| e.kind == "thread-msg").collect();
     assert_eq!(msgs.len(), 1, "{}", log(&c));
     assert_eq!(msgs[0].str("text"), Some("Grill me on #12\nthe land mode part"));
-    let thread = c.state.with_file_name("conductor").join("t1/.thread.md");
+    let thread = c.state.with_file_name("orchestrator").join("t1/.thread.md");
     assert_eq!(
         std::fs::read_to_string(thread).unwrap(),
         "owner: Grill me on #12\nthe land mode part\n",
         "the conductor gets the message only"
     );
-    assert!(r.called("herdr agent start conductor-t1"), "{:?}", r.calls.borrow());
+    assert!(f.called(START_T1), "{:?}", f.calls.borrow());
     // The conductor's summary title, after its first reply.
     let (code, out) = run(&c, &r, &["thread", "title", "t1", "Land mode for #12"]);
     assert_eq!(code, 0, "{out}");
-    let t = herdsman::events::read(&c.state)
+    let t = drover::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "thread-title")
         .unwrap();
@@ -964,20 +1049,22 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
         T + 9,
     );
     assert_eq!(body(&res), "t2 started\n", "{res}");
-    let t2 = herdsman::events::read(&c.state)
+    let t2 = drover::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "thread-new")
         .unwrap();
     assert_eq!(t2.str("title").unwrap(), format!("{}…", &long[..60]));
 }
 
-/// #405: [archive] closes the conductor's pane and folds the thread; [restore] brings it back and its next message
-/// resumes the same session. Nothing under the thread's folder goes.
 #[test]
 fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
-    let c = setup("chat-archive");
-    let r = live().reply("herdr workspace close", "");
+    let b = FakeShed::new();
+    let c = acp_setup("chat-archive", &b);
+    let f = acp();
+    let cli = b.cli(&f);
+    let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let png = url_enc(&B64.encode(b"\x89PNG one"));
@@ -990,7 +1077,7 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
         T,
     );
     assert_eq!(body(&res), "t1 started\n", "{res}");
-    let dir = c.state.with_file_name("conductor").join("t1");
+    let dir = c.state.with_file_name("orchestrator").join("t1");
     let files = |d: &std::path::Path| {
         let mut v = vec![];
         let mut todo = vec![d.to_path_buf()];
@@ -1011,23 +1098,29 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
         before.iter().any(|f| f.ends_with(format!("uploads/{T}-a.png"))),
         "{before:?}"
     );
-    let session = |c: &herdsman::Ctx| {
-        let s: Vec<_> = herdsman::events::read(&c.state)
+    let starts = |c: &drover::Ctx| {
+        let s: Vec<_> = drover::events::read(&c.state)
             .unwrap()
+            .to_vec()
             .into_iter()
-            .filter(|e| e.kind == "conductor-start")
+            .filter(|e| e.kind == "orchestrator-start")
             .collect();
         s.iter()
-            .map(|e| (e.str("session").unwrap().to_string(), e.data["resumed"] == true))
+            .map(|e| (e.str("runtime").unwrap().to_string(), e.data["resumed"] == true))
             .collect::<Vec<_>>()
     };
     let res = req(&s, "POST", "/thread", "op=archive&t=t1", &cookie, T + 10);
     assert_eq!(body(&res), "t1 archived\n", "{res}");
-    assert!(r.called("herdr workspace close"), "{:?}", r.calls.borrow());
-    let sleep = herdsman::events::read(&c.state)
+    assert!(
+        b.called("kill", "orchestrator-t1") && !b.has("orchestrator-t1"),
+        "{:?}",
+        b.methods()
+    );
+    let sleep = drover::events::read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
-        .rfind(|e| e.kind == "conductor-sleep")
+        .rfind(|e| e.kind == "orchestrator-sleep")
         .unwrap();
     assert_eq!(sleep.str("why"), Some("archived"));
     let (chat, _) = frags(&s, &cookie, T + 11);
@@ -1053,12 +1146,14 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     );
     let res = req(&s, "POST", "/thread", "op=say&t=t1&text=back+again", &cookie, T + 30);
     assert_eq!(body(&res), "sent\n", "{res}");
-    let st = session(&c);
+    let st = starts(&c);
     assert_eq!(st.len(), 2, "{st:?}");
-    assert!(st[1].1 && st[1].0 == st[0].0, "the same session resumed: {st:?}");
+    assert_eq!(st[1], ("shed-acp".to_string(), false), "{st:?}");
+    assert_eq!(f.count(START_T1), 2, "{:?}", f.calls.borrow());
     // The CLI does the same, logged; nothing was removed from the folder.
-    assert_eq!(run(&c, &r, &["thread", "archive", "t1"]).0, 0);
-    assert_eq!(run(&c, &r, &["thread", "restore", "t1"]).0, 0);
+    assert_eq!(run(&c, &cli, &["thread", "archive", "t1"]).0, 0);
+    assert_eq!(b.all("kill").len(), 2, "{:?}", b.methods());
+    assert_eq!(run(&c, &cli, &["thread", "restore", "t1"]).0, 0);
     let l = log(&c);
     assert_eq!(
         (
@@ -1072,12 +1167,49 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
     assert!(before.iter().all(|f| after.contains(f)), "{before:?} vs {after:?}");
 }
 
+#[test]
+fn a_restored_herdr_thread_resumes_its_orchestrators_session() {
+    let c = setup("chat-archive-herdr");
+    let r = Fake::default()
+        .reply(
+            "herdr agent list",
+            &agents(&[("orchestrator-t1", "idle", "/x", "w9:p1")]),
+        )
+        .reply("herdr agent prompt", "")
+        .reply("herdr pane send-keys", "")
+        .reply("herdr pane run", "")
+        .reply(
+            "herdr workspace create",
+            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
+        )
+        .reply("herdr agent start", "")
+        .reply("herdr agent wait", "")
+        .reply("herdr workspace close", "");
+    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).0, 0);
+    assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
+    assert_eq!(run(&c, &r, &["thread", "archive", "t1"]).0, 0);
+    assert!(r.called("herdr workspace close"), "{:?}", r.calls.borrow());
+    assert_eq!(run(&c, &r, &["thread", "restore", "t1"]).0, 0);
+    assert_eq!(run(&c, &r, &["thread", "say", "t1", "back again"]).0, 0);
+    let st: Vec<_> = drover::events::read(&c.state)
+        .unwrap()
+        .iter()
+        .filter(|e| e.kind == "orchestrator-start")
+        .map(|e| (e.str("session").unwrap().to_string(), e.data["resumed"] == true))
+        .collect();
+    assert_eq!(st.len(), 2, "{st:?}");
+    assert!(st[1].1 && st[1].0 == st[0].0, "the same session resumed: {st:?}");
+}
+
 /// #405: a message carries several files: all of them saved and named in the line the conductor gets; 11 are
 /// refused at 10, and a refused first message starts no thread.
 #[test]
 fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
-    let c = setup("chat-multi");
-    let r = live();
+    let b = FakeShed::new();
+    let c = acp_setup("chat-multi", &b);
+    let f = acp();
+    let cli = b.cli(&f);
+    let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let many = |n: usize| {
@@ -1099,7 +1231,11 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
         "t1\n"
     );
-    assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0, "its conductor is up");
+    assert_eq!(
+        run(&c, &cli, &["thread", "say", "t1", "hi"]).0,
+        0,
+        "its conductor is up"
+    );
     let res = req(
         &s,
         "POST",
@@ -1109,7 +1245,7 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
         T,
     );
     assert!(body(&res).contains("at most 10 files a message"), "{res}");
-    let up = c.state.with_file_name("conductor").join("t1/uploads");
+    let up = c.state.with_file_name("orchestrator").join("t1/uploads");
     assert_eq!(std::fs::read_dir(&up).map_or(0, |d| d.count()), 0, "nothing saved");
     let res = req(
         &s,
@@ -1126,11 +1262,11 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
     }
     let att: String = saved.iter().map(|p| format!(" (attached: {})", p.display())).collect();
     assert!(
-        r.called(&format!(
-            "herdr agent prompt conductor-t1 [t1] owner: IMG_0.PNG, IMG_1.PNG, IMG_2.PNG{att}"
+        f.called(&format!(
+            "shed send orchestrator-t1 [t1] owner: IMG_0.PNG, IMG_1.PNG, IMG_2.PNG{att}"
         )),
         "{:?}",
-        r.calls.borrow()
+        f.calls.borrow()
     );
     let (chat, _) = frags(&s, &cookie, T + 2);
     for i in 0..3 {
@@ -1143,14 +1279,18 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
     let a = c.state.with_file_name("a.png");
     std::fs::write(&a, b"A").unwrap();
     let a = a.to_str().unwrap();
-    let (code, out) = run(&c, &r, &["thread", "say", "t1", "two", "--file", a, "--file", a]);
+    let (code, out) = run(&c, &cli, &["thread", "say", "t1", "two", "--file", a, "--file", a]);
     assert_eq!(code, 0, "{out}");
     assert!(
-        r.calls.borrow().iter().any(|l| l.contains("owner: two (attached: ")
-            && l.contains("-a.png) (attached: ")
-            && l.contains("-2-a.png)")),
+        f.calls
+            .borrow()
+            .iter()
+            .any(|l| l.starts_with("shed send orchestrator-t1 ")
+                && l.contains("owner: two (attached: ")
+                && l.contains("-a.png) (attached: ")
+                && l.contains("-2-a.png)")),
         "{:?}",
-        r.calls.borrow()
+        f.calls.borrow()
     );
 }
 
@@ -1160,18 +1300,29 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
 /// and the message just above the box stays just above it; likewise once the box grows and the keyboard closes.
 #[test]
 fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place() {
-    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let (c, cookie) = long("chat-kb", 30, now);
+    let b = leaked();
+    let (c, cookie) = fill(acp_setup("chat-kb", b), 30, now);
+    b.add(
+        "orchestrator-t1",
+        serde_json::json!({"fleet": "sendmeter", "role": "orchestrator", "thread": "t1"}),
+    );
+    working(b, false);
+    let st = serde_json::json!({"thread": "t1", "agent": "orchestrator-t1", "pane": "orchestrator-t1", "runtime": "shed-acp", "harness": "claude"});
+    let e = drover::events::Event::new(T, "sendmeter", None, "orchestrator-start", st);
+    drover::events::append(&c.state, &e).unwrap();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c, &live(), l, false));
+    std::thread::spawn(move || {
+        let f = acp();
+        drover::serve::serve_on(&c, &b.cli(&f), l, false)
+    });
     // (A frame is two animation frames or 300 ms: a busy host throttles an offscreen view's animation frames. Each state
     // is read once it holds, or as it is after 2 s.)
     // Per state: |composer bottom − visual viewport bottom (the tab bar's top, keyboard down)|, the page's scrollTop, the same block just above the box
@@ -1186,20 +1337,20 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
           const [b0, d0] = above(), at = [tc.scrollTop > 0 ? 1 : 0]; \
           const look = async (y = () => vv.offsetTop + vv.height) => { await frame(); \
             const m = () => { const [b, d] = above(); return [Math.abs(tw.getBoundingClientRect().bottom - y()), document.scrollingElement.scrollTop, +(b === b0), Math.abs(d - d0)]; }; \
-            let r = m(); for (let i = 0; i < 40 && (r[0] > 1 || r[1] || !r[2] || r[3] > 1); i++) { await new Promise(q => st(q, 50)); r = m(); } at.push(...r); }; \
+            const ok = r => r[0] <= 1 && !r[1] && r[2] && r[3] <= 1, paint = () => new Promise(q => requestAnimationFrame(() => requestAnimationFrame(q))); \
+            let r = m(); for (let i = 0; i < 40; i++) { const was = ok(r) && String(r); await (was ? paint() : new Promise(q => st(q, 50))); r = m(); if (was === String(r)) break; } at.push(...r); }; \
           box.focus(); await new Promise(r => st(r, 100)); kb(336); await look(); \
           box.value = 'one\\ntwo\\nthree'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
           box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); await new Promise(r => st(r, 100)); kb(0); await look(() => $('nav').getBoundingClientRect().top); \
           box.focus(); kb(336, true); box.value = 'grill me on the land mode'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
           at.push(errs.length); window.late = at; } catch (e) { window.late = [-1]; } })()";
-    let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(tmpdir("chat-kb-png").join("chat-kb.png"), |p| {
+    let png = std::env::var("DROVER_SNAPSHOTS").map_or(tmpdir("chat-kb-png").join("chat-kb.png"), |p| {
         std::path::Path::new(&p).join("chat-kb.png")
     });
-    let o = swift()
-        .env("HERDSMAN_WAIT", "12")
-        .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
+    let o = webview()
+        .env("DROVER_WAIT", "12")
+        .env("DROVER_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
         .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
             &format!("http://{addr}/"),
             "390",
             "chat",
@@ -1232,21 +1383,31 @@ fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place(
     assert_eq!(m[17], 0.0, "page errors: {out}");
 }
 
-/// #407: herdr whose `conductor-t1` (pane w9:p1) is working while `.1` is set, else idle; every call recorded.
-struct Flip(Fake, std::sync::atomic::AtomicBool);
-impl herdsman::runner::Runner for Flip {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
-        let out = self.0.run(prog, args);
-        if !args.starts_with(&["agent".into(), "list".into()]) {
-            return out;
+fn working(b: &FakeShed, on: bool) {
+    let st = ["idle", "working"][usize::from(on)];
+    b.set("orchestrator-t1", |t| t["reported"] = serde_json::json!({"state": st}));
+}
+
+struct Typing<'a>(
+    common::fake_shed::Cli<'a>,
+    &'a FakeShed,
+    std::sync::Mutex<Vec<(String, usize)>>,
+);
+impl Typing<'_> {
+    fn esc(&self) -> usize {
+        let keys = self.1.all("keys");
+        keys.iter()
+            .filter(|k| k["name"] == "orchestrator-t1" && k["keys"] == serde_json::json!(["esc"]))
+            .count()
+    }
+}
+impl drover::runner::Runner for Typing<'_> {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        if prog == "shed" && args[0] == "send" {
+            let line = format!("{prog} {}", args.join(" "));
+            self.2.lock().unwrap().push((line, self.esc()));
         }
-        let st = ["idle", "working"][usize::from(self.1.load(std::sync::atomic::Ordering::SeqCst))];
-        let stdout = agents(&[("conductor-t1", st, "/x", "w9:p1")]);
-        Ok(herdsman::runner::Out {
-            code: 0,
-            stdout,
-            stderr: String::new(),
-        })
+        self.0.run(prog, args)
     }
 }
 
@@ -1268,8 +1429,8 @@ fn body_of(res: &str) -> String {
 }
 
 /// The thread's queued messages' ids by text, as the log has them.
-fn queued_ids(c: &herdsman::Ctx) -> Vec<(u64, String)> {
-    let ev = herdsman::events::read(&c.state).unwrap();
+fn queued_ids(c: &drover::Ctx) -> Vec<(u64, String)> {
+    let ev = drover::events::read(&c.state).unwrap();
     let q = ev
         .iter()
         .filter(|e| e.kind == "thread-queue" && e.data.get("q").is_none());
@@ -1288,14 +1449,14 @@ fn until(f: impl Fn() -> bool) -> bool {
 /// the message; [send now] steers a queued one in and unqueues it.
 #[test]
 fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now() {
-    use std::sync::atomic::Ordering::SeqCst;
-    let c = setup("chat-queue");
+    let b = leaked();
+    let c = acp_setup("chat-queue", b);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
         "t1\n"
     );
     assert_eq!(
-        run(&c, &live(), &["thread", "say", "t1", "hi"]).0,
+        run(&c, &b.cli(&acp()), &["thread", "say", "t1", "hi"]).0,
         0,
         "its conductor is up"
     );
@@ -1309,12 +1470,14 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
         "Mozilla/5.0 (iPhone)",
         now,
     );
-    let r = std::sync::Arc::new(Flip(live(), true.into()));
+    working(b, true);
+    let f: &'static Fake = Box::leak(Box::new(acp()));
+    let r: &'static Typing = Box::leak(Box::new(Typing(b.cli(f), b, Default::default())));
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
-    let (c2, r2) = (c.clone(), r.clone());
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &*r2, l, false));
-    let typed = |t: &str| r.0.called(&format!("herdr agent prompt conductor-t1 [t1] owner: {t}"));
+    let c2 = c.clone();
+    std::thread::spawn(move || drover::serve::serve_on(&c2, r, l, false));
+    let typed = |t: &str| f.called(&format!("shed send orchestrator-t1 [t1] owner: {t}"));
     for t in ["one", "two", "three"] {
         assert_eq!(post_to(&addr, &cookie, &format!("op=queue&t=t1&text={t}")), "queued\n");
     }
@@ -1333,7 +1496,8 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
         post_to(&addr, &cookie, "op=unqueue&t=t1&q=1"),
         "error: no such queued message\n"
     );
-    let (chat, _) = frags(&Server::new(&c, &*r, Some(ADDR.into())), &cookie, now);
+    let on = b.on(r);
+    let (chat, _) = frags(&Server::new(&c, &on, Some(ADDR.into())), &cookie, now);
     let row = |q: u64, t: &str| {
         format!("<div class=tq data-q={q}><p title=\"{t}\">{t}</p><span class=btns><button type=button name=qn>send now</button><button type=button name=qe>edit</button><button type=button name=qx>remove</button></span></div>")
     };
@@ -1343,15 +1507,11 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
         "{chat}"
     );
     std::thread::sleep(std::time::Duration::from_secs(3));
-    assert!(
-        !typed("one") && !typed("two"),
-        "typed mid-turn: {:?}",
-        r.0.calls.borrow()
-    );
+    assert!(!typed("one") && !typed("two"), "typed mid-turn: {:?}", f.calls.borrow());
     // The turn ends: both go in, in order; the removed one never.
-    r.1.store(false, SeqCst);
-    assert!(until(|| typed("two")), "{:?}", r.0.calls.borrow());
-    let calls = r.0.calls.borrow().clone();
+    working(b, false);
+    assert!(until(|| typed("two")), "{:?}", f.calls.borrow());
+    let calls = f.calls.borrow().clone();
     let at = |t: &str| calls.iter().position(|c| c.ends_with(&format!("owner: {t}")));
     assert!(
         at("one edited") < at("two") && at("three").is_none() && at("one").is_none(),
@@ -1362,58 +1522,61 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
         l.contains("\"from\":\"owner\",\"text\":\"one edited\"") && l.contains("\"from\":\"owner\",\"text\":\"two\"")
     );
     assert_eq!(l.matches("\"why\":\"sent\"").count(), 2, "{l}");
-    let (chat, _) = frags(&Server::new(&c, &*r, Some(ADDR.into())), &cookie, now);
+    let (chat, _) = frags(&Server::new(&c, &on, Some(ADDR.into())), &cookie, now);
     assert!(!chat.contains("class=tq"), "the queue is empty");
-    // Steer: Esc into the conductor's pane, then the message.
-    r.1.store(true, SeqCst);
+    working(b, true);
+    assert_eq!(r.esc(), 0);
     assert_eq!(post_to(&addr, &cookie, "op=steer&t=t1&text=stop+that"), "sent\n");
-    assert!(until(|| typed("stop that")), "{:?}", r.0.calls.borrow());
-    let calls = r.0.calls.borrow().clone();
-    let esc = calls
-        .iter()
-        .position(|c| c.starts_with("herdr pane send-keys w9:p1 Escape"));
-    assert!(
-        esc.is_some() && esc < calls.iter().position(|c| c.ends_with("owner: stop that")),
-        "{calls:?}"
-    );
+    assert!(until(|| typed("stop that")), "{:?}", f.calls.borrow());
+    let seen = r.2.lock().unwrap().clone();
+    let esc = seen.iter().find(|(l, _)| l.ends_with("owner: stop that")).map(|s| s.1);
+    assert_eq!(esc, Some(1), "Esc before the message: {seen:?}");
     // [send now]: a queued message steered in, out of the queue.
     assert_eq!(post_to(&addr, &cookie, "op=queue&t=t1&text=four"), "queued\n");
     let four = queued_ids(&c).last().unwrap().0;
     assert_eq!(post_to(&addr, &cookie, &format!("op=steer&t=t1&q={four}")), "sent\n");
-    assert!(until(|| typed("four")), "{:?}", r.0.calls.borrow());
-    assert_eq!(r.0.count("herdr pane send-keys w9:p1 Escape"), 2);
+    assert!(until(|| typed("four")), "{:?}", f.calls.borrow());
+    assert_eq!(r.esc(), 2);
     assert_eq!(log(&c).matches("\"why\":\"sent\"").count(), 3);
     assert_eq!(post_to(&addr, &cookie, "op=stop&t=t1"), "stopping\n");
-    assert_eq!(r.0.count("herdr pane send-keys w9:p1 Escape"), 3, "[stop] is Esc alone");
+    assert_eq!(r.esc(), 3, "[stop] is Esc alone");
 }
 
 /// #407: a finished turn's commands fold into one `N commands` row (closed); the live turn's stay rows; once that
 /// turn ends they fold too. The pill's turn start is the owner's last message.
 #[test]
 fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
-    let c = setup("chat-fold");
+    let b = FakeShed::new();
+    let c = acp_setup("chat-fold", &b);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
         "t1\n"
     );
     let cmd = |n: &str| {
-        let d = serde_json::json!({"thread": "t1", "cmd": format!("herdsman brief sendmeter {n}")});
-        herdsman::events::append(
+        let d = serde_json::json!({"thread": "t1", "cmd": format!("drover brief sendmeter {n}")});
+        drover::events::append(
             &c.state,
-            &herdsman::events::Event::new(T, "sendmeter", None, "thread-cmd", d),
+            &drover::events::Event::new(T, "sendmeter", None, "thread-cmd", d),
         )
         .unwrap();
     };
-    assert_eq!(run(&c, &live(), &["thread", "say", "t1", "go"]).0, 0);
+    let f = acp();
+    let cli = b.cli(&f);
+    assert_eq!(run(&c, &cli, &["thread", "say", "t1", "go"]).0, 0);
     cmd("1");
     cmd("2");
-    assert_eq!(run(&c, &live(), &["thread", "reply", "t1", "done"]).0, 0);
-    assert_eq!(run(&c, &live(), &["thread", "say", "t1", "again"]).0, 0);
+    assert_eq!(run(&c, &cli, &["thread", "reply", "t1", "done"]).0, 0);
+    assert_eq!(run(&c, &cli, &["thread", "say", "t1", "again"]).0, 0);
+    assert!(
+        f.called("shed send orchestrator-t1 [t1] owner: again"),
+        "{:?}",
+        f.calls.borrow()
+    );
     cmd("3");
     let row = |n: &str| {
-        format!("<details class=\"blk run\"><summary><span class=k>$</span><span class=cmd>herdsman brief sendmeter {n}</span><i class=cv></i></summary></details>")
+        format!("<details class=\"blk run\"><summary><span class=k>$</span><span class=cmd>drover brief sendmeter {n}</span><i class=cv></i></summary></details>")
     };
-    let ev = herdsman::events::read(&c.state).unwrap();
+    let ev = drover::events::read(&c.state).unwrap();
     let seq = |n: &str| {
         ev.iter()
             .find(|e| e.str("cmd").is_some_and(|x| x.ends_with(n)))
@@ -1422,7 +1585,9 @@ fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
     };
     let since = ev.iter().rfind(|e| e.str("text") == Some("again")).unwrap().ts;
     let chat = |st: &str| {
-        let r = Fake::default().reply("herdr agent list", &agents(&[("conductor-t1", st, "/x", "w9:p1")]));
+        b.set("orchestrator-t1", |t| t["reported"] = serde_json::json!({"state": st}));
+        let f = Fake::default();
+        let r = b.on(&f);
         let s = Server::new(&c, &r, Some(ADDR.into()));
         frags(&s, &pair(&s, &c, "Mozilla/5.0 (iPhone)", T), T).0
     };
@@ -1470,7 +1635,9 @@ fn a_stream_with_a_thread_open_stamps_its_watch_file() {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || herdsman::serve::serve_on(&c2, &live(), l, false));
+    let b = leaked();
+    b.attach(&c);
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, false));
     let open = |q: &str| {
         let mut s = std::net::TcpStream::connect(addr).unwrap();
         write!(s, "GET /live?tab=chat{q} HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n").unwrap();
@@ -1518,8 +1685,7 @@ fn a_stream_with_a_thread_open_stamps_its_watch_file() {
 /// page), and a failed send keeps the draft. (#443: at 390 px the thread's messages scroll, never the page.)
 #[test]
 fn the_thread_follows_its_end_until_you_drag_and_drafts_survive_a_reload() {
-    if !(cfg!(target_os = "macos") && std::process::Command::new("swift").arg("--version").output().is_ok()) {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let c = coded("chat-follow");
@@ -1568,11 +1734,10 @@ fn the_thread_follows_its_end_until_you_drag_and_drafts_survive_a_reload() {
           await nap(300); \
           at.push(+(box.value === 'a draft'), +(localStorage.getItem('draft:t1') === 'a draft'), f.querySelectorAll('.att').length); \
           window.late = [...at, errs.length]; } catch (e) { window.late = [-1, window.late.length]; } })()";
-    let o = swift()
-        .env("HERDSMAN_WAIT", "10")
-        .env("HERDSMAN_PRE", pre)
+    let o = webview()
+        .env("DROVER_WAIT", "10")
+        .env("DROVER_PRE", pre)
         .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
             &format!("http://{addr}/?thread=t1#chat"),
             "390",
             "chat",

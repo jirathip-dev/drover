@@ -54,7 +54,7 @@ const DBG = new URLSearchParams(location.search);
 let want = DBG.get('issue');
 tab(document.documentElement.dataset.tab || 'queue');
 // #206 `?debug` (kept for the tab's session): how the page came up. A load or reload repaints it all; a pull only refresh()es.
-const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { sessionStorage.debug = 1; console.log('[herdsman]', ...a); } } catch (e) {} };
+const dbg = (...a) => { try { if (DBG.has('debug') || sessionStorage.debug) { sessionStorage.debug = 1; console.log('[drover]', ...a); } } catch (e) {} };
 dbg('page', performance.getEntriesByType('navigation')[0]?.type, 'tab', document.documentElement.dataset.tab);
 addEventListener('pageshow', e => dbg('pageshow', e.persisted ? 'from bfcache' : 'loaded'));
 // #241: the Lanes modes are the theme's `modes` (farm, kitchen: scene, ascii; terminal: glyph alone); TT is the theme
@@ -394,7 +394,7 @@ function words(root) {
     p.innerHTML = tw('tab-' + t, t);
   }
   if (root === document) syswords();
-  root.querySelectorAll('.ask>p:first-child>b').forEach(b => relabel(b, 'needs', 'needs you'));
+  root.querySelectorAll('.ask>p:first-of-type>b').forEach(b => relabel(b, 'needs', 'needs you'));
   root.querySelectorAll('.qg>h3').forEach(h => relabel(h, QK[h.parentNode.dataset.g], h.dataset.p ?? h.textContent));
   root.querySelectorAll('details.q').forEach(d => {
     const o = d.querySelector('summary>span:nth-of-type(2)'), s = o && (o.querySelector(':scope>span') || o);
@@ -821,20 +821,25 @@ if ($('.msg.g, .msg.r')) toast($('.msg.g, .msg.r').textContent);
 // Every op form POSTs with fetch (same checks), toasts the redirect's `msg` and patches in place: the scroll stays
 // (#65, #140: no navigation); the tapped button spins until the reply. The plain form POST is the no-JS fallback.
 const PEND = { extend: 'one more round · starting a lane…', park: 'park · closing its lanes…', override: 'merge anyway · merging…' };
-const pend = (card, op) => { card.outerHTML = `<div class=pend data-n=${card.dataset.n}><p class=m>⟳ ${PEND[op]}</p></div>`; };
+const pend = (card, op) => { const p = el('div', 'pend'); p.dataset.n = card.dataset.n; p.innerHTML = `<p class=m>⟳ ${PEND[op]}</p>`; card.replaceWith(p); return p; };
 document.addEventListener('submit', async e => {
   const f = e.target, b = e.submitter, c = b && b.dataset.confirm;
   if (c && !confirm(c)) return e.preventDefault(); // #130: merge anyway
   if (!f.elements.op) return;
   e.preventDefault();
+  const d = new FormData(f), k = b && b.name === 'op' && b.closest('#needs>.ask');
+  if (b && b.name) d.set(b.name, b.value);
+  if (!d.get('op')) return toast(`error: ${((b || f).closest('.ask')?.querySelector('summary>span') || {}).textContent || 'this form'}: no op sent`);
   if (b) b.ariaBusy = 'true';
-  const d = new FormData(f, b), k = b && b.name === 'op' && b.closest('#needs>.ask');
-  if (k && PEND[b.value]) pend(k, b.value); // #217: the card is a pending line at once (no buttons, no second tap)
+  const p = k && PEND[b.value] && pend(k, b.value); // #217: the card is a pending line at once (no buttons, no second tap)
+  const ans = d.get('op') === 'answer' && f.closest('#needs>.ask'); // #859: an answered ask's card goes on the tap
+  if (ans) ans.remove();
   try {
     const r = await post('', d), m = r.redirected ? new URL(r.url).searchParams.get('msg') || '' : 'error: ' + (await r.text()).trim();
     toast(m);
+    if (p && /^(REFUSED|error)/.test(m)) p.replaceWith(k);
     if (!m.includes(' started for ')) refresh(); // a background job's result comes by /live and its toast
-  } catch (err) { toast('error: ' + err.message); }
+  } catch (err) { toast('error: ' + err.message); if (p) p.replaceWith(k); if (ans) refresh(); }
   if (b) b.ariaBusy = null;
 });
 B.insertAdjacentHTML('beforeend', `<div id=sheet><div class=bd></div><div class=sh role=dialog aria-modal=true>
@@ -1241,9 +1246,30 @@ function output(lines, fail) {
     (fail ? `<span class="ol cut t-m">⋯ ${n - 20} lines</span>${all.slice(b).join('')}` : '') +
     `</pre><p class=more2><button type=button><span>show all</span></button><span class=m>20 of ${n} lines</span></p></div>`;
 }
+// #750: a transcript that is not a parsed screen (an ACP session's: `> prompt`, `[tool] title (status)`, the reply)
+// keeps its line breaks; each `[tool] ` entry is one line, the rest of a multi-line title (to its `(status)`) a tap away.
+const flat = lines => lines.length > 0 && !lines.some(l => /^\s*[⏺⎿❯›•┊💻]/.test(plain(l)));
+function text(lines) {
+  const out = [], tool = l => /^\[tool\] /.test(plain(l)), end = l => /\((pending|in_progress|completed|failed)\)\s*$/.test(plain(l));
+  for (let i = 0; i < lines.length;) {
+    let j = i + 1;
+    if (tool(lines[i])) {
+      // A title's later lines run to its `(status)`; none before the next entry: the line stands alone.
+      for (let k = j; !end(lines[i]) && k < lines.length && !tool(lines[k]) && !/^> /.test(plain(lines[k])); k++) if (end(lines[k])) { j = k + 1; break; }
+      const rest = lines.slice(i + 1, j), head = plain(lines[i]).slice(7);
+      out.push({ key: 'tool:' + i + ':' + head, k: 'run', html: `<details class="blk run"><summary><span class=k>tool</span><span class=cmd>${esc(head)}</span><i class=cv></i></summary>${rest.length ? output(rest) : ''}</details>` });
+    } else {
+      while (j < lines.length && !tool(lines[j])) j++;
+      out.push({ key: 'txt:' + i + ':' + plain(lines[i]), k: 'txt', html: `<div class=txt>${lines.slice(i, j).map(l => html(runs(l))).join('\n')}</div>` });
+    }
+    i = j;
+  }
+  return out;
+}
 // Blocks as {key, k, html, open}: tool runs start collapsed, you and the assistant open (Q4); status is a quiet line.
 // `busy`: the live status line shows activity, so a last tool run with no output yet is `running`.
 function blocks(lines, harness, busy) {
+  if (flat(lines)) return text(lines);
   const gs = group(lines);
   return gs.map((g, i) => {
     const head = plain(g.head).trim(), key = g.k + ':' + head + ':' + plain(g.lines[0] || '').trim();
@@ -1261,13 +1287,14 @@ function blocks(lines, harness, busy) {
     return { key, k: 'run', html: `<details class="blk run">${sum(shell ? '$' : esc(name), `<span class=cmd>${esc(cmd)}</span>${tag}`)}${text.trim() ? output(g.lines, fail) : ''}</details>` };
   });
 }
-// #260 the default view: prompts, each turn's final reply, asks and herdsman notices (`{at, text}`: spawned, ask,
+// #260 the default view: prompts, each turn's final reply, asks and drover notices (`{at, text}`: spawned, ask,
 // verdict, merged). #315 screen-first: the pane's role runs (you, and the last assistant run before each prompt; none:
 // every block), the notices first (pane lines have no times); `said` (Claude's session transcript, `[{k: me | ai, text,
 // at}]`), when it has a message, is an enhancement in time order. A Claude lane without one says so in a line.
 function matters(lines, said, notices, harness) {
   const note = (key, t, at) => ({ key, k: 'note', at, html: `<p class="qs note">${esc(t)}</p>` });
   const ns = (notices || []).map(n => note('n:' + n.at + ':' + n.text, n.text, n.at * 1000));
+  if ((!said || !said.length) && flat(lines)) return ns.concat(text(lines));
   if (!said || !said.length) {
     const bs = blocks(lines, harness), last = i => (bs.slice(i + 1).find(b => /^(me|ai)$/.test(b.k)) || {}).k !== 'ai';
     const rs = bs.filter((b, i) => b.k === 'me' || b.k === 'ai' && last(i));
@@ -1425,7 +1452,7 @@ function open(e) {
   now.replaceChildren();
   hist = []; tail = []; said = null; notes = []; turns = 10;
   $('.live').hidden = true;
-  say(spane ? 'typed text goes to the login, then Enter (empty: Enter only)' : rev ? 'reviewer lane: read-only' : other ? 'not a herdsman lane: herdsman can only close its pane' : '', other || spane ? null : true);
+  say(spane ? 'typed text goes to the login, then Enter (empty: Enter only)' : rev ? 'reviewer lane: read-only' : other ? 'not a drover lane: drover can only close its pane' : '', other || spane ? null : true);
   sh.className = 'sh';
   show(kb() ? 'full' : 'mid');
   poll();
@@ -1653,7 +1680,7 @@ const lget = () => { try { return JSON.parse(get('later')) || {}; } catch (e) { 
 const ckey = c => (c.dataset.ask ? 'prompt' : c.dataset.n ? 'nh' : 'ask') + ' ' + ((c.querySelector('.m') || {}).textContent || '').split(' · ').filter(s => !/^\d+[smhd]$/.test(s)).join(' · ');
 function csig(c) {
   const x = c.cloneNode(true);
-  x.querySelectorAll(':scope>p:first-child, .cd, .st, .as, .lat').forEach(e => e.remove());
+  x.querySelectorAll(':scope>summary, :scope>p:first-of-type, .cd, .st, .as, .lat').forEach(e => e.remove());
   let h = 0;
   for (const ch of x.textContent.replace(/\b\d+[smhd]\b/g, '') + ((x.querySelector('[name=id]') || {}).value || '')) h = Math.imul(h, 31) + ch.charCodeAt(0) | 0;
   return (h >>> 0).toString(36);
@@ -1820,7 +1847,7 @@ document.addEventListener('click', async e => {
   if (!e.target.closest('#pairp')) (e.target.closest('.pairf') || $('header')).after(pp);
   pp.hidden = false;
   clearTimeout(ttl);
-  if (r.ok) pp.replaceChildren(el('p', 'code', t), el('p', 'm', `Waiting for approval on the Mac: herdsman serve approve ${t}` + (h ? ` · ${h}` : '')), ...(c ? [el('p', '', c), el('button', 'pairc', 'copy'), el('span', 'm', ' paste in Terminal ')] : []), el('button', 'pairx', 'cancel'));
+  if (r.ok) pp.replaceChildren(el('p', 'code', t), el('p', 'm', `Waiting for approval on the Mac: drover serve approve ${t}` + (h ? ` · ${h}` : '')), ...(c ? [el('p', '', c), el('button', 'pairc', 'copy'), el('span', 'm', ' paste in Terminal ')] : []), el('button', 'pairx', 'cancel'));
   else pp.replaceChildren(el('p', '', s));
   pp.scrollIntoView({ block: 'nearest' });
   if (!r.ok) return;
@@ -1874,10 +1901,10 @@ function pipeline(sec) {
     const both = d.checks.length > 1 ? ` · merge needs a PASS from ${d.checks.join(' and ')} at the same head` : '';
     h += `<p class=pv><span class=g>✓ valid</span> · ${S.length} stages (${esc(S.map(s => s.name).join(', '))}) · every stage reachable, every path ends, every loop has a limit${esc(both)}</p>`;
   }
-  const head = d.builtin ? `# Built-in: herdsman runs this while fleet.toml has no\n# [[fleet.${d.fleet}.pipeline.stage]]. Copy it there to change it.\n` : '';
+  const head = d.builtin ? `# Built-in: drover runs this while fleet.toml has no\n# [[fleet.${d.fleet}.pipeline.stage]]. Copy it there to change it.\n` : '';
   const toml = S.map(s => `\n[[fleet.${d.fleet}.pipeline.stage]]\nname = "${s.name}"\nkind = "${s.kind}"\n${s.role ? `role = "${s.role}"\n` : ''}${s.rounds != null ? `rounds = ${s.rounds}\n` : ''}next = { ${Object.entries(s.next).map(([o, t]) => `${o} = "${t}"`).join(', ')} }\n`).join('');
   const what = d.builtin ? 'the built-in pipeline' : `[fleet.${d.fleet}.pipeline]`;
-  const lg = '<i class="kd b">▲</i> build pushes code · <i class="kd c">◆</i> check: PASS or FAIL · <i class="kd g">◫</i> gate: herdsman\'s own · <i class="kd m">✓</i> merged · <i class="kd x">!</i> parked';
+  const lg = '<i class="kd b">▲</i> build pushes code · <i class="kd c">◆</i> check: PASS or FAIL · <i class="kd g">◫</i> gate: drover\'s own · <i class="kd m">✓</i> merged · <i class="kd x">!</i> parked';
   sec.innerHTML = h + `<div class=pw2><div>${pgraph(d)}<p class=lg>${lg}</p></div><details class=tm><summary><i class=cv></i><span>fleet.toml · ${esc(what)}</span></summary><pre>${esc((head + toml).trim())}</pre></details></div>`;
 }
 // One grid row per text line (`--ln` tall), so a rail meets each line at its middle: column 1 the park rail, 2 the
@@ -1897,7 +1924,7 @@ function pgraph(d) {
   S.forEach((s, i) => {
     const errs = d.bad.filter(b => b.stage === s.name), dead = !reach.includes(s.name), k = K[s.kind] ?? 'x';
     const tag = (s.here ? `<span class="tag m">${s.here} here</span>` : '') + (loops.includes(s.name) ? `<span class=lp>↺ ${esc(s.name)}</span>` : '');
-    const lines = [[`<i class="kd ${k}">${G[k]}</i><b>${esc(s.name)}</b><span class=m>${s.kind === 'gate' ? 'gate · herdsman' : esc(s.kind)}</span>${tag}`]];
+    const lines = [[`<i class="kd ${k}">${G[k]}</i><b>${esc(s.name)}</b><span class=m>${s.kind === 'gate' ? 'gate · drover' : esc(s.kind)}</span>${tag}`]];
     const ci = d.required.length ? d.required.join(' + ') : 'green', from = d.checks.length > 1 ? `from ${d.checks.join(' + ')} ` : '';
     const dt = esc(s.role ? `role ${s.role} · ${s.run ?? 'not defined'}` : `CI ${ci} · PASS ${from}at head · serial · mergeable`);
     lines.push([`<span class=dt title="${dt}">${dt}</span>`]);
@@ -2150,7 +2177,7 @@ document.addEventListener('input', e => {
   if (!(EDIT && EDIT.t === a.form.dataset.t)) draft(a.form.dataset.t, a.value);
 });
 // #407: the picked files of each thread in IndexedDB (their bytes, which every WebKit keeps), read back once at load.
-const IDB = new Promise(ok => { try { const q = indexedDB.open('herdsman', 1); q.onupgradeneeded = () => q.result.createObjectStore('att'); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); } catch (e) { ok(null); } });
+const IDB = new Promise(ok => { try { const q = indexedDB.open('drover', 1); q.onupgradeneeded = () => q.result.createObjectStore('att'); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); } catch (e) { ok(null); } });
 const idb = f => IDB.then(d => d && new Promise(ok => { const q = f(d.transaction('att', 'readwrite').objectStore('att')); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); })).catch(() => null);
 const attSave = async t => { const l = ATS[t] && await Promise.all(ATS[t].map(async f => ({ name: f.name, type: f.file.type, data: await f.file.arrayBuffer() }))); return idb(o => l ? o.put(l, t) : o.delete(t)); };
 var ATL = Promise.all([idb(o => o.getAllKeys()), idb(o => o.getAll())]).then(([ks, vs]) => {

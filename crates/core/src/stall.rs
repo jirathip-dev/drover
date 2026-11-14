@@ -128,3 +128,120 @@ pub fn stalled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], agents: &[
     );
     Some(Act::Escalate("LANE_STALLED", why))
 }
+
+/// #819: a check lane with no verdict since its spawn and no new pane output this long is replaced.
+pub const STALE_CHECK_SECS: u64 = 2 * 3600;
+
+/// #819: the minutes check lane `lane` of `fleet` #`n` has been quiet, once that is [`STALE_CHECK_SECS`].
+pub fn stale_check(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    ev: &[Event],
+    agents: &[Value],
+    (fleet, n): (&str, u64),
+    lane: &str,
+) -> Option<u64> {
+    let i = ev
+        .iter()
+        .rposition(|e| e.kind == "spawn" && e.str("agent") == Some(lane))?;
+    let sp = &ev[i];
+    if !agents.iter().any(|a| a["name"] == lane) || ev[i + 1..].iter().any(|e| e.is("verdict", fleet, n)) {
+        return None;
+    }
+    let screen = herdr::read(&On::of(r, Some(sp)), sp.str("pane")?).ok()?;
+    let tools = crate::shed::session(ctx, lane)["tools"]
+        .as_object()
+        .is_some_and(|m| !m.is_empty());
+    let quiet = ctx.now.saturating_sub(changed(ctx, lane, &screen, tools).max(sp.ts));
+    (quiet >= STALE_CHECK_SECS).then_some(quiet / 60)
+}
+
+fn changed(ctx: &Ctx, lane: &str, screen: &str, busy: bool) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let path = ctx.state.with_file_name("pane-seen.json");
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut seen: serde_json::Map<String, Value> = serde_json::from_str(&text).unwrap_or_default();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    screen.hash(&mut h);
+    let hash = format!("{:016x}", h.finish());
+    let at = seen.get(lane).filter(|s| !busy && s["hash"] == hash.as_str());
+    if let Some(t) = at.and_then(|s| s["at"].as_u64()) {
+        return t;
+    }
+    seen.insert(lane.into(), json!({"hash": hash, "at": ctx.now}));
+    let _ = std::fs::write(&path, Value::Object(seen).to_string());
+    ctx.now
+}
+
+/// #792: the prompt a silent ACP lane gets once its turn is cancelled.
+pub const NUDGE: &str = "continue: your last step finished or failed; carry on, or end your turn with `drover turn`";
+
+/// #792: a lane's process tree at or over this much of one core runs its open tool call.
+pub const BUSY_CPU_PCT: u64 = 10;
+
+/// #792: what drive does about a silent ACP lane (`fleet` #`issue`'s `lane`).
+pub enum Silent {
+    Nudge(String),
+    Respawn(String, String),
+    Escalate(String),
+}
+
+pub fn silent(ctx: &Ctx, cfg: &Config, ev: &[Event], agents: &[Value], fleet: &str) -> Vec<(u64, String, Silent)> {
+    let mut out = vec![];
+    for s in fold(ev).values().filter(|s| s.fleet == fleet) {
+        let staged = s.lanes.iter().find_map(|(r, a)| {
+            let on = s.state == "design" && crate::events::STAGES.contains(&r.as_str()) && s.lane.as_ref() == Some(a);
+            on.then_some((r.as_str(), a.as_str()))
+        });
+        let Some((role, lane)) = s.active_lane().or(staged) else {
+            continue;
+        };
+        let (Some(sp), o) = (last_spawn(ev, lane), crate::shed::session(ctx, lane)) else {
+            continue;
+        };
+        let open = o["tools"].as_object().is_some_and(|m| !m.is_empty()) && o["cpu"].as_u64() >= Some(BUSY_CPU_PCT);
+        if o["turn"] != true || open || !agents.iter().any(|a| a["name"] == lane) {
+            continue;
+        }
+        let mine = |k: &'static str| move |e: &&Event| e.kind == k && e.str("agent") == Some(lane);
+        let nudged = ev.iter().rfind(mine("nudged")).filter(|e| e.ts >= sp.ts);
+        let since = [o["at"].as_u64().unwrap_or(0), sp.ts, nudged.map_or(0, |e| e.ts)];
+        let since = since.into_iter().max().unwrap_or_default();
+        if ctx.now < since + cfg.limits.silent_minutes * 60 {
+            continue;
+        }
+        let hour = |e: &&Event| ctx.now < e.ts + 3600;
+        let respawned = ev.iter().rfind(mine("respawned-silent")).filter(hour);
+        let recent = respawned.or(ev.iter().rfind(mine("nudged")).filter(hour));
+        let quiet = crate::events::age(ctx.now - since);
+        let unanswered = nudged.filter(|n| o["said"].as_u64().is_none_or(|t| t <= n.ts));
+        let act = match (unanswered, respawned, recent) {
+            (Some(_), None, _) => Silent::Respawn(role.into(), format!("silent {quiet} after its nudge")),
+            (_, _, Some(e)) => Silent::Escalate(format!(
+                "lane {lane} went silent mid-turn again ({quiet}) within the hour after its {}",
+                ["nudge", "respawn"][usize::from(e.kind == "respawned-silent")]
+            )),
+            _ => Silent::Nudge(format!("silent {quiet} mid-turn")),
+        };
+        out.push((s.issue, lane.to_string(), act));
+    }
+    out
+}
+
+/// #792: cancel silent lane `lane`'s turn and prompt it once; logged `nudged`.
+pub fn nudge(
+    ctx: &Ctx,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    ev: &[Event],
+    (fleet, n): (&str, u64),
+    lane: &str,
+    why: &str,
+) -> Result<()> {
+    let on = On::of(r, last_spawn(ev, lane));
+    let cancelled = crate::shed::cli(&on, &["cancel", lane]).is_ok();
+    let sent = herdr::prompt(&on, lane, NUDGE).is_ok();
+    writeln!(out, "{fleet} #{n} nudged {lane}: {why}")?;
+    let d = json!({"agent": lane, "why": why, "cancelled": cancelled, "sent": sent});
+    append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "nudged", d))
+}

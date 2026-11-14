@@ -1,0 +1,28 @@
+name: arch-check
+# #734: the reusable step every fleet repo's CI calls: `drover arch-check` against its .drover/arch.toml.
+on:
+  workflow_call:
+    inputs:
+      config:
+        type: string
+        default: .drover/arch.toml
+
+jobs:
+  arch-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - uses: dtolnay/rust-toolchain@1.99.1
+      - name: install drover
+        run: cargo install --locked --git https://github.com/jirathip-dev/herdsman --branch staging drover
+      - name: arch-check
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            printf '%s' "$BODY" > "$RUNNER_TEMP/pr-body.md"
+            set -- --base HEAD^1 --pr-body "$RUNNER_TEMP/pr-body.md"
+          fi
+          drover arch-check --config "${{ inputs.config }}" "$@"

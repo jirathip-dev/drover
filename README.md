@@ -1,48 +1,114 @@
-# herdsman
+# drover (was herdsman)
 
-A Rust CLI that drives a fleet of coding agents over [herdr](https://herdr.dev). It works a GitHub
-issue queue through build → review → merge on its own, with hard gates, host-load admission and a
-live phone board with web push. Harness-neutral (Claude Code, Hermes, dsh); it needs no Hermes to run:
-its own jobs drive, install and clean ([setup](docs/setup.md#4-watchdog)).
-
-## Why
-
-If the rules live in a prompt, sooner or later an agent talks its way past them. herdsman keeps the
-state in an append-only event log and owns every step that matters: spawn, verdict, merge. Agents act
-only through it, and it refuses anything that breaks a rule.
-
-- **It drives the queue itself.** `herdsman drive` does one pass (start the next issue, review a pushed
-  head, fix a FAIL, merge a PASS); `herdsman timer install` runs it every few minutes. No AI orchestrator.
-- **The pipeline is configurable.** The default is impl → rev → gates → merge; yours is validated as a
-  full loop when the config loads and drawn on the board.
-- **A phone board.** `herdsman serve` is a PWA: queue, lanes, host, events, and web push for what needs you.
-  Frozen for features (#552): bug fixes only; new UI goes to cooee and cooee-drover, over `/api/v1` (see below).
-
-## How it fits
+A Rust CLI that runs a fleet of coding-agent lanes (impl, rev, verify, design, architect) over a GitHub issue queue.
+Each issue goes build → review → merge through hard gates. drover keeps the state in an append-only event log and
+owns spawn, verdict and merge; agents act only through it, and it refuses anything that breaks a rule. Owners talk to
+it through orchestrator threads, in cooee or on the phone board.
 
 ```
-cooee  →  cooee-drover  →  herdsman /api/v1
-(app)     (tabs)           (engine)
+cooee (app)  →  drover: /api/v1 and its screens  →  drive, lanes, gates, merge
 ```
 
-Calls go one way, left to right; nothing on the right depends on what is to its left.
+## Today
 
-- **herdsman** (this repo) is the engine: queue, drive, lanes, reviews, gates, merge. It is to be renamed
-  drover (#456).
-- **cooee** is the app: chats, and shed sessions, which include the lanes as Workflow chats (cooee#33).
-- **cooee-drover** is cooee's Queue, Asks and Fleets tabs. They read and act through herdsman's `/api/v1` and
-  reimplement nothing.
-- The old board (`herdsman serve`) is frozen (#552) and retires once #553's parity rows pass on the owner's phone.
+Shipped on `staging`. Each line names the PR (or file) that proves it.
 
-A new Queue-tab feature's data comes from herdsman's `/api/v1`, so herdsman changes first: it adds the field to
-`/api/v1` (with its fixture in `crates/cli/tests/api_v1_contract.rs`), then cooee-drover's tab reads it. A
-consumer never derives engine state itself ([docs/serve.md](docs/serve.md#json-api-v1-265)).
+**Drive and gates**
+- `drover drive` does one pass: start the next issue, review a pushed head, fix a FAIL, merge a PASS; `drover
+  timer install` runs it every few minutes (#135, #213).
+- Merge needs a PASS verdict and green CI at the PR's exact head sha, at most 3 review rounds, never main (`crates/core/src/gate.rs`).
+- The lane hook blocks merges, comments and protected pushes; reviewers are read-only (`hooks/`, #848).
+- Serial path groups (#306), the queue-wide line cap `drover cap` (#671), and arch-check from `.drover/arch.toml`
+  (#758, #772).
+- `--repro`, `--perf` and `--refactor` playbooks (#758); impl lanes end each turn with `drover turn` (#591).
+- Each lane commit carries a why note: `drover why` (#691).
+- A deterministic simulation of concurrent passes: `just sim` (#695, #697).
 
-## Quick start
+**Roles**
+- impl and rev, on different providers if you like (#751).
+- verify: drives the real app from `.drover/verify.md` after rev's PASS (#469, #765).
+- design (UI mockups) and architect (ADR) run before impl, owner-approved (#448, #760).
+- lesson: a weekly lane turns repeated review findings into checks, shadow first (#449, #586, #756).
+
+**Lane runtime**
+- herdr panes (the default), shed terminals, or shed-acp ACP sessions (#390, #480, #590); see
+  [runtimes](docs/runtimes.md).
+- Lane state comes from herdr's and shed's event streams (#585).
+- Every external call is time-limited by one runner (#763).
+
+**Orchestrator threads, asks and run cards**
+- A thread per repo, with its orchestrator agent; many orchestrators allowed (#385, #811).
+- A lane's ask goes to its repo's orchestrator first; owner topics wait for the owner (#551).
+- Run cards: the exact command, approved once by the owner, run in the background (#587, #841).
+- Thread handoff (#421), `config propose` cards (#400), design review answers (#828).
+
+**Hosts and CI runners**
+- Lanes on many machines, placed by tags and load (#211, #564); workspace roots (#645).
+- Cloud hosts with idle stop and a spend budget (#280); shed-acp hosts with no herdr (#705).
+- A host offline 15 min gets its lanes restarted on the main host (#847).
+- A never-started needs-human lane gets [start lane] (#858).
+- Owner-approved CI runner VMs for orchestrators (#596).
+
+**Accounts, providers and secrets**
+- Lanes sign in per account through config folders; drover keeps no tokens (#698, #795).
+- Fallback to the next harness or account on a usage limit (#311).
+- Providers: Claude Code, Codex, Gemini, Hermes, dsh, each one module (#836, `crates/core/src/providers/`).
+- Secrets are 0600 files on the main host; no secret store, no Keychain read (#767).
+
+**API and apps**
+- `/api/v1`: the read and act API every screen uses, pinned by a contract test (#589, #583, #797).
+- Drover in cooee: drover serves the plugin itself, `cooee-plugin.toml` and `/screens/` JSON blocks (#822).
+- An orchestrator thread can live in cooee (#690).
+- The lifeboat page at `/api/v1/lifeboat` for when cooee is down (#757).
+- The old phone board (`drover serve`) is frozen to bug fixes (#552, `.github/workflows/board-freeze.yml`).
+
+## In progress / next
+
+**Rename**
+- The GitHub repo takes the name `drover` too, after #456 is live on every host.
+
+**Runtime**
+- Retire herdr: shed is the only lane runtime ([#721](https://github.com/jirathip-dev/herdsman/issues/721)); one fake shed server for tests ([#771](https://github.com/jirathip-dev/herdsman/issues/771)).
+- Sandbox every lane with srt, go/no-go ([#782](https://github.com/jirathip-dev/herdsman/issues/782)).
+
+**Design recipes**
+- The design medium from the issue, HTML by default ([#868](https://github.com/jirathip-dev/herdsman/issues/868)).
+- A design pushed under the named path raises the ask ([#872](https://github.com/jirathip-dev/herdsman/issues/872)).
+- A per-repo design recipe, `.drover/design.md` ([#873](https://github.com/jirathip-dev/herdsman/issues/873)).
+
+**cooee and the old board**
+- Parity list: every board and chat feature moves to cooee; then the board retires ([#553](https://github.com/jirathip-dev/herdsman/issues/553), [#746](https://github.com/jirathip-dev/herdsman/issues/746)).
+- Non-fleet shed sessions in the Lanes tab ([#611](https://github.com/jirathip-dev/herdsman/issues/611)).
+- One live index, fast `/api/v1/state` ([#859](https://github.com/jirathip-dev/herdsman/issues/859)).
+
+**Drive robustness**
+- An unreachable disabled host no longer stalls the tick ([#877](https://github.com/jirathip-dev/herdsman/issues/877)); skip a dead root ([#776](https://github.com/jirathip-dev/herdsman/issues/776)).
+- Fleet SLOs and a self-heal ladder ([#855](https://github.com/jirathip-dev/herdsman/issues/855)); every wait a typed promise with a deadline ([#854](https://github.com/jirathip-dev/herdsman/issues/854)).
+- Thread files from a lane's worktree ([#833](https://github.com/jirathip-dev/herdsman/issues/833)).
+
+**Rules and checks**
+- Comment rule, banned APIs, parity with cooee's lints ([#807](https://github.com/jirathip-dev/herdsman/issues/807), [#809](https://github.com/jirathip-dev/herdsman/issues/809), [#808](https://github.com/jirathip-dev/herdsman/issues/808)).
+- Every core timing a `[limits]` key ([#844](https://github.com/jirathip-dev/herdsman/issues/844)); the workflow diagram from code ([#845](https://github.com/jirathip-dev/herdsman/issues/845)).
+
+**Simulation**
+- One sim scenario per past bug ([#856](https://github.com/jirathip-dev/herdsman/issues/856)); replay a real week ([#686](https://github.com/jirathip-dev/herdsman/issues/686)); what-if config runs ([#687](https://github.com/jirathip-dev/herdsman/issues/687)).
+
+**Then**
+- A full freeze: fixes only, the whole repo ([#559](https://github.com/jirathip-dev/herdsman/issues/559)).
+
+## Naming
+
+herdsman became **drover** in #456, alongside cooee (the app) and shed (the runtime). The binary is `drover`; a
+`herdsman` alias stays for one release and prints a rename notice. `drover migrate` moves the `herdsman` config, state
+and share trees to their `drover` names and leaves each old name as a link. `HERDSMAN_*` env and a repo's
+`.herdsman/` folder are still read for one release; the new names win. Fleet, lane and event names stay.
+
+## Setup
+
 ```sh
 cargo install --path crates/cli
-mkdir -p ~/.config/herdsman
-cat > ~/.config/herdsman/fleet.toml <<'EOF'
+mkdir -p ~/.config/drover
+cat > ~/.config/drover/fleet.toml <<'EOF'
 [fleet.app]
 repo = "you/app"
 local = "~/src/app"
@@ -56,66 +122,28 @@ profile = "lane-impl"
 harness = "claude"
 profile = "lane-rev"
 EOF
-herdsman profiles sync                # per-role Claude Code folders and the lane hook
-herdsman spawn app 12 impl --dry-run  # print the plan; drop --dry-run to launch it
-herdsman status
-herdsman timer install                # the drive loop, every few minutes
-herdsman serve --addr 127.0.0.1:7777  # phone page at http://127.0.0.1:7777
+drover profiles sync                # per-role profiles and the lane hook
+drover spawn app 12 impl --dry-run  # print the plan; drop --dry-run to launch it
+drover status
+drover timer install                # the drive loop, every 5 minutes
+drover serve --addr 127.0.0.1:7777  # /api/v1, cooee's screens and the old board
 ```
-No `pipeline` table means the default pipeline. Pick the board's look with `[serve] theme = "kitchen"`.
-Full setup, from install to the board on your phone over Tailscale: [docs/setup.md](docs/setup.md).
 
-## Commands
+Self-update installs the green head of `[self_update] branch` (default `main`); serve hands its sockets to the new binary without dropping a request; `staging_serve = true` adds a read-only staging serve on `staging_addr` (default `127.0.0.1:7787`) ([setup](docs/setup.md#self-update-and-the-daily-clean-557)).
 
 | Command | What it does |
 |---|---|
-| `drive` / `timer` / `tick` | one pass of the loop; the job that runs it; check, then drive |
-| `queue` / `next` / `pause` / `resume` | ordered work queue; the first issue ready; hold a fleet |
-| `spawn` / `adopt` | worktree + herdr pane + brief, launch the role's harness; record a running lane |
-| `verdict` / `merge` | a review verdict pinned to the exact head sha; merge if every gate passes |
-| `status` / `board` / `waiting` / `serve` | per-issue state; compact board; what waits on whom; phone page |
-| `brief` / `pr` / `wait` | cached issue spec; cached PR and CI; wait for CI or merge |
-| `check` / `ask` / `answer` / `asks` | alerts; ask for a decision, answer it, list the open ones |
-| `clean` / `reclaim` / `stop` / `kill` / `close` | reclaim done lanes; idle lanes' build folders; Esc an agent; close its pane, unpushed work to `wip/` first |
-| `wip prune` | origin's `wip/*` branches by size; delete merged issues' ones that carry build output (owner) |
-| `set` / `profiles` / `accounts` / `hosts` | switch a role's model; per-role folders and hooks; accounts; hosts |
-| `setup` / `doctor` / `protection` | install the jobs; host check; branch protection on? |
-| `help --agent` | the usage doc agents get; refusals exit 3 with `REFUSED <CODE>: why` |
+| `drive` / `timer` / `tick` | one pass; the job that runs it; check, then drive |
+| `queue` / `next` / `pause` / `resume` | the ordered queue; the first ready issue; hold a fleet |
+| `spawn` / `adopt` / `turn` | start a lane; record a running one; a lane's end of turn |
+| `verdict` / `merge` / `cap` | a verdict pinned to the head sha; merge if every gate passes; the line cap |
+| `status` / `board` / `waiting` / `serve` | per-issue state; compact board; who waits on whom; the server |
+| `ask` / `answer` / `asks` / `thread` / `card` | decisions; orchestrator threads; run cards |
+| `check` / `clean` / `reclaim` / `kill` | alerts; reclaim done lanes and build folders; stop a lane, work saved |
+| `profiles` / `accounts` / `hosts` / `secret` | per-role folders and hooks; accounts; hosts; secret files |
+| `setup` / `doctor` / `why` / `lesson` | install the jobs; host check; a line's reasoning; lesson checks |
 
-## Rules it enforces
-
-- **Exact-head review.** `merge` needs a PASS verdict and green CI for the PR's current head sha. A new
-  commit makes the old verdict stale.
-- **Round limit.** At most 3 review rounds (`[limits].review_rounds`), then `needs-human`.
-- **Host-load admission.** `spawn` refuses `HOST_BUSY` under memory pressure or high load, and
-  `DISK_LOW`, `MEM_LOW` or `DISK_BUDGET` when space runs out.
-- **Protected branches.** Merges go only to the integration branch, never main.
-- **The lane hook.** Every lane runs a pre-tool hook that blocks merges, issue and PR comments, and
-  pushes to protected branches. Reviewers are read-only.
-
-## Pipeline
-
-Stages, their kinds and where each outcome goes: [docs/pipeline.md](docs/pipeline.md).
-
-## Themes
-
-The Herd's look is a folder `themes/<name>/` (sprites, scene, words) next to fleet.toml; see
-[docs/serve.md](docs/serve.md#themes-172).
-
-## Hosts
-
-Lanes on more than one machine, placed by tags and load: [docs/hosts.md](docs/hosts.md).
-
-## Disk
-
-`[limits] worktree_budget_gb` caps the worktrees; over it, drive frees the idlest lanes' build folders
-first; `herdsman reclaim` previews, then frees, those of worktrees idle 7 days ([docs/lanes.md](docs/lanes.md)).
-
-## Config
-
-`~/.config/herdsman/fleet.toml` (or `FLEET_CONFIG`); every key is in [fleet.example.toml](fleet.example.toml).
-More: [architecture](docs/architecture.md), [lanes and hooks](docs/lanes.md), [dsh](docs/dsh.md),
-[phone page](docs/serve.md), [providers and keys](docs/providers.md).
+Detail: [setup](docs/setup.md), [config](docs/config.md), [pipeline](docs/pipeline.md), [lanes and hooks](docs/lanes.md), [hosts](docs/hosts.md), [accounts](docs/accounts.md), [orchestrator](docs/orchestrator.md), [serve and /api/v1](docs/serve.md), [architecture](docs/architecture.md). Agents read `drover help --agent`.
 
 ## License
 

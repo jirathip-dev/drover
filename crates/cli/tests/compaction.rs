@@ -1,7 +1,7 @@
 //! #343: the event log's folded checkpoint and its rotation out of the live log (#344: archived rows in `state.db`).
 mod common;
 use common::tmpdir;
-use herdsman::events::{append, checkpoint, fold, history, read, rotate, states, Event, States};
+use drover::events::{append, checkpoint, fold, history, read, rotate, states, Event, States};
 use serde_json::{json, Value};
 use std::path::Path;
 
@@ -93,11 +93,11 @@ fn rotation_keeps_every_event_and_deleting_the_checkpoint_is_harmless() {
         write(&p, &recent.collect::<Vec<_>>());
         let before = read(&p).unwrap();
         let full = fold(&before);
-        let size = herdsman::db::live_bytes(&p).unwrap();
+        let size = drover::db::live_bytes(&p).unwrap();
         rotate(&p, size + 1, now).unwrap();
         assert_eq!(read(&p).unwrap().len(), before.len(), "under the limit nothing moves");
         rotate(&p, 1, now).unwrap();
-        assert!(herdsman::db::live_bytes(&p).unwrap() < size, "the live log shrank");
+        assert!(drover::db::live_bytes(&p).unwrap() < size, "the live log shrank");
         assert!(read(&p).unwrap().len() < before.len());
         let back = history(&p).unwrap();
         let rows = |v: &[Event]| {
@@ -127,7 +127,7 @@ fn rotation_keeps_every_event_and_deleting_the_checkpoint_is_harmless() {
         append(&p, &Event::new(now, "a", Some(1), "stall", json!({}))).unwrap();
         assert_eq!(read(&p).unwrap().last().unwrap().seq, before.len() as u64 + 1);
         let with = states(&p).unwrap();
-        herdsman::db::put(&p, "states", 0, &json!({})).unwrap(); // an unreadable checkpoint
+        drover::db::put(&p, "states", 0, &json!({})).unwrap(); // an unreadable checkpoint
         same(&states(&p).unwrap(), &with);
         checkpoint(&p).unwrap();
         same(&states(&p).unwrap(), &with);
@@ -141,14 +141,14 @@ fn the_shared_read_follows_appends_and_rotations() {
     let p = d.join("events.jsonl");
     let now = 90 * 86_400;
     let seqs = |v: &[Event]| v.iter().map(|e| e.seq).collect::<Vec<_>>();
-    let same = || assert_eq!(seqs(&herdsman::events::shared(&p).unwrap()), seqs(&read(&p).unwrap()));
+    let same = || assert_eq!(seqs(&drover::events::shared(&p).unwrap()), seqs(&read(&p).unwrap()));
     same(); // no database yet
     write(&p, &log(3, 400, 0));
     same();
-    let first = herdsman::events::shared(&p).unwrap();
+    let first = drover::events::shared(&p).unwrap();
     append(&p, &Event::new(now - 10, "a", Some(1), "stall", json!({}))).unwrap();
     same();
-    assert_eq!(herdsman::events::shared(&p).unwrap().len(), first.len() + 1);
+    assert_eq!(drover::events::shared(&p).unwrap().len(), first.len() + 1);
     rotate(&p, 1, now).unwrap();
     assert!(read(&p).unwrap().len() < first.len(), "the rotation archived some");
     same();
@@ -183,8 +183,172 @@ fn the_fold_of_a_50mb_log_takes_under_20ms() {
     let ms = t.elapsed().as_secs_f64() * 1e3;
     eprintln!(
         "#343: fold of a {} MB log from its checkpoint: {ms:.2} ms",
-        herdsman::db::live_bytes(&p).unwrap() >> 20
+        drover::db::live_bytes(&p).unwrap() >> 20
     );
     assert!(ms < 20.0, "{ms} ms");
     same(&st, &fold(&read(&p).unwrap()));
+}
+
+#[test]
+fn a_5mb_build_cloned_is_stored_in_16kb() {
+    let d = tmpdir("cap");
+    let p = d.join("events.jsonl");
+    let spawn = json!({"role": "impl", "agent": "a-impl-1", "branch": "issue-1"});
+    let big = format!("cp: {}", "x".repeat(5 << 20));
+    let ev = [
+        Event::new(1_000, "a", Some(1), "spawn", spawn),
+        Event::new(
+            1_001,
+            "a",
+            Some(1),
+            "build-cloned",
+            json!({"dirs": ["target"], "secs": 7, "errors": [big]}),
+        ),
+    ];
+    ev.iter().for_each(|e| append(&p, e).unwrap());
+    let back = read(&p).unwrap();
+    let stored = serde_json::to_string(&Event {
+        seq: 0,
+        ..back[1].clone()
+    })
+    .unwrap();
+    assert!(stored.len() <= 16 << 10, "{} bytes", stored.len());
+    assert!(drover::db::live_bytes(&p).unwrap() <= 32 << 10);
+    let err = back[1].data["errors"][0].as_str().unwrap();
+    assert!(
+        err.starts_with("cp: xxx") && err.contains("bytes cut"),
+        "{}",
+        &err[..80]
+    );
+    assert_eq!(
+        (back[1].data["dirs"].clone(), back[1].data["secs"].clone()),
+        (json!(["target"]), json!(7))
+    );
+    assert_eq!(serde_json::to_value(&back[0]).unwrap()["agent"], "a-impl-1");
+    same(&fold(&back), &fold(&ev));
+}
+
+#[test]
+fn rotation_of_a_young_log_archives_old_noise_and_keeps_the_folds() {
+    let d = tmpdir("young");
+    let p = d.join("events.jsonl");
+    let (now, day) = (100 * 86_400, 86_400);
+    let mut ev = log(5, 600, now - 15 * day);
+    let noise = [
+        "driven",
+        "kick",
+        "drive-pass",
+        "lane-state",
+        "conflict-predicted",
+        "intent",
+    ];
+    for i in 0..2000u64 {
+        let (fleet, issue, kind) = (["a", "b"][(i % 2) as usize], 1 + i % 6, noise[(i % 6) as usize]);
+        let issue = (kind != "drive-pass").then_some(issue);
+        let d = json!({"agent": format!("{fleet}-impl-{}", i % 3), "step": "start", "state": "gone", "files": ["x"]});
+        ev.push(Event::new(now - 15 * day + i * 640, fleet, issue, kind, d));
+    }
+    for (i, n) in (1..=6u64).enumerate() {
+        ev.push(Event::new(
+            now - 14 * day,
+            "a",
+            Some(n),
+            "needs-decision",
+            json!({"id": format!("q{i}")}),
+        ));
+    }
+    ev.push(Event::new(
+        now - 13 * day,
+        "a",
+        None,
+        "decision",
+        json!({"id": "q0", "choice": "1"}),
+    ));
+    let huge = "y".repeat(1 << 20);
+    ev.push(Event::new(
+        now - 12 * day,
+        "a",
+        Some(2),
+        "build-cloned",
+        json!({"errors": [huge.clone()]}),
+    ));
+    ev.push(Event::new(
+        now - 12 * day,
+        "a",
+        Some(3),
+        "verdict",
+        json!({"sha": "f".repeat(40), "verdict": "FAIL", "body": huge}),
+    ));
+    write(&p, &ev);
+    let before = read(&p).unwrap();
+    rotate(&p, 1, now).unwrap();
+    let after = read(&p).unwrap();
+    same(&fold(&after), &fold(&before));
+    same(&states(&p).unwrap(), &fold(&before));
+    for f in ["a", "b"] {
+        let q = |v: &[Event]| drover::queue::replay(v, f);
+        assert_eq!(q(&after), q(&before), "queue {f}");
+    }
+    let asks = |v: &[Event]| drover::events::open_asks(v).iter().map(|a| a.seq).collect::<Vec<_>>();
+    assert_eq!(asks(&after), asks(&before));
+    assert_eq!(asks(&before).len(), 5);
+    let old_noise = |v: &[Event]| {
+        v.iter()
+            .filter(|e| noise.contains(&e.kind.as_str()) && e.ts + 2 * day < now)
+            .count()
+    };
+    assert!(
+        old_noise(&after) * 10 < old_noise(&before),
+        "{} of {}",
+        old_noise(&after),
+        old_noise(&before)
+    );
+    let newest = |v: &[Event], k: &str, f: &str, n: Option<u64>| {
+        v.iter()
+            .rfind(|e| e.kind == k && e.fleet == f && e.issue == n)
+            .map(|e| e.seq)
+    };
+    for (k, f, n) in noise
+        .iter()
+        .flat_map(|k| ["a", "b"].map(|f| (k, f)))
+        .flat_map(|(k, f)| (0..=6).map(move |n| (k, f, (n > 0).then_some(n))))
+    {
+        assert_eq!(
+            newest(&after, k, f, n),
+            newest(&before, k, f, n),
+            "newest {k} {f} {n:?}"
+        );
+    }
+    assert!(
+        after
+            .iter()
+            .all(|e| serde_json::to_string(e).unwrap().len() <= 16 << 10),
+        "no oversize live row"
+    );
+    assert!(
+        !after.iter().any(|e| e.kind == "build-cloned"),
+        "the oversize passive row is archived"
+    );
+    let all = history(&p).unwrap();
+    assert_eq!(all.len(), before.len(), "nothing deleted");
+    let cloned = all.iter().find(|e| e.kind == "build-cloned").unwrap();
+    assert_eq!(
+        cloned.data["errors"][0].as_str().unwrap().len(),
+        1 << 20,
+        "history keeps it whole"
+    );
+    let v = after
+        .iter()
+        .find(|e| e.kind == "verdict" && e.ts == now - 12 * day)
+        .unwrap();
+    assert!(
+        v.str("body").unwrap().contains("bytes cut"),
+        "a row a fold reads is rewritten capped"
+    );
+    rotate(&p, 1, now).unwrap();
+    assert_eq!(
+        read(&p).unwrap().len(),
+        after.len(),
+        "a second rotation does what the first did"
+    );
 }

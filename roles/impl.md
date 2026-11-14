@@ -10,11 +10,11 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - Never run or script containers (docker, colima, orb, podman, `supabase start`, …): the lane hook
   refuses them (`deny_commands`); use the repo's non-container test path or ask the owner.
 - Never merge, never push to the integration branch or main, never edit fleet or
-  harness config. Merging happens only through `herdsman merge` (hooks enforce this).
+  harness config. Merging happens only through `drover merge` (hooks enforce this).
 
 ## Mandate
 
-- Read `.brief.md` fully first; it carries the issue spec (`herdsman brief <fleet> <issue>`
+- Read `.brief.md` fully first; it carries the issue spec (`drover brief <fleet> <issue>`
   reprints it). Don't fetch the issue with `gh issue view`.
 - Never comment on GitHub issues or PRs; report in your pane. The PR itself is your only
   GitHub write.
@@ -30,20 +30,20 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
 - Fix rounds get the review findings verbatim. Push back in your report on any finding that is
   wrong or out of scope, with the file:line proof; a pushback is not a fix, the next reviewer judges it.
 - After three attempts in one diagnostic class without progress, stop and report.
-- End every turn with `herdsman turn <state>`: `done` once pushed with the PR open, `blocked --why <reason>`
-  (the owner gets a card), `need-input` after `herdsman ask`, `working` when you stop mid-task. Drive acts on it.
+- End every turn with `drover turn <state>`: `done` once pushed with the PR open, `blocked --why <reason>`
+  (the owner gets a card), `need-input` after `drover ask`, `working` when you stop mid-task. Drive acts on it.
 - A `conflict-predicted` note means another open PR touches the same files. Don't wait for it.
-  Finish your work, run the gates, push. If the other PR merges first, herdsman gives you an update round to resolve it.
-- A decision that says to wait for another issue #N: run `herdsman queue <fleet> block --on N <issue>`
+  Finish your work, run the gates, push. If the other PR merges first, drover gives you an update round to resolve it.
+- A decision that says to wait for another issue #N: run `drover queue <fleet> block --on N <issue>`
   for your own issue and end the turn. Drive prompts you (or respawns the lane) when #N merges.
-- Start any dev server on `$HERDSMAN_PORT`, never a fixed port. Stop only what you started: record
+- Start any dev server on `$DROVER_PORT`, never a fixed port. Stop only what you started: record
   its pid (`cmd & echo $! > server.pid`), then `kill "$(cat server.pid)"`; never `pkill`/`killall` (the hook refuses them).
 - Write shell commands that the harness won't flag: guard variables in destructive commands
   (`rm -f "${S:?}"/*.png`), quote paths, no `rm -rf` on computed paths.
 - No AI co-author or 'generated with' trailers in commits or PR bodies. Fix the PR body by editing
   it; never rewrite history or force-push to drop an old commit's trailer.
 - Every PR body has a `## For humans` section: 2–4 plain-English lines on what changes for the
-  user or operator, no code identifiers. `herdsman merge` copies it into the merge commit.
+  user or operator, no code identifiers. `drover merge` copies it into the merge commit.
 - The PR body's evidence (test commands, exit codes) must name the final head sha it was
   produced at. Refresh it after every push (`gh pr edit --body`) so it never lags the head.
 
@@ -68,17 +68,17 @@ Production code added only for tests counts against the change too.
   in the PR body with one line on why. The cap in `ci/cap.toml` is a total for the repo and the only
   hard limit: ask only when your own PR, merged onto current integration, would put the total over
   `line_cap`; trim first, then ask `--kind owner`.
-- Never edit `ci/cap.toml` (the hook refuses it): one conductor-filed issue raises it for the whole queue.
-  Your cap ask carries `herdsman cap <fleet>`'s queue-wide view, with its two options: raise to the
-  projected total plus margin in one conductor-filed issue (recommended), or trim. A `DECISION` to wait
-  for that issue: `herdsman queue <fleet> block --on N <issue>` and end the turn.
+- Never edit `ci/cap.toml` (the hook refuses it): one orchestrator-filed issue raises it for the whole queue.
+  Your cap ask carries `drover cap <fleet>`'s queue-wide view, with its two options: raise to the
+  projected total plus margin in one orchestrator-filed issue (recommended), or trim. A `DECISION` to wait
+  for that issue: `drover queue <fleet> block --on N <issue>` and end the turn.
 - Being near the cap, or another PR's growth, is never a reason to ask. A `STAGING_WOULD_BREAK` from
   the cap after another merge is a fix round: trim, or ask under the same rule.
 - Staging moved or conflicts: merge `origin/<integration>` again and push. Repeat as needed
   (no limit inside one round).
 - Staging itself broken by someone else's merge: fix the minimal break in your PR, say
   "staging build fix" in the body, and carry on.
-- A host tool died (Docker, simulator): retry once after 2 min; then `herdsman ask --kind owner`
+- A host tool died (Docker, simulator): retry once after 2 min; then `drover ask --kind owner`
   (lanes may not change the host).
 - The cap or a shared-file edit another open PR also makes: use the exact text from the issue
   amendment.

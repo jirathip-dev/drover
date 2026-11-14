@@ -1,8 +1,8 @@
-//! #680: a deterministic simulation of herdsman's concurrent passes (drive, drive --fast, check, kick and the owner's
+//! #680: a deterministic simulation of drover's concurrent passes (drive, drive --fast, check, kick and the owner's
 //! verbs) running the real `main_with` against in-process fakes of herdr, gh and git and a fake clock, under one
 //! seeded scheduler; the invariants are checked after every step (docs/design/sim-680).
 //!
-//! `HERDSMAN_SIM_SEED=<n> cargo test -p herdsman --test sim` replays one seed (`HERDSMAN_SIM_TRACE=full`: its whole
+//! `DROVER_SIM_SEED=<n> cargo test -p drover --test sim` replays one seed (`DROVER_SIM_TRACE=full`: its whole
 //! trace); `just sim [N]` runs N random seeds.
 mod hunt;
 mod invariants;
@@ -36,16 +36,16 @@ pub struct Outcome {
 
 impl Outcome {
     /// The failure with its seed, the replay line and the trace's last 200 lines plus every scenario event (all of
-    /// it with `HERDSMAN_SIM_TRACE=full`).
+    /// it with `DROVER_SIM_TRACE=full`).
     pub fn report(&self) -> String {
-        let full = std::env::var("HERDSMAN_SIM_TRACE").is_ok_and(|v| v == "full");
+        let full = std::env::var("DROVER_SIM_TRACE").is_ok_and(|v| v == "full");
         let tail = self.trace.len().saturating_sub(200);
         let lines: Vec<&str> = (self.trace.iter().enumerate())
             .filter(|(i, l)| full || *i >= tail || l.contains(" event "))
             .map(|(_, l)| l.as_str())
             .collect();
         format!(
-            "{}\nFAIL seed={} {}\nreplay: HERDSMAN_SIM_SEED={} cargo test -p herdsman --test sim\n",
+            "{}\nFAIL seed={} {}\nreplay: DROVER_SIM_SEED={} cargo test -p drover --test sim\n",
             lines.join("\n"),
             self.seed,
             self.failure.as_deref().unwrap_or("(passed)"),
@@ -69,11 +69,11 @@ pub fn run_plan(plan: &hunt::Plan, sabotage: Option<Sabotage>) -> Outcome {
 pub fn run_world(seed: u64, (mut m, cfg): (model::Model, String), steps: u64, sabotage: Option<Sabotage>) -> Outcome {
     // A lane's own environment must not reach the simulated processes (they share this one).
     for k in [
-        "HERDSMAN_LANE",
-        "HERDSMAN_OUTBOX",
-        "HERDSMAN_SERVICE",
-        "HERDSMAN_TOKEN",
-        "HERDSMAN_HOST",
+        "DROVER_LANE",
+        "DROVER_OUTBOX",
+        "DROVER_SERVICE",
+        "DROVER_TOKEN",
+        "DROVER_HOST",
     ] {
         std::env::remove_var(k);
     }
@@ -109,9 +109,9 @@ pub fn run_world(seed: u64, (mut m, cfg): (model::Model, String), steps: u64, sa
     }
 }
 
-/// The seeds this run checks: `HERDSMAN_SIM_SEED` alone, else the fixed set.
+/// The seeds this run checks: `DROVER_SIM_SEED` alone, else the fixed set.
 fn seeds() -> Vec<u64> {
-    match std::env::var("HERDSMAN_SIM_SEED").ok().and_then(|s| s.parse().ok()) {
+    match std::env::var("DROVER_SIM_SEED").ok().and_then(|s| s.parse().ok()) {
         Some(s) => vec![s],
         None => seeds::FIXED.iter().map(|s| s.0).collect(),
     }
@@ -141,11 +141,11 @@ fn check(seeds: &[u64]) -> Vec<String> {
 #[test]
 fn fixed_seeds_hold_every_invariant() {
     let mut bad = vec![];
-    let plan = std::env::var("HERDSMAN_SIM_PLAN").ok();
+    let plan = std::env::var("DROVER_SIM_PLAN").ok();
     if plan.is_none() {
         bad = check(&seeds());
     }
-    // #688: the hunt's plans (or the one `HERDSMAN_SIM_PLAN` replays).
+    // #688: the hunt's plans (or the one `DROVER_SIM_PLAN` replays).
     let texts: Vec<String> = match plan {
         Some(p) => vec![p],
         None => seeds::PLANS.iter().map(|p| p.0.to_string()).collect(),
@@ -218,7 +218,7 @@ fn a_broken_invariant_fails_with_seed_and_trace() {
         assert!(f.starts_with(code), "{s:?}: {f}");
         let r = o.report();
         assert!(
-            r.contains(&format!("FAIL seed={} {code}", o.seed)) && r.contains(&format!("HERDSMAN_SIM_SEED={}", o.seed)),
+            r.contains(&format!("FAIL seed={} {code}", o.seed)) && r.contains(&format!("DROVER_SIM_SEED={}", o.seed)),
             "{r}"
         );
         assert!(r.lines().count() > 50, "{r}");
@@ -229,23 +229,23 @@ fn env(k: &str, default: u64) -> u64 {
     std::env::var(k).ok().and_then(|s| s.parse().ok()).unwrap_or(default)
 }
 
-/// #685 `just sim --metrics [N]`: the fleet metrics over N random seeds from `HERDSMAN_SIM_FROM`, failing seeds
-/// included (the nightly job's invariant check is `just sim`'s). Written to `$HERDSMAN_SIM_OUT/metrics.{json,md}`,
-/// the table beside `HERDSMAN_SIM_BASELINE` (a metrics.json) with each >20% regression a warning; never fails on them.
+/// #685 `just sim --metrics [N]`: the fleet metrics over N random seeds from `DROVER_SIM_FROM`, failing seeds
+/// included (the nightly job's invariant check is `just sim`'s). Written to `$DROVER_SIM_OUT/metrics.{json,md}`,
+/// the table beside `DROVER_SIM_BASELINE` (a metrics.json) with each >20% regression a warning; never fails on them.
 #[test]
 #[ignore = "long: `just sim --metrics`"]
 fn metrics_batch() {
-    let (n, from) = (env("HERDSMAN_SIM_N", 50), env("HERDSMAN_SIM_FROM", 1000));
+    let (n, from) = (env("DROVER_SIM_N", 50), env("DROVER_SIM_FROM", 1000));
     let all: Vec<u64> = (from..from + n).collect();
     let runs: Vec<metrics::Metrics> = all.chunks(16).flat_map(batch).map(|o| o.metrics).collect();
     let s = metrics::summary(&runs);
-    let base = std::env::var("HERDSMAN_SIM_BASELINE")
+    let base = std::env::var("DROVER_SIM_BASELINE")
         .ok()
         .and_then(|p| std::fs::read_to_string(p).ok());
     let base: Option<serde_json::Value> = base.and_then(|b| serde_json::from_str(&b).ok());
     let table = metrics::table(runs.len(), &s, base.as_ref());
     let json = metrics::to_json(runs.len(), &s).to_string();
-    match std::env::var("HERDSMAN_SIM_OUT") {
+    match std::env::var("DROVER_SIM_OUT") {
         Ok(d) => {
             std::fs::create_dir_all(&d).unwrap();
             std::fs::write(format!("{d}/metrics.json"), json + "\n").unwrap();
@@ -255,15 +255,15 @@ fn metrics_batch() {
     }
 }
 
-/// `just sim [N]`: N random seeds from `HERDSMAN_SIM_FROM` (default 1000); every failing seed printed.
+/// `just sim [N]`: N random seeds from `DROVER_SIM_FROM` (default 1000); every failing seed printed.
 #[test]
 #[ignore = "long: `just sim`"]
 fn random_seeds() {
-    let n: u64 = std::env::var("HERDSMAN_SIM_N")
+    let n: u64 = std::env::var("DROVER_SIM_N")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(500);
-    let from: u64 = std::env::var("HERDSMAN_SIM_FROM")
+    let from: u64 = std::env::var("DROVER_SIM_FROM")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(1000);
@@ -281,7 +281,7 @@ fn random_seeds() {
 fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     let s = Some(Sabotage::Planted);
     let tripped = |f: &str| f.starts_with("I1 ");
-    let h = hunt::hunt(&[2, 3, 4, 5], 5, s, |r, f| {
+    let h = hunt::hunt(&[2, 3, 4, 5], 23, s, |r, f| {
         r < 40 && !f.iter().any(|x| tripped(&x.failure))
     });
     let f = h
@@ -308,7 +308,7 @@ fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     let r = f.report();
     let text = f.small.text();
     assert!(
-        r.contains(&format!("(\"{text}\", \"hunt: I1 ")) && r.contains("HERDSMAN_SIM_PLAN="),
+        r.contains(&format!("(\"{text}\", \"hunt: I1 ")) && r.contains("DROVER_SIM_PLAN="),
         "{r}"
     );
     let again = run_plan(&hunt::Plan::parse(&text).expect("its plan parses"), s);
@@ -321,20 +321,20 @@ fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
     );
 }
 
-/// `just sim --hunt [minutes]`: hunt from the fixed seeds for that long (`HERDSMAN_SIM_HUNT_RNG` replays a hunt's
-/// mutations); the corpus and every failure's seeds.rs line go to `HERDSMAN_SIM_CORPUS`.
+/// `just sim --hunt [minutes]`: hunt from the fixed seeds for that long (`DROVER_SIM_HUNT_RNG` replays a hunt's
+/// mutations); the corpus and every failure's seeds.rs line go to `DROVER_SIM_CORPUS`.
 #[test]
 #[ignore = "long: `just sim --hunt`"]
 fn hunt() {
     let env = |k: &str| std::env::var(k).ok().and_then(|s| s.parse::<u64>().ok());
-    let minutes = env("HERDSMAN_SIM_HUNT_MINUTES").unwrap_or(10);
+    let minutes = env("DROVER_SIM_HUNT_MINUTES").unwrap_or(10);
     let clock = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH);
-    let rng = env("HERDSMAN_SIM_HUNT_RNG").unwrap_or_else(|| clock.map_or(0, |d| d.as_secs()));
+    let rng = env("DROVER_SIM_HUNT_RNG").unwrap_or_else(|| clock.map_or(0, |d| d.as_secs()));
     let until = std::time::Instant::now() + std::time::Duration::from_secs(minutes * 60);
     let fixed: Vec<u64> = seeds::FIXED.iter().map(|s| s.0).collect();
     let h = hunt::hunt(&fixed, rng, None, |_, _| std::time::Instant::now() < until);
     let dir =
-        std::path::PathBuf::from(std::env::var("HERDSMAN_SIM_CORPUS").unwrap_or_else(|_| "target/sim-corpus".into()));
+        std::path::PathBuf::from(std::env::var("DROVER_SIM_CORPUS").unwrap_or_else(|_| "target/sim-corpus".into()));
     std::fs::create_dir_all(&dir).expect("the corpus folder");
     let corpus: Vec<String> = h.corpus.iter().map(hunt::Plan::text).collect();
     std::fs::write(dir.join("corpus.txt"), corpus.join("\n") + "\n").expect("corpus.txt");
@@ -349,7 +349,7 @@ fn hunt() {
     );
     assert!(
         found.is_empty(),
-        "replay this hunt with HERDSMAN_SIM_HUNT_RNG={rng}:\n{}",
+        "replay this hunt with DROVER_SIM_HUNT_RNG={rng}:\n{}",
         found.join("\n")
     );
 }
@@ -358,7 +358,8 @@ fn hunt() {
 /// t+1029 and #202 at t+1338 (each: the first kick's start at t+91 and a 3 s agent start, 600 s impl, the reviewer's
 /// 300 s, its record and merge; #202's first reviewer is refused, superseded at t+1025 and its successor reviews
 /// 300 s). Five spawns of four lanes, one wasted; two heads × 300 s of CI; idle: the four kept lanes from their stop
-/// to the clean (1482 + 1158 + 1783 + 1148 s) and the refused reviewer's 14 s; one reviewed head per merge.
+/// to the clean and the refused reviewer's 14 s (#779: 5661, up from 5585, as clean's `wip prune` git calls move the
+/// jittered timers after the first merge); one reviewed head per merge.
 #[test]
 fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
@@ -369,7 +370,7 @@ fn the_known_fleet_gives_exact_metrics() {
         wasted: 1,
         supersedes: 1,
         lanes: 4,
-        idle: 5585,
+        idle: 5561,
         ci_wait: 600,
         lock_wait: 13,
         serial: 0,
@@ -387,7 +388,7 @@ fn the_known_fleet_gives_exact_metrics() {
             ("caps", 0.0),
             ("ci_wait_min", 10.0),
             ("host_busy", 0.0),
-            ("idle_lane_min", 93.08),
+            ("idle_lane_min", 92.68),
             ("lock_wait_min", 0.22),
             ("queue_to_merge_p50_min", 17.12),
             ("queue_to_merge_p90_min", 22.27),

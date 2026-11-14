@@ -3,7 +3,7 @@
 //! #82: the fixture fleet is renamed `api` (`acme/api`), so the goldens carry neutral names.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
+use drover::events::{append, Event};
 use serde_json::json;
 use std::path::Path;
 
@@ -11,26 +11,12 @@ const DESIGN: &str = "\n[fleet.api.role.design]\nharness = \"hermes\"\nprofile =
 
 fn fake() -> Fake {
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
         .reply(
             "gh issue view 12",
             r#"{"title":"Fix the meter","body":"AC: it {works} \\ `ok`"}"#,
         )
         .reply("git -C", "0\n")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
-        )
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr pane wait-output", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr pane read", "Read the brief")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
 /// Spawn one lane and return its brief, with the temp dir replaced by `<TMP>`.
@@ -43,6 +29,8 @@ fn brief(name: &str, issue: &str, role: &str, fail: bool, update: bool) -> Strin
             .replace("sendmeter", "api")
             + DESIGN),
     );
+    let sh = FakeShed::new();
+    sh.attach(&c);
     if fail {
         let body = "FAIL\n\n1. **blocking**: src/x.rs:3 off by {one}.";
         let data = json!({"verdict": "FAIL", "sha": "a".repeat(40), "body": body});

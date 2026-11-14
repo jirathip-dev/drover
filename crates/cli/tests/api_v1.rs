@@ -2,8 +2,8 @@
 //! tests/golden/api/), the same Host/Origin and pairing refusals as the HTML board, and the HTML board unchanged.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -40,8 +40,7 @@ fn golden(name: &str, mut v: Value) {
     );
 }
 
-/// sendmeter: #12 in work (a lane), #17 queued behind #12, #9 asking; herdr shows the impl lane working.
-fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
+fn logged(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "17"]).0,
@@ -70,16 +69,29 @@ fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
         json!({"id": "q7", "question": "Which DB?", "options": ["sqlite", "postgres"], "recommend": 1}),
     );
     ev(900_300, 12, "merged", json!({"pr": 40, "into": "staging"}));
+    c
+}
+
+const SCREEN: &str = "⏺ Bash(cargo test)\n  ⎿ ok\n";
+
+fn herdr_fixture(name: &str) -> (drover::Ctx, Fake) {
     let list = agents(&[("sendmeter-impl-12", "working", "/x", "w1:p2")]);
     let r = Fake::default()
         .reply("herdr agent list", &list)
-        .reply("herdr pane read", "⏺ Bash(cargo test)\n  ⎿ ok\n");
-    (c, r)
+        .reply("herdr pane read", SCREEN);
+    (logged(name), r)
+}
+
+fn fixture(name: &str) -> (drover::Ctx, OnShed) {
+    let r = OnShed::new(Fake::default());
+    r.1.lane("sendmeter-impl-12", "working", "/x");
+    r.1.screen("sendmeter-impl-12", SCREEN);
+    (logged(name), r)
 }
 
 #[test]
 fn state_events_and_lane_json_match_the_goldens() {
-    let (c, r) = fixture("api-get");
+    let (c, r) = herdr_fixture("api-get");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let (status, state) = req(&s, "GET", "/api/v1/state", "", "");
     assert_eq!(status, "HTTP/1.1 200 OK");
@@ -147,7 +159,7 @@ fn refusals_are_json_with_a_code() {
         code("POST", "/api/v1/pause", "fleet=sendmeter", evil),
         want("403 Forbidden", "FORBIDDEN")
     );
-    assert!(!r.called("herdr pane read"));
+    assert!(!r.called("herdr pane read") && !r.1.called("read", "sendmeter-impl-12"));
     // A stale page's mtime is REFUSED STALE, as on the HTML board; an unknown path is 404.
     assert_eq!(
         code("POST", "/api/v1/pause", "fleet=sendmeter&mtime=1", ""),
@@ -257,7 +269,7 @@ fn an_issue_carries_its_latest_why_owner_line() {
     assert_eq!(v["why"], want, "{v}");
 }
 
-/// #576: `issue/<fleet>/<n>` lists the verdicts `herdsman verdict` recorded, newest first: a verify PASS with its two
+/// #576: `issue/<fleet>/<n>` lists the verdicts `drover verdict` recorded, newest first: a verify PASS with its two
 /// screenshots (as `/shot/` serves them), a rev PASS with its `Repro: run` block, a rev FAIL with its findings.
 #[test]
 fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
@@ -272,6 +284,7 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
     std::fs::create_dir_all(lane.join("shots")).unwrap();
     std::fs::write(lane.join("shots/home-390.png"), b"\x89PNG narrow").unwrap();
     std::fs::write(lane.join("shots/home-1440.png"), b"\x89PNG wide").unwrap();
+    std::fs::write(lane.join("shots/home-console.log"), "console error: boom\n").unwrap();
     let file = lane.join("verdict.md").to_string_lossy().to_string();
     let spawn = |ts, role: &str| {
         let (w, check) = (lane.to_string_lossy(), role != "impl");
@@ -295,7 +308,11 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
     spawn(4, "rev");
     verdict("PASS", &b, &format!("PASS\n\n{repro}"));
     spawn(5, "verify");
-    verdict("PASS", &b, "PASS\n\nshots/home-390.png and shots/home-1440.png\n");
+    verdict(
+        "PASS",
+        &b,
+        "PASS\n\nshots/home-390.png and shots/home-1440.png\n\n- `shots/home-console.log`\n",
+    );
     let none = Fake::default();
     let s = Server::new(&c, &none, Some(ADDR.into()));
     let (status, v) = req(&s, "GET", "/api/v1/issue/sendmeter/12", "", "");
@@ -304,7 +321,8 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
     let row = |i: usize| (vs[i]["role"].clone(), vs[i]["verdict"].clone(), vs[i]["sha"].clone());
     assert_eq!(vs.len(), 3, "{v}");
     assert_eq!(row(0), (json!("verify"), json!("PASS"), json!(b)));
-    assert_eq!(vs[0]["shots"], json!(["shots/home-390.png", "shots/home-1440.png"]));
+    let want = json!(["shots/home-390.png", "shots/home-1440.png", "shots/home-console.log"]);
+    assert_eq!(vs[0]["shots"], want);
     assert_eq!(vs[0]["repro"], json!(null));
     assert_eq!(row(1), (json!("rev"), json!("PASS"), json!(b)));
     assert_eq!(vs[1]["repro"]["kind"], json!("run"));
@@ -318,6 +336,14 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
         String::from_utf8_lossy(&s.respond(&format!("GET /shot/sendmeter/12/1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T))
             .into_owned();
     assert!(r.starts_with("HTTP/1.1 200") && r.ends_with("PNG wide"), "{r}");
+    // #731: a listed console log is listed and served too.
+    let r =
+        String::from_utf8_lossy(&s.respond(&format!("GET /shot/sendmeter/12/2 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T))
+            .into_owned();
+    assert!(
+        r.starts_with("HTTP/1.1 200") && r.ends_with("console error: boom\n"),
+        "{r}"
+    );
 }
 
 /// #576: `lessons` shows a fleet's last lesson lane and when tick runs the next; the digest is the CLI's; `POST
@@ -326,8 +352,8 @@ fn an_issues_verdicts_come_newest_first_with_repro_and_shots() {
 fn lessons_show_the_last_run_and_the_next_due_date() {
     let (c, r) = fixture("api-lessons");
     // tick's weekly step: the fleet is under a week old, so it skips and the next is due a week on.
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    herdsman::lesson::weekly(&c, &cfg, &Fake::default(), &mut vec![]).unwrap();
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    drover::lesson::weekly(&c, &cfg, &Fake::default(), &mut vec![]).unwrap();
     let d = json!({"role": "lesson", "stage": "impl", "agent": "sendmeter-lesson-30", "harness": "claude"});
     append(&c.state, &Event::new(900_400, "sendmeter", Some(30), "spawn", d)).unwrap();
     let s = Server::new(&c, &r, Some(ADDR.into()));

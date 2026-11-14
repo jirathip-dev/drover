@@ -2,8 +2,8 @@
 //! reply box (pairing, refusals, `prompt` events without text), vector/ASCII horses, no dashes.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -21,8 +21,7 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str, now: u64) 
     String::from_utf8_lossy(&s.respond(&r, now)).into_owned()
 }
 
-/// Agents in every state across sendmeter, synergy and Others; sendmeter-impl-14 is dead (log only).
-fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
+fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     let c = ctx(&tmpdir(name), &two());
     let spawn = |fleet: &str, issue: u64, ts: u64, role: &str, agent: &str| {
         let d = json!({"role": role, "agent": agent, "harness": if role == "rev" { "hermes" } else { "claude" }});
@@ -35,25 +34,30 @@ fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
     spawn("synergy", 8, 900_500, "impl", "synergy-impl-8");
     spawn("synergy", 5, 900_600, "design", "synergy-design-5");
     spawn("synergy", 20, 900_700, "impl", "synergy-impl-20");
-    let a = |n: &str, st: &str, p: &str| json!({"name": n, "agent_status": st, "pane_id": p, "cwd": "/x"});
-    let list = json!({"result": {"agents": [
-        a("sendmeter-impl-12", "working", "w1:p2"),
-        a("sendmeter-rev-9-r1", "blocked", "w1:p3"),
-        a("synergy-impl-7", "working", "w2:p1"),
-        a("synergy-impl-8", "working", "w2:p2"),
-        a("synergy-design-5", "done", "w2:p3"),
-        a("synergy-impl-20", "unknown", "w2:p4"),
-        {"agent": "codex", "agent_status": "idle", "pane_id": "w4:p1", "cwd": "/home/me/side", "workspace_id": "w4"},
-        {"agent": "claude", "agent_status": "working", "pane_id": "w5:p1", "cwd": "/home/me/scratch", "workspace_id": "w5"},
-    ]}});
-    let ws = json!({"result": {"workspaces": [{"workspace_id": "w4", "label": "side-project"}, {"workspace_id": "w5", "label": "scratch"}]}});
     let screen = "⏺ Read(src/serve.rs)\n  ⎿ Read 120 lines\n> fix the test\n⏺ Bash(cargo test)\n  ⎿ ok\n";
-    let r = Fake::default()
-        .reply("herdr agent list", &list.to_string())
-        .reply("herdr workspace list", &ws.to_string())
-        .reply("herdr pane read", screen)
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send", "");
+    let r = OnShed::new(Fake::default());
+    for (n, st) in [
+        ("sendmeter-impl-12", "working"),
+        ("sendmeter-rev-9-r1", "blocked"),
+        ("synergy-impl-7", "working"),
+        ("synergy-impl-8", "working"),
+        ("synergy-design-5", "done"),
+        ("synergy-impl-20", "unknown"),
+    ] {
+        r.1.lane(n, st, "/x");
+        r.1.screen(n, screen);
+    }
+    for (n, harness, st, cwd) in [
+        ("side-project", "codex", "idle", "/home/me/side"),
+        ("scratch", "claude", "working", "/home/me/scratch"),
+    ] {
+        r.1.add(n, json!({"fleet": "-", "harness": harness}));
+        r.1.set(n, |t| {
+            t["cwd"] = json!(cwd);
+            t["reported"] = json!({"state": st});
+        });
+        r.1.screen(n, screen);
+    }
     (c, r)
 }
 
@@ -117,7 +121,7 @@ fn lanes_group_by_state_then_repo_with_counts() {
     assert!(lanes.contains("<p>impl · round 0 · claude · "), "{lanes}");
 }
 
-/// #187: a lane's card shows the `HERDSMAN_PORT` its spawn logged.
+/// #187: a lane's card shows the `DROVER_PORT` its spawn logged.
 #[test]
 fn lane_card_shows_its_port() {
     let (c, r) = fixture("port");
@@ -139,7 +143,7 @@ fn sheet_transcript_is_the_masked_pane_tail() {
     let cookie = paired(&s, &c);
     let origin = format!("Origin: https://evil.example\r\n{cookie}");
     assert!(req(&s, "GET", "/lane?agent=sendmeter-impl-12", "", &origin, T).starts_with("HTTP/1.1 403 "));
-    assert!(!r.called("herdr pane read"));
+    assert!(!r.1.called("read", "sendmeter-impl-12"));
     let res = req(&s, "GET", "/lane?agent=sendmeter-impl-12", "", &cookie, T);
     assert!(
         res.starts_with("HTTP/1.1 200 OK") && res.contains("application/json"),
@@ -159,7 +163,10 @@ fn sheet_transcript_is_the_masked_pane_tail() {
         (&v["lines"], &v["live"], &v["before"], &v["more"]),
         (&lines, &json!(2), &json!(5), &json!(false))
     );
-    assert!(r.called("herdr pane read w1:p2 --source recent --lines 200 --format ansi"));
+    assert_eq!(
+        r.1.last("read"),
+        json!({"name": "sendmeter-impl-12", "lines": 200, "history": true})
+    );
     assert!(req(&s, "GET", "/lane?agent=nobody", "", &cookie, T).starts_with("HTTP/1.1 404 "));
 }
 
@@ -167,7 +174,6 @@ fn sheet_transcript_is_the_masked_pane_tail() {
 #[test]
 fn others_sheet_offers_only_close_pane() {
     let (c, r) = fixture("others");
-    let r = r.reply("herdr pane close", "");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = paired(&s, &c);
     let sheet = |agent: &str| {
@@ -175,14 +181,17 @@ fn others_sheet_offers_only_close_pane() {
         serde_json::from_str::<serde_json::Value>(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap()
     };
     let (other, lane) = (sheet("side-project"), sheet("sendmeter-impl-12"));
-    assert_eq!((&other["acts"], &other["pane"]), (&json!(["close"]), &json!("w4:p1")));
+    assert_eq!(
+        (&other["acts"], &other["pane"]),
+        (&json!(["close"]), &json!("side-project"))
+    );
     assert_eq!(
         (&lane["acts"], &lane["pane"]),
         (&json!(["stop", "kill", "clean"]), &json!(null))
     );
-    let res = req(&s, "POST", "/act", "agent=w4:p1&op=close&confirm=1", &cookie, T);
+    let res = req(&s, "POST", "/act", "agent=side-project&op=close&confirm=1", &cookie, T);
     assert!(
-        res.starts_with("HTTP/1.1 200 OK") && r.called("herdr pane close w4:p1"),
+        res.starts_with("HTTP/1.1 200 OK") && r.1.called("kill", "side-project") && !r.1.has("side-project"),
         "{res}"
     );
     let res = req(
@@ -194,13 +203,13 @@ fn others_sheet_offers_only_close_pane() {
         T,
     );
     assert!(
-        res.contains("REFUSED IS_LANE") && !r.called("herdr pane close w1:p2"),
+        res.contains("REFUSED IS_LANE") && !r.1.called("kill", "sendmeter-impl-12"),
         "{res}"
     );
 }
 
 /// Pair at `T` as an iPhone (Pair, `serve approve`, claim) and return the `Cookie:` header line.
-fn paired(s: &Server, c: &herdsman::Ctx) -> String {
+fn paired(s: &Server, c: &drover::Ctx) -> String {
     let cookie = pair(s, c, "Mozilla/5.0 (iPhone) Safari/604.1", T);
     assert_eq!(cookie.len() - "Cookie: hd=\r\n".len(), 64, "32 random bytes, hex");
     cookie
@@ -232,7 +241,7 @@ fn ask_pair(s: &Server, ip: &str, now: u64) -> (String, String, String) {
 fn pairing_is_a_phone_request_approved_on_the_mac() {
     let (c, r) = fixture("pair-req");
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let at = |now: u64| herdsman::Ctx { now, ..c.clone() };
+    let at = |now: u64| drover::Ctx { now, ..c.clone() };
     // The old code-entry endpoint is gone; `serve pair` prints the new way.
     assert!(req(&s, "POST", "/pair", "code=123456", "", T).starts_with("HTTP/1.1 404 "));
     let (rc, out) = run(&c, &Fake::default(), &["serve", "pair"]);
@@ -246,7 +255,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
     let host = host_tab(&s, ADDR, T);
     assert!(
         host.contains(
-            "no paired device yet: tap [pair this phone], then <code>herdsman serve approve &lt;code&gt;</code>"
+            "no paired device yet: tap [pair this phone], then <code>drover serve approve &lt;code&gt;</code>"
         ) && !(page.clone() + &host).contains("approve <code>"),
         "the hint's placeholder is text, never an open tag"
     );
@@ -329,6 +338,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
     // The log names the device only: never a code or token.
     let ev: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind.starts_with("pair"))
         .collect();
@@ -340,7 +350,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
         "{ev:?}"
     );
     assert!(
-        !herdsman::events::jsonl(&c.state)
+        !drover::events::jsonl(&c.state)
             .unwrap()
             .contains(&mine[11..mine.len() - 2]),
         "no token in the log"
@@ -354,7 +364,7 @@ fn pairing_behind_a_proxy_and_retaps() {
     let (c, r) = fixture("pair-proxy");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let tap = |h: &str| req(&s, "POST", "/pair/request", "", h, T);
-    let open = || herdsman::devices::pending(&c).len();
+    let open = || drover::devices::pending(&c).len();
     // Two phones behind loopback with their own X-Forwarded-For each get 2.
     for ip in ["100.64.0.1", "100.64.0.2"] {
         let h = format!("X-Peer: 127.0.0.1\r\nX-Forwarded-For: {ip}\r\n");
@@ -394,11 +404,11 @@ fn pairing_behind_a_proxy_and_retaps() {
         let set = res.lines().find_map(|l| l.strip_prefix("Set-Cookie: ")).expect(&res);
         cookie = format!("Cookie: {}\r\n", &set[..set.find(';').unwrap()]);
     }
-    let left = herdsman::devices::pending(&c3);
+    let left = drover::devices::pending(&c3);
     assert_eq!(left.len(), 1, "{left:?}");
     let page = req(&s3, "GET", "/?all=1", "", "", T);
     assert!(!page.contains("pair separately"), "no device paired yet");
-    herdsman::devices::approve(&c3, left[0].code.as_deref().unwrap()).unwrap();
+    drover::devices::approve(&c3, left[0].code.as_deref().unwrap()).unwrap();
     assert!(req(&s3, "POST", "/pair/claim", "", &cookie, T + 1).starts_with("HTTP/1.1 200 OK"));
     // A paired device exists: an unpaired page (the other iOS app) says why it shows Pair.
     let page = req(&s3, "GET", "/?all=1", "", "", T + 1);
@@ -409,11 +419,11 @@ fn pairing_behind_a_proxy_and_retaps() {
     assert!(!req(&s3, "GET", "/?all=1", "", &cookie, T + 1).contains("pair separately"));
     // [cancel] drops the browser's open request; a paired device's cookie cancels nothing.
     let (_, _, mine) = ask_pair(&s3, "10.0.0.3", T + 2);
-    assert_eq!(herdsman::devices::pending(&c3).len(), 1);
+    assert_eq!(drover::devices::pending(&c3).len(), 1);
     for k in [&cookie, &mine] {
         assert!(req(&s3, "POST", "/pair/cancel", "", k, T + 3).starts_with("HTTP/1.1 200 OK"));
     }
-    assert_eq!(herdsman::devices::pending(&c3).len(), 0);
+    assert_eq!(drover::devices::pending(&c3).len(), 0);
     assert!(req(&s3, "POST", "/send", "agent=sendmeter-impl-12&text=hi", &cookie, T + 4).starts_with("HTTP/1.1 200 "));
 }
 
@@ -443,13 +453,13 @@ fn pairing_codes_devices_and_prompt_events() {
     assert!(String::from_utf8_lossy(&s.respond(evil, T)).starts_with("HTTP/1.1 403 "));
     // A valid code sets the cookie; only the token's hash is stored, 0600.
     let cookie = paired(&s, &c);
-    let file = herdsman::db::file(&c.state); // #344: the devices' home
-    let stored = serde_json::to_string(&herdsman::devices::load(&c)).unwrap();
+    let file = drover::db::file(&c.state); // #344: the devices' home
+    let stored = serde_json::to_string(&drover::devices::load(&c)).unwrap();
     use std::os::unix::fs::PermissionsExt;
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     let tok = &cookie[11..cookie.len() - 2];
     assert!(
-        !stored.contains(tok) && stored.contains(&herdsman::devices::sha256(tok.as_bytes())),
+        !stored.contains(tok) && stored.contains(&drover::devices::sha256(tok.as_bytes())),
         "{stored}"
     );
     // The next send succeeds: prompt + Enter, and a `prompt` event without the text.
@@ -458,10 +468,19 @@ fn pairing_codes_devices_and_prompt_events() {
         res.starts_with("HTTP/1.1 200 OK") && res.ends_with("sent to sendmeter-impl-12\n"),
         "{res}"
     );
-    assert!(r.called("herdr agent prompt sendmeter-impl-12 hello secret words"));
-    assert!(r.index("herdr agent prompt") < r.index("herdr pane send-keys w1:p2 Enter"));
-    let e = read(&c.state).unwrap().pop().unwrap();
-    let label = herdsman::devices::load(&c)[0].label.clone();
+    assert_eq!(r.1.sent("sendmeter-impl-12"), ["hello secret words"]);
+    let seen = r.1.lock().seen.clone();
+    let at = |m: &str| {
+        seen.iter()
+            .position(|(k, p)| k == m && p["name"] == "sendmeter-impl-12")
+    };
+    assert!(at("send") < at("keys"), "{seen:?}");
+    assert_eq!(
+        r.1.last("keys"),
+        json!({"name": "sendmeter-impl-12", "keys": ["Enter"]})
+    );
+    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
+    let label = drover::devices::load(&c)[0].label.clone();
     assert!(label.starts_with("iPhone "), "{label}");
     assert_eq!(
         (e.kind.as_str(), e.fleet.as_str(), e.issue),
@@ -472,15 +491,14 @@ fn pairing_codes_devices_and_prompt_events() {
         json!({"via": "web", "agent": "sendmeter-impl-12", "device": label, "chars": 18})
     );
     assert!(
-        !herdsman::events::jsonl(&c.state).unwrap().contains("secret"),
+        !drover::events::jsonl(&c.state).unwrap().contains("secret"),
         "no message text in the log"
     );
-    // ESC, Ctrl-C, DEL, CR and tab are refused; a leading `-` goes through verbatim as herdr's text argument.
     for ctl in ["%1B%5B2J", "stop%03", "x%7F", "a%0Db", "a%09b"] {
         assert!(send(&cookie, ctl).contains("REFUSED BAD_VALUE: "), "{ctl}");
     }
     assert!(send(&cookie, "--wait%0Aline+two").starts_with("HTTP/1.1 200 OK"));
-    assert!(r.called("herdr agent prompt sendmeter-impl-12 --wait\nline two"));
+    assert_eq!(r.1.sent("sendmeter-impl-12")[1], "--wait\nline two");
     // The Host tab lists the device; Remove unpairs it and its next send is 401.
     let host = host_tab(&s, ADDR, T);
     assert!(
@@ -489,7 +507,7 @@ fn pairing_codes_devices_and_prompt_events() {
     );
     let mt = &host[host.find("name=mtime value=").unwrap() + 17..];
     let mt: String = mt.chars().take_while(char::is_ascii_digit).collect();
-    let hash = herdsman::devices::sha256(tok.as_bytes());
+    let hash = drover::devices::sha256(tok.as_bytes());
     let unpair = format!("op=unpair&fleet=&hash={hash}&mtime={mt}");
     assert!(
         req(&s, "POST", "/", &unpair, "", T).starts_with("HTTP/1.1 401 "),
@@ -500,13 +518,13 @@ fn pairing_codes_devices_and_prompt_events() {
         unpair.len()
     );
     assert!(String::from_utf8_lossy(&s.respond(&evil, T)).starts_with("HTTP/1.1 403 "));
-    assert_eq!(herdsman::devices::load(&c).len(), 1);
+    assert_eq!(drover::devices::load(&c).len(), 1);
     let res = req(&s, "POST", "/", &unpair, &cookie, T);
     assert!(
         res.starts_with("HTTP/1.1 303 ") && res.contains("device%20removed"),
         "{res}"
     );
-    assert!(herdsman::devices::load(&c).is_empty());
+    assert!(drover::devices::load(&c).is_empty());
     assert!(send(&cookie, "again").starts_with("HTTP/1.1 401 "));
 }
 
@@ -525,17 +543,13 @@ fn reply_refusals_rate_limit_and_read_only() {
     );
     assert_eq!(run(&c, &Fake::default(), &["pause", "sendmeter"]).0, 0);
     assert!(body(send("sendmeter-impl-12", "go")).starts_with("REFUSED PAUSED: "));
-    assert!(!r.called("herdr agent prompt") && !read(&c.state).unwrap().iter().any(|e| e.kind == "prompt"));
+    assert!(r.1.all("send").is_empty() && !read(&c.state).unwrap().iter().any(|e| e.kind == "prompt"));
     // 10 sends a minute per device.
     for _ in 0..6 {
         send("synergy-impl-8", "go");
     }
     assert!(send("synergy-impl-8", "go").starts_with("HTTP/1.1 429 "));
-    assert_eq!(
-        r.count("herdr agent prompt synergy-impl-8"),
-        6,
-        "10 attempts incl. the 4 refused"
-    );
+    assert_eq!(r.1.sent("synergy-impl-8").len(), 6, "10 attempts incl. the 4 refused");
     let ro = Server::new(&c, &r, None);
     assert!(req(&ro, "POST", "/send", "agent=synergy-impl-8&text=go", &cookie, T).starts_with("HTTP/1.1 405 "));
 }
@@ -630,22 +644,21 @@ fn vector_horses_keep_a_coat_per_name() {
     let coats: std::collections::BTreeSet<String> = all[5..].iter().map(coat).collect();
     assert_eq!(coats.len(), 8, "all 8 Corral coats in use: {coats:?}");
     assert_eq!(
-        herdsman::devices::sha256(b"abc"),
+        drover::devices::sha256(b"abc"),
         "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
     );
     assert_eq!(
-        herdsman::devices::sha256(&[b'a'; 56]),
+        drover::devices::sha256(&[b'a'; 56]),
         "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"
     );
 }
 
 /// The PR's 390 px screenshots (fixture config): Lanes in 3 modes, the sheet at 78 % and
 /// full, the pairing prompt, a sent reply; each with no horizontal scroll. Runs where
-/// WebKit is at hand; PNGs go to `$HERDSMAN_SNAPSHOTS` when set.
+/// WebKit is at hand; PNGs go to `$DROVER_SNAPSHOTS` when set.
 #[test]
 fn lanes_and_sheet_fit_390px() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture("shots");
@@ -685,11 +698,10 @@ fn lanes_and_sheet_fit_390px() {
     let stub = |send: (u16, &str)| fake((200, &lane), send);
     let open = "open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]'))";
     let submit = "document.querySelector('.reply textarea').value = 'rerun the tests'; document.querySelector('.reply').requestSubmit()";
-    let dir = std::env::var("HERDSMAN_SNAPSHOTS").ok();
+    let dir = std::env::var("DROVER_SNAPSHOTS").ok();
     let d = tmpdir("shots-png");
     let file = d.join("page.html");
     std::fs::write(&file, drawn(&page[page.find("<!doctype").unwrap()..], &s, ADDR, "", T)).unwrap();
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     let scenes = [
         ("lanes-horse", "horse", String::new()),
         ("lanes-ascii", "ascii", String::new()),
@@ -747,16 +759,8 @@ fn lanes_and_sheet_fit_390px() {
         let png = dir.as_ref().map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(p).join(format!("{name}.png"))
         });
-        let o = swift()
-            .args([
-                script,
-                file.to_str().unwrap(),
-                "390",
-                "lanes",
-                mode,
-                png.to_str().unwrap(),
-                &js,
-            ])
+        let o = webview()
+            .args([file.to_str().unwrap(), "390", "lanes", mode, png.to_str().unwrap(), &js])
             .output()
             .unwrap();
         let out = String::from_utf8_lossy(&o.stdout);
@@ -775,15 +779,22 @@ fn lanes_and_sheet_fit_390px() {
 /// ≥ 1 block, [full conversation] changes what is drawn, and the page logs no error.
 #[test]
 fn chat_views_never_blank() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture("never-blank");
     let d = json!({"role": "impl", "agent": "synergy-impl-7", "harness": "claude", "machine": "air", "host": "air"});
     append(&c.state, &Event::new(900_800, "synergy", Some(7), "spawn", d)).unwrap();
     let screen = "⏺ Bash(cargo test)\n  ⎿ ok\n> fix the test\n⏺ Fixed: the test passes.\n";
-    let r = r.reply("herdr --machine air pane read", screen);
+    let OnShed(f, sh) = r;
+    let air = FakeShed::new();
+    air.lane("synergy-impl-7", "working", "/x");
+    air.screen("synergy-impl-7", screen);
+    let over = OverSsh {
+        f: &f,
+        hosts: vec![("air", &air)],
+    };
+    let r = drover::shed::With(&over, sh.shed());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = paired(&s, &c);
     let sheet = |agent: &str| {
@@ -797,7 +808,10 @@ fn chat_views_never_blank() {
     let mut empty = local.clone();
     empty["said"] = json!([]);
     let remote = sheet("synergy-impl-7");
-    assert!(r.called("herdr --machine air pane read w2:p1 --source recent --lines 200 --format ansi"));
+    assert_eq!(
+        air.last("read"),
+        json!({"name": "synergy-impl-7", "lines": 200, "history": true})
+    );
     assert_eq!(
         (&remote["said"], remote["lines"].as_array().unwrap().len()),
         (&json!(null), 4),
@@ -822,9 +836,8 @@ fn chat_views_never_blank() {
             json!(lane.to_string())
         );
         let png = d.join(format!("{agent}.png"));
-        let o = swift()
+        let o = webview()
             .args([
-                concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
                 file.to_str().unwrap(),
                 "390",
                 "lanes",
@@ -852,8 +865,7 @@ fn chat_views_never_blank() {
 /// and the next read, answered for a paired device (`X-Paired`), takes it away again; saying yes, none ever shows.
 #[test]
 fn one_401_never_latches_unpaired() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture("pair-recheck");
@@ -865,7 +877,6 @@ fn one_401_never_latches_unpaired() {
     let d = tmpdir("pair-recheck-png");
     let file = d.join("page.html");
     std::fs::write(&file, drawn(&page[page.find("<!doctype").unwrap()..], &s, ADDR, "", T)).unwrap();
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
     // [Pair UI shown after the 401, shown after the next read, the "Pair this phone" line, pair/status asked].
     let scene = |paired: bool| {
         let js = format!(
@@ -878,10 +889,9 @@ fn one_401_never_latches_unpaired() {
             lane = json!(lane)
         );
         let png = d.join(format!("pair-{paired}.png"));
-        let o = swift()
-            .env("HERDSMAN_WAIT", "1")
+        let o = webview()
+            .env("DROVER_WAIT", "1")
             .args([
-                script,
                 file.to_str().unwrap(),
                 "390",
                 "lanes",

@@ -1,9 +1,9 @@
-//! #39: `herdsman serve --export <dir> --demo` from the committed `demo/`: the file set, an inert page
+//! #39: `drover serve --export <dir> --demo` from the committed `demo/`: the file set, an inert page
 //! (no POST form, no absolute URL, no live endpoint, no pairing or alerts), canned transcripts, and no
 //! call to the passed runner (herdr/gh/host are all canned in `demo/runner.json`).
 mod common;
 use common::*;
-use herdsman::Ctx;
+use drover::Ctx;
 use serde_json::Value;
 use std::path::PathBuf;
 
@@ -14,14 +14,14 @@ fn export() -> (PathBuf, Fake) {
         config: demo.join("fleet.toml"),
         state: demo.join("events.jsonl"),
         worktrees: d.join("wt"),
-        hermes: d.join("hermes"),
-        exe: "herdsman".into(),
+        homes: [("hermes", d.join("hermes"))].into(),
+        exe: "drover".into(),
         now: 1,
         home: d.join("home"),
         hints: vec![],
     };
     let r = Fake::default();
-    herdsman::serve::export(&c, &r, &d.join("site"), true).unwrap();
+    drover::serve::export(&c, &r, &d.join("site"), true).unwrap();
     (d.join("site"), r)
 }
 
@@ -149,23 +149,25 @@ fn demo_page_is_inert_and_relative() {
         page.contains("data-demo=1") && page.contains("id=demo>demo</span>"),
         "demo badge"
     );
-    assert!(page.contains("Demo with fake data. Install herdsman to run your own."));
+    assert!(page.contains("Demo with fake data. Install drover to run your own."));
     assert_eq!(page.matches("<span class=g>merged</span>").count(), 4, "4 merges today");
     // #81: #39 merged with q1 unanswered; its ask is closed. #99: #21's owner ask waits, #44's routine one counts down;
     // #517: #21's thread ask (t4's q33) is tied to an issue, so it is here too.
-    assert_eq!(cards.matches("<div class=ask>").count(), 3, "three needs-you cards");
-    let card = &cards[cards.find("<div class=ask>").unwrap()..];
+    assert_eq!(cards.matches("<details class=ask>").count(), 3, "three needs-you cards");
+    let card = &cards[cards.find("<details class=ask>").unwrap()..];
     assert!(
-        card.starts_with("<div class=ask><p><b>needs you</b> <span class=m>acme-api · #21 · 18m</span>"),
+        card.starts_with("<details class=ask><summary><span>#21 · owner · Rate-limit")
+            && card.contains("</summary><p><b>needs you</b> <span class=m>acme-api · #21 · 18m</span>"),
         "{card:.300}"
     );
     assert!(
         card.contains("<span class=m>· owner · waits for you</span>"),
         "{card:.300}"
     );
-    let card = &card[card[1..].find("<div class=ask>").unwrap() + 1..];
+    let card = &card[card[1..].find("<details class=ask>").unwrap() + 1..];
     assert!(
-        card.starts_with("<div class=ask><p><b>needs you</b> <span class=m>acme-web · #44 · acme-web-impl-44 · 6m</span> <span class=m>· routine · defaults to 2 in 24m</span>"),
+        card.starts_with("<details class=ask><summary><span>#44 · routine · Split the settings")
+            && card.contains("</summary><p><b>needs you</b> <span class=m>acme-web · #44 · acme-web-impl-44 · 6m</span> <span class=m>· routine · defaults to 2 in 24m</span>"),
         "{card:.300}"
     );
     assert!(

@@ -2,8 +2,8 @@
 //! (a reviewer's event too), else the issue branch's latest run read by the tick; never a query-string Actions URL.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const GH: &str = "https://github.com/jirathip-dev/sendmeter";
@@ -23,7 +23,7 @@ fn section(page: &str, id: &str) -> String {
     page[i..i + page[i..].find("</section>").unwrap()].to_string()
 }
 
-fn spawned(name: &str) -> herdsman::Ctx {
+fn spawned(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "17"]).0,
@@ -47,10 +47,11 @@ fn spawned(name: &str) -> herdsman::Ctx {
 #[test]
 fn queue_row_links_the_issue_and_its_card_shows_three_links() {
     let c = spawned("links-queue");
-    let r = Fake::default().reply(
-        "herdr agent list",
-        &agents(&[("sendmeter-impl-12", "idle", "/x", "w1:p1")]),
-    );
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane("sendmeter-impl-12", "idle", "/x");
+    let f = Fake::default();
+    let r = sh.on(&f);
     let page = get(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), "/?all=1");
     let q = section(&page, "queue");
     assert!(
@@ -66,7 +67,7 @@ fn queue_row_links_the_issue_and_its_card_shows_three_links() {
         "Lanes cards share the builder: {page}"
     );
     assert!(!page.contains("actions?query"), "{page}");
-    assert_eq!(r.count("gh"), 0, "no gh call on render: {:?}", r.calls.borrow());
+    assert_eq!(f.count("gh"), 0, "no gh call on render: {:?}", f.calls.borrow());
 }
 
 #[test]
@@ -108,13 +109,12 @@ fn an_issue_with_no_pr_links_the_ticks_latest_run_or_nothing() {
     );
     // The tick (its `drive` pass, #155) reads the issue branch's latest run; a render only reads that cache.
     let url = format!("{GH}/actions/runs/99");
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("gh pr view", "")
-        .reply(
-            "gh run list -R jirathip-dev/sendmeter --branch issue-17",
-            &format!("[{{\"url\":\"{url}\"}}]"),
-        );
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
+    let r = Fake::default().reply("gh pr view", "").reply(
+        "gh run list -R jirathip-dev/sendmeter --branch issue-17",
+        &format!("[{{\"url\":\"{url}\"}}]"),
+    );
     run(&c, &r, &["drive"]);
     assert!(
         r.called("gh run list -R jirathip-dev/sendmeter --branch issue-17 --limit 1 --json url"),

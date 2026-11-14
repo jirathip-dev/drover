@@ -1,5 +1,5 @@
 //! #677: why notes (docs/design/why-notes): a lane's `why.md`, checked at `turn done` and put on the pushed head under
-//! `refs/notes/why` by herdsman alone; read back by briefs, the merge comment, `/api/v1` and `herdsman why <file:line>`.
+//! `refs/notes/why` by drover alone; read back by briefs, the merge comment, `/api/v1` and `drover why <file:line>`.
 use crate::config::{Config, Fleet};
 use crate::events::{emit, fold, last_spawn, read, Event};
 use crate::runner::{argv, json, ok, Runner};
@@ -114,7 +114,7 @@ pub fn turn(
     out: &mut dyn Write,
     (fleet, n): (&str, u64),
     role: &str,
-) -> Result<Option<String>> {
+) -> Result<Option<(&'static str, String)>> {
     let f = cfg.fleet(fleet)?;
     let events = read(&ctx.state)?;
     let Some(s) = fold(&events).remove(&(fleet.to_string(), n)) else {
@@ -142,9 +142,25 @@ pub fn turn(
         return Ok(None);
     }
     let (on, wt) = (On::of(r, Some(sp)), sp.str("worktree").unwrap_or_default());
+    let git = |a: &[&str]| {
+        on.run("git", &argv(&[&["-C", wt][..], a].concat()))
+            .ok()
+            .filter(|o| o.code == 0)
+    };
+    let subject = |c: &str| git(&["log", "-1", "--format=%s", c]).map(|o| o.stdout.trim().to_string());
+    let parent = |c: &str| git(&["rev-parse", &format!("{c}^1")]).map(|o| o.stdout.trim().to_string());
+    if let Err(e) = body(
+        pr["body"].as_str().unwrap_or_default(),
+        head,
+        &f.integration,
+        &subject,
+        &parent,
+    ) {
+        return Ok(Some(("PR_BODY", e)));
+    }
     let path = Path::new(wt).join("why.md");
     let Some(text) = on.read(&path) else {
-        return Ok(Some(MISSING.into()));
+        return Ok(Some(("WHY_INVALID", MISSING.into())));
     };
     let spec = gh::spec(ctx, r, f, fleet, n, false).unwrap_or_default();
     let answered =
@@ -158,7 +174,7 @@ pub fn turn(
     let short = sp.data.get("update") == Some(&Value::Bool(true));
     let owner = match check(&text, short, spec["body"].as_str().unwrap_or_default(), &answered, &len) {
         Ok(o) => o,
-        Err(e) => return Ok(Some(e)),
+        Err(e) => return Ok(Some(("WHY_INVALID", e))),
     };
     let round = s.rounds + 1;
     if let Err(e) = attach(ctx, r, f, fleet, (&branch, head), &text) {
@@ -190,6 +206,53 @@ pub fn turn(
     Ok(None)
 }
 
+/// #925: `body` has `## For humans`, no "Generated with" line, and names `head` as `scripts/evidence-check.sh` does.
+pub fn body(
+    body: &str,
+    head: &str,
+    base: &str,
+    subject: &dyn Fn(&str) -> Option<String>,
+    parent: &dyn Fn(&str) -> Option<String>,
+) -> Result<(), String> {
+    let lines = || body.lines().map(str::trim);
+    if !lines().any(|l| l.eq_ignore_ascii_case("## For humans")) {
+        return Err("the PR body has no `## For humans` section: add 2-4 plain lines, `gh pr edit --body`".into());
+    }
+    let generated = |l: &str| {
+        l.trim_start_matches(|c: char| !c.is_ascii_alphanumeric())
+            .starts_with("Generated with")
+    };
+    if let Some(l) = lines().find(|l| generated(l)) {
+        return Err(format!("the PR body carries `{l}`: drop it, `gh pr edit --body`"));
+    }
+    let low = body.to_ascii_lowercase();
+    let names = |c: &str| {
+        let c = c.get(..7).unwrap_or(c).to_ascii_lowercase();
+        (low.match_indices(&c)).any(|(i, _)| !low[..i].ends_with(|ch: char| ch.is_ascii_hexdigit()))
+    };
+    let merge = |s: &str| {
+        let s = s
+            .strip_prefix("Merge ")
+            .map(|s| s.strip_prefix("remote-tracking ").unwrap_or(s));
+        let s = s.map(|s| s.strip_prefix("branch ").unwrap_or(s));
+        let s = s.map(|s| s.strip_prefix('\'').unwrap_or(s));
+        let s = s.and_then(|s| s.strip_prefix("origin/").unwrap_or(s).strip_prefix(base));
+        s.is_some_and(|t| matches!(t.strip_prefix('\'').unwrap_or(t).chars().next(), None | Some(' ')))
+    };
+    let mut c = head.to_string();
+    while !names(&c) {
+        match subject(&c).filter(|s| merge(s)).and_then(|_| parent(&c)) {
+            Some(p) => c = p,
+            None => {
+                return Err(format!(
+                    "the PR body's evidence names no sha of head {head:.7}: re-run the gates at the head and `gh pr edit --body` with it"
+                ))
+            }
+        }
+    }
+    Ok(())
+}
+
 /// Put `text` on `head` under `refs/notes/why` on origin, from the fleet's local clone (the `why-notes:<fleet>` lease
 /// held while free): origin's notes fetched into this write's own ref, the note added, pushed (never forced); a rejected
 /// push (another writer first) starts over, 3 tries. The local `refs/notes/why` follows origin's after.
@@ -219,7 +282,7 @@ pub fn attach(
         for _ in 0..3 {
             git(&["update-ref", "-d", &mine], "")?;
             let _ = git(&["fetch", "-q", "origin", &format!("+refs/notes/why:{mine}")], "");
-            let id = ["-c", "user.name=herdsman", "-c", "user.email=herdsman@localhost"];
+            let id = ["-c", "user.name=drover", "-c", "user.email=drover@localhost"];
             let o = git(
                 &[&id[..], &["notes", "--ref", &mine, "add", "-f", "-F", "-", head]].concat(),
                 text,
@@ -339,12 +402,12 @@ pub fn brief(
     (!files.is_empty()).then(|| s.lines().take(60).collect::<Vec<_>>().join("\n"))
 }
 
-/// `herdsman why <file:line>`: blame's commit, the issue that merged it, the note on it (else on the round head that
+/// `drover why <file:line>`: blame's commit, the issue that merged it, the note on it (else on the round head that
 /// pushed it) and the issue's asks with their answers; plain text, or `json`.
 pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &str, as_json: bool) -> Result<()> {
     let (file, line) = (at.rsplit_once(':'))
         .and_then(|(f, l)| Some((f, l.parse::<u64>().ok()?)))
-        .context("usage: herdsman why <file:line>")?;
+        .context("usage: drover why <file:line>")?;
     let p = Path::new(file);
     let dir = p
         .parent()
@@ -427,7 +490,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
         let d = events
             .iter()
             .rfind(|d| d.kind == "decision" && d.fleet == *fleet && d.str("id") == Some(id));
-        let answer = d.map(|d| json!({"choice": d.str("choice"), "by": d.str("by"), "via": d.str("via")}));
+        let answer = d.map(|d| json!({"choice": d.str("choice"), "by": d.str("by").map(|b| crate::orchestrator::label(cfg, &events, b)), "via": d.str("via")}));
         let mine = issue.is_some() && e.issue == issue;
         (mine || cited(id))
             .then(|| json!({"id": id, "kind": e.str("kind"), "question": e.str("question"), "answer": answer}))

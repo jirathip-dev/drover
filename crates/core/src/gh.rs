@@ -11,7 +11,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 pub const PR_FIELDS: &str =
-    "number,title,state,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,labels,mergedAt,mergeCommit";
+    "number,title,state,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,labels,mergedAt,mergeCommit,isDraft";
 pub const PR_TTL: u64 = 60;
 const SPEC_FIELDS: &str = "title,body,updatedAt,comments";
 
@@ -96,8 +96,8 @@ pub fn spec(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, issue: u64, refre
 /// #246: every open PR of the repo, flattened to `gh pr view`'s shape, in one paginated GraphQL call.
 const PRS_QUERY: &str = "query($owner:String!,$name:String!,$endCursor:String){repository(owner:$owner,name:$name){\
 pullRequests(states:OPEN,first:100,after:$endCursor){pageInfo{hasNextPage endCursor}nodes{number title body state \
-baseRefName headRefName headRefOid mergeable mergeStateStatus labels(first:50){nodes{name}} commits(last:1){nodes{\
-commit{statusCheckRollup{contexts(first:100){nodes{__typename ...on CheckRun{name status conclusion startedAt \
+baseRefName headRefName headRefOid isDraft mergeable mergeStateStatus labels(first:50){nodes{name}} commits(last:1){nodes{\
+commit{statusCheckRollup{contexts(first:100){nodes{__typename ...on CheckRun{databaseId name status conclusion startedAt \
 completedAt detailsUrl} ...on StatusContext{context state targetUrl}}}}}}}}}}}";
 const PRS_JQ: &str = ".data.repository.pullRequests.nodes[] | .labels = .labels.nodes | .statusCheckRollup = \
 [.commits.nodes[0].commit.statusCheckRollup.contexts.nodes[]?] | del(.commits)";
@@ -171,7 +171,7 @@ pub fn snapshot(ctx: &Ctx, r: &dyn Runner, f: &Fleet, fleet: &str, now: u64) -> 
             .as_object()
             .is_some_and(|m| m.values().all(|v| v["mergeable"] != "UNKNOWN"));
         let age = now.saturating_sub(at);
-        let on = || crate::secret::lookup(r, fleet, crate::webhook::SECRET).is_ok_and(|s| s.is_some());
+        let on = || Config::load(&ctx.config).is_ok_and(|c| crate::webhook::secrets(&c).is_ok_and(|s| !s.is_empty()));
         let hooked = || settled && age < CATCHUP.get() && on();
         let same = FORCE.get() && (hooked() || unchanged(r, f, &mut etags) && settled && age < PROBE_MAX);
         let c = if same {
@@ -409,17 +409,23 @@ pub fn check_name(c: &Value) -> &str {
     c["name"].as_str().or(c["context"].as_str()).unwrap_or("?")
 }
 
-/// The rollup narrowed to the latest run (by `startedAt`) of each `required` name or a `MISSING` stub; empty = all.
+/// #967: the latest run of each check name (by `startedAt`, `completedAt`, then id), only the `required` ones if set.
 pub fn required(rollup: &Value, required: &[String]) -> Value {
-    if required.is_empty() {
-        return rollup.clone();
-    }
     let all = rollup.as_array().map(Vec::as_slice).unwrap_or_default();
-    let latest = |n: &String| {
+    let latest = |n: &str| {
+        let at = |c: &&Value, k: &str| c[k].as_str().unwrap_or_default().to_owned();
         let runs = all.iter().filter(|c| check_name(c) == n);
-        runs.max_by_key(|c| c["startedAt"].as_str().unwrap_or_default())
+        runs.max_by_key(|c| (at(c, "startedAt"), at(c, "completedAt"), c["databaseId"].as_u64()))
             .cloned()
     };
+    if required.is_empty() {
+        let mut seen = Vec::new();
+        let names = all
+            .iter()
+            .map(check_name)
+            .filter(|n| !seen.contains(n) && (seen.push(*n), true).1);
+        return names.filter_map(latest).collect();
+    }
     required
         .iter()
         .map(|n| latest(n).unwrap_or_else(|| json!({"name": n, "status": "MISSING"})))
@@ -494,7 +500,7 @@ fn decided(pr: &Value, until: Until, req: &[String]) -> Option<i32> {
     }
 }
 
-/// `herdsman wait`: poll the cached read, 30 s doubling to 5 min; 0 reached, 1 failed/closed, 124 timed out.
+/// `drover wait`: poll the cached read, 30 s doubling to 5 min; 0 reached, 1 failed/closed, 124 timed out.
 #[allow(clippy::too_many_arguments)] // the CLI's wait arguments, one each
 pub fn wait(
     ctx: &Ctx,

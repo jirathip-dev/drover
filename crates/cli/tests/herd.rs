@@ -2,15 +2,15 @@
 //! weather), its Host/Origin check, no pane text, `?weather=` on loopback only; 390 px snapshots.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 const SCREEN: &str = "⏺ Bash(cargo test)\n  ⎿ PANE-SECRET-TEXT ok\n";
 
-fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
+fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     let cfg = format!("[serve]\nallowed_hosts = [\"mac.example\"]\n\n{CONFIG}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\n");
     let c = ctx(&tmpdir(name), &cfg);
     let spawn = |fleet: &str, issue: u64, ts: u64, agent: &str| {
@@ -47,22 +47,26 @@ fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
         json!({"title": "Herd mode"}).to_string(),
     )
     .unwrap();
-    let a = |n: &str, st: &str, p: &str| json!({"name": n, "agent_status": st, "pane_id": p, "cwd": "/x"});
-    let list = json!({"result": {"agents": [
-        a("sendmeter-impl-12", "working", "w1:p2"),
-        a("synergy-impl-7", "blocked", "w2:p1"),
-        a("synergy-impl-8", "done", "w2:p2"),
-        {"agent": "codex", "agent_status": "idle", "pane_id": "w4:p1", "cwd": "/home/me/side", "workspace_id": "w4"},
-    ]}});
-    let ws = json!({"result": {"workspaces": [{"workspace_id": "w4", "label": "side-project"}]}});
-    let r = Fake::default()
-        .reply("herdr agent list", &list.to_string())
-        .reply("herdr workspace list", &ws.to_string())
-        .reply("herdr pane read", SCREEN)
-        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "2\n")
-        .reply("sysctl -n vm.loadavg", "{ 3.90 1.20 1.00 }\n")
-        .reply("sysctl -n hw.ncpu", "10\n")
-        .reply("vm_stat", "Swapouts: 100.\n");
+    let r = OnShed::new(
+        Fake::default()
+            .reply("sysctl -n kern.memorystatus_vm_pressure_level", "2\n")
+            .reply("sysctl -n vm.loadavg", "{ 3.90 1.20 1.00 }\n")
+            .reply("sysctl -n hw.ncpu", "10\n")
+            .reply("vm_stat", "Swapouts: 100.\n"),
+    );
+    for (n, st) in [
+        ("sendmeter-impl-12", "working"),
+        ("synergy-impl-7", "blocked"),
+        ("synergy-impl-8", "done"),
+    ] {
+        r.1.lane(n, st, "/x");
+        r.1.screen(n, SCREEN);
+    }
+    r.1.add("side-project", json!({"fleet": "-", "harness": "codex"}));
+    r.1.set("side-project", |t| {
+        t["cwd"] = json!("/home/me/side");
+        t["reported"] = json!({"state": "idle"});
+    });
     (c, r)
 }
 
@@ -82,7 +86,7 @@ fn body(res: &str) -> Value {
 fn herd_json_shape_on_a_fixture() {
     let (c, r) = fixture("shape");
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    *s.host.lock().unwrap() = herdsman::host::sample(&r);
+    *s.host.lock().unwrap() = drover::host::sample(&r);
     let v = body(&get(&s, "/herd.json", ADDR, ""));
     let names = |l: &Value| {
         l.as_array()
@@ -182,7 +186,10 @@ fn herd_json_refuses_a_foreign_host_or_origin() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     assert!(get(&s, "/herd.json", "evil.example", "").starts_with("HTTP/1.1 403 "));
     assert!(get(&s, "/herd.json", ADDR, "Origin: https://evil.example\r\n").starts_with("HTTP/1.1 403 "));
-    assert!(!r.called("herdr agent list"), "refused before any read");
+    assert!(
+        !r.called("herdr agent list") && r.1.methods().is_empty(),
+        "refused before any read"
+    );
     body(&get(&s, "/herd.json", "mac.example", "Origin: https://mac.example\r\n"));
 }
 
@@ -190,7 +197,7 @@ fn herd_json_refuses_a_foreign_host_or_origin() {
 fn weather_param_works_on_loopback_only() {
     let (c, r) = fixture("weather");
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    *s.host.lock().unwrap() = herdsman::host::sample(&r);
+    *s.host.lock().unwrap() = drover::host::sample(&r);
     let storm = body(&get(&s, "/herd.json?weather=storm", ADDR, ""));
     assert_eq!(
         (&storm["host"]["load"], &storm["host"]["pressure"]),
@@ -227,11 +234,10 @@ fn page_has_the_herd_button_and_horse_symbols() {
 }
 
 /// The PR's 390 px Herd snapshots (fixture data): calm, gusty, storm and fog; the queue at the gate,
-/// a swipe to the next repo, the sheet from a horse; no horizontal page scroll. PNGs go to `$HERDSMAN_SNAPSHOTS`.
+/// a swipe to the next repo, the sheet from a horse; no horizontal page scroll. PNGs go to `$DROVER_SNAPSHOTS`.
 #[test]
 fn herd_snapshots_fit_390px() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture("shots");
@@ -273,13 +279,11 @@ fn herd_snapshots_fit_390px() {
         ),
     ];
     for (name, js) in scenes {
-        let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
+        let png = std::env::var("DROVER_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("{name}.png"))
         });
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
-        let o = swift()
+        let o = webview()
             .args([
-                script,
                 file.to_str().unwrap(),
                 "390",
                 "lanes",
@@ -305,8 +309,7 @@ fn herd_snapshots_fit_390px() {
 /// (a) 0 blocked · 1 working · 13 queued · 7 idle · 11 done, (b) only 1 done, (c) every band.
 #[test]
 fn herd_horses_are_one_size_at_390px() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
     let (c, r) = fixture("sizes");
@@ -380,13 +383,11 @@ fn herd_horses_are_one_size_at_390px() {
     );
     for (name, json, bands, then) in scenes {
         let js = format!("window.fetch = async () => new Response('', {{status: 404}}); herd(true); herdData({json}); {measure}{then}");
-        let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
+        let png = std::env::var("DROVER_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("{name}.png"))
         });
-        let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
-        let o = swift()
+        let o = webview()
             .args([
-                script,
                 file.to_str().unwrap(),
                 "390",
                 "lanes",

@@ -1,17 +1,18 @@
 # The phone page
 
-`herdsman serve --addr <host:port>` is one phone page (Home Screen app, works offline with a
-`last update hh:mm` line) with Queue · Lanes · Chat · Host · Events tabs (Chat: docs/conductor.md). `--read-only` serves GET only.
+`drover serve --addr <host:port>` is one phone page (Home Screen app, works offline with a
+`last update hh:mm` line) with Queue · Lanes · Chat · Host · Events tabs (Chat: docs/orchestrator.md). `--read-only` serves GET only.
 
 Frozen for features (#552): the board takes bug fixes only, until it retires once the parity list passes. New chat
-UI goes to cooee core, new workflow UI (Queue, Asks, Fleets tabs) to the cooee-drover repo; both read `/api/v1`, which
-stays open (README, "How it fits"). CI's
+UI goes to cooee core, new workflow UI (Queue, Asks, Fleets tabs) to Drover's screens, which drover serves itself (#814);
+both read `/api/v1`, which stays open. CI's
 `board-freeze` fails a PR touching the board's UI files (`assets/serve.*`, `assets/herd.*`, `assets/themes/`, `web/`,
 `crates/server/src/serve.rs`, `serve/` but `v1.rs`) unless its issue has a line starting `board-fix`.
 
 The board is live: the page keeps one `GET /live` Server-Sent Events stream open (same
-Host/Origin check, at most 8 clients, then 503; a `: ping` every 15 s; a closed client frees its
-slot within ~1 s). A watcher thread checks the
+Host/Origin check; #893: at most 4 streams per device (its paired token, else its address), its fifth closes its
+oldest; a `: ping` every `[limits] serve_heartbeat_secs` (15); a stream whose bytes stay untaken through 2 pings is
+dropped; a closed client frees its slot within ~1 s). A watcher thread checks the
 event log's size/mtime every 1 s and `herdr agent list` every 2 s (uncached); on a change (or
 every 15 s, for ages) it reads the needs-you cards and the five tabs again and pushes only the changed ones, as their
 API v1 data (#269: the server builds no HTML but the page shell; the TypeScript board in `web/` draws every tab):
@@ -29,7 +30,7 @@ the board's other tabs from API v1 again.
 Snapshot (#337): the fast step (every minute) and every kick (a lane push, a verdict, an ask, a board tap) take one
 look at everything the board and `status` show and save it as the `board` row of `state.db`'s snapshots (#344): each read's output by
 command line. Every remote host's reads (verdict files, `git` facts, its herdr's agent list and pane reads) go in one
-ssh call per host per step, a small script that prints each output and exit code; herdsman's ssh keeps one connection
+ssh call per host per step, a small script that prints each output and exit code; drover's ssh keeps one connection
 per host for 10 minutes (`ControlMaster=auto`, `ControlPersist=10m`, whatever `~/.ssh/config` says). Only what decides
 something is read: a verdict file only until its verdict is recorded, `git log` only for an impl/fix not seen pushed
 (or a review with no spawn sha), never a merged or closed lane. A request (`/`, `/api/v1/…`, `/herd.json`, `/live`) and
@@ -106,8 +107,8 @@ Lanes are grouped like Corral: state sections blocked → working → idle → d
 split into fleet subgroups (alphabetical, Others last), newest-changed first. A lane the log has open
 but herdr shows no pane for is `parked` (neutral, `parked · work on PR #n` or `parked · pushed <sha>`)
 when its worktree is clean with nothing unpushed, and `dead` (red, with the log/pane mismatch line)
-when work is at risk. #422: a thread's conductor (`conductor-<thread>`) is a lane of the thread's repo (an
-`all` thread's in `all repos`), role `conductor`, first in its subgroup, named `<thread title> · <thread>`; once
+when work is at risk. #422: a thread's orchestrator (`orchestrator-<thread>`) is a lane of the thread's repo (an
+`all` thread's in `all repos`), role `orchestrator`, first in its subgroup, named `<thread title> · <thread>`; once
 its pane closed it stays, dimmed, as `asleep`, and its row opens the thread in the chat tab. On a paused fleet a parked lane reads `parked: fleet paused (resume to review
 PR #n)`; once resumed, the usual `pushed <sha>, waiting for drive (next pass ≤ 5 min) to spawn review` applies. Tapping a lane
 opens a bottom sheet that slides up to 78 % and drags like an iOS sheet (it follows the finger from the
@@ -116,9 +117,9 @@ down flick, the backdrop or Esc slide it closed) with
 its details card and a transcript: `/lane?agent=&lines=200&turns=10&before=<n>` returns up to 200 masked
 lines with their terminal colours (the cap is server-side), `live` (how many end lines are the screen's
 still-changing last block) and `status` (the spinner line, shown under the chat). #138: herdr keeps only
-the recent screen (Claude draws in the alternate screen), so herdsman keeps a **rolling transcript** per
+the recent screen (Claude draws in the alternate screen), so drover keeps a **rolling transcript** per
 lane, `<state dir>/transcripts/<agent>.log` (mode 0600, the last 5,000 lines): every read (the sheet,
-`herdsman check`) appends the lines above the last block past their longest overlap with the file's tail,
+`drover check`) appends the lines above the last block past their longest overlap with the file's tail,
 or after a `┄ not captured: scrolled past between reads ┄` line when the reads do not meet. `clean` and
 `kill` delete it. **Load more** (or scrolling to the top) pages back through it (`more` while older lines exist). #351: a chat opens
 bounded: the lines that fit in 32 KB and the session's last `turns` (10) within 3.2 KB a turn, ~64 KB in all; each
@@ -131,14 +132,14 @@ colours map to the board's tokens. Refreshed every 5 s; a block's open state is 
 Paired devices only, same Host/Origin checks; an unpaired phone sees "Pair this phone to see the
 conversation" with the code entry.
 
-The sheet header has **Stop** (`herdsman stop`: Esc, the agent pauses), **Kill** (a confirm shows
-`herdsman kill`'s dry-run line, e.g. `impl-42 · impl · 3 unpushed commit(s), 0 dirty file(s) →
-wip/… · pane closes, worktree kept`) and **Clean** (`herdsman clean <fleet> --lane <agent>`;
+The sheet header has **Stop** (`drover stop`: Esc, the agent pauses), **Kill** (a confirm shows
+`drover kill`'s dry-run line, e.g. `impl-42 · impl · 3 unpushed commit(s), 0 dirty file(s) →
+wip/… · pane closes, worktree kept`) and **Clean** (`drover clean <fleet> --lane <agent>`;
 disabled with the reason under the actions, e.g. "only after merge (PR #42 open)", "live agent";
 a lane with no pane hides Stop and Kill and reads no transcript). An Others agent (a herdr agent that is no
-herdsman lane) gets none of the three: one **Close pane** asks "close <agent>'s pane? its worktree and files
-stay", then POSTs `/act {agent: <pane>, op: close}` (`herdsman close`), and `p.st` reads "not a herdsman lane:
-herdsman can only close its pane"; read-only pages and unpaired phones don't get it. The sheet JSON names the
+drover lane) gets none of the three: one **Close pane** asks "close <agent>'s pane? its worktree and files
+stay", then POSTs `/act {agent: <pane>, op: close}` (`drover close`), and `p.st` reads "not a drover lane:
+drover can only close its pane"; read-only pages and unpaired phones don't get it. The sheet JSON names the
 actions: `"acts": ["close"]` (with `"pane"`) for Others, `["stop", "kill", "clean"]` for lanes. Each POSTs `/act {agent, op, confirm}`:
 a paired device, the Host/Origin checks and the 10-a-minute limit, logged
 `{"type":"act","via":"web","agent","device","op"}` (dry runs are not logged). Typing `/` first in
@@ -151,14 +152,14 @@ The sheet's reply box sends text to that agent (`herdr agent prompt` + Enter; ds
 `herdr pane send-text` + Enter). A device must be paired once (#59, docs/setup.md): **Pair this
 phone** (header, blocked cards, the sheet) POSTs `/pair/request`, which shows a 6-digit code and sets
 an HttpOnly, Secure, SameSite=Strict `hd=` cookie with a random token for 10 minutes. The token pairs
-nothing until `herdsman serve approve <code>` on the Mac (`NO_SUCH_CODE` / `EXPIRED` otherwise, single
+nothing until `drover serve approve <code>` on the Mac (`NO_SUCH_CODE` / `EXPIRED` otherwise, single
 use; `serve pending` lists requests). The approval is logged, so the waiting page's live stream
 sends its `ev` (and the page's 2 s claim poll, #288, sees it) and the page POSTs `/pair/claim`, which keeps the same cookie for a year;
 each page load claims again, renewing it, and a device unused for a year (365 days) no longer counts as paired
-(`herdsman serve devices` lists each paired device's days left). Opened on the host itself (a loopback peer whose
+(`drover serve devices` lists each paired device's days left). Opened on the host itself (a loopback peer whose
 `Host` is `127.0.0.1`/`localhost`, no `X-Forwarded-For` or `Tailscale-User-Login`), the panel also shows the
-exact `herdsman serve approve <code>` line with a `[copy]` button: paste it in Terminal (a browser can't run a
-command; there is no `herdsman://` link). Local doesn't mean trusted: lanes run on the host too, so the lane
+exact `drover serve approve <code>` line with a `[copy]` button: paste it in Terminal (a browser can't run a
+command; there is no `drover://` link). Local doesn't mean trusted: lanes run on the host too, so the lane
 hook refuses `serve approve`, `serve unpair` and `serve devices --revoke` (`REFUSED OWNER_ONLY`). At most 4 requests
 are open, 2 per peer address (behind `tailscale serve`, a loopback peer, the `X-Forwarded-For` address or
 `Tailscale-User-Login`; trusted from loopback only), and a new code never repeats an open one. A re-tap of
@@ -170,8 +171,8 @@ a "no" shows the Pair UI; any later answer to a paired device (its `X-Paired: 1`
 database error reading the devices answers 503 `board busy, retrying` (API v1: `BUSY`), never 401: the page retries
 a send once after 2 s and says "reconnecting". Each 401 and 503 is one `serve.log` line, `auth <unix secs> <status>
 <method> <route>: <reason>` (`no cookie`, `unknown token`, `expired`, `db error: <kind>`; never the token), and
-`herdsman doctor` shows the last 24 h's counts.
-The panel reads `Waiting for approval on the Mac: herdsman serve approve <code>`. An unpaired page,
+`drover doctor` shows the last 24 h's counts.
+The panel reads `Waiting for approval on the Mac: drover serve approve <code>`. An unpaired page,
 while any device is paired, adds "Safari and the home-screen app pair separately" (iOS keeps their cookies apart). An optional `[serve] approve_hint`
 (a string, `{code}` replaced by the code) is appended after ` · `, e.g.
 `approve_hint = "or send 'pair {code}' to the owner"`; `/pair/request` returns it as a second line and
@@ -181,9 +182,9 @@ Sends pass the same Host/Origin checks, are limited to 10 a minute per device, a
 chars, or a control character other than newline). Removing a device also needs a paired cookie. Each send logs `{"type":"prompt","via":"web","agent","device","chars"}`, never the
 text. Secure cookies need https (`tailscale serve`) or localhost.
 
-Open asks (`herdsman ask`, but a conductor's `ask --thread`: those wait in their thread) show as a red **needs you** card above every tab: the question, option
+Open asks (`drover ask`, but an orchestrator's `ask --thread`: those wait in their thread) show as a red **needs you** card above every tab: the question, option
 buttons (recommended first) and a free-text box, tagged `routine · defaults to 2 in 24m` or `owner · waits
-for you` (#99, [docs/lanes.md](lanes.md#asks)). Answering POSTs `op=answer` (`herdsman answer … --by owner`,
+for you` (#99, [docs/lanes.md](lanes.md#asks)). Answering POSTs `op=answer` (`drover answer … --by owner`,
 logged `"via":"web"`) under the same Host/Origin checks and needs a paired device (401 otherwise). In the
 Queue tab the asked issue shows `⏸ waiting: decision`.
 
@@ -282,8 +283,8 @@ scheme, style, viewport and the last `/live` id) and a PNG of the element plus 2
 from the layout (each box's background and border, then each word; no images or gradients). A paired device only,
 with the Host/Origin checks and the 10-a-minute limit; nothing leaves the Mac. `serve` keeps the bundle as
 `state/reports/<id>/bundle.json` (plus the build) and `shot.png`, and emits a `report` event whose line names the
-bundle path to every notifier but web push, whatever its `on` (the first fleet's notifiers). `herdsman report` lists the reports,
-newest first; `herdsman report <id>` prints one bundle.
+bundle path to every notifier but web push, whatever its `on` (the first fleet's notifiers). `drover report` lists the reports,
+newest first; `drover report <id>` prints one bundle.
 
 ## Alerts (web push)
 
@@ -310,7 +311,7 @@ It works per fleet too (`[[fleet.<name>.notify]]`), next to any command notifier
 unchanged. Each event is encrypted per device (RFC 8291 aes128gcm), signed with an ES256 VAPID
 JWT (12 h) and sent once with `curl -sS --max-time 10 -X POST`, the body on stdin. A 404 or 410
 prunes that device; any other failure logs one `notify-failed` (no retry). Tapping an alert
-opens the page on its tab with the issue's row open. `herdsman push test` sends a test alert to
+opens the page on its tab with the issue's row open. `drover push test` sends a test alert to
 every subscribed device.
 
 The subscribe tells the truth (#87): with a webpush notifier it pushes one "alerts are on" test to
@@ -319,7 +320,7 @@ the subscription but answers, under the button, "alerts are saved but off: add `
 "webpush"` to fleet.toml (docs/serve.md)". The Host tab's ALERTS `push` row reads `on · 1 device · last
 sent 3m ago`, `off: no webpush notifier`, or `on · last failure: <reason>` while a webpush
 `notify-failed` is newer than the last delivery. Each delivery logs one passive `push-sent` with the
-device count only (no endpoint, no key). `herdsman check` logs one `alerts-off` (again only when the
+device count only (no endpoint, no key). `drover check` logs one `alerts-off` (again only when the
 device count changes) while `subs.json` has devices but fleet.toml has no webpush notifier.
 
 Secrets: the VAPID key (`<state>/webpush/vapid.key`) and the subscriptions
@@ -347,28 +348,31 @@ tailscale funnel --bg --https=10000 --set-path /hooks/github http://127.0.0.1:77
 
 In the repo's GitHub settings add a webhook: payload URL `https://<mac>.<tailnet>.ts.net:10000/hooks/github`,
 content type `application/json`, the secret, and the events *Pull requests*, *Check suites*, *Check runs*,
-*Statuses* and *Pushes*. The secret is `GITHUB_WEBHOOK_SECRET` in the OS store (`herdsman secret request <thread>
-GITHUB_WEBHOOK_SECRET --why …`; a fleet's own, else `all`'s); without it the endpoint answers 503 and doctor shows
+*Statuses* and *Pushes*. The secret is the 0600 file `[serve] webhook_secret_file` names (#707; one for every fleet, refused
+`SECRET_FILE_OPEN` if others can read it); without it the endpoint answers 503 and doctor shows
 `! webhook — no secret`.
 
 Each delivery's `X-Hub-Signature-256` (HMAC-SHA256 of the raw body) is checked in constant time; a missing or bad one
 gets 401 and is only counted (doctor's `webhook` row). A body over GitHub's 25 MB is refused (413) before it is read.
 `ping` answers 200. A `pull_request`, `check_suite`, `check_run`, `status` or `push` event naming an open fleet
-issue's branch or PR (a merge push: its `(#N)`) re-reads that PR into the cache `herdsman pr` reads and kicks drive
+issue's branch or PR (a merge push: its `(#N)`) re-reads that PR into the cache `drover pr` reads and kicks drive
 for the issue at once (200); anything else is ignored with 202. While a fleet has the secret, the fast step's PR read
 becomes a catch-up poll every `[limits] webhook_poll_minutes` (default 10), for what a sleeping Mac or a down Funnel
 missed.
 
 ## JSON API v1 (#265)
 
-`herdsman serve` answers JSON under `/api/v1/`, the frozen TypeScript board's (`web/`) every read, and cooee-drover's and cooee core's (below). Every route checks Host/Origin like `/live`; the routes the board keeps for a paired device (a
+`drover serve` answers JSON under `/api/v1/`, the frozen TypeScript board's (`web/`) every read, and Drover's screens' and cooee core's (below). Every route checks Host/Origin like `/live`; the routes the board keeps for a paired device (a
 transcript, a setup screen, and the paired ops: answer, drive, override, extend, park, unpair, orphans, reap, host, bqueue, cond, and
 #555's send, menu, act, setup, chat-about, chat, close) refuse an unpaired one.
+
+#725: `/api/v1/lifeboat` is a plain HTML page, not JSON: the fallback for when cooee is down ([lifeboat.md](lifeboat.md)).
 
 | route | answer |
 |---|---|
 | `GET state` | the board in one read: `seq` (newest event), `now` and `tz` (the server's clock and UTC offset, s), `age` (the step's snapshot, null when none), `mtime`, `theme`, `fleets` (with `repo`), `queue`, `lanes`, `asks`, `hosts`, `services`, `alerts` |
-| `GET host` | #267: the Host tab: `hosts` (each card's dot, words, rows with their gauge, value, sparkline series and, in an export, chart), `disk`, `orphans`, `leftovers`, `spawns`, `services`, `theme`, `accounts`, `deepseek`, `fleets`, `push`, and on a live board `key`, `subs`, `devices`; `rw` and `live` say which forms show and whether they post |
+| `GET health` | #709: `ok`, `config` (`ok`, or `invalid` with its `error`, `config invalid: <error> (fleet.toml:<line>)`); no answer: the process is dead. An invalid fleet.toml leaves the board reading the last good one (kept as `fleet.good.toml` beside the log), with that line as a red banner above every tab (`needs`' `config`); `check` alerts `config-invalid` once per distinct error, `config-ok` once it loads again |
+| `GET host` | #267: the Host tab: `hosts` (each card's dot, words, rows with their gauge, value, sparkline series and, in an export, chart), `disk`, `orphans`, `leftovers`, `spawns`, `services`, `theme`, `accounts`, `deepseek`, `fleets`, `push`, `vendors` (#830: `accounts` and `setups`, each account's and each provider login's `{name, vendor}`, from the providers), and on a live board `key`, `subs`, `devices`; `rw` and `live` say which forms show and whether they post |
 | `GET queue` | #268: the Queue tab: a card per fleet (needing you first) with its `k` colour, serial groups, `need`, `paused` line or `drive` line and red `notes`, its `rows` (state, age and `t`, stage chips, lane, PR line, notes, a defaulted decision and its `ask`, ▲/▼ targets, the `lanes` list), #576 their `marks` by issue (`design`, `verify` `on`/`off`/null, `repro`, `serial`, `needs`, the verify `note`), `done` today, the `backlog` and the `config` sheet's data; `rw` and `live` say which forms show and whether they post |
 | `GET issue/<fleet>/<n>` | #576: the issue's recorded verdicts, newest first: `role` (the stage: `rev`, `verify`), `round`, `sha`, `verdict`, `findings` (verdict.md after its first line), the newest one's screenshot `shots` (`/shot/<fleet>/<n>/<i>` serves the `i`th) and a `--repro` PASS's `repro` block (`kind` `run` or `verify`, its `text`) |
 | `GET lessons` | #576: per fleet its `lessons` (`weekly`, `off`), the `last` lesson lane (`issue`, its spawn `ts`, the issue's `state`) and `next`, when tick runs the next (null: `off`) |
@@ -376,13 +380,13 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `GET needs` | #269: the needs-you cards for this device: `snap` (#450: the step's look's time, 0 for none; the strip under the header shows its age once over 2 min), the open `asks` (`who`, `kind`, imported `from`), each `blocked` lane's card (unpaired: its `activity`; paired: the harness `menu` or the pane's `tail`), the `needs-human` `issues` (one more round `pending`, the last verdict, the PR line, `merge`), `choosing` (`[chat·N]`); `rw`, `live`, `paired` and `pair` say which forms and buttons show |
 | `GET lanes` | #269: the Lanes tab for this device: state `sections` with their repo groups and each lane's row (avatar `state`, `act`, `atone`, `coat`; `state` in `tone` for `ago`, `why`, the `activity` or `now` line) and hidden card (`head`, `shown`, `facts`, the PR line, `dead`, the `blocked` card); `error` (no fleet.toml) or `failed` (herdr unread) |
 | `GET chat` | #269: the [chat] tab: per repo (`all` first) its thread `rows` and `archived` ones, then each thread's view (`ds`, `state`, its last 30 messages by `kind`, `older` or the `started` line); `rw`: a paired device on the live board writes; #620: serve keeps the folded tab by the log's last seq, fleet.toml's mtime, the agents and the minute, and a request in between reuses it without reading the log |
-| `GET thread/<t>?before=N&n=30` | #408, #269: a thread's messages before seq `N`, as `chat`'s pages. #681: a handoff's message carries one `handoff` item (cooee's agent→agent message): `kind: "handoff"`, `id` (its seq; a repo handoff's is its card's), `from` (`{agent: "conductor", thread, repo}`), `to` (the thread id once delivered, else `{repo, pending: true}`), `title`, `summary` (the first line), `text`, `state` (`pending`, `delivered`, `failed` with its `error`, `forwarded`), `folded` (the sender's thread; the receiver's is the message form) and, while pending, `choices`: the card's rows (`n`, `text`, the `thread` it goes to, `new` for a new thread), each picked by `POST <op>` (`answer`) with its `fleet`, `id`, `choice` = `n` and `State.mtime`; the outcome shows in both threads' items. A repo handoff's own `kind: "handoff"` row after the pick has no item (its card's is the one) |
-| `GET repo/<fleet>/threads` | #681: the repo's conductor threads, newest-active first: `id`, `title`, `last` (`line`, `ts`), `unread`, `awake` (its conductor not asleep), `archived`, and `newest: true` on the ongoing one (the first not archived), so cooee shows it as the agent's chat and the rest as side threads; `all` for the all-repos threads; 404 `NOT_FOUND` for no such fleet |
+| `GET thread/<t>?before=N&n=30` | #408, #269: a thread's messages before seq `N`, as `chat`'s pages. #681: a handoff's message carries one `handoff` item (cooee's agent→agent message): `kind: "handoff"`, `id` (its seq; a repo handoff's is its card's), `from` (`{agent: "orchestrator", thread, repo}`), `to` (the thread id once delivered, else `{repo, pending: true}`), `title`, `summary` (the first line), `text`, `state` (`pending`, `delivered`, `failed` with its `error`, `forwarded`), `folded` (the sender's thread; the receiver's is the message form) and, while pending, `choices`: the card's rows (`n`, `text`, the `thread` it goes to, `new` for a new thread), each picked by `POST <op>` (`answer`) with its `fleet`, `id`, `choice` = `n` and `State.mtime`; the outcome shows in both threads' items. A repo handoff's own `kind: "handoff"` row after the pick has no item (its card's is the one) |
+| `GET repo/<fleet>/threads` | #681: the repo's orchestrator threads, newest-active first: `id`, `title`, `last` (`line`, `ts`), `unread`, `awake` (its orchestrator not asleep), `archived`, and `newest: true` on the ongoing one (the first not archived), so cooee shows it as the agent's chat and the rest as side threads; `all` for the all-repos threads; 404 `NOT_FOUND` for no such fleet |
 | `GET events?since=N` | #259's contract: the events after `N` (#266: `&until=M`, up to `M`) in `list`; over 500, `refresh: true` and none (read `state` again). Each as the Events tab says it: `glyph`, `tone`, `text`, `imp`, the row sprite's `act` and `coat`, `plain`, and its issue's `pr` or checks `run` |
-| `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) |
-| `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `cond`, `bqueue`, `answer`, `drive`, `override`, `extend`, `park`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`, as the form or a JSON object (#555: a list joins with `,`, `true` is `1`); answers `{ok, code, message}` |
+| `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) plus #749's `blocks`: an ACP lane's transcript from shed's events (`prompt`, `reply`, `tool`, `plan`, `approval`; `?before=<seq>&n=N` pages back), a PTY lane's one `screen` block (its `lines`) |
+| `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `cond`, `bqueue`, `answer`, `drive`, `override`, `extend`, `park`, `unpark`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`, as the form or a JSON object (#555: a list joins with `,`, `true` is `1`); answers `{ok, code, message}` |
 | `GET herd` | #555: Herd mode's data, the same as `/herd.json` |
-| `GET roles?fleet=F` | #555: the fleet's [config] sheet (`config`: its roles with the model/effort pickers, the conductor) and `chat`, `[chat]`'s new-thread defaults with the harnesses it may name |
+| `GET roles?fleet=F` | #555: the fleet's [config] sheet (`config`: its roles with the model/effort pickers, the orchestrator) and `chat`, `[chat]`'s new-thread defaults with the harnesses it may name |
 | `GET setup/<pane>` | #555: a setup terminal's screen (`lines`, `urls`, `closed`), the old board's `/lane?setup=` |
 | `POST send` | #555: `{agent, text}` to a lane, or `{setup, text}` into a setup terminal: the old board's `/send` (10 a minute per device: `RATE_LIMIT`; `PAUSED`, `REV_READONLY`, `BAD_VALUE`) |
 | `POST menu` | #555: `{agent, choice, h}`, a blocked lane's menu option: `/answer` (`STALE` when the menu is not the card's `h`) |
@@ -393,8 +397,8 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `POST close` | #555: `{fleet, issue}`, a backlog issue's [close]: `gh issue close`, logged `closed`; `NOT_BACKLOG` for a queued issue or one with a lane |
 | `POST qset` | #576 (paired): `fleet`, `issue`, `key` (`design`, `verify`, `repro`), `value` (`on`, `off`): the CLI's `queue <fleet> set <n> <key> <value>` |
 | `POST lesson` | #576 (paired): `fleet`: the CLI's `lesson <fleet>`, its queue entry logged `by` the device |
-| `POST conductor-attach` | #633 (paired): `{fleet, thread}`, a cooee thread as the repo's conductor thread (`conductor-attached`): `ask --thread` takes it, lane asks route to it, its asks and decisions are `events`; answers `ConductorAttach`: `brief`, `settings` (the synced conductor Claude settings), `env` (`HERDSMAN_LANE`, `HERDSMAN_THREAD`, `HERDSMAN_PORT`), `guarded` (#565's ACP guard holds) and `why` not |
-| `POST conductor-detach` | #633 (paired): `{fleet, thread}`, the link ends (`conductor-detached`; archiving the thread ends it too); `NO_SUCH_THREAD` unless attached |
+| `POST orchestrator-attach` | #633 (paired): `{fleet, thread}`, a cooee thread as the repo's orchestrator thread (`orchestrator-attached`): `ask --thread` takes it, lane asks route to it, its asks and decisions are `events`; answers `OrchestratorAttach`: `brief`, `settings` (the synced orchestrator Claude settings), `env` (`DROVER_LANE`, `DROVER_THREAD`, `DROVER_PORT`), `guarded` (#565's ACP guard holds) and `why` not |
+| `POST orchestrator-detach` | #633 (paired): `{fleet, thread}`, the link ends (`orchestrator-detached`; archiving the thread ends it too); `NO_SUCH_THREAD` unless attached |
 
 Every answer is JSON, a refusal too: `{ok: false, code, message}` with 401 `UNPAIRED`, 503 `BUSY` (#501), 403 `FORBIDDEN`, 405
 `READ_ONLY`, 409 and the `REFUSED` code (`STALE`, `DRIVE_RUNNING`, …), 404 `NOT_FOUND`. The theme is the phone's own
@@ -404,9 +408,9 @@ never caches `api/`. A breaking change is `/api/v2/`.
 The types are defined once, in `crates/server/src/api.rs` beside the board's (#375): `just types` writes them to
 `assets/types/api.d.ts`, which `web/` imports, and CI fails when that file is stale. The handlers are in
 `crates/server/src/serve/v1.rs`. Each endpoint's JSON is golden-tested in `crates/cli/tests/api_v1.rs`. #555: the contract with
-cooee core and cooee-drover is `crates/cli/tests/api_v1_contract.rs`: a fixture per route in
+cooee core and Drover's screens is `crates/cli/tests/api_v1_contract.rs`: a fixture per route in
 `crates/cli/tests/golden/api_v1/` (the route, its Rust type, the type's schema generated from its default, and a recorded
-response; cooee-drover's module tests copy them). A response whose shape (keys, each value's JSON type) or a type whose schema
+response). A response whose shape (keys, each value's JSON type) or a type whose schema
 changes fails CI until the fixtures are updated in the same PR (`BLESS=1 cargo test --test api_v1_contract`).
 
 `web/` is TypeScript with no framework: `npm run check` (`tsc --strict --noEmit`) and `npm run build` (esbuild:
@@ -417,7 +421,7 @@ build` after a UI edit.
 
 ### Who consumes this
 
-- cooee-drover's tabs (Queue, Asks, Fleets), its whole engine view: it reads and acts only through `/api/v1`;
+- Drover's tabs (Queue, Asks, Fleets), served by drover to cooee (#814): they read and act only through `/api/v1`;
 - cooee core, where it reads it (the lanes it shows as Workflow chats, cooee#33);
 - the frozen `web/` board (#552), until #553's parity rows pass.
 
@@ -429,15 +433,35 @@ one) and `where`, the one label every surface shows: the host while 2 or more ho
 empty: no chip). The old board's Queue and Lanes rows show it as a chip; `status`'s HOST column, a `board` row's
 `on …` line and `waiting`'s age show the same string. Each shape is in `crates/cli/tests/golden/api_v1/where.json`.
 
-The rule: a screen that needs data herdsman doesn't send gets the `/api/v1` field here first, with its fixture in
+The rule: a screen that needs data drover doesn't send gets the `/api/v1` field here first, with its fixture in
 `crates/cli/tests/api_v1_contract.rs`, then the consumer reads it. Consumers never derive engine state themselves.
+
+## cooee's native screens (#814)
+
+drover is cooee's `drover` plugin: `cooee-plugin.toml` at the repo root names its places (the Conductor's Queue and
+Events chips, its chat cards, the drover menu row) and `[permissions]`. cooee runs `drover serve --addr
+127.0.0.1:$PORT` and calls it with `Authorization: Bearer $COOEE_PLUGIN_TOKEN`; the board's own Host check and a paired
+device work too. Beside `/api/v1`, never in the board's pages, it answers JSON made of cooee's blocks
+(cooee#125's screens-as-data design):
+
+- `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `?before=<unix time>`),
+  `/screens/fleets` (the Fleets sheet) and `/screens/cards` (the open asks, design reviews, needs-human issues and run
+  cards as chat cards); q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
+  and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
+  shows until a tap opens the full card; a second tap folds it again;
+- `GET /screens/<x>/stream`: server-sent `{seq, ops}` events, a `screen` op first, then each change as `merge`,
+  `replace`, `remove` and `insert` ops by block id, and the Queue chip's `badge` count;
+- `POST /action` `{screen, block, action, values}`: an action not in the manifest's `[permissions]` actions is 403;
+  each other runs the board's own op (a refusal is 409 with its line).
+
+Tests: `crates/cli/tests/cooee_screens.rs` against cooee's fixtures in `crates/cli/tests/golden/cooee/`.
 
 ## Host tab (#141)
 
 Five groups in a fixed order (#234): HOSTS (a card per host, main first, then A→Z: load/cpu, swap-out, memory, disk,
 top memory, lanes, tags, each with a 24 h sparkline that opens a 1 h / 6 h / 24 h chart; docs/hosts.md), FLEET DISK
 (the worktree budget, orphan folders, processes left in closed lanes), SERVICES (board, tick, herdr, accounts,
-deepseek), FLEETS (each fleet's last `herdsman drive` result in plain words, the raw line on tap) and ALERTS (push,
+deepseek), FLEETS (each fleet's last `drover drive` result in plain words, the raw line on tap) and ALERTS (push,
 alert devices, paired devices). A group takes its worst row's status, red over amber over green (a paused fleet is
 grey and counts as none); problem groups open, green ones collapse to one summary line. A tap's
 open/closed holds for the browser session until the group's status changes (`sessionStorage`, `host:<GROUP>`).
@@ -451,7 +475,7 @@ changes the live stream sends it as `event: host` (the JSON itself, to every dev
 
 ## Static export and the public demo
 
-`herdsman serve --export <dir>` writes the page as static files instead of serving it: `index.html`,
+`drover serve --export <dir>` writes the page as static files instead of serving it: `index.html`,
 `herd.json`, `manifest.webmanifest`, `sw.js`, the icons and `a/<hash8>/` assets, rendered by the same code as the live page.
 Every URL in them is relative and the service worker keys its paths and cache on its registration scope,
 so the files work under a sub-path (the live server at `/` behaves as before). A plain export is the

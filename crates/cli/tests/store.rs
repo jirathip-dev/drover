@@ -1,50 +1,69 @@
-//! #441: the main host's secret store: a round trip and the no-store refusal (#683: `accounts import` retired, and
-//! `[accounts]` need no store).
+//! #707: drover keeps no secret store: `serve` starts with none, a `secret:` env comes from its 0600 file,
+//! `secret rm` deletes that file, and `migrate` prints the commands that delete the old Keychain items.
 mod common;
 use common::*;
+use std::io::{Read, Write};
 
-const TOKEN_A: &str = concat!("sk", "-ant-oat01-AAAA-secret");
-const SVC_A: &str = "herdsman/all/CLAUDE_CODE_OAUTH_TOKEN_A";
-
-/// CONFIG with `[accounts]` A and B.
-fn setup(name: &str) -> herdsman::Ctx {
+/// CONFIG with a `secret:` env and `[accounts]` A and B, the configs that once made serve probe the store.
+fn setup(name: &str) -> drover::Ctx {
     let d = tmpdir(name);
-    let cfg = CONFIG.to_string() + "\n[accounts]\nA = \"A\"\nB = \"B\"\n";
+    let cfg = CONFIG.replace(
+        "[fleet.sendmeter.role.impl]",
+        "[fleet.sendmeter.env]\nAPI_KEY = \"secret:API_KEY\"\n\n[fleet.sendmeter.role.impl]",
+    ) + "\n[accounts]\nA = \"A\"\nB = \"B\"\n";
     ctx(&d, &cfg)
 }
 
 #[test]
-fn an_old_account_token_goes_from_the_store_by_secret_rm() {
-    let c = setup("round-trip");
-    let r = Fake::default().stored(SVC_A, TOKEN_A);
-    assert_eq!(run(&c, &r, &["secret", "rm", "all", "CLAUDE_CODE_OAUTH_TOKEN_A"]).0, 0);
-    assert!(!r.store.borrow().contains_key(SVC_A));
-}
-
-#[test]
-fn accounts_import_is_retired() {
-    let c = setup("import-retired");
-    assert_eq!(
-        run(&c, &Fake::default(), &["accounts", "import"]).0,
-        2,
-        "no such subcommand"
-    );
-}
-
-#[test]
-fn a_main_host_without_a_store_refuses_to_start_only_for_a_secret_env() {
+fn serve_starts_with_no_secret_store() {
     let c = setup("no-store");
-    let none = Fake {
-        no_store: true,
-        ..Fake::default()
-    };
-    // #683: `[accounts]` sign in with their own login: no store needed.
-    assert_ne!(run(&c, &none, &["serve"]).0, 3);
-    let secret = CONFIG.replace(
-        "[fleet.sendmeter.role.impl]",
-        "[fleet.sendmeter.env]\nAPI_KEY = \"secret:API_KEY\"\n\n[fleet.sendmeter.role.impl]",
+    // The runner has no store (`Runner::secret` refuses): serve gets past its old probe to the server itself.
+    let r = Fake::default();
+    assert!(drover::runner::Runner::secret(&r, "drover/all/X").is_err());
+    // Exit 1 is the test binary's missing server ("no serve", on stderr); the old probe refused 3 `NO_STORE`.
+    let (code, out) = run(&c, &r, &["serve"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(!out.contains("REFUSED"), "{out}");
+    // And the board answers over a real socket with that config.
+    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = l.local_addr().unwrap();
+    let c2 = c.clone();
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, true));
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    s.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+    let mut page = String::new();
+    s.read_to_string(&mut page).unwrap();
+    assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
+}
+
+#[test]
+fn secret_rm_deletes_the_secret_file() {
+    let c = setup("secret-rm");
+    let f = secret_file(&c, "API_KEY", "v", 0o600);
+    assert_eq!(run(&c, &Fake::default(), &["secret", "rm", "all", "API_KEY"]).0, 0);
+    assert!(!f.exists());
+    let (code, out) = run(&c, &Fake::default(), &["secret", "rm", "all", "../fleet.toml"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(c.config.exists());
+}
+
+#[test]
+fn migrate_leaves_the_keychain_alone_and_prints_how_to_delete_its_items() {
+    let c = setup("migrate-keychain");
+    let e = drover::events::Event::new(
+        1,
+        "sendmeter",
+        None,
+        "secret-set",
+        serde_json::json!({"name": "API_KEY"}),
     );
-    let s = ctx(&tmpdir("no-store-secret"), &secret);
-    assert_eq!(run(&s, &none, &["serve"]).0, 3, "REFUSED NO_STORE");
-    assert_ne!(run(&s, &Fake::default(), &["serve"]).0, 3);
+    drover::events::append(&c.state, &e).unwrap();
+    let r = Fake::default();
+    let (code, out) = run(&c, &r, &["migrate"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(
+        out.contains("security delete-generic-password -a herdsman -s herdsman/sendmeter/API_KEY"),
+        "{out}"
+    );
+    assert!(!r.called("security"), "nothing deleted: {:?}", r.calls.borrow());
 }

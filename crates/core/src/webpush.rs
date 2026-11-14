@@ -14,9 +14,8 @@ use p256::{PublicKey, SecretKey};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::BTreeMap;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct Sub {
@@ -142,7 +141,7 @@ pub fn subscribe(log: &Path, f: &BTreeMap<String, String>, label: &str, now: u64
     let Some(sub) = sub else { return Ok(OFF.into()) };
     let ev = Event::new(
         now,
-        "herdsman",
+        "drover",
         None,
         "push-test",
         serde_json::json!({"reason": "alerts are on"}),
@@ -170,40 +169,36 @@ fn post(s: &Sub, k: &SecretKey, sub: &str, body: &[u8]) -> Result<u16> {
         jwt(k, &s.endpoint, sub, crate::now()),
         B64.encode(public(k))
     );
-    let mut c = Command::new("curl")
-        .args([
-            "-sS",
-            "--max-time",
-            "10",
-            "-X",
-            "POST",
-            "-o",
-            "/dev/null",
-            "-w",
-            "%{http_code}",
-            "--data-binary",
-            "@-",
-            "-H",
-            &auth,
-        ])
-        .args([
-            "-H",
-            "Content-Encoding: aes128gcm",
-            "-H",
-            "Content-Type: application/octet-stream",
-            "-H",
-            "TTL: 86400",
-            &s.endpoint,
-        ])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()?;
-    let _ = c.stdin.take().map(|mut i| i.write_all(body));
-    Ok(String::from_utf8_lossy(&c.wait_with_output()?.stdout)
-        .trim()
-        .parse()
-        .unwrap_or(0))
+    let args = crate::runner::argv(&[
+        "-sS",
+        "--max-time",
+        "10",
+        "-X",
+        "POST",
+        "-o",
+        "/dev/null",
+        "-w",
+        "%{http_code}",
+        "--data-binary",
+        "@-",
+        "-H",
+        &auth,
+        "-H",
+        "Content-Encoding: aes128gcm",
+        "-H",
+        "Content-Type: application/octet-stream",
+        "-H",
+        "TTL: 86400",
+        &s.endpoint,
+    ]);
+    // #713: through the runner, bounded past curl's own 10 s.
+    let o = crate::runner::Real.within(
+        "curl",
+        &args,
+        body,
+        std::time::Duration::from_secs(crate::config::limits().notify_secs),
+    )?;
+    Ok(o.stdout.trim().parse().unwrap_or(0))
 }
 
 /// Push `ev` once to every subscription, or only to endpoint `only` (no retry): a 404/410 prunes it, any
@@ -231,19 +226,19 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
     let evs = if n.is_some() || thread.is_some() {
         read(log)?
     } else {
-        vec![]
+        Arc::default()
     };
     let first = n.and_then(|n| finding(&evs, &ev.fleet, n)).unwrap_or("");
     let (title, mut body) = match n {
         Some(n) => (format!("#{n} needs you: {why}"), format!("{why}\n{first}")),
-        None => ("herdsman".into(), plain(ev)),
+        None => ("drover".into(), plain(ev)),
     };
     // #386: `<repo> · <thread title>: <the reply's first line>`, or `… asks: <question>`; a tap opens the thread.
-    if let Some(t) = thread.and_then(|t| crate::conductor::find(&evs, t).ok()) {
+    if let Some(t) = thread.and_then(|t| crate::orchestrator::find(&evs, t).ok()) {
         let repo = if t.fleet == "all" { "all repos" } else { &t.fleet };
         let head = format!(
             "{repo} · {}",
-            crate::conductor::title(&evs, t.str("thread").unwrap_or_default())
+            crate::orchestrator::title(&evs, t.str("thread").unwrap_or_default())
         );
         let text = ev.str("text").and_then(|x| x.lines().find(|l| !l.trim().is_empty()));
         body = match ev.str("question") {

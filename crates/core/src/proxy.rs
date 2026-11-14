@@ -1,10 +1,5 @@
-//! #637: the token proxy on the main host (docs/hosts.md). A remote ACP lane's adapter gets the proxy's URL (an ssh
-//! tunnel back here) and a per-lane key; the proxy checks that key and forwards each model call to `[proxy] upstream`
-//! with the role's account token added here, so no Claude token ever reaches a remote host. Keys are kept as their
-//! sha256, live for `key_hours`, end with their lane, and `hosts keys revoke` ends one at once.
 use crate::config::{write_atomic, Config};
 use crate::events::{ends, fold, read, Event};
-use crate::harness::{BETA_HEADER, OAUTH_BETA};
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
@@ -146,16 +141,23 @@ pub fn revoke(ctx: &Ctx, cfg: &Config, id: &str, out: &mut dyn Write) -> Result<
 }
 
 /// The account token `key` signs with, or why it is refused.
-fn authorize(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (key, now): (&str, u64)) -> std::result::Result<String, String> {
+fn authorize(ctx: &Ctx, cfg: &Config, (key, now): (&str, u64)) -> std::result::Result<String, String> {
     let (all, h) = (keys(ctx), sha(key));
     let k = all.iter().find(|k| k.sha == h).ok_or("unknown lane key")?;
     match state(now, &read(&ctx.state).unwrap_or_default(), k) {
         "live" => {}
         st => return Err(format!("lane key {} {st}", k.id)),
     }
-    let v = crate::secret::lookup(r, "all", &k.account).map_err(|e| format!("{e:#}"))?;
-    v.or_else(|| cfg.legacy_secret(&k.account))
-        .ok_or_else(|| format!("account secret {} is not in the store", k.account))
+    // #707: the account's `[accounts]` value is its hand-placed `token-file:<path>` (0600).
+    let f = k.account.strip_prefix("token-file:").map(crate::config::expand);
+    let v = f
+        .as_deref()
+        .map(crate::secret::file)
+        .transpose()
+        .map_err(|e| format!("{e:#}"))?;
+    v.flatten()
+        .or_else(|| cfg.legacy_secret(&k.account))
+        .ok_or_else(|| format!("account {}: no token file", k.account))
 }
 
 /// Headers never forwarded: hop-by-hop ones, the lane's own credentials, compression (curl passes bytes through).
@@ -171,7 +173,7 @@ const DROP: [&str; 9] = [
     "expect",
 ];
 
-/// `herdsman proxy`: serve `[proxy] port` on 127.0.0.1 until killed, one thread per connection.
+/// `drover proxy`: serve `[proxy] port` on 127.0.0.1 until killed, one thread per connection.
 pub fn serve(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<()> {
     let l =
         TcpListener::bind(("127.0.0.1", cfg.proxy.port)).with_context(|| format!("proxy port {}", cfg.proxy.port))?;
@@ -243,7 +245,7 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
         return reply(&mut c, 400, "bad request path");
     }
     let bearer = get("authorization").and_then(|a| a.strip_prefix("Bearer "));
-    let token = match authorize(ctx, cfg, r, (get("x-api-key").or(bearer).unwrap_or_default(), now)) {
+    let token = match authorize(ctx, cfg, (get("x-api-key").or(bearer).unwrap_or_default(), now)) {
         Ok(t) => t,
         Err(why) => return reply(&mut c, 401, &why),
     };
@@ -254,20 +256,16 @@ fn handle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, mut c: TcpStream, now: u64) -
         q(&path),
         q(&token)
     );
-    let mut beta: Vec<&str> = get(BETA_HEADER)
-        .unwrap_or_default()
-        .split(',')
-        .map(str::trim)
-        .filter(|b| !b.is_empty())
-        .collect();
-    if !beta.contains(&OAUTH_BETA) {
-        beta.push(OAUTH_BETA);
-    }
-    conf += &format!("header = \"{BETA_HEADER}: {}\"\n", beta.join(","));
-    for (k, v) in heads
+    let kept: Vec<_> = heads
         .iter()
-        .filter(|h| !DROP.contains(&h.0.as_str()) && h.0 != BETA_HEADER)
-    {
+        .filter(|h| !DROP.contains(&h.0.as_str()))
+        .cloned()
+        .collect();
+    let kept = match crate::providers::proxied() {
+        Some(px) => (px.headers)(&kept),
+        None => kept,
+    };
+    for (k, v) in &kept {
         conf += &format!("header = \"{k}: {}\"\n", q(v));
     }
     let tmp = ctx.state.with_file_name(format!(
@@ -347,7 +345,7 @@ fn write_private(p: &std::path::Path, b: &[u8]) -> Result<()> {
 pub fn ensure(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (name, machine): (&str, &str)) -> Result<()> {
     let port = cfg.proxy.port;
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    if TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(1)).is_err() {
+    if TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(cfg.limits.proxy_connect_secs)).is_err() {
         r.detach(&ctx.exe, &argv(&["proxy"]), &ctx.state.with_file_name("proxy.log"))?;
     }
     let pid = ctx.state.with_file_name(format!("tunnel-{name}.pid"));

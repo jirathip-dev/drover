@@ -2,9 +2,9 @@
 //! paused fleet collapsed to one line) and the [config] sheet (every group; its pickers write through `set`).
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::config::Config;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -39,7 +39,7 @@ fn sheet(s: &Server, fleet: &str) -> String {
     queue_js(s, ADDR, T, &format!("sheet(d, {fleet:?})"))
 }
 
-fn fixture(name: &str) -> herdsman::Ctx {
+fn fixture(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), &config(""));
     let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
     ok(&["queue", "alpha", "add", "1", "2"]);
@@ -88,8 +88,8 @@ fn colour_is_a_stable_name_hash_and_color_overrides_it() {
         ["alpha", "beta", "zeta", "gamma"].map(|f| again.fleet[f].color(f))
     );
     for f in ["alpha", "beta", "zeta", "gamma"] {
-        let want = herdsman::config::COLORS
-            [usize::from_str_radix(&herdsman::devices::sha256(f.as_bytes())[..2], 16).unwrap() % 5];
+        let want =
+            drover::config::COLORS[usize::from_str_radix(&drover::devices::sha256(f.as_bytes())[..2], 16).unwrap() % 5];
         assert_eq!(c.fleet[f].color(f), want, "{f}");
     }
     assert_eq!(load("color = \"p\"").unwrap().fleet["alpha"].color("alpha"), "p");
@@ -197,6 +197,7 @@ fn the_config_sheet_shows_every_group_and_its_pickers_post_through_set() {
     );
     let sets: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "set")
         .collect();

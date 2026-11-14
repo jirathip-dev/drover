@@ -1,6 +1,6 @@
 [package]
-name = "herdsman-core"
-description = "herdsman's state, events, gates and commands; no dependency on the server or cli crates"
+name = "drover-core"
+description = "drover's state, events, gates and commands; no dependency on the server or cli crates"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -10,7 +10,7 @@ repository.workspace = true
 workspace = true
 
 [lib]
-name = "herdsman_core"
+name = "drover_core"
 
 [dependencies]
 aes-gcm.workspace = true
@@ -19,7 +19,6 @@ base64.workspace = true
 shed-proto.workspace = true
 clap.workspace = true
 hkdf.workspace = true
-keyring.workspace = true
 p256.workspace = true
 rusqlite.workspace = true
 serde.workspace = true

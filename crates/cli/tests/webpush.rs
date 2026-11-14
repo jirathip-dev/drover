@@ -7,10 +7,10 @@ use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::Aes128Gcm;
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD as B64, Engine};
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{emit, read, Event};
-use herdsman::serve::Server;
-use herdsman::webpush;
+use drover::config::Config;
+use drover::events::{emit, read, Event};
+use drover::serve::Server;
+use drover::webpush;
 use p256::ecdsa::{signature::Verifier, Signature, VerifyingKey};
 use p256::{PublicKey, SecretKey};
 use std::os::unix::fs::PermissionsExt;
@@ -120,7 +120,7 @@ fn post(s: &Server, path: &str, body: &str, extra: &str) -> String {
 fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     let dir = tmpdir("wp-sub");
     let c = ctx(&dir, CONFIG);
-    let r = Fake::default().reply("herdr", NO_AGENTS);
+    let r = OnShed::new(Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
     let form = sub_form(&ua, "https://web.push.apple.com/secret-endpoint");
@@ -251,6 +251,7 @@ fn delivery_201_sent_410_pruned_500_notify_failed() {
     );
     let ev = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "notify-failed")
         .unwrap();
@@ -378,7 +379,7 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
     let _path = fake_curl(&dir);
     std::fs::write(dir.join("code"), "201").unwrap();
     let c = ctx(&dir, &format!("{CONFIG}\n{PUSH}"));
-    let r = Fake::default().reply("herdr", NO_AGENTS);
+    let r = OnShed::new(Fake::default());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
     let cookie = pair(&s, &c, "Mozilla (iPhone)", c.now) + "User-Agent: Mozilla (iPhone)\r\n";
@@ -405,10 +406,12 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
         "one push each, to the new device only"
     );
     let json: serde_json::Value =
-        serde_json::from_slice(&decrypt(&std::fs::read(dir.join("body")).unwrap(), &ua, &d(AUTH)).unwrap()).unwrap();
+        serde_json::from_slice(&decrypt(&std::fs::read(dir.join("body")).unwrap().to_vec(), &ua, &d(AUTH)).unwrap())
+            .unwrap();
     assert!(json["body"].as_str().unwrap().ends_with("alerts are on"), "{json}");
     let sent: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "push-sent")
         .collect();
@@ -461,7 +464,7 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
 fn check_warns_once_when_devices_are_subscribed_but_no_notifier_is() {
     let dir = tmpdir("wp-check");
     let c = ctx(&dir, CONFIG);
-    let r = Fake::default().reply("herdr", NO_AGENTS);
+    let r = OnShed::new(Fake::default());
     let ua = SecretKey::from_slice(&d(UA_PRIVATE)).unwrap();
     let f = |ep: &str| {
         sub_form(&ua, ep)
@@ -550,18 +553,18 @@ fn push_titles_use_each_devices_theme_words() {
             ("plain".to_string(), b.to_string()),
         ]
     };
-    assert_eq!(titles("merged"), pair("Order up: #7 merged", "herdsman"));
+    assert_eq!(titles("merged"), pair("Order up: #7 merged", "drover"));
     assert_eq!(
         titles("needs-human"),
         pair("The bell: sendmeter #7 needs you", "#7 needs you: r")
     );
     assert_eq!(
         titles("needs-decision"),
-        pair("The bell: sendmeter #7 needs you", "herdsman")
+        pair("The bell: sendmeter #7 needs you", "drover")
     );
     assert_eq!(
         titles("blocked"),
-        pair("herdsman", "herdsman"),
+        pair("drover", "drover"),
         "no theme words for other events"
     );
 }
@@ -569,7 +572,7 @@ fn push_titles_use_each_devices_theme_words() {
 /// #386: a conductor's reply pushes `<repo> · <thread title>: <first line>`, a thread ask `… asks: <question>`, both
 /// opening the thread; the owner's own message and a system line never push.
 #[test]
-fn a_conductor_reply_and_a_thread_choice_push_with_the_thread_named() {
+fn a_orchestrator_reply_and_a_thread_choice_push_with_the_thread_named() {
     let dir = tmpdir("wp-thread");
     let _path = fake_curl(&dir);
     std::fs::write(dir.join("code"), "201").unwrap();
@@ -601,7 +604,7 @@ fn a_conductor_reply_and_a_thread_choice_push_with_the_thread_named() {
     emit(&c.state, &cfg, msg("owner", "what should #12 cover?")).unwrap();
     emit(&c.state, &cfg, msg("system", "⇄ switched to account B")).unwrap();
     assert_eq!(pushes(), 0, "the owner's own words and system lines: no push");
-    emit(&c.state, &cfg, msg("conductor", "Scope and tests.\nWhich first?")).unwrap();
+    emit(&c.state, &cfg, msg("orchestrator", "Scope and tests.\nWhich first?")).unwrap();
     assert_eq!(pushes(), 1);
     let j = last();
     assert_eq!(j["body"], "sendmeter · Grill #12: Scope and tests.");
@@ -642,7 +645,7 @@ fn no_push_for_the_thread_open_on_a_board() {
         emit(&c.state, &cfg, Event::new(100, "sendmeter", None, "thread-new", d)).unwrap();
     }
     let reply = |t: &str| {
-        let d = serde_json::json!({"thread": t, "from": "conductor", "text": "Scope?"});
+        let d = serde_json::json!({"thread": t, "from": "orchestrator", "text": "Scope?"});
         emit(&c.state, &cfg, Event::new(100, "sendmeter", None, "thread-msg", d)).unwrap();
     };
     let watch = c.state.with_file_name("watch-t1.at");

@@ -24,6 +24,25 @@ export type Chat = { said?: Array<JsonValue> | null, older: boolean, notices: Ar
 export type Notice = { at: number, text: string, };
 
 /**
+ * #749: API v1's `lane/<agent>`: the sheet's chat plus `blocks`, its transcript as blocks: an ACP lane's from shed's
+ * events (no `lines`; `before` is the oldest event's `seq`, the next page's `before`), else one `screen` block (the
+ * screen is `lines`).
+ */
+export type LaneChat = { blocks: Array<Block>, said?: Array<JsonValue> | null, older: boolean, notices: Array<Notice>, harness: string, acts: Array<string>, pane?: string | null, lines: Array<string>, live: number, status?: string | null, before: number, more: boolean, };
+
+/**
+ * #749: one of an approval's options, as ACP sent it (`allow_once`, `reject_once`, …).
+ */
+export type ApprovalChoice = { id: string, name: string, kind: string, };
+
+/**
+ * #749: one block of a lane's transcript, tagged `k`, built from ACP's own fields only (never an agent's wording): a
+ * prompt, a reply's markdown (its text chunks joined), a tool call (its updates folded into one; `title_line`, the
+ * title's first line, cut), the plan, an approval (`answered`: the option taken); a PTY lane's screen is one `screen`, its `lines`.
+ */
+export type Block = { "k": "prompt", text: string, } | { "k": "reply", markdown: string, } | { "k": "tool", id: string, kind?: string | null, title_line: string, title: string, status: string, } | { "k": "plan", entries: Array<JsonValue>, } | { "k": "approval", tool: string, options: Array<ApprovalChoice>, answered?: string | null, } | { "k": "screen" };
+
+/**
  * `/live`'s `ev`: an event's seq, time and theme moment (`serve::moment`); #370 its fleet and issue, for row moments.
  */
 export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?: number | null, };
@@ -34,7 +53,11 @@ export type Moment = { seq: number, ts: number, k?: string | null, f: string, n?
  * `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no
  * export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
  */
-export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, snap: number, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, };
+export type NeedsTab = { now: number, rw: boolean, live: boolean, paired: boolean, pair: boolean, mtime: string, snap: number, choosing: number, asks: Array<NeedAsk>, blocked: Array<Blocked>, issues: Array<NeedIssue>, 
+/**
+ * #709: fleet.toml fails to load: `config invalid: <error> (fleet.toml:<line>)`, the red banner above every tab.
+ */
+config?: string | null, };
 
 /**
  * An open ask's card: `who` (fleet · #issue · agent · age), its `kind` line, the host it was imported `from`; #412: a
@@ -69,7 +92,11 @@ export type LanesTab = { now: number, rw: boolean, live: boolean, paired: boolea
 /**
  * #630: each lane's workspace root and unsaved work.
  */
-unsaved: Array<LaneUnsaved>, };
+unsaved: Array<LaneUnsaved>, 
+/**
+ * #712: fleet.toml's mtime, for a row's [unpark] form.
+ */
+mtime: string, };
 
 /**
  * A state section (`tone`) and its repo groups.
@@ -84,7 +111,11 @@ export type LaneRepo = { name: string, lanes: Array<LaneRow>, };
  * conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its
  * fleet is not configured), `dead` and the blocked card.
  */
-export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, runtime: string, host: string, where: string, };
+export type LaneRow = { name: string, role: string, state: string, act: string, grow: string, atone: string, coat: string, tone: string, ago: string, why?: string | null, why_tone: string, activity: string, now?: LaneNow | null, gone: boolean, thread?: string | null, head: string, shown: string, facts: string, issue?: number | null, pr?: PrLine | null, repo?: string | null, dead: boolean, blocked?: Blocked | null, 
+/**
+ * #712: its issue is parked: the fleet its [unpark] posts to.
+ */
+unpark?: string | null, runtime: string, host: string, where: string, };
 
 /**
  * #630: lane `name`'s workspace root, and its worktree's uncommitted files and unpushed commits.
@@ -223,7 +254,11 @@ export type Setup = { host: string, name: string, };
  * `mtime` a POST sends back (STALE when fleet.toml changed since). #266: the server's clock `now` and UTC offset `tz` (s),
  * the Events tab's time groups.
  */
-export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, };
+export type State = { seq: number, now: number, tz: number, age?: number | null, mtime: string, theme: string, fleets: Array<Fleet>, queue: Array<Queued>, lanes: Array<Lane>, asks: Array<Ask>, hosts: Array<Row>, services: Array<Row>, alerts: Array<Row>, 
+/**
+ * #859: when the background last read each source the lanes come from (herdr, shed, remote, host).
+ */
+sources: { [key in string]: number }, };
 
 export type Fleet = { name: string, repo: string, color: string, paused: boolean, };
 
@@ -231,7 +266,17 @@ export type Queued = { fleet: string, issue: number, title?: string | null, stat
 /**
  * #667: its blockers in another fleet or repo, as `owner/repo#N`.
  */
-blocked_on: Array<string>, };
+blocked_on: Array<string>, 
+/**
+ * #778: a tapped start waiting for its lane, and the row's `starting, waiting for host: <reason> · <age>`.
+ */
+pending?: PendingStart | null, status?: string | null, };
+
+/**
+ * #778: a card tap's lane start not begun yet: its `action` (extend, answer, approve, revise), since when, the last
+ * refusal `reason` (a code; a hard one with its words).
+ */
+export type PendingStart = { action: string, since: number, reason?: string | null, };
 
 /**
  * `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
@@ -251,7 +296,7 @@ export type Row = { name: string, tone: string, detail: string, fix: string, };
  * board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's
  * forms are inert); `mtime` the forms send back.
  */
-export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, };
+export type HostTab = { now: number, rw: boolean, live: boolean, mtime: string, hosts: Array<HostCard>, disk?: Disk | null, orphans: number, leftovers?: Leftovers | null, spawns?: Row | null, services: Array<Row>, theme: Row, accounts: Array<Account>, deepseek?: Balance | null, fleets: Array<FleetRow>, push: Row, key: string, subs: Array<Sub>, devices: Array<Paired>, notify: Array<Notifier>, vendors: Vendors, };
 
 /**
  * #234: a host's card: its dot and state `words` in `tone`, the lanes' 24 h series `n`, its rows, `to` the [off]/[on]
@@ -312,6 +357,16 @@ export type Paired = { hash: string, label: string, created: number, used: numbe
  * #440: a global `[[notify]]` in words (System → Notifications): `web push` or `command`, and its events.
  */
 export type Notifier = { kind: string, on: string, };
+
+/**
+ * #830: the provider vendor of each account and each [sign in ▾] login that is a provider's.
+ */
+export type Vendors = { accounts: Array<Vendor>, setups: Array<Vendor>, };
+
+/**
+ * #830: an account's or a login's `name` and its provider's `vendor`.
+ */
+export type Vendor = { name: string, vendor: string, };
 
 /**
  * #268: API v1's `queue`, the Queue tab at `now`: a card per fleet, the ones needing you first (`error`: fleet.toml
@@ -414,7 +469,7 @@ export type Ev = { seq: number, ts: number, fleet: string, issue?: number | null
 /**
  * #576: API v1's `issue/<fleet>/<n>`: its recorded verdicts, newest first; #677: its latest why note.
  */
-export type IssueView = { fleet: string, issue: number, verdicts: Array<Verdict>, why?: WhyNote | null, };
+export type IssueView = { fleet: string, issue: number, verdicts: Array<Verdict>, why?: WhyNote | null, pending?: PendingStart | null, };
 
 /**
  * #677: the issue's latest why note: the round head it is on, its round and its `Owner:` line.
@@ -447,7 +502,7 @@ export type LessonFleet = { fleet: string, lessons: string, last?: LessonRun | n
 export type LessonRun = { issue: number, ts: number, state: string, };
 
 /**
- * #576: `lessons/<fleet>/digest?days=N`: `herdsman lesson digest`'s text.
+ * #576: `lessons/<fleet>/digest?days=N`: `drover lesson digest`'s text.
  */
 export type Digest = { fleet: string, days: number, text: string, };
 
@@ -482,7 +537,7 @@ export type ConductorAttach = { ok: boolean, code: string, message: string,
  */
 brief: string, 
 /**
- * The synced conductor Claude settings (`PreToolUse`: `herdsman hook`).
+ * The synced conductor provider settings (`PreToolUse`: `drover hook`).
  */
 settings: string, env: AttachEnv, 
 /**
@@ -490,7 +545,42 @@ settings: string, env: AttachEnv,
  */
 guarded: boolean, why: string, };
 
-export type AttachEnv = { HERDSMAN_LANE: string, HERDSMAN_THREAD: string, HERDSMAN_PORT: string, } & ({ [key in string]: string });
+export type AttachEnv = { DROVER_LANE: string, DROVER_THREAD: string, DROVER_PORT: string, } & ({ [key in string]: string });
+
+/**
+ * #786: `GET /api/v1/config`: fleet.toml as cooee's config screens read it.
+ */
+export type ConfigView = { 
+/**
+ * The file's sha256: a manual edit sends it back and is refused `STALE` once the file moved.
+ */
+hash: string, 
+/**
+ * The raw TOML for the editor (a secret-shaped value never loads: `SECRET_IN_CONFIG`).
+ */
+text: string, fields: Array<ConfigField>, };
+
+/**
+ * #786: one setting: its dotted path, TOML kind, allowed values, doc line and `secret:NAME`'s name.
+ */
+export type ConfigField = { path: string, kind: string, value: JsonValue, allowed: Array<string>, doc: string, secret?: string | null, };
+
+/**
+ * #786: `config-check` and `config-edit`'s body: raw TOML, field edits, a fleet added or removed, at `hash`.
+ */
+export type ConfigChange = { hash: string, text?: string | null, set: Array<ConfigSet>, add?: NewFleet | null, remove?: string | null, confirm: boolean, };
+
+export type ConfigSet = { path: string, value: JsonValue, };
+
+/**
+ * #786: a fleet from a GitHub repo; its roles copied from the first fleet's.
+ */
+export type NewFleet = { name: string, repo: string, local: string, integration: string, };
+
+/**
+ * #786: `POST /api/v1/config-check`'s answer: the change's diff and its errors; nothing written.
+ */
+export type ConfigCheck = { diff: string, errors: Array<string>, };
 
 export type Event = { 
 /**

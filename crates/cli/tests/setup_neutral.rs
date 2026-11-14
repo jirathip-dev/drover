@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 /// Matched case-insensitively anywhere in a shipped file.
-/// #355 made `conductor` a herdsman role, so it is no longer an install's own name.
+/// #355 made `conductor` a drover role, so it is no longer an install's own name.
 const WORDS: [&str; 6] = [
     "jirathip",
     "synergy",
@@ -14,7 +14,7 @@ const WORDS: [&str; 6] = [
 ];
 
 /// (file, exact text with whitespace collapsed, why it may stay). Each one is removed before the scan.
-const EXCEPTIONS: [(&str, &str, &str); 12] = [
+const EXCEPTIONS: [(&str, &str, &str); 13] = [
     (
         "assets/herd.js",
         "jirathip-dev/corral",
@@ -72,6 +72,11 @@ const EXCEPTIONS: [(&str, &str, &str); 12] = [
     ),
     (
         "docs/setup.md",
+        "https://github.com/jirathip-dev/herdsman/issues/",
+        "the project's own issue links",
+    ),
+    (
+        "README.md",
         "https://github.com/jirathip-dev/herdsman/issues/",
         "the project's own issue links",
     ),

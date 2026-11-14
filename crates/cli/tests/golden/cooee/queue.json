@@ -1,0 +1,321 @@
+{
+ "type": "screen",
+ "id": "queue",
+ "title": "Queue",
+ "stream": "/screens/queue/stream",
+ "actions": [
+  {
+   "icon": "more",
+   "label": "More",
+   "menu": [
+    {
+     "label": "Fleets…",
+     "tap": {
+      "sheet": "/screens/fleets"
+     }
+    },
+    {
+     "label": "Drive all now",
+     "action": "drive-all"
+    }
+   ]
+  }
+ ],
+ "blocks": [
+  {
+   "type": "chips",
+   "id": "repo",
+   "name": "repo",
+   "selected": [
+    "herdsman"
+   ],
+   "action": "filter",
+   "options": [
+    {
+     "value": "all",
+     "label": "all"
+    },
+    {
+     "value": "cooee",
+     "label": "cooee"
+    },
+    {
+     "value": "herdsman",
+     "label": "herdsman"
+    },
+    {
+     "value": "drover",
+     "label": "drover"
+    }
+   ]
+  },
+  {
+   "type": "stat",
+   "id": "stats",
+   "items": [
+    {
+     "label": "merged · 7d",
+     "value": "14",
+     "spark": [
+      1,
+      3,
+      2,
+      0,
+      4,
+      1,
+      3
+     ]
+    },
+    {
+     "label": "lanes",
+     "value": "7",
+     "unit": "/ 8",
+     "tone": "warn"
+    },
+    {
+     "label": "rounds / issue",
+     "value": "1.6",
+     "spark": [
+      2.1,
+      1.9,
+      1.8,
+      2.0,
+      1.7,
+      1.6,
+      1.6
+     ]
+    }
+   ]
+  },
+  {
+   "type": "card",
+   "id": "fleet-herdsman",
+   "tone": "accent",
+   "title": "herdsman",
+   "subtitle": "read 2m ago · 7 lanes on mini",
+   "badge": {
+    "text": "driving",
+    "tone": "ok"
+   },
+   "buttons": [
+    {
+     "type": "button",
+     "id": "drive",
+     "label": "Drive now",
+     "style": "primary",
+     "action": "drive"
+    },
+    {
+     "type": "button",
+     "id": "pause",
+     "label": "Pause",
+     "action": "pause"
+    }
+   ],
+   "blocks": [
+    {
+     "type": "section",
+     "id": "inprogress",
+     "header": "in progress (7)",
+     "blocks": [
+      {
+       "type": "list",
+       "rows": [
+        {
+         "type": "row",
+         "id": "q-722",
+         "figure": {
+          "state": "working",
+          "tool": "run"
+         },
+         "title": "#722 spawn (shed): fix rounds fail git worktree add",
+         "badge": {
+          "text": "impl",
+          "tone": "working"
+         },
+         "value": {
+          "since": "2026-11-09T09:32:00Z"
+         },
+         "tap": {
+          "open": "/screens/issue?n=722"
+         },
+         "swipe": [
+          {
+           "label": "Stop",
+           "tone": "bad",
+           "action": "stop",
+           "confirm": {
+            "title": "Stop #722's impl lane?",
+            "ok": "Stop lane"
+           }
+          }
+         ],
+         "subtitle": "impl ▸ herdsman-impl-722 · mini"
+        },
+        {
+         "type": "row",
+         "id": "q-641",
+         "figure": {
+          "state": "working",
+          "tool": "edit"
+         },
+         "title": "#641 hosts bootstrap: an ambiguous machine label",
+         "badge": {
+          "text": "fix 1",
+          "tone": "working"
+         },
+         "value": {
+          "since": "2026-11-09T09:35:00Z"
+         },
+         "tap": {
+          "thread": "herdsman-impl-641"
+         },
+         "subtitle": "impl ✓ · review 1 ✗ · fix 1 ▸ herdsman-impl-641 · mini"
+        },
+        {
+         "type": "row",
+         "id": "q-609",
+         "figure": {
+          "state": "working",
+          "tool": "read"
+         },
+         "title": "#609 api/v1 + CLI: every lane says where it runs",
+         "badge": {
+          "text": "fix 4",
+          "tone": "working"
+         },
+         "value": "51m",
+         "tap": {
+          "open": "/screens/issue?n=609"
+         },
+         "subtitle": "impl ✓ · review 1–3 ✗ · fix 4 ▸ herdsman-impl-609 · air"
+        },
+        {
+         "type": "row",
+         "id": "q-708",
+         "figure": {
+          "state": "done"
+         },
+         "title": "#708 doctor: bound every Keychain/codesign call",
+         "badge": {
+          "text": "ready",
+          "tone": "done"
+         },
+         "value": "1h",
+         "tap": {
+          "open": "/screens/issue?n=708"
+         },
+         "subtitle": "impl ✓ · review 1 ✗ · fix 1 ✓ · review 2 ✓ · CI ✓"
+        },
+        {
+         "type": "row",
+         "id": "more-ip",
+         "title": "3 more",
+         "style": "link",
+         "tap": {
+          "open": "/screens/queue?all=1"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "section",
+     "id": "queued",
+     "header": "queued (12)",
+     "blocks": [
+      {
+       "type": "list",
+       "rows": [
+        {
+         "type": "row",
+         "id": "q-456",
+         "figure": {
+          "state": "idle"
+         },
+         "title": "#456 Rename herdsman to drover",
+         "badge": {
+          "text": "#1",
+          "tone": "mute"
+         },
+         "swipe": [
+          {
+           "label": "Top",
+           "action": "top"
+          },
+          {
+           "label": "Drop",
+           "tone": "bad",
+           "action": "drop",
+           "confirm": {
+            "title": "Drop #456 from the queue?",
+            "ok": "Drop"
+           }
+          }
+         ]
+        },
+        {
+         "type": "row",
+         "id": "q-686",
+         "indent": 1,
+         "figure": {
+          "state": "fail"
+         },
+         "title": "#686 sim: replay a real week of state.db",
+         "subtitle": {
+          "text": "held until #456",
+          "tone": "bad"
+         },
+         "badge": {
+          "text": "fix 1",
+          "tone": "working"
+         }
+        },
+        {
+         "type": "row",
+         "id": "q-553",
+         "figure": {
+          "state": "idle"
+         },
+         "title": "#553 Parity list: every board and chat feature",
+         "badge": {
+          "text": "#2",
+          "tone": "mute"
+         }
+        },
+        {
+         "type": "row",
+         "id": "q-725",
+         "figure": {
+          "state": "idle"
+         },
+         "title": "#725 lifeboat: small fallback page in herdsman",
+         "badge": {
+          "text": "#3",
+          "tone": "mute"
+         }
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "list",
+     "rows": [
+      {
+       "type": "row",
+       "id": "done-today",
+       "title": "done today",
+       "value": "6",
+       "accessory": "chevron",
+       "tap": {
+        "open": "/screens/done?day=2026-11-09"
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

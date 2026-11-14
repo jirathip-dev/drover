@@ -2,8 +2,8 @@
 //! culprit, bisect, revert, resume), full-first changes never reverted, and the default left as it was.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, fold, read, Event};
+use drover::config::Config;
+use drover::events::{append, fold, read, Event};
 use serde_json::{json, Value};
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
@@ -13,7 +13,7 @@ const REPO: &str = "jirathip-dev/sendmeter";
 const DIR: &str = "/tmp/does-not-matter/sendmeter";
 
 /// `CONFIG`'s fleet table with `merge_label` inside it, `[land]` and a fleet notifier on `merged` only.
-fn setup(name: &str, land: bool, verdict: &str) -> (std::path::PathBuf, herdsman::Ctx) {
+fn setup(name: &str, land: bool, verdict: &str) -> (std::path::PathBuf, drover::Ctx) {
     let d = tmpdir(name);
     let text = if land {
         let extra = format!(
@@ -56,18 +56,18 @@ fn pr(head: &str, checks: Value, files: &str) -> Fake {
         .reply("gh issue", "")
 }
 
-fn state(c: &herdsman::Ctx, n: u64) -> String {
+fn state(c: &drover::Ctx, n: u64) -> String {
     fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), n)]
         .state
         .clone()
 }
 
-fn kinds(c: &herdsman::Ctx) -> Vec<String> {
-    read(&c.state).unwrap().into_iter().map(|e| e.kind).collect()
+fn kinds(c: &drover::Ctx) -> Vec<String> {
+    read(&c.state).unwrap().to_vec().into_iter().map(|e| e.kind).collect()
 }
 
-fn event(c: &herdsman::Ctx, kind: &str) -> Option<Event> {
-    read(&c.state).unwrap().into_iter().rfind(|e| e.kind == kind)
+fn event(c: &drover::Ctx, kind: &str) -> Option<Event> {
+    read(&c.state).unwrap().to_vec().into_iter().rfind(|e| e.kind == kind)
 }
 
 #[test]
@@ -149,13 +149,13 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
         .reply("gh api repos/jirathip-dev/sendmeter/pulls/34/files", "src/a.rs\n")
         .reply("git", "");
     let cfg = Config::load(&c.config).unwrap();
-    herdsman::drive::auto_update(&c, &cfg, &r, &mut Vec::new(), "sendmeter").unwrap();
+    drover::drive::auto_update(&c, &cfg, &r, &mut Vec::new(), "sendmeter").unwrap();
     assert!(r.called(&format!("git -C {} push -q origin HEAD:issue-12", wt.display())));
     assert!(!r.called("gh pr edit"), "{:?}", r.calls.borrow());
     let u = event(&c, "auto-updated").expect("auto-updated");
     assert_eq!((u.str("from"), u.str("to")), (Some(HEAD), Some(NEW)));
     // At the new head only the fast checks count again: the full one still runs, it lands.
-    let c = herdsman::Ctx { now: c.now + 120, ..c };
+    let c = drover::Ctx { now: c.now + 120, ..c };
     let r = pr(NEW, fast_green(), "src/a.rs\n")
         .reply(
             &format!("git -C {DIR} rev-list --parents -n1 {NEW}"),
@@ -170,7 +170,7 @@ fn integration_moved_catches_up_and_lands_on_the_fast_checks_again() {
 }
 
 /// `landed` events (issue, mode, merge sha) after #12's merge, as `merge` writes them.
-fn landed(c: &herdsman::Ctx, rows: &[(u64, &str, &str)]) {
+fn landed(c: &drover::Ctx, rows: &[(u64, &str, &str)]) {
     for (i, (n, mode, sha)) in rows.iter().enumerate() {
         let ts = 100 + i as u64;
         let d = json!({"pr": format!("{}", 30 + n), "merge_sha": sha});
@@ -184,10 +184,10 @@ fn runs(checks: Value) -> String {
     checks.to_string()
 }
 
-fn watch(c: &herdsman::Ctx, r: &Fake) -> String {
+fn watch(c: &drover::Ctx, r: &Fake) -> String {
     let cfg = Config::load(&c.config).unwrap();
     let mut out = Vec::new();
-    herdsman::land::watch(c, &cfg, r, &mut out, "sendmeter").unwrap();
+    drover::land::watch(c, &cfg, r, &mut out, "sendmeter").unwrap();
     String::from_utf8(out).unwrap()
 }
 
@@ -237,7 +237,7 @@ fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log() {
     assert_eq!((p.str("red_sha"), p.str("job")), (Some("m1"), Some("e2e")));
     assert_eq!(event(&c, "revert-opened").unwrap().str("pr"), Some("77"));
     // A minute later (the next fast step) its fast checks are green: it lands, the issue goes back to a fix round.
-    let c = herdsman::Ctx { now: c.now + 60, ..c };
+    let c = drover::Ctx { now: c.now + 60, ..c };
     let rv =
         json!({"state": "OPEN", "headRefOid": "r3v", "statusCheckRollup": [check("unit", "COMPLETED", "SUCCESS")]});
     let r = integration("m1", &[("m1", red())])
@@ -263,8 +263,8 @@ fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log() {
     let s = &fold(&ev)[&("sendmeter".to_string(), 12)];
     let merged = json!({"number": 34, "state": "MERGED", "headRefOid": HEAD});
     let cfg = Config::load(&c.config).unwrap();
-    let w = herdsman::waiting::waiting_on(
-        &herdsman::waiting::Log::new(&ev),
+    let w = drover::waiting::waiting_on(
+        &drover::waiting::Log::new(&ev),
         &ev,
         s,
         None,
@@ -277,7 +277,7 @@ fn a_single_culprit_is_reverted_and_its_issue_reopened_with_the_log() {
         "{w:?}"
     );
     assert_eq!(
-        herdsman::land::note(&ev, "sendmeter", 12).as_deref(),
+        drover::land::note(&ev, "sendmeter", 12).as_deref(),
         Some("reverted: e2e red")
     );
     // Pause and revert reach the fleet's notifier, though it is set to `merged` only.
@@ -306,9 +306,9 @@ fn several_landings_bisect_to_the_first_red_one() {
         .reply("git", "");
     watch(&c, &r);
     assert!(r.called(&format!(
-        "git -C {DIR} push -q -f origin m2:refs/heads/herdsman-bisect-m2"
+        "git -C {DIR} push -q -f origin m2:refs/heads/drover-bisect-m2"
     )));
-    assert!(r.called(&format!("gh workflow run CI -R {REPO} --ref herdsman-bisect-m2")));
+    assert!(r.called(&format!("gh workflow run CI -R {REPO} --ref drover-bisect-m2")));
     assert!(!r.called("gh pr create"));
     assert_eq!(event(&c, "land-bisect").unwrap().issue, Some(13));
     // Its run is red: #13 is the culprit, not the newest landing.
@@ -346,7 +346,7 @@ fn red_pauses_fast_first_landings_and_green_resumes_them() {
     watch(&c, &r);
     assert!(!r.called("gh run rerun"), "re-run once only");
     let ev = read(&c.state).unwrap();
-    assert!(herdsman::land::paused(&ev, "sendmeter").is_some());
+    assert!(drover::land::paused(&ev, "sendmeter").is_some());
     // While paused a PASS needs the full suite (it lands full-first).
     let r = pr(HEAD, fast_green(), "src/a.rs\n").reply("git", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
@@ -357,7 +357,7 @@ fn red_pauses_fast_first_landings_and_green_resumes_them() {
     let out = watch(&c, &r);
     assert!(out.contains("landing resumed"), "{out}");
     let ev = read(&c.state).unwrap();
-    assert!(herdsman::land::paused(&ev, "sendmeter").is_none());
+    assert!(drover::land::paused(&ev, "sendmeter").is_none());
     assert_eq!(event(&c, "land-resumed").unwrap().str("sha"), Some("r3v"));
     // Nothing landed since green: the next watch reads nothing but the open revert.
     let r = Fake::default().reply("gh pr view 79", "{}");
@@ -404,7 +404,7 @@ fn stats_land_reports_both_modes() {
     assert!(out.contains("sendmeter full-first: 1 landed"), "{out}");
     assert!(out.contains("integration red (landings paused): 0 min"), "{out}");
     // One landing over two days is half a landing a day, not 0.
-    let c = herdsman::Ctx {
+    let c = drover::Ctx {
         now: 100 + 2 * 86_400,
         ..c
     };
@@ -450,7 +450,7 @@ fn a_cancelled_intermediate_run_is_no_verdict_until_its_own_run_repeats_it() {
         .reply("gh workflow run", "")
         .reply("git", "");
     watch(&c, &r);
-    assert!(r.called(&format!("gh workflow run CI -R {REPO} --ref herdsman-bisect-m2")));
+    assert!(r.called(&format!("gh workflow run CI -R {REPO} --ref drover-bisect-m2")));
     assert!(!r.called("gh pr create"));
     // Only the stale cancelled check so far: still waiting, no second dispatch.
     let r = integration("m3", &[("m1", green()), ("m2", json!([old])), ("m3", red())]).reply("git", "");
@@ -486,7 +486,7 @@ fn a_bisect_run_that_does_not_start_is_alerted_once_and_retried() {
     assert!(alerts.contains("revert-failed"), "{alerts}");
     let r = fake();
     watch(&c, &r);
-    assert!(r.called(&format!("gh workflow run CI -R {REPO} --ref herdsman-bisect-m1")));
+    assert!(r.called(&format!("gh workflow run CI -R {REPO} --ref drover-bisect-m1")));
     assert_eq!(kinds(&c).iter().filter(|k| *k == "revert-failed").count(), 1);
 }
 

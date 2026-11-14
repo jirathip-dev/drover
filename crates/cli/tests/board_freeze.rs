@@ -34,7 +34,7 @@ fn a_board_ui_change_needs_board_fix_in_the_issue() {
     assert_eq!(code, Some(1), "{out}");
     assert!(
         out.contains(
-            "the old board takes bug fixes only (board-fix in the issue); new UI goes to cooee or the drover plugins"
+            "the old board takes bug fixes only (board-fix in the issue); new UI goes to cooee or Drover's screens (served by drover)"
         ),
         "{out}"
     );
@@ -75,7 +75,7 @@ fn ci_runs_the_freeze_on_every_staging_pr() {
     assert!(wf.contains("| scripts/board-freeze.sh spec.md"), "{wf}");
 }
 
-/// #574: the body `herdsman amend` sent with `gh issue edit` (the call's `--body` value).
+/// #574: the body `drover amend` sent with `gh issue edit` (the call's `--body` value).
 fn edited(r: &Fake) -> String {
     let calls = r.calls.borrow();
     let edit = calls
@@ -85,11 +85,11 @@ fn edited(r: &Fake) -> String {
     edit.split_once(" --body ").unwrap().1.to_string()
 }
 
-/// #574: `herdsman amend` appends an owner's decision under the body's `## Amendments` (made once), logs `amend`,
+/// #574: `drover amend` appends an owner's decision under the body's `## Amendments` (made once), logs `amend`,
 /// re-runs the open PR's failed board-freeze (not other checks), and its `board-fix` line passes board-freeze.
 #[test]
 fn amend_writes_an_owner_decision_into_the_spec_and_reruns_board_freeze() {
-    use herdsman::events::{append, read, Event};
+    use drover::events::{append, read, Event};
     use serde_json::json;
     let c = ctx(&tmpdir("amend"), CONFIG);
     let ev = |n: u64, kind: &str, d: serde_json::Value| append(&c.state, &Event::new(1, "sendmeter", Some(n), kind, d));
@@ -98,7 +98,7 @@ fn amend_writes_an_owner_decision_into_the_spec_and_reruns_board_freeze() {
         ("q2", 60, Some("default")),
         ("q3", 60, None),
         ("q4", 61, Some("owner")),
-        ("q5", 60, Some("conductor-t1")),
+        ("q5", 60, Some("orchestrator-t1")),
     ] {
         ev(n, "needs-decision", json!({"id": id, "question": "?"})).unwrap();
         if let Some(by) = by {
@@ -138,6 +138,7 @@ fn amend_writes_an_owner_decision_into_the_spec_and_reruns_board_freeze() {
     assert!(!r.called("gh run rerun 88"), "only spec-reading checks re-run");
     let amends: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "amend")
         .collect();

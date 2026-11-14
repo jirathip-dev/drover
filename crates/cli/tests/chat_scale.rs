@@ -3,8 +3,8 @@
 //! fold without reading the log.
 mod common;
 use common::*;
-use herdsman::conductor::SCANS;
-use herdsman::serve::Server;
+use drover::orchestrator::SCANS;
+use drover::serve::Server;
 use serde_json::json;
 use std::sync::atomic::Ordering::Relaxed;
 
@@ -22,7 +22,7 @@ fn the_chat_tab_is_linear_in_the_log_and_cached_by_its_last_seq() {
         let id = format!("t{t}");
         log.push(json!({"ts": NOW, "fleet": "sendmeter", "type": "thread-new", "thread": id, "title": format!("thread {t}")}));
         for m in 0..MSGS {
-            let from = if m % 2 == 0 { "owner" } else { "conductor" };
+            let from = if m % 2 == 0 { "owner" } else { "orchestrator" };
             log.push(
                 json!({"ts": NOW + m, "fleet": "sendmeter", "type": "thread-msg", "thread": id, "from": from,
                 "text": format!("message {m}")}),
@@ -64,9 +64,9 @@ fn the_chat_tab_is_linear_in_the_log_and_cached_by_its_last_seq() {
     assert_eq!(api(&s, ADDR, "", NOW + 501, "chat"), first, "same answer");
     assert_eq!(SCANS.load(Relaxed) - before, 0, "the log was folded again");
     // A new event moves the last seq: the next request folds the log again.
-    herdsman::events::append(
+    drover::events::append(
         &c.state,
-        &herdsman::events::Event::new(NOW, "sendmeter", Some(1), "note", json!({})),
+        &drover::events::Event::new(NOW, "sendmeter", Some(1), "note", json!({})),
     )
     .unwrap();
     let before = SCANS.load(Relaxed);

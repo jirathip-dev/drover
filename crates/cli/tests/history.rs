@@ -3,8 +3,8 @@
 //! `events?since=&until=` windows).
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -45,10 +45,12 @@ fn a_chat_opens_with_its_last_10_turns_within_64kb() {
     };
     std::fs::write(proj.join("s.jsonl"), (0..40).map(turn).collect::<Vec<_>>().join("\n")).unwrap();
     let screen: String = (0..600).map(|i| format!("⏺ line {i} {}\n", "y".repeat(290))).collect();
-    let list = json!({"result": {"agents": [{"name": "sendmeter-impl-12", "agent_status": "working", "pane_id": "w1:p2", "cwd": wt}]}});
-    let r = Fake::default()
-        .reply("herdr agent list", &list.to_string())
-        .reply("herdr pane read", &screen);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane("sendmeter-impl-12", "working", &wt);
+    sh.screen("sendmeter-impl-12", &screen);
+    let f = Fake::default();
+    let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone) Safari/604.1", T);
     let first = get(&s, "/lane?agent=sendmeter-impl-12&lines=200", &ck);

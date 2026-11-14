@@ -1,0 +1,26 @@
+{
+  "type": "sheet", "id": "fleets", "title": "Fleets",
+  "cancel": "Cancel", "done": { "label": "Save", "action": "save-fleets" },
+  "blocks": [
+    { "type": "section", "header": "herdsman", "footer": "Drive runs every 5 minutes on mini. Pause stops new lanes; live ones finish.", "blocks": [
+      { "type": "form", "id": "f-herdsman", "fields": [
+        { "type": "toggle", "name": "herdsman.drive", "label": "Drive", "value": true },
+        { "type": "picker", "name": "herdsman.host", "label": "Host", "value": "mini", "options": ["mini", "air", "least busy"] },
+        { "type": "picker", "name": "herdsman.impl", "label": "Impl", "value": "Claude Code · opus 5.5 · high",
+          "options": ["Claude Code · opus 5.5 · high", "Claude Code · sonnet 5.5", "Codex · gpt-5.6-luna"] },
+        { "type": "picker", "name": "herdsman.rev", "label": "Review", "value": "Codex · gpt-5.6-luna",
+          "options": ["Claude Code · opus 5.5 · high", "Codex · gpt-5.6-luna"] },
+        { "type": "picker", "name": "herdsman.rounds", "label": "Rounds", "value": "3", "options": ["2", "3", "4", "5"] } ] } ] },
+    { "type": "section", "header": "drover", "blocks": [
+      { "type": "form", "id": "f-drover", "fields": [
+        { "type": "toggle", "name": "drover.drive", "label": "Drive", "value": false },
+        { "type": "picker", "name": "drover.host", "label": "Host", "value": "mini", "options": ["mini", "air"] },
+        { "type": "text", "name": "drover.integration", "label": "Branch", "value": "staging", "placeholder": "integration branch" },
+        { "type": "secret", "name": "drover.GH_TOKEN", "label": "GH_TOKEN", "set": true, "placeholder": "paste to replace" } ] } ] },
+    { "type": "list", "rows": [
+      { "type": "row", "id": "add-fleet", "title": "Add a fleet…", "style": "link", "tap": { "sheet": "/screens/fleets/new" } } ] },
+    { "type": "button", "id": "rm-drover", "label": "Remove drover…", "style": "destructive", "action": "remove-fleet",
+      "values": { "fleet": "drover" },
+      "confirm": { "title": "Remove drover?", "message": "Its queue and lanes stay on disk; drive stops for it.", "ok": "Remove" } }
+  ]
+}

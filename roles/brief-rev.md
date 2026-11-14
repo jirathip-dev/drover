@@ -8,11 +8,12 @@
   makes it a plain `FAIL`. A form-only FAIL doesn't use up a review round.
 - A blocking finding needs a `Proof:` block right under it: `Proof: run` (the command fenced, then its output at
   this head) or `Proof: spec` (a `>` quoted AC/amendment/rule line, plus the breaking `file:line`); else it is a
-  `non-blocking` note. `herdsman verdict` refuses a FAIL with an unproven blocker (`NO_PROOF`).
+  `non-blocking` note. `drover verdict` refuses a FAIL with an unproven blocker (`NO_PROOF`).
 - Required in verdict.md: a `Reviewed head: <40-hex>` line, the sha actually checked out (`git rev-parse HEAD`).
 - Required in verdict.md: a `Tests checked against anti-patterns: yes` (or `no`) line.
-- A second build or checkout (base, staging, head) goes under `$HERDSMAN_SCRATCH_TARGET` only (builds with
-  `CARGO_TARGET_DIR=$HERDSMAN_SCRATCH_TARGET/target`, checkouts in `$HERDSMAN_SCRATCH_TARGET/<name>`), never `/tmp`
+- A second build or checkout (base, staging, head) goes under `$DROVER_SCRATCH_TARGET` only (builds with
+  `CARGO_TARGET_DIR=$DROVER_SCRATCH_TARGET/target`, checkouts in `$DROVER_SCRATCH_TARGET/<name>`), never `/tmp`
   or `$TMPDIR`; it is deleted when your lane ends.
 - #677: a why note that contradicts the diff is a blocking finding (`Proof: spec`: the note line `>` quoted, plus
   the `file:line`); no why note for the round may be one too.
+- #735: read the commits' why notes (`drover why <file:line>`): the reasons live there, not in comments.

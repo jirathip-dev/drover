@@ -18,23 +18,17 @@ pub fn recipe(ctx: &Ctx, cfg: &Config, name: &str) -> Result<(toml::Table, Strin
     Ok((rc, if old { "default".into() } else { size }))
 }
 
-/// #635: the one fleet that fits host `name` (its tags), whose store scope its cloud key is read from first.
-pub fn fleet<'a>(ctx: &Ctx, cfg: &'a Config, name: &str) -> Option<&'a str> {
-    let tags = crate::hosts::tags(&cfg.hosts[name], crate::hosts::cached(ctx).get(name));
-    let mut fits = cfg.fleet.iter().filter(|f| f.1.needs.iter().all(|t| tags.contains(t)));
-    fits.next().filter(|_| fits.next().is_none()).map(|f| f.0.as_str())
-}
-
-/// The provider key `var` and where it was found: the environment, else the store's `herdsman/<fleet>/<var>`, else
-/// `herdsman/all/<var>`.
-pub fn key(r: &dyn Runner, var: &str, fleet: Option<&str>) -> Option<(String, String)> {
-    let env = std::env::var(var).ok().map(|k| (k, "env".into()));
-    let stored = |f: &str| {
-        let svc = crate::secret::service(f, var);
-        r.secret(&svc).ok().flatten().map(|k| (k, svc))
-    };
-    let found = env.or_else(|| fleet.and_then(stored)).or_else(|| stored("all"));
-    found.filter(|k| !k.0.is_empty())
+/// #707: the recipe's provider key `var` (`key_env`) and where it was found: the environment, else the 0600 file
+/// `<config>/secrets/<var>`. None: the provider's own CLI holds its login (boat's does).
+pub fn key(ctx: &Ctx, var: &str) -> Result<Option<(String, String)>> {
+    if var.is_empty() {
+        return Ok(None);
+    }
+    if let Some(k) = std::env::var(var).ok().filter(|k| !k.is_empty()) {
+        return Ok(Some((k, "env".into())));
+    }
+    let p = crate::secret::path(ctx, var);
+    Ok(crate::secret::file(&p)?.map(|k| (k, p.display().to_string())))
 }
 
 /// Recipe `c`: `<config>/recipes/<c>.toml`, else the built-in `boat`.
@@ -57,29 +51,29 @@ fn cmd(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str) -> Resul
     };
     // #635 C: an empty id is boat's current sandbox: no stop or destroy when the recipe's `id` finds none.
     if ["stop", "destroy"].contains(&verb) && rc.contains_key("id") {
-        let id = run(r, &rc, &format!("{name} id"), &get("id"), (None, fleet(ctx, cfg, name)))?;
+        let id = run(ctx, r, &rc, &format!("{name} id"), &get("id"), None)?;
         ensure!(!id.trim().is_empty(), "no sandbox named {name}: {verb} refused");
     }
     let line = get(verb).replace("{id}", &get("id")).replace("{size}", &size);
-    run(r, &rc, &format!("{name} {verb}"), &line, (None, fleet(ctx, cfg, name)))
+    run(ctx, r, &rc, &format!("{name} {verb}"), &line, None)
 }
 
-/// Run recipe `rc`'s filled-in `line`: its provider key (#635: `fleet`'s first), then #537's `token` (as `RT`),
-/// exported from stdin.
-type Scope<'a> = (Option<&'a str>, Option<&'a str>);
-pub fn run(r: &dyn Runner, rc: &toml::Table, what: &str, line: &str, (token, fleet): Scope) -> Result<String> {
+/// Run recipe `rc`'s filled-in `line`: its provider key (#707: when it has `key_env` and the key is set), then #537's
+/// `token` (as `RT`), exported from stdin.
+pub fn run(ctx: &Ctx, r: &dyn Runner, rc: &toml::Table, what: &str, line: &str, token: Option<&str>) -> Result<String> {
     let var = rc.get("key_env").and_then(|v| v.as_str()).unwrap_or_default();
-    let f = fleet.map_or(String::new(), |f| format!("`{f}` or "));
-    let (key, _) =
-        key(r, var, fleet).with_context(|| format!("{var} not set (env or the store's {f}`all` secret {var})"))?;
+    let key = key(ctx, var)?.map(|k| k.0);
+    let k = key.as_ref().map_or(String::new(), |_| {
+        format!("IFS= read -r K; export {var}=\"$K\"; unset K; ")
+    });
     let rt = token.map_or("", |_| "IFS= read -r RT; export RT; ");
-    let script = format!("IFS= read -r K; export {var}=\"$K\"; unset K; {rt}{line}");
-    let o = r.run_in(
-        "sh",
-        &argv(&["-c", &script]),
-        &format!("{key}\n{}", token.map_or(String::new(), |t| format!("{t}\n"))),
-    )?;
-    let mut err = o.stderr.trim().replace(&key, "•••");
+    let input = [key.clone(), token.map(String::from)];
+    let input: String = input.into_iter().flatten().map(|v| v + "\n").collect();
+    let o = r.run_in("sh", &argv(&["-c", &format!("{k}{rt}{line}")]), &input)?;
+    let mut err = o.stderr.trim().to_string();
+    if let Some(k) = &key {
+        err = err.replace(k, "•••");
+    }
     if let Some(t) = token.filter(|t| !t.is_empty()) {
         err = err.replace(t, "•••");
     }
@@ -89,7 +83,7 @@ pub fn run(r: &dyn Runner, rc: &toml::Table, what: &str, line: &str, (token, fle
 
 fn log(ctx: &Ctx, cfg: &Config, kind: &str, name: &str, mut d: Value) -> Result<()> {
     d["host"] = json!(name);
-    emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))
+    emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))
 }
 
 fn last<'a>(events: &'a [Event], name: &str, kinds: &[&str]) -> Option<&'a Event> {
@@ -290,7 +284,7 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Live, out: &mut dyn 
         let Some(Some(agents)) = live.get(name).filter(|_| state(&events, name) == "running") else {
             continue;
         };
-        let idle = h.idle_stop_minutes.unwrap_or(20) * 60;
+        let idle = h.idle_stop_minutes.unwrap_or(cfg.limits.cloud_idle_stop_minutes) * 60;
         let up = last(&events, name, &["cloud-up"]);
         let busy = seen.get(name).map_or(0, |s| s.busy).max(up.map_or(0, |e| e.ts));
         let quiet = (agents.is_empty() && busy + idle <= ctx.now).then(|| format!("idle {} min", idle / 60));
@@ -360,7 +354,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \"$@\"; }; ";
 /// Bootstrap's steps after herdr and each harness's install, `name⇥read-back check⇥install` each (Rust with a C linker
 /// for `cargo install`).
 const TOOLS: &str = "git\tcommand -v git\tapt_ git\ngh\tcommand -v gh\tapt_ gh";
-/// #637: a `shed-acp` host's own runtime instead of herdr: shed at herdsman's pin with its launchd or systemd job,
+/// #637: a `shed-acp` host's own runtime instead of herdr: shed at drover's pin with its launchd or systemd job,
 /// node for the ACP adapter (`{acp}`), and that adapter in shed's agent list.
 const SHED: &str =
     "shed job\tshed doctor >/dev/null 2>&1\tshed install --force && { { systemctl --user daemon-reload && \
@@ -376,24 +370,35 @@ const RUST: &str =
 /// clones of the fleets it fits. #592: no fleet.toml there. Nothing is copied from this host's logins.
 pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut dyn Write) -> Result<()> {
     let h = cfg.hosts.get(name).context("no such host")?;
+    let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
+    let acp = cfg.host_acp(name).is_some();
+    if !acp {
+        crate::hosts::resolve(r, m, true)?; // #641: before any step; none yet is fine, the herdr step adds it
+    }
     if h.cloud.is_some() && state(&read(&ctx.state)?, name) != "running" {
         start(ctx, cfg, r, name)?;
     } else if h.cloud.is_some() {
         moved(ctx, cfg, r, name, true)?;
     }
-    let m = h.machine.as_deref().context("the main host needs no bootstrap")?;
     let on = crate::hosts::On::new(r, Some(m));
     let (tags, home) = crate::hosts::probe(&on).with_context(|| format!("can't reach {name}"))?;
     let mine = crate::config::home().to_string_lossy().into_owned();
     let [exe, conf] = [&ctx.exe, &ctx.config.display().to_string()].map(|p| p.replace(&mine, &home));
-    let (root, sha) = (exe.rsplitn(3, '/').last().unwrap_or(&home), env!("HERDSMAN_SHA"));
-    let acp = cfg.host_acp(name).is_some();
+    let (root, sha) = (exe.rsplitn(3, '/').last().unwrap_or(&home), env!("DROVER_SHA"));
     let v = if acp {
         String::new()
     } else {
         crate::timer::herdr_versions(r).context("no herdr server here")?.0
     };
-    let sh = |s: &str| on.run("sh", &argv(&["-c", &format!("{SH}{s}")]));
+    let run = |s: &str, l: u64| {
+        on.run_for(
+            "sh",
+            &argv(&["-c", &format!("{SH}{s}")]),
+            "",
+            std::time::Duration::from_secs(l),
+        )
+    };
+    let sh = |s: &str| run(s, 60);
     let pass = |s: &str| sh(s).is_ok_and(|o| o.code == 0);
     // #647: a failed step's command, exit code and last 20 lines of output, shown and logged.
     let fail = |what: &str, cmd: &str, o: &crate::runner::Out| {
@@ -408,36 +413,56 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
         if pass(check) {
             return Ok(writeln!(out, "✓ {what} — there")?);
         }
-        // herdr's install is `herdr machine add` from here: this host's version there.
-        let add = || r.run(crate::herdr::BIN, &argv(&["machine", "add", m, "--label", m]));
-        let o = if install.is_empty() { add()? } else { sh(install)? };
+        // herdr's install is `herdr machine add` from here: this host's version there. #641: it replaces the label's
+        // old profile (a recreated box), never adds a second.
+        let add = || {
+            let old = crate::hosts::profiles(r, m)?;
+            for id in &old {
+                crate::runner::ok(r, crate::herdr::BIN, &["machine", "remove", id])?;
+            }
+            if !old.is_empty() {
+                log(
+                    ctx,
+                    cfg,
+                    "host-machine-replaced",
+                    name,
+                    json!({"machine": m, "old": old}),
+                )?;
+            }
+            r.run(crate::herdr::BIN, &argv(&["machine", "add", m, "--label", m]))
+        };
+        let o = if install.is_empty() {
+            add()?
+        } else {
+            run(install, 1800)?
+        };
         let (cmd, o) = if o.code == 0 { (check, sh(check)?) } else { (install, o) };
         ensure!(o.code == 0, "{}", fail(what, cmd, &o));
         Ok(writeln!(out, "✓ {what} — installed")?)
     };
     let (repo, version) = (env!("CARGO_PKG_REPOSITORY"), crate::VERSION);
-    let build = format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force");
+    let build = format!("cargo install --git {repo} --rev {sha} --locked --root '{root}' --force && ln -sf drover '{root}/bin/herdsman'");
     let herdr = format!("herdr\therdr --version | grep -qx 'herdr {v}'\t\n");
     let mut steps = format!("{}{TOOLS}\n", if acp { "" } else { &herdr });
-    for (n, i) in crate::harness::all().filter_map(|(n, h)| Some((n, h.install()?))) {
+    for (n, i) in crate::providers::lanes().filter_map(|h| Some((h.name, h.install()?))) {
         steps += &format!("{n}\tcommand -v {n}\t{i}\n");
     }
     steps += &format!("{RUST}\n");
     if acp {
         let (git, rev, sv) = (crate::shed::git(), crate::shed::REV, crate::shed::proto::VERSION);
         let shed = format!("cargo install --git {git} --rev {rev} --locked --force shed");
-        let adapter = SHED.replace("{acp}", crate::harness::default_acp().unwrap_or_default());
+        let adapter = SHED.replace("{acp}", crate::providers::default_acp().unwrap_or_default());
         steps += &format!("shed\t[ \"$(shed --version)\" = 'shed {sv}' ]\t{shed}\n{adapter}\n");
     }
-    steps += &format!("herdsman\t[ \"$('{exe}' --version)\" = 'herdsman {version}' ]\t{build}");
+    steps += &format!("drover\t[ \"$('{exe}' --version)\" = 'drover {version}' ]\t{build}");
     steps.lines().try_for_each(&mut step)?;
     // #637: a shed-acp host has no herdr panes and no harness login (its lanes sign in through the proxy): gh only.
     if acp && !pass("gh auth status") {
         bail!("{name}: log in with `ssh {m} gh auth login` there, then bootstrap again");
     }
-    let harness = crate::harness::all()
+    let harness = crate::providers::lanes()
         .filter(|_| !acp)
-        .filter_map(|(n, h)| Some((h.health_check()?.1, n)));
+        .filter_map(|h| Some((h.health_check()?.1, h.name)));
     let logins = harness.chain([("gh auth status", "gh-token")]).filter(|t| !pass(t.0));
     let panes = logins
         .map(|t| crate::setup::start(ctx, cfg, r, name, t.1, "bootstrap"))
@@ -489,11 +514,16 @@ pub fn doctor(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, rows: &mut Ve
         ));
     }
     let var = rc.get("key_env").and_then(|v| v.as_str()).unwrap_or_default();
-    let f = fleet(ctx, cfg, name);
-    rows.push(key(r, var, f).map_or_else(
-        || format!("✗ cloud {name} key — {var} not in env, herdsman/{}/{var} or herdsman/all/{var} → herdsman secret request <thread> {var}", f.unwrap_or("all")),
-        |k| format!("✓ cloud {name} key — {}", k.1),
-    ));
+    let p = crate::secret::path(ctx, var);
+    match key(ctx, var) {
+        _ if var.is_empty() => {}
+        Ok(Some(k)) => rows.push(format!("✓ cloud {name} key — {}", k.1)),
+        Ok(None) => rows.push(format!(
+            "! cloud {name} key — {var} not in env or {}: {c}'s CLI uses its own login → only API calls need it",
+            p.display()
+        )),
+        Err(e) => rows.push(format!("✗ cloud {name} key — {e:#}")),
+    }
     if let Some(i) = rc.get("identity").and_then(|v| v.as_str()) {
         let there = ctx.home.join(i.trim_start_matches("~/")).exists();
         rows.push(

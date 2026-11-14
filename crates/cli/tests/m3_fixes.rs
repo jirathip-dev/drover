@@ -2,11 +2,11 @@
 //! #17 6(b): notifiers run without the lane's HERMES_* environment.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 use std::process::Command;
 
-fn merged_13(c: &herdsman::Ctx) {
+fn merged_13(c: &drover::Ctx) {
     let e = |ts, kind: &str, d| append(&c.state, &Event::new(ts, "sendmeter", Some(13), kind, d)).unwrap();
     e(
         10,
@@ -47,11 +47,9 @@ fn spawn_and_adopt_on_merged_issue_are_refused() {
     let c = ctx(&d, CONFIG);
     merged_13(&c);
     let before = read(&c.state).unwrap().len();
-    let r = Fake::default()
-        .reply("herdr", "{}")
-        .reply("gh", "{}")
-        .reply("git", "")
-        .reply("sysctl", "1");
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = Fake::default().reply("gh", "{}").reply("git", "").reply("sysctl", "1");
     for args in [
         vec!["spawn", "sendmeter", "13", "impl"],
         vec!["spawn", "sendmeter", "13", "rev", "--dry-run"],
@@ -62,9 +60,14 @@ fn spawn_and_adopt_on_merged_issue_are_refused() {
         assert!(out.contains("REFUSED MERGED"), "{args:?}: {out}");
     }
     assert!(
-        !r.called("herdr agent") && !r.called("herdr worktree"),
+        !r.called("herdr agent") && !r.called("herdr worktree") && !r.called("git worktree"),
         "{:?}",
         r.calls.borrow()
+    );
+    assert!(
+        !sh.called("run", "sendmeter-impl-13"),
+        "no lane started: {:?}",
+        sh.methods()
     );
     assert_eq!(read(&c.state).unwrap().len(), before, "nothing logged");
 }
@@ -78,7 +81,7 @@ fn notifier_runs_without_lane_hermes_env() {
         sink.display()
     );
     std::fs::write(d.join("fleet.toml"), cfg).unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_herdsman"))
+    let out = Command::new(env!("CARGO_BIN_EXE_drover"))
         .args(["set", "sendmeter", "impl", "--harness", "claude"])
         .env("FLEET_CONFIG", d.join("fleet.toml"))
         .env("FLEET_STATE", d.join("state/events.jsonl"))

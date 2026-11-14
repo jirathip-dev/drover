@@ -2,12 +2,10 @@
 //! and the conductor-only design role.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
-const WS: &str = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
-const PANES: &str = r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#;
 
 /// CONFIG plus `extra` lines in `[fleet.sendmeter]` and a design role.
 fn config(extra: &str) -> String {
@@ -24,39 +22,31 @@ fn config(extra: &str) -> String {
 
 const SERIAL: &str = "serial_paths = [\"supabase/migrations/**\"]";
 
-/// A Fake on which any hermes spawn succeeds end to end, given the `herdr agent list`.
-fn happy(agent_list: &str) -> Fake {
+fn happy() -> Fake {
     Fake::default()
-        .reply("herdr agent list", agent_list)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
         .reply("vm_stat", "Swapouts: 100.\n")
         .reply("git -C", "")
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
-        .reply("herdr worktree", WS)
-        .reply("herdr pane list", PANES)
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr pane", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr agent wait", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-fn spawned(c: &herdsman::Ctx, n: u64, role: &str) {
+fn spawned(c: &drover::Ctx, n: u64, role: &str) {
     let d = json!({"role": role, "agent": format!("sendmeter-{role}-{n}"), "branch": format!("issue-{n}")});
     append(&c.state, &Event::new(10, "sendmeter", Some(n), "spawn", d)).unwrap();
 }
 
-fn log(c: &herdsman::Ctx, n: u64, kind: &str, d: serde_json::Value) {
+fn log(c: &drover::Ctx, n: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(20, "sendmeter", Some(n), kind, d)).unwrap();
 }
 
-fn spawn(c: &herdsman::Ctx, n: u64, role: &str) -> (i32, String) {
-    run(c, &happy(NO_AGENTS), &["spawn", "sendmeter", &n.to_string(), role])
+fn spawn(c: &drover::Ctx, n: u64, role: &str) -> (i32, String) {
+    run(c, &happy(), &["spawn", "sendmeter", &n.to_string(), role])
 }
 
-fn refused(c: &herdsman::Ctx, n: u64, role: &str, code: &str) {
+fn refused(c: &drover::Ctx, n: u64, role: &str, code: &str) {
     let before = read(&c.state).unwrap().len();
     let (exit, out) = spawn(c, n, role);
     assert_eq!(exit, 3, "{out}");
@@ -70,6 +60,8 @@ fn refused(c: &herdsman::Ctx, n: u64, role: &str, code: &str) {
 fn second_serial_impl_waits_until_first_merges() {
     let d = tmpdir("serial-busy");
     let c = ctx(&d, &config(SERIAL));
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     assert_eq!(
         run(
             &c,
@@ -101,6 +93,8 @@ fn second_serial_impl_waits_until_first_merges() {
 fn serial_max_two_admits_a_second_serial_and_refuses_a_third() {
     let d = tmpdir("serial-max");
     let c = ctx(&d, &config(&format!("{SERIAL}\nserial_max = 2")));
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     assert_eq!(
         run(
             &c,
@@ -137,6 +131,8 @@ fn serial_max_two_admits_a_second_serial_and_refuses_a_third() {
 fn in_flight_serial_issue_keeps_its_lanes_when_over_full() {
     let d = tmpdir("serial-over");
     let c = ctx(&d, &config(SERIAL));
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     let add = ["queue", "sendmeter", "add", "1", "3", "--serial"];
     assert_eq!(run(&c, &Fake::default(), &add).0, 0);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "2"]).0, 0);
@@ -150,7 +146,7 @@ fn in_flight_serial_issue_keeps_its_lanes_when_over_full() {
     assert!(board.contains(", serial: db 2/1"), "{board}");
     for n in [1, 2] {
         let argv = ["spawn", "sendmeter", &n.to_string(), "impl", "--supersede"];
-        let (exit, out) = run(&c, &happy(NO_AGENTS), &argv);
+        let (exit, out) = run(&c, &happy(), &argv);
         assert_eq!(exit, 0, "#{n}'s own fix lane is admitted: {out}");
     }
     refused(&c, 3, "impl", "SERIAL_BUSY");
@@ -167,17 +163,17 @@ fn merge_fake(files: &str) -> Fake {
         .reply("gh pr merge 34", "")
         .reply("gh pr view 34", &json!({"mergeCommit": {"oid": "m3rg3"}}).to_string())
         .reply("gh issue", "")
-        .reply("herdr agent list", NO_AGENTS)
 }
 
 fn merge(serial: bool, files: &str) -> (i32, String, Fake) {
-    merge_on(serial, merge_fake(files)).1
+    merge_on(serial, merge_fake(files)).2
 }
 
-/// Merge #12 (queued `--serial` or not) at PASS on `r`: (its ctx, (exit, output, r)).
-fn merge_on(serial: bool, r: Fake) -> (herdsman::Ctx, (i32, String, Fake)) {
+fn merge_on(serial: bool, r: Fake) -> (drover::Ctx, FakeShed, (i32, String, Fake)) {
     let d = tmpdir("serial-merge");
     let c = ctx(&d, &config(SERIAL));
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let mut q = vec!["queue", "sendmeter", "add", "12"];
     if serial {
         q.push("--serial");
@@ -186,7 +182,7 @@ fn merge_on(serial: bool, r: Fake) -> (herdsman::Ctx, (i32, String, Fake)) {
     spawned(&c, 12, "impl");
     log(&c, 12, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
-    (c, (exit, out, r))
+    (c, sh, (exit, out, r))
 }
 
 const FILES: &str = "gh api repos/jirathip-dev/sendmeter/pulls/34/files --paginate";
@@ -212,16 +208,16 @@ fn a_2011_file_pr_is_listed_whole_and_its_last_page_serial_path_refuses() {
 
 #[test]
 fn a_rename_out_of_a_serial_path_reports_both_names() {
-    let (c, (exit, out, _)) = merge_on(false, merge_fake("src/x.sql\tsupabase/migrations/x.sql\n"));
+    let (c, _sh, (exit, out, _)) = merge_on(false, merge_fake("src/x.sql\tsupabase/migrations/x.sql\n"));
     assert!(exit == 3 && out.contains("supabase/migrations/x.sql"), "{out}");
-    let cache = herdsman::gh::cache_path(&c, "diff", "sendmeter", 12);
+    let cache = drover::gh::cache_path(&c, "diff", "sendmeter", 12);
     let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(cache).unwrap()).unwrap();
     assert_eq!(v["files"], json!(["src/x.sql", "supabase/migrations/x.sql"]));
 }
 
 #[test]
 fn a_cached_head_is_not_listed_again() {
-    let (c, (exit, _, r)) = merge_on(false, merge_fake("supabase/migrations/x.sql\n"));
+    let (c, _sh, (exit, _, r)) = merge_on(false, merge_fake("supabase/migrations/x.sql\n"));
     let (again, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert!(
         exit == 3 && again == 3 && out.contains("supabase/migrations/x.sql"),
@@ -236,7 +232,7 @@ fn above_the_apis_3000_files_the_checkout_lists_them() {
     let r = merge_fake(&many(3000, ""))
         .reply("git -C /tmp/does-not-matter/sendmeter fetch -q origin", "")
         .reply(&git, "supabase/schemas/t0.sql\nsupabase/migrations/x.sql\n");
-    let (exit, out, r) = merge_on(false, r).1;
+    let (exit, out, r) = merge_on(false, r).2;
     assert!(exit == 3 && out.contains("supabase/migrations/x.sql"), "{out}");
     assert!(
         r.index("git -C /tmp/does-not-matter/sendmeter fetch") < r.index(&git),
@@ -260,6 +256,8 @@ fn unmarked_pr_touching_serial_path_is_refused() {
 #[test]
 fn owner_override_still_refuses_an_unmarked_serial_pr() {
     let c = ctx(&tmpdir("serial-override"), &config(SERIAL));
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     spawned(&c, 12, "impl");
     log(&c, 12, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
     let r = merge_fake("supabase/migrations/x.sql\n");
@@ -288,7 +286,7 @@ fn pr_outside_serial_globs_merges_unmarked() {
 
 #[test]
 fn serial_globs() {
-    use herdsman::config::glob;
+    use drover::config::glob;
     let g = |p: &str, s: &str| glob(p.as_bytes(), s.as_bytes());
     assert!(g("supabase/migrations/**", "supabase/migrations/x.sql"));
     assert!(g("supabase/migrations/**", "supabase/migrations/a/b.sql"));
@@ -303,6 +301,8 @@ fn serial_globs() {
 fn no_cap_by_default_even_with_50_lanes() {
     let d = tmpdir("cap-unset");
     let c = ctx(&d, &config(""));
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     for n in 100..150 {
         spawned(&c, n, "impl");
     }
@@ -321,17 +321,14 @@ fn no_cap_by_default_even_with_50_lanes() {
 fn max_impl_refuses_the_third_impl() {
     let d = tmpdir("cap-impl");
     let c = ctx(&d, &config("max_impl = 2\nmax_rev = 1"));
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     assert_eq!(spawn(&c, 1, "impl").0, 0);
     assert_eq!(spawn(&c, 2, "impl").0, 0);
     refused(&c, 3, "impl", "CAP");
     // A fix round of an open issue is not a new lane.
     assert_eq!(
-        run(
-            &c,
-            &happy(NO_AGENTS),
-            &["spawn", "sendmeter", "2", "impl", "--supersede"]
-        )
-        .0,
+        run(&c, &happy(), &["spawn", "sendmeter", "2", "impl", "--supersede"]).0,
         0
     );
     // max_rev = 1: #1 under review fills it; #2's reviewer waits.
@@ -345,16 +342,20 @@ fn max_impl_refuses_the_third_impl() {
 fn design_lane_spawns_but_never_moves_the_issue() {
     let d = tmpdir("design");
     let c = ctx(&d, &config(SERIAL));
-    let r = happy(NO_AGENTS);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = happy().once("git -C /tmp/does-not-matter/sendmeter rev-parse --verify", 1, "");
     let (exit, out) = run(&c, &r, &["spawn", "sendmeter", "12", "design"]);
     assert_eq!(exit, 0, "{out}");
+    assert!(sh.called("run", "sendmeter-design-12"), "{:?}", sh.methods());
+    let wt = c.worktrees.join("sendmeter/design-12");
     assert!(
-        r.called("herdr agent start sendmeter-design-12"),
+        r.called(&format!(
+            "git -C /tmp/does-not-matter/sendmeter worktree add -b design-12 {} origin/staging",
+            wt.display()
+        )),
         "{:?}",
         r.calls.borrow()
-    );
-    assert!(
-        r.called("herdr worktree create --cwd /tmp/does-not-matter/sendmeter --branch design-12 --base origin/staging")
     );
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/design-12/.brief.md")).unwrap();
     assert!(
@@ -366,9 +367,8 @@ fn design_lane_spawns_but_never_moves_the_issue() {
         (st.state.as_str(), st.branch.as_deref(), st.lane.as_deref()),
         ("queued", None, None)
     );
-    // It shows in herdr like any lane: a live design agent is LANE_LIVE for a second design spawn.
-    let live = agents(&[("sendmeter-design-12", "working", "/elsewhere", "w9:p1")]);
-    let (exit, out) = run(&c, &happy(&live), &["spawn", "sendmeter", "12", "design"]);
+    sh.set("sendmeter-design-12", |t| t["cwd"] = json!("/elsewhere"));
+    let (exit, out) = run(&c, &happy(), &["spawn", "sendmeter", "12", "design"]);
     assert_eq!(exit, 3, "{out}");
     assert!(
         out.contains("REFUSED LANE_LIVE") && out.contains("sendmeter-design-12"),

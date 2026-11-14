@@ -4,7 +4,7 @@
 //! named below with its reason; adding one needs the owner's OK.
 mod common;
 use common::*;
-use herdsman::Ctx;
+use drover::Ctx;
 use std::path::PathBuf;
 
 /// (file, selector, property, reason).
@@ -208,13 +208,13 @@ fn rendered_page_has_no_inline_px() {
         config: demo.join("fleet.toml"),
         state: demo.join("events.jsonl"),
         worktrees: d.join("wt"),
-        hermes: d.join("hermes"),
-        exe: "herdsman".into(),
+        homes: [("hermes", d.join("hermes"))].into(),
+        exe: "drover".into(),
         now: 1,
         home: d.join("home"),
         hints: vec![],
     };
-    herdsman::serve::export(&c, &Fake::default(), &d.join("site"), true).unwrap();
+    drover::serve::export(&c, &Fake::default(), &d.join("site"), true).unwrap();
     let page = std::fs::read_to_string(d.join("site/index.html")).unwrap();
     let bad: Vec<String> = page
         .match_indices("style=")

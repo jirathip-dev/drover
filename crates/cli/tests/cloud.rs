@@ -4,15 +4,15 @@
 //! refusal and the 80 % warning, an idempotent ssh include, and the provider key never in argv or the log.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, read, Event};
-use herdsman::hosts::place;
-use herdsman::runner::{Out, Runner};
+use drover::config::Config;
+use drover::events::{append, read, Event};
+use drover::hosts::place;
+use drover::runner::{Out, Runner};
 use serde_json::json;
 use std::collections::BTreeMap;
 
 const NOW: u64 = 1_000_000;
-const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m cloud1 -- ";
+const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m cloud1 -- ";
 const WT: &str = "/home/me/.herdr/worktrees/sendmeter/issue-12";
 const KEY: &str = "sekrit-key-123";
 const RECIPE: &str = r#"key_env = "FAKE_CLOUD_KEY"
@@ -30,8 +30,9 @@ fn rc(verb: &str) -> String {
     format!("sh -c IFS= read -r K; export FAKE_CLOUD_KEY=\"$K\"; unset K; fakecloud {verb} cloud1")
 }
 
-/// mini (this host) and cloud1 (the fake recipe, $10 a month, 20 h a day, a `docker` hand tag); the key in the store.
-fn setup(name: &str) -> herdsman::Ctx {
+/// mini (this host) and cloud1 (the fake recipe, $10 a month, 20 h a day, a `docker` hand tag); #707: the key in
+/// `<config>/secrets/FAKE_CLOUD_KEY`, 0600.
+fn setup(name: &str) -> drover::Ctx {
     let dir = tmpdir(name);
     std::fs::create_dir_all(&dir).unwrap();
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
@@ -41,6 +42,7 @@ budget_usd_month = 10\nmax_hours_day = 20\ntags = [\"docker\"]\n";
     let c = ctx(&dir, &cfg);
     std::fs::create_dir_all(c.config.with_file_name("recipes")).unwrap();
     std::fs::write(c.config.with_file_name("recipes/fake.toml"), RECIPE).unwrap();
+    secret_file(&c, "FAKE_CLOUD_KEY", KEY, 0o600);
     let st = c.state.parent().unwrap();
     std::fs::create_dir_all(st).unwrap();
     let cache = json!({
@@ -52,20 +54,17 @@ budget_usd_month = 10\nmax_hours_day = 20\ntags = [\"docker\"]\n";
     c
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str) {
     append(
         &c.state,
-        &Event::new(ts, "herdsman", None, kind, json!({"host": "cloud1"})),
+        &Event::new(ts, "drover", None, kind, json!({"host": "cloud1"})),
     )
     .unwrap();
 }
 
-/// #255: replies that make cloud1 pass its health look on start: herdr, git over HTTPS, the logins, herdsman.
 fn healthy(f: Fake) -> Fake {
     let gh = "HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: 2099-01-01 00:00:00 UTC\n\n[]";
-    f.stored("herdsman/all/FAKE_CLOUD_KEY", KEY)
-        .reply("herdr --machine cloud1 agent list", NO_AGENTS)
-        .reply(&format!("{SSH}'sh' '-c' 'PATH="), "version: 0.9.5\nversion: 0.9.5\n")
+    f.reply(&format!("{SSH}'sh' '-c' 'PATH="), "version: 0.9.5\nversion: 0.9.5\n")
         .reply(&format!("{SSH}'gh' 'api' '-i'"), gh)
         .reply(&format!("{SSH}'sh' '-c' 'p=$(pgrep"), "")
         .reply(&format!("{SSH}'git' 'ls-remote'"), "abc\tHEAD\n")
@@ -75,22 +74,21 @@ fn healthy(f: Fake) -> Fake {
         )
         .reply("herdr --machine cloud1 pane read w5:p1", "gh:0\nclaude:0\nhs:done\n")
         .reply(
-            &format!("{SSH}'/opt/herdsman/bin/herdsman' '--version'"),
-            &format!("herdsman {}\n", herdsman::VERSION),
+            &format!("{SSH}'/opt/drover/bin/drover' '--version'"),
+            &format!("drover {}\n", drover::VERSION),
         )
 }
 
 /// mini at load/cpu `mini`; cloud1 reachable, idle, healthy, and its recipe answering.
 fn fake(mini: f64) -> Fake {
     healthy(Fake::default())
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr --machine cloud1 agent list", NO_AGENTS)
+        .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n vm.loadavg", &format!("{{ {} 1 1 }}", mini * 4.0))
         .reply("sysctl -n hw.ncpu", "4")
         .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "0.4 1 1 1/9 42")
         .reply(&format!("{SSH}'nproc'"), "4")
         .reply(
-            &format!("{SSH}'/opt/herdsman/bin/herdsman' 'profiles' 'sync' '--profile'"),
+            &format!("{SSH}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile'"),
             "",
         )
         .reply(&rc("start"), "")
@@ -99,10 +97,17 @@ fn fake(mini: f64) -> Fake {
         .reply(&rc("stop"), "")
 }
 
-/// Where a lane on #12 goes: the host's name, or the refusal (no start: `place` only picks).
-fn placed(c: &herdsman::Ctx, r: &Fake, force: Option<&str>) -> Result<String, String> {
+fn placed(c: &drover::Ctx, r: &Fake, force: Option<&str>) -> Result<String, String> {
     let cfg = Config::load(&c.config).unwrap();
-    match place(c, &cfg, r, &read(&c.state).unwrap(), ("sendmeter", 12, "impl"), force) {
+    let sh = FakeShed::new();
+    match place(
+        c,
+        &cfg,
+        &sh.on(r),
+        &read(&c.state).unwrap(),
+        ("sendmeter", 12, "impl"),
+        force,
+    ) {
         Ok(p) => {
             let p = p.unwrap();
             p.refusal
@@ -112,9 +117,7 @@ fn placed(c: &herdsman::Ctx, r: &Fake, force: Option<&str>) -> Result<String, St
     }
 }
 
-/// A fresh lane on cloud1 answers every step.
 fn spawn_fake() -> Fake {
-    let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
     fake(0.1)
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
         .reply(
@@ -123,20 +126,32 @@ fn spawn_fake() -> Fake {
         )
         .reply(&format!("{SSH}'git' '-C'"), "")
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
-        .reply("herdr --machine cloud1 worktree create", ws)
-        .reply(
-            "herdr --machine cloud1 pane list --workspace w9",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr --machine cloud1 pane run w9:p1 export", "{}")
-        .reply("herdr --machine cloud1 agent start sendmeter-impl-12", "{}")
-        .reply("herdr --machine cloud1 agent wait sendmeter-impl-12", "{}")
+        .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
+        .reply(&format!("{SSH}'rm' '-f'"), "")
+}
+
+fn on_cloud<'a>(f: &'a Fake, sh: &'a FakeShed) -> OverSsh<'a> {
+    OverSsh {
+        f,
+        hosts: vec![("cloud1", sh)],
+    }
+}
+
+fn shed_call_at(r: &Fake, method: &str) -> Option<usize> {
+    let calls = r.calls.borrow();
+    let at = calls.iter().enumerate().filter(|(_, c)| c.contains("'shed' 'connect'"));
+    let inputs = r.inputs.borrow();
+    let sent = inputs.iter().filter(|(c, _)| c.contains("'shed' 'connect'"));
+    let want = format!("\"method\":\"{method}\"");
+    at.zip(sent).find(|(_, (_, i))| i.contains(&want)).map(|((n, _), _)| n)
 }
 
 #[test]
 fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     let c = setup("cloud-start");
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let (sh, cloud) = (FakeShed::new(), FakeShed::new());
+    sh.attach(&c);
     run(
         &c,
         &Fake::default(),
@@ -144,15 +159,22 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     );
     // A dry run never starts it.
     let r = spawn_fake();
-    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--dry-run"]);
+    let (code, out) = run(
+        &c,
+        &on_cloud(&r, &cloud),
+        &["spawn", "sendmeter", "12", "impl", "--dry-run"],
+    );
     assert!(!r.called(&rc("start")), "{code} {out}");
+    assert!(cloud.methods().is_empty(), "{:?}", cloud.methods());
     let r = spawn_fake();
-    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl"]);
+    let (code, out) = run(&c, &on_cloud(&r, &cloud), &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let i = |p: &str| r.index(p).unwrap_or_else(|| panic!("no {p}: {:?}", r.calls.borrow()));
     // #635: `status` first (an empty one would `create`), then `start`, then `address`.
     assert!(i(&rc("status")) < i(&rc("start")) && i(&rc("start")) < i(&rc("address")));
-    assert!(i(&rc("address")) < i("herdr --machine cloud1 worktree create"));
+    let started = shed_call_at(&r, "run").unwrap_or_else(|| panic!("no run: {:?}", r.calls.borrow()));
+    assert!(i(&rc("address")) < started);
+    assert!(cloud.called("run", "sendmeter-impl-12") && sh.all("run").is_empty());
     let inc = std::fs::read_to_string(c.home.join(".ssh/config.d/herdsman")).unwrap();
     assert!(
         inc.contains("Host cloud1\n  HostName 10.0.0.7\n  User ubuntu\n  Port 2222\n"),
@@ -171,7 +193,8 @@ fn a_lane_only_the_cloud_fits_starts_it_refreshes_its_address_then_spawns() {
     assert_eq!(s.str("host"), Some("cloud1"));
     // #256: why it went there, and the lane hook's host.
     assert_eq!(s.str("why"), Some("needs docker: no local host has it"));
-    assert!(r.calls.borrow().iter().any(|c| c.contains("HERDSMAN_HOST='cloud1'")));
+    let sent = cloud.sent("sendmeter-impl-12");
+    assert!(sent.iter().any(|c| c.contains("DROVER_HOST='cloud1'")), "{sent:?}");
     // #646: its first use there clones lean: the integration branch only, `wip/*` never fetched.
     let clone: Vec<_> = (r.calls.borrow().iter())
         .filter(|c| c.contains("git clone"))
@@ -189,11 +212,11 @@ fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enou
     // mini admits: mini (cloud1 is stopped and never looked at over SSH).
     let r = fake(0.1);
     assert_eq!(placed(&c, &r, None).as_deref(), Ok("mini"));
-    assert!(!r.called("herdr --machine cloud1"), "{:?}", r.calls.borrow());
+    assert!(!r.called(SSH), "{:?}", r.calls.borrow());
     // mini held: its refusal until it has been held 10 minutes, then the stopped cloud host.
     let e = placed(&c, &fake(3.0), None).unwrap_err();
     assert!(e.starts_with("HOST_BUSY: mini"), "{e}");
-    let later = herdsman::Ctx {
+    let later = drover::Ctx {
         now: NOW + 601,
         ..c.clone()
     };
@@ -205,7 +228,7 @@ fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enou
     assert_eq!(placed(&later, &fake(0.1), None).as_deref(), Ok("mini"));
     assert!(!c.state.with_file_name("held-since").exists());
     let e = placed(
-        &herdsman::Ctx {
+        &drover::Ctx {
             now: NOW + 700,
             ..c.clone()
         },
@@ -216,7 +239,7 @@ fn a_stopped_cloud_host_takes_overflow_only_after_the_locals_were_held_long_enou
     assert!(e.starts_with("HOST_BUSY: mini"), "{e}");
     // A mark left hours ago with no placement since is stale: the first busy moment after it starts the clock over.
     let e = placed(
-        &herdsman::Ctx {
+        &drover::Ctx {
             now: NOW + 5 * 3600,
             ..c
         },
@@ -234,9 +257,17 @@ fn a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked() {
     let c = setup("cloud-running-overflow");
     ev(&c, NOW - 100, "cloud-start");
     ev(&c, NOW - 90, "cloud-up");
-    let pick = |c: &herdsman::Ctx, r: &Fake| {
+    let (sh, cloud) = (FakeShed::new(), FakeShed::new());
+    let pick = |c: &drover::Ctx, r: &Fake| {
         let cfg = Config::load(&c.config).unwrap();
-        let p = place(c, &cfg, r, &read(&c.state).unwrap(), ("sendmeter", 12, "impl"), None);
+        let p = place(
+            c,
+            &cfg,
+            &sh.on(&on_cloud(r, &cloud)),
+            &read(&c.state).unwrap(),
+            ("sendmeter", 12, "impl"),
+            None,
+        );
         let p = p.unwrap().unwrap();
         (p.name, p.refusal.map(|r| r.0), p.why)
     };
@@ -244,7 +275,7 @@ fn a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked() {
     assert_eq!(pick(&c, &fake(2.0)), ("mini".into(), None, None));
     // mini held: its refusal until it has been held 10 minutes, then cloud1.
     assert_eq!(pick(&c, &fake(3.0)).1, Some("HOST_BUSY"));
-    let later = herdsman::Ctx {
+    let later = drover::Ctx {
         now: NOW + 601,
         ..c.clone()
     };
@@ -261,7 +292,7 @@ fn a_running_cloud_host_waits_behind_the_macs_and_says_why_it_was_picked() {
 }
 
 /// cloud1 running since 3000 s ago with a lane whose worktree is 1 commit ahead.
-fn running(name: &str) -> (herdsman::Ctx, Config) {
+fn running(name: &str) -> (drover::Ctx, Config) {
     let c = setup(name);
     ev(&c, NOW - 3000, "cloud-start");
     ev(&c, NOW - 2990, "cloud-up");
@@ -282,13 +313,13 @@ fn lane_fake() -> Fake {
 
 /// `check`'s cloud step: its output lines.
 fn tick(
-    c: &herdsman::Ctx,
+    c: &drover::Ctx,
     cfg: &Config,
     r: &dyn Runner,
     live: &BTreeMap<String, Option<Vec<serde_json::Value>>>,
 ) -> Vec<String> {
     let mut out = vec![];
-    herdsman::cloud::tick(c, cfg, r, live, &mut out).unwrap();
+    drover::cloud::tick(c, cfg, r, live, &mut out).unwrap();
     String::from_utf8(out).unwrap().lines().map(String::from).collect()
 }
 
@@ -312,12 +343,12 @@ fn an_idle_cloud_host_saves_each_lane_to_wip_then_stops() {
     let events = read(&c.state).unwrap();
     let stop = events.iter().rfind(|e| e.kind == "cloud-stop").unwrap();
     assert_eq!(stop.data["wip"], json!(["wip/cloud1-sendmeter-impl-12"]));
-    assert_eq!(herdsman::cloud::state(&events, "cloud1"), "stopped");
+    assert_eq!(drover::cloud::state(&events, "cloud1"), "stopped");
     // A live agent there, or a recent one, keeps it running.
     let (c, cfg) = running("cloud-busy");
     let live = BTreeMap::from([("cloud1".to_string(), Some(vec![json!({"name": "x"})]))]);
     assert!(tick(&c, &cfg, &lane_fake(), &live).is_empty());
-    let soon = herdsman::Ctx { now: NOW - 1000, ..c };
+    let soon = drover::Ctx { now: NOW - 1000, ..c };
     assert!(tick(&soon, &cfg, &lane_fake(), &idle()).is_empty());
 }
 
@@ -334,7 +365,7 @@ fn a_failed_wip_push_aborts_the_stop() {
     assert!(!r.called(&rc("stop")), "{:?}", r.calls.borrow());
     let events = read(&c.state).unwrap();
     assert!(events.iter().any(|e| e.kind == "cloud-abort"));
-    assert_eq!(herdsman::cloud::state(&events, "cloud1"), "running");
+    assert_eq!(drover::cloud::state(&events, "cloud1"), "running");
 }
 
 #[test]
@@ -347,6 +378,7 @@ fn an_unreachable_host_aborts_the_stop_and_destroy_saves_first() {
     assert!(!r.called(&rc("destroy")), "{:?}", r.calls.borrow());
     let abort = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .rfind(|e| e.kind == "cloud-abort")
         .unwrap();
@@ -356,7 +388,7 @@ fn an_unreachable_host_aborts_the_stop_and_destroy_saves_first() {
     assert!(!tick_r.called(&rc("stop")), "{:?}", tick_r.calls.borrow());
     let events = read(&c.state).unwrap();
     assert_eq!(events.iter().filter(|e| e.kind == "cloud-abort").count(), 2);
-    assert_eq!(herdsman::cloud::state(&events, "cloud1"), "running");
+    assert_eq!(drover::cloud::state(&events, "cloud1"), "running");
     // Reachable: the wip push, then `destroy`.
     let r = lane_fake().reply(&rc("destroy"), "");
     let (code, out) = run(&c, &r, &["hosts", "destroy", "cloud1"]);
@@ -371,9 +403,9 @@ fn an_unreachable_host_aborts_the_stop_and_destroy_saves_first() {
 
 #[test]
 fn the_budget_warns_at_80_percent_and_refuses_when_used_up() {
-    let card = |c: &herdsman::Ctx| {
+    let card = |c: &drover::Ctx| {
         let cfg = Config::load(&c.config).unwrap();
-        herdsman::cloud::card(c, &cfg, &read(&c.state).unwrap(), ("cloud1", 0)).unwrap()
+        drover::cloud::card(c, &cfg, &read(&c.state).unwrap(), ("cloud1", 0)).unwrap()
     };
     // 2 h at $1/h: green, stopped.
     let c = setup("cloud-budget");
@@ -417,7 +449,7 @@ fn the_budget_warns_at_80_percent_and_refuses_when_used_up() {
     let out = tick(&c, &cfg, &fake(0.1), &BTreeMap::from([("cloud1".into(), Some(vec![]))]));
     assert!(out[0].contains("stopped (spent $11.00 of $10 this month)"), "{out:?}");
     // Last month's spend does not count: on 10 Feb 1970, a span from 31 Jan 02:13 to 1 Feb 01:00 counts 1 h.
-    let c = herdsman::Ctx {
+    let c = drover::Ctx {
         now: 40 * 86_400,
         ..setup("cloud-budget-month")
     };
@@ -434,9 +466,9 @@ fn the_ssh_include_rewrite_is_idempotent_and_keeps_other_blocks() {
     std::fs::create_dir_all(&dir).unwrap();
     let other = "# herdsman other\nHost other\n  HostName 1.2.3.4\n# end other\n";
     std::fs::write(dir.join("herdsman"), other).unwrap();
-    herdsman::cloud::start(&c, &cfg, &fake(0.1), "cloud1").unwrap();
+    drover::cloud::start(&c, &cfg, &fake(0.1), "cloud1").unwrap();
     let once = std::fs::read_to_string(dir.join("herdsman")).unwrap();
-    herdsman::cloud::start(&c, &cfg, &fake(0.1), "cloud1").unwrap();
+    drover::cloud::start(&c, &cfg, &fake(0.1), "cloud1").unwrap();
     assert_eq!(std::fs::read_to_string(dir.join("herdsman")).unwrap(), once);
     assert!(
         once.starts_with(other) && once.matches("Host cloud1").count() == 1,
@@ -456,7 +488,7 @@ fn the_ssh_include_rewrite_is_idempotent_and_keeps_other_blocks() {
             },
         ),
     );
-    herdsman::cloud::start(&c, &cfg, &r, "cloud1").unwrap();
+    drover::cloud::start(&c, &cfg, &r, "cloud1").unwrap();
     let now = std::fs::read_to_string(dir.join("herdsman")).unwrap();
     assert!(now.contains("HostName 10.0.0.9") && !now.contains("10.0.0.7"), "{now}");
     let known = std::fs::read_to_string(c.home.join(".ssh/herdsman/cloud1.known")).unwrap();
@@ -471,7 +503,7 @@ fn a_lost_end_marker_keeps_later_blocks_and_a_bad_address_is_refused() {
     std::fs::create_dir_all(&dir).unwrap();
     let other = "# herdsman other\nHost other\n# end other\n";
     std::fs::write(dir.join("herdsman"), format!("# herdsman cloud1\nHost cloud1\n{other}")).unwrap();
-    herdsman::cloud::start(&c, &cfg, &fake(0.1), "cloud1").unwrap();
+    drover::cloud::start(&c, &cfg, &fake(0.1), "cloud1").unwrap();
     let now = std::fs::read_to_string(dir.join("herdsman")).unwrap();
     assert!(
         now.starts_with(other) && now.matches("Host cloud1").count() == 1,
@@ -483,7 +515,7 @@ fn a_lost_end_marker_keeps_later_blocks_and_a_bad_address_is_refused() {
         0,
         "ubuntu@10.0.0.9 22 ProxyCommand sh\nssh-ed25519 BBBB\n",
     );
-    let e = herdsman::cloud::start(&c, &cfg, &r, "cloud1").unwrap_err();
+    let e = drover::cloud::start(&c, &cfg, &r, "cloud1").unwrap_err();
     assert!(format!("{e:#}").contains("not `user@host port`"), "{e:#}");
     assert_eq!(std::fs::read_to_string(dir.join("herdsman")).unwrap(), now);
 }
@@ -499,9 +531,6 @@ impl Runner for Stdin {
         self.1.borrow_mut().push(input.into());
         self.0.run(prog, args)
     }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.0.secret(svc)
-    }
 }
 
 #[test]
@@ -511,10 +540,10 @@ fn the_provider_key_never_reaches_argv_or_the_log() {
         lane_fake().once_err(&rc("stop"), 1, &format!("bad key {KEY}")),
         Shared::default(),
     );
-    let e = herdsman::cloud::stop(&c, &cfg, &r, "cloud1", "stop", "test").unwrap_err();
+    let e = drover::cloud::stop(&c, &cfg, &r, "cloud1", "stop", "test").unwrap_err();
     assert!(format!("{e:#}").contains("bad key •••"), "{e:#}");
-    herdsman::cloud::stop(&c, &cfg, &r, "cloud1", "stop", "test").unwrap();
-    herdsman::cloud::start(&c, &cfg, &r, "cloud1").unwrap();
+    drover::cloud::stop(&c, &cfg, &r, "cloud1", "stop", "test").unwrap();
+    drover::cloud::start(&c, &cfg, &r, "cloud1").unwrap();
     assert!(
         r.1.borrow().iter().any(|i| i == &format!("{KEY}\n")),
         "the key goes on stdin"
@@ -524,27 +553,54 @@ fn the_provider_key_never_reaches_argv_or_the_log() {
         "{:?}",
         r.0.calls.borrow()
     );
-    let log = herdsman::events::jsonl(&c.state).unwrap();
+    let log = drover::events::jsonl(&c.state).unwrap();
     assert!(!log.contains(KEY) && log.contains("cloud-up"), "{log}");
+}
+
+#[test]
+fn a_recipe_without_key_env_runs_its_command_with_no_key() {
+    let (c, cfg) = running("cloud-nokey");
+    let recipe = c.config.with_file_name("recipes/fake.toml");
+    std::fs::write(&recipe, RECIPE.replace("key_env = \"FAKE_CLOUD_KEY\"\n", "")).unwrap();
+    std::fs::remove_file(c.config.with_file_name("secrets/FAKE_CLOUD_KEY")).unwrap();
+    let r = Stdin(lane_fake().reply("sh -c fakecloud stop cloud1", ""), Shared::default());
+    drover::cloud::stop(&c, &cfg, &r, "cloud1", "stop", "test").unwrap();
+    assert!(r.0.called("sh -c fakecloud stop cloud1"), "{:?}", r.0.calls.borrow());
+    assert!(
+        r.1.borrow().iter().all(String::is_empty),
+        "no key on stdin: {:?}",
+        r.1.borrow()
+    );
+    assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "cloud-stop"));
+}
+
+#[test]
+fn a_cloud_key_file_others_can_read_is_refused() {
+    let (c, cfg) = running("cloud-0644");
+    secret_file(&c, "FAKE_CLOUD_KEY", KEY, 0o644);
+    let r = Stdin(lane_fake(), Shared::default());
+    let e = drover::cloud::stop(&c, &cfg, &r, "cloud1", "stop", "test").unwrap_err();
+    assert!(format!("{e:#}").contains("REFUSED SECRET_FILE_OPEN"), "{e:#}");
+    assert!(!r.0.called("sh -c"), "nothing ran: {:?}", r.0.calls.borrow());
 }
 
 /// The start of the ssh line a bootstrap step's shell `cmd` runs as on cloud1.
 fn step(cmd: &str) -> String {
-    let s = format!("{}{cmd}", herdsman::cloud::SH).replace('\'', "'\\''");
+    let s = format!("{}{cmd}", drover::cloud::SH).replace('\'', "'\\''");
     format!("{SSH}'sh' '-c' '{s}")
 }
 
-/// cloud1 running, reachable, herdr 0.9.5 here and there; every tool there but gh (installed once) and herdsman
+/// cloud1 running, reachable, herdr 0.9.5 here and there; every tool there but gh (installed once) and drover
 /// (built once); claude logged in and gh `gh_in` (logged in or not).
 fn boot_fake(gh_in: bool) -> Fake {
     let ws = r#"{"result":{"root_pane":{"pane_id":"w7:p1"}}}"#;
     let mine = format!(
-        "[ \"$('/opt/herdsman/bin/herdsman' --version)\" = 'herdsman {}' ]",
-        herdsman::VERSION
+        "[ \"$('/opt/drover/bin/drover' --version)\" = 'drover {}' ]",
+        drover::VERSION
     );
     let f = Fake::default()
-        .stored("herdsman/all/FAKE_CLOUD_KEY", KEY)
         .reply("herdr status", "version: 0.9.5\nversion: 0.9.5\n")
+        .reply("herdr machine list --json", r#"[{"id": "c1", "label": "cloud1"}]"#)
         .reply(&format!("{SSH}'sh' '-c' 'uname -s"), "Linux\nx86_64\n/home/me\n")
         .reply(&step("herdr --version | grep -qx 'herdr 0.9.5'"), "")
         .once(&step("command -v gh"), 1, "")
@@ -575,14 +631,14 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_pan
     let (c, cfg) = running("cloud-boot");
     let r = boot_fake(false);
     let mut out = vec![];
-    let e = herdsman::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out).unwrap_err();
+    let e = drover::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out).unwrap_err();
     assert!(format!("{e:#}").contains("log in in pane w7:p1"), "{e:#}");
     let out = String::from_utf8(out).unwrap();
     assert!(
         out.contains("✓ git — there") && out.contains("✓ gh — installed"),
         "{out}"
     );
-    assert!(out.contains("✓ herdsman — installed"), "{out}");
+    assert!(out.contains("✓ drover — installed"), "{out}");
     let order = [
         "herdr --version",
         "command -v git",
@@ -593,9 +649,9 @@ fn bootstrap_installs_what_is_missing_step_by_step_and_opens_the_logins_in_a_pan
     let at: Vec<_> = order.iter().map(|s| r.index(&step(s)).unwrap()).collect();
     assert!(at.windows(2).all(|w| w[0] < w[1]), "{at:?}");
     assert!(!r.called(&step("apt_ git")) && !r.called("herdr machine add"));
-    let sha = env!("HERDSMAN_SHA");
+    let sha = env!("DROVER_SHA");
     let build = format!(
-        "cargo install --git https://github.com/jirathip-dev/herdsman --rev {sha} --locked --root '/opt/herdsman'"
+        "cargo install --git https://github.com/jirathip-dev/herdsman --rev {sha} --locked --root '/opt/drover'"
     );
     assert!(r.called(&step(&build)), "{:?}", r.calls.borrow());
     // claude is logged in: only gh's pane, the token read there without echo, never on a command line.
@@ -630,7 +686,7 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
     );
     let r = Stdin(r.0.reply(&step("gh auth setup-git"), ""), r.1);
     let mut out = vec![];
-    herdsman::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out).unwrap();
+    drover::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out).unwrap();
     let out = String::from_utf8(out).unwrap();
     assert!(
         out.contains("✓ git over https — installed") && out.contains("bootstrapped"),
@@ -652,10 +708,10 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
     assert!(!written.contains("[fleet") && !written.contains("SEKRIT"), "{written}");
     let conf = c.config.display().to_string();
     assert!(r.0.called(&step(&format!(
-        "test ! -e '{conf}' || '/opt/herdsman/bin/herdsman' profiles sync"
+        "test ! -e '{conf}' || '/opt/drover/bin/drover' profiles sync"
     ))));
     assert!(out.contains("✓ profiles sync — there"), "{out}");
-    let log = herdsman::events::jsonl(&c.state).unwrap();
+    let log = drover::events::jsonl(&c.state).unwrap();
     assert!(
         log.contains("host-bootstrap") && !log.contains("SEKRIT") && !log.contains(KEY),
         "{log}"
@@ -669,7 +725,7 @@ fn bootstrap_again_after_the_logins_sets_up_https_git_clones_and_syncs_without_s
 }
 
 /// #647: a fake cloud1 whose files are real: an ssh line naming its fleet.toml (`.1`, the path bootstrap uses there)
-/// runs in a real `sh` against `.2/fleet.toml`, its herdsman this build's.
+/// runs in a real `sh` against `.2/fleet.toml`, its drover this build's.
 struct Remote<'a>(&'a Fake, String, std::path::PathBuf);
 
 impl Runner for Remote<'_> {
@@ -680,11 +736,11 @@ impl Runner for Remote<'_> {
         let there = self.2.join("fleet.toml").display().to_string();
         let line = line
             .replace(&self.1, &there)
-            .replace("/opt/herdsman/bin/herdsman", env!("CARGO_BIN_EXE_herdsman"));
+            .replace("/opt/drover/bin/drover", env!("CARGO_BIN_EXE_drover"));
         let o = std::process::Command::new("sh")
             .args(["-c", &line])
             .env("HOME", &self.2)
-            .env("HERDSMAN_HOME", &self.2)
+            .env("DROVER_HOME", &self.2)
             .env("FLEET_CONFIG", &there)
             .env("FLEET_STATE", self.2.join("state/events.jsonl"))
             .env("FLEET_HERMES_PROFILES", self.2.join("hermes"))
@@ -694,9 +750,6 @@ impl Runner for Remote<'_> {
             stdout: String::from_utf8_lossy(&o.stdout).into(),
             stderr: String::from_utf8_lossy(&o.stderr).into(),
         })
-    }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.0.secret(svc)
     }
 }
 
@@ -737,7 +790,7 @@ fn bootstrap_repairs_an_old_bootstrap_fleet_toml_so_profiles_sync_passes_there()
     let o = r.run("ssh", &["cloud1".into(), sync.clone()]).unwrap();
     assert!(o.stderr.contains("account 'C' is not in [accounts]"), "{o:?}");
     let mut out = vec![];
-    let res = herdsman::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out);
+    let res = drover::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut out);
     let out = String::from_utf8(out).unwrap();
     assert!(res.is_ok(), "{res:?} {out}");
     assert!(out.contains("✓ profiles sync"), "{out}");
@@ -754,16 +807,16 @@ fn bootstrap_repairs_an_old_bootstrap_fleet_toml_so_profiles_sync_passes_there()
 #[test]
 fn a_failed_bootstrap_step_shows_its_command_exit_code_and_output_and_logs_them() {
     let (c, cfg) = running("cloud-boot-fail");
-    let err = "invalid config /home/me/.config/herdsman/fleet.toml: fleet.berth.role.conductor: account 'C' is not in [accounts]";
+    let err = "invalid config /home/me/.config/drover/fleet.toml: fleet.berth.role.orchestrator: account 'C' is not in [accounts]";
     let f = boot_again()
         .once_err(&step("test ! -e "), 1, &format!("warming up\n{err}\n"))
         .once_err(&step("test ! -e "), 1, &format!("warming up\n{err}\n"));
     let mut out = vec![];
-    let res = herdsman::cloud::bootstrap(&c, &cfg, &f, "cloud1", &mut out);
+    let res = drover::cloud::bootstrap(&c, &cfg, &f, "cloud1", &mut out);
     let out = String::from_utf8(out).unwrap();
     let shown = format!("{out}\n{:#}", res.unwrap_err());
     let cmd = format!(
-        "test ! -e '{}' || '/opt/herdsman/bin/herdsman' profiles sync",
+        "test ! -e '{}' || '/opt/drover/bin/drover' profiles sync",
         c.config.display()
     );
     assert!(shown.contains(&cmd) && shown.contains("exit 1"), "{shown}");
@@ -790,20 +843,20 @@ fn the_token_expiry_parses_and_warns_from_14_days() {
     let head = |d: &str| {
         format!("HTTP/2.0 200 OK\nGitHub-Authentication-Token-Expiration: {d}\n\n[{{\"full_name\":\"a/b\"}},{{\"full_name\":\"a/c\"}}]")
     };
-    let (card, warn) = herdsman::cloud::token(&head("2024-12-23 10:00:00 UTC"), now);
+    let (card, warn) = drover::cloud::token(&head("2024-12-23 10:00:00 UTC"), now);
     assert_eq!(card, "github: token · 2 repos · expires in 80d");
     assert_eq!(warn, None);
-    let (card, warn) = herdsman::cloud::token(&head("2024-10-18 00:00:00 +0000"), now);
+    let (card, warn) = drover::cloud::token(&head("2024-10-18 00:00:00 +0000"), now);
     assert!(card.ends_with("expires in 14d"), "{card}");
     assert!(warn.unwrap().starts_with("! github — token expires in 14d"));
-    let (_, warn) = herdsman::cloud::token(&head("2024-03-01 00:00:00 UTC"), now);
+    let (_, warn) = drover::cloud::token(&head("2024-03-01 00:00:00 UTC"), now);
     assert!(warn.unwrap().starts_with("! github — token expires in -217d"));
     assert_eq!(
-        herdsman::cloud::token("HTTP/2.0 200 OK\n\n[]", now).0,
+        drover::cloud::token("HTTP/2.0 200 OK\n\n[]", now).0,
         "github: token · 0 repos · no expiry"
     );
     // gh rejects an expired or revoked token: no headers at all, and the host turns red.
-    let (card, warn) = herdsman::cloud::token("", now);
+    let (card, warn) = drover::cloud::token("", now);
     assert_eq!(card, "github: unreadable");
     assert!(warn.unwrap().starts_with("✗ github — gh there has no working token"));
 }
@@ -814,14 +867,119 @@ fn a_snapshot_needs_a_green_health_check_first() {
     let recipe = RECIPE.replace("[rate", "snapshot = \"fakecloud snapshot {name}\"\n[rate");
     std::fs::write(c.config.with_file_name("recipes/fake.toml"), recipe).unwrap();
     let r = Fake::default().reply(&rc("snapshot"), "");
-    let e = herdsman::cloud::snapshot(&c, &cfg, &r, "cloud1").unwrap_err();
+    let e = drover::cloud::snapshot(&c, &cfg, &r, "cloud1").unwrap_err();
     assert!(format!("{e:#}").contains("cloud1 is not healthy"), "{e:#}");
     assert!(!r.called(&rc("snapshot")));
     let r = healthy(Fake::default()).reply(&rc("snapshot"), "");
-    herdsman::cloud::snapshot(&c, &cfg, &r, "cloud1").unwrap();
-    assert!(r.called(&rc("snapshot")) && herdsman::events::jsonl(&c.state).unwrap().contains("cloud-snapshot"));
+    let (sh, cloud) = (FakeShed::new(), FakeShed::new());
+    drover::cloud::snapshot(&c, &cfg, &sh.on(&on_cloud(&r, &cloud)), "cloud1").unwrap();
+    assert!(cloud.methods().contains(&"ls".to_string()), "its lanes were looked at");
+    assert!(r.called(&rc("snapshot")) && drover::events::jsonl(&c.state).unwrap().contains("cloud-snapshot"));
     assert!(
-        herdsman::hosts::cached(&c)["cloud1"].github.starts_with("github:"),
+        drover::hosts::cached(&c)["cloud1"].github.starts_with("github:"),
         "the look reads the token too"
     );
+}
+
+/// #641: herdr's saved machines as `herdr machine list --json` shows them; `machine add`/`remove` change the list.
+struct Machines(Fake, Shared<Vec<(String, String)>>);
+
+impl Runner for Machines {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
+        let a: Vec<&str> = args.iter().map(String::as_str).collect();
+        let mut list = self.1.borrow_mut();
+        let ok = |s: String| {
+            Ok(Out {
+                code: 0,
+                stdout: s,
+                stderr: String::new(),
+            })
+        };
+        match (prog, &a[..]) {
+            ("herdr", ["machine", "list", "--json"]) => {
+                let v: Vec<_> = list
+                    .iter()
+                    .map(|(id, l)| json!({"id": id, "label": l, "target": l}))
+                    .collect();
+                ok(json!(v).to_string())
+            }
+            ("herdr", ["machine", "add", _, "--label", l]) => {
+                let id = format!("new{}", list.len());
+                list.push((id, (*l).into()));
+                drop(list);
+                self.0.run(prog, args)
+            }
+            ("herdr", ["machine", "remove", id]) => {
+                list.retain(|p| p.0 != *id);
+                drop(list);
+                ok(String::new())
+            }
+            _ => {
+                drop(list);
+                self.0.run(prog, args)
+            }
+        }
+    }
+    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
+        self.0.secret(svc)
+    }
+}
+
+fn machines(f: Fake, ids: &[&str]) -> Machines {
+    let list = ids.iter().map(|id| ((*id).into(), "cloud1".into())).collect();
+    let s = Shared::default();
+    *s.borrow_mut() = list;
+    Machines(f, s)
+}
+
+#[test]
+fn bootstrap_refuses_an_ambiguous_machine_label_and_opens_no_pane_anywhere() {
+    let (c, _) = running("cloud-ambiguous");
+    let r = machines(boot_fake(false), &["aaa1", "bbb2"]);
+    let (code, out) = run(&c, &r, &["hosts", "bootstrap", "cloud1"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(
+        out.contains("REFUSED HOST_AMBIGUOUS") && out.contains("aaa1") && out.contains("bbb2"),
+        "{out}"
+    );
+    let calls = r.0.calls.borrow();
+    assert!(
+        !calls
+            .iter()
+            .any(|c| c.contains("workspace create") || c.contains("pane run")),
+        "{calls:?}"
+    );
+    assert!(
+        !calls.iter().any(|c| c.starts_with("ssh") || c.contains("machine add")),
+        "no step ran: {calls:?}"
+    );
+}
+
+#[test]
+fn a_setup_pane_for_a_host_with_no_machine_profile_is_refused_never_opened_here() {
+    let (c, _) = running("cloud-unknown");
+    let r = machines(boot_fake(false), &[]);
+    let (code, out) = run(&c, &r, &["setup", "cloud1", "gh"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("REFUSED HOST_UNKNOWN"), "{out}");
+    assert!(
+        !r.0.calls.borrow().iter().any(|c| c.contains("workspace create")),
+        "{:?}",
+        r.0.calls.borrow()
+    );
+}
+
+#[test]
+fn recreating_a_cloud_host_replaces_its_machine_profile() {
+    let (c, cfg) = running("cloud-recreate");
+    // A new box under the same name: no herdr there yet, so bootstrap's herdr step runs `machine add` again.
+    let f = boot_fake(false).once(&step("herdr --version | grep -qx 'herdr 0.9.5'"), 1, "");
+    let r = machines(f.reply("herdr machine add cloud1 --label cloud1", ""), &["old1"]);
+    let e = drover::cloud::bootstrap(&c, &cfg, &r, "cloud1", &mut vec![]).unwrap_err();
+    assert!(format!("{e:#}").contains("log in in pane w7:p1"), "{e:#}");
+    let list = r.1.borrow();
+    assert_eq!(list.len(), 1, "exactly one profile for cloud1: {list:?}");
+    assert_ne!(list[0].0, "old1", "the old profile is gone");
+    let log = drover::events::jsonl(&c.state).unwrap();
+    assert!(log.contains("host-machine-replaced") && log.contains("old1"), "{log}");
 }

@@ -8,17 +8,17 @@ use std::{io::Write, path::PathBuf};
 
 pub const QUEUED: &str = "queued for the main host: drive delivers it within 1 min\n";
 
-/// A lane on another host (spawn exports `HERDSMAN_OUTBOX`): its `HERDSMAN_LANE`.
+/// A lane on another host (spawn exports `DROVER_OUTBOX`): its `DROVER_LANE`.
 pub fn lane() -> Option<String> {
-    std::env::var_os("HERDSMAN_OUTBOX")?;
-    std::env::var("HERDSMAN_LANE").ok().filter(|l| !l.is_empty())
+    std::env::var_os("DROVER_OUTBOX")?;
+    std::env::var("DROVER_LANE").ok().filter(|l| !l.is_empty())
 }
 
 /// The lane's side: `args` as one line (`args`, `lane`, `ts` in ms) in the worktree holding the cwd.
 pub fn queue(lane: &str, args: &[String]) -> Result<PathBuf> {
     let cwd = std::env::current_dir()?;
     let wt = cwd.ancestors().find(|d| d.join(".git").exists());
-    let p = wt.context("no worktree holds the cwd")?.join(".herdsman/outbox.jsonl");
+    let p = wt.context("no worktree holds the cwd")?.join(".drover/outbox.jsonl");
     std::fs::create_dir_all(p.parent().context("no dir")?)?;
     let ts = std::time::UNIX_EPOCH.elapsed()?.as_millis();
     let mut f = std::fs::File::options().create(true).append(true).open(&p)?;
@@ -26,7 +26,7 @@ pub fn queue(lane: &str, args: &[String]) -> Result<PathBuf> {
     Ok(p)
 }
 
-/// Each remote lane of a live issue: its spawn, `HERDSMAN_LANE` and outbox path.
+/// Each remote lane of a live issue: its spawn, `DROVER_LANE` and outbox path.
 fn boxes(events: &[Event]) -> Vec<(&Event, String, String)> {
     let live = fold(events).into_values().filter(|s| !s.done());
     let spawns = live.flat_map(|s| s.lanes.into_values());
@@ -34,7 +34,7 @@ fn boxes(events: &[Event]) -> Vec<(&Event, String, String)> {
     let remote = remote.filter(|sp| sp.str("machine").is_some());
     let lane = |sp: &Event| Some(format!("{}:{}:{}", sp.fleet, sp.issue?, sp.str("role")?));
     remote
-        .filter_map(|sp| Some((sp, lane(sp)?, format!("{}/.herdsman/outbox.jsonl", sp.str("worktree")?))))
+        .filter_map(|sp| Some((sp, lane(sp)?, format!("{}/.drover/outbox.jsonl", sp.str("worktree")?))))
         .collect()
 }
 
@@ -89,17 +89,17 @@ fn apply(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, sp: &Event, lane: &str,
         writeln!(out, "outbox {lane}: refused: {w}")?;
     } else {
         writeln!(out, "outbox {lane}: {}", args[0])?;
-        std::env::set_var("HERDSMAN_LANE", lane); // drive runs with no `HERDSMAN_LANE` of its own
+        std::env::set_var("DROVER_LANE", lane); // drive runs with no `DROVER_LANE` of its own
         let res = crate::cli::run(&args.iter().map(String::as_str).collect::<Vec<_>>(), ctx, r, out);
-        std::env::remove_var("HERDSMAN_LANE");
+        std::env::remove_var("DROVER_LANE");
         d["code"] = json!(res.as_ref().ok());
         d["error"] = json!(res.err().map(|e| format!("{e:#}")));
     }
     append(&ctx.state, &Event::new(ctx.now, &sp.fleet, sp.issue, "outbox", d))
 }
 
-/// `check`'s side: each live remote lane whose outbox holds a line drive has not delivered in 5 min, with its oldest ts.
-pub fn stale(r: &dyn Runner, events: &[Event], now: u64) -> Vec<(Event, String, u64)> {
+/// `check`'s side: each live remote lane whose outbox holds a line drive has not delivered in `after` seconds, with its oldest ts.
+pub fn stale(r: &dyn Runner, events: &[Event], (now, after): (u64, u64)) -> Vec<(Event, String, u64)> {
     let sh = "cat \"$1\" \"$1.draining\" 2>/dev/null; exit 0";
     let oldest = |sp: &Event, p: &str| {
         let text = crate::runner::ok(&On::of(r, Some(sp)), "sh", &crate::runner::argv(&["-c", sh, "sh", p]));
@@ -108,7 +108,7 @@ pub fn stale(r: &dyn Runner, events: &[Event], now: u64) -> Vec<(Event, String, 
             .lines()
             .filter_map(|l| serde_json::from_str::<Value>(l).ok()?["ts"].as_u64())
             .min();
-        ts.filter(|ts| now.saturating_mul(1000).saturating_sub(*ts) > 5 * 60 * 1000)
+        ts.filter(|ts| now.saturating_mul(1000).saturating_sub(*ts) > after * 1000)
     };
     boxes(events)
         .into_iter()

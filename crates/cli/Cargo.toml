@@ -1,23 +1,22 @@
 [package]
-name = "herdsman"
+name = "drover"
 description = "Small CLI that owns fleet state, gates and harness toggles over herdr"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-# The tests compare against the sha core embeds (`HERDSMAN_SHA`); the same script sets it here.
+# The tests compare against the sha core embeds (`DROVER_SHA`); the same script sets it here.
 build = "../core/build.rs"
 
 [dependencies]
-herdsman-core.workspace = true
-herdsman-server.workspace = true
-herdsman-service.workspace = true
+drover-core.workspace = true
+drover-server.workspace = true
+drover-service.workspace = true
 
 [dev-dependencies]
 aes-gcm.workspace = true
 anyhow.workspace = true
 base64.workspace = true
 hkdf.workspace = true
-keyring.workspace = true
 p256.workspace = true
 rusqlite.workspace = true
 serde.workspace = true

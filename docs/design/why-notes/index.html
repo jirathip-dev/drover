@@ -47,10 +47,10 @@
 <body>
 <main>
 <h1>Why notes: each lane commit linked to its reasoning</h1>
-<p class="sub">Design for herdsman#677 · branch <code>issue-677</code> · design lane, 2026-11-08</p>
+<p class="sub">Design for drover#677 · branch <code>issue-677</code> · design lane, 2026-11-08</p>
 <div class="chips"><span>git notes <code>refs/notes/why</code></span><span>no new dependency</span><span>no old-board UI file</span><span>src/ estimate <b>+215</b> (issue guess +150)</span></div>
 
-<p>A lane writes a short <code>why.md</code>. On <code>herdsman turn done</code> herdsman checks it and attaches it to the pushed head as a git note. The note is also copied into the PR body and logged as a <code>why</code> event. Briefs, reviewers and <code>herdsman why &lt;file:line&gt;</code> read it back. Only herdsman writes notes, and it writes them from the main host's clone, never from a lane.</p>
+<p>A lane writes a short <code>why.md</code>. On <code>drover turn done</code> drover checks it and attaches it to the pushed head as a git note. The note is also copied into the PR body and logged as a <code>why</code> event. Briefs, reviewers and <code>drover why &lt;file:line&gt;</code> read it back. Only drover writes notes, and it writes them from the main host's clone, never from a lane.</p>
 
 <h2>1 · The note form</h2>
 <div class="grid">
@@ -84,7 +84,7 @@ Owner: wip saves stop carrying build output; huge files are listed, not pushed</
 <tr><th>form</th><th>accepted when</th></tr>
 <tr><td><code>"quoted text"</code></td><td>The quote appears verbatim in the issue spec cached at spawn plus its <code>## Amendments</code>, comparing with whitespace collapsed and backticks kept. At least 12 chars.</td></tr>
 <tr><td><code>q&lt;id&gt;</code></td><td>The id is an ask on this fleet that is answered (a <code>decision</code> event, owner or <code>by: default</code>).</td></tr>
-<tr><td><code>path:line</code></td><td>The path is in the head commit's tree and the line is within its length. <code>.herdsman/rules.md:7</code> works too.</td></tr>
+<tr><td><code>path:line</code></td><td>The path is in the head commit's tree and the line is within its length. <code>.drover/rules.md:7</code> works too.</td></tr>
 </table>
 <p>A line can carry more than one citation. One valid citation is enough.</p>
 
@@ -100,20 +100,20 @@ Owner: wip saves stop carrying build output; huge files are listed, not pushed</
 
 <h2>2 · Writing: <code>turn done</code> → note on origin</h2>
 <ol class="flow">
-<li><b>Lane side.</b> <code>herdsman turn done</code> reads <code>why.md</code> and runs the form and secret checks right away. These are pure checks, so a remote lane gets the refusal before its line goes to the outbox (#389).</li>
-<li><b>Main host</b> (local lanes directly; remote lanes when drive delivers the outbox). This applies only when the turn is <code>done</code> and the PR head is a <b>new push</b>, using the condition <code>TURN_NUDGE</code> already uses. Otherwise nothing note-related happens. herdsman reads <code>why.md</code> through the lane's host (<code>hosts::On</code>, so ssh for a remote lane) and runs the full check, citations included.</li>
+<li><b>Lane side.</b> <code>drover turn done</code> reads <code>why.md</code> and runs the form and secret checks right away. These are pure checks, so a remote lane gets the refusal before its line goes to the outbox (#389).</li>
+<li><b>Main host</b> (local lanes directly; remote lanes when drive delivers the outbox). This applies only when the turn is <code>done</code> and the PR head is a <b>new push</b>, using the condition <code>TURN_NUDGE</code> already uses. Otherwise nothing note-related happens. drover reads <code>why.md</code> through the lane's host (<code>hosts::On</code>, so ssh for a remote lane) and runs the full check, citations included.</li>
 <li><b>Invalid:</b> <code>turn-end</code> is still logged, with <code>"note":"WHY_INVALID: …"</code>, and the turn exits 3. Drive answers with <code>WHY_NUDGE</code>: one prompt that quotes the reason, sent <i>before</i> the review starts. After that one nudge, the next <code>turn done</code> goes to review even with no note. The rev brief then says <code>no why note: &lt;reason&gt;</code>, so a doc never blocks the pipeline (open question 1).</li>
-<li><b>Valid:</b> herdsman takes the lease <code>why-notes:&lt;fleet&gt;</code> (the <code>leases</code> table, 120 s) and works in the fleet's local clone (<code>repo.local</code>):
+<li><b>Valid:</b> drover takes the lease <code>why-notes:&lt;fleet&gt;</code> (the <code>leases</code> table, 120 s) and works in the fleet's local clone (<code>repo.local</code>):
 <pre>git fetch origin &lt;branch&gt; +refs/notes/why:refs/notes/why-origin   # head object + origin's notes (ref may not exist yet)
 git notes --ref why merge -s theirs refs/notes/why-origin          # skipped when why-origin is absent
 git notes --ref why add -f -F &lt;tmp&gt; &lt;head&gt;
 git push origin refs/notes/why:refs/notes/why                      # never --force</pre>
-A non-fast-forward reject loops back to the fetch, up to 3 times. The lease serialises herdsman's own processes. The fetch, merge and retry cover any other writer. If all 3 tries fail, herdsman logs <code>why-failed</code> with the git error, the review is not blocked, and the next drive pass retries from the kept copy.</li>
+A non-fast-forward reject loops back to the fetch, up to 3 times. The lease serialises drover's own processes. The fetch, merge and retry cover any other writer. If all 3 tries fail, drover logs <code>why-failed</code> with the git error, the review is not blocked, and the next drive pass retries from the kept copy.</li>
 <li><b>PR body:</b> <code>gh pr view --json body</code>. The section <code>## Why (round n)</code> is replaced if present (up to the next <code>## </code>), else appended. Then <code>gh pr edit --body</code>. <code>n</code> = the review round this head enters (<code>rounds + 1</code>). A second push in the same round replaces that round's section, and the older head keeps its own note.</li>
 <li><b>Event</b> <code>why</code>: <code>{sha, round, branch, agent, owner, files}</code>. <code>files</code> lists the paths changed since the previous noted head (else since the base). <code>owner</code> is the <code>Owner:</code> line, so <code>/api/v1</code> and the merge comment never read git.</li>
-<li><b>Consume:</b> <code>why.md</code> is moved to <code>.herdsman/why-r&lt;n&gt;.md</code> in the worktree. A fix round has to write a fresh one, and a stale note can never be re-attached. <code>why.md</code> joins <code>OWN_FILES</code>, so wip snapshots and <code>clean</code> treat it as scratch.</li>
+<li><b>Consume:</b> <code>why.md</code> is moved to <code>.drover/why-r&lt;n&gt;.md</code> in the worktree. A fix round has to write a fresh one, and a stale note can never be re-attached. <code>why.md</code> joins <code>OWN_FILES</code>, so wip snapshots and <code>clean</code> treat it as scratch.</li>
 </ol>
-<div class="note"><b>Only herdsman writes notes.</b> The hook gains one guard for every lane: <code>git notes</code> writes (<code>add|append|edit|copy|merge|remove</code> on any ref) and any <code>git push</code> naming <code>refs/notes</code> → <code>REFUSED NOTES_HERDSMAN_ONLY</code>. Reading (<code>git notes show</code>, <code>git log --notes=why</code>, <code>git fetch … refs/notes/why</code>) stays allowed.</div>
+<div class="note"><b>Only drover writes notes.</b> The hook gains one guard for every lane: <code>git notes</code> writes (<code>add|append|edit|copy|merge|remove</code> on any ref) and any <code>git push</code> naming <code>refs/notes</code> → <code>REFUSED NOTES_DROVER_ONLY</code>. Reading (<code>git notes show</code>, <code>git log --notes=why</code>, <code>git fetch … refs/notes/why</code>) stays allowed.</div>
 
 <h3>PR body as GitHub shows it</h3>
 <pre>…the impl's own body…
@@ -140,7 +140,7 @@ Owner: wip saves stop carrying build output; huge files are listed, not pushed
 <tr><td><code>merge_comment_owner_line</code>, <code>v1_issue_why</code></td><td>The <code>Owner:</code> line appears in both.</td></tr>
 </table>
 
-<h2>3 · Reading: <code>herdsman why &lt;file:line&gt; [--json]</code></h2>
+<h2>3 · Reading: <code>drover why &lt;file:line&gt; [--json]</code></h2>
 <ol class="flow">
 <li>Fetch notes quietly into the repo that holds the cwd (any worktree, or <code>repo.local</code> with <code>--fleet</code>). A fetch failure is ignored.</li>
 <li><code>git blame --porcelain -L n,n -- file</code> gives the commit <b>S</b>.</li>
@@ -151,7 +151,7 @@ Owner: wip saves stop carrying build output; huge files are listed, not pushed
 
 <div class="note warn">The sample below uses <b>real</b> data: blame, sha, PR, merge and the q799 ask and answer come from the live repo and event log. #646 predates notes, so its <b>note text is illustrative</b>, written the way the #646 impl lane would have written it.</div>
 
-<pre class="term"><span class="m">$</span> herdsman why crates/core/src/check.rs:1763
+<pre class="term"><span class="m">$</span> drover why crates/core/src/check.rs:1763
 <span class="k">line</span>    crates/core/src/check.rs:1763  const CAPS: (u64, u64) = (5 &lt;&lt; 20, 50 &lt;&lt; 20);
 <span class="k">commit</span>  3e8e5710f  wip: snapshots skip build output and files over the size caps, lean clones, wip prune (#646)
 <span class="k">issue</span>   #646 wip snapshots commit Cargo build output … owner-approved wip prune
@@ -172,11 +172,11 @@ Owner: wip saves stop carrying build output; huge files are listed, not pushed
        <span class="g">→ owner (web): Raise line_cap 31500 -&gt; 31700 in this PR, recorded in docs/cap-history/2026-11-07-646.md</span>
 <span class="m">git log --notes=why -1 bc11d3a0b</span></pre>
 
-<p>No note at all (an older commit, or a lane that skipped its note) prints the same block with <code>note    none</code>, so issue and asks still answer the question. A commit herdsman cannot map prints <code>issue none</code> and exits 0.</p>
+<p>No note at all (an older commit, or a lane that skipped its note) prints the same block with <code>note    none</code>, so issue and asks still answer the question. A commit drover cannot map prints <code>issue none</code> and exits 0.</p>
 
 <pre>{"file":"crates/core/src/check.rs","line":1763,"text":"const CAPS: (u64, u64) = (5 << 20, 50 << 20);",
  "commit":{"sha":"3e8e5710f9dd3eef69e1159f5cf97cdfa4a249db","subject":"wip: snapshots skip build output …(#646)"},
- "issue":{"fleet":"herdsman","number":646,"title":"wip snapshots commit Cargo build output …","pr":661,
+ "issue":{"fleet":"drover","number":646,"title":"wip snapshots commit Cargo build output …","pr":661,
           "merge_sha":"dcc92849548869a50319220dc754859fb7dc0b56","into":"staging","rounds":1},
  "note":{"sha":"bc11d3a0bb83be9a5b5c92768859f0d715a8f838","round":1,"text":"Decided: …\nOwner: …",
          "owner":"wip saves stop carrying build output; huge files are listed, not pushed"},
@@ -196,18 +196,18 @@ Owner: wip saves stop carrying build output; huge files are listed, not pushed
   Proof: spec
   &gt; Decided: per-file 5 MB and per-snapshot 50 MB caps   (why note, bc11d3a)
   crates/core/src/check.rs:1763</pre>
-<p>The impl brief template (<code>roles/brief-impl.md</code>) gets the <code>why.md</code> form, with the five keys and the three citation kinds, plus <i>never commit why.md; herdsman attaches it</i>.</p>
+<p>The impl brief template (<code>roles/brief-impl.md</code>) gets the <code>why.md</code> form, with the five keys and the three citation kinds, plus <i>never commit why.md; drover attaches it</i>.</p>
 
 <h2>5 · Merge comment and <code>/api/v1</code></h2>
 <div class="grid">
 <div>
-<pre>Merged via `herdsman merge`: PR #661 → `staging` @ `dcc9284…`
+<pre>Merged via `drover merge`: PR #661 → `staging` @ `dcc9284…`
 Pinned PASS verdict sha: `bc11d3a…`
 Why: wip saves stop carrying build output; huge files are listed, not pushed</pre>
 <p>This is the latest <code>why</code> event's <code>owner</code>. The comment stays ≤ 5 lines, and the <code>Why:</code> line is left out when there is no note.</p>
 </div>
 <div>
-<pre>GET /api/v1/issue/herdsman/646
+<pre>GET /api/v1/issue/drover/646
 { …,
   "why": { "sha": "bc11d3a0…", "round": 1,
            "owner": "wip saves stop carrying build output; …" } }</pre>
@@ -220,11 +220,11 @@ Why: wip saves stop carrying build output; huge files are listed, not pushed</pr
 <tr><th>where</th><th>what</th><th class="num">lines</th></tr>
 <tr><td><code>core/src/why.rs</code> (new)</td><td>parse and validate, citation checks</td><td class="num">55</td></tr>
 <tr><td></td><td>lease, then fetch, merge, add, push with retry; body section; event; consume</td><td class="num">50</td></tr>
-<tr><td></td><td><code>herdsman why</code>: blame → issue → note → asks, text and json</td><td class="num">50</td></tr>
+<tr><td></td><td><code>drover why</code>: blame → issue → note → asks, text and json</td><td class="num">50</td></tr>
 <tr><td></td><td>brief sections (branch notes, file notes, round note)</td><td class="num">25</td></tr>
 <tr><td><code>cli.rs</code></td><td><code>Why</code> verb; the <code>turn done</code> hook-in and exit 3</td><td class="num">15</td></tr>
 <tr><td><code>waiting.rs</code> / <code>drive.rs</code></td><td><code>WHY_NUDGE</code>, sent once before review</td><td class="num">10</td></tr>
-<tr><td><code>spawn.rs</code>, <code>hook.rs</code>, <code>gate.rs</code>, <code>serve/v1.rs</code>, <code>api.rs</code>, <code>events.rs</code></td><td>brief slots, <code>NOTES_HERDSMAN_ONLY</code>, the comment line, the API field, event names, <code>OWN_FILES</code></td><td class="num">10</td></tr>
+<tr><td><code>spawn.rs</code>, <code>hook.rs</code>, <code>gate.rs</code>, <code>serve/v1.rs</code>, <code>api.rs</code>, <code>events.rs</code></td><td>brief slots, <code>NOTES_DROVER_ONLY</code>, the comment line, the API field, event names, <code>OWN_FILES</code></td><td class="num">10</td></tr>
 <tr><td colspan="2"><b>total</b> (staging at 32,489 / cap 35,500)</td><td class="num"><b>+215</b></td></tr>
 </table>
 <p>This is above the issue's +150 guess because every citation is actually checked and because of the remote-lane path. Dropping the quote-in-spec check (shape only) saves about 15 lines.</p>

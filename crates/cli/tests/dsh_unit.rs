@@ -1,8 +1,8 @@
 //! The dsh harness's kick, moved out of `src/harness/dsh.rs`.
 use anyhow::Result;
-use herdsman::harness;
-use herdsman::runner::{Out, Runner};
-use herdsman::spawn::Plan;
+use drover::providers;
+use drover::runner::{Out, Runner};
+use drover::spawn::Plan;
 use std::path::PathBuf;
 
 /// Answers `pane get` idle, then working; records every herdr call.
@@ -58,10 +58,11 @@ fn kick_with_non_ascii_path_does_not_panic() {
         resting: None,
         session: None,
         lane_key: None,
+        token: None,
     };
     assert!(!p.kick.is_char_boundary(20));
     let r = Fake(Default::default());
-    assert!(harness::get("dsh").kick(&r, &p, "w9:p1").unwrap());
+    assert!(providers::get("dsh").kick(&r, &p, "w9:p1").unwrap());
     assert!(r
         .0
         .lock()

@@ -1,19 +1,24 @@
-//! #40: `herdsman ask` / `answer` / `asks`, the needs-you card and the `ask-waiting` alert.
+//! #40: `drover ask` / `answer` / `asks`, the needs-you card and the `ask-waiting` alert.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-36";
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 /// The asking lane's spawn, so an answer can find its pane.
-fn lane_spawn(c: &herdsman::Ctx, ts: u64) {
+fn lane_spawn(c: &drover::Ctx, ts: u64) {
     append(
         &c.state,
         &Event::new(
@@ -21,15 +26,34 @@ fn lane_spawn(c: &herdsman::Ctx, ts: u64) {
             "sendmeter",
             Some(36),
             "spawn",
-            json!({"role": "impl", "agent": LANE, "pane": "w1:p1"}),
+            json!({"role": "impl", "agent": LANE, "pane": LANE}),
         ),
     )
     .unwrap();
 }
 
-/// The asks as `herdsman ask` logs them inside `LANE` (`HERDSMAN_LANE` is process-wide, so not set here).
-fn from_lane(c: &herdsman::Ctx) {
-    let Ok(log) = herdsman::events::jsonl(&c.state) else {
+fn shed(c: &drover::Ctx) -> FakeShed {
+    let sh = FakeShed::new();
+    sh.attach(c);
+    sh.lane(LANE, "idle", "/x");
+    sh
+}
+
+fn typed(sh: &FakeShed, text: &str) -> bool {
+    let seen = sh.lock().seen.clone();
+    let send = (seen.iter()).position(|(m, p)| m == "send" && p["name"] == LANE && p["text"] == text);
+    let enter = (seen.iter()).rposition(|(m, p)| m == "keys" && p["name"] == LANE && p["keys"] == json!(["Enter"]));
+    matches!((send, enter), (Some(s), Some(e)) if s < e)
+}
+
+fn calls(sh: &FakeShed) -> (usize, usize, usize) {
+    let n = |m: &str| sh.all(m).iter().filter(|p| p["name"] == LANE).count();
+    (n("send"), n("keys"), n("wait"))
+}
+
+/// The asks as `drover ask` logs them inside `LANE` (`DROVER_LANE` is process-wide, so not set here).
+fn from_lane(c: &drover::Ctx) {
+    let Ok(log) = drover::events::jsonl(&c.state) else {
         return;
     }; // a refused ask logs nothing
     rewrite_log(
@@ -38,7 +62,7 @@ fn from_lane(c: &herdsman::Ctx) {
     );
 }
 
-fn ask(c: &herdsman::Ctx) -> String {
+fn ask(c: &drover::Ctx) -> String {
     let args = [
         "ask",
         "sendmeter",
@@ -61,6 +85,7 @@ fn ask(c: &herdsman::Ctx) -> String {
 fn ask_answer_round_trip_prompts_the_asker_once() {
     let d = tmpdir("ask-answer");
     let c = ctx(&d, CONFIG);
+    let sh = shed(&c);
     lane_spawn(&c, NOW - 60);
     let id = ask(&c);
     assert_eq!(id, "q1");
@@ -74,22 +99,14 @@ fn ask_answer_round_trip_prompts_the_asker_once() {
         "{open}"
     );
 
-    let r = Fake::default()
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr agent wait", "");
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "2", "--by", "conductor"]);
+    let r = Fake::default();
+    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "2", "--by", "orchestrator"]);
     assert_eq!(code, 0, "{out}");
-    assert!(
-        r.called("herdr agent prompt sendmeter-impl-36 DECISION q1: no, trim"),
-        "{:?}",
-        r.calls.borrow()
-    );
-    assert!(r.index("herdr pane send-keys w1:p1 Enter") > r.index("herdr agent prompt"));
+    assert!(typed(&sh, "DECISION q1: no, trim"), "{:?}", sh.methods());
     let dec = &kinds(&c, "decision")[0];
     assert_eq!(
         (dec.str("id"), dec.str("choice"), dec.str("by")),
-        (Some("q1"), Some("no, trim"), Some("conductor"))
+        (Some("q1"), Some("no, trim"), Some("orchestrator"))
     );
     assert_eq!(run(&c, &Fake::default(), &["asks"]).1, "", "answered asks are closed");
     assert!(run(&c, &Fake::default(), &["asks", "--all"])
@@ -99,7 +116,7 @@ fn ask_answer_round_trip_prompts_the_asker_once() {
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "free text", "--by", "alice"]);
     assert_eq!(code, 3);
     assert!(out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
-    assert_eq!(r.count("herdr agent prompt"), 1);
+    assert_eq!(sh.sent(LANE), ["DECISION q1: no, trim"]);
     assert!(run(&c, &r, &["answer", "sendmeter", "q9", "1"])
         .1
         .contains("REFUSED NO_SUCH_ASK"));
@@ -166,13 +183,13 @@ fn notifier_gets_the_question_numbered_options_and_answer_command() {
         "Raise the src budget?",
         "1) yes, to 5,200",
         "2) no, trim (recommended)",
-        "herdsman answer sendmeter q1 <n|\"text\">",
+        "drover answer sendmeter q1 <n|\"text\">",
     ] {
         assert!(got.contains(w), "missing {w:?} in {got}");
     }
 }
 
-fn check(c: &herdsman::Ctx, r: &Fake) -> String {
+fn check(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["check"]);
     assert_eq!(code, 0, "{out}");
     out
@@ -180,10 +197,11 @@ fn check(c: &herdsman::Ctx, r: &Fake) -> String {
 
 #[test]
 fn an_open_ask_re_alerts_once_as_ask_waiting_after_30_min() {
-    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p1")]));
+    let r = Fake::default();
     // Past 30 min an open ask re-alerts once as `ask-waiting`.
     let d = tmpdir("ask-waiting");
     let mut c = ctx(&d, CONFIG);
+    let _sh = shed(&c);
     c.now = NOW - 40 * 60;
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
     ask(&c);
@@ -198,7 +216,7 @@ fn an_open_ask_re_alerts_once_as_ask_waiting_after_30_min() {
 }
 
 #[test]
-fn needs_you_card_tops_every_tab_and_answer_needs_a_paired_device() {
+fn needs_you_card_folds_above_the_tabs_and_answer_needs_a_paired_device() {
     let d = tmpdir("ask-card");
     let c = ctx(&d, CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
@@ -208,7 +226,7 @@ fn needs_you_card_tops_every_tab_and_answer_needs_a_paired_device() {
     let page = String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
     let page = with_queue(&page, &s, "127.0.0.1:7777", NOW); // #268: the Queue tab as the board draws it
     let (card, main) = (
-        page.find("<div class=ask>").expect("no needs-you card"),
+        page.find("<details class=ask>").expect("no needs-you card"),
         page.find("<main>").unwrap(),
     );
     assert!(card < main, "the card sits above every tab section");
@@ -238,15 +256,17 @@ fn answer_to_a_gone_agent_records_the_decision_and_exits_0() {
     assert_eq!(out.trim(), want);
     assert_eq!(kinds(&c, "decision")[0].str("choice"), Some("yes, to 5,200"));
 
-    // A pane in the log whose herdr agent is gone: the prompt fails, the decision is still recorded.
     let d = tmpdir("ask-gone");
     let c = ctx(&d, CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     lane_spawn(&c, NOW - 60);
     ask(&c);
     let (code, out) = run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "2"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("recorded; asking agent gone, not prompted"), "{out}");
     assert_eq!(kinds(&c, "decision").len(), 1);
+    assert!(sh.called("get", LANE) && sh.sent(LANE).is_empty(), "{:?}", sh.methods());
 }
 
 /// One ask from `sendmeter-impl-36` on #36, then `then`: is it still in `open_asks`, and why it closed.
@@ -264,7 +284,7 @@ fn closed_by(then: Event) -> (usize, String) {
     append(&c.state, &then).unwrap();
     let events = read(&c.state).unwrap();
     (
-        herdsman::events::open_asks(&events).len(),
+        drover::events::open_asks(&events).len(),
         run(&c, &Fake::default(), &["asks", "--all"]).1,
     )
 }
@@ -307,12 +327,11 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
     let d = tmpdir("ask-web");
     let mut c = ctx(&d, CONFIG);
     c.now = NOW;
+    let sh = shed(&c);
     lane_spawn(&c, NOW - 60);
     ask(&c);
-    let r = Fake::default()
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr agent wait", "");
+    let f = Fake::default();
+    let r = sh.on(&f);
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let cookie = pair(&s, &c, "", NOW);
     let page = String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
@@ -331,7 +350,7 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
             "{res}"
         );
     }
-    assert!(kinds(&c, "decision").is_empty() && !r.called("herdr agent prompt"));
+    assert!(kinds(&c, "decision").is_empty() && sh.sent(LANE).is_empty());
     let res = post(
         &s,
         &format!("op=answer&fleet=sendmeter&id=q1&choice=2&mtime={mtime}"),
@@ -343,18 +362,14 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
         (dec.str("choice"), dec.str("by"), dec.str("via")),
         (Some("no, trim"), Some("owner"), Some("web"))
     );
-    assert!(
-        r.called("herdr agent prompt sendmeter-impl-36 DECISION q1: no, trim"),
-        "{:?}",
-        r.calls.borrow()
-    );
+    assert!(typed(&sh, "DECISION q1: no, trim"), "{:?}", sh.methods());
     // #304: the board's answer kicks the ask's issue at once.
-    assert!(r.called("sh -c nohup '/opt/herdsman/bin/herdsman' kick sendmeter 36 --why board --now"));
+    assert!(f.called("sh -c nohup '/opt/drover/bin/drover' kick sendmeter 36 --why board --now"));
     assert_eq!(run(&c, &Fake::default(), &["asks"]).1, "", "the ask is closed");
 }
 
 /// #99: a routine ask, `Raise the src budget?` style without owner words, recommending option 2.
-fn routine(c: &herdsman::Ctx, q: &str) -> (i32, String) {
+fn routine(c: &drover::Ctx, q: &str) -> (i32, String) {
     let args = [
         "ask",
         "sendmeter",
@@ -417,18 +432,17 @@ fn routine_needs_a_recommendation_and_no_owner_topic() {
 fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
     let d = tmpdir("ask-default");
     let mut c = ctx(&d, CONFIG);
+    let sh = shed(&c);
     lane_spawn(&c, NOW - 3600);
     c.now = NOW - 40 * 60;
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
     ask(&c); // q1, owner
     c.now = NOW - 30 * 60;
     assert_eq!(routine(&c, "Split the snapshot tests per pane?").0, 0); // q2
-    let r = Fake::default()
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr agent wait", "");
+    let r = Fake::default();
     c.now = NOW - 60;
-    let page = |c: &herdsman::Ctx| {
+    let page = |c: &drover::Ctx| {
+        let r = sh.on(&r);
         let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
         let page =
             String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)).into_owned();
@@ -450,9 +464,9 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
         (Some("q2"), Some("keep"), Some("default"))
     );
     assert!(
-        r.called("herdr agent prompt sendmeter-impl-36 DECISION q2: keep (default after 30 min, nobody replied)"),
+        typed(&sh, "DECISION q2: keep (default after 30 min, nobody replied)"),
         "{:?}",
-        r.calls.borrow()
+        sh.sent(LANE)
     );
     c.now = NOW + 3 * 3600;
     check(&c, &r);
@@ -467,7 +481,7 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
         (dec.len(), dec[1].str("choice"), dec[1].str("by")),
         (2, Some("split"), Some("owner"))
     );
-    assert!(r.called("herdr agent prompt sendmeter-impl-36 DECISION q2: split"));
+    assert!(typed(&sh, "DECISION q2: split"), "{:?}", sh.sent(LANE));
     assert!(!page(&c).contains("decided by default"));
     assert!(run(&c, &r, &["answer", "sendmeter", "q2", "2"])
         .1
@@ -478,20 +492,18 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
 fn a_manual_answer_before_30_min_prevents_the_default() {
     let d = tmpdir("ask-default-manual");
     let mut c = ctx(&d, CONFIG);
+    let sh = shed(&c);
     lane_spawn(&c, NOW - 3600);
     c.now = NOW - 40 * 60;
     assert_eq!(routine(&c, "Split the snapshot tests per pane?").0, 0);
-    let r = Fake::default()
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr agent wait", "");
+    let r = Fake::default();
     c.now = NOW - 20 * 60;
     assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "1"]).0, 0);
     c.now = NOW;
     check(&c, &r);
     let dec = kinds(&c, "decision");
     assert_eq!((dec.len(), dec[0].str("by")), (1, Some("owner")));
-    assert_eq!(r.count("herdr agent prompt"), 1);
+    assert_eq!(sh.sent(LANE).len(), 1, "{:?}", sh.sent(LANE));
 }
 
 /// #143: an answer is delivered once the agent leaves idle; else one retry, then a pushed `answer-undelivered`
@@ -500,47 +512,36 @@ fn a_manual_answer_before_30_min_prevents_the_default() {
 fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
     let d = tmpdir("ask-landed");
     let c = ctx(&d, CONFIG);
+    let sh = shed(&c);
     lane_spawn(&c, NOW - 60);
     ask(&c);
-    let r = Fake::default()
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr agent wait sendmeter-impl-36 --until working", "");
-    assert_eq!(run(&c, &r, &["answer", "sendmeter", "q1", "2"]).0, 0);
-    let n = |r: &Fake| {
-        (
-            r.count("herdr agent prompt"),
-            r.count("herdr pane send-keys"),
-            r.count("herdr agent wait"),
-        )
-    };
-    assert_eq!(n(&r), (1, 1, 1), "working at once: nothing more");
+    assert_eq!(run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "2"]).0, 0);
+    assert_eq!(calls(&sh), (1, 1, 1), "working at once: nothing more");
+    assert_eq!(sh.last("wait")["until"], json!(["working", "blocked"]));
     assert!(kinds(&c, "answer-undelivered").is_empty());
     assert_eq!(kinds(&c, "answer-delivered")[0].str("agent"), Some(LANE));
 
     let d = tmpdir("ask-undelivered");
     let c = ctx(&d, CONFIG);
+    let sh = shed(&c);
+    sh.wait_ends(LANE, "timeout");
     lane_spawn(&c, NOW - 60);
     ask(&c);
-    let idle = Fake::default()
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p1")]));
-    assert_eq!(run(&c, &idle, &["answer", "sendmeter", "q1", "2"]).0, 0);
-    assert_eq!(n(&idle), (2, 2, 2), "one retry");
+    assert_eq!(run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "2"]).0, 0);
+    assert_eq!(calls(&sh), (2, 2, 2), "one retry");
     let u = kinds(&c, "answer-undelivered");
     assert_eq!(
         (u.len(), u[0].str("id"), u[0].str("agent"), u[0].str("text")),
         (1, Some("q1"), Some(LANE), Some("DECISION q1: no, trim"))
     );
-    assert!(herdsman::config::WEBPUSH_ON.contains(&"answer-undelivered"), "pushed");
+    assert!(drover::config::WEBPUSH_ON.contains(&"answer-undelivered"), "pushed");
     assert!(kinds(&c, "answer-delivered").is_empty());
 }
 
 /// #283: 10 due `ask-waiting` alerts push 3 and one summary; an imported ask never pushes.
 #[test]
 fn ask_waiting_pushes_are_capped_per_pass() {
-    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p1")]));
+    let r = Fake::default();
     let d = tmpdir("ask-cap");
     let sink = d.join("pushed.txt");
     let config = format!(
@@ -548,6 +549,7 @@ fn ask_waiting_pushes_are_capped_per_pass() {
         sink.display()
     );
     let mut c = ctx(&d, &config);
+    let _sh = shed(&c);
     c.now = NOW;
     for n in 1..=11 {
         let mut a = json!({"id": format!("q{n}"), "question": format!("Q{n}?"), "options": ["a"]});
@@ -586,42 +588,40 @@ fn ask_waiting_pushes_are_capped_per_pass() {
 fn an_ask_made_during_its_lanes_startup_stays_open_answerable_and_alerts_once() {
     let d = tmpdir("ask-startup");
     let mut c = ctx(&d, CONFIG);
+    let sh = shed(&c);
     c.now = NOW - 40 * 60;
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
     let ev = |kind: &str, ts, d| Event::new(ts, "sendmeter", Some(36), kind, d);
     let lane = |pane: &str| json!({"role": "impl", "agent": LANE, "pane": pane});
     let start = c.now - 75;
     for e in [
-        ev("spawn", start - 3600, lane("w1:p1")),
+        ev("spawn", start - 3600, lane("old-36")),
         ev(
             "supersede",
             start,
             json!({"agent": LANE, "killed": [LANE], "role": "impl"}),
         ),
-        ev("spawn-started", start, lane("w1:p2")),
+        ev("spawn-started", start, lane(LANE)),
     ] {
         append(&c.state, &e).unwrap();
     }
     ask(&c);
-    append(&c.state, &ev("spawn", start, lane("w1:p2"))).unwrap(); // logged after the ask, as in #2358
+    append(&c.state, &ev("spawn", start, lane(LANE))).unwrap();
     c.now = NOW;
     let (_, open) = run(&c, &Fake::default(), &["asks", "sendmeter"]);
     assert!(open.contains("q1 #36"), "{open}");
 
-    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w1:p2")]));
+    let r = Fake::default();
     let out = check(&c, &r);
     assert!(out.contains("ask-waiting: q1 unanswered for 40m"), "{out}");
     assert_eq!(check(&c, &r), "");
     assert_eq!(kinds(&c, "ask-waiting").len(), 1);
 
-    let r = Fake::default()
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr agent wait", "");
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
     assert_eq!(code, 0, "{out}");
     assert!(out.contains(&format!("-> {LANE}")), "{out}");
-    assert!(r.called("herdr pane send-keys w1:p2 Enter"), "{:?}", r.calls.borrow());
+    assert!(typed(&sh, "DECISION q1: yes, to 5,200"), "{:?}", sh.methods());
+    assert!(!sh.called("keys", "old-36"), "{:?}", sh.methods());
 }
 
 #[test]

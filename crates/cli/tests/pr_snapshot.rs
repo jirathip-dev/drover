@@ -1,7 +1,7 @@
 //! #246: one batched GraphQL read of every open PR per fleet per step; the gate, status and serve read it.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
+use drover::events::{append, read, Event};
 use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
@@ -9,7 +9,7 @@ const ALPHA: &str = "[fleet.alpha]\nrepo = \"jirathip-dev/alpha\"\nlocal = \"/tm
     integration = \"staging\"\n\n[fleet.alpha.role.impl]\nharness = \"hermes\"\nprofile = \"fleet-impl\"\n\n[limits]";
 
 /// An impl lane of `fleet` #`n` logged at ts 10, on branch `issue-<n>`.
-fn lane(c: &herdsman::Ctx, fleet: &str, n: u64) {
+fn lane(c: &drover::Ctx, fleet: &str, n: u64) {
     let d = json!({"role": "impl", "agent": format!("{fleet}-impl-{n}"), "branch": format!("issue-{n}")});
     append(&c.state, &Event::new(10, fleet, Some(n), "spawn", d)).unwrap();
 }
@@ -27,7 +27,6 @@ fn open_prs(ns: &[u64]) -> String {
 
 fn calm() -> Fake {
     Fake::default()
-        .reply("herdr agent list", r#"{"result":{"agents":[]}}"#)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -37,6 +36,8 @@ fn calm() -> Fake {
 #[test]
 fn a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet() {
     let c = ctx(&tmpdir("snap-one-call"), &CONFIG.replace("[limits]", ALPHA));
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     for n in [12, 13, 14, 15] {
         lane(&c, "sendmeter", n);
     }
@@ -56,10 +57,10 @@ fn a_fast_step_reads_every_open_pr_in_one_graphql_call_per_fleet() {
         "no per-PR read: {calls:?}"
     );
     for n in [12, 13, 14, 15] {
-        assert_eq!(herdsman::gh::cached_pr(&c, "sendmeter", n)["number"], 100 + n);
+        assert_eq!(drover::gh::cached_pr(&c, "sendmeter", n)["number"], 100 + n);
     }
     // The step's length is stamped beside its start, for the Host tab's `fast step` row.
-    let (at, secs) = herdsman::drive::fast_step(&c).unwrap();
+    let (at, secs) = drover::drive::fast_step(&c).unwrap();
     assert_eq!((at, secs.is_some()), (c.now, true));
 }
 
@@ -86,13 +87,15 @@ fn the_merge_gate_reads_checks_from_the_snapshot() {
 #[test]
 fn status_and_serve_make_no_gh_call() {
     let c = ctx(&tmpdir("snap-read-only"), CONFIG);
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     lane(&c, "sendmeter", 12);
     let r = calm().reply("gh api graphql", &open_prs(&[12]));
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     let seen = r.calls.borrow().len();
     let (code, out) = run(&c, &r, &["status"]);
     assert_eq!(code, 0, "{out}");
-    herdsman::serve::Server::new(&c, &r, None).respond("GET / HTTP/1.1\r\n\r\n", c.now);
+    drover::serve::Server::new(&c, &r, None).respond("GET / HTTP/1.1\r\n\r\n", c.now);
     let after = &r.calls.borrow()[seen..];
     assert!(!after.iter().any(|l| l.starts_with("gh ")), "{after:?}");
 }
@@ -105,6 +108,8 @@ fn probe(status: &str, etag: &str) -> String {
 #[test]
 fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
     let c = ctx(&tmpdir("snap-etag"), CONFIG);
+    let _sh = FakeShed::new();
+    _sh.attach(&c);
     let ns: Vec<u64> = (1..=30).collect();
     for n in &ns {
         lane(&c, "sendmeter", *n);
@@ -130,7 +135,7 @@ fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
         "30 PRs, one query: {:?}",
         r.calls.borrow()
     );
-    assert_eq!(herdsman::gh::cached_pr(&c, "sendmeter", 30)["number"], 130);
+    assert_eq!(drover::gh::cached_pr(&c, "sendmeter", 30)["number"], 130);
     // The next poll: each probe carries its ETag, each answers 304, and nothing else reaches GitHub.
     c.now += 15;
     let seen = r.calls.borrow().len();
@@ -149,7 +154,7 @@ fn an_unchanged_fast_step_spends_only_304s_and_30_prs_need_one_query() {
         ]
     );
     assert_eq!(
-        herdsman::gh::cached_at(&c, "sendmeter", 30),
+        drover::gh::cached_at(&c, "sendmeter", 30),
         Some(c.now),
         "the cards stay fresh"
     );

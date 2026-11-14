@@ -9,10 +9,9 @@ use std::path::Path;
 use std::process::{Command, Stdio};
 
 const NOW: u64 = 1_000_000;
-const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/herdsman-ssh-%C -oControlPersist=10m bazzite -- ";
+const SSH: &str = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- ";
 
-/// CONFIG on Claude, mini (this host) and bazzite (remote), both probed.
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let c = ctx(
         &tmpdir(name),
@@ -27,21 +26,19 @@ fn setup(name: &str) -> herdsman::Ctx {
     });
     std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    c
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    (c, sh)
 }
 
-/// A fresh lane on bazzite: its clone, worktree, files, pane and agent start all answer.
 fn remote_fake() -> Fake {
-    let ws = r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#;
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr --machine bazzite agent list", NO_AGENTS)
         .reply("sysctl -n vm.loadavg", "{ 0.4 1 1 }")
         .reply("sysctl -n hw.ncpu", "4")
         .reply(&format!("{SSH}'cat' '/proc/loadavg'"), "0.4 1 1 1/9 42")
         .reply(&format!("{SSH}'nproc'"), "4")
         .reply(
-            &format!("{SSH}'/opt/herdsman/bin/herdsman' 'profiles' 'sync' '--profile'"),
+            &format!("{SSH}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile'"),
             "",
         )
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
@@ -50,19 +47,19 @@ fn remote_fake() -> Fake {
         .reply(&format!("{SSH}'sh' '-c' 'mkdir"), "")
         .reply(&format!("{SSH}'sh' '-c' 'umask 077"), "")
         .reply(&format!("{SSH}'rm' '-f'"), "")
-        .reply("herdr --machine bazzite worktree create", ws)
-        .reply(
-            "herdr --machine bazzite pane list --workspace w9",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr --machine bazzite pane run w9:p1 export", "{}")
-        .reply("herdr --machine bazzite agent start sendmeter-impl-12", "{}")
-        .reply("herdr --machine bazzite agent wait sendmeter-impl-12", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// The lane's environment on bazzite as the spawn left it: each `export`ed var, a value naming a file the spawn wrote
-/// there pointing at that file's copy under `remote`.
-fn lane_env(r: &Fake, remote: &Path) -> BTreeMap<String, String> {
+fn shed_call_at(r: &Fake, method: &str) -> Option<usize> {
+    let calls = r.calls.borrow();
+    let at = calls.iter().enumerate().filter(|(_, c)| c.contains("'shed' 'connect'"));
+    let inputs = r.inputs.borrow();
+    let sent = inputs.iter().filter(|(c, _)| c.contains("'shed' 'connect'"));
+    let want = format!("\"method\":\"{method}\"");
+    at.zip(sent).find(|(_, (_, i))| i.contains(&want)).map(|((n, _), _)| n)
+}
+
+fn lane_env(r: &Fake, bazzite: &FakeShed, remote: &Path) -> BTreeMap<String, String> {
     let written: BTreeMap<String, String> = r
         .inputs
         .borrow()
@@ -72,11 +69,11 @@ fn lane_env(r: &Fake, remote: &Path) -> BTreeMap<String, String> {
             Some((path.to_string(), text.clone()))
         })
         .collect();
-    let calls = r.calls.borrow();
-    let export = calls.iter().find(|c| c.contains("pane run w9:p1 export")).unwrap();
+    let sent = bazzite.sent("sendmeter-impl-12");
+    let export = sent.iter().find(|t| t.starts_with("export ")).unwrap();
     let mut env = BTreeMap::new();
     for (i, (k, v)) in export.split_whitespace().filter_map(|w| w.split_once('=')).enumerate() {
-        let v = v.trim_matches('\'');
+        let v = v.trim_end_matches('\r').trim_matches('\'');
         let v = match written.get(v) {
             Some(text) => {
                 let copy = remote.join(format!("file{i}"));
@@ -90,21 +87,21 @@ fn lane_env(r: &Fake, remote: &Path) -> BTreeMap<String, String> {
     env
 }
 
-/// `herdsman hook --role impl` on bazzite: the lane's env, that host's own `fleet.toml` (`None`: none at all).
+/// `drover hook --role impl` on bazzite: the lane's env, that host's own `fleet.toml` (`None`: none at all).
 fn hook_there(env: &BTreeMap<String, String>, remote: &Path, toml: Option<&str>, cmd: &str) -> String {
     let conf = remote.join("fleet.toml");
     let _ = std::fs::remove_file(&conf);
     if let Some(t) = toml {
         std::fs::write(&conf, t).unwrap();
     }
-    let mut c = Command::new(env!("CARGO_BIN_EXE_herdsman"));
-    c.env_remove("HERDSMAN_SCRATCH_TARGET").env_remove("FLEET_LANE");
-    for k in ["HERDSMAN_LANE", "HERDSMAN_HOST", "HERDSMAN_RULES"] {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_drover"));
+    c.env_remove("DROVER_SCRATCH_TARGET").env_remove("FLEET_LANE");
+    for k in ["DROVER_LANE", "DROVER_HOST", "DROVER_RULES"] {
         c.env_remove(k);
     }
     for (k, v) in env
         .iter()
-        .filter(|(k, _)| !["HERDSMAN_OUTBOX", "HERDSMAN_SERVICE"].contains(&k.as_str()))
+        .filter(|(k, _)| !["DROVER_OUTBOX", "DROVER_SERVICE"].contains(&k.as_str()))
     {
         c.env(k, v);
     }
@@ -132,12 +129,16 @@ fn hook_there(env: &BTreeMap<String, String>, remote: &Path, toml: Option<&str>,
 
 #[test]
 fn a_remote_lanes_hook_judges_a_fleet_its_host_never_heard_of() {
-    let c = setup("remote-rules");
-    let r = remote_fake();
-    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
+    let (c, _sh) = setup("remote-rules");
+    let (r, bazzite) = (remote_fake(), FakeShed::new());
+    let o = OverSsh {
+        f: &r,
+        hosts: vec![("bazzite", &bazzite)],
+    };
+    let (code, out) = run(&c, &o, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let remote = tmpdir("remote-rules-bazzite");
-    let env = lane_env(&r, &remote);
+    let env = lane_env(&r, &bazzite, &remote);
     // bazzite was bootstrapped before sendmeter was added: its own fleet.toml knows only another fleet.
     let stale = "[fleet.other]\nrepo = \"o/other\"\nlocal = \"/tmp/other\"\nintegration = \"staging\"\n";
     for toml in [Some(stale), None] {
@@ -153,12 +154,12 @@ fn a_remote_lanes_hook_judges_a_fleet_its_host_never_heard_of() {
     }
 }
 
-/// `herdsman hook` in a remote lane whose `HERDSMAN_RULES` names `rules`, its host's fleet.toml knowing its fleet.
+/// `drover hook` in a remote lane whose `DROVER_RULES` names `rules`, its host's fleet.toml knowing its fleet.
 fn hook_with_rules(remote: &Path, rules: &Path) -> String {
     let env = BTreeMap::from([
-        ("HERDSMAN_LANE".to_string(), "sendmeter:12:impl".to_string()),
-        ("HERDSMAN_HOST".to_string(), "bazzite".to_string()),
-        ("HERDSMAN_RULES".to_string(), rules.display().to_string()),
+        ("DROVER_LANE".to_string(), "sendmeter:12:impl".to_string()),
+        ("DROVER_HOST".to_string(), "bazzite".to_string()),
+        ("DROVER_RULES".to_string(), rules.display().to_string()),
     ]);
     hook_there(&env, remote, Some(CONFIG), "git status")
 }
@@ -183,15 +184,20 @@ fn a_missing_or_unreadable_rules_file_fails_closed_naming_it() {
 
 #[test]
 fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
-    let c = setup("remote-rules-secrets");
+    let (c, _sh) = setup("remote-rules-secrets");
     let extra = "\n[fleet.sendmeter.env]\nPLAIN = \"plain-env-value\"\nAPI = \"secret:API_KEY\"\n\
                  \n[[fleet.sendmeter.notify]]\ncmd = \"curl https://api.telegram.org/botSEKRIT/send\"\n";
     let text = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, text + extra).unwrap();
-    let r = remote_fake().stored("herdsman/sendmeter/API_KEY", "tok-VALUE-123");
-    let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
+    secret_file(&c, "API_KEY", "tok-VALUE-123", 0o600); // #707: the `secret:` env's 0600 file
+    let (r, bazzite) = (remote_fake(), FakeShed::new());
+    let o = OverSsh {
+        f: &r,
+        hosts: vec![("bazzite", &bazzite)],
+    };
+    let (code, out) = run(&c, &o, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
-    let wt = "/home/me/.local/share/herdsman/work/sendmeter/issue-12"; // #630
+    let wt = "/home/me/.local/share/drover/work/sendmeter/issue-12"; // #630
     let inputs = r.inputs.borrow();
     let rules = inputs
         .iter()
@@ -215,8 +221,8 @@ fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
     let file = tmpdir("remote-rules-wt").join("issue-12.rules.json");
     std::fs::write(&file, &rules.1).unwrap();
     let env = BTreeMap::from([
-        ("HERDSMAN_LANE".to_string(), "sendmeter:12:impl".to_string()),
-        ("HERDSMAN_RULES".to_string(), file.display().to_string()),
+        ("DROVER_LANE".to_string(), "sendmeter:12:impl".to_string()),
+        ("DROVER_RULES".to_string(), file.display().to_string()),
     ]);
     let edit = hook_there(&env, &remote, None, &format!("echo '{{}}' > {}", file.display()));
     assert!(
@@ -227,8 +233,12 @@ fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
 
 #[test]
 fn a_config_change_marks_a_live_remote_lane_rules_stale_until_respawned() {
-    let c = setup("remote-rules-stale");
-    let r = remote_fake();
+    let (c, _sh) = setup("remote-rules-stale");
+    let (f, bazzite) = (remote_fake(), FakeShed::new());
+    let r = OverSsh {
+        f: &f,
+        hosts: vec![("bazzite", &bazzite)],
+    };
     assert_eq!(
         run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]).0,
         0
@@ -241,11 +251,13 @@ fn a_config_change_marks_a_live_remote_lane_rules_stale_until_respawned() {
     let (_, board) = run(&c, &r, &["board", "sendmeter"]);
     assert!(!board.contains("rules stale"), "{board}");
     let text = std::fs::read_to_string(&c.config).unwrap();
-    std::fs::write(&c.config, text + "deny_commands_add = [\"terraform apply\"]\n").unwrap();
+    let deny = "deny_commands_add = [\"terraform apply\"]\n\n[runtime]";
+    std::fs::write(&c.config, text.replacen("\n[runtime]", &format!("\n{deny}"), 1)).unwrap();
     let (_, board) = run(&c, &r, &["board", "sendmeter"]);
     assert!(board.contains("rules stale"), "{board}");
     let (code, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
-    assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    assert_eq!(bazzite.all("run").len(), 2, "the lane restarted on bazzite's shed");
     let (_, board) = run(&c, &r, &["board", "sendmeter"]);
     assert!(!board.contains("rules stale"), "{board}");
 }
@@ -253,14 +265,18 @@ fn a_config_change_marks_a_live_remote_lane_rules_stale_until_respawned() {
 /// #592 (q659): a host with no fleet.toml gets each lane's profile from spawn, by name.
 #[test]
 fn spawn_syncs_the_lanes_profile_on_a_host_with_no_fleet_toml() {
-    let c = setup("remote-rules-profile");
-    let r = remote_fake();
+    let (c, _sh) = setup("remote-rules-profile");
+    let (r, bazzite) = (remote_fake(), FakeShed::new());
+    let o = OverSsh {
+        f: &r,
+        hosts: vec![("bazzite", &bazzite)],
+    };
     assert_eq!(
-        run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]).0,
+        run(&c, &o, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]).0,
         0
     );
-    let sync = format!("{SSH}'/opt/herdsman/bin/herdsman' 'profiles' 'sync' '--profile' 'fleet-impl' '--role' 'impl'");
-    let (at, start) = (r.index(&sync), r.index("herdr --machine bazzite agent start"));
+    let sync = format!("{SSH}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile' 'fleet-impl' '--role' 'impl'");
+    let (at, start) = (r.index(&sync), shed_call_at(&r, "run"));
     assert!(at.is_some() && at < start, "{:?}", r.calls.borrow());
     // There: that one profile is written with no fleet.toml at all.
     let there = ctx(&tmpdir("remote-rules-profile-there"), "");

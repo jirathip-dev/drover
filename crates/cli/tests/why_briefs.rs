@@ -3,8 +3,8 @@
 //! head's note, or why there is none.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::runner::{Out, Runner};
+use drover::events::{append, Event};
+use drover::runner::{Out, Runner};
 use serde_json::{json, Value};
 use std::path::Path;
 use std::process::Command;
@@ -30,12 +30,6 @@ impl Runner for Notes<'_> {
     fn sleep(&self, secs: u64) {
         self.0.sleep(secs);
     }
-    fn secret(&self, svc: &str) -> anyhow::Result<Option<String>> {
-        self.0.secret(svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> anyhow::Result<()> {
-        self.0.set_secret(svc, value)
-    }
 }
 
 fn g(dir: &Path, args: &[&str]) -> String {
@@ -54,7 +48,7 @@ fn g(dir: &Path, args: &[&str]) -> String {
 }
 
 /// A local clone with two noted commits: #12's round 1 head and #7's (which changed src/meter.rs).
-fn setup(name: &str) -> (herdsman::Ctx, String, String) {
+fn setup(name: &str) -> (drover::Ctx, String, String) {
     let d = tmpdir(name);
     let local = d.join("local");
     g(&d, &["init", "-q", local.to_str().unwrap()]);
@@ -82,7 +76,6 @@ fn setup(name: &str) -> (herdsman::Ctx, String, String) {
 
 fn fake(rev_head: &str, wt: &Path) -> Fake {
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
         .reply(
             "gh issue view 12",
             r#"{"title":"Meter retries","body":"Retries double the count in `src/meter.rs`."}"#,
@@ -92,20 +85,12 @@ fn fake(rev_head: &str, wt: &Path) -> Fake {
             &format!("{rev_head}\n"),
         )
         .reply("git -C", "0\n")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr pane wait-output", "{}")
-        .reply("herdr agent prompt", "{}")
-        .reply("herdr pane read", "Read the brief")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// Spawn `args` (after `spawn sendmeter 12`) and read the lane's brief.
-fn brief(c: &herdsman::Ctx, head: &str, args: &[&str]) -> String {
+fn brief(c: &drover::Ctx, head: &str, args: &[&str]) -> String {
+    let sh = FakeShed::new();
+    sh.attach(c);
     let dir = if args[0] == "rev" { "rev-12-r1" } else { "issue-12" };
     let wt = c.worktrees.join("sendmeter").join(dir);
     let f = fake(head, &wt);
@@ -114,7 +99,7 @@ fn brief(c: &herdsman::Ctx, head: &str, args: &[&str]) -> String {
     std::fs::read_to_string(wt.join(".brief.md")).unwrap()
 }
 
-fn noted_round(c: &herdsman::Ctx, sha: &str) {
+fn noted_round(c: &drover::Ctx, sha: &str) {
     let d = json!({"sha": sha, "round": 1, "owner": "#12 counts retries once", "files": ["src/meter.rs"]});
     append(&c.state, &Event::new(30, "sendmeter", Some(12), "why", d)).unwrap();
 }

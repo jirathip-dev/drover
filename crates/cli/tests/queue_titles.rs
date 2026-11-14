@@ -2,7 +2,7 @@
 //! no lane display mode button (#335: the look sheet's style); sw.js never caches a non-200 page.
 mod common;
 use common::*;
-use herdsman::serve::Server;
+use drover::serve::Server;
 use serde_json::json;
 
 /// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
@@ -15,7 +15,7 @@ fn get(s: &Server, path: &str) -> String {
     with_queue(&res, s, "127.0.0.1:7777", 1_000_000)
 }
 
-fn queued(name: &str) -> herdsman::Ctx {
+fn queued(name: &str) -> drover::Ctx {
     let c = ctx(&tmpdir(name), CONFIG);
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "17"]).0,
@@ -74,17 +74,19 @@ fn uncached_rows_have_no_title_and_make_no_gh_call() {
 #[test]
 fn check_caches_a_queued_issues_spec_once_and_its_row_shows_the_title() {
     let c = queued("check-titles");
-    let r = Fake::default()
-        .reply("herdr agent list", "[]")
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let f = Fake::default()
         .reply(
             "gh issue view 12",
             r#"{"title":"Nested rows show titles","body":"","updatedAt":"t1"}"#,
         )
         .reply("gh issue view 17", r#"{"title":"Deep row","body":"","updatedAt":"t1"}"#);
-    assert_eq!(run(&c, &r, &["check"]).0, 0);
-    assert_eq!(run(&c, &r, &["check"]).0, 0);
-    assert_eq!(r.count("gh issue view"), 2, "{:?}", r.calls.borrow());
-    let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    assert_eq!(run(&c, &f, &["check"]).0, 0);
+    assert_eq!(run(&c, &f, &["check"]).0, 0);
+    assert_eq!(f.count("gh issue view"), 2, "{:?}", f.calls.borrow());
+    let on = sh.on(&f);
+    let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
     let page = get(&s, "/");
     assert!(
         page.contains(">Nested rows show titles</span>") && page.contains(">Deep row</span>"),

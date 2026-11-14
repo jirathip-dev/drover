@@ -2,7 +2,7 @@
 //! a condvar) lets one run at a time. Every Runner call and state.db write is a yield point; the driver checks the
 //! invariants between steps and moves the clock (discrete events) when nothing is runnable.
 use crate::model::Model;
-use herdsman::runner::{Out, Runner};
+use drover::runner::{Out, Runner};
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -62,7 +62,7 @@ impl Proc {
 pub struct Wrote {
     pub proc: usize,
     pub at: u64,
-    pub ev: herdsman::events::Event,
+    pub ev: drover::events::Event,
     /// The host was busy (load ≥ 25) when it was written.
     pub busy: bool,
 }
@@ -128,7 +128,7 @@ impl Sim {
         self.w.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Start process `name` running `herdsman <args>` at the next step it is picked; its pid.
+    /// Start process `name` running `drover <args>` at the next step it is picked; its pid.
     pub fn spawn(self: &Arc<Sim>, w: &mut World, name: &str, args: &[&str]) -> u32 {
         let args: Vec<String> = args.iter().map(ToString::to_string).collect();
         w.next_pid += 1;
@@ -145,7 +145,7 @@ impl Sim {
             out: String::new(),
             starting: None,
         });
-        let line = format!("spawn {} pid {pid}: herdsman {}", w.procs[me].name, args.join(" "));
+        let line = format!("spawn {} pid {pid}: drover {}", w.procs[me].name, args.join(" "));
         w.log(line);
         let sim = Arc::clone(self);
         let h = std::thread::Builder::new()
@@ -168,7 +168,7 @@ impl Sim {
             (crate::scenario::ctx(&w.root, now), w.root.clone())
         };
         let (a, b) = (Arc::clone(&self), Arc::clone(&self));
-        herdsman::sim::set(Some(herdsman::sim::Hooks {
+        drover::sim::set(Some(drover::sim::Hooks {
             now: Box::new(move || a.lock().now),
             pid,
             point: Box::new(move |p| b.point(me, p)),
@@ -177,13 +177,13 @@ impl Sim {
             sim: Arc::clone(&self),
             me,
         };
-        let mut argv = vec!["herdsman".to_string()];
+        let mut argv = vec!["drover".to_string()];
         argv.extend(args);
         let mut out = vec![];
         let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            herdsman::main_with(argv, &ctx, &r, &mut out, &mut std::io::empty())
+            drover::main_with(argv, &ctx, &r, &mut out, &mut std::io::empty())
         }));
-        herdsman::sim::set(None);
+        drover::sim::set(None);
         let mut w = self.lock();
         let text = String::from_utf8_lossy(&out).replace(&root.display().to_string(), "$D");
         w.procs[me].out = text.clone();
@@ -253,7 +253,7 @@ impl Sim {
         }
     }
 
-    fn point(&self, me: usize, p: &herdsman::sim::Point) {
+    fn point(&self, me: usize, p: &drover::sim::Point) {
         {
             let mut w = self.lock();
             if w.abort {
@@ -262,7 +262,7 @@ impl Sim {
             let at = w.now;
             let name = w.procs[me].name.clone();
             match p {
-                herdsman::sim::Point::Append(ev) => {
+                drover::sim::Point::Append(ev) => {
                     let who = ev.str("agent").map(|a| format!(" {a}")).unwrap_or_default();
                     w.log(format!(
                         "{name} append {} #{}{who} ts={}",
@@ -282,7 +282,7 @@ impl Sim {
                     });
                     crate::invariants::on_append(&mut w, me);
                 }
-                herdsman::sim::Point::Lease(k) => w.log(format!("{name} lease {k}")),
+                drover::sim::Point::Lease(k) => w.log(format!("{name} lease {k}")),
             }
         }
         self.yield_now(me, 0);
@@ -365,7 +365,7 @@ impl World {
     pub fn log(&mut self, line: String) {
         let line = line.replace(&self.root.display().to_string(), "$D");
         let line = format!("{:>5} t+{:<6} {line}", self.step, self.now - crate::scenario::T0);
-        if std::env::var_os("HERDSMAN_SIM_LIVE").is_some() {
+        if std::env::var_os("DROVER_SIM_LIVE").is_some() {
             eprintln!("{line}");
         }
         self.trace.push(line);
@@ -409,11 +409,5 @@ impl Runner for SimRunner {
         let a: Vec<&str> = args.iter().map(String::as_str).collect();
         let name = a.first().copied().unwrap_or("proc").to_string();
         Ok(self.sim.spawn(&mut w, &name, &a))
-    }
-    fn secret(&self, _svc: &str) -> anyhow::Result<Option<String>> {
-        Ok(None)
-    }
-    fn set_secret(&self, _svc: &str, _value: Option<&str>) -> anyhow::Result<()> {
-        Ok(())
     }
 }

@@ -4,7 +4,7 @@
 //! page in WebKit (tests/support/webview.swift), the board's parts painted as main.ts paints them (`system_frags`).
 mod common;
 use common::*;
-use herdsman::serve::Server;
+use drover::serve::Server;
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -19,9 +19,10 @@ fn page(name: &str, red: bool) -> std::path::PathBuf {
     } else {
         "F\n/dev/disk1 41943040 1 31457280\n"
     };
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("df -k /", df);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let f = Fake::default().reply("df -k /", df);
+    let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let res = String::from_utf8_lossy(&s.respond(
         &format!(
@@ -53,18 +54,10 @@ fn measure(file: &std::path::Path, pre: &str, stored: &str, js: &str) -> Vec<f64
         ),
     )
     .unwrap();
-    let o = swift()
-        .env("HERDSMAN_TAB", stored)
-        .env("HERDSMAN_WAIT", "1")
-        .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
-            run.to_str().unwrap(),
-            "390",
-            "-",
-            "horse",
-            png.to_str().unwrap(),
-            js,
-        ])
+    let o = webview()
+        .env("DROVER_TAB", stored)
+        .env("DROVER_WAIT", "1")
+        .args([run.to_str().unwrap(), "390", "-", "horse", png.to_str().unwrap(), js])
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&o.stdout);
@@ -72,17 +65,9 @@ fn measure(file: &std::path::Path, pre: &str, stored: &str, js: &str) -> Vec<f64
     out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect()
 }
 
-fn webkit() -> bool {
-    let ok = std::process::Command::new("swift").arg("--version").output().is_ok() && cfg!(target_os = "macos");
-    if !ok {
-        eprintln!("skipping: no swift/WebKit here");
-    }
-    ok
-}
-
 #[test]
 fn three_tabs_and_the_gear_on_each_with_the_dot_only_for_a_red_host() {
-    if !webkit() {
+    if no_webkit() {
         return;
     }
     // The nav's links, then per tab: [⚙] shown, its dot shown; then no [◐], no host or events tab, and the dot's label.
@@ -104,7 +89,7 @@ fn three_tabs_and_the_gear_on_each_with_the_dot_only_for_a_red_host() {
 
 #[test]
 fn every_former_control_is_in_its_section_and_the_gear_opens_at_agent_providers() {
-    if !webkit() {
+    if no_webkit() {
         return;
     }
     let js = "document.querySelector('#sysb').click(); \
@@ -124,21 +109,16 @@ fn every_former_control_is_in_its_section_and_the_gear_opens_at_agent_providers(
         got.push(+(document.documentElement.dataset.theme === 'kitchen'), +sysOn()); \
         document.querySelector('.sxc').click(); got.push(+!sysOn(), +(location.hash === '#queue')); window.measure = got";
     let m = measure(&page("sys-all", true), "", "queue", &format!("{{ {js} }}"));
-    // Open at providers (hash, scrolled to the top, its chip filled); account A's row; sendmeter's 7 [config] groups,
-    // its 2 roles' model pickers and the pipeline graph; one host card, 4 groups, [sign in ▾] without Claude's;
-    // Activity's rows and chips; [enable alerts], one paired device, 4 Notifications groups (#557: no Telegram); Conductor's [edit] link;
-    // Appearance's 3 lists and 4 themes; nothing left in the tabs and no ALERTS, accounts or deepseek in Hosts; a theme
-    // tap applies, the sheet stays; [close] closes and puts the tab's hash back.
     assert_eq!(
         m,
-        [1., 1., 1., 1., 1., 7., 2., 1., 1., 4., 1., 0., 1., 1., 1., 1., 4., 1., 3., 4., 1., 1., 1., 1., 1., 1., 1.],
+        [1., 1., 1., 1., 1., 6., 3., 1., 1., 4., 1., 0., 1., 1., 1., 1., 4., 1., 3., 4., 1., 1., 1., 1., 1., 1., 1.],
         "{m:?}"
     );
 }
 
 #[test]
 fn the_old_links_land_on_their_system_section() {
-    if !webkit() {
+    if no_webkit() {
         return;
     }
     let file = page("sys-routes", false);

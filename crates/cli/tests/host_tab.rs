@@ -3,7 +3,7 @@
 //! it is System's Hosts & health (serve.js makes its section); ALERTS moved to Notifications & devices (system.ts).
 mod common;
 use common::*;
-use herdsman::serve::Server;
+use drover::serve::Server;
 use std::path::PathBuf;
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -20,18 +20,18 @@ fn groups(h: &str) -> Vec<&str> {
 fn an_export_ships_the_host_data_and_its_forms_are_inert() {
     let demo = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../demo"));
     let d = tmpdir("host-export");
-    let c = herdsman::Ctx {
+    let c = drover::Ctx {
         config: demo.join("fleet.toml"),
         state: demo.join("events.jsonl"),
         worktrees: d.join("wt"),
-        hermes: d.join("hermes"),
-        exe: "herdsman".into(),
+        homes: [("hermes", d.join("hermes"))].into(),
+        exe: "drover".into(),
         now: 1,
         home: d.join("home"),
         hints: vec![],
     };
     std::fs::create_dir_all(d.join("wt/oldproj")).unwrap(); // an orphan folder: [remove orphans]
-    herdsman::serve::export(&c, &Fake::default(), &d.join("site"), true).unwrap();
+    drover::serve::export(&c, &Fake::default(), &d.join("site"), true).unwrap();
     let page = std::fs::read_to_string(d.join("site/index.html")).unwrap();
     assert!(
         !page.contains("id=host") && !page.contains("class=hcd"),
@@ -54,10 +54,11 @@ fn an_export_ships_the_host_data_and_its_forms_are_inert() {
 #[test]
 fn a_live_board_draws_cards_gauges_and_forms_that_post() {
     let c = ctx(&tmpdir("host-live"), CONFIG);
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("df -k /", "F\n/dev/disk1 41943040 1 4194304\n");
-    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = Fake::default().reply("df -k /", "F\n/dev/disk1 41943040 1 4194304\n");
+    let w = sh.on(&r);
+    let s = Server::new(&c, &w, Some(ADDR.into()));
     let h = host_tab(&s, ADDR, 1_000_000);
     assert_eq!(groups(&h)[..3], ["HOSTS", "FLEET DISK", "SERVICES"], "{h}");
     // One card, the main host's, its disk (4 of 40 GB free) under the 10 GB floor: red, the used part, `▶`, how far
@@ -85,8 +86,11 @@ fn the_host_api_shows_each_root_with_its_state_and_free_space() {
     let seen = format!(r#"{{"this host":{{"roots":{roots}}}}}"#);
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(c.state.with_file_name("hosts.json"), seen).unwrap();
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = Fake::default();
+    let w = sh.on(&r);
+    let s = Server::new(&c, &w, Some(ADDR.into()));
     let res =
         String::from_utf8(s.respond(&format!("GET /api/v1/host HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).unwrap();
     let v: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
@@ -107,5 +111,33 @@ fn the_host_api_shows_each_root_with_its_state_and_free_space() {
             ("g", "~/w", serde_json::json!(["active", "42 GB free"])),
         ],
         "{v}"
+    );
+}
+
+#[test]
+fn the_host_api_gives_each_account_and_provider_login_its_vendor() {
+    let c = ctx(
+        &tmpdir("host-vendors"),
+        &(CONFIG.to_string() + "[accounts]\nA = \"A\"\n"),
+    );
+    let sh = FakeShed::attached(&c);
+    let r = Fake::default();
+    let w = sh.on(&r);
+    let s = Server::new(&c, &w, Some(ADDR.into()));
+    let res =
+        String::from_utf8(s.respond(&format!("GET /api/v1/host HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
+    let setups = v["hosts"][0]["setups"].as_array().unwrap();
+    assert!(
+        setups.contains(&"claude".into()) && setups.contains(&"gh".into()),
+        "{v}"
+    );
+    assert_eq!(
+        v["vendors"],
+        serde_json::json!({
+            "accounts": [{"name": "A", "vendor": "anthropic"}],
+            "setups": [{"name": "claude", "vendor": "anthropic"}, {"name": "codex", "vendor": "openai"}],
+        }),
+        "gh is no provider's login: {v}"
     );
 }

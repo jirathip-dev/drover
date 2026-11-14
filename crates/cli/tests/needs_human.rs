@@ -2,9 +2,9 @@
 //! card (Queue + Herd strip) with [merge anyway] only when the PR could merge but for the round limit.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, fold, read, Event};
-use herdsman::serve::Server;
+use drover::config::Config;
+use drover::events::{append, fold, read, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
@@ -12,7 +12,7 @@ const ADDR: &str = "127.0.0.1:7777";
 const HEAD: &str = "1111111111111111111111111111111111111111";
 
 /// #12: four review rounds (the last `last` at HEAD), then `needs-human`; the PR cache says open, green, mergeable.
-fn fixture(name: &str, last: &str) -> herdsman::Ctx {
+fn fixture(name: &str, last: &str) -> drover::Ctx {
     let mut c = ctx(&tmpdir(name), CONFIG);
     c.now = NOW;
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
@@ -45,10 +45,8 @@ fn fixture(name: &str, last: &str) -> herdsman::Ctx {
     c
 }
 
-fn runner() -> Fake {
-    Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
+fn runner() -> OnShed {
+    OnShed::new(Fake::default())
 }
 
 /// The response at `path`; the page (#269) with its needs cards as the board draws them.
@@ -64,8 +62,8 @@ fn get(s: &Server, path: &str, cookie: &str) -> String {
 
 /// The `#needs` strip's card for #12.
 fn card(page: &str) -> &str {
-    let a = page.find("<div class=ask data-n=12>").expect("no needs-human card");
-    &page[a..a + page[a..].find("</div>").unwrap()]
+    let a = page.find("<details class=ask data-n=12>").expect("no needs-human card");
+    &page[a..a + page[a..].find("</details>").unwrap()]
 }
 
 #[test]
@@ -93,13 +91,28 @@ fn card_with_a_pass_at_head_offers_merge_anyway_to_a_paired_phone_only() {
         "{k}"
     );
     assert!(
-        page.find("<div class=ask data-n=12>") < page.find("<main>"),
-        "above every tab"
+        page.find("<details class=ask data-n=12>") < page.find("<main>"),
+        "above the tabs"
+    );
+    assert!(
+        k.starts_with(
+            "<details class=ask data-n=12><summary><span>#12 · needs-human · review rounds ran out (4/3)</span>"
+        ),
+        "#816: folded to one line: {k}"
+    );
+    assert!(
+        k.contains(
+            r#"<button form="nf-sendmeter-12" name=op value=extend><span>one more round</span></button></summary>"#
+        ) && k.contains(r#"<form method=post id="nf-sendmeter-12">"#),
+        "#816: the line's main button posts the card's form: {k}"
     );
 
     let unpaired = get(&s, "/", "");
     let k = card(&unpaired);
-    assert!(!k.contains("<form"), "an unpaired phone sees no buttons: {k}");
+    assert!(
+        !k.contains("<form") && !k.contains("<button"),
+        "an unpaired phone sees no buttons: {k}"
+    );
     let ro = Server::new(&c, &r, None);
     let page = get(&ro, "/", "");
     let k = card(&page);
@@ -149,7 +162,8 @@ fn herd_marks_the_issue_and_park_clears_the_card() {
 }
 
 /// Finding 1/2 of the first review: the card ops act only on a needs-human issue. #217: `[one more round]` logs
-/// `round-extended` first; a refused spawn logs `extend-failed` and brings the card back, and a retry grants no more.
+/// `round-extended` first; #778: a spawn held back (PAUSED) keeps it pending, its card answered, and a second tap grants
+/// no more.
 #[test]
 fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     let c = fixture("nh-guard", "FAIL");
@@ -176,23 +190,29 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
             .count()
     };
 
-    for _ in 0..2 {
-        let res = post("extend");
-        assert!(res.contains("REFUSED%20PAUSED"), "PAUSED refuses the spawn: {res}");
-        let k = card(&get(&s, "/", &cookie)).to_string();
-        assert!(
-            k.contains("REFUSED PAUSED") && k.contains("value=extend"),
-            "the card is back: {k}"
-        );
-    }
+    let res = post("extend");
+    assert!(
+        res.contains("msg=%2312%3A%20extend"),
+        "PAUSED only holds the spawn: {res}"
+    );
+    let p = drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
+    assert_eq!((p.reason.as_deref(), p.failed), (Some("PAUSED"), false));
+    assert!(
+        !get(&s, "/", &cookie).contains("<details class=ask data-n=12>"),
+        "the card stays answered"
+    );
+    assert!(
+        post("extend").contains("msg=%2312%3A%20extend"),
+        "a second tap retries the start"
+    );
     assert_eq!(extended(), 1, "the decision is logged once, before the spawn");
     assert_eq!(fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].extra, 1);
     let failed = read(&c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "extend-failed")
         .count();
-    assert_eq!(failed, 2);
+    assert_eq!(failed, 0);
 
     append(&c.state, &Event::new(40, "sendmeter", Some(12), "merged", json!({}))).unwrap();
     for op in ["park", "extend", "override"] {
@@ -224,7 +244,7 @@ fn a_recorded_extension_is_a_pending_line_without_buttons() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "", NOW);
     let page = get(&s, "/", &cookie);
-    assert!(!page.contains("<div class=ask data-n=12>"), "no needs-you card");
+    assert!(!page.contains("<details class=ask data-n=12>"), "no needs-you card");
     let a = page.find("<div class=pend data-n=12>").expect("no pending line");
     let p = &page[a..a + page[a..].find("</div>").unwrap()];
     assert!(p.contains("⟳ one more round · starting a lane…"), "{p}");

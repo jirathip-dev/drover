@@ -1,7 +1,7 @@
 # UI rules (#58, #63)
 
-The phone page (`herdsman serve`) has one look. Two CI gates enforce it; a red gate blocks
-`herdsman merge` (required checks, #24).
+The phone page (`drover serve`) has one look. Two CI gates enforce it; a red gate blocks
+`drover merge` (required checks, #24).
 
 ## Tokens
 
@@ -108,8 +108,10 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    has its `parked · work on PR #n` line, `[clean]` is disabled with its reason in `p.st`, `[stop]` and `[kill]`
    are hidden, the chat says there is no pane, and nothing in the sheet is in the red (danger) colour.
    `sheet-other` (#95) opens the demo's Others agent (a herdr agent that is no lane) and fails unless only
-   `[close pane]` shows (no `[stop]`, `[kill]`, `[clean]`), `p.st` reads `not a herdsman lane: herdsman can only
+   `[close pane]` shows (no `[stop]`, `[kill]`, `[clean]`), `p.st` reads `not a drover lane: drover can only
    close its pane`, and nothing in the sheet is in the red (danger) colour.
+   `sheet-acp` (#750) opens a lane whose transcript is an ACP session's (`> prompt`, `[tool] title (status)`, the
+   reply) and fails unless its text keeps its line breaks and each tool is one closed one-line row.
    `lanes-now` (#276; also `~terminal`, glyph mode) redraws the Lanes tab twice through `frag()` (the `/live` path) with
    long `now:` lines as the server emits them (plain; Claude's spinner word, a long action and its time; the word with a
    long action; an idle row with no spinner), and fails unless each stays one ellipsised line inside its row in every
@@ -132,11 +134,11 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
 Run both locally:
 ```sh
 cargo test --test ui_tokens
-cargo build --release && HERDSMAN_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl \
-  ./target/release/herdsman serve --export site --demo && scripts/ui-audit.sh site ui-390
+cargo build --release && DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl \
+  ./target/release/drover serve --export site --demo && scripts/ui-audit.sh site ui-390
 ```
 `scripts/ui-audit.sh` finds `google-chrome`/`chromium`; set `CHROME=<binary>` otherwise. #560: it and the WebKit
-tests' `swift` run under `scripts/ui-lock.sh`, one audit at a time on the host (`~/.cache/herdsman/ui-audit.lock`,
+tests' `swift` run under `scripts/ui-lock.sh`, one audit at a time on the host (`~/.cache/drover/ui-audit.lock`,
 run past once held 10 min; a dead holder lets go at once); a lane that waits logs `waiting for the UI audit lock (held by <lane>)`.
 
 **Exceptions:** each is listed by name with its reason in `tests/ui_tokens.rs` (`EXCEPTIONS`). **Adding an

@@ -1,7 +1,7 @@
-//! #361: `herdsman reclaim`: preview by default; only rebuildable folders, only in worktrees idle 7 days.
+//! #361: `drover reclaim`: preview by default; only rebuildable folders, only in worktrees idle 7 days.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
+use drover::events::{append, Event};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
@@ -10,7 +10,7 @@ const NOW: u64 = 1_800_000_000;
 const DAY: u64 = 86_400;
 
 /// A lane's spawn event and its worktree, with `target/`, `node_modules/`, `.cache/`, `build/` and `src/` in it.
-fn lane(c: &herdsman::Ctx, issue: u64) -> PathBuf {
+fn lane(c: &drover::Ctx, issue: u64) -> PathBuf {
     let w = c.worktrees.join("sendmeter").join(format!("issue-{issue}"));
     for d in ["target", "node_modules", ".cache", "build", "src"] {
         std::fs::create_dir_all(w.join(d)).unwrap();
@@ -34,7 +34,7 @@ fn git(r: Fake, w: &Path, head_at: u64, status: &str) -> Fake {
         .reply(&format!("git -C {w} status"), status)
 }
 
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let cfg = CONFIG.replace(
         "[fleet.sendmeter.role.impl]",
         "build_dirs = [\"build\"]\n\n[fleet.sendmeter.role.impl]",
@@ -58,9 +58,10 @@ fn preview_changes_nothing_and_apply_removes_only_build_folders() {
     std::fs::write(w.join("notes.md"), "x").unwrap();
     touch(&w.join("notes.md"), old);
     touch(&w, NOW); // the worktree folder's own mtime is no edit: the tests hold whatever the real clock says
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = || {
         git(Fake::default(), &w, old, "?? notes.md\0")
-            .reply("herdr agent list", NO_AGENTS)
             .reply("lsof", "")
             .reply("git -C", "")
     };
@@ -83,13 +84,14 @@ fn a_y_answer_applies() {
     let c = setup("reclaim-y");
     let w = lane(&c, 12);
     touch(&w, NOW);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = git(Fake::default(), &w, NOW - 8 * DAY, "")
-        .reply("herdr agent list", NO_AGENTS)
         .reply("lsof", "")
         .reply("git -C", "");
     let mut out = Vec::new();
-    let argv = ["herdsman", "reclaim"].map(String::from).to_vec();
-    let code = herdsman::main_with(argv, &c, &r, &mut out, &mut &b"y\n"[..]);
+    let argv = ["drover", "reclaim"].map(String::from).to_vec();
+    let code = drover::main_with(argv, &c, &r, &mut out, &mut &b"y\n"[..]);
     assert_eq!(code, 0, "{}", String::from_utf8_lossy(&out));
     assert_eq!(gone(&w), [true, true, true, true, false]);
 }
@@ -109,11 +111,10 @@ fn busy_or_recent_worktrees_are_skipped() {
     let r = git(r, &live, old, "");
     let r = git(r, &edited, old, " M src/lib.rs\0");
     let r = git(r, &deleted, old, " D src/gone.rs\0");
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    sh.lane("sendmeter-impl-2", "idle", "/elsewhere");
     let r = git(r, &moved, NOW - 2 * DAY, "")
-        .reply(
-            "herdr agent list",
-            &agents(&[("sendmeter-impl-2", "idle", "/elsewhere", "p1")]),
-        )
         .reply("lsof", &lsof)
         .reply("git -C", "");
     let (code, out) = run(&c, &r, &["reclaim", "--apply"]);
@@ -148,7 +149,9 @@ fn the_shared_build_folder_is_trimmed_past_its_budget_except_a_building_profile(
     let (building, idle) = (profile("sendmeter/debug"), profile("other/debug"));
     let held = std::fs::File::open(building.join(".cargo-lock")).unwrap();
     held.lock().unwrap(); // a cargo build running there
-    let r = || Fake::default().reply("herdr agent list", NO_AGENTS).reply("lsof", "");
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r = || Fake::default().reply("lsof", "");
     let (code, out) = run(&c, &r(), &["reclaim"]);
     assert_eq!(code, 0, "{out}");
     assert!(

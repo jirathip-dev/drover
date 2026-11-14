@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@1.99.1
         with:
           components: clippy, rustfmt
@@ -26,29 +28,25 @@ jobs:
         run: cargo test --locked
       - name: "no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)"
         run: "! ls -a \"${TMPDIR:-/tmp}\" | grep '^fleet-test-'"
-      - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests)"
-        run: cargo test --release --locked --test perf -- waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log a_hundred_board_requests --nocapture --test-threads=1
+      - name: "perf in release (#447: waits and the Lanes tab on a 30,000-event log; #560: the board's CPU per 100 requests; #859: /api/v1/state on 150,000 events)"
+        run: cargo test --release --locked --test perf -- waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log a_hundred_board_requests the_state_read_stays_under_300ms --nocapture --test-threads=1
       - name: demo export (#39, synthetic data in demo/)
-        run: HERDSMAN_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/herdsman serve --export site --demo
+        run: DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/drover serve --export site --demo
       - name: leak gate (no ts.net hostname, chat ID or /Users/ path in docs/, demo/ or the exported demo)
         run: "! grep -rnE '[A-Za-z0-9-]\\.ts\\.net|telegram:-?[0-9]|/Users/' docs/ demo/ site/"
       - name: deps gate (direct deps ⊆ the allow-list in docs/serve.md)
         run: |
-          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|shed-proto|rusqlite|keyring|tokio|herdsman-core|herdsman-server|herdsman-service' || true)
+          extra=$(for f in Cargo.toml crates/*/Cargo.toml; do sed -n '/^\[\(workspace\.\)\{0,1\}dependencies\]/,/^\[/p' "$f"; done | grep -oE '^[a-z0-9_-]+' | grep -vxE 'clap|serde|serde_json|toml|anyhow|thiserror|p256|aes-gcm|hkdf|sha2|base64|ts-rs|shed-proto|rusqlite|keyring|tokio|drover-core|drover-server|drover-service' || true)
           test -z "$extra" || { echo "not allowed: $extra"; exit 1; }
-      - name: layers (#264; core never depends on server or cli, server never on cli; only runner, events and webpush in core spawn processes)
+      - name: layers (#264; core never depends on server or cli, server never on cli; #713 only the runner in core spawns processes, tests/runner_limits.rs checks every crate)
         run: |
-          core=$(cargo tree --locked -p herdsman-core -e normal,build --prefix none)
-          server=$(cargo tree --locked -p herdsman-server -e normal,build --prefix none)
-          if grep -E '^herdsman(-server)? v' <<<"$core" || grep -E '^herdsman v' <<<"$server"; then exit 1; fi
-          bad=$(grep -rlwE 'Command|Stdio|Child' crates/core/src | grep -vxE 'crates/core/src/(runner|events|webpush)\.rs' || true)
+          core=$(cargo tree --locked -p drover-core -e normal,build --prefix none)
+          server=$(cargo tree --locked -p drover-server -e normal,build --prefix none)
+          if grep -E '^drover(-server)? v' <<<"$core" || grep -E '^drover v' <<<"$server"; then exit 1; fi
+          bad=$(grep -rlwE 'Command|Stdio|Child' crates/core/src | grep -vxE 'crates/core/src/runner\.rs' || true)
           test -z "$bad" || { echo "std::process outside the Runner implementations: $bad"; exit 1; }
-      - name: harness-neutral core (#316; no Claude or Anthropic name outside crates/core/src/harness/ but comments and the hook's AI-trailer names)
-        run: |
-          bad=$(grep -rniE 'claude|anthropic' crates/*/src | grep -v '^crates/core/src/harness/' | grep -vE '^[^:]+:[0-9]+: *//' | grep -v 'const AI:' || true)
-          test -z "$bad" || { echo "harness named outside crates/core/src/harness/: $bad"; exit 1; }
       - name: "release has no ts-rs (#375: the TS bindings' dep is behind the `ts` feature)"
-        run: "! cargo tree --locked -p herdsman -e normal --prefix none | grep -E '^ts-rs(-macros)? v'"
+        run: "! cargo tree --locked -p drover -e normal --prefix none | grep -E '^ts-rs(-macros)? v'"
       - uses: taiki-e/install-action@v2
         with:
           tool: just
@@ -58,14 +56,28 @@ jobs:
           just types
           git diff --exit-code assets/types/ || { echo "::error::assets/types/ is stale: run \`just types\` and commit it"; exit 1; }
           test -z "$(git status --porcelain assets/types/)" || { echo "::error::untracked file in assets/types/: run \`just types\`"; exit 1; }
-          cargo test --locked -p herdsman-server --features ts serde_json_fits_the_types
+          cargo test --locked -p drover-server --features ts serde_json_fits_the_types
           just types-lint
       - name: "no Rust HTML (#269): crates/server builds the page shell only; the TypeScript board draws every tab"
         run: just html-lint
+      - name: "timing check (#844): every core timing is a [limits] key; no hard-coded Duration in crates/core/src"
+        run: scripts/timing-check.sh
+      - name: "workflow diagram (#845): docs/workflow.md is `drover diagram`'s output"
+        run: |
+          ./target/release/drover diagram | diff docs/workflow.md - || { echo "::error::docs/workflow.md is stale: run \`drover diagram > docs/workflow.md\`"; exit 1; }
       - name: line cap (formatted non-test Rust lines under src/ and crates/*/src/ at most line_cap in ci/cap.toml; raises need the owner's OK, docs/cap-history/)
-        run: ./target/release/herdsman cap-check --config ci/cap.toml
+        run: ./target/release/drover cap-check --config ci/cap.toml
+      - name: "arch-check (#734: layers, banned calls and size baselines in .drover/arch.toml; #735: new comments, stale docs)"
+        env:
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            printf '%s' "$BODY" > "$RUNNER_TEMP/pr-body.md"
+            set -- --base HEAD^1 --pr-body "$RUNNER_TEMP/pr-body.md"
+          fi
+          ./target/release/drover arch-check "$@"
       - name: "lesson checks (#510: shadow ones report would-fail in the job summary and never fail; active ones fail)"
-        run: ./target/release/herdsman lesson-check
+        run: ./target/release/drover lesson-check
       - name: assets budget (warn only; ≤ 1500 lines of JS/CSS under assets/)
         run: |
           n=$(cat assets/*.js assets/*.css | wc -l)
@@ -110,7 +122,7 @@ jobs:
         run: cargo build --release --locked
       - name: demo export, and the Host tab's busy and healthy fixtures (#141)
         run: |
-          HERDSMAN_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/herdsman serve --export site --demo
+          DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/drover serve --export site --demo
           scripts/host-fixtures.sh site
       # #68: Chrome's new headless never makes a window under 500 px wide; the headless shell honours 390.
       # Pinned build (Google's Chrome-for-Testing), so layout never moves without a commit.
@@ -119,6 +131,8 @@ jobs:
           c=$(npx -y @puppeteer/browsers@2.6.1 install chrome-headless-shell@156.0.8078.80 --path "$RUNNER_TEMP/chs" | tail -1 | cut -d' ' -f2-)
           test -x "$c" || { echo "::error::chrome-headless-shell install gave no binary: '$c'"; exit 1; }
           echo "CHROME=$c" >> "$GITHUB_ENV"
+      - name: the lifeboat page for the audit (#725)
+        run: LIFEBOAT_SITE="$PWD/site" cargo test --locked --test lifeboat the_page_for_the_ui_audit
       - name: ui audit at 390 px (and the loading views at 1440, #337) and the sheet close screencast (#166)
         run: scripts/ui-audit.sh site ui-390
       # #566: every hung Chrome run in the job summary; views still hung after 2 retries go to the soft `ui-flaky` check.
@@ -130,6 +144,8 @@ jobs:
           echo "flaky=$(cut -d' ' -f1 ui-390/flaky.txt 2>/dev/null | sort -u | xargs)" >> "$GITHUB_OUTPUT"
       - name: the backlog on a fresh load and after a /live patch, in Chrome on the real server (#391)
         run: cargo test --locked --test backlog the_backlog_draws_on_a_fresh_load_and_after_a_live_patch
+      - name: the verify lane's browser evidence in Chrome (#731; console error, 500, known noise, design diff)
+        run: cargo test --locked --test verify_browser
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -149,24 +165,61 @@ jobs:
         env:
           FLAKY: ${{ needs.ui.outputs.flaky }}
 
+  # #862: ui-webkit runs only when the diff touches the board UI (scripts/board-freeze.sh's list) or its own tests.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      webkit: ${{ steps.diff.outputs.webkit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          if [ -z "${BASE//0/}" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
+            echo "webkit=true" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git diff --name-only "$BASE...$HEAD" | tee changed.txt
+          webkit=false
+          scripts/board-freeze.sh /dev/null < changed.txt > /dev/null || webkit=true
+          grep -qxE 'crates/cli/tests/(support/webview\.mjs|perf\.rs|ui_audit\.rs|chat_tab\.rs)' changed.txt && webkit=true
+          echo "webkit=$webkit" | tee -a "$GITHUB_OUTPUT"
+
   # #200: the sheet close in WebKit (iOS Safari's engine; Chrome never showed the flash): the page above a closing
-  # sheet keeps its colour. The PNG is each sheet's worst frame.
+  # sheet keeps its colour. The PNG is each sheet's worst frame. #862: Playwright's WebKit on Linux.
   ui-webkit:
-    runs-on: macos-latest
+    needs: changes
+    if: needs.changes.outputs.webkit == 'true'
+    runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.99.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      # Pinned, so the engine never moves without a commit; CI-only (no package.json): the tests find it by NODE_PATH.
+      - name: playwright webkit
+        run: |
+          npm install --no-save --no-audit --no-fund --prefix "$RUNNER_TEMP/pw" playwright@1.63.0
+          npx --prefix "$RUNNER_TEMP/pw" playwright install --with-deps webkit
+          echo "NODE_PATH=$RUNNER_TEMP/pw/node_modules" >> "$GITHUB_ENV"
+          NODE_PATH="$RUNNER_TEMP/pw/node_modules" node -e "require('playwright')"
       - name: first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
       - name: sheet close in WebKit (chat, config, legend)
+        if: ${{ !cancelled() }}
         run: |
           mkdir -p ui-webkit
-          HERDSMAN_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test ui_audit closing_a_sheet_never_repaints_the_page -- --nocapture
+          DROVER_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test ui_audit closing_a_sheet_never_repaints_the_page -- --nocapture
           test -f ui-webkit/close-chat.png && test -f ui-webkit/close-config.png && test -f ui-webkit/close-legend.png
       - name: the chat keyboard in WebKit (#443, a 336 px visualViewport shrink at 390)
+        if: ${{ !cancelled() }}
         run: |
-          HERDSMAN_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test chat_tab the_keyboard_keeps_the_composer_on_it -- --nocapture
+          DROVER_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test chat_tab the_keyboard_keeps_the_composer_on_it -- --nocapture
           test -f ui-webkit/chat-kb.png
       - uses: actions/upload-artifact@v4
         if: always()

@@ -1,0 +1,12 @@
+{
+  "plugin": "drover", "version": "0.4.0", "commit": "b3f8ce2", "source": "index",
+  "run": "node server.mjs", "persona": "conductor",
+  "permissions": {
+    "places": ["header-strip: Queue", "header-strip: Events", "menu-row: drover"],
+    "chat_cards": true,
+    "push": true,
+    "actions": ["filter", "drive", "pause", "drive-all", "top", "answer", "run-card", "needs-human", "save-fleets", "stop", "drop", "remove-fleet"],
+    "destructive": ["stop", "drop", "remove-fleet", "run-card", "needs-human"],
+    "network": ["api.github.com", "127.0.0.1:7878"]
+  }
+}

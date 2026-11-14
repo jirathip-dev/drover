@@ -1,15 +1,16 @@
 //! The append-only event log (#344: in `state.db`, `db`), the state fold over it, and notifiers.
 use crate::config::Config;
+use crate::runner::{Real, Runner};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, HashMap};
-use std::io::Write;
+use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
-use std::sync::{Arc, Mutex, PoisonError};
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex, PoisonError, Weak};
+use std::time::Duration;
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +53,19 @@ impl Event {
     }
 }
 
+pub(crate) fn aliased(mut ev: Event) -> Event {
+    if let Some(k) = ev.kind.strip_prefix("conductor-") {
+        ev.kind = format!("orchestrator-{k}");
+    }
+    if ev.str("from") == Some("conductor") {
+        ev.data["from"] = "orchestrator".into();
+    }
+    if let Some(b) = ev.str("by").filter(|b| b.starts_with("conductor-")) {
+        ev.data["by"] = crate::orchestrator::by(b).into();
+    }
+    ev
+}
+
 #[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if hands a reference
 fn is_zero(n: &u64) -> bool {
     *n == 0
@@ -63,11 +77,11 @@ pub fn append(path: &Path, ev: &Event) -> Result<()> {
 }
 
 /// The live log (#343: without the events a rotation archived), by seq.
-pub fn read(path: &Path) -> Result<Vec<Event>> {
-    crate::db::events(path, "archived = ?1", 0)
+pub fn read(path: &Path) -> Result<Arc<Log>> {
+    shared(path)
 }
 
-/// #344: the log in the JSONL format before #344, one event a line with its seq (`herdsman events --jsonl`).
+/// #344: the log in the JSONL format before #344, one event a line with its seq (`drover events --jsonl`).
 pub fn jsonl(path: &Path) -> Result<String> {
     history(path)?
         .iter()
@@ -90,14 +104,14 @@ fn parse(text: &str, path: &Path) -> Vec<Event> {
     let mut out = Vec::with_capacity(lines.len());
     for (i, l) in lines.iter().enumerate() {
         match serde_json::from_str::<Event>(l) {
-            Ok(ev) if ev.seq == 0 => out.push(Event {
+            Ok(ev) if ev.seq == 0 => out.push(aliased(Event {
                 seq: i as u64 + 1,
                 ..ev
-            }),
-            Ok(ev) => out.push(ev),
+            })),
+            Ok(ev) => out.push(aliased(ev)),
             Err(_) if l.trim().is_empty() || i + 1 == lines.len() => {}
             Err(e) => eprintln!(
-                "herdsman: {}: line {}: skipping corrupt record: {e}",
+                "drover: {}: line {}: skipping corrupt record: {e}",
                 path.display(),
                 i + 1
             ),
@@ -124,12 +138,8 @@ pub(crate) fn archives(path: &Path) -> Result<Vec<Event>> {
     gz.sort();
     let mut all = vec![];
     for g in gz {
-        let o = Command::new("gzip")
-            .arg("-dc")
-            .arg(&g)
-            .stderr(Stdio::inherit())
-            .output()?;
-        all.extend(parse(&String::from_utf8_lossy(&o.stdout), &g));
+        let o = Real.run("gzip", &["-dc".into(), g.to_string_lossy().into_owned()])?;
+        all.extend(parse(&o.stdout, &g));
     }
     Ok(all)
 }
@@ -163,17 +173,88 @@ pub fn checkpoint(path: &Path) -> Result<u64> {
     Ok(seq)
 }
 
+/// #943: the most bytes of JSON one event is stored in.
+pub const EVENT_MAX: usize = 16 << 10;
+
+const NOISE: [&str; 6] = [
+    "driven",
+    "kick",
+    "drive-pass",
+    "lane-state",
+    "conflict-predicted",
+    "intent",
+];
+const NOISE_SECS: u64 = 2 * 86_400;
+
+/// #943: `ev` in at most `EVENT_MAX` bytes: long strings keep a head and a tail, long arrays their first items.
+pub fn capped(ev: &Event) -> Event {
+    let size = |e: &Event| serde_json::to_string(e).map_or(0, |s| s.len());
+    let mut keep = EVENT_MAX / 2;
+    let mut out = ev.clone();
+    while size(&out) > EVENT_MAX && keep >= 64 {
+        out.data.clone_from(&ev.data);
+        out.data.values_mut().for_each(|v| cut(v, keep));
+        keep /= 2;
+    }
+    out
+}
+
+fn cut(v: &mut Value, keep: usize) {
+    match v {
+        Value::String(s) if s.len() > keep => {
+            let (h, t) = (
+                s.floor_char_boundary(keep / 2),
+                s.ceil_char_boundary(s.len() - keep / 2),
+            );
+            *s = format!("{}… {} bytes cut …{}", &s[..h], t - h, &s[t..]);
+        }
+        Value::Array(a) => {
+            let n = (keep / 256).max(1);
+            if a.len() > n {
+                let more = a.len() - n;
+                a.truncate(n);
+                a.push(format!("… {more} more").into());
+            }
+            for x in a.iter_mut() {
+                cut(x, keep);
+            }
+        }
+        Value::Object(m) => m.values_mut().for_each(|x| cut(x, keep)),
+        _ => {}
+    }
+}
+
+fn shed_oversize(path: &Path) -> Result<()> {
+    let big = crate::db::events(
+        path,
+        "archived = 0 AND LENGTH(CAST(json AS BLOB)) > ?1",
+        EVENT_MAX as u64,
+    )?;
+    let (passive, read): (Vec<Event>, Vec<Event>) = big.into_iter().partition(|e| PASSIVE.contains(&e.kind.as_str()));
+    crate::db::rewrite(path, &read.iter().map(capped).collect::<Vec<_>>())?;
+    crate::db::archive(path, &passive.iter().map(|e| e.seq).collect::<Vec<_>>())
+}
+
 /// #343: over `max` bytes of live log, the events up to the checkpoint and older than 30 days are archived (#344: kept
 /// in the database for `history`, out of `read`). The live log keeps what its readers need: queue changes, every event
 /// of an issue still open or active in the 30 days, and a done issue's merge or close.
 pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
+    shed_oversize(path)?;
     if crate::db::live_bytes(path)? <= max {
         return Ok(());
     }
     let (cut, st, all) = (checkpoint(path)?, states(path)?, read(path)?);
+    let mut newest = HashMap::new();
+    for e in all.iter().filter(|e| NOISE.contains(&e.kind.as_str())) {
+        newest.insert((&e.kind, &e.fleet, e.issue, e.str("agent"), e.str("step")), e.seq);
+    }
+    let newest: std::collections::HashSet<u64> = newest.into_values().collect();
+    let noise = |e: &Event| {
+        NOISE.contains(&e.kind.as_str()) && e.seq <= cut && e.ts + NOISE_SECS < now && !newest.contains(&e.seq)
+    };
     let old = |e: &Event| e.seq <= cut && e.ts + 30 * 86_400 < now && e.kind != "queue";
     let mut live_issue: BTreeMap<(&str, u64), bool> = BTreeMap::new();
-    for e in &all {
+    for e in all.iter() {
         if let Some(n) = e.issue {
             let done = st.get(&(e.fleet.clone(), n)).is_some_and(IssueState::done);
             *live_issue.entry((&e.fleet, n)).or_default() |= !done || !old(e);
@@ -187,6 +268,7 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
         }
     };
     let moved = |e: &&Event| match e.issue {
+        _ if noise(e) => true,
         Some(n) => !live_issue[&(e.fleet.as_str(), n)] && !ends(e, &st[&(e.fleet.clone(), n)]),
         None => old(e),
     };
@@ -198,6 +280,17 @@ pub fn rotate(path: &Path, max: u64, now: u64) -> Result<()> {
 #[allow(clippy::needless_pass_by_value)] // public API: callers and tests hand the event over
 pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
     append(state, &ev)?;
+    notify(state, cfg, &ev)
+}
+
+/// #900: `db::ask`, then notify each event logged: they, the asks numbered, or none when `once` is logged already.
+pub fn ask(state: &Path, cfg: &Config, evs: Vec<Event>, once: Option<&str>) -> Result<Vec<Event>> {
+    let evs = crate::db::ask(state, evs, once)?.unwrap_or_default();
+    evs.iter().try_for_each(|ev| notify(state, cfg, ev))?;
+    Ok(evs)
+}
+
+fn notify(state: &Path, cfg: &Config, ev: &Event) -> Result<()> {
     // #99: phones hear of owner asks and of each default taken, never of a routine ask merely waiting.
     // #407: a thread open on a board (its stream stamped `watch-<thread>.at` in the last 5 s) pushes nothing.
     let at = |t: &str| std::fs::read_to_string(state.with_file_name(format!("watch-{t}.at"))).ok();
@@ -212,26 +305,26 @@ pub fn emit(state: &Path, cfg: &Config, ev: Event) -> Result<()> {
         "decision" if ev.str("by") == Some("default") => "needs-decision",
         // #541: a lane ask put to the owner pushes as an ask; a conductor's answer to one never pushes.
         "ask-owner" => "needs-decision",
-        "decision" if ev.str("by").is_some_and(|b| b.starts_with("conductor-")) => "",
+        "decision" if ev.str("by").is_some_and(|b| b.starts_with("orchestrator-")) => "",
         // #386: a conductor's reply pushes; the owner's own words and system lines never do.
-        "thread-msg" if ev.str("from") != Some("conductor") => "",
+        "thread-msg" if ev.str("from") != Some("orchestrator") => "",
         k => k,
     };
     let wanted = |n: &&crate::config::Notify| n.wants(if n.webpush() { push } else { &ev.kind });
     for n in cfg.notifiers(&ev.fleet).into_iter().filter(wanted) {
         let payload = if n.format.as_deref() == Some("json") {
-            serde_json::to_string(&ev)?
+            serde_json::to_string(ev)?
         } else {
-            plain(&ev) + "\n"
+            plain(ev) + "\n"
         };
         let res = if n.webpush() {
-            crate::webpush::send(state, n.sub.as_deref().unwrap_or_default(), &ev, None).map(drop)
+            crate::webpush::send(state, n.sub.as_deref().unwrap_or_default(), ev, None).map(drop)
         } else {
             run_notifier(&n.cmd, &payload)
         };
         if let Err(e) = res {
             let cmd = if n.webpush() { "webpush" } else { &n.cmd };
-            eprintln!("herdsman: notifier `{cmd}` failed: {e:#}");
+            eprintln!("drover: notifier `{cmd}` failed: {e:#}");
             let d = serde_json::json!({"cmd": cmd, "event": ev.kind, "error": format!("{e:#}")});
             let _ = append(state, &Event::new(ev.ts, &ev.fleet, ev.issue, "notify-failed", d));
         }
@@ -265,7 +358,7 @@ pub fn plain(ev: &Event) -> String {
                 })
                 .collect();
             format!(
-                "{who} needs you ({} asks {}): {}{opts}\n  herdsman answer {} {} <n|\"text\">",
+                "{who} needs you ({} asks {}): {}{opts}\n  drover answer {} {} <n|\"text\">",
                 s("agent"),
                 s("id"),
                 s("question"),
@@ -292,33 +385,23 @@ pub fn plain(ev: &Event) -> String {
     }
 }
 
-/// Runs without `HERMES_*` / `_HERMES_*`: a lane's Hermes profile must not leak into the notifier's `hermes send`.
 fn run_notifier(cmd: &str, payload: &str) -> Result<()> {
-    let mut c = Command::new("sh");
-    let hermes = |k: &std::ffi::OsString| k.to_string_lossy().trim_start_matches('_').starts_with("HERMES_");
-    for (k, _) in std::env::vars_os().filter(|(k, _)| hermes(k)) {
-        c.env_remove(k);
-    }
-    let mut child = c
-        .args(["-c", cmd])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
-    // A sink that exits without reading stdin must not fail the write.
-    let _ = child.stdin.take().unwrap().write_all(payload.as_bytes());
-    let deadline = Instant::now() + Duration::from_secs(15);
-    loop {
-        if let Some(st) = child.try_wait()? {
-            anyhow::ensure!(st.success(), "exit {}", st.code().unwrap_or(-1));
-            return Ok(());
-        }
-        if Instant::now() > deadline {
-            let _ = child.kill();
-            anyhow::bail!("timed out after 15s");
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    let mut args: Vec<String> = std::env::vars()
+        .map(|(k, _)| k)
+        .filter(|k| crate::providers::all().any(|p| p.scrubs_env(k)))
+        .flat_map(|k| ["-u".into(), k])
+        .collect();
+    // Both streams go nowhere, as before: a sink that backgrounds a child must not hold the reply open.
+    args.extend(crate::runner::argv(&[
+        "sh",
+        "-c",
+        &format!("exec >/dev/null 2>&1\n{cmd}"),
+    ]));
+    let secs = crate::config::limits().notify_secs;
+    let o = Real.run_for("env", &args, payload, Duration::from_secs(secs))?;
+    anyhow::ensure!(o.code != 124, "timed out after {secs}s");
+    anyhow::ensure!(o.code == 0, "exit {}", o.code);
+    Ok(())
 }
 
 #[cfg_attr(feature = "ts", derive(ts_rs::TS), ts(optional_fields = nullable))]
@@ -377,10 +460,13 @@ pub fn held_on(events: &[Event], s: &IssueState) -> Vec<u64> {
         .map_or(vec![], |e| crate::queue::nums(&e.data["on"]))
 }
 
-/// #500: a design lane's spawn: never the issue's build or check lane.
+/// #500: a design (#730: or architect) lane's spawn: never the issue's build or check lane.
 pub fn design(e: &Event) -> bool {
-    e.kind == "spawn" && e.str("role") == Some("design")
+    e.kind == "spawn" && e.str("role").is_some_and(|r| STAGES.contains(&r))
 }
+
+/// #730: the owner-reviewed pre-impl roles, in the order they run.
+pub const STAGES: [&str; 2] = ["architect", "design"];
 
 /// #424: lane end `e` ends spawn `sp` of its agent: only that pane's when `e` names one; a supersede logged
 /// without a pane (before #424, after the new spawn) ends none.
@@ -397,26 +483,40 @@ pub fn checks(e: &Event) -> bool {
         .unwrap_or(e.str("role") == Some("rev"))
 }
 
-/// Events `herdsman check` and notifiers write about an issue; they are not activity.
+/// Events `drover check` and notifiers write about an issue; they are not activity.
 pub const PASSIVE: &[&str] = &[
+    // #778: a tapped start still waiting; the decision before it moved the issue.
+    "pending-action",
     "lane-state",
     "lesson-prompted",
     // #511: a lane's typed turn end and drive's prompt on it; neither moves the issue.
     "turn-end",
     "turn-prompted",
+    "promise",
+    "promise-missed",
+    "self-heal",
+    "stuck",
+    "slo-ok",
     // #677: a why note put on a round head, one that failed to push, and drive's one nudge on a refused note.
     "why",
     "why-failed",
     "why-nudged",
     // #666: an ACP lane's first prompt sent again.
     "start-resent",
+    "nudged",
+    "respawned-silent",
+    "rev-stale-replaced",
     "budget-freed",
+    // #798: a finished lane's build folder or scratch removed.
+    "build-freed",
     "wip-saved",
+    "wip-skipped",
     "wip-blocked",
     // #662: a gone ACP lane's local commits drive pushed before resuming it.
     "lane-pushed",
     "stall",
     "orphan-lane",
+    "lane-dup",
     "orphan-issue",
     "outbox-stale",
     "lane-dead",
@@ -427,6 +527,7 @@ pub const PASSIVE: &[&str] = &[
     "account-capped",
     "agent-unavailable",
     "account-signed-out",
+    "lane-failed-start",
     "cap-banner-ignored",
     "spawn-failed",
     // #724: a failed spawn drive retries after a backoff, and the alert on a third identical one.
@@ -453,6 +554,7 @@ pub const PASSIVE: &[&str] = &[
     "decision-redelivered",
     "labelled",
     "build-cloned",
+    "build-reused",
     "unlabelled",
     "form-only-rejected",
     "form-rounds-exhausted",
@@ -473,7 +575,7 @@ pub const PASSIVE: &[&str] = &[
 ];
 
 /// #584: an ask's endings, the first that applies naming why it closed.
-const ORDER: [&str; 8] = [
+const ORDER: [&str; 9] = [
     "answered",
     "withdrawn",
     "delivered",
@@ -482,6 +584,7 @@ const ORDER: [&str; 8] = [
     "closed: merged",
     "closed: issue closed",
     "closed: lane gone",
+    "repeat",
 ];
 
 /// #632: events indexed and (ask, event) pairs checked: the ask endings' work, counted.
@@ -496,6 +599,7 @@ pub struct Asks {
     by: HashMap<(u8, String, Option<String>), Vec<usize>>,
     /// The first `spawn-started` of each (agent, pane).
     started: HashMap<(Option<String>, Option<String>), usize>,
+    ids: std::collections::HashSet<String>,
 }
 
 impl Asks {
@@ -510,6 +614,8 @@ impl Asks {
         let issue = e.issue.map(|n| n.to_string());
         if e.kind == "spawn-started" {
             self.started.entry((s("agent"), s("pane"))).or_insert(i);
+        } else if e.kind == "needs-decision" && twin(e).is_some_and(|k| !self.ids.insert(k)) {
+            self.ends.insert(i, Some((ORDER.len() - 1, i)));
         } else if e.kind == "needs-decision" {
             self.ends.insert(i, None);
             let keys = [key(0, s("id")), key(2, s("agent"))]
@@ -590,11 +696,12 @@ impl Threads {
     }
 }
 
-/// #701: the cached `Log` whose events `events` are (none: a log read some other way).
+/// #701, #944: the `Log` whose events `events` are, the newest or one a reader still holds (none: read some other way).
 pub fn cached(events: &[Event]) -> Option<Arc<Log>> {
-    let logs = LOGS.lock().unwrap_or_else(PoisonError::into_inner);
-    let hit = logs.values().find(|l| std::ptr::eq(l.events.as_slice(), events));
-    hit.cloned()
+    let live = LIVE.lock().unwrap_or_else(PoisonError::into_inner);
+    live.iter()
+        .filter_map(Weak::upgrade)
+        .find(|l| std::ptr::eq(&raw const *l.events, events))
 }
 
 /// #701: the first `needs-decision` (`ask`) or the last `decision` of `fleet`'s ask `id`: the index's when `events` is
@@ -613,11 +720,25 @@ pub fn ask_event<'a>(events: &'a [Event], kind: &str, fleet: &str, id: &str) -> 
     map.get(&(fleet.into(), id.into())).map(|i| &events[*i])
 }
 
+/// #900: `e` repeats an ask logged before it (two passes raced to post it): every view shows the first alone.
+pub fn repeat(events: &[Event], e: &Event) -> bool {
+    closed(events, e) == Some("repeat")
+}
+
+fn twin(e: &Event) -> Option<String> {
+    let k = (&e.fleet, e.issue, e.str("thread"), e.str("question"));
+    e.str("id").map(|id| format!("{id} {k:?}"))
+}
+
+/// #859: ask indexes built from a slice that is no cached `Log` (`index`'s one-pass fallback): serve's reads build none.
+pub static REBUILDS: AtomicUsize = AtomicUsize::new(0);
+
 /// #632: `f` on `events`' ask index: the cached `log`'s when `events` is it, else built in one pass.
 fn index<T>(events: &[Event], f: impl FnOnce(&Asks) -> T) -> T {
     if let Some(l) = cached(events) {
         return f(&l.asks);
     }
+    REBUILDS.fetch_add(1, Relaxed);
     let mut x = Asks::default();
     (1..=events.len()).for_each(|n| x.add(&events[..n]));
     f(&x)
@@ -627,10 +748,11 @@ fn index<T>(events: &[Event], f: impl FnOnce(&Asks) -> T) -> T {
 /// folded alone (a rotation or another database file since: all again).
 #[derive(Default, Clone)]
 pub struct Log {
-    pub events: Vec<Event>,
+    pub events: Events,
     pub asks: Asks,
     pub threads: Threads,
     pub states: States,
+    issues: HashMap<(String, u64), Vec<usize>>,
     seq: u64,
     key: (Option<u64>, Option<u64>),
 }
@@ -642,32 +764,125 @@ impl std::ops::Deref for Log {
     }
 }
 
-static LOGS: Mutex<BTreeMap<PathBuf, Arc<Log>>> = Mutex::new(BTreeMap::new());
+/// #944: a log's events, in a buffer its later versions share and append to in place: each sees only its own `len`.
+#[derive(Default, Clone)]
+pub struct Events {
+    buf: Arc<Buf>,
+    len: usize,
+}
+
+#[derive(Default)]
+struct Buf {
+    len: Mutex<usize>,
+    cells: Box<[UnsafeCell<MaybeUninit<Event>>]>,
+}
+
+// SAFETY: a cell is written once, under `len`'s lock, before `len` passes it; only cells below `len` are ever read.
+unsafe impl Sync for Buf {}
+
+impl Drop for Buf {
+    fn drop(&mut self) {
+        let n = *self.len.get_mut().unwrap_or_else(PoisonError::into_inner);
+        for c in &mut self.cells[..n] {
+            // SAFETY: the first `n` cells were written (`push`) and are dropped only here.
+            unsafe { c.get_mut().assume_init_drop() };
+        }
+    }
+}
+
+impl std::ops::Deref for Events {
+    type Target = [Event];
+    fn deref(&self) -> &[Event] {
+        // SAFETY: the first `len` cells are written and never written again; a cell is laid out as its `Event`.
+        unsafe { std::slice::from_raw_parts(self.buf.cells.as_ptr().cast(), self.len) }
+    }
+}
+
+impl Events {
+    fn push(&mut self, e: Event) {
+        loop {
+            let mut at = self.buf.len.lock().unwrap_or_else(PoisonError::into_inner);
+            if *at == self.len && self.len < self.buf.cells.len() {
+                // SAFETY: cell `len` is past what every handle sees and `at`'s lock is held: nothing else touches it.
+                unsafe { (*self.buf.cells[self.len].get()).write(e) };
+                (*at, self.len) = (self.len + 1, self.len + 1);
+                return;
+            }
+            drop(at);
+            self.grow(1);
+        }
+    }
+
+    fn reserve(&mut self, n: usize) {
+        if self.len + n > self.buf.cells.len() {
+            self.grow(n);
+        }
+    }
+
+    fn grow(&mut self, n: usize) {
+        let cap = (self.len + n).next_power_of_two().max(64);
+        let cells = (0..cap).map(|_| UnsafeCell::new(MaybeUninit::uninit())).collect();
+        let mut next = Events {
+            buf: Arc::new(Buf {
+                len: Mutex::new(0),
+                cells,
+            }),
+            len: 0,
+        };
+        self.iter().for_each(|e| next.push(e.clone()));
+        *self = next;
+    }
+}
+
+type Gated = (Arc<Mutex<()>>, Arc<Log>);
+
+static LOGS: Mutex<BTreeMap<PathBuf, Gated>> = Mutex::new(BTreeMap::new());
+
+static LIVE: Mutex<Vec<Weak<Log>>> = Mutex::new(Vec::new());
 
 /// #560, #632: the cached `Log` of `path` (by its database: a demo's scratch one apart), brought up to its last seq:
 /// each call reads only the events appended since (serve's requests and watcher).
 pub fn shared(path: &Path) -> Result<Arc<Log>> {
-    let mut logs = LOGS.lock().unwrap_or_else(PoisonError::into_inner);
-    let l = logs.entry(crate::db::file(path)).or_default();
-    // #560: another file or a rotation since (`db::version`): all again.
+    let (file, logs) = (crate::db::file(path), || {
+        LOGS.lock().unwrap_or_else(PoisonError::into_inner)
+    });
+    let gate = logs().entry(file.clone()).or_default().0.clone();
+    let _one = gate.lock().unwrap_or_else(PoisonError::into_inner);
     let (last, key) = (crate::db::last_seq(path), crate::db::version(path));
+    let mut l = {
+        let mut m = logs();
+        let l = &mut m.get_mut(&file).expect("added above").1;
+        if key == l.key && last == l.seq && last > 0 {
+            return Ok(l.clone());
+        }
+        std::mem::take(l)
+    };
+    let got = catch_up(path, &mut l, last, key);
+    logs().get_mut(&file).expect("added above").1 = l.clone();
+    let mut live = LIVE.lock().unwrap_or_else(PoisonError::into_inner);
+    live.retain(|w| w.strong_count() > 0 && !std::ptr::eq(w.as_ptr(), Arc::as_ptr(&l)));
+    live.push(Arc::downgrade(&l));
+    got.map(|()| l)
+}
+
+fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<u64>)) -> Result<()> {
     if key != l.key {
         *l = Arc::new(Log { key, ..Log::default() });
-    }
-    // Seq 0 (no events, or a read error `last_seq` hides) is read again: its error is the caller's to show.
-    if last == l.seq && last > 0 {
-        return Ok(l.clone());
     }
     let new = crate::db::events(path, "archived = 0 AND seq > ?1", l.seq)?;
     let m = Arc::make_mut(l);
     m.seq = new.last().map_or(last, |e| e.seq.max(last));
     m.states = fold_into(std::mem::take(&mut m.states), &new);
+    m.events.reserve(new.len());
     for e in new {
+        if let Some(n) = e.issue {
+            m.issues.entry((e.fleet.clone(), n)).or_default().push(m.events.len());
+        }
         m.events.push(e);
         m.asks.add(&m.events);
         m.threads.add(&m.events);
     }
-    Ok(l.clone())
+    Ok(())
 }
 
 /// Why ask `a` closed (#584: every ending): answered, withdrawn, delivered or failed (a handoff card), expired, its
@@ -684,7 +899,7 @@ fn ending<'a>(events: &'a [Event], a: &Event) -> Option<(&'static str, &'a Event
     Some((ORDER[end.0], &events[end.1]))
 }
 
-/// #584: `closed` as `herdsman asks` shows it: `withdrawn → q<new>`, `delivered to t<n>`.
+/// #584: `closed` as `drover asks` shows it: `withdrawn → q<new>`, `delivered to t<n>`.
 pub fn closed_row(events: &[Event], a: &Event) -> Option<String> {
     let (why, e) = ending(events, a)?;
     Some(match (why, e.str("for"), e.str("to")) {
@@ -694,13 +909,19 @@ pub fn closed_row(events: &[Event], a: &Event) -> Option<String> {
     })
 }
 
+/// #906: decision or `ask-*` ending `e` is about ask `a` (by `ask_seq`, else by id on its issue).
+pub fn names(e: &Event, a: &Event) -> bool {
+    let seq = e.data.get("ask_seq").and_then(Value::as_u64);
+    e.str("id") == a.str("id") && seq.map_or(e.issue.is_none() || e.issue == a.issue, |s| s == a.seq)
+}
+
 /// #447: what later event `e` does to ask `a` (`closed`'s reasons, one event at a time). `own`: `e`'s
 /// `spawn-started` came before the ask, so a `spawn` `e` is the asking lane itself (#446).
 fn closes(a: &Event, e: &Event, own: impl FnOnce() -> bool) -> Option<&'static str> {
     VISITS.fetch_add(1, Relaxed);
     let on = |k: &str| e.kind == k && a.issue.is_some() && e.issue == a.issue;
     let mine = matches!(e.kind.as_str(), "spawn" | "lane-killed") && e.str("agent") == a.str("agent");
-    let id = e.str("id") == a.str("id");
+    let id = names(e, a);
     if e.fleet != a.fleet {
         None
     } else if e.kind == "decision" && id {
@@ -735,13 +956,29 @@ pub fn open_asks(events: &[Event]) -> Vec<&Event> {
     index(events, |x| x.open(events))
 }
 
-/// Current per-issue state (the states in `roles/usage-tail.md`).
+/// #859: `fleet` #`n`'s events in order: the index's when `events` is a cached log, else one pass.
+pub fn of_issue<'a>(events: &'a [Event], fleet: &str, n: u64) -> Vec<&'a Event> {
+    let Some(l) = cached(events) else {
+        REBUILDS.fetch_add(1, Relaxed);
+        return events
+            .iter()
+            .filter(|e| e.fleet == fleet && e.issue == Some(n))
+            .collect();
+    };
+    let at = l.issues.get(&(fleet.to_string(), n));
+    at.map_or_else(Vec::new, |v| v.iter().map(|i| &events[*i]).collect())
+}
+
+/// Current per-issue state (the states in `roles/usage-tail.md`); #859: the cached log's fold when `events` is it.
 pub fn fold(events: &[Event]) -> States {
+    if let Some(l) = cached(events) {
+        return l.states.clone();
+    }
     fold_into(States::new(), events)
 }
 
 /// #343: `fold` on from the states `m` (a checkpoint's).
-fn fold_into(mut m: States, events: &[Event]) -> States {
+pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
     for e in events {
         let Some(n) = e.issue else { continue };
         let new = || IssueState {
@@ -763,10 +1000,13 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
         // Design lanes are the owner's: they never move the issue through review or merge; #412: one on the issue
         // branch (a `--design` issue's, before impl) is the issue's design stage.
         if design(e) {
-            if let Some(a) = e.str("agent") {
-                s.lanes.insert("design".into(), a.into());
+            if let (Some(r), Some(a)) = (e.str("role"), e.str("agent")) {
+                s.lanes.insert(r.into(), a.into());
             }
-            if !DESIGN.contains(&s.state.as_str()) || e.str("branch").is_none_or(|b| b.starts_with("design-")) {
+            if !DESIGN.contains(&s.state.as_str())
+                || e.str("branch")
+                    .is_none_or(|b| b.starts_with(&format!("{}-", e.str("role").unwrap_or_default())))
+            {
                 continue;
             }
             (s.state, s.lane) = ("design".into(), e.str("agent").map(String::from));
@@ -774,7 +1014,7 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
         s.last_ts = e.ts;
         s.last_event.clone_from(&e.kind);
         match e.kind.as_str() {
-            "spawn" if e.str("role") == Some("design") => {}
+            "spawn" if design(e) => {}
             "spawn" => {
                 s.lane = e.str("agent").map(String::from);
                 s.effort = e.str("effort").map(String::from);
@@ -844,7 +1084,8 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
             "design-approved" | "design-revise" => (s.state, s.lane) = ("queued".into(), None),
             "design-rejected" => (s.state, s.lane) = ("needs-human".into(), None),
             // #500: a false `LANE_ENDS` park undone: the state before it. #639: back in the queue, its build lane ends.
-            "repaired" => {
+            // #712: the owner's `unpark`: the state before the park, the same way.
+            "repaired" | "unparked" => {
                 s.state = e.str("state").map_or(s.state.clone(), String::from);
                 if let Some(b) = s.build.take().filter(|_| s.state == "queued") {
                     s.lanes.remove(&b);
@@ -852,6 +1093,7 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
             }
             // #350: the FAIL verdict logged right after it starts the fix round.
             "reverted" | "land-fix" => s.state = format!("fix({})", s.rounds),
+            "round-extended" if s.state == "needs-human" && s.card() == "start lane" => s.state = "queued".into(),
             "round-extended" => {
                 (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
                 // #151: `extend --no-spawn` spawns nothing, so the extra round itself leaves needs-human. #639: a build
@@ -885,7 +1127,87 @@ fn fold_into(mut m: States, events: &[Event]) -> States {
             _ => {}
         }
     }
+    debug_assert!(m.values().all(|s| state(&s.state).is_some()), "a state not in STATES");
     m
+}
+
+/// #845: every state `fold` gives an issue (a round's `(n)`, `·f` and `+uN` aside), each with its ways out.
+pub const STATES: &[(&str, &[(&str, &str)])] = &[
+    (
+        "queued",
+        &[
+            ("design", "queued with an architect or design mark, that lane first"),
+            (
+                "impl",
+                "impl spawned, refused while SERIAL_BUSY, HOST_BUSY, DISK_BUDGET, LANE_LIVE or CAP",
+            ),
+            ("closed", "issue closed on GitHub"),
+        ],
+    ),
+    ("design", &[("design-review", "design pushed, the owner's ask")]),
+    (
+        "design-review",
+        &[("queued", "approve or revise"), ("needs-human", "reject")],
+    ),
+    (
+        "impl",
+        &[
+            ("review(n)", "turn done with a push, review spawned"),
+            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+            ("queued", "lane killed, or repaired while blocked"),
+        ],
+    ),
+    (
+        "review(n)",
+        &[
+            ("ready", "PASS at head"),
+            ("fix(n)", "FAIL at head"),
+            ("needs-human", "ROUND_LIMIT after review_rounds"),
+        ],
+    ),
+    (
+        "fix(n)",
+        &[
+            ("review(n)", "fix pushed, next review round"),
+            ("needs-human", "turn blocked, or stalled past stall_minutes"),
+        ],
+    ),
+    (
+        "ready",
+        &[
+            ("review(n)", "verify stage at head for ui_paths, a verify or repro mark"),
+            (
+                "fix(n)",
+                "update round +uN when behind or conflicting, UPDATE_LIMIT after update_rounds",
+            ),
+            ("merged", "merge with PASS at head and CI green, no STAGING_WOULD_BREAK"),
+            ("blocked", "merge refused, or PR closed outside drover"),
+        ],
+    ),
+    (
+        "blocked",
+        &[
+            ("fix(n)", "fix round spawned"),
+            ("review(n)", "review spawned at a new head"),
+        ],
+    ),
+    (
+        "needs-human",
+        &[
+            ("queued", "extend with no lane yet, start lane"),
+            ("fix(n)", "extend, one more round"),
+            ("parked", "park"),
+        ],
+    ),
+    ("parked", &[("needs-human", "unpark, the state before it")]),
+    ("merged", &[]),
+    ("closed", &[]),
+];
+
+/// #845: `state`'s `STATES` entry, matched on its name before any `(` or `+`.
+pub fn state(state: &str) -> Option<&'static (&'static str, &'static [(&'static str, &'static str)])> {
+    let base = state.split(['(', '+']).next();
+    STATES.iter().find(|(name, _)| name.split('(').next() == base)
 }
 
 /// #412: the states a design spawn moves into `design` (before impl).
@@ -901,6 +1223,15 @@ impl IssueState {
             "·f"
         } else {
             ""
+        }
+    }
+
+    /// #831: a needs-human card's main action: [start lane] when no build lane ever spawned and no round was reviewed.
+    pub fn card(&self) -> &'static str {
+        if self.build.is_none() && self.verdicts.is_empty() {
+            "start lane"
+        } else {
+            "one more round"
         }
     }
 

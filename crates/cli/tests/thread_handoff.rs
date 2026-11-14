@@ -2,21 +2,21 @@
 //! source, flow-back rows (an issue filed, an ask answered), the board's chips, and a conductor's `thread new` refused.
 mod common;
 use common::*;
-use herdsman::events::{read, Event};
-use herdsman::serve::Server;
+use drover::events::{read, Event};
+use drover::serve::Server;
 use serde_json::json;
 use std::io::Write;
 use std::process::{Command, Stdio};
 
 const ADDR: &str = "127.0.0.1:7777";
 
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let d = tmpdir(name);
     let c = ctx(
         &d,
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
-    let profile = c.config.with_file_name("claude").join("fleet-conductor");
+    let profile = c.config.with_file_name("claude").join("fleet-orchestrator");
     std::fs::create_dir_all(&profile).unwrap();
     std::fs::write(profile.join("settings.json"), "{}").unwrap();
     assert_eq!(
@@ -26,8 +26,37 @@ fn setup(name: &str) -> herdsman::Ctx {
     c
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
+    let cfg = format!(
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\naccount = \"C\"\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n[accounts]\nC = \"C\"\n",
+        b.sock.display()
+    );
+    let mut c = ctx(&tmpdir(name), &cfg);
+    c.exe = env!("CARGO_BIN_EXE_drover").into();
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    assert_eq!(
+        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill #12"]).1,
+        "t1\n"
+    );
+    c
+}
+
+fn acp() -> Fake {
+    let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
+    Fake::default()
+        .reply("shed agents --json", &agents.to_string())
+        .reply("shed run", "")
+        .reply("shed send", "")
+}
+
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
 /// herdr with `agents` live, ready to start a conductor in a new workspace or type into one.
@@ -47,7 +76,7 @@ fn herdr(agents: &str) -> Fake {
 }
 
 /// #492: a handoff from t1 to `repo`, then the owner's tap on its card's new-thread row: the new thread's id.
-fn to_new(c: &herdsman::Ctx, r: &Fake, repo: &str, title: &str, text: &str) -> String {
+fn to_new(c: &drover::Ctx, r: &dyn drover::runner::Runner, repo: &str, title: &str, text: &str) -> String {
     let (code, out) = run(c, r, &["thread", "handoff", "t1", repo, title, text]);
     assert_eq!(code, 0, "{out}");
     let card = kinds(c, "needs-decision").pop().unwrap();
@@ -58,26 +87,26 @@ fn to_new(c: &herdsman::Ctx, r: &Fake, repo: &str, title: &str, text: &str) -> S
     out.trim().rsplit(' ').next().unwrap().to_string()
 }
 
-fn show(c: &herdsman::Ctx, id: &str) -> String {
+fn show(c: &drover::Ctx, id: &str) -> String {
     run(c, &Fake::default(), &["thread", "show", id]).1
 }
 
-/// The real `herdsman` binary on `c`'s files, in a conductor lane of thread `thread` (`None`: the owner's shell).
-fn bin(c: &herdsman::Ctx, thread: Option<&str>, args: &[&str], stdin: &str) -> (i32, String) {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_herdsman"));
+/// The real `drover` binary on `c`'s files, in a conductor lane of thread `thread` (`None`: the owner's shell).
+fn bin(c: &drover::Ctx, thread: Option<&str>, args: &[&str], stdin: &str) -> (i32, String) {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_drover"));
     for k in [
-        "HERDSMAN_LANE",
+        "DROVER_LANE",
         "FLEET_LANE",
-        "HERDSMAN_THREAD",
-        "HERDSMAN_OUTBOX",
+        "DROVER_THREAD",
+        "DROVER_OUTBOX",
         "SHED",
         "BERTH",
     ] {
         cmd.env_remove(k);
     }
     if let Some(t) = thread {
-        cmd.env("HERDSMAN_LANE", "sendmeter:-:conductor")
-            .env("HERDSMAN_THREAD", t);
+        cmd.env("DROVER_LANE", "sendmeter:-:orchestrator")
+            .env("DROVER_THREAD", t);
     }
     let mut child = cmd
         .args(args)
@@ -95,18 +124,20 @@ fn bin(c: &herdsman::Ctx, thread: Option<&str>, args: &[&str], stdin: &str) -> (
 }
 
 /// The conductor of `thread` ran `cmd` in its shell, which printed `stdout` (a `PostToolUse` hook call).
-fn ran(c: &herdsman::Ctx, thread: &str, cmd: &str, stdout: &str) {
+fn ran(c: &drover::Ctx, thread: &str, cmd: &str, stdout: &str) {
     let input = json!({"hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_input": {"command": cmd},
         "tool_response": {"stdout": stdout, "stderr": "", "interrupted": false}});
-    let (code, out) = bin(c, Some(thread), &["hook", "--role", "conductor"], &input.to_string());
+    let (code, out) = bin(c, Some(thread), &["hook", "--role", "orchestrator"], &input.to_string());
     assert_eq!(code, 0, "{out}");
 }
 
 #[test]
-fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_conductor_with_the_text() {
-    let c = setup("handoff-new");
-    let r = herdr(NO_AGENTS);
-    assert_eq!(to_new(&c, &r, "sendmeter", "Rate limits", "429s from #19"), "t2");
+fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_orchestrator_with_the_text() {
+    let b = FakeShed::new();
+    let c = acp_setup("handoff-new", &b);
+    let r = acp();
+    let cli = b.cli(&r);
+    assert_eq!(to_new(&c, &cli, "sendmeter", "Rate limits", "429s from #19"), "t2");
     let new = kinds(&c, "thread-new");
     assert_eq!(
         (new.len(), new[1].str("title"), new[1].fleet.as_str()),
@@ -119,8 +150,17 @@ fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_conductor_with_the_t
         (Some("t1"), Some("t2"), Some("Rate limits"), Some("429s from #19"))
     );
     // t2's conductor starts, the handoff its thread's last message, marked as from t1 (not the owner).
-    assert!(r.called("herdr agent start conductor-t2"), "{:?}", r.calls.borrow());
-    let dir = c.state.with_file_name("conductor").join("t2");
+    assert!(
+        r.called("shed run --acp claude-acp --policy allow --name orchestrator-t2"),
+        "{:?}",
+        r.calls.borrow()
+    );
+    let sent = r.calls.borrow().join("\n");
+    assert!(
+        sent.contains("\n\n[t2] t1: handoff to Rate limits · t2: 429s from #19"),
+        "{sent}"
+    );
+    let dir = c.state.with_file_name("orchestrator").join("t2");
     assert_eq!(
         std::fs::read_to_string(dir.join(".thread.md")).unwrap(),
         "from t1: handoff to Rate limits · t2: 429s from #19\n"
@@ -138,22 +178,23 @@ fn a_handoff_to_a_repo_starts_a_linked_thread_and_wakes_its_conductor_with_the_t
         show(&c, "t2")
     );
 
-    let (code, out) = run(&c, &r, &["thread", "handoff", "t1", "t1", "x", "y"]);
+    let (code, out) = run(&c, &cli, &["thread", "handoff", "t1", "t1", "x", "y"]);
     assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");
-    let (code, out) = run(&c, &r, &["thread", "handoff", "t1", "t9", "x", "y"]);
+    let (code, out) = run(&c, &cli, &["thread", "handoff", "t1", "t9", "x", "y"]);
     assert!(code == 3 && out.contains("REFUSED NO_SUCH_THREAD"), "{out}");
     assert_eq!(kinds(&c, "thread-new").len(), 2, "refusals start no thread");
 }
 
 /// A handoff to a repo with no conductor is refused before a thread or a link is logged.
 #[test]
-fn a_handoff_to_a_repo_without_a_conductor_logs_nothing() {
-    let c = setup("handoff-noconductor");
+fn a_handoff_to_a_repo_without_a_orchestrator_logs_nothing() {
+    let b = FakeShed::new();
+    let c = acp_setup("handoff-noorchestrator", &b);
     let cfg = std::fs::read_to_string(&c.config).unwrap();
     let other = "\n[fleet.other]\nrepo = \"jirathip-dev/other\"\nlocal = \"/tmp/does-not-matter/other\"\nintegration = \"staging\"\n";
     std::fs::write(&c.config, cfg + other).unwrap();
-    let (code, out) = run(&c, &herdr(NO_AGENTS), &["thread", "handoff", "t1", "other", "x", "y"]);
-    assert!(code == 3 && out.contains("REFUSED NO_CONDUCTOR"), "{out}");
+    let (code, out) = run(&c, &b.cli(&acp()), &["thread", "handoff", "t1", "other", "x", "y"]);
+    assert!(code == 3 && out.contains("REFUSED NO_ORCHESTRATOR"), "{out}");
     assert_eq!(
         (
             kinds(&c, "thread-new").len(),
@@ -165,19 +206,27 @@ fn a_handoff_to_a_repo_without_a_conductor_logs_nothing() {
 }
 
 #[test]
-fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_conductor() {
-    let c = setup("handoff-reuse");
+fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_orchestrator() {
+    let b = FakeShed::new();
+    let c = acp_setup("handoff-reuse", &b);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
         "t2\n"
     );
-    let r = herdr(&agents(&[("conductor-t2", "idle", "/x", "w9:p2")]));
-    // An awake t2 conductor: its start is logged.
-    let st = json!({"thread": "t2", "agent": "conductor-t2", "pane": "w9:p2", "workspace": "w9", "harness": "claude"});
-    herdsman::events::append(&c.state, &Event::new(c.now, "sendmeter", None, "conductor-start", st)).unwrap();
+    b.add(
+        "orchestrator-t2",
+        json!({"fleet": "sendmeter", "role": "orchestrator", "thread": "t2"}),
+    );
+    let st = json!({"thread": "t2", "agent": "orchestrator-t2", "pane": "orchestrator-t2", "runtime": "shed-acp", "harness": "claude"});
+    drover::events::append(
+        &c.state,
+        &Event::new(c.now, "sendmeter", None, "orchestrator-start", st),
+    )
+    .unwrap();
+    let r = acp();
     let (code, out) = run(
         &c,
-        &r,
+        &b.cli(&r),
         &["thread", "handoff", "t1", "t2", "Burst size", "burst 100, not 50"],
     );
     assert_eq!((code, out.as_str()), (0, "t2\n"));
@@ -187,11 +236,11 @@ fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_conduc
         "a thread id is delivered at once, no card"
     );
     assert!(
-        r.called("herdr agent prompt conductor-t2 [t2] t1: handoff to Search · t2: burst 100, not 50"),
+        r.called("shed send orchestrator-t2 [t2] t1: handoff to Search · t2: burst 100, not 50"),
         "{:?}",
         r.calls.borrow()
     );
-    assert!(!r.called("herdr agent start"));
+    assert!(!r.called("shed run"));
     assert!(
         show(&c, "t2").ends_with("from t1: handoff to Search · t2: burst 100, not 50\n"),
         "{}",
@@ -205,8 +254,8 @@ fn a_handoff_to_an_existing_thread_appends_to_it_and_types_into_its_awake_conduc
 }
 
 /// #492: t1 and t2–t8 in sendmeter, each t<n> with a conductor reply `n` minutes in (t5's a long one); t8 archived.
-fn threads(name: &str) -> herdsman::Ctx {
-    let c = setup(name);
+fn threads(name: &str, b: &FakeShed) -> drover::Ctx {
+    let c = acp_setup(name, b);
     let titles = [
         "Main chat",
         "Test",
@@ -218,7 +267,7 @@ fn threads(name: &str) -> herdsman::Ctx {
     ];
     for (i, t) in titles.iter().enumerate() {
         let n = i as u64 + 2;
-        let at = herdsman::Ctx {
+        let at = drover::Ctx {
             now: c.now + n * 60,
             ..c.clone()
         };
@@ -240,8 +289,9 @@ fn threads(name: &str) -> herdsman::Ctx {
 
 #[test]
 fn a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_before_the_tap() {
-    let c = threads("handoff-card");
-    let at = herdsman::Ctx {
+    let b = FakeShed::new();
+    let c = threads("handoff-card", &b);
+    let at = drover::Ctx {
         now: c.now + 1000,
         ..c.clone()
     };
@@ -291,9 +341,11 @@ fn a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_b
         (0, msgs, 8)
     );
     assert!(r.calls.borrow().is_empty(), "{:?}", r.calls.borrow());
+    assert!(b.methods().is_empty(), "{:?}", b.methods());
 
     // The board draws it with the existing choice rows: 5 shown, 2 behind `more`.
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let f = Fake::default();
+    let r = b.on(&f);
     let s = Server::new(&at, &r, Some(ADDR.into()));
     let cookie = pair(&s, &at, "Mozilla/5.0 (iPhone)", at.now);
     let chat = &parts(&s, ADDR, &cookie, at.now)[2];
@@ -311,8 +363,10 @@ fn a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_b
 
 #[test]
 fn a_tap_on_a_thread_delivers_there_and_a_tap_on_new_starts_a_thread() {
-    let c = threads("handoff-pick");
-    let r = herdr(NO_AGENTS);
+    let b = FakeShed::new();
+    let c = threads("handoff-pick", &b);
+    let f = acp();
+    let r = b.cli(&f);
     let hand = |title: &str, text: &str| run(&c, &r, &["thread", "handoff", "t1", "sendmeter", title, text]).0;
     assert_eq!(hand("Rate limits", "429s from #19"), 0);
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "3"]);
@@ -321,7 +375,11 @@ fn a_tap_on_a_thread_delivers_there_and_a_tap_on_new_starts_a_thread() {
         "{out}"
     );
     assert_eq!(kinds(&c, "thread-new").len(), 8, "an existing thread, no new one");
-    assert!(r.called("herdr agent start conductor-t5"), "{:?}", r.calls.borrow());
+    assert!(
+        f.called("shed run --acp claude-acp --policy allow --name orchestrator-t5"),
+        "{:?}",
+        f.calls.borrow()
+    );
     // Both rows name the target as `<title> · <id>`.
     assert!(
         show(&c, "t5").ends_with("from t1: handoff to Billing · t5: 429s from #19\n"),
@@ -366,7 +424,8 @@ fn a_tap_on_a_thread_delivers_there_and_a_tap_on_new_starts_a_thread() {
 
 #[test]
 fn a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not() {
-    let c = setup("handoff-forward");
+    let b = FakeShed::new();
+    let c = acp_setup("handoff-forward", &b);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Test"]).1,
         "t2\n"
@@ -375,7 +434,8 @@ fn a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
         "t3\n"
     );
-    let r = herdr(NO_AGENTS);
+    let f = acp();
+    let r = b.cli(&f);
     assert_eq!(
         run(&c, &r, &["thread", "handoff", "t1", "t2", "Facets", "add facets"]).1,
         "t2\n"
@@ -409,7 +469,8 @@ fn a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not
     assert!(t2.contains("handoff to Test · t2: doc it\n"), "{t2}");
     assert_eq!(t2.matches("(forwarded)").count(), 1, "{t2}");
     // The board shows the mark too.
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let f = Fake::default();
+    let r = b.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
     let chat = &parts(&s, ADDR, &cookie, c.now)[2];
@@ -423,8 +484,9 @@ fn a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not
 
 #[test]
 fn an_issue_filed_and_an_ask_answered_in_the_target_each_add_one_row_to_the_source() {
-    let c = setup("handoff-flow");
-    assert_eq!(to_new(&c, &herdr(NO_AGENTS), "sendmeter", "Rate limits", "go"), "t2");
+    let b = FakeShed::new();
+    let c = acp_setup("handoff-flow", &b);
+    assert_eq!(to_new(&c, &b.cli(&acp()), "sendmeter", "Rate limits", "go"), "t2");
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Unlinked"]).1,
         "t3\n"
@@ -464,16 +526,22 @@ fn an_issue_filed_and_an_ask_answered_in_the_target_each_add_one_row_to_the_sour
         "t2",
     ];
     assert_eq!(run(&c, &Fake::default(), &ask).1, "q2\n");
-    let r = herdr(&agents(&[("conductor-t2", "idle", "/x", "w9:p1")]));
-    assert_eq!(run(&c, &r, &["answer", "sendmeter", "q2", "1"]).0, 0);
+    let r = acp();
+    assert_eq!(run(&c, &b.cli(&r), &["answer", "sendmeter", "q2", "1"]).0, 0);
+    assert!(
+        r.called("shed send orchestrator-t2 DECISION q2: small") && !r.called("shed run"),
+        "{:?}",
+        r.calls.borrow()
+    );
     let t1 = show(&c, "t1");
     assert_eq!(t1.lines().count(), rows + 1, "{t1}");
     assert!(t1.ends_with("from t2: answered q2: Which scope? → small\n"), "{t1}");
 }
 
 #[test]
-fn a_conductors_thread_new_is_refused_naming_handoff_and_the_owners_still_works() {
-    let c = setup("handoff-perm");
+fn a_orchestrators_thread_new_is_refused_naming_handoff_and_the_owners_still_works() {
+    let b = FakeShed::new();
+    let c = acp_setup("handoff-perm", &b);
     let (code, out) = bin(&c, Some("t1"), &["thread", "new", "sendmeter", "Side quest"], "");
     assert!(
         code == 3 && out.contains("REFUSED USE_HANDOFF") && out.contains("thread handoff"),
@@ -485,18 +553,15 @@ fn a_conductors_thread_new_is_refused_naming_handoff_and_the_owners_still_works(
         (0, "t2\n".into())
     );
     // Any conductor may hand off to any repo (`all` too).
-    assert_eq!(to_new(&c, &herdr(NO_AGENTS), "all", "Cross-repo", "both fleets"), "t3");
+    assert_eq!(to_new(&c, &b.cli(&acp()), "all", "Cross-repo", "both fleets"), "t3");
     assert_eq!(kinds(&c, "thread-new")[2].fleet, "all");
     let usage = run(&c, &Fake::default(), &["help", "--agent"]).1;
     assert!(
-        usage.contains("`herdsman thread handoff <FROM> <TO> <TITLE> <TEXT>`"),
+        usage.contains("`drover thread handoff <FROM> <TO> <TITLE> <TEXT>`"),
         "{usage}"
     );
-    let brief = std::fs::read_to_string(c.state.with_file_name("conductor").join("t3/.brief.md")).unwrap();
-    assert!(
-        brief.contains("herdsman thread handoff <thread> <repo|t<n>>"),
-        "{brief}"
-    );
+    let brief = std::fs::read_to_string(c.state.with_file_name("orchestrator").join("t3/.brief.md")).unwrap();
+    assert!(brief.contains("drover thread handoff <thread> <repo|t<n>>"), "{brief}");
 }
 
 fn req(s: &Server, method: &str, path: &str, extra: &str, now: u64) -> String {
@@ -506,9 +571,9 @@ fn req(s: &Server, method: &str, path: &str, extra: &str, now: u64) -> String {
 }
 
 /// A linked pair, t1 → t2, with a flow-back line in t1.
-fn linked(name: &str) -> herdsman::Ctx {
-    let c = setup(name);
-    assert_eq!(to_new(&c, &herdr(NO_AGENTS), "sendmeter", "Rate limits", "go"), "t2");
+fn linked(name: &str, b: &FakeShed) -> drover::Ctx {
+    let c = acp_setup(name, b);
+    assert_eq!(to_new(&c, &b.cli(&acp()), "sendmeter", "Rate limits", "go"), "t2");
     ran(
         &c,
         "t2",
@@ -520,8 +585,10 @@ fn linked(name: &str) -> herdsman::Ctx {
 
 #[test]
 fn the_chat_tab_shows_a_chip_on_each_linked_row_and_thread_row() {
-    let c = linked("handoff-tab");
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let b = FakeShed::new();
+    let c = linked("handoff-tab", &b);
+    let f = Fake::default();
+    let r = b.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
     let chat = &parts(&s, ADDR, &cookie, c.now)[2]; // #269: the [chat] tab as the board draws it
@@ -558,12 +625,13 @@ fn the_chat_tab_shows_a_chip_on_each_linked_row_and_thread_row() {
 /// A tap on a chip, in a thread or in the list, opens the other thread (WebKit, serve.js's click handler).
 #[test]
 fn a_tap_on_a_chip_opens_the_other_thread() {
-    if Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
-    let c = linked("handoff-tap");
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let b = FakeShed::new();
+    let c = linked("handoff-tap", &b);
+    let f = Fake::default();
+    let r = b.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
     let page = req(&s, "GET", "/", &cookie, c.now);
@@ -583,10 +651,8 @@ fn a_tap_on_a_chip_opens_the_other_thread() {
         && r.height > 0 && r.height < 24 && r.top >= tp.top && r.bottom <= tp.bottom + 1 ? 1 : 0; \
         tap('.tr[data-t=\"t1\"] .lc[data-go=\"t2\"]'); const d = THR === 't2' ? 1 : 0; \
         window.measure = [a, b, d, document.querySelector('.cvp[data-t=\"t2\"] summary').parentElement.open ? 1 : 0, e]";
-    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift");
-    let o = swift()
+    let o = webview()
         .args([
-            script,
             file.to_str().unwrap(),
             "390",
             "chat",
@@ -621,7 +687,50 @@ fn long_text() -> String {
 }
 
 /// #621: a 2,400-byte handoff lands in full as a new thread's first conductor message, and again in full once that
-/// thread's conductor is asleep (its resume); no start's command line passes herdr's 1,024-byte limit.
+#[test]
+fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one() {
+    let b = FakeShed::new();
+    let c = acp_setup("handoff-long-acp", &b);
+    let f = acp();
+    let r = b.cli(&f);
+    let text = long_text();
+    assert_eq!(to_new(&c, &r, "sendmeter", "Big plan", &text), "t2");
+    let first = kinds(&c, "thread-msg")
+        .into_iter()
+        .find(|e| e.str("thread") == Some("t2"))
+        .unwrap();
+    let line = format!("handoff to Big plan · t2: {text}");
+    assert_eq!(
+        (first.str("from"), first.str("text")),
+        (Some("t1"), Some(line.as_str()))
+    );
+    let md = c.state.with_file_name("orchestrator").join("t2/.thread.md");
+    assert_eq!(std::fs::read_to_string(&md).unwrap(), format!("from t1: {line}\n"));
+
+    b.remove("orchestrator-t2");
+    let (code, out) = run(&c, &r, &["thread", "handoff", "t1", "t2", "More", &text]);
+    assert_eq!((code, out.as_str()), (0, "t2\n"));
+    assert!(
+        std::fs::read_to_string(&md)
+            .unwrap()
+            .ends_with(&format!("from t1: {line}\n")),
+        "{}",
+        std::fs::read_to_string(&md).unwrap()
+    );
+    assert_eq!(f.count("shed run --acp"), 2, "{:?}", f.calls.borrow());
+    let prompts: Vec<String> = f
+        .calls
+        .borrow()
+        .iter()
+        .filter(|l| l.starts_with("shed send orchestrator-t2 "))
+        .cloned()
+        .collect();
+    assert_eq!(prompts.len(), 2, "{prompts:?}");
+    for p in &prompts {
+        assert!(p.ends_with(&format!("\n\n[t2] t1: {line}")), "{p}");
+    }
+}
+
 #[test]
 fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herdrs_line_limit() {
     let c = setup("handoff-long");
@@ -638,7 +747,7 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herd
         (first.str("from"), first.str("text")),
         (Some("t1"), Some(line.as_str()))
     );
-    let md = c.state.with_file_name("conductor").join("t2/.thread.md");
+    let md = c.state.with_file_name("orchestrator").join("t2/.thread.md");
     assert_eq!(std::fs::read_to_string(&md).unwrap(), format!("from t1: {line}\n"));
 
     // t2's conductor is gone (asleep): the next long handoff resumes it, the text in full in its thread file.
@@ -660,8 +769,8 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herd
 }
 
 /// #621: a card from t1 to sendmeter, whose rows are t2 (an existing thread) and a new one.
-fn card(name: &str, text: &str) -> herdsman::Ctx {
-    let c = setup(name);
+fn card(name: &str, text: &str, b: &FakeShed) -> drover::Ctx {
+    let c = acp_setup(name, b);
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Search"]).1,
         "t2\n"
@@ -674,7 +783,7 @@ fn card(name: &str, text: &str) -> herdsman::Ctx {
 }
 
 /// #621: the copies of handoff `text` in thread `id` and the `continued in` rows in t1.
-fn copies(c: &herdsman::Ctx, id: &str, text: &str) -> (usize, usize) {
+fn copies(c: &drover::Ctx, id: &str, text: &str) -> (usize, usize) {
     let msgs = kinds(c, "thread-msg");
     let into = msgs
         .iter()
@@ -689,8 +798,10 @@ fn copies(c: &herdsman::Ctx, id: &str, text: &str) -> (usize, usize) {
 /// delivery's result.
 #[test]
 fn three_taps_on_one_handoff_deliver_it_once_and_each_gets_the_first_result() {
-    let c = card("handoff-thrice", "add facets");
-    let r = herdr(NO_AGENTS);
+    let b = FakeShed::new();
+    let c = card("handoff-thrice", "add facets", &b);
+    let f = acp();
+    let r = b.cli(&f);
     for _ in 0..3 {
         let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
         assert_eq!((code, out.as_str()), (0, "sendmeter q1: Search · t2 (0s ago) -> t2\n"));
@@ -698,44 +809,45 @@ fn three_taps_on_one_handoff_deliver_it_once_and_each_gets_the_first_result() {
     assert_eq!(copies(&c, "t2", "add facets"), (1, 1));
     assert_eq!(kinds(&c, "thread-handoff").len(), 1);
     assert_eq!(kinds(&c, "decision").len(), 1);
-    assert_eq!(r.count("herdr agent start"), 1, "{:?}", r.calls.borrow());
+    assert_eq!(f.count("shed run"), 1, "{:?}", f.calls.borrow());
 }
 
 /// #648: #623 retries a failed first try within the tap: it exits 0 and its retry is the one delivery.
 #[test]
 fn a_failed_first_try_of_a_handoff_tap_is_retried_and_delivered_once() {
-    let c = card("handoff-retry-once", "add facets");
-    let r = herdr(NO_AGENTS).once_err("herdr agent start", 1, "timed out waiting for agent startup");
-    let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
+    let b = FakeShed::new();
+    let c = card("handoff-retry-once", "add facets", &b);
+    let f = acp().once_err("shed run", 1, "timed out waiting for agent startup");
+    let (code, out) = run(&c, &b.cli(&f), &["answer", "sendmeter", "q1", "1"]);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: Search · t2 (0s ago) -> t2\n"));
     assert_eq!(copies(&c, "t2", "add facets"), (1, 1));
-    assert_eq!(r.count("herdr agent start"), 2, "{:?}", r.calls.borrow());
+    assert_eq!(f.count("shed run"), 2, "{:?}", f.calls.borrow());
     assert!(!show(&c, "t1").contains("not delivered"), "{}", show(&c, "t1"));
 }
 
 /// #621: a tap whose delivery fails shows its full error in t1; the retry delivers it, still one copy and one row.
 #[test]
 fn a_failed_handoff_tap_shows_its_error_and_its_retry_is_the_one_delivery() {
-    let c = card("handoff-retry", "add facets");
+    let b = FakeShed::new();
+    let c = card("handoff-retry", "add facets", &b);
     let why = "input contains a 1486-byte line but the terminal is in canonical mode with a 1024-byte limit; wait for the shell prompt and retry";
     // #623 retries a failed delivery once: both tries fail.
-    let r = herdr(NO_AGENTS)
-        .once_err("herdr agent start", 1, why)
-        .once_err("herdr agent start", 1, why);
+    let f = acp().once_err("shed run", 1, why).once_err("shed run", 1, why);
+    let r = b.cli(&f);
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
     assert_ne!(code, 0, "{out}");
     assert!(show(&c, "t1").contains(why), "{}", show(&c, "t1"));
     // #648: nothing reached t2's conductor; its one logged row is what the retry delivers.
     assert!(
-        kinds(&c, "conductor-start").is_empty(),
+        kinds(&c, "orchestrator-start").is_empty(),
         "{:?}",
-        kinds(&c, "conductor-start")
+        kinds(&c, "orchestrator-start")
     );
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "1"]);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: Search · t2 (0s ago) -> t2\n"));
     assert_eq!(copies(&c, "t2", "add facets"), (1, 1));
-    assert_eq!(r.count("herdr agent start"), 3, "{:?}", r.calls.borrow());
-    let md = c.state.with_file_name("conductor").join("t2/.thread.md");
+    assert_eq!(f.count("shed run"), 3, "{:?}", f.calls.borrow());
+    let md = c.state.with_file_name("orchestrator").join("t2/.thread.md");
     assert_eq!(
         std::fs::read_to_string(md).unwrap(),
         "from t1: handoff to Search · t2: add facets\n"
@@ -767,8 +879,11 @@ fn items(s: &Server, cookie: &str, now: u64, t: &str) -> Vec<serde_json::Value> 
 /// that picks one; the pick through that op makes it `delivered → t2` in t1 (folded) and in t2 (the message form).
 #[test]
 fn a_pending_repo_handoff_is_one_item_with_choices_and_its_pick_delivers_it_in_both_threads() {
-    let c = card("handoff-v1", "add facets\nthen reindex");
-    let r = herdr(NO_AGENTS);
+    let b = FakeShed::new();
+    let c = card("handoff-v1", "add facets\nthen reindex", &b);
+    let f = acp();
+    let cli = b.cli(&f);
+    let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
     let sent = items(&s, &ck, c.now, "t1");
@@ -834,9 +949,10 @@ fn a_pending_repo_handoff_is_one_item_with_choices_and_its_pick_delivers_it_in_b
 /// #681: a repo's three threads, newest-active first: t1's late reply puts it before t3 and t2; `newest` on it only.
 #[test]
 fn a_repos_threads_list_newest_active_first_with_newest_on_the_first() {
-    let c = setup("repo-threads");
+    let b = FakeShed::new();
+    let c = acp_setup("repo-threads", &b);
     for (n, t) in [(2, "Search"), (3, "Billing")] {
-        let at = herdsman::Ctx {
+        let at = drover::Ctx {
             now: c.now + n * 60,
             ..c.clone()
         };
@@ -849,7 +965,7 @@ fn a_repos_threads_list_newest_active_first_with_newest_on_the_first() {
             0
         );
     }
-    let late = herdsman::Ctx {
+    let late = drover::Ctx {
         now: c.now + 600,
         ..c.clone()
     };

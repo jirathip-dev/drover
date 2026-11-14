@@ -83,25 +83,25 @@
     "services": [
       {
         "detail": "up 0s · v0.1.0",
-        "fix": "herdsman setup",
+        "fix": "drover setup",
         "name": "board",
         "tone": "g"
       },
       {
         "detail": "ran never · job missing",
-        "fix": "herdsman timer install",
+        "fix": "drover timer install",
         "name": "tick",
         "tone": "r"
       },
       {
-        "detail": "herdsman · last pass never · nothing yet",
-        "fix": "herdsman timer install",
+        "detail": "drover · last pass never · nothing yet",
+        "fix": "drover timer install",
         "name": "drive sendmeter",
         "tone": "r"
       },
       {
         "detail": "ran never · job missing",
-        "fix": "herdsman timer install",
+        "fix": "drover timer install",
         "name": "fast step",
         "tone": "r"
       },
@@ -113,7 +113,7 @@
       },
       {
         "detail": "off: no webpush notifier",
-        "fix": "herdsman push test",
+        "fix": "drover push test",
         "name": "phone alerts",
         "tone": "a"
       },
@@ -125,11 +125,12 @@
       },
       {
         "detail": "not measured yet",
-        "fix": "herdsman clean --yes",
+        "fix": "drover clean --yes",
         "name": "fleet disk",
         "tone": "a"
       }
     ],
+    "sources": {},
     "theme": "farm",
     "tz": 0
   },
@@ -146,6 +147,7 @@
     "queue": [],
     "seq": "number",
     "services": [],
+    "sources": {},
     "theme": "string",
     "tz": "number"
   },

@@ -2,7 +2,7 @@
 //! dsh-TUI and Hermes: no divider, input line, status bar, spinner or tip in the transcript lines; the spinner (or
 //! status bar) is the status line; the messages and tool rows are kept. `BLESS=1` rewrites the `.lines.json` files
 //! (#138: the sheet groups these lines into blocks, tests/chat_blocks.rs).
-use herdsman::lanes::{activity, chat, tail};
+use drover::lanes::{activity, chat, tail};
 use std::path::Path;
 
 /// (fixture, harness, status line, text that must not be chat, text that must stay).
@@ -21,13 +21,13 @@ const SCREENS: [Screen; 7] = [
         "✶ Pontificating… (12m 0s · ↓ 3.1k tokens)",
         &[
             "Pontificating",
-            "herdsman · rev #97 r1",
+            "drover · rev #97 r1",
             "bypass permissions",
             "esc to interrupt",
         ],
         &[
             "❯ Also read /Users/me/",
-            "⏺ Running cd /Users/me/.herdr/worktrees/herdsman/rev-… · 16s",
+            "⏺ Running cd /Users/me/.herdr/worktrees/drover/rev-… · 16s",
             "(ctrl+b to run in background)",
         ],
     ),
@@ -54,8 +54,8 @@ const SCREENS: [Screen; 7] = [
         "✻ Churned for 2m 52s · done 1:01 AM",
         &[
             "Churned",
-            "herdsman · rev #59 r1",
-            "herdsman verdict herdsman 59 FAIL",
+            "drover · rev #59 r1",
+            "drover verdict drover 59 FAIL",
             "bypass permissions",
         ],
         &["Not verified: a real phone", "Checked and holding:"],

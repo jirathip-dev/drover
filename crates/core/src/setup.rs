@@ -1,5 +1,3 @@
-//! #303 setup terminals: a configured login (`[[setup]]`, else built-in claude/gh/codex) in a herdr pane on a host,
-//! typed into from the board's sheet; it closes when the command exits or after `TIMEOUT`. Only names run, never lines.
 use crate::events::{append, read, Event};
 use crate::{config::Config, gate::refused, herdr, hosts::On, runner::argv, runner::Runner, Ctx};
 use anyhow::{Context, Result};
@@ -22,13 +20,22 @@ pub fn all(cfg: &Config) -> Vec<(String, String)> {
         .iter()
         .map(|s| (s.name.clone(), s.env.iter().map(env).collect::<String>() + &s.cmd))
         .collect();
-    let logins = crate::harness::all().filter_map(|(n, h)| Some((n, h.login()?)));
-    for (n, c) in logins.chain([("gh", "gh auth login"), ("codex", "codex login")]) {
+    let login = |h: crate::providers::Entry| Some((h.name, h.login()?));
+    let logins = crate::providers::lanes()
+        .filter_map(login)
+        .chain([("gh", "gh auth login")]);
+    for (n, c) in logins.chain(crate::providers::acp_only().filter_map(login)) {
         if !v.iter().any(|x| x.0 == n) {
             v.push((n.into(), c.into()));
         }
     }
     v
+}
+
+/// #830: the vendor of each setup in `all` that is a provider's login, by its name.
+pub fn vendors(cfg: &Config) -> Vec<(String, String)> {
+    let of = |(n, _): (String, String)| Some((n.clone(), crate::providers::get(&n).vendor()?.into()));
+    all(cfg).into_iter().filter_map(of).collect()
 }
 
 /// Start setup `name` on `host` in a new workspace there; logs `setup` (no command line, no input); the pane id.
@@ -42,7 +49,10 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
         return refused("NO_SUCH_HOST", format!("no [hosts.{host}]"));
     }
     let on = On::new(r, h.and_then(|h| h.machine.as_deref()));
-    let ws = "workspace create --cwd /tmp --label herdsman-setup --no-focus";
+    if let Some(m) = on.machine {
+        crate::hosts::resolve(r, m, false)?; // #641: never a pane here for a host herdr can't pin down
+    }
+    let ws = "workspace create --cwd /tmp --label drover-setup --no-focus";
     let ws = herdr::json(&on, &argv(&ws.split(' ').collect::<Vec<_>>()))?;
     let pane = ws["result"]["root_pane"]["pane_id"].as_str().context("no pane")?;
     herdr::ok(&on, &herdr::run_argv(pane, &[&format!("cd; {line}; exit")]))?;

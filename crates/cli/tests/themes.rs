@@ -4,7 +4,7 @@
 //! picker's default is `[serve] theme`; terminal draws no sprites.
 mod common;
 use common::*;
-use herdsman::serve::{act, resolve, validate, Server};
+use drover::serve::{act, resolve, validate, Server};
 use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
@@ -19,7 +19,7 @@ const TERMINAL_ICON: &[u8] = include_bytes!("../../../assets/themes/terminal/ico
 const ACTS: [&str; 7] = ["impl", "fix", "rev", "update", "idle", "done", "blocked"];
 
 /// A server whose fleet.toml picks `theme` (none: the default), with user themes `(name, file, body)`.
-fn server(theme: Option<&str>, own: &[(&str, &str, &str)]) -> (herdsman::Ctx, Fake) {
+fn server(theme: Option<&str>, own: &[(&str, &str, &str)]) -> (drover::Ctx, Fake) {
     let d = tmpdir("theme");
     let cfg = theme.map_or(CONFIG.to_string(), |t| format!("{CONFIG}\n[serve]\ntheme = \"{t}\"\n"));
     let c = ctx(&d, &cfg);
@@ -31,17 +31,17 @@ fn server(theme: Option<&str>, own: &[(&str, &str, &str)]) -> (herdsman::Ctx, Fa
     (c, Fake::default())
 }
 
-fn raw(c: &herdsman::Ctx, r: &Fake, path: &str) -> Vec<u8> {
+fn raw(c: &drover::Ctx, r: &Fake, path: &str) -> Vec<u8> {
     let s = Server::new(c, r, Some(ADDR.into()));
     s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)
 }
 
 /// #267: the Host tab as the board draws it.
-fn host(c: &herdsman::Ctx, r: &Fake) -> String {
+fn host(c: &drover::Ctx, r: &Fake) -> String {
     host_tab(&Server::new(c, r, Some(ADDR.into())), ADDR, 1_000_000)
 }
 
-fn get(c: &herdsman::Ctx, r: &Fake, path: &str) -> String {
+fn get(c: &drover::Ctx, r: &Fake, path: &str) -> String {
     String::from_utf8_lossy(&raw(c, r, path)).into_owned()
 }
 
@@ -51,14 +51,14 @@ fn body(res: &str) -> &str {
 }
 
 /// The bytes after the head of a 200.
-fn bytes(c: &herdsman::Ctx, r: &Fake, path: &str) -> Vec<u8> {
+fn bytes(c: &drover::Ctx, r: &Fake, path: &str) -> Vec<u8> {
     let res = raw(c, r, path);
     assert!(res.starts_with(b"HTTP/1.1 200 OK"), "{path}");
     let at = res.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
     res[at + 4..].to_vec()
 }
 
-fn json(c: &herdsman::Ctx, r: &Fake, path: &str) -> Value {
+fn json(c: &drover::Ctx, r: &Fake, path: &str) -> Value {
     serde_json::from_str(body(&get(c, r, path))).unwrap()
 }
 
@@ -672,7 +672,7 @@ fn a_lane_draws_its_plant_only_with_stages_and_the_species_is_stable() {
 /// #423: an issue's growth stage from its state, and from its lane's action where the state says nothing.
 #[test]
 fn the_growth_stage_follows_the_issue() {
-    use herdsman::serve::stage;
+    use drover::serve::stage;
     for (state, act, want) in [
         ("queued", "idle", "queued"),
         ("impl", "impl", "impl"),

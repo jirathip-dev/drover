@@ -82,7 +82,7 @@ pub fn store(ctx: &Ctx, d: &[Device]) -> Result<()> {
     if let Some(e) = r.as_ref().err().filter(|_| !seen()) {
         let kind = e.downcast_ref().map_or(io::ErrorKind::Other, io::Error::kind);
         let d = json!({"path": p, "error": kind.to_string(), "reason": format!("{}: {kind}", p.display())});
-        let ev = Event::new(ctx.now, "herdsman", None, "state-write-failed", d);
+        let ev = Event::new(ctx.now, "drover", None, "state-write-failed", d);
         let _ = emit(&ctx.state, &Config::load(&ctx.config).unwrap_or_default(), ev);
     }
     r
@@ -127,7 +127,7 @@ pub fn request(ctx: &Ctx, label: &str, ip: &str) -> Result<Option<(String, Strin
     store(ctx, &all)?;
     append(
         &ctx.state,
-        &Event::new(ctx.now, "herdsman", None, "pair-request", json!({"device": label})),
+        &Event::new(ctx.now, "drover", None, "pair-request", json!({"device": label})),
     )?;
     Ok(Some((code, token)))
 }
@@ -158,7 +158,7 @@ pub fn approve(ctx: &Ctx, code: &str) -> Result<String> {
     store(ctx, &all)?;
     append(
         &ctx.state,
-        &Event::new(ctx.now, "herdsman", None, "pair-approve", json!({"device": label})),
+        &Event::new(ctx.now, "drover", None, "pair-approve", json!({"device": label})),
     )?;
     Ok(label)
 }
@@ -209,7 +209,7 @@ pub fn check(ctx: &Ctx, cookie: &str) -> Result<Device, String> {
         return Err("expired".into());
     }
     let stale = std::mem::replace(&mut all[i].used, ctx.now) + 3600 <= ctx.now;
-    let _ = stale.then(|| store(ctx, &all));
+    let _ = stale.then(|| crate::db::store_now(&ctx.state, "devices", &all));
     Ok(all.swap_remove(i))
 }
 
@@ -247,6 +247,26 @@ fn kind(e: &anyhow::Error) -> String {
         _ => e
             .downcast_ref::<io::Error>()
             .map_or("other".into(), |e| e.kind().to_string()),
+    }
+}
+
+/// cooee's attach token (`cooee-token` beside fleet.toml): `drover serve` creates it once, mode 0600, never rewrites it.
+pub fn cooee_token(ctx: &Ctx) -> Result<String> {
+    let p = ctx.config.with_file_name("cooee-token");
+    std::fs::create_dir_all(p.parent().unwrap_or(&p))?;
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&p)
+    {
+        Ok(mut f) => {
+            let t: String = random(32)?.iter().map(|b| format!("{b:02x}")).collect();
+            f.write_all(t.as_bytes())?;
+            Ok(t)
+        }
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => Ok(std::fs::read_to_string(&p)?.trim().into()),
+        Err(e) => Err(e.into()),
     }
 }
 

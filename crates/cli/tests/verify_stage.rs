@@ -2,15 +2,15 @@
 //! passed on without a recipe, its FAILs in rev's rounds, and its screenshots on the board.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, fold, read, Event};
-use herdsman::gate::gate;
-use herdsman::serve::Server;
-use herdsman::waiting::waiting_on;
+use drover::config::Config;
+use drover::events::{append, fold, read, Event};
+use drover::gate::gate;
+use drover::serve::Server;
+use drover::waiting::waiting_on;
 use serde_json::json;
 
 const VERIFY: &str = "\n[fleet.sendmeter.role.verify]\nharness = \"hermes\"\nprofile = \"fleet-verify\"\n";
-const RECIPE: &str = "gh api repos/jirathip-dev/sendmeter/contents/.herdsman/verify.md";
+const RECIPE: &str = "gh api repos/jirathip-dev/sendmeter/contents/.drover/verify.md";
 const ADDR: &str = "127.0.0.1:7777";
 
 /// The test fleet with a verify role and `ui_paths = ["web/**"]`.
@@ -25,7 +25,7 @@ fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
 }
 
@@ -35,10 +35,8 @@ fn pr(head: &str) -> String {
     .to_string()
 }
 
-/// Spawns succeed, the host is calm; the PR at `head` changes `files`.
 fn fake(head: &str, files: &str) -> Fake {
     Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "10\n")
@@ -50,18 +48,24 @@ fn fake(head: &str, files: &str) -> Fake {
         .reply("gh pr view 100", r#"{"mergeCommit":{"oid":"m3rg3"}}"#)
         .reply("gh issue", "")
         .reply("git -C", "")
-        .reply("herdr worktree", r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#)
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane", "{}")
-        .reply("herdr agent", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
-/// #12 built (its lane gone; `design`: after its design was approved) and rev PASSed at `head`.
-fn passed(name: &str, cfg: &str, design: bool) -> (herdsman::Ctx, String) {
+fn started(sh: &FakeShed, prefix: &str) -> bool {
+    let runs = sh.all("run");
+    runs.iter()
+        .any(|p| p["name"].as_str().is_some_and(|n| n.starts_with(prefix)))
+}
+
+fn sctx(name: &str, cfg: &str) -> (drover::Ctx, FakeShed) {
     let c = ctx(&tmpdir(name), cfg);
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    (c, sh)
+}
+
+fn passed(name: &str, cfg: &str, design: bool) -> (drover::Ctx, String, FakeShed) {
+    let (c, sh) = sctx(name, cfg);
     let head = sha("abc");
     if design {
         ev(&c, 5, "design-approved", json!({"id": "q1", "by": "owner"}));
@@ -84,20 +88,25 @@ fn passed(name: &str, cfg: &str, design: bool) -> (herdsman::Ctx, String) {
         "verdict",
         json!({"verdict": "PASS", "sha": head, "stage": "rev", "loop": "rev", "body": "PASS"}),
     );
-    (c, head)
+    (c, head, sh)
 }
 
-fn drive(c: &herdsman::Ctx, r: &Fake) -> String {
+fn drive(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["drive"]);
     assert_eq!(code, 0, "{out}");
     out
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
-fn state(c: &herdsman::Ctx) -> String {
+fn state(c: &drover::Ctx) -> String {
     fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].shown()
 }
 
@@ -119,14 +128,10 @@ fn without_a_verify_role_the_builtin_pipeline_is_unchanged() {
 
 #[test]
 fn a_pr_touching_ui_paths_goes_from_rev_pass_to_a_verify_lane() {
-    let (c, head) = passed("verify-ui", &config(), false);
+    let (c, head, sh) = passed("verify-ui", &config(), false);
     let r = fake(&head, "src/a.rs\nweb/src/queue.ts\n").reply(RECIPE, "");
     drive(&c, &r);
-    assert!(
-        r.called("herdr agent start sendmeter-verify-12-r1"),
-        "{:?}",
-        r.calls.borrow()
-    );
+    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
     assert!(!r.called("gh pr merge"));
     assert_eq!(state(&c), "verify(1)");
     assert!(kinds(&c, "verify-skipped").is_empty());
@@ -141,11 +146,15 @@ fn a_pr_touching_ui_paths_goes_from_rev_pass_to_a_verify_lane() {
         brief.contains("# ROLE: VERIFIER") && brief.contains("verdict.md"),
         "{brief}"
     );
+    // #731: the browser evidence helper sits beside it, the repo's own script.
+    let vb = std::fs::read_to_string(c.worktrees.join("sendmeter/verify-12-r1/.verify-browser.mjs")).unwrap();
+    let ours = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/verify-browser.mjs");
+    assert_eq!(vb, std::fs::read_to_string(ours).unwrap());
 }
 
 #[test]
 fn a_pr_outside_ui_paths_skips_verify_and_goes_to_the_gates() {
-    let (c, head) = passed("verify-skip", &config(), false);
+    let (c, head, sh) = passed("verify-skip", &config(), false);
     let r = fake(&head, "src/a.rs\n").reply(RECIPE, "");
     let out = drive(&c, &r);
     assert!(out.contains("sendmeter #12 verify-skipped at abc0000"), "{out}");
@@ -154,7 +163,7 @@ fn a_pr_outside_ui_paths_skips_verify_and_goes_to_the_gates() {
         (skip.str("sha"), skip.str("stage")),
         (Some(head.as_str()), Some("verify"))
     );
-    assert!(!r.called("herdr agent start sendmeter-verify"));
+    assert!(!started(&sh, "sendmeter-verify"));
     drive(&c, &r);
     assert!(r.called(&format!(
         "gh pr merge 100 -R jirathip-dev/sendmeter --merge --match-head-commit {head}"
@@ -164,16 +173,16 @@ fn a_pr_outside_ui_paths_skips_verify_and_goes_to_the_gates() {
 
 #[test]
 fn a_design_stage_issue_always_verifies() {
-    let (c, head) = passed("verify-design", &config(), true);
+    let (c, head, sh) = passed("verify-design", &config(), true);
     let r = fake(&head, "src/a.rs\n").reply(RECIPE, "");
     drive(&c, &r);
-    assert!(r.called("herdr agent start sendmeter-verify-12-r1"));
+    assert!(sh.called("run", "sendmeter-verify-12-r1"));
     assert!(kinds(&c, "verify-skipped").is_empty());
 }
 
 #[test]
 fn verify_off_skips_the_stage_and_verify_on_forces_it() {
-    let (c, head) = passed("verify-off", &config(), false);
+    let (c, head, sh) = passed("verify-off", &config(), false);
     assert_eq!(
         run(
             &c,
@@ -186,9 +195,9 @@ fn verify_off_skips_the_stage_and_verify_on_forces_it() {
     let r = fake(&head, "web/index.html\n").reply(RECIPE, "");
     drive(&c, &r);
     assert_eq!(kinds(&c, "verify-skipped").len(), 1);
-    assert!(!r.called("herdr agent start sendmeter-verify"));
+    assert!(!started(&sh, "sendmeter-verify"));
 
-    let (c, head) = passed("verify-on", &config(), false);
+    let (c, head, sh) = passed("verify-on", &config(), false);
     assert_eq!(
         run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12", "--verify"]).0,
         0
@@ -216,25 +225,25 @@ fn verify_off_skips_the_stage_and_verify_on_forces_it() {
     assert!(ls.contains("verify on"), "{ls}");
     let r = fake(&head, "src/a.rs\n").reply(RECIPE, "");
     drive(&c, &r);
-    assert!(r.called("herdr agent start sendmeter-verify-12-r1"));
+    assert!(sh.called("run", "sendmeter-verify-12-r1"));
     assert!(kinds(&c, "verify-skipped").is_empty());
 }
 
 #[test]
 fn no_recipe_logs_verify_no_recipe_shows_it_and_goes_on_to_the_gates() {
-    let (c, head) = passed("verify-no-recipe", &config(), false);
-    // No `.herdsman/verify.md` at the head: the contents read fails.
+    let (c, head, sh) = passed("verify-no-recipe", &config(), false);
+    // No `.drover/verify.md` at the head: the contents read fails.
     let r = fake(&head, "web/index.html\n");
     let out = drive(&c, &r);
     assert!(r.called(&format!("{RECIPE}?ref={head}")), "{:?}", r.calls.borrow());
     assert!(out.contains("verify-no-recipe"), "{out}");
     assert_eq!(kinds(&c, "verify-no-recipe").len(), 1);
-    assert!(!r.called("herdr agent start sendmeter-verify"));
+    assert!(!started(&sh, "sendmeter-verify"));
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let res =
         String::from_utf8_lossy(&s.respond(&format!("GET /api/v1/queue HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now))
             .into_owned();
-    assert!(res.contains("verify skipped: no .herdsman/verify.md"), "{res}");
+    assert!(res.contains("verify skipped: no .drover/verify.md"), "{res}");
     drive(&c, &r);
     assert_eq!(state(&c), "merged");
 }
@@ -245,7 +254,7 @@ fn next(cfg: &Config, events: &[Event], head: &str) -> (Option<String>, Result<(
     let s = &fold(events)[&("sendmeter".to_string(), 12)];
     let pr: serde_json::Value = serde_json::from_str(&pr(head)).unwrap();
     let w = waiting_on(
-        &herdsman::waiting::Log::new(events),
+        &drover::waiting::Log::new(events),
         events,
         s,
         Some((head, 1)),
@@ -279,7 +288,7 @@ fn a_verify_pass_at_an_older_sha_does_not_let_the_new_head_merge() {
     ];
     assert_eq!(
         next(&cfg, &evs, &a),
-        (Some("herdsman spawn sendmeter 12 verify".into()), Err("STALE_VERDICT"))
+        (Some("drover spawn sendmeter 12 verify".into()), Err("STALE_VERDICT"))
     );
     evs.extend([
         e(
@@ -289,10 +298,7 @@ fn a_verify_pass_at_an_older_sha_does_not_let_the_new_head_merge() {
         ),
         v(5, "verify", "PASS", &a),
     ]);
-    assert_eq!(
-        next(&cfg, &evs, &a),
-        (Some("herdsman merge sendmeter 12".into()), Ok(()))
-    );
+    assert_eq!(next(&cfg, &evs, &a), (Some("drover merge sendmeter 12".into()), Ok(())));
     evs.extend([
         e(6, "spawn", json!({"role": "impl", "agent": "sendmeter-impl-12"})),
         e(
@@ -304,7 +310,7 @@ fn a_verify_pass_at_an_older_sha_does_not_let_the_new_head_merge() {
     ]);
     assert_eq!(
         next(&cfg, &evs, &b),
-        (Some("herdsman spawn sendmeter 12 verify".into()), Err("STALE_VERDICT"))
+        (Some("drover spawn sendmeter 12 verify".into()), Err("STALE_VERDICT"))
     );
     // A FAIL goes to a fix round in impl.
     evs.extend([
@@ -318,7 +324,7 @@ fn a_verify_pass_at_an_older_sha_does_not_let_the_new_head_merge() {
     assert_eq!(
         next(&cfg, &evs, &b),
         (
-            Some("herdsman spawn sendmeter 12 impl --supersede".into()),
+            Some("drover spawn sendmeter 12 impl --supersede".into()),
             Err("VERDICT_FAIL")
         )
     );
@@ -440,19 +446,19 @@ fn shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
     // An older event that stored a path outside the lane folders: no card shot, and the route answers 404.
     let old = json!({"verdict": "FAIL", "stage": "verify", "files": [{"name": "x.png", "path": x}]});
     ev(&c, 3, "verdict", old);
-    assert!(herdsman::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12)).is_empty());
+    assert!(drover::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12)).is_empty());
     assert!(get("/shot/sendmeter/12/0").starts_with("HTTP/1.1 404"));
 }
 
 /// #599: #12's impl lane and a gone rev lane whose verdict.md says PASS at `head`, the PR (CI green) changing
-/// `files`; `recipe`: the head has `.herdsman/verify.md`.
-fn rev_wrote_pass(name: &str, files: &str, recipe: bool) -> (herdsman::Ctx, Fake, String) {
-    let c = ctx(&tmpdir(name), &config());
+/// `files`; `recipe`: the head has `.drover/verify.md`.
+fn rev_wrote_pass(name: &str, files: &str, recipe: bool) -> (drover::Ctx, Fake, String, FakeShed) {
+    let (c, sh) = sctx(name, &config());
     let head = sha("abc");
     let rev = c.worktrees.join("sendmeter/rev-12-r1");
     std::fs::create_dir_all(&rev).unwrap();
     std::fs::write(rev.join("verdict.md"), "PASS\nall good\n").unwrap();
-    let d = |role: &str, agent: &str| json!({"role": role, "agent": agent, "pane": "w9:p1", "workspace": "w9", "worktree": rev, "branch": "issue-12"});
+    let d = |role: &str, agent: &str| json!({"role": role, "agent": agent, "pane": agent, "workspace": "", "runtime": "shed", "worktree": rev, "branch": "issue-12"});
     ev(&c, 10, "spawn", d("impl", "sendmeter-impl-12"));
     let mut r = d("rev", "sendmeter-rev-12-r1");
     r["stage"] = json!("rev");
@@ -468,23 +474,23 @@ fn rev_wrote_pass(name: &str, files: &str, recipe: bool) -> (herdsman::Ctx, Fake
         r = r.reply(RECIPE, "");
     }
     r.replies.extend(fake(&head, files).replies);
-    (c, r, head)
+    (c, r, head, sh)
 }
 
 /// #599: drive's passes after it records the PASS: no rev lane is ever spawned again at the PASSed head.
-fn after_pass(c: &herdsman::Ctx, r: &Fake, passes: usize) {
+fn after_pass(c: &drover::Ctx, r: &Fake, sh: &FakeShed, passes: usize) {
     for _ in 0..passes {
         drive(c, r);
     }
     let revs = kinds(c, "spawn").into_iter().filter(|e| e.str("role") == Some("rev"));
     assert_eq!(revs.count(), 1, "rev respawned at the PASSed head");
-    assert!(!r.called("herdr agent start sendmeter-rev"));
+    assert!(!started(sh, "sendmeter-rev"));
 }
 
 #[test]
 fn a_pass_drive_records_on_a_ui_pr_without_a_recipe_logs_verify_no_recipe_and_merges() {
-    let (c, r, head) = rev_wrote_pass("verify-599-no-recipe", "web/index.html\n", false);
-    after_pass(&c, &r, 3);
+    let (c, r, head, sh) = rev_wrote_pass("verify-599-no-recipe", "web/index.html\n", false);
+    after_pass(&c, &r, &sh, 3);
     let skip = kinds(&c, "verify-no-recipe");
     assert_eq!(skip.len(), 1, "{:?}", r.calls.borrow());
     assert_eq!(skip[0].str("sha"), Some(head.as_str()));
@@ -494,21 +500,17 @@ fn a_pass_drive_records_on_a_ui_pr_without_a_recipe_logs_verify_no_recipe_and_me
 
 #[test]
 fn a_pass_drive_records_on_a_ui_pr_with_a_recipe_spawns_verify_not_rev() {
-    let (c, r, _) = rev_wrote_pass("verify-599-recipe", "src/a.rs\nweb/src/queue.ts\n", true);
-    after_pass(&c, &r, 3);
-    assert!(
-        r.called("herdr agent start sendmeter-verify-12-r1"),
-        "{:?}",
-        r.calls.borrow()
-    );
+    let (c, r, _, sh) = rev_wrote_pass("verify-599-recipe", "src/a.rs\nweb/src/queue.ts\n", true);
+    after_pass(&c, &r, &sh, 3);
+    assert!(sh.called("run", "sendmeter-verify-12-r1"), "{:?}", r.calls.borrow());
     assert!(!r.called("gh pr merge"));
     assert_eq!(state(&c), "verify(1)");
 }
 
 #[test]
 fn a_pass_drive_records_outside_ui_paths_logs_verify_skipped_and_merges() {
-    let (c, r, head) = rev_wrote_pass("verify-599-skip", "src/a.rs\n", true);
-    after_pass(&c, &r, 3);
+    let (c, r, head, sh) = rev_wrote_pass("verify-599-skip", "src/a.rs\n", true);
+    after_pass(&c, &r, &sh, 3);
     let skip = kinds(&c, "verify-skipped");
     assert_eq!(skip.len(), 1, "{:?}", r.calls.borrow());
     assert_eq!(skip[0].str("sha"), Some(head.as_str()));
@@ -542,14 +544,14 @@ fn a_rev_pass_refused_for_want_of_verify_waits_on_verify_not_review_again() {
     ];
     assert_eq!(
         next(&cfg, &evs, &a),
-        (Some("herdsman spawn sendmeter 12 verify".into()), Err("STALE_VERDICT"))
+        (Some("drover spawn sendmeter 12 verify".into()), Err("STALE_VERDICT"))
     );
 }
 
 /// #650: a rev PASS at the head that a merge refused for want of verify, then `kind` (verify-skipped or
 /// verify-no-recipe) at that head and green CI: `waiting` says merge, never "review again", and one drive pass merges.
 fn skipped_after_a_refusal_merges_in_one_pass(name: &str, kind: &str, word: &str) {
-    let (c, head) = passed(name, &config(), false);
+    let (c, head, _sh) = passed(name, &config(), false);
     let why = format!("no verify PASS for head {head}");
     ev(&c, 40, "blocked", json!({"code": "STALE_VERDICT", "reason": why}));
     ev(&c, 50, kind, json!({"sha": head, "stage": "verify", "reason": "r"}));
@@ -559,7 +561,7 @@ fn skipped_after_a_refusal_merges_in_one_pass(name: &str, kind: &str, word: &str
     let pr: serde_json::Value = serde_json::from_str(&pr(&head)).unwrap();
     let f = cfg.fleet("sendmeter").unwrap();
     let w = waiting_on(
-        &herdsman::waiting::Log::new(&evs),
+        &drover::waiting::Log::new(&evs),
         &evs,
         s,
         Some((&head, 1)),
@@ -568,7 +570,7 @@ fn skipped_after_a_refusal_merges_in_one_pass(name: &str, kind: &str, word: &str
         None,
     );
     assert_eq!(w.what, format!("PASS · verify {word} · merging next pass"));
-    assert_eq!(w.next_cmd.as_deref(), Some("herdsman merge sendmeter 12"));
+    assert_eq!(w.next_cmd.as_deref(), Some("drover merge sendmeter 12"));
     let r = fake(&head, "src/a.rs\n");
     drive(&c, &r);
     assert!(r.called(&format!(
@@ -619,7 +621,65 @@ fn a_verified_head_a_gate_refused_names_the_gate_not_review_again() {
     let s = &fold(&evs)[&("sendmeter".to_string(), 12)];
     let pr: serde_json::Value = serde_json::from_str(&pr(&a)).unwrap();
     let f = cfg.fleet("sendmeter").unwrap();
-    let w = waiting_on(&herdsman::waiting::Log::new(&evs), &evs, s, Some((&a, 1)), &pr, f, None);
+    let w = waiting_on(&drover::waiting::Log::new(&evs), &evs, s, Some((&a, 1)), &pr, f, None);
     assert_eq!(w.what, "PASS · merge refused SERIAL_UNMARKED: touches serial paths");
     assert_eq!(w.next_cmd, None);
+}
+
+/// #775 AC3: the screenshot's disk stops answering (its folder's listing hangs): `/shot/…` answers 504 within the
+/// read limit instead of holding a request thread, and `GET /` answers 200 before, during and after.
+#[test]
+fn a_shot_on_a_hung_disk_answers_504_and_the_board_stays_up() {
+    let d = tmpdir("verify-shot-hung");
+    let c = ctx(&d, &config());
+    let shots = d.join("lane/shots");
+    std::fs::create_dir_all(&shots).unwrap();
+    std::fs::write(shots.join("home-390.png"), b"\x89PNG narrow").unwrap();
+    let w = d.join("lane").to_string_lossy().into_owned();
+    ev(
+        &c,
+        1,
+        "spawn",
+        json!({"role": "verify", "stage": "verify", "check": true, "agent": "verify-1", "worktree": w}),
+    );
+    let path = shots
+        .canonicalize()
+        .unwrap()
+        .join("home-390.png")
+        .to_string_lossy()
+        .into_owned();
+    ev(
+        &c,
+        2,
+        "verdict",
+        json!({"verdict": "FAIL", "stage": "verify", "files": [{"name": "shots/home-390.png", "path": path}]}),
+    );
+    let none = Fake::default();
+    let s = Server::new(&c, &none, Some(ADDR.into()));
+    let get = |p: &str| {
+        String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now)).into_owned()
+    };
+    assert!(get("/").starts_with("HTTP/1.1 200"));
+    // The disk stops answering: the folder's listing never ends.
+    let dir = shots.canonicalize().unwrap().to_string_lossy().into_owned();
+    assert!(drover::runner::hung(&dir, std::time::Duration::ZERO, |_| {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+        None
+    }));
+    std::thread::scope(|sc| {
+        let shot = sc.spawn(|| {
+            let t = std::time::Instant::now();
+            (get("/shot/sendmeter/12/0"), t.elapsed())
+        });
+        for _ in 0..5 {
+            assert!(get("/").starts_with("HTTP/1.1 200"), "the board stays up");
+        }
+        let (png, took) = shot.join().unwrap();
+        assert!(png.starts_with("HTTP/1.1 504"), "{png}");
+        assert!(
+            took < drover::runner::probe_wait() + std::time::Duration::from_secs(1),
+            "{took:?}"
+        );
+    });
+    assert!(get("/").starts_with("HTTP/1.1 200"));
 }

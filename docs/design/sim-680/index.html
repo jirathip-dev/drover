@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>#680 · Deterministic simulation of herdsman's concurrent passes: design</title>
+<title>#680 · Deterministic simulation of drover's concurrent passes: design</title>
 <style>
   :root { --ink:#1d2330; --mute:#5b6475; --line:#d9dde5; --bg:#fbfbfc; --card:#fff; --acc:#2856c7; --bad:#b4232c; --ok:#1f7a45; --warn:#9a5b00; }
   * { box-sizing: border-box; }
@@ -48,12 +48,12 @@
 <body>
 <main>
 <h1>#680 · A deterministic simulation of drive, fast, check, merge and kick</h1>
-<p class="sub">Design for the owner to approve. Branch <code>issue-680</code> · 2026-11-08 · design lane <code>herdsman-design-680</code></p>
+<p class="sub">Design for the owner to approve. Branch <code>issue-680</code> · 2026-11-08 · design lane <code>drover-design-680</code></p>
 
 <p class="lede">The real pass code runs as a set of "processes" (one OS thread each). A seeded scheduler lets only one of them run at a time. Every call a pass makes to herdr, gh, git, <code>ps</code> or <code>kill</code> already goes through <code>Runner</code>. That call is the yield point: an in-process model answers it, the fake clock moves on, and the seed picks which process runs next. Invariants are checked after every step. Production code gains two small seams, a clock and a yield hook, about <b>30 src/ lines</b>. The fix for the incident adds about <b>25 more</b>.</p>
 
-<h2>1 · The first seed: <code>herdsman-rev-370-r5</code>, 26 supersedes in "one second"</h2>
-<p>From <code>state.db</code>, issue <code>herdsman#370</code>: every supersede, spawn and kick between seq 21420 and 22260 carries the <b>same</b> <code>ts</code>, 1793805085 (2026-11-04 22:11:25). That is 26 <code>supersede</code>, 28 <code>spawn</code> and 30 <code>kick</code> events. The lane's own later <code>lane-closed</code> key says it actually spawned at 1793805278, about 3 minutes later. So it was not one second. It was one <b>frozen clock</b> across a run of minutes.</p>
+<h2>1 · The first seed: <code>drover-rev-370-r5</code>, 26 supersedes in "one second"</h2>
+<p>From <code>state.db</code>, issue <code>drover#370</code>: every supersede, spawn and kick between seq 21420 and 22260 carries the <b>same</b> <code>ts</code>, 1793805085 (2026-11-04 22:11:25). That is 26 <code>supersede</code>, 28 <code>spawn</code> and 30 <code>kick</code> events. The lane's own later <code>lane-closed</code> key says it actually spawned at 1793805278, about 3 minutes later. So it was not one second. It was one <b>frozen clock</b> across a run of minutes.</p>
 <div class="grid">
   <div class="card">
     <h3>What the log shows</h3>
@@ -73,19 +73,19 @@
 </div>
 <h3>Seed 1, a fixed scenario (not random)</h3>
 <pre><span class="c"># crates/cli/tests/sim/seeds.rs: the scenario is written out by hand, and the seed orders the interleavings</span>
-fleet herdsman · issue 370 at fix(4) · impl lane live · host load at 2.50 (HOST_BUSY) for the first spawn
+fleet drover · issue 370 at fix(4) · impl lane live · host load at 2.50 (HOST_BUSY) for the first spawn
 t+0     impl pushes 5bca43e          → kick why=push (detached, Ctx.now frozen)
 t+5     rev spawn refused HOST_BUSY  → .again
 t+190   rev-370-r5 spawned, confirmed
-t+200   rev-370-r5 writes verdict.md FAIL, agent_status=done (the `herdsman verdict` call is delayed)
+t+200   rev-370-r5 writes verdict.md FAIL, agent_status=done (the `drover verdict` call is delayed)
 ...     drive (300 s), fast (60 s), check, overlapping kicks
 
-<span class="r">FAIL seed=1 step=412  I2 supersede-once: herdsman-rev-370-r5 superseded 2× by pass kick#3 (started t+0, lane spawned t+190)</span>
+<span class="r">FAIL seed=1 step=412  I2 supersede-once: drover-rev-370-r5 superseded 2× by pass kick#3 (started t+0, lane spawned t+190)</span>
 <span class="r">                      I7 clock: event supersede ts=t+0 written at true t+214 (lag 214 s &gt; 60 s)</span>
-replay: HERDSMAN_SIM_SEED=1 cargo test -p herdsman --test sim</pre>
+replay: DROVER_SIM_SEED=1 cargo test -p drover --test sim</pre>
 
 <h2>2 · Invariants: the final list</h2>
-<p>All of them are checked after every step, unless a row says "at quiet points". A quiet point is a moment when no pass is inside a spawn, between its pane create and its <code>spawn</code> event. The checker reads the model's ground truth (panes, PRs, true time) and the real <code>state.db</code> event log. It never reads herdsman's own view.</p>
+<p>All of them are checked after every step, unless a row says "at quiet points". A quiet point is a moment when no pass is inside a spawn, between its pane create and its <code>spawn</code> event. The checker reads the model's ground truth (panes, PRs, true time) and the real <code>state.db</code> event log. It never reads drover's own view.</p>
 <div class="scroll">
 <table>
 <tr><th>#</th><th>Invariant</th><th>Checked against</th><th></th></tr>
@@ -108,8 +108,8 @@ replay: HERDSMAN_SIM_SEED=1 cargo test -p herdsman --test sim</pre>
   <div class="card">
     <h3>Processes as baton-passing threads</h3>
     <ul>
-      <li>Each pass is one OS thread running the real entry: <code>herdsman_core::main_with(["herdsman","drive",…], &amp;ctx, &amp;sim, …)</code>, and likewise <code>drive --fast</code>, <code>check</code>, <code>merge</code>, <code>kick --now</code> and the owner and conductor verbs. Thread-locals (<code>IN_ACT</code>, <code>KICK</code>, <code>SLOT</code>, <code>ROOM</code>, the db connection cache) are per thread, which matches per-process state.</li>
-      <li>One baton, a <code>Mutex</code> plus <code>Condvar</code>. A thread runs only while it holds the baton. At each yield point it hands the baton back, and the scheduler picks the next runnable process with a SplitMix64 PRNG seeded from <code>HERDSMAN_SIM_SEED</code>, written in about 15 lines of test code (no <code>rand</code>).</li>
+      <li>Each pass is one OS thread running the real entry: <code>drover_core::main_with(["drover","drive",…], &amp;ctx, &amp;sim, …)</code>, and likewise <code>drive --fast</code>, <code>check</code>, <code>merge</code>, <code>kick --now</code> and the owner and conductor verbs. Thread-locals (<code>IN_ACT</code>, <code>KICK</code>, <code>SLOT</code>, <code>ROOM</code>, the db connection cache) are per thread, which matches per-process state.</li>
+      <li>One baton, a <code>Mutex</code> plus <code>Condvar</code>. A thread runs only while it holds the baton. At each yield point it hands the baton back, and the scheduler picks the next runnable process with a SplitMix64 PRNG seeded from <code>DROVER_SIM_SEED</code>, written in about 15 lines of test code (no <code>rand</code>).</li>
       <li>Discrete-event clock: each modelled call costs virtual seconds (herdr <code>agent start</code> 3 s, gh 1 s, git 0.5 s). <code>r.sleep(n)</code> parks the process until <code>now + n</code>. When nothing is runnable, the clock jumps to the next wake-up or scenario event.</li>
       <li>Timers start passes as launchd does: drive every 300 s, fast every 60 s, check every 300 s, each with seeded jitter, so passes of the same kind overlap. <code>Runner::detach</code> on <code>kick --now</code> starts a new process with a model pid.</li>
       <li>A panic in a process is a failure, with the seed and the trace.</li>
@@ -118,7 +118,7 @@ replay: HERDSMAN_SIM_SEED=1 cargo test -p herdsman --test sim</pre>
   <div class="card">
     <h3>Seams added to production <span class="tag new">≈30 lines</span></h3>
     <div class="kv">
-      <b>Clock</b><span><code>crate::now()</code> reads a thread-local override first, which the sim sets. The two direct uses (<code>drive.rs:231</code>, <code>:663</code>) and the service's <code>herdsman_core::now()</code> already go through it. <code>Ctx.now</code> stays the per-process start time, the real behaviour the sim must expose. ~8 lines.</span>
+      <b>Clock</b><span><code>crate::now()</code> reads a thread-local override first, which the sim sets. The two direct uses (<code>drive.rs:231</code>, <code>:663</code>) and the service's <code>drover_core::now()</code> already go through it. <code>Ctx.now</code> stays the per-process start time, the real behaviour the sim must expose. ~8 lines.</span>
       <b>Yield hook</b><span><code>crate::sim::point(&amp;Point)</code>: a thread-local <code>Option&lt;&amp;dyn Fn&gt;</code>, a no-op unless set. Called in <code>db::append</code> (with the event), <code>db::take</code>, <code>db::release</code> and <code>db::claim</code>, so read-modify-write races on <code>state.db</code> interleave too, not only those between external calls. ~15 lines.</span>
       <b>Runner</b><span>Nothing new: the sim's <code>Runner</code> is the yield point for herdr, gh, git, <code>ps</code>, <code>kill</code> and <code>detach</code>. <code>local()</code> is false, so <code>herdr::STREAMED</code> stays unused.</span>
       <b>Determinism</b><span>Any <code>HashMap</code> iteration that reaches a Runner call or an event becomes a <code>BTreeMap</code>. The determinism test finds these. Budget ~5 lines.</span>
@@ -128,11 +128,11 @@ replay: HERDSMAN_SIM_SEED=1 cargo test -p herdsman --test sim</pre>
 </div>
 
 <h2>4 · The fakes' surface</h2>
-<p>A single stateful <code>Model</code> (test code, <code>crates/cli/tests/sim/model.rs</code>) answers the argv that herdsman builds. Each argv is parsed by its leading words. An argv the model does not know fails the run with "unmodelled call", so new production calls cannot silently get a canned answer.</p>
+<p>A single stateful <code>Model</code> (test code, <code>crates/cli/tests/sim/model.rs</code>) answers the argv that drover builds. Each argv is parsed by its leading words. An argv the model does not know fails the run with "unmodelled call", so new production calls cannot silently get a canned answer.</p>
 <div class="scroll">
 <table>
 <tr><th>Tool</th><th>Calls modelled</th><th>State and behaviour</th></tr>
-<tr><td>herdr / shed</td><td><code>agent list|start|prompt|rename</code>, <code>workspace create|close|rename</code>, <code>pane list|get|read|send-text|send-keys|close</code>, <code>worktree open|remove</code>, <code>working blocked</code>, and the ssh-batched form for remote hosts</td><td>Panes with id, agent name, <code>agent_status</code> (working, idle, done, dead), screen text and the true spawn time. Agents follow scenario scripts: confirm the prompt, push, write <code>verdict.md</code>, run <code>herdsman turn</code>, ask, die, or get capped (a limit banner on screen). shed is the same model behind <code>shed::call</code>.</td></tr>
+<tr><td>herdr / shed</td><td><code>agent list|start|prompt|rename</code>, <code>workspace create|close|rename</code>, <code>pane list|get|read|send-text|send-keys|close</code>, <code>worktree open|remove</code>, <code>working blocked</code>, and the ssh-batched form for remote hosts</td><td>Panes with id, agent name, <code>agent_status</code> (working, idle, done, dead), screen text and the true spawn time. Agents follow scenario scripts: confirm the prompt, push, write <code>verdict.md</code>, run <code>drover turn</code>, ask, die, or get capped (a limit banner on screen). shed is the same model behind <code>shed::call</code>.</td></tr>
 <tr><td>gh</td><td><code>pr view|create|edit|merge</code>, <code>run list|view|rerun</code>, <code>issue view|list|close|reopen|comment</code>, <code>api graphql</code>, <code>api -i</code></td><td>PRs with base, head sha, mergeable and checks per sha (pending, then green or red). <code>pr merge</code> enforces I4 when called and moves the integration head. Rate-limit and 5xx answers are injected by the scenario.</td></tr>
 <tr><td>git</td><td><code>fetch</code>, <code>rev-parse</code>, <code>rev-list</code>, <code>log</code>, <code>diff</code>, <code>status</code>, <code>push</code>, <code>reset</code>, <code>merge-base</code>, <code>merge-tree</code>, <code>merge</code>, <code>worktree</code>, <code>write-tree</code>, <code>show</code>, <code>revert</code></td><td>Branch heads as opaque shas per remote and worktree, dirty and unpushed flags per worktree, and a conflict flag per file pair. No real objects.</td></tr>
 <tr><td>process</td><td><code>ps -o etime=</code>, <code>kill -0</code>, <code>detach</code>, <code>sh -c nohup</code></td><td>A pid table: a kick process's pid is live until its thread ends, or until the scenario kills it (crash mid-pass). Pids are reused on purpose, to cover #333.</td></tr>
@@ -159,7 +159,7 @@ replay: HERDSMAN_SIM_SEED=1 cargo test -p herdsman --test sim</pre>
     <ul>
       <li>One run is 6 sim hours or 4,000 steps, whichever comes first, then a 30 sim-minute settle with no new faults for the liveness check (I6).</li>
       <li>The trace is one line per step: <code>step · t · process · call or event · model reply (short)</code>. It is kept in a ring buffer, and the last 200 lines plus every scenario event are printed on failure.</li>
-      <li><code>HERDSMAN_SIM_SEED=&lt;n&gt; cargo test -p herdsman --test sim</code> replays one seed. <code>HERDSMAN_SIM_TRACE=full</code> prints all of it.</li>
+      <li><code>DROVER_SIM_SEED=&lt;n&gt; cargo test -p drover --test sim</code> replays one seed. <code>DROVER_SIM_TRACE=full</code> prints all of it.</li>
       <li>Determinism test: seed 7 is run twice in one process, and the two traces must be byte-equal.</li>
       <li>Fixed set: <code>crates/cli/tests/sim/seeds.rs</code> lists seed 1 (the #370 incident), seeds 2–24 and every later regression seed, with a one-line note each. The target is under 60 s on CI.</li>
       <li><code>just sim [N=500]</code> runs N random seeds and prints any failing seed. A nightly CI job runs <code>just sim 2000</code>. A failing seed goes into the fixed set with its fix.</li>

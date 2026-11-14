@@ -3,8 +3,8 @@
 //! fleet.toml moves (no [apply]; `config apply` refuses it).
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -15,10 +15,10 @@ const T: u64 = 1_000_000;
 const CARD: &str = "<form class=chc data-id=\"c1\"><button name=act value=apply>apply</button>";
 
 /// Thread t1 with a conductor role; `config propose` of an impl model change gives `c1`.
-fn setup(name: &str) -> herdsman::Ctx {
+fn setup(name: &str) -> drover::Ctx {
     let c = ctx(
         &tmpdir(name),
-        &format!("{CONFIG}\n[fleet.sendmeter.role.conductor]\nharness = \"claude\"\nmodel = \"opus\"\n"),
+        &format!("{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\nmodel = \"opus\"\n"),
     );
     assert_eq!(
         run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Models"]).1,
@@ -28,7 +28,7 @@ fn setup(name: &str) -> herdsman::Ctx {
     c
 }
 
-fn propose(c: &herdsman::Ctx) {
+fn propose(c: &drover::Ctx) {
     let file = c.config.with_file_name("proposed.toml");
     let old = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&file, old.replacen("model = \"opus\"", "model = \"sonnet\"", 1)).unwrap();
@@ -41,9 +41,9 @@ fn propose(c: &herdsman::Ctx) {
 }
 
 /// Conductor messages `m<i>` in t1.
-fn msgs(c: &herdsman::Ctx, ts: u64, ids: std::ops::Range<u64>) {
+fn msgs(c: &drover::Ctx, ts: u64, ids: std::ops::Range<u64>) {
     for i in ids {
-        let d = json!({"thread": "t1", "from": "conductor", "text": format!("m{i}")});
+        let d = json!({"thread": "t1", "from": "orchestrator", "text": format!("m{i}")});
         append(&c.state, &Event::new(ts + i, "sendmeter", None, "thread-msg", d)).unwrap();
     }
 }
@@ -127,15 +127,14 @@ fn drain(s: &mut TcpStream, ms: u64) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// A real `serve` on a socket; its address.
-fn serve(c: &herdsman::Ctx) -> std::net::SocketAddr {
+fn serve(c: &drover::Ctx) -> (std::net::SocketAddr, FakeShed) {
+    let sh = FakeShed::new();
+    sh.attach(c);
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();
-    std::thread::spawn(move || {
-        herdsman::serve::serve_on(&c2, &Fake::default().reply("herdr agent list", NO_AGENTS), l, false)
-    });
-    addr
+    std::thread::spawn(move || drover::serve::serve_on(&c2, &Fake::default(), l, false));
+    (addr, sh)
 }
 
 /// The `/live` stream of a phone with t1 open: a proposal (with a burst of 40 messages after it, in the same second)
@@ -143,7 +142,7 @@ fn serve(c: &herdsman::Ctx) -> std::net::SocketAddr {
 #[test]
 fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
     let c = setup("cfg-live");
-    let addr = serve(&c);
+    let (addr, _sh) = serve(&c);
     let mut s = TcpStream::connect(addr).unwrap();
     s.write_all(format!("GET /live?tab=chat&thread=t1 HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
         .unwrap();
@@ -191,18 +190,10 @@ fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
 
 /// The page at a phone's width in WebKit on a real `serve`, `js` run on the chat tab; `window.late` after `wait` s.
 fn webkit(url: &str, cookie: &str, js: &str, wait: &str, png: &std::path::Path) -> Vec<f64> {
-    let o = swift()
-        .env("HERDSMAN_WAIT", wait)
-        .env("HERDSMAN_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
-        .args([
-            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/support/webview.swift"),
-            url,
-            "390",
-            "chat",
-            "scene",
-            png.to_str().unwrap(),
-            js,
-        ])
+    let o = webview()
+        .env("DROVER_WAIT", wait)
+        .env("DROVER_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
+        .args([url, "390", "chat", "scene", png.to_str().unwrap(), js])
         .output()
         .unwrap();
     let out = String::from_utf8_lossy(&o.stdout);
@@ -212,18 +203,18 @@ fn webkit(url: &str, cookie: &str, js: &str, wait: &str, png: &std::path::Path) 
 
 /// The same in WebKit at 390 px: the card lands in the open thread without a reload, at its end in view; 40 messages
 /// after it, it is still there once, and a tap on `config c1 waiting` brings it into view. Then the row's marker in the
-/// list, and the card once stale. (HERDSMAN_SNAPSHOTS keeps the three shots.)
+/// list, and the card once stale. (DROVER_SNAPSHOTS keeps the three shots.)
 #[test]
 fn the_card_lands_live_in_view_and_stays_reachable_in_webkit() {
-    if std::process::Command::new("swift").arg("--version").output().is_err() || !cfg!(target_os = "macos") {
-        eprintln!("skipping: no swift/WebKit here");
+    if no_webkit() {
         return;
     }
-    let shots = std::env::var("HERDSMAN_SNAPSHOTS").map_or_else(|_| tmpdir("cfg-png"), std::path::PathBuf::from);
-    let now = herdsman::now();
+    let shots = std::env::var("DROVER_SNAPSHOTS").map_or_else(|_| tmpdir("cfg-png"), std::path::PathBuf::from);
+    let now = drover::now();
     let c = setup("cfg-webkit");
     let cookie = pair(&Server::new(&c, &Fake::default(), Some(ADDR.into())), &c, "Safari", now);
-    let url = format!("http://{}/", serve(&c));
+    let (addr, _sh) = serve(&c);
+    let url = format!("http://{addr}/");
     let c2 = c.clone();
     let later = std::thread::spawn(move || {
         // Once the page's stream watches t1 (serve stamps it each second).
@@ -304,7 +295,7 @@ fn applying_a_new_fleet_kicks_its_first_queued_issue() {
 #[test]
 fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
     let c = setup("cfg-sync");
-    let yaml = c.hermes.join("fleet-verify/config.yaml");
+    let yaml = c.homes["hermes"].join("fleet-verify/config.yaml");
     std::fs::create_dir_all(yaml.parent().unwrap()).unwrap();
     std::fs::write(&yaml, "model: x\n").unwrap();
     let old = std::fs::read_to_string(&c.config).unwrap();
@@ -319,9 +310,9 @@ fn applying_a_new_role_syncs_its_profile_and_hook_approval() {
     let (code, out) = run(&c, &r, &["config", "apply", "c1"]);
     assert_eq!(code, 0, "{out}");
     // A check role's hook is rev's (read-only).
-    let allow = std::fs::read_to_string(c.hermes.join("fleet-verify/shell-hooks-allowlist.json")).unwrap();
+    let allow = std::fs::read_to_string(c.homes["hermes"].join("fleet-verify/shell-hooks-allowlist.json")).unwrap();
     assert!(allow.contains("hook --role rev"), "{allow}");
     assert!(std::fs::read_to_string(&yaml).unwrap().contains("hooks:"));
-    let settings = herdsman::harness::profiles_root(&c).join("fleet-verify/settings.json");
+    let settings = drover::providers::profiles_root(&c).join("fleet-verify/settings.json");
     assert!(std::fs::read_to_string(settings).unwrap().contains("hook --role rev"));
 }

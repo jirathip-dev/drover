@@ -1,19 +1,19 @@
-//! M2: `herdsman check` alerts (once per state), `herdsman clean`, plain-text notifications.
+//! M2: `drover check` alerts (once per state), `drover clean`, plain-text notifications.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, emit, plain, read, Event};
+use drover::config::Config;
+use drover::events::{append, emit, plain, read, Event};
 use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
 const NOW: u64 = 1_000_000;
 const LANE: &str = "sendmeter-impl-12";
 
-fn ev(c: &herdsman::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(issue), kind, d)).unwrap();
 }
 
-fn spawn_ev(c: &herdsman::Ctx, ts: u64, issue: u64, agent: &str) {
+fn spawn_ev(c: &drover::Ctx, ts: u64, issue: u64, agent: &str) {
     ev(
         c,
         ts,
@@ -23,11 +23,20 @@ fn spawn_ev(c: &herdsman::Ctx, ts: u64, issue: u64, agent: &str) {
     );
 }
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> usize {
+fn shed(c: &drover::Ctx, lanes: &[(&str, &str)]) -> FakeShed {
+    let sh = FakeShed::new();
+    sh.attach(c);
+    for (name, status) in lanes {
+        sh.lane(name, status, "/x");
+    }
+    sh
+}
+
+fn kinds(c: &drover::Ctx, kind: &str) -> usize {
     read(&c.state).unwrap().iter().filter(|e| e.kind == kind).count()
 }
 
-fn check(c: &herdsman::Ctx, r: &Fake) -> String {
+fn check(c: &drover::Ctx, r: &Fake) -> String {
     let (code, out) = run(c, r, &["check"]);
     assert_eq!(code, 0, "{out}");
     out
@@ -38,7 +47,8 @@ fn stall_fires_once_and_again_after_state_change() {
     let d = tmpdir("stall");
     let mut c = ctx(&d, CONFIG);
     spawn_ev(&c, NOW - 3600, 12, LANE);
-    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w9:p1")]));
+    let _sh = shed(&c, &[(LANE, "idle")]);
+    let r = Fake::default();
     let out = check(&c, &r);
     assert!(out.contains("sendmeter #12 stall: no event for 60m in impl"), "{out}");
     assert_eq!(kinds(&c, "stall"), 1);
@@ -58,7 +68,8 @@ fn working_lane_is_not_a_stall() {
     let d = tmpdir("stall-working");
     let c = ctx(&d, CONFIG);
     spawn_ev(&c, NOW - 3600, 12, LANE);
-    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "working", "/x", "w9:p1")]));
+    let _sh = shed(&c, &[(LANE, "working")]);
+    let r = Fake::default();
     assert_eq!(check(&c, &r), "");
     assert_eq!(read(&c.state).unwrap().len(), 1);
 }
@@ -68,7 +79,8 @@ fn lane_dead_fires_once_and_again_after_state_change() {
     let d = tmpdir("lane-dead");
     let c = ctx(&d, CONFIG);
     spawn_ev(&c, NOW - 60, 12, LANE);
-    let r = Fake::default().reply("herdr agent list", NO_AGENTS);
+    let _sh = shed(&c, &[]);
+    let r = Fake::default();
     let out = check(&c, &r);
     assert!(
         out.contains("sendmeter #12 lane-dead: impl lane sendmeter-impl-12 is gone"),
@@ -85,15 +97,14 @@ fn lane_dead_fires_once_and_again_after_state_change() {
 fn ready_fake(head: &str) -> Fake {
     let checks = json!([{"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"}]);
     let pr = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": head, "statusCheckRollup": checks});
-    Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("gh pr view issue-12", &pr.to_string())
+    Fake::default().reply("gh pr view issue-12", &pr.to_string())
 }
 
 #[test]
 fn ready_unmerged_fires_once_and_again_after_state_change() {
     let d = tmpdir("ready");
     let mut c = ctx(&d, CONFIG);
+    let _sh = shed(&c, &[]);
     spawn_ev(&c, NOW - 7200, 12, LANE);
     ev(&c, NOW - 3600, 12, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
     let r = ready_fake(HEAD);
@@ -112,6 +123,7 @@ fn ready_unmerged_fires_once_and_again_after_state_change() {
     // PASS at an older head: not ready-unmerged.
     let d2 = tmpdir("ready-stale");
     let c2 = ctx(&d2, CONFIG);
+    let _sh2 = shed(&c2, &[]);
     spawn_ev(&c2, NOW - 7200, 12, LANE);
     ev(
         &c2,
@@ -133,6 +145,7 @@ fn ready_unmerged_fires_once_and_again_after_state_change() {
 fn merged_issues_are_never_flagged() {
     let d = tmpdir("check-merged");
     let c = ctx(&d, CONFIG);
+    let _sh = shed(&c, &[]);
     spawn_ev(&c, NOW - 90_000, 12, LANE);
     ev(&c, NOW - 80_000, 12, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
     ev(
@@ -204,6 +217,8 @@ fn notifier_gets_plain_line_unless_format_json() {
 fn clean_removes_only_merged_clean_idle_lanes() {
     let d = tmpdir("clean");
     let c = ctx(&d, CONFIG);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let wt = |n: &str| {
         let p = c.worktrees.join("sendmeter").join(n);
         std::fs::create_dir_all(&p).unwrap();
@@ -216,8 +231,9 @@ fn clean_removes_only_merged_clean_idle_lanes() {
         wt("issue-14"),
         wt("issue-15"),
     );
-    let lane = |ts, issue, role: &str, w: &str, ws: &str| {
-        let d = json!({"role": role, "agent": format!("{role}-{issue}"), "worktree": w, "pane": format!("{ws}:p1"), "workspace": ws});
+    let lane = |ts, issue, role: &str, w: &str| {
+        let agent = format!("{role}-{issue}");
+        let d = json!({"role": role, "agent": agent, "worktree": w, "pane": agent, "runtime": "shed"});
         ev(&c, ts, issue, "spawn", d);
     };
     let merged = |issue| {
@@ -229,25 +245,30 @@ fn clean_removes_only_merged_clean_idle_lanes() {
             json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
         )
     };
-    lane(10, 12, "impl", &a, "wA");
-    lane(20, 12, "rev", &b, "wB");
+    lane(10, 12, "impl", &a);
+    lane(20, 12, "rev", &b);
     merged(12);
-    lane(10, 13, "impl", &open, "wC");
-    lane(10, 14, "impl", &unpushed, "wD");
+    lane(10, 13, "impl", &open);
+    lane(10, 14, "impl", &unpushed);
     merged(14);
-    lane(10, 15, "impl", &live, "wE");
+    lane(10, 15, "impl", &live);
     merged(15);
+    sh.lane("someone", "idle", &live);
     let git = |w: &str, cmd: &str| format!("git -C {w} {cmd}");
+    let removed = |r: &Fake, w: &str| {
+        r.calls
+            .borrow()
+            .iter()
+            .any(|l| l.ends_with(&format!("worktree remove {w}")))
+    };
     let r = || {
         Fake::default()
-            .reply("herdr agent list", &agents(&[("someone", "idle", &live, "wE:p1")]))
             .reply(&git(&b, "status"), "?? verdict.md\n")
             .reply(&git(&unpushed, "rev-list"), "2\n")
             .reply(&git(&a, "rev-list"), "0\n")
             .reply(&git(&b, "rev-list"), "0\n")
             .once(&git(&unpushed, "check-ignore -q dist"), 1, "")
             .reply("git -C", "")
-            .reply("herdr", "{}")
     };
     let r0 = r();
     let (code, dry) = run(&c, &r0, &["clean"]);
@@ -265,7 +286,7 @@ fn clean_removes_only_merged_clean_idle_lanes() {
     assert!(dry.contains(&format!("keep {live}: live agent")), "{dry}");
     assert!(!dry.contains(&open), "unmerged lanes are not candidates: {dry}");
     assert!(
-        !r0.called("herdr worktree remove") && !r0.called("herdr pane close"),
+        [&a, &b, &unpushed, &live].iter().all(|w| !removed(&r0, w)) && !sh.methods().iter().any(|m| m == "kill"),
         "dry run changes nothing"
     );
     assert_eq!(kinds(&c, "clean"), 0);
@@ -291,7 +312,7 @@ fn clean_removes_only_merged_clean_idle_lanes() {
         all.iter().all(|p| p.exists()) && !dry.contains("freed"),
         "a dry run frees nothing: {dry}"
     );
-    let freed = herdsman::check::du(&gone) + herdsman::check::du(&kept_wt); // #185: blocks used, not 2000 bytes
+    let freed = drover::check::du(&gone) + drover::check::du(&kept_wt); // #185: blocks used, not 2000 bytes
     let r1 = r();
     let (code, done) = run(&c, &r1, &["clean", "--yes"]);
     assert_eq!(code, 0, "{done}");
@@ -309,17 +330,15 @@ fn clean_removes_only_merged_clean_idle_lanes() {
         done.contains(&format!("freed {freed} bytes of build folders")),
         "{done}"
     );
-    assert!(r1.called("herdr worktree remove --workspace wA") && r1.called("herdr worktree remove --workspace wB"));
-    assert!(r1.called("herdr pane close wA:p1"));
-    for ws in ["wC", "wD", "wE"] {
-        assert!(
-            !r1.called(&format!("herdr worktree remove --workspace {ws}")),
-            "{ws} must stay"
-        );
+    assert!(removed(&r1, &a) && removed(&r1, &b), "{:?}", r1.calls.borrow());
+    assert!(sh.called("kill", "impl-12"), "{:?}", sh.methods());
+    for w in [&open, &unpushed, &live] {
+        assert!(!removed(&r1, w), "{w} must stay");
     }
+    assert!(sh.has("someone"), "the live agent stays");
     let cleaned: Vec<_> = read(&c.state)
         .unwrap()
-        .into_iter()
+        .iter()
         .filter(|e| e.kind == "clean")
         .map(|e| e.str("worktree").unwrap().to_string())
         .collect();
@@ -327,13 +346,12 @@ fn clean_removes_only_merged_clean_idle_lanes() {
     assert!(cleaned.contains(&a) && cleaned.contains(&b));
 }
 
-/// Real git; herdr is scripted (no agents, workspace already gone).
-struct GitHerdr(Fake);
+struct RealGit(Fake);
 
-impl herdsman::runner::Runner for GitHerdr {
-    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+impl drover::runner::Runner for RealGit {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
         if prog == "git" {
-            return herdsman::runner::Real.run(prog, args);
+            return drover::runner::Real.run(prog, args);
         }
         self.0.run(prog, args)
     }
@@ -385,7 +403,7 @@ fn clean_falls_back_to_git_dropping_only_fleets_own_files_and_keeps_going() {
             ts,
             issue,
             "spawn",
-            json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": w, "pane": format!("w{issue}:p1"), "workspace": format!("w{issue}")}),
+            json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": w, "pane": format!("impl-{issue}"), "runtime": "shed"}),
         );
         ev(
             &c,
@@ -395,7 +413,8 @@ fn clean_falls_back_to_git_dropping_only_fleets_own_files_and_keeps_going() {
             json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
         );
     }
-    let r = || GitHerdr(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let _sh = shed(&c, &[]);
+    let r = || RealGit(Fake::default());
     let (code, dry) = run(&c, &r(), &["clean"]);
     assert_eq!(code, 0, "{dry}");
     let (ours_s, user_s, locked_s) = (
@@ -494,7 +513,8 @@ fn clean_removes_merged_worktrees_holding_only_lane_artifacts_and_unlogged_rev_t
             json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
         );
     }
-    let r = || GitHerdr(Fake::default().reply("herdr agent list", NO_AGENTS));
+    let _sh = shed(&c, &[]);
+    let r = || RealGit(Fake::default());
     let (code, dry) = run(&c, &r(), &["clean"]);
     assert_eq!(code, 0, "{dry}");
     assert!(dry.contains(&format!("would remove {} ", shots.display())), "{dry}");
@@ -536,6 +556,7 @@ fn clean_removes_merged_worktrees_holding_only_lane_artifacts_and_unlogged_rev_t
 fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
     let d = tmpdir("clean-closed");
     let c = ctx(&d, CONFIG);
+    let sh = shed(&c, &[]);
     let wt = |n: &str| {
         let p = c.worktrees.join("sendmeter").join(n);
         std::fs::create_dir_all(&p).unwrap();
@@ -543,12 +564,12 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
     };
     let (done, unpushed, open) = (wt("issue-21"), wt("issue-22"), wt("issue-23"));
     for (issue, w) in [(21, &done), (22, &unpushed), (23, &open)] {
-        let d = json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": w, "pane": format!("w{issue}:p1"), "workspace": format!("w{issue}")});
+        let agent = format!("impl-{issue}");
+        let d = json!({"role": "impl", "agent": agent, "worktree": w, "pane": agent, "runtime": "shed"});
         ev(&c, 10, issue, "spawn", d);
     }
     let r = || {
         Fake::default()
-            .reply("herdr agent list", NO_AGENTS)
             .reply(
                 "gh issue list -R jirathip-dev/sendmeter --state closed",
                 r#"[{"number": 21}, {"number": 22}, {"number": 99}]"#,
@@ -556,13 +577,20 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
             .reply(&format!("git -C {unpushed} rev-list"), "1\n")
             .reply(&format!("git -C {done} rev-list"), "0\n")
             .reply("git -C", "")
-            .reply("herdr", "{}")
+    };
+    let removed = |r: &Fake, w: &str| {
+        r.calls
+            .borrow()
+            .iter()
+            .any(|l| l.ends_with(&format!("worktree remove {w}")))
     };
     let r0 = r();
     let (code, dry) = run(&c, &r0, &["clean"]);
     assert_eq!(code, 0, "{dry}");
     assert!(
-        dry.contains(&format!("would remove {done} (pane w21:p1, sendmeter#21 issue closed)")),
+        dry.contains(&format!(
+            "would remove {done} (pane impl-21, sendmeter#21 issue closed)"
+        )),
         "{dry}"
     );
     assert!(
@@ -582,7 +610,7 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
     );
 
     // #138: a removed lane's rolling transcript goes with it; a kept lane's stays.
-    let log = |a: &str| herdsman::lanes::log(&c.state, a).unwrap();
+    let log = |a: &str| drover::lanes::log(&c.state, a).unwrap();
     std::fs::create_dir_all(log("impl-21").parent().unwrap()).unwrap();
     for a in ["impl-21", "impl-22"] {
         std::fs::write(log(a), "⏺ hi\n").unwrap();
@@ -595,8 +623,13 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
         "{out}"
     );
     assert!(!log("impl-21").exists() && log("impl-22").exists());
-    assert!(r1.called("herdr worktree remove --workspace w21") && r1.called("herdr pane close w21:p1"));
-    assert!(!r1.called("herdr worktree remove --workspace w22") && !r1.called("herdr worktree remove --workspace w23"));
+    assert!(
+        removed(&r1, &done) && sh.called("kill", "impl-21"),
+        "{:?}",
+        r1.calls.borrow()
+    );
+    assert!(!removed(&r1, &unpushed) && !removed(&r1, &open));
+    assert!(!sh.called("kill", "impl-22") && !sh.called("kill", "impl-23"));
     assert_eq!(r1.count("gh "), 0, "the closed-issue read is cached");
     assert_eq!(kinds(&c, "clean"), 1);
 }
@@ -605,13 +638,16 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
 fn orphan_lane_fires_once_per_agent() {
     let d = tmpdir("orphan-lane");
     let c = ctx(&d, CONFIG);
-    let rows = [
-        ("sendmeter-rev-93-r1", "working", "/w", "w6:p1"),
-        ("other-impl-5", "idle", "/w", "w2:p1"),
-        (LANE, "working", "/w", "w9:p1"),
-    ];
+    let _sh = shed(
+        &c,
+        &[
+            ("sendmeter-rev-93-r1", "working"),
+            ("other-impl-5", "idle"),
+            (LANE, "working"),
+        ],
+    );
     spawn_ev(&c, NOW - 60, 12, LANE);
-    let r = Fake::default().reply("herdr agent list", &agents(&rows));
+    let r = Fake::default();
     let out = check(&c, &r);
     assert!(
         out.contains("sendmeter #93 orphan-lane: herdr agent sendmeter-rev-93-r1 has no spawn event"),
@@ -626,23 +662,23 @@ fn orphan_lane_fires_once_per_agent() {
 }
 
 /// #128: a verdict closes the reviewer's pane and removes its worktree; a dirty one stays, with the reason logged;
-/// one herdr still shows working is untouched.
 #[test]
 fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
-    let working = agents(&[("sendmeter-rev-12-r1", "working", "/x", "wR:p1")]);
-    for (status, list, kind) in [
-        ("?? verdict.md\n", NO_AGENTS, "lane-closed"),
-        (" M src/x.rs\n", NO_AGENTS, "lane-kept"),
-        ("?? verdict.md\n", working.as_str(), "verdict"),
+    const REV: &str = "sendmeter-rev-12-r1";
+    for (status, working, kind) in [
+        ("?? verdict.md\n", false, "lane-closed"),
+        (" M src/x.rs\n", false, "lane-kept"),
+        ("?? verdict.md\n", true, "verdict"),
     ] {
         let d = tmpdir("verdict-close");
         let c = ctx(&d, CONFIG);
+        let lanes: &[(&str, &str)] = if working { &[(REV, "working")] } else { &[] };
+        let sh = shed(&c, lanes);
         let w = c.worktrees.join("sendmeter/rev-12-r1");
         std::fs::create_dir_all(&w).unwrap();
         let w = w.to_string_lossy().into_owned();
         spawn_ev(&c, 10, 12, LANE);
-        let rev =
-            json!({"role": "rev", "agent": "sendmeter-rev-12-r1", "worktree": w, "pane": "wR:p1", "workspace": "wR"});
+        let rev = json!({"role": "rev", "agent": REV, "worktree": w, "pane": REV, "runtime": "shed"});
         ev(&c, 20, 12, "spawn", rev);
         let f = d.join("verdict.md");
         std::fs::write(&f, "FAIL\n1. blocking a.rs:1\nProof: spec\n> AC 1\n").unwrap();
@@ -650,8 +686,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
             .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)
             .reply(&format!("git -C {w} status"), status)
             .reply(&format!("git -C {w} rev-list"), "0\n")
-            .reply("herdr agent list", list)
-            .reply("herdr", "{}");
+            .reply("git -C", "");
         let args = [
             "verdict",
             "sendmeter",
@@ -664,11 +699,16 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
         ];
         let (code, out) = run(&c, &r, &args);
         assert_eq!(code, 0, "{out}");
-        let e = read(&c.state).unwrap().pop().unwrap();
+        let e = read(&c.state).unwrap().to_vec().pop().unwrap();
         assert_eq!(e.kind, kind, "{out}");
         let gone = kind == "lane-closed";
-        assert_eq!(r.called("herdr pane close wR:p1"), gone, "{out}");
-        assert_eq!(r.called("herdr worktree remove --workspace wR"), gone, "{out}");
+        assert_eq!(sh.called("kill", REV), gone, "{out}");
+        let removed = r
+            .calls
+            .borrow()
+            .iter()
+            .any(|l| l.ends_with(&format!("worktree remove {w}")));
+        assert_eq!(removed, gone, "{out}");
         if kind == "verdict" {
             continue;
         }
@@ -681,7 +721,7 @@ fn verdict_closes_the_reviewer_lane_unless_dirty_or_working() {
                 format!("{w}: 1 uncommitted change(s)")
             }
         );
-        let st = &herdsman::events::fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
+        let st = &drover::events::fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
         assert_eq!(
             (st.state.as_str(), st.last_event.as_str()),
             ("fix(1)", "verdict"),
@@ -699,7 +739,7 @@ fn du_counts_blocks_used_not_apparent_size() {
         .set_len(1 << 30)
         .unwrap();
     std::fs::write(d.join("data"), vec![1u8; 64 << 10]).unwrap();
-    let n = herdsman::check::du(&d);
+    let n = drover::check::du(&d);
     assert!((64 << 10..1 << 20).contains(&n), "{n}");
 }
 
@@ -708,13 +748,12 @@ fn du_counts_blocks_used_not_apparent_size() {
 fn ci_missing_fires_once_per_head_after_the_grace() {
     let d = tmpdir("ci-missing");
     let mut c = ctx(&d, CONFIG);
+    let _sh = shed(&c, &[]);
     spawn_ev(&c, NOW - 7200, 12, LANE);
     ev(&c, NOW - 300, 12, "verdict", json!({"verdict": "PASS", "sha": HEAD}));
     let pr =
         json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": HEAD, "statusCheckRollup": []});
-    let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply("gh pr view issue-12", &pr.to_string());
+    let r = Fake::default().reply("gh pr view issue-12", &pr.to_string());
     assert_eq!(check(&c, &r), "", "inside the 10 min grace");
     c.now = NOW + 600;
     let out = check(&c, &r);
@@ -731,7 +770,8 @@ fn ci_missing_fires_once_per_head_after_the_grace() {
 fn an_unheld_idle_lane_stalls_once_until_it_changes() {
     let mut c = ctx(&tmpdir("stall-repeat"), CONFIG);
     spawn_ev(&c, NOW - 3600, 12, LANE);
-    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w9:p1")]));
+    let _sh = shed(&c, &[(LANE, "idle")]);
+    let r = Fake::default();
     assert!(check(&c, &r).contains("stall: no event for 60m"));
     c.now = NOW + 7200;
     assert_eq!(check(&c, &r), "", "2 h later: still the same stall");
@@ -756,11 +796,13 @@ fn a_blocked_live_lane_is_held_shown_held_and_never_stalls() {
         ),
     )
     .unwrap();
-    let r = Fake::default().reply("herdr agent list", &agents(&[(LANE, "idle", "/x", "w9:p1")]));
+    let _sh = shed(&c, &[(LANE, "idle")]);
+    let r = Fake::default();
     let (code, out) = run(&c, &r, &["queue", "sendmeter", "block", "--on", "11", "12"]);
     assert_eq!(code, 0, "{out}");
     let held: Vec<_> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "held")
         .collect();
@@ -783,4 +825,77 @@ fn a_blocked_live_lane_is_held_shown_held_and_never_stalls() {
 fn saved_as(out: &str, prefix: &str) -> String {
     let at = out.find(prefix).unwrap_or_else(|| panic!("no {prefix} in {out}"));
     out[at..].split_whitespace().next().unwrap().to_string()
+}
+
+#[test]
+fn clean_and_the_wip_snapshot_treat_spawns_claude_files_as_the_lanes_own() {
+    let d = tmpdir("clean-claude-local");
+    let git = |dir: &std::path::Path, args: &[&str]| {
+        let o = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            o.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&o.stderr)
+        );
+        String::from_utf8_lossy(&o.stdout).into_owned()
+    };
+    let (origin, local) = (d.join("origin.git"), d.join("local"));
+    git(&d, &["init", "-q", "--bare", origin.to_str().unwrap()]);
+    git(&d, &["clone", "-q", origin.to_str().unwrap(), local.to_str().unwrap()]);
+    git(&local, &["commit", "-q", "--allow-empty", "-m", "init"]);
+    git(&local, &["push", "-q", "origin", "HEAD"]);
+    let c = ctx(
+        &d,
+        &CONFIG.replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap()),
+    );
+    let wt = |n: &str, files: &[&str]| {
+        let p = c.worktrees.join("sendmeter").join(n);
+        git(&local, &["worktree", "add", "-q", "-b", n, p.to_str().unwrap()]);
+        for f in ["CLAUDE.local.md", ".claude/settings.local.json"].iter().chain(files) {
+            std::fs::create_dir_all(p.join(f).parent().unwrap()).unwrap();
+            std::fs::write(p.join(f), "x").unwrap();
+        }
+        p
+    };
+    let (ours, user) = (wt("issue-12", &[]), wt("issue-13", &["notes.txt"]));
+    for (ts, issue, p) in [(10, 12, &ours), (11, 13, &user)] {
+        let w = p.to_str().unwrap();
+        ev(
+            &c,
+            ts,
+            issue,
+            "spawn",
+            json!({"role": "impl", "agent": format!("impl-{issue}"), "worktree": w, "pane": format!("impl-{issue}"), "runtime": "shed"}),
+        );
+        ev(
+            &c,
+            50,
+            issue,
+            "merged",
+            json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
+        );
+    }
+    let _sh = shed(&c, &[]);
+    let r = || RealGit(Fake::default());
+    let (code, out) = run(&c, &r(), &["clean", "--lane", "impl-12", "--yes"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(!ours.exists(), "{out}");
+    let (_, dry) = run(&c, &r(), &["clean"]);
+    let user_s = user.display().to_string();
+    assert!(
+        dry.contains(&format!(
+            "would save {user_s} to wip/ (1 uncommitted change(s)), then remove it"
+        )),
+        "{dry}"
+    );
+    let (_, done) = run(&c, &r(), &["clean", "--yes"]);
+    let wip = saved_as(&done, "wip/impl-13-1000000-");
+    let files = git(&origin, &["ls-tree", "-r", "--name-only", &wip]);
+    assert_eq!(files, "notes.txt\n", "{done}");
 }

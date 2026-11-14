@@ -1,4 +1,4 @@
-//! The per-fleet work queue (`queue` events): `herdsman queue`, `next` and `board`.
+//! The per-fleet work queue (`queue` events): `drover queue`, `next` and `board`.
 use crate::config::{Fleet, Serial};
 use crate::events::{age, fold, last_spawn, Event, IssueState, States};
 use crate::overlap::Conflicts;
@@ -6,6 +6,7 @@ use anyhow::{anyhow, ensure, Result};
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Default)]
+#[allow(clippy::struct_excessive_bools)] // independent queue marks (`--design`, `--architect`, `--repro`, …)
 pub struct Item {
     pub issue: u64,
     /// #505: every issue it waits on (`queue block --on A --on B`); a merged one drops out in `view`.
@@ -23,10 +24,14 @@ pub struct Item {
     pub check: bool,
     /// #412: a design lane first, impl only once the owner approves it (`--design`, `queue set <n> design on|off`).
     pub design: bool,
+    /// #730: an architect lane first (before any design), same approval (`--architect`, `queue set <n> architect on|off`).
+    pub architect: bool,
     /// #417: the verify stage forced on or off (`--verify [on|off]`, `queue set <n> verify on|off`); unset = by rule.
     pub verify: Option<bool>,
     /// #420: a bug fix that starts with a failing test (`--repro`, `queue set <n> repro on|off`).
     pub repro: bool,
+    /// #734: `perf` or `refactor` (`--perf`, `--refactor`): the playbook its briefs and rev's PASS follow.
+    pub playbook: Option<String>,
 }
 
 /// A queue change, as logged: `op` is add | mv | rm | block | unblock | set (`needs`).
@@ -74,8 +79,10 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                     needs: strs(&d["needs"]),
                     check: d["check"] == true,
                     design: d["design"] == true,
+                    architect: d["architect"] == true,
                     verify: onoff(&d["verify"]),
                     repro: d["repro"] == true,
+                    playbook: d["playbook"].as_str().map(String::from),
                 })
                 .collect();
             for m in &mut moved {
@@ -84,7 +91,9 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                     m.ext.clone_from(&old.ext);
                     m.check |= old.check;
                     m.design |= old.design;
+                    m.architect |= old.architect;
                     m.repro |= old.repro;
+                    m.playbook = m.playbook.take().or_else(|| old.playbook.clone());
                     m.verify = m.verify.or(old.verify);
                     m.serial.extend(old.serial.iter().cloned());
                     m.needs = old.needs.iter().chain(&m.needs).cloned().collect();
@@ -142,6 +151,8 @@ pub fn apply(q: &mut Vec<Item>, d: &Value) -> Result<()> {
                 q[i].serial = strs(&d["serial"]);
             } else if d.get("design").is_some() {
                 q[i].design = strs(&d["design"]) == ["on"];
+            } else if d.get("architect").is_some() {
+                q[i].architect = strs(&d["architect"]) == ["on"];
             } else if d.get("verify").is_some() {
                 q[i].verify = onoff(&d["verify"]);
             } else if d.get("repro").is_some() {
@@ -192,7 +203,7 @@ pub fn released(events: &[Event], st: &States, b: &str) -> bool {
             .any(|e| e.kind == "blocker-closed" && e.str("ref") == Some(b))
 }
 
-/// #667: `#11, herdsman#633, cooee#87`: the item's open blockers, another repo's by its name.
+/// #667: `#11, drover#633, cooee#87`: the item's open blockers, another repo's by its name.
 pub fn labels(i: &Item) -> String {
     let ext = i.ext.iter().map(|b| b.rsplit('/').next().unwrap_or(b).to_string());
     let all: Vec<String> = i.blockers.iter().map(|n| format!("#{n}")).chain(ext).collect();
@@ -213,15 +224,29 @@ pub fn needs_of(events: &[Event], fleet: &str, issue: u64) -> Vec<String> {
     q.map(|i| i.needs).unwrap_or_default()
 }
 
-/// #412: issue `n` is queued for a design stage that the owner has not approved yet.
-pub fn wants_design(events: &[Event], fleet: &str, n: u64) -> bool {
-    let marked = replay(events, fleet).iter().any(|i| i.issue == n && i.design);
-    marked && !events.iter().any(|e| e.is("design-approved", fleet, n))
+/// #412: the pre-impl stage issue `n` is queued for that the owner has not approved yet: #730's `architect` first, then
+/// `design` (an approval names its stage's `role`; none before #730: `design`).
+pub fn wants_design(events: &[Event], fleet: &str, n: u64) -> Option<&'static str> {
+    let q = replay(events, fleet).into_iter().find(|i| i.issue == n)?;
+    let approved = |r| {
+        events
+            .iter()
+            .any(|e| e.is("design-approved", fleet, n) && e.str("role").unwrap_or("design") == r)
+    };
+    [("architect", q.architect), ("design", q.design)]
+        .into_iter()
+        .find(|&(r, on)| on && !approved(r))
+        .map(|(r, _)| r)
 }
 
 /// #420: issue `n` is queued `--repro`.
 pub fn repro(events: &[Event], fleet: &str, n: u64) -> bool {
     replay(events, fleet).iter().any(|i| i.issue == n && i.repro)
+}
+
+/// #734: issue `n`'s playbook, `perf` or `refactor`.
+pub fn playbook(events: &[Event], fleet: &str, n: u64) -> Option<String> {
+    replay(events, fleet).into_iter().find(|i| i.issue == n)?.playbook
 }
 
 /// Replay the fleet's `queue` events; invalid ones (never logged by fleet) are skipped.
@@ -309,7 +334,7 @@ pub fn view(events: &[Event], st: &States, fleet: &str) -> Vec<Item> {
     .collect()
 }
 
-/// `herdsman next`: (exit code, line) for the first unblocked queued issue with no lane.
+/// `drover next`: (exit code, line) for the first unblocked queued issue with no lane.
 pub fn next(events: &[Event], fleet: &str) -> (i32, String) {
     let st = fold(events);
     let free: Vec<Item> = view(events, &st, fleet)
@@ -367,7 +392,10 @@ pub fn skipped(
             }
         }
         let g = &gs.first()?.name;
-        return Some((format!("{g} slot free"), format!("{g} slot free; starts next pass")));
+        return Some((
+            format!("{g} slot free"),
+            crate::promise::Say::Starts(format!("{g} slot free")).line(),
+        ));
     }
     let mine = |m: u64| {
         f.is_some_and(|f| {
@@ -383,8 +411,14 @@ pub fn skipped(
     Some((format!("skip {code}"), format!("{code} ({why}) · {ago} ago")))
 }
 
+/// #712: a parked issue's `park --why`.
+pub fn park_why<'a>(events: &'a [Event], st: &States, fleet: &str, n: u64) -> Option<&'a str> {
+    let parked = |e: &&Event| e.is("parked", fleet, n);
+    (state(st, fleet, n) == "parked").then(|| events.iter().rfind(parked)?.str("why"))?
+}
+
 pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
-    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blockers, "blocked_ext": i.ext, "serial": !i.serial.is_empty(), "needs": i.needs, "design": i.design, "verify": i.verify, "repro": i.repro});
+    let row = |(k, i): (usize, &Item)| json!({"pos": k + 1, "issue": i.issue, "state": state(st, fleet, i.issue), "blocked_by": i.blockers, "blocked_ext": i.ext, "serial": !i.serial.is_empty(), "needs": i.needs, "design": i.design, "architect": i.architect, "verify": i.verify, "repro": i.repro, "playbook": i.playbook, "why": park_why(events, st, fleet, i.issue)});
     Value::Array(view(events, st, fleet).iter().enumerate().map(row).collect())
 }
 

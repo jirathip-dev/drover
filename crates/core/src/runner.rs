@@ -46,22 +46,93 @@ pub trait Runner: Sync {
     fn stream(&self, prog: &str, args: &[String], input: &str) -> Result<Box<dyn std::io::Read + Send>> {
         Real::stream(prog, args, input)
     }
-    /// #441: keychain service `svc`'s secret in the main host's OS store (None: not set); fakes and wrappers forward.
+    /// #707: drover keeps no secret store (`crate::secret` reads 0600 files); always refused. Kept only while the
+    /// frozen board (#552) still forwards it.
     fn secret(&self, svc: &str) -> Result<Option<String>> {
-        bail!("no secret store on this host (wanted {svc})")
+        bail!("drover keeps no secret store (wanted {svc})")
     }
-    /// #441: save `svc`'s secret (None: delete it) in the main host's OS store.
+    /// #707: as `secret`.
     fn set_secret(&self, svc: &str, _value: Option<&str>) -> Result<()> {
-        bail!("no secret store on this host (wanted {svc})")
+        bail!("drover keeps no secret store (wanted {svc})")
+    }
+}
+
+thread_local!(static REQUEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) });
+
+/// #859: `f` as a board GET request: it may read only what the background refreshed, never start a process.
+pub fn request<T>(f: impl FnOnce() -> T) -> T {
+    let was = REQUEST.replace(true);
+    let t = f();
+    REQUEST.set(was);
+    t
+}
+
+/// #859: this thread is serving a board GET request (`request`).
+pub fn in_request() -> bool {
+    REQUEST.get()
+}
+
+const SERVE_FDS: &str = "DROVER_SERVE_FDS";
+extern "C" {
+    fn fcntl(fd: i32, cmd: i32, ...) -> i32;
+}
+
+/// #894: `argv` with the listeners `fds` kept open across exec and named in `DROVER_SERVE_FDS`: a bridge in the background (sh reaps nothing), else exec'd in place.
+pub fn hand_fds(argv: &[std::ffi::OsString], fds: &[i32], bridge: bool) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    let mut c = Command::new(if bridge { "sh".as_ref() } else { argv[0].as_os_str() });
+    if bridge {
+        c.args(["-c", "\"$@\" &", "sh"]).args(argv);
+    } else {
+        c.args(&argv[1..]);
+    }
+    let list: Vec<String> = fds.iter().map(i32::to_string).collect();
+    c.env(SERVE_FDS, list.join(",")).stdin(std::process::Stdio::null());
+    let fds = fds.to_vec();
+    // SAFETY: fcntl is async-signal-safe; between fork and exec it only clears close-on-exec on the listeners.
+    unsafe {
+        c.pre_exec(move || {
+            if fds.iter().all(|&fd| fcntl(fd, 2, 0) != -1) {
+                Ok(())
+            } else {
+                Err(std::io::Error::last_os_error())
+            }
+        });
+    }
+    if !bridge {
+        return Err(c.exec()).context("exec");
+    }
+    let s = c.status().context("sh")?;
+    if !s.success() {
+        bail!("sh: {s}");
+    }
+    Ok(())
+}
+
+/// #894: the listeners a predecessor handed over (`hand_fds`), close-on-exec again; none for a fresh start.
+pub fn inherited() -> Vec<std::net::TcpListener> {
+    use std::os::fd::FromRawFd;
+    let Some(v) = std::env::var_os(SERVE_FDS) else {
+        return vec![];
+    };
+    std::env::remove_var(SERVE_FDS);
+    let fds = v
+        .to_string_lossy()
+        .split(',')
+        .filter_map(|f| f.parse().ok())
+        .collect::<Vec<i32>>();
+    // SAFETY: each fd is a listener the predecessor passed down for this process alone; nothing else here owns it.
+    unsafe {
+        fds.into_iter()
+            .map(|fd| {
+                fcntl(fd, 2, 1);
+                std::net::TcpListener::from_raw_fd(fd)
+            })
+            .collect()
     }
 }
 
 pub struct Real;
-
-/// #441: the OS store's entry for `svc`, under the `herdsman` account `security` used (#387), so old items keep working.
-fn entry(svc: &str) -> Result<keyring::Entry> {
-    keyring::Entry::new(svc, "herdsman").with_context(|| format!("secret store: {svc}"))
-}
 
 impl Runner for Real {
     fn local(&self) -> bool {
@@ -71,10 +142,10 @@ impl Runner for Real {
         self.run_in(prog, args, "")
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
-        self.within(prog, args, input, limit(prog, args))
+        self.within(prog, args, input.as_bytes(), limit(prog, args))
     }
     fn run_for(&self, prog: &str, args: &[String], input: &str, limit: Duration) -> Result<Out> {
-        self.within(prog, args, input, Some(limit))
+        self.within(prog, args, input.as_bytes(), limit)
     }
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
         use std::os::unix::process::CommandExt;
@@ -99,65 +170,6 @@ impl Runner for Real {
         std::thread::spawn(move || child.wait()); // a long-lived parent (serve) reaps it
         Ok(pid)
     }
-    fn secret(&self, svc: &str) -> Result<Option<String>> {
-        store_get(self, svc)
-    }
-    fn set_secret(&self, svc: &str, value: Option<&str>) -> Result<()> {
-        store_set(self, svc, value)
-    }
-}
-
-/// #441: `svc`'s secret in the OS store (None: not set); #548: on `r`'s clock, `KEYCHAIN_LOCKED` past `KEYCHAIN_SECS`.
-pub fn store_get(r: &dyn Runner, svc: &str) -> Result<Option<String>> {
-    let e = entry(svc)?;
-    match keychain(r, svc, move || e.get_password())? {
-        Err(keyring::Error::NoEntry) => Ok(None),
-        x => Ok(Some(x.with_context(|| format!("secret store: {svc}"))?)),
-    }
-}
-
-/// #441: save `svc`'s secret (None: delete it) in the OS store; #548: as `store_get`, never blocking.
-pub fn store_set(r: &dyn Runner, svc: &str, value: Option<&str>) -> Result<()> {
-    let (e, v) = (entry(svc)?, value.map(String::from));
-    let done = keychain(r, svc, move || {
-        v.map_or_else(|| e.delete_credential(), |v| e.set_password(&v))
-    })?;
-    done.with_context(|| format!("secret store: {svc}"))
-}
-
-/// #548: how long a keychain call may wait (a macOS access dialog nobody clicks blocks it for good).
-pub const KEYCHAIN_SECS: u64 = 5;
-
-/// #548: `f` (a keychain call on `svc`) on a worker thread, given `KEYCHAIN_SECS` (`r`'s clock) to answer; past that
-/// `KEYCHAIN_LOCKED` with the fix, and the worker is left waiting on the dialog.
-fn keychain<T: Send + 'static>(r: &dyn Runner, svc: &str, f: impl FnOnce() -> T + Send + 'static) -> Result<T> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || tx.send(f()));
-    let mut got = rx.recv_timeout(Duration::from_millis(200)).ok();
-    for _ in 0..KEYCHAIN_SECS {
-        if got.is_some() {
-            break;
-        }
-        r.sleep(1);
-        got = rx.try_recv().ok();
-    }
-    got.map_or_else(|| locked(r, svc), Ok)
-}
-
-/// #556: the one-time fix for `svc`: the owner's "Always Allow", which lasts across builds signed by "herdsman-local".
-pub fn keychain_fix(svc: &str) -> String {
-    format!("Always Allow for {svc}, once (it lasts while herdsman is signed by \"herdsman-local\")")
-}
-
-fn locked<T>(r: &dyn Runner, svc: &str) -> Result<T> {
-    let host = ok(r, "hostname", &["-s"]).map_or_else(|_| "this host".into(), |h| h.trim().to_string());
-    crate::gate::refused(
-        "KEYCHAIN_LOCKED",
-        format!(
-            "approve herdsman in the Keychain dialog on {host}: {}",
-            keychain_fix(svc)
-        ),
-    )
 }
 
 /// #637: a streamed child's stdout; dropping it waits for the child.
@@ -189,66 +201,395 @@ impl Real {
         let out = c.stdout.take().context("stdout")?;
         Ok(Box::new(Streamed(c, out)))
     }
-    /// `run_in`, killed (exit 124) once `limit` has passed.
-    pub fn within(&self, prog: &str, args: &[String], input: &str, limit: Option<Duration>) -> Result<Out> {
+    /// `run_in` with bytes on stdin, killed (exit 124) once `limit` has passed.
+    pub fn within(&self, prog: &str, args: &[String], input: &[u8], limit: Duration) -> Result<Out> {
         use std::io::Write;
         use std::process::Stdio;
-        let mut c = Command::new(prog)
-            .args(args)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .with_context(|| format!("cannot run {prog}"))?;
-        let _ = c.stdin.take().unwrap().write_all(input.as_bytes());
-        let text = |b: &[u8]| String::from_utf8_lossy(b).into_owned();
-        let Some(limit) = limit else {
-            let o = c.wait_with_output()?;
-            let code = o.status.code().unwrap_or(-1);
-            return Ok(Out {
-                code,
-                stdout: text(&o.stdout),
-                stderr: text(&o.stderr),
-            });
+        debug_assert!(!in_request(), "#859: `{prog}` started on a board request");
+        let dir = args.iter().position(|a| a == "-C").and_then(|i| args.get(i + 1));
+        let fail = |why: String| {
+            let stderr = format!("{prog} {}: {why}", args.join(" "));
+            Ok(Out {
+                code: 124,
+                stderr,
+                ..Out::default()
+            })
         };
-        let (so, se) = (drain(c.stdout.take()), drain(c.stderr.take()));
-        let end = Instant::now() + limit;
-        while Instant::now() < end {
-            if let Some(st) = c.try_wait()? {
-                let (stdout, stderr) = (
-                    text(&so.join().unwrap_or_default()),
-                    text(&se.join().unwrap_or_default()),
-                );
-                return Ok(Out {
-                    code: st.code().unwrap_or(-1),
-                    stdout,
-                    stderr,
-                });
-            }
-            std::thread::sleep(Duration::from_millis(50));
+        // #776: a `-C <dir>` on a disk that stopped answering fails at once; its child would never exit.
+        if let Some(dir) = dir.filter(|d| hung(d, probe_wait(), list)) {
+            return fail(format!("{dir} is on a disk that is not answering"));
         }
-        let _ = (c.kill(), c.wait()); // its readers may outlive it while a grandchild (ssh) holds the pipes
-        let stderr = format!("{prog} {}: no answer in {:?}", args.join(" "), limit);
-        Ok(Out {
-            code: 124,
-            stderr,
-            ..Out::default()
-        })
+        let mut pipes = None;
+        let end = Instant::now() + limit;
+        let start = || {
+            use std::os::unix::process::CommandExt;
+            let mut c = Command::new(prog)
+                .args(args)
+                .process_group(0)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .with_context(|| format!("cannot run {prog}"))?;
+            let _ = c.stdin.take().unwrap().write_all(input);
+            pipes = Some((drain(c.stdout.take()), drain(c.stderr.take())));
+            Ok(c)
+        };
+        let ended = settle(dir.map(String::as_str), limit, start)?;
+        let text = |b: std::sync::mpsc::Receiver<Vec<u8>>| {
+            let left = end.saturating_duration_since(Instant::now());
+            let v = b.recv_timeout(left).ok()?;
+            Some(String::from_utf8_lossy(&v).into_owned())
+        };
+        match ended {
+            Ended::Exited(st) => {
+                let (so, se) = pipes.context("pipes")?;
+                match (text(so), text(se)) {
+                    (Some(stdout), Some(stderr)) => Ok(Out {
+                        code: st.code().unwrap_or(-1),
+                        stdout,
+                        stderr,
+                    }),
+                    _ => fail(format!("it ended, but its output stayed open past {limit:?}")),
+                }
+            }
+            // #776: a `-C <dir>` call that ran out of time marks its whole disk: a folder macOS still lists from
+            // memory passes the probe while its files hang. Its readers may outlive it while a grandchild (ssh) holds
+            // the pipes.
+            Ended::TimedOut => {
+                dir.inspect(|d| sicken(d));
+                fail(format!("no answer in {limit:?}"))
+            }
+            Ended::Busy => fail(format!("an earlier call on {} has not ended", dir.map_or("", |d| d))),
+        }
     }
 }
 
-/// #478: another host's `herdr --machine m … list` (its ssh has no timeout of its own) answers in 20 s.
-pub fn limit(prog: &str, args: &[String]) -> Option<Duration> {
-    let remote = prog == crate::herdr::BIN && args.first().is_some_and(|a| a == "--machine");
-    (remote && args.get(3).is_some_and(|a| a == "list")).then(|| Duration::from_secs(20))
+/// #713: every call's time limit by the program's file name, unless `run_for` gives one: a call that hits it is
+/// killed and exits 124.
+/// - `herdr --machine m … list`: 20 s; #478: another host's (its ssh has no timeout of its own) must not hold a tick.
+/// - `security`, `codesign`: 10 s; they wait on the login Keychain, which can stop answering (11-08).
+/// - `herdr … --timeout <ms>`: its own timeout and 30 s; `agent start` and the waits run up to it.
+/// - `git clone|fetch|pull|push`: 10 min; a large repo over the network.
+/// - `cp`, `rm`: 10 min; copying (spawn's build cache) or deleting a worktree's build folder of many GB.
+/// - `cargo`: 30 min; self-update's release build.
+/// - `ssh` through `hosts::On`: the limit of the command it carries; `hosts bootstrap`'s installs 30 min by `run_for`.
+/// - anything else: 60 s.
+pub fn limit(prog: &str, args: &[String]) -> Duration {
+    let a = |i: usize| args.get(i).map_or("", String::as_str);
+    let net = |w: &String| ["clone", "fetch", "pull", "push"].contains(&w.as_str());
+    let wait = args
+        .iter()
+        .position(|w| w == "--timeout")
+        .and_then(|i| a(i + 1).parse::<u64>().ok());
+    let name = std::path::Path::new(prog)
+        .file_name()
+        .map_or(prog.into(), |n| n.to_string_lossy());
+    let secs = match &*name {
+        p if p == crate::herdr::BIN && a(0) == "--machine" && a(3) == "list" => 20,
+        "security" | "codesign" => 10,
+        p if p == crate::herdr::BIN => wait.map_or(60, |ms| ms / 1000 + 30),
+        "git" if args.iter().any(net) => 600,
+        "cp" | "rm" => 600,
+        "cargo" => 1800,
+        _ => 60,
+    };
+    Duration::from_secs(secs)
 }
 
-fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::thread::JoinHandle<Vec<u8>> {
+/// #776: how long a folder's listing may take before its disk counts as not answering (`disk_probe_secs`).
+pub fn probe_wait() -> Duration {
+    Duration::from_secs(crate::config::limits().disk_probe_secs)
+}
+
+/// #972: `dir` listed within `disk_probe_secs` (`hung`'s probe); a dead disk's root is skipped for the pass.
+pub fn answers(dir: &std::path::Path) -> bool {
+    !hung(&dir.to_string_lossy(), probe_wait(), list)
+}
+
+fn sick_for() -> Duration {
+    Duration::from_secs(crate::config::limits().disk_sick_secs)
+}
+
+fn poll() -> Duration {
+    Duration::from_millis(crate::config::limits().poll_millis)
+}
+
+/// #776: the probe `Real` uses: `dir`'s disk (its `st_dev`) and the first entry of its listing.
+fn list(dir: &str) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    let dev = std::fs::metadata(dir).ok()?.dev();
+    drop(std::fs::read_dir(dir).map(|mut e| e.next()));
+    Some(dev)
+}
+
+/// A folder's last probe: whether it ended, the disk it named (0: none) and when it started.
+struct Probe {
+    done: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    dev: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    at: Instant,
+    end: Instant,
+}
+
+fn probes() -> std::sync::MutexGuard<'static, std::collections::HashMap<String, Probe>> {
+    static SEEN: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Probe>>> =
+        std::sync::OnceLock::new();
+    let m = SEEN.get_or_init(std::sync::Mutex::default);
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+fn sick() -> std::sync::MutexGuard<'static, std::collections::HashMap<u64, Instant>> {
+    static SICK_AT: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u64, Instant>>> =
+        std::sync::OnceLock::new();
+    let m = SICK_AT.get_or_init(std::sync::Mutex::default);
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// #776: a hung disk's mark, shared by every drover process (drive and tick start fresh each run, so a mark kept
+/// only in memory costs each run one timed-out call and one stuck child): `~/.cache/drover/sick-disks/<dev>`,
+/// fresh for `SICK` after its last write.
+fn mark(dev: u64) -> Option<std::path::PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    Some(
+        std::path::Path::new(&home)
+            .join(".cache/drover/sick-disks")
+            .join(dev.to_string()),
+    )
+}
+
+fn is_sick(dev: u64) -> bool {
+    let fresh = |t: std::time::SystemTime| t.elapsed().is_ok_and(|e| e < sick_for());
+    dev != 0
+        && (sick().get(&dev).is_some_and(|t| t.elapsed() < sick_for())
+            || mark(dev)
+                .and_then(|p| p.metadata().ok()?.modified().ok())
+                .is_some_and(fresh))
+}
+
+/// #776: mark the disk `dir`'s last probe named as hung for `disk_sick_secs` (a call on it ran out of time).
+pub fn sicken(dir: &str) {
+    use std::sync::atomic::Ordering::Relaxed;
+    let dev = probes().get(dir).map_or(0, |p| p.dev.load(Relaxed));
+    if dev != 0 {
+        sick().insert(dev, Instant::now());
+        if let Some(p) = mark(dev) {
+            let _ = p.parent().map(std::fs::create_dir_all);
+            let _ = std::fs::write(p, b"");
+        }
+    }
+}
+
+/// #776: whether `dir`'s disk has stopped answering: `probe(dir)` (its disk and a listing) runs on its own thread and
+/// must finish within `wait`. A probe still running is never repeated: the folder stays hung, with no new thread,
+/// until it ends. A folder whose disk `sicken` marked is hung; one that answered is otherwise trusted for a minute.
+pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> + Send + 'static) -> bool {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
+    use std::sync::Arc;
+    let (done, dev, end) = {
+        let mut m = probes();
+        if let Some(p) = m.get(dir) {
+            if !p.done.load(Relaxed) && Instant::now() < p.end {
+                let (done, dev, end) = (p.done.clone(), p.dev.clone(), p.end);
+                drop(m);
+                return hangs_past(&done, &dev, end);
+            }
+            if !p.done.load(Relaxed) || is_sick(p.dev.load(Relaxed)) {
+                return true;
+            }
+            if p.at.elapsed() < Duration::from_secs(crate::config::limits().disk_trust_secs) {
+                return false;
+            }
+        }
+        let (done, dev) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicU64::new(0)));
+        let end = Instant::now() + wait;
+        m.insert(
+            dir.into(),
+            Probe {
+                done: done.clone(),
+                dev: dev.clone(),
+                at: Instant::now(),
+                end,
+            },
+        );
+        (done, dev, end)
+    };
+    let (d, v, owned) = (done.clone(), dev.clone(), dir.to_string());
+    std::thread::spawn(move || {
+        v.store(probe(&owned).unwrap_or(0), Relaxed);
+        d.store(true, Relaxed);
+    });
+    hangs_past(&done, &dev, end)
+}
+
+fn hangs_past(done: &std::sync::atomic::AtomicBool, dev: &std::sync::atomic::AtomicU64, end: Instant) -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
+    while Instant::now() < end {
+        if done.load(Relaxed) {
+            return is_sick(dev.load(Relaxed));
+        }
+        std::thread::sleep(poll());
+    }
+    !done.load(Relaxed)
+}
+
+/// #775: `path`'s bytes for a request thread (serve's screenshots, designs, thread files), within `PROBE`: a
+/// `TimedOut` error when its folder is hung (#776), an earlier read of it has not ended, or this one takes too long,
+/// which marks the folder's disk. The stuck read keeps its own thread, and holds the path until it ends.
+pub fn read_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> {
+    let path = path.as_ref().to_path_buf();
+    let late = || std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{}: no answer", path.display()));
+    let end = Instant::now() + probe_wait();
+    let dir = path
+        .parent()
+        .map(|d| d.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if hung(&dir, probe_wait(), list) {
+        return Err(late());
+    }
+    let claim = Claim::take(&path.to_string_lossy(), end).ok_or_else(late)?;
+    let gone = claim.gone.clone();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let p = path.clone();
+    std::thread::spawn(move || {
+        let _claim = claim;
+        drop(tx.send(std::fs::read(p)));
+    });
+    rx.recv_timeout(end.saturating_duration_since(Instant::now()))
+        .unwrap_or_else(|_| {
+            gone.store(true, std::sync::atomic::Ordering::Relaxed);
+            sicken(&dir);
+            Err(late())
+        })
+}
+
+/// #775: a started child as `settle` sees it. It has no blocking wait: one stuck in disk I/O outlives SIGKILL, so
+/// nothing may wait on it. Tests use one that never ends.
+pub trait Proc: Send + 'static {
+    fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>>;
+    fn kill(&mut self) -> std::io::Result<()>;
+}
+
+impl Proc for std::process::Child {
+    fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+        std::process::Child::try_wait(self)
+    }
+    fn kill(&mut self) -> std::io::Result<()> {
+        extern "C" {
+            fn kill(pid: i32, sig: i32) -> i32;
+        }
+        let group = i32::try_from(self.id()).map_or(0, |p| -p);
+        // SAFETY: kill(2) only sends SIGKILL to the child's own process group, which `within` made for it alone.
+        unsafe { kill(group, 9) };
+        std::process::Child::kill(self)
+    }
+}
+
+/// #775: how a call `settle` watched ended.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Ended {
+    Exited(std::process::ExitStatus),
+    /// It ran out of time: killed and abandoned, never waited on.
+    TimedOut,
+    /// An earlier call on its path was abandoned and has not ended, or still ran at the limit: none was started.
+    Busy,
+}
+
+type Calls = std::collections::HashMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>;
+
+/// #775: the call in flight per path (a `-C` folder, a file serve reads), its flag set once it was abandoned.
+fn calls() -> std::sync::MutexGuard<'static, Calls> {
+    static CALLS: std::sync::OnceLock<std::sync::Mutex<Calls>> = std::sync::OnceLock::new();
+    let m = CALLS.get_or_init(std::sync::Mutex::default);
+    m.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+static FREED: std::sync::Condvar = std::sync::Condvar::new();
+
+type Abandoned = (Box<dyn Proc>, Option<Claim>);
+
+/// #775: the children abandoned at their limit, with their path's claim; each `settle` reaps those that ended.
+fn gone() -> std::sync::MutexGuard<'static, Vec<Abandoned>> {
+    static GONE: std::sync::Mutex<Vec<Abandoned>> = std::sync::Mutex::new(Vec::new());
+    GONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// #775: the one call on a path in flight; dropping it frees the path.
+struct Claim {
+    key: String,
+    gone: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Claim {
+    /// Waits while another call on `key` runs, up to `until`; None at `until`, or when that call was abandoned.
+    fn take(key: &str, until: Instant) -> Option<Claim> {
+        use std::sync::atomic::Ordering::Relaxed;
+        let mut m = calls();
+        loop {
+            match m.get(key) {
+                None => {
+                    let gone = std::sync::Arc::default();
+                    m.insert(key.into(), std::sync::Arc::clone(&gone));
+                    return Some(Claim { key: key.into(), gone });
+                }
+                Some(g) if g.load(Relaxed) => return None,
+                Some(_) => {
+                    let left = until.checked_duration_since(Instant::now()).filter(|d| !d.is_zero())?;
+                    m = FREED
+                        .wait_timeout(m, left)
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .0;
+                }
+            }
+        }
+    }
+}
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        let mut m = calls();
+        if m.get(&self.key).is_some_and(|g| std::sync::Arc::ptr_eq(g, &self.gone)) {
+            m.remove(&self.key);
+        }
+        drop(m);
+        FREED.notify_all();
+    }
+}
+
+/// #775: `start` a call on `key` (None: no path) and watch it up to `limit`. At the limit its child is killed and
+/// abandoned, never waited on, and the caller gets `TimedOut` even when the child cannot die. No second call on
+/// `key` starts while one is in flight: it waits for it (within its own limit), or is `Busy` at once while an
+/// abandoned one lives.
+pub fn settle<P: Proc>(key: Option<&str>, limit: Duration, start: impl FnOnce() -> Result<P>) -> Result<Ended> {
+    let end = Instant::now() + limit;
+    gone().retain_mut(|(c, _)| matches!(c.try_wait(), Ok(None)));
+    let claim = match key.map(|k| Claim::take(k, end)) {
+        Some(None) => return Ok(Ended::Busy),
+        c => c.flatten(),
+    };
+    let mut c = start()?;
+    while Instant::now() < end {
+        if let Some(st) = c.try_wait()? {
+            return Ok(Ended::Exited(st));
+        }
+        std::thread::sleep(poll());
+    }
+    let _ = c.kill();
+    if let Some(cl) = &claim {
+        cl.gone.store(true, std::sync::atomic::Ordering::Relaxed);
+        FREED.notify_all();
+    }
+    gone().push((Box::new(c), claim));
+    Ok(Ended::TimedOut)
+}
+
+fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let mut v = vec![];
         let _ = p.map(|mut p| p.read_to_end(&mut v));
-        v
-    })
+        let _ = tx.send(v);
+    });
+    rx
 }
 
 pub fn argv(args: &[&str]) -> Vec<String> {

@@ -179,19 +179,19 @@
     "services": [
       {
         "detail": "up 0s · v0.1.0",
-        "fix": "herdsman setup",
+        "fix": "drover setup",
         "name": "board",
         "tone": "g"
       },
       {
         "detail": "ran never · job missing",
-        "fix": "herdsman timer install",
+        "fix": "drover timer install",
         "name": "tick",
         "tone": "r"
       },
       {
         "detail": "ran never · job missing",
-        "fix": "herdsman timer install",
+        "fix": "drover timer install",
         "name": "fast step",
         "tone": "r"
       },
@@ -214,6 +214,19 @@
       "fix": "",
       "name": "farm",
       "tone": "g"
+    },
+    "vendors": {
+      "accounts": [],
+      "setups": [
+        {
+          "name": "claude",
+          "vendor": "anthropic"
+        },
+        {
+          "name": "codex",
+          "vendor": "openai"
+        }
+      ]
     }
   },
   "route": "GET /api/v1/host",
@@ -246,6 +259,10 @@
       "fix": "string",
       "name": "string",
       "tone": "string"
+    },
+    "vendors": {
+      "accounts": [],
+      "setups": []
     }
   },
   "type": "HostTab"
