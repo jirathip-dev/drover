@@ -151,16 +151,13 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
 /// `drover cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config` (#973: or a higher raise in its `cap.d/`);
 /// #429: under `warn_within` lines of headroom it warns and still passes. #270: `web/src/**/*.ts` lines are reported, never capped.
 pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
-    let raised = std::fs::read_dir(config.with_file_name("cap.d"))
-        .into_iter()
-        .flatten()
-        .flatten();
-    let mut raised: Vec<PathBuf> = raised
+    let dir = std::fs::read_dir(config.with_file_name("cap.d"));
+    let mut files: Vec<PathBuf> = (dir.into_iter().flatten().flatten())
         .map(|e| e.path())
         .filter(|p| p.extension().is_some_and(|x| x == "toml"))
         .collect();
-    raised.sort();
-    let raises = raised
+    files.sort();
+    let raises = files
         .iter()
         .map(|p| Ok((p.display().to_string(), std::fs::read_to_string(p)?)));
     let Cap {
@@ -233,7 +230,7 @@ pub fn cap_at_sha(r: &dyn Runner, dir: &Path, sha: &str) -> Option<Cap> {
     let names = git(r, dir, &["ls-tree", "--name-only", sha, "ci/cap.d/"]).unwrap_or_default();
     let raises = names
         .lines()
-        .filter(|n| n.ends_with(".toml"))
+        .filter(|n| Path::new(n).extension().is_some_and(|x| x == "toml"))
         .filter_map(|n| Some((n.to_string(), show(n)?)));
     highest("ci/cap.toml", &show("ci/cap.toml")?, raises.collect())
 }
