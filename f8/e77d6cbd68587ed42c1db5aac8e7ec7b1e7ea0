@@ -1,0 +1,14 @@
+Decided: production readers get an SQL-selected working set plus a saved per-issue fold; the server keeps the whole log
+Because: q1664
+Because: q1670
+Decided: the saved fold is a states table updated inside each append's transaction, caught up 5,000 events at a time
+Because: "folded state (issue states, lanes, asks) kept in a saved fold that is updated as events are appended"
+Decided: lane, account, root, landing, why and ask kinds stay in the working set for every issue
+Because: crates/core/src/check.rs:1645
+Rejected: dropping a quiet merged issue's lane history (about 95 MB) — clean, reclaim and budget would miss its lanes
+Decided: lesson, hotspots and the spawn-held/host-busy streaks read their own time windows from SQL
+Because: crates/core/src/lesson.rs:11
+Decided: a fleet rename (#935) clears the saved fold, which then refolds from the renamed log
+Check: tests/working_set.rs: a quiet merged issue keeps only spawn and merge, and the saved fold reads no event rows
+Check: the spawn-held/host-busy streaks now look back 2 days; a longer hold re-keys
+Owner: memory for status and drive drops about 4x; under 100 MB needs the follow-up lane and ask folds
