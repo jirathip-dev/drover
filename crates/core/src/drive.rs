@@ -1562,13 +1562,21 @@ fn serial(
         .rev()
         .find(|e| e.is("serial-held", fleet, n))
         .and_then(|e| e.val("holder").as_u64());
+    let pos = |i: u64| (q.iter().position(|x| x.issue == i).unwrap_or(usize::MAX), i);
     for (g, p) in &new {
         writeln!(out, "{fleet} #{n} serial-joined {}: {p}", g.name)?;
         let d = json!({"group": g.name, "by": "diff", "path": p});
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-joined", d))?;
         let h = queue::holders(&ev, &st, f, fleet, &g.name);
-        if !old && (wait || h.len() >= g.max) {
-            let h = h.first().map(|h| h.issue).or(by).unwrap_or(0);
+        let hot = queue::hot(g);
+        let ahead = st.values().find(|x| {
+            hot && x.fleet == fleet
+                && queue::in_flight(&x.state)
+                && queue::held(&ev, fleet, x.issue, &g.name)
+                && pos(x.issue) < pos(n)
+        });
+        if (!old || hot) && (wait || h.len() >= g.max || ahead.is_some()) {
+            let h = h.first().or(ahead.as_ref()).map(|h| h.issue).or(by).unwrap_or(0);
             by = Some(h);
             let d = json!({"group": g.name, "holder": h});
             emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-held", d))?;
@@ -1579,18 +1587,17 @@ fn serial(
             (wait, text) = (true, text.or(Some(stop)));
         }
     }
-    let (now, mut blocker) = (working(&ctx.state)?, None);
-    for g in queue::groups(&q, &now, f, fleet, n) {
-        let h = queue::held(&now, fleet, n, &g.name);
-        if let (false, Some(b)) = (h, blocker) {
+    let now = working(&ctx.state)?;
+    let gs = queue::groups(&q, &now, f, fleet, n);
+    let atomic = |i: u64| queue::groups(&q, &now, f, fleet, i).iter().any(queue::hot);
+    if let Some(at) = gs.iter().position(|g| queue::held(&now, fleet, n, &g.name)) {
+        let last = (now.iter().rev()).find(|e| e.is("serial-held", fleet, n) && e.str("group") == Some(&gs[at].name));
+        let b = last.and_then(|e| e.val("holder").as_u64()).unwrap_or(0);
+        let all = atomic(n);
+        for (_, g) in (gs.iter().enumerate()).filter(|(i, g)| (all || *i > at) && !queue::held(&now, fleet, n, &g.name))
+        {
             let d = json!({"group": g.name, "holder": b, "by": "order"});
             emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "serial-held", d))?;
-        } else if h && blocker.is_none() {
-            let last = now
-                .iter()
-                .rev()
-                .find(|e| e.is("serial-held", fleet, n) && e.str("group") == Some(&g.name));
-            blocker = Some(last.and_then(|e| e.val("holder").as_u64()).unwrap_or(0));
         }
     }
     if let (Some(text), Some(lane)) = (text, s.lane.as_deref()) {
@@ -1603,8 +1610,13 @@ fn serial(
     if !wait || fast || !new.is_empty() {
         return Ok(wait);
     }
-    let pos = |i: u64| q.iter().position(|x| x.issue == i).unwrap_or(usize::MAX);
-    for g in mine.into_iter().filter(|g| queue::held(&ev, fleet, n, &g.name)) {
+    let ev = working(&ctx.state)?;
+    let atomic = |i: u64| queue::groups(&q, &ev, f, fleet, i).iter().any(queue::hot);
+    let mut slots = vec![];
+    for g in queue::groups(&q, &ev, f, fleet, n)
+        .into_iter()
+        .filter(|g| queue::held(&ev, fleet, n, &g.name))
+    {
         let first_held = |i: u64| {
             queue::groups(&q, &ev, f, fleet, i)
                 .into_iter()
@@ -1614,13 +1626,20 @@ fn serial(
             x.fleet == fleet
                 && queue::in_flight(&x.state)
                 && queue::held(&ev, fleet, x.issue, &g.name)
-                && (x.issue == n || first_held(x.issue).is_some_and(|y| y.name == g.name))
+                && (x.issue == n || atomic(x.issue) || first_held(x.issue).is_some_and(|y| y.name == g.name))
         };
-        let first = st.values().filter(waits).min_by_key(|x| (pos(x.issue), x.issue));
+        let first = st.values().filter(waits).min_by_key(|x| pos(x.issue));
         if queue::holders(&ev, &st, f, fleet, &g.name).len() >= g.max || first.map(|x| x.issue) != Some(n) {
             return Ok(true);
         }
         let e = Event::new(ctx.now, fleet, Some(n), "serial-slot", json!({"group": g.name}));
+        if atomic(n) {
+            slots.push(e);
+        } else {
+            emit(&ctx.state, cfg, e)?;
+        }
+    }
+    for e in slots {
         emit(&ctx.state, cfg, e)?;
     }
     update_lane(ctx, cfg, r, out, &ev, fleet, n)?;
