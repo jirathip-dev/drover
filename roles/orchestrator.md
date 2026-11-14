@@ -68,7 +68,7 @@ fleet through `drover`. Your `.brief.md` names the thread, its repo and your own
 - #417: a fleet with a `verify` role needs the repo's `.drover/verify.md`: file one recipe issue per repo whose body
   is `roles/verify-recipe.md`'s brief, and queue it. Until it merges, verify logs `verify-no-recipe` and passes on.
 - #668: a lane's cap ask answered "raise": file the raise once as its own issue titled `cap: raise … to <N>`
-  (`ci/cap.toml` plus its `docs/cap-history/` note; only that issue's lane may edit the file), sized by
+  (#973: one new `ci/cap.d/<date>-<N>.toml` with `line_cap` and its `why`; only that issue's lane may write there), sized by
   `drover cap <fleet>` (projected total plus margin) for the whole queue, and queue it on top. Answer every lane
   that asked with a `DECISION` to wait for it (`queue block --on <raise>`); drive rechecks them once it merges.
 - When the owner says "correct", run `drover lesson <fleet>`: it files this week's lessons issue and spawns its

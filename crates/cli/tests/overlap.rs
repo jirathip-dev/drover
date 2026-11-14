@@ -863,6 +863,44 @@ fn check_emits_cap_near_once_per_integration_sha() {
     drover::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
     assert_eq!(near().len(), 2, "500 lines of headroom is not near");
     assert!(!page().contains("cap-near"), "no banner after the raise");
+    put(&[
+        ("ci/cap.toml", "[fleet.sendmeter]\nline_cap = 504\n"),
+        ("ci/cap.d/2026-11-14-2000.toml", "line_cap = 2000\nwhy = \"room\"\n"),
+        ("ci/cap.d/2026-11-13-900.toml", "line_cap = 900\n"),
+    ]);
+    drover::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
+    assert_eq!(near().len(), 2, "#973: the highest raise in ci/cap.d/ is the cap");
+}
+
+/// #973: a raise is one file in `cap.d/` beside the cap file; the highest `line_cap` wins, never the sum.
+#[test]
+fn cap_check_takes_the_highest_raise_in_cap_d() {
+    let d = tmpdir("cap-d");
+    let (c, r) = (ctx(&d, CONFIG), Fake::default());
+    let base = d.join("cap.toml");
+    let check = || run(&c, &r, &["cap-check", "--config", base.to_str().unwrap()]);
+    std::fs::write(&base, "[fleet.x]\nline_cap = 100000000\n").unwrap();
+    let (_, out) = check();
+    let n: i64 = out
+        .split("formatted): ")
+        .nth(1)
+        .unwrap()
+        .split(' ')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    std::fs::write(&base, format!("[fleet.x]\nline_cap = {}\n", n - 1)).unwrap();
+    assert_eq!(check().0, 1);
+    std::fs::create_dir_all(d.join("cap.d")).unwrap();
+    let raise = d.join("cap.d/2026-11-14-up.toml");
+    std::fs::write(&raise, format!("line_cap = {}\nwhy = \"\"\"room\"\"\"\n", n + 1000)).unwrap();
+    std::fs::write(d.join("cap.d/2026-11-13-up.toml"), format!("line_cap = {}\n", n + 600)).unwrap();
+    std::fs::write(d.join("cap.d/notes.md"), "line_cap = 1\n").unwrap();
+    let (code, out) = check();
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains(&format!("/ cap {}\n", n + 1000)), "{out}");
+    assert!(out.contains(&format!("cap raised by {}", raise.display())), "{out}");
 }
 
 /// #270: cap-check reports the web/src TypeScript lines as a soft budget: printed, never failing the check.

@@ -1,5 +1,10 @@
+frozen = ["ci/cap.toml"]
 generated = ["assets/types/api.d.ts"]
 generate = "just types"
+
+[[collect]]
+dir = "ci/cap.d"
+glob = "*.toml"
 
 [comments]
 policy = "off"
