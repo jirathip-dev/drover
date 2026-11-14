@@ -1,5 +1,5 @@
 use crate::config::{Config, Fleet};
-use crate::events::{age, emit, fold, held_on, last_spawn, open_asks, plain, read, Event, IssueState, Log};
+use crate::events::{age, checks, emit, fold, held_on, last_spawn, open_asks, plain, read, Event, IssueState, Log};
 use crate::gate::gate;
 use crate::host;
 use crate::hosts::On;
@@ -498,7 +498,9 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     }
     let events = expire(ctx, cfg, out, events, agents.as_deref(), &remote)?;
     let open = open_asks(&events);
-    for a in agents.iter().flatten().filter(|a| a["agent_status"] == "done") {
+    let st = fold(&events);
+    let ended = |a: &&Value| matches!(a["agent_status"].as_str(), Some("done" | "idle"));
+    for a in agents.iter().flatten().filter(ended) {
         let e = a["name"].as_str().and_then(|n| last_spawn(&events, n));
         let (Some(name), Some(pane), Some(e)) = (a["name"].as_str(), a["pane_id"].as_str(), e) else {
             continue;
@@ -506,8 +508,16 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let (Some(n), Some(wt), None) = (e.issue, e.str("worktree"), On::of(r, Some(e)).machine) else {
             continue;
         };
+        let next = ["spawn", "verdict"][usize::from(checks(e))];
+        let live = (st.get(&(e.fleet.clone(), n)).and_then(IssueState::active_lane)).is_some_and(|l| l.1 == name);
+        let new = |x: &Event| x.ts >= e.ts && x.is(next, &e.fleet, n) && (next == "verdict" || checks(x));
+        let acted = !live && events.iter().any(new);
+        if a["agent_status"] == "idle" && !acted {
+            continue;
+        }
+        let wait = [cfg.limits.done_close_minutes * 60, 0][usize::from(acted)];
         let asking = open.iter().any(|q| q.str("agent") == Some(name));
-        let due = handoff(r, &events, e, (n, wt)).filter(|t| ctx.now >= t + cfg.limits.done_close_minutes * 60);
+        let due = handoff(r, &events, e, (n, wt)).filter(|t| ctx.now >= t + wait);
         let landed = e.data.get("confirmed") != Some(&json!(false));
         let Some(at) = due.filter(|_| !asking && landed) else {
             continue;

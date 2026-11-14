@@ -238,6 +238,11 @@ enum Cmd {
         #[command(subcommand)]
         cmd: ConfigCmd,
     },
+    #[command(about = "#935: a fleet's name")]
+    Fleet {
+        #[command(subcommand)]
+        cmd: FleetCmd,
+    },
     #[command(about = "#646: the fleet repo's `wip/*` branches")]
     Wip {
         #[command(subcommand)]
@@ -740,6 +745,19 @@ enum ConfigCmd {
 }
 
 #[derive(Subcommand)]
+enum FleetCmd {
+    #[command(
+        about = "Owner only (a run card): move a paused fleet's queue, history, asks, secrets and state files to a new name"
+    )]
+    Rename {
+        old: String,
+        new: String,
+        #[arg(long, help = "Apply the changes (default: print them)")]
+        yes: bool,
+    },
+}
+
+#[derive(Subcommand)]
 enum WipCmd {
     #[command(
         about = "Owner only (a run card): list origin's `wip/*` branches (size, issue state, build output); delete those of a merged or closed issue that carry build output"
@@ -1063,6 +1081,7 @@ pub fn usage_doc() -> String {
         "accounts",
         "doctor",
         "drive",
+        "fleet",
         "kick",
         "pause",
         "reclaim",
@@ -1295,6 +1314,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             return crate::heavy::run(r, &ctx.state.with_file_name("heavy"), me, max, wait, timeout);
         }
         Cmd::Status(Scope { fleet, json }) => {
+            let fleet = fleet.map(|f| crate::rename::current(&ctx.state, &f));
             let (events, all) = (read(&ctx.state)?, crate::events::states(&ctx.state)?);
             let rows: Vec<_> = all
                 .values()
@@ -1338,7 +1358,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 });
                 let cfg = Config::load(&ctx.config).ok();
                 let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
-                let hosts = cfg.is_some_and(|c| !c.hosts.is_empty()) || at.values().any(|p| !p.is_empty());
+                let hosts = cfg.as_ref().is_some_and(|c| !c.hosts.is_empty()) || at.values().any(|p| !p.is_empty());
                 let pad = [5, 63][usize::from(hosts)];
                 let c = |h: &str| format!(" {h:<14}").repeat(usize::from(hosts));
                 let head = c("HOST");
@@ -1381,6 +1401,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     writeln!(out, "{:<pad$}{} {w}{}", status_line(s, ctx.now), host(s), root(s))?;
                 }
                 write!(out, "{}", serial.concat())?;
+                if let Some(c) = &cfg {
+                    let agents = all_agents(c, &look).unwrap_or_default();
+                    write!(out, "{}", crate::hosts::slots_line(c, &events, &agents))?;
+                }
                 if let Some(t) = look.ts {
                     writeln!(
                         out,
@@ -1426,7 +1450,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Board { fleet } => {
             let events = read(&ctx.state)?;
-            let all = fleet.map_or_else(|| queue::fleets(&events), |f| vec![f]);
+            let all = fleet.map_or_else(
+                || queue::fleets(&events),
+                |f| vec![crate::rename::current(&ctx.state, &f)],
+            );
             let cfg = Config::load(&ctx.config).ok();
             let look = crate::snapshot::Snap::read(ctx, r);
             let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
@@ -1444,7 +1471,10 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         Cmd::Asks {
             scope: Scope { fleet, json },
             all,
-        } => crate::asks(ctx, out, fleet.as_deref(), json, all)?,
+        } => {
+            let fleet = fleet.map(|f| crate::rename::current(&ctx.state, &f));
+            crate::asks(ctx, out, fleet.as_deref(), json, all)?;
+        }
         Cmd::Serve {
             cmd: Some(ServeCmd::Pair),
             ..
@@ -1496,6 +1526,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             fleet,
             cmd: QueueCmd::Ls { json },
         } => {
+            let fleet = crate::rename::current(&ctx.state, &fleet);
             let rows = queue::ls_json(&read(&ctx.state)?, &crate::events::states(&ctx.state)?, &fleet);
             if json {
                 writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
@@ -1746,6 +1777,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     };
                     writeln!(out, "{}", crate::propose::settle(ctx, &cfg, r, &id, apply)?)?;
                 }
+                Cmd::Fleet {
+                    cmd: FleetCmd::Rename { old, new, yes },
+                } => crate::rename::run(ctx, r, out, (&old, &new), yes)?,
                 Cmd::Wip {
                     cmd: WipCmd::Prune { fleet, dry_run },
                 } => check::prune(ctx, &cfg, r, out, &fleet, dry_run)?,
