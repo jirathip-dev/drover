@@ -656,7 +656,11 @@ github: string,
 /**
  * #630: its set workspace roots.
  */
-roots: Array<HostRoot>, };
+roots: Array<HostRoot>, 
+/**
+ * #917: a remote host's `drover --version` at the last look.
+ */
+drover: string, };
 
 /**
  * A root as the last look saw it (`hosts.json`, the host card, `/api/v1`).

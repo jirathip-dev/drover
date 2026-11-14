@@ -456,3 +456,41 @@ fn a_second_rev_round_reuses_the_first_rounds_build_folder_and_only_the_first_cl
     assert_eq!(e.data["dirs"], json!([r2.display().to_string()]));
     assert_eq!(ev.iter().filter(|e| e.kind == "build-cloned").count(), 1);
 }
+
+#[test]
+fn eject_of_a_hung_root_returns_at_once_skips_the_saves_and_restarts_on_the_next_root() {
+    let r = repo("roots-eject-hung");
+    let old = working_on_nvme(&r);
+    let (tx, rx) = std::sync::mpsc::channel::<()>();
+    let dir = r.nvme.to_string_lossy().into_owned();
+    assert!(drover::runner::hung(&dir, std::time::Duration::ZERO, move |_| {
+        let _ = rx.recv();
+        None
+    }));
+    let f = fake(&r, &r.nvme);
+    let t = std::time::Instant::now();
+    let (code, out) = run(&r.c, &Git(&f), &["hosts", "eject", "mini"]);
+    assert!(t.elapsed() < std::time::Duration::from_secs(10), "{:?}", t.elapsed());
+    assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    assert!(out.contains(&format!("not saved {}", old.display())), "{out}");
+    let ev = read(&r.c.state).unwrap();
+    assert!(ev.iter().any(|e| e.kind == "root-eject"), "the eject is logged");
+    let skipped: Vec<&Event> = ev.iter().filter(|e| e.kind == "wip-skipped").collect();
+    assert_eq!(skipped.len(), 1, "{skipped:#?}");
+    assert_eq!(skipped[0].str("agent"), Some(AGENT));
+    let calls = f.calls.borrow().clone();
+    let o = old.to_string_lossy();
+    assert!(
+        !calls.iter().any(|c| c.starts_with("git") && c.contains(&*o)),
+        "{calls:#?}"
+    );
+    assert!(old.join("wip.txt").exists(), "unsaved work stays on the disk");
+    let new = r.internal.join("sendmeter/issue-12");
+    let last = spawns(&r.c).pop().unwrap();
+    assert_eq!(last.str("root"), Some(&*r.internal.to_string_lossy()));
+    assert_eq!(last.str("worktree"), Some(&*new.to_string_lossy()));
+    assert!(new.join("README").exists(), "checked out from its branch");
+    let moved = ev.iter().find(|e| e.kind == "root-moved").expect("root-moved");
+    assert!(moved.str("lost").is_some_and(|l| l.contains("root hung")), "{moved:#?}");
+    drop(tx);
+}
