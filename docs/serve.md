@@ -12,7 +12,10 @@ both read `/api/v1`, which stays open. CI's
 The board is live: the page keeps one `GET /live` Server-Sent Events stream open (same
 Host/Origin check; #893: at most 4 streams per device (its paired token, else its address), its fifth closes its
 oldest; a `: ping` every `[limits] serve_heartbeat_secs` (15); a stream whose bytes stay untaken through 2 pings is
-dropped; a closed client frees its slot within ~1 s). A watcher thread checks the
+dropped; a closed client frees its slot within ~1 s). #895: every `[limits] serve_host_secs` serve hands its freed heap
+back to the OS and reads its own RSS; past `[limits] serve_mem_mb` (300) it logs `serve-mem-high` once and hands over
+to a fresh copy of itself (#894's handover, no client dropped), unless it was over that already at its first reading
+(a fresh copy would be no smaller). `scripts/serve-soak.sh` measures it on a copy of a real database. A watcher thread checks the
 event log's size/mtime every 1 s and `herdr agent list` every 2 s (uncached); on a change (or
 every 15 s, for ages) it reads the needs-you cards and the five tabs again and pushes only the changed ones, as their
 API v1 data (#269: the server builds no HTML but the page shell; the TypeScript board in `web/` draws every tab):

@@ -163,6 +163,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `serve_host_secs` | `10` | serve re-samples this host's load in the background this often |
 | `serve_heartbeat_secs` | `15` | `/live` pings this often; a stream whose last 2 pings are still unsent is dropped |
 | `serve_handover_secs` | `300` | `self-update` waits this long for the running serve to hand over before restarting it |
+| `serve_mem_mb` | `300` | serve over this much RSS logs `serve-mem-high` once and hands over to a fresh copy of itself |
 | `slo_api_p95_ms` | `1000` | `/api/v1` p95 over this many ms for `slo_api_minutes` alerts `slo-api` once |
 | `slo_api_minutes` | `10` | how long `/api/v1` p95 must stay over `slo_api_p95_ms` before `slo-api` |
 | `slo_idle_minutes` | `20` | no lane working this long while the queue has spawnable work breaches `slo-idle` |
