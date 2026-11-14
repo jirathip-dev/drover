@@ -618,15 +618,15 @@ fn fleet_toml(serial_max: u64) -> String {
 
 #[test]
 fn raising_a_serial_max_cuts_waits_without_a_new_invariant_failure() {
-    let issues = ["101", "102", "103", "104"];
+    let issues = ["101", "102", "103", "104", "105"];
     let mut words = scenario::args(&["add"]);
-    words.extend(issues.iter().map(ToString::to_string));
+    words.extend(issues[..4].iter().map(ToString::to_string));
     words.push("--serial".into());
     let mut s = replay::Scenario {
         fleet: "fx".into(),
         from: 1_790_000_000,
         to: 1_790_000_000 + 4 * 3600,
-        queue: vec![(0, words)],
+        queue: vec![(0, words), (5, scenario::args(&["add", "105"]))],
         ..Default::default()
     };
     for n in issues {
@@ -650,7 +650,7 @@ fn raising_a_serial_max_cuts_waits_without_a_new_invariant_failure() {
     eprintln!("{t}");
     assert!(w.current.metrics["serial_busy"] > 0.0, "{t}");
     assert!(w.delta("waits") < 0.0 && w.delta("queue_to_merge_p90_min") < 0.0, "{t}");
-    assert_eq!(w.current.metrics["merges"], 4.0, "{t}");
+    assert_eq!(w.current.metrics["merges"], 5.0, "{t}");
     assert!(w.candidate.failures.is_empty() && w.current.failures.is_empty(), "{t}");
     assert!(t.contains("| serial db max ** | 1 | 4 |"), "{t}");
 }

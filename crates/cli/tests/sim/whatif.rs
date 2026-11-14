@@ -219,8 +219,13 @@ impl WhatIf {
         }
         let (fa, fb) = (self.current.failures.len(), self.candidate.failures.len());
         t += &format!("| invariant failures | {fa} | {fb} | {:+} |\n", fb as i64 - fa as i64);
-        for f in &self.candidate.failures {
-            t += &format!("\ncandidate: {f}");
+        for (side, s) in [("current", &self.current), ("candidate", &self.candidate)] {
+            for f in s.failures.iter().take(5) {
+                t += &format!("\n{side}: {f}");
+            }
+            if s.failures.len() > 5 {
+                t += &format!("\n{side}: … {} more", s.failures.len() - 5);
+            }
         }
         t
     }
