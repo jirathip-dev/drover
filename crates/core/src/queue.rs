@@ -293,7 +293,8 @@ pub fn groups(q: &[Item], events: &[Event], f: &Fleet, fleet: &str, n: u64) -> V
 
 /// #891: the hot files of `fleet`'s last `hot-files` event (drive logs one when the list less converted files changes).
 pub fn hot_files(events: &[Event], fleet: &str) -> Vec<String> {
-    let last = events.iter().rfind(|e| e.kind == "hot-files" && e.fleet == fleet);
+    let hot = crate::events::of_kind(events, &["hot-files"]);
+    let last = hot.into_iter().rfind(|e| e.fleet == fleet);
     let files = last
         .and_then(|e| e.data["files"].as_array().cloned())
         .unwrap_or_default();
