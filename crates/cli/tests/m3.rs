@@ -1,4 +1,3 @@
-//! #17: cached spec + PR/CI reads, `drover wait`, the queue, `drover next`, board, serve.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -21,8 +20,6 @@ fn run_ci(status: &str, conclusion: &str) -> serde_json::Value {
     json!([{"__typename": "CheckRun", "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS"},
            {"__typename": "CheckRun", "name": "test", "status": status, "conclusion": conclusion}])
 }
-
-// --- spec read once ---
 
 #[test]
 fn spec_is_refetched_only_when_updated_at_moves() {
@@ -53,13 +50,11 @@ fn spec_is_refetched_only_when_updated_at_moves() {
         r.count("gh issue view 12 -R jirathip-dev/sendmeter --json updatedAt"),
         1
     );
-    // `drover brief` prints the cache without any call.
     let quiet = Fake::default();
     let (code, out) = run(&c, &quiet, &["brief", "sendmeter", "12"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(out, "# Issue #12: Fix\n\nAC: works\n");
     assert!(quiet.calls.borrow().is_empty());
-    // Edited issue → fetched again.
     let r2 = Fake::default()
         .reply(
             "gh issue view 12 -R jirathip-dev/sendmeter --json updatedAt",
@@ -78,8 +73,6 @@ fn spec_is_refetched_only_when_updated_at_moves() {
         "# Issue #12: Fix\n\nAC v2\n"
     );
 }
-
-// --- one cached PR/CI read ---
 
 #[test]
 fn pr_makes_one_gh_call_per_60s() {
@@ -104,10 +97,8 @@ fn pr_makes_one_gh_call_per_60s() {
     c.now += 1;
     run(&c, &r, &["pr", "sendmeter", "12"]);
     assert_eq!(r.count("gh"), 2, "expired after 60 s");
-    // merge and check read the same cache.
     run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(r.count("gh api graphql"), 2, "#246: one batched read each");
-    // No PR: exit 1.
     let d = tmpdir("pr-none");
     let c = ctx(&d, CONFIG);
     let (code, out) = run(&c, &Fake::default(), &["pr", "sendmeter", "12"]);
@@ -127,7 +118,6 @@ fn wait(r: &Fake, until: &str, timeout: &str) -> (i32, String) {
 #[test]
 fn wait_exit_codes() {
     let pending = pr_json("OPEN", run_ci("IN_PROGRESS", ""));
-    // Pending, then green: polls through the cache with backoff, exits 0.
     let r = Fake::default()
         .once("gh pr view issue-12", 0, &pending)
         .reply("gh pr view issue-12", &pr_json("OPEN", run_ci("COMPLETED", "SUCCESS")));
@@ -140,7 +130,6 @@ fn wait_exit_codes() {
         calls.len() == 4 && calls[3].starts_with("gh api graphql --paginate"),
         "{calls:?}"
     );
-    // A failed check: 1, for ci-green and ci-done.
     let red = pr_json("OPEN", run_ci("COMPLETED", "FAILURE"));
     assert_eq!(
         wait(&Fake::default().reply("gh pr view issue-12", &red), "ci-green", "3600").0,
@@ -150,7 +139,6 @@ fn wait_exit_codes() {
         wait(&Fake::default().reply("gh pr view issue-12", &red), "ci-done", "3600").0,
         1
     );
-    // Never done: 124, backoff 30 → 5 min, never past the timeout.
     let r = Fake::default().reply("gh pr view issue-12", &pending);
     let (code, out) = wait(&r, "ci-done", "1000");
     assert_eq!(code, 124, "{out}");
@@ -173,7 +161,6 @@ fn wait_exit_codes() {
         ]
     );
     assert!(r.count("gh api graphql") <= 7);
-    // merged / closed.
     assert_eq!(
         wait(
             &Fake::default().reply("gh pr view issue-12", &pr_json("MERGED", json!([]))),
@@ -193,8 +180,6 @@ fn wait_exit_codes() {
         1
     );
 }
-
-// --- queue ---
 
 fn q(c: &drover::Ctx, args: &[&str]) -> (i32, String) {
     let mut a = vec!["queue", "sendmeter"];
@@ -228,7 +213,7 @@ fn queue_add_mv_rm_block_ordering() {
     q(&c, &["mv", "12", "--after", "16"]);
     assert_eq!(order(&c), [14, 13, 15, 16, 12]);
     q(&c, &["rm", "13"]);
-    q(&c, &["add", "14"]); // re-adding moves it to the bottom
+    q(&c, &["add", "14"]);
     assert_eq!(order(&c), [15, 16, 12, 14]);
     assert_eq!(q(&c, &["block", "16", "--on", "15"]).0, 0);
     q(&c, &["mv", "16", "--top"]);
@@ -237,7 +222,6 @@ fn queue_add_mv_rm_block_ordering() {
         ls,
         " 1 #16    queued  blocked by #15\n 2 #15    queued\n 3 #12    queued\n 4 #14    queued\n"
     );
-    // Invalid changes fail and log nothing.
     let n = read(&c.state).unwrap().len();
     assert_eq!(q(&c, &["mv", "99", "--top"]).0, 1);
     assert_eq!(q(&c, &["rm", "99"]).0, 1);
@@ -245,7 +229,6 @@ fn queue_add_mv_rm_block_ordering() {
     assert_eq!(q(&c, &["block", "12", "--on", "12"]).0, 1);
     assert_eq!(q(&c, &["mv", "12"]).0, 2, "mv needs a target");
     assert_eq!(read(&c.state).unwrap().len(), n);
-    // Queue events are fleet-level: no issue state is created by queueing.
     assert!(read(&c.state)
         .unwrap()
         .iter()
@@ -265,7 +248,6 @@ fn queue_survives_torn_last_line() {
         json!({"op": "rm", "issues": [12]}),
     ))
     .unwrap();
-    // #344: an old build's log, torn mid-line, beside the database: its import skips the torn row.
     std::fs::write(&c.state, &line.as_bytes()[..30]).unwrap();
     assert_eq!(order(&c), [12, 13]);
     q(&c, &["add", "14", "--top"]);
@@ -281,7 +263,6 @@ fn next_skips_blocked_and_live_lane_items() {
     q(&c, &["add", "12", "13", "14"]);
     q(&c, &["block", "13", "--on", "12"]);
     assert_eq!(next(), (0, "12\n".into()));
-    // #12 gets a lane: skipped; #13 is blocked on it; #14 is next.
     ev(
         &c,
         100,
@@ -298,7 +279,6 @@ fn next_skips_blocked_and_live_lane_items() {
         json!({"role": "impl", "agent": "sendmeter-impl-14", "branch": "issue-14"}),
     );
     assert_eq!(next(), (2, "#13 is blocked by #12\n".into()));
-    // The blocker merges: it leaves the queue and #13 is free.
     ev(
         &c,
         120,
@@ -309,8 +289,6 @@ fn next_skips_blocked_and_live_lane_items() {
     assert_eq!(next(), (0, "13\n".into()));
     assert_eq!(order(&c), [13, 14]);
 }
-
-// --- board + serve ---
 
 fn board_log(c: &drover::Ctx) {
     q(c, &["add", "17", "18", "12"]);
@@ -379,7 +357,7 @@ fn serve_is_read_only_html() {
         res.starts_with("HTTP/1.1 200 OK\r\n") && res.contains("Content-Type: text/html"),
         "{res}"
     );
-    let res = with_queue(&res, &srv, "x", 1_000_000); // #268: the board draws the Queue tab from API v1
+    let res = with_queue(&res, &srv, "x", 1_000_000);
     for n in ["#17", "#18", "#12"] {
         assert!(res.contains(n), "queued {n} missing");
     }
@@ -387,14 +365,12 @@ fn serve_is_read_only_html() {
         res.contains("https://github.com/jirathip-dev/sendmeter/pull/15"),
         "PR link"
     );
-    // #60: the Events tab body loads on tab open (#266: the board draws it from API v1).
     let api = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     if let Some(res) = events_tab(&api, "127.0.0.1:7777", 1_000_000, "{ f: { k: 'all', fl: [] } }") {
         assert!(
             res.contains("https://github.com/jirathip-dev/sendmeter/issues/12"),
             "issue link"
         );
-        // #169: `checks` is the PR's checks page; never a query-string Actions URL.
         assert!(
             res.contains("pull/15/checks\">checks</a>]") && !res.contains("actions?query"),
             "checks link"
@@ -404,7 +380,6 @@ fn serve_is_read_only_html() {
         let res = String::from_utf8(srv.respond(&format!("{m} / HTTP/1.1\r\n\r\n"), 1_000_000)).unwrap();
         assert!(res.starts_with("HTTP/1.1 405 "), "{m}: {res}");
     }
-    // Over a real socket.
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = ctx(&d, CONFIG);
@@ -418,7 +393,6 @@ fn serve_is_read_only_html() {
     };
     let page = get("GET / HTTP/1.1\r\nHost: x\r\n\r\n");
     assert!(page.starts_with("HTTP/1.1 200 OK"), "{page}");
-    // #268: the Queue tab's rows come from API v1's `queue`.
     let q = get("GET /api/v1/queue HTTP/1.1\r\nHost: \r\n\r\n");
     assert!(
         q.starts_with("HTTP/1.1 200 OK") && q.contains("\"issue\":17,") && q.contains("\"issue\":18,"),
@@ -428,8 +402,6 @@ fn serve_is_read_only_html() {
     assert!(post.starts_with("HTTP/1.1 405 "), "{post}");
     assert_eq!(order(&c), [17, 18, 12], "nothing changed");
 }
-
-// --- docs ---
 
 #[test]
 fn agent_doc_and_roles_cover_m3() {

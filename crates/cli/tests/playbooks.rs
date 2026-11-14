@@ -1,5 +1,3 @@
-//! #734: issues queued `--perf` or `--refactor`: rev's PASS needs a `baseline` first commit and a `Perf:` block
-//! (`NO_BASELINE`), or a test diff that only moves or renames tests (`TESTS_CHANGED`).
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -10,7 +8,6 @@ const COMMITS: &str = "gh pr view issue-12 -R jirathip-dev/sendmeter --json comm
 const DIFF: &str = "gh pr diff issue-12 -R jirathip-dev/sendmeter";
 const PERF: &str = "Perf:\n```\ncargo bench totals\n```\nbefore 41 ms, after 12 ms (3.4x), 5 runs each, spread 2%\n";
 
-/// #12 built and under rev, queued with `flag`.
 fn setup(name: &str, flag: &str) -> (drover::Ctx, std::path::PathBuf) {
     let d = tmpdir(name);
     let c = ctx(&d, CONFIG);

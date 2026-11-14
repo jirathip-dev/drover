@@ -1,5 +1,3 @@
-//! #173: a fleet's pipeline as data (docs/pipeline.md): stages of a fixed kind, where each outcome goes, validated
-//! as a full loop when fleet.toml loads. Absent, the built-in one is today's impl → rev → gates → merge.
 use crate::config::{Limits, Role};
 use serde::Deserialize;
 use std::collections::{BTreeMap, BTreeSet};
@@ -52,7 +50,6 @@ pub fn outcomes(kind: &str) -> &'static [&'static str] {
     }
 }
 
-/// What an outcome may lead to (a kind, or an end): code is reviewed, a fix is built, a PASS moves on.
 fn goes(outcome: &str) -> Option<&'static [&'static str]> {
     match outcome {
         "push" => Some(&["check"]),
@@ -76,8 +73,7 @@ fn stage(name: &str, kind: &str, role: Option<&str>, rounds: Option<u32>, next: 
 }
 
 impl Pipeline {
-    /// Today's loop: `[limits] review_rounds` on rev, `update_rounds` on the gate; #417: with a `verify` role, rev's
-    /// PASS goes to a verify check whose FAILs count against rev's rounds.
+    /// Today's loop: `[limits] review_rounds` on rev, `update_rounds` on the gate; #417: with a `verify` role, rev's PASS goes to a verify check whose FAILs count against rev's rounds.
     pub fn builtin(l: &Limits, verify: bool) -> Pipeline {
         let pass = if verify { "verify" } else { "gates" };
         let mut v = stage(
@@ -177,7 +173,6 @@ impl Pipeline {
 
     /// The stage a role's spawn enters: `role` names a stage or a role.
     pub fn stage_of<'a>(&'a self, role: &'a str) -> &'a str {
-        // #419: a lesson lane builds as the start stage: its PR is reviewed and fixed like any other.
         let lesson = (role == "lesson").then(|| self.stage.first()).flatten();
         self.get(role)
             .or(self.of_role(role))
@@ -185,7 +180,6 @@ impl Pipeline {
             .map_or(role, |s| s.name.as_str())
     }
 
-    /// Edges as (from, outcome, target without `:update`).
     fn edges(&self) -> impl Iterator<Item = (&str, &str, &str)> {
         self.stage.iter().flat_map(|s| {
             s.next
@@ -194,7 +188,6 @@ impl Pipeline {
         })
     }
 
-    /// Stages reachable from the start without passing `stop`.
     fn reach(&self, stop: impl Fn(&Stage) -> bool) -> BTreeSet<&str> {
         let mut seen = BTreeSet::new();
         let mut todo: Vec<&str> = self.stage.first().map(|s| s.name.as_str()).into_iter().collect();
@@ -206,7 +199,6 @@ impl Pipeline {
         seen
     }
 
-    /// A cycle among the stages without `rounds` on a check, as names (first repeated last).
     fn unlimited_cycle(&self, gone: &BTreeSet<String>) -> Option<Vec<String>> {
         fn dfs<'a>(
             p: &'a Pipeline,
@@ -288,7 +280,6 @@ impl Pipeline {
                 format!("stage {} can't be reached: no outcome leads to it", s.name),
             );
         }
-        // Back from the ends over explicit outcomes (out of rounds to park does not count).
         let mut ends: BTreeSet<&str> = ["merge", "park"].into();
         while let Some(e) = self.edges().find(|e| ends.contains(e.2) && !ends.contains(e.0)) {
             ends.insert(e.0);

@@ -1,13 +1,10 @@
-//! #170: the Events tab: each kind's glyph and colour, `[important]` leaving out the routine kinds, the noise fold
-//! by kind (a failure never shares a row with `clean`), and the time groups. #266: the words are the server's
-//! (`serve::words`, in API v1's events); the tab is the TypeScript board's (web/src/events.ts, run under node).
 mod common;
 use common::*;
 use drover::events::{append, Event};
 use drover::serve::{words, Server};
 use serde_json::{json, Value};
 
-const NOW: u64 = 1_000_000; // 13:46:40 UTC; the Fake has no `date`, so the page counts days in UTC.
+const NOW: u64 = 1_000_000;
 
 fn ev(kind: &str, d: Value) -> Event {
     Event::new(NOW, "sendmeter", Some(7), kind, d)
@@ -183,7 +180,6 @@ fn tab(events: &[Event], opts: &str) -> Option<String> {
     )
 }
 
-/// A view's rows: `imp` is `[important]`, `all` is `[all]`.
 fn view<'a>(h: &'a str, v: &str) -> Vec<&'a str> {
     let a = h.find(&format!("<div data-v={v}")).unwrap();
     let end = h[a + 1..].find("<div data-v=").map_or(h.len(), |e| a + 1 + e);
@@ -232,7 +228,6 @@ fn the_noise_fold_never_hides_a_failure() {
             json!({"why": "merged", "error": "x"}),
         )
     };
-    // Newest first: clean ×3, a failure, then clean ×2 (one run per kind).
     let Some(h) = tab(
         &[
             at(9, "clean"),
@@ -309,8 +304,6 @@ fn old_rows_are_dated_without_a_date_call_each() {
     assert!(f.count("date ") <= 1, "{:?}", f.calls.borrow());
 }
 
-/// #266: a fleet chip hides the other fleets' rows (a group left empty hides, its count is the rows shown), a row on an
-/// issue links the issue, its PR and checks, and `?all=1` unfolds every fold.
 #[test]
 fn a_fleet_chip_hides_the_others_and_a_row_links_its_pr() {
     let cfg = format!(

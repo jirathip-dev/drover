@@ -1,7 +1,3 @@
-//! #509: retry-safe side effects. A step (spawn, supersede, merge, label) logs an `intent` with a stable `action_id`
-//! before it acts and `done` or `failed` with the same id after; a retry of a `done` id, or of one in flight, skips. An
-//! intent left open past its timeout (a crash) is recovered from the real world, never blindly repeated. The ids come
-//! from the step's own inputs, so a drive pass, a kick and a per-issue worker (#345) share them.
 use crate::events::{append, Event};
 use crate::gate::{refuse, Refusal};
 use crate::runner::Runner;
@@ -16,11 +12,8 @@ pub fn id(fleet: &str, issue: u64, step: &str, key: &str) -> String {
 
 /// What a step found for its id.
 pub enum Seen {
-    /// Its intent is logged: act, then `done`.
     Act(Intent),
-    /// Done already (or recovered as done): this `done` event.
     Done(Event),
-    /// Another caller's intent, not timed out.
     Busy(Event),
 }
 
@@ -39,8 +32,7 @@ fn id_of(e: &Event) -> &str {
     e.str("action_id").unwrap_or("?")
 }
 
-/// The open intent of a logged action: `done` it once acted; dropped without (an error) it logs `failed`. A panic
-/// leaves it open, as a crash does, for the next pass to recover.
+/// The open intent of a logged action: `done` it once acted; dropped without (an error) it logs `failed`. A panic leaves it open, as a crash does, for the next pass to recover.
 pub struct Intent {
     state: PathBuf,
     ev: Event,
@@ -69,9 +61,7 @@ pub fn finish(state: &Path, now: u64, intent: &Event, kind: &str, mut d: Value) 
     append(state, &e).map(|()| e)
 }
 
-/// Log `step`'s intent at `key` (`inputs` beside) unless its id is done or in flight; an intent older than `secs`, or
-/// whose process died, is recovered: `probe` checks the real world, `Some` outcome is `done`, `None` is `failed` and
-/// this caller acts.
+/// Log `step`'s intent at `key` (`inputs` beside) unless its id is done or in flight; an intent older than `secs`, or whose process died, is recovered: `probe` checks the real world, `Some` outcome is `done`, `None` is `failed` and this caller acts.
 pub fn begin(
     r: &dyn Runner,
     state: &Path,
@@ -106,7 +96,6 @@ pub fn begin(
         d["recovered"] = json!(true);
         return Ok(Seen::Done(finish(state, now, &last, "done", d)?));
     }
-    // Nothing happened: the stale intent failed and this one is logged, both only while it is still the latest.
     let mut failed = Event::new(
         now,
         fleet,
