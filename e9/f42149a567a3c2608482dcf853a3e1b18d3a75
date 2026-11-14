@@ -1,0 +1,10 @@
+Decided: replace #235's hourly, once-per-sha, checkout-based `hosts::update` with `hosts::sync`, run by every survey (each tick's check) for each enabled, up remote host.
+Because: "the same way `hosts bootstrap` installs it" — `install_line` is now the one install command both use (crates/core/src/cloud.rs:443).
+Decided: two ssh calls at most: a status script (version, last result, busy) then a nohup'd install only on mismatch; the pid file keeps one install per host.
+Because: "The install runs in the background, or is otherwise bounded, so it never blocks the tick's pass"
+Decided: the install's result is read and logged as `host-sync` on the next tick (the job writes `<code> <to> <from>` to ~/.drover-sync.done); a failed start logs at once.
+Decided: `host-sync-failed` fires once per host until an ok `host-sync` there (key host@last-ok ts); the next tick restarts the install.
+Rejected: deciding the mismatch inside the remote shell — a fake host could not tell "matching does nothing" from "mismatch installs".
+Rejected: changing placement for herdr hosts with a mismatch — the AC says "placement skips it as it does today" (acp_guard is unchanged).
+Check: the scripts were run for real against a scratch $HOME (start returns at once, busy while running, done read once); tests use a fake ssh host.
+Owner: Remote hosts now update their drover to the main host's version by themselves every tick, and a failed update alerts once.
