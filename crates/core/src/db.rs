@@ -19,7 +19,15 @@ CREATE TABLE IF NOT EXISTS snapshot (n INTEGER PRIMARY KEY AUTOINCREMENT, key TE
     json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS processed (id TEXT PRIMARY KEY, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS states (fleet TEXT NOT NULL, issue INTEGER NOT NULL, done INTEGER NOT NULL, json TEXT NOT NULL,
-    PRIMARY KEY (fleet, issue));";
+    PRIMARY KEY (fleet, issue));
+CREATE TABLE IF NOT EXISTS lanes (lane TEXT PRIMARY KEY, seq INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS asks (seq INTEGER PRIMARY KEY, fleet TEXT NOT NULL, id TEXT, issue TEXT, agent TEXT, twin TEXT,
+    rank INTEGER NOT NULL, at INTEGER NOT NULL, row TEXT);
+CREATE INDEX IF NOT EXISTS asks_id ON asks (fleet, id);
+CREATE INDEX IF NOT EXISTS asks_issue ON asks (fleet, issue);
+CREATE INDEX IF NOT EXISTS asks_agent ON asks (fleet, agent);
+CREATE INDEX IF NOT EXISTS asks_twin ON asks (twin);
+CREATE INDEX IF NOT EXISTS asks_at ON asks (at);";
 
 pub fn file(state: &Path) -> PathBuf {
     SCRATCH
@@ -124,7 +132,7 @@ fn insert(c: &Connection, ev: &Event, seq: Option<u64>, archived: bool) -> Resul
 }
 
 fn folded(c: &Connection) -> Result<u64> {
-    let q = "SELECT ts FROM snapshot WHERE key = 'fold'";
+    let q = "SELECT ts FROM snapshot WHERE key = 'folds'";
     Ok(c.query_row(q, [], |r| r.get(0)).optional()?.unwrap_or(0))
 }
 
@@ -141,18 +149,134 @@ fn fold(c: &Connection, evs: &[Event]) -> Result<()> {
         let q = "INSERT OR REPLACE INTO states (fleet, issue, done, json) VALUES (?1, ?2, ?3, ?4)";
         c.execute(q, params![s.fleet, s.issue, s.done(), serde_json::to_string(s)?])?;
     }
-    let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('fold', ?1, '{}')";
+    for e in evs {
+        if let Some(k) = events::lane_id(e) {
+            c.execute(
+                "INSERT OR REPLACE INTO lanes (lane, seq) VALUES (?1, ?2)",
+                params![k, e.seq],
+            )?;
+        }
+        fold_ask(c, e)?;
+    }
+    let q = "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('folds', ?1, '{}')";
     Ok(c.execute(q, [evs.last().map_or(0, |e| e.seq)]).map(drop)?)
+}
+
+fn fold_ask(c: &Connection, e: &Event) -> Result<()> {
+    let open = events::ORDER.len();
+    if e.kind == "needs-decision" {
+        let twin = events::twin(e);
+        let q = "SELECT 1 FROM asks WHERE twin = ?1";
+        let again = twin.is_some() && c.query_row(q, [&twin], |_| Ok(())).optional()?.is_some();
+        let (rank, at, row) = if again {
+            (open - 1, e.seq, Some("repeat"))
+        } else {
+            (open, 0, None)
+        };
+        let q = "INSERT OR REPLACE INTO asks (seq, fleet, id, issue, agent, twin, rank, at, row) \
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
+        let issue = e.issue.map(|n| n.to_string());
+        let p = params![e.seq, e.fleet, e.str("id"), issue, e.str("agent"), twin, rank, at, row];
+        return Ok(c.execute(q, p).map(drop)?);
+    }
+    let Some((t, v)) = events::names_ask(e) else {
+        return Ok(());
+    };
+    let col = ["id", "issue", "agent"][usize::from(t)];
+    let q = format!(
+        "SELECT a.seq, a.rank, e.json FROM asks a JOIN events e ON e.seq = a.seq \
+        WHERE a.fleet = ?1 AND a.{col} IS ?2 AND a.rank > ?3 AND a.rank <> ?4"
+    );
+    let floor = events::FLOOR[usize::from(t)];
+    let asks: Vec<(u64, usize, String)> = c
+        .prepare(&q)?
+        .query_map(params![e.fleet, v, floor, open - 1], |r| {
+            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let q = "SELECT MIN(seq) FROM events WHERE type = 'spawn-started' AND json_extract(json, '$.agent') IS ?1 \
+        AND json_extract(json, '$.pane') IS ?2 AND seq < ?3";
+    let first = || {
+        c.query_row(q, params![e.str("agent"), e.str("pane"), e.seq], |r| {
+            r.get::<_, Option<u64>>(0)
+        })
+    };
+    for (seq, was, json) in asks {
+        let a = events::aliased(Event {
+            seq,
+            ..serde_json::from_str(&json)?
+        });
+        let r = events::rank(events::closes(&a, e, || {
+            first().ok().flatten().is_some_and(|f| f < seq)
+        }));
+        if r < was {
+            let q = "UPDATE asks SET rank = ?2, at = ?3, row = ?4 WHERE seq = ?1";
+            c.execute(q, params![seq, r, e.seq, events::row(events::ORDER[r], e)])?;
+        }
+    }
+    Ok(())
+}
+
+fn current(c: &mut Connection) -> Result<u64> {
+    while folded(c)? < last(c)? {
+        let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if folded(&tx)? == 0 {
+            tx.execute_batch("DELETE FROM states; DELETE FROM lanes; DELETE FROM asks;")?;
+        }
+        fold(&tx, &rows(&tx, events::CHUNK, folded(&tx)?)?)?;
+        tx.commit()?;
+    }
+    folded(c)
+}
+
+/// #1023: the saved ask fold's rows an event after `since` added or ended: each ask's seq and its ending, `None` while open.
+pub fn ask_ends(state: &Path, since: u64) -> Result<Vec<(u64, events::End)>> {
+    with(state, false, vec![], |c| {
+        current(c)?;
+        let q = "SELECT seq, rank, row FROM asks WHERE seq > ?1 OR at > ?1";
+        let row = |r: &rusqlite::Row| Ok((r.get(0)?, r.get::<_, usize>(1)?, r.get::<_, Option<String>>(2)?));
+        let all = c
+            .prepare(q)?
+            .query_map([since], row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(all.into_iter().map(|(s, r, w)| (s, w.map(|w| (r, w)))).collect())
+    })
+}
+
+/// #1023: `drover asks`' rows from the saved ask fold alone: the live asks (`all`: closed ones too) and their endings.
+pub fn asks(state: &Path, all: bool) -> Result<Vec<(Event, events::End)>> {
+    with(state, false, vec![], |c| {
+        current(c)?;
+        let q = "SELECT e.seq, e.json, a.rank, a.row FROM asks a JOIN events e ON e.seq = a.seq \
+            WHERE e.archived = 0 AND (?1 OR a.row IS NULL) ORDER BY e.seq";
+        let row = |r: &rusqlite::Row| {
+            Ok((
+                r.get(0)?,
+                r.get::<_, String>(1)?,
+                r.get(2)?,
+                r.get::<_, Option<String>>(3)?,
+            ))
+        };
+        let rows = c
+            .prepare(q)?
+            .query_map([all], row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        rows.into_iter()
+            .map(|(seq, json, rank, w)| {
+                let e = events::aliased(Event {
+                    seq,
+                    ..serde_json::from_str(&json)?
+                });
+                Ok((e, w.map(|w| (rank, w))))
+            })
+            .collect()
+    })
 }
 
 /// #948: the saved per-issue fold (each append updates it) and the seq it covers, caught up to the newest event.
 pub fn states(state: &Path) -> Result<(u64, events::States)> {
     with(state, false, (0, events::States::new()), |c| {
-        while folded(c)? < last(c)? {
-            let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-            fold(&tx, &rows(&tx, events::CHUNK, folded(&tx)?)?)?;
-            tx.commit()?;
-        }
+        current(c)?;
         let mut q = c.prepare("SELECT json FROM states")?;
         let all = q.query_map([], |r| r.get::<_, String>(0))?;
         let all = all.map(|j| Ok(serde_json::from_str::<events::IssueState>(&j?)?));
@@ -222,8 +346,10 @@ pub fn rename_fleet(
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let q = "UPDATE events SET fleet = ?2, json = json_set(json, '$.fleet', ?2) WHERE fleet = ?1";
         let n = tx.execute(q, params![old, new])?;
-        tx.execute("DELETE FROM snapshot WHERE key IN ('states', 'board', 'fold')", [])?;
-        tx.execute("DELETE FROM states", [])?;
+        tx.execute(
+            "DELETE FROM snapshot WHERE key IN ('states', 'board', 'fold', 'folds')",
+            [],
+        )?;
         tx.execute(
             "INSERT OR REPLACE INTO snapshot (key, ts, json) VALUES ('archived', 0, '{}')",
             [],

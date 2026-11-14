@@ -1873,7 +1873,7 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
         let at =
             |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m && named(e) || e.str("agent") == name;
         let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < SPAWN_SECS;
-        let logged = (events.iter())
+        let logged = (crate::events::lanes(&events).into_iter())
             .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-adopted") || young(e))
             .any(|e| at(&e));
         let Some((fleet, n, role, wt)) = shaped(cfg, &a).filter(|_| !logged) else {
@@ -1883,7 +1883,9 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
             continue;
         };
         let f = cfg.fleet(fleet)?;
-        let started = events.iter().filter(|e| e.kind == "spawn-started").rfind(at);
+        let started = (crate::events::lanes(&events).into_iter())
+            .filter(|e| e.kind == "spawn-started")
+            .rfind(at);
         let role = role.or(s.build.clone()).unwrap_or(f.flow().start().into());
         let wt = wt.or(started.and_then(|e| e.str("worktree")).map(String::from));
         let on = crate::hosts::On::new(r, m);

@@ -232,7 +232,7 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             let kind = match last.map(|e| e.kind.as_str()) {
                 Some("root-gone") if !gone => Some("root-back"),
                 Some("root-gone") => None,
-                _ if gone && events.iter().any(used) => Some("root-gone"),
+                _ if gone && crate::events::lanes(&events).into_iter().any(used) => Some("root-gone"),
                 _ => None,
             };
             if let Some(kind) = kind {

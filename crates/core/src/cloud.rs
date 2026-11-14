@@ -236,7 +236,7 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str, why
     let on = crate::hosts::On::new(r, cfg.hosts.get(name).context("no such host")?.machine.as_deref());
     let mut lanes = BTreeMap::new();
     let mine = |e: &&Event| e.kind == "spawn" && e.str("host") == Some(name);
-    for e in events.iter().filter(mine) {
+    for e in crate::events::lanes(&events).into_iter().filter(mine) {
         lanes.extend(e.str("agent").zip(e.str("worktree")));
     }
     for (lane, wt) in lanes {

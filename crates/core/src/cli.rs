@@ -1293,7 +1293,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Status(Scope { fleet, json }) => {
             let fleet = fleet.map(|f| crate::rename::current(&ctx.state, &f));
-            let (events, all) = (working(&ctx.state)?, crate::events::states(&ctx.state)?);
+            let all = crate::events::states(&ctx.state)?;
             let rows: Vec<_> = all
                 .values()
                 .filter(|s| fleet.as_ref().is_none_or(|f| *f == s.fleet))
@@ -1310,7 +1310,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             } else if rows.is_empty() {
                 writeln!(out, "no tracked issues")?;
             } else {
-                let cfg = Config::load(&ctx.config).ok();
+                let (events, cfg) = (working(&ctx.state)?, Config::load(&ctx.config).ok());
                 let serial = |f: &str| queue::serial_use(&events, &all, f, cfg.as_ref()).map(|s| format!("{f}: {s}\n"));
                 let mut serial: Vec<_> = rows.iter().filter_map(|s| serial(&s.fleet)).collect();
                 serial.dedup();

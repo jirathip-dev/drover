@@ -55,7 +55,8 @@ pub fn join(
     ws: &BTreeMap<String, String>,
 ) -> Vec<Lane> {
     let (mut by_name, mut by_pane) = (BTreeMap::new(), BTreeMap::new());
-    for e in events.iter().filter(|e| e.kind == "spawn") {
+    let lanes = crate::events::lanes(events);
+    for e in lanes.iter().copied().filter(|e| e.kind == "spawn") {
         by_name.insert(e.str("agent"), e);
         by_pane.insert(e.str("pane"), e);
     }
@@ -141,7 +142,7 @@ pub fn join(
     out.extend(cs.into_values().map(|e| orchestrator(events, e, Lane::default())));
     for l in &mut out {
         let mark = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "lane-closed" | "lane-kept-dirty");
-        let last = events.iter().rev().find(|e| mark(e) && e.str("agent") == Some(&l.name));
+        let last = lanes.iter().rev().find(|e| mark(e) && e.str("agent") == Some(&l.name));
         let why = last.filter(|e| e.kind == "lane-kept-dirty").and_then(|e| e.str("why"));
         l.kept = why.filter(|_| l.state == "done").map(String::from);
     }
