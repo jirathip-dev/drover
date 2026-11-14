@@ -134,8 +134,9 @@ impl FakeShed {
     }
     /// A running terminal `name` with `labels`, its reported state `working`, in `/w/issue-12`.
     pub fn add(&self, name: &str, labels: Value) {
-        let t = json!({"name": name, "labels": labels, "cwd": "/w/issue-12", "cmd": ["sh"], "keep": true,
+        let mut t = json!({"name": name, "cwd": "/w/issue-12", "cmd": ["sh"], "keep": true,
             "state": "running", "exit": null, "pid": 7, "reported": {"state": "working"}});
+        t["labels"] = labels;
         self.lock().terms.insert(name.into(), t);
     }
     pub fn lane(&self, name: &str, status: &str, cwd: &str) {
@@ -237,7 +238,7 @@ fn handle(m: &str, p: &Value, st: &mut State) -> Result<Value, RpcError> {
                 .iter()
                 .filter(|e| e["seq"].as_u64() < Some(before))
                 .collect();
-            let n = p["n"].as_u64().map_or(all.len(), |n| n as usize);
+            let n = p["n"].as_u64().map_or(all.len(), |n| usize::try_from(n).unwrap());
             Ok(json!({"text": "", "events": all[all.len().saturating_sub(n)..]}))
         }
         "read" => Ok(json!({"text": terms[&name]["text"].as_str().map_or(format!("screen of {name}"), String::from)})),

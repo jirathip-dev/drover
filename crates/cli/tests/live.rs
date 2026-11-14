@@ -80,7 +80,7 @@ fn subscribe(addr: std::net::SocketAddr, host: &str) -> TcpStream {
 }
 
 fn drain(s: &mut TcpStream, ms: u64) -> String {
-    let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], [0u8; 65_536]);
+    let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], vec![0u8; 65_536]);
     while Instant::now() < end {
         match s.read(&mut b) {
             Ok(0) => break,
@@ -375,7 +375,7 @@ fn answer_sends_the_digit_and_logs_no_question() {
     assert!(needs.contains("data-ask=\"sendmeter-impl-12\""), "{needs}");
     let res = req(&s, "POST", "/answer", "agent=sendmeter-impl-12&choice=2", "");
     assert!(res.starts_with("HTTP/1.1 401 "), "no device cookie: {res}");
-    assert!(r.keys().is_empty());
+    assert_eq!(r.keys(), [] as [serde_json::Value; 0]);
     let foreign = req(
         &s,
         "POST",
@@ -448,7 +448,7 @@ fn answer_refuses_a_changed_menu_and_rerenders_fresh() {
     assert!(r.keys().is_empty(), "menu A tapped, menu B on the pane: no key");
     let res = req(&s, "POST", "/answer", "agent=sendmeter-impl-12&choice=2", &ck);
     assert!(res.contains("REFUSED STALE"), "no h: {res}");
-    assert!(r.keys().is_empty());
+    assert_eq!(r.keys(), [] as [serde_json::Value; 0]);
     let reads = r.reads();
     r.sh.screen("sendmeter-impl-12", PERMISSION);
     r.then("sendmeter-impl-12", "⏺ Bash(cargo test --all)\n  ⎿ ok");
@@ -479,7 +479,7 @@ fn answer_refuses_reviewer_menus_and_unparsed_panes() {
     assert!(res.contains("REFUSED REV_READONLY"), "{res}");
     let res = req(&s, "POST", "/answer", "agent=sendmeter-impl-12&choice=1", &ck);
     assert!(res.contains("REFUSED BAD_VALUE: no menu"), "{res}");
-    assert!(r.keys().is_empty());
+    assert_eq!(r.keys(), [] as [serde_json::Value; 0]);
 }
 
 #[test]
@@ -627,7 +627,7 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
         far.contains("id: 506\nevent: refresh\ndata: 506\n\n") && !far.contains("event: ev"),
         "{far}"
     );
-    assert!(reconnect(addr, "?since=6").matches("event: ev").count() == 500);
+    assert_eq!(reconnect(addr, "?since=6").matches("event: ev").count(), 500);
 }
 
 #[test]

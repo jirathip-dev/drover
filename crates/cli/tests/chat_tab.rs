@@ -696,7 +696,7 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     let res = req(&s, "POST", "/thread", "op=retry&t=t1&n=1", &cookie, T + 20);
     assert!(body(&res).contains("nothing to retry"), "{res}");
     b.set("orchestrator-t1", |t| {
-        t["reported"] = serde_json::json!({"state": "working"})
+        t["reported"] = serde_json::json!({"state": "working"});
     });
     let none = Fake::default();
     let busy = b.on(&none);
@@ -1193,7 +1193,11 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
     );
     assert!(body(&res).contains("at most 10 files a message"), "{res}");
     let up = c.state.with_file_name("orchestrator").join("t1/uploads");
-    assert_eq!(std::fs::read_dir(&up).map_or(0, |d| d.count()), 0, "nothing saved");
+    assert_eq!(
+        std::fs::read_dir(&up).map_or(0, std::iter::Iterator::count),
+        0,
+        "nothing saved"
+    );
     let res = req(
         &s,
         "POST",
@@ -1403,7 +1407,7 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
     );
     working(b, true);
     let f: &'static Fake = Box::leak(Box::new(acp()));
-    let r: &'static Typing = Box::leak(Box::new(Typing(b.cli(f), b, Default::default())));
+    let r: &'static Typing = Box::leak(Box::new(Typing(b.cli(f), b, std::sync::Mutex::default())));
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
     let c2 = c.clone();

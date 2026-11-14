@@ -2,7 +2,7 @@ use crate::model::{Ev, Model, Script, FLEET};
 use crate::scenario::{args, config, timers, T0};
 use crate::sched::Rng;
 
-/// Seed 1 (#370, 2026-11-04 22:11:25): a reviewer's FAIL without Proof blocks, refused NO_PROOF while one kick runs pass after pass on its start's `Ctx.now`. The reviewer ignores the prompt; every reviewer after it writes the same FAIL within seconds (and adds the Proof once told). Before #680's fix the kick superseded each new reviewer at once: 25 supersedes stamped with one second.
+/// Seed 1 (#370, 2026-11-04 22:11:25): a reviewer's FAIL without Proof blocks, refused `NO_PROOF` while one kick runs pass after pass on its start's `Ctx.now`. The reviewer ignores the prompt; every reviewer after it writes the same FAIL within seconds (and adds the Proof once told). Before #680's fix the kick superseded each new reviewer at once: 25 supersedes stamped with one second.
 pub const INCIDENT: u64 = 1;
 
 /// Seeds that found a cause of their own, parked `#[ignore]` (`parked_seeds`) until its issue's fix unparks them.

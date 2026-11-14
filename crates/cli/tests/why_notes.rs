@@ -3,6 +3,7 @@ use common::*;
 use drover::events::{append, read, Event};
 use drover::runner::{Out, Runner};
 use serde_json::{json, Value};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -40,7 +41,6 @@ impl Runner for Git<'_> {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;
-        use std::io::Write;
         c.stdin.take().unwrap().write_all(input.as_bytes())?;
         let o = c.wait_with_output()?;
         Ok(Out {
@@ -389,7 +389,7 @@ fn why_reads_a_merged_line_back() {
         out.contains("issue   #12 Meter sends") && out.contains("PR #100 · merged"),
         "{out}"
     );
-    assert!(out.contains(&format!("note    round 1 · on {:.9}", head)), "{out}");
+    assert!(out.contains(&format!("note    round 1 · on {head:.9}")), "{out}");
     assert!(out.contains("  Owner: retries no longer double the meter"), "{out}");
     assert!(
         out.contains("q5 owner · Count retries?") && out.contains("→ owner (web): yes, each once"),

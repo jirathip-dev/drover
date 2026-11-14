@@ -40,7 +40,6 @@ pub fn lane_secs(events: &[Event], account: &str, now: u64, window: u64) -> u64 
 }
 
 /// `5h 1.5 · 7d 12.0 drover lane-hours`: what drover ran, not the provider's quota.
-#[allow(clippy::cast_precision_loss)]
 pub fn lane_hours(events: &[Event], account: &str, now: u64) -> String {
     let h = |w: u64| lane_secs(events, account, now, w) as f64 / 3600.0;
     format!("5h {:.1} · 7d {:.1} drover lane-hours", h(5 * 3600), h(7 * 86400))
@@ -172,11 +171,7 @@ pub fn epoch(s: &str) -> Option<u64> {
     u64::try_from(days * 86400 + h * 3600 + mi * 60 + se - off).ok()
 }
 
-#[allow(
-    clippy::cast_precision_loss,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss
-)]
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn out_at((pct, reset): (f64, u64), now: u64) -> Option<u64> {
     let start = reset.checked_sub(7 * 86400)?;
     let out = start + (now.checked_sub(start)? as f64 * 100.0 / pct.max(0.01)) as u64;

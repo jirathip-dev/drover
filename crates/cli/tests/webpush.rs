@@ -34,7 +34,7 @@ fn decrypt(body: &[u8], ua: &SecretKey, auth: &[u8]) -> Option<Vec<u8>> {
     let hk = |salt: &[u8], ikm: &[u8], info: &[u8], out: &mut [u8]| {
         hkdf::Hkdf::<sha2::Sha256>::new(Some(salt), ikm)
             .expand(info, out)
-            .unwrap()
+            .unwrap();
     };
     let (mut ikm, mut cek, mut nonce) = ([0u8; 32], [0u8; 16], [0u8; 12]);
     hk(auth, shared.raw_secret_bytes().as_slice(), &info, &mut ikm);
@@ -157,12 +157,12 @@ fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
         "unpaired cannot remove"
     );
     assert!(post(&s, "/push/unsubscribe", &body, &cookie).starts_with("HTTP/1.1 303"));
-    assert!(webpush::load(&c.state).is_empty());
+    assert_eq!(webpush::load(&c.state), [] as [drover::webpush::Sub; 0]);
 }
 
 fn fake_curl(dir: &Path) -> std::sync::MutexGuard<'static, ()> {
     static PATH: std::sync::Mutex<()> = std::sync::Mutex::new(());
-    let held = PATH.lock().unwrap_or_else(|e| e.into_inner());
+    let held = PATH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let bin = dir.join("bin");
     std::fs::create_dir_all(&bin).unwrap();
     let script = format!(
@@ -395,7 +395,7 @@ fn subscribe_with_a_notifier_pushes_once_to_that_device_and_the_host_row_follows
         "one push each, to the new device only"
     );
     let json: serde_json::Value =
-        serde_json::from_slice(&decrypt(&std::fs::read(dir.join("body")).unwrap().to_vec(), &ua, &d(AUTH)).unwrap())
+        serde_json::from_slice(&decrypt(&std::fs::read(dir.join("body")).unwrap().clone(), &ua, &d(AUTH)).unwrap())
             .unwrap();
     assert!(json["body"].as_str().unwrap().ends_with("alerts are on"), "{json}");
     let sent: Vec<_> = read(&c.state)

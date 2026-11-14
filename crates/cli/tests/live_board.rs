@@ -106,7 +106,6 @@ fn board(name: &str, home: &Path) -> (drover::Ctx, String, String, Sheds) {
     (c, url, cookie.trim().trim_start_matches("Cookie: ").to_string(), sheds)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn page(url: &str, cookie: &str, tab: &str, mode: &str, pre: &str, js: &str, wait: &str, png: &Path) -> Vec<f64> {
     let o = webview()
         .env("DROVER_COOKIE", cookie)
@@ -192,7 +191,11 @@ fn live_board_chat_and_ascii_in_webkit() {
         assert!(m.len() == 8, "{theme}: {m:?}");
         let (frames, blank, mutated, lives, same, kept) = (m[0], m[1], m[3], m[4], m[5], m[6]);
         assert!(
-            blank == 0.0 && mutated == 0.0 && same == 1.0 && kept == 1.0 && lives >= 1.0,
+            blank == 0.0
+                && mutated == 0.0
+                && (same - 1.0).abs() < f64::EPSILON
+                && (kept - 1.0).abs() < f64::EPSILON
+                && lives >= 1.0,
             "{theme}: frames, blank, samples, mutations, /live lanes, same node, same animations: {m:?}"
         );
         if theme == "farm" {

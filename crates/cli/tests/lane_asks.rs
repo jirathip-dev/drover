@@ -16,7 +16,7 @@ const SPEC: &str = "Split the sender.\n\nKeep the old sender behind a flag\nunti
 
 fn env() -> MutexGuard<'static, ()> {
     static ENV: Mutex<()> = Mutex::new(());
-    ENV.lock().unwrap_or_else(|e| e.into_inner())
+    ENV.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn as_lane() {

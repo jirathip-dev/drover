@@ -16,7 +16,7 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
         .collect()
 }
 
-fn spawn(c: &drover::Ctx, extra: Value) {
+fn spawn(c: &drover::Ctx, extra: &Value) {
     let mut d = json!({"role": "impl", "agent": LANE, "pane": LANE, "host": "mini"});
     d.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
     append(&c.state, &Event::new(NOW - 60, "sendmeter", Some(36), "spawn", d)).unwrap();
@@ -56,7 +56,7 @@ fn typed(sh: &FakeShed, pane: &str, text: &str) -> bool {
 fn a_lane_ask_stores_its_agent_and_the_answer_is_typed_into_its_pane() {
     let c = ctx(&tmpdir("deliver-lane"), CONFIG);
     let sh = shed(&c);
-    spawn(&c, json!({}));
+    spawn(&c, &json!({}));
     lane_ask(&c);
     let a = &kinds(&c, "needs-decision")[0];
     assert_eq!((a.str("agent"), a.str("host")), (Some(LANE), Some("mini")));
@@ -82,7 +82,7 @@ fn an_ask_without_an_agent_is_answered_into_the_issues_current_lane() {
     lane_ask(&c);
     assert_eq!(kinds(&c, "needs-decision")[0].str("agent"), None);
     let sh = shed(&c);
-    spawn(&c, json!({}));
+    spawn(&c, &json!({}));
     assert_eq!(run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "1"]).0, 0);
     assert!(typed(&sh, LANE, "DECISION q1: yes"), "{:?}", sh.methods());
     assert_eq!(kinds(&c, "answer-delivered")[0].str("agent"), Some(LANE));
@@ -94,7 +94,7 @@ fn a_remote_lane_is_answered_on_its_machines_shed() {
     let (here, air) = (FakeShed::new(), FakeShed::new());
     here.attach(&c);
     air.lane(LANE, "idle", "/x");
-    spawn(&c, json!({"host": "air", "machine": "air"}));
+    spawn(&c, &json!({"host": "air", "machine": "air"}));
     lane_ask(&c);
     let f = Fake::default();
     let r = OverSsh {
@@ -113,7 +113,7 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     let c = ctx(&tmpdir("deliver-retry"), CONFIG);
     let sh = FakeShed::new();
     sh.attach(&c);
-    spawn(&c, json!({}));
+    spawn(&c, &json!({}));
     lane_ask(&c);
     assert_eq!(run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "1"]).0, 0);
     let u = kinds(&c, "answer-undelivered");
@@ -147,7 +147,7 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     let c = ctx(&tmpdir("deliver-gone"), CONFIG);
     let sh = FakeShed::new();
     sh.attach(&c);
-    spawn(&c, json!({}));
+    spawn(&c, &json!({}));
     lane_ask(&c);
     assert_eq!(run(&c, &Fake::default(), &["answer", "sendmeter", "q1", "1"]).0, 0);
     let closed = Event::new(NOW, "sendmeter", Some(36), "lane-closed", json!({"agent": LANE}));
@@ -163,7 +163,7 @@ fn a_sleeping_lanes_answer_waits_for_room_then_lands() {
     let sh = FakeShed::new();
     sh.attach(&c);
     sh.lane(LANE, "hibernated", "/x");
-    spawn(&c, json!({}));
+    spawn(&c, &json!({}));
     lane_ask(&c);
     let host = |load: &str| {
         Fake::default()
@@ -191,7 +191,7 @@ fn a_superseded_lanes_successor_gets_its_answer_typed_into_its_pane() {
     sh.attach(&c);
     let wt = c.worktrees.join("sendmeter/issue-36");
     std::fs::create_dir_all(&wt).unwrap();
-    spawn(&c, json!({"worktree": wt, "branch": "issue-36", "pane": "old-36"}));
+    spawn(&c, &json!({"worktree": wt, "branch": "issue-36", "pane": "old-36"}));
     let r = Fake::default()
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
@@ -232,8 +232,8 @@ fn a_supersede_close_logged_after_the_new_spawn_does_not_close_it() {
     let c = ctx(&tmpdir("deliver-410"), CONFIG);
     let sh = shed(&c);
     sh.lane("old-36", "idle", "/x");
-    spawn(&c, json!({"pane": "old-36"}));
-    spawn(&c, json!({}));
+    spawn(&c, &json!({"pane": "old-36"}));
+    spawn(&c, &json!({}));
     let d = json!({"agent": LANE, "reason": "superseded"});
     append(&c.state, &Event::new(NOW - 50, "sendmeter", Some(36), "lane-closed", d)).unwrap();
     lane_ask(&c);
@@ -248,7 +248,7 @@ fn a_closed_lane_whose_agent_still_runs_in_its_worktree_gets_the_answer() {
     let c = ctx(&tmpdir("deliver-live"), CONFIG);
     let sh = FakeShed::new();
     sh.attach(&c);
-    spawn(&c, json!({"worktree": "/wt/issue-36", "pane": "gone-36"}));
+    spawn(&c, &json!({"worktree": "/wt/issue-36", "pane": "gone-36"}));
     lane_ask(&c);
     append(
         &c.state,
@@ -270,7 +270,7 @@ fn an_answer_with_no_lane_alerts_once_from_check() {
     let c = ctx(&tmpdir("deliver-alert"), CONFIG);
     let sh = FakeShed::new();
     sh.attach(&c);
-    spawn(&c, json!({"worktree": "/wt/issue-36"}));
+    spawn(&c, &json!({"worktree": "/wt/issue-36"}));
     lane_ask(&c);
     append(
         &c.state,

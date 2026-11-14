@@ -235,7 +235,7 @@ fn clean_removes_only_merged_clean_idle_lanes() {
             issue,
             "merged",
             json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
-        )
+        );
     };
     lane(10, 12, "impl", &a);
     lane(20, 12, "rev", &b);

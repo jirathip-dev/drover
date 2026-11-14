@@ -46,9 +46,9 @@ fn kick_with_non_ascii_path_does_not_panic() {
         kick: "Read /Users/日本語/wt/.brief.md and execute it fully.".into(),
         lane: s(),
         account: None,
-        env: Default::default(),
+        env: std::collections::BTreeMap::default(),
         port: 41000,
-        mcp: Default::default(),
+        mcp: serde_json::Map::default(),
         mcp_file: wt.join(".mcp.lane.json"),
         head: s(),
         title: s(),
@@ -58,7 +58,7 @@ fn kick_with_non_ascii_path_does_not_panic() {
         token: None,
     };
     assert!(!p.kick.is_char_boundary(20));
-    let r = Fake(Default::default());
+    let r = Fake(std::sync::Mutex::default());
     assert!(providers::get("dsh").kick(&r, &p, "w9:p1").unwrap());
     assert!(r
         .0

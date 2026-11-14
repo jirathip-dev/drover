@@ -235,7 +235,7 @@ fn the_hourly_sweep_runs_once_per_hour() {
             n,
             "merged",
             json!({"pr": "1", "merge_sha": "m", "into": "staging"}),
-        )
+        );
     };
     let first = lane(&c, 10, 12, "impl", "issue-12");
     merged(&c, 12);

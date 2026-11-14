@@ -1,4 +1,3 @@
-#![warn(clippy::pedantic)]
 fn main() {
     let _ = drover::SERVE.set((drover::hooks::serve, drover::serve::export));
     let _ = drover::SERVICE.set(drover_service::main);

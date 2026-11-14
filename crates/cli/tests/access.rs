@@ -2,6 +2,7 @@ mod common;
 use common::*;
 use drover::events::{append, read, Event};
 use serde_json::{json, Value};
+use std::io::Write as _;
 use std::path::Path;
 
 const TOKEN_A: &str = concat!("sk", "-ant-oat01-AAAA-secret");
@@ -28,11 +29,11 @@ fn folders(d: &Path, role_extra: &str) -> String {
 
 fn shell(sh: &FakeShed, lane: &str, var: &str) -> String {
     let typed = sh.sent(lane);
-    let line = typed.iter().find(|t| t.starts_with("export ")).expect("no export line");
-    let line = format!("{}; printf %s \"${var}\"", line.trim_end_matches('\r'));
+    let cmd = typed.iter().find(|t| t.starts_with("export ")).expect("no export line");
+    let cmd = format!("{}; printf %s \"${var}\"", cmd.trim_end_matches('\r'));
     let mut c = std::process::Command::new("sh");
     c.env_remove("CLAUDE_CODE_OAUTH_TOKEN").env_remove("CLAUDE_CONFIG_DIR");
-    String::from_utf8_lossy(&c.arg("-c").arg(line).output().unwrap().stdout).into()
+    String::from_utf8_lossy(&c.arg("-c").arg(cmd).output().unwrap().stdout).into()
 }
 
 fn keep_secrets(c: &drover::Ctx, n: u64) {
@@ -243,7 +244,6 @@ fn the_profile_hook_still_refuses_a_guarded_command_on_the_accounts_folder() {
         .stdout(std::process::Stdio::piped())
         .spawn()
         .unwrap();
-    use std::io::Write as _;
     ch.stdin.take().unwrap().write_all(call.to_string().as_bytes()).unwrap();
     let o = String::from_utf8(ch.wait_with_output().unwrap().stdout).unwrap();
     let v: Value = serde_json::from_str(&o).unwrap_or_else(|_| panic!("{o}"));
@@ -581,7 +581,7 @@ fn check_shows(c: &drover::Ctx, sh: &FakeShed, screen: &str) -> String {
     out
 }
 
-fn reading(c: &drover::Ctx, five: Value, seven: Value, ago: u64) {
+fn reading(c: &drover::Ctx, five: &Value, seven: &Value, ago: u64) {
     let row = json!({"ts": c.now - ago, "account": "A", "five_hour_pct": five, "five_hour_reset": null,
         "seven_day_pct": seven, "seven_day_reset": 1_200_000});
     std::fs::write(c.state.with_file_name("usage.jsonl"), format!("{row}\n")).unwrap();
@@ -603,7 +603,7 @@ fn a_banner_the_meter_contradicts_does_not_cap_and_a_lane_still_picks_the_accoun
     let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
-    reading(&c, Value::Null, json!(23.0), 60);
+    reading(&c, &Value::Null, &json!(23.0), 60);
     let out = check_shows(&c, &sh, "  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)\n");
     assert!(!out.contains("account-capped"), "{out}");
     let ignored = kinds(&c, "cap-banner-ignored");
@@ -628,7 +628,7 @@ fn a_banner_with_the_week_at_100_caps_until_the_reset() {
     let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
-    reading(&c, Value::Null, json!(100.0), 60);
+    reading(&c, &Value::Null, &json!(100.0), 60);
     let out = check_shows(&c, &sh, "  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)\n");
     assert!(
         out.contains("account-capped: A:") && !out.contains("signed out"),
@@ -654,7 +654,7 @@ fn a_banner_with_no_fresh_reading_still_caps() {
     let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
-    reading(&c, Value::Null, json!(23.0), 601);
+    reading(&c, &Value::Null, &json!(23.0), 601);
     assert!(check_shows(&c, &sh, "You've hit your limit · resets 3pm").contains("account-capped: A:"));
 }
 

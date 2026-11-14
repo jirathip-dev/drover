@@ -47,9 +47,10 @@ fn job_files_match_their_goldens() {
 }
 
 fn job(c: &drover::Ctx, label: &str) -> std::path::PathBuf {
-    match MAC {
-        true => c.home.join(format!("Library/LaunchAgents/{label}.plist")),
-        false => c.home.join(format!(".config/systemd/user/{label}.service")),
+    if MAC {
+        c.home.join(format!("Library/LaunchAgents/{label}.plist"))
+    } else {
+        c.home.join(format!(".config/systemd/user/{label}.service"))
     }
 }
 
@@ -70,9 +71,10 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
         "= already dev.drover.tick\n= already dev.drover.fast\n= already dev.drover.update\n= already dev.drover.clean\n"
     );
     let fast = std::fs::read_to_string(job(&c, "dev.drover.fast")).unwrap();
-    let every = match MAC {
-        true => fast.clone(),
-        false => std::fs::read_to_string(c.home.join(".config/systemd/user/dev.drover.fast.timer")).unwrap(),
+    let every = if MAC {
+        fast.clone()
+    } else {
+        std::fs::read_to_string(c.home.join(".config/systemd/user/dev.drover.fast.timer")).unwrap()
     };
     assert!(fast.contains("--fast") && every.contains("60"), "{fast}\n{every}");
 
@@ -315,7 +317,7 @@ fn services_rows_go_green_amber_and_red() {
             c.state.with_file_name("worktrees.du"),
             format!("{} {}", gb << 30, c.now - 240),
         )
-        .unwrap()
+        .unwrap();
     };
     fleet_disk(3);
     assert_eq!(run(&c, &host(Fake::default()), &["timer", "install", "--no-load"]).0, 0);
@@ -470,9 +472,10 @@ fn drift_is_missing_outdated_or_loaded() {
     assert_eq!(drift(&up), both("loaded", "loaded"));
     assert_eq!(drift(&host(Fake::default())), both("missing", "missing"), "not loaded");
     let edit = |label: &str, from: &str, to: &str| {
-        let p = match MAC || !from.starts_with("OnUnit") {
-            true => job(&c, label),
-            false => c.home.join(format!(".config/systemd/user/{label}.timer")),
+        let p = if MAC || !from.starts_with("OnUnit") {
+            job(&c, label)
+        } else {
+            c.home.join(format!(".config/systemd/user/{label}.timer"))
         };
         let text = std::fs::read_to_string(&p).unwrap();
         assert!(text.contains(from), "{text}");

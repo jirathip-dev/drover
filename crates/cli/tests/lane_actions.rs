@@ -216,7 +216,7 @@ fn repo(wt: &str, fail: &'static str) -> RealGit {
                 .status
                 .success(),
             "{a:?}"
-        )
+        );
     };
     sh(&["init", "-q", "--bare", &origin]);
     sh(&["clone", "-q", &origin, wt]);
@@ -789,7 +789,13 @@ fn wip_prune_dry_run_lists_and_deletes_nothing() {
         std::fs::create_dir_all(local.join(file).parent().unwrap()).unwrap();
         let mut x = file.len() as u64;
         let bytes: Vec<u8> = (0..2 << 20)
-            .map(|_| (x = x.wrapping_mul(6364136223846793005).wrapping_add(1), (x >> 56) as u8).1)
+            .map(|_| {
+                (
+                    x = x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1),
+                    (x >> 56) as u8,
+                )
+                    .1
+            })
             .collect();
         std::fs::write(local.join(file), bytes).unwrap();
         git(&["-C", &l, "add", "-f", file]);

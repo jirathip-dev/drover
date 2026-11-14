@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)]
 use drover::runner::{Out, Runner};
 use drover::Ctx;
 use std::path::{Path, PathBuf};
@@ -7,7 +7,6 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// #771: the shared fake shed server lane tests run on.
 pub mod fake_shed;
-#[allow(unused_imports)]
 pub use fake_shed::{FakeShed, OnShed, OverSsh};
 
 pub const CONFIG: &str = r#"# fleet config (test)
@@ -33,7 +32,7 @@ build_root = ""           # #630: retired (builds go under the worktree root); a
 stray_roots = []          # #536: never clean the real /tmp or $TMPDIR
 "#;
 
-/// RefCell's API over an RwLock: runners are `Sync` (serve's watcher has its own thread).
+/// `RefCell`'s API over an `RwLock`: runners are `Sync` (serve's watcher has its own thread).
 #[derive(Default)]
 pub struct Shared<T>(RwLock<T>);
 
@@ -252,6 +251,7 @@ impl Drop for Made {
 thread_local!(static MADE: Made = const { Made(std::cell::RefCell::new(Vec::new())) });
 
 static ALL: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+static AT_EXIT: std::sync::Once = std::sync::Once::new();
 
 extern "C" fn sweep() {
     if let Ok(all) = ALL.try_lock() {
@@ -275,7 +275,6 @@ pub fn tmpdir(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     MADE.with(|m| m.0.borrow_mut().push(d.clone()));
-    static AT_EXIT: std::sync::Once = std::sync::Once::new();
     AT_EXIT.call_once(|| assert_eq!(unsafe { atexit(sweep) }, 0));
     ALL.lock().unwrap().push(d.clone());
     d
@@ -309,13 +308,13 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
 
 pub fn run(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
     let mut out = Vec::new();
-    let mut argv = vec!["drover".to_string()];
-    argv.extend(args.iter().map(|s| s.to_string()));
-    let code = drover::main_with(argv, ctx, r, &mut out, &mut std::io::empty());
+    let mut cmd = vec!["drover".to_string()];
+    cmd.extend(args.iter().map(std::string::ToString::to_string));
+    let code = drover::main_with(cmd, ctx, r, &mut out, &mut std::io::empty());
     (code, String::from_utf8(out).unwrap())
 }
 
-/// `node tests/support/webview.mjs` (Playwright's WebKit) under scripts/ui-lock.sh, its page based at serve's assets.
+/// `node tests/support/webview.mjs` (Playwright's `WebKit`) under scripts/ui-lock.sh, its page based at serve's assets.
 pub fn webview() -> std::process::Command {
     static BASE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let base = BASE.get_or_init(|| {
@@ -344,7 +343,7 @@ pub fn webview() -> std::process::Command {
     c
 }
 
-/// #862: true (and a skip message) where node cannot load Playwright (`NODE_PATH`), so a WebKit test returns early.
+/// #862: true (and a skip message) where node cannot load Playwright (`NODE_PATH`), so a `WebKit` test returns early.
 pub fn no_webkit() -> bool {
     static NO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let no = *NO.get_or_init(|| {
@@ -367,7 +366,7 @@ fn user_home() -> PathBuf {
 
 static HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// #560: scripts/ui-lock.sh's host lock held for a whole WebKit test whose steps are timed (a `/live` update 2.5 s in), so its clock starts once WebKit is its own; `swift()` meanwhile runs without the wrapper. Every WebKit test of a binary that takes it must take it.
+/// #560: scripts/ui-lock.sh's host lock held for a whole `WebKit` test whose steps are timed (a `/live` update 2.5 s in), so its clock starts once `WebKit` is its own; `swift()` meanwhile runs without the wrapper. Every `WebKit` test of a binary that takes it must take it.
 pub struct UiLock(std::fs::File, std::sync::MutexGuard<'static, ()>);
 
 pub fn ui_lock() -> UiLock {
@@ -461,7 +460,7 @@ pub fn chat_fixture() -> serde_json::Value {
         "status": "✽ Gusting… (2m 47s · ↓ 1.8k tokens)", "before": l.len(), "more": true})
 }
 
-/// #138: page JS that opens sendmeter-impl-12's sheet full and draws `chat_fixture()` at once (the poll answers the same) in the full view (#315: not the one WebKit's stored `chat:full` says), every block open with [show all] pressed, or all collapsed.
+/// #138: page JS that opens sendmeter-impl-12's sheet full and draws `chat_fixture()` at once (the poll answers the same) in the full view (#315: not the one `WebKit`'s stored `chat:full` says), every block open with [show all] pressed, or all collapsed.
 pub fn chat_scene(open: bool) -> String {
     let fx = chat_fixture();
     format!(
@@ -491,14 +490,14 @@ pub fn events_tab(s: &drover::serve::Server, host: &str, now: u64, opts: &str) -
     let d = tmpdir("events-ts");
     std::fs::write(d.join("state.json"), get("/api/v1/state")).unwrap();
     std::fs::write(d.join("events.json"), get("/api/v1/events?since=0")).unwrap();
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/events.ts");
+    let src = js_str(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/events.ts"));
     let js = format!(
         "import {{ tab }} from {src:?}; import fs from 'node:fs';\n\
          const st = JSON.parse(fs.readFileSync({:?})), ev = JSON.parse(fs.readFileSync({:?}));\n\
          process.stdout.write(tab(ev.list, {{ now: st.now, tz: st.tz, fleets: st.fleets, all: false, \
          shown: {{ imp: 100, all: 100 }}, f: {{ k: 'imp', fl: [] }}, ...{opts} }}));",
-        d.join("state.json"),
-        d.join("events.json")
+        js_str(d.join("state.json")),
+        js_str(d.join("events.json")),
     );
     std::fs::write(d.join("t.mjs"), js).unwrap();
     let o = std::process::Command::new("node")
@@ -507,6 +506,10 @@ pub fn events_tab(s: &drover::serve::Server, host: &str, now: u64, opts: &str) -
         .unwrap();
     assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
     Some(String::from_utf8(o.stdout).unwrap())
+}
+
+fn js_str(p: impl AsRef<Path>) -> String {
+    p.as_ref().to_string_lossy().into_owned()
 }
 
 /// #267: the Host tab as the TypeScript board draws it: web/src/host.ts under node, from `s`'s `/api/v1/host` at `now` (`host` the request's Host: a read-only server takes an empty one).
@@ -521,12 +524,12 @@ pub fn host_tab(s: &drover::serve::Server, host: &str, now: u64) -> String {
 pub fn host_html(json: &str) -> String {
     let d = tmpdir("host-ts");
     std::fs::write(d.join("host.json"), json).unwrap();
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/host.ts");
-    let sys = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/system.ts");
+    let src = js_str(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/host.ts"));
+    let sys = js_str(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/system.ts"));
     let js = format!(
         "import {{ tab }} from {src:?}; import {{ providers, notifications }} from {sys:?}; import fs from 'node:fs';\n\
          const d = JSON.parse(fs.readFileSync({:?})); process.stdout.write(tab(d) + providers(d) + notifications(d));",
-        d.join("host.json")
+        js_str(d.join("host.json")),
     );
     std::fs::write(d.join("t.mjs"), js).unwrap();
     let o = std::process::Command::new("node")
@@ -554,11 +557,11 @@ pub fn queue_tab(s: &drover::serve::Server, host: &str, now: u64) -> String {
 pub fn queue_html(json: &str, expr: &str) -> String {
     let d = tmpdir("queue-ts");
     std::fs::write(d.join("queue.json"), json).unwrap();
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/queue.ts");
+    let src = js_str(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/queue.ts"));
     let js = format!(
         "import {{ tab, sheet }} from {src:?}; import fs from 'node:fs';\n\
          const d = JSON.parse(fs.readFileSync({:?})); process.stdout.write(String({expr}));",
-        d.join("queue.json")
+        js_str(d.join("queue.json")),
     );
     std::fs::write(d.join("t.mjs"), js).unwrap();
     let o = std::process::Command::new("node")
@@ -581,7 +584,7 @@ pub fn system_frags(s: &drover::serve::Server, host: &str, now: u64, events: &st
     std::fs::write(d.join("host.json"), get("/api/v1/host")).unwrap();
     std::fs::write(d.join("queue.json"), get("/api/v1/queue")).unwrap();
     std::fs::write(d.join("events.html"), events).unwrap();
-    let src = |f: &str| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src").join(f);
+    let src = |f: &str| js_str(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src").join(f));
     let js = format!(
         "import {{ tab }} from {:?}; import * as y from {:?}; import fs from 'node:fs';\n\
          const h = JSON.parse(fs.readFileSync({:?})), q = JSON.parse(fs.readFileSync({:?}));\n\
@@ -589,9 +592,9 @@ pub fn system_frags(s: &drover::serve::Server, host: &str, now: u64, events: &st
          'sy-fleets': y.fleets(q), 'sy-conductor': y.conductor(q), events: fs.readFileSync({:?}, 'utf8') }}));",
         src("host.ts"),
         src("system.ts"),
-        d.join("host.json"),
-        d.join("queue.json"),
-        d.join("events.html")
+        js_str(d.join("host.json")),
+        js_str(d.join("queue.json")),
+        js_str(d.join("events.html")),
     );
     std::fs::write(d.join("t.mjs"), js).unwrap();
     let o = std::process::Command::new("node")
@@ -611,7 +614,7 @@ pub fn with_queue(res: &str, s: &drover::serve::Server, host: &str, now: u64) ->
 /// #269: `exprs` (JS over `d`, `lanes`, `needs` and `chat`: web/src/{lanes,needs,chat}.ts's exports) each over API v1 data `json` (the first `d`, …), under node: their strings.
 pub fn board_js(parts: &[(&str, &str)]) -> Vec<String> {
     let d = tmpdir("board-ts");
-    let src = |f: &str| Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../web/src/{f}.ts"));
+    let src = |f: &str| js_str(Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../web/src/{f}.ts")));
     let mut js = format!(
         "import * as lanes from {:?}; import * as needs from {:?}; import * as chat from {:?}; import fs from 'node:fs';\nconst out = [];\n",
         src("lanes"),
@@ -622,7 +625,7 @@ pub fn board_js(parts: &[(&str, &str)]) -> Vec<String> {
         std::fs::write(d.join(format!("{i}.json")), json).unwrap();
         js += &format!(
             "{{ const d = JSON.parse(fs.readFileSync({:?})); out.push(String({expr})); }}\n",
-            d.join(format!("{i}.json"))
+            js_str(d.join(format!("{i}.json"))),
         );
     }
     js += "process.stdout.write(JSON.stringify(out));";
@@ -695,7 +698,7 @@ pub fn avatars(of: &[(&str, &str, &str)]) -> Vec<String> {
     board_js(&j.iter().map(|j| (j.as_str(), "lanes.avatar(d)")).collect::<Vec<_>>())
 }
 
-/// #269: a page response `res` as the board leaves it drawn (`with_board`), for a static copy (the WebKit tests' page file): without the board's module, which would read the API of the server the copy's assets come from.
+/// #269: a page response `res` as the board leaves it drawn (`with_board`), for a static copy (the `WebKit` tests' page file): without the board's module, which would read the API of the server the copy's assets come from.
 pub fn drawn(res: &str, s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> String {
     let page = with_board(res, s, host, extra, now);
     let at = page.find("<script type=module").expect("the board's module");

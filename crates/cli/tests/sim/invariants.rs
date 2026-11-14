@@ -34,7 +34,7 @@ pub fn on_append(w: &mut World, me: usize) {
     let (at, ev) = (w.wrote[i].at, w.wrote[i].ev.clone());
     let who = w.procs[me].name.clone();
     if ev.ts > at || at - ev.ts > LAG {
-        let lag = at as i64 - ev.ts as i64;
+        let lag = at.cast_signed() - ev.ts.cast_signed();
         return w.fail(format!(
             "I7 clock: {who} wrote {} #{} ts=t+{} at true t+{} (lag {lag} s > {LAG} s)",
             ev.kind,
@@ -234,7 +234,7 @@ fn liveness(w: &mut World) {
 pub fn on_exit(w: &mut World, me: usize, pid: u32) {
     let state = crate::scenario::ctx(&w.root, 0).state;
     let held: Vec<String> = (drover::db::leases(&state, "").into_iter())
-        .filter(|l| l.pid == pid && l.expires_at > w.now && !l.key.ends_with(".again"))
+        .filter(|l| l.pid == pid && l.expires_at > w.now && l.key.rsplit_once('.').is_none_or(|(_, e)| e != "again"))
         .map(|l| l.key)
         .collect();
     if !held.is_empty() {

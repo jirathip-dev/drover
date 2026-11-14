@@ -5,7 +5,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
-fn hook_in(lane: Option<&str>, role: &str, input: Value) -> String {
+fn hook_in(lane: Option<&str>, role: &str, input: &Value) -> String {
     hook_env(&[("DROVER_LANE", lane)], role, input)
 }
 
@@ -14,11 +14,11 @@ fn config() -> String {
     CONFIG.to_string() + &["synergy", "x", "fleet"].map(fleet).concat()
 }
 
-fn hook_env(vars: &[(&str, Option<&str>)], role: &str, input: Value) -> String {
+fn hook_env(vars: &[(&str, Option<&str>)], role: &str, input: &Value) -> String {
     hook_cfg(&config(), vars, role, input).0
 }
 
-fn hook_cfg(cfg: &str, vars: &[(&str, Option<&str>)], role: &str, input: Value) -> (String, std::path::PathBuf) {
+fn hook_cfg(cfg: &str, vars: &[(&str, Option<&str>)], role: &str, input: &Value) -> (String, std::path::PathBuf) {
     let d = tmpdir("hook");
     std::fs::write(d.join("fleet.toml"), cfg).unwrap();
     (hook_at(&d, &d, vars, role, &input.to_string()), d)
@@ -49,11 +49,11 @@ fn hook_at(d: &Path, cwd: &Path, vars: &[(&str, Option<&str>)], role: &str, raw:
     String::from_utf8(out.stdout).unwrap()
 }
 
-fn hook_as(role: &str, input: Value) -> String {
+fn hook_as(role: &str, input: &Value) -> String {
     hook_in(Some(&format!("sendmeter:24:{role}")), role, input)
 }
 
-fn shapes(tool: &str, ti: Value) -> [Value; 3] {
+fn shapes(tool: &str, ti: &Value) -> [Value; 3] {
     let htool = match tool {
         "Bash" => "terminal",
         "Edit" => "patch",
@@ -72,8 +72,8 @@ fn shapes(tool: &str, ti: Value) -> [Value; 3] {
     ]
 }
 
-fn call(role: &str, tool: &str, ti: Value) -> Option<String> {
-    let outs: Vec<String> = shapes(tool, ti).into_iter().map(|i| hook_as(role, i)).collect();
+fn call(role: &str, tool: &str, ti: &Value) -> Option<String> {
+    let outs: Vec<String> = shapes(tool, ti).into_iter().map(|i| hook_as(role, &i)).collect();
     if outs.iter().all(String::is_empty) {
         return None;
     }
@@ -91,7 +91,7 @@ fn call(role: &str, tool: &str, ti: Value) -> Option<String> {
 }
 
 fn bash_as(role: &str, cmd: &str) -> Option<String> {
-    call(role, "Bash", json!({"command": cmd}))
+    call(role, "Bash", &json!({"command": cmd}))
 }
 
 fn bash(cmd: &str) -> Option<String> {
@@ -101,27 +101,27 @@ fn bash(cmd: &str) -> Option<String> {
 #[test]
 fn hook_is_inert_unless_fleet_lane_is_set() {
     for cmd in ["gh pr merge 5", "git push origin HEAD:staging"] {
-        for input in shapes("Bash", json!({"command": cmd})) {
+        for input in shapes("Bash", &json!({"command": cmd})) {
             assert_eq!(
-                hook_in(None, "impl", input.clone()),
+                hook_in(None, "impl", &input.clone()),
                 "",
                 "{cmd} allowed without DROVER_LANE"
             );
             assert_eq!(
-                hook_in(Some(""), "impl", input.clone()),
+                hook_in(Some(""), "impl", &input.clone()),
                 "",
                 "{cmd} allowed with empty DROVER_LANE"
             );
             assert_ne!(
-                hook_in(Some("fleet:24:impl"), "impl", input),
+                hook_in(Some("fleet:24:impl"), "impl", &input),
                 "",
                 "{cmd} blocked in a fleet lane"
             );
         }
     }
-    for input in shapes("Bash", json!({"command": "git status"})) {
+    for input in shapes("Bash", &json!({"command": "git status"})) {
         assert_eq!(
-            hook_in(Some("fleet:24:impl"), "impl", input),
+            hook_in(Some("fleet:24:impl"), "impl", &input),
             "",
             "git status allowed in a fleet lane"
         );
@@ -130,8 +130,8 @@ fn hook_is_inert_unless_fleet_lane_is_set() {
 
 #[test]
 fn legacy_fleet_lane_arms_the_hook_and_drover_lane_wins() {
-    for input in shapes("Bash", json!({"command": "gh pr merge 5"})) {
-        let arm = |vars: &[(&str, Option<&str>)]| hook_env(vars, "impl", input.clone());
+    for input in shapes("Bash", &json!({"command": "gh pr merge 5"})) {
+        let arm = |vars: &[(&str, Option<&str>)]| hook_env(vars, "impl", &input.clone());
         assert_ne!(
             arm(&[("FLEET_LANE", Some("fleet:24:impl"))]),
             "",
@@ -210,7 +210,7 @@ fn hermes_terminal_workdir_resolves_bare_push() {
             .output()
             .unwrap()
             .status
-            .success())
+            .success());
     };
     git(&["init", "-q", "-b", "staging"]);
     git(&[
@@ -226,7 +226,7 @@ fn hermes_terminal_workdir_resolves_bare_push() {
     ]);
     let input = json!({"hook_event_name": "pre_tool_call", "tool_name": "terminal", "cwd": "/",
         "tool_input": {"command": "git push", "workdir": d}});
-    let v: Value = serde_json::from_str(&hook_as("impl", input)).unwrap();
+    let v: Value = serde_json::from_str(&hook_as("impl", &input)).unwrap();
     assert_eq!(v["action"], "block");
 }
 
@@ -275,17 +275,17 @@ fn reviewers_are_read_only() {
         assert_eq!(bash_as("rev", cmd), None, "rev may run {cmd}");
     }
     let src = json!({"file_path": "/wt/src/hook.rs"});
-    assert!(call("rev", "Edit", src.clone()).unwrap().contains("read-only"));
-    assert!(call("rev", "Write", src.clone()).is_some());
-    assert_eq!(call("impl", "Edit", src), None);
+    assert!(call("rev", "Edit", &src.clone()).unwrap().contains("read-only"));
+    assert!(call("rev", "Write", &src.clone()).is_some());
+    assert_eq!(call("impl", "Edit", &src), None);
     assert_eq!(
-        call("rev", "Write", json!({"file_path": "/wt/rev-12-r1/verdict.md"})),
+        call("rev", "Write", &json!({"file_path": "/wt/rev-12-r1/verdict.md"})),
         None
     );
-    assert_eq!(call("rev", "Write", json!({"file_path": "verdict.md"})), None);
+    assert_eq!(call("rev", "Write", &json!({"file_path": "verdict.md"})), None);
     let v4a = json!({"tool_name": "patch", "args": {"mode": "patch", "patch": "*** Update File: src/a.rs\n"}});
     assert_eq!(
-        serde_json::from_str::<Value>(&hook_as("rev", v4a)).unwrap()["action"],
+        serde_json::from_str::<Value>(&hook_as("rev", &v4a)).unwrap()["action"],
         "block"
     );
 }
@@ -314,7 +314,7 @@ fn protected_config_edits_are_denied() {
         String::from_utf8(child.wait_with_output().unwrap().stdout).unwrap()
     };
     let deny = |tool: &str, ti: Value| {
-        let outs: Vec<String> = shapes(tool, ti).into_iter().map(&run).collect();
+        let outs: Vec<String> = shapes(tool, &ti).into_iter().map(&run).collect();
         assert!(outs[0].contains("\"deny\""), "{outs:?}");
         assert!(outs[1..].iter().all(|o| o.contains("\"block\"")), "{outs:?}");
     };
@@ -327,7 +327,7 @@ fn protected_config_edits_are_denied() {
         "Write",
         json!({"file_path": "~/.hermes/profiles/fleet-rev/config.yaml"}),
     );
-    for i in shapes("Bash", json!({"command": format!("cat {}", cfg.display())})) {
+    for i in shapes("Bash", &json!({"command": format!("cat {}", cfg.display())})) {
         assert_eq!(run(i), "");
     }
 }
@@ -341,11 +341,11 @@ fn design_spawn_is_owner_only() {
     ] {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
         for (var, role) in [("FLEET_LANE", "impl"), ("DROVER_LANE", "rev"), ("DROVER_LANE", "impl")] {
-            let out = hook_env(&[(var, Some("x:1:impl"))], role, input.clone());
+            let out = hook_env(&[(var, Some("x:1:impl"))], role, &input.clone());
             assert!(out.contains("owner-only"), "{var} {role} {cmd}: {out}");
         }
         assert_eq!(
-            hook_env(&[], "impl", input.clone()),
+            hook_env(&[], "impl", &input.clone()),
             "",
             "the owner (no lane) may: {cmd}"
         );
@@ -358,7 +358,7 @@ fn design_spawn_is_owner_only() {
 fn a_orchestrator_may_spawn_design_lanes() {
     let run = |lane: &str, cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        hook_in(Some(lane), "impl", input)
+        hook_in(Some(lane), "impl", &input)
     };
     let spawn = "drover spawn synergy 2475 design";
     assert_eq!(run("synergy:-:orchestrator", spawn), "", "an orchestrator may");
@@ -383,7 +383,7 @@ fn a_orchestrator_may_spawn_design_lanes() {
 fn only_a_orchestrator_runs_lesson() {
     let run = |lane: &str, cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        hook_in(Some(lane), "impl", input)
+        hook_in(Some(lane), "impl", &input)
     };
     assert_eq!(
         run("synergy:-:orchestrator", "drover lesson synergy"),
@@ -409,7 +409,7 @@ fn only_a_orchestrator_runs_amend() {
     let run = |lane: &str| {
         let cmd = "drover amend synergy 12 --basis q3 \"board-fix: x\"";
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        hook_in(Some(lane), "impl", input)
+        hook_in(Some(lane), "impl", &input)
     };
     assert_eq!(run("synergy:-:orchestrator"), "", "an orchestrator may");
     for lane in ["synergy:12:impl", "synergy:12:rev", "synergy:12:design"] {
@@ -421,7 +421,7 @@ fn only_a_orchestrator_runs_amend() {
 fn only_the_owner_or_an_orchestrator_forces_a_spawn() {
     let run = |lane: Option<&str>, cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        hook_in(lane, "impl", input)
+        hook_in(lane, "impl", &input)
     };
     let force = "drover spawn synergy 12 impl --supersede --force";
     assert_eq!(run(Some("synergy:-:orchestrator"), force), "", "an orchestrator may");
@@ -437,7 +437,7 @@ fn only_the_owner_or_an_orchestrator_forces_a_spawn() {
 fn only_a_orchestrator_runs_timer_install() {
     let run = |lane: Option<&str>, cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        hook_in(lane, "impl", input)
+        hook_in(lane, "impl", &input)
     };
     let install = "drover timer install";
     assert_eq!(run(Some("synergy:-:orchestrator"), install), "", "an orchestrator may");
@@ -468,7 +468,7 @@ fn only_a_orchestrator_runs_timer_install() {
 fn quoted_text_is_not_a_command() {
     let run = |lane: &str, cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        hook_in(Some(lane), "impl", input)
+        hook_in(Some(lane), "impl", &input)
     };
     let reply = r#"drover thread reply t5 "run \`drover spawn synergy 2475 design\`""#;
     let heredoc = "cat > f.md <<'EOF'\nrun `drover spawn synergy 2475 design`\nEOF\nwc -l f.md";
@@ -879,9 +879,9 @@ fn container_commands_are_denied_as_command_words() {
 
 #[test]
 fn container_commands_are_allowed_outside_a_lane() {
-    for input in shapes("Bash", json!({"command": "docker ps"})) {
-        assert_eq!(hook_in(None, "impl", input.clone()), "");
-        assert_eq!(hook_in(Some(""), "impl", input), "");
+    for input in shapes("Bash", &json!({"command": "docker ps"})) {
+        assert_eq!(hook_in(None, "impl", &input.clone()), "");
+        assert_eq!(hook_in(Some(""), "impl", &input), "");
     }
 }
 
@@ -892,7 +892,7 @@ fn deny_commands_override_per_fleet_and_log_denials() {
             "{CONFIG}\n[fleet.other]\nrepo = \"o/r\"\nlocal = \"/tmp/x\"\nintegration = \"staging\"\n{fleet_toml}"
         );
         let input = json!({"tool_name": "Bash", "cwd": "/", "tool_input": {"command": cmd}});
-        let (out, d) = hook_cfg(&cfg, &[("DROVER_LANE", Some("other:7:impl"))], "impl", input);
+        let (out, d) = hook_cfg(&cfg, &[("DROVER_LANE", Some("other:7:impl"))], "impl", &input);
         let reason = serde_json::from_str::<Value>(&out).ok().map(|v| {
             v["hookSpecificOutput"]["permissionDecisionReason"]
                 .as_str()
@@ -963,10 +963,12 @@ fn broad_kills_are_denied_and_pid_kills_allowed() {
     let input = json!({"tool_name": "Bash", "cwd": "/", "tool_input": {"command": "pkill node"}});
     let vars = [("DROVER_LANE", Some("other:7:impl")), ("DROVER_HOST", Some("cloud1"))];
     assert!(
-        hook_cfg(&cfg, &vars, "impl", input.clone()).0.contains("NO_BROAD_KILL"),
+        hook_cfg(&cfg, &vars, "impl", &input.clone())
+            .0
+            .contains("NO_BROAD_KILL"),
         "no fleet or host drops it"
     );
-    assert_eq!(hook_in(None, "impl", input), "", "the owner's shell");
+    assert_eq!(hook_in(None, "impl", &input), "", "the owner's shell");
 }
 
 #[test]
@@ -975,7 +977,7 @@ fn docker_is_allowed_on_a_cloud_host_and_denied_on_a_mac() {
         let cfg = format!("{CONFIG}\n[hosts.mini]\n\n[hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"boat\"\n{hosts}");
         let input = json!({"tool_name": "Bash", "cwd": "/", "tool_input": {"command": cmd}});
         let vars = [("DROVER_LANE", Some("sendmeter:7:impl")), ("DROVER_HOST", Some(host))];
-        hook_cfg(&cfg, &vars, "impl", input).0
+        hook_cfg(&cfg, &vars, "impl", &input).0
     };
     let denied = |o: String| o.contains("NO_CONTAINERS") || o.contains("NO_COMMAND");
     for cmd in ["docker ps", "docker compose up -d db", "supabase start"] {
@@ -990,7 +992,7 @@ fn docker_is_allowed_on_a_cloud_host_and_denied_on_a_mac() {
     );
     let add = "deny_commands_add = [\"terraform apply\"]";
     assert!(denied(run(add, "cloud1", "terraform apply")));
-    assert!(run(add, "cloud1", "docker ps").is_empty());
+    assert_eq!(run(add, "cloud1", "docker ps"), "");
     let mac = "\n[hosts.mini2]\nallow_commands = [\"docker\"]";
     assert!(run(mac, "mini2", "docker ps").is_empty(), "a Mac may opt in");
 }
@@ -1003,9 +1005,9 @@ fn serve_approve_is_owner_only() {
         "drover serve devices --revoke x",
     ] {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        let out = hook_in(Some("x:1:impl"), "impl", input.clone());
+        let out = hook_in(Some("x:1:impl"), "impl", &input.clone());
         assert!(out.contains("REFUSED OWNER_ONLY"), "{cmd}: {out}");
-        assert_eq!(hook_in(None, "impl", input), "", "the owner (no lane) may: {cmd}");
+        assert_eq!(hook_in(None, "impl", &input), "", "the owner (no lane) may: {cmd}");
     }
     assert_eq!(bash("drover serve pending"), None);
     assert_eq!(bash("drover serve devices"), None);
@@ -1015,9 +1017,9 @@ fn serve_approve_is_owner_only() {
 fn setup_is_owner_only() {
     for cmd in ["drover setup mini claude", "~/.local/bin/drover setup --no-load"] {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        let out = hook_in(Some("x:1:impl"), "impl", input.clone());
+        let out = hook_in(Some("x:1:impl"), "impl", &input.clone());
         assert!(out.contains("REFUSED OWNER_ONLY"), "{cmd}: {out}");
-        assert_eq!(hook_in(None, "impl", input), "", "the owner (no lane) may: {cmd}");
+        assert_eq!(hook_in(None, "impl", &input), "", "the owner (no lane) may: {cmd}");
     }
 }
 
@@ -1030,9 +1032,9 @@ fn config_apply_and_secret_ls_rm_are_owner_only() {
         "drover secret rm all TOKEN",
     ] {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        let out = hook_in(Some("x:-:orchestrator"), "orchestrator", input.clone());
+        let out = hook_in(Some("x:-:orchestrator"), "orchestrator", &input.clone());
         assert!(out.contains("REFUSED OWNER_ONLY"), "{cmd}: {out}");
-        assert_eq!(hook_in(None, "impl", input), "", "the owner (no lane) may: {cmd}");
+        assert_eq!(hook_in(None, "impl", &input), "", "the owner (no lane) may: {cmd}");
     }
     assert_eq!(bash("drover config propose t1 /tmp/fleet.toml"), None);
     assert_eq!(bash("drover secret request t1 API_KEY --why x"), None);
@@ -1042,7 +1044,7 @@ fn config_apply_and_secret_ls_rm_are_owner_only() {
 fn a_orchestrator_command_is_logged_for_its_thread() {
     let cmds = |vars: &[(&str, Option<&str>)], cmd: &str| {
         let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-        let (out, d) = hook_cfg(CONFIG, vars, "orchestrator", input);
+        let (out, d) = hook_cfg(CONFIG, vars, "orchestrator", &input);
         let log = drover::events::jsonl(&d.join("state/events.jsonl")).unwrap_or_default();
         let rows: Vec<Value> = log.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
         (
@@ -1069,7 +1071,7 @@ fn a_orchestrator_command_is_logged_for_its_thread() {
         cmds(&lane, "drover thread reply t1 \"done\"").1.is_empty(),
         "the reply is the message"
     );
-    assert!(cmds(&lane, "ls -la").1.is_empty());
+    assert_eq!(cmds(&lane, "ls -la").1, [] as [serde_json::Value; 0]);
     assert!(
         cmds(&lane, "gh pr merge 5").1.is_empty(),
         "a denied call is not a tool row"
@@ -1088,7 +1090,7 @@ fn a_lane_may_queue_block_only_its_own_issue() {
         "drover queue sendmeter unblock 24",
     ] {
         assert_eq!(
-            hook_in(Some("sendmeter:24:impl"), "impl", input(cmd)),
+            hook_in(Some("sendmeter:24:impl"), "impl", &input(cmd)),
             "",
             "its own issue: {cmd}"
         );
@@ -1098,9 +1100,9 @@ fn a_lane_may_queue_block_only_its_own_issue() {
         "cd /tmp && drover queue sendmeter block 25 --on 24",
         "drover queue sendmeter unblock --on 24 25",
     ] {
-        let out = hook_in(Some("sendmeter:24:impl"), "impl", input(cmd));
+        let out = hook_in(Some("sendmeter:24:impl"), "impl", &input(cmd));
         assert!(out.contains("REFUSED OWN_ISSUE"), "{cmd}: {out}");
-        assert_eq!(hook_in(None, "impl", input(cmd)), "", "the owner (no lane) may: {cmd}");
+        assert_eq!(hook_in(None, "impl", &input(cmd)), "", "the owner (no lane) may: {cmd}");
     }
 }
 
@@ -1109,7 +1111,7 @@ fn a_cargo_target_dir_outside_build_root_is_refused() {
     let scratch = "/c/builds/.scratch/sendmeter-rev-24-r1";
     let bash_in = |s: Option<&str>, cmd: &str| {
         let vars = [("DROVER_LANE", Some("sendmeter:24:rev")), ("DROVER_SCRATCH_TARGET", s)];
-        let out = hook_env(&vars, "rev", shapes("Bash", json!({"command": cmd}))[0].clone());
+        let out = hook_env(&vars, "rev", &shapes("Bash", &json!({"command": cmd}))[0].clone());
         let v: Value = serde_json::from_str(&out).unwrap_or_default();
         v["hookSpecificOutput"]["permissionDecisionReason"]
             .as_str()
@@ -1181,27 +1183,27 @@ fn a_lane_hook_fails_closed() {
     for cmd in ["docker ps", "git push origin staging", "git status"] {
         assert!(
             closed(
-                &hook_cfg(&broken, &lane, "impl", pre_bash(cmd)).0,
+                &hook_cfg(&broken, &lane, "impl", &pre_bash(cmd)).0,
                 "fleet.toml failed to load"
             ),
             "{cmd}"
         );
         assert_eq!(
-            hook_cfg(&broken, &[], "impl", pre_bash(cmd)).0,
+            hook_cfg(&broken, &[], "impl", &pre_bash(cmd)).0,
             "",
             "outside a lane: {cmd}"
         );
     }
     assert_eq!(
-        hook_cfg(&config(), &lane, "impl", pre_bash("git status")).0,
+        hook_cfg(&config(), &lane, "impl", &pre_bash("git status")).0,
         "",
         "loaded, it allows"
     );
     let stranger = [("DROVER_LANE", Some("nofleet:7:impl"))];
-    let out = hook_cfg(&config(), &stranger, "impl", pre_bash("git status")).0;
+    let out = hook_cfg(&config(), &stranger, "impl", &pre_bash("git status")).0;
     assert!(closed(&out, "fleet `nofleet` is not in fleet.toml"), "{out}");
     let hermes = json!({"hook_event_name": "pre_tool_call", "tool_name": "terminal", "tool_input": {"command": "ls"}});
-    let out = hook_cfg(&broken, &lane, "impl", hermes).0;
+    let out = hook_cfg(&broken, &lane, "impl", &hermes).0;
     assert!(out.contains("\"block\"") && out.contains("HOOK_FAILED_CLOSED"), "{out}");
 }
 
@@ -1312,7 +1314,7 @@ fn files_a_lane_edits_never_change_the_hook_rules() {
 fn capability_groups_gate_a_orchestrators_owner_verbs() {
     let input =
         |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-    let run = |cfg: &str, lane: &str, cmd: &str| hook_cfg(cfg, &[("DROVER_LANE", Some(lane))], "impl", input(cmd)).0;
+    let run = |cfg: &str, lane: &str, cmd: &str| hook_cfg(cfg, &[("DROVER_LANE", Some(lane))], "impl", &input(cmd)).0;
     let on = [
         "drover clean synergy --yes",
         "drover clean --orphans --yes",
@@ -1358,7 +1360,7 @@ fn capability_groups_gate_a_orchestrators_owner_verbs() {
 fn run_cards_post_from_a_orchestrator_settle_by_the_owner_and_hard_nos_never_run() {
     let input =
         |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-    let run = |lane: Option<&str>, cmd: &str| hook_in(lane, "impl", input(cmd));
+    let run = |lane: Option<&str>, cmd: &str| hook_in(lane, "impl", &input(cmd));
     let post = "drover card post t1 --cmd 'git log -1 main' --why w --blast none --dir .";
     assert_eq!(run(Some("synergy:-:orchestrator"), post), "");
     assert!(run(Some("synergy:12:impl"), post).contains("REFUSED ORCHESTRATOR_ONLY"));
@@ -1393,7 +1395,7 @@ fn run_cards_post_from_a_orchestrator_settle_by_the_owner_and_hard_nos_never_run
 fn runners_verbs_are_a_orchestrators_and_docker_in_message_text_is_not_a_command() {
     let input =
         |cmd: &str| json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
-    let run = |lane: &str, cmd: &str| hook_cfg(&config(), &[("DROVER_LANE", Some(lane))], "impl", input(cmd)).0;
+    let run = |lane: &str, cmd: &str| hook_cfg(&config(), &[("DROVER_LANE", Some(lane))], "impl", &input(cmd)).0;
     for cmd in [
         "drover runners status",
         "drover runners revive vm1",
@@ -1484,7 +1486,7 @@ fn impl_lane_never_edits_the_cap_file() {
 
 #[test]
 fn the_stop_hook_asks_for_the_turn_only_in_impl_lanes() {
-    let stop = |lane: Option<&str>, role: &str| hook_in(lane, role, json!({"hook_event_name": "Stop"}));
+    let stop = |lane: Option<&str>, role: &str| hook_in(lane, role, &json!({"hook_event_name": "Stop"}));
     for lane in [None, Some("sendmeter:-:orchestrator"), Some("sendmeter:-:conductor")] {
         assert_eq!(stop(lane, "orchestrator"), "", "{lane:?} ends its turn freely");
     }

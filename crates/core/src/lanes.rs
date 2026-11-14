@@ -271,7 +271,6 @@ pub fn redact(l: &str) -> String {
 }
 
 /// The push guards' check (stricter than [`mask`]): the secret on line `l`, if any — a `PREFIXES`/AWS/Google token, a JWT, a PEM private key, or a high-entropy non-code value assigned to a `*KEY|TOKEN|SECRET|PASSWORD` name.
-#[allow(clippy::cast_precision_loss)]
 pub fn secret(l: &str) -> Option<&str> {
     let has = |s: &str, f: fn(&u8) -> bool| s.as_bytes().iter().any(f);
     let pre = |w: &str, p: &str| w.starts_with(p) && w.len() >= p.len() + 16 && has(&w[p.len()..], u8::is_ascii_digit);

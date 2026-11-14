@@ -72,9 +72,9 @@ fn the_service_keeps_lane_state_from_herdrs_events_and_polls_when_the_stream_dro
     std::thread::spawn(move || {
         let conn = || {
             let (c, _) = l.accept().unwrap();
-            let mut line = String::new();
-            BufReader::new(&c).read_line(&mut line).unwrap();
-            subs_tx.send(serde_json::from_str(&line).unwrap()).unwrap();
+            let mut text = String::new();
+            BufReader::new(&c).read_line(&mut text).unwrap();
+            subs_tx.send(serde_json::from_str(&text).unwrap()).unwrap();
             writeln!(&c, r#"{{"id":"drover","result":{{"type":"subscription_started"}}}}"#).unwrap();
             c
         };
@@ -133,7 +133,7 @@ fn the_service_keeps_lane_state_from_herdrs_events_and_polls_when_the_stream_dro
     assert_eq!((agents.len(), agents[0]["agent_status"].as_str()), (1, Some("done")));
     assert_eq!(host.lists.load(SeqCst), n, "no herdr agent list while the stream is up");
     let there = drover::hosts::On::new(host, Some("mini2"));
-    assert!(drover::herdr::agents(&there).unwrap().is_empty());
+    assert_eq!(drover::herdr::agents(&there).unwrap(), [] as [serde_json::Value; 0]);
 
     assert!(std::process::Command::new("kill")
         .args(["-9", &pid])
@@ -143,7 +143,7 @@ fn the_service_keeps_lane_state_from_herdrs_events_and_polls_when_the_stream_dro
     let took = until("gone", 2.0, || states().last().map(String::as_str) == Some("gone"));
     assert!(took < Duration::from_secs(2), "{took:?}");
     assert_eq!(states(), ["idle", "working", "done", "gone"]);
-    assert!(drover::herdr::agents(host).unwrap().is_empty());
+    assert_eq!(drover::herdr::agents(host).unwrap(), [] as [serde_json::Value; 0]);
     let s = subs.recv_timeout(Duration::from_secs(5)).unwrap();
     assert!(
         !s.to_string().contains("w1:p1"),

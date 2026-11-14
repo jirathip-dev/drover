@@ -7,7 +7,6 @@ mod sched;
 mod seeds;
 
 #[path = "../common/mod.rs"]
-#[allow(unused_imports)]
 mod common;
 
 use invariants::Sabotage;
@@ -389,5 +388,5 @@ fn a_metric_over_20_percent_worse_is_a_warning() {
         "{t}"
     );
     let back: serde_json::Value = serde_json::from_str(&metrics::to_json(1, &s).to_string()).unwrap();
-    assert!(metrics::regressions(&s, &back).is_empty());
+    assert_eq!(metrics::regressions(&s, &back), [] as [std::string::String; 0]);
 }

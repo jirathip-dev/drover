@@ -29,7 +29,7 @@ fn green() -> serde_json::Value {
            {"__typename": "StatusContext", "context": "ci/legacy", "state": "SUCCESS"}])
 }
 
-fn pr(base: &str, checks: serde_json::Value) -> Fake {
+fn pr(base: &str, checks: &serde_json::Value) -> Fake {
     let pr =
         json!({"number": 34, "state": "OPEN", "baseRefName": base, "headRefOid": HEAD, "statusCheckRollup": checks});
     Fake::default()
@@ -52,19 +52,19 @@ fn assert_refused(c: &drover::Ctx, r: &Fake, code: &str) {
 #[test]
 fn refuses_without_verdict() {
     let (_d, c) = setup("no-verdict", CONFIG, &[]);
-    assert_refused(&c, &pr("staging", green()), "NO_VERDICT");
+    assert_refused(&c, &pr("staging", &green()), "NO_VERDICT");
 }
 
 #[test]
 fn refuses_verdict_for_older_sha() {
     let (_d, c) = setup("old-sha", CONFIG, &[("PASS", OLD)]);
-    assert_refused(&c, &pr("staging", green()), "STALE_VERDICT");
+    assert_refused(&c, &pr("staging", &green()), "STALE_VERDICT");
 }
 
 #[test]
 fn refuses_fail_verdict() {
     let (_d, c) = setup("fail", CONFIG, &[("PASS", OLD), ("FAIL", HEAD)]);
-    assert_refused(&c, &pr("staging", green()), "VERDICT_FAIL");
+    assert_refused(&c, &pr("staging", &green()), "VERDICT_FAIL");
 }
 
 #[test]
@@ -72,10 +72,10 @@ fn refuses_when_ci_not_green() {
     let red = json!([{"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "FAILURE"}]);
     let pending = json!([{"__typename": "CheckRun", "name": "test", "status": "IN_PROGRESS", "conclusion": ""}]);
     let (_d, c) = setup("ci-red", CONFIG, &[("PASS", HEAD)]);
-    assert_refused(&c, &pr("staging", red), "CI_NOT_GREEN");
+    assert_refused(&c, &pr("staging", &red), "CI_NOT_GREEN");
     for checks in [pending, json!([])] {
         let (_d, c) = setup("ci-pending", CONFIG, &[("PASS", HEAD)]);
-        let r = pr("staging", checks);
+        let r = pr("staging", &checks);
         let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
         assert!(exit == 3 && out.contains("REFUSED CI_NOT_GREEN"), "{out}");
         assert!(!r.called("gh pr merge"));
@@ -99,7 +99,7 @@ fn required_checks_gate_only_the_latest_named_run() {
         run("quality-narrowed", "SUCCESS", "T1")
     ]);
     let (_d, c) = setup("req-red", &cfg, &[("PASS", HEAD)]);
-    let (exit, out) = run_cli(&c, &pr("staging", red));
+    let (exit, out) = run_cli(&c, &pr("staging", &red));
     assert_eq!(exit, 3, "{out}");
     assert!(
         out.contains("REFUSED CI_NOT_GREEN: required check `quality` is failed"),
@@ -111,7 +111,7 @@ fn required_checks_gate_only_the_latest_named_run() {
         run("quality-narrowed", "FAILURE", "T2")
     ]);
     let (_d, c) = setup("req-green", &cfg, &[("PASS", HEAD)]);
-    let (exit, out) = run_cli(&c, &pr("staging", green));
+    let (exit, out) = run_cli(&c, &pr("staging", &green));
     assert_eq!(exit, 0, "{out}");
 }
 
@@ -127,7 +127,7 @@ fn refuses_when_round_limit_exceeded() {
     );
     let v = [("FAIL", OLD), ("FAIL", a), ("FAIL", b), ("PASS", HEAD)];
     let (_d, c) = setup("rounds", CONFIG, &v);
-    assert_refused(&c, &pr("staging", green()), "ROUND_LIMIT");
+    assert_refused(&c, &pr("staging", &green()), "ROUND_LIMIT");
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
     assert_eq!(st.state, "needs-human");
 }
@@ -149,7 +149,7 @@ fn update_round_does_not_count_toward_review_rounds() {
     append(&c.state, &Event::new(32, "sendmeter", Some(12), "verdict", pass)).unwrap();
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
     assert_eq!((st.state.as_str(), st.rounds, st.updates), ("ready", 3, 1));
-    let r = pr("staging", green());
+    let r = pr("staging", &green());
     let (exit, out) = run_cli(&c, &r);
     assert_eq!(exit, 0, "{out}");
     assert!(r.called("gh pr merge 34"), "{out}");
@@ -178,7 +178,7 @@ fn reverdict_on_same_sha_is_one_round() {
     let (_d, c) = setup("same-sha", CONFIG, &v);
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
     assert_eq!((st.state.as_str(), st.rounds), ("ready", 2));
-    let (exit, out) = run(&c, &pr("staging", green()), &["merge", "sendmeter", "12"]);
+    let (exit, out) = run(&c, &pr("staging", &green()), &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
 }
 
@@ -186,13 +186,13 @@ fn reverdict_on_same_sha_is_one_round() {
 fn refuses_main_as_integration_target() {
     let cfg = CONFIG.replace("integration = \"staging\"", "integration = \"main\"");
     let (_d, c) = setup("main-cfg", &cfg, &[("PASS", HEAD)]);
-    assert_refused(&c, &pr("main", green()), "MAIN_TARGET");
+    assert_refused(&c, &pr("main", &green()), "MAIN_TARGET");
 }
 
 #[test]
 fn refuses_pr_based_on_main() {
     let (_d, c) = setup("main-base", CONFIG, &[("PASS", HEAD)]);
-    assert_refused(&c, &pr("main", green()), "MAIN_TARGET");
+    assert_refused(&c, &pr("main", &green()), "MAIN_TARGET");
 }
 
 #[test]
@@ -204,7 +204,7 @@ fn refuses_without_open_pr() {
 #[test]
 fn merges_with_exact_head_pass_and_green_ci() {
     let (_d, c) = setup("happy", CONFIG, &[("FAIL", OLD), ("PASS", HEAD)]);
-    let r = pr("staging", green());
+    let r = pr("staging", &green());
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     assert!(r.called(&format!(
@@ -234,7 +234,7 @@ fn the_closing_comment_carries_the_why_owner_line() {
         let d = json!({"sha": HEAD, "round": 1, "owner": owner});
         append(&c.state, &Event::new(ts, "sendmeter", Some(12), "why", d)).unwrap();
     }
-    let r = pr("staging", green());
+    let r = pr("staging", &green());
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     let calls = r.calls.borrow();
@@ -246,7 +246,7 @@ fn the_closing_comment_carries_the_why_owner_line() {
 #[test]
 fn merge_twice_says_already_merged_and_logs_nothing() {
     let (_d, c) = setup("twice", CONFIG, &[("PASS", HEAD)]);
-    let (exit, out) = run(&c, &pr("staging", green()), &["merge", "sendmeter", "12"]);
+    let (exit, out) = run(&c, &pr("staging", &green()), &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     let before = read(&c.state).unwrap().len();
     let r = Fake::default();
@@ -364,7 +364,7 @@ fn merge_tears_down_clean_lanes_and_keeps_unpushed_ones() {
         append(&c.state, &Event::new(ts, "sendmeter", Some(12), "spawn", d)).unwrap();
         sh.lane(&agent, "idle", w);
     }
-    let r = pr("staging", green())
+    let r = pr("staging", &green())
         .reply(&format!("git -C {rev} rev-list"), "1\n")
         .reply(&format!("git -C {imp} rev-list"), "0\n")
         .reply("git -C", "");
@@ -426,7 +426,7 @@ fn over(c: &drover::Ctx, r: &Fake) -> (i32, String) {
 #[test]
 fn owner_override_merges_past_round_limit_and_says_so() {
     let (_d, c) = setup("override", CONFIG, &OVER);
-    let r = pr("staging", green());
+    let r = pr("staging", &green());
     let (exit, out) = over(&c, &r);
     assert_eq!(exit, 0, "{out}");
     assert!(r.called("gh pr merge 34"));
@@ -440,7 +440,7 @@ fn owner_override_merges_past_round_limit_and_says_so() {
 fn owner_override_still_refuses_red_ci_and_a_stale_verdict() {
     let red = json!([{"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "FAILURE"}]);
     let (_d, c) = setup("override-red", CONFIG, &OVER);
-    let r = pr("staging", red);
+    let r = pr("staging", &red);
     let (exit, out) = over(&c, &r);
     assert!(exit == 3 && out.contains("REFUSED CI_NOT_GREEN"), "{out}");
     assert!(!r.called("gh pr merge"));
@@ -452,7 +452,7 @@ fn owner_override_still_refuses_red_ci_and_a_stale_verdict() {
         ("PASS", "5555555555555555555555555555555555555555"),
     ];
     let (_d, c) = setup("override-stale", CONFIG, &stale);
-    let r = pr("staging", green());
+    let r = pr("staging", &green());
     let (exit, out) = over(&c, &r);
     assert!(exit == 3 && out.contains("REFUSED STALE_VERDICT"), "{out}");
     assert!(!r.called("gh pr merge"));
@@ -493,23 +493,23 @@ fn round_extended_allows_exactly_one_more_round() {
         "round 10 of 9+1 (owner extended)"
     );
     assert_eq!(limit, 10);
-    let (exit, out) = run_cli(&c, &pr("staging", green()));
+    let (exit, out) = run_cli(&c, &pr("staging", &green()));
     assert_eq!(exit, 0, "round 10 of 9+1 merges: {out}");
 
     let (_d, c) = extended("extend-11", 11, 9);
-    let (exit, out) = run_cli(&c, &pr("staging", green()));
+    let (exit, out) = run_cli(&c, &pr("staging", &green()));
     assert!(
         out.contains("review rounds ran out (11 of 9+1 (owner extended))"),
         "{out}"
     );
     assert_eq!(exit, 3, "{out}");
-    assert_refused(&c, &pr("staging", green()), "ROUND_LIMIT");
+    assert_refused(&c, &pr("staging", &green()), "ROUND_LIMIT");
 }
 
 #[test]
 fn an_extend_after_an_overrun_round_grants_the_next_one() {
     let (_d, c) = extended("extend-overrun", 11, 10);
-    let (exit, out) = run_cli(&c, &pr("staging", green()));
+    let (exit, out) = run_cli(&c, &pr("staging", &green()));
     assert_eq!(exit, 0, "round 11 of 9+2: {out}");
 }
 
@@ -527,7 +527,7 @@ fn st(c: &drover::Ctx) -> drover::events::IssueState {
 #[test]
 fn extend_no_spawn_records_one_round_and_the_next_pass_merges_without_override() {
     let (_d, c) = needs_human("cli-extend");
-    let r = pr("staging", green());
+    let r = pr("staging", &green());
     let (exit, out) = run(&c, &r, &["extend", "sendmeter", "12", "--no-spawn", "--by", "owner"]);
     assert_eq!(exit, 0, "{out}");
     assert_eq!((st(&c).extra, st(&c).state.as_str()), (1, "fix(3)"));
@@ -538,8 +538,8 @@ fn extend_no_spawn_records_one_round_and_the_next_pass_merges_without_override()
         "--no-spawn spawns nothing"
     );
     assert!(r.calls.borrow().is_empty(), "no herdr/gh call: {:?}", r.calls.borrow());
-    let ext = all.iter().rfind(|e| e.kind == "round-extended").unwrap();
-    assert_eq!(ext.str("by"), Some("owner"));
+    let extended = all.iter().rfind(|e| e.kind == "round-extended").unwrap();
+    assert_eq!(extended.str("by"), Some("owner"));
 
     for args in [
         &["extend", "sendmeter", "12", "--no-spawn"][..],
@@ -622,7 +622,7 @@ fn merge_message_copies_the_human_summary_and_the_facts_line() {
         {"path": "src/b.rs", "additions": 1, "deletions": 4},
         {"path": "tests/x.rs", "additions": 90, "deletions": 0}],
         "body": "Closes #12\n\n## For humans\n\nThe board's Host tab now shows memory.\nNothing else changes.\n\n## Evidence\nx"});
-    let r = pr("staging", green()).once(
+    let r = pr("staging", &green()).once(
         "gh pr view 34 -R jirathip-dev/sendmeter --json number",
         0,
         &view.to_string(),
@@ -641,7 +641,7 @@ fn merge_without_a_human_summary_gives_the_facts_line_only() {
     let (_d, c) = setup("msg-none", CONFIG, &[("PASS", HEAD)]);
     let view = json!({"number": 34, "title": "[#12] Trim the cap", "body": "Closes #12",
         "files": [{"path": "src/a.rs", "additions": 1, "deletions": 9}]});
-    let r = pr("staging", green()).once(
+    let r = pr("staging", &green()).once(
         "gh pr view 34 -R jirathip-dev/sendmeter --json number",
         0,
         &view.to_string(),
@@ -673,7 +673,7 @@ fn premerge_setup(name: &str, cap: bool, extra: &str) -> (std::path::PathBuf, dr
 }
 
 fn premerge_fake(local: &str) -> Fake {
-    pr("staging", green())
+    pr("staging", &green())
         .reply(&format!("git -C {local} rev-parse origin/staging"), "base1")
         .reply("git -C ", "")
         .reply("gh api repos/jirathip-dev/sendmeter/branches/issue-12", HEAD)

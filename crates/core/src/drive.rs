@@ -1421,7 +1421,6 @@ fn pass(
     Ok(go)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn no_proof(
     ctx: &Ctx,
     cfg: &Config,

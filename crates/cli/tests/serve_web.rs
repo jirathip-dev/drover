@@ -444,7 +444,7 @@ fn lanes_group_by_fleet_with_others() {
     let c = ctx(&d, &two);
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let ev = |fleet: &str, issue: Option<u64>, d: serde_json::Value| {
-        append(&c.state, &Event::new(900_000, fleet, issue, "spawn", d)).unwrap()
+        append(&c.state, &Event::new(900_000, fleet, issue, "spawn", d)).unwrap();
     };
     ev(
         "sendmeter",
@@ -558,7 +558,7 @@ fn one_lane_per_agent_name() {
         {"name": "sendmeter-impl-3061", "agent_status": "idle", "pane_id": "w9:p1", "cwd": "/x", "host": "mini"},
     ]);
     let st = drover::events::fold(&events);
-    let (fake, ws) = (Fake::default(), Default::default());
+    let (fake, ws) = (Fake::default(), std::collections::BTreeMap::default());
     let lanes = drover::lanes::join(&cfg, &fake, &c.worktrees, &events, &st, agents.as_array().unwrap(), &ws);
     let got: Vec<_> = lanes
         .iter()
@@ -727,7 +727,7 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     let two = format!("{}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\npaused = true\n", config());
     let c = ctx(&d, &two);
     let ev = |fleet: &str, issue: u64, ts: u64, kind: &str, d: serde_json::Value| {
-        append(&c.state, &Event::new(ts, fleet, Some(issue), kind, d)).unwrap()
+        append(&c.state, &Event::new(ts, fleet, Some(issue), kind, d)).unwrap();
     };
     append(
         &c.state,

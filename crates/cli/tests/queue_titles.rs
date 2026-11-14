@@ -107,13 +107,13 @@ fn sw_never_serves_the_cache_over_a_non_200() {
         return;
     }
     let sw = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sw.js")).unwrap();
-    let harness = r#"
+    let harness = r"
 const on = {}, store = new Map(), pre = [];
 globalThis.self = { addEventListener: (k, f) => on[k] = f, skipWaiting: () => {} };
 globalThis.location = { origin: 'http://h' };
 globalThis.caches = { open: async () => ({ put: async (k, v) => store.set(k, v), addAll: async a => pre.push(...a) }), match: async k => store.get(k) };
-"#;
-    let run = r#"
+";
+    let run = r"
 const go = async (net) => {
   globalThis.fetch = net;
   let p; on.fetch({ request: { url: 'http://h/', method: 'GET' }, respondWith: x => p = x, waitUntil: () => {} });
@@ -128,7 +128,7 @@ const page = (status, body) => async () => ({ ok: status === 200, status, body, 
   out.push(await go(page(200, 'v1')), store.get('/').body, await go(page(502)), store.get('/').body, await go(page(200, 'v2')), store.get('/').body, pre.length);
   console.log(JSON.stringify(out));
 })();
-"#;
+";
     let d = tmpdir("sw");
     std::fs::write(d.join("t.js"), format!("{harness}\n{sw}\n{run}")).unwrap();
     let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
@@ -151,14 +151,14 @@ fn sw_answers_a_navigation_to_a_json_read_with_the_page() {
         return;
     }
     let sw = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/sw.js")).unwrap();
-    let harness = r#"
+    let harness = r"
 const on = {}, store = new Map(), asked = [];
 globalThis.self = { addEventListener: (k, f) => on[k] = f, skipWaiting: () => {} };
 globalThis.location = { origin: 'http://h' };
 globalThis.caches = { open: async () => ({ put: async (k, v) => store.set(k, v), addAll: async () => {} }), match: async k => store.get(k) };
 globalThis.fetch = async u => (asked.push(String(u)), { ok: true, status: 200, body: 'net:' + u, clone() { return this; } });
-"#;
-    let run = r#"
+";
+    let run = r"
 const go = async (path, mode) => {
   let p = null; on.fetch({ request: { url: 'http://h' + path, method: 'GET', mode }, respondWith: x => p = x, waitUntil: () => {} });
   return p ? (await p).body : 'PASS';
@@ -172,7 +172,7 @@ const go = async (path, mode) => {
   for (const u of urls.slice(0, 4)) out.push(await go(u, 'cors'));
   console.log(JSON.stringify(out));
 })();
-"#;
+";
     let d = tmpdir("sw-nav");
     std::fs::write(d.join("t.js"), format!("{harness}\n{sw}\n{run}")).unwrap();
     let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();

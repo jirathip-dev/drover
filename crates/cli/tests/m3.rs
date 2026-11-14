@@ -10,7 +10,7 @@ fn ev(c: &drover::Ctx, ts: u64, issue: u64, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", Some(issue), kind, d)).unwrap();
 }
 
-fn pr_json(state: &str, checks: serde_json::Value) -> String {
+fn pr_json(state: &str, checks: &serde_json::Value) -> String {
     json!({"number": 34, "state": state, "baseRefName": "staging", "headRefOid": HEAD, "mergeable": "MERGEABLE",
         "statusCheckRollup": checks})
     .to_string()
@@ -78,7 +78,7 @@ fn spec_is_refetched_only_when_updated_at_moves() {
 fn pr_makes_one_gh_call_per_60s() {
     let d = tmpdir("pr-cache");
     let mut c = ctx(&d, CONFIG);
-    let r = Fake::default().reply("gh pr view issue-12", &pr_json("OPEN", run_ci("COMPLETED", "SUCCESS")));
+    let r = Fake::default().reply("gh pr view issue-12", &pr_json("OPEN", &run_ci("COMPLETED", "SUCCESS")));
     for _ in 0..3 {
         let (code, out) = run(&c, &r, &["pr", "sendmeter", "12"]);
         assert_eq!(code, 0, "{out}");
@@ -117,10 +117,10 @@ fn wait(r: &Fake, until: &str, timeout: &str) -> (i32, String) {
 
 #[test]
 fn wait_exit_codes() {
-    let pending = pr_json("OPEN", run_ci("IN_PROGRESS", ""));
+    let pending = pr_json("OPEN", &run_ci("IN_PROGRESS", ""));
     let r = Fake::default()
         .once("gh pr view issue-12", 0, &pending)
-        .reply("gh pr view issue-12", &pr_json("OPEN", run_ci("COMPLETED", "SUCCESS")));
+        .reply("gh pr view issue-12", &pr_json("OPEN", &run_ci("COMPLETED", "SUCCESS")));
     let (code, out) = wait(&r, "ci-green", "3600");
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("ci green"), "{out}");
@@ -130,7 +130,7 @@ fn wait_exit_codes() {
         calls.len() == 4 && calls[3].starts_with("gh api graphql --paginate"),
         "{calls:?}"
     );
-    let red = pr_json("OPEN", run_ci("COMPLETED", "FAILURE"));
+    let red = pr_json("OPEN", &run_ci("COMPLETED", "FAILURE"));
     assert_eq!(
         wait(&Fake::default().reply("gh pr view issue-12", &red), "ci-green", "3600").0,
         1
@@ -163,7 +163,7 @@ fn wait_exit_codes() {
     assert!(r.count("gh api graphql") <= 7);
     assert_eq!(
         wait(
-            &Fake::default().reply("gh pr view issue-12", &pr_json("MERGED", json!([]))),
+            &Fake::default().reply("gh pr view issue-12", &pr_json("MERGED", &json!([]))),
             "merged",
             "60"
         )
@@ -172,7 +172,7 @@ fn wait_exit_codes() {
     );
     assert_eq!(
         wait(
-            &Fake::default().reply("gh pr view issue-12", &pr_json("CLOSED", json!([]))),
+            &Fake::default().reply("gh pr view issue-12", &pr_json("CLOSED", &json!([]))),
             "merged",
             "60"
         )
@@ -462,7 +462,7 @@ fn pr_judges_and_counts_the_latest_run_of_each_check() {
             ev(new.0, new.1, "2026-11-12T20:01:00Z")
         ]);
         assert_eq!(drover::gate::ci_green(&rollup, &[]).is_ok(), want == "green");
-        let r = Fake::default().reply("gh pr view issue-12", &pr_json("OPEN", rollup));
+        let r = Fake::default().reply("gh pr view issue-12", &pr_json("OPEN", &rollup));
         let (code, out) = run(&c, &r, &["pr", "sendmeter", "12"]);
         assert_eq!(code, 0, "{out}");
         assert_eq!(

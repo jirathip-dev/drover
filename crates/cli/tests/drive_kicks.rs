@@ -16,7 +16,7 @@ fn fleet_with(name: &str, max: usize, extra: &str, issues: u64, flags: &[&str]) 
     let c = ctx(&tmpdir(name), &cfg);
     let mut add = vec!["queue".to_string(), "sendmeter".into(), "add".into()];
     add.extend((1..=issues).map(|n| n.to_string()));
-    add.extend(flags.iter().map(|f| f.to_string()));
+    add.extend(flags.iter().map(std::string::ToString::to_string));
     let add: Vec<&str> = add.iter().map(String::as_str).collect();
     assert_eq!(run(&c, &Fake::default(), &add).0, 0);
     let sh = FakeShed::new();
@@ -516,7 +516,7 @@ fn a_kick_running_past_its_pass_is_pending_then_updated() {
         let ev = read(&c.state).unwrap();
         let e = ev
             .iter()
-            .rfind(|e| e.kind == "drive-pass" && e.data.get("kick").is_none_or(|k| k.is_null()));
+            .rfind(|e| e.kind == "drive-pass" && e.data.get("kick").is_none_or(serde_json::Value::is_null));
         serde_json::Value::Object(e.unwrap().data.clone())
     };
     let d = last();

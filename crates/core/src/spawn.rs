@@ -918,7 +918,6 @@ pub fn dirty(r: &dyn Runner, wt: &Path) -> Option<String> {
 }
 
 /// `spawn`'s flags.
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Default, clap::Args)]
 pub struct Opts {
     /// Print the plan; change nothing

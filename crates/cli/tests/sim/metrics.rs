@@ -21,7 +21,7 @@ pub struct Metrics {
     pub ci_wait: u64,
     /// Process-seconds in 1 s polls on drive.lock or a kick.
     pub lock_wait: u64,
-    /// Drive actions refused SERIAL_BUSY, by a busy host (HOST_BUSY, MEM_LOW, DISK_LOW), by a cap (CAP, ALL_CAPPED, SPAWN_PENDING: the parallel-spawn slots).
+    /// Drive actions refused `SERIAL_BUSY`, by a busy host (`HOST_BUSY`, `MEM_LOW`, `DISK_LOW`), by a cap (CAP, `ALL_CAPPED`, `SPAWN_PENDING`: the parallel-spawn slots).
     pub serial: u64,
     pub host_busy: u64,
     pub caps: u64,
@@ -84,7 +84,9 @@ pub fn of(w: &World) -> Metrics {
 
 fn quantile(v: &mut [u64], q: f64) -> u64 {
     v.sort_unstable();
-    let k = (q * v.len() as f64).ceil() as usize;
+    let k = (0..=v.len())
+        .find(|&k| k as f64 >= q * v.len() as f64)
+        .unwrap_or(v.len());
     v.get(k.saturating_sub(1)).copied().unwrap_or(0)
 }
 

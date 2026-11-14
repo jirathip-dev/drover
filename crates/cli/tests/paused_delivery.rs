@@ -31,9 +31,10 @@ impl Runner for Air<'_> {
         })
     }
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
-        match args.join(" ").contains("air -- 'shed' 'connect'") {
-            true => self.0.run_in(prog, args, input),
-            false => self.run(prog, args),
+        if args.join(" ").contains("air -- 'shed' 'connect'") {
+            self.0.run_in(prog, args, input)
+        } else {
+            self.run(prog, args)
         }
     }
     fn sleep(&self, secs: u64) {

@@ -19,7 +19,7 @@ impl Runner for Git<'_> {
         self.0.run(prog, args)
     }
     fn sleep(&self, secs: u64) {
-        self.0.sleep(secs)
+        self.0.sleep(secs);
     }
 }
 
@@ -43,8 +43,8 @@ struct Repo {
     internal: PathBuf,
 }
 
-fn repo(name: &str) -> Repo {
-    let d = tmpdir(name);
+fn repo(label: &str) -> Repo {
+    let d = tmpdir(label);
     let (origin, local, nvme, internal) = (
         d.join("origin.git"),
         d.join("local"),
@@ -158,10 +158,10 @@ fn eject_saves_and_restarts_a_live_lane_on_the_next_root_then_reports_safe() {
     assert_eq!((sp.len(), last.str("root")), (2, Some(&*r.internal.to_string_lossy())));
     assert_eq!(last.str("worktree"), Some(&*new.to_string_lossy()));
     assert_eq!(std::fs::read_to_string(new.join("wip.txt")).unwrap(), "half done\n");
-    let list = git(&r.local, &["worktree", "list"]);
+    let wt_list = git(&r.local, &["worktree", "list"]);
     assert!(
-        list.contains(&*new.to_string_lossy()) && !list.contains(&*old.to_string_lossy()),
-        "{list}"
+        wt_list.contains(&*new.to_string_lossy()) && !wt_list.contains(&*old.to_string_lossy()),
+        "{wt_list}"
     );
     let (_, dry) = run(&r.c, &f, &["spawn", "sendmeter", "12", "impl", "--dry-run", "--json"]);
     assert!(dry.contains(&*new.to_string_lossy()), "{dry}");
@@ -310,7 +310,15 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     let a = drover::herdr::agents(&r.sh.on(&Git(&f))).unwrap();
     assert_eq!(a[0]["cwd"], json!(wt), "{a:?}");
     let st = drover::events::states(&r.c.state).unwrap();
-    let ls = drover::lanes::join(&cfg, &Git(&f), &r.c.worktrees, &ev, &st, &a, &Default::default());
+    let ls = drover::lanes::join(
+        &cfg,
+        &Git(&f),
+        &r.c.worktrees,
+        &ev,
+        &st,
+        &a,
+        &std::collections::BTreeMap::default(),
+    );
     let l = ls.iter().find(|l| l.name == AGENT).unwrap();
     let u = l.unsaved(&Git(&f));
     assert_eq!(

@@ -127,7 +127,7 @@ fn the_hook_kicks_its_lanes_issue_and_is_inert_outside_lanes() {
         let argv = ["drover", "hook", "--role", "impl"].map(String::from).to_vec();
         let mut out = vec![];
         assert_eq!(drover::main_with(argv, &c, r, &mut out, &mut stop.as_bytes()), 0);
-        assert!(out.is_empty());
+        assert_eq!(out, [] as [u8; 0]);
     };
     std::env::remove_var("DROVER_OUTBOX");
     std::env::remove_var("DROVER_LANE");
@@ -161,7 +161,7 @@ fn a_detached_kick_runs_in_its_own_process_group() {
         String::from_utf8_lossy(&o.stdout).trim().to_string()
     };
     let args = ["-c".to_string(), "ps -o pgid= -p $$".into()];
-    let pid = drover::runner::Real.detach("sh", &args, &log).unwrap();
+    let leader = drover::runner::Real.detach("sh", &args, &log).unwrap();
     let mut theirs = String::new();
     for _ in 0..100 {
         theirs = std::fs::read_to_string(&log).unwrap_or_default().trim().to_string();
@@ -170,6 +170,6 @@ fn a_detached_kick_runs_in_its_own_process_group() {
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    assert_eq!(theirs, pid.to_string(), "the kick leads its own group");
+    assert_eq!(theirs, leader.to_string(), "the kick leads its own group");
     assert_ne!(theirs, pgid(std::process::id()), "not its parent's group");
 }

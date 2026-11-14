@@ -255,7 +255,7 @@ impl drover::runner::Runner for Late {
             self.starter.lock().unwrap().get_or_insert(std::thread::current().id());
         }
         if is("agent", "list") && *self.clock.lock().unwrap() >= self.after {
-            out.stdout = self.list.clone();
+            out.stdout.clone_from(&self.list);
         }
         Ok(out)
     }

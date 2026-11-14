@@ -131,7 +131,7 @@ fn every_control_passes_the_audit_at_390px() {
             );
         }
         assert!(
-            v[0] <= 390.0 && v[1] == 390.0,
+            v[0] <= 390.0 && (v[1] - 390.0).abs() < f64::EPSILON,
             "{name}: scrollWidth {} at {}",
             v[0],
             v[1]

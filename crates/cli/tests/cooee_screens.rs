@@ -34,7 +34,7 @@ fn recorded(name: &str) -> (drover::Ctx, OnShed) {
         assert_eq!(run(&c, &Fake::default(), args).0, 0);
     }
     let ev = |ts: u64, n: Option<u64>, kind: &str, d: Value| {
-        append(&c.state, &Event::new(ts, "sendmeter", n, kind, d)).unwrap()
+        append(&c.state, &Event::new(ts, "sendmeter", n, kind, d)).unwrap();
     };
     let spawn = |ts, n, role: &str, agent: &str| {
         ev(
@@ -42,7 +42,7 @@ fn recorded(name: &str) -> (drover::Ctx, OnShed) {
             Some(n),
             "spawn",
             json!({"role": role, "agent": agent, "harness": "claude"}),
-        )
+        );
     };
     spawn(T - 9_000, 9, "impl", "sendmeter-impl-9");
     ev(T - 600, Some(9), "merged", json!({"pr": 41, "into": "staging"}));
@@ -124,7 +124,6 @@ fn vocabulary() -> BTreeMap<String, BTreeSet<String>> {
 }
 
 fn like(v: &Value, fixture: &str, exact: bool) {
-    let vocab = vocabulary();
     fn keys(v: &Value, parent: &str, vocab: &BTreeMap<String, BTreeSet<String>>) {
         match v {
             Value::Object(m) => {
@@ -152,6 +151,7 @@ fn like(v: &Value, fixture: &str, exact: bool) {
             _ => {}
         }
     }
+    let vocab = vocabulary();
     keys(v, "", &vocab);
     let (mut got, mut want) = (BTreeSet::new(), BTreeSet::new());
     skeleton(v, "", &mut got);
@@ -428,7 +428,9 @@ fn apply(screen: &mut Value, ops: &[Value]) {
             Value::Object(m) => m.values_mut().for_each(|x| drop_id(x, id)),
             Value::Array(a) => {
                 a.retain(|x| x.get("id").and_then(Value::as_str) != Some(id));
-                a.iter_mut().for_each(|x| drop_id(x, id));
+                for x in a.iter_mut() {
+                    drop_id(x, id);
+                }
             }
             _ => {}
         }
@@ -576,21 +578,21 @@ fn the_workflow_screen_is_two_diagram_blocks_with_live_counts_and_limit_nodes() 
     let (status, v) = req(&s, T, "GET", "/screens/workflow", "", "");
     assert_eq!(status, 200, "{v}");
     assert_eq!((&v["type"], &v["id"]), (&json!("screen"), &json!("workflow")));
-    let states = find(&v, "states");
-    assert_eq!(states["type"], "diagram");
+    let flow_states = find(&v, "states");
+    assert_eq!(flow_states["type"], "diagram");
     assert!(
-        states["source"].as_str().unwrap().starts_with("stateDiagram-v2\n"),
-        "{states}"
+        flow_states["source"].as_str().unwrap().starts_with("stateDiagram-v2\n"),
+        "{flow_states}"
     );
     assert!(
-        states["source"]
+        flow_states["source"]
             .as_str()
             .unwrap()
             .contains("state \"fix(n) · 1\" as fix"),
-        "{states}"
+        "{flow_states}"
     );
     for (state, n) in [("merged", 1), ("fix(n)", 1), ("needs-human", 1)] {
-        assert_eq!(states["counts"][state], n, "{state}: {states}");
+        assert_eq!(flow_states["counts"][state], n, "{state}: {flow_states}");
     }
     let pass = find(&v, "pass");
     assert_eq!(pass["type"], "diagram");
