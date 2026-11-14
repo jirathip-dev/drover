@@ -2301,6 +2301,9 @@ impl<'a> Server<'a> {
             t.error = Some("no fleet.toml".into());
             return t;
         };
+        if paired {
+            t.shed = self.shed_rows(ctx, &cfg, &events);
+        }
         let Some(all) = self.lanes(ctx.now, &cfg, &events, &st) else {
             t.failed = true;
             return t;
