@@ -1,0 +1,9 @@
+Decided: a saved lane fold (newest event per lane kind and lane fields) and a saved ask fold (each ask's ending), both updated in the append's transaction
+Because: "Saved lane fold and ask fold, updated on append, kept exact for lanes of merged issues"
+Decided: the working set loads the lane fold's events instead of every issue's lane history; lane readers go through events::lanes and last_spawn
+Because: "The ~20 lane readers (clean, reclaim, budget, orphans, stop, kill, …) read those folds, not the lane history."
+Decided: drover asks and status --json read only the saved folds, never the working set
+Because: "peak RSS under 100 MB on a copy of the mini's db, and stay flat when the log doubles"
+Rejected: a typed per-lane struct — readers use any spawn field, so the fold keeps whole events keyed by agent, host, machine, pane, worktree and key
+Check: tests/working_set.rs compares both folds with one pass over the whole log; on the mini db copy asks output matches staging
+Owner: status and asks now use about 10–20 MB instead of about 150 MB, and stay the same when the log doubles
