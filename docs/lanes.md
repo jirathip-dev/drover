@@ -193,8 +193,8 @@ takes one of the host's slots first and frees it when the command exits or its h
 `[hosts.<n>] heavy_max` (default 3) is the slots every lane on the host shares, whatever its fleet;
 `heavy_kind_max = { swiftlint = 1 }` caps a kind lower. A full host keeps the command waiting in line, first come
 first served (a kind at its own cap lets later kinds by); after `heavy_wait_minutes` (default 30) it runs anyway
-and logs `heavy-timeout`. Each command in line is a file in `<state>/heavy/` naming its lane, kind, command,
-`since` and whether it runs. Other commands are unchanged.
+and logs `heavy-timeout`. Each command in line is a file in `<state>/heavy/` naming its `lane`, `kind`, `cmd`,
+`since` and `running`. Other commands are unchanged.
 
 Enforcement by harness: **claude** (PreToolUse) and **hermes** (`pre_tool_call`, the same
 `drover hook`) refuse the command mechanically. **dsh** has no pre-tool hook: its role prompt states
