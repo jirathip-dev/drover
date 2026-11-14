@@ -63,7 +63,7 @@ pub mod why;
 use anyhow::{bail, Context, Result};
 pub use cli::{main_with, usage_doc, HELP_AGENT_MAX, SERVE, SERVICE};
 use config::{home, set_in, set_value, write_atomic, Config};
-use events::{emit, read, Event};
+use events::{emit, working, Event};
 use runner::Runner;
 use serde_json::{json, Value};
 use std::io::Write;
@@ -218,7 +218,7 @@ pub fn now() -> u64 {
 /// Apply one queue change and log it (`drover queue`, and the page's ▲/▼ with `via`); the new order as shown.
 pub fn queue_change(ctx: &Ctx, cfg: &Config, fleet: &str, d: Value, via: Option<&str>) -> Result<String> {
     cfg.fleet(fleet)?;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let mut q = queue::replay(&events, fleet);
     queue::apply(&mut q, &d)?;
     // #667: `x#N` names another fleet unless `x` is `owner/repo`.
@@ -377,7 +377,7 @@ pub fn ask(
             "an ask is a non-empty question, at most 4 options, --recommend one of them",
         );
     }
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     if let Some(t) = thread {
         orchestrator::fleet_of(&events, t)?;
     }
@@ -443,7 +443,7 @@ pub fn orchestrator_answer(
     choice: &str,
     (t, basis): (&str, &str),
 ) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let by = format!("orchestrator-{t}");
     let ask = the_ask(&events, (fleet, id), &|e| in_thread(e, &by))?;
     let mine = ask.str("routed").is_some() || crate::design::is_ask(ask) || ask.data.get("extend").is_some();
@@ -493,7 +493,7 @@ pub fn orchestrator_extend(
     t: &str,
     (typed, basis): (Option<&str>, Option<&str>),
 ) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     if orchestrator::fleet_of(&events, t)? != fleet {
         return gate::refused("OWNER_ASK", format!("#{n} is not on {t}'s repo; ask the owner"));
     }
@@ -545,7 +545,7 @@ pub fn answer_typed(
     (line, on): (&str, Option<&str>),
     (choice, note): (Option<&str>, Option<&str>),
 ) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let is = |e: &&Event, k: &str| e.kind == k && e.fleet == fleet && e.str("id") == Some(id);
     let on = on.filter(|t| orchestrator::fleet_of(&events, t).ok() == Some(fleet));
     // Where the ask waits: its `needs-decision` in its thread, or (#541) its `ask-owner` row.
@@ -611,7 +611,7 @@ pub fn withdraw(
     by: &str,
     new: Option<&str>,
 ) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let is = |e: &&Event, q: &str| e.kind == "needs-decision" && e.fleet == fleet && e.str("id") == Some(q);
     let ask = the_ask(&events, (fleet, id), &|e| in_thread(e, by))?;
     if let Some(q) = new.filter(|q| !events.iter().any(|e| is(&e, q))) {
@@ -647,7 +647,7 @@ pub fn answer(
     choice: &str,
     (by, via): (&str, Option<&str>),
 ) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let ask = the_ask(&events, (fleet, id), &|e| in_thread(e, by))?;
     answer_with(ctx, cfg, r, out, ask, choice, (by, via), (None, None))
 }
@@ -687,7 +687,7 @@ pub(crate) fn answer_with(
     (by, via): (&str, Option<&str>),
     (basis, note): (Option<&str>, Option<&str>),
 ) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let (fleet, id) = (ask.fleet.as_str(), ask.str("id").unwrap_or_default());
     let last = (events.iter().rev()).find(|e| e.kind == "decision" && events::names(e, ask));
     let orchestrator = |b: &str| b.starts_with("orchestrator-");
@@ -820,7 +820,7 @@ fn answer_lane<'a>(events: &'a [Event], ask: &Event) -> Option<&'a Event> {
 
 /// #325: type the answer `msg` into its lane, Enter; log `answer-delivered`, or (`first`: it must land) `-undelivered`.
 pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, first: bool) -> Result<Option<String>> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let sp = answer_lane(&events, ask);
     // #424: no open lane, but the asking agent still runs in its lane's worktree: typed into that pane.
     let was = ask.str("agent").and_then(|a| events::last_spawn(&events, a));
@@ -864,7 +864,7 @@ pub fn undelivered<'a>(events: &'a [Event], fleet: &str) -> Vec<&'a Event> {
 
 /// `drover asks`: the open asks (`all`: closed ones too, with why), oldest first, with age.
 pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, all: bool) -> Result<()> {
-    let events = events::shared(&ctx.state)?; // #632: one ask index for every row
+    let events = events::working(&ctx.state)?; // #632: one ask index for every row
     let shown = |e: &&Event| fleet.is_none_or(|f| f == e.fleet) && (all || events::closed(&events, e).is_none());
     let open: Vec<&Event> = events
         .iter()

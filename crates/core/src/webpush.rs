@@ -2,7 +2,7 @@
 //! VAPID JWT (RFC 8292), sent by `curl` with the body on stdin. The VAPID key and the subscriptions
 //! are secrets: 0600 files, never logged, printed or served (only the public key and labels are).
 use crate::devices::{random, write0600};
-use crate::events::{finding, plain, read, Event};
+use crate::events::{finding, plain, working, Event};
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::Aes128Gcm;
 use anyhow::{anyhow, bail, Result};
@@ -224,7 +224,7 @@ pub fn send(log: &Path, sub: &str, ev: &Event, only: Option<&str>) -> Result<Str
     let thread = ev.str("thread").filter(|_| kinds.contains(&ev.kind.as_str()));
     let why = ev.str("reason").unwrap_or("?");
     let evs = if n.is_some() || thread.is_some() {
-        read(log)?
+        working(log)?
     } else {
         Arc::default()
     };

@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::read;
+use crate::events::working;
 use crate::lesson::ymd;
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
@@ -59,7 +59,7 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
         None => vec![],
     };
     touched.retain(|f, _| !crate::arch::any(&converted, f));
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let same = |e: &&crate::events::Event| cfg.fleet(&e.fleet).is_ok_and(|g| g.repo == f.repo);
     let updates = |sha: &String| {
         let merged = events
@@ -160,7 +160,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         writeln!(out, "filed {fleet}#{n}: {title}")?;
         n
     };
-    if crate::queue::replay(&read(&ctx.state)?, fleet)
+    if crate::queue::replay(&working(&ctx.state)?, fleet)
         .iter()
         .all(|i| i.issue != n)
     {

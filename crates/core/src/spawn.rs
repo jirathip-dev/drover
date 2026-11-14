@@ -1,7 +1,7 @@
 //! `drover spawn`, `adopt` and `profiles sync` (docs/lanes.md); per-harness parts live in `harness`.
 use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
-use crate::events::{emit, fold, last_spawn, plain, read, Event};
+use crate::events::{emit, fold, last_spawn, plain, working, Event};
 use crate::gate::refused;
 use crate::herdr;
 use crate::host;
@@ -323,10 +323,10 @@ pub fn lane_port(range: Option<&str>, key: &str, taken: &[u16]) -> u16 {
 
 pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Result<Plan> {
     let f = cfg.fleet(fleet)?;
-    let (r, resting) = access::fallback(cfg, &read(&ctx.state)?, f.role(role)?, ctx.now)?;
+    let (r, resting) = access::fallback(cfg, &working(&ctx.state)?, f.role(role)?, ctx.now)?;
     let r = &r;
     let (agent, branch, base, worktree, brief, head) = {
-        let ev = read(&ctx.state)?;
+        let ev = working(&ctx.state)?;
         let st = fold(&ev).remove(&(fleet.to_string(), issue));
         if st.as_ref().is_some_and(|s| s.state == "merged") {
             return refused(
@@ -375,10 +375,10 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
     };
     let kick = format!("Read {} and execute it fully.", brief.display());
     let lane = format!("{fleet}:{issue}:{role}");
-    let account = access::pick(ctx, cfg, &read(&ctx.state)?, r)?;
+    let account = access::pick(ctx, cfg, &working(&ctx.state)?, r)?;
     let mcp_file = worktree.join(".mcp.lane.json");
     // Ports of the logged lanes of open issues, this branch's own aside.
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let st = fold(&events);
     let open = st.values().filter(|s| !s.done()).flat_map(|s| s.lanes.values());
     let taken: Vec<u16> = open
@@ -1001,7 +1001,7 @@ pub fn spawn(
     }
     let mut p = plan(ctx, cfg, fleet, issue, role)?;
     // #157: from here every call and file of the lane is on its host; #236: the dry run shows it placed.
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let placed = crate::hosts::place(ctx, cfg, r, &ev, (fleet, issue, role), o.host.as_deref())?;
     if let Some(why) = crate::breaker::says(&ev, placed.as_ref().map_or("local", |pl| pl.name.as_str())) {
         return refused("RUNTIME_DOWN", why);
@@ -1029,7 +1029,7 @@ pub fn spawn(
     // one gets none, its host signs in through the main host's token proxy (#637).
     // #785: a signed-out account is skipped for the role's next one.
     if on.machine.is_none() && p.account.is_some() {
-        let fr = access::fallback(cfg, &read(&ctx.state)?, f.role(role)?, ctx.now)?.0;
+        let fr = access::fallback(cfg, &working(&ctx.state)?, f.role(role)?, ctx.now)?.0;
         access::signed(ctx, cfg, base, (fleet, &fr, o.dry_run), &mut p)?;
     }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
@@ -1055,7 +1055,7 @@ pub fn spawn(
         return refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
     }
     let acp_id = bt.as_ref().and_then(|b| b.0.acp.clone());
-    let n = round(&read(&ctx.state)?, fleet, issue, &p);
+    let n = round(&working(&ctx.state)?, fleet, issue, &p);
     let labels = labels(&p, acp_id.as_ref().map(|_| (f, n)));
     if let (Some(id), Some(pl)) = (&acp_id, placed.as_ref().filter(|pl| pl.machine.is_some())) {
         remote_acp(ctx, cfg, &on, &mut p, (pl, id), o.dry_run)?;
@@ -1090,7 +1090,7 @@ pub fn spawn(
     let event = |kind: &str, d: Value| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d));
 
     // Duplicate guard.
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let agents = host::agents(r).context("cannot list herdr agents for the duplicate guard")?;
     let live = host::live_in(&agents, &p.agent, &p.worktree);
     // An agent whose start timed out has no name; name it by its pane.
@@ -1218,7 +1218,7 @@ pub fn spawn(
         .rfind(|e| e.is("spawn", fleet, issue))
         .map_or(0, |e| e.seq);
     let probe = |i: &Event| -> Result<Option<Value>> {
-        let logged = read(&ctx.state)?
+        let logged = working(&ctx.state)?
             .iter()
             .any(|e| e.seq > i.seq && e.is("spawn", fleet, issue));
         let up = (step == "spawn").then(|| host::agents(r).ok()).flatten();
@@ -2062,7 +2062,7 @@ pub fn shaped<'a>(cfg: &'a Config, a: &Value) -> Option<(&'a str, u64, Option<St
 pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<bool> {
     // #393: the log is read after the (slow, remote) listing, so a lane spawned meanwhile is logged.
     let agents = crate::hosts::all_agents(cfg, seen)?;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let (st, mut any) = (fold(&events), false);
     for a in agents {
         let (Some(pane), m, name) = (a["pane_id"].as_str(), a["machine"].as_str(), a["name"].as_str()) else {

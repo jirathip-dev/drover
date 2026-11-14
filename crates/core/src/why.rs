@@ -1,7 +1,7 @@
 //! #677: why notes (docs/design/why-notes): a lane's `why.md`, checked at `turn done` and put on the pushed head under
 //! `refs/notes/why` by drover alone; read back by briefs, the merge comment, `/api/v1` and `drover why <file:line>`.
 use crate::config::{Config, Fleet};
-use crate::events::{emit, fold, last_spawn, read, Event};
+use crate::events::{emit, fold, last_spawn, working, Event};
 use crate::runner::{argv, json, ok, Runner};
 use crate::{gh, hosts::On, Ctx};
 use anyhow::{bail, Context, Result};
@@ -116,7 +116,7 @@ pub fn turn(
     role: &str,
 ) -> Result<Option<(&'static str, String)>> {
     let f = cfg.fleet(fleet)?;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let Some(s) = fold(&events).remove(&(fleet.to_string(), n)) else {
         return Ok(None);
     };
@@ -427,7 +427,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
         .lines()
         .find_map(|l| l.strip_prefix("summary "))
         .unwrap_or_default();
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let url = git(&["remote", "get-url", "origin"]).unwrap_or_default();
     let (fleet, f) = (cfg.fleet.iter().find(|(_, f)| url.contains(&f.repo)))
         .or_else(|| cfg.fleet.iter().next())

@@ -3,7 +3,7 @@
 //! repo re-reads that issue's PR into the cache `drover pr` reads and kicks drive for it. The fast step's slow
 //! catch-up read (`[limits] webhook_poll_minutes`) covers what a sleeping Mac or a down Funnel missed.
 use crate::config::Config;
-use crate::events::{fold, read};
+use crate::events::{fold, working};
 use crate::runner::Runner;
 use crate::{gate, gh, Ctx};
 use anyhow::Result;
@@ -102,7 +102,7 @@ pub fn deliver(ctx: &Ctx, r: &dyn Runner, event: &str, sig: Option<&str>, body: 
     let v: Value = serde_json::from_slice(body).unwrap_or_default();
     let repo = v["repository"]["full_name"].as_str().unwrap_or_default();
     let (branches, nums) = names(&v);
-    let states = fold(&read(&ctx.state).unwrap_or_default());
+    let states = fold(&working(&ctx.state).unwrap_or_default());
     let mut hit = vec![];
     for s in states
         .values()

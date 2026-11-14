@@ -5,7 +5,7 @@
 //! A dropped stream logs `lane-stream` down and the passes poll `herdr agent list` again until it is back.
 use crate::Service;
 use drover_core::config::Config;
-use drover_core::events::{append, read, Event};
+use drover_core::events::{append, working, Event};
 use drover_core::{herdr, shed, Ctx};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -131,7 +131,7 @@ impl Service {
             .map(|(k, s)| (k, s.as_str()));
         let diff: Vec<(String, &str)> = changed.chain(gone).map(|(k, s)| (k.clone(), s)).collect();
         if !diff.is_empty() {
-            let events = read(&self.ctx.state).unwrap_or_default();
+            let events = working(&self.ctx.state).unwrap_or_default();
             for (agent, s) in diff {
                 let spawn = events
                     .iter()

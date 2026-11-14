@@ -1,6 +1,6 @@
 //! `drover verdict` and `drover merge`: the review → merge gate.
 use crate::config::{Check, Config, Fleet, Premerge};
-use crate::events::{emit, fold, read, Event, IssueState};
+use crate::events::{emit, fold, working, Event, IssueState};
 use crate::overlap::git;
 use crate::runner::{argv, json, ok, Runner};
 use crate::Ctx;
@@ -37,7 +37,7 @@ fn is_main(b: &str) -> bool {
 }
 
 pub fn issue_state(ctx: &Ctx, fleet: &str, issue: u64) -> Result<Option<IssueState>> {
-    Ok(fold(&read(&ctx.state)?).remove(&(fleet.to_string(), issue)))
+    Ok(fold(&working(&ctx.state)?).remove(&(fleet.to_string(), issue)))
 }
 
 pub fn branch_of(st: Option<&IssueState>, issue: u64) -> String {
@@ -69,7 +69,7 @@ pub fn verdict(
         return refused("BAD_SHA", format!("--sha {sha} must be a full 40-hex commit sha"));
     }
     // #249: a verdict.md in a remote review lane's worktree is read on that lane's host.
-    let evs = read(&ctx.state)?;
+    let evs = working(&ctx.state)?;
     let reviewer = |e: &&Event| e.is("spawn", fleet, issue) && crate::events::checks(e);
     let at = evs
         .iter()
@@ -223,7 +223,7 @@ pub fn verdict(
         }
     }
     // #128: the verdict is the reviewer's only work: remove its worktree and close its pane, or keep a dirty one.
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     // #164: a PASS at the head leaves the builder waiting for merge: its build folders go (a fix round rebuilds).
     let is_impl = |e: &&Event| pass && e.is("spawn", fleet, issue) && !crate::events::checks(e);
     if let Some(b) = events.iter().rfind(is_impl) {
@@ -304,7 +304,7 @@ pub fn sync_label(
     // #285: a pure merge of the PASS head with integration (#207's carry) keeps the PASS, so the label stays.
     let carried = || s.verdicts.iter().any(|v| v.1 == "PASS") && crate::overlap::pure(r, f, s, head);
     let (flag, kind) = match (
-        passed(&read(&ctx.state)?, s, head) || carried(),
+        passed(&working(&ctx.state)?, s, head) || carried(),
         gh::has_label(pr, label),
     ) {
         (true, false) => ("--add-label", "labelled"),
@@ -333,7 +333,7 @@ pub fn ready_draft(
     let Some(num) = pr["number"].as_u64() else {
         return Ok(false);
     };
-    if pr["isDraft"] != true || pr["state"] != "OPEN" || s.done() || !passed(&read(&ctx.state)?, s, head) {
+    if pr["isDraft"] != true || pr["state"] != "OPEN" || s.done() || !passed(&working(&ctx.state)?, s, head) {
         return Ok(false);
     }
     let n = num.to_string();
@@ -785,7 +785,7 @@ pub(crate) fn unjoined<'a>(
     (fleet, n): (&str, u64),
     (num, head): (&str, &str),
 ) -> Result<Vec<(&'a crate::config::Serial, String)>> {
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let mine = crate::queue::groups(&crate::queue::replay(&ev, fleet), &ev, f, fleet, n);
     let mut new: Vec<_> = f
         .serial
@@ -815,7 +815,7 @@ pub fn merge(
     over: bool,
 ) -> Result<()> {
     let f = cfg.fleet(fleet)?;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let st = fold(&events).remove(&(fleet.to_string(), issue));
     // A retry after a merge is a no-op: no PR lookup, no event, no alert.
     if st.as_ref().is_some_and(|s| s.state == "merged") {
@@ -1011,7 +1011,7 @@ fn merged(
         emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "landed", d))?;
     }
     // The one GitHub comment fleet writes: ≤ 5 lines, merge sha + verdict sha; #677: the latest why note's Owner line.
-    let log = read(&ctx.state)?;
+    let log = working(&ctx.state)?;
     let why = log.iter().rfind(|e| e.is("why", fleet, issue));
     let why = why.and_then(|e| Some(format!("\nWhy: {}", e.str("owner")?)));
     let evidence = format!(
@@ -1109,7 +1109,7 @@ pub fn extended(ctx: &Ctx, (fleet, n): (&str, u64), (spawn, by): (bool, &str), s
         crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "round-extended", d))?;
     }
     let waits =
-        crate::pending::of(&read(&ctx.state)?, fleet, n).is_some_and(|p| p.action == "extend" && !p.back(ctx.now));
+        crate::pending::of(&working(&ctx.state)?, fleet, n).is_some_and(|p| p.action == "extend" && !p.back(ctx.now));
     if spawn && !waits {
         crate::pending::record(ctx, (fleet, n), "extend", "impl", None)?;
     }
@@ -1120,7 +1120,7 @@ pub fn extended(ctx: &Ctx, (fleet, n): (&str, u64), (spawn, by): (bool, &str), s
 pub fn held(ctx: &Ctx, fleet: &str, n: u64) -> Result<String> {
     let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
     let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let back = crate::pending::of(&events, fleet, n).is_some_and(|p| p.back(ctx.now));
     let starting = !matches!(state, "merged" | "closed" | "parked") && crate::pending::extending(&events, fleet, n);
     if state != "needs-human" && last != "extend-failed" && !back && !starting {
@@ -1154,7 +1154,7 @@ pub fn park(
 /// that the park closed (or, parked from a failed extend's card, the state it was parked in); `unparked` stores it as
 /// `repaired` does. Its queue place is kept; out of the queue, it goes to the end.
 pub fn unpark(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, (fleet, n): (&str, u64), by: &str) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let mine = |e: &&Event| e.fleet == fleet && e.issue == Some(n);
     let state = fold(&events).remove(&(fleet.to_string(), n)).map(|s| s.state);
     let Some(at) = events

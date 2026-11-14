@@ -1,4 +1,4 @@
-use crate::events::{append, read, Event};
+use crate::events::{append, working, Event};
 use crate::{config::Config, gate::refused, herdr, hosts::On, runner::argv, runner::Runner, Ctx};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -89,7 +89,7 @@ pub fn reap(ctx: &Ctx, r: &dyn Runner, events: &[Event]) -> Result<()> {
 
 /// The sheet's read of setup `pane`: its masked screen and every `https://` URL (a wrapped one joined), or closed.
 pub fn screen(ctx: &Ctx, r: &dyn Runner, pane: &str) -> Result<Value> {
-    let (events, shut) = (read(&ctx.state)?, json!({"closed": true, "lines": []}));
+    let (events, shut) = (working(&ctx.state)?, json!({"closed": true, "lines": []}));
     let Some(e) = open(&events, pane) else { return Ok(shut) };
     let live = ctx.now < e.ts + TIMEOUT;
     let o = herdr::exec(&On::of(r, Some(e)), &herdr::read_argv(pane))?;
@@ -116,7 +116,7 @@ pub fn screen(ctx: &Ctx, r: &dyn Runner, pane: &str) -> Result<Value> {
 
 /// The sheet's reply into setup `pane`: its text (keys and text only: no control characters), then Enter; never logged.
 pub fn send(ctx: &Ctx, r: &dyn Runner, pane: &str, text: &str) -> Result<String> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let on = On::of(r, Some(open(&events, pane).context("that sign-in has closed")?));
     if text.chars().any(char::is_control) || text.chars().count() > 2000 {
         return refused("BAD_VALUE", "up to 2000 chars, no control characters");

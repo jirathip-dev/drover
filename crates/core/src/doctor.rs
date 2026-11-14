@@ -102,7 +102,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             "! runtime — kind = \"berth\" is deprecated, berth is now shed → {fix}"
         ));
     }
-    let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::read(&ctx.state).unwrap_or_default());
+    let line = crate::drive::spawns_line(ctx, cfg, r, &crate::events::working(&ctx.state).unwrap_or_default());
     row(rows, !line.contains(" · stale"), '!', &line); // #333
     let (n401, n503) = crate::devices::denials(ctx); // #501: a 503 is the board's devices unread
     let log = ctx.state.with_file_name("serve.log");
@@ -283,7 +283,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     }
     rows.extend(crate::update::paused_line(
         r,
-        &crate::events::read(&ctx.state).unwrap_or_default(),
+        &crate::events::working(&ctx.state).unwrap_or_default(),
     ));
     rows.extend(login_token(r, None));
     let paired = crate::devices::load(ctx).len();

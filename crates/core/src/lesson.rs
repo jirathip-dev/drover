@@ -2,7 +2,7 @@
 //! lane), run weekly by `tick` and on demand by a conductor.
 use crate::access::{civil_month_day, civil_year};
 use crate::config::Config;
-use crate::events::{emit, plain, read, Event};
+use crate::events::{emit, plain, working, Event};
 use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
@@ -14,7 +14,7 @@ use std::io::Write;
 pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -> Result<String> {
     let f = cfg.fleet(fleet)?;
     let since = ctx.now.saturating_sub(days * 86400);
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let recent: Vec<&Event> = events.iter().filter(|e| e.fleet == fleet && e.ts >= since).collect();
     let mut s =
         format!("# Lessons digest: {fleet}, last {days} days\n\n## Review FAIL findings (blocking, with proof)\n");
@@ -146,7 +146,7 @@ pub fn weekly(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         }
         std::fs::write(at(ctx, name), ctx.now.to_string())?;
         // #517: a fleet under a week old, or with under 2 FAIL verdicts this week, has no repeated class to find.
-        let (week, events) = (ctx.now.saturating_sub(7 * 86400), read(&ctx.state)?);
+        let (week, events) = (ctx.now.saturating_sub(7 * 86400), working(&ctx.state)?);
         let young = events.iter().find(|e| e.fleet == *name).is_none_or(|e| e.ts > week);
         let fails = (events.iter())
             .filter(|e| e.fleet == *name && e.ts >= week && e.kind == "verdict" && e.str("verdict") == Some("FAIL"))
@@ -350,7 +350,7 @@ pub fn review(
         "lessons: in:title",
     ];
     let bodies = ok(r, "gh", &[&pr[..], &["--json", "body", "--jq", ".[].body"]].concat()).unwrap_or_default();
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let today = ctx.now / 86400;
     let decide = |c: LessonCheck| {
         let mine = |e: &&Event| e.fleet == fleet && ymd(e.ts / 86400) >= c.since;

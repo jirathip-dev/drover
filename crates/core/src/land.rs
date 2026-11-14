@@ -89,7 +89,7 @@ fn red(checks: &Value) -> (String, String, bool) {
 pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
     let f = cfg.fleet(fleet)?;
     let Some(l) = f.fast_first() else { return Ok(()) };
-    let ev = crate::events::read(&ctx.state)?;
+    let ev = crate::events::working(&ctx.state)?;
     let mine = |k: &'static str| move |e: &&Event| e.fleet == fleet && e.kind == k;
     let log = |n: Option<u64>, k: &str, d: Value| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, n, k, d));
     let done = |o: &&Event| {

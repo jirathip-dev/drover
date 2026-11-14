@@ -217,7 +217,7 @@ pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[L
 /// returned for the step's own scan (a read it lacks runs live).
 pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     let s = Snap::new(r, Miss::Collect, load(ctx).map(|s| s.reads), Some(ctx.now));
-    let events = crate::events::read(&ctx.state).unwrap_or_default();
+    let events = crate::events::working(&ctx.state).unwrap_or_default();
     if let Ok(list) = herdr::list(&s, "agent") {
         let all = lanes(cfg, &s, ctx, (&events, &crate::events::fold(&events)), &list);
         waits(ctx, cfg, &s, &events, &all);

@@ -1,6 +1,6 @@
 //! #92 `drover drive`: one pass of the fleet loop, no AI; each action logs a passive `driven` event.
 use crate::config::Config;
-use crate::events::{append, emit, fold, read, Event, IssueState};
+use crate::events::{append, emit, fold, working, Event, IssueState};
 use crate::overlap::git;
 use crate::runner::{ok, Runner};
 use crate::waiting::Waiting;
@@ -507,7 +507,7 @@ fn settle(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
         }
         r.sleep(1);
     }
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     ACTS.with_borrow_mut(|m| {
         for (f, acts) in m.iter_mut() {
             for a in acts.iter_mut().filter(|a| a["outcome"] == "pending") {
@@ -556,7 +556,7 @@ fn update(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, fleet: &str, n: u64) -
         }
         r.sleep(1);
     }
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let theirs =
         |e: &&Event| e.kind == "drive-pass" && e.fleet == fleet && e.data.get("kick").is_none_or(Value::is_null);
     let Some(e) = ev.iter().rfind(theirs) else {
@@ -674,7 +674,7 @@ fn wait(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, lock: &str, only: Option
     if held(ctx, lock).is_some() {
         return Ok(writeln!(out, "drive: still driving · result will appear here")?);
     }
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let done = |e: &&Event| e.kind == "drive-pass" && only.is_none_or(|f| e.fleet == f);
     let ended = |e: &&Event| e.data.get("ended").and_then(Value::as_u64) >= Some(ctx.now);
     let Some(e) = events.iter().rev().filter(done).find(ended) else {
@@ -753,7 +753,7 @@ pub fn drive(
     }
     // #234: the fast step samples every host into the 24 h history (the Host tab's sparklines).
     if fast {
-        if let Err(e) = crate::hosts::sample(ctx, cfg, r, &crate::events::read(&ctx.state)?) {
+        if let Err(e) = crate::hosts::sample(ctx, cfg, r, &crate::events::working(&ctx.state)?) {
             writeln!(out, "host history: {e:#}")?;
         }
     }
@@ -787,7 +787,7 @@ pub fn drive(
     let fleets: Vec<&str> = live.iter().copied().filter(|n| !cfg.fleet[*n].paused).collect();
     // #325: an answer that never reached its lane is typed again each fast step, until it lands or the lane is gone.
     let events = fast
-        .then(|| crate::events::read(&ctx.state).ok())
+        .then(|| crate::events::working(&ctx.state).ok())
         .flatten()
         .unwrap_or_default();
     for u in live.iter().flat_map(|f| crate::undelivered(&events, f)) {
@@ -910,7 +910,7 @@ pub fn drive(
 /// adoption hid the issue's verdict) goes back to the state it had (`repaired`); once installed, none is left to find.
 /// #517: a lesson issue parked `LANE_ENDS` is closed as "no repeated class".
 fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     // #639: needs-human, a fix round or an impl whose lane ended, with no PR and open queue blockers, goes back to the
     // queue, blocked: it starts as a first spawn once they merge.
     let log = crate::waiting::Log::new(&events);
@@ -949,7 +949,7 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
             Event::new(ctx.now, &s.fleet, Some(s.issue), "repaired", d),
         )?;
     }
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let reset = ["pushed", "verdict", "needs-human", "round-extended"];
     for s in fold(&events)
         .into_values()
@@ -1071,7 +1071,7 @@ fn silent(
     agents: &[Value],
     fleet: &str,
 ) -> Result<()> {
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let found = stall::silent(ctx, cfg, &ev, agents, fleet);
     for (n, lane, a) in found.into_iter().filter(|x| KICK.get().is_none_or(|k| k == x.0)) {
         match a {
@@ -1118,7 +1118,7 @@ fn stale_replaced(
     old: &str,
     mins: u64,
 ) -> Result<()> {
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let new = |e: &&Event| e.is("spawn", fleet, n) && e.str("role") == Some(role) && e.ts >= ctx.now;
     let new = ev
         .iter()
@@ -1161,7 +1161,7 @@ fn pass(
     let agents = crate::hosts::all_agents(cfg, seen)?;
     // #425: a lane held on an issue that merged is woken once (`released`): prompted in its pane, or respawned
     // `--supersede` when its pane is gone (a slow pass's).
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let st = fold(&ev);
     for s in st.values().filter(|s| s.fleet == fleet) {
         let on = crate::events::held_on(&ev, s);
@@ -1223,10 +1223,10 @@ fn pass(
     }
     // #666: a lane the hook keeps refusing is ended and escalated at once, never left to stall.
     if !fast {
-        crate::stall::refused(ctx, cfg, r, out, &read(&ctx.state)?, fleet)?;
+        crate::stall::refused(ctx, cfg, r, out, &working(&ctx.state)?, fleet)?;
         silent(ctx, cfg, (r, seen), out, &agents, fleet)?;
     }
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let one = |(s, _): &(IssueState, Waiting)| KICK.get().is_none_or(|k| k == s.issue);
     let mut waits = waiting::scan(ctx, cfg, seen, &events, &agents, true);
     waits.retain(one);
@@ -1239,7 +1239,7 @@ fn pass(
         }
     }
     if !fast && handoff(ctx, cfg, r, out, fleet, &events, &waits)? {
-        waits = waiting::scan(ctx, cfg, seen, &read(&ctx.state)?, &agents, false);
+        waits = waiting::scan(ctx, cfg, seen, &working(&ctx.state)?, &agents, false);
         waits.retain(one);
     }
     // #129: ready PRs that conflict with nothing merge first; of a conflicting pair the older, the other is updated.
@@ -1286,7 +1286,7 @@ fn pass(
         }
         // #148: a head auto-updated this pass has no CI yet; its merge waits for the next pass.
         let now = |e: &Event| e.is("auto-updated", fleet, s.issue) && e.ts == ctx.now;
-        if let Some(e) = crate::events::shared(&ctx.state)?.iter().rfind(|e| now(e)).cloned() {
+        if let Some(e) = crate::events::working(&ctx.state)?.iter().rfind(|e| now(e)).cloned() {
             let to = e.str("to").unwrap_or_default();
             writeln!(out, "{fleet} #{n} ready (CI pending at {to:.7})")?;
         } else if w.who == "drive" && w.what == waiting::LESSON_PROMPT && !fast {
@@ -1444,7 +1444,7 @@ fn pass(
                 ci == "green" && pr["isDraft"] != true && pr["headRefOid"].as_str() == args.get(5).copied() && !full;
             // #599/#650: a PASS merges this pass only if the merge gate's rule finds the head verified by it.
             let verified = || -> Result<bool> {
-                let st = fold(&read(&ctx.state)?).remove(&(fleet.to_string(), s.issue));
+                let st = fold(&working(&ctx.state)?).remove(&(fleet.to_string(), s.issue));
                 Ok(crate::gate::verified(f, st.as_ref(), args[5], false).is_ok())
             };
             if step == "verdict" && code.is_none() && args[3] == "PASS" && green && verified()? {
@@ -1662,7 +1662,7 @@ fn serial(
     pr: &Value,
     fast: bool,
 ) -> Result<bool> {
-    let (f, n, ev) = (cfg.fleet(fleet)?, s.issue, read(&ctx.state)?);
+    let (f, n, ev) = (cfg.fleet(fleet)?, s.issue, working(&ctx.state)?);
     let (st, q) = (fold(&ev), queue::replay(&ev, fleet));
     let mine = queue::groups(&q, &ev, f, fleet, n);
     let (mut wait, mut text) = (mine.iter().any(|g| queue::held(&ev, fleet, n, &g.name)), None);
@@ -1700,7 +1700,7 @@ fn serial(
         }
     }
     // Ordered locking: held in one group, it lets go of its slots in later ones, so no two issues hold-and-wait crossed.
-    let (now, mut blocker) = (read(&ctx.state)?, None);
+    let (now, mut blocker) = (working(&ctx.state)?, None);
     for g in queue::groups(&q, &now, f, fleet, n) {
         let h = queue::held(&now, fleet, n, &g.name);
         if let (false, Some(b)) = (h, blocker) {
@@ -1893,7 +1893,7 @@ fn no_change(
 /// #285: a tracked issue whose PR (as last read) was merged or closed outside drover is logged once, no comment:
 /// `merged`/`closed` `by: external`, or `blocked` while its issue is open; `clean` takes its lanes.
 fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     for s in fold(&events)
         .into_values()
         .filter(|s| s.fleet == fleet && !s.done() && s.state != "parked" && KICK.get().is_none_or(|k| k == s.issue))
@@ -1927,7 +1927,7 @@ fn external(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet:
 /// #667: each open blocker of the fleet's queue in another fleet or repo, read on GitHub at most once per 5 min
 /// (`gh issue view`, cached): one read closed logs `blocker-closed`, and the queue drops it.
 fn ext_closed(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let refs: std::collections::BTreeSet<String> = queue::view(&events, &fold(&events), fleet)
         .into_iter()
         .flat_map(|i| i.ext)
@@ -1982,7 +1982,7 @@ fn starts<'a>(
     mut go: bool,
 ) -> Vec<(&'a str, anyhow::Error)> {
     let mut errs = vec![];
-    let events = match read(&ctx.state) {
+    let events = match working(&ctx.state) {
         Ok(e) => e,
         Err(e) => return vec![(fleets.first().copied().unwrap_or_default(), e)],
     };
@@ -2083,7 +2083,7 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     }
     let (f, events, ag) = (
         cfg.fleet(fleet)?,
-        read(&ctx.state)?,
+        working(&ctx.state)?,
         crate::hosts::all_agents(cfg, r).unwrap_or_default(),
     );
     let busy = |l: &str| ag.iter().any(|a| a["name"] == l && a["agent_status"] == "working");

@@ -1,6 +1,6 @@
 //! #389: a remote lane's command never reaches the main host itself: it waits in its worktree's outbox, which drive
 //! pulls over main → host ssh (#249) and runs.
-use crate::events::{append, fold, last_spawn, read, Event};
+use crate::events::{append, fold, last_spawn, working, Event};
 use crate::{hosts::On, runner::Runner, Ctx};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
@@ -53,7 +53,7 @@ pub fn look(r: &dyn Runner, events: &[Event]) {
 
 /// drive's side: each live remote lane's outbox of `fleets` (as the look `seen` read it), line by line, then cleared.
 pub fn drain(ctx: &Ctx, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write, fleets: &[&str]) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     for (sp, lane, p) in boxes(&events) {
         let text = fleets.contains(&sp.fleet.as_str()).then(|| take(seen, sp, &p));
         let Some(Ok(text)) = text.map(|t| t.inspect_err(|e| drop(writeln!(out, "outbox {lane}: {e:#}")))) else {
@@ -72,7 +72,7 @@ pub fn drain(ctx: &Ctx, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Wri
 /// One line, once per lane + ts: run as `lane` (from its spawn, never the line), or refused; logged `outbox` either way.
 fn apply(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, sp: &Event, lane: &str, raw: &str) -> Result<()> {
     let v: Value = serde_json::from_str(raw).unwrap_or_default();
-    let (ts, events) = (v["ts"].as_u64(), read(&ctx.state)?);
+    let (ts, events) = (v["ts"].as_u64(), working(&ctx.state)?);
     let seen = |e: &Event| e.kind == "outbox" && e.str("lane") == Some(lane) && e.data["sent"].as_u64() == ts;
     if ts.is_some() && events.iter().any(seen) {
         return Ok(());

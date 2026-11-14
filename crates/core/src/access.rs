@@ -1,6 +1,6 @@
 //! What a lane may use: its account (first uncapped of an ordered list; tokens never read out) and MCP servers.
 use crate::config::{Config, Fleet, Role};
-use crate::events::{emit, read, Event};
+use crate::events::{emit, working, Event};
 use crate::gate::refused;
 use crate::providers::Credential;
 use crate::runner::Runner;
@@ -194,7 +194,7 @@ pub fn banner(pat: &str, screen: &str) -> bool {
 
 /// `drover accounts`: each account's state and the open lanes on it. Names only, never tokens.
 pub fn list(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     // #785: the lanes still running (`usage::lane_end`), with their accounts.
     let running = (0..events.len()).filter(|&i| events[i].kind == "spawn" && usage::lane_end(&events, i).is_none());
     let on: Vec<(&str, &str)> = running
@@ -312,7 +312,7 @@ pub fn signed(
         let d = json!({"account": name, "harness": role.harness, "meter": "sign-in check", "reason": why});
         let e = Event::new(ctx.now, fleet, None, "account-signed-out", d);
         emit(&ctx.state, cfg, e)?;
-        a = pick(ctx, cfg, &read(&ctx.state)?, role)?;
+        a = pick(ctx, cfg, &working(&ctx.state)?, role)?;
     }
     p.token = a.as_ref().and_then(|a| token_file(cfg, &p.harness, &a.0));
     p.account = a;
@@ -377,7 +377,7 @@ pub fn sign_in(cfg: &Config, r: &dyn Runner, name: &str) -> (bool, String) {
 /// `drover accounts reset <name>`: spawns may use a capped account again.
 pub fn reset(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, name: &str) -> Result<()> {
     anyhow::ensure!(cfg.accounts.names.contains_key(name), "unknown account '{name}'");
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     if capped_until(cfg, &events, name, ctx.now).is_none() {
         writeln!(out, "{name} is not capped")?;
         return Ok(());
