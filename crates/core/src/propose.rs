@@ -1,6 +1,6 @@
 use crate::config::{self, Config};
 use crate::devices::sha256;
-use crate::events::{emit, read, Event};
+use crate::events::{emit, working, Event};
 use crate::gate::refused;
 use crate::runner::Runner;
 use crate::{orchestrator, Ctx};
@@ -13,7 +13,7 @@ use std::path::Path;
 
 /// `drover config propose <thread> <file>`: `file` is the whole new fleet.toml; validated, its diff is the card.
 pub fn propose(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, thread: &str, file: &Path) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let t = orchestrator::find(&events, thread)?;
     let text = std::fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?;
     Config::parse(&text).context("the proposed fleet.toml is invalid")?;
@@ -98,7 +98,7 @@ fn install(ctx: &Ctx, r: &dyn Runner, cur: &str, text: &str) -> Result<(Config, 
 
 /// The owner's [apply] or [discard] on proposal `id`; the line the thread records.
 pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) -> Result<String> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let Some(p) = events
         .iter()
         .find(|e| e.kind == "config-propose" && e.str("id") == Some(id))
@@ -361,7 +361,7 @@ pub fn edit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &ConfigChange, by: &str)
     }
     if let Some(f) = c.remove.as_deref().filter(|_| !c.confirm) {
         let live = crate::check::live_lanes(ctx, cfg, r)?;
-        let events = read(&ctx.state)?;
+        let events = working(&ctx.state)?;
         let mut lanes = (events.iter().filter(|e| e.kind == "spawn" && e.fleet == f)).filter_map(|e| e.str("agent"));
         if let Some(l) = lanes.find(|a| live.contains(*a)) {
             return refused(

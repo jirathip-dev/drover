@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::devices::sha256;
-use crate::events::{emit, read, Event};
+use crate::events::{emit, working, Event};
 use crate::gate::refused;
 use crate::runner::{argv, Runner};
 use crate::{orchestrator, Ctx};
@@ -80,7 +80,7 @@ pub fn post(ctx: &Ctx, cfg: &Config, thread: &str, c: &Card) -> Result<String> {
             "a run card needs --cmd, --why, --blast, --dir and a timeout",
         );
     }
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let t = orchestrator::find(&events, thread)?;
     let id = format!("r{}", events.iter().filter(|e| e.kind == "run-card").count() + 1);
     let dir = std::path::absolute(c.dir)?.display().to_string();
@@ -112,7 +112,7 @@ pub fn settle_via(
     sha: Option<&str>,
     via: Option<&str>,
 ) -> Result<String> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let Some(c) = events.iter().find(|e| e.kind == "run-card" && e.str("id") == Some(id)) else {
         return refused("NO_SUCH_CARD", format!("no run card {id}"));
     };
@@ -154,7 +154,7 @@ pub fn settle_via(
 
 /// #821: run approved card `id` once, detached, up to its --timeout; log and post its exit code and output tail.
 pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str) -> Result<String> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let Some(c) = events.iter().find(|e| e.kind == "run-card" && e.str("id") == Some(id)) else {
         return refused("NO_SUCH_CARD", format!("no run card {id}"));
     };
