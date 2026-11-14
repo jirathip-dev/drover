@@ -366,7 +366,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     let key = format!("{lane}:{url}");
                     let seen = events.iter().any(|e| e.str("key") == Some(&key));
                     let dsh = spawned.and_then(|e| e.str("harness")) == Some("dsh");
-                    if !seen && herdr::reply(r, dsh, lane, p, &line).is_ok() {
+                    if !seen && herdr::tell(r, dsh, lane, p, &line).is_ok() {
                         hits.push(("amended", key, line));
                     }
                 }

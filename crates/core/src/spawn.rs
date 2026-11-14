@@ -476,11 +476,18 @@ fn brief(
                 " The design moves: also a short clip of it (`clip.gif` or `clip.mp4`) beside the images."
             ][usize::from(recipe.clip)]
         ),
-        "architect" => format!(
-            include_str!("../roles/brief-architect.md"),
-            branch = branch,
-            integration = integration
-        ),
+        "architect" => {
+            let hot = ["", include_str!("../roles/brief-hotspots-architect.md")];
+            format!(
+                include_str!("../roles/brief-architect.md"),
+                branch = branch,
+                integration = integration
+            )
+            .trim_end()
+            .to_string()
+                + "\n"
+                + hot[usize::from(title.starts_with(crate::hotspots::TITLE))]
+        }
         _ => format!(
             include_str!("../roles/brief-impl.md"),
             branch = branch,
@@ -970,7 +977,7 @@ pub struct Opts {
     /// Machine-readable output
     #[arg(long)]
     pub json: bool,
-    /// Spawn although the host is busy (logs an `override` event)
+    /// Spawn although the host is busy: the owner or an orchestrator (logs an `override` event with `by`)
     #[arg(long)]
     pub force: bool,
     /// Kill the live agent / unfinished lane in the way, then spawn (logged)
@@ -1199,7 +1206,8 @@ pub fn spawn(
     let extend = crate::pending::extending(&events, fleet, issue);
     match refusal {
         Some(("HOST_BUSY", why)) if o.force || extend => {
-            let mut d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent});
+            let by = crate::orchestrator::acting().map_or_else(|| "owner".into(), |id| format!("orchestrator-{id}"));
+            let mut d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": by});
             if extend {
                 d["why"] = "owner-extend".into();
             }
@@ -1388,7 +1396,7 @@ pub fn spawn(
             .filter(|_| p.family != "architect")
             .map(|a| match p.family {
                 "rev" => format!("Architecture: the owner approved the ADR in `{a}/`; check the diff against it."),
-                _ => format!("Architecture: the owner approved the ADR in `{a}/` on this branch; build to it."),
+                _ => format!("Architecture: the owner approved the ADR in `{a}/` on this branch; build to it, and add any `.drover/arch.toml` lines it ends with in this PR."),
             });
         let decided = events
             .iter()
