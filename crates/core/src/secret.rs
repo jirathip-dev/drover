@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{emit, read, Event};
+use crate::events::{emit, working, Event};
 use crate::gate::refused;
 use crate::runner::Runner;
 use crate::{orchestrator, Ctx};
@@ -46,7 +46,7 @@ pub fn request(ctx: &Ctx, cfg: &Config, thread: &str, name: &str, why: &str) -> 
             "a secret's name is A-Z, 0-9 and _, and --why says what it is for",
         );
     }
-    let t = orchestrator::find(&read(&ctx.state)?, thread)?.clone();
+    let t = orchestrator::find(&working(&ctx.state)?, thread)?.clone();
     let d = json!({"thread": thread, "name": name, "why": why});
     emit(
         &ctx.state,
@@ -71,7 +71,7 @@ pub fn settle(
     (id, name): (&str, &str),
     value: Option<&str>,
 ) -> Result<String> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let Some(req) = open(&events, id, name) else {
         return refused("NO_SUCH_REQUEST", format!("{id} has no open request for secret {name}"));
     };
@@ -98,7 +98,7 @@ pub fn settle(
 /// `drover secret ls` (owner only: the lane hook refuses it in a lane): `<fleet> <NAME>` of each secret set and not removed since.
 pub fn ls(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
     let mut set = std::collections::BTreeSet::new();
-    for e in read(&ctx.state)?
+    for e in working(&ctx.state)?
         .iter()
         .filter(|e| e.kind == "secret-set" || e.kind == "secret-rm")
     {
@@ -131,7 +131,7 @@ pub fn rm(ctx: &Ctx, cfg: &Config, fleet: &str, name: &str) -> Result<()> {
 
 /// #707 `drover migrate`: the old store's Keychain items are left alone; the commands that delete them (each `secret-set` the log `state` names, and a search for the rest), for the owner to run.
 pub fn retired(state: &Path, out: &mut dyn Write) -> Result<()> {
-    let set = read(state).unwrap_or_default();
+    let set = working(state).unwrap_or_default();
     let svc: std::collections::BTreeSet<String> = (set.iter().filter(|e| e.kind == "secret-set"))
         .map(|e| format!("herdsman/{}/{}", e.fleet, e.str("name").unwrap_or_default()))
         .collect();

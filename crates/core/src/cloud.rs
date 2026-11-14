@@ -1,5 +1,5 @@
 use crate::config::{write_atomic, Config};
-use crate::events::{age, emit, read, Event};
+use crate::events::{age, emit, working, Event};
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
 use anyhow::{anyhow, bail, ensure, Context, Result};
@@ -130,7 +130,7 @@ pub fn over(ctx: &Ctx, cfg: &Config, events: &[Event], name: &str) -> Option<Str
 /// What keeps placement off cloud host `name` as it is: `CLOUD_BUDGET` at a limit, else `CLOUD_STOPPED` (startable).
 pub fn held(ctx: &Ctx, cfg: &Config, name: &str) -> Option<(&'static str, String)> {
     cfg.hosts.get(name)?.cloud.as_ref()?;
-    let events = read(&ctx.state).unwrap_or_default();
+    let events = working(&ctx.state).unwrap_or_default();
     let stopped = || (state(&events, name) == "stopped").then(|| ("CLOUD_STOPPED", "stopped".into()));
     let budget = over(ctx, cfg, &events, name).map(|w| ("CLOUD_BUDGET", w));
     budget.or_else(stopped)
@@ -143,7 +143,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str) -> Result<()> 
         let _ = std::fs::remove_file(pin(ctx, name));
         cmd(ctx, cfg, r, name, v)
     };
-    let snap = last(&read(&ctx.state)?, name, &["cloud-snapshot"]).is_some();
+    let snap = last(&working(&ctx.state)?, name, &["cloud-snapshot"]).is_some();
     let up = cmd(ctx, cfg, r, name, "status").and_then(|s| match s.trim() {
         "" if snap && recipe(ctx, cfg, name)?.0.contains_key("create_from") => made("create_from"),
         "" => made("create"),
@@ -232,7 +232,7 @@ fn refresh(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, (up, repin): (bo
 
 /// Save host `name`'s lane work to `wip/<host>-<lane>` (a failed push or unreachable host: `cloud-abort`), then `verb`.
 pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str, why: &str) -> Result<Vec<String>> {
-    let (events, mut wip) = (read(&ctx.state)?, vec![]);
+    let (events, mut wip) = (working(&ctx.state)?, vec![]);
     let on = crate::hosts::On::new(r, cfg.hosts.get(name).context("no such host")?.machine.as_deref());
     let mut lanes = BTreeMap::new();
     let mine = |e: &&Event| e.kind == "spawn" && e.str("host") == Some(name);
@@ -264,7 +264,7 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str, why
 /// `check`: stop each running cloud host at its spend limit, or once it has had no live agent for `idle_stop_minutes`.
 pub type Live = BTreeMap<String, Option<Vec<Value>>>;
 pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Live, out: &mut dyn std::io::Write) -> Result<()> {
-    let (events, seen) = (read(&ctx.state).unwrap_or_default(), crate::hosts::cached(ctx));
+    let (events, seen) = (working(&ctx.state).unwrap_or_default(), crate::hosts::cached(ctx));
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.cloud.is_some()) {
         let Some(Some(agents)) = live.get(name).filter(|_| state(&events, name) == "running") else {
             continue;
@@ -352,7 +352,7 @@ pub fn bootstrap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, out: &mut 
     if !acp {
         crate::hosts::resolve(r, m, true)?;
     }
-    if h.cloud.is_some() && state(&read(&ctx.state)?, name) != "running" {
+    if h.cloud.is_some() && state(&working(&ctx.state)?, name) != "running" {
         start(ctx, cfg, r, name)?;
     } else if h.cloud.is_some() {
         moved(ctx, cfg, r, name, true)?;

@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{ends, read, Event};
+use crate::events::{ends, working, Event};
 use crate::gate::refused;
 use crate::runner::{argv, Out, Runner};
 use crate::Ctx;
@@ -96,7 +96,7 @@ pub fn authorize(ctx: &Ctx, cfg: &Config, token: &str, args: &[String]) -> Resul
     if args.is_empty() {
         return refused("TOKEN", "no command");
     }
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     if let Some(why) = crate::cli::foreign(args, &g.lane, &events) {
         return refused("TOKEN", why);
     }

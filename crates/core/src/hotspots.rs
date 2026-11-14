@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::read;
+use crate::events::working;
 use crate::lesson::ymd;
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
@@ -52,7 +52,10 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
     }
     let converted = converted(r, f)?;
     touched.retain(|f, _| !crate::arch::any(&converted, f));
-    let events = read(&ctx.state)?;
+    let (events, predicted) = (
+        working(&ctx.state)?,
+        crate::events::since(&ctx.state, &["conflict-predicted"], since)?,
+    );
     let same = |e: &&crate::events::Event| cfg.fleet(&e.fleet).is_ok_and(|g| g.repo == f.repo);
     let updates = |sha: &String| {
         let merged = events
@@ -75,8 +78,7 @@ pub fn find(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<Vec<
                 .and_then(Value::as_array)
                 .is_some_and(|a| a.contains(&json!(file)))
         };
-        let recent = |e: &&crate::events::Event| e.kind == "conflict-predicted" && e.ts >= since;
-        events.iter().filter(same).filter(recent).filter(on).count()
+        predicted.iter().filter(same).filter(on).count()
     };
     let mut hot: Vec<Hot> = (touched.into_iter().filter(|(_, s)| s.len() >= HOT))
         .map(|(file, shas)| Hot {
@@ -106,7 +108,7 @@ pub fn sync(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str) -> Result<()> 
         return Ok(());
     };
     let hot: Vec<Hot> = serde_json::from_str(&text)?;
-    let last = crate::queue::hot_files(&read(&ctx.state)?, fleet);
+    let last = crate::queue::hot_files(&working(&ctx.state)?, fleet);
     if hot.is_empty() && last.is_empty() {
         return Ok(());
     }
@@ -184,7 +186,7 @@ pub fn run(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: 
         writeln!(out, "filed {fleet}#{n}: {title}")?;
         n
     };
-    if crate::queue::replay(&read(&ctx.state)?, fleet)
+    if crate::queue::replay(&working(&ctx.state)?, fleet)
         .iter()
         .all(|i| i.issue != n)
     {

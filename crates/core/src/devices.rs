@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{append, emit, read, Event};
+use crate::events::{append, emit, working, Event};
 use crate::gate::refused;
 use crate::Ctx;
 use anyhow::Result;
@@ -74,7 +74,7 @@ pub fn store(ctx: &Ctx, d: &[Device]) -> Result<()> {
     let fresh = |e: &Event| e.kind == "state-write-failed" && e.ts + 3600 > ctx.now;
     let p = crate::db::file(&ctx.state);
     let r = crate::db::store(&ctx.state, "devices", d);
-    let seen = || read(&ctx.state).unwrap_or_default().iter().any(fresh);
+    let seen = || working(&ctx.state).unwrap_or_default().iter().any(fresh);
     if let Some(e) = r.as_ref().err().filter(|_| !seen()) {
         let kind = e.downcast_ref().map_or(io::ErrorKind::Other, io::Error::kind);
         let d = json!({"path": p, "error": kind.to_string(), "reason": format!("{}: {kind}", p.display())});

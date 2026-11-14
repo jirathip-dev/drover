@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{emit, read, Event};
+use crate::events::{emit, working, Event};
 use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::{bail, Context, Result};
@@ -16,7 +16,7 @@ pub fn self_update(
     mode: (bool, bool, bool),
 ) -> Result<i32> {
     let (dry, pause, resume) = mode;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     if pause || resume {
         let (kind, word) = [("self-update-resumed", "resumed"), ("self-update-paused", "paused")][usize::from(pause)];
         let by = std::env::var("DROVER_LANE").ok().filter(|l| !l.is_empty());
