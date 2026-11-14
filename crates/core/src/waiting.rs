@@ -560,11 +560,14 @@ pub fn scan(
     events: &[Event],
     agents: &[Value],
     live: bool,
+    only: Option<&str>,
 ) -> Vec<(IssueState, Waiting)> {
     let (mut out, log) = (vec![], Log::new(events));
     let busy = |l: &str| agents.iter().any(|a| a["name"] == l && a["agent_status"] == "working");
     let hung = crate::roots::hung_now(events);
-    for s in fold(events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
+    for s in
+        (fold(events).into_values()).filter(|s| cfg.fleet.contains_key(&s.fleet) && only.is_none_or(|o| o == s.fleet))
+    {
         let Some(lane) = s.lane.clone().or_else(|| {
             s.build
                 .as_ref()

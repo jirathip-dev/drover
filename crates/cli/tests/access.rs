@@ -460,7 +460,7 @@ fn capped_lane_waits_on_drive_to_respawn_on_a_free_account() {
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let agents = [serde_json::json!({"name": "sendmeter-impl-12", "agent_status": "idle"})];
     let ev = read(&c.state).unwrap();
-    let waits = drover::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false);
+    let waits = drover::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false, None);
     let w = &waits.iter().find(|(s, _)| s.issue == 12).unwrap().1;
     assert_eq!(w.who, "drive", "{w:?}");
     let cmd = w.next_cmd.clone().unwrap();
@@ -485,7 +485,7 @@ fn capped_ready_lane_is_not_told_to_respawn() {
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let agents = [json!({"name": "sendmeter-impl-12", "agent_status": "idle"})];
     let ev = read(&c.state).unwrap();
-    let waits = drover::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false);
+    let waits = drover::waiting::scan(&c, &cfg, &Fake::default(), &ev, &agents, false, None);
     let w = &waits.iter().find(|(s, _)| s.issue == 12).unwrap().1;
     assert!(
         !w.next_cmd.as_deref().unwrap_or_default().contains("--supersede"),

@@ -150,6 +150,7 @@ fn lanes(c: &drover::Ctx, r: &Fake, agents: &[serde_json::Value]) -> Vec<(drover
         &read(&c.state).unwrap(),
         agents,
         true,
+        None,
     )
 }
 

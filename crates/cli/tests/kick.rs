@@ -85,13 +85,16 @@ fn three_kicks_coalesce_into_one_run_and_one_follow_up() {
 #[test]
 fn a_held_drive_lock_does_not_delay_a_kick() {
     let (c, sh) = fan("kick-busy");
-    lease_as(&c, "drive.lock", 4242, c.now, 3600);
+    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     let r = fake(1);
     kick(&c, &r, "2");
     assert_eq!(kicks(&c).len(), 1);
     assert_eq!(started(&sh).len(), 1);
     assert_eq!(r.count("sleep 10"), 1, "no follow-up");
-    assert!(lease_on(&c, "drive.lock").is_some(), "the pass's lock is left alone");
+    assert!(
+        lease_on(&c, "drive-sendmeter.lock").is_some(),
+        "the pass's lock is left alone"
+    );
 }
 
 #[test]

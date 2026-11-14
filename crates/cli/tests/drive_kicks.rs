@@ -613,29 +613,22 @@ fn kicked_fleets(r: &Fake) -> Vec<String> {
 }
 
 #[test]
-fn starts_share_slots_round_robin_across_fleets() {
+fn starts_share_slots_across_fleets_passing_at_once() {
     let names = ["alpha", "beta", "gamma"];
     let (c, _sh) = fleets("kicks-638-fair", &names, 7, 5);
-    let mut firsts = vec![];
+    let alive = format!("kill -0 {}", std::process::id());
     for _ in 0..3 {
-        let r = fake("1.0");
+        let r = fake_with("1.0", Fake::default().reply(&alive, ""));
         let (code, out) = run(&c, &r, &["drive"]);
         assert_eq!(code, 0, "{out}");
         let k = kicked_fleets(&r);
         for n in names {
             assert_eq!(k.iter().filter(|f| *f == n).count(), 2, "{n}: {k:?}");
         }
-        assert_eq!(
-            k[..3].iter().collect::<std::collections::BTreeSet<_>>().len(),
-            3,
-            "one each first: {k:?}"
-        );
-        firsts.push(k[0].clone());
         for l in drover::db::leases(&c.state, "spawn-") {
             drover::db::release(&c.state, &l.key, None);
         }
     }
-    assert_eq!(firsts, ["alpha", "beta", "gamma"]);
 }
 
 struct Watch(Fake, drover::Ctx, Shared<Vec<bool>>);
@@ -665,10 +658,12 @@ fn a_kick_refused_host_busy_releases_its_slot_in_the_same_pass() {
 #[test]
 fn waiting_names_the_slot_holders() {
     let (c, _sh) = fleets("kicks-638-slots", &["alpha", "beta"], 4, 2);
-    pass(&c, &fake("1.0"));
+    let alive = format!("kill -0 {}", std::process::id());
+    pass(&c, &fake_with("1.0", Fake::default().reply(&alive, "")));
     let (code, out) = run(&c, &fake("1.0"), &["waiting"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("slots: alpha 2, beta 1\n"), "{out}");
+    let slots = ["slots: alpha 2, beta 1\n", "slots: beta 2, alpha 1\n"];
+    assert!(slots.iter().any(|s| out.contains(s)), "{out}");
 }
 
 fn broken(f: Fake) -> Fake {
@@ -878,4 +873,75 @@ fn a_manual_spawn_and_drives_launch_agree_on_the_slots() {
     let d = pass(&c, &r);
     assert_eq!(launched(&r, 1), 1, "{d}");
     assert!(!codes(&d).contains(&"SPAWN_PENDING".to_string()), "{d}");
+}
+
+struct SlowAlpha(Fake, drover::Ctx, Shared<Vec<bool>>);
+impl drover::runner::Runner for SlowAlpha {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        if prog == "gh" && args.join(" ").contains("alpha") {
+            let beta = |e: &drover::events::Event| e.kind == "drive-pass" && e.fleet == "beta";
+            let t = std::time::Instant::now();
+            let mut done = false;
+            while !done && t.elapsed() < std::time::Duration::from_secs(30) {
+                done = read(&self.1.state).unwrap_or_default().iter().any(beta);
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+            self.2.borrow_mut().push(done);
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+#[test]
+fn a_fleet_whose_gh_hangs_never_holds_another_fleets_pass_or_its_spawn() {
+    let (c, sh) = fleets("kicks-896-slow", &["alpha", "beta"], 0, 1);
+    let r = SlowAlpha(fake("1.0"), c.clone(), Shared::default());
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let waits = r.2.borrow().clone();
+    assert!(
+        !waits.is_empty() && waits.iter().all(|d| *d),
+        "alpha's gh calls saw beta's pass end: {waits:?}"
+    );
+    let ev = read(&c.state).unwrap();
+    let beta = ev.iter().find(|e| e.kind == "drive-pass" && e.fleet == "beta").unwrap();
+    assert_eq!(beta.data["actions"][0]["outcome"], "started", "{:?}", beta.data);
+    let runs = sh.all("run");
+    assert!(runs.iter().any(|p| p["name"] == "beta-impl-1"), "{runs:?}");
+}
+
+struct Meet(Fake, std::sync::Barrier);
+impl drover::runner::Runner for Meet {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        if prog == "sysctl" && args.join(" ") == "-n vm.loadavg" {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::scope(|s| {
+                s.spawn(|| {
+                    self.1.wait();
+                    let _ = tx.send(());
+                });
+                if rx.recv_timeout(std::time::Duration::from_secs(2)).is_err() {
+                    self.1.wait();
+                }
+            });
+        }
+        self.0.run(prog, args)
+    }
+    fn sleep(&self, _: u64) {}
+}
+
+#[test]
+fn two_fleets_passes_at_once_never_admit_a_spawn_past_the_host_limit() {
+    let (c, _sh) = fleets("kicks-896-admit", &["alpha", "beta"], 2, 1);
+    let pid = std::process::id();
+    let r = Meet(
+        fake_with("1.0", Fake::default().reply(&format!("kill -0 {pid}"), "")),
+        std::sync::Barrier::new(2),
+    );
+    let (code, out) = run(&c, &r, &["drive"]);
+    assert_eq!(code, 0, "{out}");
+    let held = drover::db::leases(&c.state, "spawn-");
+    assert_eq!(held.len(), 1, "one start slot of two: {held:?} {out}");
+    assert!(out.contains("REFUSED SPAWN_PENDING"), "{out}");
 }

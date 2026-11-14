@@ -201,10 +201,11 @@ fn a_pass_stuck_past_three_pass_max_secs_is_logged_and_the_next_pass_takes_its_l
     let f = host().reply("kill -0", "").reply("ps -o etime=", "01:00:00");
     assert_eq!(run(&r.c, &f, &["drive", "--fast"]).0, 0);
     let at = |ts: u64| drover::db::take(&r.c.state, "drive-fast.lock", ts, 360, "", &|_| false);
-    let live = at(NOW - 300).expect("a pass holds the lock");
+    let fleet = drover::db::take(&r.c.state, "drive-fast-sendmeter.lock", NOW - 300, 360, "", &|_| false);
+    let live = fleet.expect("a pass holds the fleet's lock");
     let (_, out) = run(&r.c, &f, &["drive", "--fast"]);
-    assert!(out.contains("another pass holds drive-fast.lock"), "{out}");
-    drover::db::release(&r.c.state, "drive-fast.lock", Some(&live));
+    assert!(out.contains("another pass holds drive-fast-sendmeter.lock"), "{out}");
+    drover::db::release(&r.c.state, "drive-fast-sendmeter.lock", Some(&live));
     at(NOW - 361).expect("a pass that hung 361 s ago");
     let (code, out) = run(&r.c, &f, &["drive", "--fast"]);
     assert_eq!(code, 0, "{out}");

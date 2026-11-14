@@ -172,6 +172,10 @@ database error reading the devices answers 503 `board busy, retrying` (API v1: `
 a send once after 2 s and says "reconnecting". Each 401 and 503 is one `serve.log` line, `auth <unix secs> <status>
 <method> <route>: <reason>` (`no cookie`, `unknown token`, `expired`, `db error: <kind>`; never the token), and
 `drover doctor` shows the last 24 h's counts.
+#896: up to 256 requests run at once (reads off the snapshot are cheap), of which at most 16 writes (any non-GET); past
+either bound the reply is 503 with `Retry-After: 1`. A board op that can spawn or merge (`drive`, `override`, `extend`,
+`park`) runs on a worker per key: the fleet for a drive press, `<fleet>#<issue>` for the rest. Different keys run at once,
+one key's ops run in the order they came; the same op already waiting on its key is `DRIVE_RUNNING`. Each ends in a toast.
 The panel reads `Waiting for approval on the Mac: drover serve approve <code>`. An unpaired page,
 while any device is paired, adds "Safari and the home-screen app pair separately" (iOS keeps their cookies apart). An optional `[serve] approve_hint`
 (a string, `{code}` replaced by the code) is appended after ` · `, e.g.

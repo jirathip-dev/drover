@@ -286,10 +286,15 @@ impl Server<'_> {
             let state = crate::gate::held(ctx, &fleet, n)?;
             crate::gate::extended(ctx, (&fleet, n), (true, "owner"), &state)?;
         }
-        if !lock(&self.running).insert(key.clone()) {
+        let mut q = lock(&self.running);
+        let jobs = q.entry(key.clone()).or_default();
+        if jobs.iter().any(|j| j.1.get("op") == Some(&op)) {
             return refused("DRIVE_RUNNING", format!("{key} has a {op} running"));
         }
-        drop(tx.send((ctx.clone(), f, key.clone())));
+        jobs.push_back((ctx.clone(), f, key.clone()));
+        if jobs.len() == 1 {
+            drop(tx.send(key.clone()));
+        }
         Ok(format!("{op} started for {key}"))
     }
 
