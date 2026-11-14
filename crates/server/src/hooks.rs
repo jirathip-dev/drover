@@ -41,6 +41,9 @@ pub fn board(ctx: &Ctx, r: &dyn Runner, addr: &str, read_only: bool, handover: b
             Some(Err((a, e))) => eprintln!("drover serve: no webhooks: {a}: {e}"),
             None => {}
         }
+        if let Some(h) = ho {
+            sc.spawn(move || h.watch_mem(ctx, r));
+        }
         crate::serve::serve_with(ctx, r, l, read_only, ho)
     })
 }

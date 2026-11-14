@@ -598,6 +598,7 @@ pub struct Limits {
     pub serve_host_secs: u64,
     pub serve_heartbeat_secs: u64,
     pub serve_handover_secs: u64,
+    pub serve_mem_mb: u64,
     pub slo_api_p95_ms: u64,
     pub slo_api_minutes: u64,
     pub slo_idle_minutes: u64,
@@ -717,6 +718,7 @@ impl Default for Limits {
             serve_host_secs: 10,
             serve_heartbeat_secs: 15,
             serve_handover_secs: 300,
+            serve_mem_mb: 300,
             slo_api_p95_ms: 1000,
             slo_api_minutes: 10,
             slo_idle_minutes: 20,
@@ -968,6 +970,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "serve_handover_secs",
         "`self-update` waits this long for the running serve to hand over before restarting it",
+    ),
+    (
+        "serve_mem_mb",
+        "serve over this much RSS logs `serve-mem-high` once and hands over to a fresh copy of itself",
     ),
     (
         "slo_api_p95_ms",
