@@ -1,0 +1,11 @@
+Decided: widen #978's lanes table into the saved lane fold: the newest event of each lane kind per lane, with its JSON, updated on append
+Because: "Saved lane fold and ask fold, updated on append, kept exact for lanes of merged issues"
+Decided: every fresh log merges in the lane fold's events, so lanes compact archived stay visible; the working set drops lane kinds
+Because: "clean/reclaim/budget/orphans/stop/kill still see lanes idle for days"
+Decided: the lane readers go through events::lanes and last_spawn, the fold's view
+Because: "The ~20 lane readers (clean, reclaim, budget, orphans, stop, kill, …) read those folds, not the lane history."
+Decided: status --json reads only the per-issue rows; drover asks selects only open ask rows unless --all
+Because: "peak RSS under 100 MB on a copy of the mini's db, and stay flat when the log doubles"
+Rejected: a separate ask fold of my own — #978 landed the same one; this branch reuses it
+Check: tests/lane_fold.rs: kill finds a merged lane after compact archived it; both folds equal one pass over the whole log
+Owner: status --json drops from about 160 MB to 20 MB and both commands stay flat when the history doubles
