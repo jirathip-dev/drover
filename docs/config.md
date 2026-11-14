@@ -74,6 +74,12 @@ full_first_paths = ["db/migrations/**", ".github/workflows/**"]
   time, plus the minutes integration sat red.
 - **Promotion.** `main` stays human-only; promote a staging commit only once its full suite is green.
 
+## Merge label (#947)
+
+`merge_label` (unset by default) is the PR label the full CI needs. drover adds it on a PASS at the head and removes it
+when the head moves past that PASS. `drover setup` creates it in the repo, and `drover doctor` checks that it exists.
+New fleets set `merge_label = "merge-ready"` with the affected-only CI recipe in [ci.md](ci.md).
+
 ## Hotspots (#889)
 
 `drover hotspots [FLEET]` (every fleet when none is named) lists the files 5 or more merged PRs touched in the
