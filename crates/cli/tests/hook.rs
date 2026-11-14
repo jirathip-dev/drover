@@ -1498,7 +1498,7 @@ fn a_lanes_git_notes_write_or_notes_push_is_refused() {
     }
 }
 
-/// #668: an impl lane never writes `ci/cap.toml` or (#973) a raise in `ci/cap.d/` (an edit, a writer's argument, a redirection's target); reading it,
+/// #668: an impl lane never writes `ci/cap.toml` (an edit, a writer's argument, a redirection's target); reading it,
 /// or a check that names it, passes. The conductor-filed raise (its issue titled `cap: …`) may edit it.
 #[test]
 fn impl_lane_never_edits_the_cap_file() {

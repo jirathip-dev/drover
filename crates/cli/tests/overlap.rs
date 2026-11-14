@@ -872,7 +872,6 @@ fn check_emits_cap_near_once_per_integration_sha() {
     assert_eq!(near().len(), 2, "#973: the highest raise in ci/cap.d/ is the cap");
 }
 
-/// #973: a raise is one file in `cap.d/` beside the cap file; the highest `line_cap` wins, never the sum.
 #[test]
 fn cap_check_takes_the_highest_raise_in_cap_d() {
     let d = tmpdir("cap-d");

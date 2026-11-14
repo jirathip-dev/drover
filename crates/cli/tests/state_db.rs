@@ -143,7 +143,6 @@ fn the_database_is_owner_only() {
     assert_eq!(mode, 0o600);
 }
 
-/// #973: a new kind emitted `.passive()` keeps its flag through the log and the fold skips it; unflagged it is activity.
 #[test]
 fn a_kind_flagged_passive_where_it_is_emitted_is_not_activity() {
     let d = tmpdir("passive-flag");

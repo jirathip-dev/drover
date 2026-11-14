@@ -581,6 +581,23 @@ fn a_line_added_to_a_frozen_list_fails_but_removed_edited_or_collected_ones_pass
 }
 
 #[test]
+fn a_frozen_list_is_judged_from_the_diff_after_the_one_that_creates_it() {
+    let d = committed("arch-frozen-new", FROZEN, &[("src/features/a.rs", "fn a() {}\n")]);
+    std::fs::write(d.join("src/registry.rs"), "mod a;\nmod b;\n").unwrap();
+    git(&d, &["add", "."]);
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    git(&d, &["commit", "-qm", "freeze"]);
+    std::fs::write(d.join("src/registry.rs"), "mod a;\nmod b;\nmod c;\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("src/registry.rs:3: `mod c;` added to a frozen list"),
+        "{out}"
+    );
+}
+
+#[test]
 fn a_generated_file_that_differs_from_its_regenerated_output_fails() {
     let conf = "generated = [\"gen/types.ts\"]\ngenerate = \"mkdir -p gen && printf 'export type A = 1;\\\\n' > gen/types.ts\"\n";
     let d = committed("arch-generated", conf, &[("gen/types.ts", "export type A = 1;\n")]);

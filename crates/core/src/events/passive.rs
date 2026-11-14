@@ -1,10 +1,8 @@
 /// #973: frozen: the passive kinds logged before `Event::passive`; a new kind sets the flag where it is emitted.
 pub const LEGACY: &[&str] = &[
-    // #778: a tapped start still waiting; the decision before it moved the issue.
     "pending-action",
     "lane-state",
     "lesson-prompted",
-    // #511: a lane's typed turn end and drive's prompt on it; neither moves the issue.
     "turn-end",
     "turn-prompted",
     "promise",
@@ -12,21 +10,17 @@ pub const LEGACY: &[&str] = &[
     "self-heal",
     "stuck",
     "slo-ok",
-    // #677: a why note put on a round head, one that failed to push, and drive's one nudge on a refused note.
     "why",
     "why-failed",
     "why-nudged",
-    // #666: an ACP lane's first prompt sent again.
     "start-resent",
     "nudged",
     "respawned-silent",
     "rev-stale-replaced",
     "budget-freed",
-    // #798: a finished lane's build folder or scratch removed.
     "build-freed",
     "wip-saved",
     "wip-blocked",
-    // #662: a gone ACP lane's local commits drive pushed before resuming it.
     "lane-pushed",
     "stall",
     "orphan-lane",
@@ -43,11 +37,9 @@ pub const LEGACY: &[&str] = &[
     "lane-failed-start",
     "cap-banner-ignored",
     "spawn-failed",
-    // #724: a failed spawn drive retries after a backoff, and the alert on a third identical one.
     "spawn-error",
     "spawn-failing",
     "spawn-started",
-    // #500: an adoption is logged with its `spawn`; a design lane's alone must not end the issue's verdict wait.
     "spawn-adopted",
     "fallback",
     "ask-waiting",
@@ -75,13 +67,11 @@ pub const LEGACY: &[&str] = &[
     "spawn-held",
     "host-busy",
     "outbox",
-    // #584: an ask's other endings, and the one-time sweep.
     "ask-withdrawn",
     "ask-delivered",
     "ask-failed",
     "ask-expired",
     "asks-swept",
-    // #509: a side effect's log around it; the step's own event (spawn, merged) is the activity.
     "intent",
     "done",
     "failed",

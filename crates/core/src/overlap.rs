@@ -148,7 +148,7 @@ fn pure_at(r: &dyn Runner, dir: &Path, into: &str, s: &IssueState, h: &str) -> b
             == git(r, dir, &["rev-parse", &format!("{h}^{{tree}}")]).ok()
 }
 
-/// `drover cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config` (#973: or a higher raise in its `cap.d/`);
+/// `drover cap-check`: formatted lines of `src/**/*.rs` and `crates/*/src/**/*.rs` (#264) against the first `[fleet.<n>] line_cap` in `config`;
 /// #429: under `warn_within` lines of headroom it warns and still passes. #270: `web/src/**/*.ts` lines are reported, never capped.
 pub fn cap_check(config: &Path, rules: &Path, out: &mut dyn std::io::Write) -> Result<i32> {
     let dir = std::fs::read_dir(config.with_file_name("cap.d"));
@@ -205,7 +205,6 @@ pub struct Cap {
     pub from: String,
 }
 
-/// #973: `base`, a cap file, and each `(name, text)` raise (top-level `line_cap`): the highest wins, never the sum.
 fn highest(name: &str, base: &str, raises: Vec<(String, String)>) -> Option<Cap> {
     let (lines, warn_within) = limits(base)?;
     let num = |t: &str| toml::from_str::<toml::Value>(t).ok()?.get("line_cap")?.as_integer();
