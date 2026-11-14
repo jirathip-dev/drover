@@ -1,0 +1,10 @@
+Decided: shed's reported `running` becomes `working` where shed's terminal turns into an agent row (crates/core/src/herdr.rs:209), so every caller that asks "is it working" (board, herd, drive, check) agrees.
+Because: "a lane that shed reports `running`, i.e. mid-turn or mid-tool, is **working**"
+Decided: shed's note rides along as the agent row's `note` and becomes the lane's `now` line while it works, the lanes tab's subtitle.
+Because: "with shed's note shown as the row's subtitle (e.g. `running: cargo test (8m)`)"
+Rejected: mapping in serve's act() only — the herd, drive and check would still read `running` as not working.
+Rejected: a new field in the API shapes — the lanes row's existing `now` line already is the subtitle, so no type or golden changes.
+Decided: herd's `act` for a working impl lane stays `impl` (the role's action, crates/server/src/serve.rs:778), its `state` is `working`; no note in herd, which carries no activity text.
+Decided: section order unchanged: blocked, then working, then idle; working already comes before idle.
+Check: cargo test --test herd a_shed_lane_reported_running_is_working_with_its_note fails at commit 1 and passes at head.
+Owner: busy shed lanes now show as working on the lanes tab with what they are running.
