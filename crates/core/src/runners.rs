@@ -1,17 +1,11 @@
-//! #537 `herdsman runners`: the owner's `[ci_runners]` VMs and their GitHub runners (docs/hosts.md). Each verb is
-//! logged `runners-<verb>`. The registration token goes to a VM on stdin (`cloud::run`), never into argv, the log or
-//! the output; the provider key stays on this host.
 use crate::config::{CiRunners, Config};
-use crate::events::{age, emit, read, Event};
+use crate::events::{age, emit, working, Event};
 use crate::gate::refused;
 use crate::runner::{argv, ok, Runner};
 use crate::Ctx;
 use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
-
-/// How often `check` pushes a fresh registration token to every VM (GitHub's last an hour).
-const TOKEN_EVERY: u64 = 30 * 60;
 
 pub enum Verb {
     Status,
@@ -22,7 +16,6 @@ pub enum Verb {
     RetireLocal,
 }
 
-/// A GitHub runner: id, name, online, busy.
 type Gh = (u64, String, bool, bool);
 
 fn conf(cfg: &Config) -> Result<&CiRunners> {
@@ -30,7 +23,7 @@ fn conf(cfg: &Config) -> Result<&CiRunners> {
 }
 
 fn log(ctx: &Ctx, cfg: &Config, kind: &str, d: Value) -> Result<()> {
-    emit(&ctx.state, cfg, Event::new(ctx.now, "herdsman", None, kind, d))
+    emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))
 }
 
 /// The VMs now: `vms`, then each `runners-add` and `runners-remove` in the log.
@@ -46,7 +39,6 @@ pub fn vms(c: &CiRunners, events: &[Event]) -> Vec<String> {
     v
 }
 
-/// The repo's GitHub runners labelled `label`.
 fn github(r: &dyn Runner, c: &CiRunners, label: &str) -> Result<Vec<Gh>> {
     let v: Value = serde_json::from_str(&ok(
         r,
@@ -86,7 +78,6 @@ fn deregister(r: &dyn Runner, c: &CiRunners, g: &Gh) -> Result<()> {
     .map(drop)
 }
 
-/// A fresh registration token (held in memory only).
 fn token(r: &dyn Runner, c: &CiRunners) -> Result<String> {
     let url = format!("repos/{}/actions/runners/registration-token", c.repo);
     let t = ok(r, "gh", &["api", "-X", "POST", &url, "--jq", ".token"])?
@@ -96,8 +87,6 @@ fn token(r: &dyn Runner, c: &CiRunners) -> Result<String> {
     Ok(t)
 }
 
-/// Recipe command `key` for VM `vm`: `runner_create|state|delete` run on the provider, the others (`runner_revive`,
-/// `runner_token`, `runner_drain`, `runner_names`) on the VM through `runner_exec` (as `$C`, `{rt}` the token).
 fn rc(ctx: &Ctx, r: &dyn Runner, c: &CiRunners, key: &str, vm: &str, token: Option<&str>) -> Result<String> {
     let rc = crate::cloud::load(ctx, &c.provider)?;
     let s = |k: &str| {
@@ -122,15 +111,12 @@ fn rc(ctx: &Ctx, r: &dyn Runner, c: &CiRunners, key: &str, vm: &str, token: Opti
     crate::cloud::run(ctx, r, &rc, &format!("{vm} {key}"), &line, token)
 }
 
-/// One VM's cost a day: the recipe's `rate_usd_hour` for `size`, × 24.
 fn per_day(ctx: &Ctx, c: &CiRunners) -> Result<f64> {
     let rc = crate::cloud::load(ctx, &c.provider)?;
     let rate = rc.get("rate_usd_hour").and_then(|t| t.get(&c.size)?.as_float());
     Ok(rate.with_context(|| format!("no rate_usd_hour for size {}", c.size))? * 24.0)
 }
 
-/// The owner said yes to ask `id` about `runners <verb>`: an owner ask whose first option the owner (not a conductor, not
-/// the default) chose, used by no verb yet (one yes lets one run on).
 fn approved(events: &[Event], id: Option<&str>, verb: &str) -> bool {
     let Some(id) = id else { return false };
     let ask = events
@@ -141,7 +127,7 @@ fn approved(events: &[Event], id: Option<&str>, verb: &str) -> bool {
         a.str("question")
             .is_some_and(|q| q.contains(&format!("runners {verb}")))
     });
-    let yes = ask.and_then(|a| a.data["options"].get(0)?.as_str());
+    let yes = ask.and_then(|a| a.val("options").get(0)?.as_str());
     let by = |e: &&Event| {
         e.str("by")
             .is_some_and(|b| b != "default" && !b.starts_with("orchestrator-"))
@@ -160,7 +146,7 @@ fn ask_owner<T>(code: &'static str, why: &str, verb: &str) -> Result<T> {
     refused(
         code,
         format!(
-            "{why}: ask the owner (`herdsman ask <fleet> \"herdsman runners {verb}: ok?\" --option yes --option no \
+            "{why}: ask the owner (`drover ask <fleet> \"drover runners {verb}: ok?\" --option yes --option no \
              --kind owner`), then run it again with --approved <id>"
         ),
     )
@@ -172,9 +158,8 @@ pub fn health(r: &dyn Runner, c: &CiRunners, events: &[Event]) -> Result<(u64, u
     Ok((on as u64, c.slots * vms(c, events).len() as u64))
 }
 
-/// Push a fresh token to every VM; the VMs it reached.
 fn push_tokens(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &CiRunners) -> Result<usize> {
-    let (t, all) = (token(r, c)?, vms(c, &read(&ctx.state)?));
+    let (t, all) = (token(r, c)?, vms(c, &working(&ctx.state)?));
     let failed: Vec<_> = all
         .iter()
         .filter(|vm| rc(ctx, r, c, "runner_token", vm, Some(&t)).is_err())
@@ -188,7 +173,7 @@ fn push_tokens(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &CiRunners) -> Result
     Ok(all.len() - failed.len())
 }
 
-/// `check`: a fresh token every `TOKEN_EVERY`, then the health (`runners-low` / `runners-ok` are check's).
+/// `check`: a fresh token every `token_refresh_minutes`, then the health (`runners-low` / `runners-ok` are check's).
 pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Option<Result<(u64, u64)>> {
     let c = cfg.ci_runners.as_ref()?;
     let last = events
@@ -196,15 +181,15 @@ pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Option
         .rev()
         .find(|e| e.kind == "runners-tokens")
         .map_or(0, |e| e.ts);
-    if last + TOKEN_EVERY <= ctx.now {
+    if last + cfg.limits.token_refresh_minutes * 60 <= ctx.now {
         if let Err(e) = push_tokens(ctx, cfg, r, c) {
-            eprintln!("herdsman check: runner tokens: {e:#}");
+            eprintln!("drover check: runner tokens: {e:#}");
         }
     }
     Some(health(r, c, events))
 }
 
-/// `herdsman runners <verb>`; `ok_id` an owner ask that approved going past a gate.
+/// `drover runners <verb>`; `ok_id` an owner ask that approved going past a gate.
 pub fn run(
     ctx: &Ctx,
     cfg: &Config,
@@ -214,7 +199,7 @@ pub fn run(
     ok_id: Option<&str>,
 ) -> Result<()> {
     let c = conf(cfg)?;
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let all = vms(c, &events);
     match verb {
         Verb::Status => {
@@ -339,10 +324,10 @@ pub fn run(
             let ago = last.map_or("never".into(), |e| format!("{} ago", age(ctx.now - e.ts)));
             Ok(writeln!(
                 out,
-                "tokens: a fresh one on {n}/{} VMs; the refresher is `herdsman check` (the 5-minute timer), every {} \
+                "tokens: a fresh one on {n}/{} VMs; the refresher is `drover check` (the 5-minute timer), every {} \
                  min (before this: {ago})",
                 all.len(),
-                TOKEN_EVERY / 60
+                cfg.limits.token_refresh_minutes
             )?)
         }
         Verb::RetireLocal => {

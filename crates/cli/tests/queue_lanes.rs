@@ -1,10 +1,7 @@
-//! #205: an open Queue card lists its issue's lanes newest first (5, then `+N older`); a lane herdr lists
-//! (and the card's current lane name) links to its Lanes sheet, a gone one is muted text with no tap; #218: unless its
-//! transcript is stored (`data-gone`). The name and `state age` are spans, so the name ellipsises first.
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const T: u64 = 1_000_000;
@@ -29,14 +26,14 @@ fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
         )
         .unwrap();
     }
-    let r = Fake::default().reply(
-        "herdr agent list",
-        &agents(&[
-            ("impl-3-u1", "working", "/x", "w1:p1"),
-            ("rev-3-r3", "done", "/x", "w1:p2"),
-        ]),
-    );
-    // #268: the Queue tab as the board draws it from API v1's `queue`.
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    for (n, status) in [("impl-3-u1", "working"), ("rev-3-r3", "done")] {
+        sh.lane(n, status, "/x");
+        sh.screen(n, "");
+    }
+    let f = Fake::default();
+    let r = sh.on(&f);
     let page = queue_tab(&Server::new(&c, &r, None), "", T);
     let card = &page[page.find("<div class=qls>").expect("lanes list")..];
     let card = &card[..card.find("</div>").unwrap()];
@@ -63,8 +60,7 @@ fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
         !card.contains("data-agent=\"rev-3-r2\""),
         "a gone lane has no tap target: {card}"
     );
-    // #218: a gone lane with a stored transcript links to it, marked `data-gone`.
-    let log = herdsman::lanes::log(&c.state, "rev-3-r2").unwrap();
+    let log = drover::lanes::log(&c.state, "rev-3-r2").unwrap();
     std::fs::create_dir_all(log.parent().unwrap()).unwrap();
     std::fs::write(&log, "  out\n").unwrap();
     let page2 = queue_tab(&Server::new(&c, &r, None), "", T);
@@ -73,12 +69,11 @@ fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
         "{page2}"
     );
     std::fs::remove_file(&log).unwrap();
-    // The card's current lane name opens the same sheet.
     assert!(
         page.contains("<p><a href=#lanes class=\"ql nw el\" data-agent=\"impl-3-u1\">impl-3-u1</a></p>"),
         "{page}"
     );
-    // A current lane herdr no longer lists stays plain text.
-    let page = queue_tab(&Server::new(&c, &Fake::default(), None), "", T);
+    drop(sh);
+    let page = queue_tab(&Server::new(&c, &r, None), "", T);
     assert!(page.contains("<p>impl-3-u1</p>"), "{page}");
 }

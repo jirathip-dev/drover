@@ -89,7 +89,7 @@
       "imp": true,
       "issue": 9,
       "k": "needs-you",
-      "plain": "sendmeter #9 needs you (? asks q7): Which DB?\n  1) sqlite (recommended)\n  2) postgres\n  herdsman answer sendmeter q7 <n|\"text\">",
+      "plain": "sendmeter #9 needs you (? asks q7): Which DB?\n  1) sqlite (recommended)\n  2) postgres\n  drover answer sendmeter q7 <n|\"text\">",
       "pr": null,
       "run": null,
       "seq": 4,

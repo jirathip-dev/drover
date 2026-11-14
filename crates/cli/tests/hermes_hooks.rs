@@ -1,8 +1,6 @@
-//! #21 AC3: `herdsman profiles sync` writes the Hermes `hooks:` key and nothing else.
 mod common;
 use common::{ctx, run, tmpdir, Fake, CONFIG};
 
-/// A role (design) whose Hermes profile is not on disk.
 const DESIGN: &str = "\n[fleet.sendmeter.role.design]\nharness = \"hermes\"\nprofile = \"fleet-design\"\n";
 
 const PROFILE: &str = "# fleet reviewer profile\n\
@@ -12,7 +10,6 @@ hooks:\n  post_tool_call:\n    - command: /old/hook.sh\n\n\
 terminal:\n  backend: local   # trailing comment\n\
 agent:\n  max_turns: 90";
 
-/// The lines outside the top-level `hooks:` block.
 fn without_hooks(text: &str) -> Vec<&str> {
     let mut skip = false;
     text.lines()
@@ -45,13 +42,12 @@ fn sync_writes_only_the_hooks_key_idempotently() {
         "other settings unchanged:\n{once}"
     );
     assert!(once.contains(
-        "hooks:\n  pre_tool_call:\n    - matcher: \"terminal|patch|write_file\"\n      command: \"'/opt/herdsman/bin/herdsman' hook --role rev\"\n  post_tool_call:\n    - matcher: \"terminal\"\n      command: \"'/opt/herdsman/bin/herdsman' hook --role rev\"\n# keep me\n"
+        "hooks:\n  pre_tool_call:\n    - matcher: \"terminal|patch|write_file\"\n      command: \"'/opt/drover/bin/drover' hook --role rev\"\n  post_tool_call:\n    - matcher: \"terminal\"\n      command: \"'/opt/drover/bin/drover' hook --role rev\"\n# keep me\n"
     ), "{once}");
     assert!(!once.contains("/old/hook.sh"));
     assert!(std::fs::read_to_string(&impl_).unwrap().ends_with(
-        "model:\n  default: x\nhooks:\n  pre_tool_call:\n    - matcher: \"terminal|patch|write_file\"\n      command: \"'/opt/herdsman/bin/herdsman' hook --role impl\"\n  post_tool_call:\n    - matcher: \"terminal\"\n      command: \"'/opt/herdsman/bin/herdsman' hook --role impl\"\n"
+        "model:\n  default: x\nhooks:\n  pre_tool_call:\n    - matcher: \"terminal|patch|write_file\"\n      command: \"'/opt/drover/bin/drover' hook --role impl\"\n  post_tool_call:\n    - matcher: \"terminal\"\n      command: \"'/opt/drover/bin/drover' hook --role impl\"\n"
     ));
-    // A role without a Hermes profile on disk gets none created.
     assert!(!c.homes["hermes"].join("fleet-design").exists());
 
     let (code, _) = run(&c, &Fake::default(), &["profiles", "sync"]);
@@ -59,8 +55,6 @@ fn sync_writes_only_the_hooks_key_idempotently() {
     assert_eq!(std::fs::read_to_string(&rev).unwrap(), once, "second sync is a no-op");
 }
 
-/// #24 AC1/AC3: sync records Hermes' consent for the herdsman hook: exactly one approval
-/// per fleet role, other approvals and non-herdsman profiles untouched, second sync a no-op.
 #[test]
 fn sync_approves_the_hook_once_per_role() {
     let d = tmpdir("hermes-allow");
@@ -79,7 +73,7 @@ fn sync_approves_the_hook_once_per_role() {
         |p: &str| std::fs::read_to_string(c.homes["hermes"].join(p).join("shell-hooks-allowlist.json")).unwrap();
     for (p, role) in [("fleet-rev", "rev"), ("fleet-impl", "impl")] {
         let v: serde_json::Value = serde_json::from_str(&allow(p)).unwrap();
-        let cmd = format!("'/opt/herdsman/bin/herdsman' hook --role {role}");
+        let cmd = format!("'/opt/drover/bin/drover' hook --role {role}");
         let fleet: Vec<_> = v["approvals"]
             .as_array()
             .unwrap()
@@ -87,7 +81,6 @@ fn sync_approves_the_hook_once_per_role() {
             .filter(|e| e["command"] == cmd)
             .collect();
         let ev = |e: &str| serde_json::json!({"event": e, "command": cmd});
-        // #304: `post_tool_call` too, so a push kicks the issue.
         assert_eq!(fleet, [&ev("pre_tool_call"), &ev("post_tool_call")], "{p}");
     }
     let rev: serde_json::Value = serde_json::from_str(&allow("fleet-rev")).unwrap();
@@ -108,8 +101,6 @@ fn sync_approves_the_hook_once_per_role() {
     );
 }
 
-/// #24 AC2: `--check` reads `hermes hooks list` as a fleet lane runs it (HERDSMAN_LANE set)
-/// and fails unless every fleet profile's hook is `✓ allowed`.
 #[test]
 fn sync_check_requires_allowed_hooks() {
     let d = tmpdir("hermes-check");
@@ -119,10 +110,10 @@ fn sync_check_requires_allowed_hooks() {
         std::fs::write(c.homes["hermes"].join(p).join("config.yaml"), "model:\n  default: x\n").unwrap();
     }
     let line = |role: &str, status: &str| {
-        format!("  [pre_tool_call]\n    - '/opt/herdsman/bin/herdsman' hook --role {role} (timeout=60s, {status})\n")
+        format!("  [pre_tool_call]\n    - '/opt/drover/bin/drover' hook --role {role} (timeout=60s, {status})\n")
     };
-    let rev = "env HERDSMAN_LANE=sendmeter:-:rev hermes -p fleet-rev hooks list";
-    let impl_ = "env HERDSMAN_LANE=sendmeter:-:impl hermes -p fleet-impl hooks list";
+    let rev = "env DROVER_LANE=sendmeter:-:rev hermes -p fleet-rev hooks list";
+    let impl_ = "env DROVER_LANE=sendmeter:-:impl hermes -p fleet-impl hooks list";
     let r = Fake::default()
         .reply(rev, &line("rev", "✓ allowed"))
         .reply(impl_, &line("impl", "✗ not allowlisted"));
@@ -144,8 +135,6 @@ fn sync_check_requires_allowed_hooks() {
     assert_eq!(code, 0, "{out}");
 }
 
-/// #2 AC2: sync drops `agent.reasoning_effort` (fleet.toml owns effort now); nested
-/// per-auxiliary values and every other line are unchanged.
 #[test]
 fn sync_removes_agent_reasoning_effort_only() {
     let d = tmpdir("hermes-effort");

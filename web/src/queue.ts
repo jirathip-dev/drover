@@ -76,7 +76,8 @@ function row(d: QueueTab, c: QueueCard, r: QueueRow): string {
   const card = lines.filter(Boolean).map(l => `<p>${l}</p>`).join('');
   const ls = r.lanes.map(qlane), more = ls.length > 5 ? `<details class=qm><summary>+${ls.length - 5} older</summary>${ls.slice(5).join('')}</details>` : '';
   const qls = ls.length ? `<div class=qls>${ls.slice(0, 5).join('')}${more}</div>` : '';
-  const data = `${r.queued ? ' data-q' : ''}${r.check ? ' data-ck' : ''}${r.blocked_by == null ? '' : ` data-b=${r.blocked_by}`}${r.groups.length ? ` data-s="${esc(r.groups.join(' '))}"` : ''}${r.where ? ` data-w="${esc(r.where)}"` : ''} data-act=${r.act} data-grow=${r.grow} data-i=${n}${r.coat ? ` style="${r.coat}"` : ''}`;
+  const hot = r.groups.filter(g => g.startsWith('hot ')), gs = r.groups.filter(g => !hot.includes(g));
+  const data = `${r.queued ? ' data-q' : ''}${r.check ? ' data-ck' : ''}${r.blocked_by == null ? '' : ` data-b=${r.blocked_by}`}${gs.length ? ` data-s="${esc(gs.join(' '))}"` : ''}${hot.length ? ` data-h="${esc(hot.map(g => g.slice(4)).join(' | '))}"` : ''}${r.where ? ` data-w="${esc(r.where)}"` : ''} data-act=${r.act} data-grow=${r.grow} data-i=${n}${r.coat ? ` style="${r.coat}"` : ''}`;
   const title = r.title == null ? '' : `<span class=tl title="${esc(r.title)}">${esc(r.title)}</span>`;
   return `<details class="q"${data}><summary><span><a href="https://github.com/${esc(c.config.repo)}/issues/${n}">#${n}</a></span><span class=${r.tone}>${esc(r.state)}</span><span class=m data-t=${r.t}>${esc(r.age)}</span>${title}</summary>${card}${qls}</details>`;
 }
@@ -136,7 +137,7 @@ export function sheet(d: QueueTab, fleet: string): string | null {
     ['repo', esc(g.repo)],
     ['local', esc(g.local)],
     ['integration', esc(g.integration)],
-    ['driver', 'herdsman <span class=m>(herdsman drive)</span>'],
+    ['driver', 'drover <span class=m>(drover drive)</span>'],
     ['default effort', `${g.effort == null ? '<span class=m>unset → none</span>' : esc(g.effort)}${all}`],
     ['colour', `<span class=${c.k}>■</span> --${c.k} <span class=m>(${g.color_set ? 'set' : 'auto'})</span>`],
     ['env', list(g.env)],

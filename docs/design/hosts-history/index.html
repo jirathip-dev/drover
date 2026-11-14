@@ -61,22 +61,22 @@
 #host{padding-bottom:var(--s4)}
 </style></head>
 <body data-ts=1793738400 data-mode=glyph>
-<header><b>herdsman</b><span id=stale hidden></span><i id=dot class=g></i><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label="herd mode">🐎</button></header>
+<header><b>drover</b><span id=stale hidden></span><i id=dot class=g></i><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label="herd mode">🐎</button></header>
 <main><section id=host>
 
 <!-- 1 · HOSTS: one card per [hosts] host, main first, then the others A→Z; every card has the same rows. -->
 <details class=grp open data-t=a style=--kw:10ch><summary><i class=dt></i><span class=gn>HOSTS</span><span class=gs>mini disk: 12 GB free</span><i class=cv></i></summary>
 <div class=hgd>
 
- <!-- mini: the main host (runs herdsman, the board and the log). -->
+ <!-- mini: the main host (runs drover, the board and the log). -->
  <article class=hcd data-t=a data-h=mini>
   <div class=hhd><span class=hnm><i class="dt a"></i><b>mini</b><span class="tag m">main</span><span class="hw g">up · admits lanes</span></span><form method=post><button><span>off</span></button></form></div>
   <details class=rw data-t=g data-k=load><summary><span class=k>load/cpu</span><span class=w><span class="bar g">▕██████<i>░░░░░░</i>▏</span> <b class=g>1.20</b> <span class=m>/ 2.5</span></span><span class=t><i class=cv></i></span><svg class=spk></svg></summary></details>
   <details class=rw data-t=g data-k=swap><summary><span class=k>swap-out</span><span class=w><span class="bar g">▕<i>░░░░░░░░░░░░</i>▏</span> <b class=g>0</b> <span class=m>/ 2000</span> now · 12 avg <span class=mt>pages/2s · held on the avg with pressure warn/critical</span></span><span class=t><i class=cv></i></span><svg class=spk></svg></summary></details>
   <details class=rw data-t=g data-k=mem><summary><span class=k>memory</span><span class=w><span class="bar g">▕██<i>░░░░░░░░░░</i>┃</span> <b class=g>9.4 GB free</b> <span class=mt>· normal · floor 2 GB</span></span><span class=t><i class=cv></i></span><svg class=spk></svg></summary></details>
   <details class=rw data-t=a data-k=disk><summary><span class=k>disk</span><span class=w><span class="bar a">▕██████████<i>░░</i>┃</span> <b class=a>12 GB free</b> <span class="mt fx">· floor 10 GB</span></span><span class=t><i class=cv></i></span><svg class=spk></svg></summary></details>
-  <p class=gr data-t=g><span class=k>top memory</span><span class=w>2.1G claude (lane atlas-impl-2898) · 1.4G VirtualMachine (VM (colima)) · 880M node (lane herdsman-impl-236)</span></p>
-  <details class=rw data-t=g data-k=lanes><summary><span class=k>lanes</span><span class=w><b>3</b> <span class=mt>atlas-impl-2898 · atlas-rev-2684-r4 · herdsman-impl-236</span></span><span class=t><i class=cv></i></span><svg class=spk></svg></summary></details>
+  <p class=gr data-t=g><span class=k>top memory</span><span class=w>2.1G claude (lane atlas-impl-2898) · 1.4G VirtualMachine (VM (colima)) · 880M node (lane drover-impl-236)</span></p>
+  <details class=rw data-t=g data-k=lanes><summary><span class=k>lanes</span><span class=w><b>3</b> <span class=mt>atlas-impl-2898 · atlas-rev-2684-r4 · drover-impl-236</span></span><span class=t><i class=cv></i></span><svg class=spk></svg></summary></details>
   <p class=gr data-t=m><span class=k>tags</span><span class=w><span class=mt>os:macos arch:arm64 xcode fast</span></span></p>
  </article>
 
@@ -87,8 +87,8 @@
   <details class=rw data-t=g data-k=swap><summary><span class=k>swap-out</span><span class=w><span class="bar g">▕<i>░░░░░░░░░░░░</i>▏</span> <b class=g>0</b> <span class=m>/ 2000</span> now · 0 avg <span class=mt>pages/2s · held on the avg with pressure warn/critical</span></span><span class=t><i class=cv></i></span><svg class=spk></svg></summary></details>
   <details class=rw data-t=g data-k=mem><summary><span class=k>memory</span><span class=w><span class="bar g">▕████<i>░░░░░░░░</i>┃</span> <b class=g>5.6 GB free</b> <span class=mt>· normal · floor 2 GB</span></span><span class=t><i class=cv></i></span><svg class=spk></svg></summary></details>
   <details class=rw data-t=g data-k=disk><summary><span class=k>disk</span><span class=w><span class="bar g">▕██<i>░░░░░░░░░░</i>┃</span> <b class=g>61 GB free</b> <span class="mt fx">· floor 10 GB</span></span><span class=t><i class=cv></i></span><svg class=spk></svg></summary></details>
-  <p class=gr data-t=g><span class=k>top memory</span><span class=w>1.6G claude (lane herdsman-rev-235-r1) · 420M Finder (other) · 310M WindowServer (other) <span class=mt>· 4m ago</span></span></p>
-  <details class=rw data-t=g data-k=lanes><summary><span class=k>lanes</span><span class=w><b>1</b> <span class=mt>herdsman-rev-235-r1</span></span><span class=t><i class=cv></i></span><svg class=spk></svg></summary></details>
+  <p class=gr data-t=g><span class=k>top memory</span><span class=w>1.6G claude (lane drover-rev-235-r1) · 420M Finder (other) · 310M WindowServer (other) <span class=mt>· 4m ago</span></span></p>
+  <details class=rw data-t=g data-k=lanes><summary><span class=k>lanes</span><span class=w><b>1</b> <span class=mt>drover-rev-235-r1</span></span><span class=t><i class=cv></i></span><svg class=spk></svg></summary></details>
   <p class=gr data-t=m><span class=k>tags</span><span class=w><span class=mt>os:macos arch:arm64</span></span></p>
  </article>
 
@@ -115,7 +115,7 @@
 
 <!-- 3 · SERVICES, FLEETS, ALERTS: the demo export's markup, unchanged. -->
 <details class=grp data-t=g style=--kw:10ch><summary><i class=dt></i><span class=gn>SERVICES</span><span class=gs>board: up 3d · v0.1.0 · tick: ran 2m ago · herdr: client 0.9.5, server 0.9.5 · theme: farm</span><i class=cv></i></summary><p class=gr data-t=g><span class=k>board</span><span class=w><b class=g>up 3d · v0.1.0</b></span></p><p class=gr data-t=g><span class=k>tick</span><span class=w><b class=g>ran 2m ago</b></span></p><p class=gr data-t=g><span class=k>herdr</span><span class=w><b class=g>client 0.9.5, server 0.9.5</b></span></p><p class=gr data-t=g><span class=k>theme</span><span class=w><b>farm</b></span></p></details>
-<details class=grp data-t=g style=--kw:10ch><summary><i class=dt></i><span class=gn>FLEETS</span><span class=gs>atlas: merged #2893 · herdsman: spawned impl #236</span><i class=cv></i></summary><p class=gr data-t=g><span class=k>atlas</span><span class=x><b class=g>merged #2893</b> </span></p><p class=gr data-t=g><span class=k>herdsman</span><span class=x><b class=g>spawned impl #236</b> </span></p><p class=gr data-t=m><span class=k>relay</span><span class=x><b class=m>paused</b> · <code>herdsman resume relay</code> starts it again</span></p></details>
+<details class=grp data-t=g style=--kw:10ch><summary><i class=dt></i><span class=gn>FLEETS</span><span class=gs>atlas: merged #2893 · drover: spawned impl #236</span><i class=cv></i></summary><p class=gr data-t=g><span class=k>atlas</span><span class=x><b class=g>merged #2893</b> </span></p><p class=gr data-t=g><span class=k>drover</span><span class=x><b class=g>spawned impl #236</b> </span></p><p class=gr data-t=m><span class=k>relay</span><span class=x><b class=m>paused</b> · <code>drover resume relay</code> starts it again</span></p></details>
 <details class=grp data-t=g style=--kw:10ch><summary><i class=dt></i><span class=gn>ALERTS</span><span class=gs>push: on · last sent 14m ago</span><i class=cv></i></summary><p class=gr data-t=g><span class=k>push</span><span class=w><b class=g>on · last sent 14m ago</b></span></p></details>
 
 </section></main>

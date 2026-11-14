@@ -1,10 +1,10 @@
 # Before #441: account tokens read from an env file (the live config at the #539 outage).
-[fleet.herdsman]
+[fleet.drover]
 repo = "jirathip-dev/herdsman"
-local = "/tmp/herdsman"
+local = "/tmp/drover"
 integration = "staging"
 
-[fleet.herdsman.role.impl]
+[fleet.drover.role.impl]
 harness = "claude"
 account = "main"
 

@@ -1,6 +1,3 @@
-//! #566: `scripts/ui-audit.sh` retries a hung Chrome run twice on a fresh profile; a view still hung after that is no
-//! failure but goes to `flaky.txt` (CI's soft `ui-flaky` check), every hang to `hangs.txt`. A real outlier still fails.
-//! Chrome is a stand-in that never returns on the `$HANG` view and reports an outlier on the `$BAD` view.
 mod common;
 use common::*;
 use std::os::unix::fs::PermissionsExt;
@@ -21,7 +18,6 @@ fn audit(hang: &str, bad: &str) -> (Option<i32>, String, String, String) {
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::create_dir_all(d.join("site")).unwrap();
     std::fs::write(d.join("site/index.html"), "ok").unwrap();
-    // The sheet-close screencast (node + CDP) is not under test: `node` exits 0.
     for (name, body) in [("chrome", CHROME), ("node", "#!/bin/sh\nexit 0\n")] {
         std::fs::write(bin.join(name), body).unwrap();
         std::fs::set_permissions(bin.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();

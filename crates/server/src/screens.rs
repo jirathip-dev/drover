@@ -138,6 +138,18 @@ fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Val
     v
 }
 
+fn hot(r: &QueueRow) -> Vec<&str> {
+    r.groups.iter().filter_map(|g| g.strip_prefix("hot ")).collect()
+}
+
+fn hot_row(f: &str, r: &QueueRow) -> Option<Value> {
+    let (n, i) = (hot(r).len(), r.issue);
+    (n > 0).then(|| {
+        json!({"type": "row", "id": format!("hot-{f}-{i}"), "indent": 1, "title": format!("🔒 hot ×{n}"), "style": "link",
+            "tap": {"sheet": format!("/screens/hot?repo={f}&issue={i}")}})
+    })
+}
+
 fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
     let f = &c.name;
     let (queued, busy): (Vec<&QueueRow>, Vec<&QueueRow>) = c.rows.iter().partition(|r| r.state == "queued");
@@ -145,7 +157,8 @@ fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
         let k = |i| q.then_some(i);
         rs.iter()
             .enumerate()
-            .map(|(i, r)| row(ev, &c.config.repo, f, r, k(i)))
+            .flat_map(|(i, r)| [Some(row(ev, &c.config.repo, f, r, k(i))), hot_row(f, r)])
+            .flatten()
             .collect()
     };
     let section = |id: &str, word: &str, rs: Vec<Value>| {
@@ -237,7 +250,8 @@ fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
     let mut blocks = vec![json!({"type": "text", "markdown": format!("**{}**", q.question)})];
     if !a.pngs.is_empty() {
         let n = q.issue.unwrap_or(0);
-        let items = (0..a.pngs.len()).map(|i| json!({"src": format!("/design/{}/{n}/{i}", q.fleet), "alt": a.pngs[i]}));
+        let items = (0..a.pngs.len())
+            .map(|i| json!({"src": format!("/design/{}/{n}/{i}/{}", q.fleet, q.id), "alt": a.pngs[i]}));
         blocks.push(json!({"type": "images", "id": format!("pngs-{}", q.id), "items": items.collect::<Vec<_>>()}));
     }
     blocks.push(c);
@@ -322,6 +336,18 @@ fn fleets(cfg: &Config) -> Value {
         );
     }
     json!({"type": "sheet", "id": "fleets", "title": "Fleets", "cancel": "Cancel", "done": {"label": "Save", "action": "save-fleets"}, "blocks": blocks})
+}
+
+fn workflow(ctx: &Ctx) -> Value {
+    let limits = Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
+    let ev = shared(&ctx.state).unwrap_or_default();
+    let counts = crate::diagram::counts(ev.states.values());
+    let blocks = crate::diagram::charts(&limits, Some(&counts)).map(|c| {
+        let nodes: Vec<Value> = c.nodes.iter().map(|(id, k)| json!({"id": id, "limit": k})).collect();
+        let n = if c.id == "states" { json!(counts) } else { json!({}) };
+        json!({"type": "diagram", "id": c.id, "source": c.source, "counts": n, "nodes": nodes})
+    });
+    json!({"type": "screen", "id": "workflow", "title": "Workflow", "blocks": blocks})
 }
 
 const KINDS: [(&str, &str); 4] = [
@@ -506,6 +532,8 @@ impl Server<'_> {
             "/screens/events" => events_screen(ctx, q),
             "/screens/fleets" => fleets(&Config::kept(ctx).ok()?),
             "/screens/cards" => self.chat_cards(ctx),
+            "/screens/workflow" => workflow(ctx),
+            "/screens/hot" => self.hot_sheet(ctx, q)?,
             _ => return None,
         };
         let oldest = self.r.refreshed().into_values().min();
@@ -515,6 +543,25 @@ impl Server<'_> {
             b.insert(0, json!({"type": "text", "id": "age", "markdown": line}));
         }
         Some(v)
+    }
+
+    fn hot_sheet(&self, ctx: &Ctx, q: &Q) -> Option<Value> {
+        let (f, n) = (q.get("repo")?, q.get("issue")?.parse::<u64>().ok()?);
+        let tab = self.queue_tab(ctx);
+        let r = tab
+            .fleets
+            .iter()
+            .find(|c| &c.name == f)?
+            .rows
+            .iter()
+            .find(|r| r.issue == n)?;
+        let rows: Vec<Value> = (hot(r).iter().enumerate())
+            .map(|(i, p)| json!({"type": "row", "id": format!("hot-{i}"), "title": p}))
+            .collect();
+        Some(
+            json!({"type": "sheet", "id": format!("hot-{f}-{n}"), "title": format!("#{n} · 🔒 hot ×{}", rows.len()),
+            "cancel": "Done", "blocks": [{"type": "list", "id": "hot-paths", "rows": rows}]}),
+        )
     }
 
     fn queue_screen(&self, ctx: &Ctx, q: &Q) -> Value {
@@ -559,6 +606,10 @@ impl Server<'_> {
         cards.extend(super::v1::slo_open(&ev).map(|e| {
             json!({"type": "card", "id": format!("slo-{}", e.seq), "kind": "alert", "tone": "warn",
                 "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
+        }));
+        cards.extend(crate::slo::open_stuck(&ev).into_iter().map(|e| {
+            json!({"type": "card", "id": format!("stuck-{}", e.seq), "kind": "alert", "tone": "warn",
+                "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": crate::events::plain(e)}]})
         }));
         cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, mins, a)));
         cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));

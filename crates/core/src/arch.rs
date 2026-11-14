@@ -1,6 +1,3 @@
-//! #734: `herdsman arch-check`: a repo's architecture rules in `.herdsman/arch.toml`, checked by plain source scanning
-//! of Rust and TypeScript: a layer uses only the layers its `may_use` lists, a banned pattern appears only in its
-//! exceptions, and a file or function over its size limit fails unless the baseline lists it at that size or more.
 use crate::config::glob;
 use crate::runner::{argv, Runner};
 use anyhow::{Context, Result};
@@ -21,6 +18,30 @@ struct Arch {
     baseline: Option<String>,
     comments: Option<Comments>,
     docs: Option<Docs>,
+    #[serde(default)]
+    frozen: Vec<String>,
+    #[serde(default)]
+    collect: Vec<Collect>,
+    #[serde(default)]
+    generated: Vec<String>,
+    generate: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Collect {
+    dir: String,
+    glob: Option<String>,
+}
+
+impl Collect {
+    fn entries(&self) -> String {
+        format!(
+            "{}/{}",
+            self.dir.trim_end_matches('/'),
+            self.glob.as_deref().unwrap_or("*")
+        )
+    }
 }
 
 #[derive(Deserialize)]
@@ -36,6 +57,7 @@ struct Comments {
 enum Policy {
     On,
     Off,
+    Strict,
 }
 
 #[derive(Deserialize, Default)]
@@ -49,13 +71,12 @@ struct Docs {
 
 struct Change {
     file: String,
+    hunk: usize,
     line: usize,
     added: bool,
     text: String,
 }
 
-/// A layer: its files, the names other files use it by (`herdsman_core`, `crate::gate`, `@app/core`; a relative
-/// TypeScript import resolves to a path and matches `paths`), and the layers it may use.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Layer {
@@ -103,14 +124,12 @@ struct Size {
     exclude: Vec<String>,
 }
 
-/// Whether a glob matches `p`, `/**/` also matching no folder (`src/**/*.rs` matches `src/lib.rs`).
-fn any(globs: &[String], p: &str) -> bool {
+pub(crate) fn any(globs: &[String], p: &str) -> bool {
     let m = |g: &str| glob(g.as_bytes(), p.as_bytes());
     globs.iter().any(|g| m(g) || m(&g.replace("/**/", "/")))
 }
 
-/// `herdsman arch-check`: each violation as `file:line: why`, exit 1 on any; `write` records today's size offenders
-/// as the baseline instead. No config: nothing to check.
+/// `drover arch-check`: each violation as `file:line: why`, exit 1 on any; `write` records today's size offenders as the baseline instead. No config: nothing to check.
 pub fn check(
     config: &Path,
     write: bool,
@@ -124,8 +143,13 @@ pub fn check(
         return Ok(0);
     };
     let a: Arch = toml::from_str(&text).with_context(|| format!("parsing {}", config.display()))?;
-    let base_path = a.baseline.as_deref().unwrap_or(".herdsman/arch-baseline.txt");
-    let base_text = std::fs::read_to_string(base_path).unwrap_or_default();
+    anyhow::ensure!(
+        a.generated.is_empty() || a.generate.is_some(),
+        "{}: `generated` needs `generate`, the command that writes them",
+        config.display()
+    );
+    let base_path = a.baseline.as_deref().unwrap_or(".drover/arch-baseline.txt");
+    let base_text = std::fs::read_to_string(crate::repo_path(Path::new(base_path))).unwrap_or_default();
     let crossings: BTreeSet<&str> = base_text
         .lines()
         .map(str::trim)
@@ -216,8 +240,16 @@ pub fn check(
         anyhow::ensure!(o.code == 0, "git diff {b}: {}", o.stderr.trim());
         diff = changes(&o.stdout);
     }
-    if let Some(c) = a.comments.as_ref().filter(|c| c.policy == Policy::Off) {
-        bad.extend(new_comments(&diff, &c.except));
+    bad.extend(frozen_adds(&a, &diff));
+    bad.extend(stale_generated(&a, r)?);
+    match &a.comments {
+        Some(c) if c.policy == Policy::Off => bad.extend(new_comments(&diff, &c.except)),
+        Some(c) if c.policy == Policy::Strict => {
+            for f in files.iter().filter(|f| commented(f, &c.except)) {
+                bad.extend(bad_comments(f, None));
+            }
+        }
+        _ => {}
     }
     if let Some(d) = &a.docs {
         bad.extend(stale_docs(d, &files));
@@ -252,6 +284,62 @@ pub fn check(
     Ok(i32::from(!bad.is_empty()))
 }
 
+/// #890: the globs `text`, an arch.toml, lists as frozen or generated: converted, so never a hotspot.
+pub fn converted(text: &str) -> Result<Vec<String>> {
+    let a: Arch = toml::from_str(text).context("parsing .drover/arch.toml")?;
+    Ok(a.frozen.into_iter().chain(a.generated).collect())
+}
+
+fn frozen_adds(a: &Arch, diff: &[Change]) -> Vec<String> {
+    let folders: Vec<String> = a.collect.iter().map(|c| format!("`{}`", c.entries())).collect();
+    let instead = if folders.is_empty() {
+        "a `[[collect]]` folder".to_string()
+    } else {
+        folders.join(" or ")
+    };
+    let collected = |f: &str| a.collect.iter().any(|c| any(&[c.entries()], f));
+    let mut hunks = BTreeMap::<usize, (Vec<&Change>, usize)>::new();
+    for c in diff.iter().filter(|c| any(&a.frozen, &c.file) && !collected(&c.file)) {
+        let h = hunks.entry(c.hunk).or_default();
+        if c.added {
+            h.0.push(c);
+        } else {
+            h.1 += 1;
+        }
+    }
+    let new = hunks.into_values().flat_map(|(adds, gone)| adds.into_iter().skip(gone));
+    new.map(|c| {
+        let (f, n, t) = (&c.file, c.line, c.text.trim());
+        format!("{f}:{n}: `{t}` added to a frozen list: add one file per entry in {instead} instead")
+    })
+    .collect()
+}
+
+fn stale_generated(a: &Arch, r: &dyn Runner) -> Result<Vec<String>> {
+    let Some(cmd) = a.generate.as_deref().filter(|_| !a.generated.is_empty()) else {
+        return Ok(vec![]);
+    };
+    let before: Vec<Option<Vec<u8>>> = a.generated.iter().map(|p| std::fs::read(p).ok()).collect();
+    let o = r.run("sh", &argv(&["-c", cmd]))?;
+    if o.code != 0 {
+        return Ok(vec![format!("`{cmd}` exited {}: {}", o.code, o.stderr.trim())]);
+    }
+    let mut bad = vec![];
+    for (p, was) in a.generated.iter().zip(before) {
+        if std::fs::read(p).ok() == was {
+            continue;
+        }
+        bad.push(format!(
+            "{p}: differs from what `{cmd}` writes: run it and commit the output, never hand-merge a generated file"
+        ));
+        match was {
+            Some(b) => std::fs::write(p, b)?,
+            None => std::fs::remove_file(p)?,
+        }
+    }
+    Ok(bad)
+}
+
 fn walk(dir: &Path, bans: &[&String], out: &mut Vec<String>) {
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
@@ -268,7 +356,6 @@ fn walk(dir: &Path, bans: &[&String], out: &mut Vec<String>) {
     }
 }
 
-/// Whether `t`, a path a line names, is layer `l`'s: one of its `mods` (or under it), or a file its `paths` match.
 fn uses(l: &Layer, t: &str) -> bool {
     let under = |m: &String| t == m || t.starts_with(&format!("{m}::")) || t.starts_with(&format!("{m}/"));
     l.mods.iter().any(under)
@@ -277,8 +364,6 @@ fn uses(l: &Layer, t: &str) -> bool {
             .any(|x| any(&l.paths, &format!("{t}{x}")))
 }
 
-/// What line `l` of file `p` names: in Rust each `a::b` path (one `use a::{b, c}` group expanded); in TypeScript
-/// the module an `import`, `export … from` or `require` loads, a relative one resolved against `p`'s folder.
 fn targets(p: &str, l: &str, rust: bool) -> Vec<String> {
     let path = |c: char| !(c.is_alphanumeric() || c == '_' || c == ':');
     if rust {
@@ -317,8 +402,6 @@ fn targets(p: &str, l: &str, rust: bool) -> Vec<String> {
     vec![parts.join("/")]
 }
 
-/// Each function's `(name, first line, lines)`: a Rust `fn` or TypeScript `function` / `const f = (…) => {` whose
-/// line opens a body, to the first later line at its indent that starts with `}` (formatted source).
 fn fns(lines: &[&str], rust: bool) -> Vec<(String, usize, usize)> {
     let kw = if rust { "fn " } else { "function " };
     let mut v = vec![];
@@ -350,14 +433,14 @@ fn fns(lines: &[&str], rust: bool) -> Vec<(String, usize, usize)> {
 }
 
 fn changes(diff: &str) -> Vec<Change> {
-    let (mut v, mut from, mut to, mut old, mut new, mut head) = (vec![], "", "", 0, 0, true);
+    let (mut v, mut from, mut to, mut old, mut new, mut head, mut hunk) = (vec![], "", "", 0, 0, true, 0);
     for l in diff.lines() {
         if l.starts_with("diff --git ") {
             head = true;
         } else if let Some(h) = l.strip_prefix("@@ -") {
             let num = |s: &str| s.split([',', ' ']).next().and_then(|n| n.parse().ok()).unwrap_or(0);
             let (o, n) = h.split_once(" +").unwrap_or_default();
-            (old, new, head) = (num(o), num(n), false);
+            (old, new, head, hunk) = (num(o), num(n), false, hunk + 1);
         } else if head {
             from = l.strip_prefix("--- a/").unwrap_or(from);
             to = l.strip_prefix("+++ b/").unwrap_or(to);
@@ -366,6 +449,7 @@ fn changes(diff: &str) -> Vec<Change> {
             let (file, line) = if added { (to, &mut new) } else { (from, &mut old) };
             v.push(Change {
                 file: file.into(),
+                hunk,
                 line: *line,
                 added,
                 text: text.into(),
@@ -418,6 +502,9 @@ fn comment_lines(lines: &[&str], rust: bool) -> Vec<bool> {
 
 fn allowed_comment(lines: &[&str], com: &[bool], i: usize) -> bool {
     let t = lines[i].trim();
+    if t.starts_with("// TODO(#") && t[9..].split(')').next().is_some_and(|n| n.parse::<u32>().is_ok()) {
+        return true;
+    }
     if t.starts_with("// SAFETY:") {
         return lines.get(i + 1).is_some_and(|n| n.contains("unsafe"));
     }
@@ -428,27 +515,35 @@ fn allowed_comment(lines: &[&str], com: &[bool], i: usize) -> bool {
     one_doc && public && (i == 0 || !com[i - 1])
 }
 
+fn commented(f: &str, except: &[String]) -> bool {
+    [".rs", ".ts", ".tsx"].iter().any(|x| f.ends_with(x)) && !any(except, f)
+}
+
 fn new_comments(diff: &[Change], except: &[String]) -> Vec<String> {
-    let code = |f: &str| [".rs", ".ts", ".tsx"].iter().any(|x| f.ends_with(x)) && !any(except, f);
-    let (mut added, mut bad) = (BTreeMap::<&str, Vec<usize>>::new(), vec![]);
-    for c in diff.iter().filter(|c| c.added && code(&c.file)) {
+    let mut added = BTreeMap::<&str, Vec<usize>>::new();
+    for c in diff.iter().filter(|c| c.added && commented(&c.file, except)) {
         added.entry(&c.file).or_default().push(c.line.saturating_sub(1));
     }
-    for (f, at) in added {
-        let src = std::fs::read_to_string(f).unwrap_or_default();
-        let lines: Vec<&str> = src.lines().collect();
-        let com = comment_lines(&lines, Path::new(f).extension().is_some_and(|x| x == "rs"));
-        for i in at
-            .into_iter()
-            .filter(|&i| com.get(i) == Some(&true) && !allowed_comment(&lines, &com, i))
-        {
-            bad.push(format!(
-                "{f}:{}: a new comment (only `// SAFETY:` over unsafe and one `///` on a pub item): put the why in `herdsman why`",
+    added
+        .into_iter()
+        .flat_map(|(f, at)| bad_comments(f, Some(&at)))
+        .collect()
+}
+
+fn bad_comments(f: &str, only: Option<&[usize]>) -> Vec<String> {
+    let src = std::fs::read_to_string(f).unwrap_or_default();
+    let lines: Vec<&str> = src.lines().collect();
+    let com = comment_lines(&lines, Path::new(f).extension().is_some_and(|x| x == "rs"));
+    let at: Vec<usize> = only.map_or_else(|| (0..lines.len()).collect(), <[usize]>::to_vec);
+    at.into_iter()
+        .filter(|&i| com.get(i) == Some(&true) && !allowed_comment(&lines, &com, i))
+        .map(|i| {
+            format!(
+                "{f}:{}: a comment (only `// SAFETY:` over unsafe, `// TODO(#N)` and one `///` on a pub item): put the why in `drover why`",
                 i + 1
-            ));
-        }
-    }
-    bad
+            )
+        })
+        .collect()
 }
 
 fn stale_docs(d: &Docs, files: &[String]) -> Vec<String> {
@@ -469,7 +564,7 @@ fn stale_docs(d: &Docs, files: &[String]) -> Vec<String> {
             } else if let Some(s) = c.find_subcommand(w) {
                 c = s;
             } else if n == 0 && w.bytes().all(|b| b.is_ascii_lowercase() || b == b'-') {
-                return Some(format!("no herdsman command `{w}`"));
+                return Some(format!("no drover command `{w}`"));
             }
         }
         None
@@ -483,7 +578,7 @@ fn stale_docs(d: &Docs, files: &[String]) -> Vec<String> {
                 continue;
             }
             for s in l.split('`').skip(1).step_by(2) {
-                let gap = match (&cli, s.strip_prefix("herdsman ")) {
+                let gap = match (&cli, s.strip_prefix("drover ")) {
                     (Some(_), Some(rest)) => cli_gap(rest),
                     _ if any(&d.skip, s) => None,
                     _ => missing_path(s, if s.starts_with("../") { dir } else { Path::new(".") }),

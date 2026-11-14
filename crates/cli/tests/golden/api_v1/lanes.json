@@ -3,7 +3,7 @@
     "error": null,
     "failed": false,
     "live": true,
-    "mtime": "1794234768095938334",
+    "mtime": "1794612627710417362",
     "now": 1000000,
     "pair": true,
     "paired": true,
@@ -137,7 +137,7 @@
                 "blocked": null,
                 "coat": "--c:#96685a;--d:#77524a;--m:#4a342c;--b:transparent",
                 "dead": false,
-                "facts": "conductor · hermes · opus · 0s",
+                "facts": "orchestrator · hermes · opus · 0s",
                 "gone": true,
                 "grow": "impl",
                 "head": "",
@@ -147,7 +147,7 @@
                 "now": null,
                 "pr": null,
                 "repo": "jirathip-dev/sendmeter",
-                "role": "conductor",
+                "role": "orchestrator",
                 "runtime": "herdr",
                 "shown": "asleep",
                 "state": "asleep",
@@ -163,6 +163,12 @@
           }
         ],
         "tone": "a"
+      }
+    ],
+    "shed": [
+      {
+        "error": "shed connect failed (1): unscripted: ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- 'shed' 'connect' '--autostart'",
+        "host": "bazzite"
       }
     ],
     "unsaved": [
@@ -197,6 +203,7 @@
     "paired": "boolean",
     "rw": "boolean",
     "sections": [],
+    "shed": [],
     "unsaved": []
   },
   "type": "LanesTab"

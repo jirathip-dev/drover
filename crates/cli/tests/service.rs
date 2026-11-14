@@ -1,30 +1,22 @@
-//! #345 `herdsman service` over real sockets: its health, a kick on the local socket, a remote lane's command over
-//! API v1 run as that lane (with its token) or refused (another issue's token, a verdict from impl, a closed lane),
-//! and the event stream carrying what it logged.
 mod common;
 use common::*;
-use herdsman::events::{append, read, Event};
-use herdsman::runner::{argv, Out, Runner};
-use herdsman::service::{grant, Grant};
+use drover::events::{append, read, Event};
+use drover::runner::{argv, Out, Runner};
+use drover::service::{grant, Grant};
 use serde_json::{json, Value};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 
 const NOW: u64 = 1_000_000;
 
-/// The fake host, but `env HERDSMAN_LANE=<lane> <exe> <args>` (the service running a lane's command) runs
-/// `herdsman <args>` in process on the same state, as the real binary would.
-struct Lane(Fake, herdsman::Ctx);
+struct Lane(Fake, drover::Ctx);
 
 impl Runner for Lane {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         if prog != "env" {
             return self.0.run(prog, args);
         }
-        assert!(
-            args[0].starts_with("HERDSMAN_LANE=") && args[1] == self.1.exe,
-            "{args:?}"
-        );
+        assert!(args[0].starts_with("DROVER_LANE=") && args[1] == self.1.exe, "{args:?}");
         let (code, stdout) = run(
             &self.1,
             &self.0,
@@ -55,8 +47,7 @@ fn post(addr: &str, body: &Value) -> (u16, Value) {
     )
 }
 
-/// A logged spawn of `role` on issue 12 and its token.
-fn lane(c: &herdsman::Ctx, role: &str, at: u64) -> String {
+fn lane(c: &drover::Ctx, role: &str, at: u64) -> String {
     let agent = format!("sendmeter-{role}-12");
     let d = json!({"role": role, "agent": agent, "pane": format!("p-{role}")});
     append(&c.state, &Event::new(at, "sendmeter", Some(12), "spawn", d)).unwrap();
@@ -95,21 +86,22 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     };
     let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = api.local_addr().unwrap().to_string();
-    let r: &'static Lane = Box::leak(Box::new(Lane(Fake::default().reply("herdr", "{}"), c.clone())));
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    let r: &'static Lane = Box::leak(Box::new(Lane(Fake::default(), c.clone())));
     let sc = c.clone();
-    std::thread::spawn(move || herdsman_service::run(sc, r, || NOW, api, None));
+    std::thread::spawn(move || drover_service::run(sc, r, || NOW, api, None));
     let mut pid = None;
     for _ in 0..100 {
-        pid = herdsman::service::up(&c);
+        pid = drover::service::up(&c);
         if pid.is_some() {
             break;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
-    // The local socket answers with this process: a kick is taken by the service, not detached.
     assert_eq!(pid, Some(u64::from(std::process::id())));
     assert_eq!(
-        herdsman::service::kick(&c, "sendmeter", 12, "push", Some("t1")),
+        drover::service::kick(&c, "sendmeter", 12, "push", Some("t1")),
         Some(std::process::id())
     );
 
@@ -123,14 +115,13 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
         "--option",
         "blue"
     ]);
-    let asks = |c: &herdsman::Ctx| {
+    let asks = |c: &drover::Ctx| {
         read(&c.state)
             .unwrap()
             .iter()
             .filter(|e| e.kind == "needs-decision")
             .count()
     };
-    // Refused: another issue's token, a junk one, a verdict from an impl lane; nothing is run or logged.
     for (token, args) in [
         (&other, ask.clone()),
         (&"f".repeat(64), ask.clone()),
@@ -154,7 +145,6 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     }
     assert_eq!(asks(&c), 0);
 
-    // An empty command is refused; a `--file` that came without its text is never read on this host.
     let (status, v) = post(&addr, &json!({"token": imp, "args": []}));
     assert_eq!(status, 403, "{v}");
     let secret = c.state.with_file_name("secret.md");
@@ -173,12 +163,10 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     assert_eq!(status, 400, "{v}");
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "verdict"), "{v}");
 
-    // Its own lane's ask runs as that lane: logged on this host.
     let (status, v) = post(&addr, &json!({"token": imp, "args": ask}));
     assert_eq!((status, v["code"].as_i64()), (200, Some(0)), "{v}");
     assert_eq!(asks(&c), 1);
 
-    // The rev lane's token is closed with its lane.
     let d = json!({"agent": "sendmeter-rev-12", "pane": "p-rev"});
     append(&c.state, &Event::new(NOW, "sendmeter", Some(12), "lane-closed", d)).unwrap();
     let (status, v) = post(
@@ -188,7 +176,6 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     assert_eq!(status, 403, "{v}");
     assert!(v["stdout"].as_str().unwrap().contains("lane is closed"), "{v}");
 
-    // The event stream (loopback) replays the log: the service's start and the lane's ask.
     let mut s = TcpStream::connect(&addr).unwrap();
     s.write_all(b"GET /api/v1/events?after=0 HTTP/1.1\r\nHost: x\r\n\r\n")
         .unwrap();
@@ -205,7 +192,6 @@ fn the_service_runs_a_lanes_command_with_its_token_and_refuses_any_other() {
     );
 }
 
-/// A real `herdsman service` process on `c`'s config and state, `bin` first on its PATH; killed when dropped.
 struct Proc(std::process::Child);
 
 impl Drop for Proc {
@@ -215,13 +201,13 @@ impl Drop for Proc {
     }
 }
 
-fn service(c: &herdsman::Ctx, bin: &std::path::Path, api: &str) -> (Proc, u64) {
+fn service(c: &drover::Ctx, bin: &std::path::Path, api: &str) -> (Proc, u64) {
     let home = c.state.parent().unwrap().parent().unwrap();
-    let child = std::process::Command::new(env!("CARGO_BIN_EXE_herdsman"))
+    let child = std::process::Command::new(env!("CARGO_BIN_EXE_drover"))
         .args(["service", "--api", api])
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
         .env("HOME", home)
-        .env("HERDSMAN_HOME", home)
+        .env("DROVER_HOME", home)
         .env("FLEET_CONFIG", &c.config)
         .env("FLEET_STATE", &c.state)
         .env("FLEET_WORKTREES", &c.worktrees)
@@ -232,7 +218,7 @@ fn service(c: &herdsman::Ctx, bin: &std::path::Path, api: &str) -> (Proc, u64) {
         .unwrap();
     let p = Proc(child);
     for _ in 0..200 {
-        if let Some(pid) = herdsman::service::up(c) {
+        if let Some(pid) = drover::service::up(c) {
             return (p, pid);
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
@@ -240,7 +226,6 @@ fn service(c: &herdsman::Ctx, bin: &std::path::Path, api: &str) -> (Proc, u64) {
     panic!("the service never answered");
 }
 
-/// Waits up to 20 s for `f`.
 fn until(what: &str, f: impl Fn() -> bool) {
     for _ in 0..400 {
         if f() {
@@ -251,21 +236,16 @@ fn until(what: &str, f: impl Fn() -> bool) {
     panic!("never: {what}");
 }
 
-/// Chaos: the service is killed (`kill -9`) mid-spawn. Its spawn marker and kick lock are stale at once (its pid is gone), the CLI
-/// goes on in direct mode and a lane's HTTP command fails fast instead of hanging; a new service starts over the dead
-/// one's socket, the next pass sweeps the marker and launches the spawn again, and the lane's command goes through.
 #[test]
 fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
     let d = tmpdir("service-chaos");
-    // The real host's disk and memory never refuse the service's spawn.
     let cfg = CONFIG.replace(
         "max_parallel_spawns = 0",
         "max_parallel_spawns = 2\nmin_free_gb = 0\nmin_free_mem_gb = 0",
     );
     let mut c = ctx(&d, &cfg);
-    c.now = herdsman::now();
+    c.now = drover::now();
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "1"]).0, 0);
-    // Its tools: `gh issue view` (the spawn's first GitHub read) logs and hangs, so the spawn is caught midway.
     let (bin, log) = (d.join("bin"), d.join("gh.log"));
     std::fs::create_dir_all(&bin).unwrap();
     let tools = [
@@ -276,43 +256,39 @@ fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
                 log.display()
             ),
         ),
-        ("herdr", format!("echo '{NO_AGENTS}'")),
         ("hermes", "exit 0".into()),
+        ("shed", "exit 0".into()),
     ];
     for (name, body) in tools {
         let p = bin.join(name);
         std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&p, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     }
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let pass = |r: &Fake| assert_eq!(run(&c, r, &["drive"]).0, 0);
     let host = || {
         Fake::default()
-            .reply("herdr agent list", NO_AGENTS)
             .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
             .reply("sysctl -n vm.loadavg", "{ 1.0 1.0 1.0 }\n")
             .reply("sysctl -n hw.ncpu", "10\n")
             .reply("vm_stat", "Pages free: 1.\nSwapouts:                     100.\n")
-            .reply("herdr", "{}")
             .reply("git -C", "")
     };
-    let cfgv = herdsman::config::Config::load(&c.config).unwrap();
-    let live = || herdsman::drive::markers(&c, &cfgv, &herdsman::runner::Real, false).0;
+    let cfgv = drover::config::Config::load(&c.config).unwrap();
+    let live = || drover::drive::markers(&c, &cfgv, &drover::runner::Real, false).0;
     let marker = || lease_on(&c, "spawn-sendmeter-1.pending");
-    // A lane on issue 12 (logged spawn and token) with a command for the service.
     let tok = lane(&c, "impl", c.now);
     let ask = argv(&["ask", "sendmeter", "12", "Which colour?", "--option", "red"]);
 
     let (a, pid_a) = service(&c, &bin, "127.0.0.1:0");
-    // The pass launches the spawn as a kick the service takes: the marker is the service's, and live.
     pass(&host());
     assert_eq!(marker().map(|l| u64::from(l.pid)), Some(pid_a));
     until("the spawn reached GitHub", || {
         std::fs::read_to_string(&log).is_ok_and(|s| s.contains("issue view 1"))
     });
-    // Its spawn marker and the kick's lock, both the service's.
     assert_eq!(live(), ["spawn-sendmeter-1.pending", "kick-sendmeter-1.lock"]);
 
-    // kill -9 mid-spawn: the marker is stale at once, no service answers, and a lane's command errs fast.
     let api_a = read(&c.state)
         .unwrap()
         .iter()
@@ -321,12 +297,11 @@ fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
         .unwrap();
     drop(a);
     assert!(live().is_empty(), "{:?}", live());
-    assert_eq!(herdsman::service::up(&c), None);
+    assert_eq!(drover::service::up(&c), None);
     let t0 = std::time::Instant::now();
-    let down = herdsman::service::post(&herdsman::runner::Real, &format!("http://{api_a}"), &tok, &ask);
+    let down = drover::service::post(&drover::runner::Real, &format!("http://{api_a}"), &tok, &ask);
     assert!(down.is_err() && t0.elapsed().as_secs() < 10, "{down:?}");
 
-    // A new service starts over the dead one's socket; the next pass sweeps the marker and launches again.
     let (_b, pid_b) = service(&c, &bin, "127.0.0.1:0");
     assert_ne!(pid_a, pid_b);
     pass(&host());
@@ -342,6 +317,6 @@ fn a_service_killed_mid_spawn_leaves_no_stale_state_and_a_new_one_resumes() {
         .rfind(|e| e.kind == "service-started")
         .and_then(|e| e.str("api").map(String::from))
         .unwrap();
-    let up = herdsman::service::post(&herdsman::runner::Real, &format!("http://{api_b}"), &tok, &ask).unwrap();
+    let up = drover::service::post(&drover::runner::Real, &format!("http://{api_b}"), &tok, &ask).unwrap();
     assert_eq!(up.code, 0, "{}{}", up.stdout, up.stderr);
 }

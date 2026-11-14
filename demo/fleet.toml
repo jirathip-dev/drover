@@ -1,4 +1,4 @@
-# Synthetic demo fleet for `herdsman serve --export site --demo` (#39). Nothing here is real.
+# Synthetic demo fleet for `drover serve --export site --demo` (#39). Nothing here is real.
 models = ["opus", "sonnet"]
 
 [limits]

@@ -1,14 +1,11 @@
-//! #344: state in `state.db`: an old JSONL log (with its archives), devices and push subscriptions are imported once,
-//! fold-equal; `events --jsonl` exports the old format; leases expire instead of going stale.
 mod common;
 use common::*;
-use herdsman::db;
-use herdsman::events::{fold, history, jsonl, read, Event};
+use drover::db;
+use drover::events::{fold, history, jsonl, read, Event};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::Path;
 
-/// Rows as the old `append` wrote them (each with its seq).
 fn rows(evs: &[Event]) -> String {
     evs.iter().map(|e| serde_json::to_string(e).unwrap() + "\n").collect()
 }
@@ -25,7 +22,6 @@ fn gzip(p: &Path, text: &str) {
     assert!(c.wait().unwrap().success());
 }
 
-/// A pre-#344 state dir: an archive (seq 1-3), the live log (seq 4-7, one old row kept live), devices and push files.
 fn legacy(d: &Path) -> Vec<Event> {
     let e = |seq, ts, issue, kind: &str, d: Value| Event {
         seq,
@@ -65,7 +61,6 @@ fn migration_imports_once_with_an_equal_fold_and_the_export_is_the_old_format() 
     let back = history(&c.state).unwrap();
     assert_eq!(states(&back), states(&all), "fold before == fold after");
     assert_eq!(rows(&back), rows(&all), "every event once, seq kept");
-    // The archive's rows stay out of the live log, as they were.
     assert_eq!(
         read(&c.state).unwrap().iter().map(|e| e.seq).collect::<Vec<_>>(),
         [4, 5, 6, 7]
@@ -78,24 +73,21 @@ fn migration_imports_once_with_an_equal_fold_and_the_export_is_the_old_format() 
     ] {
         assert!(!st.join(f).exists() && st.join(format!("{f}.migrated")).exists(), "{f}");
     }
-    assert_eq!(herdsman::devices::load(&c)[0].label, "phone");
-    assert_eq!(herdsman::webpush::load(&c.state).len(), 1);
-    // Idempotent: a second run imports nothing more.
+    assert_eq!(drover::devices::load(&c)[0].label, "phone");
+    assert_eq!(drover::webpush::load(&c.state).len(), 1);
     assert_eq!(run(&c, &Fake::default(), &["migrate"]).0, 0);
     assert_eq!(history(&c.state).unwrap().len(), all.len());
-    assert_eq!(herdsman::devices::load(&c).len(), 1);
-    // The export is the old log, byte for byte.
+    assert_eq!(drover::devices::load(&c).len(), 1);
     assert_eq!(jsonl(&c.state).unwrap(), rows(&all));
     let (code, out) = run(&c, &Fake::default(), &["events", "--jsonl"]);
     assert_eq!((code, out), (0, rows(&all)));
 }
 
-/// An old build still writing `events.jsonl` after the import: its rows join on, after the database's.
 #[test]
 fn a_log_written_after_the_import_is_imported_after_it() {
     let d = tmpdir("db-late");
     let p = d.join("events.jsonl");
-    herdsman::events::append(&p, &Event::new(1, "app", Some(1), "spawn", json!({"role": "impl"}))).unwrap();
+    drover::events::append(&p, &Event::new(1, "app", Some(1), "spawn", json!({"role": "impl"}))).unwrap();
     std::fs::write(&p, rows(&[Event::new(2, "app", Some(1), "merged", json!({}))])).unwrap();
     let all = read(&p).unwrap();
     assert_eq!(all.iter().map(|e| (e.seq, e.ts)).collect::<Vec<_>>(), [(1, 1), (2, 2)]);
@@ -112,12 +104,10 @@ fn a_lease_is_held_until_it_expires_then_taken_over_with_no_stale_row_left() {
         db::take(&p, "drive.lock", 1059, 60, "b", &live).is_none(),
         "held until it expires"
     );
-    // Its holder died without releasing it: the lease is taken over once expired, no sweep needed.
     let b = db::take(&p, "drive.lock", 1060, 60, "b", &live).unwrap();
     let rows = db::leases(&p, "drive");
     assert_eq!(rows.len(), 1);
     assert_eq!((rows[0].data.as_str(), rows[0].at), ("b", 1060));
-    // The old holder can neither renew nor release what is no longer its own.
     assert!(!db::renew(
         &p,
         &a,
@@ -129,7 +119,6 @@ fn a_lease_is_held_until_it_expires_then_taken_over_with_no_stale_row_left() {
     assert!(!db::release(&p, "drive.lock", Some(&a)));
     assert!(db::release(&p, "drive.lock", Some(&b)));
     assert!(db::leases(&p, "drive").is_empty());
-    // A holder `dead` says is gone frees the lease at once.
     db::take(&p, "kick-app-1.lock", 2000, 300, "", &live).unwrap();
     assert!(db::take(&p, "kick-app-1.lock", 2001, 300, "", &|_| true).is_some());
 }
@@ -138,7 +127,7 @@ fn a_lease_is_held_until_it_expires_then_taken_over_with_no_stale_row_left() {
 fn the_database_is_owner_only() {
     use std::os::unix::fs::PermissionsExt;
     let d = tmpdir("db-mode");
-    herdsman::events::append(&d.join("events.jsonl"), &Event::new(1, "app", None, "x", json!({}))).unwrap();
+    drover::events::append(&d.join("events.jsonl"), &Event::new(1, "app", None, "x", json!({}))).unwrap();
     let mode = std::fs::metadata(d.join("state.db")).unwrap().permissions().mode() & 0o777;
     assert_eq!(mode, 0o600);
 }

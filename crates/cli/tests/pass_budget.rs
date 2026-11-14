@@ -1,6 +1,6 @@
 mod common;
 use common::*;
-use herdsman::events::{append, Event};
+use drover::events::{append, Event};
 use serde_json::json;
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::Instant;
@@ -8,7 +8,7 @@ use std::time::Instant;
 const EVENTS: u64 = 100_000;
 const ISSUES: u64 = 40;
 
-fn fixture() -> herdsman::Ctx {
+fn fixture() -> drover::Ctx {
     let mut c = ctx(&tmpdir("pass-budget"), CONFIG);
     append(&c.state, &Event::new(1, "sendmeter", None, "drive-pass", json!({}))).unwrap();
     let mut db = rusqlite::Connection::open(c.state.with_file_name("state.db")).unwrap();
@@ -21,8 +21,8 @@ fn fixture() -> herdsman::Ctx {
     };
     for n in 1..=ISSUES {
         let wt = c.worktrees.join(format!("sendmeter/issue-{n}"));
-        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("w{n}:p1"),
-            "workspace": format!("w{n}"), "worktree": wt, "branch": format!("issue-{n}")});
+        let d = json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "pane": format!("sendmeter-impl-{n}"),
+            "workspace": "", "worktree": wt, "branch": format!("issue-{n}")});
         add(Event::new(10 + n, "sendmeter", Some(n), "spawn", d));
     }
     for i in 0..EVENTS {
@@ -51,29 +51,27 @@ fn fixture() -> herdsman::Ctx {
     c
 }
 
-fn lanes() -> Fake {
-    let rows: Vec<_> = (1..=ISSUES)
-        .map(|n| (format!("sendmeter-impl-{n}"), format!("w{n}:p1")))
-        .collect();
-    let list: Vec<_> = rows
-        .iter()
-        .map(|(a, p)| (a.as_str(), "idle", "/elsewhere", p.as_str()))
-        .collect();
-    Fake::default()
-        .reply("herdr agent list", &agents(&list))
-        .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
-        .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
-        .reply("sysctl -n hw.ncpu", "10\n")
-        .reply("vm_stat", "Pages free: 100000.\nSwapouts: 100.\n")
+fn lanes() -> OnShed {
+    let r = OnShed::new(
+        Fake::default()
+            .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
+            .reply("sysctl -n vm.loadavg", "{ 1.50 1.20 1.00 }\n")
+            .reply("sysctl -n hw.ncpu", "10\n")
+            .reply("vm_stat", "Pages free: 100000.\nSwapouts: 100.\n"),
+    );
+    for n in 1..=ISSUES {
+        r.1.lane(&format!("sendmeter-impl-{n}"), "idle", "/elsewhere");
+    }
+    r
 }
 
 #[test]
 fn a_fast_pass_over_a_100k_event_log_reads_it_once_and_stays_under_its_bound() {
     let c = fixture();
     let f = lanes();
-    let (r0, t0) = (herdsman::db::ROWS.load(Relaxed), Instant::now());
+    let (r0, t0) = (drover::db::ROWS.load(Relaxed), Instant::now());
     let (code, out) = run(&c, &f, &["drive", "--fast"]);
-    let (secs, rows) = (t0.elapsed().as_secs_f64(), herdsman::db::ROWS.load(Relaxed) - r0);
+    let (secs, rows) = (t0.elapsed().as_secs_f64(), drover::db::ROWS.load(Relaxed) - r0);
     assert_eq!(code, 0, "{out}");
     let len = EVENTS + ISSUES + 1;
     assert!(rows >= len as usize, "the pass read the log: {rows}");
@@ -87,7 +85,7 @@ fn a_fast_pass_over_a_100k_event_log_reads_it_once_and_stays_under_its_bound() {
 #[test]
 #[ignore]
 fn pass_profile_on_the_fixture_log() {
-    let runs: usize = std::env::var("HERDSMAN_PROFILE_RUNS").map_or(3, |n| n.parse().unwrap());
+    let runs: usize = std::env::var("DROVER_PROFILE_RUNS").map_or(3, |n| n.parse().unwrap());
     for i in 0..runs {
         let c = fixture();
         let f = lanes();
@@ -99,12 +97,12 @@ fn pass_profile_on_the_fixture_log() {
             let t = String::from_utf8_lossy(&o.stdout).trim().to_string();
             t.split(':').fold(0.0, |a, p| a * 60.0 + p.parse::<f64>().unwrap())
         };
-        let (r0, c0, t0) = (herdsman::db::ROWS.load(Relaxed), cpu(), Instant::now());
+        let (r0, c0, t0) = (drover::db::ROWS.load(Relaxed), cpu(), Instant::now());
         let (code, _) = run(&c, &f, &["drive", "--fast"]);
         let (wall, cpu, rows) = (
             t0.elapsed().as_secs_f64(),
             cpu() - c0,
-            herdsman::db::ROWS.load(Relaxed) - r0,
+            drover::db::ROWS.load(Relaxed) - r0,
         );
         let len = EVENTS + ISSUES + 1;
         println!(

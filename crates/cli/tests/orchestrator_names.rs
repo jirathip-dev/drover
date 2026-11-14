@@ -1,18 +1,23 @@
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, read, Event};
+use drover::config::Config;
+use drover::events::{append, read, Event};
 use serde_json::{json, Value};
 use std::sync::Mutex;
 
 const NOW: u64 = 1_000_000;
 static ENV: Mutex<()> = Mutex::new(());
 
-fn kinds(c: &herdsman::Ctx, kind: &str) -> Vec<Event> {
-    read(&c.state).unwrap().into_iter().filter(|e| e.kind == kind).collect()
+fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
+    read(&c.state)
+        .unwrap()
+        .to_vec()
+        .into_iter()
+        .filter(|e| e.kind == kind)
+        .collect()
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, kind: &str, d: Value) {
+fn ev(c: &drover::Ctx, ts: u64, kind: &str, d: Value) {
     append(&c.state, &Event::new(ts, "sendmeter", None, kind, d)).unwrap();
 }
 
@@ -111,19 +116,19 @@ fn the_old_names_load_and_act_the_same_with_one_doctor_line() {
     assert_eq!(kinds(&c, "ask-withdrawn")[0].str("by"), Some("orchestrator-t1"));
 }
 
-fn two(name: &str) -> herdsman::Ctx {
+fn two(name: &str) -> drover::Ctx {
     let cfg = format!(
         "{CONFIG}\n[orchestrator.ada]\nname = \"Ada\"\nfleets = [\"sendmeter\"]\n\n[orchestrator.bob]\nname = \"Bob\"\nfleets = [\"all\"]\n"
     );
     ctx(&tmpdir(name), &cfg)
 }
 
-fn as_orch(c: &herdsman::Ctx, r: &Fake, id: &str, args: &[&str]) -> (i32, String) {
-    std::env::set_var("HERDSMAN_LANE", "sendmeter:-:orchestrator");
-    std::env::set_var("HERDSMAN_ORCHESTRATOR", id);
+fn as_orch(c: &drover::Ctx, r: &Fake, id: &str, args: &[&str]) -> (i32, String) {
+    std::env::set_var("DROVER_LANE", "sendmeter:-:orchestrator");
+    std::env::set_var("DROVER_ORCHESTRATOR", id);
     let out = run(c, r, args);
-    std::env::remove_var("HERDSMAN_LANE");
-    std::env::remove_var("HERDSMAN_ORCHESTRATOR");
+    std::env::remove_var("DROVER_LANE");
+    std::env::remove_var("DROVER_ORCHESTRATOR");
     out
 }
 
@@ -131,24 +136,14 @@ fn spawnable() -> Fake {
     Fake::default()
         .reply("gh issue view", r#"{"title":"t","body":"b"}"#)
         .reply("git -C", "")
-        .reply("herdr agent list", NO_AGENTS)
-        .reply(
-            "herdr worktree create",
-            r#"{"result":{"workspace":{"workspace_id":"w9"}}}"#,
-        )
-        .reply(
-            "herdr pane list",
-            r#"{"result":{"panes":[{"pane_id":"w9:p1","agent":null}]}}"#,
-        )
-        .reply("herdr pane run", "{}")
-        .reply("herdr agent start", "{}")
-        .reply("herdr agent wait", "{}")
+        .reply("which shed", "/opt/shed/bin/shed\n")
 }
 
 #[test]
 fn two_orchestrators_on_one_fleet_both_act_each_named_in_the_log_and_the_gates_still_serialize() {
     let _env = ENV.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let c = two("orch-two");
+    let sh = FakeShed::attached(&c);
     let r = Fake::default();
     let new = |o: &[&str]| run(&c, &r, &[&["thread", "new", "sendmeter", "Plan"], o].concat());
     assert_eq!(new(&["--orchestrator", "ada"]), (0, "t1\n".into()));
@@ -168,13 +163,14 @@ fn two_orchestrators_on_one_fleet_both_act_each_named_in_the_log_and_the_gates_s
     }
     let queued: Vec<_> = kinds(&c, "queue")
         .iter()
-        .map(|e| (e.data["issues"].clone(), e.data["orchestrator"].clone()))
+        .map(|e| (e.val("issues").clone(), e.val("orchestrator").clone()))
         .collect();
     assert_eq!(queued, [(json!([12]), json!("ada")), (json!([13]), json!("bob"))]);
 
     let f = spawnable();
     let (code, out) = as_orch(&c, &f, "ada", &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
+    assert!(sh.called("run", "sendmeter-impl-12"), "{:?}", sh.methods());
     let (code, out) = as_orch(&c, &spawnable(), "bob", &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 3, "{out}");
     assert!(out.contains("REFUSED LANE_LIVE"), "{out}");
@@ -182,7 +178,7 @@ fn two_orchestrators_on_one_fleet_both_act_each_named_in_the_log_and_the_gates_s
     assert_eq!(code, 0, "{out}");
     let spawns: Vec<_> = kinds(&c, "spawn")
         .iter()
-        .map(|e| (e.issue, e.data["orchestrator"].clone()))
+        .map(|e| (e.issue, e.val("orchestrator").clone()))
         .collect();
     assert_eq!(spawns, [(Some(12), json!("ada")), (Some(13), json!("bob"))]);
     assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "14"]).0, 0);
@@ -213,7 +209,7 @@ fn renaming_an_orchestrator_changes_every_label_and_no_other_config() {
     assert_eq!(run(&c, &r, &["thread", "reply", "t1", "Which scope?"]).0, 0);
     let ask = ["ask", "sendmeter", "-", "How fast?", "--option", "a", "--thread", "t1"];
     assert_eq!(run(&c, &r, &ask).1, "q1\n");
-    let labels = |c: &herdsman::Ctx| {
+    let labels = |c: &drover::Ctx| {
         let show = run(c, &r, &["thread", "show", "t1"]).1;
         let ls = run(c, &r, &["thread", "ls"]).1;
         format!("{show}{ls}")

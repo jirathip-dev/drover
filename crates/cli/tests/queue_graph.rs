@@ -1,17 +1,13 @@
-//! #115: the Queue tab as a git-log style graph. `serial_label` config, the rows' graph data, and (WebKit, 390 px) the
-//! drawn graph on a fixture with chains, a fork, a clamped chain and a blocker out of view, the [?] legend sheet and
-//! the control audit on both. Screenshots go to `$HERDSMAN_SNAPSHOTS`.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, Event};
-use herdsman::serve::Server;
+use drover::config::Config;
+use drover::events::{append, Event};
+use drover::serve::Server;
 use serde_json::json;
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// `acme` names its serial mark, `beta` keeps the default (`db`, #294).
 fn config(label: &str) -> String {
     format!(
         r#"[fleet.acme]
@@ -38,7 +34,6 @@ fn load(label: &str) -> anyhow::Result<Config> {
 
 #[test]
 fn serial_label_defaults_to_db_and_takes_an_override() {
-    // #294: the old form is one group named `serial_label`, `db` when unset.
     let c = load("").unwrap();
     assert_eq!(c.fleet["acme"].serial_label(), "db");
     let c = load("serial_label = \"schema\"").unwrap();
@@ -53,16 +48,13 @@ fn serial_label_defaults_to_db_and_takes_an_override() {
     }
 }
 
-/// #268: a page as the board shows it, its Queue tab drawn by web/src/queue.ts.
 fn req(s: &Server, path: &str, extra: &str) -> String {
     let res = String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{extra}\r\n"), T))
         .into_owned();
     with_board(&res, s, ADDR, extra, T)
 }
 
-/// acme: 1 → 2 → 3 → 4 → 5 (5 clamps at depth 4), 6 also on 1 (a fork), 7 on #99 (not queued), 8 serial.
-/// beta: 22 on 21, both serial. #1 has an impl lane.
-fn fixture() -> (herdsman::Ctx, Fake) {
+fn fixture() -> (drover::Ctx, Fake) {
     let c = ctx(&tmpdir("queue-graph"), &config("serial_label = \"db\""));
     let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
     ok(&["queue", "acme", "add", "1", "2", "3", "4", "5", "6", "7"]);
@@ -72,7 +64,6 @@ fn fixture() -> (herdsman::Ctx, Fake) {
     }
     ok(&["queue", "beta", "add", "--serial", "21", "22"]);
     ok(&["queue", "beta", "block", "--on", "21", "22"]);
-    // #331: every row's title (the deep ones too) is long enough to be cut at the card edge.
     let cache = c.state.parent().unwrap().join("cache");
     std::fs::create_dir_all(&cache).unwrap();
     for (f, n) in (1..=8).map(|n| ("acme", n)).chain([("beta", 21), ("beta", 22)]) {
@@ -98,7 +89,6 @@ fn rows_carry_the_graph_data_and_the_fleet_its_serial_paths() {
     assert!(page.contains(
         "<div class=\"fc k-a\" data-s=\"db\" data-sp=\"schema/**\"><div class=fh><span class=fn><b>beta</b>"
     ));
-    // #242: a row with a lane carries its coat for the row sprite.
     let at = page
         .find("<details class=\"q\" data-q data-act=impl data-grow=impl data-i=1 style=\"--rc:#")
         .unwrap();
@@ -110,7 +100,6 @@ fn rows_carry_the_graph_data_and_the_fleet_its_serial_paths() {
     assert!(page.contains("<details class=\"q\" data-q data-b=99 data-act=idle data-grow=queued data-i=7><summary><span><a href=\"https://github.com/acme/app/issues/7\">#7</a></span>"));
     assert!(page.contains("<details class=\"q\" data-q data-s=\"db\" data-act=idle data-grow=queued data-i=8><summary><span><a href=\"https://github.com/acme/app/issues/8\">#8</a></span>"));
     assert!(page.contains("<details class=\"q\" data-q data-b=21 data-s=\"db\" data-act=idle data-grow=queued data-i=22><summary><span><a href=\"https://github.com/acme/beta/issues/22\">#22</a></span>"));
-    // Change 1 of the approval: the card no longer repeats `#n state · age`; the lane stays.
     assert!(!page.contains("<p>#1 impl"), "{page}");
     assert!(page.contains("<p>acme-impl-1</p>"));
 }
@@ -125,14 +114,10 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
     let page = req(&s, "/", &pair(&s, &c, "Mozilla/5.0 (iPhone)", T));
     let d = tmpdir("queue-graph-png");
     let file = d.join("page.html");
-    // #268: the Queue tab drawn in (`req`), without the board (it would read this file's base server).
     let html = &page[page.find("<!doctype").unwrap()..page.find("<script type=module").unwrap()];
-    // #440: in terminal (no theme words), so the rows read their plain states once the theme has loaded.
     let html = html.replace("dataset.theme=m||\"farm\"", "dataset.theme=\"terminal\"");
     assert!(html.contains("dataset.theme=\"terminal\""));
     std::fs::write(&file, format!("{html}</body></html>\n")).unwrap();
-    // Per row in page order: #n, its gutter (#241: a row sprite's glyph), its state cell with the tags, its moves.
-    // #367: each group draws its own trees, so the running #1 stands alone and its queued followers carry `! #1`.
     let want = [
         "#1 ● impl",
         "#2 ○ queued ! #1 ▼after6",
@@ -146,7 +131,6 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
         "#22 └─○ queued 🔒db",
     ]
     .join("|");
-    // #367: every repo's card shown and the chain opened, so every row is measured.
     let graph = format!(
         "document.querySelectorAll('#queue .fc').forEach(c => {{ c.hidden = false; }}); \
          document.querySelectorAll('#queue details.qc').forEach(d => {{ d.open = true; }}); \
@@ -176,11 +160,11 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
     ] {
         let js =
             format!("{stub}; {audit}; {{ {then} }}; window.measure = [audit('{root}')]; tab('queue'); {{ {then} }}");
-        let png = std::env::var("HERDSMAN_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
+        let png = std::env::var("DROVER_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
             std::path::Path::new(&p).join(format!("{name}.png"))
         });
         let o = webview()
-            .env("HERDSMAN_TAB", "queue") // #440: its own localStorage: no earlier run's Herd mode on this origin
+            .env("DROVER_TAB", "queue")
             .args([
                 file.to_str().unwrap(),
                 "390",
@@ -204,7 +188,122 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
             v[0],
             v[1]
         );
-        // The legend sheet has no controls of its own (the lane parts are hidden); [?] is audited on the queue.
         assert!(v[2] > 0.0 || name == "ui-queue-legend", "{name}: no controls audited");
     }
+}
+
+const HOT: [&str; 5] = [
+    "assets/serve.js",
+    "crates/core/src/drive.rs",
+    "crates/core/src/queue.rs",
+    "crates/server/src/screens.rs",
+    "crates/server/src/serve.rs",
+];
+
+fn hot_fixture() -> drover::Ctx {
+    let c = ctx(&tmpdir("queue-hot"), &config("serial_label = \"db\""));
+    let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
+    ok(&["queue", "acme", "add", "--serial", "9"]);
+    ok(&["queue", "acme", "add", "10"]);
+    let ev = |n, kind, d| append(&c.state, &Event::new(900_000, "acme", n, kind, d)).unwrap();
+    ev(None, "hot-files", json!({ "files": HOT }));
+    for p in HOT {
+        ev(
+            Some(9),
+            "serial-joined",
+            json!({"group": format!("hot {p}"), "by": "diff"}),
+        );
+    }
+    c
+}
+
+#[test]
+fn a_row_holding_five_hot_files_has_one_hot_chip_and_its_paths_folded() {
+    let (c, r) = (hot_fixture(), Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let page = req(&s, "/", "");
+    let at = page.find("data-i=9>").unwrap();
+    let tag = &page[page[..at].rfind("<details").unwrap()..at];
+    assert!(tag.contains(" data-s=\"db\" "), "{tag}");
+    assert!(tag.contains(&format!(" data-h=\"{}\" ", HOT.join(" | "))), "{tag}");
+    let get = |p: &str| {
+        let res =
+            String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T)).into_owned();
+        let (head, body) = res.split_once("\r\n\r\n").unwrap();
+        assert!(head.starts_with("HTTP/1.1 200"), "{res}");
+        serde_json::from_str::<serde_json::Value>(body).unwrap()
+    };
+    let q = get("/screens/queue");
+    let text = q.to_string();
+    assert_eq!(text.matches("🔒 hot ×5").count(), 1, "{text}");
+    assert!(HOT.iter().all(|p| !text.contains(p)), "{text}");
+    let list = q["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["id"] == "fleet-acme")
+        .unwrap();
+    let queued = list["blocks"][1]["blocks"][0]["rows"].as_array().unwrap();
+    let ids: Vec<&str> = queued.iter().map(|r| r["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["q-acme-9", "hot-acme-9", "q-acme-10"]);
+    assert_eq!(queued[1]["title"], "🔒 hot ×5");
+    let sheet = get(queued[1]["tap"]["sheet"].as_str().unwrap());
+    let paths: Vec<&str> = sheet["blocks"][0]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(sheet["type"], "sheet");
+    assert_eq!(paths, HOT);
+}
+
+#[test]
+fn the_hot_chip_opens_its_paths_under_the_row_and_folds_them_at_390px() {
+    if no_webkit() {
+        return;
+    }
+    let (c, r) = (hot_fixture(), Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let page = req(&s, "/", &pair(&s, &c, "Mozilla/5.0 (iPhone)", T));
+    let d = tmpdir("queue-hot-png");
+    let file = d.join("page.html");
+    let html = &page[page.find("<!doctype").unwrap()..page.find("<script type=module").unwrap()];
+    std::fs::write(&file, format!("{html}</body></html>\n")).unwrap();
+    let paths = HOT.join(" ");
+    let js = format!(
+        "document.querySelectorAll('#queue details').forEach(d => {{ d.open = false; }}); \
+         const row = n => [...document.querySelectorAll('#queue details.q')].find(d => d.querySelector('summary>span').textContent === '#' + n); \
+         const r9 = row(9), r10 = row(10), h = d => d.querySelector('summary').getBoundingClientRect().height; \
+         const tags = [...r9.querySelectorAll('summary .tag')].filter(t => t.offsetParent).map(t => t.textContent).join('|'); \
+         if (tags !== '🔒db|🔒 hot ×5') throw new Error('tags: ' + tags); \
+         if (h(r9) > h(r10) + 1) throw new Error('not one line: ' + h(r9) + ' ' + h(r10)); \
+         const chip = [...r9.querySelectorAll('summary .tag')].find(t => t.textContent === '🔒 hot ×5'); \
+         const shown = () => [...r9.querySelectorAll('summary .tag')].filter(t => t.offsetParent && !t.textContent.startsWith('🔒')).map(t => t.textContent).join(' '); \
+         if (shown()) throw new Error('paths before tap: ' + shown()); \
+         chip.click(); \
+         if (shown() !== '{paths}' || r9.open) throw new Error('after tap: ' + shown() + ' open=' + r9.open); \
+         if (r9.querySelector('summary').getBoundingClientRect().right > 390) throw new Error('wider than 390'); \
+         chip.click(); \
+         if (shown() || r9.open) throw new Error('after second tap: ' + shown()); \
+         window.measure = [1]"
+    );
+    let o = webview()
+        .env("DROVER_TAB", "queue")
+        .args([
+            file.to_str().unwrap(),
+            "390",
+            "queue",
+            "horse",
+            d.join("hot.png").to_str().unwrap(),
+            &js,
+        ])
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        o.status.success() && out.split_whitespace().count() == 3,
+        "{out} {}",
+        String::from_utf8_lossy(&o.stderr)
+    );
 }

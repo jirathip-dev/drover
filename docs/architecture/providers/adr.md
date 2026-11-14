@@ -4,7 +4,7 @@ Status: proposed (architect lane, 2026-11-11). Read `usage.md` first, then this,
 
 ## Question
 
-How does herdsman keep every provider (harness) in one module behind a common trait — login, accounts, usage/limits,
+How does drover keep every provider (harness) in one module behind a common trait — login, accounts, usage/limits,
 models, plus launch, prompt and screen parsing — so that core names none of claude, anthropic, codex, openai, gemini,
 hermes, and adding one is a new file plus one registry line (q1190)?
 
@@ -62,7 +62,7 @@ crates/core/src/harness/ (now providers/) already held a 40-method `Harness` tra
   → `Ctx.homes`), `profile_files()` (timer), `hooks_allowed()` (`profiles sync --check`), `doctor()` rows,
   `scrubs_env()` (notifier). `setup.rs` lists every provider's `login()`; `hook.rs` takes `providers::brands()`
   plus `"copilot"`.
-- **The check.** arch-check's `[[ban]]` gains `ignore_case: bool`; `.herdsman/arch.toml` gets one ban per name
+- **The check.** arch-check's `[[ban]]` gains `ignore_case: bool`; `.drover/arch.toml` gets one ban per name
   (`paths = ["crates/*/src/**"]`, `except = ["crates/core/src/providers/**"]`, `comments = true`). The #316 grep step
   is deleted (one way to check). Comment lines that name a provider are reworded or moved into the provider.
 - **Proof of "one file + one line".** `providers/fake.rs` under `#[cfg(test)]` with unit tests that drive
@@ -73,15 +73,15 @@ crates/core/src/harness/ (now providers/) already held a 40-method `Harness` tra
 
 ## Consequences
 
-- Behaviour unchanged; tests change only by path/name (`herdsman::harness` → `herdsman::providers`, `NAMES` →
+- Behaviour unchanged; tests change only by path/name (`drover::harness` → `drover::providers`, `NAMES` →
   `lane_names()`, `Ctx { hermes }` → `Ctx { homes }`, `usage_meter`/`status` → `usage`/`reading`). Setup's list
   keeps its order (lane logins, `gh`, then ACP-only logins).
 - Core gains no layer edge: providers are inside core. Rough size: src net ≈ +120 (shapes, registry macro, ban flag)
   against ≈ −60 (tables, Hermes code in core, the grep step); the fake is test code.
-- `herdsman doctor`'s Hermes rows and `profiles sync --check` read the same but come from the provider.
+- `drover doctor`'s Hermes rows and `profiles sync --check` read the same but come from the provider.
 - First unit tests in `crates/core` (`fake.rs`); everything else stays in `crates/cli/tests`.
 - Docs: `docs/providers.md` gains "Adding a provider" (the file, the registry line, which methods matter);
-  `.herdsman/rules.md` (q1193, when it lands) lists the ban with its enforcer.
+  `.drover/rules.md` (q1193, when it lands) lists the ban with its enforcer.
 
 ## Open questions for the owner
 

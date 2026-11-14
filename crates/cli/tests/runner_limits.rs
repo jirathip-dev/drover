@@ -1,13 +1,10 @@
-//! #713: every external call is time-limited (`Real` kills it at its limit, exit 124), and nothing in `src/` starts a
-//! process but `crates/core/src/runner.rs`.
 mod common;
 use common::*;
-use herdsman::runner::{argv, limit, settle, Ended, Proc, Real, Runner};
+use drover::runner::{argv, limit, settle, Ended, Proc, Real, Runner};
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::time::{Duration, Instant};
 
-/// An executable `dir/name` that sleeps 30 s.
 fn sleeper(dir: &Path, name: &str) -> String {
     use std::os::unix::fs::PermissionsExt;
     let p = dir.join(name);
@@ -44,7 +41,6 @@ fn a_call_past_its_limit_is_cut_at_the_limit_with_124() {
 
 #[test]
 fn a_call_with_no_explicit_limit_is_bounded_by_the_table() {
-    // codesign waits on the Keychain: 10 s, though the program would sleep 30.
     let prog = sleeper(&tmpdir("limit-default"), "codesign");
     let t = Instant::now();
     let o = exec_fresh(|| Real.run(&prog, &argv(&["-v", "x"])));
@@ -71,7 +67,6 @@ fn the_limits_table() {
     assert_eq!(secs("cargo", &["build", "--release"]), 1800);
 }
 
-/// `file:line` of each `Command::new` under `root/crates/*/src/` but `crates/core/src/runner.rs`.
 fn stray(root: &Path) -> Vec<String> {
     fn walk(d: &Path, out: &mut Vec<std::path::PathBuf>) {
         for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
@@ -132,43 +127,38 @@ fn nothing_in_src_starts_a_process_but_the_runner() {
     );
 }
 
-/// Each call's program and the limit it was given (0: none, the runner's own table).
 #[derive(Default)]
 struct Limits(std::sync::Mutex<Vec<(String, u64)>>);
 
 impl Runner for Limits {
-    fn run(&self, prog: &str, _: &[String]) -> anyhow::Result<herdsman::runner::Out> {
+    fn run(&self, prog: &str, _: &[String]) -> anyhow::Result<drover::runner::Out> {
         self.0.lock().unwrap().push((prog.into(), 0));
-        Ok(herdsman::runner::Out::default())
+        Ok(drover::runner::Out::default())
     }
-    fn run_for(&self, prog: &str, _: &[String], _: &str, l: Duration) -> anyhow::Result<herdsman::runner::Out> {
+    fn run_for(&self, prog: &str, _: &[String], _: &str, l: Duration) -> anyhow::Result<drover::runner::Out> {
         self.0.lock().unwrap().push((prog.into(), l.as_secs()));
-        Ok(herdsman::runner::Out::default())
+        Ok(drover::runner::Out::default())
     }
 }
 
 #[test]
 fn a_remote_call_keeps_the_limit_of_the_command_it_carries() {
     let r = Limits::default();
-    let on = herdsman::hosts::On::new(&r, Some("air"));
+    let on = drover::hosts::On::new(&r, Some("air"));
     on.run("git", &argv(&["-C", "/r", "fetch", "origin"])).unwrap();
     on.run("cargo", &argv(&["install", "x"])).unwrap();
     on.run("sh", &argv(&["-c", "true"])).unwrap();
     on.run_for("sh", &argv(&["-c", "cargo install x"]), "", Duration::from_secs(1800))
         .unwrap();
-    herdsman::hosts::On::new(&r, None)
-        .run("git", &argv(&["status"]))
-        .unwrap();
+    drover::hosts::On::new(&r, None).run("git", &argv(&["status"])).unwrap();
     let seen = r.0.lock().unwrap().clone();
     let want = [("ssh", 600), ("ssh", 1800), ("ssh", 60), ("ssh", 1800), ("git", 0)];
     assert_eq!(seen, want.map(|(p, s)| (p.to_string(), s)));
 }
 
-/// #776: a folder whose listing hangs (its disk stopped answering) counts as hung after the wait, and is never probed
-/// again while that probe is still stuck.
 #[test]
 fn a_folder_whose_listing_hangs_is_hung_and_probed_once() {
-    use herdsman::runner::hung;
+    use drover::runner::hung;
     use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
     use std::sync::Arc;
     let dir = tmpdir("hung-probe").to_string_lossy().into_owned();
@@ -199,17 +189,16 @@ fn a_folder_whose_listing_hangs_is_hung_and_probed_once() {
 #[test]
 fn a_folder_that_answers_is_not_hung() {
     let dir = tmpdir("hung-ok").to_string_lossy().into_owned();
-    assert!(!herdsman::runner::hung(&dir, Duration::from_secs(2), |d| {
+    assert!(!drover::runner::hung(&dir, Duration::from_secs(2), |d| {
         drop(std::fs::read_dir(d));
         None
     }));
 }
 
-/// #776: `git -C <dir>` on a hung folder answers 124 at once instead of starting a child that never exits.
 #[test]
 fn a_git_call_on_a_hung_folder_fails_at_once() {
     let dir = tmpdir("hung-git").to_string_lossy().into_owned();
-    assert!(herdsman::runner::hung(&dir, Duration::from_millis(100), |_| {
+    assert!(drover::runner::hung(&dir, Duration::from_millis(100), |_| {
         std::thread::sleep(Duration::from_secs(5));
         None
     }));
@@ -220,7 +209,6 @@ fn a_git_call_on_a_hung_folder_fails_at_once() {
     assert!(t.elapsed() < Duration::from_millis(200), "{:?}", t.elapsed());
 }
 
-/// #776: a healthy folder still runs git normally (the probe passes within its wait).
 #[test]
 fn a_git_call_on_a_healthy_folder_runs() {
     let dir = tmpdir("hung-healthy-git").to_string_lossy().into_owned();
@@ -230,12 +218,9 @@ fn a_git_call_on_a_healthy_folder_runs() {
     assert_ne!(o.code, 124, "{o:?}");
 }
 
-/// #776: once a call on a disk runs out of time, every folder on that disk is hung, even one whose listing still
-/// answers (macOS serves it from memory while the files hang).
 #[test]
 fn a_disk_marked_hung_fails_every_folder_on_it() {
-    use herdsman::runner::{hung, sicken};
-    // A disk id no real disk has, fresh per run: the mark is shared on disk (~/.cache/herdsman/sick-disks).
+    use drover::runner::{hung, sicken};
     let dev = 0xDEAD_0776_0000_0000 | u64::from(std::process::id());
     let (a, b) = (
         tmpdir("sick-a").to_string_lossy().into_owned(),
@@ -252,41 +237,38 @@ fn a_disk_marked_hung_fails_every_folder_on_it() {
     assert!(t.elapsed() < Duration::from_millis(100), "{:?}", t.elapsed());
 }
 
-/// #775: serve's file reads go through `read_file`: a readable file comes back, one in a hung folder times out at once.
 #[test]
 fn read_file_returns_bytes_and_gives_up_on_a_hung_folder() {
     let ok = tmpdir("read-ok");
     std::fs::write(ok.join("shot.png"), b"png").unwrap();
-    assert_eq!(herdsman::runner::read_file(ok.join("shot.png")).unwrap(), b"png");
+    assert_eq!(drover::runner::read_file(ok.join("shot.png")).unwrap(), b"png");
     let bad = tmpdir("read-hung");
     let dir = bad.to_string_lossy().into_owned();
-    assert!(herdsman::runner::hung(&dir, Duration::from_millis(100), |_| {
+    assert!(drover::runner::hung(&dir, Duration::from_millis(100), |_| {
         std::thread::sleep(Duration::from_secs(5));
         None
     }));
     let t = Instant::now();
-    let e = herdsman::runner::read_file(bad.join("shot.png")).unwrap_err();
+    let e = drover::runner::read_file(bad.join("shot.png")).unwrap_err();
     assert_eq!(e.kind(), std::io::ErrorKind::TimedOut, "{e}");
     assert!(t.elapsed() < Duration::from_millis(200), "{:?}", t.elapsed());
 }
 
-/// #776: the mark is shared on disk, so a fresh process (each drive or tick run) sees a disk another one marked.
 #[test]
 fn a_disk_mark_is_seen_by_a_process_that_never_saw_the_timeout() {
     let dev = 0xDEAD_0777_0000_0000 | u64::from(std::process::id());
     let home = std::env::var("HOME").unwrap();
     let mark = std::path::Path::new(&home)
-        .join(".cache/herdsman/sick-disks")
+        .join(".cache/drover/sick-disks")
         .join(dev.to_string());
     std::fs::create_dir_all(mark.parent().unwrap()).unwrap();
     std::fs::write(&mark, b"").unwrap();
     let dir = tmpdir("sick-shared").to_string_lossy().into_owned();
-    let hung = herdsman::runner::hung(&dir, Duration::from_secs(2), move |_| Some(dev));
+    let hung = drover::runner::hung(&dir, Duration::from_secs(2), move |_| Some(dev));
     std::fs::remove_file(&mark).unwrap();
     assert!(hung, "a folder on a disk marked by another process");
 }
 
-/// A child that never ends and ignores SIGKILL (one stuck in disk I/O).
 struct Never;
 
 impl Proc for Never {
@@ -298,8 +280,6 @@ impl Proc for Never {
     }
 }
 
-/// #775 AC2: a lane's `git status` hangs for good: across 10 ticks only the first call starts a child, the other 9
-/// answer at once, so at most one call for the lane is outstanding.
 #[test]
 fn a_hung_lane_call_is_never_started_again_while_it_lives() {
     let lane = tmpdir("hung-lane")
@@ -328,8 +308,6 @@ fn a_hung_lane_call_is_never_started_again_while_it_lives() {
     );
 }
 
-/// #775: calls on one path from many threads run one at a time (the later ones wait their turn, within their own
-/// limit), and a path is free again once its abandoned child ends.
 #[test]
 fn calls_on_one_path_run_one_at_a_time_and_a_dead_child_frees_its_path() {
     let path = tmpdir("one-at-a-time").to_string_lossy().into_owned();
@@ -348,7 +326,6 @@ fn calls_on_one_path_run_one_at_a_time_and_a_dead_child_frees_its_path() {
         }
     });
     assert_eq!(most.load(Relaxed), 1, "never two calls on the path at once");
-    // A child killed at its limit that does die is reaped by the next call, which then runs.
     let slow = || Ok(std::process::Command::new("sleep").arg("30").spawn()?);
     assert_eq!(
         settle(Some(&path), Duration::from_millis(100), slow).unwrap(),

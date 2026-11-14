@@ -1,5 +1,4 @@
-//! dsh-TUI lanes (docs/dsh.md): a per-role patch layer, a pinned `dsh-tui` typed into the shell, a git pre-push hook.
-use super::{attempts, Credential, Provider};
+use super::{attempts, Provider};
 use crate::herdr;
 use crate::runner::{ok, Runner};
 use crate::spawn::Plan;
@@ -9,22 +8,18 @@ use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-/// The dsh-TUI profile version lanes run; `herdsman spawn` refuses any other.
+/// The dsh-TUI profile version lanes run; `drover spawn` refuses any other.
 pub const DSH_TUI_VERSION: &str = "0.17.0";
-/// The agent label dsh-TUI reports to herdr.
 const LABEL: &str = "dsh-tui";
-/// The first-run wizard's title (en, zh); it reports idle but eats the prompt.
 const WIZARD: &[&str] = &["Welcome to dsh-TUI", "欢迎使用 dsh-TUI"];
 
 pub struct Dsh;
 pub static PROVIDER: Dsh = Dsh;
 
-/// `<config dir>/dsh/<profile>.patch.yml`, the lane's `--patch` overlay.
 fn patch_file(ctx: &Ctx, profile: &str) -> PathBuf {
     ctx.config.with_file_name("dsh").join(format!("{profile}.patch.yml"))
 }
 
-/// Reviewers get the workspace-write sandbox; escalations are never asked (nobody answers them).
 fn patch(role: &str) -> String {
     let mode = if role == "rev" {
         "workspace-write"
@@ -32,7 +27,7 @@ fn patch(role: &str) -> String {
         "danger-full-access"
     };
     format!(
-        "# Written by `herdsman profiles sync` for {role} lanes; edits are overwritten.\n\
+        "# Written by `drover profiles sync` for {role} lanes; edits are overwritten.\n\
          - id: sandbox-policy\n  config:\n    mode: {mode}\n    workspaceRoot: !!js process.cwd()\n\
          - id: approval\n  config:\n    policy: never\n"
     )
@@ -60,7 +55,7 @@ impl Provider for Dsh {
 
     fn ready(&self, ctx: &Ctx, r: &dyn Runner, p: &Plan) -> Result<()> {
         if !patch_file(ctx, &p.profile).exists() {
-            bail!("DSH profile {} missing; run `herdsman profiles sync`", p.profile);
+            bail!("DSH profile {} missing; run `drover profiles sync`", p.profile);
         }
         let v = ok(r, "dsh-tui", &["version"]).context("dsh-tui is not installed")?;
         let profile = v
@@ -77,20 +72,17 @@ impl Provider for Dsh {
     }
 
     fn prepare(&self, ctx: &Ctx, on: &crate::hosts::On, p: &Plan) -> Result<()> {
-        // #404: a conductor has no branch (its folder is no worktree): nothing to push.
         if p.branch.is_empty() {
             return Ok(());
         }
         install_pre_push(on, &ctx.exe, &p.worktree, p.family)
     }
 
-    /// herdr has no `dsh` kind: type the launch into the lane's shell.
     fn start_cmd(&self, ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
         let patch = format!("'{}'", patch_file(ctx, &p.profile).display());
         herdr::run_argv(pane, &["dsh-tui", "--patch", &patch])
     }
 
-    /// Settle idle (Esc skips the wizard), name the agent, type kick + Enter, confirm working/blocked/done.
     fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {
         vec![
             herdr::pane_get_argv(pane),
@@ -103,7 +95,6 @@ impl Provider for Dsh {
         ]
     }
 
-    /// Up to 3 tries 5 s apart; a kick left typed in the input only gets Enter.
     fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
         let c = self.kick_cmds(p, pane);
         if !poll(r, &c[0], &["idle"], 90) {
@@ -131,15 +122,11 @@ impl Provider for Dsh {
         Ok(false)
     }
 
-    fn credential(&self) -> Credential {
-        Credential::Own
-    }
     fn process_names(&self) -> &'static [&'static str] {
         &[LABEL]
     }
 }
 
-/// Re-read the pane (1 s apart, `tries` times) until dsh-TUI reports one of `want`.
 fn poll(r: &dyn Runner, get: &[String], want: &[&str], tries: u32) -> bool {
     for _ in attempts(r, tries, 1) {
         let pane = herdr::json(r, get)
@@ -152,7 +139,7 @@ fn poll(r: &dyn Runner, get: &[String], want: &[&str], tries: u32) -> bool {
     false
 }
 
-/// A worktree-only `pre-push` hook (`core.hooksPath`) running `herdsman hook --git-pre-push`.
+/// A worktree-only `pre-push` hook (`core.hooksPath`) running `drover hook --git-pre-push`.
 pub fn install_pre_push(r: &dyn Runner, exe: &str, wt: &Path, role: &str) -> Result<()> {
     let w = wt.to_string_lossy();
     let gd = PathBuf::from(ok(r, "git", &["-C", &w, "rev-parse", "--absolute-git-dir"])?.trim());

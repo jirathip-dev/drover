@@ -1,15 +1,13 @@
-//! #14: per-fleet notifiers replace the global ones; `notify_global` sends to both.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{emit, Event};
+use drover::config::Config;
+use drover::events::{emit, Event};
 use std::path::Path;
 
 fn sink(cmd: &Path) -> String {
     format!("cmd = \"cat >> '{}'\"\non = [\"merged\"]\n", cmd.display())
 }
 
-/// Fleet `a` has its own notifier (optionally `notify_global`), fleet `b` none; plus a global one.
 fn setup(name: &str, global_too: bool) -> (std::path::PathBuf, Config) {
     let d = tmpdir(name);
     let fleet = |f: &str| format!("[fleet.{f}]\nrepo = \"o/{f}\"\nlocal = \"/tmp/{f}\"\nintegration = \"staging\"\n");

@@ -1,4 +1,3 @@
-//! #4: `herdsman protection` reads branch protection through the runner and never writes.
 mod common;
 use common::*;
 
@@ -11,23 +10,23 @@ const NO_BRANCH: &str =
     r#"{"message":"Branch not found","documentation_url":"https://docs.github.com","status":"404"}"#;
 const FREE_PLAN: &str = r#"{"message":"Upgrade to GitHub Pro or make this repository public to enable this feature.","documentation_url":"https://docs.github.com","status":"403"}"#;
 
-fn err(stdout: &str, stderr: &str) -> herdsman::runner::Out {
-    herdsman::runner::Out {
+fn err(stdout: &str, stderr: &str) -> drover::runner::Out {
+    drover::runner::Out {
         code: 1,
         stdout: stdout.into(),
         stderr: stderr.into(),
     }
 }
 
-fn with(main: herdsman::runner::Out, staging: herdsman::runner::Out) -> Fake {
+fn with(main: drover::runner::Out, staging: drover::runner::Out) -> Fake {
     let mut r = Fake::default();
     r.replies.push((MAIN.into(), main));
     r.replies.push((STAGING.into(), staging));
     r
 }
 
-fn ok(body: &str) -> herdsman::runner::Out {
-    herdsman::runner::Out {
+fn ok(body: &str) -> drover::runner::Out {
+    drover::runner::Out {
         code: 0,
         stdout: body.into(),
         stderr: String::new(),
@@ -38,7 +37,6 @@ fn check(name: &str, r: &Fake) -> (i32, String) {
     let d = tmpdir(name);
     let c = ctx(&d, CONFIG);
     let res = run(&c, r, &["protection"]);
-    // Read-only: exactly the two GETs, never a write or a repo/settings change.
     assert_eq!(*r.calls.borrow(), vec![MAIN.to_string(), STAGING.to_string()]);
     res
 }
@@ -168,7 +166,7 @@ fn repo_without_main_is_skipped() {
 #[test]
 fn one_unprotected_among_fleets_exits_non_zero() {
     let cfg = format!(
-        "{CONFIG}\n[fleet.herdsman]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"/tmp/x\"\nintegration = \"integ\"\n"
+        "{CONFIG}\n[fleet.drover]\nrepo = \"jirathip-dev/herdsman\"\nlocal = \"/tmp/x\"\nintegration = \"integ\"\n"
     );
     let d = tmpdir("prot-multi");
     let c = ctx(&d, &cfg);
@@ -178,7 +176,6 @@ fn one_unprotected_among_fleets_exits_non_zero() {
         .reply("gh api repos/jirathip-dev/herdsman/branches/staging/", PROTECTED);
     let (code, out) = run(&c, &r, &["protection"]);
     assert_eq!(code, 1, "{out}");
-    // The integration branch is checked too; unscripted here, so it fails.
     assert!(
         out.contains("jirathip-dev/herdsman integ: ✗ unavailable: no HTTP status"),
         "{out}"

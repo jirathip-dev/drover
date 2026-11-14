@@ -1,10 +1,7 @@
-//! #501: a 401 is checked, not believed. `GET /pair/status` says whether this browser is paired; a database error
-//! reading the devices answers 503, never 401; each 401 and 503 is one `serve.log` line (never the token) that
-//! `doctor` counts over 24 h; a browser pairing again replaces its own row.
 mod common;
 use common::*;
-use herdsman::devices;
-use herdsman::serve::Server;
+use drover::devices;
+use drover::serve::Server;
 
 const T: u64 = 1_000_000;
 const IPHONE: &str = "Mozilla/5.0 (iPhone) Safari/604.1";
@@ -18,8 +15,7 @@ fn body(res: &str) -> &str {
     &res[res.find("\r\n\r\n").unwrap() + 4..]
 }
 
-/// The `auth` lines `serve.log` holds.
-fn logged(c: &herdsman::Ctx) -> Vec<String> {
+fn logged(c: &drover::Ctx) -> Vec<String> {
     let log = std::fs::read_to_string(c.state.with_file_name("serve.log")).unwrap_or_default();
     log.lines()
         .filter(|l| l.starts_with("auth "))
@@ -54,13 +50,11 @@ fn a_database_error_is_503_never_401_and_each_refusal_logs_one_line() {
     let token = cookie.trim().strip_prefix("Cookie: hd=").unwrap().to_string();
     let hash = devices::load(&c)[0].hash.clone();
     let send = "POST /send HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n";
-    // The three 401s, each with its reason.
     assert!(req(&s, "GET", "/lane?agent=x", "", T).starts_with("HTTP/1.1 401 "));
     assert!(req(&s, "GET", "/lane?agent=x", "Cookie: hd=feed\r\n", T).starts_with("HTTP/1.1 401 "));
     let late = T + devices::YEAR + 1;
     assert!(req(&s, "GET", "/lane?agent=x", &cookie, late).starts_with("HTTP/1.1 401 "));
-    // The devices unreadable (state.db gone, a directory in its place): 503, never 401.
-    let db = herdsman::db::file(&c.state);
+    let db = drover::db::file(&c.state);
     for x in ["", "-wal", "-shm"] {
         let _ = std::fs::remove_file(format!("{}{x}", db.display()));
     }
@@ -94,12 +88,11 @@ fn a_database_error_is_503_never_401_and_each_refusal_logs_one_line() {
         assert!(l.ends_with(w) && [T, late].contains(&at), "{l} / {w}");
         assert!(!l.contains(&token) && !l.contains(&hash), "no token: {l}");
     }
-    // doctor counts the last 24 h: a day later they are gone.
     assert_eq!(devices::denials(&c), (3, 5));
     let (_, out) = run(&c, &Fake::default(), &["doctor"]);
     assert!(out.contains("! board auth — 24 h: 3 × 401, 5 × 503 → see "), "{out}");
     assert_eq!(
-        devices::denials(&herdsman::Ctx {
+        devices::denials(&drover::Ctx {
             now: late + 86_400,
             ..c.clone()
         }),

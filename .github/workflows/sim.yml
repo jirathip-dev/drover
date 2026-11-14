@@ -33,9 +33,9 @@ jobs:
       - name: "fleet metrics over 200 seeds"
         continue-on-error: true
         env:
-          HERDSMAN_SIM_OUT: sim-metrics
+          DROVER_SIM_OUT: sim-metrics
         run: |
-          test -f baseline/metrics.json && export HERDSMAN_SIM_BASELINE="$PWD/baseline/metrics.json"
+          test -f baseline/metrics.json && export DROVER_SIM_BASELINE="$PWD/baseline/metrics.json"
           just sim --metrics 200
           cat sim-metrics/metrics.md >> "$GITHUB_STEP_SUMMARY"
           grep '^WARNING' sim-metrics/metrics.md | sed 's/^/::warning::/' || true

@@ -6,11 +6,11 @@
 // screenshots back to back for 400 ms; prints the frame count, the worst frame's share of pixels above the open sheet
 // that are not the baseline dimmed evenly, no darker than under the open sheet (the backdrop fading), and how dimmed
 // the last frame is (0: the page as it was); the worst frame goes to out.png.
-// #206: `HERDSMAN_TAB` is the stored tab before the page loads; tab `-`: no tab()/mode() and no <details> opened.
-// #334: `<page.html>` may be an http URL instead (a real `serve`), loaded with the `HERDSMAN_COOKIE` (`name=value`) set;
-// `HERDSMAN_WAIT` is the wait (s) before `window.late` is read (default 0.5). `HERDSMAN_PRE`: js run at document start.
-// #337 `HERDSMAN_WARM`: the URL loads twice in one WebKit (its caches and service worker warm).
-// A file's page is served at `HERDSMAN_BASE` (serve's assets beside it). Playwright resolves through NODE_PATH.
+// #206: `DROVER_TAB` is the stored tab before the page loads; tab `-`: no tab()/mode() and no <details> opened.
+// #334: `<page.html>` may be an http URL instead (a real `serve`), loaded with the `DROVER_COOKIE` (`name=value`) set;
+// `DROVER_WAIT` is the wait (s) before `window.late` is read (default 0.5). `DROVER_PRE`: js run at document start.
+// #337 `DROVER_WARM`: the URL loads twice in one WebKit (its caches and service worker warm).
+// A file's page is served at `DROVER_BASE` (serve's assets beside it). Playwright resolves through NODE_PATH.
 // node webview.mjs <page.html | http URL> <width> <tab> <mode> [out.png] [js] [close]
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
@@ -84,17 +84,17 @@ if (url) {
   await ctx.addInitScript(
     "window.errs = []; addEventListener('error', e => errs.push(String(e.message))); addEventListener('unhandledrejection', e => errs.push(String(e.reason))); const ce = console.error; console.error = (...m) => (errs.push(m.join(' ')), ce(...m))",
   );
-  if (env.HERDSMAN_PRE) await ctx.addInitScript(env.HERDSMAN_PRE);
-  const [name, ...v] = (env.HERDSMAN_COOKIE ?? "").split("=");
+  if (env.DROVER_PRE) await ctx.addInitScript(env.DROVER_PRE);
+  const [name, ...v] = (env.DROVER_COOKIE ?? "").split("=");
   if (v.length) await ctx.addCookies([{ name, value: v.join("="), url }]);
 }
 at = "load";
-if (env.HERDSMAN_TAB) await ctx.addInitScript(`localStorage.tab = ${JSON.stringify(env.HERDSMAN_TAB)}`);
+if (env.DROVER_TAB) await ctx.addInitScript(`localStorage.tab = ${JSON.stringify(env.DROVER_TAB)}`);
 if (url) {
   await page.goto(url);
-  if (env.HERDSMAN_WARM) await sleep(1).then(() => page.goto(url));
-} else if (env.HERDSMAN_BASE) {
-  const html = readFileSync(page0, "utf8"), base = env.HERDSMAN_BASE;
+  if (env.DROVER_WARM) await sleep(1).then(() => page.goto(url));
+} else if (env.DROVER_BASE) {
+  const html = readFileSync(page0, "utf8"), base = env.DROVER_BASE;
   await page.route(base, (r) => r.fulfill({ body: html, contentType: "text/html; charset=utf-8" }));
   await page.goto(base);
 } else {
@@ -138,7 +138,7 @@ const wide = [Math.trunc(v[0]), Math.trunc(v[1])];
 if (!png) done(0, ...wide, ...v.slice(3).map(Number));
 at = "shot";
 await page.setViewportSize({ width, height: extra ? 844 : Math.ceil(v[2]) });
-await sleep(Number(env.HERDSMAN_WAIT ?? 0.5));
+await sleep(Number(env.DROVER_WAIT ?? 0.5));
 // #315: numbers the js leaves in `window.late` are read after the wait (a sheet's poll has landed) instead.
 const m = await run("window.late || null");
 console.log([...wide, ...(nums(m) ? m : v.slice(3)).map(Number)].join(" "));

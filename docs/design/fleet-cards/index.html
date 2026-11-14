@@ -59,7 +59,7 @@ body:not(.cfg) #sheet{display:none}
 .cs .soon{margin:var(--s1) 0 0;padding:var(--s2);border:1px dashed #30363d;border-radius:6px;color:var(--mute);font-size:var(--fs-meta)}
 </style></head>
 <body data-ts=1793580715 data-mode=glyph>
-<header><b>herdsman</b><span id=stale hidden></span><i id=dot class=g></i><button id=rf type=button aria-label=refresh><i>↻</i></button><button id=herd-on type=button aria-label="herd mode">🐎</button></header>
+<header><b>drover</b><span id=stale hidden></span><i id=dot class=g></i><button id=rf type=button aria-label=refresh><i>↻</i></button><button id=herd-on type=button aria-label="herd mode">🐎</button></header>
 <main><section id=queue>
 <p class=qh><button type=button class=qhelp aria-label="what the marks mean"><span>?</span></button></p>
 
@@ -88,21 +88,21 @@ body:not(.cfg) #sheet{display:none}
  </details>
 </div>
 
-<!-- 2 · working. Colour: sha256("herdsman")[0] = 0xeb, 235 % 5 = 0 → --l. -->
+<!-- 2 · working. Colour: sha256("drover")[0] = 0xeb, 235 % 5 = 0 → --l. -->
 <div class="fc k-l">
- <div class=fh><span class=fn><b>herdsman</b><span class=ds><i class=g>●</i> drive · 3m ago</span></span>
+ <div class=fh><span class=fn><b>drover</b><span class=ds><i class=g>●</i> drive · 3m ago</span></span>
   <span class=btns><form method=post><button><span>drive now</span></button></form><form method=post><button><span>pause</span></button></form><button type=button onclick="location.hash='config'"><span>config</span></button></span></div>
  <p class=fm>stall check: #154 in 8m · 5 lanes</p>
  <details class="q d0" data-q><summary><i class=gt><b class=a>○</b></i><span>#160</span><span><span class=a title="queued = waiting its turn">queued</span></span><span class=m></span><span class=tl>Board freezes ~45 s each minute: Services disk row runs 'du -sk' on all worktrees in the request path (roles row never loads)</span></summary><div class=cd><p>no PR read yet</p></div></details>
  <details class="q d0" data-q><summary><i class=gt><b class=a>○</b></i><span>#164</span><span><span class=a title="queued = waiting its turn">queued</span></span><span class=m></span><span class=tl>Disk: free build folders when a lane finishes, a configurable worktree budget (default 25 GB)</span></summary><div class=cd><p>no PR read yet</p></div></details>
- <details class="q d0" data-q><summary><i class=gt><b class=g>✓</b></i><span>#150</span><span><span class=g title="ready = passed, waiting to merge">ready</span></span><span class=m>17m</span><span class=tl>Fleets that need a label for the full CI: add the merge label automatically after a PASS at the exact head</span></summary><div class=cd><p>herdsman-rev-150-r1</p><p><a href=#>PR #158</a> · CI <span class=g>✓</span> · rev <span class=g>PASS</span> r1</p></div></details>
- <details class="q d0" data-q><summary><i class=gt><b class=a>●</b></i><span>#141</span><span><span class=a title="impl = being built">impl</span></span><span class=m>66m</span><span class=tl>Host tab: 4 glanceable groups (machine/services/fleets/alerts) with status dots + gauge bars</span></summary><div class=cd><p>herdsman-impl-141</p></div></details>
- <details class="q d0" data-q><summary><i class=gt><b class=a>●</b></i><span>#149</span><span><span class=a title="impl = being built">impl</span></span><span class=m>41m</span><span class=tl>No-orch gaps: add the fleet's pass label (merge-ready) on PASS at exact head, and auto-mark serial</span></summary><div class=cd><p>herdsman-impl-149</p></div></details>
- <details class="q d0" data-q><summary><i class=gt><b class="a k">●</b></i><span>#151</span><span><span class=a title="impl = being built">impl</span></span><span class=m>41m</span><span class=tl>CLI for the needs-human card: `herdsman extend` / `herdsman park`, so chat-approved extra rounds are recorded</span></summary><div class=cd><p>herdsman-impl-151</p></div></details>
+ <details class="q d0" data-q><summary><i class=gt><b class=g>✓</b></i><span>#150</span><span><span class=g title="ready = passed, waiting to merge">ready</span></span><span class=m>17m</span><span class=tl>Fleets that need a label for the full CI: add the merge label automatically after a PASS at the exact head</span></summary><div class=cd><p>drover-rev-150-r1</p><p><a href=#>PR #158</a> · CI <span class=g>✓</span> · rev <span class=g>PASS</span> r1</p></div></details>
+ <details class="q d0" data-q><summary><i class=gt><b class=a>●</b></i><span>#141</span><span><span class=a title="impl = being built">impl</span></span><span class=m>66m</span><span class=tl>Host tab: 4 glanceable groups (machine/services/fleets/alerts) with status dots + gauge bars</span></summary><div class=cd><p>drover-impl-141</p></div></details>
+ <details class="q d0" data-q><summary><i class=gt><b class=a>●</b></i><span>#149</span><span><span class=a title="impl = being built">impl</span></span><span class=m>41m</span><span class=tl>No-orch gaps: add the fleet's pass label (merge-ready) on PASS at exact head, and auto-mark serial</span></summary><div class=cd><p>drover-impl-149</p></div></details>
+ <details class="q d0" data-q><summary><i class=gt><b class="a k">●</b></i><span>#151</span><span><span class=a title="impl = being built">impl</span></span><span class=m>41m</span><span class=tl>CLI for the needs-human card: `drover extend` / `drover park`, so chat-approved extra rounds are recorded</span></summary><div class=cd><p>drover-impl-151</p></div></details>
  <details class="q d1" data-q data-b=151><summary><i class=gt><i class=e>└─</i><b class="a k">○</b></i><span>#155</span><span><span class=a title="queued = waiting its turn">queued</span></span><span class=m></span><span class=tl>Drop orch support: drive is the only mode (delete orch role, prompts/nudges/wake, orch wording/alerts)</span></summary><div class=cd><p><span class=r>blocked by #151</span></p></div></details>
- <details class="q d2" data-q data-b=155><summary><i class=gt><i>  </i><i class=e>└─</i><b class="a k">○</b></i><span>#157</span><span><span class=a title="queued = waiting its turn">queued</span></span><span class=m></span><span class=tl>Multi-host lanes: one main herdsman places lanes on any host via herdr --machine, matched by host tags</span></summary><div class=cd><p><span class=r>blocked by #155</span></p></div></details>
+ <details class="q d2" data-q data-b=155><summary><i class=gt><i>  </i><i class=e>└─</i><b class="a k">○</b></i><span>#157</span><span><span class=a title="queued = waiting its turn">queued</span></span><span class=m></span><span class=tl>Multi-host lanes: one main drover places lanes on any host via herdr --machine, matched by host tags</span></summary><div class=cd><p><span class=r>blocked by #155</span></p></div></details>
  <details class="q d3" data-q data-b=157><summary><i class=gt><i>  </i><i>  </i><i class=e>└─</i><b class=a>○</b></i><span>#156</span><span><span class=a title="queued = waiting its turn">queued</span></span><span class=m></span><span class=tl>Final clean-up (last): re-measure, remove dead code, merge duplicate helpers, lower the cap</span></summary><div class=cd><p><span class=r>blocked by #157</span></p></div></details>
- <details class="q d0" data-q><summary><i class=gt><b class=a>●</b></i><span>#154</span><span><span class=a title="impl = being built">impl</span></span><span class=m>41m</span><span class=tl>Needs-you cards: [later] / [later all] hide them on this phone into one red line</span></summary><div class=cd><p>herdsman-impl-154</p></div></details>
+ <details class="q d0" data-q><summary><i class=gt><b class=a>●</b></i><span>#154</span><span><span class=a title="impl = being built">impl</span></span><span class=m>41m</span><span class=tl>Needs-you cards: [later] / [later all] hide them on this phone into one red line</span></summary><div class=cd><p>drover-impl-154</p></div></details>
  <details class=done><summary><i class=cv></i><span>done today: 31</span></summary>
   <p>#148 <span class=g>merged</span> 17m <a href=#>PR #153</a></p><p>#147 <span class=g>merged</span> 28m <a href=#>PR #152</a></p><p>#143 <span class=g>merged</span> 102m</p><p>#140 <span class=g>merged</span> 103m</p><p>#139 <span class=g>merged</span> 8h</p>
  </details>
@@ -123,7 +123,7 @@ body:not(.cfg) #sheet{display:none}
    <dt>repo</dt><dd>example-org/atlas-apps</dd>
    <dt>local</dt><dd>~/Projects/atlas-apps</dd>
    <dt>integration</dt><dd>staging</dd>
-   <dt>driver</dt><dd>herdsman <span class=m>(herdsman drive)</span></dd>
+   <dt>driver</dt><dd>drover <span class=m>(drover drive)</span></dd>
    <dt>default effort</dt><dd><span class=m>unset → none</span><span class="tag m">all fleets</span></dd>
    <dt>colour</dt><dd><span class=a>■</span> amber <span class=m>(auto)</span></dd>
    <dt>env</dt><dd><span class=m>none</span></dd>

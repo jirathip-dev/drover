@@ -1,6 +1,6 @@
 {
-  "name": "herdsman",
-  "short_name": "herdsman",
+  "name": "drover",
+  "short_name": "drover",
   "start_url": ".",
   "scope": ".",
   "display": "standalone",

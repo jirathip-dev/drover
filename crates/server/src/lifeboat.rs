@@ -1,7 +1,3 @@
-//! #725: the lifeboat, a small plain page at `/api/v1/lifeboat` for when cooee is down (docs/lifeboat.md): each fleet
-//! with [pause] / [resume], the queue, the live lanes, the open asks with their options and a free-text answer, and the
-//! open run cards with [approve] / [deny]. Server-rendered, no script: each form posts back and is sent back here.
-//! Its actions are the CLI verbs' own code (`answer`, `card approve|deny`, `pause|resume`), logged `via: lifeboat`.
 use crate::api::Lane;
 use crate::config::Config;
 use crate::events::{age, open_asks, shared};
@@ -28,12 +24,11 @@ fn esc(s: &str) -> String {
 fn shell(body: &str) -> String {
     format!(
         "<!doctype html><html lang=en><head><meta charset=utf-8><meta name=viewport \
-         content=\"width=device-width,initial-scale=1\"><title>herdsman lifeboat</title><style>{CSS}</style></head>\
-         <body><h1>herdsman lifeboat</h1>{body}</body></html>"
+         content=\"width=device-width,initial-scale=1\"><title>drover lifeboat</title><style>{CSS}</style></head>\
+         <body><h1>drover lifeboat</h1>{body}</body></html>"
     )
 }
 
-/// A form posting `fields` back to the lifeboat as one button.
 fn button(label: &str, fields: &[(&str, &str)]) -> String {
     let mut s = String::from("<form method=post action=lifeboat>");
     for (k, v) in fields {
@@ -42,10 +37,10 @@ fn button(label: &str, fields: &[(&str, &str)]) -> String {
     s + &format!("<button>{}</button></form>", esc(label))
 }
 
-/// An unpaired device's page: how to pair it (`devices.rs`, the same pairing as every herdsman page), nothing else.
+/// An unpaired device's page: how to pair it (`devices.rs`, the same pairing as every drover page), nothing else.
 pub fn hint() -> String {
     shell(
-        "<p>Pair this device first: tap [pair], run the <code>herdsman serve approve</code> line with the code it \
+        "<p>Pair this device first: tap [pair], run the <code>drover serve approve</code> line with the code it \
          shows on the Mac, then come back, tap [claim] and open this page again.</p>\
          <form method=post action=/pair/request><button>pair</button></form>\
          <form method=post action=/pair/claim><button>claim</button></form>",
@@ -114,7 +109,7 @@ pub fn page(ctx: &Ctx, lanes: &[Lane], msg: &str) -> String {
         let at = a.issue.map_or(String::new(), |n| format!(" #{n}"));
         let q = esc(a.str("question").unwrap_or_default());
         let _ = write!(b, "<p>{} {}{at}: {q}<br>", esc(fleet), esc(id));
-        let opts = a.data["options"].as_array().cloned().unwrap_or_default();
+        let opts = a.val("options").as_array().cloned().unwrap_or_default();
         for (n, o) in opts.iter().enumerate() {
             let (n, o) = ((n + 1).to_string(), o.as_str().unwrap_or_default());
             b += &button(

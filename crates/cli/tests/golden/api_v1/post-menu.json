@@ -1,7 +1,7 @@
 {
   "response": {
     "code": "PAUSED",
-    "message": "sendmeter is paused (`herdsman resume sendmeter`)",
+    "message": "sendmeter is paused (`drover resume sendmeter`)",
     "ok": false
   },
   "route": "POST /api/v1/menu",

@@ -1,5 +1,3 @@
-//! #539: a retired config key is a warning, never a load error. Each `upgrade/*.toml` is a fleet.toml from before a
-//! retired-key change; this build loads it. `check` and the board warn; the install gate refuses a binary that can't.
 mod common;
 use common::*;
 use std::os::unix::fs::PermissionsExt;
@@ -36,7 +34,7 @@ fn a_fleet_toml_from_before_each_retired_key_change_loads() {
     }
     let c = ctx(&tmpdir("upgrade-441"), RETIRED);
     let (_, out) = run(&c, &Fake::default(), &["doctor", "--config-only"]);
-    let warn = "! config — [accounts].accounts_env is retired (#441): drop the line (#683: accounts sign in with their own login)";
+    let warn = "! config — [accounts] is removed (#923): lanes run on the host's own CLI login; delete [accounts], fleet.drover.role.impl.account";
     assert!(out.lines().any(|l| l == warn), "{out}");
 }
 
@@ -57,15 +55,15 @@ fn check_alerts_a_retired_key_once_and_the_board_shows_it() {
     let r = Fake::default();
     let (code, out) = run(&c, &r, &["check"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("[accounts].accounts_env is retired (#441)"), "{out}");
-    let log = herdsman::events::read(&c.state).unwrap();
+    assert!(out.contains("[accounts] is removed (#923): lanes run on the host's own CLI login; delete [accounts], fleet.drover.role.impl.account"), "{out}");
+    let log = drover::events::read(&c.state).unwrap();
     assert_eq!(log.iter().filter(|e| e.kind == "config-warning").count(), 1);
     let (_, out) = run(&c, &r, &["check"]);
-    assert!(!out.contains("accounts_env"), "once per key: {out}");
+    assert!(!out.contains("[accounts]"), "once per key: {out}");
     let (code, out) = run(&c, &r, &["board"]);
     assert_eq!(code, 0, "{out}");
     let first = out.lines().next().unwrap_or_default();
-    assert_eq!(first, "! [accounts].accounts_env is retired → herdsman doctor");
+    assert_eq!(first, "! [accounts] is retired → drover doctor");
     assert!(first.chars().count() <= 60);
 }
 
@@ -73,8 +71,8 @@ fn check_alerts_a_retired_key_once_and_the_board_shows_it() {
 fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
     let d = tmpdir("gate");
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/install-gate.sh");
-    let new = env!("CARGO_BIN_EXE_herdsman");
-    let dest = d.join("bin/herdsman");
+    let new = env!("CARGO_BIN_EXE_drover");
+    let dest = d.join("bin/drover");
     std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
     std::fs::write(&dest, "old").unwrap();
     let fake = d.join("fake");
@@ -100,7 +98,7 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
             .env("FLEET_STATE", d.join("state/events.jsonl"))
             .env("PATH", &path)
             .env("HOME", &d)
-            .env("HERDSMAN_SIGN_TIMEOUT", "1")
+            .env("DROVER_SIGN_TIMEOUT", "1")
             .env(env, "1")
             .output()
             .unwrap()
@@ -121,15 +119,15 @@ fn install_gate_keeps_the_old_binary_when_the_new_one_cannot_load_the_config() {
         assert_eq!(o.status.code(), Some(1), "{env}: {out}");
         assert!(out.contains("not signed; kept ") && out.contains(fix), "{env}: {out}");
         assert_eq!(std::fs::read_to_string(&dest).unwrap(), "old");
-        assert!(!dest.with_file_name("herdsman.new").exists());
+        assert!(!dest.with_file_name("drover.new").exists());
     }
 
     let o = gate(RETIRED, "X");
     assert_eq!(o.status.code(), Some(0), "{}", String::from_utf8_lossy(&o.stdout));
     assert_eq!(std::fs::read(&dest).unwrap(), std::fs::read(new).unwrap());
-    assert!(!dest.with_file_name("herdsman.new").exists());
+    assert!(!dest.with_file_name("drover.new").exists());
     let signed = format!(
-        "--force --sign AC01B47A --keychain {}/Library/Keychains/login.keychain-db --identifier herdsman {}.new\n",
+        "--force --sign AC01B47A --keychain {}/Library/Keychains/login.keychain-db --identifier drover {}.new\n",
         d.display(),
         dest.display()
     );

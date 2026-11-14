@@ -1,12 +1,12 @@
 #![warn(clippy::pedantic)]
 fn main() {
-    let _ = herdsman::SERVE.set((herdsman::hooks::serve, herdsman::serve::export));
-    let _ = herdsman::SERVICE.set(herdsman_service::main);
-    let ctx = herdsman::Ctx::from_env();
-    let code = herdsman::main_with(
+    let _ = drover::SERVE.set((drover::hooks::serve, drover::serve::export));
+    let _ = drover::SERVICE.set(drover_service::main);
+    let ctx = drover::Ctx::from_env();
+    let code = drover::main_with(
         std::env::args().collect(),
         &ctx,
-        &herdsman::runner::Real,
+        &drover::runner::Real,
         &mut std::io::stdout(),
         &mut std::io::stdin(),
     );

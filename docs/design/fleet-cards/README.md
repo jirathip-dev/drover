@@ -8,8 +8,8 @@ plus `serve.js` `graph()`/`tidy()` produce today, so the item rows are #115's gr
 Screenshots (headless Chrome, full page): `fleet-cards-390.png` (DPR 3), `fleet-cards-1440.png`,
 `config-sheet-390.png` and `config-sheet-1440.png`.
 
-**Data:** read from `herdsman board`/`queue ls`/`status`/`asks` and `fleet.toml` on 2026-11-02 at 07:30. Fleet
-names are neutralised: `atlas` is a private app fleet and `relay` is a private paused fleet; `herdsman` is this
+**Data:** read from `drover board`/`queue ls`/`status`/`asks` and `fleet.toml` on 2026-11-02 at 07:30. Fleet
+names are neutralised: `atlas` is a private app fleet and `relay` is a private paused fleet; `drover` is this
 repo. The issue numbers, states, ages, queue order, blockers, serial marks, round counts, verdicts, lane counts,
 `done today` counts and every config value are real, with paths and MCP names masked (`db/migrations/**`, `db-dev`).
 These parts are illustrative: atlas's and relay's issue titles, the PR numbers in the `done today` lists, and the
@@ -35,7 +35,7 @@ drive age (`3m ago`).
   fleets. The text shows `drive · <age>`.
 - **Colour:** `sha256(name)[0] % 5` over `[--l, --p, --c, --g, --a]`, the same hash as the horse coats
   (`coat()`). Red is left out because it means "needs you" on the board. `[fleet.<n>] color = "l"|"p"|"c"|"g"|"a"`
-  overrides it, and any other value is a config error. Today's names give atlas amber, herdsman blue and relay amber
+  overrides it, and any other value is a config error. Today's names give atlas amber, drover blue and relay amber
   (relay shows grey while it is paused). With 5 colours, two fleets collide about 1 time in 5, which is what
   the override is for.
 - **The old `roles` row** is gone. Its forms move into the `[config]` sheet.
@@ -70,10 +70,10 @@ The bar colours come only from the existing accent tokens.
 ## Open questions for the owner
 
 1. **"Limits editable" conflicts with "no new writable keys".** Your Q2 lists limits as editable, but no `set`
-   path exists for them today. `herdsman set` only writes role keys (harness/model/profile/effort), and the web only
+   path exists for them today. `drover set` only writes role keys (harness/model/profile/effort), and the web only
    writes model/effort. Also, rounds, stall and ask-default are **global** `[limits]` for all fleets, not per fleet,
    and the line cap lives in the repo's `ci/cap.toml` (behind the owner-OK rule). The mockup shows them read-only.
-   **Recommend: read-only now.** If you want them editable, that is a separate issue: a new herdsman set --limit flag
+   **Recommend: read-only now.** If you want them editable, that is a separate issue: a new drover set --limit flag
    with its own validation and event.
 2. **`models` is unset in your `fleet.toml`.** So the web model picker offers only the current value, and any
    change is refused `BAD_VALUE` (`set` checks against `models`). The mockup shows the pickers as they would look

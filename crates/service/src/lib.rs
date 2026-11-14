@@ -1,13 +1,8 @@
-//! #345 `herdsman service` (docs/service.md): one supervised tokio process. A kick (a lane's push, stop or ask, a
-//! verdict, an answer, a board tap) arrives on the local socket and is driven in process at once; the fast step
-//! polls GitHub every 15 s; API v1 takes a remote lane's commands with its token and streams the event log; with
-//! `--board` the board runs in it; #529: lane state comes from herdr's and shed's event streams (`lanes`). Every job has a timeout and a bounded slot; a watchdog exits the process when the
-//! loop stalls 30 s, and launchd/systemd start it again.
 use anyhow::{bail, Result};
-use herdsman_core::config::Config;
-use herdsman_core::events::{append, emit, Event};
-use herdsman_core::runner::{argv, Real, Runner};
-use herdsman_core::{devices, service, Ctx};
+use drover_core::config::Config;
+use drover_core::events::{append, emit, Event};
+use drover_core::runner::{argv, Real, Runner};
+use drover_core::{devices, service, Ctx};
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering::Relaxed};
@@ -20,7 +15,6 @@ use tokio::time::{interval, timeout};
 
 mod lanes;
 
-/// Its bounds: job and connection slots, a request's size, the events a stream replays, the timeouts (seconds).
 const JOBS: usize = 16;
 const CONNS: usize = 64;
 const BODY: usize = 4 << 20;
@@ -33,18 +27,16 @@ const STALL_SECS: u64 = 30;
 pub struct Service {
     ctx: Ctx,
     r: &'static dyn Runner,
-    /// The jobs' clock (tests pin it); the watchdog keeps the wall clock.
     clock: fn() -> u64,
     beat: AtomicU64,
     jobs: Semaphore,
     conns: Arc<Semaphore>,
     polling: AtomicBool,
     seq: watch::Sender<u64>,
-    /// #529: each runtime's lane event stream, live or not.
     streams: std::sync::Mutex<std::collections::BTreeMap<&'static str, bool>>,
 }
 
-/// `herdsman service`: refuses a second one, then runs until killed.
+/// `drover service`: refuses a second one, then runs until killed.
 pub fn main(ctx: &Ctx, api: &str, board: Option<&str>) -> Result<()> {
     if let Some(pid) = service::up(ctx) {
         bail!("a service already runs (pid {pid})");
@@ -52,18 +44,17 @@ pub fn main(ctx: &Ctx, api: &str, board: Option<&str>) -> Result<()> {
     if let Some(b) = board.map(String::from) {
         let c = ctx.clone();
         std::thread::spawn(move || {
-            if let Err(e) = herdsman_server::hooks::serve(&c, &Real, &b, false) {
-                eprintln!("herdsman service: board on {b}: {e:#}");
+            if let Err(e) = drover_server::hooks::board(&c, &Real, &b, false, false) {
+                eprintln!("drover service: board on {b}: {e:#}");
             }
         });
     }
     let api = std::net::TcpListener::bind(api)?;
     let herdr = std::env::var_os("HERDR_SOCKET_PATH").map_or(ctx.home.join(".config/herdr/herdr.sock"), Into::into);
-    run(ctx.clone(), &Real, herdsman_core::now, api, Some(herdr))
+    run(ctx.clone(), &Real, drover_core::now, api, Some(herdr))
 }
 
-/// The service on `api` and the state dir's socket, until the process ends; #529: lane state from herdr's socket
-/// `herdr` (and shed's, by the config).
+/// The service on `api` and the state dir's socket, until the process ends; #529: lane state from herdr's socket `herdr` (and shed's, by the config).
 pub fn run(
     ctx: Ctx,
     r: &'static dyn Runner,
@@ -76,15 +67,15 @@ pub fn run(
         api.set_nonblocking(true)?;
         let api = TcpListener::from_std(api)?;
         let path = service::sock(&ctx);
-        let _ = std::fs::remove_file(&path); // a dead service's
+        let _ = std::fs::remove_file(&path);
         let local = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
         let s = Arc::new(Service {
-            beat: AtomicU64::new(herdsman_core::now()),
+            beat: AtomicU64::new(drover_core::now()),
             jobs: Semaphore::new(JOBS),
             conns: Arc::new(Semaphore::new(CONNS)),
             polling: AtomicBool::new(false),
-            seq: watch::channel(herdsman_core::db::last_seq(&ctx.state)).0,
+            seq: watch::channel(drover_core::db::last_seq(&ctx.state)).0,
             streams: std::sync::Mutex::default(),
             ctx,
             r,
@@ -113,11 +104,9 @@ pub fn run(
 
 impl Service {
     fn event(&self, kind: &str, d: Value) -> Event {
-        Event::new((self.clock)(), "herdsman", None, kind, d)
+        Event::new((self.clock)(), "drover", None, kind, d)
     }
 
-    /// `herdsman <args>` in process on a blocking thread, in a job slot, within `secs`; a timeout is logged and its
-    /// slot freed, so a stuck job never holds the others.
     async fn job(&self, args: Vec<String>, secs: u64) -> Option<i32> {
         let _slot = self.jobs.acquire().await.ok()?;
         let c = Ctx {
@@ -125,8 +114,8 @@ impl Service {
             ..self.ctx.clone()
         };
         let (r, a) = (self.r, args.clone());
-        let full = std::iter::once("herdsman".to_string()).chain(a).collect();
-        let run = move || herdsman_core::main_with(full, &c, r, &mut std::io::sink(), &mut std::io::empty());
+        let full = std::iter::once("drover".to_string()).chain(a).collect();
+        let run = move || drover_core::main_with(full, &c, r, &mut std::io::sink(), &mut std::io::empty());
         if let Ok(code) = timeout(Duration::from_secs(secs), tokio::task::spawn_blocking(run)).await {
             return code.ok();
         }
@@ -135,20 +124,19 @@ impl Service {
         None
     }
 
-    /// The heartbeat a tokio task stamps each second, and the thread that exits the process when it stops.
     fn watchdog(self: &Arc<Self>) {
         let me = self.clone();
         tokio::spawn(async move {
             let mut t = interval(Duration::from_secs(1));
             loop {
                 t.tick().await;
-                me.beat.store(herdsman_core::now(), Relaxed);
+                me.beat.store(drover_core::now(), Relaxed);
             }
         });
         let me = self.clone();
         std::thread::spawn(move || loop {
             std::thread::sleep(Duration::from_secs(5));
-            let late = herdsman_core::now().saturating_sub(me.beat.load(Relaxed));
+            let late = drover_core::now().saturating_sub(me.beat.load(Relaxed));
             if late > STALL_SECS {
                 let ev = me.event("service-stalled", json!({"secs": late, "pid": std::process::id()}));
                 let _ = Config::load(&me.ctx.config).map(|cfg| emit(&me.ctx.state, &cfg, ev));
@@ -157,20 +145,18 @@ impl Service {
         });
     }
 
-    /// The log's newest seq, for the event streams: one reader for all of them.
     async fn watch_log(self: Arc<Self>) {
         let mut t = interval(Duration::from_millis(250));
         loop {
             t.tick().await;
             let state = self.ctx.state.clone();
-            let seq = tokio::task::spawn_blocking(move || herdsman_core::db::last_seq(&state));
+            let seq = tokio::task::spawn_blocking(move || drover_core::db::last_seq(&state));
             if let Ok(Ok(n)) = timeout(Duration::from_secs(5), seq).await {
                 self.seq.send_if_modified(|s| std::mem::replace(s, n) != n);
             }
         }
     }
 
-    /// The fast step every 15 s (verdicts recorded, PASS + green merged), one at a time.
     async fn poll(self: Arc<Self>) {
         let mut t = interval(Duration::from_secs(POLL_SECS));
         loop {
@@ -185,7 +171,6 @@ impl Service {
         }
     }
 
-    /// The local socket: one JSON line in (`ping`, `kick`), the pid back at once; a kick is then driven.
     async fn local(self: Arc<Self>, l: UnixListener) {
         loop {
             if let Ok((c, _)) = l.accept().await {
@@ -212,15 +197,12 @@ impl Service {
             let id = k["id"].as_str().map(|i| ["--id".to_string(), i.into()]);
             let mut k = argv(&["kick", f, &n.to_string(), "--why", why, "--now"]);
             k.extend(id.into_iter().flatten());
-            // A timed-out kick frees its spawn slot: the marker's pid (this process) outlives it.
             if self.job(k, KICK_SECS).await.is_none() {
-                herdsman_core::db::release(&self.ctx.state, &format!("spawn-{f}-{n}.pending"), None);
+                drover_core::db::release(&self.ctx.state, &format!("spawn-{f}-{n}.pending"), None);
             }
         }
     }
 
-    /// API v1: `GET /api/v1/health`, `GET /api/v1/events?after=<seq>` (a paired device or this host),
-    /// `POST /api/v1/cmd` (a lane's token).
     async fn api(self: Arc<Self>, mut c: TcpStream, peer: SocketAddr) {
         let Ok(_slot) = self.conns.clone().try_acquire_owned() else {
             let _ = c.write_all(&reply(503, &json!({"error": "busy"}))).await;
@@ -234,9 +216,9 @@ impl Service {
         let (path, query) = target.split_once('?').unwrap_or((target, ""));
         let out = match (method, path) {
             ("GET", "/api/v1/health") => {
-                let late = herdsman_core::now().saturating_sub(self.beat.load(Relaxed));
+                let late = drover_core::now().saturating_sub(self.beat.load(Relaxed));
                 let busy = JOBS - self.jobs.available_permits();
-                let d = json!({"ok": true, "pid": std::process::id(), "version": herdsman_core::VERSION, "jobs": busy, "beat_secs": late});
+                let d = json!({"ok": true, "pid": std::process::id(), "version": drover_core::VERSION, "jobs": busy, "beat_secs": late});
                 reply(200, &d)
             }
             ("GET", "/api/v1/events") if peer.ip().is_loopback() || self.paired(&head) => {
@@ -258,7 +240,6 @@ impl Service {
         devices::find(&self.ctx, cookie.unwrap_or_default()).is_some()
     }
 
-    /// The events after `after` (the last `REPLAY` of them), then each new one as it is logged; a comment every 15 s.
     async fn stream(self: Arc<Self>, mut c: TcpStream, mut after: u64) {
         let head = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-store\r\n\r\n";
         if c.write_all(head.as_bytes()).await.is_err() {
@@ -292,7 +273,6 @@ impl Service {
         }
     }
 
-    /// A remote lane's command: its token checked, its `--file`s written here, then `herdsman <args>` as that lane.
     async fn cmd(self: &Arc<Self>, body: &[u8]) -> Vec<u8> {
         let v: Value = serde_json::from_slice(body).unwrap_or_default();
         let token = v["token"].as_str().unwrap_or_default().to_string();
@@ -305,7 +285,7 @@ impl Service {
         let (ctx, r, files) = (self.ctx.clone(), self.r, v["files"].clone());
         let run = move || -> Result<(u16, Value)> {
             let ctx = Ctx {
-                now: herdsman_core::now(),
+                now: drover_core::now(),
                 ..ctx
             };
             let cfg = Config::load(&ctx.config)?;
@@ -316,18 +296,17 @@ impl Service {
             let dir = ctx.state.with_file_name("service-files");
             for i in 1..args.len() {
                 if args[i - 1] == "--file" {
-                    // Only the text the lane sent: never a path on this host.
                     let Some(text) = files[&args[i]].as_str() else {
-                        let e = format!("herdsman: --file {} came without its text\n", args[i]);
+                        let e = format!("drover: --file {} came without its text\n", args[i]);
                         return Ok((400, json!({"code": 2, "stdout": "", "stderr": e})));
                     };
                     std::fs::create_dir_all(&dir)?;
-                    let p = dir.join(herdsman_core::devices::sha256(text.as_bytes()) + ".md");
+                    let p = dir.join(drover_core::devices::sha256(text.as_bytes()) + ".md");
                     std::fs::write(&p, text)?;
                     args[i] = p.display().to_string();
                 }
             }
-            let a = [argv(&[&format!("HERDSMAN_LANE={lane}"), &ctx.exe]), args].concat();
+            let a = [argv(&[&format!("DROVER_LANE={lane}"), &ctx.exe]), args].concat();
             let o = r.run("env", &a)?;
             Ok((200, json!({"code": o.code, "stdout": o.stdout, "stderr": o.stderr})))
         };
@@ -338,17 +317,16 @@ impl Service {
             Ok(Ok(Ok((status, v)))) => reply(status, &v),
             Ok(Ok(Err(e))) => reply(
                 500,
-                &json!({"code": 1, "stdout": "", "stderr": format!("herdsman: {e:#}\n")}),
+                &json!({"code": 1, "stdout": "", "stderr": format!("drover: {e:#}\n")}),
             ),
             _ => reply(
                 504,
-                &json!({"code": 1, "stdout": "", "stderr": "herdsman service: timed out\n"}),
+                &json!({"code": 1, "stdout": "", "stderr": "drover service: timed out\n"}),
             ),
         }
     }
 }
 
-/// One request: its head (request line and headers) and a body of `Content-Length` bytes; `None` over the bounds.
 async fn request(c: &mut TcpStream) -> std::io::Result<Option<(String, Vec<u8>)>> {
     let (mut buf, mut chunk) = (vec![], [0u8; 8192]);
     loop {

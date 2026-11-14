@@ -3,4 +3,4 @@
 repo = "o/app"
 local = "/tmp/app"
 integration = "staging"
-driver = "herdsman"
+driver = "drover"

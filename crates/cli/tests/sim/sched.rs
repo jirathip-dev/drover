@@ -1,8 +1,5 @@
-//! The seeded scheduler: each simulated process is an OS thread running the real `main_with`; one baton (a mutex and
-//! a condvar) lets one run at a time. Every Runner call and state.db write is a yield point; the driver checks the
-//! invariants between steps and moves the clock (discrete events) when nothing is runnable.
 use crate::model::Model;
-use herdsman::runner::{Out, Runner};
+use drover::runner::{Out, Runner};
 use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -33,7 +30,6 @@ impl Rng {
     }
 }
 
-/// The payload a process thread unwinds with once the run is over (never a failure).
 struct Abort;
 
 pub struct Proc {
@@ -62,7 +58,7 @@ impl Proc {
 pub struct Wrote {
     pub proc: usize,
     pub at: u64,
-    pub ev: herdsman::events::Event,
+    pub ev: drover::events::Event,
     /// The host was busy (load ≥ 25) when it was written.
     pub busy: bool,
 }
@@ -80,6 +76,13 @@ pub struct World {
     pub root: PathBuf,
     pub step: u64,
     next_pid: u32,
+    /// #686: a replay records each violation (once per invariant and subject) with its step and runs on.
+    pub keep_going: bool,
+    pub violations: Vec<String>,
+    /// Every `(agent, pane)` a spawn event logged (I5's index).
+    pub spawned: std::collections::BTreeSet<(String, String)>,
+    /// `(wrote, merges)` at the last full check of I4's merged sha and I6 (both read only those).
+    pub checked: (usize, usize),
 }
 
 pub struct Sim {
@@ -88,7 +91,6 @@ pub struct Sim {
     threads: Mutex<Vec<std::thread::JoinHandle<()>>>,
 }
 
-/// A call's virtual cost in seconds (herdr's agent start is slow, gh a round trip, local tools free).
 fn cost(prog: &str, args: &[String]) -> u64 {
     match (prog, args.first().map(String::as_str), args.get(1).map(String::as_str)) {
         ("herdr", Some("agent"), Some("start")) => 3,
@@ -97,7 +99,6 @@ fn cost(prog: &str, args: &[String]) -> u64 {
     }
 }
 
-/// Calls answered without a switch: `kill -0` and `ps` run inside a lease's transaction (`db::take`'s `dead`).
 fn atomic(prog: &str) -> bool {
     matches!(prog, "kill" | "ps")
 }
@@ -118,6 +119,10 @@ impl Sim {
                 root,
                 step: 0,
                 next_pid: 40_000,
+                keep_going: false,
+                violations: vec![],
+                spawned: Default::default(),
+                checked: (usize::MAX, 0),
             }),
             cv: Condvar::new(),
             threads: Mutex::new(vec![]),
@@ -128,7 +133,7 @@ impl Sim {
         self.w.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    /// Start process `name` running `herdsman <args>` at the next step it is picked; its pid.
+    /// Start process `name` running `drover <args>` at the next step it is picked; its pid.
     pub fn spawn(self: &Arc<Sim>, w: &mut World, name: &str, args: &[&str]) -> u32 {
         let args: Vec<String> = args.iter().map(ToString::to_string).collect();
         w.next_pid += 1;
@@ -145,7 +150,7 @@ impl Sim {
             out: String::new(),
             starting: None,
         });
-        let line = format!("spawn {} pid {pid}: herdsman {}", w.procs[me].name, args.join(" "));
+        let line = format!("spawn {} pid {pid}: drover {}", w.procs[me].name, args.join(" "));
         w.log(line);
         let sim = Arc::clone(self);
         let h = std::thread::Builder::new()
@@ -168,7 +173,7 @@ impl Sim {
             (crate::scenario::ctx(&w.root, now), w.root.clone())
         };
         let (a, b) = (Arc::clone(&self), Arc::clone(&self));
-        herdsman::sim::set(Some(herdsman::sim::Hooks {
+        drover::sim::set(Some(drover::sim::Hooks {
             now: Box::new(move || a.lock().now),
             pid,
             point: Box::new(move |p| b.point(me, p)),
@@ -177,13 +182,13 @@ impl Sim {
             sim: Arc::clone(&self),
             me,
         };
-        let mut argv = vec!["herdsman".to_string()];
+        let mut argv = vec!["drover".to_string()];
         argv.extend(args);
         let mut out = vec![];
         let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            herdsman::main_with(argv, &ctx, &r, &mut out, &mut std::io::empty())
+            drover::main_with(argv, &ctx, &r, &mut out, &mut std::io::empty())
         }));
-        herdsman::sim::set(None);
+        drover::sim::set(None);
         let mut w = self.lock();
         let text = String::from_utf8_lossy(&out).replace(&root.display().to_string(), "$D");
         w.procs[me].out = text.clone();
@@ -216,7 +221,6 @@ impl Sim {
         self.cv.notify_all();
     }
 
-    /// Block until it is `me`'s turn; `Err` once the run is over (the thread then unwinds or returns).
     fn wait_turn(&self, me: usize) -> Result<(), ()> {
         let mut w = self.lock();
         loop {
@@ -230,7 +234,6 @@ impl Sim {
         }
     }
 
-    /// Hand the baton back: `me` may run again `secs` from now.
     fn yield_now(&self, me: usize, secs: u64) {
         {
             let mut w = self.lock();
@@ -253,7 +256,7 @@ impl Sim {
         }
     }
 
-    fn point(&self, me: usize, p: &herdsman::sim::Point) {
+    fn point(&self, me: usize, p: &drover::sim::Point) {
         {
             let mut w = self.lock();
             if w.abort {
@@ -262,7 +265,7 @@ impl Sim {
             let at = w.now;
             let name = w.procs[me].name.clone();
             match p {
-                herdsman::sim::Point::Append(ev) => {
+                drover::sim::Point::Append(ev) => {
                     let who = ev.str("agent").map(|a| format!(" {a}")).unwrap_or_default();
                     w.log(format!(
                         "{name} append {} #{}{who} ts={}",
@@ -272,6 +275,9 @@ impl Sim {
                     ));
                     if ev.kind == "spawn" {
                         w.procs[me].starting = None;
+                        let (a, p) = (ev.str("agent"), ev.str("pane"));
+                        w.spawned
+                            .insert((a.unwrap_or_default().into(), p.unwrap_or_default().into()));
                     }
                     let busy = w.model.load >= 25;
                     w.wrote.push(Wrote {
@@ -282,7 +288,7 @@ impl Sim {
                     });
                     crate::invariants::on_append(&mut w, me);
                 }
-                herdsman::sim::Point::Lease(k) => w.log(format!("{name} lease {k}")),
+                drover::sim::Point::Lease(k) => w.log(format!("{name} lease {k}")),
             }
         }
         self.yield_now(me, 0);
@@ -326,7 +332,6 @@ impl Sim {
                 let next = [wake, crate::scenario::next(&w)].into_iter().flatten().min();
                 match next {
                     Some(t) if t <= until => {
-                        // #685: a live lane not working is idle while the clock moves.
                         let dt = t.saturating_sub(w.now);
                         let idle = w.model.live().filter(|p| p.status != "working").count() as u64;
                         w.model.idle += idle * dt;
@@ -365,12 +370,21 @@ impl World {
     pub fn log(&mut self, line: String) {
         let line = line.replace(&self.root.display().to_string(), "$D");
         let line = format!("{:>5} t+{:<6} {line}", self.step, self.now - crate::scenario::T0);
-        if std::env::var_os("HERDSMAN_SIM_LIVE").is_some() {
+        if std::env::var_os("DROVER_SIM_LIVE").is_some() {
             eprintln!("{line}");
         }
         self.trace.push(line);
     }
     pub fn fail(&mut self, why: String) {
+        if self.keep_going {
+            let key: Vec<&str> = why.split_whitespace().take(4).collect();
+            if !(self.violations.iter()).any(|v| v.split_whitespace().skip(3).take(4).eq(key.iter().copied())) {
+                self.log(format!("FAIL {why}"));
+                let at = format!("step {} t+{}:", self.step, self.now - crate::scenario::T0);
+                self.violations.push(format!("{at} {why}"));
+            }
+            return;
+        }
         if self.failure.is_none() {
             self.log(format!("FAIL {why}"));
             self.failure = Some(why);

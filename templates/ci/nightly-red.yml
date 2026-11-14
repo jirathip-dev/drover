@@ -1,0 +1,43 @@
+# Nightly full run of the integration branch (drover docs/ci.md). Copy to .github/workflows/nightly-red.yml beside
+# templates/ci/ci.yml and replace `staging` with your integration branch. Red: opens one `nightly red` issue, or
+# comments on the open one. Green: closes it.
+name: nightly-red
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+jobs:
+  full:
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: staging
+
+  report:
+    needs: full
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      RESULT: ${{ needs.full.result }}
+      URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - run: |
+          set -euo pipefail
+          open=$(gh issue list --state open --label "nightly red" --json number --jq '.[0].number // empty')
+          if [ "$RESULT" = success ]; then
+            if [ -n "$open" ]; then gh issue close "$open" --comment "Green again: $URL"; fi
+            exit 0
+          fi
+          if [ -n "$open" ]; then
+            gh issue comment "$open" --body "Still red ($RESULT): $URL"
+          else
+            gh label create "nightly red" --force --color B60205 --description "The nightly full run is red"
+            gh issue create --title "nightly red" --label "nightly red" --body "The nightly full run of staging is $RESULT: $URL"
+          fi

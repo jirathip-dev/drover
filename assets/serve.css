@@ -289,7 +289,9 @@ button[name=choice]>span,button.pick>span{display:-webkit-box;-webkit-line-clamp
 :is(details.q,.qc)>summary{grid-template-columns:var(--gw) 6ch minmax(0,1fr) auto;align-content:start;padding:var(--s1) 0}
 /* #367: titles start in one column at every depth: past the depth-2 gutter (--gm), so no graph line crosses one. */
 :is(details.q,.qc){--gm:5ch}:is(details.q,.qc):has(>summary .gt>.rsg){--gm:calc(4ch + var(--s4) + var(--s3))}
-:is(details.q,.qc) :is(.tl,.cst){grid-column:1/-1;padding-left:calc(var(--gm) + var(--s2))}
+:is(details.q,.qc) :is(.tl,.cst,.hp){grid-column:1/-1;padding-left:calc(var(--gm) + var(--s2))}
+:is(details.q,.qc) .hp:not([hidden]){display:flex;flex-wrap:wrap;gap:var(--s1);min-width:0}.hp>.tag{overflow-wrap:anywhere}
+#queue .tag.hot{cursor:pointer}
 :is(details.q,.qc)>summary>span:first-of-type{grid-column:2} /* #206: the #n column before graph() adds the gutter, too */
 details.q[open]{padding-bottom:var(--s2)}
 /* #423: beside an issue's plant (a theme with `stages`), a long theme + plain state pair (`inspect · review(1)`)
@@ -448,7 +450,7 @@ body:not(.unf) .ask.lt{display:none}
 .dp ul{margin:0 0 var(--s2);padding-left:var(--s4);color:var(--fg);font-size:var(--fs-meta)}.dp code{font-size:var(--fs-meta)}
 /* #173: the pipeline group (in a fleet's [config] sheet) and the card's current stage. */
 /* Stage kinds: a glyph in a fixed colour. ▲ build (pushes code) amber, ◆ check (PASS/FAIL) purple, ◫ gate
-   (herdsman's own) cyan, ✓ merge green, ! park red ("needs you", as everywhere on the board). */
+   (drover's own) cyan, ✓ merge green, ! park red ("needs you", as everywhere on the board). */
 .kd{font-style:normal;color:var(--mute)}.kd.b{color:var(--a)}.kd.c{color:var(--p)}.kd.g{color:var(--c)}.kd.m{color:var(--g)}.kd.x{color:var(--r)}
 /* The graph: one grid row per text line, all --ln tall, so every edge meets a line's middle. Column 1 is the
    park rail, column 2 the stage boxes, then one 2ch rail per loop target (shortest span innermost).

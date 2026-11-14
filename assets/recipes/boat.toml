@@ -10,7 +10,7 @@ key_env = "BOAT_API_KEY"
 # #635 D: a new sandbox authorizes only boat's own key; the host block gets `IdentityFile` + `IdentitiesOnly yes`.
 identity = "~/.ssh/ascii_box_ed25519"
 # #635 C: `{id}` in a line is this lookup (`--all`: the default list omits stopped sandboxes). An empty id is boat's
-# current sandbox, so each line refuses one, and herdsman runs no `stop` or `destroy` when it prints nothing.
+# current sandbox, so each line refuses one, and drover runs no `stop` or `destroy` when it prints nothing.
 id = '''boat list --all --json --no-update | jq -r 'first(.sandboxes[]|select(.name=="{name}"))|.id' '''
 create = "boat new --type {size} --name {name} --no-auto-stop --no-update >/dev/null"
 start = '''i=$({id}); [ -n "$i" ] || { echo "no sandbox named {name}" >&2; exit 1; }; boat resume "$i" --no-update >/dev/null'''
@@ -20,8 +20,8 @@ address = '''e=$(boat list --all --json --no-update | jq -r 'first(.sandboxes[]|
 h=${e%:*}; p=${e##*:}; echo "user@$h $p"; ssh-keyscan -t ed25519 -p "$p" "$h" 2>/dev/null | grep -m1 ' ssh-ed25519 ' | cut -d' ' -f2-'''
 destroy = '''i=$({id}); [ -n "$i" ] || { echo "no sandbox named {name}" >&2; exit 1; }; boat delete "$i" --yes --no-update'''
 # #255: `hosts snapshot` saves a bootstrapped host; `create_from` makes a new one from that snapshot, ready to use.
-snapshot = '''i=$({id}); [ -n "$i" ] || { echo "no sandbox named {name}" >&2; exit 1; }; boat snapshot "$i" herdsman-{name} --no-update'''
-create_from = "boat new --type {size} --name {name} --from herdsman-{name} --no-auto-stop --no-update >/dev/null"
+snapshot = '''i=$({id}); [ -n "$i" ] || { echo "no sandbox named {name}" >&2; exit 1; }; boat snapshot "$i" drover-{name} --no-update'''
+create_from = "boat new --type {size} --name {name} --from drover-{name} --no-auto-stop --no-update >/dev/null"
 
 # #537: `[ci_runners]` VMs (boat.dev's HTTP API, docs.boat.dev; check them there). `{vm}` is a VM id; `{size}`,
 # `{ttl}` (seconds, 0 = none), `{snapshots}` and `{service}` (the runner unit) come from `[ci_runners]`.

@@ -1,14 +1,12 @@
-//! AC3: every `herdsman merge` refusal. Each test also asserts `gh pr merge` was
-//! never called, so an always-merge gate turns every one of them RED.
 mod common;
 use common::*;
-use herdsman::events::{append, fold, read, Event};
+use drover::events::{append, fold, read, Event};
 use serde_json::json;
 
 const HEAD: &str = "1111111111111111111111111111111111111111";
 const OLD: &str = "2222222222222222222222222222222222222222";
 
-fn setup(name: &str, config: &str, verdicts: &[(&str, &str)]) -> (std::path::PathBuf, herdsman::Ctx) {
+fn setup(name: &str, config: &str, verdicts: &[(&str, &str)]) -> (std::path::PathBuf, drover::Ctx) {
     let d = tmpdir(name);
     let c = ctx(&d, config);
     let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
@@ -41,7 +39,7 @@ fn pr(base: &str, checks: serde_json::Value) -> Fake {
         .reply("gh issue", "")
 }
 
-fn assert_refused(c: &herdsman::Ctx, r: &Fake, code: &str) {
+fn assert_refused(c: &drover::Ctx, r: &Fake, code: &str) {
     let (exit, out) = run(c, r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
     assert!(out.contains(&format!("REFUSED {code}")), "{out}");
@@ -73,10 +71,8 @@ fn refuses_fail_verdict() {
 fn refuses_when_ci_not_green() {
     let red = json!([{"__typename": "CheckRun", "name": "test", "status": "COMPLETED", "conclusion": "FAILURE"}]);
     let pending = json!([{"__typename": "CheckRun", "name": "test", "status": "IN_PROGRESS", "conclusion": ""}]);
-    // A fresh log each time: the PR read is cached for 60 s per issue.
     let (_d, c) = setup("ci-red", CONFIG, &[("PASS", HEAD)]);
     assert_refused(&c, &pr("staging", red), "CI_NOT_GREEN");
-    // #148: pending or not yet reported is refused but stays ready, waiting for CI.
     for checks in [pending, json!([])] {
         let (_d, c) = setup("ci-pending", CONFIG, &[("PASS", HEAD)]);
         let r = pr("staging", checks);
@@ -119,7 +115,7 @@ fn required_checks_gate_only_the_latest_named_run() {
     assert_eq!(exit, 0, "{out}");
 }
 
-fn run_cli(c: &herdsman::Ctx, r: &Fake) -> (i32, String) {
+fn run_cli(c: &drover::Ctx, r: &Fake) -> (i32, String) {
     run(c, r, &["merge", "sendmeter", "12"])
 }
 
@@ -136,7 +132,6 @@ fn refuses_when_round_limit_exceeded() {
     assert_eq!(st.state, "needs-human");
 }
 
-/// #123: three review rounds plus a PASSed `--update` round: merge allowed, rounds stay 3.
 #[test]
 fn update_round_does_not_count_toward_review_rounds() {
     let (a, b) = (
@@ -160,7 +155,6 @@ fn update_round_does_not_count_toward_review_rounds() {
     assert!(r.called("gh pr merge 34"), "{out}");
 }
 
-/// #123: an update round whose merge-only check FAILs is a normal review round.
 #[test]
 fn failed_update_round_counts_as_a_review_round() {
     let (_d, c) = setup("update-fail", CONFIG, &[("PASS", OLD)]);
@@ -216,7 +210,7 @@ fn merges_with_exact_head_pass_and_green_ci() {
     assert!(r.called(&format!(
         "gh pr merge 34 -R jirathip-dev/sendmeter --merge --match-head-commit {HEAD}"
     )));
-    assert!(r.called("gh issue comment 12 -R jirathip-dev/sendmeter --body Merged via `herdsman merge`"));
+    assert!(r.called("gh issue comment 12 -R jirathip-dev/sendmeter --body Merged via `drover merge`"));
     assert!(
         out.contains("m3rg3") && out.contains(HEAD) && out.contains("Merged"),
         "{out}"
@@ -233,7 +227,6 @@ fn merges_with_exact_head_pass_and_green_ci() {
     assert_eq!(st.state, "merged");
 }
 
-/// #677: the closing comment carries the latest why note's Owner line.
 #[test]
 fn the_closing_comment_carries_the_why_owner_line() {
     let (_d, c) = setup("why-owner", CONFIG, &[("PASS", HEAD)]);
@@ -256,7 +249,6 @@ fn merge_twice_says_already_merged_and_logs_nothing() {
     let (exit, out) = run(&c, &pr("staging", green()), &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
     let before = read(&c.state).unwrap().len();
-    // Second caller: the PR is closed now, so a gate run would refuse NO_PR.
     let r = Fake::default();
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
@@ -264,8 +256,6 @@ fn merge_twice_says_already_merged_and_logs_nothing() {
     assert_eq!(read(&c.state).unwrap().len(), before, "no new event");
     assert!(r.calls.borrow().is_empty(), "no gh calls: {:?}", r.calls.borrow());
 }
-
-// --- herdsman verdict ---
 
 #[test]
 fn verdict_pins_exact_branch_head() {
@@ -306,8 +296,6 @@ fn verdict_pins_exact_branch_head() {
     );
 }
 
-// --- #6: the evidence comment must land ---
-
 fn merge_fake() -> Fake {
     let pr = json!({"number": 34, "state": "OPEN", "baseRefName": "staging", "headRefOid": HEAD, "statusCheckRollup": green()});
     Fake::default()
@@ -326,7 +314,7 @@ fn evidence_comment_failing_twice_leaves_issue_open_and_exits_nonzero() {
         sink.display()
     );
     let (_d, c) = setup("evidence-missing", &cfg, &[("PASS", HEAD)]);
-    let r = merge_fake(); // `gh issue comment` is unscripted → fails
+    let r = merge_fake();
     let (exit, _) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_ne!(exit, 0);
     assert!(r.called("gh pr merge 34"), "the merge itself happened");
@@ -359,8 +347,6 @@ fn evidence_comment_retry_that_lands_closes_issue() {
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "evidence-missing"));
 }
 
-// --- #19: lane teardown + dogfood reinstall line ---
-
 #[test]
 fn merge_tears_down_clean_lanes_and_keeps_unpushed_ones() {
     let (_d, c) = setup("teardown", CONFIG, &[("PASS", HEAD)]);
@@ -370,29 +356,31 @@ fn merge_tears_down_clean_lanes_and_keeps_unpushed_ones() {
         p.to_string_lossy().into_owned()
     };
     let (imp, rev) = (wt("issue-12"), wt("rev-12-r1"));
-    for (ts, role, w, ws) in [(11, "impl", &imp, "wA"), (12, "rev", &rev, "wB")] {
-        let d = json!({"role": role, "agent": format!("{role}-12"), "worktree": w, "pane": format!("{ws}:p1"), "workspace": ws});
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    for (ts, role, w) in [(11, "impl", &imp), (12, "rev", &rev)] {
+        let agent = format!("{role}-12");
+        let d = json!({"role": role, "agent": agent, "worktree": w, "pane": agent});
         append(&c.state, &Event::new(ts, "sendmeter", Some(12), "spawn", d)).unwrap();
+        sh.lane(&agent, "idle", w);
     }
-    // After the clean impl pane is closed only the rev agent (unpushed work) is left.
     let r = pr("staging", green())
-        .reply("herdr agent list", &agents(&[("rev-12", "idle", &rev, "wB:p1")]))
         .reply(&format!("git -C {rev} rev-list"), "1\n")
         .reply(&format!("git -C {imp} rev-list"), "0\n")
-        .reply("git -C", "")
-        .reply("herdr", "{}");
+        .reply("git -C", "");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 0, "{out}");
-    assert!(r.called("herdr pane close wA:p1"), "{:?}", r.calls.borrow());
-    assert!(r.called("herdr worktree remove --workspace wA"));
+    assert!(sh.called("kill", "impl-12") && !sh.has("impl-12"), "{:?}", sh.methods());
+    let remove = |w: &str| format!("git -C /tmp/does-not-matter/sendmeter worktree remove {w}");
+    assert!(r.called(&remove(&imp)), "{:?}", r.calls.borrow());
     assert!(out.contains(&format!("removed {imp}")), "{out}");
     assert!(
-        !r.called("herdr pane close wB:p1"),
+        !sh.called("kill", "rev-12") && sh.has("rev-12"),
         "a lane with unpushed commits keeps its pane"
     );
-    assert!(!r.called("herdr worktree remove --workspace wB"));
+    assert!(!r.called(&remove(&rev)));
     assert!(
-        out.contains(&format!("keep pane wB:p1 ({rev}): 1 unpushed commit(s)")),
+        out.contains(&format!("keep pane rev-12 ({rev}): 1 unpushed commit(s)")),
         "{out}"
     );
     assert!(
@@ -410,7 +398,7 @@ fn merge_into_fleet_repo_prints_reinstall_command_last() {
         replies: r
             .replies
             .into_iter()
-            .map(|(p, o)| (p.replace("sendmeter", "herdsman"), o))
+            .map(|(p, o)| (p.replace("sendmeter", "drover"), o))
             .collect(),
         ..Fake::default()
     };
@@ -418,15 +406,12 @@ fn merge_into_fleet_repo_prints_reinstall_command_last() {
     assert_eq!(exit, 0, "{out}");
     assert_eq!(
         out.lines().last(),
-        Some("cargo install --path /tmp/does-not-matter/sendmeter/crates/cli --locked --root /opt/herdsman --force && sh /tmp/does-not-matter/sendmeter/scripts/signing-identity.sh sign /opt/herdsman/bin/herdsman"),
+        Some("cargo build --release --locked -p drover --manifest-path /tmp/does-not-matter/sendmeter/Cargo.toml && sh /tmp/does-not-matter/sendmeter/scripts/install-gate.sh /tmp/does-not-matter/sendmeter/target/release/drover /opt/drover/bin/drover && ln -sf drover /opt/drover/bin/herdsman"),
         "{out}"
     );
     assert!(!r.called("cargo"), "printed, never run");
 }
 
-// --- #130: `--owner-override` and `round-extended` ---
-
-/// Four rounds, the last a PASS at the head.
 const OVER: [(&str, &str); 4] = [
     ("FAIL", OLD),
     ("FAIL", "3333333333333333333333333333333333333333"),
@@ -434,7 +419,7 @@ const OVER: [(&str, &str); 4] = [
     ("PASS", HEAD),
 ];
 
-fn over(c: &herdsman::Ctx, r: &Fake) -> (i32, String) {
+fn over(c: &drover::Ctx, r: &Fake) -> (i32, String) {
     run(c, r, &["merge", "sendmeter", "12", "--owner-override"])
 }
 
@@ -473,8 +458,7 @@ fn owner_override_still_refuses_red_ci_and_a_stale_verdict() {
     assert!(!r.called("gh pr merge"));
 }
 
-/// #309: `review_rounds` 9, `rounds` reviewed shas (the last a PASS at the head), the owner's extend after `at`.
-fn extended(name: &str, rounds: usize, at: usize) -> (std::path::PathBuf, herdsman::Ctx) {
+fn extended(name: &str, rounds: usize, at: usize) -> (std::path::PathBuf, drover::Ctx) {
     let (d, c) = setup(name, &CONFIG.replace("review_rounds = 3", "review_rounds = 9"), &[]);
     for i in 1..=rounds {
         let (v, sha) = if i == rounds {
@@ -498,13 +482,12 @@ fn extended(name: &str, rounds: usize, at: usize) -> (std::path::PathBuf, herdsm
     (d, c)
 }
 
-/// `[one more round]` logs `round-extended`: round 10 of 9+1 merges without override, round 11 is ROUND_LIMIT again.
 #[test]
 fn round_extended_allows_exactly_one_more_round() {
     let (_d, c) = extended("extend-10", 10, 9);
     let s = st(&c);
-    let cfg = herdsman::config::Config::load(&c.config).unwrap();
-    let (limit, of) = herdsman::gate::limit(cfg.fleet("sendmeter").unwrap(), "rev", Some(&s));
+    let cfg = drover::config::Config::load(&c.config).unwrap();
+    let (limit, of) = drover::gate::limit(cfg.fleet("sendmeter").unwrap(), "rev", Some(&s));
     assert_eq!(
         format!("round {}{of}", s.stage_rounds["rev"]),
         "round 10 of 9+1 (owner extended)"
@@ -523,8 +506,6 @@ fn round_extended_allows_exactly_one_more_round() {
     assert_refused(&c, &pr("staging", green()), "ROUND_LIMIT");
 }
 
-/// #309 (synergy#2940): a round reviewed past the limit (a new head after a PASS) is needs-human; its extend grants the
-/// next round, whose PASS merges.
 #[test]
 fn an_extend_after_an_overrun_round_grants_the_next_one() {
     let (_d, c) = extended("extend-overrun", 11, 10);
@@ -532,17 +513,14 @@ fn an_extend_after_an_overrun_round_grants_the_next_one() {
     assert_eq!(exit, 0, "round 11 of 9+2: {out}");
 }
 
-// --- #151: `herdsman extend` / `herdsman park` ---
-
-/// Three FAILed rounds of 3, then `needs-human`.
-fn needs_human(name: &str) -> (std::path::PathBuf, herdsman::Ctx) {
+fn needs_human(name: &str) -> (std::path::PathBuf, drover::Ctx) {
     let (d, c) = setup(name, CONFIG, &OVER[..3]);
     let e = Event::new(30, "sendmeter", Some(12), "needs-human", json!({"code": "ROUND_LIMIT"}));
     append(&c.state, &e).unwrap();
     (d, c)
 }
 
-fn st(c: &herdsman::Ctx) -> herdsman::events::IssueState {
+fn st(c: &drover::Ctx) -> drover::events::IssueState {
     fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].clone()
 }
 
@@ -612,8 +590,6 @@ fn extend_and_park_refuse_outside_needs_human_and_park_clears_it() {
     assert!(exit == 3 && out.contains("is parked, not needs-human"), "{out}");
 }
 
-/// #712: `unpark` puts a parked issue back in the round it had before its needs-human, logged `by`, and an issue
-/// out of the queue goes last; a second unpark refuses.
 #[test]
 fn unpark_restores_the_round_and_requeues_it_last() {
     let (_d, c) = needs_human("cli-unpark");
@@ -626,7 +602,7 @@ fn unpark_restores_the_round_and_requeues_it_last() {
     let all = read(&c.state).unwrap();
     let un = all.iter().rfind(|e| e.kind == "unparked").unwrap();
     assert_eq!((un.str("by"), un.str("state")), (Some("alice"), Some("fix(3)")));
-    let q: Vec<u64> = herdsman::queue::replay(&all, "sendmeter")
+    let q: Vec<u64> = drover::queue::replay(&all, "sendmeter")
         .iter()
         .map(|i| i.issue)
         .collect();
@@ -638,7 +614,6 @@ fn unpark_restores_the_round_and_requeues_it_last() {
     );
 }
 
-/// #198: the merge commit is `<title> (#PR)`, the PR body's `## For humans` lines, then the facts line.
 #[test]
 fn merge_message_copies_the_human_summary_and_the_facts_line() {
     let (_d, c) = setup("msg", CONFIG, &[("FAIL", OLD), ("PASS", HEAD)]);
@@ -661,7 +636,6 @@ fn merge_message_copies_the_human_summary_and_the_facts_line() {
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "no-human-summary"));
 }
 
-/// #198: no `## For humans` section merges anyway with the facts line only, logged `no-human-summary`.
 #[test]
 fn merge_without_a_human_summary_gives_the_facts_line_only() {
     let (_d, c) = setup("msg-none", CONFIG, &[("PASS", HEAD)]);
@@ -681,8 +655,7 @@ fn merge_without_a_human_summary_gives_the_facts_line_only() {
     assert!(read(&c.state).unwrap().iter().any(|e| e.kind == "no-human-summary"));
 }
 
-/// #272: a fleet whose local checkout has `ci/cap.toml` (or not); returns (dir, ctx, local, scratch worktree).
-fn premerge_setup(name: &str, cap: bool, extra: &str) -> (std::path::PathBuf, herdsman::Ctx, String, String) {
+fn premerge_setup(name: &str, cap: bool, extra: &str) -> (std::path::PathBuf, drover::Ctx, String, String) {
     let d = tmpdir(name);
     let local = d.join("local");
     std::fs::create_dir_all(local.join("ci")).unwrap();
@@ -712,7 +685,7 @@ fn premerge_cap_failure_refuses_without_merging_and_goes_to_fix() {
     let r = premerge_fake(&local).once("sh -c", 1, "src lines (formatted): 14885 / cap 14700\n");
     let (exit, out) = run(&c, &r, &["merge", "sendmeter", "12"]);
     assert_eq!(exit, 3, "{out}");
-    let want = "REFUSED STAGING_WOULD_BREAK: /opt/herdsman/bin/herdsman cap-check --config ci/cap.toml: src lines (formatted): 14885 / cap 14700";
+    let want = "REFUSED STAGING_WOULD_BREAK: /opt/drover/bin/drover cap-check --config ci/cap.toml: src lines (formatted): 14885 / cap 14700";
     assert!(out.contains(want), "{out}");
     assert!(!r.called("gh pr merge"), "{:#?}", r.calls.borrow());
     assert!(r.called(&format!("git -C {wt} merge --no-ff --no-edit {HEAD}")));
@@ -732,23 +705,20 @@ fn premerge_passing_merges_and_logs_its_time() {
     assert!(r.index("sh -c").unwrap() < r.index("gh pr merge").unwrap());
     let ev = read(&c.state).unwrap();
     let m = ev.iter().find(|e| e.kind == "merged").unwrap();
-    assert!(m.data["premerge_secs"].is_u64(), "{:?}", m.data);
+    assert!(m.val("premerge_secs").is_u64(), "{:?}", m.data);
 }
 
-/// #510: a passing premerge runs each shadow lesson check on the merged tree and logs which would fail; active and
-/// hand-written checks are not run there.
 #[test]
 fn premerge_logs_the_shadow_lesson_checks() {
-    // No `ci/cap.toml` and no `premerge`: the shadow checks alone still run the premerge.
     let (_d, c, local, wt) = premerge_setup("pre-shadow", false, "");
-    std::fs::create_dir_all(format!("{wt}/.herdsman")).unwrap();
-    std::fs::create_dir_all(format!("{local}/.herdsman")).unwrap();
+    std::fs::create_dir_all(format!("{wt}/.drover")).unwrap();
+    std::fs::create_dir_all(format!("{local}/.drover")).unwrap();
     let rules = "- don't unwrap (enforced by: no-unwrap `! grep -Hn unwrap src`, shadow since 1970-01-01)\n\
                  - don't sleep (enforced by: no-sleep `! grep -Hn sleep src`, shadow since 1970-01-01)\n\
                  - don't panic (enforced by: no-panic `! grep -Hn panic src`, active since 1970-01-01)\n\
                  - don't hand (enforced by: hand `false`)\n";
-    std::fs::write(format!("{wt}/.herdsman/rules.md"), rules).unwrap();
-    std::fs::write(format!("{local}/.herdsman/rules.md"), rules).unwrap();
+    std::fs::write(format!("{wt}/.drover/rules.md"), rules).unwrap();
+    std::fs::write(format!("{local}/.drover/rules.md"), rules).unwrap();
     let r = premerge_fake(&local)
         .once(
             "sh -c cd \"$0\" && ! grep -Hn unwrap src",
@@ -802,7 +772,6 @@ fn premerge_default_needs_cap_toml() {
     assert!(!m.data.contains_key("premerge_secs"));
 }
 
-/// #373: the issue's own example, as `[[fleet.<n>.premerge]]` tables.
 const NAMED: &str = r#"
 [[fleet.sendmeter.premerge]]
 name  = "migration-order"
@@ -856,7 +825,7 @@ fn named_premerge_failure_refuses_with_its_code_and_a_fix_round() {
         "{body}"
     );
     assert!(body.contains("is behind the dev ledger"), "{body}");
-    let log = herdsman::events::jsonl(&c.state).unwrap();
+    let log = drover::events::jsonl(&c.state).unwrap();
     assert!(!log.contains("sbp9f8e7d6c5b4a"), "secret in events: {log}");
     let (_, board) = run(&c, &Fake::default(), &["board", "sendmeter"]);
     assert!(board.contains("migration-order failed: rename needed"), "{board}");
@@ -883,6 +852,7 @@ fn list_form_premerge_still_runs_its_checks() {
     assert!(!r.called("gh pr merge"));
     let p = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .find(|e| e.kind == "premerge-failed")
         .unwrap();

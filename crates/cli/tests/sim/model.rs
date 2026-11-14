@@ -1,46 +1,40 @@
-//! The in-process world herdsman's calls land in: herdr panes and agents, gh PRs and checks, git heads, pids and the
-//! host's load. Each argv is matched by its leading words; one it does not know fails the run ("unmodelled call").
 use crate::sched::{Sim, World};
-use herdsman::runner::Out;
+use drover::runner::Out;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-pub const FLEET: &str = "herdsman";
+pub const FLEET: &str = "drover";
 pub const REPO: &str = "jirathip-dev/herdsman";
 
 /// What a lane's agent does once its prompt lands.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Script {
-    /// Works `secs`, pushes a new head (CI then goes green or red), stops.
-    Push { secs: u64, green: bool },
-    /// Works `secs`, writes verdict.md (`PASS`, or `FAIL` with or without its Proof blocks), stops. Told its FAIL was
-    /// refused NO_PROOF, it adds them if it `heeds`, else writes the same file again.
+    Push {
+        secs: u64,
+        green: bool,
+        #[serde(default)]
+        ci: Option<u64>,
+    },
     Review {
         secs: u64,
         pass: bool,
         proof: bool,
         heeds: bool,
     },
-    /// Its pane dies after `secs`.
-    Die { secs: u64 },
-    /// Works forever.
+    Die {
+        secs: u64,
+    },
     Hang,
 }
 
 #[derive(Clone, Debug)]
 pub enum Ev {
-    /// A timer's pass (`drive`, `drive --fast`, `check`): started, then again `every` secs later (± jitter).
     Timer { args: Vec<String>, every: u64 },
-    /// A one-off process: an owner verb, a lane's hook.
     Run(Vec<String>),
-    /// Pane `pane`'s agent reaches the next step of its script.
     Lane { pane: String, step: u8 },
-    /// A head's CI ends.
     Ci { sha: String, green: bool },
-    /// The host's 1-minute load (10 cores: ≥ 25 is busy).
     Load(u64),
-    /// A running pass of this kind (`drive`, `kick`, …) is killed where it stands (its leases left behind).
     Crash(String),
 }
 
@@ -91,7 +85,7 @@ pub struct Model {
     pub agenda: BTreeMap<(u64, u64), Ev>,
     seq: u64,
     shas: u64,
-    /// Scripts queued per role: the next lane of that role takes the first (else `default`).
+    /// Scripts queued per role (or `<role>#<issue>`): the next lane takes the first, the last is kept.
     pub scripts: BTreeMap<String, Vec<Script>>,
     pub merges: Vec<Merge>,
     pub closed: Vec<u64>,
@@ -102,9 +96,7 @@ pub struct Model {
     pub sabotage: Option<crate::invariants::Sabotage>,
     /// #685: every head's CI takes this long (else 1–15 min, drawn).
     pub ci_secs: Option<u64>,
-    /// #685 ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live
-    /// lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed
-    /// a head or wrote a verdict herdsman takes.
+    /// #685 ground truth: when each pending head's CI started, the seconds heads spent pending, pane-seconds a live lane spent not working, process-seconds in 1 s polls (drive.lock and kick waits), and the panes that pushed a head or wrote a verdict drover takes.
     pub ci_since: BTreeMap<String, u64>,
     pub ci_wait: u64,
     pub idle: u64,
@@ -117,11 +109,11 @@ impl Model {
         self.seq += 1;
         self.agenda.insert((t, self.seq), e);
     }
-    /// A new head's CI starts at `now`; its end is drawn from `rng` unless `ci_secs` fixes it.
-    pub fn ci_start(&mut self, sha: &str, now: u64, rng: &mut crate::sched::Rng) -> u64 {
+    /// A new head's CI starts at `now`; its end is `secs`, `ci_secs` or drawn from `rng`.
+    pub fn ci_start(&mut self, sha: &str, now: u64, secs: Option<u64>, rng: &mut crate::sched::Rng) -> u64 {
         self.ci.insert(sha.into(), None);
         self.ci_since.insert(sha.into(), now);
-        now + self.ci_secs.unwrap_or_else(|| 60 * rng.range(1, 15))
+        now + secs.or(self.ci_secs).unwrap_or_else(|| 60 * rng.range(1, 15))
     }
     pub fn sha(&mut self) -> String {
         self.shas += 1;
@@ -188,7 +180,7 @@ pub fn answer(sim: &Arc<Sim>, w: &mut World, me: usize, prog: &str, args: &[Stri
                 w.procs[me].starting = Some((*pane).into());
                 let agent = Some(a[2].to_string());
                 let starts = w.model.panes.iter().filter(|p| p.agent == agent).count();
-                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 4;
+                let planted = w.model.sabotage == Some(crate::invariants::Sabotage::Planted) && starts >= 3;
                 if planted || w.model.sabotage == Some(crate::invariants::Sabotage::DoubleLane) {
                     crate::invariants::double(w, pane);
                 }
@@ -314,7 +306,12 @@ fn herdr(sim: &Arc<Sim>, w: &mut World, a: &[&str]) -> Out {
         },
         ["agent", "start", agent, "--kind", _, "--pane", pane, ..] => {
             let role = agent.split('-').nth(1).unwrap_or("impl").to_string();
-            let queued = m.scripts.get_mut(&role).filter(|v| !v.is_empty()).map(|v| v.remove(0));
+            let own = format!("{role}#{}", agent.split('-').nth(2).unwrap_or_default());
+            let queued = match m.scripts.get_mut(&own) {
+                Some(v) if v.len() > 1 => Some(v.remove(0)),
+                Some(v) => v.first().cloned(),
+                None => m.scripts.get_mut(&role).filter(|v| !v.is_empty()).map(|v| v.remove(0)),
+            };
             let script = queued.unwrap_or_else(|| crate::scenario::default_script(&mut w.rng, &role));
             w.log(format!("model: {agent} runs {script:?}"));
             let m = &mut w.model;
@@ -461,6 +458,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             Some(h) => ok(format!("{h}\n")),
             None => err(128, "fatal: not a git repository"),
         },
+        ["rev-parse", "--short=7", "HEAD"] => ok(m.heads.get(dir).map_or(String::new(), |h| format!("{:.7}\n", h))),
         ["rev-parse", "--verify", "--quiet", b] | ["rev-parse", b] => {
             match m.origin.get(b.trim_start_matches("origin/")) {
                 Some(h) => ok(format!("{h}\n")),
@@ -472,7 +470,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             None => err(128, "fatal"),
         },
         ["status", "--porcelain", ..] => ok(""),
-        ["rev-list", "--objects", "--disk-usage", ..] => ok("0\n"),
+        ["rev-list", "--objects", "--disk-usage", ..] | ["rev-list", "--count", ..] => ok("0\n"),
         ["rev-list", ..] | ["log", ..] | ["diff", ..] | ["branch", ..] | ["ls-files", ..] => ok(""),
         ["reset", "--hard", b] => {
             if let Some(h) = m.origin.get(b.trim_start_matches("origin/")).cloned() {
@@ -484,7 +482,6 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             Some(h) => ok(format!("{h}\t{r}\n")),
             None => ok(""),
         },
-        // #779 `wip prune` (from `clean`): origin's wip branches.
         ["for-each-ref", _, "refs/remotes/origin/wip/"] => ok(m
             .origin
             .keys()
@@ -501,7 +498,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
                 p.head = head.clone();
             }
             m.version += 1;
-            let t = w.model.ci_start(&head, w.now, &mut w.rng);
+            let t = w.model.ci_start(&head, w.now, None, &mut w.rng);
             let green = w.rng.chance(90);
             w.model.at(t, Ev::Ci { sha: head, green });
             ok("")

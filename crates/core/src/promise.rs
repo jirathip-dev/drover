@@ -30,7 +30,6 @@ pub enum Say {
     ReviewsAhead(usize),
     Pass(String),
     Starts(String),
-    PassRunning,
 }
 
 /// The spawn-slot wait phrase; the board matches on it.
@@ -64,7 +63,6 @@ impl Say {
             ),
             Say::Pass(r) => format!("drive's next pass{r}"),
             Say::Starts(r) => format!("{r}; starts next pass"),
-            Say::PassRunning => "a drive pass is running; the next pass starts the round".into(),
         }
     }
 }
@@ -186,14 +184,20 @@ pub fn pass(
     Ok(())
 }
 
-/// The row's line once its open promise was missed: `⚠ missed <age>: <real reason>`.
-pub fn missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>, now: u64) -> Option<String> {
+/// #855: the issue's open promise once missed, with drive's real reason.
+pub fn open_missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>) -> Option<(Promise, String)> {
     let mine: Vec<&Event> = events
         .iter()
         .filter(|e| e.fleet == s.fleet && e.issue == Some(s.issue))
         .collect();
     let (p, why) = open(&mine)?;
     let why = why.filter(|_| !p.moved(s, head) && kind.is_none_or(|k| k == p.kind))?;
+    Some((p, why))
+}
+
+/// The row's line once its open promise was missed: `⚠ missed <age>: <real reason>`.
+pub fn missed(events: &[Event], s: &IssueState, head: &str, kind: Option<Kind>, now: u64) -> Option<String> {
+    let (p, why) = open_missed(events, s, head, kind)?;
     Some(format!("⚠ missed {}: {why}", age(now.saturating_sub(p.made_at))))
 }
 
@@ -232,19 +236,19 @@ mod tests {
             state: state.clone(),
             worktrees: dir.join("w"),
             homes: std::collections::BTreeMap::default(),
-            exe: "herdsman".into(),
+            exe: "drover".into(),
             now,
             home: dir.into(),
             hints: vec![],
         };
         let cfg = crate::config::Config::default();
-        let ev = crate::events::read(&state).unwrap_or_default();
+        let ev = crate::events::working(&state).unwrap_or_default();
         pass(&ctx, &cfg, "f", &ev, rows).unwrap();
-        crate::events::read(&state).unwrap()
+        crate::events::working(&state).unwrap().to_vec()
     }
 
     fn tmp(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("herdsman-{name}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("drover-{name}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(&d).unwrap();
         d
@@ -267,7 +271,7 @@ mod tests {
         assert_eq!((count(&ev, "promise-missed"), count(&ev2, "promise-missed")), (1, 1));
         let m = ev2.iter().find(|e| e.kind == "promise-missed").unwrap();
         assert_eq!(m.str("why"), Some("now: PASS · CI green · PR is a draft"));
-        assert_eq!(m.data["age"], 600);
+        assert_eq!(m.val("age"), 600);
         assert_eq!(
             missed(&ev2, &ready, "", None, 1900).as_deref(),
             Some("⚠ missed 15m: now: PASS · CI green · PR is a draft")

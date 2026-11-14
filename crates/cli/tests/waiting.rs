@@ -1,24 +1,22 @@
-//! #46: idle with a reason: `waiting_on` per case and the owner's idle lanes replayed; #155: waits name drive.
 mod common;
 use common::*;
-use herdsman::config::Config;
-use herdsman::events::{append, read, Event};
-use herdsman::serve::Server;
-use herdsman::waiting::{scan, Waiting};
+use drover::config::Config;
+use drover::events::{append, read, Event};
+use drover::serve::Server;
+use drover::waiting::{scan, Waiting};
 use serde_json::json;
 
 const NOW: u64 = 1_000_000;
 
-/// A 40-hex sha starting with `p`.
 fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
 
-fn ev(c: &herdsman::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: serde_json::Value) {
+fn ev(c: &drover::Ctx, ts: u64, issue: Option<u64>, kind: &str, d: serde_json::Value) {
     append(&c.state, &Event::new(ts, "sendmeter", issue, kind, d)).unwrap();
 }
 
-fn spawn(c: &herdsman::Ctx, ts: u64, n: u64, role: &str, agent: &str) {
+fn spawn(c: &drover::Ctx, ts: u64, n: u64, role: &str, agent: &str) {
     ev(
         c,
         ts,
@@ -28,8 +26,7 @@ fn spawn(c: &herdsman::Ctx, ts: u64, n: u64, role: &str, agent: &str) {
     );
 }
 
-/// A rev lane in a real worktree; `verdict` = verdict.md's text (None: not written), `old` = mtime before the spawn.
-fn rev(c: &herdsman::Ctx, ts: u64, n: u64, verdict: Option<&str>, old: bool) -> String {
+fn rev(c: &drover::Ctx, ts: u64, n: u64, verdict: Option<&str>, old: bool) -> String {
     let (agent, wt) = (format!("sendmeter-rev-{n}-r1"), c.worktrees.join(format!("rev-{n}")));
     std::fs::create_dir_all(&wt).unwrap();
     ev(
@@ -50,7 +47,7 @@ fn rev(c: &herdsman::Ctx, ts: u64, n: u64, verdict: Option<&str>, old: bool) -> 
     wt.join("verdict.md").display().to_string()
 }
 
-fn verdict(c: &herdsman::Ctx, ts: u64, n: u64, v: &str, sha: &str) {
+fn verdict(c: &drover::Ctx, ts: u64, n: u64, v: &str, sha: &str) {
     ev(c, ts, Some(n), "verdict", json!({"verdict": v, "sha": sha}));
 }
 
@@ -64,8 +61,7 @@ fn pr(head: &str, ci: &str) -> String {
         .to_string()
 }
 
-/// Every case of the brief in one log, with fake gh (PR views) and git (worktree heads).
-fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
+fn fixture(name: &str) -> (drover::Ctx, Fake) {
     let c = ctx(&tmpdir(name), CONFIG);
     let t = NOW - 1500;
     spawn(&c, t, 1, "impl", "sendmeter-impl-1");
@@ -138,8 +134,7 @@ fn fixture(name: &str) -> (herdsman::Ctx, Fake) {
     (c, r)
 }
 
-/// The issues' reasons: each one's latest lane only.
-fn waits(c: &herdsman::Ctx, r: &Fake, agents: &[serde_json::Value]) -> Vec<Waiting> {
+fn waits(c: &drover::Ctx, r: &Fake, agents: &[serde_json::Value]) -> Vec<Waiting> {
     lanes(c, r, agents)
         .into_iter()
         .filter(|(s, w)| s.lane.as_ref() == Some(&w.lane))
@@ -147,7 +142,7 @@ fn waits(c: &herdsman::Ctx, r: &Fake, agents: &[serde_json::Value]) -> Vec<Waiti
         .collect()
 }
 
-fn lanes(c: &herdsman::Ctx, r: &Fake, agents: &[serde_json::Value]) -> Vec<(herdsman::events::IssueState, Waiting)> {
+fn lanes(c: &drover::Ctx, r: &Fake, agents: &[serde_json::Value]) -> Vec<(drover::events::IssueState, Waiting)> {
     scan(
         c,
         &Config::load(&c.config).unwrap(),
@@ -171,7 +166,7 @@ fn every_case_has_its_who_what_and_next_command() {
         ],
     );
     let t = NOW - 1500;
-    let s = |n: &str| Some(format!("herdsman {n}"));
+    let s = |n: &str| Some(format!("drover {n}"));
     let want: [(u64, &str, &str, u64, Option<String>); 14] = [
         (1, "owner", "waiting on your answer (q3)", NOW - 600, None),
         (
@@ -203,7 +198,6 @@ fn every_case_has_its_who_what_and_next_command() {
         (7, "none", "idle without pushing (check the pane)", t, None),
         (8, "none", "nothing to do (merged): clean me", t + 20, None),
         (9, "none", "rev idle without a verdict (check the pane)", t + 10, None),
-        // #444: #10's lane is in no herdr list: gone without a push, respawned.
         (
             10,
             "drive",
@@ -211,7 +205,6 @@ fn every_case_has_its_who_what_and_next_command() {
             t,
             s("spawn sendmeter 10 impl --supersede"),
         ),
-        // #214: #12's reviewer exited (no herdr agent) without a verdict: a new review round.
         (
             12,
             "drive",
@@ -257,11 +250,10 @@ fn every_case_has_its_who_what_and_next_command() {
         ("m", "a"),
         "drive amber only past 5 min"
     );
-    // Every next command is one pasteable herdsman invocation: no empty args, no `PASS|FAIL`, no `?`.
     for cmd in all.iter().filter_map(|w| w.next_cmd.as_deref()) {
         let args: Vec<&str> = cmd.split(' ').collect();
         assert!(
-            args[0] == "herdsman" && args.iter().all(|a| !a.is_empty() && !a.contains(['|', '?'])),
+            args[0] == "drover" && args.iter().all(|a| !a.is_empty() && !a.contains(['|', '?'])),
             "{cmd}"
         );
         assert!(
@@ -311,16 +303,14 @@ fn waiting_lists_every_open_item_with_its_next_command() {
     let (c, r) = fixture("waiting-cmd");
     let (code, out) = run(&c, &r, &["waiting", "sendmeter"]);
     assert_eq!(code, 0, "{out}");
-    assert!(out.contains("sendmeter #42 drive: pushed fix 605297c, waiting for drive (next pass ≤ 5 min) to spawn review (8m) → herdsman spawn sendmeter 42 rev"), "{out}");
+    assert!(out.contains("sendmeter #42 drive: pushed fix 605297c, waiting for drive (next pass ≤ 5 min) to spawn review (8m) → drover spawn sendmeter 42 rev"), "{out}");
     assert!(
         out.contains("sendmeter #1 owner: waiting on your answer (q3) (10m)\n"),
         "{out}"
     );
-    // #445: every open issue is listed with its reason, ci and nothing-due ones too.
     assert!(out.contains("sendmeter #5 ci: PASS · CI running 0/1 (24m)\n"), "{out}");
-    // #444: herdr lists no lane here, so the impl lanes that never pushed are gone: respawned by drive.
     assert!(
-        out.contains("sendmeter #10 drive: lane gone, no push: respawning impl (25m) → herdsman spawn sendmeter 10 impl --supersede\n"),
+        out.contains("sendmeter #10 drive: lane gone, no push: respawning impl (25m) → drover spawn sendmeter 10 impl --supersede\n"),
         "{out}"
     );
     let (_, j) = run(&c, &r, &["waiting", "--json"]);
@@ -354,11 +344,10 @@ fn waiting_lists_every_open_item_with_its_next_command() {
     );
 }
 
-/// The owner's screenshot (2026-10-31 09:48): the lanes herdr calls `idle`, each now with its true reason.
 #[test]
 fn idle_lanes_render_their_reason() {
     let (c, r) = fixture("nine-idle");
-    run(&c, &r, &["waiting"]); // fills the PR cache the page reads
+    run(&c, &r, &["waiting"]);
     let names = [
         "sendmeter-impl-1",
         "sendmeter-impl-42",
@@ -369,16 +358,15 @@ fn idle_lanes_render_their_reason() {
         "sendmeter-impl-7",
         "sendmeter-impl-8",
     ];
-    let list: Vec<_> = names
-        .iter()
-        .map(|n| json!({"name": n, "agent_status": "idle", "pane_id": format!("w1:{n}"), "cwd": "/x"}))
-        .collect();
-    let r = r
-        .reply("herdr agent list", &json!({"result": {"agents": list}}).to_string())
-        .reply("herdr workspace list", "{}")
-        .reply("herdr pane read", "");
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    for n in names {
+        sh.lane(n, "idle", "/x");
+        sh.screen(n, "");
+    }
+    let r = sh.on(&r);
     let s = Server::new(&c, &r, None);
-    let page = parts(&s, "", "", NOW)[1].clone(); // #269: the Lanes tab as the board draws it
+    let page = parts(&s, "", "", NOW)[1].clone();
     for (tone, label) in [
         ("r", "idle · waiting on your answer (q3) (10m)"),
         (
@@ -411,7 +399,6 @@ fn idle_lanes_render_their_reason() {
         !page.contains("<span class=\"nw a\">idle </span><span class=act>"),
         "no bare idle row"
     );
-    // #43: the sheet header is the row's card (reason included) above the Stop / Kill / Clean actions.
     assert!(
         page.contains("<div class=card hidden><p>#42</p><p>idle · pushed fix 605297c"),
         "{page}"
@@ -423,7 +410,6 @@ fn idle_lanes_render_their_reason() {
     );
 }
 
-/// #43: a killed lane falls back to its prior state; the issue's surviving lane tells drive what to respawn.
 #[test]
 fn a_killed_lane_waits_on_drive_to_respawn_it() {
     let c = ctx(&tmpdir("waiting-killed"), CONFIG);
@@ -459,7 +445,7 @@ fn a_killed_lane_waits_on_drive_to_respawn_it() {
         .into_iter()
         .map(|w| (w.issue, w.lane, w.who, w.what, w.next_cmd))
         .collect();
-    let s = |n: &str| Some(format!("herdsman {n}"));
+    let s = |n: &str| Some(format!("drover {n}"));
     assert_eq!(
         got,
         vec![
@@ -481,7 +467,6 @@ fn a_killed_lane_waits_on_drive_to_respawn_it() {
     );
 }
 
-/// #53: a 120-char reason gets its own line under a one-line name; an older lane of the issue says `superseded by`.
 #[test]
 fn a_long_reason_never_squeezes_the_name() {
     let c = ctx(&tmpdir("waiting-long"), CONFIG);
@@ -495,15 +480,15 @@ fn a_long_reason_never_squeezes_the_name() {
         "needs-decision",
         json!({"id": id, "agent": "synergy-impl-2859", "question": "?", "options": [], "recommend": null}),
     );
-    let list: Vec<_> = ["synergy-rev-2859-r2", "synergy-impl-2859"]
-        .iter()
-        .map(|n| json!({"name": n, "agent_status": "idle", "pane_id": format!("w1:{n}"), "cwd": "/x"}))
-        .collect();
-    let r = Fake::default()
-        .reply("herdr agent list", &json!({"result": {"agents": list}}).to_string())
-        .reply("herdr workspace list", "{}")
-        .reply("herdr pane read", "");
-    let page = parts(&Server::new(&c, &r, None), "", "", NOW)[1].clone(); // #269: the Lanes tab as the board draws it
+    let sh = FakeShed::new();
+    sh.attach(&c);
+    for n in ["synergy-rev-2859-r2", "synergy-impl-2859"] {
+        sh.lane(n, "idle", "/x");
+        sh.screen(n, "");
+    }
+    let f = Fake::default();
+    let r = sh.on(&f);
+    let page = parts(&Server::new(&c, &r, None), "", "", NOW)[1].clone();
     let reason = format!("waiting on your answer ({id})");
     assert_eq!(reason.len(), 120);
     assert!(page.contains(&format!("<span class=\"nw el\">synergy-impl-2859</span><span class=\"nw r\">idle 10m</span><span class=\"why r\">{reason}</span>")), "{page}");
@@ -515,8 +500,6 @@ fn a_long_reason_never_squeezes_the_name() {
     );
 }
 
-/// #327: a fix lane that died (`lane-dead`), or whose supersede never spawned, at the FAILed head: the fix is due again;
-/// a live fix lane at that head is not.
 #[test]
 fn a_dead_fix_lane_is_respawned_not_parked() {
     let c = ctx(&tmpdir("waiting-dead-fix"), CONFIG);
@@ -546,10 +529,9 @@ fn a_dead_fix_lane_is_respawned_not_parked() {
     for n in [20, 21, 22] {
         r = r.reply(&format!("gh pr view issue-{n} "), &pr(&sha(&n.to_string()), "green"));
     }
-    // #444: "still there" is a pane herdr lists; one it does not is gone, and respawned too.
     let all = waits(&c, &r, &[json!({"name": "sendmeter-impl-22", "agent_status": "idle"})]);
     let of = |n: u64| all.iter().find(|w| w.issue == n).map(|w| w.next_cmd.clone());
-    let fix = |n: u64| Some(Some(format!("herdsman spawn sendmeter {n} impl --supersede")));
+    let fix = |n: u64| Some(Some(format!("drover spawn sendmeter {n} impl --supersede")));
     assert_eq!(of(20), fix(20), "lane-dead with the fix still due");
     assert_eq!(of(21), fix(21), "a supersede that never spawned");
     assert_eq!(of(22), Some(None), "a fix lane still there is left alone");
@@ -559,13 +541,13 @@ fn a_dead_fix_lane_is_respawned_not_parked() {
 fn a_green_pass_on_a_draft_or_unlabelled_pr_names_the_cause() {
     let (c, mut r) = fixture("waiting-812-draft");
     let draft = pr(&sha("4"), "green").replace("\"number\"", "\"isDraft\":true,\"number\"");
-    let out = herdsman::runner::Out {
+    let out = drover::runner::Out {
         code: 0,
         stdout: draft,
         stderr: String::new(),
     };
     r.replies.insert(0, ("gh pr view issue-4 ".into(), out));
-    let four = |c: &herdsman::Ctx, r: &Fake| waits(c, r, &[]).into_iter().find(|w| w.issue == 4).unwrap();
+    let four = |c: &drover::Ctx, r: &Fake| waits(c, r, &[]).into_iter().find(|w| w.issue == 4).unwrap();
     assert_eq!(four(&c, &r).what, "PASS · CI green · PR is a draft");
     let (c, r) = fixture("waiting-812-label");
     let cfg = CONFIG.replace(
@@ -580,15 +562,15 @@ fn a_green_pass_on_a_draft_or_unlabelled_pr_names_the_cause() {
 fn a_pass_left_unmerged_for_three_passes_shows_the_missed_promise_with_the_real_reason() {
     let (mut c, mut r) = fixture("waiting-854-missed");
     let cfg = Config::load(&c.config).unwrap();
-    let drive = |c: &herdsman::Ctx, r: &Fake| {
+    let drive = |c: &drover::Ctx, r: &Fake| {
         let rows = lanes(c, r, &[]);
-        herdsman::promise::pass(c, &cfg, "sendmeter", &read(&c.state).unwrap(), &rows).unwrap();
+        drover::promise::pass(c, &cfg, "sendmeter", &read(&c.state).unwrap(), &rows).unwrap();
     };
-    let four = |c: &herdsman::Ctx, r: &Fake| waits(c, r, &[]).into_iter().find(|w| w.issue == 4).unwrap();
+    let four = |c: &drover::Ctx, r: &Fake| waits(c, r, &[]).into_iter().find(|w| w.issue == 4).unwrap();
     assert_eq!(four(&c, &r).what, "PASS · CI green · merging within 1 min");
     drive(&c, &r);
     let draft = pr(&sha("4"), "green").replace("\"number\"", "\"isDraft\":true,\"number\"");
-    let out = herdsman::runner::Out {
+    let out = drover::runner::Out {
         code: 0,
         stdout: draft,
         stderr: String::new(),
@@ -600,6 +582,7 @@ fn a_pass_left_unmerged_for_three_passes_shows_the_missed_promise_with_the_real_
     }
     let missed: Vec<Event> = read(&c.state)
         .unwrap()
+        .to_vec()
         .into_iter()
         .filter(|e| e.kind == "promise-missed" && e.issue == Some(4))
         .collect();

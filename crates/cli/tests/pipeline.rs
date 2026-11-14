@@ -1,19 +1,18 @@
-//! #173: the configurable pipeline. The built-in default replays both fleets' recorded histories with today's decisions.
 mod common;
-use herdsman::config::Config;
-use herdsman::events::{fold, Event};
-use herdsman::gate::gate;
-use herdsman::waiting::waiting_on;
+use drover::config::Config;
+use drover::events::{fold, Event};
+use drover::gate::gate;
+use drover::waiting::waiting_on;
 use serde_json::json;
 
 const FLEETS: &str = r#"
-[fleet.herdsman]
-repo = "o/herdsman"
+[fleet.drover]
+repo = "o/drover"
 local = "/tmp/h"
 integration = "staging"
-[fleet.herdsman.role.impl]
+[fleet.drover.role.impl]
 harness = "claude"
-[fleet.herdsman.role.rev]
+[fleet.drover.role.rev]
 harness = "claude"
 [fleet.atlas]
 repo = "o/atlas"
@@ -25,8 +24,6 @@ harness = "claude"
 harness = "claude"
 "#;
 
-/// After every event of the recorded log (sanitized: `tests/golden/pipeline/events.jsonl`), the issue's fold, its
-/// wait reason for a PR at the last verdict's head and at a moved head, and the merge gate.
 #[test]
 fn default_pipeline_replays_recorded_histories() {
     let cfg = Config::parse(FLEETS).unwrap();
@@ -44,7 +41,7 @@ fn default_pipeline_replays_recorded_histories() {
                 "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]})
         };
         let moved = "e".repeat(40);
-        let log = herdsman::waiting::Log::new(&events[..=i]);
+        let log = drover::waiting::Log::new(&events[..=i]);
         let a = waiting_on(
             &log,
             &events[..=i],
@@ -68,7 +65,6 @@ fn default_pipeline_replays_recorded_histories() {
     assert_eq!(out, std::fs::read_to_string(path).unwrap(), "decisions changed");
 }
 
-/// `[fleet.atlas]` with roles impl, rev, sec and `stages` as its pipeline, plus a plain `[fleet.other]`.
 fn atlas(stages: &str) -> String {
     let mut t = String::from("[fleet.atlas]\nrepo = \"o/atlas\"\nlocal = \"/tmp/a\"\nintegration = \"staging\"\n");
     for r in ["impl", "rev", "sec"] {
@@ -78,7 +74,6 @@ fn atlas(stages: &str) -> String {
     t + stages
 }
 
-/// One `[[fleet.atlas.pipeline.stage]]`.
 fn st(name: &str, kind: &str, role: &str, rounds: Option<u32>, next: &str) -> String {
     let role = if role.is_empty() {
         String::new()
@@ -102,7 +97,6 @@ fn stages(s: &[(&str, &str, &str, Option<u32>, &str)]) -> String {
     s.iter().map(|s| st(s.0, s.1, s.2, s.3, s.4)).collect()
 }
 
-/// The custom example: impl → rev → sec → gates → merge, both checks FAIL back to impl.
 fn two_checks() -> String {
     atlas(&stages(&[
         IMPL,
@@ -130,7 +124,6 @@ fn the_brief_and_custom_pipelines_are_valid() {
     }
 }
 
-/// Each rule rejects a crafted pipeline, refused `BAD_PIPELINE` for that fleet only, with the stage's fleet.toml line.
 #[test]
 fn each_rule_rejects_a_crafted_pipeline() {
     let rev = ("rev", "check", "rev", Some(3), "PASS = \"gates\", FAIL = \"impl\"");
@@ -203,8 +196,6 @@ fn each_rule_rejects_a_crafted_pipeline() {
     }
 }
 
-/// The design's refused example: rev's PASS now goes to a `qa` check without rounds, `docs` uses an undefined role.
-/// Its four errors, plus `unmapped`: drive has no step for a PASS that leads to a build.
 #[test]
 fn the_design_error_example_breaks_its_rules() {
     let cfg = Config::parse(&atlas(&stages(&[
@@ -258,12 +249,11 @@ fn pr(head: &str) -> serde_json::Value {
         "statusCheckRollup": [{"__typename": "CheckRun", "name": "ci", "status": "COMPLETED", "conclusion": "SUCCESS"}]})
 }
 
-/// What `waiting_on` has drive run next, and the merge gate's answer, after `events`.
 fn next(cfg: &Config, events: &[Event], head: &str) -> (Option<String>, Result<(), &'static str>) {
     let f = cfg.fleet("atlas").unwrap();
     let s = &fold(events)[&("atlas".to_string(), 12)];
     let w = waiting_on(
-        &herdsman::waiting::Log::new(events),
+        &drover::waiting::Log::new(events),
         events,
         s,
         Some((head, 1)),
@@ -277,8 +267,6 @@ fn next(cfg: &Config, events: &[Event], head: &str) -> (Option<String>, Result<(
     )
 }
 
-/// A custom 2-check pipeline: rev's PASS spawns sec on the same head, merge needs both PASSes at the head, and a FAIL
-/// in either routes to a fix in impl.
 #[test]
 fn two_checks_merge_on_both_passes_and_either_fail_routes_to_fix() {
     let cfg = Config::parse(&two_checks()).unwrap();
@@ -290,14 +278,13 @@ fn two_checks_merge_on_both_passes_and_either_fail_routes_to_fix() {
     ];
     assert_eq!(
         next(&cfg, &e, &a),
-        (Some("herdsman spawn atlas 12 sec".into()), Err("STALE_VERDICT"))
+        (Some("drover spawn atlas 12 sec".into()), Err("STALE_VERDICT"))
     );
     e.push(spawn(4, "sec", true));
     assert_eq!(fold(&e)[&("atlas".to_string(), 12)].shown(), "sec(1)");
     let mut pass = e.clone();
     pass.push(verdict(5, "sec", "PASS", &a));
-    assert_eq!(next(&cfg, &pass, &a), (Some("herdsman merge atlas 12".into()), Ok(())));
-    // A head with only rev's PASS does not merge, nor one whose sec PASS is for an older head.
+    assert_eq!(next(&cfg, &pass, &a), (Some("drover merge atlas 12".into()), Ok(())));
     let mut moved = pass.clone();
     moved.extend([
         spawn(6, "impl", false),
@@ -305,9 +292,8 @@ fn two_checks_merge_on_both_passes_and_either_fail_routes_to_fix() {
         verdict(8, "rev", "PASS", &b),
     ]);
     assert_eq!(next(&cfg, &moved, &b).1, Err("STALE_VERDICT"));
-    // sec FAIL → fix in impl; then rev FAIL → fix in impl.
     e.push(verdict(5, "sec", "FAIL", &a));
-    let fix = Some("herdsman spawn atlas 12 impl --supersede".into());
+    let fix = Some("drover spawn atlas 12 impl --supersede".into());
     assert_eq!(next(&cfg, &e, &a), (fix.clone(), Err("VERDICT_FAIL")));
     e.extend([
         spawn(6, "impl", false),
@@ -317,7 +303,6 @@ fn two_checks_merge_on_both_passes_and_either_fail_routes_to_fix() {
     assert_eq!(next(&cfg, &e, &b), (fix, Err("VERDICT_FAIL")));
 }
 
-/// Per-stage round limits: sec (≤2) runs out on its 2nd FAIL while rev (≤3) has used 2 of its own.
 #[test]
 fn round_limits_are_per_check_stage() {
     let d = common::tmpdir("pipeline-rounds");
@@ -326,7 +311,7 @@ fn round_limits_are_per_check_stage() {
     let file = d.join("v.md");
     std::fs::write(&file, "FAIL\n\nnope\n").unwrap();
     let file = file.to_string_lossy().to_string();
-    let log = |e: Event| herdsman::events::append(&c.state, &e).unwrap();
+    let log = |e: Event| drover::events::append(&c.state, &e).unwrap();
     let verdict = |v: &str, sha: &str| {
         let r = common::Fake::default().reply("gh api", sha);
         common::run(&c, &r, &["verdict", "atlas", "12", v, "--sha", sha, "--file", &file])
@@ -346,14 +331,13 @@ fn round_limits_are_per_check_stage() {
         out.contains("(round 2/2)") && out.contains("round limit reached → needs-human"),
         "{out}"
     );
-    let s = &fold(&herdsman::events::read(&c.state).unwrap())[&("atlas".to_string(), 12)];
+    let s = &fold(&drover::events::read(&c.state).unwrap())[&("atlas".to_string(), 12)];
     assert_eq!(
         (s.state.as_str(), s.stage_rounds["rev"], s.stage_rounds["sec"]),
         ("needs-human", 2, 2)
     );
 }
 
-/// `BAD_PIPELINE` stops only its fleet's commands; doctor lists the rule.
 #[test]
 fn a_bad_pipeline_refuses_spawn_and_doctor_lists_it() {
     let bad = atlas(&stages(&[
@@ -374,7 +358,6 @@ fn a_bad_pipeline_refuses_spawn_and_doctor_lists_it() {
     assert!(out.contains("✓ pipeline other — valid (built-in)"), "{out}");
 }
 
-/// Red CI after the last round's PASS is the gate's FAIL at the same head: no new round, and needs-human at once.
 #[test]
 fn red_ci_in_the_last_round_goes_to_park() {
     let d = common::tmpdir("pipeline-ci-red");
@@ -382,8 +365,7 @@ fn red_ci_in_the_last_round_goes_to_park() {
     let file = d.join("v.md");
     std::fs::write(&file, "FAIL\n\nCI red\n").unwrap();
     let file = file.to_string_lossy().to_string();
-    let log =
-        |ts, kind, d| herdsman::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
+    let log = |ts, kind, d| drover::events::append(&c.state, &Event::new(ts, "sendmeter", Some(12), kind, d)).unwrap();
     for (i, sha) in ["a", "b", "c"].iter().enumerate() {
         let t = 10 * i as u64;
         log(t, "spawn", json!({"role": "impl", "agent": "sendmeter-impl-12"}));
@@ -403,7 +385,7 @@ fn red_ci_in_the_last_round_goes_to_park() {
         &["verdict", "sendmeter", "12", "FAIL", "--sha", &head, "--file", &file],
     );
     assert!(out.contains("(round 3/3)") && out.contains("needs-human"), "{out}");
-    let events = herdsman::events::read(&c.state).unwrap();
+    let events = drover::events::read(&c.state).unwrap();
     let v = events.iter().rfind(|e| e.kind == "verdict").unwrap();
     assert_eq!((v.str("stage"), v.str("loop")), (Some("gates"), Some("rev")));
 }
