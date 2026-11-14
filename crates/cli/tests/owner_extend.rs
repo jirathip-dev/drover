@@ -3,7 +3,6 @@ use common::*;
 use drover::events::{append, read, Event};
 use drover::runner::{Out, Runner};
 use serde_json::{json, Value};
-use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 fn sha(p: &str) -> String {
