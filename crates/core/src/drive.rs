@@ -2214,9 +2214,12 @@ fn act(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: &[Event
     let paced = (c[0] == "spawn" && step == "respawn" && KICK.get().is_none())
         .then(|| paced(cfg, fleet))
         .flatten();
+    let full = (spawn.filter(|_| KICK.get().is_none() && !kicks).zip(c.get(3)))
+        .and_then(|(n, role)| crate::hosts::slot_before(ctx, cfg, r, ev, (fleet, n, role), &[]));
     let res = match (back, paced, issue.filter(|_| kicks)) {
         (Some(why), _, _) => crate::gate::refused("SPAWN_BACKOFF", why),
         (None, Some(why), _) => crate::gate::refused("RESPAWN_PACED", why),
+        (None, None, None) if full.is_some() => crate::gate::refused("HOST_FULL", full.unwrap_or_default()),
         (None, None, Some(n)) => launch(ctx, cfg, r, ev, (fleet, n), c, step == "start"),
         (None, None, None) => crate::cli::run(c, ctx, r, &mut buf),
     };

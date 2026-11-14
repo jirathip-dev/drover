@@ -1,7 +1,7 @@
 //! `drover check` (alerts, each once per state) and `drover clean` (reclaim merged or closed lanes).
 
 use crate::config::{Config, Fleet};
-use crate::events::{age, emit, fold, held_on, last_spawn, open_asks, plain, read, Event, IssueState, Log};
+use crate::events::{age, checks, emit, fold, held_on, last_spawn, open_asks, plain, read, Event, IssueState, Log};
 use crate::gate::gate;
 use crate::host;
 use crate::hosts::On;
@@ -540,11 +540,8 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     let open = open_asks(&events);
     // #248: a done lane whose handoff is logged closes its session after `done_close_minutes`; its worktree stays.
     let st = fold(&events);
-    for a in agents
-        .iter()
-        .flatten()
-        .filter(|a| matches!(a["agent_status"].as_str(), Some("done" | "idle")))
-    {
+    let ended = |a: &&Value| matches!(a["agent_status"].as_str(), Some("done" | "idle"));
+    for a in agents.iter().flatten().filter(ended) {
         let e = a["name"].as_str().and_then(|n| last_spawn(&events, n));
         let (Some(name), Some(pane), Some(e)) = (a["name"].as_str(), a["pane_id"].as_str(), e) else {
             continue;
@@ -552,15 +549,10 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let (Some(n), Some(wt), None) = (e.issue, e.str("worktree"), On::of(r, Some(e)).machine) else {
             continue;
         };
-        let check = crate::events::checks(e);
-        let next = |x: &Event| {
-            [
-                x.is("spawn", &e.fleet, n) && crate::events::checks(x),
-                x.is("verdict", &e.fleet, n),
-            ]
-        };
+        let next = ["spawn", "verdict"][usize::from(checks(e))];
         let live = (st.get(&(e.fleet.clone(), n)).and_then(IssueState::active_lane)).is_some_and(|l| l.1 == name);
-        let acted = !live && events.iter().any(|x| x.ts >= e.ts && next(x)[usize::from(check)]);
+        let new = |x: &Event| x.ts >= e.ts && x.is(next, &e.fleet, n) && (next == "verdict" || checks(x));
+        let acted = !live && events.iter().any(new);
         if a["agent_status"] == "idle" && !acted {
             continue;
         }

@@ -110,7 +110,7 @@ caps the live lanes that need the `sim` tag (by fleet, role or `queue add --need
 idle at its prompt, or whose issue is `ready`, `needs-human`, `parked`, `blocked` or done, holds no working slot; a
 `sim` lane holds its simulator slot while its pane lives (unless its issue is in one of those states). Over a cap a
 start is not refused for good: drive skips it with `HOST_FULL` (`waiting for a slot: 12/12 working on mini`), counting
-spawns still starting, and starts it in queue order once a slot frees. `drover status` prints `mini: working N/12 ·
+spawns still starting, and starts it in queue order once a slot frees; a hand-typed `drover spawn` is not held. `drover status` prints `mini: working N/12 ·
 simulators N/1` for each capped host. Once its verdict is in, a reviewer's idle pane closes on the next `check`.
 Likewise, a builder's idle pane closes once a review started after it. Their worktrees stay until merge.
 

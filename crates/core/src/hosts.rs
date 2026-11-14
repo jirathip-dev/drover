@@ -654,9 +654,10 @@ pub fn needs(f: &Fleet, role: &str, events: &[Event], (fleet, issue): (&str, u64
 const IDLE: [&str; 6] = ["ready", "needs-human", "parked", "blocked", "merged", "closed"];
 const SLOTS: [&str; 2] = ["working", "simulators"];
 
-fn sim(cfg: &Config, events: &[Event], (fleet, n, role): Lane) -> bool {
-    cfg.fleet(fleet)
-        .is_ok_and(|f| needs(f, role, events, (fleet, n)).iter().any(|t| t == "sim"))
+fn sim(cfg: &Config, events: &[Event], e: &Event) -> bool {
+    let (role, n) = (e.str("role").unwrap_or_default(), e.issue.unwrap_or_default());
+    let need = |f| needs(f, role, events, (&e.fleet, n));
+    cfg.fleet(&e.fleet).is_ok_and(|f| need(f).iter().any(|t| t == "sim"))
 }
 
 /// #984: a host's live lanes (`agents`) but `skip`'s: those running a turn, and those holding a simulator.
@@ -664,96 +665,52 @@ pub fn held_slots(cfg: &Config, events: &[Event], agents: &[Value], skip: Option
     let st = fold(events);
     let mut n = [0; 2];
     for a in agents {
-        let sp = events
-            .iter()
-            .rfind(|e| e.kind == "spawn" && a["name"].as_str().is_some_and(|x| e.str("agent") == Some(x)));
+        let sp = a["name"].as_str().and_then(|x| crate::events::last_spawn(events, x));
         let Some((sp, i)) = sp.and_then(|e| Some((e, e.issue?))) else {
             continue;
         };
-        let idle = st
-            .get(&(sp.fleet.clone(), i))
-            .is_none_or(|s| IDLE.contains(&s.state.as_str()));
-        if idle || skip == Some((sp.fleet.as_str(), i)) {
-            continue;
+        let s = st.get(&(sp.fleet.clone(), i));
+        if s.is_some_and(|s| !IDLE.contains(&s.state.as_str())) && skip != Some((sp.fleet.as_str(), i)) {
+            n[0] += usize::from(!matches!(a["agent_status"].as_str(), Some("idle" | "done" | "blocked")));
+            n[1] += usize::from(sim(cfg, events, sp));
         }
-        n[0] += usize::from(!matches!(a["agent_status"].as_str(), Some("idle" | "done" | "blocked")));
-        n[1] += usize::from(sim(cfg, events, (&sp.fleet, i, sp.str("role").unwrap_or_default())));
     }
     n
 }
 
-/// #984: `waiting for a slot` while every host of `on` (name, agents) and `starting` spawns fill a cap the lane needs.
-pub fn slot_wait(
-    cfg: &Config,
-    events: &[Event],
-    me: Lane,
-    on: &[(&str, Vec<Value>)],
-    starting: &[Event],
-) -> Option<String> {
-    let start: Vec<Lane> = (starting.iter())
-        .filter(|e| e.fleet != me.0 || e.issue != Some(me.1))
-        .filter_map(|e| Some((e.fleet.as_str(), e.issue?, e.str("role").unwrap_or_default())))
-        .collect();
-    let mut used = [start.len(), start.iter().filter(|l| sim(cfg, events, **l)).count()];
-    let mut caps = [Some(0); 2];
-    for (name, agents) in on {
-        let held = held_slots(cfg, events, agents, Some((me.0, me.1)));
-        let h = cfg.hosts.get(*name);
-        for k in 0..2 {
-            caps[k] = caps[k]
-                .zip(h.and_then(|h| [h.max_working, h.max_simulators][k]))
-                .map(|(a, b)| a + b);
-            used[k] += held[k];
-        }
-    }
-    let names: Vec<&str> = on.iter().map(|h| h.0).collect();
-    let mine = [!on.is_empty(), !on.is_empty() && sim(cfg, events, me)];
-    (0..2).filter(|&k| mine[k]).find_map(|k| {
-        let cap = caps[k].filter(|&c| used[k] >= c)?;
-        Some(format!(
-            "waiting for a slot: {}/{cap} {} on {}",
-            used[k],
-            SLOTS[k],
-            names.join(", ")
-        ))
-    })
-}
-
-/// #984: drive's slot check before it launches a start: over every enabled host the lane fits.
-pub fn slot_before(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    events: &[Event],
-    me: Lane,
-    starting: &[Event],
-) -> Option<String> {
-    let need = needs(cfg.fleet(me.0).ok()?, me.2, events, (me.0, me.1));
-    let seen = cached(ctx);
+/// #984: drive's check before a start: `waiting for a slot` while every enabled host the lane fits is full.
+pub fn slot_before(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], me: Lane, start: &[Event]) -> Option<String> {
+    let need = needs(cfg.fleet(me.0).ok()?, me.2, ev, (me.0, me.1));
+    let (seen, sims) = (cached(ctx), need.iter().any(|t| t == "sim"));
+    let others = || start.iter().filter(|e| e.fleet != me.0 || e.issue != Some(me.1));
+    let start = [others().count(), others().filter(|e| sim(cfg, ev, e)).count()];
     let fit = |(n, h): &(&String, &HostCfg)| h.enabled && need.iter().all(|t| tags(h, seen.get(*n)).contains(t));
-    let fit: Vec<_> = cfg.hosts.iter().filter(fit).collect();
-    if !fit
-        .iter()
-        .any(|h| h.1.max_working.is_some() || h.1.max_simulators.is_some())
-    {
-        return None;
+    let mut full = None;
+    for (name, h) in cfg.hosts.iter().filter(fit) {
+        let caps = [h.max_working, h.max_simulators.filter(|_| sims)];
+        (caps != [None; 2]).then_some(())?;
+        let agents = agents_of(cfg, name, &On::new(r, h.machine.as_deref())).unwrap_or_default();
+        let held = held_slots(
+            cfg,
+            &crate::events::read(&ctx.state).unwrap_or_default(),
+            &agents,
+            Some((me.0, me.1)),
+        );
+        let used = [held[0] + start[0], held[1] + start[1]];
+        let (k, c) = (0..2).find_map(|k| caps[k].filter(|&c| used[k] >= c).map(|c| (k, c)))?;
+        full.get_or_insert(format!("waiting for a slot: {}/{c} {} on {name}", used[k], SLOTS[k]));
     }
-    let agents =
-        |(n, h): &(&String, &HostCfg)| agents_of(cfg, n, &On::new(r, h.machine.as_deref())).unwrap_or_default();
-    let on: Vec<_> = fit.iter().map(|h| (h.0.as_str(), agents(h))).collect();
-    slot_wait(cfg, events, me, &on, starting)
+    full
 }
 
 /// #984: each capped host's `name: working N/cap · simulators N/cap` line, from its live `agents` (`host`-tagged remote).
 pub fn slots_line(cfg: &Config, events: &[Event], agents: &[Value]) -> String {
     let mut out = String::new();
     for (name, h) in &cfg.hosts {
-        let caps = [h.max_working, h.max_simulators];
-        let mine: Vec<Value> = (agents.iter())
-            .filter(|a| a["host"].as_str().map_or(h.machine.is_none(), |x| x == name))
-            .cloned()
-            .collect();
+        let on = |a: &&Value| a["host"].as_str().map_or(h.machine.is_none(), |x| x == name);
+        let mine: Vec<Value> = agents.iter().filter(on).cloned().collect();
         let held = held_slots(cfg, events, &mine, None);
+        let caps = [h.max_working, h.max_simulators];
         let v: Vec<String> = (0..2)
             .filter_map(|k| Some(format!("{} {}/{}", SLOTS[k], held[k], caps[k]?)))
             .collect();
@@ -889,7 +846,7 @@ pub struct Placed {
 }
 
 /// #630: the log and the root of the issue's last spawn.
-type Pre<'a> = (&'a [Event], Option<&'a str>, Lane<'a>);
+type Pre<'a> = (&'a [Event], Option<&'a str>);
 
 /// #984: a lane by fleet, issue and role.
 pub type Lane<'a> = (&'a str, u64, &'a str);
@@ -920,10 +877,7 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
         Err(Some(c)) => (Host::default(), Some(c)),
         Err(None) => (Host::default(), Some(("HOST_OFFLINE", "unreachable".to_string()))),
         Ok(_) if sick.is_some() => (Host::default(), sick.map(|w| ("NO_HOST", format!("unhealthy: {w}")))),
-        Ok(a) => match slot_wait(cfg, pre.0, pre.2, &[(name, a)], &[]) {
-            Some(w) => (Host::default(), Some(("HOST_FULL", w))),
-            None => gate(ctx, cfg, &on),
-        },
+        Ok(_) => gate(ctx, cfg, &on),
     };
     Placed {
         name: name.into(),
@@ -1162,7 +1116,7 @@ pub fn place(
     }
     let f = cfg.fleet(fleet)?;
     let last = events.iter().rev().find(|e| e.is("spawn", fleet, issue));
-    let pre = (events, last.and_then(|e| e.str("root")), (fleet, issue, role));
+    let pre = (events, last.and_then(|e| e.str("root")));
     // #236: `--host`, else the role's `host` pin; a design lane runs in the main host's herdr only.
     let design = crate::events::STAGES.contains(&f.family(role));
     let pin = f.role.get(f.role_key(role)).and_then(|r| r.host.as_deref());
@@ -1191,7 +1145,7 @@ pub fn place(
         let was = (e.str("host").unwrap_or("local"), e.str("machine"));
         let mut p = at(ctx, cfg, f, r, was, pre);
         let code = p.refusal.as_ref().map(|x| x.0);
-        let busy = matches!(code, Some("DISK_LOW" | "HOST_BUSY" | "MEM_LOW" | "HOST_FULL"));
+        let busy = matches!(code, Some("DISK_LOW" | "HOST_BUSY" | "MEM_LOW"));
         let wt = last_spawn(events, &format!("{fleet}-{role}-{issue}")).filter(|l| l.str("machine") == was.1);
         let wt = wt.and_then(|l| l.str("worktree")).map(Path::new);
         let unpushed = busy && wt.is_some_and(|w| crate::check::unsaved(&On::new(r, was.1), w));
@@ -1271,14 +1225,7 @@ pub fn wake(ctx: &Ctx, cfg: &Config, r: &dyn Runner, f: (&Fleet, bool), p: Optio
             let why = p.why.clone();
             Ok(Some(Placed {
                 why,
-                ..at(
-                    ctx,
-                    cfg,
-                    f.0,
-                    r,
-                    (&p.name, p.machine.as_deref()),
-                    (&[], None, ("", 0, "")),
-                )
+                ..at(ctx, cfg, f.0, r, (&p.name, p.machine.as_deref()), (&[], None))
             }))
         }
         p => Ok(p),

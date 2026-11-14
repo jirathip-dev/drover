@@ -943,7 +943,7 @@ pub fn scan(
             .rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
         tried
             .and_then(|e| e.str("code"))
-            .is_some_and(|c| c == "SPAWN_PENDING" || HOST_WAIT.contains(&c))
+            .is_some_and(|c| ["SPAWN_PENDING", "HOST_FULL"].contains(&c) || HOST_WAIT.contains(&c))
     };
     let ahead = out
         .iter_mut()
@@ -1015,14 +1015,7 @@ pub fn recovered(events: &[Event], lane: &str, now: u64) -> String {
 }
 
 /// #493: a refusal that stops drive's starts for every fleet (`CAP`: its own); the queue waits on it.
-const HOST_WAIT: [&str; 6] = [
-    "HOST_BUSY",
-    "HOST_FULL",
-    "DISK_LOW",
-    "DISK_BUDGET",
-    "MEM_LOW",
-    "ALL_CAPPED",
-];
+const HOST_WAIT: [&str; 5] = ["HOST_BUSY", "DISK_LOW", "DISK_BUDGET", "MEM_LOW", "ALL_CAPPED"];
 pub const ORPHAN_SECS: u64 = 1800;
 
 /// #493: since when nothing has driven guarded issue `s`, once that is 30 min: no working lane, no drive action on it
@@ -1048,7 +1041,7 @@ pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Valu
         seen |= e.fleet == s.fleet;
         for a in e.data.get("actions").and_then(Value::as_array).into_iter().flatten() {
             let code = a["code"].as_str().unwrap_or_default();
-            let wait = HOST_WAIT.contains(&code) || code == "CAP" && e.fleet == s.fleet;
+            let wait = HOST_WAIT.contains(&code) || code == "HOST_FULL" || code == "CAP" && e.fleet == s.fleet;
             // #534: a LANE_LIVE loop on a finished lane drives nothing.
             let old = a["words"].as_str().is_some_and(|w| w.contains(crate::drive::OLD));
             if e.fleet == s.fleet && a["issue"] == s.issue && !old || s.state == "queued" && wait {
