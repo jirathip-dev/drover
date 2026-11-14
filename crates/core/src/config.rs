@@ -613,7 +613,6 @@ pub struct Limits {
     pub spawn_pending_max_secs: u64,
     pub fallback_rest_minutes: u64,
     pub acp_start_minutes: u64,
-    pub rotate_mb: u64,
     pub webhook_poll_minutes: u64,
     pub keychain_readers: usize,
     pub reap_keychain_readers: bool,
@@ -734,7 +733,6 @@ impl Default for Limits {
             spawn_pending_max_secs: 300,
             fallback_rest_minutes: 60,
             acp_start_minutes: 3,
-            rotate_mb: 20,
             webhook_poll_minutes: 10,
             keychain_readers: 3,
             reap_keychain_readers: false,
@@ -887,10 +885,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "acp_start_minutes",
         "an ACP lane with no event back this long after its first turn is a failed start",
-    ),
-    (
-        "rotate_mb",
-        "the event log over this many MB moves old events to monthly archives",
     ),
     (
         "webhook_poll_minutes",

@@ -123,7 +123,6 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `spawn_pending_max_secs` | `300` | a spawn marker or kick lock older than this is stale |
 | `fallback_rest_minutes` | `60` | how long an unavailable agent rests when its message names no reset |
 | `acp_start_minutes` | `3` | an ACP lane with no event back this long after its first turn is a failed start |
-| `rotate_mb` | `20` | the event log over this many MB moves old events to monthly archives |
 | `webhook_poll_minutes` | `10` | with GitHub webhooks on, the fast step re-reads PRs only this often |
 | `keychain_readers` | `3` | more Keychain readers up over 60 s alert `keychain-jammed` |
 | `reap_keychain_readers` | `false` | kill those stuck Keychain readers too |

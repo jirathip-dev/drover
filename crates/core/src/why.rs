@@ -427,7 +427,7 @@ pub fn show(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, at: &s
         .lines()
         .find_map(|l| l.strip_prefix("summary "))
         .unwrap_or_default();
-    let events = read(&ctx.state)?;
+    let events = crate::events::history(&ctx.state)?;
     let url = git(&["remote", "get-url", "origin"]).unwrap_or_default();
     let (fleet, f) = (cfg.fleet.iter().find(|(_, f)| url.contains(&f.repo)))
         .or_else(|| cfg.fleet.iter().next())

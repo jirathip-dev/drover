@@ -14,7 +14,7 @@ use std::io::Write;
 pub fn digest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, fleet: &str, days: u64) -> Result<String> {
     let f = cfg.fleet(fleet)?;
     let since = ctx.now.saturating_sub(days * 86400);
-    let events = read(&ctx.state)?;
+    let events = crate::events::history(&ctx.state)?;
     let recent: Vec<&Event> = events.iter().filter(|e| e.fleet == fleet && e.ts >= since).collect();
     let mut s =
         format!("# Lessons digest: {fleet}, last {days} days\n\n## Review FAIL findings (blocking, with proof)\n");

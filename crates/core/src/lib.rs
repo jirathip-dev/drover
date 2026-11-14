@@ -860,27 +860,23 @@ pub fn undelivered<'a>(events: &'a [Event], fleet: &str) -> Vec<&'a Event> {
 
 /// `drover asks`: the open asks (`all`: closed ones too, with why), oldest first, with age.
 pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, all: bool) -> Result<()> {
-    let events = events::shared(&ctx.state)?; // #632: one ask index for every row
-    let shown = |e: &&Event| fleet.is_none_or(|f| f == e.fleet) && (all || events::closed(&events, e).is_none());
-    let open: Vec<&Event> = events
-        .iter()
-        .filter(|e| e.kind == "needs-decision")
-        .filter(shown)
-        .collect();
+    // #978: the `asks` table, one row per ask with its ending.
+    let mut open = crate::db::asks(&ctx.state, fleet)?;
+    open.retain(|a| all || a.1.is_none());
     if as_json {
         // #446: and why each closed (`closed`, null while open).
         let mut rows = Vec::new();
-        for e in &open {
+        for (e, why) in &open {
             let mut v = serde_json::to_value(e)?;
-            v["closed"] = json!(events::closed(&events, e));
+            v["closed"] = json!(why.as_ref().map(|w| events::ORDER[w.0]));
             rows.push(v);
         }
         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
     }
-    for e in open.iter().filter(|_| !as_json) {
+    for (e, why) in open.iter().filter(|_| !as_json) {
         let at = e.issue.map_or("-".into(), |n| format!("#{n}"));
         let s = |k| e.str(k).unwrap_or_default();
-        let why = events::closed_row(&events, e).map_or(String::new(), |w| format!(" [{w}]"));
+        let why = why.as_ref().map_or(String::new(), |w| format!(" [{}]", w.1));
         writeln!(
             out,
             "{} {} {at} {} {}: {}{why}",

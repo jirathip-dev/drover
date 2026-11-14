@@ -47,7 +47,7 @@ pub const STEPS: [(&str, &[&str]); 8] = [
             "overflow_after_minutes",
         ],
     ),
-    ("backlog, checkpoint", &["rotate_mb"]),
+    ("backlog", &[]),
 ];
 /// #677: drive's one prompt on a `done` whose why note was refused.
 pub const WHY_NUDGE: &str = "your `turn done` was refused: ";
@@ -884,18 +884,15 @@ pub fn drive(
             "spawns_launched": launched(&acts), "actions": acts, "kick": KICK.get()});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
-    // #343: a slow pass folds the log into its checkpoint, and rotates a log over `rotate_mb`; #365: reads backlogs.
+    // #365: a slow pass reads backlogs.
     if !fast && KICK.get().is_none() {
         for n in &fleets {
             crate::gh::backlog(ctx, r, cfg.fleet(n)?, n).unwrap_or_else(|e| eprintln!("drover: {n} backlog: {e:#}"));
         }
         crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: stale panes: {e:#}"));
         crate::check::dedup(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: lane-dup: {e:#}"));
-        let max = cfg.limits.rotate_mb << 20;
-        let cp = crate::events::checkpoint(&ctx.state).and_then(|_| crate::events::rotate(&ctx.state, max, ctx.now));
-        cp.unwrap_or_else(|e| eprintln!("drover: checkpoint: {e:#}"));
     }
-    lap("backlog, checkpoint");
+    lap("backlog");
     let secs = t0.elapsed().as_secs_f64();
     if t0.elapsed().as_secs() > cfg.limits.pass_max_secs {
         let r1 = |x: f64| (x * 10.0).round() / 10.0;
