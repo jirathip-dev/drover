@@ -3,21 +3,17 @@ use crate::api::Job;
 use crate::events::Event;
 use serde_json::json;
 
-/// #977: the taps that run as jobs, each on its own thread (`Server::tap`).
 pub(super) const OPS: [&str; 8] = [
     "drive", "override", "extend", "park", "unpark", "answer", "card", "config",
 ];
 const KEEP: u64 = 900;
 
-/// #977: a job to run: (ctx, form, job id).
 pub(super) type Tap = (Ctx, BTreeMap<String, String>, String);
 
-/// #977: the board's jobs by id, each with its button's key (op, fleet, issue, id); the last id number.
 #[derive(Default)]
 pub(super) struct Jobs(BTreeMap<String, (String, Job)>, u64);
 
 impl Jobs {
-    /// #977: a job is still running (a handover waits for it; one waiting for host does not hold it).
     pub(super) fn busy(&self) -> bool {
         self.0.values().any(|j| j.1.state == "running")
     }
@@ -43,7 +39,6 @@ fn extended(ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<()> {
     crate::gate::extended(ctx, (g("fleet"), n), (true, "owner"), &state)
 }
 
-/// #977: a tap's page is current (`STALE` unless its `mtime` is fleet.toml's; a card or config tap has none).
 pub(super) fn ready(ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<()> {
     let g = |k: &str| f.get(k).map_or("", String::as_str);
     if !["card", "config"].contains(&g("op")) && g("mtime") != mtime(ctx) {
@@ -60,7 +55,6 @@ fn host_wait(reason: &str) -> bool {
 }
 
 impl Server<'_> {
-    /// #977: a job op's tap, accepted at once (a tap of the same button returns its pending or done job); None: no job op.
     pub(super) fn tap(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Option<Result<Job>> {
         let op = f.get("op").map_or("", String::as_str);
         let tx = self.jobs.as_ref().filter(|_| OPS.contains(&op))?;
@@ -122,7 +116,6 @@ impl Server<'_> {
         Some(j.clone())
     }
 
-    /// #977: the job `id`, as it stands.
     pub(super) fn job(&self, id: &str) -> Option<Job> {
         lock(&self.tapped).0.get(id).map(|j| j.1.clone())
     }
@@ -136,7 +129,6 @@ impl Server<'_> {
         ));
     }
 
-    /// #977: run job `id` on its own thread: its op, then, while its issue's start waits for host, `waiting`; toasted.
     pub(super) fn run_job(&self, (ctx, f, id): Tap) {
         if let Some(j) = self.job(&id) {
             self.logged(&j);
