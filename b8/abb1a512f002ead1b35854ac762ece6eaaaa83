@@ -1,0 +1,7 @@
+Decided: the two sheet audits open a `.lane[data-agent]` row; the shed "Other" error row for an offline host is not an agent lane
+Because: assets/ui-audit.js:595
+Decided: merged origin/staging; each conflict keeps the herdr removal and takes #948's events::read to events::working rename
+Because: crates/core/src/check.rs:1919
+Rejected: giving the hosts fixture a canned `shed connect` reply for bazzite — an offline host failing to answer is what the fixture models
+Check: CI ui's hosts-sheet passes; rg -il herdr crates/*/src lists only config.rs
+Owner: The board check that opens a lane no longer trips on the offline-host row; staging's event-log change is merged in.
