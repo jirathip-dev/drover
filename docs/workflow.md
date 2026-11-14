@@ -59,7 +59,8 @@ flowchart TD
     t2["clean"] --> t3
     t3["trim"] --> t4
     t4["lesson"] --> t5
-    t5["hotspots"]
+    t5["hotspots"] --> t6
+    t6["compact"]
     d0["read log, host sample"] --> d1
     d1["disk budget"] --> d2
     d2["roots, redeliver"] --> d3
@@ -67,7 +68,7 @@ flowchart TD
     d4["repair, outbox"] --> d5
     d5["PR reads, gates, steps"] --> d6
     d6["spawns"] --> d7
-    d7["backlog, checkpoint"]
+    d7["backlog"]
     t1 --> d0
     other["other timers: serve, hosts, store"]
     j0 -.- k_slow_secs(["slow_secs = 300"])
@@ -101,7 +102,6 @@ flowchart TD
     d6 -.- k_respawn_max(["respawn_max = 3"])
     d6 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
     d6 -.- k_overflow_after_minutes(["overflow_after_minutes = 10"])
-    d7 -.- k_rotate_mb(["rotate_mb = 20"])
     other -.- k_transcript_days(["transcript_days = 30"])
     other -.- k_runtime_down_minutes(["runtime_down_minutes = 30"])
     other -.- k_ssh_connect_secs(["ssh_connect_secs = 10"])

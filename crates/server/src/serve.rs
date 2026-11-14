@@ -1987,6 +1987,9 @@ impl<'a> Server<'a> {
                 .collect();
             let mut rows = vec![];
             for &(n, blocked_by, k) in &items {
+                if gh::cached_spec(ctx, f, n).is_some_and(|v| gh::is_pr(&v)) {
+                    continue;
+                }
                 let s = st.get(&(f.clone(), n));
                 let waiting = asks.iter().any(|e| e.fleet == *f && e.issue == Some(n));
                 let logged = s.map_or("queued", |s| s.state.as_str());
