@@ -1,6 +1,5 @@
 {
   "response": {
-    "accounts": [],
     "deepseek": null,
     "devices": [
       {
@@ -231,7 +230,6 @@
   },
   "route": "GET /api/v1/host",
   "schema": {
-    "accounts": [],
     "deepseek": "null",
     "devices": [],
     "disk": "null",

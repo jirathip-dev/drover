@@ -122,8 +122,6 @@ pub struct Plan {
     pub kick: String,
     /// `DROVER_LANE` value (`<fleet>:<issue>:<role>`); arms `drover hook` in the lane.
     pub lane: String,
-    /// `[accounts]` lanes: the account name and (#683) the env it signs in with (`access::account_env`); that env is empty on a remote host (its lanes sign in through the main host's token proxy, #637).
-    pub account: Option<access::Account>,
     pub env: std::collections::BTreeMap<String, String>,
     pub port: u16,
     /// The only MCP servers the lane gets, and the lane-local file a harness reads them from.
@@ -132,14 +130,10 @@ pub struct Plan {
     /// Display title head (`<fleet> · <role> #<issue>`) and the full lane title built from it.
     pub head: String,
     pub title: String,
-    /// #302: the card's `on <entry> (<entries> resting until` and that time, when a `fallback` entry carries on.
-    pub resting: Option<(String, u64)>,
     /// #355: an orchestrator's harness session id, and whether to resume it (`Harness::resumes`).
     pub session: Option<(String, bool)>,
     /// #637: a remote ACP lane's proxy key, its only credential (the secrets file's `Proxy::auth_token_env`).
     pub lane_key: Option<String>,
-    /// #707: a local lane's `token-file:` account: the env var and the file `deliver` exports it from.
-    pub token: Option<(String, PathBuf)>,
 }
 
 /// #979: a build or check lane's shell and all it starts under macOS background `QoS`, else `nice 10` and idle I/O.
@@ -164,16 +158,11 @@ impl Plan {
         };
         let plain = self.env.iter().filter(|(_, x)| !x.starts_with("secret:"));
         c.extend(plain.map(|(k, x)| format!("{k}='{}'", v(x))));
-        c.extend(self.account.iter().map(|a| format!("DROVER_ACCOUNT='{}'", a.0)));
-        let acct = self.account.iter().flat_map(|a| &a.1);
-        c.extend(acct.map(|(k, d)| format!("{k}='{}'", d.replace('\'', r"'\''"))));
         c.extend(providers::get(&self.harness).env().iter().map(|v| String::from(*v)));
-        if let (None, providers::Credential::Account(providers::Accounts { token_env: Some(v), .. })) =
-            (&self.account, providers::get(&self.harness).credential())
-        {
+        if let Some(v) = providers::get(&self.harness).token_env() {
             c.push(format!("&& unset {v}"));
         }
-        if !self.secrets().is_empty() || self.lane_key.is_some() || self.token.is_some() {
+        if !self.secrets().is_empty() || self.lane_key.is_some() {
             let f = self.secrets_file().display().to_string().replace('\'', r"'\''");
             c.push(format!("&& . '{f}'"));
         }
@@ -217,26 +206,19 @@ impl Plan {
     }
 }
 
-/// #707: the lane's secrets read from 0600 files on the main host (`<config>/secrets/<NAME>`, its `token-file:`) and written 0600 beside its worktree on its host (over the ssh channel's stdin to a remote one), never in argv, a pane or the log; the guard removes the file when dropped.
-pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, cfg: &Config, p: &Plan) -> Result<Delivered<'a>> {
+/// #707: the lane's secrets read from 0600 files on the main host (`<config>/secrets/<NAME>`) and
+pub fn deliver<'a>(ctx: &Ctx, on: &'a crate::hosts::On<'a>, p: &Plan) -> Result<Delivered<'a>> {
     let mut text = String::new();
-    let named = p
-        .secrets()
-        .into_iter()
-        .map(|(var, _, n)| (var, crate::secret::path(ctx, &n), n));
-    let token = p
-        .token
-        .iter()
-        .map(|(var, f)| (var.clone(), f.clone(), "token-file".into()));
-    for (var, f, name) in named.chain(token) {
-        let v = crate::secret::file(&f)?.or_else(|| cfg.legacy_secret(&name));
+    for (var, _, name) in p.secrets() {
+        let f = crate::secret::path(ctx, &name);
         let why = || {
             format!(
                 "{var}: secret {name} is not in {} (`drover secret request`)",
                 f.display()
             )
         };
-        text += &format!("export {var}='{}'\n", v.with_context(why)?.replace('\'', r"'\''"));
+        let v = crate::secret::file(&f)?.with_context(why)?;
+        text += &format!("export {var}='{}'\n", v.replace('\'', r"'\''"));
     }
     text += &p.lane_key.as_ref().map_or_else(String::new, |k| {
         let var = crate::providers::proxied().map_or("", |px| px.auth_token_env);
@@ -307,8 +289,7 @@ pub fn lane_port(range: Option<&str>, key: &str, taken: &[u16]) -> u16 {
 
 pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Result<Plan> {
     let f = cfg.fleet(fleet)?;
-    let (r, resting) = access::fallback(cfg, &working(&ctx.state)?, f.role(role)?, ctx.now)?;
-    let r = &r;
+    let r = f.role(role)?;
     let (agent, branch, base, worktree, brief, head) = {
         let ev = working(&ctx.state)?;
         let st = fold(&ev).remove(&(fleet.to_string(), issue));
@@ -357,7 +338,6 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
     };
     let kick = format!("Read {} and execute it fully.", brief.display());
     let lane = format!("{fleet}:{issue}:{role}");
-    let account = access::pick(ctx, cfg, &working(&ctx.state)?, r)?;
     let mcp_file = worktree.join(".mcp.lane.json");
     let events = working(&ctx.state)?;
     let st = fold(&events);
@@ -388,17 +368,14 @@ pub fn plan(ctx: &Ctx, cfg: &Config, fleet: &str, issue: u64, role: &str) -> Res
         brief,
         kick,
         lane,
-        account,
         env,
         port,
         mcp: access::mcp_servers(cfg, f, r)?,
         mcp_file,
         head,
         title,
-        resting,
         session: None,
         lane_key: None,
-        token: None,
     })
 }
 
@@ -557,13 +534,8 @@ fn round(events: &[Event], fleet: &str, issue: u64, p: &Plan) -> u32 {
     k.filter(|_| p.family == "rev").unwrap_or(n)
 }
 
-/// #565: why drover's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (with an account; #637: on a remote host, its profile checked there instead); empty when it would. #633: an attached cooee conductor's `guarded` too.
-pub fn unguarded(
-    ctx: &Ctx,
-    (profile, family, h): (&str, &str, &str),
-    id: &str,
-    (account, remote): (bool, bool),
-) -> String {
+/// #565: why drover's hook would not guard ACP agent `id` running `harness` on `profile` for `family` (#637: on a remote host, its profile checked there instead); empty when it would. #633: an attached cooee conductor's `guarded` too.
+pub fn unguarded(ctx: &Ctx, (profile, family, h): (&str, &str, &str), id: &str, remote: bool) -> String {
     let settings: Value = std::fs::read_to_string(providers::profiles_root(ctx).join(profile).join("settings.json"))
         .ok()
         .and_then(|s| serde_json::from_str(&s).ok())
@@ -574,28 +546,16 @@ pub fn unguarded(
         format!("ACP agent {id} runs no {h} hook")
     } else if !remote && !hooks.any(|h| h["command"].as_str().is_some_and(|c| providers::guards(ctx, c, family))) {
         format!("profile {profile} has no drover PreToolUse hook; run `drover profiles sync`")
-    } else if !account && remote {
-        "an ACP lane on another host signs in with its role's [accounts] account, through the main host's proxy".into()
     } else {
         String::new()
     }
 }
 
-/// #565: an ACP lane's adapter (its agent's command in `shed agents`), run by `sh` after the lane's exports and secrets file, with its account's env as its sign-in (#683), its profile's settings and role as the worktree's local project settings and memory, and no `$SHED` (its state is the session's, not the hook's). Refused `ACP_UNGUARDED` when drover's hook would not guard it (#508: fail closed).
+/// file, signed in with the host's own login, its profile's settings and role as the
 pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&str>) -> Result<Vec<String>> {
     let dir = providers::profiles_root(ctx).join(&p.profile);
     let home = |a: Vec<String>| crate::hosts::rehome(a, remote);
-    let why = unguarded(
-        ctx,
-        (&p.profile, p.family, &p.harness),
-        id,
-        (
-            p.account
-                .as_ref()
-                .is_some_and(|a| !a.1.is_empty() || p.lane_key.is_some()),
-            remote.is_some(),
-        ),
-    );
+    let why = unguarded(ctx, (&p.profile, p.family, &p.harness), id, remote.is_some());
     if !why.is_empty() {
         return refused("ACP_UNGUARDED", format!("{why}; the lane does not start"));
     }
@@ -644,6 +604,9 @@ fn remote_acp(
                 pl.name
             ),
         );
+    }
+    if let Err(why) = crate::proxy::token(cfg) {
+        return refused("NO_PROXY_TOKEN", why);
     }
     if let Some(px) = crate::providers::proxied() {
         p.env.insert(px.base_url_env.into(), crate::proxy::url(cfg));
@@ -713,7 +676,7 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
     }
     json!({
         "agent": p.agent, "role": p.role, "harness": p.harness, "profile": p.profile, "machine": on.machine,
-        "model": p.model, "effort": p.effort, "branch": p.branch, "base": p.base, "account": p.account.as_ref().map(|a| &a.0),
+        "model": p.model, "effort": p.effort, "branch": p.branch, "base": p.base,
         "worktree": p.worktree, "brief": p.brief, "kick": p.kick, "title": p.title, "port": p.port, "commands": cmds,
     })
 }
@@ -978,10 +941,6 @@ pub fn spawn(
                 .insert("DROVER_RULES".into(), p.rules_file().display().to_string());
         }
     }
-    if on.machine.is_none() && p.account.is_some() {
-        let fr = access::fallback(cfg, &working(&ctx.state)?, f.role(role)?, ctx.now)?.0;
-        access::signed(ctx, cfg, base, (fleet, &fr, o.dry_run), &mut p)?;
-    }
     let hm = placed.as_ref().and_then(|pl| pl.home.as_deref());
     let home = |a: Vec<String>| crate::hosts::rehome(a, hm);
     let wt = p.worktree.to_string_lossy().into_owned();
@@ -1093,12 +1052,6 @@ pub fn spawn(
     let prior = events
         .iter()
         .rfind(|e| e.kind == "spawn" && e.str("worktree") == Some(&wt));
-    let unavailable =
-        |e: &Event, sp: &Event| e.issue == Some(issue) && e.ts >= sp.ts && e.str("agent") == sp.str("agent");
-    let rest = |e: &&Event| crate::access::rests(&e.kind);
-    let chain = !f.role(role)?.fallback.is_empty();
-    let gone = prior.filter(|sp| chain && events.iter().filter(rest).any(|e| unavailable(e, sp)));
-    let entry = |h: Option<&str>, a: Option<&str>| [h, a].into_iter().flatten().collect::<Vec<_>>().join(":");
     if on.exists(&p.worktree) && prior.is_none() {
         if let Some(why) = dirty(r, &p.worktree) {
             dup.push(("WORKTREE_DIRTY", format!("{wt} is no fleet lane and has {why}")));
@@ -1284,7 +1237,7 @@ pub fn spawn(
         let (title, body) = (iss["title"].as_str().unwrap_or(""), iss["body"].as_str().unwrap_or(""));
         p.title = lane_title(&p.head, title);
         note = prior
-            .filter(|_| gone.is_some() || o.supersede && !dup.is_empty())
+            .filter(|_| o.supersede && !dup.is_empty())
             .map(|prev| handover(ctx, r, &events, prev, &p, (fleet, issue, title)));
         let cause = prior
             .filter(|_| o.supersede)
@@ -1370,12 +1323,10 @@ pub fn spawn(
         )?;
     }
     if let (Some(k), Some(pl)) = (&p.lane_key, &placed) {
-        let acct = p.account.as_ref().and_then(|a| cfg.accounts.names.get(&a.0));
-        let acct = acct.map_or("", String::as_str);
-        crate::proxy::mint(ctx, cfg, k, (fleet, issue, &p.agent), (&pl.name, acct))?;
+        crate::proxy::mint(ctx, cfg, k, (fleet, issue, &p.agent), &pl.name)?;
         crate::proxy::ensure(ctx, cfg, base, (&pl.name, pl.machine.as_deref().unwrap_or_default()))?;
     }
-    let _secrets = deliver(ctx, &on, cfg, &p)?;
+    let _secrets = deliver(ctx, &on, &p)?;
     let rules = placed.as_ref().filter(|pl| pl.machine.is_some());
     let rules = rules.map(|pl| crate::hook::Rules::resolve(cfg, fleet, role, &pl.name));
     if let Some(rl) = &rules {
@@ -1456,21 +1407,6 @@ pub fn spawn(
                 } else {
                     format!("\nscreen:\n{screen}")
                 };
-                let mine = |k: &str, e: &Event| e.is(k, fleet, issue) && e.str("agent") == Some(&p.agent);
-                let acct = p.account.as_ref().map(|a| a.0.as_str());
-                let same = |e: &Event| e.str("harness") == Some(&p.harness) && e.str("account") == acct;
-                let twice = events
-                    .iter()
-                    .rev()
-                    .take_while(|e| !mine("spawn", e))
-                    .any(|e| mine("spawn-failed", e) && same(e));
-                let until = ctx.now + cfg.limits.fallback_rest_minutes * 60;
-                let kind = ["spawn-failed", "agent-unavailable"][usize::from(twice)];
-                let d = json!({"agent": p.agent, "harness": p.harness, "account": acct, "until": until, "reason": "won't start",
-                    "error": format!("{why}{shown}")});
-                if chain {
-                    event(kind, d)?;
-                }
                 if on.machine.is_some() {
                     let _ = herdr::workspace_close(r, &ws);
                     bail!("{why}; closed workspace {ws}{shown}");
@@ -1525,9 +1461,6 @@ pub fn spawn(
             if let Some(rl) = &rules {
                 d["rules"] = json!(rl);
             }
-            let until = p.resting.as_ref().map(|r| crate::usage::date(base, r.1, "+%H:%M"));
-            d["resting"] = json!(p.resting.as_ref().zip(until).map(|(r, t)| format!("{} {t})", r.0)));
-            let to = entry(d["harness"].as_str(), d["account"].as_str());
             if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
                 if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a["pane_id"] == old) {
                     let _ = herdr::close(r, old);
@@ -1537,10 +1470,6 @@ pub fn spawn(
             }
             intent.done(json!({"agent": p.agent, "pane": pane}))?;
             event("spawn", d)?;
-            if let Some(sp) = gone {
-                let from = entry(sp.str("harness"), sp.str("account"));
-                event("fallback", json!({"agent": p.agent, "from": from, "to": to}))?;
-            }
             kicked?;
             pj["pane"] = json!(pane);
             pj["confirmed"] = json!(confirmed);
@@ -1726,16 +1655,13 @@ fn handover(
     p: &Plan,
     (fleet, issue, title): (&str, u64, &str),
 ) -> String {
-    let acct = p.account.as_ref().map(|a| a.0.as_str());
     let mine = |e: &&Event| e.fleet == fleet && e.issue == Some(issue);
     let spawns: Vec<&Event> = events
         .iter()
         .filter(mine)
         .filter(|e| e.kind == "spawn" && e.str("role") == Some(&p.role))
         .collect();
-    let ran = spawns
-        .iter()
-        .rposition(|e| e.str("harness") == Some(&p.harness) && e.str("account") == acct);
+    let ran = spawns.iter().rposition(|e| e.str("harness") == Some(&p.harness));
     let since = ran.and_then(|i| spawns.get(i + 1)).map(|e| e.ts);
     let at = since.map(iso);
     let after = |t: &Value| at.as_ref().is_none_or(|s| t.as_str().is_none_or(|t| t > s.as_str()));
@@ -1823,13 +1749,9 @@ fn handover(
     let mut out =
         "Handover: Summary of the previous lane; its tool state and approvals are not carried over.".to_string();
     if let Some(s) = since {
-        let who = [Some(p.harness.as_str()), acct]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>()
-            .join(":");
         out += &format!(
-            "\nOnly what happened since {who}'s last lane on this issue was replaced ({} UTC).",
+            "\nOnly what happened since {}'s last lane on this issue was replaced ({} UTC).",
+            p.harness,
             iso(s).replace('T', " ")
         );
     }
@@ -1873,7 +1795,7 @@ fn iso(t: u64) -> String {
 
 fn lane_data(p: &Plan, pane: &str, ws: &str) -> Value {
     json!({"role": p.role, "stage": p.stage, "check": p.family == "rev", "harness": p.harness, "profile": p.profile, "model": p.model, "effort": p.effort, "agent": p.agent,
-        "pane": pane, "workspace": ws, "worktree": p.worktree, "branch": p.branch, "account": p.account.as_ref().map(|a| &a.0), "port": p.port, "qos": p.qos()})
+        "pane": pane, "workspace": ws, "worktree": p.worktree, "branch": p.branch, "port": p.port, "qos": p.qos()})
 }
 
 /// `drover adopt`: log the lane running in `pane` and name its agent as planned; nothing is started. `extra` joins the `spawn` data (#376: an orphan's host, machine, worktree, `since`).
