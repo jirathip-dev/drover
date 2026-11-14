@@ -1,0 +1,15 @@
+Decided: every row is drawn with blocks cooee already has (card fold, row indent/link/swipe, chips, form, toggle, button, sheet); no new block type, so no native snapshot is owed
+Because: "reuse existing blocks; add a block only where none fits, with its snapshot"
+Decided: "+N more" and a chain's fold are link rows opening the same screen with more=/fold= in the query, the shape of cooee's own fixture row "3 more"; the stream URL carries them so a refresh keeps the view
+Because: crates/server/src/screens.rs:197
+Decided: a paused fleet's card gets a fold line with Resume as its main button; a fleet that needs you sorts first, is tone warn and its repo chip gets a ● dot
+Because: crates/server/src/screens.rs:312
+Decided: ▲/▼ are swipe actions (and buttons on the issue sheet) through a new `move` action that runs the same queue mv as Top, logged via cooee
+Because: crates/server/src/screens.rs:1006
+Decided: a non-live row taps into an issue sheet: lit stage chips, issue/PR/checks links, the asking thread with the ask's options, notes, ▲/▼; a live row keeps its lane-thread tap, a waiting row taps the asking thread
+Because: crates/server/src/screens.rs:823
+Decided: the backlog is a sheet: filter chips, a search field, a toggle per issue, done "Queue ticked" queues them needs-check like the board's bqueue
+Because: "no backlog (search, filters, tick, [queue N])"
+Rejected: a per-fleet hue, a live "[queue N]" count and swipe between repos — cooee's tones, static done label and gestures are cooee changes
+Check: manifest and permissions fixture gain move and queue; queue.json fixture gains the Legend menu item — cooee's plugin pin must take the same
+Owner: The phone Queue folds paused fleets, shows blocked chains as a foldable tree, hides long lists behind "+N more", moves rows up and down, and adds an issue card, a legend and a backlog.
