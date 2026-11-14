@@ -835,21 +835,21 @@ pub fn undelivered<'a>(events: &'a [Event], fleet: &str) -> Vec<&'a Event> {
 
 /// `drover asks`: the open asks (`all`: closed ones too, with why), oldest first, with age.
 pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, all: bool) -> Result<()> {
-    let mut open = db::asks(&ctx.state, all)?;
-    open.retain(|a| fleet.is_none_or(|f| f == a.0.fleet));
+    let mut open = crate::db::asks(&ctx.state, fleet)?;
+    open.retain(|a| all || a.1.is_none());
     if as_json {
         let mut rows = Vec::new();
-        for (e, end) in &open {
+        for (e, why) in &open {
             let mut v = serde_json::to_value(e)?;
-            v["closed"] = json!(end.as_ref().map(|w| events::ORDER[w.0]));
+            v["closed"] = json!(why.as_ref().map(|w| events::ORDER[w.0]));
             rows.push(v);
         }
         writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
     }
-    for (e, end) in open.iter().filter(|_| !as_json) {
+    for (e, why) in open.iter().filter(|_| !as_json) {
         let at = e.issue.map_or("-".into(), |n| format!("#{n}"));
         let s = |k| e.str(k).unwrap_or_default();
-        let why = end.as_ref().map_or(String::new(), |w| format!(" [{}]", w.1));
+        let why = why.as_ref().map_or(String::new(), |w| format!(" [{}]", w.1));
         writeln!(
             out,
             "{} {} {at} {} {}: {}{why}",
