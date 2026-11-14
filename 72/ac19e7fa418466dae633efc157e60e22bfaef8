@@ -1,0 +1,10 @@
+Decided: link shed and drover into /usr/local/bin over sudo when the non-login ssh read-back misses them, not record absolute paths for the survey and spawn
+Because: "Do this either by linking or installing into a directory on the non-login PATH"
+Decided: the read-back runs through the plain On runner (no SH PATH export), the same ssh line the survey's shed connect uses
+Because: crates/core/src/cloud.rs:489
+Decided: boat2's assertion reads the logged host-bootstrap tail, since errors go to stderr and the test's run helper captures stdout only
+Rejected: absolute paths recorded at bootstrap — every bare shed call in the runner and the survey would change
+Rejected: a 60 s Duration for the read-back — timing-check refuses a hard-coded Duration; the runner's default ssh timeout fits a command -v
+Check: on base the new remote_acp test fails at the survey (bootstrap 0, host offline); at head all 7 remote_acp tests pass
+Check: the only full-suite failure (self_update pause_and_resume) fails identically on origin/staging in this lane: lane identity env leaks into by
+Owner: Setting up a remote shed host now makes sure shed and drover are reachable over plain ssh, or fails and says which one is missing.
