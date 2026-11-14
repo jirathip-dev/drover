@@ -341,3 +341,65 @@ impl Runner for With<'_> {
         self.0.local()
     }
 }
+
+/// #611: each enabled host's shed sessions that are no lane or conductor, or `{host, error}` for a host whose shed fails.
+pub fn others(cfg: &Config, r: &dyn Runner, events: &[Event]) -> Vec<Value> {
+    let ours = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "orchestrator-start");
+    let ours: std::collections::BTreeSet<&str> = events.iter().filter(ours).filter_map(|e| e.str("agent")).collect();
+    let mut out = vec![];
+    for (host, h) in crate::hosts::cards(cfg, r) {
+        let on = crate::hosts::On::new(r, h.and_then(|h| h.machine.as_deref()));
+        let Some(w) = on.shed().map(|b| b.wire).filter(|_| h.is_none_or(|h| h.enabled)) else {
+            continue;
+        };
+        let ls = call(&on, &w, Method::Ls, json!(proto::LsParams::default()));
+        match ls.and_then(|v| Ok(serde_json::from_value::<Vec<proto::TerminalInfo>>(v)?)) {
+            Ok(ts) => out.extend(
+                ts.into_iter()
+                    .filter(|t| !ours.contains(t.name.as_str()) && !t.labels.contains_key("fleet"))
+                    .map(|t| {
+                        let state = match (t.state, &t.reported) {
+                            (proto::State::Running, Some(s)) => s.state.as_str(),
+                            (proto::State::Running, None) => "running",
+                            (proto::State::Exited, _) => "exited",
+                        };
+                        json!({"name": t.name, "host": host, "runtime": if t.acp.is_some() { "acp" } else { "shed" },
+                    "labels": t.labels, "state": state, "last": last_line(&on, &w, &t)})
+                    }),
+            ),
+            Err(e) => out.push(json!({"host": host, "error": format!("{e:#}")})),
+        }
+    }
+    out
+}
+
+fn last_line(r: &dyn Runner, w: &Wire, t: &proto::TerminalInfo) -> String {
+    let acp = t.acp.is_some();
+    let p = proto::ReadParams {
+        name: t.name.clone(),
+        lines: None,
+        history: false,
+        events: acp,
+        before: None,
+        n: acp.then_some(50),
+    };
+    let read = call(r, w, Method::Read, json!(p)).and_then(|v| Ok(serde_json::from_value::<proto::ReadResult>(v)?));
+    let Ok(read) = read else {
+        return String::new();
+    };
+    let reply = |e: &proto::Logged| match &e.kind {
+        EventKind::Reply { text, .. } => Some(text.clone()),
+        _ => None,
+    };
+    let text = if acp {
+        read.events.iter().rev().find_map(reply).unwrap_or_default()
+    } else {
+        read.text
+    };
+    text.lines()
+        .rev()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or_default()
+        .into()
+}

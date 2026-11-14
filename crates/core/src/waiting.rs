@@ -311,11 +311,10 @@ fn waits(
         let what = format!("blocked by {on}");
         return w("drive", &what, s.last_ts, None);
     }
-    if let Some(g) = fc
-        .serial
-        .iter()
+    if let Some(g) = crate::queue::serials(log.all, fc, f)
+        .into_iter()
         .filter(|g| crate::queue::held(events, f, n, &g.name))
-        .min_by_key(|g| &g.name)
+        .min_by(|a, b| a.name.cmp(&b.name))
     {
         let st = crate::events::fold(log.all);
         let h = crate::queue::holders(log.all, &st, fc, f, &g.name);
@@ -325,7 +324,7 @@ fn waits(
         } else {
             format!("held by {}", who.join(" "))
         };
-        let what = format!("waits: {} {by} ({}/{})", g.name, h.len(), g.max);
+        let what = format!("serial: {} {by} ({}/{})", g.name, h.len(), g.max);
         return w("drive", &what, s.last_ts, None);
     }
     let active = matches!(s.state.split('(').next(), Some("impl" | "fix" | "review"));
@@ -867,7 +866,7 @@ pub fn scan(
             .rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
         tried
             .and_then(|e| e.str("code"))
-            .is_some_and(|c| c == "SPAWN_PENDING" || HOST_WAIT.contains(&c))
+            .is_some_and(|c| ["SPAWN_PENDING", "HOST_FULL"].contains(&c) || HOST_WAIT.contains(&c))
     };
     let ahead = out
         .iter_mut()
@@ -963,7 +962,7 @@ pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Valu
         seen |= e.fleet == s.fleet;
         for a in e.data.get("actions").and_then(Value::as_array).into_iter().flatten() {
             let code = a["code"].as_str().unwrap_or_default();
-            let wait = HOST_WAIT.contains(&code) || code == "CAP" && e.fleet == s.fleet;
+            let wait = HOST_WAIT.contains(&code) || code == "HOST_FULL" || code == "CAP" && e.fleet == s.fleet;
             let old = a["words"].as_str().is_some_and(|w| w.contains(crate::drive::OLD));
             if e.fleet == s.fleet && a["issue"] == s.issue && !old || s.state == "queued" && wait {
                 since = since.max(e.ts);

@@ -153,6 +153,8 @@ pub struct Dialect {
     /// #511: its `hook_event_name` when a prompt is submitted, and its answer that ends no turn but goes on with `reason` (none: "", `None`).
     pub prompt: &'static str,
     pub again: Option<fn(&str) -> Value>,
+    /// #909: its answer that runs the tool call with this tool input instead (none: it can't).
+    pub rewrite: Option<fn(Value) -> Value>,
 }
 
 /// The hook dialects of every harness that has one, in `known` order.
