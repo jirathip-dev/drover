@@ -1,4 +1,3 @@
-//! #984: `[hosts.<name>] max_working` / `max_simulators` bound a host's working lanes; over the cap a start waits.
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
@@ -56,7 +55,6 @@ fn over_max_working_a_start_waits_then_starts_when_a_lane_finishes() {
     assert!(st.contains("mini: working 2/2"), "{st}");
     assert!(st.contains("waiting for a slot: 2/2 working on mini"), "{st}");
 
-    // #1's lane ends its turn: idle at its prompt, it frees its slot and #3 starts.
     sh.set("sendmeter-impl-1", |t| t["reported"] = json!({"state": "idle"}));
     let out = drive(&c);
     assert_eq!(state(&c, 3), "impl", "{out}");
@@ -89,7 +87,6 @@ fn with_max_simulators_one_a_second_sim_lane_waits() {
     let out = drive(&c);
     assert_eq!(spawned(&sh), ["sendmeter-impl-1"], "{out}");
     assert!(out.contains("waiting for a slot: 1/1 simulators on mini"), "{out}");
-    // An idle sim lane still holds its simulator for the length of the lane.
     sh.set("sendmeter-impl-1", |t| t["reported"] = json!({"state": "idle"}));
     drive(&c);
     assert_eq!(state(&c, 2), "queued");
