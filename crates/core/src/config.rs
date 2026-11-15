@@ -1039,6 +1039,7 @@ pub const WEBPUSH_ON: &[&str] = &[
     "thread-msg",
     "blocked",
     "stall",
+    "lane-hog",
     "lane-dead",
     "usage-limit",
     "signed-out",

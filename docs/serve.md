@@ -37,7 +37,7 @@ per host for 10 minutes (`ControlMaster=auto`, `ControlPersist=10m`, whatever `~
 something is read: a verdict file only until its verdict is recorded, `git log` only for an impl/fix not seen pushed
 (or a review with no spawn sha), never a merged or closed lane. A request (`/screens/…`, `/api/v1/…`, `/live`) and
 `status`/`hosts` replay the snapshot: a remote read it lacks fails, it never runs on a request; only a lane's chat
-(`/lane`) reads that one pane live (5 s cache). Over 10 s old, a screen opens with a `data <age> old` text block, and `status` ends with it. With no snapshot saved (a new install), reads run live as before; the
+(`/lane`) reads that one session's log from shed live (#1053: `session::transcript`, or the copy kept at close). Every screen shows the snapshot's age (#977: `as of 3m ago`, `as of: not yet known` before the first; amber past 10 min), and `status` ends with it. With no snapshot saved (a new install), reads run live as before; the
 watcher pushes on each new snapshot instead of polling shed. `tests/perf.rs` is the gate (budgets: [performance.md](performance.md)): 30 lanes on 2 hosts, +300 ms
 per remote call, at most one remote call per host per step, `GET /` < 150 ms (< 40 KB),
 `status` < 300 ms; a miss fails CI and the numbers go to the job summary.
@@ -186,7 +186,7 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `GET issue/<fleet>/<n>` | #576: the issue's recorded verdicts, newest first: `role` (the stage: `rev`, `verify`), `round`, `sha`, `verdict`, `findings` (verdict.md after its first line), the newest one's screenshot `shots` (`/shot/<fleet>/<n>/<i>` serves the `i`th) and a `--repro` PASS's `repro` block (`kind` `run` or `verify`, its `text`) |
 | `GET lessons` | #576: per fleet its `lessons` (`weekly`, `off`), the `last` lesson lane (`issue`, its spawn `ts`, the issue's `state`) and `next`, when tick runs the next (null: `off`) |
 | `GET lessons/<fleet>/digest?days=N` | #576: the CLI's `lesson digest` (default 7 days) as `text` |
-| `GET needs` | #269: the needs-you cards for this device: `snap` (#450: the step's look's time, 0 for none; the strip under the header shows its age once over 2 min), the open `asks` (`who`, `kind`, imported `from`), each `blocked` lane's card (unpaired: its `activity`; paired: the harness `menu` or the pane's `tail`), the `needs-human` `issues` (one more round `pending`, the last verdict, its screenshot `shots` and #969 `shots_at`, the verdict's sha that `/shot/<fleet>/<n>/<i>/<sha>` names, the PR line, `merge`), `choosing` (`[chat·N]`); `rw`, `live`, `paired` and `pair` say which forms and buttons show |
+| `GET needs` | #269: the needs-you cards for this device: `snap` (#450: the step's look's time, 0 for none; the strip under the header shows its age once over 2 min), the open `asks` (`who`, `kind`, imported `from`), each `blocked` lane's card (unpaired: its `activity`, shed's note; paired: the last lines of shed's text as `tail`; #1053: no `menu`), the `needs-human` `issues` (one more round `pending`, the last verdict, its screenshot `shots` and #969 `shots_at`, the verdict's sha that `/shot/<fleet>/<n>/<i>/<sha>` names, the PR line, `merge`), `choosing` (`[chat·N]`); `rw`, `live`, `paired` and `pair` say which forms and buttons show |
 | `GET lanes` | #269: the Lanes tab for this device: state `sections` with their repo groups and each lane's row (avatar `state`, `act`, `atone`, `coat`; `state` in `tone` for `ago`, `why`, the `activity` or `now` line) and hidden card (`head`, `shown`, `facts`, the PR line, `dead`, the `blocked` card); `error` (no fleet.toml) or `failed` (shed unread); #611: for a paired device, `shed`, the folded read-only `Other in shed (N)` section's rows (`GET shed`'s) |
 | `GET shed` | #611 (paired only, else 401): every enabled host's shed sessions no lane or conductor in the log names and no `fleet` label marks, each `{name, host, runtime (shed or acp), labels, state (shed's), last (an ACP session's last reply, a terminal's last non-empty screen line), age (since the board first saw that state)}`; a host whose shed fails is one `{host, error}` entry, and stays up. One `ls` per host, cached 10 s like the lane list |
 | `GET chat` | #269: the [chat] tab: per repo (`all` first) its thread `rows` and `archived` ones, then each thread's view (`ds`, `state`, its last 30 messages by `kind`, `older` or the `started` line); `rw`: a paired device on the live board writes; #620: serve keeps the folded tab by the log's last seq, fleet.toml's mtime, the agents and the minute, and a request in between reuses it without reading the log |
@@ -194,12 +194,13 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `GET repo/<fleet>/threads` | #681: the repo's orchestrator threads, newest-active first: `id`, `title`, `last` (`line`, `ts`), `unread`, `awake` (its orchestrator not asleep), `archived`, and `newest: true` on the ongoing one (the first not archived), so cooee shows it as the agent's chat and the rest as side threads; `all` for the all-repos threads; 404 `NOT_FOUND` for no such fleet |
 | `GET events?since=N` | #259's contract: the events after `N` (#266: `&until=M`, up to `M`) in `list`; over 500, `refresh: true` and none (read `state` again). Each as the Events tab says it: `glyph`, `tone`, `text`, `imp`, the row sprite's `act` and `coat`, `plain`, and its issue's `pr` or checks `run` |
 | `GET lane/<agent>` | the lane's transcript page, the sheet's `/lane` JSON (`?before=N` pages back) plus #749's `blocks`: an ACP lane's transcript from shed's events (`prompt`, `reply`, `tool`, `plan`, `approval`; `?before=<seq>&n=N` pages back), a PTY lane's one `screen` block (its `lines`) |
-| `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `cond`, `bqueue`, `answer`, `drive`, `override`, `extend`, `park`, `unpark`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`, as the form or a JSON object (#555: a list joins with `,`, `true` is `1`); answers `{ok, code, message}` |
+| `POST <op>` | a form op (`pause`, `resume`, `mv`, `set`, `cond`, `bqueue`, `answer`, `drive`, `override`, `extend`, `park`, `unpark`, `host`, `reap`, …) with the HTML form's fields and `State.mtime`, as the form or a JSON object (#555: a list joins with `,`, `true` is `1`); answers `{ok, code, message}`. #977: a tap (`answer`, `drive`, `override`, `extend`, `park`, `unpark`, `card` `{id, act, sha}`, `config` `{id, act}`) is a job: 202 `ACCEPTED` with its `job` id at once, run on its own thread, never refused for another job or a running drive; the same button tapped again while its job runs or within 15 min of the first tap returns that job (a card or config by its id alone) (a refused one may be tapped again); each logs `job` events |
+| `GET job/<id>` | #977 (paired): a tap's `Job` (`id`, `op`, `fleet`, `issue`, `ts`): `state` `running`, `waiting` (`HOST_WAIT`: its issue's start waits for host; re-checked every `serve_host_secs`), `done`, `refused` (`code`) or `error`, and `message` (its toast) |
 | `GET herd` | #555: Herd mode's data (the old board's `/herd.json`, gone with it in #927) |
 | `GET roles?fleet=F` | #555: the fleet's [config] sheet (`config`: its roles with the model/effort pickers, the orchestrator) and `chat`, `[chat]`'s new-thread defaults with the harnesses it may name |
 | `GET setup/<pane>` | #555: a setup terminal's screen (`lines`, `urls`, `closed`), the old board's `/lane?setup=` |
 | `POST send` | #555: `{agent, text}` to a lane, or `{setup, text}` into a setup terminal: the old board's `/send` (10 a minute per device: `RATE_LIMIT`; `PAUSED`, `REV_READONLY`, `BAD_VALUE`) |
-| `POST menu` | #555: `{agent, choice, h}`, a blocked lane's menu option: `/answer` (`STALE` when the menu is not the card's `h`) |
+| `POST menu` | #555: `{agent, choice, h}`; #1053: refused `BAD_VALUE` (shed reports no menu; answer with `send`) |
 | `POST act` | #555: `{agent, op, confirm}`, stop, kill, clean or close: `/act` (kill and clean dry-run without `confirm`) |
 | `POST setup` | #555: `{host, name}`, start a configured setup terminal: `/setup` (`NO_SUCH_SETUP`) |
 | `POST chat-about` | #555: `{fleet, issue}`, a backlog row's [chat about]: a new thread in the fleet's repo whose first message names the issue |
@@ -211,7 +212,7 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `POST orchestrator-detach` | #633 (paired): `{fleet, thread}`, the link ends (`orchestrator-detached`; archiving the thread ends it too); `NO_SUCH_THREAD` unless attached |
 
 Every answer is JSON, a refusal too: `{ok: false, code, message}` with 401 `UNPAIRED`, 503 `BUSY` (#501), 403 `FORBIDDEN`, 405
-`READ_ONLY`, 409 and the `REFUSED` code (`STALE`, `DRIVE_RUNNING`, …), 404 `NOT_FOUND`. The theme is the phone's own
+`READ_ONLY`, 409 and the `REFUSED` code (`STALE`, …), 404 `NOT_FOUND`. The theme is the phone's own
 choice (localStorage): `state.theme` is the board's default, and no route writes it. The service worker
 never caches `api/`. A breaking change is `/api/v2/`.
 
@@ -254,7 +255,8 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
 
 - `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `?before=<unix time>`),
   `/screens/fleets` (the Fleets sheet) and `/screens/cards` (the open asks, design reviews, needs-human issues and run
-  cards as chat cards); q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
+  cards as chat cards); #977: each full screen (not a sheet) shows the step's snapshot age, `as of 3m ago` (`as of: not yet known` before
+  one), `warn` past 10 min, as a `snapshot` item of its `stat` block, else an `age` section's row; q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
   and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
   shows until a tap opens the full card; a second tap folds it again;
 - #926: `GET /screens/lanes`, the Lanes chip: each live lane grouped waiting (blocked), working, asleep (idle), done, parked, dead, with its figure

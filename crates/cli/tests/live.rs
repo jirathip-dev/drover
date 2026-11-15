@@ -1,7 +1,6 @@
 mod common;
 use common::*;
-use drover::events::{append, read, Event};
-use drover::lanes::{pending, prompt};
+use drover::events::{append, Event};
 use drover::serve::Server;
 use serde_json::json;
 use std::io::{Read, Write};
@@ -25,29 +24,20 @@ fn live_server(name: &str) -> (drover::Ctx, std::net::SocketAddr, FakeShed) {
 struct Lanes {
     f: Fake,
     sh: FakeShed,
-    later: std::sync::Mutex<Vec<(String, String)>>,
 }
 
 impl Lanes {
     fn new(f: Fake) -> Lanes {
-        Lanes {
-            f,
-            sh: FakeShed::new(),
-            later: std::sync::Mutex::default(),
-        }
+        Lanes { f, sh: FakeShed::new() }
     }
     fn blocked(&self, name: &str, screen: &str) {
         self.sh.lane(name, "blocked", "/x");
+        self.sh
+            .set(name, |t| t["reported"]["note"] = json!("permission: Bash command"));
         self.sh.screen(name, screen);
-    }
-    fn then(&self, name: &str, screen: &str) {
-        self.later.lock().unwrap().push((name.into(), screen.into()));
     }
     fn keys(&self) -> Vec<serde_json::Value> {
         self.sh.all("keys")
-    }
-    fn reads(&self) -> usize {
-        self.sh.all("read").len()
     }
 }
 
@@ -60,11 +50,6 @@ impl drover::runner::Runner for Lanes {
     }
     fn sleep(&self, secs: u64) {
         self.f.sleep(secs);
-        let mut later = self.later.lock().unwrap();
-        if !later.is_empty() {
-            let (name, screen) = later.remove(0);
-            self.sh.screen(&name, &screen);
-        }
     }
     fn shed(&self) -> Option<drover::shed::Shed> {
         Some(self.sh.shed())
@@ -195,117 +180,7 @@ fn live_caps_clients_and_checks_host() {
     }
 }
 
-const MENU: &str = "⏺ I need to pick a database.\n\n Which database should the meter use?\n\n❯ 1. SQLite\n  2. Postgres\n  3. Type something.\n\nEnter to select · ↑/↓ to navigate · Esc to cancel\n";
 const PERMISSION: &str = "╭──────────────────────────────────────────╮\n│ Bash command                             │\n│   cargo test --all                       │\n│ Do you want to proceed?                  │\n│ ❯ 1. Yes                                 │\n│   2. Yes, and don't ask again for cargo  │\n│      commands in /p/sendmeter            │\n│   3. No, and tell Claude what to do      │\n│      differently (esc)                   │\n╰──────────────────────────────────────────╯\n";
-
-#[test]
-fn prompt_parser_fixtures() {
-    assert_eq!(
-        pending(MENU),
-        Some((
-            "Which database should the meter use?".into(),
-            vec!["SQLite".into(), "Postgres".into(), "Type something.".into()]
-        ))
-    );
-    let (q, opts) = pending(PERMISSION).unwrap();
-    assert_eq!(q, "Do you want to proceed?");
-    assert_eq!(
-        opts,
-        [
-            "Yes",
-            "Yes, and don't ask again for cargo",
-            "No, and tell Claude what to do"
-        ]
-    );
-    assert_eq!(
-        pending("⏺ Done with the migration.\n\nShould I also update the README?\n\n> \n"),
-        Some(("Should I also update the README?".into(), vec![]))
-    );
-    assert_eq!(
-        pending("dsh> cargo build\n   Compiling drover\n    Finished dev\ndsh> "),
-        None,
-        "dsh pane"
-    );
-    assert_eq!(pending("Plan:\n1. Read the spec\n2. Write the code\n"), None);
-    for junk in [
-        "",
-        "\n\n\n",
-        "❯",
-        "❯ 1.",
-        "1. \n2. ",
-        "❯ 99999999999999999999. x\n2. y",
-        "\u{0}\u{1b}[2J?",
-        "│││",
-        "❯ 2. b\n❯ 1. a",
-    ] {
-        let _ = pending(junk);
-    }
-    assert_eq!(
-        pending("❯ 2. b\n  1. a\nWhich?"),
-        Some(("Which?".into(), vec![])),
-        "out of order: no menu, never a guess"
-    );
-}
-
-const COUNTDOWN: &str = include_str!("golden/screens/claude-permission-countdown.txt");
-
-#[test]
-fn prompt_card_golden_from_the_auto_deny_screen() {
-    assert_eq!(
-        prompt(COUNTDOWN).unwrap(),
-        json!({
-            "title": "Bash command",
-            "reason": "Dangerous rm operation on possibly-empty variable path: $S/*.png in `rm -f $S/*.png` (rewrite it as \"${S:?}\"/*.png or use a literal path)",
-            "command": "cp /Users/me/qg.bak tests/queue_graph.rs && cargo fmt && S=/Users/me/snaps; rm -f $S/*.png; DROVER_SNAPSHOTS=$S cargo test --test queue_graph",
-            "countdown": 14,
-            "question": "Do you want to proceed?",
-            "options": ["Yes", "No"],
-            "push": false
-        })
-    );
-    let c = prompt(PERMISSION).unwrap();
-    assert_eq!(
-        (c["title"].as_str(), c["countdown"].as_u64(), c["push"].as_bool()),
-        (Some("Bash command"), None, Some(true))
-    );
-    assert_eq!(c["command"], "cargo test --all");
-    assert_eq!(prompt(&COUNTDOWN.replace("in 0:14", "in 0:00")).unwrap()["push"], true);
-    assert_eq!(
-        prompt("Should I also update the README?\n> "),
-        None,
-        "no menu, no card JSON"
-    );
-}
-
-#[test]
-fn countdown_card_shows_reason_command_and_clears_when_the_prompt_goes() {
-    let (c, r) = blocked("countdown", COUNTDOWN, COUNTDOWN);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let ck = cookie(&s, &c);
-    let v = needs(&s, &ck, T);
-    let b = card(&v, "sendmeter-impl-12").unwrap_or_else(|| panic!("{v}"));
-    let m = &b["menu"];
-    assert_eq!(
-        (&b["push"], &m["title"], &m["countdown"]),
-        (&json!(false), &json!("Bash command"), &json!(14)),
-        "{b}"
-    );
-    assert!(
-        m["reason"]
-            .as_str()
-            .unwrap()
-            .starts_with("Dangerous rm operation on possibly-empty variable path")
-            && m["command"].as_str().unwrap().starts_with("cp /Users/me/qg.bak")
-            && m["options"].as_array().unwrap().len() == 2,
-        "{b}"
-    );
-    let working = "⏺ Bash(cargo test)\n  ⎿ Error: denied\n\n✶ Pontificating… (12m 0s · ↓ 3.1k tokens)\n";
-    let r2 = Lanes::new(Fake::default());
-    r2.blocked("sendmeter-impl-12", working);
-    let s2 = Server::new(&c, &r2, Some(ADDR.into()));
-    let v = needs(&s2, &ck, T + 5);
-    assert!(card(&v, "sendmeter-impl-12").is_none(), "no stale card: {v}");
-}
 
 fn blocked(name: &str, imp: &str, rev: &str) -> (drover::Ctx, Lanes) {
     let c = ctx(&tmpdir(name), CONFIG);
@@ -349,13 +224,6 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> String 
     String::from_utf8_lossy(&s.respond(&r, T)).into_owned()
 }
 
-fn shown_h(needs: &serde_json::Value) -> String {
-    card(needs, "sendmeter-impl-12").expect("menu buttons")["menu"]["h"]
-        .as_str()
-        .unwrap()
-        .to_string()
-}
-
 fn cookie(s: &Server, c: &drover::Ctx) -> String {
     pair(
         s,
@@ -369,123 +237,18 @@ fn cookie(s: &Server, c: &drover::Ctx) -> String {
 }
 
 #[test]
-fn answer_sends_the_digit_and_logs_no_question() {
-    let (c, r) = blocked("answer", PERMISSION, PERMISSION);
+fn an_answer_is_refused_shed_reports_no_menu() {
+    let (c, r) = blocked("answer-rev", "garbage, no prompt", PERMISSION);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
-    let v = needs(&s, &ck, T);
-    let h = shown_h(&v);
-    let m = &card(&v, "sendmeter-impl-12").unwrap()["menu"];
-    assert!(
-        m["question"] == "Do you want to proceed?" && m["options"][1].as_str().unwrap().starts_with("Yes, and don"),
-        "{v}"
-    );
-    let res = req(&s, "POST", "/answer", "agent=sendmeter-impl-12&choice=2", "");
-    assert!(res.starts_with("HTTP/1.1 401 "), "no device cookie: {res}");
-    assert!(r.keys().is_empty());
-    let foreign = req(
-        &s,
-        "POST",
-        "/answer",
-        "agent=sendmeter-impl-12&choice=2",
-        &format!("{ck}Origin: https://evil.example\r\n"),
-    );
-    assert!(foreign.starts_with("HTTP/1.1 403 "), "{foreign}");
-    for bad in ["0", "4", "12", "2%0A", "Enter"] {
-        let res = req(
-            &s,
-            "POST",
-            "/answer",
-            &format!("agent=sendmeter-impl-12&choice={bad}"),
-            &ck,
-        );
-        assert!(res.contains("REFUSED BAD_VALUE"), "{bad}: {res}");
+    for agent in ["sendmeter-rev-9-r1", "sendmeter-impl-12"] {
+        let res = req(&s, "POST", "/answer", &format!("agent={agent}&choice=1"), &ck);
+        assert!(res.contains("REFUSED BAD_VALUE: no menu"), "{res}");
     }
-    assert!(r.keys().is_empty(), "never a guessed key");
-    r.then("sendmeter-impl-12", "⏺ Bash(cargo test --all)\n  ⎿ ok");
-    let res = req(
-        &s,
-        "POST",
-        "/answer",
-        &format!("agent=sendmeter-impl-12&choice=2&h={h}"),
-        &ck,
-    );
-    assert!(
-        res.starts_with("HTTP/1.1 200 OK") && res.contains("sent to sendmeter-impl-12"),
-        "{res}"
-    );
-    assert_eq!(r.keys(), [json!({"name": "sendmeter-impl-12", "keys": ["2"]})]);
-    let e = read(&c.state).unwrap().to_vec().pop().unwrap();
-    assert_eq!((e.kind.as_str(), e.issue), ("answer", Some(12)));
-    assert_eq!(
-        serde_json::Value::Object(e.data.clone()),
-        json!({"via": "web", "agent": "sendmeter-impl-12", "device": e.str("device").unwrap(), "choice": "2"})
-    );
-    assert!(
-        !drover::events::jsonl(&c.state).unwrap().contains("proceed"),
-        "never the question text"
-    );
-    let res = req(
-        &s,
-        "POST",
-        "/answer",
-        &format!("agent=sendmeter-rev-9-r1&choice=1&h={h}"),
-        &ck,
-    );
-    assert!(res.contains("still waiting: sendmeter-rev-9-r1"), "{res}");
-    assert_eq!(r.keys()[1], json!({"name": "sendmeter-rev-9-r1", "keys": ["1"]}));
-}
-
-#[test]
-fn answer_refuses_a_changed_menu_and_rerenders_fresh() {
-    let (c, r) = blocked("stale-menu", PERMISSION, PERMISSION);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let ck = cookie(&s, &c);
-    let h = shown_h(&needs(&s, &ck, T));
-    let b = PERMISSION.replace("for cargo  ", "for git    ");
-    r.sh.screen("sendmeter-impl-12", &b);
-    let res = req(
-        &s,
-        "POST",
-        "/answer",
-        &format!("agent=sendmeter-impl-12&choice=2&h={h}"),
-        &ck,
-    );
-    assert!(res.contains("REFUSED STALE: menu changed — refreshed"), "{res}");
-    assert!(r.keys().is_empty(), "menu A tapped, menu B on the pane: no key");
-    let res = req(&s, "POST", "/answer", "agent=sendmeter-impl-12&choice=2", &ck);
-    assert!(res.contains("REFUSED STALE"), "no h: {res}");
     assert!(r.keys().is_empty());
-    let reads = r.reads();
-    r.sh.screen("sendmeter-impl-12", PERMISSION);
-    r.then("sendmeter-impl-12", "⏺ Bash(cargo test --all)\n  ⎿ ok");
-    let res = req(
-        &s,
-        "POST",
-        "/answer",
-        &format!("agent=sendmeter-impl-12&choice=2&h={h}"),
-        &ck,
-    );
-    assert!(
-        res.contains("sent to sendmeter-impl-12") && r.keys() == [json!({"name": "sendmeter-impl-12", "keys": ["2"]})],
-        "same menu: the digit: {res}"
-    );
     let v = needs(&s, &ck, T);
-    assert!(r.reads() > reads + 2, "a fresh read after the send");
     let b = card(&v, "sendmeter-impl-12").unwrap_or_else(|| panic!("{v}"));
-    assert!(b["menu"].is_null() && b.to_string().contains("⎿ ok"), "{b}");
-}
-
-#[test]
-fn answer_refuses_reviewer_menus_and_unparsed_panes() {
-    let (c, r) = blocked("answer-rev", "garbage, no prompt", MENU);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let ck = cookie(&s, &c);
-    let res = req(&s, "POST", "/answer", "agent=sendmeter-rev-9-r1&choice=1", &ck);
-    assert!(res.contains("REFUSED REV_READONLY"), "{res}");
-    let res = req(&s, "POST", "/answer", "agent=sendmeter-impl-12&choice=1", &ck);
-    assert!(res.contains("REFUSED BAD_VALUE: no menu"), "{res}");
-    assert!(r.keys().is_empty());
+    assert_eq!((&b["menu"], &b["push"]), (&json!(null), &json!(true)), "{b}");
 }
 
 #[test]
@@ -605,7 +368,7 @@ fn unpaired_viewers_see_no_pane_text() {
         let res = req(&s, "GET", path, "", "");
         assert!(pane.iter().all(|p| !res.contains(p)), "{path}: {res}");
         assert!(
-            req(&s, "GET", path, "", &ck).contains("Do you want to proceed?") || path == "/",
+            req(&s, "GET", path, "", &ck).contains("don't ask") || path == "/",
             "{path} paired"
         );
     }
@@ -629,13 +392,17 @@ fn unpaired_viewers_see_no_pane_text() {
     );
     for n in ["sendmeter-impl-12", "sendmeter-rev-9-r1"] {
         live.lane(n, "blocked", "/x");
+        live.set(n, |t| t["reported"]["note"] = json!("permission: Bash command"));
         live.screen(n, PERMISSION);
     }
     let (a, d) = (drain(&mut anon, 4_000), drain(&mut dev, 500));
-    assert!(a.contains("event: needs\n") && a.contains("\"activity\":\""), "{a}");
+    assert!(
+        a.contains("event: needs\n") && a.contains("\"activity\":\"permission: Bash command"),
+        "{a}"
+    );
     assert!(pane.iter().all(|p| !a.contains(p)), "unpaired stream: {a}");
     assert!(
-        d.contains("Do you want to proceed?") && d.contains("\"menu\":{"),
+        d.contains("don't ask") && d.contains("\"tail\":\""),
         "paired stream: {d}"
     );
     drover::devices::store(&c, &[]).unwrap();

@@ -160,14 +160,6 @@ impl Provider for Hermes {
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         Some(&DIALECT)
     }
-    fn now_line(&self, line: &str) -> bool {
-        line.contains('💻') || line.starts_with('┊')
-    }
-    fn tool_line(&self, line: &str) -> Option<(String, String)> {
-        let t = line.trim_start_matches(['┊', ' ']);
-        let cmd = t.strip_prefix("💻").or(t.strip_prefix("$ "))?.trim_start();
-        Some(("$".into(), cmd.strip_prefix("$ ").unwrap_or(cmd).into()))
-    }
 }
 
 fn approve_hook(path: &Path, cmd: &str) -> Result<()> {

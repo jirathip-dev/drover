@@ -57,8 +57,8 @@ reads them.
 
 ## Adding a provider (#806)
 
-Each provider is one module in `crates/core/src/providers/` behind the `Provider` trait (login, usage-limit
-banner, models, launch, prompt and screen parsing); core asks `providers::get`, `lanes()`,
+Each provider is one module in `crates/core/src/providers/` behind the `Provider` trait (login, models, launch and
+prompt; #1053: no screen parsing, shed reports every lane fact); core asks `providers::get`, `lanes()`,
 `proxied()` and the like, and never names one. arch-check's `[[ban]]`s in `.drover/arch.toml` fail any provider
 name (any case, comments too) in `crates/*/src/**` outside that folder. The ADR is
 [docs/architecture/providers/adr.md](architecture/providers/adr.md).
@@ -67,9 +67,9 @@ To add one:
 
 1. Write `crates/core/src/providers/<name>.rs` with `pub static PROVIDER` implementing `Provider`. Override only what
    differs from the defaults: `surface()` (`Terminal`, a `harness` choice; `Acp`, reached through its ACP agent;
-   `Listed`, known only as an agent's vendor), `start_cmd`/`kick_cmds`, `login()`, `token_env()`, `cap_banner()`,
+   `Listed`, known only as an agent's vendor), `start_cmd`/`kick_cmds`, `login()`, `token_env()`,
    `efforts()`, `hook_dialect()`, `brands()`.
 2. Append its name to the `registry! { … }` line in `crates/core/src/providers/mod.rs`. Order matters only for the
-   first-match readers (screen parsing, `proxied()`), so new ones go last.
+   first-match readers (`proxied()`), so new ones go last.
 
 Nothing else changes: `harness = "<name>"` validates, `profiles sync` writes its files, setup offers its login. `crates/core/src/providers/fake.rs`, a test-only provider, proves it with unit tests.

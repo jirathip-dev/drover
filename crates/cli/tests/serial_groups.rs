@@ -664,3 +664,56 @@ fn a_blocked_issue_holds_no_hot_lock_after_one_pass() {
     drive(&c, &r);
     assert!(holding(&c, HOT).is_empty(), "still released while blocked");
 }
+
+fn released_x(c: &drover::Ctx, sh: &FakeShed, waiters: &[u64]) -> Vec<(u64, String)> {
+    let (a, holder_y) = (9, 8);
+    lane(c, a);
+    drive(c, &fake(&[(a, &format!("{X}\n"))]));
+    let mut all = vec![(a, format!("{X}\n"))];
+    for &n in waiters {
+        lane(c, n);
+        sh.lane(&format!("sendmeter-impl-{n}"), "done", "/x");
+        sh.exit(&format!("sendmeter-impl-{n}"));
+        all.push((n, format!("{X}\n")));
+        let r: Vec<_> = all.iter().map(|(n, f)| (*n, f.as_str())).collect();
+        drive(c, &fake(&r));
+        assert_eq!(logged(c, n, "serial-held"), [format!("hot {X} ({a})")]);
+    }
+    lane(c, holder_y);
+    all.push((holder_y, format!("{Y}\n")));
+    let r: Vec<_> = all.iter().map(|(n, f)| (*n, f.as_str())).collect();
+    drive(c, &fake(&r));
+    assert_eq!(holding(c, Y), [holder_y]);
+    joined(c, a, &[Y]);
+    all
+}
+
+#[test]
+fn a_waiter_takes_a_hot_file_its_holder_released_by_being_held_elsewhere() {
+    let (c, sh) = hot_ctx_on("sg-hot-release", &[X, Y]);
+    let (a, b) = (9, 12);
+    let all = released_x(&c, &sh, &[b]);
+    let r: Vec<_> = all.iter().map(|(n, f)| (*n, f.as_str())).collect();
+    let (out, steps) = drive(&c, &fake(&r));
+    assert!(logged(&c, a, "serial-held").contains(&format!("hot {Y} (8)")), "{out}");
+    assert_eq!(logged(&c, b, "serial-slot"), [format!("hot {X}")], "{out}");
+    assert_eq!(holding(&c, X), [b], "{out}");
+    assert_eq!(steps, ["conflict"], "#12 gets its round: {out}");
+    let (_, w) = run(&c, &fake(&r), &["waiting", "sendmeter"]);
+    assert!(!w.contains("for a slot (0/1)"), "{w}");
+}
+
+#[test]
+fn two_waiters_on_a_released_hot_file_only_the_first_takes_it() {
+    let (c, sh) = hot_ctx_on("sg-hot-release-two", &[X, Y]);
+    let (b, d) = (12, 13);
+    let all = released_x(&c, &sh, &[b, d]);
+    let r: Vec<_> = all.iter().map(|(n, f)| (*n, f.as_str())).collect();
+    let (out, _) = drive(&c, &fake(&r));
+    assert_eq!(logged(&c, b, "serial-slot"), [format!("hot {X}")], "{out}");
+    assert!(logged(&c, d, "serial-slot").is_empty(), "{out}");
+    assert_eq!(holding(&c, X), [b], "{out}");
+    let (_, w) = run(&c, &fake(&r), &["waiting", "sendmeter"]);
+    let row = w.lines().find(|l| l.starts_with("sendmeter #13 ")).unwrap_or_default();
+    assert!(row.contains(&format!("serial: hot {X} held by #{b} (1/1)")), "{w}");
+}

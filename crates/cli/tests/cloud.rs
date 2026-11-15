@@ -287,14 +287,14 @@ fn tick(
     c: &drover::Ctx,
     cfg: &Config,
     r: &dyn Runner,
-    live: &BTreeMap<String, Option<Vec<serde_json::Value>>>,
+    live: &BTreeMap<String, Option<Vec<drover::session::Session>>>,
 ) -> Vec<String> {
     let mut out = vec![];
     drover::cloud::tick(c, cfg, r, live, &mut out).unwrap();
     String::from_utf8(out).unwrap().lines().map(String::from).collect()
 }
 
-fn idle() -> BTreeMap<String, Option<Vec<serde_json::Value>>> {
+fn idle() -> BTreeMap<String, Option<Vec<drover::session::Session>>> {
     BTreeMap::from([("cloud1".to_string(), Some(vec![]))])
 }
 
@@ -316,7 +316,12 @@ fn an_idle_cloud_host_saves_each_lane_to_wip_then_stops() {
     assert_eq!(*stop.val("wip"), json!(["wip/cloud1-sendmeter-impl-12"]));
     assert_eq!(drover::cloud::state(&events, "cloud1"), "stopped");
     let (c, cfg) = running("cloud-busy");
-    let live = BTreeMap::from([("cloud1".to_string(), Some(vec![json!({"name": "x"})]))]);
+    let live = BTreeMap::from([(
+        "cloud1".to_string(),
+        Some(vec![session(
+            &json!({"name": "x", "status": "working", "labels": {"fleet": "sendmeter"}}),
+        )]),
+    )]);
     assert!(tick(&c, &cfg, &lane_fake(), &live).is_empty());
     let soon = drover::Ctx { now: NOW - 1000, ..c };
     assert!(tick(&soon, &cfg, &lane_fake(), &idle()).is_empty());

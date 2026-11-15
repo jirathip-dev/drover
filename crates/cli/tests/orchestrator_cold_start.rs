@@ -130,7 +130,7 @@ fn a_blocked_orchestrator_start_holds_no_request() {
         .recv_timeout(Duration::from_secs(1))
         .expect("the answer's reply waits on the start");
     assert!(
-        res.starts_with("HTTP/1.1 200") && res.ends_with("answered q1\n"),
+        res.starts_with("HTTP/1.1 200") && res.contains("answer accepted · job "),
         "{res:.300}"
     );
     assert!(ms < 1000, "the answer took {ms} ms");

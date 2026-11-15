@@ -435,7 +435,7 @@ pub fn chat_fixture() -> serde_json::Value {
         "⏺ I read the brief. The overlap check skips **merged** issues only, so a closed one still counts.".into(),
         "⏺ Bash(cargo test --locked)".into(),
         "  ⎿  test result: \x1b[38;2;80;200;80mok\x1b[0m. 218 passed; 0 failed".into(),
-        drover::lanes::GAP.into(),
+        "┄ not captured: scrolled past between reads ┄".into(),
         "⏺ # Plan".into(),
         "  Base is green. The bug is in `src/overlap.rs`: the list keeps every issue that is not **merged**.".into(),
         "  1. Swap `s.state != \"merged\"` for `!s.done()`, which the board already uses everywhere.".into(),
@@ -564,4 +564,86 @@ pub fn herdr_setup(f: Fake) -> Fake {
     f.reply("herdr --machine bazzite pane read", "Paste code here >\n")
         .reply("herdr machine list --json", BAZZITE)
         .reply("herdr", V1_WS)
+}
+
+/// A shed session as `ls` lists it: `name`, `status` (shed's reported word; none: unreported), `cwd`, `labels`, `host`, `exited`.
+pub fn session(v: &serde_json::Value) -> drover::session::Session {
+    let t = serde_json::json!({"name": v["name"], "labels": v.get("labels").cloned().unwrap_or(serde_json::json!({})),
+        "cwd": v["cwd"].as_str().unwrap_or("/"), "cmd": [], "keep": true,
+        "state": if v["exited"] == true { "exited" } else { "running" }, "exit": v.get("exit").cloned(), "pid": 7,
+        "reported": v.get("status").map(|s| serde_json::json!({"state": s, "note": v.get("note")}))});
+    let mut s: drover::session::Session = serde_json::from_value::<drover::shed::proto::TerminalInfo>(t)
+        .unwrap()
+        .into();
+    s.host = v["host"].as_str().map(String::from);
+    s
+}
+
+/// `rows` (each as `session` reads it) as one answering host's sessions.
+pub fn sessions(rows: serde_json::Value) -> drover::session::Sessions {
+    drover::session::Sessions::of(rows.as_array().unwrap().iter().map(session))
+}
+
+pub fn http(addr: &str, req: &str) -> String {
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    std::io::Write::write_all(&mut s, req.as_bytes()).unwrap();
+    let mut res = String::new();
+    std::io::Read::read_to_string(&mut s, &mut res).unwrap();
+    res
+}
+
+/// #977: a live board (`serve_on`) and a paired device's cookie, for taps over HTTP.
+pub struct Board {
+    pub addr: String,
+    pub cookie: String,
+}
+
+impl Board {
+    pub fn start(c: &Ctx, r: impl Runner + Send + 'static) -> Board {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let fake = Fake::default();
+        let s = drover::serve::Server::new(c, &fake, Some("127.0.0.1:7777".into()));
+        let cookie = pair(&s, c, "Mozilla/5.0 (iPhone)", now);
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap().to_string();
+        let c2 = c.clone();
+        std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        Board { addr, cookie }
+    }
+
+    pub fn post(&self, op: &str, body: &str) -> (u128, serde_json::Value) {
+        let (addr, cookie) = (&self.addr, &self.cookie);
+        let req = format!(
+            "POST /api/v1/{op} HTTP/1.1\r\nHost: {addr}\r\n{cookie}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let t = std::time::Instant::now();
+        let res = http(addr, &req);
+        let ms = t.elapsed().as_millis();
+        (ms, serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap())
+    }
+
+    pub fn get(&self, path: &str) -> serde_json::Value {
+        let (addr, cookie) = (&self.addr, &self.cookie);
+        let res = http(
+            addr,
+            &format!("GET /api/v1/{path} HTTP/1.1\r\nHost: {addr}\r\n{cookie}Connection: close\r\n\r\n"),
+        );
+        serde_json::from_str::<serde_json::Value>(res.split_once("\r\n\r\n").unwrap().1).unwrap()
+    }
+
+    pub fn until(&self, id: &str, done: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+        let t0 = std::time::Instant::now();
+        loop {
+            let j = self.get(&format!("job/{id}"));
+            if done(&j) || t0.elapsed().as_secs() >= 30 {
+                return j;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
 }
