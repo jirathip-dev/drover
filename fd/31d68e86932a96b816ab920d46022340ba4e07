@@ -1,0 +1,7 @@
+Decided: merged origin/staging; extend stays off #977's job queue and runs inline (log, requeue, kick), every other tap stays a job
+Because: "#1058's extend job is only log plus requeue, so it never waits on host load"
+Decided: drive.rs keeps staging's fair share admission without the extend bypass; the Queue row puts the extend wait first under #1045's 48-char cut
+Because: "no override of HOST_BUSY or SPAWN_PENDING for extends"
+Rejected: staging's spawn-at-tap and memory-wait extend tests — this issue reverses that behaviour
+Check: owner_extend.rs board tap through Board; needs_human.rs expects the card gone after the tap
+Owner: Brought the branch up to date with staging; one more round still just requeues the issue, now beside the new background tap jobs.
