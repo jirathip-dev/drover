@@ -129,7 +129,7 @@ Files this issue touches that 5 or more merged PRs touched in 14 days, and what 
 | `crates/core/src/orchestrator.rs` | 13 | large module | shrinks: the brief moves to its own file, the chat code is a new file |
 | `crates/core/src/config.rs` | 83 | validation list | +5 beside the existing orchestrator check |
 | `crates/core/src/spawn.rs` | 88 | large module | one match arm changed |
-| `roles/orchestrator.md` | 5 | docs split per area | becomes a folder of three parts; the file is deleted |
+| `roles/orchestrator/` (the old single file) | 5 | docs split per area | becomes a folder of three parts; the file is deleted |
 | `docs/serve.md` | 66 | docs split per area | untouched: the routes get their own docs file |
 | `crates/cli/tests/cooee_screens.rs` | 8 | tests | untouched: the tests get their own file |
 

@@ -28,6 +28,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 mod chat;
+#[path = "cooee.rs"]
+mod cooee;
 mod fresh;
 #[path = "screens.rs"]
 mod screens;
@@ -1178,6 +1180,7 @@ impl<'a> Server<'a> {
         };
         let (status, ctype, body) = match (method, path) {
             (_, p) if p.starts_with("/api/") => self.api(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
+            (_, p) if p.starts_with("/cooee/") => self.cooee(ctx, head, (method, p), body),
             (_, p) if p.starts_with("/screens/") || p == "/action" => self.screens(ctx, head, (method, p), query, body, self.auth(ctx, head, &a)),
             ("POST", _) if self.addr.is_none() => ("405 Method Not Allowed", "text/plain", text("read-only: GET only\n")),
             _ if guarded && !self.allowed(ctx, head) => ("403 Forbidden", "text/plain", text("forbidden: foreign Host or Origin\n")),

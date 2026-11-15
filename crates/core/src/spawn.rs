@@ -17,7 +17,11 @@ pub fn role_prompt(role: &str) -> &'static str {
         "impl" => include_str!("../roles/impl.md"),
         "design" => include_str!("../roles/design.md"),
         "architect" => include_str!("../roles/architect.md"),
-        "orchestrator" => include_str!("../roles/orchestrator.md"),
+        "orchestrator" => concat!(
+            include_str!("../roles/orchestrator/role.md"),
+            "\n",
+            include_str!("../roles/orchestrator/thread.md")
+        ),
         "lesson" => include_str!("../roles/lesson.md"),
         "verify" => include_str!("../roles/verify.md"),
         _ => include_str!("../roles/rev.md"),

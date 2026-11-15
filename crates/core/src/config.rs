@@ -1176,6 +1176,16 @@ impl Config {
         {
             bail!("orchestrator.{id}.fleets: \"{f}\" is no fleet");
         }
+        let named = |id: &String| {
+            id != "default"
+                && !id.is_empty()
+                && id
+                    .bytes()
+                    .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        };
+        if let Some(id) = c.orchestrator.more.keys().find(|id| !named(id)) {
+            bail!("orchestrator.{id}: an id is lowercase letters, digits and `-`, and not `default`");
+        }
         if let Some(g) = c
             .orchestrator
             .groups()

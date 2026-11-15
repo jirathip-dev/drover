@@ -175,6 +175,9 @@ impl Provider for Claude {
         let [md, json] = LOCAL_FILES;
         format!(" && mkdir -p .claude && cp {settings} {json} && cp {role} {md}")
     }
+    fn chat_settings(&self, profile: &std::path::Path) -> std::path::PathBuf {
+        profile.into()
+    }
     fn login(&self) -> Option<&'static str> {
         Some("claude /login")
     }
