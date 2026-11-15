@@ -903,12 +903,18 @@ fn one(
     };
     ACTS.with_borrow_mut(BTreeMap::clear);
     ROOM.set((false, None));
-    let res = pass(ctx, cfg, (r, seen), out, name, fast).and_then(|go| {
+    let res = pass(ctx, cfg, (r, seen), out, name, fast);
+    let mut slow = ("PR reads, gates, steps", t0.elapsed());
+    let res = res.and_then(|go| {
         if fast {
-            Ok(())
-        } else {
-            starts(ctx, cfg, r, out, name, go)
+            return Ok(());
         }
+        let t = std::time::Instant::now();
+        let res = starts(ctx, cfg, r, out, name, go);
+        if t.elapsed() > slow.1 {
+            slow = ("spawns", t.elapsed());
+        }
+        res
     });
     if let Err(e) = &res {
         let a = json!({"step": "pass", "outcome": "error", "code": "ERROR", "words": format!("failed: {e:#}")});
@@ -926,8 +932,9 @@ fn one(
             crate::usage::date(r, end, "+%H:%M"),
         );
         let secs = (t0.elapsed().as_secs_f64() * 10.0).round() / 10.0;
-        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs,
-            "spawns_launched": launched(&acts), "actions": acts, "kick": KICK.get()});
+        let step_secs = (slow.1.as_secs_f64() * 10.0).round() / 10.0;
+        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs, "step": slow.0,
+            "step_secs": step_secs, "spawns_launched": launched(&acts), "actions": acts, "kick": KICK.get()});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
     if !fast && KICK.get().is_none() {

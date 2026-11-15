@@ -34,6 +34,16 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - shed terminals or shed-acp ACP sessions, set in `[runtime]` (#390, #480, #590, #721); lane state from shed's events (#585); see [runtimes](docs/runtimes.md).
 - Every external call is time-limited by one runner (#763).
 
+**Serve health** (#898)
+- Each minute serve writes `serve-health.json` to the state dir, and `GET /api/v1/health` returns the same
+  numbers under `serve`: its RSS, the last minute's count, p50, p95 and max ms for `/live` first bytes, `/api/v1`
+  reads and writes, the reads answered 503, live clients, queued taps and its start time.
+- `drover check` alerts once per state, and again with `-ok` when it clears: `serve-restarts` (over 3 starts in 24 h
+  that were no handover), `serve-mem` (RSS over 300 MB), `serve-slow` (`/api/v1` p95 over 200 ms for 5 min),
+  `serve-503` (any read answered 503) and `drive-slow` (a fleet's pass over `pass_max_secs`, naming its slowest step).
+- CI: the request-path guard (no git, gh or ssh on a read, every route answering with the db write-locked) and a
+  50 ms p95 bench per route group (`crates/cli/tests/serve_health.rs`).
+
 **Orchestrator threads, asks and run cards**
 - A thread per repo, with its orchestrator agent; many orchestrators allowed (#385, #811).
 - A lane's ask goes to its repo's orchestrator first; owner topics wait for the owner (#551).

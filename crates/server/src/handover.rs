@@ -34,6 +34,11 @@ impl Handover {
         })
     }
 
+    /// #898: a predecessor handed its listeners down: this start is no restart.
+    pub fn inherited(&self) -> bool {
+        self.inherited
+    }
+
     /// A successor took over: the accept loops stop after the connection in hand.
     pub fn stopping(&self) -> bool {
         self.stop.load(SeqCst)

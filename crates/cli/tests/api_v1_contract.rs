@@ -187,7 +187,8 @@ fn every_route_keeps_its_fixtures_shape() {
         ("queue", "/api/v1/queue", QueueTab),
         ("needs", "/api/v1/needs", NeedsTab),
         ("lanes", "/api/v1/lanes", LanesTab),
-        ("shed", "/api/v1/shed", Vec<ShedRow>)
+        ("shed", "/api/v1/shed", Vec<ShedRow>),
+        ("health", "/api/v1/health", Health)
     );
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let h = [t.as_str(), "sendmeter", "Facets", "add facets\nthen reindex"];
