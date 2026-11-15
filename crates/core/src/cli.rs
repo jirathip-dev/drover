@@ -339,6 +339,14 @@ enum Cmd {
     #[command(about = "Compact board (≤ 60 cols): queue order, state, lane, age, last event")]
     Board { fleet: Option<String> },
     #[command(
+        about = "#910: every live lane's processes (CPU %, run time, heavy kind) and heavy-slot waits, under the host's load, heavy slots and held respawns"
+    )]
+    Top {
+        #[arg(help = "Machine-readable output")]
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
         about = "File this week's lessons issue, queue it on top and spawn its `lesson` lane (orchestrators and the owner only)"
     )]
     #[command(args_conflicts_with_subcommands = true)]
@@ -1057,8 +1065,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's orchestrator `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`, +6 for #712's `unpark` and `park --why`/`--by`, +1 for #780's `thread new --orchestrator`, +2 for #817's `extend --typed`/`--basis`, +1 for #838's `answer --note`, +3 for #844's `config show`, +3 for #889's `hotspots`, +4 for #845's `diagram`).
-pub const HELP_AGENT_MAX: usize = 366;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's orchestrator `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`, +6 for #712's `unpark` and `park --why`/`--by`, +1 for #780's `thread new --orchestrator`, +2 for #817's `extend --typed`/`--basis`, +1 for #838's `answer --note`, +3 for #844's `config show`, +3 for #889's `hotspots`, +4 for #845's `diagram`, +3 for #910's `top`).
+pub const HELP_AGENT_MAX: usize = 369;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -1428,6 +1436,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let (code, line) = queue::next(&working(&ctx.state)?, &fleet);
             writeln!(out, "{line}")?;
             return Ok(code);
+        }
+        Cmd::Top { json } => {
+            let t = crate::top::top(ctx, &Config::load(&ctx.config)?, r)?;
+            if json {
+                writeln!(out, "{}", serde_json::to_string_pretty(&t)?)?;
+            } else {
+                crate::top::print(&t, out)?;
+            }
         }
         Cmd::Board { fleet } => {
             let events = working(&ctx.state)?;
