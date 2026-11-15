@@ -63,8 +63,8 @@ fn cached_spec_and_pr_titles_show_in_the_queue_row() {
     let out = titles(&s);
     assert!(out.contains(&"#12 Queue titles".to_string()), "{out:?}");
     assert!(
-        out.contains(&"#17 A very long issue title that goes well past one phone line".to_string()),
-        "#331: whole, the page ellipsises it: {out:?}"
+        out.contains(&"#17 A very long issue title that goes well past …".to_string()),
+        "#1026: cut to one short line: {out:?}"
     );
     assert_eq!(r.count("gh"), 0, "no gh call on render: {:?}", r.calls.borrow());
 }
