@@ -302,6 +302,14 @@ pub fn hot(g: &Serial) -> bool {
     g.name.starts_with("hot ")
 }
 
+/// #1060: `s` may hold no slot: a queue blocker is open or its lane is held on another issue.
+pub fn stuck(events: &[Event], st: &States, s: &IssueState) -> bool {
+    let open = view(events, st, &s.fleet)
+        .iter()
+        .any(|i| i.issue == s.issue && !labels(i).is_empty());
+    open || !crate::events::held_on(events, s).is_empty()
+}
+
 /// In flight: a live impl/fix lane, or at review/ready.
 pub fn in_flight(state: &str) -> bool {
     state == "impl" || state.starts_with("fix") || state.starts_with("review") || state == "ready"

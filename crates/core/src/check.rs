@@ -6,7 +6,7 @@ use crate::hosts::On;
 use crate::runner::{ok, Runner};
 use crate::spawn::{changes, dirty, own_files, SHOT_DIRS};
 use crate::Ctx;
-use crate::{gh, herdr};
+use crate::{gh, term};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
@@ -62,7 +62,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     PUSHES.set((0, 0));
     let _ = std::fs::write(ctx.state.with_file_name("check.at"), ctx.now.to_string());
     let agents = host::agents(r)
-        .map_err(|e| eprintln!("drover check: herdr agent list failed ({e:#}); skipping lane checks"))
+        .map_err(|e| eprintln!("drover check: the agent list failed ({e:#}); skipping lane checks"))
         .ok();
     if let Some(a) = &agents {
         crate::orchestrator::sleep_idle(ctx, cfg, r, &events, a)?;
@@ -298,7 +298,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 ));
             }
             if let Some(p) = pane.filter(|_| status.is_some()) {
-                let recent = herdr::recent(r, p, "200").unwrap_or_default();
+                let recent = term::recent(r, p, "200").unwrap_or_default();
                 if let Some(sp) = spawned {
                     let screen = crate::lanes::strip(&recent);
                     let h = crate::providers::get(sp.str("harness").unwrap_or_default());
@@ -320,7 +320,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                     let key = format!("{lane}:{url}");
                     let seen = events.iter().any(|e| e.str("key") == Some(&key));
                     let dsh = spawned.and_then(|e| e.str("harness")) == Some("dsh");
-                    if !seen && herdr::tell(r, dsh, lane, p, &line).is_ok() {
+                    if !seen && term::tell(r, dsh, lane, p, &line).is_ok() {
                         hits.push(("amended", key, line));
                     }
                 }
@@ -418,7 +418,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let lane = crate::spawn::shaped(cfg, &json!({"name": name}));
         let lane = lane.filter(|l| l.2.is_some() && !tracked.contains_key(&(l.0.to_string(), l.1)));
         if let Some(l) = lane.filter(|_| last_spawn(&events, name).is_none()) {
-            let why = format!("herdr agent {name} has no spawn event and matches no tracked issue");
+            let why = format!("agent {name} has no spawn event and matches no tracked issue");
             let d = json!({"key": name, "reason": why});
             fire(ctx, cfg, out, &events, (l.0, Some(l.1)), "orphan-lane", d)?;
         }
@@ -466,6 +466,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let e = Event::new(ctx.now, "drover", None, "keychain-clear", json!({}));
         crate::events::append(&ctx.state, &e)?;
     }
+    overload(ctx, cfg, r, out, &events, agents.as_deref().unwrap_or_default())?;
     for (e, lane, ts) in crate::outbox::stale(r, &events, (ctx.now, cfg.limits.outbox_stale_minutes * 60)) {
         let why = format!(
             "{lane}'s outbox holds a line from {} ago that drive has not delivered",
@@ -506,7 +507,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             continue;
         }
         let mb = host::held(r, &[a]).first().copied().unwrap_or_default();
-        if herdr::close(r, pane).is_ok() {
+        if term::close(r, pane).is_ok() {
             let d = json!({"key": format!("{name}:{at}"), "agent": name, "freed_mb": mb, "reason": "done"});
             fire(ctx, cfg, out, &events, (&e.fleet, Some(n)), "lane-closed", d)?;
         }
@@ -587,6 +588,37 @@ fn handoff(r: &dyn Runner, events: &[Event], e: &Event, (n, wt): (u64, &str)) ->
     }
     let by = |x: &&Event| x.ts >= e.ts && (x.is("pushed", &e.fleet, n) || x.is("verdict", &e.fleet, n));
     events.iter().rev().find(by).map(|x| x.ts)
+}
+
+fn overload(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    events: &[Event],
+    agents: &[Value],
+) -> Result<()> {
+    let rows = crate::hosts::history(ctx);
+    let remote = |h: &str| cfg.hosts.get(h).is_some_and(|c| c.machine.is_some());
+    let over = (rows.iter().rev().filter(|w| !remote(&w.host)))
+        .take_while(|w| w.load_cpu.is_some_and(|l| l > cfg.limits.load_per_cpu));
+    let (Some(since), Some((load, main))) = over.fold((None, None), |(_, l), w| {
+        (Some(w.ts), l.or(w.load_cpu.map(|x| (x, w.host.clone()))))
+    }) else {
+        return Ok(());
+    };
+    if ctx.now < since + cfg.limits.overload_minutes * 60 {
+        return Ok(());
+    }
+    let top = crate::top::busiest(ctx, cfg, r, agents, 5)?;
+    let why = format!(
+        "{main} load/cpu {load:.2} > {} for {}; top: {}",
+        cfg.limits.load_per_cpu,
+        age(ctx.now - since),
+        top.join(", ")
+    );
+    let d = json!({"key": since, "host": main, "reason": why, "top": top});
+    fire(ctx, cfg, out, events, ("drover", None), "host-overloaded", d)
 }
 
 thread_local!(static PUSHES: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) });
@@ -699,7 +731,7 @@ pub fn teardown(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fl
         }
         match dirty(&on, Path::new(wt)) {
             Some(why) => writeln!(out, "keep pane {pane} ({wt}): {why}")?,
-            None => drop(herdr::close(&on, pane)),
+            None => drop(term::close(&on, pane)),
         }
     }
     if seen.is_empty() {
@@ -733,7 +765,7 @@ pub fn clean_all(
 ) -> Result<()> {
     let events = working(&ctx.state)?;
     let states = fold(&events);
-    let agents = crate::hosts::all_agents(cfg, r).context("cannot list herdr agents; refusing to clean blind")?;
+    let agents = crate::hosts::all_agents(cfg, r).context("cannot list the live agents; refusing to clean blind")?;
     let off = if all { disabled(cfg, r) } else { vec![] };
     let mut seen = std::collections::BTreeSet::new();
     let mut failed = 0;
@@ -911,22 +943,13 @@ pub fn clean_all(
             writeln!(out, "would remove {shown} (pane {pane}, {}#{n} {why})", e.fleet)?;
             continue;
         }
-        if let Err(err) = remove(
-            &on,
-            cfg,
-            &e.fleet,
-            wt,
-            e.str("workspace")
-                .or_else(|| pane.split(':').next())
-                .unwrap_or_default(),
-            saved,
-        ) {
+        if let Err(err) = remove(&on, cfg, &e.fleet, wt, saved) {
             writeln!(out, "failed {shown}: {err:#}")?;
             failed += 1;
             continue;
         }
         if !pane.is_empty() {
-            let _ = herdr::close(&on, pane);
+            let _ = term::close(&on, pane);
         }
         if on.machine.is_none() {
             crate::providers::remove_tmp(&stray_roots(cfg), wt);
@@ -946,7 +969,7 @@ pub fn clean_all(
             ),
         )?;
     }
-    let sheds = r.shed().filter(|_| lane.is_none()).map(herdr::Shed);
+    let sheds = r.shed().filter(|_| lane.is_none()).map(term::Shed);
     for (b, t) in sheds
         .iter()
         .flat_map(|b| b.exited(r).unwrap_or_default().into_iter().map(move |t| (b, t)))
@@ -996,22 +1019,8 @@ pub fn clean_all(
 
 const IDLE: &str = "idle-merged";
 
-/// #557 `clean --scheduled`, the daily `dev.drover.clean` job: `clean --yes` held to lanes idle 3 days (10 a run), then each herdr workspace whose checkout folder is gone is closed. A refusal or failure alerts `clean-failed` once (until a run passes); a clean no-op is silent.
 pub fn scheduled(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let res = clean(ctx, cfg, r, out, None, (None, None, true), true).and_then(|()| {
-        let list = herdr::list(r, "workspace")?;
-        let all = list["result"]["workspaces"].as_array().cloned().unwrap_or_default();
-        for w in all {
-            let (id, path) = (w["workspace_id"].as_str(), w["worktree"]["checkout_path"].as_str());
-            let (Some(id), Some(path)) = (id, path.filter(|p| !Path::new(p).exists())) else {
-                continue;
-            };
-            let o = herdr::workspace_close(r, id)?;
-            anyhow::ensure!(o.code == 0, "close workspace {id}: {}", herdr::message(&o));
-            writeln!(out, "closed workspace {id}: {path} is gone")?;
-        }
-        Ok(())
-    });
+    let res = clean(ctx, cfg, r, out, None, (None, None, true), true);
     let mark = ctx.state.with_file_name("clean.failed");
     let Err(e) = res else {
         let _ = std::fs::remove_file(&mark);
@@ -1036,7 +1045,6 @@ pub fn reap(ctx: &Ctx, cfg: &Config, r: &dyn Runner, (fleet, issue): (&str, Opti
     Ok(names.len())
 }
 
-/// #186: the processes in worktrees of closed lanes (newest spawn not its issue's active lane, no live herdr agent there) as `(pid, command, cwd)`; with `yes` each such worktree is reaped.
 pub fn leftovers(
     ctx: &Ctx,
     cfg: &Config,
@@ -1280,7 +1288,7 @@ fn disabled<'c>(cfg: &'c Config, r: &dyn Runner) -> Off<'c> {
     let hosts = cfg.hosts.iter().filter(|h| !h.1.enabled);
     let hosts = hosts.filter_map(|(n, h)| Some((n.as_str(), h.machine.as_deref()?)));
     hosts
-        .map(|(n, m)| (n, m, crate::hosts::agents_of(cfg, n, &On::new(r, Some(m))).ok()))
+        .map(|(n, m)| (n, m, crate::host::agents(&On::new(r, Some(m))).ok()))
         .collect()
 }
 
@@ -1325,7 +1333,6 @@ fn sweep_off(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, off: 
     Ok(freed)
 }
 
-/// #634: lanes no trim touches: a live herdr or shed agent (a running shed terminal or ACP session) of that name, or one spawned in the last `stall_minutes`.
 pub fn live_lanes(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Live> {
     let since = ctx.now.saturating_sub(cfg.limits.stall_minutes * 60);
     let events = working(&ctx.state)?;
@@ -1845,11 +1852,7 @@ fn closed_issues<'a>(
     &memo[fleet]
 }
 
-/// herdr first; else `git worktree remove` (never `--force`) of the re-checked tree minus `OWN_FILES` and `SHOT_DIRS`. `saved`: its work is on `wip/` (#716), so what is left goes too (`--force`).
-pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, ws: &str, saved: bool) -> Result<()> {
-    if !ws.is_empty() && herdr::worktree_remove(r, ws)? {
-        return Ok(());
-    }
+pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, saved: bool) -> Result<()> {
     if let Some(why) = dirty(r, Path::new(wt)).filter(|_| !saved) {
         anyhow::bail!("{why}");
     }
@@ -1901,7 +1904,7 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
         }
         e => e?,
     };
-    herdr::keys(&On::of(r, Some(e)), e.str("pane").unwrap_or_default(), "Escape")?;
+    term::keys(&On::of(r, Some(e)), e.str("pane").unwrap_or_default(), "Escape")?;
     emit(
         &ctx.state,
         cfg,
@@ -1910,7 +1913,6 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agent:
     Ok(writeln!(out, "sent Esc to {agent}")?)
 }
 
-/// `drover close`: close a non-lane herdr agent's pane (by name or pane id); files stay. Logs `closed-other`. #478: `host` picks that machine's agent when names collide (a lane is only the one its newest spawn there).
 pub fn close(
     ctx: &Ctx,
     cfg: &Config,
@@ -1923,7 +1925,7 @@ pub fn close(
         return crate::gate::refused("BAD_VALUE", format!("--host {h}: no [hosts.{h}]"));
     }
     let on = On::new(r, host.and_then(|h| cfg.hosts[h].machine.as_deref()));
-    let (events, agents) = (working(&ctx.state)?, herdr::agents(&on)?);
+    let (events, agents) = (working(&ctx.state)?, term::agents(&on)?);
     let a = agents.iter().find(|a| a["name"] == agent || a["pane_id"] == agent);
     let name = a.and_then(|a| a["name"].as_str()).unwrap_or(agent);
     let here = |e: &Event| host.is_none_or(|h| e.str("host") == Some(h));
@@ -1933,8 +1935,8 @@ pub fn close(
     {
         return crate::gate::refused("IS_LANE", format!("`{name}` is a lane: use stop, kill or clean"));
     }
-    let pane = a.and_then(|a| a["pane_id"].as_str()).context("no such herdr agent")?;
-    herdr::close(&on, pane)?;
+    let pane = a.and_then(|a| a["pane_id"].as_str()).context("no such agent")?;
+    term::close(&on, pane)?;
     let ev = Event::new(ctx.now, "", None, "closed-other", json!({"agent": name}));
     emit(&ctx.state, cfg, ev)?;
     Ok(writeln!(out, "closed {name}'s pane; its worktree and files stay")?)
@@ -2130,9 +2132,9 @@ pub fn unsaved(on: &On, wt: &Path) -> bool {
 }
 
 fn close_gone(on: &On, agent: &str, wt: &str, pane: &str) -> Result<()> {
-    herdr::close(on, pane)?;
+    term::close(on, pane)?;
     for again in [true, false] {
-        let left: Vec<String> = (host::live_in(&herdr::agents(on)?, agent, Path::new(wt)).iter())
+        let left: Vec<String> = (host::live_in(&term::agents(on)?, agent, Path::new(wt)).iter())
             .filter(|a| a["name"] == agent || a["name"].is_null())
             .filter_map(|a| a["pane_id"].as_str().map(String::from))
             .collect();
@@ -2145,7 +2147,7 @@ fn close_gone(on: &On, agent: &str, wt: &str, pane: &str) -> Result<()> {
             left.join(", ")
         );
         for p in &left {
-            herdr::close(on, p)?;
+            term::close(on, p)?;
         }
     }
     Ok(())
