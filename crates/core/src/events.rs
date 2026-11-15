@@ -990,7 +990,9 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
             "round-extended" if s.state == "needs-human" && s.card() == "start lane" => s.state = "queued".into(),
             "round-extended" => {
                 (s.extra, s.granted) = (s.extra + 1, s.stage_rounds.values().max().unwrap_or(&0) + 1);
-                if s.state == "needs-human" {
+                if s.state == "needs-human" && e.data.get("queued") == Some(&Value::Bool(true)) {
+                    s.state = "queued".into();
+                } else if s.state == "needs-human" {
                     s.state = if s.verdicts.is_empty() {
                         "impl".into()
                     } else {
@@ -998,6 +1000,7 @@ pub(crate) fn fold_into(mut m: States, events: &[Event]) -> States {
                     };
                 }
             }
+            crate::pending::REQUEUED if s.state != "parked" => s.state = "queued".into(),
             "clean" if e.str("why") != Some("merged") => s.state = "closed".into(),
             "lane-killed" if e.str("role").and_then(|r| s.lanes.get(r)).map(String::as_str) == e.str("agent") => {
                 let role = e.str("role").unwrap_or_default();

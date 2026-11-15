@@ -344,11 +344,9 @@ fn launch(
         .iter()
         .filter(|p| p.fleet == fleet && !bound(p).is_some_and(low))
         .count();
-    let extend = crate::pending::extending(ev, fleet, n);
     if live.iter().any(|e| e.fleet == fleet && e.issue == Some(n))
-        || !extend
-            && (n_live >= max - usize::from(start && max > 1)
-                || (mine >= max.div_ceil(2) && waits_elsewhere(ctx, cfg, ev, fleet)))
+        || n_live >= max - usize::from(start && max > 1)
+        || (mine >= max.div_ceil(2) && waits_elsewhere(ctx, cfg, ev, fleet))
     {
         let by = Some(held_by(ctx, cfg, r)).filter(|b| !b.is_empty());
         let by = by.map_or(String::new(), |b| format!(": {b}"));
@@ -358,7 +356,7 @@ fn launch(
     if let Some(why) = crate::hosts::slot_before(ctx, cfg, r, ev, (fleet, n, role), &live) {
         return crate::gate::refused("HOST_FULL", why);
     }
-    if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && extend)) {
+    if let Some((code, why)) = room(ctx, cfg, r) {
         return crate::gate::refused(code, why);
     }
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
@@ -714,6 +712,9 @@ pub fn drive(
     if only.is_none() {
         if let Err(e) = crate::check::budget(ctx, cfg, r, out) {
             writeln!(out, "budget: {e:#}")?;
+        }
+        if let Err(e) = crate::pending::requeue_waiting(ctx, cfg) {
+            writeln!(out, "requeue extends: {e:#}")?;
         }
     }
     lap("disk budget");
@@ -1888,12 +1889,18 @@ fn starts<'a>(
         };
         let at = (fleet, n.parse().ok(), "start");
         let design = n.parse().ok().and_then(|n| queue::wants_design(&events, fleet, n));
+        let again = n.parse().is_ok_and(|n| crate::pending::requeued(&events, fleet, n));
         let f = &cfg.fleet[fleet];
-        let c = match design {
-            Some(role) => ["spawn", fleet, &n, role, "--supersede"],
-            None => ["spawn", fleet, &n, f.flow().start(), ""],
-        };
-        let code = match act(ctx, cfg, r, out, &events, at, &c[..4 + usize::from(design.is_some())]) {
+        let c = ["spawn", fleet, &n, design.unwrap_or(f.flow().start()), "--supersede"];
+        let code = match act(
+            ctx,
+            cfg,
+            r,
+            out,
+            &events,
+            at,
+            &c[..4 + usize::from(design.is_some() || again)],
+        ) {
             Ok(c) => c,
             Err(e) => {
                 errs.push((fleet, e));

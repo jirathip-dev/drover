@@ -95,7 +95,7 @@ fn rounds(events: &[Event], f: &str, n: u64) -> String {
     shown.collect::<Vec<_>>().join(" · ")
 }
 
-fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Value {
+fn row(ev: &[Event], (repo, paused): (&str, bool), f: &str, r: &QueueRow, k: Option<usize>) -> Value {
     let fig = figure(&r.act, &r.state);
     let title = format!("#{} {}", r.issue, r.title.clone().unwrap_or_default());
     let state = r.state.replace('(', " ").replace(')', "").replace("⏸ waiting: ", "");
@@ -115,6 +115,9 @@ fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Val
     }
     if r.pr.ci.as_deref() == Some("green") {
         sub = format!("{sub} · CI ✓");
+    }
+    if let Some(w) = k.and(crate::pending::waits(ev, f, r.issue, paused)) {
+        sub = format!("{sub} · {w}");
     }
     let vals = json!({"fleet": f, "issue": r.issue, "agent": r.lane});
     if let Some(b) = r.blocked_by {
@@ -156,11 +159,12 @@ fn hot_row(f: &str, r: &QueueRow) -> Option<Value> {
 fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
     let f = &c.name;
     let (queued, busy): (Vec<&QueueRow>, Vec<&QueueRow>) = c.rows.iter().partition(|r| r.state == "queued");
+    let paused = c.paused.is_some();
     let rows = |rs: &[&QueueRow], q: bool| -> Vec<Value> {
         let k = |i| q.then_some(i);
         rs.iter()
             .enumerate()
-            .flat_map(|(i, r)| [Some(row(ev, &c.config.repo, f, r, k(i))), hot_row(f, r)])
+            .flat_map(|(i, r)| [Some(row(ev, (&c.config.repo, paused), f, r, k(i))), hot_row(f, r)])
             .flatten()
             .collect()
     };
@@ -168,7 +172,6 @@ fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
         json!({"type": "section", "id": format!("{id}-{f}"), "header": format!("{word} ({})", rs.len()),
             "blocks": [{"type": "list", "id": format!("{id}-list-{f}"), "rows": rs}]})
     };
-    let paused = c.paused.is_some();
     let badge = [
         json!({"text": "driving", "tone": "ok"}),
         json!({"text": "paused", "tone": "mute"}),

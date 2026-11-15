@@ -265,16 +265,6 @@ impl Server<'_> {
 
     pub(super) fn op(&self, ctx: &Ctx, f: BTreeMap<String, String>) -> Result<String> {
         let [op, fleet] = ["op", "fleet"].map(|k| f.get(k).cloned().unwrap_or_default());
-        let Some(tx) = self
-            .jobs
-            .as_ref()
-            .filter(|_| ["drive", "override", "extend", "park"].contains(&op.as_str()))
-        else {
-            let (res, later) = crate::orchestrator::deferred(|| self.write(ctx, &f));
-            self.later(ctx, later);
-            return res;
-        };
-        let key = f.get("issue").map_or(fleet.clone(), |n| format!("{fleet}#{n}"));
         if op == "extend" {
             if f.get("mtime").map(String::as_str) != Some(&super::mtime(ctx)) {
                 return refused(
@@ -283,9 +273,21 @@ impl Server<'_> {
                 );
             }
             let n = f.get("issue").and_then(|n| n.parse().ok()).context("no issue")?;
-            let state = crate::gate::held(ctx, &fleet, n)?;
-            crate::gate::extended(ctx, (&fleet, n), (true, "owner"), &state)?;
+            let mut out = vec![];
+            let ext = (true, "owner", None);
+            crate::gate::needs_human(ctx, &Config::kept(ctx)?, &self.r, &mut out, (&fleet, n), "extend", ext)?;
+            return Ok(format!("#{n}: extended, back in the queue"));
         }
+        let Some(tx) = self
+            .jobs
+            .as_ref()
+            .filter(|_| ["drive", "override", "park"].contains(&op.as_str()))
+        else {
+            let (res, later) = crate::orchestrator::deferred(|| self.write(ctx, &f));
+            self.later(ctx, later);
+            return res;
+        };
+        let key = f.get("issue").map_or(fleet.clone(), |n| format!("{fleet}#{n}"));
         if !lock(&self.running).insert(key.clone()) {
             return refused("DRIVE_RUNNING", format!("{key} has a {op} running"));
         }
@@ -464,7 +466,8 @@ impl Server<'_> {
                 })
                 .collect(),
             pending: crate::pending::of(&events, f, i.issue).map(start),
-            status: crate::pending::of(&events, f, i.issue).and_then(|p| p.line(ctx.now)),
+            status: (crate::pending::of(&events, f, i.issue).and_then(|p| p.line(ctx.now)))
+                .or_else(|| crate::pending::waits(&events, f, i.issue, cfg.fleet.get(f).is_some_and(|c| c.paused))),
         };
         let seen = crate::hosts::cached(ctx);
         let host = |(name, h): (String, Option<&crate::config::HostCfg>)| {

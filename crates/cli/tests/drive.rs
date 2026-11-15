@@ -1941,30 +1941,24 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
     };
     let spy = Spy(low, &c, Default::default());
     let (code, out) = run(&c, &spy, &["extend", "sendmeter", "12"]);
-    assert!(code == 0 && out.contains("waiting for host (MEM_LOW)"), "{out}");
+    assert!(code == 0 && out.ends_with("#12: extend\n"), "{out}");
     let seen = spy.2.lock().unwrap().clone();
-    assert!(
-        !seen.is_empty() && seen.iter().all(|&l| l),
-        "a command ran before the decision: {seen:?}"
-    );
+    assert!(seen.iter().all(|&l| l), "a command ran before the decision: {seen:?}");
     let all = read(&c.state).unwrap().to_vec();
     assert!(!all.iter().any(|e| e.kind == "extend-failed"), "{all:?}");
-    let p = drover::pending::of(&all, "sendmeter", 12).expect("pending");
-    assert_eq!(
-        (p.action.as_str(), p.reason.as_deref(), p.failed),
-        ("extend", Some("MEM_LOW"), false)
-    );
-    assert_eq!(state(&c), "fix(3)");
+    assert_eq!(drover::pending::of(&all, "sendmeter", 12), None);
+    assert_eq!(state(&c), "queued");
+    assert!(started("").is_empty(), "the tap spawns nothing");
 
     let r = base();
     let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["fix"], "{out}");
+    assert_eq!(steps, ["start"], "{out}");
     assert!(!started("").is_empty(), "{:?}", r.calls.borrow());
-    assert_eq!(drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
+    assert_eq!(state(&c), "fix(3)");
 }
 
 #[test]
-fn an_extend_during_a_pass_spawns_at_once() {
+fn an_extend_during_a_pass_only_requeues_it() {
     let c = setup("drive-extend-lock");
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     ev(
@@ -1981,7 +1975,8 @@ fn an_extend_during_a_pass_spawns_at_once() {
         .reply("git -C", "");
     let (code, out) = run(&c, &r, &["extend", "sendmeter", "12"]);
     assert!(code == 0 && out.ends_with("#12: extend\n"), "{out}");
-    assert!(!started("sendmeter-impl-12").is_empty(), "{:?}", r.calls.borrow());
+    assert!(started("sendmeter-impl-12").is_empty(), "{:?}", r.calls.borrow());
+    assert_eq!(state(&c), "queued");
     assert!(lease_on(&c, "drive.lock").is_some(), "the pass's lock is left alone");
     let all = read(&c.state).unwrap();
     assert_eq!(all.iter().filter(|e| e.kind == "round-extended").count(), 1);
