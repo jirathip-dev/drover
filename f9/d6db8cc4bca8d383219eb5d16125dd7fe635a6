@@ -1,0 +1,10 @@
+Decided: frozen-add checks read `frozen` from `git show <base>:<config>`; the head's arch.toml no longer feeds them
+Because: "frozen-add checks use the `frozen` list from the base's `.drover/arch.toml`"
+Because: crates/core/src/arch.rs:248
+Decided: the base file is parsed leniently (only `frozen`), so an older base arch.toml with other fields still loads
+Because: crates/core/src/arch.rs:31
+Decided: no `--base`, or no arch.toml at the base: an empty frozen list, so no frozen-add violations
+Because: "No base arch.toml (or no `--base`): no frozen-add violations, as no freeze has merged."
+Rejected: the union of base and head lists — a PR that adds and freezes a new file would still fail on every line
+Check: crates/cli/tests/arch_check.rs:598 walks all four AC cases; it fails on staging and passes at the head
+Owner: A pull request can now add a new file and freeze it in one go; the freeze only takes effect once it merges.
