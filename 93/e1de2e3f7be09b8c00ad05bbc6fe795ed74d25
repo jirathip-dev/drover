@@ -1,0 +1,12 @@
+Decided: every drive pass runs one reconcile over the fleet's in-flight hot-file issues before any issue step, logging serial-held with by reconcile
+Because: "Every drive pass reconciles held locks: an issue that cannot hold all of its hot files holds none"
+Decided: an issue held in any of its groups is held in all of them; a hot file over max keeps its earliest queued holders and holds the rest; repeated until nothing changes
+Because: "no file is ever held by more than its max"
+Decided: an in-flight issue with an open queue blocker or a lane held on another issue is stuck: it holds none and is never handed a slot
+Because: crates/core/src/queue.rs:306
+Decided: drive no longer runs the serial step for a merged or closed issue, so it takes no hot lock
+Because: crates/core/src/drive.rs:1188
+Rejected: reconciling only on new joins inside serial() — pre-upgrade and never-driven issues never reach that path
+Rejected: a needs-human or parked case — those states are not in flight, so holders already drops them
+Check: crates/core/src/drive.rs:1629 keeps a stuck issue off the slot queue, else reconcile and the slot step would flap each pass
+Owner: Hot files no longer end up locked by two PRs or by a PR that is itself waiting or blocked; each drive pass now fixes those locks.
