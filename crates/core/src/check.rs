@@ -768,7 +768,7 @@ pub fn clean_all(
         let away = e.str("host").filter(|_| e.str("machine").is_some());
         let held = match away.filter(|h| cfg.hosts.get(*h).is_some_and(|c| !c.enabled)) {
             Some(h) => !off.iter().any(|o| o.0 == h && o.2.is_some()),
-            None => crate::hosts::offline(ctx, Some(e)).is_some(),
+            None => crate::hosts::offline(ctx, Some(cfg), Some(e)).is_some(),
         };
         let root = crate::roots::skip(ctx, cfg, e).map(|w| match w {
             "off-root" => "off-root (not cleaned)",

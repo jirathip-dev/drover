@@ -764,8 +764,8 @@ pub fn scan(
                 format!("{why}{NO_PUSH}respawning {role}")
             };
         }
-        if let Some(h) = crate::hosts::offline(ctx, sp).filter(|_| s.active_lane().is_some()) {
-            (w.who, w.what, w.next_cmd, w.promise) = ("none", format!("host offline: {h}"), None, None);
+        if let Some(h) = crate::hosts::offline(ctx, Some(cfg), sp).filter(|_| s.active_lane().is_some()) {
+            (w.who, w.what, w.next_cmd, w.promise) = ("none", h, None, None);
         }
         let stuck = ["idle without pushing", "rev idle without", "reviewer exited"]
             .iter()
