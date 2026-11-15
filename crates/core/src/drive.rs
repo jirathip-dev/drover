@@ -1202,7 +1202,7 @@ fn pass(
         let sp = crate::events::last_spawn(&ev, lane);
         let live = agents.iter().any(|a| a.name == lane);
         let pane = sp.and_then(|e| e.str("pane")).filter(|_| live);
-        let away = crate::hosts::offline(ctx, sp).is_some();
+        let away = crate::hosts::offline(ctx, Some(cfg), sp).is_some();
         if fast && !live || away {
             continue;
         }
