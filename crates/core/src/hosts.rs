@@ -882,7 +882,9 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
         .map(|h| h.0)
         .filter(|n| cfg.host_acp(n).is_some())
     {
-        return acp_health(ctx, cfg, on, (name, tags, home));
+        let mut bad = acp_health(ctx, cfg, on, (name, tags, home));
+        bad.extend(shed_row(on));
+        return bad;
     }
     let mut bad = vec![];
     let mut fail = |pass: bool, row: String| bad.extend((!pass).then_some(row));
@@ -908,10 +910,12 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     let mine = format!("drover {}", crate::VERSION);
     let line = format!("! drover — {theirs} there, {mine} here → the next `check` updates it (docs/hosts.md)");
     fail(theirs == mine, line);
-    if let Err(e) = crate::session::live_on(on) {
-        bad.push(format!("! shed: {e:#}"));
-    }
+    bad.extend(shed_row(on));
     bad
+}
+
+fn shed_row(on: &On) -> Option<String> {
+    crate::session::live_on(on).err().map(|e| format!("! shed: {e:#}"))
 }
 
 fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[String], &str)) -> Vec<String> {
