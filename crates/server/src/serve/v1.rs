@@ -365,14 +365,14 @@ impl Server<'_> {
     pub(super) fn blocks(&self, ctx: &Ctx, q: &BTreeMap<String, String>, chat: Chat) -> LaneChat {
         let num = |k: &str| q.get(k).and_then(|v| v.parse().ok());
         let acp = || {
-            let (cfg, ev) = (Config::load(&ctx.config).ok()?, working(&ctx.state).ok()?);
-            let all = self.lanes(ctx.now, &cfg, &ev, &ev.states)?;
-            let l = all.into_iter().find(|l| q.get("agent") == Some(&l.name))?;
-            let (on, pane) = (l.on(&self.r), l.pane.as_deref()?);
+            let (agent, ev) = (q.get("agent")?, working(&ctx.state).ok()?);
+            let on = crate::hosts::On::of(&self.r, crate::events::last_spawn(&ev, agent));
             let n = num("n").or_else(|| num("lines")).unwrap_or(200).min(200);
             let seq = q.get("before").and_then(|v| v.parse::<u64>().ok()).filter(|&s| s > 0);
-            let ev = crate::term::Shed(crate::runner::Runner::shed(&on)?).transcript(&on, pane, seq, n);
-            ev.ok().flatten()
+            match crate::session::transcript::page(&on, ctx, agent, seq, n)? {
+                crate::session::transcript::Transcript::Events(ev) => Some(ev),
+                crate::session::transcript::Transcript::Screen(_) => None,
+            }
         };
         let Some(ev) = self.export.is_none().then(acp).flatten() else {
             return LaneChat {
@@ -403,7 +403,7 @@ impl Server<'_> {
         let mut rows: Vec<Value> = serde_json::from_str(kept.1.as_deref().unwrap_or("[]")).unwrap_or_default();
         if kept.1.is_none() || ctx.now >= kept.0 + 10 {
             let same = |a: &Value, b: &Value| ["host", "name", "state"].iter().all(|k| a[k] == b[k]);
-            let mut now = crate::shed::others(cfg, &self.r, events);
+            let mut now = crate::lanes::others(cfg, &self.r, events);
             for r in now.iter_mut().filter(|r| r.get("error").is_none()) {
                 let was = rows.iter().find(|p| same(p, r)).and_then(|p| p["since"].as_u64());
                 r["since"] = json!(was.unwrap_or(ctx.now));
@@ -436,7 +436,7 @@ impl Server<'_> {
                 role: l.role.clone(),
                 harness: l.harness.clone(),
                 model: l.model.clone(),
-                state: l.state.clone(),
+                state: l.state.word(),
                 shown,
                 tone: tone.into(),
                 since: l.since,
@@ -450,8 +450,8 @@ impl Server<'_> {
 
     pub(super) fn state(&self, ctx: &Ctx) -> Result<State> {
         let (cfg, events) = (Config::kept(ctx)?, working(&ctx.state)?);
-        let (st, r) = (events.states.clone(), &self.cached(ctx.now, 60));
-        let lanes = self.lane_list(ctx, &cfg, &events, &st);
+        let (st, r) = (&events.states, &self.cached(ctx.now, 60));
+        let lanes = self.lane_list(ctx, &cfg, &events, st);
         let queued = |(f, i): (&String, crate::queue::Item)| Queued {
             fleet: f.clone(),
             issue: i.issue,
@@ -502,7 +502,7 @@ impl Server<'_> {
         let queue = cfg
             .fleet
             .keys()
-            .flat_map(|f| crate::queue::view(&events, &st, f).into_iter().map(move |i| (f, i)));
+            .flat_map(|f| crate::queue::view(&events, st, f).into_iter().map(move |i| (f, i)));
         Ok(State {
             seq: events.last().map_or(0, |e| e.seq),
             now: ctx.now,
@@ -665,8 +665,14 @@ fn pending_cards(ctx: &Ctx, mut tab: NeedsTab) -> NeedsTab {
     let back = |f: &str, n| crate::pending::of(&ev, f, n).filter(|p| p.back(ctx.now));
     tab.issues
         .retain(|i| crate::pending::of(&ev, &i.fleet, i.issue).is_none() || back(&i.fleet, i.issue).is_some());
-    let mut st = ev.states.clone();
-    st.retain(|(f, n), _| back(f, *n).is_some() && !tab.issues.iter().any(|i| i.fleet == *f && i.issue == *n));
+    let asked = crate::events::of_kind(&ev, &["pending-action"]);
+    let keys: std::collections::BTreeSet<(String, u64)> =
+        asked.iter().filter_map(|e| Some((e.fleet.clone(), e.issue?))).collect();
+    let card =
+        |(f, n): &&(String, u64)| back(f, *n).is_some() && !tab.issues.iter().any(|i| i.fleet == *f && i.issue == *n);
+    let mut st: crate::events::States = (keys.iter().filter(card))
+        .filter_map(|k| ev.states.get_key_value(k).map(|(k, v)| (k.clone(), v.clone())))
+        .collect();
     for s in st.values_mut() {
         s.last_event = "extend-failed".into();
     }

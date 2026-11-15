@@ -165,16 +165,14 @@ fn dry_run_launches_pinned_dsh_tui_with_role_patch() {
     assert_eq!(cmd(2).1["labels"]["harness"], "dsh");
     let launch = format!("exec dsh-tui --patch '{}'\r", patch.display());
     assert_eq!(cmd(4), at("send", json!({"name": lane, "text": launch})));
-    assert_eq!(cmd(5), at("get", json!({"name": lane})));
-    assert_eq!(cmd(6), at("read", json!({"name": lane, "history": false})));
-    assert_eq!(cmd(7), at("keys", json!({"name": lane, "keys": ["esc"]})));
-    let (m, kick) = cmd(8);
+    assert_eq!(cmd(5), at("read", json!({"name": lane, "history": false})));
+    assert_eq!(cmd(6), at("keys", json!({"name": lane, "keys": ["esc"]})));
+    let (m, kick) = cmd(7);
     assert!(
         m == "send" && kick["text"].as_str().unwrap().starts_with("Read "),
         "{kick}"
     );
-    assert_eq!(cmd(9), at("get", json!({"name": lane})));
-    assert_eq!(cmd(10), at("keys", json!({"name": lane, "keys": ["enter"]})));
+    assert_eq!(cmd(8), at("keys", json!({"name": lane, "keys": ["enter"]})));
     assert!(sh.methods().is_empty(), "a dry run calls nothing");
 }
 

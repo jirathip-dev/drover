@@ -250,7 +250,7 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str, why
     let on = crate::hosts::On::new(r, cfg.hosts.get(name).context("no such host")?.machine.as_deref());
     let mut lanes = BTreeMap::new();
     let mine = |e: &&Event| e.kind == "spawn" && e.str("host") == Some(name);
-    for e in events.iter().filter(mine) {
+    for e in crate::events::lanes(&events).into_iter().filter(mine) {
         lanes.extend(e.str("agent").zip(e.str("worktree")));
     }
     for (lane, wt) in lanes {
@@ -276,7 +276,7 @@ pub fn stop(ctx: &Ctx, cfg: &Config, r: &dyn Runner, name: &str, verb: &str, why
 }
 
 /// `check`: stop each running cloud host at its spend limit, or once it has had no live agent for `idle_stop_minutes`.
-pub type Live = BTreeMap<String, Option<Vec<Value>>>;
+pub type Live = BTreeMap<String, Option<Vec<crate::session::Session>>>;
 pub fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner, live: &Live, out: &mut dyn std::io::Write) -> Result<()> {
     let (events, seen) = (working(&ctx.state).unwrap_or_default(), crate::hosts::cached(ctx));
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.cloud.is_some()) {

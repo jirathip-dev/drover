@@ -144,8 +144,8 @@ fn parked_lane_alerts_once_and_never_stalls() {
     );
     assert_eq!(
         (n("lane-dead", 14), n("stall", 14)),
-        (1, 1),
-        "dead (dirty) keeps its alerts; #666: its stall once, until the lane changes"
+        (1, 0),
+        "dead (dirty) keeps its lane-dead; #1053: a gone lane is dead, never stalled"
     );
 }
 
@@ -154,7 +154,7 @@ fn unpaused_fleet_resumes_a_parked_impl_to_review() {
     let (c, r) = fixture("parked-resume", false);
     let events = read(&c.state).unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    let waits = drover::waiting::scan(&c, &cfg, &r, &events, &[], false);
+    let waits = drover::waiting::scan(&c, &cfg, &r, &events, &[], false, None);
     let w = &waits.iter().find(|(s, _)| s.issue == 12).unwrap().1;
     assert_eq!(
         (w.who, w.what.as_str()),

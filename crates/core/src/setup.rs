@@ -53,7 +53,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
         "drover-setup-{}",
         name.replace(|c: char| !c.is_ascii_alphanumeric(), "-")
     );
-    term::Shed(crate::shed::Shed { acp: None, ..b }).start(&on, pane, &[], "/tmp", &term::Acp::default())?;
+    term::Shed(crate::shed::Shed { acp: None, ..b }).start(ctx, &on, pane, &[], "/tmp", &term::Acp::default())?;
     term::ok(&on, &term::run_argv(pane, &[&format!("cd; {line}; exit")]))?;
     let d = json!({"host": host, "name": name, "pane": pane, "machine": on.machine, "via": via});
     append(&ctx.state, &Event::new(ctx.now, "", None, "setup", d))?;
@@ -71,7 +71,7 @@ pub fn open<'e>(events: &'e [Event], pane: &str) -> Option<&'e Event> {
 /// Close setup `e`'s terminal (its scrollback goes with it) and log `setup-closed`.
 pub fn close(ctx: &Ctx, r: &dyn Runner, e: &Event, why: &str) -> Result<()> {
     let pane = e.str("pane").unwrap_or_default();
-    term::close(&On::of(r, Some(e)), pane)?;
+    term::close(ctx, &On::of(r, Some(e)), pane)?;
     let d = json!({"pane": pane, "why": why});
     append(&ctx.state, &Event::new(ctx.now, "", None, "setup-closed", d))
 }

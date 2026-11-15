@@ -226,7 +226,7 @@ Every fleet is driven by drover itself. `drover drive [fleet]` does one pass, fr
 | `FAIL (form-only)`: every `blocking [<category>]` finding in `form_categories` | a fix round that doesn't count toward `review_rounds` (`fix(n·f)`); a blocker untagged or of another category: a plain FAIL (`form-only-rejected`); past `form_rounds` per issue they count (`form-rounds-exhausted`) |
 | FAIL in round `review_rounds` | `verdict` logs `needs-human` with the findings; drive stops |
 | a lane killed | `spawn impl` (respawn) |
-| a live lane idle `stall_minutes` with no push, verdict or turn (#666) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with its last screen lines |
+| a live lane shed has said quiet for `stall_minutes` with no turn-end (#666, #1053) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with shed's note |
 | a live lane whose pane or session shows no output 10 min after its spawn | an ACP session gets its brief again once; then `spawn <role> --supersede` once (respawn `failed start`); then `needs-human START_FAILED` |
 | an ACP lane (build, check or design stage) mid-turn with no session event `silent_minutes` (10) and no tool call still running (#792) | `shed cancel` and one `continue` prompt (`nudged`); still silent 10 min later: `spawn <role> --supersede` once (`respawned-silent`); silent again within the hour: `needs-human LANE_SILENT` |
 | a design or architect lane in `error` or gone with no commit of its own (past its spawn, not on integration) under its stage's folders (#915) | `needs-human LANE_FAILED` naming the error; no `design-review`, no ask; a respawn is the owner's `spawn`, under `RESPAWN_LOOP` |
@@ -262,9 +262,13 @@ never passes `--force`, and never bypasses a refusal: `REFUSED` (e.g. `HOST_BUSY
 next pass. Starts fan out: a pass tries every startable item in queue order, each spawn sampling the host
 afresh. An item-specific refusal (`SERIAL_BUSY`, `MCP_FORBIDDEN`, …) skips that item for the pass; it keeps
 its queue place and status reads `skipped this pass: <CODE> (<why>)` (board lane `skip <CODE>`). `CAP` ends
-the fleet's starts; `HOST_BUSY` and `LOGIN_NEEDED` end starting for every later fleet in the pass too (same Mac). Every action logs a passive `driven` event (step, command, result). A pass holds
-the `drive.lock` lease (#344: taken over once its pid is gone, or after an hour), so cron and the button never overlap; the
-board shows `driver: drover · last pass <age> ago`.
+the fleet's starts; `HOST_BUSY` and `LOGIN_NEEDED` end that fleet's starts in the pass. Every action logs a passive `driven` event (step, command, result).
+#896: each fleet's pass runs on its own thread under its own `drive-<fleet>.lock` lease (`drive-fast-<fleet>.lock` for
+the fast step; #344: taken over once its pid is gone, or after an hour), so cron and the button never overlap on one
+fleet and a slow fleet never holds another. The steps every fleet shares (the look, orphans, repair, checkpoint) run
+under `drive.lock`; a pass that finds it held skips them. A spawn's admission (slot count, host room, its marker) runs
+under the short `admit.lock`, so two fleets' passes never both take the last slot. The board shows each fleet's
+`⟳ driving…` and its last pass's length.
 
 A fix lane may push back on a finding in its report with file:line proof; that is not a fix,
 and the next (fresh) reviewer decides.

@@ -159,9 +159,11 @@ impl FakeShed {
     pub fn screen(&self, name: &str, text: &str) {
         self.set(name, |t| t["text"] = json!(text));
     }
-    /// Terminal `name` exited (`ls` no longer lists it as a lane; `get` still finds it).
+    /// Terminal `name` ended normally: `exited`, code 0, its last report `done` (`ls` and `get` still list it).
     pub fn exit(&self, name: &str) {
-        self.set(name, |t| t["state"] = json!("exited"));
+        self.set(name, |t| {
+            (t["state"], t["exit"], t["reported"]) = (json!("exited"), json!(0), json!({"state": "done"}));
+        });
     }
     /// A `wait` on terminal `name` ends `outcome` (`timeout`, `exited`) instead of `matched`.
     pub fn wait_ends(&self, name: &str, outcome: &str) {
@@ -231,12 +233,8 @@ fn handle(m: &str, p: &Value, st: &mut State) -> Result<Value, RpcError> {
         "get" => Ok(terms[&name].clone()),
         "read" if p["events"] == true && terms[&name]["acp"].is_string() => {
             let before = p["before"].as_u64().unwrap_or(u64::MAX);
-            let all: Vec<&Value> = terms[&name]["events"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .filter(|e| e["seq"].as_u64() < Some(before))
-                .collect();
+            let kept = terms[&name]["events"].as_array().cloned().unwrap_or_default();
+            let all: Vec<&Value> = kept.iter().filter(|e| e["seq"].as_u64() < Some(before)).collect();
             let n = p["n"].as_u64().map_or(all.len(), |n| n as usize);
             Ok(json!({"text": "", "events": all[all.len().saturating_sub(n)..]}))
         }

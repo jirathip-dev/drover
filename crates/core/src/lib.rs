@@ -44,6 +44,7 @@ pub mod runner;
 pub mod runners;
 pub mod secret;
 pub mod service;
+pub mod session;
 pub mod setup;
 pub mod shed;
 pub mod sim;
@@ -802,10 +803,10 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, 
     let agent = sp.or(was).and_then(|e| e.str("agent")).unwrap_or_default();
     let on = &crate::hosts::On::of(r, sp.or(was));
     let wt = sp.map_or(was.and_then(|e| e.str("worktree")), |_| None);
-    let all = wt.and_then(|_| crate::host::agents(on).ok()).unwrap_or_default();
-    let inside = crate::host::live_in(&all, "", std::path::Path::new(wt.unwrap_or_default()));
-    let live = inside.into_iter().find(|a| a["name"] == agent);
-    let pane = sp.and_then(|e| e.str("pane")).or_else(|| live?["pane_id"].as_str());
+    let all = wt.and_then(|_| crate::session::live_on(on).ok()).unwrap_or_default();
+    let dir = std::path::Path::new(wt.unwrap_or_default());
+    let live = all.iter().find(|a| a.in_dir("", dir) && a.name == agent);
+    let pane = sp.and_then(|e| e.str("pane")).or_else(|| Some(live?.name.as_str()));
     let typed = |p| {
         term::awake(on, agent)
             .and_then(|()| term::prompt(on, agent, msg))
@@ -831,16 +832,19 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, 
 
 /// #325: answers whose last delivery failed, newest first (one per ask).
 pub fn undelivered<'a>(events: &'a [Event], fleet: &str) -> Vec<&'a Event> {
-    let tries = |e: &&Event| e.fleet == fleet && e.kind.starts_with("answer-");
+    let kinds = ["answer-undelivered", "answer-delivered", "answer-delivered-live"];
     let mut seen = std::collections::BTreeSet::new();
-    let last = events.iter().rev().filter(tries).filter(|e| seen.insert(e.str("id")));
+    let tries = events::of_kind(events, &kinds)
+        .into_iter()
+        .rev()
+        .filter(|e| e.fleet == fleet);
+    let last = tries.filter(|e| seen.insert(e.str("id")));
     last.filter(|e| e.kind == "answer-undelivered").collect()
 }
 
 /// `drover asks`: the open asks (`all`: closed ones too, with why), oldest first, with age.
 pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, all: bool) -> Result<()> {
-    let mut open = crate::db::asks(&ctx.state, fleet)?;
-    open.retain(|a| all || a.1.is_none());
+    let open = crate::db::asks(&ctx.state, fleet, all)?;
     if as_json {
         let mut rows = Vec::new();
         for (e, why) in &open {

@@ -1,12 +1,12 @@
 use crate::config::Config;
-use crate::events::{Event, States};
+use crate::events::{Event, IssueState, States};
 use crate::hosts::{quote, On};
 use crate::lanes::{self, Lane};
 use crate::runner::{argv, Out, Runner};
+use crate::session::Sessions;
 use crate::waiting::Waiting;
-use crate::{term, Ctx};
+use crate::Ctx;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
@@ -169,17 +169,15 @@ impl Runner for Snap<'_> {
     }
 }
 
-/// The board's lanes: the live agents (`list`, every remote host's added) joined with the log.
-pub fn lanes(cfg: &Config, r: &dyn Runner, ctx: &Ctx, (events, st): (&[Event], &States), list: &Value) -> Vec<Lane> {
-    let mut agents = list["result"]["agents"].as_array().cloned().unwrap_or_default();
-    agents.extend(crate::hosts::remote_agents(cfg, r));
-    lanes::join(cfg, r, &ctx.worktrees, events, st, &agents)
+/// The board's lanes: every host's shed sessions joined with the log.
+pub fn lanes(cfg: &Config, r: &dyn Runner, (events, st): (&[Event], &States), sessions: &Sessions) -> Vec<Lane> {
+    lanes::join(cfg, r, events, st, sessions)
 }
 
 /// #447: what waits are worked out from: the log's length and last row, and each lane's state.
 pub fn wait_key(events: &[Event], all: &[Lane]) -> String {
     let last = events.last().map_or(0, |e| e.seq);
-    let lanes: Vec<_> = all.iter().map(|l| format!("{}={}", l.name, l.state)).collect();
+    let lanes: Vec<_> = all.iter().map(|l| format!("{}={}", l.name, l.state.word())).collect();
     format!("{last} {}", lanes.join(" "))
 }
 
@@ -199,10 +197,11 @@ pub fn saved_waits(
 
 /// Each lane's wait reason, from the cached PR reads.
 pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[Lane]) -> Vec<Waiting> {
-    let live: Vec<_> = (all.iter())
-        .map(|l| json!({"name": l.name, "agent_status": l.state}))
-        .collect();
-    let w = crate::waiting::scan(ctx, cfg, r, events, &live, false);
+    let live: Vec<_> = all.iter().filter_map(|l| l.session.clone()).collect();
+    let names: std::collections::HashSet<&str> = all.iter().map(|x| x.name.as_str()).collect();
+    let shown = |l: &String| names.contains(l.as_str());
+    let keep = |s: &IssueState| !s.done() || s.lane.iter().chain(s.lanes.values()).any(shown);
+    let w = crate::waiting::scan_where(ctx, cfg, r, (events, &live), false, keep);
     w.into_iter().map(|x| x.1).collect()
 }
 
@@ -210,12 +209,10 @@ pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[L
 pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     let s = Snap::new(r, Miss::Collect, load(ctx).map(|s| s.reads), Some(ctx.now));
     let events = crate::events::working(&ctx.state).unwrap_or_default();
-    if let Ok(list) = term::list(&s) {
-        let all = lanes(cfg, &s, ctx, (&events, &crate::events::fold(&events)), &list);
+    let sessions = crate::session::all(cfg, &s);
+    if sessions.listed() {
+        let all = lanes(cfg, &s, (&events, &crate::events::fold(&events)), &sessions);
         waits(ctx, cfg, &s, &events, &all);
-        for l in &all {
-            l.pane.as_ref().map(|p| term::read(&l.on(&s), p));
-        }
     }
     crate::timer::services(ctx, cfg, &s, Some(String::new()));
     crate::hosts::cards(cfg, &s);
@@ -223,8 +220,13 @@ pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     s.fetch();
     let s = Snap { miss: Miss::Live, ..s };
     let (mut key, mut ws) = (String::new(), vec![]);
-    if let Ok(list) = term::list(&s) {
-        let all = lanes(cfg, &s, ctx, (&events, &crate::events::fold(&events)), &list);
+    let sessions = crate::session::all(cfg, &s);
+    if sessions.listed() {
+        if let Err(e) = crate::session::stamp::observe(ctx, cfg, &sessions) {
+            eprintln!("drover: lane states: {e:#}");
+        }
+        let events = crate::events::working(&ctx.state).unwrap_or_default();
+        let all = lanes(cfg, &s, (&events, &crate::events::fold(&events)), &sessions);
         (key, ws) = (wait_key(&events, &all), waits(ctx, cfg, &s, &events, &all));
     }
     let reads = lock(&s.reads).clone();

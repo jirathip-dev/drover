@@ -27,10 +27,11 @@ fn every_adapter_call_is_a_shed_request() {
     let r = shed::With(&f, b.shed());
     let lane = "sendmeter-impl-12";
 
-    assert_eq!(term::read(&r, lane).unwrap(), "screen of sendmeter-impl-12");
+    assert_eq!(
+        term::ok(&r, &term::read_argv(lane)).unwrap(),
+        "screen of sendmeter-impl-12"
+    );
     assert_eq!(b.last("read"), json!({"name": lane, "history": false}));
-    term::recent(&r, lane, "200").unwrap();
-    assert_eq!(b.last("read"), json!({"name": lane, "lines": 200, "history": true}));
     term::keys(&r, lane, "Escape").unwrap();
     assert_eq!(b.last("keys"), json!({"name": lane, "keys": ["esc"]}));
     term::reply(&r, false, lane, lane, "go on").unwrap();
@@ -43,10 +44,10 @@ fn every_adapter_call_is_a_shed_request() {
         b.last("wait"),
         json!({"name": lane, "until": ["working", "blocked"], "timeout": 20.0})
     );
-    let pane = term::harness_in(&r, lane).unwrap();
+    let s = drover::session::get(&r, lane).unwrap().unwrap();
     assert_eq!(
-        (pane["agent"].as_str(), pane["pane_id"].as_str()),
-        (Some("claude"), Some(lane))
+        (s.labels["harness"].as_str(), s.name.as_str(), s.running()),
+        ("claude", lane, true)
     );
     let o = term::exec(&r, &term::wait_output_argv(lane, "❯", "60000")).unwrap();
     assert_eq!(o.code, 0);
@@ -56,20 +57,20 @@ fn every_adapter_call_is_a_shed_request() {
     );
     term::ok(&r, &term::run_argv(lane, &["exec", "'dsh-tui'"])).unwrap();
     assert_eq!(b.last("send"), json!({"name": lane, "text": "exec 'dsh-tui'\r"}));
-    let a = term::agents(&r).unwrap();
+    let a = drover::session::live_on(&r).unwrap();
     assert_eq!(a.len(), 1, "{a:?}");
     assert_eq!(
-        (a[0]["name"].as_str(), a[0]["agent_status"].as_str()),
-        (Some(lane), Some("working"))
+        (a[0].name.as_str(), a[0].status()),
+        (lane, Some(drover::session::Status::Working))
     );
-    assert_eq!(term::list(&r).unwrap()["result"]["agents"], json!(a));
-    term::close(&r, lane).unwrap();
+    let c = ctx(&tmpdir("adapter-calls"), CONFIG);
+    term::close(&c, &r, lane).unwrap();
     assert_eq!(b.methods().iter().rev().take(2).collect::<Vec<_>>(), ["rm", "kill"]);
-    assert!(term::agents(&r).unwrap().is_empty());
-    term::close(&r, lane).unwrap();
+    assert!(drover::session::live_on(&r).unwrap().is_empty());
+    term::close(&c, &r, lane).unwrap();
     let o = term::exec(&r, &term::read_argv(lane)).unwrap();
     assert!(term::failed_with(&o, "pane_not_found"), "{o:?}");
-    assert!(term::read(&r, "w1:p1").is_err());
+    assert!(term::ok(&r, &term::read_argv("w1:p1")).is_err());
     assert!(f.calls.borrow().is_empty(), "{:?}", f.calls.borrow());
 }
 
@@ -118,7 +119,10 @@ fn another_host_is_reached_through_shed_connect_over_ssh() {
     let f = Fake::default().reply("ssh", &format!("{hello}\n{read}\n"));
     let base = shed::With(&f, b.shed());
     let on = On::new(&base, Some("box"));
-    assert_eq!(term::read(&on, "sendmeter-impl-12").unwrap(), "remote screen");
+    assert_eq!(
+        term::ok(&on, &term::read_argv("sendmeter-impl-12")).unwrap(),
+        "remote screen"
+    );
     let calls = f.calls.borrow();
     assert!(
         calls
@@ -327,7 +331,7 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     let (none, s) = (Fake::default(), b.shed());
     let none = shed::With(&none, s);
     assert!(
-        term::agents(&On::new(&none, Some("bazzite"))).is_err(),
+        drover::session::live_on(&On::new(&none, Some("bazzite"))).is_err(),
         "neither answers: unreachable"
     );
     let cfg = drover::config::Config::load(&c.config).unwrap();
@@ -612,7 +616,10 @@ fn an_acp_lanes_state_follows_its_turn_events() {
     assert!(cfg.runtime.is_none(), "no global runtime: the fleet's own");
     let sh = cfg.shed_for("sendmeter").unwrap();
     assert_eq!((sh.acp.as_deref(), sh.policy.as_str()), (Some("claude-acp"), "allow"));
-    assert_eq!(shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap(), 4);
+    assert_eq!(
+        drover::session::stamp::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap(),
+        4
+    );
     let states: Vec<_> = drover::events::read(&c.state)
         .unwrap()
         .iter()
@@ -709,7 +716,7 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
     let c = ctx(&d, &shed_config(&b.sock, ""));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    assert_eq!(shed::intake(&c, &cfg, &b.shed().wire).unwrap(), 2);
+    assert_eq!(drover::session::stamp::intake(&c, &cfg, &b.shed().wire).unwrap(), 2);
     assert_eq!(b.last("events"), json!({"labels": {}, "since": 0}));
     let logged: Vec<_> = drover::events::read(&c.state)
         .unwrap()
@@ -732,14 +739,14 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
         std::fs::read_to_string(c.state.with_file_name("shed.seq")).unwrap(),
         "7"
     );
-    shed::intake(&c, &cfg, &b.shed().wire).unwrap();
+    drover::session::stamp::intake(&c, &cfg, &b.shed().wire).unwrap();
     assert_eq!(
         b.last("events")["since"],
         7,
         "the next pass asks only for what it has not seen"
     );
     let none = Wire::Socket(d.join("none.sock"));
-    assert!(shed::intake(&c, &cfg, &none).is_err());
+    assert!(drover::session::stamp::intake(&c, &cfg, &none).is_err());
 }
 
 #[test]
@@ -802,13 +809,13 @@ fn drive_reads_berths_seq_file_once_when_sheds_is_missing() {
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     std::fs::write(c.state.with_file_name("berth.seq"), "8").unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    assert_eq!(shed::intake(&c, &cfg, &b.shed().wire).unwrap(), 1);
+    assert_eq!(drover::session::stamp::intake(&c, &cfg, &b.shed().wire).unwrap(), 1);
     assert_eq!(b.last("events")["since"], 8);
     assert_eq!(
         std::fs::read_to_string(c.state.with_file_name("shed.seq")).unwrap(),
         "9"
     );
-    shed::intake(&c, &cfg, &b.shed().wire).unwrap();
+    drover::session::stamp::intake(&c, &cfg, &b.shed().wire).unwrap();
     assert_eq!(b.last("events")["since"], 9, "shed's file wins once it exists");
 }
 
@@ -1153,11 +1160,10 @@ fn an_acp_lane_that_exits_on_a_usage_limit_is_pushed_holds_the_host_and_resumes_
     std::fs::write(wt.join("more.rs"), "staged").unwrap();
     git(&wt, &["add", "more.rs"]);
     let head = git(&wt, &["rev-parse", "HEAD"]);
-    let limit = "Claude AI usage limit reached ∙ resets 5pm";
     exits(
         &b,
         &[
-            json!({"event": "text", "text": limit}),
+            json!({"event": "state", "state": "rate-limited", "note": "resets 5pm"}),
             json!({"event": "exited", "code": 0}),
         ],
     );
@@ -1204,7 +1210,7 @@ fn lane_dead_and_waiting_carry_an_acp_lanes_exit_cause() {
     exits(&b, &[json!({"event": "exited", "code": 139})]);
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let c = later(&c, 300);
-    shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
+    drover::session::stamp::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
     let cli = Push(b.cli(&f), wt.clone());
     let (code, out) = run(&c, &cli, &["check"]);
     assert_eq!(code, 0, "{out}");
@@ -2164,8 +2170,8 @@ fn a_silent_lanes_respawn_waits_under_host_busy_and_mem_low() {
 fn an_auth_failure_alerts_signed_out_once_and_holds_the_host() {
     let (c, b, f, wt, _) = acp_lane("acp-auth");
     mid_turn(&b);
-    let err = "API Error: 401 {\"type\":\"error\",\"error\":{\"type\":\"authentication_error\"}}";
-    b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["text"] = json!(err);
+    let err = "auth: API Error: 401 authentication_error";
+    b.lock().terms.get_mut("sendmeter-impl-12").unwrap()["reported"] = json!({"state": "error", "note": err});
     let cli = Push(b.cli(&f), wt.clone());
     for s in [60, 120] {
         let (code, out) = run(&later(&c, s), &cli, &["check"]);
@@ -2219,7 +2225,7 @@ fn an_acp_lane_silent_after_its_first_turn_is_a_failed_start() {
         json!({"seq": seq, "name": "sendmeter-impl-12", "labels": lane_labels(), "event": "turn", "prompt": "# Brief"});
     b.lock().events.push(turn);
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
+    drover::session::stamp::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap();
     let cli = Push(b.cli(&f), wt.clone());
     let check = |secs| {
         let (code, out) = run(&later(&c, secs), &cli, &["check"]);
@@ -2423,7 +2429,7 @@ fn thread_say_restarts_a_hung_acp_orchestrator_and_delivers_to_the_fresh_one() {
     let text = json!({"seq": 1, "name": "orchestrator-t1", "labels": labels, "event": "text", "text": "thinking"});
     b.lock().events.push(text);
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    shed::intake(&at(&c, c.now + 20 * 60), &cfg, &cfg.shed().unwrap().wire).unwrap();
+    drover::session::stamp::intake(&at(&c, c.now + 20 * 60), &cfg, &cfg.shed().unwrap().wire).unwrap();
     let f = hang_fake();
     assert_eq!(
         run(

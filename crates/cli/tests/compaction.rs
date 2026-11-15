@@ -158,7 +158,18 @@ fn compaction_archives_old_done_issues_and_deletes_old_heartbeats() {
     assert_eq!((code, out.trim()), (0, "2 heartbeats deleted, 5 events archived"));
     let kinds = |v: &[Event]| v.iter().map(|e| format!("{}{:?}", e.kind, e.issue)).collect::<Vec<_>>();
     let hot = kinds(&read(&p).unwrap());
-    assert_eq!(hot, ["queueNone", "spawnSome(3)", "mergedSome(2)", "drivenSome(3)"]);
+    assert_eq!(
+        hot,
+        [
+            "queueNone",
+            "spawnSome(3)",
+            "spawnSome(1)",
+            "spawnSome(2)",
+            "mergedSome(2)",
+            "drivenSome(3)"
+        ],
+        "the hot events and the archived lanes' newest events (the lane fold)"
+    );
     let gone = |e: &&Event| !matches!(e.kind.as_str(), "drive-pass" | "kick");
     let rows = |v: &[Event]| {
         v.iter()

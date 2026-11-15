@@ -163,13 +163,15 @@ fn waits(c: &drover::Ctx, r: &Fake, agents: &[serde_json::Value]) -> Vec<Waiting
 }
 
 fn lanes(c: &drover::Ctx, r: &Fake, agents: &[serde_json::Value]) -> Vec<(drover::events::IssueState, Waiting)> {
+    let agents: Vec<_> = agents.iter().map(session).collect();
     scan(
         c,
         &Config::load(&c.config).unwrap(),
         r,
         &read(&c.state).unwrap(),
-        agents,
+        &agents,
         true,
+        None,
     )
 }
 
@@ -180,9 +182,9 @@ fn every_case_has_its_who_what_and_next_command() {
         &c,
         &r,
         &[
-            json!({"name": "sendmeter-impl-11", "agent_status": "working"}),
-            json!({"name": "sendmeter-rev-9-r1", "agent_status": "idle"}),
-            json!({"name": "sendmeter-impl-7", "agent_status": "idle"}),
+            json!({"name": "sendmeter-impl-11", "status": "working"}),
+            json!({"name": "sendmeter-rev-9-r1", "status": "idle"}),
+            json!({"name": "sendmeter-impl-7", "status": "idle"}),
         ],
     );
     let t = NOW - 1500;
@@ -286,11 +288,7 @@ fn every_case_has_its_who_what_and_next_command() {
 #[test]
 fn every_idle_lane_of_an_issue_gets_a_reason() {
     let (c, r) = fixture("waiting-lanes");
-    let all = lanes(
-        &c,
-        &r,
-        &[json!({"name": "sendmeter-rev-9-r1", "agent_status": "working"})],
-    );
+    let all = lanes(&c, &r, &[json!({"name": "sendmeter-rev-9-r1", "status": "working"})]);
     let of = |lane: &str| {
         all.iter()
             .find(|x| x.1.lane == lane)
@@ -553,7 +551,7 @@ fn a_dead_fix_lane_is_respawned_not_parked() {
     for n in [20, 21, 22] {
         r = r.reply(&format!("gh pr view issue-{n} "), &pr(&sha(&n.to_string()), "green"));
     }
-    let all = waits(&c, &r, &[json!({"name": "sendmeter-impl-22", "agent_status": "idle"})]);
+    let all = waits(&c, &r, &[json!({"name": "sendmeter-impl-22", "status": "idle"})]);
     let of = |n: u64| all.iter().find(|w| w.issue == n).map(|w| w.next_cmd.clone());
     let fix = |n: u64| Some(Some(format!("drover spawn sendmeter {n} impl --supersede")));
     assert_eq!(of(20), fix(20), "lane-dead with the fix still due");

@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::events::{age, Event};
 use crate::host;
 use crate::runner::{ok, Runner};
+use crate::session::Session;
 use crate::Ctx;
 use anyhow::Result;
 use serde::Serialize;
@@ -81,14 +82,20 @@ fn walk(mine: &[&Proc], at: &Proc, depth: usize, out: &mut Vec<Proc>) {
     }
 }
 
-fn lanes(ctx: &Ctx, events: &[Event], agents: &[Value], all: &[Proc], cwds: &[(String, String, String)]) -> Vec<Lane> {
+fn lanes(
+    ctx: &Ctx,
+    events: &[Event],
+    agents: &[Session],
+    all: &[Proc],
+    cwds: &[(String, String, String)],
+) -> Vec<Lane> {
     let queue = crate::heavy::line(&ctx.state.with_file_name("heavy"));
-    let lane = |a: &Value| {
-        let agent = a["name"].as_str()?;
+    let lane = |a: &Session| {
+        let agent = a.name.as_str();
         let sp = (events.iter()).rfind(|e| e.kind == "spawn" && e.str("agent") == Some(agent))?;
         let issue = sp.issue.map_or("-".into(), |n| n.to_string());
         let key = format!("{}:{issue}:{}", sp.fleet, sp.str("role").unwrap_or_default());
-        let dir = Path::new(sp.str("worktree").or(a["cwd"].as_str()).unwrap_or("\0"));
+        let dir = sp.str("worktree").map_or(a.cwd.as_path(), Path::new);
         let pids: Vec<String> = host::inside(cwds, dir).into_iter().map(|p| p.0).collect();
         let mine: Vec<&Proc> = all.iter().filter(|p| pids.contains(&p.pid)).collect();
         let mut procs = vec![];
@@ -111,7 +118,7 @@ fn lanes(ctx: &Ctx, events: &[Event], agents: &[Value], all: &[Proc], cwds: &[(S
     agents.iter().filter_map(lane).collect()
 }
 
-fn snapshot(ctx: &Ctx, cfg: &Config, r: &dyn Runner, agents: &[Value]) -> Result<(Vec<Proc>, Vec<Lane>)> {
+fn snapshot(ctx: &Ctx, cfg: &Config, r: &dyn Runner, agents: &[Session]) -> Result<(Vec<Proc>, Vec<Lane>)> {
     let events = crate::events::working(&ctx.state)?;
     let all = ps(r, cfg);
     let lanes = lanes(ctx, &events, agents, &all, &host::cwds(r));
@@ -119,7 +126,7 @@ fn snapshot(ctx: &Ctx, cfg: &Config, r: &dyn Runner, agents: &[Value]) -> Result
 }
 
 /// The `n` busiest processes by CPU as `cpu% command (lane agent | other)`, for `host-overloaded`.
-pub fn busiest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, agents: &[Value], n: usize) -> Result<Vec<String>> {
+pub fn busiest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, agents: &[Session], n: usize) -> Result<Vec<String>> {
     let (mut all, lanes) = snapshot(ctx, cfg, r, agents)?;
     all.sort_by(|a, b| b.cpu.total_cmp(&a.cpu));
     let owner = |p: &Proc| {
@@ -135,7 +142,7 @@ pub fn busiest(ctx: &Ctx, cfg: &Config, r: &dyn Runner, agents: &[Value], n: usi
 
 /// Sample the host and build `drover top`'s rows.
 pub fn top(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Result<Top> {
-    let agents = host::agents(r)?;
+    let agents = crate::session::live_on(r)?;
     let (_, lanes) = snapshot(ctx, cfg, r, &agents)?;
     let main = crate::hosts::cards(cfg, r).into_iter().next().and_then(|c| c.1);
     let line = crate::heavy::line(&ctx.state.with_file_name("heavy"));

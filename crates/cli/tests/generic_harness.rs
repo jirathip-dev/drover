@@ -15,21 +15,6 @@ fn the_generic_harness_has_every_fallback() {
     let h = providers::get("gemini");
     assert!(h.env().is_empty() && h.health_check().is_none() && h.process_names().is_empty());
     assert!(h.login().is_none() && h.hook_dialect().is_none() && h.token_env().is_none());
-    let banner = "Claude usage limit reached. Your limit will reset at 3pm.";
-    assert!(!h.signed_out("Please run /login") && !h.usage_limited(banner));
-    assert_eq!(h.tool_line("⏺ Bash(cargo test)"), None);
-    assert_eq!(h.answer_keys(2), "2");
-    assert_eq!(
-        (h.pending_menu(MENU), h.status_word("✻ Herding… (4m 12s)")),
-        (None, None)
-    );
-    assert_eq!(h.transcript(std::path::Path::new("/"), "/wt"), None);
-    assert!(h.now_line("$ cargo test") && !h.now_line("────────────────────"));
-    assert_eq!(
-        drover::lanes::activity("gemini", MENU),
-        "2. Postgres",
-        "the last non-chrome line"
-    );
 }
 
 #[test]
@@ -82,7 +67,7 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
     );
     let res = String::from_utf8_lossy(&s.respond(&req, T)).into_owned();
     assert!(
-        res.contains("no menu on") && !sh.called("keys", LANE) && sh.sent(LANE).is_empty(),
+        res.contains("REFUSED BAD_VALUE: no menu") && !sh.called("keys", LANE) && sh.sent(LANE).is_empty(),
         "{res}"
     );
     let host: serde_json::Value = serde_json::from_str(&api(&s, ADDR, "", T, "host")).unwrap();

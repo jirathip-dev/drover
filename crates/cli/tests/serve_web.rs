@@ -385,7 +385,7 @@ fn page_reads_only_cached_pr_data_and_serves_pwa_assets() {
     assert_eq!(
         (&row["subtitle"], &row["tap"]["url"]),
         (
-            &json!("impl · CI ✓"),
+            &json!("impl · PR #34 · CI ✓"),
             &json!("https://github.com/jirathip-dev/sendmeter/pull/34")
         ),
         "{row}"
@@ -479,29 +479,23 @@ fn lanes_group_by_fleet_with_others() {
     let events = read(&c.state).unwrap();
     let st = drover::events::fold(&events);
     let wt = c.worktrees.join("synergy-apps/designer").to_string_lossy().into_owned();
-    let agents = json!([
-        {"name": "sendmeter-impl-12", "agent_status": "working", "pane_id": "w1:p2", "cwd": "/x"},
-        {"name": "synergy-design-5", "agent_status": "done", "pane_id": "w2:p1", "cwd": "/x"},
-        {"name": "w3", "agent": "claude", "agent_status": "working", "pane_id": "w3", "cwd": wt},
-        {"name": "side-project", "agent": "codex", "agent_status": "idle", "pane_id": "side-project", "cwd": "/Users/me/Projects/side"},
-        {"agent": "dsh-tui", "agent_status": "blocked", "pane_id": "w5:p1", "cwd": "/p/synergy-apps"},
-    ]);
-    let lanes = drover::lanes::join(
-        &cfg,
-        &Fake::default(),
-        &c.worktrees,
-        &events,
-        &st,
-        agents.as_array().unwrap(),
-    );
-    let got: Vec<(Option<&str>, &str, &str, &str, bool)> = lanes
+    let lab = |f: &str, h: &str| json!({"fleet": f, "harness": h});
+    let agents = sessions(json!([
+        {"name": "sendmeter-impl-12", "status": "working", "cwd": "/x", "labels": lab("sendmeter", "claude")},
+        {"name": "synergy-design-5", "status": "done", "cwd": "/x", "labels": lab("synergy", "claude")},
+        {"name": "w3", "status": "working", "cwd": wt, "labels": lab("synergy", "claude")},
+        {"name": "side-project", "status": "idle", "cwd": "/Users/me/Projects/side", "labels": lab("", "codex")},
+        {"name": "synergy-impl-7", "status": "waiting-approval", "cwd": "/p/synergy-apps", "labels": lab("synergy", "dsh")},
+    ]));
+    let lanes = drover::lanes::join(&cfg, &Fake::default(), &events, &st, &agents);
+    let got: Vec<(Option<&str>, &str, &str, String, bool)> = lanes
         .iter()
         .map(|l| {
             (
                 l.fleet.as_deref(),
                 l.name.as_str(),
                 l.role.as_str(),
-                l.state.as_str(),
+                l.state.word(),
                 l.parked.is_some(),
             )
         })
@@ -509,12 +503,12 @@ fn lanes_group_by_fleet_with_others() {
     assert_eq!(
         got,
         [
-            (Some("sendmeter"), "sendmeter-impl-12", "impl", "working", false),
-            (Some("synergy"), "synergy-design-5", "design", "done", false),
-            (Some("synergy"), "w3", "other", "working", false),
-            (None, "side-project", "other", "idle", false),
-            (Some("synergy"), "synergy-impl-7", "impl", "blocked", false),
-            (Some("sendmeter"), "sendmeter-rev-9-r1", "rev", "dead", false),
+            (Some("sendmeter"), "sendmeter-impl-12", "impl", "working".into(), false),
+            (Some("synergy"), "synergy-design-5", "design", "done".into(), false),
+            (Some("synergy"), "w3", "other", "working".into(), false),
+            (None, "side-project", "other", "idle".into(), false),
+            (Some("synergy"), "synergy-impl-7", "impl", "blocked".into(), false),
+            (Some("sendmeter"), "sendmeter-rev-9-r1", "rev", "dead".into(), false),
         ]
     );
     assert_eq!(
@@ -523,10 +517,9 @@ fn lanes_group_by_fleet_with_others() {
     );
     let sh = FakeShed::attached(&c);
     sh.lane("sendmeter-impl-12", "working", "/x");
-    sh.screen(
-        "sendmeter-impl-12",
-        "⏺ Bash(cd ~/w; cargo test 2>&1 | tail -5)\n\n✻ Herding… (4m 2s · ↓ 1k tokens)\n────────────────────\n> \n────────────────────\n",
-    );
+    sh.set("sendmeter-impl-12", |t| {
+        t["reported"]["note"] = json!("running: cargo test (4m)")
+    });
     sh.lane("synergy-design-5", "done", "/x");
     for (name, harness, cwd, state) in [
         ("w3", "claude", wt.as_str(), "working"),
@@ -544,7 +537,7 @@ fn lanes_group_by_fleet_with_others() {
     assert_eq!(find(&lanes, "lanes-working").unwrap()["header"], "working (2)");
     assert_eq!(
         find(&lanes, "l-sendmeter-impl-12").unwrap()["subtitle"],
-        "impl · local · ✻ Herding… · now: running cd ~/w; cargo test 2>&1 | tail -5 · 4m"
+        "impl · local · running: cargo test (4m)"
     );
     assert_eq!(
         find(&lanes, "lanes-dead").unwrap()["blocks"][0]["rows"][0]["id"],
@@ -562,32 +555,24 @@ fn one_lane_per_agent_name() {
         append(&c.state, &Event::new(ts, "sendmeter", Some(3061), "spawn", d)).unwrap();
     }
     let events = read(&c.state).unwrap();
-    let agents = json!([
-        {"name": "sendmeter-impl-3061", "agent_status": "working", "pane_id": "w1:p1", "cwd": "/x"},
-        {"name": "sendmeter-impl-3061", "agent_status": "idle", "pane_id": "w9:p1", "cwd": "/x", "host": "mini"},
-    ]);
+    let lab = json!({"fleet": "sendmeter"});
+    let agents = sessions(json!([
+        {"name": "sendmeter-impl-3061", "status": "working", "cwd": "/x", "labels": lab},
+        {"name": "sendmeter-impl-3061", "status": "idle", "cwd": "/x", "host": "mini", "labels": lab},
+    ]));
     let st = drover::events::fold(&events);
     let fake = Fake::default();
-    let lanes = drover::lanes::join(&cfg, &fake, &c.worktrees, &events, &st, agents.as_array().unwrap());
+    let lanes = drover::lanes::join(&cfg, &fake, &events, &st, &agents);
     let got: Vec<_> = lanes
         .iter()
-        .map(|l| (l.name.as_str(), l.state.as_str(), l.pane.as_deref()))
+        .map(|l| (l.name.as_str(), l.state.word(), l.host.as_deref()))
         .collect();
-    assert_eq!(got, [("sendmeter-impl-3061", "working", Some("w1:p1"))]);
+    assert_eq!(got, [("sendmeter-impl-3061", "working".to_string(), None)]);
 }
 
 #[test]
-fn activity_lines_per_harness_are_masked_and_cut() {
-    use drover::lanes::{activity, mask, tail};
-    let claude = "⏺ Read(src/serve.rs)\n  ⎿ Read 120 lines\n⏺ Bash(cargo test --release)\n  ⎿ Running…\n╭──────╮\n│ > │\n╰──────╯\n⏵⏵ bypass permissions on\n";
-    assert_eq!(activity("claude", claude), "⏺ Bash(cargo test --release)");
-    let hermes = "┊ 💻 $ git status  0.2s\nthinking...\n┊ 📖 read  src/lib.rs  0.1s\n────\n❯ \n";
-    assert_eq!(activity("hermes", hermes), "┊ 📖 read  src/lib.rs  0.1s");
-    let dsh = "Applying patch to src/a.rs\n─────────────\n> type here\n";
-    assert_eq!(activity("dsh", dsh), "Applying patch to src/a.rs");
-    let long = format!("⏺ Bash(echo {})", "x".repeat(80));
-    let cut = activity("claude", &long);
-    assert_eq!((cut.chars().count(), cut.ends_with('…')), (60, true));
+fn secrets_in_shown_text_are_masked() {
+    use drover::lanes::{mask, tail};
     let secrets = [
         (
             concat!("export ANTHROPIC_API_KEY=sk", "-ant-api03-abcdefghijklmnop"),
@@ -626,13 +611,6 @@ fn activity_lines_per_harness_are_masked_and_cut() {
     for (raw, want) in secrets {
         assert_eq!(mask(raw), want, "{raw}");
     }
-    assert_eq!(
-        activity(
-            "claude",
-            concat!("⏺ Bash(export OPENAI_API_KEY=sk", "-proj-abcdefghijklmnopqrstuvwxyz)")
-        ),
-        "⏺ Bash(export OPENAI_API_KEY=•••)"
-    );
     let lines: String = (1..=14).map(|i| format!("line {i}\n\n")).collect::<String>()
         + concat!("gh", "p_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n");
     let t = tail(&lines, 10);

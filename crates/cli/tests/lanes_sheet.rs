@@ -153,11 +153,13 @@ fn sheet_transcript_is_the_masked_pane_tail() {
     ]);
     assert_eq!(
         (&v["lines"], &v["live"], &v["before"], &v["more"]),
-        (&lines, &json!(2), &json!(5), &json!(false))
+        (&lines, &json!(0), &json!(5), &json!(false))
     );
+    let read = r.1.last("read");
     assert_eq!(
-        r.1.last("read"),
-        json!({"name": "sendmeter-impl-12", "lines": 200, "history": true})
+        (&read["name"], &read["history"]),
+        (&json!("sendmeter-impl-12"), &json!(true)),
+        "shed's text"
     );
     assert!(req(&s, "GET", "/lane?agent=nobody", "", &cookie, T).starts_with("HTTP/1.1 404 "));
 }

@@ -100,16 +100,7 @@ fn demo_export_writes_the_file_set_without_running_anything() {
         .find(|b| b["id"] == "transcript")
         .unwrap()
         .to_string();
-    for gone in [
-        "────",
-        "acme-web · impl #48",
-        "Combobulating",
-        "Tip:",
-        "bypass permissions",
-    ] {
-        assert!(!said.contains(gone), "`{gone}` in the sheet: {said}");
-    }
-    assert!(said.contains("raising it one step."), "{said}");
+    assert!(said.contains("raising it one step."), "shed's text as it is: {said}");
 }
 
 #[test]

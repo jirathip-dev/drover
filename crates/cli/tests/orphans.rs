@@ -200,7 +200,11 @@ fn a_stale_head_orphan_review_is_closed_not_recorded() {
         kinds(&c, "verdict").is_empty() && kinds(&c, "spawn").len() == 1,
         "not recorded, not adopted"
     );
-    assert!(!sh.called("get", name), "never adopted: {:?}", sh.methods());
+    assert!(
+        kinds(&c, "spawn-adopted").is_empty(),
+        "never adopted: {:?}",
+        sh.methods()
+    );
 }
 
 #[test]
@@ -209,7 +213,7 @@ fn a_merged_issues_orphan_is_closed() {
     let wt = c.worktrees.join("sendmeter/issue-12");
     std::fs::create_dir_all(&wt).unwrap();
     ev(&c, 10, "merged", json!({}));
-    sh.add("t7", json!({"fleet": "sendmeter"}));
+    sh.add("t7", json!({"fleet": "sendmeter", "issue": "12", "role": "impl"}));
     sh.set("t7", |t| t["cwd"] = json!(wt));
     let r = fake().reply("git -C", "");
     let out = fast(&c, &r);

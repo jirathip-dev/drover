@@ -74,25 +74,17 @@ fn send_prompts_a_lane_with_the_boards_refusals_and_rate_limit() {
 }
 
 #[test]
-fn menu_answers_the_card_it_was_shown_and_refuses_a_stale_one() {
+fn menu_is_refused_shed_reports_no_menu() {
     let (c, r) = v1_board("v1-menu");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let needs = req(&s, "GET", "/api/v1/needs", "", &ck).1;
-    let h = needs["blocked"][0]["menu"]["h"].as_str().unwrap().to_string();
-    let pick = |choice: &str, h: &str| json!({"agent": REV, "choice": choice, "h": h});
-    assert_eq!(post(&s, "menu", pick("1", &h), "").1, "UNPAIRED");
-    assert_eq!(post(&s, "menu", pick("1", "123"), &ck).1, "STALE");
-    assert_eq!(post(&s, "menu", pick("7", &h), &ck).1, "BAD_VALUE");
+    assert_eq!(needs["blocked"][0]["menu"], json!(null), "{needs}");
+    let pick = json!({"agent": REV, "choice": "1", "h": "123"});
+    assert_eq!(post(&s, "menu", pick.clone(), "").1, "UNPAIRED");
+    assert_eq!(post(&s, "menu", pick, &ck).1, "BAD_VALUE");
     assert!(r.1.all("keys").is_empty(), "never a guessed key");
-    let (status, code, _) = post(&s, "menu", pick("1", &h), &ck);
-    assert_eq!((status, code.as_str()), (200, "OK"));
-    assert_eq!(r.1.all("keys"), [json!({"name": REV, "keys": ["1"]})]);
-    let e = kinds(&c, "answer").pop().unwrap();
-    assert_eq!(
-        (e.issue, e.str("choice"), e.str("via")),
-        (Some(9), Some("1"), Some("web"))
-    );
+    assert!(kinds(&c, "answer").is_empty());
 }
 
 #[test]

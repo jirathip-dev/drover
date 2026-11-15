@@ -131,7 +131,7 @@ fn a_failed_start_waits_for_room_and_is_never_forced() {
         "runtime": "shed", "worktree": wt, "branch": "issue-1", "confirmed": true});
     ev(&c, 1, T - 3600, "spawn", d);
     sh.lane("sendmeter-impl-1", "idle", &wt.to_string_lossy());
-    sh.screen("sendmeter-impl-1", "\n  \n");
+    sh.set("sendmeter-impl-1", |t| t["reported"] = serde_json::Value::Null);
     assert_eq!(pass(&c, &no_pr("50.00"), T), Vec::<u64>::new());
     let held = read(&c.state).unwrap();
     let d = held.iter().rfind(|e| e.kind == "driven").expect("a driven step");
