@@ -1,0 +1,9 @@
+Decided: update round after #927 and #1069: #927's edit to roles/orchestrator.md is carried into the split roles/orchestrator/role.md; #1069 merged clean
+Because: roles/orchestrator/role.md:21
+Decided: the chat brief is rebuilt and written on each GET /cooee/profiles, only when its text changed
+Because: "editing that file changes the served text with no restart"
+Decided: thread-started links once with via: profile and route() skips such links, so lane asks never reach a cooee chat
+Because: crates/core/src/orchestrator.rs:477
+Rejected: restoring roles/orchestrator.md from staging — the split files replace it; two copies would drift
+Check: role.md carries staging's #927 line; the live cooee chat waits on cooee's paired persona issue
+Owner: Staging's latest changes are merged in; cooee chat profiles work as before.
