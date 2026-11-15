@@ -82,12 +82,14 @@ fn kill_pushes_wip_then_closes_and_logs() {
         .once(&format!("git -C {wt} diff --cached --name-only"), 0, "")
         .once(&format!("git -C {wt} diff --cached"), 0, "+fn x() {}\n");
     let r = AtPush(f, &sh, Shared::default());
-    let log = drover::lanes::log(&c.state, LANE).unwrap();
-    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
-    std::fs::write(&log, "⏺ hi\n").unwrap();
+    sh.screen(LANE, "⏺ hi\n");
     let (code, out) = run(&c, &r, &["kill", LANE, "--yes"]);
     assert_eq!(code, 0, "{out}");
-    assert!(!log.exists());
+    assert_eq!(
+        drover::session::transcript::archived(&c, LANE),
+        Some(drover::session::transcript::Transcript::Screen("⏺ hi\n".into())),
+        "the kill keeps shed's log for the next lane's handover"
+    );
     let (r, at_push) = (&r.0, &r.2);
     assert!(
         out.contains(&format!("killed {LANE}: work pushed to wip/{LANE}-20261031-120000-")),
@@ -387,19 +389,24 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
     let f = git(&wt, "", "0\n", "");
     let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    assert!(req(&s, "/act", &format!("agent={LANE}&op=stop"), "").starts_with("HTTP/1.1 401 "));
+    assert!(req(&s, "/api/v1/act", &json!({"agent": LANE, "op": "stop"}).to_string(), "").starts_with("HTTP/1.1 401 "));
     assert!(req(
         &s,
-        "/act",
-        &format!("agent={LANE}&op=stop"),
+        "/api/v1/act",
+        &json!({"agent": LANE, "op": "stop"}).to_string(),
         "Origin: https://evil.example\r\n"
     )
     .starts_with("HTTP/1.1 403 "));
     assert!(sh.all("keys").is_empty(), "{:?}", sh.methods());
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let res = req(&s, "/act", &format!("agent={LANE}&op=stop"), &cookie);
+    let res = req(
+        &s,
+        "/api/v1/act",
+        &json!({"agent": LANE, "op": "stop"}).to_string(),
+        &cookie,
+    );
     assert!(
-        res.starts_with("HTTP/1.1 200 OK") && res.ends_with("sent Esc to sendmeter-impl-12\n"),
+        res.starts_with("HTTP/1.1 200 OK") && res.contains("sent Esc to sendmeter-impl-12"),
         "{res}"
     );
     assert_eq!(sh.last("keys"), json!({"name": LANE, "keys": ["esc"]}));
@@ -409,7 +416,12 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
         (e.kind.as_str(), e.str("via"), e.str("device"), e.str("op")),
         ("act", Some("web"), Some(&*label), Some("stop"))
     );
-    let res = req(&s, "/act", &format!("agent={LANE}&op=kill"), &cookie);
+    let res = req(
+        &s,
+        "/api/v1/act",
+        &json!({"agent": LANE, "op": "kill"}).to_string(),
+        &cookie,
+    );
     assert!(
         res.contains("pane closes, worktree kept") && !sh.called("kill", LANE),
         "{res}"
@@ -417,18 +429,11 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
     assert_eq!(kinds(&c, "act"), 1);
 }
 
-fn screen() -> String {
-    "> fix it\n⏺ Bash(cargo test)\n  ⎿ ok\n⏺ Done.\n  All green.\n⏺ Bash(cargo fmt)\n".into()
-}
-
 #[test]
-fn lane_pages_back_through_the_rolling_transcript() {
+fn lane_pages_back_through_sheds_text() {
     let (c, _, sh) = lane("more");
-    let log = drover::lanes::log(&c.state, LANE).unwrap();
-    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
-    std::fs::write(&log, (0..450).map(|i| format!("  out {i}\n")).collect::<String>()).unwrap();
     sh.lane(LANE, "working", "/x");
-    sh.screen(LANE, &screen());
+    sh.screen(LANE, &(0..450).map(|i| format!("  out {i}\n")).collect::<String>());
     let f = Fake::default();
     let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
@@ -444,35 +449,29 @@ fn lane_pages_back_through_the_rolling_transcript() {
     let first = get("&lines=500");
     let lines = first["lines"].as_array().unwrap();
     assert_eq!(
-        (lines.len(), &first["live"], &first["before"], &first["more"]),
-        (200, &json!(1), &json!(200), &json!(true)),
+        (lines.len(), &first["before"], &first["more"], &lines[199]),
+        (200, &json!(200), &json!(true), &json!("  out 449")),
         "the cap stays at 200"
-    );
-    assert_eq!(
-        (&lines[193], &lines[194], &lines[199]),
-        (
-            &json!(drover::lanes::GAP),
-            &json!("> fix it"),
-            &json!("⏺ Bash(cargo fmt)")
-        )
     );
     let older = get("&lines=200&before=200");
     assert_eq!(
-        (&older["before"], &older["more"], &older["live"]),
-        (&json!(400), &json!(true), &json!(0))
+        (&older["before"], &older["more"], &older["lines"][0]),
+        (&json!(400), &json!(true), &json!("  out 50"))
     );
-    assert_eq!(older["lines"][0], "  out 57");
     let oldest = get("&before=400");
-    assert_eq!((&oldest["before"], &oldest["more"]), (&json!(457), &json!(false)));
-    assert_eq!(oldest["lines"][0], "  out 0");
-    let file = std::fs::read_to_string(&log).unwrap();
-    assert!(file.ends_with("  out 449\n┄ not captured: scrolled past between reads ┄\n> fix it\n⏺ Bash(cargo test)\n  ⎿ ok\n⏺ Done.\n  All green.\n"), "{file}");
-    let recent = json!({"name": LANE, "lines": 200, "history": true});
-    assert!(sh.all("read").contains(&recent), "{:?}", sh.all("read"));
+    assert_eq!(
+        (&oldest["before"], &oldest["more"], &oldest["lines"][0]),
+        (&json!(450), &json!(false), &json!("  out 0"))
+    );
+    assert!(
+        sh.all("read").iter().any(|p| p["name"] == LANE && p["history"] == true),
+        "{:?}",
+        sh.all("read")
+    );
 }
 
 #[test]
-fn a_gone_lane_reads_its_stored_transcript() {
+fn a_gone_lane_reads_the_log_drover_archived_at_close() {
     let (c, _, sh) = lane("gone-transcript");
     let f = Fake::default();
     let r = sh.on(&f);
@@ -487,9 +486,10 @@ fn a_gone_lane_reads_its_stored_transcript() {
         res
     };
     assert!(get().starts_with("HTTP/1.1 404"), "{}", get());
-    let log = drover::lanes::log(&c.state, LANE).unwrap();
-    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
-    std::fs::write(&log, (0..250).map(|i| format!("  out {i}\n")).collect::<String>()).unwrap();
+    sh.lane(LANE, "done", "/x");
+    sh.screen(LANE, &(0..250).map(|i| format!("  out {i}\n")).collect::<String>());
+    drover::term::close(&c, &r, LANE).unwrap();
+    assert!(!sh.has(LANE));
     let res = get();
     let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
     let lines = j["lines"].as_array().unwrap();
@@ -497,22 +497,6 @@ fn a_gone_lane_reads_its_stored_transcript() {
         (lines.len(), &lines[0], &lines[199], &j["live"], &j["more"]),
         (200, &json!("  out 50"), &json!("  out 249"), &json!(0), &json!(true))
     );
-}
-
-#[test]
-fn inputs_are_16px_and_zoom_is_off() {
-    let css = include_str!("../../../assets/serve.css");
-    let rule = css.lines().find(|l| l.starts_with(".reply textarea{")).unwrap();
-    assert!(
-        rule.ends_with("font-size:var(--fs-input)}") && css.contains("--fs-input:16px"),
-        "{rule}"
-    );
-    let (c, _, _sh) = lane("zoom");
-    let page = String::from_utf8_lossy(&Server::new(&c, &Fake::default(), None).respond("GET / HTTP/1.1\r\n\r\n", T))
-        .into_owned();
-    assert!(page.contains("initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"));
-    assert!(!css.contains(".lock") && !css.contains("body{position:fixed"));
-    assert!(include_str!("../../../assets/serve.js").contains("visualViewport"));
 }
 
 #[test]
@@ -660,52 +644,6 @@ fn kill_saves_code_and_names_the_secret_line() {
         "{out}"
     );
     assert!(!r.called(&format!("git -C {wt} push")));
-}
-
-#[test]
-fn a_closed_lane_reads_claudes_saved_session() {
-    let (c, wt, sh) = lane("closed-session");
-    let ev = json!({"agent": LANE, "reason": "done", "freed_mb": 270});
-    append(&c.state, &Event::new(T - 10, "sendmeter", Some(12), "lane-closed", ev)).unwrap();
-    let dir = c
-        .home
-        .join(".claude/projects")
-        .join(wt.replace(|ch: char| !ch.is_ascii_alphanumeric(), "-"));
-    std::fs::create_dir_all(&dir).unwrap();
-    let key = concat!("ghp_", "abcdefghijklmnop0123456789");
-    let rows = [
-        json!({"type": "user", "message": {"content": "Read the brief and execute it."}}),
-        json!({"type": "assistant", "message": {"content": [{"type": "text", "text": format!("Pushed.\ntoken {key}")}, {"type": "tool_use", "name": "Bash", "input": {"command": "cargo test\necho"}}]}}),
-        json!({"type": "user", "message": {"content": [{"type": "tool_result", "content": "ok"}]}}),
-        json!({"type": "summary"}),
-    ];
-    let jsonl: String = rows.iter().map(|r| format!("{r}\n")).collect();
-    std::fs::write(dir.join("s-1.jsonl"), jsonl).unwrap();
-    std::fs::write(dir.join("notes.txt"), "not a session").unwrap();
-    let log = drover::lanes::log(&c.state, LANE).unwrap();
-    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
-    std::fs::write(&log, "  rolled\n").unwrap();
-    let f = Fake::default();
-    let r = sh.on(&f);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let cookie = pair(&s, &c, "", T);
-    let res = String::from_utf8_lossy(&s.respond(
-        &format!("GET /lane?agent={LANE} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n"),
-        T,
-    ))
-    .into_owned();
-    let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
-    assert_eq!(
-        j["lines"],
-        json!([
-            "❯ Read the brief and execute it.",
-            "⏺ Pushed.",
-            "  token ghp_•••",
-            "⏺ Bash(cargo test)"
-        ]),
-        "{res}"
-    );
-    assert_eq!(j["live"], 0);
 }
 
 #[test]

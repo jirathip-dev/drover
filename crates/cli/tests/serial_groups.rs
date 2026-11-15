@@ -591,3 +591,129 @@ fn a_serial_busy_lane_names_the_hot_file_and_its_holder_in_waiting() {
     assert!(row.contains(&format!("serial: hot {HOT} held by #9")), "{w}");
     assert!(!row.contains("missed") && !row.contains("nothing drives this"), "{w}");
 }
+
+fn joined(c: &drover::Ctx, n: u64, files: &[&str]) {
+    for f in files {
+        ev(
+            c,
+            n,
+            "serial-joined",
+            json!({"group": format!("hot {f}"), "by": "diff", "path": f}),
+        );
+    }
+}
+
+fn hot_files(c: &drover::Ctx, files: &[&str]) {
+    let hot = Event::new(10, "sendmeter", None, "hot-files", json!({"files": files}));
+    append(&c.state, &hot).unwrap();
+}
+
+fn reviewing(c: &drover::Ctx, n: u64) {
+    lane(c, n);
+    let rev = format!("sendmeter-rev-{n}-r1");
+    ev(
+        c,
+        n,
+        "spawn",
+        json!({"role": "rev", "agent": rev, "pane": rev, "workspace": "", "runtime": "shed"}),
+    );
+}
+
+#[test]
+fn one_pass_reconciles_hot_locks_taken_before_the_all_or_none_rule() {
+    let (c, _sh) = hot_ctx_on("sg-hot-reconcile", &[X, Y]);
+    let (b, a, d, e) = (8, 9, 12, 13);
+    hot_files(&c, &[X, Y]);
+    for n in [b, a, d, e] {
+        reviewing(&c, n);
+    }
+    joined(&c, b, &[Y]);
+    joined(&c, a, &[Y, X]);
+    ev(&c, a, "serial-held", json!({"group": format!("hot {Y}"), "holder": b}));
+    joined(&c, d, &[X]);
+    joined(&c, e, &[X]);
+    let all = [
+        (b, format!("{Y}\n")),
+        (a, format!("{X}\n{Y}\n")),
+        (d, format!("{X}\n")),
+        (e, format!("{X}\n")),
+    ];
+    let all: Vec<_> = all.iter().map(|(n, f)| (*n, f.as_str())).collect();
+    assert_eq!(holding(&c, X), [a, d, e], "the state before the upgrade");
+    let (out, _) = drive(&c, &fake(&all));
+    let x = holding(&c, X);
+    assert!(!x.contains(&a), "#9 waits on {Y}: it holds none: {x:?} {out}");
+    assert!(x.len() <= 1, "{X} holders over max: {x:?} {out}");
+    assert_eq!(holding(&c, Y), [b], "{out}");
+    let (_, w) = run(&c, &fake(&all), &["waiting", "sendmeter"]);
+    assert!(!w.contains("(2/1)") && !w.contains("(3/1)"), "{w}");
+}
+
+#[test]
+fn a_blocked_issue_holds_no_hot_lock_after_one_pass() {
+    let (c, _sh) = hot_ctx("sg-hot-blocked");
+    hot_files(&c, &[HOT]);
+    reviewing(&c, 9);
+    joined(&c, 9, &[HOT]);
+    let r = fake(&[(9, &format!("{HOT}\n"))]);
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "9"]).0, 0);
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "block", "--on", "5", "9"]).0, 0);
+    assert_eq!(holding(&c, HOT), [9], "held before the pass");
+    let (out, _) = drive(&c, &r);
+    assert!(holding(&c, HOT).is_empty(), "{out}");
+    drive(&c, &r);
+    assert!(holding(&c, HOT).is_empty(), "still released while blocked");
+}
+
+fn released_x(c: &drover::Ctx, sh: &FakeShed, waiters: &[u64]) -> Vec<(u64, String)> {
+    let (a, holder_y) = (9, 8);
+    lane(c, a);
+    drive(c, &fake(&[(a, &format!("{X}\n"))]));
+    let mut all = vec![(a, format!("{X}\n"))];
+    for &n in waiters {
+        lane(c, n);
+        sh.lane(&format!("sendmeter-impl-{n}"), "done", "/x");
+        sh.exit(&format!("sendmeter-impl-{n}"));
+        all.push((n, format!("{X}\n")));
+        let r: Vec<_> = all.iter().map(|(n, f)| (*n, f.as_str())).collect();
+        drive(c, &fake(&r));
+        assert_eq!(logged(c, n, "serial-held"), [format!("hot {X} ({a})")]);
+    }
+    lane(c, holder_y);
+    all.push((holder_y, format!("{Y}\n")));
+    let r: Vec<_> = all.iter().map(|(n, f)| (*n, f.as_str())).collect();
+    drive(c, &fake(&r));
+    assert_eq!(holding(c, Y), [holder_y]);
+    joined(c, a, &[Y]);
+    all
+}
+
+#[test]
+fn a_waiter_takes_a_hot_file_its_holder_released_by_being_held_elsewhere() {
+    let (c, sh) = hot_ctx_on("sg-hot-release", &[X, Y]);
+    let (a, b) = (9, 12);
+    let all = released_x(&c, &sh, &[b]);
+    let r: Vec<_> = all.iter().map(|(n, f)| (*n, f.as_str())).collect();
+    let (out, steps) = drive(&c, &fake(&r));
+    assert!(logged(&c, a, "serial-held").contains(&format!("hot {Y} (8)")), "{out}");
+    assert_eq!(logged(&c, b, "serial-slot"), [format!("hot {X}")], "{out}");
+    assert_eq!(holding(&c, X), [b], "{out}");
+    assert_eq!(steps, ["conflict"], "#12 gets its round: {out}");
+    let (_, w) = run(&c, &fake(&r), &["waiting", "sendmeter"]);
+    assert!(!w.contains("for a slot (0/1)"), "{w}");
+}
+
+#[test]
+fn two_waiters_on_a_released_hot_file_only_the_first_takes_it() {
+    let (c, sh) = hot_ctx_on("sg-hot-release-two", &[X, Y]);
+    let (b, d) = (12, 13);
+    let all = released_x(&c, &sh, &[b, d]);
+    let r: Vec<_> = all.iter().map(|(n, f)| (*n, f.as_str())).collect();
+    let (out, _) = drive(&c, &fake(&r));
+    assert_eq!(logged(&c, b, "serial-slot"), [format!("hot {X}")], "{out}");
+    assert!(logged(&c, d, "serial-slot").is_empty(), "{out}");
+    assert_eq!(holding(&c, X), [b], "{out}");
+    let (_, w) = run(&c, &fake(&r), &["waiting", "sendmeter"]);
+    let row = w.lines().find(|l| l.starts_with("sendmeter #13 ")).unwrap_or_default();
+    assert!(row.contains(&format!("serial: hot {X} held by #{b} (1/1)")), "{w}");
+}

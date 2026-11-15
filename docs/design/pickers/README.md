@@ -68,10 +68,10 @@ node docs/design/pickers/shoot.mjs <site> <chrome-headless-shell>
   -        );
   +        let pick = "<button id=look type=button aria-haspopup=dialog aria-label=\"look: theme and colours\">◐</button>";
   ```
-- **`assets/serve.css`** (`serve.css.diff`): the Queue-tab hide of `#thp,#scp` goes, `#look` takes `#thp`'s margin,
+- **assets/serve.css** (removed in #927) (`serve.css.diff`): the Queue-tab hide of `#thp,#scp` goes, `#look` takes `#thp`'s margin,
   and `look.css` is added (the rows, art, swatches, light backdrop, side by side ≥ 720 px). Only tokens are used, so the
   "no raw colour" lint holds.
-- **`assets/serve.js`** (`serve.js.diff`): both picker blocks become `look.js`, built on the same `SD`, `choose`, `fails`,
+- **assets/serve.js** (removed in #927) (`serve.js.diff`): both picker blocks become `look.js`, built on the same `SD`, `choose`, `fails`,
   `block`, `put`/`get`, `theme()` and `colours()`. The sheet is the shared one (`show`, `close`, `.sh.lg` hides the lane
   parts, as `[?]` does). Also two lines in `sync()` (Q5) and one in `close()`.
 - **`assets/ui-audit.js`**: `theme-switch` taps the sheet rows instead of setting `thp.value`. A new `look` view (roots:

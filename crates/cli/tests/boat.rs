@@ -237,6 +237,31 @@ fn the_rates_are_boats_and_medium_is_default() {
         out.contains("✗ cloud boat1 identity — ~/.ssh/ascii_box_ed25519 missing"),
         "{out}"
     );
+    assert!(!out.contains("cloud boat1 recipe"), "{out}");
+}
+
+#[test]
+fn bootstrap_that_cannot_reach_a_host_names_the_recipe_override_in_use() {
+    let (c, bin) = setup("boat-override", "small");
+    let cfg = Config::load(&c.config).unwrap();
+    let recipe = c.config.with_file_name("recipes/boat.toml");
+    std::fs::create_dir_all(recipe.parent().unwrap()).unwrap();
+    let builtin = include_str!("../../core/assets/recipes/boat.toml");
+    let stale: String = builtin
+        .lines()
+        .filter(|l| !l.starts_with("identity"))
+        .map(|l| l.to_owned() + "\n")
+        .collect();
+    std::fs::write(&recipe, stale).unwrap();
+    let r = Boat(Fake::default().reply("herdr machine list --json", "[]"), bin);
+    let e = drover::cloud::bootstrap(&c, &cfg, &r, "boat1", &mut vec![]).unwrap_err();
+    let want = format!("can't reach boat1 (recipe override {} in use)", recipe.display());
+    assert!(format!("{e:#}").contains(&want), "{e:#}");
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(out.contains("✗ cloud boat1 recipe — "), "{out}");
+    std::fs::write(&recipe, builtin).unwrap();
+    let (_, out) = run(&c, &r, &["doctor"]);
+    assert!(!out.contains("cloud boat1 recipe"), "{out}");
 }
 
 #[test]
@@ -262,6 +287,13 @@ fn doctor_flags_a_recipe_subcommand_the_boat_cli_lacks_and_an_include_of_a_known
         "{out}"
     );
     assert!(!out.contains("no `resume`"), "{out}");
+    let p = recipe.display();
+    assert!(
+        out.contains(&format!(
+            "✗ cloud boat1 recipe — {p} has no identity, the built-in boat has one → delete {p}, or add identity to it"
+        )),
+        "{out}"
+    );
     assert!(
         out.contains("✗ ssh include — `Include config.d/*` reads config.d/herdsman-boat1.known"),
         "{out}"

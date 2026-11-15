@@ -40,7 +40,7 @@ drover thread ls [FLEET] [--json]           # per repo: title, last message, unr
   `drover config propose`) and the chip offers it. A send on a pick no longer offered is refused `BAD_VALUE` with a
   system line naming the model and the list (the message stays); a model the CLI rejects at start is one system line
   with its error, not retried.
-- **No worktree:** it runs in `<state dir>/orchestrator/<thread>/` (or `<[orchestrator] dir>/<thread>/`) in its own herdr workspace, as agent
+- **No worktree:** it runs in `<state dir>/orchestrator/<thread>/` (or `<[orchestrator] dir>/<thread>/`) in its own shed terminal (an ACP session on a `shed-acp` fleet), as agent
   `orchestrator-<thread>`, with `DROVER_LANE=<fleet>:-:orchestrator` (so the lane hook guards it) and
   `DROVER_THREAD=<thread>`.
 - **Its brief** (`.brief.md` there, rewritten at each start) is `roles/orchestrator.md`, the thread and repo, then the
@@ -123,6 +123,14 @@ drover thread ls [FLEET] [--json]           # per repo: title, last message, unr
   reply`); the board shows them as closed tool rows.
 
 ## The [chat] tab (#386)
+
+#1072: the tab is back as **Threads**, the last tab of the standalone page only (`[queue] [events] [lanes]
+[threads·N]`; `cooee-plugin.toml` has no Threads place, so the Cooee plugin never shows it). It is a JSON screen like
+the others (`docs/design/threads-tab/`): `/screens/threads` (the list), `/screens/threads/<id>` (a thread, opened in
+the same tab, its cards place hidden) and `/screens/threads/new/<repo>`. Its taps post `/action` `thread-new`,
+`thread-say`, `thread-retry`, `thread-archive`, `thread-restore` (the `POST /thread` ops below, standalone and paired
+only) and `answer`. Not yet on it: files, queued messages, config and secret cards. The rest of this section is the old
+tab's spec, which it follows.
 
 Built from the approved mockup (`docs/design/conductor-chat/`): the middle tab, `[queue] [lanes] [chat] [host]
 [events]`, reading `[chat·N]` with N the threads where a choice waits.

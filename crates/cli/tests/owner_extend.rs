@@ -3,7 +3,6 @@ use common::*;
 use drover::events::{append, fold, read, Event};
 use drover::serve::Server;
 use serde_json::{json, Value};
-use std::io::{Read, Write};
 
 const ADDR: &str = "127.0.0.1:7777";
 const IMPL: &str = "sendmeter-impl-12";
@@ -266,46 +265,30 @@ fn a_975_pending_extend_is_requeued_once_and_its_card_never_comes_back() {
     assert_eq!(state(&c), "fix(3)");
 }
 
-fn http(addr: &str, req: &str) -> String {
-    let mut s = std::net::TcpStream::connect(addr).unwrap();
-    s.write_all(req.as_bytes()).unwrap();
-    let mut res = String::new();
-    s.read_to_string(&mut res).unwrap();
-    res
-}
-
 #[test]
 fn a_board_tap_logs_and_requeues_at_once_and_never_bounces_on_a_running_drive() {
     let (c, _sh) = setup("extend-board");
     let calm = fake("1");
-    let w = with(&c, &calm);
-    let cookie = pair(&server(&c, &w), &c, "Mozilla/5.0 (iPhone)", drover::now());
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = l.local_addr().unwrap().to_string();
-    let c2 = c.clone();
-    std::thread::spawn(move || drover::serve::serve_on(&c2, &fake("1"), l, false));
-    let post = |op: &str, body: &str| {
-        let req = format!(
-            "POST /api/v1/{op} HTTP/1.1\r\nHost: {addr}\r\n{cookie}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
-            body.len()
-        );
-        http(&addr, &req)
-    };
-    let needs = http(
-        &addr,
-        &format!("GET /api/v1/needs HTTP/1.1\r\nHost: {addr}\r\n{cookie}Connection: close\r\n\r\n"),
-    );
-    let needs: Value = serde_json::from_str(needs.split_once("\r\n\r\n").unwrap().1).unwrap();
-    let mt = needs["mtime"].as_str().unwrap().to_string();
-    let stale = post("extend", "fleet=sendmeter&issue=12&mtime=1");
-    assert!(stale.contains("STALE"), "{stale}");
+    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
+    let b = Board::start(&c, fake("1"));
+    let mt = b.get("needs")["mtime"].as_str().unwrap().to_string();
+    let (_, stale) = b.post("extend", "fleet=sendmeter&issue=12&mtime=1");
+    assert_eq!(stale["code"], "STALE", "{stale}");
     assert_eq!(kinds(&c, "round-extended"), 0, "a stale page decides nothing");
-    let drive = post("drive", &format!("fleet=sendmeter&mtime={mt}"));
-    assert!(drive.contains("drive started for sendmeter"), "{drive}");
-    let res = post("extend", &format!("fleet=sendmeter&issue=12&mtime={mt}"));
-    assert!(res.contains("#12: extended, back in the queue"), "{res}");
-    assert_eq!(kinds(&c, "round-extended"), 1);
+    let (_, drive) = b.post("drive", &format!("fleet=sendmeter&mtime={mt}"));
+    assert_eq!(drive["code"], "ACCEPTED", "{drive}");
+    let (_, res) = b.post("extend", &format!("fleet=sendmeter&issue=12&mtime={mt}"));
+    assert_eq!(
+        (&res["code"], &res["message"]),
+        (&json!("OK"), &json!("#12: extend")),
+        "{res}"
+    );
+    assert!(res["job"].is_null(), "an extend is no job: {res}");
+    assert_eq!(kinds(&c, "round-extended"), 1, "logged at the tap");
     let at: Vec<u64> = order(&c).into_iter().map(|q| q.0).collect();
     assert_eq!(at, [11, 12, 13]);
     assert_eq!(cards(&c, &calm, c.now), []);
+    let (_, again) = b.post("extend", &format!("fleet=sendmeter&issue=12&mtime={mt}"));
+    assert_eq!(again["code"], "NOT_NEEDS_HUMAN", "{again}");
+    assert_eq!(kinds(&c, "round-extended"), 1, "a re-tap logs nothing");
 }

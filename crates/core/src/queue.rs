@@ -245,12 +245,25 @@ pub fn playbook(events: &[Event], fleet: &str, n: u64) -> Option<String> {
 
 /// Replay the fleet's `queue` events; invalid ones (never logged by fleet) are skipped.
 pub fn replay(events: &[Event], fleet: &str) -> Vec<Item> {
-    let mut q = vec![];
-    for e in events.iter().filter(|e| e.kind == "queue" && e.fleet == fleet) {
+    let all = crate::events::of_kind(events, &["queue"]);
+    let mine: Vec<&Event> = all.into_iter().filter(|e| e.fleet == fleet).collect();
+    let memo = crate::events::queues(events);
+    let mut memo = memo
+        .as_ref()
+        .map(|m| m.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+    let kept = memo
+        .as_ref()
+        .and_then(|m| m.get(fleet))
+        .filter(|(n, _)| *n <= mine.len());
+    let (done, mut q) = kept.cloned().unwrap_or_default();
+    for e in &mine[done..] {
         let mut next = q.clone();
         if apply(&mut next, &Value::Object(e.data.clone())).is_ok() {
             q = next;
         }
+    }
+    if let Some(m) = memo.as_mut() {
+        m.insert(fleet.into(), (mine.len(), q.clone()));
     }
     q
 }
@@ -262,7 +275,7 @@ fn state<'a>(st: &'a States, fleet: &str, n: u64) -> &'a str {
 /// #294: the serial groups issue `n` is in, by name: marked in queue `q` (`""` = the first group) or joined by its diff (`serial-joined`; #149's `serial-auto` = the first group), merged ones included.
 pub fn groups(q: &[Item], events: &[Event], f: &Fleet, fleet: &str, n: u64) -> Vec<Serial> {
     let marks = q.iter().filter(|i| i.issue == n).flat_map(|i| &i.serial);
-    let joined = events.iter().filter(|e| e.fleet == fleet && e.issue == Some(n));
+    let joined = crate::events::of_issue(events, fleet, n).into_iter();
     let joined = joined.filter_map(|e| match e.kind.as_str() {
         "serial-joined" => e.str("group"),
         "serial-auto" => Some(""),
@@ -280,7 +293,8 @@ pub fn groups(q: &[Item], events: &[Event], f: &Fleet, fleet: &str, n: u64) -> V
 
 /// #891: the hot files of `fleet`'s last `hot-files` event (drive logs one when the list less converted files changes).
 pub fn hot_files(events: &[Event], fleet: &str) -> Vec<String> {
-    let last = events.iter().rfind(|e| e.kind == "hot-files" && e.fleet == fleet);
+    let hot = crate::events::of_kind(events, &["hot-files"]);
+    let last = hot.into_iter().rfind(|e| e.fleet == fleet);
     let files = last
         .and_then(|e| e.val("files").as_array().cloned())
         .unwrap_or_default();
@@ -300,6 +314,14 @@ pub fn serials(events: &[Event], f: &Fleet, fleet: &str) -> Vec<Serial> {
 /// #1032: a hot-file group: its issues take all their groups at once or none.
 pub fn hot(g: &Serial) -> bool {
     g.name.starts_with("hot ")
+}
+
+/// #1060: `s` may hold no slot: a queue blocker is open or its lane is held on another issue.
+pub fn stuck(events: &[Event], st: &States, s: &IssueState) -> bool {
+    let open = view(events, st, &s.fleet)
+        .iter()
+        .any(|i| i.issue == s.issue && !labels(i).is_empty());
+    open || !crate::events::held_on(events, s).is_empty()
 }
 
 /// In flight: a live impl/fix lane, or at review/ready.
@@ -428,8 +450,13 @@ pub fn skipped(
 
 /// #712: a parked issue's `park --why`.
 pub fn park_why<'a>(events: &'a [Event], st: &States, fleet: &str, n: u64) -> Option<&'a str> {
-    let parked = |e: &&Event| e.is("parked", fleet, n);
-    (state(st, fleet, n) == "parked").then(|| events.iter().rfind(parked)?.str("why"))?
+    let parked = |e: &&Event| e.kind == "parked";
+    (state(st, fleet, n) == "parked").then(|| {
+        crate::events::of_issue(events, fleet, n)
+            .into_iter()
+            .rfind(parked)?
+            .str("why")
+    })?
 }
 
 pub fn ls_json(events: &[Event], st: &States, fleet: &str) -> Value {
@@ -486,8 +513,8 @@ pub fn board(
         let hit = |e: &&Event| e.is("premerge-failed", fleet, n) || pass(e);
         let note = events.iter().rev().find(hit).and_then(|e| e.str("note"));
         let warn = note.map_or(String::new(), |t| format!("\n         ✗ {t}")) + &warn;
-        let away = s.and_then(|s| crate::hosts::offline(ctx, last_spawn(events, s.active_lane()?.1)));
-        let warn = away.map_or(String::new(), |h| format!("\n         host offline: {h}")) + &warn;
+        let away = s.and_then(|s| crate::hosts::offline(ctx, cfg, last_spawn(events, s.active_lane()?.1)));
+        let warn = away.map_or(String::new(), |h| format!("\n         {h}")) + &warn;
         let sp = s.and_then(|s| last_spawn(events, s.active_lane()?.1));
         let stale = sp.zip(cfg).is_some_and(|(e, c)| crate::hook::rules_stale(c, fleet, e));
         let place = s.and_then(|s| at.get(s.active_lane()?.1)).filter(|p| !p.is_empty());

@@ -282,6 +282,43 @@ fn queue_events_fleets_and_cards_are_cooees_fixtures_from_recorded_state() {
 }
 
 #[test]
+fn a_queue_row_is_one_short_title_line_without_the_pr_title() {
+    let (c, r) = recorded("cooee-short-row");
+    let (issue, pr) = ("Long issue title ".repeat(7), "Long PR title ".repeat(8));
+    assert!(issue.len() > 100 && pr.len() > 100);
+    let cache = c.state.parent().unwrap().join("cache");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(
+        cache.join("issue-sendmeter-12.json"),
+        json!({"title": issue}).to_string(),
+    )
+    .unwrap();
+    let cached = json!({"ts": T, "pr": {"number": 281, "title": pr}});
+    std::fs::write(cache.join("pr-sendmeter-12.json"), cached.to_string()).unwrap();
+    let (status, q) = req(
+        &Server::new(&c, &r, Some(ADDR.into())),
+        T,
+        "GET",
+        "/screens/queue",
+        "",
+        "",
+    );
+    assert_eq!(status, 200, "{q}");
+    let row = find(&q, "q-sendmeter-12");
+    let (title, sub) = (row["title"].as_str().unwrap(), row["subtitle"].as_str().unwrap());
+    assert!(
+        title.starts_with("#12 Long issue title") && title.ends_with('…'),
+        "{title}"
+    );
+    assert!(!title.contains("PR"), "{title}");
+    assert!(sub.contains("PR #281") && !sub.contains("Long PR title"), "{sub}");
+    for line in [title, sub] {
+        assert!(line.chars().count() <= 49 && !line.contains('\n'), "{line}");
+    }
+    assert_eq!(row["tap"], json!({"sheet": "/screens/lanes/sendmeter-impl-12"}));
+}
+
+#[test]
 fn the_lanes_screen_and_a_lanes_sheet_are_cooees_blocks() {
     let (c, r) = recorded("cooee-lanes");
     r.1.lane("sendmeter-impl-20", "idle", "/x");

@@ -3,7 +3,7 @@ use common::*;
 use drover::config::Config;
 use drover::events::{append, fold, read, Event};
 use drover::serve::Server;
-use serde_json::json;
+use serde_json::{json, Value};
 
 const NOW: u64 = 1_000_000;
 const ADDR: &str = "127.0.0.1:7777";
@@ -48,17 +48,43 @@ fn runner() -> OnShed {
 
 fn get(s: &Server, path: &str, cookie: &str) -> String {
     let res = s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n"), NOW);
-    let res = String::from_utf8_lossy(&res).into_owned();
-    if path == "/" {
-        with_board(&res, s, ADDR, cookie, NOW)
-    } else {
-        res
-    }
+    String::from_utf8_lossy(&res).into_owned()
 }
 
-fn card(page: &str) -> &str {
-    let a = page.find("<details class=ask data-n=12>").expect("no needs-human card");
-    &page[a..a + page[a..].find("</details>").unwrap()]
+fn card(s: &Server, cookie: &str) -> Option<Value> {
+    let res = get(s, "/screens/cards", cookie);
+    let all: Value = serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap();
+    all.as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "nhc-sendmeter-12")
+        .cloned()
+}
+
+fn choice(k: &Value) -> Option<&Value> {
+    k["blocks"].as_array().unwrap().iter().find(|b| b["type"] == "choice")
+}
+
+fn options(k: &Value) -> Vec<&str> {
+    choice(k).map_or(vec![], |c| {
+        c["options"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|o| o["value"].as_str().unwrap())
+            .collect()
+    })
+}
+
+fn action(s: &Server, cookie: &str, choice: &str) -> String {
+    let body = json!({"screen": "cards", "block": "nh-sendmeter-12", "action": "needs-human",
+        "values": {"fleet": "sendmeter", "issue": 12, "choice": choice}})
+    .to_string();
+    let req = format!(
+        "POST /action HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    String::from_utf8_lossy(&s.respond(&req, NOW)).into_owned()
 }
 
 #[test]
@@ -73,45 +99,41 @@ fn card_with_a_pass_at_head_offers_merge_anyway_to_a_paired_phone_only() {
     let r = runner();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "", NOW);
-    let page = get(&s, "/", &cookie);
-    let k = card(&page);
+    let k = card(&s, &cookie).expect("no needs-human card");
+    let text = k["blocks"][0]["markdown"].as_str().unwrap();
+    assert!(text.contains("review rounds ran out (4/3)"), "{k}");
+    assert!(text.contains("blocking: src/x.rs:9 still wrong"), "{k}");
+    assert_eq!(options(&k), ["extend", "merge", "park"], "{k}");
+    let merge = &choice(&k).unwrap()["options"][1];
+    assert_eq!(merge["confirm"]["ok"], "Merge", "{k}");
+    assert_eq!(merge["label"], "merge anyway");
     assert!(
-        k.contains("sendmeter · #12") && k.contains("review rounds ran out (4/3)"),
-        "{k}"
-    );
-    assert!(k.contains("PASS at 1111111") && k.contains("mergeable"), "{k}");
-    assert!(k.contains("value=override") && k.contains("data-confirm="), "{k}");
-    assert!(
-        k.contains("value=extend>one more round") && k.contains("value=park>park"),
-        "{k}"
-    );
-    assert!(
-        page.find("<details class=ask data-n=12>") < page.find("<main>"),
-        "above the tabs"
-    );
-    assert!(
-        k.starts_with(
-            "<details class=ask data-n=12><summary><span>#12 · needs-human · review rounds ran out (4/3)</span>"
-        ),
+        k["fold"]["line"]
+            .as_str()
+            .unwrap()
+            .starts_with("#12 · needs-human · review rounds ran out (4/3)"),
         "#816: folded to one line: {k}"
     );
-    assert!(
-        k.contains(
-            r#"<button form="nf-sendmeter-12" name=op value=extend><span>one more round</span></button></summary>"#
-        ) && k.contains(r#"<form method=post id="nf-sendmeter-12">"#),
-        "#816: the line's main button posts the card's form: {k}"
+    assert_eq!(
+        (&k["fold"]["main"]["value"], &k["fold"]["main"]["label"]),
+        (&json!("extend"), &json!("one more round")),
+        "#816: the line's main button is the card's first choice: {k}"
     );
 
-    let unpaired = get(&s, "/", "");
-    let k = card(&unpaired);
     assert!(
-        !k.contains("<form") && !k.contains("<button"),
-        "an unpaired phone sees no buttons: {k}"
+        action(&s, "", "park").starts_with("HTTP/1.1 401"),
+        "an unpaired phone cannot act"
     );
     let ro = Server::new(&c, &r, None);
-    let page = get(&ro, "/", "");
-    let k = card(&page);
-    assert!(!k.contains("<form"), "a read-only server shows no buttons: {k}");
+    let res = action(&ro, &cookie, "park");
+    assert!(
+        res.starts_with("HTTP/1.1 40"),
+        "a read-only server takes no action: {res}"
+    );
+    assert_eq!(
+        fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].state,
+        "needs-human"
+    );
 }
 
 #[test]
@@ -120,11 +142,15 @@ fn card_with_a_fail_has_no_merge_anyway() {
     let r = runner();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "", NOW);
-    let page = get(&s, "/", &cookie);
-    let k = card(&page);
-    assert!(k.contains("FAIL: blocking: src/x.rs:9 still wrong"), "{k}");
-    assert!(!k.contains("value=override"), "{k}");
-    assert!(k.contains("value=extend") && k.contains("value=park"), "{k}");
+    let k = card(&s, &cookie).expect("no needs-human card");
+    assert!(
+        k["blocks"][0]["markdown"]
+            .as_str()
+            .unwrap()
+            .contains("blocking: src/x.rs:9 still wrong"),
+        "{k}"
+    );
+    assert_eq!(options(&k), ["extend", "park"], "{k}");
 }
 
 #[test]
@@ -132,7 +158,7 @@ fn herd_marks_the_issue_and_park_clears_the_card() {
     let c = fixture("nh-herd", "FAIL");
     let r = runner();
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let res = get(&s, "/herd.json", "");
+    let res = get(&s, "/api/v1/herd", "");
     let j: serde_json::Value = serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap();
     assert_eq!(j["fleets"][0]["needs"], json!([12]));
     assert_eq!(j["fleets"][0]["queue"][0]["issue"], 12, "no lane: a gate horse");
@@ -153,7 +179,7 @@ fn herd_marks_the_issue_and_park_clears_the_card() {
     assert!(post(&cookie).starts_with("HTTP/1.1 303"));
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
     assert_eq!(st.state, "parked");
-    assert!(!get(&s, "/", &cookie).contains("data-n=12"), "parked: no card");
+    assert!(card(&s, &cookie).is_none(), "parked: no card");
 }
 
 #[test]
@@ -163,8 +189,8 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "", NOW);
     assert_eq!(run(&c, &r, &["pause", "sendmeter"]).0, 0);
-    let page = get(&s, "/", &cookie);
-    let i = page.find("name=mtime value=").unwrap() + 17;
+    let page = get(&s, "/api/v1/state", &cookie);
+    let i = page.find("\"mtime\":\"").unwrap() + 9;
     let mt: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
     let post = |op: &str| {
         let body = format!("op={op}&fleet=sendmeter&mtime={mt}&issue=12");
@@ -188,10 +214,7 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
         "PAUSED only holds the start: {res}"
     );
     assert_eq!(drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
-    assert!(
-        !get(&s, "/", &cookie).contains("<details class=ask data-n=12>"),
-        "the card stays answered"
-    );
+    assert_eq!(card(&s, &cookie), None, "the card leaves at the tap");
     assert!(post("extend").contains("not%20needs"), "a second tap decides nothing");
     assert_eq!(extended(), 1, "the decision is logged once");
     let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
@@ -231,12 +254,11 @@ fn a_recorded_extension_is_a_pending_line_without_buttons() {
     let r = runner();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "", NOW);
-    let page = get(&s, "/", &cookie);
-    assert!(!page.contains("<details class=ask data-n=12>"), "no needs-you card");
-    let a = page.find("<div class=pend data-n=12>").expect("no pending line");
-    let p = &page[a..a + page[a..].find("</div>").unwrap()];
-    assert!(p.contains("⟳ one more round · starting a lane…"), "{p}");
-    assert!(!p.contains("<form") && !p.contains("<button"), "{p}");
+    let k = card(&s, &cookie).expect("the card stays, pending");
+    assert!(
+        choice(&k).is_none() && k["fold"]["main"].is_null(),
+        "no choice while one more round starts: {k}"
+    );
 
     let spawn = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
     append(&c.state, &Event::new(41, "sendmeter", Some(12), "spawn", spawn)).unwrap();
@@ -246,7 +268,7 @@ fn a_recorded_extension_is_a_pending_line_without_buttons() {
     )
     .unwrap();
     assert!(
-        !get(&s, "/", &cookie).contains("class=pend"),
+        card(&s, &cookie).is_none_or(|k| choice(&k).is_some()),
         "an old-order extension is not pending"
     );
 }

@@ -1,0 +1,23 @@
+{"type":"screen","id":"thread-t3","title":"Rate limits for /v1/search","focus":true,"stream":"/screens/threads/t3/stream",
+ "actions":[{"label":"archive","action":"thread-archive","values":{"thread":"t3"}}],
+ "blocks":[
+ {"type":"row","id":"who","figure":{"state":"needs"},"title":"acme-api · claude · opus","subtitle":{"text":"! choose · started by owner 09:12","tone":"warn"},"value":"awake"},
+ {"type":"card","id":"m1","kind":"you","title":"you","meta":"09:12","blocks":[{"type":"text","id":"m1-t","markdown":"One customer's integration is hammering `/v1/search` and #19's webhook retries keep hitting 429s. I want proper rate limits. Grill me, then file it."}]},
+ {"type":"card","id":"c1","kind":"tool","fold":{"line":"$ drover brief acme-api 19"},"blocks":[{"type":"text","id":"c1-o","markdown":"```\n#19 webhooks: retry with backoff\n…\n```"}]},
+ {"type":"card","id":"m2","kind":"orch","title":"orchestrator","meta":"09:13","blocks":[{"type":"text","id":"m2-t","markdown":"I see it: #19's retries got `429` from search four times between 14:02 and 14:20. Three questions, one at a time."}]},
+ {"type":"card","id":"q31","kind":"ask","title":"q31 · 1 of 3","blocks":[{"type":"text","id":"q31-t","markdown":"Limit per API key or per client IP?"},{"type":"text","id":"q31-a","markdown":"✓ **per API key** · you · 09:14"}]},
+ {"type":"card","id":"q32","kind":"ask","title":"q32 · 2 of 3","blocks":[{"type":"text","id":"q32-t","markdown":"How much per key?"},{"type":"text","id":"q32-a","markdown":"✓ other: **600 a minute, burst 100** · you · 09:16"}]},
+ {"type":"card","id":"m3","kind":"orch","title":"orchestrator","meta":"09:18","blocks":[{"type":"text","id":"m3-t","markdown":"Filing it, and queueing it right after #21 (the per-key auth it builds on)."}]},
+ {"type":"card","id":"c2","kind":"tool","fold":{"line":"$ gh issue create -R acme/acme-api -t \"Rate-limit /v1/search per API key\""}},
+ {"type":"card","id":"c3","kind":"tool","fold":{"line":"$ drover queue acme-api add 52 --after 21"}},
+ {"type":"card","id":"m4","kind":"orch","title":"orchestrator","meta":"09:19","blocks":[{"type":"text","id":"m4-t","markdown":"Filed [#52](https://github.com/acme/acme-api/issues/52) and queued it after #21."}]},
+ {"type":"card","id":"m5","kind":"sys","blocks":[{"type":"text","id":"m5-t","markdown":"switched to account B (A resting until 18:40) · same session"}]},
+ {"type":"card","id":"q33","kind":"ask","tone":"warn","title":"q33 · 3 of 3","meta":"09:34","blocks":[
+  {"type":"text","id":"q33-t","markdown":"Return 429 with `Retry-After` only, or also the `X-RateLimit-*` headers on every response?"},
+  {"type":"choice","id":"q33-c","action":"answer","values":{"thread":"t3","ask":"q33"},"recommended":"both","options":[
+   {"label":"both: retry-after on a 429, x-ratelimit-limit, -remaining and -reset on every response","value":"both"},
+   {"label":"retry-after only","value":"retry-after"},
+   {"label":"headers only behind a ?debug flag","value":"debug"}],
+   "other":{"placeholder":"other: type an answer"}}]},
+ {"type":"form","id":"say","fields":[{"type":"text","name":"text","label":"","value":"","placeholder":"message the orchestrator"}],"submit":{"label":"send","action":"thread-say","values":{"thread":"t3"}}}
+]}
