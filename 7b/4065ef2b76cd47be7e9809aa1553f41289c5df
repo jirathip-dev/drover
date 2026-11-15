@@ -1,0 +1,8 @@
+Decided: dropped the `///` line on pub(crate) owner_refusal; the strict policy allows it only on a pub item
+Because: crates/core/src/drive.rs:1533
+Decided: a design-state lane gone or in error/hibernated/idle/done takes the impl gone-lane respawn row, with its role from the lane's spawn
+Because: "Reuse #886's respawn path for impl lanes rather than a second one."
+Rejected: making owner_refusal pub to keep the line — widens the API for a comment
+
+Check: drover arch-check reports 0 violations; design_stage still passes 24/24
+Owner: A comment line that broke the repo's style check was removed; behaviour is unchanged.
