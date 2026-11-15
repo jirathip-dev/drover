@@ -678,7 +678,9 @@ fn issue(ctx: &Ctx, fleet: &str, n: u64) -> IssueView {
         issue: n,
         verdicts,
         why,
-        pending: crate::pending::of(&ev, fleet, n).map(start),
+        pending: (working(&ctx.state).ok())
+            .and_then(|w| crate::pending::of(&w, fleet, n))
+            .map(start),
     }
 }
 
