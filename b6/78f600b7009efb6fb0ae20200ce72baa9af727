@@ -1,0 +1,14 @@
+Decided: serve samples itself in its existing 60 s slo loop into serve-health.json; drover check reads that file and alerts
+Because: "serve records its own numbers each minute into the state dir"
+Because: crates/server/src/serve/v1.rs:566
+Decided: serve-slow reuses #859's Timing::breach (each of the last 5 min's /api/v1 p95 over 200 ms), no second percentile code
+Because: crates/server/src/serve/slo.rs:88
+Decided: starts go to a one-day serve-starts file, cold or handover by Handover::inherited, not to the event log
+Because: crates/server/src/serve.rs:297
+Decided: each alert flips once per state with a matching -ok event, keyed on the last flip, through check's fire
+Because: crates/core/src/check.rs:574
+Decided: drive-pass now names the fleet pass's slowest step (gates/steps or spawns); drive-slow uses pass_max_secs (120 s)
+Rejected: replacing slo-api with serve-slow — slo-api has its own limits, card and tests; out of scope
+Rejected: adding #895's memory soak here — it ships in #895's own PR #1003
+Check: serve_health.rs: the non-deferring server (a read that calls gh) fails the guard; the deferring one passes with the db locked
+Owner: drover check now warns when the board server restarts, bloats, slows or turns reads away, or a fleet's pass runs long
