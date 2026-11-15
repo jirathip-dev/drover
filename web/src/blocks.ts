@@ -1,5 +1,5 @@
 // #927: one renderer per block type, the set cooee draws (screen, section, list, row, card, text, stat, chips, choice,
-// button, run, images, form and its fields, sheet). A block that acts calls `ctx.act`; a tap that goes somewhere
+// button, run, images, form and its fields and `submit`, sheet). A block that acts calls `ctx.act`; a tap that goes somewhere
 // calls `ctx.tap`. No block knows which screen it is on.
 import type { Blk } from './ops';
 import { esc, figure, word } from './theme';
@@ -7,7 +7,7 @@ import { esc, figure, word } from './theme';
 export type Act = { action: string; block?: string; values?: Blk; confirm?: Blk };
 export type Ctx = {
   screen: string;
-  act: (a: Act, el?: HTMLElement) => void;
+  act: (a: Act, el?: HTMLElement) => void | Promise<void>;
   tap: (t: Blk) => void;
   open: Set<string>;
 };
@@ -213,10 +213,21 @@ const R: Record<string, (b: Blk, c: Ctx) => HTMLElement | null> = {
     }
     return s;
   },
-  form(b) {
-    const f = el('div', 'form');
+  form(b, c) {
+    const f = el('div', `form${b.submit ? ' say' : ''}`);
     f.dataset.id = b.id ?? '';
     for (const x of b.fields ?? []) f.append(field(x));
+    if (!b.submit) return f;
+    const s = b.submit, go = btn(s.label), word = go.firstElementChild!;
+    const send = () => {
+      const v = values(f);
+      if (!String(v.text ?? '').trim()) return;
+      word.textContent = 'sending…';
+      Promise.resolve(c.act({ action: s.action, block: b.id, values: { ...s.values, ...v } }, go)).finally(() => { word.textContent = s.label; });
+    };
+    go.onclick = send;
+    f.querySelector('input')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); send(); } });
+    f.append(go);
     return f;
   },
   sheet(b, c) {

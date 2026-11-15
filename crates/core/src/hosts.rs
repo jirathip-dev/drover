@@ -198,7 +198,7 @@ impl Runner for On<'_> {
     }
 }
 
-/// #561: a check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed after 15 s; one through a dead shared connection drops its socket and runs once more without it. `mark` (the tick's `tick.step`, with the tick's start) names the step and the child it waits on, for `tick-stuck`.
+/// #561: a check, clean or drive pass's runner. Each remote host is probed once (`ssh … true`, 5 s, no shared connection); an unreachable one answers 255 at once for the rest of the pass. Every remote call is killed after `ssh_call_secs`, and its host is offline for the rest of the pass; one refused through a dead shared connection drops its socket and runs once more without it. #1056: a machine no `[hosts]` entry names is never contacted. `mark` (the tick's `tick.step`, with the tick's start) names the step and the child it waits on, for `tick-stuck`.
 pub struct Pass<'a> {
     r: &'a dyn Runner,
     probe: bool,
@@ -292,8 +292,14 @@ impl<'a> Pass<'a> {
         let Some(m) = Self::host(prog, args) else {
             return input.map_or_else(|| self.r.run(prog, args), |i| self.r.run_in(prog, args, i));
         };
-        if self.off.contains(m) {
-            let stderr = format!("{m}: not sent (host disabled, no lane there)");
+        let unknown = self.log.is_some_and(|(_, cfg)| !configured(cfg, m));
+        if self.off.contains(m) || unknown {
+            let why = if unknown {
+                "not configured"
+            } else {
+                "host disabled, no lane there"
+            };
+            let stderr = format!("{m}: not sent ({why})");
             return Ok(Out {
                 code: 255,
                 stderr,
@@ -323,6 +329,8 @@ impl<'a> Pass<'a> {
             if let Some(sock) = g.lines().find_map(|l| l.strip_prefix("controlpath ")) {
                 let _ = std::fs::remove_file(sock);
             }
+        }
+        if o.code == 255 && !refused(&o) && args.iter().any(|a| a == CM[1]) {
             let bare = args.iter().filter(|a| !CM.contains(&a.as_str())).cloned();
             let bare: Vec<String> = std::iter::once("-oControlPath=none".into()).chain(bare).collect();
             o = self.r.run_for(prog, &bare, input, limit)?;
@@ -662,16 +670,29 @@ pub fn sick(ctx: &Ctx, name: &str, row: &str) {
     }
 }
 
-/// #478: the host spawn `sp`'s lane runs on, when the last look (`survey`) could not reach it.
-pub fn offline<'a>(ctx: &Ctx, sp: Option<&'a Event>) -> Option<&'a str> {
-    let h = sp.filter(|e| e.str("machine").is_some())?.str("host")?;
-    cached(ctx).get(h).is_some_and(|s| !s.up).then_some(h)
+/// #1056: some `[hosts]` entry runs on machine `m`.
+pub fn configured(cfg: &Config, m: &str) -> bool {
+    cfg.hosts.values().any(|h| h.machine.as_deref() == Some(m))
+}
+
+/// #478: `host offline: <host>` for spawn `sp`'s lane when the last look (`survey`) could not reach its host; #1056: `host offline (not configured): <machine>` when no `[hosts]` entry runs on its machine.
+pub fn offline(ctx: &Ctx, cfg: Option<&Config>, sp: Option<&Event>) -> Option<String> {
+    let sp = sp?;
+    let m = sp.str("machine")?;
+    if cfg.is_some_and(|c| !configured(c, m)) {
+        return Some(format!("host offline (not configured): {m}"));
+    }
+    let h = sp.str("host")?;
+    cached(ctx)
+        .get(h)
+        .is_some_and(|s| !s.up)
+        .then(|| format!("host offline: {h}"))
 }
 
 /// #877: spawn `sp`'s lane is on a host that is `off` or failed its last probe: a pass never reaches into it.
 pub fn held(ctx: &Ctx, cfg: &Config, sp: &Event) -> bool {
     let off = |h: &str| cfg.hosts.get(h).is_some_and(|c| !c.enabled);
-    offline(ctx, Some(sp)).is_some()
+    offline(ctx, Some(cfg), Some(sp)).is_some()
         || sp.str("machine").is_some() && sp.str("host").is_some_and(off)
         || crate::roots::skip(ctx, cfg, sp).is_some()
 }
@@ -784,8 +805,8 @@ pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
             .and_then(|n| st.get(&(e.fleet.clone(), n)))
             .is_some_and(IssueState::done)
     };
-    let mut wts: Vec<&str> = events
-        .iter()
+    let mut wts: Vec<&str> = crate::events::lanes(&events)
+        .into_iter()
         .filter(lane)
         .filter(done)
         .filter_map(|e| e.str("worktree"))
@@ -882,7 +903,9 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
         .map(|h| h.0)
         .filter(|n| cfg.host_acp(n).is_some())
     {
-        return acp_health(ctx, cfg, on, (name, tags, home));
+        let mut bad = acp_health(ctx, cfg, on, (name, tags, home));
+        bad.extend(shed_row(on));
+        return bad;
     }
     let mut bad = vec![];
     let mut fail = |pass: bool, row: String| bad.extend((!pass).then_some(row));
@@ -908,10 +931,12 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     let mine = format!("drover {}", crate::VERSION);
     let line = format!("! drover — {theirs} there, {mine} here → the next `check` updates it (docs/hosts.md)");
     fail(theirs == mine, line);
-    if let Err(e) = crate::session::live_on(on) {
-        bad.push(format!("! shed: {e:#}"));
-    }
+    bad.extend(shed_row(on));
     bad
+}
+
+fn shed_row(on: &On) -> Option<String> {
+    crate::session::live_on(on).err().map(|e| format!("! shed: {e:#}"))
 }
 
 fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[String], &str)) -> Vec<String> {
@@ -1060,7 +1085,10 @@ pub fn place(
         };
     }
     let f = cfg.fleet(fleet)?;
-    let last = events.iter().rev().find(|e| e.is("spawn", fleet, issue));
+    let last = crate::events::lanes(events)
+        .into_iter()
+        .rev()
+        .find(|e| e.is("spawn", fleet, issue));
     let pre = (events, last.and_then(|e| e.str("root")));
     let design = crate::events::STAGES.contains(&f.family(role));
     let pin = f.role.get(f.role_key(role)).and_then(|r| r.host.as_deref());
@@ -1183,9 +1211,10 @@ pub fn rehome(a: Vec<String>, home: Option<&str>) -> Vec<String> {
 pub fn lanes_on(cfg: &Config, events: &[Event], name: &str) -> Vec<String> {
     let here = cfg.hosts.get(name).is_none_or(|h| h.machine.is_none());
     let on = |l: &&str| last_spawn(events, l).is_some_and(|e| e.str("host").map_or(here, |h| h == name));
-    let st = fold(events);
-    let open = st.values().filter(|s| !s.done()).filter_map(|s| s.active_lane());
-    open.map(|l| l.1).filter(on).map(String::from).collect()
+    crate::events::with_states(events, |st| {
+        let open = st.values().filter(|s| !s.done()).filter_map(|s| s.active_lane());
+        open.map(|l| l.1).filter(on).map(String::from).collect()
+    })
 }
 
 /// #840: a remote host unreachable 15 min straight: its open lanes restart on the main host from their pushed branch.

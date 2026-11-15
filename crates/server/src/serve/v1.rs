@@ -2,7 +2,7 @@ use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, St
 use super::{form, lanes, lock, refused, shown, view, working, Config, Ctx, Refusal, Result, Server};
 use crate::api::{
     ApprovalChoice, Ask, Block, Chat, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, Health,
-    IssueView, Lane, LaneChat, LessonFleet, LessonRun,
+    IssueView, Lane, LaneChat, LessonFleet, LessonRun, ServeHealth,
 };
 use crate::api::{Handoff, HandoffChoice, HandoffFrom, LastLine, RepoThread, RepoThreads};
 use crate::api::{
@@ -91,7 +91,7 @@ impl Server<'_> {
             ),
             ("GET", Some("health")) => {
                 let error = Config::loaded(ctx).err().map(|e| format!("{:#}", e.0));
-                let config = if error.is_some() { "invalid" } else { "ok" };
+                let (config, serve) = (if error.is_some() { "invalid" } else { "ok" }, self.numbers(ctx.now));
                 out(
                     "200 OK",
                     &Health {
@@ -100,6 +100,7 @@ impl Server<'_> {
                         error,
                         routes: lock(&self.timing).routes(ctx.now),
                         sources: self.r.refreshed(),
+                        serve,
                     },
                 )
             }
@@ -450,8 +451,8 @@ impl Server<'_> {
 
     pub(super) fn state(&self, ctx: &Ctx) -> Result<State> {
         let (cfg, events) = (Config::kept(ctx)?, working(&ctx.state)?);
-        let (st, r) = (events.states.clone(), &self.cached(ctx.now, 60));
-        let lanes = self.lane_list(ctx, &cfg, &events, &st);
+        let (st, r) = (&events.states, &self.cached(ctx.now, 60));
+        let lanes = self.lane_list(ctx, &cfg, &events, st);
         let queued = |(f, i): (&String, crate::queue::Item)| Queued {
             fleet: f.clone(),
             issue: i.issue,
@@ -471,7 +472,8 @@ impl Server<'_> {
                 })
                 .collect(),
             pending: crate::pending::of(&events, f, i.issue).map(start),
-            status: crate::pending::of(&events, f, i.issue).and_then(|p| p.line(ctx.now)),
+            status: (crate::pending::of(&events, f, i.issue).and_then(|p| p.line(ctx.now)))
+                .or_else(|| crate::pending::waits(&events, f, i.issue, cfg.fleet.get(f).is_some_and(|c| c.paused))),
         };
         let seen = crate::hosts::cached(ctx);
         let host = |(name, h): (String, Option<&crate::config::HostCfg>)| {
@@ -502,7 +504,7 @@ impl Server<'_> {
         let queue = cfg
             .fleet
             .keys()
-            .flat_map(|f| crate::queue::view(&events, &st, f).into_iter().map(move |i| (f, i)));
+            .flat_map(|f| crate::queue::view(&events, st, f).into_iter().map(move |i| (f, i)));
         Ok(State {
             seq: events.last().map_or(0, |e| e.seq),
             now: ctx.now,
@@ -544,8 +546,33 @@ impl Server<'_> {
         });
     }
 
+    fn numbers(&self, now: u64) -> ServeHealth {
+        let ((groups, busy), slow) = {
+            let t = lock(&self.timing);
+            (t.minute(now), t.breach(now, 200, 5))
+        };
+        ServeHealth {
+            at: now,
+            started: super::STARTED.get().copied().unwrap_or_default(),
+            rss_mb: self.rss.load(std::sync::atomic::Ordering::Relaxed),
+            groups,
+            busy,
+            clients: lock(&self.clients).len() as u64,
+            queued: lock(&self.running).values().map(|q| q.len() as u64).sum(),
+            slow: slow.map(|(r, p95)| format!("{r} p95 {p95} ms, over 200 ms for 5 min")),
+        }
+    }
+
     /// #859: `/api/v1` p95 over `slo_api_p95_ms` for `slo_api_minutes`: one `slo-api`; held again, `slo-api-ok`.
     pub fn slo(&self, now: u64) {
+        let pid = std::process::id().to_string();
+        let kb = crate::runner::ok(&self.r, "ps", &["-o", "rss=", "-p", &pid]).map(|s| s.trim().parse::<u64>());
+        self.rss.store(
+            kb.ok().and_then(Result::ok).unwrap_or_default() / 1024,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        let h = serde_json::to_vec(&self.numbers(now)).unwrap_or_default();
+        drop(std::fs::write(self.ctx.state.with_file_name("serve-health.json"), h));
         let (Ok(cfg), Ok(ev)) = (Config::kept(self.ctx), working(&self.ctx.state)) else {
             return;
         };
@@ -665,8 +692,14 @@ fn pending_cards(ctx: &Ctx, mut tab: NeedsTab) -> NeedsTab {
     let back = |f: &str, n| crate::pending::of(&ev, f, n).filter(|p| p.back(ctx.now));
     tab.issues
         .retain(|i| crate::pending::of(&ev, &i.fleet, i.issue).is_none() || back(&i.fleet, i.issue).is_some());
-    let mut st = ev.states.clone();
-    st.retain(|(f, n), _| back(f, *n).is_some() && !tab.issues.iter().any(|i| i.fleet == *f && i.issue == *n));
+    let asked = crate::events::of_kind(&ev, &["pending-action"]);
+    let keys: std::collections::BTreeSet<(String, u64)> =
+        asked.iter().filter_map(|e| Some((e.fleet.clone(), e.issue?))).collect();
+    let card =
+        |(f, n): &&(String, u64)| back(f, *n).is_some() && !tab.issues.iter().any(|i| i.fleet == *f && i.issue == *n);
+    let mut st: crate::events::States = (keys.iter().filter(card))
+        .filter_map(|k| ev.states.get_key_value(k).map(|(k, v)| (k.clone(), v.clone())))
+        .collect();
     for s in st.values_mut() {
         s.last_event = "extend-failed".into();
     }

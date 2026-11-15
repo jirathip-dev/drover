@@ -245,7 +245,10 @@ Herd strip (the issue's horse, or a gate horse when it has no lane, wears a red 
   PASS, green CI and the serial gate still apply. The `merged` event records `by: owner, override: "ROUND_LIMIT"`
   and the closing comment says `Owner override: ROUND_LIMIT`.
 - **one more round** logs `round-extended` (this issue's limit is `review_rounds` + 1 per extension) and
-  spawns `impl --supersede`. #817: an orchestrator grants it in its repo's thread with
+  puts the issue back in its queue place as `queued` (#1058): the tap spawns nothing, drive starts it in turn
+  with `impl --supersede`, and its Queue row reads `extended · waiting: <gate>` (`PAUSED`, `HOST_BUSY`, …) until
+  then. The card never comes back for a wait; a hard refusal of the start (`MERGED`, `UPDATE_LIMIT`, an error)
+  is a new `needs-human` naming the code. #817: an orchestrator grants it in its repo's thread with
   `drover extend <fleet> <issue> --typed "<owner line>"` (`by: owner (typed)`) or `--basis "<spec quote>"`
   (`by: orchestrator-<thread>`, an FYI line whose [change] parks the issue for 30 min).
 - **park** logs `parked` (`by`, and `drover park <fleet> <issue> --why <text>`'s reason): the issue leaves
@@ -263,9 +266,13 @@ never passes `--force`, and never bypasses a refusal: `REFUSED` (e.g. `HOST_BUSY
 next pass. Starts fan out: a pass tries every startable item in queue order, each spawn sampling the host
 afresh. An item-specific refusal (`SERIAL_BUSY`, `MCP_FORBIDDEN`, …) skips that item for the pass; it keeps
 its queue place and status reads `skipped this pass: <CODE> (<why>)` (board lane `skip <CODE>`). `CAP` ends
-the fleet's starts; `HOST_BUSY` and `LOGIN_NEEDED` end starting for every later fleet in the pass too (same Mac). Every action logs a passive `driven` event (step, command, result). A pass holds
-the `drive.lock` lease (#344: taken over once its pid is gone, or after an hour), so cron and the button never overlap; the
-board shows `driver: drover · last pass <age> ago`.
+the fleet's starts; `HOST_BUSY` and `LOGIN_NEEDED` end that fleet's starts in the pass. Every action logs a passive `driven` event (step, command, result).
+#896: each fleet's pass runs on its own thread under its own `drive-<fleet>.lock` lease (`drive-fast-<fleet>.lock` for
+the fast step; #344: taken over once its pid is gone, or after an hour), so cron and the button never overlap on one
+fleet and a slow fleet never holds another. The steps every fleet shares (the look, orphans, repair, checkpoint) run
+under `drive.lock`; a pass that finds it held skips them. A spawn's admission (slot count, host room, its marker) runs
+under the short `admit.lock`, so two fleets' passes never both take the last slot. The board shows each fleet's
+`⟳ driving…` and its last pass's length.
 
 A fix lane may push back on a finding in its report with file:line proof; that is not a fix,
 and the next (fresh) reviewer decides.

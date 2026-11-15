@@ -1303,7 +1303,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Status(Scope { fleet, json }) => {
             let fleet = fleet.map(|f| crate::rename::current(&ctx.state, &f));
-            let (events, all) = (working(&ctx.state)?, crate::events::states(&ctx.state)?);
+            let all = crate::events::states(&ctx.state)?;
             let rows: Vec<_> = all
                 .values()
                 .filter(|s| fleet.as_ref().is_none_or(|f| *f == s.fleet))
@@ -1320,7 +1320,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             } else if rows.is_empty() {
                 writeln!(out, "no tracked issues")?;
             } else {
-                let cfg = Config::load(&ctx.config).ok();
+                let (events, cfg) = (working(&ctx.state)?, Config::load(&ctx.config).ok());
                 let serial = |f: &str| queue::serial_use(&events, &all, f, cfg.as_ref()).map(|s| format!("{f}: {s}\n"));
                 let mut serial: Vec<_> = rows.iter().filter_map(|s| serial(&s.fleet)).collect();
                 serial.dedup();
@@ -1342,6 +1342,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         &events,
                         &crate::session::all(&c, &look).running(),
                         false,
+                        None,
                     )
                 });
                 let cfg = Config::load(&ctx.config).ok();
@@ -1373,7 +1374,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     "FLEET", "ISSUE", "STATE", "LANE", "AGE", head
                 )?;
                 for (s, skip) in rows.into_iter().zip(skips) {
-                    let pending = crate::pending::of(&events, &s.fleet, s.issue).and_then(|p| p.line(ctx.now));
+                    let paused = cfg
+                        .as_ref()
+                        .is_some_and(|c| c.fleet.get(&s.fleet).is_some_and(|f| f.paused));
+                    let pending = (crate::pending::of(&events, &s.fleet, s.issue).and_then(|p| p.line(ctx.now)))
+                        .or_else(|| crate::pending::waits(&events, &s.fleet, s.issue, paused));
                     let wait = waits
                         .iter()
                         .flatten()
@@ -1858,7 +1863,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let (events, agents) = (working(&ctx.state)?, crate::session::all(&cfg, r).running());
                     let at = places(&cfg, r, &events);
-                    let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true);
+                    let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true, None);
                     let mut rows: Vec<_> = all
                         .into_iter()
                         .filter(|(s, w)| s.lane.as_ref() == Some(&w.lane) && !s.done() && s.state != "parked")
@@ -1924,7 +1929,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                     rows.retain(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet));
                     for w in &mut rows {
-                        if let Some(l) = crate::pending::of(&events, &w.fleet, w.issue).and_then(|p| p.line(ctx.now)) {
+                        let paused = cfg.fleet.get(&w.fleet).is_some_and(|f| f.paused);
+                        let line = crate::pending::of(&events, &w.fleet, w.issue).and_then(|p| p.line(ctx.now));
+                        if let Some(l) = line.or_else(|| crate::pending::waits(&events, &w.fleet, w.issue, paused)) {
                             (w.who, w.what) = ("drive", l);
                         }
                     }

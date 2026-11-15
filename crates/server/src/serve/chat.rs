@@ -646,3 +646,211 @@ pub fn deliver(ctx: &Ctx, r: &dyn Runner, (t, line): &(Event, String)) {
         ));
     }
 }
+
+/// #1072: a thread state as the screens' row figure.
+fn figure(state: &str) -> Value {
+    json!({"state": match state { "choose" => "needs", "working" => "working", _ => "idle" }})
+}
+
+/// #1072: a thread's row on the Threads screen: its sprite, `new`, the state word and last line, age; tap opens it.
+fn row_block(r: &ThreadRow, repo: Option<&str>) -> Value {
+    let (word, tone) = match r.state.as_str() {
+        "choose" => ("! choose · ", "warn"),
+        "working" => ("✻ working · ", ""),
+        "asleep" => ("☾ asleep · ", ""),
+        _ => ("", ""),
+    };
+    let sub = repo.map_or(format!("{word}{}", r.line), |f| format!("{f} · {}", r.line));
+    let act = or(repo.is_some(), "restore", "archive");
+    let mut v = json!({"type": "row", "id": r.id, "figure": figure(&r.state), "title": r.title,
+        "subtitle": {"text": sub, "tone": tone}, "value": r.age, "tap": {"open": format!("/screens/threads/{}", r.id)},
+        "swipe": [{"label": act, "action": format!("thread-{act}"), "values": {"thread": r.id}}]});
+    if r.unread {
+        v["badge"] = json!({"text": "new", "tone": "done"});
+    }
+    v
+}
+
+/// #1072: the Threads tab (`/screens/threads`): a section per repo ("all repos" first) with its three newest threads,
+/// the older ones folded, `[+ thread]`; the archived ones folded at the foot; `badge` the threads waiting on a choice.
+pub fn list_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session]) -> Value {
+    let threads = conductor::threads(events);
+    let (mut blocks, mut arch) = (vec![], vec![]);
+    for repo in std::iter::once("all").chain(cfg.fleet.keys().map(String::as_str)) {
+        let mut rows = vec![];
+        for t in threads.iter().filter(|t| t.fleet == repo) {
+            let on = conductor::archived(events, t.str("thread").unwrap_or_default());
+            let r = row(ctx, events, t, agents);
+            if on {
+                arch.push((r.0, row_block(&r.1, Some(or(repo == "all", "all repos", repo)))));
+            } else {
+                rows.push((r.0, row_block(&r.1, None)));
+            }
+        }
+        rows.sort_by_key(|r| std::cmp::Reverse(r.0));
+        let mut rows: Vec<Value> = rows.into_iter().map(|r| r.1).collect();
+        let older = rows.split_off(rows.len().min(3));
+        let n = rows.len() + older.len();
+        let name = or(repo == "all", "all repos", repo);
+        let count = match n {
+            0 => "no threads".into(),
+            1 => "1 thread".into(),
+            n => format!("{n} threads"),
+        };
+        let mut kids = vec![];
+        if !rows.is_empty() {
+            kids.push(json!({"type": "list", "id": format!("l-{repo}"), "rows": rows}));
+        }
+        if !older.is_empty() {
+            kids.push(json!({"type": "card", "id": format!("older-{repo}"), "fold": {"line": format!("▸ {} older threads", older.len())},
+                "blocks": [{"type": "list", "id": format!("l-older-{repo}"), "rows": older}]}));
+        }
+        kids.push(json!({"type": "button", "id": format!("new-{repo}"), "label": "+ thread", "tap": {"open": format!("/screens/threads/new/{repo}")}}));
+        blocks.push(json!({"type": "section", "id": format!("r-{repo}"), "header": format!("{name} · {count}"), "blocks": kids}));
+    }
+    if !arch.is_empty() {
+        arch.sort_by_key(|r| std::cmp::Reverse(r.0));
+        let rows: Vec<Value> = arch.into_iter().map(|r| r.1).collect();
+        blocks.push(
+            json!({"type": "card", "id": "archived", "fold": {"line": format!("▸ {} archived", rows.len())},
+            "blocks": [{"type": "list", "id": "l-archived", "rows": rows}]}),
+        );
+    }
+    json!({"type": "screen", "id": "threads", "title": "Threads", "badge": choosing(events),
+        "stream": "/screens/threads/stream", "blocks": blocks})
+}
+
+/// #1072: the composer: one text field whose `[label]` posts `action` with `values`.
+fn composer(label: &str, action: &str, values: &Value) -> Value {
+    json!({"type": "form", "id": "say", "fields": [{"type": "text", "name": "text", "label": "", "value": "", "placeholder": "message the orchestrator"}],
+        "submit": {"label": label, "action": action, "values": values}})
+}
+
+/// #1072: a message as a card: `kind` you, orch, tool, sys or ask (choice rows while open, else its answer).
+fn msg_card(now: u64, id: &str, m: &Msg) -> Value {
+    let (key, age) = (format!("m-{}", m.seq), crate::events::age(now.saturating_sub(m.ts)));
+    let text = |k: &str, t: &str| json!({"type": "text", "id": format!("{key}-{k}"), "markdown": t});
+    let sys = |t: &str| json!({"type": "card", "id": key, "kind": "sys", "blocks": [text("t", t)]});
+    match m.kind.as_str() {
+        "msg" if m.from == "owner" => {
+            json!({"type": "card", "id": key, "kind": "you", "title": "you", "meta": format!("✓ {age}"), "blocks": [text("t", &m.text)]})
+        }
+        "msg" => {
+            json!({"type": "card", "id": key, "kind": "orch", "title": "orchestrator", "meta": age, "blocks": [text("t", &m.text)]})
+        }
+        "note" if m.retry => {
+            json!({"type": "card", "id": key, "kind": "you", "tone": "bad", "title": "you", "meta": age,
+            "blocks": [text("t", &m.text)],
+            "buttons": [{"type": "button", "id": format!("{key}-retry"), "label": "retry", "style": "bad", "action": "thread-retry", "values": {"thread": id, "msg": m.seq}}]})
+        }
+        "cmd" => json!({"type": "card", "id": key, "kind": "tool", "fold": {"line": format!("$ {}", m.text)}}),
+        "fold" => {
+            let more = or(m.cmds.len() > 1, " …", "");
+            let line = format!("$ {}{more}", m.cmds.first().map_or("", String::as_str));
+            let all = format!("```\n{}\n```", m.cmds.join("\n"));
+            json!({"type": "card", "id": key, "kind": "tool", "fold": {"line": line}, "blocks": [text("t", &all)]})
+        }
+        "ask" => {
+            let Some(a) = &m.ask else { return sys(&m.text) };
+            let mut blocks = vec![text("t", &a.question)];
+            if let Some(d) = &m.answer {
+                let by = d.by.as_deref().unwrap_or("you");
+                let when = crate::events::age(now.saturating_sub(d.ts));
+                blocks.push(text("a", &format!("✓ **{}** · {by} · {when}", d.choice)));
+            } else if m.open {
+                let opts: Vec<Value> = a.options.iter().map(|o| json!({"label": o, "value": o})).collect();
+                let mut ch = json!({"type": "choice", "id": a.id, "action": "answer", "values": {"thread": id}, "options": opts,
+                    "other": {"placeholder": "other: type an answer"}});
+                let rec = a
+                    .recommend
+                    .and_then(|n| a.options.get(usize::try_from(n).ok()?.checked_sub(1)?));
+                if let Some(r) = rec {
+                    ch["recommended"] = json!(r);
+                }
+                blocks.push(ch);
+            }
+            json!({"type": "card", "id": key, "kind": "ask", "tone": or(m.open && m.answer.is_none(), "warn", ""),
+                "title": format!("{}{}", a.id, or(m.routine, " · routine", "")), "meta": age, "blocks": blocks})
+        }
+        "resumed" => sys(&format!("resumed session {}", m.text)),
+        "sleep" => sys("the orchestrator went to sleep"),
+        _ => sys(&m.text),
+    }
+}
+
+/// #1072: one thread (`/screens/threads/<id>`): its bar row, its last 30 messages and the composer; `[archive]` or,
+/// archived, `[restore]` and no composer.
+pub fn thread_screen(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Session], id: &str) -> Option<Value> {
+    let t = conductor::find(events, id).ok()?;
+    let v = thread(ctx, cfg, events, t, agents);
+    let arch = v.page.archived;
+    let act = or(arch, "restore", "archive");
+    let bar: Vec<&str> = v.ds.split(" · ").collect();
+    let awake = bar
+        .last()
+        .filter(|w| ["awake", "asleep", "working"].contains(w))
+        .copied()
+        .unwrap_or_default();
+    let title = bar
+        .iter()
+        .filter(|w| **w != awake)
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let sub = match v.state.as_str() {
+        "choose" => json!({"text": "! choose", "tone": "warn"}),
+        "working" => json!("✻ working"),
+        "new" => json!("no orchestrator yet"),
+        s => json!(s),
+    };
+    let mut blocks = vec![
+        json!({"type": "row", "id": "who", "figure": figure(&v.state), "title": title, "subtitle": sub, "value": awake}),
+    ];
+    blocks.extend(v.page.msgs.iter().map(|m| msg_card(ctx.now, id, m)));
+    if !arch {
+        blocks.push(composer("send", "thread-say", &json!({ "thread": id })));
+    }
+    Some(
+        json!({"type": "screen", "id": format!("thread-{id}"), "title": v.title, "focus": true,
+        "stream": format!("/screens/threads/{id}/stream"),
+        "actions": [{"label": act, "action": format!("thread-{act}"), "values": {"thread": id}}], "blocks": blocks}),
+    )
+}
+
+/// #1072: a new thread in `repo` (`/screens/threads/new/<repo>`): its first message starts it (#405).
+pub fn new_screen(cfg: &Config, repo: &str) -> Option<Value> {
+    let role = conductor::defaults(cfg, repo).ok()?.1;
+    let who = super::join(&[repo, role.harness.as_str(), role.model.as_deref().unwrap_or_default()]);
+    let hint = "Your first message starts the thread and its orchestrator, and titles it with its first line. Nothing is logged until you send.";
+    Some(
+        json!({"type": "screen", "id": format!("thread-new-{repo}"), "title": "New thread", "focus": true, "blocks": [
+        {"type": "row", "id": "who", "figure": {"state": "idle"}, "title": who, "subtitle": "no orchestrator yet"},
+        {"type": "text", "id": "hint", "markdown": hint},
+        composer("start", "thread-new", &json!({ "repo": repo }))]}),
+    )
+}
+
+impl super::Server<'_> {
+    /// #1072: the Threads tab's screens by `sub` path: empty the list, `/<id>` a thread (a paired live open marks it read),
+    /// `/new/<repo>` a new one.
+    pub(super) fn threads_screen(&self, ctx: &Ctx, sub: &str, paired: bool) -> Option<Value> {
+        let (cfg, events) = (Config::kept(ctx).ok()?, crate::events::working(&ctx.state).ok()?);
+        let agents = self.sessions(ctx.now).map(|s| s.running()).unwrap_or_default();
+        match sub {
+            "" => Some(list_screen(ctx, &cfg, &events, &agents)),
+            s if s.starts_with("/new/") => new_screen(&cfg, &s[5..]),
+            s => {
+                let id = s.strip_prefix('/')?;
+                if paired && self.addr.is_some() && self.export.is_none() {
+                    drop(conductor::mark_read(
+                        ctx,
+                        &cfg,
+                        &events,
+                        conductor::find(&events, id).ok()?,
+                    ));
+                }
+                thread_screen(ctx, &cfg, &events, &agents, id)
+            }
+        }
+    }
+}

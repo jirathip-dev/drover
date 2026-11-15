@@ -649,3 +649,36 @@ fn a_remote_acp_lane_without_the_proxy_token_file_is_refused_with_the_setup_comm
     assert!(spawned(&c).is_empty() && drover::proxy::keys(&c).is_empty());
     assert!(b.runs.borrow().is_empty(), "nothing started");
 }
+
+#[test]
+fn doctor_checks_a_shed_acp_host_through_shed_as_the_survey_does() {
+    let (c, _) = setup("racp-doctor", &["boat1"]);
+    let f = spawn_fake()
+        .reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n")
+        .reply("@boat1 sh -lc gh auth status", "");
+    let b = Boat::new(&c, &f, &[("boat1", true, true)]);
+    for (p, role) in [("fleet-impl", "impl"), ("lane-orchestrator", "orchestrator")] {
+        let hook = json!([{"hooks": [{"command": format!("'{EXE}' hook --role {role}")}]}]);
+        let dir = b.profiles.join(p);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("settings.json"),
+            json!({"hooks": {"PreToolUse": hook}}).to_string(),
+        )
+        .unwrap();
+    }
+    let (_, o) = run(&c, &b, &["doctor"]);
+    assert!(
+        o.contains("\n✓ host boat1 — git, gh, ") && o.contains(", shed\n"),
+        "{o}"
+    );
+    assert!(f.called("ssh boat1 'shed' 'connect'"), "{:?}", f.calls.borrow());
+    assert!(!o.contains("herdr"), "{o}");
+    b.machines.borrow_mut().get_mut("boat1").unwrap().bare = false;
+    let (_, o) = run(&c, &b, &["doctor"]);
+    assert!(
+        o.contains("\n! host boat1 shed: ") && o.contains("shed: not found"),
+        "{o}"
+    );
+    assert!(!o.contains("✓ host boat1"), "{o}");
+}

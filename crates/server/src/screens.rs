@@ -36,6 +36,22 @@ pub fn places() -> Value {
     serde_json::to_value(m.get("places")).unwrap_or_default()
 }
 
+/// #1072: the standalone page's places: the manifest's, then the Threads tab (never the Cooee plugin's).
+pub fn page_places() -> Value {
+    let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
+    let mut all = places().as_array().cloned().unwrap_or_default();
+    all.push(threads);
+    Value::Array(all)
+}
+
+const THREAD_ACTIONS: [&str; 5] = [
+    "thread-new",
+    "thread-say",
+    "thread-retry",
+    "thread-archive",
+    "thread-restore",
+];
+
 fn iso(t: u64) -> String {
     let (d, s) = (t / 86_400, t % 86_400);
     let (m, day) = civil_month_day(d);
@@ -101,16 +117,36 @@ fn rounds(events: &[Event], f: &str, n: u64) -> String {
     shown.collect::<Vec<_>>().join(" · ")
 }
 
-fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Value {
+fn cut(s: &str, n: usize) -> String {
+    let mut c: String = s.chars().take(n).collect();
+    if c.len() < s.len() {
+        c.push('…');
+    }
+    c
+}
+
+const LINE: usize = 48;
+
+fn row(ctx: &Ctx, ev: &[Event], (repo, paused): (&str, bool), f: &str, r: &QueueRow, k: Option<usize>) -> Value {
     let fig = figure(&r.act, &r.state);
-    let title = format!("#{} {}", r.issue, r.title.clone().unwrap_or_default());
+    let title = format!(
+        "#{} {}",
+        r.issue,
+        crate::gh::cached_title(ctx, f, r.issue).unwrap_or_default()
+    );
     let state = r.state.replace('(', " ").replace(')', "").replace("⏸ waiting: ", "");
     let badge = match k {
         Some(k) => json!({"text": format!("#{}", k + 1), "tone": "mute"}),
         None => json!({"text": state, "tone": badge_tone(&fig)}),
     };
-    let mut v = json!({"type": "row", "id": format!("q-{f}-{}", r.issue), "figure": fig, "title": title.trim_end(), "badge": badge});
+    let mut v = json!({"type": "row", "id": format!("q-{f}-{}", r.issue), "figure": fig, "title": cut(title.trim_end(), LINE), "badge": badge});
     let mut sub = rounds(ev, f, r.issue);
+    if let Some(pr) = r.pr.pr {
+        sub = format!("{sub} · PR #{pr}");
+    }
+    if r.pr.ci.as_deref() == Some("green") {
+        sub = format!("{sub} · CI ✓");
+    }
     let live = r.live && !r.dead && !r.lane.is_empty();
     if live {
         let at = [r.lane.as_str(), r.place.as_str()];
@@ -119,15 +155,18 @@ fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Val
             at.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")
         );
     }
-    if r.pr.ci.as_deref() == Some("green") {
-        sub = format!("{sub} · CI ✓");
-    }
+    let sub = sub.trim_start_matches(" ▸ ").trim_start_matches(" · ");
+    let sub = match k.and(crate::pending::waits(ev, f, r.issue, paused)) {
+        Some(w) if !sub.is_empty() => format!("{w} · {sub}"),
+        Some(w) => w,
+        None => sub.into(),
+    };
     let vals = json!({"fleet": f, "issue": r.issue, "agent": r.lane});
     if let Some(b) = r.blocked_by {
         v["indent"] = json!(1);
         v["subtitle"] = json!({"text": format!("held until #{b}"), "tone": "bad"});
     } else if !sub.is_empty() {
-        v["subtitle"] = json!(sub.trim_start_matches(" ▸ ").trim_start_matches(" · "));
+        v["subtitle"] = json!(cut(&sub, LINE));
     }
     if k.is_none() {
         v["value"] = json!({ "since": iso(r.t) });
@@ -159,14 +198,15 @@ fn hot_row(f: &str, r: &QueueRow) -> Option<Value> {
     })
 }
 
-fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
+fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard) -> Value {
     let f = &c.name;
     let (queued, busy): (Vec<&QueueRow>, Vec<&QueueRow>) = c.rows.iter().partition(|r| r.state == "queued");
+    let paused = c.paused.is_some();
     let rows = |rs: &[&QueueRow], q: bool| -> Vec<Value> {
         let k = |i| q.then_some(i);
         rs.iter()
             .enumerate()
-            .flat_map(|(i, r)| [Some(row(ev, &c.config.repo, f, r, k(i))), hot_row(f, r)])
+            .flat_map(|(i, r)| [Some(row(ctx, ev, (&c.config.repo, paused), f, r, k(i))), hot_row(f, r)])
             .flatten()
             .collect()
     };
@@ -174,7 +214,6 @@ fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
         json!({"type": "section", "id": format!("{id}-{f}"), "header": format!("{word} ({})", rs.len()),
             "blocks": [{"type": "list", "id": format!("{id}-list-{f}"), "rows": rs}]})
     };
-    let paused = c.paused.is_some();
     let badge = [
         json!({"text": "driving", "tone": "ok"}),
         json!({"text": "paused", "tone": "mute"}),
@@ -227,21 +266,21 @@ fn choice(id: &str, action: &str, options: &[Value]) -> Value {
 }
 
 fn fold(n: Option<u64>, kind: &str, q: &str, age: &str, main: &Value) -> Value {
-    let mut cut: String = q.chars().take(48).collect();
-    if cut.len() < q.len() {
-        cut.push('…');
-    }
+    let cut = cut(q, LINE);
     let n = n.map_or(String::new(), |n| format!("#{n} · "));
     json!({"line": format!("{n}{kind} · {cut} · {age}"), "main": main})
 }
 
 fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
     let q = &a.ask;
-    let opts: Vec<Value> = q.options.iter().map(|o| json!({"value": o, "label": o})).collect();
-    let mut c = choice(&q.id, "answer", &opts);
     let rec = q
         .recommend
         .and_then(|n| q.options.get(usize::try_from(n).ok()?.checked_sub(1)?));
+    let (first, rest): (Vec<&String>, Vec<&String>) = q.options.iter().partition(|o| Some(*o) == rec);
+    let opts: Vec<Value> = (first.into_iter().chain(rest))
+        .map(|o| json!({"value": o, "label": o}))
+        .collect();
+    let mut c = choice(&q.id, "answer", &opts);
     if let Some(r) = rec {
         c["recommended"] = json!(r);
     }
@@ -276,6 +315,52 @@ fn ask_card(now: u64, mins: u64, a: &NeedAsk) -> Value {
     json!({"type": "card", "id": format!("ask-{}", q.id), "kind": "ask", "tone": "warn",
         "title": format!("{}{issue}{design}", q.fleet), "meta": format!("{kind} · {age}"),
         "fold": fold(q.issue, kind, &q.question, &age, &main.unwrap_or_default()), "blocks": blocks})
+}
+
+fn ask_outcome(log: &[Event], a: &Event) -> Option<String> {
+    let why = crate::events::closed_row(log, a)?;
+    let pick = (log.iter().rev())
+        .find(|d| d.kind == "decision" && crate::events::names(d, a))
+        .and_then(|d| d.str("choice"));
+    Some(match pick.filter(|_| why == "answered") {
+        Some(c) => format!("answered · {c}"),
+        None => why,
+    })
+}
+
+fn ask_minutes(ctx: &Ctx) -> u64 {
+    Config::kept(ctx).map_or(crate::config::Limits::default().ask_default_minutes, |c| {
+        c.limits.ask_default_minutes
+    })
+}
+
+fn ask_sheet(ctx: &Ctx, q: &Q) -> Option<Value> {
+    let seq = q.get("seq")?.parse::<u64>().ok()?;
+    let log = working(&ctx.state).ok()?;
+    let a = log.get(log.binary_search_by_key(&seq, |e| e.seq).ok()?)?;
+    let a = (a.kind == "needs-decision").then_some(a)?;
+    let ask = super::v1::ask(a);
+    let blocks = if let Some(o) = ask_outcome(&log, a) {
+        json!([{"type": "text", "markdown": format!("**{}**\n\n{o}", ask.question)}])
+    } else {
+        let routine = a.str("kind") == Some("routine") && ask.recommend.is_some();
+        let need = NeedAsk {
+            ask,
+            who: String::new(),
+            kind: (if routine { "routine" } else { "owner" }).into(),
+            from: None,
+            pngs: super::chat::files_of(a)
+                .map(|f| f["name"].as_str().unwrap_or_default().into())
+                .collect(),
+            thread: None,
+            title: None,
+        };
+        ask_card(ctx.now, ask_minutes(ctx), &need)["blocks"].clone()
+    };
+    let id = a.str("id").unwrap_or_default();
+    Some(
+        json!({"type": "sheet", "id": format!("asks-{seq}"), "title": format!("{} · {id}", a.fleet), "cancel": "Done", "blocks": blocks}),
+    )
 }
 
 fn needs_card(i: &NeedIssue, ev: &crate::events::Log) -> Value {
@@ -394,7 +479,7 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
         .map(|c| c.fleet.into_iter().map(|(f, fc)| (f, fc.repo)).collect())
         .unwrap_or_default();
     let list = super::v1::feed(ctx, &window, usize::MAX).list;
-    let mut rows = vec![];
+    let (mut rows, mut asks) = (vec![], None);
     for e in list.iter().rev().filter(|e| e.ts < before) {
         let Some(k) = kind_of(&e.kind).filter(|k| all || picked.contains(k)) else {
             continue;
@@ -419,6 +504,14 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
             (_, Some((pr, repo))) => json!({ "url": format!("https://github.com/{repo}/pull/{pr}") }),
             _ => Value::Null,
         };
+        let log =
+            (e.kind == "needs-decision").then(|| asks.get_or_insert_with(|| working(&ctx.state).unwrap_or_default()));
+        if let Some((log, i)) = log.and_then(|l| Some((&**l, l.binary_search_by_key(&e.seq, |x| x.seq).ok()?))) {
+            match ask_outcome(log, &log[i]) {
+                Some(o) => r["subtitle"] = json!(o),
+                None => r["tap"] = json!({ "sheet": format!("/screens/ask?seq={}", e.seq) }),
+            }
+        }
         if r["tap"].is_null() {
             r.as_object_mut().map(|o| o.remove("tap"));
         }
@@ -649,6 +742,7 @@ fn sheets(v: &Value, out: &mut Vec<String>) {
         Value::Object(m) => {
             out.extend(
                 m.get("sheet")
+                    .or_else(|| m.get("open"))
                     .and_then(Value::as_str)
                     .filter(|p| p.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b)))
                     .map(String::from),
@@ -662,7 +756,7 @@ fn sheets(v: &Value, out: &mut Vec<String>) {
 
 impl Server<'_> {
     pub(super) fn screen_files(&self, ctx: &Ctx, paired: bool) -> Vec<(String, Vec<u8>)> {
-        let mut paths: Vec<String> = places()
+        let mut paths: Vec<String> = page_places()
             .as_array()
             .into_iter()
             .flatten()
@@ -694,6 +788,10 @@ impl Server<'_> {
             "/screens/cards" => self.chat_cards(ctx),
             "/screens/workflow" => workflow(ctx),
             "/screens/hot" => self.hot_sheet(ctx, q)?,
+            "/screens/ask" => ask_sheet(ctx, q)?,
+            p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
+                return self.threads_screen(ctx, &p[16..], paired)
+            }
             _ => return None,
         };
         let snap = Some(self.snapshot().1.ts).filter(|t| *t > 0);
@@ -824,7 +922,7 @@ impl Server<'_> {
             tab.fleets
                 .iter()
                 .filter(|f| sel.is_none_or(|s| f.name == s))
-                .map(|c| fleet_card(&ev, c)),
+                .map(|c| fleet_card(ctx, &ev, c)),
         );
         let stream = sel.map_or("/screens/queue/stream".into(), |s| {
             format!("/screens/queue/stream?repo={s}")
@@ -839,9 +937,6 @@ impl Server<'_> {
 
     fn chat_cards(&self, ctx: &Ctx) -> Value {
         let tab = self.needs_tab(ctx, true);
-        let mins = Config::kept(ctx).map_or(crate::config::Limits::default().ask_default_minutes, |c| {
-            c.limits.ask_default_minutes
-        });
         let ev = working(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
         cards.extend(tab.config.as_ref().map(|e| {
@@ -856,7 +951,7 @@ impl Server<'_> {
             json!({"type": "card", "id": format!("stuck-{}", e.seq), "kind": "alert", "tone": "warn",
                 "title": "Drive is stuck", "blocks": [{"type": "text", "id": "stuck-why", "markdown": crate::events::plain(e)}]})
         }));
-        cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, mins, a)));
+        cards.extend(tab.asks.iter().map(|a| ask_card(ctx.now, ask_minutes(ctx), a)));
         cards.extend(tab.issues.iter().map(|i| needs_card(i, &ev)));
         Value::Array(cards)
     }
@@ -900,7 +995,7 @@ impl Server<'_> {
             ("POST", "/action") => {
                 let a: Value = serde_json::from_str(body).unwrap_or_default();
                 let name = a["action"].as_str().unwrap_or_default();
-                if !permitted(name) {
+                if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name)) {
                     let why =
                         format!("REFUSED NOT_PERMITTED: `{name}` is not in cooee-plugin.toml's [permissions] actions");
                     return line("403 Forbidden", &why);
@@ -1015,6 +1110,29 @@ impl Server<'_> {
                 ];
                 self.form_op(ctx, "card", &kv)?
             }
+            n if THREAD_ACTIONS.contains(&n) => {
+                let kv = [
+                    ("t", s("thread")),
+                    ("text", s("text")),
+                    ("repo", s("repo")),
+                    ("n", s("msg")),
+                ];
+                let mut f: Q = kv.into_iter().map(|(k, v)| (k.into(), v)).collect();
+                f.insert("op".into(), n[7..].into());
+                let mut later = vec![];
+                let (res, more) = crate::conductor::deferred(|| super::chat::post(ctx, &self.r, &f, &mut later));
+                self.later(ctx, later.into_iter().chain(more));
+                self.kick.store(true, Relaxed);
+                let line = res?;
+                if n == "thread-new" {
+                    let id = line.split(' ').next().unwrap_or_default();
+                    let s = self
+                        .threads_screen(ctx, &format!("/{id}"), true)
+                        .context("no such thread")?;
+                    return Ok(json!({"ops": [{"op": "screen", "screen": s}], "toast": line}));
+                }
+                line
+            }
             "save-fleets" => self.save_fleets(ctx, &cfg, v)?,
             "remove-fleet" => {
                 let hash = crate::propose::view(ctx)?.hash;
@@ -1027,7 +1145,8 @@ impl Server<'_> {
             }
             other => anyhow::bail!("no handler for `{other}`"),
         };
-        let close = ["save-fleets", "remove-fleet", "kill", "clean", "close"].contains(&name);
+        let close = ["save-fleets", "remove-fleet", "kill", "clean", "close"].contains(&name)
+            || name == "answer" && a["screen"] != "cards";
         let ops: Vec<Value> = (name == "answer")
             .then(|| json!({"op": "remove", "id": format!("ask-{block}")}))
             .into_iter()
