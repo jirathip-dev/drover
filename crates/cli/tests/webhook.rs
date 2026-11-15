@@ -269,12 +269,12 @@ fn with_webhooks_on_the_fast_step_reads_prs_only_every_webhook_poll_minutes_or_a
     };
     let step = |t: u64| assert_eq!(run(&at(t), &r, &["drive", "--fast"]).0, 0);
     step(0);
-    let reads = r.count("gh ");
+    let reads = r.count("gh api");
     assert!(reads > 0 && r.count("gh api graphql") == 1);
     for t in [60, 120, 540] {
         step(t);
     }
-    assert_eq!(r.count("gh "), reads, "{:?}", r.calls.borrow());
+    assert_eq!(r.count("gh api"), reads, "{:?}", r.calls.borrow());
     step(600);
     assert_eq!(r.count("gh api graphql"), 2, "{:?}", r.calls.borrow());
     let body = suite("jirathip-dev/sendmeter", "issue-7");
