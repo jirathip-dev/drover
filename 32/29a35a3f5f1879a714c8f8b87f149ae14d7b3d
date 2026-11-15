@@ -1,0 +1,5 @@
+Decided: no code change for the red board_fresh check; merged origin/staging again and re-ran CI
+Because: crates/cli/tests/board_fresh.rs:145
+Rejected: loosening the slo test's threshold — the slow route was /api/v1/health, which this PR never touches
+Check: CI rust job green at this head; board_fresh and shed_version pass locally
+Owner: the shed version check is unchanged; this round only re-ran a flaky timing test on fresh staging
