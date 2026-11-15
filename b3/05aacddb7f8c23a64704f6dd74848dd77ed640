@@ -1,0 +1,4 @@
+Decided: merge origin/staging; usage-tail takes staging's "live agent" wording and keeps the lane-hog clause, and the lane-hog test drives stop through the fake shed server
+Because: crates/cli/tests/lane_hog.rs:13
+Rejected: none
+Owner: brought up to date with staging; nothing changes in behaviour
