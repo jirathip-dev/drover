@@ -29,6 +29,11 @@ colours, and in the Home Screen app "enable alerts"). Each screen's last copy is
 painted first, offline too, with `last update hh:mm · Nm ago` on the strip until a fresh read or a live stream
 replaces it. A read over 300 ms shows `↻ loading` on the strip. `crates/cli/tests/page.rs` taps through it in Chrome.
 
+#895: every `[limits] serve_host_secs` serve hands its freed heap back to the OS and reads its own RSS; past
+`[limits] serve_mem_mb` (300) it logs `serve-mem-high` once and hands over to a fresh copy of itself (#894's handover,
+no client dropped), unless it was over that already at its first reading (a fresh copy would be no smaller).
+`scripts/serve-soak.sh` measures it on a copy of a real database.
+
 Snapshot (#337): the fast step (every minute) and every kick (a lane push, a verdict, an ask, a board tap) take one
 look at everything the board and `status` show and save it as the `board` row of `state.db`'s snapshots (#344): each read's output by
 command line. Every remote host's reads (verdict files, `git` facts, its shed's agent list and pane reads) go in one

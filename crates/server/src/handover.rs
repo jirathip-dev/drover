@@ -1,3 +1,6 @@
+use crate::config::Config;
+use crate::events::{append, Event};
+use crate::runner::Runner;
 use crate::Ctx;
 use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -88,6 +91,49 @@ impl Handover {
         }
     }
 
+    /// #895: frees heap to the OS; past `serve_mem_mb` of RSS logs `serve-mem-high` once and hands over (docs/serve.md).
+    pub fn watch_mem(&self, ctx: &Ctx, r: &dyn Runner) {
+        let (pid, mut first, mut logged) = (std::process::id().to_string(), None, false);
+        while !self.stopping() {
+            let limits = Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
+            std::thread::sleep(Duration::from_secs(limits.serve_host_secs.max(1)));
+            release_freed();
+            let rss = crate::runner::ok(r, "ps", &["-o", "rss=", "-p", &pid]);
+            let Some(mb) = rss.ok().and_then(|s| s.trim().parse::<u64>().ok()).map(|kb| kb >> 10) else {
+                continue;
+            };
+            let fresh = *first.get_or_insert(mb >= limits.serve_mem_mb);
+            if mb < limits.serve_mem_mb {
+                continue;
+            }
+            if !std::mem::replace(&mut logged, true) {
+                let d = serde_json::json!({"rss_mb": mb, "limit_mb": limits.serve_mem_mb, "handover": !fresh});
+                let _ = append(
+                    &ctx.state,
+                    &Event::new(crate::now(), "drover", None, "serve-mem-high", d),
+                );
+            }
+            if fresh {
+                continue;
+            }
+            match self.ask(limits.serve_handover_secs) {
+                Ok(()) => return,
+                Err(e) => eprintln!("drover serve: no handover past {mb} MB: {e}"),
+            }
+        }
+    }
+
+    fn ask(&self, secs: u64) -> std::io::Result<()> {
+        let mut c = UnixStream::connect(&self.sock)?;
+        c.set_read_timeout(Some(Duration::from_secs(secs.max(1))))?;
+        writeln!(c, "handover")?;
+        let mut line = String::new();
+        BufReader::new(c).read_line(&mut line)?;
+        line.starts_with("ok ")
+            .then_some(())
+            .ok_or_else(|| std::io::Error::other(line.trim().to_string()))
+    }
+
     fn fds(&self) -> Vec<RawFd> {
         self.listeners.iter().map(|l| l.0).collect()
     }
@@ -121,6 +167,27 @@ impl Handover {
         std::process::exit(0)
     }
 }
+
+#[cfg(target_os = "macos")]
+fn release_freed() {
+    unsafe extern "C" {
+        fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
+    }
+    // SAFETY: a null zone asks every malloc zone to return its free pages; goal 0 is as many as it can.
+    unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn release_freed() {
+    unsafe extern "C" {
+        fn malloc_trim(pad: usize) -> i32;
+    }
+    // SAFETY: glibc's malloc_trim only returns free heap pages to the OS; pad 0 keeps no slack.
+    unsafe { malloc_trim(0) };
+}
+
+#[cfg(not(any(target_os = "macos", all(target_os = "linux", target_env = "gnu"))))]
+fn release_freed() {}
 
 fn argv() -> Vec<std::ffi::OsString> {
     std::env::args_os().collect()
