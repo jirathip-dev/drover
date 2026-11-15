@@ -7,7 +7,7 @@ use crate::api::{
     QueueCard, QueueLane, QueueRow, QueueTab, RoleRow, Row, Stage, Sub,
 };
 use crate::config::{Config, Limits, Role};
-use crate::events::{age, append, shared, Event, IssueState, States};
+use crate::events::{age, append, working, Event, IssueState, States};
 use crate::gate::{gate, refused, Refusal};
 use crate::handover::Handover;
 use crate::host::{self, Host};
@@ -908,7 +908,7 @@ impl<'a> Server<'a> {
             let since = header(&req, "last-event-id").or(q.get("since").map(String::as_str));
             let mut top = 0;
             if let Some(n) = since.and_then(|n| n.parse::<u64>().ok()) {
-                let ev = shared(&self.ctx.state).unwrap_or_default();
+                let ev = working(&self.ctx.state).unwrap_or_default();
                 top = ev.last().map_or(n, |e| e.seq);
                 let after: Vec<_> = ev.iter().filter(|e| e.seq > n).collect();
                 msg += &match after.last() {
@@ -991,7 +991,7 @@ impl<'a> Server<'a> {
         }
         let driving = crate::drive::running(self.ctx, "");
         if log != w.log {
-            let ev = shared(&self.ctx.state).unwrap_or_default();
+            let ev = working(&self.ctx.state).unwrap_or_default();
             let top = ev.last().map_or(0, |e| e.seq);
             for e in ev.iter().filter(|e| e.seq > w.seen.unwrap_or(top)) {
                 lock(&self.clients).retain(|c| c.0.send(sse(e)).is_ok());
@@ -1198,7 +1198,7 @@ impl<'a> Server<'a> {
             ("GET", p) if p.starts_with("/thread/") => {
                 let (t, name) = p[8..].split_once('/').unwrap_or_default();
                 let name = form(&format!("n={name}")).remove("n").unwrap_or_default();
-                let at = shared(&ctx.state).ok().and_then(|ev| chat::file(ctx, &ev, t, &name, false));
+                let at = working(&ctx.state).ok().and_then(|ev| chat::file(ctx, &ev, t, &name, false));
                 disk_file(at, ctype(&name), "no such file in the thread\n")
             }
             // #412: a PNG of the design waiting for the owner's decision.
@@ -1208,7 +1208,7 @@ impl<'a> Server<'a> {
                 let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
                 let n = n.parse().unwrap_or(0);
                 let ask = |e: &Event| crate::design::is_ask(e) && e.fleet == f && e.issue == Some(n) && q.is_none_or(|q| e.str("id") == Some(q));
-                let ev = shared(&ctx.state).unwrap_or_default();
+                let ev = crate::events::since(&ctx.state, &["needs-decision", "design-review"], 0).unwrap_or_default();
                 let k = ev.iter().rposition(ask);
                 let at = k.and_then(|k| chat::files_of(&ev[k]).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
                 let sha = k.filter(|_| q.is_some()).and_then(|k| ev[..k].iter().rfind(|e| e.is("design-review", &f, n))?.str("sha"));
@@ -1219,7 +1219,7 @@ impl<'a> Server<'a> {
                 let mut it = p[6..].splitn(4, '/');
                 let (f, n, i, sha) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));
                 let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
-                let ev = shared(&ctx.state).unwrap_or_default();
+                let ev = crate::events::since(&ctx.state, &["spawn", "verdict"], 0).unwrap_or_default();
                 let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n), sha)).unwrap_or_default();
                 let at = i.parse().ok().and_then(|i: usize| shots.into_iter().nth(i));
                 self.round_file(sha, at.map(|(_, p)| p.display().to_string()), "no such screenshot\n")
@@ -1384,7 +1384,7 @@ impl<'a> Server<'a> {
 
     /// The live fleet lane `agent` with its fleet and pane; refused PAUSED when its fleet is.
     fn lane(&self, ctx: &Ctx, agent: &str) -> Result<(lanes::Lane, String, String)> {
-        let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
+        let (cfg, events) = (Config::kept(ctx)?, working(&ctx.state)?);
         let all = self
             .lanes(ctx.now, &cfg, &events, &events.states)
             .context("herdr agent list failed")?;
@@ -1473,7 +1473,7 @@ impl<'a> Server<'a> {
     fn act(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Act) -> Result<String> {
         let (mut out, cfg) = (vec![], Config::kept(ctx)?);
         let (agent, yes, op) = (f.agent.as_str(), f.confirm == "1", f.op.as_str());
-        let sp = crate::events::last_spawn(&shared(&ctx.state)?, agent).map(|e| (e.fleet.clone(), e.issue));
+        let sp = crate::events::last_spawn(&working(&ctx.state)?, agent).map(|e| (e.fleet.clone(), e.issue));
         let Some((fleet, issue)) = sp.or_else(|| (op == "close").then(|| (String::new(), None))) else {
             return refused("NO_SUCH_AGENT", format!("no lane `{agent}` in the log"));
         };
@@ -1507,7 +1507,7 @@ impl<'a> Server<'a> {
         }
         let n = |k: &str, d: usize| q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d);
         let (lines, before) = (n("lines", 200).min(200), n("before", 0));
-        let (cfg, events) = (Config::kept(ctx).ok()?, shared(&ctx.state).ok()?);
+        let (cfg, events) = (Config::kept(ctx).ok()?, working(&ctx.state).ok()?);
         let agent = q.get("agent")?;
         let ls = self.lanes(ctx.now, &cfg, &events, &events.states)?;
         let file = lanes::log(&ctx.state, agent).filter(|_| self.export.is_none());
@@ -1629,7 +1629,7 @@ impl<'a> Server<'a> {
                     choice,
                     ("owner", Some("web")),
                 )?;
-                drop(shared(&ctx.state));
+                drop(working(&ctx.state));
                 format!("answered {}", g("id"))
             }
             "drive" => {
@@ -1818,7 +1818,7 @@ impl<'a> Server<'a> {
     /// tab (web/src/needs.ts draws them): the open asks (options recommended first, a free-text box), each blocked
     /// lane's pending prompt, then the `needs-human` issues.
     fn needs_tab(&self, ctx: &Ctx, paired: bool) -> NeedsTab {
-        let events = shared(&ctx.state).unwrap_or_default();
+        let events = working(&ctx.state).unwrap_or_default();
         let (cfg, st) = (Config::kept(ctx).ok(), events.states.clone());
         let (cfg, ev, st) = (cfg.as_ref(), &events, &st);
         let all = cfg.and_then(|c| self.lanes(ctx.now, c, ev, st)).unwrap_or_default();
@@ -1950,7 +1950,7 @@ impl<'a> Server<'a> {
             ..QueueTab::default()
         };
         // #483: the error's own text, config or log (e.g. `migrate --live`), not a fixed line.
-        let (cfg, events) = match (Config::kept(ctx), shared(&ctx.state)) {
+        let (cfg, events) = match (Config::kept(ctx), working(&ctx.state)) {
             (Ok(c), Ok(e)) => (c, e),
             (Err(e), _) | (_, Err(e)) => {
                 d.error = Some(format!("{e:#}"));
@@ -2229,7 +2229,7 @@ impl<'a> Server<'a> {
     /// #37: Herd mode's data (`/herd.json`, the `herd` event; docs/serve.md).
     /// `weather` (loopback only) forces the host values.
     fn herd(&self, ctx: &Ctx, weather: Option<&str>) -> Result<Herd> {
-        let events = shared(&ctx.state)?;
+        let events = working(&ctx.state)?;
         let (cfg, st) = (Config::kept(ctx)?, events.states.clone());
         let all = self.lanes(ctx.now, &cfg, &events, &st).unwrap_or_default();
         let waits = self.waits(ctx, &cfg, &events, &all);
@@ -2341,7 +2341,7 @@ impl<'a> Server<'a> {
             mtime: mtime(ctx),
             ..LanesTab::default()
         };
-        let events = shared(&ctx.state).unwrap_or_default();
+        let events = working(&ctx.state).unwrap_or_default();
         let (Ok(cfg), st) = (Config::kept(ctx), events.states.clone()) else {
             t.error = Some("no fleet.toml".into());
             return t;
@@ -2474,7 +2474,7 @@ impl<'a> Server<'a> {
     /// #141: the Host tab as data (API v1's `host`; web/src/host.ts draws it): the host cards, then FLEET DISK, SERVICES,
     /// FLEETS and ALERTS rows with a status; serve.js ranks them.
     fn host_tab(&self, ctx: &Ctx) -> HostTab {
-        let (cfg, events) = (Config::kept(ctx).ok(), shared(&ctx.state).unwrap_or_default());
+        let (cfg, events) = (Config::kept(ctx).ok(), working(&ctx.state).unwrap_or_default());
         let (cfg, events) = (cfg.as_ref(), &events);
         let (hs, r, dl, dc) = (
             self.sample(),
@@ -3231,7 +3231,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     };
     // #344: the demo's log goes into a scratch database, so `demo/` stays as committed.
     let _scratch = demo.then(crate::db::Scratch::start);
-    let (r, events): (&dyn Runner, _) = (if demo { &canned } else { r }, shared(&ctx.state)?);
+    let (r, events): (&dyn Runner, _) = (if demo { &canned } else { r }, working(&ctx.state)?);
     let ctx = &Ctx {
         now: if demo {
             events.iter().map(|e| e.ts).max().unwrap_or(0) + 60
