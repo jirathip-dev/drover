@@ -1,0 +1,11 @@
+Decided: the page renders /screens JSON with one renderer per block type; tabs come from cooee-plugin.toml's places
+Because: "It has no per-tab code: a new screen in the manifest appears as a tab with no change to the page"
+Decided: owner defaults taken: no Chat tab (asks and run cards stay as cards) and the lifeboat stays as it is
+Because: "Default here: the page has no Chat tab; asks and run cards still show as cards."
+Decided: the ts types test reads API v1 from the server on a copy of demo/, since the export no longer writes herd.json or api/v1 files
+Because: "`/api/v1`, pairing and push stay."
+Rejected: dropping the Herd type with /herd.json — API v1's GET herd still serves it
+Rejected: writing api/v1 files back into the export — production code only for a test
+Check: cargo test -p drover-server --features ts --test types passes; assets/types/api.d.ts has no drift
+Check: staging merge keeps #721's shed fixtures in serve_web, orchestrator_cards and setup_terminal tests
+Owner: The phone app now draws the same Queue, Lanes, Events, Fleets and cards screens as cooee; the Host and Chat tabs are gone.
