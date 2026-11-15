@@ -1,0 +1,7 @@
+Decided: an issue read finds its pending start in the cached working log, as pending_cards does, not in the filtered `since` copy
+Because: crates/server/src/serve/v1.rs:678
+Decided: the 150k-event test reads /api/v1/issue itself, so the rebuild it used to catch only by a racing test is caught every run
+Because: crates/cli/tests/perf.rs:697
+Rejected: serialising the perf tests — the read really rebuilt from a copied slice; the counter was right
+Check: without the v1.rs change the 150k test fails at its rebuild assertion (left 1, right 0)
+Owner: Fixed the red speed check: opening an issue's details no longer rescans a copy of the event log.
