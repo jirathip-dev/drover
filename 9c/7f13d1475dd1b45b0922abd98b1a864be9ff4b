@@ -1,0 +1,8 @@
+Decided: each fleet's pass runs its own closed-issue reconcile first, right after taking the fleet's lock
+Because: "No clean or host probe in a pass can hold back the issue-state reconcile in 1"
+Rejected: one reconcile over all fleets at the top of drive — a hung gh on one fleet held every other fleet's pass and broke #896's parallel-pass test
+Because: crates/core/src/drive.rs:904
+Decided: the sim's golden metrics and the hunt's start seeds are re-pinned, as #899 and #984 did
+Because: q1723
+Check: cargo test -p drover --test sim and --test drive_kicks both pass at the head
+Owner: Closed issues leave the Queue within a minute, a killed tick shows in amber on the fleet card, and the simulator tests are green again.
