@@ -19,7 +19,7 @@ pub trait Runner: Sync {
         self.run_in(prog, args, input)
     }
     fn sleep(&self, secs: u64) {
-        std::thread::sleep(std::time::Duration::from_secs(secs));
+        crate::clock::sleep(std::time::Duration::from_secs(secs));
     }
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
         let (args, log) = (args.join(" "), log.display());
@@ -68,11 +68,15 @@ extern "C" {
 /// #894: `argv` with the listeners `fds` kept open across exec and named in `DROVER_SERVE_FDS`: a bridge in the background (sh reaps nothing), else exec'd in place.
 pub fn hand_fds(argv: &[std::ffi::OsString], fds: &[i32], bridge: bool) -> Result<()> {
     use std::os::unix::process::CommandExt;
-    let mut c = Command::new(if bridge { "sh".as_ref() } else { argv[0].as_os_str() });
+    let mut c = Command::new(if bridge {
+        "sh".as_ref()
+    } else {
+        argv.first().map_or("".as_ref(), |a| a.as_os_str())
+    });
     if bridge {
         c.args(["-c", "\"$@\" &", "sh"]).args(argv);
     } else {
-        c.args(&argv[1..]);
+        c.args(argv.get(1..).unwrap_or_default());
     }
     let list: Vec<String> = fds.iter().map(i32::to_string).collect();
     c.env(SERVE_FDS, list.join(",")).stdin(std::process::Stdio::null());
@@ -100,7 +104,7 @@ pub fn hand_fds(argv: &[std::ffi::OsString], fds: &[i32], bridge: bool) -> Resul
 /// #894: the listeners a predecessor handed over (`hand_fds`), close-on-exec again; none for a fresh start.
 pub fn inherited() -> Vec<std::net::TcpListener> {
     use std::os::fd::FromRawFd;
-    let Some(v) = std::env::var_os(SERVE_FDS) else {
+    let Some(v) = crate::config::env_os(SERVE_FDS) else {
         return vec![];
     };
     std::env::remove_var(SERVE_FDS);
@@ -167,7 +171,7 @@ impl std::io::Read for Streamed {
 
 impl Drop for Streamed {
     fn drop(&mut self) {
-        let _ = self.0.wait();
+        self.0.wait().ok();
     }
 }
 
@@ -203,7 +207,7 @@ impl Real {
             return fail(format!("{dir} is on a disk that is not answering"));
         }
         let mut pipes = None;
-        let end = Instant::now() + limit;
+        let end = crate::clock::instant() + limit;
         let start = || {
             use std::os::unix::process::CommandExt;
             let mut c = Command::new(prog)
@@ -214,13 +218,13 @@ impl Real {
                 .stderr(Stdio::piped())
                 .spawn()
                 .with_context(|| format!("cannot run {prog}"))?;
-            let _ = c.stdin.take().unwrap().write_all(input);
+            let _ = c.stdin.take().map(|mut s| s.write_all(input));
             pipes = Some((drain(c.stdout.take()), drain(c.stderr.take())));
             Ok(c)
         };
         let ended = settle(dir.map(String::as_str), limit, start)?;
         let text = |b: std::sync::mpsc::Receiver<Vec<u8>>| {
-            let left = end.saturating_duration_since(Instant::now());
+            let left = end.saturating_duration_since(crate::clock::instant());
             let v = b.recv_timeout(left).ok()?;
             Some(String::from_utf8_lossy(&v).into_owned())
         };
@@ -308,7 +312,7 @@ fn sick() -> std::sync::MutexGuard<'static, std::collections::HashMap<u64, Insta
 }
 
 fn mark(dev: u64) -> Option<std::path::PathBuf> {
-    let home = std::env::var_os("HOME")?;
+    let home = crate::config::env_os("HOME")?;
     Some(
         std::path::Path::new(&home)
             .join(".cache/drover/sick-disks")
@@ -330,10 +334,10 @@ pub fn sicken(dir: &str) {
     use std::sync::atomic::Ordering::Relaxed;
     let dev = probes().get(dir).map_or(0, |p| p.dev.load(Relaxed));
     if dev != 0 {
-        sick().insert(dev, Instant::now());
+        sick().insert(dev, crate::clock::instant());
         if let Some(p) = mark(dev) {
             let _ = p.parent().map(std::fs::create_dir_all);
-            let _ = std::fs::write(p, b"");
+            std::fs::write(p, b"").ok();
         }
     }
 }
@@ -345,7 +349,7 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
     let (done, dev, end) = {
         let mut m = probes();
         if let Some(p) = m.get(dir) {
-            if !p.done.load(Relaxed) && Instant::now() < p.end {
+            if !p.done.load(Relaxed) && crate::clock::instant() < p.end {
                 let (done, dev, end) = (p.done.clone(), p.dev.clone(), p.end);
                 drop(m);
                 return hangs_past(&done, &dev, end);
@@ -358,13 +362,13 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
             }
         }
         let (done, dev) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicU64::new(0)));
-        let end = Instant::now() + wait;
+        let end = crate::clock::instant() + wait;
         m.insert(
             dir.into(),
             Probe {
                 done: done.clone(),
                 dev: dev.clone(),
-                at: Instant::now(),
+                at: crate::clock::instant(),
                 end,
             },
         );
@@ -380,11 +384,11 @@ pub fn hung(dir: &str, wait: Duration, probe: impl FnOnce(&str) -> Option<u64> +
 
 fn hangs_past(done: &std::sync::atomic::AtomicBool, dev: &std::sync::atomic::AtomicU64, end: Instant) -> bool {
     use std::sync::atomic::Ordering::Relaxed;
-    while Instant::now() < end {
+    while crate::clock::instant() < end {
         if done.load(Relaxed) {
             return is_sick(dev.load(Relaxed));
         }
-        std::thread::sleep(poll());
+        crate::clock::sleep(poll());
     }
     !done.load(Relaxed)
 }
@@ -393,7 +397,7 @@ fn hangs_past(done: &std::sync::atomic::AtomicBool, dev: &std::sync::atomic::Ato
 pub fn read_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> {
     let path = path.as_ref().to_path_buf();
     let late = || std::io::Error::new(std::io::ErrorKind::TimedOut, format!("{}: no answer", path.display()));
-    let end = Instant::now() + probe_wait();
+    let end = crate::clock::instant() + probe_wait();
     let dir = path
         .parent()
         .map(|d| d.to_string_lossy().into_owned())
@@ -409,7 +413,7 @@ pub fn read_file(path: impl AsRef<std::path::Path>) -> std::io::Result<Vec<u8>> 
         let _claim = claim;
         drop(tx.send(std::fs::read(p)));
     });
-    rx.recv_timeout(end.saturating_duration_since(Instant::now()))
+    rx.recv_timeout(end.saturating_duration_since(crate::clock::instant()))
         .unwrap_or_else(|_| {
             gone.store(true, std::sync::atomic::Ordering::Relaxed);
             sicken(&dir);
@@ -481,7 +485,9 @@ impl Claim {
                 }
                 Some(g) if g.load(Relaxed) => return None,
                 Some(_) => {
-                    let left = until.checked_duration_since(Instant::now()).filter(|d| !d.is_zero())?;
+                    let left = until
+                        .checked_duration_since(crate::clock::instant())
+                        .filter(|d| !d.is_zero())?;
                     m = FREED
                         .wait_timeout(m, left)
                         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -505,20 +511,20 @@ impl Drop for Claim {
 
 /// #775: `start` a call on `key` (None: no path) and watch it up to `limit`. At the limit its child is killed and abandoned, never waited on, and the caller gets `TimedOut` even when the child cannot die. No second call on `key` starts while one is in flight: it waits for it (within its own limit), or is `Busy` at once while an abandoned one lives.
 pub fn settle<P: Proc>(key: Option<&str>, limit: Duration, start: impl FnOnce() -> Result<P>) -> Result<Ended> {
-    let end = Instant::now() + limit;
+    let end = crate::clock::instant() + limit;
     gone().retain_mut(|(c, _)| matches!(c.try_wait(), Ok(None)));
     let claim = match key.map(|k| Claim::take(k, end)) {
         Some(None) => return Ok(Ended::Busy),
         c => c.flatten(),
     };
     let mut c = start()?;
-    while Instant::now() < end {
+    while crate::clock::instant() < end {
         if let Some(st) = c.try_wait()? {
             return Ok(Ended::Exited(st));
         }
-        std::thread::sleep(poll());
+        crate::clock::sleep(poll());
     }
-    let _ = c.kill();
+    c.kill().ok();
     if let Some(cl) = &claim {
         cl.gone.store(true, std::sync::atomic::Ordering::Relaxed);
         FREED.notify_all();
@@ -532,7 +538,7 @@ fn drain(p: Option<impl std::io::Read + Send + 'static>) -> std::sync::mpsc::Rec
     std::thread::spawn(move || {
         let mut v = vec![];
         let _ = p.map(|mut p| p.read_to_end(&mut v));
-        let _ = tx.send(v);
+        tx.send(v).ok();
     });
     rx
 }
@@ -559,4 +565,14 @@ pub fn json<S: AsRef<str>>(r: &dyn Runner, prog: &str, args: &[S]) -> Result<Val
             args.iter().map(AsRef::as_ref).collect::<Vec<_>>().join(" ")
         )
     })
+}
+
+/// This process's id.
+pub fn pid() -> u32 {
+    std::process::id()
+}
+
+/// End this process with `code`.
+pub fn exit(code: i32) -> ! {
+    std::process::exit(code)
 }

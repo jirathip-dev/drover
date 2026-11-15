@@ -1,4 +1,4 @@
-#![allow(dead_code)]
+#![allow(dead_code, reason = "each test crate uses its own part of the shared helpers")]
 use drover::runner::{Out, Runner};
 use drover::Ctx;
 use std::path::{Path, PathBuf};
@@ -7,7 +7,7 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// #771: the shared fake shed server lane tests run on.
 pub mod fake_shed;
-#[allow(unused_imports)]
+#[allow(unused_imports, reason = "not every test crate drives the fake shed")]
 pub use fake_shed::{FakeShed, OnShed, OverSsh};
 
 pub const CONFIG: &str = r#"# fleet config (test)

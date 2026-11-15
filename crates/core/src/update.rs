@@ -18,8 +18,12 @@ pub fn self_update(
     let (dry, pause, resume) = mode;
     let events = working(&ctx.state)?;
     if pause || resume {
-        let (kind, word) = [("self-update-resumed", "resumed"), ("self-update-paused", "paused")][usize::from(pause)];
-        let by = std::env::var("DROVER_LANE").ok().filter(|l| !l.is_empty());
+        let (kind, word) = if pause {
+            ("self-update-paused", "paused")
+        } else {
+            ("self-update-resumed", "resumed")
+        };
+        let by = crate::config::env("DROVER_LANE").filter(|l| !l.is_empty());
         let d = json!({"by": by.as_deref().unwrap_or("owner")});
         emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))?;
         writeln!(out, "✓ self-update {word}")?;
@@ -129,7 +133,7 @@ fn install(
         writeln!(out, "✓ {what}installed {sha:.7} at {}; {synced}{done}", live.display())?;
         return Ok(0);
     };
-    let _ = std::fs::remove_file(&new);
+    std::fs::remove_file(&new).ok();
     let why = format!("{sha:.7}: {e:#}");
     let kept = if format!("{e:#}").starts_with("installed, then") {
         "now live at"

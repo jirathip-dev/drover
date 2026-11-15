@@ -6,7 +6,7 @@ use crate::api::{
 };
 use crate::conductor::{self, of};
 use crate::config::Config;
-use crate::events::{ask_event, closed, Event};
+use crate::events::{ask_event, closed, Event, Json};
 use crate::runner::Runner;
 use crate::session::{Session, Status};
 use crate::Ctx;
@@ -17,7 +17,11 @@ use std::collections::BTreeMap;
 
 /// `a` if `c`, else `b`.
 fn or<'a>(c: bool, a: &'a str, b: &'a str) -> &'a str {
-    [b, a][usize::from(c)]
+    if c {
+        a
+    } else {
+        b
+    }
 }
 
 /// The files a message carries.
@@ -268,7 +272,7 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
     ThreadPage {
         id: id.into(),
         archived: conductor::archived(events, id),
-        older: (k > 0).then(|| msgs[k].seq),
+        older: msgs.get(k).filter(|_| k > 0).map(|m| m.seq),
         started: t.ts,
         dir: dir.strip_prefix(&home).map_or(dir.clone(), |d| format!("~{d}")),
         msgs: {
@@ -404,7 +408,7 @@ pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Se
         let (mut rows, mut arch) = (vec![], vec![]);
         for t in threads.iter().filter(|t| t.fleet == repo) {
             let on = conductor::archived(events, t.str("thread").unwrap_or_default());
-            [&mut rows, &mut arch][usize::from(on)].push(row(ctx, events, t, agents));
+            if on { &mut arch } else { &mut rows }.push(row(ctx, events, t, agents));
         }
         rows.sort_by_key(|r| std::cmp::Reverse(r.0));
         arch.sort_by_key(|r| std::cmp::Reverse(r.0));
@@ -437,7 +441,8 @@ impl super::Server<'_> {
             .collect();
         let key = json!([crate::db::last_seq(&ctx.state), super::mtime(ctx), seen, ctx.now / 60]);
         let mut all = self.chat.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        let c = &mut all[usize::from(rw)];
+        let [ro, wr] = &mut *all;
+        let c = if rw { wr } else { ro };
         if c.0 != key {
             // #483: a config or log read error shows its own text (as the Queue tab does).
             let (cfg, events) = match (Config::kept(ctx), crate::events::working(&ctx.state)) {
@@ -530,8 +535,8 @@ pub fn post(
                 conductor::text_ok(&text)?;
                 let mut d = json!({"thread": id, "text": text, "files": files});
                 if let Ok(o) = old {
-                    d["q"] = json!(q);
-                    (d["files"] == json!([])).then(|| d["files"] = json!(qfiles(o)));
+                    d.put("q", json!(q));
+                    (d.at("files") == &json!([])).then(|| d.put("files", json!(qfiles(o))));
                 }
                 let t = conductor::find(&events, &id)?;
                 crate::events::append(&ctx.state, &Event::new(ctx.now, &t.fleet, None, "thread-queue", d))?;
@@ -666,7 +671,7 @@ fn row_block(r: &ThreadRow, repo: Option<&str>) -> Value {
         "subtitle": {"text": sub, "tone": tone}, "value": r.age, "tap": {"open": format!("/screens/threads/{}", r.id)},
         "swipe": [{"label": act, "action": format!("thread-{act}"), "values": {"thread": r.id}}]});
     if r.unread {
-        v["badge"] = json!({"text": "new", "tone": "done"});
+        v.put("badge", json!({"text": "new", "tone": "done"}));
     }
     v
 }
@@ -765,7 +770,7 @@ fn msg_card(now: u64, id: &str, m: &Msg) -> Value {
                     .recommend
                     .and_then(|n| a.options.get(usize::try_from(n).ok()?.checked_sub(1)?));
                 if let Some(r) = rec {
-                    ch["recommended"] = json!(r);
+                    ch.put("recommended", json!(r));
                 }
                 blocks.push(ch);
             }

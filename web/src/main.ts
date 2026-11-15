@@ -2,20 +2,21 @@
 // header-strip place is a tab, the menu-row places open from [⚙], the chat-cards place is the cards above every tab.
 // A screen is fetched, drawn block by block, patched by its `stream`, and its blocks post `/action`. No per-tab code.
 import { type Act, type Ctx, el, kids, render, values } from './blocks';
-import { apply, type Blk } from './ops';
-import { R, colours, esc, get, put, schemes, theme, themes } from './theme';
+import { apply, type Blk, blks, isBlk, isList, obj } from './ops';
+import { R, colours, esc, get, nodes, put, schemes, theme, themes } from './theme';
 
 type Place = { type: string; id?: string; label?: string; subtitle?: string; screen?: string };
 declare const PL: Place[];
 const B = document.body, H = document.documentElement;
 const ro = 'ro' in B.dataset, demo = 'demo' in B.dataset;
-const $ = <T extends Element = HTMLElement>(s: string) => document.querySelector<T>(s)!;
+const $ = <T extends Element = HTMLElement>(s: string): T => { const e = document.querySelector<T>(s); if (!e) throw new Error(`no ${s}`); return e; };
+const msg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const exported = B.dataset.root === '';
 const url = (p: string) => new URL(p.replace(/^\//, '') + (exported && /^\/screens\/[^?]*$/.test(p) ? '/index.html' : ''), R).href;
 
 type View = { path: string; model: Blk | null; at: number; live: boolean; es?: EventSource; root: HTMLElement; open: Set<string>; back: string[] };
 const view = (path: string, root: HTMLElement): View => ({ path, model: null, at: 0, live: false, root, open: new Set(), back: [] });
-const tabs = PL.filter(p => p.type === 'header-strip' && p.screen).map(p => ({ ...p, v: view(p.screen!, el('section', 'tab')), a: el('a') }));
+const tabs = PL.flatMap(p => (p.type === 'header-strip' && p.screen ? [{ ...p, v: view(p.screen, el('section', 'tab')), a: el('a') }] : []));
 const cards = PL.some(p => p.type === 'chat-cards') ? view('/screens/cards', $('#cards')) : null;
 let cur = tabs.find(t => t.id === (location.hash.slice(1) || get('tab'))) ?? tabs[0];
 
@@ -23,19 +24,21 @@ const dot = $('#dot'), stale = $('#stale');
 function sync() {
   const v = cur.v, live = !!v.live && navigator.onLine;
   dot.className = demo ? 'demo' : live ? 'g' : navigator.onLine ? 'a' : 'r';
-  H.toggleAttribute('data-focus', !!v.model && !Array.isArray(v.model) && !!v.model.focus);
+  H.toggleAttribute('data-focus', !!v.model && !isList(v.model) && !!v.model.focus);
   const t = v.at ? new Date(v.at) : null, hm = t && t.toTimeString().slice(0, 5), old = t ? Date.now() - t.getTime() : 0;
   stale.hidden = !t || (live && old < 120_000);
   if (t) stale.textContent = `last update ${hm}${old > 60_000 ? ` · ${Math.round(old / 60_000)}m ago` : ''}`;
 }
 
 // The last copy of each screen, painted at once (offline too), its age on the strip until a fresh one lands.
-const cached = (p: string): { t: number; v: Blk } | null => { try { return JSON.parse(get('scr:' + p) ?? 'null'); } catch { return null; } };
+const cached = (p: string): { t: number; v: Blk } | null => {
+  try { const c: unknown = JSON.parse(get('scr:' + p) ?? 'null'); return isBlk(c) && isBlk(c.v) ? { t: Number(c.t), v: c.v } : null; } catch { return null; }
+};
 async function fetchScreen(p: string): Promise<Blk> {
   const get = () => fetch(url(p), { cache: 'no-store' });
   const r = await get().catch(() => new Promise<Response>(ok => setTimeout(() => ok(get()), 300)));
-  const j = await r.json().catch(() => ({ line: `${r.status}` }));
-  if (!r.ok) throw Object.assign(new Error(j.line ?? String(r.status)), { status: r.status });
+  const j = obj(await r.json().catch(() => ({ line: `${r.status}` })));
+  if (!r.ok) throw Object.assign(new Error(String(j.line ?? r.status)), { status: r.status });
   return j;
 }
 
@@ -43,23 +46,22 @@ function ctx(v: View, screen: string): Ctx {
   return { screen, open: v.open, act: (a, b) => act(a, v, screen, b), tap };
 }
 function rows(m: unknown, out = new Map<string, string>()) {
-  if (Array.isArray(m)) m.forEach(x => rows(x, out));
-  else if (m && typeof m === 'object') {
-    const o = m as Blk;
-    if ((o.type === 'row' || o.type === 'card') && o.id) out.set(o.id, JSON.stringify(o));
-    Object.values(o).forEach(x => rows(x, out));
+  if (isList(m)) m.forEach(x => rows(x, out));
+  else if (isBlk(m)) {
+    if ((m.type === 'row' || m.type === 'card') && m.id) out.set(String(m.id), JSON.stringify(m));
+    Object.values(m).forEach(x => rows(x, out));
   }
   return out;
 }
 function paint(v: View, before?: Blk | null) {
   const m = v.model;
   if (!m) return;
-  const c = ctx(v, Array.isArray(m) ? 'cards' : m.id);
-  const body = Array.isArray(m) ? kids(m, c) : [render(m, c)].filter((e): e is HTMLElement => !!e);
+  const c = ctx(v, isList(m) ? 'cards' : String(m.id));
+  const body = isList(m) ? kids(m, c) : [render(m, c)].filter((e): e is HTMLElement => !!e);
   if (v.back.length && body[0]) {
     const b = el('button', '', '<span>‹ back</span>');
     b.type = 'button';
-    b.onclick = () => go(v, v.back.pop()!, false);
+    b.onclick = () => { const p = v.back.pop(); if (p != null) go(v, p, false); };
     body[0].prepend(b);
   }
   v.root.replaceChildren(...body);
@@ -72,8 +74,8 @@ function paint(v: View, before?: Blk | null) {
 }
 function badges() {
   tabs.forEach(t => {
-    const n = t.v.model && !Array.isArray(t.v.model) ? t.v.model.badge : null;
-    t.a.innerHTML = `<span>${esc(t.label?.toLowerCase())}${n ? `<b class=n>·${n}</b>` : ''}</span>`;
+    const n = t.v.model && !isList(t.v.model) ? t.v.model.badge : null;
+    t.a.replaceChildren(...nodes(`<span>${esc(t.label?.toLowerCase())}${n ? `<b class=n>·${n}</b>` : ''}</span>`));
   });
 }
 
@@ -89,8 +91,8 @@ async function load(v: View, quiet = false) {
     paint(v, before);
     if (!v.es) stream(v);
   } catch (e) {
-    if ((e as { status?: number }).status === 401) unpaired();
-    else if (!v.model) v.root.replaceChildren(el('p', 'msg r', esc((e as Error).message)));
+    if (isBlk(e) && e.status === 401) unpaired();
+    else if (!v.model) v.root.replaceChildren(el('p', 'msg r', esc(msg(e))));
     sync();
   } finally {
     clearTimeout(slow);
@@ -99,14 +101,14 @@ async function load(v: View, quiet = false) {
 }
 
 function stream(v: View) {
-  const s = v.model && !Array.isArray(v.model) ? v.model.stream : v === cards ? v.path + '/stream' : null;
+  const s = v.model && !isList(v.model) ? v.model.stream : v === cards ? v.path + '/stream' : null;
   if (!s || exported || !('EventSource' in window)) return;
-  const es = (v.es = new EventSource(url(s)));
+  const es = (v.es = new EventSource(url(String(s))));
   es.onopen = () => { v.live = true; sync(); };
   es.onerror = () => { v.live = false; sync(); };
   es.onmessage = e => {
-    const d = JSON.parse(e.data) as { ops: Blk[] }, before = v.model && JSON.parse(JSON.stringify(v.model));
-    v.model = apply(v.model ?? {}, d.ops as never);
+    const d = obj(JSON.parse(e.data)), before = v.model && obj(JSON.parse(JSON.stringify(v.model)));
+    v.model = apply(v.model ?? {}, blks(d.ops));
     [v.at, v.live] = [Date.now(), true];
     put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
     paint(v, before);
@@ -152,35 +154,38 @@ async function sheet(path: string) {
   try {
     shv.model = await fetchScreen(path);
   } catch (e) {
-    if ((e as { status?: number }).status === 401) return unpaired();
-    return toast((e as Error).message, true);
+    if (isBlk(e) && e.status === 401) return unpaired();
+    return toast(msg(e), true);
   }
   drawSheet();
   sh.hidden = false;
   H.classList.add('sheet');
 }
 function drawSheet() {
-  const m = shv.model!, c = ctx(shv, m.id), head = $('#sheet .sh');
+  const m = shv.model;
+  if (!m) return;
+  const c = ctx(shv, String(m.id)), head = $('#sheet .sh'), done = m.done;
   head.replaceChildren(el('b', '', esc(m.title)));
   const x = el('button', '', `<span>${esc(m.cancel ?? 'close')}</span>`);
   x.type = 'button';
   x.onclick = closeSheet;
   head.append(x);
-  if (m.done) {
-    const d = el('button', 'primary', `<span>${esc(m.done.label)}</span>`);
+  if (isBlk(done)) {
+    const d = el('button', 'primary', `<span>${esc(done.label)}</span>`);
     d.type = 'button';
-    d.onclick = () => c.act({ action: m.done.action, block: m.id, values: { ...m.done.values, ...values(shv.root) } }, d);
+    d.onclick = () => c.act({ action: done.action, block: m.id, values: { ...obj(done.values), ...values(shv.root) } }, d);
     head.append(d);
   }
-  shv.root.replaceChildren(...(m.type === 'sheet' ? kids(m.blocks, c) : [render(m, c)!]));
+  shv.root.replaceChildren(...kids(m.type === 'sheet' ? m.blocks : [m], c));
 }
 sh.addEventListener('click', e => { if (e.target === sh) closeSheet(); });
 addEventListener('keydown', e => { if (e.key === 'Escape' && !sh.hidden) closeSheet(); });
 
-function tap(t: Blk) {
-  if (t.sheet) sheet(t.sheet);
-  else if (t.open) go(cur.v, t.open);
-  else if (t.url) window.open(t.url, '_blank', 'noopener');
+function tap(x: unknown) {
+  const t = obj(x);
+  if (t.sheet) sheet(String(t.sheet));
+  else if (t.open) go(cur.v, String(t.open));
+  else if (t.url) window.open(String(t.url), '_blank', 'noopener');
   else if (t.thread) toast('threads open in cooee');
 }
 
@@ -204,32 +209,32 @@ function confirmed(c: Blk): Promise<boolean> {
 async function act(a: Act, v: View, screen: string, b?: HTMLElement) {
   if (demo) return toast('Demo with fake data: install drover to act on your own fleets');
   if (ro) return toast('read-only page', true);
-  if (a.confirm && !(await confirmed(a.confirm))) return;
+  if (isBlk(a.confirm) && !(await confirmed(a.confirm))) return;
   b?.setAttribute('aria-busy', 'true');
   try {
     const r = await fetch(url('action'), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...a, confirm: undefined, screen }) });
-    const j = await r.json().catch(() => ({ line: `${r.status}` }));
+    const j = obj(await r.json().catch(() => ({ line: `${r.status}` })));
     if (r.status === 401) return unpaired();
-    if (!r.ok) return toast(j.line ?? `${r.status}`, true);
-    const ops: Blk[] = j.ops ?? [];
+    if (!r.ok) return toast(String(j.line ?? r.status), true);
+    const ops = blks(j.ops);
     const whole = ops.find(o => o.op === 'screen');
     if (whole && v !== shv) {
       close(v);
-      v.model = apply(v.model ?? {}, ops as never);
+      v.model = apply(v.model ?? {}, ops);
       v.path = String(v.model.stream ?? v.path).replace(/\/stream/, '') || v.path;
       [v.at] = [Date.now()];
       put('scr:' + v.path, JSON.stringify({ t: v.at, v: v.model }));
       paint(v);
       stream(v);
     } else if (ops.length && v.model) {
-      v.model = apply(v.model, ops as never);
+      v.model = apply(v.model, ops);
       v === shv ? drawSheet() : paint(v);
     }
     if (j.close && v === shv) closeSheet();
-    if (j.toast) toast(j.toast);
+    if (j.toast) toast(String(j.toast));
     if (!whole) setTimeout(() => { if (cards) load(cards, true); load(cur.v, true); }, 300);
   } catch (e) {
-    toast(`${(e as Error).message}`, true);
+    toast(msg(e), true);
   } finally {
     b?.removeAttribute('aria-busy');
   }
@@ -239,8 +244,8 @@ async function act(a: Act, v: View, screen: string, b?: HTMLElement) {
 let pairing = false;
 async function unpaired() {
   const r = await fetch(url('pair/status'), { cache: 'no-store' }).catch(() => null);
-  const j = r && r.ok ? await r.json().catch(() => null) : null;
-  if (j && !j.paired) {
+  const j: unknown = r && r.ok ? await r.json().catch(() => null) : null;
+  if (isBlk(j) && !j.paired) {
     B.dataset.pair = '1';
     toast('pair this phone first', true);
   }
@@ -250,7 +255,7 @@ async function pair() {
   const s = r ? (await r.text()).trim() : 'error: no answer', [code, hint, line] = s.split('\n'), p = $('#pairp');
   p.hidden = false;
   p.className = `pairp msg ${r && r.ok ? 'a' : 'r'}`;
-  p.innerHTML = r && r.ok ? `<p class=code>${esc(code)}</p><p class=m>Waiting for approval on the Mac: drover serve approve ${esc(code)}${hint ? ` · ${esc(hint)}` : ''}</p>${line ? `<pre>${esc(line)}</pre>` : ''}` : esc(s);
+  p.replaceChildren(...nodes(r && r.ok ? `<p class=code>${esc(code)}</p><p class=m>Waiting for approval on the Mac: drover serve approve ${esc(code)}${hint ? ` · ${esc(hint)}` : ''}</p>${line ? `<pre>${esc(line)}</pre>` : ''}` : esc(s)));
   pairing = !!(r && r.ok);
 }
 setInterval(async () => {
@@ -282,11 +287,11 @@ function settings() {
     return r;
   };
   const sec = (h: string, rs: HTMLElement[]) => { const s = el('section', 'sec', `<h3 class=sh>${esc(h)}</h3>`); const l = el('div', 'list'); l.append(...rs); s.append(l); return s; };
-  const menu = PL.filter(p => p.type === 'menu-row' && p.screen);
-  if (menu.length) body.push(sec('screens', menu.map(p => row(p.label ?? p.screen!, false, () => sheet(p.screen!), p.subtitle))));
+  const menu = PL.flatMap(p => (p.type === 'menu-row' && p.screen ? [{ ...p, screen: p.screen }] : []));
+  if (menu.length) body.push(sec('screens', menu.map(p => row(p.label ?? p.screen, false, () => sheet(p.screen), p.subtitle))));
   body.push(sec('theme', themes().map(n => row(n, n === H.dataset.theme, () => { put('theme', n); H.dataset.theme = n; colours(); theme(n).then(redraw); settings(); }))));
   body.push(sec('colours', schemes().map(n => row(n, n === H.dataset.scheme, () => { put('scheme', n); colours(); settings(); }))));
-  const standalone = matchMedia('(display-mode: standalone)').matches || (navigator as { standalone?: boolean }).standalone === true;
+  const standalone = matchMedia('(display-mode: standalone)').matches || ('standalone' in navigator && navigator.standalone === true);
   if (standalone && 'PushManager' in window && B.dataset.key) body.push(sec('alerts', [row('enable alerts on this phone', false, alerts)]));
   body.push(el('p', 'm foot', 'this phone only · the home-screen icon keeps its install-time look'));
   shv.root.replaceChildren(...body);
@@ -296,13 +301,13 @@ function settings() {
 async function alerts() {
   try {
     if ((await Notification.requestPermission()) !== 'granted') throw new Error('notifications are off for this app');
-    const key = Uint8Array.from(atob(B.dataset.key!.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
+    const key = Uint8Array.from(atob((B.dataset.key ?? '').replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0));
     const s = (await (await navigator.serviceWorker.ready).pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key })).toJSON();
     const r = await fetch(url('push/subscribe'), { method: 'POST', body: new URLSearchParams({ endpoint: s.endpoint ?? '', p256dh: s.keys?.p256dh ?? '', auth: s.keys?.auth ?? '' }) });
     if (r.status === 401) return unpaired();
     toast((await r.text()).trim(), !r.ok);
   } catch (e) {
-    toast('alerts failed: ' + (e as Error).message, true);
+    toast('alerts failed: ' + msg(e), true);
   }
 }
 

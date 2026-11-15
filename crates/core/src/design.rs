@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{self, emit, last_spawn, working, Event, IssueState};
+use crate::events::{self, emit, last_spawn, working, Event, IssueState, Json};
 use crate::runner::{ok, Runner};
 use crate::Ctx;
 use anyhow::{Context, Result};
@@ -23,7 +23,7 @@ pub fn scope(ctx: &Ctx, r: &dyn Runner, input: &Value, fleet: &str, n: Option<u6
         .unwrap_or_default();
     let root = top.map_or_else(|_| cwd.to_string(), |t| t.trim().to_string());
     let text = std::fs::read_to_string(crate::repo_path(&Path::new(&root).join(RECIPE))).unwrap_or_default();
-    let allow = Recipe::of(&text, spec["body"].as_str().unwrap_or_default()).folders;
+    let allow = Recipe::of(&text, spec.at("body").as_str().unwrap_or_default()).folders;
     crate::hook::Design { root, allow }
 }
 
@@ -129,7 +129,8 @@ fn pre<'a>(ev: &'a [Event], f: &str, n: u64, role: &str) -> Option<&'a str> {
         .rposition(|e| e.is("design-rejected", f, n))
         .map_or(0, |i| i + 1);
     let design = |e: &&Event| e.is("spawn", f, n) && e.str("role") == Some(role);
-    ev[from..]
+    ev.get(from..)
+        .unwrap_or_default()
         .iter()
         .filter(design)
         .find_map(|e| e.str("sha").filter(|s| !s.is_empty()))
@@ -177,7 +178,7 @@ pub fn handoff(
         vec!["docs/architecture".to_string()]
     } else {
         let spec = crate::gh::cached_spec(ctx, f, n).unwrap_or_default();
-        Recipe::at(r, wt, head, spec["body"].as_str().unwrap_or_default()).folders
+        Recipe::at(r, wt, head, spec.at("body").as_str().unwrap_or_default()).folders
     };
     let (range, int) = (
         format!("{pre}..{head}"),
@@ -192,10 +193,10 @@ pub fn handoff(
             names.push(l);
         }
     }
-    if names.is_empty() {
+    let Some(&first) = names.first() else {
         return Ok(());
-    }
-    let dir = folder(names[0], &dirs);
+    };
+    let dir = folder(first, &dirs);
     let adr = (role == "architect").then(|| dir.clone());
     let png = |l: &&str| {
         [".png", ".gif", ".mp4"]
@@ -259,9 +260,9 @@ fn section(md: &str, name: &str) -> Option<String> {
     let at = lines
         .iter()
         .position(|l| level(l) > 0 && l.trim_start_matches('#').trim().eq_ignore_ascii_case(name))?;
-    let body: Vec<&str> = lines[at + 1..]
-        .iter()
-        .take_while(|l| !(1..=level(lines[at])).contains(&level(l)))
+    let top = level(lines.get(at)?);
+    let body: Vec<&str> = (lines.get(at + 1..).unwrap_or_default().iter())
+        .take_while(|l| !(1..=top).contains(&level(l)))
         .copied()
         .collect();
     Some(body.join("\n").trim().to_string()).filter(|b| !b.is_empty())
@@ -307,7 +308,7 @@ pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, 
         .and_then(|e| Some((e.str("agent")?, e.str("pane")?)))
         .filter(|_| kind != "design-revise")
     {
-        let _ = crate::term::close(ctx, r, pane);
+        crate::term::close(ctx, r, pane).ok();
         let c = json!({"agent": agent, "pane": pane, "reason": kind});
         emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "lane-closed", c))?;
     }
@@ -321,13 +322,11 @@ pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, 
         let c = git(&["commit-tree", &tree, "-p", "HEAD", "-m", &msg])?;
         git(&["reset", "--hard", &c])?;
         git(&["push", "origin", &format!("{c}:refs/heads/{branch}")])?;
-        (d["pre"], d["sha"]) = (json!(pre), json!(c));
+        d.put("pre", json!(pre)).put("sha", json!(c));
     }
-    (d["id"], d["by"]) = (ask.val("id").clone(), json!(by));
-    (d["role"], d["adr"]) = (
-        ask.val("role").clone(),
-        review.map_or(Value::Null, |e| e.val("adr").clone()),
-    );
+    d.put("id", ask.val("id").clone()).put("by", json!(by));
+    let adr = review.map_or(Value::Null, |e| e.val("adr").clone());
+    d.put("role", ask.val("role").clone()).put("adr", adr);
     emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), kind, d))?;
     let (action, role) = match kind {
         "design-approved" => ("approve", cfg.fleet(f)?.flow().start()),

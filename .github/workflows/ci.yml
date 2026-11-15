@@ -22,11 +22,14 @@ jobs:
         run: cargo build --release --locked
       - name: fmt
         run: cargo fmt --check
-      - name: "clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/)"
+      - name: "clippy (#808: pedantic on every crate, at most 10 #[allow] in crates/; #809: banned APIs in non-test code)"
         run: |
-          cargo clippy --all-targets --locked -- -D warnings
+          cargo clippy --workspace --lib --bins --locked -- -D warnings
+          cargo clippy --workspace --tests --locked -- -D warnings -A clippy::unwrap_used -A clippy::expect_used -A clippy::panic -A clippy::indexing_slicing -A clippy::as_conversions -A clippy::print_stdout -A clippy::print_stderr -A clippy::let_underscore_must_use
           n=$(grep -rE '#!?\[allow\(' crates | wc -l)
           test "$n" -le 10 || { echo "::error::$n #[allow] attributes in crates/, at most 10"; exit 1; }
+      - name: "banned-API fixtures (#809: each ci/lint-fixtures/rust/<lint>.rs fails clippy under the workspace [lints])"
+        run: scripts/lint-fixtures.sh rust
       - name: "test (#337: tests/perf.rs is the hard perf gate; its numbers go to the job summary)"
         run: cargo test --locked
       - name: "no test temp dirs left (#535: each test removes its fleet-test-* dirs, pass or fail)"
@@ -117,6 +120,10 @@ jobs:
         run: npm ci --no-audit --no-fund
       - name: typecheck (tsc --strict --noEmit)
         run: npm run check
+      - name: "banned TypeScript (#809: lint.mjs on src, and each lint-fixtures/<name>.ts fails it)"
+        run: |
+          npm run lint
+          ../scripts/lint-fixtures.sh ts
       - name: build, and the committed dist is that build
         run: |
           npm run build

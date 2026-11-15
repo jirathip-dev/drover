@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::runner::{argv, ok, Runner};
-use crate::Ctx;
+use crate::{events::Json, Ctx};
 use anyhow::Result;
 use std::collections::BTreeSet;
 use std::io::Write;
@@ -77,7 +77,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let view = view
             .ok()
             .and_then(|v| serde_json::from_str::<serde_json::Value>(&v).ok());
-        if view.is_some_and(|v| v["isArchived"] == true) {
+        if view.is_some_and(|v| v.at("isArchived") == true) {
             rows.push(format!(
                 "! gh {name} — {repo} is archived → remove [fleet.{name}] from fleet.toml"
             ));
@@ -285,7 +285,7 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         let on = crate::hosts::On::new(r, Some(m));
         let Some((tags, home)) = crate::hosts::probe(&on) else {
             let ssh = |e: anyhow::Error| format!("unreachable (ssh: {e:#})");
-            let why = ok(&on, "true", &[] as &[&str]).map_or_else(ssh, |_| "probe: unreadable answer".into());
+            let why = ok::<&str>(&on, "true", &[]).map_or_else(ssh, |_| "probe: unreadable answer".into());
             rows.push(format!("✗ host {name} — {why} → ssh {m} true"));
             continue;
         };
@@ -380,7 +380,7 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         .unwrap_or_default();
     for id in ids {
         let a = agents.as_array().into_iter().flatten().find(|a| a["id"] == id.as_str());
-        let Some(cmd) = a.and_then(|a| a["cmd"][0].as_str()) else {
+        let Some(cmd) = a.and_then(|a| a.at("cmd").at(0).as_str()) else {
             rows.push(format!("✗ shed agent {id} — not installed → shed agents add {id}"));
             continue;
         };

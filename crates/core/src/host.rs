@@ -9,7 +9,7 @@ const SPARE: &[&str] = &["shed", "drover", "herdsman", "launchd"];
 
 /// #186: `(pid, command, cwd)` of every process `lsof` sees, but `SPARE`, pid 1, this process and its parent.
 pub fn cwds(r: &dyn Runner) -> Vec<(String, String, String)> {
-    let me = [1, std::process::id(), std::os::unix::process::parent_id()].map(|p| p.to_string());
+    let me = [1, crate::runner::pid(), std::os::unix::process::parent_id()].map(|p| p.to_string());
     let (mut out, mut p) = (vec![], (String::new(), String::new()));
     for l in stdout(r, "lsof", &["-n", "-d", "cwd", "-F", "pcn"])
         .unwrap_or_default()
@@ -55,7 +55,7 @@ pub fn reap(r: &dyn Runner, dir: &Path, trim: bool, spare: Option<&str>) -> (Vec
     let kill = |sig: &str, ps: &[(String, String, String)]| {
         let mut args = vec![sig.to_string()];
         args.extend(ps.iter().map(|p| p.0.clone()));
-        let _ = r.run("kill", &args);
+        r.run("kill", &args).ok();
     };
     if first.is_empty() {
         return (vec![], 0);
@@ -80,9 +80,9 @@ pub fn keychain_jam(r: &dyn Runner) -> (Vec<Stuck>, Option<Stuck>) {
     let name = |w: Option<&&str>| w.map_or("?", |w| w.rsplit('/').next().unwrap_or(w)).to_string();
     let parent = |ppid: &str| name(rows.iter().find(|w| w.first() == Some(&ppid)).and_then(|w| w.get(3)));
     let (mut readers, mut agent) = (vec![], None);
-    for w in rows.iter().filter(|w| w.len() > 3) {
-        let up = etime_secs(w[2]);
-        let stuck = (w[0].to_string(), up, parent(w[1]));
+    for (w, [pid, ppid, et, _]) in rows.iter().filter_map(|w| Some((w, w.first_chunk::<4>()?))) {
+        let up = etime_secs(et);
+        let stuck = (pid.to_string(), up, parent(ppid));
         match (name(w.get(3)).as_str(), w.get(4)) {
             ("security", Some(&"find-generic-password")) if up > 60 => readers.push(stuck),
             ("SecurityAgent", _) if up > 600 => agent = Some(stuck),
@@ -148,7 +148,9 @@ pub fn groups(r: &dyn Runner) -> [u64; 5] {
     for (k, cmd) in ps.to_lowercase().lines().filter_map(|l| l.trim().split_once(' ')) {
         let lane = crate::providers::lanes().any(|h| h.process_names().iter().any(|w| cmd.contains(w)));
         let i = G.iter().position(|g| g.split(' ').any(|w| cmd.contains(w)));
-        kb[if lane { 0 } else { i.map_or(4, |i| i + 1) }] += k.parse::<u64>().unwrap_or(0);
+        if let Some(s) = kb.get_mut(if lane { 0 } else { i.map_or(4, |i| i + 1) }) {
+            *s += k.parse::<u64>().unwrap_or(0);
+        }
     }
     kb.map(|k| k / 1024)
 }
@@ -306,8 +308,8 @@ pub fn window(state: &Path, h: &mut Host) {
     let old = std::fs::read_to_string(&file).unwrap_or_default();
     let mut w: Vec<f64> = old.split_whitespace().filter_map(|x| x.parse().ok()).collect();
     w.extend(h.swapout);
-    let w = &w[w.len().saturating_sub(WINDOW)..];
-    let _ = std::fs::write(&file, w.iter().map(f64::to_string).collect::<Vec<_>>().join(" "));
+    let w = w.get(w.len().saturating_sub(WINDOW)..).unwrap_or_default();
+    std::fs::write(&file, w.iter().map(f64::to_string).collect::<Vec<_>>().join(" ")).ok();
     let mut m = w.to_vec();
     m.sort_by(f64::total_cmp);
     h.swap_median = m.get(m.len() / 2).copied();

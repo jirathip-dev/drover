@@ -1,5 +1,5 @@
 use crate::config::{Config, Fleet};
-use crate::events::{age, fold, last_spawn, open_asks, Event, IssueState};
+use crate::events::{age, fold, last_spawn, open_asks, Event, IssueState, Json};
 use crate::promise::Say;
 pub use crate::promise::SLOT;
 use crate::runner::{ok, Runner};
@@ -105,7 +105,11 @@ fn failed_start(events: &[Event], s: &IssueState) -> bool {
     let Some(at) = events.iter().position(hit) else {
         return false;
     };
-    !events[at..].iter().any(|e| e.is("turn-end", &s.fleet, s.issue))
+    !events
+        .get(at..)
+        .unwrap_or_default()
+        .iter()
+        .any(|e| e.is("turn-end", &s.fleet, s.issue))
 }
 
 /// #511: the build lane's latest `drover turn` since its spawn and any extra round the owner gave.
@@ -334,7 +338,7 @@ fn waits(
             &format!(
                 "held until {} merge{}",
                 crate::queue::hashes(&on),
-                ["s", ""][usize::from(on.len() > 1)]
+                if on.len() > 1 { "" } else { "s" }
             ),
             s.last_ts,
             None,
@@ -612,7 +616,9 @@ pub fn scan_where(
             lane: Some(lane.clone()),
             ..s
         };
-        let (f, branch) = (&cfg.fleet[&s.fleet], crate::gate::branch_of(Some(&s), s.issue));
+        let (Some(f), branch) = (cfg.fleet.get(&s.fleet), crate::gate::branch_of(Some(&s), s.issue)) else {
+            continue;
+        };
         if live && !matches!(s.state.as_str(), "merged" | "closed") && gh::cached_pr(ctx, &s.fleet, s.issue).is_null() {
             gh::run(ctx, r, f, (&s.fleet, s.issue), &branch, ctx.now);
         }
@@ -663,7 +669,7 @@ pub fn scan_where(
         let wt = sp.and_then(|e| e.str("worktree")).filter(|_| !s.done());
         let on = crate::hosts::On::of(r, sp);
         let spawn = s.check_lane().and_then(|l| last_spawn(mine, l));
-        let pushed = pr["headRefOid"].as_str().unwrap_or_default();
+        let pushed = pr.at("headRefOid").as_str().unwrap_or_default();
         let seen = mine
             .iter()
             .any(|e| e.is("pushed", &s.fleet, s.issue) && e.str("sha") == Some(pushed));
@@ -725,7 +731,7 @@ pub fn scan_where(
         let ev = ev.as_deref().unwrap_or(mine);
         let mut w = waiting_on(&log, ev, &s, at.or(head), &pr, f, path.as_deref().zip(word.as_deref()));
         if w.what.starts_with("PASS · behind ") && !gh::update_ready(ctx, None, f, &s.fleet) {
-            let green = gh::ci(&gh::required(&pr["statusCheckRollup"], f.checks(&pr))) == "green";
+            let green = gh::ci(&gh::required(pr.at("statusCheckRollup"), f.checks(&pr))) == "green";
             let merge = format!("drover merge {} {}", s.fleet, s.issue);
             (w.who, w.next_cmd) = if green { ("drive", Some(merge)) } else { ("ci", None) };
             w.say(&Say::MergeOnGreen(format!(
@@ -796,7 +802,7 @@ pub fn scan_where(
             let why = match (cause, ended) {
                 (Some(c), _) => format!("lane gone ({})", c.cause.word()),
                 (None, Some(st)) => format!("lane {st}{note}"),
-                _ => ["prompt never landed", "lane gone"][usize::from(gone)].into(),
+                _ => if gone { "lane gone" } else { "prompt never landed" }.into(),
             };
             let resume = waiting_turn.is_none() && resumed(&why);
             (w.who, w.lane, w.promise) = ("drive", built, None);
@@ -841,7 +847,7 @@ pub fn scan_where(
         {
             w.what = format!("PASS, PR lacks label `{l}`, so the full CI has not run");
         }
-        if pr["isDraft"] == true && w.what.starts_with("PASS") && !w.what.ends_with(DRAFT) {
+        if pr.at("isDraft") == true && w.what.starts_with("PASS") && !w.what.ends_with(DRAFT) {
             (w.what, w.promise) = (format!("PASS · {DRAFT}"), None);
         }
         let tried = mine.iter().rfind(|e| matches!(e.kind.as_str(), "driven" | "spawn"));
@@ -872,12 +878,13 @@ pub fn scan_where(
         }
         let safe = || wt.is_some_and(|wt| crate::spawn::dirty(&on, std::path::Path::new(wt)).is_none());
         if f.paused && !agents.iter().any(|a| a.name == lane) && safe() {
-            let pr = pr["number"]
+            let pr = pr
+                .at("number")
                 .as_u64()
                 .map_or(String::new(), |p| format!(" (resume to review PR #{p})"));
             (w.who, w.what, w.next_cmd, w.promise) = ("none", format!("parked: fleet paused{pr}"), None, None);
         }
-        let head = pr["headRefOid"].as_str().unwrap_or_default();
+        let head = pr.at("headRefOid").as_str().unwrap_or_default();
         let serial = || serial_wait(events, f, &s.fleet, s.issue).is_some();
         if let Some(m) = crate::promise::missed(mine, &s, head, w.promise, ctx.now).filter(|_| !serial()) {
             w.what = m;
@@ -897,7 +904,7 @@ pub fn scan_where(
     let review = |w: &Waiting| {
         let role = w.next_cmd.as_deref().and_then(|c| c.strip_prefix("drover spawn "));
         let role = role.and_then(|c| c.split(' ').nth(2));
-        role.is_some_and(|r| cfg.fleet[&w.fleet].flow().is_check(r))
+        role.is_some_and(|r| cfg.fleet.get(&w.fleet).is_some_and(|f| f.flow().is_check(r)))
     };
     let held = |w: &Waiting| {
         let mine = crate::events::of_issue(events, &w.fleet, w.issue);
@@ -968,7 +975,11 @@ pub fn recovered(events: &[Event], lane: &str, now: u64) -> String {
             && sp.is_some_and(|sp| e.ts >= sp.ts)
     };
     events.iter().rfind(mine).map_or(String::new(), |e| {
-        let how = ["nudged", "respawned"][usize::from(e.kind == "respawned-silent")];
+        let how = if e.kind == "respawned-silent" {
+            "respawned"
+        } else {
+            "nudged"
+        };
         format!(
             " · {how} {} ago: {}",
             age(now.saturating_sub(e.ts)),
