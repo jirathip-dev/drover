@@ -606,10 +606,13 @@ fn health(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event]) -> Res
         let Some(p) = events.iter().rfind(|e| e.kind == "drive-pass" && e.fleet == *name) else {
             continue;
         };
-        let (secs, step) = (p.data["secs"].as_f64().unwrap_or(0.0), p.str("step").unwrap_or("?"));
+        let (secs, step) = (
+            p.data.get("secs").and_then(serde_json::Value::as_f64).unwrap_or(0.0),
+            p.str("step").unwrap_or("?"),
+        );
         let why = format!(
             "{name}'s pass took {secs} s; slowest step: {step} ({} s)",
-            p.data["step_secs"]
+            p.data.get("step_secs").unwrap_or(&json!("?"))
         );
         now.push((
             name,
