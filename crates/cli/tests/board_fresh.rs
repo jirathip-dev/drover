@@ -53,8 +53,8 @@ fn every_screen_shows_the_snapshot_age_amber_past_10_min_and_reads_run_in_the_ba
             .find(|i| i["label"] == "snapshot");
         let row = blocks
             .iter()
-            .find(|b| b["id"] == "age-list")
-            .map(|b| b["rows"][0]["subtitle"].clone());
+            .find(|b| b["id"] == "age")
+            .map(|b| b["blocks"][0]["rows"][0]["subtitle"].clone());
         item.map(|i| json!({"text": i["value"], "tone": i["tone"]})).or(row)
     };
     get(&s, NOW, "/api/v1/state");

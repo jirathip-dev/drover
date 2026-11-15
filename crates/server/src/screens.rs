@@ -713,7 +713,10 @@ impl Server<'_> {
                 Some(st) => st["items"].as_array_mut().into_iter().for_each(|i| {
                     i.push(json!({"label": "snapshot", "value": line.clone(), "tone": tone}));
                 }),
-                None => b.insert(0, json!({"type": "list", "id": "age-list", "rows": [row]})),
+                None => b.insert(
+                    0,
+                    json!({"type": "section", "id": "age", "header": "snapshot", "blocks": [{"type": "list", "id": "age-list", "rows": [row]}]}),
+                ),
             }
         }
         Some(v)

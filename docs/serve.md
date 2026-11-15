@@ -256,7 +256,7 @@ device work too (the phone page draws the same screens, #927). Beside `/api/v1` 
 - `GET /screens/queue` (`?repo=<fleet>`), `/screens/events` (`?kind=merge,verdict,lane,ask`, `?before=<unix time>`),
   `/screens/fleets` (the Fleets sheet) and `/screens/cards` (the open asks, design reviews, needs-human issues and run
   cards as chat cards); #977: each full screen (not a sheet) shows the step's snapshot age, `as of 3m ago` (`as of: not yet known` before
-  one), `warn` past 10 min, as a `snapshot` item of its `stat` block, else an `age-list` row; q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
+  one), `warn` past 10 min, as a `snapshot` item of its `stat` block, else an `age` section's row; q1235: each ask card carries `fold`, its folded line (`#N · kind · question cut short · age`)
   and its `main` button (`{block, action, value, label}`, the recommended answer or one more round), which the app
   shows until a tap opens the full card; a second tap folds it again;
 - #926: `GET /screens/lanes`, the Lanes chip: each live lane grouped waiting (blocked), working, asleep (idle), done, parked, dead, with its figure
