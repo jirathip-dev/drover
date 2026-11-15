@@ -1,0 +1,10 @@
+Decided: clear the update worktree with remove --force --force before add; it drops a locked entry, and only the update-<fleet> path
+Because: "unlocks and prunes its own `update-<fleet>` entry when the folder is missing (that entry only, never other worktrees)"
+Rejected: worktree prune — it prunes every stale entry in the repo, not just drive's own
+Decided: both auto-update call sites go through catch_up, which emits auto-update-failed unless the fleet's newest failed/updated event is the same failure
+Because: "A failing auto-update raises one alert per state (`auto-update-failed`, naming the error)"
+Decided: the sim's git model accepts remove --force --force next to staging's plain remove form
+Because: crates/cli/tests/sim/model.rs:494
+Check: cargo test -p drover --test update_worktree fails at commit 1 with the production error and passes at head
+Check: cargo test -p drover --test sim passes at head (CI's rust job failed on the unmodelled remove call)
+Owner: Drive clears its own stuck update folder, and a failing auto-update now alerts once instead of failing silently
