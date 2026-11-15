@@ -1,9 +1,6 @@
-//! #387: `drover config propose`: a fleet.toml change (roles, models, gates, land mode, serial groups, hosts, accounts)
-//! as a thread card with [apply] [discard]. Only the owner's tap (or `config apply`, which the lane hook refuses in a lane) applies it, with a
-//! backup, a `doctor` check and an event; settled, the card folds to the one line the thread records.
 use crate::config::{self, Config};
 use crate::devices::sha256;
-use crate::events::{emit, read, Event};
+use crate::events::{emit, working, Event};
 use crate::gate::refused;
 use crate::runner::Runner;
 use crate::{orchestrator, Ctx};
@@ -16,7 +13,7 @@ use std::path::Path;
 
 /// `drover config propose <thread> <file>`: `file` is the whole new fleet.toml; validated, its diff is the card.
 pub fn propose(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, thread: &str, file: &Path) -> Result<()> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let t = orchestrator::find(&events, thread)?;
     let text = std::fs::read_to_string(file).with_context(|| format!("cannot read {}", file.display()))?;
     Config::parse(&text).context("the proposed fleet.toml is invalid")?;
@@ -26,13 +23,31 @@ pub fn propose(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, thread: &str, file:
         return refused("BAD_VALUE", "the proposal changes nothing");
     }
     let id = format!("c{}", events.iter().filter(|e| e.kind == "config-propose").count() + 1);
-    let d = json!({"thread": thread, "id": id, "diff": diff, "text": text, "base": sha256(cur.as_bytes())});
+    let sha = sha256(text.as_bytes());
+    crate::devices::write0600(&stored_at(ctx, &id), text.as_bytes())?;
+    stored(ctx, &id, Some(&sha))?;
+    let d = json!({"thread": thread, "id": id, "diff": diff, "sha": sha, "base": sha256(cur.as_bytes())});
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, &t.fleet, None, "config-propose", d),
     )?;
     Ok(writeln!(out, "{id}")?)
+}
+
+fn stored_at(ctx: &Ctx, id: &str) -> std::path::PathBuf {
+    ctx.state.with_file_name("proposals").join(format!("{id}.toml"))
+}
+
+fn stored(ctx: &Ctx, id: &str, sha: Option<&str>) -> Result<String> {
+    let text = std::fs::read_to_string(stored_at(ctx, id)).unwrap_or_default();
+    if sha != Some(&sha256(text.as_bytes())) {
+        return refused(
+            "PROPOSAL_TRUNCATED",
+            format!("{id} is not stored whole; propose the fleet.toml again"),
+        );
+    }
+    Ok(text)
 }
 
 /// The changed lines of `a` → `b` (`- ` / `+ `, by longest common subsequence), each run under its `[section]`.
@@ -101,7 +116,7 @@ fn install(ctx: &Ctx, r: &dyn Runner, cur: &str, text: &str) -> Result<(Config, 
 
 /// The owner's [apply] or [discard] on proposal `id`; the line the thread records.
 pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) -> Result<String> {
-    let events = read(&ctx.state)?;
+    let events = working(&ctx.state)?;
     let Some(p) = events
         .iter()
         .find(|e| e.kind == "config-propose" && e.str("id") == Some(id))
@@ -109,7 +124,7 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
         return refused("NO_SUCH_PROPOSAL", format!("no config proposal {id}"));
     };
     if let Some(s) = settled(&events, id) {
-        let how = if s.data["applied"] == true {
+        let how = if s.val("applied") == true {
             "applied"
         } else {
             "discarded"
@@ -128,11 +143,11 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
                 format!("fleet.toml changed since {id} was proposed; ask for a new one"),
             );
         }
-        let (new, backup, ok) = install(ctx, r, &cur, p.str("text").unwrap_or_default())?;
+        let text = stored(ctx, id, p.str("sha"))?;
+        let (new, backup, ok) = install(ctx, r, &cur, &text)?;
         d.as_object_mut()
             .unwrap()
             .extend([("backup".into(), json!(backup)), ("doctor".into(), json!(ok))]);
-        // #558: each fleet it adds has its first queued issue kicked now, not at the next pass.
         let mut kicked = String::new();
         for (f, _) in new
             .fleet
@@ -365,7 +380,7 @@ pub fn edit(ctx: &Ctx, cfg: &Config, r: &dyn Runner, c: &ConfigChange, by: &str)
     }
     if let Some(f) = c.remove.as_deref().filter(|_| !c.confirm) {
         let live = crate::check::live_lanes(ctx, cfg, r)?;
-        let events = read(&ctx.state)?;
+        let events = working(&ctx.state)?;
         let mut lanes = (events.iter().filter(|e| e.kind == "spawn" && e.fleet == f)).filter_map(|e| e.str("agent"));
         if let Some(l) = lanes.find(|a| live.contains(*a)) {
             return refused(

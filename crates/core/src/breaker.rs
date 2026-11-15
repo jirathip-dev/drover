@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{append, emit, last_spawn, read, Event};
+use crate::events::{append, emit, last_spawn, working, Event};
 use crate::hosts::On;
 use crate::runner::Runner;
 use crate::Ctx;
@@ -45,7 +45,7 @@ fn failure_on(e: &Event, h: &str) -> bool {
 
 /// Lane `lane` failed to start or ended with no push: true while its host's breaker is open (trips it at the limit).
 pub fn failed(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str, lane: &str, why: &str) -> Result<bool> {
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let Some(sp) = last_spawn(&ev, lane) else {
         return Ok(false);
     };
@@ -77,7 +77,7 @@ pub fn failed(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, fleet: &str, lane: &
 
 /// Each host whose breaker is open runs one canary; a pass closes it (`runtime-up`).
 pub fn probe(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
-    let ev = read(&ctx.state)?;
+    let ev = working(&ctx.state)?;
     let open = |e: &&Event| {
         e.kind == "runtime-down"
             && e.str("host")
@@ -86,10 +86,7 @@ pub fn probe(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     for e in ev.iter().filter(open) {
         let h = e.str("host").unwrap_or_default();
         let on = On::new(r, cfg.hosts.get(h).and_then(|c| c.machine.as_deref()));
-        let ok = match crate::runner::Runner::shed(&on) {
-            Some(b) => crate::herdr::Shed(b).canary(&on),
-            None => crate::herdr::in_pane(&on, "/", CANARY, CANARY_OUT).is_some_and(|t| t.contains(CANARY_OUT)),
-        };
+        let ok = crate::runner::Runner::shed(&on).is_some_and(|b| crate::term::Shed(b).canary(&on));
         if !ok {
             writeln!(out, "runtime down on {h}: canary failed")?;
             continue;

@@ -1,4 +1,3 @@
-//! AC6: the event log survives kill -9 mid-write. #344: the log is `state.db`; a JSONL log from before is imported.
 mod common;
 use common::tmpdir;
 use drover::events::{append, fold, read, Event};
@@ -18,7 +17,6 @@ fn ev(i: u64) -> Event {
 fn torn_last_line_is_ignored_and_next_append_is_clean() {
     let d = tmpdir("torn");
     let p = d.join("events.jsonl");
-    // An old log whose writer was killed half-way through record 3.
     let line = |i| serde_json::to_string(&ev(i)).unwrap();
     std::fs::write(&p, format!("{}\n{}\n{}", line(1), line(2), &line(3)[..100])).unwrap();
     assert_eq!(read(&p).unwrap().len(), 2);
@@ -28,7 +26,6 @@ fn torn_last_line_is_ignored_and_next_append_is_clean() {
     assert_eq!(fold(&all)[&("sendmeter".to_string(), 7)].lane.as_deref(), Some("a4"));
 }
 
-/// Child mode: append forever until killed.
 #[test]
 fn kill9_child_writer() {
     let Ok(p) = std::env::var("FLEET_KILL_CHILD") else {
@@ -53,12 +50,11 @@ fn kill9_mid_append_never_corrupts() {
             .stdout(std::process::Stdio::null())
             .spawn()
             .unwrap();
-        // Wait (bounded) for the child's first record, then kill it mid-stream.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while read(&p).unwrap().len() <= start && std::time::Instant::now() < deadline {
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
-        child.kill().unwrap(); // SIGKILL
+        child.kill().unwrap();
         child.wait().unwrap();
         let before = read(&p).unwrap();
         assert!(before.len() > start, "round {round}: child wrote nothing in 10 s");
@@ -67,12 +63,10 @@ fn kill9_mid_append_never_corrupts() {
         assert_eq!(after.len(), before.len() + 1, "round {round}");
         assert_eq!(after.last().unwrap().ts, 999_000 + round);
     }
-    // Every row reads back, numbered without a gap.
     let seqs: Vec<u64> = read(&p).unwrap().iter().map(|e| e.seq).collect();
     assert_eq!(seqs, (1..=seqs.len() as u64).collect::<Vec<_>>());
 }
 
-/// Child mode: read the log so the parent can inspect stderr.
 #[test]
 fn read_child() {
     let Ok(p) = std::env::var("FLEET_READ_CHILD") else {
@@ -99,12 +93,10 @@ fn corrupt_middle_line_warns_torn_tail_is_silent() {
     let d = tmpdir("corrupt");
     let p = d.join("events.jsonl");
     let line = |i| serde_json::to_string(&ev(i)).unwrap();
-    // Torn final line: silent.
     std::fs::write(&p, format!("{}\n{}\n{}", line(1), line(2), &line(3)[..100])).unwrap();
     let (out, err) = read_stderr(&p);
     assert!(out.contains("count=2"), "stdout: {out}");
     assert!(!err.contains("corrupt"), "torn tail must be silent: {err}");
-    // Garbage on line 2 of 3 (plus a blank line): exactly one warning naming it.
     let p = tmpdir("corrupt-mid").join("events.jsonl");
     std::fs::write(&p, format!("{}\nnot json\n\n{}\n", line(1), line(2))).unwrap();
     let (out, err) = read_stderr(&p);
@@ -114,7 +106,6 @@ fn corrupt_middle_line_warns_torn_tail_is_silent() {
     assert!(warns[0].contains("line 2:"), "{}", warns[0]);
 }
 
-/// Child mode: append `FLEET_WRITER_N` events tagged with this writer's number.
 #[test]
 fn writer_child() {
     let (Ok(p), Ok(w)) = (std::env::var("FLEET_WRITER_LOG"), std::env::var("FLEET_WRITER_N")) else {
@@ -124,8 +115,6 @@ fn writer_child() {
     (0..25).for_each(|i| append(std::path::Path::new(&p), &ev(w * 100 + i)).unwrap());
 }
 
-/// #259: every row gets a monotonic seq, across concurrent writers; old rows by line. #344: 16 writer processes at
-/// once lose no event and none fails.
 #[test]
 fn seq_is_monotonic_across_concurrent_writers() {
     let d = tmpdir("seq");

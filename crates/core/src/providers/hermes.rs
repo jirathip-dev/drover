@@ -1,7 +1,6 @@
-//! Hermes: the `hooks:` key + its consent in the role's existing profile; the kick is typed at the `❯` prompt.
-use super::{attempts, hook_command, Credential, Dialect, Home, Provider, Row};
+use super::{attempts, hook_command, Dialect, Home, Provider, Row};
 use crate::config::Config;
-use crate::herdr;
+use crate::term;
 use crate::runner::{argv, Runner};
 use crate::spawn::Plan;
 use crate::Ctx;
@@ -28,7 +27,6 @@ fn root(ctx: &Ctx) -> PathBuf {
         .unwrap_or_else(|| HOME.resolve(&crate::config::home()))
 }
 
-/// Hermes' `pre_tool_call` / `post_tool_call` / `on_session_end` shell hooks (older ones: `args`, no event name).
 static DIALECT: Dialect = Dialect {
     sent: |v| {
         let ev = v["hook_event_name"].as_str().unwrap_or_default();
@@ -44,6 +42,7 @@ static DIALECT: Dialect = Dialect {
     deny: |reason| json!({"action": "block", "message": reason}),
     prompt: "",
     again: None,
+    rewrite: None,
 };
 
 impl Provider for Hermes {
@@ -124,35 +123,33 @@ impl Provider for Hermes {
     }
 
     fn start_cmd(&self, _ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
-        // Unattended lanes cannot answer Hermes' first-use hook consent prompt.
         let mut a = argv(&["-p", &p.profile, "--accept-hooks"]);
         if let Some(e) = &p.effort {
             a.extend(["--reasoning".into(), e.clone()]);
         }
-        herdr::start_argv(&p.agent, "hermes", pane, a)
+        term::start_argv("hermes", pane, &a)
     }
 
-    /// Wait for `❯` (an early prompt is dropped), prompt + Enter, confirm by `working` or the screen leaving `ctx --`.
     fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {
         vec![
-            herdr::wait_output_argv(pane, "❯", "60000"),
-            herdr::prompt_argv(&p.agent, &p.kick),
-            herdr::keys_argv(pane, "Enter"),
-            herdr::wait_working_argv(&p.agent, "10000"),
-            herdr::read_argv(pane),
+            term::wait_output_argv(pane, "❯", "60000"),
+            term::prompt_argv(&p.agent, &p.kick),
+            term::keys_argv(pane, "Enter"),
+            term::wait_working_argv(&p.agent, "10000"),
+            term::read_argv(pane),
         ]
     }
 
     fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
         let c = self.kick_cmds(p, pane);
-        herdr::exec(r, &c[0])?;
+        term::exec(r, &c[0])?;
         for _ in attempts(r, 3, 10) {
-            herdr::exec(r, &c[1])?;
-            herdr::exec(r, &c[2])?;
-            if herdr::exec(r, &c[3])?.code == 0 {
+            term::exec(r, &c[1])?;
+            term::exec(r, &c[2])?;
+            if term::exec(r, &c[3])?.code == 0 {
                 return Ok(true);
             }
-            let screen = herdr::exec(r, &c[4])?;
+            let screen = term::exec(r, &c[4])?;
             if screen.code == 0 && screen.stdout.contains("ctx ") && !screen.stdout.contains("ctx --") {
                 return Ok(true);
             }
@@ -160,24 +157,11 @@ impl Provider for Hermes {
         Ok(false)
     }
 
-    fn credential(&self) -> Credential {
-        Credential::Own
-    }
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         Some(&DIALECT)
     }
-    fn now_line(&self, line: &str) -> bool {
-        line.contains('💻') || line.starts_with('┊')
-    }
-    /// `┊ 💻 cargo test` (or `$ …`) as a shell call.
-    fn tool_line(&self, line: &str) -> Option<(String, String)> {
-        let t = line.trim_start_matches(['┊', ' ']);
-        let cmd = t.strip_prefix("💻").or(t.strip_prefix("$ "))?.trim_start();
-        Some(("$".into(), cmd.strip_prefix("$ ").unwrap_or(cmd).into()))
-    }
 }
 
-/// Record Hermes' first-use consent for the hook (unconsented hooks never register on non-TTY runs), keeping others.
 fn approve_hook(path: &Path, cmd: &str) -> Result<()> {
     let text = std::fs::read_to_string(path).unwrap_or_default();
     let mut data: Value = serde_json::from_str(&text)
@@ -188,7 +172,6 @@ fn approve_hook(path: &Path, cmd: &str) -> Result<()> {
         data["approvals"] = json!([]);
     }
     let list = data["approvals"].as_array_mut().context("approvals")?;
-    // #304: `post_tool_call` kicks the issue after a push.
     let n = list.len();
     for ev in ["pre_tool_call", "post_tool_call"] {
         if !list.iter().any(|e| e["event"] == ev && e["command"] == cmd) {
@@ -207,7 +190,6 @@ pub fn set_mcp(ctx: &Ctx, profile: &str, servers: &serde_json::Map<String, Value
     let Ok(text) = std::fs::read_to_string(&yaml) else {
         return Ok(());
     };
-    // JSON is YAML flow syntax: one line per server.
     let block: String = servers
         .iter()
         .map(|(k, v)| format!("  {}: {v}\n", serde_json::to_string(k).unwrap()))
@@ -224,7 +206,6 @@ pub fn set_mcp(ctx: &Ctx, profile: &str, servers: &serde_json::Map<String, Value
     Ok(())
 }
 
-/// Replace the top-level `key` block by `block` (appended when absent, removed when empty); other bytes kept.
 fn set_block(text: &str, key: &str, block: &str) -> String {
     let (mut out, mut skip, mut done) = (String::new(), false, false);
     for line in text.split_inclusive('\n') {
@@ -248,7 +229,6 @@ fn set_block(text: &str, key: &str, block: &str) -> String {
     out
 }
 
-/// Drop the direct child `agent.reasoning_effort` (fleet.toml owns effort); every other byte is kept.
 fn drop_reasoning_effort(text: &str) -> String {
     let (mut out, mut in_agent, mut child) = (String::new(), false, None);
     for line in text.split_inclusive('\n') {

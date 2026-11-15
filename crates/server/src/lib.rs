@@ -1,4 +1,3 @@
-// #264: serve.rs moved as is; its `crate::` paths resolve through this re-export.
 pub use drover_core::*;
 pub mod api;
 pub mod handover;

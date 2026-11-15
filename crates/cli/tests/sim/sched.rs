@@ -1,6 +1,3 @@
-//! The seeded scheduler: each simulated process is an OS thread running the real `main_with`; one baton (a mutex and
-//! a condvar) lets one run at a time. Every Runner call and state.db write is a yield point; the driver checks the
-//! invariants between steps and moves the clock (discrete events) when nothing is runnable.
 use crate::model::Model;
 use drover::runner::{Out, Runner};
 use std::panic::AssertUnwindSafe;
@@ -33,7 +30,6 @@ impl Rng {
     }
 }
 
-/// The payload a process thread unwinds with once the run is over (never a failure).
 struct Abort;
 
 pub struct Proc {
@@ -80,6 +76,13 @@ pub struct World {
     pub root: PathBuf,
     pub step: u64,
     next_pid: u32,
+    /// #686: a replay records each violation (once per invariant and subject) with its step and runs on.
+    pub keep_going: bool,
+    pub violations: Vec<String>,
+    /// Every `(agent, pane)` a spawn event logged (I5's index).
+    pub spawned: std::collections::BTreeSet<(String, String)>,
+    /// `(wrote, merges)` at the last full check of I4's merged sha and I6 (both read only those).
+    pub checked: (usize, usize),
 }
 
 pub struct Sim {
@@ -88,16 +91,14 @@ pub struct Sim {
     threads: Mutex<Vec<std::thread::JoinHandle<()>>>,
 }
 
-/// A call's virtual cost in seconds (herdr's agent start is slow, gh a round trip, local tools free).
 fn cost(prog: &str, args: &[String]) -> u64 {
     match (prog, args.first().map(String::as_str), args.get(1).map(String::as_str)) {
-        ("herdr", Some("agent"), Some("start")) => 3,
+        ("shed", Some("send"), Some(p)) if p.contains("\"text\":\"exec ") => 3,
         ("gh", ..) | ("ssh", ..) => 1,
         _ => 0,
     }
 }
 
-/// Calls answered without a switch: `kill -0` and `ps` run inside a lease's transaction (`db::take`'s `dead`).
 fn atomic(prog: &str) -> bool {
     matches!(prog, "kill" | "ps")
 }
@@ -118,6 +119,10 @@ impl Sim {
                 root,
                 step: 0,
                 next_pid: 40_000,
+                keep_going: false,
+                violations: vec![],
+                spawned: Default::default(),
+                checked: (usize::MAX, 0),
             }),
             cv: Condvar::new(),
             threads: Mutex::new(vec![]),
@@ -216,7 +221,6 @@ impl Sim {
         self.cv.notify_all();
     }
 
-    /// Block until it is `me`'s turn; `Err` once the run is over (the thread then unwinds or returns).
     fn wait_turn(&self, me: usize) -> Result<(), ()> {
         let mut w = self.lock();
         loop {
@@ -230,7 +234,6 @@ impl Sim {
         }
     }
 
-    /// Hand the baton back: `me` may run again `secs` from now.
     fn yield_now(&self, me: usize, secs: u64) {
         {
             let mut w = self.lock();
@@ -272,6 +275,9 @@ impl Sim {
                     ));
                     if ev.kind == "spawn" {
                         w.procs[me].starting = None;
+                        let (a, p) = (ev.str("agent"), ev.str("pane"));
+                        w.spawned
+                            .insert((a.unwrap_or_default().into(), p.unwrap_or_default().into()));
                     }
                     let busy = w.model.load >= 25;
                     w.wrote.push(Wrote {
@@ -326,7 +332,6 @@ impl Sim {
                 let next = [wake, crate::scenario::next(&w)].into_iter().flatten().min();
                 match next {
                     Some(t) if t <= until => {
-                        // #685: a live lane not working is idle while the clock moves.
                         let dt = t.saturating_sub(w.now);
                         let idle = w.model.live().filter(|p| p.status != "working").count() as u64;
                         w.model.idle += idle * dt;
@@ -371,6 +376,15 @@ impl World {
         self.trace.push(line);
     }
     pub fn fail(&mut self, why: String) {
+        if self.keep_going {
+            let key: Vec<&str> = why.split_whitespace().take(4).collect();
+            if !(self.violations.iter()).any(|v| v.split_whitespace().skip(3).take(4).eq(key.iter().copied())) {
+                self.log(format!("FAIL {why}"));
+                let at = format!("step {} t+{}:", self.step, self.now - crate::scenario::T0);
+                self.violations.push(format!("{at} {why}"));
+            }
+            return;
+        }
         if self.failure.is_none() {
             self.log(format!("FAIL {why}"));
             self.failure = Some(why);
@@ -390,6 +404,48 @@ pub struct SimRunner {
 impl Runner for SimRunner {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         Ok(self.sim.call(self.me, prog, args))
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        use drover::shed::proto::{ErrorCode, Hello, Response, RpcError};
+        if prog != "shed" {
+            return self.run(prog, args);
+        }
+        let mut stdout = String::new();
+        for q in input
+            .lines()
+            .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        {
+            let (id, m) = (q["id"].clone(), q["method"].as_str().unwrap_or_default().to_string());
+            let o = match m.as_str() {
+                "hello" => Out {
+                    stdout: serde_json::json!(Hello::ours()).to_string(),
+                    ..Out::default()
+                },
+                _ => self.sim.call(self.me, "shed", &[m, q["params"].to_string()]),
+            };
+            let code = if o.stderr == "NAME_TAKEN" {
+                ErrorCode::NameTaken
+            } else {
+                ErrorCode::NoSuchTerminal
+            };
+            let r = match serde_json::from_str(&o.stdout) {
+                Ok(v) if o.code == 0 => Response::ok(id, v),
+                _ => Response::err(id, RpcError::new(code, &o.stderr)),
+            };
+            stdout += &(serde_json::to_string(&r)? + "\n");
+        }
+        Ok(Out {
+            stdout,
+            ..Out::default()
+        })
+    }
+    fn shed(&self) -> Option<drover::shed::Shed> {
+        let wire = drover::shed::Wire::Connect;
+        Some(drover::shed::Shed {
+            wire,
+            acp: None,
+            policy: "ask".into(),
+        })
     }
     fn sleep(&self, secs: u64) {
         {

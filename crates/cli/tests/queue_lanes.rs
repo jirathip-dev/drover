@@ -1,5 +1,3 @@
-//! (and the card's current lane name) links to its Lanes sheet, a gone one is muted text with no tap; #218: unless its
-//! transcript is stored (`data-gone`). The name and `state age` are spans, so the name ellipsises first.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -9,7 +7,7 @@ use serde_json::json;
 const T: u64 = 1_000_000;
 
 #[test]
-fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
+fn lanes_newest_first_and_a_gone_lane_has_no_link() {
     let c = ctx(&tmpdir("queue-lanes"), CONFIG);
     let names = [
         "impl-3",
@@ -36,49 +34,47 @@ fn lanes_newest_first_capped_at_five_and_a_gone_lane_has_no_link() {
     }
     let f = Fake::default();
     let r = sh.on(&f);
-    // #268: the Queue tab as the board draws it from API v1's `queue`.
-    let page = queue_tab(&Server::new(&c, &r, None), "", T);
-    let card = &page[page.find("<div class=qls>").expect("lanes list")..];
-    let card = &card[..card.find("</div>").unwrap()];
-    let at = |a: &str| card.find(&format!(">{a}<")).unwrap_or_else(|| panic!("no {a}: {card}"));
+    let lanes = |r: &dyn drover::runner::Runner| {
+        let q: serde_json::Value = serde_json::from_str(&api(&Server::new(&c, r, None), "", "", T, "queue")).unwrap();
+        let row = q["fleets"][0]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["issue"] == 3)
+            .cloned();
+        row.unwrap_or_else(|| panic!("{q}"))["lanes"]
+            .as_array()
+            .unwrap()
+            .clone()
+    };
+    let line = |l: &serde_json::Value| {
+        format!(
+            "{} {} {} {}",
+            l["name"].as_str().unwrap(),
+            l["state"],
+            l["ago"],
+            l["link"]
+        )
+    };
+    let got = lanes(&r);
     let mut order: Vec<&str> = names.to_vec();
     order.reverse();
-    assert!(order.windows(2).all(|w| at(w[0]) < at(w[1])), "newest first: {card}");
-    let older = card
-        .find("<details class=qm><summary>+2 older</summary>")
-        .expect("+2 older");
-    assert!(
-        at("impl-3-f1") < older && older < at("rev-3-r1"),
-        "the 2 oldest under +2 older: {card}"
+    assert_eq!(
+        got.iter().map(|l| l["name"].as_str().unwrap()).collect::<Vec<_>>(),
+        order,
+        "newest first"
     );
-    assert!(card.starts_with(
-        "<div class=qls><a href=#lanes class=\"ql nw el\" data-agent=\"impl-3-u1\"><span class=g>●</span> <span class=qn>impl-3-u1</span> <span class=qa>working 54m</span></a>\
-         <a href=#lanes class=\"ql nw el\" data-agent=\"rev-3-r3\"><span class=g>○</span> <span class=qn>rev-3-r3</span> <span class=qa>done 55m</span></a>"
-    ), "{card}");
-    assert!(
-        card.contains("<span class=\"ql nw el m\"><span class=m>○</span> <span class=qn>rev-3-r2</span> <span class=qa>gone 57m</span></span>"),
-        "{card}"
+    assert_eq!(line(&got[0]), "impl-3-u1 \"working\" \"54m\" \"live\"");
+    assert_eq!(line(&got[1]), "rev-3-r3 \"done\" \"55m\" \"live\"");
+    assert_eq!(
+        line(&got[3]),
+        "rev-3-r2 \"gone\" \"57m\" \"\"",
+        "a gone lane has no tap target"
     );
-    assert!(
-        !card.contains("data-agent=\"rev-3-r2\""),
-        "a gone lane has no tap target: {card}"
-    );
-    // #218: a gone lane with a stored transcript links to it, marked `data-gone`.
-    let log = drover::lanes::log(&c.state, "rev-3-r2").unwrap();
-    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
-    std::fs::write(&log, "  out\n").unwrap();
-    let page2 = queue_tab(&Server::new(&c, &r, None), "", T);
-    assert!(
-        page2.contains("<a href=#lanes class=\"ql nw el\" data-agent=\"rev-3-r2\" data-gone><span class=m>○</span>"),
-        "{page2}"
-    );
-    std::fs::remove_file(&log).unwrap();
-    // The card's current lane name opens the same sheet.
-    assert!(
-        page.contains("<p><a href=#lanes class=\"ql nw el\" data-agent=\"impl-3-u1\">impl-3-u1</a></p>"),
-        "{page}"
-    );
+    sh.lane("rev-3-r2", "done", "/x");
+    drover::term::close(&c, &r, "rev-3-r2").unwrap();
+    assert_eq!(lanes(&r)[3]["link"], "gone", "the log drover archived at close");
+    drover::session::transcript::forget(&c, "rev-3-r2");
     drop(sh);
-    let page = queue_tab(&Server::new(&c, &r, None), "", T);
-    assert!(page.contains("<p>impl-3-u1</p>"), "{page}");
+    assert_eq!(lanes(&r)[0]["link"], "", "no pane: no link");
 }

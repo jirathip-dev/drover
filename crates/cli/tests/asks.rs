@@ -1,4 +1,3 @@
-//! #40: `drover ask` / `answer` / `asks`, the needs-you card and the `ask-waiting` alert.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -17,7 +16,6 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
         .collect()
 }
 
-/// The asking lane's spawn, so an answer can find its pane.
 fn lane_spawn(c: &drover::Ctx, ts: u64) {
     append(
         &c.state,
@@ -51,11 +49,10 @@ fn calls(sh: &FakeShed) -> (usize, usize, usize) {
     (n("send"), n("keys"), n("wait"))
 }
 
-/// The asks as `drover ask` logs them inside `LANE` (`DROVER_LANE` is process-wide, so not set here).
 fn from_lane(c: &drover::Ctx) {
     let Ok(log) = drover::events::jsonl(&c.state) else {
         return;
-    }; // a refused ask logs nothing
+    };
     rewrite_log(
         &c.state,
         &log.replace("\"agent\":null", &format!("\"agent\":\"{LANE}\"")),
@@ -91,8 +88,8 @@ fn ask_answer_round_trip_prompts_the_asker_once() {
     assert_eq!(id, "q1");
     let a = &kinds(&c, "needs-decision")[0];
     assert_eq!((a.issue, a.str("agent")), (Some(36), Some(LANE)));
-    assert_eq!(a.data["options"], json!(["yes, to 5,200", "no, trim"]));
-    assert_eq!(a.data["recommend"], 2);
+    assert_eq!(*a.val("options"), json!(["yes, to 5,200", "no, trim"]));
+    assert_eq!(a.val("recommend"), 2);
     let (_, open) = run(&c, &Fake::default(), &["asks", "sendmeter"]);
     assert!(
         open.contains("q1 #36") && open.contains("Raise the src budget?"),
@@ -122,7 +119,6 @@ fn ask_answer_round_trip_prompts_the_asker_once() {
         .contains("REFUSED NO_SUCH_ASK"));
 }
 
-/// #155: an ask from outside a lane (the owner's) names no agent; its answer prompts nobody.
 #[test]
 fn an_ask_from_outside_a_lane_names_no_agent() {
     let c = ctx(&tmpdir("ask-nolane"), CONFIG);
@@ -198,7 +194,6 @@ fn check(c: &drover::Ctx, r: &Fake) -> String {
 #[test]
 fn an_open_ask_re_alerts_once_as_ask_waiting_after_30_min() {
     let r = Fake::default();
-    // Past 30 min an open ask re-alerts once as `ask-waiting`.
     let d = tmpdir("ask-waiting");
     let mut c = ctx(&d, CONFIG);
     let _sh = shed(&c);
@@ -216,25 +211,34 @@ fn an_open_ask_re_alerts_once_as_ask_waiting_after_30_min() {
 }
 
 #[test]
-fn needs_you_card_folds_above_the_tabs_and_answer_needs_a_paired_device() {
+fn the_needs_you_card_is_a_cards_screen_block_and_answer_needs_a_paired_device() {
     let d = tmpdir("ask-card");
     let c = ctx(&d, CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
     ask(&c);
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let page = String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
-    let page = with_queue(&page, &s, "127.0.0.1:7777", NOW); // #268: the Queue tab as the board draws it
-    let (card, main) = (
-        page.find("<details class=ask>").expect("no needs-you card"),
-        page.find("<main>").unwrap(),
-    );
-    assert!(card < main, "the card sits above every tab section");
+    let get = |p: &str| {
+        let res =
+            String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"), NOW))
+                .into_owned();
+        res[res.find("\r\n\r\n").unwrap() + 4..].to_string()
+    };
     assert!(
-        page[card..].find("value=2>2. no, trim") < page[card..].find("value=1>1. yes"),
-        "recommended first"
+        get("/").contains("<div id=cards></div><main>"),
+        "the cards sit above every tab"
     );
-    assert!(page.contains("⏸ waiting: decision"));
+    let cards: serde_json::Value = serde_json::from_str(&get("/screens/cards")).unwrap();
+    let card = cards
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "ask-q1")
+        .expect("no needs-you card");
+    assert_eq!(card["fold"]["main"]["value"], "no, trim", "recommended first: {card}");
+    assert_eq!(card["blocks"][1]["recommended"], "no, trim", "{card}");
+    let q: serde_json::Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", NOW, "queue")).unwrap();
+    assert_eq!(q["fleets"][0]["rows"][0]["state"], "⏸ waiting: decision");
     let body = "op=answer&fleet=sendmeter&id=q1&choice=2";
     let req = format!(
         "POST / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\nContent-Length: {}\r\n\r\n{body}",
@@ -266,10 +270,10 @@ fn answer_to_a_gone_agent_records_the_decision_and_exits_0() {
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("recorded; asking agent gone, not prompted"), "{out}");
     assert_eq!(kinds(&c, "decision").len(), 1);
-    assert!(sh.called("get", LANE) && sh.sent(LANE).is_empty(), "{:?}", sh.methods());
+    assert!(sh.called("get", LANE) && !sh.has(LANE), "{:?}", sh.methods());
+    assert!(kinds(&c, "answer-delivered").is_empty());
 }
 
-/// One ask from `sendmeter-impl-36` on #36, then `then`: is it still in `open_asks`, and why it closed.
 fn closed_by(then: Event) -> (usize, String) {
     let d = tmpdir(&format!("ask-closed-{}", then.kind));
     let c = ctx(&d, CONFIG);
@@ -308,12 +312,10 @@ fn an_ask_closes_when_its_issue_merges_or_its_lane_goes() {
         assert_eq!(open, 0, "{kind} closes the ask");
         assert!(all.contains("q1 #36") && all.trim_end().ends_with(why), "{kind}: {all}");
     }
-    // Another issue's merge or clean leaves it open.
     assert_eq!(closed_by(ev("merged", 37, json!({}))).0, 1);
     assert_eq!(closed_by(ev("clean", 37, json!({}))).0, 1);
 }
 
-/// POST `body` to `/` (plus extra header lines); the raw response.
 fn post(s: &Server, body: &str, extra: &str) -> String {
     let req = format!(
         "POST / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n{extra}Content-Length: {}\r\n\r\n{body}",
@@ -334,10 +336,8 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
     let r = sh.on(&f);
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let cookie = pair(&s, &c, "", NOW);
-    let page = String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
-    let page = with_queue(&page, &s, "127.0.0.1:7777", NOW); // #269: the needs cards as the board draws them
-    let i = page.find("name=mtime value=").unwrap() + 17;
-    let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let st: serde_json::Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", NOW, "state")).unwrap();
+    let mtime = st["mtime"].as_str().unwrap();
     let long = "x".repeat(2001);
     for bad in ["%20", "a%0Ab", long.as_str()] {
         let res = post(
@@ -363,12 +363,10 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
         (Some("no, trim"), Some("owner"), Some("web"))
     );
     assert!(typed(&sh, "DECISION q1: no, trim"), "{:?}", sh.methods());
-    // #304: the board's answer kicks the ask's issue at once.
     assert!(f.called("sh -c nohup '/opt/drover/bin/drover' kick sendmeter 36 --why board --now"));
     assert_eq!(run(&c, &Fake::default(), &["asks"]).1, "", "the ask is closed");
 }
 
-/// #99: a routine ask, `Raise the src budget?` style without owner words, recommending option 2.
 fn routine(c: &drover::Ctx, q: &str) -> (i32, String) {
     let args = [
         "ask",
@@ -436,17 +434,15 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
     lane_spawn(&c, NOW - 3600);
     c.now = NOW - 40 * 60;
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
-    ask(&c); // q1, owner
+    ask(&c);
     c.now = NOW - 30 * 60;
-    assert_eq!(routine(&c, "Split the snapshot tests per pane?").0, 0); // q2
+    assert_eq!(routine(&c, "Split the snapshot tests per pane?").0, 0);
     let r = Fake::default();
     c.now = NOW - 60;
     let page = |c: &drover::Ctx| {
         let r = sh.on(&r);
         let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
-        let page =
-            String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)).into_owned();
-        with_queue(&page, &s, "127.0.0.1:7777", c.now) // #268: the Queue tab as the board draws it
+        api(&s, "127.0.0.1:7777", "", c.now, "needs") + &api(&s, "127.0.0.1:7777", "", c.now, "queue")
     };
     let p = page(&c);
     assert!(
@@ -471,9 +467,14 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
     c.now = NOW + 3 * 3600;
     check(&c, &r);
     assert_eq!(kinds(&c, "decision").len(), 1, "the owner ask still waits");
-    assert!(page(&c).contains("decided by default: keep"));
+    let decided = |c: &drover::Ctx| {
+        let r = sh.on(&r);
+        let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
+        let q: serde_json::Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", c.now, "queue")).unwrap();
+        q["fleets"][0]["rows"][0]["decided"].clone()
+    };
+    assert_eq!(decided(&c), "keep", "decided by default: keep");
 
-    // [change]: a new decision on the defaulted ask, prompted; after that it is the owner's and final.
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q2", "1"]);
     assert_eq!(code, 0, "{out}");
     let dec = kinds(&c, "decision");
@@ -482,7 +483,7 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
         (2, Some("split"), Some("owner"))
     );
     assert!(typed(&sh, "DECISION q2: split"), "{:?}", sh.sent(LANE));
-    assert!(!page(&c).contains("decided by default"));
+    assert_eq!(decided(&c), serde_json::Value::Null, "no longer decided by default");
     assert!(run(&c, &r, &["answer", "sendmeter", "q2", "2"])
         .1
         .contains("REFUSED ALREADY_ANSWERED"));
@@ -506,8 +507,6 @@ fn a_manual_answer_before_30_min_prevents_the_default() {
     assert_eq!(sh.sent(LANE).len(), 1, "{:?}", sh.sent(LANE));
 }
 
-/// #143: an answer is delivered once the agent leaves idle; else one retry, then a pushed `answer-undelivered`
-/// (#325) that drive's fast step types again.
 #[test]
 fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
     let d = tmpdir("ask-landed");
@@ -538,7 +537,6 @@ fn an_answer_the_agent_never_picks_up_is_retried_once_then_pushed() {
     assert!(kinds(&c, "answer-delivered").is_empty());
 }
 
-/// #283: 10 due `ask-waiting` alerts push 3 and one summary; an imported ask never pushes.
 #[test]
 fn ask_waiting_pushes_are_capped_per_pass() {
     let r = Fake::default();
@@ -583,7 +581,6 @@ fn ask_waiting_pushes_are_capped_per_pass() {
     );
 }
 
-/// #446 (synergy #2358): the lane asks during its startup, after `spawn-started` and before its `spawn` is logged.
 #[test]
 fn an_ask_made_during_its_lanes_startup_stays_open_answerable_and_alerts_once() {
     let d = tmpdir("ask-startup");

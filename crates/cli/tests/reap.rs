@@ -1,4 +1,3 @@
-//! #186: a closing lane's leftover processes (cwd inside its worktree) get TERM, 5 s, then KILL; nothing else does.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -24,8 +23,6 @@ fn setup(name: &str) -> (std::path::PathBuf, drover::Ctx, String, String, FakeSh
     (d, c, mine, sibling, sh)
 }
 
-/// `lsof -Fpcn` rows: two children in the lane's worktree, one in a sibling (prefix trap),
-/// one outside, and the board server (`drover serve`) started from inside it.
 fn lsof(mine: &str, sibling: &str) -> String {
     format!(
         "p101\ncnode\nfcwd\nn{mine}/web\np102\ncChrome Helper\nfcwd\nn{mine}\n\
@@ -80,8 +77,8 @@ fn closing_a_lane_terms_then_kills_only_its_worktree_pids() {
         .find(|e| e.kind == "lane-reaped")
         .unwrap();
     assert_eq!(ev.issue, Some(12));
-    assert_eq!(ev.data["killed"], 2);
-    assert_eq!(ev.data["names"], json!(["node", "Chrome Helper"]));
+    assert_eq!(ev.val("killed"), 2);
+    assert_eq!(*ev.val("names"), json!(["node", "Chrome Helper"]));
 }
 
 #[test]
@@ -119,7 +116,7 @@ fn a_dry_run_and_a_live_lane_signal_nothing() {
 }
 
 #[test]
-fn host_tab_shows_leftovers_and_reap_kills_them() {
+fn the_host_api_counts_leftovers_and_reap_kills_them() {
     use drover::serve::Server;
     const ADDR: &str = "127.0.0.1:7777";
     let (_d, c, mine, sibling, sh) = setup("reap-host");
@@ -130,19 +127,11 @@ fn host_tab_shows_leftovers_and_reap_kills_them() {
         .reply("kill", "");
     let on = sh.on(&r);
     let s = Server::new(&c, &on, Some(ADDR.into()));
-    let page = host_tab(&s, ADDR, 1_000_000);
-    assert!(page.contains("<span class=k>leftovers</span>"), "no leftovers row");
-    assert!(
-        page.contains("<b class=a>2</b> processes left in closed lanes <span class=mt>· 300 MB"),
-        "count + memory"
-    );
-    assert!(
-        page.contains("name=op value=reap") && page.contains("data-confirm="),
-        "a confirmed [reap]"
-    );
-    assert!(kills(&r).is_empty(), "rendering signals nothing");
-    let i = page.find("name=mtime value=").unwrap() + 17;
-    let mt: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let page = api(&s, ADDR, "", 1_000_000, "host");
+    let host: serde_json::Value = serde_json::from_str(&page).unwrap();
+    assert_eq!(host["leftovers"], json!({"n": 2, "mb": "300"}), "count + memory");
+    assert!(kills(&r).is_empty(), "reading signals nothing");
+    let mt = host["mtime"].as_str().unwrap();
     let body = format!("op=reap&fleet=&mtime={mt}");
     let unpaired = format!(
         "POST / HTTP/1.1\r\nHost: {ADDR}\r\nContent-Length: {}\r\n\r\n{body}",
@@ -205,7 +194,7 @@ fn check_reaps_closed_lanes_but_spares_active_and_live_ones() {
         .filter(|e| e.kind == "lane-reaped")
         .collect();
     assert_eq!(reaped.len(), 1);
-    assert_eq!(reaped[0].data["names"], json!(["Google Chrome Helper"]));
+    assert_eq!(*reaped[0].val("names"), json!(["Google Chrome Helper"]));
 }
 
 #[test]
@@ -261,11 +250,11 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
     );
     let ev = trimmed(&c);
     assert_eq!(ev.len(), 1);
-    assert_eq!(ev[0].data["agent"], "impl-12");
-    assert_eq!(ev[0].data["killed"], json!(["node", "node"]));
-    assert_eq!(ev[0].data["freed_mb"], 2148);
+    assert_eq!(ev[0].val("agent"), "impl-12");
+    assert_eq!(*ev[0].val("killed"), json!(["node", "node"]));
+    assert_eq!(ev[0].val("freed_mb"), 2148);
 
-    let young = c.now - 60; // done, but its last event is under `idle_reap_minutes` old
+    let young = c.now - 60;
     let c2 = drover::Ctx {
         now: young + 120,
         ..ctx(&tmpdir("trim-young"), CONFIG)
@@ -289,9 +278,8 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
     assert!(kills(&r).is_empty() && trimmed(&c2).is_empty(), "too soon to trim");
 }
 
-/// #223: the Host tab names the top memory users and their owner: a lane, the VM, or other.
 #[test]
-fn host_tab_shows_top_memory_users_with_their_owner() {
+fn the_host_api_names_top_memory_users_with_their_owner() {
     use drover::serve::Server;
     let (_d, c, mine, _, sh) = setup("top-host");
     sh.lane("impl-12", "done", &mine);
@@ -301,19 +289,25 @@ fn host_tab_shows_top_memory_users_with_their_owner() {
         .reply("top -l 1 -o mem", top);
     let on = sh.on(&r);
     let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
-    let page = host_tab(&s, "127.0.0.1:7777", 1_000_000);
-    assert!(page.contains("<span class=k>top memory</span>"), "no top memory row");
-    assert!(page.contains("16G VM (colima) · "), "the VM is classified");
+    let page = api(&s, "127.0.0.1:7777", "", 1_000_000, "host");
+    let host: serde_json::Value = serde_json::from_str(&page).unwrap();
+    let row = host["hosts"][0]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["k"] == "top memory")
+        .cloned();
+    let text = row.expect("no top memory row")["text"].as_str().unwrap().to_string();
+    assert!(text.contains("16G VM (colima) · "), "the VM is classified: {text}");
     assert!(
-        page.contains("2210M node (lane impl-12)"),
-        "a lane's process names the lane"
+        text.contains("2210M node (lane impl-12)"),
+        "a lane's process names the lane: {text}"
     );
-    assert!(page.contains("703M python3.14 (other)"));
+    assert!(text.contains("703M python3.14 (other)"), "{text}");
 }
 
-/// #248: the Host tab sums what the Claude lanes hold, working and done apart.
 #[test]
-fn host_tab_sums_claude_lane_memory_by_state() {
+fn the_host_api_sums_claude_lane_memory_by_state() {
     use drover::serve::Server;
     let (_d, c, mine, sibling, sh) = setup("claude-host");
     sh.lane("impl-12", "done", &mine);
@@ -326,16 +320,22 @@ fn host_tab_sums_claude_lane_memory_by_state() {
         .reply("ps -axo pid=,rss=", "  201 2097152\n  202 1048576\n");
     let on = sh.on(&r);
     let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
-    let page = host_tab(&s, "127.0.0.1:7777", 1_000_000);
-    assert!(page.contains("<span class=k>claude</span>"), "no claude row");
-    assert!(
-        page.contains("<b>3.0 GB</b> <span class=mt>(2 lanes: working 1 / done 1)</span>"),
+    let page = api(&s, "127.0.0.1:7777", "", 1_000_000, "host");
+    let host: serde_json::Value = serde_json::from_str(&page).unwrap();
+    let row = host["hosts"][0]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["k"] == "claude")
+        .cloned();
+    let row = row.expect("no claude row");
+    assert_eq!(
+        (&row["b"], &row["notes"]),
+        (&json!("3.0 GB"), &json!(["(2 lanes: working 1 / done 1)"])),
         "the sum by state"
     );
 }
 
-/// #679: a shed-acp lane `done` between turns keeps its agent's tree (adapter, `node`, `claude`, their background job);
-/// while its last turn is `working` nothing is trimmed; after a `turn done` only what is not the agent's goes.
 #[test]
 fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
     let d = tmpdir("trim-acp");
@@ -352,8 +352,6 @@ fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
     );
     let why = "full cargo test running in background";
     ev("turn-end", json!({"state": "working", "why": why, "role": "impl"}));
-    // shed server 199 (outside) → sh 200 (the terminal's pid) → shed acp-bridge 201 → node 202 → claude 203 → zsh 204
-    // → cargo 205; a stray shell 300 (parent: launchd) → zsh 301 → vite 302, not the agent's.
     let rows = format!(
         "p200\ncsh\nfcwd\nn{wt}\np201\ncshed\nfcwd\nn{wt}\np202\ncnode\nfcwd\nn{wt}\np203\ncclaude\nfcwd\nn{wt}\n\
          p204\nczsh\nfcwd\nn{wt}\np205\nccargo\nfcwd\nn{wt}\np300\nczsh\nfcwd\nn{wt}\np301\nczsh\nfcwd\nn{wt}\n\
@@ -398,12 +396,12 @@ fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
     );
     let ev = trimmed(&c);
     assert_eq!(ev.len(), 1);
-    assert_eq!(ev[0].data["killed"], json!(["vite"]), "no lane-trimmed names the agent");
+    assert_eq!(*ev[0].val("killed"), json!(["vite"]), "no lane-trimmed names the agent");
 }
 
 #[test]
-fn check_alerts_no_stall_for_an_acp_lane_between_turns() {
-    for (turn, stalls) in [("working", false), ("done", true)] {
+fn check_alerts_no_stall_for_a_lane_that_reported_its_turn_end() {
+    for (turn, stalls) in [("working", false), ("done", false)] {
         let c = ctx(&tmpdir(&format!("stall-acp-{turn}")), CONFIG);
         let sh = FakeShed::new();
         sh.attach(&c);

@@ -1,4 +1,3 @@
-//! AC2 (set round-trip, byte-identical) and AC7 (notifier).
 mod common;
 use common::*;
 use drover::events::read;

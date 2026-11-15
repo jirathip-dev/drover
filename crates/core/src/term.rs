@@ -1,0 +1,445 @@
+use crate::runner::{argv, Out, Runner};
+use crate::shed;
+use anyhow::{bail, Context, Result};
+use serde_json::{json, Value};
+use shed_proto::{KeysParams, Method, ReadParams, RunParams, SendParams, Target, WaitParams};
+use std::path::PathBuf;
+
+/// #941: an ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`) and the provider's session options (`--meta`).
+#[derive(Clone, Debug, Default)]
+pub struct Acp {
+    pub cmd: Vec<String>,
+    pub mcp: Option<PathBuf>,
+    pub meta: Option<Value>,
+}
+
+/// #298: shed's lanes: terminals named as their agents, labelled `fleet`, `issue`, `role` and `harness`.
+pub struct Shed(pub shed::Shed);
+
+impl Shed {
+    fn call(&self, r: &dyn Runner, m: Method, params: impl serde::Serialize) -> Result<Value> {
+        shed::call(r, &self.0.wire, m, json!(params))
+    }
+    /// `run` params for lane `name` in `cwd`: a kept terminal of the user's login shell, which `typed` lines then drive.
+    pub fn run_params(name: &str, labels: &[(&str, String)], cwd: &str) -> RunParams {
+        let labels = labels.iter().map(|(k, v)| ((*k).to_string(), v.clone())).collect();
+        let cmd = argv(&["sh", "-c", "exec \"${SHELL:-sh}\" -l"]);
+        RunParams {
+            name: Some(name.into()),
+            labels,
+            cwd: cwd.into(),
+            keep: true,
+            idle_after: None,
+            cmd,
+            acp: None,
+            resume: None,
+            mcp_servers: vec![],
+            no_hibernate: false,
+            policy: None,
+            meta: None,
+            machine: None,
+            parent: None,
+            rows: None,
+            cols: None,
+        }
+    }
+    /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), #565: its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
+    pub fn start(
+        &self,
+        ctx: &crate::Ctx,
+        r: &dyn Runner,
+        name: &str,
+        labels: &[(&str, String)],
+        cwd: &str,
+        acp: &Acp,
+    ) -> Result<()> {
+        if crate::session::get(r, name).is_ok_and(|s| s.is_some_and(|s| !s.running())) {
+            crate::session::transcript::archive(r, ctx, name)?;
+            self.rm(r, name)?;
+        }
+        if self.0.acp.is_none() {
+            return self.call(r, Method::Run, Self::run_params(name, labels, cwd)).map(drop);
+        }
+        let a = self.acp_argv(name, labels, cwd, acp);
+        shed::cli(r, &a.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
+    }
+    /// #899: remove session `name`.
+    pub fn rm(&self, r: &dyn Runner, name: &str) -> Result<()> {
+        self.call(r, Method::Rm, Target { name: name.into() }).map(drop)
+    }
+    /// #938: a throwaway terminal running the breaker's canary shows its output: shed starts sessions again.
+    pub fn canary(&self, r: &dyn Runner) -> bool {
+        let name = "drover-canary";
+        let _ = self.rm(r, name);
+        let mut p = Self::run_params(name, &[], "/");
+        p.cmd = argv(&["sh", "-c", crate::breaker::CANARY]);
+        let wait = WaitParams {
+            children: None,
+            kind: None,
+            name: name.into(),
+            until: vec![],
+            output: Some(crate::breaker::CANARY_OUT.into()),
+            timeout: Some(20.0),
+        };
+        let ok = self.call(r, Method::Run, p).is_ok()
+            && self
+                .call(r, Method::Wait, wait)
+                .is_ok_and(|v| v["outcome"] == "matched");
+        let _ = self.rm(r, name);
+        ok
+    }
+    /// The `shed run --acp` words that start ACP lane `name`.
+    pub fn acp_argv(&self, name: &str, labels: &[(&str, String)], cwd: &str, acp: &Acp) -> Vec<String> {
+        let id = self.0.acp.as_deref().unwrap_or_default();
+        let mut a = argv(&[
+            "run",
+            "--acp",
+            id,
+            "--policy",
+            &self.0.policy,
+            "--name",
+            name,
+            "--cwd",
+            cwd,
+        ]);
+        a.extend(
+            acp.mcp
+                .iter()
+                .flat_map(|f| ["--mcp".into(), f.to_string_lossy().into_owned()]),
+        );
+        a.extend(acp.meta.iter().flat_map(|m| ["--meta".into(), m.to_string()]));
+        a.extend(labels.iter().flat_map(|(k, v)| ["--label".into(), format!("{k}={v}")]));
+        a.extend(
+            (!acp.cmd.is_empty())
+                .then(|| "--".to_string())
+                .into_iter()
+                .chain(acp.cmd.iter().cloned()),
+        );
+        a
+    }
+    /// The ACP lane's kick: once its session is ready, the prompt (framed by shed's CLI), confirmed by its state.
+    pub fn kick_acp(&self, r: &dyn Runner, name: &str, text: &str) -> Result<bool> {
+        let ready = WaitParams {
+            children: None,
+            kind: None,
+            name: name.into(),
+            until: vec![],
+            output: Some("ACP session ready".into()),
+            timeout: Some(60.0),
+        };
+        if self.call(r, Method::Wait, ready)?["outcome"] != "matched" {
+            return Ok(false);
+        }
+        shed::cli(r, &["send", name, text])?;
+        let up = WaitParams {
+            children: None,
+            kind: None,
+            name: name.into(),
+            until: argv(&["working", "blocked", "done"]),
+            output: None,
+            timeout: Some(20.0),
+        };
+        Ok(self.call(r, Method::Wait, up)?["outcome"] == "matched")
+    }
+}
+
+fn request(a: &[String]) -> Option<(Method, Value)> {
+    let w: Vec<&str> = a.iter().map(String::as_str).collect();
+    let flag = |f: &str| w.windows(2).find(|p| p[0] == f).map(|p| p[1]);
+    let secs = flag("--timeout")
+        .and_then(|ms| ms.parse::<f64>().ok())
+        .map(|ms| ms / 1000.0);
+    Some(match w[..] {
+        ["pane", "read", t, ..] => {
+            let lines = flag("--lines").and_then(|n| n.parse().ok());
+            (
+                Method::Read,
+                json!(ReadParams {
+                    name: t.into(),
+                    lines,
+                    history: lines.is_some(),
+                    events: false,
+                    before: None,
+                    n: None,
+                }),
+            )
+        }
+        ["pane", "send-keys", t, k] => {
+            let k = if k == "Escape" { "esc" } else { k };
+            (
+                Method::Keys,
+                json!(KeysParams {
+                    name: t.into(),
+                    keys: vec![k.into()]
+                }),
+            )
+        }
+        ["agent", "prompt", t, text] | ["pane", "send-text", t, text] => (
+            Method::Send,
+            json!(SendParams {
+                name: t.into(),
+                text: text.into(),
+                ..Default::default()
+            }),
+        ),
+        ["pane", "run", t, ref line @ ..] => (
+            Method::Send,
+            json!(SendParams {
+                name: t.into(),
+                text: line.join(" ") + "\r",
+                ..Default::default()
+            }),
+        ),
+        ["agent", "wait", t, ..] => {
+            let until = w
+                .windows(2)
+                .filter(|p| p[0] == "--until")
+                .map(|p| p[1].to_string())
+                .collect();
+            (
+                Method::Wait,
+                json!(WaitParams {
+                    children: None,
+                    kind: None,
+                    name: t.into(),
+                    until,
+                    output: None,
+                    timeout: secs
+                }),
+            )
+        }
+        ["pane", "wait-output", t, ..] => {
+            let output = flag("--match").map(String::from);
+            (
+                Method::Wait,
+                json!(WaitParams {
+                    children: None,
+                    kind: None,
+                    name: t.into(),
+                    until: vec![],
+                    output,
+                    timeout: secs
+                }),
+            )
+        }
+        ["pane", "close", t] => (Method::Kill, json!(Target { name: t.into() })),
+        _ => return None,
+    })
+}
+
+fn failed(code: &str, message: &str) -> Out {
+    let stderr = json!({"error": {"code": code, "message": message}}).to_string();
+    Out {
+        code: 1,
+        stdout: String::new(),
+        stderr,
+    }
+}
+
+impl Shed {
+    /// Run one pane word on shed; the caller reads the exit code.
+    pub fn exec(&self, r: &dyn Runner, a: &[String]) -> Result<Out> {
+        let Some((m, params)) = request(a) else {
+            return Ok(failed("unsupported", &format!("shed runs no `{}`", a.join(" "))));
+        };
+        let name = params["name"].as_str().unwrap_or_default().to_string();
+        let acp = matches!(m, Method::Send | Method::Keys)
+            && crate::session::get(r, &name).is_ok_and(|s| s.is_some_and(|s| s.acp));
+        let got = match m {
+            Method::Send if acp => {
+                shed::cli(r, &["send", &name, params["text"].as_str().unwrap_or_default()]).map(|_| json!({}))
+            }
+            Method::Keys
+                if acp
+                    && params["keys"][0]
+                        .as_str()
+                        .is_some_and(|k| k.eq_ignore_ascii_case("enter")) =>
+            {
+                Ok(json!({}))
+            }
+            Method::Kill => self.call(r, m, &params).and_then(|_| self.call(r, Method::Rm, &params)),
+            _ => self.call(r, m, &params),
+        };
+        let v = match got {
+            Ok(v) => v,
+            Err(e) if format!("{e:#}").starts_with("NO_SUCH_TERMINAL") => {
+                return Ok(failed("pane_not_found", &format!("{e:#}")))
+            }
+            Err(e) => return Ok(failed("shed", &format!("{e:#}"))),
+        };
+        let stdout = match m {
+            Method::Read => v["text"].as_str().unwrap_or_default().to_string(),
+            Method::Wait if v["outcome"] != "matched" => {
+                let code = if v["outcome"] == "timeout" {
+                    "timeout"
+                } else {
+                    "agent_exited"
+                };
+                return Ok(failed(code, &format!("shed wait {name}: {}", v["outcome"])));
+            }
+            _ => v.to_string(),
+        };
+        Ok(Out {
+            code: 0,
+            stdout,
+            stderr: String::new(),
+        })
+    }
+}
+
+/// #298: a harness launch (`start_cmd`, a `pane run` line) as the line a lane's shell runs: `exec <line>`.
+pub fn typed(pane: &str, start: &[String]) -> Vec<String> {
+    run_argv(pane, &["exec", &start.get(3..).unwrap_or_default().join(" ")])
+}
+
+/// #298: pane word `a` as the shed request a plan shows (`shed <method> <params>`).
+pub fn shed_line(a: &[String]) -> Vec<String> {
+    request(a).map_or_else(|| a.to_vec(), |(m, v)| argv(&["shed", m.name(), &v.to_string()]))
+}
+
+fn shed(r: &dyn Runner) -> Result<Shed> {
+    r.shed()
+        .map(Shed)
+        .context("no shed runtime: set `[runtime] kind = \"shed-acp\"` (docs/runtimes.md)")
+}
+
+/// Run a pane word built here (`*_argv`) on shed; the caller reads the exit code.
+pub fn exec(r: &dyn Runner, a: &[String]) -> Result<Out> {
+    shed(r)?.exec(r, a)
+}
+
+/// `exec`, failing on a non-zero exit; returns stdout.
+pub fn ok(r: &dyn Runner, a: &[String]) -> Result<String> {
+    let o = exec(r, a)?;
+    if o.code != 0 {
+        bail!("{} failed ({}): {}", a.join(" "), o.code, o.stderr.trim());
+    }
+    Ok(o.stdout)
+}
+
+pub fn read_argv(pane: &str) -> Vec<String> {
+    argv(&["pane", "read", pane, "--source", "visible"])
+}
+
+pub fn keys_argv(pane: &str, key: &str) -> Vec<String> {
+    argv(&["pane", "send-keys", pane, key])
+}
+
+/// Send one key (`Enter`, `Escape`, a menu digit) to the pane.
+pub fn keys(r: &dyn Runner, pane: &str, key: &str) -> Result<String> {
+    ok(r, &keys_argv(pane, key))
+}
+
+pub fn prompt_argv(agent: &str, text: &str) -> Vec<String> {
+    argv(&["agent", "prompt", agent, text])
+}
+
+/// Type `text` into the agent's prompt (no Enter).
+pub fn prompt(r: &dyn Runner, agent: &str, text: &str) -> Result<String> {
+    ok(r, &prompt_argv(agent, text))
+}
+
+pub fn send_text_argv(pane: &str, text: &str) -> Vec<String> {
+    argv(&["pane", "send-text", pane, text])
+}
+
+/// The page's reply: the text (dsh: `pane send-text`, else `agent prompt`), then Enter.
+pub fn reply(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> Result<()> {
+    let first = if dsh {
+        send_text_argv(pane, text)
+    } else {
+        prompt_argv(agent, text)
+    };
+    for a in [first, keys_argv(pane, "Enter")] {
+        let o = exec(r, &a)?;
+        if o.code != 0 {
+            bail!("{} {}: {}", a[0], a[1], o.stderr.trim());
+        }
+    }
+    Ok(())
+}
+
+/// #908: Err `HOST_BUSY` (the prompt held to a later pass) while shed has `agent` asleep and the host has no room to wake it.
+pub fn awake(r: &dyn Runner, agent: &str) -> Result<()> {
+    let asleep = crate::session::get(r, agent).ok().flatten().and_then(|s| s.status());
+    if asleep != Some(crate::session::Status::Asleep) {
+        return Ok(());
+    }
+    let (l, h) = (crate::config::limits(), crate::host::sample(r));
+    let low = (h.free_mem_gb.filter(|g| *g < l.min_free_mem_gb)).map(|g| format!("only {g:.1} GB of memory free"));
+    match low.or_else(|| crate::host::admit(&h, &l).err()) {
+        Some(why) => bail!("REFUSED HOST_BUSY: {agent} is asleep and waking it starts its agent: {why}; held"),
+        None => Ok(()),
+    }
+}
+
+/// #908: `reply` once `awake` lets drover's prompt through.
+pub fn tell(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> Result<()> {
+    awake(r, agent)?;
+    reply(r, dsh, agent, pane, text)
+}
+
+/// #143: whether a prompt the caller just entered moved the agent off idle within 20 s, typing it once more if not.
+pub fn landed(r: &dyn Runner, agent: &str, pane: &str, text: &str) -> bool {
+    let up = || exec(r, &wait_working_argv(agent, "20000")).is_ok_and(|o| o.code == 0);
+    up() || (reply(r, false, agent, pane, text).is_ok() && up())
+}
+
+/// Close the session, its log archived first (`session::transcript::archive`); one already gone (#249) is closed.
+pub fn close(ctx: &crate::Ctx, r: &dyn Runner, pane: &str) -> Result<String> {
+    let _ = crate::session::transcript::archive(r, ctx, pane);
+    let o = exec(r, &argv(&["pane", "close", pane]))?;
+    if o.code != 0 && ![&o.stderr, &o.stdout].iter().any(|s| s.contains("pane_not_found")) {
+        bail!("pane close {pane} failed ({}): {}", o.code, o.stderr.trim());
+    }
+    Ok(o.stdout)
+}
+
+/// A `{"error": {"code": <code>}}` answer (on stderr or stdout), e.g. `timeout`.
+pub fn failed_with(o: &Out, code: &str) -> bool {
+    [&o.stderr, &o.stdout]
+        .iter()
+        .any(|s| serde_json::from_str::<Value>(s.trim()).is_ok_and(|v| v["error"]["code"] == code))
+}
+
+/// #477: a failed call's `error.message` (the JSON envelope), else its stderr.
+pub fn message(o: &Out) -> String {
+    let m = [&o.stderr, &o.stdout].iter().find_map(|s| {
+        let v: Value = serde_json::from_str(s.trim()).ok()?;
+        Some(v["error"]["message"].as_str()?.to_string())
+    });
+    m.unwrap_or_else(|| o.stderr.trim().into())
+}
+
+/// #359: how long a lane's startup is waited for.
+pub const CONFIRM_SECS: u64 = 120;
+
+/// `pane run <pane> <words…>`: type a line into the pane's shell.
+pub fn run_argv(pane: &str, words: &[&str]) -> Vec<String> {
+    argv(&[&["pane", "run", pane][..], words].concat())
+}
+
+/// The harness `kind` launched in `pane` with `args`, as its shell line.
+pub fn start_argv(kind: &str, pane: &str, args: &[String]) -> Vec<String> {
+    run_argv(pane, &[&crate::hosts::quote(kind, args)])
+}
+
+/// `agent wait` until the kick shows as working or blocked.
+pub fn wait_working_argv(agent: &str, ms: &str) -> Vec<String> {
+    let a = format!("agent wait {agent} --until working --until blocked --timeout {ms}");
+    argv(&a.split(' ').collect::<Vec<_>>())
+}
+
+pub fn wait_output_argv(pane: &str, pattern: &str, ms: &str) -> Vec<String> {
+    argv(&[
+        "pane",
+        "wait-output",
+        pane,
+        "--match",
+        pattern,
+        "--source",
+        "visible",
+        "--timeout",
+        ms,
+    ])
+}

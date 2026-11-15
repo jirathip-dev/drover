@@ -1,14 +1,9 @@
-//! #731: `scripts/verify-browser.mjs`, the verify lane's browser evidence, in headless Chrome (`CHROME`, the ui job's
-//! chrome-headless-shell; skipped without it) against a small fixture server: a console error or a 500 is a `FAIL`
-//! line and exit 1, unless the recipe's `## Known noise` names it; a shot over the threshold from its approved PNG
-//! fails with its diff image.
 mod common;
 use common::*;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Command;
 
-/// Pages: `/error` logs a console error, `/fetch500` fetches `/api` (a 500), `/red` and `/blue` are plain colours.
 fn serve() -> String {
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
@@ -113,7 +108,6 @@ fn a_shot_over_the_threshold_from_its_approved_png_fails_with_its_diff_image() {
         "{out}"
     );
     assert!(std::fs::read(&diff).unwrap().starts_with(b"\x89PNG"));
-    // The same two shots under a 100 % threshold pass, through the standalone `diff` (an iOS sim-task shot's path).
     let (shot, ok) = (d.join("red/page-390.png"), approved.join("page-390.png"));
     let o = Command::new("node")
         .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/verify-browser.mjs"))

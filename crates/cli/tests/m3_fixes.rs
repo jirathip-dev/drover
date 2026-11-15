@@ -1,9 +1,7 @@
-//! #17 6(a): a merged issue never leaves `merged`; spawn/adopt on it is refused.
-//! #17 6(b): notifiers run without the lane's HERMES_* environment.
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
-use serde_json::json;
+use serde_json::{json, Value};
 use std::process::Command;
 
 fn merged_13(c: &drover::Ctx) {
@@ -27,7 +25,6 @@ fn merged_issue_never_leaves_merged() {
     let d = tmpdir("sticky-merged");
     let c = ctx(&d, CONFIG);
     merged_13(&c);
-    // What the #13 self-test logged: an adopt `spawn` after the merge.
     let late = json!({"role": "impl", "agent": "sendmeter-impl-13", "branch": "issue-13", "adopted": true});
     append(&c.state, &Event::new(50, "sendmeter", Some(13), "spawn", late)).unwrap();
     append(
@@ -103,8 +100,6 @@ fn notifier_runs_without_lane_hermes_env() {
     );
 }
 
-/// #16: `clean` reaches a worktree whose only record is an adopted lane, and the
-/// pane of an adopt logged after the merge (pre-#17 log) without a state flip.
 #[test]
 fn clean_reaches_adopted_lanes_of_merged_issues() {
     let d = tmpdir("clean-adopted");
@@ -115,12 +110,11 @@ fn clean_reaches_adopted_lanes_of_merged_issues() {
         p.to_string_lossy().into_owned()
     };
     let (w13, w14) = (wt("issue-13"), wt("issue-14"));
-    let lane = |n: u64, ws: &str, w: &str| {
+    let lane = |n: u64, pane: &str, w: &str| {
         json!({"role": "impl", "agent": format!("sendmeter-impl-{n}"), "branch": format!("issue-{n}"),
-            "worktree": w, "pane": format!("{ws}:p1"), "workspace": ws, "adopted": true})
+            "worktree": w, "pane": pane, "adopted": true})
     };
     let e = |ts, n, kind: &str, d| append(&c.state, &Event::new(ts, "sendmeter", Some(n), kind, d)).unwrap();
-    // #13: spawn, review PASS, merged, then a late adopt in a new pane.
     let mut first = lane(13, "wOld", &w13);
     first["adopted"] = json!(false);
     e(10, 13, "spawn", first);
@@ -132,7 +126,6 @@ fn clean_reaches_adopted_lanes_of_merged_issues() {
         json!({"pr": "15", "merge_sha": "08c9338", "into": "staging"}),
     );
     e(40, 13, "spawn", lane(13, "w644", &w13));
-    // #14: the adopt is the lane's only record.
     e(10, 14, "spawn", lane(14, "w7", &w14));
     e(20, 14, "verdict", json!({"verdict": "PASS", "sha": "3".repeat(40)}));
     e(
@@ -145,22 +138,26 @@ fn clean_reaches_adopted_lanes_of_merged_issues() {
     for n in [13, 14] {
         assert_eq!(states[&("sendmeter".to_string(), n)].state, "merged", "#{n}");
     }
+    let sh = FakeShed::attached(&c);
     let r = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
         .reply(&format!("git -C {w13} rev-list"), "0\n")
         .reply(&format!("git -C {w14} rev-list"), "0\n")
-        .reply("git -C", "")
-        .reply("herdr", "{}");
+        .reply("git -C", "");
     let (code, out) = run(&c, &r, &["clean", "--yes"]);
     assert_eq!(code, 0, "{out}");
     assert!(
         out.contains(&format!("removed {w13}")) && out.contains(&format!("removed {w14}")),
         "{out}"
     );
+    let killed: Vec<Value> = sh.all("kill").into_iter().map(|p| p["name"].clone()).collect();
     assert!(
-        r.called("herdr worktree remove --workspace w644") && r.called("herdr pane close w644:p1"),
-        "newest (adopted) pane wins"
+        killed.contains(&json!("w644")),
+        "newest (adopted) pane wins: {killed:?}"
     );
-    assert!(r.called("herdr worktree remove --workspace w7") && r.called("herdr pane close w7:p1"));
-    assert!(!r.called("--workspace wOld"));
+    assert!(
+        killed.contains(&json!("w7")) && !killed.contains(&json!("wOld")),
+        "{killed:?}"
+    );
+    let removed = |w: &str| r.called(&format!("git -C /tmp/does-not-matter/sendmeter worktree remove {w}"));
+    assert!(removed(&w13) && removed(&w14), "{:?}", r.calls.borrow());
 }

@@ -18,7 +18,7 @@ A move is copy, regenerate, then `drover doctor` until every line is ✓. Paths 
 | Config | `~/.config/drover/fleet.toml` | fleets, roles, notifiers, `[serve]` |
 | State database (#344) | `~/.local/state/drover/state.db` (copy it with drover stopped, or `sqlite3 state.db .backup`) | the event log (queue, lanes, verdicts, asks), paired phones (hashes only), push subscriptions |
 | VAPID key | `~/.local/state/drover/webpush/vapid.key` | keep it and paired phones keep getting push |
-| Secrets (#441) | the main host's OS store, `drover/<fleet>/<NAME>` | not a file: on the new host re-save secrets by request; accounts sign in with their own login (#683) |
+| Secrets (#441) | the main host's OS store, `drover/<fleet>/<NAME>` | not a file: on the new host re-save secrets by request; lanes sign in with the host's own login (#923) |
 
 Copy the secret files with their mode (`scp -p` or `rsync -a`), never through chat or a repo, then
 `chmod 600` `vapid.key`, `subs.json` and `devices.json` on the new host.
@@ -27,13 +27,13 @@ Copy the secret files with their mode (`scp -p` or `rsync -a`), never through ch
 
 - `~/.config/drover/claude/` (the per-role Claude profiles) and the Hermes profiles' hooks:
   `drover profiles sync`.
-- `gh auth login`, `herdr`, and each fleet's `local` checkout (`git clone https://github.com/<repo>.git <local>`).
+- `gh auth login`, shed (and its job), and each fleet's `local` checkout (`git clone https://github.com/<repo>.git <local>`).
 - Then `drover setup` ([setup.md](setup.md#4-watchdog)): the tick and serve jobs, `tailscale serve`
   (with `[serve] tailscale_https_port` set) and the profiles, then doctor.
 
 ## Don't copy
 
-- Worktrees (`~/.herdr/worktrees/`): their branches are on GitHub; new lanes make fresh ones.
+- Worktrees (each workspace root): their branches are on GitHub; new lanes make fresh ones.
 - Lock files, `check.at` / `drive.at` and `tick.log`: the new host writes its own.
 
 ## New hostname

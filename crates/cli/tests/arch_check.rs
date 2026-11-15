@@ -1,6 +1,3 @@
-//! #734: `drover arch-check` on fixture repos: a cross-layer `use` or import fails with file:line, a banned call
-//! outside its exception fails, and a file or function over its size limit fails unless the baseline lists it at
-//! that size, so an untouched offender passes and a grown one fails.
 mod common;
 use common::tmpdir;
 use std::path::Path;
@@ -243,7 +240,7 @@ fn only_an_added_comment_fails_but_safety_over_unsafe_and_one_doc_line_on_a_pub_
     assert_eq!(code, 1, "{out}");
     let flagged: Vec<&str> = out
         .lines()
-        .filter_map(|l| l.split(": a new comment").nth(1).and(l.split(": a").next()))
+        .filter_map(|l| l.split(": a comment").nth(1).and(l.split(": a").next()))
         .collect();
     assert_eq!(
         flagged,
@@ -267,6 +264,28 @@ fn only_an_added_comment_fails_but_safety_over_unsafe_and_one_doc_line_on_a_pub_
         (0, true),
         "no --base, nothing judged: {out}"
     );
+}
+
+#[test]
+fn strict_fails_an_old_plain_comment_and_a_doc_on_a_private_item_but_not_the_allowed_ones() {
+    let ok = "// SAFETY: the pointer is valid\nunsafe fn s() {}\n// TODO(#12)\nfn t() {}\n/// Shown.\npub fn p() {}\n";
+    let conf = "[comments]\npolicy = \"strict\"\nexcept = [\"gen/**\"]\n";
+    let d = committed(
+        "arch-strict",
+        conf,
+        &[("src/lib.rs", ok), ("gen/x.rs", "// generated\n")],
+    );
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    let bad = "// plain\nfn a() {}\n/// Private.\nfn b() {}\n// TODO: no issue\nfn c() {}\n";
+    std::fs::write(d.join("src/bad.rs"), bad).unwrap();
+    let (code, out) = arch(&d, &[]);
+    assert_eq!(code, 1, "{out}");
+    let flagged: Vec<&str> = out
+        .lines()
+        .filter_map(|l| l.split(": a comment").nth(1).and(l.split(": a").next()))
+        .collect();
+    assert_eq!(flagged, ["src/bad.rs:1", "src/bad.rs:3", "src/bad.rs:5"], "{out}");
 }
 
 const DOCS: &str = "[docs]\npaths = [\"docs/**/*.md\", \"README.md\"]\nwatch = [\"src/cli.rs\"]\ncli = true\n";
@@ -533,14 +552,9 @@ fn a_commit_building_a_promise_phrase_outside_the_promise_module_fails_this_repo
 }
 
 #[test]
-fn the_repos_provider_ban_fails_a_new_web_file_and_passes_the_two_frozen_board_files() {
+fn the_repos_provider_ban_fails_a_web_file_naming_a_provider() {
     let conf = include_str!("../../../.drover/arch.toml");
-    let board = "const C = '<b>Anthropic</b>' + ['claude', 'codex'].join();\n";
-    let d = committed(
-        "arch-ban-web",
-        conf,
-        &[("web/src/system.ts", board), ("web/src/host.ts", board)],
-    );
+    let d = committed("arch-ban-web", conf, &[("web/src/main.ts", "export const v = 'x';\n")]);
     let (code, out) = arch(&d, &[]);
     assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
     std::fs::write(

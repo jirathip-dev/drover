@@ -1,8 +1,3 @@
-//! #713: the 11-08 outage as a test. The login Keychain stops answering: `security` and `codesign` never return.
-//! `doctor`, `serve` (startup through its first page render), `tick` and `check` each still finish within 10 s of
-//! wall-clock time, and serve still serves the board. #707 retired the store and the signing step, so `lsof`, which
-//! all four still call (doctor's port probe, the host's cwd scan) and which hangs the same way on a stuck mount,
-//! stands in for the next tool that stops answering.
 mod common;
 use common::*;
 use drover::runner::{Out, Runner};
@@ -10,7 +5,6 @@ use serde_json::json;
 use std::io::{Read, Write};
 use std::time::Duration;
 
-/// The tools that hang with the Keychain, and `lsof`, the one of the next kind that all four commands call.
 const WEDGED: [&str; 3] = ["security", "codesign", "lsof"];
 
 fn hang() -> ! {
@@ -19,8 +13,6 @@ fn hang() -> ! {
     }
 }
 
-/// `.0`, except that a `WEDGED` program never answers. As `Real`, a call is cut at its limit (`run_for`'s, else
-/// `runner::limit`'s): exit 124 at once (the limit is virtual time); a call with no limit blocks for good.
 struct Wedged(Fake);
 
 impl Wedged {
@@ -60,7 +52,6 @@ impl Runner for Wedged {
     }
 }
 
-/// A Claude fleet with a `secret:` env and account A's usage meter, and #12's
 fn setup(name: &str) -> (drover::Ctx, FakeShed) {
     let d = tmpdir(name);
     let cfg = CONFIG.replace(
@@ -96,7 +87,6 @@ fn wedged() -> Wedged {
     )
 }
 
-/// `f` on its own thread; its result, or a failure once 10 s of wall-clock time have passed.
 fn in_10_s<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static) -> T {
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || tx.send(f()));
@@ -107,7 +97,6 @@ fn in_10_s<T: Send + 'static>(what: &str, f: impl FnOnce() -> T + Send + 'static
     }
 }
 
-/// `drover <args>` against the wedged Keychain, within 10 s: (exit code, output).
 fn cli(name: &str, args: &'static [&'static str]) -> (i32, String) {
     let (c, sh) = setup(name);
     in_10_s(&format!("drover {}", args.join(" ")), move || {

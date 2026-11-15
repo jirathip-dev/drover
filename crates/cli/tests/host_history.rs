@@ -1,5 +1,3 @@
-//! #234: the Host tab's 24 h history: a row per host (the fast step for this host, the 5-minute survey for a remote
-//! one), rows past 24 h dropped, the size bound, worst-per-bucket downsampling, and the cards and chart series served.
 mod common;
 use common::*;
 use drover::config::Config;
@@ -59,7 +57,6 @@ fn rows_are_appended_per_host_per_step() {
         f: &r,
         hosts: vec![("bazzite", &bazzite)],
     };
-    // The fast step: this host, sampled now.
     let (code, out) = run(&c, &over, &["drive", "--fast"]);
     assert_eq!(code, 0, "{out}");
     survey(&c, &cfg, &sh.on(&over), false);
@@ -150,7 +147,7 @@ fn downsampling_keeps_the_worst_per_bucket() {
 }
 
 #[test]
-fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
+fn the_host_api_has_a_card_per_host_with_its_24h_series() {
     let (c, sh) = two_hosts("history-cards");
     let st = c.state.parent().unwrap();
     let seen = json!({"bazzite": {"tags": ["os:linux"], "seen": NOW - 1980, "up": false, "load": 0.4, "disk": 300.0, "disk_total": 476.0}});
@@ -159,50 +156,39 @@ fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
     let r = fake();
     let w = sh.on(&r);
     let s = Server::new(&c, &w, Some(ADDR.into()));
-    let get = |q: &str| {
-        String::from_utf8_lossy(&s.respond(&format!("GET {q} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned()
+    let host: serde_json::Value = serde_json::from_str(&api(&s, ADDR, "", NOW, "host")).unwrap();
+    let hosts = host["hosts"].as_array().unwrap();
+    let names: Vec<&str> = hosts.iter().map(|h| h["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["mini", "bazzite"], "main first");
+    assert_eq!((&hosts[0]["main"], &hosts[1]["main"]), (&json!(true), &json!(false)));
+    let key = |h: &serde_json::Value, k: &str| {
+        h["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["key"] == k)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {k} on {h}"))
     };
-    let page = host_tab(&s, ADDR, NOW);
-    let gs: Vec<&str> = page
-        .split("<span class=gn>")
-        .skip(1)
-        .map(|g| g.split('<').next().unwrap())
-        .collect();
-    assert_eq!(gs[..2], ["HOSTS", "FLEET DISK"], "{gs:?}");
-    assert!(!page.contains(">MACHINE<"));
-    let (mini, bazzite) = (
-        page.find("data-h=\"mini\"").unwrap(),
-        page.find("data-h=\"bazzite\"").unwrap(),
-    );
-    assert!(mini < bazzite, "main first");
-    assert!(page[mini..bazzite].contains("<span class=\"tag m\">main</span>"));
     for k in ["load", "swap", "mem", "disk", "lanes"] {
-        assert_eq!(page.matches(&format!("data-k={k} ")).count(), 2, "{k} on both cards");
+        hosts.iter().for_each(|h| drop(key(h, k)));
     }
-    // Load 1.5 is under 2.5, but the history keeps the 3.1 peak in the last 12-minute bucket.
-    let s24 = &page[page.find("data-k=load data-s=\"").unwrap() + 20..];
-    assert!(
-        s24.starts_with(&",".repeat(119)) && s24[119..].starts_with("3.10\""),
+    let s24 = key(&hosts[0], "load")["s"].as_str().unwrap().to_string();
+    assert!(s24.starts_with(&",".repeat(119)) && s24[119..] == *"3.10", "{s24}");
+    let disk = key(&hosts[0], "disk");
+    assert_eq!(
+        (&disk["b"], &disk["bt"], &disk["notes"]),
+        (&json!("free 42 GB"), &json!("g"), &json!(["of 466"])),
+        "used-space bar words: {disk}"
+    );
+    assert_eq!(
+        (&hosts[1]["words"], &hosts[1]["tone"]),
+        (&json!("offline · last seen 33m"), &json!("m")),
         "{}",
-        &s24[..140]
-    );
-    let i = page.find("<span class=k>disk</span>").unwrap();
-    assert!(
-        page[i..].contains("<b class=g>free 42 GB</b> <span class=mt>of 466</span>"),
-        "used-space bar words: {}",
-        &page[i..i + 400]
-    );
-    assert!(page[bazzite..].contains("<span class=\"hw m\">offline · last seen 33m</span>"));
-    let chart = get("/frag?id=hist&host=mini&k=load");
-    let parts: Vec<&str> = chart.split("\r\n\r\n").nth(1).unwrap().split('|').collect();
-    assert_eq!(parts.len(), 4, "value, lanes, pressure, minutes ago: {chart}");
-    assert!(
-        parts[0].split(';').nth(2).unwrap().ends_with("3.10") && parts[3].ends_with('0'),
-        "{chart}"
+        hosts[1]
     );
 }
 
-/// #352: `ps` lines with every group, the claude one's command line `len` bytes long.
 fn watched_fake(len: usize) -> Fake {
     let ps = format!(
         "204800 /usr/local/bin/claude --settings {}\n102400 /opt/homebrew/bin/qemu-system-aarch64\n51200 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome\n10240 drover drive --fast\n20480 /bin/zsh\n",
@@ -220,7 +206,6 @@ fn no_process_table_walk_while_nobody_watches() {
     assert_eq!(r.count("ps -axo rss=,command="), 0, "{:?}", r.calls.borrow());
     let rows = history(&c);
     assert!(rows.len() == 1 && rows[0].procs.is_none(), "{rows:?}");
-    // A Host tab seen 3 min ago no longer counts.
     std::fs::write(c.state.with_file_name("host-watch.at"), (NOW - 180).to_string()).unwrap();
     run(&c, &r, &["drive", "--fast"]);
     assert_eq!(r.count("ps -axo rss=,command="), 0);
@@ -245,7 +230,6 @@ fn sampling_resumes_once_the_host_tab_is_open() {
     assert!(!watch.exists(), "another tab is not watching the host");
     let _host = live("?tab=host");
     let at: u64 = std::fs::read_to_string(&watch).unwrap().parse().unwrap();
-    // The next fast step (each minute) walks `ps` once and keeps the groups, not the PIDs.
     c.now = at + 60;
     let r = watched_fake(10);
     let (code, out) = run(&c, &r, &["drive", "--fast"]);

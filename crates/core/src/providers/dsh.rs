@@ -1,6 +1,6 @@
-//! dsh-TUI lanes (docs/dsh.md): a per-role patch layer, a pinned `dsh-tui` typed into the shell, a git pre-push hook.
-use super::{attempts, Credential, Provider};
-use crate::herdr;
+use super::{attempts, Provider};
+use crate::session::Status;
+use crate::term;
 use crate::runner::{ok, Runner};
 use crate::spawn::Plan;
 use crate::Ctx;
@@ -11,20 +11,16 @@ use std::path::{Path, PathBuf};
 
 /// The dsh-TUI profile version lanes run; `drover spawn` refuses any other.
 pub const DSH_TUI_VERSION: &str = "0.17.0";
-/// The agent label dsh-TUI reports to herdr.
 const LABEL: &str = "dsh-tui";
-/// The first-run wizard's title (en, zh); it reports idle but eats the prompt.
 const WIZARD: &[&str] = &["Welcome to dsh-TUI", "欢迎使用 dsh-TUI"];
 
 pub struct Dsh;
 pub static PROVIDER: Dsh = Dsh;
 
-/// `<config dir>/dsh/<profile>.patch.yml`, the lane's `--patch` overlay.
 fn patch_file(ctx: &Ctx, profile: &str) -> PathBuf {
     ctx.config.with_file_name("dsh").join(format!("{profile}.patch.yml"))
 }
 
-/// Reviewers get the workspace-write sandbox; escalations are never asked (nobody answers them).
 fn patch(role: &str) -> String {
     let mode = if role == "rev" {
         "workspace-write"
@@ -77,75 +73,61 @@ impl Provider for Dsh {
     }
 
     fn prepare(&self, ctx: &Ctx, on: &crate::hosts::On, p: &Plan) -> Result<()> {
-        // #404: a conductor has no branch (its folder is no worktree): nothing to push.
         if p.branch.is_empty() {
             return Ok(());
         }
         install_pre_push(on, &ctx.exe, &p.worktree, p.family)
     }
 
-    /// herdr has no `dsh` kind: type the launch into the lane's shell.
     fn start_cmd(&self, ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
         let patch = format!("'{}'", patch_file(ctx, &p.profile).display());
-        herdr::run_argv(pane, &["dsh-tui", "--patch", &patch])
+        term::run_argv(pane, &["dsh-tui", "--patch", &patch])
     }
 
-    /// Settle idle (Esc skips the wizard), name the agent, type kick + Enter, confirm working/blocked/done.
     fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {
         vec![
-            herdr::pane_get_argv(pane),
-            herdr::read_argv(pane),
-            herdr::keys_argv(pane, "esc"),
-            herdr::rename_argv(pane, &p.agent),
-            herdr::send_text_argv(pane, &p.kick),
-            herdr::pane_get_argv(pane),
-            herdr::keys_argv(pane, "enter"),
+            term::read_argv(pane),
+            term::keys_argv(pane, "esc"),
+            term::send_text_argv(pane, &p.kick),
+            term::keys_argv(pane, "enter"),
         ]
     }
 
-    /// Up to 3 tries 5 s apart; a kick left typed in the input only gets Enter.
     fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
         let c = self.kick_cmds(p, pane);
-        if !poll(r, &c[0], &["idle"], 90) {
+        if !poll(r, pane, &[Status::Idle], 90) {
             return Ok(false);
         }
-        let screen = herdr::exec(r, &c[1])?.stdout;
+        let screen = term::exec(r, &c[0])?.stdout;
         if WIZARD.iter().any(|w| screen.contains(w)) {
-            herdr::exec(r, &c[2])?;
+            term::exec(r, &c[1])?;
             r.sleep(2);
-            if !poll(r, &c[0], &["idle"], 30) {
+            if !poll(r, pane, &[Status::Idle], 30) {
                 return Ok(false);
             }
         }
-        herdr::exec(r, &c[3])?;
         let typed: String = p.kick.chars().take(20).collect();
         for attempt in attempts(r, 3, 5) {
-            if attempt == 0 || !herdr::exec(r, &c[1])?.stdout.contains(&typed) {
-                herdr::exec(r, &c[4])?;
+            if attempt == 0 || !term::exec(r, &c[0])?.stdout.contains(&typed) {
+                term::exec(r, &c[2])?;
             }
-            herdr::exec(r, &c[6])?;
-            if poll(r, &c[5], &["working", "blocked", "done"], 10) {
+            term::exec(r, &c[3])?;
+            if poll(r, pane, &[Status::Working, Status::Blocked, Status::Done], 10) {
                 return Ok(true);
             }
         }
         Ok(false)
     }
 
-    fn credential(&self) -> Credential {
-        Credential::Own
-    }
     fn process_names(&self) -> &'static [&'static str] {
         &[LABEL]
     }
 }
 
-/// Re-read the pane (1 s apart, `tries` times) until dsh-TUI reports one of `want`.
-fn poll(r: &dyn Runner, get: &[String], want: &[&str], tries: u32) -> bool {
+fn poll(r: &dyn Runner, pane: &str, want: &[Status], tries: u32) -> bool {
     for _ in attempts(r, tries, 1) {
-        let pane = herdr::json(r, get)
-            .map(|v| v["result"]["pane"].clone())
-            .unwrap_or_default();
-        if pane["agent"] == LABEL && want.iter().any(|w| pane["agent_status"] == *w) {
+        let s = crate::session::get(r, pane).ok().flatten().and_then(|s| s.status());
+        if s.is_some_and(|s| want.contains(&s)) {
             return true;
         }
     }

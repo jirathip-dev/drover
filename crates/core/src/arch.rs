@@ -1,6 +1,3 @@
-//! #734: `drover arch-check`: a repo's architecture rules in `.drover/arch.toml`, checked by plain source scanning
-//! of Rust and TypeScript: a layer uses only the layers its `may_use` lists, a banned pattern appears only in its
-//! exceptions, and a file or function over its size limit fails unless the baseline lists it at that size or more.
 use crate::config::glob;
 use crate::runner::{argv, Runner};
 use anyhow::{Context, Result};
@@ -60,6 +57,7 @@ struct Comments {
 enum Policy {
     On,
     Off,
+    Strict,
 }
 
 #[derive(Deserialize, Default)]
@@ -79,8 +77,6 @@ struct Change {
     text: String,
 }
 
-/// A layer: its files, the names other files use it by (`drover_core`, `crate::gate`, `@app/core`; a relative
-/// TypeScript import resolves to a path and matches `paths`), and the layers it may use.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Layer {
@@ -128,14 +124,12 @@ struct Size {
     exclude: Vec<String>,
 }
 
-/// Whether a glob matches `p`, `/**/` also matching no folder (`src/**/*.rs` matches `src/lib.rs`).
 pub(crate) fn any(globs: &[String], p: &str) -> bool {
     let m = |g: &str| glob(g.as_bytes(), p.as_bytes());
     globs.iter().any(|g| m(g) || m(&g.replace("/**/", "/")))
 }
 
-/// `drover arch-check`: each violation as `file:line: why`, exit 1 on any; `write` records today's size offenders
-/// as the baseline instead. No config: nothing to check.
+/// `drover arch-check`: each violation as `file:line: why`, exit 1 on any; `write` records today's size offenders as the baseline instead. No config: nothing to check.
 pub fn check(
     config: &Path,
     write: bool,
@@ -248,8 +242,14 @@ pub fn check(
     }
     bad.extend(frozen_adds(&a, &diff));
     bad.extend(stale_generated(&a, r)?);
-    if let Some(c) = a.comments.as_ref().filter(|c| c.policy == Policy::Off) {
-        bad.extend(new_comments(&diff, &c.except));
+    match &a.comments {
+        Some(c) if c.policy == Policy::Off => bad.extend(new_comments(&diff, &c.except)),
+        Some(c) if c.policy == Policy::Strict => {
+            for f in files.iter().filter(|f| commented(f, &c.except)) {
+                bad.extend(bad_comments(f, None));
+            }
+        }
+        _ => {}
     }
     if let Some(d) = &a.docs {
         bad.extend(stale_docs(d, &files));
@@ -356,7 +356,6 @@ fn walk(dir: &Path, bans: &[&String], out: &mut Vec<String>) {
     }
 }
 
-/// Whether `t`, a path a line names, is layer `l`'s: one of its `mods` (or under it), or a file its `paths` match.
 fn uses(l: &Layer, t: &str) -> bool {
     let under = |m: &String| t == m || t.starts_with(&format!("{m}::")) || t.starts_with(&format!("{m}/"));
     l.mods.iter().any(under)
@@ -365,8 +364,6 @@ fn uses(l: &Layer, t: &str) -> bool {
             .any(|x| any(&l.paths, &format!("{t}{x}")))
 }
 
-/// What line `l` of file `p` names: in Rust each `a::b` path (one `use a::{b, c}` group expanded); in TypeScript
-/// the module an `import`, `export … from` or `require` loads, a relative one resolved against `p`'s folder.
 fn targets(p: &str, l: &str, rust: bool) -> Vec<String> {
     let path = |c: char| !(c.is_alphanumeric() || c == '_' || c == ':');
     if rust {
@@ -405,8 +402,6 @@ fn targets(p: &str, l: &str, rust: bool) -> Vec<String> {
     vec![parts.join("/")]
 }
 
-/// Each function's `(name, first line, lines)`: a Rust `fn` or TypeScript `function` / `const f = (…) => {` whose
-/// line opens a body, to the first later line at its indent that starts with `}` (formatted source).
 fn fns(lines: &[&str], rust: bool) -> Vec<(String, usize, usize)> {
     let kw = if rust { "fn " } else { "function " };
     let mut v = vec![];
@@ -507,6 +502,9 @@ fn comment_lines(lines: &[&str], rust: bool) -> Vec<bool> {
 
 fn allowed_comment(lines: &[&str], com: &[bool], i: usize) -> bool {
     let t = lines[i].trim();
+    if t.starts_with("// TODO(#") && t[9..].split(')').next().is_some_and(|n| n.parse::<u32>().is_ok()) {
+        return true;
+    }
     if t.starts_with("// SAFETY:") {
         return lines.get(i + 1).is_some_and(|n| n.contains("unsafe"));
     }
@@ -517,27 +515,35 @@ fn allowed_comment(lines: &[&str], com: &[bool], i: usize) -> bool {
     one_doc && public && (i == 0 || !com[i - 1])
 }
 
+fn commented(f: &str, except: &[String]) -> bool {
+    [".rs", ".ts", ".tsx"].iter().any(|x| f.ends_with(x)) && !any(except, f)
+}
+
 fn new_comments(diff: &[Change], except: &[String]) -> Vec<String> {
-    let code = |f: &str| [".rs", ".ts", ".tsx"].iter().any(|x| f.ends_with(x)) && !any(except, f);
-    let (mut added, mut bad) = (BTreeMap::<&str, Vec<usize>>::new(), vec![]);
-    for c in diff.iter().filter(|c| c.added && code(&c.file)) {
+    let mut added = BTreeMap::<&str, Vec<usize>>::new();
+    for c in diff.iter().filter(|c| c.added && commented(&c.file, except)) {
         added.entry(&c.file).or_default().push(c.line.saturating_sub(1));
     }
-    for (f, at) in added {
-        let src = std::fs::read_to_string(f).unwrap_or_default();
-        let lines: Vec<&str> = src.lines().collect();
-        let com = comment_lines(&lines, Path::new(f).extension().is_some_and(|x| x == "rs"));
-        for i in at
-            .into_iter()
-            .filter(|&i| com.get(i) == Some(&true) && !allowed_comment(&lines, &com, i))
-        {
-            bad.push(format!(
-                "{f}:{}: a new comment (only `// SAFETY:` over unsafe and one `///` on a pub item): put the why in `drover why`",
+    added
+        .into_iter()
+        .flat_map(|(f, at)| bad_comments(f, Some(&at)))
+        .collect()
+}
+
+fn bad_comments(f: &str, only: Option<&[usize]>) -> Vec<String> {
+    let src = std::fs::read_to_string(f).unwrap_or_default();
+    let lines: Vec<&str> = src.lines().collect();
+    let com = comment_lines(&lines, Path::new(f).extension().is_some_and(|x| x == "rs"));
+    let at: Vec<usize> = only.map_or_else(|| (0..lines.len()).collect(), <[usize]>::to_vec);
+    at.into_iter()
+        .filter(|&i| com.get(i) == Some(&true) && !allowed_comment(&lines, &com, i))
+        .map(|i| {
+            format!(
+                "{f}:{}: a comment (only `// SAFETY:` over unsafe, `// TODO(#N)` and one `///` on a pub item): put the why in `drover why`",
                 i + 1
-            ));
-        }
-    }
-    bad
+            )
+        })
+        .collect()
 }
 
 fn stale_docs(d: &Docs, files: &[String]) -> Vec<String> {

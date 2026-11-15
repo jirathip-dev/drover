@@ -122,10 +122,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.99.1
       - name: build
         run: cargo build --release --locked
-      - name: demo export, and the Host tab's busy and healthy fixtures (#141)
-        run: |
-          DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/drover serve --export site --demo
-          scripts/host-fixtures.sh site
+      - name: demo export
+        run: DROVER_HOME=demo FLEET_CONFIG=demo/fleet.toml FLEET_STATE=demo/events.jsonl ./target/release/drover serve --export site --demo
       # #68: Chrome's new headless never makes a window under 500 px wide; the headless shell honours 390.
       # Pinned build (Google's Chrome-for-Testing), so layout never moves without a commit.
       - name: chrome-headless-shell
@@ -135,7 +133,7 @@ jobs:
           echo "CHROME=$c" >> "$GITHUB_ENV"
       - name: the lifeboat page for the audit (#725)
         run: LIFEBOAT_SITE="$PWD/site" cargo test --locked --test lifeboat the_page_for_the_ui_audit
-      - name: ui audit at 390 px (and the loading views at 1440, #337) and the sheet close screencast (#166)
+      - name: ui audit at 390 px (and 1440, #337) of the screens the page draws (#927)
         run: scripts/ui-audit.sh site ui-390
       # #566: every hung Chrome run in the job summary; views still hung after 2 retries go to the soft `ui-flaky` check.
       - name: Chrome hangs
@@ -144,8 +142,8 @@ jobs:
         run: |
           if [ -s ui-390/hangs.txt ]; then { echo "### Chrome hangs (#566)"; sed 's/^/- /' ui-390/hangs.txt; } >> "$GITHUB_STEP_SUMMARY"; fi
           echo "flaky=$(cut -d' ' -f1 ui-390/flaky.txt 2>/dev/null | sort -u | xargs)" >> "$GITHUB_OUTPUT"
-      - name: the backlog on a fresh load and after a /live patch, in Chrome on the real server (#391)
-        run: cargo test --locked --test backlog the_backlog_draws_on_a_fresh_load_and_after_a_live_patch
+      - name: "the page in Chrome on the real server (#927: answer, run cards, pause/resume, stop, Fleets, offline)"
+        run: cargo test --locked --test page
       - name: the verify lane's browser evidence in Chrome (#731; console error, 500, known noise, design diff)
         run: cargo test --locked --test verify_browser
       - uses: actions/upload-artifact@v4
@@ -167,7 +165,7 @@ jobs:
         env:
           FLAKY: ${{ needs.ui.outputs.flaky }}
 
-  # #862: ui-webkit runs only when the diff touches the board UI (scripts/board-freeze.sh's list) or its own tests.
+  # #862: ui-webkit runs only when the diff touches the page (#927: web/, assets/, serve.rs, screens.rs) or its own tests.
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -186,12 +184,10 @@ jobs:
           fi
           git diff --name-only "$BASE...$HEAD" | tee changed.txt
           webkit=false
-          scripts/board-freeze.sh /dev/null < changed.txt > /dev/null || webkit=true
-          grep -qxE 'crates/cli/tests/(support/webview\.mjs|perf\.rs|ui_audit\.rs|chat_tab\.rs)' changed.txt && webkit=true
+          grep -qE '^(web/|assets/|crates/server/src/(serve\.rs|screens\.rs)|crates/cli/tests/(support/webview\.mjs|perf\.rs))' changed.txt && webkit=true
           echo "webkit=$webkit" | tee -a "$GITHUB_OUTPUT"
 
-  # #200: the sheet close in WebKit (iOS Safari's engine; Chrome never showed the flash): the page above a closing
-  # sheet keeps its colour. The PNG is each sheet's worst frame. #862: Playwright's WebKit on Linux.
+  # #337: the page's first paint in WebKit (iOS Safari's engine), Playwright's WebKit on Linux.
   ui-webkit:
     needs: changes
     if: needs.changes.outputs.webkit == 'true'
@@ -212,20 +208,3 @@ jobs:
           NODE_PATH="$RUNNER_TEMP/pw/node_modules" node -e "require('playwright')"
       - name: first paint in WebKit (#337, hard gate < 300 ms warm; the numbers go to the job summary)
         run: cargo test --locked --test perf the_first_paint_in_webkit_is_under_300ms -- --nocapture
-      - name: sheet close in WebKit (chat, config, legend)
-        if: ${{ !cancelled() }}
-        run: |
-          mkdir -p ui-webkit
-          DROVER_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test ui_audit closing_a_sheet_never_repaints_the_page -- --nocapture
-          test -f ui-webkit/close-chat.png && test -f ui-webkit/close-config.png && test -f ui-webkit/close-legend.png
-      - name: the chat keyboard in WebKit (#443, a 336 px visualViewport shrink at 390)
-        if: ${{ !cancelled() }}
-        run: |
-          DROVER_SNAPSHOTS="$PWD/ui-webkit" cargo test --locked --test chat_tab the_keyboard_keeps_the_composer_on_it -- --nocapture
-          test -f ui-webkit/chat-kb.png
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: ui-webkit
-          path: ui-webkit/*.png
-          retention-days: 14

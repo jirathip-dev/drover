@@ -1,12 +1,14 @@
 {
   "response": {
     "code": "ERROR",
+    "job": null,
     "message": "gh issue create: no number",
     "ok": false
   },
   "route": "POST /api/v1/lesson",
   "schema": {
     "code": "string",
+    "job": "null",
     "message": "string",
     "ok": "boolean"
   },

@@ -1,5 +1,3 @@
-//! #666: a stalled lane is superseded once, then the owner's (one needs-human card with its last screen); a lane that
-//! never started is retried once, then escalated; a lane the hook keeps refusing is ended with the refusal on its card.
 mod common;
 use common::*;
 use drover::events::{append, fold, read, Event};
@@ -68,6 +66,9 @@ fn shed_on(c: &drover::Ctx, name: &str, status: &str, cwd: &str, screen: &str) -
     sh.attach(c);
     sh.lane(name, status, cwd);
     sh.screen(name, screen);
+    if status.is_empty() {
+        sh.set(name, |t| t["reported"] = serde_json::Value::Null);
+    }
     sh
 }
 
@@ -77,7 +78,6 @@ fn drive(c: &drover::Ctx, r: &Fake) -> String {
     out
 }
 
-/// #12 built and rev PASSed at `head`; its verify lane spawned at `t` in a worktree with no verdict.md.
 fn verify_lane(name: &str, t: u64) -> (drover::Ctx, String) {
     let c = ctx(&tmpdir(name), &config());
     let head = sha("abc");
@@ -104,20 +104,23 @@ fn verify_lane(name: &str, t: u64) -> (drover::Ctx, String) {
     (c, head)
 }
 
-/// AC 2 (the regression): cooee-verify-34-r3 ended with no verdict.md and sat 7 h with only `stall` events.
 #[test]
 fn a_verify_lane_that_ends_without_a_verdict_is_respawned_once_then_needs_a_human() {
     let t0 = 1_000_000 - 60;
     let (c, head) = verify_lane("stall-verify", t0);
     let screen = "Opened the app at 1440 wide\nSaved shot-1440.png\n> ";
     let sh = shed_on(&c, "sendmeter-verify-12-r1", "done", "/w/verify-12-r1", screen);
+    let note = |sh: &FakeShed| {
+        sh.set("sendmeter-verify-12-r1", |t| {
+            t["reported"]["note"] = json!("Saved shot-1440.png")
+        })
+    };
+    note(&sh);
     let r = fake().reply("gh pr view issue-12", &pr(&head));
-    // Inside `stall_minutes`: nothing yet.
     drive(&c, &r);
     assert!(kinds(&c, "respawn").is_empty());
     assert!(!sh.called("run", "sendmeter-verify-12-r1"));
-    // Stalled: superseded once with a fresh lane of the same role and round.
-    let c1 = at(&c, t0 + STALL + 1);
+    let c1 = at(&c, c.now + STALL + 1);
     let out = drive(&c1, &r);
     let rs = kinds(&c, "respawn");
     assert_eq!(rs.len(), 1, "{out}");
@@ -128,9 +131,9 @@ fn a_verify_lane_that_ends_without_a_verdict_is_respawned_once_then_needs_a_huma
     assert!(sh.called("run", "sendmeter-verify-12-r1"), "{out}");
     assert!(state(&c).starts_with("review"), "{}", state(&c));
     sh.lane("sendmeter-verify-12-r1", "done", "/w/verify-12-r1");
-    sh.screen("sendmeter-verify-12-r1", screen);
-    // The respawned lane stalls too: one needs-human card with the evidence (its last screen lines).
-    let c2 = at(&c, t0 + 2 * STALL + 2);
+    note(&sh);
+    drive(&at(&c, c1.now + 1), &r);
+    let c2 = at(&c, c1.now + STALL + 2);
     let out = drive(&c2, &r);
     assert_eq!(state(&c), "needs-human", "{out}");
     let nh = kinds(&c, "needs-human");
@@ -142,14 +145,13 @@ fn a_verify_lane_that_ends_without_a_verdict_is_respawned_once_then_needs_a_huma
         "{why}"
     );
     assert_eq!(kinds(&c, "respawn").len(), 1, "never a second respawn");
-    // It never loops.
-    drive(&at(&c, t0 + 4 * STALL), &r);
+    drive(&at(&c, c2.now + 2 * STALL), &r);
     assert_eq!(kinds(&c, "needs-human").len(), 1);
     assert_eq!(kinds(&c, "respawn").len(), 1);
 }
 
 #[test]
-fn a_blank_pane_after_the_start_window_is_retried_once_then_escalated() {
+fn a_lane_shed_never_heard_from_after_the_start_window_is_retried_once_then_escalated() {
     let c = ctx(&tmpdir("stall-blank"), CONFIG);
     let t0 = 1_000_000 - 60;
     let wt = c.worktrees.join("sendmeter/issue-12");
@@ -157,7 +159,7 @@ fn a_blank_pane_after_the_start_window_is_retried_once_then_escalated() {
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "pane": "sendmeter-impl-12", "workspace": "", "runtime": "shed", "worktree": wt,
         "branch": "issue-12", "confirmed": true});
     ev(&c, t0, "spawn", d);
-    let sh = shed_on(&c, "sendmeter-impl-12", "idle", &wt.to_string_lossy(), "\n  \n");
+    let sh = shed_on(&c, "sendmeter-impl-12", "", &wt.to_string_lossy(), "\n  \n");
     let r = fake();
     drive(&c, &r);
     assert!(kinds(&c, "respawn").is_empty(), "inside the start window");
@@ -171,8 +173,7 @@ fn a_blank_pane_after_the_start_window_is_retried_once_then_escalated() {
     );
     assert!(sh.called("run", "sendmeter-impl-12"), "{out}");
     sh.lane("sendmeter-impl-12", "idle", &wt.to_string_lossy());
-    sh.screen("sendmeter-impl-12", "\n  \n");
-    // The retry shows nothing either: escalated, with no stall wait.
+    sh.set("sendmeter-impl-12", |t| t["reported"] = serde_json::Value::Null);
     let out = drive(&at(&c, t0 + 2 * start + 2), &r);
     assert_eq!(state(&c), "needs-human", "{out}");
     let nh = kinds(&c, "needs-human");

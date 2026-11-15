@@ -1,7 +1,7 @@
 use crate::config::Config;
-use crate::events::{age, emit, read, Event};
+use crate::events::{age, emit, working, Event};
 use crate::runner::{ok, Runner};
-use crate::{drive, herdr, host, Ctx};
+use crate::{drive, host, Ctx};
 use anyhow::Result;
 use std::io::Write;
 use std::os::unix::fs::MetadataExt;
@@ -10,13 +10,11 @@ use std::path::{Path, PathBuf};
 pub const TICK: &str = "dev.drover.tick";
 /// #212: the every-minute `drive --fast` job, its own job so the slow tick never delays it.
 pub const FAST: &str = "dev.drover.fast";
-/// #237: the build's own jobs (label, args); `install` derives each one's interval from its args.
-/// #345: `drover service`, kept alive; it runs the fast step itself (and the board with `--board`).
+/// #237: the build's own jobs (label, args); `install` derives each one's interval from its args. #345: `drover service`, kept alive; it runs the fast step itself (and the board with `--board`).
 pub const SERVICE: &str = "dev.drover.service";
 pub const JOBS: [(&str, &[&str]); 2] = [(TICK, &["tick"]), (FAST, &["drive", "--fast"])];
 /// #845: the tick's steps in order (`tick.step` names the running one) and the `[limits]` keys that time them.
 pub const TICK_STEPS: [(&str, &[&str]); 7] = [
-    ("herdr status", &[]),
     (
         "check",
         &[
@@ -37,6 +35,7 @@ pub const TICK_STEPS: [(&str, &[&str]); 7] = [
     ("trim", &[]),
     ("lesson", &[]),
     ("hotspots", &[]),
+    ("compact", &[]),
 ];
 /// #557: drover's own install every 5 min and the daily scheduled clean; `setup` and `timer` write them.
 pub const UPDATE: &str = "dev.drover.update";
@@ -49,12 +48,10 @@ pub const DAILY: u64 = 86_400;
 const MAC: bool = cfg!(target_os = "macos");
 const FIX: &str = "drover timer install";
 const ABANDON: &str = "<key>AbandonProcessGroup</key><true/>";
-const HANDOFF: &str = "restart herdr to finish the update: `herdr update --handoff`";
 /// One Services row: (item, tone `g|a|r`, detail, the fix shown on red).
 pub type Row = (String, &'static str, String, String);
 
-/// The job's files (path, content) for launchd (`mac`) or systemd: `argv` every `every` seconds or kept alive (0),
-/// with an explicit PATH, both streams to `<state>/tick.log` (or `serve.log`).
+/// The job's files (path, content) for launchd (`mac`) or systemd: `argv` every `every` seconds or kept alive (0), with an explicit PATH, both streams to `<state>/tick.log` (or `serve.log`).
 pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: u64, mac: bool) -> Vec<(PathBuf, String)> {
     let (i, secs) = (usize::from(every > 0), every.to_string());
     let log = ctx.state.with_file_name(["serve.log", "tick.log"][i]);
@@ -87,7 +84,6 @@ pub fn files(ctx: &Ctx, label: &str, argv: &[&str], path: &str, every: u64, mac:
     std::iter::once((ctx.home.join(dest), text)).chain(timer).collect()
 }
 
-/// (probe, load, unload) of the job: `launchctl` in the gui domain, else `systemctl --user`.
 fn ctl(ctx: &Ctx, label: &str, every: bool) -> [String; 3] {
     if MAC {
         let uid = std::fs::metadata(&ctx.home).map_or(0, |m| m.uid());
@@ -110,7 +106,6 @@ fn exec(r: &dyn Runner, cmd: &str) -> Result<String> {
     ok(r, w.next().unwrap_or_default(), &w.collect::<Vec<_>>())
 }
 
-/// The job's files as `install` writes them, with `path` for PATH.
 fn expect(ctx: &Ctx, cfg: &Config, label: &str, args: &[&str], path: &str) -> Vec<(PathBuf, String)> {
     let every = !["serve", "service"].contains(&args[0]);
     let secs = match args[0] {
@@ -124,8 +119,7 @@ fn expect(ctx: &Ctx, cfg: &Config, label: &str, args: &[&str], path: &str) -> Ve
     files(ctx, label, &cmd, path, secs, MAC)
 }
 
-/// #237: each own job against this build: `loaded`, `missing` (no file, or not loaded) or `outdated (args or
-/// interval differ)`; PATH is the host's, never compared.
+/// #237: each own job against this build: `loaded`, `missing` (no file, or not loaded) or `outdated (args or interval differ)`; PATH is the host's, never compared.
 pub fn drift(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<(&'static str, &'static str)> {
     let same = |(p, t): &(PathBuf, String)| {
         let x = std::fs::read_to_string(p).unwrap_or_default();
@@ -136,7 +130,6 @@ pub fn drift(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Vec<(&'static str, &'st
         let files = expect(ctx, cfg, label, args, "\0");
         let up = files.iter().all(|f| f.0.exists()) && exec(r, &ctl(ctx, label, true)[0]).is_ok();
         let i = usize::from(up) + usize::from(up && files.iter().all(same));
-        // #340: without it launchd kills the job's detached kicks when the job exits.
         let abandons = |(p, _): &(PathBuf, String)| std::fs::read_to_string(p).is_ok_and(|x| x.contains(ABANDON));
         if i == 1 && MAC && !files.iter().all(abandons) {
             return (label, "outdated (no AbandonProcessGroup)");
@@ -161,13 +154,11 @@ pub fn job_path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     got.unwrap_or_else(|| path(ctx, cfg, r))
 }
 
-/// The jobs' PATH: the dirs of the harness binaries, `gh`, `herdr`, `shed` (#600) and drover, then the system dirs
-/// (`/usr/sbin:/sbin` for `sysctl` and `vm_stat`, the #30 lesson).
 fn path(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> String {
     let roles = cfg.fleet.values().flat_map(|f| f.role.values());
     let found = roles
         .map(|role| role.harness.as_str())
-        .chain(["gh", herdr::BIN, "shed", "cargo"]) // #557: `self-update` builds with cargo
+        .chain(["gh", "shed", "cargo"])
         .filter_map(|b| ok(r, "which", &[b]).ok());
     let dir = |p: String| Some(Path::new(p.trim()).parent()?.to_string_lossy().into_owned());
     let mut dirs: Vec<String> = found.chain([ctx.exe.clone()]).filter_map(dir).collect();
@@ -208,7 +199,7 @@ pub fn install(ctx: &Ctx, cfg: &Config, r: &dyn Runner, label: &str, args: &[&st
         return format!("✓ wrote {label}; load it: {up}");
     }
     if live || MAC {
-        let _ = exec(r, &down); // a loaded job reloads its new content
+        let _ = exec(r, &down);
     }
     if !MAC {
         let _ = exec(r, "systemctl --user daemon-reload");
@@ -240,7 +231,7 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
             .join("\n"),
         _ => {
             let on = ["not loaded", "loaded"][usize::from(exec(r, &ctl(ctx, label, true)[0]).is_ok())];
-            let (_, detail) = tick_row(ctx, &read(&ctx.state)?);
+            let (_, detail) = tick_row(ctx, &working(&ctx.state)?);
             format!("{label}: {on} · tick {detail}")
         }
     };
@@ -248,8 +239,6 @@ pub fn timer(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, cmd: 
     Ok(i32::from(line.contains('✗')))
 }
 
-/// #461: log `timer-install`: `by` the owner or the lane (`DROVER_LANE`), the jobs written and the labels
-/// reloaded; a conductor's thread (`DROVER_THREAD`) shows it as a system line.
 fn installed(ctx: &Ctx, cfg: &Config, lines: &[(&str, String)]) -> Result<()> {
     let lane = std::env::var("DROVER_LANE").unwrap_or_default();
     let pick = |f: fn(&str) -> bool| lines.iter().filter(|l| f(&l.1)).map(|l| l.0).collect::<Vec<_>>();
@@ -264,7 +253,6 @@ fn installed(ctx: &Ctx, cfg: &Config, lines: &[(&str, String)]) -> Result<()> {
     emit(&ctx.state, cfg, ev)
 }
 
-/// Log `kind` for `item` and notify, at most once an hour per item.
 fn alert(ctx: &Ctx, cfg: &Config, events: &[Event], kind: &str, item: &str, reason: &str) -> Result<()> {
     let recent = |e: &Event| e.kind == kind && e.str("key") == Some(item) && ctx.now < e.ts + 3600;
     if events.iter().any(recent) {
@@ -274,9 +262,22 @@ fn alert(ctx: &Ctx, cfg: &Config, events: &[Event], kind: &str, item: &str, reas
     emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, kind, d))
 }
 
-/// `drover tick`: `check`, then `drive` (under #92's lock), the hourly clean, remote build trims, then an hourly alert per
-/// red Services row. A refusal exits 0; a real error (config, herdr) logs `tick-failed`, alerted at most hourly, and
-/// exits 1. #561: one probe per remote host, 15 s per remote call; `tick.step` names the step for `tick-stuck`.
+fn compact_daily(ctx: &Ctx, out: &mut dyn Write) -> Result<()> {
+    let at = ctx.state.with_file_name("compact.at");
+    let last = std::fs::read_to_string(&at)
+        .ok()
+        .and_then(|s| s.trim().parse::<u64>().ok());
+    if last.is_some_and(|t| ctx.now < t + 86_400) {
+        return Ok(());
+    }
+    std::fs::write(&at, ctx.now.to_string())?;
+    match crate::db::compact(&ctx.state, ctx.now) {
+        Ok((gone, moved)) => writeln!(out, "compact: {gone} heartbeats deleted, {moved} events archived")?,
+        Err(e) => writeln!(out, "compact: {e:#}")?,
+    }
+    Ok(())
+}
+
 pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let log = ctx.state.with_file_name("tick.log");
     if log.metadata().is_ok_and(|m| m.len() > 1 << 20) {
@@ -284,7 +285,6 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         let _ = f.and_then(|f| f.set_len(0));
     }
     let mark = ctx.state.with_file_name("tick.step");
-    // #791: `tick.beat` (`<started> <beat>`) each minute while the tick runs: `running` reads it.
     let (beat, since, t0) = (
         ctx.state.with_file_name("tick.beat"),
         ctx.now,
@@ -304,7 +304,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         }
     });
     let budget = loaded.as_ref().map_or(u64::MAX, |c| c.limits.slow_secs);
-    let events = read(&ctx.state).unwrap_or_default();
+    let events = working(&ctx.state).unwrap_or_default();
     let spared = loaded
         .as_ref()
         .ok()
@@ -313,8 +313,6 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     let mut pass = crate::hosts::Pass::new(r, Some((mark.clone(), ctx.now))).sparing(off, log);
     pass.until = std::time::Instant::now().checked_add(std::time::Duration::from_secs(budget));
     let res = loaded.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|cfg| {
-        pass.step("herdr status");
-        herdr::status(&pass).map_err(|e| anyhow::anyhow!("herdr: {e:#}"))?;
         pass.step("check");
         crate::check::check(ctx, cfg, &pass, out)?;
         pass.step("drive");
@@ -322,12 +320,10 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
         if pass.over() {
             writeln!(
                 out,
-                "tick: past its {budget} s budget; skipped: clean, trim, lesson, hotspots"
+                "tick: past its {budget} s budget; skipped: clean, trim, lesson, hotspots, compact"
             )?;
             return driven;
         }
-        // #164: the `clean --yes` sweep once an hour, not only after a merge; its failures don't fail the tick.
-        // #561: after drive, so no spawn or merge waits on it.
         let at = ctx.state.with_file_name("clean.at");
         let last = std::fs::read_to_string(&at)
             .ok()
@@ -340,11 +336,13 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
             }
         }
         pass.step("trim");
-        crate::check::trim_hosts(ctx, cfg, &pass, out)?; // #485: maintenance after drive, never before it
+        crate::check::trim_hosts(ctx, cfg, &pass, out)?;
         pass.step("lesson");
-        crate::lesson::weekly(ctx, cfg, &pass, out)?; // #419
+        crate::lesson::weekly(ctx, cfg, &pass, out)?;
         pass.step("hotspots");
         crate::hotspots::weekly(ctx, cfg, &pass, out)?;
+        pass.step("compact");
+        compact_daily(ctx, out)?;
         driven
     });
     for m in pass.late() {
@@ -354,7 +352,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     drop(stop);
     let _ = beating.join();
     let _ = std::fs::remove_file(&beat);
-    let (cfg, events) = (loaded.unwrap_or_default(), read(&ctx.state).unwrap_or_default());
+    let (cfg, events) = (loaded.unwrap_or_default(), working(&ctx.state).unwrap_or_default());
     match res {
         Err(e) if e.downcast_ref::<crate::gate::Refusal>().is_some() => writeln!(out, "tick: {e}")?,
         Err(e) => {
@@ -372,8 +370,7 @@ pub fn tick(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write) -> Result<i32> {
     Ok(0)
 }
 
-/// #791: the running tick's start, while its `tick.beat` is at most 2 tick intervals old; `None`: no tick runs, or
-/// it stalled (no heartbeat for over 2 intervals: stuck).
+/// #791: the running tick's start, while its `tick.beat` is at most 2 tick intervals old; `None`: no tick runs, or it stalled (no heartbeat for over 2 intervals: stuck).
 pub fn running(ctx: &Ctx, cfg: &Config) -> Option<u64> {
     let text = std::fs::read_to_string(ctx.state.with_file_name("tick.beat")).ok()?;
     let mut w = text.split_whitespace().map(|x| x.parse::<u64>().ok());
@@ -395,11 +392,8 @@ pub fn stuck_secs(cfg: &Config) -> u64 {
     2 * cfg.limits.slow_secs
 }
 
-/// #237: reinstall each own job `drift` finds missing or outdated, read it back, log `timer-repaired`; alert when
-/// that fails. Never the tick's own job: reloading it would end this run (its row stays red, alerted).
 fn repair(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> Result<()> {
     for ((label, state), (_, args)) in drift(ctx, cfg, r).into_iter().zip(JOBS) {
-        // #345: a running service is the fast step; its job stays out.
         if label == TICK || state == "loaded" || label == FAST && crate::service::up(ctx).is_some() {
             continue;
         }
@@ -436,8 +430,7 @@ fn snap(ctx: &Ctx, cfg: &Config) -> Vec<(PathBuf, Vec<u8>)> {
     v
 }
 
-/// `drover setup`: tick job, board job (or adopt one under another label), tailscale serve, profiles sync, then
-/// doctor, whose exit code it returns. Each step prints `✓ done`, `= already` or `✗ <error> → <fix>`.
+/// `drover setup`: tick job, board job (or adopt one under another label), tailscale serve, profiles sync, then doctor, whose exit code it returns. Each step prints `✓ done`, `= already` or `✗ <error> → <fix>`.
 pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Result<i32> {
     let cfg = Config::load(&ctx.config)?;
     let (label, addr) = (cfg.serve.launchd_label.as_deref(), cfg.serve.addr());
@@ -469,16 +462,19 @@ pub fn setup(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, load: bool) -> Resu
     let tick = install(ctx, &cfg, r, TICK, &["tick"], load);
     let fast = install(ctx, &cfg, r, FAST, &["drive", "--fast"], load);
     let [update, clean] = MORE.map(|(l, args)| install(ctx, &cfg, r, l, args, load));
-    writeln!(
-        out,
-        "{}",
-        [tick, fast, board, tailscale, sync, update, clean].join("\n")
-    )?;
+    let labels = cfg
+        .fleet
+        .values()
+        .filter_map(|f| Some(crate::gh::ensure_label(r, f, f.merge_label.as_deref()?)));
+    let rows: Vec<_> = [tick, fast, board, tailscale, sync, update, clean]
+        .into_iter()
+        .chain(labels)
+        .collect();
+    writeln!(out, "{}", rows.join("\n"))?;
     crate::doctor::doctor(ctx, r, out, false, false)
 }
 
-/// #345 `drover service --install`: write its unit (kept alive: launchd/systemd restart it) and print the commands
-/// that swap it in for the fast-step job (and the board job, with `--board`); loads nothing itself.
+/// #345 `drover service --install`: write its unit (kept alive: launchd/systemd restart it) and print the commands that swap it in for the fast-step job (and the board job, with `--board`); loads nothing itself.
 pub fn service_unit(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, api: &str, board: Option<&str>) -> Result<()> {
     let cfg = Config::load(&ctx.config)?;
     let mut args = vec!["service", "--api", api];
@@ -516,22 +512,6 @@ pub fn phone(ctx: &Ctx, cfg: Option<&Config>, events: &[Event]) -> (&'static str
     }
 }
 
-/// herdr's (client, server) versions, and whether the server is older (`herdr status`).
-pub fn herdr_versions(r: &dyn Runner) -> Option<(String, String, bool)> {
-    versions(&herdr::status(r).ok()?)
-}
-
-/// `herdr status` text's (client, server) versions, and whether the server is older.
-pub fn versions(status: &str) -> Option<(String, String, bool)> {
-    let version = |l: &str| l.trim().strip_prefix("version: ").map(String::from);
-    let mut v = status.lines().filter_map(version);
-    let (client, server) = (v.next()?, v.next()?);
-    let parse = |v: &str| v.split('.').map(|n| n.parse().unwrap_or(0)).collect::<Vec<u32>>();
-    let older = parse(&server) < parse(&client);
-    Some((client, server, older))
-}
-
-/// Tone for a time: amber after 10 min, red after 15 (or never).
 fn tone(now: u64, t: Option<u64>) -> &'static str {
     let since = t.map_or(u64::MAX, |t| now.saturating_sub(t));
     ["g", "a", "r"][usize::from(since > 600) + usize::from(since > 900)]
@@ -541,7 +521,6 @@ fn ago(now: u64, t: Option<u64>) -> String {
     t.map_or("never".into(), |t| format!("{} ago", age(now.saturating_sub(t))))
 }
 
-/// The last tick: the `check.at` stamp `check` writes, red when a `tick-failed` is newer.
 fn tick_row(ctx: &Ctx, events: &[Event]) -> (&'static str, String) {
     let stamp = std::fs::read_to_string(ctx.state.with_file_name("check.at")).unwrap_or_default();
     let ran = stamp.trim().parse::<u64>().ok();
@@ -553,10 +532,8 @@ fn tick_row(ctx: &Ctx, events: &[Event]) -> (&'static str, String) {
     }
 }
 
-/// The Host tab's Services rows from the event log, `herdr`, the host and the stamps; `board`: the serving
-/// page's own detail, else the board is up when its address listens.
 pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) -> Vec<Row> {
-    let events = crate::events::shared(&ctx.state).unwrap_or_default();
+    let events = crate::events::working(&ctx.state).unwrap_or_default();
     let row = |item: &str, t, d: String, fix: &str| (item.to_string(), t, d, fix.to_string());
     let addr = cfg.serve.addr();
     let port = format!("-iTCP:{}", addr.rsplit(':').next().unwrap_or_default());
@@ -565,7 +542,6 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     let t = if board.is_some() { "g" } else { "r" };
     let d = board.unwrap_or(format!("down on {addr}"));
     let mut rows = vec![row("board", t, d, "drover setup")];
-    // #237: each own job against this build, folded into its step's row: red unless loaded.
     let drift = drift(ctx, cfg, r);
     let service = crate::service::up(ctx);
     let job = |i: usize, t, d: String| match drift[i].1 {
@@ -588,23 +564,19 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
             row(&item, tone(ctx.now, last), driven, FIX)
         });
     }
-    // #246: how long the last fast step took and when it ran.
     let (at, secs) = drive::fast_step(ctx).unzip();
     let took = secs
         .flatten()
         .map_or(String::new(), |s| format!("fast step {s:.1} s · "));
-    // #237: red after 3× its interval.
     let late = at.is_none_or(|t| ctx.now.saturating_sub(t) > 3 * cfg.limits.fast_secs);
     let t = if late { "r" } else { tone(ctx.now, at) };
     let (t, d) = job(1, t, format!("{took}ran {}", ago(ctx.now, at)));
     rows.push(row("fast step", t, d, FIX));
-    // #304: the last kick (a lane push, stop or ask, a board tap) beside the timers.
     let k = events.iter().rfind(|e| e.kind == "kick");
     let why = k.map(|e| format!(" ({} #{})", e.str("why").unwrap_or("?"), e.issue.unwrap_or(0)));
     let d = format!("last kick {}{}", ago(ctx.now, k.map(|e| e.ts)), why.unwrap_or_default());
     rows.push(row("kick", "m", d, ""));
-    // #529: the service's lane event streams; amber while one is down and the passes poll.
-    for rt in [herdr::BIN, "shed"].iter().filter(|_| service.is_some()) {
+    for rt in ["shed"].iter().filter(|_| service.is_some()) {
         let last = events
             .iter()
             .rfind(|e| e.kind == "lane-stream" && e.str("runtime") == Some(rt));
@@ -617,18 +589,11 @@ pub fn services(ctx: &Ctx, cfg: &Config, r: &dyn Runner, board: Option<String>) 
     }
     let (t, d) = phone(ctx, Some(cfg), &events);
     rows.push(row("phone alerts", t, d, "drover push test"));
-    let v = herdr_versions(r);
-    let shown = |(c, s, _): &(String, String, bool)| format!("client {c}, server {s}");
-    let d = v.as_ref().map_or("not on PATH, or no server".into(), shown);
-    let t = v.map_or("r", |v| ["g", "a"][usize::from(v.2)]);
-    rows.push(row(herdr::BIN, t, d, [herdr::BIN, HANDOFF][usize::from(t == "a")]));
     if let Some(gb) = host::free_gb(r) {
         let (min, n) = (cfg.limits.min_free_gb, usize::from);
         let t = ["g", "a", "r"][n(gb <= min * 1.25) + n(gb < min)];
         rows.push(row("disk", t, format!("{gb:.0} GB free"), "drover clean --yes"));
     }
-    // #164: the worktree total from the last walk (#160: never a `du` here), against the budget; amber from 80 %,
-    // red over (DISK_BUDGET).
     let budget = cfg.limits.worktree_budget_gb;
     let du = crate::check::worktree_du(ctx);
     let (t, d) = du.map_or(("a", "not measured yet".into()), |(gb, at)| {

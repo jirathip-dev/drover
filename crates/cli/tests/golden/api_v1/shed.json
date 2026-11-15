@@ -1,0 +1,16 @@
+{
+  "response": [
+    {
+      "age": "0s",
+      "host": "bazzite",
+      "labels": {},
+      "last": "Paste code here >",
+      "name": "drover-setup-claude-B",
+      "runtime": "shed",
+      "state": "running"
+    }
+  ],
+  "route": "GET /api/v1/shed",
+  "schema": [],
+  "type": "Vec<ShedRow>"
+}

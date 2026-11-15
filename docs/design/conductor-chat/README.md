@@ -2,7 +2,7 @@
 
 `index.html` is the board with a new middle tab, `[chat]` (`[queue] [lanes] [chat] [host] [events]`): repos with their conductor threads, one thread open with choice
 rows, image bubbles, a file, a link, a config-propose card and a secret-request card (Amendment A). It links
-`assets/serve.css` unchanged and inlines the farm scheme's tokens as `serve.rs` writes them. One `<style>` block holds
+assets/serve.css (removed in #927) unchanged and inlines the farm scheme's tokens as `serve.rs` writes them. One `<style>` block holds
 the new rules, which use existing tokens only and move to `serve.css` when the tab is built (step 1). Static: the
 hash picks the view.
 
@@ -21,7 +21,7 @@ writes 844 px slices.
 
 **Data:** illustrative, in the demo's fleets (`acme-api`, `acme-web`, `docs`), so nothing private is shown. The story
 is the AC's live readback: a grill (3 choices, one answered from Telegram), a filed issue (#52) queued after #21, a
-mockup sent back, then a config proposal and a secret request. `IMG_2041.PNG` is `../farm-v2/board-events-390.png`
+mockup sent back, then a config proposal and a secret request. `IMG_2041.PNG` is `board-events-390.png`
 (a real board screenshot). `rate-limits-docs-390.png` is the conductor's "mockup", made from
 `fixtures/rate-limits-docs.html`. The account names, times and ids (`q31`, `c8`) are made up. The working directory
 `~/.local/state/drover/conductor/t3` is the decided one (Q6, #386: the state folder, per thread).

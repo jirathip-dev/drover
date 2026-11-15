@@ -93,7 +93,7 @@ fn a_live_reviewer_quiet_two_hours_without_a_verdict_is_replaced_in_the_same_rou
     assert_eq!(st.len(), 1, "{out}");
     assert_eq!(st[0].str("agent"), Some("sendmeter-rev-12-r2"));
     assert_eq!(st[0].str("new"), Some("sendmeter-rev-12-r2"));
-    assert_eq!(st[0].data["idle_minutes"].as_u64(), Some(121));
+    assert_eq!(st[0].val("idle_minutes").as_u64(), Some(121));
     assert_eq!(starts(&sh), 1, "{out}");
     let s = fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].clone();
     assert_eq!(s.state, "review(2)", "no round burned");
@@ -101,22 +101,18 @@ fn a_live_reviewer_quiet_two_hours_without_a_verdict_is_replaced_in_the_same_rou
 }
 
 #[test]
-fn a_reviewer_whose_pane_changed_is_not_replaced() {
+fn a_reviewer_whose_shed_status_changed_is_not_replaced() {
     let (c, sh) = stuck("stale-rev-busy");
     let t0 = 1_000_000;
     drive(&at(&c, t0), &fake(&sh, QUIET));
-    let r = fake(
-        &sh,
-        "Reading crates/core/src/drive.rs\nRunning cargo test -p drover\n> ",
-    );
-    let out = drive(&at(&c, t0 + 121 * 60), &r);
+    let r = fake(&sh, QUIET);
+    sh.set(REV, |t| t["reported"] = json!({"state": "blocked"}));
+    drive(&at(&c, t0 + 100 * 60), &r);
+    drive(&at(&c, t0 + 101 * 60), &fake(&sh, QUIET));
+    let out = drive(&at(&c, t0 + 121 * 60), &fake(&sh, QUIET));
     assert!(kinds(&c, "rev-stale-replaced").is_empty(), "{out}");
     assert_eq!(starts(&sh), 0, "{out}");
-    let r = fake(
-        &sh,
-        "Reading crates/core/src/drive.rs\nRunning cargo test -p drover\n> ",
-    );
-    let out = drive(&at(&c, t0 + 200 * 60), &r);
+    let out = drive(&at(&c, t0 + 200 * 60), &fake(&sh, QUIET));
     assert!(kinds(&c, "rev-stale-replaced").is_empty(), "{out}");
 }
 

@@ -9,7 +9,6 @@ use std::path::Path;
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-/// Every POST answers `Reply`: the form ops (`serve.rs` `write`, `PAIRED_OPS`), #555's and #576's.
 const POSTS: &[&str] = &[
     "mv",
     "pause",
@@ -39,7 +38,6 @@ const POSTS: &[&str] = &[
     "conductor-detach",
 ];
 
-/// The JSON shape of `v`: each scalar's type name, an object's keys, a list's elements merged.
 fn shape(v: &Value) -> Value {
     match v {
         Value::Null => json!("null"),
@@ -51,7 +49,6 @@ fn shape(v: &Value) -> Value {
     }
 }
 
-/// Two list elements' shapes as one: objects' keys joined, `null` gives way.
 fn merge(a: Value, b: Value) -> Value {
     match (a, b) {
         (Value::Object(mut a), Value::Object(b)) => {
@@ -72,8 +69,6 @@ fn merge(a: Value, b: Value) -> Value {
     }
 }
 
-/// Where shape `got` leaves `want` (`at` its path): a key added or gone, or a type changed; `null` and an empty
-/// list fit anything.
 fn diff(at: &str, want: &Value, got: &Value, out: &mut Vec<String>) {
     match (want, got) {
         _ if want == "null" || got == "null" => {}
@@ -102,12 +97,10 @@ fn diff(at: &str, want: &Value, got: &Value, out: &mut Vec<String>) {
     }
 }
 
-/// The schema of type `T`: the shape of its default (every field; lists empty, options null).
 fn schema<T: Serialize + Default>() -> Value {
     shape(&serde_json::to_value(T::default()).unwrap())
 }
 
-/// One route's fixture `name`: `got` against the recorded response and `ty`'s schema (`BLESS=1` writes it).
 fn check(name: &str, route: &str, (ty, schema): (&str, Value), got: Value, fails: &mut Vec<String>) {
     let file = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("tests/golden/api_v1/{name}.json"));
     let fresh = json!({"route": route, "type": ty, "schema": schema, "response": got});
@@ -131,7 +124,6 @@ fn check(name: &str, route: &str, (ty, schema): (&str, Value), got: Value, fails
     fails.extend(out.into_iter().map(|o| format!("{name} ({route}): {o}")));
 }
 
-/// `method path` on the board as `cookie`'s device: its JSON reply, the test's folder shown as `<tmp>`.
 fn call(s: &Server, c: &drover::Ctx, (method, path): (&str, &str), body: &str, cookie: &str) -> Value {
     let r = format!(
         "{method} {path} HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}Content-Length: {}\r\n\r\n{body}",
@@ -143,17 +135,42 @@ fn call(s: &Server, c: &drover::Ctx, (method, path): (&str, &str), body: &str, c
     serde_json::from_str(&body).unwrap_or_else(|e| panic!("{method} {path}: {e}: {res}"))
 }
 
+struct Bazzite(OnShed, FakeShed);
+
+impl drover::runner::Runner for Bazzite {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover::runner::Out> {
+        self.0.run(prog, args)
+    }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<drover::runner::Out> {
+        if prog == "ssh" && args.join(" ").contains("bazzite -- 'shed' 'connect'") {
+            let stdout = self.1.connect(input);
+            return Ok(drover::runner::Out {
+                stdout,
+                ..Default::default()
+            });
+        }
+        self.0.run_in(prog, args, input)
+    }
+    fn sleep(&self, secs: u64) {
+        self.0.sleep(secs);
+    }
+    fn shed(&self) -> Option<drover::shed::Shed> {
+        self.0.shed()
+    }
+}
+
 #[test]
 fn every_route_keeps_its_fixtures_shape() {
-    let (c, r) = v1_board_on("v1-contract", herdr_setup(Fake::default().reply("gh", "")));
+    let (c, r) = v1_board_on("v1-contract", Fake::default().reply("gh", ""));
+    let r = Bazzite(r, FakeShed::new());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let post = |op: &str, v: Value| call(&s, &c, ("POST", &format!("/api/v1/{op}")), &v.to_string(), &ck);
-    // A thread to read, and a setup pane open.
     post("chat-about", json!({"fleet": "sendmeter", "issue": 30}));
     let ev = drover::events::read(&c.state).unwrap();
     let t = ev.iter().rev().find_map(|e| e.str("thread")).unwrap().to_string();
     post("setup", json!({"host": "bazzite", "name": "claude B"}));
+    r.1.screen("drover-setup-claude-B", "Paste code here >\n");
     let mut fails = vec![];
     let get = |p: &str| call(&s, &c, ("GET", p), "", &ck);
     macro_rules! gets {
@@ -169,9 +186,9 @@ fn every_route_keeps_its_fixtures_shape() {
         ("host", "/api/v1/host", HostTab),
         ("queue", "/api/v1/queue", QueueTab),
         ("needs", "/api/v1/needs", NeedsTab),
-        ("lanes", "/api/v1/lanes", LanesTab)
+        ("lanes", "/api/v1/lanes", LanesTab),
+        ("shed", "/api/v1/shed", Vec<ShedRow>)
     );
-    // #681: a pending repo handoff from it: its `handoff` item (with the card's rows) in `thread/<t>` and `chat`.
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let h = [t.as_str(), "sendmeter", "Facets", "add facets\nthen reindex"];
     drover::orchestrator::handoff(&c, &cfg, &r, h).unwrap();
@@ -182,7 +199,7 @@ fn every_route_keeps_its_fixtures_shape() {
         ("lane/<agent>", format!("/api/v1/lane/{IMPL}"), LaneChat),
         ("herd", "/api/v1/herd", Herd),
         ("roles", "/api/v1/roles?fleet=sendmeter", Roles),
-        ("setup/<pane>", "/api/v1/setup/w9:p1", SetupScreen),
+        ("setup/<pane>", "/api/v1/setup/drover-setup-claude-B", SetupScreen),
         ("issue/<fleet>/<n>", "/api/v1/issue/sendmeter/12", IssueView),
         ("lessons", "/api/v1/lessons", Lessons),
         (
@@ -191,7 +208,6 @@ fn every_route_keeps_its_fixtures_shape() {
             Digest
         )
     );
-    // Each POST's `Reply` (a refusal is the same shape as an OK).
     let m = get("/api/v1/state")["mtime"].clone();
     for op in POSTS {
         let got = post(
@@ -207,7 +223,6 @@ fn every_route_keeps_its_fixtures_shape() {
             &mut fails,
         );
     }
-    // #633: a cooee thread attached as the conductor, and an ask in it, as `events` lists them.
     let since = get("/api/v1/events?since=0")["seq"].clone();
     let attach = json!({"fleet": "sendmeter", "thread": "cooee-7f3a"});
     let ty = ("ConductorAttach", schema::<ConductorAttach>());
@@ -274,7 +289,6 @@ fn a_changed_shape_fails_the_contract() {
     );
 }
 
-/// `diff` against the schema, then against the recorded response.
 fn check_shapes(schema: &Value, old: &Value, got: &Value, out: &mut Vec<String>) {
     diff("", schema, &shape(got), out);
     diff("", &shape(old), &shape(got), out);

@@ -33,8 +33,8 @@ pub fn pass(
     out: &mut dyn Write,
     fleets: &[&str],
 ) -> Result<()> {
-    let events = crate::events::read(&ctx.state)?;
-    let agents = crate::hosts::all_agents(cfg, seen)?;
+    let events = crate::events::working(&ctx.state)?;
+    let agents = crate::session::all(cfg, seen).checked()?.running();
     let mut now: Vec<Breach> = tick(ctx, cfg, r).into_iter().collect();
     for f in fleets {
         now.extend(idle(ctx, cfg, &events, &agents, f));
@@ -188,7 +188,7 @@ fn tick(ctx: &Ctx, cfg: &Config, r: &dyn Runner) -> Option<Breach> {
     })
 }
 
-fn idle(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Value], fleet: &str) -> Option<Breach> {
+fn idle(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[crate::session::Session], fleet: &str) -> Option<Breach> {
     let at = ctx.state.with_file_name(format!("slo-idle-{fleet}.at"));
     let st = fold(events);
     let lanes: Vec<&str> = st
@@ -196,7 +196,7 @@ fn idle(ctx: &Ctx, cfg: &Config, events: &[Event], agents: &[Value], fleet: &str
         .filter(|s| s.fleet == fleet)
         .filter_map(|s| s.lane.as_deref())
         .collect();
-    let working = |a: &Value| a["agent_status"] == "working" && lanes.iter().any(|l| a["name"] == *l);
+    let working = |a: &crate::session::Session| a.busy() && lanes.iter().any(|l| a.name == *l);
     let next = crate::queue::startable(events, fleet)
         .first()
         .and_then(|n| n.parse::<u64>().ok());

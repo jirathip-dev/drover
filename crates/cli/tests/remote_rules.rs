@@ -1,5 +1,3 @@
-//! #592: a remote host keeps no fleet.toml: spawn resolves the lane's hook rules on the main host and ships them beside
-//! the worktree, so the hook there judges a fleet that host never heard of as the main host would.
 mod common;
 use common::*;
 use serde_json::json;
@@ -87,7 +85,6 @@ fn lane_env(r: &Fake, bazzite: &FakeShed, remote: &Path) -> BTreeMap<String, Str
     env
 }
 
-/// `drover hook --role impl` on bazzite: the lane's env, that host's own `fleet.toml` (`None`: none at all).
 fn hook_there(env: &BTreeMap<String, String>, remote: &Path, toml: Option<&str>, cmd: &str) -> String {
     let conf = remote.join("fleet.toml");
     let _ = std::fs::remove_file(&conf);
@@ -139,7 +136,6 @@ fn a_remote_lanes_hook_judges_a_fleet_its_host_never_heard_of() {
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
     let remote = tmpdir("remote-rules-bazzite");
     let env = lane_env(&r, &bazzite, &remote);
-    // bazzite was bootstrapped before sendmeter was added: its own fleet.toml knows only another fleet.
     let stale = "[fleet.other]\nrepo = \"o/other\"\nlocal = \"/tmp/other\"\nintegration = \"staging\"\n";
     for toml in [Some(stale), None] {
         let allowed = hook_there(&env, &remote, toml, "git status");
@@ -154,7 +150,6 @@ fn a_remote_lanes_hook_judges_a_fleet_its_host_never_heard_of() {
     }
 }
 
-/// `drover hook` in a remote lane whose `DROVER_RULES` names `rules`, its host's fleet.toml knowing its fleet.
 fn hook_with_rules(remote: &Path, rules: &Path) -> String {
     let env = BTreeMap::from([
         ("DROVER_LANE".to_string(), "sendmeter:12:impl".to_string()),
@@ -189,7 +184,7 @@ fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
                  \n[[fleet.sendmeter.notify]]\ncmd = \"curl https://api.telegram.org/botSEKRIT/send\"\n";
     let text = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, text + extra).unwrap();
-    secret_file(&c, "API_KEY", "tok-VALUE-123", 0o600); // #707: the `secret:` env's 0600 file
+    secret_file(&c, "API_KEY", "tok-VALUE-123", 0o600);
     let (r, bazzite) = (remote_fake(), FakeShed::new());
     let o = OverSsh {
         f: &r,
@@ -197,7 +192,7 @@ fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
     };
     let (code, out) = run(&c, &o, &["spawn", "sendmeter", "12", "impl", "--host", "bazzite"]);
     assert_eq!(code, 0, "{out} {:?}", r.calls.borrow());
-    let wt = "/home/me/.local/share/drover/work/sendmeter/issue-12"; // #630
+    let wt = "/home/me/.local/share/drover/work/sendmeter/issue-12";
     let inputs = r.inputs.borrow();
     let rules = inputs
         .iter()
@@ -216,7 +211,6 @@ fn the_rules_file_holds_no_secrets_and_the_lane_may_not_edit_it() {
     ] {
         assert!(!rules.1.contains(secret), "{secret}: {}", rules.1);
     }
-    // The lane's own rules are as protected as fleet.toml.
     let remote = tmpdir("remote-rules-edit");
     let file = tmpdir("remote-rules-wt").join("issue-12.rules.json");
     std::fs::write(&file, &rules.1).unwrap();
@@ -245,7 +239,6 @@ fn a_config_change_marks_a_live_remote_lane_rules_stale_until_respawned() {
     );
     let (_, board) = run(&c, &r, &["board", "sendmeter"]);
     assert!(!board.contains("rules stale"), "{board}");
-    // A config apply that leaves its rules alone marks nothing.
     let text = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, text.replace("stall_minutes = 30", "stall_minutes = 40")).unwrap();
     let (_, board) = run(&c, &r, &["board", "sendmeter"]);
@@ -262,7 +255,6 @@ fn a_config_change_marks_a_live_remote_lane_rules_stale_until_respawned() {
     assert!(!board.contains("rules stale"), "{board}");
 }
 
-/// #592 (q659): a host with no fleet.toml gets each lane's profile from spawn, by name.
 #[test]
 fn spawn_syncs_the_lanes_profile_on_a_host_with_no_fleet_toml() {
     let (c, _sh) = setup("remote-rules-profile");
@@ -278,7 +270,6 @@ fn spawn_syncs_the_lanes_profile_on_a_host_with_no_fleet_toml() {
     let sync = format!("{SSH}'/opt/drover/bin/drover' 'profiles' 'sync' '--profile' 'fleet-impl' '--role' 'impl'");
     let (at, start) = (r.index(&sync), shed_call_at(&r, "run"));
     assert!(at.is_some() && at < start, "{:?}", r.calls.borrow());
-    // There: that one profile is written with no fleet.toml at all.
     let there = ctx(&tmpdir("remote-rules-profile-there"), "");
     std::fs::remove_file(&there.config).unwrap();
     let (code, out) = run(

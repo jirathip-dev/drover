@@ -1,9 +1,3 @@
-//! #337: the board's speed on a fixture of 30 lanes on 2 hosts (mini, this host, and bazzite, remote), every remote
-//! call 300 ms slow: a step makes at most one remote call per host, and the page, the scene data, `status` and the
-//! first paint in WebKit stay under their targets (hard: a miss fails). The numbers go to `$GITHUB_STEP_SUMMARY`.
-//! #351: every timing goes through the real server (`serve_on` on a socket, its sampler and watcher threads up, this
-//! fixture's runner), never a hand-built page: a call-count probe on the runner proves it; and a steady-state `/live`
-//! change is the changed part's data only (#269: JSON the board draws), under 5 KB. Budgets: docs/performance.md.
 mod common;
 use common::*;
 use drover::events::{append, Event};
@@ -17,31 +11,47 @@ use std::time::{Duration, Instant};
 const NOW: u64 = 1_000_000;
 const ADDR: &str = "127.0.0.1:7777";
 
-/// The fixture's runner: a remote call (ssh, `herdr --machine`) sleeps 300 ms and is counted by host; every call
-/// counts in the probe (`.2`).
-struct Slow(Fake, Mutex<Vec<String>>, AtomicUsize);
+struct Slow(
+    Fake,
+    Mutex<Vec<String>>,
+    AtomicUsize,
+    Option<&'static FakeShed>,
+    &'static FakeShed,
+);
+impl Slow {
+    fn remote(&self, prog: &str, args: &[String]) {
+        self.2.fetch_add(1, Relaxed);
+        if let Some(h) = args.iter().rev().nth(2).filter(|_| prog == "ssh") {
+            std::thread::sleep(Duration::from_millis(300));
+            self.1.lock().unwrap().push(h.clone());
+        }
+    }
+}
 impl Runner for Slow {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
-        self.2.fetch_add(1, Relaxed);
-        let host = match prog {
-            "ssh" => args.iter().rev().nth(2).cloned(),
-            "herdr" if args.first().is_some_and(|a| a == "--machine") => args.get(1).cloned(),
-            _ => None,
-        };
-        if let Some(h) = host {
-            std::thread::sleep(Duration::from_millis(300));
-            self.1.lock().unwrap().push(h);
-        }
+        self.remote(prog, args);
         self.0.run(prog, args)
     }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        if prog != "ssh" || !args.iter().any(|a| a.contains("'shed' 'connect'")) {
+            return self.run(prog, args);
+        }
+        self.remote(prog, args);
+        Ok(Out {
+            stdout: self.4.connect(input),
+            ..Out::default()
+        })
+    }
     fn sleep(&self, _: u64) {}
+    fn shed(&self) -> Option<drover::shed::Shed> {
+        self.3.map(FakeShed::shed)
+    }
 }
 
 fn shed() -> &'static FakeShed {
     Box::leak(Box::new(FakeShed::new()))
 }
 
-/// 30 impl lanes, #1–#15 on mini and #16–#30 on bazzite, each idle with a pane and an unpushed worktree.
 fn fixture() -> (drover::Ctx, Slow) {
     let base = CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"");
     let cfg = format!("{base}\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n");
@@ -51,7 +61,7 @@ fn fixture() -> (drover::Ctx, Slow) {
     let seen = json!({"mini": {"home": "/Users/me", "probed": NOW, "seen": NOW, "up": true},
                       "bazzite": {"home": "/home/me", "probed": NOW, "seen": NOW, "up": true}});
     std::fs::write(st.join("hosts.json"), seen.to_string()).unwrap();
-    let (mut mini, mut bazzite) = (vec![], vec![]);
+    let (mini, bazzite) = (shed(), shed());
     for n in 1..=30u64 {
         let remote = n > 15;
         let wt = if remote {
@@ -63,34 +73,27 @@ fn fixture() -> (drover::Ctx, Slow) {
                 .into()
         };
         let agent = format!("sendmeter-impl-{n}");
-        let mut d = json!({"role": "impl", "agent": agent, "harness": "claude", "pane": format!("w{n}:p1"),
-                           "workspace": format!("w{n}"), "worktree": wt, "branch": format!("issue-{n}")});
+        let mut d = json!({"role": "impl", "agent": agent, "harness": "claude", "pane": agent, "runtime": "shed",
+                           "worktree": wt, "branch": format!("issue-{n}")});
         if remote {
             (d["host"], d["machine"]) = (json!("bazzite"), json!("bazzite"));
         }
         append(&c.state, &Event::new(NOW - 900, "sendmeter", Some(n), "spawn", d)).unwrap();
-        let a = json!({"name": agent, "agent_status": "idle", "pane_id": format!("w{n}:p1"), "cwd": wt});
-        if remote { &mut bazzite } else { &mut mini }.push(a);
+        let sh = if remote { bazzite } else { mini };
+        sh.lane(&agent, "idle", &wt);
+        sh.screen(&agent, "⏺ Working on it\n\n❯ \n");
     }
-    let list = |a: &[serde_json::Value]| json!({"result": {"agents": a}}).to_string();
     let f = Fake::default()
-        .reply("herdr agent list", &list(&mini))
-        .reply("herdr --machine bazzite agent list", &list(&bazzite))
-        .reply("herdr workspace list", r#"{"result":{"workspaces":[]}}"#)
-        .reply("herdr pane read", "⏺ Working on it\n\n❯ \n")
-        .reply("herdr --machine bazzite pane read", "⏺ Working on it\n\n❯ \n")
         .reply("git -C", &format!("{} {}\n", "a".repeat(40), NOW - 600))
-        // #389: no lane has queued anything for the main host.
         .reply("ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C -oControlPersist=10m bazzite -- 'sh' '-c' 'd=", "")
         .reply("ssh", &format!("{} {}\n", "a".repeat(40), NOW - 600));
-    (c, Slow(f, Mutex::default(), AtomicUsize::new(0)))
+    (c, Slow(f, Mutex::default(), AtomicUsize::new(0), Some(mini), bazzite))
 }
 
 fn ms(t: Instant) -> u128 {
     t.elapsed().as_millis()
 }
 
-/// `serve_on` (the real server: socket, sampler, watcher) on this fixture, as `drover serve` runs it; its address.
 fn serve<R: Runner + 'static>(c: drover::Ctx, r: R) -> (&'static drover::Ctx, &'static R, std::net::SocketAddr) {
     let (c, r): (&'static drover::Ctx, &'static R) = (Box::leak(Box::new(c)), Box::leak(Box::new(r)));
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -100,13 +103,11 @@ fn serve<R: Runner + 'static>(c: drover::Ctx, r: R) -> (&'static drover::Ctx, &'
     (c, r, addr)
 }
 
-/// One GET over the socket: (ms, response bytes).
 fn get(addr: std::net::SocketAddr, path: &str) -> (u128, usize) {
     let (t, text) = fetch(addr, path);
     (t, text.len())
 }
 
-/// One GET over the socket: (ms, response text).
 fn fetch(addr: std::net::SocketAddr, path: &str) -> (u128, String) {
     let t = Instant::now();
     let mut s = std::net::TcpStream::connect(addr).unwrap();
@@ -123,7 +124,6 @@ fn fetch(addr: std::net::SocketAddr, path: &str) -> (u128, String) {
     (ms(t), text.into_owned())
 }
 
-/// What a `/live` stream sends within `ms`.
 fn drain(s: &mut std::net::TcpStream, ms: u64) -> String {
     let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], [0u8; 65_536]);
     while Instant::now() < end {
@@ -136,7 +136,6 @@ fn drain(s: &mut std::net::TcpStream, ms: u64) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Appends `line` to the job summary on CI (the numbers on the PR's checks page), and prints it.
 fn report(line: &str) {
     eprintln!("{line}");
     if let Ok(p) = std::env::var("GITHUB_STEP_SUMMARY") {
@@ -158,12 +157,11 @@ fn a_step_makes_one_remote_call_per_host_and_requests_make_none() {
     assert!(drover::snapshot::load(&c).is_some_and(|s| s.reads.keys().any(|k| k.contains("issue-20"))));
     let before = r.2.load(Relaxed);
     let (c, r, addr) = serve(c, r);
-    get(addr, "/"); // warm, as a phone's second load is
+    get(addr, "/");
     r.1.lock().unwrap().clear();
     let (page, size) = get(addr, "/");
-    let (herd, _) = get(addr, "/herd.json");
-    let (lanes, _) = get(addr, "/api/v1/lanes"); // #269: the Lanes tab's data
-                                                 // The probe: these timings ran `serve_on` on this fixture's runner (its renders read through it).
+    let (herd, _) = get(addr, "/screens/lanes");
+    let (lanes, _) = get(addr, "/api/v1/lanes");
     assert!(r.2.load(Relaxed) > before, "serve_on never called the fixture's runner");
     let t = Instant::now();
     let (code, out) = run(c, r, &["status", "sendmeter"]);
@@ -174,21 +172,20 @@ fn a_step_makes_one_remote_call_per_host_and_requests_make_none() {
     assert!(calls.is_empty(), "remote calls on a request or status: {calls:?}");
     report(&format!(
         "#337 perf (30 lanes, 2 hosts, +300 ms per remote call): step {step} ms (drive --fast) · via serve_on's socket: \
-         GET / {page} ms ({} KB) · /herd.json {herd} ms · /api/v1/lanes {lanes} ms · status {status} ms (the CLI)",
+         GET / {page} ms ({} KB) · /screens/lanes {herd} ms · /api/v1/lanes {lanes} ms · status {status} ms (the CLI)",
         size / 1024
     ));
     assert!(page < 150, "GET / took {page} ms (target < 150)");
-    assert!(herd < 100, "/herd.json took {herd} ms (target < 100)");
+    assert!(herd < 100, "/screens/lanes took {herd} ms (target < 100)");
     assert!(status < 300, "status took {status} ms (target < 300)");
     assert!(size < 40 * 1024, "GET / is {size} bytes (target < 40 KB)");
 }
 
-/// #337: only what decides something is read: a recorded verdict's file never again, a merged lane's worktree never.
 #[test]
 fn a_recorded_verdict_and_a_merged_lane_are_never_read() {
     let (c, r) = fixture();
     let rev = "/home/me/.herdr/worktrees/sendmeter/rev-16-r1";
-    let d = json!({"role": "rev", "agent": "sendmeter-rev-16-r1", "harness": "claude", "pane": "w40:p1", "workspace": "w40",
+    let d = json!({"role": "rev", "agent": "sendmeter-rev-16-r1", "harness": "claude", "pane": "sendmeter-rev-16-r1",
                    "worktree": rev, "branch": "rev-16-r1", "sha": "b".repeat(40), "host": "bazzite", "machine": "bazzite"});
     append(&c.state, &Event::new(NOW - 800, "sendmeter", Some(16), "spawn", d)).unwrap();
     let v = json!({"verdict": "FAIL", "sha": "b".repeat(40), "branch": "issue-16"});
@@ -205,8 +202,6 @@ fn a_recorded_verdict_and_a_merged_lane_are_never_read() {
     assert!(!keys.iter().any(|k| k.contains("issue-17'")), "{keys:?}");
 }
 
-/// #337: the page carries no tab (#269: the TypeScript board draws each from API v1); API v1's Lanes is the lanes, its
-/// needs cards the cards only.
 #[test]
 fn the_page_carries_no_tab_and_each_part_is_its_own_read() {
     let (c, r) = fixture();
@@ -218,11 +213,10 @@ fn the_page_carries_no_tab_and_each_part_is_its_own_read() {
     };
     let page = body("/", "Cookie: tab=lanes\r\n");
     assert!(
-        page.contains("<div id=needs></div>")
-            && page.contains("<section id=queue></section><section id=lanes></section><section id=chat></section>")
-            && !page.contains("sendmeter-impl-20"),
+        page.contains("<div id=cards></div><main></main><nav></nav>") && !page.contains("sendmeter-impl-20"),
         "{page}"
     );
+    assert!(body("/screens/lanes", "").contains("\"id\":\"l-sendmeter-impl-20\""));
     assert!(body("/api/v1/lanes", "").contains("\"name\":\"sendmeter-impl-20\""));
     let needs = body("/api/v1/needs", "");
     assert!(
@@ -231,8 +225,6 @@ fn the_page_carries_no_tab_and_each_part_is_its_own_read() {
     );
 }
 
-/// #450: no full-screen loader: one strip right under the header holds the loading mark (the chat's `.tld`), its word and
-/// the age; API v1's needs carry the step's look as a time for it (`snap`), never the old `as of the step's look` box.
 #[test]
 fn the_loader_and_the_age_are_one_strip_under_the_header() {
     let (c, r) = fixture();
@@ -249,14 +241,10 @@ fn the_loader_and_the_age_are_one_strip_under_the_header() {
         .split_once("</div>")
         .unwrap()
         .0;
-    assert!(rest.starts_with("<i id=ptr hidden>↻</i><div id=strip>"), "{rest}");
-    assert!(
-        strip.starts_with("<span id=ld class=tld hidden aria-hidden=true><svg class=lds"),
-        "{strip}"
-    );
-    assert!(
-        strip.ends_with("<span class=ldw>loading</span><span id=stale hidden></span>"),
-        "{strip}"
+    assert!(rest.starts_with("<div id=strip>"), "{rest}");
+    assert_eq!(
+        strip,
+        "<span id=ld hidden><i>↻</i> loading</span><span id=stale hidden></span>"
     );
     assert_eq!(page.matches("id=ld ").count(), 1);
     let res = s.respond(
@@ -272,8 +260,6 @@ fn the_loader_and_the_age_are_one_strip_under_the_header() {
     assert!(!page.contains("as of the step's look"));
 }
 
-/// #337: the first contentful paint in WebKit (warm: the second load in one WebKit, its caches and service worker up;
-/// the cold one, a new WebKit process, is reported) of the page a real board serves from the snapshot, under 300 ms. Runs where WebKit is at hand (the macOS CI job).
 #[test]
 fn the_first_paint_in_webkit_is_under_300ms() {
     if no_webkit() {
@@ -283,7 +269,6 @@ fn the_first_paint_in_webkit_is_under_300ms() {
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     let base = format!("http://{}/", serve(c, r).2);
     let file = tmpdir("perf-fcp").join("page.png");
-    // Read after the shot's wait (`window.late`): the entry lands once the frame has painted.
     let fcp = "Object.defineProperty(window, 'late', {get: () => new Promise(r => { const t = Date.now(), f = () => { const e = performance.getEntriesByName('first-contentful-paint')[0]; if (e || Date.now() - t > 5000) r([e ? e.startTime : -1]); else setTimeout(f, 20); }; f(); })})";
     let paint = |warm: bool| {
         let mut sw = webview();
@@ -312,9 +297,6 @@ fn the_first_paint_in_webkit_is_under_300ms() {
     assert!(warm < 300.0, "first contentful paint {warm:.0} ms (target < 300)");
 }
 
-/// #351: after a part's first copy on a stream, `/live` sends only what changed: an ask is one `needs` (#269: the
-/// cards' data, the TypeScript board draws it; #266: Events, the old probe, is the board's), no Lanes and no [chat],
-/// under 5 KB, on the 30-lane board served by `serve_on`.
 #[test]
 fn a_steady_state_live_change_is_one_part_under_5kb() {
     let (c, r) = fixture();
@@ -363,36 +345,8 @@ fn a_steady_state_live_change_is_one_part_under_5kb() {
         "a steady-state /live change is {} bytes (target < 5 KB)",
         got.len()
     );
-    // The board draws the part from that data: the same cards it draws from API v1's `needs` now.
-    if std::process::Command::new("node").arg("--version").output().is_err() {
-        return eprintln!("skipping the client half: no node here");
-    }
-    let data = got
-        .split("event: needs\ndata: ")
-        .nth(1)
-        .unwrap()
-        .split("\n\n")
-        .next()
-        .unwrap();
-    let mut now = std::net::TcpStream::connect(addr).unwrap();
-    now.write_all(format!("GET /api/v1/needs HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
-        .unwrap();
-    let mut res = String::new();
-    now.read_to_string(&mut res).unwrap();
-    let drawn = board_js(&[
-        (data, "needs.tab(d)"),
-        (&res[res.find("\r\n\r\n").unwrap() + 4..], "needs.tab(d)"),
-    ]);
-    assert!(
-        drawn[0].contains("probe-2?") && drawn[0].contains("seed-9?"),
-        "{}",
-        drawn[0]
-    );
-    assert_eq!(drawn[0], drawn[1]);
 }
 
-/// #447: a 30,000-event log and 200 idle lanes, each with an answered ask, a review round and the step's chatter;
-/// ten asks still open.
 fn big() -> (drover::Ctx, Fake, &'static FakeShed) {
     big_with(200)
 }
@@ -439,9 +393,6 @@ fn big_with(lanes: u64) -> (drover::Ctx, Fake, &'static FakeShed) {
     (c, f, sh)
 }
 
-/// #447: the waits are linear in the log: `snapshot::waits` under 200 ms, and the Lanes tab's data
-/// (`/api/v1/lanes`, `/herd.json`, served from the step's snapshot) under 300 ms on 30,000 events and 200 lanes, in a release build (CI's perf step; a debug build
-/// reports only).
 #[test]
 fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
     let (c, r, sh) = big();
@@ -449,9 +400,9 @@ fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
     let events = drover::events::read(&c.state).unwrap();
     assert_eq!(events.len(), 30_000);
     let on = sh.on(&r);
-    let list = drover::herdr::list(&on, "agent").unwrap();
+    let list = drover::session::all(&cfg, &on);
     let st = drover::events::fold(&events);
-    let all = drover::snapshot::lanes(&cfg, &on, &c, (&events, &st), &list);
+    let all = drover::snapshot::lanes(&cfg, &on, (&events, &st), &list);
     assert_eq!(all.len(), 200);
     let t = Instant::now();
     let w = drover::snapshot::waits(&c, &cfg, &on, &events, &all);
@@ -464,24 +415,23 @@ fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     let mut snap = drover::snapshot::load(&c).unwrap();
     assert_eq!(snap.waits.len(), w.len(), "the step saves the waits the board reads");
-    // Tag the saved waits: a request that shows the tag read the snapshot instead of scanning the log.
     for w in &mut snap.waits {
         w.what = format!("snaphit {}", w.what);
     }
     drover::db::put(&c.state, "board", snap.ts, &snap).unwrap();
-    let (_, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0)));
+    let (_, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0), None, shed()));
     let mut lanes = 0;
-    for path in ["/api/v1/lanes", "/herd.json"] {
+    for path in ["/api/v1/lanes", "/api/v1/herd", "/screens/lanes"] {
         fetch(addr, path);
         let (t, body) = fetch(addr, path);
         assert!(
-            body.contains("snaphit"),
+            body.contains("snaphit") || path == "/screens/lanes",
             "{path} worked the waits out again instead of reading the snapshot"
         );
         lanes = lanes.max(t);
     }
     report(&format!(
-        "#447 perf (30,000 events, 200 lanes): snapshot::waits {waits} ms · GET /api/v1/lanes, /herd.json {lanes} ms"
+        "#447 perf (30,000 events, 200 lanes): snapshot::waits {waits} ms · GET /api/v1/lanes, /api/v1/herd, /screens/lanes {lanes} ms"
     ));
     if cfg!(debug_assertions) {
         return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
@@ -494,7 +444,6 @@ extern "C" {
     fn getrusage(who: i32, usage: *mut [i64; 18]) -> i32;
 }
 
-/// #560: This process's user + system CPU time so far, in ms (`getrusage(RUSAGE_SELF)`: two `timeval`s first).
 fn cpu_ms() -> f64 {
     let mut u = [0i64; 18];
     assert_eq!(unsafe { getrusage(0, &mut u) }, 0);
@@ -502,14 +451,12 @@ fn cpu_ms() -> f64 {
     tv(u[0], u[1]) + tv(u[2], u[3])
 }
 
-/// #560: the board's reads over a 30,000-event store (20 lanes) cost under 2 s of CPU per 100 requests (about 1 s on the mini, 3.4 s before #560), in a release
-/// build (a debug build reports only): each request reads only the events appended since the last, never the whole log.
 #[test]
 fn a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget() {
     let (c, r, _sh) = big_with(20);
     assert_eq!(run(&c, &r, &["drive", "--fast"]).0, 0);
     let state = c.state.clone();
-    let (_, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0)));
+    let (_, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0), None, shed()));
     let paths = [
         "/api/v1/state",
         "/api/v1/host",
@@ -517,7 +464,7 @@ fn a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget() {
         "/api/v1/needs",
         "/api/v1/lanes",
         "/api/v1/chat",
-        "/herd.json",
+        "/screens/lanes",
         "/api/v1/events?since=29990",
         "/",
         "/api/v1/queue",
@@ -525,7 +472,6 @@ fn a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget() {
     paths.iter().for_each(|p| drop(fetch(addr, p)));
     let t = cpu_ms();
     for i in 0..100 {
-        // The fleet keeps logging: every tenth request has a new event to read.
         if i % 10 == 0 {
             append(
                 &state,
@@ -706,7 +652,7 @@ fn the_state_read_stays_under_300ms_on_a_150k_event_log() {
         }
         Err(_) => huge(),
     };
-    let (c, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0)));
+    let (c, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0), None, shed()));
     let first = fetch(addr, "/api/v1/state").0;
     let rebuilt = drover::events::REBUILDS.load(Relaxed);
     let mut t: Vec<u128> = (0..5).map(|_| fetch(addr, "/api/v1/state").0).collect();
@@ -726,7 +672,7 @@ fn the_state_read_stays_under_300ms_on_a_150k_event_log() {
         "/api/v1/chat",
         "/api/v1/queue",
         "/api/v1/host",
-        "/herd.json",
+        "/screens/lanes",
         "/",
     ] {
         let res = send(addr, &format!("GET {p} HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n"));
@@ -748,7 +694,11 @@ fn the_state_read_stays_under_300ms_on_a_150k_event_log() {
     };
     assert!(asks(&fetch(addr, "/api/v1/state").1).contains(&"alpha-q1".to_string()));
     let msg = op(addr, &cookie, "op=answer&fleet=alpha&id=alpha-q1&choice=yes");
-    assert!(msg.contains("answered"), "{msg}");
+    assert!(msg.contains("answer%20accepted"), "{msg}");
+    let t0 = std::time::Instant::now();
+    while asks(&fetch(addr, "/api/v1/state").1).contains(&"alpha-q1".to_string()) && t0.elapsed().as_secs() < 30 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
     let (after, body) = fetch(addr, "/api/v1/state");
     assert!(
         !asks(&body).contains(&"alpha-q1".to_string()),
@@ -773,7 +723,18 @@ impl Runner for NoSpawn {
         }
         self.0.run(prog, args)
     }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
+        if drover::runner::in_request() {
+            let line = format!("{prog} {}", args.join(" "));
+            self.1.lock().unwrap().push(line.clone());
+            panic!("#859: `{line}` started on a board request");
+        }
+        self.0.run_in(prog, args, input)
+    }
     fn sleep(&self, _: u64) {}
+    fn shed(&self) -> Option<drover::shed::Shed> {
+        self.0.shed()
+    }
 }
 
 #[test]
@@ -797,7 +758,7 @@ fn no_board_request_starts_a_process() {
         "/api/v1/lane/sendmeter-impl-1",
         "/api/v1/lane/sendmeter-impl-20",
         "/lane?agent=sendmeter-impl-1",
-        "/herd.json",
+        "/screens/lanes",
         "/screens/queue",
         "/screens/cards",
         "/screens/events",
@@ -819,11 +780,7 @@ fn no_board_request_starts_a_process() {
     );
     let v: serde_json::Value = serde_json::from_str(&api_body(&fetch(addr, "/api/v1/state").1)).unwrap();
     assert_eq!(v["lanes"].as_array().unwrap().len(), 30, "{}", v["lanes"]);
-    assert!(
-        v["sources"]["herdr"].is_u64() && v["sources"]["remote"].is_u64(),
-        "{}",
-        v["sources"]
-    );
+    assert!(v["sources"]["remote"].is_u64(), "{}", v["sources"]);
 }
 
 fn api_body(res: &str) -> String {

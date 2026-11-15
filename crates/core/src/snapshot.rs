@@ -1,14 +1,12 @@
-//! #337: the board's one snapshot (#344: the `board` row in `state.db`): every read the board, `status` and `hosts` make, taken
-//! by the fast step and each kick, every remote host's reads in one ssh call; a request replays it, never a remote read.
 use crate::config::Config;
 use crate::events::{Event, States};
 use crate::hosts::{quote, On};
 use crate::lanes::{self, Lane};
 use crate::runner::{argv, Out, Runner};
+use crate::session::Sessions;
 use crate::waiting::Waiting;
-use crate::{herdr, Ctx};
+use crate::Ctx;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
@@ -23,16 +21,18 @@ pub struct Snapshot {
     pub key: String,
 }
 
-/// herdr where a host installs it (docs/hosts.md), for a non-login ssh shell.
-const HERDR: &str = "PATH=\"$HOME/.local/bin:$PATH\"";
-
 pub fn key(prog: &str, args: &[String]) -> String {
     format!("{prog} {}", args.join(" "))
 }
 
-/// A read through another host (ssh, `herdr --machine`).
-pub fn remote(prog: &str, args: &[String]) -> bool {
-    prog == "ssh" || prog == herdr::BIN && args.first().is_some_and(|a| a == "--machine")
+/// A remote read with stdin (`shed connect`) by its command line and its requests.
+pub fn key_in(prog: &str, args: &[String], input: &str) -> String {
+    format!("{}\n{input}", key(prog, args))
+}
+
+/// A read through another host (ssh).
+pub fn remote(prog: &str) -> bool {
+    prog == "ssh"
 }
 
 /// #344: the `board` row of the database's snapshots.
@@ -49,8 +49,7 @@ pub fn out(v: Option<String>) -> Out {
     }
 }
 
-/// What a read the snapshot lacks does: `Collect` (the step's look: ssh is batched, answered from the last snapshot
-/// meanwhile; the rest runs and is kept), `Live` (runs), `Local` (a remote one fails, the rest runs).
+/// What a read the snapshot lacks does: `Collect` (the step's look: ssh is batched, answered from the last snapshot meanwhile; the rest runs and is kept), `Live` (runs), `Local` (a remote one fails, the rest runs).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Miss {
     Collect,
@@ -94,7 +93,6 @@ impl<'a> Snap<'a> {
             ts,
         }
     }
-    /// One ssh call per host: its wanted reads as one script, each output and exit code after a `\x1e`.
     fn fetch(&self) {
         let mut by: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
         for (k, (m, line)) in std::mem::take(&mut *lock(&self.want)) {
@@ -109,17 +107,7 @@ impl<'a> Snap<'a> {
             let mut parts = text.split('\x1e');
             for (k, _) in cmds {
                 let (o, code) = (parts.next(), parts.next());
-                let mut o = o.filter(|_| code == Some("0")).map(String::from);
-                // The host's agents decide what drive does: a failed batch read is asked through herdr itself.
-                if o.is_none() && k.ends_with(" agent list") && k.starts_with(herdr::BIN) {
-                    let a = argv(&["--machine", &m, "agent", "list"]);
-                    o = self
-                        .r
-                        .run(herdr::BIN, &a)
-                        .ok()
-                        .filter(|o| o.code == 0)
-                        .map(|o| o.stdout);
-                }
+                let o = o.filter(|_| code == Some("0")).map(String::from);
                 lock(&self.reads).insert(k, o);
             }
         }
@@ -129,10 +117,8 @@ impl<'a> Snap<'a> {
 impl Runner for Snap<'_> {
     fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<Out> {
         let k = key(prog, args);
-        // A herdr read on another host runs there too, through the host's own herdr.
         let there = match args {
             [.., m, _, line] if prog == "ssh" => Some((m.clone(), line.clone())),
-            [_, m, rest @ ..] if remote(prog, args) => Some((m.clone(), format!("{HERDR} {}", quote(prog, rest)))),
             _ => None,
         };
         if let Some(t) = there.filter(|_| self.miss == Miss::Collect) {
@@ -142,7 +128,7 @@ impl Runner for Snap<'_> {
         if let Some(v) = lock(&self.reads).get(&k) {
             return Ok(out(v.clone()));
         }
-        if self.miss == Miss::Local && remote(prog, args) {
+        if self.miss == Miss::Local && remote(prog) {
             return Ok(out(None));
         }
         let o = self.r.run(prog, args)?;
@@ -154,40 +140,45 @@ impl Runner for Snap<'_> {
     fn sleep(&self, secs: u64) {
         self.r.sleep(secs);
     }
-    /// #298: a call with stdin (`shed connect`, a file write) is never a cached read.
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> anyhow::Result<Out> {
         if input.is_empty() {
             return self.run(prog, args);
+        }
+        if !remote(prog) {
+            return self.r.run_in(prog, args, input);
+        }
+        let k = key_in(prog, args, input);
+        if let ([.., m, _, line], Miss::Collect) = (args, self.miss) {
+            let words: Vec<String> = std::iter::once("%s\\n".into())
+                .chain(input.lines().map(String::from))
+                .collect();
+            let piped = format!("({} | {line})", quote("printf", &words));
+            lock(&self.want).insert(k.clone(), (m.clone(), piped));
+            return Ok(out(self.prev.get(&k).cloned().flatten()));
+        }
+        if let Some(v) = lock(&self.reads).get(&k) {
+            return Ok(out(v.clone()));
+        }
+        if self.miss == Miss::Local {
+            return Ok(out(None));
         }
         self.r.run_in(prog, args, input)
     }
     fn shed(&self) -> Option<crate::shed::Shed> {
         self.r.shed()
     }
-    fn local(&self) -> bool {
-        self.r.local()
-    }
 }
 
-/// The board's lanes: herdr's agents (`list`, every remote host's added) joined with the log.
-pub fn lanes(cfg: &Config, r: &dyn Runner, ctx: &Ctx, (events, st): (&[Event], &States), list: &Value) -> Vec<Lane> {
-    let mut agents = list["result"]["agents"].as_array().cloned().unwrap_or_default();
-    agents.extend(crate::hosts::remote_agents(cfg, r));
-    let wsl = herdr::list(r, "workspace").unwrap_or_default();
-    let ws: BTreeMap<String, String> = wsl["result"]["workspaces"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|w| Some((w["workspace_id"].as_str()?.into(), w["label"].as_str()?.into())))
-        .collect();
-    lanes::join(cfg, r, &ctx.worktrees, events, st, &agents, &ws)
+/// The board's lanes: every host's shed sessions joined with the log.
+pub fn lanes(cfg: &Config, r: &dyn Runner, (events, st): (&[Event], &States), sessions: &Sessions) -> Vec<Lane> {
+    lanes::join(cfg, r, events, st, sessions)
 }
 
 /// #447: what waits are worked out from: the log's length and last row, and each lane's state.
 pub fn wait_key(events: &[Event], all: &[Lane]) -> String {
     let last = events.last().map_or(0, |e| e.seq);
-    let lanes: Vec<_> = all.iter().map(|l| format!("{}={}", l.name, l.state)).collect();
-    format!("{} {last} {}", events.len(), lanes.join(" "))
+    let lanes: Vec<_> = all.iter().map(|l| format!("{}={}", l.name, l.state.word())).collect();
+    format!("{last} {}", lanes.join(" "))
 }
 
 /// The step's waits while its snapshot saw this log and these lanes; else worked out now.
@@ -206,34 +197,33 @@ pub fn saved_waits(
 
 /// Each lane's wait reason, from the cached PR reads.
 pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[Lane]) -> Vec<Waiting> {
-    let live: Vec<_> = (all.iter())
-        .map(|l| json!({"name": l.name, "agent_status": l.state}))
-        .collect();
-    let w = crate::waiting::scan(ctx, cfg, r, events, &live, false);
+    let live: Vec<_> = all.iter().filter_map(|l| l.session.clone()).collect();
+    let w = crate::waiting::scan(ctx, cfg, r, events, &live, false, None);
     w.into_iter().map(|x| x.1).collect()
 }
 
-/// The step's look: the reads the board makes (lanes, waits, now-lines, Host rows), remote ones batched; saved, and
-/// returned for the step's own scan (a read it lacks runs live).
+/// The step's look: the reads the board makes (lanes, waits, now-lines, Host rows), remote ones batched; saved, and returned for the step's own scan (a read it lacks runs live).
 pub fn take<'a>(ctx: &Ctx, cfg: &Config, r: &'a dyn Runner) -> Snap<'a> {
     let s = Snap::new(r, Miss::Collect, load(ctx).map(|s| s.reads), Some(ctx.now));
-    let events = crate::events::read(&ctx.state).unwrap_or_default();
-    if let Ok(list) = herdr::list(&s, "agent") {
-        let all = lanes(cfg, &s, ctx, (&events, &crate::events::fold(&events)), &list);
+    let events = crate::events::working(&ctx.state).unwrap_or_default();
+    let sessions = crate::session::all(cfg, &s);
+    if sessions.listed() {
+        let all = lanes(cfg, &s, (&events, &crate::events::fold(&events)), &sessions);
         waits(ctx, cfg, &s, &events, &all);
-        for l in &all {
-            l.pane.as_ref().map(|p| herdr::read(&l.on(&s), p));
-        }
     }
     crate::timer::services(ctx, cfg, &s, Some(String::new()));
     crate::hosts::cards(cfg, &s);
     crate::outbox::look(&s, &events);
     s.fetch();
     let s = Snap { miss: Miss::Live, ..s };
-    // #447: the waits a request would work out, from this look's reads: the board reads them, never the log again.
     let (mut key, mut ws) = (String::new(), vec![]);
-    if let Ok(list) = herdr::list(&s, "agent") {
-        let all = lanes(cfg, &s, ctx, (&events, &crate::events::fold(&events)), &list);
+    let sessions = crate::session::all(cfg, &s);
+    if sessions.listed() {
+        if let Err(e) = crate::session::stamp::observe(ctx, cfg, &sessions) {
+            eprintln!("drover: lane states: {e:#}");
+        }
+        let events = crate::events::working(&ctx.state).unwrap_or_default();
+        let all = lanes(cfg, &s, (&events, &crate::events::fold(&events)), &sessions);
         (key, ws) = (wait_key(&events, &all), waits(ctx, cfg, &s, &events, &all));
     }
     let reads = lock(&s.reads).clone();

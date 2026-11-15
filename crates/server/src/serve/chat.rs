@@ -8,6 +8,7 @@ use crate::conductor::{self, of};
 use crate::config::Config;
 use crate::events::{ask_event, closed, Event};
 use crate::runner::Runner;
+use crate::session::{Session, Status};
 use crate::Ctx;
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
@@ -72,13 +73,13 @@ fn queued<'a>(events: &'a [Event], id: &'a str) -> BTreeMap<u64, &'a Event> {
 }
 
 /// `choose` (an open ask), `working` (mid-turn), `asleep`, `awake` or `new` (no conductor yet).
-fn state(events: &[Event], id: &str, agents: &[Value]) -> &'static str {
+fn state(events: &[Event], id: &str, agents: &[Session]) -> &'static str {
     let lane = of(events, id).rfind(|e| e.kind.starts_with("orchestrator-"));
-    let a = lane.and_then(|l| agents.iter().find(|a| l.data.get("agent") == Some(&a["name"])));
+    let a = lane.and_then(|l| agents.iter().find(|a| l.str("agent") == Some(a.name.as_str())));
     match lane {
         _ if open_ask(events, id).is_some() => "choose",
         Some(l) if l.kind == "orchestrator-sleep" => "asleep",
-        Some(_) if a.is_some_and(|a| a["agent_status"] == "working") => "working",
+        Some(_) if a.is_some_and(Session::busy) => "working",
         Some(_) => "awake",
         None => "new",
     }
@@ -103,7 +104,7 @@ fn link(e: &Event) -> Option<Link> {
 fn ask(events: &[Event], a: &Event, m: Msg) -> Msg {
     let answer = ask_event(events, "decision", &a.fleet, a.str("id").unwrap_or_default()).map(|d| {
         let c = d.str("choice").unwrap_or_default();
-        let opts = a.data["options"].as_array().into_iter().flatten();
+        let opts = a.val("options").as_array().into_iter().flatten();
         Answered {
             n: (opts.filter_map(Value::as_str).zip(1..))
                 .find(|o| o.0 == c)
@@ -130,7 +131,7 @@ fn run_card(ctx: &Ctx, events: &[Event], e: &Event) -> RunCard {
     let done = events.iter().find(|d| d.kind == "run-done" && d.str("id") == Some(&id));
     let exp = e.ts + crate::card::TTL;
     let state = match set {
-        Some(x) if x.data["approved"] != true => "denied",
+        Some(x) if x.val("approved") != true => "denied",
         Some(_) if done.is_none() => "running",
         Some(_) => "approved",
         None if ctx.now > exp => "expired",
@@ -147,7 +148,7 @@ fn run_card(ctx: &Ctx, events: &[Event], e: &Event) -> RunCard {
         exp,
         state: state.into(),
         by: set.and_then(|x| x.str("by")).map(Into::into),
-        code: done.and_then(|d| d.data["code"].as_i64()),
+        code: done.and_then(|d| d.val("code").as_i64()),
         tail: done.map(|d| s(d, "tail")).unwrap_or_default(),
     }
 }
@@ -217,7 +218,7 @@ fn page(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, (before, n): (u64,
                 let Some(mut a) = conductor::lane_of(events, e).cloned() else {
                     continue;
                 };
-                a.data["recommend"] = e.data["recommend"].clone();
+                a.data.insert("recommend".into(), e.val("recommend").clone());
                 ask(events, &a, m("ask", s("question")))
             }
             ("config-propose", _) if crate::propose::settled(events, &s("id")).is_none() => Msg {
@@ -288,7 +289,7 @@ pub fn older(ctx: &Ctx, events: &[Event], id: &str, q: &BTreeMap<String, String>
 
 /// One thread: the bar (fleet · harness · model · state), its last 30 messages and the live line's state; #407:
 /// working, the turn's start (`since`, serve.js times its pill), and the queued messages above the box.
-fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, agents: &[Value]) -> ThreadView {
+fn thread(ctx: &Ctx, cfg: &Config, events: &[Event], t: &Event, agents: &[Session]) -> ThreadView {
     let id = t.str("thread").unwrap_or_default();
     let st = state(events, id, agents);
     let me = |e: &&Event| e.kind == "thread-msg" && e.str("from") == Some("owner");
@@ -351,7 +352,7 @@ fn waiting(ctx: &Ctx, events: &[Event], id: &str) -> Vec<String> {
 
 /// A thread's row: unread, title, age; its state and the last message; the threads it links to (not its flow-back
 /// lines), once each.
-fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, ThreadRow) {
+fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Session]) -> (u64, ThreadRow) {
     let id = t.str("thread").unwrap_or_default();
     let mut msgs = of(events, id).filter(|e| matches!(e.kind.as_str(), "thread-msg" | "needs-decision"));
     let last = msgs.rfind(|e| e.str("from") != Some("system"));
@@ -384,7 +385,7 @@ fn row(ctx: &Ctx, events: &[Event], t: &Event, agents: &[Value]) -> (u64, Thread
 
 /// #269: API v1's `chat`, the tab (web/src/chat.ts draws it): "all repos", then each fleet by name, a card each with
 /// its threads newest first (the archived ones apart); then every thread's view (serve.js shows the open one).
-pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Value], rw: bool) -> ChatTab {
+pub fn tab(ctx: &Ctx, cfg: Result<&Config, &str>, events: &[Event], agents: &[Session], rw: bool) -> ChatTab {
     let mut tab = ChatTab {
         now: ctx.now,
         rw,
@@ -429,17 +430,17 @@ impl super::Server<'_> {
     /// #701: one per `rw` (a paired and an unpaired device no longer evict each other's every tick), keyed by each
     /// agent's name and status only (all a thread's state reads).
     pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> Value {
-        let agents = self.herdr_json(ctx.now, "agent");
-        let agents = agents
-            .and_then(|j| j["result"]["agents"].as_array().cloned())
-            .unwrap_or_default();
-        let seen: Vec<_> = agents.iter().map(|a| [&a["name"], &a["agent_status"]]).collect();
+        let agents = self.sessions(ctx.now).map(|s| s.running()).unwrap_or_default();
+        let seen: Vec<_> = agents
+            .iter()
+            .map(|a| [a.name.as_str(), a.status().map_or("", Status::word)])
+            .collect();
         let key = json!([crate::db::last_seq(&ctx.state), super::mtime(ctx), seen, ctx.now / 60]);
         let mut all = self.chat.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let c = &mut all[usize::from(rw)];
         if c.0 != key {
             // #483: a config or log read error shows its own text (as the Queue tab does).
-            let (cfg, events) = match (Config::kept(ctx), crate::events::shared(&ctx.state)) {
+            let (cfg, events) = match (Config::kept(ctx), crate::events::working(&ctx.state)) {
                 (Ok(c), Ok(e)) => (Ok(c), e),
                 (Err(e), _) | (_, Err(e)) => (Err(format!("{e:#}")), std::sync::Arc::default()),
             };
@@ -483,9 +484,9 @@ pub fn post(
     later: &mut Vec<(Event, String)>,
 ) -> Result<String> {
     let cfg = Config::kept(ctx)?;
-    let events = crate::events::shared(&ctx.state)?;
+    let events = crate::events::working(&ctx.state)?;
     let g = |k: &str| f.get(k).map_or("", String::as_str);
-    let (id, mut out) = (g("t"), vec![]);
+    let id = g("t");
     match g("op") {
         // #405: `new` is a first message (in `repo`): the thread, titled with its first line, then the message.
         // #407: `queue` keeps it for the turn's end (`q`: an edit of queued message q, its files kept unless new
@@ -576,20 +577,6 @@ pub fn post(
             later.push((conductor::find(&events, id)?.clone(), line.into()));
             Ok("retrying".into())
         }
-        "answer" => {
-            let (choice, by) = (
-                or(g("choice").is_empty(), g("text"), g("choice")),
-                ("owner", Some("web")),
-            );
-            crate::answer(ctx, &cfg, r, &mut out, (g("fleet"), g("id")), choice, by)?;
-            Ok(format!("answered {}", g("id")))
-        }
-        // #669: a run card's [approve] (with the sha prefix the owner saw) / [deny].
-        "card" => {
-            let approve = g("act") == "approve";
-            crate::card::settle(ctx, &cfg, r, g("id"), approve, approve.then(|| g("sha")))
-        }
-        "config" => crate::propose::settle(ctx, &cfg, r, g("id"), g("act") == "apply"),
         "secret" => crate::secret::settle(ctx, &cfg, r, (id, g("name")), (g("act") == "save").then(|| g("value"))),
         "read" => {
             conductor::mark_read(ctx, &cfg, &events, conductor::find(&events, id)?)?;
@@ -612,14 +599,14 @@ fn stop(r: &dyn Runner, events: &[Event], id: &str) {
         .filter(|e| e.kind == "orchestrator-start")
         .and_then(|e| e.str("pane"))
     {
-        drop(crate::herdr::keys(r, p, "Escape"));
+        drop(crate::term::keys(r, p, "Escape"));
     }
 }
 
 /// #407: at a turn's end (the conductor no longer working) its queued messages go in, oldest first, each logged as
 /// the owner's and unqueued; the lines for `deliver`.
-pub fn flush(ctx: &Ctx, agents: &[Value]) -> Vec<(Event, String)> {
-    let (Ok(cfg), Ok(events)) = (Config::kept(ctx), crate::events::shared(&ctx.state)) else {
+pub fn flush(ctx: &Ctx, agents: &[Session]) -> Vec<(Event, String)> {
+    let (Ok(cfg), Ok(events)) = (Config::kept(ctx), crate::events::working(&ctx.state)) else {
         return vec![];
     };
     let mut out = vec![];

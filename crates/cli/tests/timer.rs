@@ -1,25 +1,21 @@
-//! #98 `drover timer|tick|setup` and the Services rows: golden job files, idempotent setup, adopt, tick-failed.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
 use serde_json::json;
 use std::path::Path;
 
-const HERDR: &str = "client:\n  version: 0.9.5\n\nserver:\n  status: running\n  version: 0.9.5\n";
 const MAC: bool = cfg!(target_os = "macos");
 
 fn host(r: Fake) -> Fake {
-    r.reply("herdr status", HERDR)
-        .reply("which hermes", "/opt/hermes/bin/hermes\n")
+    r.reply("which hermes", "/opt/hermes/bin/hermes\n")
         .reply("which gh", "/opt/homebrew/bin/gh\n")
-        .reply("which herdr", "/opt/homebrew/bin/herdr\n")
+        .reply("which shed", "/opt/homebrew/bin/shed\n")
         .reply("sysctl -n kern.memorystatus_vm_pressure_level", "1\n")
         .reply("sysctl -n vm.loadavg", "{ 1.00 1.00 1.00 }\n")
         .reply("sysctl -n hw.ncpu", "8\n")
         .reply("vm_stat", "Swapouts: 5.\n")
 }
 
-/// The tick and serve jobs, launchd and systemd, against tests/golden/timer/ (`BLESS=1` rewrites them).
 #[test]
 fn job_files_match_their_goldens() {
     let d = tmpdir("timer-golden");
@@ -64,7 +60,6 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
     assert_eq!(code, 0, "{out}");
     assert!(out.starts_with("✓ wrote dev.drover.tick; load it: "), "{out}");
     let text = std::fs::read_to_string(job(&c, "dev.drover.tick")).unwrap();
-    // PATH: the harness, gh, herdr and drover dirs, then the system dirs with /usr/sbin:/sbin.
     let path = "/opt/hermes/bin:/opt/homebrew/bin:/opt/drover/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin";
     assert!(text.contains(path) && text.contains("tick"), "{text}");
     assert!(!r.called("launchctl bootstrap") && !r.called("systemctl --user enable"));
@@ -72,7 +67,6 @@ fn install_no_load_writes_without_loading_and_remove_deletes() {
         run(&c, &r, &["timer", "install", "--no-load"]).1,
         "= already dev.drover.tick\n= already dev.drover.fast\n= already dev.drover.update\n= already dev.drover.clean\n"
     );
-    // #212: the fast job runs `drive --fast` every `fast_secs` (60); systemd keeps the interval in its .timer.
     let fast = std::fs::read_to_string(job(&c, "dev.drover.fast")).unwrap();
     let every = match MAC {
         true => fast.clone(),
@@ -109,7 +103,6 @@ fn install_loads_and_prints_the_command() {
         out.starts_with("✗ dev.drover.tick: ") && out.contains(&format!("→ {cmd}")),
         "{out}"
     );
-    // launchd's bootstrap prefix covers every job; systemd enables each job's own .timer.
     let unit = |job: &str| {
         if MAC {
             cmd.to_string()
@@ -137,7 +130,6 @@ fn tick_runs_check_then_drive_and_exits_zero_on_refusals() {
     let c = ctx(&tmpdir("timer-tick"), CONFIG);
     let _sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    // Memory pressure critical: the start is refused HOST_BUSY; the tick still exits 0.
     let r = host(Fake::default().once("sysctl -n kern.memorystatus_vm_pressure_level", 0, "4\n"))
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "");
@@ -183,8 +175,7 @@ fn tick_failed_is_logged_at_most_once_an_hour() {
         }),
         2
     );
-    // herdr missing is a real error too.
-    let c = ctx(&tmpdir("timer-noherdr"), CONFIG);
+    let c = ctx(&tmpdir("timer-noshed"), CONFIG);
     let (code, out) = run(&c, &Fake::default(), &["tick"]);
     assert_eq!(code, 1, "{out}");
     let e = read(&c.state)
@@ -193,10 +184,9 @@ fn tick_failed_is_logged_at_most_once_an_hour() {
         .into_iter()
         .find(|e| e.kind == "tick-failed")
         .unwrap();
-    assert!(e.str("reason").unwrap().starts_with("herdr: "), "{e:?}");
+    assert!(e.str("reason").unwrap().starts_with("no shed runtime"), "{e:?}");
 }
 
-/// The five step lines `setup` prints before doctor's rows.
 fn steps(out: &str) -> Vec<&str> {
     out.lines().take(5).collect()
 }
@@ -231,7 +221,7 @@ fn setup_twice_is_all_already_and_tailscale_absent_is_skipped() {
     assert!(
         out.lines()
             .skip(5)
-            .any(|l| l.contains(" doctor") || l.contains(" herdr — ")),
+            .any(|l| l.contains(" doctor") || l.contains(" host — ")),
         "{out}"
     );
     let serve = std::fs::read_to_string(job(&c, "dev.drover.serve")).unwrap();
@@ -243,6 +233,35 @@ fn setup_twice_is_all_already_and_tailscale_absent_is_skipped() {
     let (_, out) = run(&c, &r, &["setup"]);
     assert!(steps(&out).iter().all(|l| l.starts_with("= ")), "{out}");
     assert!(!r.called("tailscale serve --bg"));
+}
+
+#[test]
+fn setup_makes_a_missing_merge_label_once_then_says_already() {
+    let cfg = CONFIG.replace(
+        "integration = \"staging\"",
+        "integration = \"staging\"\nmerge_label = \"merge-ready\"",
+    );
+    let c = ctx(&tmpdir("timer-label"), &cfg);
+    let _sh = FakeShed::attached(&c);
+    let list = "gh label list --repo jirathip-dev/sendmeter --search merge-ready --json name --limit 100";
+    let create = "gh label create merge-ready --repo jirathip-dev/sendmeter --force";
+    let r = host(Fake::default())
+        .reply("launchctl print", "")
+        .reply("systemctl --user is-active", "")
+        .once(list, 0, r#"[{"name":"merge-ready-old"}]"#)
+        .reply(list, r#"[{"name":"Merge-Ready"}]"#)
+        .reply(create, "");
+    let (_, out) = run(&c, &r, &["setup", "--no-load"]);
+    let label = "label merge-ready in jirathip-dev/sendmeter";
+    assert!(out.lines().any(|l| l == format!("✓ {label}")), "{out}");
+    assert!(
+        out.lines()
+            .any(|l| l == "✓ label sendmeter — merge-ready in jirathip-dev/sendmeter"),
+        "{out}"
+    );
+    let (_, out) = run(&c, &r, &["setup", "--no-load"]);
+    assert!(out.lines().any(|l| l == format!("= already {label}")), "{out}");
+    assert_eq!(r.count(create), 1);
 }
 
 #[test]
@@ -288,7 +307,6 @@ fn services_rows_go_green_amber_and_red() {
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     stamp("check.at", 60);
     stamp("drive-sendmeter.last", 60);
-    // #246: the fast step stamps its start and length.
     std::fs::write(c.state.with_file_name("drive-fast.at"), format!("{} 2.1", c.now - 40)).unwrap();
     let fleet_disk = |gb: u64| {
         std::fs::write(
@@ -298,7 +316,6 @@ fn services_rows_go_green_amber_and_red() {
         .unwrap()
     };
     fleet_disk(3);
-    // #237: both own jobs written by this build and loaded.
     assert_eq!(run(&c, &host(Fake::default()), &["timer", "install", "--no-load"]).0, 0);
     let df = |gb: u64| {
         format!(
@@ -322,14 +339,13 @@ fn services_rows_go_green_amber_and_red() {
             "fast step",
             "kick",
             "phone alerts",
-            "herdr",
             "disk",
             "fleet disk"
         ]
     );
     for (item, tone, detail, _) in &all {
         let want = match item.as_str() {
-            "phone alerts" => "a", // no webpush notifier
+            "phone alerts" => "a",
             "kick" => "m",
             _ => "g",
         };
@@ -338,12 +354,11 @@ fn services_rows_go_green_amber_and_red() {
     assert_eq!(all[1].2, "ran 60s ago");
     assert_eq!(all[3].2, "fast step 2.1 s · ran 40s ago");
     assert_eq!(all[4].2, "last kick never");
-    assert_eq!(all[7].2, "200 GB free");
+    assert_eq!(all[6].2, "200 GB free");
     assert_eq!(
-        all[8].2, "▕█░░░░░░░░░▏ 3.0 / 25 GB · 4m ago",
+        all[7].2, "▕█░░░░░░░░░▏ 3.0 / 25 GB · 4m ago",
         "#164: from the last walk, against the budget"
     );
-    // #304: the last kick beside the timers.
     let k = serde_json::json!({"why": "push", "result": "sendmeter: started #2940"});
     let e = drover::events::Event::new(c.now - 12, "sendmeter", Some(2940), "kick", k);
     drover::events::append(&c.state, &e).unwrap();
@@ -357,8 +372,8 @@ fn services_rows_go_green_amber_and_red() {
         .reply("systemctl --user is-active", "");
     let all = rows(&c, &amber);
     fleet_disk(21);
-    assert_eq!((all[1].1, all[7].1), ("a", "a"), "{all:?}");
-    assert_eq!(rows(&c, &amber)[8].1, "a", "over 80 % of the budget");
+    assert_eq!((all[1].1, all[6].1), ("a", "a"), "{all:?}");
+    assert_eq!(rows(&c, &amber)[7].1, "a", "over 80 % of the budget");
 
     append(
         &c.state,
@@ -367,44 +382,43 @@ fn services_rows_go_green_amber_and_red() {
             "drover",
             None,
             "tick-failed",
-            json!({"key": "tick", "reason": "herdr: gone"}),
+            json!({"key": "tick", "reason": "shed: gone"}),
         ),
     )
     .unwrap();
     stamp("drive-sendmeter.last", 1000);
     fleet_disk(26);
-    stamp("drive-fast.at", 181); // #237: over 3× fast_secs (60), no length; the jobs not loaded
+    stamp("drive-fast.at", 181);
     let red = Fake::default().reply("df -k /", &df(5));
     let all = rows(&c, &red);
     let tones: Vec<_> = all.iter().map(|r| r.1).collect();
-    assert_eq!(tones, ["r", "r", "r", "r", "m", "a", "r", "r", "r"], "{all:?}");
+    assert_eq!(tones, ["r", "r", "r", "r", "m", "a", "r", "r"], "{all:?}");
     assert_eq!(all[3].2, "ran 3m ago · job missing");
-    assert_eq!(all[8].2, "▕██████████▏ 26.0 / 25 GB · 4m ago");
-    assert_eq!(all[1].2, "failed: herdr: gone · job missing");
+    assert_eq!(all[7].2, "▕██████████▏ 26.0 / 25 GB · 4m ago");
+    assert_eq!(all[1].2, "failed: shed: gone · job missing");
     assert_eq!(
-        (all[0].3.as_str(), all[7].3.as_str()),
+        (all[0].3.as_str(), all[6].3.as_str()),
         ("drover setup", "drover clean --yes")
     );
 
-    // The page: a SERVICES group with what clears a problem under it.
     let s = drover::serve::Server::new(&c, &red, Some("127.0.0.1:7777".into()));
-    let page = host_tab(&s, "127.0.0.1:7777", c.now);
-    assert!(page.contains("<span class=gn>SERVICES</span>"), "{page}");
-    assert!(
-        page.contains("/ 25 GB</span> (104%) <span class=\"mt fx\">· 4m ago</span>"),
-        "{page}"
-    );
+    let host: serde_json::Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", c.now, "host")).unwrap();
+    let services = host["services"].as_array().unwrap();
     for (k, d) in [
-        ("tick", "failed: herdr: gone · job missing"),
+        ("tick", "failed: shed: gone · job missing"),
         ("fast step", "ran 3m ago · job missing"),
     ] {
-        let want = format!("<span class=k>{k}</span><span class=w><b class=r>{d}</b> <span class=\"mt fx\">→ drover");
-        assert!(page.contains(&want), "{want}\n{page}");
+        let row = services
+            .iter()
+            .find(|r| r["name"] == k)
+            .unwrap_or_else(|| panic!("no {k}: {host}"));
+        assert!(
+            row["tone"] == "r" && row["detail"] == d && row["fix"].as_str().unwrap().starts_with("drover"),
+            "{row}"
+        );
     }
 }
 
-/// #160: a 10 s `du` never reaches a request: the page, the Host tab (#267: its API read) and the config fragment answer
-/// at once; `check` stores the total.
 #[test]
 fn slow_du_never_blocks_the_board() {
     struct SlowDu(Fake);
@@ -442,7 +456,6 @@ const LOAD: &str = if MAC {
     "systemctl --user enable"
 };
 
-/// #237: each own job against this build: missing (no file, or not loaded), outdated (args or interval), loaded.
 #[test]
 fn drift_is_missing_outdated_or_loaded() {
     let c = ctx(&tmpdir("timer-drift"), CONFIG);
@@ -455,7 +468,6 @@ fn drift_is_missing_outdated_or_loaded() {
     assert_eq!(run(&c, &up, &["timer", "install", "--no-load"]).0, 0);
     assert_eq!(drift(&up), both("loaded", "loaded"));
     assert_eq!(drift(&host(Fake::default())), both("missing", "missing"), "not loaded");
-    // Another PATH is the host's own; another interval or args is outdated.
     let edit = |label: &str, from: &str, to: &str| {
         let p = match MAC || !from.starts_with("OnUnit") {
             true => job(&c, label),
@@ -481,15 +493,12 @@ fn drift_is_missing_outdated_or_loaded() {
     };
     edit("dev.drover.tick", from, to);
     assert_eq!(drift(&up)[0].1, "outdated (args or interval differ)");
-    // #340: a plist without AbandonProcessGroup lets launchd kill the job's detached kicks.
     if MAC {
         edit("dev.drover.fast", "<key>AbandonProcessGroup</key><true/>\n", "");
         assert_eq!(drift(&up)[1].1, "outdated (no AbandonProcessGroup)");
     }
 }
 
-/// #237: the tick reinstalls only the missing fast job, reads it back and logs `timer-repaired`; a failed repair
-/// alerts once an hour.
 #[test]
 fn tick_repairs_only_the_missing_job() {
     let c = ctx(&tmpdir("timer-repair"), CONFIG);
@@ -519,7 +528,6 @@ fn tick_repairs_only_the_missing_job() {
         (Some("dev.drover.fast"), Some("missing"))
     );
 
-    // The load fails: one `timer-repair-failed` an hour, never `timer-repaired`.
     std::fs::remove_file(job(&c, "dev.drover.fast")).unwrap();
     let r = host(Fake::default()).reply(PROBE, "").reply("git -C", "");
     for _ in 0..2 {

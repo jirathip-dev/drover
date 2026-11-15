@@ -1,11 +1,9 @@
-//! `drover protection`: read-only `gh api …/protection` check; enabling it is the owner's job (docs/dsh.md).
 use crate::config::Config;
 use crate::runner::{argv, Runner};
 use anyhow::Result;
 use serde_json::Value;
 use std::io::Write;
 
-/// Some(true) fully protected, Some(false) not (or unknown), None no such branch; plus report lines.
 fn branch(r: &dyn Runner, repo: &str, b: &str) -> (Option<bool>, Vec<String>) {
     let o = match r.run("gh", &argv(&["api", &format!("repos/{repo}/branches/{b}/protection")])) {
         Ok(o) => o,
@@ -29,7 +27,6 @@ fn branch(r: &dyn Runner, repo: &str, b: &str) -> (Option<bool>, Vec<String>) {
         return (Some(missing.is_empty()), lines);
     }
     let msg = body["message"].as_str().unwrap_or("").to_string();
-    // gh prints the body on stdout and `gh: <message> (HTTP <code>)` on stderr.
     let status = body["status"].as_str().map(String::from).or_else(|| {
         let s = o.stderr.rsplit_once("(HTTP ")?.1;
         Some(s.split(')').next()?.to_string())

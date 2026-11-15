@@ -1,6 +1,3 @@
-//! #538: conductor access: capability groups in `[conductor] allow` (their default, the brief's list, a config card
-//! that switches one only on the owner's [apply]) and run cards (approve runs the exact command once and posts its
-//! output, deny runs nothing, a changed or expired card is refused, a hard no is refused at posting).
 mod common;
 use common::*;
 use drover::config::Config;
@@ -40,7 +37,6 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
         .collect()
 }
 
-/// `drover hook` as thread t1's conductor under `c`'s fleet.toml: its stdout ("" allows).
 fn orchestrator_hook(c: &drover::Ctx, cmd: &str) -> String {
     let input = json!({"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": {"command": cmd}});
     let mut child = Command::new(env!("CARGO_BIN_EXE_drover"))
@@ -85,7 +81,7 @@ fn groups_default_to_all_but_pause_and_set_and_name_only_known_groups() {
     let cfg = Config::parse(CONFIG).unwrap();
     assert_eq!(
         cfg.orchestrator.groups(),
-        ["design", "clean", "hosts", "reclaim", "accounts", "runners"]
+        ["design", "clean", "hosts", "reclaim", "runners"]
     );
     let set = Config::parse(&format!("{CONFIG}\n[orchestrator]\nallow = [\"set\"]\n")).unwrap();
     assert_eq!(set.orchestrator.groups(), ["set"]);
@@ -109,6 +105,7 @@ fn the_orchestrator_brief_lists_the_fleets_groups() {
     let agents =
         json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo", "claude-agent-acp"]}]);
     let f = Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed", "");
     let r = sh.cli(&f);
@@ -150,7 +147,6 @@ fn a_config_card_switches_a_group_on_only_at_the_owners_apply() {
         &["config", "propose", "t1", file.to_str().unwrap()],
     );
     assert_eq!((code, out.as_str()), (0, "c1\n"));
-    // Proposed, not applied: still off, and the conductor can't apply it itself.
     assert!(orchestrator_hook(&c, "drover pause sendmeter").contains("REFUSED GROUP_OFF"));
     assert!(orchestrator_hook(&c, "drover config apply c1").contains("REFUSED OWNER_ONLY"));
     let (code, out) = run(&c, &Fake::default(), &["config", "apply", "c1"]);
@@ -160,7 +156,6 @@ fn a_config_card_switches_a_group_on_only_at_the_owners_apply() {
         orchestrator_hook(&c, "drover hosts off mini").contains("REFUSED GROUP_OFF"),
         "hosts is off now"
     );
-    // A group verb the conductor runs shows in its thread with the group.
     assert_eq!(orchestrator_hook(&c, "drover clean sendmeter --yes"), "");
     let row = kinds(&c, "thread-cmd").pop().unwrap();
     assert_eq!(
@@ -221,16 +216,15 @@ fn approve_runs_the_exact_command_once_and_posts_its_masked_output() {
     assert!(text.contains("token •••") && !text.contains("ghp_"), "masked: {text}");
     let s = &kinds(&c, "run-settled")[0];
     assert_eq!(
-        (s.str("by"), s.str("id"), s.str("sha"), s.data["approved"].clone()),
+        (s.str("by"), s.str("id"), s.str("sha"), s.val("approved").clone()),
         (Some("owner"), Some("r1"), Some(sha.as_str()), json!(true))
     );
     let done = &kinds(&c, "run-done")[0];
     assert_eq!(
-        (done.str("by"), done.str("id"), done.data["code"].clone()),
+        (done.str("by"), done.str("id"), done.val("code").clone()),
         (Some("owner"), Some("r1"), json!(0))
     );
 
-    // Once only.
     let again = Fake::default().reply("sh -c", "");
     let (code, out) = run(&at5, &again, &["card", "approve", "r1"]);
     assert_eq!((code, out.contains("REFUSED ALREADY_SETTLED")), (3, true), "{out}");
@@ -244,10 +238,8 @@ fn a_changed_or_expired_card_is_refused_and_deny_runs_nothing() {
     assert_eq!(post(&c, "terraform apply -auto-approve").1, "r2\n");
     let other = kinds(&c, "run-card")[1].str("sha").unwrap().to_string();
     let r = Fake::default().reply("sh -c", "");
-    // The approval names r2's command, not r1's: refused, nothing runs.
     let (code, out) = run(&at(&c, T + 60), &r, &["card", "approve", "r1", "--sha", &other[..12]]);
     assert_eq!((code, out.contains("REFUSED CARD_CHANGED")), (3, true), "{out}");
-    // 15 min after posting it expires.
     let (code, out) = run(&at(&c, T + 901), &r, &["card", "approve", "r1"]);
     assert_eq!((code, out.contains("REFUSED EXPIRED")), (3, true), "{out}");
     assert!(!r.called("sh -c"));
@@ -257,7 +249,7 @@ fn a_changed_or_expired_card_is_refused_and_deny_runs_nothing() {
     assert_eq!((code, out.as_str()), (0, "run r2 denied by owner; nothing ran\n"));
     let s = &kinds(&c, "run-settled")[0];
     assert_eq!(
-        (s.str("by"), s.str("id"), s.data["approved"].clone()),
+        (s.str("by"), s.str("id"), s.val("approved").clone()),
         (Some("owner"), Some("r2"), json!(false))
     );
     assert_eq!(
@@ -413,7 +405,7 @@ fn a_card_sleeping_90s_with_timeout_300_runs_in_the_background_and_reports_exit_
         r.0.calls.borrow()
     );
     let done = &kinds(&c, "run-done")[0];
-    assert_eq!((done.str("id"), done.data["code"].clone()), (Some("r1"), json!(0)));
+    assert_eq!((done.str("id"), done.val("code").clone()), (Some("r1"), json!(0)));
     let text = last_msg(&c);
     assert!(
         text.starts_with("run r1 approved by owner, ran in /srv/app: exit 0"),
@@ -436,7 +428,7 @@ fn a_run_past_its_timeout_is_killed_and_reported_with_its_tail() {
     let (code, out) = run(&at(&c, T + 400), &r, &["card", "run", "r1"]);
     assert_eq!(code, 0, "{out}");
     let done = &kinds(&c, "run-done")[0];
-    assert_eq!(done.data["code"], json!(124));
+    assert_eq!(*done.val("code"), json!(124));
     let text = last_msg(&c);
     assert!(
         text.starts_with("run r1 approved by owner, ran in /srv/app: exit 124"),
@@ -448,4 +440,48 @@ fn a_run_past_its_timeout_is_killed_and_reported_with_its_tail() {
     );
     let kill = format!("kill -KILL -- -{}", std::process::id());
     assert!(r.0.called(&kill), "{:?}", r.0.calls.borrow());
+}
+
+#[test]
+fn a_card_tapped_twice_on_the_board_is_one_job_and_runs_once() {
+    let c = setup("card-board-twice", "");
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    assert_eq!(post(&at(&c, now), "git log -1 main"), (0, "r1\n".into()));
+    let sha = kinds(&c, "run-card")[0].str("sha").unwrap().to_string();
+    let r = Fake::default()
+        .reply("sh -c nohup", "4242\n")
+        .reply("sh -c", "commit 1a2b\n");
+    let b = Board::start(&c, r);
+    let tap = format!("id=r1&act=approve&sha={}", &sha[..12]);
+    let (ms, first) = b.post("card", &tap);
+    assert!(first["code"] == "ACCEPTED" && ms < 200, "{ms} ms: {first}");
+    let (_, second) = b.post("card", &tap);
+    assert_eq!(
+        second["job"], first["job"],
+        "the second tap is the first's job: {second}"
+    );
+    let j = b.until(first["job"].as_str().unwrap(), |j| j["state"] != "running");
+    assert_eq!(
+        (&j["state"], &j["message"]),
+        (&json!("done"), &json!("run r1 approved by owner, running in /srv/app…")),
+        "{j}"
+    );
+    let (_, late) = b.post("card", &tap);
+    assert_eq!(
+        late["job"], first["job"],
+        "a tap after it ended is still that job: {late}"
+    );
+    assert_eq!(kinds(&c, "run-settled").len(), 1, "settled once");
+    let unpaired = http(
+        &b.addr,
+        &format!(
+            "POST /api/v1/card HTTP/1.1\r\nHost: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{tap}",
+            b.addr,
+            tap.len()
+        ),
+    );
+    assert!(unpaired.starts_with("HTTP/1.1 401"), "{unpaired}");
 }

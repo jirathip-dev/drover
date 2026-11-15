@@ -1,4 +1,3 @@
-//! #248: `drover check` closes a done lane's session once its handoff is logged; dirty or unpushed lanes stay.
 mod common;
 use common::*;
 use drover::events::{append, read, Event};
@@ -65,8 +64,8 @@ fn a_done_pushed_lane_closes_after_the_delay() {
     assert!(sh.called("kill", LANE) && !sh.has(LANE), "{:?}", sh.methods());
     let closed = kinds(&c, "lane-closed");
     assert_eq!(closed.len(), 1);
-    assert_eq!(closed[0].data["agent"], LANE);
-    assert_eq!(closed[0].data["freed_mb"], 270);
+    assert_eq!(closed[0].val("agent"), LANE);
+    assert_eq!(closed[0].val("freed_mb"), 270);
     assert!(std::path::Path::new(&wt).is_dir(), "the worktree stays");
     let r = with(&wt, "", "0\n");
     let (code, out) = run(&c, &r, &["check"]);
@@ -89,26 +88,19 @@ fn a_dirty_or_unpushed_lane_stays_open_with_an_event() {
         }
         let kept = kinds(&c, "lane-kept-dirty");
         assert_eq!(kept.len(), 1, "once per handoff: {why}");
-        assert_eq!(kept[0].data["why"], why);
+        assert_eq!(kept[0].val("why"), why);
         assert!(kinds(&c, "lane-closed").is_empty());
-        // The card says why it stays open.
         let f = fake(&sh, &wt, status, ahead);
         let r = sh.on(&f);
         let s = drover::serve::Server::new(&c, &r, None);
-        let page = with_queue(
-            &String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)),
-            &s,
-            "",
-            T,
-        );
-        assert!(page.contains(&format!("kept open: {why}")), "{why}");
+        let page = api(&s, "", "", T, "lanes");
+        assert!(page.contains(&format!("kept open: {why}")), "{why}: {page}");
     }
 }
 
 #[test]
 fn a_lane_without_a_logged_handoff_stays_open() {
     let (c, wt, sh) = lane("close-nohandoff", 400);
-    // A newer spawn of the lane: the push was the previous round's.
     let sp = json!({"role": "impl", "agent": LANE, "pane": LANE, "worktree": wt});
     append(&c.state, &Event::new(T - 300 + 1, "sendmeter", Some(12), "spawn", sp)).unwrap();
     let r = fake(&sh, &wt, "", "0\n");
@@ -119,7 +111,6 @@ fn a_lane_without_a_logged_handoff_stays_open() {
 
 #[test]
 fn a_spawn_whose_prompt_never_landed_is_not_closed_as_done() {
-    // #444 (#363): the spawn exited 4, logged in the same second as the handoff it then seemed to follow.
     let c = ctx(&tmpdir("close-unconfirmed"), CONFIG);
     let sh = FakeShed::new();
     sh.attach(&c);

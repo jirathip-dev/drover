@@ -1,4 +1,3 @@
-//! #4: `drover protection` reads branch protection through the runner and never writes.
 mod common;
 use common::*;
 
@@ -38,7 +37,6 @@ fn check(name: &str, r: &Fake) -> (i32, String) {
     let d = tmpdir(name);
     let c = ctx(&d, CONFIG);
     let res = run(&c, r, &["protection"]);
-    // Read-only: exactly the two GETs, never a write or a repo/settings change.
     assert_eq!(*r.calls.borrow(), vec![MAIN.to_string(), STAGING.to_string()]);
     res
 }
@@ -178,7 +176,6 @@ fn one_unprotected_among_fleets_exits_non_zero() {
         .reply("gh api repos/jirathip-dev/herdsman/branches/staging/", PROTECTED);
     let (code, out) = run(&c, &r, &["protection"]);
     assert_eq!(code, 1, "{out}");
-    // The integration branch is checked too; unscripted here, so it fails.
     assert!(
         out.contains("jirathip-dev/herdsman integ: ✗ unavailable: no HTTP status"),
         "{out}"
