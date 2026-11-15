@@ -3,9 +3,7 @@ use crate::api::Job;
 use crate::events::Event;
 use serde_json::json;
 
-pub(super) const OPS: [&str; 8] = [
-    "drive", "override", "extend", "park", "unpark", "answer", "card", "config",
-];
+pub(super) const OPS: [&str; 7] = ["drive", "override", "park", "unpark", "answer", "card", "config"];
 const KEEP: u64 = 900;
 
 pub(super) type Tap = (Ctx, BTreeMap<String, String>, String);
@@ -34,16 +32,6 @@ fn key(f: &BTreeMap<String, String>) -> String {
 
 fn ended(j: &Job) -> bool {
     !matches!(j.state.as_str(), "running" | "waiting")
-}
-
-fn extended(ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<()> {
-    let g = |k: &str| f.get(k).map_or("", String::as_str);
-    if g("op") != "extend" {
-        return Ok(());
-    }
-    let n = g("issue").parse().ok().ok_or_else(|| anyhow::anyhow!("no issue"))?;
-    let state = crate::gate::held(ctx, g("fleet"), n)?;
-    crate::gate::extended(ctx, (g("fleet"), n), (true, "owner"), &state)
 }
 
 pub(super) fn ready(ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<()> {
@@ -94,7 +82,7 @@ impl Server<'_> {
             jobs.0.insert(j.id.clone(), (k, j.clone()));
             j
         };
-        if let Err(e) = ready(ctx, f).and_then(|()| extended(ctx, f)) {
+        if let Err(e) = ready(ctx, f) {
             lock(&self.tapped).0.remove(&job.id);
             return Err(e);
         }

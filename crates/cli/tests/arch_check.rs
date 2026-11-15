@@ -595,6 +595,36 @@ fn a_line_added_to_a_frozen_list_fails_but_removed_edited_or_collected_ones_pass
 }
 
 #[test]
+fn only_a_freeze_the_base_arch_toml_lists_counts() {
+    let reg = "mod a;\n";
+    let d = committed("arch-frozen-base", "", &[("src/registry.rs", reg)]);
+    let both = "frozen = [\"src/registry.rs\", \"src/root.rs\"]\n";
+    std::fs::write(d.join(".drover/arch.toml"), both).unwrap();
+    std::fs::write(d.join("src/root.rs"), "mod a;\nmod b;\n").unwrap();
+    std::fs::write(d.join("src/registry.rs"), "mod a;\nmod b;\n").unwrap();
+    git(&d, &["add", "-N", "src/root.rs"]);
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    let (code, out) = arch(&d, &[]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+    git(&d, &["add", "-A"]);
+    git(&d, &["commit", "-qm", "freeze"]);
+    std::fs::write(d.join(".drover/arch.toml"), "").unwrap();
+    std::fs::write(d.join("src/registry.rs"), "mod a;\nmod b;\nmod c;\n").unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(
+        out.contains("src/registry.rs:3: `mod c;` added to a frozen list"),
+        "{out}"
+    );
+    git(&d, &["rm", "-q", "--cached", ".drover/arch.toml"]);
+    git(&d, &["commit", "-qm", "no arch"]);
+    std::fs::write(d.join(".drover/arch.toml"), both).unwrap();
+    let (code, out) = arch(&d, &["--base", "HEAD"]);
+    assert_eq!((code, out.contains("0 violations")), (0, true), "{out}");
+}
+
+#[test]
 fn a_generated_file_that_differs_from_its_regenerated_output_fails() {
     let conf = "generated = [\"gen/types.ts\"]\ngenerate = \"mkdir -p gen && printf 'export type A = 1;\\\\n' > gen/types.ts\"\n";
     let d = committed("arch-generated", conf, &[("gen/types.ts", "export type A = 1;\n")]);

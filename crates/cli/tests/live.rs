@@ -65,7 +65,7 @@ fn subscribe(addr: std::net::SocketAddr, host: &str) -> TcpStream {
 }
 
 fn drain(s: &mut TcpStream, ms: u64) -> String {
-    let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], [0u8; 65_536]);
+    let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], vec![0u8; 65_536]);
     while Instant::now() < end {
         match s.read(&mut b) {
             Ok(0) => break,
@@ -245,7 +245,7 @@ fn an_answer_is_refused_shed_reports_no_menu() {
         let res = req(&s, "POST", "/answer", &format!("agent={agent}&choice=1"), &ck);
         assert!(res.contains("REFUSED BAD_VALUE: no menu"), "{res}");
     }
-    assert!(r.keys().is_empty());
+    assert_eq!(r.keys(), [] as [serde_json::Value; 0]);
     let v = needs(&s, &ck, T);
     let b = card(&v, "sendmeter-impl-12").unwrap_or_else(|| panic!("{v}"));
     assert_eq!((&b["menu"], &b["push"]), (&json!(null), &json!(true)), "{b}");
@@ -348,7 +348,7 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
         far.contains("id: 506\nevent: refresh\ndata: 506\n\n") && !far.contains("event: ev"),
         "{far}"
     );
-    assert!(reconnect(addr, "?since=6").matches("event: ev").count() == 500);
+    assert_eq!(reconnect(addr, "?since=6").matches("event: ev").count(), 500);
 }
 
 #[test]

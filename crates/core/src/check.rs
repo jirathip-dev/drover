@@ -380,6 +380,19 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
                 hits.push(("ready-unmerged", format!("{}:{head}", s.last_ts), why));
             }
         }
+        let mine = crate::events::of_issue(&events, &s.fleet, s.issue);
+        let from = mine.iter().rposition(|e| e.kind == "spawn").unwrap_or_default();
+        let refused = mine[from..].iter().rev().find(|e| {
+            e.kind == "driven"
+                && e.str("step") == Some("respawn")
+                && e.str("code").is_some_and(crate::drive::owner_refusal)
+        });
+        if let Some(e) = refused {
+            let at = mine.get(from).map_or(0, |sp| sp.ts);
+            let code = e.str("code").unwrap_or_default();
+            let why = format!("#{} respawn refused: {}", s.issue, e.str("result").unwrap_or(code));
+            hits.push(("respawn-refused", format!("{at}:{code}"), why));
+        }
         for (kind, key, reason) in hits {
             let mut d = json!({"key": key, "reason": reason});
             if let Some(c) = cause.filter(|_| kind == "lane-dead") {
@@ -573,10 +586,75 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
             emit(&ctx.state, cfg, ev)?;
         }
     }
+    health(ctx, cfg, out, &events)?;
     if let Some(a) = &agents {
         leftovers(ctx, cfg, r, a, true)?;
     }
     let _ = stamp(ctx, &measure(ctx, cfg));
+    Ok(())
+}
+
+fn health(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event]) -> Result<()> {
+    let starts = std::fs::read_to_string(ctx.state.with_file_name("serve-starts")).unwrap_or_default();
+    let day = |t: &u64| t + 86_400 >= ctx.now;
+    let cold = (starts.lines()).filter_map(|l| l.strip_suffix(" cold")?.parse::<u64>().ok());
+    let cold = cold.filter(day).count();
+    let mut now = vec![(
+        "drover",
+        "serve-restarts",
+        (cold > 3).then(|| format!("serve started {cold} times in 24 h, none a handover")),
+    )];
+    let h = std::fs::read(ctx.state.with_file_name("serve-health.json")).unwrap_or_default();
+    let h: serde_json::Value = serde_json::from_slice(&h).unwrap_or_default();
+    if h["at"].as_u64().is_some_and(|t| t + 600 >= ctx.now) {
+        let (rss, busy) = (h["rss_mb"].as_u64().unwrap_or(0), h["busy"].as_u64().unwrap_or(0));
+        now.push((
+            "drover",
+            "serve-mem",
+            (rss > 300).then(|| format!("serve RSS {rss} MB, over 300 MB")),
+        ));
+        now.push(("drover", "serve-slow", h["slow"].as_str().map(|s| format!("serve {s}"))));
+        let why = format!("serve answered {busy} reads 503 in the last minute");
+        now.push(("drover", "serve-503", (busy > 0).then_some(why)));
+    }
+    for name in cfg.fleet.keys() {
+        let Some(p) = events.iter().rfind(|e| e.kind == "drive-pass" && e.fleet == *name) else {
+            continue;
+        };
+        let (secs, step) = (
+            p.data.get("secs").and_then(serde_json::Value::as_f64).unwrap_or(0.0),
+            p.str("step").unwrap_or("?"),
+        );
+        let why = format!(
+            "{name}'s pass took {secs} s; slowest step: {step} ({} s)",
+            p.data.get("step_secs").unwrap_or(&json!("?"))
+        );
+        now.push((
+            name,
+            "drive-slow",
+            (std::time::Duration::try_from_secs_f64(secs))
+                .is_ok_and(|d| d > std::time::Duration::from_secs(cfg.limits.pass_max_secs))
+                .then_some(why),
+        ));
+    }
+    for (fleet, kind, why) in now {
+        let ok = format!("{kind}-ok");
+        let last = (events.iter().rev())
+            .find(|e| e.fleet == fleet && e.issue.is_none() && [kind, &ok].contains(&e.kind.as_str()));
+        if why.is_some() != last.is_some_and(|e| e.kind == kind) {
+            let reason = why.as_deref().map_or_else(|| format!("{kind} cleared"), String::from);
+            let d = json!({"key": last.map_or(0, |e| e.ts), "reason": reason});
+            fire(
+                ctx,
+                cfg,
+                out,
+                events,
+                (fleet, None),
+                if why.is_some() { kind } else { &ok },
+                d,
+            )?;
+        }
+    }
     Ok(())
 }
 
@@ -817,7 +895,7 @@ pub fn clean_all(
         let away = e.str("host").filter(|_| e.str("machine").is_some());
         let held = match away.filter(|h| cfg.hosts.get(*h).is_some_and(|c| !c.enabled)) {
             Some(h) => !off.iter().any(|o| o.0 == h && o.2.is_some()),
-            None => crate::hosts::offline(ctx, Some(e)).is_some(),
+            None => crate::hosts::offline(ctx, Some(cfg), Some(e)).is_some(),
         };
         let root = crate::roots::skip(ctx, cfg, e).map(|w| match w {
             "off-root" => "off-root (not cleaned)",
@@ -1689,7 +1767,6 @@ fn touched(r: &dyn Runner, wt: &Path) -> Option<u64> {
     Some(t)
 }
 
-#[allow(clippy::cast_precision_loss)]
 fn gb(bytes: u64) -> f64 {
     bytes as f64 / 1_073_741_824.0
 }

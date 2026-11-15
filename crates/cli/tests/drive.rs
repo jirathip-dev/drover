@@ -137,7 +137,7 @@ fn start_spawns_the_next_queued_issue() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["start"], "{out}");
     assert!(out.starts_with("sendmeter #12 start: "), "{out}");
-    assert!(!started("sendmeter-impl-12").is_empty());
+    assert_ne!(started("sendmeter-impl-12"), [] as [std::string::String; 0]);
     assert_eq!(state(&c), "impl");
     let wt = c.worktrees.join("sendmeter/issue-12");
     idle(&c, &fake(&[("sendmeter-impl-12", "working", &wt.to_string_lossy())]));
@@ -161,7 +161,7 @@ fn review_spawns_rev_at_the_pushed_head() {
         rev.display()
     );
     assert!(r.called(&add), "{:?}", r.calls.borrow());
-    assert!(!started("sendmeter-rev-12-r1").is_empty());
+    assert_ne!(started("sendmeter-rev-12-r1"), [] as [std::string::String; 0]);
     assert_eq!(state(&c), "review(1)");
     let r = fake(&[
         ("sendmeter-impl-12", "idle", &wt.to_string_lossy()),
@@ -477,7 +477,7 @@ fn a_merged_issues_idle_lane_pane_closes_after_the_limit_with_its_work_on_wip() 
         "idle under idle_merged_minutes (15): {out}"
     );
     assert!(read(&c.state).unwrap().iter().all(|e| e.kind != "lane-closed"));
-    let r1 = Stamped(r(900), Default::default());
+    let r1 = Stamped(r(900), std::sync::Mutex::default());
     let (code, out) = run(&at(&c, 900), &r1, &["drive"]);
     assert_eq!(code, 0, "{out}");
     let w = wt.display();
@@ -734,7 +734,7 @@ fn a_dead_pids_lock_is_taken_over_at_once_and_a_live_ones_respected() {
         assert!(
             lease_on(&c, "drive-sendmeter.lock").is_none(),
             "released after the pass"
-        )
+        );
     };
     assert_eq!(drive(&c, &dead).1, ["start"]);
     gone();
@@ -774,13 +774,13 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
     assert!(post("127.0.0.1:7777", "").starts_with("HTTP/1.1 401"));
     let cookie = pair(&s, &c, "", c.now);
     assert!(post("evil.example", &cookie).starts_with("HTTP/1.1 403"));
-    assert!(started("").is_empty());
+    assert_eq!(started(""), [] as [std::string::String; 0]);
     let res = post("127.0.0.1:7777", &cookie);
     assert!(
         res.starts_with("HTTP/1.1 303") && res.contains("sendmeter%3A%20started%20%2312"),
         "{res}"
     );
-    assert!(!started("sendmeter-impl-12").is_empty());
+    assert_ne!(started("sendmeter-impl-12"), [] as [std::string::String; 0]);
     let drive = get(&s)["fleets"][0]["drive"].clone();
     assert_eq!(
         (&drive["tone"], &drive["line"]),
@@ -869,7 +869,7 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
     assert!(t.elapsed() < Duration::from_secs(1), "GET / waited {:?}", t.elapsed());
     live.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
     let mut toast = || {
-        let (mut seen, mut b) = (String::new(), [0u8; 65_536]);
+        let (mut seen, mut b) = (String::new(), vec![0u8; 65_536]);
         while !seen.contains("event: toast") {
             let n = live.read(&mut b).unwrap();
             assert!(n > 0, "the stream closed: {seen}");
@@ -1089,7 +1089,7 @@ fn a_serial_busy_item_is_skipped_and_keeps_its_place() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["start", "start", "start"], "{out}");
     assert!(out.contains("sendmeter #1 start: REFUSED SERIAL_BUSY"), "{out}");
-    assert!(started("sendmeter-impl-1").is_empty());
+    assert_eq!(started("sendmeter-impl-1"), [] as [std::string::String; 0]);
     assert_eq!((state_of(&c, 2), state_of(&c, 3)), ("impl".into(), "impl".into()));
     assert_eq!(
         run(&c, &Fake::default(), &["next", "sendmeter"]),
@@ -1965,32 +1965,26 @@ fn extend_logs_first_and_a_failed_spawn_is_the_next_passs_fix() {
         replies: [low.replies, base().replies].concat(),
         ..Default::default()
     };
-    let spy = Spy(low, &c, Default::default());
+    let spy = Spy(low, &c, std::sync::Mutex::default());
     let (code, out) = run(&c, &spy, &["extend", "sendmeter", "12"]);
-    assert!(code == 0 && out.contains("waiting for host (MEM_LOW)"), "{out}");
+    assert!(code == 0 && out.ends_with("#12: extend\n"), "{out}");
     let seen = spy.2.lock().unwrap().clone();
-    assert!(
-        !seen.is_empty() && seen.iter().all(|&l| l),
-        "a command ran before the decision: {seen:?}"
-    );
+    assert!(seen.iter().all(|&l| l), "a command ran before the decision: {seen:?}");
     let all = read(&c.state).unwrap().to_vec();
     assert!(!all.iter().any(|e| e.kind == "extend-failed"), "{all:?}");
-    let p = drover::pending::of(&all, "sendmeter", 12).expect("pending");
-    assert_eq!(
-        (p.action.as_str(), p.reason.as_deref(), p.failed),
-        ("extend", Some("MEM_LOW"), false)
-    );
-    assert_eq!(state(&c), "fix(3)");
+    assert_eq!(drover::pending::of(&all, "sendmeter", 12), None);
+    assert_eq!(state(&c), "queued");
+    assert!(started("").is_empty(), "the tap spawns nothing");
 
     let r = base();
     let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["fix"], "{out}");
+    assert_eq!(steps, ["start"], "{out}");
     assert!(!started("").is_empty(), "{:?}", r.calls.borrow());
-    assert_eq!(drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
+    assert_eq!(state(&c), "fix(3)");
 }
 
 #[test]
-fn an_extend_during_a_pass_spawns_at_once() {
+fn an_extend_during_a_pass_only_requeues_it() {
     let c = setup("drive-extend-lock");
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     ev(
@@ -2007,7 +2001,8 @@ fn an_extend_during_a_pass_spawns_at_once() {
         .reply("git -C", "");
     let (code, out) = run(&c, &r, &["extend", "sendmeter", "12"]);
     assert!(code == 0 && out.ends_with("#12: extend\n"), "{out}");
-    assert!(!started("sendmeter-impl-12").is_empty(), "{:?}", r.calls.borrow());
+    assert!(started("sendmeter-impl-12").is_empty(), "{:?}", r.calls.borrow());
+    assert_eq!(state(&c), "queued");
     assert!(
         lease_on(&c, "drive-sendmeter.lock").is_some(),
         "the pass's lock is left alone"
@@ -2142,10 +2137,8 @@ fn a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absen
     );
     assert_eq!(code, 0, "{out}");
     let (_, out) = run(&c, &r, &["waiting", "sendmeter"]);
-    let want = format!(
-        "sendmeter #12 drive: no change at {:.7}, waiting for drive (next pass ≤ 5 min) to spawn review",
-        head
-    );
+    let want =
+        format!("sendmeter #12 drive: no change at {head:.7}, waiting for drive (next pass ≤ 5 min) to spawn review");
     assert!(out.contains(&want), "{out}");
     assert_eq!(run(&c, &r, &["check"]).0, 0, "shed's idle, first heard now");
     let (code, out) = run(&at(&c, 1800), &r, &["check"]);
@@ -2647,7 +2640,7 @@ fn a_done_reviewer_in_the_way_is_superseded_and_the_review_spawns() {
     let sup = all.iter().find(|e| e.kind == "supersede").expect(&out);
     assert_eq!(sup.str("agent"), Some("sendmeter-rev-12-r1"));
     assert!(sh().called("kill", "sendmeter-rev-12-r1"), "{:?}", r.calls.borrow());
-    assert!(!started("sendmeter-rev-12-r1").is_empty());
+    assert_ne!(started("sendmeter-rev-12-r1"), [] as [std::string::String; 0]);
     assert_eq!(state(&c), "review(1)");
 }
 
@@ -2658,7 +2651,7 @@ fn a_working_reviewer_in_the_way_still_waits() {
     assert_eq!(steps, ["review"], "{out}");
     assert!(out.contains("REFUSED LANE_LIVE: live agent(s)"), "{out}");
     assert!(!read(&c.state).unwrap().iter().any(|e| e.kind == "supersede"));
-    assert!(started("").is_empty());
+    assert_eq!(started(""), [] as [std::string::String; 0]);
     assert_eq!(state(&c), "impl");
 }
 
@@ -2787,7 +2780,7 @@ fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
     let (code, out) = run(&c, &Fake::default(), &["queue", "sendmeter", "ls"]);
     assert!(code == 0 && out.contains("parked: host mini is down"), "{out}");
     let r = fake(NONE).reply("git -C", "");
-    assert!(drive(&c, &r).1.is_empty());
+    assert_eq!(drive(&c, &r).1, [] as [std::string::String; 0]);
     assert!(started("").is_empty(), "a parked issue is skipped");
 
     let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
@@ -2821,7 +2814,7 @@ fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
     assert_eq!(kinds, [("parked", Some("owner")), ("unparked", Some("owner"))]);
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["start"], "{out}");
-    assert!(!started("sendmeter-impl-12").is_empty());
+    assert_ne!(started("sendmeter-impl-12"), [] as [std::string::String; 0]);
 }
 
 #[test]

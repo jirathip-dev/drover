@@ -61,14 +61,14 @@ impl Waiting {
     }
 }
 
-/// #217: an extra round is recorded for a lane that has not started yet (`extend --no-spawn` asks for none); #778: its pending action, until a hard refusal ends it (logs before #778: the round's own event, last).
+/// #217: an extra round is recorded for a lane that has not started yet (`extend --no-spawn` asks for none), logs before #778: the round's own event, last; #1058's requeued round waits in the queue instead.
 pub fn unspawned(events: &[Event], s: &IssueState) -> bool {
     let last = events
         .iter()
         .rev()
         .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue));
-    crate::pending::extending(events, &s.fleet, s.issue)
-        || last.is_some_and(|e| e.kind == "round-extended" && e.data.get("spawn") == Some(&Value::Bool(true)))
+    let old = |e: &Event| e.data.get("spawn") == Some(&Value::Bool(true)) && e.data.get("queued").is_none();
+    last.is_some_and(|e| e.kind == "round-extended" && old(e))
 }
 
 fn lost(events: &[Event], s: &IssueState, pushed: &str) -> bool {
@@ -753,6 +753,17 @@ pub fn scan_where(
                     .any(|p| p.fleet == s.fleet && p.issue == Some(s.issue))
         };
         let idle = w.what.starts_with("idle without pushing");
+        let session = agents.iter().find(|a| a.name == built);
+        let ended = session
+            .and_then(crate::session::Session::status)
+            .filter(|_| s.state == "design")
+            .and_then(|st| match st {
+                crate::session::Status::Failed => Some("error"),
+                crate::session::Status::Asleep => Some("hibernated"),
+                crate::session::Status::Idle => Some("idle"),
+                crate::session::Status::Done => Some("done"),
+                _ => None,
+            });
         let waiting_turn = turn(mine, &s);
         if idle && s.build.as_deref() == Some("lesson") && settled() {
             let asked = mine
@@ -774,13 +785,18 @@ pub fn scan_where(
         {
             (w.who, w.what) = turned(mine, t, &built, ctx.now, cfg.limits.stall_minutes * 60);
             (w.lane, w.since) = (built, t.ts);
-        } else if idle && (gone || unconfirmed) && settled() {
+        } else if (idle && (gone || unconfirmed) || s.state == "design" && gone || ended.is_some()) && settled() {
             let (n, last) = respawns(mine, &s.fleet, s.issue);
-            let role = s.build.as_deref().unwrap_or(f.flow().start());
+            let stage = sp.and_then(|e| e.str("role")).filter(|_| s.state == "design");
+            let role = stage.or(s.build.as_deref()).unwrap_or(f.flow().start());
             let cause = crate::session::stamp::exit(mine, &built).filter(|_| gone);
-            let why = match cause {
-                Some(c) => format!("lane gone ({})", c.cause.word()),
-                None => ["prompt never landed", "lane gone"][usize::from(gone)].into(),
+            let note = session
+                .and_then(|a| a.note.as_deref())
+                .map_or(String::new(), |n| format!(" ({n})"));
+            let why = match (cause, ended) {
+                (Some(c), _) => format!("lane gone ({})", c.cause.word()),
+                (None, Some(st)) => format!("lane {st}{note}"),
+                _ => ["prompt never landed", "lane gone"][usize::from(gone)].into(),
             };
             let resume = waiting_turn.is_none() && resumed(&why);
             (w.who, w.lane, w.promise) = ("drive", built, None);
@@ -797,8 +813,8 @@ pub fn scan_where(
                 format!("{why}{NO_PUSH}respawning {role}")
             };
         }
-        if let Some(h) = crate::hosts::offline(ctx, sp).filter(|_| s.active_lane().is_some()) {
-            (w.who, w.what, w.next_cmd, w.promise) = ("none", format!("host offline: {h}"), None, None);
+        if let Some(h) = crate::hosts::offline(ctx, Some(cfg), sp).filter(|_| s.active_lane().is_some()) {
+            (w.who, w.what, w.next_cmd, w.promise) = ("none", h, None, None);
         }
         let stuck = ["idle without pushing", "rev idle without", "reviewer exited"]
             .iter()

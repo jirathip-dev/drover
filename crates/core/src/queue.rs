@@ -5,7 +5,6 @@ use anyhow::{anyhow, ensure, Result};
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Default)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct Item {
     pub issue: u64,
     /// #505: every issue it waits on (`queue block --on A --on B`); a merged one drops out in `view`.
@@ -513,8 +512,8 @@ pub fn board(
         let hit = |e: &&Event| e.is("premerge-failed", fleet, n) || pass(e);
         let note = events.iter().rev().find(hit).and_then(|e| e.str("note"));
         let warn = note.map_or(String::new(), |t| format!("\n         ✗ {t}")) + &warn;
-        let away = s.and_then(|s| crate::hosts::offline(ctx, last_spawn(events, s.active_lane()?.1)));
-        let warn = away.map_or(String::new(), |h| format!("\n         host offline: {h}")) + &warn;
+        let away = s.and_then(|s| crate::hosts::offline(ctx, cfg, last_spawn(events, s.active_lane()?.1)));
+        let warn = away.map_or(String::new(), |h| format!("\n         {h}")) + &warn;
         let sp = s.and_then(|s| last_spawn(events, s.active_lane()?.1));
         let stale = sp.zip(cfg).is_some_and(|(e, c)| crate::hook::rules_stale(c, fleet, e));
         let place = s.and_then(|s| at.get(s.active_lane()?.1)).filter(|p| !p.is_empty());

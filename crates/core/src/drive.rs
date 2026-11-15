@@ -351,10 +351,9 @@ fn launch(
     let mine = live.iter().filter(counts).filter(|p| p.fleet == fleet).count();
     let weight = cfg.fleet(fleet)?.weight.unwrap_or(1).max(1);
     let share = start && mine * (weight + others) >= (max - usize::from(max > 1)) * weight;
-    let extend = crate::pending::extending(ev, fleet, n);
     if live.iter().any(|e| e.fleet == fleet && e.issue == Some(n))
-        || !extend
-            && (n_live >= max - usize::from(start && max > 1) || others > 0 && (mine >= max.div_ceil(2) || share))
+        || n_live >= max - usize::from(start && max > 1)
+        || others > 0 && (mine >= max.div_ceil(2) || share)
     {
         let by = Some(held_by(ctx, cfg, r)).filter(|b| !b.is_empty());
         let by = by.map_or(String::new(), |b| format!(": {b}"));
@@ -364,7 +363,7 @@ fn launch(
     if let Some(why) = crate::hosts::slot_before(ctx, cfg, r, ev, (fleet, n, role), &live) {
         return crate::gate::refused("HOST_FULL", why);
     }
-    if let Some((code, why)) = room(ctx, cfg, r).filter(|x| !(x.0 == "HOST_BUSY" && extend)) {
+    if let Some((code, why)) = room(ctx, cfg, r) {
         return crate::gate::refused(code, why);
     }
     let mut d = json!({"role": role, "check": cfg.fleet(fleet)?.flow().is_check(role)});
@@ -753,6 +752,9 @@ pub fn drive(
         if let Err(e) = crate::check::budget(ctx, cfg, r, out) {
             writeln!(out, "budget: {e:#}")?;
         }
+        if let Err(e) = crate::pending::requeue_waiting(ctx, cfg) {
+            writeln!(out, "requeue extends: {e:#}")?;
+        }
     }
     lap("disk budget");
     if only.is_none() && !fast && first {
@@ -908,12 +910,18 @@ fn one(
     }
     ACTS.with_borrow_mut(BTreeMap::clear);
     ROOM.set((false, None));
-    let res = pass(ctx, cfg, (r, seen), out, name, fast).and_then(|go| {
+    let res = pass(ctx, cfg, (r, seen), out, name, fast);
+    let mut slow = ("PR reads, gates, steps", t0.elapsed());
+    let res = res.and_then(|go| {
         if fast {
-            Ok(())
-        } else {
-            starts(ctx, cfg, r, out, name, go)
+            return Ok(());
         }
+        let t = std::time::Instant::now();
+        let res = starts(ctx, cfg, r, out, name, go);
+        if t.elapsed() > slow.1 {
+            slow = ("spawns", t.elapsed());
+        }
+        res
     });
     if let Err(e) = &res {
         let a = json!({"step": "pass", "outcome": "error", "code": "ERROR", "words": format!("failed: {e:#}")});
@@ -931,8 +939,9 @@ fn one(
             crate::usage::date(r, end, "+%H:%M"),
         );
         let secs = (t0.elapsed().as_secs_f64() * 10.0).round() / 10.0;
-        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs,
-            "spawns_launched": launched(&acts), "actions": acts, "kick": KICK.get()});
+        let step_secs = (slow.1.as_secs_f64() * 10.0).round() / 10.0;
+        let d = json!({"by": by, "started": ctx.now, "ended": end, "at": at, "secs": secs, "step": slow.0,
+            "step_secs": step_secs, "spawns_launched": launched(&acts), "actions": acts, "kick": KICK.get()});
         let _ = append(&ctx.state, &Event::new(ctx.now, name, None, "drive-pass", d));
     }
     if !fast && KICK.get().is_none() {
@@ -1207,7 +1216,7 @@ fn pass(
         let sp = crate::events::last_spawn(&ev, lane);
         let live = agents.iter().any(|a| a.name == lane);
         let pane = sp.and_then(|e| e.str("pane")).filter(|_| live);
-        let away = crate::hosts::offline(ctx, sp).is_some();
+        let away = crate::hosts::offline(ctx, Some(cfg), sp).is_some();
         if fast && !live || away {
             continue;
         }
@@ -1436,6 +1445,21 @@ fn pass(
                 let d = json!({"role": args.get(3), "agent": w.lane, "why": why, "failed_on": on});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
             }
+            if let Some(c) = code.filter(|c| gone.is_some() && *c != "RESPAWN_LOOP" && owner_refusal(c)) {
+                let why = ACTS.with_borrow(|m| m.get(fleet).and_then(|a| a.last()).map(|a| a["why"].clone()));
+                let reason = format!(
+                    "{} respawn refused {c}: {}",
+                    args[3],
+                    why.as_ref().and_then(Value::as_str).unwrap_or("?")
+                );
+                writeln!(out, "{fleet} #{n} needs-human: {reason}")?;
+                let d = json!({"code": "RESPAWN_REFUSED", "refused": c, "reason": reason, "agent": w.lane});
+                emit(
+                    &ctx.state,
+                    cfg,
+                    Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
+                )?;
+            }
             go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "RESPAWN_PACED"));
             let mut merge = step == "merge";
             let full = f.merge_label.is_some() && pr["landing"] != "fast-first";
@@ -1515,7 +1539,6 @@ fn pass(
     Ok(go)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn no_proof(
     ctx: &Ctx,
     cfg: &Config,
@@ -1617,6 +1640,18 @@ fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> Option<bool
 }
 
 pub(crate) const OLD: &str = "is in the way: replacing it";
+
+pub(crate) fn owner_refusal(code: &str) -> bool {
+    let owner = [
+        "RESPAWN_LOOP",
+        "DESIGN_MAIN_ONLY",
+        "HOST_OFFLINE",
+        "MCP_FORBIDDEN",
+        "ACP_UNGUARDED",
+        "ACCOUNT_ENV",
+    ];
+    owner.contains(&code)
+}
 
 fn last_words(fleet: &str) -> String {
     let last = ACTS.with_borrow(|m| m.get(fleet).and_then(|a| a.last()).map(|a| a["words"].to_string()));
@@ -2023,12 +2058,18 @@ fn starts(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &
         }
         let at = (fleet, n.parse().ok(), "start");
         let design = n.parse().ok().and_then(|n| queue::wants_design(&events, fleet, n));
+        let again = n.parse().is_ok_and(|n| crate::pending::requeued(&events, fleet, n));
         let f = &cfg.fleet[fleet];
-        let c = match design {
-            Some(role) => ["spawn", fleet, &n, role, "--supersede"],
-            None => ["spawn", fleet, &n, f.flow().start(), ""],
-        };
-        let code = match act(ctx, cfg, r, out, &events, at, &c[..4 + usize::from(design.is_some())]) {
+        let c = ["spawn", fleet, &n, design.unwrap_or(f.flow().start()), "--supersede"];
+        let code = match act(
+            ctx,
+            cfg,
+            r,
+            out,
+            &events,
+            at,
+            &c[..4 + usize::from(design.is_some() || again)],
+        ) {
             Ok(c) => c,
             Err(e) => {
                 res = Err(e);

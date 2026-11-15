@@ -898,7 +898,6 @@ pub fn dirty(r: &dyn Runner, wt: &Path) -> Option<String> {
 }
 
 /// `spawn`'s flags.
-#[allow(clippy::struct_excessive_bools)]
 #[derive(Default, clap::Args)]
 pub struct Opts {
     /// Print the plan; change nothing
@@ -1103,14 +1102,10 @@ pub fn spawn(
         let why = crate::check::worktree_why(ctx);
         return refused("DISK_BUDGET", format!("worktrees {gb:.1} GB > {budget} GB; {why}"));
     }
-    let extend = crate::pending::extending(&events, fleet, issue);
     match refusal {
-        Some(("HOST_BUSY", why)) if o.force || extend => {
+        Some(("HOST_BUSY", why)) if o.force => {
             let by = crate::orchestrator::acting().map_or_else(|| "owner".into(), |id| format!("orchestrator-{id}"));
-            let mut d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": by});
-            if extend {
-                d["why"] = "owner-extend".into();
-            }
+            let d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": by});
             event("override", d)?;
         }
         Some(("HOST_BUSY", why)) => return refused("HOST_BUSY", format!("{why}; retry later or pass --force")),

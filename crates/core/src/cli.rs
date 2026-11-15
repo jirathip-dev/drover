@@ -1374,7 +1374,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     "FLEET", "ISSUE", "STATE", "LANE", "AGE", head
                 )?;
                 for (s, skip) in rows.into_iter().zip(skips) {
-                    let pending = crate::pending::of(&events, &s.fleet, s.issue).and_then(|p| p.line(ctx.now));
+                    let paused = cfg
+                        .as_ref()
+                        .is_some_and(|c| c.fleet.get(&s.fleet).is_some_and(|f| f.paused));
+                    let pending = (crate::pending::of(&events, &s.fleet, s.issue).and_then(|p| p.line(ctx.now)))
+                        .or_else(|| crate::pending::waits(&events, &s.fleet, s.issue, paused));
                     let wait = waits
                         .iter()
                         .flatten()
@@ -1925,7 +1929,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                     rows.retain(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet));
                     for w in &mut rows {
-                        if let Some(l) = crate::pending::of(&events, &w.fleet, w.issue).and_then(|p| p.line(ctx.now)) {
+                        let paused = cfg.fleet.get(&w.fleet).is_some_and(|f| f.paused);
+                        let line = crate::pending::of(&events, &w.fleet, w.issue).and_then(|p| p.line(ctx.now));
+                        if let Some(l) = line.or_else(|| crate::pending::waits(&events, &w.fleet, w.issue, paused)) {
                             (w.who, w.what) = ("drive", l);
                         }
                     }

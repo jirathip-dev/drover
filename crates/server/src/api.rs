@@ -111,7 +111,6 @@ pub struct Moment {
 }
 
 /// #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none; #450: the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card, the `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
-#[allow(clippy::struct_excessive_bools)]
 pub struct NeedsTab {
     pub now: u64,
     pub rw: bool,
@@ -180,7 +179,6 @@ pub struct NeedIssue {
     pub shots_at: Option<String>,
 }
 
-#[allow(clippy::struct_excessive_bools)]
 pub struct LanesTab {
     pub now: u64,
     pub rw: bool,
@@ -425,7 +423,6 @@ pub struct RepoThreads {
 }
 
 /// #681: a conductor thread: its `last` line and time, `awake` (its conductor not asleep), `newest` on the ongoing one (the first not archived).
-#[allow(clippy::struct_excessive_bools)]
 pub struct RepoThread {
     pub id: String,
     pub title: String,
@@ -755,7 +752,6 @@ pub struct DriveAct {
     pub code: String,
 }
 
-#[allow(clippy::struct_excessive_bools)]
 pub struct QueueRow {
     pub issue: u64,
     pub state: String,
@@ -1011,14 +1007,28 @@ pub struct Health {
     /// #859: each route's request times over the last 10 min, slowest p95 first; each source's `refreshed_at`.
     pub routes: Vec<RouteTime>,
     pub sources: BTreeMap<String, u64>,
+    pub serve: ServeHealth,
 }
 
-/// #859: one route's requests in the window: how many, their median and 95th percentile in ms.
+/// #898: serve's own numbers (each minute also `serve-health.json`): RSS, the last minute's route groups and read 503s.
+pub struct ServeHealth {
+    pub at: u64,
+    pub started: u64,
+    pub rss_mb: u64,
+    pub groups: Vec<RouteTime>,
+    pub busy: u64,
+    pub clients: u64,
+    pub queued: u64,
+    pub slow: Option<String>,
+}
+
+/// #859: one route's requests in the window: how many, their median, 95th percentile and (#898) slowest in ms.
 pub struct RouteTime {
     pub route: String,
     pub count: u64,
     pub p50: u64,
     pub p95: u64,
+    pub max: u64,
 }
 
 /// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
