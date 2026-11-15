@@ -1,0 +1,10 @@
+Decided: each fleet's pass runs its own closed-issue reconcile first, right after taking the fleet's lock
+Because: "No clean or host probe in a pass can hold back the issue-state reconcile in 1"
+Rejected: one reconcile over all fleets at the top of drive — a hung gh on one fleet held every other fleet's pass and broke #896's parallel-pass test
+Decided: the sim's golden metrics and the hunt's start seeds are re-pinned, as #899 and #984 did
+Because: q1723
+Decided: the webhook fast-step test counts PR reads only, since the closed-issue read must run every fast pass
+Because: "An issue closed on GitHub leaves the in-progress group (queue, `status`, Queue screen) within one fast pass"
+Rejected: skip the closed read between webhook polls — the webhook receiver handles no issues deliveries, so a close would wait up to webhook_poll_minutes
+Check: cargo test -p drover --test sim, --test webhook and --test drive_kicks pass at the head
+Owner: Closed issues leave the Queue within a minute, a killed tick shows in amber on the fleet card, and the simulator tests are green again.
