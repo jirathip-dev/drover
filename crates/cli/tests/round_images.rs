@@ -71,12 +71,15 @@ fn git(dir: &Path, args: &[&str]) -> String {
     String::from_utf8(o.stdout).unwrap().trim().into()
 }
 
-fn needs_srcs(s: &Server, addr: &str, now: u64) -> Vec<String> {
-    let [needs, ..] = parts(s, addr, "", now);
-    needs
-        .split("<img src=\"")
-        .skip(1)
-        .map(|x| x[..x.find('"').unwrap()].to_string())
+fn shot_srcs(s: &Server, addr: &str, now: u64) -> Vec<String> {
+    let needs: Value = serde_json::from_str(&api(s, addr, "", now, "needs")).unwrap();
+    let issues = needs["issues"].as_array().unwrap().iter();
+    issues
+        .flat_map(|i| {
+            let at = i["shots_at"].as_str().unwrap_or_default().to_string();
+            let (f, n) = (i["fleet"].as_str().unwrap().to_string(), i["issue"].clone());
+            (0..i["shots"].as_array().unwrap().len()).map(move |k| format!("shot/{f}/{n}/{k}/{at}"))
+        })
         .collect()
 }
 
@@ -131,17 +134,15 @@ fn a_revised_designs_card_shows_its_own_rounds_png_through_the_service_worker() 
         let q = json!({"id": id, "question": "Design for #12 is ready: approve, revise (type a note) or reject?",
             "options": ["approve", "revise", "reject"], "recommend": null, "kind": "owner", "design": true, "files": files, "role": "design"});
         ev(c, "needs-decision", q);
-        let (old, new) = (needs_srcs(s, &addr, c.now), card_srcs(s, &addr, c.now));
-        assert_eq!((old.len(), new.len()), (1, 1), "round {k}: {old:?} {new:?}");
-        (old[0].clone(), new[0].clone())
+        let srcs = card_srcs(s, &addr, c.now);
+        assert_eq!(srcs.len(), 1, "round {k}: {srcs:?}");
+        srcs[0].clone()
     };
-    let (r1_old, r1_new) = round(1, b"\x89PNG round 1");
-    assert_eq!(sw.get(&r1_old), b"\x89PNG round 1");
+    let r1_new = round(1, b"\x89PNG round 1");
     assert_eq!(sw.get(&r1_new), b"\x89PNG round 1");
     ev(c, "decision", json!({"id": "q1", "choice": "revise", "by": "owner"}));
-    let (r2_old, r2_new) = round(2, b"\x89PNG round 2");
-    assert_eq!(sw.get(&r2_old), b"\x89PNG round 2", "the old board's card: {r2_old}");
-    assert_eq!(sw.get(&r2_new), b"\x89PNG round 2", "Drover's screens' card: {r2_new}");
+    let r2_new = round(2, b"\x89PNG round 2");
+    assert_eq!(sw.get(&r2_new), b"\x89PNG round 2", "the card: {r2_new}");
     let direct = |p: &str| {
         let p = if p.starts_with('/') {
             p.to_string()
@@ -151,7 +152,6 @@ fn a_revised_designs_card_shows_its_own_rounds_png_through_the_service_worker() 
         let res = s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {addr}\r\n\r\n"), c.now);
         res[res.windows(4).position(|w| w == b"\r\n\r\n").unwrap() + 4..].to_vec()
     };
-    assert_eq!(direct(&r1_old), b"\x89PNG round 1");
     assert_eq!(direct(&r1_new), b"\x89PNG round 1");
     assert_eq!(direct("/design/sendmeter/12/0"), b"\x89PNG round 2");
 }
@@ -179,7 +179,7 @@ fn a_later_verify_rounds_card_shows_its_own_screenshot_through_the_service_worke
             json!({"verdict": "FAIL", "stage": "verify", "sha": sha, "files": files, "body": "FAIL\n"}),
         );
         ev(c, "needs-human", json!({"reason": "verify FAIL"}));
-        let srcs = needs_srcs(s, &addr, c.now);
+        let srcs = shot_srcs(s, &addr, c.now);
         assert_eq!(srcs.len(), 1, "round {k}: {srcs:?}");
         srcs[0].clone()
     };

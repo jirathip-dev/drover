@@ -2,7 +2,7 @@
 
 `index.html` is the Host tab with one HOSTS section: one card per host, main first, then the others A→Z. Each card's
 load/cpu, swap-out, memory, disk and lanes rows carry a 24 h sparkline, and tapping a row opens its chart. The page
-uses `assets/serve.css` unchanged (linked relatively) plus one `<style>` block that uses tokens only. That block moves
+uses assets/serve.css (removed in #927) unchanged (linked relatively) plus one `<style>` block that uses tokens only. That block moves
 to `serve.css` in phase 2. SERVICES, FLEETS and ALERTS are the demo export's markup, unchanged.
 
 The history is a fixture: 24 h × 1 row a minute × 3 hosts. The script at the end draws it with inline SVG and no

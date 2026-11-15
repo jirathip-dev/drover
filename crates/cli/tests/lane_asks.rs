@@ -144,13 +144,22 @@ fn typed(sh: &FakeShed, text: &str) -> bool {
     sh.sent(LANE).iter().any(|t| t == text) && enter
 }
 
-fn chat(c: &drover::Ctx, now: u64) -> String {
+fn chat(c: &drover::Ctx, now: u64) -> Vec<serde_json::Value> {
     let r = Fake::default();
     let c = at(c, now);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
-    let [_, _, chat] = parts(&s, ADDR, &cookie, now);
-    chat
+    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, now, "chat")).unwrap();
+    chat["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|t| t["page"]["msgs"].as_array().unwrap().clone())
+        .collect()
+}
+
+fn change(msgs: &[serde_json::Value], id: &str) -> bool {
+    msgs.iter().any(|m| m["kind"] == "note" && m["ask"]["id"] == id)
 }
 
 #[test]
@@ -177,7 +186,12 @@ fn a_lane_ask_wakes_the_newest_thread_and_stays_open_without_a_push() {
     );
     assert_eq!(pushes(&c), 0, "a routed ask does not push");
     let chat = chat(&c, NOW + 5);
-    assert!(!chat.contains("lane ask q1"), "the board hides the wake line: {chat}");
+    assert!(
+        !chat
+            .iter()
+            .any(|m| m["text"].as_str().unwrap_or_default().contains("lane ask q1")),
+        "the chat hides the wake line: {chat:?}"
+    );
 }
 
 #[test]
@@ -253,7 +267,10 @@ fn an_owner_topic_is_refused_and_put_to_the_owner_in_the_thread() {
     );
     assert_eq!(pushes(&c), 2, "each pushes as an ask");
     let chat = chat(&c, NOW + 5);
-    assert!(chat.contains("data-id=\"q1\""), "{chat}");
+    assert!(
+        chat.iter().any(|m| m["kind"] == "ask" && m["ask"]["id"] == "q1"),
+        "{chat:?}"
+    );
     as_owner();
     let (code, out) = run(&c, &sh.cli(&host()), &["answer", "sendmeter", "q1", "2"]);
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: no -> sendmeter-impl-36\n"));
@@ -288,7 +305,13 @@ fn the_owner_changes_a_orchestrator_answer_within_30_minutes_only() {
     lane_ask(&c, &sh, "Split it?");
     assert_eq!(orchestrator_answer(&c, &sh, "t1", "q1", "2", quote).0, 0);
     let board = chat(&c, NOW + 60);
-    assert!(board.contains("answered q1 for #36: no, because Keep the old sender behind a flag</p><details class=chg><summary>change</summary><form class=chq data-id=\"q1\""), "{board}");
+    assert!(
+        board
+            .iter()
+            .any(|m| m["text"] == "answered q1 for #36: no, because Keep the old sender behind a flag"),
+        "{board:?}"
+    );
+    assert!(change(&board, "q1"), "[change] offered: {board:?}");
     let (code, out) = orchestrator_answer(&c, &sh, "t1", "q1", "1", quote);
     assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
     as_owner();
@@ -300,17 +323,14 @@ fn the_owner_changes_a_orchestrator_answer_within_30_minutes_only() {
     assert_eq!((code, out.as_str()), (0, "sendmeter q1: yes -> sendmeter-impl-36\n"));
     assert!(typed(&sh, "DECISION q1: yes"), "{:?}", sh.methods());
     assert_eq!(kinds(&c, "decision").last().unwrap().str("by"), Some("owner"));
-    assert!(
-        !chat(&c, NOW + 29 * 60 + 5).contains("class=chg"),
-        "changed: no more [change]"
-    );
+    assert!(!change(&chat(&c, NOW + 29 * 60 + 5), "q1"), "changed: no more [change]");
 
     lane_ask(&c, &sh, "Split the tests too?");
     assert_eq!(orchestrator_answer(&c, &sh, "t1", "q2", "2", quote).0, 0);
-    assert!(chat(&c, NOW + 60).contains("<form class=chq data-id=\"q2\""));
+    assert!(change(&chat(&c, NOW + 60), "q2"));
     let late = NOW + 30 * 60;
     let typed_before = sh.sent(LANE);
-    assert!(!chat(&c, late).contains("class=chg"), "no [change] after 30 min");
+    assert!(!change(&chat(&c, late), "q2"), "no [change] after 30 min");
     let (code, out) = run(&at(&c, late), &sh.cli(&host()), &["answer", "sendmeter", "q2", "1"]);
     assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
     assert_eq!(sh.sent(LANE), typed_before, "the refused answer reaches no lane");

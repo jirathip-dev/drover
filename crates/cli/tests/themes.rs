@@ -31,8 +31,9 @@ fn raw(c: &drover::Ctx, r: &Fake, path: &str) -> Vec<u8> {
     s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)
 }
 
-fn host(c: &drover::Ctx, r: &Fake) -> String {
-    host_tab(&Server::new(c, r, Some(ADDR.into())), ADDR, 1_000_000)
+fn host_theme(c: &drover::Ctx, r: &Fake) -> Value {
+    let h = api(&Server::new(c, r, Some(ADDR.into())), ADDR, "", 1_000_000, "host");
+    serde_json::from_str::<Value>(&h).unwrap()["theme"].clone()
 }
 
 fn get(c: &drover::Ctx, r: &Fake, path: &str) -> String {
@@ -154,14 +155,13 @@ fn default_theme_is_farm() {
         get(&c, &r, "/themes/farm/scene.svg").starts_with("HTTP/1.1 404 "),
         "farm draws its scene in herd.js"
     );
-    assert!(
-        host(&c, &r).contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>farm</b></span></p>")
+    assert_eq!(
+        host_theme(&c, &r),
+        json!({"name": "farm", "tone": "g", "detail": "", "fix": ""})
     );
     let page = get(&c, &r, "/?all=1");
     assert!(page.contains("m=m||localStorage.theme}catch(e){}") && page.contains("h.dataset.theme=m||\"farm\";"));
-    assert!(page.contains(
-        "<button id=sysb type=button aria-haspopup=dialog aria-label=system>⚙<i class=sd hidden></i></button>"
-    ));
+    assert!(page.contains("<button id=sysb type=button aria-haspopup=dialog aria-label=settings>⚙</button>"));
     assert!(!page.contains("id=look"));
     assert!(!page.contains("id=theme") && !page.contains("id=scheme"));
 }
@@ -184,9 +184,7 @@ fn lookup_is_user_then_built_in_then_farm() {
     let k: Value = serde_json::from_str(KITCHEN).unwrap();
     assert_eq!(json(&c, &r, "/themes/kitchen/theme.json"), resolve(&k, &farm()));
     assert_eq!(body(&get(&c, &r, "/themes/kitchen/scene.svg")), KITCHEN_SCENE);
-    assert!(
-        host(&c, &r).contains("<p class=gr data-t=g><span class=k>theme</span><span class=w><b>kitchen</b></span></p>")
-    );
+    assert_eq!(host_theme(&c, &r)["name"], "kitchen");
     assert_eq!(json(&c, &r, "/themes/farm/theme.json"), resolve(&farm(), &farm()));
     let own = r#"{"poses":{"working":"w"}}"#;
     let (c, r) = server(Some("kitchen"), &[("kitchen", "theme.json", own)]);
@@ -347,12 +345,12 @@ fn invalid_theme_json_falls_back_to_farm_with_a_host_warning() {
             FARM_SPRITES,
             "{name}"
         );
-        let page = host(&c, &r);
-        let warn = format!(
-            "<p class=gr data-t=a><span class=k>theme</span><span class=w><b class=a>farm</b> <span class=mt>`{name}`: {}</span></span></p>",
-            why.replace('"', "&quot;")
+        let t = host_theme(&c, &r);
+        assert_eq!(
+            t,
+            json!({"name": name, "tone": "a", "detail": why, "fix": ""}),
+            "{name}: one warning"
         );
-        assert_eq!(page.matches(&warn).count(), 1, "{name}: one warning row\n{page}");
     }
 }
 
@@ -432,8 +430,6 @@ fn per_role_action_resolution() {
     ] {
         assert_eq!(act(role, state), want, "{role} {state}");
     }
-    let a = &avatars(&[("x-rev-1", "rev", "working")])[0];
-    assert!(a.contains("data-act=rev") && a.contains("<use href=#ha-rev />"), "{a}");
 }
 
 #[test]
@@ -509,20 +505,6 @@ const GARDEN: &str = include_str!("../../../assets/swag/garden/theme.json");
 const GARDEN_SPRITES: &str = include_str!("../../../assets/swag/garden/sprites.svg");
 const GARDEN_SCENE: &str = include_str!("../../../assets/swag/garden/scene.svg");
 
-fn plants(js: &str) -> Option<Value> {
-    if std::process::Command::new("node").arg("--version").output().is_err() {
-        eprintln!("skipping: no node here");
-        return None;
-    }
-    let src = include_str!("../../../assets/serve.js");
-    let part = &src[src.find("// #423 plants").unwrap()..src.find("// plants:end").unwrap()];
-    let d = tmpdir("plants-js");
-    std::fs::write(d.join("t.js"), format!("{part}\nconsole.log(JSON.stringify({js}))")).unwrap();
-    let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    Some(serde_json::from_slice(&o.stdout).unwrap())
-}
-
 #[test]
 fn garden_draws_every_stage_and_species_itself() {
     let g = resolve(&validate(GARDEN.as_bytes()).unwrap(), &farm());
@@ -579,52 +561,6 @@ fn garden_draws_every_stage_and_species_itself() {
         include_bytes!("../../../assets/swag/garden/icon-180.png")
     );
     assert!(get(&c, &r, "/").contains("h.dataset.theme=m||\"garden\";"));
-}
-
-#[test]
-fn a_lane_draws_its_plant_only_with_stages_and_the_species_is_stable() {
-    let farm = resolve(&farm(), &farm());
-    let kitchen = resolve(&validate(KITCHEN.as_bytes()).unwrap(), &farm);
-    let garden = resolve(&validate(GARDEN.as_bytes()).unwrap(), &farm);
-    let js = format!(
-        "(() => {{ const F = {farm}, K = {kitchen}, G = {garden}, all = () => true, none = () => false; return [\
-         duo(F, all, 'ha-impl', 'impl', 48), duo(K, all, 'ha-fix', 'fix', 7), plant(F, 'ready', 3),\
-         duo(G, all, 'ha-impl', 'review', 48), duo(G, i => i === 'hs-plant-fix', 'ha-fix', 'fix', 49),\
-         duo(G, none, 'ha-rev', 'review', 50), plant(G, 'queued', 51, 1).ids,\
-         [48, 49, 50, 51, 52, 53, 54, 48].map(n => species(G, n).id), species(G, -1), species(F, 4)] }})()"
-    );
-    let Some(got) = plants(&js) else { return };
-    assert_eq!(got[0], "<use href=\"#ha-impl\"></use>", "farm: the role pose alone");
-    assert_eq!(got[1], "<use href=\"#ha-fix\"></use>", "kitchen: the role pose alone");
-    assert_eq!(got[2], Value::Null);
-    assert_eq!(
-        got[3],
-        "<use href=\"#hs-plant-review-monstera\" style=\"--ld:#2a6a34;--lf:#3f8f45;--lv:#7cc46a\"></use><use href=\"#ha-impl\"></use>"
-    );
-    assert_eq!(
-        got[4],
-        "<use href=\"#hs-plant-fix\" style=\"--ld:#356f2a;--lf:#4f9a3a;--lv:#b4dc5a\"></use><use href=\"#ha-fix\"></use>",
-        "a sheet without the species' sprite: the stage's own"
-    );
-    assert_eq!(
-        got[5], "<use href=\"#ha-rev\"></use>",
-        "no such sprite: the action alone"
-    );
-    assert_eq!(got[6], json!(["plant-queued-alocasia-row", "plant-queued-row"]));
-    assert_eq!(
-        got[7],
-        json!([
-            "monstera",
-            "philodendron",
-            "peperomia",
-            "alocasia",
-            "pothos",
-            "calathea",
-            "monstera",
-            "monstera"
-        ])
-    );
-    assert_eq!((&got[8], &got[9]), (&Value::Null, &Value::Null));
 }
 
 #[test]

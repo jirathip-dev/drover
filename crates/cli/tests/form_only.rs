@@ -191,7 +191,7 @@ fn the_antipatterns_line_is_accepted() {
 }
 
 #[test]
-fn the_card_says_not_counted_in_amber() {
+fn the_queue_row_says_not_counted_in_amber() {
     let (mut c, d) = fixture("form-card", "");
     verdict(&c, &d, 'a', FORM);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
@@ -203,10 +203,12 @@ fn the_card_says_not_counted_in_amber() {
     c.now = 1_000_000;
     let r = OnShed::new(Fake::default());
     let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let page = queue_tab(&s, "127.0.0.1:7777", c.now);
-    assert!(
-        page.contains("rev <span class=a>FAIL (form-only)</span> r1 · <span class=a>not counted · form 1/3</span>"),
-        "{page}"
+    let q: serde_json::Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", c.now, "queue")).unwrap();
+    let pr = &q["fleets"][0]["rows"][0]["pr"];
+    assert_eq!(
+        (&pr["verdict"], &pr["vtone"], &pr["rounds"], &pr["form"]),
+        (&json!("FAIL (form-only)"), &json!("a"), &json!(1), &json!("1/3")),
+        "{q}"
     );
 }
 

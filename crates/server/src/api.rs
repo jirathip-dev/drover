@@ -12,7 +12,7 @@ macro_rules! shapes {
 }
 
 shapes! {
-/// `/herd.json` (Herd mode, docs/serve.md).
+/// API v1's `GET herd` (docs/serve.md).
 pub struct Herd {
     pub fleets: Vec<HerdFleet>,
     pub others: Vec<HerdLane>,
