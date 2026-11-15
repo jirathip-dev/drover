@@ -240,6 +240,9 @@ pub trait Provider: Sync {
     fn acp_profile(&self, _settings: &str, _role: &str) -> String {
         String::new()
     }
+    fn acp_meta(&self) -> Option<serde_json::Value> {
+        None
+    }
     fn login(&self) -> Option<&'static str> {
         None
     }

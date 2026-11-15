@@ -2,7 +2,7 @@
 
 `index.html` is the board with a new middle tab, `[chat]` (`[queue] [lanes] [chat] [host] [events]`): repos with their conductor threads, one thread open with choice
 rows, image bubbles, a file, a link, a config-propose card and a secret-request card (Amendment A). It links
-`assets/serve.css` unchanged and inlines the farm scheme's tokens as `serve.rs` writes them. One `<style>` block holds
+assets/serve.css (removed in #927) unchanged and inlines the farm scheme's tokens as `serve.rs` writes them. One `<style>` block holds
 the new rules, which use existing tokens only and move to `serve.css` when the tab is built (step 1). Static: the
 hash picks the view.
 

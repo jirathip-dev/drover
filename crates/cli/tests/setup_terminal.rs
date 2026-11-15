@@ -88,7 +88,11 @@ fn the_board_starts_by_name_types_unlogged_and_shows_the_screen() {
         "{res}"
     );
     there.screen("drover-setup-claude-B", screen);
-    let res = post("/send", "setup=drover-setup-claude-B&text=sk-SECRET-CODE-4242", &cookie);
+    let res = post(
+        "/api/v1/send",
+        r#"{"setup":"drover-setup-claude-B","text":"sk-SECRET-CODE-4242"}"#,
+        &cookie,
+    );
     assert!(res.starts_with("HTTP/1.1 200"), "{res}");
     assert_eq!(
         there.sent("drover-setup-claude-B").last().unwrap(),
@@ -113,8 +117,18 @@ fn the_board_starts_by_name_types_unlogged_and_shows_the_screen() {
         (j["closed"].as_bool(), j["lines"][3].as_str()),
         (Some(false), Some("Paste code here >"))
     );
-    let page = host_tab(&s, ADDR, T);
-    assert!(page.contains("data-su=\"claude B\" data-host=\"bazzite\"") && page.contains("data-su=\"codex\""));
+    let host: serde_json::Value = serde_json::from_str(&api(&s, ADDR, "", T, "host")).unwrap();
+    let bazzite = host["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["name"] == "bazzite")
+        .unwrap();
+    let setups = bazzite["setups"].to_string();
+    assert!(
+        setups.contains("\"claude B\"") && setups.contains("\"codex\""),
+        "{setups}"
+    );
 }
 
 #[test]

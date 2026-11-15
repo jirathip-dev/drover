@@ -374,11 +374,27 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
     let get = |p: &str| {
         String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now)).into_owned()
     };
-    let [needs, ..] = parts(&s, ADDR, "", c.now);
+    let needs: serde_json::Value = serde_json::from_str(&api(&s, ADDR, "", c.now, "needs")).unwrap();
+    let card = &needs["issues"][0];
     assert!(
-        needs.contains(&format!("<img src=\"shot/sendmeter/12/0/{h}\"")),
+        card["issue"] == 12 && card["shots"].as_array().is_some_and(|x| !x.is_empty()) && card["shots_at"] == *h,
         "{needs}"
     );
+    let cards: serde_json::Value =
+        serde_json::from_str(get("/screens/cards").split_once("\r\n\r\n").unwrap().1).unwrap();
+    let card = cards
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["id"] == "nhc-sendmeter-12")
+        .unwrap();
+    let img = card["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["type"] == "images")
+        .unwrap();
+    assert_eq!(img["items"][0]["src"], format!("/shot/sendmeter/12/0/{h}"), "{card}");
     let png = get("/shot/sendmeter/12/0");
     assert!(
         png.starts_with("HTTP/1.1 200") && png.ends_with("\u{fffd}PNG narrow"),

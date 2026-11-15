@@ -387,19 +387,24 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
     let f = git(&wt, "", "0\n", "");
     let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    assert!(req(&s, "/act", &format!("agent={LANE}&op=stop"), "").starts_with("HTTP/1.1 401 "));
+    assert!(req(&s, "/api/v1/act", &json!({"agent": LANE, "op": "stop"}).to_string(), "").starts_with("HTTP/1.1 401 "));
     assert!(req(
         &s,
-        "/act",
-        &format!("agent={LANE}&op=stop"),
+        "/api/v1/act",
+        &json!({"agent": LANE, "op": "stop"}).to_string(),
         "Origin: https://evil.example\r\n"
     )
     .starts_with("HTTP/1.1 403 "));
     assert!(sh.all("keys").is_empty(), "{:?}", sh.methods());
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let res = req(&s, "/act", &format!("agent={LANE}&op=stop"), &cookie);
+    let res = req(
+        &s,
+        "/api/v1/act",
+        &json!({"agent": LANE, "op": "stop"}).to_string(),
+        &cookie,
+    );
     assert!(
-        res.starts_with("HTTP/1.1 200 OK") && res.ends_with("sent Esc to sendmeter-impl-12\n"),
+        res.starts_with("HTTP/1.1 200 OK") && res.contains("sent Esc to sendmeter-impl-12"),
         "{res}"
     );
     assert_eq!(sh.last("keys"), json!({"name": LANE, "keys": ["esc"]}));
@@ -409,7 +414,12 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
         (e.kind.as_str(), e.str("via"), e.str("device"), e.str("op")),
         ("act", Some("web"), Some(&*label), Some("stop"))
     );
-    let res = req(&s, "/act", &format!("agent={LANE}&op=kill"), &cookie);
+    let res = req(
+        &s,
+        "/api/v1/act",
+        &json!({"agent": LANE, "op": "kill"}).to_string(),
+        &cookie,
+    );
     assert!(
         res.contains("pane closes, worktree kept") && !sh.called("kill", LANE),
         "{res}"
@@ -497,22 +507,6 @@ fn a_gone_lane_reads_its_stored_transcript() {
         (lines.len(), &lines[0], &lines[199], &j["live"], &j["more"]),
         (200, &json!("  out 50"), &json!("  out 249"), &json!(0), &json!(true))
     );
-}
-
-#[test]
-fn inputs_are_16px_and_zoom_is_off() {
-    let css = include_str!("../../../assets/serve.css");
-    let rule = css.lines().find(|l| l.starts_with(".reply textarea{")).unwrap();
-    assert!(
-        rule.ends_with("font-size:var(--fs-input)}") && css.contains("--fs-input:16px"),
-        "{rule}"
-    );
-    let (c, _, _sh) = lane("zoom");
-    let page = String::from_utf8_lossy(&Server::new(&c, &Fake::default(), None).respond("GET / HTTP/1.1\r\n\r\n", T))
-        .into_owned();
-    assert!(page.contains("initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"));
-    assert!(!css.contains(".lock") && !css.contains("body{position:fixed"));
-    assert!(include_str!("../../../assets/serve.js").contains("visualViewport"));
 }
 
 #[test]

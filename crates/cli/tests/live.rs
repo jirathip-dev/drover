@@ -282,29 +282,29 @@ fn countdown_card_shows_reason_command_and_clears_when_the_prompt_goes() {
     let (c, r) = blocked("countdown", COUNTDOWN, COUNTDOWN);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
-    let page = page(&s, "/", &ck);
-    let needs = &page[page.find("<div id=needs>").unwrap()..page.find("<main>").unwrap()];
-    for want in [
-        "data-push=0",
-        "<p class=title>Bash command</p>",
-        "<p class=reason>Dangerous rm operation on possibly-empty variable path",
-        "<p class=command>cp /Users/me/qg.bak",
-        &format!("<p class=cd data-until={}>auto-denies in 0:14</p>", T + 14),
-        "class=pick value=2",
-    ] {
-        assert!(needs.contains(want), "{want}: {needs}");
-    }
-    assert!(!needs.contains("data-push=1"), "{needs}");
+    let v = needs(&s, &ck, T);
+    let b = card(&v, "sendmeter-impl-12").unwrap_or_else(|| panic!("{v}"));
+    let m = &b["menu"];
+    assert_eq!(
+        (&b["push"], &m["title"], &m["countdown"]),
+        (&json!(false), &json!("Bash command"), &json!(14)),
+        "{b}"
+    );
+    assert!(
+        m["reason"]
+            .as_str()
+            .unwrap()
+            .starts_with("Dangerous rm operation on possibly-empty variable path")
+            && m["command"].as_str().unwrap().starts_with("cp /Users/me/qg.bak")
+            && m["options"].as_array().unwrap().len() == 2,
+        "{b}"
+    );
     let working = "⏺ Bash(cargo test)\n  ⎿ Error: denied\n\n✶ Pontificating… (12m 0s · ↓ 3.1k tokens)\n";
     let r2 = Lanes::new(Fake::default());
     r2.blocked("sendmeter-impl-12", working);
     let s2 = Server::new(&c, &r2, Some(ADDR.into()));
-    let page =
-        String::from_utf8_lossy(&s2.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n{ck}\r\n"), T + 5))
-            .into_owned();
-    let page = with_board(&page, &s2, ADDR, &ck, T + 5);
-    let needs = &page[page.find("<div id=needs>").unwrap()..page.find("<main>").unwrap()];
-    assert!(!needs.contains("sendmeter-impl-12"), "no stale card: {needs}");
+    let v = needs(&s2, &ck, T + 5);
+    assert!(card(&v, "sendmeter-impl-12").is_none(), "no stale card: {v}");
 }
 
 fn blocked(name: &str, imp: &str, rev: &str) -> (drover::Ctx, Lanes) {
@@ -328,8 +328,17 @@ fn blocked(name: &str, imp: &str, rev: &str) -> (drover::Ctx, Lanes) {
     (c, r)
 }
 
-fn page(s: &Server, path: &str, extra: &str) -> String {
-    with_board(&req(s, "GET", path, "", extra), s, ADDR, extra, T)
+fn needs(s: &Server, extra: &str, now: u64) -> serde_json::Value {
+    let r = String::from_utf8_lossy(&s.respond(
+        &format!("GET /api/v1/needs HTTP/1.1\r\nHost: {ADDR}\r\n{extra}\r\n"),
+        now,
+    ))
+    .into_owned();
+    serde_json::from_str(&r[r.find("\r\n\r\n").unwrap() + 4..]).unwrap_or_else(|_| panic!("{r}"))
+}
+
+fn card<'a>(needs: &'a serde_json::Value, agent: &str) -> Option<&'a serde_json::Value> {
+    needs["blocked"].as_array().unwrap().iter().find(|b| b["name"] == agent)
 }
 
 fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> String {
@@ -340,9 +349,11 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> String 
     String::from_utf8_lossy(&s.respond(&r, T)).into_owned()
 }
 
-fn shown_h(page: &str) -> String {
-    let i = page.find("data-h=").expect("menu buttons") + 7;
-    page[i..].chars().take_while(char::is_ascii_digit).collect()
+fn shown_h(needs: &serde_json::Value) -> String {
+    card(needs, "sendmeter-impl-12").expect("menu buttons")["menu"]["h"]
+        .as_str()
+        .unwrap()
+        .to_string()
 }
 
 fn cookie(s: &Server, c: &drover::Ctx) -> String {
@@ -362,17 +373,13 @@ fn answer_sends_the_digit_and_logs_no_question() {
     let (c, r) = blocked("answer", PERMISSION, PERMISSION);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
-    let page = page(&s, "/", &ck);
-    let needs = &page[page.find("<div id=needs>").unwrap()..page.find("<main>").unwrap()];
-    let h = shown_h(needs);
+    let v = needs(&s, &ck, T);
+    let h = shown_h(&v);
+    let m = &card(&v, "sendmeter-impl-12").unwrap()["menu"];
     assert!(
-        needs.contains("Do you want to proceed?")
-            && needs.contains(&format!(
-                "<button type=button class=pick value=2 data-h={h}>2. Yes, and don"
-            )),
-        "{needs}"
+        m["question"] == "Do you want to proceed?" && m["options"][1].as_str().unwrap().starts_with("Yes, and don"),
+        "{v}"
     );
-    assert!(needs.contains("data-ask=\"sendmeter-impl-12\""), "{needs}");
     let res = req(&s, "POST", "/answer", "agent=sendmeter-impl-12&choice=2", "");
     assert!(res.starts_with("HTTP/1.1 401 "), "no device cookie: {res}");
     assert!(r.keys().is_empty());
@@ -434,7 +441,7 @@ fn answer_refuses_a_changed_menu_and_rerenders_fresh() {
     let (c, r) = blocked("stale-menu", PERMISSION, PERMISSION);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
-    let h = shown_h(&page(&s, "/", &ck));
+    let h = shown_h(&needs(&s, &ck, T));
     let b = PERMISSION.replace("for cargo  ", "for git    ");
     r.sh.screen("sendmeter-impl-12", &b);
     let res = req(
@@ -463,11 +470,10 @@ fn answer_refuses_a_changed_menu_and_rerenders_fresh() {
         res.contains("sent to sendmeter-impl-12") && r.keys() == [json!({"name": "sendmeter-impl-12", "keys": ["2"]})],
         "same menu: the digit: {res}"
     );
-    let page = page(&s, "/", &ck);
+    let v = needs(&s, &ck, T);
     assert!(r.reads() > reads + 2, "a fresh read after the send");
-    let card = &page
-        [page.find("data-ask=\"sendmeter-impl-12\"").unwrap()..page.find("data-ask=\"sendmeter-rev-9-r1\"").unwrap()];
-    assert!(!card.contains("class=pick") && card.contains("⎿ ok"), "{card}");
+    let b = card(&v, "sendmeter-impl-12").unwrap_or_else(|| panic!("{v}"));
+    assert!(b["menu"].is_null() && b.to_string().contains("⎿ ok"), "{b}");
 }
 
 #[test]
@@ -494,60 +500,14 @@ fn unparsed_blocked_pane_shows_masked_tail_and_reply() {
     );
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let ck = cookie(&s, &c);
-    let page = page(&s, "/", &ck);
-    let needs = &page[page.find("<div id=needs>").unwrap()..page.find("<main>").unwrap()];
+    let v = needs(&s, &ck, T);
+    let b = card(&v, "sendmeter-impl-12").unwrap_or_else(|| panic!("{v}"));
+    assert_eq!(b["tail"], "l3\nl4\nl5\nl6\nl7 token=•••\nl8", "{b}");
     assert!(
-        needs.contains("<pre>l3\nl4") && needs.contains("class=rp>Reply") && !needs.contains("l2\n"),
-        "{needs}"
+        !v.to_string()
+            .contains(concat!("gh", "p_abcdefghijklmnopqrstuvwxyz0123456789")),
+        "masked: {v}"
     );
-    assert!(
-        !needs.contains(concat!("gh", "p_abcdefghijklmnopqrstuvwxyz0123456789")),
-        "masked: {needs}"
-    );
-}
-
-#[test]
-fn live_board_fits_390px() {
-    if no_webkit() {
-        return;
-    }
-    let (c, r) = blocked("live-shots", COUNTDOWN, PERMISSION);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let ck = cookie(&s, &c);
-    let page = drawn(&req(&s, "GET", "/?all=1", "", &ck), &s, ADDR, &ck, T);
-    let d = tmpdir("live-png");
-    let file = d.join("page.html");
-    std::fs::write(&file, &page[page.find("<!doctype").unwrap()..]).unwrap();
-    let stub =
-        "window.fetch = async u => new Response(u === '/answer' ? 'sent to sendmeter-impl-12' : '{}', {status: 200})";
-    let scenes = [
-        ("sync-green", "queue", "sync('g'); pulse()".to_string()),
-        ("sync-amber", "queue", "sync('a')".into()),
-        ("sync-red", "queue", "last = Date.now() - 600000; sync('r')".into()),
-        ("pull", "queue", "sync('g'); M.style.transform = 'translateY(60px)'; ptr.hidden = false; ptr.style.transform = 'rotate(240deg)'".into()),
-        ("needs-you-menu", "queue", "sync('g')".into()),
-        ("needs-you-countdown", "queue", "sync('g')".into()),
-        ("answer-sent", "queue", format!("sync('g'); {stub}; document.querySelector('.ask .pick[value=\"1\"]').click()")),
-        ("sheet-blocked", "lanes", "sync('g'); open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]'))".into()),
-    ];
-    let dir = std::env::var("DROVER_SNAPSHOTS").ok();
-    for (name, tab, js) in scenes {
-        let png = dir.as_ref().map_or(d.join(format!("{name}.png")), |p| {
-            std::path::Path::new(p).join(format!("{name}.png"))
-        });
-        let o = webview()
-            .args([file.to_str().unwrap(), "390", tab, "horse", png.to_str().unwrap(), &js])
-            .output()
-            .unwrap();
-        let out = String::from_utf8_lossy(&o.stdout);
-        let w: Vec<u32> = out.split_whitespace().filter_map(|n| n.parse().ok()).collect();
-        assert!(
-            o.status.success() && w.len() == 2,
-            "{name}: {out} {}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-        assert!(w[0] <= 390 && w[1] == 390, "{name}: scrollWidth {} at {}", w[0], w[1]);
-    }
 }
 
 fn reconnect(addr: std::net::SocketAddr, since: &str) -> String {
@@ -609,15 +569,13 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
         1,
         "the build alone (#391)"
     );
-    let tab = events_tab(
-        &Server::new(&c, &Fake::default(), Some(addr.to_string())),
-        &addr.to_string(),
+    let evs = String::from_utf8_lossy(&Server::new(&c, &Fake::default(), Some(addr.to_string())).respond(
+        &format!("GET /api/v1/events?since=0 HTTP/1.1\r\nHost: {addr}\r\n\r\n"),
         T + 20,
-        "{ f: { k: 'all', fl: [] } }",
-    );
+    ))
+    .into_owned();
     for i in 0..3 {
-        let Some(tab) = &tab else { break };
-        assert_eq!(tab.matches(&format!(">note · missed-{i}<")).count(), 1, "{tab}");
+        assert_eq!(evs.matches(&format!("\"reason\":\"missed-{i}\"")).count(), 1, "{evs}");
     }
     for i in 0..501 {
         append(&c.state, &Event::new(T + 30 + i, "sendmeter", None, "note", json!({}))).unwrap();
@@ -628,30 +586,6 @@ fn live_messages_carry_the_seq_and_a_reconnect_replays_what_it_missed() {
         "{far}"
     );
     assert!(reconnect(addr, "?since=6").matches("event: ev").count() == 500);
-}
-
-#[test]
-fn the_board_dedupes_by_seq_and_skips_stale_moments() {
-    if std::process::Command::new("node").arg("--version").output().is_err() {
-        return eprintln!("skipping: no node here");
-    }
-    let src = include_str!("../../../assets/serve.js");
-    let part = &src[src.find("  const at = e").unwrap()..src.find("  es.addEventListener('refresh'").unwrap()];
-    let js = format!(
-        "let seq = 0; const played = [], told = [], h = {{}}, es = {{ addEventListener: (n, f) => (h[n] = f) }};\n\
-         const rmoment = k => played.push(k), dispatchEvent = e => told.push(e.type);\n{part}\n\
-         const now = Math.floor(Date.now() / 1e3), ev = (s, ts, k) => h.ev({{ lastEventId: String(s), data: JSON.stringify({{ seq: s, ts, k }}) }});\n\
-         ev(1, now, 'merged'); ev(1, now, 'merged'); ev(2, now - 300, 'fail'); ev(3, now, null); ev(2, now, 'fail'); ev(4, now, 'needs-you');\n\
-         console.log(played.join(','), seq, told.join());"
-    );
-    let d = tmpdir("dedupe-js");
-    std::fs::write(d.join("t.js"), js).unwrap();
-    let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    assert_eq!(
-        String::from_utf8_lossy(&o.stdout).trim(),
-        "merged,needs-you 4 herd-ev,herd-ev,herd-ev,herd-ev"
-    );
 }
 
 #[test]
@@ -675,12 +609,6 @@ fn unpaired_viewers_see_no_pane_text() {
             "{path} paired"
         );
     }
-    let res = page(&s, "/", "");
-    assert!(
-        pane.iter().all(|p| !res.contains(p)) && res.contains("pair this phone to answer"),
-        "{res}"
-    );
-    assert!(page(&s, "/", &ck).contains("Do you want to proceed?"), "paired");
     let live = FakeShed::new();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = l.local_addr().unwrap();
@@ -731,7 +659,7 @@ fn the_sampler_thread_fills_the_host() {
     let end = Instant::now() + Duration::from_secs(5);
     loop {
         let mut s = TcpStream::connect(addr).unwrap();
-        s.write_all(format!("GET /herd.json HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
+        s.write_all(format!("GET /api/v1/herd HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
             .unwrap();
         let mut out = String::new();
         s.read_to_string(&mut out).unwrap();

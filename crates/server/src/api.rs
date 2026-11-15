@@ -12,7 +12,7 @@ macro_rules! shapes {
 }
 
 shapes! {
-/// `/herd.json` (Herd mode, docs/serve.md).
+/// API v1's `GET herd` (docs/serve.md).
 pub struct Herd {
     pub fleets: Vec<HerdFleet>,
     pub others: Vec<HerdLane>,
@@ -1026,6 +1026,21 @@ pub struct Reply {
     pub ok: bool,
     pub code: String,
     pub message: String,
+    /// #977: a tap's job id (`code` ACCEPTED): `GET /api/v1/job/<id>` gives how it ended.
+    pub job: Option<String>,
+}
+
+#[derive(Clone)]
+/// #977: a tap run as a job: `state` running, waiting (for host), done, refused (`code`) or error; `message` its toast.
+pub struct Job {
+    pub id: String,
+    pub op: String,
+    pub fleet: String,
+    pub issue: Option<u64>,
+    pub state: String,
+    pub code: String,
+    pub message: String,
+    pub ts: u64,
 }
 
 /// #633: `POST /api/v1/conductor-attach`'s answer (a refusal is a `Reply`): what a cooee conductor profile needs.

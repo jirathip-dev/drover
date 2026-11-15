@@ -743,16 +743,16 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
     let r = shed.on(&f);
     let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let get = |s: &drover::serve::Server| {
-        let res = s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now);
-        with_queue(&String::from_utf8_lossy(&res), s, "127.0.0.1:7777", c.now)
+        serde_json::from_str::<serde_json::Value>(&api(s, "127.0.0.1:7777", "", c.now, "queue")).unwrap()
     };
     let page = get(&s);
-    assert!(
-        page.contains("<button>Drive now</button>")
-            && page.contains("<details class=\"dp a\"><summary><i>●</i><span>drive · no pass yet</span>")
+    let drive = &page["fleets"][0]["drive"];
+    assert_eq!(
+        (&drive["tone"], &drive["line"]),
+        (&json!("a"), &json!("drive · no pass yet")),
+        "{drive}"
     );
-    let i = page.find("name=mtime value=").unwrap() + 17;
-    let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let mtime = page["mtime"].as_str().unwrap().to_string();
     let body = format!("op=drive&fleet=sendmeter&mtime={mtime}");
     let post = |host: &str, extra: &str| {
         let req = format!(
@@ -771,8 +771,11 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
         "{res}"
     );
     assert!(!started("sendmeter-impl-12").is_empty());
-    assert!(
-        get(&s).contains("<details class=\"dp g\"><summary><i>●</i><span>drive · 0s ago · started 1 · merged 0</span>")
+    let drive = get(&s)["fleets"][0]["drive"].clone();
+    assert_eq!(
+        (&drive["tone"], &drive["line"]),
+        (&json!("g"), &json!("drive · 0s ago · started 1 · merged 0")),
+        "{drive}"
     );
 }
 
@@ -842,10 +845,15 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
     live.write_all(format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n").as_bytes())
         .unwrap();
     let (res, took) = post();
-    assert!(res.contains("drive%20started%20for%20sendmeter"), "{res}");
+    assert!(res.contains("drive%20accepted%20%C2%B7%20job%20"), "{res}");
     assert!(took < Duration::from_millis(200), "the POST took {took:?}");
-    let (res, _) = post();
-    assert!(res.contains("REFUSED%20DRIVE%5FRUNNING"), "{res}");
+    let job = |res: &str| {
+        res.split("job%20")
+            .nth(1)
+            .map(|j| j.split_whitespace().next().unwrap_or_default().to_string())
+    };
+    let (again, _) = post();
+    assert_eq!(job(&again), job(&res), "a second tap is the first's job: {again}");
     let t = Instant::now();
     assert!(get("/", "").starts_with("HTTP/1.1 200"));
     assert!(t.elapsed() < Duration::from_secs(1), "GET / waited {:?}", t.elapsed());
@@ -864,8 +872,10 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
         seen.contains("event: toast\ndata: \"sendmeter: started #12\""),
         "{seen}"
     );
-    assert!(post().0.contains("drive%20started"), "the flag is cleared");
-    toast();
+    assert!(
+        post().0.contains("sendmeter%3A%20started%20%2312"),
+        "a tap after it ended shows its result"
+    );
 }
 
 fn stale_pr(head: &str, mergeable: &str, status: &str) -> String {
@@ -2761,19 +2771,14 @@ fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
     assert!(started("").is_empty(), "a parked issue is skipped");
 
     let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let page = with_queue(
-        &String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)),
-        &s,
-        "127.0.0.1:7777",
-        c.now,
+    let page: serde_json::Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", c.now, "queue")).unwrap();
+    let row = &page["fleets"][0]["rows"][0];
+    assert_eq!(
+        (&row["issue"], &row["state"], &row["notes"]),
+        (&json!(12), &json!("parked"), &json!(["parked: host mini is down"])),
+        "{row}"
     );
-    assert!(
-        page.contains("<span class=r>parked: host mini is down</span>"),
-        "{page}"
-    );
-    assert!(page.contains("<input type=hidden name=op value=unpark>"), "{page}");
-    let i = page.find("name=mtime value=").unwrap() + 17;
-    let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let mtime = page["mtime"].as_str().unwrap().to_string();
     let body = format!("op=unpark&fleet=sendmeter&issue=12&mtime={mtime}");
     let post = |extra: &str| {
         let req = format!(

@@ -5,50 +5,20 @@ use std::path::PathBuf;
 
 const EXCEPTIONS: &[(&str, &str, &str, &str)] = &[
     (
-        "serve.css",
-        ".gl",
-        "font-size",
-        "glyph-mode avatar: a 20 px emoji picture, not text",
-    ),
-    (
-        "serve.css",
-        ".av .asc",
-        "font",
-        "ascii-mode avatar: 10 px character art, not text",
-    ),
-    (
-        "serve.css",
-        "#herd-on svg",
-        "height",
-        "header horse icon: 19×14 px picture geometry",
-    ),
-    (
-        "serve.css",
+        "board.css",
         ".av",
         "height",
         "lane avatar box: 48×40 px picture geometry",
     ),
     (
-        "serve.css",
+        "board.css",
         ".px",
         "height",
         "lane horse drawing: 48×36 px picture geometry",
     ),
     (
-        "herd.css",
-        ".hr",
-        "height",
-        "ranch strip: never shorter than 120 px of sky on a short screen",
-    ),
-    (
-        "herd.css",
-        ".hrain",
-        "inset",
-        "rain overlay: offset by its 60 px tile so the tile can scroll in",
-    ),
-    (
-        "serve.css",
-        "button[name=choice],button.pick",
+        "board.css",
+        "button.pick",
         "height",
         "choice buttons wrap: sentences, not labels; owner-approved 2026-10-31 (#63 A; #139: wherever the form renders)",
     ),
@@ -133,32 +103,35 @@ fn decls(css: &str) -> Vec<(usize, String, String, String)> {
 
 #[test]
 fn css_uses_only_the_tokens() {
-    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets"));
+    let dir = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/src"));
     let mut bad = vec![];
-    for file in ["serve.css", "herd.css"] {
+    for file in ["board.css"] {
         let css = std::fs::read_to_string(dir.join(file)).unwrap();
-        if file == "serve.css" {
-            assert!(
-                css.starts_with(":root{") && css.contains("--fs:13px") && css.contains("--ctl:28px"),
-                "serve.css opens with the token block"
-            );
-        }
+        let body = css
+            .lines()
+            .skip_while(|l| l.starts_with("/*"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(
+            body.starts_with(":root{") && css.contains("--fs:13px") && css.contains("--ctl:28px"),
+            "board.css opens with the token block"
+        );
         for (line, sel, p, v) in decls(&css) {
             if EXCEPTIONS.iter().any(|e| e.0 == file && e.1 == sel && e.2 == p) {
                 continue;
             }
             let sized = SIZED.contains(&p.as_str()) || p.starts_with("margin") || p.starts_with("padding");
             for n in px(&v).into_iter().filter(|_| sized) {
-                bad.push(format!("assets/{file}:{line} {sel} {{{p}:{v}}} raw {n}"));
+                bad.push(format!("web/src/{file}:{line} {sel} {{{p}:{v}}} raw {n}"));
             }
             if p == "height" && (sel.contains("button") || sel.contains(".pk")) && v != "var(--ctl)" {
                 bad.push(format!(
-                    "assets/{file}:{line} {sel} {{{p}:{v}}} a control is var(--ctl) tall"
+                    "web/src/{file}:{line} {sel} {{{p}:{v}}} a control is var(--ctl) tall"
                 ));
             }
             if (p == "font-size" || (p == "font" && v != "inherit")) && !v.starts_with("var(--fs") {
                 bad.push(format!(
-                    "assets/{file}:{line} {sel} {{{p}:{v}}} font size is not a --fs token"
+                    "web/src/{file}:{line} {sel} {{{p}:{v}}} font size is not a --fs token"
                 ));
             }
         }
@@ -169,24 +142,6 @@ fn css_uses_only_the_tokens() {
         bad.len(),
         bad.join("\n")
     );
-}
-
-#[test]
-fn serve_css_has_no_raw_colour() {
-    let css = include_str!("../../../assets/serve.css");
-    let bad: Vec<String> = decls(css)
-        .into_iter()
-        .filter(|(_, _, _, v)| {
-            v.contains("rgb(") || v.contains("rgba(") || v.contains("hsl(") || {
-                v.match_indices('#').any(|(i, _)| {
-                    let h = v[i + 1..].chars().take_while(char::is_ascii_hexdigit).count();
-                    [3, 4, 6, 8].contains(&h)
-                })
-            }
-        })
-        .map(|(l, sel, p, v)| format!("assets/serve.css:{l} {sel} {{{p}:{v}}}"))
-        .collect();
-    assert!(bad.is_empty(), "raw colours outside the schemes:\n{}", bad.join("\n"));
 }
 
 #[test]

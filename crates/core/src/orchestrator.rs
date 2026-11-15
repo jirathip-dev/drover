@@ -1077,6 +1077,9 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
     let text = profile(cfg, t, fleet);
     on.write(&brief, &text)?;
     h.prepare(ctx, &on, &p)?;
+    if let Some(acp) = &acp {
+        crate::spawn::write_acp_mcp(&on, &p, acp)?;
+    }
     let _secrets = crate::spawn::deliver(ctx, &on, &p)?;
     let labels = [
         ("fleet", fleet),
@@ -1094,7 +1097,7 @@ fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, t: &Event, events: &[Event], l
         &agent,
         &labels,
         &dir.to_string_lossy(),
-        acp.as_deref().unwrap_or_default(),
+        &acp.clone().unwrap_or_default(),
     )?;
     if acp.is_some() {
         let kick = format!("The thread so far is in {}, the last message new.", thread.display());

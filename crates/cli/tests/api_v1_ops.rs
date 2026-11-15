@@ -176,17 +176,11 @@ fn setup_starts_a_configured_terminal_and_reads_its_screen() {
 }
 
 #[test]
-fn herd_and_roles_read_as_the_old_board_draws_them() {
+fn herd_and_roles_read_through_api_v1() {
     let (c, r) = v1_board("v1-reads");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let (status, herd) = req(&s, "GET", "/api/v1/herd", "", "");
     assert_eq!(status, "200 OK");
-    let old = String::from_utf8_lossy(&s.respond(&format!("GET /herd.json HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T))
-        .into_owned();
-    assert_eq!(
-        herd,
-        serde_json::from_str::<Value>(old.split_once("\r\n\r\n").unwrap().1).unwrap()
-    );
     assert_eq!(herd["fleets"][0]["name"], "sendmeter");
     let evil = "Origin: https://evil.example\r\n";
     assert_eq!(req(&s, "GET", "/api/v1/herd", "", evil).1["code"], "FORBIDDEN");
@@ -284,6 +278,7 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
     let agents =
         json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo", "claude-agent-acp"]}]);
     let host = Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed", "")
         .reply("gh issue close", "");

@@ -82,6 +82,7 @@ fn spawn_logs_spawn_started_before_the_harness_starts() {
     let f = fake()
         .reply("which shed", "/opt/shed/bin/shed\n")
         .reply("git -C", "")
+        .reply("shed help run", "--meta <JSON>")
         .reply(
             "shed agents --json",
             r#"[{"id": "claude-acp", "cmd": ["claude-agent-acp"]}]"#,
