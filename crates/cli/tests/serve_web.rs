@@ -454,7 +454,7 @@ fn lanes_group_by_fleet_with_others() {
     let c = ctx(&d, &two);
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let ev = |fleet: &str, issue: Option<u64>, d: serde_json::Value| {
-        append(&c.state, &Event::new(900_000, fleet, issue, "spawn", d)).unwrap()
+        append(&c.state, &Event::new(900_000, fleet, issue, "spawn", d)).unwrap();
     };
     ev(
         "sendmeter",
@@ -480,7 +480,7 @@ fn lanes_group_by_fleet_with_others() {
     let st = drover::events::fold(&events);
     let wt = c.worktrees.join("synergy-apps/designer").to_string_lossy().into_owned();
     let lab = |f: &str, h: &str| json!({"fleet": f, "harness": h});
-    let agents = sessions(json!([
+    let agents = sessions(&json!([
         {"name": "sendmeter-impl-12", "status": "working", "cwd": "/x", "labels": lab("sendmeter", "claude")},
         {"name": "synergy-design-5", "status": "done", "cwd": "/x", "labels": lab("synergy", "claude")},
         {"name": "w3", "status": "working", "cwd": wt, "labels": lab("synergy", "claude")},
@@ -518,7 +518,7 @@ fn lanes_group_by_fleet_with_others() {
     let sh = FakeShed::attached(&c);
     sh.lane("sendmeter-impl-12", "working", "/x");
     sh.set("sendmeter-impl-12", |t| {
-        t["reported"]["note"] = json!("running: cargo test (4m)")
+        t["reported"]["note"] = json!("running: cargo test (4m)");
     });
     sh.lane("synergy-design-5", "done", "/x");
     for (name, harness, cwd, state) in [
@@ -527,7 +527,7 @@ fn lanes_group_by_fleet_with_others() {
     ] {
         sh.add(name, json!({"fleet": "", "harness": harness}));
         sh.set(name, |t| {
-            (t["cwd"], t["reported"]) = (json!(cwd), json!({"state": state}))
+            (t["cwd"], t["reported"]) = (json!(cwd), json!({"state": state}));
         });
     }
     sh.lane("synergy-impl-7", "blocked", "/p/synergy-apps");
@@ -556,7 +556,7 @@ fn one_lane_per_agent_name() {
     }
     let events = read(&c.state).unwrap();
     let lab = json!({"fleet": "sendmeter"});
-    let agents = sessions(json!([
+    let agents = sessions(&json!([
         {"name": "sendmeter-impl-3061", "status": "working", "cwd": "/x", "labels": lab},
         {"name": "sendmeter-impl-3061", "status": "idle", "cwd": "/x", "host": "mini", "labels": lab},
     ]));
@@ -623,7 +623,7 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     let two = format!("{}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\npaused = true\n", config());
     let c = ctx(&d, &two);
     let ev = |fleet: &str, issue: u64, ts: u64, kind: &str, d: serde_json::Value| {
-        append(&c.state, &Event::new(ts, fleet, Some(issue), kind, d)).unwrap()
+        append(&c.state, &Event::new(ts, fleet, Some(issue), kind, d)).unwrap();
     };
     append(
         &c.state,

@@ -212,13 +212,13 @@ impl Runner for Boat<'_> {
 }
 
 fn setup(name: &str, hosts: &[&str]) -> (drover::Ctx, PathBuf) {
+    use std::os::unix::fs::PermissionsExt;
     let base = CONFIG.replace("harness  =  \"hermes\"    # toggled in tests", "harness = \"claude\"");
     let home = tmpdir(&format!("{name}-remote"));
     let d = tmpdir(name);
     let tf = d.join("config/tokens/proxy");
     std::fs::create_dir_all(tf.parent().unwrap()).unwrap();
     std::fs::write(&tf, TOKEN_C).unwrap();
-    use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&tf, std::fs::Permissions::from_mode(0o600)).unwrap();
     let mut toml = format!(
         "{base}\n[proxy]\nport = 9\ntoken-file = \"{}\"\n\n[hosts.mini]\nenabled = false\n",
@@ -386,9 +386,12 @@ fn shed_runner<'a>(b: &'a Boat, cfg: &drover::config::Config) -> drover::shed::W
 
 fn grep(dir: &Path, needle: &str) -> bool {
     let Ok(rd) = std::fs::read_dir(dir) else { return false };
-    rd.flatten().any(|e| match e.file_type().unwrap().is_dir() {
-        true => grep(&e.path(), needle),
-        false => std::fs::read_to_string(e.path()).is_ok_and(|s| s.contains(needle)),
+    rd.flatten().any(|e| {
+        if e.file_type().unwrap().is_dir() {
+            grep(&e.path(), needle)
+        } else {
+            std::fs::read_to_string(e.path()).is_ok_and(|s| s.contains(needle))
+        }
     })
 }
 
@@ -577,7 +580,7 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
     );
     let f = Fake::default();
     let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let pport = l.local_addr().unwrap().port();
+    let proxy_port = l.local_addr().unwrap().port();
     let now: &'static Shared<u64> = Box::leak(Box::new(Shared::new(c.now)));
     let dir = c.config.parent().unwrap().parent().unwrap();
     let pc: &'static drover::Ctx = Box::leak(Box::new(ctx(dir, &std::fs::read_to_string(&c.config).unwrap())));
@@ -586,7 +589,7 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
     let f = pf;
     std::thread::spawn(move || drover::proxy::serve_on(pc, pcfg, pf, &l, &|| now.get()));
     {
-        let (status, body) = call(pport, &live);
+        let (status, body) = call(proxy_port, &live);
         assert!(status.contains("200"), "{status} {body}");
         assert!(body.contains("message_stop"), "{body}");
         let up = seen.lock().unwrap().clone();
@@ -611,7 +614,7 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
             "/v1#@x",
             "v1/messages",
         ] {
-            let (status, body) = call_at(pport, &live, p);
+            let (status, body) = call_at(proxy_port, &live, p);
             assert!(
                 status.contains("400") && body.contains("bad request path"),
                 "{p}: {status} {body}"
@@ -625,11 +628,11 @@ fn a_lane_keys_model_call_goes_through_the_proxy_and_a_revoked_expired_or_ended_
             "{list}"
         );
         for (k, why) in [(gone.as_str(), "revoked"), ("hsk-nope", "unknown lane key")] {
-            let (status, body) = call(pport, k);
+            let (status, body) = call(proxy_port, k);
             assert!(status.contains("401") && body.contains(why), "{status} {body}");
         }
         now.set(c.now + 12 * 3600);
-        let (status, body) = call(pport, &late);
+        let (status, body) = call(proxy_port, &late);
         assert!(status.contains("401") && body.contains("expired"), "{status} {body}");
         assert_eq!(seen.lock().unwrap().len(), 1, "refused calls never reach upstream");
     }

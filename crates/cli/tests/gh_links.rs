@@ -7,6 +7,16 @@ use serde_json::json;
 const GH: &str = "https://github.com/jirathip-dev/sendmeter";
 
 fn row(s: &Server, n: u64) -> (serde_json::Value, serde_json::Value) {
+    fn find(v: &serde_json::Value, id: &str) -> Option<serde_json::Value> {
+        if v["id"] == id {
+            return Some(v.clone());
+        }
+        match v {
+            serde_json::Value::Object(m) => m.values().find_map(|x| find(x, id)),
+            serde_json::Value::Array(a) => a.iter().find_map(|x| find(x, id)),
+            _ => None,
+        }
+    }
     let q: serde_json::Value = serde_json::from_str(&api(s, "127.0.0.1:7777", "", 1_000_000, "queue")).unwrap();
     let r = q["fleets"][0]["rows"]
         .as_array()
@@ -19,16 +29,6 @@ fn row(s: &Server, n: u64) -> (serde_json::Value, serde_json::Value) {
         String::from_utf8_lossy(&s.respond("GET /screens/queue HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", 1_000_000))
             .into_owned();
     let screen: serde_json::Value = serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap();
-    fn find(v: &serde_json::Value, id: &str) -> Option<serde_json::Value> {
-        if v["id"] == id {
-            return Some(v.clone());
-        }
-        match v {
-            serde_json::Value::Object(m) => m.values().find_map(|x| find(x, id)),
-            serde_json::Value::Array(a) => a.iter().find_map(|x| find(x, id)),
-            _ => None,
-        }
-    }
     let block = find(&screen, &format!("q-sendmeter-{n}")).unwrap_or_else(|| panic!("no row {n}: {screen}"));
     (r, block)
 }
@@ -86,8 +86,8 @@ fn an_issue_with_no_pr_links_the_ticks_latest_run_or_nothing() {
     );
     assert!(block.get("tap").is_none(), "{block}");
     let url = format!("{GH}/actions/runs/99");
-    let _sh = FakeShed::new();
-    _sh.attach(&c);
+    let sh = FakeShed::new();
+    sh.attach(&c);
     let r = Fake::default().reply("gh pr view", "").reply(
         "gh run list -R jirathip-dev/sendmeter --branch issue-17",
         &format!("[{{\"url\":\"{url}\"}}]"),

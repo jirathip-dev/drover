@@ -64,9 +64,9 @@ fn secret_in_config_is_refused() {
 }
 
 fn config(d: &Path) -> String {
+    use std::os::unix::fs::PermissionsExt;
     let env = d.join("tokens.env");
     std::fs::write(&env, format!("export DEEPSEEK_API_KEY=\"{DS_KEY}\"\n")).unwrap();
-    use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(&env, std::fs::Permissions::from_mode(0o600)).unwrap();
     CONFIG.to_string()
         + &format!(
@@ -160,9 +160,9 @@ fn deepseek_hints_when_the_env_file_lacks_the_key() {
 
 #[test]
 fn a_deepseek_env_file_others_can_read_is_refused() {
+    use std::os::unix::fs::PermissionsExt;
     let d = tmpdir("usage-0644");
     let c = ctx(&d, &config(&d));
-    use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(d.join("tokens.env"), std::fs::Permissions::from_mode(0o644)).unwrap();
     let r = stdin(Fake::default());
     let page = api(&Server::new(&c, &r, None), "", "", c.now, "host");

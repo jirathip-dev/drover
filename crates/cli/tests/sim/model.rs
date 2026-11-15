@@ -48,7 +48,7 @@ pub struct Pane {
     pub born: u64,
     pub closed: bool,
     pub script: Option<Script>,
-    /// Prompts it was sent (a NO_PROOF refusal among them).
+    /// Prompts it was sent (a `NO_PROOF` refusal among them).
     pub told: Vec<String>,
 }
 
@@ -115,7 +115,7 @@ impl Model {
     }
     pub fn sha(&mut self) -> String {
         self.shas += 1;
-        format!("{:040x}", 0xc0ffee_u64 * 1_000_003 + self.shas)
+        format!("{:040x}", 0x00c0_ffee_u64 * 1_000_003 + self.shas)
     }
     pub fn incarnation(&self, i: usize) -> String {
         let id = &self.panes[i].id;
@@ -320,7 +320,7 @@ fn shed(w: &mut World, a: &[&str]) -> Out {
                         .map(|v| v.remove(0)),
                 };
                 let script = queued.unwrap_or_else(|| crate::scenario::default_script(&mut w.rng, &role));
-                w.log(format!("model: {name} runs {script:?}"));
+                w.log(&format!("model: {name} runs {script:?}"));
                 let m = &mut w.model;
                 let Some(p) = m.pane(&name) else { return gone() };
                 if p.agent.is_some() {
@@ -403,8 +403,7 @@ fn gh(w: &mut World, a: &[&str]) -> Out {
             ok("")
         }
         ["issue", "comment", ..] | ["pr", "edit", ..] | ["label", "create", ..] => ok(""),
-        ["run", "list", ..] => ok("[]"),
-        ["issue", "list", ..] => ok("[]"),
+        ["run" | "issue", "list", ..] => ok("[]"),
         _ => unmodelled(),
     }
 }
@@ -416,12 +415,11 @@ fn git(w: &mut World, a: &[&str]) -> Out {
         rest => ("", rest),
     };
     match rest {
-        ["fetch", ..] => ok(""),
         ["rev-parse", "HEAD"] => match m.heads.get(dir) {
             Some(h) => ok(format!("{h}\n")),
             None => err(128, "fatal: not a git repository"),
         },
-        ["rev-parse", "--short=7", "HEAD"] => ok(m.heads.get(dir).map_or(String::new(), |h| format!("{:.7}\n", h))),
+        ["rev-parse", "--short=7", "HEAD"] => ok(m.heads.get(dir).map_or(String::new(), |h| format!("{h:.7}\n"))),
         ["rev-parse", "--verify", "--quiet", b] | ["rev-parse", b] => {
             match m.origin.get(b.trim_start_matches("origin/")) {
                 Some(h) => ok(format!("{h}\n")),
@@ -432,9 +430,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             Some(h) => ok(format!("{h} {}\n", w.now)),
             None => err(128, "fatal"),
         },
-        ["status", "--porcelain", ..] => ok(""),
         ["rev-list", "--objects", "--disk-usage", ..] | ["rev-list", "--count", ..] => ok("0\n"),
-        ["rev-list", ..] | ["log", ..] | ["diff", ..] | ["branch", ..] | ["ls-files", ..] => ok(""),
         ["reset", "--hard", b] => {
             if let Some(h) = m.origin.get(b.trim_start_matches("origin/")).cloned() {
                 m.heads.insert(dir.into(), h);
@@ -458,7 +454,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             };
             m.origin.insert(branch.into(), head.clone());
             if let Some(p) = m.prs.get_mut(branch) {
-                p.head = head.clone();
+                p.head.clone_from(&head);
             }
             m.version += 1;
             let t = w.model.ci_start(&head, w.now, None, &mut w.rng);
@@ -481,7 +477,11 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             m.heads.insert(dir.into(), n);
             ok("")
         }
-        ["add", ..] | ["reset", "-q", ..] | ["ls-tree", ..] | ["commit", ..] | ["push", ..] | ["stash", ..] => ok(""),
+        ["status", "--porcelain", ..]
+        | ["fetch" | "rev-list" | "log" | "diff" | "branch" | "ls-files" | "add" | "ls-tree" | "commit" | "push"
+        | "stash" | "remote" | "config", ..]
+        | ["reset", "-q", ..]
+        | ["worktree", "prune"] => ok(""),
         ["merge-tree", ..] => ok(format!("{:040x}\n", 7)),
         ["show", _] => err(128, "fatal: path does not exist"),
         ["worktree", "add", .., path, rev] => {
@@ -497,7 +497,6 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             m.heads.remove(*path);
             ok("")
         }
-        ["worktree", "prune"] | ["remote", ..] | ["config", ..] => ok(""),
         _ => unmodelled(),
     }
 }

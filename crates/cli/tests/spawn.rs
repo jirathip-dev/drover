@@ -519,7 +519,7 @@ impl drover::runner::Runner for Checkout<'_> {
     }
     fn sleep(&self, secs: u64) {
         within(|| self.cloned.get());
-        self.f.sleep(secs)
+        self.f.sleep(secs);
     }
 }
 

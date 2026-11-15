@@ -40,14 +40,14 @@ fn board_routes_read_the_working_set_and_a_merged_issues_shot_still_serves() {
     let (r, rows) = get("/thread/t1/a.png");
     assert!(r.starts_with("HTTP/1.1 404"), "{r}");
     assert!(
-        rows + 2_000 <= total as usize,
+        rows + 2_000 <= usize::try_from(total).unwrap(),
         "the quiet merged issue's history stays unread: {rows} of {total} rows"
     );
 
     let (r, rows) = get("/api/v1/needs");
     assert!(r.starts_with("HTTP/1.1 200"), "{r}");
     assert!(
-        rows + 2_000 <= total as usize,
+        rows + 2_000 <= usize::try_from(total).unwrap(),
         "the needs tab and its pending cards leave the full log unread: {rows} of {total} rows"
     );
 

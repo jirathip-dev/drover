@@ -111,7 +111,6 @@ pub struct Moment {
 }
 
 /// #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none; #450: the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card, the `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
-#[allow(clippy::struct_excessive_bools)]
 pub struct NeedsTab {
     pub now: u64,
     pub rw: bool,
@@ -180,7 +179,6 @@ pub struct NeedIssue {
     pub shots_at: Option<String>,
 }
 
-#[allow(clippy::struct_excessive_bools)]
 pub struct LanesTab {
     pub now: u64,
     pub rw: bool,
@@ -425,7 +423,6 @@ pub struct RepoThreads {
 }
 
 /// #681: a conductor thread: its `last` line and time, `awake` (its conductor not asleep), `newest` on the ongoing one (the first not archived).
-#[allow(clippy::struct_excessive_bools)]
 pub struct RepoThread {
     pub id: String,
     pub title: String,
@@ -755,7 +752,6 @@ pub struct DriveAct {
     pub code: String,
 }
 
-#[allow(clippy::struct_excessive_bools)]
 pub struct QueueRow {
     pub issue: u64,
     pub state: String,

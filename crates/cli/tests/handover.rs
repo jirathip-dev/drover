@@ -27,9 +27,9 @@ fn get(addr: &str) -> Result<String, String> {
     }
 }
 
-fn live(addr: String, mut last: u64, stop: Arc<AtomicBool>, seen: Arc<Mutex<Vec<u64>>>, opens: Arc<AtomicUsize>) {
+fn live(addr: &str, mut last: u64, stop: &AtomicBool, seen: &Mutex<Vec<u64>>, opens: &AtomicUsize) {
     while !stop.load(SeqCst) {
-        let Ok(mut s) = TcpStream::connect(&addr) else {
+        let Ok(mut s) = TcpStream::connect(addr) else {
             std::thread::sleep(Duration::from_millis(50));
             continue;
         };
@@ -37,7 +37,7 @@ fn live(addr: String, mut last: u64, stop: Arc<AtomicBool>, seen: Arc<Mutex<Vec<
             .unwrap();
         s.set_read_timeout(Some(Duration::from_millis(100))).unwrap();
         opens.fetch_add(1, SeqCst);
-        let (mut buf, mut b) = (String::new(), [0u8; 65_536]);
+        let (mut buf, mut b) = (String::new(), vec![0u8; 65_536]);
         while !stop.load(SeqCst) {
             match s.read(&mut b) {
                 Ok(0) => break,
@@ -118,7 +118,7 @@ fn a_handover_fails_no_request_and_loses_no_live_event() {
     let (seen, opens) = (Arc::new(Mutex::new(vec![])), Arc::new(AtomicUsize::new(0)));
     let client = {
         let (stop, seen, opens, addr) = (stop.clone(), seen.clone(), opens.clone(), addr.clone());
-        std::thread::spawn(move || live(addr, base, stop, seen, opens))
+        std::thread::spawn(move || live(&addr, base, &stop, &seen, &opens))
     };
     std::thread::sleep(Duration::from_millis(1_500));
     let writing = Arc::new(AtomicBool::new(true));
@@ -324,7 +324,7 @@ fn a_serve_that_starts_over_its_memory_limit_logs_once_and_keeps_serving() {
     std::thread::spawn(move || {
         err.lines()
             .map_while(Result::ok)
-            .for_each(|l| l2.lock().unwrap().push_str(&(l + "\n")))
+            .for_each(|l| l2.lock().unwrap().push_str(&(l + "\n")));
     });
     std::thread::sleep(Duration::from_millis(5_000));
     get(&addr).unwrap();

@@ -4,7 +4,7 @@ use std::panic::AssertUnwindSafe;
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
-/// SplitMix64: the seed's only source of choices.
+/// `SplitMix64`: the seed's only source of choices.
 pub struct Rng(u64);
 
 impl Rng {
@@ -94,7 +94,7 @@ pub struct Sim {
 fn cost(prog: &str, args: &[String]) -> u64 {
     match (prog, args.first().map(String::as_str), args.get(1).map(String::as_str)) {
         ("shed", Some("send"), Some(p)) if p.contains("\"text\":\"exec ") => 3,
-        ("gh", ..) | ("ssh", ..) => 1,
+        ("gh" | "ssh", ..) => 1,
         _ => 0,
     }
 }
@@ -121,7 +121,7 @@ impl Sim {
                 next_pid: 40_000,
                 keep_going: false,
                 violations: vec![],
-                spawned: Default::default(),
+                spawned: std::collections::BTreeSet::default(),
                 checked: (usize::MAX, 0),
             }),
             cv: Condvar::new(),
@@ -151,7 +151,7 @@ impl Sim {
             starting: None,
         });
         let line = format!("spawn {} pid {pid}: drover {}", w.procs[me].name, args.join(" "));
-        w.log(line);
+        w.log(&line);
         let sim = Arc::clone(self);
         let h = std::thread::Builder::new()
             .name(format!("sim-{me}"))
@@ -182,16 +182,16 @@ impl Sim {
             sim: Arc::clone(&self),
             me,
         };
-        let mut argv = vec!["drover".to_string()];
-        argv.extend(args);
+        let mut cmd = vec!["drover".to_string()];
+        cmd.extend(args);
         let mut out = vec![];
         let res = std::panic::catch_unwind(AssertUnwindSafe(|| {
-            drover::main_with(argv, &ctx, &r, &mut out, &mut std::io::empty())
+            drover::main_with(cmd, &ctx, &r, &mut out, &mut std::io::empty())
         }));
         drover::sim::set(None);
         let mut w = self.lock();
         let text = String::from_utf8_lossy(&out).replace(&root.display().to_string(), "$D");
-        w.procs[me].out = text.clone();
+        w.procs[me].out.clone_from(&text);
         w.procs[me].done = true;
         w.procs[me].starting = None;
         if !w.abort {
@@ -201,7 +201,7 @@ impl Sim {
             Ok(code) => {
                 let name = w.procs[me].name.clone();
                 let first = text.lines().last().unwrap_or_default().to_string();
-                w.log(format!("exit {name} {code}: {first:.140}"));
+                w.log(&format!("exit {name} {code}: {first:.140}"));
             }
             Err(p) if p.is::<Abort>() => {}
             Err(p) => {
@@ -239,18 +239,18 @@ impl Sim {
             let mut w = self.lock();
             if w.abort {
                 drop(w);
-                return self.unwind();
+                return Self::unwind();
             }
             w.procs[me].wake = w.now + secs;
             w.turn = None;
         }
         self.cv.notify_all();
         if self.wait_turn(me).is_err() {
-            self.unwind();
+            Self::unwind();
         }
     }
 
-    fn unwind(&self) {
+    fn unwind() {
         if !std::thread::panicking() {
             std::panic::resume_unwind(Box::new(Abort));
         }
@@ -267,7 +267,7 @@ impl Sim {
             match p {
                 drover::sim::Point::Append(ev) => {
                     let who = ev.str("agent").map(|a| format!(" {a}")).unwrap_or_default();
-                    w.log(format!(
+                    w.log(&format!(
                         "{name} append {} #{}{who} ts={}",
                         ev.kind,
                         ev.issue.unwrap_or(0),
@@ -288,7 +288,7 @@ impl Sim {
                     });
                     crate::invariants::on_append(&mut w, me);
                 }
-                drover::sim::Point::Lease(k) => w.log(format!("{name} lease {k}")),
+                drover::sim::Point::Lease(k) => w.log(&format!("{name} lease {k}")),
             }
         }
         self.yield_now(me, 0);
@@ -312,7 +312,7 @@ impl Sim {
         let reply = o.stdout.trim().replace('\n', "⏎").replace(&root, "$D");
         let reply: String = reply.chars().take(80).collect();
         let name = w.procs[me].name.clone();
-        w.log(format!("{name} {short} → {} {reply}", o.code));
+        w.log(&format!("{name} {short} → {} {reply}", o.code));
         o
     }
 
@@ -342,7 +342,7 @@ impl Sim {
                     _ => break,
                 }
             }
-            let pick = ready[w.rng.below(ready.len() as u64) as usize];
+            let pick = ready[usize::try_from(w.rng.below(ready.len() as u64)).unwrap()];
             w.turn = Some(pick);
             w.step += 1;
             drop(w);
@@ -367,7 +367,7 @@ impl Sim {
 }
 
 impl World {
-    pub fn log(&mut self, line: String) {
+    pub fn log(&mut self, line: &str) {
         let line = line.replace(&self.root.display().to_string(), "$D");
         let line = format!("{:>5} t+{:<6} {line}", self.step, self.now - crate::scenario::T0);
         if std::env::var_os("DROVER_SIM_LIVE").is_some() {
@@ -379,14 +379,14 @@ impl World {
         if self.keep_going {
             let key: Vec<&str> = why.split_whitespace().take(4).collect();
             if !(self.violations.iter()).any(|v| v.split_whitespace().skip(3).take(4).eq(key.iter().copied())) {
-                self.log(format!("FAIL {why}"));
+                self.log(&format!("FAIL {why}"));
                 let at = format!("step {} t+{}:", self.step, self.now - crate::scenario::T0);
                 self.violations.push(format!("{at} {why}"));
             }
             return;
         }
         if self.failure.is_none() {
-            self.log(format!("FAIL {why}"));
+            self.log(&format!("FAIL {why}"));
             self.failure = Some(why);
         }
     }
@@ -451,7 +451,7 @@ impl Runner for SimRunner {
         {
             let mut w = self.sim.lock();
             let name = w.procs[self.me].name.clone();
-            w.log(format!("{name} sleep {secs}"));
+            w.log(&format!("{name} sleep {secs}"));
             if secs == 1 {
                 w.model.polled += 1;
             }

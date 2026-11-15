@@ -5,7 +5,6 @@ use anyhow::{anyhow, ensure, Result};
 use serde_json::{json, Value};
 
 #[derive(Debug, Clone, PartialEq, Default)]
-#[allow(clippy::struct_excessive_bools)]
 pub struct Item {
     pub issue: u64,
     /// #505: every issue it waits on (`queue block --on A --on B`); a merged one drops out in `view`.

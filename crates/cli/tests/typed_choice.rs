@@ -113,8 +113,8 @@ fn a_typed_reject_with_a_note_rejects_and_keeps_the_note() {
     let line = "No, start over";
     let c = design_ask("typed-reject", line);
     let pre = "a".repeat(40);
-    let lane = json!({"agent": "sendmeter-design-60", "pane": "p1", "worktree": "/w", "branch": "issue-60"});
-    log(&c, NOW - 80, Some(60), "spawn", lane);
+    let row = json!({"agent": "sendmeter-design-60", "pane": "p1", "worktree": "/w", "branch": "issue-60"});
+    log(&c, NOW - 80, Some(60), "spawn", row);
     let review = json!({"agent": "sendmeter-design-60", "pre": pre, "adr": null});
     log(&c, NOW - 70, Some(60), "design-review", review);
     let note = "wrong direction";

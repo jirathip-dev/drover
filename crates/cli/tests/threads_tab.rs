@@ -62,7 +62,7 @@ fn recorded(name: &str) -> drover::Ctx {
             "sendmeter",
             "thread-msg",
             json!({"thread": "t1", "from": from, "text": text}),
-        )
+        );
     };
     ev(
         T - 90_000,
@@ -83,7 +83,7 @@ fn recorded(name: &str) -> drover::Ctx {
             "sendmeter",
             "thread-msg",
             json!({"thread": "t2", "from": from, "text": text}),
-        )
+        );
     };
     msg(T - 89_500, "owner", "split it");
     msg2(T - 7_100, "owner", "Grill me, then file it.");
@@ -100,7 +100,7 @@ fn recorded(name: &str) -> drover::Ctx {
             "sendmeter",
             "needs-decision",
             json!({"id": id, "thread": "t2", "question": q, "options": opts, "recommend": 1, "kind": "owner"}),
-        )
+        );
     };
     ask(
         T - 6_800,

@@ -66,7 +66,10 @@ fn every_adapter_call_is_a_shed_request() {
     let c = ctx(&tmpdir("adapter-calls"), CONFIG);
     term::close(&c, &r, lane).unwrap();
     assert_eq!(b.methods().iter().rev().take(2).collect::<Vec<_>>(), ["rm", "kill"]);
-    assert!(drover::session::live_on(&r).unwrap().is_empty());
+    assert_eq!(
+        drover::session::live_on(&r).unwrap(),
+        [] as [drover::session::Session; 0]
+    );
     term::close(&c, &r, lane).unwrap();
     let o = term::exec(&r, &term::read_argv(lane)).unwrap();
     assert!(term::failed_with(&o, "pane_not_found"), "{o:?}");
@@ -1061,8 +1064,8 @@ fn the_build_trim_keeps_a_running_shed_lanes_scratch() {
         "a running ACP lane's scratch is never trimmed, oldest or not: {out}"
     );
     assert!(!exited.exists(), "an exited lane's goes over budget: {out}");
-    let line = format!("builds: trimmed {} ", exited.display());
-    assert!(out.contains(&line) && out.contains("no live agent"), "{out}");
+    let want = format!("builds: trimmed {} ", exited.display());
+    assert!(out.contains(&want) && out.contains("no live agent"), "{out}");
 }
 
 fn git(dir: &std::path::Path, a: &[&str]) -> String {
@@ -1171,7 +1174,7 @@ fn an_acp_lane_that_exits_on_a_usage_limit_is_pushed_holds_the_host_and_resumes_
     let (code, out) = run(&later(&c, 300), &cli, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert_eq!(git(&origin, &["rev-parse", "issue-12"]), head, "{out}");
-    assert!(git(&origin, &["ls-tree", "--name-only", "issue-12"]).is_empty());
+    assert_eq!(git(&origin, &["ls-tree", "--name-only", "issue-12"]), "");
     assert_eq!(
         git(&wt, &["diff", "--cached", "--name-only"]),
         "more.rs",
@@ -1197,7 +1200,7 @@ fn an_acp_lane_that_exits_on_a_usage_limit_is_pushed_holds_the_host_and_resumes_
         exits(&b, &[json!({"event": "exited", "code": 1})]);
         let (code, out) = run(&later(&c, 2400 + i * 1900), &cli, &["drive"]);
         assert_eq!(code, 0, "{out}");
-        assert_eq!(logged(&c, "spawn").len(), 2 + i as usize, "{out}");
+        assert_eq!(logged(&c, "spawn").len(), 2 + usize::try_from(i).unwrap(), "{out}");
     }
     assert!(logged(&c, "needs-human").is_empty());
     let (_, st) = run(&later(&c, 8100), &cli, &["status", "sendmeter"]);
@@ -1907,7 +1910,7 @@ fn recorded(b: &FakeShed, agent: &str) -> Value {
     let events: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
     b.add("sendmeter-impl-12", lane_labels());
     b.set("sendmeter-impl-12", |t| {
-        (t["acp"], t["events"]) = (json!(format!("{agent}-acp")), events)
+        (t["acp"], t["events"]) = (json!(format!("{agent}-acp")), events);
     });
     lane_json(b, "sendmeter-impl-12", "")
 }
@@ -2249,7 +2252,7 @@ fn verify_round_one(name: &str) -> (drover::Ctx, FakeShed) {
     let verify = "\n[fleet.sendmeter.role.verify]\nharness = \"claude\"\nprofile = \"fleet-verify\"\n";
     let c = ctx(&tmpdir(name), &format!("{}{verify}", shed_config(&b.sock, "")));
     let ev = |kind: &str, d: Value| {
-        drover::events::append(&c.state, &Event::new(c.now - 100, "sendmeter", Some(12), kind, d)).unwrap()
+        drover::events::append(&c.state, &Event::new(c.now - 100, "sendmeter", Some(12), kind, d)).unwrap();
     };
     let impl_ = json!({"role": "impl", "agent": "sendmeter-impl-12", "branch": "issue-12"});
     ev("spawn", impl_.clone());

@@ -408,7 +408,7 @@ fn a_metric_over_20_percent_worse_is_a_warning() {
         "{t}"
     );
     let back: serde_json::Value = serde_json::from_str(&metrics::to_json(1, &s).to_string()).unwrap();
-    assert!(metrics::regressions(&s, &back).is_empty());
+    assert_eq!(metrics::regressions(&s, &back), [] as [std::string::String; 0]);
 }
 
 #[test]
@@ -529,7 +529,7 @@ fn sim_fleet() -> String {
 
 fn scenario_env() -> Option<replay::Scenario> {
     let src = var("DROVER_SIM_REPLAY")?;
-    if src.ends_with(".json") {
+    if src.strip_suffix(".json").is_some() {
         return Some(serde_json::from_str(&std::fs::read_to_string(&src).unwrap()).unwrap());
     }
     let days = var("DROVER_SIM_DAYS").and_then(|d| d.parse().ok()).unwrap_or(7);
@@ -590,18 +590,15 @@ fn what_if() {
         let text = std::fs::read_to_string(p).unwrap_or_else(|e| panic!("{p}: {e}"));
         whatif::Knobs::read(&text, &sim_fleet()).unwrap_or_else(|e| panic!("{p}: {e:#}"))
     };
-    let (src, what) = match scenario_env() {
-        Some(s) => {
-            let what = format!("replay {} {}..{}", s.fleet, s.from, s.to);
-            (whatif::Source::Replay(s), what)
-        }
-        None => {
-            let (n, from) = (env("DROVER_SIM_N", 50), env("DROVER_SIM_FROM", 1000));
-            (
-                whatif::Source::Seeds((from..from + n).collect()),
-                format!("{n} seeds from {from}"),
-            )
-        }
+    let (src, what) = if let Some(s) = scenario_env() {
+        let what = format!("replay {} {}..{}", s.fleet, s.from, s.to);
+        (whatif::Source::Replay(s), what)
+    } else {
+        let (n, from) = (env("DROVER_SIM_N", 50), env("DROVER_SIM_FROM", 1000));
+        (
+            whatif::Source::Seeds((from..from + n).collect()),
+            format!("{n} seeds from {from}"),
+        )
     };
     let w = whatif::run(src, knobs(&cur), knobs(&cand));
     println!(
@@ -672,5 +669,5 @@ fn a_busy_window_blocks_spawns_only_while_it_takes_every_host() {
     assert_eq!(loads(&ws, 1).0, [(100, 40), (300, 1)]);
     assert_eq!(loads(&ws, 2).0, [(100, 40), (200, 1)]);
     assert_eq!(loads(&ws, 3), (vec![(150, 40), (200, 1)], vec![(150, 200, 1)]));
-    assert!(loads(&[(100, 200, 1)], 2).0.is_empty());
+    assert_eq!(loads(&[(100, 200, 1)], 2).0, [] as [(u64, u64); 0]);
 }

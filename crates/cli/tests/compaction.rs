@@ -18,8 +18,8 @@ fn log(seed: u64, n: u64, t0: u64) -> Vec<Event> {
     let mut r = Rng(seed);
     (0..n)
         .map(|i| {
-            let (fleet, issue) = (["a", "b"][r.n(2) as usize], 1 + r.n(6));
-            let role = ["impl", "rev"][r.n(2) as usize];
+            let (fleet, issue) = (["a", "b"][usize::try_from(r.n(2)).unwrap()], 1 + r.n(6));
+            let role = ["impl", "rev"][usize::try_from(r.n(2)).unwrap()];
             let agent = format!("{fleet}-{role}-{issue}-{}", r.n(3));
             let sha = format!("{:040}", r.n(4));
             let (kind, d) = match r.n(13) {
@@ -29,17 +29,23 @@ fn log(seed: u64, n: u64, t0: u64) -> Vec<Event> {
                 ),
                 3..=4 => (
                     "verdict",
-                    json!({"sha": sha, "verdict": (["PASS", "FAIL"][r.n(2) as usize])}),
+                    json!({"sha": sha, "verdict": (["PASS", "FAIL"][usize::try_from(r.n(2)).unwrap()])}),
                 ),
-                5 => (["merged", "closed", "needs-human"][r.n(3) as usize], json!({})),
+                5 => (
+                    ["merged", "closed", "needs-human"][usize::try_from(r.n(3)).unwrap()],
+                    json!({}),
+                ),
                 11 => ("needs-decision", json!({"id": format!("q{}", r.n(5)), "agent": agent})),
-                6 => ("clean", json!({"why": (["merged", "closed"][r.n(2) as usize])})),
+                6 => (
+                    "clean",
+                    json!({"why": (["merged", "closed"][usize::try_from(r.n(2)).unwrap()])}),
+                ),
                 7 => ("lane-killed", json!({"role": role, "agent": agent})),
                 8 => ("round-extended", json!({})),
                 9 => ("stall", json!({"reason": "quiet"})),
                 10 => ("queue", json!({"op": "add", "issues": [issue]})),
                 _ => (
-                    ["decision", "ask-withdrawn"][r.n(2) as usize],
+                    ["decision", "ask-withdrawn"][usize::try_from(r.n(2)).unwrap()],
                     json!({"id": format!("q{}", r.n(5))}),
                 ),
             };
@@ -152,7 +158,9 @@ fn compaction_archives_old_done_issues_and_deletes_old_heartbeats() {
         Event::new(97 * DAY, "a", Some(1), "kick", json!({})),
         Event::new(99 * DAY, "a", Some(3), "driven", json!({})),
     ];
-    ev.iter().for_each(|e| append(&p, e).unwrap());
+    for e in &ev {
+        append(&p, e).unwrap();
+    }
     let (before, st) = (history(&p).unwrap(), states(&p).unwrap());
     let (code, out) = run(&c, &Fake::default(), &["compact"]);
     assert_eq!((code, out.trim()), (0, "2 heartbeats deleted, 5 events archived"));
@@ -271,7 +279,9 @@ fn a_5mb_build_cloned_is_stored_in_16kb() {
             json!({"dirs": ["target"], "secs": 7, "errors": [big]}),
         ),
     ];
-    ev.iter().for_each(|e| append(&p, e).unwrap());
+    for e in &ev {
+        append(&p, e).unwrap();
+    }
     let back = read(&p).unwrap();
     let stored = serde_json::to_string(&Event {
         seq: 0,

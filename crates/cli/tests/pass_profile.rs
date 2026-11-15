@@ -14,7 +14,7 @@ fn cpu() -> f64 {
 }
 
 #[test]
-#[ignore]
+#[ignore = "a manual profile run, not a check"]
 fn pass_profile() {
     let src = PathBuf::from(std::env::var("DROVER_PROFILE").expect("DROVER_PROFILE"));
     let fast = std::env::var("DROVER_PROFILE_MODE").as_deref() == Ok("fast");

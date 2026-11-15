@@ -91,7 +91,7 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!((state(&c, 12).as_str(), state(&c, 13).as_str()), ("design", "impl"));
     let out = drive(&c, &r);
     assert!(
-        out.contains(&format!("sendmeter #12 design-review: {:.7}", HEAD)),
+        out.contains(&format!("sendmeter #12 design-review: {HEAD:.7}")),
         "{out}"
     );
     assert_eq!(state(&c, 12), "design-review");
@@ -143,7 +143,7 @@ fn a_design_lane_whose_only_untracked_file_is_its_claude_local_md_hands_off() {
     assert_eq!(state(&c, 12), "design");
     let out = drive(&c, &r);
     assert!(
-        out.contains(&format!("sendmeter #12 design-review: {:.7}", HEAD)),
+        out.contains(&format!("sendmeter #12 design-review: {HEAD:.7}")),
         "{out}"
     );
     assert_eq!(
@@ -863,8 +863,7 @@ fn an_architect_ask_quotes_the_summary_and_links_the_adr_folder_at_the_sha_and_a
     drive(&c, &r);
     let link = tree(&head, "docs/architecture/meter");
     let q = format!(
-        "{sum}\n\n{link}\n\nArchitecture (ADR) for #12 is ready ({:.7}): approve, revise (type a note) or reject?",
-        head
+        "{sum}\n\n{link}\n\nArchitecture (ADR) for #12 is ready ({head:.7}): approve, revise (type a note) or reject?"
     );
     let ask = &kinds(&c, "needs-decision")[0];
     assert_eq!(ask.str("question"), Some(q.as_str()));
@@ -978,7 +977,7 @@ fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_rai
     git(&w, &["reset", "-q", "--hard", "origin/staging"]);
     let agent = kinds(&c, "spawn")[0].str("agent").unwrap().to_string();
     sh.set(&agent, |t| {
-        t["reported"] = serde_json::json!({"state": "error", "note": "no response"})
+        t["reported"] = serde_json::json!({"state": "error", "note": "no response"});
     });
     c.now += 300;
     drive(&c, &r);
