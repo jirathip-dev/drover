@@ -206,6 +206,31 @@ fn admission_runs_per_host() {
     assert!(e.starts_with("HOST_BUSY: mini: load/cpu 3.00 > 2.5"), "{e}");
 }
 
+#[test]
+fn host_busy_names_the_lane_holding_the_cpu() {
+    let c = setup("hosts-hog", "", true, 0);
+    let (wt, agent) = ("/Users/me/work/sendmeter/issue-9", "sendmeter-impl-9");
+    let d = json!({"role": "impl", "agent": agent, "worktree": wt, "pane": "w1:p1", "branch": "issue-9"});
+    ev(&c, NOW - 60, 9, "spawn", d);
+    let mut ps = String::from("500 1 0.0 /bin/zsh\n900 1 50.0 /Applications/Safari\n");
+    let mut lsof = format!("p500\nczsh\nfcwd\nn{wt}\np900\ncSafari\nfcwd\nn/Users/me\n");
+    for i in 0..24 {
+        ps += &format!("{} 500 10.0 /usr/bin/yes\n", 600 + i);
+        let cwd = if i % 2 == 0 {
+            "/Users/me/work/.build/.scratch/sendmeter-impl-9"
+        } else {
+            "/"
+        };
+        lsof += &format!("p{}\ncyes\nfcwd\nn{cwd}\n", 600 + i);
+    }
+    let r = fake(3.0, 4.0).reply("ps -Ao", &ps).reply("lsof", &lsof);
+    let e = placed(&c, &r, 12, "impl", Some("mini")).unwrap_err();
+    assert!(e.starts_with("HOST_BUSY: mini: load/cpu 3.00 > 2.5"), "{e}");
+    assert!(e.ends_with("; sendmeter-impl-9 holds 60% (24 × yes)"), "{e}");
+    let calm = fake(1.0, 4.0).reply("ps -Ao", &ps).reply("lsof", &lsof);
+    assert_eq!(placed(&c, &calm, 12, "impl", Some("mini")).as_deref(), Ok("mini"));
+}
+
 fn with_account(c: &drover::Ctx) -> &'static str {
     let toml = std::fs::read_to_string(&c.config).unwrap().replacen(
         "harness = \"claude\"",

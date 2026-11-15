@@ -3,7 +3,8 @@ use crate::runner::{ok, Runner};
 pub use crate::term::agents;
 use anyhow::Result;
 use serde_json::Value;
-use std::path::Path;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 
 /// Live agents named `name` or running inside `dir`.
 pub fn live_in<'a>(agents: &'a [Value], name: &str, dir: &Path) -> Vec<&'a Value> {
@@ -186,7 +187,7 @@ pub struct Host {
     pub top: Vec<String>,
 }
 
-fn own_load(ps: &str) -> (f64, Vec<String>) {
+fn procs(ps: &str) -> Vec<(u64, u64, f64, String)> {
     let row = |l: &str| {
         let mut w = l.split_whitespace();
         let (pid, parent, cpu) = (
@@ -198,7 +199,48 @@ fn own_load(ps: &str) -> (f64, Vec<String>) {
         let name = comm.rsplit('/').next().unwrap_or_default().to_string();
         Some((pid, parent, cpu.parse::<f64>().ok()?, name))
     };
-    let procs: Vec<_> = ps.lines().filter_map(row).collect();
+    ps.lines().filter_map(row).collect()
+}
+const PS: [&str; 2] = ["-Ao", "pid=,ppid=,pcpu=,comm="];
+
+/// #966: per lane (`dirs` holds its process's or an ancestor's cwd): its % of the host's CPUs and `n × busiest`.
+pub fn lane_cpu(r: &dyn Runner, dirs: &BTreeMap<PathBuf, String>) -> Vec<(String, f64, String)> {
+    let cpus = stdout(r, "sysctl", &["-n", "hw.ncpu"]).or_else(|| stdout(r, "nproc", &[]));
+    let Some(cpus) = cpus.and_then(|s| s.trim().parse::<f64>().ok()).filter(|n| *n > 0.0) else {
+        return vec![];
+    };
+    let ps = procs(&stdout(r, "ps", &PS).unwrap_or_default());
+    let cwd: BTreeMap<u64, String> = cwds(r)
+        .into_iter()
+        .filter_map(|p| Some((p.0.parse().ok()?, p.2)))
+        .collect();
+    let parent: BTreeMap<u64, u64> = ps.iter().map(|p| (p.0, p.1)).collect();
+    let lane = |pid: u64| {
+        let up = std::iter::successors(Some(pid), |p| parent.get(p).copied().filter(|q| *q > 1)).take(64);
+        up.filter_map(|p| cwd.get(&p))
+            .find_map(|c| Path::new(c).ancestors().find_map(|d| dirs.get(d)))
+    };
+    let mut by = BTreeMap::<&String, BTreeMap<&str, (usize, f64)>>::new();
+    for (pid, _, cpu, name) in ps.iter().filter(|p| p.2 > 0.0) {
+        if let Some(l) = lane(*pid) {
+            let n = by.entry(l).or_default().entry(name).or_default();
+            *n = (n.0 + 1, n.1 + cpu);
+        }
+    }
+    let mut out: Vec<_> = (by.into_iter())
+        .map(|(l, names)| {
+            let top = names.iter().max_by(|a, b| a.1 .1.total_cmp(&b.1 .1));
+            let top = top.map_or(String::new(), |(n, (k, _))| format!("{k} × {n}"));
+            let sum: f64 = names.values().map(|v| v.1).sum();
+            (l.clone(), (sum / cpus).min(100.0), top)
+        })
+        .collect();
+    out.sort_by(|a, b| b.1.total_cmp(&a.1));
+    out
+}
+
+fn own_load(ps: &str) -> (f64, Vec<String>) {
+    let procs = procs(ps);
     let ours: Vec<u64> = (procs.iter().filter(|p| ["drover", "herdsman"].contains(&p.3.as_str())))
         .map(|p| p.0)
         .collect();
@@ -257,7 +299,7 @@ pub fn sample(r: &dyn Runner) -> Host {
     let load = load.or_else(|| word(linux("cat", &["/proc/loadavg"]), 0));
     let ncpu = ncpu.or_else(|| word(linux("nproc", &[]), 0));
     let avail = || Some(word(linux("grep", &["MemAvailable", "/proc/meminfo"]), 1)? / 1_048_576.0);
-    let (own, top) = own_load(&stdout(r, "ps", &["-Ao", "pid=,ppid=,pcpu=,comm="]).unwrap_or_default());
+    let (own, top) = own_load(&stdout(r, "ps", &PS).unwrap_or_default());
     let load_per_cpu = load.zip(ncpu.filter(|n| *n > 0.0)).map(|(l, n)| (l - own).max(0.0) / n);
     let size = stdout(r, "sysctl", &["-n", "hw.memsize"]).and_then(|s| s.trim().parse::<f64>().ok());
     let size = size.map(|b| b / 1_073_741_824.0);
