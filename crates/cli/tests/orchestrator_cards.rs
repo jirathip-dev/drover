@@ -2,7 +2,7 @@ mod common;
 use common::*;
 use drover::events::{read, Event};
 use drover::serve::Server;
-use serde_json::json;
+use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -19,9 +19,31 @@ fn body(res: &str) -> &str {
     &res[res.find("\r\n\r\n").unwrap() + 4..]
 }
 
-fn chat(s: &Server, cookie: &str, now: u64) -> String {
-    let j = api(s, ADDR, cookie, now, "chat");
-    board_js(&[(&j, "chat.tab(d)")]).remove(0)
+fn chat(s: &Server, cookie: &str, now: u64) -> Value {
+    serde_json::from_str(&api(s, ADDR, cookie, now, "chat")).unwrap()
+}
+
+fn thread(page: &Value) -> &Value {
+    let all = page["threads"].as_array().unwrap();
+    all.iter()
+        .find(|t| t["id"] == "t1")
+        .unwrap_or_else(|| panic!("no t1: {page}"))
+}
+
+fn shown(page: &Value) -> Vec<&Value> {
+    thread(page)["page"]["msgs"].as_array().unwrap().iter().collect()
+}
+
+fn msg<'a>(page: &'a Value, kind: &str, from: &str) -> &'a Value {
+    let m = shown(page).into_iter().find(|m| m["kind"] == kind && m["from"] == from);
+    m.unwrap_or_else(|| panic!("no {kind} {from} in {page}"))
+}
+
+fn run_card<'a>(page: &'a Value, id: &str) -> &'a Value {
+    let m = shown(page)
+        .into_iter()
+        .find(|m| m["kind"] == "run" && m["run"]["id"] == id);
+    &m.unwrap_or_else(|| panic!("no run card {id} in {page}"))["run"]
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
@@ -49,19 +71,9 @@ fn setup(name: &str, role_extra: &str, extra: &str) -> drover::Ctx {
 
 fn acp_setup(name: &str, role_extra: &str, extra: &str, b: &FakeShed) -> drover::Ctx {
     let d = tmpdir(name);
-    let role = if role_extra.is_empty() {
-        "account = \"C\""
-    } else {
-        role_extra
-    };
-    let accounts = if extra.contains("[accounts]") {
-        ""
-    } else {
-        "[accounts]\nC = \"C\"\n"
-    };
     let cfg = format!(
-        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{role}\n\n\
-         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n{accounts}{extra}",
+        "{CONFIG}\n[fleet.sendmeter.role.orchestrator]\nharness = \"claude\"\n{role_extra}\n\n\
+         [fleet.sendmeter.runtime]\nkind = \"shed-acp\"\nsocket = \"{}\"\n\n{extra}",
         b.sock.display()
     );
     let mut c = ctx(&d, &cfg);
@@ -77,28 +89,16 @@ fn acp_setup(name: &str, role_extra: &str, extra: &str, b: &FakeShed) -> drover:
 fn acp(adapter: &[&str]) -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
     Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
 }
 
-fn herdr(agents: &str) -> Fake {
-    Fake::default()
-        .reply("herdr agent list", agents)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
-        )
-        .reply("herdr workspace close", "")
-        .reply("herdr pane run", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr agent start", "")
-        .reply("herdr agent wait", "")
-        .reply("herdr agent prompt", "")
-}
-
-fn live() -> String {
-    agents(&[("orchestrator-t1", "idle", "/x", "w9:p1")])
+fn shed_setup(name: &str, role_extra: &str, extra: &str) -> (drover::Ctx, FakeShed) {
+    let c = setup(name, role_extra, extra);
+    let b = FakeShed::attached(&c);
+    (c, b)
 }
 
 #[test]
@@ -147,11 +147,16 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
     let s = Server::new(&c, &on, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let page = chat(&s, &cookie, T);
-    assert!(page.contains("<pre class=df>  [fleet.sendmeter.role.impl]\n- model = &quot;opus&quot;\n+ model = &quot;sonnet&quot;\n</pre>"), "{page}");
-    assert!(
-        page.contains("<form class=chc data-id=\"c1\"><button name=act value=apply>apply</button>"),
+    let c1 = msg(&page, "config", "c1");
+    assert_eq!(
+        (&c1["text"], &c1["open"]),
+        (
+            &json!("  [fleet.sendmeter.role.impl]\n- model = \"opus\"\n+ model = \"sonnet\"\n"),
+            &json!(true)
+        ),
         "{page}"
     );
+    assert_eq!(thread(&page)["waiting"], json!(["c1"]), "{page}");
 
     let res = req(&s, "/thread", "op=config&id=c1&act=apply", "", T);
     assert!(res.starts_with("HTTP/1.1 401"), "{res}");
@@ -176,8 +181,16 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
     assert!(st.val("doctor").is_boolean());
     let page = chat(&s, &cookie, T + 20);
     assert!(
-        !page.contains("class=chc")
-            && page.contains(" class=\"qs note\">config c1 applied by owner, backup kept, doctor ")
+        shown(&page).iter().all(|m| m["kind"] != "config"),
+        "settled: no card: {page}"
+    );
+    assert!(
+        shown(&page).iter().any(|m| m["kind"] == "note"
+            && m["text"]
+                .as_str()
+                .unwrap()
+                .starts_with("config c1 applied by owner, backup kept, doctor ")),
+        "{page}"
     );
     assert!(
         r.called("shed send orchestrator-t1 [t1] system: config c1 applied by owner"),
@@ -206,128 +219,23 @@ fn a_config_proposal_is_applied_only_by_the_owners_tap_with_a_backup_and_a_docto
 }
 
 #[test]
-fn a_usage_limit_resumes_the_orchestrator_on_the_next_account_with_the_same_session() {
-    let accounts = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n";
-    let c = setup("cards-switch", "fallback = [\"claude:A\", \"claude:B\"]", accounts);
-    assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
-    run(&c, &Fake::default(), &["thread", "reply", "t1", "Small or full?"]);
-    let first = kinds(&c, "orchestrator-start")[0].clone();
-    assert_eq!(first.str("account"), Some("A"));
-    let session = first.str("session").unwrap().to_string();
-
-    let banner = "You've hit your limit · resets 6:40pm";
-    let r = herdr(&live()).reply("herdr pane read w9:p1", banner);
-    let sh = Shell(&r, "CLAUDE_CONFIG_DIR|$CLAUDE_CODE_OAUTH_TOKEN", Shared::default());
-    let (code, out) = run(
-        &drover::Ctx {
-            now: T + 60,
-            ..c.clone()
-        },
-        &sh,
-        &["check"],
-    );
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(kinds(&c, "account-capped")[0].str("account"), Some("A"));
-    assert!(r.called("herdr workspace close w9"));
-    let next = &kinds(&c, "orchestrator-start")[1];
-    assert_eq!(
-        (next.str("account"), next.str("session")),
-        (Some("B"), Some(session.as_str()))
-    );
-    assert_eq!(*next.val("resumed"), json!(true));
-    let calls = r.calls.borrow();
-    let start = calls
-        .iter()
-        .find(|c| c.starts_with("herdr agent start orchestrator-t1"))
-        .unwrap();
-    assert!(
-        start.contains(&format!("--resume {session}")) && !start.contains("--session-id"),
-        "{start}"
-    );
-    let b = drover::config::home().join(".config/drover/accounts/B");
-    assert_eq!(*sh.2.borrow(), [format!("{}|", b.display())], "on B: {calls:?}");
-    let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
-    assert!(
-        show.contains(
-            "owner: scope #12\nOrchestrator: Small or full?\nsystem: switched to claude:B (claude:A resting until "
-        ),
-        "{show}"
-    );
-}
-
-#[test]
-fn a_usage_limit_restarts_the_orchestrator_on_the_next_account() {
-    let accounts = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n";
-    let sh = FakeShed::new();
-    let c = acp_setup(
-        "cards-switch-acp",
-        "fallback = [\"claude:A\", \"claude:B\"]",
-        accounts,
-        &sh,
-    );
-    assert_eq!(
-        run(&c, &sh.cli(&acp(&["echo"])), &["thread", "say", "t1", "scope #12"]).0,
-        0
-    );
-    run(&c, &Fake::default(), &["thread", "reply", "t1", "Small or full?"]);
-    let first = kinds(&c, "orchestrator-start")[0].clone();
-    assert_eq!(first.str("account"), Some("A"));
-
-    sh.screen("orchestrator-t1", "You've hit your limit · resets 6:40pm");
-    let r = acp(&["env"]);
-    let cli = sh.cli(&r);
-    let (code, out) = run(
-        &drover::Ctx {
-            now: T + 60,
-            ..c.clone()
-        },
-        &cli,
-        &["check"],
-    );
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(kinds(&c, "account-capped")[0].str("account"), Some("A"));
-    assert!(sh.called("kill", "orchestrator-t1"), "{:?}", sh.methods());
-    let next = &kinds(&c, "orchestrator-start")[1];
-    assert_eq!(
-        (next.str("account"), next.str("runtime")),
-        (Some("B"), Some("shed-acp"))
-    );
-    assert_eq!(*next.val("resumed"), json!(false));
-    assert_eq!(r.count("shed run --acp claude-acp"), 1, "{:?}", r.calls.borrow());
-    let b = drover::config::home().join(".config/drover/accounts/B");
-    let env = cli.out.borrow().concat();
-    assert!(
-        env.lines().any(|l| l == format!("CLAUDE_CONFIG_DIR={}", b.display())),
-        "on B: {env}"
-    );
-    assert!(!env.contains("CLAUDE_CODE_OAUTH_TOKEN"), "{env}");
-    let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
-    assert!(
-        show.contains(
-            "owner: scope #12\nOrchestrator: Small or full?\nsystem: switched to claude:B (claude:A resting until "
-        ),
-        "{show}"
-    );
-}
-
-#[test]
 fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness_login() {
-    let signed_out = "Invalid API key · Please run /login";
+    let signed_out = json!({"state": "error", "note": "auth: Invalid API key · Please run /login"});
     let page = |c: &drover::Ctx| {
-        let r = herdr(NO_AGENTS);
+        let r = Fake::default();
         let s = Server::new(c, &r, Some(ADDR.into()));
         chat(&s, &pair(&s, c, "Mozilla/5.0 (iPhone)", T), T + 120)
     };
-    let c = setup("cards-signin-plain", "", "");
-    assert_eq!(run(&c, &herdr(NO_AGENTS), &["thread", "say", "t1", "scope #12"]).0, 0);
+    let (c, b) = shed_setup("cards-signin-plain", "", "");
+    assert_eq!(run(&c, &Fake::default(), &["thread", "say", "t1", "scope #12"]).0, 0);
     let later = drover::Ctx {
         now: T + 60,
         ..c.clone()
     };
-    let r = herdr(&live()).reply("herdr pane read w9:p1", signed_out);
-    assert_eq!(run(&later, &r, &["check"]).0, 0);
-    assert!(r.called("herdr workspace close w9"));
-    assert_eq!(kinds(&c, "orchestrator-start").len(), 1, "no account to resume on");
+    b.set("orchestrator-t1", |t| t["reported"] = signed_out.clone());
+    assert_eq!(run(&later, &Fake::default(), &["check"]).0, 0);
+    assert!(b.called("kill", "orchestrator-t1"), "{:?}", b.methods());
+    assert_eq!(kinds(&c, "orchestrator-start").len(), 1, "nothing to resume on");
     assert!(kinds(&c, "agent-unavailable").is_empty(), "the harness is not rested");
     let lines: Vec<_> = kinds(&c, "thread-msg")
         .into_iter()
@@ -335,12 +243,16 @@ fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness
         .collect();
     assert_eq!(lines.len(), 1);
     assert_eq!(lines[0].str("signin"), Some("claude"));
-    assert!(page(&c).contains("claude is signed out: sign in <button type=button data-su=\"claude\""));
-    run(
-        &later,
-        &herdr(&live()).reply("herdr pane read w9:p1", signed_out),
-        &["check"],
+    let signed = page(&c);
+    assert!(
+        shown(&signed)
+            .iter()
+            .any(|m| m["kind"] == "note" && m["signin"] == "claude"),
+        "{signed}"
     );
+    b.add("orchestrator-t1", json!({"fleet": "sendmeter", "harness": "claude"}));
+    b.set("orchestrator-t1", |t| t["reported"] = signed_out.clone());
+    run(&later, &Fake::default(), &["check"]);
     assert_eq!(
         kinds(&c, "thread-msg")
             .iter()
@@ -349,48 +261,6 @@ fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness
         1,
         "once"
     );
-}
-
-#[test]
-fn a_signed_out_orchestrator_gets_a_sign_in_card_for_its_own_login() {
-    let signed_out = "Invalid API key · Please run /login";
-    let sh = FakeShed::new();
-    let page = |c: &drover::Ctx| {
-        let f = Fake::default();
-        let r = sh.on(&f);
-        let s = Server::new(c, &r, Some(ADDR.into()));
-        chat(&s, &pair(&s, c, "Mozilla/5.0 (iPhone)", T), T + 120)
-    };
-    let extra = "[accounts]\nA = \"CLAUDE_CODE_OAUTH_TOKEN_A\"\nB = \"CLAUDE_CODE_OAUTH_TOKEN_B\"\n\n[[setup]]\nname = \"claude A\"\ncmd = \"claude /login\"\nenv = {CLAUDE_CONFIG_DIR = \"~/accounts/A\"}\n";
-    let c = acp_setup(
-        "cards-signin-account",
-        "fallback = [\"claude:A\", \"claude:B\"]",
-        extra,
-        &sh,
-    );
-    assert_eq!(
-        run(&c, &sh.cli(&acp(&["echo"])), &["thread", "say", "t1", "scope #12"]).0,
-        0
-    );
-    sh.screen("orchestrator-t1", signed_out);
-    let later = drover::Ctx {
-        now: T + 60,
-        ..c.clone()
-    };
-    assert_eq!(run(&later, &sh.cli(&acp(&["echo"])), &["check"]).0, 0);
-    assert!(sh.called("kill", "orchestrator-t1"), "{:?}", sh.methods());
-    let line = kinds(&c, "thread-msg")
-        .into_iter()
-        .find(|e| e.str("signin").is_some())
-        .unwrap();
-    assert_eq!(line.str("signin"), Some("claude A"));
-    assert!(page(&c).contains("claude is signed out (account A): sign in <button type=button data-su=\"claude A\""));
-    let next = &kinds(&c, "orchestrator-start")[1];
-    assert_eq!(
-        (next.str("account"), next.str("runtime")),
-        (Some("B"), Some("shed-acp"))
-    );
-    assert_eq!(kinds(&c, "account-signed-out")[0].str("account"), Some("A"));
 }
 
 #[test]
@@ -420,16 +290,18 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let form = format!("op=secret&t=t1&name=API_KEY&act=save&value={value}");
     let guest = chat(&s, "", T);
-    assert!(
-        guest.contains("only a paired owner device can enter it") && !guest.contains("class=chs"),
-        "{guest}"
-    );
+    assert_eq!(guest["rw"], json!(false), "an unpaired device gets no form: {guest}");
     assert!(req(&s, "/thread", &form, "", T).starts_with("HTTP/1.1 401"));
     let file = c.config.with_file_name("secrets/API_KEY");
     assert!(!file.exists());
 
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    assert!(chat(&s, &cookie, T).contains("<form class=chs data-t=\"t1\" data-name=\"API_KEY\"><input type=password"));
+    let page = chat(&s, &cookie, T);
+    assert_eq!(
+        (&page["rw"], &msg(&page, "secret", "API_KEY")["text"]),
+        (&json!(true), &json!("the search API")),
+        "{page}"
+    );
     let res = req(&s, "/thread", &form, &cookie, T + 10);
     assert_eq!(body(&res), "secret API_KEY set ✓ (by owner)\n", "{res}");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), value);
@@ -439,10 +311,11 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
     let log = drover::events::jsonl(&c.state).unwrap();
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1", "--json"]);
     let page = chat(&s, &cookie, T + 20);
-    for (what, text) in [("argv", &calls), ("events", &log), ("chat", &show), ("board", &page)] {
+    let board = page.to_string();
+    for (what, text) in [("argv", &calls), ("events", &log), ("chat", &show), ("board", &board)] {
         assert!(!text.contains(value), "the secret is in {what}: {text}");
     }
-    assert!(show.contains("secret API_KEY set ✓ (by owner)") && !page.contains("class=chs"));
+    assert!(show.contains("secret API_KEY set ✓ (by owner)"));
     assert_eq!(*cli.out.borrow(), [format!("{value}\n")], "{calls}");
     assert!(calls.contains("&& . '") && !f.inputs.borrow().iter().any(|i| i.1.contains(value)));
     assert!(
@@ -505,22 +378,24 @@ fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() 
     );
 
     let page = chat(&s, &cookie, T + 60);
-    let row = format!("<form class=chr data-id=\"r1\" data-sha=\"{}\"><button name=act value=approve>approve</button><button name=act value=deny>deny</button></form>", &sha[..12]);
-    for want in [
-        row.as_str(),
-        "<pre class=rc>git log -1 main</pre>",
-        "why: owner asked",
-        "touches: read-only",
-        "runs on: main host, /srv/app",
-        "expires in 14m",
-    ] {
-        assert!(page.contains(want), "{want} not in {page}");
-    }
-    let folds: Vec<&str> = page
-        .split("<details")
-        .filter(|d| d.contains("class=\"blk fold\""))
-        .collect();
-    assert!(folds.iter().all(|f| !f.contains("run card")), "{page}");
+    let r1 = run_card(&page, "r1");
+    assert_eq!(
+        (&r1["why"], &r1["blast"], &r1["host"], &r1["state"], &r1["exp"]),
+        (
+            &json!("owner asked"),
+            &json!("read-only"),
+            &json!("main"),
+            &json!("open"),
+            &json!(T + 900)
+        ),
+        "{page}"
+    );
+    assert!(
+        shown(&page)
+            .iter()
+            .all(|m| m["kind"] != "fold" || !m.to_string().contains("run card")),
+        "{page}"
+    );
 
     let res = req(
         &s,
@@ -545,23 +420,17 @@ fn a_run_card_shows_as_its_own_row_with_approve_and_deny_and_then_its_outcome() 
     let res = req(&s, "/thread", "op=card&id=r2&act=deny", &cookie, T + 130);
     assert!(res.starts_with("HTTP/1.1 200"), "{res}");
     let page = chat(&s, &cookie, T + 140);
-    for want in [
-        "✓ approved by owner · exit 0",
-        "commit 1a2b",
-        "✗ denied by owner · nothing ran",
-    ] {
-        assert!(page.contains(want), "{want} not in {page}");
-    }
-    assert!(
-        !page.contains("data-id=\"r1\"") && !page.contains("data-id=\"r2\""),
+    let (r1, r2) = (run_card(&page, "r1"), run_card(&page, "r2"));
+    assert_eq!(
+        (&r1["state"], &r1["by"], &r1["code"]),
+        (&json!("approved"), &json!("owner"), &json!(0)),
         "{page}"
     );
-    assert!(page.contains("data-id=\"r3\""), "{page}");
+    assert!(r1["tail"].as_str().unwrap().contains("commit 1a2b"), "{page}");
+    assert_eq!((&r2["state"], &r2["by"]), (&json!("denied"), &json!("owner")), "{page}");
+    assert_eq!(run_card(&page, "r3")["state"], "open", "{page}");
     let page = chat(&s, &cookie, T + 901);
-    assert!(
-        page.contains("expired · nothing ran") && !page.contains("data-id=\"r3\""),
-        "{page}"
-    );
+    assert_eq!(run_card(&page, "r3")["state"], "expired", "{page}");
 }
 
 fn card_between_replies(c: &drover::Ctx, sh: &FakeShed) -> (String, Fake, String) {
@@ -599,18 +468,11 @@ fn card_between_replies(c: &drover::Ctx, sh: &FakeShed) -> (String, Fake, String
     (sha, r, cookie)
 }
 
-fn t1(page: &str) -> &str {
-    &page[page.find("<div class=cvp data-t=\"t1\">").unwrap()..]
-}
-fn pos(page: &str, w: &str) -> usize {
-    page.find(w).unwrap_or_else(|| panic!("{w} not in {page}"))
-}
-
 #[test]
 fn a_run_card_between_two_replies_renders_in_order_in_the_chat_tab() {
     let sh = FakeShed::new();
     let c = acp_setup("cards-run-order", "", "", &sh);
-    let (sha, r, cookie) = card_between_replies(&c, &sh);
+    let (_, r, cookie) = card_between_replies(&c, &sh);
     let cli = sh.cli(&r);
     let on = sh.on(&cli);
     let s = Server::new(&c, &on, Some(ADDR.into()));
@@ -633,20 +495,6 @@ fn a_run_card_between_two_replies_renders_in_order_in_the_chat_tab() {
         [("msg", "before the card"), ("run", "uptime"), ("msg", "after the card")],
         "{t}"
     );
-
-    let all = chat(&s, &cookie, T + 60);
-    let page = t1(&all);
-    let form = format!("<form class=chr data-id=\"r1\" data-sha=\"{}\"><button name=act value=approve>approve</button><button name=act value=deny>deny</button></form>", &sha[..12]);
-    let order = [
-        "before the card",
-        "<pre class=rc>uptime</pre>",
-        "why: owner asked",
-        "touches: read-only",
-        &form,
-        "after the card",
-    ];
-    let at: Vec<usize> = order.iter().map(|w| pos(page, w)).collect();
-    assert!(at.windows(2).all(|w| w[0] < w[1]), "{order:?} out of order in {page}");
 }
 
 #[test]
@@ -678,16 +526,24 @@ fn a_settled_run_cards_result_renders_in_the_chat_tab() {
     assert_eq!(ran.0, 0, "{ran:?}");
     let on = sh.on(&cli);
     let s = Server::new(&c, &on, Some(ADDR.into()));
-    let all = chat(&s, &cookie, T + 130);
-    let page = t1(&all);
-    let order = [
-        "<pre class=rc>uptime</pre>",
-        "✓ approved by owner · exit 0",
-        "load 0.42",
-        "after the card",
-        "run r1 approved by owner, ran in /srv/app: exit 0",
-    ];
-    let at: Vec<usize> = order.iter().map(|w| pos(page, w)).collect();
-    assert!(at.windows(2).all(|w| w[0] < w[1]), "{order:?} out of order in {page}");
-    assert!(!page.contains("data-id=\"r1\""), "{page}");
+    let page = chat(&s, &cookie, T + 130);
+    let r1 = run_card(&page, "r1");
+    assert_eq!((&r1["state"], &r1["code"]), (&json!("approved"), &json!(0)), "{page}");
+    assert!(r1["tail"].as_str().unwrap().contains("load 0.42"), "{page}");
+    let order: Vec<&str> = shown(&page)
+        .iter()
+        .filter(|m| ["run", "msg", "note"].contains(&m["kind"].as_str().unwrap()))
+        .map(|m| m["text"].as_str().unwrap())
+        .collect();
+    let at = |w: &str| {
+        order
+            .iter()
+            .position(|t| t.starts_with(w))
+            .unwrap_or_else(|| panic!("{w} not in {order:?}"))
+    };
+    assert!(
+        at("uptime") < at("after the card")
+            && at("after the card") < at("run r1 approved by owner, ran in /srv/app: exit 0"),
+        "{order:?}"
+    );
 }

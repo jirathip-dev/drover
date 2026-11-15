@@ -110,9 +110,9 @@ fn toasts(live: &mut TcpStream, seen: &mut String, n: usize) -> Vec<String> {
 fn a_slow_write_on_one_issue_never_delays_another_and_one_issues_writes_run_in_order() {
     let b = board("serve-workers-order", &[1, 2], &[1]);
     let (mut live, mut seen) = (b.live(), String::new());
-    assert!(b.op("park", 1).contains("park%20started"));
-    assert!(b.op("override", 1).contains("override%20started"));
-    assert!(b.op("park", 2).contains("park%20started"));
+    assert!(b.op("park", 1).contains("park%20accepted"));
+    assert!(b.op("override", 1).contains("override%20accepted"));
+    assert!(b.op("park", 2).contains("park%20accepted"));
     assert_eq!(toasts(&mut live, &mut seen, 1), ["\"#2: park\""]);
     b.open.store(true, SeqCst);
     let t = toasts(&mut live, &mut seen, 3);
@@ -125,7 +125,7 @@ fn two_hundred_reads_are_all_answered_while_four_writes_run() {
     let b = board("serve-workers-reads", &[1, 2, 3, 4], &[1, 2, 3, 4]);
     let mut live = b.live();
     for n in 1..=4 {
-        assert!(b.op("park", n).contains("park%20started"));
+        assert!(b.op("park", n).contains("park%20accepted"));
     }
     let mut conns: Vec<TcpStream> = (0..200).map(|_| TcpStream::connect(b.addr).unwrap()).collect();
     let req = format!("GET / HTTP/1.1\r\nHost: {}\r\n\r\n", b.addr);
