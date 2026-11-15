@@ -81,13 +81,13 @@ fn retired_account_keys_load_warn_once_and_the_lane_runs_on_the_hosts_login() {
 }
 
 #[test]
-fn a_usage_limit_banner_alerts_once_and_holds_new_lanes_until_hosts_on() {
+fn sheds_rate_limited_alerts_once_and_holds_new_lanes_until_hosts_on() {
     let d = tmpdir("acct-banner-hold");
     let c = ctx(&d, &config(&d, ""));
     let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
-    let banner = "  ⎿  You've hit your limit · resets 3pm (Asia/Bangkok)\n";
+    let banner = ("rate-limited", "resets 3pm (Asia/Bangkok)");
     let out = check_shows(&c, &sh, banner);
     let hit = kinds(&c, "usage-limit");
     assert_eq!(hit.len(), 1, "{out}");
@@ -114,13 +114,13 @@ fn a_usage_limit_banner_alerts_once_and_holds_new_lanes_until_hosts_on() {
 }
 
 #[test]
-fn a_sign_in_prompt_is_reported_as_signed_out_and_holds_the_host() {
+fn sheds_auth_error_is_reported_as_signed_out_and_holds_the_host() {
     let d = tmpdir("acct-signed-out");
     let c = ctx(&d, &config(&d, ""));
     let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
-    let out = check_shows(&c, &sh, "  ⎿  API Error: 401 · Please run /login\n");
+    let out = check_shows(&c, &sh, ("error", "auth: API Error: 401 · Please run /login"));
     assert!(kinds(&c, "usage-limit").is_empty(), "{out}");
     let s = kinds(&c, "signed-out");
     assert_eq!(s.len(), 1, "{out}");
@@ -130,20 +130,20 @@ fn a_sign_in_prompt_is_reported_as_signed_out_and_holds_the_host() {
 }
 
 #[test]
-fn the_pattern_in_a_reply_or_tool_output_is_no_banner() {
+fn a_limit_word_in_sheds_note_is_no_usage_limit() {
     let d = tmpdir("acct-banner-src");
     let c = ctx(&d, &config(&d, ""));
     let sh = FakeShed::attached(&c);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     spawn(&c, &sh, 12);
-    for screen in [
-        "⏺ Bash(rg -n 'hit your limit' crates)\n  ⎿  claude.rs:19: usage limit reached|hit your limit\n",
-        "⏺ The pane said \"You've hit your limit · resets 3pm\", so I matched it.\n",
-        "❯ why did it say usage limit reached?\n",
+    for shown in [
+        ("working", "running: rg -n 'hit your limit' crates"),
+        ("idle", "You've hit your limit · resets 3pm"),
+        ("error", "usage limit reached"),
     ] {
-        check_shows(&c, &sh, screen);
+        check_shows(&c, &sh, shown);
     }
-    assert!(kinds(&c, "usage-limit").is_empty());
+    assert!(kinds(&c, "usage-limit").is_empty() && kinds(&c, "signed-out").is_empty());
     spawn(&c, &sh, 13);
 }
 
@@ -225,10 +225,10 @@ fn hermes_profile_gets_only_the_listed_mcp_servers() {
     );
 }
 
-fn check_shows(c: &drover::Ctx, sh: &FakeShed, screen: &str) -> String {
+fn check_shows(c: &drover::Ctx, sh: &FakeShed, (status, note): (&str, &str)) -> String {
     let wt = c.worktrees.join("sendmeter/issue-12");
-    sh.lane("sendmeter-impl-12", "idle", wt.to_str().unwrap());
-    sh.screen("sendmeter-impl-12", screen);
+    sh.lane("sendmeter-impl-12", status, wt.to_str().unwrap());
+    sh.set("sendmeter-impl-12", |t| t["reported"]["note"] = serde_json::json!(note));
     let (code, out) = run(c, &Fake::default(), &["check"]);
     assert_eq!(code, 0, "{out}");
     out

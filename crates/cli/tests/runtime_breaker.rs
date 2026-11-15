@@ -60,7 +60,7 @@ fn six_lanes_failing_to_start_on_one_host_trip_the_breaker_once_and_park_no_issu
     let sh = FakeShed::attached(&c);
     for (a, w) in six_lanes(&c, t0) {
         sh.lane(&a, "idle", &w);
-        sh.screen(&a, "\n  \n");
+        sh.set(&a, |t| t["reported"] = serde_json::Value::Null);
     }
     sh.wait_ends("drover-canary", "timeout");
     let r = fake();

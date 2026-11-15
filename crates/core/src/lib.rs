@@ -19,7 +19,6 @@ pub mod events;
 pub mod gate;
 pub mod gh;
 pub mod heavy;
-pub mod herdr;
 pub mod hook;
 pub mod host;
 pub mod hosts;
@@ -45,6 +44,7 @@ pub mod runner;
 pub mod runners;
 pub mod secret;
 pub mod service;
+pub mod session;
 pub mod setup;
 pub mod shed;
 pub mod sim;
@@ -52,7 +52,9 @@ pub mod slo;
 pub mod snapshot;
 pub mod spawn;
 pub mod stall;
+pub mod term;
 pub mod timer;
+pub mod top;
 pub mod update;
 pub mod usage;
 pub mod verify;
@@ -729,6 +731,9 @@ pub(crate) fn answer_with(
             Event::new(ctx.now, fleet, ask.issue, "parked", json!({"by": by})),
         )?;
     }
+    if let Some(a) = ask.str("lane_hog").filter(|_| text == "kill its processes") {
+        crate::check::unhog(ctx, r, out, a)?;
+    }
     if let (Some(b), Some(t)) = (basis, by.strip_prefix("orchestrator-")) {
         let at = ask.issue.map_or(String::new(), |n| format!(" for #{n}"));
         let text = format!("answered {id}{at}: {text}, because {b}");
@@ -798,19 +803,19 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, 
     let agent = sp.or(was).and_then(|e| e.str("agent")).unwrap_or_default();
     let on = &crate::hosts::On::of(r, sp.or(was));
     let wt = sp.map_or(was.and_then(|e| e.str("worktree")), |_| None);
-    let all = wt.and_then(|_| crate::host::agents(on).ok()).unwrap_or_default();
-    let inside = crate::host::live_in(&all, "", std::path::Path::new(wt.unwrap_or_default()));
-    let live = inside.into_iter().find(|a| a["name"] == agent);
-    let pane = sp.and_then(|e| e.str("pane")).or_else(|| live?["pane_id"].as_str());
+    let all = wt.and_then(|_| crate::session::live_on(on).ok()).unwrap_or_default();
+    let dir = std::path::Path::new(wt.unwrap_or_default());
+    let live = all.iter().find(|a| a.in_dir("", dir) && a.name == agent);
+    let pane = sp.and_then(|e| e.str("pane")).or_else(|| Some(live?.name.as_str()));
     let typed = |p| {
-        herdr::awake(on, agent)
-            .and_then(|()| herdr::prompt(on, agent, msg))
-            .and_then(|_| herdr::keys(on, p, "Enter"))
+        term::awake(on, agent)
+            .and_then(|()| term::prompt(on, agent, msg))
+            .and_then(|_| term::keys(on, p, "Enter"))
     };
     let why = match pane.map(|p| (p, typed(p))) {
         None => "no open lane for this ask".into(),
         Some((_, Err(e))) => format!("{e:#}"),
-        Some((p, Ok(_))) if first && !herdr::landed(on, agent, p, msg) => "the agent did not pick it up".into(),
+        Some((p, Ok(_))) if first && !term::landed(on, agent, p, msg) => "the agent did not pick it up".into(),
         Some(_) => String::new(),
     };
     let kind = match (why.is_empty(), live) {
@@ -827,9 +832,13 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, 
 
 /// #325: answers whose last delivery failed, newest first (one per ask).
 pub fn undelivered<'a>(events: &'a [Event], fleet: &str) -> Vec<&'a Event> {
-    let tries = |e: &&Event| e.fleet == fleet && e.kind.starts_with("answer-");
+    let kinds = ["answer-undelivered", "answer-delivered", "answer-delivered-live"];
     let mut seen = std::collections::BTreeSet::new();
-    let last = events.iter().rev().filter(tries).filter(|e| seen.insert(e.str("id")));
+    let tries = events::of_kind(events, &kinds)
+        .into_iter()
+        .rev()
+        .filter(|e| e.fleet == fleet);
+    let last = tries.filter(|e| seen.insert(e.str("id")));
     last.filter(|e| e.kind == "answer-undelivered").collect()
 }
 
