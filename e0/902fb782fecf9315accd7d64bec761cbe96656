@@ -1,0 +1,5 @@
+Decided: the cap-rule test asserts the new sentence naming ci/cap.d instead of restoring the old wording
+Because: roles/impl.md:72
+Rejected: restoring the old sentence in the role docs — it would hide that ci/cap.d raises are hook-refused too
+Check: cargo test --locked -p drover --test spawn passes; the asserted text appears in both roles/impl.md and roles/usage-tail.md
+Owner: The one test that still expected the old line-cap wording now checks the new wording.
