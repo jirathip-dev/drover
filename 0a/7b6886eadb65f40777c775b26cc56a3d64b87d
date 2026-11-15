@@ -1,0 +1,13 @@
+Decided: the provider's acp_meta gives the whole `_meta` object and acp_argv sends it as shed#94's `--meta '<json>'`; the pin 9b88eb5 already includes shed#94 (b4ef743), so it stays
+Because: "Drover's core names no option key outside the provider."
+Decided: `--mcp .mcp.lane.json` is sent when the provider has options or the role has servers, rewritten as ACP's list; a no-option provider with no servers gives today's words
+Because: crates/core/src/spawn.rs:584
+Decided: an old shed is told apart by `shed help run` lacking `--meta` (shed's version is always 0.0.0); doctor shows a ✗ row and spawn refuses SHED_OLD
+Because: crates/core/src/spawn.rs:594
+Rejected: `shed run --help` as the probe — every test fake matching or counting `shed run` would see it
+Decided: claude's options also carry settings.claudeMdExcludes with the host's ~/.claude/CLAUDE.md; live run: without it a lane under $HOME still read that file as a project file
+Because: crates/core/src/providers/claude.rs:180
+Rejected: claudeMdExcludes in the profile's settings.json — CLI lanes share that file and would lose the global CLAUDE.md too; `~` in the path is not expanded (tried live)
+Check: the live run in the PR body used hand-built words that match the shed.rs assertions, not a real `drover spawn`
+Check: a running shed server older than its CLI is not caught; only the installed CLI is probed
+Owner: ACP lanes now keep the host's login but leave out your global CLAUDE.md, plugins and connectors, and get only their role's MCP servers.
