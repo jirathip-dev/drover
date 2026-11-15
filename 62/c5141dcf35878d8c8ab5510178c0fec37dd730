@@ -1,0 +1,4 @@
+Decided: merged origin/staging; kept staging's session::stamp::intake, optional runtime and auto-update-failed beside this PR's shed line and shed-version alert
+Because: crates/core/src/hosts.rs:949
+Rejected: none
+Owner: the shed version check now sits on top of the latest staging, nothing about it changed
