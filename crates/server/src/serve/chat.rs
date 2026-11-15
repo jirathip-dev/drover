@@ -429,7 +429,7 @@ impl super::Server<'_> {
     /// #701: one per `rw` (a paired and an unpaired device no longer evict each other's every tick), keyed by each
     /// agent's name and status only (all a thread's state reads).
     pub(super) fn chat_tab(&self, ctx: &Ctx, rw: bool) -> Value {
-        let agents = self.herdr_json(ctx.now, "agent");
+        let agents = self.agents_json(ctx.now);
         let agents = agents
             .and_then(|j| j["result"]["agents"].as_array().cloned())
             .unwrap_or_default();
@@ -439,7 +439,7 @@ impl super::Server<'_> {
         let c = &mut all[usize::from(rw)];
         if c.0 != key {
             // #483: a config or log read error shows its own text (as the Queue tab does).
-            let (cfg, events) = match (Config::kept(ctx), crate::events::shared(&ctx.state)) {
+            let (cfg, events) = match (Config::kept(ctx), crate::events::working(&ctx.state)) {
                 (Ok(c), Ok(e)) => (Ok(c), e),
                 (Err(e), _) | (_, Err(e)) => (Err(format!("{e:#}")), std::sync::Arc::default()),
             };
@@ -483,7 +483,7 @@ pub fn post(
     later: &mut Vec<(Event, String)>,
 ) -> Result<String> {
     let cfg = Config::kept(ctx)?;
-    let events = crate::events::shared(&ctx.state)?;
+    let events = crate::events::working(&ctx.state)?;
     let g = |k: &str| f.get(k).map_or("", String::as_str);
     let (id, mut out) = (g("t"), vec![]);
     match g("op") {
@@ -612,14 +612,14 @@ fn stop(r: &dyn Runner, events: &[Event], id: &str) {
         .filter(|e| e.kind == "orchestrator-start")
         .and_then(|e| e.str("pane"))
     {
-        drop(crate::herdr::keys(r, p, "Escape"));
+        drop(crate::term::keys(r, p, "Escape"));
     }
 }
 
 /// #407: at a turn's end (the conductor no longer working) its queued messages go in, oldest first, each logged as
 /// the owner's and unqueued; the lines for `deliver`.
 pub fn flush(ctx: &Ctx, agents: &[Value]) -> Vec<(Event, String)> {
-    let (Ok(cfg), Ok(events)) = (Config::kept(ctx), crate::events::shared(&ctx.state)) else {
+    let (Ok(cfg), Ok(events)) = (Config::kept(ctx), crate::events::working(&ctx.state)) else {
         return vec![];
     };
     let mut out = vec![];

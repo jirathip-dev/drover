@@ -66,10 +66,13 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
         chat["lines"].as_array().unwrap().iter().any(|l| l == "  2. Postgres"),
         "{chat}"
     );
-    let page = with_board(&get("/?all=1"), &s, ADDR, &ck, T);
-    let needs = &page[page.find("<div id=needs>").unwrap()..page.find("<main>").unwrap()];
+    let needs: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &ck, T, "needs")).unwrap();
+    let card = &needs["blocked"][0];
     assert!(
-        needs.contains("Which database should the meter use?") && !needs.contains("class=pick"),
+        card["tail"]
+            .as_str()
+            .is_some_and(|t| t.contains("Which database should the meter use?"))
+            && card["menu"].is_null(),
         "{needs}"
     );
     let body = format!("agent={LANE}&choice=1");
@@ -82,11 +85,21 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
         res.contains("no menu on") && !sh.called("keys", LANE) && sh.sent(LANE).is_empty(),
         "{res}"
     );
-    let page = host_tab(&s, ADDR, T);
-    assert!(!page.contains("<span class=k>claude</span>"), "{page}");
-    assert!(
-        page.contains("<span class=k>gemini</span>")
-            && page.contains("<b>1.0 GB</b> <span class=mt>(1 lanes: working 0 / done 0)</span>"),
-        "{page}"
+    let host: serde_json::Value = serde_json::from_str(&api(&s, ADDR, "", T, "host")).unwrap();
+    let rows: Vec<&serde_json::Value> = host["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|h| h["rows"].as_array().unwrap())
+        .collect();
+    assert!(rows.iter().all(|r| r["k"] != "claude"), "{host}");
+    let g = rows
+        .iter()
+        .find(|r| r["k"] == "gemini")
+        .unwrap_or_else(|| panic!("{host}"));
+    assert_eq!(
+        (&g["b"], &g["notes"]),
+        (&json!("1.0 GB"), &json!(["(1 lanes: working 0 / done 0)"])),
+        "{g}"
     );
 }

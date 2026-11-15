@@ -1,4 +1,6 @@
-use super::{devices, form, header, mtime, shared, shown, Auth, BTreeMap, Config, Ctx, Event, Refusal, Result, Server};
+use super::{
+    devices, form, header, mtime, shown, working, Auth, BTreeMap, Config, Ctx, Event, Refusal, Result, Server,
+};
 use super::{LaneRow, LanesTab, NeedAsk, NeedIssue, QueueCard, QueueRow, JSON};
 use crate::access::{civil_month_day, civil_year};
 use crate::api::{Block, Chat};
@@ -26,6 +28,12 @@ pub fn permitted(action: &str) -> bool {
     let m: toml::Value = toml::from_str(MANIFEST).unwrap_or(toml::Value::Integer(0));
     let list = m.get("permissions").and_then(|p| p.get("actions")?.as_array().cloned());
     list.unwrap_or_default().iter().any(|a| a.as_str() == Some(action))
+}
+
+/// `cooee-plugin.toml`'s `[[places]]` as JSON: the tabs, menu rows and cards the phone page draws.
+pub fn places() -> Value {
+    let m: toml::Value = toml::from_str(MANIFEST).unwrap_or(toml::Value::Integer(0));
+    serde_json::to_value(m.get("places")).unwrap_or_default()
 }
 
 fn iso(t: u64) -> String {
@@ -287,6 +295,14 @@ fn needs_card(i: &NeedIssue, ev: &crate::events::Log) -> Value {
         format!("\n\n{}", i.fail)
     };
     let mut blocks = vec![json!({"type": "text", "markdown": format!("**{}**{fail}", i.why)})];
+    let at = i.shots_at.as_deref().map_or(String::new(), |a| format!("/{a}"));
+    let shots = i.shots.iter().enumerate();
+    let items: Vec<Value> = shots
+        .map(|(k, a)| json!({"src": format!("/shot/{f}/{n}/{k}{at}"), "alt": a}))
+        .collect();
+    if !items.is_empty() {
+        blocks.push(json!({"type": "images", "id": format!("shots-{f}-{n}"), "items": items}));
+    }
     if !i.pending {
         blocks.push(choice(&format!("nh-{f}-{n}"), "needs-human", &opts));
     }
@@ -341,7 +357,7 @@ fn fleets(cfg: &Config) -> Value {
 
 fn workflow(ctx: &Ctx) -> Value {
     let limits = Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
-    let ev = shared(&ctx.state).unwrap_or_default();
+    let ev = working(&ctx.state).unwrap_or_default();
     let counts = crate::diagram::counts(ev.states.values());
     let blocks = crate::diagram::charts(&limits, Some(&counts)).map(|c| {
         let nodes: Vec<Value> = c.nodes.iter().map(|(id, k)| json!({"id": id, "limit": k})).collect();
@@ -372,15 +388,12 @@ fn events_screen(ctx: &Ctx, q: &Q) -> Value {
     let before = q.get("before").and_then(|b| b.parse().ok()).unwrap_or(ctx.now);
     let picked: Vec<&str> = q.get("kind").map_or("all", String::as_str).split(',').collect();
     let all = picked.contains(&"all") || picked.iter().all(|k| !KINDS.iter().any(|(v, _)| v == k));
-    let log = shared(&ctx.state).unwrap_or_default();
-    let since = log
-        .iter()
-        .find(|e| e.ts + 86_400 >= before)
-        .map_or(u64::MAX, |e| e.seq.saturating_sub(1));
+    let kinds = ["merged", "verdict", "needs-human", "spawn", "needs-decision"];
+    let window = crate::events::since(&ctx.state, &kinds, before.saturating_sub(86_400)).unwrap_or_default();
     let repos: BTreeMap<String, String> = Config::kept(ctx)
         .map(|c| c.fleet.into_iter().map(|(f, fc)| (f, fc.repo)).collect())
         .unwrap_or_default();
-    let list = super::v1::events(ctx, since, u64::MAX, usize::MAX).list;
+    let list = super::v1::feed(ctx, &window, usize::MAX).list;
     let mut rows = vec![];
     for e in list.iter().rev().filter(|e| e.ts < before) {
         let Some(k) = kind_of(&e.kind).filter(|k| all || picked.contains(k)) else {
@@ -634,7 +647,46 @@ fn count(v: &Value) -> Option<usize> {
     })
 }
 
+fn sheets(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::Object(m) => {
+            out.extend(
+                m.get("sheet")
+                    .and_then(Value::as_str)
+                    .filter(|p| p.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b)))
+                    .map(String::from),
+            );
+            m.values().for_each(|x| sheets(x, out));
+        }
+        Value::Array(a) => a.iter().for_each(|x| sheets(x, out)),
+        _ => {}
+    }
+}
+
 impl Server<'_> {
+    pub(super) fn screen_files(&self, ctx: &Ctx, paired: bool) -> Vec<(String, Vec<u8>)> {
+        let mut paths: Vec<String> = places()
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p["screen"].as_str().map(String::from))
+            .chain(["/screens/cards".to_string()])
+            .collect();
+        let mut out = vec![];
+        let mut i = 0;
+        while let Some(p) = paths.get(i).cloned() {
+            i += 1;
+            if let Some(v) = self.screen(ctx, &p, &Q::new(), paired) {
+                let mut more = vec![];
+                sheets(&v, &mut more);
+                more.retain(|m| !paths.contains(m));
+                paths.extend(more);
+                out.push((format!("{}/index.html", &p[1..]), v.to_string().into_bytes()));
+            }
+        }
+        out
+    }
+
     fn screen(&self, ctx: &Ctx, path: &str, q: &Q, paired: bool) -> Option<Value> {
         let mut v = match path {
             "/screens/queue" => self.queue_screen(ctx, q),
@@ -657,7 +709,7 @@ impl Server<'_> {
     }
 
     fn lane_sheet(&self, ctx: &Ctx, agent: &str) -> Option<Value> {
-        let (cfg, ev) = (Config::kept(ctx).ok()?, shared(&ctx.state).ok()?);
+        let (cfg, ev) = (Config::kept(ctx).ok()?, working(&ctx.state).ok()?);
         let all = self.lanes(ctx.now, &cfg, &ev, &ev.states)?;
         let l = all.into_iter().find(|l| l.name == agent)?;
         let spawn = crate::events::last_spawn(&ev, agent);
@@ -743,7 +795,7 @@ impl Server<'_> {
     }
 
     fn queue_screen(&self, ctx: &Ctx, q: &Q) -> Value {
-        let (tab, ev) = (self.queue_tab(ctx), shared(&ctx.state).unwrap_or_default());
+        let (tab, ev) = (self.queue_tab(ctx), working(&ctx.state).unwrap_or_default());
         let sel = q
             .get("repo")
             .filter(|r| tab.fleets.iter().any(|f| &f.name == *r))
@@ -779,8 +831,12 @@ impl Server<'_> {
         let mins = Config::kept(ctx).map_or(crate::config::Limits::default().ask_default_minutes, |c| {
             c.limits.ask_default_minutes
         });
-        let ev = shared(&ctx.state).unwrap_or_default();
+        let ev = working(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
+        cards.extend(tab.config.as_ref().map(|e| {
+            json!({"type": "card", "id": "config-invalid", "kind": "alert", "tone": "bad",
+                "title": "fleet.toml is invalid", "blocks": [{"type": "text", "id": "config-why", "markdown": e}]})
+        }));
         cards.extend(super::v1::slo_open(&ev).map(|e| {
             json!({"type": "card", "id": format!("slo-{}", e.seq), "kind": "alert", "tone": "warn",
                 "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
@@ -913,7 +969,7 @@ impl Server<'_> {
                 self.prompt(ctx, &cooee(), &send)?
             }
             "answer" => {
-                let open = crate::events::open_asks(&shared(&ctx.state)?)
+                let open = crate::events::open_asks(&working(&ctx.state)?)
                     .into_iter()
                     .find(|e| e.str("id") == Some(block))
                     .cloned();

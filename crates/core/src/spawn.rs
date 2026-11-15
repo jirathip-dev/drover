@@ -2,12 +2,12 @@ use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, working, Event};
 use crate::gate::refused;
-use crate::herdr;
 use crate::host;
 use crate::providers;
-use crate::runner::{argv, ok, Out, Runner};
+use crate::runner::{argv, ok, Runner};
+use crate::term;
 use crate::Ctx;
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -148,7 +148,7 @@ impl Plan {
     /// Exports `DROVER_LANE`, `DROVER_PORT` and the fleet's `env`; #441: sources the secrets `deliver` wrote.
     pub fn lane_cmd(&self, pane: &str) -> Vec<String> {
         let (lane, port) = (format!("DROVER_LANE='{}'", self.lane), self.port.to_string());
-        let mut c = herdr::run_argv(pane, &["export", &lane, &format!("DROVER_PORT={port}")]);
+        let mut c = term::run_argv(pane, &["export", &lane, &format!("DROVER_PORT={port}")]);
         let v = |v: &str| {
             expand(v)
                 .display()
@@ -484,15 +484,6 @@ fn brief(
     )
 }
 
-fn create_argv(local: &str, p: &Plan, reopen: bool) -> Vec<String> {
-    let wt = p.worktree.to_string_lossy();
-    if reopen {
-        herdr::worktree_open_argv(local, &wt, &p.agent)
-    } else {
-        herdr::worktree_create_argv(local, &p.branch, &p.base, &wt, &p.agent)
-    }
-}
-
 fn labels(p: &Plan, acp: Option<(&Fleet, u32)>) -> Vec<(&'static str, String)> {
     let issue = p.lane.split(':').nth(1).unwrap_or_default().to_string();
     let fleet = p.lane.split(':').next().unwrap_or_default().to_string();
@@ -552,12 +543,15 @@ pub fn unguarded(ctx: &Ctx, (profile, family, h): (&str, &str, &str), id: &str, 
 }
 
 /// file, signed in with the host's own login, its profile's settings and role as the
-pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&str>) -> Result<Vec<String>> {
+pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&str>) -> Result<term::Acp> {
     let dir = providers::profiles_root(ctx).join(&p.profile);
     let home = |a: Vec<String>| crate::hosts::rehome(a, remote);
     let why = unguarded(ctx, (&p.profile, p.family, &p.harness), id, remote.is_some());
     if !why.is_empty() {
         return refused("ACP_UNGUARDED", format!("{why}; the lane does not start"));
+    }
+    if !shed_meta(r) {
+        return refused("SHED_OLD", format!("{SHED_OLD}; the lane does not start"));
     }
     let agents: Value = serde_json::from_str(&crate::shed::cli(r, &["agents", "--json"])?.stdout)?;
     let agent = agents.as_array().into_iter().flatten().find(|a| a["id"] == id);
@@ -575,7 +569,39 @@ pub fn acp_cmd(ctx: &Ctx, r: &dyn Runner, p: &Plan, id: &str, remote: Option<&st
     let (set, role) = (q(&set.to_string_lossy()), q(&role.to_string_lossy()));
     let profile = providers::get(&p.harness).acp_profile(&set, &role);
     let line = words.join(" ") + &profile + " && unset SHED BERTH && exec \"$@\"";
-    Ok([argv(&["sh", "-c", &line, "sh"]), cmd].concat())
+    let meta = providers::get(&p.harness).acp_meta();
+    Ok(term::Acp {
+        cmd: [argv(&["sh", "-c", &line, "sh"]), cmd].concat(),
+        mcp: (meta.is_some() || !p.mcp.is_empty()).then(|| p.mcp_file.clone()),
+        meta,
+    })
+}
+
+/// #941: what `shed_meta` lacking means, for doctor's row and spawn's refusal.
+pub const SHED_OLD: &str =
+    "this host's shed predates shed#94 (no `shed run --meta`): an ACP lane would load the owner's own setup";
+
+/// #941: the host's shed takes `run --meta`.
+pub fn shed_meta(r: &dyn Runner) -> bool {
+    crate::shed::cli(r, &["help", "run"]).is_ok_and(|o| o.stdout.contains("--meta"))
+}
+
+/// #941: an ACP lane's `--mcp` file: the role's servers as ACP's list (stdio, `http`, `sse`).
+pub fn write_acp_mcp(on: &crate::hosts::On, p: &Plan, acp: &term::Acp) -> Result<()> {
+    let Some(file) = &acp.mcp else { return Ok(()) };
+    let pairs = |v: &Value| -> Vec<Value> {
+        let kv = v.as_object().into_iter().flatten();
+        kv.map(|(k, v)| json!({"name": k, "value": v})).collect()
+    };
+    let list: Vec<Value> = p
+        .mcp
+        .iter()
+        .map(|(name, s)| match s["type"].as_str() {
+            Some(t @ ("http" | "sse")) => json!({"type": t, "name": name, "url": s["url"], "headers": pairs(&s["headers"])}),
+            _ => json!({"name": name, "command": s["command"], "args": s.get("args").unwrap_or(&json!([])), "env": pairs(&s["env"])}),
+        })
+        .collect();
+    on.write(file, &serde_json::to_string_pretty(&list)?)
 }
 
 fn remote_acp(
@@ -642,32 +668,23 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
         "git",
         argv(&["-C", local, "fetch", "origin", p.base.trim_start_matches("origin/")]),
     )];
-    if let Some(b) = bt.filter(|b| b.0.acp.is_some()) {
-        cmds.extend((!reopen).then(|| sent("git", worktree_add(local, p, false))));
-        let run = b.acp_argv(&p.agent, labels, &p.worktree.to_string_lossy(), acp);
+    cmds.extend((!reopen).then(|| sent("git", worktree_add(local, p, false))));
+    if bt.0.acp.is_some() {
+        let run = bt.acp_argv(&p.agent, labels, &p.worktree.to_string_lossy(), acp);
         cmds.push(sent("shed", run));
         cmds.push(sent("shed", argv(&["send", &p.agent, "<the brief>"])));
-    } else if bt.is_some() {
+    } else {
         let pane = p.agent.as_str();
-        cmds.extend((!reopen).then(|| sent("git", worktree_add(local, p, false))));
-        let run = herdr::Shed::run_params(pane, labels, &p.worktree.to_string_lossy());
+        let run = term::Shed::run_params(pane, labels, &p.worktree.to_string_lossy());
         cmds.push(sent("shed", argv(&["run", &json!(run).to_string()])));
-        let typed = [
-            home(p.lane_cmd(pane)),
-            herdr::typed(pane, &home(p.start_cmd(ctx, pane))),
-        ];
-        let shown = |a: Vec<String>| herdr::shed_line(&a)[1..].to_vec();
+        let typed = [home(p.lane_cmd(pane)), term::typed(pane, &home(p.start_cmd(ctx, pane)))];
+        let shown = |a: Vec<String>| term::shed_line(&a)[1..].to_vec();
         cmds.extend(
             typed
                 .into_iter()
                 .chain(p.kick_cmds(pane))
                 .map(|a| sent("shed", shown(a))),
         );
-    } else {
-        cmds.push(sent(herdr::BIN, create_argv(local, p, reopen)));
-        cmds.push(sent(herdr::BIN, home(p.lane_cmd("<pane>"))));
-        cmds.push(sent(herdr::BIN, home(p.start_cmd(ctx, "<pane>"))));
-        cmds.extend(p.kick_cmds("<pane>").into_iter().map(|k| sent(herdr::BIN, k)));
     }
     if let Some(t) = p.env.get("DROVER_TOKEN") {
         cmds.iter_mut()
@@ -683,9 +700,9 @@ fn plan_json(ctx: &Ctx, p: &Plan, on: &crate::hosts::On, (local, reopen): (&str,
 
 type Runtime<'a> = (
     Option<&'a str>,
-    Option<&'a herdr::Shed>,
+    &'a term::Shed,
     &'a [(&'static str, String)],
-    &'a [String],
+    &'a term::Acp,
 );
 
 /// Lane scratch: untracked files fleet itself writes into a worktree (some gitignored). Never dirty work.
@@ -926,8 +943,7 @@ pub fn spawn(
         return refused("RUNTIME_DOWN", why);
     }
     let placed = crate::hosts::wake(ctx, cfg, r, (f, o.dry_run), placed)?;
-    let acp_host = placed.as_ref().is_some_and(|pl| cfg.host_acp(&pl.name).is_some());
-    let on = crate::hosts::On::new(r, placed.as_ref().and_then(|pl| pl.machine.as_deref())).shed_only(acp_host);
+    let on = crate::hosts::On::new(r, placed.as_ref().and_then(|pl| pl.machine.as_deref()));
     let (base, r): (&dyn Runner, &dyn Runner) = (r, &on);
     if let Some(pl) = &placed {
         p.at(&pl.root, f);
@@ -947,20 +963,22 @@ pub fn spawn(
     let local = placed.as_ref().map_or_else(|| f.local_path(), |pl| pl.local.clone());
     let local = local.to_string_lossy().into_owned();
     let reopen = on.exists(&p.worktree);
-    let bt = cfg.shed_on(fleet, placed.as_ref().map(|pl| pl.name.as_str())).map(|b| {
+    let bt = {
+        let pl = placed.as_ref().map(|pl| pl.name.as_str());
+        let b = cfg.shed_on(fleet, pl).context(crate::config::NO_RUNTIME)?;
         let wire = on.shed().map_or(b.wire.clone(), |w| w.wire);
         let acp = b
             .acp
             .clone()
             .map(|a| f.role(role).ok().and_then(|r| r.agent.clone()).unwrap_or(a));
-        herdr::Shed(crate::shed::Shed { wire, acp, ..b })
-    });
-    if bt.is_some() && on.machine.is_none() && ok(r, "which", &["shed"]).is_err() {
+        term::Shed(crate::shed::Shed { wire, acp, ..b })
+    };
+    if on.machine.is_none() && ok(r, "which", &["shed"]).is_err() {
         let path = std::env::var("PATH").unwrap_or_default();
         let fix = "`drover timer install` from a shell where `which shed` finds it";
         return refused("SHED_MISSING", format!("shed is not on PATH ({path}); {fix}"));
     }
-    let acp_id = bt.as_ref().and_then(|b| b.0.acp.clone());
+    let acp_id = bt.0.acp.clone();
     let n = round(&working(&ctx.state)?, fleet, issue, &p);
     let labels = labels(&p, acp_id.as_ref().map(|_| (f, n)));
     if let (Some(id), Some(pl)) = (&acp_id, placed.as_ref().filter(|pl| pl.machine.is_some())) {
@@ -968,9 +986,9 @@ pub fn spawn(
     }
     let acp = match &acp_id {
         Some(id) => acp_cmd(ctx, r, &p, id, hm.filter(|_| on.machine.is_some()))?,
-        None => vec![],
+        None => term::Acp::default(),
     };
-    let mut pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, bt.as_ref(), &labels, &acp));
+    let mut pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
     if o.dry_run {
         pj["dry_run"] = json!(true);
         print_plan(out, &pj, o.json)?;
@@ -995,7 +1013,7 @@ pub fn spawn(
     let event = |kind: &str, d: Value| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d));
 
     let events = working(&ctx.state)?;
-    let agents = host::agents(r).context("cannot list herdr agents for the duplicate guard")?;
+    let agents = host::agents(r).context("cannot list the lanes for the duplicate guard")?;
     let live = host::live_in(&agents, &p.agent, &p.worktree);
     let names: Vec<&str> = live
         .iter()
@@ -1135,7 +1153,7 @@ pub fn spawn(
         }
         for a in host::live_in(listed.as_deref().unwrap_or_default(), &p.agent, Path::new(owt)) {
             if let Some(pane) = a["pane_id"].as_str() {
-                herdr::close(&old, pane)?;
+                term::close(&old, pane)?;
             }
         }
         if stale.is_none() && !hung {
@@ -1160,7 +1178,7 @@ pub fn spawn(
 
     let mut sha = None;
     let note;
-    let (created, brief_text) = {
+    let brief_text = {
         let iss = crate::gh::spec(ctx, base, f, fleet, issue, true)?;
         if on.machine.is_some() && !on.exists(&Path::new(&local).join(".git")) {
             ok(r, "sh", &["-c", &clone_sh(&f.repo, &f.integration, &local)])?;
@@ -1180,24 +1198,20 @@ pub fn spawn(
         if moved.is_some() && p.family != "rev" && pushed() {
             p.base = format!("origin/{}", p.branch);
         }
-        let make = || -> Result<Value> {
-            Ok(match bt {
-                None => herdr::json(r, &create_argv(&local, &p, reopen))?,
-                Some(_) if reopen => Value::Null,
-                Some(_) => {
-                    let have = r
-                        .run(
-                            "git",
-                            &argv(&["-C", &local, "rev-parse", "--verify", "--quiet", &p.branch]),
-                        )?
-                        .code
-                        == 0;
-                    ok(r, "git", &worktree_add(&local, &p, have))?;
-                    Value::Null
-                }
-            })
+        let make = || -> Result<()> {
+            if !reopen {
+                let have = r
+                    .run(
+                        "git",
+                        &argv(&["-C", &local, "rev-parse", "--verify", "--quiet", &p.branch]),
+                    )?
+                    .code
+                    == 0;
+                ok(r, "git", &worktree_add(&local, &p, have))?;
+            }
+            Ok(())
         };
-        let created = match make() {
+        match make() {
             Err(e) if !reopen => {
                 let Some(held) = checked_out(r, &local, &p.branch) else {
                     return Err(e);
@@ -1221,10 +1235,10 @@ pub fn spawn(
                 }
                 let d = json!({"role": role, "agent": p.agent, "old": held, "worktree": wt, "wip": wip});
                 event("worktree-moved", d)?;
-                make()?
+                make()?;
             }
             c => c?,
-        };
+        }
         if p.family == "rev" && reopen {
             ok(r, "git", &["-C", &wt, "reset", "--hard", &p.base])?;
             let _ = on.remove(&p.worktree.join("verdict.md"));
@@ -1281,30 +1295,21 @@ pub fn spawn(
                 format!("Saved work: the last lane's uncommitted and unpushed work is on `origin/{w}`; fetch and merge it first.")
             }))
             .map(|t| format!("\n\n{t}"));
-        (
-            created,
-            brief(
-                f,
-                issue,
-                &p,
-                title,
-                &decided.fold(body.to_string(), |b, d| b + &d),
-                (
-                    fix,
-                    crate::repo_read("rules.md", |f| on.read(&p.worktree.join(f))).as_deref(),
-                    crate::queue::repro(&events, fleet, issue),
-                    crate::queue::playbook(&events, fleet, issue),
-                ),
-                &recipe,
+        brief(
+            f,
+            issue,
+            &p,
+            title,
+            &decided.fold(body.to_string(), |b, d| b + &d),
+            (
+                fix,
+                crate::repo_read("rules.md", |f| on.read(&p.worktree.join(f))).as_deref(),
+                crate::queue::repro(&events, fleet, issue),
+                crate::queue::playbook(&events, fleet, issue),
             ),
+            &recipe,
         )
     };
-    let wsid = |v: Value| v["result"]["workspace"]["workspace_id"].as_str().map(String::from);
-    let mut ws = String::new();
-    if bt.is_none() {
-        ws = wsid(created).context("herdr: no workspace_id")?;
-        herdr::workspace_rename(r, &ws, &p.agent)?;
-    }
     on.write(&p.brief, &brief_text).context("writing the brief")?;
     if p.role == "verify" {
         let vb = include_str!("../../../scripts/verify-browser.mjs");
@@ -1314,6 +1319,7 @@ pub fn spawn(
         copy_included(&f.local_path(), &p.worktree)?;
     }
     h.prepare(ctx, &on, &p)?;
+    write_acp_mcp(&on, &p, &acp)?;
     if on.machine.is_some() && p.lane_key.is_none() {
         let exe = home(vec![ctx.exe.clone()]).remove(0);
         ok(
@@ -1332,90 +1338,16 @@ pub fn spawn(
     if let Some(rl) = &rules {
         on.write(&p.rules_file(), &serde_json::to_string(rl)?)?;
     }
-    let pick = |ws: &mut String, skip: Option<&str>| match herdr::free_pane(r, ws, &p.worktree, skip) {
-        Err(e) if format!("{e:#}").contains("workspace_not_found") => {
-            *ws = wsid(herdr::json(r, &create_argv(&local, &p, true))?).context("herdr: no workspace_id")?;
-            herdr::free_pane(r, ws, &p.worktree, None)
-        }
-        x => x,
-    };
-    let mut pane = if bt.is_some() {
-        p.agent.clone()
-    } else {
-        pick(&mut ws, None)?
-    };
+    let pane = p.agent.clone();
     let host = placed.as_ref().map(|pl| (&pl.name, &pl.machine));
     let d = json!({"agent": p.agent, "role": role, "host": host.map(|h| h.0), "machine": host.and_then(|h| h.1.as_ref()),
         "worktree": p.worktree, "pane": pane});
     event("spawn-started", d)?;
-    pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, bt.as_ref(), &labels, &acp));
-    if let Some(b) = &bt {
-        b.start(r, &pane, &labels, &wt, &acp)?;
-        if b.0.acp.is_none() {
-            herdr::ok(r, &home(p.lane_cmd(&pane)))?;
-            herdr::ok(r, &herdr::typed(&pane, &home(p.start_cmd(ctx, &pane))))?;
-        }
-    } else {
-        herdr::ok(r, &home(p.lane_cmd(&pane)))?;
-        let mut start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
-        if herdr::failed_with(&start, "agent_pane_busy") {
-            let lane = events
-                .iter()
-                .any(|e| e.kind == "spawn" && e.str("pane") == Some(&pane) && e.str("machine") == on.machine);
-            let closed =
-                lane && !agents.iter().any(|a| a["pane_id"] == pane.as_str()) && herdr::close(r, &pane).is_ok();
-            event("pane-busy", json!({"agent": p.agent, "pane": pane, "closed": closed}))?;
-            pane = pick(&mut ws, Some(&pane))?;
-            herdr::ok(r, &home(p.lane_cmd(&pane)))?;
-            start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
-        }
-        let soft = |s: &Out| s.code != 0 && SOFT.iter().any(|c| herdr::failed_with(s, c));
-        let mut late = soft(&start) && confirm(r, h, &pane);
-        if soft(&start) && !late {
-            let _ = herdr::close(r, &pane);
-            pane = pick(&mut ws, Some(&pane))?;
-            herdr::ok(r, &home(p.lane_cmd(&pane)))?;
-            start = herdr::exec(r, &home(p.start_cmd(ctx, &pane)))?;
-            late = soft(&start) && confirm(r, h, &pane);
-        }
-        let mut screen = String::new();
-        if start.code != 0 && !late {
-            let logged = |prompt: &str| {
-                event(
-                    "startup-prompt",
-                    json!({"agent": p.agent, "pane": pane, "prompt": prompt}),
-                )
-            };
-            (late, screen) = unblock(r, h, &pane, logged)?;
-        }
-        if start.code != 0 {
-            let taken = herdr::failed_with(&start, "agent_name_taken");
-            if let Some(pane) = orphan(&if taken { host::agents(r)? } else { vec![] }, &events, &p, true) {
-                adopt(ctx, cfg, r, out, (fleet, issue, role), &pane, &json!({}))?;
-                return intent.done(json!({"agent": p.agent, "adopted": pane})).map(|()| true);
-            }
-            let why = if late {
-                herdr::rename(r, &pane, &p.agent).err().map(|e| format!("{e:#}"))
-            } else if soft(&start) {
-                Some(format!("no harness came up in 120 s: {}", start.stderr.trim()))
-            } else {
-                Some(format!("herdr agent start failed: {}", start.stderr.trim()))
-            };
-            if let Some(why) = why {
-                let shown = if screen.is_empty() {
-                    String::new()
-                } else {
-                    format!("\nscreen:\n{screen}")
-                };
-                if on.machine.is_some() {
-                    let _ = herdr::workspace_close(r, &ws);
-                    bail!("{why}; closed workspace {ws}{shown}");
-                }
-                let _ = herdr::close(r, &pane);
-                bail!("{why}; closed pane {pane}{shown}");
-            }
-            event("spawn-adopted", json!({"agent": p.agent, "pane": pane}))?;
-        }
+    pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
+    bt.start(r, &pane, &labels, &wt, &acp)?;
+    if bt.0.acp.is_none() {
+        term::ok(r, &home(p.lane_cmd(&pane)))?;
+        term::ok(r, &term::typed(&pane, &home(p.start_cmd(ctx, &pane))))?;
     }
     let mut dirs: Vec<String> = f.clone_build.clone();
     dirs.extend(f.clone_node_modules.then(|| "node_modules".into()));
@@ -1436,14 +1368,12 @@ pub fn spawn(
             [clone_build(r, dirs, &f.local_path(), &p.worktree), warm]
         });
         let res = (|| -> Result<bool> {
-            let kicked = match bt.as_ref().filter(|b| b.0.acp.is_some()) {
-                Some(b) => b.kick_acp(r, &pane, &brief_text),
+            let kicked = match bt.0.acp {
+                Some(_) => bt.kick_acp(r, &pane, &brief_text),
                 None => h.kick(r, &p, &pane),
             };
-            let mut d = lane_data(&p, &pane, &ws);
-            if let Some(b) = &bt {
-                d["runtime"] = json!(["shed", "shed-acp"][usize::from(b.0.acp.is_some())]);
-            }
+            let mut d = lane_data(&p, &pane);
+            d["runtime"] = json!(["shed", "shed-acp"][usize::from(bt.0.acp.is_some())]);
             let confirmed = kicked.as_ref().is_ok_and(|c| *c);
             d["confirmed"] = json!(confirmed);
             d["error"] = json!(kicked.as_ref().err().map(|e| format!("{e:#}")));
@@ -1463,7 +1393,7 @@ pub fn spawn(
             }
             if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
                 if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a["pane_id"] == old) {
-                    let _ = herdr::close(r, old);
+                    let _ = term::close(r, old);
                     let c = json!({"agent": agent, "reason": "superseded", "pane": old});
                     event("lane-closed", c)?;
                 }
@@ -1485,55 +1415,7 @@ pub fn spawn(
     res
 }
 
-const SPAWN_SECS: u64 = 3 * herdr::CONFIRM_SECS;
-
-fn tail(r: &dyn Runner, pane: &str) -> String {
-    let s = herdr::read(r, pane).unwrap_or_default();
-    let lines: Vec<_> = s.trim_end().lines().map(crate::lanes::redact).collect();
-    lines[lines.len().saturating_sub(40)..].join("\n")
-}
-
-pub(crate) fn unblock(
-    r: &dyn Runner,
-    h: &dyn providers::Provider,
-    pane: &str,
-    logged: impl FnOnce(&str) -> Result<()>,
-) -> Result<(bool, String)> {
-    let screen = tail(r, pane);
-    let Some((prompt, keys)) = h.startup_prompt(&screen) else {
-        return Ok((false, screen));
-    };
-    for k in &keys {
-        herdr::keys(r, pane, k)?;
-    }
-    logged(prompt)?;
-    if confirm(r, h, pane) {
-        return Ok((true, screen));
-    }
-    Ok((false, tail(r, pane)))
-}
-
-const SOFT: [&str; 3] = ["timeout", "agent_name_not_found", "agent_launch_pending"];
-const REPORTED: [&str; 4] = ["working", "idle", "blocked", "done"];
-
-fn confirm(r: &dyn Runner, h: &dyn providers::Provider, pane: &str) -> bool {
-    let (mut left, mut titled, names) = (herdr::CONFIRM_SECS, false, h.process_names());
-    loop {
-        let v = herdr::json(r, &herdr::pane_get_argv(pane)).map_or(Value::Null, |v| v["result"]["pane"].clone());
-        let agent = v["agent"].as_str().unwrap_or("");
-        let title = v["terminal_title"].as_str().unwrap_or("");
-        let state = v["agent_status"].as_str().unwrap_or("");
-        titled |= h.startup_title().is_some_and(|t| title.contains(t)) || REPORTED.contains(&state);
-        if titled && !agent.is_empty() && (names.is_empty() || names.contains(&agent)) {
-            return true;
-        }
-        if left < 5 {
-            return false;
-        }
-        left -= 5;
-        r.sleep(5);
-    }
-}
+const SPAWN_SECS: u64 = 3 * term::CONFIRM_SECS;
 
 fn orphan(agents: &[Value], events: &[Event], p: &Plan, unnamed: bool) -> Option<String> {
     let mine = |a: &&Value| a["name"] == p.agent.as_str() || unnamed && a["name"].as_str().is_none_or(str::is_empty);
@@ -1794,12 +1676,11 @@ fn iso(t: u64) -> String {
     )
 }
 
-fn lane_data(p: &Plan, pane: &str, ws: &str) -> Value {
+fn lane_data(p: &Plan, pane: &str) -> Value {
     json!({"role": p.role, "stage": p.stage, "check": p.family == "rev", "harness": p.harness, "profile": p.profile, "model": p.model, "effort": p.effort, "agent": p.agent,
-        "pane": pane, "workspace": ws, "worktree": p.worktree, "branch": p.branch, "port": p.port, "qos": p.qos()})
+        "pane": pane, "worktree": p.worktree, "branch": p.branch, "port": p.port, "qos": p.qos()})
 }
 
-/// `drover adopt`: log the lane running in `pane` and name its agent as planned; nothing is started. `extra` joins the `spawn` data (#376: an orphan's host, machine, worktree, `since`).
 pub fn adopt(
     ctx: &Ctx,
     cfg: &Config,
@@ -1810,13 +1691,8 @@ pub fn adopt(
     extra: &Value,
 ) -> Result<()> {
     let p = plan(ctx, cfg, fleet, issue, role)?;
-    let info = herdr::harness_in(r, pane).with_context(|| format!("no harness running in pane {pane}"))?;
-    herdr::rename(r, pane, &p.agent)?;
-    let ws = info["workspace_id"]
-        .as_str()
-        .or_else(|| pane.split(':').next())
-        .unwrap_or_default();
-    let mut d = lane_data(&p, pane, ws);
+    term::harness_in(r, pane).with_context(|| format!("no harness running in pane {pane}"))?;
+    let mut d = lane_data(&p, pane);
     d["adopted"] = json!(true);
     extra
         .as_object()
@@ -1827,7 +1703,6 @@ pub fn adopt(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "spawn", d))
 }
 
-/// #376: the lane a herdr agent looks like, `(fleet, issue, role, worktree)`: named `<fleet>-<role>-<issue>[-rN]`, or working under `work/<repo>/issue-N` (#630; or `worktrees/`; role: none) or `work/<repo>/<check role>-N-rK`.
 pub fn shaped<'a>(cfg: &'a Config, a: &Value) -> Option<(&'a str, u64, Option<String>, Option<String>)> {
     let name = a["name"].as_str().unwrap_or_default();
     let cwd = Path::new(a["cwd"].as_str().or(a["foreground_cwd"].as_str()).unwrap_or_default());
@@ -1861,7 +1736,6 @@ pub fn shaped<'a>(cfg: &'a Config, a: &Value) -> Option<(&'a str, u64, Option<St
     })
 }
 
-/// #376: each lane-shaped herdr agent (`shaped`, any host) of a tracked issue that no `spawn` logged: an open issue's is adopted (`spawn-adopted`, why `orphan`), so its verdict is recorded as any lane's; a done issue's, or a review whose verdict is for an old head, is closed once its unpushed work is on `wip/` (`lane-closed`, why `stale-orphan`). True when it logged any.
 pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<bool> {
     let agents = crate::hosts::all_agents(cfg, seen)?;
     let events = working(&ctx.state)?;
@@ -1931,7 +1805,7 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
                     let b = crate::check::wip_branch(ctx, &on, &format!("{fleet}-{role}-{n}"));
                     crate::check::save_wip(&on, w, &b, "wip: stale orphan lane, saved by drover")?;
                 }
-                herdr::close(&on, pane)?;
+                term::close(&on, pane)?;
                 writeln!(out, "closed stale orphan {agent} ({why})")?;
                 let d = json!({"agent": agent, "pane": pane, "host": a["host"], "why": "stale-orphan", "reason": why});
                 emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "lane-closed", d))

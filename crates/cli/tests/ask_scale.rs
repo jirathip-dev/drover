@@ -1,6 +1,6 @@
 mod common;
 use common::*;
-use drover::events::{append, shared, Event, VISITS};
+use drover::events::{append, working, Event, VISITS};
 use drover::serve::Server;
 use serde_json::{json, Value};
 use std::sync::atomic::Ordering::Relaxed;
@@ -81,7 +81,7 @@ fn the_needs_and_chat_views_are_linear_in_the_log_and_one_event_updates_the_inde
     let d = json!({"id": "q799", "choice": "yes", "by": "owner"});
     append(&c.state, &Event::new(NOW, "sendmeter", Some(AGENTS), "decision", d)).unwrap();
     let before = VISITS.load(Relaxed);
-    let l = shared(&c.state).unwrap();
+    let l = working(&c.state).unwrap();
     assert!(
         VISITS.load(Relaxed) - before <= 2,
         "the earlier events were indexed again"

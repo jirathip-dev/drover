@@ -3,13 +3,30 @@ use common::*;
 use drover::serve::Server;
 use serde_json::json;
 
-fn get(s: &Server, path: &str) -> String {
-    let res = String::from_utf8_lossy(&s.respond(
-        &format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"),
-        1_000_000,
-    ))
-    .into_owned();
-    with_queue(&res, s, "127.0.0.1:7777", 1_000_000)
+fn titles(s: &Server) -> Vec<String> {
+    let res =
+        String::from_utf8_lossy(&s.respond("GET /screens/queue HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", 1_000_000))
+            .into_owned();
+    let v: serde_json::Value = serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap();
+    fn rows(v: &serde_json::Value, out: &mut Vec<String>) {
+        match v {
+            serde_json::Value::Object(m) => {
+                if m.get("type").and_then(|t| t.as_str()) == Some("row")
+                    && m.get("id")
+                        .and_then(|i| i.as_str())
+                        .is_some_and(|i| i.starts_with("q-"))
+                {
+                    out.push(m["title"].as_str().unwrap_or_default().to_string());
+                }
+                m.values().for_each(|x| rows(x, out));
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|x| rows(x, out)),
+            _ => {}
+        }
+    }
+    let mut out = vec![];
+    rows(&v, &mut out);
+    out
 }
 
 fn queued(name: &str) -> drover::Ctx {
@@ -43,11 +60,14 @@ fn cached_spec_and_pr_titles_show_in_the_queue_row() {
     .unwrap();
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let out = get(&s, "/");
-    assert!(out.contains("Queue titles · PR #33 · Lanes like Corral"), "{out}");
+    let out = titles(&s);
     assert!(
-        out.contains("well past one phone line<") && !out.contains("past one…"),
-        "#331: whole, CSS ellipsises it: {out}"
+        out.contains(&"#12 Queue titles · PR #33 · Lanes like Corral".to_string()),
+        "{out:?}"
+    );
+    assert!(
+        out.contains(&"#17 A very long issue title that goes well past one phone line".to_string()),
+        "#331: whole, the page ellipsises it: {out:?}"
     );
     assert_eq!(r.count("gh"), 0, "no gh call on render: {:?}", r.calls.borrow());
 }
@@ -57,12 +77,7 @@ fn uncached_rows_have_no_title_and_make_no_gh_call() {
     let c = queued("no-titles");
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let page = get(&s, "/");
-    assert!(
-        page.contains("<details class=\"q\" data-q data-act=idle data-grow=queued data-i=")
-            && !page.contains("class=tl title"),
-        "{page}"
-    );
+    assert_eq!(titles(&s), ["#12", "#17"]);
     assert_eq!(r.count("gh"), 0, "{:?}", r.calls.borrow());
 }
 
@@ -82,21 +97,10 @@ fn check_caches_a_queued_issues_spec_once_and_its_row_shows_the_title() {
     assert_eq!(f.count("gh issue view"), 2, "{:?}", f.calls.borrow());
     let on = sh.on(&f);
     let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
-    let page = get(&s, "/");
+    let out = titles(&s);
     assert!(
-        page.contains(">Nested rows show titles</span>") && page.contains(">Deep row</span>"),
-        "{page}"
-    );
-}
-
-#[test]
-fn no_lanes_mode_button() {
-    let c = queued("mode");
-    let r = Fake::default();
-    let page = get(&Server::new(&c, &r, Some("127.0.0.1:7777".into())), "/?all=1");
-    assert!(
-        page.contains("<section id=lanes>") && !page.contains("id=mode"),
-        "{page}"
+        out.contains(&"#12 Nested rows show titles".to_string()) && out.contains(&"#17 Deep row".to_string()),
+        "{out:?}"
     );
 }
 
@@ -134,7 +138,7 @@ const page = (status, body) => async () => ({ ok: status === 200, status, body, 
     let o = std::process::Command::new("node").arg(d.join("t.js")).output().unwrap();
     assert_eq!(
         String::from_utf8_lossy(&o.stdout).trim(),
-        r#"[502,0,"DOWN",200,"v1",200,"v1",200,"v2",6]"#,
+        r#"[502,0,"DOWN",200,"v1",200,"v1",200,"v2",4]"#,
         "{}",
         String::from_utf8_lossy(&o.stderr)
     );
@@ -164,7 +168,7 @@ const go = async (path, mode) => {
   return p ? (await p).body : 'PASS';
 };
 (async () => {
-  const urls = ['/api/v1/needs', '/herd.json?weather=calm', '/lane?agent=x', '/live', '/a/@V/nope.js'], out = [];
+  const urls = ['/api/v1/needs', '/screens/queue', '/lane?agent=x', '/live', '/a/@V/nope.js'], out = [];
   for (const u of urls) out.push(await go(u, 'navigate'));
   out.push(asked.join(' '));
   store.set('/', { body: 'cached-page' });
@@ -207,8 +211,8 @@ fn queue_add_reads_an_uncached_title_and_a_backlog_row_has_the_reads() {
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "22"]).0, 0);
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let page = get(&s, "/");
-    for t in ["Queued after the read", "Cached", "From the backlog read"] {
-        assert!(page.contains(&format!("class=tl title=\"{t}\"")), "{t}: {page}");
+    let out = titles(&s);
+    for t in ["#21 Queued after the read", "#20 Cached", "#22 From the backlog read"] {
+        assert!(out.contains(&t.to_string()), "{t}: {out:?}");
     }
 }
