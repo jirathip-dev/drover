@@ -1011,14 +1011,28 @@ pub struct Health {
     /// #859: each route's request times over the last 10 min, slowest p95 first; each source's `refreshed_at`.
     pub routes: Vec<RouteTime>,
     pub sources: BTreeMap<String, u64>,
+    pub serve: ServeHealth,
 }
 
-/// #859: one route's requests in the window: how many, their median and 95th percentile in ms.
+/// #898: serve's own numbers (each minute also `serve-health.json`): RSS, the last minute's route groups and read 503s.
+pub struct ServeHealth {
+    pub at: u64,
+    pub started: u64,
+    pub rss_mb: u64,
+    pub groups: Vec<RouteTime>,
+    pub busy: u64,
+    pub clients: u64,
+    pub queued: u64,
+    pub slow: Option<String>,
+}
+
+/// #859: one route's requests in the window: how many, their median, 95th percentile and (#898) slowest in ms.
 pub struct RouteTime {
     pub route: String,
     pub count: u64,
     pub p50: u64,
     pub p95: u64,
+    pub max: u64,
 }
 
 /// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.

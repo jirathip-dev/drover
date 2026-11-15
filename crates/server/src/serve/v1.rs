@@ -2,7 +2,7 @@ use super::{act, board, busy, coat, gh, moment, words, Auth, BTreeMap, Event, St
 use super::{form, lanes, lock, refused, shown, view, working, Config, Ctx, Refusal, Result, Server};
 use crate::api::{
     ApprovalChoice, Ask, Block, Chat, ChatDefaults, ConductorAttach, Digest, Ev, Events, Fleet, Harness, Health,
-    IssueView, Lane, LaneChat, LessonFleet, LessonRun,
+    IssueView, Lane, LaneChat, LessonFleet, LessonRun, ServeHealth,
 };
 use crate::api::{Handoff, HandoffChoice, HandoffFrom, LastLine, RepoThread, RepoThreads};
 use crate::api::{
@@ -91,7 +91,7 @@ impl Server<'_> {
             ),
             ("GET", Some("health")) => {
                 let error = Config::loaded(ctx).err().map(|e| format!("{:#}", e.0));
-                let config = if error.is_some() { "invalid" } else { "ok" };
+                let (config, serve) = (if error.is_some() { "invalid" } else { "ok" }, self.numbers(ctx.now));
                 out(
                     "200 OK",
                     &Health {
@@ -100,6 +100,7 @@ impl Server<'_> {
                         error,
                         routes: lock(&self.timing).routes(ctx.now),
                         sources: self.r.refreshed(),
+                        serve,
                     },
                 )
             }
@@ -545,8 +546,33 @@ impl Server<'_> {
         });
     }
 
+    fn numbers(&self, now: u64) -> ServeHealth {
+        let ((groups, busy), slow) = {
+            let t = lock(&self.timing);
+            (t.minute(now), t.breach(now, 200, 5))
+        };
+        ServeHealth {
+            at: now,
+            started: super::STARTED.get().copied().unwrap_or_default(),
+            rss_mb: self.rss.load(std::sync::atomic::Ordering::Relaxed),
+            groups,
+            busy,
+            clients: lock(&self.clients).len() as u64,
+            queued: lock(&self.running).values().map(|q| q.len() as u64).sum(),
+            slow: slow.map(|(r, p95)| format!("{r} p95 {p95} ms, over 200 ms for 5 min")),
+        }
+    }
+
     /// #859: `/api/v1` p95 over `slo_api_p95_ms` for `slo_api_minutes`: one `slo-api`; held again, `slo-api-ok`.
     pub fn slo(&self, now: u64) {
+        let pid = std::process::id().to_string();
+        let kb = crate::runner::ok(&self.r, "ps", &["-o", "rss=", "-p", &pid]).map(|s| s.trim().parse::<u64>());
+        self.rss.store(
+            kb.ok().and_then(Result::ok).unwrap_or_default() / 1024,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        let h = serde_json::to_vec(&self.numbers(now)).unwrap_or_default();
+        drop(std::fs::write(self.ctx.state.with_file_name("serve-health.json"), h));
         let (Ok(cfg), Ok(ev)) = (Config::kept(self.ctx), working(&self.ctx.state)) else {
             return;
         };
