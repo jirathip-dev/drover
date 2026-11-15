@@ -176,8 +176,10 @@ impl Provider for Claude {
         format!(" && mkdir -p .claude && cp {settings} {json} && cp {role} {md}")
     }
     fn acp_meta(&self) -> Option<serde_json::Value> {
-        let options = serde_json::json!({"settingSources": ["project", "local"], "strictMcpConfig": true});
-        Some(serde_json::json!({"claudeCode": {"options": options}}))
+        let global = crate::config::home().join(".claude/CLAUDE.md");
+        let settings = json!({"claudeMdExcludes": [global]});
+        let options = json!({"settingSources": ["project", "local"], "settings": settings, "strictMcpConfig": true});
+        Some(json!({"claudeCode": {"options": options}}))
     }
     fn login(&self) -> Option<&'static str> {
         Some("claude /login")

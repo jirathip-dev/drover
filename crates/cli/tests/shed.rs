@@ -266,7 +266,13 @@ fn acp_fake(adapter: &[&str]) -> Fake {
         .reply("shed cancel", "")
 }
 
-const META: &str = r#"{"claudeCode":{"options":{"settingSources":["project","local"],"strictMcpConfig":true}}}"#;
+static META: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let global = drover::config::home().join(".claude/CLAUDE.md");
+    format!(
+        r#"{{"claudeCode":{{"options":{{"settingSources":["project","local"],"settings":{{"claudeMdExcludes":["{}"]}},"strictMcpConfig":true}}}}}}"#,
+        global.display()
+    )
+});
 
 fn acp_ctx(name: &str, cfg: &str) -> drover::Ctx {
     let mut c = ctx(&tmpdir(name), cfg);
@@ -290,10 +296,10 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
     let head = format!(
         "shed run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd {0} --mcp {0}/.mcp.lane.json \
-         --meta {META} --label fleet=sendmeter --label issue=12 --label role=impl --label harness=claude --label source=drover --label group=sendmeter \
+         --meta {1} --label fleet=sendmeter --label issue=12 --label role=impl --label harness=claude --label source=drover --label group=sendmeter \
          --label item=#12 --label round=0 --label url=https://github.com/jirathip-dev/sendmeter/issues/12 \
          --label drover.fleet=sendmeter --label drover.issue=12 --label drover.role=impl --label drover.round=0 -- sh -c ",
-        wt.display()
+        wt.display(), *META
     );
     assert!(start.starts_with(&head), "{start}");
     assert!(start.ends_with(" sh echo claude-agent-acp"), "{start}");
@@ -372,7 +378,7 @@ fn an_acp_lane_gets_only_its_roles_mcp_servers_in_acps_shape() {
         .cloned()
         .unwrap();
     assert!(
-        start.contains(&format!(" --mcp {} --meta {META} ", file.display())),
+        start.contains(&format!(" --mcp {} --meta {} ", file.display(), *META)),
         "{start}"
     );
     let mcp: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
@@ -1310,10 +1316,10 @@ fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_
     let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
     let head = format!(
         "shed run --acp claude-acp --policy allow --name orchestrator-t1 --cwd {0} --mcp {0}/.mcp.lane.json \
-         --meta {META} --label fleet=sendmeter --label issue=- \
+         --meta {1} --label fleet=sendmeter --label issue=- \
          --label role=orchestrator --label harness=claude --label source=drover --label group=sendmeter --label thread=t1 \
          -- sh -c ",
-        dir.display()
+        dir.display(), *META
     );
     assert!(start.starts_with(&head), "{start}");
     let herdr = |c: &&String| c.starts_with("herdr") && *c != "herdr agent list";
@@ -1838,7 +1844,7 @@ fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
         "{runs:?}"
     );
     assert!(runs[1].contains("--label harness=codex "), "{runs:?}");
-    assert!(runs[0].contains(&format!(" --meta {META} ")), "{runs:?}");
+    assert!(runs[0].contains(&format!(" --meta {} ", *META)), "{runs:?}");
     assert!(
         !runs[1].contains(" --mcp ") && !runs[1].contains(" --meta "),
         "{runs:?}"
