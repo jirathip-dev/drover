@@ -1,0 +1,5 @@
+Decided: merged origin/staging into issue-1053 again; the merge was clean (drive.rs, serial_groups.rs from staging)
+Because: "#1033's test still passes."
+Rejected: none
+Check: env -u DROVER_LANE -u DROVER_HOST cargo test --workspace --no-fail-fast exits 0 at the merged head
+Owner: the branch is current with staging again; nothing in the lane change itself moved
