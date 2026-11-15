@@ -3,7 +3,7 @@ use drover_server::api::*;
 use drover_server::events::{fold, Event, IssueState};
 use drover_server::{hosts, propose, waiting::Waiting, Ctx};
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use ts_rs::TS;
 
 const OUT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/types/api.d.ts");
@@ -144,22 +144,47 @@ fn export_bindings() {
     std::fs::write(OUT, bindings()).unwrap();
 }
 
-fn demo() -> (PathBuf, Vec<Event>) {
-    let demo = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../../demo"));
+struct Canned(std::collections::BTreeMap<String, String>);
+
+impl drover_server::runner::Runner for Canned {
+    fn run(&self, prog: &str, args: &[String]) -> anyhow::Result<drover_server::runner::Out> {
+        let line = format!("{prog} {}", args.join(" "));
+        let out = self
+            .0
+            .iter()
+            .filter(|(k, _)| line.starts_with(k.as_str()))
+            .max_by_key(|(k, _)| k.len());
+        Ok(drover_server::runner::Out {
+            code: i32::from(out.is_none()),
+            stdout: out.map_or(String::new(), |o| o.1.clone()),
+            stderr: String::new(),
+        })
+    }
+}
+
+fn demo() -> (Ctx, Vec<Event>) {
     let d = std::env::temp_dir().join(format!("drover-types-{}", std::process::id()));
+    let demo = d.join("demo");
+    std::fs::create_dir_all(&demo).unwrap();
+    for f in std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/../../demo")).unwrap() {
+        let f = f.unwrap();
+        if f.file_type().unwrap().is_file() {
+            std::fs::copy(f.path(), demo.join(f.file_name())).unwrap();
+        }
+    }
+    let log = std::fs::read_to_string(demo.join("events.jsonl")).unwrap();
+    let events: Vec<Event> = log.lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     let ctx = Ctx {
         config: demo.join("fleet.toml"),
         state: demo.join("events.jsonl"),
         worktrees: d.join("wt"),
         homes: [("hermes", d.join("hermes"))].into(),
         exe: "drover".into(),
-        now: 1,
+        now: events.iter().map(|e| e.ts).max().unwrap_or(0) + 60,
         home: d.join("home"),
         hints: vec![],
     };
-    drover_server::serve::export(&ctx, &drover_server::runner::Real, &d.join("site"), true).unwrap();
-    let log = std::fs::read_to_string(&ctx.state).unwrap();
-    (d, log.lines().map(|l| serde_json::from_str(l).unwrap()).collect())
+    (ctx, events)
 }
 
 fn same<T: serde::de::DeserializeOwned + serde::Serialize>(v: &Value) -> Value {
@@ -170,18 +195,32 @@ fn same<T: serde::de::DeserializeOwned + serde::Serialize>(v: &Value) -> Value {
 
 #[test]
 fn serde_json_fits_the_types() {
-    let (d, events) = demo();
-    let site = d.join("site");
-    let file = |p: &Path| serde_json::from_str::<Value>(&std::fs::read_to_string(p).unwrap()).unwrap();
-    let mut checks = vec![("Herd", same::<Herd>(&file(&site.join("herd.json"))))];
-    checks.push(("HostTab", same::<HostTab>(&file(&site.join("api/v1/host")))));
-    checks.push(("QueueTab", same::<QueueTab>(&file(&site.join("api/v1/queue")))));
-    checks.push(("NeedsTab", same::<NeedsTab>(&file(&site.join("api/v1/needs")))));
-    checks.push(("LanesTab", same::<LanesTab>(&file(&site.join("api/v1/lanes")))));
-    checks.push(("ChatTab", same::<ChatTab>(&file(&site.join("api/v1/chat")))));
-    for l in std::fs::read_dir(site.join("lane")).unwrap() {
-        checks.push(("Chat", same::<Chat>(&file(&l.unwrap().path()))));
+    let (ctx, events) = demo();
+    let d = ctx.home.parent().unwrap().to_path_buf();
+    let _scratch = drover_server::db::Scratch::start();
+    let canned = Canned(
+        serde_json::from_str(&std::fs::read_to_string(ctx.config.with_file_name("runner.json")).unwrap()).unwrap(),
+    );
+    let s = drover_server::serve::Server::new(&ctx, &canned, None);
+    let get = |p: &str| {
+        let res = String::from_utf8(s.respond(&format!("GET /api/v1/{p} HTTP/1.1\r\n\r\n"), ctx.now)).unwrap();
+        assert!(res.starts_with("HTTP/1.1 200"), "{p}: {res}");
+        serde_json::from_str::<Value>(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap()
+    };
+    let mut checks = vec![("Herd", same::<Herd>(&get("herd")))];
+    checks.push(("HostTab", same::<HostTab>(&get("host"))));
+    checks.push(("QueueTab", same::<QueueTab>(&get("queue"))));
+    checks.push(("NeedsTab", same::<NeedsTab>(&get("needs"))));
+    checks.push(("LanesTab", same::<LanesTab>(&get("lanes"))));
+    checks.push(("ChatTab", same::<ChatTab>(&get("chat"))));
+    let state = same::<State>(&get("state"));
+    for l in state["lanes"].as_array().unwrap() {
+        checks.push((
+            "Chat",
+            same::<Chat>(&get(&format!("lane/{}", l["name"].as_str().unwrap()))),
+        ));
     }
+    checks.push(("State", state));
     checks.extend(events.iter().map(|e| ("Event", json!(e))));
     checks.push((
         "Event",

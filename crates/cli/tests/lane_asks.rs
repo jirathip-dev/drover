@@ -103,6 +103,7 @@ fn host() -> Fake {
          "author": {"login": "owner"}, "createdAt": "t1"}]});
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
     Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")

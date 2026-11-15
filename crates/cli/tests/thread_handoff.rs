@@ -43,6 +43,7 @@ fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
 fn acp() -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
     Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
@@ -55,21 +56,6 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
         .into_iter()
         .filter(|e| e.kind == kind)
         .collect()
-}
-
-fn herdr(agents: &str) -> Fake {
-    Fake::default()
-        .reply("herdr agent list", agents)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
-        )
-        .reply("herdr workspace close", "")
-        .reply("herdr pane run", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr agent start", "")
-        .reply("herdr agent wait", "")
-        .reply("herdr agent prompt", "")
 }
 
 fn to_new(c: &drover::Ctx, r: &dyn drover::runner::Runner, repo: &str, title: &str, text: &str) -> String {
@@ -612,10 +598,9 @@ fn the_chat_api_links_each_linked_row_and_thread_row() {
     assert_eq!(links("t2"), json!([link("t1", "from")]));
 }
 
-fn starts(r: &Fake) -> Vec<String> {
-    let calls = r.calls.borrow();
-    let start = calls.iter().filter(|c| c.starts_with("herdr agent start"));
-    start.map(|c| c.split_once(" -- ").unwrap().1.to_string()).collect()
+fn starts(b: &FakeShed) -> Vec<String> {
+    let sent = b.sent("orchestrator-t2").into_iter();
+    sent.filter(|l| l.starts_with("exec ")).collect()
 }
 
 fn long_text() -> String {
@@ -668,9 +653,10 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one() {
 }
 
 #[test]
-fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herdrs_line_limit() {
+fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_the_shells_line_limit() {
     let c = setup("handoff-long");
-    let r = herdr(NO_AGENTS);
+    let b = FakeShed::attached(&c);
+    let r = Fake::default();
     let text = long_text();
     assert_eq!(text.len(), 2400);
     assert_eq!(to_new(&c, &r, "sendmeter", "Big plan", &text), "t2");
@@ -686,6 +672,7 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herd
     let md = c.state.with_file_name("orchestrator").join("t2/.thread.md");
     assert_eq!(std::fs::read_to_string(&md).unwrap(), format!("from t1: {line}\n"));
 
+    b.remove("orchestrator-t2");
     let (code, out) = run(&c, &r, &["thread", "handoff", "t1", "t2", "More", &text]);
     assert_eq!((code, out.as_str()), (0, "t2\n"));
     assert!(
@@ -695,7 +682,7 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herd
         "{}",
         std::fs::read_to_string(&md).unwrap()
     );
-    let s = starts(&r);
+    let s = starts(&b);
     assert_eq!(s.len(), 2, "{s:?}");
     assert!(s[1].contains("--resume"), "{}", s[1]);
     for l in &s {

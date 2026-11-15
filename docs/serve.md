@@ -31,19 +31,19 @@ replaces it. A read over 300 ms shows `↻ loading` on the strip. `crates/cli/te
 
 Snapshot (#337): the fast step (every minute) and every kick (a lane push, a verdict, an ask, a board tap) take one
 look at everything the board and `status` show and save it as the `board` row of `state.db`'s snapshots (#344): each read's output by
-command line. Every remote host's reads (verdict files, `git` facts, its herdr's agent list and pane reads) go in one
+command line. Every remote host's reads (verdict files, `git` facts, its shed's agent list and pane reads) go in one
 ssh call per host per step, a small script that prints each output and exit code; drover's ssh keeps one connection
 per host for 10 minutes (`ControlMaster=auto`, `ControlPersist=10m`, whatever `~/.ssh/config` says). Only what decides
 something is read: a verdict file only until its verdict is recorded, `git log` only for an impl/fix not seen pushed
 (or a review with no spawn sha), never a merged or closed lane. A request (`/screens/…`, `/api/v1/…`, `/live`) and
 `status`/`hosts` replay the snapshot: a remote read it lacks fails, it never runs on a request; only a lane's chat
 (`/lane`) reads that one pane live (5 s cache). Over 10 s old, a screen opens with a `data <age> old` text block, and `status` ends with it. With no snapshot saved (a new install), reads run live as before; the
-watcher pushes on each new snapshot instead of polling herdr. `tests/perf.rs` is the gate (budgets: [performance.md](performance.md)): 30 lanes on 2 hosts, +300 ms
+watcher pushes on each new snapshot instead of polling shed. `tests/perf.rs` is the gate (budgets: [performance.md](performance.md)): 30 lanes on 2 hosts, +300 ms
 per remote call, at most one remote call per host per step, `GET /` < 150 ms (< 40 KB),
 `status` < 300 ms; a miss fails CI and the numbers go to the job summary.
 
 Speed (#57): a background thread samples the host every 10 s (the 2 s `vm_stat` delta happens there),
-so a request never waits on it. Requests share the watcher's cache of `herdr pane read` and the
+so a request never waits on it. Requests share the watcher's cache of pane reads and the
 per-issue `git log`; the watcher re-reads at a third of a request's ttl, so a request finds them warm. The icons and
 manifest are `public, max-age=86400`. The page is HTML only (`no-store`); its script and style are
 `/a/<hash8>/board.js` and `board.css`, with the built-in themes (`themes/…`; `<hash8>` is FNV-1a over their content
@@ -187,8 +187,8 @@ transcript, a setup screen, and the paired ops: answer, drive, override, extend,
 | `GET lessons` | #576: per fleet its `lessons` (`weekly`, `off`), the `last` lesson lane (`issue`, its spawn `ts`, the issue's `state`) and `next`, when tick runs the next (null: `off`) |
 | `GET lessons/<fleet>/digest?days=N` | #576: the CLI's `lesson digest` (default 7 days) as `text` |
 | `GET needs` | #269: the needs-you cards for this device: `snap` (#450: the step's look's time, 0 for none; the strip under the header shows its age once over 2 min), the open `asks` (`who`, `kind`, imported `from`), each `blocked` lane's card (unpaired: its `activity`; paired: the harness `menu` or the pane's `tail`), the `needs-human` `issues` (one more round `pending`, the last verdict, its screenshot `shots` and #969 `shots_at`, the verdict's sha that `/shot/<fleet>/<n>/<i>/<sha>` names, the PR line, `merge`), `choosing` (`[chat·N]`); `rw`, `live`, `paired` and `pair` say which forms and buttons show |
-| `GET lanes` | #269: the Lanes tab for this device: state `sections` with their repo groups and each lane's row (avatar `state`, `act`, `atone`, `coat`; `state` in `tone` for `ago`, `why`, the `activity` or `now` line) and hidden card (`head`, `shown`, `facts`, the PR line, `dead`, the `blocked` card); `error` (no fleet.toml) or `failed` (herdr unread); #611: for a paired device, `shed`, the folded read-only `Other in shed (N)` section's rows (`GET shed`'s) |
-| `GET shed` | #611 (paired only, else 401): every enabled host's shed sessions no lane or conductor in the log names and no `fleet` label marks, each `{name, host, runtime (shed or acp), labels, state (shed's), last (an ACP session's last reply, a terminal's last non-empty screen line), age (since the board first saw that state)}`; a host whose shed fails is one `{host, error}` entry, and stays up. One `ls` per host, cached 10 s like the herdr agent list |
+| `GET lanes` | #269: the Lanes tab for this device: state `sections` with their repo groups and each lane's row (avatar `state`, `act`, `atone`, `coat`; `state` in `tone` for `ago`, `why`, the `activity` or `now` line) and hidden card (`head`, `shown`, `facts`, the PR line, `dead`, the `blocked` card); `error` (no fleet.toml) or `failed` (shed unread); #611: for a paired device, `shed`, the folded read-only `Other in shed (N)` section's rows (`GET shed`'s) |
+| `GET shed` | #611 (paired only, else 401): every enabled host's shed sessions no lane or conductor in the log names and no `fleet` label marks, each `{name, host, runtime (shed or acp), labels, state (shed's), last (an ACP session's last reply, a terminal's last non-empty screen line), age (since the board first saw that state)}`; a host whose shed fails is one `{host, error}` entry, and stays up. One `ls` per host, cached 10 s like the lane list |
 | `GET chat` | #269: the [chat] tab: per repo (`all` first) its thread `rows` and `archived` ones, then each thread's view (`ds`, `state`, its last 30 messages by `kind`, `older` or the `started` line); `rw`: a paired device on the live board writes; #620: serve keeps the folded tab by the log's last seq, fleet.toml's mtime, the agents and the minute, and a request in between reuses it without reading the log |
 | `GET thread/<t>?before=N&n=30` | #408, #269: a thread's messages before seq `N`, as `chat`'s pages. #681: a handoff's message carries one `handoff` item (cooee's agent→agent message): `kind: "handoff"`, `id` (its seq; a repo handoff's is its card's), `from` (`{agent: "orchestrator", thread, repo}`), `to` (the thread id once delivered, else `{repo, pending: true}`), `title`, `summary` (the first line), `text`, `state` (`pending`, `delivered`, `failed` with its `error`, `forwarded`), `folded` (the sender's thread; the receiver's is the message form) and, while pending, `choices`: the card's rows (`n`, `text`, the `thread` it goes to, `new` for a new thread), each picked by `POST <op>` (`answer`) with its `fleet`, `id`, `choice` = `n` and `State.mtime`; the outcome shows in both threads' items. A repo handoff's own `kind: "handoff"` row after the pick has no item (its card's is the one) |
 | `GET repo/<fleet>/threads` | #681: the repo's orchestrator threads, newest-active first: `id`, `title`, `last` (`line`, `ts`), `unread`, `awake` (its orchestrator not asleep), `archived`, and `newest: true` on the ongoing one (the first not archived), so cooee shows it as the agent's chat and the rest as side threads; `all` for the all-repos threads; 404 `NOT_FOUND` for no such fleet |
@@ -235,10 +235,9 @@ run `npm run build` after a UI edit.
 - cooee core, where it reads it (the lanes it shows as Workflow chats, cooee#33).
 
 #609: every lane in `state`, `lanes` and `herd`, and each `queue` row (its active lane's, empty with
-none), carries `runtime` (`herdr`, `shed` or `shed-acp`, from the lane's spawn: a config change later never moves it),
+none), carries `runtime` (`shed` or `shed-acp`, from the lane's spawn: a config change later never moves it),
 `host` (its `[hosts]` name, the main host's for a local lane, `local` with no `[hosts]`; `herd`'s stays null without
-one) and `where`, the one label every surface shows: the host while 2 or more hosts are enabled, then `herdr` or `shed`
-(an ACP session is `shed`) while live lanes span both runtimes, joined with ` · ` (`mini · shed`, `air`, `shed`, or
+one) and `where`, the one label every surface shows: the host while 2 or more hosts are enabled (`air`, or
 empty: no chip). The Lanes screen's rows show it; `status`'s HOST column, a `board` row's
 `on …` line and `waiting`'s age show the same string. Each shape is in `crates/cli/tests/golden/api_v1/where.json`.
 
@@ -283,8 +282,8 @@ the read-only view, without transcripts.
 
 `--demo` (#39) is the public demo at <https://jirathip-dev.github.io/herdsman/>, built from the synthetic
 `demo/` (3 made-up repos, `fleet.toml`, `events.jsonl`, `cache/` for issue/PR titles and CI, and
-`runner.json`: the canned `herdr agent list`, pane text and host values by command-line prefix). Nothing
-runs: no herdr, no gh, no network, and `demo/` is never written (#344: the export imports its files into a scratch database). "Now" is a minute after the log's last event, so ages never go stale.
+`runner.json`: the canned agent list, pane text and host values by command-line prefix). Nothing
+runs: no shed, no gh, no network, and `demo/` is never written (#344: the export imports its files into a scratch database). "Now" is a minute after the log's last event, so ages never go stale.
 The page carries a `demo` badge and a one-line note; an action only says "Demo with fake data", no POST is ever sent,
 there is no stream (the dot is a static blue), no pairing and no "enable alerts". Lane sheets are the exported
 `screens/lanes/<agent>`. `.github/workflows/pages.yml` publishes it on every push to `staging`; CI exports it too and

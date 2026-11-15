@@ -165,6 +165,7 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
     let agents =
         json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo", "claude-agent-acp"]}]);
     let host = Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed", "");
     let cli = sh.cli(&host);
