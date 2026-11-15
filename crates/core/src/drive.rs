@@ -731,10 +731,6 @@ pub fn drive(
         None => lease(ctx, r, out, lock, max, only.unwrap_or_default())?,
     };
     let first = KICK.get().is_some() || lead.is_some();
-    let closed = || working(&ctx.state).and_then(|ev| crate::check::closed_on_github(ctx, cfg, r, out, ev));
-    if let Some(Err(e)) = lead.is_some().then(closed) {
-        writeln!(out, "closed issues: {e:#}")?;
-    }
     if let Some((step, secs)) = crate::timer::stuck_step(ctx, cfg).filter(|_| fast && first) {
         writeln!(
             out,
@@ -905,6 +901,11 @@ fn one(
             None => return Ok(writeln!(out, "drive: another pass holds {lock}; nothing done")?),
         },
     };
+    if KICK.get().is_none() {
+        if let Err(e) = working(&ctx.state).and_then(|ev| crate::check::closed_in(ctx, cfg, r, out, &ev, name)) {
+            writeln!(out, "{name} closed issues: {e:#}")?;
+        }
+    }
     ACTS.with_borrow_mut(BTreeMap::clear);
     ROOM.set((false, None));
     let res = pass(ctx, cfg, (r, seen), out, name, fast).and_then(|go| {

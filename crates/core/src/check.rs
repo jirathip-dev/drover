@@ -1819,39 +1819,47 @@ fn clone_id(_: &Path) -> Option<u64> {
     None
 }
 
-pub(crate) fn closed_on_github(
-    ctx: &Ctx,
-    cfg: &Config,
-    r: &dyn Runner,
-    out: &mut dyn Write,
-    ev: Arc<Log>,
-) -> Result<Arc<Log>> {
-    let st = fold(&ev);
+fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: Arc<Log>) -> Result<Arc<Log>> {
     let mut any = false;
-    for (name, f) in &cfg.fleet {
-        let state = |n: u64| st.get(&(name.clone(), n));
-        let mut open: Vec<u64> = (st.values().filter(|s| s.fleet == *name && !s.done()))
-            .map(|s| s.issue)
-            .collect();
-        open.extend((crate::queue::replay(&ev, name).iter().map(|i| i.issue)).filter(|n| state(*n).is_none()));
-        open.retain(|n| gh::cached_pr(ctx, name, *n)["state"] != "MERGED");
-        let Some(closed) = (!open.is_empty())
-            .then(|| gh::closed(ctx, r, f, name, ctx.now).ok())
-            .flatten()
-        else {
-            continue;
-        };
-        for n in open.into_iter().filter(|n| closed.contains(n)) {
-            writeln!(out, "{name} #{n} closed on GitHub")?;
-            let d = json!({"by": "external", "why": "issue closed on GitHub"});
-            emit(&ctx.state, cfg, Event::new(ctx.now, name, Some(n), "closed-other", d))?;
-            any = true;
-        }
+    for name in cfg.fleet.keys() {
+        any |= closed_in(ctx, cfg, r, out, &ev, name)?;
     }
     if any {
         return working(&ctx.state);
     }
     Ok(ev)
+}
+
+pub(crate) fn closed_in(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    ev: &Log,
+    fleet: &str,
+) -> Result<bool> {
+    let st = fold(ev);
+    let state = |n: u64| st.get(&(fleet.to_string(), n));
+    let mut open: Vec<u64> = (st.values().filter(|s| s.fleet == fleet && !s.done()))
+        .map(|s| s.issue)
+        .collect();
+    open.extend((crate::queue::replay(ev, fleet).iter().map(|i| i.issue)).filter(|n| state(*n).is_none()));
+    open.retain(|n| gh::cached_pr(ctx, fleet, *n)["state"] != "MERGED");
+    let f = cfg.fleet(fleet)?;
+    let Some(closed) = (!open.is_empty())
+        .then(|| gh::closed(ctx, r, f, fleet, ctx.now).ok())
+        .flatten()
+    else {
+        return Ok(false);
+    };
+    let mut any = false;
+    for n in open.into_iter().filter(|n| closed.contains(n)) {
+        writeln!(out, "{fleet} #{n} closed on GitHub")?;
+        let d = json!({"by": "external", "why": "issue closed on GitHub"});
+        emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "closed-other", d))?;
+        any = true;
+    }
+    Ok(any)
 }
 
 fn closed_issues<'a>(
