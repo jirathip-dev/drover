@@ -1,0 +1,10 @@
+Decided: after #721 removed herdr, hosts::health already lists a host's agents through shed (host::agents, the survey's call) but skipped it for shed-acp hosts; the shed-acp path now adds the same ! shed row
+Because: crates/core/src/hosts.rs:899
+Decided: doctor.rs is left as staging has it: its ✓ host row already names shed in place of herdr, and it reads health's rows
+Because: "The ✓ row lists shed in place of herdr."
+Rejected: a separate ✗ shed list check in doctor — it duplicated health's ! shed row and broke hosts' doctor_names_the_failed_host_check test
+Decided: the stale-override row sits with the other cloud rows in cloud::doctor; bootstrap's can't-reach names any override file in use
+Because: crates/core/src/cloud.rs:373
+Rejected: rebasing onto staging as asked — the branch is pushed and lanes never force-push, so staging is merged in
+Check: remote_acp doctor_checks_a_shed_acp_host_through_shed_as_the_survey_does fails on staging's hosts.rs (no shed connect to boat1); boat's two override tests fail without cloud.rs
+Owner: Up to date with staging after #721, #966 and #1070; doctor checks shed-only hosts through shed and points at an old recipe file with no ssh identity.
