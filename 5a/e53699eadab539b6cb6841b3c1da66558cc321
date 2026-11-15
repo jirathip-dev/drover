@@ -1,0 +1,7 @@
+Decided: merged origin/staging; each conflict keeps the herdr removal and takes staging's held-by lane state and daily compact tick step
+Because: "Remove the herdr runtime: `herdr.rs`, the herdr branches in spawn, confirm, adopt, snapshot, kill/stop/close, clean, check"
+Decided: TICK_STEPS is 7 (staging's 8 minus the herdr status step); docs/workflow.md's tick chart matches
+Because: crates/core/src/timer.rs:17
+Rejected: a code change for board-freeze — the check reads the issue's board-fix line, which only an orchestrator or the owner can write (q1656)
+Check: rg -il herdr crates/*/src lists only config.rs; cargo test exits 0 at this head
+Owner: Staging's latest changes are merged in; board-freeze still needs the q1656 board-fix amendment written on the issue.
