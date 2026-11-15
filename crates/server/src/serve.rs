@@ -213,6 +213,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
         ..Server::new(ctx, r, addr).deferring()
     };
     STARTED.get_or_init(|| ctx.now);
+    started(ctx, ho.is_some_and(Handover::inherited));
     for _ in 0..2 {
         s.warm();
         s.refresh(crate::now());
@@ -277,6 +278,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
                 });
             } else {
                 busy.fetch_sub(1, Relaxed);
+                lock(&s.timing).busy(crate::now());
                 drop(st.write_all(BUSY));
             }
             if let Some(h) = ho.filter(|h| h.stopping()) {
@@ -289,6 +291,22 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
         }
     });
     Ok(())
+}
+
+/// #898: this start in `serve-starts` (its last day kept): `drover check` alerts `serve-restarts` on cold ones.
+fn started(ctx: &Ctx, handover: bool) {
+    let f = ctx.state.with_file_name("serve-starts");
+    let was = std::fs::read_to_string(&f).unwrap_or_default();
+    let day = |l: &&str| {
+        l.split(' ')
+            .next()
+            .and_then(|t| t.parse::<u64>().ok())
+            .is_some_and(|t| t + 86_400 >= ctx.now)
+    };
+    let mut keep: Vec<&str> = was.lines().filter(day).collect();
+    let now = format!("{} {}", ctx.now, ["cold", "handover"][usize::from(handover)]);
+    keep.push(&now);
+    drop(std::fs::write(f, keep.join("\n") + "\n"));
 }
 
 /// `Server::cached` as a Runner (runner, cache, now, ttl): also `waiting::scan`'s per-issue `git log` on a request.
@@ -433,6 +451,7 @@ pub struct Server<'a> {
     /// #620: the [chat] tab's fold, by its key (`chat_tab`).
     chat: Mutex<[(serde_json::Value, serde_json::Value); 2]>,
     timing: Mutex<slo::Timing>,
+    rss: std::sync::atomic::AtomicU64,
 }
 
 const JSON: &str = "application/json; charset=utf-8";
@@ -809,6 +828,7 @@ impl<'a> Server<'a> {
             later: Mutex::default(),
             chat: Mutex::default(),
             timing: Mutex::default(),
+            rss: std::sync::atomic::AtomicU64::default(),
         }
     }
 
@@ -861,7 +881,7 @@ impl<'a> Server<'a> {
             ),
             1,
         );
-        let target = req.split_whitespace().nth(1).unwrap_or_default();
+        let (t0, target) = (Instant::now(), req.split_whitespace().nth(1).unwrap_or_default());
         let (path, query) = target.split_once('?').unwrap_or((target, ""));
         let mut clients = lock(&self.clients);
         clients.retain(|c| c.0.send(String::new()).is_ok());
@@ -914,6 +934,8 @@ impl<'a> Server<'a> {
                     _ => after.into_iter().map(sse).collect(),
                 };
             }
+            let ms = t0.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
+            lock(&self.timing).add(crate::now(), "/live", false, ms);
             // Each second: a message (an `ev` the replay sent already: skipped), else a peek (the peer closed: free
             // the slot), else a ping every 15 s; #352: a `?tab=host` stream stamps `host-watch.at` (`hosts::sample`).
             std::thread::spawn(move || {
@@ -1114,7 +1136,17 @@ impl<'a> Server<'a> {
         };
         let path = req.split_whitespace().nth(1).unwrap_or_default();
         let ms = t.elapsed().as_millis().try_into().unwrap_or(u64::MAX);
-        lock(&self.timing).add(now, path.split('?').next().unwrap_or_default(), ms);
+        let mut t = lock(&self.timing);
+        t.add(
+            now,
+            path.split('?').next().unwrap_or_default(),
+            !req.starts_with("GET "),
+            ms,
+        );
+        if req.starts_with("GET ") && res.starts_with(b"HTTP/1.1 503") {
+            t.busy(now);
+        }
+        drop(t);
         res
     }
 

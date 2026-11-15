@@ -53,7 +53,7 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - Secrets are 0600 files on the main host; no secret store, no Keychain read (#767).
 
 **API and apps**
-- `/api/v1`: the read and act API every screen uses, pinned by a contract test (#589, #583, #797).
+- `/api/v1`: the read and act API every screen uses, pinned by a contract test (#589, #583, #797); [serve health](docs/serve.md#serve-health-898) (#898).
 - Drover in cooee: drover serves the plugin itself, `cooee-plugin.toml` and `/screens/` JSON blocks (#822).
 - An orchestrator thread can live in cooee (#690).
 - The lifeboat page at `/api/v1/lifeboat` for when cooee is down (#757).
