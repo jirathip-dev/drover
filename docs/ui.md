@@ -5,7 +5,7 @@ The phone page (`drover serve`) has one look. Two CI gates enforce it; a red gat
 
 ## Tokens
 
-The first `:root` block of `assets/serve.css` is the only place a raw px length may appear; `herd.css` uses the same tokens.
+The first `:root` block of `web/src/board.css` (the page's CSS, #927) is the only place a raw px length may appear.
 
 | token | value | use |
 |---|---|---|
@@ -13,7 +13,7 @@ The first `:root` block of `assets/serve.css` is the only place a raw px length 
 | `--fs-meta` | 11px | secondary text: ages, reasons, captions |
 | `--fs-input` | 16px | inputs, textareas, selects (iOS zooms below 16 px) |
 | `--fs-code` | 32px | the pairing code's digits (#59) |
-| `--ctl` | 28px | the visible height of every control, the Herd strip and `[×]` |
+| `--ctl` | 28px | the visible height of every control |
 | `--hit` | 44px | the minimum tap area |
 | `--s1` … `--s4` | 4 / 8 / 12 / 16px | margins, paddings, gaps, offsets |
 
@@ -25,23 +25,18 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
   (CSS pseudo-elements), 28 px tall, no fill; inverted while pressed. A select hides behind
   its `[opus ▾]` label.
 - **Hit area:** the `]` pseudo-element spans an 8 px ring around the control, so the tap area is
-  ≥ 44×44 px. Controls sit 16 px apart so rings never overlap. Rows (queue `summary`, lane rows,
-  horses) are full-width tap rows at least 44 px tall, not 28 px controls.
+  ≥ 44×44 px. Controls sit 16 px apart so rings never overlap. Rows (a screen's `row` blocks, a card's folded
+  line) are full-width tap rows at least 44 px tall, not 28 px controls.
 - **Choices (the one exception, owner-approved 2026-10-31):** ask and menu options are sentences:
   full width, wrapping, ≤ 4 lines then an ellipsis (full text in `title`), `[`/`]` on the first
   line, stacked 8 px apart, the recommended one first with an 11 px `(recommended)`.
 - **Type scale:** text is 13 or 11 px, nothing else; inputs 16 px (iOS zooms below 16 px).
-- **Herd strip:** one 28 px bar on top of each Herd page with `[×]` inside it on the right; the
-  counts share its line or wrap to an 11 px second line in the same bar, and are never ellipsised (#65 A).
 - **Labels, not sentences (#68):** a button holds its label (in a span that ellipsises, so `[`/`]` never
-  overlap text). A control's runtime result or error (alerts, pair, stop/kill/clean, send, answer) is an 11 px
-  `p.st` under it that wraps, red on error; #66's toast is for page actions. Unpaired, `[enable alerts]` dims
-  with "pair this phone first" under it, and a Pair this phone button opens the pairing panel (#59): in the flow under the header (or the sheet's
-  Pair button), never over a card; a tap closes it, and after 10 min it says "code expired" with a Pair button.
+  overlap text). An action's reply line (the server's `toast`, or its refusal in red) is the 11 px toast under the
+  header (#927). Unpaired, the header's `[pair]` opens the pairing panel (#59) in the flow under the header.
 - **No text past the screen (#68):** every text box shrinks (`min-width:0`) and wraps anywhere (paths, shas,
-  URLs, `code`); one-line cells (`.nw`, `.el`, `.tl`) ellipsise.
-- Names never wrap vertically (`.nw` cells stay on one line, horse labels clamp at 2 lines);
-  text that does not fit ellipsises. Nothing scrolls sideways at 390 px.
+  URLs, `code`); one-line cells (a row's subtitle, a card's folded line) ellipsise.
+- Nothing scrolls sideways at 390 px.
 
 ## Gates
 
@@ -49,85 +44,20 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    `height`, `min-height`, `line-height`, `margin*`, `padding*`, `gap`, `top/left/right/bottom`,
    `inset`) with a px value outside the token block, a font size that is not a `--fs` token, a control
    `height` that is not `--ctl`, or an inline `style=` with px in the rendered page fails (`file:line value`).
-2. **Browser audit** — the `ui` CI job: headless Chrome opens the exported demo at 390×844, DPR 3,
-   on Queue, Queue with a row open, an open row's 3-lane list (`queue-lanes`, #205: one 44 px line each, ellipsised; a gone lane no link), Lanes, a Lanes sheet, a parked lane's sheet, the sheet dragged, Host (#267: also `hosts/host-chart@1440`, `busy/host-ranked@1440`, `healthy/host-ranked@1440`), Events (#266: also `events-open`, `events-all`, `events@1440`), Herd page 1 and page 2 (by day), Herd at night and at night in a storm.
-   `assets/ui-audit.js` (only in the `--demo` export, `?audit=<view>&check=1`) fails on a control
-   not 28 px tall (a choice: over 4 lines), text not 11/13 px (inputs 16), a tap area under 44 px, sideways scroll
-   (on Herd pages too: no box past the page's sides), a name over 2 lines, text overflowing its box without an
-   ellipsis, a Herd strip/`[A]`/`[×]` not 28 px or `[A]` not inside the strip left of `[×]` (#71), a lane horse not 132±1 px wide or a queued one not 53±1 (#65), or
-   text under the weather caption or the demo's weather switcher with the page scrolled to its end, or ellipsised
-   strip text, also with a fixture of the owner's counts (13 queued, 11 done, 5 idle, 3 working) (#65 A).
-   On every view it also fails unless the viewport meta is `…,maximum-scale=1,user-scalable=no,viewport-fit=cover` and
-   `html` has `touch-action:manipulation` (#114: no zoom), and on Herd pages unless every queued horse in a row has its
-   feet (SVG bottom) on one line ±1 px, blocked or not (the owner's-counts fixture mixes them), and none overlaps the gate post.
-   Two more views (#65) prove updates never move the scroll: `herd-scroll` scrolls Herd page 1 to 400 px and
-   pushes a changed fixture through `herdData()` (a label, a band move, a lane and a queued issue gone, one lane
-   added); `queue-scroll` opens every Queue row, scrolls to 400 px and pushes a changed section through `frag()`.
-   Each fails if the scroll moved, a row closed, or the MutationObserver saw more nodes leave than were removed.
-   `sheet-drag` (#70): the sheet's handle is ≥ 56 px; a synthetic −200 px pointer drag moves the sheet mid-drag,
-   release lands on a detent (50 %, 78 %, full), and a close leaves it shown and sliding off-screen for a frame
-   before `hidden`. Virtual time runs no frames, so there rAF is a 16 ms timer and the slide is read as its target.
-   `herd-night` (#71) checks Auto at 06:59/07:00/18:59/19:00 (night/day/day/night), taps `[A]` through
-   day → night → auto → day → night (label, icon, stored value, scene each time), then loads the page again in an
-   iframe (virtual time runs no reload) and fails unless it comes back at night.
-   `herd-kitchen` and `herd-nodone` (#172) shoot Herd page 1 in the kitchen theme, and in it with `done` missing:
-   each fails unless the chefs and counter scene are drawn, and in `herd-nodone` the done pose is farm's horse.
-   #239: `herd-kitchen`, `-busy` and `-held` shoot the kitchen at each heat level (the demo's calm, gusty, storm) and
-   fail on night, the `[A]` button, the wrong level, no fanning chef or smoke while held, or `! needs you` overflowing
-   its ticket; `herd-kitchen-still` is held under reduced motion and fails if `#herd` still animates.
-   #241: on Queue, Lanes, Host and Events, and again in kitchen and terminal (`<view>~<theme>`, `?theme=`), it fails
-   unless terminal draws no sprite, load scene or mode button (glyph avatars), and other themes draw a labelled 24 px
-   sprite per Queue/Events glyph and a load scene per Host group; no theme shows a Lanes mode button (#335). #281: each row sprite is
-   24×24 in a 28 px slot, its row at most 4 px taller than with the glyph (no wrap), and no screenshot pixel inside it
-   is a blend of its neighbours (crisp, never smoothed). `theme-switch` picks
-   terminal then kitchen in place and fails on a reload, a kept sprite or a favicon not swapped; `moment-still` runs
-   with reduced motion forced and fails unless a moment is a still frame.
-   #337: `loading` (and `~kitchen`, `~terminal`, each also `@1440` at 1440 px) shows a wait and fails if the header or
-   `[↻]` moves, a sprite is in the header (idle or busy), `[↻]` is not its plain spinning ↻, or the overlay takes taps,
-   covers the header, or is not the theme's 96×96 `loading` sprite centred near the top of the content (terminal: a
-   spinning ↻); the shot holds a strip of its first four frames. `loading-still` runs with reduced motion forced and
-   fails unless it is one still frame.
-   #335: `ascii-queue`, `ascii-lanes`, `ascii-host`, `ascii-events` (and `~kitchen`; `ascii-queue~terminal`,
-   `ascii-lanes~terminal`) are those views in the look sheet's ascii style: they fail on any sprite (rows, Host
-   miniature, Lanes avatar), a row figure not in the 24 px box of the same 28 px slot, or, in terminal, anything but
-   glyphs. `ascii-loading` (and `~kitchen`) fails unless the overlay runs the theme's two ascii frames by CSS alone (no
-   node or text change while it shows) with `[↻]` the plain ↻. `look` also picks ascii, then pixel, in place.
-   #367: the `queue` fixture (`scripts/host-fixtures.sh`: 3 repos, 40 queued rows, a 6-step chain) at 390 and 1440 px.
-   `queue-repos` fails unless a chip tap, ←, → and a sideways drag each switch repos (only the picked card shows, the pick
-   stored; `[all]` only needs-you groups), the groups read `needs you (1), in progress (2), queued (40)` with the running
-   rows above the fold, the chain is one closed row laid out as a queued row (#391: `#302 chain · 6 #3`, its title, `▸ #302 → #307 · next: #400 (in impl)`), `+ 30 more` is
-   closed, and every title line is ≥ 4.5:1 on what is under it. `queue-chain` opens both: the 6 steps (depth ≤ 2) and the
-   30 rows right under their rows, every title starting at one x, and scrolled to the end the last row clears the tab bar.
-   #365: `queue-backlog` opens acme-api's 100-issue backlog in that fixture and fails unless it shows `(100)` rows, a search
-   (`past one`) leaves only matching rows with `(N of 100)`, `>90 days` and the `phone` label leave only such rows, and
-   three ticks show `[queue 3]` above the tab bar carrying the issues in tick order; no row scrolls sideways.
-   `toast` (#66) submits a ▲ form through the page's fetch path with a fixture redirect and fails unless the
-   one-line toast showed, is gone 5 s later, and `location.search` has no `msg`; then (#140) `[Drive now]`, which
-   must toast `drive started for <fleet>` with `location` unchanged (no navigation).
-   `sheet-parked` (#83) opens the demo's parked lane (no pane, its work on an open PR) and fails unless the card
-   has its `parked · work on PR #n` line, `[clean]` is disabled with its reason in `p.st`, `[stop]` and `[kill]`
-   are hidden, the chat says there is no pane, and nothing in the sheet is in the red (danger) colour.
-   `sheet-other` (#95) opens the demo's Others agent (a herdr agent that is no lane) and fails unless only
-   `[close pane]` shows (no `[stop]`, `[kill]`, `[clean]`), `p.st` reads `not a drover lane: drover can only
-   close its pane`, and nothing in the sheet is in the red (danger) colour.
-   `sheet-acp` (#750) opens a lane whose transcript is an ACP session's (`> prompt`, `[tool] title (status)`, the
-   reply) and fails unless its text keeps its line breaks and each tool is one closed one-line row.
-   `lanes-now` (#276; also `~terminal`, glyph mode) redraws the Lanes tab twice through `frag()` (the `/live` path) with
-   long `now:` lines as the server emits them (plain; Claude's spinner word, a long action and its time; the word with a
-   long action; an idle row with no spinner), and fails unless each stays one ellipsised line inside its row in every
-   mode, the action cut before the word.
-   `needs-later` (#154) pushes three needs-you cards through `frag()` and fails unless `[later]` on one leaves the red
-   line `1 need you ▸` and 2 cards, `[later all]` the line alone, a tap on the line all 3, and a changed card comes back.
-   #68: on every view, a box whose content is wider than it (`scrollWidth > clientWidth + 1`, tap rings off)
-   fails unless it ellipsises or scrolls by design, and so does any box past the screen's right edge. `host` and
-   `sheet` run each inline control's failure path with a canned long reply (Alerts: an error, then the old 401
-   pair text, leaving it unpaired; kill refused, kill's dry run, clean refused, a send error) and re-check after
-   each step. The demo fixture carries a 60-char agent name, a 200-char title, a Thai title, an 80-char path
-   and a 140-char event line.
+2. **Browser audit** — the `ui` CI job: headless Chrome opens the exported demo at 390×844, DPR 3. #927: the views
+   are the screens the page draws: each tab by its place id (`queue`, `lanes`, `events`), `fleets` (the `[⚙]`
+   screen's sheet), `lane` (a lane's sheet) and `card` (the first card opened), in kitchen, garden and terminal
+   (`~<theme>`), at 1440 (`@1440`) and in every colour scheme (`queue^<scheme>`, the contact sheet), plus #725's
+   `lifeboat/page`. `assets/ui-audit.js` (only in the `--demo` export, `?audit=<view>&check=1`) fails on a control not
+   28 px tall (a choice: over 4 lines), text not 11/13 px (inputs 16), a tap area under 44 px, a box whose content is
+   wider than it unless it ellipsises or scrolls by design, anything past the screen's right edge, sideways scroll, a
+   row sprite not 24×24 or smoothed (#281), no screen drawn, a viewport meta other than
+   `…,maximum-scale=1,user-scalable=no,viewport-fit=cover`, or `html` `touch-action` other than `manipulation`.
    Screenshots are uploaded as the `ui-390` artifact on every run.
-   #266: a tab moved to the TypeScript board keeps its pixels: shoot its views on staging and on the branch with
-   `UI_AUDIT_VIEWS="events events-rows …" scripts/ui-audit.sh <site> <dir>` (one machine, one Chrome), then
-   `scripts/pixel-diff.py <before> <after>` fails when over 0.1 % of a shot's pixels differ (any channel by more than 8).
+   #266, #927: a look change is measured: shoot the views on staging and on the branch with
+   `UI_AUDIT_VIEWS="queue lanes events" scripts/ui-audit.sh <site> <dir>` (one machine, one Chrome), then
+   `scripts/pixel-diff.py <before> <after>` reports the share of each shot's pixels that differ (any channel by more
+   than 8; over 0.1 % fails).
    A Chrome run that does not return in `UI_AUDIT_TIMEOUT` s (default 60; needs `timeout`) is killed and fails its view
    with its stderr tail (#71); the job itself stops at 20 min.
 

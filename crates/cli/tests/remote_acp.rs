@@ -127,6 +127,7 @@ impl Boat<'_> {
                 Ok(out(0, &(lines.collect::<Vec<_>>().join("\n") + "\n")))
             }
             ["shed", "agents", "--json"] => Ok(out(0, &self.machines.borrow()[m].agents.to_string())),
+            ["shed", "help", "run"] => Ok(out(0, "--meta <JSON>")),
             ["shed", "send", ..] => Ok(out(0, "")),
             ["shed", "run", ..] => {
                 let name = &w[w.iter().position(|a| a == "--name").unwrap() + 1];

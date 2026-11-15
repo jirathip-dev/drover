@@ -387,19 +387,24 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
     let f = git(&wt, "", "0\n", "");
     let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    assert!(req(&s, "/act", &format!("agent={LANE}&op=stop"), "").starts_with("HTTP/1.1 401 "));
+    assert!(req(&s, "/api/v1/act", &json!({"agent": LANE, "op": "stop"}).to_string(), "").starts_with("HTTP/1.1 401 "));
     assert!(req(
         &s,
-        "/act",
-        &format!("agent={LANE}&op=stop"),
+        "/api/v1/act",
+        &json!({"agent": LANE, "op": "stop"}).to_string(),
         "Origin: https://evil.example\r\n"
     )
     .starts_with("HTTP/1.1 403 "));
     assert!(sh.all("keys").is_empty(), "{:?}", sh.methods());
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let res = req(&s, "/act", &format!("agent={LANE}&op=stop"), &cookie);
+    let res = req(
+        &s,
+        "/api/v1/act",
+        &json!({"agent": LANE, "op": "stop"}).to_string(),
+        &cookie,
+    );
     assert!(
-        res.starts_with("HTTP/1.1 200 OK") && res.ends_with("sent Esc to sendmeter-impl-12\n"),
+        res.starts_with("HTTP/1.1 200 OK") && res.contains("sent Esc to sendmeter-impl-12"),
         "{res}"
     );
     assert_eq!(sh.last("keys"), json!({"name": LANE, "keys": ["esc"]}));
@@ -409,7 +414,12 @@ fn act_needs_a_paired_cookie_and_logs_via_web() {
         (e.kind.as_str(), e.str("via"), e.str("device"), e.str("op")),
         ("act", Some("web"), Some(&*label), Some("stop"))
     );
-    let res = req(&s, "/act", &format!("agent={LANE}&op=kill"), &cookie);
+    let res = req(
+        &s,
+        "/api/v1/act",
+        &json!({"agent": LANE, "op": "kill"}).to_string(),
+        &cookie,
+    );
     assert!(
         res.contains("pane closes, worktree kept") && !sh.called("kill", LANE),
         "{res}"
@@ -497,22 +507,6 @@ fn a_gone_lane_reads_its_stored_transcript() {
         (lines.len(), &lines[0], &lines[199], &j["live"], &j["more"]),
         (200, &json!("  out 50"), &json!("  out 249"), &json!(0), &json!(true))
     );
-}
-
-#[test]
-fn inputs_are_16px_and_zoom_is_off() {
-    let css = include_str!("../../../assets/serve.css");
-    let rule = css.lines().find(|l| l.starts_with(".reply textarea{")).unwrap();
-    assert!(
-        rule.ends_with("font-size:var(--fs-input)}") && css.contains("--fs-input:16px"),
-        "{rule}"
-    );
-    let (c, _, _sh) = lane("zoom");
-    let page = String::from_utf8_lossy(&Server::new(&c, &Fake::default(), None).respond("GET / HTTP/1.1\r\n\r\n", T))
-        .into_owned();
-    assert!(page.contains("initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover"));
-    assert!(!css.contains(".lock") && !css.contains("body{position:fixed"));
-    assert!(include_str!("../../../assets/serve.js").contains("visualViewport"));
 }
 
 #[test]
@@ -898,4 +892,71 @@ fn wip_prune_keeps_only_the_newest_of_a_closed_issue() {
             "wip/sendmeter-impl-49-20261102-080200-cd34"
         ]
     );
+}
+
+#[test]
+fn the_lanes_sheets_stop_and_kill_run_the_verbs_and_log_via_the_screen() {
+    let (c, wt, sh) = lane("cooee-stop-kill");
+    sh.lane(LANE, "working", &wt);
+    let r = OnShed(git(&wt, "", "0\n", ""), sh);
+    let (s, sh) = (Server::new(&c, &r, Some(ADDR.into())), &r.1);
+    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
+    let sheet = String::from_utf8_lossy(&s.respond(
+        &format!("GET /screens/lanes/{LANE} HTTP/1.1\r\nHost: {ADDR}\r\n{ck}\r\n"),
+        T,
+    ))
+    .into_owned();
+    let sheet: serde_json::Value = serde_json::from_str(sheet.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let button = |id: &str| {
+        let b = sheet["blocks"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{sheet}"))
+            .iter()
+            .find(|b| b["id"] == id)
+            .cloned();
+        b.unwrap_or_else(|| panic!("no {id} in {sheet}"))
+    };
+    let post = |b: serde_json::Value| {
+        let body =
+            json!({"screen": sheet["id"], "block": "", "action": b["action"], "values": b["values"]}).to_string();
+        let res = s.respond(
+            &format!(
+                "POST /action HTTP/1.1\r\nHost: {ADDR}\r\n{ck}Content-Length: {}\r\n\r\n{body}",
+                body.len()
+            ),
+            T,
+        );
+        let res = String::from_utf8_lossy(&res).into_owned();
+        let (head, body) = res.split_once("\r\n\r\n").unwrap();
+        (
+            head[9..12].to_string(),
+            serde_json::from_str::<serde_json::Value>(body).unwrap(),
+        )
+    };
+    let last_act = || {
+        read(&c.state)
+            .unwrap()
+            .iter()
+            .rfind(|e| e.kind == "act")
+            .cloned()
+            .unwrap()
+    };
+
+    let (status, v) = post(button("act-stop"));
+    assert_eq!(status, "200", "{v}");
+    assert_eq!(sh.last("keys"), json!({"name": LANE, "keys": ["esc"]}));
+    assert_eq!(kinds(&c, "stop"), 1);
+    let e = last_act();
+    assert_eq!(
+        (e.str("op"), e.str("agent"), e.str("device")),
+        (Some("stop"), Some(LANE), Some("cooee"))
+    );
+
+    let (status, v) = post(button("act-kill"));
+    assert_eq!(status, "200", "{v}");
+    assert_eq!(v["close"], true, "{v}");
+    assert!(closed(sh), "{:?}", sh.methods());
+    assert_eq!(kinds(&c, "lane-killed"), 1);
+    let e = last_act();
+    assert_eq!((e.str("op"), e.str("device")), (Some("kill"), Some("cooee")));
 }

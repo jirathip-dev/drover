@@ -1,12 +1,14 @@
 {
   "response": {
     "code": "STALE",
+    "job": null,
     "message": "fleet.toml changed since the page was rendered; reload and retry",
     "ok": false
   },
   "route": "POST /api/v1/host",
   "schema": {
     "code": "string",
+    "job": "null",
     "message": "string",
     "ok": "boolean"
   },

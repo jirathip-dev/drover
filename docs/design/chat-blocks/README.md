@@ -1,7 +1,7 @@
 # Chat blocks — design mockup (#138, phase 1)
 
 `index.html` is the lane sheet's chat drawn as Corral-style role blocks, at the sheet's full detent. It uses
-`assets/serve.css` unchanged (linked relatively) plus one `<style>` block of block rules that use tokens only.
+assets/serve.css (removed in #927) unchanged (linked relatively) plus one `<style>` block of block rules that use tokens only.
 Those rules move to `serve.css` in phase 2. The page is static: blocks open natively (`<details>`), and one inline
 handler toggles `[show all]`. Screenshots: `chat-blocks-390.png` (390 px, DPR 3, full page) and
 `chat-blocks-1440.png`.

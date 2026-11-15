@@ -1,6 +1,6 @@
 use crate::config::Limits;
-pub use crate::herdr::agents;
 use crate::runner::{ok, Runner};
+pub use crate::term::agents;
 use anyhow::Result;
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -15,7 +15,7 @@ pub fn live_in<'a>(agents: &'a [Value], name: &str, dir: &Path) -> Vec<&'a Value
         .collect()
 }
 
-const SPARE: &[&str] = &[crate::herdr::BIN, "drover", "herdsman", "launchd"];
+const SPARE: &[&str] = &["shed", "drover", "herdsman", "launchd"];
 
 /// #186: `(pid, command, cwd)` of every process `lsof` sees, but `SPARE`, pid 1, this process and its parent.
 pub fn cwds(r: &dyn Runner) -> Vec<(String, String, String)> {
@@ -91,8 +91,7 @@ pub fn keychain_jam(r: &dyn Runner) -> (Vec<Stuck>, Option<Stuck>) {
     let parent = |ppid: &str| name(rows.iter().find(|w| w.first() == Some(&ppid)).and_then(|w| w.get(3)));
     let (mut readers, mut agent) = (vec![], None);
     for w in rows.iter().filter(|w| w.len() > 3) {
-        let up = w[2].split(['-', ':']).rev().zip([1, 60, 3600, 86_400]);
-        let up: u64 = up.map(|(n, k)| n.parse::<u64>().unwrap_or(0) * k).sum();
+        let up = etime_secs(w[2]);
         let stuck = (w[0].to_string(), up, parent(w[1]));
         match (name(w.get(3)).as_str(), w.get(4)) {
             ("security", Some(&"find-generic-password")) if up > 60 => readers.push(stuck),
@@ -101,6 +100,12 @@ pub fn keychain_jam(r: &dyn Runner) -> (Vec<Stuck>, Option<Stuck>) {
         }
     }
     (readers, agent)
+}
+
+/// `ps`'s `etime` (`[[dd-]hh:]mm:ss`) in seconds.
+pub fn etime_secs(etime: &str) -> u64 {
+    let up = etime.split(['-', ':']).rev().zip([1, 60, 3600, 86_400]);
+    up.map(|(n, k)| n.parse::<u64>().unwrap_or(0) * k).sum()
 }
 
 /// #710: `keychain_jam`'s readers and agent as one line, with troubleshooting §2's fix for those pids.

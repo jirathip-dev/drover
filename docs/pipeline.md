@@ -151,7 +151,7 @@ check whose rounds it counts). Events from before #173 fold as before: `rev` is 
 ## The board
 
 The Pipeline group of the fleet's `[config]` sheet draws the pipeline as a node graph. `serve` sends the pipeline as
-data (`data-pipe`: stages, outcomes, rounds, `n here` counts, broken rules), and `assets/serve.js` draws it.
+data (`data-pipe`: stages, outcomes, rounds, `n here` counts, broken rules), and assets/serve.js (removed in #927) draws it.
 The graph shows each stage's kind, role and `n here`, the loops back with their round limits, and the rail to park.
 It is read-only: edit `fleet.toml`. Each issue card starts with its chain (`○ ─ ▲ impl ─ ◆ rev ─ ◫ gates ─ ✓ merge`),
 with the current stage lit and a check that PASSed at the head ticked. The mockup is in docs/design/pipeline/ on

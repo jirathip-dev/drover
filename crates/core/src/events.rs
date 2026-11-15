@@ -418,6 +418,7 @@ pub fn checks(e: &Event) -> bool {
 /// Events `drover check` and notifiers write about an issue; they are not activity.
 pub const PASSIVE: &[&str] = &[
     "pending-action",
+    "job",
     "lane-state",
     "lesson-prompted",
     "turn-end",
@@ -732,6 +733,21 @@ pub fn since(path: &Path, kinds: &[&str], ts: u64) -> Result<Vec<Event>> {
         path,
         &format!("archived = 0 AND ts >= ?1 AND type IN ({})", kinds.join(", ")),
         ts,
+    )
+}
+
+/// #1022: at most `limit` live events numbered after `since`, up to `until`, by seq: the board's event feed.
+pub fn between(path: &Path, (since, until): (u64, u64), limit: usize) -> Result<Vec<Event>> {
+    let (until, limit) = (
+        i64::try_from(until).unwrap_or(i64::MAX),
+        i64::try_from(limit).unwrap_or(i64::MAX),
+    );
+    crate::db::events(
+        path,
+        &format!(
+            "seq IN (SELECT seq FROM events WHERE archived = 0 AND seq > ?1 AND seq <= {until} ORDER BY seq LIMIT {limit})"
+        ),
+        since,
     )
 }
 

@@ -1,11 +1,11 @@
 mod common;
 use common::*;
 use drover::events::Event;
-use drover::herdr;
 use drover::hosts::On;
 use drover::runner::Runner;
 use drover::shed::proto::Response;
 use drover::shed::{self, Wire};
+use drover::term;
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -27,52 +27,50 @@ fn every_adapter_call_is_a_shed_request() {
     let r = shed::With(&f, b.shed());
     let lane = "sendmeter-impl-12";
 
-    assert_eq!(herdr::read(&r, lane).unwrap(), "screen of sendmeter-impl-12");
+    assert_eq!(term::read(&r, lane).unwrap(), "screen of sendmeter-impl-12");
     assert_eq!(b.last("read"), json!({"name": lane, "history": false}));
-    herdr::recent(&r, lane, "200").unwrap();
+    term::recent(&r, lane, "200").unwrap();
     assert_eq!(b.last("read"), json!({"name": lane, "lines": 200, "history": true}));
-    herdr::keys(&r, lane, "Escape").unwrap();
+    term::keys(&r, lane, "Escape").unwrap();
     assert_eq!(b.last("keys"), json!({"name": lane, "keys": ["esc"]}));
-    herdr::reply(&r, false, lane, lane, "go on").unwrap();
+    term::reply(&r, false, lane, lane, "go on").unwrap();
     assert_eq!(b.last("send"), json!({"name": lane, "text": "go on"}));
     assert_eq!(b.last("keys"), json!({"name": lane, "keys": ["Enter"]}));
-    herdr::reply(&r, true, lane, lane, "typed").unwrap();
+    term::reply(&r, true, lane, lane, "typed").unwrap();
     assert_eq!(b.last("send"), json!({"name": lane, "text": "typed"}));
-    assert!(herdr::landed(&r, lane, lane, "x"));
+    assert!(term::landed(&r, lane, lane, "x"));
     assert_eq!(
         b.last("wait"),
         json!({"name": lane, "until": ["working", "blocked"], "timeout": 20.0})
     );
-    let pane = herdr::harness_in(&r, lane).unwrap();
+    let pane = term::harness_in(&r, lane).unwrap();
     assert_eq!(
         (pane["agent"].as_str(), pane["pane_id"].as_str()),
         (Some("claude"), Some(lane))
     );
-    herdr::rename(&r, lane, lane).unwrap();
-    let o = herdr::exec(&r, &herdr::wait_output_argv(lane, "❯", "60000")).unwrap();
+    let o = term::exec(&r, &term::wait_output_argv(lane, "❯", "60000")).unwrap();
     assert_eq!(o.code, 0);
     assert_eq!(
         b.last("wait"),
         json!({"name": lane, "until": [], "output": "❯", "timeout": 60.0})
     );
-    herdr::ok(&r, &herdr::run_argv(lane, &["exec", "'dsh-tui'"])).unwrap();
+    term::ok(&r, &term::run_argv(lane, &["exec", "'dsh-tui'"])).unwrap();
     assert_eq!(b.last("send"), json!({"name": lane, "text": "exec 'dsh-tui'\r"}));
-    let a = herdr::agents(&r).unwrap();
+    let a = term::agents(&r).unwrap();
     assert_eq!(a.len(), 1, "{a:?}");
     assert_eq!(
         (a[0]["name"].as_str(), a[0]["agent_status"].as_str()),
         (Some(lane), Some("working"))
     );
-    assert_eq!(herdr::list(&r, "agent").unwrap()["result"]["agents"], json!(a));
-    herdr::close(&r, lane).unwrap();
+    assert_eq!(term::list(&r).unwrap()["result"]["agents"], json!(a));
+    term::close(&r, lane).unwrap();
     assert_eq!(b.methods().iter().rev().take(2).collect::<Vec<_>>(), ["rm", "kill"]);
-    assert!(herdr::agents(&r).unwrap().is_empty());
-    herdr::close(&r, lane).unwrap();
-    let o = herdr::exec(&r, &herdr::read_argv(lane)).unwrap();
-    assert!(herdr::failed_with(&o, "pane_not_found"), "{o:?}");
-    assert!(herdr::read(&r, "w1:p1").is_err());
-    assert!(f.called("herdr pane read w1:p1"));
-    assert!(f.called("herdr agent list"));
+    assert!(term::agents(&r).unwrap().is_empty());
+    term::close(&r, lane).unwrap();
+    let o = term::exec(&r, &term::read_argv(lane)).unwrap();
+    assert!(term::failed_with(&o, "pane_not_found"), "{o:?}");
+    assert!(term::read(&r, "w1:p1").is_err());
+    assert!(f.calls.borrow().is_empty(), "{:?}", f.calls.borrow());
 }
 
 #[test]
@@ -82,8 +80,8 @@ fn a_wait_that_times_out_answers_as_herdr() {
     b.wait_ends("slow", "timeout");
     let f = Fake::default();
     let r = shed::With(&f, b.shed());
-    let o = herdr::exec(&r, &herdr::wait_working_argv("slow", "20000")).unwrap();
-    assert!(o.code != 0 && herdr::failed_with(&o, "timeout"), "{o:?}");
+    let o = term::exec(&r, &term::wait_working_argv("slow", "20000")).unwrap();
+    assert!(o.code != 0 && term::failed_with(&o, "timeout"), "{o:?}");
 }
 
 #[test]
@@ -120,7 +118,7 @@ fn another_host_is_reached_through_shed_connect_over_ssh() {
     let f = Fake::default().reply("ssh", &format!("{hello}\n{read}\n"));
     let base = shed::With(&f, b.shed());
     let on = On::new(&base, Some("box"));
-    assert_eq!(herdr::read(&on, "sendmeter-impl-12").unwrap(), "remote screen");
+    assert_eq!(term::read(&on, "sendmeter-impl-12").unwrap(), "remote screen");
     let calls = f.calls.borrow();
     assert!(
         calls
@@ -228,7 +226,7 @@ fn a_lane_spawns_on_shed() {
         .unwrap();
     assert_eq!(
         (ev.str("runtime"), ev.str("pane"), ev.str("workspace")),
-        (Some("shed"), Some("sendmeter-impl-12"), Some(""))
+        (Some("shed"), Some("sendmeter-impl-12"), None)
     );
     assert_eq!(ev.val("confirmed"), true);
     assert!(std::fs::read_to_string(wt.join(".brief.md"))
@@ -259,11 +257,20 @@ const TOKEN_C: &str = concat!("sk", "-ant-oat01-CCCC-secret");
 fn acp_fake(adapter: &[&str]) -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
     spawn_fake()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
         .reply("shed cancel", "")
 }
+
+static META: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let global = drover::config::home().join(".claude/CLAUDE.md");
+    format!(
+        r#"{{"claudeCode":{{"options":{{"settingSources":["project","local"],"settings":{{"claudeMdExcludes":["{}"]}},"strictMcpConfig":true}}}}}}"#,
+        global.display()
+    )
+});
 
 fn acp_ctx(name: &str, cfg: &str) -> drover::Ctx {
     let mut c = ctx(&tmpdir(name), cfg);
@@ -286,14 +293,16 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     let calls = f.calls.borrow();
     let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
     let head = format!(
-        "shed run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd {} --label fleet=sendmeter \
-         --label issue=12 --label role=impl --label harness=claude --label source=drover --label group=sendmeter \
+        "shed run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd {0} --mcp {0}/.mcp.lane.json \
+         --meta {1} --label fleet=sendmeter --label issue=12 --label role=impl --label harness=claude --label source=drover --label group=sendmeter \
          --label item=#12 --label round=0 --label url=https://github.com/jirathip-dev/sendmeter/issues/12 \
          --label drover.fleet=sendmeter --label drover.issue=12 --label drover.role=impl --label drover.round=0 -- sh -c ",
-        wt.display()
+        wt.display(), *META
     );
     assert!(start.starts_with(&head), "{start}");
     assert!(start.ends_with(" sh echo claude-agent-acp"), "{start}");
+    let mcp: Value = serde_json::from_str(&std::fs::read_to_string(wt.join(".mcp.lane.json")).unwrap()).unwrap();
+    assert_eq!(mcp, json!([]), "a role with no mcp sends an empty list");
     assert!(
         !start.contains(TOKEN_C) && !out.contains(TOKEN_C),
         "no token in argv: {start}"
@@ -318,7 +327,7 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     let (none, s) = (Fake::default(), b.shed());
     let none = shed::With(&none, s);
     assert!(
-        herdr::agents(&On::new(&none, Some("bazzite"))).is_err(),
+        term::agents(&On::new(&none, Some("bazzite"))).is_err(),
         "neither answers: unreachable"
     );
     let cfg = drover::config::Config::load(&c.config).unwrap();
@@ -334,6 +343,77 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
         "{:?}",
         b.methods()
     );
+}
+
+#[test]
+fn an_acp_lane_gets_only_its_roles_mcp_servers_in_acps_shape() {
+    let b = FakeShed::new();
+    let d = tmpdir("acp-mcp");
+    let repo = d.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let all = json!({"mcpServers": {
+        "docs": {"command": "npx", "args": ["docs"], "env": {"K": "v"}},
+        "web": {"type": "http", "url": "http://x", "headers": {"H": "h"}},
+        "other": {"command": "other"}}});
+    std::fs::write(repo.join(".mcp.json"), all.to_string()).unwrap();
+    let cfg = acp_config(&b.sock, "claude")
+        .replace(
+            "harness = \"claude\"",
+            "harness = \"claude\"\nmcp = [\"docs\", \"web\"]",
+        )
+        .replace("/tmp/does-not-matter/sendmeter", repo.to_str().unwrap());
+    let c = acp_ctx("acp-mcp", &cfg);
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let (code, out) = run(&c, &b.cli(&f), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let file = wt.join(".mcp.lane.json");
+    let start = f
+        .calls
+        .borrow()
+        .iter()
+        .find(|c| c.starts_with("shed run"))
+        .cloned()
+        .unwrap();
+    assert!(
+        start.contains(&format!(" --mcp {} --meta {} ", file.display(), *META)),
+        "{start}"
+    );
+    let mcp: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(
+        mcp,
+        json!([
+            {"name": "docs", "command": "npx", "args": ["docs"], "env": [{"name": "K", "value": "v"}]},
+            {"type": "http", "name": "web", "url": "http://x", "headers": [{"name": "H", "value": "h"}]}
+        ])
+    );
+}
+
+#[test]
+fn a_shed_without_run_meta_is_a_doctor_cross_and_refuses_acp_lanes() {
+    let b = FakeShed::new();
+    let c = acp_ctx("acp-old-shed", &acp_config(&b.sock, "claude"));
+    let help = "      --mcp <FILE>\n";
+    let old = acp_fake(&["echo", "claude-agent-acp"])
+        .once("shed help run", 0, help)
+        .once("shed help run", 0, help);
+    let (code, out) = run(&c, &b.cli(&old), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("REFUSED SHED_OLD: "), "{out}");
+    assert!(
+        !old.called("shed run") && !old.called("git"),
+        "{:?}",
+        old.calls.borrow()
+    );
+    let (_, out) = run(&c, &old, &["doctor"]);
+    assert!(
+        out.contains("✗ shed run --meta — this host's shed predates shed#94"),
+        "{out}"
+    );
+    assert!(out.contains(&format!("--rev {} ", shed::REV)), "{out}");
+    let new = acp_fake(&["echo", "claude-agent-acp"]);
+    let (_, out) = run(&c, &new, &["doctor"]);
+    assert!(out.contains("✓ shed run --meta — "), "{out}");
 }
 
 fn bash_call(cmd: &str, cwd: &std::path::Path) -> String {
@@ -529,7 +609,7 @@ fn an_acp_lanes_state_follows_its_turn_events() {
     let c = ctx(&tmpdir("acp-state"), &acp_config(&b.sock, "claude"));
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
-    assert!(cfg.runtime.shed().is_none(), "no global runtime: the fleet's own");
+    assert!(cfg.runtime.is_none(), "no global runtime: the fleet's own");
     let sh = cfg.shed_for("sendmeter").unwrap();
     assert_eq!((sh.acp.as_deref(), sh.policy.as_str()), (Some("claude-acp"), "allow"));
     assert_eq!(shed::intake(&c, &cfg, &cfg.shed().unwrap().wire).unwrap(), 4);
@@ -663,12 +743,20 @@ fn drive_logs_sheds_state_changes_since_its_last_pass() {
 }
 
 #[test]
-fn the_default_runtime_is_herdr() {
+fn no_runtime_is_no_shed_and_herdr_fails_to_load() {
     let cfg = drover::config::Config::parse(CONFIG).unwrap();
-    assert!(cfg.runtime.shed().is_none());
+    assert!(cfg.shed().is_none());
     assert!(Fake::default().shed().is_none());
     let bad = format!("{CONFIG}\n[runtime]\nkind = \"tmux\"\n");
     assert!(drover::config::Config::parse(&bad).is_err());
+    for herdr in [
+        format!("{CONFIG}\n[runtime]\nkind = \"herdr\"\n"),
+        format!("{CONFIG}\n[fleet.sendmeter.runtime]\nkind = \"herdr\"\n"),
+        format!("{CONFIG}\n[hosts.air]\nmachine = \"air\"\nruntime = \"herdr\"\n"),
+    ] {
+        let e = format!("{:#}", drover::config::Config::parse(&herdr).unwrap_err());
+        assert!(e.contains(drover::config::RETIRED_RUNTIME), "{e}");
+    }
 }
 
 #[test]
@@ -742,7 +830,7 @@ fn the_service_follows_sheds_events_and_says_when_the_stream_drops() {
     let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let r: &'static Fake = Box::leak(Box::new(Fake::default().reply("herdr", "{}")));
     let sc = c.clone();
-    std::thread::spawn(move || drover_service::run(sc, r, || 1_000_000, api, None));
+    std::thread::spawn(move || drover_service::run(sc, r, || 1_000_000, api));
     let logged = |kind: &str| -> Vec<drover::events::Event> {
         let all = drover::events::read(&c.state).unwrap_or_default();
         all.iter().filter(|e| e.kind == kind).cloned().collect()
@@ -824,81 +912,6 @@ fn the_lanes_tab_lists_a_running_shed_acp_lane_live() {
         (row.0.as_str(), row.1["state"].as_str(), row.1["gone"].as_bool()),
         (Some("working"), Some("working"), Some(false)),
         "{v}"
-    );
-}
-
-#[test]
-fn a_remote_host_without_shed_is_up_when_its_herdr_answers() {
-    let b = FakeShed::new();
-    let d = tmpdir("shed-remote-up");
-    let c = ctx(
-        &d,
-        &shed_config(&b.sock, "\n[hosts.mini]\n\n[hosts.bazzite]\nmachine = \"bazzite\"\n"),
-    );
-    let st = c.state.parent().unwrap();
-    std::fs::create_dir_all(st).unwrap();
-    let cache = json!({
-        "mini": {"tags": ["os:macos"], "home": "/Users/me", "probed": 1, "seen": 1, "up": true},
-        "bazzite": {"tags": ["os:linux"], "home": "/home/me", "probed": 1, "seen": 1, "up": true},
-    });
-    std::fs::write(st.join("hosts.json"), cache.to_string()).unwrap();
-    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let wt = "/home/me/.herdr/worktrees/sendmeter/issue-12";
-    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C \
-               -oControlPersist=10m bazzite -- ";
-    let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w9:p1",
-        "workspace": "w9", "worktree": wt, "branch": "issue-12", "host": "bazzite", "machine": "bazzite"});
-    drover::events::append(&c.state, &Event::new(c.now - 900, "sendmeter", Some(12), "spawn", sp)).unwrap();
-    let f = Fake::default()
-        .reply("herdr agent list", NO_AGENTS)
-        .reply(
-            "herdr --machine bazzite agent list",
-            &agents(&[("sendmeter-impl-12", "working", wt, "w9:p1")]),
-        )
-        .reply("gh issue view", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
-        .reply("git ", "")
-        .reply(&format!("{ssh}'sh' '-c' 'uname"), "Linux\nx86_64\n/home/me\n");
-    let base = shed::With(&f, b.shed());
-    let on = On::new(&base, Some("bazzite"));
-    assert!(on.shed().is_some(), "shed runtime on");
-    let listed = herdr::agents(&on).expect("herdr answers there: the host is up");
-    assert_eq!(listed[0]["name"], "sendmeter-impl-12", "{listed:?}");
-    let cfg = drover::config::Config::load(&c.config).unwrap();
-    let remote = drover::hosts::remote_agents(&cfg, &base);
-    assert_eq!(remote.len(), 1, "its herdr agents are listed: {remote:?}");
-
-    let (_, out) = run(&c, &f, &["spawn", "sendmeter", "13", "impl", "--host", "bazzite"]);
-    assert!(!out.contains("HOST_OFFLINE"), "{out}");
-    assert!(
-        f.called(&format!("{ssh}'sh' '-c' 'git clone")),
-        "{out} {:?}",
-        f.calls.borrow()
-    );
-    let (code, out) = run(&c, &f, &["hosts", "refresh"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(!out.contains("offline") && !out.contains("unreachable"), "{out}");
-    let seen: Value = serde_json::from_str(&std::fs::read_to_string(st.join("hosts.json")).unwrap()).unwrap();
-    let health = seen["bazzite"]["health"].as_array().unwrap();
-    let shed_rows = health
-        .iter()
-        .filter(|w| w.as_str().unwrap().starts_with("! shed: shed connect failed"));
-    assert_eq!(
-        (seen["bazzite"]["up"].as_bool(), shed_rows.count()),
-        (Some(true), 1),
-        "{health:?}"
-    );
-    for _ in 0..2 {
-        assert_eq!(run(&c, &f, &["check"]).0, 0);
-    }
-    let evs = drover::events::read(&c.state).unwrap().to_vec();
-    assert!(!evs.iter().any(|e| e.kind == "host-offline"), "{evs:?}");
-    let (_, status) = run(&c, &f, &["status"]);
-    assert!(!status.contains("host offline"), "{status}");
-    let (_, doc) = run(&c, &f, &["doctor"]);
-    assert!(doc.contains("host bazzite shed: shed connect failed"), "{doc}");
-    assert!(
-        doc.contains("\n! host bazzite shed: ") && !doc.contains("unreachable"),
-        "{doc}"
     );
 }
 
@@ -1233,10 +1246,11 @@ fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_
     let calls = f.calls.borrow().clone();
     let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
     let head = format!(
-        "shed run --acp claude-acp --policy allow --name orchestrator-t1 --cwd {} --label fleet=sendmeter --label issue=- \
+        "shed run --acp claude-acp --policy allow --name orchestrator-t1 --cwd {0} --mcp {0}/.mcp.lane.json \
+         --meta {1} --label fleet=sendmeter --label issue=- \
          --label role=orchestrator --label harness=claude --label source=drover --label group=sendmeter --label thread=t1 \
          -- sh -c ",
-        dir.display()
+        dir.display(), *META
     );
     assert!(start.starts_with(&head), "{start}");
     let herdr = |c: &&String| c.starts_with("herdr") && *c != "herdr agent list";
@@ -1432,7 +1446,7 @@ fn wheres(c: &drover::Ctx, r: impl Fn() -> Fake) -> BTreeMap<String, (String, St
             "{state}"
         );
     }
-    let herd = board_get(c, r(), "/herd.json");
+    let herd = board_get(c, r(), "/api/v1/herd");
     for l in herd["fleets"]
         .as_array()
         .unwrap()
@@ -1465,17 +1479,17 @@ fn every_lane_says_where_it_runs() {
         json!({"role": "rev", "agent": "sendmeter-rev-9", "harness": "claude", "pane": "w9:p1",
         "worktree": "/w/issue-9", "host": "air", "machine": "air"}),
     );
-    let air = agents(&[("sendmeter-rev-9", "working", "/w/issue-9", "w9:p1")]);
-    let both = || {
-        Fake::default()
-            .reply("herdr agent list", NO_AGENTS)
-            .reply("herdr --machine air agent list", &air)
+    let ssh = "ssh -oBatchMode=yes -oConnectTimeout=10 -oControlMaster=auto -oControlPath=/tmp/drover-ssh-%C \
+               -oControlPersist=10m air -- 'shed' 'connect'";
+    let ls = |terms: Value| {
+        let hello = json!({"jsonrpc": "2.0", "id": 0, "result": {"product": "shed", "version": shed::proto::VERSION}});
+        format!("{hello}\n{}\n", json!({"jsonrpc": "2.0", "id": 1, "result": terms}))
     };
-    let shed_only = || {
-        Fake::default()
-            .reply("herdr agent list", NO_AGENTS)
-            .reply("herdr --machine air agent list", NO_AGENTS)
-    };
+    let rev9 = json!([{"name": "sendmeter-rev-9", "labels": {"fleet": "sendmeter", "harness": "claude"},
+        "cwd": "/w/issue-9", "cmd": ["sh"], "keep": true, "state": "running", "exit": null, "pid": 8,
+        "reported": {"state": "working"}}]);
+    let both = || Fake::default().reply(ssh, &ls(rev9.clone()));
+    let shed_only = || Fake::default().reply(ssh, &ls(json!([])));
     let t = |rt: &str, h: &str, w: &str| (rt.to_string(), h.to_string(), w.to_string());
     let (rev, imp) = ("sendmeter-rev-9", "sendmeter-impl-12");
     let mut shapes = vec![];
@@ -1483,7 +1497,7 @@ fn every_lane_says_where_it_runs() {
     let got = wheres(&c, both);
     assert_eq!(
         (&got[rev], &got[imp]),
-        (&t("herdr", "air", "air · herdr"), &t("shed-acp", "mini", "mini · shed"))
+        (&t("shed", "air", "air"), &t("shed-acp", "mini", "mini"))
     );
     shapes.push(json!(got));
     let q = board_get(&c, both(), "/api/v1/queue");
@@ -1502,12 +1516,12 @@ fn every_lane_says_where_it_runs() {
             )
         })
         .collect();
-    assert!(rows.contains(&(9, t("herdr", "air", "air · herdr"))), "{rows:?}");
-    assert!(rows.contains(&(12, t("shed-acp", "mini", "mini · shed"))), "{rows:?}");
+    assert!(rows.contains(&(9, t("shed", "air", "air"))), "{rows:?}");
+    assert!(rows.contains(&(12, t("shed-acp", "mini", "mini"))), "{rows:?}");
 
     std::fs::write(&c.config, acp_config(&b.sock, "claude") + &hosts(false)).unwrap();
     let got = wheres(&c, both);
-    assert_eq!((&got[rev].2, &got[imp].2), (&"herdr".to_string(), &"shed".to_string()));
+    assert_eq!((&got[rev].2, &got[imp].2), (&String::new(), &String::new()));
     shapes.push(json!(got));
 
     std::fs::write(&c.config, acp_config(&b.sock, "claude") + &hosts(true)).unwrap();
@@ -1523,10 +1537,7 @@ fn every_lane_says_where_it_runs() {
     std::fs::write(&c.config, acp_config(&b.sock, "claude") + &hosts(true)).unwrap();
     for cmd in ["status", "board", "waiting"] {
         let (code, out) = run(&c, &both(), &[cmd, "sendmeter"]);
-        assert!(
-            code == 0 && out.contains("mini · shed") && out.contains("air · herdr"),
-            "{cmd}: {out}"
-        );
+        assert!(code == 0 && out.contains("mini") && out.contains("air"), "{cmd}: {out}");
     }
 
     let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/api_v1/where.json");
@@ -1554,17 +1565,17 @@ fn a_lane_keeps_its_spawn_runtime_after_the_config_changes() {
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "runtime": "shed-acp",
         "pane": "sendmeter-impl-12", "worktree": "/w/issue-12"});
     drover::events::append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", d)).unwrap();
-    let r = || Fake::default().reply("herdr agent list", NO_AGENTS);
+    let r = Fake::default;
     assert_eq!(wheres(&c, r)["sendmeter-impl-12"].0, "shed-acp");
     std::fs::write(
         &c.config,
-        CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\""),
+        b.config(&CONFIG.replace("harness  =  \"hermes\"", "harness = \"claude\"")),
     )
     .unwrap();
     let cfg = drover::config::Config::load(&c.config).unwrap();
     assert!(
-        cfg.shed_for("sendmeter").is_none(),
-        "the fleet's new lanes start in herdr"
+        cfg.shed_for("sendmeter").unwrap().acp.is_none(),
+        "the fleet's new lanes start in a shed terminal"
     );
     let got = wheres(&c, r);
     assert_eq!(got["sendmeter-impl-12"].0, "shed-acp", "{got:?}");
@@ -1572,7 +1583,7 @@ fn a_lane_keeps_its_spawn_runtime_after_the_config_changes() {
 
 fn herdr_era_lane(
     name: &str,
-    sock: &std::path::Path,
+    b: &FakeShed,
     fix: bool,
     live: &[&str],
 ) -> (drover::Ctx, Fake, PathBuf, PathBuf, PathBuf) {
@@ -1596,7 +1607,7 @@ fn herdr_era_lane(
     );
     git(&old, &["commit", "-q", "--allow-empty", "-m", "impl"]);
     git(&old, &["push", "-q", "origin", "issue-12"]);
-    let cfg = shed_config(sock, "").replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
+    let cfg = shed_config(&b.sock, "").replace("/tmp/does-not-matter/sendmeter", local.to_str().unwrap());
     let c = ctx(&d, &cfg);
     assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
     let sp = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "pane": "w1:p1",
@@ -1615,12 +1626,11 @@ fn herdr_era_lane(
         let e = Event::new(c.now - 900 + i as u64 * 60, "sendmeter", Some(12), kind, data);
         drover::events::append(&c.state, &e).unwrap();
     }
-    let rows: Vec<_> = (live.iter())
-        .map(|n| (*n, "working", old.to_str().unwrap(), "w1:p2"))
-        .collect();
+    for n in live {
+        b.lane(n, "working", old.to_str().unwrap());
+    }
     let f = Fake::default()
         .reply("gh issue view 12", r#"{"title":"Fix the meter","body":"AC: it works"}"#)
-        .reply("herdr agent list", &agents(&rows))
         .reply("which shed", "/opt/shed/bin/shed\n");
     (c, f, local, old, origin)
 }
@@ -1632,7 +1642,7 @@ fn worktrees_of(local: &std::path::Path) -> String {
 #[test]
 fn a_fix_round_moves_a_clean_herdr_era_worktree_to_the_new_root() {
     let b = FakeShed::new();
-    let (c, f, local, old, _) = herdr_era_lane("moved-clean", &b.sock, true, &[]);
+    let (c, f, local, old, _) = herdr_era_lane("moved-clean", &b, true, &[]);
     let cli = Push(b.cli(&f), local.parent().unwrap().into());
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert_eq!(code, 0, "{out} {:?}", f.calls.borrow());
@@ -1653,7 +1663,7 @@ fn a_fix_round_moves_a_clean_herdr_era_worktree_to_the_new_root() {
 #[test]
 fn a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves() {
     let b = FakeShed::new();
-    let (c, f, local, old, origin) = herdr_era_lane("moved-unpushed", &b.sock, false, &[]);
+    let (c, f, local, old, origin) = herdr_era_lane("moved-unpushed", &b, false, &[]);
     git(&old, &["commit", "-q", "--allow-empty", "-m", "unpushed"]);
     let commit = git(&old, &["rev-parse", "HEAD"]);
     let cli = Push(b.cli(&f), local.parent().unwrap().into());
@@ -1672,7 +1682,7 @@ fn a_herdr_era_worktrees_unpushed_commit_is_saved_to_wip_before_it_moves() {
 #[test]
 fn a_live_agent_in_the_herdr_era_worktree_refuses_lane_live() {
     let b = FakeShed::new();
-    let (c, f, local, old, _) = herdr_era_lane("moved-live", &b.sock, false, &["shell"]);
+    let (c, f, local, old, _) = herdr_era_lane("moved-live", &b, false, &["shell"]);
     let cli = Push(b.cli(&f), local.parent().unwrap().into());
     let (code, out) = run(&c, &cli, &["spawn", "sendmeter", "12", "impl"]);
     assert_eq!(code, 3, "{out}");
@@ -1735,6 +1745,7 @@ fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
     let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
         "mergeable": "MERGEABLE", "statusCheckRollup": []});
     let f = spawn_fake()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
@@ -1760,6 +1771,11 @@ fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
         "{runs:?}"
     );
     assert!(runs[1].contains("--label harness=codex "), "{runs:?}");
+    assert!(runs[0].contains(&format!(" --meta {} ", *META)), "{runs:?}");
+    assert!(
+        !runs[1].contains(" --mcp ") && !runs[1].contains(" --meta "),
+        "{runs:?}"
+    );
     let dumps = cli.out.borrow();
     let env = |i: usize| -> BTreeMap<String, String> {
         let kv = dumps[i].lines().filter_map(|l| l.split_once('='));
@@ -2424,7 +2440,14 @@ fn thread_say_restarts_a_hung_acp_orchestrator_and_delivers_to_the_fresh_one() {
     assert_eq!((code, out.as_str()), (0, "t1: -> orchestrator-t1\n"));
     assert_eq!(
         shed_calls(&f),
-        ["shed cancel", "shed kill", "shed agents", "shed run", "shed send"]
+        [
+            "shed cancel",
+            "shed kill",
+            "shed help",
+            "shed agents",
+            "shed run",
+            "shed send"
+        ]
     );
     let sends = f
         .calls
