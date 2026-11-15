@@ -1,0 +1,5 @@
+Decided: staging renamed shed's agent list to session::live_on; the branch's shared shed_row now calls it, so herdr and shed-acp hosts give the same ! shed row
+Because: crates/core/src/hosts.rs:917
+Rejected: none
+Check: self_update pause test fails only when DROVER_LANE is set in the lane's env; it passes with it unset
+Owner: Up to date with staging again; doctor still checks shed-only hosts through shed and points at an old recipe file with no ssh identity.
