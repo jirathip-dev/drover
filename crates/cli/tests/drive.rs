@@ -845,10 +845,15 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
     live.write_all(format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n").as_bytes())
         .unwrap();
     let (res, took) = post();
-    assert!(res.contains("drive%20started%20for%20sendmeter"), "{res}");
+    assert!(res.contains("drive%20accepted%20%C2%B7%20job%20"), "{res}");
     assert!(took < Duration::from_millis(200), "the POST took {took:?}");
-    let (res, _) = post();
-    assert!(res.contains("REFUSED%20DRIVE%5FRUNNING"), "{res}");
+    let job = |res: &str| {
+        res.split("job%20")
+            .nth(1)
+            .map(|j| j.split_whitespace().next().unwrap_or_default().to_string())
+    };
+    let (again, _) = post();
+    assert_eq!(job(&again), job(&res), "a second tap is the first's job: {again}");
     let t = Instant::now();
     assert!(get("/", "").starts_with("HTTP/1.1 200"));
     assert!(t.elapsed() < Duration::from_secs(1), "GET / waited {:?}", t.elapsed());
@@ -867,8 +872,10 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
         seen.contains("event: toast\ndata: \"sendmeter: started #12\""),
         "{seen}"
     );
-    assert!(post().0.contains("drive%20started"), "the flag is cleared");
-    toast();
+    assert!(
+        post().0.contains("sendmeter%3A%20started%20%2312"),
+        "a tap after it ended shows its result"
+    );
 }
 
 fn stale_pr(head: &str, mergeable: &str, status: &str) -> String {

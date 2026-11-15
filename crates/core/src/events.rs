@@ -418,6 +418,7 @@ pub fn checks(e: &Event) -> bool {
 /// Events `drover check` and notifiers write about an issue; they are not activity.
 pub const PASSIVE: &[&str] = &[
     "pending-action",
+    "job",
     "lane-state",
     "lesson-prompted",
     "turn-end",
