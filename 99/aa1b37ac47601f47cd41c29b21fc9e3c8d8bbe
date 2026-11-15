@@ -1,0 +1,7 @@
+Decided: drive's look at shed sessions (lane-state stamps) runs inside the step's snapshot take, before its wait key, not in each fleet's pass
+Because: crates/core/src/drive.rs:774
+Rejected: observe before the grew baseline in drive — the saved wait key then lags the stamps and the board recomputes waits (perf waits_and_the_lanes_tab test)
+Decided: the ADR docs' example lane is myapp-impl-12, an install-neutral name
+Because: "Lane status, stall, dead, orphan and transcript read only shed (plus drover's turn-end); no herdr-shaped mapping or pane scrape remains."
+Check: cargo test -p drover --test perf passes both the one-remote-call-per-step and the snapshot-hit tests
+Owner: a drive step again makes one remote call per host; staging's #966 is merged in
