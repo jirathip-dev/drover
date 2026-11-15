@@ -1,0 +1,6 @@
+Decided: merged origin/staging (f627d72); conflicted tests took staging's side, then pedantic clippy fixed on them again: by-ref helper args, try_from casts, Mutex::default(), vec! read buffers, hoisted nested items
+Decided: .drover/rules.md keeps this branch's lines plus staging's two new ones (HOST_STRESS, request-path guard); staging's dropped board-freeze line stays dropped
+Decided: core usage.rs takes staging's (#923 removed the meter), so its two allows go with it; api.rs takes neither allow nor doc line
+Check: sim/model.rs git arms merged into the later ok("") arm only where no arm in between matches the moved patterns
+Because: "Behaviour unchanged; tests pass."
+Owner: the rules branch is caught up with staging and still passes pedantic clippy with 9 allows
