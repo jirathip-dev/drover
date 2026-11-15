@@ -382,13 +382,13 @@ fn page_reads_only_cached_pr_data_and_serves_pwa_assets() {
     let page = get(&s, "/");
     let q = screen(&s, "/screens/queue");
     let row = find(&q, "q-sendmeter-12").unwrap_or_else(|| panic!("{q}"));
+    assert_eq!(row["subtitle"], json!("impl · PR #34 · CI ✓"), "{row}");
+    let sheet = screen(&s, row["tap"]["sheet"].as_str().unwrap_or_else(|| panic!("{row}")));
+    let pr = find(&sheet, "pr").unwrap_or_else(|| panic!("{sheet}"));
     assert_eq!(
-        (&row["subtitle"], &row["tap"]["url"]),
-        (
-            &json!("impl · PR #34 · CI ✓"),
-            &json!("https://github.com/jirathip-dev/sendmeter/pull/34")
-        ),
-        "{row}"
+        pr["tap"]["url"],
+        json!("https://github.com/jirathip-dev/sendmeter/pull/34"),
+        "{pr}"
     );
     assert!(!r.called("gh"), "no gh call per page load: {:?}", r.calls.borrow());
     for (path, ctype) in [
