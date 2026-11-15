@@ -1,0 +1,7 @@
+Decided: serve_web follows a Queue row's issue sheet to its PR link instead of a direct PR tap
+Because: "40/41: no issue or checks links"
+Decided: the page test resumes a paused fleet from its folded card's Resume, not the hidden Pause button
+Because: "pause a fleet: its card folds to one line"
+Rejected: keeping a data-id on the fold's main button — the renderer is shared and the fold is the intended view
+Check: CI ui job runs tests/page.rs (no Chrome on this host)
+Owner: Two older tests now follow the new Queue taps and the folded paused card.
