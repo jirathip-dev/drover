@@ -825,6 +825,9 @@ pub fn drive(
         }
         crate::check::stale(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: stale panes: {e:#}"));
         crate::check::dedup(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: lane-dup: {e:#}"));
+        if only.is_none() {
+            crate::check::hogs(ctx, cfg, r, out).unwrap_or_else(|e| eprintln!("drover: lane-hog: {e:#}"));
+        }
     }
     lap("backlog");
     let secs = t0.elapsed().as_secs_f64();

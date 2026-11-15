@@ -1,2 +1,3 @@
 - don't write a comment beyond `// SAFETY:` over unsafe, `// TODO(#N)` and one `///` line on a public item, in any Rust or TypeScript file, tests included (enforced by: CI arch-check, `[comments] policy = "strict"`)
 - don't name a provider outside crates/core/src/providers/ (enforced by: CI arch-check)
+- don't stress the shared host from a lane: no `yes`, `stress` or busy loops, no N parallel copies; cap the run or reproduce under load in CI (enforced by: hook HOST_STRESS)

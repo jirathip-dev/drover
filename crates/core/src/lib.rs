@@ -731,6 +731,9 @@ pub(crate) fn answer_with(
             Event::new(ctx.now, fleet, ask.issue, "parked", json!({"by": by})),
         )?;
     }
+    if let Some(a) = ask.str("lane_hog").filter(|_| text == "kill its processes") {
+        crate::check::unhog(ctx, r, out, a)?;
+    }
     if let (Some(b), Some(t)) = (basis, by.strip_prefix("orchestrator-")) {
         let at = ask.issue.map_or(String::new(), |n| format!(" for #{n}"));
         let text = format!("answered {id}{at}: {text}, because {b}");

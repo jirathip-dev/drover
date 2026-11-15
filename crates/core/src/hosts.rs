@@ -724,8 +724,44 @@ pub fn gate(ctx: &Ctx, cfg: &Config, on: &On) -> (Host, Option<(&'static str, St
         let why = format!("only {gb:.1} GB of memory free (floor {mem} GB); a lane needs about 0.5–1.5 GB");
         return (hs, Some(("MEM_LOW", format!("{why}; retry when a lane finishes"))));
     }
-    let busy = host::admit(&hs, &cfg.limits).err().map(|w| ("HOST_BUSY", w));
+    let load = hs.load_per_cpu.is_some_and(|x| x > cfg.limits.load_per_cpu);
+    let hog = || {
+        let dirs = lane_dirs(&crate::events::read(&ctx.state).unwrap_or_default(), on.machine);
+        let (lane, share, top) = host::lane_cpu(on, &dirs).into_iter().next()?;
+        Some(format!("; {lane} holds {share:.0}% ({top})"))
+    };
+    let busy = host::admit(&hs, &cfg.limits).err();
+    let busy = busy.map(|w| ("HOST_BUSY", w + &load.then(hog).flatten().unwrap_or_default()));
     (hs, busy)
+}
+
+/// #966: each open issue's lanes on `machine`: worktree, build and scratch folder → agent.
+pub fn lane_dirs(events: &[Event], machine: Option<&str>) -> BTreeMap<PathBuf, String> {
+    let (st, mut dirs) = (fold(events), BTreeMap::new());
+    let open = |e: &&Event| {
+        e.issue
+            .is_none_or(|n| st.get(&(e.fleet.clone(), n)).is_none_or(|s| !s.done()))
+    };
+    let spawns = events
+        .iter()
+        .filter(|e| e.kind == "spawn" && e.str("machine") == machine);
+    for sp in spawns.filter(open) {
+        let (Some(agent), Some(wt)) = (sp.str("agent"), sp.str("worktree").map(PathBuf::from)) else {
+            continue;
+        };
+        let b = sp
+            .str("root")
+            .map(PathBuf::from)
+            .or_else(|| wt.ancestors().nth(2).map(Path::to_path_buf));
+        let b = b.map(|r| r.join(crate::roots::BUILD));
+        let build = b
+            .iter()
+            .flat_map(|b| [b.join(agent), b.join(crate::spawn::SCRATCH).join(agent)]);
+        for d in build.chain([wt]) {
+            dirs.insert(d, agent.to_string());
+        }
+    }
+    dirs
 }
 
 /// #416: the host under `min_free_gb`: its free GB and what `clean --yes` would free there, else `reclaim`.
