@@ -1530,7 +1530,6 @@ fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> Option<bool
 
 pub(crate) const OLD: &str = "is in the way: replacing it";
 
-/// #914: a refused respawn that waits on the owner, not on time or room.
 pub(crate) fn owner_refusal(code: &str) -> bool {
     let owner = [
         "RESPAWN_LOOP",
