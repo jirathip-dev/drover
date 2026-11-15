@@ -91,12 +91,16 @@ fn inside(path: &Path, dir: &Path) -> Option<PathBuf> {
 }
 
 /// #547: the shots of `fleet` #`n`'s last verdict the board shows and serves: a verify verdict's, each still a file inside one of the issue's lane folders (older events kept any `.png` word).
-pub fn served(events: &[Event], (fleet, n): (&str, u64)) -> Vec<(String, PathBuf)> {
-    let mine = crate::events::of_issue(events, fleet, n);
+pub fn served(events: &[Event], (fleet, n): (&str, u64), at: Option<&str>) -> Vec<(String, PathBuf)> {
+    let mine = crate::events::of_kind(events, &["spawn", "verdict"]);
+    let mine: Vec<&Event> = mine
+        .into_iter()
+        .filter(|e| e.fleet == fleet && e.issue == Some(n))
+        .collect();
     let lanes: BTreeSet<&str> = (mine.iter().filter(|e| e.kind == "spawn"))
         .filter_map(|e| e.str("worktree"))
         .collect();
-    let last = mine.iter().rfind(|e| e.kind == "verdict");
+    let last = (mine.iter()).rfind(|e| e.kind == "verdict" && at.is_none_or(|s| e.str("sha") == Some(s)));
     let files = last
         .filter(|e| e.str("stage") == Some("verify"))
         .and_then(|e| e.val("files").as_array());

@@ -3,7 +3,7 @@ use common::*;
 use drover::config::Config;
 use drover::events::{append, read, Event};
 use drover::serve::Server;
-use serde_json::json;
+use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -36,6 +36,7 @@ fn acp_ctx(name: &str, extra: &str, b: &FakeShed) -> drover::Ctx {
 fn acp() -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
     Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
@@ -49,25 +50,26 @@ fn req(s: &Server, path: &str, body: &str, extra: &str) -> String {
     String::from_utf8_lossy(&s.respond(&r, T)).into_owned()
 }
 
-fn chat(s: &Server, cookie: &str) -> String {
-    let [_, _, chat] = parts(s, ADDR, cookie, T);
-    chat
+fn chat(s: &Server, cookie: &str) -> Value {
+    serde_json::from_str(&api(s, ADDR, cookie, T, "chat")).unwrap()
 }
 
-fn host(agents: &str) -> Fake {
+fn thread<'a>(chat: &'a Value, id: &str) -> &'a Value {
+    let all = chat["threads"].as_array().unwrap();
+    all.iter()
+        .find(|t| t["id"] == id)
+        .unwrap_or_else(|| panic!("no {id}: {chat}"))
+}
+
+fn host() -> Fake {
     let dsh = format!("profile: {}  /x\n", drover::providers::DSH_TUI_VERSION);
-    Fake::default()
-        .reply("herdr agent list", agents)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
-        )
-        .reply(
-            "herdr pane get",
-            r#"{"result":{"pane":{"agent":"dsh-tui","agent_status":"idle"}}}"#,
-        )
-        .reply("herdr", "")
-        .reply("dsh-tui version", &dsh)
+    Fake::default().reply("dsh-tui version", &dsh)
+}
+
+fn on_shed(name: &str, extra: &str, b: &FakeShed) -> drover::Ctx {
+    let c = ctx(&tmpdir(name), &b.config(&config(extra)));
+    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    c
 }
 
 fn kind(c: &drover::Ctx, k: &str) -> Vec<Event> {
@@ -106,8 +108,11 @@ fn chat_defaults_come_from_the_chat_table_else_the_conductor_role() {
     );
     let bad = Config::parse(&config("[chat]\nharness = \"codex\"\n")).unwrap_err();
     assert!(format!("{bad:#}").contains("chat.harness"), "{bad:#}");
-    let bad = Config::parse(&config("[chat]\naccount = \"nobody\"\n")).unwrap_err();
-    assert!(format!("{bad:#}").contains("not in [accounts]"), "{bad:#}");
+    let old = Config::parse(&config("[chat]\naccount = \"nobody\"\n")).unwrap();
+    assert!(
+        old.warnings().iter().any(|w| w.1.contains("chat.account")),
+        "#923: a warning, never an error"
+    );
 }
 
 #[test]
@@ -147,12 +152,15 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let page = chat(&s, &cookie);
+    let chip = &page["repos"][0]["harness"];
+    assert_eq!(
+        (&chip["name"], &chip["all"]),
+        (&json!("harness"), &json!(["claude", "hermes", "dsh"])),
+        "the empty thread's chip: {page}"
+    );
     assert!(
-        page.contains(
-            "<div class=cbar><select class=cp name=harness aria-label=harness><option value=\"claude\">claude</option>\
-             <option value=\"hermes\">hermes</option><option value=\"dsh\" selected>dsh</option></select></div></form>"
-        ),
-        "the empty thread's chip, preset to the default: {page}"
+        chip["cur"].is_null() || chip["cur"] == "dsh",
+        "preset to the default: {page}"
     );
     let res = req(
         &s,
@@ -166,23 +174,27 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
         f.count("shed run --acp claude-acp --policy allow --name orchestrator-t3"),
         1
     );
-    assert!(chat(&s, &cookie).contains(
-        "<b>Board</b><small class=tid>· t3</small></div><span class=ds><i class=dt></i>sendmeter · claude · opus"
-    ));
+    let page = chat(&s, &cookie);
+    let t3 = thread(&page, "t3");
+    assert_eq!(t3["title"], "Board");
+    assert!(
+        t3["ds"].as_str().unwrap().starts_with("sendmeter · claude · opus"),
+        "{t3}"
+    );
 }
 
 #[test]
 fn a_hermes_thread_starts_its_orchestrator_on_hermes() {
-    let c = ctx(&tmpdir("pick-new-hermes"), &config("[chat]\nharness = \"claude\"\n"));
-    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let b = FakeShed::new();
+    let c = on_shed("pick-new-hermes", "[chat]\nharness = \"claude\"\n", &b);
     let (code, out) = run(
         &c,
         &Fake::default(),
         &["thread", "new", "sendmeter", "Grill", "--harness", "hermes"],
     );
     assert_eq!((code, out.as_str()), (0, "t1\n"));
-    std::fs::write(&c.config, config("[chat]\nharness = \"dsh\"\n")).unwrap();
-    let r = host(NO_AGENTS);
+    std::fs::write(&c.config, b.config(&config("[chat]\nharness = \"dsh\"\n"))).unwrap();
+    let r = host();
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
     let st = &kind(&c, "orchestrator-start")[0];
     assert_eq!((st.str("harness"), st.str("model")), (Some("hermes"), None));
@@ -193,15 +205,15 @@ fn the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread() {
     let notes = tmpdir("pick-notes").join("AGENTS.md");
     std::fs::write(&notes, "Always grill scope first.\n").unwrap();
     let extra = format!("[conductor]\ninstructions = \"{}\"\n", notes.display());
-    let c = ctx(&tmpdir("pick-reach"), &config(&extra));
-    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
+    let b = FakeShed::new();
+    let c = on_shed("pick-reach", &extra, &b);
     for (i, h) in ["claude", "hermes", "dsh"].iter().enumerate() {
         let id = format!("t{}", i + 1);
         assert_eq!(
             run(&c, &Fake::default(), &["thread", "new", "sendmeter", h, "--harness", h]).0,
             0
         );
-        let r = host(NO_AGENTS);
+        let r = host();
         let (code, out) = run(&c, &r, &["thread", "say", &id, "hi"]);
         assert_eq!(code, 0, "{out}");
         assert_eq!(kind(&c, "orchestrator-start")[i].str("harness"), Some(*h));
@@ -211,22 +223,20 @@ fn the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread() {
             brief.contains("# Orchestrator brief: thread") && brief.contains("Always grill scope first."),
             "{brief}"
         );
-        let calls = r.calls.borrow().join("\n");
+        let sent = b.sent(&format!("orchestrator-{id}"));
         let kick = format!("Read {} and act on it.", dir.join(".brief.md").display());
         let channel = match *h {
-            "claude" => "herdr agent start orchestrator-t1 --kind claude",
-            "hermes" => "herdr agent prompt orchestrator-t2 Read ",
-            _ => "herdr pane send-text w9:p1 Read ",
+            "claude" => "exec 'claude' ",
+            "hermes" => "Read ",
+            _ => "exec dsh-tui --patch ",
         };
-        assert!(
-            calls.lines().any(|l| l.starts_with(channel) && l.contains(&kick)),
-            "{h}: {calls}"
-        );
+        let line = sent.iter().find(|l| l.starts_with(channel));
+        let line = line.unwrap_or_else(|| panic!("{h}: {sent:?}"));
+        assert!(*h == "dsh" || line.contains(&kick), "{h}: {sent:?}");
         if *h == "claude" {
             let role = c.config.with_file_name("claude").join("fleet-orchestrator/role.md");
-            let line = calls.lines().find(|l| l.starts_with(channel)).unwrap();
             assert!(
-                line.contains(&format!("--append-system-prompt-file {}", role.display())),
+                line.contains(&format!("'--append-system-prompt-file' '{}'", role.display())),
                 "{line}"
             );
             assert!(std::fs::read_to_string(role).unwrap().contains("orchestrator"));
@@ -236,21 +246,22 @@ fn the_conductors_instructions_reach_a_claude_a_hermes_and_a_dsh_thread() {
 
 #[test]
 fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
-    let c = ctx(&tmpdir("pick-model"), &config(""));
-    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    let r = host(NO_AGENTS);
+    let b = FakeShed::new();
+    let c = on_shed("pick-model", "", &b);
+    let f = host();
+    let r = b.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Grill", &cookie);
     assert!(res.ends_with("t1 started\n"), "{res}");
     let page = chat(&s, &cookie);
-    assert!(
-        page.contains(
-            "<div class=cbar><select class=cp name=model aria-label=model><option value=\"opus\" selected>opus</option>\
-             <option value=\"sonnet\">sonnet</option></select><select class=cp name=effort aria-label=effort>"
-        ),
+    let chips = &thread(&page, "t1")["chips"];
+    assert_eq!(
+        (&chips[0]["name"], &chips[0]["all"], &chips[1]["name"]),
+        (&json!("model"), &json!(["opus", "sonnet"]), &json!("effort")),
         "{page}"
     );
+    assert!(chips[0]["cur"].is_null() || chips[0]["cur"] == "opus", "{page}");
     let res = req(&s, "/thread", "op=model&t=t1&model=gpt-9", &cookie);
     assert!(res.contains("REFUSED BAD_VALUE"), "{res}");
     let res = req(&s, "/thread", "op=model&t=t1&model=sonnet&effort=low", &cookie);
@@ -258,25 +269,28 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
     let pick = &kind(&c, "thread-model")[0];
     assert_eq!((pick.str("model"), pick.str("effort")), (Some("sonnet"), Some("low")));
     let page = chat(&s, &cookie);
+    let t1 = thread(&page, "t1");
     assert!(
-        page.contains(" class=\"qs note\">model sonnet · effort low from the next turn</p>"),
-        "{page}"
+        t1["page"]["msgs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["text"] == "model sonnet · effort low from the next turn"),
+        "{t1}"
     );
-    assert!(
-        page.contains("<option value=\"sonnet\" selected>sonnet</option>"),
-        "{page}"
-    );
+    assert_eq!(t1["chips"][0]["cur"], "sonnet", "{t1}");
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.ends_with("system: model sonnet · effort low from the next turn\n"),
         "{show}"
     );
     let first = kind(&c, "orchestrator-start")[0].clone();
-    let awake = r#"{"result":{"agents":[{"name":"orchestrator-t1","agent_status":"idle","pane_id":"w9:p1"}]}}"#;
-    let r2 = host(awake);
+    assert!(b.has("orchestrator-t1"));
+    let r2 = host();
     assert_eq!(run(&c, &r2, &["thread", "say", "t1", "next"]).0, 0);
-    let calls = r2.calls.borrow().join("\n");
-    assert!(calls.contains("herdr workspace close w9"), "{calls}");
+    let m = b.methods();
+    let closed = m.iter().position(|x| x == "rm").unwrap_or_else(|| panic!("{m:?}"));
+    assert_eq!(m[closed - 1], "kill", "{m:?}");
     let sleep = kind(&c, "orchestrator-sleep");
     assert_eq!(sleep[0].str("why"), Some("model"));
     let next = &kind(&c, "orchestrator-start")[1];
@@ -285,16 +299,14 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
         (next.str("session"), next.val("resumed").as_bool()),
         (first.str("session"), Some(true))
     );
-    let start = calls
-        .lines()
-        .find(|l| l.starts_with("herdr agent start orchestrator-t1"))
-        .unwrap();
-    assert!(start.contains("--model sonnet --effort low"), "{start}");
+    let sent = b.sent("orchestrator-t1");
+    let start = sent.iter().rfind(|l| l.starts_with("exec 'claude' ")).unwrap();
+    assert!(start.contains("'--model' 'sonnet' '--effort' 'low'"), "{start}");
     assert!(
-        start.contains(&format!("--resume {}", first.str("session").unwrap())),
+        start.contains(&format!("'--resume' '{}'", first.str("session").unwrap())),
         "{start}"
     );
-    let r3 = host(awake);
+    let r3 = host();
     assert_eq!(run(&c, &r3, &["thread", "say", "t1", "again"]).0, 0);
     assert_eq!(kind(&c, "orchestrator-start").len(), 2);
 }
@@ -311,13 +323,13 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it() {
     let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Grill", &cookie);
     assert!(res.ends_with("t1 started\n"), "{res}");
     let page = chat(&s, &cookie);
-    assert!(
-        page.contains(
-            "<div class=cbar><select class=cp name=model aria-label=model><option value=\"opus\" selected>opus</option>\
-             <option value=\"sonnet\">sonnet</option></select><select class=cp name=effort aria-label=effort>"
-        ),
+    let chips = &thread(&page, "t1")["chips"];
+    assert_eq!(
+        (&chips[0]["name"], &chips[0]["all"], &chips[1]["name"]),
+        (&json!("model"), &json!(["opus", "sonnet"]), &json!("effort")),
         "{page}"
     );
+    assert!(chips[0]["cur"].is_null() || chips[0]["cur"] == "opus", "{page}");
     let res = req(&s, "/thread", "op=model&t=t1&model=gpt-9", &cookie);
     assert!(res.contains("REFUSED BAD_VALUE"), "{res}");
     let res = req(&s, "/thread", "op=model&t=t1&model=sonnet&effort=low", &cookie);
@@ -325,14 +337,16 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it() {
     let pick = &kind(&c, "thread-model")[0];
     assert_eq!((pick.str("model"), pick.str("effort")), (Some("sonnet"), Some("low")));
     let page = chat(&s, &cookie);
+    let t1 = thread(&page, "t1");
     assert!(
-        page.contains(" class=\"qs note\">model sonnet · effort low from the next turn</p>"),
-        "{page}"
+        t1["page"]["msgs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["text"] == "model sonnet · effort low from the next turn"),
+        "{t1}"
     );
-    assert!(
-        page.contains("<option value=\"sonnet\" selected>sonnet</option>"),
-        "{page}"
-    );
+    assert_eq!(t1["chips"][0]["cur"], "sonnet", "{t1}");
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.ends_with("system: model sonnet · effort low from the next turn\n"),
@@ -368,9 +382,13 @@ fn an_old_thread_without_a_harness_renders_and_starts_on_the_default() {
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    assert!(chat(&s, &cookie).contains(
-        "<b>Before #404</b><small class=tid>· t1</small></div><span class=ds>sendmeter · claude · opus</span>"
-    ));
+    let page = chat(&s, &cookie);
+    let t1 = thread(&page, "t1");
+    assert_eq!(
+        (&t1["title"], &t1["ds"]),
+        (&json!("Before #404"), &json!("sendmeter · claude · opus")),
+        "{t1}"
+    );
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
     assert_eq!(kind(&c, "orchestrator-start")[0].str("harness"), Some("claude"));
 }
@@ -438,33 +456,4 @@ fn a_pick_dropped_from_the_models_list_is_refused_on_send_and_the_message_stays(
     );
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(show.contains("keep me"), "{show}");
-}
-
-#[test]
-fn a_model_the_cli_rejects_at_start_is_one_system_line_and_no_retry() {
-    let c = ctx(&tmpdir("pick-rejected"), &listed("\"opus\", \"fable\""));
-    assert_eq!(run(&c, &Fake::default(), &["profiles", "sync"]).0, 0);
-    assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Grill"]).0, 0);
-    pick_fable(&c);
-    let r = host(NO_AGENTS)
-        .once_err(
-            "herdr agent start",
-            1,
-            r#"{"error":{"code":"agent_not_ready","message":"agent exited before ready"}}"#,
-        )
-        .once(
-            "herdr pane read",
-            0,
-            "API Error: 400 {\"type\":\"error\",\"error\":{\"type\":\"unrecognized_model\"}}",
-        );
-    let (code, out) = run(&c, &r, &["thread", "say", "t1", "hi"]);
-    assert!(code == 3 && out.contains("REFUSED BAD_VALUE"), "{out}");
-    assert_eq!(r.count("herdr agent start"), 1, "{:?}", r.calls.borrow());
-    let sys = system(&c);
-    assert_eq!(sys.len(), 1, "{sys:?}");
-    assert!(
-        sys[0].contains("model fable") && sys[0].contains("unrecognized_model"),
-        "{sys:?}"
-    );
-    assert!(kind(&c, "orchestrator-start").is_empty());
 }

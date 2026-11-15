@@ -18,10 +18,8 @@ fn audit(hang: &str, bad: &str) -> (Option<i32>, String, String, String) {
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::create_dir_all(d.join("site")).unwrap();
     std::fs::write(d.join("site/index.html"), "ok").unwrap();
-    for (name, body) in [("chrome", CHROME), ("node", "#!/bin/sh\nexit 0\n")] {
-        std::fs::write(bin.join(name), body).unwrap();
-        std::fs::set_permissions(bin.join(name), std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    std::fs::write(bin.join("chrome"), CHROME).unwrap();
+    std::fs::set_permissions(bin.join("chrome"), std::fs::Permissions::from_mode(0o755)).unwrap();
     let port = std::net::TcpListener::bind("127.0.0.1:0")
         .unwrap()
         .local_addr()
@@ -36,7 +34,7 @@ fn audit(hang: &str, bad: &str) -> (Option<i32>, String, String, String) {
         .env("CHROME", bin.join("chrome"))
         .env("UI_AUDIT_PORT", port.to_string())
         .env("UI_AUDIT_TIMEOUT", "1")
-        .env("UI_AUDIT_VIEWS", "queue config")
+        .env("UI_AUDIT_VIEWS", "queue fleets")
         .env("HANG", hang)
         .env("BAD", bad)
         .output()
@@ -62,15 +60,15 @@ fn a_view_that_never_settles_is_retried_twice_then_flaky_and_ui_stays_green() {
         "{out}"
     );
     assert!(out.contains("queue: hung 3 times, not checked (ui-flaky)"), "{out}");
-    assert!(out.contains("config: 0 controls, 0 outliers"), "{out}");
+    assert!(out.contains("fleets: 0 controls, 0 outliers"), "{out}");
 }
 
 #[test]
 fn a_real_outlier_still_fails_ui_beside_a_hung_view() {
-    let (code, out, _, flaky) = audit("queue", "config");
+    let (code, out, _, flaky) = audit("queue", "fleets");
     assert_eq!(code, Some(1), "{out}");
     assert!(
-        out.contains("config: 0 controls, 1 outliers\n  [x]: 20 px tall"),
+        out.contains("fleets: 0 controls, 1 outliers\n  [x]: 20 px tall"),
         "{out}"
     );
     assert_eq!(flaky, "queue --screenshot\nqueue --dump-dom\n", "{out}");

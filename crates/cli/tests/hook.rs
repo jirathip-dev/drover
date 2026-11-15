@@ -970,6 +970,33 @@ fn broad_kills_are_denied_and_pid_kills_allowed() {
 }
 
 #[test]
+fn host_stress_is_refused_and_test_runs_allowed() {
+    for cmd in [
+        "yes > /dev/null &",
+        "for i in $(seq 24); do yes >/dev/null & done",
+        "stress-ng --cpu 8",
+        "nice -n 5 stress --cpu 4 --timeout 60",
+        "while true; do :; done &",
+        "for i in 1 2 3; do cargo test & done",
+    ] {
+        let r = bash(cmd).unwrap_or_default();
+        assert!(r.contains("REFUSED HOST_STRESS"), "{cmd}: {r}");
+        assert!(r.contains("cpulimit") && r.contains("in CI"), "{r}");
+    }
+    for cmd in [
+        "cargo test",
+        "npx playwright test",
+        "xcodebuild test -scheme App",
+        "yes | head -n 3",
+        "cpulimit -l 50 -- yes > /dev/null",
+        "for f in a b; do cargo test -p $f && echo ok; done",
+        "git commit -m \"stress-ng --cpu 8\"",
+    ] {
+        assert_eq!(bash(cmd), None, "{cmd} allowed");
+    }
+}
+
+#[test]
 fn docker_is_allowed_on_a_cloud_host_and_denied_on_a_mac() {
     let run = |hosts: &str, host: &str, cmd: &str| {
         let cfg = format!("{CONFIG}\n[hosts.mini]\n\n[hosts.cloud1]\nmachine = \"cloud1\"\ncloud = \"boat\"\n{hosts}");
@@ -1319,7 +1346,6 @@ fn capability_groups_gate_a_orchestrators_owner_verbs() {
         "drover hosts off mini",
         "drover hosts refresh",
         "drover reclaim --apply",
-        "drover accounts reset A",
         "drover runners add x",
     ];
     let off = [

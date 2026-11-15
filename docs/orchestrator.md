@@ -13,7 +13,7 @@ drover thread ls [FLEET] [--json]           # per repo: title, last message, unr
 ## The orchestrator lane
 
 - **Role `orchestrator`, any harness:** `[fleet.<n>.role.orchestrator]` takes the usual role keys (`harness`, `model`,
-  `effort`, `account`/`accounts`, `fallback`, `mcp`). An `all` thread uses the first fleet that defines one. Without
+  `effort`, `mcp`). An `all` thread uses the first fleet that defines one. Without
   one (#401), a fleet's orchestrator is its `impl` role on profile `lane-orchestrator` (which `profiles sync` writes; a
   Hermes impl needs `hermes profile create lane-orchestrator`); only a fleet with neither refuses `NO_ORCHESTRATOR`.
   `drover spawn … orchestrator` refuses `BAD_VALUE`.
@@ -26,10 +26,9 @@ drover thread ls [FLEET] [--json]           # per repo: title, last message, unr
 
   ```toml
   [chat]
-  harness = "claude"   # claude | hermes | dsh; another harness than the role's drops its model and accounts
+  harness = "claude"   # claude | hermes | dsh; another harness than the role's drops its model
   model = "opus"
   effort = "high"
-  account = "A"        # or accounts = ["A", "B"]
   ```
 
   A thread keeps the harness it starts on for good (`drover thread new … --harness <h>`, or the empty thread's
@@ -41,7 +40,7 @@ drover thread ls [FLEET] [--json]           # per repo: title, last message, unr
   `drover config propose`) and the chip offers it. A send on a pick no longer offered is refused `BAD_VALUE` with a
   system line naming the model and the list (the message stays); a model the CLI rejects at start is one system line
   with its error, not retried.
-- **No worktree:** it runs in `<state dir>/orchestrator/<thread>/` (or `<[orchestrator] dir>/<thread>/`) in its own herdr workspace, as agent
+- **No worktree:** it runs in `<state dir>/orchestrator/<thread>/` (or `<[orchestrator] dir>/<thread>/`) in its own shed terminal (an ACP session on a `shed-acp` fleet), as agent
   `orchestrator-<thread>`, with `DROVER_LANE=<fleet>:-:orchestrator` (so the lane hook guards it) and
   `DROVER_THREAD=<thread>`.
 - **Its brief** (`.brief.md` there, rewritten at each start) is `roles/orchestrator.md`, the thread and repo, then the
@@ -189,8 +188,8 @@ Built from the approved mockup (`docs/design/conductor-chat/`): the middle tab, 
 choice `<repo> · <thread title> asks: <question>`; a tap opens the thread. The owner's messages, commands and system
 lines never push, nor (#407) anything in a thread a board has open.
 
-Events: `thread-new`, `thread-msg` (`files`; #413 `via`: a flow-back line), `thread-handoff`, `thread-cmd`, `thread-read`, #407 `thread-queue` (`text`, `files`, `q`: the one an edit replaces) and `thread-unqueue` (`q`, why: sent, removed), `orchestrator-start` (session, resumed,
-account), `orchestrator-sleep` (why: idle, gone, usage limit, signed out); #387: `config-propose`, `config-settled`,
+Events: `thread-new`, `thread-msg` (`files`; #413 `via`: a flow-back line), `thread-handoff`, `thread-cmd`, `thread-read`, #407 `thread-queue` (`text`, `files`, `q`: the one an edit replaces) and `thread-unqueue` (`q`, why: sent, removed), `orchestrator-start` (session, resumed),
+`orchestrator-sleep` (why: idle, gone, signed out); #387: `config-propose`, `config-settled`,
 `secret-request`, `secret-set`, `secret-dismissed`, `secret-rm` (names only).
 
 ## Config changes (#387)
@@ -201,7 +200,8 @@ owner applies it: a tap on a paired device, or `drover config apply|discard <id>
 refuses both inside one, `OWNER_ONLY`). Applying keeps the old file as `fleet.toml.bak-<time>`, writes the
 new one and runs `doctor`. A failing `doctor` does not roll back: the line says `doctor ✗` and the backup is there
 to restore. If fleet.toml changed since the proposal, it refuses `STALE`, and the card shows `stale: fleet.toml
-changed since` instead of its buttons (#460). Settled, the card folds to the thread's system line, e.g. `config c1
+changed since` instead of its buttons (#460). #1028: the proposed file is kept whole beside the event log
+(`proposals/<id>.toml`, its sha256 in the event); a proposal not stored whole refuses `PROPOSAL_TRUNCATED`: propose it again. Settled, the card folds to the thread's system line, e.g. `config c1
 applied by owner, backup kept, doctor ✓` (the orchestrator gets it too). #460: while a card waits, the thread's bar and
 its row in the list say `config c1 waiting` (a tap on the bar's scrolls to the card), and the thread's first page
 always carries it: past the last 30 messages it stays right under the older-messages marker.
@@ -211,8 +211,7 @@ always carries it: past the last 30 messages it stays right under the older-mess
 - **Groups:** `[orchestrator] allow = [...]` switches on owner-level drover verbs for orchestrators; the lane hook allows
   a group's verbs from an orchestrator and refuses them from every other lane (`OWNER_ONLY`), and refuses an off group's
   `GROUP_OFF`. Unset, every group but `pause` and `set` is on. The groups: `design` (`spawn … design`), `clean`
-  (`clean --yes`, `--orphans`, `--lane`), `hosts` (`hosts on|off|refresh`), `reclaim`, `accounts` (`accounts
-  reset`), `runners` (#537's `runners …`), `pause` (`pause`, `resume`), `set`. The brief lists each, on or off. The
+  (`clean --yes`, `--orphans`, `--lane`), `hosts` (`hosts on|off|refresh`), `reclaim`, `runners` (#537's `runners …`), `pause` (`pause`, `resume`), `set`. The brief lists each, on or off. The
   orchestrator never edits `allow`: it proposes the change as a config card the owner applies. Its group verbs show in
   the thread as tool rows with their group (`thread-cmd`'s `group`).
 - **Run cards:** `drover card post <thread> --cmd "<command>" --why "…" --blast "…" --dir <folder> [--timeout
@@ -227,14 +226,11 @@ always carries it: past the last 30 messages it stays right under the older-mess
   secret's value, deleting production data, force-pushing or rewriting history, turning off branch protection or
   drover's gates. It is a pattern guard over the command's words, best effort like `deny_commands`.
 
-## Accounts (#387)
+## Sign-in (#923)
 
-The orchestrator uses its role's `account`/`accounts` or #302's `fallback` chain. When `check` sees the awake orchestrator's
-usage-limit banner (or a sign-out), it rests that account (else that harness), closes the pane, and resumes the
-**same session** on the next one (Claude Code `--resume <id>`). The thread shows `switched to claude:B (claude:A
-resting until 18:40)`. A harness that can't resume gets the thread so far in its kick. A sign-out also adds a
-`<harness> is signed out: [sign in]` line; the button opens #303's setup terminal on the main host. The orchestrator
-never edits the account list itself: that change is a `config propose` card.
+The orchestrator runs on the host's own login, like every lane ([accounts](accounts.md)). When the awake orchestrator
+shows a sign-in prompt, it sleeps and the thread gets a `<harness> is signed out: [sign in]` line; the button opens
+#303's setup terminal on the main host.
 
 ## Secrets (#387)
 

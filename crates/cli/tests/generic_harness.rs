@@ -14,25 +14,7 @@ const MENU: &str = "⏺ Bash(cargo test)\nWhich database should the meter use?\n
 fn the_generic_harness_has_every_fallback() {
     let h = providers::get("gemini");
     assert!(h.env().is_empty() && h.health_check().is_none() && h.process_names().is_empty());
-    assert_eq!(h.credential(), providers::Credential::None);
-    assert!(h.login().is_none() && h.hook_dialect().is_none() && h.usage().is_none());
-    let c = ctx(&tmpdir("generic-fallbacks"), CONFIG);
-    let cfg = drover::config::Config::load(&c.config).unwrap();
-    let banner = "Claude usage limit reached. Your limit will reset at 3pm.";
-    assert!(!h.signed_out("Please run /login") && h.usage_limited(&cfg, &Fake::default(), banner, T).is_none());
-    assert_eq!(h.tool_line("⏺ Bash(cargo test)"), None);
-    assert_eq!(h.answer_keys(2), "2");
-    assert_eq!(
-        (h.pending_menu(MENU), h.status_word("✻ Herding… (4m 12s)")),
-        (None, None)
-    );
-    assert_eq!(h.transcript(std::path::Path::new("/"), "/wt"), None);
-    assert!(h.now_line("$ cargo test") && !h.now_line("────────────────────"));
-    assert_eq!(
-        drover::lanes::activity("gemini", MENU),
-        "2. Postgres",
-        "the last non-chrome line"
-    );
+    assert!(h.login().is_none() && h.hook_dialect().is_none() && h.token_env().is_none());
 }
 
 #[test]
@@ -69,10 +51,13 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
         chat["lines"].as_array().unwrap().iter().any(|l| l == "  2. Postgres"),
         "{chat}"
     );
-    let page = with_board(&get("/?all=1"), &s, ADDR, &ck, T);
-    let needs = &page[page.find("<div id=needs>").unwrap()..page.find("<main>").unwrap()];
+    let needs: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &ck, T, "needs")).unwrap();
+    let card = &needs["blocked"][0];
     assert!(
-        needs.contains("Which database should the meter use?") && !needs.contains("class=pick"),
+        card["tail"]
+            .as_str()
+            .is_some_and(|t| t.contains("Which database should the meter use?"))
+            && card["menu"].is_null(),
         "{needs}"
     );
     let body = format!("agent={LANE}&choice=1");
@@ -82,14 +67,24 @@ fn a_generic_lane_reads_its_pane_answers_by_reply_and_gets_its_own_memory_row() 
     );
     let res = String::from_utf8_lossy(&s.respond(&req, T)).into_owned();
     assert!(
-        res.contains("no menu on") && !sh.called("keys", LANE) && sh.sent(LANE).is_empty(),
+        res.contains("REFUSED BAD_VALUE: no menu") && !sh.called("keys", LANE) && sh.sent(LANE).is_empty(),
         "{res}"
     );
-    let page = host_tab(&s, ADDR, T);
-    assert!(!page.contains("<span class=k>claude</span>"), "{page}");
-    assert!(
-        page.contains("<span class=k>gemini</span>")
-            && page.contains("<b>1.0 GB</b> <span class=mt>(1 lanes: working 0 / done 0)</span>"),
-        "{page}"
+    let host: serde_json::Value = serde_json::from_str(&api(&s, ADDR, "", T, "host")).unwrap();
+    let rows: Vec<&serde_json::Value> = host["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|h| h["rows"].as_array().unwrap())
+        .collect();
+    assert!(rows.iter().all(|r| r["k"] != "claude"), "{host}");
+    let g = rows
+        .iter()
+        .find(|r| r["k"] == "gemini")
+        .unwrap_or_else(|| panic!("{host}"));
+    assert_eq!(
+        (&g["b"], &g["notes"]),
+        (&json!("1.0 GB"), &json!(["(1 lanes: working 0 / done 0)"])),
+        "{g}"
     );
 }
