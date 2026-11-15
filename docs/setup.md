@@ -151,7 +151,9 @@ drover needs no Hermes: `drover setup` (or `timer install`) also writes two jobs
   stream (the page reconnects with `?since=<seq>` and misses no event), drains its requests and execs the new binary
   in place, so launchd keeps its pid. A serve that does not answer on `<state dir>/serve-<port>.sock` (an older
   build) is restarted instead. Any failed step keeps the old binary and alerts `self-update-failed` once per head,
-  with the exact failure. `drover self-update --dry-run` prints what it would do; `--pause` / `--resume` toggle it
+  with the exact failure. #1031: that doctor also says `hello` to the local `shed serve`; a server on another shed
+  protocol fails it (`✗ shed — SHED_VERSION: …` naming the shed the new drover needs), so the old drover stays and
+  the alert goes out once per mismatch, not once per head; install that shed and restart `shed serve`. `drover self-update --dry-run` prints what it would do; `--pause` / `--resume` toggle it
   (logged). The job's PATH includes `cargo`'s directory.
 - `[self_update] staging_serve = true` (off by default) also installs the green staging head into
   `<state dir>/update-staging/bin/drover` and runs it as `dev.drover.serve-staging`: `serve --read-only` on

@@ -744,7 +744,8 @@ pub fn drive(
     }
     lap("read log, host sample");
     if let Some(b) = r.shed().filter(|_| !fast && first) {
-        if let Err(e) = crate::session::stamp::intake(ctx, cfg, &b.wire) {
+        let res = crate::session::stamp::intake(ctx, cfg, &b.wire);
+        if let (false, Err(e)) = (crate::shed::version_alert(ctx, cfg, &res)?, &res) {
             writeln!(out, "shed events: {e:#}")?;
         }
     }

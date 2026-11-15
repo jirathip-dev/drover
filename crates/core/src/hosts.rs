@@ -936,7 +936,11 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
 }
 
 fn shed_row(on: &On) -> Option<String> {
-    crate::session::live_on(on).err().map(|e| format!("! shed: {e:#}"))
+    let line = on.shed().map_or_else(
+        || crate::session::live_on(on).err().map(|e| format!("! shed: {e:#}")),
+        |b| Some(crate::shed::line(on, &b.wire)),
+    );
+    line.filter(|l| !l.starts_with('✓'))
 }
 
 fn acp_health(ctx: &Ctx, cfg: &Config, on: &On, (name, tags, home): (&str, &[String], &str)) -> Vec<String> {
