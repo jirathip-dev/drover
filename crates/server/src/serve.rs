@@ -139,44 +139,6 @@ type Auth = std::result::Result<devices::Device, String>;
 fn busy(a: &Auth) -> bool {
     a.as_ref().is_err_and(|w| w.starts_with("db error: "))
 }
-#[cfg(target_os = "macos")]
-fn queued(s: &TcpStream) -> i32 {
-    extern "C" {
-        fn getsockopt(fd: i32, level: i32, name: i32, value: *mut i32, len: *mut u32) -> i32;
-    }
-    let (mut n, mut len) = (0i32, 4u32);
-    // SAFETY: a live socket's fd and an int-sized out value with its length, as SO_NWRITE writes.
-    let rc = unsafe {
-        getsockopt(
-            std::os::fd::AsRawFd::as_raw_fd(s),
-            0xffff,
-            0x1024,
-            &raw mut n,
-            &raw mut len,
-        )
-    };
-    if rc == 0 {
-        n
-    } else {
-        0
-    }
-}
-
-#[cfg(not(target_os = "macos"))]
-fn queued(s: &TcpStream) -> i32 {
-    extern "C" {
-        fn ioctl(fd: i32, req: u64, ...) -> i32;
-    }
-    let mut n = 0i32;
-    // SAFETY: a live socket's fd and an int out value, as SIOCOUTQ writes.
-    let rc = unsafe { ioctl(std::os::fd::AsRawFd::as_raw_fd(s), 0x5411, &raw mut n) };
-    if rc == 0 {
-        n
-    } else {
-        0
-    }
-}
-
 fn sent(s: &mut TcpStream, mut b: &[u8], end: Instant) -> bool {
     while !b.is_empty() {
         let left = end.saturating_duration_since(drover_core::clock::instant());
@@ -974,7 +936,7 @@ impl<'a> Server<'a> {
                                 return
                             }
                             _ if t.elapsed() >= beat => {
-                                missed = if queued(&s) > 0 { missed + 1 } else { 0 };
+                                missed = if drover_sys::unsent(&s) > 0 { missed + 1 } else { 0 };
                                 if missed >= 2 {
                                     return;
                                 }

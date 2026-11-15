@@ -440,13 +440,8 @@ fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
     assert!(lanes < 300, "the lanes reads took {lanes} ms (target < 300)");
 }
 
-extern "C" {
-    fn getrusage(who: i32, usage: *mut [i64; 18]) -> i32;
-}
-
 fn cpu_ms() -> f64 {
-    let mut u = [0i64; 18];
-    assert_eq!(unsafe { getrusage(0, &raw mut u) }, 0);
+    let u = drover_sys::rusage().unwrap();
     let tv = |s: i64, us: i64| s as f64 * 1e3 + f64::from(u32::try_from(us).unwrap()) / 1e3;
     tv(u[0], u[1]) + tv(u[2], u[3])
 }

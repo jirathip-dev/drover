@@ -24,6 +24,6 @@
 - don't stress the shared host from a lane: no `yes`, `stress` or busy loops, no N parallel copies; cap the run or reproduce under load in CI (enforced by: hook HOST_STRESS)
 - don't call git, gh, ssh or a db write on serve's request path (enforced by: the request-path guard test, crates/cli/tests/serve_health.rs)
 - don't unwrap, expect, panic!, todo!, unimplemented!, dbg!, index or slice, `as`-cast, `let _ =` a must_use value or `#[allow]` without a reason in non-test Rust; tests may (enforced by: CI clippy, `[workspace.lints]` deny + clippy.toml, CI banned-API fixtures)
-- don't print to stdout or stderr but through the CLI's one writer `stderr!`, or write `unsafe` (enforced by: CI clippy print_stdout/print_stderr, `unsafe_code = "forbid"`, CI banned-API fixtures)
+- don't print to stdout or stderr but through the CLI's one writer `stderr!`, or write `unsafe` outside crates/sys (enforced by: CI clippy print_stdout/print_stderr, `unsafe_code = "forbid"`, CI banned-API fixtures)
 - don't use `Command::new`/`std::process` outside core's runner.rs, `env::var` outside config.rs, or `thread::sleep`/`SystemTime::now`/`Instant::now` outside clock.rs (enforced by: CI arch-check, #809 bans)
 - don't use `any`, a non-null `!`, an `as` cast but `as const`, `@ts-ignore`/`@ts-expect-error`, innerHTML/outerHTML/insertAdjacentHTML, eval/new Function, console.log, a default export or an `enum` in web/src (enforced by: CI web, `npm run lint` and tsc --strict, web/lint-fixtures)

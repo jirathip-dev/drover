@@ -1877,42 +1877,12 @@ fn walk(p: &Path, seen: &mut Seen) -> u64 {
     match std::fs::symlink_metadata(p) {
         Ok(m) if m.is_dir() => std::fs::read_dir(p).map_or(0, |d| d.flatten().map(|e| walk(&e.path(), seen)).sum()),
         Ok(m) => {
-            let id = m.is_file().then(|| clone_id(p)).flatten();
+            let id = m.is_file().then(|| drover_sys::clone_id(p)).flatten();
             let id = id.or_else(|| (m.nlink() > 1).then(|| m.ino()));
             u64::from(id.is_none_or(|i| seen.insert((m.dev(), i)))) * m.blocks() * 512
         }
         Err(_) => 0,
     }
-}
-
-#[cfg(target_os = "macos")]
-fn clone_id(p: &Path) -> Option<u64> {
-    use std::os::unix::ffi::OsStrExt;
-    #[repr(C)]
-    struct AttrList([u16; 2], [u32; 5]);
-    #[repr(C, packed)]
-    struct Buf(u32, [u32; 5], u64, u64);
-    extern "C" {
-        fn getattrlist(
-            path: *const std::ffi::c_char,
-            list: *mut AttrList,
-            buf: *mut Buf,
-            size: usize,
-            opts: u32,
-        ) -> i32;
-    }
-    let path = std::ffi::CString::new(p.as_os_str().as_bytes()).ok()?;
-    let mut list = AttrList([5, 0], [0x8000_0000, 0, 0, 0, 0x300]);
-    let mut buf = Buf(0, [0; 5], 0, 0);
-    // SAFETY: a NUL-terminated path, an attrlist and a buffer of the size passed, all live for the call.
-    let rc = unsafe { getattrlist(path.as_ptr(), &raw mut list, &raw mut buf, size_of::<Buf>(), 0x21) };
-    let (returned, id, flags) = (buf.1[4], buf.2, buf.3);
-    (rc == 0 && returned & 0x300 == 0x300 && flags & 1 == 1).then_some(id)
-}
-
-#[cfg(not(target_os = "macos"))]
-fn clone_id(_: &Path) -> Option<u64> {
-    None
 }
 
 fn closed_on_github(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, ev: Arc<Log>) -> Result<Arc<Log>> {

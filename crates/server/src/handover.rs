@@ -102,7 +102,7 @@ impl Handover {
         while !self.stopping() {
             let limits = Config::kept(ctx).map(|c| c.limits).unwrap_or_default();
             drover_core::clock::sleep(Duration::from_secs(limits.serve_host_secs.max(1)));
-            release_freed();
+            drover_sys::release_freed();
             let rss = crate::runner::ok(r, "ps", &["-o", "rss=", "-p", &pid]);
             let Some(mb) = rss.ok().and_then(|s| s.trim().parse::<u64>().ok()).map(|kb| kb >> 10) else {
                 continue;
@@ -173,27 +173,6 @@ impl Handover {
         drover_core::runner::exit(0)
     }
 }
-
-#[cfg(target_os = "macos")]
-fn release_freed() {
-    unsafe extern "C" {
-        fn malloc_zone_pressure_relief(zone: *mut std::ffi::c_void, goal: usize) -> usize;
-    }
-    // SAFETY: a null zone asks every malloc zone to return its free pages; goal 0 is as many as it can.
-    unsafe { malloc_zone_pressure_relief(std::ptr::null_mut(), 0) };
-}
-
-#[cfg(all(target_os = "linux", target_env = "gnu"))]
-fn release_freed() {
-    unsafe extern "C" {
-        fn malloc_trim(pad: usize) -> i32;
-    }
-    // SAFETY: glibc's malloc_trim only returns free heap pages to the OS; pad 0 keeps no slack.
-    unsafe { malloc_trim(0) };
-}
-
-#[cfg(not(any(target_os = "macos", all(target_os = "linux", target_env = "gnu"))))]
-fn release_freed() {}
 
 fn argv() -> Vec<std::ffi::OsString> {
     std::env::args_os().collect()

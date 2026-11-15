@@ -32,7 +32,7 @@ rust)
     cp "$f" "$t/src/lib.rs"
     code=0
     out=$(cd "$t" && cargo clippy -q --all-targets 2>&1) || code=$?
-    expect "$name" "$code" "$out" "$name"
+    expect "$name" "$code" "$out" "${name//_/[_-]}"
   done
   ;;
 ts)

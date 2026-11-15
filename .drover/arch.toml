@@ -127,7 +127,7 @@ reason = "#809: processes start only in core's runner (crate::runner)"
 [[ban]]
 pattern = "std::process"
 paths = ["crates/*/src/**"]
-except = ["crates/core/src/runner.rs"]
+except = ["crates/core/src/runner.rs", "crates/sys/src/**"]
 reason = "#809: processes start only in core's runner (crate::runner, runner::pid, runner::exit)"
 
 [[ban]]

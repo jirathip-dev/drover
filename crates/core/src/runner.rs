@@ -61,9 +61,6 @@ pub fn in_request() -> bool {
 }
 
 const SERVE_FDS: &str = "DROVER_SERVE_FDS";
-extern "C" {
-    fn fcntl(fd: i32, cmd: i32, ...) -> i32;
-}
 
 /// #894: `argv` with the listeners `fds` kept open across exec and named in `DROVER_SERVE_FDS`: a bridge in the background (sh reaps nothing), else exec'd in place.
 pub fn hand_fds(argv: &[std::ffi::OsString], fds: &[i32], bridge: bool) -> Result<()> {
@@ -80,17 +77,7 @@ pub fn hand_fds(argv: &[std::ffi::OsString], fds: &[i32], bridge: bool) -> Resul
     }
     let list: Vec<String> = fds.iter().map(i32::to_string).collect();
     c.env(SERVE_FDS, list.join(",")).stdin(std::process::Stdio::null());
-    let fds = fds.to_vec();
-    // SAFETY: fcntl is async-signal-safe; between fork and exec it only clears close-on-exec on the listeners.
-    unsafe {
-        c.pre_exec(move || {
-            if fds.iter().all(|&fd| fcntl(fd, 2, 0) != -1) {
-                Ok(())
-            } else {
-                Err(std::io::Error::last_os_error())
-            }
-        });
-    }
+    drover_sys::keep_fds(&mut c, fds.to_vec());
     if !bridge {
         return Err(c.exec()).context("exec");
     }
@@ -103,7 +90,6 @@ pub fn hand_fds(argv: &[std::ffi::OsString], fds: &[i32], bridge: bool) -> Resul
 
 /// #894: the listeners a predecessor handed over (`hand_fds`), close-on-exec again; none for a fresh start.
 pub fn inherited() -> Vec<std::net::TcpListener> {
-    use std::os::fd::FromRawFd;
     let Some(v) = crate::config::env_os(SERVE_FDS) else {
         return vec![];
     };
@@ -113,15 +99,7 @@ pub fn inherited() -> Vec<std::net::TcpListener> {
         .split(',')
         .filter_map(|f| f.parse().ok())
         .collect::<Vec<i32>>();
-    // SAFETY: each fd is a listener the predecessor passed down for this process alone; nothing else here owns it.
-    unsafe {
-        fds.into_iter()
-            .map(|fd| {
-                fcntl(fd, 2, 1);
-                std::net::TcpListener::from_raw_fd(fd)
-            })
-            .collect()
-    }
+    drover_sys::adopt_listeners(fds)
 }
 
 pub struct Real;
@@ -137,23 +115,13 @@ impl Runner for Real {
         self.within(prog, args, input.as_bytes(), limit)
     }
     fn detach(&self, exe: &str, args: &[String], log: &std::path::Path) -> Result<u32> {
-        use std::os::unix::process::CommandExt;
-        extern "C" {
-            fn setsid() -> i32;
-        }
         let log = std::fs::File::options().create(true).append(true).open(log)?;
         let mut c = Command::new(exe);
         c.args(args)
             .stdin(std::process::Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log);
-        // SAFETY: setsid is async-signal-safe; between fork and exec it touches nothing else.
-        unsafe {
-            c.pre_exec(|| match setsid() {
-                -1 => Err(std::io::Error::last_os_error()),
-                _ => Ok(()),
-            });
-        }
+        drover_sys::new_session(&mut c);
         let mut child = c.spawn().with_context(|| format!("cannot run {exe}"))?;
         let pid = child.id();
         std::thread::spawn(move || child.wait());
@@ -432,12 +400,7 @@ impl Proc for std::process::Child {
         std::process::Child::try_wait(self)
     }
     fn kill(&mut self) -> std::io::Result<()> {
-        extern "C" {
-            fn kill(pid: i32, sig: i32) -> i32;
-        }
-        let group = i32::try_from(self.id()).map_or(0, |p| -p);
-        // SAFETY: kill(2) only sends SIGKILL to the child's own process group, which `within` made for it alone.
-        unsafe { kill(group, 9) };
+        drover_sys::kill_group(self.id());
         std::process::Child::kill(self)
     }
 }

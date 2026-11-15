@@ -262,10 +262,6 @@ extern "C" fn sweep() {
     }
 }
 
-extern "C" {
-    fn atexit(f: extern "C" fn()) -> std::ffi::c_int;
-}
-
 pub fn tmpdir(name: &str) -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
     let d = std::env::temp_dir().join(format!(
@@ -276,7 +272,7 @@ pub fn tmpdir(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     MADE.with(|m| m.0.borrow_mut().push(d.clone()));
-    AT_EXIT.call_once(|| assert_eq!(unsafe { atexit(sweep) }, 0));
+    AT_EXIT.call_once(|| assert!(drover_sys::at_exit(sweep)));
     ALL.lock().unwrap().push(d.clone());
     d
 }

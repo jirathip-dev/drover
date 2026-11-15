@@ -3,9 +3,7 @@ use crate::runner::{Real, Runner};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use std::cell::UnsafeCell;
 use std::collections::{BTreeMap, HashMap};
-use std::mem::MaybeUninit;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering::Relaxed};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
@@ -700,75 +698,8 @@ impl std::ops::Deref for Log {
     }
 }
 
-/// #944: a log's events, in a buffer its later versions share and append to in place: each sees only its own `len`.
-#[derive(Default, Clone)]
-pub struct Events {
-    buf: Arc<Buf>,
-    len: usize,
-}
-
-#[derive(Default)]
-struct Buf {
-    len: Mutex<usize>,
-    cells: Box<[UnsafeCell<MaybeUninit<Event>>]>,
-}
-
-// SAFETY: a cell is written once, under `len`'s lock, before `len` passes it; only cells below `len` are ever read.
-unsafe impl Sync for Buf {}
-
-impl Drop for Buf {
-    fn drop(&mut self) {
-        let n = *self.len.get_mut().unwrap_or_else(PoisonError::into_inner);
-        for c in self.cells.iter_mut().take(n) {
-            // SAFETY: the first `n` cells were written (`push`) and are dropped only here.
-            unsafe { c.get_mut().assume_init_drop() };
-        }
-    }
-}
-
-impl std::ops::Deref for Events {
-    type Target = [Event];
-    fn deref(&self) -> &[Event] {
-        // SAFETY: the first `len` cells are written and never written again; a cell is laid out as its `Event`.
-        unsafe { std::slice::from_raw_parts(self.buf.cells.as_ptr().cast(), self.len) }
-    }
-}
-
-impl Events {
-    fn push(&mut self, e: Event) {
-        loop {
-            let mut at = self.buf.len.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Some(c) = self.buf.cells.get(self.len).filter(|_| *at == self.len) {
-                // SAFETY: cell `len` is past what every handle sees and `at`'s lock is held: nothing else touches it.
-                unsafe { (*c.get()).write(e) };
-                (*at, self.len) = (self.len + 1, self.len + 1);
-                return;
-            }
-            drop(at);
-            self.grow(1);
-        }
-    }
-
-    fn reserve(&mut self, n: usize) {
-        if self.len + n > self.buf.cells.len() {
-            self.grow(n);
-        }
-    }
-
-    fn grow(&mut self, n: usize) {
-        let cap = (self.len + n).next_power_of_two().max(64);
-        let cells = (0..cap).map(|_| UnsafeCell::new(MaybeUninit::uninit())).collect();
-        let mut next = Events {
-            buf: Arc::new(Buf {
-                len: Mutex::new(0),
-                cells,
-            }),
-            len: 0,
-        };
-        self.iter().for_each(|e| next.push(e.clone()));
-        *self = next;
-    }
-}
+/// #944: a log's events, in a buffer its later versions share and append to in place.
+pub type Events = drover_sys::Append<Event>;
 
 type Gated = (Arc<Mutex<()>>, Arc<Log>);
 
@@ -1005,13 +936,10 @@ pub fn issue_log(events: &[Event], fleet: &str, n: u64) -> Events {
     let mut copies = l.copies.lock().unwrap_or_else(PoisonError::into_inner);
     let c = copies.entry((fleet.to_string(), n)).or_default();
     at.iter()
-        .skip(c.len)
+        .skip(c.len())
         .filter_map(|i| events.get(*i))
         .for_each(|e| c.push(e.clone()));
-    Events {
-        buf: c.buf.clone(),
-        len: at.len(),
-    }
+    c.prefix(at.len())
 }
 
 /// #971: the events naming `agent`, in order: the index's when `events` is a cached log, else one pass.

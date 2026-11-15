@@ -167,7 +167,9 @@ TS: it imports them from `assets/types/api.d.ts`.
   - `cast_precision_loss`: `u64` to `f64` only for shown hours, GB and percents.
 - **Banned APIs (#809):** in non-test code clippy denies `unwrap`, `expect`, `panic!`, `todo!`, `unimplemented!`,
   `dbg!`, indexing and slicing, `as` casts, `print!`/`eprint!` (but `write_stderr`, behind `stderr!`), `let _ =` on a
-  `#[must_use]` value and an `#[allow]` without a `reason`; `unsafe_code` is forbidden. Tests may unwrap, index and
+  `#[must_use]` value and an `#[allow]` without a `reason`; `unsafe_code` is forbidden in every crate but
+  `crates/sys` (`drover-sys`), which holds each OS call std has no safe form for, and the event log's shared
+  append buffer, behind safe fns (`// SAFETY:` on each block, `unsafe_op_in_unsafe_fn` denied). Tests may unwrap, index and
   print (`clippy.toml`; CI's second clippy pass allows them in test targets). `.drover/arch.toml` keeps processes in
   `runner.rs`, the environment in `config.rs` and the clock and sleeps in `clock.rs`. Each ban has a fixture CI must
   see fail: `scripts/lint-fixtures.sh rust|ts` (`ci/lint-fixtures/rust/`, `web/lint-fixtures/`).
