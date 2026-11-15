@@ -158,10 +158,10 @@ fn eject_saves_and_restarts_a_live_lane_on_the_next_root_then_reports_safe() {
     assert_eq!((sp.len(), last.str("root")), (2, Some(&*r.internal.to_string_lossy())));
     assert_eq!(last.str("worktree"), Some(&*new.to_string_lossy()));
     assert_eq!(std::fs::read_to_string(new.join("wip.txt")).unwrap(), "half done\n");
-    let wt_list = git(&r.local, &["worktree", "list"]);
+    let trees = git(&r.local, &["worktree", "list"]);
     assert!(
-        wt_list.contains(&*new.to_string_lossy()) && !wt_list.contains(&*old.to_string_lossy()),
-        "{wt_list}"
+        trees.contains(&*new.to_string_lossy()) && !trees.contains(&*old.to_string_lossy()),
+        "{trees}"
     );
     let (_, dry) = run(&r.c, &f, &["spawn", "sendmeter", "12", "impl", "--dry-run", "--json"]);
     assert!(dry.contains(&*new.to_string_lossy()), "{dry}");
@@ -207,54 +207,6 @@ fn a_pulled_root_is_noted_once_and_its_lane_restarts_on_the_next_root_from_its_p
 }
 
 #[test]
-fn migrate_moves_an_idle_worktree_into_the_new_layout() {
-    let r = repo("roots-migrate");
-    let old = r.c.home.join(".herdr/worktrees/sendmeter");
-    let (idle, live) = (old.join("issue-12"), old.join("issue-13"));
-    git(
-        &r.local,
-        &["worktree", "add", "-q", &idle.to_string_lossy(), "issue-12"],
-    );
-    git(
-        &r.local,
-        &[
-            "worktree",
-            "add",
-            "-q",
-            "-b",
-            "issue-13",
-            &live.to_string_lossy(),
-            "staging",
-        ],
-    );
-    let cache = r.c.home.join(".cache/drover/target/sendmeter");
-    std::fs::create_dir_all(&cache).unwrap();
-    r.sh.lane("sendmeter-impl-13", "working", &live.to_string_lossy());
-    let f = Fake::default();
-    let (code, out) = run(&r.c, &Git(&f), &["migrate"]);
-    assert_eq!(code, 0, "{out}");
-    let to = r.c.worktrees.join("sendmeter/issue-12");
-    assert!(to.join("README").is_file() && !idle.exists(), "{out}");
-    let list = git(&r.local, &["worktree", "list"]);
-    assert!(
-        list.contains(&*to.to_string_lossy()) && !list.contains(&*idle.to_string_lossy()),
-        "{list}"
-    );
-    assert!(live.exists() && out.contains("live, left for later"), "{out}");
-    assert!(
-        cache.exists(),
-        "the old build caches stay while a worktree is left: {out}"
-    );
-    r.sh.exit("sendmeter-impl-13");
-    let (code, out) = run(&r.c, &Git(&Fake::default()), &["migrate"]);
-    assert_eq!(code, 0, "{out}");
-    assert!(
-        r.c.worktrees.join("sendmeter/issue-13/README").is_file() && !cache.exists(),
-        "{out}"
-    );
-}
-
-#[test]
 fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_files() {
     let r = repo("roots-warm");
     let b = r.nvme.join(".build");
@@ -287,7 +239,8 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
         assert!(!mine.join("old").exists() && !mine.join("theirs").exists());
     } else {
         assert!(!mine.join("warm").exists(), "{out}");
-        assert_eq!(cl.val("errors").as_array().map(Vec::len), Some(1), "{out}");
+        let rel = cl.str("errors_ref").expect("the clone's error in cache/");
+        assert!(drover::events::path_in(&r.c.state, rel).is_file(), "{out}");
     }
     let target = format!("{}'", b.join(AGENT).display());
     let sent = r.sh.sent(AGENT);
@@ -307,18 +260,10 @@ fn a_new_lane_clones_its_fleets_warmest_build_on_its_root_and_gets_the_included_
     let (_, st) = run(&r.c, &Git(&f), &["status"]);
     assert!(st.contains(" · +1 ⇡1"), "{st}");
     let cfg = Config::load(&r.c.config).unwrap();
-    let a = drover::herdr::agents(&r.sh.on(&Git(&f))).unwrap();
-    assert_eq!(a[0]["cwd"], json!(wt), "{a:?}");
+    let a = drover::session::all(&cfg, &r.sh.on(&Git(&f)));
+    assert_eq!(a.live().next().map(|s| s.cwd.clone()), Some(wt.clone()), "{a:?}");
     let st = drover::events::states(&r.c.state).unwrap();
-    let ls = drover::lanes::join(
-        &cfg,
-        &Git(&f),
-        &r.c.worktrees,
-        &ev,
-        &st,
-        &a,
-        &std::collections::BTreeMap::default(),
-    );
+    let ls = drover::lanes::join(&cfg, &Git(&f), &ev, &st, &a);
     let l = ls.iter().find(|l| l.name == AGENT).unwrap();
     let u = l.unsaved(&Git(&f));
     assert_eq!(

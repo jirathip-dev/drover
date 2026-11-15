@@ -2,6 +2,7 @@ mod common;
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use common::*;
 use drover::serve::Server;
+use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -18,82 +19,24 @@ fn body(res: &str) -> &str {
     &res[res.find("\r\n\r\n").unwrap() + 4..]
 }
 
-fn frags(s: &Server, cookie: &str, now: u64) -> (String, String) {
-    let [needs, _, chat] = parts(s, ADDR, cookie, now);
-    (chat, needs)
+fn chat(s: &Server, cookie: &str, now: u64) -> Value {
+    serde_json::from_str(&api(s, ADDR, cookie, now, "chat")).unwrap()
 }
 
-fn demo() -> drover::Ctx {
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    std::env::set_current_dir(&root).unwrap();
-    let d = tmpdir("chat-demo");
-    let c = ctx(&d, &std::fs::read_to_string(root.join("demo/fleet.toml")).unwrap());
-    std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
-    std::fs::copy(root.join("demo/events.jsonl"), &c.state).unwrap();
-    c
+fn thread<'a>(chat: &'a Value, t: &str) -> &'a Value {
+    let all = chat["threads"].as_array().unwrap();
+    all.iter()
+        .find(|x| x["id"] == t)
+        .unwrap_or_else(|| panic!("no {t}: {chat}"))
 }
 
-#[test]
-fn the_tab_shows_each_repo_with_its_threads_and_a_thread_as_chat_blocks() {
-    let c = demo();
-    let r = Fake::default();
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let now = 1_793_429_670;
-    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
-    let page = req(&s, "GET", "/", "", &format!("{cookie}Cookie: tab=chat\r\n"), now);
-    assert!(
-        page.contains("<a href=#lanes><span>lanes</span></a><a href=#chat><span>chat</span></a></nav>"),
-        "[chat] is the last of three tabs (#440)"
-    );
-    let (chat, needs) = frags(&s, &cookie, now);
-    let at = |s: &str| chat.find(s).unwrap_or_else(|| panic!("{s} not in {chat}"));
-    assert!(at("<b>all repos</b>") < at("<b>acme-api</b>") && at("<b>acme-api</b>") < at("<b>acme-web</b>"));
-    assert!(chat.contains(
-        "<a class=\"tr\" href=#chat data-t=\"t4\"><i class=ud>●</i><span class=tt><span>Rate limits for /v1/search</span><small class=tid>· t4</small></span>"
-    ));
-    assert!(chat.contains("<b class=r>! choose</b>conductor: Return 429 with `Retry-After` only"));
-    assert!(
-        chat.contains("<a class=\"tr rd\" href=#chat data-t=\"t2\">"),
-        "t2 was read"
-    );
-    assert!(at("data-t=\"t4\"><i") < at("data-t=\"t2\"><i"), "newest first");
-    assert!(chat.contains("<span class=btns><button type=button class=ntb data-repo=\"all\">+ thread</button></span>"));
-    let t4 = &chat[at("<div class=cvp data-t=\"t4\">")..];
-    let t4 = &t4[..t4.find("</form></div>").unwrap()];
-    for want in [
-        "<span class=ds><i class=dt></i>acme-api · claude · opus · awake</span>",
-        "conductor in ",
-        " class=\"blk me\" open><summary><span class=k>you</span>",
-        " class=\"blk ai\" open><summary><span class=k>conductor</span><span class=pv>I see it:",
-        "<code>/v1/search</code>",
-        "<figure class=im><img src=\"thread/t4/IMG%5F2041%2EPNG\"",
-        "<figcaption>IMG_2041.PNG · 218 KB</figcaption>",
-        " class=\"blk run\"><summary><span class=k>$</span><span class=cmd>drover brief acme-api 19</span>",
-        "<p class=ans>✓ 1. per API key <span class=m>· you · ",
-        "<p class=ans>✓ other: \"600 a minute, burst 100\" <span class=m>· you · ",
-        "<a class=tf href=\"thread/t4/429%2Dbody%2Ejson\"><span>▤ 429-body.json</span><span class=m>87 B</span></a>",
-        "<a href=\"https://docs.github.com/rest/using-the-rest-api/rate-limits-for-the-rest-api\">",
-        " class=\"qs note\">⇄ switched to account B",
-        "<form class=chq data-id=\"q33\" data-fleet=\"acme-api\"><button type=button name=choice value=1><span>1. both:",
-        "<small>(recommended)</small>",
-        "placeholder=\"other: type an answer\"",
-        "<p class=tlv><b>●</b> waiting for your answer",
-        "<form class=tw data-t=\"t4\"><input type=file multiple hidden>",
-    ] {
-        assert!(t4.contains(want), "{want} not in {t4}");
-    }
-    assert!(!t4.contains("DECISION q31"), "a DECISION line shows as the ✓ line only");
-    assert!(
-        chat.contains("<span class=ds>all · claude · opus · asleep</span>"),
-        "{chat}"
-    );
-    assert!(!t4.contains("disabled"), "a paired owner device writes");
-    assert!(needs.contains("Rate-limit the public search endpoint") && needs.contains("X-RateLimit"));
-    assert!(
-        needs.contains("asked in <a href=#chat class=ath data-go=\"t4\">Rate limits for /v1/search · t4</a>"),
-        "{needs}"
-    );
-    assert!(needs.contains("<i id=chn hidden data-n=2></i>"), "{needs}");
+fn msgs<'a>(chat: &'a Value, t: &str) -> Vec<&'a Value> {
+    thread(chat, t)["page"]["msgs"].as_array().unwrap().iter().collect()
+}
+
+fn files(chat: &Value, t: &str) -> Vec<String> {
+    let all = msgs(chat, t).into_iter().flat_map(|m| m["files"].as_array().unwrap());
+    all.map(|f| f["name"].as_str().unwrap().to_string()).collect()
 }
 
 fn setup(name: &str) -> drover::Ctx {
@@ -124,6 +67,7 @@ fn acp() -> Fake {
     let agents =
         serde_json::json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
     Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
@@ -173,10 +117,20 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
         "t1",
     ];
     assert_eq!(run(&c, &r, &ask).1, "q1\n");
-    let (chat, _) = frags(&s, &cookie, T + 5);
-    assert!(
-        chat.contains("<form class=chq data-id=\"q1\" data-fleet=\"sendmeter\"><button type=button name=choice value=2><span>2. full <small>(recommended)</small></span></button><button type=button name=choice value=1><span>1. small</span></button>"),
-        "{chat}"
+    let page = chat(&s, &cookie, T + 5);
+    let ask = msgs(&page, "t1")
+        .into_iter()
+        .find(|m| m["kind"] == "ask")
+        .unwrap_or_else(|| panic!("{page}"));
+    assert_eq!(
+        (
+            &ask["ask"]["id"],
+            &ask["ask"]["options"],
+            &ask["ask"]["recommend"],
+            &ask["open"]
+        ),
+        (&json!("q1"), &json!(["small", "full"]), &json!(2), &json!(true)),
+        "{page}"
     );
     let res = req(
         &s,
@@ -192,11 +146,12 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
         "{:?}",
         f.calls.borrow()
     );
-    let (chat, _) = frags(&s, &cookie, T + 20);
-    assert!(!chat.contains("data-id=\"q1\""), "the rows fold");
-    assert!(
-        chat.contains("<p class=ans>✓ 1. small <span class=m>· you · "),
-        "{chat}"
+    let page = chat(&s, &cookie, T + 20);
+    let ask = msgs(&page, "t1").into_iter().find(|m| m["kind"] == "ask").unwrap();
+    assert_eq!(
+        (&ask["open"], &ask["answer"]["n"], &ask["answer"]["choice"]),
+        (&json!(false), &json!(1), &json!("small")),
+        "{page}"
     );
     let ask2 = ["ask", "sendmeter", "-", "How fast?", "--option", "a", "--thread", "t1"];
     assert_eq!(run(&c, &r, &ask2).1, "q2\n");
@@ -210,7 +165,16 @@ fn a_thread_starts_from_the_board_and_a_tapped_choice_types_its_decision_into_th
     );
     assert_eq!(body(&res), "answered q2\n", "{res}");
     assert!(f.called("shed send orchestrator-t1 DECISION q2: 600 a minute"));
-    assert!(frags(&s, &cookie, T + 40).0.contains("✓ other: \"600 a minute\""));
+    let page = chat(&s, &cookie, T + 40);
+    let q2 = msgs(&page, "t1")
+        .into_iter()
+        .find(|m| m["kind"] == "ask" && m["ask"]["id"] == "q2")
+        .unwrap();
+    assert_eq!(
+        (&q2["answer"]["n"], &q2["answer"]["choice"]),
+        (&Value::Null, &json!("600 a minute")),
+        "{page}"
+    );
 }
 
 #[test]
@@ -273,9 +237,11 @@ fn an_attached_image_reaches_the_conductor_and_its_reply_file_shows_inline() {
         &["thread", "reply", "t1", "Here it is.", "--file", mock.to_str().unwrap()],
     );
     assert_eq!(code, 0, "{out}");
-    let (chat, _) = frags(&s, &cookie, T + 5);
-    assert!(chat.contains("<img src=\"thread/t1/IMG%5F1%2EPNG\""), "{chat}");
-    assert!(chat.contains("<img src=\"thread/t1/mockup%2D390%2Epng\""), "{chat}");
+    let got = files(&chat(&s, &cookie, T + 5), "t1");
+    assert!(
+        got.contains(&"IMG_1.PNG".to_string()) && got.contains(&"mockup-390.png".to_string()),
+        "{got:?}"
+    );
     let got = req(&s, "GET", "/thread/t1/mockup-390.png", "", "", T + 5);
     assert!(got.ends_with("\r\n\r\n\u{FFFD}PNG mock"), "{got}");
     let res = req(&s, "GET", "/thread/t1/fleet.toml", "", "", T + 5);
@@ -369,22 +335,8 @@ fn a_device_that_is_not_paired_reads_the_thread_but_cannot_write() {
     let cli = b.cli(&f);
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let (chat, _) = frags(&s, "", T);
-    assert!(
-        chat.contains("<p class=\"ns m\">pair this phone to answer or write</p>"),
-        "{chat}"
-    );
-    assert!(
-        chat.contains("<button type=button name=choice value=1 disabled>"),
-        "{chat}"
-    );
-    assert!(
-        chat.contains("<textarea name=text rows=1 aria-label=message placeholder=\"message the conductor\" disabled>")
-    );
-    assert!(
-        !chat.contains("class=ntb") && !chat.contains("class=nt "),
-        "no [+ thread]"
-    );
+    let page = chat(&s, "", T);
+    assert_eq!(page["rw"], json!(false), "an unpaired device reads, no forms: {page}");
     for b in [
         "op=say&t=t1&text=hi",
         "op=answer&fleet=sendmeter&id=q1&choice=1",
@@ -492,84 +444,6 @@ const nav = async url => {{
     assert_eq!(got[1], serde_json::json!(["body of /", "cache /", "net /"]), "the page");
 }
 
-#[test]
-fn an_image_tap_opens_the_viewer_and_a_page_at_a_nested_path_still_loads_its_images() {
-    if no_webkit() {
-        return;
-    }
-    let c = setup("chat-viewer");
-    let folder = c.state.with_file_name("orchestrator").join("t1");
-    std::fs::create_dir_all(&folder).unwrap();
-    let assets = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets");
-    for f in ["icon-180.png", "icon-192.png"] {
-        std::fs::copy(assets.join(f), folder.join(f)).unwrap();
-    }
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).1,
-        "t1\n"
-    );
-    let (a, b) = (folder.join("icon-180.png"), folder.join("icon-192.png"));
-    let reply = [
-        "thread",
-        "reply",
-        "t1",
-        "Two shots.",
-        "--file",
-        a.to_str().unwrap(),
-        "--file",
-        b.to_str().unwrap(),
-    ];
-    let (code, out) = run(&c, &Fake::default(), &reply);
-    assert_eq!(code, 0, "{out}");
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = l.local_addr().unwrap().to_string();
-    let (c2, at) = (c.clone(), addr.clone());
-    std::thread::spawn(move || {
-        let r = Fake::default();
-        let s = Server::new(&c2, &r, Some(at));
-        for mut st in l.incoming().flatten() {
-            let mut buf = [0u8; 8192];
-            let n = std::io::Read::read(&mut st, &mut buf).unwrap_or(0);
-            let head = String::from_utf8_lossy(&buf[..n]).replacen("GET /deep/thread/t1/icon-180.png ", "GET / ", 1);
-            let _ = std::io::Write::write_all(&mut st, &s.respond(&head, T));
-        }
-    });
-    let js = "const ptr = (k, x, y) => IV.dispatchEvent(new PointerEvent(k, { pointerId: 1, clientX: x, clientY: y, bubbles: true })); \
-        const swipe = (x0, y0, x1, y1) => { ptr('pointerdown', x0, y0); ptr('pointermove', x1, y1); ptr('pointerup', x1, y1); }; \
-        const tap2 = () => { for (const k of [0, 1]) { ptr('pointerdown', 195, 400); ptr('pointerup', 195, 400); } }; \
-        (function go() { const im = [...$$('#chat .cvp[data-t=\"t1\"] .im img')]; \
-          if (im.length < 2 || !im.every(i => i.complete)) return setTimeout(go, 50); \
-          const href = location.href, ok = () => im.filter(i => i.naturalWidth > 0).length, at = [im.length, ok(), +(location.pathname === '/')]; \
-          im[0].click(); \
-          at.push(+!IV.hidden, +(location.href === href), +(IVI.src === im[0].src), +($('.ivn').textContent === '1 / 2')); \
-          swipe(300, 400, 100, 400); \
-          at.push(+(IVI.src === im[1].src), +($('.ivn').textContent === '2 / 2')); \
-          tap2(); \
-          at.push(+IVI.style.transform.includes('scale(2.5)')); \
-          $('.ivx').click(); \
-          at.push(+IV.hidden); \
-          im[1].click(); swipe(200, 300, 200, 500); \
-          at.push(+IV.hidden, ok(), +(location.href === href), errs.length); \
-          window.late = at; })()";
-    let png = tmpdir("chat-viewer-png").join("thread.png");
-    let o = webview()
-        .env("DROVER_WAIT", "3")
-        .args([
-            &format!("http://{addr}/deep/thread/t1/icon-180.png"),
-            "390",
-            "chat",
-            "scene",
-            png.to_str().unwrap(),
-            &format!("chatOpen('t1'); {{ {js} }}"),
-        ])
-        .output()
-        .unwrap();
-    let out = String::from_utf8_lossy(&o.stdout);
-    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
-    let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    assert_eq!(m, [2., 2., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 2., 1., 0.], "{out}");
-}
-
 struct Held<'a>(
     common::fake_shed::Cli<'a>,
     std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
@@ -671,16 +545,16 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let res = req(&s, "POST", "/thread", "op=say&t=t1&text=hello", &cookie, T);
     assert_eq!(body(&res), "sent\n", "{res}");
-    let (chat, _) = frags(&s, &cookie, T + 5);
-    let at = chat
-        .find(" class=\"qs note r\">✗ not delivered: ")
-        .unwrap_or_else(|| panic!("{chat}"));
-    let line = &chat[at..at + chat[at..].find("</p>").unwrap()];
-    let n = line.split("data-n=").nth(1).and_then(|x| x.split('>').next()).unwrap();
+    let page = chat(&s, &cookie, T + 5);
+    let failed = msgs(&page, "t1")
+        .into_iter()
+        .find(|m| m["retry"] == true)
+        .unwrap_or_else(|| panic!("{page}"));
     assert!(
-        line.ends_with(&format!(" <button type=button class=rty data-n={n}>retry</button>")),
-        "{line}"
+        failed["text"].as_str().unwrap().starts_with("✗ not delivered: "),
+        "{failed}"
     );
+    let n = failed["seq"].to_string();
     let f = acp();
     let cli = b.cli(&f);
     let r = b.on(&cli);
@@ -700,11 +574,9 @@ fn a_failed_delivery_shows_red_with_retry_and_retry_types_it_again() {
     });
     let none = Fake::default();
     let busy = b.on(&none);
-    let (chat, _) = frags(&Server::new(&c, &busy, Some(ADDR.into())), &cookie, T + 30);
-    assert!(
-        chat.contains("<p class=\"tlv wk\" data-since=1000000><i class=tld aria-hidden=true></i> working</p>"),
-        "{chat}"
-    );
+    let page = chat(&Server::new(&c, &busy, Some(ADDR.into())), &cookie, T + 30);
+    let t1 = thread(&page, "t1");
+    assert_eq!((&t1["state"], &t1["since"]), (&json!("working"), &json!(T)), "{t1}");
 }
 
 fn long(name: &str, n: u64, now: u64) -> (drover::Ctx, String) {
@@ -735,183 +607,34 @@ fn a_long_thread_carries_its_last_30_messages_and_older_ones_come_30_at_a_time()
     let (c, cookie) = long("chat-window", 100, T);
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let msgs = |h: &str| -> Vec<String> {
-        h.split("<span class=pv>")
-            .skip(1)
-            .map(|p| p[..p.find('<').unwrap()].into())
-            .collect()
+    let texts = |p: &Value| -> Vec<String> {
+        let all = p["msgs"].as_array().unwrap().iter().filter(|m| m["kind"] == "msg");
+        all.map(|m| m["text"].as_str().unwrap().to_string()).collect()
     };
     let want = |a: u64, b: u64| (a..=b).map(|i| format!("m{i}")).collect::<Vec<_>>();
-    let b = |h: &str| {
-        h.split("class=\"qs tmo\" data-b=")
-            .nth(1)
-            .map(|s| s[..s.find('>').unwrap()].to_string())
-    };
-    let (chat, _) = frags(&s, &cookie, T + 200);
-    let view = &chat[chat.find("<div class=cvp data-t=\"t1\">").unwrap()..];
-    assert_eq!(msgs(view), want(71, 100));
-    assert!(!view.contains("thread started"), "{view}");
-    assert!(view.contains(" data-n="), "each block names its event");
-    let page = |b: &str| {
-        let j = api(&s, ADDR, &cookie, T + 200, &format!("thread/t1?before={b}&n=30"));
-        board_js(&[(&j, &format!("chat.page({}, 't1', d, true)", T + 200))]).remove(0)
-    };
-    let p1 = page(&b(view).unwrap());
-    assert_eq!(msgs(&p1), want(41, 70));
-    let p2 = page(&b(&p1).unwrap());
-    assert_eq!(msgs(&p2), want(11, 40));
-    let p3 = page(&b(&p2).unwrap());
-    assert_eq!(msgs(&p3), want(1, 10));
+    let all = chat(&s, &cookie, T + 200);
+    let view = &thread(&all, "t1")["page"];
+    assert_eq!(texts(view), want(71, 100));
     assert!(
-        p3.starts_with("<p class=qs>thread started by owner") && b(&p3).is_none(),
-        "{p3}"
+        view["msgs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|m| m["seq"].as_u64().unwrap() > 0),
+        "each message names its event"
     );
+    let page = |b: &Value| -> Value {
+        serde_json::from_str(&api(&s, ADDR, &cookie, T + 200, &format!("thread/t1?before={b}&n=30"))).unwrap()
+    };
+    let p1 = page(&view["older"]);
+    assert_eq!(texts(&p1), want(41, 70));
+    let p2 = page(&p1["older"]);
+    assert_eq!(texts(&p2), want(11, 40));
+    let p3 = page(&p2["older"]);
+    assert_eq!(texts(&p3), want(1, 10));
+    assert!(p3["older"].is_null() && p3["started"].as_u64().unwrap() > 0, "{p3}");
     let no = req(&s, "GET", "/api/v1/thread/t9?before=5", "", &cookie, T + 200);
     assert!(no.starts_with("HTTP/1.1 404"), "{no}");
-}
-
-#[test]
-fn scrolling_up_loads_older_messages_in_place_and_a_live_update_keeps_them() {
-    if no_webkit() {
-        return;
-    }
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let b = leaked();
-    let (c, cookie) = fill(acp_setup("chat-window-webkit", b), 100, now);
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || {
-        let f = acp();
-        drover::serve::serve_on(&c, &b.cli(&f), l, false)
-    });
-    let js = "const tc = () => $('#chat .cvp[data-t=\"t1\"] .tc'), n = () => tc() ? tc().querySelectorAll(':scope>[data-n]').length : 0; \
-        const until = f => new Promise(r => (function go() { f() ? r() : setTimeout(go, 50); })()); \
-        (async () => { const at = window.late = []; await until(() => n()); at.push(n()); \
-          for (const k of [60, 90, 100]) { tc().scrollTop = 1e6; await new Promise(r => setTimeout(r, 100)); tc().scrollTop = 0; const a = tc().querySelector(':scope>[data-n]'), y = a.getBoundingClientRect().top; \
-            await until(() => n() >= k); at.push(n(), +(Math.abs(a.getBoundingClientRect().top - y) > 1)); await new Promise(r => setTimeout(r, 200)); } \
-          at.push(+!!tc().querySelector('.tmo'), +tc().firstElementChild.textContent.startsWith('thread started')); \
-          tc().scrollTop = tc().scrollHeight / 2; await new Promise(r => setTimeout(r, 200)); \
-          const th = $('#chat .cvp[data-t=\"t1\"] .th'), r = th.getBoundingClientRect(); \
-          at.push(Math.round(r.top - $('header').getBoundingClientRect().bottom), +th.contains(document.elementFromPoint(r.left + 40, r.top + r.height / 2)), +(tc().scrollTop > innerHeight && !document.scrollingElement.scrollTop)); \
-          const f = $('#chat .tw[data-t=\"t1\"]'); f.elements.text.value = 'a new one'; f.requestSubmit(); \
-          await until(() => [...tc().querySelectorAll(':scope>.blk.me:not(.snt) .pv')].some(p => p.textContent === 'a new one')); \
-          at.push(+(tc().querySelector(':scope>[data-n] .pv').textContent === 'm1'), +tc().firstElementChild.textContent.startsWith('thread started'), +(n() > 100), errs.length); })()";
-    let png = tmpdir("chat-window-png").join("thread.png");
-    let o = webview()
-        .env("DROVER_WAIT", "12")
-        .env("DROVER_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
-        .args([
-            &format!("http://{addr}/"),
-            "390",
-            "chat",
-            "scene",
-            png.to_str().unwrap(),
-            &format!("chatOpen('t1'); {{ {js} }}"),
-        ])
-        .output()
-        .unwrap();
-    let out = String::from_utf8_lossy(&o.stdout);
-    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
-    let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    assert_eq!(
-        m,
-        [30., 60., 0., 90., 0., 100., 0., 0., 1., 0., 1., 1., 1., 1., 1., 0.],
-        "{out}"
-    );
-}
-
-const CODE: &str = "Run this:\n\n```sh\n  if [ 1 < 2 ] && true; then\n\n    echo \"b & c\"\nfi\n```\nThen check `x`.\n\n```\nunclosed <tail>\n  more";
-
-fn coded(name: &str) -> drover::Ctx {
-    let c = setup(name);
-    assert_eq!(
-        run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Code"]).1,
-        "t1\n"
-    );
-    let (code, out) = run(&c, &Fake::default(), &["thread", "reply", "t1", CODE]);
-    assert_eq!(code, 0, "{out}");
-    c
-}
-
-#[test]
-fn a_fenced_block_renders_as_one_box_with_its_exact_text_and_copy() {
-    let (c, r) = (coded("chat-code"), Fake::default());
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let (chat, _) = frags(&s, &cookie, T);
-    let md = CODE
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;");
-    let want = "<p>Run this:</p>\
-        <div class=cb><pre>  if [ 1 &lt; 2 ] &amp;&amp; true; then\n\n    echo &quot;b &amp; c&quot;\nfi</pre><button type=button class=cpy>copy</button></div>\
-        <p>Then check <code>x</code>.</p>\
-        <div class=cb><pre>unclosed &lt;tail&gt;\n  more</pre><button type=button class=cpy>copy</button></div></div>";
-    assert!(
-        chat.contains(&format!("<div class=md data-md=\"{md}\">{want}")),
-        "{chat}"
-    );
-}
-
-#[test]
-fn copy_puts_the_exact_text_on_the_clipboard_flashes_copied_and_selects_without_one() {
-    if no_webkit() {
-        return;
-    }
-    let c = coded("chat-copy");
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = l.local_addr().unwrap().to_string();
-    let (c2, at) = (c.clone(), addr.clone());
-    std::thread::spawn(move || {
-        let r = Fake::default();
-        let s = Server::new(&c2, &r, Some(at));
-        for mut st in l.incoming().flatten() {
-            let mut buf = [0u8; 8192];
-            let n = std::io::Read::read(&mut st, &mut buf).unwrap_or(0);
-            let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), T));
-        }
-    });
-    let pre = "window.copied = []; Object.defineProperty(navigator, 'clipboard', { configurable: true, \
-        value: { writeText: t => (copied.push(t), Promise.resolve()) } })";
-    let (first, second) = (
-        "  if [ 1 < 2 ] && true; then\n\n    echo \"b & c\"\nfi",
-        "unclosed <tail>\n  more",
-    );
-    let js = format!(
-        "(async () => {{ try {{ const q = () => [...$$('#chat .cvp[data-t=\"t1\"] .cpy')], timers = [], st = window.setTimeout; \
-          while (!q().length) await new Promise(r => st(r, 50)); \
-          const b = q(); \
-          window.setTimeout = (f, ms) => (ms === 1500 && timers.push(f), ms === 1500 ? 0 : st(f, ms)); \
-          b[0].click(); await new Promise(r => st(r, 50)); \
-          const flash = b[0].textContent; timers.forEach(f => f()); \
-          Object.defineProperty(navigator, 'clipboard', {{ configurable: true, value: undefined }}); \
-          b[1].click(); \
-          window.late = [b.length, copied.length, +(copied[0] === {}), +(flash === 'copied'), +(b[0].textContent === 'copy'), \
-            timers.length, +(getSelection().toString() === {}), errs.length]; }} catch (e) {{ window.late = [-1]; }} }})()",
-        serde_json::json!(first),
-        serde_json::json!(second)
-    );
-    let o = webview()
-        .env("DROVER_WAIT", "3")
-        .env("DROVER_PRE", pre)
-        .args([
-            &format!("http://{addr}/"),
-            "390",
-            "chat",
-            "scene",
-            tmpdir("chat-copy-png").join("t.png").to_str().unwrap(),
-            &format!("chatOpen('t1'); {{ {js} }}"),
-        ])
-        .output()
-        .unwrap();
-    let out = String::from_utf8_lossy(&o.stdout);
-    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
-    let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    assert_eq!(m, [2., 1., 1., 1., 1., 1., 1., 0.], "{out}");
 }
 
 fn log(c: &drover::Ctx) -> String {
@@ -927,14 +650,18 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let (chat, _) = frags(&s, &cookie, T);
-    assert!(
-        chat.contains("<div class=cvp data-t=\"new-sendmeter\">")
-            && chat.contains("<form class=tw data-t=\"new-sendmeter\" data-repo=\"sendmeter\">")
-            && chat.contains("<button type=button class=ntb data-repo=\"sendmeter\">+ thread</button>"),
-        "{chat}"
+    let page = chat(&s, &cookie, T);
+    let repo = page["repos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["repo"] == "sendmeter")
+        .unwrap();
+    assert_eq!(
+        (&repo["rows"], &page["rw"]),
+        (&json!([]), &json!(true)),
+        "an empty thread to write in: {page}"
     );
-    assert!(!chat.contains("name=title"), "no title form");
     assert!(
         !log(&c).contains("thread-"),
         "an empty thread is never logged: {}",
@@ -955,9 +682,9 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     let msgs: Vec<_> = events.iter().filter(|e| e.kind == "thread-msg").collect();
     assert_eq!(msgs.len(), 1, "{}", log(&c));
     assert_eq!(msgs[0].str("text"), Some("Grill me on #12\nthe land mode part"));
-    let thread = c.state.with_file_name("orchestrator").join("t1/.thread.md");
+    let md = c.state.with_file_name("orchestrator").join("t1/.thread.md");
     assert_eq!(
-        std::fs::read_to_string(thread).unwrap(),
+        std::fs::read_to_string(md).unwrap(),
         "owner: Grill me on #12\nthe land mode part\n",
         "the conductor gets the message only"
     );
@@ -977,15 +704,19 @@ fn a_first_message_starts_the_thread_titled_by_its_first_line_and_thread_title_r
     assert!(run(&c, &r, &["thread", "show", "t1"])
         .1
         .starts_with("t1 sendmeter: Land mode for #12\n"));
-    let (chat, _) = frags(&s, &cookie, T + 5);
-    assert!(
-        chat.contains("<span class=tt><span>Land mode for #12</span><small class=tid>· t1</small></span>"),
-        "{chat}"
+    let page = chat(&s, &cookie, T + 5);
+    let row = &page["repos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["repo"] == "sendmeter")
+        .unwrap()["rows"][0];
+    assert_eq!(
+        (&row["id"], &row["title"]),
+        (&json!("t1"), &json!("Land mode for #12")),
+        "{page}"
     );
-    assert!(
-        chat.contains("<div class=tn><b>Land mode for #12</b><small class=tid>· t1</small></div>"),
-        "{chat}"
-    );
+    assert_eq!(thread(&page, "t1")["title"], "Land mode for #12");
     for bad in ["two\nlines", " "] {
         assert_ne!(run(&c, &r, &["thread", "title", "t1", bad]).0, 0, "{bad:?}");
     }
@@ -1073,27 +804,26 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
         .rfind(|e| e.kind == "orchestrator-sleep")
         .unwrap();
     assert_eq!(sleep.str("why"), Some("archived"));
-    let (chat, _) = frags(&s, &cookie, T + 11);
-    let fold = &chat[chat
-        .find("<details class=\"done arc\"><summary><span>1 archived</span>")
-        .unwrap_or_else(|| panic!("{chat}"))..];
-    assert!(fold.starts_with("<details class=\"done arc\"><summary><span>1 archived</span><i class=cv></i></summary><div class=sw><a class=\"tr"), "{fold}");
-    assert!(
-        fold.contains("<button type=button class=sb name=restore data-t=\"t1\">restore</button></div></details></div>"),
-        "{fold}"
-    );
-    assert!(
-        chat.contains("<b>sendmeter</b><span class=ds>no threads</span>"),
-        "{chat}"
+    let page = chat(&s, &cookie, T + 11);
+    let repo = |p: &Value| {
+        p["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["repo"] == "sendmeter")
+            .unwrap()
+            .clone()
+    };
+    let r = repo(&page);
+    assert_eq!(
+        (&r["rows"], &r["archived"][0]["id"]),
+        (&json!([]), &json!("t1")),
+        "{page}"
     );
     let res = req(&s, "POST", "/thread", "op=restore&t=t1", &cookie, T + 20);
     assert_eq!(body(&res), "t1 restored\n", "{res}");
-    let (chat, _) = frags(&s, &cookie, T + 21);
-    assert!(!chat.contains("class=\"done arc\""), "{chat}");
-    assert!(
-        chat.contains("<button type=button class=sb name=archive data-t=\"t1\">archive</button>"),
-        "{chat}"
-    );
+    let r = repo(&chat(&s, &cookie, T + 21));
+    assert_eq!((&r["archived"], &r["rows"][0]["id"]), (&json!([]), &json!("t1")), "{r}");
     let res = req(&s, "POST", "/thread", "op=say&t=t1&text=back+again", &cookie, T + 30);
     assert_eq!(body(&res), "sent\n", "{res}");
     let st = starts(&c);
@@ -1117,27 +847,19 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
 }
 
 #[test]
-fn a_restored_herdr_thread_resumes_its_orchestrators_session() {
-    let c = setup("chat-archive-herdr");
-    let r = Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[("orchestrator-t1", "idle", "/x", "w9:p1")]),
-        )
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr pane run", "")
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
-        )
-        .reply("herdr agent start", "")
-        .reply("herdr agent wait", "")
-        .reply("herdr workspace close", "");
+fn a_restored_shed_thread_resumes_its_orchestrators_session() {
+    let c = setup("chat-archive-shed");
+    let b = FakeShed::attached(&c);
+    let r = Fake::default();
     assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).0, 0);
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
+    assert!(b.called("run", "orchestrator-t1"), "{:?}", b.methods());
     assert_eq!(run(&c, &r, &["thread", "archive", "t1"]).0, 0);
-    assert!(r.called("herdr workspace close"), "{:?}", r.calls.borrow());
+    assert!(
+        b.called("kill", "orchestrator-t1") && !b.has("orchestrator-t1"),
+        "{:?}",
+        b.methods()
+    );
     assert_eq!(run(&c, &r, &["thread", "restore", "t1"]).0, 0);
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "back again"]).0, 0);
     let st: Vec<_> = drover::events::read(&c.state)
@@ -1219,12 +941,9 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
         "{:?}",
         f.calls.borrow()
     );
-    let (chat, _) = frags(&s, &cookie, T + 2);
+    let got = files(&chat(&s, &cookie, T + 2), "t1");
     for i in 0..3 {
-        assert!(
-            chat.contains(&format!("<img src=\"thread/t1/IMG%5F{i}%2EPNG\"")),
-            "{chat}"
-        );
+        assert!(got.contains(&format!("IMG_{i}.PNG")), "{got:?}");
     }
     let a = c.state.with_file_name("a.png");
     std::fs::write(&a, b"A").unwrap();
@@ -1242,87 +961,6 @@ fn a_message_with_three_images_delivers_all_three_and_eleven_are_refused() {
         "{:?}",
         f.calls.borrow()
     );
-}
-
-#[test]
-fn the_keyboard_keeps_the_composer_on_it_the_page_still_and_the_thread_in_place() {
-    if no_webkit() {
-        return;
-    }
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    let b = leaked();
-    let (c, cookie) = fill(acp_setup("chat-kb", b), 30, now);
-    b.add(
-        "orchestrator-t1",
-        serde_json::json!({"fleet": "sendmeter", "role": "orchestrator", "thread": "t1"}),
-    );
-    working(b, false);
-    let st = serde_json::json!({"thread": "t1", "agent": "orchestrator-t1", "pane": "orchestrator-t1", "runtime": "shed-acp", "harness": "claude"});
-    let e = drover::events::Event::new(T, "sendmeter", None, "orchestrator-start", st);
-    drover::events::append(&c.state, &e).unwrap();
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = l.local_addr().unwrap();
-    std::thread::spawn(move || {
-        let f = acp();
-        drover::serve::serve_on(&c, &b.cli(&f), l, false)
-    });
-    let js = "(async () => { try { const st = window.setTimeout, v = () => $('#chat .cvp[data-t=\"t1\"]'); \
-          while (!(v() && v().querySelectorAll('.tc .blk').length > 20)) await new Promise(r => st(r, 50)); \
-          chatOpen('t1'); \
-          const frame = () => new Promise(r => { requestAnimationFrame(() => requestAnimationFrame(r)); st(r, 300); }); await frame(); \
-          const tc = v().querySelector('.tc'), tw = v().querySelector('.tw'), box = tw.elements.text, vv = visualViewport; \
-          const above = () => { const y = tw.getBoundingClientRect().top; const b = [...tc.querySelectorAll('.blk')].filter(b => b.getBoundingClientRect().top < y - 1).pop(); return [b, b.getBoundingClientRect().top - y]; }; \
-          const H = innerHeight, kb = (h, ev) => { for (const [o, k] of [[vv, 'height'], [window, 'innerHeight']]) Object.defineProperty(o, k, { configurable: true, get: () => H - h }); if (ev) vv.dispatchEvent(new Event('resize')); }; \
-          const [b0, d0] = above(), at = [tc.scrollTop > 0 ? 1 : 0]; \
-          const look = async (y = () => vv.offsetTop + vv.height) => { await frame(); \
-            const m = () => { const [b, d] = above(); return [Math.abs(tw.getBoundingClientRect().bottom - y()), document.scrollingElement.scrollTop, +(b === b0), Math.abs(d - d0)]; }; \
-            const ok = r => r[0] <= 1 && !r[1] && r[2] && r[3] <= 1, paint = () => new Promise(q => requestAnimationFrame(() => requestAnimationFrame(q))); \
-            let r = m(); for (let i = 0; i < 40; i++) { const was = ok(r) && String(r); await (was ? paint() : new Promise(q => st(q, 50))); r = m(); if (was === String(r)) break; } at.push(...r); }; \
-          box.focus(); await new Promise(r => st(r, 100)); kb(336); await look(); \
-          box.value = 'one\\ntwo\\nthree'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
-          box.value = ''; box.dispatchEvent(new Event('input', { bubbles: true })); box.blur(); await new Promise(r => st(r, 100)); kb(0); await look(() => $('nav').getBoundingClientRect().top); \
-          box.focus(); kb(336, true); box.value = 'grill me on the land mode'; box.dispatchEvent(new Event('input', { bubbles: true })); await look(); \
-          at.push(errs.length); window.late = at; } catch (e) { window.late = [-1]; } })()";
-    let png = std::env::var("DROVER_SNAPSHOTS").map_or(tmpdir("chat-kb-png").join("chat-kb.png"), |p| {
-        std::path::Path::new(&p).join("chat-kb.png")
-    });
-    let o = webview()
-        .env("DROVER_WAIT", "12")
-        .env("DROVER_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
-        .args([
-            &format!("http://{addr}/"),
-            "390",
-            "chat",
-            "scene",
-            png.to_str().unwrap(),
-            js,
-        ])
-        .output()
-        .unwrap();
-    let out = String::from_utf8_lossy(&o.stdout);
-    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
-    let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    assert_eq!(m.len(), 18, "{out}");
-    assert_eq!(m[0], 1.0, "the thread starts scrolled to its end: {out}");
-    for (i, s) in m[1..17].chunks(4).enumerate() {
-        let what = ["keyboard up", "box grown", "keyboard down", "keyboard up again"][i];
-        assert!(
-            s[0] <= 1.0,
-            "{what}: the composer is {} px off the keyboard or tab bar ({out})",
-            s[0]
-        );
-        assert_eq!(s[1], 0.0, "{what}: the page scrolled ({out})");
-        assert_eq!(s[2], 1.0, "{what}: another message above the box ({out})");
-        assert!(
-            s[3] <= 1.0,
-            "{what}: the message above the box moved {} px ({out})",
-            s[3]
-        );
-    }
-    assert_eq!(m[17], 0.0, "page errors: {out}");
 }
 
 fn working(b: &FakeShed, on: bool) {
@@ -1432,14 +1070,11 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
         "error: no such queued message\n"
     );
     let on = b.on(r);
-    let (chat, _) = frags(&Server::new(&c, &on, Some(ADDR.into())), &cookie, now);
-    let row = |q: u64, t: &str| {
-        format!("<div class=tq data-q={q}><p title=\"{t}\">{t}</p><span class=btns><button type=button name=qn>send now</button><button type=button name=qe>edit</button><button type=button name=qx>remove</button></span></div>")
-    };
-    let rows = row(ids[0].0, "one edited") + &row(ids[1].0, "two");
-    assert!(
-        chat.contains(&format!("<form class=tw data-t=\"t1\">{rows}<input type=file")),
-        "{chat}"
+    let page = chat(&Server::new(&c, &on, Some(ADDR.into())), &cookie, now);
+    assert_eq!(
+        thread(&page, "t1")["queued"],
+        json!([{"q": ids[0].0, "text": "one edited"}, {"q": ids[1].0, "text": "two"}]),
+        "{page}"
     );
     std::thread::sleep(std::time::Duration::from_secs(3));
     assert!(!typed("one") && !typed("two"), "typed mid-turn: {:?}", f.calls.borrow());
@@ -1456,8 +1091,8 @@ fn a_queued_message_waits_for_the_turn_to_end_and_steer_interrupts_and_sends_now
         l.contains("\"from\":\"owner\",\"text\":\"one edited\"") && l.contains("\"from\":\"owner\",\"text\":\"two\"")
     );
     assert_eq!(l.matches("\"why\":\"sent\"").count(), 2, "{l}");
-    let (chat, _) = frags(&Server::new(&c, &on, Some(ADDR.into())), &cookie, now);
-    assert!(!chat.contains("class=tq"), "the queue is empty");
+    let page = chat(&Server::new(&c, &on, Some(ADDR.into())), &cookie, now);
+    assert_eq!(thread(&page, "t1")["queued"], json!([]), "the queue is empty");
     working(b, true);
     assert_eq!(r.esc(), 0);
     assert_eq!(post_to(&addr, &cookie, "op=steer&t=t1&text=stop+that"), "sent\n");
@@ -1504,43 +1139,34 @@ fn a_finished_turns_commands_fold_and_the_live_turns_stay_open() {
         f.calls.borrow()
     );
     cmd("3");
-    let row = |n: &str| {
-        format!("<details class=\"blk run\"><summary><span class=k>$</span><span class=cmd>drover brief sendmeter {n}</span><i class=cv></i></summary></details>")
-    };
     let ev = drover::events::read(&c.state).unwrap();
-    let seq = |n: &str| {
-        ev.iter()
-            .find(|e| e.str("cmd").is_some_and(|x| x.ends_with(n)))
-            .unwrap()
-            .seq
-    };
     let since = ev.iter().rfind(|e| e.str("text") == Some("again")).unwrap().ts;
-    let chat = |st: &str| {
+    let shown = |st: &str| {
         b.set("orchestrator-t1", |t| t["reported"] = serde_json::json!({"state": st}));
         let f = Fake::default();
         let r = b.on(&f);
         let s = Server::new(&c, &r, Some(ADDR.into()));
-        frags(&s, &pair(&s, &c, "Mozilla/5.0 (iPhone)", T), T).0
+        chat(&s, &pair(&s, &c, "Mozilla/5.0 (iPhone)", T), T)
     };
-    let fold = |f: u64, n: &str, rows: &str| {
-        format!("<details data-n={f} class=\"blk fold\"><summary><span class=pv>{n}</span></summary>{rows}</details>")
+    let brief = |n: &str| format!("drover brief sendmeter {n}");
+    let folds = |p: &Value| -> Vec<Value> {
+        msgs(p, "t1")
+            .into_iter()
+            .filter(|m| m["kind"] == "fold")
+            .map(|m| m["cmds"].clone())
+            .collect()
     };
-    let w = chat("working");
-    assert!(
-        w.contains(&fold(seq("1"), "2 commands", &(row("1") + &row("2")))),
-        "{w}"
-    );
-    assert!(
-        w.contains(&row("3").replacen("<details", &format!("<details data-n={}", seq("3")), 1))
-            && !w.contains(&fold(seq("3"), "1 command", &row("3"))),
-        "the live turn's row stays: {w}"
-    );
-    assert!(w.contains(&format!("<p class=\"tlv wk\" data-since={since}>")), "{w}");
-    let i = chat("idle");
-    assert!(
-        i.contains(&fold(seq("3"), "1 command", &row("3"))) && !i.contains("tlv wk"),
-        "{i}"
-    );
+    let cmds = |p: &Value| -> Vec<String> {
+        let all = msgs(p, "t1").into_iter().filter(|m| m["kind"] == "cmd");
+        all.map(|m| m["text"].as_str().unwrap().to_string()).collect()
+    };
+    let w = shown("working");
+    assert_eq!(folds(&w), [json!([brief("1"), brief("2")])], "{w}");
+    assert_eq!(cmds(&w), [brief("3")], "the live turn's row stays: {w}");
+    assert_eq!(thread(&w, "t1")["since"], json!(since), "{w}");
+    let i = shown("idle");
+    assert_eq!(folds(&i), [json!([brief("1"), brief("2")]), json!([brief("3")])], "{i}");
+    assert!(cmds(&i).is_empty() && thread(&i, "t1")["state"] != "working", "{i}");
 }
 
 #[test]
@@ -1604,78 +1230,5 @@ fn a_stream_with_a_thread_open_stamps_its_watch_file() {
                 .filter(|e| e.file_name().to_string_lossy().starts_with("watch-"))
                 .count()
                 == 1
-    );
-}
-
-#[test]
-fn the_thread_follows_its_end_until_you_drag_and_drafts_survive_a_reload() {
-    if no_webkit() {
-        return;
-    }
-    let c = coded("chat-follow");
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = l.local_addr().unwrap().to_string();
-    let (c2, at) = (c.clone(), addr.clone());
-    std::thread::spawn(move || {
-        let r = Fake::default();
-        let s = Server::new(&c2, &r, Some(at));
-        for mut st in l.incoming().flatten() {
-            let mut buf = [0u8; 8192];
-            let n = std::io::Read::read(&mut st, &mut buf).unwrap_or(0);
-            let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), T));
-        }
-    });
-    let pre = "(() => { window.urls = []; const E = window.EventSource; window.EventSource = function (u) { urls.push(String(u)); return new E(u); }; \
-        const F = window.fetch; window.fetch = (u, o) => o && o.method === 'POST' ? Promise.resolve(new Response('error: down', { status: 409 })) : F(u, o); })()";
-    let js = "(async () => { try { \
-          const nap = ms => new Promise(r => setTimeout(r, ms)), at = window.late = []; \
-          for (let k = 0; k < 60 && !$('#chat .cvp[data-t=\"t1\"] .tc'); k++) await nap(50); \
-          at.push(+(THR === 't1'), +(document.documentElement.dataset.tab === 'chat'), +urls.some(u => u.includes('thread=t1'))); \
-          const n = urls.length; Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); \
-          if (!es) connect(); /* the stream was between retries (this server's /live ends at once): its retry */ \
-          at.push(+urls.slice(n).some(u => !u.includes('thread='))); \
-          Object.defineProperty(document, 'hidden', { configurable: true, get: () => false }); \
-          const tev = k => Object.defineProperty(new Event(k), 'touches', { value: [{ clientX: 200, clientY: 400 }] }); \
-          const sc = () => $('#chat .cvp[data-t=\"t1\"] .tc'), end = () => +(Math.abs(sc().scrollTop + sc().clientHeight - sc().scrollHeight) <= 2); \
-          const more = () => { const k = $('#chat').cloneNode(true); for (let i = 0; i < 8; i++) k.querySelector('.cvp[data-t=\"t1\"] .tc').append(Object.assign(document.createElement('p'), { className: 'qs', textContent: 'a streamed line ' + i })); frag('chat', k.innerHTML); }; \
-          more(); more(); await nap(100); at.push(end()); \
-          sc().scrollTop = 200; await nap(100); more(); await nap(100); at.push(end()); \
-          dispatchEvent(tev('touchstart')); sc().scrollTop = 200; await nap(100); dispatchEvent(tev('touchend')); \
-          more(); await nap(100); at.push(+(sc().scrollTop === 200), +!FOL); \
-          sc().scrollTop = sc().scrollHeight; await nap(100); more(); await nap(100); at.push(end(), +FOL); \
-          dispatchEvent(tev('touchstart')); sc().scrollTop = 100; await nap(100); dispatchEvent(tev('touchend')); \
-          const f = $('#chat .tw[data-t=\"t1\"]'), box = f.elements.text; \
-          box.value = 'a draft'; box.dispatchEvent(new Event('input', { bubbles: true })); \
-          const i = f.querySelector('input[type=file]'), d = new DataTransfer(); d.items.add(new File(['x'], 'notes.txt', { type: 'text/plain' })); \
-          Object.defineProperty(i, 'files', { configurable: true, value: d.files }); i.dispatchEvent(new Event('change', { bubbles: true })); \
-          await nap(300); \
-          const fr = document.body.appendChild(Object.assign(document.createElement('iframe'), { src: '/?thread=t1#chat', style: 'width:390px;height:844px' })); \
-          let w; for (let k = 0; k < 100 && !(w = fr.contentWindow) .document?.querySelector('#chat .tw[data-t=\"t1\"] .att'); k++) await nap(50); \
-          const fb = w.document.querySelector('#chat .tw[data-t=\"t1\"]'); \
-          at.push(+(fb?.elements.text.value === 'a draft'), fb ? fb.querySelectorAll('.att').length : -2, +(fb?.querySelector('.att span')?.textContent === 'notes.txt')); \
-          f.requestSubmit(); at.push(+(box.value === ''), end(), +FOL); \
-          await nap(300); \
-          at.push(+(box.value === 'a draft'), +(localStorage.getItem('draft:t1') === 'a draft'), f.querySelectorAll('.att').length); \
-          window.late = [...at, errs.length]; } catch (e) { window.late = [-1, window.late.length]; } })()";
-    let o = webview()
-        .env("DROVER_WAIT", "10")
-        .env("DROVER_PRE", pre)
-        .args([
-            &format!("http://{addr}/?thread=t1#chat"),
-            "390",
-            "chat",
-            "scene",
-            tmpdir("chat-follow-png").join("t.png").to_str().unwrap(),
-            js,
-        ])
-        .output()
-        .unwrap();
-    let out = String::from_utf8_lossy(&o.stdout);
-    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
-    let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    assert_eq!(
-        m,
-        [1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 1., 0.],
-        "{out}"
     );
 }

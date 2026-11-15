@@ -1,9 +1,8 @@
 use crate::config::{home, Config};
 use crate::events::{emit, status_line, working, Event};
-use crate::hosts::all_agents;
 use crate::runner::{self, Runner};
 use crate::{
-    access, check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx,
+    check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx,
 };
 use anyhow::{bail, Context, Result};
 use clap::{CommandFactory, Parser, Subcommand};
@@ -23,7 +22,7 @@ type Service = fn(&Ctx, &str, Option<&str>) -> Result<()>;
 #[command(
     name = "drover",
     version = crate::VERSION,
-    about = "State, gates and harness toggle over herdr",
+    about = "State, gates and harness toggle over shed",
     disable_help_subcommand = true
 )]
 pub(crate) struct Cli {
@@ -56,7 +55,7 @@ enum Cmd {
     #[command(about = "Resume a paused fleet")]
     Resume { fleet: String },
     #[command(
-        about = "Create worktree + herdr pane, write .brief.md, launch the role's harness, verify the prompt landed"
+        about = "Create worktree + shed terminal, write .brief.md, launch the role's harness, verify the prompt landed"
     )]
     Spawn {
         fleet: String,
@@ -65,12 +64,12 @@ enum Cmd {
         #[command(flatten)]
         o: spawn::Opts,
     },
-    #[command(about = "Record a lane already running in a herdr pane (repair a spawn that was never logged)")]
+    #[command(about = "Record a lane already running in a shed terminal (repair a spawn that was never logged)")]
     Adopt {
         fleet: String,
         issue: u64,
         role: String,
-        #[arg(help = "The herdr pane the harness runs in")]
+        #[arg(help = "The shed terminal the harness runs in")]
         #[arg(long)]
         pane: String,
     },
@@ -339,6 +338,14 @@ enum Cmd {
     #[command(about = "Compact board (≤ 60 cols): queue order, state, lane, age, last event")]
     Board { fleet: Option<String> },
     #[command(
+        about = "#910: every live lane's processes (CPU %, run time, heavy kind) and heavy-slot waits, under the host's load, heavy slots and held respawns"
+    )]
+    Top {
+        #[arg(help = "Machine-readable output")]
+        #[arg(long)]
+        json: bool,
+    },
+    #[command(
         about = "File this week's lessons issue, queue it on top and spawn its `lesson` lane (orchestrators and the owner only)"
     )]
     #[command(args_conflicts_with_subcommands = true)]
@@ -373,9 +380,7 @@ enum Cmd {
         #[arg(help = "Write the page as static files into this dir instead of serving (docs/serve.md)")]
         #[arg(long)]
         export: Option<std::path::PathBuf>,
-        #[arg(
-            help = "With --export: the inert demo, its herdr/gh/host reads canned in runner.json next to fleet.toml"
-        )]
+        #[arg(help = "With --export: the inert demo, its shed/gh/host reads canned in runner.json next to fleet.toml")]
         #[arg(long, requires = "export")]
         demo: bool,
     },
@@ -440,7 +445,7 @@ enum Cmd {
         rules: std::path::PathBuf,
     },
     #[command(
-        about = "Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun. `setup <host> <name>` (#303): run that configured login in a herdr pane on the host instead"
+        about = "Write and load the tick and board jobs, tailscale serve, profiles sync, then doctor (its exit code); safe to rerun. `setup <host> <name>` (#303): run that configured login in a shed terminal on the host instead"
     )]
     Setup {
         #[arg(requires = "name")]
@@ -484,14 +489,7 @@ enum Cmd {
     )]
     Check,
     #[command(
-        about = "Each `[accounts]` account: ok / capped until hh:mm, and the lanes on it (names only, never tokens)"
-    )]
-    Accounts {
-        #[command(subcommand)]
-        cmd: Option<AccountsCmd>,
-    },
-    #[command(
-        about = "Read-only host check: herdr, gh, config, accounts, harnesses, serve, phone, watchdog; ✓/✗/! with the fix per line, exit 1 on any ✗"
+        about = "Read-only host check: shed, gh, config, harnesses, serve, phone, watchdog; ✓/✗/! with the fix per line, exit 1 on any ✗"
     )]
     Doctor {
         #[arg(long)]
@@ -520,9 +518,7 @@ enum Cmd {
         #[arg(help = "With --yes, remove the orphans too: folders under the worktree root no fleet owns")]
         #[arg(long)]
         orphans: bool,
-        #[arg(
-            help = "The daily job (#557): merged/closed lanes idle 3+ days, at most 10, plus herdr workspaces whose folder is gone"
-        )]
+        #[arg(help = "The daily job (#557): merged/closed lanes idle 3+ days, at most 10")]
         #[arg(long, hide = true, conflicts_with_all = ["fleet", "lane", "yes", "orphans"])]
         scheduled: bool,
     },
@@ -558,7 +554,7 @@ enum Cmd {
     #[command(about = "Send Esc to an agent's pane (it pauses); logs `stop`")]
     Stop { agent: String },
     #[command(
-        about = "Close the pane of a herdr agent that is not a drover lane (IS_LANE for lanes); files and worktrees stay"
+        about = "Close the terminal of a shed agent that is not a drover lane (IS_LANE for lanes); files and worktrees stay"
     )]
     Close {
         agent: String,
@@ -591,6 +587,14 @@ enum Cmd {
         #[arg(long)]
         live: bool,
     },
+    #[command(
+        hide = true,
+        about = "Archive old events of done issues, delete old heartbeats (daily by tick)"
+    )]
+    Compact {
+        #[arg(long, help = "Rebuild the issue, lane and ask tables from every event instead")]
+        rebuild: bool,
+    },
     #[command(about = "The event log in its JSONL format (one event a line, with its seq), for external readers")]
     #[command(hide = true)]
     Events {
@@ -618,10 +622,7 @@ enum Cmd {
         #[arg(long)]
         git_pre_push: bool,
     },
-    #[command(
-        hide = true,
-        about = "A provider's status line: records the lane account's 5h/7d limits (reads status JSON on stdin)"
-    )]
+    #[command(hide = true, about = "A provider's status line: the lane's fleet and issue")]
     Statusline,
     #[command(
         about = "#275: log a lane's own event (`hook-denied`, `coauthor-trailer`), forwarded from a lane on another host"
@@ -947,12 +948,6 @@ enum StatsCmd {
 }
 
 #[derive(Subcommand)]
-enum AccountsCmd {
-    #[command(about = "Let spawns use a capped account again")]
-    Reset { name: String },
-}
-
-#[derive(Subcommand)]
 enum HostsCmd {
     #[command(about = "Probe every host's tags again (else hourly, by `check`)")]
     Refresh,
@@ -971,7 +966,7 @@ enum HostsCmd {
     Destroy { name: String },
     #[command(
         hide = true,
-        about = "Owner only: install herdr, drover, git, gh, the lane providers there over SSH, open its logins, clone its fleets"
+        about = "Owner only: install shed, drover, git, gh, the lane providers there over SSH, open its logins, clone its fleets"
     )]
     Bootstrap { name: String },
     #[command(about = "Owner only: a healthy cloud host saved as its recipe's snapshot; logs `cloud-snapshot`")]
@@ -1069,8 +1064,8 @@ enum ProfilesCmd {
     },
 }
 
-/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's orchestrator `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`, +6 for #712's `unpark` and `park --why`/`--by`, +1 for #780's `thread new --orchestrator`, +2 for #817's `extend --typed`/`--basis`, +1 for #838's `answer --note`, +3 for #844's `config show`, +3 for #889's `hotspots`, +4 for #845's `diagram`).
-pub const HELP_AGENT_MAX: usize = 366;
+/// Line budget of `help --agent` (tests/spawn.rs): raise it here, next to the text it counts (+1 for #130's `--owner-override`, +8 for #151's `extend`/`park`, +1 for #164's `--orphans`, +14 for #157's `hosts`, `queue set`, `--needs`, `--host`, +4 for #319's `done`, +19 for #355's `thread` and `ask --thread`, +1 for #386's `thread reply --file`, +19 for #387's `config` and `secret`, +3 for #413's `thread handoff`, +10 for #405's `thread title`/`archive`/`restore` and `thread say --file`, +9 for #419's `lesson`, +2 for #412's `queue add --design` and the design states, +2 for #417's `queue add --verify` and the verify stage, +1 for #461's orchestrator `timer install`, +1 for #420's `queue add --repro`, +1 for #344's `migrate --live`, +2 for #478's `kill`/`close --host`, +1 for #404's `thread new --harness`, +1 for #541's `answer --basis`, +15 for #538's `card`, +4 for #510's `lesson apply`, +4 for #505's `queue unblock`, +5 for #511's `turn`, +4 for #574's `amend`, +4 for #646's `wip prune`, +3 for #630's `hosts eject`, +2 for #668's `cap`, +4 for #677's `why`, +3 for #637's `hosts keys`, +2 for #730's `queue add --architect` and the two roles, +2 for #734's `queue add --perf`/`--refactor`, +6 for #712's `unpark` and `park --why`/`--by`, +1 for #780's `thread new --orchestrator`, +2 for #817's `extend --typed`/`--basis`, +1 for #838's `answer --note`, +3 for #844's `config show`, +3 for #889's `hotspots`, +4 for #845's `diagram`, +3 for #910's `top`).
+pub const HELP_AGENT_MAX: usize = 369;
 
 /// The one usage doc both harnesses get: the commands generated from the CLI definition, the rest from `roles/usage-*.md`.
 pub fn usage_doc() -> String {
@@ -1078,7 +1073,6 @@ pub fn usage_doc() -> String {
     cmd.build();
     let mut s = String::from(include_str!("../roles/usage-head.md"));
     let owner = [
-        "accounts",
         "doctor",
         "drive",
         "fleet",
@@ -1167,9 +1161,9 @@ pub fn main_with(args: Vec<String>, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Wri
             sent[i] = std::path::absolute(&sent[i]).map_or(sent[i].clone(), |p| p.display().to_string());
         }
     }
-    let with = Config::load(&ctx.config)
-        .ok()
-        .and_then(|c| c.shed())
+    let with = (r.shed().is_none())
+        .then(|| Config::load(&ctx.config).ok()?.shed())
+        .flatten()
         .map(|b| crate::shed::With(r, b));
     let r: &dyn Runner = with.as_ref().map_or(r, |w| w);
     let res = match lane_write.then(|| forward(r, &sent)).flatten() {
@@ -1250,7 +1244,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 _ => ctx.state.clone(),
             };
             crate::db::migrate(&state, out)?;
-            crate::roots::migrate(ctx, r, out)?;
             crate::secret::retired(&state, out)?;
         }
         Cmd::Events { .. } => write!(out, "{}", crate::events::jsonl(&ctx.state)?)?,
@@ -1282,12 +1275,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             role,
             git_pre_push: false,
         } => run_hook(ctx, r, out, stdin, role.as_deref() == Some("rev"))?,
-        Cmd::Statusline => {
-            let mut buf = String::new();
-            let _ = stdin.read_to_string(&mut buf);
-            let env = |k: &str| std::env::var(k).unwrap_or_default();
-            crate::usage::statusline(ctx, &env("DROVER_ACCOUNT"), &env("DROVER_LANE"), &buf, out);
-        }
+        Cmd::Statusline => crate::usage::statusline(&std::env::var("DROVER_LANE").unwrap_or_default(), out),
         Cmd::LaneEvent { kind, data } => lane_event(ctx, &kind, serde_json::from_str(&data)?),
         Cmd::Heavy {
             kind,
@@ -1315,7 +1303,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
         }
         Cmd::Status(Scope { fleet, json }) => {
             let fleet = fleet.map(|f| crate::rename::current(&ctx.state, &f));
-            let (events, all) = (working(&ctx.state)?, crate::events::states(&ctx.state)?);
+            let all = crate::events::states(&ctx.state)?;
             let rows: Vec<_> = all
                 .values()
                 .filter(|s| fleet.as_ref().is_none_or(|f| *f == s.fleet))
@@ -1332,7 +1320,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             } else if rows.is_empty() {
                 writeln!(out, "no tracked issues")?;
             } else {
-                let cfg = Config::load(&ctx.config).ok();
+                let (events, cfg) = (working(&ctx.state)?, Config::load(&ctx.config).ok());
                 let serial = |f: &str| queue::serial_use(&events, &all, f, cfg.as_ref()).map(|s| format!("{f}: {s}\n"));
                 let mut serial: Vec<_> = rows.iter().filter_map(|s| serial(&s.fleet)).collect();
                 serial.dedup();
@@ -1352,12 +1340,13 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         &c,
                         &look,
                         &events,
-                        &all_agents(&c, &look).unwrap_or_default(),
+                        &crate::session::all(&c, &look).running(),
                         false,
+                        None,
                     )
                 });
                 let cfg = Config::load(&ctx.config).ok();
-                let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
+                let at = cfg.as_ref().map(|c| places(c, &look, &events)).unwrap_or_default();
                 let hosts = cfg.as_ref().is_some_and(|c| !c.hosts.is_empty()) || at.values().any(|p| !p.is_empty());
                 let pad = [5, 63][usize::from(hosts)];
                 let c = |h: &str| format!(" {h:<14}").repeat(usize::from(hosts));
@@ -1385,7 +1374,11 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     "FLEET", "ISSUE", "STATE", "LANE", "AGE", head
                 )?;
                 for (s, skip) in rows.into_iter().zip(skips) {
-                    let pending = crate::pending::of(&events, &s.fleet, s.issue).and_then(|p| p.line(ctx.now));
+                    let paused = cfg
+                        .as_ref()
+                        .is_some_and(|c| c.fleet.get(&s.fleet).is_some_and(|f| f.paused));
+                    let pending = (crate::pending::of(&events, &s.fleet, s.issue).and_then(|p| p.line(ctx.now)))
+                        .or_else(|| crate::pending::waits(&events, &s.fleet, s.issue, paused));
                     let wait = waits
                         .iter()
                         .flatten()
@@ -1402,7 +1395,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 write!(out, "{}", serial.concat())?;
                 if let Some(c) = &cfg {
-                    let agents = all_agents(c, &look).unwrap_or_default();
+                    let agents = crate::session::all(c, &look).running();
                     write!(out, "{}", crate::hosts::slots_line(c, &events, &agents))?;
                 }
                 if let Some(t) = look.ts {
@@ -1448,6 +1441,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             writeln!(out, "{line}")?;
             return Ok(code);
         }
+        Cmd::Top { json } => {
+            let t = crate::top::top(ctx, &Config::load(&ctx.config)?, r)?;
+            if json {
+                writeln!(out, "{}", serde_json::to_string_pretty(&t)?)?;
+            } else {
+                crate::top::print(&t, out)?;
+            }
+        }
         Cmd::Board { fleet } => {
             let events = working(&ctx.state)?;
             let all = fleet.map_or_else(
@@ -1456,7 +1457,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             );
             let cfg = Config::load(&ctx.config).ok();
             let look = crate::snapshot::Snap::read(ctx, r);
-            let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
+            let at = cfg.as_ref().map(|c| places(c, &look, &events)).unwrap_or_default();
             let board = |f: &String| queue::board(ctx, &events, f, cfg.as_ref(), &crate::overlap::cached(ctx, f), &at);
             let boards: Vec<_> = all.iter().map(board).collect();
             for (k, _) in cfg.iter().flat_map(Config::warnings) {
@@ -1466,6 +1467,14 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 writeln!(out, "{l}")?;
             }
             write!(out, "{}", boards.join("\n"))?;
+        }
+        Cmd::Compact { rebuild: true } => {
+            crate::db::rebuild(&ctx.state)?;
+            writeln!(out, "rebuilt the issue, lane and ask tables")?;
+        }
+        Cmd::Compact { rebuild: false } => {
+            let (gone, moved) = crate::db::compact(&ctx.state, ctx.now)?;
+            writeln!(out, "{gone} heartbeats deleted, {moved} events archived")?;
         }
         Cmd::Report { id } => crate::report::show(ctx, out, id.as_deref())?,
         Cmd::Asks {
@@ -1583,7 +1592,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             let pane = crate::setup::start(ctx, &Config::load(&ctx.config)?, r, &h, &n, "cli")?;
             writeln!(
                 out,
-                "{n} on {h}: herdr pane {pane}; it closes when the login exits or in 10 min"
+                "{n} on {h}: shed terminal {pane}; it closes when the login exits or in 10 min"
             )?;
         }
         Cmd::Tick => return crate::timer::tick(ctx, r, out),
@@ -1852,9 +1861,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now, id.as_deref()))?;
                 }
                 Cmd::Waiting(Scope { fleet, json }) => {
-                    let (events, agents) = (working(&ctx.state)?, all_agents(&cfg, r).unwrap_or_default());
-                    let at = places(ctx, &cfg, r, &events);
-                    let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true);
+                    let (events, agents) = (working(&ctx.state)?, crate::session::all(&cfg, r).running());
+                    let at = places(&cfg, r, &events);
+                    let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true, None);
                     let mut rows: Vec<_> = all
                         .into_iter()
                         .filter(|(s, w)| s.lane.as_ref() == Some(&w.lane) && !s.done() && s.state != "parked")
@@ -1920,7 +1929,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     }
                     rows.retain(|w| fleet.as_ref().is_none_or(|f| *f == w.fleet));
                     for w in &mut rows {
-                        if let Some(l) = crate::pending::of(&events, &w.fleet, w.issue).and_then(|p| p.line(ctx.now)) {
+                        let paused = cfg.fleet.get(&w.fleet).is_some_and(|f| f.paused);
+                        let line = crate::pending::of(&events, &w.fleet, w.issue).and_then(|p| p.line(ctx.now));
+                        if let Some(l) = line.or_else(|| crate::pending::waits(&events, &w.fleet, w.issue, paused)) {
                             (w.who, w.what) = ("drive", l);
                         }
                     }
@@ -1951,10 +1962,6 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         )?;
                     }
                 }
-                Cmd::Accounts { cmd: None } => access::list(ctx, &cfg, r, out)?,
-                Cmd::Accounts {
-                    cmd: Some(AccountsCmd::Reset { name }),
-                } => access::reset(ctx, &cfg, out, &name)?,
                 Cmd::Protection => return protection::protection(&cfg, r, out),
                 Cmd::Stats {
                     cmd: StatsCmd::Land { fleet },
@@ -2165,7 +2172,9 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                             );
                             let mut d = queue::op("add", &issues, top, None, after, None);
                             for &i in &issues {
-                                let _ = gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, i, false);
+                                if gh::spec(ctx, r, cfg.fleet(&fleet)?, &fleet, i, false).is_ok_and(|v| gh::is_pr(&v)) {
+                                    return gate::refused("IS_PR", format!("#{i} is a pull request, not an issue"));
+                                }
                             }
                             if let Some(g) = g {
                                 d["serial"] = if g.is_empty() { json!(true) } else { json!(g) };
@@ -2478,11 +2487,8 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     Ok(0)
 }
 
-fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> std::collections::BTreeMap<String, String> {
-    let (st, list) = (
-        crate::events::fold(events),
-        crate::herdr::list(r, "agent").unwrap_or_default(),
-    );
-    let ls = crate::snapshot::lanes(cfg, r, ctx, (events, &st), &list);
+fn places(cfg: &Config, r: &dyn Runner, events: &[Event]) -> std::collections::BTreeMap<String, String> {
+    let st = crate::events::fold(events);
+    let ls = crate::snapshot::lanes(cfg, r, (events, &st), &crate::session::all(cfg, r));
     ls.into_iter().map(|l| (l.name, l.place)).collect()
 }

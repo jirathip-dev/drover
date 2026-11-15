@@ -2,7 +2,7 @@
 
 > **Approved 2026-11-03 ("Approve all with fixes"), built in phase 2.** The open questions below took their
 > recommendations: these token names, brass links, no tile texture, lifted palettes, `theme-color` from `--bg`, the
-> added gates, and the gate in `assets/serve.js` (`src/` only serves the files). The owner's fixes changed the values
+> added gates, and the gate in assets/serve.js (removed in #927) (`src/` only serves the files). The owner's fixes changed the values
 > and the gate, so `assets/schemes/` (copied to `schemes/` here) and the board's gate are the source of truth; the PNGs
 > and `report.json` are phase 1's. The CI `ui` job shoots Queue and Host in every scheme from the real CSS
 > (`ui-390/queue-scheme-<name>.png`, `busy-host-ranked-scheme-<name>.png`).
@@ -32,7 +32,7 @@ node docs/design/schemes/shoot.mjs <site> <chrome-headless-shell>   # the phones
 ```
 
 **Data:** the committed synthetic `demo/`, with one change in a scratch copy: a PASS verdict for acme-api #15, so the
-Queue has a **ready** row (the demo has none). Nothing in the repo's `demo/` changed. Host is `scripts/host-fixtures.sh`'s
+Queue has a **ready** row (the demo has none). Nothing in the repo's `demo/` changed. Host is scripts/host-fixtures.sh (removed in #927)'s
 `busy` fixture, so it has the **red bar** (load/cpu 4.24 over 2.5, MACHINE red). The shots are framed without changing
 any style: the demo banner is removed, Queue keeps only the first **needs-you card** above the fleet cards, and Host drops
 the needs-you cards so its groups fill the screen. Each Queue shows a needs-you card, `waiting`/`needs-human`/`dead` in red,
@@ -179,7 +179,7 @@ Status colours stay green, amber and red in every scheme: the hue order never ch
    briefs invite (wheat vs amber, copper vs red). **Recommend: keep them.**
 7. **Where the gate runs vs the src budget.** CIEDE2000 and the contrast maths are about 40 lines, more than the
    issue's `src/ ≈ +25`. **Recommend:** `src/` only serves the schemes (built-in and user files, about 20 lines), and
-   the gate runs in `assets/serve.js` (outside the line cap), which filters the picker and writes the Host warning.
+   the gate runs in assets/serve.js (removed in #927) (outside the line cap), which filters the picker and writes the Host warning.
    A Rust test would run that JS under node, as `tests/chat_blocks.rs` does. Alternatively, the gate goes in Rust and the
    budget is about +60.
 8. **The tightest margins:** farm's amber↔red is ΔE 20.4 (#242's values; the threshold is 20) and gruvbox's

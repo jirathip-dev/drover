@@ -60,26 +60,19 @@ fn setup(name: &str) -> (drover::Ctx, FakeShed) {
 #[test]
 fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_closed() {
     let (c, b) = setup("orchestrator-lanes");
-    let agents = drover::herdr::agents(&b.on(&Fake::default())).unwrap();
+    let cfg0 = drover::config::Config::load(&c.config).unwrap();
+    let agents = drover::session::all(&cfg0, &b.on(&Fake::default()));
     let cfg = drover::config::Config::load(&c.config).unwrap();
     let events = read(&c.state).unwrap();
     let st = drover::events::fold(&events);
-    let lanes = drover::lanes::join(
-        &cfg,
-        &Fake::default(),
-        &c.worktrees,
-        &events,
-        &st,
-        &agents,
-        &std::collections::BTreeMap::default(),
-    );
+    let lanes = drover::lanes::join(&cfg, &Fake::default(), &events, &st, &agents);
     let row = |l: &drover::lanes::Lane| {
         let s = |v: &Option<String>| v.clone().unwrap_or_default();
         (
             s(&l.fleet),
             l.name.clone(),
             l.role.clone(),
-            l.state.clone(),
+            l.state.word(),
             s(&l.model),
             s(&l.thread),
             l.issue,
@@ -137,79 +130,42 @@ fn orchestrators_are_lanes_of_their_repo_first_in_its_group_and_asleep_once_clos
 }
 
 #[test]
-fn the_lanes_tab_renders_orchestrator_rows_with_their_thread() {
+fn the_lanes_api_carries_orchestrator_rows_with_their_thread() {
     let (c, b) = setup("orchestrator-lanes-page");
     let f = Fake::default();
     let r = b.on(&f);
     let s = Server::new(&c, &r, None);
-    let page = with_queue(
-        &String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)),
-        &s,
-        "",
-        T,
+    let v: serde_json::Value = serde_json::from_str(&api(&s, "", "", T, "lanes")).unwrap();
+    let repo = |sec: &str, f: &str| {
+        let secs = v["sections"].as_array().unwrap();
+        let sec = secs.iter().find(|x| x["name"] == sec).unwrap_or_else(|| panic!("{v}"));
+        let repos = sec["repos"].as_array().unwrap();
+        repos.iter().find(|r| r["name"] == f).unwrap_or_else(|| panic!("{sec}"))["lanes"].clone()
+    };
+    let drover = repo("idle", "drover");
+    let row = |name: &str| {
+        let all = drover.as_array().unwrap();
+        all.iter()
+            .find(|l| l["name"] == name)
+            .unwrap_or_else(|| panic!("{drover}"))
+            .clone()
+    };
+    assert_eq!(drover[0]["name"], "Orchestrator-run design lanes · t6");
+    assert_eq!(
+        (&drover[0]["role"], &drover[0]["thread"]),
+        (&json!("orchestrator"), &json!("t6"))
     );
-    let at = |s: &str| page.find(s).unwrap_or_else(|| panic!("{s} missing"));
-    let idle = &page[at("<h2><span class=a>idle (")..];
-    let herd = &idle[idle.find("<h3>drover (3)</h3>").unwrap()..];
-    assert!(
-        herd.starts_with("<h3>drover (3)</h3><div class=lane data-agent=\"Orchestrator-run design lanes · t6\" data-role=orchestrator data-thread=t6>"),
-        "{herd}"
+    let old = row("Old chat · t8");
+    assert_eq!(
+        (&old["gone"], &old["thread"], &old["state"], &old["tone"]),
+        (&json!(true), &json!("t8"), &json!("asleep"), &json!("m")),
+        "asleep reads muted: {old}"
     );
+    assert_eq!(repo("working", "all repos")[0]["thread"], "t7");
+    let others = repo("idle", "Others");
     assert!(
-        page.contains("<div class=lane data-agent=\"Old chat · t8\" data-role=orchestrator data-gone data-thread=t8>")
-    );
-    assert!(page.contains("<span class=\"nw m\">asleep"), "asleep reads muted");
-    assert!(page.contains(
-        "<h3>all repos (1)</h3><div class=lane data-agent=\"Every repo · t7\" data-role=orchestrator data-thread=t7>"
-    ));
-    let others = &page[at("<h3>Others (2)</h3>")..];
-    let others = &others[..others.find("<h2>").unwrap_or(others.len())];
-    assert!(
-        !others.contains("data-thread") && others.contains("orchestrator-t99"),
+        others.as_array().unwrap().iter().all(|l| l["thread"].is_null())
+            && others.to_string().contains("orchestrator-t99"),
         "{others}"
     );
-    let css = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/serve.css")).unwrap();
-    assert!(css.contains(".lane[data-thread][data-gone]>.lr{opacity:.55}"));
-}
-
-#[test]
-fn a_tap_on_a_orchestrator_row_opens_its_thread_in_the_chat_tab() {
-    if no_webkit() {
-        return;
-    }
-    let (c, b) = setup("orchestrator-lanes-tap");
-    let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = l.local_addr().unwrap().to_string();
-    let at = addr.clone();
-    std::thread::spawn(move || {
-        let f = Fake::default();
-        let r = b.on(&f);
-        let s = Server::new(&c, &r, Some(at));
-        for mut st in l.incoming().flatten() {
-            let mut buf = [0u8; 8192];
-            let n = std::io::Read::read(&mut st, &mut buf).unwrap_or(0);
-            let _ = std::io::Write::write_all(&mut st, &s.respond(&String::from_utf8_lossy(&buf[..n]), T));
-        }
-    });
-    let js = "$('.lane[data-thread=\"t8\"] .lr').click(); \
-        const v = $('#chat .cvp[data-t=\"t8\"]'); \
-        window.late = [+(document.documentElement.dataset.tab === 'chat'), +!$('#chat').hidden, +!!v, \
-          +(v && getComputedStyle(v).display !== 'none'), +(THR === 't8'), +!!(history.state && history.state.thr === 't8'), \
-          +!$('#sheet.on'), errs.length];";
-    let png = tmpdir("orchestrator-lanes-png").join("tap.png");
-    let o = webview()
-        .args([
-            &format!("http://{addr}/?all=1"),
-            "390",
-            "lanes",
-            "scene",
-            png.to_str().unwrap(),
-            js,
-        ])
-        .output()
-        .unwrap();
-    let out = String::from_utf8_lossy(&o.stdout);
-    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
-    let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-    assert_eq!(m, [1., 1., 1., 1., 1., 1., 1., 0.], "{out}");
 }

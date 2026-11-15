@@ -439,7 +439,7 @@ fn orphans_are_listed_and_removed_only_with_the_flag() {
 }
 
 #[test]
-fn the_host_tab_removes_orphans_for_a_paired_device_only() {
+fn orphans_are_removed_for_a_paired_device_only() {
     const ADDR: &str = "127.0.0.1:7777";
     let c = ctx(&tmpdir("disk-orphans-page"), CONFIG);
     let old = c.worktrees.join("oldproj");
@@ -448,15 +448,10 @@ fn the_host_tab_removes_orphans_for_a_paired_device_only() {
     let r = Fake::default();
     let w = sh.on(&r);
     let s = drover::serve::Server::new(&c, &w, Some(ADDR.into()));
-    let page = host_tab(&s, ADDR, NOW);
-    assert!(
-        page.contains(
-            "<button data-confirm=\"Remove 1 orphan folder under the worktree root?\">remove orphans</button>"
-        ),
-        "{page}"
-    );
-    let i = page.find("name=mtime value=").unwrap() + 17;
-    let mt: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let host = || serde_json::from_str::<serde_json::Value>(&api(&s, ADDR, "", NOW, "host")).unwrap();
+    let h = host();
+    assert_eq!(h["orphans"], 1, "{h}");
+    let mt = h["mtime"].as_str().unwrap().to_string();
     let body = format!("op=orphans&fleet=&mtime={mt}");
     let post = |extra: &str| {
         let req = format!(
@@ -472,7 +467,7 @@ fn the_host_tab_removes_orphans_for_a_paired_device_only() {
     let cookie = pair(&s, &c, "", NOW);
     let res = post(&cookie);
     assert!(res.contains("removed%201%20orphan"), "{res}");
-    assert!(!old.exists() && !host_tab(&s, ADDR, NOW).contains("remove orphans"));
+    assert!(!old.exists() && host()["orphans"] == 0);
 }
 
 struct TwoHosts<'a>(Fake, &'a FakeShed);

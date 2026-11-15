@@ -138,13 +138,17 @@ fn subscribe_needs_a_paired_device_and_unsubscribe_removes_it() {
     assert_eq!((subs.len(), subs[0].label.as_str()), (1, "iPhone"));
     let file = dir.join("state/state.db");
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
-    let page = host_tab(&s, ADDR, 1_000_000);
+    let page = api(&s, ADDR, "", 1_000_000, "host");
+    let host: serde_json::Value = serde_json::from_str(&page).unwrap();
     assert!(
-        page.contains("Enable alerts") && page.contains(&subs[0].id()),
-        "Notifications lists the device"
+        host["live"] == true
+            && host["key"].as_str().is_some_and(|k| !k.is_empty())
+            && host["subs"][0]["id"] == subs[0].id(),
+        "Notifications lists the device: {host}"
     );
-    assert!(
-        page.contains("<dt>push</dt><dd><b class=a>off: no webpush notifier</b>"),
+    assert_eq!(
+        (&host["push"]["tone"], &host["push"]["detail"]),
+        (&serde_json::json!("a"), &serde_json::json!("off: no webpush notifier")),
         "Notifications' push row: off"
     );
     assert!(
@@ -354,12 +358,11 @@ fn webpush_notifier_needs_sub() {
 const PUSH: &str = "[[notify]]\ntype = \"webpush\"\nsub = \"mailto:owner@example.com\"\n";
 
 fn host(s: &Server, now: u64) -> String {
-    let page = host_tab(s, ADDR, now);
-    let row = page
-        .split("<dt>push</dt><dd><b class=")
-        .nth(1)
-        .expect("Notifications push row");
-    row[row.find('>').unwrap() + 1..row.find("</b>").unwrap()].to_string()
+    let v: serde_json::Value = serde_json::from_str(&api(s, ADDR, "", now, "host")).unwrap();
+    v["push"]["detail"]
+        .as_str()
+        .expect("Notifications push row")
+        .to_string()
 }
 
 #[test]

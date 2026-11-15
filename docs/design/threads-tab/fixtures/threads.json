@@ -1,0 +1,28 @@
+{"type":"screen","id":"threads","title":"Threads","badge":1,"stream":"/screens/threads/stream","blocks":[
+ {"type":"section","id":"r-all","header":"all repos · 1 thread","blocks":[
+  {"type":"list","id":"l-all","rows":[
+   {"type":"row","id":"t7","figure":{"state":"idle"},"title":"Weekly lesson digest, every fleet","subtitle":"☾ asleep · orchestrator: Filed lessons for acme-api and acme-web.","value":"1d","tap":{"open":"/screens/threads/t7"},"swipe":[{"label":"archive","action":"thread-archive","values":{"thread":"t7"}}]}]},
+  {"type":"button","id":"new-all","label":"+ thread","tap":{"open":"/screens/threads/new/all"}}]},
+ {"type":"section","id":"r-acme-api","header":"acme-api · 5 threads","blocks":[
+  {"type":"list","id":"l-acme-api","rows":[
+   {"type":"row","id":"t3","figure":{"state":"needs"},"title":"Rate limits for /v1/search","badge":{"text":"new","tone":"done"},"subtitle":{"text":"! choose · orchestrator: Return 429 with Retry-After only, or…","tone":"warn"},"value":"2m","tap":{"open":"/screens/threads/t3"},"swipe":[{"label":"archive","action":"thread-archive","values":{"thread":"t3"}}]},
+   {"type":"row","id":"t5","figure":{"state":"working"},"title":"Idempotency keys: retry window","badge":{"text":"new","tone":"done"},"subtitle":"✻ working · orchestrator: reading #17's diff before I answer","value":"40m","tap":{"open":"/screens/threads/t5"},"swipe":[{"label":"archive","action":"thread-archive","values":{"thread":"t5"}}]},
+   {"type":"row","id":"t4","figure":{"state":"idle"},"title":"Split the search worker queue","subtitle":"☾ asleep · you: ok, queue it after #21","value":"3h 5m","tap":{"open":"/screens/threads/t4"},"swipe":[{"label":"archive","action":"thread-archive","values":{"thread":"t4"}}]}]},
+  {"type":"card","id":"older-acme-api","fold":{"line":"▸ 2 older threads"},"blocks":[
+   {"type":"list","id":"l-older-acme-api","rows":[
+    {"type":"row","id":"t2","figure":{"state":"idle"},"title":"Flaky e2e on CI runners","subtitle":"☾ asleep · orchestrator: Filed #19.","value":"2d","tap":{"open":"/screens/threads/t2"}},
+    {"type":"row","id":"t1","figure":{"state":"idle"},"title":"Move auth tokens to the keychain","subtitle":"☾ asleep · you: thanks","value":"4d","tap":{"open":"/screens/threads/t1"}}]}]},
+  {"type":"button","id":"new-acme-api","label":"+ thread","tap":{"open":"/screens/threads/new/acme-api"}}]},
+ {"type":"section","id":"r-acme-web","header":"acme-web · 2 threads","blocks":[
+  {"type":"list","id":"l-acme-web","rows":[
+   {"type":"row","id":"t6","figure":{"state":"idle"},"title":"Dark mode for the settings page","subtitle":"orchestrator: Queued #48 with --design.","value":"25m","tap":{"open":"/screens/threads/t6"},"swipe":[{"label":"archive","action":"thread-archive","values":{"thread":"t6"}}]},
+   {"type":"row","id":"t8","figure":{"state":"idle"},"title":"Why did #41 need three rounds?","subtitle":"☾ asleep · orchestrator: Two FAILs were the same lint.","value":"6h 12m","tap":{"open":"/screens/threads/t8"},"swipe":[{"label":"archive","action":"thread-archive","values":{"thread":"t8"}}]}]},
+  {"type":"button","id":"new-acme-web","label":"+ thread","tap":{"open":"/screens/threads/new/acme-web"}}]},
+ {"type":"section","id":"r-docs","header":"docs · no threads","blocks":[
+  {"type":"button","id":"new-docs","label":"+ thread","tap":{"open":"/screens/threads/new/docs"}}]},
+ {"type":"card","id":"archived","fold":{"line":"▸ 3 archived"},"blocks":[
+  {"type":"list","id":"l-archived","rows":[
+   {"type":"row","id":"a10","title":"Pricing page copy","subtitle":"docs · archived 3d ago","value":"5d","tap":{"open":"/screens/threads/a10"},"swipe":[{"label":"restore","action":"thread-restore","values":{"thread":"a10"}}]},
+   {"type":"row","id":"a11","title":"Try sonnet for rev lanes","subtitle":"all repos · archived 6d ago","value":"8d","tap":{"open":"/screens/threads/a11"},"swipe":[{"label":"restore","action":"thread-restore","values":{"thread":"a11"}}]},
+   {"type":"row","id":"a12","title":"Search index rebuild","subtitle":"acme-api · archived 9d ago","value":"12d","tap":{"open":"/screens/threads/a12"},"swipe":[{"label":"restore","action":"thread-restore","values":{"thread":"a12"}}]}]}]}
+]}

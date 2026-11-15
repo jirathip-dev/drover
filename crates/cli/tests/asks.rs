@@ -211,25 +211,34 @@ fn an_open_ask_re_alerts_once_as_ask_waiting_after_30_min() {
 }
 
 #[test]
-fn needs_you_card_folds_above_the_tabs_and_answer_needs_a_paired_device() {
+fn the_needs_you_card_is_a_cards_screen_block_and_answer_needs_a_paired_device() {
     let d = tmpdir("ask-card");
     let c = ctx(&d, CONFIG);
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "36"]).0, 0);
     ask(&c);
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let page = String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
-    let page = with_queue(&page, &s, "127.0.0.1:7777", NOW);
-    let (card, main) = (
-        page.find("<details class=ask>").expect("no needs-you card"),
-        page.find("<main>").unwrap(),
-    );
-    assert!(card < main, "the card sits above every tab section");
+    let get = |p: &str| {
+        let res =
+            String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n"), NOW))
+                .into_owned();
+        res[res.find("\r\n\r\n").unwrap() + 4..].to_string()
+    };
     assert!(
-        page[card..].find("value=2>2. no, trim") < page[card..].find("value=1>1. yes"),
-        "recommended first"
+        get("/").contains("<div id=cards></div><main>"),
+        "the cards sit above every tab"
     );
-    assert!(page.contains("⏸ waiting: decision"));
+    let cards: serde_json::Value = serde_json::from_str(&get("/screens/cards")).unwrap();
+    let card = cards
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "ask-q1")
+        .expect("no needs-you card");
+    assert_eq!(card["fold"]["main"]["value"], "no, trim", "recommended first: {card}");
+    assert_eq!(card["blocks"][1]["recommended"], "no, trim", "{card}");
+    let q: serde_json::Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", NOW, "queue")).unwrap();
+    assert_eq!(q["fleets"][0]["rows"][0]["state"], "⏸ waiting: decision");
     let body = "op=answer&fleet=sendmeter&id=q1&choice=2";
     let req = format!(
         "POST / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\nContent-Length: {}\r\n\r\n{body}",
@@ -261,7 +270,8 @@ fn answer_to_a_gone_agent_records_the_decision_and_exits_0() {
     assert_eq!(code, 0, "{out}");
     assert!(out.contains("recorded; asking agent gone, not prompted"), "{out}");
     assert_eq!(kinds(&c, "decision").len(), 1);
-    assert!(sh.called("get", LANE) && sh.sent(LANE).is_empty(), "{:?}", sh.methods());
+    assert!(sh.called("get", LANE) && !sh.has(LANE), "{:?}", sh.methods());
+    assert!(kinds(&c, "answer-delivered").is_empty());
 }
 
 fn closed_by(then: &Event) -> (usize, String) {
@@ -326,10 +336,8 @@ fn a_paired_device_answers_from_the_card_and_bad_text_is_refused() {
     let r = sh.on(&f);
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let cookie = pair(&s, &c, "", NOW);
-    let page = String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
-    let page = with_queue(&page, &s, "127.0.0.1:7777", NOW);
-    let i = page.find("name=mtime value=").unwrap() + 17;
-    let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let st: serde_json::Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", NOW, "state")).unwrap();
+    let mtime = st["mtime"].as_str().unwrap();
     let long = "x".repeat(2001);
     for bad in ["%20", "a%0Ab", long.as_str()] {
         let res = post(
@@ -434,9 +442,7 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
     let page = |c: &drover::Ctx| {
         let r = sh.on(&r);
         let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
-        let page =
-            String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)).into_owned();
-        with_queue(&page, &s, "127.0.0.1:7777", c.now)
+        api(&s, "127.0.0.1:7777", "", c.now, "needs") + &api(&s, "127.0.0.1:7777", "", c.now, "queue")
     };
     let p = page(&c);
     assert!(
@@ -461,7 +467,13 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
     c.now = NOW + 3 * 3600;
     check(&c, &r);
     assert_eq!(kinds(&c, "decision").len(), 1, "the owner ask still waits");
-    assert!(page(&c).contains("decided by default: keep"));
+    let decided = |c: &drover::Ctx| {
+        let r = sh.on(&r);
+        let s = Server::new(c, &r, Some("127.0.0.1:7777".into()));
+        let q: serde_json::Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", c.now, "queue")).unwrap();
+        q["fleets"][0]["rows"][0]["decided"].clone()
+    };
+    assert_eq!(decided(&c), "keep", "decided by default: keep");
 
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q2", "1"]);
     assert_eq!(code, 0, "{out}");
@@ -471,7 +483,7 @@ fn a_routine_ask_defaults_at_30_min_and_an_owner_ask_never_does() {
         (2, Some("split"), Some("owner"))
     );
     assert!(typed(&sh, "DECISION q2: split"), "{:?}", sh.sent(LANE));
-    assert!(!page(&c).contains("decided by default"));
+    assert_eq!(decided(&c), serde_json::Value::Null, "no longer decided by default");
     assert!(run(&c, &r, &["answer", "sendmeter", "q2", "2"])
         .1
         .contains("REFUSED ALREADY_ANSWERED"));

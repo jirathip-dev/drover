@@ -155,6 +155,7 @@ fn a_handoff_ask_closes_when_it_is_delivered_and_when_it_fails() {
     let c = handoff("handoff-ok", &sh);
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
     let f = Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "");

@@ -5,10 +5,10 @@ or token on a command line: read it with `read -rs` into a shell variable and `u
 
 ## 1. A locked or jammed login Keychain (#707)
 
-**Symptom.** Lanes on a folder account come up signed out, or `security` calls hang over ssh; the board still serves
+**Symptom.** Lanes come up signed out, or `security` calls hang over ssh; the board still serves
 and drive still starts lanes (drover itself reads no Keychain item and holds no secret store since #707).
 
-**Cause.** Claude Code keeps a folder login (`CLAUDE_CONFIG_DIR=<folder> claude /login`) in the login Keychain. A locked
+**Cause.** Claude Code keeps the host's login (`claude /login`) in the login Keychain. A locked
 login Keychain, or unanswered Keychain dialogs queued in SecurityAgent with no one at the screen (seen on 2026-11-08),
 leaves that login unreadable.
 
@@ -36,14 +36,12 @@ kill <pid> <pid>
 kill "$(pgrep -x SecurityAgent)"
 ```
 
-A headless host that must not depend on the login Keychain at all: give its accounts a hand-placed `token-file:`
-([accounts](accounts.md)).
-
-**Confirm.** `drover accounts` shows each account `signed in`, and a new lane on it starts signed in.
+**Confirm.** `claude auth status` says `loggedIn: true`, and a new lane starts signed in (then
+`drover hosts on <host>` if a `signed-out` alert held the host, [accounts](accounts.md)).
 
 ## 2. drover's old Keychain items
 
-**Symptom.** `drover/<fleet>/<NAME>` items (old `secret:` values, `BOAT_API_KEY`, account tokens) are still in the
+**Symptom.** `drover/<fleet>/<NAME>` items (old `secret:` values, `BOAT_API_KEY`, old tokens) are still in the
 login Keychain after the move to secret files.
 
 **Cause.** drover stopped reading them (#707) and deletes nothing itself.
@@ -104,23 +102,19 @@ next tool call is not refused.
 
 ## 5. Shed on remote hosts
 
-**Symptom.** With a shed runtime configured, a remote host shows offline and takes no lanes, though ssh and herdr work
-there.
+**Symptom.** A remote host shows offline and takes no lanes, though ssh works there.
 
-**Cause.** Until #601 lands, a shed runtime makes drover look for shed on every host; a remote host with no shed fails
-that look and counts as offline.
+**Cause.** A host is up only when its shed answers (`shed connect` over ssh); a host with no shed, or its shed
+server down, counts as offline.
 
 **How to tell.**
 
 ```sh
-drover hosts                    # the host: offline
-ssh <host> herdr agent list       # works
+drover hosts                       # the host: offline
+ssh <host> shed ls                 # fails
 ```
 
-Offline in `drover hosts` while `herdr agent list` over ssh is OK is this case, not a network fault.
-
-**Fix.** Until #601, run remote lanes with the herdr runtime (`kind = "herdr"`, see [runtimes](runtimes.md)), or
-install shed on that host.
+**Fix.** `drover hosts bootstrap <host>` (installs shed and its job), or start shed's job there.
 
 **Confirm.** `drover hosts` shows the host reachable, and a lane placed there starts.
 
@@ -183,8 +177,7 @@ releases (macOS 27.2 has `/usr/bin/timeout`), so the perl form works everywhere.
 ## 7. Keep a headless Mac's login usable
 
 A macOS host's Claude login lives in the login Keychain (the `Claude Code-credentials` item; see
-[accounts](accounts.md)), so a headless Mac on folder logins must keep that keychain unlocked and the Mac awake (or
-use a `token-file:` account, #707):
+[accounts](accounts.md)), so a headless Mac must keep that keychain unlocked and the Mac awake:
 
 ```sh
 security show-keychain-info ~/Library/Keychains/login.keychain-db   # want: no-timeout
@@ -202,7 +195,7 @@ sudo fdesetup authrestart
 ```
 
 **A shell rc that exports `CLAUDE_CODE_OAUTH_TOKEN`.** A token exported in `~/.zshrc` (or another rc file) reaches
-every lane and overrides the account env drover gives it, so all lanes run on that one token. Remove the export;
+every lane and overrides the host's own login, so all lanes run on that one token. Remove the export;
 `doctor` flags a login-shell token (#708). Check without printing the value:
 
 ```sh

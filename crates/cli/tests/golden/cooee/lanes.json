@@ -1,0 +1,35 @@
+{
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "lanes-list-working",
+          "rows": [
+            {
+              "figure": {
+                "coat": "bay",
+                "state": "working"
+              },
+              "id": "l-sendmeter-impl-12",
+              "subtitle": "fix · local",
+              "tap": {
+                "sheet": "/screens/lanes/sendmeter-impl-12"
+              },
+              "title": "sendmeter #12",
+              "type": "row",
+              "value": "50m"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "header": "working (1)",
+      "id": "lanes-working",
+      "type": "section"
+    }
+  ],
+  "id": "lanes",
+  "stream": "/screens/lanes/stream",
+  "title": "Lanes",
+  "type": "screen"
+}

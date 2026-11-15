@@ -48,14 +48,24 @@ fn stall_fires_once_and_again_after_state_change() {
     spawn_ev(&c, NOW - 3600, 12, LANE);
     let _sh = shed(&c, &[(LANE, "idle")]);
     let r = Fake::default();
+    assert_eq!(
+        check(&c, &r),
+        "",
+        "the clock starts when drover first hears shed's idle"
+    );
+    c.now = NOW + 3600;
     let out = check(&c, &r);
-    assert!(out.contains("sendmeter #12 stall: no event for 60m in impl"), "{out}");
+    assert!(
+        out.contains("sendmeter #12 stall: quiet for 60m, no turn-end, in impl"),
+        "{out}"
+    );
     assert_eq!(kinds(&c, "stall"), 1);
     assert_eq!(check(&c, &r), "", "no re-fire on the next run");
     assert_eq!(kinds(&c, "stall"), 1);
-    ev(&c, NOW + 10, 12, "spawn", json!({"role": "impl", "agent": LANE}));
-    assert_eq!(check(&c, &r), "", "fresh activity");
-    c.now = NOW + 10 + 3600;
+    ev(&c, NOW + 3610, 12, "spawn", json!({"role": "impl", "agent": LANE}));
+    c.now = NOW + 3610;
+    assert_eq!(check(&c, &r), "", "fresh spawn");
+    c.now = NOW + 3610 + 3600;
     assert!(check(&c, &r).contains("stall"));
     assert_eq!(kinds(&c, "stall"), 2);
     assert_eq!(kinds(&c, "lane-dead"), 0);
@@ -69,7 +79,12 @@ fn working_lane_is_not_a_stall() {
     let _sh = shed(&c, &[(LANE, "working")]);
     let r = Fake::default();
     assert_eq!(check(&c, &r), "");
-    assert_eq!(read(&c.state).unwrap().len(), 1);
+    let all = read(&c.state).unwrap();
+    assert_eq!(
+        all.iter().map(|e| e.kind.as_str()).collect::<Vec<_>>(),
+        ["spawn", "lane-state"]
+    );
+    assert_eq!(all[1].str("state"), Some("working"), "check stamps shed's status");
 }
 
 #[test]
@@ -597,7 +612,7 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
         "no GitHub writes"
     );
 
-    let log = |a: &str| drover::lanes::log(&c.state, a).unwrap();
+    let log = |a: &str| c.state.with_file_name("transcripts").join(format!("{a}.txt"));
     std::fs::create_dir_all(log("impl-21").parent().unwrap()).unwrap();
     for a in ["impl-21", "impl-22"] {
         std::fs::write(log(a), "⏺ hi\n").unwrap();
@@ -609,7 +624,11 @@ fn clean_reclaims_lanes_whose_issue_closed_outside_merge() {
         out.contains(&format!("removed {done} (sendmeter#21 issue closed)")),
         "{out}"
     );
-    assert!(!log("impl-21").exists() && log("impl-22").exists());
+    let kept = |a: &str| drover::session::transcript::kept(&c, a);
+    assert!(
+        !kept("impl-21") && kept("impl-22"),
+        "the archive goes with the worktree"
+    );
     assert!(
         removed(&r1, &done) && sh.called("kill", "impl-21"),
         "{:?}",
@@ -637,7 +656,7 @@ fn orphan_lane_fires_once_per_agent() {
     let r = Fake::default();
     let out = check(&c, &r);
     assert!(
-        out.contains("sendmeter #93 orphan-lane: herdr agent sendmeter-rev-93-r1 has no spawn event"),
+        out.contains("sendmeter #93 orphan-lane: session sendmeter-rev-93-r1 has no spawn event"),
         "{out}"
     );
     assert_eq!(
@@ -755,7 +774,9 @@ fn an_unheld_idle_lane_stalls_once_until_it_changes() {
     spawn_ev(&c, NOW - 3600, 12, LANE);
     let _sh = shed(&c, &[(LANE, "idle")]);
     let r = Fake::default();
-    assert!(check(&c, &r).contains("stall: no event for 60m"));
+    assert_eq!(check(&c, &r), "");
+    c.now = NOW + 3600;
+    assert!(check(&c, &r).contains("stall: quiet for 60m"));
     c.now = NOW + 7200;
     assert_eq!(check(&c, &r), "", "2 h later: still the same stall");
     c.now = NOW + 24 * 3600;
