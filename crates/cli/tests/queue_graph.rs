@@ -165,7 +165,7 @@ fn a_row_holding_five_hot_files_has_one_hot_chip_and_its_paths_folded() {
     let queued = list["blocks"][1]["blocks"][0]["rows"].as_array().unwrap();
     let ids: Vec<&str> = queued.iter().map(|r| r["id"].as_str().unwrap()).collect();
     assert_eq!(ids, ["q-acme-9", "hot-acme-9", "q-acme-10"]);
-    assert_eq!(queued[1]["title"], "🔒 hot ×5");
+    assert_eq!(queued[1]["title"], "🔒 db · 🔒 hot ×5");
     let sheet = get(queued[1]["tap"]["sheet"].as_str().unwrap());
     let paths: Vec<&str> = sheet["blocks"][0]["rows"]
         .as_array()
