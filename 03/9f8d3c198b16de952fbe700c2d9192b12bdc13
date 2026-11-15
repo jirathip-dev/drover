@@ -1,0 +1,9 @@
+Decided: merged origin/staging; the old board's serve.js and serve.css are deleted there (#927), so this branch takes the deletion and the strip-overlap fix goes with them
+Because: docs/serve.md:199
+Decided: the snapshot age stays on the JSON screens (a `snapshot` stat item, else an `age-list` row), replacing staging's `data <age> old` block
+Because: "Every page shows the snapshot's age (\"as of 3m ago\"), turning amber past 10 min."
+Decided: a screen with no stat block gets the age as an `age` section holding one row, the section → list → row shape the Lanes fixture already has
+Because: "lanes: not in the fixture" — crates/cli/tests/cooee_screens.rs:161 fails the bare list on staging's exact Lanes fixture
+Rejected: adding the bare list to the Lanes golden — the goldens are cooee's recorded shapes, not ours to widen
+Check: crates/server/src/screens.rs:702 is the only age block; board_fresh asserts it on /screens/queue and /screens/events with the shed runner
+Owner: The board's old web page is gone upstream, so the overlapping age strip went with it; the age now shows on every screen the app and page draw.
