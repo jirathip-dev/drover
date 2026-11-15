@@ -16,10 +16,18 @@ import or a device change is all or nothing) and **leases** (a lock can no longe
 | Table | What |
 |---|---|
 | `events` | the log: `seq`, `ts`, `fleet`, `issue`, `type`, the event's JSON, `archived`; indexed by (fleet, issue) and type |
-| `leases` | every lock and marker: `drive.lock`, `drive-fast.lock`, `drive-<fleet>-<n>.lock`, `kick-<fleet>-<n>.lock` and `.again`, `spawn-<fleet>-<n>.pending` |
+| `leases` | every lock and marker: `drive.lock`, `drive-fast.lock`, `drive-<fleet>.lock`, `drive-fast-<fleet>.lock`, `admit.lock`, `drive-<fleet>-<n>.lock`, `kick-<fleet>-<n>.lock` and `.again`, `spawn-<fleet>-<n>.pending` |
 | `devices`, `push` | paired phones and web push subscriptions (were `serve/devices.json`, `webpush/subs.json`) |
-| `snapshot` | `board`: #337's reads; `states`: #343's fold checkpoint |
+| `snapshot` | `board`: #337's reads; `archived`: the last compaction's stamp |
 | `processed` | #509: the trigger ids (`kick --id`: a verdict's sha, a decision) already driven, each driven once |
+| `issues`, `lanes`, `asks` | #978: the current state, one row per issue, lane (its latest `spawn`) and ask (with its ending), updated in the transaction that appends each event; `drover compact --rebuild` makes them again from every event |
+
+**Hot database and archive (#978):** `tick` runs `drover compact` once a day, after drive: `drive-pass`, `driven`
+and `kick` rows over 48 h are deleted; a merged or closed issue's events over 14 days old are appended to
+`archive/events-YYYY-MM.jsonl.zst` (by their month) and deleted; the file is vacuumed and its WAL truncated. An open
+issue's events and the last 14 days stay. `history` (`drover why`, `drover lesson digest`) reads the archive and
+the database together. A `build-cloned` event keeps its `cp` errors in `cache/build-cloned/<sha256>.txt` and names
+that file in `errors_ref`.
 
 **Retry-safe side effects (#509, `crates/core/src/action.rs`):** spawn, supersede and merge log an `intent` with a
 stable `action_id` (`<fleet>#<issue>:<step>@<key>`; key: the head sha for a merge, the role and the issue's last
@@ -103,8 +111,8 @@ The split is a pure move by what compiles today, so core still holds I/O modules
 `devices`, `webpush`): their cycles (`gate` → `spawn`/`drive`/`check`, `config` → `harness`/`devices`,
 `events` → `webpush`, `serve` → `drive` → `cli`) run through them. #265–#269 move them out step by step.
 
-Every module under `crates/*/src/`, one job each. External tools go through one seam: `runner` (any program), `herdr` (every
-herdr argv) and `gh` (cached GitHub reads).
+Every module under `crates/*/src/`, one job each. External tools go through one seam: `runner` (any program), `term` (every
+lane terminal call, on shed) and `gh` (cached GitHub reads).
 
 | Module | Job |
 |---|---|
@@ -121,12 +129,12 @@ herdr argv) and `gh` (cached GitHub reads).
 | `check` | `check` alerts, `clean`, `stop`, `kill`, `close`, the worktree budget |
 | `waiting` | what an idle lane waits on (`waiting`) |
 | `host`, `hosts` | host-load admission and live agents; multi-host placement ([hosts.md](hosts.md)) |
-| `access`, `usage` | a lane's account and MCP servers; account and provider usage (`accounts`) |
+| `access`, `usage` | a lane's MCP servers; the DeepSeek balance and the lanes' status line |
 | `hook` | the lanes' pre-tool hook |
 | `overlap` | conflict preview between open branches, `cap-check` |
 | `serve`, `lanes`, `devices`, `webpush` | the phone page, its Lanes tab, paired devices, web push |
 | `doctor`, `protection` | read-only host and branch-protection checks |
-| `runner`, `herdr`, `gh` | the seams to external programs |
+| `runner`, `term`, `gh` | the seams to external programs |
 
 ## API types
 
@@ -144,9 +152,9 @@ TS: it imports them from `assets/types/api.d.ts`.
 
 - **Format:** rustfmt with `max_width = 120` (`rustfmt.toml`); CI runs `cargo fmt --check`. The formatter decides
   layout, not the lane: no golf, no joined or packed lines to fit the cap. Run `cargo fmt` before committing.
-- **Lints:** clippy `pedantic` as warnings: `[workspace.lints]` in `Cargo.toml` for core and server (#264), `#![warn(clippy::pedantic)]` in the binary's `main.rs`; CI's `-D warnings` makes it an error. Other
-  exceptions sit inline at the narrowest scope as `#[allow(clippy::<lint>)] // reason`. The crate-level allows, all
-  style noise for a CLI:
+- **Lints:** clippy `pedantic` as warnings: `[workspace.lints]` in `Cargo.toml` for every crate and its tests (#264, #808);
+  CI's `-D warnings` makes it an error. Other exceptions sit inline at the narrowest scope as `#[allow(clippy::<lint>)]`,
+  at most 10 in `crates/` (CI counts them, #808). The workspace allows, all style noise for a CLI:
   - `must_use_candidate`: return values here are read or deliberately dropped; `#[must_use]` everywhere is noise.
   - `missing_errors_doc`: nearly every fn returns `anyhow::Result`, and the error is the message it prints.
   - `missing_panics_doc`: the few `unwrap`s are on invariants, not inputs.
@@ -154,6 +162,9 @@ TS: it imports them from `assets/types/api.d.ts`.
   - `format_push_string`: the HTML page is built with `+= &format!(..)`; one extra allocation per row is nothing.
   - `format_collect`: `.map(|x| format!(..)).collect()` reads better than a `fold` with `write!`.
   - `many_single_char_names`: short names in small math and parsing closures (dates, hex, crypto).
+  - `struct_excessive_bools`: API rows and CLI flags are flat bool fields by design (serde, clap).
+  - `too_many_arguments`: gate and drive steps take the context, config, runner and the step's own values.
+  - `cast_precision_loss`: `u64` to `f64` only for shown hours, GB and percents.
 - **Size cap:** at most `line_cap` (in `ci/cap.toml`) formatted lines of non-test Rust under `src/` and `crates/*/src/` (tests
   live in `crates/cli/tests/`), counted after `cargo fmt`. CI runs `drover cap-check --config ci/cap.toml`; a fleet can set its own
   `line_cap` under `[fleet.<name>]`. Raising the cap needs the owner's OK in an issue.
@@ -163,5 +174,5 @@ effective cap is the highest `line_cap` among `ci/cap.toml` and that folder, so 
 `ci/cap.toml` is frozen (`.drover/arch.toml`). The notes before #973 stay in `docs/cap-history/`.
 - **Drive over time (#856):** a fix for a bug that shows only as drive runs pass after pass (a stuck tick, a lane
   never replaced, a hold that never lifts) adds its scenario to `crates/cli/tests/drive_sim.rs`: a fake clock,
-  GitHub, herdr panes, hosts and processes, `tick` every 5 minutes and `drive --fast` every minute, asserted on the
+  GitHub, shed terminals, hosts and processes, `tick` every 5 minutes and `drive --fast` every minute, asserted on the
   event log. It must fail with the fix turned off.

@@ -63,7 +63,8 @@ fn migration_imports_once_with_an_equal_fold_and_the_export_is_the_old_format() 
     assert_eq!(rows(&back), rows(&all), "every event once, seq kept");
     assert_eq!(
         read(&c.state).unwrap().iter().map(|e| e.seq).collect::<Vec<_>>(),
-        [4, 5, 6, 7]
+        [1, 4, 5, 6, 7],
+        "the live events and the archived lane's newest spawn (the lane fold)"
     );
     for f in [
         "events.jsonl",

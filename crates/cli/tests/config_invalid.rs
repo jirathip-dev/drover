@@ -2,15 +2,15 @@ mod common;
 use common::*;
 use drover::events::read;
 use drover::serve::Server;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 const HOST: &str = "127.0.0.1:7777";
 const GOOD: &str =
     "[fleet.acme]\nrepo = \"acme/app\"\nlocal = \"/tmp/does-not-matter/app\"\nintegration = \"staging\"\n";
-const WANT: &str = "config invalid: fleet.acme.role.impl: account 'C' is not in [accounts] (fleet.toml:8)";
+const WANT: &str = "config invalid: invalid value: integer `-1`, expected usize (fleet.toml:5)";
 
 fn bad() -> String {
-    format!("{GOOD}\n[fleet.acme.role.impl]\nharness = \"claude\"\naccount = \"C\"\n")
+    format!("{GOOD}max_impl = -1\n")
 }
 
 fn health(s: &Server, now: u64) -> Value {
@@ -34,8 +34,25 @@ fn an_invalid_config_shows_a_banner_and_alerts_once_until_it_is_fixed() {
         api(&s, HOST, "", c.now, "queue").contains("acme/app"),
         "the queue tab keeps its data"
     );
-    let [needs, ..] = parts(&s, HOST, "", c.now);
-    assert!(needs.contains(WANT), "banner: {needs}");
+    let needs: Value = serde_json::from_str(&api(&s, HOST, "", c.now, "needs")).unwrap();
+    assert_eq!(needs["config"], WANT, "banner: {needs}");
+    let screen = |p: &str| {
+        let r = String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {HOST}\r\n\r\n"), c.now))
+            .into_owned();
+        r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
+    };
+    let cards: Value = serde_json::from_str(&screen("/screens/cards")).unwrap();
+    let card = cards
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["id"] == "config-invalid")
+        .cloned();
+    assert_eq!(
+        card.map(|k| k["blocks"][0]["markdown"].clone()),
+        Some(json!(WANT)),
+        "the page's banner card: {cards}"
+    );
     let h = health(&s, c.now);
     assert_eq!(
         (h["ok"].as_bool(), h["config"].as_str()),
@@ -55,8 +72,9 @@ fn an_invalid_config_shows_a_banner_and_alerts_once_until_it_is_fixed() {
     assert_eq!(alerts(&c, "config-invalid"), 1, "the same error alerts once");
 
     std::fs::write(&c.config, GOOD).unwrap();
-    let [needs, ..] = parts(&s, HOST, "", c.now);
-    assert!(!needs.contains("config invalid"), "{needs}");
+    let needs: Value = serde_json::from_str(&api(&s, HOST, "", c.now, "needs")).unwrap();
+    assert!(needs["config"].is_null(), "{needs}");
+    assert!(!screen("/screens/cards").contains("config-invalid"));
     let h = health(&s, c.now);
     assert_eq!(
         (h["ok"].as_bool(), h["config"].as_str()),

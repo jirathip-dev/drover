@@ -23,13 +23,31 @@ pub fn propose(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, thread: &str, file:
         return refused("BAD_VALUE", "the proposal changes nothing");
     }
     let id = format!("c{}", events.iter().filter(|e| e.kind == "config-propose").count() + 1);
-    let d = json!({"thread": thread, "id": id, "diff": diff, "text": text, "base": sha256(cur.as_bytes())});
+    let sha = sha256(text.as_bytes());
+    crate::devices::write0600(&stored_at(ctx, &id), text.as_bytes())?;
+    stored(ctx, &id, Some(&sha))?;
+    let d = json!({"thread": thread, "id": id, "diff": diff, "sha": sha, "base": sha256(cur.as_bytes())});
     emit(
         &ctx.state,
         cfg,
         Event::new(ctx.now, &t.fleet, None, "config-propose", d),
     )?;
     Ok(writeln!(out, "{id}")?)
+}
+
+fn stored_at(ctx: &Ctx, id: &str) -> std::path::PathBuf {
+    ctx.state.with_file_name("proposals").join(format!("{id}.toml"))
+}
+
+fn stored(ctx: &Ctx, id: &str, sha: Option<&str>) -> Result<String> {
+    let text = std::fs::read_to_string(stored_at(ctx, id)).unwrap_or_default();
+    if sha != Some(&sha256(text.as_bytes())) {
+        return refused(
+            "PROPOSAL_TRUNCATED",
+            format!("{id} is not stored whole; propose the fleet.toml again"),
+        );
+    }
+    Ok(text)
 }
 
 /// The changed lines of `a` → `b` (`- ` / `+ `, by longest common subsequence), each run under its `[section]`.
@@ -68,9 +86,8 @@ pub fn diff(a: &str, b: &str) -> String {
 
 /// Proposal `id`'s `config-settled`, if any.
 pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
-    events
-        .iter()
-        .find(|e| e.kind == "config-settled" && e.str("id") == Some(id))
+    let settled = crate::events::of_kind(events, &["config-settled"]);
+    settled.into_iter().find(|e| e.str("id") == Some(id))
 }
 
 /// #460: proposal `p` was made over a fleet.toml that has changed since: it can no longer apply.
@@ -125,7 +142,8 @@ pub fn settle(ctx: &Ctx, cfg: &Config, r: &dyn Runner, id: &str, apply: bool) ->
                 format!("fleet.toml changed since {id} was proposed; ask for a new one"),
             );
         }
-        let (new, backup, ok) = install(ctx, r, &cur, p.str("text").unwrap_or_default())?;
+        let text = stored(ctx, id, p.str("sha"))?;
+        let (new, backup, ok) = install(ctx, r, &cur, &text)?;
         d.as_object_mut()
             .unwrap()
             .extend([("backup".into(), json!(backup)), ("doctor".into(), json!(ok))]);

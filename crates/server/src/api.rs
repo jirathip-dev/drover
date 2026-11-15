@@ -12,7 +12,7 @@ macro_rules! shapes {
 }
 
 shapes! {
-/// `/herd.json` (Herd mode, docs/serve.md).
+/// API v1's `GET herd` (docs/serve.md).
 pub struct Herd {
     pub fleets: Vec<HerdFleet>,
     pub others: Vec<HerdLane>,
@@ -111,7 +111,6 @@ pub struct Moment {
 }
 
 /// #269: API v1's `needs`, the cards above every tab as this device sees them: the snapshot's time `snap` (0: none; #450: the strip under the header shows its age once over 2 min), the open asks, each blocked lane's card, the `needs-human` issues, and `choosing` (`[chat·N]`). `rw`: the board takes forms (the answer boxes); `live`: and is no export; `paired`: the device may answer a lane or an issue; `pair`: the page offers Pair this phone.
-#[allow(clippy::struct_excessive_bools)]
 pub struct NeedsTab {
     pub now: u64,
     pub rw: bool,
@@ -176,10 +175,10 @@ pub struct NeedIssue {
     pub mergeable: String,
     pub merge: bool,
     pub shots: Vec<String>,
+    /// #969: the sha of the verdict `shots` are from, the round `/shot/<fleet>/<n>/<i>/<sha>` names.
+    pub shots_at: Option<String>,
 }
 
-/// #269: API v1's `lanes`, the Lanes tab as this device sees it: state sections, repo groups inside (`error`: no fleet.toml, `failed`: herdr unread). `rw`, `live`, `paired`, `pair` as `NeedsTab`'s.
-#[allow(clippy::struct_excessive_bools)]
 pub struct LanesTab {
     pub now: u64,
     pub rw: bool,
@@ -236,7 +235,6 @@ pub struct LaneRepo {
     pub lanes: Vec<LaneRow>,
 }
 
-/// A Lanes row: its avatar (`avatar`, herdr's `state` with `act`, #423 `grow`, `atone` and `coat`), name, `state` in `tone` for `ago`, the `why` line (`why_tone`), the activity (`activity`, or the `now` parts), `gone` (no pane), the conductor `thread` it opens; the hidden card: `head`, `shown`, `facts`, the PR line (`issue` and `pr`, `repo` none when its fleet is not configured), `dead` and the blocked card.
 pub struct LaneRow {
     pub name: String,
     pub role: String,
@@ -425,7 +423,6 @@ pub struct RepoThreads {
 }
 
 /// #681: a conductor thread: its `last` line and time, `awake` (its conductor not asleep), `newest` on the ongoing one (the first not archived).
-#[allow(clippy::struct_excessive_bools)]
 pub struct RepoThread {
     pub id: String,
     pub title: String,
@@ -508,7 +505,7 @@ pub struct State {
     pub hosts: Vec<Row>,
     pub services: Vec<Row>,
     pub alerts: Vec<Row>,
-    /// #859: when the background last read each source the lanes come from (herdr, shed, remote, host).
+    /// #859: when the background last read each source the lanes come from (shed, remote, host).
     pub sources: BTreeMap<String, u64>,
 }
 
@@ -539,7 +536,7 @@ pub struct PendingStart {
     pub reason: Option<String>,
 }
 
-/// `state` is herdr's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
+/// `state` is the runtime's (or `dead`, `parked`); `shown` and `tone` (g, a, r, m) are the Lanes row's words.
 pub struct Lane {
     pub name: String,
     pub fleet: Option<String>,
@@ -576,7 +573,7 @@ pub struct Row {
     pub fix: String,
 }
 
-/// #267: API v1's `host`, the Host tab at `now`: HOSTS (`hosts`), FLEET DISK (`disk`, `orphans`, `leftovers`, `spawns`), SERVICES (`services`, `theme`: `detail` its error, `accounts`, `deepseek`), FLEETS and ALERTS (`push`, and on a live board its `key`, `subs` and paired `devices`). `rw`: the board takes forms; `live`: and is no export (an export's forms are inert); `mtime` the forms send back.
+/// SERVICES (`services`, `theme`: `detail` its error, `deepseek`), FLEETS and ALERTS (`push`, and on a live
 pub struct HostTab {
     pub now: u64,
     pub rw: bool,
@@ -589,7 +586,6 @@ pub struct HostTab {
     pub spawns: Option<Row>,
     pub services: Vec<Row>,
     pub theme: Row,
-    pub accounts: Vec<Account>,
     pub deepseek: Option<Balance>,
     pub fleets: Vec<FleetRow>,
     pub push: Row,
@@ -668,23 +664,6 @@ pub struct Disk {
 pub struct Leftovers {
     pub n: usize,
     pub mb: String,
-}
-
-/// An account: `capped`, its cap line in `tone`, its usage `meters` and `pace` (or the `hint` why none), its lane hours.
-pub struct Account {
-    pub name: String,
-    pub capped: bool,
-    pub tone: String,
-    pub cap: String,
-    pub meters: Vec<Meter>,
-    pub pace: Option<String>,
-    pub hint: Option<String>,
-    pub hours: String,
-}
-
-pub struct Meter {
-    pub label: String,
-    pub pct: f64,
 }
 
 /// The `DeepSeek` balance (currency and amount) and whether it is `low`, else the `hint` why none was read.
@@ -773,8 +752,6 @@ pub struct DriveAct {
     pub code: String,
 }
 
-/// A Queue row: `#issue` in its shown `state` (`tone`) for `age`, counting from `t`; its row sprite's `act`, #423 `grow` (the growth stage) and `coat`; `queued` (with `check`: from the backlog), its serial `groups`, `blocked_by`; titles; the open card: the pipeline `stage`, the current `lane` (`live`: herdr lists it), the PR line, `dead`, red `notes` (a land note, an answer not delivered), the decision taken by default (and its ask to change it), #517 its `open` ask (answerable here), [▲]/[▼] (`up`, `down`: the rows to move before or after) and the lanes list.
-#[allow(clippy::struct_excessive_bools)]
 pub struct QueueRow {
     pub issue: u64,
     pub state: String,
@@ -828,7 +805,6 @@ pub struct PrLine {
     pub form: Option<String>,
 }
 
-/// #205: a lane the issue had, newest first: herdr's `state` (`gone`) in `tone`, its spawn's age; `link`: `live` opens its Lanes sheet, `gone` its stored transcript, empty none.
 pub struct QueueLane {
     pub name: String,
     pub state: String,
@@ -1031,14 +1007,28 @@ pub struct Health {
     /// #859: each route's request times over the last 10 min, slowest p95 first; each source's `refreshed_at`.
     pub routes: Vec<RouteTime>,
     pub sources: BTreeMap<String, u64>,
+    pub serve: ServeHealth,
 }
 
-/// #859: one route's requests in the window: how many, their median and 95th percentile in ms.
+/// #898: serve's own numbers (each minute also `serve-health.json`): RSS, the last minute's route groups and read 503s.
+pub struct ServeHealth {
+    pub at: u64,
+    pub started: u64,
+    pub rss_mb: u64,
+    pub groups: Vec<RouteTime>,
+    pub busy: u64,
+    pub clients: u64,
+    pub queued: u64,
+    pub slow: Option<String>,
+}
+
+/// #859: one route's requests in the window: how many, their median, 95th percentile and (#898) slowest in ms.
 pub struct RouteTime {
     pub route: String,
     pub count: u64,
     pub p50: u64,
     pub p95: u64,
+    pub max: u64,
 }
 
 /// A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
@@ -1046,6 +1036,21 @@ pub struct Reply {
     pub ok: bool,
     pub code: String,
     pub message: String,
+    /// #977: a tap's job id (`code` ACCEPTED): `GET /api/v1/job/<id>` gives how it ended.
+    pub job: Option<String>,
+}
+
+#[derive(Clone)]
+/// #977: a tap run as a job: `state` running, waiting (for host), done, refused (`code`) or error; `message` its toast.
+pub struct Job {
+    pub id: String,
+    pub op: String,
+    pub fleet: String,
+    pub issue: Option<u64>,
+    pub state: String,
+    pub code: String,
+    pub message: String,
+    pub ts: u64,
 }
 
 /// #633: `POST /api/v1/conductor-attach`'s answer (a refusal is a `Reply`): what a cooee conductor profile needs.
@@ -1070,9 +1075,6 @@ pub struct AttachEnv {
     pub thread: String,
     #[serde(rename = "DROVER_PORT")]
     pub port: String,
-    /// #683: the role's account env (`access::account_env`), the thread's own login (empty: no account).
-    #[serde(flatten)]
-    pub account: BTreeMap<String, String>,
 }
 
 }

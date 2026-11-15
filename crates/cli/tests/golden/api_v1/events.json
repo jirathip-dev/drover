@@ -135,17 +135,16 @@
         "act": "idle",
         "coat": "--c:#a05c2c;--d:#7d4520;--m:#5d3317;--b:#efe7dc",
         "data": {
-          "account": null,
           "agent": "conductor-t1",
           "confirmed": true,
           "effort": null,
           "harness": "hermes",
           "model": "opus",
-          "pane": "w9:p1",
+          "pane": "orchestrator-t1",
           "resumed": false,
+          "runtime": "shed",
           "session": "fdfd5b2b-9278-4304-bf9e-b7a9c365705a",
-          "thread": "t1",
-          "workspace": "w9"
+          "thread": "t1"
         },
         "fleet": "sendmeter",
         "glyph": "·",

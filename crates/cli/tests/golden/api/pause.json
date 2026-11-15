@@ -1,5 +1,6 @@
 {
   "code": "OK",
+  "job": null,
   "message": "sendmeter paused",
   "ok": true
 }

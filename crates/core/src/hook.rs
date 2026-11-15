@@ -123,6 +123,23 @@ pub fn broad_kill() -> Vec<Deny> {
         .into()
 }
 
+/// #966: lanes share the host's CPU: one lane's burn holds every lane's spawn `HOST_BUSY`.
+pub const HOST_STRESS: &str = "REFUSED HOST_STRESS: lanes share this host's CPU, so never stress it from a lane: \
+                               cap the run (cpulimit, or nice -n 20 under a timeout) or reproduce under load in CI";
+
+fn stress(cmd: &str) -> bool {
+    let runs = |s: &str, c: &str| denied(s, &[Deny::Cmd(c.into())]).is_some();
+    let words: Vec<&str> = cmd.split(|c: char| c.is_whitespace() || ";|&()`".contains(c)).collect();
+    let has = |w: &str| words.contains(&w);
+    let looped = has("do") && has("done");
+    let alone = |(i, c): (usize, char)| c == '&' && !cmd[..i].ends_with('&') && !cmd[i + 1..].starts_with('&');
+    let capped = has("cpulimit") || has("nice") && (has("timeout") || has("gtimeout"));
+    let yes = cmd
+        .split(['|', ';', '&', '\n'])
+        .any(|s| runs(s, "yes") && (s.contains('>') || looped));
+    looped && cmd.char_indices().any(alone) || !capped && (yes || runs(cmd, "stress") || runs(cmd, "stress-ng"))
+}
+
 fn tool_input(input: &Value) -> &Value {
     let mut keys = dialects().flat_map(|d| d.input.iter());
     keys.find_map(|k| input.get(k).filter(|v| v.is_object()))
@@ -248,8 +265,12 @@ fn notes(t: &[&str]) -> Option<String> {
 }
 
 fn bash(cmd: &str, cwd: &str, p: &Policy, cur_branch: &dyn Fn(&str) -> Option<String>) -> Option<String> {
-    if let Some(d) = denied(&dups(&unquote(cmd, true)), &p.deny) {
+    let bare = dups(&unquote(cmd, true));
+    if let Some(d) = denied(&bare, &p.deny) {
         return Some(d.reason());
+    }
+    if stress(&bare) {
+        return Some(HOST_STRESS.into());
     }
     let cmd = &dups(&unquote(cmd, false));
     let mut cwd = cwd.to_string();
@@ -572,7 +593,6 @@ fn group(r: &[&str]) -> Option<&'static str> {
         ("clean", _) if has("--yes") || has("--orphans") || has("--lane") => "clean",
         ("hosts" | "host", Some("on" | "off" | "refresh")) => "hosts",
         ("reclaim", _) => "reclaim",
-        ("accounts", Some("reset")) => "accounts",
         ("runners", Some(_)) => "runners",
         ("pause" | "resume", _) => "pause",
         ("set", _) => "set",
@@ -604,7 +624,6 @@ fn design_spawn(t: &[&str], p: &Policy) -> Option<String> {
         (r.first(), r.get(1)),
         (Some(&"config"), Some(&("apply" | "discard")))
             | (Some(&"secret"), Some(&("ls" | "rm")))
-            | (Some(&"accounts"), Some(&"import"))
             | (Some(&"card"), Some(&("approve" | "deny" | "run")))
             | (Some(&"fleet"), Some(&"rename"))
     ) {

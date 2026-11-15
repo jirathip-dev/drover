@@ -374,8 +374,27 @@ fn verify_fails_count_in_revs_rounds_and_the_third_fail_parks() {
     let get = |p: &str| {
         String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), c.now)).into_owned()
     };
-    let [needs, ..] = parts(&s, ADDR, "", c.now);
-    assert!(needs.contains("<img src=\"shot/sendmeter/12/0\""), "{needs}");
+    let needs: serde_json::Value = serde_json::from_str(&api(&s, ADDR, "", c.now, "needs")).unwrap();
+    let card = &needs["issues"][0];
+    assert!(
+        card["issue"] == 12 && card["shots"].as_array().is_some_and(|x| !x.is_empty()) && card["shots_at"] == *h,
+        "{needs}"
+    );
+    let cards: serde_json::Value =
+        serde_json::from_str(get("/screens/cards").split_once("\r\n\r\n").unwrap().1).unwrap();
+    let card = cards
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|k| k["id"] == "nhc-sendmeter-12")
+        .unwrap();
+    let img = card["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["type"] == "images")
+        .unwrap();
+    assert_eq!(img["items"][0]["src"], format!("/shot/sendmeter/12/0/{h}"), "{card}");
     let png = get("/shot/sendmeter/12/0");
     assert!(
         png.starts_with("HTTP/1.1 200") && png.ends_with("\u{fffd}PNG narrow"),
@@ -430,7 +449,10 @@ fn shots_are_only_a_verify_verdicts_files_inside_its_lane_folder() {
     assert!(get("/shot/sendmeter/12/0").ends_with("\u{fffd}PNG narrow"));
     let old = json!({"verdict": "FAIL", "stage": "verify", "files": [{"name": "x.png", "path": x}]});
     ev(&c, 3, "verdict", old);
-    assert!(drover::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12)).is_empty());
+    assert_eq!(
+        drover::verify::served(&read(&c.state).unwrap(), ("sendmeter", 12), None),
+        [] as [(std::string::String, std::path::PathBuf); 0]
+    );
     assert!(get("/shot/sendmeter/12/0").starts_with("HTTP/1.1 404"));
 }
 

@@ -1,12 +1,14 @@
 {
   "response": {
     "code": "BAD_VALUE",
+    "job": null,
     "message": "op is stop, kill, clean or close, not ``",
     "ok": false
   },
   "route": "POST /api/v1/act",
   "schema": {
     "code": "string",
+    "job": "null",
     "message": "string",
     "ok": "boolean"
   },

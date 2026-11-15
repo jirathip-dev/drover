@@ -67,10 +67,12 @@ fn stuck(name: &str) -> drover::Ctx {
 fn a_granted_extend_on_a_never_started_lane_spawns_it_once_the_host_admits() {
     let c = stuck("never-started-extend");
     let (code, out) = run(&c, &low_mem("4"), &["extend", "sendmeter", "12"]);
-    assert!(code == 0 && out.contains("(MEM_LOW)"), "{out}");
+    assert_eq!((code, spawns(&c)), (0, 0), "the tap spawns nothing: {out}");
     let (code, out) = run(&c, &low_mem("1"), &["drive"]);
     assert_eq!((code, spawns(&c)), (0, 0), "still refused on memory: {out}");
-    let calm = fake("4");
+    let (code, out) = run(&c, &fake("4"), &["drive"]);
+    assert_eq!((code, spawns(&c)), (0, 0), "no HOST_BUSY override for an extend: {out}");
+    let calm = fake("1");
     let (code, out) = run(&c, &calm, &["drive"]);
     assert_eq!(code, 0, "{out}");
     assert!(started("sendmeter-impl-12"), "{out}");
@@ -138,9 +140,12 @@ fn waiting_names_the_card_or_the_load_never_a_question_mark() {
 
     assert_eq!(run(&c, &low_mem("4"), &["extend", "sendmeter", "12"]).0, 0);
     let w = waiting(&c);
+    assert!(w.contains("sendmeter #12 drive: extended · starting"), "{w}");
+    assert_eq!(run(&c, &low_mem("1"), &["drive"]).0, 0);
     assert!(
-        w.contains("sendmeter #12 drive: extended · starting, waiting for host: MEM_LOW"),
-        "{w}"
+        waiting(&c).contains("sendmeter #12 drive: extended · waiting: MEM_LOW"),
+        "{}",
+        waiting(&c)
     );
     let legacy = stuck("never-started-legacy");
     ev(

@@ -13,6 +13,7 @@ Lazy senior dev: YAGNI, reuse, stdlib first, shortest correct diff.
   refuses them (`deny_commands`); use the repo's non-container test path or ask the owner.
 - Never merge, never push to the integration branch or main, never edit fleet or
   harness config. Merging happens only through `drover merge` (hooks enforce this).
+- don't stress the shared host from a lane: no `yes`, `stress` or busy loops, no N parallel copies; cap the run or reproduce under load in CI (enforced by: hook HOST_STRESS)
 
 ## Mandate
 

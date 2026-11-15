@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 pub const PR_FIELDS: &str =
     "number,title,state,baseRefName,headRefOid,mergeable,mergeStateStatus,statusCheckRollup,labels,mergedAt,mergeCommit,isDraft";
 pub const PR_TTL: u64 = 60;
-const SPEC_FIELDS: &str = "title,body,updatedAt,comments";
+const SPEC_FIELDS: &str = "title,body,updatedAt,comments,url";
 
 pub fn cache_path(ctx: &Ctx, kind: &str, fleet: &str, issue: u64) -> PathBuf {
     ctx.state
@@ -42,6 +42,11 @@ pub fn cached_at(ctx: &Ctx, fleet: &str, issue: u64) -> Option<u64> {
 /// The cached spec, if any; never calls GitHub (dry runs).
 pub fn cached_spec(ctx: &Ctx, fleet: &str, issue: u64) -> Option<Value> {
     load(&cache_path(ctx, "issue", fleet, issue))
+}
+
+/// #886: issue `v` (a `spec` read) is a pull request: GitHub's issue view answers for a PR's number too.
+pub fn is_pr(v: &Value) -> bool {
+    v["url"].as_str().is_some_and(|u| u.contains("/pull/"))
 }
 
 /// The cached issue title, if any (#391: else the last backlog read's, for a row queued from it); never calls GitHub.
@@ -509,7 +514,6 @@ fn decided(pr: &Value, until: Until, req: &[String]) -> Option<i32> {
 }
 
 /// `drover wait`: poll the cached read, 30 s doubling to 5 min; 0 reached, 1 failed/closed, 124 timed out.
-#[allow(clippy::too_many_arguments)]
 pub fn wait(
     ctx: &Ctx,
     r: &dyn Runner,

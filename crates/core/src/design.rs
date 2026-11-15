@@ -141,7 +141,7 @@ pub fn handoff(
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
-    agents: &[Value],
+    agents: &[crate::session::Session],
     s: &IssueState,
 ) -> Result<()> {
     let ev = working(&ctx.state)?;
@@ -155,7 +155,7 @@ pub fn handoff(
     };
     let busy = agents
         .iter()
-        .any(|a| sp.str("agent") == a["name"].as_str() && a["agent_status"] == "working");
+        .any(|a| sp.str("agent") == Some(a.name.as_str()) && a.busy());
     let Some(wt) = sp.str("worktree").filter(|_| !busy) else {
         return Ok(());
     };
@@ -170,7 +170,7 @@ pub fn handoff(
     }
     let role = sp.str("role").unwrap_or("design");
     if handed {
-        return failed(ctx, cfg, out, &ev, sp, (f, n, role));
+        return Ok(());
     }
     let pre = pre(&ev, f, n, role).unwrap_or(head);
     let dirs = if role == "architect" {
@@ -193,7 +193,7 @@ pub fn handoff(
         }
     }
     if names.is_empty() {
-        return failed(ctx, cfg, out, &ev, sp, (f, n, role));
+        return Ok(());
     }
     let dir = folder(names[0], &dirs);
     let adr = (role == "architect").then(|| dir.clone());
@@ -238,36 +238,6 @@ pub fn handoff(
         writeln!(out, "{f} #{n} design-review: {head:.7}")?;
     }
     Ok(())
-}
-
-fn failed(
-    ctx: &Ctx,
-    cfg: &Config,
-    out: &mut dyn Write,
-    ev: &[Event],
-    sp: &Event,
-    (f, n, role): (&str, u64, &str),
-) -> Result<()> {
-    let agent = sp.str("agent").unwrap_or_default();
-    let mine = |e: &&Event| e.kind == "lane-state" && e.str("agent") == Some(agent) && e.ts >= sp.ts;
-    let Some(end) = ev
-        .iter()
-        .rfind(mine)
-        .filter(|e| matches!(e.str("state"), Some("error" | "gone")))
-    else {
-        return Ok(());
-    };
-    let note = ["note", "cause", "why"]
-        .iter()
-        .find_map(|k| end.str(k))
-        .unwrap_or("no reason given");
-    let why = format!(
-        "{role} lane {agent} ended ({}: {note}) with no {role} commit of its own",
-        end.str("state").unwrap_or_default()
-    );
-    writeln!(out, "{f} #{n} needs-human: {why}")?;
-    let d = json!({"code": "LANE_FAILED", "reason": why, "agent": agent, "role": role});
-    emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "needs-human", d))
 }
 
 fn folder(name: &str, dirs: &[String]) -> String {
@@ -337,7 +307,7 @@ pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, 
         .and_then(|e| Some((e.str("agent")?, e.str("pane")?)))
         .filter(|_| kind != "design-revise")
     {
-        let _ = crate::herdr::close(r, pane);
+        let _ = crate::term::close(ctx, r, pane);
         let c = json!({"agent": agent, "pane": pane, "reason": kind});
         emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "lane-closed", c))?;
     }

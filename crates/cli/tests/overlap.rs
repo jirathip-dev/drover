@@ -578,7 +578,7 @@ fn behind_under_a_non_strict_rule_is_not_updated_and_merges_as_it_is() {
     let behind = json!({"number": 13, "state": "OPEN", "baseRefName": "staging", "headRefOid": from,
         "mergeable": "MERGEABLE", "mergeStateStatus": "BEHIND", "statusCheckRollup": []});
     let w = Mixed(Fake::default().reply("gh pr view issue-3 ", &behind.to_string()));
-    let ws = drover::waiting::scan(&c, &cfg, &sh.on(&w), &read(&c.state).unwrap(), &[], true);
+    let ws = drover::waiting::scan(&c, &cfg, &sh.on(&w), &read(&c.state).unwrap(), &[], true, None);
     let what = &ws.iter().find(|(s, _)| s.issue == 3).expect("#3").1.what;
     assert!(
         what.starts_with("PASS · behind staging (not required) · merging when CI green"),
@@ -814,11 +814,11 @@ fn check_emits_cap_near_once_per_integration_sha() {
     let page = || {
         let f = Fake::default();
         let s = drover::serve::Server::new(&c, &f, Some("127.0.0.1:7777".into()));
-        queue_tab(&s, "127.0.0.1:7777", c.now)
+        api(&s, "127.0.0.1:7777", "", c.now, "queue")
     };
     assert!(
-        page().contains("<p class=r>cap-near: 499 lines of headroom on staging</p>"),
-        "board banner"
+        page().contains("cap-near: 499 lines of headroom on staging"),
+        "the fleet's note"
     );
     let second = put(&[("c.txt", "c\n")]);
     drover::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
@@ -828,7 +828,7 @@ fn check_emits_cap_near_once_per_integration_sha() {
     put(&[("ci/cap.toml", "[fleet.sendmeter]\nline_cap = 505\n")]);
     drover::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
     assert_eq!(near().len(), 2, "500 lines of headroom is not near");
-    assert!(!page().contains("cap-near"), "no banner after the raise");
+    assert!(!page().contains("cap-near: "), "no note after the raise");
     put(&[
         ("ci/cap.toml", "[fleet.sendmeter]\nline_cap = 504\n"),
         ("ci/cap.d/2026-11-14-2000.toml", "line_cap = 2000\nwhy = \"room\"\n"),

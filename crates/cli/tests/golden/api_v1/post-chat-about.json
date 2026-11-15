@@ -1,12 +1,14 @@
 {
   "response": {
     "code": "OK",
+    "job": null,
     "message": "t2 started",
     "ok": true
   },
   "route": "POST /api/v1/chat-about",
   "schema": {
     "code": "string",
+    "job": "null",
     "message": "string",
     "ok": "boolean"
   },

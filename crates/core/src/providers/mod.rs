@@ -1,6 +1,6 @@
-use crate::herdr;
 use crate::runner::Runner;
 use crate::spawn::Plan;
+use crate::term;
 use crate::Ctx;
 use anyhow::Result;
 use serde_json::Value;
@@ -92,27 +92,12 @@ pub fn proxied() -> Option<&'static Proxy> {
 /// Effort levels a role may set (`effort = "…"`).
 pub const EFFORTS: &[&str] = &["none", "low", "medium", "high", "xhigh"];
 
-/// How a harness's lanes sign in: unknown, an `[accounts]` account of this provider (`access::pick`; #683: its env from `access::account_env`), or the harness's own login on the host.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Credential {
-    None,
-    Account(Accounts),
-    Own,
-}
-
-/// What an `[accounts]` account is to its provider.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Accounts {
-    pub provider: &'static str,
-    pub config_env: &'static str,
-    pub token_env: Option<&'static str>,
-}
-
 /// #637: what the token proxy needs from the provider it fronts.
 pub struct Proxy {
     pub upstream: &'static str,
     pub base_url_env: &'static str,
     pub auth_token_env: &'static str,
+    pub setup: &'static str,
     pub headers: fn(&[Header]) -> Vec<Header>,
 }
 
@@ -160,31 +145,6 @@ pub struct Dialect {
 /// The hook dialects of every harness that has one, in `known` order.
 pub fn dialects() -> impl Iterator<Item = &'static Dialect> {
     known().filter_map(|h| get(h).hook_dialect())
-}
-
-/// A usage window: used %, reset epoch, either unread.
-#[derive(Clone, Copy, Default, PartialEq, Debug)]
-pub struct Window {
-    pub used: Option<f64>,
-    pub resets: Option<u64>,
-}
-
-/// An account's limits: its session and its weekly window.
-#[derive(Clone, Copy, Default, PartialEq, Debug)]
-pub struct Limits {
-    pub session: Window,
-    pub week: Window,
-}
-
-/// A provider's usage meter for an `[accounts]` login (#258; #707: its status line only, no poll).
-pub trait Usage: Sync {
-    fn reading(&self, status_line: &Value) -> Limits;
-    fn cap_banner(&self) -> &'static str;
-}
-
-/// The provider `[accounts]` are for: the first lane provider that runs on one.
-pub fn accounts() -> Option<Entry> {
-    lanes().find(|h| matches!(h.credential(), Credential::Account(_)))
 }
 
 pub trait Provider: Sync {
@@ -245,7 +205,7 @@ pub trait Provider: Sync {
         Ok(())
     }
     fn start_cmd(&self, _ctx: &Ctx, p: &Plan, pane: &str) -> Vec<String> {
-        herdr::run_argv(pane, &[&p.harness])
+        term::run_argv(pane, &[&p.harness])
     }
     fn resumes(&self) -> bool {
         false
@@ -254,13 +214,13 @@ pub trait Provider: Sync {
         false
     }
     fn kick_cmds(&self, p: &Plan, pane: &str) -> Vec<Vec<String>> {
-        vec![herdr::send_text_argv(pane, &p.kick), herdr::keys_argv(pane, "enter")]
+        vec![term::send_text_argv(pane, &p.kick), term::keys_argv(pane, "enter")]
     }
     fn kick(&self, r: &dyn Runner, p: &Plan, pane: &str) -> Result<bool> {
         Ok(self
             .kick_cmds(p, pane)
             .iter()
-            .all(|c| herdr::exec(r, c).is_ok_and(|o| o.code == 0)))
+            .all(|c| term::exec(r, c).is_ok_and(|o| o.code == 0)))
     }
     fn env(&self) -> &'static [&'static str] {
         &[]
@@ -271,14 +231,11 @@ pub trait Provider: Sync {
     fn acp_env(&self, _model: Option<&str>, _effort: Option<&str>) -> Vec<(&'static str, String)> {
         Vec::new()
     }
-    fn signed_in(&self, _r: &dyn Runner, _dir: &Path) -> Option<bool> {
-        None
-    }
     fn acp_profile(&self, _settings: &str, _role: &str) -> String {
         String::new()
     }
-    fn credential(&self) -> Credential {
-        Credential::None
+    fn acp_meta(&self) -> Option<serde_json::Value> {
+        None
     }
     fn login(&self) -> Option<&'static str> {
         None
@@ -289,40 +246,10 @@ pub trait Provider: Sync {
     fn hook_dialect(&self) -> Option<&'static Dialect> {
         None
     }
-    fn usage(&self) -> Option<&'static dyn Usage> {
-        None
-    }
-    fn usage_limited(&self, _cfg: &crate::config::Config, _r: &dyn Runner, _screen: &str, _now: u64) -> Option<u64> {
-        None
-    }
-    fn signed_out(&self, _screen: &str) -> bool {
-        false
-    }
-    fn status_word(&self, _screen: &str) -> Option<(String, Option<String>)> {
-        None
-    }
-    fn now_line(&self, line: &str) -> bool {
-        !crate::lanes::chrome(line)
-    }
-    fn tool_line(&self, line: &str) -> Option<(String, String)> {
-        Some(("$".into(), line.strip_prefix("$ ")?.trim_start().into()))
-    }
-    fn pending_menu(&self, _screen: &str) -> Option<(String, Vec<String>)> {
-        None
-    }
-    fn startup_prompt(&self, _screen: &str) -> Option<(&'static str, Vec<String>)> {
-        None
-    }
-    fn answer_keys(&self, n: usize) -> String {
-        n.to_string()
-    }
-    fn transcript(&self, _home: &Path, _wt: &str) -> Option<PathBuf> {
+    fn token_env(&self) -> Option<&'static str> {
         None
     }
     fn health_check(&self) -> Option<(&'static str, &'static str, &'static str)> {
-        None
-    }
-    fn startup_title(&self) -> Option<&'static str> {
         None
     }
     fn process_names(&self) -> &'static [&'static str] {
