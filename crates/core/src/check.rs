@@ -1,5 +1,7 @@
 use crate::config::{Config, Fleet};
-use crate::events::{age, checks, emit, fold, held_on, last_spawn, open_asks, plain, working, Event, IssueState, Log};
+use crate::events::{
+    age, checks, emit, fold, held_on, lanes, last_spawn, open_asks, plain, working, Event, IssueState, Log,
+};
 use crate::gate::gate;
 use crate::host;
 use crate::hosts::On;
@@ -805,7 +807,7 @@ pub fn clean_all(
             })
         })
         .collect();
-    let spawns: Vec<&Event> = (events.iter().rev())
+    let spawns: Vec<&Event> = (lanes(&events).into_iter().rev())
         .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-started") && fleet.is_none_or(|f| f == e.fleet))
         .chain(&revs)
         .filter(|e| e.issue.is_some_and(|n| issue.is_none_or(|i| i == n)))
@@ -1073,8 +1075,8 @@ pub fn leftovers(
         std::collections::BTreeSet::new(),
         vec![],
     );
-    let st = fold(&events);
-    for e in events.iter().rev().filter(|e| e.kind == "spawn") {
+    let st = &events.states;
+    for e in lanes(&events).into_iter().rev().filter(|e| e.kind == "spawn") {
         let (Some(wt), Some(n), agent, None) = (e.str("worktree"), e.issue, e.str("agent"), e.str("machine")) else {
             continue;
         };
@@ -1170,7 +1172,7 @@ pub fn budget(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> R
         let since = ctx.now.saturating_sub(cfg.limits.stall_minutes * 60);
         let working = |a: &str| (agents.iter()).any(|x| x.name == a && x.busy());
         let mut seen = std::collections::BTreeSet::new();
-        let mut lanes: Vec<(u64, &Event, &str)> = (events.iter().rev())
+        let mut lanes: Vec<(u64, &Event, &str)> = (lanes(&events).into_iter().rev())
             .filter(|e| e.kind == "spawn" && e.str("role") != Some("orch"))
             .filter_map(|e| Some((e, e.str("worktree")?)))
             .filter(|(e, _)| crate::roots::skip(ctx, cfg, e).is_none())
@@ -1365,8 +1367,7 @@ fn sweep(ctx: &Ctx, cfg: &Config, on: &On, host: &str, out: &mut dyn Write) -> R
     Ok(())
 }
 
-fn finished(events: &[Event], states: &crate::events::States, i: usize) -> Option<&'static str> {
-    let sp = &events[i];
+fn finished(events: &[Event], states: &crate::events::States, sp: &Event) -> Option<&'static str> {
     let (agent, role) = (sp.str("agent")?, sp.str("role").unwrap_or_default());
     let s = states.get(&(sp.fleet.clone(), sp.issue?))?;
     if s.done() {
@@ -1380,10 +1381,11 @@ fn finished(events: &[Event], states: &crate::events::States, i: usize) -> Optio
         "turn-end" => e.str("state") == Some("done") && e.str("role") == Some(role),
         _ => false,
     };
-    let mine = events[i + 1..]
-        .iter()
-        .filter(|e| e.fleet == sp.fleet && e.issue == sp.issue);
-    mine.into_iter().any(ends).then_some("lane finished")
+    let mine = crate::events::of_issue(events, &sp.fleet, sp.issue?);
+    mine.into_iter()
+        .filter(|e| e.seq > sp.seq)
+        .any(ends)
+        .then_some("lane finished")
 }
 
 fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, host: &str, b: &str, out: &mut dyn Write) -> Result<()> {
@@ -1395,15 +1397,16 @@ fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, host: &str, b: &str, out: &mut dyn
     let (agents, events) = (crate::session::live_on(on)?, working(&ctx.state)?);
     let states = fold(&events);
     let agent = |n: &str| agents.iter().find(|a| a.name == n);
-    let spawn = |n: &str| (events.iter()).rposition(|e| e.kind == "spawn" && e.str("agent") == Some(n));
-    let spawned = |n: &str| (events.iter()).any(|e| e.kind.starts_with("spawn") && e.str("agent") == Some(n));
+    let lanes = lanes(&events);
+    let spawn = |n: &str| last_spawn(&events, n);
+    let spawned = |n: &str| (lanes.iter()).any(|e| e.kind.starts_with("spawn") && e.str("agent") == Some(n));
     let low = host::free_gb(on).is_some_and(|g| g < cfg.limits.min_free_gb);
     let (mut why, total) = (BTreeMap::new(), names.len());
     for (n, _) in names {
         if agent(&n).is_some_and(Session::busy) {
             continue;
         }
-        let ended = spawn(&n).and_then(|i| finished(&events, &states, i));
+        let ended = spawn(&n).and_then(|sp| finished(&events, &states, sp));
         let unknown = !spawned(&n);
         let w = match ended {
             Some(w) => w,
@@ -1422,7 +1425,7 @@ fn sweep_in(ctx: &Ctx, cfg: &Config, on: &On, host: &str, b: &str, out: &mut dyn
     for (n, bytes) in &removed {
         let what = if scr { "scratch" } else { "builds" };
         writeln!(out, "{what}: {host}: removed {b}/{n} {:.2} GB ({})", gb(*bytes), why[n])?;
-        if let Some(sp) = spawn(n).map(|i| &events[i]) {
+        if let Some(sp) = spawn(n) {
             let d = json!({"agent": n, "bytes": bytes, "why": why[n], "host": host, "path": format!("{b}/{n}")});
             emit(
                 &ctx.state,
@@ -1641,7 +1644,7 @@ pub fn reclaim(ctx: &Ctx, cfg: &Config, r: &dyn Runner, o: &mut dyn Write, i: &m
     let (events, agents, ps) = (working(&ctx.state)?, crate::session::live_on(r)?, host::cwds(r));
     let live = live_lanes(ctx, cfg, r)?;
     let (mut seen, mut total) = (std::collections::BTreeSet::new(), 0);
-    for e in events.iter().rev().filter(|e| e.kind == "spawn") {
+    for e in lanes(&events).into_iter().rev().filter(|e| e.kind == "spawn") {
         let wt = Path::new(e.str("worktree").unwrap_or_default());
         if e.str("machine").is_some() || !wt.starts_with(&ctx.worktrees) || !wt.is_dir() || !seen.insert(wt) {
             continue;
@@ -1894,6 +1897,7 @@ pub fn remove(r: &On, cfg: &Config, fleet: &str, wt: &str, saved: bool) -> Resul
 }
 
 fn spawned<'a>(events: &'a [Event], agent: &str, host: Option<&str>) -> Result<&'a Event> {
+    let events = lanes(events);
     let i = events.iter().rposition(|e| {
         e.kind == "spawn" && e.str("agent") == Some(agent) && host.is_none_or(|h| e.str("host") == Some(h))
     });
@@ -1902,8 +1906,8 @@ fn spawned<'a>(events: &'a [Event], agent: &str, host: Option<&str>) -> Result<&
             && e.str("agent") == Some(agent)
             && (e.kind == "lane-killed" || e.str("pane") == sp.str("pane"))
     };
-    match i.filter(|i| !events[*i..].iter().any(|e| killed(e, &events[*i]))) {
-        Some(i) => Ok(&events[i]),
+    match i.filter(|i| !events[*i..].iter().any(|e| killed(e, events[*i]))) {
+        Some(i) => Ok(events[i]),
         None => crate::gate::refused("NO_SUCH_AGENT", format!("no live lane `{agent}` in the log")),
     }
 }
@@ -2031,6 +2035,7 @@ fn kill_as(
 /// #478: each pane a supersede left on a host it could not reach (`stale_host`), killed as `kill --host` does once that host answers; a pane already gone there is only logged.
 pub fn stale(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let events = working(&ctx.state)?;
+    let events = lanes(&events);
     for s in events.iter().filter(|e| e.kind == "supersede") {
         let (Some(h), Some(agent), pane) = (s.str("stale_host"), s.str("agent"), s.str("stale_pane")) else {
             continue;
@@ -2085,7 +2090,8 @@ pub fn stop_rounds(
 ) -> Result<Vec<String>> {
     let events = working(&ctx.state)?;
     let (mut lists, mut seen, mut stopped) = (BTreeMap::new(), vec![keep], vec![]);
-    let olds = (events.iter().rev()).filter(|e| e.is("spawn", fleet, issue) && e.str("role") == Some(role));
+    let olds =
+        (lanes(&events).into_iter().rev()).filter(|e| e.is("spawn", fleet, issue) && e.str("role") == Some(role));
     for sp in olds {
         let agent = sp.str("agent").unwrap_or(keep);
         if seen.contains(&agent) || crate::hosts::held(ctx, cfg, sp) {
@@ -2109,7 +2115,7 @@ pub fn stop_rounds(
 pub fn dedup(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Result<()> {
     let (events, mut by) = (working(&ctx.state)?, BTreeMap::new());
     let on = |f: &str| cfg.fleet.get(f).is_some_and(|f| !f.paused);
-    let spawns = (events.iter()).filter(|e| e.kind == "spawn" && on(&e.fleet));
+    let spawns = lanes(&events).into_iter().filter(|e| e.kind == "spawn" && on(&e.fleet));
     let keys = spawns.filter_map(|e| Some(((e.fleet.as_str(), e.issue?, e.str("role")?), e.str("agent")?)));
     if !keys.fold(false, |two, (k, a)| by.insert(k, a).is_some_and(|b| b != a) || two) {
         return Ok(());

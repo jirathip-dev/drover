@@ -92,9 +92,8 @@ pub fn post(ctx: &Ctx, cfg: &Config, thread: &str, c: &Card) -> Result<String> {
 
 /// Card `id`'s `run-settled`, if any.
 pub fn settled<'a>(events: &'a [Event], id: &str) -> Option<&'a Event> {
-    events
-        .iter()
-        .find(|e| e.kind == "run-settled" && e.str("id") == Some(id))
+    let settled = crate::events::of_kind(events, &["run-settled"]);
+    settled.into_iter().find(|e| e.str("id") == Some(id))
 }
 
 /// The owner's [approve] (`sha`: the prefix of the command's sha the owner saw, if the tap carries it) or [deny] on card `id`; the line the thread records.

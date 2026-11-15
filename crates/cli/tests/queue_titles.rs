@@ -61,13 +61,9 @@ fn cached_spec_and_pr_titles_show_in_the_queue_row() {
     let r = Fake::default();
     let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let out = titles(&s);
-    assert!(
-        out.contains(&"#12 Queue titles · PR #33 · Lanes like Corral".to_string()),
-        "{out:?}"
-    );
-    assert!(
-        out.contains(&"#17 A very long issue title that goes well past one phone line".to_string()),
-        "#331: whole, the page ellipsises it: {out:?}"
+    assert_eq!(
+        out,
+        ["#12 Queue titles", "#17 A very long issue title that goes well past …"]
     );
     assert_eq!(r.count("gh"), 0, "no gh call on render: {:?}", r.calls.borrow());
 }
