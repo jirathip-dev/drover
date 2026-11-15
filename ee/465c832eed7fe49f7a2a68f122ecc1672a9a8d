@@ -1,0 +1,15 @@
+Decided: the page renders /screens JSON with one renderer per block type; tabs come from cooee-plugin.toml's places, so a new screen is a new tab with no page change
+Because: "It has no per-tab code: a new screen in the manifest appears as a tab with no change to the page"
+Decided: owner defaults taken: no Chat tab (asks and run cards stay as cards) and the lifeboat stays as it is
+Because: "Default here: the page has no Chat tab; asks and run cards still show as cards."
+Decided: themes are the pinned swag packs drover already embeds (#928), drawn as before (ha-/hr- symbols from sprites.svg)
+Because: "A row's `figure` (`coat`, `state`) is the theme's sprite, as today."
+Decided: each screen's last copy lives in localStorage and paints first with its age; the SW never caches screens/ or action
+Because: "Offline: the last screens paint from the cache with their age."
+Decided: the board-freeze check, its script, test and rules line go with the old board's files
+Because: "The board-freeze check (#552) goes when the old board's files go."
+Rejected: deleting /live and the API v1 parts the old board read in this PR — API v1 stays and /live is left to #746's cleanup
+Rejected: cooee's plain sprite format (s-edit, s-read…) — the shared packs here are the legacy-board folder; switching would change the look
+Check: crates/cli/tests/page.rs taps the page in Chrome: answer, approve, deny, pause, resume, stop, Fleets save, then offline paint
+Check: scripts/ui-audit.sh passes on queue lanes events fleets lane card; pixel diffs vs the old board are in the PR body
+Owner: The phone app now draws the same Queue, Lanes, Events, Fleets and cards screens as cooee; the Host and Chat tabs are gone.
