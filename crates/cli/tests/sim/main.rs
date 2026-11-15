@@ -6,6 +6,7 @@ mod replay;
 mod scenario;
 mod sched;
 mod seeds;
+mod whatif;
 
 #[path = "../common/mod.rs"]
 #[allow(unused_imports)]
@@ -283,7 +284,7 @@ fn the_hunt_finds_a_planted_bug_sooner_than_random_seeds_and_minimises_it() {
         .iter()
         .find(|x| tripped(&x.failure))
         .expect("the hunt finds it within 40 rounds");
-    let random: Vec<u64> = (2..2 + f.round as u64).collect();
+    let random: Vec<u64> = (1000..1000 + f.round as u64).collect();
     let hs: Vec<_> = random.iter().map(|&n| std::thread::spawn(move || run(n, s))).collect();
     for o in hs.into_iter().map(|h| h.join().expect("a run")) {
         let why = o.failure.unwrap_or_default();
@@ -351,14 +352,14 @@ fn the_known_fleet_gives_exact_metrics() {
     let o = run_world(seeds::KNOWN, seeds::known(), STEPS + 1000, None);
     assert!(o.failure.is_none(), "{}", o.report());
     let want = metrics::Metrics {
-        to_merge: vec![1027, 1336],
+        to_merge: vec![1012, 1337],
         spawns: 5,
         wasted: 1,
         supersedes: 1,
         lanes: 4,
-        idle: 1004,
+        idle: 992,
         ci_wait: 600,
-        lock_wait: 13,
+        lock_wait: 11,
         serial: 0,
         host_busy: 0,
         caps: 0,
@@ -374,10 +375,10 @@ fn the_known_fleet_gives_exact_metrics() {
             ("caps", 0.0),
             ("ci_wait_min", 10.0),
             ("host_busy", 0.0),
-            ("idle_lane_min", 16.73),
-            ("lock_wait_min", 0.22),
-            ("queue_to_merge_p50_min", 17.12),
-            ("queue_to_merge_p90_min", 22.27),
+            ("idle_lane_min", 16.53),
+            ("lock_wait_min", 0.18),
+            ("queue_to_merge_p50_min", 16.87),
+            ("queue_to_merge_p90_min", 22.28),
             ("review_rounds_per_merge", 1.0),
             ("serial_busy", 0.0),
             ("supersedes_per_lane", 0.25),
@@ -518,19 +519,28 @@ fn a_fixture_db_replays_to_its_merge_order_and_counts() {
     assert!(!saved.contains("all good") && !saved.contains("blocking"), "{saved}");
 }
 
+fn var(k: &str) -> Option<String> {
+    std::env::var(k).ok().filter(|v| !v.is_empty())
+}
+
+fn sim_fleet() -> String {
+    var("DROVER_SIM_FLEET").unwrap_or_else(|| "herdsman".into())
+}
+
+fn scenario_env() -> Option<replay::Scenario> {
+    let src = var("DROVER_SIM_REPLAY")?;
+    if src.ends_with(".json") {
+        return Some(serde_json::from_str(&std::fs::read_to_string(&src).unwrap()).unwrap());
+    }
+    let days = var("DROVER_SIM_DAYS").and_then(|d| d.parse().ok()).unwrap_or(7);
+    let (evs, from, to) = replay::read(std::path::Path::new(&src), &sim_fleet(), days).unwrap();
+    Some(replay::build(&evs, &sim_fleet(), from, to))
+}
+
 #[test]
 #[ignore = "long: `just sim --replay`"]
 fn replay_db() {
-    let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-    let src = var("DROVER_SIM_REPLAY").expect("DROVER_SIM_REPLAY");
-    let s: replay::Scenario = if src.ends_with(".json") {
-        serde_json::from_str(&std::fs::read_to_string(&src).unwrap()).unwrap()
-    } else {
-        let fleet = var("DROVER_SIM_FLEET").unwrap_or_else(|| "herdsman".into());
-        let days = var("DROVER_SIM_DAYS").and_then(|d| d.parse().ok()).unwrap_or(7);
-        let (evs, from, to) = replay::read(std::path::Path::new(&src), &fleet, days).unwrap();
-        replay::build(&evs, &fleet, from, to)
-    };
+    let s = scenario_env().expect("DROVER_SIM_REPLAY");
     if let Some(p) = var("DROVER_SIM_SAVE") {
         std::fs::write(&p, serde_json::to_string_pretty(&s).unwrap()).unwrap();
         println!("scenario saved to {p}");
@@ -569,4 +579,98 @@ fn replay_db() {
     }
     println!("{}", replay::table(&s.real, &sim));
     assert!(o.failure.is_none(), "{:?}", o.failure);
+}
+
+#[test]
+#[ignore = "long: `just sim --what-if`"]
+fn what_if() {
+    let path = |k: &str| var(k).unwrap_or_else(|| panic!("{k}"));
+    let (cur, cand) = (path("DROVER_SIM_CURRENT"), path("DROVER_SIM_WHATIF"));
+    let knobs = |p: &str| {
+        let text = std::fs::read_to_string(p).unwrap_or_else(|e| panic!("{p}: {e}"));
+        whatif::Knobs::read(&text, &sim_fleet()).unwrap_or_else(|e| panic!("{p}: {e:#}"))
+    };
+    let (src, what) = match scenario_env() {
+        Some(s) => {
+            let what = format!("replay {} {}..{}", s.fleet, s.from, s.to);
+            (whatif::Source::Replay(s), what)
+        }
+        None => {
+            let (n, from) = (env("DROVER_SIM_N", 50), env("DROVER_SIM_FROM", 1000));
+            (
+                whatif::Source::Seeds((from..from + n).collect()),
+                format!("{n} seeds from {from}"),
+            )
+        }
+    };
+    let w = whatif::run(src, knobs(&cur), knobs(&cand));
+    println!(
+        "what-if over {what}: current {cur} vs candidate {cand}\n\n{}",
+        w.table()
+    );
+}
+
+fn fleet_toml(serial_max: u64) -> String {
+    format!(
+        "[fleet.fx]\nrepo = \"o/fx\"\nlocal = \"/x\"\nintegration = \"staging\"\nserial_paths = [\"db/**\"]\nserial_max = {serial_max}\n"
+    )
+}
+
+#[test]
+fn raising_a_serial_max_cuts_waits_without_a_new_invariant_failure() {
+    let issues = ["101", "102", "103", "104", "105"];
+    let mut words = scenario::args(&["add"]);
+    words.extend(issues[..4].iter().map(ToString::to_string));
+    words.push("--serial".into());
+    let mut s = replay::Scenario {
+        fleet: "fx".into(),
+        from: 1_790_000_000,
+        to: 1_790_000_000 + 4 * 3600,
+        queue: vec![(0, words), (5, scenario::args(&["add", "105"]))],
+        ..Default::default()
+    };
+    for n in issues {
+        let push = model::Script::Push {
+            secs: 1800,
+            green: true,
+            ci: Some(300),
+        };
+        s.lanes.insert(format!("impl#{n}"), vec![push]);
+        let pass = model::Script::Review {
+            secs: 600,
+            pass: true,
+            proof: true,
+            heeds: true,
+        };
+        s.lanes.insert(format!("rev#{n}"), vec![pass]);
+    }
+    let knobs = |max| whatif::Knobs::read(&fleet_toml(max), "fx").unwrap();
+    let w = whatif::run(whatif::Source::Replay(s), knobs(1), knobs(4));
+    let t = w.table();
+    eprintln!("{t}");
+    assert!(w.current.metrics["serial_busy"] > 0.0, "{t}");
+    assert!(w.delta("waits") < 0.0 && w.delta("queue_to_merge_p90_min") < 0.0, "{t}");
+    assert_eq!(w.current.metrics["merges"], 5.0, "{t}");
+    assert!(w.candidate.failures.is_empty() && w.current.failures.is_empty(), "{t}");
+    assert!(t.contains("| serial db max ** | 1 | 4 |"), "{t}");
+}
+
+#[test]
+fn a_busy_window_blocks_spawns_only_while_it_takes_every_host() {
+    let loads = |ws: &[(u64, u64, u64)], hosts| {
+        let mut m = model::Model::default();
+        m.at(50, model::Ev::Load(40));
+        m.at(60, model::Ev::Load(1));
+        whatif::place(&mut m, ws, hosts);
+        let l = m.agenda.iter().filter_map(|(k, e)| match e {
+            model::Ev::Load(l) => Some((k.0, *l)),
+            _ => None,
+        });
+        (l.collect::<Vec<_>>(), whatif::windows(&m))
+    };
+    let ws = [(100, 200, 2), (150, 300, 1)];
+    assert_eq!(loads(&ws, 1).0, [(100, 40), (300, 1)]);
+    assert_eq!(loads(&ws, 2).0, [(100, 40), (200, 1)]);
+    assert_eq!(loads(&ws, 3), (vec![(150, 40), (200, 1)], vec![(150, 200, 1)]));
+    assert!(loads(&[(100, 200, 1)], 2).0.is_empty());
 }

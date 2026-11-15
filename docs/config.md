@@ -119,6 +119,7 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `silent_minutes` | `10` | an ACP lane's open turn with no session event this long is cancelled and nudged |
 | `ci_start_minutes` | `10` | a PR head with no checks this long after its push alerts `ci-missing` |
 | `load_per_cpu` | `2.5` | spawn refuses HOST_BUSY over this load per CPU |
+| `overload_minutes` | `10` | load per CPU over `load_per_cpu` this long alerts `host-overloaded` once, with the 5 busiest processes |
 | `swapout_rate` | `2000.0` | pages swapped out per 2 s sample that count as swapping |
 | `min_free_gb` | `10.0` | spawn refuses DISK_LOW under this many GB free on `/` |
 | `worktree_budget_gb` | `25.0` | over this many GB of worktrees drive frees build folders, then spawn refuses DISK_BUDGET |
@@ -144,7 +145,6 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `max_parallel_spawns` | `6` | concurrent detached spawn kicks (0: in the pass) |
 | `spawn_pending_max_secs` | `300` | a spawn marker or kick lock older than this is stale |
 | `acp_start_minutes` | `3` | an ACP lane with no event back this long after its first turn is a failed start |
-| `rotate_mb` | `20` | the event log over this many MB moves old events to monthly archives |
 | `webhook_poll_minutes` | `10` | with GitHub webhooks on, the fast step re-reads PRs only this often |
 | `keychain_readers` | `3` | more Keychain readers up over 60 s alert `keychain-jammed` |
 | `reap_keychain_readers` | `false` | kill those stuck Keychain readers too |
@@ -178,7 +178,6 @@ Every timing and cap drover core uses is a `[limits]` key; a fleet.toml without 
 | `outbox_stale_minutes` | `5` | a remote lane's outbox line undelivered this long alerts `outbox-stale` |
 | `host_offline_minutes` | `15` | a remote host unreachable this long has its open lanes restarted on the main host |
 | `promise_passes` | `{}` | drive passes a promise of each kind may stay open before `promise-missed` (default 2) |
-| `serve_herdr_secs` | `2` | serve re-reads herdr's agents in the background this often |
 | `serve_shed_secs` | `5` | serve re-reads shed's lanes in the background this often |
 | `serve_remote_secs` | `10` | serve re-reads the remote hosts (ssh) in the background this often |
 | `serve_host_secs` | `10` | serve re-samples this host's load in the background this often |

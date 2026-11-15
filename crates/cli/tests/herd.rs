@@ -81,11 +81,11 @@ fn body(res: &str) -> Value {
 }
 
 #[test]
-fn herd_json_shape_on_a_fixture() {
+fn the_herd_read_shape_on_a_fixture() {
     let (c, r) = fixture("shape");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     *s.host.lock().unwrap() = drover::host::sample(&r);
-    let v = body(&get(&s, "/herd.json", ADDR, ""));
+    let v = body(&get(&s, "/api/v1/herd", ADDR, ""));
     let names = |l: &Value| {
         l.as_array()
             .unwrap()
@@ -142,10 +142,10 @@ fn herd_json_shape_on_a_fixture() {
 }
 
 #[test]
-fn herd_json_carries_the_action_and_fleet_colour() {
+fn the_herd_read_carries_the_action_and_fleet_colour() {
     let (c, r) = fixture("act");
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let v = body(&get(&s, "/herd.json", ADDR, ""));
+    let v = body(&get(&s, "/api/v1/herd", ADDR, ""));
     let f = &v["fleets"];
     assert!(
         ["l", "p", "c", "g", "a"].contains(&f[0]["color"].as_str().unwrap()),
@@ -158,14 +158,14 @@ fn herd_json_carries_the_action_and_fleet_colour() {
     );
     let fail = json!({"verdict": "FAIL", "sha": "a".repeat(40)});
     append(&c.state, &Event::new(900_200, "sendmeter", Some(12), "verdict", fail)).unwrap();
-    let v = body(&get(&Server::new(&c, &r, Some(ADDR.into())), "/herd.json", ADDR, ""));
+    let v = body(&get(&Server::new(&c, &r, Some(ADDR.into())), "/api/v1/herd", ADDR, ""));
     assert_eq!(v["fleets"][0]["lanes"][0]["act"], "fix");
 }
 
 #[test]
-fn herd_json_has_no_pane_text() {
+fn the_herd_read_has_no_pane_text() {
     let (c, r) = fixture("nopane");
-    let res = get(&Server::new(&c, &r, Some(ADDR.into())), "/herd.json", ADDR, "");
+    let res = get(&Server::new(&c, &r, Some(ADDR.into())), "/api/v1/herd", ADDR, "");
     assert!(
         !res.contains("PANE-SECRET-TEXT") && !res.contains("cargo test") && !res.contains("turns"),
         "{res}"
@@ -174,239 +174,21 @@ fn herd_json_has_no_pane_text() {
 }
 
 #[test]
-fn herd_json_refuses_a_foreign_host_or_origin() {
+fn the_herd_read_refuses_a_foreign_host_or_origin() {
     let (c, r) = fixture("origin");
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    assert!(get(&s, "/herd.json", "evil.example", "").starts_with("HTTP/1.1 403 "));
-    assert!(get(&s, "/herd.json", ADDR, "Origin: https://evil.example\r\n").starts_with("HTTP/1.1 403 "));
+    assert!(get(&s, "/api/v1/herd", "evil.example", "").starts_with("HTTP/1.1 403 "));
+    assert!(get(&s, "/api/v1/herd", ADDR, "Origin: https://evil.example\r\n").starts_with("HTTP/1.1 403 "));
     assert!(
         !r.called("herdr agent list") && r.1.methods().is_empty(),
         "refused before any read"
     );
-    body(&get(&s, "/herd.json", "mac.example", "Origin: https://mac.example\r\n"));
-}
-
-#[test]
-fn weather_param_works_on_loopback_only() {
-    let (c, r) = fixture("weather");
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    *s.host.lock().unwrap() = drover::host::sample(&r);
-    let storm = body(&get(&s, "/herd.json?weather=storm", ADDR, ""));
-    assert_eq!(
-        (&storm["host"]["load"], &storm["host"]["pressure"]),
-        (&json!(3.25), &json!("normal"))
-    );
-    assert!(storm["host"]["gate"]
-        .as_str()
-        .unwrap()
-        .starts_with("load/cpu 3.25 > 2.5"));
-    let calm = body(&get(&s, "/herd.json?weather=calm", ADDR, ""));
-    assert_eq!(
-        (&calm["host"]["gate"], &calm["host"]["pressure"]),
-        (&Value::Null, &json!("normal"))
-    );
-    let real = body(&get(&s, "/herd.json?weather=calm", "mac.example", ""));
-    assert_eq!(
-        (&real["host"]["pressure"], &real["host"]["gate"]),
-        (&json!("warn"), &json!("memory pressure warn"))
-    );
-}
-
-#[test]
-fn page_has_the_herd_button_and_horse_symbols() {
-    let (c, r) = fixture("page");
-    let page = get(&Server::new(&c, &r, Some(ADDR.into())), "/", ADDR, "");
-    assert!(page.contains("<button id=herd-on type=button aria-label=\"herd mode\">🐎</button>"));
-    assert!(
-        page.contains("/herd.js></script>")
-            && std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/herd.js"))
-                .unwrap()
-                .contains("const H = $('#herd')")
-    );
-}
-
-#[test]
-fn herd_snapshots_fit_390px() {
-    if no_webkit() {
-        return;
-    }
-    let (c, r) = fixture("shots");
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page = get(&s, "/", ADDR, "");
-    let herd = |w: &str| get(&s, &format!("/herd.json?weather={w}"), ADDR, "");
-    let json = |w: &str| herd(w)[herd(w).find("\r\n\r\n").unwrap() + 4..].to_string();
-    let d = tmpdir("herd-png");
-    let file = d.join("page.html");
-    std::fs::write(&file, &page[page.find("<!doctype").unwrap()..]).unwrap();
-    let show = |w: &str| {
-        format!(
-            "window.fetch = async () => new Response('no pane output', {{status: 404}}); herd(true); herdData({})",
-            json(w)
-        )
-    };
-    let scenes = [
-        ("herd-calm", show("calm")),
-        ("herd-gusty", show("gusty")),
-        ("herd-storm", show("storm")),
-        ("herd-fog", show("fog")),
-        (
-            "herd-swipe",
-            format!("{}; PG.scrollLeft = PG.clientWidth", show("gusty")),
-        ),
-        (
-            "herd-queue-tap",
-            format!(
-                "{}; document.querySelector('.hqh[data-i=\"19\"]').click()",
-                show("calm")
-            ),
-        ),
-        (
-            "herd-sheet",
-            format!(
-                "{}; document.querySelector('.hh[data-agent=\"sendmeter-impl-12\"]').click()",
-                show("calm")
-            ),
-        ),
-    ];
-    for (name, js) in scenes {
-        let png = std::env::var("DROVER_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
-            std::path::Path::new(&p).join(format!("{name}.png"))
-        });
-        let o = webview()
-            .args([
-                file.to_str().unwrap(),
-                "390",
-                "lanes",
-                "horse",
-                png.to_str().unwrap(),
-                &js,
-            ])
-            .output()
-            .unwrap();
-        let out = String::from_utf8_lossy(&o.stdout);
-        let w: Vec<u32> = out.split_whitespace().filter_map(|n| n.parse().ok()).collect();
-        assert!(
-            o.status.success() && w.len() == 2,
-            "{name}: {out} {}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-        assert!(w[0] <= 390 && w[1] == 390, "{name}: scrollWidth {} at {}", w[0], w[1]);
-    }
-}
-
-#[test]
-fn herd_horses_are_one_size_at_390px() {
-    if no_webkit() {
-        return;
-    }
-    let (c, r) = fixture("sizes");
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page = get(&s, "/", ADDR, "");
-    let mut calm = body(&get(&s, "/herd.json?weather=calm", ADDR, ""));
-    let fleet = calm["fleets"][0].clone();
-    let mut herd = |states: &[(&str, &str, usize)], q: u64| {
-        let mut lanes = vec![];
-        for &(state, tone, n) in states {
-            for _ in 0..n {
-                let mut l = fleet["lanes"][0].clone();
-                (l["name"], l["state"], l["shown"], l["tone"]) = (
-                    json!(format!("sendmeter-impl-{}", 100 + lanes.len())),
-                    json!(state),
-                    json!(state),
-                    json!(tone),
-                );
-                lanes.push(l);
-            }
-        }
-        let queue: Vec<Value> = (0..q)
-            .map(|i| json!({"issue": 200 + i, "title": null, "blocked_by": null, "coat": fleet["queue"][0]["coat"]}))
-            .collect();
-        calm["fleets"] = json!([{"name": "sendmeter", "lanes": lanes, "queue": queue}]);
-        calm["others"] = json!([]);
-        calm.to_string()
-    };
-    let scenes = [
-        (
-            "herd-58-a",
-            herd(&[("working", "g", 1), ("idle", "m", 7), ("done", "g", 11)], 13),
-            4.0,
-            String::new(),
-        ),
-        ("herd-58-b", herd(&[("done", "g", 1)], 0), 1.0, String::new()),
-        (
-            "herd-58-c",
-            herd(
-                &[
-                    ("working", "g", 3),
-                    ("idle", "m", 2),
-                    ("done", "g", 2),
-                    ("blocked", "r", 1),
-                    ("dead", "r", 1),
-                ],
-                5,
-            ),
-            5.0,
-            String::new(),
-        ),
-    ];
-    let to = |band: &str| {
-        format!("; document.querySelector('.b-{band}').scrollIntoView({{behavior: 'instant'}}); here().scrollTop -= 64")
-    };
-    let scenes = scenes.iter().cloned().chain([
-        ("herd-58-a2", scenes[0].1.clone(), 4.0, to("done")),
-        ("herd-58-c2", scenes[2].1.clone(), 5.0, to("idle")),
-    ]);
-    let d = tmpdir("herd-58-png");
-    let file = d.join("page.html");
-    std::fs::write(&file, &page[page.find("<!doctype").unwrap()..]).unwrap();
-    let w = |sel: &str| {
-        format!("(document.querySelector('{sel} svg') || {{getBoundingClientRect: () => ({{width: -1}})}}).getBoundingClientRect().width")
-    };
-    let measure = format!(
-        "window.measure = [document.querySelector('.hr').clientHeight, document.querySelectorAll('.band').length, {}, {}, {}, {}, {}]",
-        w(".b-working .hh"), w(".b-idle .hh"), w(".b-done .hh"), w(".b-blocked .hh"), w(".b-queue .hqh")
-    );
-    for (name, json, bands, then) in scenes {
-        let js = format!("window.fetch = async () => new Response('', {{status: 404}}); herd(true); herdData({json}); {measure}{then}");
-        let png = std::env::var("DROVER_SNAPSHOTS").map_or(d.join(format!("{name}.png")), |p| {
-            std::path::Path::new(&p).join(format!("{name}.png"))
-        });
-        let o = webview()
-            .args([
-                file.to_str().unwrap(),
-                "390",
-                "lanes",
-                "horse",
-                png.to_str().unwrap(),
-                &js,
-            ])
-            .output()
-            .unwrap();
-        let out = String::from_utf8_lossy(&o.stdout);
-        let v: Vec<f64> = out.split_whitespace().filter_map(|n| n.parse().ok()).collect();
-        assert!(
-            o.status.success() && v.len() == 9,
-            "{name}: {out} {}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-        let [sw, vw, ranch, n, working, idle, done, blocked, queued] = v[..] else {
-            unreachable!()
-        };
-        assert!(sw <= 390.0 && vw == 390.0, "{name}: scrollWidth {sw} at {vw}");
-        assert!((ranch - 0.22 * 844.0).abs() <= 1.0, "{name}: ranch {ranch}px");
-        assert_eq!(n, bands, "{name}: bands drawn");
-        let lane: Vec<f64> = [working, idle, done, blocked]
-            .into_iter()
-            .filter(|&x| x >= 0.0)
-            .collect();
-        assert!(
-            lane.iter().all(|&x| (x - 132.0).abs() <= 1.0),
-            "{name}: lane horse widths {lane:?}"
-        );
-        if queued >= 0.0 {
-            assert!((queued - 53.0).abs() <= 1.0, "{name}: queued {queued}");
-        }
-    }
+    body(&get(
+        &s,
+        "/api/v1/herd",
+        "mac.example",
+        "Origin: https://mac.example\r\n",
+    ));
 }
 
 #[test]

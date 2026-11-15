@@ -43,35 +43,13 @@ once() {
   return "$rc"
 }
 fail=0
-# #141: `busy/host-ranked` is the `host-ranked` view of <site>/busy (scripts/host-fixtures.sh), shot as busy-host-ranked.png.
-# #157: `hosts/host` and `hosts/sheet`: the host cards (one offline) and a lane card naming its host; #234 `hosts/host-chart`:
-# mini's load/cpu chart open. #267: the chart and the busy and healthy fixtures at 1440 too.
-# #367: `queue/queue-repos` and `queue/queue-chain` (also @1440): the Queue fixture's chips, groups, chain and `+ N more`.
-# #370: every tab at 1440 in farm, kitchen and terminal; `row-loop` (a row sprite's two frames, the same node across a
-# patch), `moment-row` (a moment on its row, once, resumed after a patch), each `-still` under reduced motion; `empty`.
-# #386: `chat` and `chat-thread` (also @1440): the [chat] tab's thread list and one thread. #397: `chat-error`, a start error over it.
-# #406: `chat-viewer`, `chat-viewer-zoom`, `chat-viewer-multi`: the image viewer fitted, zoomed and on the second of two.
-# #403: `chat-send`, `chat-long`, `chat-kb`, `chat-back` and `chat-wait` (its themes, ascii and still): the phone composer.
-# #408: `chat-older` and `chat-mid` (also @1440): a long thread's older page loaded, then scrolled half way, its header pinned.
-# #409: `chat-code` and `chat-copied`: a reply's short and long-line code boxes, and [copy]'s `copied` flash.
-# #405: `chat-new`, `chat-archive`, `chat-archived`, `chat-thumbs`: the empty new thread, a row swiped left to [archive],
-# the archived fold and three images waiting above the box.
-# #407: `chat-pin`, `chat-fold`, `chat-pill` (and -stopping, -reconnecting, -offline), `chat-queue`, `chat-queue-edit`,
-# `chat-steer`, `chat-menu`, `chat-undo`: the pinned send, a folded turn, the pill's states, the queue and its edit, the
-# long-press menus and the undo toast.
-# #423: the garden: `herd-garden` (-busy, -held, -still: the shop window's sun, cloud and rain), its tabs and moments,
-# Queue and Lanes in garden-dark too (`^garden-dark`), and both garden schemes on the contact sheet.
-# #492: `chat-handoff`: a handoff's choice card, the target repo's threads and [new thread].
-# #516: `herd-dupes`: herd.json repeating a lane's name, refreshed 5 times: one card per name.
-# #365: `queue/queue-backlog`: acme-api's 100-issue backlog searched, filtered and ticked.
-# #450: `loading` (a fast load shows no strip, a slow one the strip), `loading-tap` (a tap during a load opens its sheet),
-# `stale` (`as of 3m ago`) and `first-load` (the empty outlines).
-# #725: `lifeboat/page`: the lifeboat's paired page (site/lifeboat/, written by `cargo test --test lifeboat`), shot as lifeboat-page.png.
-for v in lifeboat/page queue queue-open queue-lanes queue-change queue-drive queue-result config lanes lanes-now sheet sheet-full sheet-acp sheet-parked sheet-other sheet-drag host busy/host-ranked healthy/host-ranked hosts/host hosts/host-chart hosts/sheet hosts/host-chart@1440 busy/host-ranked@1440 healthy/host-ranked@1440 events pipeline pipeline-custom herd1 herd2 herd-kitchen herd-kitchen-busy herd-kitchen-held herd-kitchen-still herd-garden herd-garden-busy herd-garden-held herd-garden-still herd-nodone herd-night herd-night-storm herd-scroll herd-dupes herd-nav queue-scroll queue/queue-repos queue/queue-chain queue/queue-backlog queue/queue-repos@1440 queue/queue-chain@1440 toast needs-later needs-answered needs-pending needs-fold chat chat-thread chat-thread@1440 chat-error chat-viewer chat-viewer-zoom chat-viewer-multi chat-code chat-copied chat-handoff chat-send chat-long chat-kb chat-back chat-older chat-mid chat-mid@1440 chat-wait chat-wait~kitchen chat-wait~terminal chat-wait-still ascii-chat-wait chat-new chat-archive chat-archived chat-thumbs chat-pin chat-fold chat-pill chat-pill-stopping chat-pill-reconnecting chat-pill-offline chat-queue chat-queue-edit chat-steer chat-menu chat-undo \
-  queue-rows events-rows events@1440 events-rows@1440 events-open events-open@1440 events-all queue-rows~kitchen events-rows~kitchen queue~kitchen lanes~kitchen host~kitchen events~kitchen queue~garden lanes~garden host~garden events~garden queue~garden^garden-dark lanes~garden^garden-dark queue~terminal lanes~terminal lanes-now~terminal host~terminal events~terminal theme-switch look look~kitchen moment-still loading loading~kitchen loading~terminal loading~garden loading-still loading-tap stale first-load loading@1440 loading~kitchen@1440 loading~terminal@1440 \
-  $(for v in queue lanes host events loading; do echo "ascii-$v ascii-$v~kitchen"; done) ascii-queue~terminal ascii-lanes~terminal \
-  $(for v in queue lanes host events; do echo "$v@1440 $v~kitchen@1440 $v~terminal@1440"; done) row-loop row-loop~kitchen row-loop-still moment-row moment-row~kitchen moment-row-still moment-row~garden moment-row~garden^garden-dark row-loop~garden empty empty~kitchen empty~terminal \
-  $(for s in github-dark solarized-dark gruvbox nord dracula paper farm kitchen garden-light garden-dark; do echo "queue^$s busy/host-ranked^$s"; done); do
+# #927: the page draws the JSON screens: each tab (its place id), `fleets` (the [⚙] screen's sheet), `lane` (a lane's
+# sheet) and `card` (the first card opened), in each built-in theme (`~<theme>`), at 1440 (`@1440`) and in every colour
+# scheme (`^<scheme>`, the contact sheet). #725: `lifeboat/page`: the lifeboat's paired page (site/lifeboat/, written by
+# `cargo test --test lifeboat`), shot as lifeboat-page.png.
+for v in lifeboat/page queue lanes events fleets lane card queue@1440 lanes@1440 events@1440 \
+  $(for t in kitchen garden terminal; do echo "queue~$t lanes~$t events~$t"; done) lanes~garden^garden-dark \
+  $(for s in github-dark solarized-dark gruvbox nord dracula paper farm kitchen garden-light garden-dark; do echo "queue^$s"; done); do
   [ -n "${UI_AUDIT_VIEWS:-}" ] && [[ " $UI_AUDIT_VIEWS " != *" $v "* ]] && continue # #266: only these views (space-separated)
   # #241: `<view>~<theme>` is the view in that theme (`?theme=`), shot as <view>-<theme>.png. #244: `<view>^<scheme>`
   # in that colour scheme (`?scheme=`), shot as <view>-scheme-<scheme>.png: the contact sheet, from the real CSS.
@@ -83,9 +61,6 @@ for v in lifeboat/page queue queue-open queue-lanes queue-change queue-drive que
   dir=$([[ $v == */* ]] && echo "${v%/*}/" || true) view=${v##*/} v=${v//\//-}${th:+-$th}${sc:+-scheme-$sc}
   v=$v${wd:+-$wd}
   url="http://127.0.0.1:$port/${dir}index.html?audit=$view${th:+&theme=$th}${sc:+&scheme=$sc}${wd:+&w=$wd}"
-  case $v in herd-garden*) url+="&theme=garden" ;; esac # #423
-  case $v in herd-kitchen*) url+="&theme=kitchen" ;; herd-nodone) url+="&theme=kitchen&nopose=done" ;; esac # #172, #239
-  case $v in moment-still|herd-kitchen-still|herd-garden-still|herd-nav|loading-still|chat-wait-still|row-loop-still|moment-row-still) flags=(--force-prefers-reduced-motion) ;; esac # #241, #239, #291, #305, #370
   run "$url&shot=1" --screenshot="$shots/$v.png" ${flags[@]+"${flags[@]}"} >/dev/null || fail=1
   run "$url&check=1" --dump-dom ${flags[@]+"${flags[@]}"} > "$shots/$v.html" || fail=1
   if grep -qx "$v --dump-dom" "$shots/flaky.txt"; then echo "$v: hung 3 times, not checked (ui-flaky)"
@@ -129,8 +104,4 @@ EOF
   then fail=1; fi
   rm "$shots/$v.html"
 done
-# #166: the chat sheet opened and swipe-closed under a CDP screencast: no near-black frame, the page never moves.
-# #453: one retry, for the runner's Chrome renderer crash; a real regression fails both runs.
-close() { ${to:+"$to" -k 5 90} node "$(dirname "$0")/ui-close.mjs" "http://127.0.0.1:$port/index.html" "$chrome" "$shots"; }
-close || { echo "ui-close: retrying once" >&2; close; } || fail=1
 exit $fail

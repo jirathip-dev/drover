@@ -1,6 +1,6 @@
 # Lanes, hooks and notifiers
 
-A lane is one agent working one issue in its own worktree and herdr pane: `impl`, `rev`
+A lane is one agent working one issue in its own worktree and shed terminal: `impl`, `rev`
 or the owner-only `design` and `architect`. No lane runs the fleet: `drover drive` does ([Drive](#drive)). Agents get their usage doc from `drover help --agent`.
 
 ## Design and architect (#412, #730)
@@ -55,7 +55,7 @@ drover clean --orphans --yes        # also remove folders under the worktree roo
   skips the question. Idle means no live lane, no process with its cwd there, HEAD not moved and no changed or
   untracked file modified in 7 days. Sources, branches and worktree registrations stay. Sizes are logical: an
   APFS-cloned folder shares blocks, so freeing it may save less.
-- `LANE_LIVE`: a herdr agent is live in the worktree, or the log has an unfinished lane.
+- `LANE_LIVE`: a live agent is in the worktree, or the log has an unfinished lane.
 - `WORKTREE_DIRTY`: unpushed or uncommitted work from no known lane.
 - `SERIAL_BUSY`, `CAP`, `MCP_FORBIDDEN`, `MERGED`: see `drover help --agent`.
 
@@ -73,7 +73,7 @@ dir, `DROVER_SCRATCH_TARGET=<root>/.build/.scratch/<agent>`, for second builds a
 the hook refuses a `CARGO_TARGET_DIR` or `--target-dir` outside `<root>/.build` (`REFUSED SCRATCH_TARGET`). Scratch dirs
 count toward `build_budget_gb` (oldest go first); drive deletes a lane's once it ended. #651: on every enabled host
 (remote ones in the tick, after their trim; `[limits] sweep_remote = false` keeps it to this one) a scratch dir stays only
-while its agent is working, it is an open issue's latest lane of its role, or a herdr agent no spawn names yet holds it.
+while its agent is working, it is an open issue's latest lane of its role, or a live agent no spawn names yet holds it.
 Under `min_free_gb` every non-working lane's goes, largest first; each removal is logged with host, size and reason. `drover clean` lists the Cargo folders lanes left in `[limits] stray_roots`
 (`/tmp`, `$TMPDIR`) untouched a day, and with `--yes` removes them and each removed worktree's Claude temp dir. Node fleets: pnpm's store is
 already shared; for npm set `npm_config_cache`. `clone_build = ["target"]` (or `["node_modules"]`) APFS-clones (`cp -cR`) each listed
@@ -96,7 +96,7 @@ Every lane gets `DROVER_PORT` (#187): a stable hash of `<fleet>/<branch>` into t
 logs it and the Lanes tab shows it (`:41234`). Lanes start dev servers on it, never a fixed port; `env`
 values expand it: `[fleet.web.env] PORT = "$DROVER_PORT"`. `scripts/ui-audit.sh` serves on it when set.
 
-`drover close <agent>` closes the pane of a herdr agent that is not a drover lane (by name or pane id),
+`drover close <agent>` closes the terminal of a shed agent that is not a drover lane (by name or pane id),
 never touching files or worktrees, and logs a passive `closed-other`; a logged lane is refused `IS_LANE`
 (use stop, kill or clean). `drover stop <agent>` sends Esc (logs `stop`). `drover kill <agent>` prints what is lost
 (state, unpushed commits, dirty files, open PR); with `--yes` it commits dirty files as `wip: kill
@@ -120,9 +120,7 @@ way, logged `lane-closed` with `why: merged-idle`, then its worktree removed; th
 `SECRET_IN_WIP` or failed snapshot keeps the pane, one `lane-kept-dirty`, never retried. A working agent, an open
 issue's lane, an orchestrator or any other agent in the folder stays `keep …: live agent`.
 
-`--supersede` kills the old agent and logs it. If `herdr agent start` times out but the
-harness came up in the pane, spawn names the agent and logs the lane anyway; if nothing
-came up it closes the pane and logs nothing. `drover adopt` records a lane by hand.
+`--supersede` kills the old agent and logs it. `drover adopt` records a lane by hand.
 
 Harnesses: `claude` runs Claude Code with the synced profile folder, `hermes` runs a Hermes
 profile with its hook accepted, and `dsh` is a reviewer-only beta ([dsh.md](dsh.md)).
@@ -196,6 +194,13 @@ first served (a kind at its own cap lets later kinds by); after `heavy_wait_minu
 and logs `heavy-timeout`. Each command in line is a file in `<state>/heavy/` naming its `lane`, `kind`, `cmd`,
 `since` and `running`. Other commands are unchanged.
 
+`drover top` (#910; `--json` for the same data) shows what each live lane is really doing: every process under its
+worktree as a tree with its CPU %, run time and heavy kind, and `waiting for heavy slot <kind> <age>` for each of its
+commands in line; the header gives the host's load per CPU against `load_per_cpu`, heavy slots used of `heavy_max` and
+the respawns the last drive pass held back (`RESPAWN_PACED`). When load per CPU stays over `load_per_cpu` for
+`[limits] overload_minutes` (default 10) in the host history, `drover check` alerts `host-overloaded` once, naming
+the 5 busiest processes and their lanes; once load is back under the limit, the next overload alerts again.
+
 Enforcement by harness: **claude** (PreToolUse) and **hermes** (`pre_tool_call`, the same
 `drover hook`) refuse the command mechanically. **dsh** has no pre-tool hook: its role prompt states
 the rule, and its `pre-push` hook refuses a push whose new commits add a script line (`*.sh`, `*.bash`,
@@ -221,7 +226,7 @@ Every fleet is driven by drover itself. `drover drive [fleet]` does one pass, fr
 | `FAIL (form-only)`: every `blocking [<category>]` finding in `form_categories` | a fix round that doesn't count toward `review_rounds` (`fix(n·f)`); a blocker untagged or of another category: a plain FAIL (`form-only-rejected`); past `form_rounds` per issue they count (`form-rounds-exhausted`) |
 | FAIL in round `review_rounds` | `verdict` logs `needs-human` with the findings; drive stops |
 | a lane killed | `spawn impl` (respawn) |
-| a live lane idle `stall_minutes` with no push, verdict or turn (#666) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with its last screen lines |
+| a live lane shed has said quiet for `stall_minutes` with no turn-end (#666, #1053) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with shed's note |
 | a live lane whose pane or session shows no output 10 min after its spawn | an ACP session gets its brief again once; then `spawn <role> --supersede` once (respawn `failed start`); then `needs-human START_FAILED` |
 | an ACP lane (build, check or design stage) mid-turn with no session event `silent_minutes` (10) and no tool call still running (#792) | `shed cancel` and one `continue` prompt (`nudged`); still silent 10 min later: `spawn <role> --supersede` once (`respawned-silent`); silent again within the hour: `needs-human LANE_SILENT` |
 | a design or architect lane in `error`, idle, hibernated or gone with no commit of its own under its stage's folders (#915, #914) | no `design-review`, no ask; `spawn <role> --supersede` (respawn) like a gone impl lane: 30 min apart, `LANE_ENDS` after two, under `RESPAWN_LOOP` |

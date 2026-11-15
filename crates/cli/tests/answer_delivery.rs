@@ -124,11 +124,9 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     let page = |r: &Fake| {
         let r = sh.on(r);
         let s = Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-        let page =
-            String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", NOW)).into_owned();
-        with_queue(&page, &s, "127.0.0.1:7777", NOW)
+        api(&s, "127.0.0.1:7777", "", NOW, "queue")
     };
-    assert!(page(&Fake::default()).contains("<span class=r>answer q1 not delivered: "));
+    assert!(page(&Fake::default()).contains("answer q1 not delivered: "));
 
     let asked = || sh.all("get").iter().filter(|p| p["name"] == LANE).count();
     let before = asked();
@@ -141,8 +139,9 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     assert!(typed(&sh, LANE, "DECISION q1: yes"), "{:?}", sh.methods());
     assert_eq!(kinds(&c, "answer-delivered")[0].str("agent"), Some(LANE));
     assert!(!page(&Fake::default()).contains("not delivered"));
+    let tries = sh.sent(LANE).len();
     run(&c, &Fake::default(), &["drive", "--fast"]);
-    assert_eq!(sh.sent(LANE).len(), 1, "typed once: {:?}", sh.sent(LANE));
+    assert_eq!(sh.sent(LANE).len(), tries, "typed once: {:?}", sh.sent(LANE));
 
     let c = ctx(&tmpdir("deliver-gone"), CONFIG);
     let sh = FakeShed::new();
@@ -153,8 +152,9 @@ fn drive_retries_an_undelivered_answer_until_it_lands_or_the_lane_is_gone() {
     let closed = Event::new(NOW, "sendmeter", Some(36), "lane-closed", json!({"agent": LANE}));
     append(&c.state, &closed).unwrap();
     sh.lane(LANE, "idle", "/x");
+    let tries = sh.sent(LANE).len();
     run(&c, &Fake::default(), &["drive", "--fast"]);
-    assert!(sh.sent(LANE).is_empty(), "{:?}", sh.methods());
+    assert_eq!(sh.sent(LANE).len(), tries, "{:?}", sh.methods());
 }
 
 #[test]

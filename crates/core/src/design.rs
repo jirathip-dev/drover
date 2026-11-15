@@ -141,7 +141,7 @@ pub fn handoff(
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
-    agents: &[Value],
+    agents: &[crate::session::Session],
     s: &IssueState,
 ) -> Result<()> {
     let ev = working(&ctx.state)?;
@@ -155,7 +155,7 @@ pub fn handoff(
     };
     let busy = agents
         .iter()
-        .any(|a| sp.str("agent") == a["name"].as_str() && a["agent_status"] == "working");
+        .any(|a| sp.str("agent") == Some(a.name.as_str()) && a.busy());
     let Some(wt) = sp.str("worktree").filter(|_| !busy) else {
         return Ok(());
     };
@@ -307,7 +307,7 @@ pub fn decide(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, text: &str, 
         .and_then(|e| Some((e.str("agent")?, e.str("pane")?)))
         .filter(|_| kind != "design-revise")
     {
-        let _ = crate::herdr::close(r, pane);
+        let _ = crate::term::close(ctx, r, pane);
         let c = json!({"agent": agent, "pane": pane, "reason": kind});
         emit(&ctx.state, cfg, Event::new(ctx.now, f, Some(n), "lane-closed", c))?;
     }

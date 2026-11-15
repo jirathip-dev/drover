@@ -1,12 +1,14 @@
 {
   "response": {
     "code": "OK",
+    "job": null,
     "message": "sendmeter paused",
     "ok": true
   },
   "route": "POST /api/v1/pause",
   "schema": {
     "code": "string",
+    "job": "null",
     "message": "string",
     "ok": "boolean"
   },
