@@ -1,0 +1,11 @@
+Decided: the Threads place is added by the page shell (page_places), never by cooee-plugin.toml; thread-* actions run only for a paired standalone device, the plugin gets NOT_PERMITTED
+Because: "It is NOT added to `cooee-plugin.toml`: when Drover runs as the Cooee plugin there is no Threads tab"
+Decided: the screens are built in serve/chat.rs from the old tab's own folds (row, thread, state, page) and its POST /thread ops (chat::post), so no second thread model exists
+Because: "move its drawing onto the JSON screen model and reuse its behaviour, instead of keeping a second hand-drawn board"
+Decided: Threads is the last tab and a thread replaces the list in the same tab at every width, per the design's recommended answers
+Because: q1722
+Decided: a paired live open of a thread marks it read only while unread, so the stream's rebuilds log one thread-read, never a loop
+Because: crates/cli/tests/threads_tab.rs:229
+Rejected: deleting API v1's chat tab payload — other clients and tests still read it; out of this issue's scope
+Check: GET /screens/threads, /screens/threads/t2 and /screens/threads/new/sendmeter equal the golden JSON in crates/cli/tests/golden/cooee/
+Owner: The standalone page has a Threads tab again: read orchestrator threads, send, answer asks, start, archive and restore; Cooee is unchanged.
