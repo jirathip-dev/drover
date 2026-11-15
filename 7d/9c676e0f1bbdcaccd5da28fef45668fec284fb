@@ -1,0 +1,7 @@
+Decided: a pass sends no ssh to a machine no [hosts] entry names, and a call killed at ssh_call_secs marks its host offline for the pass with no retry
+Because: "A lane whose machine is not a configured host gets no ssh at all"
+Because: "A machine that hits that deadline, or isn't in `[hosts]` at all, counts as offline for the rest of the pass"
+Rejected: the 5 s probe budget for every call — remote git and shed connect calls need longer; ssh_call_secs is already a [limits] key
+Rejected: keeping the bare-socket retry after a timeout — it doubles the stall on a host that already hit the deadline
+Check: crates/core/src/hosts.rs Pass::call guard and the 124 path; stalled_host.rs and ssh_deadline.rs
+Owner: drive no longer hangs on old lanes' machines that aren't configured hosts, and a stalled host costs one deadline per pass
