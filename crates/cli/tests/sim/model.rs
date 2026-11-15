@@ -527,7 +527,7 @@ fn git(w: &mut World, a: &[&str]) -> Out {
             m.heads.insert((*path).into(), (*sha).into());
             ok("")
         }
-        ["worktree", "remove", "--force", path] => {
+        ["worktree", "remove", "--force", path] | ["worktree", "remove", "--force", "--force", path] => {
             let _ = std::fs::remove_dir_all(path);
             m.heads.remove(*path);
             ok("")
