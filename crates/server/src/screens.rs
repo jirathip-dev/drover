@@ -36,6 +36,22 @@ pub fn places() -> Value {
     serde_json::to_value(m.get("places")).unwrap_or_default()
 }
 
+/// #1072: the standalone page's places: the manifest's, then the Threads tab (never the Cooee plugin's).
+pub fn page_places() -> Value {
+    let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
+    let mut all = places().as_array().cloned().unwrap_or_default();
+    all.push(threads);
+    Value::Array(all)
+}
+
+const THREAD_ACTIONS: [&str; 5] = [
+    "thread-new",
+    "thread-say",
+    "thread-retry",
+    "thread-archive",
+    "thread-restore",
+];
+
 fn iso(t: u64) -> String {
     let (d, s) = (t / 86_400, t % 86_400);
     let (m, day) = civil_month_day(d);
@@ -720,6 +736,7 @@ fn sheets(v: &Value, out: &mut Vec<String>) {
         Value::Object(m) => {
             out.extend(
                 m.get("sheet")
+                    .or_else(|| m.get("open"))
                     .and_then(Value::as_str)
                     .filter(|p| p.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b)))
                     .map(String::from),
@@ -733,7 +750,7 @@ fn sheets(v: &Value, out: &mut Vec<String>) {
 
 impl Server<'_> {
     pub(super) fn screen_files(&self, ctx: &Ctx, paired: bool) -> Vec<(String, Vec<u8>)> {
-        let mut paths: Vec<String> = places()
+        let mut paths: Vec<String> = page_places()
             .as_array()
             .into_iter()
             .flatten()
@@ -766,6 +783,9 @@ impl Server<'_> {
             "/screens/workflow" => workflow(ctx),
             "/screens/hot" => self.hot_sheet(ctx, q)?,
             "/screens/ask" => ask_sheet(ctx, q)?,
+            p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
+                return self.threads_screen(ctx, &p[16..], paired)
+            }
             _ => return None,
         };
         let snap = Some(self.snapshot().1.ts).filter(|t| *t > 0);
@@ -969,7 +989,7 @@ impl Server<'_> {
             ("POST", "/action") => {
                 let a: Value = serde_json::from_str(body).unwrap_or_default();
                 let name = a["action"].as_str().unwrap_or_default();
-                if !permitted(name) {
+                if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name)) {
                     let why =
                         format!("REFUSED NOT_PERMITTED: `{name}` is not in cooee-plugin.toml's [permissions] actions");
                     return line("403 Forbidden", &why);
@@ -1083,6 +1103,29 @@ impl Server<'_> {
                     ("via", "cooee".into()),
                 ];
                 self.form_op(ctx, "card", &kv)?
+            }
+            n if THREAD_ACTIONS.contains(&n) => {
+                let kv = [
+                    ("t", s("thread")),
+                    ("text", s("text")),
+                    ("repo", s("repo")),
+                    ("n", s("msg")),
+                ];
+                let mut f: Q = kv.into_iter().map(|(k, v)| (k.into(), v)).collect();
+                f.insert("op".into(), n[7..].into());
+                let mut later = vec![];
+                let (res, more) = crate::conductor::deferred(|| super::chat::post(ctx, &self.r, &f, &mut later));
+                self.later(ctx, later.into_iter().chain(more));
+                self.kick.store(true, Relaxed);
+                let line = res?;
+                if n == "thread-new" {
+                    let id = line.split(' ').next().unwrap_or_default();
+                    let s = self
+                        .threads_screen(ctx, &format!("/{id}"), true)
+                        .context("no such thread")?;
+                    return Ok(json!({"ops": [{"op": "screen", "screen": s}], "toast": line}));
+                }
+                line
             }
             "save-fleets" => self.save_fleets(ctx, &cfg, v)?,
             "remove-fleet" => {

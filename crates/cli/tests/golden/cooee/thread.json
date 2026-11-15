@@ -1,0 +1,179 @@
+{
+  "actions": [
+    {
+      "action": "thread-archive",
+      "label": "archive",
+      "values": {
+        "thread": "t2"
+      }
+    }
+  ],
+  "blocks": [
+    {
+      "figure": {
+        "state": "needs"
+      },
+      "id": "who",
+      "subtitle": {
+        "text": "! choose",
+        "tone": "warn"
+      },
+      "title": "sendmeter · claude · opus",
+      "type": "row",
+      "value": "awake"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-5-t",
+          "markdown": "Grill me, then file it.",
+          "type": "text"
+        }
+      ],
+      "id": "m-5",
+      "kind": "you",
+      "meta": "✓ 118m",
+      "title": "you",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-6-t",
+          "markdown": "```\ndrover brief sendmeter 19\n```",
+          "type": "text"
+        }
+      ],
+      "fold": {
+        "line": "$ drover brief sendmeter 19"
+      },
+      "id": "m-6",
+      "kind": "tool",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-7-t",
+          "markdown": "Two questions, one at a time.",
+          "type": "text"
+        }
+      ],
+      "id": "m-7",
+      "kind": "orch",
+      "meta": "115m",
+      "title": "orchestrator",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-8-t",
+          "markdown": "Limit per API key or per client IP?",
+          "type": "text"
+        },
+        {
+          "id": "m-8-a",
+          "markdown": "✓ **per key** · owner · 111m",
+          "type": "text"
+        }
+      ],
+      "id": "m-8",
+      "kind": "ask",
+      "meta": "113m",
+      "title": "q31",
+      "tone": "",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-10-t",
+          "markdown": "✗ not delivered: no pane",
+          "type": "text"
+        }
+      ],
+      "buttons": [
+        {
+          "action": "thread-retry",
+          "id": "m-10-retry",
+          "label": "retry",
+          "style": "bad",
+          "type": "button",
+          "values": {
+            "msg": 10,
+            "thread": "t2"
+          }
+        }
+      ],
+      "id": "m-10",
+      "kind": "you",
+      "meta": "8m",
+      "title": "you",
+      "tone": "bad",
+      "type": "card"
+    },
+    {
+      "blocks": [
+        {
+          "id": "m-11-t",
+          "markdown": "Retry-After only, or the X-RateLimit headers too?",
+          "type": "text"
+        },
+        {
+          "action": "answer",
+          "id": "q33",
+          "options": [
+            {
+              "label": "retry-after",
+              "value": "retry-after"
+            },
+            {
+              "label": "both",
+              "value": "both"
+            }
+          ],
+          "other": {
+            "placeholder": "other: type an answer"
+          },
+          "recommended": "retry-after",
+          "type": "choice",
+          "values": {
+            "thread": "t2"
+          }
+        }
+      ],
+      "id": "m-11",
+      "kind": "ask",
+      "meta": "5m",
+      "title": "q33",
+      "tone": "warn",
+      "type": "card"
+    },
+    {
+      "fields": [
+        {
+          "label": "",
+          "name": "text",
+          "placeholder": "message the orchestrator",
+          "type": "text",
+          "value": ""
+        }
+      ],
+      "id": "say",
+      "submit": {
+        "action": "thread-say",
+        "label": "send",
+        "values": {
+          "thread": "t2"
+        }
+      },
+      "type": "form"
+    }
+  ],
+  "focus": true,
+  "id": "thread-t2",
+  "stream": "/screens/threads/t2/stream",
+  "title": "Rate limits for /v1/search",
+  "type": "screen"
+}
