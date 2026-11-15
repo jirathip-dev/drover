@@ -187,6 +187,7 @@ fn sent(s: &mut TcpStream, mut b: &[u8], end: Instant) -> bool {
 type Clients = Arc<Mutex<Vec<(Sender<String>, Option<String>, String)>>>;
 const PER_DEVICE: usize = 4;
 type Cache = Arc<Mutex<BTreeMap<String, (u64, Option<String>)>>>;
+const BUSY: &[u8] = b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n";
 /// When this board started (the Services board row's uptime).
 static STARTED: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
@@ -253,10 +254,11 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             w.tick();
             std::thread::sleep(Duration::from_secs(1));
         });
-        // #977: each tap's job on its own thread, never waiting on another job or a drive pass.
         sc.spawn(move || {
             for t in rx {
-                sc.spawn(move || s.run_job(t));
+                if let Some(k) = s.queued(t) {
+                    sc.spawn(move || s.drain(&k));
+                }
             }
         });
         let sock = ho.and_then(Handover::ready);
@@ -264,7 +266,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
             sc.spawn(move || h.control(&sock));
         }
         for mut st in l.incoming().flatten() {
-            if busy.fetch_add(1, Relaxed) < 16 {
+            if busy.fetch_add(1, Relaxed) < 256 {
                 open.fetch_add(1, Relaxed);
                 // #715: its deliveries (a conductor start can take minutes) run after it frees its request slot.
                 sc.spawn(move || {
@@ -275,7 +277,7 @@ pub fn serve_with(ctx: &Ctx, r: &dyn Runner, l: TcpListener, read_only: bool, ho
                 });
             } else {
                 busy.fetch_sub(1, Relaxed);
-                drop(st.write_all(b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 1\r\nContent-Length: 0\r\n\r\n"));
+                drop(st.write_all(BUSY));
             }
             if let Some(h) = ho.filter(|h| h.stopping()) {
                 h.left();
@@ -421,6 +423,8 @@ pub struct Server<'a> {
     /// #977: `serve_on`'s job runner for taps, and the jobs by id.
     jobs: Option<Sender<jobs::Tap>>,
     tapped: Mutex<jobs::Jobs>,
+    running: Mutex<BTreeMap<String, std::collections::VecDeque<jobs::Tap>>>,
+    writes: AtomicUsize,
     /// `serve --export` (#39): Some(demo), static files with relative URLs; `true` is the inert demo.
     export: Option<bool>,
     /// #337: the step's snapshot as last loaded, by the file's mtime.
@@ -799,6 +803,8 @@ impl<'a> Server<'a> {
             watch: Mutex::default(),
             jobs: None,
             tapped: Mutex::default(),
+            running: Mutex::default(),
+            writes: AtomicUsize::new(0),
             export: None,
             snap: Mutex::default(),
             later: Mutex::default(),
@@ -953,8 +959,16 @@ impl<'a> Server<'a> {
         if req.starts_with("GET ") && path.starts_with("/screens/") && path.ends_with("/stream") {
             return self.stream(&mut s, &req, path, query);
         }
-        s.write_all(&self.reply(&req, crate::now()))?;
-        Ok(())
+        let write = !req.starts_with("GET ");
+        if write && self.writes.fetch_add(1, Relaxed) >= 16 {
+            self.writes.fetch_sub(1, Relaxed);
+            return s.write_all(BUSY);
+        }
+        let out = self.reply(&req, crate::now());
+        if write {
+            self.writes.fetch_sub(1, Relaxed);
+        }
+        s.write_all(&out)
     }
 
     /// #715: deliveries to type in once the reply is out (`deliver`).

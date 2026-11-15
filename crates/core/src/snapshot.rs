@@ -198,7 +198,7 @@ pub fn saved_waits(
 /// Each lane's wait reason, from the cached PR reads.
 pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[Lane]) -> Vec<Waiting> {
     let live: Vec<_> = all.iter().filter_map(|l| l.session.clone()).collect();
-    let w = crate::waiting::scan(ctx, cfg, r, events, &live, false);
+    let w = crate::waiting::scan(ctx, cfg, r, events, &live, false, None);
     w.into_iter().map(|x| x.1).collect()
 }
 

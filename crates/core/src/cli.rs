@@ -1342,6 +1342,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         &events,
                         &crate::session::all(&c, &look).running(),
                         false,
+                        None,
                     )
                 });
                 let cfg = Config::load(&ctx.config).ok();
@@ -1858,7 +1859,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 Cmd::Waiting(Scope { fleet, json }) => {
                     let (events, agents) = (working(&ctx.state)?, crate::session::all(&cfg, r).running());
                     let at = places(&cfg, r, &events);
-                    let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true);
+                    let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true, None);
                     let mut rows: Vec<_> = all
                         .into_iter()
                         .filter(|(s, w)| s.lane.as_ref() == Some(&w.lane) && !s.done() && s.state != "parked")

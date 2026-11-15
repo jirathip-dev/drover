@@ -136,6 +136,33 @@ impl Server<'_> {
         ));
     }
 
+    pub(super) fn queued(&self, t: Tap) -> Option<String> {
+        let g = |k: &str| t.1.get(k).map_or("", String::as_str);
+        let k = if ["card", "config"].contains(&g("op")) {
+            format!("{} {}", g("op"), g("id"))
+        } else {
+            format!("{} {}", g("fleet"), g("issue"))
+        };
+        let mut q = lock(&self.running);
+        let first = !q.contains_key(&k);
+        q.entry(k.clone()).or_default().push_back(t);
+        first.then_some(k)
+    }
+
+    pub(super) fn drain(&self, k: &str) {
+        loop {
+            let t = {
+                let mut q = lock(&self.running);
+                let Some(t) = q.get_mut(k).and_then(std::collections::VecDeque::pop_front) else {
+                    q.remove(k);
+                    return;
+                };
+                t
+            };
+            self.run_job(t);
+        }
+    }
+
     pub(super) fn run_job(&self, (ctx, f, id): Tap) {
         if let Some(j) = self.job(&id) {
             self.logged(&j);
