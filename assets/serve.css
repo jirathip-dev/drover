@@ -697,6 +697,7 @@ html[data-tab=chat],html[data-tab=chat] body{overflow-x:clip}
    serve.js) while the box is focused: the composer sits flush on it, the page never scrolls, only the messages do. */
 @media (max-width:999px){
   html[data-tab=chat] .cvp{position:fixed;top:calc(var(--hit) + var(--s1));left:0;right:0;bottom:max(var(--kb),calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom)));display:flex;flex-direction:column;padding:0 var(--s3)}
+  html[data-tab=chat] #strip:has(#ld:not([hidden]),#stale:not([hidden])){height:calc(var(--s4) * 1.5 + var(--s1) * 2);box-sizing:border-box}html[data-tab=chat]:has(#strip :is(#ld,#stale):not([hidden])) .cvp{top:calc(var(--hit) + var(--s1) * 3 + var(--s4) * 1.5)}
   html[data-tab=chat] .cvp .tc{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain}
   html[data-tab=chat] .cvp .tw{position:relative;bottom:auto;margin-bottom:0}
   html:has(.cvp .tw textarea:focus) nav{display:none}html:has(.cvp .tw textarea:focus) .cvp{bottom:var(--kb)}
