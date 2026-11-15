@@ -1646,7 +1646,6 @@ fn serial(
     Ok(true)
 }
 
-/// #1060: each pass, a hot-file issue that is stuck or waits on one of its groups holds none, and no hot file has more than `max` holders.
 fn reconcile(ctx: &Ctx, cfg: &Config, fleet: &str) -> Result<()> {
     let (f, ev) = (cfg.fleet(fleet)?, working(&ctx.state)?);
     let (st, q) = (fold(&ev), queue::replay(&ev, fleet));
