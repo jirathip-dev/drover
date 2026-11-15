@@ -39,29 +39,51 @@ impl Runner for Connect {
 }
 
 #[test]
-fn drover_shows_the_data_age_once_the_background_read_is_over_10s_old() {
+fn every_screen_shows_the_snapshot_age_amber_past_10_min_and_reads_run_in_the_background() {
     let c = ctx(&tmpdir("fresh-age"), CONFIG);
     std::fs::create_dir_all(c.state.parent().unwrap()).unwrap();
     let r = Connect(Fake::default(), FakeShed::new());
     let s = Server::new(&c, &r, Some(ADDR.into())).deferring();
-    let age = |now| {
-        let v = get(&s, now, "/screens/queue");
-        let b = v["blocks"].as_array().unwrap().iter().find(|b| b["id"] == "age");
-        b.map(|b| b["markdown"].clone())
+    let age = |now, screen| {
+        let v = get(&s, now, screen);
+        let blocks = v["blocks"].as_array().unwrap();
+        let stat = blocks.iter().filter(|b| b["type"] == "stat");
+        let item = stat
+            .flat_map(|b| b["items"].as_array().unwrap())
+            .find(|i| i["label"] == "snapshot");
+        let row = blocks
+            .iter()
+            .find(|b| b["id"] == "age")
+            .map(|b| b["blocks"][0]["rows"][0]["subtitle"].clone());
+        item.map(|i| json!({"text": i["value"], "tone": i["tone"]})).or(row)
     };
     get(&s, NOW, "/api/v1/state");
     assert!(r.1.methods().is_empty(), "the request ran shed: {:?}", r.1.methods());
-    assert_eq!(age(NOW), None, "nothing read yet: no age to show");
     s.refresh(NOW);
     assert!(
         r.0.called("shed connect --autostart") && r.1.methods().contains(&"ls".to_string()),
         "the background read what the request asked for"
     );
     assert_eq!(get(&s, NOW + 5, "/api/v1/state")["sources"]["shed"], NOW);
-    assert_eq!(age(NOW + 5), None);
-    assert_eq!(age(NOW + 11), Some(json!("data 11s old")));
-    s.refresh(NOW + 11);
-    assert_eq!(age(NOW + 12), None, "read again: fresh");
+    let unknown = json!({"text": "as of: not yet known", "tone": "warn"});
+    for screen in ["/screens/queue", "/screens/events"] {
+        assert_eq!(age(NOW, screen), Some(unknown.clone()), "{screen}: no snapshot yet");
+    }
+    let snap = drover::snapshot::Snapshot {
+        ts: NOW,
+        ..Default::default()
+    };
+    drover::db::put(&c.state, "board", NOW, &snap).unwrap();
+    for screen in ["/screens/queue", "/screens/events"] {
+        assert_eq!(
+            age(NOW + 180, screen),
+            Some(json!({"text": "as of 3m ago", "tone": "mute"}))
+        );
+        assert_eq!(
+            age(NOW + 601, screen),
+            Some(json!({"text": "as of 10m ago", "tone": "warn"}))
+        );
+    }
 }
 
 struct Slow(Fake, AtomicU64);

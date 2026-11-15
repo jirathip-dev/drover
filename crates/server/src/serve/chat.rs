@@ -485,7 +485,7 @@ pub fn post(
     let cfg = Config::kept(ctx)?;
     let events = crate::events::working(&ctx.state)?;
     let g = |k: &str| f.get(k).map_or("", String::as_str);
-    let (id, mut out) = (g("t"), vec![]);
+    let id = g("t");
     match g("op") {
         // #405: `new` is a first message (in `repo`): the thread, titled with its first line, then the message.
         // #407: `queue` keeps it for the turn's end (`q`: an edit of queued message q, its files kept unless new
@@ -576,20 +576,6 @@ pub fn post(
             later.push((conductor::find(&events, id)?.clone(), line.into()));
             Ok("retrying".into())
         }
-        "answer" => {
-            let (choice, by) = (
-                or(g("choice").is_empty(), g("text"), g("choice")),
-                ("owner", Some("web")),
-            );
-            crate::answer(ctx, &cfg, r, &mut out, (g("fleet"), g("id")), choice, by)?;
-            Ok(format!("answered {}", g("id")))
-        }
-        // #669: a run card's [approve] (with the sha prefix the owner saw) / [deny].
-        "card" => {
-            let approve = g("act") == "approve";
-            crate::card::settle(ctx, &cfg, r, g("id"), approve, approve.then(|| g("sha")))
-        }
-        "config" => crate::propose::settle(ctx, &cfg, r, g("id"), g("act") == "apply"),
         "secret" => crate::secret::settle(ctx, &cfg, r, (id, g("name")), (g("act") == "save").then(|| g("value"))),
         "read" => {
             conductor::mark_read(ctx, &cfg, &events, conductor::find(&events, id)?)?;

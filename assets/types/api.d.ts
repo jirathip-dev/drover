@@ -458,7 +458,16 @@ export type ChatDefaults = { harness?: string | null, model?: string | null, eff
 /**
  * A POST's answer: `code` is OK, a `REFUSED` code, or ERROR; `message` the line the board toasts.
  */
-export type Reply = { ok: boolean, code: string, message: string, };
+export type Reply = { ok: boolean, code: string, message: string, 
+/**
+ * #977: a tap's job id (`code` ACCEPTED): `GET /api/v1/job/<id>` gives how it ended.
+ */
+job?: string | null, };
+
+/**
+ * #977: a tap run as a job: `state` running, waiting (for host), done, refused (`code`) or error; `message` its toast.
+ */
+export type Job = { id: string, op: string, fleet: string, issue?: number | null, state: string, code: string, message: string, ts: number, };
 
 /**
  * #633: `POST /api/v1/conductor-attach`'s answer (a refusal is a `Reply`): what a cooee conductor profile needs.

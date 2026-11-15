@@ -699,11 +699,25 @@ impl Server<'_> {
             "/screens/hot" => self.hot_sheet(ctx, q)?,
             _ => return None,
         };
-        let oldest = self.r.refreshed().into_values().min();
-        let old = oldest.map(|t| ctx.now.saturating_sub(t)).filter(|a| *a > 10);
-        if let (Some(a), Some(b)) = (old, v.get_mut("blocks").and_then(Value::as_array_mut)) {
-            let line = format!("data {} old", crate::events::age(a));
-            b.insert(0, json!({"type": "text", "id": "age", "markdown": line}));
+        let snap = Some(self.snapshot().1.ts).filter(|t| *t > 0);
+        let age = snap.map(|t| ctx.now.saturating_sub(t));
+        let page = v["type"] == "screen";
+        if let Some(b) = v.get_mut("blocks").and_then(Value::as_array_mut).filter(|_| page) {
+            let line = age.map_or("as of: not yet known".into(), |a| {
+                format!("as of {} ago", crate::events::age(a))
+            });
+            let tone = if age.is_some_and(|a| a <= 600) { "mute" } else { "warn" };
+            let row =
+                json!({"type": "row", "id": "age", "title": "Snapshot", "subtitle": {"text": line, "tone": tone}});
+            match b.iter_mut().find(|b| b["type"] == "stat") {
+                Some(st) => st["items"].as_array_mut().into_iter().for_each(|i| {
+                    i.push(json!({"label": "snapshot", "value": line.clone(), "tone": tone}));
+                }),
+                None => b.insert(
+                    0,
+                    json!({"type": "section", "id": "age", "header": "snapshot", "blocks": [{"type": "list", "id": "age-list", "rows": [row]}]}),
+                ),
+            }
         }
         Some(v)
     }
@@ -907,7 +921,7 @@ impl Server<'_> {
     fn form_op(&self, ctx: &Ctx, op: &str, kv: &[(&str, String)]) -> Result<String> {
         let mut f: Q = kv.iter().map(|(k, v)| ((*k).into(), v.clone())).collect();
         f.extend([("op".into(), op.into()), ("mtime".into(), mtime(ctx))]);
-        self.op(ctx, f)
+        self.op(ctx, &f)
     }
 
     fn action(&self, ctx: &Ctx, name: &str, a: &Value) -> Result<Value> {
@@ -995,16 +1009,14 @@ impl Server<'_> {
                 self.form_op(ctx, op, &[("fleet", fleet), ("issue", n()?.to_string())])?
             }
             "run-card" => {
-                let sha = Some(s("sha")).filter(|s| !s.is_empty());
-                crate::card::settle_via(
-                    ctx,
-                    &cfg,
-                    &self.r,
-                    block,
-                    s("choice") == "approve",
-                    sha.as_deref(),
-                    Some("cooee"),
-                )?
+                let act = if s("choice") == "approve" { "approve" } else { "deny" };
+                let kv = [
+                    ("id", block.into()),
+                    ("act", act.into()),
+                    ("sha", s("sha")),
+                    ("via", "cooee".into()),
+                ];
+                self.form_op(ctx, "card", &kv)?
             }
             "save-fleets" => self.save_fleets(ctx, &cfg, v)?,
             "remove-fleet" => {
