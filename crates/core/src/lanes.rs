@@ -189,7 +189,7 @@ pub fn health(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &Sessions, s:
     };
     let shut = |e: &Event| e.kind == "lane-closed" && crate::events::ends(e, sp) && e.ts >= sp.ts;
     let killed = |e: &Event| e.kind == "lane-killed" && e.str("agent") == Some(lane) && e.ts >= sp.ts;
-    if events.iter().any(|e| shut(e) || killed(e)) {
+    if (crate::events::of_kind(events, &["lane-closed", "lane-killed"]).into_iter()).any(|e| shut(e) || killed(e)) {
         return Health::Closed;
     }
     let live = match sessions.seen(lane, sp.str("machine")) {
@@ -228,8 +228,10 @@ pub fn whose<'a>(cfg: &Config, s: &'a Session) -> Option<(&'a str, Option<u64>, 
 /// #1053: the running sessions labelled for a configured fleet that no `spawn`, adoption, conductor start or young `spawn-started` names.
 pub fn orphans<'a>(ctx: &Ctx, cfg: &Config, events: &[Event], sessions: &'a Sessions) -> Vec<&'a Session> {
     let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < crate::spawn::SPAWN_SECS;
-    let named = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "spawn-adopted" | "orchestrator-start") || young(e);
-    let ours: BTreeSet<&str> = events.iter().filter(named).filter_map(|e| e.str("agent")).collect();
+    let kinds = ["spawn", "spawn-adopted", "spawn-started", "orchestrator-start"];
+    let named = |e: &&Event| e.kind != "spawn-started" || young(e);
+    let ours = crate::events::of_kind(events, &kinds).into_iter().filter(named);
+    let ours: BTreeSet<&str> = ours.filter_map(|e| e.str("agent")).collect();
     let lone = |s: &&Session| !ours.contains(s.name.as_str()) && whose(cfg, s).is_some();
     sessions.live().filter(lone).collect()
 }
@@ -440,8 +442,8 @@ pub fn tail(screen: &str, n: usize) -> Vec<String> {
 
 /// #611: each enabled host's shed sessions that are no lane or conductor, or `{host, error}` for a host whose shed fails.
 pub fn others(cfg: &Config, r: &dyn Runner, events: &[Event]) -> Vec<Value> {
-    let ours = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "orchestrator-start");
-    let ours: BTreeSet<&str> = events.iter().filter(ours).filter_map(|e| e.str("agent")).collect();
+    let ours = crate::events::of_kind(events, &["spawn", "orchestrator-start"]).into_iter();
+    let ours: BTreeSet<&str> = ours.filter_map(|e| e.str("agent")).collect();
     let mut out = vec![];
     for (host, h) in crate::hosts::cards(cfg, r) {
         let on = crate::hosts::On::new(r, h.and_then(|h| h.machine.as_deref()));

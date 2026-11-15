@@ -374,9 +374,61 @@ pub struct IssueState {
 /// Per-issue state, keyed by (fleet, issue).
 pub type States = BTreeMap<(String, u64), IssueState>;
 
-/// The newest `spawn` of `agent`.
+/// The newest `spawn` of `agent` (#1023: the lane fold's, for a cached log).
 pub fn last_spawn<'a>(events: &'a [Event], agent: &str) -> Option<&'a Event> {
-    of_agent(events, agent).into_iter().rfind(|e| e.kind == "spawn")
+    let spawn = |e: &&Event| e.kind == "spawn" && e.str("agent") == Some(agent);
+    match cached(events) {
+        Some(l) => l.lane_at.iter().rev().map(|i| &events[*i]).find(spawn),
+        None => events.iter().rfind(spawn),
+    }
+}
+
+const LANE: [&str; 14] = [
+    "spawn",
+    "spawn-started",
+    "spawn-adopted",
+    "lane-killed",
+    "lane-closed",
+    "lane-dead",
+    "stale-pane-killed",
+    "lane-kept-dirty",
+    "wip-blocked",
+    "supersede",
+    "clean",
+    "stale-marker",
+    "root-hung",
+    "root-answers",
+];
+
+pub(crate) fn lane_id(e: &Event) -> Option<String> {
+    let at = [
+        "host",
+        "agent",
+        "machine",
+        "pane",
+        "worktree",
+        "key",
+        "stale_host",
+        "stale_pane",
+        "file",
+        "root",
+    ];
+    LANE.contains(&e.kind.as_str())
+        .then(|| format!("{} {:?} {:?}", e.kind, e.issue, at.map(|k| e.str(k))))
+}
+
+/// #1023: the lane fold of `events` (each lane's newest lane event), in log order: the cached log's, else one pass.
+pub fn lanes(events: &[Event]) -> Vec<&Event> {
+    if let Some(l) = cached(events) {
+        return l.lane_at.iter().map(|i| &events[*i]).collect();
+    }
+    let mut m = HashMap::new();
+    for (i, e) in events.iter().enumerate() {
+        m.extend(lane_id(e).map(|k| (k, i)));
+    }
+    let mut at: Vec<usize> = m.into_values().collect();
+    at.sort_unstable();
+    at.into_iter().map(|i| &events[i]).collect()
 }
 
 /// #425: the issue `s`'s lane is held on (`held`, no `released` or `spawn` since). #505: the issues it waits on (`on`: one number before #505, a list since); empty when not held.
@@ -603,6 +655,8 @@ fn index<T>(events: &[Event], f: impl FnOnce(&Endings, &dyn Fn(usize) -> u64) ->
 pub struct Log {
     pub events: Events,
     pub asks: Endings,
+    lanes: HashMap<String, usize>,
+    lane_at: std::collections::BTreeSet<usize>,
     pub threads: Threads,
     pub states: States,
     issues: HashMap<(String, u64), Vec<usize>>,
@@ -724,11 +778,8 @@ const WORKING: &str = concat!(
     " OR type = 'lane-state' AND json_extract(json, '$.state') = 'gone'",
     " OR type NOT IN ('driven', 'kick', 'drive-pass', 'lane-state', 'conflict-predicted', 'intent', 'push-sent', 'pass-slow') AND (issue IS NULL",
     " OR (fleet, issue) IN (SELECT fleet, issue FROM events WHERE seq > ?1 - 10000) OR type GLOB 'ask-*' OR type IN (",
-    "'needs-decision', 'decision', 'queue', 'merged', 'closed', 'closed-other', 'clean', ",
-    "'spawn', 'spawn-started', 'spawn-adopted', 'lane-killed', 'lane-closed', 'lane-dead', ",
-    "'stale-pane-killed', 'lane-kept-dirty', 'wip-blocked', 'supersede', ",
-    "'stale-marker', 'why', ",
-    "'root-hung', 'root-answers', 'premerge-failed', 'landed', 'revert-opened', ",
+    "'needs-decision', 'decision', 'queue', 'merged', 'closed', 'closed-other', 'why', ",
+    "'premerge-failed', 'landed', 'revert-opened', ",
     "'revert-failed', 'reverted', 'land-fix', 'land-bisect', 'lesson-skipped'",
     ")))"
 );
@@ -786,7 +837,12 @@ fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<
         *l = Arc::new(Log { key, ..Log::default() });
     }
     let fresh = l.seq == 0 && l.events.is_empty();
-    let (new, states, asks) = crate::db::since(path, l.seq, fresh, (live && fresh).then_some(WORKING))?;
+    let (mut new, states, asks) = crate::db::since(path, l.seq, fresh, (live && fresh).then_some(WORKING))?;
+    if fresh {
+        new.extend(crate::db::lanes(path)?);
+        new.sort_by_key(|e| e.seq);
+        new.dedup_by_key(|e| e.seq);
+    }
     let m = Arc::make_mut(l);
     m.seq = new.last().map_or(last, |e| e.seq.max(last));
     m.states.extend(states);
@@ -795,6 +851,11 @@ fn catch_up(path: &Path, l: &mut Arc<Log>, last: u64, key: (Option<u64>, Option<
     for e in new {
         if let Some(n) = e.issue {
             m.issues.entry((e.fleet.clone(), n)).or_default().push(m.events.len());
+        }
+        if let Some(k) = lane_id(&e) {
+            let old = m.lanes.insert(k, m.events.len());
+            old.map(|i| m.lane_at.remove(&i));
+            m.lane_at.insert(m.events.len());
         }
         m.kinds.entry(e.kind.clone()).or_default().push(m.events.len());
         if let Some(a) = e.str("agent") {

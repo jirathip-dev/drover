@@ -1672,7 +1672,9 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
             continue;
         };
         let f = cfg.fleet(fleet)?;
-        let started = events.iter().filter(|e| e.kind == "spawn-started").rfind(at);
+        let started = (crate::events::lanes(&events).into_iter())
+            .filter(|e| e.kind == "spawn-started")
+            .rfind(at);
         let role = role.or(s.build.clone()).unwrap_or(f.flow().start().into());
         let wt = wt.or(started.and_then(|e| e.str("worktree")).map(String::from));
         let on = crate::hosts::On::new(r, m);

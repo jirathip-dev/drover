@@ -784,8 +784,8 @@ pub fn disk_low(ctx: &Ctx, cfg: &Config, on: &On) -> Option<String> {
             .and_then(|n| st.get(&(e.fleet.clone(), n)))
             .is_some_and(IssueState::done)
     };
-    let mut wts: Vec<&str> = events
-        .iter()
+    let mut wts: Vec<&str> = crate::events::lanes(&events)
+        .into_iter()
         .filter(lane)
         .filter(done)
         .filter_map(|e| e.str("worktree"))
@@ -1060,7 +1060,10 @@ pub fn place(
         };
     }
     let f = cfg.fleet(fleet)?;
-    let last = events.iter().rev().find(|e| e.is("spawn", fleet, issue));
+    let last = crate::events::lanes(events)
+        .into_iter()
+        .rev()
+        .find(|e| e.is("spawn", fleet, issue));
     let pre = (events, last.and_then(|e| e.str("root")));
     let design = crate::events::STAGES.contains(&f.family(role));
     let pin = f.role.get(f.role_key(role)).and_then(|r| r.host.as_deref());
