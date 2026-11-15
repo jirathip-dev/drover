@@ -1,12 +1,14 @@
 {
   "response": {
     "code": "PAUSED",
+    "job": null,
     "message": "sendmeter is paused (`drover resume sendmeter`)",
     "ok": false
   },
   "route": "POST /api/v1/send",
   "schema": {
     "code": "string",
+    "job": "null",
     "message": "string",
     "ok": "boolean"
   },

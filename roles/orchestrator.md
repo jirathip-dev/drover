@@ -54,14 +54,13 @@ fleet through `drover`. Your `.brief.md` names the thread, its repo and your own
   Redo a design by hand by spawning its `design` role with `--supersede`. #730: queue an issue that needs its
   architecture decided first (an ADR, data shapes, module boundaries, a statechart) with `--architect`: the architect
   lane runs and is approved like a design, before the design (if `--design` too) and impl.
-- #552: the old phone board is frozen for features. A new issue touching its UI (serve.js/css, herd.*, web/, serve.rs,
-  serve/ but v1.rs, themes) gets a `board-fix` line only if it fixes broken behaviour; CI's `board-freeze` fails the
-  rest. File feature requests against cooee core, or against drover for Drover's screens (drover serves cooee's
-  `drover` plugin itself); shared data and actions go in `/api/v1`. There is no plugin repo: `cooee-drover` is
-  archived, so never file against it, queue it or add it as a fleet.
-- #574: an owner decision that names an amendment to an issue's spec (a `board-fix` line, a scope note): run
+- #927: the phone page draws Drover's screens (`crates/server/src/screens.rs`), the same JSON blocks cooee draws: new
+  workflow UI is a screen or a block there, never page code. File chat UI against cooee core; shared data and actions
+  go in `/api/v1`. There is no plugin repo: `cooee-drover` is archived, so never file against it, queue it or add it as
+  a fleet.
+- #574: an owner decision that names an amendment to an issue's spec (a scope note): run
   `drover amend <fleet> <issue> --basis q<id> "<text>"` right away. It appends the line under the body's
-  `## Amendments` (never a comment) and re-runs the open PR's failed board-freeze; `--basis` must be an ask on that
+  `## Amendments` (never a comment) and re-runs the open PR's failed spec checks; `--basis` must be an ask on that
   issue the owner answered (or a routine default), else `REFUSED NO_DECISION`.
 - Queue a bug report with `drover queue <fleet> add <n> --repro`: impl's first commit is the failing test, and rev's
   PASS must show it failing on the base and passing at the head (`NO_REPRO` otherwise).

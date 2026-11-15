@@ -32,14 +32,23 @@ pub struct Metrics {
 }
 
 pub fn of(w: &World) -> Metrics {
-    let produced = |e: &Event| w.model.produced.iter().any(|p| Some(p.as_str()) == e.str("pane"));
+    let mut seen = BTreeMap::new();
+    let produced = |e: &Event| {
+        let pane = e.str("pane").unwrap_or_default().to_string();
+        let k = seen.entry(pane.clone()).or_insert(0);
+        *k += 1;
+        w.model.produced.contains(&format!("{pane}#{k}"))
+    };
     let mut m = log(w.wrote.iter().map(|x| (x.at, &x.ev)), produced);
     (m.idle, m.ci_wait, m.lock_wait) = (w.model.idle, w.model.ci_wait, w.model.polled);
     m
 }
 
 /// The metrics a log alone gives, for the sim's run and a real one alike.
-pub fn log<'a>(evs: impl Iterator<Item = (u64, &'a Event)> + Clone, produced: impl Fn(&Event) -> bool) -> Metrics {
+pub fn log<'a>(
+    evs: impl Iterator<Item = (u64, &'a Event)> + Clone,
+    mut produced: impl FnMut(&Event) -> bool,
+) -> Metrics {
     let mut m = Metrics::default();
     let mut queued: BTreeMap<u64, u64> = BTreeMap::new();
     let mut lanes = BTreeSet::new();

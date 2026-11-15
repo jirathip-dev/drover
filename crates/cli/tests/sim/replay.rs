@@ -82,7 +82,11 @@ pub fn build(evs: &[Event], fleet: &str, from: u64, to: u64) -> Scenario {
         ..Scenario::default()
     };
     let mut queued = BTreeSet::new();
-    for e in evs.iter().filter(|e| e.kind == "queue") {
+    for e in evs.iter().filter(|e| e.kind == "queue" || e.kind == "serial-joined") {
+        if let (Some(n), Some(g)) = (e.issue, e.str("group").filter(|_| e.kind == "serial-joined")) {
+            s.queue.push((at(e), args(&["set", &n.to_string(), "serial", g])));
+            continue;
+        }
         let ns = issues(e);
         let words: Vec<Vec<String>> = match e.str("op") {
             Some("add") => {
@@ -91,6 +95,11 @@ pub fn build(evs: &[Event], fleet: &str, from: u64, to: u64) -> Scenario {
                 let mut w = vec!["add".to_string()];
                 w.extend(top.then(|| "--top".to_string()));
                 w.extend(ns.iter().map(ToString::to_string));
+                match e.val("serial") {
+                    serde_json::Value::Bool(true) => w.push("--serial".into()),
+                    serde_json::Value::String(g) => w.extend(["--serial".into(), g.clone()]),
+                    _ => {}
+                }
                 vec![w]
             }
             Some("block") => match e.data.get("on").and_then(serde_json::Value::as_u64) {
@@ -291,7 +300,12 @@ pub fn model(s: &Scenario) -> (Model, String) {
 /// Replay `s` to its end; the run and what the sim did.
 pub fn run(s: &Scenario) -> (crate::Outcome, Run) {
     let (m, cfg) = model(s);
-    let o = crate::play(s.from, m, &cfg, T0 + (s.to - s.from), u64::MAX / 2, u64::MAX / 2, true);
+    run_in(s, m, &cfg)
+}
+
+/// #687: replay `s` in world `m` (its `model`, maybe changed) under fleet.toml `cfg`.
+pub fn run_in(s: &Scenario, m: Model, cfg: &str) -> (crate::Outcome, Run) {
+    let o = crate::play(s.from, m, cfg, T0 + (s.to - s.from), u64::MAX / 2, u64::MAX / 2, true);
     let metrics = crate::metrics::summary(std::slice::from_ref(&o.metrics));
     let sim = Run {
         merged: merged(&o.events),

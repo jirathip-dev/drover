@@ -115,7 +115,7 @@ fn idle(c: &drover::Ctx, r: &Fake) {
         read(&c.state)
             .unwrap()
             .iter()
-            .filter(|e| e.kind != "drive-pass")
+            .filter(|e| e.kind != "drive-pass" && e.kind != "lane-state")
             .count()
     };
     let before = acts();
@@ -702,14 +702,17 @@ fn paused_fleets_and_host_busy_are_no_ops() {
 fn the_lock_keeps_passes_apart_and_a_stale_one_is_taken_over() {
     let c = setup("drive-lock");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    lease_as(&c, "drive.lock", 4242, c.now, 3600);
+    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     let r = fake(NONE).reply("git -C", "").reply("kill -0 4242", "");
     let (out, steps) = drive(&c, &r);
     assert!(out.contains("another pass holds") && steps.is_empty(), "{out}");
-    assert!(sh().methods().is_empty(), "{:?}", sh().methods());
-    lease_as(&c, "drive.lock", 4242, c.now - 7200, 3600);
+    assert!(!sh().methods().iter().any(|m| m == "run"), "{:?}", sh().methods());
+    lease_as(&c, "drive-sendmeter.lock", 4242, c.now - 7200, 3600);
     assert_eq!(drive(&c, &r).1, ["start"]);
-    assert!(lease_on(&c, "drive.lock").is_none(), "released after the pass");
+    assert!(
+        lease_on(&c, "drive-sendmeter.lock").is_none(),
+        "released after the pass"
+    );
     assert_eq!(drover::drive::last_pass(&c, "sendmeter"), Some(c.now));
 }
 
@@ -717,20 +720,25 @@ fn the_lock_keeps_passes_apart_and_a_stale_one_is_taken_over() {
 fn a_dead_pids_lock_is_taken_over_at_once_and_a_live_ones_respected() {
     let c = setup("drive-pid");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    lease_as(&c, "drive.lock", 4242, c.now, 3600);
+    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     let live = fake(NONE).reply("git -C", "").reply("kill -0 4242", "");
     let (out, steps) = drive(&c, &live);
     assert!(out.contains("another pass holds") && steps.is_empty(), "{out}");
     assert_eq!(
-        lease_on(&c, "drive.lock").unwrap().pid,
+        lease_on(&c, "drive-sendmeter.lock").unwrap().pid,
         4242,
         "a live pass's lease stays"
     );
     let dead = fake(NONE).reply("git -C", "").once("kill -0 4242", 1, "");
-    let gone = || assert!(lease_on(&c, "drive.lock").is_none(), "released after the pass");
+    let gone = || {
+        assert!(
+            lease_on(&c, "drive-sendmeter.lock").is_none(),
+            "released after the pass"
+        )
+    };
     assert_eq!(drive(&c, &dead).1, ["start"]);
     gone();
-    lease_as(&c, "drive.lock", 4242, c.now, 3600);
+    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     std::fs::remove_file(&sh().sock).unwrap();
     let bad = Fake::default().once("kill -0 4242", 1, "");
     assert!(run(&c, &bad, &["drive"]).0 != 0);
@@ -745,16 +753,16 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
     let r = shed.on(&f);
     let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
     let get = |s: &drover::serve::Server| {
-        let res = s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now);
-        with_queue(&String::from_utf8_lossy(&res), s, "127.0.0.1:7777", c.now)
+        serde_json::from_str::<serde_json::Value>(&api(s, "127.0.0.1:7777", "", c.now, "queue")).unwrap()
     };
     let page = get(&s);
-    assert!(
-        page.contains("<button>Drive now</button>")
-            && page.contains("<details class=\"dp a\"><summary><i>●</i><span>drive · no pass yet</span>")
+    let drive = &page["fleets"][0]["drive"];
+    assert_eq!(
+        (&drive["tone"], &drive["line"]),
+        (&json!("a"), &json!("drive · no pass yet")),
+        "{drive}"
     );
-    let i = page.find("name=mtime value=").unwrap() + 17;
-    let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let mtime = page["mtime"].as_str().unwrap().to_string();
     let body = format!("op=drive&fleet=sendmeter&mtime={mtime}");
     let post = |host: &str, extra: &str| {
         let req = format!(
@@ -773,8 +781,11 @@ fn drive_now_on_the_board_is_paired_only_and_toasts_its_line() {
         "{res}"
     );
     assert!(!started("sendmeter-impl-12").is_empty());
-    assert!(
-        get(&s).contains("<details class=\"dp g\"><summary><i>●</i><span>drive · 0s ago · started 1 · merged 0</span>")
+    let drive = get(&s)["fleets"][0]["drive"].clone();
+    assert_eq!(
+        (&drive["tone"], &drive["line"]),
+        (&json!("g"), &json!("drive · 0s ago · started 1 · merged 0 · 0 s")),
+        "{drive}"
     );
 }
 
@@ -844,10 +855,15 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
     live.write_all(format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n").as_bytes())
         .unwrap();
     let (res, took) = post();
-    assert!(res.contains("drive%20started%20for%20sendmeter"), "{res}");
+    assert!(res.contains("drive%20accepted%20%C2%B7%20job%20"), "{res}");
     assert!(took < Duration::from_millis(200), "the POST took {took:?}");
-    let (res, _) = post();
-    assert!(res.contains("REFUSED%20DRIVE%5FRUNNING"), "{res}");
+    let job = |res: &str| {
+        res.split("job%20")
+            .nth(1)
+            .map(|j| j.split_whitespace().next().unwrap_or_default().to_string())
+    };
+    let (again, _) = post();
+    assert_eq!(job(&again), job(&res), "a second tap is the first's job: {again}");
     let t = Instant::now();
     assert!(get("/", "").starts_with("HTTP/1.1 200"));
     assert!(t.elapsed() < Duration::from_secs(1), "GET / waited {:?}", t.elapsed());
@@ -866,8 +882,10 @@ fn drive_now_runs_in_the_background_and_the_board_keeps_answering() {
         seen.contains("event: toast\ndata: \"sendmeter: started #12\""),
         "{seen}"
     );
-    assert!(post().0.contains("drive%20started"), "the flag is cleared");
-    toast();
+    assert!(
+        post().0.contains("sendmeter%3A%20started%20%2312"),
+        "a tap after it ended shows its result"
+    );
 }
 
 fn stale_pr(head: &str, mergeable: &str, status: &str) -> String {
@@ -1433,7 +1451,7 @@ fn every_pass_manual_or_automatic_writes_a_drive_pass_with_each_action_a_silent_
     let (tone, line) = drover::drive::result(&p[1]);
     assert_eq!(tone, "a", "everything held back: amber");
     assert!(
-        line.ends_with(" · started 0 · merged 0 · 1 waiting: Mac busy (memory pressure critical)"),
+        line.contains(" · started 0 · merged 0 · 1 waiting: Mac busy (memory pressure critical) · "),
         "{line}"
     );
 }
@@ -1454,7 +1472,7 @@ impl drover::runner::Runner for Other<'_> {
                 &Event::new(self.1.now - 3, "sendmeter", None, "drive-pass", d),
             )
             .unwrap();
-            assert!(drover::db::release(&self.1.state, "drive.lock", None));
+            assert!(drover::db::release(&self.1.state, "drive-sendmeter.lock", None));
         }
     }
 }
@@ -1463,7 +1481,7 @@ impl drover::runner::Runner for Other<'_> {
 fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions() {
     let c = setup("drive-wait");
     assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "12"]).0, 0);
-    lease_as(&c, "drive.lock", 4242, c.now, 3600);
+    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     let cfg = drover::config::Config::load(&c.config).unwrap();
     assert!(drover::drive::running(&c, "sendmeter"));
     let (f, mut out) = (fake(NONE).reply("git -C", "").reply("kill -0 4242", ""), vec![]);
@@ -1475,14 +1493,18 @@ fn a_manual_press_that_finds_a_pass_running_waits_for_it_and_shows_its_actions()
         "sendmeter #12 start: started\nsendmeter #13 start: REFUSED CAP: lane limit or usage cap reached\n"
     );
     assert_eq!(r.2.into_inner(), 3, "waited 3 s, then ran no pass of its own");
-    assert!(shed.methods().is_empty(), "never two passes: {:?}", shed.methods());
+    assert!(
+        !shed.methods().iter().any(|m| m == "run"),
+        "never two passes: {:?}",
+        shed.methods()
+    );
     assert_eq!(
         drover::drive::summary("sendmeter", &out),
         "sendmeter: started #12 · 1 skipped (CAP)"
     );
     assert_eq!(passes(&c).len(), 1);
 
-    lease_as(&c, "drive.lock", 4242, c.now, 3600);
+    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     let mut out = vec![];
     drover::drive::drive(&c, &cfg, &shed.on(&f), &mut out, Some("sendmeter"), true, false).unwrap();
     assert_eq!(
@@ -1577,11 +1599,9 @@ fn a_pass_recorded_with_green_ci_merges_in_the_same_pass() {
 }
 
 #[test]
-fn under_limited_admission_a_review_goes_before_any_fleets_new_start() {
-    let alpha = "[fleet.alpha]\nrepo = \"jirathip-dev/alpha\"\nlocal = \"/tmp/does-not-matter/alpha\"\n\
-        integration = \"staging\"\n\n[fleet.alpha.role.impl]\nharness = \"hermes\"\nprofile = \"fleet-impl\"\n\n[limits]";
-    let c = ctx(&tmpdir("drive-rev-first"), &CONFIG.replace("[limits]", alpha));
-    assert_eq!(run(&c, &Fake::default(), &["queue", "alpha", "add", "5"]).0, 0);
+fn under_limited_admission_a_review_goes_before_the_fleets_new_start() {
+    let c = setup("drive-rev-first");
+    assert_eq!(run(&c, &Fake::default(), &["queue", "sendmeter", "add", "5"]).0, 0);
     let wt = lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let head = sha("abc");
     let r = Fake {
@@ -1598,7 +1618,7 @@ fn under_limited_admission_a_review_goes_before_any_fleets_new_start() {
     let (out, steps) = drive(&c, &r);
     assert_eq!(steps, ["review", "start"], "{out}");
     assert!(!started("sendmeter-rev-12-r1").is_empty(), "{out}");
-    assert!(out.contains("alpha #5 start: REFUSED HOST_BUSY"), "{out}");
+    assert!(out.contains("sendmeter #5 start: REFUSED HOST_BUSY"), "{out}");
     assert_eq!(state(&c), "review(1)");
 }
 
@@ -1618,7 +1638,7 @@ fn the_fast_step_merges_past_a_held_slow_lock_and_starts_no_lane() {
     lane(&c, 10, "impl", "sendmeter-impl-12", "issue-12");
     let rev = lane(&c, 20, "rev", "sendmeter-rev-12-r1", "rev-12-r1");
     std::fs::write(rev.join("verdict.md"), "PASS\nall good\n").unwrap();
-    lease_as(&c, "drive.lock", 4242, c.now, 3600);
+    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     let head = sha("abc");
     let r = fake(NONE)
         .reply("kill -0 4242", "")
@@ -1639,7 +1659,11 @@ fn the_fast_step_merges_past_a_held_slow_lock_and_starts_no_lane() {
     assert_eq!(steps, ["verdict", "merge"], "{out}");
     assert_eq!(state(&c), "merged");
     assert!(started("").is_empty() && !r.called("git -C /tmp/does-not-matter/sendmeter fetch"));
-    assert_eq!(lease_on(&c, "drive.lock").unwrap().pid, 4242, "the slow lock stays");
+    assert_eq!(
+        lease_on(&c, "drive-sendmeter.lock").unwrap().pid,
+        4242,
+        "the slow lock stays"
+    );
     assert_eq!(drover::drive::last_pass(&c, "sendmeter"), None, "no slow pass ran");
     assert!(
         lease_on(&c, "drive-sendmeter-12.lock").is_none(),
@@ -1667,7 +1691,7 @@ fn the_fast_step_refreshes_the_card_cache_and_the_wording_reads_it() {
             .to_string()
     };
     let card = || {
-        let ws = drover::waiting::scan(&c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false);
+        let ws = drover::waiting::scan(&c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false, None);
         ws.into_iter().find(|w| w.1.issue == 12).unwrap().1
     };
     let mut five: Vec<_> = (0..3)
@@ -1976,7 +2000,7 @@ fn an_extend_during_a_pass_spawns_at_once() {
         json!({"verdict": "FAIL", "sha": sha("3"), "body": "FAIL"}),
     );
     ev(&c, 14, "needs-human", json!({"code": "UPDATE_LIMIT"}));
-    lease_as(&c, "drive.lock", 4242, c.now, 3600);
+    lease_as(&c, "drive-sendmeter.lock", 4242, c.now, 3600);
     let r = fake(NONE)
         .reply("gh pr view issue-12", &pr(&sha("3"), "green"))
         .reply("kill -0 4242", "")
@@ -1984,7 +2008,10 @@ fn an_extend_during_a_pass_spawns_at_once() {
     let (code, out) = run(&c, &r, &["extend", "sendmeter", "12"]);
     assert!(code == 0 && out.ends_with("#12: extend\n"), "{out}");
     assert!(!started("sendmeter-impl-12").is_empty(), "{:?}", r.calls.borrow());
-    assert!(lease_on(&c, "drive.lock").is_some(), "the pass's lock is left alone");
+    assert!(
+        lease_on(&c, "drive-sendmeter.lock").is_some(),
+        "the pass's lock is left alone"
+    );
     let all = read(&c.state).unwrap();
     assert_eq!(all.iter().filter(|e| e.kind == "round-extended").count(), 1);
     assert_eq!(drover::pending::of(&all, "sendmeter", 12), None);
@@ -2120,7 +2147,8 @@ fn a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absen
         head
     );
     assert!(out.contains(&want), "{out}");
-    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(run(&c, &r, &["check"]).0, 0, "shed's idle, first heard now");
+    let (code, out) = run(&at(&c, 1800), &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     let stalls: Vec<_> = kinds(&c, "stall")
         .iter()
@@ -2159,7 +2187,7 @@ fn no_checks_after_the_grace_is_ci_missing_not_running() {
             .to_string()
     };
     let card = |c: &drover::Ctx| {
-        let ws = drover::waiting::scan(c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false);
+        let ws = drover::waiting::scan(c, &cfg, &Fake::default(), &read(&c.state).unwrap(), &[], false, None);
         ws.into_iter().find(|w| w.1.issue == 12).unwrap().1
     };
     let empty = Fake::default().reply("gh pr view issue-12", &view(json!([])));
@@ -2763,19 +2791,14 @@ fn an_unparked_issue_goes_back_to_its_state_and_the_next_pass_starts_it() {
     assert!(started("").is_empty(), "a parked issue is skipped");
 
     let s = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    let page = with_queue(
-        &String::from_utf8_lossy(&s.respond("GET / HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n", c.now)),
-        &s,
-        "127.0.0.1:7777",
-        c.now,
+    let page: serde_json::Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", c.now, "queue")).unwrap();
+    let row = &page["fleets"][0]["rows"][0];
+    assert_eq!(
+        (&row["issue"], &row["state"], &row["notes"]),
+        (&json!(12), &json!("parked"), &json!(["parked: host mini is down"])),
+        "{row}"
     );
-    assert!(
-        page.contains("<span class=r>parked: host mini is down</span>"),
-        "{page}"
-    );
-    assert!(page.contains("<input type=hidden name=op value=unpark>"), "{page}");
-    let i = page.find("name=mtime value=").unwrap() + 17;
-    let mtime: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let mtime = page["mtime"].as_str().unwrap().to_string();
     let body = format!("op=unpark&fleet=sendmeter&issue=12&mtime={mtime}");
     let post = |extra: &str| {
         let req = format!(
