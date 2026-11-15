@@ -1,0 +1,11 @@
+Decided: round 2 is an update round: merged origin/staging; the #941 conflicts in providers/claude.rs and providers/mod.rs were two added methods, both kept
+Because: crates/core/src/providers/claude.rs:178
+Decided: chat.rs takes the policy from the fleet runtime, else the now-optional global [runtime]
+Because: crates/core/src/orchestrator/chat.rs:140
+Decided: the chat brief is rebuilt and written on each GET /cooee/profiles, only when its text changed
+Because: "editing that file changes the served text with no restart"
+Decided: thread-started links once with via: profile and route() skips such links, so lane asks never reach a cooee chat
+Because: crates/core/src/orchestrator.rs:477
+Rejected: testing the whole chat brief for thread verbs — the generated usage doc lists every command; the test checks the text before it
+Check: the live cooee chat is unverified; it waits on cooee's paired persona issue
+Owner: Staging's changes are merged in with no change to how cooee chat profiles work.
