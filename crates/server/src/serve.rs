@@ -46,11 +46,7 @@ macro_rules! th {
 }
 /// #57: served under `/a/<VER>/` as immutable (the SW precaches them); the page links them.
 const ASSETS: &[(&str, &str, &[u8])] = &[
-    ("serve.css", "text/css", include_bytes!("../assets/serve.css")),
-    ("herd.css", "text/css", include_bytes!("../assets/herd.css")),
-    ("serve.js", "text/javascript", include_bytes!("../assets/serve.js")),
-    ("herd.js", "text/javascript", include_bytes!("../assets/herd.js")),
-    // #265: the TypeScript board's build (web/dist, committed: `cargo install` needs no Node).
+    // #927: the page that draws the screens (web/dist, committed: `cargo install` needs no Node).
     ("board.js", "text/javascript", include_bytes!("../web/dist/board.js")),
     ("board.css", "text/css", include_bytes!("../web/dist/board.css")),
     th!("swag/", "farm/sprites.svg", SVG),
@@ -728,7 +724,7 @@ fn ago(now: u64, t: u64) -> String {
     }
 }
 
-/// A lane as the Lanes row, its sheet card and herd.json show it: (cached title, tone, shown state, age).
+/// A lane as the Lanes row, its sheet card and API v1's `herd` show it: (cached title, tone, shown state, age).
 /// #46: an idle lane shows what it waits on, coloured by who; a working one keeps its state.
 type View = (Option<String>, &'static str, String, String);
 fn view(ctx: &Ctx, l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> View {
@@ -1015,7 +1011,7 @@ impl<'a> Server<'a> {
             lock(&self.cache).insert("agent list".into(), (now, out));
         }
         // #37: Herd's data rides the same stream, re-read every 10 s (host weather) while anyone listens;
-        // like a frag, pushed only on a change (the page reads `/herd.json` when Herd opens).
+        // pushed only on a change (API v1's `GET herd` reads the same).
         let at = &Ctx {
             now,
             ..self.ctx.clone()
@@ -1143,12 +1139,12 @@ impl<'a> Server<'a> {
         let nav = header(head, "sec-fetch-mode") == Some("navigate")
             || header(head, "sec-fetch-dest") == Some("document")
             || header(head, "accept").is_some_and(|a| a.starts_with("text/html"));
-        if method == "GET" && nav && ["/herd.json", "/lane", "/frag"].contains(&path) {
+        if method == "GET" && nav && path == "/lane" {
             return see("/");
         }
         // Host/Origin-checked: the live stream, transcripts, Herd's data and every write.
         let guarded = method == "GET"
-            && (["/live", "/lane", "/herd.json"].contains(&path)
+            && (["/live", "/lane"].contains(&path)
                 || path.starts_with("/thread/")
                 || path.starts_with("/design/")
                 || path.starts_with("/shot/"))
@@ -1183,18 +1179,12 @@ impl<'a> Server<'a> {
             ("GET", "/live" | "/pair/status") if busy(self.auth(ctx, head, &a)) => deny(""),
             ("GET", "/") => self.page(ctx, &form(query), dev().is_some())
                 .map_or_else(fail, |b| ("200 OK", HTML, b.into_bytes())),
-            ("GET", "/frag") => Self::part(ctx, &form(query))
-                .map_or(("404 Not Found", "text/plain", text("no such part\n")), |h| ("200 OK", HTML, h.into_bytes())),
             ("GET", "/lane") if dev().is_none() => deny("pair this device to read transcripts\n"),
             ("GET", "/pair/status") => ("200 OK", JSON, json!({"paired": dev().is_some()}).to_string().into_bytes()),
             ("GET", "/lane") => self.transcript(ctx, &form(query)).map_or(
                 ("404 Not Found", "text/plain", text("no such agent pane\n")),
                 |j| ("200 OK", JSON, j.into_bytes()),
             ),
-            ("GET", "/herd.json") => {
-                let weather = form(query).get("weather").filter(|_| loopback).cloned();
-                self.herd(ctx, weather.as_deref()).map_or_else(fail, |j| ("200 OK", JSON, json!(j).to_string().into_bytes()))
-            }
             // #241: any theme by name (the phone picks it), theme.json resolved; an unknown name is farm.
             ("GET", p) if p.starts_with("/themes/") => match p[8..].split_once('/').filter(|(n, f)| !n.is_empty() && THEME.contains(f)) {
                 Some((n, f)) => theme(ctx, n, f).0.map_or(("404 Not Found", "text/plain", text("not in this theme\n")), |b| {
@@ -1279,7 +1269,7 @@ impl<'a> Server<'a> {
                 let msg = crate::webpush::remove(&ctx.state, &[id]).map_or_else(|e| shown(&e), |n| format!("{n} alert device removed"));
                 return see(&format!("/?msg={}", enc(&msg)));
             }
-            ("POST", p @ ("/send" | "/answer" | "/act" | "/setup" | "/thread" | "/report")) => {
+            ("POST", p @ ("/answer" | "/setup" | "/thread" | "/report")) => {
                 let (status, msg) = self.send(ctx, head, &form(body.trim()), p, &a);
                 (status, "text/plain", format!("{msg}\n").into_bytes())
             }
@@ -1707,15 +1697,6 @@ impl<'a> Server<'a> {
         ]
     }
 
-    /// #60: a part the page loads on demand: a Host chart's series (`id=hist&host=&k=`, #234). #266: the Events tab is
-    /// the TypeScript board's (web/src/events.ts); #268: the Queue tab's, its [config] sheets with it.
-    fn part(ctx: &Ctx, q: &BTreeMap<String, String>) -> Option<String> {
-        // #234: an open chart's series: the small history file only (#160).
-        q.get("id").filter(|i| *i == "hist")?;
-        let rows = crate::hosts::history(ctx);
-        Some(crate::hosts::chart(&rows, q.get("host")?, q.get("k")?, ctx.now))
-    }
-
     fn page(&self, ctx: &Ctx, q: &BTreeMap<String, String>, paired: bool) -> Result<String> {
         let msg = q.get("msg").map_or(String::new(), |m| {
             let bad = m.starts_with("REFUSED") || m.starts_with("error");
@@ -1743,15 +1724,12 @@ impl<'a> Server<'a> {
         } else {
             msg
         };
-        // #241: the phone's theme (localStorage, before the first paint), default `[serve] theme`; #440: System's
-        // Appearance picks it. [⚙] opens the System sheet (serve.js), its dot red while a host card is.
+        // #241: the phone's theme (localStorage, before the first paint), default `[serve] theme`; [⚙] picks it.
         let name = active(ctx);
         let th = serde_json::to_string(&name)?.replace('<', "\\u003c");
         let names = BUILT.iter().copied().chain([name.as_str()]).collect::<BTreeSet<_>>();
-        let pick =
-            "<button id=sysb type=button aria-haspopup=dialog aria-label=system>⚙<i class=sd hidden></i></button>";
-        // #244: every colour scheme (serve.js gates them) and each theme's default; the first paint is the phone's last
-        // scheme (serve.js keeps its block), else the board theme's built-in default.
+        // #244: every colour scheme (the page gates them) and each theme's default; the first paint is the phone's last
+        // scheme (the page keeps its block), else the board theme's built-in default.
         let def: BTreeMap<_, serde_json::Value> = names
             .iter()
             .map(|n| (*n, theme(ctx, n, "theme.json").0.unwrap_or_default()))
@@ -1788,8 +1766,9 @@ impl<'a> Server<'a> {
             d => block(d)?,
         };
         let sd = json!({"t": def, "s": schemes(ctx)}).to_string().replace('<', "\\u003c");
-        // #406: the page opened at any other path (the SW's copy) moves to the root before the body, so its
-        // relative URLs (a thread's files) resolve there.
+        // #927: the places cooee-plugin.toml declares: the page's tabs, its [⚙] screens and the cards (web/src/main.ts).
+        let pl = screens::places().to_string().replace('<', "\\u003c");
+        // #406: the page opened at any other path (the SW's copy) moves to the root before the body.
         let home = if root.is_empty() {
             ""
         } else {
@@ -1800,19 +1779,35 @@ impl<'a> Server<'a> {
         } else {
             ""
         };
+        let live = self.addr.is_some() && self.export.is_none();
+        let key = (live && paired)
+            .then(|| crate::webpush::vapid(&ctx.state).ok())
+            .flatten()
+            .map(|k| {
+                base64::Engine::encode(
+                    &base64::engine::general_purpose::URL_SAFE_NO_PAD,
+                    crate::webpush::public(&k),
+                )
+            });
+        let ro = format!(
+            "{ro}{}{}",
+            key.map_or(String::new(), |k| format!(" data-key={k}")),
+            if live && !paired { " data-pair=1" } else { "" }
+        );
         Ok(format!(
             "<!doctype html><html lang=en><head><meta charset=utf-8>\
              <meta name=viewport content=\"width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover\">\
              <meta name=theme-color content=\"#1f2a38\"><meta name=apple-mobile-web-app-capable content=yes>\
              <link rel=manifest href={root}manifest.webmanifest><link rel=icon href={root}icon-192.png?v={VER:08x}><link rel=apple-touch-icon href={root}icon-180.png?v={VER:08x}>\
-             <title>drover</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/serve.css><link rel=stylesheet href={root}a/{VER:08x}/herd.css>\
-             <script>let h=document.documentElement,t=location.hash.slice(1),m=new URLSearchParams(location.search).get('theme');try{{t=t||localStorage.tab;m=m||localStorage.theme}}catch(e){{}}h.dataset.tab=['lanes','chat'].includes(t)?t:'queue';h.dataset.theme=m||{th};\
-             let SD={sd},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
-             <body data-ts={} data-mode=scene{ro}><header><b>drover</b>{badge}<i id=dot class=a></i>\
-             <button type=button class=qhelp aria-label=\"what the marks mean\">?</button><button id=rf type=button aria-label=refresh>↻</button><button id=herd-on type=button aria-label=\"herd mode\">🐎</button>{pick}{}</header><i id=ptr hidden>↻</i><div id=strip><span id=ld class=tld hidden aria-hidden=true><svg class=lds viewBox=\"0 0 132 100\" style=\"--c:#c89a56;--d:#a37a3c;--m:#e8dcc0;--b:#efe7dc\"><use href=#hload /></svg><i></i></span><span class=ldw>loading</span><span id=stale hidden></span></div>{msg}<div id=needs></div><main>\
-             <section id=queue></section><section id=lanes></section><section id=chat></section></main>\
-             <nav><a href=#queue><span>queue</span></a><a href=#lanes><span>lanes</span></a><a href=#chat><span>chat</span></a></nav><script src={root}a/{VER:08x}/serve.js></script><script src={root}a/{VER:08x}/herd.js></script><script type=module src={root}a/{VER:08x}/board.js></script></body></html>\n",
-            ctx.now, if paired { "" } else { self.pairb() }
+             <title>drover</title><style id=sch>{first}</style><link rel=stylesheet href={root}a/{VER:08x}/board.css>\
+             <script>let h=document.documentElement,m=new URLSearchParams(location.search).get('theme');try{{m=m||localStorage.theme}}catch(e){{}}h.dataset.theme=m||{th};\
+             let SD={sd},PL={pl},sb;try{{sb=localStorage.sb}}catch(e){{}}if(sb)document.getElementById('sch').textContent=sb{home}</script></head>\
+             <body data-ts={}{ro}><header><b>drover</b>{badge}<i id=dot class=a></i>\
+             <button id=rf type=button aria-label=refresh>↻</button><button id=sysb type=button aria-haspopup=dialog aria-label=settings>⚙</button><button type=button class=pairb>pair</button></header>\
+             <div id=strip><span id=ld hidden><i>↻</i> loading</span><span id=stale hidden></span></div>{msg}<div id=pairp hidden></div><p id=toast hidden></p>\
+             <div id=cards></div><main></main><nav></nav><div id=sheet hidden><div class=sp><p class=sh></p><div class=sb></div></div></div><div id=confirm hidden></div>\
+             <script type=module src={root}a/{VER:08x}/board.js></script></body></html>\n",
+            ctx.now
         ))
     }
 
@@ -2224,7 +2219,7 @@ impl<'a> Server<'a> {
         w
     }
 
-    /// #37: Herd mode's data (`/herd.json`, the `herd` event; docs/serve.md).
+    /// #37: Herd's data (API v1's `GET herd`, the `herd` event; docs/serve.md).
     /// `weather` (loopback only) forces the host values.
     fn herd(&self, ctx: &Ctx, weather: Option<&str>) -> Result<Herd> {
         let events = working(&ctx.state)?;
@@ -3273,11 +3268,9 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
         host: Arc::new(Mutex::new(host::sample(r))),
         ..Server::new(ctx, r, demo.then(|| "demo".into()))
     };
-    let (page, herd) = (
-        s.page(ctx, &BTreeMap::new(), demo)?,
-        json!(s.herd(ctx, None)?).to_string(),
-    );
-    let (sw, v) = (SW.replace("@V", &format!("{VER:08x}")), format!("a/{VER:08x}/"));
+    let page = s.page(ctx, &BTreeMap::new(), demo)?;
+    let sw = SW.replace("@V", &format!("{VER:08x}"));
+    let v = format!("a/{VER:08x}/");
     // #63: the demo-only `?audit=<view>` UI gate (scripts/ui-audit.sh); never in the live page.
     let page = if demo {
         page.replace(
@@ -3287,31 +3280,15 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     } else {
         page
     };
-    std::fs::create_dir_all(dir.join("lane"))?;
-    // #266: the API reads the TypeScript board makes (Events, #267 Host, #268 Queue, #269 the needs cards, Lanes and
-    // [chat]), as files: every event, whatever the query.
-    let (state, all) = (
-        json!(s.state(ctx)?).to_string(),
-        json!(v1::events(ctx, 0, u64::MAX, usize::MAX)),
-    );
-    let (all, host) = (all.to_string(), json!(s.host_tab(ctx)).to_string());
-    let queue = json!(s.queue_tab(ctx)).to_string();
-    let [(_, needs), (_, lanes), (_, chat)] = s.parts(ctx, demo);
-    let files = [
-        ("index.html", page.as_bytes()),
-        ("herd.json", herd.as_bytes()),
-        ("sw.js", sw.as_bytes()),
-        ("api/v1/state", state.as_bytes()),
-        ("api/v1/events", all.as_bytes()),
-        ("api/v1/host", host.as_bytes()),
-        ("api/v1/queue", queue.as_bytes()),
-        ("api/v1/needs", needs.as_bytes()),
-        ("api/v1/lanes", lanes.as_bytes()),
-        ("api/v1/chat", chat.as_bytes()),
-    ]
-    .map(|(n, b)| (n.to_string(), b));
+    // #927: the screens the page draws, as files (each lane's sheet too).
+    let mut files = vec![
+        ("index.html".to_string(), page.into_bytes()),
+        ("sw.js".into(), sw.into_bytes()),
+    ];
+    files.extend(s.screen_files(ctx, demo));
     for (name, body) in files
-        .into_iter()
+        .iter()
+        .map(|(n, b)| (n.clone(), b.as_slice()))
         .chain(FILES.iter().map(|f| (f.0.to_string(), f.2)))
         .chain(ASSETS.iter().map(|a| (v.clone() + a.0, a.2)))
     {
@@ -3331,36 +3308,6 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
             theme(ctx, n, f)
                 .0
                 .map_or(Ok(()), |b| std::fs::write(dir.join("themes").join(n).join(f), b))?;
-        }
-    }
-    // #386: the files threads carry, as `/thread/<t>/<name>` serves them.
-    for e in events.iter().filter(|e| e.kind == "thread-msg") {
-        for f in chat::files_of(e) {
-            let (t, name) = (
-                e.str("thread").unwrap_or_default(),
-                f["name"].as_str().unwrap_or_default(),
-            );
-            let to = dir.join("thread").join(t);
-            let b = chat::file(ctx, &events, t, name, demo).and_then(|p| crate::runner::read_file(p).ok());
-            if let Some(b) = b.filter(|_| !name.contains('/')) {
-                std::fs::create_dir_all(&to)?;
-                std::fs::write(to.join(name), b)?;
-            }
-        }
-    }
-    let (cfg, st) = (Config::kept(ctx)?, events.states.clone());
-    for l in s
-        .lanes(ctx.now, &cfg, &events, &st)
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|_| demo)
-    {
-        let safe = !l.name.starts_with('.') && l.name.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
-        if let Some(j) = s
-            .transcript(ctx, &BTreeMap::from([("agent".to_string(), l.name.clone())]))
-            .filter(|_| safe)
-        {
-            std::fs::write(dir.join("lane").join(format!("{}.json", l.name)), j)?;
         }
     }
     Ok(())

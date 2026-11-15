@@ -814,11 +814,11 @@ fn check_emits_cap_near_once_per_integration_sha() {
     let page = || {
         let f = Fake::default();
         let s = drover::serve::Server::new(&c, &f, Some("127.0.0.1:7777".into()));
-        queue_tab(&s, "127.0.0.1:7777", c.now)
+        api(&s, "127.0.0.1:7777", "", c.now, "queue")
     };
     assert!(
-        page().contains("<p class=r>cap-near: 499 lines of headroom on staging</p>"),
-        "board banner"
+        page().contains("cap-near: 499 lines of headroom on staging"),
+        "the fleet's note"
     );
     let second = put(&[("c.txt", "c\n")]);
     drover::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
@@ -828,7 +828,7 @@ fn check_emits_cap_near_once_per_integration_sha() {
     put(&[("ci/cap.toml", "[fleet.sendmeter]\nline_cap = 505\n")]);
     drover::check::check(&c, &cfg, &r, &mut vec![]).unwrap();
     assert_eq!(near().len(), 2, "500 lines of headroom is not near");
-    assert!(!page().contains("cap-near"), "no banner after the raise");
+    assert!(!page().contains("cap-near: "), "no note after the raise");
 }
 
 #[test]

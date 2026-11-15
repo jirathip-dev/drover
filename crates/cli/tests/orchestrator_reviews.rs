@@ -105,13 +105,15 @@ fn by(c: &drover::Ctx, t: Option<&str>, now: u64, args: &[&str]) -> (i32, String
     got
 }
 
-fn chat(c: &drover::Ctx, now: u64) -> String {
+fn changeable(c: &drover::Ctx, now: u64) -> bool {
     let r = Fake::default();
     let c = at(c, now);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", now);
-    let [_, _, chat] = parts(&s, ADDR, &cookie, now);
-    chat
+    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, now, "chat")).unwrap();
+    let threads = chat["threads"].as_array().unwrap().iter();
+    let mut msgs = threads.flat_map(|t| t["page"]["msgs"].as_array().unwrap().clone());
+    msgs.any(|m| m["kind"] == "note" && m["ask"]["id"] == "q1" && m["open"] == true)
 }
 
 #[test]
@@ -287,11 +289,8 @@ fn a_basis_extend_posts_an_fyi_whose_change_parks_within_30_minutes_only() {
             Some(&*format!("answered q1 for #36: one more round, because {QUOTE}"))
         )
     );
-    assert!(chat(&c, NOW + 60).contains("<form class=chq data-id=\"q1\""));
-    assert!(
-        !chat(&c, NOW + 30 * 60).contains("class=chg"),
-        "no [change] after 30 min"
-    );
+    assert!(changeable(&c, NOW + 60), "[change] on the FYI");
+    assert!(!changeable(&c, NOW + 30 * 60), "no [change] after 30 min");
     let (code, out) = by(&c, None, NOW + 30 * 60, &["answer", "sendmeter", "q1", "park"]);
     assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
     assert!(kinds(&c, "parked").is_empty());

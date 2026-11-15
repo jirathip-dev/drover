@@ -27,7 +27,7 @@ fn node(js: &str) -> Option<Value> {
         eprintln!("skipping: no node here");
         return None;
     }
-    let src = include_str!("../../../assets/serve.js");
+    let src = include_str!("../../../web/src/schemes.ts");
     let part = &src[src.find("// #244 schemes").unwrap()..src.find("// schemes:end").unwrap()];
     let d = tmpdir("schemes-js");
     std::fs::write(d.join("t.js"), format!("{part}\nconsole.log(JSON.stringify({js}))")).unwrap();

@@ -93,13 +93,8 @@ fn a_dirty_or_unpushed_lane_stays_open_with_an_event() {
         let f = fake(&sh, &wt, status, ahead);
         let r = sh.on(&f);
         let s = drover::serve::Server::new(&c, &r, None);
-        let page = with_queue(
-            &String::from_utf8_lossy(&s.respond("GET /?all=1 HTTP/1.1\r\n\r\n", T)),
-            &s,
-            "",
-            T,
-        );
-        assert!(page.contains(&format!("kept open: {why}")), "{why}");
+        let page = api(&s, "", "", T, "lanes");
+        assert!(page.contains(&format!("kept open: {why}")), "{why}: {page}");
     }
 }
 

@@ -72,7 +72,7 @@ fn a_chat_opens_with_its_last_10_turns_within_64kb() {
 }
 
 #[test]
-fn events_open_with_100_rows_then_page() {
+fn the_events_api_reads_a_seq_window() {
     let c = ctx(&tmpdir("events-pages"), CONFIG);
     for i in 0..250 {
         let d = json!({"reason": format!("n-{i}")});
@@ -88,19 +88,4 @@ fn events_open_with_100_rows_then_page() {
         .map(|e| e["seq"].as_u64().unwrap())
         .collect();
     assert_eq!((seqs.len(), seqs[0], seqs[49], &w["seq"]), (50, 101, 150, &json!(250)));
-    let view = |shown: u64| {
-        let h = events_tab(&s, ADDR, T, &format!("{{ shown: {{ imp: 100, all: {shown} }} }}"))?;
-        let all = h[h.find("<div data-v=all").unwrap()..].to_string();
-        Some((all.matches("<details class=\"er").count(), all))
-    };
-    let Some((n, first)) = view(100) else { return };
-    assert_eq!(n, 100, "{first}");
-    assert!(first.contains("n-249") && !first.contains("n-149<") && first.contains("class=eo"));
-    let (n, page) = view(200).unwrap();
-    assert_eq!(n, 200);
-    assert!(page.contains("n-50<") && !page.contains("n-49<") && page.contains("class=eo"));
-    let (n, last) = view(300).unwrap();
-    assert_eq!(n, 250);
-    assert!(last.contains("n-0<") && !last.contains("class=eo"));
-    assert!(!get(&s, "/", "").contains("details class=\"er"));
 }
