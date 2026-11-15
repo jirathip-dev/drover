@@ -3,6 +3,7 @@ use crate::events::{age, fold, last_spawn, open_asks, Event, IssueState};
 use crate::promise::Say;
 pub use crate::promise::SLOT;
 use crate::runner::{ok, Runner};
+use crate::session::{Cause, Session};
 use crate::{gh, Ctx};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
@@ -177,7 +178,9 @@ pub(crate) fn respawns(events: &[Event], fleet: &str, n: u64) -> (usize, u64) {
 
 /// #662: a gone lane's wait (or `respawn` why) that names a resumable exit cause.
 pub fn resumed(why: &str) -> bool {
-    crate::shed::RESUMABLE.iter().any(|c| why.contains(&format!("({c})")))
+    [Cause::Limit, Cause::Crash]
+        .iter()
+        .any(|c| why.contains(&format!("({})", c.word())))
 }
 
 /// The 40-hex sha on verdict.md's `Reviewed head` line (#293).
@@ -549,19 +552,21 @@ fn waits(
     }
 }
 
-/// One row per lane herdr does not show `working`: the latest lane's reason (`s.lane == w.lane`), shared by the issue's older lanes, which wait on the latest one while it works. `live` refreshes the PR read, else the cache only.
 pub fn scan(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
     events: &[Event],
-    agents: &[Value],
+    agents: &[Session],
     live: bool,
+    only: Option<&str>,
 ) -> Vec<(IssueState, Waiting)> {
     let (mut out, log) = (vec![], Log::new(events));
-    let busy = |l: &str| agents.iter().any(|a| a["name"] == l && a["agent_status"] == "working");
+    let busy = |l: &str| agents.iter().any(|a| a.name == l && a.busy());
     let hung = crate::roots::hung_now(events);
-    for s in fold(events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
+    for s in
+        (fold(events).into_values()).filter(|s| cfg.fleet.contains_key(&s.fleet) && only.is_none_or(|o| o == s.fleet))
+    {
         let Some(lane) = s.lane.clone().or_else(|| {
             s.build
                 .as_ref()
@@ -703,7 +708,7 @@ pub fn scan(
         if let Some(h) = spawn.filter(|_| there.machine.is_some()).and_then(|e| e.str("host")) {
             w.what = w.what.replace("review done", &format!("review done on {h}"));
         }
-        if w.what.starts_with("rev idle without") && !agents.iter().any(|a| a["name"] == lane.as_str()) {
+        if w.what.starts_with("rev idle without") && !agents.iter().any(|a| a.name == lane) {
             let c = s.check.as_deref().unwrap_or("rev");
             w.who = "drive";
             w.what = "reviewer exited without a verdict: reviewing again".into();
@@ -712,7 +717,7 @@ pub fn scan(
         let built = s.build.as_ref().and_then(|b| s.lanes.get(b)).unwrap_or(&lane).clone();
         let sp = last_spawn(mine, &built);
         let unconfirmed = sp.and_then(|e| e.data.get("confirmed")) == Some(&Value::Bool(false));
-        let gone = !agents.iter().any(|a| a["name"] == built.as_str());
+        let gone = !agents.iter().any(|a| a.name == built);
         let settled = || {
             sp.is_some_and(|e| ctx.now >= e.ts + 120)
                 && !crate::drive::pending(ctx, cfg, r)
@@ -744,9 +749,9 @@ pub fn scan(
         } else if idle && (gone || unconfirmed) && settled() {
             let (n, last) = respawns(mine, &s.fleet, s.issue);
             let role = s.build.as_deref().unwrap_or(f.flow().start());
-            let cause = crate::shed::exit_cause(mine, &built).filter(|_| gone);
+            let cause = crate::session::stamp::exit(mine, &built).filter(|_| gone);
             let why = match cause {
-                Some(c) => format!("lane gone ({c})"),
+                Some(c) => format!("lane gone ({})", c.cause.word()),
                 None => ["prompt never landed", "lane gone"][usize::from(gone)].into(),
             };
             let resume = waiting_turn.is_none() && resumed(&why);
@@ -821,12 +826,7 @@ pub fn scan(
             w.what += &format!(" · checked {} ago", age(ctx.now - t));
         }
         let safe = || wt.is_some_and(|wt| crate::spawn::dirty(&on, std::path::Path::new(wt)).is_none());
-        if f.paused
-            && !agents
-                .iter()
-                .any(|a| a["name"] == lane.as_str() && a["agent_status"] != "parked")
-            && safe()
-        {
+        if f.paused && !agents.iter().any(|a| a.name == lane) && safe() {
             let pr = pr["number"]
                 .as_u64()
                 .map_or(String::new(), |p| format!(" (resume to review PR #{p})"));
@@ -936,12 +936,8 @@ const HOST_WAIT: [&str; 5] = ["HOST_BUSY", "DISK_LOW", "DISK_BUDGET", "MEM_LOW",
 pub const ORPHAN_SECS: u64 = 1800;
 
 /// #493: since when nothing has driven guarded issue `s`, once that is 30 min: no working lane, no drive action on it (a due step, or a refused one drive retries) and no named wait (an open ask, a hold, a paused fleet, CI after PASS).
-pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Value], now: u64) -> Option<u64> {
-    let working = |l: &String| {
-        agents
-            .iter()
-            .any(|a| a["name"] == l.as_str() && a["agent_status"] == "working")
-    };
+pub fn undriven(log: &Log, s: &IssueState, f: &Fleet, pr: &Value, agents: &[Session], now: u64) -> Option<u64> {
+    let working = |l: &String| agents.iter().any(|a| a.name == *l && a.busy());
     let asked = |a: &&Event| {
         a.fleet == s.fleet && (a.issue == Some(s.issue) || s.lanes.values().any(|l| a.str("agent") == Some(l)))
     };

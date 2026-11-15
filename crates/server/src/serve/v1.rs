@@ -37,7 +37,15 @@ fn out(status: &'static str, v: &impl Serialize) -> Res {
 
 fn reply(status: &'static str, code: &str, message: impl Into<String>) -> Res {
     let (ok, code, message) = (code == "OK", code.into(), message.into());
-    out(status, &Reply { ok, code, message })
+    out(
+        status,
+        &Reply {
+            ok,
+            code,
+            message,
+            job: None,
+        },
+    )
 }
 
 impl Server<'_> {
@@ -186,6 +194,13 @@ impl Server<'_> {
                     &events(ctx, n("since").unwrap_or(0), n("until").unwrap_or(u64::MAX), 500),
                 )
             }
+            ("GET", Some(x)) if x.starts_with("job/") && !paired => {
+                reply("401 Unauthorized", "UNPAIRED", "pair this device first")
+            }
+            ("GET", Some(x)) if x.starts_with("job/") => self.job(&x[4..]).map_or_else(
+                || reply("404 Not Found", "NOT_FOUND", "no such job"),
+                |j| out("200 OK", &j),
+            ),
             ("GET", _) if lane.or(setup).is_some() && !paired => {
                 reply("401 Unauthorized", "UNPAIRED", "pair this device first")
             }
@@ -257,40 +272,32 @@ impl Server<'_> {
             }
             ("POST", Some(op)) => {
                 let f = fields(body).into_iter().chain([("op".into(), op.into())]).collect();
-                done(self.op(ctx, f))
+                match self.tap(ctx, &f) {
+                    Some(Ok(j)) => out(
+                        "202 Accepted",
+                        &Reply {
+                            ok: true,
+                            code: "ACCEPTED".into(),
+                            message: j.message,
+                            job: Some(j.id),
+                        },
+                    ),
+                    Some(Err(e)) => done(Err(e)),
+                    None => done(self.op(ctx, &f)),
+                }
             }
             _ => reply("404 Not Found", "NOT_FOUND", format!("no {method} {p} in API v1")),
         }
     }
 
-    pub(super) fn op(&self, ctx: &Ctx, f: BTreeMap<String, String>) -> Result<String> {
-        let [op, fleet] = ["op", "fleet"].map(|k| f.get(k).cloned().unwrap_or_default());
-        let Some(tx) = self
-            .jobs
-            .as_ref()
-            .filter(|_| ["drive", "override", "extend", "park"].contains(&op.as_str()))
-        else {
-            let (res, later) = crate::orchestrator::deferred(|| self.write(ctx, &f));
-            self.later(ctx, later);
-            return res;
-        };
-        let key = f.get("issue").map_or(fleet.clone(), |n| format!("{fleet}#{n}"));
-        if op == "extend" {
-            if f.get("mtime").map(String::as_str) != Some(&super::mtime(ctx)) {
-                return refused(
-                    "STALE",
-                    "fleet.toml changed since the page was rendered; reload and retry",
-                );
-            }
-            let n = f.get("issue").and_then(|n| n.parse().ok()).context("no issue")?;
-            let state = crate::gate::held(ctx, &fleet, n)?;
-            crate::gate::extended(ctx, (&fleet, n), (true, "owner"), &state)?;
+    pub(super) fn op(&self, ctx: &Ctx, f: &BTreeMap<String, String>) -> Result<String> {
+        if let Some(j) = self.tap(ctx, f) {
+            return j.map(|j| format!("{} · job {}", j.message, j.id));
         }
-        if !lock(&self.running).insert(key.clone()) {
-            return refused("DRIVE_RUNNING", format!("{key} has a {op} running"));
-        }
-        drop(tx.send((ctx.clone(), f, key.clone())));
-        Ok(format!("{op} started for {key}"))
+        super::jobs::ready(ctx, f)?;
+        let (res, later) = crate::orchestrator::deferred(|| self.work(ctx, f));
+        self.later(ctx, later);
+        res
     }
 
     fn lesson(&self, ctx: &Ctx, f: &BTreeMap<String, String>, by: &str) -> Result<String> {
@@ -358,14 +365,14 @@ impl Server<'_> {
     pub(super) fn blocks(&self, ctx: &Ctx, q: &BTreeMap<String, String>, chat: Chat) -> LaneChat {
         let num = |k: &str| q.get(k).and_then(|v| v.parse().ok());
         let acp = || {
-            let (cfg, ev) = (Config::load(&ctx.config).ok()?, working(&ctx.state).ok()?);
-            let all = self.lanes(ctx.now, &cfg, &ev, &ev.states)?;
-            let l = all.into_iter().find(|l| q.get("agent") == Some(&l.name))?;
-            let (on, pane) = (l.on(&self.r), l.pane.as_deref()?);
+            let (agent, ev) = (q.get("agent")?, working(&ctx.state).ok()?);
+            let on = crate::hosts::On::of(&self.r, crate::events::last_spawn(&ev, agent));
             let n = num("n").or_else(|| num("lines")).unwrap_or(200).min(200);
             let seq = q.get("before").and_then(|v| v.parse::<u64>().ok()).filter(|&s| s > 0);
-            let ev = crate::herdr::Shed(crate::runner::Runner::shed(&on)?).transcript(&on, pane, seq, n);
-            ev.ok().flatten()
+            match crate::session::transcript::page(&on, ctx, agent, seq, n)? {
+                crate::session::transcript::Transcript::Events(ev) => Some(ev),
+                crate::session::transcript::Transcript::Screen(_) => None,
+            }
         };
         let Some(ev) = self.export.is_none().then(acp).flatten() else {
             return LaneChat {
@@ -396,7 +403,7 @@ impl Server<'_> {
         let mut rows: Vec<Value> = serde_json::from_str(kept.1.as_deref().unwrap_or("[]")).unwrap_or_default();
         if kept.1.is_none() || ctx.now >= kept.0 + 10 {
             let same = |a: &Value, b: &Value| ["host", "name", "state"].iter().all(|k| a[k] == b[k]);
-            let mut now = crate::shed::others(cfg, &self.r, events);
+            let mut now = crate::lanes::others(cfg, &self.r, events);
             for r in now.iter_mut().filter(|r| r.get("error").is_none()) {
                 let was = rows.iter().find(|p| same(p, r)).and_then(|p| p["since"].as_u64());
                 r["since"] = json!(was.unwrap_or(ctx.now));
@@ -429,7 +436,7 @@ impl Server<'_> {
                 role: l.role.clone(),
                 harness: l.harness.clone(),
                 model: l.model.clone(),
-                state: l.state.clone(),
+                state: l.state.word(),
                 shown,
                 tone: tone.into(),
                 since: l.since,

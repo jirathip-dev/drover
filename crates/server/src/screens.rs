@@ -30,6 +30,12 @@ pub fn permitted(action: &str) -> bool {
     list.unwrap_or_default().iter().any(|a| a.as_str() == Some(action))
 }
 
+/// `cooee-plugin.toml`'s `[[places]]` as JSON: the tabs, menu rows and cards the phone page draws.
+pub fn places() -> Value {
+    let m: toml::Value = toml::from_str(MANIFEST).unwrap_or(toml::Value::Integer(0));
+    serde_json::to_value(m.get("places")).unwrap_or_default()
+}
+
 fn iso(t: u64) -> String {
     let (d, s) = (t / 86_400, t % 86_400);
     let (m, day) = civil_month_day(d);
@@ -95,16 +101,36 @@ fn rounds(events: &[Event], f: &str, n: u64) -> String {
     shown.collect::<Vec<_>>().join(" · ")
 }
 
-fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Value {
+fn cut(s: &str, n: usize) -> String {
+    let mut c: String = s.chars().take(n).collect();
+    if c.len() < s.len() {
+        c.push('…');
+    }
+    c
+}
+
+const LINE: usize = 48;
+
+fn row(ctx: &Ctx, ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Value {
     let fig = figure(&r.act, &r.state);
-    let title = format!("#{} {}", r.issue, r.title.clone().unwrap_or_default());
+    let title = format!(
+        "#{} {}",
+        r.issue,
+        crate::gh::cached_title(ctx, f, r.issue).unwrap_or_default()
+    );
     let state = r.state.replace('(', " ").replace(')', "").replace("⏸ waiting: ", "");
     let badge = match k {
         Some(k) => json!({"text": format!("#{}", k + 1), "tone": "mute"}),
         None => json!({"text": state, "tone": badge_tone(&fig)}),
     };
-    let mut v = json!({"type": "row", "id": format!("q-{f}-{}", r.issue), "figure": fig, "title": title.trim_end(), "badge": badge});
+    let mut v = json!({"type": "row", "id": format!("q-{f}-{}", r.issue), "figure": fig, "title": cut(title.trim_end(), LINE), "badge": badge});
     let mut sub = rounds(ev, f, r.issue);
+    if let Some(pr) = r.pr.pr {
+        sub = format!("{sub} · PR #{pr}");
+    }
+    if r.pr.ci.as_deref() == Some("green") {
+        sub = format!("{sub} · CI ✓");
+    }
     let live = r.live && !r.dead && !r.lane.is_empty();
     if live {
         let at = [r.lane.as_str(), r.place.as_str()];
@@ -113,15 +139,12 @@ fn row(ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Val
             at.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")
         );
     }
-    if r.pr.ci.as_deref() == Some("green") {
-        sub = format!("{sub} · CI ✓");
-    }
     let vals = json!({"fleet": f, "issue": r.issue, "agent": r.lane});
     if let Some(b) = r.blocked_by {
         v["indent"] = json!(1);
         v["subtitle"] = json!({"text": format!("held until #{b}"), "tone": "bad"});
     } else if !sub.is_empty() {
-        v["subtitle"] = json!(sub.trim_start_matches(" ▸ ").trim_start_matches(" · "));
+        v["subtitle"] = json!(cut(sub.trim_start_matches(" ▸ ").trim_start_matches(" · "), LINE));
     }
     if k.is_none() {
         v["value"] = json!({ "since": iso(r.t) });
@@ -153,14 +176,14 @@ fn hot_row(f: &str, r: &QueueRow) -> Option<Value> {
     })
 }
 
-fn fleet_card(ev: &[Event], c: &QueueCard) -> Value {
+fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard) -> Value {
     let f = &c.name;
     let (queued, busy): (Vec<&QueueRow>, Vec<&QueueRow>) = c.rows.iter().partition(|r| r.state == "queued");
     let rows = |rs: &[&QueueRow], q: bool| -> Vec<Value> {
         let k = |i| q.then_some(i);
         rs.iter()
             .enumerate()
-            .flat_map(|(i, r)| [Some(row(ev, &c.config.repo, f, r, k(i))), hot_row(f, r)])
+            .flat_map(|(i, r)| [Some(row(ctx, ev, &c.config.repo, f, r, k(i))), hot_row(f, r)])
             .flatten()
             .collect()
     };
@@ -221,10 +244,7 @@ fn choice(id: &str, action: &str, options: &[Value]) -> Value {
 }
 
 fn fold(n: Option<u64>, kind: &str, q: &str, age: &str, main: &Value) -> Value {
-    let mut cut: String = q.chars().take(48).collect();
-    if cut.len() < q.len() {
-        cut.push('…');
-    }
+    let cut = cut(q, LINE);
     let n = n.map_or(String::new(), |n| format!("#{n} · "));
     json!({"line": format!("{n}{kind} · {cut} · {age}"), "main": main})
 }
@@ -338,6 +358,14 @@ fn needs_card(i: &NeedIssue, ev: &crate::events::Log) -> Value {
         format!("\n\n{}", i.fail)
     };
     let mut blocks = vec![json!({"type": "text", "markdown": format!("**{}**{fail}", i.why)})];
+    let at = i.shots_at.as_deref().map_or(String::new(), |a| format!("/{a}"));
+    let shots = i.shots.iter().enumerate();
+    let items: Vec<Value> = shots
+        .map(|(k, a)| json!({"src": format!("/shot/{f}/{n}/{k}{at}"), "alt": a}))
+        .collect();
+    if !items.is_empty() {
+        blocks.push(json!({"type": "images", "id": format!("shots-{f}-{n}"), "items": items}));
+    }
     if !i.pending {
         blocks.push(choice(&format!("nh-{f}-{n}"), "needs-human", &opts));
     }
@@ -597,10 +625,7 @@ fn said(i: usize, b: &Block, lines: &[String]) -> Value {
             "**asks:** {tool} · {}",
             answered.as_deref().unwrap_or("waiting")
         )),
-        Block::Screen => {
-            let shown: Vec<String> = lines.iter().map(|l| crate::lanes::strip(l)).collect();
-            text(format!("```\n{}\n```", shown.join("\n")))
-        }
+        Block::Screen => text(format!("```\n{}\n```", lines.join("\n"))),
     }
 }
 
@@ -690,7 +715,46 @@ fn count(v: &Value) -> Option<usize> {
     })
 }
 
+fn sheets(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::Object(m) => {
+            out.extend(
+                m.get("sheet")
+                    .and_then(Value::as_str)
+                    .filter(|p| p.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b)))
+                    .map(String::from),
+            );
+            m.values().for_each(|x| sheets(x, out));
+        }
+        Value::Array(a) => a.iter().for_each(|x| sheets(x, out)),
+        _ => {}
+    }
+}
+
 impl Server<'_> {
+    pub(super) fn screen_files(&self, ctx: &Ctx, paired: bool) -> Vec<(String, Vec<u8>)> {
+        let mut paths: Vec<String> = places()
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p["screen"].as_str().map(String::from))
+            .chain(["/screens/cards".to_string()])
+            .collect();
+        let mut out = vec![];
+        let mut i = 0;
+        while let Some(p) = paths.get(i).cloned() {
+            i += 1;
+            if let Some(v) = self.screen(ctx, &p, &Q::new(), paired) {
+                let mut more = vec![];
+                sheets(&v, &mut more);
+                more.retain(|m| !paths.contains(m));
+                paths.extend(more);
+                out.push((format!("{}/index.html", &p[1..]), v.to_string().into_bytes()));
+            }
+        }
+        out
+    }
+
     fn screen(&self, ctx: &Ctx, path: &str, q: &Q, paired: bool) -> Option<Value> {
         let mut v = match path {
             "/screens/queue" => self.queue_screen(ctx, q),
@@ -704,11 +768,25 @@ impl Server<'_> {
             "/screens/ask" => ask_sheet(ctx, q)?,
             _ => return None,
         };
-        let oldest = self.r.refreshed().into_values().min();
-        let old = oldest.map(|t| ctx.now.saturating_sub(t)).filter(|a| *a > 10);
-        if let (Some(a), Some(b)) = (old, v.get_mut("blocks").and_then(Value::as_array_mut)) {
-            let line = format!("data {} old", crate::events::age(a));
-            b.insert(0, json!({"type": "text", "id": "age", "markdown": line}));
+        let snap = Some(self.snapshot().1.ts).filter(|t| *t > 0);
+        let age = snap.map(|t| ctx.now.saturating_sub(t));
+        let page = v["type"] == "screen";
+        if let Some(b) = v.get_mut("blocks").and_then(Value::as_array_mut).filter(|_| page) {
+            let line = age.map_or("as of: not yet known".into(), |a| {
+                format!("as of {} ago", crate::events::age(a))
+            });
+            let tone = if age.is_some_and(|a| a <= 600) { "mute" } else { "warn" };
+            let row =
+                json!({"type": "row", "id": "age", "title": "Snapshot", "subtitle": {"text": line, "tone": tone}});
+            match b.iter_mut().find(|b| b["type"] == "stat") {
+                Some(st) => st["items"].as_array_mut().into_iter().for_each(|i| {
+                    i.push(json!({"label": "snapshot", "value": line.clone(), "tone": tone}));
+                }),
+                None => b.insert(
+                    0,
+                    json!({"type": "section", "id": "age", "header": "snapshot", "blocks": [{"type": "list", "id": "age-list", "rows": [row]}]}),
+                ),
+            }
         }
         Some(v)
     }
@@ -728,7 +806,7 @@ impl Server<'_> {
         let mut facts: Vec<Value> = [
             fact("issue", issue),
             fact("role", Some(l.role.clone())),
-            fact("state", Some(l.state.clone())),
+            fact("state", Some(l.state.word())),
             fact("host", Some(l.at())),
             fact("branch", spawn.and_then(|e| e.str("branch")).map(String::from)),
             fact("port", l.port.clone()),
@@ -818,7 +896,7 @@ impl Server<'_> {
             tab.fleets
                 .iter()
                 .filter(|f| sel.is_none_or(|s| f.name == s))
-                .map(|c| fleet_card(&ev, c)),
+                .map(|c| fleet_card(ctx, &ev, c)),
         );
         let stream = sel.map_or("/screens/queue/stream".into(), |s| {
             format!("/screens/queue/stream?repo={s}")
@@ -835,6 +913,10 @@ impl Server<'_> {
         let tab = self.needs_tab(ctx, true);
         let ev = working(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
+        cards.extend(tab.config.as_ref().map(|e| {
+            json!({"type": "card", "id": "config-invalid", "kind": "alert", "tone": "bad",
+                "title": "fleet.toml is invalid", "blocks": [{"type": "text", "id": "config-why", "markdown": e}]})
+        }));
         cards.extend(super::v1::slo_open(&ev).map(|e| {
             json!({"type": "card", "id": format!("slo-{}", e.seq), "kind": "alert", "tone": "warn",
                 "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
@@ -905,7 +987,7 @@ impl Server<'_> {
     fn form_op(&self, ctx: &Ctx, op: &str, kv: &[(&str, String)]) -> Result<String> {
         let mut f: Q = kv.iter().map(|(k, v)| ((*k).into(), v.clone())).collect();
         f.extend([("op".into(), op.into()), ("mtime".into(), mtime(ctx))]);
-        self.op(ctx, f)
+        self.op(ctx, &f)
     }
 
     fn action(&self, ctx: &Ctx, name: &str, a: &Value) -> Result<Value> {
@@ -993,16 +1075,14 @@ impl Server<'_> {
                 self.form_op(ctx, op, &[("fleet", fleet), ("issue", n()?.to_string())])?
             }
             "run-card" => {
-                let sha = Some(s("sha")).filter(|s| !s.is_empty());
-                crate::card::settle_via(
-                    ctx,
-                    &cfg,
-                    &self.r,
-                    block,
-                    s("choice") == "approve",
-                    sha.as_deref(),
-                    Some("cooee"),
-                )?
+                let act = if s("choice") == "approve" { "approve" } else { "deny" };
+                let kv = [
+                    ("id", block.into()),
+                    ("act", act.into()),
+                    ("sha", s("sha")),
+                    ("via", "cooee".into()),
+                ];
+                self.form_op(ctx, "card", &kv)?
             }
             "save-fleets" => self.save_fleets(ctx, &cfg, v)?,
             "remove-fleet" => {
