@@ -2,6 +2,7 @@ use crate::config::Config;
 use crate::events::{append, emit, fold, working, Event, IssueState};
 use crate::overlap::git;
 use crate::runner::{ok, Runner};
+use crate::session::Session;
 use crate::waiting::Waiting;
 use crate::{gh, queue, stall, waiting, Ctx};
 use anyhow::Result;
@@ -707,7 +708,7 @@ pub fn drive(
     }
     lap("read log, host sample");
     if let Some(b) = r.shed().filter(|_| !fast) {
-        if let Err(e) = crate::shed::intake(ctx, cfg, &b.wire) {
+        if let Err(e) = crate::session::stamp::intake(ctx, cfg, &b.wire) {
             writeln!(out, "shed events: {e:#}")?;
         }
     }
@@ -838,7 +839,7 @@ pub fn drive(
 fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<()> {
     let events = working(&ctx.state)?;
     let log = crate::waiting::Log::new(&events);
-    let mut agents: Option<Vec<Value>> = None;
+    let mut agents: Option<Vec<Session>> = None;
     for s in fold(&events).into_values().filter(|s| cfg.fleet.contains_key(&s.fleet)) {
         let on = log.blockers(&s.fleet, s.issue);
         if on.is_empty() || !gh::cached_pr(ctx, &s.fleet, s.issue)["number"].is_null() {
@@ -850,11 +851,9 @@ fn repair(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &
         if s.state == "impl" {
             let live = match &mut agents {
                 Some(a) => a,
-                None => agents.insert(crate::hosts::all_agents(cfg, seen)?),
+                None => agents.insert(crate::session::all(cfg, seen).checked()?.running()),
             };
-            let lane = s
-                .active_lane()
-                .is_some_and(|(_, l)| live.iter().any(|a| a["name"] == l));
+            let lane = s.active_lane().is_some_and(|(_, l)| live.iter().any(|a| a.name == l));
             if lane
                 || pending(ctx, cfg, r)
                     .iter()
@@ -982,14 +981,7 @@ fn save(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "lane-pushed", d))
 }
 
-fn silent(
-    ctx: &Ctx,
-    cfg: &Config,
-    (r, seen): (&dyn Runner, &dyn Runner),
-    out: &mut dyn Write,
-    agents: &[Value],
-    fleet: &str,
-) -> Result<()> {
+fn silent(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, agents: &[Session], fleet: &str) -> Result<()> {
     let ev = working(&ctx.state)?;
     let found = stall::silent(ctx, cfg, &ev, agents, fleet);
     for (n, lane, a) in found.into_iter().filter(|x| KICK.get().is_none_or(|k| k == x.0)) {
@@ -1011,13 +1003,10 @@ fn silent(
         .filter(|s| s.fleet == fleet && s.state.starts_with("review"));
     for s in reviews.filter(|s| KICK.get().is_none_or(|k| k == s.issue)) {
         let Some((role, old)) = s.active_lane() else { continue };
-        if !agents
-            .iter()
-            .any(|a| a["name"] == old && a["agent_status"] == "working")
-        {
+        if !agents.iter().any(|a| a.name == old && a.busy()) {
             continue;
         }
-        let Some(mins) = stall::stale_check(ctx, seen, &ev, agents, (fleet, s.issue), old) else {
+        let Some(mins) = stall::stale_check(ctx, &ev, agents, (fleet, s.issue), old) else {
             continue;
         };
         let (n, step) = (s.issue.to_string(), (fleet, Some(s.issue), "review"));
@@ -1077,7 +1066,9 @@ fn pass(
     fast: bool,
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
-    let agents = crate::hosts::all_agents(cfg, seen)?;
+    let sessions = crate::session::all(cfg, seen).checked()?;
+    crate::session::stamp::observe(ctx, cfg, &sessions)?;
+    let agents = sessions.running();
     let ev = working(&ctx.state)?;
     let st = fold(&ev);
     for s in st.values().filter(|s| s.fleet == fleet) {
@@ -1109,7 +1100,7 @@ fn pass(
             continue;
         };
         let sp = crate::events::last_spawn(&ev, lane);
-        let live = agents.iter().any(|a| a["name"] == lane);
+        let live = agents.iter().any(|a| a.name == lane);
         let pane = sp.and_then(|e| e.str("pane")).filter(|_| live);
         let away = crate::hosts::offline(ctx, sp).is_some();
         if fast && !live || away {
@@ -1137,7 +1128,7 @@ fn pass(
     }
     if !fast {
         crate::stall::refused(ctx, cfg, r, out, &working(&ctx.state)?, fleet)?;
-        silent(ctx, cfg, (r, seen), out, &agents, fleet)?;
+        silent(ctx, cfg, r, out, &agents, fleet)?;
         if let Err(e) = crate::hotspots::sync(ctx, cfg, r, fleet) {
             writeln!(out, "{fleet} hotspots: {e:#}")?;
         }
@@ -1313,7 +1304,10 @@ fn pass(
                 let d = json!({"role": args.get(3), "why": "exited without a verdict"});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "lane-lost", d))?;
             }
-            let cause = crate::shed::exit_cause(&events, &w.lane).filter(|c| crate::shed::RESUMABLE.contains(c));
+            let cause = crate::session::stamp::exit(&events, &w.lane)
+                .map(|x| x.cause)
+                .filter(|c| c.resumable());
+            let cause = cause.map(crate::session::Cause::word);
             if let Some(why) = cause.filter(|_| args[0] == "spawn") {
                 save(ctx, cfg, r, out, f, (&events, s.issue, &w.lane), why)?;
             }
@@ -1321,7 +1315,7 @@ fn pass(
             let stale = (code == Some("LANE_LIVE") && step == "review")
                 .then(|| s.lanes.get(args[3]))
                 .flatten()
-                .and_then(|l| Some((l, stall::stale_check(ctx, r, &events, &agents, (fleet, s.issue), l)?)));
+                .and_then(|l| Some((l, stall::stale_check(ctx, &events, &agents, (fleet, s.issue), l)?)));
             if code == Some("LANE_LIVE") && args[0] == "spawn" && (last_words(fleet).contains(OLD) || stale.is_some()) {
                 let a = [&args[..], &["--supersede"]].concat();
                 code = act(ctx, cfg, r, out, &events, (fleet, Some(s.issue), step), &a)?;
@@ -1370,7 +1364,7 @@ fn pass(
                 catch_up(ctx, cfg, r, out, fleet)?;
             }
         } else if let Some(a) = (!fast)
-            .then(|| stall::stalled(ctx, cfg, r, &events, &agents, w))
+            .then(|| stall::stalled(ctx, cfg, r, &events, &sessions, w))
             .flatten()
         {
             let start = matches!(
@@ -1422,7 +1416,7 @@ fn no_proof(
     cfg: &Config,
     r: &dyn Runner,
     out: &mut dyn Write,
-    (ev, agents): (&[Event], &[Value]),
+    (ev, agents): (&[Event], &[Session]),
     (fleet, n, lane): (&str, u64, &str),
     args: &[&str],
     fast: bool,
@@ -1441,7 +1435,7 @@ fn no_proof(
         .iter()
         .any(|e| e.str("sha") == Some(args[5]) && e.str("hash") == Some(hash));
     let pane = sp.and_then(|e| e.str("pane"));
-    let open = pane.filter(|_| agents.iter().any(|a| a["name"] == lane));
+    let open = pane.filter(|_| agents.iter().any(|a| a.name == lane));
     let told = mine.iter().any(|e| e.val("prompted") == true);
     if !seen {
         act(ctx, cfg, r, out, ev, (fleet, Some(n), "verdict"), args)?;
@@ -1486,7 +1480,7 @@ fn repro_refused(
     ctx: &Ctx,
     cfg: &Config,
     r: &dyn Runner,
-    (ev, agents): (&[Event], &[Value]),
+    (ev, agents): (&[Event], &[Session]),
     (fleet, n, lane): (&str, u64, &str),
     args: &[&str],
     hash: &str,
@@ -1500,7 +1494,7 @@ fn repro_refused(
         .any(|e| e.is("repro-refused", fleet, n) && sp.is_some_and(|p| e.ts >= p.ts) && e.val("prompted") == true);
     let pane = sp
         .and_then(|e| e.str("pane"))
-        .filter(|_| !told && agents.iter().any(|a| a["name"] == lane));
+        .filter(|_| !told && agents.iter().any(|a| a.name == lane));
     let text = format!("drover verdict refused your verdict.md: REFUSED NO_REPRO: {why}. Fix the Repro block.");
     let tell = |p| crate::term::reply(&on, false, lane, p, &text).is_ok() && crate::term::landed(&on, lane, p, &text);
     let prompted = pane.is_some_and(tell);
@@ -2032,9 +2026,9 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     let (f, events, ag) = (
         cfg.fleet(fleet)?,
         working(&ctx.state)?,
-        crate::hosts::all_agents(cfg, r).unwrap_or_default(),
+        crate::session::all(cfg, r).checked().unwrap_or_default(),
     );
-    let busy = |l: &str| ag.iter().any(|a| a["name"] == l && a["agent_status"] == "working");
+    let busy = |l: &str| ag.busy(l);
     let open = |s: &IssueState| {
         let pr = gh::cached_pr(ctx, fleet, s.issue);
         pr["number"].as_u64().filter(|_| pr["state"] == "OPEN")

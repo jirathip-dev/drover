@@ -44,6 +44,7 @@ pub mod runner;
 pub mod runners;
 pub mod secret;
 pub mod service;
+pub mod session;
 pub mod setup;
 pub mod shed;
 pub mod sim;
@@ -799,10 +800,10 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, 
     let agent = sp.or(was).and_then(|e| e.str("agent")).unwrap_or_default();
     let on = &crate::hosts::On::of(r, sp.or(was));
     let wt = sp.map_or(was.and_then(|e| e.str("worktree")), |_| None);
-    let all = wt.and_then(|_| crate::host::agents(on).ok()).unwrap_or_default();
-    let inside = crate::host::live_in(&all, "", std::path::Path::new(wt.unwrap_or_default()));
-    let live = inside.into_iter().find(|a| a["name"] == agent);
-    let pane = sp.and_then(|e| e.str("pane")).or_else(|| live?["pane_id"].as_str());
+    let all = wt.and_then(|_| crate::session::live_on(on).ok()).unwrap_or_default();
+    let dir = std::path::Path::new(wt.unwrap_or_default());
+    let live = all.iter().find(|a| a.in_dir("", dir) && a.name == agent);
+    let pane = sp.and_then(|e| e.str("pane")).or_else(|| Some(live?.name.as_str()));
     let typed = |p| {
         term::awake(on, agent)
             .and_then(|()| term::prompt(on, agent, msg))

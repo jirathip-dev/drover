@@ -554,10 +554,7 @@ fn said(i: usize, b: &Block, lines: &[String]) -> Value {
             "**asks:** {tool} · {}",
             answered.as_deref().unwrap_or("waiting")
         )),
-        Block::Screen => {
-            let shown: Vec<String> = lines.iter().map(|l| crate::lanes::strip(l)).collect();
-            text(format!("```\n{}\n```", shown.join("\n")))
-        }
+        Block::Screen => text(format!("```\n{}\n```", lines.join("\n"))),
     }
 }
 
@@ -723,7 +720,7 @@ impl Server<'_> {
         let mut facts: Vec<Value> = [
             fact("issue", issue),
             fact("role", Some(l.role.clone())),
-            fact("state", Some(l.state.clone())),
+            fact("state", Some(l.state.word())),
             fact("host", Some(l.at())),
             fact("branch", spawn.and_then(|e| e.str("branch")).map(String::from)),
             fact("port", l.port.clone()),

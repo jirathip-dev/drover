@@ -71,11 +71,10 @@ fn lanes_newest_first_and_a_gone_lane_has_no_link() {
         "rev-3-r2 \"gone\" \"57m\" \"\"",
         "a gone lane has no tap target"
     );
-    let log = drover::lanes::log(&c.state, "rev-3-r2").unwrap();
-    std::fs::create_dir_all(log.parent().unwrap()).unwrap();
-    std::fs::write(&log, "  out\n").unwrap();
-    assert_eq!(lanes(&r)[3]["link"], "gone", "its stored transcript");
-    std::fs::remove_file(&log).unwrap();
+    sh.lane("rev-3-r2", "done", "/x");
+    drover::term::close(&c, &r, "rev-3-r2").unwrap();
+    assert_eq!(lanes(&r)[3]["link"], "gone", "the log drover archived at close");
+    drover::session::transcript::forget(&c, "rev-3-r2");
     drop(sh);
     assert_eq!(lanes(&r)[0]["link"], "", "no pane: no link");
 }

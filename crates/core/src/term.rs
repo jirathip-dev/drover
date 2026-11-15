@@ -2,8 +2,7 @@ use crate::runner::{argv, Out, Runner};
 use crate::shed;
 use anyhow::{bail, Context, Result};
 use serde_json::{json, Value};
-use shed_proto::{KeysParams, Logged, LsParams, Method, ReadParams, ReadResult, RunParams, SendParams, Target};
-use shed_proto::{TerminalInfo, WaitParams};
+use shed_proto::{KeysParams, Method, ReadParams, RunParams, SendParams, Target, WaitParams};
 use std::path::PathBuf;
 
 /// #941: an ACP lane's start: its adapter command, the role's MCP servers file (`--mcp`) and the provider's session options (`--meta`).
@@ -20,29 +19,6 @@ pub struct Shed(pub shed::Shed);
 impl Shed {
     fn call(&self, r: &dyn Runner, m: Method, params: impl serde::Serialize) -> Result<Value> {
         shed::call(r, &self.0.wire, m, json!(params))
-    }
-    fn get(&self, r: &dyn Runner, name: &str) -> Result<TerminalInfo> {
-        Ok(serde_json::from_value(self.call(
-            r,
-            Method::Get,
-            Target { name: name.into() },
-        )?)?)
-    }
-    pub fn transcript(&self, r: &dyn Runner, name: &str, before: Option<u64>, n: usize) -> Result<Option<Vec<Logged>>> {
-        if self.get(r, name)?.acp.is_none() {
-            return Ok(None);
-        }
-        let p = ReadParams {
-            name: name.into(),
-            lines: None,
-            history: false,
-            events: true,
-            before,
-            n: Some(n),
-        };
-        Ok(Some(
-            serde_json::from_value::<ReadResult>(self.call(r, Method::Read, p)?)?.events,
-        ))
     }
     /// `run` params for lane `name` in `cwd`: a kept terminal of the user's login shell, which `typed` lines then drive.
     pub fn run_params(name: &str, labels: &[(&str, String)], cwd: &str) -> RunParams {
@@ -68,9 +44,18 @@ impl Shed {
         }
     }
     /// Start lane `name` (`run_params`), or with `[runtime] acp` that ACP agent (shed's CLI makes its bridge), #565: its adapter `cmd` after `--`. A terminal of that name an earlier lane left exited is removed first.
-    pub fn start(&self, r: &dyn Runner, name: &str, labels: &[(&str, String)], cwd: &str, acp: &Acp) -> Result<()> {
-        if self.get(r, name).is_ok_and(|t| t.state == shed_proto::State::Exited) {
-            self.call(r, Method::Rm, Target { name: name.into() })?;
+    pub fn start(
+        &self,
+        ctx: &crate::Ctx,
+        r: &dyn Runner,
+        name: &str,
+        labels: &[(&str, String)],
+        cwd: &str,
+        acp: &Acp,
+    ) -> Result<()> {
+        if crate::session::get(r, name).is_ok_and(|s| s.is_some_and(|s| !s.running())) {
+            crate::session::transcript::archive(r, ctx, name)?;
+            self.rm(r, name)?;
         }
         if self.0.acp.is_none() {
             return self.call(r, Method::Run, Self::run_params(name, labels, cwd)).map(drop);
@@ -78,13 +63,7 @@ impl Shed {
         let a = self.acp_argv(name, labels, cwd, acp);
         shed::cli(r, &a.iter().map(String::as_str).collect::<Vec<_>>()).map(drop)
     }
-    /// #899: its exited lane terminals (a `fleet` label), kept until removed.
-    pub fn exited(&self, r: &dyn Runner) -> Result<Vec<TerminalInfo>> {
-        let all: Vec<TerminalInfo> = serde_json::from_value(self.call(r, Method::Ls, LsParams::default())?)?;
-        let gone = |t: &TerminalInfo| t.state == shed_proto::State::Exited && t.labels.contains_key("fleet");
-        Ok(all.into_iter().filter(gone).collect())
-    }
-    /// #899: remove terminal `name`.
+    /// #899: remove session `name`.
     pub fn rm(&self, r: &dyn Runner, name: &str) -> Result<()> {
         self.call(r, Method::Rm, Target { name: name.into() }).map(drop)
     }
@@ -162,14 +141,6 @@ impl Shed {
         };
         Ok(self.call(r, Method::Wait, up)?["outcome"] == "matched")
     }
-}
-
-fn agent_of(t: &TerminalInfo) -> Value {
-    let up = t.state == shed_proto::State::Running;
-    json!({"name": t.name, "pane_id": t.name, "cwd": t.cwd, "agent": t.labels.get("harness").filter(|_| up),
-        "agent_status": t.reported.as_ref().map_or("unknown", |s| if s.state == "running" { "working" } else { s.state.as_str() }),
-        "note": t.reported.as_ref().and_then(|s| s.note.as_deref()), "terminal_title": "", "runtime": "shed", "pid": t.pid,
-        "cpu": t.resources.map(|u| u.cpu_pct)})
 }
 
 fn request(a: &[String]) -> Option<(Method, Value)> {
@@ -252,7 +223,6 @@ fn request(a: &[String]) -> Option<(Method, Value)> {
             )
         }
         ["pane", "close", t] => (Method::Kill, json!(Target { name: t.into() })),
-        ["pane", "get", t] => (Method::Get, json!(Target { name: t.into() })),
         _ => return None,
     })
 }
@@ -273,7 +243,8 @@ impl Shed {
             return Ok(failed("unsupported", &format!("shed runs no `{}`", a.join(" "))));
         };
         let name = params["name"].as_str().unwrap_or_default().to_string();
-        let acp = matches!(m, Method::Send | Method::Keys) && self.get(r, &name).is_ok_and(|t| t.acp.is_some());
+        let acp = matches!(m, Method::Send | Method::Keys)
+            && crate::session::get(r, &name).is_ok_and(|s| s.is_some_and(|s| s.acp));
         let got = match m {
             Method::Send if acp => {
                 shed::cli(r, &["send", &name, params["text"].as_str().unwrap_or_default()]).map(|_| json!({}))
@@ -298,7 +269,6 @@ impl Shed {
         };
         let stdout = match m {
             Method::Read => v["text"].as_str().unwrap_or_default().to_string(),
-            Method::Get => json!({"result": {"pane": agent_of(&serde_json::from_value(v)?)}}).to_string(),
             Method::Wait if v["outcome"] != "matched" => {
                 let code = if v["outcome"] == "timeout" {
                     "timeout"
@@ -314,14 +284,6 @@ impl Shed {
             stdout,
             stderr: String::new(),
         })
-    }
-    /// Its live lanes, as agent rows.
-    pub fn agents(&self, r: &dyn Runner) -> Result<Vec<Value>> {
-        let all: Vec<TerminalInfo> = serde_json::from_value(self.call(r, Method::Ls, LsParams::default())?)?;
-        let lanes = all
-            .iter()
-            .filter(|t| t.state == shed_proto::State::Running && t.labels.contains_key("fleet"));
-        Ok(lanes.map(agent_of).collect())
     }
 }
 
@@ -355,39 +317,8 @@ pub fn ok(r: &dyn Runner, a: &[String]) -> Result<String> {
     Ok(o.stdout)
 }
 
-/// `exec` as JSON, failing on a non-zero exit.
-pub fn json(r: &dyn Runner, a: &[String]) -> Result<Value> {
-    serde_json::from_str(&ok(r, a)?).with_context(|| format!("{}: not JSON", a.join(" ")))
-}
-
-/// Live lanes, as agent rows: shed's on `r`.
-pub fn agents(r: &dyn Runner) -> Result<Vec<Value>> {
-    shed(r)?.agents(r)
-}
-
-/// The agent list as `{"result": {"agents": [...]}}`.
-pub fn list(r: &dyn Runner) -> Result<Value> {
-    Ok(json!({"result": {"agents": agents(r)?}}))
-}
-
-/// The agent list as JSON text when it answered (serve's watcher hashes and caches it).
-pub fn agent_list(r: &dyn Runner) -> Option<String> {
-    list(r).ok().map(|v| v.to_string())
-}
-
 pub fn read_argv(pane: &str) -> Vec<String> {
     argv(&["pane", "read", pane, "--source", "visible"])
-}
-
-/// The pane's visible screen.
-pub fn read(r: &dyn Runner, pane: &str) -> Result<String> {
-    ok(r, &read_argv(pane))
-}
-
-/// The pane's last `lines` lines, with their SGR colours (#138).
-pub fn recent(r: &dyn Runner, pane: &str, lines: &str) -> Result<String> {
-    let a = format!("pane read {pane} --source recent --lines {lines} --format ansi");
-    ok(r, &argv(&a.split(' ').collect::<Vec<_>>()))
 }
 
 pub fn keys_argv(pane: &str, key: &str) -> Vec<String> {
@@ -430,8 +361,8 @@ pub fn reply(r: &dyn Runner, dsh: bool, agent: &str, pane: &str, text: &str) -> 
 
 /// #908: Err `HOST_BUSY` (the prompt held to a later pass) while shed has `agent` asleep and the host has no room to wake it.
 pub fn awake(r: &dyn Runner, agent: &str) -> Result<()> {
-    let t = r.shed().map(Shed).and_then(|s| s.get(r, agent).ok());
-    if t.and_then(|t| t.reported).is_none_or(|s| s.state != "hibernated") {
+    let asleep = crate::session::get(r, agent).ok().flatten().and_then(|s| s.status());
+    if asleep != Some(crate::session::Status::Asleep) {
         return Ok(());
     }
     let (l, h) = (crate::config::limits(), crate::host::sample(r));
@@ -454,8 +385,9 @@ pub fn landed(r: &dyn Runner, agent: &str, pane: &str, text: &str) -> bool {
     up() || (reply(r, false, agent, pane, text).is_ok() && up())
 }
 
-/// Close the pane; one already gone (#249: a worktree remove closed its workspace) is closed.
-pub fn close(r: &dyn Runner, pane: &str) -> Result<String> {
+/// Close the session, its log archived first (`session::transcript::archive`); one already gone (#249) is closed.
+pub fn close(ctx: &crate::Ctx, r: &dyn Runner, pane: &str) -> Result<String> {
+    let _ = crate::session::transcript::archive(r, ctx, pane);
     let o = exec(r, &argv(&["pane", "close", pane]))?;
     if o.code != 0 && ![&o.stderr, &o.stdout].iter().any(|s| s.contains("pane_not_found")) {
         bail!("pane close {pane} failed ({}): {}", o.code, o.stderr.trim());
@@ -481,16 +413,6 @@ pub fn message(o: &Out) -> String {
 
 /// #359: how long a lane's startup is waited for.
 pub const CONFIRM_SECS: u64 = 120;
-
-pub fn pane_get_argv(pane: &str) -> Vec<String> {
-    argv(&["pane", "get", pane])
-}
-
-/// `pane get`'s pane, when a harness (any detected agent) runs in it.
-pub fn harness_in(r: &dyn Runner, pane: &str) -> Option<Value> {
-    let v = json(r, &pane_get_argv(pane)).ok()?;
-    Some(v["result"]["pane"].clone()).filter(|p| !p["agent"].is_null())
-}
 
 /// `pane run <pane> <words…>`: type a line into the pane's shell.
 pub fn run_argv(pane: &str, words: &[&str]) -> Vec<String> {

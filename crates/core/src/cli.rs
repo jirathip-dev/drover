@@ -1,6 +1,5 @@
 use crate::config::{home, Config};
 use crate::events::{emit, status_line, working, Event};
-use crate::hosts::all_agents;
 use crate::runner::{self, Runner};
 use crate::{
     check, devices, gate, gh, hook, migrate, pause, protection, providers, queue, queue_change, set, spawn, Ctx,
@@ -1341,12 +1340,12 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                         &c,
                         &look,
                         &events,
-                        &all_agents(&c, &look).unwrap_or_default(),
+                        &crate::session::all(&c, &look).running(),
                         false,
                     )
                 });
                 let cfg = Config::load(&ctx.config).ok();
-                let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
+                let at = cfg.as_ref().map(|c| places(c, &look, &events)).unwrap_or_default();
                 let hosts = cfg.as_ref().is_some_and(|c| !c.hosts.is_empty()) || at.values().any(|p| !p.is_empty());
                 let pad = [5, 63][usize::from(hosts)];
                 let c = |h: &str| format!(" {h:<14}").repeat(usize::from(hosts));
@@ -1391,7 +1390,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                 }
                 write!(out, "{}", serial.concat())?;
                 if let Some(c) = &cfg {
-                    let agents = all_agents(c, &look).unwrap_or_default();
+                    let agents = crate::session::all(c, &look).running();
                     write!(out, "{}", crate::hosts::slots_line(c, &events, &agents))?;
                 }
                 if let Some(t) = look.ts {
@@ -1453,7 +1452,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
             );
             let cfg = Config::load(&ctx.config).ok();
             let look = crate::snapshot::Snap::read(ctx, r);
-            let at = cfg.as_ref().map(|c| places(ctx, c, &look, &events)).unwrap_or_default();
+            let at = cfg.as_ref().map(|c| places(c, &look, &events)).unwrap_or_default();
             let board = |f: &String| queue::board(ctx, &events, f, cfg.as_ref(), &crate::overlap::cached(ctx, f), &at);
             let boards: Vec<_> = all.iter().map(board).collect();
             for (k, _) in cfg.iter().flat_map(Config::warnings) {
@@ -1857,8 +1856,8 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     crate::drive::kicked(ctx, &cfg, r, out, (&fleet, issue, &why, now, id.as_deref()))?;
                 }
                 Cmd::Waiting(Scope { fleet, json }) => {
-                    let (events, agents) = (working(&ctx.state)?, all_agents(&cfg, r).unwrap_or_default());
-                    let at = places(ctx, &cfg, r, &events);
+                    let (events, agents) = (working(&ctx.state)?, crate::session::all(&cfg, r).running());
+                    let at = places(&cfg, r, &events);
                     let all = crate::waiting::scan(ctx, &cfg, r, &events, &agents, true);
                     let mut rows: Vec<_> = all
                         .into_iter()
@@ -2481,8 +2480,8 @@ fn pre_push(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mut dyn Read
     Ok(0)
 }
 
-fn places(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event]) -> std::collections::BTreeMap<String, String> {
-    let (st, list) = (crate::events::fold(events), crate::term::list(r).unwrap_or_default());
-    let ls = crate::snapshot::lanes(cfg, r, ctx, (events, &st), &list);
+fn places(cfg: &Config, r: &dyn Runner, events: &[Event]) -> std::collections::BTreeMap<String, String> {
+    let st = crate::events::fold(events);
+    let ls = crate::snapshot::lanes(cfg, r, (events, &st), &crate::session::all(cfg, r));
     ls.into_iter().map(|l| (l.name, l.place)).collect()
 }

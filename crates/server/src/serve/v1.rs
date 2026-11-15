@@ -358,14 +358,14 @@ impl Server<'_> {
     pub(super) fn blocks(&self, ctx: &Ctx, q: &BTreeMap<String, String>, chat: Chat) -> LaneChat {
         let num = |k: &str| q.get(k).and_then(|v| v.parse().ok());
         let acp = || {
-            let (cfg, ev) = (Config::load(&ctx.config).ok()?, working(&ctx.state).ok()?);
-            let all = self.lanes(ctx.now, &cfg, &ev, &ev.states)?;
-            let l = all.into_iter().find(|l| q.get("agent") == Some(&l.name))?;
-            let (on, pane) = (l.on(&self.r), l.pane.as_deref()?);
+            let (agent, ev) = (q.get("agent")?, working(&ctx.state).ok()?);
+            let on = crate::hosts::On::of(&self.r, crate::events::last_spawn(&ev, agent));
             let n = num("n").or_else(|| num("lines")).unwrap_or(200).min(200);
             let seq = q.get("before").and_then(|v| v.parse::<u64>().ok()).filter(|&s| s > 0);
-            let ev = crate::term::Shed(crate::runner::Runner::shed(&on)?).transcript(&on, pane, seq, n);
-            ev.ok().flatten()
+            match crate::session::transcript::page(&on, ctx, agent, seq, n)? {
+                crate::session::transcript::Transcript::Events(ev) => Some(ev),
+                crate::session::transcript::Transcript::Screen(_) => None,
+            }
         };
         let Some(ev) = self.export.is_none().then(acp).flatten() else {
             return LaneChat {
@@ -396,7 +396,7 @@ impl Server<'_> {
         let mut rows: Vec<Value> = serde_json::from_str(kept.1.as_deref().unwrap_or("[]")).unwrap_or_default();
         if kept.1.is_none() || ctx.now >= kept.0 + 10 {
             let same = |a: &Value, b: &Value| ["host", "name", "state"].iter().all(|k| a[k] == b[k]);
-            let mut now = crate::shed::others(cfg, &self.r, events);
+            let mut now = crate::lanes::others(cfg, &self.r, events);
             for r in now.iter_mut().filter(|r| r.get("error").is_none()) {
                 let was = rows.iter().find(|p| same(p, r)).and_then(|p| p["since"].as_u64());
                 r["since"] = json!(was.unwrap_or(ctx.now));
@@ -429,7 +429,7 @@ impl Server<'_> {
                 role: l.role.clone(),
                 harness: l.harness.clone(),
                 model: l.model.clone(),
-                state: l.state.clone(),
+                state: l.state.word(),
                 shown,
                 tone: tone.into(),
                 since: l.since,

@@ -4,6 +4,7 @@ use crate::gate::refused;
 use crate::host::{self, Host};
 use crate::providers;
 use crate::runner::{argv, ok, Out, Runner};
+use crate::session::{Session, Status};
 use crate::Ctx;
 use anyhow::{bail, ensure, Result};
 use serde::{Deserialize, Serialize};
@@ -450,7 +451,7 @@ pub fn probe(r: &dyn Runner) -> Option<(Vec<String>, String)> {
 }
 
 /// Look at every host: its live agents (None: unreachable), load, memory and disk, its tags when an hour old (or `refresh`); saved for the board, `hosts` and placement.
-pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMap<String, Option<Vec<Value>>> {
+pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMap<String, Option<Vec<Session>>> {
     let (mut all, mut agents, mut rows) = (cached(ctx), BTreeMap::new(), vec![]);
     if cfg.hosts.is_empty() {
         return agents;
@@ -467,7 +468,7 @@ pub fn survey(ctx: &Ctx, cfg: &Config, r: &dyn Runner, refresh: bool) -> BTreeMa
         if let Some(Err(e)) = (h.cloud.is_some() && !stopped).then(|| crate::cloud::moved(ctx, cfg, r, name, false)) {
             eprintln!("cloud {name}: {e:#}");
         }
-        let a = (!stopped).then(|| host::agents(&on).ok()).flatten();
+        let a = (!stopped).then(|| crate::session::live_on(&on).ok()).flatten();
         s.up = a.is_some();
         let live = a.as_ref().is_some_and(|a| !a.is_empty());
         s.busy = if live { ctx.now } else { s.busy };
@@ -588,17 +589,20 @@ fn sim(cfg: &Config, events: &[Event], e: &Event) -> bool {
 }
 
 /// #984: a host's live lanes (`agents`) but `skip`'s: those running a turn, and those holding a simulator.
-pub fn held_slots(cfg: &Config, events: &[Event], agents: &[Value], skip: Option<(&str, u64)>) -> [usize; 2] {
+pub fn held_slots(cfg: &Config, events: &[Event], agents: &[Session], skip: Option<(&str, u64)>) -> [usize; 2] {
     let st = fold(events);
     let mut n = [0; 2];
     for a in agents {
-        let sp = a["name"].as_str().and_then(|x| crate::events::last_spawn(events, x));
+        let sp = crate::events::last_spawn(events, &a.name);
         let Some((sp, i)) = sp.and_then(|e| Some((e, e.issue?))) else {
             continue;
         };
         let s = st.get(&(sp.fleet.clone(), i));
         if s.is_some_and(|s| !IDLE.contains(&s.state.as_str())) && skip != Some((sp.fleet.as_str(), i)) {
-            n[0] += usize::from(!matches!(a["agent_status"].as_str(), Some("idle" | "done" | "blocked")));
+            n[0] += usize::from(!matches!(
+                a.status().map(Status::word),
+                Some("idle" | "done" | "blocked")
+            ));
             n[1] += usize::from(sim(cfg, events, sp));
         }
     }
@@ -616,7 +620,7 @@ pub fn slot_before(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], me: La
     for (name, h) in cfg.hosts.iter().filter(fit) {
         let caps = [h.max_working, h.max_simulators.filter(|_| sims)];
         (caps != [None; 2]).then_some(())?;
-        let agents = host::agents(&On::new(r, h.machine.as_deref())).unwrap_or_default();
+        let agents = crate::session::live_on(&On::new(r, h.machine.as_deref())).unwrap_or_default();
         let held = held_slots(
             cfg,
             &crate::events::working(&ctx.state).unwrap_or_default(),
@@ -631,11 +635,11 @@ pub fn slot_before(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ev: &[Event], me: La
 }
 
 /// #984: each capped host's `name: working N/cap · simulators N/cap` line, from its live `agents` (`host`-tagged remote).
-pub fn slots_line(cfg: &Config, events: &[Event], agents: &[Value]) -> String {
+pub fn slots_line(cfg: &Config, events: &[Event], agents: &[Session]) -> String {
     let mut out = String::new();
     for (name, h) in &cfg.hosts {
-        let on = |a: &&Value| a["host"].as_str().map_or(h.machine.is_none(), |x| x == name);
-        let mine: Vec<Value> = agents.iter().filter(on).cloned().collect();
+        let on = |a: &&Session| a.host.as_deref().map_or(h.machine.is_none(), |x| x == name);
+        let mine: Vec<Session> = agents.iter().filter(on).cloned().collect();
         let held = held_slots(cfg, events, &mine, None);
         let caps = [h.max_working, h.max_simulators];
         let v: Vec<String> = (0..2)
@@ -646,18 +650,6 @@ pub fn slots_line(cfg: &Config, events: &[Event], agents: &[Value]) -> String {
         }
     }
     out
-}
-
-/// Every remote host's live agents, each tagged `host`; an unreachable host adds none.
-pub fn remote_agents(cfg: &Config, r: &dyn Runner) -> Vec<Value> {
-    let mut all = vec![];
-    for (name, m) in cfg.hosts.iter().filter_map(|(n, h)| Some((n, h.machine.as_deref()?))) {
-        for mut a in host::agents(&On::new(r, Some(m))).unwrap_or_default() {
-            (a["host"], a["machine"]) = (json!(name), json!(m));
-            all.push(a);
-        }
-    }
-    all
 }
 
 /// #637: add `row` to host `name`'s last-seen health (a `✗` keeps new lanes off it until the next health look).
@@ -682,11 +674,6 @@ pub fn held(ctx: &Ctx, cfg: &Config, sp: &Event) -> bool {
     offline(ctx, Some(sp)).is_some()
         || sp.str("machine").is_some() && sp.str("host").is_some_and(off)
         || crate::roots::skip(ctx, cfg, sp).is_some()
-}
-
-/// This host's live agents, then the remote ones.
-pub fn all_agents(cfg: &Config, r: &dyn Runner) -> Result<Vec<Value>> {
-    Ok([host::agents(r)?, remote_agents(cfg, r)].concat())
 }
 
 /// #923: when the host on `machine` (None: the main one) last had new lanes let back on (`host-on`), else 0.
@@ -820,7 +807,7 @@ fn at(ctx: &Ctx, cfg: &Config, f: &Fleet, r: &dyn Runner, (name, machine): (&str
     };
     let reach = format!("can't reach {}:", f.repo);
     let sick = (seen.health.iter()).find(|w| w.starts_with('✗') && (!w.starts_with("✗ git ") || w.contains(&reach)));
-    let (hs, refusal) = match cloud.map_or_else(|| host::agents(&on).map_err(|_| None), |c| Err(Some(c))) {
+    let (hs, refusal) = match cloud.map_or_else(|| crate::session::live_on(&on).map_err(|_| None), |c| Err(Some(c))) {
         Err(Some(c)) => (Host::default(), Some(c)),
         Err(None) => (Host::default(), Some(("HOST_OFFLINE", "unreachable".to_string()))),
         Ok(_) if sick.is_some() => (Host::default(), sick.map(|w| ("NO_HOST", format!("unhealthy: {w}")))),
@@ -885,7 +872,7 @@ pub fn health(ctx: &Ctx, cfg: &Config, on: &On, tags: &[String], home: &str) -> 
     let mine = format!("drover {}", crate::VERSION);
     let line = format!("! drover — {theirs} there, {mine} here → the next `check` updates it (docs/hosts.md)");
     fail(theirs == mine, line);
-    if let Err(e) = host::agents(on) {
+    if let Err(e) = crate::session::live_on(on) {
         bad.push(format!("! shed: {e:#}"));
     }
     bad

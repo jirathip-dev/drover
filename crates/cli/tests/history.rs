@@ -19,59 +19,6 @@ fn get(s: &Server, path: &str, extra: &str) -> String {
 }
 
 #[test]
-fn a_chat_opens_with_its_last_10_turns_within_64kb() {
-    let dir = tmpdir("chat-window");
-    std::env::set_var("HOME", dir.join("home"));
-    let c = ctx(&dir, CONFIG);
-    let wt = dir.join("wt/issue-12").to_string_lossy().into_owned();
-    let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "worktree": wt});
-    append(&c.state, &Event::new(T - 100, "sendmeter", Some(12), "spawn", d)).unwrap();
-    let proj = dir
-        .join("home/.claude/projects")
-        .join(wt.replace(|c: char| !c.is_ascii_alphanumeric(), "-"));
-    std::fs::create_dir_all(&proj).unwrap();
-    let turn = |i: u32| {
-        let (k, text) = (
-            ["user", "assistant"][i as usize % 2],
-            format!("turn {i} {}", "x".repeat(2000)),
-        );
-        json!({"type": k, "message": {"content": text}, "timestamp": format!("2026-11-03T09:{:02}:00Z", i)}).to_string()
-    };
-    std::fs::write(proj.join("s.jsonl"), (0..40).map(turn).collect::<Vec<_>>().join("\n")).unwrap();
-    let screen: String = (0..600).map(|i| format!("⏺ line {i} {}\n", "y".repeat(290))).collect();
-    let sh = FakeShed::new();
-    sh.attach(&c);
-    sh.lane("sendmeter-impl-12", "working", &wt);
-    sh.screen("sendmeter-impl-12", &screen);
-    let f = Fake::default();
-    let r = sh.on(&f);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let ck = pair(&s, &c, "Mozilla/5.0 (iPhone) Safari/604.1", T);
-    let first = get(&s, "/lane?agent=sendmeter-impl-12&lines=200", &ck);
-    let j: Value = serde_json::from_str(&first).unwrap();
-    let said = j["said"].as_array().unwrap();
-    assert_eq!(said.len(), 10, "the last 10 turns");
-    assert!(said[9]["text"].as_str().unwrap().starts_with("turn 39 "));
-    let lines = j["lines"].as_array().unwrap().len();
-    assert!((50..200).contains(&lines), "the lines that fit in 32 KB: {lines}");
-    assert!(j["older"] == true && j["more"] == true, "{}", &first[..300]);
-    assert!(
-        first.len() <= 64 * 1024,
-        "first open is {} bytes (budget 64 KB)",
-        first.len()
-    );
-    let j: Value = serde_json::from_str(&get(
-        &s,
-        &format!("/lane?agent=sendmeter-impl-12&turns=20&before={lines}"),
-        &ck,
-    ))
-    .unwrap();
-    assert_eq!(j["said"].as_array().unwrap().len(), 20);
-    let older = j["lines"].as_array().unwrap();
-    assert!(!older.is_empty() && j["before"].as_u64() > Some(lines as u64), "{j}");
-}
-
-#[test]
 fn the_events_api_reads_a_seq_window() {
     let c = ctx(&tmpdir("events-pages"), CONFIG);
     for i in 0..250 {

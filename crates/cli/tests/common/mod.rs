@@ -435,7 +435,7 @@ pub fn chat_fixture() -> serde_json::Value {
         "⏺ I read the brief. The overlap check skips **merged** issues only, so a closed one still counts.".into(),
         "⏺ Bash(cargo test --locked)".into(),
         "  ⎿  test result: \x1b[38;2;80;200;80mok\x1b[0m. 218 passed; 0 failed".into(),
-        drover::lanes::GAP.into(),
+        "┄ not captured: scrolled past between reads ┄".into(),
         "⏺ # Plan".into(),
         "  Base is green. The bug is in `src/overlap.rs`: the list keeps every issue that is not **merged**.".into(),
         "  1. Swap `s.state != \"merged\"` for `!s.done()`, which the board already uses everywhere.".into(),
@@ -564,4 +564,22 @@ pub fn herdr_setup(f: Fake) -> Fake {
     f.reply("herdr --machine bazzite pane read", "Paste code here >\n")
         .reply("herdr machine list --json", BAZZITE)
         .reply("herdr", V1_WS)
+}
+
+/// A shed session as `ls` lists it: `name`, `status` (shed's reported word; none: unreported), `cwd`, `labels`, `host`, `exited`.
+pub fn session(v: &serde_json::Value) -> drover::session::Session {
+    let t = serde_json::json!({"name": v["name"], "labels": v.get("labels").cloned().unwrap_or(serde_json::json!({})),
+        "cwd": v["cwd"].as_str().unwrap_or("/"), "cmd": [], "keep": true,
+        "state": if v["exited"] == true { "exited" } else { "running" }, "exit": v.get("exit").cloned(), "pid": 7,
+        "reported": v.get("status").map(|s| serde_json::json!({"state": s, "note": v.get("note")}))});
+    let mut s: drover::session::Session = serde_json::from_value::<drover::shed::proto::TerminalInfo>(t)
+        .unwrap()
+        .into();
+    s.host = v["host"].as_str().map(String::from);
+    s
+}
+
+/// `rows` (each as `session` reads it) as one answering host's sessions.
+pub fn sessions(rows: serde_json::Value) -> drover::session::Sessions {
+    drover::session::Sessions::of(rows.as_array().unwrap().iter().map(session))
 }
