@@ -289,10 +289,6 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             rows.push(format!("✗ host {name} — {why} → ssh {m} true"));
             continue;
         };
-        if let Err(e) = crate::host::agents(&on) {
-            rows.push(format!("✗ host {name} — shed list: {e:#} → ssh {m} shed doctor"));
-            continue;
-        }
         let tags = [tags, h.tags.clone()].concat();
         let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
