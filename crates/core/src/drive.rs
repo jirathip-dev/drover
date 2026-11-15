@@ -1617,11 +1617,22 @@ fn serial(
                 .into_iter()
                 .find(|y| queue::held(&ev, fleet, i, &y.name))
         };
+        let free = |i: u64| {
+            queue::groups(&q, &ev, f, fleet, i)
+                .iter()
+                .filter(|y| queue::held(&ev, fleet, i, &y.name))
+                .all(|y| queue::holders(&ev, &st, f, fleet, &y.name).len() < y.max)
+        };
         let waits = |x: &&IssueState| {
             x.fleet == fleet
                 && queue::in_flight(&x.state)
                 && queue::held(&ev, fleet, x.issue, &g.name)
-                && (x.issue == n || atomic(x.issue) || first_held(x.issue).is_some_and(|y| y.name == g.name))
+                && (x.issue == n
+                    || if atomic(x.issue) {
+                        free(x.issue)
+                    } else {
+                        first_held(x.issue).is_some_and(|y| y.name == g.name)
+                    })
                 && !queue::stuck(&ev, &st, x)
         };
         let first = st.values().filter(waits).min_by_key(|x| pos(x.issue));
