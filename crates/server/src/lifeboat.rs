@@ -1,6 +1,6 @@
 use crate::api::Lane;
 use crate::config::Config;
-use crate::events::{age, open_asks, shared};
+use crate::events::{age, open_asks, working};
 use crate::runner::Runner;
 use crate::Ctx;
 use std::collections::BTreeMap;
@@ -57,7 +57,7 @@ pub fn back(msg: &str) -> String {
 
 /// The page for a paired device: `lanes` are API v1's (the step's snapshot), `msg` the last post's result.
 pub fn page(ctx: &Ctx, lanes: &[Lane], msg: &str) -> String {
-    let (Ok(cfg), Ok(ev)) = (Config::kept(ctx), shared(&ctx.state)) else {
+    let (Ok(cfg), Ok(ev)) = (Config::kept(ctx), working(&ctx.state)) else {
         return shell("<p>fleet.toml or the event log could not be read</p>");
     };
     let mut b = String::new();

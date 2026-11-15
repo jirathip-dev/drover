@@ -22,7 +22,7 @@ pub struct Metrics {
     pub ci_wait: u64,
     /// Process-seconds in 1 s polls on drive.lock or a kick.
     pub lock_wait: u64,
-    /// Drive actions refused SERIAL_BUSY, by a busy host (HOST_BUSY, MEM_LOW, DISK_LOW), by a cap (CAP, SPAWN_PENDING: the parallel-spawn slots).
+    /// Drive actions refused `SERIAL_BUSY`, by a busy host (`HOST_BUSY`, `MEM_LOW`, `DISK_LOW`), by a cap (CAP, `SPAWN_PENDING`: the parallel-spawn slots).
     pub serial: u64,
     pub host_busy: u64,
     pub caps: u64,
@@ -32,14 +32,23 @@ pub struct Metrics {
 }
 
 pub fn of(w: &World) -> Metrics {
-    let produced = |e: &Event| w.model.produced.iter().any(|p| Some(p.as_str()) == e.str("pane"));
+    let mut seen = BTreeMap::new();
+    let produced = |e: &Event| {
+        let pane = e.str("pane").unwrap_or_default().to_string();
+        let k = seen.entry(pane.clone()).or_insert(0);
+        *k += 1;
+        w.model.produced.contains(&format!("{pane}#{k}"))
+    };
     let mut m = log(w.wrote.iter().map(|x| (x.at, &x.ev)), produced);
     (m.idle, m.ci_wait, m.lock_wait) = (w.model.idle, w.model.ci_wait, w.model.polled);
     m
 }
 
 /// The metrics a log alone gives, for the sim's run and a real one alike.
-pub fn log<'a>(evs: impl Iterator<Item = (u64, &'a Event)> + Clone, produced: impl Fn(&Event) -> bool) -> Metrics {
+pub fn log<'a>(
+    evs: impl Iterator<Item = (u64, &'a Event)> + Clone,
+    mut produced: impl FnMut(&Event) -> bool,
+) -> Metrics {
     let mut m = Metrics::default();
     let mut queued: BTreeMap<u64, u64> = BTreeMap::new();
     let mut lanes = BTreeSet::new();
@@ -90,7 +99,9 @@ pub fn log<'a>(evs: impl Iterator<Item = (u64, &'a Event)> + Clone, produced: im
 
 fn quantile(v: &mut [u64], q: f64) -> u64 {
     v.sort_unstable();
-    let k = (q * v.len() as f64).ceil() as usize;
+    let k = (0..=v.len())
+        .find(|&k| k as f64 >= q * v.len() as f64)
+        .unwrap_or(v.len());
     v.get(k.saturating_sub(1)).copied().unwrap_or(0)
 }
 

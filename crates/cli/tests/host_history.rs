@@ -93,7 +93,7 @@ fn the_file_stays_under_the_size_bound() {
         record(&c, &[row(c.now, "mini", 1.23), row(c.now, "bazzite", 0.45)], 2).unwrap();
     }
     let p = c.state.with_file_name("host-history.jsonl");
-    let size = std::fs::metadata(&p).unwrap().len() as usize;
+    let size = usize::try_from(std::fs::metadata(&p).unwrap().len()).unwrap();
     assert!(size <= 2 * BOUND, "{size} B over {} B", 2 * BOUND);
     let rows = history(&c);
     assert!(
@@ -117,7 +117,7 @@ fn one_host_keeps_24h_and_rewrites_rarely() {
         rewrites += usize::from(ino != 0 && now != ino);
         ino = now;
     }
-    let size = std::fs::metadata(&p).unwrap().len() as usize;
+    let size = usize::try_from(std::fs::metadata(&p).unwrap().len()).unwrap();
     assert!(size <= BOUND, "{size} B over {BOUND} B");
     assert!(rewrites <= 1, "{rewrites} rewrites");
     let rows = history(&c);
@@ -140,14 +140,17 @@ fn downsampling_keeps_the_worst_per_bucket() {
         Some((3.71, NOW - 3_600 + 60 + 17 * 60)),
         "the peak and its own minute"
     );
-    assert!(load.iter().enumerate().all(|(i, v)| i == 1 || v.unwrap().0 == 0.5));
+    assert!(load
+        .iter()
+        .enumerate()
+        .all(|(i, v)| i == 1 || (v.unwrap().0 - 0.5).abs() < f64::EPSILON));
     let disk = spark(&rows, "mini", "disk", (NOW, 3_600, 6));
     assert_eq!(disk[4].unwrap().0, 9.0, "free space keeps the minimum");
     assert_eq!(spark(&rows, "bazzite", "load", (NOW, 3_600, 6)), vec![None; 6]);
 }
 
 #[test]
-fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
+fn the_host_api_has_a_card_per_host_with_its_24h_series() {
     let (c, sh) = two_hosts("history-cards");
     let st = c.state.parent().unwrap();
     let seen = json!({"bazzite": {"tags": ["os:linux"], "seen": NOW - 1980, "up": false, "load": 0.4, "disk": 300.0, "disk_total": 476.0}});
@@ -156,45 +159,38 @@ fn the_host_tab_has_a_card_per_host_and_serves_the_chart() {
     let r = fake();
     let w = sh.on(&r);
     let s = Server::new(&c, &w, Some(ADDR.into()));
-    let get = |q: &str| {
-        String::from_utf8_lossy(&s.respond(&format!("GET {q} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned()
+    let host: serde_json::Value = serde_json::from_str(&api(&s, ADDR, "", NOW, "host")).unwrap();
+    let hosts = host["hosts"].as_array().unwrap();
+    let names: Vec<&str> = hosts.iter().map(|h| h["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["mini", "bazzite"], "main first");
+    assert_eq!((&hosts[0]["main"], &hosts[1]["main"]), (&json!(true), &json!(false)));
+    let key = |h: &serde_json::Value, k: &str| {
+        h["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["key"] == k)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {k} on {h}"))
     };
-    let page = host_tab(&s, ADDR, NOW);
-    let gs: Vec<&str> = page
-        .split("<span class=gn>")
-        .skip(1)
-        .map(|g| g.split('<').next().unwrap())
-        .collect();
-    assert_eq!(gs[..2], ["HOSTS", "FLEET DISK"], "{gs:?}");
-    assert!(!page.contains(">MACHINE<"));
-    let (mini, bazzite) = (
-        page.find("data-h=\"mini\"").unwrap(),
-        page.find("data-h=\"bazzite\"").unwrap(),
-    );
-    assert!(mini < bazzite, "main first");
-    assert!(page[mini..bazzite].contains("<span class=\"tag m\">main</span>"));
     for k in ["load", "swap", "mem", "disk", "lanes"] {
-        assert_eq!(page.matches(&format!("data-k={k} ")).count(), 2, "{k} on both cards");
+        for h in hosts {
+            drop(key(h, k));
+        }
     }
-    let s24 = &page[page.find("data-k=load data-s=\"").unwrap() + 20..];
-    assert!(
-        s24.starts_with(&",".repeat(119)) && s24[119..].starts_with("3.10\""),
+    let s24 = key(&hosts[0], "load")["s"].as_str().unwrap().to_string();
+    assert!(s24.starts_with(&",".repeat(119)) && s24[119..] == *"3.10", "{s24}");
+    let disk = key(&hosts[0], "disk");
+    assert_eq!(
+        (&disk["b"], &disk["bt"], &disk["notes"]),
+        (&json!("free 42 GB"), &json!("g"), &json!(["of 466"])),
+        "used-space bar words: {disk}"
+    );
+    assert_eq!(
+        (&hosts[1]["words"], &hosts[1]["tone"]),
+        (&json!("offline · last seen 33m"), &json!("m")),
         "{}",
-        &s24[..140]
-    );
-    let i = page.find("<span class=k>disk</span>").unwrap();
-    assert!(
-        page[i..].contains("<b class=g>free 42 GB</b> <span class=mt>of 466</span>"),
-        "used-space bar words: {}",
-        &page[i..i + 400]
-    );
-    assert!(page[bazzite..].contains("<span class=\"hw m\">offline · last seen 33m</span>"));
-    let chart = get("/frag?id=hist&host=mini&k=load");
-    let parts: Vec<&str> = chart.split("\r\n\r\n").nth(1).unwrap().split('|').collect();
-    assert_eq!(parts.len(), 4, "value, lanes, pressure, minutes ago: {chart}");
-    assert!(
-        parts[0].split(';').nth(2).unwrap().ends_with("3.10") && parts[3].ends_with('0'),
-        "{chart}"
+        hosts[1]
     );
 }
 
@@ -256,9 +252,12 @@ fn the_byte_bound_holds_with_long_command_lines() {
         std::fs::write(c.state.with_file_name("host-watch.at"), c.now.to_string()).unwrap();
         drover::hosts::sample(&c, &cfg, &r, &[]).unwrap();
     }
-    let size = std::fs::metadata(c.state.with_file_name("host-history.jsonl"))
-        .unwrap()
-        .len() as usize;
+    let size = usize::try_from(
+        std::fs::metadata(c.state.with_file_name("host-history.jsonl"))
+            .unwrap()
+            .len(),
+    )
+    .unwrap();
     assert!(size <= 2 * BOUND, "{size} B over {} B", 2 * BOUND);
     let rows = history(&c);
     assert!(rows.len() <= 2 * 1_600 && rows.len() >= 1_440, "{} rows", rows.len());

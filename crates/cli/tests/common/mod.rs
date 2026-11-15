@@ -33,7 +33,7 @@ build_root = ""           # #630: retired (builds go under the worktree root); a
 stray_roots = []          # #536: never clean the real /tmp or $TMPDIR
 "#;
 
-/// RefCell's API over an RwLock: runners are `Sync` (serve's watcher has its own thread).
+/// `RefCell`'s API over an `RwLock`: runners are `Sync` (serve's watcher has its own thread).
 #[derive(Default)]
 pub struct Shared<T>(RwLock<T>);
 
@@ -252,6 +252,7 @@ impl Drop for Made {
 thread_local!(static MADE: Made = const { Made(std::cell::RefCell::new(Vec::new())) });
 
 static ALL: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+static AT_EXIT: std::sync::Once = std::sync::Once::new();
 
 extern "C" fn sweep() {
     if let Ok(all) = ALL.try_lock() {
@@ -275,7 +276,6 @@ pub fn tmpdir(name: &str) -> PathBuf {
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     MADE.with(|m| m.0.borrow_mut().push(d.clone()));
-    static AT_EXIT: std::sync::Once = std::sync::Once::new();
     AT_EXIT.call_once(|| assert_eq!(unsafe { atexit(sweep) }, 0));
     ALL.lock().unwrap().push(d.clone());
     d
@@ -309,13 +309,13 @@ pub fn ctx(dir: &Path, config: &str) -> Ctx {
 
 pub fn run(ctx: &Ctx, r: &dyn Runner, args: &[&str]) -> (i32, String) {
     let mut out = Vec::new();
-    let mut argv = vec!["drover".to_string()];
-    argv.extend(args.iter().map(|s| s.to_string()));
-    let code = drover::main_with(argv, ctx, r, &mut out, &mut std::io::empty());
+    let mut cmd = vec!["drover".to_string()];
+    cmd.extend(args.iter().map(std::string::ToString::to_string));
+    let code = drover::main_with(cmd, ctx, r, &mut out, &mut std::io::empty());
     (code, String::from_utf8(out).unwrap())
 }
 
-/// `node tests/support/webview.mjs` (Playwright's WebKit) under scripts/ui-lock.sh, its page based at serve's assets.
+/// `node tests/support/webview.mjs` (Playwright's `WebKit`) under scripts/ui-lock.sh, its page based at serve's assets.
 pub fn webview() -> std::process::Command {
     static BASE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let base = BASE.get_or_init(|| {
@@ -344,7 +344,7 @@ pub fn webview() -> std::process::Command {
     c
 }
 
-/// #862: true (and a skip message) where node cannot load Playwright (`NODE_PATH`), so a WebKit test returns early.
+/// #862: true (and a skip message) where node cannot load Playwright (`NODE_PATH`), so a `WebKit` test returns early.
 pub fn no_webkit() -> bool {
     static NO: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     let no = *NO.get_or_init(|| {
@@ -367,7 +367,7 @@ fn user_home() -> PathBuf {
 
 static HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// #560: scripts/ui-lock.sh's host lock held for a whole WebKit test whose steps are timed (a `/live` update 2.5 s in), so its clock starts once WebKit is its own; `swift()` meanwhile runs without the wrapper. Every WebKit test of a binary that takes it must take it.
+/// #560: scripts/ui-lock.sh's host lock held for a whole `WebKit` test whose steps are timed (a `/live` update 2.5 s in), so its clock starts once `WebKit` is its own; `swift()` meanwhile runs without the wrapper. Every `WebKit` test of a binary that takes it must take it.
 pub struct UiLock(std::fs::File, std::sync::MutexGuard<'static, ()>);
 
 pub fn ui_lock() -> UiLock {
@@ -435,7 +435,7 @@ pub fn chat_fixture() -> serde_json::Value {
         "⏺ I read the brief. The overlap check skips **merged** issues only, so a closed one still counts.".into(),
         "⏺ Bash(cargo test --locked)".into(),
         "  ⎿  test result: \x1b[38;2;80;200;80mok\x1b[0m. 218 passed; 0 failed".into(),
-        drover::lanes::GAP.into(),
+        "┄ not captured: scrolled past between reads ┄".into(),
         "⏺ # Plan".into(),
         "  Base is green. The bug is in `src/overlap.rs`: the list keeps every issue that is not **merged**.".into(),
         "  1. Swap `s.state != \"merged\"` for `!s.done()`, which the board already uses everywhere.".into(),
@@ -461,7 +461,7 @@ pub fn chat_fixture() -> serde_json::Value {
         "status": "✽ Gusting… (2m 47s · ↓ 1.8k tokens)", "before": l.len(), "more": true})
 }
 
-/// #138: page JS that opens sendmeter-impl-12's sheet full and draws `chat_fixture()` at once (the poll answers the same) in the full view (#315: not the one WebKit's stored `chat:full` says), every block open with [show all] pressed, or all collapsed.
+/// #138: page JS that opens sendmeter-impl-12's sheet full and draws `chat_fixture()` at once (the poll answers the same) in the full view (#315: not the one `WebKit`'s stored `chat:full` says), every block open with [show all] pressed, or all collapsed.
 pub fn chat_scene(open: bool) -> String {
     let fx = chat_fixture();
     format!(
@@ -476,165 +476,6 @@ pub fn chat_scene(open: bool) -> String {
     )
 }
 
-/// #266: the Events tab as the TypeScript board draws it: web/src/events.ts under node, from `s`'s `/api/v1/state` and `/api/v1/events` at `now`; `opts` (a JS object) overrides the draw's `all`, `shown` or `f`. None where node is missing.
-pub fn events_tab(s: &drover::serve::Server, host: &str, now: u64, opts: &str) -> Option<String> {
-    if std::process::Command::new("node").arg("--version").output().is_err() {
-        eprintln!("skipping: no node here");
-        return None;
-    }
-    let get = |p: &str| {
-        let r = s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {host}\r\n\r\n"), now);
-        let r = String::from_utf8_lossy(&r).into_owned();
-        assert!(r.starts_with("HTTP/1.1 200"), "{p}: {r}");
-        r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
-    };
-    let d = tmpdir("events-ts");
-    std::fs::write(d.join("state.json"), get("/api/v1/state")).unwrap();
-    std::fs::write(d.join("events.json"), get("/api/v1/events?since=0")).unwrap();
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/events.ts");
-    let js = format!(
-        "import {{ tab }} from {src:?}; import fs from 'node:fs';\n\
-         const st = JSON.parse(fs.readFileSync({:?})), ev = JSON.parse(fs.readFileSync({:?}));\n\
-         process.stdout.write(tab(ev.list, {{ now: st.now, tz: st.tz, fleets: st.fleets, all: false, \
-         shown: {{ imp: 100, all: 100 }}, f: {{ k: 'imp', fl: [] }}, ...{opts} }}));",
-        d.join("state.json"),
-        d.join("events.json")
-    );
-    std::fs::write(d.join("t.mjs"), js).unwrap();
-    let o = std::process::Command::new("node")
-        .arg(d.join("t.mjs"))
-        .output()
-        .unwrap();
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    Some(String::from_utf8(o.stdout).unwrap())
-}
-
-/// #267: the Host tab as the TypeScript board draws it: web/src/host.ts under node, from `s`'s `/api/v1/host` at `now` (`host` the request's Host: a read-only server takes an empty one).
-pub fn host_tab(s: &drover::serve::Server, host: &str, now: u64) -> String {
-    let r = s.respond(&format!("GET /api/v1/host HTTP/1.1\r\nHost: {host}\r\n\r\n"), now);
-    let r = String::from_utf8_lossy(&r).into_owned();
-    assert!(r.starts_with("HTTP/1.1 200"), "/api/v1/host: {r}");
-    host_html(&r[r.find("\r\n\r\n").unwrap() + 4..])
-}
-
-/// #267: web/src/host.ts's drawing of API v1 `host` data `json`, under node; #440: then what System draws from the same data (web/src/system.ts): Agent providers and Notifications & devices.
-pub fn host_html(json: &str) -> String {
-    let d = tmpdir("host-ts");
-    std::fs::write(d.join("host.json"), json).unwrap();
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/host.ts");
-    let sys = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/system.ts");
-    let js = format!(
-        "import {{ tab }} from {src:?}; import {{ providers, notifications }} from {sys:?}; import fs from 'node:fs';\n\
-         const d = JSON.parse(fs.readFileSync({:?})); process.stdout.write(tab(d) + providers(d) + notifications(d));",
-        d.join("host.json")
-    );
-    std::fs::write(d.join("t.mjs"), js).unwrap();
-    let o = std::process::Command::new("node")
-        .arg(d.join("t.mjs"))
-        .output()
-        .expect("node (24+) runs web/src/host.ts");
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    String::from_utf8(o.stdout).unwrap()
-}
-
-/// #268: `expr` (JS, over API v1 `queue` data `d`: `tab(d)`, `sheet(d, fleet)`) from web/src/queue.ts under node, from `s`'s `/api/v1/queue` at `now` (`host` the request's Host: a read-only server takes an empty one).
-pub fn queue_js(s: &drover::serve::Server, host: &str, now: u64, expr: &str) -> String {
-    let r = s.respond(&format!("GET /api/v1/queue HTTP/1.1\r\nHost: {host}\r\n\r\n"), now);
-    let r = String::from_utf8_lossy(&r).into_owned();
-    assert!(r.starts_with("HTTP/1.1 200"), "/api/v1/queue: {r}");
-    queue_html(&r[r.find("\r\n\r\n").unwrap() + 4..], expr)
-}
-
-/// #268: the Queue tab as the TypeScript board draws it (`queue_js`'s `tab(d)`).
-pub fn queue_tab(s: &drover::serve::Server, host: &str, now: u64) -> String {
-    queue_js(s, host, now, "tab(d)")
-}
-
-/// #268: `expr` over API v1 `queue` data `json` in web/src/queue.ts, under node.
-pub fn queue_html(json: &str, expr: &str) -> String {
-    let d = tmpdir("queue-ts");
-    std::fs::write(d.join("queue.json"), json).unwrap();
-    let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src/queue.ts");
-    let js = format!(
-        "import {{ tab, sheet }} from {src:?}; import fs from 'node:fs';\n\
-         const d = JSON.parse(fs.readFileSync({:?})); process.stdout.write(String({expr}));",
-        d.join("queue.json")
-    );
-    std::fs::write(d.join("t.mjs"), js).unwrap();
-    let o = std::process::Command::new("node")
-        .arg(d.join("t.mjs"))
-        .output()
-        .expect("node (24+) runs web/src/queue.ts");
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    String::from_utf8(o.stdout).unwrap()
-}
-
-/// #440: a `<script>` painting what the TypeScript board draws into the System sheet (main.ts), for a page cut before board.js: Hosts & health from `s`'s `/api/v1/host`, Agent providers and Notifications from the same, Fleets and Conductor from `/api/v1/queue`, Activity from its events (`events`, `events_tab`'s HTML).
-pub fn system_frags(s: &drover::serve::Server, host: &str, now: u64, events: &str) -> String {
-    let get = |p: &str| {
-        let r =
-            String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {host}\r\n\r\n"), now)).into_owned();
-        assert!(r.starts_with("HTTP/1.1 200"), "{p}: {r}");
-        r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
-    };
-    let d = tmpdir("system-ts");
-    std::fs::write(d.join("host.json"), get("/api/v1/host")).unwrap();
-    std::fs::write(d.join("queue.json"), get("/api/v1/queue")).unwrap();
-    std::fs::write(d.join("events.html"), events).unwrap();
-    let src = |f: &str| Path::new(env!("CARGO_MANIFEST_DIR")).join("../../web/src").join(f);
-    let js = format!(
-        "import {{ tab }} from {:?}; import * as y from {:?}; import fs from 'node:fs';\n\
-         const h = JSON.parse(fs.readFileSync({:?})), q = JSON.parse(fs.readFileSync({:?}));\n\
-         process.stdout.write(JSON.stringify({{ host: tab(h), 'sy-providers': y.providers(h), 'sy-notifications': y.notifications(h), \
-         'sy-fleets': y.fleets(q), 'sy-conductor': y.conductor(q), events: fs.readFileSync({:?}, 'utf8') }}));",
-        src("host.ts"),
-        src("system.ts"),
-        d.join("host.json"),
-        d.join("queue.json"),
-        d.join("events.html")
-    );
-    std::fs::write(d.join("t.mjs"), js).unwrap();
-    let o = std::process::Command::new("node")
-        .arg(d.join("t.mjs"))
-        .output()
-        .expect("node (24+) runs web/src/system.ts");
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    let parts = String::from_utf8(o.stdout).unwrap().replace("</", "<\\/");
-    format!("<script>{{ const p = {parts}; for (const id in p) frag(id, p[id]); }}</script>")
-}
-
-/// #268: a page response `res` with its Queue tab as the board draws it (`queue_tab`) in `<section id=queue>` (`host` the request's Host, else an empty one: a read-only server's); #269: and every other part the board draws (`with_board`, for an unpaired request).
-pub fn with_queue(res: &str, s: &drover::serve::Server, host: &str, now: u64) -> String {
-    with_board(res, s, host, "", now)
-}
-
-/// #269: `exprs` (JS over `d`, `lanes`, `needs` and `chat`: web/src/{lanes,needs,chat}.ts's exports) each over API v1 data `json` (the first `d`, …), under node: their strings.
-pub fn board_js(parts: &[(&str, &str)]) -> Vec<String> {
-    let d = tmpdir("board-ts");
-    let src = |f: &str| Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../web/src/{f}.ts"));
-    let mut js = format!(
-        "import * as lanes from {:?}; import * as needs from {:?}; import * as chat from {:?}; import fs from 'node:fs';\nconst out = [];\n",
-        src("lanes"),
-        src("needs"),
-        src("chat")
-    );
-    for (i, (json, expr)) in parts.iter().enumerate() {
-        std::fs::write(d.join(format!("{i}.json")), json).unwrap();
-        js += &format!(
-            "{{ const d = JSON.parse(fs.readFileSync({:?})); out.push(String({expr})); }}\n",
-            d.join(format!("{i}.json"))
-        );
-    }
-    js += "process.stdout.write(JSON.stringify(out));";
-    std::fs::write(d.join("t.mjs"), js).unwrap();
-    let o = std::process::Command::new("node")
-        .arg(d.join("t.mjs"))
-        .output()
-        .expect("node (24+) runs web/src/*.ts");
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-    serde_json::from_slice(&o.stdout).unwrap()
-}
-
 /// #269: API v1 `path` from `s` for a request with Host `host` (none taken: an empty one, a read-only server's) and `extra` header lines (a `Cookie: …\r\n`) at `now`: the body.
 pub fn api(s: &drover::serve::Server, host: &str, extra: &str, now: u64, path: &str) -> String {
     let req = |h: &str| format!("GET /api/v1/{path} HTTP/1.1\r\nHost: {h}\r\n{extra}\r\n");
@@ -644,63 +485,6 @@ pub fn api(s: &drover::serve::Server, host: &str, extra: &str, now: u64, path: &
     }
     assert!(r.starts_with("HTTP/1.1 200"), "/api/v1/{path}: {r}");
     r[r.find("\r\n\r\n").unwrap() + 4..].to_string()
-}
-
-/// #269: the needs cards, the Lanes tab and the [chat] tab as the board draws them for that request (`api`'s).
-pub fn parts(s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> [String; 3] {
-    let [n, l, c] = ["needs", "lanes", "chat"].map(|p| api(s, host, extra, now, p));
-    let v = board_js(&[(&n, "needs.tab(d)"), (&l, "lanes.tab(d)"), (&c, "chat.tab(d)")]);
-    [v[0].clone(), v[1].clone(), v[2].clone()]
-}
-
-/// #269: what `/frags?tab=` sent before the board drew them: `needs` and the tab's part (`lanes`, `chat`) by id.
-pub fn frags(s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> serde_json::Value {
-    let [needs, lanes, chat] = parts(s, host, extra, now);
-    serde_json::json!({ "needs": needs, "lanes": lanes, "chat": chat })
-}
-
-/// #269: a page response `res` with every tab the board draws in it (the Queue tab's as `with_queue`), as the page shows them once drawn, for the request with Host `host` and `extra` header lines.
-pub fn with_board(res: &str, s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> String {
-    let req = |h: &str| format!("GET /api/v1/queue HTTP/1.1\r\nHost: {h}\r\n\r\n");
-    let ok = String::from_utf8_lossy(&s.respond(&req(host), now)).starts_with("HTTP/1.1 200");
-    let q = queue_tab(s, if ok { host } else { "" }, now);
-    let [needs, lanes, chat] = parts(s, host, extra, now);
-    res.replacen(
-        "<section id=queue></section>",
-        &format!("<section id=queue>{q}</section>"),
-        1,
-    )
-    .replacen("<div id=needs></div>", &format!("<div id=needs>{needs}</div>"), 1)
-    .replacen(
-        "<section id=lanes></section>",
-        &format!("<section id=lanes>{lanes}</section>"),
-        1,
-    )
-    .replacen(
-        "<section id=chat></section>",
-        &format!("<section id=chat>{chat}</section>"),
-        1,
-    )
-}
-
-/// #269: the Lanes row's avatar (web/src/lanes.ts's `avatar`) for each (name, role, herdr state), under node.
-pub fn avatars(of: &[(&str, &str, &str)]) -> Vec<String> {
-    use drover::serve::{act, coat, tone};
-    let j: Vec<String> = of
-        .iter()
-        .map(|(n, r, s)| {
-            serde_json::json!({"state": s, "act": act(r, s), "atone": tone(s), "coat": coat(n)}).to_string()
-        })
-        .collect();
-    board_js(&j.iter().map(|j| (j.as_str(), "lanes.avatar(d)")).collect::<Vec<_>>())
-}
-
-/// #269: a page response `res` as the board leaves it drawn (`with_board`), for a static copy (the WebKit tests' page file): without the board's module, which would read the API of the server the copy's assets come from.
-pub fn drawn(res: &str, s: &drover::serve::Server, host: &str, extra: &str, now: u64) -> String {
-    let page = with_board(res, s, host, extra, now);
-    let at = page.find("<script type=module").expect("the board's module");
-    let end = at + page[at..].find("</script>").unwrap() + 9;
-    format!("{}{}", &page[..at], &page[end..])
 }
 
 /// #344: replace the whole event log with JSONL `text` (as a test edits a log): the database goes, the next read imports `text`. Leases, devices and snapshots go with it.
@@ -780,4 +564,86 @@ pub fn herdr_setup(f: Fake) -> Fake {
     f.reply("herdr --machine bazzite pane read", "Paste code here >\n")
         .reply("herdr machine list --json", BAZZITE)
         .reply("herdr", V1_WS)
+}
+
+/// A shed session as `ls` lists it: `name`, `status` (shed's reported word; none: unreported), `cwd`, `labels`, `host`, `exited`.
+pub fn session(v: &serde_json::Value) -> drover::session::Session {
+    let t = serde_json::json!({"name": v["name"], "labels": v.get("labels").cloned().unwrap_or(serde_json::json!({})),
+        "cwd": v["cwd"].as_str().unwrap_or("/"), "cmd": [], "keep": true,
+        "state": if v["exited"] == true { "exited" } else { "running" }, "exit": v.get("exit").cloned(), "pid": 7,
+        "reported": v.get("status").map(|s| serde_json::json!({"state": s, "note": v.get("note")}))});
+    let mut s: drover::session::Session = serde_json::from_value::<drover::shed::proto::TerminalInfo>(t)
+        .unwrap()
+        .into();
+    s.host = v["host"].as_str().map(String::from);
+    s
+}
+
+/// `rows` (each as `session` reads it) as one answering host's sessions.
+pub fn sessions(rows: &serde_json::Value) -> drover::session::Sessions {
+    drover::session::Sessions::of(rows.as_array().unwrap().iter().map(session))
+}
+
+pub fn http(addr: &str, req: &str) -> String {
+    let mut s = std::net::TcpStream::connect(addr).unwrap();
+    std::io::Write::write_all(&mut s, req.as_bytes()).unwrap();
+    let mut res = String::new();
+    std::io::Read::read_to_string(&mut s, &mut res).unwrap();
+    res
+}
+
+/// #977: a live board (`serve_on`) and a paired device's cookie, for taps over HTTP.
+pub struct Board {
+    pub addr: String,
+    pub cookie: String,
+}
+
+impl Board {
+    pub fn start(c: &Ctx, r: impl Runner + Send + 'static) -> Board {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let fake = Fake::default();
+        let s = drover::serve::Server::new(c, &fake, Some("127.0.0.1:7777".into()));
+        let cookie = pair(&s, c, "Mozilla/5.0 (iPhone)", now);
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap().to_string();
+        let c2 = c.clone();
+        std::thread::spawn(move || drover::serve::serve_on(&c2, &r, l, false));
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        Board { addr, cookie }
+    }
+
+    pub fn post(&self, op: &str, body: &str) -> (u128, serde_json::Value) {
+        let (addr, cookie) = (&self.addr, &self.cookie);
+        let req = format!(
+            "POST /api/v1/{op} HTTP/1.1\r\nHost: {addr}\r\n{cookie}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let t = std::time::Instant::now();
+        let res = http(addr, &req);
+        let ms = t.elapsed().as_millis();
+        (ms, serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap())
+    }
+
+    pub fn get(&self, path: &str) -> serde_json::Value {
+        let (addr, cookie) = (&self.addr, &self.cookie);
+        let res = http(
+            addr,
+            &format!("GET /api/v1/{path} HTTP/1.1\r\nHost: {addr}\r\n{cookie}Connection: close\r\n\r\n"),
+        );
+        serde_json::from_str::<serde_json::Value>(res.split_once("\r\n\r\n").unwrap().1).unwrap()
+    }
+
+    pub fn until(&self, id: &str, done: impl Fn(&serde_json::Value) -> bool) -> serde_json::Value {
+        let t0 = std::time::Instant::now();
+        loop {
+            let j = self.get(&format!("job/{id}"));
+            if done(&j) || t0.elapsed().as_secs() >= 30 {
+                return j;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
 }

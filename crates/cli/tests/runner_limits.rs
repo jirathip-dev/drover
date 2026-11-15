@@ -17,7 +17,7 @@ fn exec_fresh<T>(call: impl Fn() -> anyhow::Result<T>) -> T {
     for _ in 0..50 {
         match call() {
             Err(e) if e.chain().any(|c| c.to_string().contains("os error 26")) => {
-                std::thread::sleep(Duration::from_millis(20))
+                std::thread::sleep(Duration::from_millis(20));
             }
             r => return r.unwrap(),
         }
@@ -59,8 +59,6 @@ fn the_limits_table() {
     assert_eq!(secs("gh", &["pr", "view", "issue-9"]), 60);
     assert_eq!(secs("security", &["find-generic-password", "-s", "x"]), 10);
     assert_eq!(secs("/usr/bin/codesign", &["-v", "x"]), 10);
-    assert_eq!(secs("herdr", &["--machine", "air", "agent", "list"]), 20);
-    assert_eq!(secs("herdr", &["agent", "start", "a", "--timeout", "90000", "--"]), 120);
     assert_eq!(secs("git", &["-C", "/r", "fetch", "origin"]), 600);
     assert_eq!(secs("git", &["-C", "/r", "status"]), 60);
     assert_eq!(secs("cp", &["-cR", "a", "b"]), 600);
@@ -148,7 +146,7 @@ fn a_remote_call_keeps_the_limit_of_the_command_it_carries() {
     on.run("git", &argv(&["-C", "/r", "fetch", "origin"])).unwrap();
     on.run("cargo", &argv(&["install", "x"])).unwrap();
     on.run("sh", &argv(&["-c", "true"])).unwrap();
-    on.run_for("sh", &argv(&["-c", "cargo install x"]), "", Duration::from_secs(1800))
+    on.run_for("sh", &argv(&["-c", "cargo install x"]), "", Duration::from_mins(30))
         .unwrap();
     drover::hosts::On::new(&r, None).run("git", &argv(&["status"])).unwrap();
     let seen = r.0.lock().unwrap().clone();

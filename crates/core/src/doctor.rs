@@ -20,12 +20,6 @@ fn mode(path: &Path) -> String {
 pub fn doctor(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, json: bool, config_only: bool) -> Result<i32> {
     let mut rows = vec![];
     if !config_only {
-        if let Some((client, server, older)) = crate::timer::herdr_versions(r) {
-            let line = format!("herdr — client {client}, server {server} → herdr update --handoff");
-            row(&mut rows, !older, '!', &line);
-        } else {
-            rows.push("✗ herdr — not on PATH, or no server → herdr".into());
-        }
         let sample = crate::host::sample(r);
         let host = sample.pressure.is_some() && sample.swapout.is_some() && sample.load_per_cpu.is_some();
         row(&mut rows, host, '✗', "host — sysctl + vm_stat → put /usr/sbin on PATH");
@@ -53,7 +47,11 @@ fn config_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) 
 
 fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
     config_rows(ctx, cfg, r, rows);
-    if cfg.runtime.kind == crate::config::RuntimeKind::Berth {
+    if cfg
+        .runtime
+        .as_ref()
+        .is_some_and(|r| r.kind == crate::config::RuntimeKind::Berth)
+    {
         let fix = format!("set kind = \"shed\" in {}", ctx.config.display());
         rows.push(format!(
             "! runtime — kind = \"berth\" is deprecated, berth is now shed → {fix}"
@@ -293,16 +291,12 @@ fn checks(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
             rows.extend(on.shed().map(|_| format!("✗ host {name} shed — unreachable")));
             continue;
         };
-        if let Err(e) = crate::herdr::poll(&on) {
-            rows.push(format!("✗ host {name} — herdr agent list: {e} → herdr machine status"));
-            continue;
-        }
         let tags = [tags, h.tags.clone()].concat();
         let bad = crate::hosts::health(ctx, cfg, &on, &tags, &home);
         let h = crate::providers::lanes().filter_map(|h| h.health_check());
         let logins: String = h.map(|c| format!("{}, ", c.0)).collect();
         let v = crate::VERSION;
-        let ok = format!("✓ host {name} — herdr, session, git, gh, {logins}drover {v}");
+        let ok = format!("✓ host {name} — git, gh, {logins}drover {v}, shed");
         let at = |w: &String| w.replacen(' ', &format!(" host {name} "), 1);
         let shed = on.shed().filter(|_| !bad.iter().any(|w| w.contains(" shed")));
         rows.extend(bad.iter().map(at));
@@ -371,6 +365,18 @@ fn shed_rows(ctx: &Ctx, cfg: &Config, r: &dyn Runner, rows: &mut Vec<String>) {
         |p| format!("✓ shed — {} on the timer's PATH", p.display()),
     ));
     let ids: BTreeSet<String> = cfg.fleet.keys().filter_map(|n| cfg.shed_for(n)?.acp).collect();
+    if !ids.is_empty() {
+        let fix = format!(
+            "cargo install --git {} --rev {} --locked --force shed",
+            crate::shed::git(),
+            crate::shed::REV
+        );
+        rows.push(if crate::spawn::shed_meta(r) {
+            "✓ shed run --meta — ACP lanes get their provider's session options".into()
+        } else {
+            format!("✗ shed run --meta — {} → {fix}", crate::spawn::SHED_OLD)
+        });
+    }
     let agents = ids
         .first()
         .and_then(|_| crate::shed::cli(r, &["agents", "--json"]).ok());

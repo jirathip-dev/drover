@@ -18,7 +18,7 @@ pub struct Scenario {
     pub queue: Vec<(u64, Vec<String>)>,
     /// Each `<role>#<issue>`'s lanes in spawn order: what its agent did (the last one again for any later lane).
     pub lanes: BTreeMap<String, Vec<Script>>,
-    /// Windows the host refused spawns HOST_BUSY, and a host was offline (the sim has one host: both are busy).
+    /// Windows the host refused spawns `HOST_BUSY`, and a host was offline (the sim has one host: both are busy).
     pub busy: Vec<(u64, u64)>,
     pub offline: Vec<(u64, u64)>,
     /// What really happened that week.
@@ -82,7 +82,11 @@ pub fn build(evs: &[Event], fleet: &str, from: u64, to: u64) -> Scenario {
         ..Scenario::default()
     };
     let mut queued = BTreeSet::new();
-    for e in evs.iter().filter(|e| e.kind == "queue") {
+    for e in evs.iter().filter(|e| e.kind == "queue" || e.kind == "serial-joined") {
+        if let (Some(n), Some(g)) = (e.issue, e.str("group").filter(|_| e.kind == "serial-joined")) {
+            s.queue.push((at(e), args(&["set", &n.to_string(), "serial", g])));
+            continue;
+        }
         let ns = issues(e);
         let words: Vec<Vec<String>> = match e.str("op") {
             Some("add") => {
@@ -91,6 +95,11 @@ pub fn build(evs: &[Event], fleet: &str, from: u64, to: u64) -> Scenario {
                 let mut w = vec!["add".to_string()];
                 w.extend(top.then(|| "--top".to_string()));
                 w.extend(ns.iter().map(ToString::to_string));
+                match e.val("serial") {
+                    serde_json::Value::Bool(true) => w.push("--serial".into()),
+                    serde_json::Value::String(g) => w.extend(["--serial".into(), g.clone()]),
+                    _ => {}
+                }
                 vec![w]
             }
             Some("block") => match e.data.get("on").and_then(serde_json::Value::as_u64) {
@@ -168,14 +177,15 @@ pub fn build(evs: &[Event], fleet: &str, from: u64, to: u64) -> Scenario {
         }
         let rev = s.lanes.entry(format!("rev#{n}")).or_default();
         if rev.is_empty() {
-            rev.push(match merged.contains(&n) {
-                true => Script::Review {
+            rev.push(if merged.contains(&n) {
+                Script::Review {
                     secs: 600,
                     pass: true,
                     proof: true,
                     heeds: true,
-                },
-                false => Script::Hang,
+                }
+            } else {
+                Script::Hang
             });
         }
     }
@@ -233,7 +243,7 @@ pub fn real(evs: &[Event], from: u64) -> Run {
             produced.insert(*p);
         }
         if e.kind == "spawn" {
-            last.insert((n, r), e as *const Event);
+            last.insert((n, r), std::ptr::from_ref::<Event>(e));
         }
         if ["spawn", "pushed", "verdict", "merged"].contains(&e.kind.as_str()) && seen.insert(n) {
             adds.push(Event::new(
@@ -246,7 +256,9 @@ pub fn real(evs: &[Event], from: u64) -> Run {
         }
     }
     let log = adds.iter().map(|e| (from, e)).chain(evs.iter().map(|e| (e.ts, e)));
-    let mut m = crate::metrics::summary(&[crate::metrics::log(log, |e| produced.contains(&(e as *const Event)))]);
+    let mut m = crate::metrics::summary(&[crate::metrics::log(log, |e| {
+        produced.contains(&std::ptr::from_ref::<Event>(e))
+    })]);
     m.retain(|k, _| !["idle_lane_min", "ci_wait_min", "lock_wait_min"].contains(k));
     Run {
         merged: merged(evs),
@@ -291,7 +303,12 @@ pub fn model(s: &Scenario) -> (Model, String) {
 /// Replay `s` to its end; the run and what the sim did.
 pub fn run(s: &Scenario) -> (crate::Outcome, Run) {
     let (m, cfg) = model(s);
-    let o = crate::play(s.from, m, &cfg, T0 + (s.to - s.from), u64::MAX / 2, u64::MAX / 2, true);
+    run_in(s, m, &cfg)
+}
+
+/// #687: replay `s` in world `m` (its `model`, maybe changed) under fleet.toml `cfg`.
+pub fn run_in(s: &Scenario, m: Model, cfg: &str) -> (crate::Outcome, Run) {
+    let o = crate::play(s.from, m, cfg, T0 + (s.to - s.from), u64::MAX / 2, u64::MAX / 2, true);
     let metrics = crate::metrics::summary(std::slice::from_ref(&o.metrics));
     let sim = Run {
         merged: merged(&o.events),

@@ -23,8 +23,7 @@ pub struct Config {
     pub hosts: BTreeMap<String, HostCfg>,
     /// #303: `[[setup]]` logins a host card's [sign in] runs (`crate::setup`).
     pub setup: Vec<SetupCfg>,
-    /// #298: `[runtime]`, the terminal runtime new lanes start in (docs/runtimes.md); herdr when unset.
-    pub runtime: Runtime,
+    pub runtime: Option<Runtime>,
     /// #355: `[conductor]`: the conductor profile, plain markdown in a repo the owner picks (`crate::conductor`).
     #[serde(alias = "conductor")]
     pub orchestrator: OrchestratorCfg,
@@ -180,17 +179,33 @@ impl OrchestratorCfg {
 }
 
 #[derive(Debug, Default, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(try_from = "String")]
 pub enum RuntimeKind {
     #[default]
-    Herdr,
     Shed,
-    #[serde(rename = "shed-acp")]
     ShedAcp,
     Berth,
 }
 
-/// #298: `kind`, herdr or shed; shed's `socket` (default its per-user one), and an ACP agent id its lanes run instead of the harness's terminal UI (`shed run --acp`), with shed's permission `acp_policy` (default `ask`).
+/// #721: the load error for the retired runtime, with its migration.
+pub const NO_RUNTIME: &str = "no shed runtime: set [runtime] kind = \"shed-acp\" or \"shed\" (docs/runtimes.md)";
+
+pub const RETIRED_RUNTIME: &str = "runtime \"herdr\" is retired (#721): set kind = \"shed-acp\" (each lane an ACP \
+     session) or \"shed\" (each lane a shed terminal); docs/runtimes.md has the migration";
+
+impl TryFrom<String> for RuntimeKind {
+    type Error = String;
+    fn try_from(k: String) -> std::result::Result<Self, String> {
+        match k.as_str() {
+            "shed" => Ok(Self::Shed),
+            "shed-acp" => Ok(Self::ShedAcp),
+            "berth" => Ok(Self::Berth),
+            "herdr" => Err(RETIRED_RUNTIME.into()),
+            _ => Err(format!("unknown runtime \"{k}\": \"shed-acp\" or \"shed\"")),
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize)]
 #[serde(default)]
 pub struct Runtime {
@@ -201,10 +216,10 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// The shed runtime, when it is the kind.
-    pub fn shed(&self) -> Option<crate::shed::Shed> {
+    /// The shed runtime it names.
+    pub fn shed(&self) -> crate::shed::Shed {
         let acp = self.kind == RuntimeKind::ShedAcp;
-        (acp || matches!(self.kind, RuntimeKind::Shed | RuntimeKind::Berth)).then(|| crate::shed::Shed {
+        crate::shed::Shed {
             wire: crate::shed::Wire::Socket(self.socket.as_deref().map_or_else(crate::shed::default_socket, expand)),
             acp: self
                 .acp
@@ -214,7 +229,7 @@ impl Runtime {
                 .acp_policy
                 .clone()
                 .unwrap_or_else(|| if acp { "allow" } else { "ask" }.into()),
-        })
+        }
     }
 }
 
@@ -226,7 +241,6 @@ pub struct SetupCfg {
     pub env: BTreeMap<String, String>,
 }
 
-/// #157: one host: its herdr machine label (unset = this host), hand tags, workspace root, and whether new lanes go there. #630: or `roots`, in order: a new lane goes to the first mounted, writable one with room.
 #[derive(Debug, Deserialize)]
 pub struct HostCfg {
     pub machine: Option<String>,
@@ -248,7 +262,7 @@ pub struct HostCfg {
     #[serde(default)]
     pub deny_commands_add: Vec<Deny>,
     pub allow_commands: Option<Vec<String>>,
-    /// #637: `herdr` or `shed-acp`: the runtime its lanes start in (unset: the fleet's, as before).
+    /// #637: `shed-acp`: the runtime its lanes start in (unset: the fleet's, as before).
     pub runtime: Option<RuntimeKind>,
     /// #984: lanes running a turn at once on this host, all fleets (unset: no cap).
     pub max_working: Option<usize>,
@@ -533,6 +547,7 @@ pub struct Limits {
     pub silent_minutes: u64,
     pub ci_start_minutes: u64,
     pub load_per_cpu: f64,
+    pub overload_minutes: u64,
     pub swapout_rate: f64,
     pub min_free_gb: f64,
     pub worktree_budget_gb: f64,
@@ -558,7 +573,6 @@ pub struct Limits {
     pub max_parallel_spawns: usize,
     pub spawn_pending_max_secs: u64,
     pub acp_start_minutes: u64,
-    pub rotate_mb: u64,
     pub webhook_poll_minutes: u64,
     pub keychain_readers: usize,
     pub reap_keychain_readers: bool,
@@ -592,12 +606,12 @@ pub struct Limits {
     pub outbox_stale_minutes: u64,
     pub host_offline_minutes: u64,
     pub promise_passes: std::collections::BTreeMap<crate::promise::Kind, u64>,
-    pub serve_herdr_secs: u64,
     pub serve_shed_secs: u64,
     pub serve_remote_secs: u64,
     pub serve_host_secs: u64,
     pub serve_heartbeat_secs: u64,
     pub serve_handover_secs: u64,
+    pub serve_mem_mb: u64,
     pub slo_api_p95_ms: u64,
     pub slo_api_minutes: u64,
     pub slo_idle_minutes: u64,
@@ -639,6 +653,7 @@ impl Default for Limits {
             silent_minutes: 10,
             ci_start_minutes: 10,
             load_per_cpu: 2.5,
+            overload_minutes: 10,
             swapout_rate: 2000.0,
             min_free_gb: 10.0,
             worktree_budget_gb: 25.0,
@@ -677,7 +692,6 @@ impl Default for Limits {
             max_parallel_spawns: 6,
             spawn_pending_max_secs: 300,
             acp_start_minutes: 3,
-            rotate_mb: 20,
             webhook_poll_minutes: 10,
             keychain_readers: 3,
             reap_keychain_readers: false,
@@ -711,12 +725,12 @@ impl Default for Limits {
             outbox_stale_minutes: 5,
             host_offline_minutes: 15,
             promise_passes: std::collections::BTreeMap::new(),
-            serve_herdr_secs: 2,
             serve_shed_secs: 5,
             serve_remote_secs: 10,
             serve_host_secs: 10,
             serve_heartbeat_secs: 15,
             serve_handover_secs: 300,
+            serve_mem_mb: 300,
             slo_api_p95_ms: 1000,
             slo_api_minutes: 10,
             slo_idle_minutes: 20,
@@ -745,6 +759,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "a PR head with no checks this long after its push alerts `ci-missing`",
     ),
     ("load_per_cpu", "spawn refuses HOST_BUSY over this load per CPU"),
+    (
+        "overload_minutes",
+        "load per CPU over `load_per_cpu` this long alerts `host-overloaded` once, with the 5 busiest processes",
+    ),
     (
         "swapout_rate",
         "pages swapped out per 2 s sample that count as swapping",
@@ -826,10 +844,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "acp_start_minutes",
         "an ACP lane with no event back this long after its first turn is a failed start",
-    ),
-    (
-        "rotate_mb",
-        "the event log over this many MB moves old events to monthly archives",
     ),
     (
         "webhook_poll_minutes",
@@ -946,10 +960,6 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
         "drive passes a promise of each kind may stay open before `promise-missed` (default 2)",
     ),
     (
-        "serve_herdr_secs",
-        "serve re-reads herdr's agents in the background this often",
-    ),
-    (
         "serve_shed_secs",
         "serve re-reads shed's lanes in the background this often",
     ),
@@ -968,6 +978,10 @@ pub const LIMIT_DOCS: &[(&str, &str)] = &[
     (
         "serve_handover_secs",
         "`self-update` waits this long for the running serve to hand over before restarting it",
+    ),
+    (
+        "serve_mem_mb",
+        "serve over this much RSS logs `serve-mem-high` once and hands over to a fresh copy of itself",
     ),
     (
         "slo_api_p95_ms",
@@ -1031,10 +1045,12 @@ pub const WEBPUSH_ON: &[&str] = &[
     "thread-msg",
     "blocked",
     "stall",
+    "lane-hog",
     "lane-dead",
     "usage-limit",
     "signed-out",
     "lane-failed-start",
+    "respawn-refused",
     "rev-stale-replaced",
     "ready-unmerged",
     "ci-missing",
@@ -1057,12 +1073,14 @@ pub const WEBPUSH_ON: &[&str] = &[
     "self-update-failed",
     "shed-version",
     "shed-version-ok",
+    "auto-update-failed",
     "host-sync-failed",
     "clean-failed",
     "runners-low",
     "runners-ok",
     "runtime-down",
     "heavy-timeout",
+    "host-overloaded",
 ];
 
 impl Notify {
@@ -1165,7 +1183,7 @@ impl Config {
         if raw.get("limits").and_then(|l| l.get("max_agents")).is_some() {
             eprintln!("drover: [limits].max_agents is no longer used; ignoring it");
         }
-        if c.runtime.kind == RuntimeKind::Berth {
+        if c.runtime.as_ref().is_some_and(|r| r.kind == RuntimeKind::Berth) {
             eprintln!("drover: [runtime] kind = \"berth\" is deprecated, berth is now shed: set kind = \"shed\"");
         }
         let levels = crate::providers::EFFORTS;
@@ -1365,14 +1383,13 @@ impl Config {
     /// #565: the shed runtime fleet `name`'s new lanes start on: its own `[fleet.<n>.runtime]`, else `[runtime]`'s.
     pub fn shed_for(&self, name: &str) -> Option<crate::shed::Shed> {
         let own = self.fleet.get(name).and_then(|f| f.runtime.as_ref());
-        own.map_or_else(|| self.runtime.shed(), Runtime::shed)
+        own.or(self.runtime.as_ref()).map(Runtime::shed)
     }
 
-    /// #565: the shed server lanes are reached on: `[runtime]`'s, else the first fleet runtime's; #637: else shed-acp's defaults when a host runs it.
     pub fn shed(&self) -> Option<crate::shed::Shed> {
-        let first = || self.fleet.values().find_map(|f| f.runtime.as_ref()?.shed());
+        let first = || self.fleet.values().find_map(|f| f.runtime.as_ref());
         let host = || self.hosts.keys().find_map(|h| self.host_acp(h));
-        self.runtime.shed().or_else(first).or_else(host)
+        self.runtime.as_ref().or_else(first).map(Runtime::shed).or_else(host)
     }
 
     /// #637: host `name`'s own `runtime = "shed-acp"`: the shed-acp runtime (shed's defaults), else None.
@@ -1380,20 +1397,18 @@ impl Config {
         self.hosts
             .get(name)
             .filter(|h| h.runtime == Some(RuntimeKind::ShedAcp))?;
-        Runtime {
-            kind: RuntimeKind::ShedAcp,
-            ..Runtime::default()
-        }
-        .shed()
+        Some(
+            Runtime {
+                kind: RuntimeKind::ShedAcp,
+                ..Runtime::default()
+            }
+            .shed(),
+        )
     }
 
     /// #637: the runtime fleet `fleet`'s new lanes start in on host `host`: the host's own, else the fleet's.
     pub fn shed_on(&self, fleet: &str, host: Option<&str>) -> Option<crate::shed::Shed> {
-        match host.and_then(|h| self.hosts.get(h)?.runtime.as_ref()) {
-            Some(RuntimeKind::Herdr) => None,
-            Some(RuntimeKind::ShedAcp) => host.and_then(|h| self.host_acp(h)),
-            _ => self.shed_for(fleet),
-        }
+        host.and_then(|h| self.host_acp(h)).or_else(|| self.shed_for(fleet))
     }
 
     /// The fleet, refused `BAD_PIPELINE` while its pipeline breaks a rule (#173: that fleet stops, the others run).

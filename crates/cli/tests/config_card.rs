@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
-const CARD: &str = "<form class=chc data-id=\"c1\"><button name=act value=apply>apply</button>";
 
 fn setup(name: &str) -> drover::Ctx {
     let c = ctx(
@@ -43,15 +42,22 @@ fn msgs(c: &drover::Ctx, ts: u64, ids: std::ops::Range<u64>) {
     }
 }
 
-fn chat(s: &Server, cookie: &str) -> (String, String) {
-    let h = board_js(&[(&api(s, ADDR, cookie, T + 500, "chat"), "chat.tab(d)")]).remove(0);
-    let at = h.find("<div class=cvp data-t=\"t1\">").unwrap();
-    (h[at..].into(), h[..at].into())
+fn chat(s: &Server, cookie: &str) -> Value {
+    serde_json::from_str(&api(s, ADDR, cookie, T + 500, "chat")).unwrap()
 }
 
-fn page(s: &Server, cookie: &str, q: &str) -> String {
-    let j = api(s, ADDR, cookie, T + 500, &format!("thread/t1?before={q}"));
-    board_js(&[(&j, "chat.page(0, 't1', d, true)")]).remove(0)
+fn thread(chat: &Value) -> Value {
+    let ts = chat["threads"].as_array().unwrap();
+    ts.iter().find(|t| t["id"] == "t1").unwrap().clone()
+}
+
+fn page(s: &Server, cookie: &str, q: &str) -> Value {
+    serde_json::from_str(&api(s, ADDR, cookie, T + 500, &format!("thread/t1?before={q}"))).unwrap()
+}
+
+fn configs(msgs: &Value) -> Vec<Value> {
+    let all = msgs.as_array().unwrap().iter();
+    all.filter(|m| m["kind"] == "config").cloned().collect()
 }
 
 #[test]
@@ -62,43 +68,45 @@ fn a_waiting_card_stays_on_the_first_page_and_a_stale_one_cannot_apply() {
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T + 500);
-    let (view, list) = chat(&s, &cookie);
-    assert_eq!(view.matches(CARD).count(), 1, "{view}");
-    let (marker, card, first) = (
-        view.find("class=\"qs tmo\"").unwrap(),
-        view.find(CARD).unwrap(),
-        view.find(">m10</span>").unwrap(),
+    let all = chat(&s, &cookie);
+    let t = thread(&all);
+    let msgs = &t["page"]["msgs"];
+    assert_eq!(
+        (&msgs[0]["kind"], &msgs[0]["from"], &msgs[0]["open"]),
+        (&json!("config"), &json!("c1"), &json!(true)),
+        "kept first, above the window: {t}"
     );
+    assert_eq!(msgs[1]["text"], "m10", "{t}");
+    assert_eq!(msgs.as_array().unwrap().len(), 31, "the 30 and the card");
+    assert_eq!(t["waiting"], json!(["c1"]), "on the thread's bar: {t}");
+    let repo = all["repos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["repo"] == "sendmeter")
+        .unwrap();
+    assert_eq!(repo["rows"][0]["waiting"], json!(["c1"]), "on its row: {repo}");
+    let older = page(&s, &cookie, &format!("{}&n=30", t["page"]["older"]));
     assert!(
-        marker < card && card < first,
-        "kept right under the marker, above the window: {view}"
+        older.to_string().contains("\"text\":\"m9\"") && configs(&older["msgs"]).is_empty(),
+        "{older}"
     );
-    assert_eq!(view.matches("<details data-n=").count(), 31, "the 30 and the card");
-    assert!(
-        view.contains("<b class=\"a cw\">config c1 waiting</b>"),
-        "on the thread's bar: {view}"
-    );
-    assert!(
-        list.contains("<b class=\"a cw\">config c1 waiting</b>"),
-        "on its row: {list}"
-    );
-    let b = &view[view.find("data-b=").unwrap() + 7..];
-    let older = page(&s, &cookie, &format!("{}&n=30", &b[..b.find('>').unwrap()]));
-    assert!(older.contains(">m9</span>") && !older.contains("class=chc"), "{older}");
 
     let cur = std::fs::read_to_string(&c.config).unwrap();
     std::fs::write(&c.config, cur + "\n# hand edit\n").unwrap();
-    let (view, list) = chat(&s, &cookie);
+    let all = chat(&s, &cookie);
+    let t = thread(&all);
     assert!(
-        !view.contains("class=chc") && !view.contains("waiting") && !list.contains("waiting"),
-        "{view}"
+        configs(&t["page"]["msgs"]).is_empty() && t["waiting"] == json!([]),
+        "{t}"
     );
     let older = page(&s, &cookie, "999999&n=60");
-    assert!(
-        older.contains("<p class=qid>config c1</p>")
-            && older.contains("</pre></div><p class=m>stale: fleet.toml changed since</p></details>")
-            && !older.contains("class=chc"),
-        "{older}"
+    let cards = configs(&older["msgs"]);
+    assert_eq!(cards.len(), 1, "{older}");
+    assert_eq!(
+        (&cards[0]["from"], &cards[0]["open"]),
+        (&json!("c1"), &json!(false)),
+        "stale: {older}"
     );
     let (code, out) = run(&c, &Fake::default(), &["config", "apply", "c1"]);
     assert!(code == 3 && out.contains("REFUSED STALE"), "{code} {out}");
@@ -106,7 +114,7 @@ fn a_waiting_card_stays_on_the_first_page_and_a_stale_one_cannot_apply() {
 }
 
 fn drain(s: &mut TcpStream, ms: u64) -> String {
-    let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], [0u8; 65_536]);
+    let (end, mut out, mut b) = (Instant::now() + Duration::from_millis(ms), vec![], vec![0u8; 65_536]);
     while Instant::now() < end {
         match s.read(&mut b) {
             Ok(0) => break,
@@ -173,71 +181,6 @@ fn a_proposal_reaches_a_thread_open_on_the_phone_live() {
         .find(|r| r["repo"] == "sendmeter")
         .unwrap();
     assert_eq!(repo["rows"][0]["waiting"], json!(["c1"]), "{repo}");
-}
-
-fn webkit(url: &str, cookie: &str, js: &str, wait: &str, png: &std::path::Path) -> Vec<f64> {
-    let o = webview()
-        .env("DROVER_WAIT", wait)
-        .env("DROVER_COOKIE", cookie.trim().trim_start_matches("Cookie: "))
-        .args([url, "390", "chat", "scene", png.to_str().unwrap(), js])
-        .output()
-        .unwrap();
-    let out = String::from_utf8_lossy(&o.stdout);
-    assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
-    out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect()
-}
-
-#[test]
-fn the_card_lands_live_in_view_and_stays_reachable_in_webkit() {
-    if no_webkit() {
-        return;
-    }
-    let shots = std::env::var("DROVER_SNAPSHOTS").map_or_else(|_| tmpdir("cfg-png"), std::path::PathBuf::from);
-    let now = drover::now();
-    let c = setup("cfg-webkit");
-    let cookie = pair(&Server::new(&c, &Fake::default(), Some(ADDR.into())), &c, "Safari", now);
-    let (addr, _sh) = serve(&c);
-    let url = format!("http://{addr}/");
-    let c2 = c.clone();
-    let later = std::thread::spawn(move || {
-        let w = c2.state.with_file_name("watch-t1.at");
-        while !w.exists() {
-            std::thread::sleep(Duration::from_millis(50));
-        }
-        std::thread::sleep(Duration::from_millis(1_000));
-        propose(&c2);
-        std::thread::sleep(Duration::from_millis(1_500));
-        msgs(&c2, now, 0..40);
-    });
-    let js = "chatOpen('t1'); const cards = () => $$('#chat .cvp[data-t=\"t1\"] .chc[data-id=\"c1\"]'), late = window.late = []; \
-        const seen = e => { const r = e.closest('.blk').getBoundingClientRect(); return +(r.top >= 0 && r.bottom <= innerHeight); }; \
-        const until = f => new Promise(r => (function go() { f() ? r() : setTimeout(go, 50); })()); \
-        (async () => { await until(() => cards().length); await new Promise(r => setTimeout(r, 300)); late.push(seen(cards()[0]), $$('#chat .cw').length); \
-          await until(() => $('#chat .cvp[data-t=\"t1\"] .tc').textContent.includes('m39')); await new Promise(r => setTimeout(r, 300)); \
-          late.push(cards().length, seen(cards()[0])); $('#chat .cvp[data-t=\"t1\"] .th .cw').click(); await new Promise(r => setTimeout(r, 300)); \
-          late.push(seen(cards()[0]), errs.length); })()";
-    let m = webkit(&url, &cookie, js, "12", &shots.join("config-live.png"));
-    later.join().unwrap();
-    assert_eq!(
-        m,
-        [1., 2., 1., 0., 1., 0.],
-        "arrived in view, markers, count, after the burst in view, after the tap, errors"
-    );
-
-    let js = "chatOpen(''); setTimeout(() => { window.late = [$$('#chat .tr[data-t=\"t1\"] .cw').length]; }, 1000)";
-    assert_eq!(
-        webkit(&url, &cookie, js, "1.5", &shots.join("config-waiting.png")),
-        [1.]
-    );
-
-    let cur = std::fs::read_to_string(&c.config).unwrap();
-    std::fs::write(&c.config, cur + "\n# hand edit\n").unwrap();
-    let js = "chatOpen('t1'); setTimeout(() => $('#chat .cvp[data-t=\"t1\"] .tmo').click(), 800); setTimeout(() => { const s = [...$$('#chat .cvp[data-t=\"t1\"] .tc p.m')].find(p => p.textContent.startsWith('stale')); \
-        s && s.closest('.blk').scrollIntoView({ block: 'center' }); window.late = [+!!s, $$('#chat .chc').length]; }, 1800)";
-    assert_eq!(
-        webkit(&url, &cookie, js, "2.5", &shots.join("config-stale.png")),
-        [1., 0.]
-    );
 }
 
 #[test]

@@ -3,6 +3,7 @@ use common::*;
 use drover::events::{fold, read, Event};
 use drover::runner::{Out, Real, Runner};
 use drover::serve::Server;
+use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -90,7 +91,7 @@ fn a_marked_issue_gets_design_until_approved_and_an_unmarked_one_goes_straight_t
     assert_eq!((state(&c, 12).as_str(), state(&c, 13).as_str()), ("design", "impl"));
     let out = drive(&c, &r);
     assert!(
-        out.contains(&format!("sendmeter #12 design-review: {:.7}", HEAD)),
+        out.contains(&format!("sendmeter #12 design-review: {HEAD:.7}")),
         "{out}"
     );
     assert_eq!(state(&c, 12), "design-review");
@@ -142,7 +143,7 @@ fn a_design_lane_whose_only_untracked_file_is_its_claude_local_md_hands_off() {
     assert_eq!(state(&c, 12), "design");
     let out = drive(&c, &r);
     assert!(
-        out.contains(&format!("sendmeter #12 design-review: {:.7}", HEAD)),
+        out.contains(&format!("sendmeter #12 design-review: {HEAD:.7}")),
         "{out}"
     );
     assert_eq!(
@@ -159,9 +160,20 @@ fn post(s: &Server, path: &str, body: &str, cookie: &str, now: u64) -> String {
     String::from_utf8_lossy(&s.respond(&r, now)).into_owned()
 }
 
-fn needs_and_chat(s: &Server, cookie: &str, now: u64) -> (String, String) {
-    let [needs, _, chat] = parts(s, ADDR, cookie, now);
-    (needs, chat)
+fn needs_and_ask(s: &Server, cookie: &str, now: u64) -> (Value, Value) {
+    let needs: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "needs")).unwrap();
+    let chat: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "chat")).unwrap();
+    let msgs: Vec<Value> = chat["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|t| t["page"]["msgs"].as_array().unwrap().clone())
+        .collect();
+    let ask = msgs
+        .into_iter()
+        .rfind(|m| m["ask"]["id"] == "q1")
+        .unwrap_or_else(|| panic!("no q1 in {chat}"));
+    (needs, ask)
 }
 
 #[test]
@@ -190,12 +202,13 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     drive(&c, &r);
     let ask = &kinds(&c, "needs-decision")[0];
     assert_eq!((ask.issue, ask.str("thread")), (Some(12), Some("t1")));
-    let (needs, chat) = needs_and_chat(&s, &cookie, c.now + 5);
+    let (needs, ask) = needs_and_ask(&s, &cookie, c.now + 5);
+    let card = &needs["asks"][0];
     assert!(
-        needs.contains("<details class=ask>") && needs.contains("<img src=\"design/sendmeter/12/0/q1\""),
+        card["ask"]["id"] == "q1" && card["ask"]["issue"] == 12 && card["pngs"][0] == "docs/design/meter/1440.png",
         "{needs}"
     );
-    assert!(chat.contains("data-id=\"q1\""), "{chat}");
+    assert_eq!(ask["open"], true, "{ask}");
     let res = String::from_utf8_lossy(&s.respond(
         &format!("GET /design/sendmeter/12/0 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"),
         c.now,
@@ -205,8 +218,7 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
         res.starts_with("HTTP/1.1 200") && res.ends_with("\u{fffd}PNG wide"),
         "{res}"
     );
-    let i = needs.find("name=mtime value=").unwrap() + 17;
-    let mt: String = needs[i..].chars().take_while(char::is_ascii_digit).collect();
+    let mt = needs["mtime"].as_str().unwrap().to_string();
     let res = post(
         &s,
         "/",
@@ -216,12 +228,13 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     );
     assert!(res.starts_with("HTTP/1.1 303"), "{res}");
     assert_eq!(kinds(&c, "design-approved")[0].str("by"), Some("owner"));
-    let (needs, chat) = needs_and_chat(&s, &cookie, c.now + 15);
-    assert!(
-        !needs.contains("<details class=ask>") && !chat.contains("data-id=\"q1\""),
-        "{needs}"
+    let (needs, ask) = needs_and_ask(&s, &cookie, c.now + 15);
+    assert_eq!(needs["asks"], json!([]), "{needs}");
+    assert_eq!(
+        (&ask["open"], &ask["answer"]["choice"]),
+        (&json!(false), &json!("approve")),
+        "{ask}"
     );
-    assert!(chat.contains("✓ 1. approve"), "{chat}");
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "reject"]);
     assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
     std::fs::create_dir_all(wt(&c, 13)).unwrap();
@@ -850,8 +863,7 @@ fn an_architect_ask_quotes_the_summary_and_links_the_adr_folder_at_the_sha_and_a
     drive(&c, &r);
     let link = tree(&head, "docs/architecture/meter");
     let q = format!(
-        "{sum}\n\n{link}\n\nArchitecture (ADR) for #12 is ready ({:.7}): approve, revise (type a note) or reject?",
-        head
+        "{sum}\n\n{link}\n\nArchitecture (ADR) for #12 is ready ({head:.7}): approve, revise (type a note) or reject?"
     );
     let ask = &kinds(&c, "needs-decision")[0];
     assert_eq!(ask.str("question"), Some(q.as_str()));
@@ -952,9 +964,9 @@ fn a_long_summary_is_cut_at_a_line_end_near_600_characters() {
 }
 
 #[test]
-fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_raises_no_ask_but_a_card() {
+fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_raises_no_ask_and_is_respawned() {
     let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    let (c, w, r, _sh) = staged("architect-error", "--architect");
+    let (mut c, w, r, sh) = staged("architect-error", "--architect");
     let local = w.parent().unwrap().parent().unwrap().parent().unwrap().join("local");
     let routines = local.join("docs/architecture/routines");
     std::fs::create_dir_all(&routines).unwrap();
@@ -964,13 +976,15 @@ fn an_architect_lane_that_errors_with_no_commit_over_an_unrelated_adr_folder_rai
     git(&local, &["push", "-q", "origin", "HEAD:staging"]);
     git(&w, &["reset", "-q", "--hard", "origin/staging"]);
     let agent = kinds(&c, "spawn")[0].str("agent").unwrap().to_string();
-    let d = serde_json::json!({"agent": agent, "state": "error", "note": "no response"});
-    drover::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "lane-state", d)).unwrap();
+    sh.set(&agent, |t| {
+        t["reported"] = serde_json::json!({"state": "error", "note": "no response"});
+    });
+    c.now += 300;
     drive(&c, &r);
     assert!(kinds(&c, "design-review").is_empty() && kinds(&c, "needs-decision").is_empty());
-    let card = &kinds(&c, "needs-human")[0];
-    assert!(card.str("reason").unwrap().contains("no response"), "{card:?}");
-    assert_eq!(state(&c, 12), "needs-human");
+    let respawn = &kinds(&c, "respawn")[0];
+    assert_eq!(respawn.str("why"), Some("lane error (no response)"), "{respawn:?}");
+    assert_eq!((spawned(&c, "architect"), state(&c, 12).as_str()), (2, "design"));
 }
 
 #[test]
@@ -1026,4 +1040,99 @@ fn a_hotspots_issues_architect_brief_carries_the_hot_files_playbook_and_profiles
     let base = fake(&c, HEAD);
     drive(&c, &Both(adr(&c, HEAD), &base));
     assert!(!brief(&c).contains("This is a hotspots issue"), "{}", brief(&c));
+}
+
+fn beacon(c: &drover::Ctx, sh: &FakeShed, role: &str) -> String {
+    let agent = kinds(c, "spawn").last().unwrap().str("agent").unwrap().to_string();
+    let labels = serde_json::json!({"fleet": "sendmeter", "issue": "12", "role": role});
+    let ev = |seq: u64, state: &str, note: Option<&str>| serde_json::json!({"seq": seq, "name": agent, "labels": labels, "event": "state", "state": state, "note": note});
+    sh.lock()
+        .events
+        .extend([ev(1, "error", Some("no response")), ev(2, "hibernated", None)]);
+    sh.set(&agent, |t| t["reported"] = serde_json::json!({"state": "hibernated"}));
+    agent
+}
+
+fn lane_states(c: &drover::Ctx, agent: &str) -> Vec<(String, Option<String>)> {
+    let mine = kinds(c, "lane-state")
+        .into_iter()
+        .filter(|e| e.str("agent") == Some(agent));
+    mine.map(|e| (e.str("state").unwrap().to_string(), e.str("note").map(String::from)))
+        .collect()
+}
+
+#[test]
+fn a_design_stage_lane_that_errors_then_hibernates_without_a_push_is_respawned_by_drive() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    for (flag, role) in [("--architect", "architect"), ("--design", "design")] {
+        let (mut c, _w, r, sh) = staged(&format!("{role}-beacon"), flag);
+        assert_eq!(spawned(&c, role), 1, "{role}");
+        let agent = beacon(&c, &sh, role);
+        c.now += 300;
+        let (code, w) = run(&c, &r, &["waiting", "sendmeter"]);
+        assert_eq!(code, 0, "{w}");
+        assert!(w.contains(&format!("no push: respawning {role}")), "{w}");
+        assert!(
+            w.contains(&format!("drover spawn sendmeter 12 {role} --supersede")),
+            "{w}"
+        );
+        assert!(!w.contains("check the pane"), "{w}");
+        drive(&c, &r);
+        let states = lane_states(&c, &agent);
+        assert!(
+            states.contains(&("error".into(), Some("no response".into())))
+                && states.iter().any(|s| s.0 == "hibernated"),
+            "{role}: {states:?}"
+        );
+        assert_eq!(spawned(&c, role), 2, "{role}: drive respawned it");
+        assert_eq!(kinds(&c, "respawn")[0].str("role"), Some(role), "{role}");
+        assert!(kinds(&c, "needs-human").is_empty(), "{role}");
+    }
+}
+
+#[test]
+fn a_refused_design_stage_respawn_is_one_owner_ask_and_one_check_alert() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut c, _w, r, sh) = staged("architect-loop", "--architect");
+    let toml = std::fs::read_to_string(&c.config).unwrap();
+    std::fs::write(&c.config, toml.replacen("[limits]\n", "[limits]\nrespawn_max = 1\n", 1)).unwrap();
+    let agent = beacon(&c, &sh, "architect");
+    let d = serde_json::json!({"key": format!("sendmeter:12:{agent}"), "reason": "gone"});
+    drover::events::append(&c.state, &Event::new(c.now, "sendmeter", Some(12), "lane-dead", d)).unwrap();
+    c.now += 300;
+    let loops = |c: &drover::Ctx| {
+        let asks = kinds(c, "needs-decision");
+        asks.iter()
+            .filter(|e| e.str("respawn_loop") == Some("architect"))
+            .count()
+    };
+    let alerts = |c: &drover::Ctx| kinds(c, "respawn-refused").len();
+    drive(&c, &r);
+    assert_eq!(spawned(&c, "architect"), 1, "RESPAWN_LOOP refused it");
+    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!((loops(&c), alerts(&c)), (1, 1), "{out}");
+    assert!(alerts(&c) == 1 && out.contains("RESPAWN_LOOP"), "{out}");
+    c.now += 300;
+    drive(&c, &r);
+    assert_eq!(run(&c, &r, &["check"]).0, 0);
+    assert_eq!((loops(&c), alerts(&c), spawned(&c, "architect")), (1, 1, 1));
+}
+
+#[test]
+fn a_design_lane_that_pushed_its_artifact_and_asked_is_not_respawned() {
+    let _one = ONE.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut c, w, r, sh) = staged("architect-asked", "--architect");
+    push(&w, &[("docs/architecture/meter/adr.md", "# ADR\n")]);
+    drive(&c, &r);
+    assert_eq!(
+        (state(&c, 12).as_str(), kinds(&c, "needs-decision").len()),
+        ("design-review", 1)
+    );
+    beacon(&c, &sh, "architect");
+    c.now += 300;
+    drive(&c, &r);
+    let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
+    assert_eq!(spawned(&c, "architect"), 1, "{w}");
+    assert!(kinds(&c, "respawn").is_empty() && !w.contains("respawning"), "{w}");
 }
