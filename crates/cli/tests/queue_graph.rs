@@ -191,3 +191,119 @@ fn the_graph_and_its_legend_pass_the_audit_at_390px() {
         assert!(v[2] > 0.0 || name == "ui-queue-legend", "{name}: no controls audited");
     }
 }
+
+const HOT: [&str; 5] = [
+    "assets/serve.js",
+    "crates/core/src/drive.rs",
+    "crates/core/src/queue.rs",
+    "crates/server/src/screens.rs",
+    "crates/server/src/serve.rs",
+];
+
+fn hot_fixture() -> drover::Ctx {
+    let c = ctx(&tmpdir("queue-hot"), &config("serial_label = \"db\""));
+    let ok = |args: &[&str]| assert_eq!(run(&c, &Fake::default(), args).0, 0, "{args:?}");
+    ok(&["queue", "acme", "add", "--serial", "9"]);
+    ok(&["queue", "acme", "add", "10"]);
+    let ev = |n, kind, d| append(&c.state, &Event::new(900_000, "acme", n, kind, d)).unwrap();
+    ev(None, "hot-files", json!({ "files": HOT }));
+    for p in HOT {
+        ev(
+            Some(9),
+            "serial-joined",
+            json!({"group": format!("hot {p}"), "by": "diff"}),
+        );
+    }
+    c
+}
+
+#[test]
+fn a_row_holding_five_hot_files_has_one_hot_chip_and_its_paths_folded() {
+    let (c, r) = (hot_fixture(), Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let page = req(&s, "/", "");
+    let at = page.find("data-i=9>").unwrap();
+    let tag = &page[page[..at].rfind("<details").unwrap()..at];
+    assert!(tag.contains(" data-s=\"db\" "), "{tag}");
+    assert!(tag.contains(&format!(" data-h=\"{}\" ", HOT.join(" | "))), "{tag}");
+    let get = |p: &str| {
+        let res =
+            String::from_utf8_lossy(&s.respond(&format!("GET {p} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T)).into_owned();
+        let (head, body) = res.split_once("\r\n\r\n").unwrap();
+        assert!(head.starts_with("HTTP/1.1 200"), "{res}");
+        serde_json::from_str::<serde_json::Value>(body).unwrap()
+    };
+    let q = get("/screens/queue");
+    let text = q.to_string();
+    assert_eq!(text.matches("🔒 hot ×5").count(), 1, "{text}");
+    assert!(HOT.iter().all(|p| !text.contains(p)), "{text}");
+    let list = q["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|b| b["id"] == "fleet-acme")
+        .unwrap();
+    let queued = list["blocks"][1]["blocks"][0]["rows"].as_array().unwrap();
+    let ids: Vec<&str> = queued.iter().map(|r| r["id"].as_str().unwrap()).collect();
+    assert_eq!(ids, ["q-acme-9", "hot-acme-9", "q-acme-10"]);
+    assert_eq!(queued[1]["title"], "🔒 hot ×5");
+    let sheet = get(queued[1]["tap"]["sheet"].as_str().unwrap());
+    let paths: Vec<&str> = sheet["blocks"][0]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["title"].as_str().unwrap())
+        .collect();
+    assert_eq!(sheet["type"], "sheet");
+    assert_eq!(paths, HOT);
+}
+
+#[test]
+fn the_hot_chip_opens_its_paths_under_the_row_and_folds_them_at_390px() {
+    if no_webkit() {
+        return;
+    }
+    let (c, r) = (hot_fixture(), Fake::default());
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let page = req(&s, "/", &pair(&s, &c, "Mozilla/5.0 (iPhone)", T));
+    let d = tmpdir("queue-hot-png");
+    let file = d.join("page.html");
+    let html = &page[page.find("<!doctype").unwrap()..page.find("<script type=module").unwrap()];
+    std::fs::write(&file, format!("{html}</body></html>\n")).unwrap();
+    let paths = HOT.join(" ");
+    let js = format!(
+        "document.querySelectorAll('#queue details').forEach(d => {{ d.open = false; }}); \
+         const row = n => [...document.querySelectorAll('#queue details.q')].find(d => d.querySelector('summary>span').textContent === '#' + n); \
+         const r9 = row(9), r10 = row(10), h = d => d.querySelector('summary').getBoundingClientRect().height; \
+         const tags = [...r9.querySelectorAll('summary .tag')].filter(t => t.offsetParent).map(t => t.textContent).join('|'); \
+         if (tags !== '🔒db|🔒 hot ×5') throw new Error('tags: ' + tags); \
+         if (h(r9) > h(r10) + 1) throw new Error('not one line: ' + h(r9) + ' ' + h(r10)); \
+         const chip = [...r9.querySelectorAll('summary .tag')].find(t => t.textContent === '🔒 hot ×5'); \
+         const shown = () => [...r9.querySelectorAll('summary .tag')].filter(t => t.offsetParent && !t.textContent.startsWith('🔒')).map(t => t.textContent).join(' '); \
+         if (shown()) throw new Error('paths before tap: ' + shown()); \
+         chip.click(); \
+         if (shown() !== '{paths}' || r9.open) throw new Error('after tap: ' + shown() + ' open=' + r9.open); \
+         if (r9.querySelector('summary').getBoundingClientRect().right > 390) throw new Error('wider than 390'); \
+         chip.click(); \
+         if (shown() || r9.open) throw new Error('after second tap: ' + shown()); \
+         window.measure = [1]"
+    );
+    let o = webview()
+        .env("DROVER_TAB", "queue")
+        .args([
+            file.to_str().unwrap(),
+            "390",
+            "queue",
+            "horse",
+            d.join("hot.png").to_str().unwrap(),
+            &js,
+        ])
+        .output()
+        .unwrap();
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(
+        o.status.success() && out.split_whitespace().count() == 3,
+        "{out} {}",
+        String::from_utf8_lossy(&o.stderr)
+    );
+}

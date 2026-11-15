@@ -7,13 +7,13 @@ use crate::api::{
     QueueCard, QueueLane, QueueRow, QueueTab, RoleRow, Row, Stage, Sub,
 };
 use crate::config::{Config, Limits, Role};
-use crate::events::{age, append, shared, Event, IssueState, States};
+use crate::events::{age, append, working, Event, IssueState, States};
 use crate::gate::{gate, refused, Refusal};
 use crate::handover::Handover;
 use crate::host::{self, Host};
 use crate::runner::{Out, Runner};
 use crate::snapshot::Snapshot;
-use crate::{devices, gh, herdr, lanes, queue, Ctx};
+use crate::{devices, gh, lanes, queue, term, Ctx};
 use anyhow::{bail, Context, Result};
 use serde_json::json;
 use std::cell::OnceCell;
@@ -305,7 +305,7 @@ impl Runner for Memo<'_> {
         let (key, cache) = (crate::snapshot::key(prog, args), || lock(self.1));
         match self.4.reads.get(&key) {
             Some(v) => return Ok(crate::snapshot::out(v.clone())),
-            None if self.4.ts > 0 && crate::snapshot::remote(prog, args) => return Ok(crate::snapshot::out(None)),
+            None if self.4.ts > 0 && crate::snapshot::remote(prog) => return Ok(crate::snapshot::out(None)),
             None if self.0.defer && crate::runner::in_request() => return self.0.run(prog, args),
             None => {}
         }
@@ -326,6 +326,10 @@ impl Runner for Memo<'_> {
     fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<Out> {
         if input.is_empty() {
             return self.run(prog, args);
+        }
+        if self.4.ts > 0 && crate::snapshot::remote(prog) {
+            let read = self.4.reads.get(&crate::snapshot::key_in(prog, args, input));
+            return Ok(crate::snapshot::out(read.cloned().flatten()));
         }
         self.0.run_in(prog, args, input)
     }
@@ -356,11 +360,10 @@ fn seen(q: &str, opts: &[String]) -> u64 {
     hash(&(lanes::mask(q), opts.iter().map(|o| lanes::mask(o)).collect::<Vec<_>>()))
 }
 
-/// The watcher's last look: the log's (size, mtime), the `herdr agent list` read (secs, hash), last render, per-(paired, fragment) hashes.
 #[derive(Default)]
 struct Watch {
     log: Option<(u64, Option<std::time::SystemTime>)>,
-    herdr: (u64, u64),
+    agents: (u64, u64),
     rendered: u64,
     /// The last `herd` push: (time, hash of the body).
     herd: (u64, u64),
@@ -757,14 +760,11 @@ fn view(ctx: &Ctx, l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> View {
     (title, tone, shown, ago(ctx.now, l.since))
 }
 
-/// The lane's wait reason while herdr shows it idle, done or unknown.
 fn wait_of(l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> Option<crate::waiting::Waiting> {
     let w = waits.iter().find(|w| w.lane == l.name).cloned();
     w.filter(|_| matches!(l.state.as_str(), "idle" | "done" | "unknown" | "parked"))
 }
 
-/// #241: the theme action (docs/themes.md) a lane, issue or event shows: its role (`impl`, `fix`, `rev`, `update`)
-/// while it works, else `idle`, `done` or `blocked`. `state` is a lane's (herdr) or an issue's (the log).
 pub fn act(role: &str, state: &str) -> &'static str {
     let busy = |r: &str| match r {
         "fix" => "fix",
@@ -912,7 +912,7 @@ impl<'a> Server<'a> {
             let since = header(&req, "last-event-id").or(q.get("since").map(String::as_str));
             let mut top = 0;
             if let Some(n) = since.and_then(|n| n.parse::<u64>().ok()) {
-                let ev = shared(&self.ctx.state).unwrap_or_default();
+                let ev = working(&self.ctx.state).unwrap_or_default();
                 top = ev.last().map_or(n, |e| e.seq);
                 let after: Vec<_> = ev.iter().filter(|e| e.seq > n).collect();
                 msg += &match after.last() {
@@ -995,7 +995,7 @@ impl<'a> Server<'a> {
         }
         let driving = crate::drive::running(self.ctx, "");
         if log != w.log {
-            let ev = shared(&self.ctx.state).unwrap_or_default();
+            let ev = working(&self.ctx.state).unwrap_or_default();
             let top = ev.last().map_or(0, |e| e.seq);
             for e in ev.iter().filter(|e| e.seq > w.seen.unwrap_or(top)) {
                 lock(&self.clients).retain(|c| c.0.send(sse(e)).is_ok());
@@ -1004,16 +1004,15 @@ impl<'a> Server<'a> {
         }
         let mut changed = kicked || log != w.log || driving != w.driving || now >= w.rendered + 15;
         (w.log, w.driving) = (log, driving);
-        // #337: a new snapshot is the change to show; none saved, herdr's agent list every 2 s as before.
         let at = self.snapshot().0;
         if at.is_some() {
-            changed |= hash(&at) != w.herdr.1;
-            w.herdr = (now, hash(&at));
-        } else if now >= w.herdr.0 + 2 {
-            let out = herdr::agent_list(&self.r);
-            changed |= hash(&out) != w.herdr.1;
-            w.herdr = (now, hash(&out));
-            lock(&self.cache).insert("herdr agent list".into(), (now, out));
+            changed |= hash(&at) != w.agents.1;
+            w.agents = (now, hash(&at));
+        } else if now >= w.agents.0 + 2 {
+            let out = term::agent_list(&self.r);
+            changed |= hash(&out) != w.agents.1;
+            w.agents = (now, hash(&out));
+            lock(&self.cache).insert("agent list".into(), (now, out));
         }
         // #37: Herd's data rides the same stream, re-read every 10 s (host weather) while anyone listens;
         // like a frag, pushed only on a change (the page reads `/herd.json` when Herd opens).
@@ -1029,9 +1028,8 @@ impl<'a> Server<'a> {
             }
             w.herd = (now, hash(&j));
         }
-        // #407: a turn that ended (the log or herdr changed) gets its thread's queued messages.
         let agents = (changed && self.addr.is_some())
-            .then(|| self.herdr_json(now, "agent"))
+            .then(|| self.agents_json(now))
             .flatten();
         for job in agents
             .and_then(|j| j["result"]["agents"].as_array().map(|a| chat::flush(at, a)))
@@ -1079,7 +1077,7 @@ impl<'a> Server<'a> {
 
     /// Forget cached pane reads: the next render reads each pane afresh.
     fn purge(&self) {
-        lock(&self.cache).retain(|k, _| !k.starts_with("herdr pane read"));
+        lock(&self.cache).retain(|k, _| !k.starts_with("pane read"));
     }
 
     /// The runner whose reads that ran OK within the last `ttl` seconds come from the cache (else run now).
@@ -1208,7 +1206,7 @@ impl<'a> Server<'a> {
             ("GET", p) if p.starts_with("/thread/") => {
                 let (t, name) = p[8..].split_once('/').unwrap_or_default();
                 let name = form(&format!("n={name}")).remove("n").unwrap_or_default();
-                let at = shared(&ctx.state).ok().and_then(|ev| chat::file(ctx, &ev, t, &name, false));
+                let at = working(&ctx.state).ok().and_then(|ev| chat::file(ctx, &ev, t, &name, false));
                 disk_file(at, ctype(&name), "no such file in the thread\n")
             }
             // #412: a PNG of the design waiting for the owner's decision.
@@ -1218,7 +1216,7 @@ impl<'a> Server<'a> {
                 let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
                 let n = n.parse().unwrap_or(0);
                 let ask = |e: &Event| crate::design::is_ask(e) && e.fleet == f && e.issue == Some(n) && q.is_none_or(|q| e.str("id") == Some(q));
-                let ev = shared(&ctx.state).unwrap_or_default();
+                let ev = crate::events::since(&ctx.state, &["needs-decision", "design-review"], 0).unwrap_or_default();
                 let k = ev.iter().rposition(ask);
                 let at = k.and_then(|k| chat::files_of(&ev[k]).nth(i.parse().ok()?)?["path"].as_str().map(String::from));
                 let sha = k.filter(|_| q.is_some()).and_then(|k| ev[..k].iter().rfind(|e| e.is("design-review", &f, n))?.str("sha"));
@@ -1229,7 +1227,7 @@ impl<'a> Server<'a> {
                 let mut it = p[6..].splitn(4, '/');
                 let (f, n, i, sha) = (it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().unwrap_or_default(), it.next().filter(|s| !s.is_empty()));
                 let f = form(&format!("f={f}")).remove("f").unwrap_or_default();
-                let ev = shared(&ctx.state).unwrap_or_default();
+                let ev = crate::events::since(&ctx.state, &["spawn", "verdict"], 0).unwrap_or_default();
                 let shots = n.parse().map(|n| crate::verify::served(&ev, (f.as_str(), n), sha)).unwrap_or_default();
                 let at = i.parse().ok().and_then(|i: usize| shots.into_iter().nth(i));
                 self.round_file(sha, at.map(|(_, p)| p.display().to_string()), "no such screenshot\n")
@@ -1394,10 +1392,10 @@ impl<'a> Server<'a> {
 
     /// The live fleet lane `agent` with its fleet and pane; refused PAUSED when its fleet is.
     fn lane(&self, ctx: &Ctx, agent: &str) -> Result<(lanes::Lane, String, String)> {
-        let (cfg, events) = (Config::kept(ctx)?, shared(&ctx.state)?);
+        let (cfg, events) = (Config::kept(ctx)?, working(&ctx.state)?);
         let all = self
             .lanes(ctx.now, &cfg, &events, &events.states)
-            .context("herdr agent list failed")?;
+            .context("the agent list failed")?;
         let l = all
             .into_iter()
             .find(|l| l.name == agent)
@@ -1418,7 +1416,7 @@ impl<'a> Server<'a> {
         let (agent, choice) = (f.agent.as_str(), f.choice.as_str());
         let (l, fleet, pane) = self.lane(ctx, agent)?;
         let on = l.on(&self.r);
-        let screen = || herdr::read(&on, &pane);
+        let screen = || term::read(&on, &pane);
         let h = crate::providers::get(&l.harness);
         let menu = h.pending_menu(&screen()?);
         let Some((q, opts)) = menu.filter(|p| !p.1.is_empty()) else {
@@ -1440,7 +1438,7 @@ impl<'a> Server<'a> {
         if f.h != seen(&q, &opts).to_string() {
             return refused("STALE", "menu changed — refreshed");
         }
-        herdr::keys(&on, &pane, &h.answer_keys(choice.parse()?))?;
+        term::keys(&on, &pane, &h.answer_keys(choice.parse()?))?;
         let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "choice": choice});
         append(&ctx.state, &Event::new(ctx.now, &fleet, l.issue, "answer", d))?;
         // #337: a board tap is a kick: the snapshot is looked at again at once.
@@ -1455,7 +1453,6 @@ impl<'a> Server<'a> {
         })
     }
 
-    /// `herdr agent prompt` (dsh: `pane send-text`) + Enter; logs a `prompt` event without the text.
     fn prompt(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Send) -> Result<String> {
         let (agent, text) = (f.agent.as_str(), f.text.as_str());
         let (l, fleet, pane) = self.lane(ctx, agent)?;
@@ -1470,7 +1467,7 @@ impl<'a> Server<'a> {
         if text.chars().any(|c| (c < ' ' && c != '\n') || c == '\x7f') {
             return refused("BAD_VALUE", "a message has no control characters (newlines are fine)");
         }
-        herdr::reply(&l.on(&self.r), l.harness == "dsh", agent, pane, text)?;
+        term::reply(&l.on(&self.r), l.harness == "dsh", agent, pane, text)?;
         let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "chars": n});
         append(&ctx.state, &Event::new(ctx.now, fleet, l.issue, "prompt", d))?;
         if let Some(n) = l.issue {
@@ -1483,7 +1480,7 @@ impl<'a> Server<'a> {
     fn act(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Act) -> Result<String> {
         let (mut out, cfg) = (vec![], Config::kept(ctx)?);
         let (agent, yes, op) = (f.agent.as_str(), f.confirm == "1", f.op.as_str());
-        let sp = crate::events::last_spawn(&shared(&ctx.state)?, agent).map(|e| (e.fleet.clone(), e.issue));
+        let sp = crate::events::last_spawn(&working(&ctx.state)?, agent).map(|e| (e.fleet.clone(), e.issue));
         let Some((fleet, issue)) = sp.or_else(|| (op == "close").then(|| (String::new(), None))) else {
             return refused("NO_SUCH_AGENT", format!("no lane `{agent}` in the log"));
         };
@@ -1517,7 +1514,7 @@ impl<'a> Server<'a> {
         }
         let n = |k: &str, d: usize| q.get(k).and_then(|v| v.parse().ok()).unwrap_or(d);
         let (lines, before) = (n("lines", 200).min(200), n("before", 0));
-        let (cfg, events) = (Config::kept(ctx).ok()?, shared(&ctx.state).ok()?);
+        let (cfg, events) = (Config::kept(ctx).ok()?, working(&ctx.state).ok()?);
         let agent = q.get("agent")?;
         let ls = self.lanes(ctx.now, &cfg, &events, &events.states)?;
         let file = lanes::log(&ctx.state, agent).filter(|_| self.export.is_none());
@@ -1537,7 +1534,7 @@ impl<'a> Server<'a> {
         };
         // #337: a lane's chat always reads its pane live (5 s cache), never from the snapshot.
         let live = Memo(&self.r, &self.cache, ctx.now, 5, Arc::default());
-        let screen = herdr::recent(&l.on(&live), l.pane.as_deref()?, "200").ok()?;
+        let screen = term::recent(&l.on(&live), l.pane.as_deref()?, "200").ok()?;
         let body = lanes::body(&screen);
         let (all, live) = file.map_or((body.clone(), body.len()), |f| lanes::roll(&f, &body));
         let end = all.len().saturating_sub(before);
@@ -1639,7 +1636,7 @@ impl<'a> Server<'a> {
                     choice,
                     ("owner", Some("web")),
                 )?;
-                drop(shared(&ctx.state));
+                drop(working(&ctx.state));
                 format!("answered {}", g("id"))
             }
             "drive" => {
@@ -1675,7 +1672,7 @@ impl<'a> Server<'a> {
             }
             "reap" => {
                 let cfg = Config::kept(ctx)?;
-                let n = crate::check::leftovers(ctx, &cfg, &self.r, &herdr::agents(&self.r)?, true)?.len();
+                let n = crate::check::leftovers(ctx, &cfg, &self.r, &term::agents(&self.r)?, true)?.len();
                 format!("reaped {n} leftover process(es)")
             }
             "host" => {
@@ -1823,7 +1820,7 @@ impl<'a> Server<'a> {
     /// tab (web/src/needs.ts draws them): the open asks (options recommended first, a free-text box), each blocked
     /// lane's pending prompt, then the `needs-human` issues.
     fn needs_tab(&self, ctx: &Ctx, paired: bool) -> NeedsTab {
-        let events = shared(&ctx.state).unwrap_or_default();
+        let events = working(&ctx.state).unwrap_or_default();
         let (cfg, st) = (Config::kept(ctx).ok(), events.states.clone());
         let (cfg, ev, st) = (cfg.as_ref(), &events, &st);
         let all = cfg.and_then(|c| self.lanes(ctx.now, c, ev, st)).unwrap_or_default();
@@ -1908,7 +1905,7 @@ impl<'a> Server<'a> {
         let screen = l
             .pane
             .as_ref()
-            .and_then(|p| herdr::read(&l.on(&self.cached(ctx.now, 2)), p).ok())
+            .and_then(|p| term::read(&l.on(&self.cached(ctx.now, 2)), p).ok())
             .unwrap_or_default();
         let rw = self.addr.is_some() && paired;
         let h = crate::providers::get(&l.harness);
@@ -1938,9 +1935,8 @@ impl<'a> Server<'a> {
         })
     }
 
-    /// `herdr agent|workspace list` JSON, read at most every 10 s (None when herdr cannot be read).
-    fn herdr_json(&self, now: u64, what: &str) -> Option<serde_json::Value> {
-        herdr::list(&self.cached(now, 10), what).ok()
+    fn agents_json(&self, now: u64) -> Option<serde_json::Value> {
+        term::list(&self.cached(now, 10)).ok()
     }
 
     /// #268: API v1's `queue`, the Queue tab's data (web/src/queue.ts draws it): per configured fleet a card (#162),
@@ -1955,7 +1951,7 @@ impl<'a> Server<'a> {
             ..QueueTab::default()
         };
         // #483: the error's own text, config or log (e.g. `migrate --live`), not a fixed line.
-        let (cfg, events) = match (Config::kept(ctx), shared(&ctx.state)) {
+        let (cfg, events) = match (Config::kept(ctx), working(&ctx.state)) {
             (Ok(c), Ok(e)) => (c, e),
             (Err(e), _) | (_, Err(e)) => {
                 d.error = Some(format!("{e:#}"));
@@ -1963,13 +1959,11 @@ impl<'a> Server<'a> {
             }
         };
         let (cfg, events, st) = (&cfg, &events, &events.states);
-        // The state of an open lane herdr shows no pane for: `dead`, or `parked` (#83).
         let ls = self.lanes(now, cfg, events, st).unwrap_or_default();
         let gone = |s: &IssueState| {
             s.active_lane()
                 .and_then(|x| ls.iter().find(|l| l.name == x.1 && l.pane.is_none()))
         };
-        // #205: a lane herdr still lists opens its Lanes sheet; #218: a gone one its stored transcript, else none.
         let link = |a: &str| match ls.iter().any(|l| l.name == a) {
             true => "live",
             false if lanes::log(&ctx.state, a).is_some_and(|f| f.is_file()) => "gone",
@@ -1993,6 +1987,9 @@ impl<'a> Server<'a> {
                 .collect();
             let mut rows = vec![];
             for &(n, blocked_by, k) in &items {
+                if gh::cached_spec(ctx, f, n).is_some_and(|v| gh::is_pr(&v)) {
+                    continue;
+                }
                 let s = st.get(&(f.clone(), n));
                 let waiting = asks.iter().any(|e| e.fleet == *f && e.issue == Some(n));
                 let logged = s.map_or("queued", |s| s.state.as_str());
@@ -2201,9 +2198,8 @@ impl<'a> Server<'a> {
         d
     }
 
-    /// herdr's agents joined with the log (None when herdr cannot be read).
     fn lanes(&self, now: u64, cfg: &Config, events: &[Event], st: &States) -> Option<Vec<lanes::Lane>> {
-        let list = self.herdr_json(now, "agent")?;
+        let list = self.agents_json(now)?;
         Some(crate::snapshot::lanes(
             cfg,
             &self.cached(now, 30),
@@ -2231,7 +2227,7 @@ impl<'a> Server<'a> {
     /// #37: Herd mode's data (`/herd.json`, the `herd` event; docs/serve.md).
     /// `weather` (loopback only) forces the host values.
     fn herd(&self, ctx: &Ctx, weather: Option<&str>) -> Result<Herd> {
-        let events = shared(&ctx.state)?;
+        let events = working(&ctx.state)?;
         let (cfg, st) = (Config::kept(ctx)?, events.states.clone());
         let all = self.lanes(ctx.now, &cfg, &events, &st).unwrap_or_default();
         let waits = self.waits(ctx, &cfg, &events, &all);
@@ -2343,7 +2339,7 @@ impl<'a> Server<'a> {
             mtime: mtime(ctx),
             ..LanesTab::default()
         };
-        let events = shared(&ctx.state).unwrap_or_default();
+        let events = working(&ctx.state).unwrap_or_default();
         let (Ok(cfg), st) = (Config::kept(ctx), events.states.clone()) else {
             t.error = Some("no fleet.toml".into());
             return t;
@@ -2386,7 +2382,7 @@ impl<'a> Server<'a> {
         let screen = l
             .pane
             .as_ref()
-            .and_then(|p| herdr::read(&l.on(&self.cached(ctx.now, 30)), p).ok());
+            .and_then(|p| term::read(&l.on(&self.cached(ctx.now, 30)), p).ok());
         let (title, tone, shown, a) = view(ctx, l, waits);
         let issue = l.issue.map(|n| format!("#{n}")).unwrap_or_default();
         let round = s.map(|s| {
@@ -2476,7 +2472,7 @@ impl<'a> Server<'a> {
     /// #141: the Host tab as data (API v1's `host`; web/src/host.ts draws it): the host cards, then FLEET DISK, SERVICES,
     /// FLEETS and ALERTS rows with a status; serve.js ranks them.
     fn host_tab(&self, ctx: &Ctx) -> HostTab {
-        let (cfg, events) = (Config::kept(ctx).ok(), shared(&ctx.state).unwrap_or_default());
+        let (cfg, events) = (Config::kept(ctx).ok(), working(&ctx.state).unwrap_or_default());
         let (cfg, events) = (cfg.as_ref(), &events);
         let (hs, r, dl, dc) = (
             self.sample(),
@@ -2508,7 +2504,7 @@ impl<'a> Server<'a> {
             d.orphans = crate::check::orphan_dirs(ctx, c).len();
         }
         // #186: processes still running in closed lanes' worktrees; `[reap]` TERMs, then KILLs them.
-        let left = cfg.zip(herdr::agents(r).ok()).map_or(vec![], |(c, a)| {
+        let left = cfg.zip(term::agents(r).ok()).map_or(vec![], |(c, a)| {
             crate::check::leftovers(ctx, c, r, &a, false).unwrap_or_default()
         });
         if !left.is_empty() {
@@ -2531,7 +2527,7 @@ impl<'a> Server<'a> {
             });
         }
         // #98: green, amber or red per service, what clears it otherwise.
-        let svc = |s: &crate::timer::Row| ["board", "tick", "fast step", herdr::BIN].contains(&s.0.as_str());
+        let svc = |s: &crate::timer::Row| ["board", "tick", "fast step"].contains(&s.0.as_str());
         let rows = cfg.map_or(vec![], |c| crate::timer::services(ctx, c, r, Some(board(ctx))));
         let row = |(name, t, detail, fix): crate::timer::Row| Row {
             name,
@@ -2659,7 +2655,7 @@ impl<'a> Server<'a> {
                 gate = hs.clone();
                 (s.up, s.seen, s.load, s.mem, s.swap) = (true, now, hs.load_per_cpu, hs.free_mem_gb, hs.swapout);
                 ((s.disk, s.disk_total), s.mem_total) = (host::df(r).unzip(), hs.mem_total_gb);
-                let all = herdr::agents(r).unwrap_or_default();
+                let all = term::agents(r).unwrap_or_default();
                 s.top = host::top(r, &all);
                 // #248, #316: what each harness's lanes hold (their pane trees), working and done apart, so done-lane
                 // memory shows; an agent is its harness's by `Harness::process_names`, else by its own label.
@@ -2939,7 +2935,37 @@ impl Runner for Canned {
             stderr: String::new(),
         })
     }
+    fn run_in(&self, prog: &str, args: &[String], input: &str) -> Result<crate::runner::Out> {
+        use crate::shed::proto::{ErrorCode, Hello, Request, Response, RpcError};
+        if prog != "shed" {
+            return self.run(prog, args);
+        }
+        let mut stdout = String::new();
+        for q in input.lines().filter_map(|l| serde_json::from_str::<Request>(l).ok()) {
+            let id = q.id.clone().unwrap_or_default();
+            let key = format!("shed {} {}", q.method, q.params["name"].as_str().unwrap_or_default());
+            let got = match q.method.as_str() {
+                "hello" => serde_json::to_value(Hello::ours()).ok(),
+                _ => self.0.get(key.trim_end()).and_then(|v| serde_json::from_str(v).ok()),
+            };
+            let none = || RpcError::new(ErrorCode::NoSuchTerminal, &key);
+            let r = got.map_or_else(|| Response::err(id.clone(), none()), |v| Response::ok(id.clone(), v));
+            stdout += &(serde_json::to_string(&r)? + "\n");
+        }
+        Ok(crate::runner::Out {
+            stdout,
+            ..Default::default()
+        })
+    }
     fn sleep(&self, _: u64) {}
+    fn shed(&self) -> Option<crate::shed::Shed> {
+        let wire = crate::shed::Wire::Connect;
+        Some(crate::shed::Shed {
+            wire,
+            acp: None,
+            policy: "ask".into(),
+        })
+    }
 }
 
 /// #172: the files a theme folder may hold; `/themes/<name>/<file>` serves nothing else (#241: and its icons).
@@ -3233,7 +3259,7 @@ pub fn export(ctx: &Ctx, r: &dyn Runner, dir: &std::path::Path, demo: bool) -> R
     };
     // #344: the demo's log goes into a scratch database, so `demo/` stays as committed.
     let _scratch = demo.then(crate::db::Scratch::start);
-    let (r, events): (&dyn Runner, _) = (if demo { &canned } else { r }, shared(&ctx.state)?);
+    let (r, events): (&dyn Runner, _) = (if demo { &canned } else { r }, working(&ctx.state)?);
     let ctx = &Ctx {
         now: if demo {
             events.iter().map(|e| e.ts).max().unwrap_or(0) + 60

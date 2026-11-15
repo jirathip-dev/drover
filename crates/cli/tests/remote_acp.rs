@@ -650,7 +650,7 @@ fn a_remote_acp_lane_without_the_proxy_token_file_is_refused_with_the_setup_comm
 }
 
 #[test]
-fn doctor_checks_a_shed_acp_host_through_shed_and_never_runs_herdr_there() {
+fn doctor_checks_a_shed_acp_host_through_shed_as_the_survey_does() {
     let (c, _) = setup("racp-doctor", &["boat1"]);
     let f = spawn_fake()
         .reply("@boat1 sh -c uname", "Linux\nx86_64\n/home/me\n")
@@ -667,7 +667,18 @@ fn doctor_checks_a_shed_acp_host_through_shed_and_never_runs_herdr_there() {
         .unwrap();
     }
     let (_, o) = run(&c, &b, &["doctor"]);
-    assert!(o.contains("\n✓ host boat1 — shed, git, gh, "), "{o}");
-    assert!(!o.contains("herdr agent list"), "{o}");
-    assert!(!f.called("herdr --machine boat1"), "{:?}", f.calls.borrow());
+    assert!(
+        o.contains("\n✓ host boat1 — git, gh, ") && o.contains(", shed\n"),
+        "{o}"
+    );
+    assert!(f.called("ssh boat1 'shed' 'connect'"), "{:?}", f.calls.borrow());
+    assert!(!o.contains("herdr"), "{o}");
+    b.machines.borrow_mut().get_mut("boat1").unwrap().bare = false;
+    let (code, o) = run(&c, &b, &["doctor"]);
+    assert_eq!(code, 1, "{o}");
+    assert!(
+        o.contains("\n✗ host boat1 — shed list: ") && o.contains("→ ssh boat1 shed doctor"),
+        "{o}"
+    );
+    assert!(!o.contains("✓ host boat1"), "{o}");
 }
