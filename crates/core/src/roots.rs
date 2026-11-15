@@ -200,9 +200,9 @@ pub fn eject(
     let d = json!({"host": name, "root": root});
     emit(&ctx.state, cfg, Event::new(ctx.now, "drover", None, "root-eject", d))?;
     restart(ctx, cfg, r, out, (name, &root), false)?;
-    let open: Vec<String> = (crate::host::agents(&on)?.iter())
-        .filter(|a| a["cwd"].as_str().is_some_and(|c| Path::new(c).starts_with(&root)))
-        .map(|a| a["name"].as_str().unwrap_or("?").to_string())
+    let open: Vec<String> = (crate::session::live_on(&on)?.iter())
+        .filter(|a| a.cwd.starts_with(&root))
+        .map(|a| a.name.clone())
         .collect();
     if open.is_empty() {
         writeln!(out, "safe to unplug {}", root.display())?;
@@ -219,7 +219,7 @@ pub fn watch(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     for (name, h) in cfg.hosts.iter().filter(|h| h.1.enabled && !h.1.roots().is_empty()) {
         let home = cache.get(name).map(|s| s.home.as_str()).filter(|_| h.machine.is_some());
         let on = On::quick(r, h.machine.as_deref());
-        if crate::host::agents(&on).is_err() {
+        if crate::session::live_on(&on).is_err() {
             continue;
         }
         for root in listed(cfg, name, home, &ctx.worktrees) {
@@ -294,7 +294,7 @@ fn restart(
             );
             let git = |a: &[&str]| ok(&on, "git", &[&["-C", wt][..], a].concat());
             if hung {
-                let _ = crate::term::close(&on, e.str("pane").unwrap_or_default());
+                let _ = crate::term::close(ctx, &on, e.str("pane").unwrap_or_default());
                 forget(Path::new(&local), Path::new(wt), e.str("branch").unwrap_or_default())?;
                 writeln!(out, "not saved {wt}: root hung, unsaved work stays on the disk")?;
                 lost.push(format!("{agent}: not saved, root hung"));
@@ -312,7 +312,7 @@ fn restart(
                 lost.push(format!("{agent}: uncommitted work, {} commit(s) not pushed", n.trim()));
                 continue;
             }
-            let _ = crate::term::close(&on, e.str("pane").unwrap_or_default());
+            let _ = crate::term::close(ctx, &on, e.str("pane").unwrap_or_default());
             let ahead = git(&["rev-list", "--count", "HEAD", "--not", "--remotes"])?;
             if crate::spawn::changes(&git(&["status", "--porcelain"])?) > 0 || ahead.trim() != "0" {
                 let w = crate::check::wip_branch(ctx, &on, agent);

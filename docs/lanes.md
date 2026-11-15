@@ -226,7 +226,7 @@ Every fleet is driven by drover itself. `drover drive [fleet]` does one pass, fr
 | `FAIL (form-only)`: every `blocking [<category>]` finding in `form_categories` | a fix round that doesn't count toward `review_rounds` (`fix(n·f)`); a blocker untagged or of another category: a plain FAIL (`form-only-rejected`); past `form_rounds` per issue they count (`form-rounds-exhausted`) |
 | FAIL in round `review_rounds` | `verdict` logs `needs-human` with the findings; drive stops |
 | a lane killed | `spawn impl` (respawn) |
-| a live lane idle `stall_minutes` with no push, verdict or turn (#666) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with its last screen lines |
+| a live lane shed has said quiet for `stall_minutes` with no turn-end (#666, #1053) | `spawn <role> --supersede` once (respawn `lane stalled`); stalled again: `needs-human LANE_STALLED` with shed's note |
 | a live lane whose pane or session shows no output 10 min after its spawn | an ACP session gets its brief again once; then `spawn <role> --supersede` once (respawn `failed start`); then `needs-human START_FAILED` |
 | an ACP lane (build, check or design stage) mid-turn with no session event `silent_minutes` (10) and no tool call still running (#792) | `shed cancel` and one `continue` prompt (`nudged`); still silent 10 min later: `spawn <role> --supersede` once (`respawned-silent`); silent again within the hour: `needs-human LANE_SILENT` |
 | a design or architect lane in `error` or gone with no commit of its own (past its spawn, not on integration) under its stage's folders (#915) | `needs-human LANE_FAILED` naming the error; no `design-review`, no ask; a respawn is the owner's `spawn`, under `RESPAWN_LOOP` |

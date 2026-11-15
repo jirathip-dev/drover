@@ -2,9 +2,9 @@ use crate::access;
 use crate::config::{expand, Config, Fleet, Role};
 use crate::events::{emit, fold, last_spawn, plain, working, Event};
 use crate::gate::refused;
-use crate::host;
 use crate::providers;
 use crate::runner::{argv, ok, Runner};
+use crate::session::{Session, Status};
 use crate::term;
 use crate::Ctx;
 use anyhow::{Context, Result};
@@ -791,11 +791,11 @@ fn first_lines(e: &anyhow::Error) -> String {
     format!("{e:#}").lines().take(5).collect::<Vec<_>>().join("\n")
 }
 
-fn reuse(p: &Plan, dirs: &[String], target: Option<&String>, agents: &[Value]) -> Option<Value> {
+fn reuse(p: &Plan, dirs: &[String], target: Option<&String>, agents: &[Session]) -> Option<Value> {
     let (stem, k) = p.agent.rsplit_once("-r")?;
     let k = k.parse::<u64>().ok().filter(|k| *k > 1)?;
     let prev = format!("{stem}-r{}", k - 1);
-    if agents.iter().any(|a| a["name"] == prev.as_str()) {
+    if agents.iter().any(|a| a.name == prev) {
         return None;
     }
     let wt = p.worktree.to_string_lossy();
@@ -1013,14 +1013,11 @@ pub fn spawn(
     let event = |kind: &str, d: Value| emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), kind, d));
 
     let events = working(&ctx.state)?;
-    let agents = host::agents(r).context("cannot list the lanes for the duplicate guard")?;
-    let live = host::live_in(&agents, &p.agent, &p.worktree);
-    let names: Vec<&str> = live
-        .iter()
-        .filter_map(|a| a["name"].as_str().filter(|n| !n.is_empty()).or(a["pane_id"].as_str()))
-        .collect();
+    let agents = crate::session::live_on(r).context("cannot list the lanes for the duplicate guard")?;
+    let live: Vec<&Session> = agents.iter().filter(|a| a.in_dir(&p.agent, &p.worktree)).collect();
+    let names: Vec<&str> = live.iter().map(|a| a.name.as_str()).collect();
     let mut dup = vec![];
-    let stale = live.iter().all(|a| a["agent_status"] != "working") && orphan(&agents, &events, &p, true).is_some();
+    let stale = live.iter().all(|a| !a.busy()) && orphan(&agents, &events, &p).is_some();
     if stale {
         let last = events
             .iter()
@@ -1038,17 +1035,17 @@ pub fn spawn(
     let unfinished = fold(&events)
         .remove(&(fleet.to_string(), issue))
         .filter(|s| s.unfinished(role, f.family(role) == "rev"));
-    let over = |a: &&Value| {
-        let sp = (events.iter()).rposition(|e| e.is("spawn", fleet, issue) && e.str("agent") == a["name"].as_str());
+    let over = |a: &&Session| {
+        let sp = (events.iter()).rposition(|e| e.is("spawn", fleet, issue) && e.str("agent") == Some(a.name.as_str()));
         let after = |i: usize| {
             events[i + 1..]
                 .iter()
                 .any(|e| e.is("verdict", fleet, issue) || e.is("spawn", fleet, issue))
         };
-        matches!(a["agent_status"].as_str(), Some("done" | "idle")) && sp.is_some_and(after)
+        matches!(a.status(), Some(Status::Done | Status::Idle)) && sp.is_some_and(after)
     };
     if !stale && !live.is_empty() {
-        let st = live[0]["agent_status"].as_str().unwrap_or_default();
+        let st = live[0].status().map_or("unknown", Status::word);
         let finished = if unfinished.is_none() && live.iter().all(over) {
             format!("finished ({st}) lane(s) ")
         } else {
@@ -1075,7 +1072,7 @@ pub fn spawn(
             dup.push(("WORKTREE_DIRTY", format!("{wt} is no fleet lane and has {why}")));
         }
     }
-    if let Some(pane) = orphan(&agents, &events, &p, false).filter(|_| live.len() == 1 && !o.supersede) {
+    if let Some(pane) = orphan(&agents, &events, &p).filter(|_| live.len() == 1 && !o.supersede) {
         return adopt(ctx, cfg, r, out, (fleet, issue, role), &pane, &json!({})).map(|()| true);
     }
     if let Some((code, msg)) = dup.first().filter(|_| !o.supersede) {
@@ -1129,8 +1126,8 @@ pub fn spawn(
         let logged = working(&ctx.state)?
             .iter()
             .any(|e| e.seq > i.seq && e.is("spawn", fleet, issue));
-        let up = (step == "spawn").then(|| host::agents(r).ok()).flatten();
-        let up = up.is_some_and(|a| !host::live_in(&a, &p.agent, &p.worktree).is_empty());
+        let up = (step == "spawn").then(|| crate::session::live_on(r).ok()).flatten();
+        let up = up.is_some_and(|a| a.iter().any(|a| a.in_dir(&p.agent, &p.worktree)));
         Ok((logged || up).then(|| json!({"agent": p.agent})))
     };
     let (key, secs) = (format!("{role}@{round}"), SPAWN_SECS + 300);
@@ -1142,19 +1139,22 @@ pub fn spawn(
         let was = last_spawn(&events, &p.agent);
         let old = crate::hosts::On::of(base, was);
         let owt = was.and_then(|e| e.str("worktree")).unwrap_or(&wt);
-        let listed = host::agents(&old);
+        let listed = crate::session::live_on(&old);
         let stale = was.filter(|_| listed.is_err() && old.machine.is_some());
         let hung =
             was.is_some_and(|e| matches!(crate::roots::skip(ctx, cfg, e), Some("root unreachable" | "root-hung")));
-        let cause = crate::shed::exit_cause(&events, &p.agent).filter(|c| crate::shed::RESUMABLE.contains(c));
+        let cause = crate::session::stamp::exit(&events, &p.agent).filter(|x| x.cause.resumable());
         let here = cause.is_some() && owt == wt && old.machine == on.machine;
         if stale.is_none() && !here && !hung {
             wip = crate::check::save_lane(ctx, &old, &p.agent, owt)?;
         }
-        for a in host::live_in(listed.as_deref().unwrap_or_default(), &p.agent, Path::new(owt)) {
-            if let Some(pane) = a["pane_id"].as_str() {
-                term::close(&old, pane)?;
-            }
+        for a in listed
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .filter(|a| a.in_dir(&p.agent, Path::new(owt)))
+        {
+            term::close(ctx, &old, &a.name)?;
         }
         if stale.is_none() && !hung {
             crate::check::reap(ctx, cfg, &old, (fleet, Some(issue)), owt)?;
@@ -1216,9 +1216,9 @@ pub fn spawn(
                 let Some(held) = checked_out(r, &local, &p.branch) else {
                     return Err(e);
                 };
-                let live = host::agents(r)?;
-                let names: Vec<&str> = (host::live_in(&live, "\0", Path::new(&held)).iter())
-                    .filter_map(|a| a["name"].as_str().filter(|n| !n.is_empty()).or(a["pane_id"].as_str()))
+                let live = crate::session::live_on(r)?;
+                let names: Vec<&str> = (live.iter().filter(|a| a.in_dir("\0", Path::new(&held))))
+                    .map(|a| a.name.as_str())
                     .collect();
                 if !names.is_empty() {
                     let why = format!("live agent(s) {names:?} in {held}, where {} is checked out", p.branch);
@@ -1255,8 +1255,9 @@ pub fn spawn(
             .map(|prev| handover(ctx, r, &events, prev, &p, (fleet, issue, title)));
         let cause = prior
             .filter(|_| o.supersede)
-            .and_then(|sp| crate::shed::exit_cause(&events, sp.str("agent")?));
-        let resume = cause.filter(|c| crate::shed::RESUMABLE.contains(c)).map(|c| {
+            .and_then(|sp| crate::session::stamp::exit(&events, sp.str("agent")?));
+        let resume = cause.filter(|x| x.cause.resumable()).map(|x| {
+            let c = x.cause.word();
             format!(
                 "Resume: your previous session in this worktree stopped mid-turn ({c}). Its local commits and staged \
                  changes are kept here, and drover pushed the commits to `{}`: continue from them and push.",
@@ -1344,7 +1345,7 @@ pub fn spawn(
         "worktree": p.worktree, "pane": pane});
     event("spawn-started", d)?;
     pj = plan_json(ctx, &p, &on, (&local, reopen), (hm, &bt, &labels, &acp));
-    bt.start(r, &pane, &labels, &wt, &acp)?;
+    bt.start(ctx, r, &pane, &labels, &wt, &acp)?;
     if bt.0.acp.is_none() {
         term::ok(r, &home(p.lane_cmd(&pane)))?;
         term::ok(r, &term::typed(&pane, &home(p.start_cmd(ctx, &pane))))?;
@@ -1392,8 +1393,8 @@ pub fn spawn(
                 d["rules"] = json!(rl);
             }
             if let Some((agent, old)) = prior.and_then(|e| Some((e.str("agent")?, e.str("pane")?))) {
-                if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a["pane_id"] == old) {
-                    let _ = term::close(r, old);
+                if o.supersede && confirmed && old != pane && !agents.iter().any(|a| a.name == old) {
+                    let _ = term::close(ctx, r, old);
                     let c = json!({"agent": agent, "reason": "superseded", "pane": old});
                     event("lane-closed", c)?;
                 }
@@ -1415,13 +1416,16 @@ pub fn spawn(
     res
 }
 
-const SPAWN_SECS: u64 = 3 * term::CONFIRM_SECS;
+pub const SPAWN_SECS: u64 = 3 * term::CONFIRM_SECS;
 
-fn orphan(agents: &[Value], events: &[Event], p: &Plan, unnamed: bool) -> Option<String> {
-    let mine = |a: &&Value| a["name"] == p.agent.as_str() || unnamed && a["name"].as_str().is_none_or(str::is_empty);
-    let pane = host::live_in(agents, "\0", &p.worktree).into_iter().find(mine)?["pane_id"].as_str()?;
-    let logged = events.iter().any(|e| e.kind == "spawn" && e.str("pane") == Some(pane));
-    (!logged).then(|| pane.into())
+fn orphan(agents: &[Session], events: &[Event], p: &Plan) -> Option<String> {
+    let a = agents
+        .iter()
+        .find(|a| a.name == p.agent && a.cwd.starts_with(&p.worktree))?;
+    let logged = events
+        .iter()
+        .any(|e| e.kind == "spawn" && e.str("pane") == Some(a.name.as_str()));
+    (!logged).then(|| a.name.clone())
 }
 
 pub(crate) fn lane_admit(
@@ -1546,62 +1550,10 @@ fn handover(
         .collect();
     let ran = spawns.iter().rposition(|e| e.str("harness") == Some(&p.harness));
     let since = ran.and_then(|i| spawns.get(i + 1)).map(|e| e.ts);
-    let at = since.map(iso);
-    let after = |t: &Value| at.as_ref().is_none_or(|s| t.as_str().is_none_or(|t| t > s.as_str()));
-    let (wt, h) = (
-        p.worktree.to_string_lossy(),
-        providers::get(prev.str("harness").unwrap_or_default()),
-    );
-    let (mut prompts, mut replies, mut cmds) = (vec![], vec![], vec![]);
-    let jsonl = h
-        .transcript(&ctx.home, &wt)
-        .and_then(|f| crate::lanes::read_tail(&f, 1 << 20));
-    let log = crate::lanes::log(&ctx.state, prev.str("agent").unwrap_or_default());
-    if let Some(t) = &jsonl {
-        for m in crate::lanes::said(t).0.into_iter().filter(|m| after(&m["at"])) {
-            let text = m["text"].as_str().unwrap_or_default().to_string();
-            [&mut replies, &mut prompts][usize::from(m["k"] == "me")].push(text);
-        }
-        let rows = t.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok());
-        for v in rows.filter(|v| after(&v["timestamp"])) {
-            let parts = v["message"]["content"].as_array().cloned().unwrap_or_default();
-            cmds.extend(
-                parts
-                    .iter()
-                    .filter_map(|c| c["input"]["command"].as_str())
-                    .map(crate::lanes::mask),
-            );
-        }
-    } else if let Some(text) = log.and_then(|f| std::fs::read_to_string(f).ok()) {
-        let mut open = false;
-        for l in text.lines().map(crate::lanes::strip) {
-            let l = l.trim();
-            let glyph = |g: &[char]| {
-                l.strip_prefix(g)
-                    .map(|t| t.trim().to_string())
-                    .filter(|t| !t.is_empty())
-            };
-            open = match (h.tool_line(l), glyph(&['❯', '›', '>']), glyph(&['⏺', '•'])) {
-                (Some((t, a)), ..) => {
-                    cmds.extend((t == "Bash" || t == "$").then_some(a));
-                    false
-                }
-                (_, Some(t), _) => {
-                    prompts.push(t);
-                    false
-                }
-                (.., Some(t)) => {
-                    replies.push(t);
-                    true
-                }
-                _ if open && !l.is_empty() => {
-                    replies.last_mut().into_iter().for_each(|r| *r += &format!(" {l}"));
-                    true
-                }
-                _ => false,
-            };
-        }
-    }
+    let wt = p.worktree.to_string_lossy();
+    let (was, prev) = (prev, prev.str("agent").unwrap_or_default());
+    let said = crate::session::transcript::page(&crate::hosts::On::of(r, Some(was)), ctx, prev, None, usize::MAX);
+    let [prompts, replies, cmds] = said.as_ref().map(crate::session::transcript::said).unwrap_or_default();
     let git = |a: &[&str]| ok(r, "git", &[&["-C", &*wt][..], a].concat()).unwrap_or_default();
     let files = match since {
         Some(s) => {
@@ -1691,7 +1643,9 @@ pub fn adopt(
     extra: &Value,
 ) -> Result<()> {
     let p = plan(ctx, cfg, fleet, issue, role)?;
-    term::harness_in(r, pane).with_context(|| format!("no harness running in pane {pane}"))?;
+    crate::session::get(r, pane)?
+        .filter(|s| s.running() && s.labels.contains_key("harness"))
+        .with_context(|| format!("no harness running in pane {pane}"))?;
     let mut d = lane_data(&p, pane);
     d["adopted"] = json!(true);
     extra
@@ -1703,57 +1657,17 @@ pub fn adopt(
     emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(issue), "spawn", d))
 }
 
-pub fn shaped<'a>(cfg: &'a Config, a: &Value) -> Option<(&'a str, u64, Option<String>, Option<String>)> {
-    let name = a["name"].as_str().unwrap_or_default();
-    let cwd = Path::new(a["cwd"].as_str().or(a["foreground_cwd"].as_str()).unwrap_or_default());
-    let parts: Vec<&str> = cwd.iter().filter_map(|c| c.to_str()).collect();
-    cfg.fleet.iter().find_map(|(fl, f)| {
-        let lane = |b: &str, issue: bool| {
-            let mut w = b.split('-');
-            let role = w
-                .next()
-                .filter(|r| f.role.contains_key(*r) && (issue || f.family(r) == "rev"))?;
-            Some((Some(role.to_string()), w.next()?.parse::<u64>().ok()?))
-        };
-        let named = name.strip_prefix(&format!("{fl}-")).and_then(|w| lane(w, true));
-        let at = parts
-            .windows(3)
-            .position(|w| matches!(w[0], "worktrees" | "work") && w[1] == f.repo_name());
-        let by_cwd = at.and_then(|i| match parts[i + 2].strip_prefix("issue-") {
-            Some(n) => Some((None, n.parse().ok()?)),
-            None => lane(parts[i + 2], false),
-        });
-        let (role, n) = named.or(by_cwd.clone())?;
-        let wt = at.filter(|_| by_cwd.is_some_and(|c| c.1 == n));
-        let wt = wt.map(|i| {
-            parts[..i + 3]
-                .iter()
-                .collect::<PathBuf>()
-                .to_string_lossy()
-                .into_owned()
-        });
-        Some((fl.as_str(), n, role, wt))
-    })
-}
-
 pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), out: &mut dyn Write) -> Result<bool> {
-    let agents = crate::hosts::all_agents(cfg, seen)?;
+    let sessions = crate::session::all(cfg, seen).checked()?;
     let events = working(&ctx.state)?;
     let (st, mut any) = (fold(&events), false);
-    for a in agents {
-        let (Some(pane), m, name) = (a["pane_id"].as_str(), a["machine"].as_str(), a["name"].as_str()) else {
+    for a in crate::lanes::orphans(ctx, cfg, &events, &sessions) {
+        let (pane, m, name) = (a.name.as_str(), a.machine.as_deref(), Some(a.name.as_str()));
+        let at = |e: &&Event| e.str("agent") == name;
+        let Some((fleet, Some(n), role)) = crate::lanes::whose(cfg, a) else {
             continue;
         };
-        let named = |e: &&Event| name.is_none_or(str::is_empty) || e.str("agent") == name;
-        let at =
-            |e: &&Event| e.str("pane") == Some(pane) && e.str("machine") == m && named(e) || e.str("agent") == name;
-        let young = |e: &Event| e.kind == "spawn-started" && ctx.now.saturating_sub(e.ts) < SPAWN_SECS;
-        let logged = (events.iter())
-            .filter(|e| matches!(e.kind.as_str(), "spawn" | "spawn-adopted") || young(e))
-            .any(|e| at(&e));
-        let Some((fleet, n, role, wt)) = shaped(cfg, &a).filter(|_| !logged) else {
-            continue;
-        };
+        let (role, wt) = (role.map(String::from), Some(a.cwd.to_string_lossy().into_owned()));
         let Some(s) = st.get(&(fleet.to_string(), n)) else {
             continue;
         };
@@ -1805,14 +1719,14 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
                     let b = crate::check::wip_branch(ctx, &on, &format!("{fleet}-{role}-{n}"));
                     crate::check::save_wip(&on, w, &b, "wip: stale orphan lane, saved by drover")?;
                 }
-                term::close(&on, pane)?;
+                term::close(ctx, &on, pane)?;
                 writeln!(out, "closed stale orphan {agent} ({why})")?;
-                let d = json!({"agent": agent, "pane": pane, "host": a["host"], "why": "stale-orphan", "reason": why});
+                let d = json!({"agent": agent, "pane": pane, "host": a.host, "why": "stale-orphan", "reason": why});
                 emit(&ctx.state, cfg, Event::new(ctx.now, fleet, Some(n), "lane-closed", d))
             })()
         } else {
             let since = started.map_or(0, |e| e.ts);
-            let mut d = json!({"why": "orphan", "since": since, "worktree": wt, "host": a["host"], "machine": m});
+            let mut d = json!({"why": "orphan", "since": since, "worktree": wt, "host": a.host, "machine": m});
             d.as_object_mut()
                 .into_iter()
                 .for_each(|o| o.retain(|_, v| !v.is_null()));

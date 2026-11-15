@@ -111,3 +111,25 @@ pattern = "earlier review"
 paths = ["crates/*/src/**"]
 except = ["crates/core/src/promise.rs"]
 reason = "#854: a waiting/next-step line is a typed promise: build it with crate::promise::Say"
+
+[[ban]]
+pattern = "agent_status"
+paths = ["crates/*/src/**"]
+reason = "#1053: a lane's status is session::Status, mapped from shed once in crates/core/src/session/"
+
+[[ban]]
+pattern = "pane_id"
+paths = ["crates/*/src/**"]
+reason = "#1053: a session is addressed by its shed name; no herdr-shaped row"
+
+[[ban]]
+pattern = ".reported"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/session/**"]
+reason = "#1053: shed's reported state is read in crates/core/src/session/ only (Status::of)"
+
+[[ban]]
+pattern = "read_argv"
+paths = ["crates/*/src/**"]
+except = ["crates/core/src/term.rs", "crates/core/src/setup.rs", "crates/core/src/providers/**"]
+reason = "#1053: no lane fact is read off a screen; a transcript is session::transcript"

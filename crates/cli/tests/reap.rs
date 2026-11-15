@@ -400,8 +400,8 @@ fn check_never_trims_an_acp_lanes_agent_or_its_working_turn() {
 }
 
 #[test]
-fn check_alerts_no_stall_for_an_acp_lane_between_turns() {
-    for (turn, stalls) in [("working", false), ("done", true)] {
+fn check_alerts_no_stall_for_a_lane_that_reported_its_turn_end() {
+    for (turn, stalls) in [("working", false), ("done", false)] {
         let c = ctx(&tmpdir(&format!("stall-acp-{turn}")), CONFIG);
         let sh = FakeShed::new();
         sh.attach(&c);

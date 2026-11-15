@@ -115,7 +115,7 @@ fn idle(c: &drover::Ctx, r: &Fake) {
         read(&c.state)
             .unwrap()
             .iter()
-            .filter(|e| e.kind != "drive-pass")
+            .filter(|e| e.kind != "drive-pass" && e.kind != "lane-state")
             .count()
     };
     let before = acts();
@@ -2128,7 +2128,8 @@ fn a_no_change_round_is_reviewed_while_a_check_that_waits_for_the_label_is_absen
         head
     );
     assert!(out.contains(&want), "{out}");
-    let (code, out) = run(&c, &r, &["check"]);
+    assert_eq!(run(&c, &r, &["check"]).0, 0, "shed's idle, first heard now");
+    let (code, out) = run(&at(&c, 1800), &r, &["check"]);
     assert_eq!(code, 0, "{out}");
     let stalls: Vec<_> = kinds(&c, "stall")
         .iter()

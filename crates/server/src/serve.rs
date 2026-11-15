@@ -3,8 +3,8 @@
 use crate::api::{
     body, Backlog, BacklogIssue, Balance, Bar, Blocked, Cell, Chat, Conductor, ConfigSheet, Disk, DoneRow, Drive,
     DriveAct, FleetRow, Harness, Herd, HerdFleet, HerdHost, HerdLane, HerdQueued, HostCard, HostTab, LaneNow, LaneRepo,
-    LaneRow, LaneSection, LanesTab, Leftovers, Menu, Moment, NeedAsk, NeedIssue, NeedsTab, Notice, Paired, PrLine,
-    QueueCard, QueueLane, QueueRow, QueueTab, RoleRow, Row, Stage, Sub,
+    LaneRow, LaneSection, LanesTab, Leftovers, Moment, NeedAsk, NeedIssue, NeedsTab, Notice, Paired, PrLine, QueueCard,
+    QueueLane, QueueRow, QueueTab, RoleRow, Row, Stage, Sub,
 };
 use crate::config::{Config, Limits, Role};
 use crate::events::{age, append, working, Event, IssueState, States};
@@ -348,10 +348,6 @@ fn hash(s: &impl Hash) -> u64 {
 }
 
 /// A menu as its card shows it (masked question and options): `/answer` refuses a tap on any other.
-fn seen(q: &str, opts: &[String]) -> u64 {
-    hash(&(lanes::mask(q), opts.iter().map(|o| lanes::mask(o)).collect::<Vec<_>>()))
-}
-
 #[derive(Default)]
 struct Watch {
     log: Option<(u64, Option<std::time::SystemTime>)>,
@@ -730,7 +726,7 @@ fn view(ctx: &Ctx, l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> View {
         .zip(l.fleet.as_ref())
         .and_then(|(n, f)| gh::cached_title(ctx, f, n));
     let (tone, shown) = wait_of(l, waits).map_or_else(
-        || (tone(&l.state), l.state.clone()),
+        || (tone(&l.state.word()), l.state.word()),
         |w| (w.tone(ctx.now), w.label(ctx.now)),
     );
     let pr = l
@@ -755,7 +751,7 @@ fn view(ctx: &Ctx, l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> View {
 
 fn wait_of(l: &lanes::Lane, waits: &[crate::waiting::Waiting]) -> Option<crate::waiting::Waiting> {
     let w = waits.iter().find(|w| w.lane == l.name).cloned();
-    w.filter(|_| matches!(l.state.as_str(), "idle" | "done" | "unknown" | "parked"))
+    w.filter(|_| matches!(l.state.word().as_str(), "idle" | "done" | "unknown" | "parked"))
 }
 
 pub fn act(role: &str, state: &str) -> &'static str {
@@ -1002,10 +998,9 @@ impl<'a> Server<'a> {
             changed |= hash(&at) != w.agents.1;
             w.agents = (now, hash(&at));
         } else if now >= w.agents.0 + 2 {
-            let out = term::agent_list(&self.r);
+            let out = format!("{:?}", crate::session::on(&self.r).ok());
             changed |= hash(&out) != w.agents.1;
             w.agents = (now, hash(&out));
-            lock(&self.cache).insert("agent list".into(), (now, out));
         }
         // #37: Herd's data rides the same stream, re-read every 10 s (host weather) while anyone listens;
         // pushed only on a change (API v1's `GET herd` reads the same).
@@ -1021,13 +1016,8 @@ impl<'a> Server<'a> {
             }
             w.herd = (now, hash(&j));
         }
-        let agents = (changed && self.addr.is_some())
-            .then(|| self.agents_json(now))
-            .flatten();
-        for job in agents
-            .and_then(|j| j["result"]["agents"].as_array().map(|a| chat::flush(at, a)))
-            .unwrap_or_default()
-        {
+        let agents = (changed && self.addr.is_some()).then(|| self.sessions(now)).flatten();
+        for job in agents.map(|a| chat::flush(at, &a.running())).unwrap_or_default() {
             chat::deliver(at, &self.r, &job);
         }
         // #560: the parts are rendered only for an audience listening (a client that connects reads them afresh).
@@ -1362,7 +1352,7 @@ impl<'a> Server<'a> {
             let (via, s) = (format!("web {}", dev.label), body::<crate::api::Setup>(f));
             Config::kept(ctx).and_then(|c| crate::setup::start(ctx, &c, &self.r, &s.host, &s.name, &via))
         } else if pick {
-            self.pick(ctx, dev, &body(f))
+            refused("BAD_VALUE", "no menu: shed reports none; answer with the reply box")
         } else if act {
             self.act(ctx, dev, &body(f))
         } else if path == "/report" {
@@ -1391,57 +1381,13 @@ impl<'a> Server<'a> {
             .into_iter()
             .find(|l| l.name == agent)
             .with_context(|| format!("no agent `{agent}`"))?;
-        let (Some(fleet), Some(pane)) = (l.fleet.clone(), l.pane.clone()) else {
+        let (Some(fleet), Some(pane)) = (l.fleet.clone(), l.pane().map(String::from)) else {
             bail!("`{agent}` is not a live fleet lane")
         };
         if cfg.fleet.get(&fleet).is_some_and(|f| f.paused) {
             return refused("PAUSED", format!("{fleet} is paused (`drover resume {fleet}`)"));
         }
         Ok((l, fleet, pane))
-    }
-
-    /// A blocked lane's menu option (`Harness::pending_menu`): its keys (`answer_keys`) via `pane send-keys`, then a re-read ("sent" or
-    /// "still waiting"); logs an `answer` event without the question. No menu parsed, or not the
-    /// menu the tapped card showed (`h`, read afresh): no key.
-    fn pick(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Answer) -> Result<String> {
-        let (agent, choice) = (f.agent.as_str(), f.choice.as_str());
-        let (l, fleet, pane) = self.lane(ctx, agent)?;
-        let on = l.on(&self.r);
-        let screen = || term::read(&on, &pane);
-        let h = crate::providers::get(&l.harness);
-        let menu = h.pending_menu(&screen()?);
-        let Some((q, opts)) = menu.filter(|p| !p.1.is_empty()) else {
-            return refused(
-                "BAD_VALUE",
-                format!("no menu on {agent}'s pane: menu changed — refreshed; answer with the reply box"),
-            );
-        };
-        if reviewer(ctx, &fleet, &l.role) && !q.starts_with("Do you want") {
-            return refused("REV_READONLY", "reviewer lanes answer permission prompts only");
-        }
-        if !choice
-            .parse()
-            .is_ok_and(|n: usize| (1..=opts.len().min(9)).contains(&n))
-            || choice.len() != 1
-        {
-            return refused("BAD_VALUE", format!("choose 1 to {}", opts.len()));
-        }
-        if f.h != seen(&q, &opts).to_string() {
-            return refused("STALE", "menu changed — refreshed");
-        }
-        term::keys(&on, &pane, &h.answer_keys(choice.parse()?))?;
-        let d = serde_json::json!({"via": "web", "agent": agent, "device": dev.label, "choice": choice});
-        append(&ctx.state, &Event::new(ctx.now, &fleet, l.issue, "answer", d))?;
-        // #337: a board tap is a kick: the snapshot is looked at again at once.
-        if let Some(n) = l.issue {
-            crate::drive::kick(ctx, &self.r, &fleet, n, "board");
-        }
-        self.r.sleep(1);
-        Ok(if h.pending_menu(&screen()?) == Some((q, opts)) {
-            format!("still waiting: {agent}")
-        } else {
-            format!("sent to {agent}")
-        })
     }
 
     fn prompt(&self, ctx: &Ctx, dev: &devices::Device, f: &crate::api::Send) -> Result<String> {
@@ -1497,8 +1443,8 @@ impl<'a> Server<'a> {
         Ok(String::from_utf8_lossy(&out).trim().replace('\n', "; "))
     }
 
-    /// The sheet's transcript: up to 200 masked ANSI lines `before` the newest (load more) of the lane's rolling
-    /// transcript (#138; the export reads the screen only), the live block's length and the status line, as JSON.
+    /// The sheet's transcript: shed's own log of the lane (`session::transcript`): a PTY session's text, up to 200
+    /// masked lines `before` the newest (load more); an ACP session's events go as `blocks` (API v1), as JSON.
     fn transcript(&self, ctx: &Ctx, q: &BTreeMap<String, String>) -> Option<String> {
         if let Some(p) = q.get("setup") {
             return crate::setup::screen(ctx, &self.r, p).ok().map(|j| j.to_string());
@@ -1508,34 +1454,36 @@ impl<'a> Server<'a> {
         let (cfg, events) = (Config::kept(ctx).ok()?, working(&ctx.state).ok()?);
         let agent = q.get("agent")?;
         let ls = self.lanes(ctx.now, &cfg, &events, &events.states)?;
-        let file = lanes::log(&ctx.state, agent).filter(|_| self.export.is_none());
-        let Some(l) = ls.into_iter().find(|l| &l.name == agent && l.pane.is_some()) else {
-            let wt = crate::events::last_spawn(&events, agent).and_then(|e| e.str("worktree"));
-            let saved = wt.and_then(|wt| lanes::session(&ctx.home, wt));
-            let rolled = || Some(std::fs::read_to_string(file?).ok()?.lines().map(String::from).collect());
-            let all: Vec<String> = saved.filter(|_| self.export.is_none()).or_else(rolled)?;
-            let page = window(&all[..all.len().saturating_sub(before)], lines, 32);
+        let l = ls.into_iter().find(|l| &l.name == agent);
+        let sp = crate::events::last_spawn(&events, agent);
+        if l.is_none() && sp.is_none() {
+            return None;
+        }
+        let on = crate::hosts::On::of(&self.r, sp);
+        let live = l.as_ref().and_then(|l| l.session.as_ref());
+        let t = match live {
+            Some(s) => crate::session::transcript::of(&on, s, None, Some(1)).ok(),
+            None => crate::session::transcript::page(&on, ctx, agent, None, 1),
+        };
+        if t.is_none() && l.as_ref().is_none_or(|l| l.session.is_none()) {
+            return None;
+        }
+        let text = match t {
+            Some(crate::session::transcript::Transcript::Screen(t)) => t,
+            _ => String::new(),
+        };
+        let all: Vec<String> = text.lines().map(lanes::mask).collect();
+        let end = all.len().saturating_sub(before);
+        let page = window(&all[..end], lines, 32);
+        let Some(l) = l.filter(|l| l.session.is_some()) else {
             return serde_json::to_string(&Chat {
                 lines: page.to_vec(),
                 before: before + page.len(),
-                more: all.len() > before + page.len(),
+                more: end > page.len(),
                 ..Chat::default()
             })
             .ok();
         };
-        // #337: a lane's chat always reads its pane live (5 s cache), never from the snapshot.
-        let live = Memo(&self.r, &self.cache, ctx.now, 5, Arc::default());
-        let screen = term::recent(&l.on(&live), l.pane.as_deref()?, "200").ok()?;
-        let body = lanes::body(&screen);
-        let (all, live) = file.map_or((body.clone(), body.len()), |f| lanes::roll(&f, &body));
-        let end = all.len().saturating_sub(before);
-        let page = window(&all[..end], lines, 32);
-        let status = lanes::chat(&screen).1.map(lanes::strip);
-        let ok = self.export.is_none();
-        // #351: the last `turns` (10, more as the sheet scrolls up) within 3.2 KB each: a chat opens with ~64 KB at most.
-        let said = l.session().filter(|_| ok).and_then(|p| lanes::read_tail(&p, 1 << 21));
-        let (said, turns) = (said.map(|s| lanes::said(&s).0), n("turns", 10));
-        let win = said.as_deref().map(|s| window(s, turns, turns * 16 / 5));
         let note = |e: &&Event| {
             let t = match e.kind.as_str() {
                 _ if Some(&e.fleet) != l.fleet.as_ref() || e.issue != l.issue => None,
@@ -1555,17 +1503,16 @@ impl<'a> Server<'a> {
         } else {
             &["stop", "kill", "clean"]
         };
-        let older = win.zip(said.as_ref()).is_some_and(|(w, s)| w.len() < s.len());
         serde_json::to_string(&Chat {
-            said: win.map(<[_]>::to_vec),
-            older,
+            said: None,
+            older: false,
             notices,
             harness: l.harness.clone(),
             acts: acts.iter().map(|&a| a.into()).collect(),
-            pane: l.pane.clone().filter(|_| l.role == "other"),
+            pane: l.pane().filter(|_| l.role == "other").map(String::from),
             lines: page.to_vec(),
-            live: if before == 0 { live.min(page.len()) } else { 0 },
-            status,
+            live: 0,
+            status: l.note(),
             before: before + page.len(),
             more: end > page.len(),
         })
@@ -1657,7 +1604,7 @@ impl<'a> Server<'a> {
             }
             "reap" => {
                 let cfg = Config::kept(ctx)?;
-                let n = crate::check::leftovers(ctx, &cfg, &self.r, &term::agents(&self.r)?, true)?.len();
+                let n = crate::check::leftovers(ctx, &cfg, &self.r, &crate::session::live_on(&self.r)?, true)?.len();
                 format!("reaped {n} leftover process(es)")
             }
             "host" => {
@@ -1831,8 +1778,8 @@ impl<'a> Server<'a> {
             snap: self.snapshot().1.ts,
             choosing: chat::choosing(ev),
             asks: asks.collect(),
-            blocked: (all.iter().filter(|l| l.state == "blocked"))
-                .filter_map(|l| self.blocked(ctx, l, paired))
+            blocked: (all.iter().filter(|l| l.state.word() == "blocked"))
+                .map(|l| self.blocked(ctx, l, paired))
                 .collect(),
             issues: Self::needs_human(ctx, cfg, ev, st),
             config: Config::loaded(ctx).err().map(|e| format!("{:#}", e.0)),
@@ -1888,45 +1835,30 @@ impl<'a> Server<'a> {
         st.values().filter_map(pend).collect()
     }
 
-    /// A blocked lane's card: a harness menu's options under its title, reason, command and countdown (#127: `push`
-    /// false while that runs; none once the pane works again), else the pane's last 6 masked lines. Unpaired: no pane
-    /// text, only the 1-line activity.
-    fn blocked(&self, ctx: &Ctx, l: &lanes::Lane, paired: bool) -> Option<Blocked> {
-        let screen = l
-            .pane
-            .as_ref()
-            .and_then(|p| term::read(&l.on(&self.cached(ctx.now, 2)), p).ok())
-            .unwrap_or_default();
-        let rw = self.addr.is_some() && paired;
-        let h = crate::providers::get(&l.harness);
-        let c = lanes::prompt(&screen).unwrap_or_default();
-        let menu = h.pending_menu(&screen);
-        if menu.is_none() && h.status_word(&screen).is_some() {
-            return None;
-        }
-        let s = |k: &str| c[k].as_str().unwrap_or_default().to_string();
-        let menu = menu.filter(|_| paired).map(|(q, opts)| Menu {
-            title: s("title"),
-            reason: s("reason"),
-            command: s("command"),
-            countdown: c["countdown"].as_u64(),
-            question: lanes::mask(&q),
-            options: opts.iter().filter(|_| rw).map(|o| lanes::mask(o)).collect(),
-            h: seen(&q, &opts).to_string(),
+    /// A blocked lane's card: shed's note as its activity; paired, the last 6 masked lines of shed's text as they are.
+    fn blocked(&self, ctx: &Ctx, l: &lanes::Lane, paired: bool) -> Blocked {
+        let memo = self.cached(ctx.now, 2);
+        let on = l.on(&memo);
+        let text = l.session.as_ref().filter(|_| paired).and_then(|s| {
+            match crate::session::transcript::of(&on, s, None, Some(1)).ok()? {
+                crate::session::transcript::Transcript::Screen(t) => Some(t),
+                crate::session::transcript::Transcript::Events(_) => None,
+            }
         });
         let issue = l.issue.map_or(String::new(), |n| format!("#{n}"));
-        Some(Blocked {
+        Blocked {
             name: l.name.clone(),
             who: join(&[l.fleet.as_deref().unwrap_or_default(), &issue, &l.name]),
-            push: c["push"].as_bool().unwrap_or(true),
-            activity: (!paired).then(|| lanes::activity(&l.harness, &screen)),
-            tail: (paired && menu.is_none()).then(|| lanes::tail(&screen, 6).join("\n")),
-            menu,
-        })
+            push: true,
+            activity: l.note().filter(|_| !paired),
+            tail: text.map(|t| lanes::tail(&t, 6).join("\n")),
+            menu: None,
+        }
     }
 
-    fn agents_json(&self, now: u64) -> Option<serde_json::Value> {
-        term::list(&self.cached(now, 10)).ok()
+    fn sessions(&self, now: u64) -> Option<crate::session::Sessions> {
+        let cfg = Config::kept(self.ctx).unwrap_or_default();
+        Some(crate::session::all(&cfg, &self.cached(now, 10))).filter(crate::session::Sessions::listed)
     }
 
     /// #268: API v1's `queue`, the Queue tab's data (web/src/queue.ts draws it): per configured fleet a card (#162),
@@ -1952,11 +1884,11 @@ impl<'a> Server<'a> {
         let ls = self.lanes(now, cfg, events, st).unwrap_or_default();
         let gone = |s: &IssueState| {
             s.active_lane()
-                .and_then(|x| ls.iter().find(|l| l.name == x.1 && l.pane.is_none()))
+                .and_then(|x| ls.iter().find(|l| l.name == x.1 && l.session.is_none()))
         };
         let link = |a: &str| match ls.iter().any(|l| l.name == a) {
             true => "live",
-            false if lanes::log(&ctx.state, a).is_some_and(|f| f.is_file()) => "gone",
+            false if crate::session::transcript::kept(ctx, a) => "gone",
             false => "",
         };
         let asks = crate::events::open_asks(events);
@@ -1984,7 +1916,8 @@ impl<'a> Server<'a> {
                 let waiting = asks.iter().any(|e| e.fleet == *f && e.issue == Some(n));
                 let logged = s.map_or("queued", |s| s.state.as_str());
                 let shown = if waiting { "⏸ waiting: decision" } else { logged };
-                let state = s.and_then(gone).map_or(shown, |l| l.state.as_str());
+                let word = s.and_then(gone).map(|l| l.state.word());
+                let state = word.as_deref().unwrap_or(shown);
                 let dead = state == "dead";
                 // #162: needs you, then ready, then working, then queued; serve.js keeps follow-ups under their parent.
                 let rank = match state.split('(').next().unwrap_or_default() {
@@ -2002,11 +1935,14 @@ impl<'a> Server<'a> {
                 let qls = spawns
                     .filter_map(|e| e.str("agent").filter(|a| seen.insert(*a)).map(|a| (a, e.ts)))
                     .map(|(a, ts)| {
-                        let st = ls.iter().find(|l| l.name == a).map_or("gone", |l| l.state.as_str());
+                        let st: String = ls
+                            .iter()
+                            .find(|l| l.name == a)
+                            .map_or("gone".into(), |l| l.state.word());
                         QueueLane {
                             name: a.into(),
-                            state: st.into(),
-                            tone: if st == "gone" { "m" } else { tone(st) }.into(),
+                            tone: if st == "gone" { "m" } else { tone(&st) }.into(),
+                            state: st,
                             ago: ago(now, ts),
                             link: link(a).into(),
                         }
@@ -2130,7 +2066,7 @@ impl<'a> Server<'a> {
             if fc.paused {
                 let nd = lanes
                     .iter()
-                    .filter(|s| gone(s).is_some_and(|l| l.state == "dead"))
+                    .filter(|s| gone(s).is_some_and(|l| l.state.word() == "dead"))
                     .count();
                 let what = match (lanes.len(), nd) {
                     (0, _) => "no lane".to_string(),
@@ -2189,14 +2125,8 @@ impl<'a> Server<'a> {
     }
 
     fn lanes(&self, now: u64, cfg: &Config, events: &[Event], st: &States) -> Option<Vec<lanes::Lane>> {
-        let list = self.agents_json(now)?;
-        Some(crate::snapshot::lanes(
-            cfg,
-            &self.cached(now, 30),
-            self.ctx,
-            (events, st),
-            &list,
-        ))
+        let list = self.sessions(now)?;
+        Some(crate::snapshot::lanes(cfg, &self.cached(now, 30), (events, st), &list))
     }
 
     fn waits(&self, ctx: &Ctx, cfg: &Config, events: &[Event], all: &[lanes::Lane]) -> Vec<crate::waiting::Waiting> {
@@ -2223,13 +2153,13 @@ impl<'a> Server<'a> {
         let waits = self.waits(ctx, &cfg, &events, &all);
         let lanes = |f: Option<&String>| -> Vec<_> {
             all.iter()
-                .filter(|l| l.fleet.as_ref() == f && l.state != "asleep") // #422: no asleep conductor in the herd
+                .filter(|l| l.fleet.as_ref() == f && l.state.word() != "asleep") // #422: no asleep conductor in the herd
                 .map(|l| {
                     let (title, tone, shown, a) = view(ctx, l, &waits);
                     // #239: a fix round's lane has role impl; the issue's state says it is fixing.
                     let is = l.issue.and_then(|i| st.get(&(f?.clone(), i)));
                     let is = is.map_or("", |s| s.state.as_str());
-                    let act = match (act(&l.role, &l.state), act(&l.role, is)) {
+                    let act = match (act(&l.role, &l.state.word()), act(&l.role, is)) {
                         ("impl", b @ ("fix" | "update")) => b,
                         (a, _) => a,
                     };
@@ -2247,7 +2177,7 @@ impl<'a> Server<'a> {
                         host: l.host.clone(),
                         runtime: l.runtime.clone(),
                         place: l.place.clone(),
-                        state: l.state.clone(),
+                        state: l.state.word(),
                         shown,
                         tone: tone.into(),
                         age: a,
@@ -2369,10 +2299,6 @@ impl<'a> Server<'a> {
         paired: bool,
         waits: &[crate::waiting::Waiting],
     ) -> LaneRow {
-        let screen = l
-            .pane
-            .as_ref()
-            .and_then(|p| term::read(&l.on(&self.cached(ctx.now, 30)), p).ok());
         let (title, tone, shown, a) = view(ctx, l, waits);
         let issue = l.issue.map(|n| format!("#{n}")).unwrap_or_default();
         let round = s.map(|s| {
@@ -2394,22 +2320,15 @@ impl<'a> Server<'a> {
             o(&l.port),
             a,
         ];
-        let screen = screen.unwrap_or_default();
-        let (now, spin) = (lanes::now_of(l, &screen), lanes::spin(&l.harness, &screen));
-        let busy = (now.is_some() || spin.is_some()).then(|| {
-            let (w, t) = spin.map_or((None, None), |(w, t)| (Some(w), t));
-            let n = now.as_ref().map(|n| match n.strip_prefix("now: running ") {
-                Some(c) => format!("{}running {}", if w.is_some() { "" } else { "now: " }, lanes::short(c)),
-                None => n.strip_prefix("now: ").filter(|_| w.is_some()).unwrap_or(n).to_string(),
+        let busy = l
+            .note()
+            .filter(|_| l.state.is(crate::session::Status::Working))
+            .map(|n| LaneNow {
+                title: n.clone(),
+                w: None,
+                n: Some(n),
+                t: None,
             });
-            let title: Vec<_> = [&w, &now, &t].into_iter().flatten().cloned().collect();
-            LaneNow {
-                title: title.join(" · "),
-                w,
-                n,
-                t,
-            }
-        });
         // #53: line 1 name (one line) + `state age`; line 2 the reason (no age), or `superseded by` on an issue's older lane.
         let w = wait_of(l, waits);
         let sup = s.and_then(|s| s.lane.as_ref()).filter(|x| **x != l.name && w.is_some());
@@ -2426,22 +2345,22 @@ impl<'a> Server<'a> {
             place: l.place.clone(),
             name: l.name.clone(),
             role: l.role.clone(),
-            state: l.state.clone(),
-            act: act(&l.role, &l.state).into(),
-            grow: stage(s.map_or("", |s| s.state.as_str()), act(&l.role, &l.state)).into(),
-            atone: self::tone(&l.state).into(),
+            state: l.state.word(),
+            act: act(&l.role, &l.state.word()).into(),
+            grow: stage(s.map_or("", |s| s.state.as_str()), act(&l.role, &l.state.word())).into(),
+            atone: self::tone(&l.state.word()).into(),
             coat: coat(&l.name),
             tone: if sup.is_some() { "m" } else { tone }.into(),
             ago: ago(ctx.now, since),
             why,
             why_tone: why_tone.into(),
             activity: if busy.is_none() {
-                lanes::activity(&l.harness, &screen)
+                l.note().unwrap_or_default()
             } else {
                 String::new()
             },
             now: busy,
-            gone: l.pane.is_none(),
+            gone: l.session.is_none(),
             thread: l.thread.clone(), // #422: a tap opens it
             head: format!("{issue} {}", o(&title)).trim().into(),
             shown,
@@ -2449,8 +2368,8 @@ impl<'a> Server<'a> {
             issue: l.issue.filter(|_| l.fleet.is_some()),
             pr: l.issue.zip(l.fleet.as_ref()).map(|(n, f)| pr_data(ctx, fc, f, n, s)),
             repo: fc.map(|c| c.repo.clone()),
-            dead: l.state == "dead",
-            blocked: (l.state == "blocked").then(|| self.blocked(ctx, l, paired)).flatten(),
+            dead: l.state.word() == "dead",
+            blocked: (l.state.is(crate::session::Status::Blocked)).then(|| self.blocked(ctx, l, paired)),
             unpark: l.fleet.clone().filter(|_| s.is_some_and(|s| s.state == "parked")),
         }
     }
@@ -2494,7 +2413,7 @@ impl<'a> Server<'a> {
             d.orphans = crate::check::orphan_dirs(ctx, c).len();
         }
         // #186: processes still running in closed lanes' worktrees; `[reap]` TERMs, then KILLs them.
-        let left = cfg.zip(term::agents(r).ok()).map_or(vec![], |(c, a)| {
+        let left = cfg.zip(crate::session::live_on(r).ok()).map_or(vec![], |(c, a)| {
             crate::check::leftovers(ctx, c, r, &a, false).unwrap_or_default()
         });
         if !left.is_empty() {
@@ -2645,20 +2564,26 @@ impl<'a> Server<'a> {
                 gate = hs.clone();
                 (s.up, s.seen, s.load, s.mem, s.swap) = (true, now, hs.load_per_cpu, hs.free_mem_gb, hs.swapout);
                 ((s.disk, s.disk_total), s.mem_total) = (host::df(r).unzip(), hs.mem_total_gb);
-                let all = term::agents(r).unwrap_or_default();
+                let all = crate::session::live_on(r).unwrap_or_default();
                 s.top = host::top(r, &all);
                 // #248, #316: what each harness's lanes hold (their pane trees), working and done apart, so done-lane
                 // memory shows; an agent is its harness's by `Harness::process_names`, else by its own label.
-                let mut by: BTreeMap<String, Vec<&serde_json::Value>> = BTreeMap::new();
-                for (a, label) in all
-                    .iter()
-                    .filter_map(|a| Some((a, a["agent"].as_str().filter(|l| !l.is_empty())?)))
-                {
+                let mut by: BTreeMap<String, Vec<&crate::session::Session>> = BTreeMap::new();
+                for (a, label) in all.iter().filter_map(|a| {
+                    Some((
+                        a,
+                        a.labels.get("harness").map(String::as_str).filter(|l| !l.is_empty())?,
+                    ))
+                }) {
                     let h = crate::providers::lanes().find(|h| h.process_names().contains(&label));
                     by.entry(h.map_or(label, |h| h.name).into()).or_default().push(a);
                 }
                 for (h, ours) in by {
-                    let n = |st: &str| ours.iter().filter(|a| a["agent_status"] == st).count();
+                    let n = |st: &str| {
+                        ours.iter()
+                            .filter(|a| a.status().map(crate::session::Status::word) == Some(st))
+                            .count()
+                    };
                     let mb: u64 = host::held(r, &ours).iter().sum();
                     let gb = format!("{}.{} GB", mb / 1024, mb % 1024 * 10 / 1024);
                     let (w, d) = (n("working"), n("done"));

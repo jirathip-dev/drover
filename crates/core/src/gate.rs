@@ -213,8 +213,8 @@ pub fn verdict(
     let is_impl = |e: &&Event| pass && e.is("spawn", fleet, issue) && !crate::events::checks(e);
     if let Some(b) = events.iter().rfind(is_impl) {
         let wt = Path::new(b.str("worktree").unwrap_or_default());
-        let working = |a: &serde_json::Value| a["name"].as_str() == b.str("agent") && a["agent_status"] == "working";
-        if wt.is_dir() && term::agents(r).is_ok_and(|a| !a.iter().any(working)) {
+        let busy = |a: &crate::session::Session| Some(a.name.as_str()) == b.str("agent") && a.busy();
+        if wt.is_dir() && crate::session::live_on(r).is_ok_and(|a| !a.iter().any(busy)) {
             check::purge(r, cfg, fleet, out, wt, false)?;
         }
     }
@@ -226,10 +226,8 @@ pub fn verdict(
         return Ok(());
     };
     let (agent, pane) = (e.str("agent"), e.str("pane").unwrap_or_default());
-    let busy = term::agents(r).map_or(true, |a| {
-        a.iter()
-            .any(|a| a["name"].as_str() == agent && a["agent_status"] == "working")
-    });
+    let busy =
+        crate::session::live_on(r).map_or(true, |a| a.iter().any(|a| Some(a.name.as_str()) == agent && a.busy()));
     if busy {
         return Ok(());
     }
@@ -238,7 +236,7 @@ pub fn verdict(
         Some(why) => Err(anyhow::anyhow!(why)),
         None => check::reap(ctx, cfg, r, (fleet, Some(issue)), wt)
             .and_then(|_| check::remove(r, cfg, fleet, wt, false))
-            .and_then(|()| term::close(r, pane).map(drop)),
+            .and_then(|()| term::close(ctx, r, pane).map(drop)),
     };
     let kind = if gone.is_ok() { "lane-closed" } else { "lane-kept" };
     let reason = gone.map_or_else(|why| format!("{wt}: {why:#}"), |()| "verdict recorded".into());
@@ -1094,7 +1092,7 @@ pub fn park(
         e.data.insert("why".into(), json!(w));
     }
     crate::events::append(&ctx.state, &e)?;
-    if let Ok(a) = term::agents(r) {
+    if let Ok(a) = crate::session::live_on(r) {
         check::leftovers(ctx, cfg, r, &a, true)?;
     }
     Ok(writeln!(out, "#{n}: park")?)
