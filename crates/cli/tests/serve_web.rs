@@ -385,7 +385,7 @@ fn page_reads_only_cached_pr_data_and_serves_pwa_assets() {
     assert_eq!(
         (&row["subtitle"], &row["tap"]["url"]),
         (
-            &json!("impl · CI ✓"),
+            &json!("impl · PR #34 · CI ✓"),
             &json!("https://github.com/jirathip-dev/sendmeter/pull/34")
         ),
         "{row}"
