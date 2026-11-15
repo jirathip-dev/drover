@@ -1,0 +1,10 @@
+Decided: merge origin/staging and fit this branch's indexes onto staging's SQLite-loaded log: kind and agent indexes pushed in catch_up, lanes join on sessions with last_spawn, waits and serial holders on with_states
+Because: crates/core/src/events.rs:799
+Because: crates/core/src/lanes.rs:94
+Decided: verify::served reads the spawn and verdict kind index, not of_issue, so a narrow API read on an uncached slice counts no rebuild
+Because: crates/core/src/verify.rs:95
+Rejected: staging's whole-log scan in served — the board calls it once per queue row, the per-redraw scan this issue removes
+Decided: evidence re-measured at the merged head (AC1 on a fresh copy of the live state.db, AC2 best of 3)
+Because: q1659
+Check: the PR body evidence names head 5cb661b2 and the AC2 ratio stays under 1.5x
+Owner: Merged the latest staging into this PR and re-measured; the board change is the same.
