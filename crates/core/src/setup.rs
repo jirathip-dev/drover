@@ -53,7 +53,7 @@ pub fn start(ctx: &Ctx, cfg: &Config, r: &dyn Runner, host: &str, name: &str, vi
         "drover-setup-{}",
         name.replace(|c: char| !c.is_ascii_alphanumeric(), "-")
     );
-    term::Shed(crate::shed::Shed { acp: None, ..b }).start(&on, pane, &[], "/tmp", &[])?;
+    term::Shed(crate::shed::Shed { acp: None, ..b }).start(&on, pane, &[], "/tmp", &term::Acp::default())?;
     term::ok(&on, &term::run_argv(pane, &[&format!("cd; {line}; exit")]))?;
     let d = json!({"host": host, "name": name, "pane": pane, "machine": on.machine, "via": via});
     append(&ctx.state, &Event::new(ctx.now, "", None, "setup", d))?;

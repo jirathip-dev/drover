@@ -67,6 +67,7 @@ fn acp_setup(name: &str, role_extra: &str, extra: &str, b: &FakeShed) -> drover:
 fn acp(adapter: &[&str]) -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
     Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")

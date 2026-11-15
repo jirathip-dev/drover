@@ -284,6 +284,7 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
     let agents =
         json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo", "claude-agent-acp"]}]);
     let host = Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed", "")
         .reply("gh issue close", "");

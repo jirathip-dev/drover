@@ -257,11 +257,20 @@ const TOKEN_C: &str = concat!("sk", "-ant-oat01-CCCC-secret");
 fn acp_fake(adapter: &[&str]) -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": adapter}]);
     spawn_fake()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
         .reply("shed cancel", "")
 }
+
+static META: std::sync::LazyLock<String> = std::sync::LazyLock::new(|| {
+    let global = drover::config::home().join(".claude/CLAUDE.md");
+    format!(
+        r#"{{"claudeCode":{{"options":{{"settingSources":["project","local"],"settings":{{"claudeMdExcludes":["{}"]}},"strictMcpConfig":true}}}}}}"#,
+        global.display()
+    )
+});
 
 fn acp_ctx(name: &str, cfg: &str) -> drover::Ctx {
     let mut c = ctx(&tmpdir(name), cfg);
@@ -284,14 +293,16 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
     let calls = f.calls.borrow();
     let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
     let head = format!(
-        "shed run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd {} --label fleet=sendmeter \
-         --label issue=12 --label role=impl --label harness=claude --label source=drover --label group=sendmeter \
+        "shed run --acp claude-acp --policy allow --name sendmeter-impl-12 --cwd {0} --mcp {0}/.mcp.lane.json \
+         --meta {1} --label fleet=sendmeter --label issue=12 --label role=impl --label harness=claude --label source=drover --label group=sendmeter \
          --label item=#12 --label round=0 --label url=https://github.com/jirathip-dev/sendmeter/issues/12 \
          --label drover.fleet=sendmeter --label drover.issue=12 --label drover.role=impl --label drover.round=0 -- sh -c ",
-        wt.display()
+        wt.display(), *META
     );
     assert!(start.starts_with(&head), "{start}");
     assert!(start.ends_with(" sh echo claude-agent-acp"), "{start}");
+    let mcp: Value = serde_json::from_str(&std::fs::read_to_string(wt.join(".mcp.lane.json")).unwrap()).unwrap();
+    assert_eq!(mcp, json!([]), "a role with no mcp sends an empty list");
     assert!(
         !start.contains(TOKEN_C) && !out.contains(TOKEN_C),
         "no token in argv: {start}"
@@ -332,6 +343,77 @@ fn a_shed_acp_fleet_starts_its_lane_as_an_acp_session_with_the_brief_as_its_firs
         "{:?}",
         b.methods()
     );
+}
+
+#[test]
+fn an_acp_lane_gets_only_its_roles_mcp_servers_in_acps_shape() {
+    let b = FakeShed::new();
+    let d = tmpdir("acp-mcp");
+    let repo = d.join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    let all = json!({"mcpServers": {
+        "docs": {"command": "npx", "args": ["docs"], "env": {"K": "v"}},
+        "web": {"type": "http", "url": "http://x", "headers": {"H": "h"}},
+        "other": {"command": "other"}}});
+    std::fs::write(repo.join(".mcp.json"), all.to_string()).unwrap();
+    let cfg = acp_config(&b.sock, "claude")
+        .replace(
+            "harness = \"claude\"",
+            "harness = \"claude\"\nmcp = [\"docs\", \"web\"]",
+        )
+        .replace("/tmp/does-not-matter/sendmeter", repo.to_str().unwrap());
+    let c = acp_ctx("acp-mcp", &cfg);
+    let f = acp_fake(&["echo", "claude-agent-acp"]);
+    let (code, out) = run(&c, &b.cli(&f), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 0, "{out}");
+    let wt = c.worktrees.join("sendmeter/issue-12");
+    let file = wt.join(".mcp.lane.json");
+    let start = f
+        .calls
+        .borrow()
+        .iter()
+        .find(|c| c.starts_with("shed run"))
+        .cloned()
+        .unwrap();
+    assert!(
+        start.contains(&format!(" --mcp {} --meta {} ", file.display(), *META)),
+        "{start}"
+    );
+    let mcp: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(
+        mcp,
+        json!([
+            {"name": "docs", "command": "npx", "args": ["docs"], "env": [{"name": "K", "value": "v"}]},
+            {"type": "http", "name": "web", "url": "http://x", "headers": [{"name": "H", "value": "h"}]}
+        ])
+    );
+}
+
+#[test]
+fn a_shed_without_run_meta_is_a_doctor_cross_and_refuses_acp_lanes() {
+    let b = FakeShed::new();
+    let c = acp_ctx("acp-old-shed", &acp_config(&b.sock, "claude"));
+    let help = "      --mcp <FILE>\n";
+    let old = acp_fake(&["echo", "claude-agent-acp"])
+        .once("shed help run", 0, help)
+        .once("shed help run", 0, help);
+    let (code, out) = run(&c, &b.cli(&old), &["spawn", "sendmeter", "12", "impl"]);
+    assert_eq!(code, 3, "{out}");
+    assert!(out.contains("REFUSED SHED_OLD: "), "{out}");
+    assert!(
+        !old.called("shed run") && !old.called("git"),
+        "{:?}",
+        old.calls.borrow()
+    );
+    let (_, out) = run(&c, &old, &["doctor"]);
+    assert!(
+        out.contains("✗ shed run --meta — this host's shed predates shed#94"),
+        "{out}"
+    );
+    assert!(out.contains(&format!("--rev {} ", shed::REV)), "{out}");
+    let new = acp_fake(&["echo", "claude-agent-acp"]);
+    let (_, out) = run(&c, &new, &["doctor"]);
+    assert!(out.contains("✓ shed run --meta — "), "{out}");
 }
 
 fn bash_call(cmd: &str, cwd: &std::path::Path) -> String {
@@ -1164,10 +1246,11 @@ fn a_shed_acp_fleets_thread_runs_its_orchestrator_as_an_acp_session_that_sleeps_
     let calls = f.calls.borrow().clone();
     let start = calls.iter().find(|c| c.starts_with("shed run")).unwrap();
     let head = format!(
-        "shed run --acp claude-acp --policy allow --name orchestrator-t1 --cwd {} --label fleet=sendmeter --label issue=- \
+        "shed run --acp claude-acp --policy allow --name orchestrator-t1 --cwd {0} --mcp {0}/.mcp.lane.json \
+         --meta {1} --label fleet=sendmeter --label issue=- \
          --label role=orchestrator --label harness=claude --label source=drover --label group=sendmeter --label thread=t1 \
          -- sh -c ",
-        dir.display()
+        dir.display(), *META
     );
     assert!(start.starts_with(&head), "{start}");
     let herdr = |c: &&String| c.starts_with("herdr") && *c != "herdr agent list";
@@ -1662,6 +1745,7 @@ fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
     let pr = json!({"number": 100, "state": "OPEN", "baseRefName": "staging", "headRefOid": head,
         "mergeable": "MERGEABLE", "statusCheckRollup": []});
     let f = spawn_fake()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
@@ -1687,6 +1771,11 @@ fn a_codex_rev_and_a_claude_impl_spawn_with_their_own_agent_and_login() {
         "{runs:?}"
     );
     assert!(runs[1].contains("--label harness=codex "), "{runs:?}");
+    assert!(runs[0].contains(&format!(" --meta {} ", *META)), "{runs:?}");
+    assert!(
+        !runs[1].contains(" --mcp ") && !runs[1].contains(" --meta "),
+        "{runs:?}"
+    );
     let dumps = cli.out.borrow();
     let env = |i: usize| -> BTreeMap<String, String> {
         let kv = dumps[i].lines().filter_map(|l| l.split_once('='));
@@ -2351,7 +2440,14 @@ fn thread_say_restarts_a_hung_acp_orchestrator_and_delivers_to_the_fresh_one() {
     assert_eq!((code, out.as_str()), (0, "t1: -> orchestrator-t1\n"));
     assert_eq!(
         shed_calls(&f),
-        ["shed cancel", "shed kill", "shed agents", "shed run", "shed send"]
+        [
+            "shed cancel",
+            "shed kill",
+            "shed help",
+            "shed agents",
+            "shed run",
+            "shed send"
+        ]
     );
     let sends = f
         .calls
