@@ -1,0 +1,5 @@
+Decided: merged origin/staging and renamed the lane session binding in waiting.rs from status to session
+Because: crates/core/src/waiting.rs:756
+Rejected: #[allow(clippy::similar_names)] — an allow hides the clash instead of naming the value for what it is
+Check: cargo clippy --all-targets -- -D warnings exits 0 at the merge head; design_stage behaviour unchanged
+Owner: A naming clash that failed the build check after the latest staging merge is fixed; behaviour is unchanged.
