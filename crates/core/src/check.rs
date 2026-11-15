@@ -579,7 +579,6 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
     Ok(())
 }
 
-/// #898: serve's cold starts, RSS, p95 and read 503s (`serve-starts`, `serve-health.json`), each fleet's last pass.
 fn health(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, events: &[Event]) -> Result<()> {
     let starts = std::fs::read_to_string(ctx.state.with_file_name("serve-starts")).unwrap_or_default();
     let day = |t: &u64| t + 86_400 >= ctx.now;

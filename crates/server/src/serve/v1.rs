@@ -545,7 +545,6 @@ impl Server<'_> {
         });
     }
 
-    /// #898: serve's own numbers at `now`: RSS as last sampled, the last minute's route groups and read 503s.
     fn numbers(&self, now: u64) -> ServeHealth {
         let ((groups, busy), slow) = {
             let t = lock(&self.timing);
@@ -564,7 +563,6 @@ impl Server<'_> {
     }
 
     /// #859: `/api/v1` p95 over `slo_api_p95_ms` for `slo_api_minutes`: one `slo-api`; held again, `slo-api-ok`.
-    /// #898: first serve's RSS and numbers into `serve-health.json`, which `drover check` alerts on.
     pub fn slo(&self, now: u64) {
         let pid = std::process::id().to_string();
         let kb = crate::runner::ok(&self.r, "ps", &["-o", "rss=", "-p", &pid]).map(|s| s.trim().parse::<u64>());
