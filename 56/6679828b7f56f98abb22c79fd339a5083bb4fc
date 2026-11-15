@@ -1,0 +1,5 @@
+Decided: merge origin/staging; keep the lane fold's readers and add #971's kind and agent indexes beside it in the append step
+Because: "Saved lane fold and ask fold, updated on append, kept exact for lanes of merged issues"
+Rejected: none
+Check: crates/core/src/events.rs catch_up updates lane_at, kinds and agents for each new event
+Owner: the branch is current with staging again; status and asks still use about 10–20 MB
