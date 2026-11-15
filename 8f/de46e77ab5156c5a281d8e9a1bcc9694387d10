@@ -1,0 +1,7 @@
+Decided: merged origin/staging; the one conflict, events_tab.rs, takes #927's removal of the old board tab tests and keeps this branch's ask-row test with its imports
+Because: crates/cli/tests/events_tab.rs:180
+Decided: staging build fix: queue_titles expects #1045's one short Queue line (no PR title, long titles cut with …)
+Because: crates/cli/tests/queue_titles.rs:64
+Rejected: rebasing onto staging — form fixes are new commits, never a history rewrite
+Check: queue_titles and serve_web fail on bare origin/staging since #1045 and pass here
+Owner: The branch is on the latest staging again, plus a test fix staging needed; answering asks from Events works as before.
