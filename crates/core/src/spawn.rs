@@ -1103,14 +1103,10 @@ pub fn spawn(
         let why = crate::check::worktree_why(ctx);
         return refused("DISK_BUDGET", format!("worktrees {gb:.1} GB > {budget} GB; {why}"));
     }
-    let extend = crate::pending::extending(&events, fleet, issue);
     match refusal {
-        Some(("HOST_BUSY", why)) if o.force || extend => {
+        Some(("HOST_BUSY", why)) if o.force => {
             let by = crate::orchestrator::acting().map_or_else(|| "owner".into(), |id| format!("orchestrator-{id}"));
-            let mut d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": by});
-            if extend {
-                d["why"] = "owner-extend".into();
-            }
+            let d = json!({"code": "HOST_BUSY", "reason": why, "role": role, "agent": p.agent, "by": by});
             event("override", d)?;
         }
         Some(("HOST_BUSY", why)) => return refused("HOST_BUSY", format!("{why}; retry later or pass --force")),
@@ -1672,7 +1668,9 @@ pub fn orphans(ctx: &Ctx, cfg: &Config, (r, seen): (&dyn Runner, &dyn Runner), o
             continue;
         };
         let f = cfg.fleet(fleet)?;
-        let started = events.iter().filter(|e| e.kind == "spawn-started").rfind(at);
+        let started = (crate::events::lanes(&events).into_iter())
+            .filter(|e| e.kind == "spawn-started")
+            .rfind(at);
         let role = role.or(s.build.clone()).unwrap_or(f.flow().start().into());
         let wt = wt.or(started.and_then(|e| e.str("worktree")).map(String::from));
         let on = crate::hosts::On::new(r, m);

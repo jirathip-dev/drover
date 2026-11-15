@@ -36,6 +36,22 @@ pub fn places() -> Value {
     serde_json::to_value(m.get("places")).unwrap_or_default()
 }
 
+/// #1072: the standalone page's places: the manifest's, then the Threads tab (never the Cooee plugin's).
+pub fn page_places() -> Value {
+    let threads = json!({"type": "header-strip", "id": "threads", "label": "Threads", "screen": "/screens/threads"});
+    let mut all = places().as_array().cloned().unwrap_or_default();
+    all.push(threads);
+    Value::Array(all)
+}
+
+const THREAD_ACTIONS: [&str; 5] = [
+    "thread-new",
+    "thread-say",
+    "thread-retry",
+    "thread-archive",
+    "thread-restore",
+];
+
 fn iso(t: u64) -> String {
     let (d, s) = (t / 86_400, t % 86_400);
     let (m, day) = civil_month_day(d);
@@ -111,7 +127,7 @@ fn cut(s: &str, n: usize) -> String {
 
 const LINE: usize = 48;
 
-fn row(ctx: &Ctx, ev: &[Event], f: &str, r: &QueueRow, k: Option<usize>) -> Value {
+fn row(ctx: &Ctx, ev: &[Event], paused: bool, f: &str, r: &QueueRow, k: Option<usize>) -> Value {
     let fig = figure(&r.act, &r.state);
     let title = format!(
         "#{} {}",
@@ -153,11 +169,17 @@ fn row(ctx: &Ctx, ev: &[Event], f: &str, r: &QueueRow, k: Option<usize>) -> Valu
             .collect();
         sub = format!("asks: {} · {}", a.ask.question, opts.join(" / "));
     }
+    let sub = sub.trim_start_matches(" ▸ ").trim_start_matches(" · ");
+    let sub = match k.and(crate::pending::waits(ev, f, r.issue, paused)) {
+        Some(w) if !sub.is_empty() => format!("{w} · {sub}"),
+        Some(w) => w,
+        None => sub.into(),
+    };
     let vals = json!({"fleet": f, "issue": r.issue, "agent": r.lane});
     if let Some(b) = r.blocked_by {
         v["subtitle"] = json!({"text": format!("held until #{b}"), "tone": "bad"});
     } else if !sub.is_empty() {
-        v["subtitle"] = json!(cut(sub.trim_start_matches(" ▸ ").trim_start_matches(" · "), LINE));
+        v["subtitle"] = json!(cut(&sub, LINE));
     }
     if k.is_none() {
         v["value"] = json!({ "since": iso(r.t) });
@@ -265,12 +287,13 @@ fn tree<'a>(rs: &[&'a QueueRow]) -> Vec<(&'a QueueRow, usize)> {
 fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q) -> Value {
     let f = &c.name;
     let (queued, busy): (Vec<&QueueRow>, Vec<&QueueRow>) = c.rows.iter().partition(|r| r.state == "queued");
+    let paused = c.paused.is_some();
     let rows = |id: &str, ts: Vec<(&QueueRow, usize)>| -> (usize, Vec<Value>) {
         let mut groups: Vec<Vec<Value>> = vec![];
         let mut i = 0;
         while let Some(&(r, d)) = ts.get(i) {
             let k = queued.iter().position(|x| x.issue == r.issue);
-            let mut v = row(ctx, ev, f, r, k);
+            let mut v = row(ctx, ev, paused, f, r, k);
             if d > 0 {
                 v["indent"] = json!(d.min(2));
             }
@@ -310,7 +333,6 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard, q: &Q) -> Value {
         json!({"type": "section", "id": format!("{id}-{f}"), "header": format!("{word} ({n})"),
             "blocks": [{"type": "list", "id": format!("{id}-list-{f}"), "rows": rs}]})
     };
-    let paused = c.paused.is_some();
     let badge = [
         json!({"text": "driving", "tone": "ok"}),
         json!({"text": "paused", "tone": "mute"}),
@@ -1000,6 +1022,7 @@ fn sheets(v: &Value, out: &mut Vec<String>) {
         Value::Object(m) => {
             out.extend(
                 m.get("sheet")
+                    .or_else(|| m.get("open"))
                     .and_then(Value::as_str)
                     .filter(|p| p.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b)))
                     .map(String::from),
@@ -1013,7 +1036,7 @@ fn sheets(v: &Value, out: &mut Vec<String>) {
 
 impl Server<'_> {
     pub(super) fn screen_files(&self, ctx: &Ctx, paired: bool) -> Vec<(String, Vec<u8>)> {
-        let mut paths: Vec<String> = places()
+        let mut paths: Vec<String> = page_places()
             .as_array()
             .into_iter()
             .flatten()
@@ -1058,6 +1081,9 @@ impl Server<'_> {
                 backlog(ctx.now, tab.fleets.iter().find(|c| Some(&c.name) == q.get("repo"))?, q)?
             }
             "/screens/ask" => ask_sheet(ctx, q)?,
+            p if p == "/screens/threads" || p.starts_with("/screens/threads/") => {
+                return self.threads_screen(ctx, &p[16..], paired)
+            }
             _ => return None,
         };
         let snap = Some(self.snapshot().1.ts).filter(|t| *t > 0);
@@ -1254,7 +1280,7 @@ impl Server<'_> {
             ("POST", "/action") => {
                 let a: Value = serde_json::from_str(body).unwrap_or_default();
                 let name = a["action"].as_str().unwrap_or_default();
-                if !permitted(name) {
+                if !permitted(name) && (plugin || !THREAD_ACTIONS.contains(&name)) {
                     let why =
                         format!("REFUSED NOT_PERMITTED: `{name}` is not in cooee-plugin.toml's [permissions] actions");
                     return line("403 Forbidden", &why);
@@ -1397,6 +1423,29 @@ impl Server<'_> {
                     ("via", "cooee".into()),
                 ];
                 self.form_op(ctx, "card", &kv)?
+            }
+            n if THREAD_ACTIONS.contains(&n) => {
+                let kv = [
+                    ("t", s("thread")),
+                    ("text", s("text")),
+                    ("repo", s("repo")),
+                    ("n", s("msg")),
+                ];
+                let mut f: Q = kv.into_iter().map(|(k, v)| (k.into(), v)).collect();
+                f.insert("op".into(), n[7..].into());
+                let mut later = vec![];
+                let (res, more) = crate::conductor::deferred(|| super::chat::post(ctx, &self.r, &f, &mut later));
+                self.later(ctx, later.into_iter().chain(more));
+                self.kick.store(true, Relaxed);
+                let line = res?;
+                if n == "thread-new" {
+                    let id = line.split(' ').next().unwrap_or_default();
+                    let s = self
+                        .threads_screen(ctx, &format!("/{id}"), true)
+                        .context("no such thread")?;
+                    return Ok(json!({"ops": [{"op": "screen", "screen": s}], "toast": line}));
+                }
+                line
             }
             "save-fleets" => self.save_fleets(ctx, &cfg, v)?,
             "remove-fleet" => {

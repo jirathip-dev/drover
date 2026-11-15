@@ -17,6 +17,9 @@ pub const SOFT: [&str; 10] = [
     "HOST_OFFLINE",
 ];
 const SKIP: [&str; 2] = ["IN_FLIGHT", "ALREADY_DONE"];
+const DISK: [&str; 2] = ["DISK_LOW", "DISK_BUDGET"];
+/// #1058: an extend migrated from #975's pending start back to its queue place.
+pub const REQUEUED: &str = "extend-requeued";
 /// A pending action unstarted this long brings its card back.
 pub const BACK_SECS: u64 = 1800;
 /// #825: the reason of a start held by host load alone: it waits, its card never comes back for it.
@@ -34,23 +37,15 @@ pub struct Pending {
 }
 
 impl Pending {
-    /// Its card is back: a hard refusal, or still not started after `BACK_SECS`.
+    /// Its card is back: a hard refusal, or (#1058: never an extend's) still not started after `BACK_SECS`.
     pub fn back(&self, now: u64) -> bool {
-        self.failed || now >= self.since + BACK_SECS && self.reason.as_deref() != Some(LOAD)
+        self.failed || self.action != "extend" && now >= self.since + BACK_SECS && self.reason.as_deref() != Some(LOAD)
     }
-    /// The row's line while it waits: `starting, waiting for host: <reason> · <age>`; #975: `extended · starting`.
+    /// The row's line while it waits: `starting, waiting for host: <reason> · <age>`.
     pub fn line(&self, now: u64) -> Option<String> {
         let wait = age(now.saturating_sub(self.since));
-        let what = match (&self.reason, self.action == "extend") {
-            (None, true) => "extended · starting".into(),
-            (Some(why), true) => format!("extended · starting, waiting for host: {why}"),
-            (why, false) => format!(
-                "starting, waiting for host: {}",
-                why.clone()
-                    .unwrap_or_else(|| crate::promise::Say::Pass(String::new()).line())
-            ),
-        };
-        (!self.failed).then(|| format!("{what} · {wait}"))
+        let why = (self.reason.clone()).unwrap_or_else(|| crate::promise::Say::Pass(String::new()).line());
+        (!self.failed).then(|| format!("starting, waiting for host: {why} · {wait}"))
     }
     /// A returned card's reason: the refusal and the wait.
     pub fn why(&self, now: u64) -> String {
@@ -68,7 +63,7 @@ pub fn of(events: &[Event], fleet: &str, n: u64) -> Option<Pending> {
     let (i, e) = mine().rfind(|(_, e)| e.kind == "pending-action")?;
     let num = |k| e.data.get(k).and_then(serde_json::Value::as_u64);
     let (since, after) = (num("since").unwrap_or(e.ts), num("after").unwrap_or(u64::MAX));
-    let started = mine().any(|(j, s)| s.kind == "spawn" && (j > i || s.seq > after));
+    let started = mine().any(|(j, s)| s.kind == "spawn" && (j > i || s.seq > after) || j > i && s.kind == REQUEUED);
     (!started).then(|| Pending {
         action: e.str("action").unwrap_or_default().into(),
         role: e.str("role").unwrap_or_default().into(),
@@ -79,9 +74,48 @@ pub fn of(events: &[Event], fleet: &str, n: u64) -> Option<Pending> {
     })
 }
 
-/// #975: the owner's extend waits to start: its spawn skips the host-load and spawn-pending gates.
-pub fn extending(events: &[Event], fleet: &str, n: u64) -> bool {
-    of(events, fleet, n).is_some_and(|p| p.action == "extend" && !p.failed)
+fn since<'a>(events: &'a [Event], fleet: &str, n: u64) -> Option<Vec<&'a Event>> {
+    let mut all = crate::events::of_issue(events, fleet, n);
+    let queued =
+        |e: &&Event| e.kind == REQUEUED || e.kind == "round-extended" && e.data.get("queued") == Some(&json!(true));
+    let at = all.iter().rposition(queued)?;
+    let rest = all.split_off(at);
+    let ended = |e: &&Event| matches!(e.kind.as_str(), "spawn" | "needs-human" | "parked");
+    (!rest.iter().any(ended)).then_some(rest)
+}
+
+/// #1058: `fleet` #`n` waits in the queue for its extra round's start.
+pub fn requeued(events: &[Event], fleet: &str, n: u64) -> bool {
+    since(events, fleet, n).is_some()
+}
+
+/// #1058: its Queue row: `extended · waiting: <gate>`, the fleet's pause or drive's last refused start; `extended · starting` before any.
+pub fn waits(events: &[Event], fleet: &str, n: u64, paused: bool) -> Option<String> {
+    let rest = since(events, fleet, n)?;
+    let tried = |e: &&&Event| e.kind == "driven" && e.str("step") == Some("start");
+    let code = rest.iter().rfind(tried).and_then(|e| e.str("code"));
+    let gate = if paused { Some("PAUSED") } else { code };
+    Some(gate.map_or("extended · starting".into(), |g| format!("extended · waiting: {g}")))
+}
+
+/// #1058: each extend still waiting on #975's pending start (unstarted, not refused) goes back to its queue place once.
+pub fn requeue_waiting(ctx: &Ctx, cfg: &crate::config::Config) -> Result<()> {
+    let ev = crate::events::working(&ctx.state)?;
+    let open = |k: &(String, u64)| ev.states.get(k).is_some_and(|s| !s.done() && s.state != "parked");
+    let extends = ev
+        .iter()
+        .filter(|e| e.kind == "pending-action" && e.str("action") == Some("extend"));
+    let keys: std::collections::BTreeSet<_> = extends.filter_map(|e| Some((e.fleet.clone(), e.issue?))).collect();
+    for (f, n) in keys.into_iter().filter(open) {
+        if of(&ev, &f, n).is_some_and(|p| p.action == "extend" && !p.failed) {
+            append(
+                &ctx.state,
+                &Event::new(ctx.now, &f, Some(n), REQUEUED, json!({"by": "migrate"})),
+            )?;
+            crate::gate::requeue(ctx, cfg, &ev, &f, n)?;
+        }
+    }
+    Ok(())
 }
 
 /// Log a tap's pending action, after its decision: a new one, its start not tried yet; a spawn logged past seq `after` (`None`: past this record) started it.
@@ -90,9 +124,17 @@ pub fn record(ctx: &Ctx, (fleet, n): (&str, u64), action: &str, role: &str, afte
     append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "pending-action", d))
 }
 
-/// A start of `fleet` #`n` refused `code` (`why`): a pending action logs it, failed unless soft; whether it stays pending.
+/// A start of `fleet` #`n` refused `code` (`why`): a pending action logs it, failed unless soft; whether it stays pending. #1058: a hard refusal of a requeued extend's start is a new needs-human.
 pub fn refused(ctx: &Ctx, (fleet, n): (&str, u64), code: &str, why: &str) -> Result<bool> {
-    let Some(p) = of(&crate::events::working(&ctx.state)?, fleet, n).filter(|p| !p.failed) else {
+    let ev = crate::events::working(&ctx.state)?;
+    let wait = SOFT.contains(&code) || SKIP.contains(&code) || DISK.contains(&code);
+    let queued = ev.states.get(&(fleet.into(), n)).is_some_and(|s| s.state == "queued");
+    if !wait && queued && requeued(&ev, fleet, n) {
+        let d = json!({"code": code, "reason": format!("one more round did not start: {code}: {why}"), "start": true});
+        append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "needs-human", d))?;
+        return Ok(false);
+    }
+    let Some(p) = of(&ev, fleet, n).filter(|p| !p.failed) else {
         return Ok(false);
     };
     let soft = SOFT.contains(&code);

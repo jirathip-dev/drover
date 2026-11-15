@@ -23,6 +23,7 @@ const dot = $('#dot'), stale = $('#stale');
 function sync() {
   const v = cur.v, live = !!v.live && navigator.onLine;
   dot.className = demo ? 'demo' : live ? 'g' : navigator.onLine ? 'a' : 'r';
+  H.toggleAttribute('data-focus', !!v.model && !Array.isArray(v.model) && !!v.model.focus);
   const t = v.at ? new Date(v.at) : null, hm = t && t.toTimeString().slice(0, 5), old = t ? Date.now() - t.getTime() : 0;
   stale.hidden = !t || (live && old < 120_000);
   if (t) stale.textContent = `last update ${hm}${old > 60_000 ? ` · ${Math.round(old / 60_000)}m ago` : ''}`;

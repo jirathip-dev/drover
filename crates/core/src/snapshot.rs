@@ -1,5 +1,5 @@
 use crate::config::Config;
-use crate::events::{Event, States};
+use crate::events::{Event, IssueState, States};
 use crate::hosts::{quote, On};
 use crate::lanes::{self, Lane};
 use crate::runner::{argv, Out, Runner};
@@ -198,7 +198,10 @@ pub fn saved_waits(
 /// Each lane's wait reason, from the cached PR reads.
 pub fn waits(ctx: &Ctx, cfg: &Config, r: &dyn Runner, events: &[Event], all: &[Lane]) -> Vec<Waiting> {
     let live: Vec<_> = all.iter().filter_map(|l| l.session.clone()).collect();
-    let w = crate::waiting::scan(ctx, cfg, r, events, &live, false, None);
+    let names: std::collections::HashSet<&str> = all.iter().map(|x| x.name.as_str()).collect();
+    let shown = |l: &String| names.contains(l.as_str());
+    let keep = |s: &IssueState| !s.done() || s.lane.iter().chain(s.lanes.values()).any(shown);
+    let w = crate::waiting::scan_where(ctx, cfg, r, (events, &live), false, keep);
     w.into_iter().map(|x| x.1).collect()
 }
 
