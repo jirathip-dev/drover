@@ -694,6 +694,7 @@ fn the_state_read_stays_under_300ms_on_a_150k_event_log() {
         "/api/v1/chat",
         "/api/v1/queue",
         "/api/v1/host",
+        "/api/v1/issue/sendmeter/1000",
         "/screens/lanes",
         "/",
     ] {
