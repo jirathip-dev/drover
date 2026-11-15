@@ -1709,7 +1709,7 @@ impl<'a> Server<'a> {
         };
         let sd = json!({"t": def, "s": schemes(ctx)}).to_string().replace('<', "\\u003c");
         // #927: the places cooee-plugin.toml declares: the page's tabs, its [⚙] screens and the cards (web/src/main.ts).
-        let pl = screens::places().to_string().replace('<', "\\u003c");
+        let pl = screens::page_places().to_string().replace('<', "\\u003c");
         // #406: the page opened at any other path (the SW's copy) moves to the root before the body.
         let home = if root.is_empty() {
             ""

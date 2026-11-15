@@ -125,3 +125,19 @@ body:not([data-pair]) .pairb{display:none}
 @keyframes fl{from{background:color-mix(in srgb,var(--l) 25%,transparent)}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 .sb>button,.scr>button,.sec>button,.shb>button,.card>button{margin:var(--s2) var(--s4) var(--s2) 0}
+/* #1072 Threads: a `focus` screen hides the cards; message cards by kind; the composer's `submit` sticks to the foot. */
+html[data-focus] #cards{display:none}
+.scr .card.k-you,.scr .card.k-orch,.scr .card.k-ask{border-left-width:3px}
+.scr .card.k-you{border-left-color:var(--a)}
+.scr .card.k-orch,.scr .card.k-ask{border-left-color:var(--p)}
+.scr .card.k-you .ch>b{color:var(--a)}
+.scr .card.k-orch .ch>b,.scr .card.k-ask .ch>b{color:var(--p)}
+.scr .card.k-you .ch .m,.scr .card.k-orch .ch .m,.scr .card.k-ask .ch .m{margin-left:auto;font-size:var(--fs-meta)}
+.scr .card.k-you.bad .ch .m{color:var(--r)}
+.scr .card.k-tool,.scr .card.k-sys{background:none;border:0;padding:0 var(--s2);margin:0}
+.scr .card.k-tool .fold{color:var(--a);font-size:var(--fs-meta)}
+.scr .card.k-sys .txt{color:var(--mute);font-size:var(--fs-meta)}
+.form.say{position:sticky;bottom:calc(var(--hit) + var(--s2) + env(safe-area-inset-bottom));display:flex;align-items:center;gap:var(--s3);padding:var(--s2) 0;background:var(--bg);border-top:1px solid var(--line)}
+.form.say .fd{flex:1;border:0;min-height:0}
+.form.say .fk:empty{display:none}
+.scr[data-id^=thread-]{max-width:760px;margin-inline:auto}

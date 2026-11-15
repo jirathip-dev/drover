@@ -45,8 +45,9 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    `inset`) with a px value outside the token block, a font size that is not a `--fs` token, a control
    `height` that is not `--ctl`, or an inline `style=` with px in the rendered page fails (`file:line value`).
 2. **Browser audit** — the `ui` CI job: headless Chrome opens the exported demo at 390×844, DPR 3. #927: the views
-   are the screens the page draws: each tab by its place id (`queue`, `lanes`, `events`), `fleets` (the `[⚙]`
-   screen's sheet), `lane` (a lane's sheet) and `card` (the first card opened), in kitchen, garden and terminal
+   are the screens the page draws: each tab by its place id (`queue`, `lanes`, `events`, #1072's standalone-only
+   `threads`), `fleets` (the `[⚙]` screen's sheet), `lane` (a lane's sheet), `card` (the first card opened) and `thread`
+   (the Threads tab's first thread), in kitchen, garden and terminal
    (`~<theme>`), at 1440 (`@1440`) and in every colour scheme (`queue^<scheme>`, the contact sheet), plus #725's
    `lifeboat/page`. `assets/ui-audit.js` (only in the `--demo` export, `?audit=<view>&check=1`) fails on a control not
    28 px tall (a choice: over 4 lines), text not 11/13 px (inputs 16), a tap area under 44 px, a box whose content is
@@ -55,7 +56,7 @@ Other lengths are sums of tokens (`calc(var(--hit) + var(--s2))`); radii, border
    `…,maximum-scale=1,user-scalable=no,viewport-fit=cover`, or `html` `touch-action` other than `manipulation`.
    Screenshots are uploaded as the `ui-390` artifact on every run.
    #266, #927: a look change is measured: shoot the views on staging and on the branch with
-   `UI_AUDIT_VIEWS="queue lanes events" scripts/ui-audit.sh <site> <dir>` (one machine, one Chrome), then
+   `UI_AUDIT_VIEWS="queue lanes events threads thread" scripts/ui-audit.sh <site> <dir>` (one machine, one Chrome), then
    `scripts/pixel-diff.py <before> <after>` reports the share of each shot's pixels that differ (any channel by more
    than 8; over 0.1 % fails).
    A Chrome run that does not return in `UI_AUDIT_TIMEOUT` s (default 60; needs `timeout`) is killed and fails its view
