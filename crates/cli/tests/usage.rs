@@ -108,8 +108,13 @@ fn balance_shows_without_leaking_secrets() {
             r#"{"balance_infos":[{"currency":"USD","total_balance":"2.28"}]}"#,
         ),
     ));
-    let page = host_tab(&Server::new(&c, &r, None), "", c.now);
-    assert!(page.contains("<span class=\"pvs a\">✓ USD 2.28 · low</span>"), "{page}");
+    let page = api(&Server::new(&c, &r, None), "", "", c.now, "host");
+    let host: serde_json::Value = serde_json::from_str(&page).unwrap();
+    assert_eq!(
+        host["deepseek"],
+        serde_json::json!({"balance": "USD 2.28", "low": true, "hint": ""}),
+        "{page}"
+    );
     assert!(!page.contains("lane-hours"), "#923: no account meter: {page}");
     let sent = r.1.borrow().join("\n");
     assert!(sent.contains(&format!("Bearer {DS_KEY}")), "keys go on stdin: {sent}");
@@ -144,12 +149,11 @@ fn deepseek_hints_when_the_env_file_lacks_the_key() {
             missing.display()
         ),
     );
-    let page = host_tab(&Server::new(&c, &Fake::default(), None), "", c.now);
-    assert!(
-        page.contains(&format!(
-            "<article class=pvc data-p=deepseek><div class=pvch><b>DeepSeek</b><span class=m>API keys</span></div><div class=pvr data-t=a><p class=pvh><b class=pvn>balance</b><span class=\"pvs a\">key not found in {}</span>",
-            missing.display()
-        )),
+    let page = api(&Server::new(&c, &Fake::default(), None), "", "", c.now, "host");
+    let host: serde_json::Value = serde_json::from_str(&page).unwrap();
+    assert_eq!(
+        host["deepseek"]["hint"],
+        format!("key not found in {}", missing.display()),
         "{page}"
     );
 }
@@ -161,7 +165,7 @@ fn a_deepseek_env_file_others_can_read_is_refused() {
     use std::os::unix::fs::PermissionsExt;
     std::fs::set_permissions(d.join("tokens.env"), std::fs::Permissions::from_mode(0o644)).unwrap();
     let r = stdin(Fake::default());
-    let page = host_tab(&Server::new(&c, &r, None), "", c.now);
+    let page = api(&Server::new(&c, &r, None), "", "", c.now, "host");
     assert!(page.contains("REFUSED SECRET_FILE_OPEN: "), "{page}");
     assert!(!r.0.called("curl"), "{:?}", r.0.calls.borrow());
     no_secret("page", &page);

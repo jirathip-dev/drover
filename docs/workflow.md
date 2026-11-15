@@ -102,6 +102,7 @@ flowchart TD
     d6 -.- k_respawn_max(["respawn_max = 3"])
     d6 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
     d6 -.- k_overflow_after_minutes(["overflow_after_minutes = 10"])
+    other -.- k_overload_minutes(["overload_minutes = 10"])
     other -.- k_transcript_days(["transcript_days = 30"])
     other -.- k_runtime_down_minutes(["runtime_down_minutes = 30"])
     other -.- k_ssh_connect_secs(["ssh_connect_secs = 10"])

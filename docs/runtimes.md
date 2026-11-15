@@ -166,6 +166,13 @@ next message starts a fresh one pointed at `.thread.md`. A `shed` fleet's orches
 install` puts the folder of the `shed` your shell resolves on it, `drover doctor` checks `shed` and each ACP
 adapter's command there, and spawn refuses `SHED_MISSING` (with the PATH it searched) before anything is made.
 
+**Session options and MCP (#941).** An ACP lane's `shed run` carries its provider's session options as `--meta` and
+the role's `mcp` servers as `--mcp .mcp.lane.json` (ACP's list, empty when the role names none). claude's options load
+only the project's and local settings, take only that MCP list, and exclude `~/.claude/CLAUDE.md` by path (Claude Code
+reads it as a project file from any folder under `$HOME`), so the lane keeps the host's login and leaves the owner's
+global `CLAUDE.md`, plugins, skills and MCP servers out. A shed without `run --meta` (before shed#94) is a `✗` row in
+`drover doctor`, and spawn refuses its ACP lanes `SHED_OLD`.
+
 **Proof (2026-11-06, the mini).** shed 0.0.0 with claude-acp 0.101.0. A session in a scratch repo had drover's
 hook as its project settings' `PreToolUse` hook and `DROVER_LANE=drover:565:impl`. It was asked to run
 `git push origin staging`, `pkill -f …` and `gh pr merge 1`. Each tool call ended `failed` with drover's refusal

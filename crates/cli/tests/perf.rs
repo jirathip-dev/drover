@@ -160,7 +160,7 @@ fn a_step_makes_one_remote_call_per_host_and_requests_make_none() {
     get(addr, "/");
     r.1.lock().unwrap().clear();
     let (page, size) = get(addr, "/");
-    let (herd, _) = get(addr, "/herd.json");
+    let (herd, _) = get(addr, "/screens/lanes");
     let (lanes, _) = get(addr, "/api/v1/lanes");
     assert!(r.2.load(Relaxed) > before, "serve_on never called the fixture's runner");
     let t = Instant::now();
@@ -172,11 +172,11 @@ fn a_step_makes_one_remote_call_per_host_and_requests_make_none() {
     assert!(calls.is_empty(), "remote calls on a request or status: {calls:?}");
     report(&format!(
         "#337 perf (30 lanes, 2 hosts, +300 ms per remote call): step {step} ms (drive --fast) · via serve_on's socket: \
-         GET / {page} ms ({} KB) · /herd.json {herd} ms · /api/v1/lanes {lanes} ms · status {status} ms (the CLI)",
+         GET / {page} ms ({} KB) · /screens/lanes {herd} ms · /api/v1/lanes {lanes} ms · status {status} ms (the CLI)",
         size / 1024
     ));
     assert!(page < 150, "GET / took {page} ms (target < 150)");
-    assert!(herd < 100, "/herd.json took {herd} ms (target < 100)");
+    assert!(herd < 100, "/screens/lanes took {herd} ms (target < 100)");
     assert!(status < 300, "status took {status} ms (target < 300)");
     assert!(size < 40 * 1024, "GET / is {size} bytes (target < 40 KB)");
 }
@@ -213,11 +213,10 @@ fn the_page_carries_no_tab_and_each_part_is_its_own_read() {
     };
     let page = body("/", "Cookie: tab=lanes\r\n");
     assert!(
-        page.contains("<div id=needs></div>")
-            && page.contains("<section id=queue></section><section id=lanes></section><section id=chat></section>")
-            && !page.contains("sendmeter-impl-20"),
+        page.contains("<div id=cards></div><main></main><nav></nav>") && !page.contains("sendmeter-impl-20"),
         "{page}"
     );
+    assert!(body("/screens/lanes", "").contains("\"id\":\"l-sendmeter-impl-20\""));
     assert!(body("/api/v1/lanes", "").contains("\"name\":\"sendmeter-impl-20\""));
     let needs = body("/api/v1/needs", "");
     assert!(
@@ -242,14 +241,10 @@ fn the_loader_and_the_age_are_one_strip_under_the_header() {
         .split_once("</div>")
         .unwrap()
         .0;
-    assert!(rest.starts_with("<i id=ptr hidden>↻</i><div id=strip>"), "{rest}");
-    assert!(
-        strip.starts_with("<span id=ld class=tld hidden aria-hidden=true><svg class=lds"),
-        "{strip}"
-    );
-    assert!(
-        strip.ends_with("<span class=ldw>loading</span><span id=stale hidden></span>"),
-        "{strip}"
+    assert!(rest.starts_with("<div id=strip>"), "{rest}");
+    assert_eq!(
+        strip,
+        "<span id=ld hidden><i>↻</i> loading</span><span id=stale hidden></span>"
     );
     assert_eq!(page.matches("id=ld ").count(), 1);
     let res = s.respond(
@@ -350,31 +345,6 @@ fn a_steady_state_live_change_is_one_part_under_5kb() {
         "a steady-state /live change is {} bytes (target < 5 KB)",
         got.len()
     );
-    if std::process::Command::new("node").arg("--version").output().is_err() {
-        return eprintln!("skipping the client half: no node here");
-    }
-    let data = got
-        .split("event: needs\ndata: ")
-        .nth(1)
-        .unwrap()
-        .split("\n\n")
-        .next()
-        .unwrap();
-    let mut now = std::net::TcpStream::connect(addr).unwrap();
-    now.write_all(format!("GET /api/v1/needs HTTP/1.1\r\nHost: {addr}\r\n\r\n").as_bytes())
-        .unwrap();
-    let mut res = String::new();
-    now.read_to_string(&mut res).unwrap();
-    let drawn = board_js(&[
-        (data, "needs.tab(d)"),
-        (&res[res.find("\r\n\r\n").unwrap() + 4..], "needs.tab(d)"),
-    ]);
-    assert!(
-        drawn[0].contains("probe-2?") && drawn[0].contains("seed-9?"),
-        "{}",
-        drawn[0]
-    );
-    assert_eq!(drawn[0], drawn[1]);
 }
 
 fn big() -> (drover::Ctx, Fake, &'static FakeShed) {
@@ -451,17 +421,17 @@ fn waits_and_the_lanes_tab_stay_fast_on_a_30k_event_log() {
     drover::db::put(&c.state, "board", snap.ts, &snap).unwrap();
     let (_, _, addr) = serve(c, Slow(r, Mutex::default(), AtomicUsize::new(0), None, shed()));
     let mut lanes = 0;
-    for path in ["/api/v1/lanes", "/herd.json"] {
+    for path in ["/api/v1/lanes", "/api/v1/herd", "/screens/lanes"] {
         fetch(addr, path);
         let (t, body) = fetch(addr, path);
         assert!(
-            body.contains("snaphit"),
+            body.contains("snaphit") || path == "/screens/lanes",
             "{path} worked the waits out again instead of reading the snapshot"
         );
         lanes = lanes.max(t);
     }
     report(&format!(
-        "#447 perf (30,000 events, 200 lanes): snapshot::waits {waits} ms · GET /api/v1/lanes, /herd.json {lanes} ms"
+        "#447 perf (30,000 events, 200 lanes): snapshot::waits {waits} ms · GET /api/v1/lanes, /api/v1/herd, /screens/lanes {lanes} ms"
     ));
     if cfg!(debug_assertions) {
         return eprintln!("debug build: budgets apply in release (cargo test --release --test perf)");
@@ -494,7 +464,7 @@ fn a_hundred_board_requests_on_a_30k_event_store_stay_under_the_cpu_budget() {
         "/api/v1/needs",
         "/api/v1/lanes",
         "/api/v1/chat",
-        "/herd.json",
+        "/screens/lanes",
         "/api/v1/events?since=29990",
         "/",
         "/api/v1/queue",
@@ -702,7 +672,7 @@ fn the_state_read_stays_under_300ms_on_a_150k_event_log() {
         "/api/v1/chat",
         "/api/v1/queue",
         "/api/v1/host",
-        "/herd.json",
+        "/screens/lanes",
         "/",
     ] {
         let res = send(addr, &format!("GET {p} HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n"));
@@ -784,7 +754,7 @@ fn no_board_request_starts_a_process() {
         "/api/v1/lane/sendmeter-impl-1",
         "/api/v1/lane/sendmeter-impl-20",
         "/lane?agent=sendmeter-impl-1",
-        "/herd.json",
+        "/screens/lanes",
         "/screens/queue",
         "/screens/cards",
         "/screens/events",

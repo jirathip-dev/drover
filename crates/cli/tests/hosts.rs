@@ -426,15 +426,24 @@ fn an_offline_host_never_pages_and_shows_grey() {
     assert!(hosts.contains("1 lane(s) sendmeter-impl-12"), "{hosts}");
     let w = sh.on(&r);
     let s = Server::new(&c, &w, Some(ADDR.into()));
-    let page = host_tab(&s, ADDR, NOW);
-    let g = &page[page
-        .find("<article class=hcd data-h=\"bazzite\"")
-        .expect("a bazzite card")..];
-    let g = &g[..g.find("</article>").unwrap()];
-    assert!(g.contains("<span class=\"hw m\">offline · last seen 33m</span>"), "{g}");
-    assert!(g.split("data-t=").skip(1).all(|t| t.starts_with('m')), "all grey: {g}");
-    let mini = page.find("data-h=\"mini\"").expect("a mini card");
-    assert!(mini < page.find("data-h=\"bazzite\"").unwrap(), "main first");
+    let page: serde_json::Value = serde_json::from_str(&api(&s, ADDR, "", NOW, "host")).unwrap();
+    let names: Vec<&str> = page["hosts"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|h| h["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names, ["mini", "bazzite"], "main first");
+    let g = &page["hosts"][1];
+    assert_eq!(
+        (&g["tone"], &g["words"]),
+        (&json!("m"), &json!("offline · last seen 33m")),
+        "{g}"
+    );
+    assert!(
+        g["rows"].as_array().unwrap().iter().all(|r| r["t"] == "m"),
+        "all grey: {g}"
+    );
 }
 
 #[test]
@@ -455,11 +464,8 @@ fn an_off_host_is_never_chosen_but_drains_its_lanes() {
     let sh = FakeShed::attached(&c);
     let w = sh.on(&r);
     let s = Server::new(&c, &w, Some(ADDR.into()));
-    let page = host_tab(&s, ADDR, NOW);
-    assert!(
-        page.contains("<span class=\"hw m\">off · draining 1 lane</span>"),
-        "draining shown"
-    );
+    let page: serde_json::Value = serde_json::from_str(&api(&s, ADDR, "", NOW, "host")).unwrap();
+    assert_eq!(page["hosts"][1]["words"], "off · draining 1 lane", "draining shown");
     let text = std::fs::read_to_string(&c.config)
         .unwrap()
         .replace("tags = [\"fast\"]", "tags = [\"fast\"]\nenabled = false");
@@ -527,21 +533,20 @@ fn cli_and_board_toggles_both_log() {
     );
     assert_eq!(run(&c, &r, &["hosts", "off", "nope"]).0, 1);
     let s = Server::new(&c, &w, Some(ADDR.into()));
-    let get = || host_tab(&s, ADDR, NOW);
+    let get = || serde_json::from_str::<serde_json::Value>(&api(&s, ADDR, "", NOW, "host")).unwrap();
     let page = get();
-    assert!(
-        page.contains("<span class=\"hw m\">off · not used for lanes</span>")
-            && page.contains("name=to value=on><button data-confirm=\"turn bazzite on?\">on</button>")
+    let bazzite = &page["hosts"][1];
+    assert_eq!(
+        (&bazzite["name"], &bazzite["words"], &bazzite["to"]),
+        (&json!("bazzite"), &json!("off · not used for lanes"), &json!("on"))
     );
-    let mini = &page[page.find("data-h=\"mini\"").unwrap()..page.find("data-h=\"bazzite\"").unwrap()];
-    assert!(!mini.contains("name=to value="), "{mini}");
+    assert_eq!(page["hosts"][0]["to"], json!(null), "the main host has no toggle");
     let (code, out) = run(&c, &r, &["hosts", "off", "mini"]);
     assert!(code == 3 && out.contains("REFUSED MAIN_HOST"), "{out}");
     assert!(!std::fs::read_to_string(&c.config)
         .unwrap()
         .contains("[hosts.mini]\ntags = [\"fast\"]\nenabled"));
-    let i = page.find("name=mtime value=").unwrap() + 17;
-    let mt: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let mt = page["mtime"].as_str().unwrap();
     let body = format!("op=host&fleet=&host=bazzite&to=on&mtime={mt}");
     let post = |cookie: &str| {
         let req = format!(
@@ -560,12 +565,15 @@ fn cli_and_board_toggles_both_log() {
         ("host-on", Some("bazzite"), Some("web"))
     );
     assert!(std::fs::read_to_string(&c.config).unwrap().contains("enabled = true"));
-    let off = "data-confirm=\"turn bazzite off? no new lanes; 0 running lanes finish\">off</button>";
-    assert!(get().contains(off));
+    let on = get();
+    assert_eq!(
+        (&on["hosts"][1]["to"], &on["hosts"][1]["lanes"]),
+        (&json!("off"), &json!(0))
+    );
 }
 
 #[test]
-fn lane_cards_and_the_herd_name_the_host() {
+fn the_lanes_screen_and_the_herd_name_the_host() {
     let c = setup("hosts-cards", "", true, 0);
     remote_spawn(&c, NOW - 60);
     let (sh, bazzite, f) = (FakeShed::attached(&c), FakeShed::new(), Fake::default());
@@ -573,16 +581,12 @@ fn lane_cards_and_the_herd_name_the_host() {
     let r = two(&f, &bazzite);
     let w = sh.on(&r);
     let s = Server::new(&c, &w, Some(ADDR.into()));
-    let page =
-        String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW)).into_owned();
-    let page = with_queue(&page, &s, ADDR, NOW);
-    let card = &page[page.find("data-agent=\"sendmeter-impl-12\"").expect("lane row")..];
-    assert!(
-        card[..card.find("</div></div>").unwrap()].contains("impl · bazzite · round 0 · claude"),
-        "{card}"
-    );
-    let herd = String::from_utf8_lossy(&s.respond(&format!("GET /herd.json HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW))
+    let res = String::from_utf8_lossy(&s.respond(&format!("GET /screens/lanes HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), NOW))
         .into_owned();
+    let lanes: serde_json::Value = serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).unwrap();
+    let row = lanes.to_string();
+    assert!(row.contains("\"subtitle\":\"impl · bazzite"), "{row}");
+    let herd = api(&s, ADDR, "", NOW, "herd");
     assert!(herd.contains("\"host\":\"bazzite\""), "{herd}");
 }
 

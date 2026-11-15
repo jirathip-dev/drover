@@ -1,7 +1,7 @@
 // Generated from the Rust payload types by `just types` (#375); never edit by hand.
 
 /**
- * `/herd.json` (Herd mode, docs/serve.md).
+ * API v1's `GET herd` (docs/serve.md).
  */
 export type Herd = { fleets: Array<HerdFleet>, others: Array<HerdLane>, host: HerdHost, };
 
