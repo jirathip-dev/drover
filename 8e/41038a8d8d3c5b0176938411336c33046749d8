@@ -1,0 +1,12 @@
+Decided: the chat brief is rebuilt and written on each GET /cooee/profiles, only when its text changed, so an instructions edit reaches the next chat without a restart
+Because: "editing that file changes the served text with no restart"
+Decided: roles/orchestrator.md split into role, thread and chat parts; a thread brief is role + thread, a chat brief is role + chat + usage doc, both ending in standing()
+Because: crates/core/src/orchestrator/brief.rs:20
+Decided: profile id is the orchestrator id; the lane fleet is the first of its fleets with an orchestrator role
+Because: q1714
+Decided: thread-started links once with via: profile and route() skips such links, so lane asks never reach a cooee chat
+Because: crates/core/src/orchestrator.rs:477
+Rejected: testing the whole chat brief for thread verbs — the generated usage doc lists every command; the test checks the text before it
+Check: the cooee_profiles hook test runs the served settings' real hook command with the served env, and the same call without the env is inert
+Check: the live cooee chat is unverified; it waits on cooee's paired persona issue
+Owner: Cooee can now get each orchestrator from drover as a chat profile carrying your instructions file and drover's guard; no second copy of the text.
