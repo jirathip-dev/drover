@@ -735,6 +735,21 @@ pub fn since(path: &Path, kinds: &[&str], ts: u64) -> Result<Vec<Event>> {
     )
 }
 
+/// #1022: at most `limit` live events numbered after `since`, up to `until`, by seq: the board's event feed.
+pub fn between(path: &Path, (since, until): (u64, u64), limit: usize) -> Result<Vec<Event>> {
+    let (until, limit) = (
+        i64::try_from(until).unwrap_or(i64::MAX),
+        i64::try_from(limit).unwrap_or(i64::MAX),
+    );
+    crate::db::events(
+        path,
+        &format!(
+            "seq IN (SELECT seq FROM events WHERE archived = 0 AND seq > ?1 AND seq <= {until} ORDER BY seq LIMIT {limit})"
+        ),
+        since,
+    )
+}
+
 fn log(path: &Path, live: bool) -> Result<Arc<Log>> {
     let (file, logs) = ((crate::db::file(path), live), || {
         LOGS.lock().unwrap_or_else(PoisonError::into_inner)

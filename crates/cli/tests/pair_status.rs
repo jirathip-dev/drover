@@ -49,7 +49,7 @@ fn a_database_error_is_503_never_401_and_each_refusal_logs_one_line() {
     let cookie = pair(&s, &c, IPHONE, T);
     let token = cookie.trim().strip_prefix("Cookie: hd=").unwrap().to_string();
     let hash = devices::load(&c)[0].hash.clone();
-    let send = "POST /send HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n";
+    let send = "POST /answer HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n";
     assert!(req(&s, "GET", "/lane?agent=x", "", T).starts_with("HTTP/1.1 401 "));
     assert!(req(&s, "GET", "/lane?agent=x", "Cookie: hd=feed\r\n", T).starts_with("HTTP/1.1 401 "));
     let late = T + devices::YEAR + 1;
@@ -76,7 +76,7 @@ fn a_database_error_is_503_never_401_and_each_refusal_logs_one_line() {
         "401 GET /lane: no cookie",
         "401 GET /lane: unknown token",
         "401 GET /lane: expired",
-        "503 POST /send: db error: is a directory",
+        "503 POST /answer: db error: is a directory",
         "503 GET /lane: db error: is a directory",
         "503 GET /pair/status: db error: is a directory",
         "503 GET /api/v1/lane/x: db error: is a directory",

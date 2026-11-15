@@ -105,6 +105,7 @@ fn the_orchestrator_brief_lists_the_fleets_groups() {
     let agents =
         json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo", "claude-agent-acp"]}]);
     let f = Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed", "");
     let r = sh.cli(&f);

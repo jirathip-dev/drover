@@ -24,14 +24,14 @@ fn config(extra: &str) -> String {
     )
 }
 
-fn get(s: &Server, path: &str) -> String {
-    let res =
-        String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T)).into_owned();
-    with_queue(&res, s, ADDR, T)
+fn fleets(s: &Server) -> Vec<serde_json::Value> {
+    let q: serde_json::Value = serde_json::from_str(&api(s, ADDR, "", T, "queue")).unwrap();
+    q["fleets"].as_array().unwrap().clone()
 }
 
-fn sheet(s: &Server, fleet: &str) -> String {
-    queue_js(s, ADDR, T, &format!("sheet(d, {fleet:?})"))
+fn sheet(s: &Server, fleet: &str) -> serde_json::Value {
+    let f = fleets(s).into_iter().find(|f| f["name"] == fleet).unwrap();
+    f["config"].clone()
 }
 
 fn fixture(name: &str) -> drover::Ctx {
@@ -94,49 +94,57 @@ fn colour_is_a_stable_name_hash_and_color_overrides_it() {
     );
     let d = tmpdir("fc-colour-page");
     let c = ctx(&d, &config("color = \"c\""));
-    let page = get(&Server::new(&c, &Fake::default(), Some(ADDR.into())), "/");
-    assert!(
-        page.contains("<div class=\"fc k-c\"><div class=fh><span class=fn><b>alpha</b>"),
-        "{page}"
-    );
+    let r = Fake::default();
+    let f = fleets(&Server::new(&c, &r, Some(ADDR.into())));
+    let alpha = f.iter().find(|f| f["name"] == "alpha").unwrap();
+    assert_eq!(alpha["k"], "c", "{alpha}");
 }
 
 #[test]
-fn fleets_that_need_you_go_first_then_by_name_and_a_paused_one_collapses() {
+fn fleets_that_need_you_go_first_then_by_name_and_a_paused_one_is_empty() {
     let c = fixture("fc-order");
-    let page = get(&Server::new(&c, &Fake::default(), Some(ADDR.into())), "/");
-    let at = |n: &str| {
-        page.find(&format!("<b>{n}</b>"))
-            .unwrap_or_else(|| panic!("no {n}: {page}"))
+    let r = Fake::default();
+    let f = fleets(&Server::new(&c, &r, Some(ADDR.into())));
+    let names: Vec<&str> = f.iter().map(|f| f["name"].as_str().unwrap()).collect();
+    assert_eq!(names, ["beta", "zeta", "alpha", "gamma"]);
+    let cfg = Config::load(&c.config).unwrap();
+    assert_eq!(
+        (&f[0]["k"], &f[0]["paused"], &f[0]["need"]),
+        (
+            &json!(cfg.fleet["beta"].color("beta")),
+            &json!("paused · no lane"),
+            &json!(1)
+        ),
+        "{}",
+        f[0]
+    );
+    assert_eq!(
+        (&f[3]["paused"], &f[3]["rows"]),
+        (&json!("paused · no lane"), &json!([]))
+    );
+    let rows = |i: usize| -> Vec<(u64, String)> {
+        f[i]["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| (r["issue"].as_u64().unwrap(), r["state"].as_str().unwrap().to_string()))
+            .collect()
     };
-    assert!(at("beta") < at("zeta") && at("zeta") < at("alpha") && at("alpha") < at("gamma"));
-    let beta = &page[page[..at("beta")].rfind("<details class=\"fc off").unwrap()..];
-    assert!(
-        beta.starts_with(&format!(
-            "<details class=\"fc off k-{}\"><summary><i class=cv></i><span class=fn><b>beta</b> <i class=m>●</i> paused · no lane</span>\
-             <span class=\"tag r\">! 1 need you</span><form method=post>",
-            Config::load(&c.config).unwrap().fleet["beta"].color("beta")
-        )),
-        "{beta}"
+    assert_eq!(f[1]["need"], 1);
+    assert_eq!(
+        rows(1),
+        [(5, "needs-human".to_string()), (4, "queued".to_string())],
+        "needs-you row first"
     );
-    assert!(beta[..beta.find("</summary>").unwrap()].contains("<button>Resume</button>"));
-    let gamma = &page[at("gamma")..];
-    let gamma = &gamma[..gamma.find("</section>").unwrap()];
-    assert!(!gamma.contains("class=fh") && !gamma.contains("class=cfg"), "{gamma}");
-    let zeta = &page[at("zeta")..at("alpha")];
-    assert!(zeta.contains("<span class=\"tag r\">! 1 need you</span>"), "{zeta}");
-    assert!(
-        zeta.find(">#5</a>") < zeta.find(">#4</a>"),
-        "needs-you row first: {zeta}"
+    assert_eq!((&f[2]["need"], &f[2]["paused"]), (&json!(0), &json!(null)));
+    assert_eq!(
+        (&f[2]["drive"]["tone"], &f[2]["drive"]["line"], &f[2]["drive"]["meta"]),
+        (
+            &json!("a"),
+            &json!("drive · no pass yet"),
+            &json!(["stall check: #1 is due now", "1 lane"])
+        )
     );
-    assert!(zeta.contains("<span class=r>needs-human</span>"));
-    let alpha = &page[at("alpha")..at("gamma")];
-    assert!(
-        !alpha.contains("need you") && alpha.contains("<button>Pause</button>"),
-        "{alpha}"
-    );
-    assert!(alpha.contains("<button type=button class=cfg data-f=\"alpha\">Config</button>"));
-    assert!(alpha.contains("<details class=\"dp a\"><summary><i>●</i><span>drive · no pass yet</span><i class=cv></i></summary><ul><li>stall check: #1 is due now</li><li>1 lane</li>"));
 }
 
 #[test]
@@ -145,25 +153,21 @@ fn the_config_sheet_shows_every_group_and_its_pickers_post_through_set() {
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let res = sheet(&s, "alpha");
-    for g in [
-        "<h3>General<span>edit fleet.toml</span></h3>",
-        "<h3>Limits<span>edit fleet.toml</span></h3>",
-        "<h3>Roles<span>set: harness · model · effort</span></h3>",
-        "<h3>Alerts<span>edit fleet.toml</span></h3>",
-        "<h3>Hosts / needs<span>after #157</span></h3>",
-    ] {
-        assert!(res.contains(g), "{g}: {res}");
-    }
-    let path = c.config.display().to_string();
-    assert!(res.contains("<p class=cp><span class=m>config</span> ") && res.contains(&path[path.len() - 20..]));
-    assert!(res.contains("<dt>repo</dt><dd>acme/alpha</dd>") && res.contains("<dt>line cap</dt>"));
-    assert!(res.contains("<select name=harness aria-label=harness><option selected data-e=\"none low medium high xhigh\">claude</option>"));
-    assert!(res.contains(
-        "<select name=model aria-label=model><option selected>opus</option><option>sonnet</option></select>"
-    ));
-    assert!(res.contains("<select name=effort aria-label=effort>"));
-    let i = res.find("name=mtime value=").unwrap() + 17;
-    let mt: String = res[i..].chars().take_while(char::is_ascii_digit).collect();
+    assert_eq!(res["path"], c.config.display().to_string());
+    assert_eq!((&res["repo"], &res["line_cap"]), (&json!("acme/alpha"), &json!(null)));
+    assert_eq!(res["models"], json!(["opus", "sonnet"]));
+    let imp = &res["roles"][0];
+    assert_eq!(
+        (&imp["name"], &imp["harness"], &imp["model"], &imp["efforts"]),
+        (
+            &json!("impl"),
+            &json!("claude"),
+            &json!("opus"),
+            &json!(["none", "low", "medium", "high", "xhigh"])
+        )
+    );
+    let q: serde_json::Value = serde_json::from_str(&api(&s, ADDR, "", T, "queue")).unwrap();
+    let mt = q["mtime"].as_str().unwrap();
     let post = |body: &str| {
         let req = format!(
             "POST / HTTP/1.1\r\nHost: {ADDR}\r\nContent-Length: {}\r\n\r\n{body}",
@@ -195,10 +199,7 @@ fn the_config_sheet_shows_every_group_and_its_pickers_post_through_set() {
     assert_eq!(sets[0].val("via"), "web");
     let d = tmpdir("fc-config-nomodels");
     let c = ctx(&d, &config("").replace("models = [\"opus\", \"sonnet\"]\n", ""));
-    let res = sheet(&Server::new(&c, &Fake::default(), Some(ADDR.into())), "alpha");
-    assert!(
-        res.contains("<select name=model aria-label=model disabled data-off>"),
-        "{res}"
-    );
-    assert!(res.contains("add models = [...] to fleet.toml"));
+    let r = Fake::default();
+    let res = sheet(&Server::new(&c, &r, Some(ADDR.into())), "alpha");
+    assert_eq!(res["models"], json!([]), "no models = [...] in fleet.toml: {res}");
 }
