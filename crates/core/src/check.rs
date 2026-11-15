@@ -466,6 +466,7 @@ pub fn check(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write) -> Re
         let e = Event::new(ctx.now, "drover", None, "keychain-clear", json!({}));
         crate::events::append(&ctx.state, &e)?;
     }
+    overload(ctx, cfg, r, out, &events, agents.as_deref().unwrap_or_default())?;
     for (e, lane, ts) in crate::outbox::stale(r, &events, (ctx.now, cfg.limits.outbox_stale_minutes * 60)) {
         let why = format!(
             "{lane}'s outbox holds a line from {} ago that drive has not delivered",
@@ -587,6 +588,37 @@ fn handoff(r: &dyn Runner, events: &[Event], e: &Event, (n, wt): (u64, &str)) ->
     }
     let by = |x: &&Event| x.ts >= e.ts && (x.is("pushed", &e.fleet, n) || x.is("verdict", &e.fleet, n));
     events.iter().rev().find(by).map(|x| x.ts)
+}
+
+fn overload(
+    ctx: &Ctx,
+    cfg: &Config,
+    r: &dyn Runner,
+    out: &mut dyn Write,
+    events: &[Event],
+    agents: &[Value],
+) -> Result<()> {
+    let rows = crate::hosts::history(ctx);
+    let remote = |h: &str| cfg.hosts.get(h).is_some_and(|c| c.machine.is_some());
+    let over = (rows.iter().rev().filter(|w| !remote(&w.host)))
+        .take_while(|w| w.load_cpu.is_some_and(|l| l > cfg.limits.load_per_cpu));
+    let (Some(since), Some((load, main))) = over.fold((None, None), |(_, l), w| {
+        (Some(w.ts), l.or(w.load_cpu.map(|x| (x, w.host.clone()))))
+    }) else {
+        return Ok(());
+    };
+    if ctx.now < since + cfg.limits.overload_minutes * 60 {
+        return Ok(());
+    }
+    let top = crate::top::busiest(ctx, cfg, r, agents, 5)?;
+    let why = format!(
+        "{main} load/cpu {load:.2} > {} for {}; top: {}",
+        cfg.limits.load_per_cpu,
+        age(ctx.now - since),
+        top.join(", ")
+    );
+    let d = json!({"key": since, "host": main, "reason": why, "top": top});
+    fire(ctx, cfg, out, events, ("drover", None), "host-overloaded", d)
 }
 
 thread_local!(static PUSHES: std::cell::Cell<(usize, usize)> = const { std::cell::Cell::new((0, 0)) });

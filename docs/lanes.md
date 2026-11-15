@@ -194,6 +194,13 @@ first served (a kind at its own cap lets later kinds by); after `heavy_wait_minu
 and logs `heavy-timeout`. Each command in line is a file in `<state>/heavy/` naming its `lane`, `kind`, `cmd`,
 `since` and `running`. Other commands are unchanged.
 
+`drover top` (#910; `--json` for the same data) shows what each live lane is really doing: every process under its
+worktree as a tree with its CPU %, run time and heavy kind, and `waiting for heavy slot <kind> <age>` for each of its
+commands in line; the header gives the host's load per CPU against `load_per_cpu`, heavy slots used of `heavy_max` and
+the respawns the last drive pass held back (`RESPAWN_PACED`). When load per CPU stays over `load_per_cpu` for
+`[limits] overload_minutes` (default 10) in the host history, `drover check` alerts `host-overloaded` once, naming
+the 5 busiest processes and their lanes; once load is back under the limit, the next overload alerts again.
+
 Enforcement by harness: **claude** (PreToolUse) and **hermes** (`pre_tool_call`, the same
 `drover hook`) refuse the command mechanically. **dsh** has no pre-tool hook: its role prompt states
 the rule, and its `pre-push` hook refuses a push whose new commits add a script line (`*.sh`, `*.bash`,

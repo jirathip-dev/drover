@@ -53,6 +53,7 @@ pub mod spawn;
 pub mod stall;
 pub mod term;
 pub mod timer;
+pub mod top;
 pub mod update;
 pub mod usage;
 pub mod verify;
