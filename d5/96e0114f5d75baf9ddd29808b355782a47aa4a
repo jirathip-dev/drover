@@ -1,0 +1,9 @@
+Decided: merged origin/staging; staging's tap jobs (#977) now go through this branch's per-key queue (fleet and issue, or a card or config by id), so one issue's jobs still run in order
+Because: "writes to different issues run at once, and writes to the same issue run in order"
+Rejected: staging's one thread per tap — two taps on one issue would race, and serve_workers' order test fails with it
+Decided: a kick's follow-up waits only on a live holder of drive-<fleet>.lock, skipping a crashed pass's lease
+Because: crates/core/src/drive.rs:549
+Decided: sim hunt starts from staging's seeds 2-5 with rng 2, random baseline from staging's 1000; known-fleet lock wait is 12 ticks
+Because: crates/cli/tests/sim/main.rs:279
+Check: serve_workers order test fails when the runner spawns each tap on its own thread; the minimised I7 plan from the hunt now passes
+Owner: The branch is up to date with staging; board taps keep staging's new job flow and still queue per issue.
