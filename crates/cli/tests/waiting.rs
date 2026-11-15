@@ -8,6 +8,26 @@ use serde_json::json;
 
 const NOW: u64 = 1_000_000;
 
+fn lane_rows(s: &Server) -> Vec<serde_json::Value> {
+    let v: serde_json::Value = serde_json::from_str(&api(s, "", "", NOW, "lanes")).unwrap();
+    let secs = v["sections"].as_array().unwrap().iter();
+    let repos = secs.flat_map(|s| s["repos"].as_array().unwrap().clone());
+    repos.flat_map(|r| r["lanes"].as_array().unwrap().clone()).collect()
+}
+
+fn row_line(l: &serde_json::Value) -> String {
+    let s = |k: &str| l[k].as_str().unwrap_or_default().to_string();
+    format!(
+        "{} | {} {} {} | {} {}",
+        s("name"),
+        s("tone"),
+        s("state"),
+        s("ago"),
+        s("why_tone"),
+        s("why")
+    )
+}
+
 fn sha(p: &str) -> String {
     format!("{p}{}", "0".repeat(40 - p.len()))
 }
@@ -366,7 +386,8 @@ fn idle_lanes_render_their_reason() {
     }
     let r = sh.on(&r);
     let s = Server::new(&c, &r, None);
-    let page = parts(&s, "", "", NOW)[1].clone();
+    let rows = lane_rows(&s);
+    let page: String = rows.iter().map(|l| row_line(l) + "\n").collect();
     for (tone, label) in [
         ("r", "idle · waiting on your answer (q3) (10m)"),
         (
@@ -388,25 +409,18 @@ fn idle_lanes_render_their_reason() {
     ] {
         let (what, a) = label.trim_start_matches("idle · ").rsplit_once(" (").unwrap();
         assert!(
-            page.contains(&format!(
-                "<span class=\"nw {tone}\">idle {}</span><span class=\"why {tone}\">{what}</span>",
-                a.trim_end_matches(')')
-            )),
+            page.contains(&format!("| {tone} idle {} | {tone} {what}\n", a.trim_end_matches(')'))),
             "{label}:\n{page}"
         );
     }
     assert!(
-        !page.contains("<span class=\"nw a\">idle </span><span class=act>"),
-        "no bare idle row"
+        rows.iter().all(|l| l["state"] != "idle" || l["why"].is_string()),
+        "no bare idle row: {page}"
     );
+    let r42 = rows.iter().find(|l| l["name"] == "sendmeter-impl-42").unwrap();
     assert!(
-        page.contains("<div class=card hidden><p>#42</p><p>idle · pushed fix 605297c"),
-        "{page}"
-    );
-    assert!(
-        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/serve.js"))
-            .unwrap()
-            .contains("<div class=top></div><div class=acts><button type=button data-op=stop>Stop</button>")
+        r42["shown"].as_str().unwrap().starts_with("idle · pushed fix 605297c"),
+        "{r42}"
     );
 }
 
@@ -468,7 +482,7 @@ fn a_killed_lane_waits_on_drive_to_respawn_it() {
 }
 
 #[test]
-fn a_long_reason_never_squeezes_the_name() {
+fn a_long_reason_stays_whole_and_only_on_its_lane() {
     let c = ctx(&tmpdir("waiting-long"), CONFIG);
     let id = "q".repeat(120 - "waiting on your answer ()".len());
     spawn(&c, NOW - 2000, 2859, "rev", "synergy-rev-2859-r2");
@@ -488,13 +502,23 @@ fn a_long_reason_never_squeezes_the_name() {
     }
     let f = Fake::default();
     let r = sh.on(&f);
-    let page = parts(&Server::new(&c, &r, None), "", "", NOW)[1].clone();
+    let page = lane_rows(&Server::new(&c, &r, None))
+        .iter()
+        .map(row_line)
+        .collect::<Vec<_>>()
+        .join("\n");
     let reason = format!("waiting on your answer ({id})");
     assert_eq!(reason.len(), 120);
-    assert!(page.contains(&format!("<span class=\"nw el\">synergy-impl-2859</span><span class=\"nw r\">idle 10m</span><span class=\"why r\">{reason}</span>")), "{page}");
-    assert!(page.contains("<span class=\"nw el\">synergy-rev-2859-r2</span><span class=\"nw m\">idle 33m</span><span class=\"why m\">superseded by synergy-impl-2859</span>"), "{page}");
+    assert!(
+        page.contains(&format!("synergy-impl-2859 | r idle 10m | r {reason}")),
+        "{page}"
+    );
+    assert!(
+        page.contains("synergy-rev-2859-r2 | m idle 33m | m superseded by synergy-impl-2859"),
+        "{page}"
+    );
     assert_eq!(
-        page.matches(&format!("{reason}</span>")).count(),
+        page.matches(&reason).count(),
         1,
         "the older lane does not repeat it; no `(10m)` suffix in the row"
     );

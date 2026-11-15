@@ -116,7 +116,7 @@ fn a_dry_run_and_a_live_lane_signal_nothing() {
 }
 
 #[test]
-fn host_tab_shows_leftovers_and_reap_kills_them() {
+fn the_host_api_counts_leftovers_and_reap_kills_them() {
     use drover::serve::Server;
     const ADDR: &str = "127.0.0.1:7777";
     let (_d, c, mine, sibling, sh) = setup("reap-host");
@@ -127,19 +127,11 @@ fn host_tab_shows_leftovers_and_reap_kills_them() {
         .reply("kill", "");
     let on = sh.on(&r);
     let s = Server::new(&c, &on, Some(ADDR.into()));
-    let page = host_tab(&s, ADDR, 1_000_000);
-    assert!(page.contains("<span class=k>leftovers</span>"), "no leftovers row");
-    assert!(
-        page.contains("<b class=a>2</b> processes left in closed lanes <span class=mt>· 300 MB"),
-        "count + memory"
-    );
-    assert!(
-        page.contains("name=op value=reap") && page.contains("data-confirm="),
-        "a confirmed [reap]"
-    );
-    assert!(kills(&r).is_empty(), "rendering signals nothing");
-    let i = page.find("name=mtime value=").unwrap() + 17;
-    let mt: String = page[i..].chars().take_while(char::is_ascii_digit).collect();
+    let page = api(&s, ADDR, "", 1_000_000, "host");
+    let host: serde_json::Value = serde_json::from_str(&page).unwrap();
+    assert_eq!(host["leftovers"], json!({"n": 2, "mb": "300"}), "count + memory");
+    assert!(kills(&r).is_empty(), "reading signals nothing");
+    let mt = host["mtime"].as_str().unwrap();
     let body = format!("op=reap&fleet=&mtime={mt}");
     let unpaired = format!(
         "POST / HTTP/1.1\r\nHost: {ADDR}\r\nContent-Length: {}\r\n\r\n{body}",
@@ -287,7 +279,7 @@ fn check_trims_a_done_lanes_children_but_not_its_agent() {
 }
 
 #[test]
-fn host_tab_shows_top_memory_users_with_their_owner() {
+fn the_host_api_names_top_memory_users_with_their_owner() {
     use drover::serve::Server;
     let (_d, c, mine, _, sh) = setup("top-host");
     sh.lane("impl-12", "done", &mine);
@@ -297,18 +289,25 @@ fn host_tab_shows_top_memory_users_with_their_owner() {
         .reply("top -l 1 -o mem", top);
     let on = sh.on(&r);
     let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
-    let page = host_tab(&s, "127.0.0.1:7777", 1_000_000);
-    assert!(page.contains("<span class=k>top memory</span>"), "no top memory row");
-    assert!(page.contains("16G VM (colima) · "), "the VM is classified");
+    let page = api(&s, "127.0.0.1:7777", "", 1_000_000, "host");
+    let host: serde_json::Value = serde_json::from_str(&page).unwrap();
+    let row = host["hosts"][0]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["k"] == "top memory")
+        .cloned();
+    let text = row.expect("no top memory row")["text"].as_str().unwrap().to_string();
+    assert!(text.contains("16G VM (colima) · "), "the VM is classified: {text}");
     assert!(
-        page.contains("2210M node (lane impl-12)"),
-        "a lane's process names the lane"
+        text.contains("2210M node (lane impl-12)"),
+        "a lane's process names the lane: {text}"
     );
-    assert!(page.contains("703M python3.14 (other)"));
+    assert!(text.contains("703M python3.14 (other)"), "{text}");
 }
 
 #[test]
-fn host_tab_sums_claude_lane_memory_by_state() {
+fn the_host_api_sums_claude_lane_memory_by_state() {
     use drover::serve::Server;
     let (_d, c, mine, sibling, sh) = setup("claude-host");
     sh.lane("impl-12", "done", &mine);
@@ -321,10 +320,18 @@ fn host_tab_sums_claude_lane_memory_by_state() {
         .reply("ps -axo pid=,rss=", "  201 2097152\n  202 1048576\n");
     let on = sh.on(&r);
     let s = Server::new(&c, &on, Some("127.0.0.1:7777".into()));
-    let page = host_tab(&s, "127.0.0.1:7777", 1_000_000);
-    assert!(page.contains("<span class=k>claude</span>"), "no claude row");
-    assert!(
-        page.contains("<b>3.0 GB</b> <span class=mt>(2 lanes: working 1 / done 1)</span>"),
+    let page = api(&s, "127.0.0.1:7777", "", 1_000_000, "host");
+    let host: serde_json::Value = serde_json::from_str(&page).unwrap();
+    let row = host["hosts"][0]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["k"] == "claude")
+        .cloned();
+    let row = row.expect("no claude row");
+    assert_eq!(
+        (&row["b"], &row["notes"]),
+        (&json!("3.0 GB"), &json!(["(2 lanes: working 1 / done 1)"])),
         "the sum by state"
     );
 }

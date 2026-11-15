@@ -1432,7 +1432,7 @@ fn wheres(c: &drover::Ctx, r: impl Fn() -> Fake) -> BTreeMap<String, (String, St
             "{state}"
         );
     }
-    let herd = board_get(c, r(), "/herd.json");
+    let herd = board_get(c, r(), "/api/v1/herd");
     for l in herd["fleets"]
         .as_array()
         .unwrap()

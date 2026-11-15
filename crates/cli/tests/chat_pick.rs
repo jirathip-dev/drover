@@ -3,7 +3,7 @@ use common::*;
 use drover::config::Config;
 use drover::events::{append, read, Event};
 use drover::serve::Server;
-use serde_json::json;
+use serde_json::{json, Value};
 
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
@@ -49,9 +49,15 @@ fn req(s: &Server, path: &str, body: &str, extra: &str) -> String {
     String::from_utf8_lossy(&s.respond(&r, T)).into_owned()
 }
 
-fn chat(s: &Server, cookie: &str) -> String {
-    let [_, _, chat] = parts(s, ADDR, cookie, T);
-    chat
+fn chat(s: &Server, cookie: &str) -> Value {
+    serde_json::from_str(&api(s, ADDR, cookie, T, "chat")).unwrap()
+}
+
+fn thread<'a>(chat: &'a Value, id: &str) -> &'a Value {
+    let all = chat["threads"].as_array().unwrap();
+    all.iter()
+        .find(|t| t["id"] == id)
+        .unwrap_or_else(|| panic!("no {id}: {chat}"))
 }
 
 fn host(agents: &str) -> Fake {
@@ -150,12 +156,15 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     let page = chat(&s, &cookie);
+    let chip = &page["repos"][0]["harness"];
+    assert_eq!(
+        (&chip["name"], &chip["all"]),
+        (&json!("harness"), &json!(["claude", "hermes", "dsh"])),
+        "the empty thread's chip: {page}"
+    );
     assert!(
-        page.contains(
-            "<div class=cbar><select class=cp name=harness aria-label=harness><option value=\"claude\">claude</option>\
-             <option value=\"hermes\">hermes</option><option value=\"dsh\" selected>dsh</option></select></div></form>"
-        ),
-        "the empty thread's chip, preset to the default: {page}"
+        chip["cur"].is_null() || chip["cur"] == "dsh",
+        "preset to the default: {page}"
     );
     let res = req(
         &s,
@@ -169,9 +178,13 @@ fn thread_new_harness_is_recorded_and_its_conductor_starts_on_it() {
         f.count("shed run --acp claude-acp --policy allow --name orchestrator-t3"),
         1
     );
-    assert!(chat(&s, &cookie).contains(
-        "<b>Board</b><small class=tid>· t3</small></div><span class=ds><i class=dt></i>sendmeter · claude · opus"
-    ));
+    let page = chat(&s, &cookie);
+    let t3 = thread(&page, "t3");
+    assert_eq!(t3["title"], "Board");
+    assert!(
+        t3["ds"].as_str().unwrap().starts_with("sendmeter · claude · opus"),
+        "{t3}"
+    );
 }
 
 #[test]
@@ -247,13 +260,13 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
     let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Grill", &cookie);
     assert!(res.ends_with("t1 started\n"), "{res}");
     let page = chat(&s, &cookie);
-    assert!(
-        page.contains(
-            "<div class=cbar><select class=cp name=model aria-label=model><option value=\"opus\" selected>opus</option>\
-             <option value=\"sonnet\">sonnet</option></select><select class=cp name=effort aria-label=effort>"
-        ),
+    let chips = &thread(&page, "t1")["chips"];
+    assert_eq!(
+        (&chips[0]["name"], &chips[0]["all"], &chips[1]["name"]),
+        (&json!("model"), &json!(["opus", "sonnet"]), &json!("effort")),
         "{page}"
     );
+    assert!(chips[0]["cur"].is_null() || chips[0]["cur"] == "opus", "{page}");
     let res = req(&s, "/thread", "op=model&t=t1&model=gpt-9", &cookie);
     assert!(res.contains("REFUSED BAD_VALUE"), "{res}");
     let res = req(&s, "/thread", "op=model&t=t1&model=sonnet&effort=low", &cookie);
@@ -261,14 +274,16 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_resumes_on_it() {
     let pick = &kind(&c, "thread-model")[0];
     assert_eq!((pick.str("model"), pick.str("effort")), (Some("sonnet"), Some("low")));
     let page = chat(&s, &cookie);
+    let t1 = thread(&page, "t1");
     assert!(
-        page.contains(" class=\"qs note\">model sonnet · effort low from the next turn</p>"),
-        "{page}"
+        t1["page"]["msgs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["text"] == "model sonnet · effort low from the next turn"),
+        "{t1}"
     );
-    assert!(
-        page.contains("<option value=\"sonnet\" selected>sonnet</option>"),
-        "{page}"
-    );
+    assert_eq!(t1["chips"][0]["cur"], "sonnet", "{t1}");
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.ends_with("system: model sonnet · effort low from the next turn\n"),
@@ -314,13 +329,13 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it() {
     let res = req(&s, "/thread", "op=new&repo=sendmeter&text=Grill", &cookie);
     assert!(res.ends_with("t1 started\n"), "{res}");
     let page = chat(&s, &cookie);
-    assert!(
-        page.contains(
-            "<div class=cbar><select class=cp name=model aria-label=model><option value=\"opus\" selected>opus</option>\
-             <option value=\"sonnet\">sonnet</option></select><select class=cp name=effort aria-label=effort>"
-        ),
+    let chips = &thread(&page, "t1")["chips"];
+    assert_eq!(
+        (&chips[0]["name"], &chips[0]["all"], &chips[1]["name"]),
+        (&json!("model"), &json!(["opus", "sonnet"]), &json!("effort")),
         "{page}"
     );
+    assert!(chips[0]["cur"].is_null() || chips[0]["cur"] == "opus", "{page}");
     let res = req(&s, "/thread", "op=model&t=t1&model=gpt-9", &cookie);
     assert!(res.contains("REFUSED BAD_VALUE"), "{res}");
     let res = req(&s, "/thread", "op=model&t=t1&model=sonnet&effort=low", &cookie);
@@ -328,14 +343,16 @@ fn a_model_and_effort_pick_is_logged_shown_and_the_next_turn_restarts_on_it() {
     let pick = &kind(&c, "thread-model")[0];
     assert_eq!((pick.str("model"), pick.str("effort")), (Some("sonnet"), Some("low")));
     let page = chat(&s, &cookie);
+    let t1 = thread(&page, "t1");
     assert!(
-        page.contains(" class=\"qs note\">model sonnet · effort low from the next turn</p>"),
-        "{page}"
+        t1["page"]["msgs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|m| m["text"] == "model sonnet · effort low from the next turn"),
+        "{t1}"
     );
-    assert!(
-        page.contains("<option value=\"sonnet\" selected>sonnet</option>"),
-        "{page}"
-    );
+    assert_eq!(t1["chips"][0]["cur"], "sonnet", "{t1}");
     let (_, show) = run(&c, &Fake::default(), &["thread", "show", "t1"]);
     assert!(
         show.ends_with("system: model sonnet · effort low from the next turn\n"),
@@ -371,9 +388,13 @@ fn an_old_thread_without_a_harness_renders_and_starts_on_the_default() {
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    assert!(chat(&s, &cookie).contains(
-        "<b>Before #404</b><small class=tid>· t1</small></div><span class=ds>sendmeter · claude · opus</span>"
-    ));
+    let page = chat(&s, &cookie);
+    let t1 = thread(&page, "t1");
+    assert_eq!(
+        (&t1["title"], &t1["ds"]),
+        (&json!("Before #404"), &json!("sendmeter · claude · opus")),
+        "{t1}"
+    );
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
     assert_eq!(kind(&c, "orchestrator-start")[0].str("harness"), Some("claude"));
 }

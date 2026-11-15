@@ -14,8 +14,9 @@ fn req(s: &Server, path: &str, body: &str, extra: &str) -> String {
     String::from_utf8_lossy(&s.respond(&r, T)).into_owned()
 }
 
-fn config_sheet(s: &Server) -> String {
-    queue_js(s, ADDR, T, "sheet(d, 'sendmeter')")
+fn mtime(s: &Server) -> String {
+    let st: serde_json::Value = serde_json::from_str(&api(s, ADDR, "", T, "state")).unwrap();
+    st["mtime"].as_str().unwrap().to_string()
 }
 
 fn setup(name: &str) -> drover::Ctx {
@@ -103,10 +104,7 @@ fn a_orchestrator_choice_in_config_writes_its_table_after_a_backup_and_the_next_
     let cli = b.cli(&f);
     let r = b.on(&cli);
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let sheet = config_sheet(&s);
-    assert!(!sheet.contains("<h3>Conductor<span>"), "{sheet}");
-    let i = sheet.find("name=mtime value=").unwrap() + 17;
-    let mt: String = sheet[i..].chars().take_while(char::is_ascii_digit).collect();
+    let mt = mtime(&s);
     let tap = format!("op=cond&fleet=sendmeter&model=sonnet&mtime={mt}");
     let res = req(&s, "/", &tap, "");
     assert!(res.starts_with("HTTP/1.1 401"), "{res}");
@@ -158,9 +156,7 @@ fn a_orchestrator_choice_that_fails_doctor_is_refused_and_leaves_fleet_toml_alon
     let r = Fake::default().reply("which hermes", "/usr/local/bin/hermes\n");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let sheet = config_sheet(&s);
-    let i = sheet.find("name=mtime value=").unwrap() + 17;
-    let mt: String = sheet[i..].chars().take_while(char::is_ascii_digit).collect();
+    let mt = mtime(&s);
     let res = req(
         &s,
         "/",

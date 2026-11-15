@@ -357,25 +357,24 @@ fn serve_is_read_only_html() {
         res.starts_with("HTTP/1.1 200 OK\r\n") && res.contains("Content-Type: text/html"),
         "{res}"
     );
-    let res = with_queue(&res, &srv, "x", 1_000_000);
-    for n in ["#17", "#18", "#12"] {
-        assert!(res.contains(n), "queued {n} missing");
+    let q = api(&srv, "", "", 1_000_000, "queue");
+    for n in [17, 18, 12] {
+        assert!(q.contains(&format!("\"issue\":{n},")), "queued #{n} missing: {q}");
     }
     assert!(
-        res.contains("https://github.com/jirathip-dev/sendmeter/pull/15"),
-        "PR link"
+        q.contains("\"issue\":13,\"note\":\"merged\",\"age\":\"60m\",\"pr\":\"15\""),
+        "done #13, PR 15: {q}"
     );
-    let api = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
-    if let Some(res) = events_tab(&api, "127.0.0.1:7777", 1_000_000, "{ f: { k: 'all', fl: [] } }") {
-        assert!(
-            res.contains("https://github.com/jirathip-dev/sendmeter/issues/12"),
-            "issue link"
-        );
-        assert!(
-            res.contains("pull/15/checks\">checks</a>]") && !res.contains("actions?query"),
-            "checks link"
-        );
-    }
+    let rw = drover::serve::Server::new(&c, &r, Some("127.0.0.1:7777".into()));
+    let ev = String::from_utf8(rw.respond(
+        "GET /screens/events HTTP/1.1\r\nHost: 127.0.0.1:7777\r\n\r\n",
+        1_000_000,
+    ))
+    .unwrap();
+    assert!(
+        ev.contains("https://github.com/jirathip-dev/sendmeter/pull/15"),
+        "the events screen links the PR: {ev}"
+    );
     for m in ["POST", "PUT", "DELETE", "PATCH", "HEAD"] {
         let res = String::from_utf8(srv.respond(&format!("{m} / HTTP/1.1\r\n\r\n"), 1_000_000)).unwrap();
         assert!(res.starts_with("HTTP/1.1 405 "), "{m}: {res}");

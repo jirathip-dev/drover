@@ -59,31 +59,29 @@ fn fixture(name: &str) -> (drover::Ctx, OnShed) {
     (c, r)
 }
 
-fn section<'a>(page: &'a str, id: &str) -> &'a str {
-    let a = page.find(&format!("<section id={id}>")).unwrap();
-    &page[a..a + page[a..].find("</section>").unwrap()]
+fn json_of(res: &str) -> serde_json::Value {
+    serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap_or_else(|_| panic!("{res}"))
 }
 
 #[test]
 fn lanes_group_by_state_then_repo_with_counts() {
     let (c, r) = fixture("group");
-    let s = Server::new(&c, &r, None);
-    let page = with_queue(&req(&s, "GET", "/?all=1", "", "", T), &s, ADDR, T);
-    let lanes = section(&page, "lanes");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let lanes = json_of(&req(&s, "GET", "/api/v1/lanes", "", "", T));
     let mut got = vec![];
-    for part in lanes.split("<h").skip(1) {
-        let text = &part[..part.find("</h").unwrap()];
-        let text = text.trim_end_matches("</span>").rsplit('>').next().unwrap();
-        got.push(if part.starts_with('2') {
-            text.to_string()
-        } else {
-            format!("  {text}")
-        });
-        let mut rows = part
-            .split("data-agent=\"")
-            .skip(1)
-            .map(|r| r[..r.find('"').unwrap()].to_string());
-        got.extend(rows.by_ref().map(|a| format!("    {a}")));
+    for sec in lanes["sections"].as_array().unwrap() {
+        let n: usize = sec["repos"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["lanes"].as_array().unwrap().len())
+            .sum();
+        got.push(format!("{} ({n})", sec["name"].as_str().unwrap()));
+        for repo in sec["repos"].as_array().unwrap() {
+            let rows = repo["lanes"].as_array().unwrap();
+            got.push(format!("  {} ({})", repo["name"].as_str().unwrap(), rows.len()));
+            got.extend(rows.iter().map(|l| format!("    {}", l["name"].as_str().unwrap())));
+        }
     }
     let want = [
         "blocked (1)",
@@ -110,12 +108,6 @@ fn lanes_group_by_state_then_repo_with_counts() {
         "    sendmeter-impl-14",
     ];
     assert_eq!(got, want);
-    assert!(
-        !lanes.contains("<details")
-            && lanes.contains("<button type=button class=lr>")
-            && lanes.contains("<div class=card hidden>")
-    );
-    assert!(lanes.contains("<p>impl · round 0 · claude · "), "{lanes}");
 }
 
 #[test]
@@ -123,9 +115,15 @@ fn lane_card_shows_its_port() {
     let (c, r) = fixture("port");
     let d = json!({"role": "impl", "agent": "sendmeter-impl-12", "harness": "claude", "port": 41234});
     append(&c.state, &Event::new(900_800, "sendmeter", Some(12), "spawn", d)).unwrap();
-    let s = Server::new(&c, &r, None);
-    let page = with_queue(&req(&s, "GET", "/?all=1", "", "", T), &s, ADDR, T);
-    assert!(section(&page, "lanes").contains(" · :41234 · "), "{page}");
+    let s = Server::new(&c, &r, Some(ADDR.into()));
+    let cookie = paired(&s, &c);
+    let sheet = json_of(&req(&s, "GET", "/screens/lanes/sendmeter-impl-12", "", &cookie, T));
+    let port = sheet["blocks"][0]["blocks"][0]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["id"] == "f-port");
+    assert_eq!(port.map(|r| &r["value"]), Some(&json!(":41234")), "{sheet}");
 }
 
 #[test]
@@ -182,7 +180,14 @@ fn others_sheet_offers_only_close_pane() {
         (&lane["acts"], &lane["pane"]),
         (&json!(["stop", "kill", "clean"]), &json!(null))
     );
-    let res = req(&s, "POST", "/act", "agent=side-project&op=close&confirm=1", &cookie, T);
+    let res = req(
+        &s,
+        "POST",
+        "/api/v1/act",
+        "agent=side-project&op=close&confirm=1",
+        &cookie,
+        T,
+    );
     assert!(
         res.starts_with("HTTP/1.1 200 OK") && r.1.called("kill", "side-project") && !r.1.has("side-project"),
         "{res}"
@@ -190,13 +195,13 @@ fn others_sheet_offers_only_close_pane() {
     let res = req(
         &s,
         "POST",
-        "/act",
+        "/api/v1/act",
         "agent=sendmeter-impl-12&op=close&confirm=1",
         &cookie,
         T,
     );
     assert!(
-        res.contains("REFUSED IS_LANE") && !r.1.called("kill", "sendmeter-impl-12"),
+        res.contains("\"code\":\"IS_LANE\"") && !r.1.called("kill", "sendmeter-impl-12"),
         "{res}"
     );
 }
@@ -239,15 +244,8 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
         (rc, out.as_str()),
         (0, "now: open the page, tap Pair, then run serve approve <code>\n")
     );
-    let page = with_queue(&req(&s, "GET", "/?all=1", "", "", T), &s, ADDR, T);
-    assert!(page.contains("<button type=button class=pairb>Pair this phone</button></header>"));
-    let host = host_tab(&s, ADDR, T);
-    assert!(
-        host.contains(
-            "no paired device yet: tap [pair this phone], then <code>drover serve approve &lt;code&gt;</code>"
-        ) && !(page.clone() + &host).contains("approve <code>"),
-        "the hint's placeholder is text, never an open tag"
-    );
+    let page = req(&s, "GET", "/?all=1", "", "", T);
+    assert!(page.contains(" data-pair=1>") && page.contains("<button type=button class=pairb>pair</button></header>"));
     let res = req(
         &s,
         "POST",
@@ -266,7 +264,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
         "{st} {code}"
     );
     assert!(req(&s, "POST", "/pair/claim", "", &mine, T).starts_with("HTTP/1.1 403 "));
-    assert!(req(&s, "POST", "/send", "agent=sendmeter-impl-12&text=hi", &mine, T).starts_with("HTTP/1.1 401 "));
+    assert!(req(&s, "POST", "/api/v1/send", "agent=sendmeter-impl-12&text=hi", &mine, T).starts_with("HTTP/1.1 401 "));
     let (_, out) = run(&at(T + 60), &Fake::default(), &["serve", "pending"]);
     assert!(
         out.contains(&format!("{code} iPhone Safari ")) && out.contains(" 9m left") && out.lines().count() == 2,
@@ -301,7 +299,7 @@ fn pairing_is_a_phone_request_approved_on_the_mac() {
         "{res}"
     );
     assert!(
-        !req(&s, "GET", "/?all=1", "", &mine, T + 61).contains("class=pairb"),
+        !req(&s, "GET", "/?all=1", "", &mine, T + 61).contains("data-pair"),
         "paired: no Pair button"
     );
     let (rc, out) = run(&at(T + 62), &Fake::default(), &["serve", "approve", &code]);
@@ -399,7 +397,15 @@ fn pairing_behind_a_proxy_and_retaps() {
         assert!(req(&s3, "POST", "/pair/cancel", "", k, T + 3).starts_with("HTTP/1.1 200 OK"));
     }
     assert_eq!(drover::devices::pending(&c3).len(), 0);
-    assert!(req(&s3, "POST", "/send", "agent=sendmeter-impl-12&text=hi", &cookie, T + 4).starts_with("HTTP/1.1 200 "));
+    assert!(req(
+        &s3,
+        "POST",
+        "/api/v1/send",
+        "agent=sendmeter-impl-12&text=hi",
+        &cookie,
+        T + 4
+    )
+    .starts_with("HTTP/1.1 200 "));
 }
 
 #[test]
@@ -410,7 +416,7 @@ fn pairing_codes_devices_and_prompt_events() {
         req(
             &s,
             "POST",
-            "/send",
+            "/api/v1/send",
             &format!("agent=sendmeter-impl-12&text={text}"),
             cookie,
             T + 10,
@@ -418,7 +424,7 @@ fn pairing_codes_devices_and_prompt_events() {
     };
     let res = send("", "hi");
     assert!(
-        res.starts_with("HTTP/1.1 401 ") && res.contains("tap Pair this phone"),
+        res.starts_with("HTTP/1.1 401 ") && res.contains("\"code\":\"UNPAIRED\""),
         "{res}"
     );
     assert!(req(&s, "POST", "/pair/request", "", "Origin: https://evil.example\r\n", T).starts_with("HTTP/1.1 403 "));
@@ -436,7 +442,7 @@ fn pairing_codes_devices_and_prompt_events() {
     );
     let res = send(&cookie, "hello+secret+words");
     assert!(
-        res.starts_with("HTTP/1.1 200 OK") && res.ends_with("sent to sendmeter-impl-12\n"),
+        res.starts_with("HTTP/1.1 200 OK") && res.contains("\"message\":\"sent to sendmeter-impl-12\""),
         "{res}"
     );
     assert_eq!(r.1.sent("sendmeter-impl-12"), ["hello secret words"]);
@@ -466,17 +472,14 @@ fn pairing_codes_devices_and_prompt_events() {
         "no message text in the log"
     );
     for ctl in ["%1B%5B2J", "stop%03", "x%7F", "a%0Db", "a%09b"] {
-        assert!(send(&cookie, ctl).contains("REFUSED BAD_VALUE: "), "{ctl}");
+        assert!(send(&cookie, ctl).contains("\"code\":\"BAD_VALUE\""), "{ctl}");
     }
     assert!(send(&cookie, "--wait%0Aline+two").starts_with("HTTP/1.1 200 OK"));
     assert_eq!(r.1.sent("sendmeter-impl-12")[1], "--wait\nline two");
-    let host = host_tab(&s, ADDR, T);
-    assert!(
-        host.contains(&format!("<span>{label} <span class=m>paired ")) && host.contains("<button>Remove</button>"),
-        "{host}"
-    );
-    let mt = &host[host.find("name=mtime value=").unwrap() + 17..];
-    let mt: String = mt.chars().take_while(char::is_ascii_digit).collect();
+    let mt = json_of(&req(&s, "GET", "/api/v1/state", "", "", T))["mtime"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let hash = drover::devices::sha256(tok.as_bytes());
     let unpair = format!("op=unpair&fleet=&hash={hash}&mtime={mt}");
     assert!(
@@ -503,16 +506,22 @@ fn reply_refusals_rate_limit_and_read_only() {
     let (c, r) = fixture("refuse");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = paired(&s, &c);
-    let send = |agent: &str, text: &str| req(&s, "POST", "/send", &format!("agent={agent}&text={text}"), &cookie, T);
-    let body = |res: String| res[res.find("\r\n\r\n").unwrap() + 4..].trim().to_string();
-    assert!(body(send("sendmeter-rev-9-r1", "stop")).starts_with("REFUSED REV_READONLY: "));
-    assert!(body(send("sendmeter-impl-12", &"x".repeat(2001))).starts_with("REFUSED BAD_VALUE: "));
-    assert!(
-        body(send("sendmeter-impl-12", "+++")).starts_with("REFUSED BAD_VALUE: "),
-        "blank"
-    );
+    let send = |agent: &str, text: &str| {
+        req(
+            &s,
+            "POST",
+            "/api/v1/send",
+            &format!("agent={agent}&text={text}"),
+            &cookie,
+            T,
+        )
+    };
+    let code = |res: String| json_of(&res)["code"].as_str().unwrap().to_string();
+    assert_eq!(code(send("sendmeter-rev-9-r1", "stop")), "REV_READONLY");
+    assert_eq!(code(send("sendmeter-impl-12", &"x".repeat(2001))), "BAD_VALUE");
+    assert_eq!(code(send("sendmeter-impl-12", "+++")), "BAD_VALUE", "blank");
     assert_eq!(run(&c, &Fake::default(), &["pause", "sendmeter"]).0, 0);
-    assert!(body(send("sendmeter-impl-12", "go")).starts_with("REFUSED PAUSED: "));
+    assert_eq!(code(send("sendmeter-impl-12", "go")), "PAUSED");
     assert!(r.1.all("send").is_empty() && !read(&c.state).unwrap().iter().any(|e| e.kind == "prompt"));
     for _ in 0..6 {
         send("synergy-impl-8", "go");
@@ -520,7 +529,7 @@ fn reply_refusals_rate_limit_and_read_only() {
     assert!(send("synergy-impl-8", "go").starts_with("HTTP/1.1 429 "));
     assert_eq!(r.1.sent("synergy-impl-8").len(), 6, "10 attempts incl. the 4 refused");
     let ro = Server::new(&c, &r, None);
-    assert!(req(&ro, "POST", "/send", "agent=synergy-impl-8&text=go", &cookie, T).starts_with("HTTP/1.1 405 "));
+    assert!(req(&ro, "POST", "/api/v1/send", "agent=synergy-impl-8&text=go", &cookie, T).starts_with("HTTP/1.1 405 "));
 }
 
 #[test]
@@ -528,48 +537,23 @@ fn page_has_no_dash_placeholders() {
     let (c, r) = fixture("dash");
     run(&c, &Fake::default(), &["queue", "sendmeter", "add", "18", "12"]);
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page = req(&s, "GET", "/?all=1", "", "", T);
-    let mut html = page[page.find("<body").unwrap()..].to_string();
-    html.truncate(html.find("<script").unwrap());
-    html += &queue_js(&s, ADDR, T, "tab(d) + sheet(d, 'sendmeter')");
-    html += &parts(&s, ADDR, "", T).concat();
-    html += &events_tab(&s, ADDR, T, "{}").unwrap_or_default();
+    let cookie = paired(&s, &c);
+    let mut text = String::new();
+    for p in [
+        "/screens/queue",
+        "/screens/lanes",
+        "/screens/events",
+        "/screens/fleets",
+        "/screens/cards",
+        "/screens/lanes/sendmeter-impl-12",
+    ] {
+        text += &req(&s, "GET", p, "", &cookie, T);
+    }
     assert!(
-        !html.contains(" - ") && !html.contains(">-<") && !html.contains(" · -") && !html.contains('—'),
-        "{html}"
+        !text.contains(" - ") && !text.contains("\"-\"") && !text.contains(" · -") && !text.contains('—'),
+        "{text}"
     );
-    assert!(
-        html.contains("<details class=\"q\" data-q data-act=idle data-grow=queued data-i=18><summary><span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/18\">#18</a></span><span class=a>queued</span>"),
-        "{html}"
-    );
-    assert!(
-        html.contains("<option value=\"\" selected>default (profile)</option>"),
-        "unset model"
-    );
-    assert!(
-        html.contains("<option value=\"\" selected>default (none)</option>"),
-        "unset effort"
-    );
-}
-
-#[test]
-fn ascii_horse_snapshots() {
-    let states = ["working", "idle", "unknown", "done", "blocked", "dead"];
-    let all = avatars(&states.map(|s| ("x", "impl", s)));
-    let asc = |state: &str| {
-        let a = &all[states.iter().position(|s| *s == state).unwrap()];
-        a[a.find("</i>").unwrap() + 4..a.find("</i><svg").unwrap() + 4].to_string()
-    };
-    let stand = "<i class=asc><b>    _/>\n~(___)\n  | |</b></i>";
-    assert_eq!(
-        asc("working"),
-        "<i class=\"asc run\"><b>    _/>\n~(___)\n /  \\</b><b>    _/>\n~(___)\n  ><</b></i>"
-    );
-    assert_eq!(asc("idle"), stand);
-    assert_eq!(asc("unknown"), stand);
-    assert_eq!(asc("done"), "<i class=asc><b>\n    _/>\n~(___)_</b></i>");
-    assert_eq!(asc("blocked"), "<i class=asc><b>     />\n ~(_/\n  / \\</b></i>");
-    assert_eq!(asc("dead"), asc("blocked"));
+    assert!(text.contains("\"id\":\"q-sendmeter-18\""), "{text}");
 }
 
 #[test]
@@ -583,12 +567,7 @@ fn vector_horses_keep_a_coat_per_name() {
         ("synergy-impl-7", "impl", "idle"),
     ];
     of.extend(names.iter().map(|n| (n.as_str(), "impl", "idle")));
-    let all = avatars(&of);
-    let w = &all[0];
-    assert!(
-        w.contains("class=\"av g working\"") && w.contains("<use href=#ha-impl />") && w.contains("data-act=impl"),
-        "{w}"
-    );
+    let all: Vec<String> = of.iter().map(|(n, _, _)| drover::serve::coat(n)).collect();
     let horses = std::fs::read_to_string(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../../assets/swag/farm/sprites.svg"
@@ -602,7 +581,6 @@ fn vector_horses_keep_a_coat_per_name() {
             .contains("class=\"leg leg-nf\" style=\"--a:28deg\"")
             && horses.contains("fill=\"var(--c)\"")
     );
-    assert!(all[1].contains("class=\"av r blocked\"") && all[2].contains("av g done"));
     let coat = |a: &String| a[a.find("--c:").unwrap()..a.find(";--d").unwrap()].to_string();
     assert_eq!(coat(&all[3]), coat(&all[4]));
     let coats: std::collections::BTreeSet<String> = all[5..].iter().map(coat).collect();
@@ -615,255 +593,4 @@ fn vector_horses_keep_a_coat_per_name() {
         drover::devices::sha256(&[b'a'; 56]),
         "b35439a4ac6f0948b6d6f9e3c6af0f5f590ce20f1bde7090ef7970686ec6738a"
     );
-}
-
-#[test]
-fn lanes_and_sheet_fit_390px() {
-    if no_webkit() {
-        return;
-    }
-    let (c, r) = fixture("shots");
-    std::fs::create_dir_all(c.state.parent().unwrap().join("cache")).unwrap();
-    std::fs::write(
-        c.state.parent().unwrap().join("cache/issue-sendmeter-12.json"),
-        json!({"title": "Send meter readings nightly"}).to_string(),
-    )
-    .unwrap();
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page = req(&s, "GET", "/?all=1", "", "", T);
-    let body = |res: String| res[res.find("\r\n\r\n").unwrap() + 4..].to_string();
-    let cookie = paired(&s, &c);
-    let lane = body(req(&s, "GET", "/lane?agent=sendmeter-impl-12", "", &cookie, T));
-    let (pair, sent) = (
-        body(req(&s, "POST", "/send", "agent=sendmeter-impl-12&text=x", "", T)),
-        body(req(
-            &s,
-            "POST",
-            "/send",
-            "agent=sendmeter-impl-12&text=rerun+the+tests",
-            &cookie,
-            T,
-        )),
-    );
-    let mut more: serde_json::Value = serde_json::from_str(&lane).unwrap();
-    more["more"] = json!(true);
-    let kill = "sendmeter-impl-12 · impl · 3 unpushed commit(s), 0 dirty file(s) → wip/sendmeter-impl-12-20261031-1200 · pane closes, worktree kept; dry run: nothing changed; pass --yes to kill";
-    let fake = |lane: (u16, &str), send: (u16, &str)| {
-        format!(
-            "window.fetch = async (u, o) => u.startsWith('/lane') ? new Response({}, {{status: {}}}) : u === '/act' ? \
-             (o.body.get('op') === 'clean' ? new Response('REFUSED UNSAFE_CLEAN: sendmeter-impl-12: not merged', {{status: 409}}) : new Response({}, {{status: 200}})) : new Response({}, {{status: {}}});",
-            json!(lane.1), lane.0, json!(kill), json!(send.1), send.0
-        )
-    };
-    let stub = |send: (u16, &str)| fake((200, &lane), send);
-    let open = "open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]'))";
-    let submit = "document.querySelector('.reply textarea').value = 'rerun the tests'; document.querySelector('.reply').requestSubmit()";
-    let dir = std::env::var("DROVER_SNAPSHOTS").ok();
-    let d = tmpdir("shots-png");
-    let file = d.join("page.html");
-    std::fs::write(&file, drawn(&page[page.find("<!doctype").unwrap()..], &s, ADDR, "", T)).unwrap();
-    let scenes = [
-        ("lanes-horse", "horse", String::new()),
-        ("lanes-ascii", "ascii", String::new()),
-        ("lanes-glyph", "glyph", String::new()),
-        ("sheet-78", "horse", format!("{}; {open}", stub((200, &sent)))),
-        (
-            "sheet-full",
-            "horse",
-            format!("{}; {open}; snap('full')", stub((200, &sent))),
-        ),
-        (
-            "pairing-prompt",
-            "horse",
-            format!("{}; {open}; {submit}", stub((401, &pair))),
-        ),
-        (
-            "reply-sent",
-            "horse",
-            format!("{}; {open}; {submit}", stub((200, &sent))),
-        ),
-        (
-            "transcript-more",
-            "horse",
-            format!(
-                "{}; {open}; snap('full'); setTimeout(() => document.querySelector('.blk.run').open = true, 100)",
-                fake((200, &more.to_string()), (200, &sent))
-            ),
-        ),
-        ("chat-open", "horse", chat_scene(true)),
-        ("chat-collapsed", "horse", chat_scene(false)),
-        (
-            "slash-menu",
-            "horse",
-            format!(
-                "{}; {open}; ta.value = '/c'; ta.dispatchEvent(new Event('input'))",
-                stub((200, &sent))
-            ),
-        ),
-        (
-            "kill-confirm",
-            "horse",
-            format!("{}; {open}; run('kill')", stub((200, &sent))),
-        ),
-        (
-            "sheet-unpaired",
-            "horse",
-            format!(
-                "{}; {open}",
-                fake((401, "pair this device to read transcripts"), (401, &pair))
-            ),
-        ),
-    ];
-    for (name, mode, js) in scenes {
-        let png = dir.as_ref().map_or(d.join(format!("{name}.png")), |p| {
-            std::path::Path::new(p).join(format!("{name}.png"))
-        });
-        let o = webview()
-            .args([file.to_str().unwrap(), "390", "lanes", mode, png.to_str().unwrap(), &js])
-            .output()
-            .unwrap();
-        let out = String::from_utf8_lossy(&o.stdout);
-        let w: Vec<u32> = out.split_whitespace().filter_map(|n| n.parse().ok()).collect();
-        assert!(
-            o.status.success() && w.len() == 2,
-            "{name}: {out} {}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-        assert!(w[0] <= 390 && w[1] == 390, "{name}: scrollWidth {} at {}", w[0], w[1]);
-    }
-}
-
-#[test]
-fn chat_views_never_blank() {
-    if no_webkit() {
-        return;
-    }
-    let (c, r) = fixture("never-blank");
-    let d = json!({"role": "impl", "agent": "synergy-impl-7", "harness": "claude", "machine": "air", "host": "air"});
-    append(&c.state, &Event::new(900_800, "synergy", Some(7), "spawn", d)).unwrap();
-    let screen = "⏺ Bash(cargo test)\n  ⎿ ok\n> fix the test\n⏺ Fixed: the test passes.\n";
-    let OnShed(f, sh) = r;
-    let air = FakeShed::new();
-    air.lane("synergy-impl-7", "working", "/x");
-    air.screen("synergy-impl-7", screen);
-    let over = OverSsh {
-        f: &f,
-        hosts: vec![("air", &air)],
-    };
-    let r = drover::shed::With(&over, sh.shed());
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let cookie = paired(&s, &c);
-    let sheet = |agent: &str| {
-        let res = req(&s, "GET", &format!("/lane?agent={agent}"), "", &cookie, T);
-        serde_json::from_str::<serde_json::Value>(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap()
-    };
-    let mut local = sheet("sendmeter-impl-12");
-    local["said"] = json!([{"k": "me", "text": "fix the test", "at": "2026-11-03T09:00:00Z"},
-        {"k": "ai", "text": "Fixed: **the test** passes.", "at": "2026-11-03T09:01:00Z"}]);
-    let mut empty = local.clone();
-    empty["said"] = json!([]);
-    let remote = sheet("synergy-impl-7");
-    assert_eq!(
-        air.last("read"),
-        json!({"name": "synergy-impl-7", "lines": 200, "history": true})
-    );
-    assert_eq!(
-        (&remote["said"], remote["lines"].as_array().unwrap().len()),
-        (&json!(null), 4),
-        "{remote}"
-    );
-    let page = req(&s, "GET", "/?all=1", "", "", T);
-    let d = tmpdir("never-blank-png");
-    let file = d.join("page.html");
-    std::fs::write(&file, drawn(&page[page.find("<!doctype").unwrap()..], &s, ADDR, "", T)).unwrap();
-    for (agent, lane) in [
-        ("sendmeter-impl-12", local),
-        ("sendmeter-impl-12", empty),
-        ("synergy-impl-7", remote),
-        ("sendmeter-rev-9-r1", sheet("sendmeter-rev-9-r1")),
-    ] {
-        let js = format!(
-            "window.errs = 0; window.onerror = () => {{ errs++; }}; addEventListener('unhandledrejection', () => errs++); \
-             console.error = () => errs++; window.fetch = async () => new Response({}, {{status: 200}}); \
-             if ($('.fv').ariaPressed === 'true') $('.fv').click(); open($('.lane[data-agent=\"{agent}\"]')); \
-             setTimeout(() => {{ const a = now.innerHTML, msgs = $$('.now .blk.me, .now .blk.ai').length; $('.fv').click(); \
-             window.late = [msgs, $$('.now .blk').length, now.innerHTML !== a ? 1 : 0, errs]; }}, 300)",
-            json!(lane.to_string())
-        );
-        let png = d.join(format!("{agent}.png"));
-        let o = webview()
-            .args([
-                file.to_str().unwrap(),
-                "390",
-                "lanes",
-                "horse",
-                png.to_str().unwrap(),
-                &js,
-            ])
-            .output()
-            .unwrap();
-        let out = String::from_utf8_lossy(&o.stdout);
-        let m: Vec<f64> = out.split_whitespace().skip(2).filter_map(|n| n.parse().ok()).collect();
-        assert!(
-            o.status.success() && m.len() == 4,
-            "{agent}: {out} {}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-        assert!(
-            m[0] >= 1.0 && m[1] >= 1.0 && m[2] == 1.0 && m[3] == 0.0,
-            "{agent}: default msgs, full blocks, toggled, errors: {m:?}"
-        );
-    }
-}
-
-#[test]
-fn one_401_never_latches_unpaired() {
-    if no_webkit() {
-        return;
-    }
-    let (c, r) = fixture("pair-recheck");
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let cookie = paired(&s, &c);
-    let res = req(&s, "GET", "/lane?agent=sendmeter-impl-12", "", &cookie, T);
-    let lane = &res[res.find("\r\n\r\n").unwrap() + 4..];
-    let page = req(&s, "GET", "/?all=1", "", "", T);
-    let d = tmpdir("pair-recheck-png");
-    let file = d.join("page.html");
-    std::fs::write(&file, drawn(&page[page.find("<!doctype").unwrap()..], &s, ADDR, "", T)).unwrap();
-    let scene = |paired: bool| {
-        let js = format!(
-            "let k = 0, asked = 0; window.fetch = async u => u.includes('pair/status') ? (asked++, new Response(JSON.stringify({{paired: {paired}}}))) : \
-             u.startsWith('/lane') ? (k++ ? new Response({lane}, {{headers: {{'X-Paired': '1'}}}}) : new Response('pair this device to read transcripts', {{status: 401}})) : \
-             new Response('', {{status: 404}}); \
-             const vis = () => +!document.querySelector('.pairf').hidden; \
-             open(document.querySelector('.lane[data-agent=\"sendmeter-impl-12\"]')); \
-             setTimeout(() => {{ const a = vis(), u = +!!document.querySelector('.unp'); poll().then(() => {{ window.late = [a, vis(), u, asked]; }}); }}, 200)",
-            lane = json!(lane)
-        );
-        let png = d.join(format!("pair-{paired}.png"));
-        let o = webview()
-            .env("DROVER_WAIT", "1")
-            .args([
-                file.to_str().unwrap(),
-                "390",
-                "lanes",
-                "horse",
-                png.to_str().unwrap(),
-                &js,
-            ])
-            .output()
-            .unwrap();
-        let out = String::from_utf8_lossy(&o.stdout).into_owned();
-        assert!(o.status.success(), "{out} {}", String::from_utf8_lossy(&o.stderr));
-        out.split_whitespace()
-            .skip(2)
-            .map(|n| n.parse::<f64>().unwrap() as u8)
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(
-        scene(false),
-        [1, 0, 1, 1],
-        "confirmed no: Pair UI, gone after the next paired read"
-    );
-    assert_eq!(scene(true), [0, 0, 0, 1], "status yes: no Pair UI at all");
 }

@@ -3,6 +3,7 @@ use common::*;
 use drover::events::{fold, read, Event};
 use drover::runner::{Out, Real, Runner};
 use drover::serve::Server;
+use serde_json::{json, Value};
 use std::path::Path;
 use std::sync::Mutex;
 
@@ -159,9 +160,20 @@ fn post(s: &Server, path: &str, body: &str, cookie: &str, now: u64) -> String {
     String::from_utf8_lossy(&s.respond(&r, now)).into_owned()
 }
 
-fn needs_and_chat(s: &Server, cookie: &str, now: u64) -> (String, String) {
-    let [needs, _, chat] = parts(s, ADDR, cookie, now);
-    (needs, chat)
+fn needs_and_ask(s: &Server, cookie: &str, now: u64) -> (Value, Value) {
+    let needs: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "needs")).unwrap();
+    let chat: Value = serde_json::from_str(&api(s, ADDR, cookie, now, "chat")).unwrap();
+    let msgs: Vec<Value> = chat["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|t| t["page"]["msgs"].as_array().unwrap().clone())
+        .collect();
+    let ask = msgs
+        .into_iter()
+        .rfind(|m| m["ask"]["id"] == "q1")
+        .unwrap_or_else(|| panic!("no q1 in {chat}"));
+    (needs, ask)
 }
 
 #[test]
@@ -190,12 +202,13 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     drive(&c, &r);
     let ask = &kinds(&c, "needs-decision")[0];
     assert_eq!((ask.issue, ask.str("thread")), (Some(12), Some("t1")));
-    let (needs, chat) = needs_and_chat(&s, &cookie, c.now + 5);
+    let (needs, ask) = needs_and_ask(&s, &cookie, c.now + 5);
+    let card = &needs["asks"][0];
     assert!(
-        needs.contains("<details class=ask>") && needs.contains("<img src=\"design/sendmeter/12/0/q1\""),
+        card["ask"]["id"] == "q1" && card["ask"]["issue"] == 12 && card["pngs"][0] == "docs/design/meter/1440.png",
         "{needs}"
     );
-    assert!(chat.contains("data-id=\"q1\""), "{chat}");
+    assert_eq!(ask["open"], true, "{ask}");
     let res = String::from_utf8_lossy(&s.respond(
         &format!("GET /design/sendmeter/12/0 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"),
         c.now,
@@ -205,8 +218,7 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
         res.starts_with("HTTP/1.1 200") && res.ends_with("\u{fffd}PNG wide"),
         "{res}"
     );
-    let i = needs.find("name=mtime value=").unwrap() + 17;
-    let mt: String = needs[i..].chars().take_while(char::is_ascii_digit).collect();
+    let mt = needs["mtime"].as_str().unwrap().to_string();
     let res = post(
         &s,
         "/",
@@ -216,12 +228,13 @@ fn the_board_card_and_the_thread_ask_are_one_answer_first_tap_wins() {
     );
     assert!(res.starts_with("HTTP/1.1 303"), "{res}");
     assert_eq!(kinds(&c, "design-approved")[0].str("by"), Some("owner"));
-    let (needs, chat) = needs_and_chat(&s, &cookie, c.now + 15);
-    assert!(
-        !needs.contains("<details class=ask>") && !chat.contains("data-id=\"q1\""),
-        "{needs}"
+    let (needs, ask) = needs_and_ask(&s, &cookie, c.now + 15);
+    assert_eq!(needs["asks"], json!([]), "{needs}");
+    assert_eq!(
+        (&ask["open"], &ask["answer"]["choice"]),
+        (&json!(false), &json!("approve")),
+        "{ask}"
     );
-    assert!(chat.contains("✓ 1. approve"), "{chat}");
     let (code, out) = run(&c, &r, &["answer", "sendmeter", "q1", "reject"]);
     assert!(code == 3 && out.contains("REFUSED ALREADY_ANSWERED"), "{out}");
     std::fs::create_dir_all(wt(&c, 13)).unwrap();

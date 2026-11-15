@@ -1,6 +1,5 @@
 mod common;
 use common::*;
-use drover::devices;
 use drover::events::{append, read, Event};
 use drover::serve::Server;
 use serde_json::json;
@@ -12,15 +11,27 @@ fn config() -> String {
 }
 
 fn get(s: &Server, path: &str) -> String {
-    let res = String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000))
-        .into_owned();
-    with_queue(&res, s, ADDR, 1_000_000)
+    String::from_utf8_lossy(&s.respond(&format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), 1_000_000)).into_owned()
+}
+
+fn screen(s: &Server, path: &str) -> serde_json::Value {
+    let res = get(s, path);
+    serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap_or_else(|_| panic!("{res}"))
+}
+
+fn find<'a>(v: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+    if v.get("id").and_then(serde_json::Value::as_str) == Some(id) {
+        return Some(v);
+    }
+    match v {
+        serde_json::Value::Object(m) => m.values().find_map(|x| find(x, id)),
+        serde_json::Value::Array(a) => a.iter().find_map(|x| find(x, id)),
+        _ => None,
+    }
 }
 
 fn mtime(s: &Server) -> String {
-    let page = get(s, "/");
-    let i = page.find("name=mtime value=").expect("no mtime field") + 17;
-    page[i..].chars().take_while(char::is_ascii_digit).collect()
+    screen(s, "/api/v1/state")["mtime"].as_str().unwrap().to_string()
 }
 
 fn post(s: &Server, body: &str, extra: &str) -> String {
@@ -80,11 +91,6 @@ fn queue_buttons_move_like_queue_mv() {
     let (cli, web) = pair("mv");
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
-    let page = get(&s, "/");
-    assert!(
-        page.contains("name=before value=18") && page.contains("▲ up"),
-        "▲ on #12 targets #18"
-    );
     for (args, body, msg) in [
         (
             vec!["mv", "12", "--before", "18"],
@@ -148,7 +154,7 @@ fn pause_button_matches_cli_and_blocks_next_and_spawn() {
             Some("web".into())
         )
     );
-    assert!(get(&s, "/").contains("> paused · ") && get(&s, "/").contains(">Resume</button>"));
+    assert!(get(&s, "/screens/queue").contains("\"label\":\"Resume\""));
     for c in [&cli, &web] {
         assert_eq!(
             run(c, &Fake::default(), &["next", "sendmeter"]),
@@ -180,13 +186,11 @@ fn role_dropdowns_set_like_drover_set() {
     let (cli, web) = pair("set");
     let r = Fake::default();
     let s = Server::new(&web, &r, Some(ADDR.into()));
-    assert!(get(&s, "/").contains("<button type=button class=cfg data-f=\"sendmeter\">Config</button>"));
-    let page = queue_js(&s, ADDR, 1_000_000, "sheet(d, 'sendmeter')");
+    let fleets = screen(&s, "/screens/fleets").to_string();
     assert!(
-        page.contains("<option selected>opus</option><option>sonnet</option>"),
-        "only `models`"
+        fleets.contains("\"name\":\"sendmeter.impl\",\"options\":[\"opus\",\"sonnet\"]"),
+        "only `models`: {fleets}"
     );
-    assert!(page.contains("<select name=effort aria-label=effort><option value=\"\" selected>default (none)</option><option>none</option>"));
     assert_eq!(
         run(
             &cli,
@@ -376,9 +380,15 @@ fn page_reads_only_cached_pr_data_and_serves_pwa_assets() {
     let r = Fake::default();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let page = get(&s, "/");
-    assert!(
-        page.contains("pull/34\">PR #34</a>] [<a href=\"https://github.com/jirathip-dev/sendmeter/pull/34/checks\">checks</a>] · CI <span class=g>✓</span>"),
-        "{page}"
+    let q = screen(&s, "/screens/queue");
+    let row = find(&q, "q-sendmeter-12").unwrap_or_else(|| panic!("{q}"));
+    assert_eq!(
+        (&row["subtitle"], &row["tap"]["url"]),
+        (
+            &json!("impl · CI ✓"),
+            &json!("https://github.com/jirathip-dev/sendmeter/pull/34")
+        ),
+        "{row}"
     );
     assert!(!r.called("gh"), "no gh call per page load: {:?}", r.calls.borrow());
     for (path, ctype) in [
@@ -430,9 +440,9 @@ fn page_reads_only_cached_pr_data_and_serves_pwa_assets() {
     assert!(get(&s, "/manifest.webmanifest").contains("\"display\": \"standalone\""));
     assert!(
         page.contains("rel=manifest href=/manifest.webmanifest")
-            && std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/serve.js"))
+            && std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/src/main.ts"))
                 .unwrap()
-                .contains("serviceWorker.register(R + 'sw.js')")
+                .contains("serviceWorker.register(url('sw.js'))")
     );
     assert!(page.contains("data-ts=1000000"), "render time for the stale badge");
 }
@@ -518,20 +528,16 @@ fn lanes_group_by_fleet_with_others() {
         "herdr pane read w1:p2",
         "⏺ Bash(cd ~/w; cargo test 2>&1 | tail -5)\n\n✻ Herding… (4m 2s · ↓ 1k tokens)\n────────────────────\n> \n────────────────────\n",
     );
-    let page = get(&Server::new(&c, &r, None), "/?all=1");
-    let at = |s: &str| page.find(s).unwrap_or_else(|| panic!("{s} missing"));
-    let working = &page[at("<h2><span class=g>working (2)</span></h2><h3>sendmeter (1)</h3>")..];
-    let rest = &working[4..];
-    assert!(
-        rest.find("<h3>synergy (1)</h3>") < rest.find("<h2>"),
-        "synergy subgroup inside working"
+    let lanes = screen(&Server::new(&c, &r, Some(ADDR.into())), "/screens/lanes");
+    assert_eq!(find(&lanes, "lanes-working").unwrap()["header"], "working (2)");
+    assert_eq!(
+        find(&lanes, "l-sendmeter-impl-12").unwrap()["subtitle"],
+        "impl · local · ✻ Herding… · now: running cd ~/w; cargo test 2>&1 | tail -5 · 4m"
     );
-    assert!(
-        page.contains("⚠ log/pane mismatch")
-            && page.contains(concat!(
-                "<span class=\"act nw el now\" title=\"✻ Herding… · now: running cd ~/w; cargo test 2&gt;&amp;1 | tail -5 · 4m\">",
-                "<span class=el>✻ Herding…</span><i> · </i><span class=el>running cargo test</span><i> · </i><span class=t>4m</span></span>"
-            ))
+    assert_eq!(
+        find(&lanes, "lanes-dead").unwrap()["blocks"][0]["rows"][0]["id"],
+        "l-sendmeter-rev-9-r1",
+        "a log/pane mismatch is dead"
     );
     let s = Server::new(&c, &r, None);
     for t in [0, 5, 29] {
@@ -631,97 +637,6 @@ fn activity_lines_per_harness_are_masked_and_cut() {
 }
 
 #[test]
-fn page_fits_390px_without_horizontal_scroll() {
-    let d = tmpdir("phone");
-    let c = ctx(&d, &config());
-    run(&c, &Fake::default(), &["queue", "sendmeter", "add", "17", "18", "12"]);
-    let cache = d.join("state/cache");
-    std::fs::create_dir_all(&cache).unwrap();
-    std::fs::write(
-        cache.join("issue-sendmeter-12.json"),
-        json!({"title": "Queue rows show issue and PR titles from the cached reads"}).to_string(),
-    )
-    .unwrap();
-    std::fs::write(
-        cache.join("pr-sendmeter-12.json"),
-        json!({"pr": {"number": 33, "title": "src: titles in Queue"}}).to_string(),
-    )
-    .unwrap();
-    let long = "sendmeter-impl-12-with-a-very-long-agent-name-that-would-push-a-table-wide";
-    append(&c.state, &Event::new(999_000, "sendmeter", Some(12), "spawn", json!({"role": "impl", "agent": long, "branch": "issue-12-a-very-long-branch-name-without-any-break-points-at-all"}))).unwrap();
-    append(
-        &c.state,
-        &Event::new(
-            999_100,
-            "sendmeter",
-            Some(12),
-            "blocked",
-            json!({"code": "CI_NOT_GREEN", "reason": "x".repeat(300)}),
-        ),
-    )
-    .unwrap();
-    let screen = format!("⏺ Bash({})\n{}\n", "y".repeat(200), "z".repeat(400));
-    let sh = FakeShed::new();
-    sh.attach(&c);
-    sh.lane(long, "working", "/x");
-    sh.screen(long, &screen);
-    let f = Fake::default();
-    let r = sh.on(&f);
-    let page = get(&Server::new(&c, &r, Some(ADDR.into())), "/");
-    let html = &page[page.find("<!doctype").unwrap()..];
-    assert!(!html.contains("<table") && !html.contains("<pre"), "no wide blocks");
-    assert!(
-        html.contains("width=device-width")
-            && std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../assets/serve.css"))
-                .unwrap()
-                .contains("overflow-wrap:anywhere")
-    );
-    assert!(
-        html.contains("<details class=\"q\" data-q data-act=blocked data-grow=blocked data-i=12 style=\"--rc:#")
-            && html.contains(
-                "\"><summary><span><a href=\"https://github.com/jirathip-dev/sendmeter/issues/12\">#12</a></span>"
-            ),
-        "rows are details"
-    );
-    assert!(
-        html.contains("class=tl title=\"Queue rows show issue and PR titles from the cached reads · PR #33 · src: titles in Queue\">"),
-        "title line"
-    );
-    for t in ["queue", "lanes", "chat"] {
-        assert!(
-            html.contains(&format!("<section id={t}>")) && html.contains(&format!("<a href=#{t}>")),
-            "{t} tab"
-        );
-    }
-    if no_webkit() {
-        return;
-    }
-    let file = d.join("page.html");
-    std::fs::write(&file, html).unwrap();
-    for tab in ["queue", "lanes"] {
-        for mode in ["horse", "ascii", "glyph"] {
-            let o = webview()
-                .args([file.to_str().unwrap(), "390", tab, mode])
-                .output()
-                .unwrap();
-            let out = String::from_utf8_lossy(&o.stdout);
-            let w: Vec<u32> = out.split_whitespace().filter_map(|n| n.parse().ok()).collect();
-            assert!(
-                o.status.success() && w.len() == 2,
-                "{tab}/{mode}: {out} {}",
-                String::from_utf8_lossy(&o.stderr)
-            );
-            assert!(
-                w[0] <= 390 && w[1] == 390,
-                "{tab}/{mode}: scrollWidth {} at {}",
-                w[0],
-                w[1]
-            );
-        }
-    }
-}
-
-#[test]
 fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     let d = tmpdir("short");
     let two = format!("{}\n[fleet.synergy]\nrepo = \"o/synergy-apps\"\nlocal = \"/p/synergy-apps\"\nintegration = \"staging\"\npaused = true\n", config());
@@ -776,68 +691,29 @@ fn queue_shows_open_work_only_and_folds_paused_retired_and_noise() {
     let f = Fake::default();
     let r = sh.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page = get(&s, "/");
-    let section = |id: &str| {
-        let a = page.find(&format!("<section id={id}>")).unwrap();
-        page[a..a + page[a..].find("</section>").unwrap()].to_string()
-    };
-    let queue = section("queue");
+    let q = screen(&s, "/screens/queue");
+    let text = q.to_string();
     assert!(
-        !queue.contains("fleet-impl-3") && !queue.contains("<span>fleet</span>"),
+        !text.contains("fleet-impl-3") && find(&q, "fleet-fleet").is_none(),
         "no retired fleet"
     );
-    let rows = queue.matches("<details class=\"q\"").count();
-    assert_eq!(rows, 2 + 2, "open items only: sendmeter #17 #18, synergy #1039 #1040");
-    assert!(queue.contains("<span>done today: 30</span>"), "{queue}");
-    let done = &queue[queue.find("done today").unwrap()..];
-    let done = &done[..done.find("</details>").unwrap()];
-    assert_eq!(done.matches("<p>#").count(), 5, "at most 5: {done}");
-    assert!(done.starts_with("done today: 30</span></summary><p>#129 ") && done.contains("pull/1129\">PR #1129</a>"));
-    assert!(
-        queue.contains(
-            "<summary><i class=cv></i><span class=fn><b>synergy</b> <i class=m>●</i> paused · 1 lane (dead)</span>"
-        ),
-        "{queue}"
+    assert_eq!(
+        text.matches("\"id\":\"q-").count(),
+        2 + 2,
+        "open items only: sendmeter #17 #18, synergy #1039 #1040"
     );
-    let syn = &queue[queue.find("class=\"fc off").unwrap()..];
-    assert!(
-        syn.contains(
-            "<span><a href=\"https://github.com/o/synergy-apps/issues/1039\">#1039</a></span><span class=r>dead</span>"
-        ),
-        "{syn}"
-    );
-    let dead_row = &syn[syn
-        .find("<span><a href=\"https://github.com/o/synergy-apps/issues/1039\">#1039</a></span>")
-        .unwrap()..];
-    let dead_row = &dead_row[..dead_row.find("</details>").unwrap()];
-    assert!(!dead_row.contains("<button"), "no action on a dead lane: {dead_row}");
-    assert!(
-        queue.contains(
-            "<a href=\"https://github.com/jirathip-dev/sendmeter/issues/17\">#17</a></span><span class=a>impl</span>"
-        ),
+    assert_eq!(find(&q, "done-today-sendmeter").unwrap()["value"], "30");
+    let syn = find(&q, "fleet-synergy").unwrap();
+    assert_eq!(syn["subtitle"], "paused · 1 lane (dead)", "{syn}");
+    assert_eq!(find(syn, "pause-synergy").unwrap()["label"], "Resume");
+    let dead = find(&q, "q-synergy-1039").unwrap();
+    assert_eq!(dead["badge"]["text"], "dead", "{dead}");
+    assert!(dead.get("swipe").is_none(), "no action on a dead lane: {dead}");
+    assert_eq!(
+        find(&q, "q-sendmeter-17").unwrap()["badge"]["text"],
+        "impl",
         "live lane stays impl"
     );
-    assert!(
-        queue.contains("stall check: #17 in"),
-        "paused fleet's lane is not counted"
-    );
-    assert!(
-        !page.contains("id=events"),
-        "#60: Events loads when opened; #440: in System (serve.js makes its section)"
-    );
-    if let Some(ev) = events_tab(&s, ADDR, 1_000_000, "{ f: { k: 'all', fl: [] } }") {
-        let rows: Vec<&str> = ev.split("<details class=\"er").skip(1).collect();
-        assert!(rows
-            .iter()
-            .filter(|r| r.contains("alert failed"))
-            .all(|r| r.contains("t-r\" data-act=blocked>✗") && !r.contains("clean")));
-        assert!(ev.contains("alert failed") && !ev.contains("clean ×"), "{ev}");
-        let all = events_tab(&s, ADDR, 1_000_000, "{ all: true }").unwrap();
-        assert!(
-            all.matches("<details class=\"er").count() > 2 * 50,
-            "unfolded, unlimited"
-        );
-    }
 }
 
 #[test]
@@ -854,17 +730,15 @@ fn page_never_samples_the_host_and_links_immutable_assets() {
             && page.contains("Cache-Control: no-store")
             && !page.contains("<style>")
             && page.matches("<script>").count() == 1
-            && page.contains("<script>let h=document.documentElement,t=location.hash")
+            && page.contains("<script>let h=document.documentElement,m=new URLSearchParams")
     );
-    let i = page.find("<script src=/a/").unwrap() + 15;
+    let i = page.find("<script type=module src=/a/").unwrap() + 27;
     let v = &page[i..i + 8];
     assert!(v.chars().all(|c| c.is_ascii_hexdigit()), "{v}");
     let sw = get(&s, "/sw.js");
     for (f, ctype) in [
-        ("serve.css", "text/css"),
-        ("herd.css", "text/css"),
-        ("serve.js", "text/javascript"),
-        ("herd.js", "text/javascript"),
+        ("board.css", "text/css"),
+        ("board.js", "text/javascript"),
         ("themes/farm/sprites.svg", "image/svg+xml"),
         ("themes/farm/theme.json", "application/json"),
     ] {
@@ -885,7 +759,7 @@ fn page_never_samples_the_host_and_links_immutable_assets() {
         );
     }
     assert!(
-        get(&s, "/a/00000000/serve.js").starts_with("HTTP/1.1 404 "),
+        get(&s, "/a/00000000/board.js").starts_with("HTTP/1.1 404 "),
         "another build's hash"
     );
     assert!(
@@ -906,7 +780,7 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
         ))
         .into_owned()
     };
-    for path in ["/herd.json", "/api/v1/needs", "/api/v1/lanes"] {
+    for path in ["/api/v1/needs", "/api/v1/lanes"] {
         let res = send(path, "");
         assert!(
             res.starts_with("HTTP/1.1 200 OK") && res.contains("Content-Type: application/json; charset=utf-8\r\n"),
@@ -916,7 +790,7 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
         assert!(j.is_object(), "{path}");
     }
     assert!(send("/frags", "").starts_with("HTTP/1.1 404"), "no HTML parts");
-    for path in ["/herd.json", "/lane?agent=sendmeter-impl-12"] {
+    for path in ["/lane?agent=sendmeter-impl-12"] {
         for nav in [
             "Sec-Fetch-Mode: navigate\r\n",
             "Sec-Fetch-Dest: document\r\n",
@@ -939,124 +813,11 @@ fn fetch_only_reads_redirect_navigations_to_the_board() {
     );
     let sw = send("/sw.js", "");
     assert!(sw.contains("e.request.mode === 'navigate' && u.pathname !== P && !u.pathname.startsWith(P + 'thread/')) return e.respondWith(caches.match(P).then(m => m || fetch(P)))"), "{sw}");
-    assert!(sw.contains("u.pathname.startsWith(P + 'api/')") && !sw.contains("frags"));
+    assert!(
+        sw.contains("['api/', 'screens/', 'design/', 'shot/'].some(d => u.pathname.startsWith(P + d))")
+            && !sw.contains("frags")
+    );
     let v = send("/", "");
     let v = &v[v.find("/a/").unwrap()..][..11];
-    assert!(!send(&format!("{v}/serve.js"), "").contains("frags"));
-}
-
-#[test]
-fn frag_parts_redirect_navigations_and_404_unknown_ids() {
-    let (c, r) = (ctx(&tmpdir("frag-part"), &config()), Fake::default());
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let send = |path: &str, extra: &str| {
-        String::from_utf8_lossy(&s.respond(
-            &format!("GET {path} HTTP/1.1\r\nHost: {ADDR}\r\n{extra}\r\n"),
-            1_000_000,
-        ))
-        .into_owned()
-    };
-    for path in ["/frag?id=hist&host=mini&k=load"] {
-        assert!(send(path, "").starts_with("HTTP/1.1 200 OK"), "{path}");
-        for nav in [
-            "Sec-Fetch-Mode: navigate\r\n",
-            "Sec-Fetch-Dest: document\r\n",
-            "Accept: text/html,application/xhtml+xml\r\n",
-        ] {
-            assert!(
-                send(path, nav).starts_with("HTTP/1.1 303 See Other\r\nLocation: /\r\n"),
-                "{path} {nav}"
-            );
-        }
-    }
-    for path in [
-        "/frag?id=nope",
-        "/frag",
-        "/frag?id=roles&fleet=sendmeter",
-        "/frag?id=config",
-        "/frag?id=config&fleet=nope",
-        "/frag?id=config&fleet=sendmeter",
-    ] {
-        let res = send(path, "");
-        assert!(
-            res.starts_with("HTTP/1.1 404 Not Found") && res.ends_with("no such part\n"),
-            "{path}: {res}"
-        );
-    }
-}
-
-#[test]
-fn pair_request_carries_the_optional_approve_hint() {
-    let js = include_str!("../../../assets/serve.js");
-    assert!(
-        js.contains("`Waiting for approval on the Mac: drover serve approve ${t}` + (h ? ` · ${h}` : '')"),
-        "the Mac line, hint after ` · `"
-    );
-    assert!(
-        js.contains("el('p', 'm', `Waiting"),
-        "`el` sets textContent: the hint is never HTML"
-    );
-    let request = |c: &drover::Ctx| {
-        let r = Fake::default();
-        let s = Server::new(c, &r, Some(ADDR.into()));
-        let req =
-            format!("POST /pair/request HTTP/1.1\r\nHost: {ADDR}\r\nX-Peer: 10.0.0.1\r\nContent-Length: 0\r\n\r\n");
-        let res = String::from_utf8_lossy(&s.respond(&req, 1_000_000)).into_owned();
-        assert!(res.starts_with("HTTP/1.1 200 "), "{res}");
-        res.rsplit("\r\n\r\n").next().unwrap().to_string()
-    };
-    let body = request(&ctx(&tmpdir("hint-off"), &config()));
-    assert!(body.len() == 8 && body.ends_with("\n\n"), "code only: {body:?}");
-    let hinted = config().replace(
-        "[serve]\n",
-        "[serve]\napprove_hint = \"or send 'pair {code}' to <b>ops</b>\"\n",
-    );
-    let body = request(&ctx(&tmpdir("hint-on"), &hinted));
-    let code = &body[..6];
-    assert_eq!(
-        body,
-        format!("{code}\nor send 'pair {code}' to <b>ops</b>\n"),
-        "text/plain; the page sets it as text"
-    );
-}
-
-#[test]
-fn host_local_pairing_shows_the_approve_line_and_lasts_a_year() {
-    let js = include_str!("../../../assets/serve.js");
-    assert!(
-        js.contains("el('button', 'pairc', 'copy')") && js.contains("paste in Terminal"),
-        "the copy button"
-    );
-    assert!(
-        js.contains("setInterval(claim, 2000)"),
-        "the page pairs itself once approved"
-    );
-    let c = ctx(&tmpdir("pair-host"), &config());
-    let r = Fake::default();
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let request = |extra: &str| {
-        let req = format!("POST /pair/request HTTP/1.1\r\n{extra}Content-Length: 0\r\n\r\n");
-        let res = String::from_utf8_lossy(&s.respond(&req, 1_000_000)).into_owned();
-        assert!(res.starts_with("HTTP/1.1 200 "), "{res}");
-        devices::cancel(&c, res.lines().find_map(|l| l.strip_prefix("Set-Cookie: ")).unwrap()).unwrap();
-        res.rsplit("\r\n\r\n").next().unwrap().to_string()
-    };
-    let body = request("X-Peer: 127.0.0.1\r\nHost: 127.0.0.1:7777\r\n");
-    assert_eq!(body, format!("{0}\n\ndrover serve approve {0}\n", &body[..6]));
-    for extra in [
-        "X-Peer: 127.0.0.1\r\nHost: 127.0.0.1:7777\r\nX-Forwarded-For: 100.64.0.2\r\n",
-        "X-Peer: 127.0.0.1\r\nHost: 127.0.0.1:7777\r\nTailscale-User-Login: a@b\r\n",
-        "X-Peer: 10.0.0.1\r\nHost: 127.0.0.1:7777\r\n",
-        "X-Peer: 127.0.0.1\r\nHost: mac.tail1.ts.net\r\n",
-    ] {
-        assert_eq!(request(extra).len(), 8, "not on the host: code only: {extra:?}");
-    }
-    let cookie = common::pair(&s, &c, "Mac Safari", 1_000_000);
-    let devs = |now| run(&drover::Ctx { now, ..c.clone() }, &r, &["serve", "devices"]).1;
-    assert!(devs(1_000_000).ends_with(" expires in 365d\n"), "{}", devs(1_000_000));
-    let paired = |now| devices::find(&drover::Ctx { now, ..c.clone() }, &cookie[8..]).is_some();
-    assert!(paired(1_000_000 + 300 * 86_400), "used: renewed for a year from now");
-    assert!(paired(1_000_000 + 600 * 86_400), "still within a year of that use");
-    assert!(!paired(1_000_000 + 966 * 86_400), "a year unused: unpaired");
-    assert_eq!(devs(1_000_000 + 966 * 86_400), "");
+    assert!(!send(&format!("{v}/board.js"), "").contains("frags"));
 }

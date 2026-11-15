@@ -8,41 +8,6 @@ use std::collections::BTreeMap;
 const ADDR: &str = "127.0.0.1:7777";
 const T: u64 = 1_000_000;
 
-type Form = (BTreeMap<String, String>, Vec<(String, String)>);
-
-fn forms(html: &str) -> Vec<Form> {
-    let attr = |tag: &str, k: &str| {
-        let at = tag.find(&format!(" {k}="))? + k.len() + 2;
-        let v = &tag[at..];
-        Some(match v.strip_prefix('"') {
-            Some(q) => q[..q.find('"')?].replace("&quot;", "\"").replace("&amp;", "&"),
-            None => v[..v.find([' ', '>']).unwrap_or(v.len())].to_string(),
-        })
-    };
-    html.split("<form method=post")
-        .skip(1)
-        .map(|f| {
-            let f = &f[..f.find("</form>").unwrap()];
-            let tags = |t: &str| {
-                f.split(&format!("<{t} "))
-                    .skip(1)
-                    .map(|x| format!(" {}", &x[..x.find('>').unwrap() + 1]))
-                    .collect::<Vec<_>>()
-            };
-            let hidden = tags("input")
-                .iter()
-                .filter(|i| i.contains("type=hidden"))
-                .map(|i| (attr(i, "name").unwrap(), attr(i, "value").unwrap_or_default()))
-                .collect();
-            let buttons = tags("button")
-                .iter()
-                .filter_map(|b| Some((attr(b, "name")?, attr(b, "value")?)))
-                .collect();
-            (hidden, buttons)
-        })
-        .collect()
-}
-
 fn post(s: &Server, cookie: &str, fields: &BTreeMap<String, String>) -> Value {
     let body = fields
         .iter()
@@ -59,15 +24,14 @@ fn post(s: &Server, cookie: &str, fields: &BTreeMap<String, String>) -> Value {
     serde_json::from_str(&res[res.find("\r\n\r\n").unwrap() + 4..]).unwrap_or_else(|_| panic!("{res}"))
 }
 
-fn form(html: &str, op: &str, with: Option<(&str, &str)>) -> Form {
-    forms(html)
-        .into_iter()
-        .find(|(h, b)| {
-            let mut all = h.clone();
-            all.extend(b.iter().cloned());
-            h.get("op").map(String::as_str) == Some(op) && with.is_none_or(|(k, v)| all.get(k).is_some_and(|x| x == v))
-        })
-        .unwrap_or_else(|| panic!("no {op} form {with:?}: {html}"))
+fn fields(s: &Server, op: &str, kv: &[(&str, &str)]) -> BTreeMap<String, String> {
+    let st: Value = serde_json::from_str(&api(s, ADDR, "", T, "state")).unwrap();
+    let mtime = st["mtime"].as_str().unwrap().to_string();
+    [("op", op), ("fleet", "sendmeter"), ("mtime", mtime.as_str())]
+        .iter()
+        .chain(kv)
+        .map(|(k, v)| ((*k).into(), (*v).into()))
+        .collect()
 }
 
 fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
@@ -80,7 +44,7 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
 }
 
 #[test]
-fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
+fn every_queue_write_posts_through_api_v1() {
     let c = ctx(
         &tmpdir("queue-board"),
         &format!("models = [\"opus\", \"sonnet\"]\n\n{CONFIG}").replace(
@@ -113,22 +77,15 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     .unwrap();
     let r = OnShed::new(Fake::default().reply("which hermes", "/usr/local/bin/hermes\n"));
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    let page = String::from_utf8_lossy(&s.respond(&format!("GET / HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T)).into_owned();
-    assert!(
-        page.contains("<section id=queue></section>") && !page.contains("class=\"fc "),
-        "the page has no Queue HTML"
-    );
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let tab = || queue_tab(&s, ADDR, T);
+    let queue = || api(&s, ADDR, "", T, "queue");
     let ok = |f: &BTreeMap<String, String>| {
         let v = post(&s, &cookie, f);
         assert_eq!(v["ok"], true, "{f:?}: {v}");
         v["message"].as_str().unwrap().to_string()
     };
 
-    let (mv, _) = form(&tab(), "mv", Some(("issue", "12")));
-    assert_eq!(mv.get("after").map(String::as_str), Some("17"), "{mv:?}");
-    ok(&mv);
+    ok(&fields(&s, "mv", &[("issue", "12"), ("after", "17")]));
     let order: Vec<u64> = drover::queue::view(
         &read(&c.state).unwrap(),
         &drover::events::fold(&read(&c.state).unwrap()),
@@ -139,14 +96,8 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     .collect();
     assert_eq!(order, [17, 12, 18]);
 
-    let (mut change, buttons) = form(&tab(), "answer", Some(("id", "q1")));
-    assert_eq!(
-        buttons[0],
-        ("choice".into(), "2".into()),
-        "recommended first: {buttons:?}"
-    );
-    change.insert("choice".into(), buttons[1].1.clone());
-    ok(&change);
+    assert!(queue().contains("\"q1\""), "{}", queue());
+    ok(&fields(&s, "answer", &[("id", "q1"), ("choice", "1")]));
     let d = kinds(&c, "decision");
     assert_eq!(
         (d.len(), d[1].str("choice"), d[1].str("by")),
@@ -154,9 +105,7 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
         "{d:?}"
     );
 
-    let (mut bq, _) = form(&tab(), "bqueue", None);
-    bq.insert("issues".into(), "31,30".into());
-    assert!(ok(&bq).ends_with("(needs-check)"));
+    assert!(ok(&fields(&s, "bqueue", &[("issues", "31,30")])).ends_with("(needs-check)"));
     let q = kinds(&c, "queue");
     assert_eq!(
         (
@@ -167,29 +116,29 @@ fn the_page_has_no_queue_html_and_every_drawn_form_posts_through_api_v1() {
     );
 
     let before = kinds(&c, "drive-pass").len();
-    ok(&form(&tab(), "drive", None).0);
+    ok(&fields(&s, "drive", &[]));
     assert_eq!(kinds(&c, "drive-pass").len(), before + 1);
 
-    ok(&form(&tab(), "pause", None).0);
-    let paused = tab();
-    assert!(paused.contains("<details class=\"fc off "), "{paused}");
-    ok(&form(&paused, "resume", None).0);
-    assert!(!tab().contains("<details class=\"fc off "));
+    let paused = || std::fs::read_to_string(&c.config).unwrap().contains("paused = true");
+    ok(&fields(&s, "pause", &[]));
+    assert!(paused());
+    ok(&fields(&s, "resume", &[]));
+    assert!(!paused());
 
-    let sheet = queue_js(&s, ADDR, T, "sheet(d, 'sendmeter')");
-    let (mut set, _) = form(&sheet, "set", Some(("role", "impl")));
-    set.extend([("harness", "hermes"), ("model", "sonnet"), ("effort", "")].map(|(k, v)| (k.into(), v.into())));
-    assert!(ok(&set).contains("model sonnet"));
-    let sheet = queue_js(&s, ADDR, T, "sheet(d, 'sendmeter')");
-    assert!(
-        forms(&sheet)
-            .iter()
-            .all(|(h, _)| h.get("op").map(String::as_str) != Some("cond")),
-        "{sheet}"
+    let set = fields(
+        &s,
+        "set",
+        &[
+            ("role", "impl"),
+            ("harness", "hermes"),
+            ("model", "sonnet"),
+            ("effort", ""),
+        ],
     );
-    let v = post(&s, "", &form(&tab(), "drive", None).0);
+    assert!(ok(&set).contains("model sonnet"));
+    let v = post(&s, "", &fields(&s, "drive", &[]));
     assert_eq!(v["code"], "UNPAIRED", "{v}");
-    let mut stale = form(&tab(), "pause", None).0;
+    let mut stale = fields(&s, "pause", &[]);
     stale.insert("mtime".into(), "1".into());
     assert_eq!(post(&s, &cookie, &stale)["code"], "STALE");
 }
@@ -222,20 +171,14 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
     let r = drover::shed::With(&cli, sh.shed());
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let html = queue_tab(&s, ADDR, T);
+    let q = api(&s, ADDR, "", T, "queue");
+    assert!(q.contains("ship the bell now?") && q.contains("\"t6\""), "{q}");
+    let needs = api(&s, ADDR, &cookie, T, "needs");
     assert!(
-        html.contains("ship the bell now?")
-            && html.contains("asked in <a href=#chat class=ath data-go=\"t6\">the bell · t6</a>"),
-        "{html}"
-    );
-    let (mut f, buttons) = form(&html, "answer", Some(("id", "q398")));
-    assert_eq!(buttons[0], ("choice".into(), "1".into()), "{buttons:?}");
-    let [needs, _, _] = parts(&s, ADDR, &cookie, T);
-    assert!(
-        needs.contains("ship the bell now?") && needs.contains("the bell · t6"),
+        needs.contains("ship the bell now?") && needs.contains("the bell"),
         "{needs}"
     );
-    f.insert("choice".into(), buttons[1].1.clone());
+    let f = fields(&s, "answer", &[("id", "q398"), ("choice", "2")]);
     let v = post(&s, &cookie, &f);
     assert_eq!(v["ok"], true, "{v}");
     let d = kinds(&c, "decision");
@@ -260,5 +203,5 @@ fn a_thread_ask_on_an_issue_is_answerable_from_its_queue_card() {
         (&json!(false), &json!("after #10")),
         "{m}"
     );
-    assert!(!queue_tab(&s, ADDR, T).contains("ship the bell now?"));
+    assert!(!api(&s, ADDR, "", T, "queue").contains("ship the bell now?"));
 }

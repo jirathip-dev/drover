@@ -59,7 +59,8 @@ Shipped on `staging`. Each line names the PR (or file) that proves it.
 - Drover in cooee: drover serves the plugin itself, `cooee-plugin.toml` and `/screens/` JSON blocks (#822).
 - An orchestrator thread can live in cooee (#690).
 - The lifeboat page at `/api/v1/lifeboat` for when cooee is down (#757).
-- The old phone board (`drover serve`) is frozen to bug fixes (#552, `.github/workflows/board-freeze.yml`).
+- The phone page (`drover serve`) draws the same `/screens/` JSON cooee draws: Queue, Lanes, Events, the Fleets sheet
+  and the cards (#927).
 
 ## In progress / next
 

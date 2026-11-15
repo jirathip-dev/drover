@@ -405,18 +405,20 @@ fn services_rows_go_green_amber_and_red() {
     );
 
     let s = drover::serve::Server::new(&c, &red, Some("127.0.0.1:7777".into()));
-    let page = host_tab(&s, "127.0.0.1:7777", c.now);
-    assert!(page.contains("<span class=gn>SERVICES</span>"), "{page}");
-    assert!(
-        page.contains("/ 25 GB</span> (104%) <span class=\"mt fx\">· 4m ago</span>"),
-        "{page}"
-    );
+    let host: serde_json::Value = serde_json::from_str(&api(&s, "127.0.0.1:7777", "", c.now, "host")).unwrap();
+    let services = host["services"].as_array().unwrap();
     for (k, d) in [
         ("tick", "failed: herdr: gone · job missing"),
         ("fast step", "ran 3m ago · job missing"),
     ] {
-        let want = format!("<span class=k>{k}</span><span class=w><b class=r>{d}</b> <span class=\"mt fx\">→ drover");
-        assert!(page.contains(&want), "{want}\n{page}");
+        let row = services
+            .iter()
+            .find(|r| r["name"] == k)
+            .unwrap_or_else(|| panic!("no {k}: {host}"));
+        assert!(
+            row["tone"] == "r" && row["detail"] == d && row["fix"].as_str().unwrap().starts_with("drover"),
+            "{row}"
+        );
     }
 }
 

@@ -28,6 +28,12 @@ pub fn permitted(action: &str) -> bool {
     list.unwrap_or_default().iter().any(|a| a.as_str() == Some(action))
 }
 
+/// `cooee-plugin.toml`'s `[[places]]` as JSON: the tabs, menu rows and cards the phone page draws.
+pub fn places() -> Value {
+    let m: toml::Value = toml::from_str(MANIFEST).unwrap_or(toml::Value::Integer(0));
+    serde_json::to_value(m.get("places")).unwrap_or_default()
+}
+
 fn iso(t: u64) -> String {
     let (d, s) = (t / 86_400, t % 86_400);
     let (m, day) = civil_month_day(d);
@@ -287,6 +293,14 @@ fn needs_card(i: &NeedIssue, ev: &crate::events::Log) -> Value {
         format!("\n\n{}", i.fail)
     };
     let mut blocks = vec![json!({"type": "text", "markdown": format!("**{}**{fail}", i.why)})];
+    let at = i.shots_at.as_deref().map_or(String::new(), |a| format!("/{a}"));
+    let shots = i.shots.iter().enumerate();
+    let items: Vec<Value> = shots
+        .map(|(k, a)| json!({"src": format!("/shot/{f}/{n}/{k}{at}"), "alt": a}))
+        .collect();
+    if !items.is_empty() {
+        blocks.push(json!({"type": "images", "id": format!("shots-{f}-{n}"), "items": items}));
+    }
     if !i.pending {
         blocks.push(choice(&format!("nh-{f}-{n}"), "needs-human", &opts));
     }
@@ -634,7 +648,46 @@ fn count(v: &Value) -> Option<usize> {
     })
 }
 
+fn sheets(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::Object(m) => {
+            out.extend(
+                m.get("sheet")
+                    .and_then(Value::as_str)
+                    .filter(|p| p.bytes().all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b)))
+                    .map(String::from),
+            );
+            m.values().for_each(|x| sheets(x, out));
+        }
+        Value::Array(a) => a.iter().for_each(|x| sheets(x, out)),
+        _ => {}
+    }
+}
+
 impl Server<'_> {
+    pub(super) fn screen_files(&self, ctx: &Ctx, paired: bool) -> Vec<(String, Vec<u8>)> {
+        let mut paths: Vec<String> = places()
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|p| p["screen"].as_str().map(String::from))
+            .chain(["/screens/cards".to_string()])
+            .collect();
+        let mut out = vec![];
+        let mut i = 0;
+        while let Some(p) = paths.get(i).cloned() {
+            i += 1;
+            if let Some(v) = self.screen(ctx, &p, &Q::new(), paired) {
+                let mut more = vec![];
+                sheets(&v, &mut more);
+                more.retain(|m| !paths.contains(m));
+                paths.extend(more);
+                out.push((format!("{}/index.html", &p[1..]), v.to_string().into_bytes()));
+            }
+        }
+        out
+    }
+
     fn screen(&self, ctx: &Ctx, path: &str, q: &Q, paired: bool) -> Option<Value> {
         let mut v = match path {
             "/screens/queue" => self.queue_screen(ctx, q),
@@ -781,6 +834,10 @@ impl Server<'_> {
         });
         let ev = shared(&ctx.state).unwrap_or_default();
         let mut cards = run_cards(ctx.now, &ev);
+        cards.extend(tab.config.as_ref().map(|e| {
+            json!({"type": "card", "id": "config-invalid", "kind": "alert", "tone": "bad",
+                "title": "fleet.toml is invalid", "blocks": [{"type": "text", "id": "config-why", "markdown": e}]})
+        }));
         cards.extend(super::v1::slo_open(&ev).map(|e| {
             json!({"type": "card", "id": format!("slo-{}", e.seq), "kind": "alert", "tone": "warn",
                 "title": "The board is slow", "blocks": [{"type": "text", "id": "slo-why", "markdown": e.str("reason")}]})
