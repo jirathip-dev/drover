@@ -1,0 +1,8 @@
+Decided: merged origin/staging; the one conflict took #1022's working() read in chat_cards and kept this branch's shared ask_minutes helper
+Because: crates/server/src/screens.rs:297
+Decided: an ask row's outcome reads the cached working log, loaded once and only when the Events screen shows an ask row
+Because: crates/server/src/screens.rs:458
+Rejected: deriving the outcome from #1022's 24 h Events window — it holds only five event kinds, never the decision or ask-* ending
+Rejected: rebasing onto staging — form fixes are new commits, never a history rewrite
+Check: events_tab, cooee_screens, lane_actions and perf pass at the merge head; the full workspace run is green there
+Owner: The branch is on the latest staging again; answering asks from Events works as before.
