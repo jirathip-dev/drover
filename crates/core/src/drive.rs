@@ -1367,9 +1367,7 @@ fn pass(
                 go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW"));
             } else if merge && !fast && code.is_none() {
                 updated = true;
-                if let Err(e) = auto_update(ctx, cfg, r, out, fleet) {
-                    writeln!(out, "{fleet} auto-update: {e:#}")?;
-                }
+                catch_up(ctx, cfg, r, out, fleet)?;
             }
         } else if let Some(a) = (!fast)
             .then(|| stall::stalled(ctx, cfg, r, &events, &agents, w))
@@ -1413,9 +1411,7 @@ fn pass(
         }
     }
     if !updated && !fast {
-        if let Err(e) = auto_update(ctx, cfg, r, out, fleet) {
-            writeln!(out, "{fleet} auto-update: {e:#}")?;
-        }
+        catch_up(ctx, cfg, r, out, fleet)?;
     }
     Ok(go)
 }
@@ -2007,6 +2003,27 @@ fn clean_merged(
     Ok(())
 }
 
+fn catch_up(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
+    let Err(e) = auto_update(ctx, cfg, r, out, fleet) else {
+        return Ok(());
+    };
+    writeln!(out, "{fleet} auto-update: {e:#}")?;
+    let reason = format!("{e:#}").split_whitespace().collect::<Vec<_>>().join(" ");
+    let kinds = ["auto-update-failed", "auto-updated"];
+    let events = working(&ctx.state)?;
+    let last = events
+        .iter()
+        .rfind(|e| e.fleet == fleet && kinds.contains(&e.kind.as_str()));
+    if last.is_some_and(|e| e.kind == kinds[0] && e.str("reason") == Some(&reason)) {
+        return Ok(());
+    }
+    emit(
+        &ctx.state,
+        cfg,
+        Event::new(ctx.now, fleet, None, kinds[0], json!({"reason": reason})),
+    )
+}
+
 /// #129: after a merge, merge integration into every other open ready PR whose lane isn't working, oldest PR first, in a scratch worktree (#207: never one in review, whose verdict would go stale). A clean merge is pushed (`auto-updated`) only when needed (#285: `update_ready`), else the PR merges as it is; a ready PR's conflict gets an `--update` lane.
 pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write, fleet: &str) -> Result<()> {
     if KICK.get().is_some() {
@@ -2039,7 +2056,7 @@ pub fn auto_update(ctx: &Ctx, cfg: &Config, r: &dyn Runner, out: &mut dyn Write,
     for (_, s) in prs {
         let (n, branch) = (s.issue.to_string(), crate::gate::branch_of(Some(&s), s.issue));
         let from = git(r, &dir, &["rev-parse", &format!("origin/{branch}")])?;
-        let _ = tree(&["remove", "--force", &wts]);
+        let _ = tree(&["remove", "--force", "--force", &wts]);
         tree(&["add", "-f", "--detach", &wts, &from])?;
         let clean = git(r, &wt, &["merge", "--no-edit", &into]).is_ok();
         let to = git(r, &wt, &["rev-parse", "HEAD"])?;
