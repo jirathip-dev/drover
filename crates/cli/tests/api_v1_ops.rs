@@ -20,7 +20,7 @@ fn req(s: &Server, method: &str, path: &str, body: &str, extra: &str) -> (String
     )
 }
 
-fn post(s: &Server, op: &str, v: Value, cookie: &str) -> (u16, String, String) {
+fn post(s: &Server, op: &str, v: &Value, cookie: &str) -> (u16, String, String) {
     let (status, r) = req(s, "POST", &format!("/api/v1/{op}"), &v.to_string(), cookie);
     assert_eq!(r["ok"], json!(r["code"] == "OK"), "{r}");
     let s = |k: &str| r[k].as_str().unwrap().to_string();
@@ -48,11 +48,11 @@ fn send_prompts_a_lane_with_the_boards_refusals_and_rate_limit() {
     let (c, r) = v1_board("v1-send");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let msg = json!({"agent": IMPL, "text": "run the tests again"});
-    assert_eq!(post(&s, "send", msg.clone(), "").1, "UNPAIRED");
-    assert!(r.1.sent(IMPL).is_empty());
+    assert_eq!(post(&s, "send", &msg.clone(), "").1, "UNPAIRED");
+    assert_eq!(r.1.sent(IMPL), [] as [std::string::String; 0]);
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     assert_eq!(
-        post(&s, "send", msg.clone(), &ck),
+        post(&s, "send", &msg.clone(), &ck),
         (200, "OK".into(), format!("sent to {IMPL}"))
     );
     assert_eq!(r.1.sent(IMPL), ["run the tests again"]);
@@ -61,16 +61,16 @@ fn send_prompts_a_lane_with_the_boards_refusals_and_rate_limit() {
         (e.str("via"), e.str("agent"), e.data.get("text")),
         (Some("web"), Some(IMPL), None)
     );
-    let (status, code, _) = post(&s, "send", json!({"agent": IMPL, "text": " "}), &ck);
+    let (status, code, _) = post(&s, "send", &json!({"agent": IMPL, "text": " "}), &ck);
     assert_eq!((status, code.as_str()), (409, "BAD_VALUE"));
-    let (_, code, why) = post(&s, "send", json!({"agent": REV, "text": "hi"}), &ck);
+    let (_, code, why) = post(&s, "send", &json!({"agent": REV, "text": "hi"}), &ck);
     assert_eq!(code, "REV_READONLY", "{why}");
-    let (status, code, _) = post(&s, "send", json!({"agent": "nobody", "text": "hi"}), &ck);
+    let (status, code, _) = post(&s, "send", &json!({"agent": "nobody", "text": "hi"}), &ck);
     assert_eq!((status, code.as_str()), (400, "ERROR"));
     for _ in 0..6 {
-        post(&s, "send", msg.clone(), &ck);
+        post(&s, "send", &msg.clone(), &ck);
     }
-    assert_eq!(post(&s, "send", msg, &ck).1, "RATE_LIMIT");
+    assert_eq!(post(&s, "send", &msg, &ck).1, "RATE_LIMIT");
 }
 
 #[test]
@@ -81,8 +81,8 @@ fn menu_is_refused_shed_reports_no_menu() {
     let needs = req(&s, "GET", "/api/v1/needs", "", &ck).1;
     assert_eq!(needs["blocked"][0]["menu"], json!(null), "{needs}");
     let pick = json!({"agent": REV, "choice": "1", "h": "123"});
-    assert_eq!(post(&s, "menu", pick.clone(), "").1, "UNPAIRED");
-    assert_eq!(post(&s, "menu", pick, &ck).1, "BAD_VALUE");
+    assert_eq!(post(&s, "menu", &pick.clone(), "").1, "UNPAIRED");
+    assert_eq!(post(&s, "menu", &pick, &ck).1, "BAD_VALUE");
     assert!(r.1.all("keys").is_empty(), "never a guessed key");
     assert!(kinds(&c, "answer").is_empty());
 }
@@ -91,9 +91,9 @@ fn menu_is_refused_shed_reports_no_menu() {
 fn act_stops_a_lane_dry_runs_a_kill_and_refuses_unknowns() {
     let (c, r) = v1_board("v1-act");
     let s = Server::new(&c, &r, Some(ADDR.into()));
-    assert_eq!(post(&s, "act", json!({"agent": IMPL, "op": "stop"}), "").1, "UNPAIRED");
+    assert_eq!(post(&s, "act", &json!({"agent": IMPL, "op": "stop"}), "").1, "UNPAIRED");
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let (status, code, msg) = post(&s, "act", json!({"agent": IMPL, "op": "stop"}), &ck);
+    let (status, code, msg) = post(&s, "act", &json!({"agent": IMPL, "op": "stop"}), &ck);
     assert_eq!(
         (status, code.as_str(), msg.as_str()),
         (200, "OK", "sent Esc to sendmeter-impl-12")
@@ -101,10 +101,10 @@ fn act_stops_a_lane_dry_runs_a_kill_and_refuses_unknowns() {
     assert_eq!(r.1.all("keys"), [json!({"name": IMPL, "keys": ["esc"]})]);
     assert_eq!(kinds(&c, "act").pop().unwrap().str("op"), Some("stop"));
     assert_eq!(
-        post(&s, "act", json!({"agent": "nobody", "op": "stop"}), &ck).1,
+        post(&s, "act", &json!({"agent": "nobody", "op": "stop"}), &ck).1,
         "NO_SUCH_AGENT"
     );
-    assert_eq!(post(&s, "act", json!({"agent": IMPL, "op": "rm"}), &ck).1, "BAD_VALUE");
+    assert_eq!(post(&s, "act", &json!({"agent": IMPL, "op": "rm"}), &ck).1, "BAD_VALUE");
     assert_eq!(kinds(&c, "act").len(), 1);
 }
 
@@ -140,13 +140,13 @@ fn setup_starts_a_configured_terminal_and_reads_its_screen() {
     let start = json!({"host": "bazzite", "name": "claude B"});
     let pane = "drover-setup-claude-B";
     let screen_of = format!("/api/v1/setup/{pane}");
-    assert_eq!(post(&s, "setup", start.clone(), "").1, "UNPAIRED");
+    assert_eq!(post(&s, "setup", &start.clone(), "").1, "UNPAIRED");
     assert_eq!(req(&s, "GET", &screen_of, "", "").1["code"], "UNPAIRED");
     assert!(r.1.methods().is_empty(), "nothing started unpaired");
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let (_, code, _) = post(&s, "setup", json!({"host": "bazzite", "name": "rm -rf ~"}), &ck);
+    let (_, code, _) = post(&s, "setup", &json!({"host": "bazzite", "name": "rm -rf ~"}), &ck);
     assert_eq!(code, "NO_SUCH_SETUP");
-    assert_eq!(post(&s, "setup", start, &ck), (200, "OK".into(), pane.into()));
+    assert_eq!(post(&s, "setup", &start, &ck), (200, "OK".into(), pane.into()));
     assert!(
         r.1.called("run", pane) && r.0 .1.all("run").is_empty(),
         "on bazzite, never here"
@@ -158,7 +158,7 @@ fn setup_starts_a_configured_terminal_and_reads_its_screen() {
         ("200 OK", &json!("Paste code here >"))
     );
     let typed = json!({"setup": pane, "text": "sk-SECRET-4242"});
-    assert_eq!(post(&s, "send", typed, &ck).1, "OK");
+    assert_eq!(post(&s, "send", &typed, &ck).1, "OK");
     assert!(
         r.1.sent(pane).iter().any(|t| t == "sk-SECRET-4242"),
         "{:?}",
@@ -202,7 +202,7 @@ fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
     let (c, r) = v1_board("v1-chat");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let set = json!({"fleet": "sendmeter", "role": "rev", "model": "sonnet", "mtime": mtime(&s)});
-    assert_eq!(post(&s, "set", set, "").1, "OK");
+    assert_eq!(post(&s, "set", &set, "").1, "OK");
     let roles = |s: &Server| req(s, "GET", "/api/v1/roles?fleet=sendmeter", "", "").1;
     assert_eq!(roles(&s)["config"]["roles"][2]["model"], "sonnet");
     let chat = |m: &str, v: Value| {
@@ -212,26 +212,31 @@ fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
     };
     let m = mtime(&s);
     assert_eq!(
-        post(&s, "chat", chat(&m, json!({"harness": "claude"})), "").1,
+        post(&s, "chat", &chat(&m, json!({"harness": "claude"})), "").1,
         "UNPAIRED"
     );
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
     assert_eq!(
-        post(&s, "chat", chat("1", json!({"harness": "claude"})), &ck).1,
+        post(&s, "chat", &chat("1", json!({"harness": "claude"})), &ck).1,
         "STALE"
     );
     assert_eq!(
-        post(&s, "chat", chat(&m, json!({"model": "gpt-9"})), &ck).1,
+        post(&s, "chat", &chat(&m, json!({"model": "gpt-9"})), &ck).1,
         "BAD_VALUE"
     );
     assert_eq!(
-        post(&s, "chat", chat(&m, json!({"harness": "emacs"})), &ck).1,
+        post(&s, "chat", &chat(&m, json!({"harness": "emacs"})), &ck).1,
         "BAD_VALUE"
     );
-    assert_eq!(post(&s, "chat", chat(&m, json!({})), &ck).1, "BAD_VALUE");
+    assert_eq!(post(&s, "chat", &chat(&m, json!({})), &ck).1, "BAD_VALUE");
     let toml = std::fs::read_to_string(&c.config).unwrap();
     assert!(!toml.contains("[chat]"), "a refusal writes nothing");
-    let (status, code, msg) = post(&s, "chat", chat(&m, json!({"harness": "claude", "model": "opus"})), &ck);
+    let (status, code, msg) = post(
+        &s,
+        "chat",
+        &chat(&m, json!({"harness": "claude", "model": "opus"})),
+        &ck,
+    );
     assert_eq!(
         (status, code.as_str(), msg.as_str()),
         (200, "OK", "chat defaults: harness claude, model opus")
@@ -248,7 +253,7 @@ fn set_takes_json_and_chat_writes_the_new_thread_defaults() {
         (Some("chat"), Some("model"), Some("opus"))
     );
     let m = mtime(&s);
-    assert_eq!(post(&s, "chat", chat(&m, json!({"effort": "high"})), &ck).1, "OK");
+    assert_eq!(post(&s, "chat", &chat(&m, json!({"effort": "high"})), &ck).1, "OK");
     let toml = std::fs::read_to_string(&c.config).unwrap();
     assert_eq!(toml.matches("[chat]").count(), 1, "{toml}");
     assert_eq!(roles(&s)["chat"]["effort"], "high");
@@ -282,10 +287,10 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
     std::fs::write(cache.join("backlog-sendmeter-0.json"), bl.to_string()).unwrap();
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let about = json!({"fleet": "sendmeter", "issue": 30});
-    assert_eq!(post(&s, "chat-about", about.clone(), "").1, "UNPAIRED");
-    assert_eq!(post(&s, "close", about.clone(), "").1, "UNPAIRED");
+    assert_eq!(post(&s, "chat-about", &about.clone(), "").1, "UNPAIRED");
+    assert_eq!(post(&s, "close", &about.clone(), "").1, "UNPAIRED");
     let ck = pair(&s, &c, "Mozilla/5.0 (iPhone)", T);
-    let (status, code, msg) = post(&s, "chat-about", about.clone(), &ck);
+    let (status, code, msg) = post(&s, "chat-about", &about.clone(), &ck);
     assert_eq!((status, code.as_str()), (200, "OK"), "{msg}");
     let t = msg.strip_suffix(" started").unwrap();
     let said = kinds(&c, "thread-msg").pop().unwrap();
@@ -294,16 +299,16 @@ fn a_backlog_issue_gets_a_thread_or_closes() {
         (Some(t), Some("Let's talk about #30: Meter export"))
     );
     assert_eq!(
-        post(&s, "chat-about", json!({"fleet": "nope", "issue": 30}), &ck).1,
+        post(&s, "chat-about", &json!({"fleet": "nope", "issue": 30}), &ck).1,
         "NO_ORCHESTRATOR"
     );
     assert_eq!(
-        post(&s, "close", json!({"fleet": "sendmeter", "issue": 12}), &ck).1,
+        post(&s, "close", &json!({"fleet": "sendmeter", "issue": 12}), &ck).1,
         "NOT_BACKLOG"
     );
-    assert_eq!(post(&s, "close", json!({"fleet": "sendmeter"}), &ck).1, "BAD_VALUE");
+    assert_eq!(post(&s, "close", &json!({"fleet": "sendmeter"}), &ck).1, "BAD_VALUE");
     assert!(!host.called("gh issue close"));
-    assert_eq!(post(&s, "close", about, &ck), (200, "OK".into(), "closed #30".into()));
+    assert_eq!(post(&s, "close", &about, &ck), (200, "OK".into(), "closed #30".into()));
     assert!(host.called("gh issue close 30 -R jirathip-dev/sendmeter"));
     let e = kinds(&c, "closed").pop().unwrap();
     assert_eq!(

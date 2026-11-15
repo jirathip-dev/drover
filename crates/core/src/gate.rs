@@ -51,7 +51,6 @@ pub fn no_proof(body: &str) -> Option<String> {
     (!bad.is_empty()).then(|| bad.join("; "))
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn verdict(
     ctx: &Ctx,
     cfg: &Config,
@@ -1024,54 +1023,52 @@ pub fn needs_human(
     let state = state.as_str();
     match op {
         "override" => merge(ctx, cfg, r, out, fleet, n, true)?,
-        "extend" => {
-            extended(ctx, (fleet, n), (spawn, by), state)?;
-            if spawn {
-                let o = crate::spawn::Opts {
-                    supersede: true,
-                    ..Default::default()
-                };
-                if let Err(e) = crate::spawn::spawn(ctx, cfg, r, out, (fleet, n, "impl"), &o) {
-                    let rf = e.downcast_ref::<Refusal>();
-                    let (code, why) = rf.map_or(("ERROR", format!("{e:#}")), |r| (r.code, r.msg.clone()));
-                    if crate::pending::refused(ctx, (fleet, n), code, &why)? {
-                        writeln!(out, "#{n}: starting, waiting for host ({code}); drive starts the round")?;
-                        return Ok(());
-                    }
-                    let d = json!({"by": by, "reason": format!("{e:#}")});
-                    crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "extend-failed", d))?;
-                    return Err(e);
-                }
-            }
-        }
+        "extend" => extended(ctx, cfg, (fleet, n), (spawn, by), state)?,
         _ => return park(ctx, cfg, r, out, (fleet, n), by, why),
     }
     writeln!(out, "#{n}: {op}")?;
     Ok(())
 }
 
-/// #975: the owner's extend decided, once: `round-extended` off needs-human, then its pending start unless one waits.
-pub fn extended(ctx: &Ctx, (fleet, n): (&str, u64), (spawn, by): (bool, &str), state: &str) -> Result<()> {
-    if state == "needs-human" {
-        let d = json!({"by": by, "spawn": spawn});
-        crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), "round-extended", d))?;
-    }
-    let waits =
-        crate::pending::of(&working(&ctx.state)?, fleet, n).is_some_and(|p| p.action == "extend" && !p.back(ctx.now));
-    if spawn && !waits {
-        crate::pending::record(ctx, (fleet, n), "extend", "impl", None)?;
+fn extended(ctx: &Ctx, cfg: &Config, (fleet, n): (&str, u64), (spawn, by): (bool, &str), state: &str) -> Result<()> {
+    let nh = working(&ctx.state)?
+        .iter()
+        .rfind(|e| e.is("needs-human", fleet, n))
+        .cloned();
+    let unstarted = nh.is_some_and(|e| e.data.get("start") == Some(&json!(true)));
+    let (kind, e) = match state {
+        "needs-human" if !unstarted => ("round-extended", json!({"by": by, "spawn": spawn, "queued": spawn})),
+        _ if spawn => (crate::pending::REQUEUED, json!({"by": by})),
+        _ => return Ok(()),
+    };
+    crate::events::append(&ctx.state, &Event::new(ctx.now, fleet, Some(n), kind, e))?;
+    if spawn {
+        requeue(ctx, cfg, &working(&ctx.state)?, fleet, n)?;
     }
     Ok(())
 }
 
-/// Issue `n`'s state if it waits on the owner's needs-human card (or #975 its extend's start), else `NOT_NEEDS_HUMAN`.
+/// Issue `n` keeps its queue place; out of the queue, it goes last.
+pub fn requeue(ctx: &Ctx, cfg: &Config, events: &[Event], fleet: &str, n: u64) -> Result<()> {
+    if !crate::queue::replay(events, fleet).iter().any(|i| i.issue == n) {
+        crate::queue_change(
+            ctx,
+            cfg,
+            fleet,
+            crate::queue::op("add", &[n], false, None, None, None),
+            None,
+        )?;
+    }
+    Ok(())
+}
+
+/// Issue `n`'s state if it waits on the owner's needs-human card (or a pending start's returned card), else `NOT_NEEDS_HUMAN`.
 pub fn held(ctx: &Ctx, fleet: &str, n: u64) -> Result<String> {
     let st = issue_state(ctx, fleet, n)?.map(|s| (s.state, s.last_event));
     let (state, last) = st.as_ref().map_or(("unknown", ""), |(s, l)| (s.as_str(), l.as_str()));
     let events = working(&ctx.state)?;
     let back = crate::pending::of(&events, fleet, n).is_some_and(|p| p.back(ctx.now));
-    let starting = !matches!(state, "merged" | "closed" | "parked") && crate::pending::extending(&events, fleet, n);
-    if state != "needs-human" && last != "extend-failed" && !back && !starting {
+    if state != "needs-human" && last != "extend-failed" && !back {
         return refused("NOT_NEEDS_HUMAN", format!("#{n} is {state}, not needs-human"));
     }
     Ok(state.into())
@@ -1129,15 +1126,7 @@ pub fn unpark(ctx: &Ctx, cfg: &Config, out: &mut dyn Write, (fleet, n): (&str, u
         cfg,
         Event::new(ctx.now, fleet, Some(n), "unparked", json!({"by": by, "state": to})),
     )?;
-    if !crate::queue::replay(&events, fleet).iter().any(|i| i.issue == n) {
-        crate::queue_change(
-            ctx,
-            cfg,
-            fleet,
-            crate::queue::op("add", &[n], false, None, None, None),
-            None,
-        )?;
-    }
+    requeue(ctx, cfg, &events, fleet, n)?;
     writeln!(out, "#{n}: unparked, back to {to}")?;
     Ok(())
 }

@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS snapshot (n INTEGER PRIMARY KEY AUTOINCREMENT, key TE
 CREATE TABLE IF NOT EXISTS processed (id TEXT PRIMARY KEY, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS states (fleet TEXT NOT NULL, issue INTEGER NOT NULL, done INTEGER NOT NULL, json TEXT NOT NULL,
     PRIMARY KEY (fleet, issue));
-CREATE TABLE IF NOT EXISTS lanes (agent TEXT PRIMARY KEY, seq INTEGER NOT NULL, json TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS lanes (lane TEXT PRIMARY KEY, seq INTEGER NOT NULL, json TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS asks (seq INTEGER PRIMARY KEY, fleet TEXT NOT NULL, id TEXT, issue INTEGER, agent TEXT,
     twin TEXT, json TEXT NOT NULL, rank INTEGER, closed TEXT, at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS asks_twin ON asks (twin);
@@ -109,12 +109,16 @@ fn open(state: &Path) -> Result<Connection> {
     anyhow::ensure!(mode(&c)? == "wal", "{} is not in WAL mode", file(state).display());
     c.execute_batch(SCHEMA)?;
     let mut c = c;
-    if c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))? < 1 {
+    let version = |c: &Connection| c.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0));
+    if version(&c)? < 2 {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if tx.pragma_query_value(None, "user_version", |r| r.get::<_, u32>(0))? < 1 {
+        if version(&tx)? < 1 {
             offload_all(&tx, state)?;
+        }
+        if version(&tx)? < 2 {
+            tx.execute_batch(&format!("DROP TABLE lanes; {SCHEMA}"))?;
             rebuild_in(&tx, state)?;
-            tx.pragma_update(None, "user_version", 1)?;
+            tx.pragma_update(None, "user_version", 2)?;
         }
         tx.commit()?;
     }
@@ -171,11 +175,16 @@ fn project(c: &Connection, ev: &Event) -> Result<()> {
             c.execute(q, params![ev.fleet, n, s.done(), serde_json::to_string(s)?])?;
         }
     }
-    if let (true, Some(a)) = (ev.kind == "spawn", ev.str("agent")) {
-        let q = "INSERT OR REPLACE INTO lanes (agent, seq, json) VALUES (?1, ?2, ?3)";
-        c.execute(q, params![a, ev.seq, serde_json::to_string(ev)?])?;
-    }
+    lane(c, ev)?;
     project_ask(c, ev)
+}
+
+fn lane(c: &Connection, e: &Event) -> Result<()> {
+    if let Some(k) = events::lane_id(e) {
+        let q = "INSERT OR REPLACE INTO lanes (lane, seq, json) VALUES (?1, ?2, ?3)";
+        c.execute(q, params![k, e.seq, serde_json::to_string(e)?])?;
+    }
+    Ok(())
 }
 
 fn project_ask(c: &Connection, e: &Event) -> Result<()> {
@@ -272,11 +281,8 @@ fn rebuild_in(c: &Connection, state: &Path) -> Result<()> {
     for s in events::fold_into(events::States::new(), &all).into_values() {
         c.execute(q, params![s.fleet, s.issue, s.done(), serde_json::to_string(&s)?])?;
     }
-    let q = "INSERT OR REPLACE INTO lanes (agent, seq, json) VALUES (?1, ?2, ?3)";
-    for e in all.iter().filter(|e| e.kind == "spawn") {
-        if let Some(a) = e.str("agent") {
-            c.execute(q, params![a, e.seq, serde_json::to_string(e)?])?;
-        }
+    for e in &all {
+        lane(c, e)?;
     }
     let m = projected(&all)?;
     let mut q = m.prepare("SELECT * FROM asks")?;
@@ -295,6 +301,19 @@ pub fn rebuild(state: &Path) -> Result<()> {
         let tx = c.transaction_with_behavior(TransactionBehavior::Immediate)?;
         rebuild_in(&tx, state)?;
         Ok(tx.commit()?)
+    })
+}
+
+/// #1023: the saved lane fold's events (each lane's newest lane event), kept after `compact` archives its issue.
+pub fn lanes(state: &Path) -> Result<Vec<Event>> {
+    with(state, false, vec![], |c| {
+        let mut q = c.prepare("SELECT seq, json FROM lanes")?;
+        let rows = q.query_map([], |r| Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?)))?;
+        rows.map(|r| {
+            let (seq, json) = r?;
+            Ok(events::aliased(numbered(seq, &json)?))
+        })
+        .collect()
     })
 }
 
@@ -347,12 +366,12 @@ pub(crate) fn since(
     })
 }
 
-/// #978: `drover asks`' rows: every ask (`fleet`'s) with its ending, oldest first.
-pub fn asks(state: &Path, fleet: Option<&str>) -> Result<Vec<(Event, Ending)>> {
+/// #978: `drover asks`' rows: the open asks (`all`: every ask), `fleet`'s, with their endings, oldest first.
+pub fn asks(state: &Path, fleet: Option<&str>, all: bool) -> Result<Vec<(Event, Ending)>> {
     with(state, false, vec![], |c| {
-        let q = "SELECT seq, json, rank, closed FROM asks WHERE ?1 IS NULL OR fleet = ?1 ORDER BY seq";
+        let q = "SELECT seq, json, rank, closed FROM asks WHERE (?1 IS NULL OR fleet = ?1) AND (?2 OR rank IS NULL) ORDER BY seq";
         let mut q = c.prepare(q)?;
-        let rows = q.query_map([fleet], |r| {
+        let rows = q.query_map(params![fleet, all], |r| {
             let end = r.get::<_, Option<usize>>(2)?.zip(r.get::<_, Option<String>>(3)?);
             Ok((r.get::<_, u64>(0)?, r.get::<_, String>(1)?, end))
         })?;

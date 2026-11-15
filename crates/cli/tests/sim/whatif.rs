@@ -101,13 +101,13 @@ pub fn windows(m: &Model) -> Vec<(u64, u64, u64)> {
 pub fn place(m: &mut Model, ws: &[(u64, u64, u64)], hosts: u64) {
     m.agenda.retain(|_, e| !matches!(e, Ev::Load(_)));
     let mut edges: Vec<(u64, i64)> = (ws.iter())
-        .flat_map(|&(a, b, n)| [(a, n as i64), (b, -(n as i64))])
+        .flat_map(|&(a, b, n)| [(a, n.cast_signed()), (b, -n.cast_signed())])
         .collect();
     edges.sort_unstable();
     let (mut busy, mut on) = (0, false);
     for (t, d) in edges {
         busy += d;
-        if (busy >= hosts as i64) != on {
+        if (busy >= hosts.cast_signed()) != on {
             on = !on;
             m.at(t, Ev::Load(if on { 40 } else { 1 }));
         }
@@ -124,7 +124,7 @@ fn with_waits(mut m: BTreeMap<String, f64>, merges: u64) -> BTreeMap<String, f64
     m
 }
 
-/// Run `src` under knobs `k`; `real_hosts` is how many hosts a replayed HOST_BUSY window had busy (the current config's).
+/// Run `src` under knobs `k`; `real_hosts` is how many hosts a replayed `HOST_BUSY` window had busy (the current config's).
 pub fn side(src: &Source, k: &Knobs, real_hosts: u64) -> Side {
     let cfg = k.config();
     match src {
@@ -218,7 +218,10 @@ impl WhatIf {
             t += &format!("| {k} | {v} | {c} | {:+} |\n", self.delta(k));
         }
         let (fa, fb) = (self.current.failures.len(), self.candidate.failures.len());
-        t += &format!("| invariant failures | {fa} | {fb} | {:+} |\n", fb as i64 - fa as i64);
+        t += &format!(
+            "| invariant failures | {fa} | {fb} | {:+} |\n",
+            i64::try_from(fb).unwrap() - i64::try_from(fa).unwrap()
+        );
         for (side, s) in [("current", &self.current), ("candidate", &self.candidate)] {
             for f in s.failures.iter().take(5) {
                 t += &format!("\n{side}: {f}");

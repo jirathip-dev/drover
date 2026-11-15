@@ -124,6 +124,14 @@ drover thread ls [FLEET] [--json]           # per repo: title, last message, unr
 
 ## The [chat] tab (#386)
 
+#1072: the tab is back as **Threads**, the last tab of the standalone page only (`[queue] [events] [lanes]
+[threads·N]`; `cooee-plugin.toml` has no Threads place, so the Cooee plugin never shows it). It is a JSON screen like
+the others (`docs/design/threads-tab/`): `/screens/threads` (the list), `/screens/threads/<id>` (a thread, opened in
+the same tab, its cards place hidden) and `/screens/threads/new/<repo>`. Its taps post `/action` `thread-new`,
+`thread-say`, `thread-retry`, `thread-archive`, `thread-restore` (the `POST /thread` ops below, standalone and paired
+only) and `answer`. Not yet on it: files, queued messages, config and secret cards. The rest of this section is the old
+tab's spec, which it follows.
+
 Built from the approved mockup (`docs/design/conductor-chat/`): the middle tab, `[queue] [lanes] [chat] [host]
 [events]`, reading `[chat·N]` with N the threads where a choice waits.
 

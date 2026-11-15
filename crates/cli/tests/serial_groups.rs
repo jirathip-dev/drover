@@ -203,16 +203,16 @@ fn a_second_ci_push_holds_until_the_holder_merges_then_updates() {
         let sent = sh.sent("sendmeter-impl-12");
         sent.into_iter().filter(|t| t.starts_with("stop:")).collect::<Vec<_>>()
     };
-    let (out, steps) = drive(&c, &r);
+    let (out, acts) = drive(&c, &r);
     assert_eq!(logged(&c, 12, "serial-held"), ["ci (9)"], "{out}");
     let stop = "stop: ci is held by #9; you'll get an update round when it merges";
     assert_eq!(stops(), [stop], "{:?}", sh.methods());
-    assert!(steps.is_empty(), "no review while held: {steps:?}");
+    assert!(acts.is_empty(), "no review while held: {acts:?}");
     assert!(!sh.called("run", "sendmeter-rev-12-r1"));
     let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
     assert!(w.contains("serial: ci held by #9 (1/1)"), "{w}");
-    let (_, steps) = drive(&c, &r);
-    assert!(steps.is_empty(), "{steps:?}");
+    let (_, acts) = drive(&c, &r);
+    assert!(acts.is_empty(), "{acts:?}");
     assert_eq!(stops().len(), 1);
     let (exit, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
     assert!(
@@ -220,8 +220,8 @@ fn a_second_ci_push_holds_until_the_holder_merges_then_updates() {
         "{out}"
     );
     ev(&c, 9, "merged", json!({}));
-    let (out, steps) = drive(&c, &r);
-    assert_eq!(steps, ["conflict"], "{out}");
+    let (out, acts) = drive(&c, &r);
+    assert_eq!(acts, ["conflict"], "{out}");
     assert_eq!(logged(&c, 12, "serial-slot"), ["ci"]);
     assert!(sh.called("run", "sendmeter-impl-12"), "{out}");
     let brief = std::fs::read_to_string(c.worktrees.join("sendmeter/issue-12/.brief.md")).unwrap();
@@ -262,7 +262,7 @@ fn two_groups_take_slots_in_name_order_so_two_issues_never_deadlock() {
     let r = fake(&[(12, "b/x\na/x\n"), (13, "b/y\na/y\n")]);
     drive(&c, &r);
     assert_eq!(logged(&c, 12, "serial-joined"), ["aa", "bb"]);
-    assert!(logged(&c, 12, "serial-held").is_empty());
+    assert_eq!(logged(&c, 12, "serial-held"), [] as [std::string::String; 0]);
     assert_eq!(logged(&c, 13, "serial-held"), ["aa (12)", "bb (12)"]);
     let (_, status) = run(&c, &Fake::default(), &["status", "sendmeter"]);
     assert!(status.contains("serial: bb 1/1 · aa 1/1"), "{status}");
@@ -456,7 +456,10 @@ fn a_second_pr_on_a_hot_file_waits_until_arch_toml_freezes_it() {
     let show = "git -C /tmp/does-not-matter/sendmeter show origin/staging:.drover/arch.toml";
     let r = fake_on(Fake::default().reply(show, &arch), &both);
     drive(&c, &r);
-    assert!(drover::queue::hot_files(&read(&c.state).unwrap(), "sendmeter").is_empty());
+    assert_eq!(
+        drover::queue::hot_files(&read(&c.state).unwrap(), "sendmeter"),
+        [] as [std::string::String; 0]
+    );
     let (_, w) = run(&c, &r, &["waiting", "sendmeter"]);
     assert!(!w.contains("serial: hot"), "{w}");
     let (_, out) = run(&c, &r, &["spawn", "sendmeter", "12", "impl", "--supersede"]);
@@ -472,8 +475,8 @@ fn a_pr_touching_no_hot_file_is_never_held() {
     drive(&c, &r);
     drive(&c, &r);
     assert_eq!(logged(&c, 9, "serial-joined"), [format!("hot {HOT}")]);
-    assert!(logged(&c, 13, "serial-joined").is_empty());
-    assert!(logged(&c, 13, "serial-held").is_empty());
+    assert_eq!(logged(&c, 13, "serial-joined"), [] as [std::string::String; 0]);
+    assert_eq!(logged(&c, 13, "serial-held"), [] as [std::string::String; 0]);
     let (_, out) = run(&c, &r, &["spawn", "sendmeter", "13", "impl", "--supersede"]);
     assert!(!out.contains("SERIAL_BUSY"), "{out}");
 }

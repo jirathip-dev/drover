@@ -1,0 +1,5 @@
+{"type":"screen","id":"thread-new-acme-web","title":"New thread","focus":true,"blocks":[
+ {"type":"row","id":"who","figure":{"state":"idle"},"title":"acme-web · claude · opus","subtitle":"no orchestrator yet"},
+ {"type":"text","id":"hint","markdown":"Your first message starts the thread and its orchestrator, and titles it with its first line. Nothing is logged until you send."},
+ {"type":"form","id":"say","fields":[{"type":"text","name":"text","label":"","value":"","placeholder":"message the orchestrator"}],"submit":{"label":"start","action":"thread-new","values":{"repo":"acme-web"}}}
+]}

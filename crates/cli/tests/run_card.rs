@@ -304,12 +304,13 @@ impl Clock {
             .iter()
             .find_map(|a| a.strip_prefix("sleep ")?.parse().ok())
             .unwrap_or(0);
-        if let Some(out) = args.last().filter(|a| a.ends_with(".out")) {
+        if let Some(out) = args.last().filter(|a| a.strip_suffix(".out").is_some()) {
             std::fs::write(out, "started\n")?;
         }
-        let (code, stdout, stderr) = match n <= limit {
-            true => (0, format!("slept {n}s\n"), String::new()),
-            false => (124, String::new(), format!("no answer in {limit}s")),
+        let (code, stdout, stderr) = if n <= limit {
+            (0, format!("slept {n}s\n"), String::new())
+        } else {
+            (124, String::new(), format!("no answer in {limit}s"))
         };
         Ok(drover::runner::Out { code, stdout, stderr })
     }

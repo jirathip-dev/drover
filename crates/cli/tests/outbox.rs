@@ -27,7 +27,8 @@ impl Runner for Air {
 #[test]
 fn a_remote_lane_only_queues_and_drive_drains_it_once() {
     let (md, ld) = (tmpdir("outbox-main"), tmpdir("outbox-lane"));
-    let (main, lane) = (ctx(&md, CONFIG), ctx(&ld, CONFIG));
+    let hosts = format!("{CONFIG}\n[hosts.mini]\n\n[hosts.air]\nmachine = \"air\"\n");
+    let (main, lane) = (ctx(&md, &hosts), ctx(&ld, CONFIG));
     let wt = ld.join("worktree");
     std::fs::create_dir_all(wt.join("src")).unwrap();
     std::fs::write(wt.join(".git"), "gitdir: elsewhere\n").unwrap();

@@ -1,0 +1,149 @@
+{
+  "badge": 1,
+  "blocks": [
+    {
+      "blocks": [
+        {
+          "id": "l-all",
+          "rows": [
+            {
+              "badge": {
+                "text": "new",
+                "tone": "done"
+              },
+              "figure": {
+                "state": "idle"
+              },
+              "id": "t3",
+              "subtitle": {
+                "text": "conductor: Filed lessons.",
+                "tone": ""
+              },
+              "swipe": [
+                {
+                  "action": "thread-archive",
+                  "label": "archive",
+                  "values": {
+                    "thread": "t3"
+                  }
+                }
+              ],
+              "tap": {
+                "open": "/screens/threads/t3"
+              },
+              "title": "Weekly lesson digest",
+              "type": "row",
+              "value": "48m"
+            }
+          ],
+          "type": "list"
+        },
+        {
+          "id": "new-all",
+          "label": "+ thread",
+          "tap": {
+            "open": "/screens/threads/new/all"
+          },
+          "type": "button"
+        }
+      ],
+      "header": "all repos · 1 thread",
+      "id": "r-all",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "id": "l-sendmeter",
+          "rows": [
+            {
+              "badge": {
+                "text": "new",
+                "tone": "done"
+              },
+              "figure": {
+                "state": "needs"
+              },
+              "id": "t2",
+              "subtitle": {
+                "text": "! choose · conductor: Retry-After only, or the X-RateLimit headers too?",
+                "tone": "warn"
+              },
+              "swipe": [
+                {
+                  "action": "thread-archive",
+                  "label": "archive",
+                  "values": {
+                    "thread": "t2"
+                  }
+                }
+              ],
+              "tap": {
+                "open": "/screens/threads/t2"
+              },
+              "title": "Rate limits for /v1/search",
+              "type": "row",
+              "value": "5m"
+            }
+          ],
+          "type": "list"
+        },
+        {
+          "id": "new-sendmeter",
+          "label": "+ thread",
+          "tap": {
+            "open": "/screens/threads/new/sendmeter"
+          },
+          "type": "button"
+        }
+      ],
+      "header": "sendmeter · 1 thread",
+      "id": "r-sendmeter",
+      "type": "section"
+    },
+    {
+      "blocks": [
+        {
+          "id": "l-archived",
+          "rows": [
+            {
+              "figure": {
+                "state": "idle"
+              },
+              "id": "t1",
+              "subtitle": {
+                "text": "sendmeter · you: split it",
+                "tone": ""
+              },
+              "swipe": [
+                {
+                  "action": "thread-restore",
+                  "label": "restore",
+                  "values": {
+                    "thread": "t1"
+                  }
+                }
+              ],
+              "tap": {
+                "open": "/screens/threads/t1"
+              },
+              "title": "Search worker split",
+              "type": "row",
+              "value": "24h"
+            }
+          ],
+          "type": "list"
+        }
+      ],
+      "fold": {
+        "line": "▸ 1 archived"
+      },
+      "id": "archived",
+      "type": "card"
+    }
+  ],
+  "id": "threads",
+  "stream": "/screens/threads/stream",
+  "title": "Threads",
+  "type": "screen"
+}

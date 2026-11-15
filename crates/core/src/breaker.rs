@@ -18,8 +18,10 @@ pub fn host(sp: &Event) -> &str {
 
 /// Host `h`'s `runtime-down` while its breaker is open.
 pub fn down<'a>(ev: &'a [Event], h: &str) -> Option<&'a Event> {
-    let mine = |e: &&Event| matches!(e.kind.as_str(), "runtime-down" | "runtime-up") && e.str("host") == Some(h);
-    ev.iter().rfind(mine).filter(|e| e.kind == "runtime-down")
+    let on = crate::events::of_kind(ev, &["runtime-down", "runtime-up"]);
+    on.into_iter()
+        .rfind(|e| e.str("host") == Some(h))
+        .filter(|e| e.kind == "runtime-down")
 }
 
 /// `runtime down on <host> since <HH:MM> UTC` while host `h`'s breaker is open.

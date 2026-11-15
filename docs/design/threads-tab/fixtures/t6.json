@@ -1,0 +1,14 @@
+{"type":"screen","id":"thread-t6","title":"Dark mode for the settings page","focus":true,"stream":"/screens/threads/t6/stream",
+ "actions":[{"label":"archive","action":"thread-archive","values":{"thread":"t6"}}],
+ "blocks":[
+ {"type":"row","id":"who","figure":{"state":"working"},"title":"acme-web · claude · opus","subtitle":"✻ working","value":"awake"},
+ {"type":"card","id":"m1","kind":"you","title":"you","meta":"✓ 09:02","blocks":[{"type":"text","id":"m1-t","markdown":"The settings page is the last one without dark mode. File it as a design issue."}]},
+ {"type":"card","id":"c1","kind":"tool","fold":{"line":"$ gh issue create -R acme/acme-web -t \"Dark mode for /settings\""}},
+ {"type":"card","id":"c2","kind":"tool","fold":{"line":"$ drover queue acme-web add 48 --design"}},
+ {"type":"card","id":"m2","kind":"orch","title":"orchestrator","meta":"09:04","blocks":[{"type":"text","id":"m2-t","markdown":"Queued #48 with `--design`: a design lane first, impl once you approve it."}]},
+ {"type":"card","id":"q40","kind":"ask","title":"q40 · routine","blocks":[{"type":"text","id":"q40-t","markdown":"Top of the queue, or after #44?"},{"type":"text","id":"q40-a","markdown":"✓ **after #44** · default · 09:34 (unanswered 30 min)"}]},
+ {"type":"card","id":"m3","kind":"you","title":"you","meta":"✓ 09:40","blocks":[{"type":"text","id":"m3-t","markdown":"Good. Also check the email templates."}]},
+ {"type":"card","id":"m4","kind":"you","title":"you","meta":"09:41","tone":"bad","blocks":[{"type":"text","id":"m4-t","markdown":"And the print stylesheet."},{"type":"text","id":"m4-e","markdown":"not delivered: the orchestrator's pane did not answer"}],"buttons":[{"type":"button","id":"m4-retry","label":"retry","style":"bad","action":"thread-retry","values":{"thread":"t6","msg":"m4"}}]},
+ {"type":"card","id":"m5","kind":"you","title":"you","meta":"sending…","blocks":[{"type":"text","id":"m5-t","markdown":"Skip the print one for now."}]},
+ {"type":"form","id":"say","fields":[{"type":"text","name":"text","label":"","value":"","placeholder":"message the orchestrator"}],"submit":{"label":"send","action":"thread-say","values":{"thread":"t6"}}}
+]}

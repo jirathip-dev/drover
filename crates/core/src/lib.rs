@@ -469,7 +469,6 @@ pub fn orchestrator_answer(
 }
 
 /// #817: `drover extend` by thread `t`'s orchestrator: the owner's `typed` line, else its extend ask answered on `basis`.
-#[allow(clippy::too_many_arguments)]
 pub fn orchestrator_extend(
     ctx: &Ctx,
     cfg: &Config,
@@ -658,7 +657,6 @@ fn in_thread(e: &Event, by: &str) -> bool {
         .is_some_and(|t| e.str("thread") == Some(t))
 }
 
-#[allow(clippy::too_many_arguments)]
 pub(crate) fn answer_with(
     ctx: &Ctx,
     cfg: &Config,
@@ -832,16 +830,19 @@ pub fn deliver(ctx: &Ctx, cfg: &Config, r: &dyn Runner, ask: &Event, msg: &str, 
 
 /// #325: answers whose last delivery failed, newest first (one per ask).
 pub fn undelivered<'a>(events: &'a [Event], fleet: &str) -> Vec<&'a Event> {
-    let tries = |e: &&Event| e.fleet == fleet && e.kind.starts_with("answer-");
+    let kinds = ["answer-undelivered", "answer-delivered", "answer-delivered-live"];
     let mut seen = std::collections::BTreeSet::new();
-    let last = events.iter().rev().filter(tries).filter(|e| seen.insert(e.str("id")));
+    let tries = events::of_kind(events, &kinds)
+        .into_iter()
+        .rev()
+        .filter(|e| e.fleet == fleet);
+    let last = tries.filter(|e| seen.insert(e.str("id")));
     last.filter(|e| e.kind == "answer-undelivered").collect()
 }
 
 /// `drover asks`: the open asks (`all`: closed ones too, with why), oldest first, with age.
 pub fn asks(ctx: &Ctx, out: &mut dyn Write, fleet: Option<&str>, as_json: bool, all: bool) -> Result<()> {
-    let mut open = crate::db::asks(&ctx.state, fleet)?;
-    open.retain(|a| all || a.1.is_none());
+    let open = crate::db::asks(&ctx.state, fleet, all)?;
     if as_json {
         let mut rows = Vec::new();
         for (e, why) in &open {

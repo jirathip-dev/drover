@@ -265,6 +265,7 @@ fn a_signed_out_orchestrator_with_no_account_gets_a_sign_in_card_for_the_harness
 
 #[test]
 fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_reference_injects_at_spawn() {
+    use std::os::unix::fs::PermissionsExt;
     let value = "hunter2-SECRET-value";
     let sh = FakeShed::new();
     let c = acp_setup(
@@ -305,7 +306,6 @@ fn a_secret_goes_only_to_the_keychain_from_an_owner_device_and_a_secret_referenc
     let res = req(&s, "/thread", &form, &cookie, T + 10);
     assert_eq!(body(&res), "secret API_KEY set ✓ (by owner)\n", "{res}");
     assert_eq!(std::fs::read_to_string(&file).unwrap(), value);
-    use std::os::unix::fs::PermissionsExt;
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     let calls = f.calls.borrow().join("\n");
     let log = drover::events::jsonl(&c.state).unwrap();
