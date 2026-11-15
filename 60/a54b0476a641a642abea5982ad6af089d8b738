@@ -1,0 +1,9 @@
+Decided: merged origin/staging; the waiting.rs conflict keeps the design-stage respawn row and reads staging's typed sessions (Status::Failed/Asleep/Idle/Done, session note, session::stamp::exit)
+Because: crates/core/src/waiting.rs:725
+Decided: a design-state lane gone or in error/hibernated/idle/done takes the impl gone-lane respawn row, with its role from the lane's spawn
+Because: "Reuse #886's respawn path for impl lanes rather than a second one."
+Decided: a respawn refused with an owner code raises needs-human RESPAWN_REFUSED; RESPAWN_LOOP keeps spawn's own ask; check alerts respawn-refused once per spawn and code
+Because: "drive raises an owner card and `herdsman check` emits an alert once per state"
+Rejected: carding every hard refusal — SHED_MISSING-style holds are expected to wait (design_orphan.rs)
+Check: design_stage passes at the merge head; the beacon test still feeds error then hibernated through intake
+Owner: The branch is on the latest staging; design and architect lanes that crash or stall are still restarted automatically.
