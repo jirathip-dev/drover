@@ -1,0 +1,14 @@
+Decided: merged origin/staging (#721) instead of rebasing; the term.rs conflict keeps staging's side plus this branch's PathBuf import
+Because: crates/core/src/term.rs:7
+Decided: the orchestrator and setup call sites #721 reshaped now pass term::Acp; setup's CLI start passes Acp::default, today's words
+Because: crates/core/src/term.rs:11
+Decided: the provider's acp_meta gives the whole `_meta` object, sent as shed#94's `--meta '<json>'`; the pin 9b88eb5 already includes shed#94
+Because: "Drover's core names no option key outside the provider."
+Decided: an old shed is told apart by `shed help run` lacking `--meta`; doctor shows a ✗ row and spawn refuses SHED_OLD
+Because: crates/core/src/spawn.rs:554
+Decided: claude's options also carry settings.claudeMdExcludes with the host's ~/.claude/CLAUDE.md; a lane under $HOME still read it otherwise
+Because: crates/core/src/providers/claude.rs:180
+Rejected: claudeMdExcludes in the profile's settings.json — CLI lanes share that file and would lose the global CLAUDE.md too
+Check: serve_load's heartbeat test failed once under full-suite load and passed alone; this PR touches no serve file
+Check: the live run in the PR body used hand-built words that match the shed.rs assertions, not a real `drover spawn`
+Owner: ACP lanes keep the host's login but leave out your global CLAUDE.md, plugins and connectors, and get only their role's MCP servers.
