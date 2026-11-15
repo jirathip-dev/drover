@@ -591,3 +591,76 @@ fn a_serial_busy_lane_names_the_hot_file_and_its_holder_in_waiting() {
     assert!(row.contains(&format!("serial: hot {HOT} held by #9")), "{w}");
     assert!(!row.contains("missed") && !row.contains("nothing drives this"), "{w}");
 }
+
+fn joined(c: &drover::Ctx, n: u64, files: &[&str]) {
+    for f in files {
+        ev(
+            c,
+            n,
+            "serial-joined",
+            json!({"group": format!("hot {f}"), "by": "diff", "path": f}),
+        );
+    }
+}
+
+fn hot_files(c: &drover::Ctx, files: &[&str]) {
+    let hot = Event::new(10, "sendmeter", None, "hot-files", json!({"files": files}));
+    append(&c.state, &hot).unwrap();
+}
+
+fn reviewing(c: &drover::Ctx, n: u64) {
+    lane(c, n);
+    let rev = format!("sendmeter-rev-{n}-r1");
+    ev(
+        c,
+        n,
+        "spawn",
+        json!({"role": "rev", "agent": rev, "pane": rev, "workspace": "", "runtime": "shed"}),
+    );
+}
+
+#[test]
+fn one_pass_reconciles_hot_locks_taken_before_the_all_or_none_rule() {
+    let (c, _sh) = hot_ctx_on("sg-hot-reconcile", &[X, Y]);
+    let (b, a, d, e) = (8, 9, 12, 13);
+    hot_files(&c, &[X, Y]);
+    for n in [b, a, d, e] {
+        reviewing(&c, n);
+    }
+    joined(&c, b, &[Y]);
+    joined(&c, a, &[Y, X]);
+    ev(&c, a, "serial-held", json!({"group": format!("hot {Y}"), "holder": b}));
+    joined(&c, d, &[X]);
+    joined(&c, e, &[X]);
+    let all = [
+        (b, format!("{Y}\n")),
+        (a, format!("{X}\n{Y}\n")),
+        (d, format!("{X}\n")),
+        (e, format!("{X}\n")),
+    ];
+    let all: Vec<_> = all.iter().map(|(n, f)| (*n, f.as_str())).collect();
+    assert_eq!(holding(&c, X), [a, d, e], "the state before the upgrade");
+    let (out, _) = drive(&c, &fake(&all));
+    let x = holding(&c, X);
+    assert!(!x.contains(&a), "#9 waits on {Y}: it holds none: {x:?} {out}");
+    assert!(x.len() <= 1, "{X} holders over max: {x:?} {out}");
+    assert_eq!(holding(&c, Y), [b], "{out}");
+    let (_, w) = run(&c, &fake(&all), &["waiting", "sendmeter"]);
+    assert!(!w.contains("(2/1)") && !w.contains("(3/1)"), "{w}");
+}
+
+#[test]
+fn a_blocked_issue_holds_no_hot_lock_after_one_pass() {
+    let (c, _sh) = hot_ctx("sg-hot-blocked");
+    hot_files(&c, &[HOT]);
+    reviewing(&c, 9);
+    joined(&c, 9, &[HOT]);
+    let r = fake(&[(9, &format!("{HOT}\n"))]);
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "add", "9"]).0, 0);
+    assert_eq!(run(&c, &r, &["queue", "sendmeter", "block", "--on", "5", "9"]).0, 0);
+    assert_eq!(holding(&c, HOT), [9], "held before the pass");
+    let (out, _) = drive(&c, &r);
+    assert!(holding(&c, HOT).is_empty(), "{out}");
+    drive(&c, &r);
+    assert!(holding(&c, HOT).is_empty(), "still released while blocked");
+}

@@ -124,6 +124,7 @@ fn acp() -> Fake {
     let agents =
         serde_json::json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
     Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
@@ -1117,27 +1118,19 @@ fn archive_stops_the_conductor_and_folds_the_thread_and_restore_resumes_it() {
 }
 
 #[test]
-fn a_restored_herdr_thread_resumes_its_orchestrators_session() {
-    let c = setup("chat-archive-herdr");
-    let r = Fake::default()
-        .reply(
-            "herdr agent list",
-            &agents(&[("orchestrator-t1", "idle", "/x", "w9:p1")]),
-        )
-        .reply("herdr agent prompt", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr pane run", "")
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
-        )
-        .reply("herdr agent start", "")
-        .reply("herdr agent wait", "")
-        .reply("herdr workspace close", "");
+fn a_restored_shed_thread_resumes_its_orchestrators_session() {
+    let c = setup("chat-archive-shed");
+    let b = FakeShed::attached(&c);
+    let r = Fake::default();
     assert_eq!(run(&c, &Fake::default(), &["thread", "new", "sendmeter", "Look"]).0, 0);
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "hi"]).0, 0);
+    assert!(b.called("run", "orchestrator-t1"), "{:?}", b.methods());
     assert_eq!(run(&c, &r, &["thread", "archive", "t1"]).0, 0);
-    assert!(r.called("herdr workspace close"), "{:?}", r.calls.borrow());
+    assert!(
+        b.called("kill", "orchestrator-t1") && !b.has("orchestrator-t1"),
+        "{:?}",
+        b.methods()
+    );
     assert_eq!(run(&c, &r, &["thread", "restore", "t1"]).0, 0);
     assert_eq!(run(&c, &r, &["thread", "say", "t1", "back again"]).0, 0);
     let st: Vec<_> = drover::events::read(&c.state)

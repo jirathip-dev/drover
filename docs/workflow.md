@@ -54,14 +54,13 @@ stateDiagram-v2
 flowchart TD
     j0["dev.drover.tick: drover tick"] --> t0
     j1["dev.drover.fast: drover drive --fast"] --> d0
-    t0["herdr status"] --> t1
-    t1["check"] --> t2
-    t2["drive"] --> t3
-    t3["clean"] --> t4
-    t4["trim"] --> t5
-    t5["lesson"] --> t6
-    t6["hotspots"] --> t7
-    t7["compact"]
+    t0["check"] --> t1
+    t1["drive"] --> t2
+    t2["clean"] --> t3
+    t3["trim"] --> t4
+    t4["lesson"] --> t5
+    t5["hotspots"] --> t6
+    t6["compact"]
     d0["read log, host sample"] --> d1
     d1["disk budget"] --> d2
     d2["roots, redeliver"] --> d3
@@ -70,21 +69,21 @@ flowchart TD
     d5["PR reads, gates, steps"] --> d6
     d6["spawns"] --> d7
     d7["backlog"]
-    t2 --> d0
+    t1 --> d0
     other["other timers: serve, hosts, store"]
     j0 -.- k_slow_secs(["slow_secs = 300"])
     j1 -.- k_fast_secs(["fast_secs = 60"])
-    t1 -.- k_stall_minutes(["stall_minutes = 30"])
-    t1 -.- k_ask_default_minutes(["ask_default_minutes = 30"])
-    t1 -.- k_ask_waiting_minutes(["ask_waiting_minutes = 30"])
-    t1 -.- k_ask_expire_hours(["ask_expire_hours = 24"])
-    t1 -.- k_outbox_stale_minutes(["outbox_stale_minutes = 5"])
-    t1 -.- k_acp_start_minutes(["acp_start_minutes = 3"])
-    t1 -.- k_idle_reap_minutes(["idle_reap_minutes = 10"])
-    t1 -.- k_done_close_minutes(["done_close_minutes = 5"])
-    t1 -.- k_idle_merged_minutes(["idle_merged_minutes = 15"])
-    t1 -.- k_token_refresh_minutes(["token_refresh_minutes = 30"])
-    t2 -.- k_pass_max_secs(["pass_max_secs = 120"])
+    t0 -.- k_stall_minutes(["stall_minutes = 30"])
+    t0 -.- k_ask_default_minutes(["ask_default_minutes = 30"])
+    t0 -.- k_ask_waiting_minutes(["ask_waiting_minutes = 30"])
+    t0 -.- k_ask_expire_hours(["ask_expire_hours = 24"])
+    t0 -.- k_outbox_stale_minutes(["outbox_stale_minutes = 5"])
+    t0 -.- k_acp_start_minutes(["acp_start_minutes = 3"])
+    t0 -.- k_idle_reap_minutes(["idle_reap_minutes = 10"])
+    t0 -.- k_done_close_minutes(["done_close_minutes = 5"])
+    t0 -.- k_idle_merged_minutes(["idle_merged_minutes = 15"])
+    t0 -.- k_token_refresh_minutes(["token_refresh_minutes = 30"])
+    t1 -.- k_pass_max_secs(["pass_max_secs = 120"])
     d1 -.- k_shed_read_millis(["shed_read_millis = 300"])
     d1 -.- k_worktree_budget_gb(["worktree_budget_gb = 25.0"])
     d1 -.- k_build_budget_gb(["build_budget_gb = 20.0"])
@@ -103,6 +102,7 @@ flowchart TD
     d6 -.- k_respawn_max(["respawn_max = 3"])
     d6 -.- k_respawn_window_minutes(["respawn_window_minutes = 60"])
     d6 -.- k_overflow_after_minutes(["overflow_after_minutes = 10"])
+    other -.- k_overload_minutes(["overload_minutes = 10"])
     other -.- k_transcript_days(["transcript_days = 30"])
     other -.- k_runtime_down_minutes(["runtime_down_minutes = 30"])
     other -.- k_ssh_connect_secs(["ssh_connect_secs = 10"])
@@ -120,7 +120,6 @@ flowchart TD
     other -.- k_tick_beat_secs(["tick_beat_secs = 60"])
     other -.- k_orchestrator_idle_minutes(["orchestrator_idle_minutes = 30"])
     other -.- k_orchestrator_change_minutes(["orchestrator_change_minutes = 30"])
-    other -.- k_serve_herdr_secs(["serve_herdr_secs = 2"])
     other -.- k_serve_shed_secs(["serve_shed_secs = 5"])
     other -.- k_serve_remote_secs(["serve_remote_secs = 10"])
     other -.- k_serve_host_secs(["serve_host_secs = 10"])

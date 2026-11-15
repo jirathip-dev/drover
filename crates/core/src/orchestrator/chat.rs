@@ -141,13 +141,13 @@ fn profile(ctx: &Ctx, cfg: &Config, id: &str) -> Result<ChatProfile> {
         .fleet
         .get(seat.fleet)
         .and_then(|f| f.runtime.as_ref())
-        .unwrap_or(&cfg.runtime);
+        .or(cfg.runtime.as_ref());
     Ok(ChatProfile::offered(
         &seat,
         agent,
         file,
         settings,
-        rt.acp_policy.clone(),
+        rt.and_then(|r| r.acp_policy.clone()),
     ))
 }
 
