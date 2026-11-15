@@ -1070,7 +1070,6 @@ fn pass(
 ) -> Result<bool> {
     let f = cfg.fleet(fleet)?;
     let sessions = crate::session::all(cfg, seen).checked()?;
-    crate::session::stamp::observe(ctx, cfg, &sessions)?;
     let agents = sessions.running();
     let ev = working(&ctx.state)?;
     let st = fold(&ev);

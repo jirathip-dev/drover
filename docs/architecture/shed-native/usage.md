@@ -103,7 +103,7 @@ self.call(r, Method::Rm, &target)?;
 
 ```rust
 // crates/cli/tests/shed_native.rs, on common/fake_shed.rs
-shed.lane("sendmeter-impl-12", "running", wt);              // reported {state: running, note: "running: cargo test (8m)"}
+shed.lane("myapp-impl-12", "running", wt);              // reported {state: running, note: "running: cargo test (8m)"}
 assert_eq!(v1_lane(&s, name)["state"], "working");          // /api/v1/state, /api/v1/lanes, the Lanes screen
 assert!(check(&c, &shed).is_empty());
 

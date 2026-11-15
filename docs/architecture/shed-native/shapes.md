@@ -92,8 +92,8 @@ shed puts no time on a reported state (`Reported` and `TerminalInfo` have none, 
 `since`:
 
 ```json
-{"agent": "sendmeter-impl-12", "state": "done", "note": "end_turn", "since": 1794700000, "shed_seq": 412}
-{"agent": "sendmeter-impl-12", "state": "gone", "why": "exited", "code": 1, "cause": "adapter crash", "since": 1794700900}
+{"agent": "myapp-impl-12", "state": "done", "note": "end_turn", "since": 1794700000, "shed_seq": 412}
+{"agent": "myapp-impl-12", "state": "gone", "why": "exited", "code": 1, "cause": "adapter crash", "since": 1794700900}
 ```
 
 - `state` is shed's own word, unmapped (`gone` for an exit or kill, as today).
