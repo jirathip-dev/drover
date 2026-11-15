@@ -203,7 +203,7 @@ fn soak(name: &str, mode: &str, config: &str) -> Result<Vec<u64>, String> {
     let (t0, mut samples, mut next_drive) = (Instant::now(), vec![], Instant::now());
     while t0.elapsed() < Duration::from_secs(secs) {
         let tick = Instant::now();
-        for p in ["/", "/herd.json", "/api/v1/state"] {
+        for p in ["/", "/screens/queue", "/api/v1/state"] {
             get(&addr, p, &cookies[0])?;
         }
         let d = json!({"step": "review", "code": "EXIT", "result": "exit 1: boom"});

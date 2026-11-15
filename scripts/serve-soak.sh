@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # #895: serve's RSS under load: `scripts/serve-soak.sh <secs> <state.db> [dir]` copies the database into dir, runs
-# `drover serve` on it with 8 /live clients, the page and herd.json polled every second and a drive pass every 60 s,
+# `drover serve` on it with 8 /live clients, the page and /screens/queue polled every second and a drive pass every 60 s,
 # and prints `rss_kb <secs> <kb>` at the start, every 60 s and at the end. DROVER names the binary.
 set -euo pipefail
 secs=${1:?usage: serve-soak.sh <secs> <state.db> [dir]}
@@ -32,7 +32,7 @@ done
 t0=$SECONDS next=60
 while ((SECONDS - t0 < secs)); do
   curl -s -o /dev/null "http://127.0.0.1:$port/" || true
-  curl -s -o /dev/null "http://127.0.0.1:$port/herd.json" || true
+  curl -s -o /dev/null "http://127.0.0.1:$port/screens/queue" || true
   if ((SECONDS - t0 >= next)); then
     "$bin" drive > /dev/null 2>&1 || true
     rss "$next"
