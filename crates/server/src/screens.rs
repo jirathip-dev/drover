@@ -127,7 +127,7 @@ fn cut(s: &str, n: usize) -> String {
 
 const LINE: usize = 48;
 
-fn row(ctx: &Ctx, ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usize>) -> Value {
+fn row(ctx: &Ctx, ev: &[Event], (repo, paused): (&str, bool), f: &str, r: &QueueRow, k: Option<usize>) -> Value {
     let fig = figure(&r.act, &r.state);
     let title = format!(
         "#{} {}",
@@ -155,12 +155,18 @@ fn row(ctx: &Ctx, ev: &[Event], repo: &str, f: &str, r: &QueueRow, k: Option<usi
             at.into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ")
         );
     }
+    let sub = sub.trim_start_matches(" ▸ ").trim_start_matches(" · ");
+    let sub = match k.and(crate::pending::waits(ev, f, r.issue, paused)) {
+        Some(w) if !sub.is_empty() => format!("{w} · {sub}"),
+        Some(w) => w,
+        None => sub.into(),
+    };
     let vals = json!({"fleet": f, "issue": r.issue, "agent": r.lane});
     if let Some(b) = r.blocked_by {
         v["indent"] = json!(1);
         v["subtitle"] = json!({"text": format!("held until #{b}"), "tone": "bad"});
     } else if !sub.is_empty() {
-        v["subtitle"] = json!(cut(sub.trim_start_matches(" ▸ ").trim_start_matches(" · "), LINE));
+        v["subtitle"] = json!(cut(&sub, LINE));
     }
     if k.is_none() {
         v["value"] = json!({ "since": iso(r.t) });
@@ -195,11 +201,12 @@ fn hot_row(f: &str, r: &QueueRow) -> Option<Value> {
 fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard) -> Value {
     let f = &c.name;
     let (queued, busy): (Vec<&QueueRow>, Vec<&QueueRow>) = c.rows.iter().partition(|r| r.state == "queued");
+    let paused = c.paused.is_some();
     let rows = |rs: &[&QueueRow], q: bool| -> Vec<Value> {
         let k = |i| q.then_some(i);
         rs.iter()
             .enumerate()
-            .flat_map(|(i, r)| [Some(row(ctx, ev, &c.config.repo, f, r, k(i))), hot_row(f, r)])
+            .flat_map(|(i, r)| [Some(row(ctx, ev, (&c.config.repo, paused), f, r, k(i))), hot_row(f, r)])
             .flatten()
             .collect()
     };
@@ -207,7 +214,6 @@ fn fleet_card(ctx: &Ctx, ev: &[Event], c: &QueueCard) -> Value {
         json!({"type": "section", "id": format!("{id}-{f}"), "header": format!("{word} ({})", rs.len()),
             "blocks": [{"type": "list", "id": format!("{id}-list-{f}"), "rows": rs}]})
     };
-    let paused = c.paused.is_some();
     let badge = [
         json!({"text": "driving", "tone": "ok"}),
         json!({"text": "paused", "tone": "mute"}),

@@ -211,20 +211,14 @@ fn card_ops_need_needs_human_and_a_refused_extend_logs_nothing() {
     let res = post("extend");
     assert!(
         res.contains("msg=%2312%3A%20extend"),
-        "PAUSED only holds the spawn: {res}"
+        "PAUSED only holds the start: {res}"
     );
-    let p = drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12).expect("pending");
-    assert_eq!((p.reason.as_deref(), p.failed), (Some("PAUSED"), false));
-    assert!(
-        card(&s, &cookie).is_some_and(|k| choice(&k).is_none()),
-        "the card stays answered"
-    );
-    assert!(
-        post("extend").contains("msg=%2312%3A%20extend"),
-        "a second tap retries the start"
-    );
-    assert_eq!(extended(), 1, "the decision is logged once, before the spawn");
-    assert_eq!(fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)].extra, 1);
+    assert_eq!(drover::pending::of(&read(&c.state).unwrap(), "sendmeter", 12), None);
+    assert_eq!(card(&s, &cookie), None, "the card leaves at the tap");
+    assert!(post("extend").contains("not%20needs"), "a second tap decides nothing");
+    assert_eq!(extended(), 1, "the decision is logged once");
+    let st = &fold(&read(&c.state).unwrap())[&("sendmeter".to_string(), 12)];
+    assert_eq!((st.extra, st.state.as_str()), (1, "queued"));
     let failed = read(&c.state)
         .unwrap()
         .iter()

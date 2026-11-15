@@ -61,14 +61,14 @@ impl Waiting {
     }
 }
 
-/// #217: an extra round is recorded for a lane that has not started yet (`extend --no-spawn` asks for none); #778: its pending action, until a hard refusal ends it (logs before #778: the round's own event, last).
+/// #217: an extra round is recorded for a lane that has not started yet (`extend --no-spawn` asks for none), logs before #778: the round's own event, last; #1058's requeued round waits in the queue instead.
 pub fn unspawned(events: &[Event], s: &IssueState) -> bool {
     let last = events
         .iter()
         .rev()
         .find(|e| e.fleet == s.fleet && e.issue == Some(s.issue));
-    crate::pending::extending(events, &s.fleet, s.issue)
-        || last.is_some_and(|e| e.kind == "round-extended" && e.data.get("spawn") == Some(&Value::Bool(true)))
+    let old = |e: &Event| e.data.get("spawn") == Some(&Value::Bool(true)) && e.data.get("queued").is_none();
+    last.is_some_and(|e| e.kind == "round-extended" && old(e))
 }
 
 fn lost(events: &[Event], s: &IssueState, pushed: &str) -> bool {

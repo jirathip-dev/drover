@@ -471,7 +471,8 @@ impl Server<'_> {
                 })
                 .collect(),
             pending: crate::pending::of(&events, f, i.issue).map(start),
-            status: crate::pending::of(&events, f, i.issue).and_then(|p| p.line(ctx.now)),
+            status: (crate::pending::of(&events, f, i.issue).and_then(|p| p.line(ctx.now)))
+                .or_else(|| crate::pending::waits(&events, f, i.issue, cfg.fleet.get(f).is_some_and(|c| c.paused))),
         };
         let seen = crate::hosts::cached(ctx);
         let host = |(name, h): (String, Option<&crate::config::HostCfg>)| {
