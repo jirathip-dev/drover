@@ -1,0 +1,10 @@
+Decided: cap_at_sha reads ci/cap.toml before listing ci/cap.d, so a missing cap file costs no extra git call; this made the sim's hunt green again
+Because: crates/core/src/overlap.rs:221
+Decided: LEGACY now equals staging's last PASSIVE list (lane-dup, wip-skipped, lane-hog, usage-limit, signed-out); this PR creates the file, so the freeze starts after it
+Because: crates/core/src/events/passive.rs:30
+Decided: check's fire no longer flags every alert passive; that drifted the sim's exact metrics
+Because: crates/core/src/check.rs:719
+Rejected: keeping .passive() on kinds already in LEGACY — redundant calls that only change the logged JSON
+Rejected: skipping created files in frozen_adds — staging now judges freezes from the base arch.toml, which covers this PR
+Check: cargo test --locked -p drover --test sim passes; no PASSIVE reference left in crates/
+Owner: The simulator tests are green again; the shared lists still stop colliding between PRs.
