@@ -2064,11 +2064,7 @@ fn dispatch(cmd: Cmd, ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, stdin: &mu
                     if let Some((code, w)) = &note {
                         d["note"] = json!(format!("{code}: {w}"));
                     }
-                    emit(
-                        &ctx.state,
-                        &cfg,
-                        Event::new(ctx.now, f, Some(n), "turn-end", d).passive(),
-                    )?;
+                    emit(&ctx.state, &cfg, Event::new(ctx.now, f, Some(n), "turn-end", d))?;
                     writeln!(out, "recorded {f}#{n} turn-end: {state}")?;
                     if state == "need-input" {
                         writeln!(out, "ask the question with `drover ask {f} {n} …` if you have not")?;

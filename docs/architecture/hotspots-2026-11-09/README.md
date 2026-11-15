@@ -11,8 +11,7 @@ Read this file, then `adr.md`, `shapes.md`, `boundaries.md`.
 ## Where it stands (origin/staging 7ed65121, 14 days to 2026-11-13)
 
 433 PRs merged. The table in the issue has 273 rows; 67 of them are paths that no longer exist (the Nov 3 move from
-`src/` and `tests/` into `crates/`), and the frozen old board (`crates/server/src/serve.rs`, `assets/serve.js`,
-`web/dist/`, frozen by `scripts/board-freeze.sh` since Nov 12) fills eight more that decay on their own by Nov 26.
+`src/` and `tests/` into `crates/`), and the old board (frozen on Nov 12, since deleted) fills eight more that decay on their own by Nov 26.
 
 What is left, by where the hunks land (every merge's diff on origin/staging, grouped by the function or item it hit):
 

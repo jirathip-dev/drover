@@ -28,7 +28,7 @@ the report itself is noise that would send next week's architect after the wrong
 - 67 rows are paths removed on Nov 3 (`src/`, `tests/`); `crates/core/src/hotspots.rs` never checks the tip.
 - `conflict-predicted` fires per new pair of heads (`crates/core/src/overlap.rs:48`), so the count is pushes, not
   pairs: 442 on `justfile` from one long-lived PR.
-- The old board's files are frozen by `scripts/board-freeze.sh` since Nov 12; their rows decay by Nov 26.
+- The old board's files were frozen on Nov 12 and are since deleted; their rows decay by Nov 26.
 
 ## Options
 

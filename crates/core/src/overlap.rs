@@ -218,12 +218,13 @@ fn highest(name: &str, base: &str, raises: Vec<(String, String)>) -> Option<Cap>
 /// #973: the cap at `sha` of the repo in `dir`, by git alone: `ci/cap.toml` and `ci/cap.d/*.toml` at that commit.
 pub fn cap_at_sha(r: &dyn Runner, dir: &Path, sha: &str) -> Option<Cap> {
     let show = |p: &str| git(r, dir, &["show", &format!("{sha}:{p}")]).ok();
+    let base = show("ci/cap.toml")?;
     let names = git(r, dir, &["ls-tree", "--name-only", sha, "ci/cap.d/"]).unwrap_or_default();
     let raises = names
         .lines()
         .filter(|n| Path::new(n).extension().is_some_and(|x| x == "toml"))
         .filter_map(|n| Some((n.to_string(), show(n)?)));
-    highest("ci/cap.toml", &show("ci/cap.toml")?, raises.collect())
+    highest("ci/cap.toml", &base, raises.collect())
 }
 
 fn limits(text: &str) -> Option<(i64, i64)> {
