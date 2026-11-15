@@ -1,0 +1,8 @@
+Decided: a hot (all-or-none) waiter counts as first in line for a freed slot only when every group it is held on has a free slot
+Because: "whose all-or-none set can be taken is granted (`serial-slot`)"
+Decided: order stays queue position then issue number, one grant per group per pass
+Because: "only the oldest is granted per pass; the other still shows `held by #<granted>`"
+Rejected: a new pass loop over all held issues — serial() already grants waiters each pass; only its first-in-line pick was wrong
+Check: crates/core/src/drive.rs free closure gates the atomic branch of waits; non-hot groups keep the first_held rule
+Check: self_update pause test fails in this lane from its env identity, unrelated to this diff
+Owner: Issues waiting on a hot file now start once it is free, even if the old holder never merged.
