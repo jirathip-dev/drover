@@ -1440,6 +1440,21 @@ fn pass(
                 let d = json!({"role": args.get(3), "agent": w.lane, "why": why, "failed_on": on});
                 append(&ctx.state, &Event::new(ctx.now, fleet, Some(s.issue), "respawn", d))?;
             }
+            if let Some(c) = code.filter(|c| gone.is_some() && *c != "RESPAWN_LOOP" && owner_refusal(c)) {
+                let why = ACTS.with_borrow(|m| m.get(fleet).and_then(|a| a.last()).map(|a| a["why"].clone()));
+                let reason = format!(
+                    "{} respawn refused {c}: {}",
+                    args[3],
+                    why.as_ref().and_then(Value::as_str).unwrap_or("?")
+                );
+                writeln!(out, "{fleet} #{n} needs-human: {reason}")?;
+                let d = json!({"code": "RESPAWN_REFUSED", "refused": c, "reason": reason, "agent": w.lane});
+                emit(
+                    &ctx.state,
+                    cfg,
+                    Event::new(ctx.now, fleet, Some(s.issue), "needs-human", d),
+                )?;
+            }
             go &= !matches!(code, Some("HOST_BUSY" | "DISK_LOW" | "MEM_LOW" | "RESPAWN_PACED"));
             let mut merge = step == "merge";
             let full = f.merge_label.is_some() && pr["landing"] != "fast-first";
@@ -1519,7 +1534,6 @@ fn pass(
     Ok(go)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn no_proof(
     ctx: &Ctx,
     cfg: &Config,
@@ -1621,6 +1635,18 @@ fn tell(r: &dyn Runner, events: &[Event], lane: &str, text: &str) -> Option<bool
 }
 
 pub(crate) const OLD: &str = "is in the way: replacing it";
+
+pub(crate) fn owner_refusal(code: &str) -> bool {
+    let owner = [
+        "RESPAWN_LOOP",
+        "DESIGN_MAIN_ONLY",
+        "HOST_OFFLINE",
+        "MCP_FORBIDDEN",
+        "ACP_UNGUARDED",
+        "ACCOUNT_ENV",
+    ];
+    owner.contains(&code)
+}
 
 fn last_words(fleet: &str) -> String {
     let last = ACTS.with_borrow(|m| m.get(fleet).and_then(|a| a.last()).map(|a| a["words"].to_string()));

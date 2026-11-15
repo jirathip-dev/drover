@@ -95,7 +95,7 @@ impl Board {
 }
 
 fn toasts(live: &mut TcpStream, seen: &mut String, n: usize) -> Vec<String> {
-    let mut b = [0u8; 65_536];
+    let mut b = vec![0u8; 65_536];
     let all = |s: &str| s.matches("event: toast\ndata: ").count();
     while all(seen) < n {
         let k = live.read(&mut b).unwrap();

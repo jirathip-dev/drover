@@ -412,6 +412,7 @@ fn pairing_behind_a_proxy_and_retaps() {
 
 #[test]
 fn pairing_codes_devices_and_prompt_events() {
+    use std::os::unix::fs::PermissionsExt;
     let (c, r) = fixture("pair");
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let send = |cookie: &str, text: &str| {
@@ -435,7 +436,6 @@ fn pairing_codes_devices_and_prompt_events() {
     let cookie = paired(&s, &c);
     let file = drover::db::file(&c.state);
     let stored = serde_json::to_string(&drover::devices::load(&c)).unwrap();
-    use std::os::unix::fs::PermissionsExt;
     assert_eq!(std::fs::metadata(&file).unwrap().permissions().mode() & 0o777, 0o600);
     let tok = &cookie[11..cookie.len() - 2];
     assert!(
@@ -499,7 +499,7 @@ fn pairing_codes_devices_and_prompt_events() {
         res.starts_with("HTTP/1.1 303 ") && res.contains("device%20removed"),
         "{res}"
     );
-    assert!(drover::devices::load(&c).is_empty());
+    assert_eq!(drover::devices::load(&c), [] as [drover::devices::Device; 0]);
     assert!(send(&cookie, "again").starts_with("HTTP/1.1 401 "));
 }
 

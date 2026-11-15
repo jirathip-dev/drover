@@ -188,7 +188,7 @@ fn soak(name: &str, mode: &str, config: &str) -> Result<Vec<u64>, String> {
                 s.write_all(format!("GET /live HTTP/1.1\r\nHost: {addr}\r\n{cookie}\r\n").as_bytes())
                     .unwrap();
                 s.set_read_timeout(Some(Duration::from_millis(200))).unwrap();
-                let (mut b, mut got) = ([0u8; 65_536], 0);
+                let (mut b, mut got) = (vec![0u8; 65_536], 0);
                 while !stop.load(SeqCst) {
                     match s.read(&mut b) {
                         Ok(0) => break,

@@ -504,6 +504,7 @@ pub const PASSIVE: &[&str] = &[
     "usage-limit",
     "signed-out",
     "lane-failed-start",
+    "respawn-refused",
     "spawn-failed",
     "spawn-error",
     "spawn-failing",

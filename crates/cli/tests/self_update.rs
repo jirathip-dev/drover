@@ -191,9 +191,9 @@ fn the_staging_serve_runs_the_staging_head_and_cannot_write_the_live_state() {
         .spawn()
         .unwrap();
     let mut err = std::io::BufReader::new(p.stderr.take().unwrap());
-    let mut line = String::new();
-    std::io::BufRead::read_line(&mut err, &mut line).unwrap();
-    let addr = line
+    let mut banner = String::new();
+    std::io::BufRead::read_line(&mut err, &mut banner).unwrap();
+    let addr = banner
         .trim()
         .strip_prefix("drover serve: read-only view on http://")
         .unwrap()
@@ -237,6 +237,7 @@ fn red_ci_installs_nothing() {
 
 #[test]
 fn green_is_built_signed_gated_swapped_synced_and_restarted() {
+    use std::os::unix::fs::MetadataExt;
     let (c, live) = setup("upd-green");
     let new = format!("{}.new", live.display());
     let r = host("SUCCESS")
@@ -252,7 +253,6 @@ fn green_is_built_signed_gated_swapped_synced_and_restarted() {
     assert_eq!(code, 0, "{out}");
     assert!(out.starts_with("✓ installed abcdef1 at "), "{out}");
     assert_eq!(std::fs::read_to_string(&live).unwrap(), "NEW", "swapped in");
-    use std::os::unix::fs::MetadataExt;
     let ino = |p: &std::path::Path| std::fs::metadata(p).unwrap().ino();
     assert_ne!(ino(&live), ino(&old), "renamed over, never rewritten in place");
     assert_eq!(
@@ -411,7 +411,9 @@ fn scheduled_clean_keeps_its_age_cap_and_live_dirty_rules_and_alerts_a_failure_o
         "{out}"
     );
     assert!(kinds(&c, "clean-failed").is_empty(), "a passing run alerts nothing");
-    cleaned.iter().for_each(|w| std::fs::remove_dir_all(w).unwrap());
+    for w in &cleaned {
+        std::fs::remove_dir_all(w).unwrap();
+    }
 
     sh.remove("impl-21");
     let r = || git(Fake::default());
