@@ -1,0 +1,15 @@
+Decided: a tap logs `round-extended` with `queued: true` and the fold puts the issue at `queued` in its kept queue place (out of the queue: last); drive starts it with `impl --supersede` in queue order
+Because: "[one more round] only grants the round and puts the issue back in the normal queue, in its old place"
+Decided: no spawn at the tap and no HOST_BUSY or SPAWN_PENDING override for extends; the v1 extend op runs inline and never takes a job slot, so it cannot bounce DRIVE_RUNNING
+Because: "no override of HOST_BUSY or SPAWN_PENDING for extends"
+Decided: a hard refusal of the requeued start (not SOFT, IN_FLIGHT, ALREADY_DONE or DISK_*) logs a new needs-human with the code and `start: true`; its re-tap logs `extend-requeued`, granting no second round
+Because: "Only a hard refusal brings a card back."
+Decided: drive's full pass converts each unstarted, unrefused #975 pending extend to `extend-requeued` once, paused fleets too; until then `Pending::back` never returns an extend's card
+Because: "every existing pending extend with no spawn since (the 14 synergy issues above) is converted to rule 1"
+Decided: the Queue row reads `extended · waiting: <gate>` from the fleet's pause, else drive's last refused `start` since the requeue
+Because: crates/core/src/pending.rs:93
+Rejected: changing the fold of old `round-extended` events — the states table is a stored projection, so a new event kind migrates them without a rebuild
+Rejected: keeping BACK_SECS for extends — the owner decided a card never comes back for a wait
+Check: owner_extend.rs drives the real CLI, /api/v1 and /screens for the requeue, the 2 h paused and HOST_BUSY wait, the hard ERROR refusal, the migration and a serve_on board tap
+Check: self_update's pause_and_resume test fails on base too (lane identity env), unrelated
+Owner: One more round now just puts the issue back in its queue spot; drive starts it when the host is free, and the card only returns if the start is refused outright.
