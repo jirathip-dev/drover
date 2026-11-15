@@ -141,7 +141,7 @@ fn an_unpaired_request_gets_401() {
 }
 
 #[test]
-fn the_lanes_tab_ends_with_the_folded_section_and_fits_390px() {
+fn the_lanes_screen_ends_with_the_other_in_shed_section() {
     let mini = FakeShed::new();
     let c = board("shed-tab", &mini);
     chat(&mini, "cooee-chat-4");
@@ -155,65 +155,28 @@ fn the_lanes_tab_ends_with_the_folded_section_and_fits_390px() {
     let r = mini.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, IPHONE, T);
-    let lanes = api(&s, ADDR, &cookie, T, "lanes");
-    let html = &board_js(&[(&lanes, "lanes.tab(d)")])[0];
-    let at = html
-        .find("<details class=qm><summary><span>Other in shed</span> (2)</summary>")
-        .expect(html);
-    let section = &html[at..];
-    assert!(section.ends_with("</details>"), "the tab's last part");
+    let res = String::from_utf8_lossy(&s.respond(
+        &format!("GET /screens/lanes HTTP/1.1\r\nHost: {ADDR}\r\n{cookie}\r\n"),
+        T,
+    ))
+    .into_owned();
+    let v: Value = serde_json::from_str(res.split_once("\r\n\r\n").unwrap().1).expect(&res);
+    let last = v["blocks"].as_array().unwrap().last().unwrap().clone();
+    let rows = last["blocks"][0]["rows"].as_array().unwrap().clone();
+    assert_eq!(last["id"], "others", "the screen's last part: {v}");
+    assert_eq!(last["header"], format!("other in shed ({})", rows.len()));
+    let line = |r: &Value| format!("{} | {}", r["title"].as_str().unwrap(), r["subtitle"].as_str().unwrap());
+    let lines: Vec<String> = rows.iter().map(line).collect();
     for want in [
-        "cooee-chat-4 <span class=\"tag m\">mini</span> <span class=\"tag m\">acp</span>",
-        "<p class=\"act nw el\">The deploy finished.</p>",
-        "<small>app=cooee thread=c9</small>",
-        "scratch-shell <span class=\"tag m\">mini</span> <span class=\"tag m\">shed</span>",
-        "running <span class=m>0s</span>",
-        "<p class=\"r nw el\">! shed air: shed connect failed (255): air: unreachable</p>",
+        "cooee-chat-4 | mini",
+        "The deploy finished.",
+        "scratch-shell | mini · running",
+        "air | air · shed connect failed (255): air: unreachable",
     ] {
-        assert!(section.contains(want), "{want}\n{section}");
+        assert!(lines.iter().any(|l| l.contains(want)), "{want}\n{lines:#?}");
     }
-    assert!(!section.contains("<button") && !section.contains("<form") && !section.contains("data-agent"));
-    if no_webkit() {
-        return;
-    }
-    let res =
-        String::from_utf8_lossy(&s.respond(&format!("GET /?all=1 HTTP/1.1\r\nHost: {ADDR}\r\n\r\n"), T)).into_owned();
-    let d = tmpdir("shed-png");
-    let file = d.join("page.html");
-    std::fs::write(
-        &file,
-        drawn(&res[res.find("<!doctype").unwrap()..], &s, ADDR, &cookie, T),
-    )
-    .unwrap();
-    let dir = std::env::var("DROVER_SNAPSHOTS").map_or(d.clone(), std::path::PathBuf::from);
-    let open = "const x = document.querySelector('#lanes details.qm'); x.open = true; x.scrollIntoView()";
-    for (name, js) in [
-        (
-            "shed-folded",
-            "document.querySelector('#lanes details.qm').scrollIntoView()",
-        ),
-        ("shed-open", open),
-    ] {
-        let png = dir.join(format!("{name}.png"));
-        let o = webview()
-            .args([
-                file.to_str().unwrap(),
-                "390",
-                "lanes",
-                "horse",
-                png.to_str().unwrap(),
-                js,
-            ])
-            .output()
-            .unwrap();
-        let out = String::from_utf8_lossy(&o.stdout);
-        let w: Vec<u32> = out.split_whitespace().filter_map(|n| n.parse().ok()).collect();
-        assert!(
-            o.status.success() && w.len() == 2,
-            "{name}: {out} {}",
-            String::from_utf8_lossy(&o.stderr)
-        );
-        assert!(w[0] <= 390 && w[1] == 390, "{name}: scrollWidth {} at {}", w[0], w[1]);
-        assert!(png.exists(), "{name}");
-    }
+    assert!(
+        rows.iter().all(|r| r.get("tap").is_none() && r.get("swipe").is_none()),
+        "{last}"
+    );
 }

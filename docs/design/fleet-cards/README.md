@@ -1,7 +1,7 @@
 # Fleet cards and the [config] sheet: design mockup (#162, phase 1)
 
 `index.html` is the Queue tab with each fleet as its own card, plus one fleet's `[config]` sheet (open
-`index.html#config`, or tap any `[config]`). It links `assets/serve.css` unchanged. One `<style>` block holds the new
+`index.html#config`, or tap any `[config]`). It links assets/serve.css (removed in #927) unchanged. One `<style>` block holds the new
 rules, which use existing tokens only and move to `serve.css` in phase 2. The row markup is exactly what `serve.rs`
 plus `serve.js` `graph()`/`tidy()` produce today, so the item rows are #115's graph rows, unchanged.
 

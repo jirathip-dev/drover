@@ -43,6 +43,7 @@ fn acp_setup(name: &str, b: &FakeShed) -> drover::Ctx {
 fn acp() -> Fake {
     let agents = json!([{"id": "claude-acp", "version": "0.101.0", "distribution": "npx", "cmd": ["echo"]}]);
     Fake::default()
+        .reply("shed help run", "--meta <JSON>")
         .reply("shed agents --json", &agents.to_string())
         .reply("shed run", "")
         .reply("shed send", "")
@@ -55,21 +56,6 @@ fn kinds(c: &drover::Ctx, kind: &str) -> Vec<Event> {
         .into_iter()
         .filter(|e| e.kind == kind)
         .collect()
-}
-
-fn herdr(agents: &str) -> Fake {
-    Fake::default()
-        .reply("herdr agent list", agents)
-        .reply(
-            "herdr workspace create",
-            r#"{"result":{"root_pane":{"pane_id":"w9:p1"}}}"#,
-        )
-        .reply("herdr workspace close", "")
-        .reply("herdr pane run", "")
-        .reply("herdr pane send-keys", "")
-        .reply("herdr agent start", "")
-        .reply("herdr agent wait", "")
-        .reply("herdr agent prompt", "")
 }
 
 fn to_new(c: &drover::Ctx, r: &dyn drover::runner::Runner, repo: &str, title: &str, text: &str) -> String {
@@ -336,17 +322,28 @@ fn a_handoff_to_a_repo_posts_a_choice_card_of_its_threads_and_delivers_nothing_b
     let r = b.on(&f);
     let s = Server::new(&at, &r, Some(ADDR.into()));
     let cookie = pair(&s, &at, "Mozilla/5.0 (iPhone)", at.now);
-    let chat = &parts(&s, ADDR, &cookie, at.now)[2];
-    let v = &chat[chat.find("<div class=cvp data-t=\"t1\">").unwrap()..];
-    let v = &v[..v.find("</form></div>").unwrap()];
-    let more = v.find("<details class=more><summary>more (2)</summary>").expect(v);
-    assert_eq!(v.matches("name=choice").count(), 7, "{v}");
-    assert_eq!(v[..more].matches("name=choice").count(), 5, "{v}");
-    assert!(v[..more].contains("5. new thread: Rate limits"), "{v}");
-    assert!(
-        v[more..].contains("7. Main chat · <span class=tl data-go=\"t2\">t2</span>"),
-        "{v}"
-    );
+    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, at.now, "chat")).unwrap();
+    let t1 = chat["threads"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["id"] == "t1")
+        .unwrap();
+    let h = t1["page"]["msgs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find_map(|m| m["handoff"].as_object())
+        .expect("a handoff card");
+    let choices = h["choices"].as_array().unwrap();
+    let picks: Vec<(&str, &str)> = choices
+        .iter()
+        .map(|c| (c["text"].as_str().unwrap(), c["thread"].as_str().unwrap()))
+        .collect();
+    assert_eq!(picks.len(), 7, "{picks:?}");
+    assert_eq!(picks[4], ("new thread: Rate limits", "new"), "{picks:?}");
+    assert_eq!(picks[6].1, "t2", "{picks:?}");
+    assert!(picks[6].0.starts_with("Main chat · t2"), "{picks:?}");
 }
 
 #[test]
@@ -455,9 +452,9 @@ fn a_forward_marks_the_received_row_and_a_handoff_after_the_owner_wrote_does_not
     let r = b.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    let chat = &parts(&s, ADDR, &cookie, c.now)[2];
+    let chat = api(&s, ADDR, &cookie, c.now, "chat");
     assert_eq!(
-        chat.matches("<p>handoff to Test · <span class=tl data-go=\"t2\">t2</span>: add facets (forwarded)</p>")
+        chat.matches("\"text\":\"handoff to Test · t2: add facets (forwarded)\"")
             .count(),
         1,
         "{chat}"
@@ -543,12 +540,6 @@ fn a_orchestrators_thread_new_is_refused_naming_handoff_and_the_owners_still_wor
     assert!(brief.contains("drover thread handoff <thread> <repo|t<n>>"), "{brief}");
 }
 
-fn req(s: &Server, method: &str, path: &str, extra: &str, now: u64) -> String {
-    let r = format!("{method} {path} HTTP/1.1\r\nHost: {ADDR}\r\n{extra}Content-Length: 0\r\n\r\n");
-    let res = String::from_utf8_lossy(&s.respond(&r, now)).into_owned();
-    res[res.find("\r\n\r\n").unwrap() + 4..].to_string()
-}
-
 fn linked(name: &str, b: &FakeShed) -> drover::Ctx {
     let c = acp_setup(name, b);
     assert_eq!(to_new(&c, &b.cli(&acp()), "sendmeter", "Rate limits", "go"), "t2");
@@ -562,95 +553,54 @@ fn linked(name: &str, b: &FakeShed) -> drover::Ctx {
 }
 
 #[test]
-fn the_chat_tab_shows_a_chip_on_each_linked_row_and_thread_row() {
+fn the_chat_api_links_each_linked_row_and_thread_row() {
     let b = FakeShed::new();
     let c = linked("handoff-tab", &b);
     let f = Fake::default();
     let r = b.on(&f);
     let s = Server::new(&c, &r, Some(ADDR.into()));
     let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    let chat = &parts(&s, ADDR, &cookie, c.now)[2];
-    let view = |t: &str| {
-        let v = &chat[chat.find(&format!("<div class=cvp data-t=\"{t}\">")).unwrap()..];
-        v[..v.find("</form></div>").unwrap()].to_string()
+    let chat: serde_json::Value = serde_json::from_str(&api(&s, ADDR, &cookie, c.now, "chat")).unwrap();
+    let thread = |t: &str| {
+        chat["threads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|x| x["id"] == t)
+            .unwrap()["page"]["msgs"]
+            .clone()
     };
-    let (go1, go2) = (
-        "<span class=lc data-go=\"t1\">from t1</span>",
-        "<span class=lc data-go=\"t2\">continued in t2</span>",
+    let link = |t: &str, w: &str| json!({"t": t, "w": w});
+    let t1 = thread("t1");
+    let msgs = t1.as_array().unwrap();
+    assert!(
+        msgs.iter()
+            .any(|m| m["link"] == link("t2", "continued in") && m["text"] == "Rate limits → Rate limits · t2"),
+        "{t1}"
     );
     assert!(
-        view("t1").contains(&format!(
-            " class=qs>{go2} · Rate limits → Rate limits · <span class=tl data-go=\"t2\">t2</span></p>"
-        )),
-        "{}",
-        view("t1")
+        msgs.iter()
+            .any(|m| m["link"] == link("t2", "from") && m["text"] == "filed #52: Rate-limit search"),
+        "{t1}"
     );
-    let back = " class=\"qs note\"><span class=lc data-go=\"t2\">from t2</span> filed #52: Rate-limit search</p>";
-    assert!(view("t1").contains(back), "{}", view("t1"));
+    let t2 = thread("t2");
     assert!(
-        view("t2").contains(&format!(" class=\"blk ai\" open><summary><span class=k>{go1}</span>")),
-        "{}",
-        view("t2")
+        t2.as_array().unwrap().iter().any(|m| m["link"] == link("t1", "from")),
+        "{t2}"
     );
-    let row = |t: &str| {
-        let r = &chat[chat.find(&format!("href=#chat data-t=\"{t}\">")).unwrap()..];
-        r[..r.find("</a>").unwrap()].to_string()
-    };
-    assert!(row("t1").contains(&format!("<span class=tp>{go2} ")), "{}", row("t1"));
-    assert!(row("t2").contains(&format!("<span class=tp>{go1} ")), "{}", row("t2"));
+    let rows = chat["repos"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|r| r["rows"].as_array().unwrap().iter());
+    let links = |t: &str| rows.clone().find(|r| r["id"] == t).unwrap()["links"].clone();
+    assert_eq!(links("t1"), json!([link("t2", "continued in")]));
+    assert_eq!(links("t2"), json!([link("t1", "from")]));
 }
 
-#[test]
-fn a_tap_on_a_chip_opens_the_other_thread() {
-    if no_webkit() {
-        return;
-    }
-    let b = FakeShed::new();
-    let c = linked("handoff-tap", &b);
-    let f = Fake::default();
-    let r = b.on(&f);
-    let s = Server::new(&c, &r, Some(ADDR.into()));
-    let cookie = pair(&s, &c, "Mozilla/5.0 (iPhone)", c.now);
-    let page = req(&s, "GET", "/", &cookie, c.now);
-    let html = drawn(&page, &s, ADDR, &cookie, c.now);
-    assert!(html.contains("class=lc data-go"), "the chat tab is on the page");
-    let d = tmpdir("handoff-tap-page");
-    let (file, png) = (d.join("page.html"), d.join("tap.png"));
-    std::fs::write(&file, html).unwrap();
-    let js = "window.fetch = async () => new Response('', {status: 404}); const tap = s => document.querySelector(s).click(); \
-        chatOpen('t1'); tap('.cvp[data-t=\"t1\"] p.qs .lc[data-go=\"t2\"]'); const a = THR === 't2' ? 1 : 0; \
-        tap('.cvp[data-t=\"t2\"] summary .lc[data-go=\"t1\"]'); const b = THR === 't1' ? 1 : 0; \
-        chatOpen(''); const r = document.querySelector('.tr[data-t=\"t1\"] .lc').getBoundingClientRect(), \
-        tp = document.querySelector('.tr[data-t=\"t1\"] .tp').getBoundingClientRect(); \
-        const e = [...document.querySelectorAll('#chat .lc')].every(c => getComputedStyle(c).display === 'inline') \
-        && r.height > 0 && r.height < 24 && r.top >= tp.top && r.bottom <= tp.bottom + 1 ? 1 : 0; \
-        tap('.tr[data-t=\"t1\"] .lc[data-go=\"t2\"]'); const d = THR === 't2' ? 1 : 0; \
-        window.measure = [a, b, d, document.querySelector('.cvp[data-t=\"t2\"] summary').parentElement.open ? 1 : 0, e]";
-    let o = webview()
-        .args([
-            file.to_str().unwrap(),
-            "390",
-            "chat",
-            "horse",
-            png.to_str().unwrap(),
-            js,
-        ])
-        .output()
-        .unwrap();
-    let out = String::from_utf8_lossy(&o.stdout);
-    let v: Vec<f64> = out.split_whitespace().filter_map(|n| n.parse().ok()).collect();
-    assert_eq!(
-        v.get(2..),
-        Some(&[1.0, 1.0, 1.0, 1.0, 1.0][..]),
-        "{out} {}",
-        String::from_utf8_lossy(&o.stderr)
-    );
-}
-
-fn starts(r: &Fake) -> Vec<String> {
-    let calls = r.calls.borrow();
-    let start = calls.iter().filter(|c| c.starts_with("herdr agent start"));
-    start.map(|c| c.split_once(" -- ").unwrap().1.to_string()).collect()
+fn starts(b: &FakeShed) -> Vec<String> {
+    let sent = b.sent("orchestrator-t2").into_iter();
+    sent.filter(|l| l.starts_with("exec ")).collect()
 }
 
 fn long_text() -> String {
@@ -703,9 +653,10 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one() {
 }
 
 #[test]
-fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herdrs_line_limit() {
+fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_the_shells_line_limit() {
     let c = setup("handoff-long");
-    let r = herdr(NO_AGENTS);
+    let b = FakeShed::attached(&c);
+    let r = Fake::default();
     let text = long_text();
     assert_eq!(text.len(), 2400);
     assert_eq!(to_new(&c, &r, "sendmeter", "Big plan", &text), "t2");
@@ -721,6 +672,7 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herd
     let md = c.state.with_file_name("orchestrator").join("t2/.thread.md");
     assert_eq!(std::fs::read_to_string(&md).unwrap(), format!("from t1: {line}\n"));
 
+    b.remove("orchestrator-t2");
     let (code, out) = run(&c, &r, &["thread", "handoff", "t1", "t2", "More", &text]);
     assert_eq!((code, out.as_str()), (0, "t2\n"));
     assert!(
@@ -730,7 +682,7 @@ fn a_long_handoff_lands_in_full_in_a_new_thread_and_in_an_asleep_one_within_herd
         "{}",
         std::fs::read_to_string(&md).unwrap()
     );
-    let s = starts(&r);
+    let s = starts(&b);
     assert_eq!(s.len(), 2, "{s:?}");
     assert!(s[1].contains("--resume"), "{}", s[1]);
     for l in &s {

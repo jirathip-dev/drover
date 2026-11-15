@@ -90,12 +90,8 @@ pub fn run(ctx: &Ctx, r: &dyn Runner, out: &mut dyn Write, (old, new): (&str, &s
     }
     let states = crate::events::states(&ctx.state)?;
     let open = |a: &str| (states.values()).any(|s| s.fleet == old && !s.done() && s.lanes.values().any(|l| l == a));
-    let agents = crate::host::agents(r)?;
-    let live: Vec<&str> = agents
-        .iter()
-        .filter_map(|a| a["name"].as_str())
-        .filter(|a| open(a))
-        .collect();
+    let agents = crate::session::live_on(r)?;
+    let live: Vec<&str> = agents.iter().map(|a| a.name.as_str()).filter(|a| open(a)).collect();
     if !live.is_empty() {
         return refused(
             "LANE_LIVE",

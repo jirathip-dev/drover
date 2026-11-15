@@ -21,6 +21,13 @@ label = "Events"
 screen = "/screens/events"
 
 [[places]]
+type = "header-strip"
+id = "lanes"
+persona = "conductor"
+label = "Lanes"
+screen = "/screens/lanes"
+
+[[places]]
 type = "chat-cards"
 persona = "conductor"
 
@@ -33,6 +40,6 @@ screen = "/screens/fleets"
 [permissions]
 places = ["header-strip", "chat-cards", "menu-row"]
 push = true
-actions = ["filter", "drive", "pause", "drive-all", "top", "answer", "run-card", "needs-human", "save-fleets", "stop", "drop", "remove-fleet", "move", "queue"]
-destructive = ["stop", "drop", "remove-fleet", "run-card", "needs-human"]
+actions = ["filter", "drive", "pause", "drive-all", "top", "answer", "run-card", "needs-human", "save-fleets", "stop", "drop", "remove-fleet", "kill", "clean", "close", "send", "move", "queue"]
+destructive = ["stop", "drop", "remove-fleet", "run-card", "needs-human", "kill", "clean", "close"]
 network = ["api.github.com", "127.0.0.1:7777"]

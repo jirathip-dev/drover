@@ -9,17 +9,7 @@ const WORDS: [&str; 6] = [
     "hermes-brain",
 ];
 
-const EXCEPTIONS: [(&str, &str, &str); 11] = [
-    (
-        "assets/herd.js",
-        "jirathip-dev/corral",
-        "MIT notice: the source Herd mode is ported from",
-    ),
-    (
-        "assets/herd.js",
-        "MIT © jirathip-dev",
-        "MIT notice of the ported Corral code",
-    ),
+const EXCEPTIONS: [(&str, &str, &str); 9] = [
     (
         "assets/swag/farm/sprites.svg",
         "(c) 2026 jirathip-dev, MIT",
