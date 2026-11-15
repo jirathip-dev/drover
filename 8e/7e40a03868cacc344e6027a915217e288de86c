@@ -1,0 +1,14 @@
+Decided: every lane fact is read through crates/core/src/session/ (typed Session, Status, Cause, Sessions); no herdr-shaped row or screen parser is left
+Because: "Lane status, stall, dead, orphan and transcript read only shed (plus drover's turn-end); no herdr-shaped mapping or pane scrape remains."
+Decided: the stall clock starts at drover's lane-state stamp of shed's status (since), so the first look at an already-quiet lane starts it
+Because: docs/architecture/shed-native/shapes.md:100
+Decided: a lane with any turn-end since its spawn never stalls, and a gone lane is dead only (no stall alert beside it)
+Because: docs/architecture/shed-native/boundaries.md:60
+Decided: drover kill no longer deletes the lane's log; the archive goes only with the worktree (clean), so a respawn's handover can read it
+Rejected: keep kill dropping the log as before — the handover would lose shed's log, now its only source
+Decided: check alerts orphan-lane only for a labelled session whose issue drover does not track; drive adopts the rest by their labels
+Because: crates/core/src/check.rs:420
+Decided: the sim's planted bug fires on a 4th start (was 3rd): never-started now reads shed's silence, so starts are less rare in the sim
+Check: crates/cli/tests/shed_native.rs drives one fake session running → idle → exited across the Lanes rows, /api/v1 and drover check
+Check: the [[ban]] lines in .drover/arch.toml (agent_status, pane_id, .reported, read_argv) pass on this tree
+Owner: lanes now show exactly what shed reports; the phone's menu buttons and screen-parsed alerts are gone, as the ADR said
